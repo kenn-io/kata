@@ -24,11 +24,6 @@ import (
 	"go.kenn.io/kit/safefileio"
 )
 
-type hiddenDeadlineError struct{}
-
-func (hiddenDeadlineError) Error() string { return "probe ended" }
-func (hiddenDeadlineError) Unwrap() error { return context.DeadlineExceeded }
-
 func TestManagedExternallyDoesNotAutostart(t *testing.T) {
 	for _, defaultLimit := range []bool{false, true} {
 		t.Run(fmt.Sprintf("default_limit=%t", defaultLimit), func(t *testing.T) {
@@ -64,12 +59,12 @@ func TestManagedExternallyDoesNotAutostart(t *testing.T) {
 func TestManagedExternallyUnreachableDetail(t *testing.T) {
 	t.Run("wrapped deadline", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
-			probe := &LocalDaemonUnreachableError{cause: hiddenDeadlineError{}}
+			probe := &LocalDaemonUnreachableError{PID: 123, Address: "127.0.0.1:1234", DataDir: "/example/runtime", cause: fmt.Errorf("probe: %w", context.DeadlineExceeded)}
 			_, err := waitForSupervisedDaemon(t.Context(), "/example/config.toml", func(context.Context) bool { return false }, func(context.Context) (ensureDiscovery, error) {
 				return ensureDiscovery{}, probe
 			})
 			require.ErrorIs(t, err, context.DeadlineExceeded)
-			require.NotContains(t, err.Error(), "context deadline exceeded")
+			require.Equal(t, 1, strings.Count(err.Error(), "context deadline exceeded"))
 		})
 	})
 	t.Run("caller cancels while probing", func(t *testing.T) {
@@ -95,6 +90,7 @@ func TestManagedExternallyUnreachableDetail(t *testing.T) {
 			var advised interface{ RecoveryAdvice() string }
 			require.ErrorAs(t, err, &advised)
 			require.Equal(t, 1, strings.Count(advised.RecoveryAdvice(), "service manager"))
+			require.Contains(t, advised.RecoveryAdvice(), "Restart it through its service manager if it has one, or with the original options and environment")
 		})
 	})
 	for _, clear := range []bool{false, true} {
@@ -127,13 +123,18 @@ func TestManagedExternallyUnreachableDetail(t *testing.T) {
 	}
 }
 
-func TestAutoStartedDaemonRecovery(t *testing.T) {
+func TestDaemonRecoveryAdvice(t *testing.T) {
 	err := &LocalDaemonUnreachableError{PID: 123, VerifiedProcess: true, autoStarted: true, WebOrigin: "http://127.0.0.1:1234"}
 	require.Contains(t, err.RecoveryAdvice(), "http://127.0.0.1:1234/debug/pprof/goroutine?debug=2")
 	require.Contains(t, err.RecoveryAdvice(), "Wait during startup or migration")
 	require.Contains(t, err.RecoveryAdvice(), "rerun the original command")
 	require.Contains(t, err.RecoveryAdvice(), "any command that autostarts")
 	require.Contains(t, err.RecoveryAdvice(), "daemon status, daemon diagnose, and health only inspect")
+	if runtime.GOOS == "windows" {
+		require.Contains(t, err.RecoveryAdvice(), "taskkill /PID 123 /F")
+	} else {
+		require.Contains(t, err.RecoveryAdvice(), "kill -QUIT 123")
+	}
 	t.Run("profile with quote", func(t *testing.T) {
 		err := &LocalDaemonUnreachableError{PID: 123, VerifiedProcess: true, Profile: "team's profile", ProfileAutostart: true}
 		command := `kata --daemon 'team'"'"'s profile' daemon recover`

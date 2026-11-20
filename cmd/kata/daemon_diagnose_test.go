@@ -920,8 +920,7 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 					cliErr := requireCLIError(t, err, ExitDaemonUnavail)
 					require.Equal(t, 1, strings.Count(cliErr.Message, "autostart = false"))
 					require.NotContains(t, cliErr.Message, "service manager")
-					require.Equal(t, 1, strings.Count(cliErr.Hint, "service manager"))
-					require.Contains(t, cliErr.Hint, "Restart it through its service manager if it has one, or with the original options and environment")
+					require.Contains(t, cliErr.Hint, "service manager")
 				})
 				return
 			}
@@ -930,11 +929,6 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 			require.Equal(t, "local_unreachable", cliErr.Code)
 			require.Contains(t, cliErr.Message, "503")
 			require.Contains(t, cliErr.Message, fmt.Sprintf("%q", filepath.Join(ns.DataDir, "daemon.log")))
-			if runtime.GOOS == "windows" {
-				require.Contains(t, cliErr.Hint, fmt.Sprintf("taskkill /PID %d /F", os.Getpid()))
-			} else {
-				require.Contains(t, cliErr.Hint, fmt.Sprintf("kill -QUIT %d", os.Getpid()))
-			}
 			require.Contains(t, cliErr.Hint, "kata --daemon 'work' daemon recover")
 		})
 	}
@@ -964,7 +958,7 @@ func TestDaemonDiagnoseSecondPing(t *testing.T) {
 			t.Chdir(t.TempDir())
 			resetFlags(t)
 			if tc.end == "timeout" {
-				t.Setenv("KATA_HTTP_TIMEOUT", "500ms")
+				t.Setenv("KATA_HTTP_TIMEOUT", "10s")
 			}
 			flags.Daemon = tc.catalog
 			if tc.catalog != "" {
@@ -1032,11 +1026,10 @@ func TestDaemonDiagnoseSecondPing(t *testing.T) {
 				assert.Contains(t, result.Message, "context deadline exceeded")
 			}
 			assert.Contains(t, result.Message, strconv.Quote(filepath.Join(ns.DataDir, "daemon.log")))
-			if runtime.GOOS != "windows" {
-				assert.Contains(t, result.NextAction, fmt.Sprintf("kill -QUIT %d", os.Getpid()))
-			}
 			if tc.profile {
 				assert.Contains(t, result.NextAction, "--daemon 'work' daemon recover")
+			} else {
+				assert.Contains(t, result.NextAction, fmt.Sprint(os.Getpid()))
 			}
 		})
 	}

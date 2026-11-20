@@ -620,11 +620,7 @@ func TestDaemonStatus_AgentReportsWebURL(t *testing.T) {
 	assert.Contains(t, string(out), "daemon.log")
 	cliErr := requireCLIError(t, err, ExitDaemonUnavail)
 	assert.Contains(t, cliErr.Message, "unreachable")
-	if runtime.GOOS == "windows" {
-		assert.Contains(t, cliErr.Hint, fmt.Sprintf("taskkill /PID %d /F", os.Getpid()))
-	} else {
-		assert.Contains(t, cliErr.Hint, fmt.Sprintf("kill -QUIT %d", os.Getpid()))
-	}
+	assert.Contains(t, cliErr.Hint, fmt.Sprint(os.Getpid()))
 }
 
 func TestDaemonStatusReportsMCPState(t *testing.T) {
