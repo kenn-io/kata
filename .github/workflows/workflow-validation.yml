@@ -27,6 +27,8 @@ permissions:
 cache-mode: read
 
 env:
+  # Module-relative source paths keep build cache entries independent of the checkout path.
+  GOFLAGS: -trimpath
   # "|" falls back to the source repo on any proxy error, including HTTP/2 stream resets mid-download.
   GOPROXY: https://proxy.golang.org|direct
 
@@ -54,9 +56,20 @@ jobs:
           persist-credentials: false
 
       - uses: actions/setup-go@v7.0.0
+        id: setup-go
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
+
+      - name: Restore release Go cache
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: release-go-${{ runner.os }}-${{ runner.arch }}-go-${{ steps.setup-go.outputs.go-version }}-${{ github.sha }}
+          restore-keys: |
+            release-go-${{ runner.os }}-${{ runner.arch }}-go-${{ steps.setup-go.outputs.go-version }}-
 
       - name: Set up Node
         uses: actions/setup-node@v7.1.0
