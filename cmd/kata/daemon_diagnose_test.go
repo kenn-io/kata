@@ -886,11 +886,16 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 	for _, tc := range []struct {
 		name, command  string
 		recoverOnRetry bool
+		managed        bool
 	}{
 		{name: "ordinary", command: "list"},
 		{name: "health preserves first failure", command: "health", recoverOnRetry: true},
+		{name: "service managed", command: "list", managed: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.managed {
+				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n"), 0600))
+			}
 			var pings atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if tc.recoverOnRetry && r.URL.Path == "/api/v1/instance" {
@@ -908,8 +913,20 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 			address := strings.TrimPrefix(server.URL, "http://")
 			_, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Network: "tcp", Address: address})
 			require.NoError(t, err)
-			_, _, err = executeRootCapture(t, t.Context(), "--daemon", "work", tc.command)
+			ctx := t.Context()
+			if tc.managed {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, 300*time.Millisecond)
+				defer cancel()
+			}
+			_, _, err = executeRootCapture(t, ctx, "--daemon", "work", tc.command)
 			cliErr := requireCLIError(t, err, ExitDaemonUnavail)
+			if tc.managed {
+				require.Equal(t, 1, strings.Count(cliErr.Message, "autostart = false"))
+				require.NotContains(t, cliErr.Message, "service manager")
+				require.Equal(t, 1, strings.Count(cliErr.Hint, "service manager"))
+				return
+			}
 			require.Equal(t, "local_unreachable", cliErr.Code)
 			require.Contains(t, cliErr.Message, "503")
 			require.Contains(t, cliErr.Message, fmt.Sprintf("%q", filepath.Join(ns.DataDir, "daemon.log")))
