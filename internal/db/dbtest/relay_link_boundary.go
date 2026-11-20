@@ -80,7 +80,7 @@ func RunRelayLinkBoundaryKeepsSameProjectEffects(t *testing.T, store db.Storage)
 		writeCtx := db.WithRootAttribution(ctx, fixture.signer, "relay-member")
 		_, err = store.AcceptRelayDeliveries(writeCtx, grant.Enrollment.RelayBindingUID, db.RelayBatch{Stream: db.RelayStreamEvent, Envelopes: []db.RelayEnvelope{envelope}})
 		require.ErrorIs(t, err, db.ErrFederationIngestValidation)
-		require.ErrorContains(t, err, "legacy parent unlink does not match the current parent")
+		require.ErrorContains(t, err, "The parent this older change tries to remove is not the issue's current parent")
 	})
 	t.Run("relay composite creation", func(t *testing.T) {
 		ctx := t.Context()
