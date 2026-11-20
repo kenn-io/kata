@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"cmp"
 	"maps"
+	"slices"
 	"sort"
 )
 
@@ -10,13 +12,30 @@ type childSortMode int
 const (
 	childSortTopological childSortMode = iota
 	childSortTemporal
+	childSortPriority
 )
 
 func (m childSortMode) label() string {
-	if m == childSortTemporal {
+	switch m {
+	case childSortTemporal:
 		return "temporal"
+	case childSortPriority:
+		return "priority"
+	default:
+		return "topological"
 	}
-	return "topological"
+}
+
+// next returns the mode the `o` key switches to.
+func (m childSortMode) next() childSortMode {
+	switch m {
+	case childSortTopological:
+		return childSortTemporal
+	case childSortTemporal:
+		return childSortPriority
+	default:
+		return childSortTopological
+	}
 }
 
 type issueListViewMode int
@@ -310,10 +329,7 @@ func (s *queueBuildState) visibleChildKeys(parent issueKey, expanded bool) []iss
 		if !expanded {
 			return nil
 		}
-		if s.childSort == childSortTopological {
-			children = s.topologicalChildKeys(children)
-		}
-		return children
+		return s.sortChildKeys(children)
 	}
 	if !expanded {
 		return nil
@@ -324,10 +340,42 @@ func (s *queueBuildState) visibleChildKeys(parent issueKey, expanded bool) []iss
 			out = append(out, child)
 		}
 	}
-	if s.childSort == childSortTopological {
-		out = s.topologicalChildKeys(out)
+	return s.sortChildKeys(out)
+}
+
+func (s *queueBuildState) sortChildKeys(children []issueKey) []issueKey {
+	switch s.childSort {
+	case childSortTopological:
+		return s.topologicalChildKeys(children)
+	case childSortPriority:
+		return s.priorityChildKeys(children)
+	default:
+		return children
 	}
-	return out
+}
+
+// priorityChildKeys orders children the way `kata next` and the ready list's
+// priority sort do: priority ascending with unprioritized issues last, then
+// most recently updated first. Remaining ties keep list order.
+func (s *queueBuildState) priorityChildKeys(children []issueKey) []issueKey {
+	if len(children) < 2 {
+		return children
+	}
+	rank := func(iss Issue) int64 {
+		if iss.Priority == nil {
+			return 5
+		}
+		return *iss.Priority
+	}
+	sorted := slices.Clone(children)
+	slices.SortStableFunc(sorted, func(a, b issueKey) int {
+		ia, ib := s.byKey[a], s.byKey[b]
+		if c := cmp.Compare(rank(ia), rank(ib)); c != 0 {
+			return c
+		}
+		return ib.UpdatedAt.Compare(ia.UpdatedAt)
+	})
+	return sorted
 }
 
 func (s *queueBuildState) topologicalChildKeys(children []issueKey) []issueKey {

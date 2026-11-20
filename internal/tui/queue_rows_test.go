@@ -1,6 +1,9 @@
 package tui
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestBuildQueueRows_CollapsedShowsTopLevelOnly(t *testing.T) {
 	issues := []Issue{
@@ -159,6 +162,33 @@ func TestBuildQueueRows_TemporalChildSortPreservesFetchOrder(t *testing.T) {
 		childSortTemporal,
 	)
 	assertQueueShortIDs(t, rows, []string{"aaa1", "bbb2", "ccc3", "ddd4"})
+}
+
+func TestBuildQueueRows_PriorityChildSortOrdersByPriorityThenRecency(t *testing.T) {
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	at := func(hours int) issueOpt {
+		return func(i *Issue) { i.UpdatedAt = base.Add(time.Duration(hours) * time.Hour) }
+	}
+	prio := func(p int64) issueOpt {
+		return func(i *Issue) { i.Priority = &p }
+	}
+	issues := []Issue{
+		testIssue("aaa1", withCounts(6, 6)),
+		testIssue("bbb2", withParent("aaa1"), prio(3), at(1)),
+		testIssue("ccc3", withParent("aaa1"), at(9)),
+		testIssue("ddd4", withParent("aaa1"), prio(0), at(1)),
+		testIssue("eee5", withParent("aaa1"), prio(1), at(1)),
+		testIssue("fff6", withParent("aaa1"), prio(0), at(5)),
+		testIssue("ggg7", withParent("aaa1"), prio(4), at(1)),
+	}
+
+	rows := buildQueueRowsWithSort(
+		issues,
+		ListFilter{},
+		expansionSet{{projectID: 7, shortID: "aaa1"}: true},
+		childSortPriority,
+	)
+	assertQueueShortIDs(t, rows, []string{"aaa1", "fff6", "ddd4", "eee5", "bbb2", "ggg7", "ccc3"})
 }
 
 func TestBuildQueueRows_FlatModePreservesFetchOrder(t *testing.T) {

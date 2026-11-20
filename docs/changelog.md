@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-19
+last_edited: 2026-11-20
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -41,6 +41,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
   fix it. Upgrade a federated hub and its spokes in one window: a hub that
   refuses a pushed definition can quarantine that spoke's relay batch.
 
+- Order an expanded parent's children by priority in `kata tui`: `o` now
+  cycles topological, temporal, and priority order. Priority order matches
+  `kata next`: highest priority first, unprioritized last, then most recently
+  updated.
 - Let a service manager own the local daemon. Set top-level `autostart = false`
   in `config.toml`, and Kata commands, including `kata daemon recover`, wait up
   to 30 seconds for the supervised daemon instead of starting their own. See
