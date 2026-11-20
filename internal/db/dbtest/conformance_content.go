@@ -559,7 +559,6 @@ func checkChangeLabels(t *testing.T, store db.Storage) error {
 
 	before, err := store.IssueByID(ctx, issueID)
 	require.NoError(t, err)
-	time.Sleep(5 * time.Millisecond)
 	params := db.ChangeLabelsParams{
 		Add:    []string{"ready-for-human"},
 		Remove: []string{"ready-for-agent"},
@@ -584,11 +583,12 @@ func checkChangeLabels(t *testing.T, store db.Storage) error {
 	assert.Equal(t, []string{"ready-for-human"}, labelNames())
 	after, err := store.IssueByID(ctx, issueID)
 	require.NoError(t, err)
-	assert.True(t, after.UpdatedAt.After(before.UpdatedAt), "updated_at must move")
+	touchedAt, err := time.Parse(time.RFC3339Nano, addedAt)
+	require.NoError(t, err)
+	assert.True(t, after.UpdatedAt.Equal(touchedAt), "updated_at %v is the call's timestamp %s", after.UpdatedAt, addedAt)
 	assert.Equal(t, before.Revision, after.Revision, "label edits do not bump revision")
 
 	eventsAfterSwap := eventCount()
-	time.Sleep(5 * time.Millisecond) // a store that touches updated_at on a no-op must show a later stamp
 	labels, events, err = store.ChangeLabelsAndEvents(ctx, issueID, params)
 	if err != nil {
 		return fmt.Errorf("repeat swap: %w", err)
