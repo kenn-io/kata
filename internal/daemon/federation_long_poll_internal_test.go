@@ -51,21 +51,61 @@ func TestFederationPollWaitsBoundEveryHeldPoll(t *testing.T) {
 
 func TestFederationPollWakeIgnoresItsOwnInstance(t *testing.T) {
 	waits := newFederationPollWaits(16)
-	woken, unsubscribe := waits.remote.subscribe(7, "01HZNQ7VFPK1XGD8R5MABCD4EA")
+	woken, unsubscribe := waits.remote.subscribe()
 	defer unsubscribe()
-	waits.receive(waits.message(7, ""))
+	waits.receive(waits.message())
 	select {
 	case <-woken:
 		t.Fatal("a process must ignore the wakeups it published")
 	default:
 	}
 	other := newFederationPollWaits(16)
-	waits.receive(other.message(0, "01HZNQ7VFPK1XGD8R5MABCD4EA"))
+	waits.receive(other.message())
 	select {
 	case <-woken:
 	default:
 		t.Fatal("another process's wakeup was not delivered")
 	}
+}
+
+// recordingPollWakeBus records what a hub process publishes to the others.
+type recordingPollWakeBus struct{ published chan string }
+
+func (b recordingPollWakeBus) PublishFederationPollWake(_ context.Context, payload string) error {
+	b.published <- payload
+	return nil
+}
+
+func (recordingPollWakeBus) ListenFederationPollWake(ctx context.Context, _ func(), _ func(string)) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// Every role that can connect to a shared PostgreSQL database can listen on
+// the wake channel, so a wake names no project.
+func TestFederationPollWakeNamesNoProject(t *testing.T) {
+	waits := newFederationPollWaits(16)
+	broadcaster := NewEventBroadcaster()
+	bus := recordingPollWakeBus{published: make(chan string, 1)}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runFederationPollWakeBridge(ctx, bus, broadcaster, waits, slog.New(slog.DiscardHandler))
+	}()
+	defer func() { cancel(); <-done }()
+	const movedFrom = "01HZNQ7VFPK1XGD8R5MABCD4EA"
+	payload := fmt.Sprintf(`{"from_project_uid":%q}`, movedFrom)
+	require.Eventually(t, func() bool {
+		broadcaster.Broadcast(NewEventMsg(4242, db.Event{Type: "issue.moved", Payload: payload}))
+		select {
+		case published := <-bus.published:
+			assert.Equal(t, waits.instance, published, "a wake carries only the publishing instance")
+			return true
+		default:
+			return false
+		}
+	}, 5*time.Second, 10*time.Millisecond)
 }
 
 // closedPollWakeBus is a store that has been closed.

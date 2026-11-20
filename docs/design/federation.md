@@ -328,7 +328,8 @@ and an AES-GCM payload key come from HKDF-SHA256 over the installation's
 `meta.instance_uid` and the schema name. A database role without access to the
 kata schema therefore cannot find the channel, read which project committed,
 or forge a wake. Each notification carries a sender ID and counter, and
-listeners drop replayed ones. A hub wakes every held poll after its listener
+listeners drop replayed ones. A wake names no project and wakes every held poll
+in the receiving process. A hub wakes every held poll after its listener
 reconnects, because notifications sent while it was disconnected are lost.
 
 SQLite direct spokes prepare pulled issue histories and projection differences
