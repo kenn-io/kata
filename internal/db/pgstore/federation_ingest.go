@@ -310,11 +310,10 @@ func (s *Store) IngestFederationEvents(
 
 		// A repeated snapshot is not stored, but the links it adds still need
 		// the pushing spoke's authority over every project they touch.
-		parentEvents := freshEvents
 		for _, winner := range repeatedWinners {
 			freshEvents = append(freshEvents, winner.event)
 		}
-		if err := s.authorizeFederationCurrentIssuesTx(ctx, tx, params, freshEvents, parentEvents, moveSnapshots); err != nil {
+		if err := s.authorizeFederationCurrentIssuesTx(ctx, tx, params, freshEvents, moveSnapshots); err != nil {
 			return db.FinishTransactionRollback(ctx, err, tx.Rollback())
 		}
 		linksAffected := false
@@ -1000,9 +999,9 @@ func (s *Store) authorizeFederationMoveTx(ctx context.Context, tx *sql.Tx, p db.
 // Fresh events retain their authored envelope, but authorization follows every
 // affected issue's current owner. Duplicates already passed this acceptance
 // boundary and must not acquire new authority merely to acknowledge a retry.
-func (s *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.Tx, p db.FederationIngestParams, events, parentEvents []db.RemoteEvent, moveSnapshots *db.FederationMoveSnapshotValidator) error {
+func (s *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.Tx, p db.FederationIngestParams, events []db.RemoteEvent, moveSnapshots *db.FederationMoveSnapshotValidator) error {
 	// Report graph validation only after checking current project authority.
-	parentRemovals, err := db.DirectParentRemovalsForIngest(ctx, tx, parentEvents, p.AuthorizeReference != nil)
+	parentRemovals, err := db.DirectParentRemovals(ctx, tx, events, p.AuthorizeReference != nil)
 	staged := map[string]int64{}
 	type checkedProject struct {
 		id        int64

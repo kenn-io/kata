@@ -358,9 +358,9 @@ func directLinkAdditionEligible(event FoldEvent) bool {
 	return child != "" && child == event.IssueUID
 }
 
-// DirectParentRemovalsForIngest tracks parent operations only when needed for
+// DirectParentRemovals tracks parent operations only when needed for
 // reference authorization or validation of an older child-primary unlink.
-func DirectParentRemovalsForIngest(ctx context.Context, tx federationHistoryQuery, events []RemoteEvent, authorizeReference bool) (map[string][]string, error) {
+func DirectParentRemovals(ctx context.Context, tx federationHistoryQuery, events []RemoteEvent, authorizeReference bool) (map[string][]string, error) {
 	if !authorizeReference {
 		needed := false
 		for _, event := range events {
@@ -380,20 +380,11 @@ func DirectParentRemovalsForIngest(ctx context.Context, tx federationHistoryQuer
 			return nil, nil
 		}
 	}
-	return DirectParentRemovals(ctx, tx, events)
-}
-
-// DirectParentRemovals checks parent operations against current links.
-func DirectParentRemovals(ctx context.Context, tx federationHistoryQuery, events []RemoteEvent) (map[string][]string, error) {
 	ordered := make([]FoldEvent, 0, len(events))
 	for _, event := range events {
 		ordered = append(ordered, moveSnapshotFoldEvent(event))
 	}
 	slices.SortStableFunc(ordered, func(a, b FoldEvent) int { return compareClock(clockOf(a), clockOf(b)) })
-	return currentParentRemovals(ctx, tx, ordered)
-}
-
-func currentParentRemovals(ctx context.Context, tx federationHistoryQuery, ordered []FoldEvent) (map[string][]string, error) {
 	parents := map[string]string{}
 	removed := map[string][]string{}
 	parentOf := func(child string) (string, error) {
