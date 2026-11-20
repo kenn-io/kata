@@ -263,16 +263,16 @@ func TestEnsureRunningReportsUnreachableDaemonWhenStartLockWaitExpires(t *testin
 	release, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).AcquireStartLock(t.Context())
 	require.NoError(t, err)
 	defer release()
-	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
-	defer cancel()
-
-	_, err = EnsureRunning(ctx)
-
-	require.ErrorIs(t, err, context.DeadlineExceeded)
-	require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
-	assert.Contains(t, err.Error(), address)
-	assert.Contains(t, err.Error(), filepath.Join(ns.DataDir, "daemon.log"))
-	assert.Contains(t, err.Error(), fmt.Sprintf("pid %d", os.Getpid()))
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		_, err := EnsureRunning(ctx)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+		assert.Contains(t, err.Error(), address)
+		assert.Contains(t, err.Error(), filepath.Join(ns.DataDir, "daemon.log"))
+		assert.Contains(t, err.Error(), fmt.Sprintf("pid %d", os.Getpid()))
+	})
 }
 
 func TestEnsureRunningRestartsWhenDaemonVersionUnknown(t *testing.T) {
@@ -833,7 +833,9 @@ func TestStopRunningDaemonsDoesNotSignalAfterProbeDeadline(t *testing.T) {
 		"ok": true, "service": "kata", "version": "old-version", "pid": oldPID,
 	})
 	require.NoError(t, writeRuntimeRecordForPID(t, tmp, oldPID, addr))
+	deadline := make(chan struct{})
 	blocked := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		close(deadline)
 		<-r.Context().Done()
 	}))
 	t.Cleanup(blocked.Close)
@@ -847,15 +849,28 @@ func TestStopRunningDaemonsDoesNotSignalAfterProbeDeadline(t *testing.T) {
 		return nil
 	}
 	t.Cleanup(func() { signalDaemonStopForEnsure = origSignal })
-	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
-	defer cancel()
-
+	ctx := probeDeadlineContext{Context: t.Context(), done: deadline}
 	err = stopRunningDaemons(ctx, ns.DataDir, ns.DBHash)
-
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
 	assert.Contains(t, err.Error(), strings.TrimPrefix(blocked.URL, "http://"))
 	assert.Zero(t, signals)
+}
+
+// probeDeadlineContext expires when the later endpoint receives its probe.
+type probeDeadlineContext struct {
+	context.Context
+	done <-chan struct{}
+}
+
+func (c probeDeadlineContext) Done() <-chan struct{} { return c.done }
+func (c probeDeadlineContext) Err() error {
+	select {
+	case <-c.done:
+		return context.DeadlineExceeded
+	default:
+		return c.Context.Err()
+	}
 }
 
 func TestDaemonDiscoveryPreservesRecordPublishedDuringProbe(t *testing.T) {
