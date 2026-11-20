@@ -1,4 +1,4 @@
-.PHONY: build install homebrew test test-short test-stress test-federation-docker lint vet clean fmt nilaway openapi api-generate api-check api-breaking tui tui-demo docs-install docs-build docs-serve docs-preview docs-check docs-deploy docs-screenshots docs-assets-branch kata-ui-check kata-ui-test kata-ui-pack-check web-install web-generate web-check web-audit web-test web-test-browser web-e2e web-build web-embed web-assets-check web-release-check web-dev
+.PHONY: build install homebrew test test-short test-stress test-federation-docker lint vet clean fmt nilaway openapi api-generate api-check api-breaking tui tui-demo docs-install docs-build docs-serve docs-preview docs-check docs-deploy docs-screenshots docs-assets-branch kata-ui-check kata-ui-test kata-ui-pack-check web-install web-generate web-check web-audit web-test web-test-unit web-test-browser web-e2e web-build web-embed web-assets-check web-release-check web-dev
 
 GOFLAGS_TEST := -shuffle=on
 FEDERATION_STRESS_TIMEOUT ?= 2m
@@ -86,11 +86,14 @@ web-audit:
 web-test: kata-ui-test kata-ui-pack-check
 	cd web && bun run test
 
+web-test-unit:
+	cd web && bun run test $(WEB_TEST_ARGS)
+
 web-test-browser:
 	cd web && bun run test:e2e -- tests/dev-proxy.spec.ts $(if $(WEB_TEST_GREP),--grep "$(WEB_TEST_GREP)",)
 
 web-e2e:
-	cd web && bun run test:e2e
+	cd web && bun run test:e2e $(WEB_TEST_ARGS)
 
 web-e2e-firefox:
 	cd web && bun run test:e2e:firefox

@@ -15,6 +15,7 @@ import (
 
 	"go.kenn.io/kata/internal/sqliteconfig"
 	kitvec "go.kenn.io/kit/vector"
+	"go.kenn.io/kit/vector/pgvector"
 	"go.kenn.io/kit/vector/sqlitevec"
 )
 
@@ -35,7 +36,9 @@ type Index struct {
 	db        *sql.DB
 	store     *sqlitevec.Store[string, string]
 	flowStore kitvec.Store[string, string]
+	lifecycle lifecycleStore
 	pg        *postgresIndex
+	pgStore   *pgvector.Store[string, string]
 
 	rejectedMu sync.Mutex
 	rejected   map[string]bool
@@ -79,7 +82,7 @@ func Open(ctx context.Context, path string) (*Index, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("vector: init kit store: %w", err)
 	}
-	return &Index{db: db, store: store, flowStore: store}, nil
+	return &Index{db: db, store: store, flowStore: store, lifecycle: store}, nil
 }
 
 // OpenPostgres binds the semantic index to canonical pgvector tables on an
@@ -89,7 +92,14 @@ func OpenPostgres(ctx context.Context, db *sql.DB) (*Index, error) {
 	if err := pg.validate(ctx); err != nil {
 		return nil, err
 	}
-	return &Index{db: db, flowStore: pg, pg: pg}, nil
+	store, err := pgvector.New[string, string](ctx, db, pgvector.Schema{
+		DocsTable: "issue_vector_mirror", IDColumn: "issue_uid", ContentColumn: "content", RevisionColumn: "content_revision", Prefix: "issue_vector", SharedChunks: true,
+		Begin: func(ctx context.Context, _ *sql.TxOptions) (*sql.Tx, error) { return pg.beginReconcilerTx(ctx) },
+	})
+	if err != nil {
+		return nil, fmt.Errorf("vector: init kit postgres store: %w", err)
+	}
+	return &Index{db: db, flowStore: store, lifecycle: store, pg: pg, pgStore: store}, nil
 }
 
 // Close releases the sidecar handle. A Postgres-backed index runs on the

@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-11-18
+last_edited: 2026-11-19
 ---
 
 # Configuration
@@ -938,8 +938,10 @@ plaintext opt-in does not change that contract. Install the hub's CA in the
 daemon's trust store when using a private certificate authority.
 
 `read_only` permits pull only. `collaborate` permits pull and push; the hub may
-also grant task claiming. Both require an empty local project. `migrate` asks
-the hub to approve adoption of an existing project's tasks and authors.
+also grant task claiming. Both attach an empty project or rejoin a detached
+project matching the hub UID. Collaborative rejoin reoffers local-origin
+events; the hub deduplicates them, and new events must use the enrollment
+actor. `migrate` asks the hub to approve importing local tasks and authors.
 The helper cannot silently downgrade write access or upgrade read-only access.
 
 Kata retains the request across restarts and failed exchanges. A helper that
@@ -1179,10 +1181,10 @@ model    = "nomic-embed-text"
 # query_suffix = ""
 # request_dimensions = false    # send dims only if the provider supports it
 # dims                          # expected vector dimensionality (default 768)
-# batch_size                    # inputs per request (default 64)
+# batch_size                    # inputs per request (default 64; built-in server 8)
 # model_context_tokens          # model's maximum tokens for one input
 # max_batch_tokens              # provider's aggregate input-token cap per request
-# timeout_seconds               # per-request timeout (default 30)
+# timeout_seconds               # per-request timeout (default 30; built-in server 300)
 # trust_private_network = false # allow plaintext HTTP to literal non-public IPs
 ```
 
@@ -1353,6 +1355,15 @@ During that backfill the vector leg is unavailable (queries embedded under
 the new configuration cannot be scored against the old generation's vectors), so
 `auto` searches degrade to labeled lexical results and explicit
 `--hybrid`/`--semantic` requests return 503 until the cutover.
+
+<a id="telemetry"></a><a id="reporting-rules"></a>
+
+## Usage reporting
+
+Kata can send general, anonymous usage telemetry. Usage telemetry is off
+unless you have opted in or set `TELEMETRY_ENABLED=1`. Any of these turns it
+off: `KATA_TELEMETRY_ENABLED=0`, `TELEMETRY_ENABLED=0`,
+`DO_NOT_TRACK`, or `CI`. Development builds never send it.
 
 ## Federation credentials
 

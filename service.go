@@ -259,6 +259,7 @@ type Service struct {
 	broadcaster            *daemon.EventBroadcaster
 	publish                daemon.EventPublisher
 	federationWake         chan struct{}
+	federationRetries      *federation.SyncRetries
 	gitHubSyncWake         chan struct{}
 	gitHubSyncFetcher      githubsync.Fetcher
 	gitHubSyncProgress     *githubsync.ProgressTracker
@@ -555,6 +556,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 			controller: cfg.FederationAccess,
 		}
 	}
+	federationRetries := federation.NewSyncRetries()
 	serverConfig := daemon.ServerConfig{
 		DB:       store,
 		Embedder: embedder, VectorIndex: index, EmbeddingUnavailableReason: unavailable,
@@ -571,6 +573,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		FederationCredentials:     federationCredentials,
 		FederationPushPending:     federation.DirectSpokePushPending(store),
 		FederationHubClient:       federation.CredentialHTTPClient,
+		FederationSyncRetry:       federationRetries.FederationSyncRetry,
 		DisableFederationRebind:   true,
 		GitHubSyncFetcher:         gitHubSyncFetcher,
 		GitHubSyncProgress:        gitHubSyncProgress,
@@ -635,6 +638,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		broadcaster:            broadcaster,
 		publish:                publisher,
 		federationWake:         federationWake,
+		federationRetries:      federationRetries,
 		gitHubSyncWake:         gitHubSyncWake,
 		gitHubSyncFetcher:      gitHubSyncFetcher,
 		gitHubSyncProgress:     gitHubSyncProgress,
@@ -1053,6 +1057,7 @@ func (s *Service) serviceWorkers() []namedWorker {
 		Credentials: s.federationCredentials,
 		Interval:    30 * time.Second,
 		Wake:        s.federationWake,
+		Retries:     s.federationRetries,
 		OnError: func(err error) {
 			s.logger.Error("kata federation worker", "err", err)
 		},

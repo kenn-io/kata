@@ -3,7 +3,7 @@
   /* eslint-disable svelte/prefer-svelte-reactivity -- reference counts are a transient search-result lookup. */
   import { commentEvidenceLength, trimCommentEvidence } from '../lib/kata/commentEvidence'
   import { CommentRelations } from '@kenn-io/kata-ui'
-  import { Button, Markdown, MentionTextarea, type MentionOption } from '@kenn-io/kit-ui'
+  import { Avatar, Button, Markdown, MentionTextarea, type MentionOption } from '@kenn-io/kit-ui'
   import {
     formatRelativeTime as timeAgo,
     formatTimestamp as localDateTimeLabel,
@@ -334,7 +334,13 @@
               {#if comment.edited_at}<span title={localDateTimeLabel(comment.edited_at)}
                   >(edited)</span
                 >{/if}
-              <span class="avatar" aria-hidden="true">{comment.author.slice(0, 1)}</span>
+              <Avatar
+                name={comment.author}
+                initials={comment.author.slice(0, 1).toUpperCase()}
+                tone="neutral"
+                decorative
+                size={20}
+              />
               <span class="author"
                 >{comment.teammate
                   ? `${comment.author} / ${comment.teammate}`
@@ -417,20 +423,6 @@
     margin-bottom: var(--space-3);
     color: var(--text-muted);
     font-size: var(--font-size-sm);
-  }
-
-  .avatar {
-    display: inline-grid;
-    flex: 0 0 auto;
-    place-items: center;
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    background: var(--bg-inset);
-    color: var(--text-secondary);
-    font-size: var(--font-size-2xs);
-    font-weight: var(--font-weight-semibold);
-    text-transform: uppercase;
   }
 
   .author {
