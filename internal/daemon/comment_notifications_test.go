@@ -267,7 +267,7 @@ func FuzzNotificationProjectionWhitespace(f *testing.F) {
 			return
 		}
 		raw := jsontext.Value(space + `{"metadata":{"notify.reader":` + string(slot) + `},"other":1}`)
-		got, e := walkNotificationJSON(raw, func(value jsontext.Value) (bool, error) { return len(notificationReferences(value)) == 0, nil })
+		got, e := walkNotificationJSON(raw, func(value jsontext.Value) (bool, error) { return len(notification.References(value)) == 0, nil })
 		require.NoError(t, e)
 		require.JSONEq(t, `{"metadata":{},"other":1}`, string(got))
 	})
@@ -305,7 +305,7 @@ func TestCommentNotificationsScopedDiscovery(t *testing.T) {
 
 func TestNotificationProjectionLeadingWhitespace(t *testing.T) {
 	raw := jsontext.Value(" \n" + `{"metadata":{"notify.reader":{"re":"hidden","message":"secret"}}}`)
-	got, err := walkNotificationJSON(raw, func(slot jsontext.Value) (bool, error) { return len(notificationReferences(slot)) == 0, nil })
+	got, err := walkNotificationJSON(raw, func(slot jsontext.Value) (bool, error) { return len(notification.References(slot)) == 0, nil })
 	require.NoError(t, err)
 	require.JSONEq(t, `{"metadata":{}}`, string(got))
 }
@@ -337,7 +337,7 @@ func checkNotificationProjectionPreservesOpaqueNestedValues(t *testing.T, messag
 	require.NoError(t, err)
 
 	got, err := walkNotificationJSON(jsontext.Value(raw), func(value jsontext.Value) (bool, error) {
-		return !slices.Contains(notificationReferences(value), "hidden-comment"), nil
+		return !slices.Contains(notification.References(value), "hidden-comment"), nil
 	})
 	require.NoError(t, err)
 

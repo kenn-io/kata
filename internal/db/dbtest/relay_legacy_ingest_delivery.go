@@ -1,15 +1,45 @@
 package dbtest
 
 import (
+	"crypto/ed25519"
 	"encoding/json/jsontext"
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/uid"
 )
+
+// RunRelayCrossProjectRemoval checks that relay ingest accepts a crossing parent removal.
+func RunRelayCrossProjectRemoval(t *testing.T, store db.Storage) {
+	ctx := t.Context()
+	fixture := newRelayLinkBoundaryFixture(t, store, "relay-cross-removal", true)
+	public := fixture.signer.PrivateKey.Public().(ed25519.PublicKey)
+	require.NoError(t, store.PinRootAuthority(ctx, db.RootKeyPin{ProjectUID: fixture.sibling.UID, AuthorityUID: store.InstanceUID(), KeyID: db.RootPublicKeyID(public), PublicKey: public}))
+	child, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.project.ID, Title: "Child", Author: "member"})
+	require.NoError(t, err)
+	peer, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.sibling.ID, Title: "Peer", Author: "member"})
+	require.NoError(t, err)
+	instance, err := uid.New()
+	require.NoError(t, err)
+	grant, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: fixture.project.ID, ParentTokenID: fixture.parentTokenID, SpokeInstanceUID: instance, ProtocolVersion: db.RelayProtocolVersion})
+	require.NoError(t, err)
+	_, _, err = store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: peer.ID, Type: "blocks", Author: "member"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: child.ID, Actor: "member", FromUID: child.UID, ToUID: peer.UID, FromShortID: child.ShortID, ToShortID: peer.ShortID})
+	require.NoError(t, err)
+	_, _, err = store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: peer.ID, Type: "parent", Author: "member"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: child.ID, Actor: "member", FromUID: child.UID, ToUID: peer.UID, FromShortID: child.ShortID, ToShortID: peer.ShortID})
+	require.NoError(t, err)
+	event := newRemoteEvent(t, fixture.project, &child.UID, "issue.links_changed", "member", instance, time.Now().UnixMilli()+10, jsontext.Value(`{"parent_removed_uid":"`+peer.UID+`"}`))
+	body, err := db.EncodeRelaySourceEvent(event)
+	require.NoError(t, err)
+	envelope, err := db.SealRelayEnvelope(db.RelayEnvelope{Version: db.RelayProtocolVersion, BindingUID: grant.Enrollment.RelayBindingUID, ProjectUID: fixture.project.UID, AuthorityUID: store.InstanceUID(), SenderInstanceUID: instance, ReceiverInstanceUID: store.InstanceUID(), Epoch: grant.Enrollment.RelayResetEpoch, Sequence: 1, Stream: db.RelayStreamEvent, Path: []string{instance}, SourceUID: event.EventUID, SourceHash: event.ContentHash, Body: body})
+	require.NoError(t, err)
+	_, err = store.AcceptRelayDeliveries(db.WithRootAttribution(ctx, fixture.signer, "relay-member"), grant.Enrollment.RelayBindingUID, db.RelayBatch{Stream: db.RelayStreamEvent, Envelopes: []db.RelayEnvelope{envelope}})
+	require.NoError(t, err)
+	require.Equal(t, []string{peer.UID}, linkTargetUIDs(t, store, child.ID))
+}
 
 // RunRelayOffersLegacyIngestedEvents covers a direct spoke's creation followed
 // by a root-local notification. The relay must receive the introduction first,
@@ -100,7 +130,7 @@ func RunLegacyRelayAdmission(t *testing.T, store db.Storage) {
 		for _, mode := range modes {
 			t.Run(kind+"/"+mode, func(t *testing.T) {
 				ctx := t.Context()
-				fixture := newRelayLinkBoundaryFixture(t, store, "legacy-"+kind+"-"+mode)
+				fixture := newRelayLinkBoundaryFixture(t, store, "legacy-"+kind+"-"+mode, mode == "relayed peer")
 				if mode == "relayed peer" {
 					fixture.project, fixture.sibling = fixture.sibling, fixture.project
 				}

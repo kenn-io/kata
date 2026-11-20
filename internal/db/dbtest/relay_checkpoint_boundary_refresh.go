@@ -14,7 +14,7 @@ import (
 // source bytes must stay at the root; the child needs a fresh current snapshot.
 func RunRelayRootCheckpointLaterBoundary(t *testing.T, store db.Storage, openReplica func(*testing.T) db.Storage, seedHistory func(*testing.T, db.Project, db.RemoteEvent)) {
 	ctx := t.Context()
-	fixture := newRelayLinkBoundaryFixture(t, store, "checkpoint-boundary")
+	fixture := newRelayLinkBoundaryFixture(t, store, "checkpoint-boundary", true)
 	private, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.sibling.ID, Title: "Private endpoint", Author: "member"})
 	require.NoError(t, err)
 	writeCtx := db.WithRootAttribution(ctx, fixture.signer, "relay-member")
@@ -57,12 +57,10 @@ func RunRelayRootCheckpointLaterBoundary(t *testing.T, store db.Storage, openRep
 	require.NoError(t, err)
 	require.False(t, required)
 
-	legacyUID, err := uid.New()
-	require.NoError(t, err)
 	issueUID, err := uid.New()
 	require.NoError(t, err)
 	payload := jsontext.Value(`{"uid":"` + issueUID + `","title":"Later legacy creation","body":"","author":"member","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":[{"type":"blocks","to_issue_uid":"` + private.UID + `","author":"member"}]}`)
-	event := newRemoteEvent(t, fixture.project, &issueUID, "issue.created", "member", legacyUID, 600, payload)
+	event := newRemoteEvent(t, fixture.project, &issueUID, "issue.created", "member", store.InstanceUID(), 600, payload)
 	seedHistory(t, fixture.project, event)
 	issue, err := store.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
 	require.NoError(t, err)
@@ -76,15 +74,12 @@ func RunRelayRootCheckpointLaterBoundary(t *testing.T, store db.Storage, openRep
 	links, err := store.LinksByIssue(ctx, issue.ID)
 	require.NoError(t, err)
 	require.Len(t, links, 1)
-	_, err = resetter.CreateRelayReset(ctx, bindingUID, fixture.signer)
-	require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary, "a live private link must be refused before signing shared current state")
-	require.Equal(t, []string{private.UID}, linkTargetUIDs(t, store, issue.ID), "a refused reset must preserve the owner's private link")
-	_, err = store.DeleteLinkAndEvent(writeCtx, links[0], db.LinkEventParams{
-		EventType: "issue.unlinked", EventIssueID: issue.ID, Actor: "member",
-		FromUID: issue.UID, ToUID: private.UID, FromShortID: issue.ShortID, ToShortID: private.ShortID,
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: fixture.sibling.ID, Role: db.FederationRoleHub,
+		HubProjectID: fixture.sibling.ID, HubProjectUID: fixture.sibling.UID,
 	})
 	require.NoError(t, err)
-	require.Empty(t, linkTargetUIDs(t, store, issue.ID), "remove the live boundary without rewriting private history")
+	require.Empty(t, linkTargetUIDs(t, store, issue.ID), "unsharing removes the link from current state")
 
 	later, _, err := store.CreateIssue(writeCtx, db.CreateIssueParams{ProjectID: fixture.project.ID, Title: "Later ordinary issue", Author: "member"})
 	require.NoError(t, err)
