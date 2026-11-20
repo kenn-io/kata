@@ -1,3 +1,4 @@
+import type { Locator } from '@playwright/test'
 import { expect, test } from './fixtures'
 
 test('fenced code highlights in the read-only issue description under the production CSP', async ({
@@ -21,4 +22,38 @@ test('fenced code highlights in the read-only issue description under the produc
         .evaluateAll((spans) => new Set(spans.map((span) => getComputedStyle(span).color)).size),
     )
     .toBeGreaterThan(1)
+})
+
+test('Kenn links in issue bodies and comments work in read and edit views', async ({
+  page,
+  kata,
+}) => {
+  const credentials = await kata.launch(page)
+  const issue = await kata.seedIssue(page, credentials, {
+    title: 'Links to Kenn',
+    body: 'Open kenn://example/item.\n\n[note](kenn://example/note)',
+  })
+  const comment = await kata.request(
+    page,
+    credentials,
+    'POST',
+    `/api/v1/projects/${kata.projectID}/issues/${issue.uid}/comments`,
+    { actor: 'example-worker', body: 'See kenn://example/comment' },
+  )
+  expect(comment.ok()).toBe(true)
+  await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
+
+  async function expectLinks(scope: Locator) {
+    for (const [name, href] of [
+      ['kenn://example/item', 'kenn://example/item'],
+      ['note', 'kenn://example/note'],
+      ['kenn://example/comment', 'kenn://example/comment'],
+    ]) {
+      await expect(scope.getByRole('link', { name, exact: true })).toHaveAttribute('href', href)
+    }
+  }
+
+  await expectLinks(page.getByRole('region', { name: 'Kata issue detail', exact: true }))
+  await page.getByRole('button', { name: 'Edit issue' }).click()
+  await expectLinks(page.getByRole('region', { name: 'Kata issue editor', exact: true }))
 })
