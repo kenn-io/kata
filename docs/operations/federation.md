@@ -2136,12 +2136,16 @@ kata federation leave <project> --delete
 ```
 
 Before revoking the hub enrollment, a daemon preflight checks for local
-blockers. If the project has open issues and you omit `--force`, preflight
-refuses the leave with `project_has_open_issues` **before the hub enrollment is
-revoked**, and keeps the binding, credential, and hub enrollment intact. Plain
-detach leaves run the same preflight so any local refusal the daemon can
-predict surfaces before hub contact. Close the open issues, or rerun with
-`--force`, and run the leave again. Because the preflight is advisory and the
+blockers. If you run `kata federation leave <project> --delete` on a project
+with open issues and omit `--force`, preflight refuses the archive leave with
+`project_has_open_issues` **before the hub enrollment is revoked**, and keeps
+the binding, credential, and hub enrollment intact. That open-issue check
+applies only to an archive leave. Kata allows a plain detach leave without
+`--delete` when the project has open issues. Plain detach leaves still run the
+same daemon preflight, so any other local refusal the daemon can predict
+surfaces before hub contact. To retry an archive leave, close the open issues
+and run the leave again, or rerun with `--delete --force`. The CLI rejects
+`--force` without `--delete`. Because the preflight is advisory and the
 authoritative check runs inside the archive transaction after the revoke, an
 issue opened in that small window can leave the spoke revoked on the hub and
 intact locally. Rerun `leave --delete --local-only` or `leave --delete --force`
