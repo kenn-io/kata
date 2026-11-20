@@ -334,6 +334,8 @@ func DirectLinkPeers(event FoldEvent) (map[string]bool, error) {
 			child, parent := parentRemovalEndpoints(event, payload)
 			if child == event.IssueUID {
 				add(parent)
+			} else if parent == event.IssueUID {
+				add(child)
 			}
 		}
 	}

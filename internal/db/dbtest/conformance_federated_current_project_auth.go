@@ -240,6 +240,17 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 	_, err = store.EventsByUIDs(ctx, route.ID, []string{forged.EventUID})
 	require.ErrorIs(t, err, db.ErrNotFound)
 
+	// A parent URL can remove the same cross-project edge from its other end.
+	_, _, err = store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: peerChild.ID, ToIssueID: directChild.ID, Type: "parent", Author: "worker"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: peerChild.ID, FromUID: peerChild.UID, FromShortID: peerChild.ShortID, ToUID: directChild.UID, ToShortID: directChild.ShortID, Actor: "worker"})
+	require.NoError(t, err)
+	parentUnlink, err := json.Marshal(map[string]string{"from_uid": directChild.UID, "to_uid": peerChild.UID, "link_from_uid": peerChild.UID, "link_to_uid": directChild.UID, "type": "parent"})
+	require.NoError(t, err)
+	params.Events = []db.FederationIngestEvent{{SourceEventID: 3, Event: newRemoteEvent(t, route, &directChild.UID, "issue.unlinked", "worker", origin, at+3, parentUnlink)}}
+	_, err = store.IngestFederationEvents(ctx, params)
+	require.NoError(t, err)
+	_, err = store.ParentOf(ctx, peerChild.ID)
+	require.ErrorIs(t, err, db.ErrNotFound)
+
 	// Both operations name the same peer and allow reference approval.
 	mixedChild, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: route.ID, Title: "Mixed child", Author: "worker"})
 	require.NoError(t, err)

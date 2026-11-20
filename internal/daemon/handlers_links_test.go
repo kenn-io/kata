@@ -520,6 +520,22 @@ func TestDeleteLink_EventPayloadOrientsFromURLIssue(t *testing.T) {
 	assert.Equal(t, bIss.UID, pl.LinkToUID, "link_to_uid must preserve storage direction")
 }
 
+func TestDeleteParentLink_FromParentURLIncludesChildProof(t *testing.T) {
+	env := testenv.New(t)
+	pid, child, parent := setupTwoIssues(t, env)
+	childIssue, err := env.DB.IssueByID(t.Context(), child)
+	require.NoError(t, err)
+	parentIssue, err := env.DB.IssueByID(t.Context(), parent)
+	require.NoError(t, err)
+	created := postLink(t, env, pid, child, "parent", parent)
+	resp, out := deleteLink(t, env, pid, parent, created.Link.ID)
+	require.Equal(t, 200, resp.StatusCode)
+	require.NotNil(t, out.Event)
+	peers, err := db.DirectLinkPeers(db.FoldEvent{Type: out.Event.Type, IssueUID: parentIssue.UID, Payload: []byte(lastEventPayload(t, env, pid, "issue.unlinked"))})
+	require.NoError(t, err)
+	require.Equal(t, map[string]bool{childIssue.UID: true}, peers)
+}
+
 // TestCreateLink_ArchivedPeerIs409 pins that POST /links rejects a link whose
 // target lives in an archived project with 409 link_target_archived.
 // requireLinkTargetAddable is wired in the POST handler (handlers_links.go);

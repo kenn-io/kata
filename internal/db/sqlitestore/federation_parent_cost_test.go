@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -30,7 +31,7 @@ type parentQueryConn struct {
 }
 
 func (c *parentQueryConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
-	if query == "SELECT to_issue_uid FROM links WHERE from_issue_uid=$1 AND type='parent'" {
+	if strings.Join(strings.Fields(strings.ToLower(query)), " ") == "select to_issue_uid from links where from_issue_uid=$1 and type='parent'" {
 		c.queries.Add(1)
 	}
 	return c.sqliteConn.QueryContext(ctx, query, args)
