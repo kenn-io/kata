@@ -76,7 +76,7 @@ func TestDelete_ReasonRejectsOldDaemon(t *testing.T) {
 
 	_, err = runCLICapture(t, &old, dir, "delete", short, "--force", "--confirm", "DELETE kata#"+short,
 		"--reason", "duplicate of the import task")
-	require.ErrorContains(t, err, "requires daemon API 0.62.0")
+	require.ErrorContains(t, err, "requires daemon API 0.63.0")
 	assert.Zero(t, deletes.Load())
 }
 

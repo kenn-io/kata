@@ -13,6 +13,8 @@ import (
 // forward supersedes, which downstream work blocks an install, or how a
 // checkpoint is translated per hop.
 type RelayResetBackend interface {
+	// AuthorizeRelayRelease checks the projects referenced by a checkpoint.
+	AuthorizeRelayRelease(ctx context.Context, projectUID string, events []RemoteEvent) error
 	// ProjectUID returns the UID of a project row.
 	ProjectUID(ctx context.Context, projectID int64) (string, error)
 	// RelayBinding loads the project's federation binding, or ErrNotFound.

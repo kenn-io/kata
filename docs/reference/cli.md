@@ -1158,7 +1158,7 @@ explicitly asks for that exact operation and ref.
 
 `delete --reason` records why on the issue's `issue.soft_deleted` event, so
 whoever reads the deleted issue's history before restoring it sees the reason.
-It needs a daemon that reports API 0.62.0 or newer; an older daemon gets an
+It needs a daemon that reports API 0.63.0 or newer; an older daemon gets an
 upgrade message and the issue is not deleted.
 
 ## Labels, ownership, and claiming
