@@ -513,7 +513,7 @@ func withDiagnosisAction(result daemonDiagnosis) daemonDiagnosis {
 	case "selection_error":
 		result.NextAction = "repair the selected routing configuration; current-home processes are listed separately"
 	default:
-		if result.NextAction == "" {
+		if result.State != "local_unreachable" || (result.NextAction == "" && (result.Message == "" || result.PID == 0)) {
 			result.NextAction = "inspect the selected process and its credentials; do not switch databases"
 		}
 	}
