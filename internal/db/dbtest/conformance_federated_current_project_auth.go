@@ -5,6 +5,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -276,6 +277,59 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 	parent, err = store.ParentOf(ctx, child.ID)
 	require.NoError(t, err)
 	require.Equal(t, peer.ID, parent.ToIssueID)
+	t.Run("legacy-reverse-primary", func(t *testing.T) {
+		for _, batch := range []bool{false, true} {
+			t.Run(fmt.Sprint(batch), func(t *testing.T) {
+				parent, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: route.ID, Title: "Reverse parent", Author: "worker"})
+				require.NoError(t, err)
+				child, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: route.ID, Title: "Reverse child", Author: "worker"})
+				require.NoError(t, err)
+				if !batch {
+					_, err = store.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: child.ID, Actor: "worker", SetParent: &parent.ID})
+					require.NoError(t, err)
+				}
+				payload, err := json.Marshal(map[string]string{"from_uid": parent.UID, "to_uid": child.UID, "type": "parent"})
+				require.NoError(t, err)
+				params.Events = nil
+				if batch {
+					set, err := json.Marshal(map[string]string{"parent_set_uid": parent.UID})
+					require.NoError(t, err)
+					params.Events = append(params.Events, db.FederationIngestEvent{SourceEventID: 9, Event: newRemoteEvent(t, route, &child.UID, "issue.links_changed", "worker", origin, at+11, set)})
+				}
+				params.Events = append(params.Events, db.FederationIngestEvent{SourceEventID: 10, Event: newRemoteEvent(t, route, &parent.UID, "issue.unlinked", "worker", origin, at+12, payload)})
+				authorize := params.AuthorizeReference
+				params.AuthorizeReference = nil
+				_, err = store.IngestFederationEvents(ctx, params)
+				params.AuthorizeReference = authorize
+				require.ErrorIs(t, err, db.ErrFederationIngestValidation)
+				if !batch {
+					link, err := store.ParentOf(ctx, child.ID)
+					require.NoError(t, err)
+					require.Equal(t, parent.ID, link.ToIssueID)
+				}
+			})
+		}
+	})
+	t.Run("implicit-displacement-with-reference", func(t *testing.T) {
+		payload, err := json.Marshal(map[string]any{"parent_set_uid": other.UID, "related_added_uids": []string{peer.UID}})
+		require.NoError(t, err)
+		params.Events = []db.FederationIngestEvent{{SourceEventID: 4, Event: newRemoteEvent(t, route, &child.UID, "issue.links_changed", "worker", origin, at+7, payload)}}
+		_, err = store.IngestFederationEvents(ctx, params)
+		require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
+		parent, err := store.ParentOf(ctx, child.ID)
+		require.NoError(t, err)
+		require.Equal(t, peer.ID, parent.ToIssueID)
+	})
+	t.Run("combined-parent-and-blocks-removal", func(t *testing.T) {
+		payload, err := json.Marshal(map[string]any{"parent_removed_uid": peer.UID, "blocks_removed_uids": []string{peer.UID}})
+		require.NoError(t, err)
+		params.Events = []db.FederationIngestEvent{{SourceEventID: 4, Event: newRemoteEvent(t, route, &child.UID, "issue.links_changed", "worker", origin, at+7, payload)}}
+		_, err = store.IngestFederationEvents(ctx, params)
+		require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
+		parent, err := store.ParentOf(ctx, child.ID)
+		require.NoError(t, err)
+		require.Equal(t, peer.ID, parent.ToIssueID)
+	})
 	// A reference proof for a peer does not authorize removing a blocks link.
 	blocksPayload, err := json.Marshal(map[string]any{"blocks_removed_uids": []string{peer.UID}, "related_added_uids": []string{peer.UID}})
 	require.NoError(t, err)

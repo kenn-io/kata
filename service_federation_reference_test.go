@@ -68,8 +68,8 @@ func TestDirectPushWithProjectScopedActors(t *testing.T) {
 			credentials := serviceCredentialStoreAdapter{newServiceFederationCredentialStore()}
 			var projects []db.Project
 			var bindings []db.FederationBinding
-			for i, actor := range []string{"worker", "peer-member", "peer-member"} {
-				name := []string{"route-project", "peer-project", "other-project"}[i]
+			for i, actor := range []string{"worker", "peer-member"} {
+				name := []string{"route-project", "peer-project"}[i]
 				project, err := hub.store.CreateProject(ctx, name)
 				require.NoError(t, err)
 				projects = append(projects, project)
@@ -95,13 +95,10 @@ func TestDirectPushWithProjectScopedActors(t *testing.T) {
 			}
 			peer, _, err := hub.store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[1].ID, Title: "Peer issue", Author: "peer-member"})
 			require.NoError(t, err)
-			newPeer, _, err := hub.store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[2].ID, Title: "New parent", Author: "peer-member"})
-			require.NoError(t, err)
 			other, _, err := hub.store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Existing child", Author: "worker"})
 			require.NoError(t, err)
 			require.NoError(t, syncProject(0))
 			require.NoError(t, syncProject(1))
-			require.NoError(t, syncProject(2))
 			local, err := spoke.DB.IssueByUID(ctx, peer.UID, db.IncludeDeletedNo)
 			require.NoError(t, err)
 			child, err := spoke.DB.IssueByUID(ctx, other.UID, db.IncludeDeletedNo)
@@ -129,6 +126,20 @@ func TestDirectPushWithProjectScopedActors(t *testing.T) {
 			if mode != "host" {
 				return
 			}
+			project, err := hub.store.CreateProject(ctx, "other-project")
+			require.NoError(t, err)
+			projects = append(projects, project)
+			grant, err := hub.CreateFederationEnrollment(ctx, FederationEnrollmentSpec{ProjectUID: project.UID, SpokeInstanceUID: spoke.DB.InstanceUID(), Capabilities: "pull,push", Actor: "peer-member"})
+			require.NoError(t, err)
+			localProject, err := spoke.DB.CreateProjectWithUID(ctx, project.Name, project.UID)
+			require.NoError(t, err)
+			binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: localProject.ID, Role: db.FederationRoleSpoke, HubURL: server.URL, HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "peer-member"})
+			require.NoError(t, err)
+			bindings = append(bindings, binding)
+			require.NoError(t, credentials.store.StoreFederationCredential(ctx, project.UID, FederationCredential{HubURL: server.URL, HubProjectID: project.ID, Token: grant.Token, Actor: "peer-member"}))
+			newPeer, _, err := hub.store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "New parent", Author: "peer-member"})
+			require.NoError(t, err)
+			require.NoError(t, syncProject(2))
 			controller.allow.Store(true)
 			require.NoError(t, syncProject(0))
 			after, err := spoke.DB.FederationBindingByProject(ctx, child.ProjectID)

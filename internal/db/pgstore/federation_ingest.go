@@ -999,13 +999,9 @@ func (s *Store) authorizeFederationMoveTx(ctx context.Context, tx *sql.Tx, p db.
 // affected issue's current owner. Duplicates already passed this acceptance
 // boundary and must not acquire new authority merely to acknowledge a retry.
 func (s *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.Tx, p db.FederationIngestParams, events []db.RemoteEvent, moveSnapshots *db.FederationMoveSnapshotValidator) error {
-	var parentRemovals map[string][]string
-	if p.AuthorizeReference != nil {
-		var err error
-		parentRemovals, err = db.DirectParentRemovals(ctx, tx, events)
-		if err != nil {
-			return err
-		}
+	parentRemovals, err := db.DirectParentRemovals(ctx, tx, events)
+	if err != nil {
+		return err
 	}
 	staged := map[string]int64{}
 	type checkedProject struct {
@@ -1051,7 +1047,12 @@ func (s *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.
 		if err != nil {
 			return err
 		}
-		refs = append(refs, parentRemovals[event.EventUID]...)
+		if p.AuthorizeReference != nil {
+			for _, previous := range parentRemovals[event.EventUID] {
+				refs = append(refs, previous)
+				delete(peers, previous)
+			}
+		}
 		refs = append(refs, primary)
 		for _, issueUID := range refs {
 			if issueUID == "" {

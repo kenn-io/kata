@@ -323,16 +323,16 @@ func DirectLinkPeers(event FoldEvent) (map[string]bool, error) {
 	if event.Type == "issue.links_changed" || event.Type == "issue.unlinked" {
 		payload := PayloadMap(event.Payload)
 		if event.Type == "issue.links_changed" {
-			for _, key := range []string{"blocks_removed_uids", "blocked_by_removed_uids", "related_removed_uids"} {
-				for _, uid := range StringSlice(payload[key]) {
-					delete(peers, uid)
-				}
-			}
 			uid, _ := StringValue(payload["parent_removed_uid"])
 			if peers[uid] {
 				delete(peers, uid)
 			} else {
 				add(uid)
+			}
+			for _, key := range []string{"blocks_removed_uids", "blocked_by_removed_uids", "related_removed_uids"} {
+				for _, uid := range StringSlice(payload[key]) {
+					delete(peers, uid)
+				}
 			}
 		} else if kind, _ := StringValue(payload["type"]); kind == "parent" {
 			for _, key := range []string{"from_uid", "to_uid"} {
@@ -392,6 +392,9 @@ func DirectParentRemovals(ctx context.Context, tx Transaction, events []RemoteEv
 	for _, event := range ordered {
 		if event.Type == "issue.unlinked" || event.Type == "issue.links_changed" {
 			payload := PayloadMap(event.Payload)
+			if err := validateLegacyParentUnlink(event, payload, parentOf); err != nil {
+				return nil, err
+			}
 			from, to := parentRemovalEndpoints(event, payload)
 			if from != "" && to != "" {
 				previous, err := parentOf(from)
@@ -419,6 +422,31 @@ func DirectParentRemovals(ctx context.Context, tx Transaction, events []RemoteEv
 		}
 	}
 	return removed, nil
+}
+
+// validateLegacyParentUnlink rejects an ambiguous unlink when its reverse edge exists.
+func validateLegacyParentUnlink(event FoldEvent, payload map[string]jsontext.Value, parentOf func(string) (string, error)) error {
+	if event.Type != "issue.unlinked" {
+		return nil
+	}
+	kind, _ := StringValue(payload["type"])
+	_, fromPresent := payload["link_from_uid"]
+	_, toPresent := payload["link_to_uid"]
+	if kind != "parent" || fromPresent || toPresent {
+		return nil
+	}
+	from, to := parentRemovalEndpoints(event, payload)
+	if from == "" || to == "" {
+		return nil
+	}
+	parent, err := parentOf(to)
+	if err != nil {
+		return err
+	}
+	if parent == from {
+		return fmt.Errorf("%w: issue.unlinked has ambiguous parent direction", ErrFederationIngestValidation)
+	}
+	return nil
 }
 
 // parentRemovalEndpoints returns the child-to-parent storage endpoints removed
