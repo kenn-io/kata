@@ -27,8 +27,6 @@ permissions:
 cache-mode: read
 
 env:
-  # Module-relative source paths keep build cache entries independent of the checkout path.
-  GOFLAGS: -trimpath
   # "|" falls back to the source repo on any proxy error, including HTTP/2 stream resets mid-download.
   GOPROXY: https://proxy.golang.org|direct
 

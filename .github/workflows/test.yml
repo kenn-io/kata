@@ -333,7 +333,7 @@ jobs:
         with:
           persist-credentials: false
 
-      # Go tests is the only writer of the per-commit Linux Go cache; PostgreSQL jobs restore it.
+      # Go tests is the only writer of the per-commit Linux cache; PostgreSQL jobs restore it.
       - name: Set up Go
         id: setup-go
         uses: actions/setup-go@v7.0.0
