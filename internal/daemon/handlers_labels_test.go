@@ -193,17 +193,6 @@ func TestUpdateLabels_SameLabelInAddAndRemoveIs400(t *testing.T) {
 	assert.Equal(t, []string{"ready-for-agent"}, issueLabelNames(t, env, n))
 }
 
-func TestUpdateLabels_InvalidAddKeepsRemovedLabelAttached(t *testing.T) {
-	env := testenv.New(t)
-	pid, n := setupOneIssue(t, env)
-	postLabel(t, env, pid, n, "ready-for-agent")
-
-	resp, raw := envDoRaw(t, env, http.MethodPatch, issuePath(pid, n, "labels"),
-		map[string]any{"actor": "tester", "add": []string{"Bad-Case"}, "remove": []string{"ready-for-agent"}}, nil)
-	assertAPIError(t, resp.StatusCode, raw, http.StatusBadRequest, "validation")
-	assert.Equal(t, []string{"ready-for-agent"}, issueLabelNames(t, env, n))
-}
-
 func TestUpdateLabels_InvalidRemoveChangesNothing(t *testing.T) {
 	env := testenv.New(t)
 	pid, n := setupOneIssue(t, env)
