@@ -24,6 +24,18 @@ func (d *Store) CreateRelayReset(ctx context.Context, bindingUID string, signer 
 	return result, nil
 }
 
+func (b relayResetBackend) relayReleaseLookup(ctx context.Context) *db.EventIssueLookup {
+	return eventIssueLookup(db.WithoutIssueRegistries(db.WithAuthorizedProjects(ctx, nil)), b.tx)
+}
+
+func (b relayResetBackend) AuthorizeRelayRelease(ctx context.Context, projectUID string, events []db.RemoteEvent) error {
+	return db.AuthorizeRelayRelease(ctx, b.tx, b.relayReleaseLookup(ctx), projectUID, events)
+}
+
+func (b relayResetBackend) AuthorizeRelayReleasePrefix(ctx context.Context, projectUID string, events []db.RemoteEvent) (int, error) {
+	return db.AuthorizeRelayReleasePrefix(ctx, b.tx, b.relayReleaseLookup(ctx), projectUID, events)
+}
+
 func (b relayResetBackend) Project(ctx context.Context, projectID int64) (db.Project, error) {
 	return scanProject(b.tx.QueryRowContext(ctx, projectSelect+` WHERE id=?`, projectID))
 }

@@ -115,7 +115,16 @@ var storageScenarios = []scenario{
 	}},
 	{name: "relay topology", methods: []string{"SetRelayBindingConfig"}, run: func(t *testing.T, store db.Storage) error { RunRelayTopology(t, store); return nil }},
 	{name: "relay enrollment", methods: []string{"CreateRelayEnrollment"}, run: func(t *testing.T, store db.Storage) error { RunRelayEnrollmentScope(t, store); return nil }},
-	{name: "relay cross-project boundary", methods: []string{"AdoptProjectIntoFederation", "AuthorizeFederationToken", "CheckRelayProjectLinks", "CloseIssueWithEvents", "CreateAPIToken", "CreateIssue", "CreateLink", "CreateLinkAndEvent", "CreateProject", "CreateRelayEnrollment", "DeleteLinkAndEvent", "EditIssueAtomic", "EventsAfter", "FederationBindingByProject", "InstanceUID", "IssueByID", "LinkByID", "LinksByIssue", "MoveIssueProject", "ParentOf", "PendingRelayDeliveries", "PinRootAuthority", "ProjectByID", "SetRelayBindingConfig", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error { RunRelayCrossProjectBoundary(t, store); return nil }},
+	{name: "relay cross-project boundary", methods: []string{"AcceptRelayDeliveries", "AckRelayDeliveries", "AdoptProjectIntoFederation", "AuthorizeFederationToken", "CheckRelayProjectLinks", "CloseIssueWithEvents", "CreateAPIToken", "CreateIssue", "CreateLink", "CreateLinkAndEvent", "CreateProject", "CreateProjectWithUID", "CreateRelayEnrollment", "CreateTeam", "DeleteLinkAndEvent", "EditIssueAtomic", "EventsAfter", "FederationBindingByProject", "InstanceUID", "IssueByID", "IssueByUID", "LinkByID", "LinksByIssue", "MoveIssueProject", "ParentOf", "PendingRelayDeliveries", "PinRootAuthority", "ProjectAccessPolicy", "ProjectByID", "ProjectByUID", "RemoveProject", "RootAuthority", "SetProjectAccessPolicy", "SetRelayBindingConfig", "UpsertFederationBinding"}, runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+		RunRelayCrossProjectBoundary(t, store, backend)
+		return nil
+	}},
+	{name: "relay archived source restoration", runWithBackend: checkRelayArchivedSourceRestoration},
+	{name: "relay archived peer reconnect", run: checkRelayArchivedPeerReconnect},
+	{name: "relay cross-link reset history", runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+		RunRelayCrossLinkResetHistory(t, store, backend)
+		return nil
+	}},
 	{name: "relay checkpoint capacity", methods: []string{"CreateAPIToken", "CreateIssue", "CreateProject", "CreateRelayEnrollment", "ListFederationEnrollments", "PinRootAuthority", "UpsertFederationBinding"}, runWithBackend: func(t *testing.T, _ db.Storage, backend Backend) error {
 		RunRelayCheckpointCapacity(t, backend)
 		return nil
@@ -151,6 +160,11 @@ var storageScenarios = []scenario{
 	{name: "legacy relay admission", methods: []string{"IngestFederationEvents", "CreateRelayEnrollment", "RevokeFederationEnrollment"}, run: func(t *testing.T, store db.Storage) error {
 		RunLegacyRelayAdmission(t, store)
 		RunLegacyRelayParentUIDCollision(t, store)
+		return nil
+	}},
+	{name: "relay cross project removal", run: func(t *testing.T, store db.Storage) error { RunRelayCrossProjectRemoval(t, store); return nil }},
+	{name: "relay event release peer access", runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+		RunRelayEventReleasePeerAccess(t, store, backend)
 		return nil
 	}},
 	{name: "relay offers legacy ingested events", methods: []string{"IngestFederationEvents", "PendingRelayDeliveries", "PatchIssueMetadata"}, run: func(t *testing.T, store db.Storage) error {
@@ -443,7 +457,7 @@ var storageScenarios = []scenario{
 		methods: []string{
 			"CreateProject", "CreateProjectAndEvent", "CreateProjectWithUID", "CreateProjectWithUIDAndEvent",
 			"ListProjects", "ListProjectsIncludingArchived", "ProjectByID", "ProjectByName",
-			"ProjectByNameIncludingArchived", "ProjectByUID", "RenameProject", "RenameProjectAndEvent",
+			"ProjectByNameIncludingArchived", "ProjectByUID", "ProjectByUIDTx", "RenameProject", "RenameProjectAndEvent",
 		},
 		run: checkProjects,
 	},

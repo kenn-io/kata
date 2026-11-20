@@ -61,18 +61,59 @@ func EventRequiresProjectScopeReset(
 		_, visible := allowed[issue.ProjectUID]
 		return !visible, nil
 	}
+	refIsPrivate := func(ref string) (bool, error) {
+		if ref == "" || issueByRef == nil {
+			return true, nil
+		}
+		issue, err := issueByRef(event.ProjectUID, ref)
+		if errors.Is(err, ErrNotFound) {
+			return true, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		_, visible := allowed[issue.ProjectUID]
+		return !visible, nil
+	}
+	commentIsPrivate := func(uid, kind string) (bool, error) {
+		if len(uid) != 26 || !ValidCommentReplyKind(kind) || commentIssueByUID == nil {
+			return true, nil
+		}
+		issue, err := commentIssueByUID(uid)
+		if errors.Is(err, ErrNotFound) {
+			return true, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if _, visible := allowed[issue.ProjectUID]; !visible {
+			return true, nil
+		}
+		RecordExposedIssue(ctx, issue.ID)
+		return false, nil
+	}
+	projectIsPrivate := func(uid string) (bool, error) { _, visible := allowed[uid]; return !visible, nil }
+	return walkEventProjectReferences(event, issueIsPrivate, issueIsPrivate, refIsPrivate, commentIsPrivate, projectIsPrivate)
+}
+
+// walkEventProjectReferences visits structured references without selecting a visibility policy.
+func walkEventProjectReferences(event Event, issueIsPrivate, linkIsPrivate func(string) (bool, error), refIsPrivate func(string) (bool, error), commentIsPrivate func(string, string) (bool, error), projectIsPrivate func(string) (bool, error)) (bool, error) {
 	for _, relatedUID := range []*string{event.RelatedIssueUID} {
 		if relatedUID == nil {
 			continue
 		}
-		private, err := issueIsPrivate(*relatedUID)
+		check := issueIsPrivate
+		if event.Type == "issue.linked" || event.Type == "issue.unlinked" {
+			check = linkIsPrivate
+		}
+		private, err := check(*relatedUID)
 		if err != nil || private {
 			return private, err
 		}
 	}
 	checkUIDs := func(uids []string) (bool, error) {
 		for _, uid := range uids {
-			private, err := issueIsPrivate(uid)
+			private, err := linkIsPrivate(uid)
 			if err != nil || private {
 				return private, err
 			}
@@ -81,18 +122,9 @@ func EventRequiresProjectScopeReset(
 	}
 	checkRefs := func(refs []string) (bool, error) {
 		for _, ref := range refs {
-			if ref == "" || issueByRef == nil {
-				return true, nil
-			}
-			issue, err := issueByRef(event.ProjectUID, ref)
-			if errors.Is(err, ErrNotFound) {
-				return true, nil
-			}
-			if err != nil {
-				return false, err
-			}
-			if _, visible := allowed[issue.ProjectUID]; !visible {
-				return true, nil
+			private, err := refIsPrivate(ref)
+			if err != nil || private {
+				return private, err
 			}
 		}
 		return false, nil
@@ -117,12 +149,13 @@ func EventRequiresProjectScopeReset(
 		return checkUIDs(uids)
 	}
 	checkSnapshotReferences := func(payload map[string]jsontext.Value) (bool, error) {
-		if reset, err := checkSnapshotLinks(payload); reset || err != nil {
-			return reset, err
+		reset, err := checkSnapshotLinks(payload)
+		if err != nil {
+			return false, err
 		}
 		raw, found := payload["comments"]
 		if !found {
-			return false, nil
+			return reset, nil
 		}
 		var comments *[]struct {
 			ReplyToUID string `json:"reply_to_uid"`
@@ -135,25 +168,27 @@ func EventRequiresProjectScopeReset(
 			if comment.ReplyToUID == "" && comment.ReplyKind == "" {
 				continue
 			}
-			if len(comment.ReplyToUID) != 26 || !ValidCommentReplyKind(comment.ReplyKind) || commentIssueByUID == nil {
-				return true, nil
+			private, err := commentIsPrivate(comment.ReplyToUID, comment.ReplyKind)
+			if err != nil || private {
+				return private, err
 			}
-			issue, err := commentIssueByUID(comment.ReplyToUID)
-			if errors.Is(err, ErrNotFound) {
-				return true, nil
-			}
-			if err != nil {
-				return false, err
-			}
-			if _, visible := allowed[issue.ProjectUID]; !visible {
-				return true, nil
-			}
-			RecordExposedIssue(ctx, issue.ID)
 		}
-		return false, nil
+		return reset, nil
 	}
 
 	switch event.Type {
+	case "issue.linked", "issue.unlinked":
+		var payload map[string]jsontext.Value
+		if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
+			return true, nil
+		}
+		var uids []string
+		for _, key := range []string{"from_uid", "to_uid", "from_issue_uid", "to_issue_uid", "link_from_uid", "link_to_uid"} {
+			if uid, ok := StringValue(payload[key]); ok && uid != "" {
+				uids = append(uids, uid)
+			}
+		}
+		return checkUIDs(uids)
 	case "issue.moved":
 		var payload map[string]jsontext.Value
 		if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
@@ -164,8 +199,9 @@ func EventRequiresProjectScopeReset(
 			if !ok || uid == "" {
 				return true, nil
 			}
-			if _, visible := allowed[uid]; !visible {
-				return true, nil
+			private, err := projectIsPrivate(uid)
+			if err != nil || private {
+				return private, err
 			}
 		}
 		if snapshot, found := payload["snapshot"]; found {
@@ -191,9 +227,10 @@ func EventRequiresProjectScopeReset(
 		if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
 			return true, nil
 		}
+		reset := false
 		if payload.ParentUID == nil || *payload.ParentUID == "" {
 			if payload.ParentShortID != nil && *payload.ParentShortID != "" {
-				return true, nil
+				reset = true
 			}
 		} else {
 			private, err := issueIsPrivate(*payload.ParentUID)
@@ -207,7 +244,8 @@ func EventRequiresProjectScopeReset(
 				refs = append(refs, evidence.IssueRef)
 			}
 		}
-		return checkRefs(refs)
+		private, err := checkRefs(refs)
+		return reset || private, err
 	case "issue.links_changed":
 		var payload map[string]jsontext.Value
 		if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {

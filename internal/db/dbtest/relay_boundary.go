@@ -12,8 +12,24 @@ import (
 // RunRelayCrossProjectBoundary exercises relay cross project boundary on the supplied native store.
 // R6: new relay admission refuses existing cross-project links, and a shared
 // project cannot serialize private endpoints via link or create-with-link.
-func RunRelayCrossProjectBoundary(t *testing.T, store db.Storage) {
+func RunRelayCrossProjectBoundary(t *testing.T, store db.Storage, backend Backend) {
 	ctx := t.Context()
+	fixture := NewRelaySharedAccessFixture(t, store)
+	replica := backend.Open(t)
+	t.Cleanup(func() { require.NoError(t, replica.Close()) })
+	features := db.WithRelayPeerEventFeatures(ctx, db.SupportedEventFeatures)
+	peerBinding, peerEpoch := setupRelayHop(t, store, replica, fixture.Projects[1], "boundary-peer", false)
+	sourceBinding, sourceEpoch := setupRelayHop(t, store, replica, fixture.Projects[0], "boundary-source", true)
+	syncRelayHop(features, t, store, replica, peerBinding, peerEpoch, db.RelayStreamEvent, db.RelayStreamReceipt, db.RelayStreamArtifact)
+	syncRelayHop(features, t, store, replica, sourceBinding, sourceEpoch, db.RelayStreamEvent, db.RelayStreamReceipt, db.RelayStreamArtifact)
+	replicaIssue, err := replica.IssueByUID(ctx, fixture.Issues[0].UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	require.Equal(t, []string{fixture.Issues[1].UID}, linkTargetUIDs(t, replica, replicaIssue.ID))
+	replicaPeerIssue, err := replica.IssueByUID(ctx, fixture.Issues[1].UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	_, err = replica.CreateLink(ctx, db.CreateLinkParams{FromIssueID: replicaIssue.ID, ToIssueID: replicaPeerIssue.ID, Type: "related", Author: "member"})
+	require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary)
+
 	first, err := store.CreateProject(ctx, "first-project")
 	require.NoError(t, err)
 	second, err := store.CreateProject(ctx, "second-project")
@@ -24,7 +40,7 @@ func RunRelayCrossProjectBoundary(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	adoptionIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: adopting.ID, Author: "member", Title: "Existing adoption link"})
 	require.NoError(t, err)
-	for _, p := range []db.Project{first, second, shared} {
+	for _, p := range []db.Project{first, shared} {
 		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: p.ID, Role: db.FederationRoleHub, HubProjectID: p.ID, HubProjectUID: p.UID, Enabled: true})
 		require.NoError(t, err)
 	}
@@ -58,10 +74,11 @@ func RunRelayCrossProjectBoundary(t *testing.T, store db.Storage) {
 	for _, p := range []db.Project{first, shared} {
 		require.NoError(t, store.PinRootAuthority(ctx, db.RootKeyPin{ProjectUID: p.UID, AuthorityUID: store.InstanceUID(), KeyID: db.RootPublicKeyID(public), PublicKey: public}))
 	}
+	rootUID := "00000000000000000000000002"
+
 	// An existing legacy spoke can also have local cross-project links. The
 	// negotiated setup path must return the same boundary sentinel without
 	// partially installing a relay configuration.
-	rootUID := "00000000000000000000000002"
 	var legacyProjects [2]db.Project
 	var legacyIssues [2]db.Issue
 	for i, name := range []string{"legacy-project", "legacy-peer-project"} {
@@ -186,6 +203,41 @@ func RunRelayCrossProjectBoundary(t *testing.T, store db.Storage) {
 	require.Equal(t, "issue.unlinked", replacement.UnlinkedEvent.Type)
 	require.Equal(t, "issue.linked", replacement.LinkedEvent.Type)
 	require.Equal(t, newParent.ID, replacement.Link.ToIssueID)
+	sharedParent, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: first.ID, Author: "member", Title: "Cross-project parent"})
+	require.NoError(t, err)
+	crossReplacement, err := replacementStore.ReplaceParentAndEvents(ctx, db.ReplaceParentAndEventsParams{
+		ExpectedParentLinkID: replacement.Link.ID, ExpectedParentIssueID: newParent.ID,
+		Link: db.CreateLinkParams{FromIssueID: local.ID, ToIssueID: sharedParent.ID, Type: "parent", Author: "member"},
+		UnlinkEvent: db.LinkEventParams{
+			EventType: "issue.unlinked", EventIssueID: local.ID,
+			FromShortID: local.ShortID, FromUID: local.UID,
+			ToShortID: newParent.ShortID, ToUID: newParent.UID, Actor: "member",
+		},
+		LinkEvent: db.LinkEventParams{
+			EventType: "issue.linked", EventIssueID: local.ID,
+			FromShortID: local.ShortID, FromUID: local.UID,
+			ToShortID: sharedParent.ShortID, ToUID: sharedParent.UID, Actor: "member",
+		},
+	})
+	require.NoError(t, err)
+	crossParent, err := store.ParentOf(ctx, local.ID)
+	require.NoError(t, err)
+	require.Equal(t, sharedParent.ID, crossParent.ToIssueID)
+	replacement, err = replacementStore.ReplaceParentAndEvents(ctx, db.ReplaceParentAndEventsParams{
+		ExpectedParentLinkID: crossReplacement.Link.ID, ExpectedParentIssueID: sharedParent.ID,
+		Link: db.CreateLinkParams{FromIssueID: local.ID, ToIssueID: newParent.ID, Type: "parent", Author: "member"},
+		UnlinkEvent: db.LinkEventParams{
+			EventType: "issue.unlinked", EventIssueID: local.ID,
+			FromShortID: local.ShortID, FromUID: local.UID,
+			ToShortID: sharedParent.ShortID, ToUID: sharedParent.UID, Actor: "member",
+		},
+		LinkEvent: db.LinkEventParams{
+			EventType: "issue.linked", EventIssueID: local.ID,
+			FromShortID: local.ShortID, FromUID: local.UID,
+			ToShortID: newParent.ShortID, ToUID: newParent.UID, Actor: "member",
+		},
+	})
+	require.NoError(t, err)
 	currentParentLink := replacement.Link
 	eventsBeforeReplace, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: shared.ID, Limit: 1000})
 	require.NoError(t, err)

@@ -2,6 +2,7 @@ package dbtest
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -240,6 +241,21 @@ func checkProjects(t *testing.T, store db.Storage) error {
 		assert.Equal(t, alpha.Name, got.Name)
 		assert.Equal(t, alpha.UID, got.UID)
 	}
+	beginner, ok := store.(interface {
+		BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
+	})
+	require.True(t, ok)
+	tx, err := beginner.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin project lookup: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	byUIDTx, err := store.ProjectByUIDTx(ctx, tx, alpha.UID)
+	require.NoError(t, err)
+	assert.Equal(t, alpha, byUIDTx)
+	_, err = store.ProjectByUIDTx(ctx, tx, "01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	assert.ErrorIs(t, err, db.ErrNotFound)
+	require.NoError(t, tx.Rollback())
 
 	renamed, renamedEvent, changed, err := store.RenameProjectAndEvent(ctx, beta.ID, "renamed-project", "user-a")
 	if err != nil {

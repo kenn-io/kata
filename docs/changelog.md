@@ -44,7 +44,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Swap triage labels, such as `ready-for-agent` to `ready-for-human`, in one
   request that applies fully or not at all and answers with the issue's
   resulting labels: `PATCH /api/v1/projects/{project_id}/issues/{ref}/labels`
-  takes `add` and `remove` lists. Needs a daemon on API 0.62.0 or newer. See
+  takes `add` and `remove` lists. Needs a daemon on API 0.63.0 or newer. See
   [labels](reference/http-api.md#label-endpoints).
 - Let a service manager own the local daemon. Set top-level `autostart = false`
   in `config.toml`, and Kata commands, including `kata daemon recover`, wait up

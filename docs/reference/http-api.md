@@ -335,7 +335,8 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
-| `0.62.0` | Added `PATCH /api/v1/projects/{project_id}/issues/{ref}/labels`, which applies `add` and `remove` label lists in one transaction and answers with the issue's resulting `labels`. |
+| `0.63.0` | Added `PATCH /api/v1/projects/{project_id}/issues/{ref}/labels`, which applies `add` and `remove` label lists in one transaction and answers with the issue's resulting `labels`. |
+| `0.62.0` | Federation peers advertise `relay_cross_links_v1` in `X-Kata-Event-Features`. A common root can link issues across projects with a shared relay audience. Relays check access to each referenced project they can resolve before releasing events or checkpoints, and pause for older peers with `409 unsupported_event_features` at crossing links or links with unresolved endpoints. An unresolved endpoint may belong to another project. |
 | `0.60.0` | Enrollment join instructions use the signing hub's external URL and include signing key placeholders. |
 | `0.59.0` | Schedule and deadline civil dates and times accept an explicit `[Zone]` suffix. |
 | `0.58.0` | `GET /api/v1/projects/{project_id}/events` accepts `actor` so callers who may restore a soft-deleted issue can read its history. |
@@ -1088,7 +1089,7 @@ federated event log.
 To change several labels at once, for example moving an issue from
 `ready-for-agent` to `ready-for-human`, send `PATCH
 /api/v1/projects/{project_id}/issues/{ref}/labels` with `add` and `remove`
-lists (API `0.62.0` or newer):
+lists (API `0.63.0` or newer):
 
 ```json
 {"actor": "reviewer", "add": ["ready-for-human"], "remove": ["ready-for-agent"]}
