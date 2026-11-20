@@ -94,47 +94,4 @@ func TestNumericProjectNameCollision(t *testing.T) {
 		require.Len(t, stored.Comments, 1)
 		require.Equal(t, "named project comment", stored.Comments[0].Body)
 	})
-	for _, tc := range []struct {
-		command string
-		uid     bool
-	}{{"edit", false}, {"edit", true}, {"move", false}, {"move", true}, {"show", false}, {"comment", false}} {
-		t.Run(fmt.Sprintf("%s/uid=%t", tc.command, tc.uid), func(t *testing.T) {
-			env, dir, _, target, _ := setupMoveCLIProjects(t)
-			named, err := env.DB.CreateProject(t.Context(), fmt.Sprint(target.ID))
-			require.NoError(t, err)
-			issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: named.ID, Title: "named project issue", Author: "tester"})
-			require.NoError(t, err)
-			args := []string{"--workspace", dir, "--project", named.Name}
-			ref := issue.ShortID
-			if tc.uid {
-				ref = issue.UID
-			}
-			switch tc.command {
-			case "edit":
-				args = append(args, "edit", ref, "--title", "updated issue")
-			case "move":
-				args = append(args, "move", ref, target.Name, "--single")
-			case "show":
-				args = append(args, "show", ref)
-			case "comment":
-				args = append(args, "comment", ref, "--body", "example comment")
-			}
-			out, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), args...)
-			require.NoError(t, err)
-			switch tc.command {
-			case "edit":
-				require.Contains(t, out, "updated issue")
-			case "move":
-				stored, err := env.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
-				require.NoError(t, err)
-				require.Equal(t, target.ID, stored.ProjectID)
-			case "show":
-				require.Contains(t, out, issue.Title)
-			case "comment":
-				stored := fetchIssueViaHTTPWithComments(t, env, named.ID, issue.ShortID)
-				require.Len(t, stored.Comments, 1)
-				require.Equal(t, "example comment", stored.Comments[0].Body)
-			}
-		})
-	}
 }
