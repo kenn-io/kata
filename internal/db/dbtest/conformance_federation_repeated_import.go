@@ -152,6 +152,35 @@ func repeatedImportLabels(t *testing.T, hub db.Storage, issueID int64) []string 
 // holds: newer copies update the issue, older and identical copies change
 // nothing, and comments merge by UID with their original author and time.
 func checkFederationRepeatedImport(t *testing.T, source db.Storage, backend Backend) error {
+	t.Run("existing cross-project parent survives repeated import", func(t *testing.T) {
+		ctx := t.Context()
+		copySource := backend.Open(t)
+		t.Cleanup(func() { require.NoError(t, copySource.Close()) })
+		h := newRepeatedImportHub(t, copySource, backend)
+		child, err := h.hub.IssueByUID(ctx, h.issueUID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		foreign, err := h.hub.CreateProject(ctx, "foreign-parent")
+		require.NoError(t, err)
+		parent, _, err := h.hub.CreateIssue(ctx, db.CreateIssueParams{ProjectID: foreign.ID, Title: "Hub parent", Author: "other"})
+		require.NoError(t, err)
+		_, _, err = h.hub.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: parent.ID, Type: "parent", Author: "operator"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: child.ID, FromShortID: child.ShortID, FromUID: child.UID, ToShortID: parent.ShortID, ToUID: parent.UID, Actor: "operator"})
+		require.NoError(t, err)
+		origin, enrollment, events := h.repeatedImportCopy(t, h.target, func(issueUID string, payload map[string]any) {
+			if issueUID == h.issueUID {
+				repeatedImportShiftUpdatedAt(t, payload, time.Minute)
+				payload["title"] = "Updated copy"
+				payload["links"] = []any{map[string]any{"type": "parent", "to_issue_uid": h.otherUID, "author": "operator"}}
+			}
+		})
+		_, err = pushRepeatedImportBaseline(t, h.hub, h.target.ID, enrollment, origin, events)
+		require.NoError(t, err)
+		child, err = h.hub.IssueByUID(ctx, h.issueUID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		require.Equal(t, "Updated copy", child.Title)
+		link, err := h.hub.ParentOf(ctx, child.ID)
+		require.NoError(t, err)
+		require.Equal(t, parent.ID, link.ToIssueID)
+	})
 	ctx := t.Context()
 	h := newRepeatedImportHub(t, source, backend)
 	hub := h.hub

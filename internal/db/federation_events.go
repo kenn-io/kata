@@ -376,6 +376,10 @@ func currentParentRemovals(ctx context.Context, tx federationHistoryQuery, order
 	parents := map[string]string{}
 	clocks := map[string]FoldClock{}
 	removed := map[string][]string{}
+	batchUIDs := make(map[string]bool, len(ordered))
+	for _, event := range ordered {
+		batchUIDs[event.UID] = true
+	}
 	parentOf := func(child string) (string, error) {
 		if parent, known := parents[child]; known {
 			return parent, nil
@@ -402,6 +406,10 @@ AND type IN ('issue.created','issue.snapshot','issue.linked','issue.links_change
 				if err := rows.Scan(&event.UID, &event.OriginInstanceUID, &issue, &event.Type, &payload, &event.HLCPhysicalMS, &event.HLCCounter); err != nil {
 					_ = rows.Close()
 					return "", err
+				}
+				// Relay delivery has already stored these events; the loop below replays them.
+				if batchUIDs[event.UID] {
+					continue
 				}
 				event.IssueUID, event.Payload = issue.String, jsontext.Value(payload)
 				assignments, err := directParentAssignments(event)
