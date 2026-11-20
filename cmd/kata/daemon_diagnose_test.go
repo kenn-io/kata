@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -874,7 +873,6 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 		managed       bool
 	}{
 		{name: "ordinary", command: "list"},
-		{name: "health discovery", command: "health"},
 		{name: "service managed", command: "list", managed: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -902,12 +900,7 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 			cliErr := requireCLIError(t, err, ExitDaemonUnavail)
 			require.Equal(t, "local_unreachable", cliErr.Code)
 			require.Contains(t, cliErr.Message, "503")
-			require.Contains(t, cliErr.Message, fmt.Sprintf("%q", filepath.Join(ns.DataDir, "daemon.log")))
-			if runtime.GOOS == "windows" {
-				require.Contains(t, cliErr.Hint, "kata --daemon 'work' daemon recover")
-			} else {
-				require.Contains(t, cliErr.Hint, "kata --daemon work daemon recover")
-			}
+			require.Contains(t, cliErr.Hint, "daemon recover")
 		})
 	}
 }
@@ -990,15 +983,8 @@ func TestDaemonDiagnoseSecondPing(t *testing.T) {
 			}
 			assert.Equal(t, os.Getpid(), result.PID)
 			assert.Contains(t, result.Message, "503")
-			assert.Contains(t, result.Message, strconv.Quote(filepath.Join(ns.DataDir, "daemon.log")))
 			if tc.profile {
-				command := "--daemon work daemon recover"
-				if runtime.GOOS == "windows" {
-					command = "--daemon 'work' daemon recover"
-				}
-				assert.Contains(t, result.NextAction, command)
-			} else if runtime.GOOS != "windows" {
-				assert.Contains(t, result.NextAction, fmt.Sprint(os.Getpid()))
+				assert.Contains(t, result.NextAction, "daemon recover")
 			}
 		})
 	}

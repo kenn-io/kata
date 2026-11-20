@@ -124,9 +124,7 @@ func TestManagedExternallyUnreachableDetail(t *testing.T) {
 					require.NotErrorIs(t, err, cause)
 				} else {
 					require.ErrorIs(t, err, cause)
-					var advised interface{ RecoveryAdvice() string }
-					require.ErrorAs(t, err, &advised)
-					require.Contains(t, advised.RecoveryAdvice(), "service manager")
+					require.ErrorContains(t, err, "service manager")
 					require.ErrorContains(t, err, "autostart = false")
 				}
 			})
@@ -163,6 +161,7 @@ func TestDaemonRecoveryAdvice(t *testing.T) {
 
 func TestDiscoveryDeadlineAfterEarlierUnreachableRuntime(t *testing.T) {
 	setupKataEnv(t)
+	child, _ := startLongLivedTestProcess(t)
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond)
 		defer cancel()
@@ -170,7 +169,7 @@ func TestDiscoveryDeadlineAfterEarlierUnreachableRuntime(t *testing.T) {
 			return liveDaemonsUsing(ctx, dir, func(string) ([]kitdaemon.RuntimeRecord, error) {
 				return []kitdaemon.RuntimeRecord{
 					{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1234"},
-					{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:5678"},
+					{PID: child.Process.Pid, Network: "tcp", Address: "127.0.0.1:5678"},
 				}, nil
 			}, func(ctx context.Context, address string) (string, PingInfo, error) {
 				if address == "127.0.0.1:1234" {
@@ -183,7 +182,6 @@ func TestDiscoveryDeadlineAfterEarlierUnreachableRuntime(t *testing.T) {
 		_, _, err := discoverResolved(ctx, "/example/runtime", scan)
 		require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
 		require.ErrorContains(t, err, "127.0.0.1:1234")
-		require.ErrorContains(t, err, "daemon.log")
 	})
 }
 

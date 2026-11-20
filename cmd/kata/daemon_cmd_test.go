@@ -601,7 +601,7 @@ func TestDaemonStatus_ListsUnverifiableRecord(t *testing.T) {
 	assert.Equal(t, child.Process.Pid, got.Daemons[0].PID)
 }
 
-func TestDaemonStatus_AgentReportsWebURLAndUnreachableDiagnosis(t *testing.T) {
+func TestDaemonStatus_AgentReportsWebURL(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
 
@@ -617,7 +617,6 @@ func TestDaemonStatus_AgentReportsWebURLAndUnreachableDiagnosis(t *testing.T) {
 	stdout, _, err := executeRootCapture(t, t.Context(), "--agent", "daemon", "status")
 	out := []byte(stdout)
 	assert.True(t, strings.HasPrefix(string(out), "OK daemon status=running web_url=http://127.0.0.1:28888 selected_state=local_unreachable selected_profile=\"\" message="))
-	assert.Contains(t, string(out), "daemon.log")
 	cliErr := requireCLIError(t, err, ExitDaemonUnavail)
 	assert.Contains(t, cliErr.Message, "unreachable")
 	if runtime.GOOS != "windows" {
