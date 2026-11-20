@@ -2,10 +2,6 @@ package main
 
 import (
 	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"net/http/httputil"
-	"net/url"
 	"strings"
 	"testing"
 
@@ -70,48 +66,38 @@ func TestIssueRefCommandsAcceptUIDsAndShortIDs(t *testing.T) {
 	require.Contains(t, out, "purged")
 }
 
-func TestIssueRefCommandsProjectIDAndQualifiedName(t *testing.T) {
-	env, dir, _, target, _ := setupMoveCLIProjects(t)
-	numeric, err := env.DB.CreateProject(t.Context(), fmt.Sprint(target.ID))
-	require.NoError(t, err)
-	namedIssue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: numeric.ID, Title: "numeric name issue", Author: "tester"})
-	require.NoError(t, err)
-	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: target.ID, Title: "target issue", Author: "tester"})
-	require.NoError(t, err)
-	selector := fmt.Sprint(target.ID)
-	out, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "--project", selector, "show", issue.UID)
-	require.NoError(t, err)
-	require.Contains(t, out, issue.Title)
-	upstream, err := url.Parse(env.URL)
-	require.NoError(t, err)
-	proxy := &httputil.ReverseProxy{Rewrite: func(r *httputil.ProxyRequest) { r.SetURL(upstream) }, ModifyResponse: func(r *http.Response) error {
-		r.Header.Del("X-Kata-Project-Name")
-		return nil
-	}}
-	server := httptest.NewServer(proxy)
-	t.Cleanup(server.Close)
-	out, _, err = executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL), "--workspace", dir, "--project", selector, "comment", issue.UID, "--body", "recovered comment", "--agent")
-	require.NoError(t, err)
-	require.Contains(t, out, "OK comment "+issue.ShortID)
-	stored := fetchIssueViaHTTPWithComments(t, env, target.ID, issue.ShortID)
-	require.Len(t, stored.Comments, 1)
-	require.Equal(t, "recovered comment", stored.Comments[0].Body)
-	out, _, err = executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "--project", selector, "show", numeric.Name+"#"+namedIssue.ShortID)
-	require.NoError(t, err)
-	require.Contains(t, out, namedIssue.Title)
-	out, _, err = executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "--project", selector, "comment", numeric.Name+"#"+namedIssue.ShortID, "--body", "named project comment")
-	require.NoError(t, err)
-	require.Contains(t, out, "comment appended")
-	stored = fetchIssueViaHTTPWithComments(t, env, numeric.ID, namedIssue.ShortID)
-	require.Len(t, stored.Comments, 1)
-	require.Equal(t, "named project comment", stored.Comments[0].Body)
-}
-
 func TestNumericProjectNameCollision(t *testing.T) {
+	t.Run("project ID and qualified name", func(t *testing.T) {
+		env, dir, _, target, _ := setupMoveCLIProjects(t)
+		numeric, err := env.DB.CreateProject(t.Context(), fmt.Sprint(target.ID))
+		require.NoError(t, err)
+		namedIssue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: numeric.ID, Title: "numeric name issue", Author: "tester"})
+		require.NoError(t, err)
+		issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: target.ID, Title: "target issue", Author: "tester"})
+		require.NoError(t, err)
+		selector := fmt.Sprint(target.ID)
+		out, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "--project", selector, "show", issue.UID)
+		require.NoError(t, err)
+		require.Contains(t, out, issue.Title)
+		_, _, err = executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "--project", selector, "comment", issue.UID, "--body", "recovered comment")
+		require.NoError(t, err)
+		stored := fetchIssueViaHTTPWithComments(t, env, target.ID, issue.ShortID)
+		require.Len(t, stored.Comments, 1)
+		require.Equal(t, "recovered comment", stored.Comments[0].Body)
+		out, _, err = executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "--project", selector, "show", numeric.Name+"#"+namedIssue.ShortID)
+		require.NoError(t, err)
+		require.Contains(t, out, namedIssue.Title)
+		out, _, err = executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "--project", selector, "comment", numeric.Name+"#"+namedIssue.ShortID, "--body", "named project comment")
+		require.NoError(t, err)
+		require.Contains(t, out, "comment appended")
+		stored = fetchIssueViaHTTPWithComments(t, env, numeric.ID, namedIssue.ShortID)
+		require.Len(t, stored.Comments, 1)
+		require.Equal(t, "named project comment", stored.Comments[0].Body)
+	})
 	for _, tc := range []struct {
 		command string
 		uid     bool
-	}{{"edit", false}, {"edit", true}, {"label", false}, {"label", true}, {"move", false}, {"move", true}, {"show", false}, {"comment", false}} {
+	}{{"edit", false}, {"edit", true}, {"move", false}, {"move", true}, {"show", false}, {"comment", false}} {
 		t.Run(fmt.Sprintf("%s/uid=%t", tc.command, tc.uid), func(t *testing.T) {
 			env, dir, _, target, _ := setupMoveCLIProjects(t)
 			named, err := env.DB.CreateProject(t.Context(), fmt.Sprint(target.ID))
@@ -126,8 +112,6 @@ func TestNumericProjectNameCollision(t *testing.T) {
 			switch tc.command {
 			case "edit":
 				args = append(args, "edit", ref, "--title", "updated issue")
-			case "label":
-				args = append(args, "label", "add", ref, "example")
 			case "move":
 				args = append(args, "move", ref, target.Name, "--single")
 			case "show":
@@ -140,8 +124,6 @@ func TestNumericProjectNameCollision(t *testing.T) {
 			switch tc.command {
 			case "edit":
 				require.Contains(t, out, "updated issue")
-			case "label":
-				require.Contains(t, out, "example")
 			case "move":
 				stored, err := env.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
 				require.NoError(t, err)

@@ -163,36 +163,7 @@ func runMoveBatch(cmd *cobra.Command, args []string, refsFrom string) error {
 			moveBatchOne(a, client, prepared[i], &results[i], actor, subtreeSupported, &halt)
 		}
 	})
-	var commentErrs []error
-	for i := range results {
-		r := &results[i]
-		if r.Result != "moved" || comment == "" {
-			continue
-		}
-		key, e := uid.New()
-		if e != nil {
-			r.Message = "comment not sent: " + e.Error()
-			commentErrs = append(commentErrs, e)
-			continue
-		}
-		e = a.ctx.Err()
-		if e == nil {
-			e = postFollowupCommentWithKey(a.ctx, a.client, a.baseURL, r.targetID, r.UID, actor, comment, handle, key)
-		}
-		if e != nil {
-			detail := strings.Replace(e.Error(), " (rerun the original kata close command with the same --idempotency-key)", "", 1)
-			r.Message = strings.TrimSpace(r.Message + " comment failed: " + detail)
-			r.Hint = fmt.Sprintf("retry with: kata comment %s --project %d --body ... --idempotency-key %s%s", r.UID, r.targetID, key, moveBatchRecoveryFlags())
-			if cmd.Flags().Changed("as") {
-				r.Hint += " --as " + shellQuote(flags.As)
-			}
-			if cmd.Flags().Changed("teammate") {
-				teammate, _ := cmd.Flags().GetString("teammate")
-				r.Hint += " --teammate " + shellQuote(teammate)
-			}
-			commentErrs = append(commentErrs, fmt.Errorf("comment for %s failed: %s; %s", r.UID, detail, r.Hint))
-		}
-	}
+	commentErrs := postMoveBatchComments(cmd, a, results, actor, comment, handle)
 	printErr := printMoveBatch(cmd, results)
 	summary := summarizeMoveBatch(results)
 	var outcome error
@@ -209,14 +180,62 @@ func runMoveBatch(cmd *cobra.Command, args []string, refsFrom string) error {
 	} else if summary.Refused > 0 {
 		outcome = moveBatchRefusalError(printErr)
 	}
-	if len(commentErrs) > 0 {
-		combined := errors.Join(outcome, errors.Join(commentErrs...))
+	if commentErrs != nil {
+		combined := errors.Join(outcome, commentErrs)
 		cli := *cliErrorForErr(combined, true)
 		cli.Code = ""
 		cli.Message = strings.TrimSpace(combined.Error())
 		return errors.Join(&cli, printErr)
 	}
 	return errors.Join(outcome, printErr)
+}
+
+func postMoveBatchComments(cmd *cobra.Command, a daemonAPI, results []moveBatchResult, actor, comment, handle string) error {
+	if comment == "" {
+		return nil
+	}
+	suffix := moveBatchRecoveryFlags()
+	if cmd.Flags().Changed("as") {
+		suffix += " --as " + shellQuote(flags.As)
+	}
+	if cmd.Flags().Changed("teammate") {
+		teammate, _ := cmd.Flags().GetString("teammate")
+		suffix += " --teammate " + shellQuote(teammate)
+	}
+	errs := make([]error, len(results))
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for range moveBatchWorkers {
+		wg.Go(func() {
+			for i := range jobs {
+				r := &results[i]
+				key, err := uid.New()
+				if err != nil {
+					r.Message = "comment not sent: " + err.Error()
+					errs[i] = err
+					continue
+				}
+				err = a.ctx.Err()
+				if err == nil {
+					err = postFollowupCommentWithKey(a.ctx, a.client, a.baseURL, r.targetID, r.UID, actor, comment, handle, key)
+				}
+				if err != nil {
+					detail := strings.Replace(err.Error(), " (rerun the original kata close command with the same --idempotency-key)", "", 1)
+					r.Message = strings.TrimSpace(r.Message + " comment failed: " + detail)
+					r.Hint = fmt.Sprintf("retry with: kata comment %s --project %d --body ... --idempotency-key %s%s", r.UID, r.targetID, key, suffix)
+					errs[i] = fmt.Errorf("comment for %s failed: %s; %s", r.UID, detail, r.Hint)
+				}
+			}
+		})
+	}
+	for i := range results {
+		if results[i].Result == "moved" {
+			jobs <- i
+		}
+	}
+	close(jobs)
+	wg.Wait()
+	return errors.Join(errs...)
 }
 
 // validateMoveBatchDefault checks the optional positional target of a refs
@@ -355,7 +374,7 @@ func moveBatchOne(a daemonAPI, client *kataclient.Client, prepared *moveBatchPre
 	unknown := func() {
 		halt.Store(true)
 		result.Result = "unknown"
-		result.Hint = fmt.Sprintf("outcome unconfirmed; run kata show %s --project %d --json%s to inspect the target. Check move history before retrying if the issue may have moved more than once.", result.UID, result.targetID, moveBatchRecoveryFlags())
+		result.Hint = moveBatchUnknownHint(result.UID, result.targetID, issue.ProjectID)
 	}
 	if response == nil {
 		transportErr, marked := errors.AsType[*daemonTransportError](callErr)
@@ -389,6 +408,11 @@ func moveBatchOne(a daemonAPI, client *kataclient.Client, prepared *moveBatchPre
 
 func moveBatchComplete(moved moveResponseWire, targetID int64, uid string) bool {
 	return moved.Changed && moved.EventID != 0 && moved.Issue.UID == uid && moved.Issue.ProjectID == targetID && moved.Issue.ShortID != "" && moved.NewShortID == moved.Issue.ShortID
+}
+
+func moveBatchUnknownHint(uid string, targetID, sourceID int64) string {
+	flags := moveBatchRecoveryFlags()
+	return fmt.Sprintf("outcome unconfirmed; inspect the target with kata show %s --project %d --json%s and the source with kata show %s --project %d --json%s. Check move history before retrying if the issue may have moved more than once.", uid, targetID, flags, uid, sourceID, flags)
 }
 
 func moveBatchRecoveryFlags() string {
