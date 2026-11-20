@@ -252,6 +252,13 @@ func TestDirectPushWithProjectScopedActors(t *testing.T) {
 				events, err := hub.store.EventsByUIDs(ctx, projects[0].ID, []string{linked.UID})
 				require.NoError(t, err)
 				require.Len(t, events, 1)
+				title := "Updated after direct link"
+				_, err = spoke.DB.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: directChild.ID, Actor: "worker", Title: &title})
+				require.NoError(t, err)
+				require.NoError(t, syncProject(0))
+				updated, err := hub.store.IssueByUID(ctx, directChild.UID, db.IncludeDeletedNo)
+				require.NoError(t, err)
+				require.Equal(t, title, updated.Title)
 			})
 
 			t.Run("legacy-parent-replacement", func(t *testing.T) {

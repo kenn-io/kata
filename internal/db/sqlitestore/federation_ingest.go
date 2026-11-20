@@ -1623,9 +1623,11 @@ func (d *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.
 			return err
 		}
 		explicitRefs := refs
-		for _, previous := range parentRemovals[event.EventUID] {
-			refs = append(refs, previous)
-			delete(peers, previous)
+		if p.AuthorizeReference != nil {
+			for _, previous := range parentRemovals[event.EventUID] {
+				refs = append(refs, previous)
+				delete(peers, previous)
+			}
 		}
 		refs = append([]string{primary}, refs...)
 		for _, issueUID := range refs {
