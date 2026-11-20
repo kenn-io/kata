@@ -257,9 +257,9 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 	t.Run("stale-unlink-before-reassigned-parent", func(t *testing.T) {
 		staleChild, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: route.ID, Title: "Stale child", Author: "worker", Links: []db.InitialLink{{Type: "parent", ToNumber: peer.ID}}})
 		require.NoError(t, err)
-		clear, err := json.Marshal(map[string]string{"parent_removed_uid": peer.UID})
+		clearParent, err := json.Marshal(map[string]string{"parent_removed_uid": peer.UID})
 		require.NoError(t, err)
-		detached := newRemoteEvent(t, route, &staleChild.UID, "issue.links_changed", "worker", origin, at+15, clear)
+		detached := newRemoteEvent(t, route, &staleChild.UID, "issue.links_changed", "worker", origin, at+15, clearParent)
 		reassigned := newRemoteEvent(t, route, &staleChild.UID, "issue.links_changed", "worker", origin, at+20, payload)
 		_, err = store.InsertRemoteEvents(ctx, route.ID, []db.RemoteEvent{detached, reassigned})
 		require.NoError(t, err)
