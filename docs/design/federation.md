@@ -302,14 +302,26 @@ a move out of it, or until the wait ends, and then answers with the page as it
 would without a wait. Successful event-poll responses advertise the longest wait
 the hub accepts in `X-Kata-Federation-Poll-Wait-Max`, 45 seconds. A spoke holds
 polls only at hubs that send that header and keeps its interval pull
-otherwise. Before answering a held poll, the hub runs the request's full
-federation authorization again without the per-request cache, so revocation
-ends a held poll at its next wake or at its expiry. The hub bounds held polls
-in total, per credential, and for signed requests holding a control slot; past
-a bound it answers at once. Hub processes sharing a PostgreSQL database relay
-commit wakeups to each other with `LISTEN/NOTIFY` on a dedicated connection and
-wake every held poll after the listener reconnects, because notifications sent
-while it was disconnected are lost.
+otherwise. The wait counts from when the hub accepts the request, so a slow
+first read shortens it. Before each read a held poll makes after waiting, the
+hub runs the request's full federation authorization again without the
+per-request cache. For a signed request this also confirms that the signing
+key has not passed its `not_after` and still holds the secret the request was
+verified with. Every event-poll read, held or not, is followed by one more
+authorization check, and the hub releases the page only if it still passes.
+Revocation therefore ends a held poll at its next wake or at its expiry. When
+the wait ends without a wake, the hub reads once more, so events whose wakeup
+was lost still arrive. The hub bounds held polls in total, per credential, and
+for signed requests holding a control slot; past a bound it answers at once.
+
+Hub processes sharing a PostgreSQL database and schema relay commit wakeups to
+each other with `LISTEN/NOTIFY` on a dedicated connection. The channel name
+and an AES-GCM payload key come from HKDF-SHA256 over the installation's
+`meta.instance_uid` and the schema name. A database role without access to the
+kata schema therefore cannot find the channel, read which project committed,
+or forge a wake. Each notification carries a sender ID and counter, and
+listeners drop replayed ones. A hub wakes every held poll after its listener
+reconnects, because notifications sent while it was disconnected are lost.
 
 SQLite direct spokes prepare pulled issue histories and projection differences
 before taking the writer lock, then update only the touched issues and changed
