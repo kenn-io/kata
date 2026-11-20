@@ -423,6 +423,19 @@ func syncDirectSpoke(
 			}()
 		}
 	}
+	if hubHoldsPull(ctx, binding) {
+		interrupted, err := federationPullInterrupted(ctx, store, binding.ProjectID)
+		if err != nil {
+			return err
+		}
+		if !interrupted {
+			// A poll at this cursor is out at the hub, which answers it as
+			// soon as anything new is visible, and that answer wakes the
+			// runner. An ordinary poll now would return an empty page. The
+			// watcher records the pull when the hub answers.
+			return nil
+		}
+	}
 	resumePull, pullStartedAt, err := startFederationPull(ctx, store, binding.ProjectID)
 	if err != nil {
 		return err
@@ -437,12 +450,6 @@ func syncDirectSpoke(
 			pullErr = errors.Join(pushErr, pullErr)
 		}
 		return recordFederationSyncErrorAt(ctx, store, binding.ProjectID, pullErr, at)
-	}
-	if !resumePull && hubHoldsPull(ctx, binding) {
-		// A poll at this cursor is out at the hub, which answers it as soon as
-		// anything new is visible, and that answer wakes the runner. An
-		// ordinary poll now would return an empty page.
-		return store.RecordFederationSyncPullSuccess(ctx, binding.ProjectID, pullCompletedAt(pullStartedAt))
 	}
 	body, err := client.PollProjectEvents(ctx, hubProjectID, binding.PullCursorEventID, federationPollLimit)
 	if err != nil {
@@ -688,8 +695,7 @@ func startFederationPull(ctx context.Context, store db.Storage, projectID int64)
 	if err != nil && !errors.Is(err, db.ErrNotFound) {
 		return false, time.Time{}, err
 	}
-	resumePull := previousPull.LastPullStartedAt != nil &&
-		(previousPull.LastPullSuccessAt == nil || previousPull.LastPullStartedAt.After(*previousPull.LastPullSuccessAt))
+	resumePull := pullInterrupted(previousPull)
 	startedAt := time.Now().UTC().Truncate(time.Millisecond)
 	for _, previous := range []*time.Time{previousPull.LastPullStartedAt, previousPull.LastPullSuccessAt} {
 		if previous != nil && !startedAt.After(*previous) {
@@ -700,6 +706,24 @@ func startFederationPull(ctx context.Context, store db.Storage, projectID int64)
 		return false, time.Time{}, err
 	}
 	return resumePull, startedAt, nil
+}
+
+// federationPullInterrupted reports whether the binding's last pull started
+// and never completed.
+func federationPullInterrupted(ctx context.Context, store db.Storage, projectID int64) (bool, error) {
+	status, err := store.FederationSyncStatusByProject(ctx, projectID)
+	if errors.Is(err, db.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return pullInterrupted(status), nil
+}
+
+func pullInterrupted(status db.FederationSyncStatus) bool {
+	return status.LastPullStartedAt != nil &&
+		(status.LastPullSuccessAt == nil || status.LastPullStartedAt.After(*status.LastPullSuccessAt))
 }
 
 func validateFederationRunnerLease(ctx context.Context, validate func(context.Context) error) error {
