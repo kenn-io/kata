@@ -67,7 +67,6 @@ type BaseURLKey struct{}
 // ConfiguredRemote instead of inferring locality from the endpoint address:
 // a configured remote may be reached through a loopback SSH tunnel.
 type RunningDaemon struct {
-	record           *kitdaemon.RuntimeRecord
 	BaseURL          string
 	Address          string
 	Network          string
@@ -81,9 +80,6 @@ const (
 	skipDaemonVersionEnvVar = "KATA_SKIP_DAEMON_VERSION_CHECK"
 	daemonStartupWait       = 30 * time.Second
 )
-
-// ErrSQLiteMigrationActive means an active SQLite migration must finish first.
-var ErrSQLiteMigrationActive = errors.New("a SQLite migration is in progress")
 
 // ErrDaemonManagedExternally means the home's supervisor owns implicit startup.
 var ErrDaemonManagedExternally = errors.New("kata daemon is not ready; it is managed externally (autostart = false)")
@@ -233,6 +229,7 @@ func waitForSupervisedDaemon(
 	ctx context.Context, configPath string, migrating func(context.Context) bool,
 	scan func(context.Context) (ensureDiscovery, error),
 ) (RunningDaemon, error) {
+	caller := ctx
 	ctx, cancel := context.WithTimeout(ctx, daemonStartupWait)
 	defer cancel()
 	var running RunningDaemon
@@ -261,18 +258,44 @@ func waitForSupervisedDaemon(
 	if !errors.Is(err, ErrLocalDaemonUnreachable) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
 		return RunningDaemon{}, err
 	}
-	message := fmt.Errorf("%w; did not become ready (limit %s or the caller's deadline); start or restart it with your service manager (%s)", ErrDaemonManagedExternally, daemonStartupWait, configPath)
-	if migrating(ctx) {
+	message := fmt.Errorf("%w; did not become ready (limit %s or the caller's deadline) (%s)", ErrDaemonManagedExternally, daemonStartupWait, configPath)
+	migrationActive := migrating(ctx)
+	advice := ""
+	if migrationActive {
 		message = fmt.Errorf("%w; a SQLite migration is in progress; retry when it finishes and do not interrupt the daemon (%s)", ErrDaemonManagedExternally, configPath)
+	} else if !errors.Is(caller.Err(), context.Canceled) {
+		advice = "start or restart it with your service manager"
 	}
 	if unreachable != nil {
-		message = fmt.Errorf("%w: %w", message, unreachable)
+		if e, ok := errors.AsType[*LocalDaemonUnreachableError](unreachable); ok {
+			if advice != "" {
+				e.ManagedExternally = true
+				advice = e.RecoveryAdvice()
+			}
+			message = &supervisedWaitError{message: message.Error() + ": " + e.Summary(), cause: errors.Join(message, unreachable)}
+		} else {
+			message = fmt.Errorf("%w: %w", message, unreachable)
+		}
 	}
 	if ctx.Err() != nil {
-		return RunningDaemon{}, fmt.Errorf("%w: %w", message, ctx.Err())
+		if strings.Contains(message.Error(), ctx.Err().Error()) {
+			message = &supervisedWaitError{message: message.Error(), cause: errors.Join(message, ctx.Err())}
+		} else {
+			message = fmt.Errorf("%w: %w", message, ctx.Err())
+		}
 	}
-	return RunningDaemon{}, message
+	return RunningDaemon{}, &supervisedWaitError{message: message.Error(), cause: message, advice: advice}
 }
+
+type supervisedWaitError struct {
+	message string
+	cause   error
+	advice  string
+}
+
+func (e *supervisedWaitError) Error() string          { return e.message }
+func (e *supervisedWaitError) Unwrap() error          { return e.cause }
+func (e *supervisedWaitError) RecoveryAdvice() string { return e.advice }
 
 func canRestartLocalDaemon(record kitdaemon.RuntimeRecord) bool {
 	return record.Metadata[daemonruntime.RuntimeRestartExecutableKey] == "1" && daemonruntime.RuntimeProcessAlive(record)
@@ -437,7 +460,6 @@ func discoverForEnsureUsing(ctx context.Context, dataDir string, scan liveDaemon
 
 func runningDaemonForLive(candidate liveDaemon) RunningDaemon {
 	running := localRunningDaemon(candidate.BaseURL, candidate.Record.Endpoint().ConfigAddress())
-	running.record = &candidate.Record
 	source := candidate.Record.Metadata["config_auth_source"]
 	running.PersistedAuth = source == "generated_file" || source == "persisted_file"
 	return running

@@ -176,10 +176,8 @@ func currentHomeStorageIsAbsent(dsn string, openErr error) bool {
 func diagnoseDaemonSelection(
 	ctx context.Context, expectedProject string, selection client.DaemonSelection,
 ) (daemonDiagnosis, client.DaemonSelection, error) {
-	callerCtx := ctx
 	ctx, cancel := context.WithTimeout(ctx, envHTTPTimeout(defaultHTTPTimeout))
 	defer cancel()
-	ctx = client.WithCallerContext(ctx, callerCtx)
 	var err error
 	result := selectedDaemonDiagnosis(selection, expectedProject)
 	result.Project = strings.TrimSpace(flags.Project)
@@ -344,7 +342,6 @@ func probeDaemonSelection(
 		resolved, found, err = client.DiscoverResolved(ctx, ns.DataDir)
 		if found && selection.Resolved.Name != "" {
 			resolved = selection.Resolved.WithRunning(resolved.Running())
-			resolved.RuntimeDir = ns.DataDir
 		}
 	}
 	if err != nil {
@@ -387,8 +384,6 @@ func probeDaemonSelection(
 		result.State = "local_unreachable"
 		if result.Kind == "remote" {
 			result.State = unavailableRemoteState(result.Endpoint)
-		} else {
-			result = diagnosisUnreachable(result, resolved.Unreachable(ctx, err))
 		}
 		return withDiagnosisAction(result), selection, nil
 	}
@@ -396,8 +391,6 @@ func probeDaemonSelection(
 		result.State = "local_unreachable"
 		if result.Kind == "remote" {
 			result.State = unavailableRemoteState(result.Endpoint)
-		} else {
-			result = diagnosisUnreachable(result, resolved.Unreachable(ctx, errors.New("ping returned an unhealthy response")))
 		}
 		return withDiagnosisAction(result), selection, nil
 	}

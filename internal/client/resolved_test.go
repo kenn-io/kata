@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -375,7 +374,7 @@ func TestResolvedDaemonRunningPreservesEndpointMetadata(t *testing.T) {
 				BaseURL: "http://127.0.0.1:27123",
 				Record:  kitdaemon.RuntimeRecord{Address: "127.0.0.1:27123"},
 			}),
-			want: RunningDaemon{BaseURL: "http://127.0.0.1:27123", Address: "127.0.0.1:27123", Network: "tcp", Scheme: "http", record: &kitdaemon.RuntimeRecord{Address: "127.0.0.1:27123"}},
+			want: RunningDaemon{BaseURL: "http://127.0.0.1:27123", Address: "127.0.0.1:27123", Network: "tcp", Scheme: "http"},
 		},
 		{
 			name: "local unix",
@@ -495,12 +494,7 @@ local = true
 	resolved, ok, err := DiscoverSelected(t.Context(), DiscoverRequest{Name: "local"})
 	require.NoError(t, err)
 	assert.True(t, ok)
-	ns, err := daemonruntime.NewNamespace()
-	require.NoError(t, err)
-	records, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).List()
-	require.NoError(t, err)
-	require.Len(t, records, 1)
-	assert.Equal(t, RunningDaemon{BaseURL: baseURL, Address: address, Network: "tcp", Scheme: "http", record: &records[0]}, resolved.Running())
+	assert.Equal(t, localRunningDaemon(baseURL, address), resolved.Running())
 }
 
 func TestDiscoverSelectedProbesNamedRemoteOnRequest(t *testing.T) {
@@ -609,8 +603,4 @@ func writeNeutralWorkspaceMarker(t *testing.T, workspace string) {
 	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.toml"), []byte(
 		"version = 1\n\n[project]\nidentity = \"example.test/spoke-project\"\nname = \"spoke-project\"\n",
 	), 0o600))
-}
-
-func TestResolvedDaemonUnreachableRequiresSelectedRuntime(t *testing.T) {
-	require.Nil(t, (ResolvedDaemon{}).Unreachable(t.Context(), errors.New("failed")))
 }

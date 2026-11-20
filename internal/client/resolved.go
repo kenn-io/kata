@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"go.kenn.io/kata/internal/config"
-	kitdaemon "go.kenn.io/kit/daemon"
 )
 
 // DaemonSource names the input that selected a daemon. The source is carried
@@ -50,7 +49,6 @@ func (s DaemonSource) String() string {
 // for that source. Client construction consumes this value without resolving
 // those inputs again.
 type ResolvedDaemon struct {
-	record              *kitdaemon.RuntimeRecord
 	SourcePath          string
 	RuntimeDir          string
 	LocalProfile        *LocalProfileIdentity
@@ -103,29 +101,7 @@ func (d ResolvedDaemon) Running() RunningDaemon {
 		Scheme:           d.Scheme,
 		ConfiguredRemote: d.ConfiguredRemote(),
 		PersistedAuth:    d.persistedAuth,
-		record:           d.record,
 	}
-}
-
-// Unreachable retains the runtime selected by discovery.
-func (d ResolvedDaemon) Unreachable(ctx context.Context, cause error) error {
-	if d.record == nil {
-		return nil
-	}
-	dir := d.RuntimeDir
-	if d.LocalProfile != nil {
-		dir = d.LocalProfile.DataDir
-	}
-	return annotateUnreachable(newUnreachable(ctx, dir, *d.record, cause), d)
-}
-
-func annotateUnreachable(err error, d ResolvedDaemon) error {
-	if e, ok := errors.AsType[*LocalDaemonUnreachableError](err); ok && d.profileConfig != nil {
-		e.Profile = d.Name
-		e.ProfileAutostart = d.profileConfig.Config.AutostartEnabled()
-		e.ManagedExternally = !e.ProfileAutostart
-	}
-	return err
 }
 
 // WithRunning replaces only the selected runtime endpoint metadata. It keeps
@@ -152,7 +128,6 @@ func (d ResolvedDaemon) WithRunning(running RunningDaemon) ResolvedDaemon {
 
 func resolvedForRunning(source DaemonSource, name string, running RunningDaemon) ResolvedDaemon {
 	resolved := ResolvedDaemon{
-		record:        running.record,
 		Source:        source,
 		Name:          name,
 		BaseURL:       running.BaseURL,

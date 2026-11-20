@@ -23,6 +23,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
+	"go.kenn.io/kit/agenthook"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
@@ -70,14 +71,6 @@ type PingInfo struct {
 // recorded endpoint could not be reached.
 var ErrLocalDaemonUnreachable = errors.New("local daemon is unreachable")
 
-type callerContextKey struct{}
-
-// WithCallerContext keeps ctx's deadline for bounded work while using
-// callerCtx to distinguish an operation timeout from caller cancellation.
-func WithCallerContext(ctx, callerCtx context.Context) context.Context {
-	return context.WithValue(ctx, callerContextKey{}, callerCtx)
-}
-
 // LocalDaemonUnreachableError retains the failed process and its evidence paths.
 type LocalDaemonUnreachableError struct {
 	PID               int
@@ -89,8 +82,6 @@ type LocalDaemonUnreachableError struct {
 	Profile           string
 	ProfileAutostart  bool
 	autoStarted       bool
-	callerStopped     bool
-	migrationActive   bool
 	cause             error
 }
 
@@ -106,14 +97,11 @@ func (e *LocalDaemonUnreachableError) Summary() string {
 // RecoveryAdvice describes actions appropriate for the selected process.
 func (e *LocalDaemonUnreachableError) RecoveryAdvice() string {
 	message := ""
-	if e.callerStopped && !e.migrationActive {
+	if errors.Is(e.cause, context.Canceled) {
 		return message
 	}
 	if e.WebOrigin != "" {
 		message = "Try to save goroutine stacks from " + e.WebOrigin + "/debug/pprof/goroutine?debug=2 without a token. If authentication is required, send the token in an Authorization: Bearer header only to an independently verified endpoint, such as the owner-only Unix socket. "
-	}
-	if e.migrationActive {
-		return message + "Wait for the migration to finish, then retry; do not interrupt the daemon"
 	}
 	if e.ManagedExternally {
 		if e.VerifiedProcess && goruntime.GOOS != "windows" {
@@ -132,9 +120,13 @@ func (e *LocalDaemonUnreachableError) RecoveryAdvice() string {
 	}
 	switch {
 	case e.Profile != "" && e.ProfileAutostart:
-		return message
+		commands, _ := agenthook.BuildCommand("kata", "--daemon", e.Profile, "daemon", "recover")
+		if goruntime.GOOS == "windows" {
+			return message + ". Then run in PowerShell " + commands.PowerShell
+		}
+		return message + ". Then run " + commands.POSIX
 	case e.autoStarted:
-		return message + ". Then run kata daemon start"
+		return message + ". Then rerun the original command"
 	default:
 		return message + ". Then start it again the way you originally started it (same options and environment)"
 	}
@@ -144,9 +136,9 @@ func (e *LocalDaemonUnreachableError) Unwrap() error {
 	return e.cause
 }
 
-// Is reports whether the probe failed or its selected storage is migrating.
+// Is reports whether the probe failed.
 func (e *LocalDaemonUnreachableError) Is(target error) bool {
-	return target == ErrLocalDaemonUnreachable && !e.callerStopped || target == ErrSQLiteMigrationActive && e.migrationActive
+	return target == ErrLocalDaemonUnreachable
 }
 
 // liveDaemon is one runtime record that answered /api/v1/ping: the record
@@ -197,8 +189,8 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 			address := ep.ConfigAddress()
 			url, info, probeErr := probe(ctx, address)
 			if probeErr != nil {
-				evidence := newUnreachable(ctx, dataDir, r, probeErr)
-				if !yield(liveDaemon{}, evidence) || evidence.callerStopped || ctx.Err() != nil {
+				evidence := newUnreachable(dataDir, r, probeErr)
+				if !yield(liveDaemon{}, evidence) || ctx.Err() != nil {
 					return
 				}
 				continue
@@ -223,15 +215,7 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 	}
 }
 
-func newUnreachable(ctx context.Context, dataDir string, r kitdaemon.RuntimeRecord, cause error) *LocalDaemonUnreachableError {
-	callerCtx := ctx
-	if original, ok := ctx.Value(callerContextKey{}).(context.Context); ok {
-		callerCtx = original
-	}
-	stopped := callerCtx.Err() != nil
-	if stopped {
-		cause = callerCtx.Err()
-	}
+func newUnreachable(dataDir string, r kitdaemon.RuntimeRecord, cause error) *LocalDaemonUnreachableError {
 	enabled, _, err := config.ReadAutostartEnabled()
 	origin := ""
 	if web, err := DiscoverWebRuntime(r); err == nil {
@@ -241,9 +225,7 @@ func newUnreachable(ctx context.Context, dataDir string, r kitdaemon.RuntimeReco
 		PID: r.PID, Address: r.Endpoint().ConfigAddress(), DataDir: dataDir,
 		WebOrigin:         origin,
 		VerifiedProcess:   daemonruntime.RuntimeProcessAlive(r),
-		migrationActive:   sqliteCutoverLockedForRuntimeDSN(r.Metadata["db_path"]),
 		ManagedExternally: err == nil && !enabled,
-		callerStopped:     stopped,
 		autoStarted:       r.Metadata[daemonruntime.RuntimeAutoStartKey] == "1",
 		cause:             cause,
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -198,10 +197,4 @@ func sqliteCutoverLockedForDSN(dsn string) bool {
 	}
 	defer func() { _ = lock.Close() }()
 	return !locked
-}
-
-// Runtime metadata URL-encodes SQLite paths; bare paths remain literal.
-func sqliteCutoverLockedForRuntimeDSN(dsn string) bool {
-	decoded, err := url.PathUnescape(dsn)
-	return strings.HasPrefix(dsn, "sqlite://") && err == nil && sqliteCutoverLockedForDSN(decoded) || !strings.HasPrefix(dsn, "sqlite://") && sqliteCutoverLockedForDSN(dsn)
 }

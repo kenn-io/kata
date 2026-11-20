@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -119,81 +118,4 @@ func TestLocalProfileIdentityProbeDistinguishesAuthenticationFailures(t *testing
 			}
 		})
 	}
-}
-
-func TestLocalProfileUnreachableInstanceKeepsEvidence(t *testing.T) {
-	profile, root := localProfileFixture(t)
-	ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
-	require.NoError(t, err)
-	require.NoError(t, ns.EnsureDirs())
-	entered := make(chan struct{}, 1)
-	waitEntered := func(t *testing.T) {
-		t.Helper()
-		select {
-		case <-entered:
-		case <-time.After(5 * time.Second):
-			t.Fatal("profile identity request did not start")
-		}
-	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/ping" {
-			_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, currentVersionForEnsure(), os.Getpid())
-			return
-		}
-		select {
-		case entered <- struct{}{}:
-		default:
-		}
-		<-r.Context().Done()
-	}))
-	t.Cleanup(server.Close)
-	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
-	require.NoError(t, err)
-	t.Setenv("KATA_HTTP_TIMEOUT", "50ms")
-	selection, err := InspectSelection(t.Context(), root, "")
-	require.NoError(t, err)
-	t.Run("discover", func(t *testing.T) {
-		_, _, err := DiscoverLocalProfileSelection(t.Context(), selection)
-		waitEntered(t)
-		var evidence *LocalDaemonUnreachableError
-		require.ErrorAs(t, err, &evidence)
-		require.Equal(t, "work", evidence.Profile)
-		require.Equal(t, ns.DataDir, evidence.DataDir)
-		require.Equal(t, os.Getpid(), evidence.PID)
-		require.Contains(t, err.Error(), fmt.Sprintf("%q", filepath.Join(ns.DataDir, "daemon.log")))
-	})
-	t.Run("supervised", func(t *testing.T) {
-		require.NoError(t, os.WriteFile(filepath.Join(profile.Home, "config.toml"), []byte("autostart = false\n"), 0600))
-		t.Cleanup(func() { require.NoError(t, os.Remove(filepath.Join(profile.Home, "config.toml"))) })
-		selected, err := InspectSelection(t.Context(), root, "")
-		require.NoError(t, err)
-		_, _, err = DiscoverLocalProfileSelection(t.Context(), selected)
-		waitEntered(t)
-		var evidence *LocalDaemonUnreachableError
-		require.ErrorAs(t, err, &evidence)
-		require.Equal(t, os.Getpid(), evidence.PID)
-		require.Contains(t, err.Error(), fmt.Sprintf("%q", filepath.Join(ns.DataDir, "daemon.log")))
-		require.Contains(t, err.Error(), "service manager")
-		require.NotContains(t, err.Error(), "daemon recover")
-	})
-
-	t.Run("caller cancellation", func(t *testing.T) {
-		t.Setenv("KATA_HTTP_TIMEOUT", "2s")
-		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
-		go func() {
-			select {
-			case <-entered:
-				cancel()
-			case <-ctx.Done():
-			}
-		}()
-		_, _, err := DiscoverLocalProfileSelection(ctx, selection)
-		require.ErrorIs(t, err, context.Canceled)
-		var evidence *LocalDaemonUnreachableError
-		require.ErrorAs(t, err, &evidence)
-		require.Equal(t, os.Getpid(), evidence.PID)
-		require.Equal(t, ns.DataDir, evidence.DataDir)
-		require.Contains(t, err.Error(), fmt.Sprintf("%q", filepath.Join(ns.DataDir, "daemon.log")))
-	})
 }

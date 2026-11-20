@@ -98,7 +98,11 @@ func discoverLocalProfileWithVerifier(
 	var unreachable error
 	for candidate, err := range scan(ctx, resolved.LocalProfile.DataDir) {
 		if err != nil {
-			err = annotateUnreachable(err, selection.Resolved)
+			if e, ok := errors.AsType[*LocalDaemonUnreachableError](err); ok {
+				e.Profile = resolved.Name
+				e.ProfileAutostart = selection.Profile.Config.AutostartEnabled()
+				e.ManagedExternally = !e.ProfileAutostart
+			}
 			if errors.Is(err, ErrLocalDaemonUnreachable) {
 				unreachable = err
 				continue
@@ -129,9 +133,6 @@ func verifyLocalProfileInstance(ctx context.Context, resolved ResolvedDaemon) er
 	}
 	resp, err := apiClient.InstanceWithResponse(ctx)
 	if resp == nil {
-		if evidence := resolved.Unreachable(ctx, err); evidence != nil {
-			return evidence
-		}
 		return fmt.Errorf("local profile instance is unavailable: %w", ErrLocalDaemonUnreachable)
 	}
 	if resp.StatusCode != 200 {
@@ -238,7 +239,12 @@ func EnsureLocalProfileSelection(ctx context.Context, selection DaemonSelection)
 		return selection.Resolved, errors.New("selection is not a registered local profile")
 	}
 	resolved, err := ensureLocalProfile(ctx, selection)
-	return resolved, annotateUnreachable(err, selection.Resolved)
+	if e, ok := errors.AsType[*LocalDaemonUnreachableError](err); ok {
+		e.Profile = resolved.Name
+		e.ProfileAutostart = selection.Profile.Config.AutostartEnabled()
+		e.ManagedExternally = !e.ProfileAutostart
+	}
+	return resolved, err
 }
 
 // EnsureSameLocalProfile refreshes the original profile snapshot without reading
@@ -263,7 +269,7 @@ func waitForSupervisedProfile(ctx context.Context, resolved ResolvedDaemon, prof
 		}
 		found, err := discoverForEnsure(ctx, dir)
 		if err != nil || found.Outcome == daemonScanNone {
-			return found, annotateUnreachable(err, resolved)
+			return found, err
 		}
 		resolved = resolved.WithRunning(runningDaemonForLive(found.Daemon))
 		resolved.UnixSocket = found.Daemon.UnixSocket

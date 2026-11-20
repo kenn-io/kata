@@ -775,14 +775,6 @@ func TestRuntimeRecordPassesThroughSQLiteSchemeDSN(t *testing.T) {
 	assert.Equal(t, "sqlite:///var/lib/kata/kata.db", got)
 }
 
-func TestRuntimeRecordDistinguishesSQLitePaths(t *testing.T) {
-	space := redactRuntimeDSN("sqlite:///example/kata database.db")
-	percent := redactRuntimeDSN("sqlite:///example/kata%20database.db")
-	assert.Equal(t, "sqlite:///example/kata%20database.db", space)
-	assert.Equal(t, "sqlite:///example/kata%2520database.db", percent)
-	assert.NotContains(t, redactRuntimeDSN("sqlite://user:secret@host/kata%20database.db"), "secret")
-}
-
 func TestDaemonStart_RuntimeRecordSerializesUnixAddressAsURL(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("default daemon endpoint is TCP on Windows")

@@ -57,14 +57,17 @@ func TestManagedExternallyDoesNotAutostart(t *testing.T) {
 
 func TestManagedExternallyUnreachableDetail(t *testing.T) {
 	t.Run("caller cancels while probing", func(t *testing.T) {
+		setupKataEnv(t)
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		_, err := waitForSupervisedDaemon(ctx, "/example/config.toml", func(context.Context) bool { return false }, func(ctx context.Context) (ensureDiscovery, error) {
 			cancel()
-			return ensureDiscovery{}, newUnreachable(ctx, "/example/runtime", kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1"}, ctx.Err())
+			return ensureDiscovery{}, newUnreachable("/example/runtime", kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1"}, ctx.Err())
 		})
 		require.ErrorIs(t, err, context.Canceled)
 		require.ErrorContains(t, err, fmt.Sprintf("%q", filepath.Join("/example/runtime", "daemon.log")))
+		require.Equal(t, 1, strings.Count(err.Error(), "context canceled"))
+		require.NotContains(t, err.Error(), "restart")
 	})
 	for _, clear := range []bool{false, true} {
 		t.Run(fmt.Sprintf("clear=%t", clear), func(t *testing.T) {
@@ -86,12 +89,39 @@ func TestManagedExternallyUnreachableDetail(t *testing.T) {
 					require.NotErrorIs(t, err, cause)
 				} else {
 					require.ErrorIs(t, err, cause)
-					require.ErrorContains(t, err, "service manager")
+					var advised interface{ RecoveryAdvice() string }
+					require.ErrorAs(t, err, &advised)
+					require.Contains(t, advised.RecoveryAdvice(), "service manager")
 					require.ErrorContains(t, err, "autostart = false")
 				}
 			})
 		})
 	}
+}
+
+func TestAutoStartedDaemonRecovery(t *testing.T) {
+	err := &LocalDaemonUnreachableError{PID: 123, VerifiedProcess: true, autoStarted: true}
+	require.Contains(t, err.RecoveryAdvice(), "rerun the original command")
+}
+
+func TestNamedProfileUnreachableErrorIncludesRecovery(t *testing.T) {
+	err := &LocalDaemonUnreachableError{PID: 123, VerifiedProcess: true, Profile: "example", ProfileAutostart: true}
+	require.Contains(t, err.Error(), "recover")
+	require.Contains(t, err.Error(), "example")
+}
+
+func TestSupervisedWaitShowsLastProbeAdviceOnce(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		probe := &LocalDaemonUnreachableError{PID: 123, VerifiedProcess: true, ManagedExternally: true, WebOrigin: "http://127.0.0.1:1234", cause: errors.New("probe failed")}
+		_, err := waitForSupervisedDaemon(t.Context(), "/example/config.toml", func(context.Context) bool { return false }, func(context.Context) (ensureDiscovery, error) {
+			return ensureDiscovery{}, probe
+		})
+		require.NotContains(t, err.Error(), "service manager")
+		var advised interface{ RecoveryAdvice() string }
+		require.ErrorAs(t, err, &advised)
+		require.Contains(t, advised.RecoveryAdvice(), "http://127.0.0.1:1234/debug/pprof/goroutine?debug=2")
+		require.Equal(t, 1, strings.Count(advised.RecoveryAdvice(), "service manager"))
+	})
 }
 
 func TestManagedExternallyProfileDoesNotAutostart(t *testing.T) {
