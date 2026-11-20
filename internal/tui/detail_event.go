@@ -243,7 +243,7 @@ func eventChunkLines(e EventLogEntry, width int, isCursor bool, current map[stri
 	head := fmt.Sprintf("[%s] %s %s — %s",
 		e.Type, fmtTime(e.CreatedAt),
 		sanitizeForDisplay(authorname.Display(e.Actor)),
-		sanitizeForDisplay(eventDescription(e)))
+		sanitizeForLine(eventDescription(e)))
 	lines := []string{applyActivityCursor(head, isCursor)}
 	if e.Type == "issue.closed" {
 		lines = append(lines, closeDetailLines(e, width, current)...)
@@ -438,7 +438,7 @@ func joinStringArray(m map[string]any, key string) string {
 	return strings.Join(parts, ", ")
 }
 
-// reasonSuffix renders " (reason)" for closed events that carry one.
+// reasonSuffix renders " (reason)" for closed and deleted events that carry one.
 func reasonSuffix(e EventLogEntry) string {
 	if r := payloadString(e, "reason"); r != "" {
 		return " (" + r + ")"
