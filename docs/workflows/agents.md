@@ -792,8 +792,8 @@ use a targeted `--to ... --re` request instead. Broadcast is an explicit
 coordinator workflow and stays out of the per-session contract.
 
 For federation rollout, upgrade hubs to the comment-link schema before their
-spokes. A schema-31 hub rejects pushes from a schema-32 spoke. Older CLIs ignore
-the new comment fields. Follow the
+spokes. A schema-31 hub rejects pushes from a schema-32 spoke when they contain
+comment replies. Older CLIs ignore the new comment fields. Follow the
 [federation upgrade guide](../operations/federation.md) for the participating
 daemons.
 
