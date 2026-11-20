@@ -288,9 +288,9 @@ func (c *Client) SearchIssues(ctx context.Context, projectID int64, q SearchQuer
 	return answer, nil
 }
 
-// IssueWithLabels reads one issue by ref with its labels and planning dates, the
+// GetIssue reads one issue by ref with its labels and planning dates, the
 // fields a search hit does not carry. It skips the detail view's extra reads.
-func (c *Client) IssueWithLabels(ctx context.Context, projectID int64, ref string) (*Issue, error) {
+func (c *Client) GetIssue(ctx context.Context, projectID int64, ref string) (*Issue, error) {
 	body, err := c.showIssue(ctx, projectID, ref)
 	if err != nil {
 		return nil, err

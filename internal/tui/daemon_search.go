@@ -57,18 +57,12 @@ type hitRead struct {
 	err  error
 }
 
-// loadedUIDs is the set of UIDs the loaded issues hold.
-func loadedUIDs(issues []Issue) map[string]struct{} {
+// missingHitUIDs lists the hits the loaded issues do not hold.
+func missingHitUIDs(hits, issues []Issue) []string {
 	loaded := make(map[string]struct{}, len(issues))
 	for _, iss := range issues {
 		loaded[iss.UID] = struct{}{}
 	}
-	return loaded
-}
-
-// missingHitUIDs lists the hits the loaded issues do not hold.
-func missingHitUIDs(hits, issues []Issue) []string {
-	loaded := loadedUIDs(issues)
 	var uids []string
 	for _, hit := range hits {
 		if _, ok := loaded[hit.UID]; !ok {
@@ -93,7 +87,7 @@ func readHits(ctx context.Context, api listAPI, pid int64, uids []string) []hitR
 		go func() {
 			defer func() { <-sem; wg.Done() }()
 			reads[i].uid = uid
-			iss, err := api.IssueWithLabels(ctx, pid, uid)
+			iss, err := api.GetIssue(ctx, pid, uid)
 			var apiErr *APIError
 			switch {
 			case errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound:
@@ -408,11 +402,11 @@ func (m Model) askDaemonIfStale() (Model, tea.Cmd) {
 	}
 }
 
-// guardAnswer decides whether an answer for req, asked for query in project pid,
+// guardAnswer decides whether an answer for req, asked for query,
 // may change the rows now. A refusal also settles what the ask leaves behind.
-func (m Model) guardAnswer(connGen uint64, req int64, query SearchQuery, pid int64) (Model, bool) {
+func (m Model) guardAnswer(connGen uint64, req int64, query SearchQuery) (Model, bool) {
 	r := m.list.ranked
-	if m.staleConnMsg(connGen) || req == 0 || req != r.req || m.scope.allProjects || m.scope.projectID != pid {
+	if m.staleConnMsg(connGen) || req == 0 || req != r.req {
 		return m, false
 	}
 	if query.Query != strings.TrimSpace(m.list.filter.Search) {
@@ -439,7 +433,7 @@ func (m Model) failAsk(err error) Model {
 }
 
 func (m Model) handleDaemonSearchDone(msg daemonSearchDoneMsg) (Model, tea.Cmd) {
-	m, ok := m.guardAnswer(msg.connGen, msg.req, msg.query, msg.projectID)
+	m, ok := m.guardAnswer(msg.connGen, msg.req, msg.query)
 	if !ok {
 		return m, nil
 	}
@@ -470,7 +464,7 @@ func (m Model) handleDaemonSearchDone(msg daemonSearchDoneMsg) (Model, tea.Cmd) 
 
 // handleDaemonSearchHydrate lands an answer whose missing hits were read.
 func (m Model) handleDaemonSearchHydrate(msg daemonSearchHydrateMsg) (Model, tea.Cmd) {
-	m, ok := m.guardAnswer(msg.connGen, msg.req, msg.query, msg.projectID)
+	m, ok := m.guardAnswer(msg.connGen, msg.req, msg.query)
 	if !ok {
 		return m, nil
 	}

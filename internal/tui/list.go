@@ -20,8 +20,8 @@ type listAPI interface {
 	ListIssues(ctx context.Context, projectID int64, f ListFilter) ([]Issue, error)
 	ListAllIssues(ctx context.Context, f ListFilter) ([]Issue, error)
 	SearchIssues(ctx context.Context, projectID int64, q SearchQuery) (*SearchAnswer, error)
-	// IssueWithLabels reads one issue with its labels and planning dates.
-	IssueWithLabels(ctx context.Context, projectID int64, ref string) (*Issue, error)
+	// GetIssue reads one issue with its labels and planning dates.
+	GetIssue(ctx context.Context, projectID int64, ref string) (*Issue, error)
 	CreateIssue(
 		ctx context.Context, projectID int64, body CreateIssueBody,
 	) (*MutationResp, error)

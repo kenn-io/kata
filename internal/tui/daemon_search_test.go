@@ -28,8 +28,8 @@ func (a searchModelAPI) SearchIssues(ctx context.Context, pid int64, q SearchQue
 	return a.fake.SearchIssues(ctx, pid, q)
 }
 
-func (a searchModelAPI) IssueWithLabels(ctx context.Context, pid int64, ref string) (*Issue, error) {
-	return a.fake.IssueWithLabels(ctx, pid, ref)
+func (a searchModelAPI) GetIssue(ctx context.Context, pid int64, ref string) (*Issue, error) {
+	return a.fake.GetIssue(ctx, pid, ref)
 }
 
 var ctrlT = tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl}
@@ -812,6 +812,28 @@ func TestDaemonSearch_FailedReadDuringRecheckKeepsTheHit(t *testing.T) {
 	m = settleRecheck(m, recheck)
 
 	require.Equal(t, []string{"01TEST-far1", "01TEST-aaa1"}, visibleUIDs(m))
+}
+
+func TestDaemonSearch_AnswerBeforeTheFirstFetchOfASwitchedProjectKeepsHits(t *testing.T) {
+	m, api := daemonSearchFixture(t)
+	injectProjects(&m, mockProject{ID: 5, Name: "spoke-project", Ident: "..."})
+	hit := Issue{ProjectID: 5, UID: "01TEST-spk1", ShortID: "spk1", Title: "in the spoke", Status: "open"}
+	api.searchFn = answerWith("hybrid", hit)
+	m = openBarFromCmd(t, m, '/')
+	m, _ = stepModel(m, ctrlT) // daemon search lasts for the session
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+
+	m, _ = updateModel(m, keyRune('P'))
+	m.projectsCursor = cursorForTestProject(t, m, 5)
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.Equal(t, int64(5), m.scope.projectID)
+	m = openBarFromCmd(t, m, '/')
+	m, cmds := typeText(m, "payments")
+	m = settleSearch(m, cmds...)
+	require.Equal(t, []string{"01TEST-spk1"}, visibleUIDs(m), "the list has not loaded yet, so the hit is not outside it")
+
+	m, _ = stepModel(m, initialFetchMsg{dispatchKey: m.currentCacheKey(), issues: []Issue{hit}})
+	require.Equal(t, []string{"01TEST-spk1"}, visibleUIDs(m))
 }
 
 func TestDaemonSearch_RendersCompletelyAtEverySize(t *testing.T) {

@@ -48,7 +48,7 @@ type fakeListAPI struct {
 	searchFn    func(SearchQuery) (*SearchAnswer, error)
 	searchCalls []SearchQuery
 	searchPIDs  []int64
-	// readFn answers IssueWithLabels by ref; the ref is recorded first.
+	// readFn answers GetIssue by ref; the ref is recorded first.
 	readFn   func(ref string) (*Issue, error)
 	readRefs []string
 	readMu   sync.Mutex
@@ -57,7 +57,7 @@ type fakeListAPI struct {
 	readStarted chan struct{}
 }
 
-func (f *fakeListAPI) IssueWithLabels(ctx context.Context, _ int64, ref string) (*Issue, error) {
+func (f *fakeListAPI) GetIssue(ctx context.Context, _ int64, ref string) (*Issue, error) {
 	f.readMu.Lock()
 	f.readRefs = append(f.readRefs, ref)
 	f.readMu.Unlock()
@@ -71,7 +71,7 @@ func (f *fakeListAPI) IssueWithLabels(ctx context.Context, _ int64, ref string) 
 		}
 	}
 	if f.readFn == nil {
-		return nil, errors.New("unexpected IssueWithLabels " + ref)
+		return nil, errors.New("unexpected GetIssue " + ref)
 	}
 	return f.readFn(ref)
 }
