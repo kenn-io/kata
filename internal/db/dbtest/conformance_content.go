@@ -519,6 +519,16 @@ func checkLabels(t *testing.T, store db.Storage) error {
 	return nil
 }
 
+// waitPastMillisecond returns once the wall clock reads a later millisecond
+// than at. Stores stamp time.Now at millisecond precision with no clock to
+// inject, so a timestamp written afterwards differs from at.
+func waitPastMillisecond(t *testing.T, at time.Time) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		return time.Now().UTC().Truncate(time.Millisecond).After(at)
+	}, time.Second, 100*time.Microsecond)
+}
+
 func checkChangeLabels(t *testing.T, store db.Storage) error {
 	t.Helper()
 	ctx := t.Context()
@@ -559,6 +569,7 @@ func checkChangeLabels(t *testing.T, store db.Storage) error {
 
 	before, err := store.IssueByID(ctx, issueID)
 	require.NoError(t, err)
+	waitPastMillisecond(t, before.UpdatedAt)
 	params := db.ChangeLabelsParams{
 		Add:    []string{"ready-for-human"},
 		Remove: []string{"ready-for-agent"},
@@ -586,9 +597,11 @@ func checkChangeLabels(t *testing.T, store db.Storage) error {
 	touchedAt, err := time.Parse(time.RFC3339Nano, addedAt)
 	require.NoError(t, err)
 	assert.True(t, after.UpdatedAt.Equal(touchedAt), "updated_at %v is the call's timestamp %s", after.UpdatedAt, addedAt)
+	assert.True(t, after.UpdatedAt.After(before.UpdatedAt), "updated_at must move")
 	assert.Equal(t, before.Revision, after.Revision, "label edits do not bump revision")
 
 	eventsAfterSwap := eventCount()
+	waitPastMillisecond(t, after.UpdatedAt)
 	labels, events, err = store.ChangeLabelsAndEvents(ctx, issueID, params)
 	if err != nil {
 		return fmt.Errorf("repeat swap: %w", err)
