@@ -639,9 +639,12 @@ Held polls need a few things from the deployment:
   `KATA_HTTP_TIMEOUT` under 16 seconds turns held polls off.
 
 The hub checks the poll's full authorization again before it answers a held
-poll, so a revoked credential or removed membership stops the poll when it
-wakes or expires. Hubs that share a PostgreSQL database wake each other's held
-polls with `LISTEN/NOTIFY`; a SQLite hub wakes them in process.
+poll, including the signing key of a signed poll, so a revoked credential,
+removed membership, or retired signing key stops the poll when it wakes or
+expires. Hubs that share a PostgreSQL database wake each other's held polls
+with `LISTEN/NOTIFY`; a SQLite hub wakes them in process. A wake names no
+project, so a commit on one hub process wakes every held poll on the others,
+and each poll reads its own project again.
 
 Sync runs in turns. One turn for a project pushes and pulls at most 8 batches
 per stream and direction (1000 deliveries per event or receipt batch, 32
