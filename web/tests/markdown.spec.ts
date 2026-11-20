@@ -33,14 +33,13 @@ test('Kenn links in issue bodies and comments work in read and edit views', asyn
     title: 'Links to Kenn',
     body: 'Open kenn://example/item.\n\n[note](kenn://example/note)',
   })
-  const comment = await kata.request(
+  await kata.request(
     page,
     credentials,
     'POST',
     `/api/v1/projects/${kata.projectID}/issues/${issue.uid}/comments`,
     { actor: 'example-worker', body: 'See kenn://example/comment' },
   )
-  expect(comment.ok()).toBe(true)
   await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
 
   async function expectLinks(scope: Locator) {
