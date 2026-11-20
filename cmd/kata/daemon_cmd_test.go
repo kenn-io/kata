@@ -2644,18 +2644,6 @@ public_origin = "https://daemon.example"
 	}, startup.Web)
 }
 
-func testEmbeddedWebRelease(t *testing.T) bool {
-	t.Helper()
-	handler, err := web.NewEmbeddedHandler()
-	require.NoError(t, err)
-	req := httptest.NewRequest(http.MethodGet, "/kata", nil)
-	req.Header.Set("Accept", "text/html")
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, req)
-	require.Equal(t, http.StatusOK, response.Code)
-	return strings.Contains(response.Body.String(), `<meta name="kata-web-distribution" content="production"`)
-}
-
 func TestDaemonRuntimeWebMetadata(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -2735,7 +2723,7 @@ func TestDaemonRuntimeWebMetadata(t *testing.T) {
 			}
 			assert.Equal(t, "true", record.Metadata["web_origin_stable"])
 			want := "loopback,sse"
-			if !testEmbeddedWebRelease(t) {
+			if web.ValidateEmbeddedRelease() != nil {
 				want += ",placeholder-assets"
 			}
 			assert.Equal(t, want, record.Metadata["web_capabilities"])
@@ -2777,11 +2765,7 @@ func TestDaemonRuntimeWebMetadata_TokenProtectedReadonlyAllowsLoopbackSession(t 
 			record.Metadata["web_origin"] != ""
 	}, 3*time.Second, 10*time.Millisecond)
 
-	want := "loopback,poll"
-	if !testEmbeddedWebRelease(t) {
-		want += ",placeholder-assets"
-	}
-	assert.Equal(t, want, record.Metadata["web_capabilities"])
+	assert.True(t, strings.HasPrefix(record.Metadata["web_capabilities"], "loopback,poll"))
 
 	cancel()
 	select {

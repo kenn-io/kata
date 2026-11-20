@@ -14,13 +14,13 @@ func mockBuildInfo(t *testing.T, moduleVersion, revision, buildTime string, modi
 	t.Cleanup(func() { readBuildInfo = orig })
 
 	settings := []debug.BuildSetting{
-		{Key: "vcs.revision", Value: revision},
+		{Key: settingRevision, Value: revision},
 	}
 	if buildTime != "" {
-		settings = append(settings, debug.BuildSetting{Key: "vcs.time", Value: buildTime})
+		settings = append(settings, debug.BuildSetting{Key: settingBuildTime, Value: buildTime})
 	}
 	if modified {
-		settings = append(settings, debug.BuildSetting{Key: "vcs.modified", Value: "true"})
+		settings = append(settings, debug.BuildSetting{Key: settingModified, Value: "true"})
 	}
 	readBuildInfo = func() (*debug.BuildInfo, bool) {
 		return &debug.BuildInfo{Main: debug.Module{Version: moduleVersion}, Settings: settings}, true

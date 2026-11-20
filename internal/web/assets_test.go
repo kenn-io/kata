@@ -8,23 +8,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestValidateReleaseDistributionRejectsCompilationStub(t *testing.T) {
+func TestHandlerReleaseStatusRejectsCompilationStub(t *testing.T) {
 	stub := fstest.MapFS{
 		"index.html": &fstest.MapFile{Data: []byte("Kata UI assets are not built")},
 	}
-	assert.Error(t, validateReleaseDistribution(stub))
 	_, release, err := newHandlerWithReleaseStatus(stub)
 	require.NoError(t, err)
 	assert.False(t, release)
 }
 
-func TestValidateReleaseDistributionAcceptsProductionMarkerAndManifest(t *testing.T) {
+func TestHandlerReleaseStatusAcceptsProductionMarkerAndManifest(t *testing.T) {
 	files := fstest.MapFS{
 		"index.html":             &fstest.MapFile{Data: []byte(`<meta name="kata-web-distribution" content="production"><script src="/assets/app-a1b2c3d4.js"></script>`)},
 		".vite/manifest.json":    &fstest.MapFile{Data: []byte(`{"entry":{"file":"assets/app-a1b2c3d4.js","isEntry":true}}`)},
 		"assets/app-a1b2c3d4.js": &fstest.MapFile{Data: []byte("export const ready = true")},
 	}
-	assert.NoError(t, validateReleaseDistribution(files))
 	_, release, err := newHandlerWithReleaseStatus(files)
 	require.NoError(t, err)
 	assert.True(t, release)

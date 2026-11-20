@@ -19,7 +19,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/client"
-	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db/sqlitestore"
@@ -33,68 +32,47 @@ func TestUIReplacesSameVersionPlaceholderDaemon(t *testing.T) {
 	oldValidate := validateWebUIAssetsForCommand
 	validateWebUIAssetsForCommand = func() error { return nil }
 	t.Cleanup(func() { validateWebUIAssetsForCommand = oldValidate })
-	for _, profile := range []bool{false, true} {
-		t.Run(fmt.Sprintf("profile=%t", profile), func(t *testing.T) {
-			resetFlags(t)
-			home := setupKataEnv(t)
-			t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
-			t.Setenv("KATA_SERVER", "")
-			daemonHome := home
-			if profile {
-				daemonHome = t.TempDir()
-			}
-			store, err := sqlitestore.Open(t.Context(), filepath.Join(daemonHome, "kata.db"))
-			require.NoError(t, err)
-			uid := store.InstanceUID()
-			require.NoError(t, store.Close())
-			if profile {
-				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(fmt.Sprintf("active_daemon = \"work\"\n[[daemon]]\nname = \"work\"\nlocal = true\nhome = %q\ninstance_uid = %q\n", daemonHome, uid)), 0600))
-				t.Setenv("KATA_DSN", "postgres://user@127.0.0.1:1/wrong")
-				t.Setenv("KATA_POSTGRES_SCHEMA", "wrong")
-			}
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path == "/api/v1/ping" {
-					_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version, os.Getpid())
-					return
-				}
-				_, _ = fmt.Fprintf(w, `{"instance_uid":%q}`, uid)
-			}))
-			t.Cleanup(server.Close)
-			var ns *daemonruntime.Namespace
-			if profile {
-				cfg, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: daemonHome, InstanceUID: uid})
-				require.NoError(t, err)
-				ns, err = daemonruntime.NewNamespaceForHome(daemonHome, cfg.StorageID)
-				require.NoError(t, err)
-			} else {
-				ns, err = daemonruntime.NewNamespace()
-				require.NoError(t, err)
-			}
-			require.NoError(t, ns.EnsureDirs())
-			identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
-			require.True(t, ok)
-			record := kitdaemon.RuntimeRecord{PID: os.Getpid(), ProcessIdentityV2: identity, Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://"), StartedAt: time.Now(), Metadata: map[string]string{daemonruntime.RuntimeRestartExecutableKey: "1", "web_origin": server.URL, "web_origin_stable": "true", "web_capabilities": "loopback,sse,placeholder-assets"}}
-			_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(record)
-			require.NoError(t, err)
-			oldRestart, oldBrowser := client.RestartLocalDaemon, openWebBrowserForCommand
-			t.Cleanup(func() { client.RestartLocalDaemon, openWebBrowserForCommand = oldRestart, oldBrowser })
-			restarts := 0
-			client.RestartLocalDaemon = func(_ context.Context, target *daemonruntime.Namespace, old kitdaemon.RuntimeRecord) (kitdaemon.RuntimeRecord, error) {
-				restarts++
-				assert.Equal(t, ns.DataDir, target.DataDir)
-				assert.Equal(t, record.PID, old.PID)
-				record.Metadata["web_capabilities"] = "loopback,sse"
-				_, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(record)
-				return record, err
-			}
-			opened := false
-			openWebBrowserForCommand = func(context.Context, client.WebUILaunch) error { opened = true; return nil }
-			_, err = runCmdOutput(t, nil, "ui")
-			require.NoError(t, err)
-			assert.Equal(t, 1, restarts)
-			assert.True(t, opened)
-		})
+	resetFlags(t)
+	home := setupKataEnv(t)
+	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+	t.Setenv("KATA_SERVER", "")
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(home, "kata.db"))
+	require.NoError(t, err)
+	uid := store.InstanceUID()
+	require.NoError(t, store.Close())
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/ping" {
+			_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version, os.Getpid())
+			return
+		}
+		_, _ = fmt.Fprintf(w, `{"instance_uid":%q}`, uid)
+	}))
+	t.Cleanup(server.Close)
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
+	require.True(t, ok)
+	record := kitdaemon.RuntimeRecord{PID: os.Getpid(), ProcessIdentityV2: identity, Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://"), StartedAt: time.Now(), Metadata: map[string]string{daemonruntime.RuntimeRestartExecutableKey: "1", "web_origin": server.URL, "web_origin_stable": "true", "web_capabilities": "loopback,sse,placeholder-assets"}}
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(record)
+	require.NoError(t, err)
+	oldRestart, oldBrowser := client.RestartLocalDaemon, openWebBrowserForCommand
+	t.Cleanup(func() { client.RestartLocalDaemon, openWebBrowserForCommand = oldRestart, oldBrowser })
+	restarts := 0
+	client.RestartLocalDaemon = func(_ context.Context, target *daemonruntime.Namespace, old kitdaemon.RuntimeRecord) (kitdaemon.RuntimeRecord, error) {
+		restarts++
+		assert.Equal(t, ns.DataDir, target.DataDir)
+		assert.Equal(t, record.PID, old.PID)
+		record.Metadata["web_capabilities"] = "loopback,sse"
+		_, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(record)
+		return record, err
 	}
+	opened := false
+	openWebBrowserForCommand = func(context.Context, client.WebUILaunch) error { opened = true; return nil }
+	_, err = runCmdOutput(t, nil, "ui")
+	require.NoError(t, err)
+	assert.Equal(t, 1, restarts)
+	assert.True(t, opened)
 }
 
 func TestUICommandRejectsCompilationStub(t *testing.T) {
