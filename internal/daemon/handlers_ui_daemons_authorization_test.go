@@ -579,6 +579,42 @@ func TestWebDaemonGatewayForwardsNonBypassCloseBodiesUnchanged(t *testing.T) {
 	assert.Equal(t, bodies, forwardedBodies)
 }
 
+func TestWebDaemonGatewayForwardsLabelSwapAndRefusesNeighbouringRoutes(t *testing.T) {
+	var forwarded []string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/instance" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"web_ui_contract_version": api.UISnapshotContractVersion,
+				"web_ui_capabilities": api.UICapabilities{
+					Writable: true, Updates: "poll", ActorPolicy: "request",
+				},
+			})
+			return
+		}
+		forwarded = append(forwarded, r.Method+" "+r.URL.Path)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(upstream.Close)
+
+	handler, manager := newAuthorizedWebDaemonGateway(t, false, true, config.CatalogDaemonConfig{
+		Name: "example-remote", URL: upstream.URL, Token: "target-token", AllowInsecure: true,
+	})
+	issued, err := manager.IssueSession(Principal{Kind: PrincipalWebLocal}, "/kata")
+	require.NoError(t, err)
+	body := `{"actor":"agent","add":["ready-for-human"],"remove":["ready-for-agent"]}`
+
+	allowed := authorizedGatewayRequest(t, handler, manager, issued, http.MethodPatch,
+		"/api/v1/projects/7/issues/abcd/labels", strings.NewReader(body), "")
+	assert.Equal(t, http.StatusNoContent, allowed.Code, allowed.Body.String())
+	assert.Equal(t, []string{"PATCH /api/v1/projects/7/issues/abcd/labels"}, forwarded)
+
+	refused := authorizedGatewayRequest(t, handler, manager, issued, http.MethodPatch,
+		"/api/v1/projects/7/issues/abcd/labels/bug", strings.NewReader(body), "")
+	assert.Equal(t, http.StatusForbidden, refused.Code, refused.Body.String())
+	assert.Len(t, forwarded, 1, "a neighbouring route must not reach the target")
+}
+
 func TestWebDaemonGatewayRejectsOversizedCloseBeforeContactingTarget(t *testing.T) {
 	var targetCalls int
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
