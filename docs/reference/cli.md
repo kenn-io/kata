@@ -991,9 +991,9 @@ kata move --refs-from refs.txt target-project
 A refs file has one `ref` or `ref<TAB>project` per line; a row's project wins
 over the positional target, which must still name a project when given. A
 leading UTF-8 byte order mark is ignored. Blank lines are ignored, and there is
-no comment syntax: `# note` is treated as an issue ref. Refs must be
-project-qualified short IDs or issue UIDs; with an explicit `--project`, bare
-short IDs are read in that project. A malformed row or more than 5,000 rows fails before
+no comment syntax: `# note` is treated as an issue ref. Refs can be
+project-qualified short IDs or issue UIDs. Bare short IDs resolve in the
+`--project` project or, when omitted, the bound workspace. A malformed row or more than 5,000 rows fails before
 any move; an empty file succeeds without contacting the daemon. An invalid ref
 or unknown target is refused while other rows still move. When refs resolve to
 the same issue, only the first moves; if they name different targets, all are

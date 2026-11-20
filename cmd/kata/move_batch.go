@@ -129,6 +129,14 @@ func runMoveBatch(cmd *cobra.Command, args []string, refsFrom string) error {
 	if err != nil {
 		return errors.Join(err, printMoveBatch(cmd, results))
 	}
+	start, err := resolveStartPath(flags.Workspace)
+	if err != nil {
+		return errors.Join(err, printMoveBatch(cmd, results))
+	}
+	bareProject := strings.TrimSpace(flags.Project)
+	if bareProject == "" {
+		bareProject = workspaceProjectName(start)
+	}
 	a, err := dialDaemon(cmd.Context())
 	if err != nil {
 		return errors.Join(err, printMoveBatch(cmd, results))
@@ -161,7 +169,7 @@ func runMoveBatch(cmd *cobra.Command, args []string, refsFrom string) error {
 		if defaultTarget != nil && rows[i].Target == args[0] {
 			target = defaultTarget
 		}
-		prepared[i] = resolveMoveBatchOne(a, client, projects, rows[i], target, &results[i], &halt)
+		prepared[i] = resolveMoveBatchOne(a, client, projects, bareProject, rows[i], target, &results[i], &halt)
 	})
 	refuseDuplicateMoveBatchRows(prepared, results)
 	runMoveBatchJobs(a, &halt, len(rows), func(i int) {
@@ -316,7 +324,7 @@ func runMoveBatchJobs(a daemonAPI, halt *atomic.Bool, count int, job func(int)) 
 	wg.Wait()
 }
 
-func resolveMoveBatchOne(a daemonAPI, client *kataclient.Client, projects []projectRef, row moveBatchRow, sharedTarget *projectRef, result *moveBatchResult, halt *atomic.Bool) *moveBatchPrepared {
+func resolveMoveBatchOne(a daemonAPI, client *kataclient.Client, projects []projectRef, bareProject string, row moveBatchRow, sharedTarget *projectRef, result *moveBatchResult, halt *atomic.Bool) *moveBatchPrepared {
 	if a.ctx.Err() != nil {
 		return nil
 	}
@@ -327,10 +335,10 @@ func resolveMoveBatchOne(a daemonAPI, client *kataclient.Client, projects []proj
 	}
 	parsed, err := shortid.Parse(row.Ref)
 	if err == nil && parsed.ULID == "" && parsed.Project == "" {
-		parsed.Project = strings.TrimSpace(flags.Project)
+		parsed.Project = bareProject
 	}
 	if err != nil || (parsed.ULID == "" && parsed.Project == "") {
-		refuse("invalid_ref", errors.New("use project#id, the issue UID, or --project with a short ID"))
+		refuse("invalid_ref", errors.New("use project#id or the issue UID; bare short IDs require --project or a bound workspace"))
 		return nil
 	}
 	var target projectRef
@@ -342,10 +350,6 @@ func resolveMoveBatchOne(a daemonAPI, client *kataclient.Client, projects []proj
 			refuse("invalid_target", err)
 			return nil
 		}
-	}
-	if target.UID == "" {
-		refuse("invalid_target", fmt.Errorf("project %q has no UID", target.Name))
-		return nil
 	}
 	result.Target, result.targetID = target.Name, target.ID
 	pid, ref := target.ID, parsed.ULID

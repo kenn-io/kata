@@ -66,9 +66,9 @@ func TestMoveBatchUnknownStopsNewRowsAndFinishesInflight(t *testing.T) {
 	inflight := moveBatchResult{Result: "unattempted"}
 	unknown := moveBatchResult{Result: "unattempted"}
 	next := moveBatchResult{Result: "unattempted"}
-	preparedSecond := resolveMoveBatchOne(a, client, projects, row(second.ShortID), nil, &inflight, &halt)
-	preparedFirst := resolveMoveBatchOne(a, client, projects, row(first.ShortID), nil, &unknown, &halt)
-	preparedThird := resolveMoveBatchOne(a, client, projects, row(third.ShortID), nil, &next, &halt)
+	preparedSecond := resolveMoveBatchOne(a, client, projects, flags.Project, row(second.ShortID), nil, &inflight, &halt)
+	preparedFirst := resolveMoveBatchOne(a, client, projects, flags.Project, row(first.ShortID), nil, &unknown, &halt)
+	preparedThird := resolveMoveBatchOne(a, client, projects, flags.Project, row(third.ShortID), nil, &next, &halt)
 	require.NotNil(t, preparedSecond)
 	require.NotNil(t, preparedFirst)
 	require.NotNil(t, preparedThird)
@@ -108,6 +108,21 @@ func TestMoveBatchMovesOnlyListedIssues(t *testing.T) {
 	got, err := env.DB.IssueByID(t.Context(), child.ID)
 	require.NoError(t, err)
 	require.Equal(t, source.ID, got.ProjectID)
+}
+
+func TestMoveBatchBareIDsInBoundWorkspace(t *testing.T) {
+	env, dir, source, target, first := setupMoveCLIProjects(t)
+	second, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "second", Author: "tester"})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.toml"), []byte("version = 1\n[project]\nname = \"source-project\"\n"), 0600))
+
+	out, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "move", first.ShortID, second.ShortID, target.Name, "--json")
+	require.NoError(t, err, "stdout: %s\nstderr: %s", out, stderr)
+	for _, issue := range []db.Issue{first, second} {
+		stored, err := env.DB.IssueByID(t.Context(), issue.ID)
+		require.NoError(t, err)
+		require.Equal(t, target.ID, stored.ProjectID)
+	}
 }
 
 func TestMoveBatchCancelMarksOnlyDispatchedMovesUnknown(t *testing.T) {
