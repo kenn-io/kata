@@ -175,7 +175,6 @@ func currentHomeStorageIsAbsent(dsn string, openErr error) bool {
 func diagnoseDaemonSelection(
 	ctx context.Context, expectedProject string, selection client.DaemonSelection,
 ) (daemonDiagnosis, client.DaemonSelection, error) {
-	callerCtx := ctx
 	ctx, cancel := context.WithTimeout(ctx, envHTTPTimeout(defaultHTTPTimeout))
 	defer cancel()
 	var err error
@@ -263,7 +262,7 @@ func diagnoseDaemonSelection(
 			return withDiagnosisAction(result), selection, nil
 		}
 	}
-	result, selection, err = probeDaemonSelection(ctx, callerCtx, result, selection)
+	result, selection, err = probeDaemonSelection(ctx, result, selection)
 	if result.State == "ready" {
 		result.Writable, result.ActorPolicy = liveDaemonCapabilities(ctx, selection.Resolved)
 		result.RootSigning = liveRootSigningHealth(ctx, selection.Resolved)
@@ -313,9 +312,8 @@ func inspectDiagnosisProject(ctx context.Context, store db.Storage, result *daem
 	return true
 }
 
-// callerCtx distinguishes cancellation by the caller from the probe's timeout.
 func probeDaemonSelection(
-	ctx, callerCtx context.Context, result daemonDiagnosis, selection client.DaemonSelection,
+	ctx context.Context, result daemonDiagnosis, selection client.DaemonSelection,
 ) (daemonDiagnosis, client.DaemonSelection, error) {
 	var err error
 	var resolved client.ResolvedDaemon
@@ -382,7 +380,7 @@ func probeDaemonSelection(
 	}
 	ping, err := apiClient.Ping(ctx)
 	if err != nil || ping == nil || !ping.Ok || ping.Service != "kata" {
-		result = diagnosisUnreachable(result, resolved.Unreachable(callerCtx, err))
+		result = diagnosisUnreachable(result, resolved.Unreachable(ctx, err))
 		result.State = "local_unreachable"
 		if result.Kind == "remote" {
 			result.State = unavailableRemoteState(result.Endpoint)

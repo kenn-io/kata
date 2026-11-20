@@ -217,14 +217,13 @@ func locateDaemon(ctx context.Context) (daemonLocateOutput, error) {
 	if injected, ok := ctx.Value(client.BaseURLKey{}).(string); ok && injected != "" && flags.Daemon == "" {
 		target = client.RunningDaemon{BaseURL: injected, Address: injected, Network: "tcp", Scheme: "http"}
 	} else {
-		callerCtx := ctx
 		ctx, cancel := context.WithTimeout(ctx, envHTTPTimeout(defaultHTTPTimeout))
 		defer cancel()
 		selection, err := client.InspectSelection(ctx, workspaceStartForRemote(), flags.Daemon)
 		if err != nil {
 			return daemonLocateOutput{}, cliDaemonTargetError(err)
 		}
-		diagnosis, selection, err := probeDaemonSelection(ctx, callerCtx, selectedDaemonDiagnosis(selection, ""), selection)
+		diagnosis, selection, err := probeDaemonSelection(ctx, selectedDaemonDiagnosis(selection, ""), selection)
 		if err != nil {
 			return daemonLocateOutput{}, err
 		}

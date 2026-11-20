@@ -332,7 +332,7 @@ func localRuntimeResolved(candidate liveDaemon) ResolvedDaemon {
 // Unreachable reports cause as a live local daemon failure using the runtime
 // record discovery already selected. Other targets return cause unchanged.
 func (d ResolvedDaemon) Unreachable(ctx context.Context, cause error) error {
-	if ctx.Err() != nil || d.runtime == nil {
+	if errors.Is(ctx.Err(), context.Canceled) || d.runtime == nil {
 		return cause
 	}
 	if cause == nil {

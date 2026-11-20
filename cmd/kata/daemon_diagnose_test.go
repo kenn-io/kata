@@ -1006,7 +1006,7 @@ func TestDaemonDiagnoseSecondPing(t *testing.T) {
 			} else {
 				selection, err := client.InspectSelection(ctx, "", tc.catalog)
 				require.NoError(t, err)
-				result, _, err = probeDaemonSelection(ctx, ctx, selectedDaemonDiagnosis(selection, ""), selection)
+				result, _, err = probeDaemonSelection(ctx, selectedDaemonDiagnosis(selection, ""), selection)
 				require.NoError(t, err)
 			}
 			require.EqualValues(t, 2, pings.Load())
