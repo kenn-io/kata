@@ -519,26 +519,42 @@ func checkLabels(t *testing.T, store db.Storage) error {
 	return nil
 }
 
-// waitPastMillisecond returns once the wall clock reads a later millisecond
-// than at. Stores stamp time.Now at millisecond precision with no clock to
-// inject, so a timestamp written afterwards differs from at.
-func waitPastMillisecond(t *testing.T, at time.Time) {
-	t.Helper()
-	require.Eventually(t, func() bool {
-		return time.Now().UTC().Truncate(time.Millisecond).After(at)
-	}, time.Second, 100*time.Microsecond)
-}
-
 func checkChangeLabels(t *testing.T, store db.Storage) error {
 	t.Helper()
 	ctx := t.Context()
-	fixture, err := createIssueFixture(ctx, store, "change-labels-project", "swap labels", "label-author", nil)
+	project, err := store.CreateProject(ctx, "change-labels-project")
 	if err != nil {
 		return err
 	}
-	issueID := fixture.Issue.ID
-	_, err = store.AddLabel(ctx, issueID, "ready-for-agent", "label-author")
-	require.NoError(t, err)
+	// Imported issues keep the updated_at they are given, so a store that
+	// skips the touch, or touches on a no-op, leaves a visible difference.
+	importedAt := time.Date(2026, 7, 1, 10, 0, 0, 0, time.UTC)
+	imported, _, err := store.ImportBatch(ctx, db.ImportBatchParams{
+		ProjectID: project.ID, Source: "tracker", Actor: "label-author",
+		Items: []db.ImportItem{
+			{
+				ExternalID: "swap", Title: "swap labels", Author: "label-author", Status: "open",
+				CreatedAt: importedAt, UpdatedAt: importedAt, Labels: []string{"ready-for-agent"},
+			},
+			{
+				ExternalID: "settled", Title: "already swapped", Author: "label-author", Status: "open",
+				CreatedAt: importedAt, UpdatedAt: importedAt, Labels: []string{"ready-for-human"},
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("import fixtures: %w", err)
+	}
+	require.Len(t, imported.Items, 2)
+	importedIssue := func(i int) db.Issue {
+		t.Helper()
+		issue, err := store.IssueByShortID(ctx, project.ID, imported.Items[i].IssueShortID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		require.True(t, issue.UpdatedAt.Equal(importedAt), "fixture keeps the imported updated_at")
+		return issue
+	}
+	before, settled := importedIssue(0), importedIssue(1)
+	issueID := before.ID
 	labelNames := func() []string {
 		t.Helper()
 		rows, err := store.LabelsByIssue(ctx, issueID)
@@ -551,7 +567,7 @@ func checkChangeLabels(t *testing.T, store db.Storage) error {
 	}
 	eventCount := func() int {
 		t.Helper()
-		events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: fixture.Project.ID, Limit: 1000})
+		events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, Limit: 1000})
 		require.NoError(t, err)
 		return len(events)
 	}
@@ -563,13 +579,10 @@ func checkChangeLabels(t *testing.T, store db.Storage) error {
 			UpdatedAt string `json:"updated_at"`
 		}
 		require.NoError(t, json.Unmarshal([]byte(e.Payload), &payload))
-		assert.Equal(t, fixture.Issue.UID, payload.IssueUID)
+		assert.Equal(t, before.UID, payload.IssueUID)
 		return payload.Label, payload.UpdatedAt
 	}
 
-	before, err := store.IssueByID(ctx, issueID)
-	require.NoError(t, err)
-	waitPastMillisecond(t, before.UpdatedAt)
 	params := db.ChangeLabelsParams{
 		Add:    []string{"ready-for-human"},
 		Remove: []string{"ready-for-agent"},
@@ -600,18 +613,17 @@ func checkChangeLabels(t *testing.T, store db.Storage) error {
 	assert.True(t, after.UpdatedAt.After(before.UpdatedAt), "updated_at must move")
 	assert.Equal(t, before.Revision, after.Revision, "label edits do not bump revision")
 
-	eventsAfterSwap := eventCount()
-	waitPastMillisecond(t, after.UpdatedAt)
-	labels, events, err = store.ChangeLabelsAndEvents(ctx, issueID, params)
+	eventsBeforeNoop := eventCount()
+	labels, events, err = store.ChangeLabelsAndEvents(ctx, settled.ID, params)
 	if err != nil {
-		return fmt.Errorf("repeat swap: %w", err)
+		return fmt.Errorf("swap already applied: %w", err)
 	}
 	assert.Equal(t, []string{"ready-for-human"}, labels)
 	assert.Empty(t, events)
-	assert.Equal(t, eventsAfterSwap, eventCount())
-	repeated, err := store.IssueByID(ctx, issueID)
+	assert.Equal(t, eventsBeforeNoop, eventCount())
+	unchanged, err := store.IssueByID(ctx, settled.ID)
 	require.NoError(t, err)
-	assert.True(t, after.UpdatedAt.Equal(repeated.UpdatedAt), "no-op call must not touch updated_at")
+	assert.True(t, unchanged.UpdatedAt.Equal(importedAt), "no-op call must not touch updated_at")
 
 	labels, events, err = store.ChangeLabelsAndEvents(ctx, issueID, db.ChangeLabelsParams{
 		Remove: []string{"ready-for-human"}, Actor: "label-author",
