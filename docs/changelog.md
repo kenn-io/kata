@@ -205,6 +205,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
   included, so a client labels a page of runs without listing jobs, workflows
   and issues. `kata tui` names runs this way.
 
+- Connect Docbank over HTTP on a trusted private network with `[docbank] trust_private_network = true` or `KATA_DOCBANK_TRUST_PRIVATE_NETWORK=true`. HTTP exposes the key and attachment contents to that network.
+
+- Use attachments through project relays with Docbank configured only on the root. Upgrade every daemon on the route. Standalone references continue to use the local vault after sharing. A disabled spoke returns `federation_offline` for uploads and links until it is re-enabled. A hub owner can link new references only to files inside its configured Docbank folder, including when the hub is disabled. See [Issue attachments](guide/attachments.md#use-attachments-through-project-relays).
+
 - Create native recurring child jobs and adapter prompt jobs with [typed cron flags](reference/cron.md#create-with-typed-flags), without a JSON file.
 - Keep syncing when a spoke joins a project after the hub moved an issue into it.
   The destination's pull moves the spoke's existing copy, with its comments,

@@ -35,7 +35,7 @@ const RepeatedAdoptionEventFeature = "repeated_adoption_v1"
 const RelayCrossLinksEventFeature = "relay_cross_links_v1"
 
 // SupportedEventFeatures lists event capabilities understood by this daemon.
-const SupportedEventFeatures = CronEventFeature + "," + IssueMoveEventFeature + "," + RepeatedAdoptionEventFeature + "," + IssueDateZoneEventFeature + "," + RelayCrossLinksEventFeature
+const SupportedEventFeatures = CronEventFeature + "," + DocbankOriginEventFeature + "," + IssueMoveEventFeature + "," + RepeatedAdoptionEventFeature + "," + IssueDateZoneEventFeature + "," + RelayCrossLinksEventFeature
 
 // Native cron job projections are immutable and retained as tombstones, so a
 // positive job result remains valid for that project UID's lifetime.
@@ -64,13 +64,14 @@ func MergeEventFeatures(values ...string) string {
 func PayloadRequiredFeatures(kind, payload string) (string, error) {
 	native, nativeErr := payloadHasNativeRecurringState(kind, payload)
 	zone, zoneErr := payloadZonedDateFeature(kind, payload)
-	if err := cmp.Or(nativeErr, zoneErr); err != nil {
+	origin, originErr := payloadDocbankOriginFeature(kind, payload)
+	if err := cmp.Or(nativeErr, zoneErr, originErr); err != nil {
 		return "", err
 	}
 	if native {
 		zone = MergeEventFeatures(zone, CronEventFeature)
 	}
-	return MergeEventFeatures(EventRequiredFeatures(kind), zone), nil
+	return MergeEventFeatures(EventRequiredFeatures(kind), zone, origin), nil
 }
 
 func payloadZonedDateFeature(kind, payload string) (string, error) {

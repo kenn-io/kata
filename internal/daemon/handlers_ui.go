@@ -81,6 +81,7 @@ type normalizedUIReferencesIntent struct {
 }
 
 type uiPolicy struct {
+	AnyEnabledSpoke    bool               `json:"any_enabled_spoke"`
 	Capabilities       api.UICapabilities `json:"capabilities"`
 	Origin             string             `json:"origin"`
 	OriginStable       bool               `json:"origin_stable"`
@@ -147,7 +148,10 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err := normalizeIssueScopeForUISnapshot(ctx, &intent); err != nil {
 				return nil, err
 			}
-			policy := effectiveUIPolicy(ctx, cfg)
+			policy, err := loadUIPolicy(ctx, cfg)
+			if err != nil {
+				return nil, internalAPIError(err)
+			}
 			if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil {
 				policy.ProjectAccessActor = decision.Actor
 				policy.ProjectAccessEpoch = decision.PolicyRevision
@@ -325,7 +329,10 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 				if err != nil {
 					return nil, err
 				}
-				policy := effectiveUIPolicy(ctx, cfg)
+				policy, err := loadUIPolicy(ctx, cfg)
+				if err != nil {
+					return nil, internalAPIError(err)
+				}
 				if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil {
 					policy.ProjectAccessActor = decision.Actor
 					policy.ProjectAccessEpoch = decision.PolicyRevision
@@ -344,7 +351,10 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, err
 			}
-			policy := effectiveUIPolicy(ctx, cfg)
+			policy, err := loadUIPolicy(ctx, cfg)
+			if err != nil {
+				return nil, internalAPIError(err)
+			}
 			if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil {
 				policy.ProjectAccessActor = decision.Actor
 				policy.ProjectAccessEpoch = decision.PolicyRevision
@@ -720,11 +730,28 @@ func uiValidationError(field, message string, data map[string]any) error {
 	return api.NewError(http.StatusBadRequest, "validation", message, "", data)
 }
 
-func effectiveUIPolicy(ctx context.Context, cfg ServerConfig) uiPolicy {
-	policy := uiPolicy{Capabilities: api.UICapabilities{
-		Attachments: cfg.Docbank != nil,
-		Writable:    !cfg.InsecureReadonly, Updates: "sse", ActorPolicy: "request",
+func loadUIPolicy(ctx context.Context, cfg ServerConfig) (uiPolicy, error) {
+	anyEnabledSpoke := false
+	if cfg.DB != nil {
+		bindings, err := cfg.DB.ListFederationBindings(ctx)
+		if err != nil {
+			return uiPolicy{}, err
+		}
+		for _, binding := range bindings {
+			if binding.Role == db.FederationRoleSpoke && binding.Enabled {
+				anyEnabledSpoke = true
+				break
+			}
+		}
+	}
+	return effectiveUIPolicy(ctx, cfg, anyEnabledSpoke), nil
+}
+
+func effectiveUIPolicy(ctx context.Context, cfg ServerConfig, anyEnabledSpoke bool) uiPolicy {
+	policy := uiPolicy{AnyEnabledSpoke: anyEnabledSpoke, Capabilities: api.UICapabilities{
+		Writable: !cfg.InsecureReadonly, Updates: "sse", ActorPolicy: "request",
 	}}
+	policy.Capabilities.Attachments = cfg.Docbank != nil || anyEnabledSpoke
 	if cfg.WebSessions != nil {
 		principal, _ := PrincipalFromContext(ctx)
 		policy.Capabilities.Writable = cfg.WebSessions.CanWrite(principal)

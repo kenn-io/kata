@@ -3,6 +3,8 @@
 package generated
 
 import (
+	"uuid"
+
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 )
 
@@ -273,6 +275,46 @@ type PollProjectEventsPath struct {
 
 type GetProjectFederationPath struct {
 	ProjectID int64 `json:"project_id"`
+}
+
+type FederatedDocbankCapabilitiesPath struct {
+	ProjectID int64 `json:"project_id"`
+}
+
+type LinkFederatedDocbankPath struct {
+	ProjectID int64  `json:"project_id"`
+	Ref       string `json:"ref" validate:"required"`
+}
+
+func (l LinkFederatedDocbankPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(l))
+}
+
+type UploadFederatedDocbankPath struct {
+	ProjectID int64  `json:"project_id"`
+	Ref       string `json:"ref" validate:"required"`
+}
+
+func (u UploadFederatedDocbankPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(u))
+}
+
+type FederatedDocbankContentPath struct {
+	ProjectID int64     `json:"project_id"`
+	VersionID uuid.UUID `json:"version_id" validate:"required"`
+}
+
+func (f FederatedDocbankContentPath) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(f.VersionID).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("VersionID", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type EnableProjectFederationPath struct {

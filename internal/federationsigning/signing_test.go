@@ -154,6 +154,20 @@ func TestVerifierPreservesRequestBodyLimitError(t *testing.T) {
 	require.EqualValues(t, 1, limitErr.Limit)
 }
 
+func TestSignPreservesAttachmentBodyLimitError(t *testing.T) {
+	source := testSource(t)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "https://hub.example/api/v1/projects/1/federation/docbank/issues/abc4/uploads", http.NoBody)
+	require.NoError(t, err)
+	req.ContentLength = AttachmentMaxBodyBytes + 1
+	req.Header.Set("Authorization", "Bearer enrollment")
+
+	err = Sign(req, source)
+	require.ErrorIs(t, err, signingpolicy.ErrInvalid)
+	var limitErr *http.MaxBytesError
+	require.ErrorAs(t, err, &limitErr)
+	require.EqualValues(t, AttachmentMaxBodyBytes, limitErr.Limit)
+}
+
 func TestVerifierKeepsUnavailableKeysRejectedUntilSourceReturns(t *testing.T) {
 	for _, mode := range []string{"missing environment", "missing file", "short key", "nonregular file"} {
 		t.Run(mode, func(t *testing.T) {

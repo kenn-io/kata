@@ -34,6 +34,16 @@ func requireFederatedIssueClaimWithRefresh(
 	actor string,
 	refresh bool,
 ) error {
+	return requireFederatedIssueClaimWithResult(ctx, cfg, issue, actor, refresh, nil)
+}
+
+type claimRefreshResult struct {
+	binding db.FederationBinding
+	known   bool
+	missing bool
+}
+
+func requireFederatedIssueClaimWithResult(ctx context.Context, cfg ServerConfig, issue db.Issue, actor string, refresh bool, result *claimRefreshResult) error {
 	principal := db.ClaimPrincipal{
 		HolderInstanceUID: cfg.DB.InstanceUID(),
 		Holder:            strings.TrimSpace(actor),
@@ -46,7 +56,7 @@ func requireFederatedIssueClaimWithRefresh(
 		}
 		principal = hostClaimPrincipal(cfg, api.ClaimActionBody{}, requestPrincipal.Subject).ClaimPrincipal
 	}
-	return requireFederatedIssueClaimForPrincipalWithRefresh(ctx, cfg, issue, principal, refresh)
+	return checkFederatedIssueClaim(ctx, cfg, issue, principal, refresh, false, result)
 }
 
 func requireFederatedIssueClaimForPrincipal(
@@ -66,6 +76,12 @@ func requireFederatedIssueClaimForPrincipalWithRefresh(
 	principal db.ClaimPrincipal,
 	refresh bool,
 ) error {
+	return checkFederatedIssueClaim(ctx, cfg, issue, principal, refresh, false, nil)
+}
+
+// Service calls must admit external I/O through a transaction fence and retain
+// every component of the authenticated forwarded lease identity.
+func checkFederatedIssueClaim(ctx context.Context, cfg ServerConfig, issue db.Issue, principal db.ClaimPrincipal, refresh, service bool, result *claimRefreshResult) error {
 	// Claims belong to the resolved issue in its current project.
 	projectID := issue.ProjectID
 
@@ -77,31 +93,43 @@ func requireFederatedIssueClaimForPrincipalWithRefresh(
 
 	binding, err := cfg.DB.FederationBindingByProject(ctx, projectID)
 	if errors.Is(err, db.ErrNotFound) {
+		if service {
+			return attachmentError(503, "federation_offline")
+		}
 		return nil
 	}
 	if err != nil {
 		return internalAPIError(err)
 	}
 	if !binding.Enabled {
+		if service {
+			return attachmentError(503, "federation_offline")
+		}
 		return nil
 	}
 	if binding.Role == db.FederationRoleSpoke && !binding.PushEnabled {
 		return federationReadOnlyError(db.ErrFederatedReadOnly)
 	}
 
-	principal = boundSpokeClaimPrincipal(binding, principal, cfg.DB.InstanceUID())
+	// A relay caches a downstream lease in that incoming hop's identity, just
+	// as its acquire response is remapped. Only local callers need the first
+	// binding transform here; forwarding to the next hop transforms separately.
+	if !service || binding.RelayConfig == nil || principal.HolderInstanceUID == cfg.DB.InstanceUID() {
+		principal = boundSpokeClaimPrincipal(binding, principal, cfg.DB.InstanceUID())
+	}
 
 	if refresh && binding.Role == db.FederationRoleSpoke {
-		if err := refreshSpokeClaimStatusForGate(ctx, cfg, binding, issue); err != nil {
+		if err := refreshSpokeClaimStatusForGate(ctx, cfg, binding, issue, result); err != nil {
 			return err
 		}
 	}
 
 	err = cfg.DB.CheckClaimGate(ctx, db.ClaimGateParams{
-		ProjectID: projectID,
-		IssueRef:  issue.UID,
-		Principal: principal,
-		Now:       time.Now().UTC(),
+		ApplyTransactionFence: service,
+		ProjectID:             projectID,
+		IssueRef:              issue.UID,
+		Principal:             principal,
+		Now:                   time.Now().UTC(),
 	})
 	if err != nil {
 		return claimGateAPIError(err)
@@ -136,6 +164,7 @@ func refreshSpokeClaimStatusForGate(
 	cfg ServerConfig,
 	binding db.FederationBinding,
 	issue db.Issue,
+	result *claimRefreshResult,
 ) error {
 	remoteCtx, cancelRemote := context.WithTimeout(ctx, mutationClaimStatusRefreshTimeout)
 	defer cancelRemote()
@@ -155,10 +184,18 @@ func refreshSpokeClaimStatusForGate(
 		if pendingErr != nil {
 			return pendingErr
 		}
-		if pending {
+		var status *claimHubStatusError
+		missingRelayIssue := result != nil && binding.RelayConfig != nil && errors.As(err, &status) && status != nil && status.StatusCode == http.StatusNotFound && (hubStatusErrorCode(status) == "issue_not_found" || hubStatusErrorCode(status) == "hub_claim_failed")
+		if pending || missingRelayIssue {
+			if result != nil {
+				*result = claimRefreshResult{binding: binding, known: true, missing: true}
+			}
 			return nil
 		}
 		return claimForwardError(err)
+	}
+	if result != nil {
+		*result = claimRefreshResult{binding: binding, known: true}
 	}
 	resp, err = remapCachedClaimStatus(ctx, cfg.DB, binding.ProjectID, issue.UID, resp)
 	if err != nil {
@@ -259,6 +296,10 @@ func isOfflineClaimHubStatusError(err error) bool {
 
 func claimGateAPIError(err error) error {
 	switch {
+	case errors.Is(err, errHostFederationAccessUnavailable), errors.Is(err, db.ErrTransactionFinalizationFailed):
+		return api.NewError(http.StatusServiceUnavailable, "access_unavailable", "federation access decision unavailable", "", nil)
+	case errors.Is(err, ErrHostAccessDenied):
+		return federationCredentialDenied()
 	case errors.Is(err, db.ErrClaimDenied):
 		return api.NewError(http.StatusConflict, "claim_denied",
 			"lease denied for federated issue mutation", "run kata federation lease acquire <ref>", nil)

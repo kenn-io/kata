@@ -335,6 +335,7 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
+| `0.63.0` | Routes shared-project attachments to their Docbank origin. Attachment references can include `origin`; the UI attachment capability is enabled when the daemon has a local Docbank or any enabled spoke binding. A disabled spoke rejects uploads and links with `503 federation_offline`, even when it has a local vault. Federation peers advertise `docbank_origin_v1` before receiving origin references. |
 | `0.62.0` | Federation peers advertise `relay_cross_links_v1` in `X-Kata-Event-Features`. A common root can link issues across projects with a shared relay audience. Relays check access to each referenced project they can resolve before releasing events or checkpoints, and pause for older peers with `409 unsupported_event_features` at crossing links or links with unresolved endpoints. An unresolved endpoint may belong to another project. |
 | `0.60.0` | Enrollment join instructions use the signing hub's external URL and include signing key placeholders. |
 | `0.59.0` | Schedule and deadline civil dates and times accept an explicit `[Zone]` suffix. |
@@ -1088,7 +1089,16 @@ set the query parameter `reuse_existing=true` to return the smallest existing
 attachment ID for the resolved Docbank version, or create a reference if none
 exists. On uploads and links, reuse returns `attachment_invalid` if the daemon cannot read an existing reference. Omitting it or setting it to `false` creates a new reference. `GET
 /api/v1/projects/{project_id}/issues/{ref}/attachments/{attachment_id}/content`
-streams the file back. `POST /api/v1/projects/{project_id}/issues/{ref}/attachments/links` saves a reference to an existing Docbank file version. Its JSON body takes exactly one of `node_id` or `path`, an optional `version_id`, and `actor`. Set `reuse_existing` to `true` to return the smallest existing attachment ID for that version without adding another reference; if no reference exists, the route creates one. Omitting this field creates a new reference. All three routes return `docbank_not_configured` when the daemon has no Docbank, and `503 docbank_key_unavailable` without contacting Docbank when the daemon cannot resolve its Docbank key; the message gives the reason, and the health `docbank` block names the source. See [Issue attachments](../guide/attachments.md).
+streams the file back. `POST /api/v1/projects/{project_id}/issues/{ref}/attachments/links` saves a reference to an existing Docbank file version. Its JSON body takes exactly one of `node_id` or `path`, an optional `version_id`, and `actor`. Set `reuse_existing` to `true` to return the smallest existing attachment ID for that version without adding another reference; if no reference exists, the route creates one. Omitting this field creates a new reference. Local routes return `docbank_not_configured` when the daemon has no Docbank, and `503 docbank_key_unavailable` when the daemon cannot resolve its Docbank key. See [Issue attachments](../guide/attachments.md).
+
+Federation transport uses these routes under `/api/v1/projects/{project_id}/federation/docbank`:
+
+- `GET /capabilities` identifies the project, origin, and protocol version.
+- `POST /issues/{ref}/uploads` forwards bytes unless another holder has an active claim on the issue.
+- `POST /issues/{ref}/links` resolves a file reference unless another holder has an active claim on the issue.
+- `GET /versions/{version_id}/content` streams content from the origin.
+
+An attachment upload or link checks the route's capabilities before forwarding; a read requests content directly. References without an origin resolve in the local vault, including when a standalone project later becomes a hub. The UI attachment capability is enabled when the daemon has a local vault or any enabled spoke. A project without an available route can still show attachment controls; individual requests report route errors.
 
 ## Project Hygiene Endpoints
 
