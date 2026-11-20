@@ -53,7 +53,7 @@ func newUICmd() *cobra.Command {
 			}
 			returnPath := "/kata"
 			if len(args) == 1 {
-				returnPath, err = resolveUIIssuePath(cmd, prepared, args[0])
+				returnPath, err = resolveUIIssuePath(cmd, &prepared, args[0])
 				if err != nil {
 					return err
 				}
@@ -83,7 +83,7 @@ func newUICmd() *cobra.Command {
 	}
 }
 
-func resolveUIIssuePath(cmd *cobra.Command, prepared client.PreparedWebUI, rawRef string) (string, error) {
+func resolveUIIssuePath(cmd *cobra.Command, prepared *client.PreparedWebUI, rawRef string) (string, error) {
 	start, err := resolveStartPath(flags.Workspace)
 	if err != nil {
 		return "", err
@@ -113,14 +113,19 @@ func resolveUIIssuePath(cmd *cobra.Command, prepared client.PreparedWebUI, rawRe
 	}
 	savedProject := flags.Project
 	flags.Project = parsed.ProjectName
+	var selectedDaemon string
 	projectID, _, err := func() (int64, string, error) {
 		defer func() { flags.Project = savedProject }()
 		return resolveProjectIDAndNameWithClientHeaders(
-			cmd.Context(), httpClient, resolutionBaseURL, start, gatewayHeaders,
+			cmd.Context(), httpClient, resolutionBaseURL, start, gatewayHeaders, &selectedDaemon,
 		)
 	}()
 	if err != nil {
 		return "", err
+	}
+	if !prepared.ConfiguredRemote && prepared.DaemonName == "" && selectedDaemon != "" {
+		prepared.DaemonName = selectedDaemon
+		gatewayHeaders = map[string]string{"X-Kata-Web-Daemon": selectedDaemon}
 	}
 	apiClient, err := kataclient.NewWithHTTPClient(resolutionBaseURL, httpClient)
 	if err != nil {

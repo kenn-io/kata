@@ -688,14 +688,14 @@ describe('App', () => {
                   id: 'local',
                   url: '',
                   local: true,
-                  default: true,
+                  default: false,
                   auth: 'none',
                   health: 'connected',
                 },
                 {
                   id: 'hub',
                   url: 'https://hub.example',
-                  default: false,
+                  default: true,
                   auth: 'none',
                   health: 'connected',
                 },
@@ -729,6 +729,61 @@ describe('App', () => {
       expect(window.location.href).toBe(route)
     },
   )
+
+  it('offers the local fallback when the automatic daemon goes down', async () => {
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const rosterHeaders: Array<string | null> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        const path = new URL(request.url).pathname
+        if (path === '/api/v1/ui/daemons') {
+          rosterHeaders.push(request.headers.get('X-Kata-Web-Daemon'))
+          const daemons =
+            rosterHeaders.length === 1 || rosterHeaders.at(-1) === 'hub'
+              ? [
+                  {
+                    id: 'hub',
+                    url: 'https://hub.example',
+                    default: true,
+                    auth: 'none',
+                    health: rosterHeaders.length === 1 ? 'connected' : 'down',
+                  },
+                ]
+              : [
+                  {
+                    id: 'local',
+                    url: '',
+                    local: true,
+                    default: true,
+                    auth: 'none',
+                    health: 'connected',
+                  },
+                ]
+          return Response.json({ daemons })
+        }
+        if (path === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (path.endsWith('/api/v1/ui/snapshot'))
+          return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+        return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+      }),
+    )
+    render(App)
+    expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+    await fireEvent.click(screen.getByTestId('daemon-chip'))
+    expect(await screen.findByTestId('daemon-row-local')).not.toBeNull()
+    expect(rosterHeaders).toEqual([null, null])
+    expect(screen.getByTestId('daemon-chip').textContent).toContain('hub')
+    expect(screen.getByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+    await fireEvent.click(screen.getByTestId('daemon-row-local'))
+    await waitFor(() => expect(screen.getByTestId('daemon-chip').textContent).toContain('local'))
+    await fireEvent.click(screen.getByTestId('daemon-chip'))
+    await waitFor(() => expect(rosterHeaders.at(-1)).toBe('local'))
+  })
 
   it.each([false, true])(
     'honors an explicitly selected gateway daemon on first authority load, down: %s',

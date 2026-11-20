@@ -323,6 +323,9 @@ func (g *webDaemonGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stripWebDaemonBrowserCredentials(r.Header)
+	if r.Method == http.MethodPost && r.URL.Path == "/api/v1/projects/resolve" {
+		w.Header().Set(webDaemonHeaderName, d.id)
+	}
 	if d.local {
 		g.localMux.ServeHTTP(w, r)
 		return
@@ -594,7 +597,7 @@ func (g *webDaemonGateway) proxyDefault(ctx context.Context, catalog []config.Ca
 	if id == g.active || !g.syncHubs[id] {
 		return id
 	}
-	for _, daemon := range g.roster(ctx, catalog, "", false, false).Daemons {
+	for _, daemon := range g.roster(ctx, catalog, "", false, true).Daemons {
 		if daemon.Default {
 			return daemon.ID
 		}
@@ -752,6 +755,7 @@ func (g *webDaemonGateway) proxy(d resolvedWebDaemon) (http.Handler, error) {
 		},
 		ModifyResponse: func(response *http.Response) error {
 			response.Header.Del("Set-Cookie")
+			response.Header.Del(webDaemonHeaderName)
 			response.Header.Del(daemonruntime.WebOriginHeader)
 			response.Header.Del(daemonruntime.WebAuthenticationHeader)
 			if response.StatusCode >= http.StatusMultipleChoices &&

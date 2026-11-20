@@ -490,6 +490,7 @@ func TestWebDaemonGatewayDefaultWithDownSyncHub(t *testing.T) {
 			response, err := http.DefaultClient.Do(request)
 			require.NoError(t, err)
 			defer func() { _ = response.Body.Close() }()
+			assert.Empty(t, response.Header.Get("X-Kata-Web-Daemon"))
 			if tc.ordinary {
 				require.Equal(t, http.StatusNoContent, response.StatusCode)
 				assert.EqualValues(t, 1, requests.Load())

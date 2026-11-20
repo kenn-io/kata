@@ -163,6 +163,7 @@
   let liveUpdatesReconnecting = $state(false)
   let daemonInfos = $state<WebDaemonInfo[]>([])
   let activeDaemonID = $state<string | undefined>()
+  let explicitDaemonID = launchDaemonID
   let daemonRosterLoaded = false
   let daemonRosterAbort: AbortController | undefined
   let daemonRefreshAbort: AbortController | undefined
@@ -1102,7 +1103,7 @@
   }
 
   function readDaemonRoster(signal: AbortSignal): Promise<WebDaemonInfo[]> {
-    return fetchWebDaemons(browserFetch, signal, activeDaemonID ?? launchDaemonID)
+    return fetchWebDaemons(browserFetch, signal, explicitDaemonID)
   }
 
   async function loadDaemonRoster(): Promise<boolean> {
@@ -1197,6 +1198,7 @@
     if (daemonSwitching || authenticationRecoveryPending || id === activeDaemonID) return
     if (daemonInfos.find((daemon) => daemon.id === id)?.health === 'upgrade_required') return
     const sourceDaemon = activeDaemonID
+    const sourceExplicitDaemon = explicitDaemonID
     const sourceRoute = route.kind === 'route-error' ? acceptedRoute : route
     if (sourceDaemon && sourceRoute) saveDaemonRoute(sourceDaemon, serializeRoute(sourceRoute))
     const restoredPath = loadDaemonRoute(id) ?? `${routePath}?view=all-open`
@@ -1214,6 +1216,7 @@
     referenceAbort?.abort()
     references = undefined
     activeDaemonID = id
+    explicitDaemonID = id
     route = restored
     acceptedRoute = undefined
     history.replaceState(null, '', serializeRoute(restored))
@@ -1239,6 +1242,7 @@
     daemonError = `Could not connect to ${id}`
     if (sourceDaemon && sourceRoute) {
       activeDaemonID = sourceDaemon
+      explicitDaemonID = sourceExplicitDaemon
       route = sourceRoute
       acceptedRoute = undefined
       history.replaceState(null, '', serializeRoute(sourceRoute))

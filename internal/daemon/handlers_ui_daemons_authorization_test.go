@@ -115,6 +115,34 @@ func TestWebDaemonRestrictedRosterFallsBackToLocalMux(t *testing.T) {
 	assert.Equal(t, "local snapshot", proxyResponse.Body.String())
 }
 
+func TestWebDaemonGatewayKeepsAutomaticLocalFallbackAfterRecovery(t *testing.T) {
+	var ready atomic.Bool
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if !ready.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = fmt.Fprintf(w, `{"web_ui_contract_version":%q}`, api.UISnapshotContractVersion)
+	}))
+	t.Cleanup(hub.Close)
+	localMux := http.NewServeMux()
+	localMux.HandleFunc("POST /api/v1/projects/resolve", func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "local") })
+	gateway := &webDaemonGateway{catalog: []config.CatalogDaemonConfig{{Name: "hub", URL: hub.URL, AllowInsecure: true}}, syncHubs: map[string]bool{"hub": true}, localMux: localMux, health: make(map[string]webDaemonHealthEntry), inflight: make(map[string]*webDaemonInflightProbe), proxies: make(map[string]http.Handler)}
+	ctx := WithPrincipal(t.Context(), Principal{Kind: PrincipalWebLocal})
+	request := httptest.NewRequestWithContext(ctx, http.MethodPost, "http://127.0.0.1/api/v1/projects/resolve", strings.NewReader(`{"name":"example-project"}`))
+	response := httptest.NewRecorder()
+	gateway.ServeHTTP(response, request)
+	require.Equal(t, "local", response.Body.String())
+	assert.Equal(t, "local", response.Header().Get(webDaemonHeaderName))
+	ready.Store(true)
+	roster := httptest.NewRecorder()
+	gateway.list(roster, httptest.NewRequestWithContext(ctx, http.MethodGet, "http://127.0.0.1/api/v1/ui/daemons", nil))
+	var listed webDaemonRosterResponse
+	require.NoError(t, json.Unmarshal(roster.Body.Bytes(), &listed))
+	require.Len(t, listed.Daemons, 2)
+	assert.Equal(t, "local", listed.Daemons[1].ID)
+}
+
 func TestWebDaemonRosterListsRecoveredHubAndKeepsLocalFallback(t *testing.T) {
 	var ready atomic.Bool
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
