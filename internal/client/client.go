@@ -110,7 +110,7 @@ func (e *LocalDaemonUnreachableError) RecoveryAdvice() string {
 		return message
 	}
 	if e.WebOrigin != "" {
-		message = "Save goroutine stacks from " + e.WebOrigin + "/debug/pprof/goroutine?debug=2 without a token. For authenticated capture, send the token in an Authorization: Bearer header only to an independently verified endpoint, such as the owner-only Unix socket. "
+		message = "Try to save goroutine stacks from " + e.WebOrigin + "/debug/pprof/goroutine?debug=2 without a token. If authentication is required, send the token in an Authorization: Bearer header only to an independently verified endpoint, such as the owner-only Unix socket. "
 	}
 	if e.migrationActive {
 		return message + "Wait for the migration to finish, then retry; do not interrupt the daemon"

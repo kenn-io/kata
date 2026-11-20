@@ -141,7 +141,9 @@ func TestLiveUnreachableRecoveryAdvice(t *testing.T) {
 			if tc.want == "" {
 				require.NotContains(t, err.Error(), "/debug/pprof/")
 			} else {
+				require.Contains(t, err.Error(), "Try to save goroutine stacks")
 				require.Contains(t, err.Error(), tc.want+"/debug/pprof/goroutine?debug=2")
+				require.Contains(t, err.Error(), "If authentication is required")
 				require.Contains(t, err.Error(), "Authorization: Bearer")
 			}
 			require.True(t, observed.VerifiedProcess)
