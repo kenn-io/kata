@@ -44,6 +44,12 @@ func (s *Store) ReadFederation(ctx context.Context, in db.FederationReadParams) 
 		out, err = db.ReadFederationTransaction(ctx, tx, in, project, binding, refresh, readEvents)
 		return err
 	}
-	err := s.withSerializableTx(ctx, run)
+	runTx := s.withSerializableTx
+	if !in.Metadata {
+		// The page and cursor need one snapshot. Keep the transaction writable
+		// for authorization fences, while leaving predicate locks to writers.
+		runTx = s.withRepeatableReadTx
+	}
+	err := runTx(ctx, run)
 	return out, err
 }
