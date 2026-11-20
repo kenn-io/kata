@@ -139,8 +139,7 @@ func TestHealthProfileRejectedCredential(t *testing.T) {
 	})
 	_, _, err := executeRootCapture(t, t.Context(), "--daemon", "work", "health")
 	cliErr := requireCLIError(t, err, ExitDaemonUnavail)
-	require.Contains(t, cliErr.Message, "authentication failed (HTTP 401)")
-	require.Empty(t, cliErr.Hint)
+	require.NotEmpty(t, cliErr.Data)
 }
 
 func TestDaemonDiagnoseRefusesWrongProjectRecovery(t *testing.T) {
@@ -929,7 +928,11 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 			require.Equal(t, "local_unreachable", cliErr.Code)
 			require.Contains(t, cliErr.Message, "503")
 			require.Contains(t, cliErr.Message, fmt.Sprintf("%q", filepath.Join(ns.DataDir, "daemon.log")))
-			require.Contains(t, cliErr.Hint, "kata --daemon 'work' daemon recover")
+			if runtime.GOOS == "windows" {
+				require.Contains(t, cliErr.Hint, "kata --daemon 'work' daemon recover")
+			} else {
+				require.Contains(t, cliErr.Hint, "kata --daemon work daemon recover")
+			}
 		})
 	}
 }

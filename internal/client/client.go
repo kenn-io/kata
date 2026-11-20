@@ -22,6 +22,7 @@ import (
 
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
+	"go.kenn.io/kata/internal/federation/joincommand"
 	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
@@ -95,10 +96,7 @@ func (e *LocalDaemonUnreachableError) Summary() string {
 
 // RecoveryAdvice describes actions appropriate for the selected process.
 func (e *LocalDaemonUnreachableError) RecoveryAdvice() string {
-	message := ""
-	if e.WebOrigin != "" {
-		message = "Try to save goroutine stacks from " + e.WebOrigin + "/debug/pprof/goroutine?debug=2 without a token. If authentication is required, send the token in an Authorization: Bearer header only to an independently verified endpoint, such as the owner-only Unix socket. "
-	}
+	message := e.profilingAdvice()
 	if e.ManagedExternally {
 		if e.VerifiedProcess && goruntime.GOOS != "windows" {
 			message += fmt.Sprintf("Wait during startup or migration. If the daemon is stuck, recheck the PID and endpoint before stopping it. Use kill -QUIT %d to dump goroutines to standard error and stop it. ", e.PID)
@@ -106,25 +104,30 @@ func (e *LocalDaemonUnreachableError) RecoveryAdvice() string {
 		return message + "Restart it through its service manager if it has one, or with the original options and environment"
 	}
 	if !e.VerifiedProcess {
-		return "Inspect the selected process and its credentials; do not switch databases"
+		return message + "Inspect the selected process and its credentials; do not switch databases"
 	}
 	message += "Wait during startup or migration. If the daemon is stuck, recheck the PID and endpoint before stopping it. "
-	if goruntime.GOOS == "windows" {
-		message += fmt.Sprintf("Stop it with taskkill /PID %d /F", e.PID)
-	} else {
-		message += fmt.Sprintf("Use kill -QUIT %d to dump goroutines to standard error and stop it", e.PID)
+	if goruntime.GOOS != "windows" {
+		message += fmt.Sprintf("Use kill -QUIT %d to dump goroutines to standard error and stop it. ", e.PID)
 	}
 	switch {
 	case e.Profile != "" && e.ProfileAutostart:
 		if goruntime.GOOS == "windows" {
-			return message + ". Then run in PowerShell kata --daemon '" + strings.ReplaceAll(e.Profile, "'", "''") + "' daemon recover"
+			return message + "Then run in PowerShell kata --daemon '" + strings.ReplaceAll(e.Profile, "'", "''") + "' daemon recover"
 		}
-		return message + ". Then run kata --daemon '" + strings.ReplaceAll(e.Profile, "'", "'\"'\"'") + "' daemon recover"
+		return message + "Then run kata --daemon " + joincommand.ShellQuote(e.Profile) + " daemon recover"
 	case e.autoStarted:
-		return message + ". Then rerun the original command or any command that autostarts the daemon. daemon status, daemon diagnose, and health only inspect"
+		return message + "Then rerun the original command or any command that autostarts the daemon. daemon status, daemon diagnose, and health only inspect"
 	default:
-		return message + ". Then start it again the way you originally started it (same options and environment)"
+		return message + "Then start it again the way you originally started it (same options and environment)"
 	}
+}
+
+func (e *LocalDaemonUnreachableError) profilingAdvice() string {
+	if e.WebOrigin != "" {
+		return "Try to save goroutine stacks from " + e.WebOrigin + "/debug/pprof/goroutine?debug=2 without a token. If authentication is required, send the token in an Authorization: Bearer header only to an independently verified endpoint, such as the owner-only Unix socket. "
+	}
+	return ""
 }
 
 func (e *LocalDaemonUnreachableError) Unwrap() error {
@@ -184,11 +187,14 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 			address := ep.ConfigAddress()
 			url, info, probeErr := probe(ctx, address)
 			if probeErr != nil {
-				if err := ctx.Err(); err != nil {
+				if err := ctx.Err(); errors.Is(err, context.Canceled) {
 					yield(liveDaemon{}, err)
 					return
 				}
 				if !yield(liveDaemon{}, NewLocalDaemonUnreachable(dataDir, r, probeErr)) {
+					return
+				}
+				if ctx.Err() != nil {
 					return
 				}
 				continue

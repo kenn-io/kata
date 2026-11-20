@@ -267,6 +267,8 @@ func waitForSupervisedDaemon(
 			if advice != "" {
 				e.ManagedExternally = true
 				advice = e.RecoveryAdvice()
+			} else if !errors.Is(caller.Err(), context.Canceled) {
+				advice = strings.TrimSpace(e.profilingAdvice())
 			}
 			message = &supervisedWaitError{message: message.Error() + ": " + e.Summary(), cause: errors.Join(message, unreachable)}
 		} else {
