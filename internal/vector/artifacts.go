@@ -143,17 +143,8 @@ func (ix *Index) ReconcileArtifacts(ctx context.Context, key string, source db.S
 		if received != comparison {
 			continue
 		}
-		if allowed != nil {
-			permitted, err := allowed(ctx, artifact.ProjectUID)
-			if err != nil {
-				return reused, err
-			}
-			if !permitted {
-				continue
-			}
-		}
-		imported, err := ix.reuseArtifact(ctx, key, source, artifact, expected, doc.Revision)
-		if errors.Is(err, kitvec.ErrStale) || (err == nil && !imported) {
+		imported, err := ix.reuseArtifact(ctx, key, source, artifact, expected, doc.Revision, allowed, true)
+		if err == nil && !imported {
 			continue
 		}
 		if err != nil {
@@ -170,7 +161,21 @@ func (ix *Index) ReconcileArtifacts(ctx context.Context, key string, source db.S
 // edit need a fresh offer; retention queues one only when a newer content
 // event made the bytes current. Retention runs before the import stamps the
 // document, so a failed re-offer leaves the document pending and is retried.
-func (ix *Index) reuseArtifact(ctx context.Context, key string, source db.Storage, artifact embedding.EmbeddingArtifact, expected embedding.ArtifactIdentity, revision any) (bool, error) {
+func (ix *Index) reuseArtifact(ctx context.Context, key string, source db.Storage, artifact embedding.EmbeddingArtifact, expected embedding.ArtifactIdentity, revision any, allowed func(context.Context, string) (bool, error), ignoreStale bool) (imported bool, err error) {
+	if allowed != nil {
+		permitted, err := allowed(ctx, artifact.ProjectUID)
+		if err != nil || !permitted {
+			return false, err
+		}
+	}
+	// Ignore stale reuse errors only after policy errors have been returned.
+	if ignoreStale {
+		defer func() {
+			if errors.Is(err, kitvec.ErrStale) {
+				imported, err = false, nil
+			}
+		}()
+	}
 	if retainer, ok := source.(db.EmbeddingArtifactStorage); ok {
 		_, err := retainer.RetainEmbeddingArtifact(ctx, artifact)
 		if errors.Is(err, db.ErrFederationIngestValidation) {

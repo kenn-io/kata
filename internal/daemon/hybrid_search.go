@@ -218,10 +218,7 @@ func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 	ctx = db.WithAuthorizedProjects(ctx, []string{project.UID})
 	if p.EmbeddingProjectAllowed != nil {
 		allowed, err := p.EmbeddingProjectAllowed(ctx, project.UID)
-		if err != nil {
-			return nil, false, err
-		}
-		if !allowed {
+		if err != nil || !allowed {
 			return nil, false, errors.New("semantic search is unavailable for this project")
 		}
 	}

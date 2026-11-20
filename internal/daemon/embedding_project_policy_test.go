@@ -115,7 +115,7 @@ func TestEmbeddingProjectPolicyRetainedArtifacts(t *testing.T) {
 	for _, tc := range []struct {
 		path string
 		err  error
-	}{{"reconcile", nil}, {"reconcile", policyErr}, {"fill", nil}, {"fill", policyErr}} {
+	}{{"reconcile", nil}, {"reconcile", policyErr}, {"reconcile", kitvec.ErrStale}, {"fill", nil}, {"fill", policyErr}, {"fill", kitvec.ErrStale}} {
 		name := tc.path
 		if tc.err != nil {
 			name += "-error"

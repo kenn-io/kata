@@ -238,16 +238,7 @@ func (s *artifactCaptureStore) reuseArtifacts(ctx context.Context, key string, i
 		if received != comparison {
 			continue
 		}
-		if s.allowed != nil {
-			permitted, err := s.allowed(ctx, artifact.ProjectUID)
-			if err != nil {
-				return err
-			}
-			if !permitted {
-				continue
-			}
-		}
-		imported, err := s.index.reuseArtifact(ctx, key, s.source, artifact, expected, scanned.Revision)
+		imported, err := s.index.reuseArtifact(ctx, key, s.source, artifact, expected, scanned.Revision, s.allowed, false)
 		if err != nil {
 			return err
 		}
