@@ -2338,11 +2338,16 @@ describe('App', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Today' }))
     await waitFor(() => expect(window.location.search).toBe('?view=today'))
     await waitFor(() => expect(document.title).toBe('Today · Kata'))
+    const localReference = referenceRequests.findLast(
+      (request) => request.headers.get('X-Kata-Web-Daemon') === 'example-local',
+    )
+    expect(localReference?.signal.aborted).toBe(false)
     now = 120_000
     await fireEvent.click(screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }))
     await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
     expect(await screen.findByText('Loading Kata…')).not.toBeNull()
     await waitFor(() => expect(document.title).toBe('Kata'))
+    expect(localReference?.signal.aborted).toBe(true)
     releaseRemote()
     expect(await screen.findByRole('button', { name: /Remote issue/ })).not.toBeNull()
     expect(window.location.search).toBe('?view=all-open')
@@ -2353,12 +2358,6 @@ describe('App', () => {
     await expect(telemetry[1]!.json()).resolves.toMatchObject({
       properties: { duration_bucket: '1_to_5m' },
     })
-    expect(
-      referenceRequests.findLast(
-        (request) => request.headers.get('X-Kata-Web-Daemon') === 'example-local',
-      )?.signal.aborted,
-    ).toBe(true)
-
     await fireEvent.click(
       screen.getByRole('button', { name: 'Switch Kata daemon: example-remote' }),
     )
