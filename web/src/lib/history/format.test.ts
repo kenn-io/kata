@@ -48,6 +48,13 @@ describe('describeKataEvent', () => {
     expect(descriptor.tone).toBe('positive')
   })
 
+  test('issue.soft_deleted includes the reason from payload', () => {
+    const descriptor = describeKataEvent(
+      makeEvent('issue.soft_deleted', { reason: 'duplicate of the import task' }),
+    )
+    expect(descriptor.label).toBe('deleted (duplicate of the import task)')
+    expect(descriptor.tone).toBe('negative')
+  })
   test('issue.labeled formats the label value', () => {
     expect(describeKataEvent(makeEvent('issue.labeled', { label: 'p0' })).label).toBe(
       'added label p0',

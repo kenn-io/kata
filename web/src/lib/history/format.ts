@@ -118,8 +118,14 @@ export function describeKataEvent(event: KataTaskEvent): KataEventDescriptor {
       const label = to === '-' ? 'moved' : `moved to ${to}`
       return { icon: FolderInputIcon, label, tone: 'neutral' }
     }
-    case 'issue.soft_deleted':
-      return { icon: TrashIcon, label: 'deleted', tone: 'negative' }
+    case 'issue.soft_deleted': {
+      const reason = payload.reason as string | undefined
+      return {
+        icon: TrashIcon,
+        label: reason ? `deleted (${reason})` : 'deleted',
+        tone: 'negative',
+      }
+    }
     case 'issue.restored':
       return { icon: ArchiveRestoreIcon, label: 'restored', tone: 'positive' }
     default:

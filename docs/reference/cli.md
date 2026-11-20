@@ -1258,7 +1258,7 @@ Delete, restore, and purge:
 ```sh
 kata delete <ref> --force --confirm "DELETE <qualified-id>" [--reason TEXT]
 kata restore <ref>
-kata purge <ref> --force --confirm "PURGE <qualified-id>" [--reason TEXT]
+kata purge <ref> --force --confirm "PURGE <qualified-id>"
 ```
 
 `delete` is reversible with `restore`, while `purge` is irreversible. The
@@ -1269,8 +1269,7 @@ explicitly asks for that exact operation and ref.
 `delete --reason` records why on the issue's `issue.soft_deleted` event, so
 whoever reads the deleted issue's history before restoring it sees the reason.
 It needs a daemon that reports API 0.73.0 or newer; an older daemon gets an
-upgrade message and the issue is not deleted. `purge --reason` stores the
-reason in the purge log.
+upgrade message and the issue is not deleted.
 
 ## Labels, ownership, and claiming
 

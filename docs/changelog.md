@@ -11,9 +11,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Say why you delete an issue with `kata delete --reason <text>`. The reason
   is recorded on the `issue.soft_deleted` event, so the deleted issue's
-  history shows who deleted it, when and why. `POST .../actions/delete` and
-  the MCP `kata.delete` tool already accepted a `reason` and now keep it.
-  `--reason` needs a daemon on API 0.73.0 or newer.
+  history in the API, `kata tui` and the web UI shows who deleted it, when and
+  why. `POST .../actions/delete` and the MCP `kata.delete` tool already
+  accepted a `reason`, and a daemon on API 0.73.0 or newer now keeps it;
+  `kata delete --reason` refuses to delete through an older daemon.
 - Find an issue in `kata tui` by what it is about: press `/` in a project, then
   `ctrl+t` to ask the daemon for ranked results instead of filtering the loaded
   rows. Of the daemon's best 50 hits, the TUI shows those among the issues it

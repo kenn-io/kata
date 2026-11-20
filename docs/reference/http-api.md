@@ -360,8 +360,7 @@ issue and ignores it otherwise.
 
 `POST /api/v1/projects/{project_id}/issues/{ref}/actions/delete` records its
 optional `reason` on the `issue.soft_deleted` event, so whoever reads that
-history sees why the issue was deleted. Purge stores its `reason` in
-`purge_log.reason`.
+history sees why the issue was deleted.
 
 If you need close evidence, pass `include_effective_close_event_uid=true`. When
 a visible native close currently supplies the issue's closed status, the
