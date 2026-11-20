@@ -8,8 +8,9 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-// RunParentReplacement checks a conflict and the events of a successful replacement.
-func RunParentReplacement(t *testing.T, store db.Storage) {
+// RunParentReplacementMissingExpectedLink checks a concurrent removal between
+// handler preflight and the atomic parent replacement returns a conflict.
+func RunParentReplacementMissingExpectedLink(t *testing.T, store db.Storage) {
 	t.Helper()
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "example-project")

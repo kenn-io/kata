@@ -381,11 +381,6 @@ projects through the same hub to project the edge locally. Different DNS names
 and IP aliases are deliberately different spoke groups even if they route to
 the same daemon.
 
-A direct spoke can remove or replace a cross-project parent using different
-project actors when the host approves the referenced project's credential.
-Moves, other link removals, and a displaced parent known only to the hub still
-require same-actor authority. See [host-owned access](../development/embedding.md#host-owned-access).
-
 ## Leases And Write Gates
 
 The root arbitrates leases, while replicas accept ordinary edits locally.

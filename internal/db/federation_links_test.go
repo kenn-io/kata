@@ -68,6 +68,10 @@ func TestFederationEventAffectsLinks(t *testing.T) {
 	}
 }
 
+// Link reconciliation reads only FoldProjection.Links, and the group fold is
+// restricted to FederationLinkAffectingEventTypes for cost. That restriction is
+// only sound if it cannot change Links, so assert the two folds agree over a
+// stream that mixes link-bearing and unrelated events.
 func TestFoldingOnlyLinkAffectingEventsPreservesLinks(t *testing.T) {
 	const projectUID = "01HZNQ7VFPK1XGD8R5MABCD4EY"
 	child := "01HZNQ7VFPK1XGD8R5MABCD4EA"
