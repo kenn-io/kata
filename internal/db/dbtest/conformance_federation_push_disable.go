@@ -47,7 +47,7 @@ func checkFederationPushDisableWaitsForLocalWork(t *testing.T, store db.Storage)
 	require.NoError(t, err)
 	require.NoError(t, store.UpsertClaimCache(ctx, db.IssueClaim{
 		ClaimUID: otherClaim, ProjectID: project.ID, IssueUID: issue.UID,
-		Holder: "someone-else", HolderInstanceUID: otherInstance, ClientKind: "cli",
+		Holder: "bound-agent", HolderInstanceUID: otherInstance, ClientKind: "cli",
 		ClaimKind: "hard", AcquiredAt: now, UpdatedAt: now, Revision: 1,
 	}))
 	ownClaim, err := uid.New()
@@ -59,11 +59,11 @@ func checkFederationPushDisableWaitsForLocalWork(t *testing.T, store db.Storage)
 	require.NoError(t, store.AdvanceFederationPushCursor(ctx, project.ID, accepted))
 	require.NoError(t, store.UpsertClaimCache(ctx, db.IssueClaim{
 		ClaimUID: ownClaim, ProjectID: project.ID, IssueUID: second.UID,
-		Holder: "bound-agent", HolderInstanceUID: otherInstance, ClientKind: "agent",
+		Holder: "bound-agent", HolderInstanceUID: store.InstanceUID(), ClientKind: "agent",
 		ClaimKind: "hard", AcquiredAt: now, UpdatedAt: now, Revision: 1,
 	}))
 	_, err = store.DisableFederationPushWhenSettled(ctx, project.ID, store.InstanceUID())
-	require.ErrorIs(t, err, db.ErrFederationClaimsHeld, "a live claim held through this replica keeps push on")
+	require.ErrorIs(t, err, db.ErrFederationClaimsHeld, "a live claim held by this replica keeps push on")
 	require.NoError(t, store.ApplyClaimStatus(ctx, project.ID, second.UID, db.ClaimStatus{Held: false, HubNow: now.Add(time.Second)}))
 
 	pending, err := store.EnqueuePendingClaim(ctx, db.PendingClaimParams{
@@ -79,7 +79,7 @@ func checkFederationPushDisableWaitsForLocalWork(t *testing.T, store db.Storage)
 	before, err := store.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
 	disabled, err := store.DisableFederationPushWhenSettled(ctx, project.ID, store.InstanceUID())
-	require.NoError(t, err, "a claim held by another replica does not belong to this one")
+	require.NoError(t, err, "another installation's claim does not belong to this one, even under the same actor")
 	assert.False(t, disabled.PushEnabled)
 	assert.Equal(t, before.PushCursorEventID, disabled.PushCursorEventID)
 	assert.Equal(t, before.PullCursorEventID, disabled.PullCursorEventID)

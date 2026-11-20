@@ -355,13 +355,13 @@ func federationReplicaSettledTx(ctx context.Context, tx *sql.Tx, binding db.Fede
 		   WHERE project_id = ?
 		     AND released_at IS NULL
 		     AND (claim_kind = 'hard' OR expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-		     AND (holder_instance_uid = ? OR holder = ?)
+		     AND holder_instance_uid = ?
 		) OR EXISTS (
 		  SELECT 1 FROM pending_claim_requests
 		   WHERE project_id = ?
 		     AND rejected_at IS NULL
 		     AND resolved_at IS NULL)`,
-		binding.ProjectID, originInstanceUID, actor, binding.ProjectID).Scan(&claims); err != nil {
+		binding.ProjectID, originInstanceUID, binding.ProjectID).Scan(&claims); err != nil {
 		return fmt.Errorf("check federation claims: %w", err)
 	}
 	if claims != 0 {

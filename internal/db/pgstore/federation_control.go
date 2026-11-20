@@ -369,10 +369,10 @@ WHERE project_id=$1 AND origin_instance_uid=$2 AND id>$3 AND `+pgFederationPushE
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM issue_claims
 WHERE project_id=$1 AND released_at IS NULL
   AND (claim_kind='hard' OR expires_at > $2)
-  AND (holder_instance_uid=$3 OR holder=$4))
+  AND holder_instance_uid=$3)
 OR EXISTS (SELECT 1 FROM pending_claim_requests
 WHERE project_id=$1 AND rejected_at IS NULL AND resolved_at IS NULL)`,
-		binding.ProjectID, storedTime(time.Now()), originInstanceUID, actor).Scan(&claims); err != nil {
+		binding.ProjectID, storedTime(time.Now()), originInstanceUID).Scan(&claims); err != nil {
 		return mapSQLError(err, nil)
 	}
 	if claims {
