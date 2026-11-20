@@ -423,7 +423,7 @@ func syncDirectSpoke(
 			}()
 		}
 	}
-	if hubHoldsPull(ctx, binding) {
+	if hubHoldsPull(ctx, binding.ProjectID, binding.PullCursorEventID, client.heldPollTarget(hubProjectID)) {
 		interrupted, err := federationPullInterrupted(ctx, store, binding.ProjectID)
 		if err != nil {
 			return err
@@ -1785,7 +1785,7 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 	if credentials == nil {
 		credentials = config.DefaultFederationCredentialStore()
 	}
-	polls := newHubLongPolls(ctx, r.DB, credentials, r.clientOpts(), interval, r.DrainAdmission)
+	polls := newHubLongPolls(ctx, r.DB, credentials, r.clientOpts(), interval, r.DrainAdmission, r.OnError)
 	r.longPolls = polls
 	defer func() {
 		polls.stopAll()

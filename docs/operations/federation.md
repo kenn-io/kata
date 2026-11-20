@@ -633,9 +633,11 @@ Held polls need a few things from the deployment:
   open requests than it did with interval polls.
 - A hub holds at most 256 polls, and at most 32 per spoke credential. Signed
   polls can use at most half of the hub's federation control slots. Past a
-  limit the hub answers at once and the spoke falls back to its interval.
+  limit the hub answers at once and the spoke falls back to its interval. It
+  asks for a held poll again after a growing delay, up to 16 intervals.
 - The spoke asks for a wait 15 seconds shorter than its request budget, so a
-  `KATA_HTTP_TIMEOUT` under 16 seconds turns held polls off.
+  `KATA_HTTP_TIMEOUT` under 16 seconds turns held polls off. The daemon log
+  says so once for each binding.
 
 The hub checks the poll's full authorization again before each read and after
 the last one, including the signing key for signed polls. A revoked
