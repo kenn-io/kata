@@ -223,13 +223,6 @@ type Model struct {
 	// searchTickGen does the same for the typing-pause timer.
 	nextSearchReq int64
 	searchTickGen int64
-	// askCancel stops the reads of the newest ask and recheckCancel those of
-	// the recheck in flight, recheckReq naming it. They live here, not in the
-	// ranked answer, because that value is saved and restored by Esc and the
-	// Inbox, which must not bring back a recheck that is long finished.
-	askCancel     context.CancelFunc
-	recheckCancel context.CancelFunc
-	recheckReq    int64
 }
 
 // initialModel constructs the root Bubble Tea model. Style vars are
@@ -498,9 +491,6 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m, postFetchCmd = m.reconcileSplitDetailAfterRefetch(prevPID, prevUID, prevHas)
 		}
-		var recheckCmd tea.Cmd
-		m, recheckCmd = m.recheckRankedHits()
-		postFetchCmd = combineCmds(postFetchCmd, recheckCmd)
 	}
 	if mut, ok := msg.(mutationDoneMsg); ok {
 		m = m.recordUndoAttempt(mut)
@@ -2474,10 +2464,9 @@ func (m Model) cancelInput() (Model, tea.Cmd) {
 		pre.Day = m.list.filter.Day
 		m.list.filter = pre
 		// An answer still in flight belongs to the query being discarded.
-		m = m.cancelSearchReads()
 		// The saved answer predates any refresh since the bar opened, so bring
 		// it up to the loaded rows before it comes back.
-		m.list.ranked = m.input.preRanked.discardInFlight().refreshed(m.list.issues, m.list.complete())
+		m.list.ranked = m.input.preRanked.discardInFlight().loadedOnly(m.list.issues)
 		m.searchTickGen++
 		snapshot := m.input.preListSelection
 		m.list.cursor = snapshot.cursor
@@ -2494,12 +2483,6 @@ func (m Model) cancelInput() (Model, tea.Cmd) {
 		m, cmd = m.restoreSearchDetailIfNeeded(preSplitDetail, nil)
 	case searchCanceled:
 		m, cmd = m.followSearchResultIfNeeded(nil)
-	}
-	if searchCanceled {
-		// Only the search bar restores a saved answer that may be out of date.
-		var recheckCmd tea.Cmd
-		m, recheckCmd = m.recheckRankedHits()
-		cmd = combineCmds(cmd, recheckCmd)
 	}
 	return m, cmd
 }

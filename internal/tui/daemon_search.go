@@ -3,9 +3,8 @@ package tui
 import (
 	"context"
 	"errors"
-	"net/http"
+	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -19,10 +18,6 @@ const (
 	daemonSearchDebounce = 250 * time.Millisecond
 	// A meaning search embeds the query first, which is slower than a list read.
 	daemonSearchTimeout = 15 * time.Second
-	// daemonSearchReadWorkers bounds the reads in flight at once. A search
-	// reads at most daemonSearchLimit issues, so one ask or one recheck costs
-	// at most that many requests.
-	daemonSearchReadWorkers = 8
 )
 
 // rankedSearch is the daemon's ranked answer to the search bar's query and the
@@ -42,185 +37,27 @@ type rankedSearch struct {
 	hasAnswer bool
 	// answered is the query the hits answer.
 	answered SearchQuery
-	// hits are the answer's issues in the daemon's order, replaced by the
-	// list's own copy of an issue whenever a refresh brings a fresher one.
-	hits    []Issue
+	// hits are the answer's issues that are among the loaded rows, in the
+	// daemon's order, each the list's own copy of the issue. A refresh swaps in
+	// the fresher copy and drops a hit the list no longer holds.
+	hits []Issue
+	// beyond counts the answer's hits that were not among the loaded rows.
+	beyond  int
 	lexical bool
 }
 
-// hitRead is the outcome of reading one hit the loaded list does not hold.
-type hitRead struct {
-	uid   string
-	issue Issue
-	// gone is true when the issue was deleted or now lives in another project.
-	gone bool
-	err  error
-}
-
-// missingHitUIDs lists the hits the loaded issues do not hold.
-func missingHitUIDs(hits, issues []Issue) []string {
-	loaded := make(map[string]struct{}, len(issues))
-	for _, iss := range issues {
-		loaded[iss.UID] = struct{}{}
-	}
-	var uids []string
-	for _, hit := range hits {
-		if _, ok := loaded[hit.UID]; !ok {
-			uids = append(uids, hit.UID)
-		}
-	}
-	return uids
-}
-
-// readHits reads each uid in project pid, a few at a time. The search route's
-// hits carry no labels or planning dates, so this is how an issue beyond a
-// truncated list gets the data the list filters read; it is also how a hit that
-// vanished is noticed when the loaded list cannot say. The show route answers
-// 404 for a deleted issue, so no deleted-at check is needed.
-func readHits(ctx context.Context, api listAPI, pid int64, uids []string) []hitRead {
-	reads := make([]hitRead, len(uids))
-	sem := make(chan struct{}, daemonSearchReadWorkers)
-	var wg sync.WaitGroup
-	for i, uid := range uids {
-		sem <- struct{}{}
-		wg.Add(1)
-		go func() {
-			defer func() { <-sem; wg.Done() }()
-			reads[i].uid = uid
-			iss, err := api.GetIssue(ctx, pid, uid)
-			var apiErr *APIError
-			switch {
-			case errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound:
-				reads[i].gone = true
-			case err != nil:
-				reads[i].err = err
-			case iss == nil || iss.ProjectID != pid:
-				reads[i].gone = true
-			default:
-				reads[i].issue = *iss
-			}
-		}()
-	}
-	wg.Wait()
-	return reads
-}
-
-// mergeReads applies reads to hits, keeping the daemon's order: a gone hit is
-// dropped, a read one is swapped for its full copy, and any other is kept. When
-// strict, a failed read is returned as the error instead: an ask filtering on
-// partial data would silently hide valid hits, while a recheck can simply keep
-// what it has.
-func mergeReads(hits []Issue, reads []hitRead, strict bool) ([]Issue, error) {
-	byUID := make(map[string]hitRead, len(reads))
-	for _, read := range reads {
-		if read.err != nil && strict {
-			return nil, read.err
-		}
-		byUID[read.uid] = read
-	}
-	merged := make([]Issue, 0, len(hits))
-	for _, hit := range hits {
-		read, ok := byUID[hit.UID]
-		switch {
-		case ok && read.gone:
-		case ok && read.err == nil:
-			merged = append(merged, read.issue)
-		default:
-			merged = append(merged, hit)
-		}
-	}
-	return merged, nil
-}
-
-// cancelAskReads stops the reads of the ask in flight, the way detail reads are
-// stopped when their issue is left.
-func (m Model) cancelAskReads() Model {
-	if m.askCancel != nil {
-		m.askCancel()
-		m.askCancel = nil
-	}
-	return m
-}
-
-// cancelRecheck stops the recheck in flight; its answer, if it still comes,
-// is dropped because recheckReq no longer matches.
-func (m Model) cancelRecheck() Model {
-	if m.recheckCancel != nil {
-		m.recheckCancel()
-		m.recheckCancel = nil
-	}
-	m.recheckReq = 0
-	return m
-}
-
-// cancelSearchReads stops every search read still out, on leaving the search.
-func (m Model) cancelSearchReads() Model {
-	return m.cancelAskReads().cancelRecheck()
-}
-
-// recheckRankedHits is run after the list refreshes. A refresh that was cut
-// off at the working-set limit cannot say a missing hit is gone, so the hits it
-// does not hold are read one by one; the answer drops the vanished ones.
-func (m Model) recheckRankedHits() (Model, tea.Cmd) {
-	r := m.list.ranked
-	if m.api == nil || m.scope.allProjects || m.scope.projectID == 0 || !m.list.truncated ||
-		!r.hasAnswer || m.recheckCancel != nil {
-		return m, nil
-	}
-	uids := missingHitUIDs(r.hits, m.list.issues)
-	if len(uids) == 0 {
-		return m, nil
-	}
-	m.nextSearchReq++
-	req := m.nextSearchReq
-	ctx, cancel := context.WithTimeout(context.Background(), daemonSearchTimeout)
-	m.recheckReq, m.recheckCancel = req, cancel
-	api, pid, connGen := m.api, m.scope.projectID, m.connGen
-	return m, func() tea.Msg {
-		defer cancel()
-		return daemonSearchRecheckMsg{req: req, connGen: connGen, projectID: pid, reads: readHits(ctx, api, pid, uids)}
-	}
-}
-
-func (m Model) handleDaemonSearchRecheck(msg daemonSearchRecheckMsg) (Model, tea.Cmd) {
-	if msg.req != m.recheckReq {
-		return m, nil
-	}
-	m = m.cancelRecheck()
-	if m.staleConnMsg(msg.connGen) || m.scope.allProjects || m.scope.projectID != msg.projectID {
-		// The recheck belonged to a scope or daemon that was left. It held off
-		// the current list's recheck while it was out, so start that one now.
-		return m.recheckRankedHits()
-	}
-	prevPID, prevUID, prevHas := highlightedIdentity(m.list)
-	hits, _ := mergeReads(m.list.ranked.hits, msg.reads, false)
-	m.list.ranked.hits = hits
-	// A hit the list took in meanwhile is better served by its loaded copy.
-	m.list.ranked = m.list.ranked.refreshed(m.list.issues, false)
-	m.list = m.list.clampCursorToFilter()
-	m.list = m.list.syncSelection(m.list.visibleRows())
-	return m.reconcileSplitDetailAfterRefetch(prevPID, prevUID, prevHas)
-}
-
-// refreshed swaps each hit for the list's current copy of the same issue.
-// When issues is the complete list (complete), a hit it lacks is gone: deleted,
-// moved, or outside what the list fetches (the Inbox holds only open issues).
-func (r rankedSearch) refreshed(issues []Issue, complete bool) rankedSearch {
-	if len(r.hits) == 0 {
-		return r
-	}
+// loadedOnly keeps the hits the loaded issues hold, in the daemon's order, each
+// as the list's own copy. The route's hits carry no labels or planning dates and
+// may be stale; the loaded rows are what every other list filter reads.
+func (r rankedSearch) loadedOnly(issues []Issue) rankedSearch {
 	byUID := make(map[string]Issue, len(issues))
 	for _, iss := range issues {
-		if iss.UID != "" {
-			byUID[iss.UID] = iss
-		}
+		byUID[iss.UID] = iss
 	}
 	hits := make([]Issue, 0, len(r.hits))
 	for _, hit := range r.hits {
 		if cur, ok := byUID[hit.UID]; ok {
 			hits = append(hits, cur)
-		} else if !complete {
-			hits = append(hits, hit)
 		}
 	}
 	r.hits = hits
@@ -286,10 +123,16 @@ func (lm listModel) rankedNote() string {
 	switch {
 	case !r.live && !shown:
 		return ""
-	case shown && r.lexical:
-		return "ranked by words only (lexical)"
 	case shown:
-		return "ranked by words and meaning"
+		note := "ranked by words and meaning"
+		if r.lexical {
+			note = "ranked by words only (lexical)"
+		}
+		if lm.truncated && r.beyond > 0 {
+			// The list holds the first issues only; say what the answer had past them.
+			note += fmt.Sprintf(" · %d hits beyond the loaded issues", r.beyond)
+		}
+		return note
 	case r.err != nil:
 		return "search failed"
 	case strings.TrimSpace(lm.filter.Search) == "":
@@ -335,7 +178,6 @@ func (m Model) toggleDaemonSearch() (Model, tea.Cmd) {
 	}
 	m.daemonSearch = !m.daemonSearch
 	m.searchTickGen++
-	m = m.cancelSearchReads()
 	prevPID, prevUID, prevHas := highlightedIdentity(m.list)
 	m = m.syncDaemonSearch()
 	m.list = m.list.dropRanked()
@@ -392,14 +234,12 @@ func (m Model) askDaemonIfStale() (Model, tea.Cmd) {
 	m.searchTickGen++
 	m.list.ranked.req, m.list.ranked.asked, m.list.ranked.pending = req, query, true
 	ask := SearchQuery{Query: query, Limit: daemonSearchLimit}
-	m = m.cancelAskReads()
-	ctx, cancel := context.WithTimeout(context.Background(), daemonSearchTimeout)
-	m.askCancel = cancel
 	api, pid, connGen := m.api, m.scope.projectID, m.connGen
 	return m, func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), daemonSearchTimeout)
 		defer cancel()
 		answer, err := api.SearchIssues(ctx, pid, ask)
-		return daemonSearchDoneMsg{req: req, connGen: connGen, projectID: pid, query: ask, answer: answer, err: err}
+		return daemonSearchDoneMsg{req: req, connGen: connGen, query: ask, answer: answer, err: err}
 	}
 }
 
@@ -444,38 +284,7 @@ func (m Model) handleDaemonSearchDone(msg daemonSearchDoneMsg) (Model, tea.Cmd) 
 	if msg.err != nil {
 		return m.failAsk(msg.err), nil
 	}
-	// The list may have changed since the ask went out, so what is missing from
-	// it is judged now: a complete list means those hits are outside it, a
-	// truncated one cannot say and the hits are read.
-	missing := missingHitUIDs(msg.answer.Issues, m.list.issues)
-	if !m.list.truncated || len(missing) == 0 {
-		return m.applyAnswer(msg.query, msg.answer)
-	}
-	m = m.cancelAskReads()
-	ctx, cancel := context.WithTimeout(context.Background(), daemonSearchTimeout)
-	m.askCancel = cancel
-	api, pid := m.api, msg.projectID
-	return m, func() tea.Msg {
-		defer cancel()
-		return daemonSearchHydrateMsg{
-			daemonSearchDoneMsg: msg, reads: readHits(ctx, api, pid, missing),
-		}
-	}
-}
-
-// handleDaemonSearchHydrate lands an answer whose missing hits were read.
-func (m Model) handleDaemonSearchHydrate(msg daemonSearchHydrateMsg) (Model, tea.Cmd) {
-	m, ok := m.guardAnswer(msg.connGen, msg.req, msg.query)
-	if !ok {
-		return m, nil
-	}
-	hits, err := mergeReads(msg.answer.Issues, msg.reads, true)
-	if err != nil {
-		return m.failAsk(err), nil
-	}
-	answer := *msg.answer
-	answer.Issues = hits
-	return m.applyAnswer(msg.query, &answer)
+	return m.applyAnswer(msg.query, msg.answer)
 }
 
 // applyAnswer shows the daemon's hits, starting at the first one.
@@ -487,11 +296,17 @@ func (m Model) applyAnswer(query SearchQuery, answer *SearchAnswer) (Model, tea.
 	}
 	r.err = nil
 	r.hasAnswer = true
-	r.hits = answer.Issues
+	r.hits, r.beyond = answer.Issues, 0
 	r.answered = query
 	r.lexical = answer.Mode == "" || answer.Mode == "lexical"
 	prevPID, prevUID, prevHas := highlightedIdentity(m.list)
-	m.list.ranked = r.refreshed(m.list.issues, m.list.complete())
+	if !m.list.loading {
+		// A list still loading is empty, so nothing can be judged against it;
+		// its first fetch narrows the hits.
+		r = r.loadedOnly(m.list.issues)
+		r.beyond = len(answer.Issues) - len(r.hits)
+	}
+	m.list.ranked = r
 	m.list.cursor, m.list.windowStart = 0, 0
 	m.list.selectedUID, m.list.selectedProjectID = "", 0
 	m.list = m.list.syncSelection(m.list.visibleRows())
@@ -506,12 +321,6 @@ func (m Model) routeDaemonSearch(msg tea.Msg) (Model, tea.Cmd, bool) {
 	case daemonSearchDoneMsg:
 		next, cmd := m.handleDaemonSearchDone(msg)
 		return next, cmd, true
-	case daemonSearchHydrateMsg:
-		next, cmd := m.handleDaemonSearchHydrate(msg)
-		return next, cmd, true
-	case daemonSearchRecheckMsg:
-		next, cmd := m.handleDaemonSearchRecheck(msg)
-		return next, cmd, true
 	}
 	return m, nil, false
 }
@@ -523,26 +332,9 @@ type daemonSearchTickMsg struct{ gen int64 }
 // daemonSearchDoneMsg carries the daemon's answer to ask; req identifies the
 // ask so an answer that is no longer the newest is dropped.
 type daemonSearchDoneMsg struct {
-	req       int64
-	connGen   uint64
-	projectID int64
-	query     SearchQuery
-	answer    *SearchAnswer
-	err       error
-}
-
-// daemonSearchHydrateMsg is an answer together with the reads of the hits the
-// truncated list did not hold.
-type daemonSearchHydrateMsg struct {
-	daemonSearchDoneMsg
-	reads []hitRead
-}
-
-// daemonSearchRecheckMsg carries the reads of the hits a truncated list did not
-// hold; req is Model.recheckReq at the start, so a cancelled recheck drops.
-type daemonSearchRecheckMsg struct {
-	req       int64
-	connGen   uint64
-	projectID int64
-	reads     []hitRead
+	req     int64
+	connGen uint64
+	query   SearchQuery
+	answer  *SearchAnswer
+	err     error
 }

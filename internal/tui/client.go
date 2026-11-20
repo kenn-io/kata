@@ -288,16 +288,6 @@ func (c *Client) SearchIssues(ctx context.Context, projectID int64, q SearchQuer
 	return answer, nil
 }
 
-// GetIssue reads one issue by ref with its labels and planning dates, the
-// fields a search hit does not carry. It skips the detail view's extra reads.
-func (c *Client) GetIssue(ctx context.Context, projectID int64, ref string) (*Issue, error) {
-	body, err := c.showIssue(ctx, projectID, ref)
-	if err != nil {
-		return nil, err
-	}
-	return &body.Issue, nil
-}
-
 // GetIssueDetail fetches a single issue plus hierarchy metadata by ref.
 // ref is a short_id, qualified short_id, or UID — the daemon's path
 // resolver picks the matching column.
