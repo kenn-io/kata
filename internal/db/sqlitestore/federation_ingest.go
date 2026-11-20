@@ -1625,7 +1625,7 @@ func (d *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.
 			refs = append(refs, previous)
 			delete(peers, previous)
 		}
-		refs = append(refs, primary)
+		refs = append([]string{primary}, refs...)
 		for _, issueUID := range refs {
 			if issueUID == "" {
 				continue

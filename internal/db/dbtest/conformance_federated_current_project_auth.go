@@ -16,6 +16,35 @@ import (
 // Fresh source-stream work can alter an issue which now belongs elsewhere;
 // credential, actor, and host authority follow that current project.
 func checkFederatedFreshCurrentProjectAuthority(t *testing.T, store db.Storage) error {
+	t.Run("moved-child-before-displaced-parent", func(t *testing.T) {
+		ctx := t.Context()
+		source, target, child, _ := federatedRehomeFixture(t, store, "moved-child-displaced-parent")
+		parents, err := store.CreateProject(ctx, "moved-child-parents")
+		require.NoError(t, err)
+		_, err = store.EnableProjectFederation(ctx, parents.ID, "worker")
+		require.NoError(t, err)
+		parent, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: parents.ID, Title: "Existing parent", Author: "worker"})
+		require.NoError(t, err)
+		newParent, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "New parent", Author: "worker"})
+		require.NoError(t, err)
+		_, err = store.CreateLink(ctx, db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: parent.ID, Type: "parent", Author: "worker"})
+		require.NoError(t, err)
+		child, err = store.IssueByUID(ctx, child.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: child.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: child.Revision, Actor: "worker"})
+		require.NoError(t, err)
+		origin, err := uid.New()
+		require.NoError(t, err)
+		grant, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: origin, ProjectID: &source.ID, Capabilities: "push", Actor: "worker"})
+		require.NoError(t, err)
+		payload, err := json.Marshal(map[string]string{"parent_set_uid": newParent.UID})
+		require.NoError(t, err)
+		event := newRemoteEvent(t, source, &child.UID, "issue.links_changed", "worker", origin, time.Now().Add(time.Hour).UnixMilli(), payload)
+		_, err = store.IngestFederationEvents(ctx, db.FederationIngestParams{ProjectID: source.ID, FederationEnrollmentID: grant.Enrollment.ID, SpokeInstanceUID: origin, BoundActor: "worker", EventFeatures: db.SupportedEventFeatures, Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: event}}})
+		var notEnrolled *db.FederationProjectNotEnrolledError
+		require.ErrorAs(t, err, &notEnrolled)
+		require.Equal(t, child.UID, notEnrolled.IssueUID)
+	})
 	t.Run("legacy-unlink-moved-child", func(t *testing.T) {
 		ctx := t.Context()
 		source, target, child, _ := federatedRehomeFixture(t, store, "legacy-unlink-moved")
