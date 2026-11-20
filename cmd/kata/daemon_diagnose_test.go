@@ -921,6 +921,7 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 					require.Equal(t, 1, strings.Count(cliErr.Message, "autostart = false"))
 					require.NotContains(t, cliErr.Message, "service manager")
 					require.Equal(t, 1, strings.Count(cliErr.Hint, "service manager"))
+					require.Contains(t, cliErr.Hint, "Restart it through its service manager if it has one, or with the original options and environment")
 				})
 				return
 			}

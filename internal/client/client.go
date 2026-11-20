@@ -103,7 +103,7 @@ func (e *LocalDaemonUnreachableError) RecoveryAdvice() string {
 		if e.VerifiedProcess && goruntime.GOOS != "windows" {
 			message += fmt.Sprintf("Wait during startup or migration. If the daemon is stuck, recheck the PID and endpoint before stopping it. Use kill -QUIT %d to dump goroutines to standard error and stop it. ", e.PID)
 		}
-		return message + "Restart it through its service manager"
+		return message + "Restart it through its service manager if it has one, or with the original options and environment"
 	}
 	if !e.VerifiedProcess {
 		return "Inspect the selected process and its credentials; do not switch databases"
