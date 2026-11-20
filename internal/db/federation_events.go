@@ -504,7 +504,7 @@ func rejectAmbiguousParentRemoval(event FoldEvent, payload map[string]jsontext.V
 		}
 	}
 	if from == "" || to == "" || reverse || (!forward && !companion) {
-		return fmt.Errorf("%w: Cannot tell which issue was the child in this parent removal.", ErrFederationIngestValidation)
+		return fmt.Errorf("%w: cannot tell which issue was the child in this parent removal", ErrFederationIngestValidation)
 	}
 	return nil
 }
