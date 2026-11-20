@@ -415,6 +415,41 @@ func TestReconcileProviderRestoredIntentAfterUnconfirmedReleaseRequestsNewApprov
 	assert.True(t, binding.PushEnabled)
 }
 
+// The old collaborate approval may still grant claims while its release is
+// unanswered. Restoring collaborate repeats that release, so it waits for
+// such a claim the same way the downgrade did.
+func TestReconcileProviderRestoredIntentRechecksClaimsBeforeRelease(t *testing.T) {
+	f := newIntentChangeFixture(t, federationprovider.IntentCollaborate)
+	require.NoError(t, f.reconcile(t, federationprovider.IntentCollaborate))
+	project, binding := f.binding(t)
+	issue, _, err := f.store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Claimed while the release was unanswered", Author: "someone"})
+	require.NoError(t, err)
+	accepted, err := f.store.MaxLocalOriginEventID(t.Context(), project.ID)
+	require.NoError(t, err)
+	require.NoError(t, f.store.AdvanceFederationPushCursor(t.Context(), project.ID, accepted))
+
+	t.Setenv("KATA_TEST_PROVIDER_RELEASE_DECISION", "exit-two")
+	require.Error(t, f.reconcile(t, federationprovider.IntentReadOnly))
+	now := time.Now().UTC()
+	claimUID, err := uid.New()
+	require.NoError(t, err)
+	require.NoError(t, f.store.UpsertClaimCache(t.Context(), db.IssueClaim{
+		ClaimUID: claimUID, ProjectID: project.ID, IssueUID: issue.UID,
+		Holder: binding.Actor, HolderInstanceUID: f.store.InstanceUID(), ClientKind: "cli",
+		ClaimKind: "hard", AcquiredAt: now, UpdatedAt: now, Revision: 1,
+	}))
+
+	t.Setenv("KATA_TEST_PROVIDER_RELEASE_DECISION", "released")
+	err = f.reconcile(t, federationprovider.IntentCollaborate)
+	require.ErrorIs(t, err, federation.ErrBindingConflict, "the live claim blocks the repeated release")
+	assert.Len(t, f.requests(t), 2, "the release is not sent again while the claim is live")
+
+	require.NoError(t, f.store.ApplyClaimStatus(t.Context(), project.ID, issue.UID, db.ClaimStatus{Held: false, HubNow: now.Add(time.Second)}))
+	require.NoError(t, f.reconcile(t, federationprovider.IntentCollaborate))
+	_, after := f.binding(t)
+	assert.True(t, after.PushEnabled)
+}
+
 // A provider that is unavailable when the release is repeated has still not
 // said whether the old approval works, so Kata keeps trying to release it.
 func TestReconcileProviderUnavailableReleaseKeepsReleasePending(t *testing.T) {

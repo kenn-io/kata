@@ -264,7 +264,10 @@ func releaseForIntentChange(
 	ctx context.Context, store db.Storage, managed config.FederationManagedCredentialStore,
 	mapping config.FederationProjectConfig, saved config.FederationManagedCredentialReservation,
 ) (config.FederationManagedCredentialReservation, federationprovider.Response, error) {
-	if mapping.Intent == federationprovider.IntentReadOnly {
+	// A collaborate approval can hold claims. Releasing it, for a downgrade
+	// or when a restored intent repeats an unanswered release, waits until
+	// no claim depends on it. Push is already off on a repeat.
+	if saved.Credential.Provider.Intent == federationprovider.IntentCollaborate {
 		project, err := store.ProjectByName(ctx, mapping.SpokeProject)
 		if err != nil {
 			return saved, federationprovider.Response{}, errors.Join(ErrFederationProviderStorage, err)
