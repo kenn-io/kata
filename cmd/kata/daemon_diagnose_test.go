@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -947,6 +948,7 @@ func TestDaemonDiagnoseSecondPing(t *testing.T) {
 		{name: "named local", catalog: "work"},
 		{name: "canceled", end: "cancel"},
 		{name: "profile", profile: true},
+		{name: "profile internal timeout", profile: true, end: "timeout"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := ""
@@ -960,6 +962,9 @@ func TestDaemonDiagnoseSecondPing(t *testing.T) {
 			t.Setenv("KATA_DSN", "")
 			t.Chdir(t.TempDir())
 			resetFlags(t)
+			if tc.end == "timeout" {
+				t.Setenv("KATA_HTTP_TIMEOUT", "500ms")
+			}
 			flags.Daemon = tc.catalog
 			if tc.catalog != "" {
 				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[[daemon]]\nname = 'work'\nlocal = true\n"), 0600))
@@ -978,6 +983,10 @@ func TestDaemonDiagnoseSecondPing(t *testing.T) {
 				}
 				if tc.end == "cancel" {
 					cancel()
+				}
+				if tc.end == "timeout" {
+					<-r.Context().Done()
+					return
 				}
 				http.Error(w, "fixture unavailable", http.StatusServiceUnavailable)
 			}))
@@ -1002,12 +1011,12 @@ func TestDaemonDiagnoseSecondPing(t *testing.T) {
 			} else {
 				selection, err := client.InspectSelection(ctx, "", tc.catalog)
 				require.NoError(t, err)
-				result, _, err = probeDaemonSelection(ctx, selectedDaemonDiagnosis(selection, ""), selection)
+				result, _, err = probeDaemonSelection(ctx, ctx, selectedDaemonDiagnosis(selection, ""), selection)
 				require.NoError(t, err)
 			}
 			require.EqualValues(t, 2, pings.Load())
 			require.Equal(t, "local_unreachable", result.State)
-			if tc.end != "" {
+			if tc.end == "cancel" {
 				require.Error(t, ctx.Err())
 				assert.NotContains(t, result.NextAction, "kill")
 				assert.NotContains(t, result.NextAction, "taskkill")
@@ -1016,8 +1025,12 @@ func TestDaemonDiagnoseSecondPing(t *testing.T) {
 				return
 			}
 			assert.Equal(t, os.Getpid(), result.PID)
-			assert.Contains(t, result.Message, "503")
-			assert.Contains(t, result.Message, filepath.Join(ns.DataDir, "daemon.log"))
+			if tc.end != "timeout" {
+				assert.Contains(t, result.Message, "503")
+			} else {
+				assert.Contains(t, result.Message, "context deadline exceeded")
+			}
+			assert.Contains(t, result.Message, strconv.Quote(filepath.Join(ns.DataDir, "daemon.log")))
 			if runtime.GOOS != "windows" {
 				assert.Contains(t, result.NextAction, fmt.Sprintf("kill -QUIT %d", os.Getpid()))
 			}
