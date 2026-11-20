@@ -98,7 +98,7 @@ func newRootCmd() *cobra.Command {
 	cmd.PersistentFlags().String("teammate", "", "teammate attribution (default: $KATA_TEAMMATE; empty suppresses inheritance)")
 	cmd.PersistentFlags().StringVar(&flags.As, "as", "", "override actor (default: $KATA_AUTHOR > $USER > git > anonymous)")
 	cmd.PersistentFlags().StringVar(&flags.Workspace, "workspace", "", "path used for project resolution (default: cwd)")
-	cmd.PersistentFlags().StringVar(&flags.Project, "project", "", "project name (show/comment also accept an ID with an issue UID)")
+	cmd.PersistentFlags().StringVar(&flags.Project, "project", "", "project name (default: .kata.toml at or above --workspace; show <UID> and comment <UID> also accept an ID)")
 	cmd.PersistentFlags().StringVar(&flags.Daemon, "daemon", "", "named daemon catalog entry (default: KATA_SERVER, workspace, active_daemon, local)")
 	// Root-local, not persistent: `kata --version` is the conventional
 	// spelling, while `kata list --version` should stay an unknown flag.
