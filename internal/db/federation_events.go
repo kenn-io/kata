@@ -370,7 +370,6 @@ func DirectParentRemovals(ctx context.Context, tx interface {
 	fresh := make(map[string]bool, len(events))
 	history := map[string]bool{}
 	uids := map[string]bool{}
-	removing, assigning := map[string]bool{}, map[string]bool{}
 	ordered := make([]FoldEvent, 0, len(events))
 	for _, event := range events {
 		switch event.Type {
@@ -384,7 +383,6 @@ func DirectParentRemovals(ctx context.Context, tx interface {
 		payload := PayloadMap(fold.Payload)
 		from, to := parentRemovalEndpoints(fold, payload)
 		if (fold.Type == "issue.unlinked" || fold.Type == "issue.links_changed") && from != "" && to != "" {
-			removing[from] = true
 			_, hasFrom := payload["link_from_uid"]
 			_, hasTo := payload["link_to_uid"]
 			if fold.Type == "issue.unlinked" && !hasFrom && !hasTo {
@@ -396,12 +394,7 @@ func DirectParentRemovals(ctx context.Context, tx interface {
 			return nil, err
 		}
 		for _, key := range assignments {
-			assigning[key.FromUID] = true
-		}
-	}
-	for child := range removing {
-		if assigning[child] {
-			history[child] = true
+			history[key.FromUID] = true
 		}
 	}
 	for child := range history {
@@ -417,7 +410,7 @@ func DirectParentRemovals(ctx context.Context, tx interface {
 		rows, err := tx.QueryContext(ctx, `SELECT e.uid,e.origin_instance_uid,p.uid,e.issue_uid,e.type,e.actor,e.payload,e.hlc_physical_ms,e.hlc_counter
 FROM events e JOIN projects p ON p.id=e.project_id
 WHERE e.type IN ('issue.created','issue.snapshot','issue.moved','issue.linked','issue.unlinked','issue.links_changed')
-AND (e.issue_uid=$1 OR e.related_issue_uid=$1 OR (e.type IN ('issue.created','issue.snapshot','issue.moved') AND e.payload LIKE '%' || $1 || '%'))`, uid)
+AND (e.issue_uid=$1 OR e.related_issue_uid=$1 OR e.payload LIKE '%' || $1 || '%')`, uid)
 		if err != nil {
 			return nil, err
 		}
