@@ -154,7 +154,7 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 	}
 	if skippedUndeliverable > 0 {
 		fmt.Fprintf(os.Stderr,
-			"note: skipped %d link record(s) between projects that a relay between hubs cannot deliver\n",
+			"note: skipped %d link record(s) that cannot be delivered across these projects\n",
 			skippedUndeliverable)
 	}
 	if skippedCycles > 0 {
@@ -476,7 +476,7 @@ const (
 	linkSkipMissingPeer                   // peer issue absent from envelope/database
 	linkSkipDuplicate                     // edge already present (natural-key no-op)
 	linkSkipMapping                       // import_mapping references a skipped link
-	linkSkipUndeliverable                 // merge link between projects that a relay cannot deliver
+	linkSkipUndeliverable                 // merge link that cannot be delivered across projects
 	linkSkipParentCycle                   // merge parent link that would close a cycle in the target
 	linkSkipSecondParent                  // merge parent link for a task that already has a parent in the target
 )

@@ -656,6 +656,57 @@ func TestHTTPLinkServerBoundary(t *testing.T) {
 	resp, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(a.ID, from.ShortID, "links"), map[string]any{"actor": "tester", "type": "blocks", "to_ref": to.UID}, nil)
 	require.Equal(t, http.StatusConflict, resp.StatusCode, string(raw))
 	require.Contains(t, string(raw), "can't link: project server-b isn't synced to the same server as server-a; connect server-b first")
+	var body struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &body))
+	require.Equal(t, "federated_link_server_mismatch", body.Error.Code)
+	after, err := env.DB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: a.ID, Limit: 100})
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: b.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: b.ID, HubProjectUID: b.UID, Actor: "tester", Enabled: true})
+	require.NoError(t, err)
+	resp, raw = envDoRaw(t, env, http.MethodPost, issuePathRef(a.ID, from.ShortID, "links"), map[string]any{"actor": "tester", "type": "blocks", "to_ref": to.UID}, nil)
+	require.Equal(t, http.StatusConflict, resp.StatusCode, string(raw))
+	require.Contains(t, string(raw), "can't link: enable sync and push for project server-b first")
+	body.Error.Code = ""
+	require.NoError(t, json.Unmarshal(raw, &body))
+	require.Equal(t, "federated_link_server_mismatch", body.Error.Code)
+	resp, raw = envDoRaw(t, env, http.MethodPost, issuePathRef(b.ID, to.ShortID, "links"), map[string]any{"actor": "tester", "type": "blocks", "to_ref": from.UID}, nil)
+	require.Equal(t, http.StatusConflict, resp.StatusCode, string(raw))
+	require.Contains(t, string(raw), "can't link: enable sync and push for project server-b first")
+	after, err = env.DB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: a.ID, Limit: 100})
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+}
+
+func TestHTTPLinkServerBoundaryDuplicate(t *testing.T) {
+	env := testenv.New(t)
+	ctx := t.Context()
+	a, err := env.DB.CreateProject(ctx, "server-a")
+	require.NoError(t, err)
+	b, err := env.DB.CreateProject(ctx, "server-b")
+	require.NoError(t, err)
+	from, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: a.ID, Title: "A", Author: "tester"})
+	require.NoError(t, err)
+	to, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: b.ID, Title: "B", Author: "tester"})
+	require.NoError(t, err)
+	payload := map[string]any{"actor": "tester", "type": "blocks", "to_ref": to.UID}
+	var first linkResp
+	resp := envDoJSON(t, env, http.MethodPost, issuePathRef(a.ID, from.ShortID, "links"), payload, &first)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.True(t, first.Changed)
+	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: b.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: b.ID, HubProjectUID: b.UID, Actor: "tester", Enabled: true, PushEnabled: true})
+	require.NoError(t, err)
+	before, err := env.DB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: a.ID, Limit: 100})
+	require.NoError(t, err)
+	var duplicate linkResp
+	resp = envDoJSON(t, env, http.MethodPost, issuePathRef(a.ID, from.ShortID, "links"), payload, &duplicate)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.False(t, duplicate.Changed)
+	require.Equal(t, first.Link.ID, duplicate.Link.ID)
 	after, err := env.DB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: a.ID, Limit: 100})
 	require.NoError(t, err)
 	require.Equal(t, before, after)

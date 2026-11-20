@@ -110,6 +110,21 @@ func TestDirectProjectLinksSameServerSync(t *testing.T) {
 	}
 	localParent, err := writer.env.DB.IssueByUID(ctx, parent.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
+	peerBinding, err := writer.env.DB.FederationBindingByProject(ctx, writer.projects[1].ID)
+	require.NoError(t, err)
+	peerBinding.PushEnabled = false
+	_, err = writer.env.DB.UpsertFederationBinding(ctx, peerBinding)
+	require.NoError(t, err)
+	_, _, err = writer.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: writer.projects[0].ID, Title: "Child", Author: "writer", Links: []db.InitialLink{{Type: "parent", ToNumber: localParent.ID}}})
+	require.ErrorIs(t, err, db.ErrFederatedLinkServerMismatch)
+	later, _, err := writer.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: writer.projects[0].ID, Title: "Later change", Author: "writer"})
+	require.NoError(t, err)
+	require.NoError(t, writer.sync(t, 0))
+	_, err = hub.DB.IssueByUID(ctx, later.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	peerBinding.PushEnabled = true
+	_, err = writer.env.DB.UpsertFederationBinding(ctx, peerBinding)
+	require.NoError(t, err)
 	child, _, err := writer.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: writer.projects[0].ID, Title: "Child", Author: "writer", Links: []db.InitialLink{{Type: "parent", ToNumber: localParent.ID}}})
 	require.NoError(t, err)
 	require.NoError(t, writer.sync(t, 0))

@@ -45,6 +45,12 @@ func (s *Store) CreateLinkAndEvent(
 	var link db.Link
 	var event db.Event
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		if err := checkLinkEndpointsProjectAccessTx(ctx, tx, params.FromIssueID, params.ToIssueID); err != nil {
+			return err
+		}
+		if err := ensureRelayLinkBoundaryTx(ctx, tx, params.FromIssueID, params.ToIssueID); err != nil {
+			return err
+		}
 		eventIssue, project, err := lockedIssueTx(ctx, tx, eventParams.EventIssueID, false)
 		if err != nil {
 			return err

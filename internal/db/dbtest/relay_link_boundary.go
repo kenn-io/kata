@@ -227,9 +227,49 @@ func RunLinkServerBoundary(t *testing.T, store db.Storage) {
 	bind(b, db.FederationRoleSpoke, "https://hub.example/team-b", "bob")
 	require.ErrorIs(t, link(ai, bi), db.ErrFederatedLinkServerMismatch)
 	bind(b, db.FederationRoleSpoke, "https://HUB.example:443/team-a/", "bob")
-	require.NoError(t, link(ai, bi))
-	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: b.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example/team-a", HubProjectID: b.ID, HubProjectUID: b.UID, Actor: "bob"})
+	aBinding, err := store.FederationBindingByProject(ctx, a.ID)
 	require.NoError(t, err)
+	bBinding, err := store.FederationBindingByProject(ctx, b.ID)
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name             string
+		aEnabled, aPush  bool
+		bEnabled, bPush  bool
+		forward, reverse string
+	}{
+		{"source sync paused", false, true, true, true, a.Name, a.Name},
+		{"source push paused", true, false, true, true, a.Name, a.Name},
+		{"target sync paused", true, true, false, true, b.Name, b.Name},
+		{"target push paused", true, true, true, false, b.Name, b.Name},
+		{"both paused", false, false, false, false, a.Name, b.Name},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			aBinding.Enabled, aBinding.PushEnabled = tc.aEnabled, tc.aPush
+			bBinding.Enabled, bBinding.PushEnabled = tc.bEnabled, tc.bPush
+			_, err := store.UpsertFederationBinding(ctx, aBinding)
+			require.NoError(t, err)
+			_, err = store.UpsertFederationBinding(ctx, bBinding)
+			require.NoError(t, err)
+			before, err := store.EventsAfter(ctx, db.EventsAfterParams{Limit: 100})
+			require.NoError(t, err)
+			for _, pair := range []struct {
+				from, to db.Issue
+				paused   string
+			}{{ai, bi, tc.forward}, {bi, ai, tc.reverse}} {
+				err := link(pair.from, pair.to)
+				require.ErrorIs(t, err, db.ErrFederatedLinkServerMismatch)
+				require.EqualError(t, err, "can't link: enable sync and push for project "+pair.paused+" first")
+			}
+			require.Equal(t, []string{oldParent.UID}, linkTargetUIDs(t, store, ai.ID))
+			require.Empty(t, linkTargetUIDs(t, store, bi.ID))
+			after, err := store.EventsAfter(ctx, db.EventsAfterParams{Limit: 100})
+			require.NoError(t, err)
+			require.Equal(t, before, after)
+		})
+	}
+	bind(a, db.FederationRoleSpoke, "https://hub.example/team-a", "alice")
+	bind(b, db.FederationRoleSpoke, "https://hub.example/team-a", "bob")
+	require.NoError(t, link(ai, bi))
 	require.NoError(t, link(bi, ai))
 
 	c, err := store.CreateProject(ctx, "server-c")
