@@ -422,7 +422,6 @@ func InitializeReplayState(path string) error {
 	return atomicfile.WriteNew(path, []byte("0\n"), atomicfile.WithPrivate())
 }
 
-// Close releases replay ownership and permanently fences this verifier.
 // macVerifies checks the request's signature against the public base URL.
 func (v *Verifier) macVerifies(r *http.Request, k signingpolicy.Key, secret []byte) bool {
 	cloned := r.Clone(r.Context())
@@ -469,6 +468,7 @@ func (v *Verifier) Recheck(r *http.Request, enrollmentID int64) error {
 	return nil
 }
 
+// Close releases replay ownership and permanently fences this verifier.
 func (v *Verifier) Close() error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
