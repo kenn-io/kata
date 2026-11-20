@@ -1377,7 +1377,8 @@ the new configuration cannot be scored against the old generation's vectors), so
 Kata can send general, anonymous usage telemetry. Usage telemetry is off
 unless you have opted in or set `TELEMETRY_ENABLED=1`. Any of these turns it
 off: `KATA_TELEMETRY_ENABLED=0`, `TELEMETRY_ENABLED=0`,
-`DO_NOT_TRACK`, or `CI`. Development builds never send it.
+`DO_NOT_TRACK`, or `CI`. Development builds never send it. Tagged `go install`
+builds report a release version and can send telemetry when enabled.
 
 ## Federation credentials
 

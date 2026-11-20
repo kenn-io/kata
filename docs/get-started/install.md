@@ -133,6 +133,9 @@ cron compatibility, read the [release notes](../changelog.md).
 go install go.kenn.io/kata/cmd/kata@latest
 ```
 
+A tagged install reports its release version. `kata update` can replace it with
+a release, and it can send [opt-in usage telemetry](../reference/configuration.md#usage-reporting).
+
 This module-source install includes the CLI, daemon, and TUI, but Go does not
 run the browser asset toolchain. To use `kata ui`, install a release binary or
 build from a clone with `make install` so the compiled browser bundle is
