@@ -179,7 +179,7 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 
 	directChild, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: route.ID, Title: "Direct link", Author: "worker"})
 	require.NoError(t, err)
-	directPayload, err := json.Marshal(map[string]string{"from_uid": directChild.UID, "to_uid": peer.UID, "type": "blocks"})
+	directPayload, err := json.Marshal(map[string]string{"from_uid": directChild.UID, "to_uid": peer.UID, "type": "parent"})
 	require.NoError(t, err)
 	direct := newRemoteEvent(t, route, &directChild.UID, "issue.linked", "worker", origin, at+1, directPayload)
 	direct.RelatedIssueUID = &peer.UID
@@ -188,8 +188,25 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 	params.Events = []db.FederationIngestEvent{{SourceEventID: 2, Event: direct}}
 	_, err = store.IngestFederationEvents(ctx, params)
 	require.NoError(t, err)
-	_, err = store.LinkByEndpoints(ctx, directChild.ID, peer.ID, "blocks")
+	parent, err = store.ParentOf(ctx, directChild.ID)
 	require.NoError(t, err)
+	require.Equal(t, peer.ID, parent.ToIssueID)
+
+	peerChild, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "Peer child", Author: "peer-member"})
+	require.NoError(t, err)
+	forgedPayload, err := json.Marshal(map[string]string{"from_uid": peerChild.UID, "to_uid": directChild.UID, "type": "parent"})
+	require.NoError(t, err)
+	forged := newRemoteEvent(t, route, &directChild.UID, "issue.linked", "worker", origin, at+2, forgedPayload)
+	forged.RelatedIssueUID = &peerChild.UID
+	forged.ContentHash, err = db.RemoteEventContentHash(forged)
+	require.NoError(t, err)
+	params.Events = []db.FederationIngestEvent{{SourceEventID: 3, Event: forged}}
+	_, err = store.IngestFederationEvents(ctx, params)
+	require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
+	_, err = store.ParentOf(ctx, peerChild.ID)
+	require.ErrorIs(t, err, db.ErrNotFound)
+	_, err = store.EventsByUIDs(ctx, route.ID, []string{forged.EventUID})
+	require.ErrorIs(t, err, db.ErrNotFound)
 
 	// One edit can add a relationship and remove a different relationship
 	// to the same peer. Removing the parent still needs ordinary authority.

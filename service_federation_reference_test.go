@@ -160,13 +160,19 @@ func TestDirectPushWithProjectScopedActors(t *testing.T) {
 			}
 
 			t.Run("direct-link-with-different-actors", func(t *testing.T) {
-				_, linked, err := spoke.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: local.ID, Type: "blocks", Author: "worker"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: child.ID, FromShortID: child.ShortID, FromUID: child.UID, ToShortID: local.ShortID, ToUID: local.UID, Actor: "worker"})
+				directChild, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: child.ProjectID, Title: "Direct child", Author: "worker"})
+				require.NoError(t, err)
+				require.NoError(t, syncProject(0))
+				_, linked, err := spoke.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: directChild.ID, ToIssueID: local.ID, Type: "parent", Author: "worker"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: directChild.ID, FromShortID: directChild.ShortID, FromUID: directChild.UID, ToShortID: local.ShortID, ToUID: local.UID, Actor: "worker"})
 				require.NoError(t, err)
 				later, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: child.ProjectID, Title: "Later direct link work", Author: "worker"})
 				require.NoError(t, err)
 				require.NoError(t, syncProject(0))
-				_, err = hub.store.LinkByEndpoints(ctx, other.ID, peer.ID, "blocks")
+				hubChild, err := hub.store.IssueByUID(ctx, directChild.UID, db.IncludeDeletedNo)
 				require.NoError(t, err)
+				parent, err := hub.store.ParentOf(ctx, hubChild.ID)
+				require.NoError(t, err)
+				require.Equal(t, peer.ID, parent.ToIssueID)
 				_, err = hub.store.IssueByUID(ctx, later.UID, db.IncludeDeletedNo)
 				require.NoError(t, err)
 				events, err := hub.store.EventsByUIDs(ctx, projects[0].ID, []string{linked.UID})
@@ -198,19 +204,6 @@ func TestDirectPushWithProjectScopedActors(t *testing.T) {
 				binding, err := spoke.DB.FederationBindingByProject(ctx, child.ProjectID)
 				require.NoError(t, err)
 				require.Equal(t, laterEvent.ID, binding.PushCursorEventID)
-			})
-
-			t.Run("parent-primary-cannot-change-peer-child", func(t *testing.T) {
-				peerChild, _, err := hub.store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[1].ID, Title: "Peer child", Author: "peer-member"})
-				require.NoError(t, err)
-				require.NoError(t, syncProject(1))
-				localChild, err := spoke.DB.IssueByUID(ctx, peerChild.UID, db.IncludeDeletedNo)
-				require.NoError(t, err)
-				_, _, err = spoke.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: localChild.ID, ToIssueID: child.ID, Type: "parent", Author: "worker"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: child.ID, FromShortID: localChild.ShortID, FromUID: localChild.UID, ToShortID: child.ShortID, ToUID: child.UID, Actor: "worker"})
-				require.NoError(t, err)
-				require.ErrorContains(t, syncProject(0), "403")
-				_, err = hub.store.ParentOf(ctx, peerChild.ID)
-				require.ErrorIs(t, err, db.ErrNotFound)
 			})
 		})
 	}

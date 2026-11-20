@@ -1036,7 +1036,6 @@ func TestSyncFederationOnceAutoRetriesFormerPeerReferenceQuarantine(t *testing.T
 	spoke := testenv.New(t)
 	project, err := spoke.DB.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
-
 	localIssue, localEvent, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: project.ID,
 		Title:     "pending local",
