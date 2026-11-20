@@ -617,9 +617,12 @@ A direct spoke also keeps one held poll open per binding when its hub supports
 held polls. The hub answers a held poll as soon as an event commits in that
 project, or after at most 45 seconds when nothing changes, so hub events reach
 the spoke without waiting for the interval. While a binding's poll is held,
-interval passes skip that binding's pull and still push, renew claims, and
-update sync status. Relay bindings and hubs without held-poll support keep
-pulling on the interval.
+interval passes skip that binding's pull and still push and renew claims. The
+spoke records a pull in sync status when the hub answers the held poll, so a
+hub that stops answering stops advancing the binding's last pull time. A pass
+that fails for a binding ends that binding's held poll until a later pass
+succeeds. Relay bindings and hubs without held-poll support keep pulling on the
+interval.
 
 Held polls need a few things from the deployment:
 
@@ -634,10 +637,14 @@ Held polls need a few things from the deployment:
 - The spoke asks for a wait 15 seconds shorter than its request budget, so a
   `KATA_HTTP_TIMEOUT` under 16 seconds turns held polls off.
 
-The hub checks the poll's full authorization again before it answers a held
-poll, so a revoked credential or removed membership stops the poll when it
-wakes or expires. Hubs that share a PostgreSQL database wake each other's held
-polls with `LISTEN/NOTIFY`; a SQLite hub wakes them in process.
+The hub checks the poll's full authorization again before each read and after
+the last one, including the signing key for signed polls. A revoked
+credential, removed membership, or retired signing key therefore stops the poll
+when it wakes or expires. When the wait ends, the hub reads once more, so an
+event whose wakeup was lost still arrives. Hubs that share a PostgreSQL
+database and schema wake each other's held polls with `LISTEN/NOTIFY` on an
+encrypted channel that other database roles cannot find or forge; a SQLite hub
+wakes them in process.
 
 Sync runs in turns. One turn for a project pushes and pulls at most 8 batches
 per stream and direction (1000 deliveries per event or receipt batch, 32
