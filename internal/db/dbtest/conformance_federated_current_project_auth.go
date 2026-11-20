@@ -350,10 +350,7 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 					params.Events = append(params.Events, db.FederationIngestEvent{SourceEventID: 9, Event: newRemoteEvent(t, route, &child.UID, "issue.links_changed", "worker", origin, at+11, set)})
 				}
 				params.Events = append(params.Events, db.FederationIngestEvent{SourceEventID: 10, Event: newRemoteEvent(t, route, &parent.UID, "issue.unlinked", "worker", origin, at+12, payload)})
-				authorize := params.AuthorizeReference
-				params.AuthorizeReference = nil
 				_, err = store.IngestFederationEvents(ctx, params)
-				params.AuthorizeReference = authorize
 				require.ErrorIs(t, err, db.ErrFederationIngestValidation)
 				link, err := store.ParentOf(ctx, child.ID)
 				if batch {
@@ -429,14 +426,18 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 	params.Events = []db.FederationIngestEvent{{SourceEventID: 4, Event: newRemoteEvent(t, route, &child.UID, "issue.links_changed", "worker", origin, at+7, blocksPayload)}}
 	_, err = store.IngestFederationEvents(ctx, params)
 	require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
+	blocksLink, err := json.Marshal(map[string]string{"from_uid": child.UID, "to_uid": peer.UID, "type": "blocks"})
+	require.NoError(t, err)
+	peers, err := db.DirectLinkPeers(db.FoldEvent{Type: "issue.linked", IssueUID: child.UID, Payload: blocksLink})
+	require.NoError(t, err)
+	require.Empty(t, peers)
 	blocksUnlink, err := json.Marshal(map[string]string{"from_uid": child.UID, "to_uid": peer.UID, "link_from_uid": child.UID, "link_to_uid": peer.UID, "type": "blocks"})
 	require.NoError(t, err)
 	params.Events = []db.FederationIngestEvent{{SourceEventID: 4, Event: newRemoteEvent(t, route, &child.UID, "issue.unlinked", "worker", origin, at+7, blocksUnlink)}}
 	_, err = store.IngestFederationEvents(ctx, params)
 	require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
-	// One edit can add a relationship and remove a different relationship
-	// to the same peer. A reference proof authorizes both changes.
-	mixedPayload, err := json.Marshal(map[string]any{"parent_removed_uid": peer.UID, "related_added_uids": []string{peer.UID}})
+	// A reference proof authorizes removing a parent.
+	mixedPayload, err := json.Marshal(map[string]any{"parent_removed_uid": peer.UID})
 	require.NoError(t, err)
 	mixed := newRemoteEvent(t, route, &child.UID, "issue.links_changed", "worker", origin, at+2, mixedPayload)
 	params.Events = []db.FederationIngestEvent{{SourceEventID: 3, Event: mixed}}
@@ -444,7 +445,7 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 	require.NoError(t, err)
 	_, err = store.ParentOf(ctx, child.ID)
 	require.ErrorIs(t, err, db.ErrNotFound)
-	// Replace a parent with the two events emitted by the link endpoint.
+	// Restore the parent before replacing it with the link endpoint's two events.
 	params.Events = []db.FederationIngestEvent{{SourceEventID: 6, Event: newRemoteEvent(t, route, &child.UID, "issue.links_changed", "worker", origin, at+8, payload)}}
 	_, err = store.IngestFederationEvents(ctx, params)
 	require.NoError(t, err)
