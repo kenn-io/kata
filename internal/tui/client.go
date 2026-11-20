@@ -255,41 +255,16 @@ func (c *Client) listIssuesAt(ctx context.Context, projectID *int64, f ListFilte
 	return resp.Issues, err
 }
 
-// Oldest daemon APIs that honor the search route's filters. Older daemons
-// ignore an unknown query parameter, which would answer with unfiltered hits.
-const (
-	searchStatusAPIVersion = "0.20.0"
-	searchLabelAPIVersion  = "0.8.0"
-)
-
-// SearchIssues asks the daemon to rank one project's issues for q.Query. A
-// daemon too old to apply q's filters gets an upgrade error instead of an
-// answer that silently ignores them.
+// SearchIssues asks the daemon to rank one project's issues for q.Query. The
+// daemon picks words or words and meaning itself.
 func (c *Client) SearchIssues(ctx context.Context, projectID int64, q SearchQuery) (*SearchAnswer, error) {
 	apiClient, err := c.generatedClient()
 	if err != nil {
 		return nil, err
 	}
-	switch {
-	case q.Status != "":
-		err = requireAPIVersion(ctx, apiClient, searchStatusAPIVersion,
-			"status-filtered search requires daemon API "+searchStatusAPIVersion+" or newer")
-	case len(q.Labels) > 0:
-		err = requireAPIVersion(ctx, apiClient, searchLabelAPIVersion,
-			"label-filtered search requires daemon API "+searchLabelAPIVersion+" or newer")
-	}
-	if err != nil {
-		return nil, err
-	}
-	params := &generated.SearchIssuesQuery{Q: q.Query, Label: q.Labels}
+	params := &generated.SearchIssuesQuery{Q: q.Query}
 	if q.Limit > 0 {
 		params.Limit = new(int64(q.Limit))
-	}
-	if q.Mode != "" {
-		params.Mode = new(generated.SearchIssuesQueryMode(q.Mode))
-	}
-	if q.Status != "" {
-		params.Status = new(generated.SearchIssuesQueryStatus(q.Status))
 	}
 	wire, callErr := apiClient.SearchIssuesWithResponse(ctx, &generated.SearchIssuesRequestOptions{
 		PathParams: &generated.SearchIssuesPath{ProjectID: projectID}, Query: params,
@@ -298,21 +273,15 @@ func (c *Client) SearchIssues(ctx context.Context, projectID int64, q SearchQuer
 		return nil, callErr
 	}
 	var resp struct {
-		Mode           string `json:"mode"`
-		Degraded       bool   `json:"degraded"`
-		DegradedReason string `json:"degraded_reason"`
-		Truncated      bool   `json:"truncated"`
-		Results        []struct {
+		Mode    string `json:"mode"`
+		Results []struct {
 			Issue Issue `json:"issue"`
 		} `json:"results"`
 	}
 	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
 		return nil, err
 	}
-	answer := &SearchAnswer{
-		Issues: make([]Issue, len(resp.Results)), Mode: resp.Mode, Degraded: resp.Degraded,
-		DegradedReason: resp.DegradedReason, Truncated: resp.Truncated,
-	}
+	answer := &SearchAnswer{Issues: make([]Issue, len(resp.Results)), Mode: resp.Mode}
 	for i, hit := range resp.Results {
 		answer.Issues[i] = hit.Issue
 	}

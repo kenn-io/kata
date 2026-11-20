@@ -3,8 +3,6 @@ package tui
 import (
 	"context"
 	"errors"
-	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -13,16 +11,12 @@ import (
 )
 
 const (
-	// daemonSearchMode lets the daemon rank by words and meaning when its
-	// embeddings work and by words alone otherwise.
-	daemonSearchMode  = "auto"
 	daemonSearchLimit = 50
 	// daemonSearchDebounce waits for typing to pause so one question goes to
 	// the daemon per burst of keystrokes.
 	daemonSearchDebounce = 250 * time.Millisecond
 	// A meaning search embeds the query first, which is slower than a list read.
-	daemonSearchTimeout      = 15 * time.Second
-	daemonSearchNeedsProject = "daemon search needs one project"
+	daemonSearchTimeout = 15 * time.Second
 )
 
 // rankedSearch is the daemon's ranked answer to the search bar's query and the
@@ -31,8 +25,6 @@ type rankedSearch struct {
 	// live is true while the search bar is open with daemon search on: the
 	// typed text asks the daemon instead of filtering the loaded rows.
 	live bool
-	// refused is true after ctrl+t in a scope the daemon search cannot cover.
-	refused bool
 	// req identifies the newest ask. An answer for another id is dropped; zero
 	// never matches, so zeroing it discards whatever is still in flight.
 	req     int64
@@ -41,22 +33,19 @@ type rankedSearch struct {
 	asked string
 	err   error
 
-	have bool
+	hasAnswer bool
+	// answered is the query the hits answer.
+	answered SearchQuery
 	// hits are the answer's issues in the daemon's order, replaced by the
 	// list's own copy of an issue whenever a refresh brings a fresher one.
-	hits   []Issue
-	query  string
-	status string
-	labels []string
-
-	lexical   bool
-	degraded  bool
-	reason    string
-	truncated bool
+	hits    []Issue
+	lexical bool
 }
 
 // refreshed swaps each hit for the list's current copy of the same issue.
-func (r rankedSearch) refreshed(issues []Issue) rankedSearch {
+// When issues is the complete list (complete), a hit it lacks is gone: deleted,
+// moved, or outside what the list fetches (the Inbox holds only open issues).
+func (r rankedSearch) refreshed(issues []Issue, complete bool) rankedSearch {
 	if len(r.hits) == 0 {
 		return r
 	}
@@ -66,50 +55,48 @@ func (r rankedSearch) refreshed(issues []Issue) rankedSearch {
 			byUID[iss.UID] = iss
 		}
 	}
-	hits := make([]Issue, len(r.hits))
-	for i, hit := range r.hits {
-		hits[i] = hit
+	hits := make([]Issue, 0, len(r.hits))
+	for _, hit := range r.hits {
 		if cur, ok := byUID[hit.UID]; ok {
-			hits[i] = cur
+			hits = append(hits, cur)
+		} else if !complete {
+			hits = append(hits, hit)
 		}
 	}
 	r.hits = hits
 	return r
 }
 
-// discardInFlight keeps a saved answer but makes any ask still out stale.
+// discardInFlight keeps a saved answer but makes any ask still out stale. The
+// recorded query goes with an ask that never answered, so asking for it again
+// is not skipped as already done.
 func (r rankedSearch) discardInFlight() rankedSearch {
-	r.live, r.refused, r.pending, r.req = false, false, false, 0
-	return r
-}
-
-// rankedStatus is the status the daemon is asked for: the Inbox fetch only
-// ever holds open issues.
-func (lm listModel) rankedStatus() string {
-	if lm.inboxOnly {
-		return "open"
+	if r.pending {
+		r.asked = ""
 	}
-	return lm.filter.Status
+	r.live, r.pending, r.req = false, false, 0
+	return r
 }
 
 // rankedShown reports whether the rows are the daemon's answer: while the bar is
 // open the previous answer stays until the next one lands; once the search is
-// committed it stays only while the query and the filters it was asked with
-// still stand.
+// committed it stays only while its query stands.
 func (lm listModel) rankedShown() bool {
 	r := lm.ranked
-	if !r.have || r.status != lm.rankedStatus() || !slices.Equal(r.labels, lm.filter.Labels) {
+	if !r.hasAnswer {
 		return false
 	}
-	return r.live || r.query == strings.TrimSpace(lm.filter.Search)
+	return r.live || r.answered.Query == strings.TrimSpace(lm.filter.Search)
 }
 
-// rankedRows lists the daemon's hits flat, in its order. The route already
-// applied the query, status and labels, so only the filters it cannot apply
-// narrow the hits.
+// rankedRows lists the daemon's hits flat, in its order. The route only knows
+// the query, so every list filter narrows the hits the way it narrows the
+// loaded rows.
 func (lm listModel) rankedRows() []queueRow {
-	narrow := ListFilter{
-		Owner: lm.filter.Owner, Author: lm.filter.Author, Date: lm.filter.Date, Day: lm.filter.Day,
+	narrow := lm.filter
+	narrow.Search = ""
+	if lm.inboxOnly && narrow.Status == "" {
+		narrow.Status = "open"
 	}
 	rows := make([]queueRow, 0, len(lm.ranked.hits))
 	for _, iss := range lm.ranked.hits {
@@ -132,43 +119,23 @@ func (lm listModel) dropRanked() listModel {
 }
 
 // rankedNote is the short line beside the search bar: what the daemon is
-// doing, how it ranked the answer, and why that may fall short.
+// doing, or how it ranked the answer.
 func (lm listModel) rankedNote() string {
 	r := lm.ranked
-	if r.refused {
-		return daemonSearchNeedsProject
-	}
 	shown := lm.rankedShown()
-	if !r.live && !shown {
+	switch {
+	case !r.live && !shown:
 		return ""
-	}
-	var parts []string
-	switch {
+	case shown && r.lexical:
+		return "ranked by words only (lexical)"
+	case shown:
+		return "ranked by words and meaning"
 	case r.err != nil:
-		parts = append(parts, "search failed")
-	case !shown && strings.TrimSpace(lm.filter.Search) == "":
-		parts = append(parts, "type to ask the daemon")
-	case !shown:
-		parts = append(parts, "searching…")
+		return "search failed"
+	case strings.TrimSpace(lm.filter.Search) == "":
+		return "type to ask the daemon"
 	}
-	if !shown {
-		return strings.Join(parts, " · ")
-	}
-	if r.lexical {
-		parts = append(parts, "ranked by words only (lexical)")
-	} else {
-		parts = append(parts, "ranked by words and meaning")
-	}
-	switch {
-	case r.reason != "":
-		parts = append(parts, sanitizeForLine(r.reason))
-	case r.degraded:
-		parts = append(parts, "degraded")
-	}
-	if r.truncated {
-		parts = append(parts, fmt.Sprintf("showing the best %d", daemonSearchLimit))
-	}
-	return strings.Join(parts, " · ")
+	return "searching…"
 }
 
 // daemonSearchAvailable is the one predicate behind the ctrl+t hint in the
@@ -198,19 +165,14 @@ func (h daemonSearchHint) helpItem() helplayout.HelpItem {
 // a query that is meant for the daemon.
 func (m Model) syncDaemonSearch() Model {
 	m.list.ranked.live = m.daemonSearch && m.daemonSearchAvailable()
-	if m.input.kind != inputSearchBar {
-		m.list.ranked.refused = false
-	}
 	return m
 }
 
 // toggleDaemonSearch is ctrl+t in the search bar.
 func (m Model) toggleDaemonSearch() (Model, tea.Cmd) {
 	if !m.daemonSearchAvailable() {
-		m.list.ranked.refused = true
 		return m, nil
 	}
-	m.list.ranked.refused = false
 	m.daemonSearch = !m.daemonSearch
 	m.searchTickGen++
 	m = m.syncDaemonSearch()
@@ -264,13 +226,7 @@ func (m Model) askDaemonIfStale() (Model, tea.Cmd) {
 	req := m.nextSearchReq
 	m.searchTickGen++
 	m.list.ranked.req, m.list.ranked.asked, m.list.ranked.pending = req, query, true
-	ask := SearchQuery{
-		Query:  query,
-		Mode:   daemonSearchMode,
-		Limit:  daemonSearchLimit,
-		Status: m.list.rankedStatus(),
-		Labels: slices.Clone(m.list.filter.Labels),
-	}
+	ask := SearchQuery{Query: query, Limit: daemonSearchLimit}
 	api, pid, connGen := m.api, m.scope.projectID, m.connGen
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), daemonSearchTimeout)
@@ -283,6 +239,12 @@ func (m Model) askDaemonIfStale() (Model, tea.Cmd) {
 func (m Model) handleDaemonSearchDone(msg daemonSearchDoneMsg) (Model, tea.Cmd) {
 	r := m.list.ranked
 	if m.staleConnMsg(msg.connGen) || msg.req == 0 || msg.req != r.req {
+		return m, nil
+	}
+	if m.modal != modalNone || m.view != viewList || (m.input.kind != inputNone && m.input.kind != inputSearchBar) {
+		// Swapping the rows would move the selection under a form or another
+		// view. Forget the ask so the next time the bar opens it asks again.
+		m.list.ranked = r.discardInFlight()
 		return m, nil
 	}
 	r.pending = false
@@ -299,19 +261,16 @@ func (m Model) handleDaemonSearchDone(msg daemonSearchDoneMsg) (Model, tea.Cmd) 
 		m.list.status = ""
 	}
 	r.err = nil
-	r.have = true
+	r.hasAnswer = true
 	r.hits = msg.answer.Issues
-	r.query = msg.query.Query
-	r.status, r.labels = msg.query.Status, msg.query.Labels
+	r.answered = msg.query
 	r.lexical = msg.answer.Mode == "" || msg.answer.Mode == "lexical"
-	r.degraded = msg.answer.Degraded
-	r.reason = msg.answer.DegradedReason
-	r.truncated = msg.answer.Truncated
-	m.list.ranked = r.refreshed(m.list.issues)
+	prevPID, prevUID, prevHas := highlightedIdentity(m.list)
+	m.list.ranked = r.refreshed(m.list.issues, false)
 	m.list.cursor, m.list.windowStart = 0, 0
 	m.list.selectedUID, m.list.selectedProjectID = "", 0
 	m.list = m.list.syncSelection(m.list.visibleRows())
-	return m, nil
+	return m.reconcileSplitDetailAfterRefetch(prevPID, prevUID, prevHas)
 }
 
 func (m Model) routeDaemonSearch(msg tea.Msg) (Model, tea.Cmd, bool) {

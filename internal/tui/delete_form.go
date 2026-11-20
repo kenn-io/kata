@@ -41,8 +41,7 @@ func (m Model) deleteHidden() bool {
 }
 
 // helpKeymap is the keymap the help overlay lists: without the delete and
-// move keys when they are not on offer, and without the daemon-search key
-// when the search bar is not open over one project.
+// move keys when they are not on offer.
 func (m Model) helpKeymap() keymap {
 	km := m.keymap
 	if m.deleteHidden() {
@@ -50,9 +49,6 @@ func (m Model) helpKeymap() keymap {
 	}
 	if m.moveHidden() {
 		km.MoveIssue = key{}
-	}
-	if !m.daemonSearchAvailable() {
-		km.DaemonSearch = key{}
 	}
 	return km
 }

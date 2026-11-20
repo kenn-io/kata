@@ -170,21 +170,18 @@ output it appears as a `mode` field (`lexical`, `hybrid`, or `semantic`); see th
 `kata tui`'s `/` search filters the rows already loaded, by title and ID. To
 find an issue by what it is about, press `/` in a project, then `ctrl+t` to ask
 the daemon instead. The daemon ranks the project's issues in auto mode, so
-the results follow its order and the best 50 show, flat rather than nested. A
-status filter (`s`) and label filters (`f`) go to the daemon with the query; an
-owner, author, or date filter still narrows the hits. A note beside the search
-line says whether the daemon ranked by words and meaning or by words only, gives
-its reason when the answer is degraded, and says when more than 50 issues match.
+the results follow its order and the best 50 show, flat rather than nested. The
+other list filters (status, labels, owner, author, date) still narrow those
+hits, so fewer than 50 can show. A note beside the search line says whether the
+daemon ranked by words and meaning or by words only.
 
 The choice lasts until you quit. Press `ctrl+t` again to filter the loaded rows
 by text. Results come after you stop typing; a blank query shows the normal
 list. `enter` keeps the results while the query and filters stay; `esc` restores
 the previous list, and `c` clears the filters and the results. Daemon search
-needs one project, so in the all-projects view `ctrl+t` only says so. It does not
-set up embeddings: without them the daemon ranks by words, and the note says so.
-A daemon older than API 0.20.0 cannot apply a status filter to search, and one
-older than 0.8.0 cannot apply label filters, so the TUI shows an upgrade message
-instead of results.
+needs one project, so in the all-projects view `ctrl+t` does nothing. It does
+not set up embeddings: without them the daemon ranks by words, and the note
+says so.
 
 ## Freshness: lexical is instant, semantic is eventual
 

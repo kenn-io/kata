@@ -233,26 +233,18 @@ type ListFilter struct {
 	Limit  int
 }
 
-// SearchQuery is one ranked search of a project. Mode is the daemon's search
-// mode ("auto" lets it pick words or words and meaning); Status and Labels are
-// the filters the route applies before ranking.
+// SearchQuery is one ranked search of a project: the text to rank for and the
+// most hits to return.
 type SearchQuery struct {
-	Query  string
-	Mode   string
-	Status string
-	Labels []string
-	Limit  int
+	Query string
+	Limit int
 }
 
-// SearchAnswer is the daemon's ranked answer: Issues in its order, the Mode it
-// actually ran ("lexical", "hybrid", ...), why it fell short when Degraded, and
-// whether more issues matched than Limit.
+// SearchAnswer is the daemon's ranked answer: Issues in its order and the Mode
+// it actually ran ("lexical", "hybrid", ...).
 type SearchAnswer struct {
-	Issues         []Issue
-	Mode           string
-	Degraded       bool
-	DegradedReason string
-	Truncated      bool
+	Issues []Issue
+	Mode   string
 }
 
 // CreateInitialLinkBody requests a link created atomically with a new

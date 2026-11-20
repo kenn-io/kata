@@ -73,7 +73,7 @@ ctrl+u         clear prompt
 
 Filters
 /       search
-ctrl+t  search bar: ask the daemon for ranked results
+ctrl+t  daemon search (in /)
 s       cycle status filter
 f       filter (form)
 c       clear filters

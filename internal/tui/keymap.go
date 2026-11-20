@@ -92,7 +92,7 @@ func newKeymap() keymap {
 		// narrow the displayed list. Plan 8 commit 5b will add the
 		// daemon LabelsByIssues hook + the Labels axis.
 		ClearFilters:      key{Keys: []string{"c"}, Help: "clear filters"},
-		DaemonSearch:      key{Keys: []string{"ctrl+t"}, Help: "search bar: ask the daemon for ranked results"},
+		DaemonSearch:      key{Keys: []string{"ctrl+t"}, Help: "daemon search (in /)"},
 		Close:             key{Keys: []string{"x"}, Help: "close"},
 		CloseWithEvidence: key{Keys: []string{"V"}, Help: "close with evidence"},
 		Reopen:            key{Keys: []string{"r"}, Help: "reopen"},

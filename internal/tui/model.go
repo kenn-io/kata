@@ -1405,7 +1405,6 @@ func (m Model) routeInputKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		m.input.err = ""
 	}
 	if m.input.kind == inputSearchBar {
-		m.list.ranked.refused = false
 		if next, cmd, handled := m.routeSearchInputKey(msg); handled {
 			return next, cmd
 		}

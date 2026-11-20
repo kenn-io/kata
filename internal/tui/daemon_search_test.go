@@ -3,8 +3,8 @@ package tui
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -104,7 +104,6 @@ func TestDaemonSearch_AsksOncePerPauseAndListsHitsInDaemonOrder(t *testing.T) {
 	alpha, _, gamma := searchTestIssues()
 	// Neither title contains the query, so only the daemon can find them.
 	api.searchFn = answerWith("hybrid", gamma, alpha)
-	m.list.filter = ListFilter{Status: "open", Labels: []string{"bug", "ui"}}
 
 	m = openBarFromCmd(t, m, '/')
 	m, _ = stepModel(m, ctrlT)
@@ -112,9 +111,7 @@ func TestDaemonSearch_AsksOncePerPauseAndListsHitsInDaemonOrder(t *testing.T) {
 	require.Empty(t, api.searchCalls, "typing alone must not ask the daemon")
 	m = settleSearch(m, cmds...)
 
-	require.Equal(t, []SearchQuery{{
-		Query: "payments", Mode: "auto", Limit: 50, Status: "open", Labels: []string{"bug", "ui"},
-	}}, api.searchCalls)
+	require.Equal(t, []SearchQuery{{Query: "payments", Limit: 50}}, api.searchCalls)
 	require.Equal(t, []int64{7}, api.searchPIDs)
 	require.Equal(t, []string{"01TEST-ccc3", "01TEST-aaa1"}, visibleUIDs(m))
 	for _, row := range m.list.visibleRows() {
@@ -137,6 +134,26 @@ func TestDaemonSearch_OwnerFilterStillNarrowsHits(t *testing.T) {
 	m = settleSearch(m, cmds...)
 
 	require.Equal(t, []string{"01TEST-ccc3"}, visibleUIDs(m))
+}
+
+func TestDaemonSearch_StatusAndLabelFiltersNarrowHitsAnyOf(t *testing.T) {
+	m, api := daemonSearchFixture(t)
+	alpha, beta, gamma := searchTestIssues()
+	alpha.Labels = []string{"bug"}
+	beta.Labels = []string{"ui"}
+	gamma.Labels = []string{"bug"}
+	gamma.Status = "closed"
+	m.list.issues = []Issue{alpha, beta, gamma}
+	api.searchFn = answerWith("hybrid", gamma, alpha, beta)
+	m.list.filter = ListFilter{Status: "open", Labels: []string{"bug", "ui"}}
+
+	m = openBarFromCmd(t, m, '/')
+	m, _ = stepModel(m, ctrlT)
+	m, cmds := typeText(m, "payments")
+	m = settleSearch(m, cmds...)
+
+	require.Equal(t, []SearchQuery{{Query: "payments", Limit: 50}}, api.searchCalls, "filters stay out of the ask")
+	require.Equal(t, []string{"01TEST-aaa1", "01TEST-bbb2"}, visibleUIDs(m), "either label keeps a hit; closed drops")
 }
 
 func TestDaemonSearch_StaleAnswerDoesNotOverwriteNewerOne(t *testing.T) {
@@ -183,15 +200,14 @@ func TestDaemonSearch_ToggleOffReturnsToLocalFiltering(t *testing.T) {
 	require.Len(t, api.searchCalls, 1, "local filtering asks the daemon nothing")
 }
 
-func TestDaemonSearch_AllProjectsSendsNothingAndSaysWhy(t *testing.T) {
+func TestDaemonSearch_AllProjectsKeyDoesNothing(t *testing.T) {
 	m, api := daemonSearchFixture(t)
 	m.scope = scope{allProjects: true}
 	m = openBarFromCmd(t, m, '/')
 
 	m, cmd := stepModel(m, ctrlT)
 	require.Nil(t, cmd)
-	require.False(t, m.daemonSearch)
-	require.Equal(t, "daemon search needs one project", m.list.rankedNote())
+	require.Empty(t, m.list.rankedNote())
 
 	m, cmds := typeText(m, "login")
 	m = settleSearch(m, cmds...)
@@ -220,21 +236,6 @@ func TestDaemonSearch_ErrorKeepsRowsAndShowsInStatusLine(t *testing.T) {
 	require.Contains(t, stripANSI(m.list.status), "embedding service refused")
 }
 
-func TestDaemonSearch_OldDaemonErrorShowsUpgradeMessage(t *testing.T) {
-	m, api := daemonSearchFixture(t)
-	api.searchFn = func(SearchQuery) (*SearchAnswer, error) {
-		return nil, errors.New("status-filtered search requires daemon API 0.20.0 or newer; upgrade the daemon")
-	}
-	m.list.filter.Status = "open"
-	m = openBarFromCmd(t, m, '/')
-	m, _ = stepModel(m, ctrlT)
-	m, cmds := typeText(m, "pay")
-	m = settleSearch(m, cmds...)
-
-	require.Contains(t, stripANSI(m.list.status), "upgrade the daemon")
-	require.Len(t, visibleUIDs(m), 3, "an old daemon never turns into an empty result")
-}
-
 func TestDaemonSearch_NoteSaysHowTheDaemonRanked(t *testing.T) {
 	_, _, gamma := searchTestIssues()
 	for _, tc := range []struct {
@@ -245,12 +246,6 @@ func TestDaemonSearch_NoteSaysHowTheDaemonRanked(t *testing.T) {
 	}{
 		{"words and meaning", SearchAnswer{Mode: "hybrid"}, []string{"ranked by words and meaning"}, []string{"lexical"}},
 		{"words only", SearchAnswer{Mode: "lexical"}, []string{"ranked by words only (lexical)"}, []string{"meaning"}},
-		{
-			"degraded says why",
-			SearchAnswer{Mode: "lexical", Degraded: true, DegradedReason: "embedding service unreachable"},
-			[]string{"words only", "embedding service unreachable"}, nil,
-		},
-		{"more than fifty match", SearchAnswer{Mode: "hybrid", Truncated: true}, []string{"showing the best 50"}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m, api := daemonSearchFixture(t)
@@ -299,6 +294,78 @@ func TestDaemonSearch_EscRestoresPreviousListAndDropsPendingAsk(t *testing.T) {
 	require.Equal(t, []string{"01TEST-aaa1"}, visibleUIDs(m))
 }
 
+func TestDaemonSearch_EscOnPendingAskLetsReopeningAskAgain(t *testing.T) {
+	m, api := daemonSearchFixture(t)
+	alpha, _, _ := searchTestIssues()
+	api.searchFn = answerWith("hybrid", alpha)
+	m = openBarFromCmd(t, m, '/')
+	m, _ = stepModel(m, ctrlT)
+	m, cmds := typeText(m, "foo")
+	m, ask := stepModel(m, onlyMsg(t, cmds[len(cmds)-1]))
+	inFlight := onlyMsg(t, ask)
+
+	// Commit while the answer is still out, then open the bar and cancel it.
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = openBarFromCmd(t, m, '/')
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	m, _ = stepModel(m, inFlight)
+	require.Empty(t, visibleUIDs(m), "the dropped answer leaves the committed text filter")
+
+	out, open := m.Update(runeKey('/'))
+	m, reask := stepModel(out.(Model), open())
+	m = settleSearch(m, reask)
+	require.Len(t, api.searchCalls, 2, "reopening asks again")
+	require.Equal(t, []string{"01TEST-aaa1"}, visibleUIDs(m))
+	require.Contains(t, m.list.rankedNote(), "ranked by words and meaning")
+}
+
+func TestDaemonSearch_LateAnswerDoesNotMoveSelectionUnderAnotherView(t *testing.T) {
+	m, api := daemonSearchFixture(t)
+	alpha, _, gamma := searchTestIssues()
+	api.searchFn = answerWith("hybrid", alpha, gamma)
+	m = openBarFromCmd(t, m, '/')
+	m, _ = stepModel(m, ctrlT)
+	m, cmds := typeText(m, "login")
+	m, ask := stepModel(m, onlyMsg(t, cmds[len(cmds)-1]))
+	inFlight := onlyMsg(t, ask)
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	_, uid, _ := highlightedIdentity(m.list)
+	require.Equal(t, "01TEST-ccc3", uid)
+
+	m, _ = stepModel(m, runeKey('?'))
+	require.Equal(t, viewHelp, m.view)
+	m, _ = stepModel(m, inFlight)
+
+	_, uid, _ = highlightedIdentity(m.list)
+	require.Equal(t, "01TEST-ccc3", uid, "the answer must not re-rank rows behind the help overlay")
+}
+
+func TestDaemonSearch_AnswerFollowsSelectionInSplitDetail(t *testing.T) {
+	m, api := daemonSearchFixture(t)
+	alpha, _, gamma := searchTestIssues()
+	api.searchFn = answerWith("hybrid", gamma, alpha)
+	m = resizeModel(m, 160, 40)
+	require.Equal(t, splitlayout.Split, m.layout)
+
+	m = openBarFromCmd(t, m, '/')
+	m, _ = stepModel(m, ctrlT)
+	m, cmds := typeText(m, "payments")
+	m, ask := stepModel(m, onlyMsg(t, cmds[len(cmds)-1]))
+	inFlight := onlyMsg(t, ask)
+	// Moving into the results points the detail pane at the unfiltered list's row.
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyDown})
+	_, before, _ := highlightedIdentity(m.list)
+	require.NotEqual(t, "01TEST-ccc3", before)
+	require.NotNil(t, m.detail.issue)
+	require.Equal(t, before, m.detail.issue.UID)
+
+	m, _ = stepModel(m, inFlight)
+
+	require.Equal(t, "01TEST-ccc3", m.detail.issue.UID, "the detail pane follows the first ranked hit")
+}
+
 func TestDaemonSearch_CommitKeepsRankedResultsUntilFiltersClear(t *testing.T) {
 	m, api := daemonSearchFixture(t)
 	alpha, _, gamma := searchTestIssues()
@@ -319,7 +386,7 @@ func TestDaemonSearch_CommitKeepsRankedResultsUntilFiltersClear(t *testing.T) {
 	require.Empty(t, m.list.rankedNote())
 }
 
-func TestDaemonSearch_RefreshKeepsRankedOrderWithFreshRows(t *testing.T) {
+func TestDaemonSearch_RefreshUpdatesHitsAndDropsMissingOnes(t *testing.T) {
 	m, api := daemonSearchFixture(t)
 	alpha, beta, gamma := searchTestIssues()
 	api.searchFn = answerWith("hybrid", gamma, alpha)
@@ -334,9 +401,9 @@ func TestDaemonSearch_RefreshKeepsRankedOrderWithFreshRows(t *testing.T) {
 	m.list = m.list.applyFetched(refetchedMsg{issues: []Issue{beta, alpha}})
 
 	rows := m.list.visibleRows()
-	require.Len(t, rows, 2)
-	require.Equal(t, "01TEST-ccc3", rows[0].issue.UID, "an issue the refresh dropped keeps its place")
-	require.Equal(t, "fix alpha, renamed", rows[1].issue.Title)
+	require.Len(t, rows, 1, "a hit the complete refresh no longer returns is gone")
+	require.Equal(t, "01TEST-aaa1", rows[0].issue.UID)
+	require.Equal(t, "fix alpha, renamed", rows[0].issue.Title)
 }
 
 func TestDaemonSearch_BlankQueryAsksNothingAndShowsTheNormalList(t *testing.T) {
@@ -361,56 +428,44 @@ func TestDaemonSearch_BlankQueryAsksNothingAndShowsTheNormalList(t *testing.T) {
 	require.Len(t, visibleUIDs(m), 3)
 }
 
-func TestDaemonSearch_FooterHintFollowsTheSamePredicateAsTheKey(t *testing.T) {
+func TestDaemonSearch_FooterHintFollowsTheKey(t *testing.T) {
 	askHint := helplayout.HelpItem{Key: "ctrl+t", Description: "ask daemon"}
 	rowsHint := helplayout.HelpItem{Key: "ctrl+t", Description: "filter rows"}
 	for _, tc := range []struct {
 		name  string
-		setup func(m Model) Model
+		setup func(t *testing.T, m Model) Model
 		want  *helplayout.HelpItem
 	}{
-		{"bar open over one project", func(m Model) Model { return openBarFromCmdNoT(m) }, &askHint},
-		{"results focus", func(m Model) Model {
-			m = openBarFromCmdNoT(m)
-			m.input.searchFocus = searchFocusResults
+		{"bar open over one project", func(t *testing.T, m Model) Model { return openBarFromCmd(t, m, '/') }, &askHint},
+		{"results focus", func(t *testing.T, m Model) Model {
+			m = openBarFromCmd(t, m, '/')
+			m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyDown})
 			return m
 		}, &askHint},
-		{"toggled on offers the way back", func(m Model) Model {
-			m = openBarFromCmdNoT(m)
-			m.daemonSearch = true
+		{"toggled on offers the way back", func(t *testing.T, m Model) Model {
+			m = openBarFromCmd(t, m, '/')
+			m, _ = stepModel(m, ctrlT)
 			return m
 		}, &rowsHint},
-		{"all projects", func(m Model) Model {
+		{"all projects", func(t *testing.T, m Model) Model {
 			m.scope = scope{allProjects: true}
-			return openBarFromCmdNoT(m)
+			return openBarFromCmd(t, m, '/')
 		}, nil},
-		{"bar closed", func(m Model) Model { return m }, nil},
+		{"bar closed", func(_ *testing.T, m Model) Model { return m }, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m, _ := daemonSearchFixture(t)
-			m = tc.setup(m)
+			m = tc.setup(t, m)
 			rows := flattenHelpRows(m.helpRows())
-			hasKey := false
-			for _, item := range rows {
-				hasKey = hasKey || item.Key == "ctrl+t"
-			}
 			if tc.want == nil {
-				require.False(t, hasKey, "no hint when the toggle cannot work: %+v", rows)
-				require.Empty(t, m.helpKeymap().DaemonSearch.Keys)
+				for _, item := range rows {
+					require.NotEqual(t, "ctrl+t", item.Key, "no hint when the toggle cannot work: %+v", rows)
+				}
 				return
 			}
 			assertHelpItemPresent(t, rows, *tc.want)
-			require.Equal(t, []string{"ctrl+t"}, m.helpKeymap().DaemonSearch.Keys)
-			require.True(t, m.daemonSearchAvailable())
 		})
 	}
-}
-
-func openBarFromCmdNoT(m Model) Model {
-	out, cmd := m.Update(runeKey('/'))
-	m = out.(Model)
-	out, _ = m.Update(cmd())
-	return out.(Model)
 }
 
 func TestDaemonSearch_RendersCompletelyAtEverySize(t *testing.T) {
@@ -432,12 +487,7 @@ func TestDaemonSearch_RendersCompletelyAtEverySize(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			m, api := daemonSearchFixture(t)
 			_, _, gamma := searchTestIssues()
-			api.searchFn = func(SearchQuery) (*SearchAnswer, error) {
-				return &SearchAnswer{
-					Mode: "lexical", Degraded: true, DegradedReason: "embedding service unreachable",
-					Truncated: true, Issues: []Issue{gamma},
-				}, nil
-			}
+			api.searchFn = answerWith("lexical", gamma)
 			m.scope = scope{projectID: 7, projectName: longName}
 			if tc.allProjects {
 				m.scope = scope{allProjects: true}
@@ -448,17 +498,16 @@ func TestDaemonSearch_RendersCompletelyAtEverySize(t *testing.T) {
 			}
 			m = openBarFromCmd(t, m, '/')
 			m, _ = stepModel(m, ctrlT)
-			wantNote := "ranked by words only"
-			if tc.allProjects {
-				wantNote = "daemon search needs one project"
-			} else {
+			if !tc.allProjects {
 				var cmds []tea.Cmd
 				m, cmds = typeText(m, "pay")
 				m = settleSearch(m, cmds...)
 			}
 
 			view := stripANSI(m.View().Content)
-			require.Contains(t, view, wantNote)
+			if !tc.allProjects {
+				require.Contains(t, view, "ranked by words only")
+			}
 			if tc.wantFooter {
 				require.Contains(t, view, "ctrl+t")
 			} else {
@@ -473,22 +522,13 @@ func TestDaemonSearch_RendersCompletelyAtEverySize(t *testing.T) {
 	}
 }
 
-func TestClient_SearchIssues_SendsRouteParametersAndDecodesHitsInOrder(t *testing.T) {
-	var got struct {
-		path, q, mode, limit, status string
-		labels                       []string
-	}
+func TestClient_SearchIssues_SendsOnlyQueryAndLimitAndDecodesHitsInOrder(t *testing.T) {
+	var path string
+	var query url.Values
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/health" {
-			respondJSON(t, w, map[string]any{"api_schema_version": "0.61.0"})
-			return
-		}
-		query := r.URL.Query()
-		got.path, got.q, got.mode = r.URL.Path, query.Get("q"), query.Get("mode")
-		got.limit, got.status, got.labels = query.Get("limit"), query.Get("status"), query["label"]
+		path, query = r.URL.Path, r.URL.Query()
 		respondJSON(t, w, map[string]any{
-			"query": "payments", "mode": "lexical", "degraded": true,
-			"degraded_reason": "embedding service unreachable", "complete": false, "truncated": true,
+			"query": "payments", "mode": "hybrid", "complete": true, "truncated": false,
 			"results": []map[string]any{
 				{"issue": map[string]any{"uid": "u-2", "project_id": 7, "short_id": "bbb2", "title": "second"}, "matched_in": []string{"title"}},
 				{"issue": map[string]any{"uid": "u-1", "project_id": 7, "short_id": "aaa1", "title": "first"}, "matched_in": []string{"title"}},
@@ -496,57 +536,11 @@ func TestClient_SearchIssues_SendsRouteParametersAndDecodesHitsInOrder(t *testin
 		})
 	})
 
-	answer, err := c.SearchIssues(t.Context(), 7, SearchQuery{
-		Query: "payments", Mode: "auto", Limit: 50, Status: "open", Labels: []string{"bug", "ui"},
-	})
+	answer, err := c.SearchIssues(t.Context(), 7, SearchQuery{Query: "payments", Limit: 50})
 	require.NoError(t, err)
 
-	require.Equal(t, "/api/v1/projects/7/search", got.path)
-	require.Equal(t, "payments", got.q)
-	require.Equal(t, "auto", got.mode)
-	require.Equal(t, "50", got.limit)
-	require.Equal(t, "open", got.status)
-	require.Equal(t, []string{"bug", "ui"}, got.labels)
+	require.Equal(t, "/api/v1/projects/7/search", path)
+	require.Equal(t, url.Values{"q": {"payments"}, "limit": {"50"}}, query)
 	require.Equal(t, []string{"u-2", "u-1"}, []string{answer.Issues[0].UID, answer.Issues[1].UID})
-	require.Equal(t, "lexical", answer.Mode)
-	require.True(t, answer.Degraded)
-	require.Equal(t, "embedding service unreachable", answer.DegradedReason)
-	require.True(t, answer.Truncated)
-}
-
-func TestClient_SearchIssues_OldDaemonGetsUpgradeErrorNotAnAnswer(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		version string
-		query   SearchQuery
-		wantErr string
-	}{
-		{"status needs 0.20.0", "0.19.0", SearchQuery{Query: "q", Status: "open"}, "0.20.0"},
-		{"labels need 0.8.0", "0.7.0", SearchQuery{Query: "q", Labels: []string{"bug"}}, "0.8.0"},
-		{"status on 0.20.0 passes", "0.20.0", SearchQuery{Query: "q", Status: "closed"}, ""},
-		{"plain query needs no version", "0.1.0", SearchQuery{Query: "q"}, ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			searches := 0
-			c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path == "/api/v1/health" {
-					respondJSON(t, w, map[string]any{"api_schema_version": tc.version})
-					return
-				}
-				searches++
-				respondJSON(t, w, map[string]any{
-					"query": "q", "mode": "lexical", "complete": true, "truncated": false, "results": []any{},
-				})
-			})
-			_, err := c.SearchIssues(t.Context(), 7, tc.query)
-			if tc.wantErr == "" {
-				require.NoError(t, err)
-				require.Equal(t, 1, searches)
-				return
-			}
-			require.ErrorContains(t, err, tc.wantErr)
-			require.ErrorContains(t, err, "upgrade the daemon")
-			require.Zero(t, searches, fmt.Sprintf("%s: the route must not be asked", tc.name))
-		})
-	}
+	require.Equal(t, "hybrid", answer.Mode)
 }

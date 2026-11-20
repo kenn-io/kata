@@ -9,7 +9,7 @@ I         inbox                        e              edit body                 
 D         daemons                      c              new comment
 F         federation                   R              typed reply to selected comment    Filters
 C         credentials                  ]              next comment link                  /       search
-T         attention                    [              previous comment link              ctrl+t  search bar: ask the daemon for ranked results
+T         attention                    [              previous comment link              ctrl+t  daemon search (in /)
 L         toggle layout                p              set parent                         s       cycle status filter
                                        b              add blocker                        f       filter (form)
 Graph                                  l              add related                        c       clear filters
