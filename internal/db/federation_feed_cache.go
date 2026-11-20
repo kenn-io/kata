@@ -37,9 +37,10 @@ type federationFeedFacts struct {
 	// movesThrough.
 	movesThrough int64
 	// issues is how many issues the project owned when a read last counted
-	// them. It only sizes page windows: a stale count changes what a poll
-	// costs, never what it returns.
-	issues int64
+	// them, if issuesKnown. It only sizes page windows: a stale count changes
+	// what a poll costs, never what it returns.
+	issues      int64
+	issuesKnown bool
 }
 
 // FederationFeedRead carries one read transaction's view of the cache and the
@@ -52,6 +53,8 @@ type FederationFeedRead struct {
 	// noMovesAfter is true when this transaction found no issue.moved event
 	// stamped to the project above known.movesThrough.
 	noMovesAfter bool
+	// counted is true when this transaction counted the project's issues.
+	counted bool
 }
 
 // Begin returns the remembered facts for one read of project.
@@ -116,7 +119,7 @@ func (r *FederationFeedRead) foreignChecked(afterID int64) (int64, bool) {
 
 // knownIssues returns the remembered issue count, when there is one.
 func (r *FederationFeedRead) knownIssues() (int64, bool) {
-	if r == nil || r.known.issues == 0 {
+	if r == nil || !r.known.issuesKnown {
 		return 0, false
 	}
 	return r.known.issues, true
@@ -125,7 +128,17 @@ func (r *FederationFeedRead) knownIssues() (int64, bool) {
 // recordIssues notes how many issues the project owns.
 func (r *FederationFeedRead) recordIssues(issues int64) {
 	if r != nil {
-		r.learned.issues = issues
+		r.learned.issues, r.learned.issuesKnown, r.counted = issues, true, true
+	}
+}
+
+// recordEvents notes that the read returned events. Every change to which
+// issues the project owns reaches its feed as an event, and a move out of the
+// project is stamped to the destination, so a count this read reused may be
+// stale; the next read counts again.
+func (r *FederationFeedRead) recordEvents() {
+	if r != nil && !r.counted {
+		r.learned.issues, r.learned.issuesKnown = 0, false
 	}
 }
 

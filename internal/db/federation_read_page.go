@@ -98,6 +98,8 @@ func ReadFederationEventPage(ctx context.Context, tx *sql.Tx, project Project, i
 	}
 	if len(events) == 0 {
 		feed.recordQuiet(afterID, maxID)
+	} else {
+		feed.recordEvents()
 	}
 	return events, nil
 }

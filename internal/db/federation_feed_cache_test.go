@@ -33,13 +33,36 @@ func TestFederationFeedCacheKeepsNewestProofs(t *testing.T) {
 	require.Equal(t, int64(60), after, "quiet range")
 }
 
-// A read that returned events still proves the move check for its snapshot.
-func TestFederationFeedCacheRecordsMoveCheckWithoutQuietRange(t *testing.T) {
+// A remembered count of zero is still a count, so an empty project is not
+// recounted on every poll.
+func TestFederationFeedCacheReusesZeroIssueCount(t *testing.T) {
 	var cache FederationFeedCache
 	project := Project{ID: 7, UID: "01M8000000000000000000000P", Revision: 1}
 	read := cache.Begin(project, FederationBinding{})
-	read.recordMoves(false)
-	read.recordSnapshot(80)
+	read.recordIssues(0)
 	read.Commit()
-	require.Equal(t, int64(80), cache.Begin(project, FederationBinding{}).movesAfter())
+	issues, ok := cache.Begin(project, FederationBinding{}).knownIssues()
+	require.True(t, ok)
+	require.Zero(t, issues)
+}
+
+// Every change to which issues a project owns reaches its feed as an event,
+// so a read that reused the remembered count and returned events drops it.
+// A count the read took itself stays.
+func TestFederationFeedCacheForgetsReusedIssueCountAfterEvents(t *testing.T) {
+	var cache FederationFeedCache
+	project := Project{ID: 7, UID: "01M8000000000000000000000P", Revision: 1}
+	counting := cache.Begin(project, FederationBinding{})
+	counting.recordIssues(40)
+	counting.recordEvents()
+	counting.Commit()
+	issues, ok := cache.Begin(project, FederationBinding{}).knownIssues()
+	require.True(t, ok)
+	require.Equal(t, int64(40), issues)
+
+	reusing := cache.Begin(project, FederationBinding{})
+	reusing.recordEvents()
+	reusing.Commit()
+	_, ok = cache.Begin(project, FederationBinding{}).knownIssues()
+	require.False(t, ok)
 }
