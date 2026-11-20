@@ -5,6 +5,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	kataclient "go.kenn.io/kata/pkg/client"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/shortid"
 )
 
 // resolveIssueRefForCommand parses one positional issue-ref argument, resolves
@@ -62,6 +64,16 @@ func resolveIssueRefForCommandWithOptions(
 			Message:  err.Error(),
 			Kind:     kindValidation,
 			ExitCode: ExitValidation,
+		}
+	}
+	issueID, parseErr := shortid.Parse(ref)
+	if cmd.Name() == "show" && flags.Project != "" && parseErr == nil && issueID.ULID != "" {
+		if id, e := strconv.ParseInt(flags.Project, 10, 64); e == nil && id > 0 {
+			project, e := resolveProjectSelector(a, flags.Project)
+			if e != nil {
+				return nil, "", 0, resolvedIssueRef{}, e
+			}
+			return a.ctx, a.baseURL, project.ID, resolvedIssueRef{RefForAPI: parsed.RefForAPI, ProjectName: project.Name}, nil
 		}
 	}
 	pid, projectName, err := resolveProjectIDAndNameForRef(

@@ -16,7 +16,6 @@ import (
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/internal/textsafe"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -68,7 +67,7 @@ func runShow(cmd *cobra.Command, issueRef, agentOperation string, opts showRunOp
 			ExitCode: ExitUsage,
 		}
 	}
-	ctx, baseURL, pid, ref, err := resolveShowIssueRef(cmd, issueRef)
+	ctx, baseURL, pid, ref, err := resolveIssueRefForCommand(cmd, issueRef)
 	if err != nil {
 		return err
 	}
@@ -165,30 +164,6 @@ func runShow(cmd *cobra.Command, issueRef, agentOperation string, opts showRunOp
 	return renderAndPrintShowHuman(
 		cmd.Context(), rows.downsample(out), b, ref.ProjectName, renderer, width,
 	)
-}
-
-// resolveShowIssueRef looks up a full UID daemon-wide when no project is
-// selected, so `kata show <UID>` finds an issue after it moves out of the
-// workspace's project.
-func resolveShowIssueRef(cmd *cobra.Command, issueRef string) (context.Context, string, int64, resolvedIssueRef, error) {
-	parsed, err := shortid.Parse(issueRef)
-	if err != nil || parsed.ULID == "" || flags.Project != "" {
-		return resolveIssueRefForCommand(cmd, issueRef)
-	}
-	a, err := dialDaemon(cmd.Context())
-	if err != nil {
-		return nil, "", 0, resolvedIssueRef{}, err
-	}
-	client, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
-	if err != nil {
-		return nil, "", 0, resolvedIssueRef{}, err
-	}
-	issue, err := fetchIssueByUID(a.ctx, client, parsed.ULID)
-	if err != nil {
-		return nil, "", 0, resolvedIssueRef{}, err
-	}
-	_, name, _ := issueRefAndProjectForOutput(a, 0, "", issueIdentityForOutput{ProjectID: issue.ProjectID, UID: issue.UID, ShortID: issue.ShortID})
-	return a.ctx, a.baseURL, issue.ProjectID, resolvedIssueRef{RefForAPI: parsed.ULID, ProjectName: name}, nil
 }
 
 func printShowHuman(

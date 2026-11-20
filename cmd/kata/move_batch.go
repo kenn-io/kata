@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http/httptrace"
-	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/shortid"
+	"go.kenn.io/kata/internal/uid"
 	kataclient "go.kenn.io/kata/pkg/client"
 )
 
@@ -47,7 +47,6 @@ type moveBatchResult struct {
 	Hint     string `json:"hint,omitempty"`
 	To       string `json:"to,omitempty"`
 	EventID  int64  `json:"event_id,omitempty,omitzero"`
-	sourceID int64
 	targetID int64
 }
 
@@ -154,7 +153,7 @@ func runMoveBatch(cmd *cobra.Command, args []string, refsFrom string) error {
 	var halt atomic.Bool
 	prepared := make([]*moveBatchPrepared, len(rows))
 	runMoveBatchJobs(a, &halt, len(rows), func(i int) {
-		prepared[i] = resolveMoveBatchOne(a, client, projects, rows[i], &results[i])
+		prepared[i] = resolveMoveBatchOne(a, client, projects, rows[i], &results[i], &halt)
 	})
 	groups := make(map[string][]int)
 	for i, p := range prepared {
@@ -191,14 +190,27 @@ func runMoveBatch(cmd *cobra.Command, args []string, refsFrom string) error {
 		if r.Result != "moved" || comment == "" {
 			continue
 		}
-		e := a.ctx.Err()
+		key, e := uid.New()
+		if e != nil {
+			r.Message = "comment not sent: " + e.Error()
+			commentErrs = append(commentErrs, e)
+			continue
+		}
+		e = a.ctx.Err()
 		if e == nil {
-			e = postFollowupComment(a.ctx, a.client, a.baseURL, r.targetID, r.UID, actor, comment, handle)
+			e = postFollowupCommentWithKey(a.ctx, a.client, a.baseURL, r.targetID, r.UID, actor, comment, handle, key)
 		}
 		if e != nil {
-			detail := strings.Replace(e.Error(), " (retry with: kata comment "+r.UID+" --body ...)", "", 1)
+			detail := strings.Replace(e.Error(), " (rerun the original kata close command with the same --idempotency-key)", "", 1)
 			r.Message = strings.TrimSpace(r.Message + " comment failed: " + detail)
-			r.Hint = fmt.Sprintf("retry with: kata comment %s --project %s --body ...", r.UID, shellQuote(r.Target))
+			r.Hint = fmt.Sprintf("retry with: kata comment %s --project %d --body ... --idempotency-key %s%s", r.UID, r.targetID, key, moveBatchRecoveryFlags())
+			if cmd.Flags().Changed("as") {
+				r.Hint += " --as " + shellQuote(flags.As)
+			}
+			if cmd.Flags().Changed("teammate") {
+				teammate, _ := cmd.Flags().GetString("teammate")
+				r.Hint += " --teammate " + shellQuote(teammate)
+			}
 			commentErrs = append(commentErrs, fmt.Errorf("comment for %s failed: %s; %s", r.UID, detail, r.Hint))
 		}
 	}
@@ -248,7 +260,7 @@ func runMoveBatchJobs(a daemonAPI, halt *atomic.Bool, count int, job func(int)) 
 	wg.Wait()
 }
 
-func resolveMoveBatchOne(a daemonAPI, client *kataclient.Client, projects []projectRef, row moveBatchRow, result *moveBatchResult) *moveBatchPrepared {
+func resolveMoveBatchOne(a daemonAPI, client *kataclient.Client, projects []projectRef, row moveBatchRow, result *moveBatchResult, halt *atomic.Bool) *moveBatchPrepared {
 	if a.ctx.Err() != nil {
 		return nil
 	}
@@ -274,7 +286,10 @@ func resolveMoveBatchOne(a daemonAPI, client *kataclient.Client, projects []proj
 	result.Target, result.targetID = target.Name, target.ID
 	pid, ref := target.ID, parsed.ULID
 	if parsed.Project != "" {
-		source, e := resolveProjectSelectorFromRefs(parsed.Project, projects)
+		source, found, e := uniqueProjectMatch(parsed.Project, projects, projectNameExact)
+		if e == nil && !found {
+			e = fmt.Errorf("project selector %q did not match any project", parsed.Project)
+		}
 		if e != nil {
 			refuse("invalid_ref", e)
 			return nil
@@ -289,14 +304,20 @@ func resolveMoveBatchOne(a daemonAPI, client *kataclient.Client, projects []proj
 		issue, err = fetchMoveIssue(a.ctx, a.client, a.baseURL, pid, ref)
 	}
 	if err != nil {
-		if _, ok := errors.AsType[*url.Error](err); ok {
-			result.Message = err.Error()
-		} else {
+		if apiErr, ok := errors.AsType[*cliError](err); ok && apiErr.HTTPStatus >= 400 && apiErr.HTTPStatus < 500 {
 			refuse("issue_lookup", err)
+		} else {
+			result.Message = err.Error()
+			halt.Store(true)
 		}
 		return nil
 	}
-	result.UID, result.sourceID = issue.UID, issue.ProjectID
+	if !uid.Valid(issue.UID) {
+		result.Message = "issue lookup returned an invalid UID"
+		halt.Store(true)
+		return nil
+	}
+	result.UID = issue.UID
 	return &moveBatchPrepared{issue: issue, target: target, pid: pid, ref: ref}
 }
 
@@ -312,10 +333,11 @@ func moveBatchOne(a daemonAPI, client *kataclient.Client, prepared *moveBatchPre
 	unknown := func() {
 		halt.Store(true)
 		result.Result = "unknown"
-		result.Hint = fmt.Sprintf("outcome unconfirmed; run kata show %s --json to see the current issue.project_id. Source project ID: %d; target project ID: %d. Check move history before retrying if the issue may have moved more than once.", shellQuote(result.UID), result.sourceID, result.targetID)
+		result.Hint = fmt.Sprintf("outcome unconfirmed; run kata show %s --project %d --json%s to inspect the target. Check move history before retrying if the issue may have moved more than once.", result.UID, result.targetID, moveBatchRecoveryFlags())
 	}
 	if response == nil {
-		if !dispatched.Load() {
+		transportErr, marked := errors.AsType[*daemonTransportError](callErr)
+		if !dispatched.Load() && (!marked || !transportErr.mutationOutcomeUnknown()) {
 			if callErr != nil && a.ctx.Err() == nil {
 				result.Message = callErr.Error()
 			}
@@ -328,14 +350,14 @@ func moveBatchOne(a daemonAPI, client *kataclient.Client, prepared *moveBatchPre
 		unknown()
 		return
 	}
-	if response.StatusCode != 200 {
+	if response.StatusCode >= 400 {
 		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 			result.Result, result.Code, result.Message, result.Hint = "refused", "move_refused", err.Error(), ""
 			return
 		}
 	}
 	var moved moveResponseWire
-	if err := json.Unmarshal(response.Body, &moved); err != nil || !moveBatchComplete(moved, target.ID) {
+	if err := json.Unmarshal(response.Body, &moved); err != nil || !moveBatchComplete(moved, target.ID, result.UID) {
 		unknown()
 		return
 	}
@@ -343,8 +365,19 @@ func moveBatchOne(a daemonAPI, client *kataclient.Client, prepared *moveBatchPre
 	result.To, result.EventID = moveQualifiedID(target.Name, moved.Issue.ShortID), moved.EventID
 }
 
-func moveBatchComplete(moved moveResponseWire, targetID int64) bool {
-	return moved.Changed && moved.EventID != 0 && moved.Issue.ProjectID == targetID && moved.Issue.ShortID != "" && moved.NewShortID == moved.Issue.ShortID
+func moveBatchComplete(moved moveResponseWire, targetID int64, uid string) bool {
+	return moved.Changed && moved.EventID != 0 && moved.Issue.UID == uid && moved.Issue.ProjectID == targetID && moved.Issue.ShortID != "" && moved.NewShortID == moved.Issue.ShortID
+}
+
+func moveBatchRecoveryFlags() string {
+	var result string
+	if flags.Daemon != "" {
+		result += " --daemon " + shellQuote(flags.Daemon)
+	}
+	if flags.Workspace != "" {
+		result += " --workspace " + shellQuote(flags.Workspace)
+	}
+	return result
 }
 
 func moveBatchRefusalError(printErr error) error {

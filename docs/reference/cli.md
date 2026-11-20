@@ -46,7 +46,7 @@ compactly; `kata --help` has their full descriptions.
 | Flag | Meaning |
 | --- | --- |
 | `--workspace <path>` | Resolve project context from a specific workspace. |
-| `--project <name>` | Select a project explicitly; otherwise resolve `.kata.toml` at or above `--workspace`. |
+| `--project <name>` | Select a project explicitly; otherwise resolve `.kata.toml` at or above `--workspace`. With an issue UID, `show` and `comment` also accept a numeric project ID. |
 | `--daemon <name>` | Target a named daemon catalog entry. Without it, select `KATA_SERVER`, workspace config, `active_daemon`, then local. |
 | `--as <actor>` | Override the actor for this command. An explicitly empty value is a validation error; actor fallback applies only when the flag is absent. |
 | `--teammate <handle>` | Attribute supported comments, new issues, and cron run observations to one teammate under the accountable actor. An explicit empty value suppresses `KATA_TEAMMATE`. |
@@ -727,8 +727,6 @@ kata search <query> [--limit N] [--include-deleted]
 kata search <query> [--lexical [--cursor CURSOR] | --hybrid | --semantic]
 kata search <query> [--status open|closed] [--label LABEL] [--no-label LABEL]
 ```
-
-A full issue UID works with `kata show` from any workspace, including an unbound directory.
 
 `kata show --render` renders Markdown only in issue descriptions and comment
 bodies. Headers, status, claims, labels, links, and metadata remain literal so
