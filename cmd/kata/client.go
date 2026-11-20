@@ -183,26 +183,24 @@ func cliDaemonTargetError(err error) error {
 			ExitCode: ExitValidation,
 		}
 	}
-	if e, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok && !errors.Is(err, client.ErrDaemonManagedExternally) {
-		return &cliError{Message: e.Summary(), Hint: e.RecoveryAdvice(), Code: "local_unreachable", Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
-	}
 	if errors.Is(err, client.ErrRemoteUnavailable) ||
 		errors.Is(err, client.ErrLocalDaemonUnreachable) ||
 		errors.Is(err, client.ErrDaemonManagedExternally) {
-		hint := ""
-		message := err.Error()
+		message, hint, code := err.Error(), "", ""
 		if advised, ok := errors.AsType[interface {
 			error
+			Summary() string
 			RecoveryAdvice() string
-		}](err); ok && errors.Is(err, client.ErrDaemonManagedExternally) {
-			hint = advised.RecoveryAdvice()
-			if summary, ok := err.(interface{ Summary() string }); ok {
-				message = summary.Summary()
+		}](err); ok {
+			message, hint = advised.Summary(), advised.RecoveryAdvice()
+			if !errors.Is(err, client.ErrDaemonManagedExternally) {
+				code = "local_unreachable"
 			}
 		}
 		return &cliError{
 			Message:  message,
 			Hint:     hint,
+			Code:     code,
 			Kind:     kindDaemonUnavail,
 			ExitCode: ExitDaemonUnavail,
 		}
