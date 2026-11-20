@@ -51,7 +51,7 @@ func checkCommentGraphPurgeEvidenceFromHiddenSource(t *testing.T, store db.Stora
 	require.NoError(t, err)
 	_, err = store.PurgeIssue(ctx, target.ID, "worker", nil)
 	require.NoError(t, err)
-	_, _, changed, err := store.SoftDeleteIssue(ctx, evidenceSource.ID, "worker")
+	_, _, changed, err := store.SoftDeleteIssue(ctx, evidenceSource.ID, "worker", "")
 	require.NoError(t, err)
 	require.True(t, changed)
 

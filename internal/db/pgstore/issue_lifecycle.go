@@ -481,12 +481,13 @@ func (s *Store) closeIssueWithEvents(
 
 // ReopenIssue clears close state; an already-open issue is a no-op.
 func (s *Store) ReopenIssue(ctx context.Context, issueID int64, actor string) (db.Issue, *db.Event, bool, error) {
-	return s.transitionIssue(ctx, issueID, actor, false)
+	return s.transitionIssue(ctx, issueID, actor, "", false)
 }
 
-// SoftDeleteIssue hides an issue while retaining all dependent state.
-func (s *Store) SoftDeleteIssue(ctx context.Context, issueID int64, actor string) (db.Issue, *db.Event, bool, error) {
-	return s.transitionIssue(ctx, issueID, actor, true)
+// SoftDeleteIssue hides an issue while retaining all dependent state. A
+// non-empty reason is recorded on its issue.soft_deleted event.
+func (s *Store) SoftDeleteIssue(ctx context.Context, issueID int64, actor, reason string) (db.Issue, *db.Event, bool, error) {
+	return s.transitionIssue(ctx, issueID, actor, reason, true)
 }
 
 // RestoreIssue makes a soft-deleted issue visible again.
@@ -524,7 +525,7 @@ func (s *Store) RestoreIssue(ctx context.Context, issueID int64, actor string) (
 	return issue, event, changed, err
 }
 
-func (s *Store) transitionIssue(ctx context.Context, issueID int64, actor string, deleteIssue bool) (db.Issue, *db.Event, bool, error) {
+func (s *Store) transitionIssue(ctx context.Context, issueID int64, actor, deleteReason string, deleteIssue bool) (db.Issue, *db.Event, bool, error) {
 	var issue db.Issue
 	var event *db.Event
 	var changed bool
@@ -555,6 +556,9 @@ func (s *Store) transitionIssue(ctx context.Context, issueID int64, actor string
 		if deleteIssue {
 			eventType = "issue.soft_deleted"
 			payload = map[string]any{"deleted_at": at}
+			if deleteReason != "" {
+				payload["reason"] = deleteReason
+			}
 			statement = `UPDATE issues SET deleted_at = $1, updated_at = $1 WHERE id = $2`
 		}
 		if _, err := tx.ExecContext(ctx, statement, at, current.ID); err != nil {

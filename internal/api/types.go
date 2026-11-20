@@ -1363,7 +1363,7 @@ type DestructiveActionRequest struct {
 	Confirm   string `header:"X-Kata-Confirm"`
 	Body      struct {
 		Actor  string `json:"actor" required:"true"`
-		Reason string `json:"reason,omitempty"` // purge only; lands in purge_log.reason
+		Reason string `json:"reason,omitempty" doc:"Why the issue is removed. Delete records it on the issue.soft_deleted event; purge stores it in purge_log.reason."`
 	}
 }
 

@@ -95,7 +95,7 @@ func TestKitMigrationReusesPersistedEmbeddingsForIndexingAndServing(t *testing.T
 	require.NoError(t, err)
 	require.Len(t, result.Hits, 1)
 	require.Equal(t, updated.Revision, result.Hits[0].Issue.Revision)
-	_, _, _, err = store.SoftDeleteIssue(ctx, issue.ID, "example-author")
+	_, _, _, err = store.SoftDeleteIssue(ctx, issue.ID, "example-author", "")
 	require.NoError(t, err)
 	result, err = hybridSearch(ctx, store, index, client, hybridParams{
 		ProjectID: project.ID, Query: "session", Limit: 10, Requested: "hybrid",

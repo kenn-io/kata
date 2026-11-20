@@ -235,7 +235,7 @@ func TestIssueScopedLifecycleEventsSurvivePollHistoryAndDigest(t *testing.T) {
 		IfMatchRev: child.Revision, Actor: "coordinator",
 	})
 	require.NoError(t, err)
-	_, _, _, err = env.DB.SoftDeleteIssue(t.Context(), child.ID, "coordinator")
+	_, _, _, err = env.DB.SoftDeleteIssue(t.Context(), child.ID, "coordinator", "")
 	require.NoError(t, err)
 	_, _, _, err = env.DB.RestoreIssue(t.Context(), child.ID, "coordinator")
 	require.NoError(t, err)

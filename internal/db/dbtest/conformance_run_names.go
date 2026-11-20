@@ -22,7 +22,7 @@ func checkRunNames(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	gone, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Gone", Author: "worker"})
 	require.NoError(t, err)
-	_, _, _, err = store.SoftDeleteIssue(ctx, gone.ID, "worker")
+	_, _, _, err = store.SoftDeleteIssue(ctx, gone.ID, "worker", "")
 	require.NoError(t, err)
 
 	observe := func(withWorkflow bool, issue db.Issue) string {

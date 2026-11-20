@@ -106,7 +106,7 @@ func TestLegacyCommentReplyExportPreservesSourceEventAfterTargetSoftDelete(t *te
 		ReplyToUID: targetComment.UID, ReplyKind: "reply",
 	})
 	require.NoError(t, err)
-	_, _, changed, err := source.SoftDeleteIssue(ctx, targetIssue.ID, "worker")
+	_, _, changed, err := source.SoftDeleteIssue(ctx, targetIssue.ID, "worker", "")
 	require.NoError(t, err)
 	require.True(t, changed)
 

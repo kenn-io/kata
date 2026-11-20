@@ -862,7 +862,7 @@ func TestClaimsCanBeReacquiredForSoftDeletedIssue(t *testing.T) {
 		Now:       now,
 	})
 	require.NoError(t, err)
-	_, _, _, err = d.SoftDeleteIssue(ctx, issue.ID, "alice")
+	_, _, _, err = d.SoftDeleteIssue(ctx, issue.ID, "alice", "")
 	require.NoError(t, err)
 
 	released, err := d.ReleaseClaim(ctx, db.ReleaseClaimParams{
@@ -906,7 +906,7 @@ func TestClaimStatusExpiresTimedClaimForSoftDeletedIssue(t *testing.T) {
 		Now:       now.Add(-2 * time.Minute),
 	})
 	require.NoError(t, err)
-	_, _, _, err = d.SoftDeleteIssue(ctx, issue.ID, "alice")
+	_, _, _, err = d.SoftDeleteIssue(ctx, issue.ID, "alice", "")
 	require.NoError(t, err)
 
 	status, err := d.ClaimStatus(ctx, p.ID, issue.ShortID, now)

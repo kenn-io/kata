@@ -140,7 +140,7 @@ func TestIssueMutationsCarryUpdatedAt(t *testing.T) {
 	require.True(t, changed)
 	assertEventCarriesUpdatedAt(t, *evt, reopened)
 
-	_, _, changed, err = d.SoftDeleteIssue(ctx, a.ID, "agent")
+	_, _, changed, err = d.SoftDeleteIssue(ctx, a.ID, "agent", "")
 	require.NoError(t, err)
 	require.True(t, changed)
 	restored, evt, changed, err := d.RestoreIssue(ctx, a.ID, "agent")

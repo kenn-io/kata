@@ -198,7 +198,7 @@ func TestExportComments(t *testing.T) {
 	require.Less(t, got[0].ID, got[1].ID)
 
 	// Soft-delete the parent issue: default filter omits its comments.
-	_, _, _, err = d.SoftDeleteIssue(ctx, issue.ID, "a")
+	_, _, _, err = d.SoftDeleteIssue(ctx, issue.ID, "a", "")
 	require.NoError(t, err)
 	require.Empty(t, collectExport(t, d.ExportComments(ctx, db.ExportFilter{ProjectID: &p.ID})))
 }
@@ -232,7 +232,7 @@ func TestExportImportMappings(t *testing.T) {
 	require.Equal(t, "github", got[0].Source)
 
 	// Soft-deleting the underlying issue drops the mapping under default filter.
-	_, _, _, err = d.SoftDeleteIssue(ctx, issue.ID, "a")
+	_, _, _, err = d.SoftDeleteIssue(ctx, issue.ID, "a", "")
 	require.NoError(t, err)
 	require.Empty(t, collectExport(t, d.ExportImportMappings(ctx, db.ExportFilter{ProjectID: &p.ID})))
 	// IncludeDeleted surfaces it again.
@@ -267,7 +267,7 @@ func TestExportLinks(t *testing.T) {
 	require.Equal(t, b.ID, got[0].ToIssueID)
 
 	// Soft-deleting an endpoint drops the link under the default filter.
-	_, _, _, err = d.SoftDeleteIssue(ctx, b.ID, "x")
+	_, _, _, err = d.SoftDeleteIssue(ctx, b.ID, "x", "")
 	require.NoError(t, err)
 	require.Empty(t, collectExport(t, d.ExportLinks(ctx, db.ExportFilter{ProjectID: &p.ID})))
 }
@@ -318,7 +318,7 @@ func TestExportEvents_UIDOnlyPeerSoftDeleted(t *testing.T) {
 	t.Parallel()
 	d, ctx, p, peer := setupTestIssue(t)
 	// Soft-delete the peer issue so its uid points at a deleted row.
-	_, _, _, err := d.SoftDeleteIssue(ctx, peer.ID, "a")
+	_, _, _, err := d.SoftDeleteIssue(ctx, peer.ID, "a", "")
 	require.NoError(t, err)
 
 	// Insert two raw events directly so they carry related_issue_uid
@@ -447,7 +447,7 @@ func TestExportIssues(t *testing.T) {
 	d, ctx, p, issue := setupTestIssue(t)
 	deleted, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "d", Author: "a"})
 	require.NoError(t, err)
-	_, _, _, err = d.SoftDeleteIssue(ctx, deleted.ID, "a")
+	_, _, _, err = d.SoftDeleteIssue(ctx, deleted.ID, "a", "")
 	require.NoError(t, err)
 
 	// Default filter excludes soft-deleted issues.

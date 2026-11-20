@@ -195,6 +195,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
   the issue can read it; everyone else still gets `issue_not_found`, as does
   every caller of a daemon embedded under a host access controller.
 
+- Say why you delete an issue with `kata delete --reason <text>`. The reason
+  is recorded on the `issue.soft_deleted` event, so the deleted issue's
+  history shows who deleted it, when and why. `POST .../actions/delete` and
+  the MCP `kata.delete` tool already accepted a `reason` and now keep it.
+  `--reason` needs a daemon on API 0.62.0 or newer.
+
 - Read the job, workflow and issue of a cron run from the run row itself: it
   carries `job_name`, `workflow_name` and `issue_short_id`, deleted ones
   included, so a client labels a page of runs without listing jobs, workflows

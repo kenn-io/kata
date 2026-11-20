@@ -14,7 +14,7 @@ func checkCommentEventExportAfterTargetDeletion(t *testing.T, target db.Storage,
 	softDeleteSource := backend.Open(t)
 	t.Cleanup(func() { require.NoError(t, softDeleteSource.Close()) })
 	project, sourceIssue, targetIssue, _, creation := createCommentExportPair(t, softDeleteSource)
-	_, _, changed, err := softDeleteSource.SoftDeleteIssue(ctx, targetIssue.ID, "worker")
+	_, _, changed, err := softDeleteSource.SoftDeleteIssue(ctx, targetIssue.ID, "worker", "")
 	require.NoError(t, err)
 	require.True(t, changed)
 

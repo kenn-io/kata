@@ -47,7 +47,7 @@ func TestExportImport_DeletedIssueOmitsImportMappings(t *testing.T) {
 		_, err := src.UpsertImportMapping(ctx, params)
 		require.NoError(t, err)
 	}
-	_, _, _, err = src.SoftDeleteIssue(ctx, deleted.ID, "tester")
+	_, _, _, err = src.SoftDeleteIssue(ctx, deleted.ID, "tester", "")
 	require.NoError(t, err)
 
 	var buf bytes.Buffer

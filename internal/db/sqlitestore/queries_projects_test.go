@@ -664,7 +664,7 @@ func TestBatchProjectStats_ExcludesSoftDeletedIssues(t *testing.T) {
 	p := createProject(ctx, t, d, "proj")
 	makeIssue(t, ctx, d, p.ID, "live", "tester")
 	soft := makeIssue(t, ctx, d, p.ID, "soft", "tester")
-	_, _, _, err := d.SoftDeleteIssue(ctx, soft.ID, "tester")
+	_, _, _, err := d.SoftDeleteIssue(ctx, soft.ID, "tester", "")
 	require.NoError(t, err)
 	// Sanity: the soft-deleted row still exists with deleted_at set, so
 	// the filter is what's actually doing the work.

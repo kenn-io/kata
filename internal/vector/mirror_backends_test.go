@@ -50,7 +50,7 @@ func TestRefreshMirrorMatchesLiveFeedAcrossBackends(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, 506, count)
 
-			_, _, _, err = store.SoftDeleteIssue(ctx, issues[504].ID, "tester")
+			_, _, _, err = store.SoftDeleteIssue(ctx, issues[504].ID, "tester", "")
 			require.NoError(t, err)
 			changed, err = idx.RefreshMirror(ctx, store)
 			require.NoError(t, err)

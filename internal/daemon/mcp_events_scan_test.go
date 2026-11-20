@@ -271,12 +271,12 @@ func TestMCPEventsScopedTokenIgnoresOtherProjects(t *testing.T) {
 		subscribeEvents(t, service, f.scoped, mcpevents.Arguments{For: "example-user"})
 		require.NoError(t, service.Drain(ctx))
 
-		_, _, _, err := store.SoftDeleteIssue(ctx, f.hiddenIssue.ID, "coordinator")
+		_, _, _, err := store.SoftDeleteIssue(ctx, f.hiddenIssue.ID, "coordinator", "")
 		require.NoError(t, err)
 		require.NoError(t, service.Drain(ctx))
 		assert.Zero(t, got.pings.Load(), "a project the token cannot see")
 
-		_, _, _, err = store.SoftDeleteIssue(ctx, f.childIssue.ID, "coordinator")
+		_, _, _, err = store.SoftDeleteIssue(ctx, f.childIssue.ID, "coordinator", "")
 		require.NoError(t, err)
 		require.NoError(t, service.Drain(ctx))
 		assert.Equal(t, int64(1), got.pings.Load(), "its own project")

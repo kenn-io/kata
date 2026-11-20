@@ -328,7 +328,7 @@ func TestClaimGateLinkDeleteSkipsSoftDeletedPeerClaim(t *testing.T) {
 		Author:      "tester",
 	})
 	require.NoError(t, err)
-	_, _, _, err = env.DB.SoftDeleteIssue(t.Context(), peer.ID, "tester")
+	_, _, _, err = env.DB.SoftDeleteIssue(t.Context(), peer.ID, "tester", "")
 	require.NoError(t, err)
 	acquireClaimGateIssue(t, env, project, issue, "agent")
 
@@ -413,7 +413,7 @@ func TestClaimGateParentReplaceSkipsSoftDeletedOldParentClaim(t *testing.T) {
 		Author:      "tester",
 	})
 	require.NoError(t, err)
-	_, _, _, err = env.DB.SoftDeleteIssue(t.Context(), oldParent.ID, "tester")
+	_, _, _, err = env.DB.SoftDeleteIssue(t.Context(), oldParent.ID, "tester", "")
 	require.NoError(t, err)
 	acquireClaimGateIssue(t, env, project, child, "agent")
 	acquireClaimGateIssue(t, env, project, newParent, "agent")
@@ -465,7 +465,7 @@ func TestClaimGateEditLinksDeltaRemoveSkipsSoftDeletedPeerClaim(t *testing.T) {
 		Author:      "tester",
 	})
 	require.NoError(t, err)
-	_, _, _, err = env.DB.SoftDeleteIssue(t.Context(), parent.ID, "tester")
+	_, _, _, err = env.DB.SoftDeleteIssue(t.Context(), parent.ID, "tester", "")
 	require.NoError(t, err)
 	acquireClaimGateIssue(t, env, project, child, "agent")
 
@@ -535,7 +535,7 @@ func TestClaimGateEditLinksDeltaParentReplaceDeniesOtherOldParentClaimHolder(t *
 func TestClaimGateRestoreCanAcquireLeaseAfterSoftDelete(t *testing.T) {
 	env := testenv.New(t)
 	project, issue, _ := setupClaimGateProject(t, env, true)
-	_, _, _, err := env.DB.SoftDeleteIssue(t.Context(), issue.ID, "tester")
+	_, _, _, err := env.DB.SoftDeleteIssue(t.Context(), issue.ID, "tester", "")
 	require.NoError(t, err)
 	acquireClaimGateIssue(t, env, project, issue, "agent")
 
@@ -897,7 +897,7 @@ func claimGateDeleteRequest(t *testing.T, federated bool) (*testenv.Env, claimGa
 func claimGateRestoreRequest(t *testing.T, federated bool) (*testenv.Env, claimGateHTTPRequest) {
 	env := testenv.New(t)
 	project, issue, _ := setupClaimGateProject(t, env, federated)
-	_, _, _, err := env.DB.SoftDeleteIssue(t.Context(), issue.ID, "tester")
+	_, _, _, err := env.DB.SoftDeleteIssue(t.Context(), issue.ID, "tester", "")
 	require.NoError(t, err)
 	return env, claimGateHTTPRequest{
 		method: http.MethodPost,
