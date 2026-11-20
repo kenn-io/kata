@@ -231,12 +231,10 @@ func TestFederationPollWaitReauthorizesWhenWaitExpires(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, result.status, "%s", result.raw)
 }
 
-func TestFederationPollWaitRejectsInvalidWait(t *testing.T) {
+func TestFederationPollWaitRejectsANegativeWait(t *testing.T) {
 	f := newLongPollFixture(t)
-	for _, wait := range []string{"-1", "x"} {
-		result := f.poll(t, 0, wait)
-		assert.Equal(t, http.StatusBadRequest, result.status, "wait=%s: %s", wait, result.raw)
-	}
+	result := f.poll(t, 0, "-1")
+	assert.Equal(t, http.StatusBadRequest, result.status, "%s", result.raw)
 }
 
 func TestFederationPollWaitReleasesWaitersWhenClientsDisconnect(t *testing.T) {

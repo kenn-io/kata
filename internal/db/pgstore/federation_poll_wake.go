@@ -6,7 +6,6 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"sync"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -19,51 +18,9 @@ const federationPollWakeChannel = "kata_federation_poll"
 
 var _ db.FederationPollWakeBus = (*Store)(nil)
 
-// pollWakeState lets Close end listeners blocked on their connection; closing
-// the pool alone does not interrupt a connection that is in use.
-type pollWakeState struct {
-	mu        sync.Mutex
-	closed    bool
-	listeners map[*context.CancelFunc]struct{}
-}
-
-// close marks the bus closed and ends every listener. It reports whether this
-// call closed it.
-func (p *pollWakeState) close() bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.closed {
-		return false
-	}
-	p.closed = true
-	for cancel := range p.listeners {
-		(*cancel)()
-	}
-	return true
-}
-
-func (p *pollWakeState) isClosed() bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.closed
-}
-
-// listen derives the context one listener runs under. It reports false once
-// the bus is closed.
-func (p *pollWakeState) listen(ctx context.Context) (context.Context, func(), bool) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.closed {
-		return nil, nil, false
-	}
-	ctx, cancel := context.WithCancel(ctx)
-	p.listeners[&cancel] = struct{}{}
-	return ctx, func() {
-		p.mu.Lock()
-		delete(p.listeners, &cancel)
-		p.mu.Unlock()
-		cancel()
-	}, true
+// pollWakeClosed reports whether Close has run.
+func (s *Store) pollWakeClosed() bool {
+	return s.pollWakeCtx.Err() != nil
 }
 
 type federationPollWakeNotification struct {
@@ -74,7 +31,7 @@ type federationPollWakeNotification struct {
 // PublishFederationPollWake notifies every hub process listening on this
 // database and schema.
 func (s *Store) PublishFederationPollWake(ctx context.Context, payload string) error {
-	if s.pollWakeDB == nil || s.pollWake.isClosed() {
+	if s.pollWakeDB == nil || s.pollWakeClosed() {
 		return db.ErrFederationPollWakeClosed
 	}
 	message, err := json.Marshal(federationPollWakeNotification{Schema: s.schema, Payload: payload})
@@ -93,11 +50,14 @@ func (s *Store) ListenFederationPollWake(ctx context.Context, listening func(), 
 	if s.pollWakeDB == nil {
 		return db.ErrFederationPollWakeClosed
 	}
-	ctx, done, open := s.pollWake.listen(ctx)
-	if !open {
+	if s.pollWakeClosed() {
 		return db.ErrFederationPollWakeClosed
 	}
-	defer done()
+	// Closing the pool does not interrupt a connection in use, so Close ends
+	// the listener through its context.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	defer context.AfterFunc(s.pollWakeCtx, cancel)()
 	conn, err := s.pollWakeDB.Conn(ctx)
 	if err != nil {
 		return s.pollWakeError("open federation poll wake listener", err)
@@ -116,7 +76,7 @@ func (s *Store) pollWakeError(action string, err error) error {
 	if err == nil {
 		return nil
 	}
-	if s.pollWake.isClosed() {
+	if s.pollWakeClosed() {
 		return errors.Join(db.ErrFederationPollWakeClosed, err)
 	}
 	return fmt.Errorf("%s: %w", action, err)
