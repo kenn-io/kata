@@ -17,6 +17,7 @@ import (
 
 type postgresHubProcess struct {
 	store  *pgstore.Store
+	reads  *federationReadProbe
 	server *httptest.Server
 }
 
@@ -25,11 +26,12 @@ func newPostgresHubProcess(t testing.TB, dsn string) postgresHubProcess {
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
-	hub := daemon.NewServer(daemon.ServerConfig{DB: store, StartedAt: time.Now().UTC()})
+	reads := newFederationReadProbe(store)
+	hub := daemon.NewServer(daemon.ServerConfig{DB: reads.storage(), StartedAt: time.Now().UTC()})
 	t.Cleanup(func() { _ = hub.Close() })
 	server := httptest.NewServer(hub.Handler())
 	t.Cleanup(server.Close)
-	return postgresHubProcess{store: store, server: server}
+	return postgresHubProcess{store: store, reads: reads, server: server}
 }
 
 func TestFederationPollWaitWakesAcrossPostgresHubProcesses(t *testing.T) {
@@ -52,9 +54,12 @@ func TestFederationPollWaitWakesAcrossPostgresHubProcesses(t *testing.T) {
 	require.NoError(t, err)
 	cursor := pollPostgresHub(t, poller.server.URL, project.ID, 0, "").body.NextAfterID
 
+	reads := poller.reads.readsReturned()
 	done := make(chan longPollResult, 1)
 	go func() { done <- pollPostgresHub(t, poller.server.URL, project.ID, cursor, "30") }()
-	waitForHeldPoll(t, done)
+	// The poll subscribes to wakeups before its first read, so the commit
+	// below reaches it only through the wake bridge.
+	poller.reads.waitForReads(t, reads+1)
 	createIssueOnPostgresHub(t, writer.server.URL, project.ID, "Committed by another hub process")
 	select {
 	case result := <-done:

@@ -988,6 +988,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		holdUntil := time.Now().Add(wait)
 		read := func(readCtx context.Context) (db.FederationReadResult, error) {
 			result, err := cfg.DB.ReadFederation(readCtx, db.FederationReadParams{ProjectID: in.ProjectID, Features: in.EventFeatures, AfterID: in.AfterID, IssueUID: in.IssueUID, Limit: limit})
 			if err != nil {
@@ -1002,17 +1003,23 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 				defer waiter.release()
 			}
 		}
+		reauthorize := func() (context.Context, error) {
+			return reauthorizeFederationPoll(requestCtx, cfg, in.Authorization, in.ProjectID, operation)
+		}
 		result, err := read(ctx)
 		if err != nil {
 			return nil, err
 		}
 		if waiter != nil {
-			result, err = holdFederationPoll(requestCtx, waiter, wait, result, func() (context.Context, error) {
-				return reauthorizeFederationPoll(requestCtx, cfg, in.Authorization, in.ProjectID, operation)
-			}, read)
+			result, err = holdFederationPoll(requestCtx, waiter, holdUntil, result, reauthorize, read)
 			if err != nil {
 				return nil, err
 			}
+		}
+		// Authorize again after the read. A revocation that commits after
+		// this check commits after every event in the page.
+		if _, err := reauthorize(); err != nil {
+			return nil, err
 		}
 		return &api.FederationPollEventsResponse{
 			EventFeatures: db.SupportedEventFeatures, RequiredEventFeatures: result.RequiredFeatures,
