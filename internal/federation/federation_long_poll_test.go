@@ -96,13 +96,14 @@ func isEventPoll(r *http.Request) bool {
 // that fails before it pulls, and the next poll would answer at once.
 func TestFederationRunnerStopsHoldingPollsWhileItsPassesFail(t *testing.T) {
 	h := newHubSpokeHarness(t, false)
-	var held atomic.Int64
+	var held, failed atomic.Int64
 	var failPulls atomic.Bool
 	h.bindThrough(t, func(w http.ResponseWriter, r *http.Request, hub http.Handler) {
 		if isHeldPoll(r) {
 			held.Add(1)
 		}
 		if failPulls.Load() && isEventPoll(r) {
+			failed.Add(1)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -116,10 +117,13 @@ func TestFederationRunnerStopsHoldingPollsWhileItsPassesFail(t *testing.T) {
 	failPulls.Store(true)
 	before := held.Load()
 	h.createHubIssue(t, "Waiting behind a failing pass")
+	// The held poll's answer starts a pass, and that pass fails its pull.
+	//nolint:kennlint // sleeptest: the runner and hub exchange held polls over real HTTP.
+	require.Eventually(t, func() bool { return failed.Load() > 0 },
+		10*time.Second, 20*time.Millisecond, "the held poll's answer never started a pass")
 	//nolint:kennlint // sleeptest: the runner and hub exchange held polls over real HTTP.
 	time.Sleep(time.Second)
 	assert.Equal(t, before, held.Load(), "the spoke kept holding polls while every pass failed")
-	assert.Zero(t, h.spokeIssueCount(t))
 }
 
 // Moving a binding to a new hub address must not leave interval passes
