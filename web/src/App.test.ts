@@ -15,7 +15,6 @@ import { preferencesStorageKey } from './lib/state/preferences'
 
 describe('App', () => {
   beforeEach(() => {
-    document.title = ''
     sessionStorage.clear()
     localStorage.clear()
     document.documentElement.classList.remove('dark')
@@ -1703,7 +1702,7 @@ describe('App', () => {
     expect(screen.getByRole('region', { name: 'Kata workspace' })).not.toBeNull()
   })
 
-  it('fences authority when a reference request requires login', async () => {
+  it('fences browser authority when a reference request rejects the session', async () => {
     history.replaceState(null, '', '/kata#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
@@ -1738,7 +1737,7 @@ describe('App', () => {
     )
   })
 
-  it('shows configured-origin login without probing authority or losing the requested route', async () => {
+  it('shows configured-origin login without probing authority or losing the requested route', () => {
     const fetcher = vi.fn()
     vi.stubGlobal('fetch', fetcher)
     history.replaceState(
@@ -1773,8 +1772,11 @@ describe('App', () => {
       }),
     )
     render(App)
+
+    const search = screen.getAllByRole('button', { name: 'Search for abc4' })
+    expect(search).toHaveLength(1)
     expect(window.location.pathname + window.location.search).toBe('/kata?issue=abc4')
-    await fireEvent.click(screen.getByRole('button', { name: 'Search for abc4' }))
+    await fireEvent.click(search[0]!)
     expect(window.location.pathname).toBe('/kata')
     expect(new URLSearchParams(window.location.search).getAll('status')).toEqual(['all'])
     expect(new URLSearchParams(window.location.search).get('text')).toBe('abc4')
@@ -2275,6 +2277,10 @@ describe('App', () => {
     remote.collection[0]!.title = 'Remote issue'
     let releaseRemote!: () => void
     const remoteReleased = new Promise<void>((resolve) => (releaseRemote = resolve))
+    let releaseRemoteReferences!: () => void
+    const remoteReferencesReleased = new Promise<void>(
+      (resolve) => (releaseRemoteReferences = resolve),
+    )
     const snapshotRequests: Request[] = []
     const referenceRequests: Request[] = []
     vi.stubGlobal(
@@ -2306,26 +2312,22 @@ describe('App', () => {
         }
         if (path.endsWith('/api/v1/ui/references')) {
           referenceRequests.push(request)
-          if (request.headers.get('X-Kata-Web-Daemon') === 'example-local') {
+          const daemon = request.headers.get('X-Kata-Web-Daemon')
+          if (daemon === 'example-local') {
             await new Promise<void>((resolve) => {
               request.signal.addEventListener('abort', () => resolve(), { once: true })
             })
           }
+          if (daemon === 'example-remote') await remoteReferencesReleased
           return Response.json({ issues: [], labels: [], owners: [], projects: [] })
         }
         if (path.endsWith('/api/v1/ui/snapshot')) {
           snapshotRequests.push(request)
           const daemon = request.headers.get('X-Kata-Web-Daemon')
-          if (daemon === 'example-remote') return remoteReleased.then(() => Response.json(remote))
-          const selected = new URL(request.url).searchParams.has('selected_issue_uid')
-            ? availableSelection(local.collection[0])
-            : undefined
-          return Response.json(
-            { ...local, ...(selected ? { selected } : {}) },
-            {
-              headers: { ETag: `"${daemon ?? 'default'}-${snapshotRequests.length}"` },
-            },
-          )
+          if (daemon === 'example-remote') await remoteReleased
+          return Response.json(daemon === 'example-remote' ? remote : local, {
+            headers: { ETag: `"${daemon ?? 'default'}-${snapshotRequests.length}"` },
+          })
         }
         throw new Error(`Unexpected request: ${request.method} ${path}`)
       }),
@@ -2333,23 +2335,33 @@ describe('App', () => {
 
     render(App)
     expect(await screen.findByRole('button', { name: /Example issue/ })).not.toBeNull()
-    await fireEvent.click(screen.getByRole('button', { name: /Example issue/ }))
-    await screen.findByRole('region', { name: 'Kata issue detail' })
     await fireEvent.click(screen.getByRole('button', { name: 'Today' }))
     await waitFor(() => expect(window.location.search).toBe('?view=today'))
     await waitFor(() => expect(document.title).toBe('Today · Kata'))
-    const localReference = referenceRequests.findLast(
-      (request) => request.headers.get('X-Kata-Web-Daemon') === 'example-local',
-    )
-    expect(localReference?.signal.aborted).toBe(false)
+    let localReference!: Request
+    await waitFor(() => {
+      localReference = referenceRequests.findLast(
+        (request) => request.headers.get('X-Kata-Web-Daemon') === 'example-local',
+      )!
+      expect(localReference?.signal.aborted).toBe(false)
+    })
     now = 120_000
     await fireEvent.click(screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }))
     await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
     expect(await screen.findByText('Loading Kata…')).not.toBeNull()
     await waitFor(() => expect(document.title).toBe('Kata'))
-    expect(localReference?.signal.aborted).toBe(true)
+    expect(localReference.signal.aborted).toBe(true)
     releaseRemote()
     expect(await screen.findByRole('button', { name: /Remote issue/ })).not.toBeNull()
+    await waitFor(() => {
+      expect(
+        referenceRequests.some(
+          (request) => request.headers.get('X-Kata-Web-Daemon') === 'example-remote',
+        ),
+      ).toBe(true)
+    })
+    expect(localReference.signal.aborted).toBe(true)
+    releaseRemoteReferences()
     expect(window.location.search).toBe('?view=all-open')
     now += 10_000
     window.dispatchEvent(new Event('pagehide'))
