@@ -23,7 +23,6 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
-	"go.kenn.io/kit/agenthook"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
@@ -117,13 +116,12 @@ func (e *LocalDaemonUnreachableError) RecoveryAdvice() string {
 	}
 	switch {
 	case e.Profile != "" && e.ProfileAutostart:
-		commands, _ := agenthook.BuildCommand("kata", "--daemon", e.Profile, "daemon", "recover")
 		if goruntime.GOOS == "windows" {
-			return message + ". Then run in PowerShell " + commands.PowerShell
+			return message + ". Then run in PowerShell kata --daemon '" + strings.ReplaceAll(e.Profile, "'", "''") + "' daemon recover"
 		}
-		return message + ". Then run " + commands.POSIX
+		return message + ". Then run kata --daemon '" + strings.ReplaceAll(e.Profile, "'", "'\"'\"'") + "' daemon recover"
 	case e.autoStarted:
-		return message + ". Then rerun the original command"
+		return message + ". Then rerun the original command or any command that autostarts the daemon. daemon status, daemon diagnose, and health only inspect"
 	default:
 		return message + ". Then start it again the way you originally started it (same options and environment)"
 	}

@@ -289,7 +289,13 @@ type supervisedWaitError struct {
 	advice  string
 }
 
-func (e *supervisedWaitError) Error() string          { return e.message }
+func (e *supervisedWaitError) Error() string {
+	if e.advice == "" {
+		return e.message
+	}
+	return e.message + "; " + e.advice
+}
+func (e *supervisedWaitError) Summary() string        { return e.message }
 func (e *supervisedWaitError) Unwrap() error          { return e.cause }
 func (e *supervisedWaitError) RecoveryAdvice() string { return e.advice }
 

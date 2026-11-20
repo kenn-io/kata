@@ -140,7 +140,12 @@ func discoverDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) 
 			return resolved, diagnosisError(diagnosis)
 		}
 		if err != nil {
-			return resolved, cliDaemonTargetError(err)
+			mapped := cliDaemonTargetError(err)
+			var target *cliError
+			if resolved.LocalProfile != nil && !errors.As(mapped, &target) {
+				return resolved, &cliError{Message: err.Error(), Code: "local_unreachable", Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
+			}
+			return resolved, mapped
 		}
 		return resolved, noDaemonRunningError()
 	}
@@ -190,14 +195,18 @@ func cliDaemonTargetError(err error) error {
 		errors.Is(err, client.ErrLocalDaemonUnreachable) ||
 		errors.Is(err, client.ErrDaemonManagedExternally) {
 		hint := ""
+		message := err.Error()
 		if advised, ok := errors.AsType[interface {
 			error
 			RecoveryAdvice() string
 		}](err); ok && errors.Is(err, client.ErrDaemonManagedExternally) {
 			hint = advised.RecoveryAdvice()
+			if summary, ok := err.(interface{ Summary() string }); ok {
+				message = summary.Summary()
+			}
 		}
 		return &cliError{
-			Message:  err.Error(),
+			Message:  message,
 			Hint:     hint,
 			Kind:     kindDaemonUnavail,
 			ExitCode: ExitDaemonUnavail,

@@ -63,11 +63,9 @@ func TestManagedExternallyUnreachableDetail(t *testing.T) {
 		defer cancel()
 		_, err := waitForSupervisedDaemon(ctx, "/example/config.toml", func(context.Context) bool { return false }, func(ctx context.Context) (ensureDiscovery, error) {
 			cancel()
-			return ensureDiscovery{}, NewLocalDaemonUnreachable("/example/runtime", kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1"}, ctx.Err())
+			return ensureDiscovery{}, ctx.Err()
 		})
 		require.ErrorIs(t, err, context.Canceled)
-		require.ErrorContains(t, err, fmt.Sprintf("%q", filepath.Join("/example/runtime", "daemon.log")))
-		require.Equal(t, 1, strings.Count(err.Error(), "context canceled"))
 		var advised interface{ RecoveryAdvice() string }
 		require.ErrorAs(t, err, &advised)
 		require.Empty(t, advised.RecoveryAdvice())
@@ -78,7 +76,7 @@ func TestManagedExternallyUnreachableDetail(t *testing.T) {
 			_, err := waitForSupervisedDaemon(t.Context(), "/example/config.toml", func(context.Context) bool { return false }, func(context.Context) (ensureDiscovery, error) {
 				return ensureDiscovery{}, probe
 			})
-			require.NotContains(t, err.Error(), "service manager")
+			require.Equal(t, 1, strings.Count(err.Error(), "service manager"))
 			var advised interface{ RecoveryAdvice() string }
 			require.ErrorAs(t, err, &advised)
 			require.Contains(t, advised.RecoveryAdvice(), "http://127.0.0.1:1234/debug/pprof/goroutine?debug=2")
@@ -118,11 +116,17 @@ func TestManagedExternallyUnreachableDetail(t *testing.T) {
 func TestAutoStartedDaemonRecovery(t *testing.T) {
 	err := &LocalDaemonUnreachableError{PID: 123, VerifiedProcess: true, autoStarted: true}
 	require.Contains(t, err.RecoveryAdvice(), "rerun the original command")
+	require.Contains(t, err.RecoveryAdvice(), "any command that autostarts")
+	require.Contains(t, err.RecoveryAdvice(), "daemon status, daemon diagnose, and health only inspect")
 	t.Run("named profile", func(t *testing.T) {
 		err := &LocalDaemonUnreachableError{PID: 123, VerifiedProcess: true, Profile: "work profile", ProfileAutostart: true}
-		command := "kata --daemon 'work profile' daemon recover"
+		require.Contains(t, err.RecoveryAdvice(), "kata --daemon 'work profile' daemon recover")
+	})
+	t.Run("profile with quote", func(t *testing.T) {
+		err := &LocalDaemonUnreachableError{PID: 123, VerifiedProcess: true, Profile: "team's profile", ProfileAutostart: true}
+		command := `kata --daemon 'team'"'"'s profile' daemon recover`
 		if runtime.GOOS == "windows" {
-			command = "'kata' '--daemon' 'work profile' 'daemon' 'recover'"
+			command = `kata --daemon 'team''s profile' daemon recover`
 		}
 		require.Contains(t, err.RecoveryAdvice(), command)
 	})

@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,7 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/client"
@@ -185,12 +186,17 @@ func TestLocalProfileTargetErrorsAreStructured(t *testing.T) {
 }
 
 func TestManagedExternallyTargetErrorIsStructured(t *testing.T) {
-	advice := &client.LocalDaemonUnreachableError{PID: 123, ManagedExternally: true, VerifiedProcess: true}
-	cause := errors.Join(client.ErrDaemonManagedExternally, context.DeadlineExceeded, advice)
-	err := cliDaemonTargetError(cause)
-	var target *cliError
-	require.ErrorAs(t, err, &target)
-	assert.Equal(t, ExitDaemonUnavail, target.ExitCode)
-	assert.Equal(t, cause.Error(), target.Message)
-	assert.Equal(t, advice.RecoveryAdvice(), target.Hint)
+	home, _, uid, _ := stoppedProfileCLI(t)
+	supervisedProfileDaemon(t, home, uid, func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	})
+	lock := flock.New(filepath.Join(home, "kata.db.import.lock"))
+	require.NoError(t, lock.Lock())
+	t.Cleanup(func() { require.NoError(t, lock.Close()) })
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	defer cancel()
+	_, _, err := executeRootCapture(t, ctx, "--daemon", "work", "list")
+	target := requireCLIError(t, err, ExitDaemonUnavail)
+	assert.Contains(t, target.Message, "migration is in progress")
+	assert.Empty(t, target.Hint)
 }

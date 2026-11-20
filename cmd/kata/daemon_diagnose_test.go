@@ -127,6 +127,29 @@ func TestDaemonDiagnoseReportsLivePrincipalCapabilities(t *testing.T) {
 	}
 }
 
+func TestHealthProfileRejectedCredential(t *testing.T) {
+	home, _, uid, _ := stoppedProfileCLI(t)
+	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: uid})
+	require.NoError(t, err)
+	ns, err := daemonruntime.NewNamespaceForHome(home, profile.StorageID)
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/ping" {
+			_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version, os.Getpid())
+			return
+		}
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	}))
+	t.Cleanup(server.Close)
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
+	require.NoError(t, err)
+	_, _, err = executeRootCapture(t, t.Context(), "--daemon", "work", "health")
+	cliErr := requireCLIError(t, err, ExitDaemonUnavail)
+	require.Contains(t, cliErr.Message, "authentication failed (HTTP 401)")
+	require.NotContains(t, cliErr.Hint, "kill")
+}
+
 func TestDaemonDiagnoseRefusesWrongProjectRecovery(t *testing.T) {
 	home, _, _, _ := stoppedProfileCLI(t)
 	out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--expect-project-uid", "01HZZZZZZZZZZZZZZZZZZZZZ01", "--json")
@@ -879,6 +902,11 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var pings atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.recoverOnRetry && r.URL.Path == "/api/v1/instance" {
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = fmt.Fprintf(w, `{"instance_uid":%q}`, uid)
+					return
+				}
 				if tc.recoverOnRetry && r.URL.Path == "/api/v1/ping" && pings.Add(1) > 1 {
 					_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d,"instance_uid":%q}`, version.Version, os.Getpid(), uid)
 					return
