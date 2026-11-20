@@ -254,6 +254,27 @@ func TestEnsureRunningDiscoveryWaitsForStartLockWhenDaemonUnreachable(t *testing
 	assert.Zero(t, state.startCalls)
 }
 
+func TestEnsureRunningReportsUnreachableDaemonWhenStartLockWaitExpires(t *testing.T) {
+	tmp := setupKataEnv(t)
+	address := "unix://" + filepath.Join(tmp, "missing.sock")
+	require.NoError(t, writeRuntimeRecord(t, tmp, address))
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	release, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).AcquireStartLock(t.Context())
+	require.NoError(t, err)
+	defer release()
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	defer cancel()
+
+	_, err = EnsureRunning(ctx)
+
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+	assert.Contains(t, err.Error(), address)
+	assert.Contains(t, err.Error(), filepath.Join(ns.DataDir, "daemon.log"))
+	assert.Contains(t, err.Error(), fmt.Sprintf("pid %d", os.Getpid()))
+}
+
 func TestEnsureRunningRestartsWhenDaemonVersionUnknown(t *testing.T) {
 	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
 	tmp := setupKataEnv(t)
@@ -798,6 +819,39 @@ func TestStopRunningDaemonsSignalsVerifiedIncompatibleRuntime(t *testing.T) {
 	require.NoError(t, stopRunningDaemons(t.Context(), ns.DataDir, ns.DBHash))
 	assert.Equal(t, os.Getpid(), signaled.PID)
 	assert.Equal(t, ns.DBHash, signaledDBHash)
+}
+
+func TestStopRunningDaemonsDoesNotSignalAfterProbeDeadline(t *testing.T) {
+	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+	tmp := setupKataEnv(t)
+	child, _ := startLongLivedTestProcess(t)
+	_, addr := startMockDaemonPing(t, map[string]any{
+		"ok": true, "service": "kata", "version": "old-version", "pid": os.Getpid(),
+	})
+	require.NoError(t, writeRuntimeRecordForPID(t, tmp, os.Getpid(), addr))
+	blocked := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	t.Cleanup(blocked.Close)
+	require.NoError(t, writeRuntimeRecordForPID(t, tmp, child.Process.Pid, strings.TrimPrefix(blocked.URL, "http://")))
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	origSignal := signalDaemonStopForEnsure
+	signals := 0
+	signalDaemonStopForEnsure = func(kitdaemon.RuntimeRecord, string) error {
+		signals++
+		return nil
+	}
+	t.Cleanup(func() { signalDaemonStopForEnsure = origSignal })
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancel()
+
+	err = stopRunningDaemons(ctx, ns.DataDir, ns.DBHash)
+
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+	assert.Contains(t, err.Error(), strings.TrimPrefix(blocked.URL, "http://"))
+	assert.Zero(t, signals)
 }
 
 func TestDaemonDiscoveryPreservesRecordPublishedDuringProbe(t *testing.T) {

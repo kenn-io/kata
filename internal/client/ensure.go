@@ -323,9 +323,12 @@ func discoverForStart(ctx context.Context, dataDir string) (ensureDiscovery, fun
 	if (err != nil && !errors.Is(err, ErrLocalDaemonUnreachable)) || found.Outcome == daemonScanCompatible {
 		return found, func() {}, err
 	}
-	release, err := (kitdaemon.RuntimeStore{Dir: dataDir}).AcquireStartLock(ctx)
-	if err != nil {
-		return ensureDiscovery{}, nil, fmt.Errorf("auto-start daemon: %w", err)
+	release, lockErr := (kitdaemon.RuntimeStore{Dir: dataDir}).AcquireStartLock(ctx)
+	if lockErr != nil {
+		if errors.Is(lockErr, context.DeadlineExceeded) && err != nil {
+			lockErr = errors.Join(err, lockErr)
+		}
+		return ensureDiscovery{}, nil, fmt.Errorf("auto-start daemon: %w", lockErr)
 	}
 	found, err = discoverForEnsure(ctx, dataDir)
 	if err != nil {
@@ -498,6 +501,12 @@ func stopRunningDaemons(ctx context.Context, dataDir, dbhash string) error {
 			return fmt.Errorf("daemon at %s (pid %d) runs an incompatible version, but its process identity cannot be verified; stop it manually", address, candidate.Record.PID)
 		}
 		targets = append(targets, candidate.Record)
+	}
+	if ctx.Err() != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) && unreachable != nil {
+			return unreachable
+		}
+		return ctx.Err()
 	}
 	if len(targets) == 0 {
 		return unreachable
