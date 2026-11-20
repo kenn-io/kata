@@ -728,6 +728,8 @@ kata search <query> [--lexical [--cursor CURSOR] | --hybrid | --semantic]
 kata search <query> [--status open|closed] [--label LABEL] [--no-label LABEL]
 ```
 
+A full issue UID works with `kata show` from any workspace, including an unbound directory.
+
 `kata show --render` renders Markdown only in issue descriptions and comment
 bodies. Headers, status, claims, labels, links, and metadata remain literal so
 the surrounding issue record stays predictable. Set `KATA_COLOR_MODE=light`

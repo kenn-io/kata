@@ -80,6 +80,19 @@ func TestMoveBatchLostResponseUsesUIDAndHistory(t *testing.T) {
 	require.Equal(t, target.Name, reply.Results[0].Target)
 	require.Contains(t, reply.Results[0].Hint, "check move history")
 	require.Contains(t, reply.Results[0].Hint, "any other project")
+	for _, workspace := range []string{t.TempDir(), dir} {
+		shown, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", workspace, "show", issue.UID, "--json")
+		require.NoError(t, err, shown)
+		var result struct {
+			Issue struct {
+				ProjectID int64 `json:"project_id"`
+			} `json:"issue"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(shown), &result))
+		require.Equal(t, target.ID, result.Issue.ProjectID)
+	}
+	require.Contains(t, reply.Results[0].Hint, fmt.Sprintf("issue.project_id is %d", target.ID))
+	require.Contains(t, reply.Results[0].Hint, fmt.Sprintf("issue.project_id is %d", source.ID))
 }
 
 func TestMoveBatchCancelMarksOnlyDispatchedMovesUnknown(t *testing.T) {

@@ -16,6 +16,7 @@ import (
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/internal/textsafe"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -67,9 +68,56 @@ func runShow(cmd *cobra.Command, issueRef, agentOperation string, opts showRunOp
 			ExitCode: ExitUsage,
 		}
 	}
-	ctx, baseURL, pid, ref, err := resolveIssueRefForCommand(cmd, issueRef)
-	if err != nil {
-		return err
+	var ctx context.Context
+	var baseURL string
+	var pid int64
+	var ref resolvedIssueRef
+	var err error
+	parsed, parseErr := shortid.Parse(issueRef)
+	if parseErr == nil && parsed.ULID != "" {
+		a, dialErr := dialDaemon(cmd.Context())
+		if dialErr != nil {
+			return dialErr
+		}
+		c, clientErr := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+		if clientErr != nil {
+			return clientErr
+		}
+		response, callErr := c.ShowIssueByUIDWithResponse(a.ctx, &generated.ShowIssueByUIDRequestOptions{PathParams: &generated.ShowIssueByUIDPath{UID: parsed.ULID}})
+		if response == nil {
+			return externalCLITransportError(response, callErr)
+		}
+		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+			return err
+		}
+		var body struct {
+			Issue struct {
+				ProjectID int64 `json:"project_id"`
+			} `json:"issue"`
+		}
+		if err := json.Unmarshal(response.Body, &body); err != nil {
+			return err
+		}
+		ctx, baseURL, pid = a.ctx, a.baseURL, body.Issue.ProjectID
+		ref.RefForAPI = parsed.ULID
+		if currentOutputMode() != outputJSON {
+			project, err := c.ShowProjectWithResponse(ctx, &generated.ShowProjectRequestOptions{PathParams: &generated.ShowProjectPath{ProjectID: pid}})
+			if project != nil && externalCLIResponseError(project.StatusCode, project.Body, err) == nil {
+				var body struct {
+					Project struct {
+						Name string `json:"name"`
+					} `json:"project"`
+				}
+				if json.Unmarshal(project.Body, &body) == nil {
+					ref.ProjectName = body.Project.Name
+				}
+			}
+		}
+	} else {
+		ctx, baseURL, pid, ref, err = resolveIssueRefForCommand(cmd, issueRef)
+		if err != nil {
+			return err
+		}
 	}
 	client, err := httpClientFor(ctx, baseURL)
 	if err != nil {

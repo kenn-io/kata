@@ -41,6 +41,7 @@ type moveBatchResult struct {
 	NewShortID string `json:"new_short_id,omitempty"`
 	EventID    int64  `json:"event_id,omitempty,omitzero"`
 	source     string
+	sourceID   int64
 	targetID   int64
 }
 
@@ -284,6 +285,7 @@ func moveBatchOne(a daemonAPI, client *kataclient.Client, projects []projectRef,
 		return
 	}
 	result.UID = issue.UID
+	result.sourceID = issue.ProjectID
 	for _, p := range projects {
 		if p.ID == issue.ProjectID {
 			result.source = p.Name
@@ -314,7 +316,7 @@ func moveBatchOne(a daemonAPI, client *kataclient.Client, projects []projectRef,
 			return
 		}
 		result.Result = "unknown"
-		result.Hint = fmt.Sprintf("outcome unconfirmed; run kata show %s --json. Moved if the current project is %s; not moved if it is still %s; if it is any other project, check move history for a move into %s before retrying, because the issue may have moved again.", shellQuote(result.UID), shellQuote(result.Target), shellQuote(result.source), shellQuote(result.Target))
+		result.Hint = fmt.Sprintf("outcome unconfirmed; run kata show %s --json. If issue.project_id is %d, it reached the target; if issue.project_id is %d, it is safe to retry. For any other project, check move history before retrying.", shellQuote(result.UID), result.targetID, result.sourceID)
 		return
 	}
 	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
