@@ -1,7 +1,7 @@
 ---
 title: Local daemon profiles
 description: Keep personal and work spokes separate and recover a stopped spoke without changing its database identity.
-last_edited: 2026-11-11
+last_edited: 2026-11-19
 ---
 
 # Local daemon profiles
@@ -127,7 +127,7 @@ them.
 | `ready` | Continue using the selected daemon. |
 | `stopped_local_profile` | Run `daemon recover` to check and reach that existing profile. If autostart is disabled, start it through its service manager. |
 | `local_stopped` | Start the current home explicitly. It is not a pinned profile. |
-| `local_unreachable` | Inspect the selected process, transport, and credentials. |
+| `local_unreachable` | Check the process evidence in `message` and follow any recovery guidance in `next_action`. If no process evidence is available, inspect transport and credentials. |
 | `selection_error` | Repair routing with `daemon diagnose`; status retains the current-home process list. |
 | `missing_profile_storage` | Restore access to the profile's existing storage. |
 | `unreadable_storage` | Use `message` to restore access to the selected storage metadata. |

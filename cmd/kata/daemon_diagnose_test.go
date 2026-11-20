@@ -17,6 +17,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db"
@@ -857,4 +858,134 @@ func supervisedProfileDaemon(t *testing.T, home, uid string, handler http.Handle
 	require.NoError(t, ns.EnsureDirs())
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
 	require.NoError(t, err)
+}
+
+func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
+	home, _, uid, _ := stoppedProfileCLI(t)
+	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: uid})
+	require.NoError(t, err)
+	ns, err := daemonruntime.NewNamespaceForHome(home, profile.StorageID)
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+
+	for _, tc := range []struct {
+		name, command string
+		managed       bool
+	}{
+		{name: "ordinary", command: "list"},
+		{name: "service managed", command: "list", managed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.managed {
+				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n"), 0600))
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, "fixture unavailable", http.StatusServiceUnavailable)
+			}))
+			t.Cleanup(server.Close)
+			address := strings.TrimPrefix(server.URL, "http://")
+			_, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Network: "tcp", Address: address})
+			require.NoError(t, err)
+			if tc.managed {
+				settledCLIUse(t, func(t *testing.T) {
+					_, _, err := executeRootCapture(t, t.Context(), "--daemon", "work", tc.command)
+					cliErr := requireCLIError(t, err, ExitDaemonUnavail)
+					require.Equal(t, 1, strings.Count(cliErr.Message, "autostart = false"))
+					require.NotContains(t, cliErr.Message, "service manager")
+					require.Contains(t, cliErr.Hint, "service manager")
+				})
+				return
+			}
+			_, _, err = executeRootCapture(t, t.Context(), "--daemon", "work", tc.command)
+			cliErr := requireCLIError(t, err, ExitDaemonUnavail)
+			require.Equal(t, "local_unreachable", cliErr.Code)
+			require.Contains(t, cliErr.Message, "503")
+			require.Contains(t, cliErr.Hint, "daemon recover")
+		})
+	}
+}
+
+func TestDaemonDiagnoseSecondPing(t *testing.T) {
+	for _, tc := range []struct {
+		name, catalog, end string
+		profile            bool
+	}{
+		{name: "current home"},
+		{name: "named local", catalog: "work"},
+		{name: "canceled", end: "cancel"},
+		{name: "profile", profile: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := ""
+			uid := ""
+			if tc.profile {
+				home, _, uid, _ = stoppedProfileCLI(t)
+			} else {
+				home = setupKataEnv(t)
+			}
+			t.Setenv("KATA_SERVER", "")
+			t.Setenv("KATA_DSN", "")
+			t.Chdir(t.TempDir())
+			resetFlags(t)
+			flags.Daemon = tc.catalog
+			if tc.catalog != "" {
+				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[[daemon]]\nname = 'work'\nlocal = true\n"), 0600))
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			var pings atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/instance" {
+					_, _ = fmt.Fprintf(w, `{"instance_uid":%q}`, uid)
+					return
+				}
+				if pings.Add(1) == 1 {
+					_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version, os.Getpid())
+					return
+				}
+				if tc.end == "cancel" {
+					cancel()
+				}
+				http.Error(w, "fixture unavailable", http.StatusServiceUnavailable)
+			}))
+			t.Cleanup(server.Close)
+			ns, err := daemonruntime.NewNamespace()
+			require.NoError(t, err)
+			if tc.profile {
+				profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: uid})
+				require.NoError(t, err)
+				ns, err = daemonruntime.NewNamespaceForHome(home, profile.StorageID)
+				require.NoError(t, err)
+			}
+			require.NoError(t, ns.EnsureDirs())
+			record := kitdaemon.NewRuntimeRecord("kata", version.Version, kitdaemon.Endpoint{Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
+			_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(record)
+			require.NoError(t, err)
+			var result daemonDiagnosis
+			if tc.profile {
+				out, _, err := executeRootCapture(t, ctx, "--daemon", "work", "daemon", "diagnose", "--json")
+				require.NoError(t, err)
+				require.NoError(t, json.Unmarshal([]byte(out), &result))
+			} else {
+				selection, err := client.InspectSelection(ctx, "", tc.catalog)
+				require.NoError(t, err)
+				result, _, err = probeDaemonSelection(ctx, selectedDaemonDiagnosis(selection, ""), selection)
+				require.NoError(t, err)
+			}
+			require.EqualValues(t, 2, pings.Load())
+			require.Equal(t, "local_unreachable", result.State)
+			if tc.end == "cancel" {
+				require.Error(t, ctx.Err())
+				assert.NotContains(t, result.NextAction, "kill")
+				assert.NotContains(t, result.NextAction, "start it")
+				assert.NotContains(t, result.NextAction, "service manager")
+				return
+			}
+			assert.Equal(t, os.Getpid(), result.PID)
+			assert.Contains(t, result.Message, "503")
+			if tc.profile {
+				assert.Contains(t, result.NextAction, "daemon recover")
+			}
+		})
+	}
 }

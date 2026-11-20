@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -252,6 +253,27 @@ func TestEnsureRunningDiscoveryWaitsForStartLockWhenDaemonUnreachable(t *testing
 	assert.Equal(t, wantURL, got.url)
 	assert.Zero(t, state.stopCalls)
 	assert.Zero(t, state.startCalls)
+}
+
+func TestEnsureRunningReportsUnreachableDaemonWhenStartLockWaitExpires(t *testing.T) {
+	tmp := setupKataEnv(t)
+	address := "unix://" + filepath.Join(tmp, "missing.sock")
+	require.NoError(t, writeRuntimeRecord(t, tmp, address))
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	release, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).AcquireStartLock(t.Context())
+	require.NoError(t, err)
+	defer release()
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		_, err := EnsureRunning(ctx)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+		assert.Contains(t, err.Error(), address)
+		assert.Contains(t, err.Error(), strconv.Quote(filepath.Join(ns.DataDir, "daemon.log")))
+		assert.Contains(t, err.Error(), fmt.Sprintf("pid %d", os.Getpid()))
+	})
 }
 
 func TestEnsureRunningRestartsWhenDaemonVersionUnknown(t *testing.T) {
@@ -798,6 +820,58 @@ func TestStopRunningDaemonsSignalsVerifiedIncompatibleRuntime(t *testing.T) {
 	require.NoError(t, stopRunningDaemons(t.Context(), ns.DataDir, ns.DBHash))
 	assert.Equal(t, os.Getpid(), signaled.PID)
 	assert.Equal(t, ns.DBHash, signaledDBHash)
+}
+
+func TestStopRunningDaemonsDoesNotSignalAfterProbeDeadline(t *testing.T) {
+	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+	tmp := setupKataEnv(t)
+	child, _ := startLongLivedTestProcess(t)
+	oldPID, blockedPID := os.Getpid(), child.Process.Pid
+	if fmt.Sprint(oldPID) > fmt.Sprint(blockedPID) {
+		oldPID, blockedPID = blockedPID, oldPID
+	}
+	_, addr := startMockDaemonPing(t, map[string]any{
+		"ok": true, "service": "kata", "version": "old-version", "pid": oldPID,
+	})
+	require.NoError(t, writeRuntimeRecordForPID(t, tmp, oldPID, addr))
+	deadline := make(chan struct{})
+	blocked := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		close(deadline)
+		<-r.Context().Done()
+	}))
+	t.Cleanup(blocked.Close)
+	require.NoError(t, writeRuntimeRecordForPID(t, tmp, blockedPID, strings.TrimPrefix(blocked.URL, "http://")))
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	origSignal := signalDaemonStopForEnsure
+	signals := 0
+	signalDaemonStopForEnsure = func(kitdaemon.RuntimeRecord, string) error {
+		signals++
+		return nil
+	}
+	t.Cleanup(func() { signalDaemonStopForEnsure = origSignal })
+	ctx := probeDeadlineContext{Context: t.Context(), done: deadline}
+	err = stopRunningDaemons(ctx, ns.DataDir, ns.DBHash)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+	assert.Contains(t, err.Error(), strings.TrimPrefix(blocked.URL, "http://"))
+	assert.Zero(t, signals)
+}
+
+// probeDeadlineContext expires when the later endpoint receives its probe.
+type probeDeadlineContext struct {
+	context.Context
+	done <-chan struct{}
+}
+
+func (c probeDeadlineContext) Done() <-chan struct{} { return c.done }
+func (c probeDeadlineContext) Err() error {
+	select {
+	case <-c.done:
+		return context.DeadlineExceeded
+	default:
+		return c.Context.Err()
+	}
 }
 
 func TestDaemonDiscoveryPreservesRecordPublishedDuringProbe(t *testing.T) {

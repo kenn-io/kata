@@ -135,7 +135,7 @@ func discoverDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) 
 		ProbeRemote:    flags.Daemon != "",
 	})
 	if err != nil || !found {
-		if resolved.LocalProfile != nil {
+		if resolved.LocalProfile != nil && !errors.Is(err, client.ErrLocalDaemonUnreachable) {
 			diagnosis, _, _ := diagnoseDaemon(ctx, "")
 			return resolved, diagnosisError(diagnosis)
 		}
@@ -186,8 +186,21 @@ func cliDaemonTargetError(err error) error {
 	if errors.Is(err, client.ErrRemoteUnavailable) ||
 		errors.Is(err, client.ErrLocalDaemonUnreachable) ||
 		errors.Is(err, client.ErrDaemonManagedExternally) {
+		message, hint, code := err.Error(), "", ""
+		if advised, ok := errors.AsType[interface {
+			error
+			Summary() string
+			RecoveryAdvice() string
+		}](err); ok {
+			message, hint = advised.Summary(), advised.RecoveryAdvice()
+			if !errors.Is(err, client.ErrDaemonManagedExternally) {
+				code = "local_unreachable"
+			}
+		}
 		return &cliError{
-			Message:  err.Error(),
+			Message:  message,
+			Hint:     hint,
+			Code:     code,
 			Kind:     kindDaemonUnavail,
 			ExitCode: ExitDaemonUnavail,
 		}
