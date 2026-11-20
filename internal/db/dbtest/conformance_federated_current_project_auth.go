@@ -27,7 +27,7 @@ func checkFederatedParentWithoutReferenceController(t *testing.T, store db.Stora
 	require.NoError(t, err)
 	queued, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: route.ID, Title: "Queued parent", Author: "worker"})
 	require.NoError(t, err)
-	_, _, err = store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: current.ID, Type: "parent", Author: "worker"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: child.ID, FromUID: child.UID, FromShortID: child.ShortID, ToUID: current.UID, ToShortID: current.ShortID, Actor: "worker"})
+	_, linkEvent, err := store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: current.ID, Type: "parent", Author: "worker"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: child.ID, FromUID: child.UID, FromShortID: child.ShortID, ToUID: current.UID, ToShortID: current.ShortID, Actor: "worker"})
 	require.NoError(t, err)
 	origin, err := uid.New()
 	require.NoError(t, err)
@@ -35,9 +35,13 @@ func checkFederatedParentWithoutReferenceController(t *testing.T, store db.Stora
 	require.NoError(t, err)
 	payload, err := json.Marshal(map[string]string{"type": "parent", "from_uid": child.UID, "to_uid": queued.UID})
 	require.NoError(t, err)
-	stale := newRemoteEvent(t, route, &child.UID, "issue.unlinked", "worker", origin, 2, payload)
+	stale := newRemoteEvent(t, route, &child.UID, "issue.unlinked", "worker", origin, linkEvent.HLCPhysicalMS-1, payload)
 	_, err = store.IngestFederationEvents(ctx, db.FederationIngestParams{ProjectID: route.ID, SpokeInstanceUID: origin, BoundActor: "worker", FederationEnrollmentID: grant.Enrollment.ID, EventFeatures: db.SupportedEventFeatures, Events: []db.FederationIngestEvent{{SourceEventID: 2, Event: stale}}})
 	require.ErrorIs(t, err, db.ErrFederationIngestValidation)
+	require.ErrorContains(t, err, "no longer has")
+	parent, err := store.ParentOf(ctx, child.ID)
+	require.NoError(t, err)
+	require.Equal(t, current.ID, parent.ToIssueID)
 	return nil
 }
 

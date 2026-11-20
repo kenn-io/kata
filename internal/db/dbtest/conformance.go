@@ -223,8 +223,8 @@ var storageScenarios = []scenario{
 		RunArchivedPortableDataExport(t, store, backend)
 		return nil
 	}},
-	{name: "parent replacement with removed expected link", methods: []string{"CreateProject", "CreateIssue", "CreateLinkAndEvent", "DeleteLinkAndEvent", "ParentOf"}, run: func(t *testing.T, store db.Storage) error {
-		RunParentReplacementMissingExpectedLink(t, store)
+	{name: "parent replacement payload and removed expected link", methods: []string{"CreateProject", "CreateIssue", "CreateLinkAndEvent", "DeleteLinkAndEvent", "ParentOf"}, run: func(t *testing.T, store db.Storage) error {
+		RunParentReplacement(t, store)
 		return nil
 	}},
 	{name: "local comment replies", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "CloseIssue", "SoftDeleteIssue", "CommentsByIssue"}, run: checkLocalCommentReplies},
