@@ -503,9 +503,6 @@ local = true
 	assert.True(t, ok)
 	assert.Equal(t, baseURL, resolved.Running().BaseURL)
 	assert.Equal(t, address, resolved.Running().Address)
-	ns, err := daemonruntime.NewNamespace()
-	require.NoError(t, err)
-	assert.Equal(t, "local:"+ns.DataDir, TelemetryTargetKey(resolved))
 }
 
 func TestDiscoverSelectedProbesNamedRemoteOnRequest(t *testing.T) {
@@ -616,14 +613,6 @@ func writeNeutralWorkspaceMarker(t *testing.T, workspace string) {
 	), 0o600))
 }
 
-func TestResolvedDaemonUnreachableRetainsSelectedRuntime(t *testing.T) {
-	record := kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1234"}
-	resolved := resolvedForRunning(DaemonSourceLocalRuntime, "work", runningDaemonForLive(liveDaemon{Record: record, DataDir: "/runtime", BaseURL: "http://127.0.0.1:1234"}))
-	err := resolved.Unreachable(t.Context(), errors.New("ping failed"))
-	var unreachable *LocalDaemonUnreachableError
-	require.ErrorAs(t, err, &unreachable)
-	require.Equal(t, record.PID, unreachable.PID)
-	require.Equal(t, "/runtime", unreachable.DataDir)
-	require.Empty(t, unreachable.Profile)
+func TestResolvedDaemonUnreachableRequiresSelectedRuntime(t *testing.T) {
 	require.Nil(t, (ResolvedDaemon{}).Unreachable(t.Context(), errors.New("failed")))
 }

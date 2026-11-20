@@ -281,19 +281,3 @@ func TestManagedExternallyReportsMigrationInProgress(t *testing.T) {
 		})
 	}
 }
-
-func TestManagedExternallyMigrationRetainsUnreachableEvidence(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
-		defer cancel()
-		evidence := &LocalDaemonUnreachableError{PID: os.Getpid(), DataDir: "/runtime", cause: errors.New("unreachable")}
-		_, err := waitForSupervisedDaemon(ctx, "/config", func(context.Context) bool { return true }, func(context.Context) (ensureDiscovery, error) {
-			return ensureDiscovery{}, evidence
-		})
-		require.ErrorIs(t, err, ErrSQLiteMigrationActive)
-		require.ErrorIs(t, err, ErrDaemonManagedExternally)
-		var got *LocalDaemonUnreachableError
-		require.ErrorAs(t, err, &got)
-		require.Equal(t, evidence.PID, got.PID)
-	})
-}

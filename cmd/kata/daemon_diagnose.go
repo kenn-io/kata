@@ -342,6 +342,7 @@ func probeDaemonSelection(
 		resolved, found, err = client.DiscoverResolved(ctx, ns.DataDir)
 		if found && selection.Resolved.Name != "" {
 			resolved = selection.Resolved.WithRunning(resolved.Running())
+			resolved.RuntimeDir = ns.DataDir
 		}
 	}
 	if err != nil {
@@ -527,11 +528,9 @@ func withDiagnosisAction(result daemonDiagnosis) daemonDiagnosis {
 
 func diagnosisError(result daemonDiagnosis) error {
 	data, _ := json.Marshal(result)
-	message := result.State + ": " + result.NextAction
-	hint := ""
+	message, hint := result.State+": "+result.NextAction, ""
 	if result.State == "local_unreachable" && result.Message != "" {
-		message = result.State + ": " + result.Message
-		hint = result.NextAction
+		message, hint = result.State+": "+result.Message, result.NextAction
 	}
 	return &cliError{Message: message, Hint: hint, Code: result.State, Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail, Data: data}
 }

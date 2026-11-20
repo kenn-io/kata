@@ -112,17 +112,11 @@ func TestReadRuntimeRecordsFindsKitRuntimeStoreRecord(t *testing.T) {
 	require.Equal(t, written, records[0].SourcePath)
 }
 
-func newHungServer(t *testing.T) *httptest.Server {
-	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
-	t.Cleanup(server.Close)
-	return server
-}
-
 // The issue contract is evidence capture and scoped recovery for a live process
 // whose listener cannot answer ping; this fixture does not infer the hang's cause.
 func TestLiveUnreachableRecoveryAdvice(t *testing.T) {
-	server := newHungServer(t)
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+	t.Cleanup(server.Close)
 	for _, tc := range []struct{ name, origin, want string }{
 		{"valid origin", server.URL, server.URL},
 		{"malformed origin", "http://user@host/path", ""},
@@ -211,38 +205,20 @@ func TestLiveUnreachableRecoveryAdvice(t *testing.T) {
 			})
 		})
 	}
-	t.Run("legacy live record", func(t *testing.T) {
-		record := kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1"}
+	for identity, verified := range map[kitdaemon.ProcessIdentity]bool{"": true, "future-v1:12345": false} {
+		record := kitdaemon.RuntimeRecord{PID: os.Getpid(), ProcessIdentityV2: identity, Network: "tcp", Address: "127.0.0.1:1"}
 		reader := func(string) ([]kitdaemon.RuntimeRecord, error) { return []kitdaemon.RuntimeRecord{record}, nil }
 		probe := func(context.Context, string) (string, PingInfo, error) {
 			return "", PingInfo{}, errors.New("probe failed")
 		}
-		var observed error
 		for _, err := range liveDaemonsUsing(t.Context(), t.TempDir(), reader, probe) {
-			observed = err
+			require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+			var evidence *LocalDaemonUnreachableError
+			require.ErrorAs(t, err, &evidence)
+			require.Equal(t, verified, evidence.VerifiedProcess)
 			break
 		}
-		require.ErrorIs(t, observed, ErrLocalDaemonUnreachable)
-		var evidence *LocalDaemonUnreachableError
-		require.ErrorAs(t, observed, &evidence)
-		require.True(t, evidence.VerifiedProcess)
-	})
-	t.Run("unverified", func(t *testing.T) {
-		record := kitdaemon.RuntimeRecord{PID: os.Getpid(), ProcessIdentityV2: "future-v1:12345", Network: "tcp", Address: "127.0.0.1:1"}
-		reader := func(string) ([]kitdaemon.RuntimeRecord, error) { return []kitdaemon.RuntimeRecord{record}, nil }
-		probe := func(context.Context, string) (string, PingInfo, error) {
-			return "", PingInfo{}, errors.New("probe failed")
-		}
-		var observed error
-		for _, err := range liveDaemonsUsing(t.Context(), t.TempDir(), reader, probe) {
-			observed = err
-			break
-		}
-		require.ErrorIs(t, observed, ErrLocalDaemonUnreachable)
-		var evidence *LocalDaemonUnreachableError
-		require.ErrorAs(t, observed, &evidence)
-		require.False(t, evidence.VerifiedProcess)
-	})
+	}
 }
 
 func TestUnreachableErrorRelaunchPaths(t *testing.T) {

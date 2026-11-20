@@ -136,10 +136,7 @@ func discoverDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) 
 	})
 	if err != nil || !found {
 		if resolved.LocalProfile != nil && ctx.Err() == nil {
-			diagnosis, _, diagnoseErr := diagnoseDaemon(ctx, "")
-			if diagnoseErr != nil {
-				return resolved, diagnoseErr
-			}
+			diagnosis, _, _ := diagnoseDaemon(ctx, "")
 			return resolved, diagnosisError(diagnosis)
 		}
 		if err != nil {
@@ -166,13 +163,6 @@ func noDaemonRunningError() error {
 }
 
 func cliDaemonTargetError(err error) error {
-	if e, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok && errors.Is(err, client.ErrLocalDaemonUnreachable) && !errors.Is(err, client.ErrDaemonManagedExternally) {
-		return &cliError{Message: e.Summary(), Hint: e.RecoveryAdvice(), Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
-	}
-	if errors.Is(err, client.ErrLocalDaemonUnreachable) || errors.Is(err, client.ErrDaemonManagedExternally) {
-		return &cliError{Message: err.Error(), Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
-	}
-
 	code := ""
 	switch {
 	case errors.Is(err, client.ErrProfileStorageUnavailable):
@@ -193,7 +183,12 @@ func cliDaemonTargetError(err error) error {
 			ExitCode: ExitValidation,
 		}
 	}
-	if errors.Is(err, client.ErrRemoteUnavailable) {
+	if e, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok && errors.Is(err, client.ErrLocalDaemonUnreachable) && !errors.Is(err, client.ErrDaemonManagedExternally) {
+		return &cliError{Message: e.Summary(), Hint: e.RecoveryAdvice(), Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
+	}
+	if errors.Is(err, client.ErrRemoteUnavailable) ||
+		errors.Is(err, client.ErrLocalDaemonUnreachable) ||
+		errors.Is(err, client.ErrDaemonManagedExternally) {
 		return &cliError{
 			Message:  err.Error(),
 			Kind:     kindDaemonUnavail,

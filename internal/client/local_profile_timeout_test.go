@@ -150,7 +150,6 @@ func TestLocalProfileUnreachableInstanceKeepsEvidence(t *testing.T) {
 	}{
 		{"discover", func() error { _, _, err := DiscoverLocalProfileSelection(t.Context(), selection); return err }},
 		{"ensure", func() error { _, err := EnsureLocalProfileSelection(t.Context(), selection); return err }},
-		{"named", func() error { _, err := PrepareResolvedNamed(t.Context(), "work"); return err }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.run()

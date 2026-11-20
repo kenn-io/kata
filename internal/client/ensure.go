@@ -68,7 +68,6 @@ type BaseURLKey struct{}
 // a configured remote may be reached through a loopback SSH tunnel.
 type RunningDaemon struct {
 	record           *kitdaemon.RuntimeRecord
-	dataDir          string
 	BaseURL          string
 	Address          string
 	Network          string
@@ -288,7 +287,7 @@ func restartLocalDaemon(ctx context.Context, ns *daemonruntime.Namespace, previo
 		return RunningDaemon{}, err
 	}
 	_, baseURL := LocalHTTPClient(record.Endpoint().ConfigAddress())
-	return runningDaemonForLive(liveDaemon{Record: record, DataDir: ns.DataDir, BaseURL: baseURL}), nil
+	return runningDaemonForLive(liveDaemon{Record: record, BaseURL: baseURL}), nil
 }
 
 // discoverForStart returns a compatible daemon without locking. Any other
@@ -439,7 +438,6 @@ func discoverForEnsureUsing(ctx context.Context, dataDir string, scan liveDaemon
 func runningDaemonForLive(candidate liveDaemon) RunningDaemon {
 	running := localRunningDaemon(candidate.BaseURL, candidate.Record.Endpoint().ConfigAddress())
 	running.record = &candidate.Record
-	running.dataDir = candidate.DataDir
 	source := candidate.Record.Metadata["config_auth_source"]
 	running.PersistedAuth = source == "generated_file" || source == "persisted_file"
 	return running

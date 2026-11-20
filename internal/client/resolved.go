@@ -104,7 +104,6 @@ func (d ResolvedDaemon) Running() RunningDaemon {
 		ConfiguredRemote: d.ConfiguredRemote(),
 		PersistedAuth:    d.persistedAuth,
 		record:           d.record,
-		dataDir:          d.RuntimeDir,
 	}
 }
 
@@ -142,9 +141,6 @@ func (d ResolvedDaemon) WithRunning(running RunningDaemon) ResolvedDaemon {
 	refreshed.profileConfig = d.profileConfig
 	refreshed.SourcePath = d.SourcePath
 	refreshed.RuntimeDir = d.RuntimeDir
-	if running.dataDir != "" {
-		refreshed.RuntimeDir = running.dataDir
-	}
 	refreshed.credentialError = d.credentialError
 	refreshed.implicitToken = d.implicitToken
 	if d.implicitToken && !running.PersistedAuth {
@@ -157,7 +153,6 @@ func (d ResolvedDaemon) WithRunning(running RunningDaemon) ResolvedDaemon {
 func resolvedForRunning(source DaemonSource, name string, running RunningDaemon) ResolvedDaemon {
 	resolved := ResolvedDaemon{
 		record:        running.record,
-		RuntimeDir:    running.dataDir,
 		Source:        source,
 		Name:          name,
 		BaseURL:       running.BaseURL,

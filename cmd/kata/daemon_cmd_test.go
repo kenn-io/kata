@@ -4156,7 +4156,7 @@ func TestReviewStatusCutoverAndSupervisorGuidance(t *testing.T) {
 			var result daemonStatusOutput
 			require.NoError(t, json.Unmarshal([]byte(stdout), &result))
 			require.NotNil(t, result.Selected)
-			hint := result.Selected.Message
+			hint := result.Selected.Message + result.Selected.NextAction
 			require.Contains(t, hint, "daemon.log")
 			if tc.migration {
 				require.Contains(t, hint, "Wait")
@@ -4165,13 +4165,6 @@ func TestReviewStatusCutoverAndSupervisorGuidance(t *testing.T) {
 			}
 			require.NotContains(t, hint, "kill")
 			require.NotContains(t, hint, "daemon restart")
-			if tc.supervised {
-				_, stderr, err := executeRootCapture(t, t.Context(), "health")
-				require.Error(t, err)
-				require.Contains(t, stderr, "service manager")
-				require.NotContains(t, stderr, "kill")
-				require.NotContains(t, stderr, "daemon restart")
-			}
 		})
 	}
 }

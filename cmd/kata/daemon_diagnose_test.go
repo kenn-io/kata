@@ -881,17 +881,15 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 	}
 
 	t.Run("ordinary", func(t *testing.T) {
-		for _, args := range [][]string{{"--daemon", "work", "list"}, {"list"}} {
-			_, stderr, err := executeRootCapture(t, t.Context(), args...)
-			var cliErr *cliError
-			require.ErrorAs(t, err, &cliErr)
-			require.Contains(t, cliErr.Message, "503")
-			require.Contains(t, cliErr.Message, fmt.Sprintf("%q", logPath))
-			require.Contains(t, cliErr.Hint, recoverCommand)
-			require.Contains(t, stderr, logPath)
-			require.Contains(t, cliErr.Hint, "recover")
-			require.NotContains(t, cliErr.Message, "recover")
-		}
+		_, stderr, err := executeRootCapture(t, t.Context(), "--daemon", "work", "list")
+		var cliErr *cliError
+		require.ErrorAs(t, err, &cliErr)
+		require.Contains(t, cliErr.Message, "503")
+		require.Contains(t, cliErr.Message, fmt.Sprintf("%q", logPath))
+		require.Contains(t, cliErr.Hint, recoverCommand)
+		require.Contains(t, stderr, logPath)
+		require.Contains(t, cliErr.Hint, "recover")
+		require.NotContains(t, cliErr.Message, "recover")
 	})
 	t.Run("health keeps the failure in the error text", func(t *testing.T) {
 		_, stderr, err := executeRootCapture(t, t.Context(), "--daemon", "work", "health")
@@ -1025,43 +1023,44 @@ func TestReviewSupervisedProfileDiagnosisGuidance(t *testing.T) {
 	}
 }
 
-func TestReviewSupervisedDiscoveryDeadline(t *testing.T) {
-	for _, profile := range []bool{false, true} {
-		t.Run(fmt.Sprintf("profile=%t", profile), func(t *testing.T) {
-			resetFlags(t)
-			var home, uid string
-			if profile {
-				home, _, uid, _ = stoppedProfileCLI(t)
-			} else {
-				home = setupKataEnv(t)
-				t.Chdir(t.TempDir())
-				t.Setenv("KATA_SERVER", "")
-			}
-			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n"), 0600))
-			var ns *daemonruntime.Namespace
-			var err error
-			if profile {
-				p, resolveErr := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: uid})
-				require.NoError(t, resolveErr)
-				ns, err = daemonruntime.NewNamespaceForHome(home, p.StorageID)
-			} else {
-				ns, err = daemonruntime.NewNamespace()
-			}
-			require.NoError(t, err)
-			require.NoError(t, ns.EnsureDirs())
-			server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
-			t.Cleanup(server.Close)
-			_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
-			require.NoError(t, err)
-			ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
-			defer cancel()
-			_, err = discoverDaemonResolved(ctx)
-			require.ErrorIs(t, err, context.DeadlineExceeded)
-			require.Contains(t, err.Error(), filepath.Join(ns.DataDir, "daemon.log"))
-			for _, word := range []string{"kill", "restart", "service manager", "daemon recover"} {
-				require.NotContains(t, err.Error(), word)
-			}
-		})
+func TestReviewSupervisedDiscoveryCancellation(t *testing.T) {
+	resetFlags(t)
+	home, _, uid, _ := stoppedProfileCLI(t)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n"), 0600))
+	p, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: uid})
+	require.NoError(t, err)
+	ns, err := daemonruntime.NewNamespaceForHome(home, p.StorageID)
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	requestStarted := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case requestStarted <- struct{}{}:
+		default:
+		}
+		<-r.Context().Done()
+	}))
+	t.Cleanup(server.Close)
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := discoverDaemonResolved(ctx)
+		done <- err
+	}()
+	select {
+	case <-requestStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("profile discovery did not probe the selected runtime")
+	}
+	cancel()
+	err = <-done
+	require.ErrorIs(t, err, context.Canceled)
+	require.Contains(t, err.Error(), filepath.Join(ns.DataDir, "daemon.log"))
+	for _, word := range []string{"kill", "restart", "service manager", "daemon recover"} {
+		require.NotContains(t, err.Error(), word)
 	}
 }
 

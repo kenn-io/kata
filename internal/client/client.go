@@ -88,11 +88,7 @@ type LocalDaemonUnreachableError struct {
 }
 
 func (e *LocalDaemonUnreachableError) Error() string {
-	message := e.Summary()
-	if advice := e.RecoveryAdvice(); advice != "" {
-		message += ". " + advice
-	}
-	return message
+	return strings.TrimSuffix(e.Summary()+". "+e.RecoveryAdvice(), ". ")
 }
 
 // Summary describes the selected process and probe failure.
@@ -152,7 +148,6 @@ func (e *LocalDaemonUnreachableError) Is(target error) bool {
 // daemon worth talking to" so discovery call sites can filter one scan.
 type liveDaemon struct {
 	Record     kitdaemon.RuntimeRecord
-	DataDir    string
 	BaseURL    string
 	UnixSocket string
 	Info       PingInfo
@@ -201,7 +196,6 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 				}
 				continue
 			}
-
 			// A reused PID can keep an old record alive after another daemon
 			// takes over its endpoint. The responding daemon is not this record's
 			// process; keep scanning for its matching record. Do not delete the
@@ -211,7 +205,7 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 			if info.PID != r.PID && (info.PID != 0 || !daemonruntime.RuntimeProcessAlive(r)) {
 				continue
 			}
-			candidate := liveDaemon{Record: r, DataDir: dataDir, BaseURL: url, Info: info}
+			candidate := liveDaemon{Record: r, BaseURL: url, Info: info}
 			if ep.IsUnix() {
 				candidate.UnixSocket = ep.Address
 			}
