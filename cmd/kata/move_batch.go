@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -394,7 +395,7 @@ func moveBatchOne(a daemonAPI, client *kataclient.Client, prepared *moveBatchPre
 		unknown()
 		return
 	}
-	if response.StatusCode >= 500 && response.StatusCode <= 599 {
+	if response.StatusCode == http.StatusRequestTimeout || response.StatusCode >= 500 && response.StatusCode <= 599 {
 		unknown()
 		return
 	}

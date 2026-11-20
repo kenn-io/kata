@@ -31,19 +31,29 @@ func TestMoveBatchUnknownStopsNewRowsAndFinishesInflight(t *testing.T) {
 	require.NoError(t, err)
 	started := make(chan struct{})
 	release := make(chan struct{})
-	baseURL := interceptingProxy(t, env, func(w http.ResponseWriter, r *http.Request) bool {
-		if strings.HasSuffix(r.URL.Path, "/actions/move") {
-			if strings.Contains(r.URL.Path, first.ShortID) {
-				w.WriteHeader(http.StatusBadGateway)
-				return true
-			}
-			if strings.Contains(r.URL.Path, second.ShortID) {
-				close(started)
-				<-release
-			}
+	upstream, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	proxy := &httputil.ReverseProxy{Rewrite: func(r *httputil.ProxyRequest) {
+		r.SetURL(upstream)
+	}, ModifyResponse: func(r *http.Response) error {
+		if strings.HasSuffix(r.Request.URL.Path, "/actions/move") && strings.Contains(r.Request.URL.Path, first.ShortID) {
+			_ = r.Body.Close()
+			r.StatusCode = http.StatusRequestTimeout
+			r.Body = io.NopCloser(strings.NewReader("gateway timeout"))
+			r.ContentLength = -1
+			r.Header.Del("Content-Length")
 		}
-		return false
-	})
+		return nil
+	}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/actions/move") && strings.Contains(r.URL.Path, second.ShortID) {
+			close(started)
+			<-release
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	baseURL := server.URL
 	a := daemonAPI{ctx: t.Context(), baseURL: baseURL, client: http.DefaultClient}
 	client, err := kataclient.NewWithHTTPClient(baseURL, a.client)
 	require.NoError(t, err)
@@ -75,7 +85,10 @@ func TestMoveBatchUnknownStopsNewRowsAndFinishesInflight(t *testing.T) {
 	require.Equal(t, "unknown", unknown.Result)
 	require.Equal(t, "unattempted", next.Result)
 	require.Equal(t, "moved", inflight.Result)
-	stored, err := env.DB.IssueByID(t.Context(), third.ID)
+	stored, err := env.DB.IssueByID(t.Context(), first.ID)
+	require.NoError(t, err)
+	require.Equal(t, target.ID, stored.ProjectID)
+	stored, err = env.DB.IssueByID(t.Context(), third.ID)
 	require.NoError(t, err)
 	require.Equal(t, source.ID, stored.ProjectID)
 }
