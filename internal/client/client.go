@@ -101,14 +101,14 @@ func (e *LocalDaemonUnreachableError) RecoveryAdvice() string {
 	}
 	if e.ManagedExternally {
 		if e.VerifiedProcess && goruntime.GOOS != "windows" {
-			message += fmt.Sprintf("Recheck the PID and endpoint before stopping it. Use kill -QUIT %d to dump goroutines to standard error and stop it. ", e.PID)
+			message += fmt.Sprintf("Wait during startup or migration. If the daemon is stuck, recheck the PID and endpoint before stopping it. Use kill -QUIT %d to dump goroutines to standard error and stop it. ", e.PID)
 		}
 		return message + "Restart it through its service manager"
 	}
 	if !e.VerifiedProcess {
 		return "Inspect the selected process and its credentials; do not switch databases"
 	}
-	message += "Recheck the PID and endpoint before stopping it. "
+	message += "Wait during startup or migration. If the daemon is stuck, recheck the PID and endpoint before stopping it. "
 	if goruntime.GOOS == "windows" {
 		message += fmt.Sprintf("Stop it with taskkill /PID %d /F", e.PID)
 	} else {

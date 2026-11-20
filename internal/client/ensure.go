@@ -274,7 +274,7 @@ func waitForSupervisedDaemon(
 		}
 	}
 	if ctx.Err() != nil {
-		if strings.Contains(message.Error(), ctx.Err().Error()) {
+		if errors.Is(message, ctx.Err()) {
 			message = &supervisedWaitError{message: message.Error(), cause: errors.Join(message, ctx.Err())}
 		} else {
 			message = fmt.Errorf("%w: %w", message, ctx.Err())

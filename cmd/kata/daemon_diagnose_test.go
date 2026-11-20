@@ -922,8 +922,13 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 			require.Equal(t, "local_unreachable", cliErr.Code)
 			require.Contains(t, cliErr.Message, "503")
 			require.Contains(t, cliErr.Message, fmt.Sprintf("%q", filepath.Join(ns.DataDir, "daemon.log")))
-			advice := (&client.LocalDaemonUnreachableError{PID: os.Getpid(), Address: address, DataDir: ns.DataDir, VerifiedProcess: true, Profile: "work", ProfileAutostart: true}).RecoveryAdvice()
-			require.Equal(t, advice, cliErr.Hint)
+			require.Contains(t, cliErr.Hint, "Wait during startup or migration")
+			if runtime.GOOS == "windows" {
+				require.Contains(t, cliErr.Hint, fmt.Sprintf("taskkill /PID %d /F", os.Getpid()))
+			} else {
+				require.Contains(t, cliErr.Hint, fmt.Sprintf("kill -QUIT %d", os.Getpid()))
+			}
+			require.Contains(t, cliErr.Hint, "kata --daemon 'work' daemon recover")
 		})
 	}
 	t.Run("diagnose loses second ping", func(t *testing.T) {

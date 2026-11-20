@@ -24,6 +24,11 @@ import (
 	"go.kenn.io/kit/safefileio"
 )
 
+type hiddenDeadlineError struct{}
+
+func (hiddenDeadlineError) Error() string { return "probe ended" }
+func (hiddenDeadlineError) Unwrap() error { return context.DeadlineExceeded }
+
 func TestManagedExternallyDoesNotAutostart(t *testing.T) {
 	for _, defaultLimit := range []bool{false, true} {
 		t.Run(fmt.Sprintf("default_limit=%t", defaultLimit), func(t *testing.T) {
@@ -57,6 +62,16 @@ func TestManagedExternallyDoesNotAutostart(t *testing.T) {
 }
 
 func TestManagedExternallyUnreachableDetail(t *testing.T) {
+	t.Run("wrapped deadline", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			probe := &LocalDaemonUnreachableError{cause: hiddenDeadlineError{}}
+			_, err := waitForSupervisedDaemon(t.Context(), "/example/config.toml", func(context.Context) bool { return false }, func(context.Context) (ensureDiscovery, error) {
+				return ensureDiscovery{}, probe
+			})
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+			require.NotContains(t, err.Error(), "context deadline exceeded")
+		})
+	})
 	t.Run("caller cancels while probing", func(t *testing.T) {
 		setupKataEnv(t)
 		ctx, cancel := context.WithCancel(t.Context())
@@ -115,6 +130,7 @@ func TestManagedExternallyUnreachableDetail(t *testing.T) {
 
 func TestAutoStartedDaemonRecovery(t *testing.T) {
 	err := &LocalDaemonUnreachableError{PID: 123, VerifiedProcess: true, autoStarted: true}
+	require.Contains(t, err.RecoveryAdvice(), "Wait during startup or migration")
 	require.Contains(t, err.RecoveryAdvice(), "rerun the original command")
 	require.Contains(t, err.RecoveryAdvice(), "any command that autostarts")
 	require.Contains(t, err.RecoveryAdvice(), "daemon status, daemon diagnose, and health only inspect")
