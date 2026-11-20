@@ -204,6 +204,8 @@ type Config struct {
 	Embeddings   EmbeddingsConfig
 	// EmbeddingProjectAllowed controls which project UIDs may use the embedding
 	// provider. Nil allows all projects. Errors abort the current attempt.
+	// Daemons sharing a PostgreSQL schema must return the same decision for each
+	// project because they share the mirror, vector index, and reconciler lease.
 	EmbeddingProjectAllowed func(context.Context, string) (bool, error)
 	// WebHandler optionally serves public, data-free browser assets alongside
 	// the API. Non-API paths bypass Kata's bearer check. Nil keeps the service
