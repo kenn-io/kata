@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -150,6 +151,16 @@ func BenchmarkFederationPollWake(b *testing.B) {
 		b.Cleanup(func() { _ = store.Close() })
 		newBenchHub(b, store, store).run(b)
 	})
+	newPostgres := func(b *testing.B) string {
+		// A benchmark never starts a container; it measures a server the
+		// caller names.
+		if os.Getenv("KATA_TEST_POSTGRES_DSN") == "" {
+			b.Skip("set KATA_TEST_POSTGRES_DSN to benchmark PostgreSQL wakes")
+		}
+		dsn, cleanup := pgstoretest.NewDatabase(b, b.Context())
+		b.Cleanup(cleanup)
+		return dsn
+	}
 	openPostgres := func(b *testing.B, dsn string) *pgstore.Store {
 		store, err := pgstore.Open(b.Context(), dsn)
 		require.NoError(b, err)
@@ -157,14 +168,11 @@ func BenchmarkFederationPollWake(b *testing.B) {
 		return store
 	}
 	b.Run("postgres", func(b *testing.B) {
-		dsn, cleanup := pgstoretest.NewDatabase(b, b.Context())
-		b.Cleanup(cleanup)
-		store := openPostgres(b, dsn)
+		store := openPostgres(b, newPostgres(b))
 		newBenchHub(b, store, store).run(b)
 	})
 	b.Run("postgres-two-processes", func(b *testing.B) {
-		dsn, cleanup := pgstoretest.NewDatabase(b, b.Context())
-		b.Cleanup(cleanup)
+		dsn := newPostgres(b)
 		newBenchHub(b, openPostgres(b, dsn), openPostgres(b, dsn)).run(b)
 	})
 }
