@@ -229,8 +229,7 @@ func DiscoverLocalProfileSelection(ctx context.Context, selection DaemonSelectio
 	if selection.Profile == nil || selection.Resolved.LocalProfile == nil {
 		return selection.Resolved, false, errors.New("selection is not a registered local profile")
 	}
-	resolved, found, err := discoverLocalProfile(ctx, selection)
-	return resolved, found, annotateUnreachable(err, selection.Resolved)
+	return discoverLocalProfile(ctx, selection)
 }
 
 // EnsureLocalProfileSelection starts only the home pinned by this snapshot.

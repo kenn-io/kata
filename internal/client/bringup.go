@@ -80,8 +80,7 @@ func bringUpSelection(
 	}
 	switch {
 	case selection.Profile != nil:
-		resolved, found, err := up.profile(ctx, selection)
-		return resolved, found, annotateUnreachable(err, selection.Resolved)
+		return up.profile(ctx, selection)
 	case selection.Resolved.ConfiguredRemote():
 		if probe && !probeRemote(ctx, selection.Resolved.BaseURL) {
 			return ResolvedDaemon{}, false, remoteUnavailableError(ctx, selection.Resolved, workspaceStart)
@@ -181,7 +180,7 @@ func supervisedDiscovery(
 		if resolved, ok, err = discover(ctx, selection); ok {
 			return ensureDiscovery{Outcome: daemonScanCompatible}, nil
 		}
-		return ensureDiscovery{}, annotateUnreachable(err, selection.Resolved)
+		return ensureDiscovery{}, err
 	})
 	return resolved, ok, err
 }
@@ -208,7 +207,7 @@ func (s executableStart) startIfStopped(
 type inProcessStart struct{}
 
 func (inProcessStart) profile(ctx context.Context, selection DaemonSelection) (ResolvedDaemon, bool, error) {
-	resolved, err := ensureLocalProfile(ctx, selection)
+	resolved, err := EnsureLocalProfileSelection(ctx, selection)
 	return resolved, err == nil, err
 }
 

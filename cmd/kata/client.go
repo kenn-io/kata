@@ -166,6 +166,9 @@ func noDaemonRunningError() error {
 }
 
 func cliDaemonTargetError(err error) error {
+	if e, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok && errors.Is(err, client.ErrLocalDaemonUnreachable) && !errors.Is(err, client.ErrDaemonManagedExternally) {
+		return &cliError{Message: e.Summary(), Hint: e.RecoveryAdvice(), Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
+	}
 	if errors.Is(err, client.ErrLocalDaemonUnreachable) || errors.Is(err, client.ErrDaemonManagedExternally) {
 		return &cliError{Message: err.Error(), Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
 	}

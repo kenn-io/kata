@@ -269,6 +269,7 @@ func TestUnreachableErrorRelaunchPaths(t *testing.T) {
 				e.Profile = "work"
 			}
 			text := e.Error()
+			require.NotContains(t, text, "kata daemon restart")
 			require.Contains(t, text, filepath.Join(dir, "daemon.log"))
 			require.Contains(t, text, fmt.Sprint(os.Getpid()))
 			want := tc.want

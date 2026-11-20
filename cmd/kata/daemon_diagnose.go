@@ -373,10 +373,6 @@ func probeDaemonSelection(
 	}
 	hc, err := client.NewHTTPClientForResolved(ctx, probeTarget, client.Opts{Timeout: envHTTPTimeout(defaultHTTPTimeout)})
 	if err != nil {
-		if evidence := resolved.Unreachable(ctx, err); evidence != nil {
-			result.State = "local_unreachable"
-			return withDiagnosisAction(diagnosisUnreachable(result, evidence)), selection, nil
-		}
 		return result, selection, err
 	}
 	apiClient, err := kataapi.NewWithHTTPClient(resolved.BaseURL, hc)
@@ -483,7 +479,7 @@ func safeDaemonOrigin(value string) string {
 
 func diagnosisUnreachable(result daemonDiagnosis, err error) daemonDiagnosis {
 	if e, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok {
-		result.Message, result.PID, result.Endpoint = err.Error(), e.PID, e.Address
+		result.Message, result.NextAction, result.PID, result.Endpoint = e.Summary(), e.RecoveryAdvice(), e.PID, e.Address
 	}
 	return result
 }
@@ -532,13 +528,12 @@ func withDiagnosisAction(result daemonDiagnosis) daemonDiagnosis {
 func diagnosisError(result daemonDiagnosis) error {
 	data, _ := json.Marshal(result)
 	message := result.State + ": " + result.NextAction
+	hint := ""
 	if result.State == "local_unreachable" && result.Message != "" {
 		message = result.State + ": " + result.Message
-		if result.NextAction != "" {
-			message += ". " + result.NextAction
-		}
+		hint = result.NextAction
 	}
-	return &cliError{Message: message, Code: result.State, Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail, Data: data}
+	return &cliError{Message: message, Hint: hint, Code: result.State, Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail, Data: data}
 }
 
 func printDaemonDiagnosis(cmd *cobra.Command, result daemonDiagnosis) error {
@@ -597,7 +592,9 @@ func printDaemonDiagnosis(cmd *cobra.Command, result daemonDiagnosis) error {
 			return err
 		}
 	}
-	_, err = fmt.Fprintf(cmd.OutOrStdout(), "  next: %s\n", result.NextAction)
+	if result.NextAction != "" {
+		_, err = fmt.Fprintf(cmd.OutOrStdout(), "  next: %s\n", result.NextAction)
+	}
 	return err
 }
 

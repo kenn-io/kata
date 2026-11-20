@@ -621,10 +621,15 @@ func TestDaemonStatusReportsWebURLAndRecoveryAdvice(t *testing.T) {
 	assert.Contains(t, string(out), "unreachable")
 	assert.Contains(t, string(out), "daemon.log")
 	resetFlags(t)
-	human, _, err := executeRootCapture(t, t.Context(), "daemon", "status")
+	human, stderr, err := executeRootCapture(t, t.Context(), "daemon", "status")
 	require.Error(t, err)
 	assert.Contains(t, string(human), "  reason:")
 	assert.Contains(t, string(human), "daemon.log")
+	assert.Equal(t, 1, strings.Count(human+stderr, "daemon.log"))
+	assert.Contains(t, human, "  next:")
+	jsonOut, jsonErr, err := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
+	require.Error(t, err)
+	assert.Equal(t, 1, strings.Count(jsonOut+jsonErr, "daemon.log"))
 }
 
 func TestDaemonStatusReportsMCPState(t *testing.T) {

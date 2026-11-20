@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -886,9 +887,10 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 			require.ErrorAs(t, err, &cliErr)
 			require.Contains(t, cliErr.Message, "503")
 			require.Contains(t, cliErr.Message, fmt.Sprintf("%q", logPath))
-			require.Contains(t, cliErr.Message, recoverCommand)
+			require.Contains(t, cliErr.Hint, recoverCommand)
 			require.Contains(t, stderr, logPath)
-			require.Contains(t, cliErr.Message, "recover")
+			require.Contains(t, cliErr.Hint, "recover")
+			require.NotContains(t, cliErr.Message, "recover")
 		}
 	})
 	t.Run("health keeps the failure in the error text", func(t *testing.T) {
@@ -901,10 +903,10 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 		require.Equal(t, "local_unreachable", result.State)
 		require.Contains(t, result.Message, "503")
 		require.Contains(t, cliErr.Message, "503")
-		healthNextAction := result.Message
+		healthNextAction := result.NextAction
 		require.Contains(t, healthNextAction, recoverCommand)
 		require.Contains(t, healthNextAction, "recover")
-		require.Contains(t, cliErr.Message, healthNextAction)
+		require.Equal(t, healthNextAction, cliErr.Hint)
 		require.Contains(t, stderr, healthNextAction)
 	})
 }
@@ -950,10 +952,43 @@ func TestDaemonDiagnoseSecondPingUnreachable(t *testing.T) {
 	require.Equal(t, os.Getpid(), result.PID)
 	require.Contains(t, result.Message, filepath.Join(ns.DataDir, "daemon.log"))
 	if runtime.GOOS == "windows" {
-		require.Contains(t, result.Message, "'--daemon' 'work'")
+		require.Contains(t, result.NextAction, "'--daemon' 'work'")
 	} else {
-		require.Contains(t, result.Message, "--daemon work")
+		require.Contains(t, result.NextAction, "--daemon work")
 	}
+	require.NotContains(t, result.Message, "daemon recover")
+}
+
+func TestDaemonDiagnosisClientConstructionFailure(t *testing.T) {
+	resetFlags(t)
+	setupKataEnv(t)
+	t.Chdir(t.TempDir())
+	t.Setenv("KATA_SERVER", "")
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version, os.Getpid())
+	}))
+	t.Cleanup(server.Close)
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://"), Metadata: map[string]string{"config_auth_source": "generated_file"}})
+	require.NoError(t, err)
+	out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
+	require.NoError(t, err)
+	var result daemonDiagnosis
+	require.NoError(t, json.Unmarshal([]byte(out), &result))
+	require.Equal(t, "selection_error", result.State)
+	require.Contains(t, result.Message, "persisted auth token")
+	require.NotContains(t, result.NextAction, "kill")
+}
+
+func TestDaemonDiagnosisOmitsEmptyAction(t *testing.T) {
+	resetFlags(t)
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	require.NoError(t, printDaemonDiagnosis(cmd, daemonDiagnosis{State: "local_unreachable", Message: "context canceled", PID: 1}))
+	require.NotContains(t, out.String(), "next:")
 }
 
 func TestReviewSupervisedProfileDiagnosisGuidance(t *testing.T) {
@@ -980,9 +1015,9 @@ func TestReviewSupervisedProfileDiagnosisGuidance(t *testing.T) {
 			require.NoError(t, json.Unmarshal([]byte(out), &result))
 			require.Equal(t, "local_unreachable", result.State)
 			if migration {
-				require.Contains(t, result.Message, "Wait")
+				require.Contains(t, result.NextAction, "Wait")
 			} else {
-				require.Contains(t, result.Message, "service manager")
+				require.Contains(t, result.NextAction, "service manager")
 			}
 			require.NotContains(t, result.Message, "kill")
 			require.NotContains(t, result.Message, "daemon recover")
@@ -1058,9 +1093,9 @@ func TestDaemonDiagnosisProbeOwnedTimeout(t *testing.T) {
 	require.Equal(t, os.Getpid(), result.PID)
 	require.Contains(t, result.Message, filepath.Join(ns.DataDir, "daemon.log"))
 	if runtime.GOOS == "windows" {
-		require.Contains(t, result.Message, "taskkill")
+		require.Contains(t, result.NextAction, "taskkill")
 	} else {
-		require.Contains(t, result.Message, "kill -QUIT")
+		require.Contains(t, result.NextAction, "kill -QUIT")
 	}
 }
 

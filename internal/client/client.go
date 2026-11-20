@@ -88,29 +88,40 @@ type LocalDaemonUnreachableError struct {
 }
 
 func (e *LocalDaemonUnreachableError) Error() string {
-	message := fmt.Sprintf("daemon pid %d is running at %s but is unreachable: %v. Check for logs at %q if it exists", e.PID, e.Address, e.cause, filepath.Join(e.DataDir, "daemon.log"))
+	message := e.Summary()
+	if advice := e.RecoveryAdvice(); advice != "" {
+		message += ". " + advice
+	}
+	return message
+}
+
+// Summary describes the selected process and probe failure.
+func (e *LocalDaemonUnreachableError) Summary() string {
+	return fmt.Sprintf("daemon pid %d is running at %s but is unreachable: %v. Check for logs at %q if it exists", e.PID, e.Address, e.cause, filepath.Join(e.DataDir, "daemon.log"))
+}
+
+// RecoveryAdvice describes actions appropriate for the selected process.
+func (e *LocalDaemonUnreachableError) RecoveryAdvice() string {
+	message := ""
 	if e.callerStopped && !e.migrationActive {
 		return message
 	}
 	if e.WebOrigin != "" {
-		message += ". Capture " + e.WebOrigin + "/debug/pprof/goroutine?debug=2; send the daemon token as an Authorization: Bearer header if one is set"
+		message = "Capture " + e.WebOrigin + "/debug/pprof/goroutine?debug=2; send the daemon token as an Authorization: Bearer header if one is set. "
 	}
 	if e.migrationActive {
-		return message + ". Wait for the migration to finish, then retry; do not interrupt the daemon"
+		return message + "Wait for the migration to finish, then retry; do not interrupt the daemon"
 	}
 	if e.ManagedExternally {
-		return message + ". Restart it through its service manager"
-	}
-	if e.Profile == "" {
-		message += ". While it runs, kata daemon restart keeps its options"
+		return message + "Restart it through its service manager"
 	}
 	if !e.VerifiedProcess {
-		return message
+		return strings.TrimSuffix(message, ". ")
 	}
 	if goruntime.GOOS == "windows" {
-		message += fmt.Sprintf(". Stop it with taskkill /PID %d /F", e.PID)
+		message += fmt.Sprintf("Stop it with taskkill /PID %d /F", e.PID)
 	} else {
-		message += fmt.Sprintf(". Use kill -QUIT %d to dump goroutines and stop it", e.PID)
+		message += fmt.Sprintf("Use kill -QUIT %d to dump goroutines and stop it", e.PID)
 	}
 	switch {
 	case e.Profile != "" && e.profileAutostart:
