@@ -806,7 +806,7 @@ func registerLinks(humaAPI huma.API, cfg ServerConfig) {
 	registerLinksHandlers(humaAPI, cfg)
 }
 
-// registerLabels registers POST/DELETE /labels and GET /labels (counts) routes.
+// registerLabels registers POST/PATCH/DELETE /labels and GET /labels (counts) routes.
 func registerLabels(humaAPI huma.API, cfg ServerConfig) {
 	registerLabelsHandlers(humaAPI, cfg)
 }

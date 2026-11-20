@@ -7917,3 +7917,50 @@ type UnassignRequestBody struct {
 	Actor         *string `json:"actor,omitempty"`
 	ExpectedOwner *string `json:"expected_owner,omitempty"`
 }
+
+type UpdateLabelsRequestBody struct {
+	Actor *string `json:"actor,omitempty"`
+
+	// Add Labels to attach. Labels already attached change nothing.
+	Add []string `json:"add,omitempty"`
+
+	// Remove Labels to detach. Labels not attached change nothing. A label must not appear in both add and remove.
+	Remove []string `json:"remove,omitempty"`
+}
+
+type UpdateLabelsResponseBody struct {
+	Changed bool `json:"changed"`
+
+	// Events issue.unlabeled then issue.labeled events the request recorded; empty when nothing changed.
+	Events []Event `json:"events" validate:"required"`
+	Issue  Issue   `json:"issue"`
+
+	// Labels The issue's labels after the change, sorted.
+	Labels []string `json:"labels" validate:"required"`
+}
+
+func (u UpdateLabelsResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(u.Events, "required"); err != nil {
+		errors = errors.Append("Events", err)
+	}
+	for i, item := range u.Events {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Events[%d]", i), err)
+			}
+		}
+	}
+	if v, ok := any(u.Issue).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Issue", err)
+		}
+	}
+	if err := typesValidator.Var(u.Labels, "required"); err != nil {
+		errors = errors.Append("Labels", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}

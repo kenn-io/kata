@@ -1214,6 +1214,30 @@ type AddLabelResponse struct {
 	}
 }
 
+// UpdateLabelsRequest is PATCH /api/v1/projects/{id}/issues/{ref}/labels.
+// Remove is applied before Add, both inside one transaction.
+type UpdateLabelsRequest struct {
+	ProjectTarget
+	Ref  string `path:"ref" required:"true"`
+	Body struct {
+		Actor  string   `json:"actor,omitempty"`
+		Add    []string `json:"add,omitempty" doc:"Labels to attach. Labels already attached change nothing."`
+		Remove []string `json:"remove,omitempty" doc:"Labels to detach. Labels not attached change nothing. A label must not appear in both add and remove."`
+	}
+}
+
+// UpdateLabelsResponse answers with the issue's labels after the change, read
+// in the same transaction, so a caller never has to guess which labels remain.
+type UpdateLabelsResponse struct {
+	ProjectNameHeader
+	Body struct {
+		Issue   db.Issue   `json:"issue"`
+		Labels  []string   `json:"labels" doc:"The issue's labels after the change, sorted."`
+		Events  []db.Event `json:"events" doc:"issue.unlabeled then issue.labeled events the request recorded; empty when nothing changed."`
+		Changed bool       `json:"changed"`
+	}
+}
+
 // RemoveLabelRequest is DELETE /api/v1/projects/{id}/issues/{ref}/labels/{label}.
 type RemoveLabelRequest struct {
 	ProjectID int64  `path:"project_id" required:"true"`

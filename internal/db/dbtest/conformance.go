@@ -716,6 +716,14 @@ var storageScenarios = []scenario{
 		run: checkLabels,
 	},
 	{
+		name: "change labels",
+		methods: []string{
+			"AddLabel", "ChangeLabelsAndEvents", "CreateIssue", "CreateProject", "EventsAfter", "IssueByID",
+			"LabelsByIssue",
+		},
+		run: checkChangeLabels,
+	},
+	{
 		name: "links and relationship projections",
 		methods: []string{
 			"ChildrenOfIssue", "CloseIssue", "CreateIssue", "CreateLink",

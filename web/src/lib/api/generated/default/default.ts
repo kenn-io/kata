@@ -325,6 +325,9 @@ import type {
   UnbindExternalRootParams,
   UnbindExternalRootPathParameters,
   UnmapConnectorFieldPathParameters,
+  UpdateLabelsPathParameters,
+  UpdateLabelsRequestBody,
+  UpdateLabelsResponseBody,
 } from '../models'
 
 import { orvalFetch } from '../../client.ts'
@@ -5663,6 +5666,50 @@ export const reachableIssueGraph = async (
       method: 'GET',
     },
   )
+}
+
+export type updateLabelsResponse200 = {
+  data: UpdateLabelsResponseBody
+  status: 200
+}
+
+export type updateLabelsResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type updateLabelsResponseSuccess = updateLabelsResponse200 & {
+  headers: Headers
+}
+export type updateLabelsResponseError = updateLabelsResponseDefault & {
+  headers: Headers
+}
+
+export type updateLabelsResponse = updateLabelsResponseSuccess | updateLabelsResponseError
+
+export const getUpdateLabelsUrl = ({ projectId, ref }: UpdateLabelsPathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/issues/${encodeURIComponent(String(ref))}/labels`
+}
+
+export const updateLabels = async (
+  { projectId, ref }: UpdateLabelsPathParameters,
+  updateLabelsRequestBody: UpdateLabelsRequestBody,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<updateLabelsResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<updateLabelsResponse>(getUpdateLabelsUrl({ projectId, ref }), {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(updateLabelsRequestBody),
+  })
 }
 
 export type addLabelResponse200 = {

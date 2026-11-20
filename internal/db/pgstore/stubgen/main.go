@@ -177,6 +177,7 @@ var alreadyImplemented = map[string]bool{
 	"ApplyExternalRootProjection":          true, // external_roots.go
 	"AttachAlias":                          true, // aliases.go
 	"BatchProjectStats":                    true, // project_lifecycle.go
+	"ChangeLabelsAndEvents":                true, // labels.go
 	"ChildrenOfIssue":                      true, // relationship_queries.go
 	"ClaimIssueSyncBinding":                true, // issue_sync.go
 	"ClaimExternalRootBinding":             true, // external_roots.go

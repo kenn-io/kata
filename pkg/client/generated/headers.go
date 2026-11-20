@@ -136,6 +136,14 @@ type CreateCommentHeaders struct {
 	IdempotencyKey        *string `json:"Idempotency-Key,omitempty"`
 }
 
+type UpdateLabelsHeaders struct {
+	// XKataProjectAlias Workspace alias identity; requires a name: selector
+	XKataProjectAlias *string `json:"X-Kata-Project-Alias,omitempty"`
+
+	// XKataProjectAliasKind Workspace alias kind; required with X-Kata-Project-Alias
+	XKataProjectAliasKind *string `json:"X-Kata-Project-Alias-Kind,omitempty"`
+}
+
 type AddLabelHeaders struct {
 	// XKataProjectAlias Workspace alias identity; requires a name: selector
 	XKataProjectAlias *string `json:"X-Kata-Project-Alias,omitempty"`
