@@ -134,9 +134,6 @@ func runMoveBatch(cmd *cobra.Command, args []string, refsFrom string) error {
 		return errors.Join(err, printMoveBatch(cmd, results))
 	}
 	bareProject := strings.TrimSpace(flags.Project)
-	if bareProject == "" {
-		bareProject = workspaceProjectName(start)
-	}
 	a, err := dialDaemon(cmd.Context())
 	if err != nil {
 		return errors.Join(err, printMoveBatch(cmd, results))
@@ -145,9 +142,15 @@ func runMoveBatch(cmd *cobra.Command, args []string, refsFrom string) error {
 	if err != nil {
 		return errors.Join(err, printMoveBatch(cmd, results))
 	}
-	defaultTarget, err := validateMoveBatchDefault(args, refsFrom, projects)
-	if err != nil {
-		return errors.Join(err, printMoveBatch(cmd, results))
+	var bareErr error
+	if bareProject == "" {
+		for _, row := range rows {
+			parsed, parseErr := shortid.Parse(row.Ref)
+			if parseErr == nil && parsed.ULID == "" && parsed.Project == "" {
+				_, bareProject, bareErr = resolveProjectIDAndNameWithClient(a, start)
+				break
+			}
+		}
 	}
 	client, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
 	if err != nil {
@@ -165,11 +168,7 @@ func runMoveBatch(cmd *cobra.Command, args []string, refsFrom string) error {
 	var halt atomic.Bool
 	prepared := make([]*moveBatchPrepared, len(rows))
 	runMoveBatchJobs(a, &halt, len(rows), func(i int) {
-		var target *projectRef
-		if defaultTarget != nil && rows[i].Target == args[0] {
-			target = defaultTarget
-		}
-		prepared[i] = resolveMoveBatchOne(a, client, projects, bareProject, rows[i], target, &results[i], &halt)
+		prepared[i] = resolveMoveBatchOne(a, client, projects, bareProject, bareErr, rows[i], &results[i], &halt)
 	})
 	refuseDuplicateMoveBatchRows(prepared, results)
 	runMoveBatchJobs(a, &halt, len(rows), func(i int) {
@@ -259,16 +258,6 @@ func postMoveBatchComments(cmd *cobra.Command, a daemonAPI, results []moveBatchR
 	return errors.Join(errs...)
 }
 
-// validateMoveBatchDefault checks the optional positional target of a refs
-// file, which rows that name their own project never consult.
-func validateMoveBatchDefault(args []string, refsFrom string, projects []projectRef) (*projectRef, error) {
-	if refsFrom == "" || len(args) == 0 {
-		return nil, nil
-	}
-	target, err := resolveProjectSelectorFromRefs(strings.TrimSpace(args[0]), projects)
-	return &target, err
-}
-
 func refuseDuplicateMoveBatchRows(prepared []*moveBatchPrepared, results []moveBatchResult) {
 	groups := make(map[string][]int)
 	for i, p := range prepared {
@@ -324,7 +313,7 @@ func runMoveBatchJobs(a daemonAPI, halt *atomic.Bool, count int, job func(int)) 
 	wg.Wait()
 }
 
-func resolveMoveBatchOne(a daemonAPI, client *kataclient.Client, projects []projectRef, bareProject string, row moveBatchRow, sharedTarget *projectRef, result *moveBatchResult, halt *atomic.Bool) *moveBatchPrepared {
+func resolveMoveBatchOne(a daemonAPI, client *kataclient.Client, projects []projectRef, bareProject string, bareErr error, row moveBatchRow, result *moveBatchResult, halt *atomic.Bool) *moveBatchPrepared {
 	if a.ctx.Err() != nil {
 		return nil
 	}
@@ -335,21 +324,20 @@ func resolveMoveBatchOne(a daemonAPI, client *kataclient.Client, projects []proj
 	}
 	parsed, err := shortid.Parse(row.Ref)
 	if err == nil && parsed.ULID == "" && parsed.Project == "" {
+		if bareErr != nil {
+			refuse("invalid_ref", bareErr)
+			return nil
+		}
 		parsed.Project = bareProject
 	}
 	if err != nil || (parsed.ULID == "" && parsed.Project == "") {
 		refuse("invalid_ref", errors.New("use project#id or the issue UID; bare short IDs require --project or a bound workspace"))
 		return nil
 	}
-	var target projectRef
-	if sharedTarget != nil {
-		target = *sharedTarget
-	} else {
-		target, err = resolveProjectSelectorFromRefs(strings.TrimSpace(row.Target), projects)
-		if err != nil {
-			refuse("invalid_target", err)
-			return nil
-		}
+	target, err := resolveProjectSelectorFromRefs(strings.TrimSpace(row.Target), projects)
+	if err != nil {
+		refuse("invalid_target", err)
+		return nil
 	}
 	result.Target, result.targetID = target.Name, target.ID
 	pid, ref := target.ID, parsed.ULID

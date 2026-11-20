@@ -20,6 +20,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/testenv"
 	kataclient "go.kenn.io/kata/pkg/client"
 )
 
@@ -66,9 +67,9 @@ func TestMoveBatchUnknownStopsNewRowsAndFinishesInflight(t *testing.T) {
 	inflight := moveBatchResult{Result: "unattempted"}
 	unknown := moveBatchResult{Result: "unattempted"}
 	next := moveBatchResult{Result: "unattempted"}
-	preparedSecond := resolveMoveBatchOne(a, client, projects, flags.Project, row(second.ShortID), nil, &inflight, &halt)
-	preparedFirst := resolveMoveBatchOne(a, client, projects, flags.Project, row(first.ShortID), nil, &unknown, &halt)
-	preparedThird := resolveMoveBatchOne(a, client, projects, flags.Project, row(third.ShortID), nil, &next, &halt)
+	preparedSecond := resolveMoveBatchOne(a, client, projects, flags.Project, nil, row(second.ShortID), &inflight, &halt)
+	preparedFirst := resolveMoveBatchOne(a, client, projects, flags.Project, nil, row(first.ShortID), &unknown, &halt)
+	preparedThird := resolveMoveBatchOne(a, client, projects, flags.Project, nil, row(third.ShortID), &next, &halt)
 	require.NotNil(t, preparedSecond)
 	require.NotNil(t, preparedFirst)
 	require.NotNil(t, preparedThird)
@@ -122,7 +123,11 @@ func TestMoveBatchMovesOnlyListedIssues(t *testing.T) {
 			args := []string{"--workspace", dir}
 			firstRef := first.UID
 			if bound {
+				dir = t.TempDir()
+				args[1] = dir
 				require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.toml"), []byte("version = 1\n[project]\nname = \"source-project\"\n"), 0600))
+				_, err = env.DB.AttachAlias(t.Context(), source.ID, "local://"+dir, "local")
+				require.NoError(t, err)
 				firstRef = first.ShortID
 			} else {
 				args = append(args, "--project", source.Name)
@@ -428,14 +433,45 @@ func TestMoveBatchCommentsRunWithBoundedConcurrency(t *testing.T) {
 }
 
 func TestMoveBatchInvalidDefaultTargetWithRowOverrides(t *testing.T) {
-	env, dir, source, target, issue := setupMoveCLIProjects(t)
+	env, dir, _, target, issue := setupMoveCLIProjects(t)
 	path := filepath.Join(t.TempDir(), "refs")
 	require.NoError(t, os.WriteFile(path, []byte(issue.UID+"\t"+target.Name+"\n"), 0600))
 	_, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "move", "missing-project", "--refs-from", path, "--json")
-	require.ErrorContains(t, err, "missing-project")
+	require.NoError(t, err)
 	stored, err := env.DB.IssueByID(t.Context(), issue.ID)
 	require.NoError(t, err)
-	require.Equal(t, source.ID, stored.ProjectID)
+	require.Equal(t, target.ID, stored.ProjectID)
+}
+
+func TestMoveBatchBareRefFollowsWorkspaceAlias(t *testing.T) {
+	for _, change := range []string{"rename", "merge"} {
+		t.Run(change, func(t *testing.T) {
+			env := testenv.New(t)
+			dir, pid := initLocalBoundWorkspace(t, env, "old-project")
+			issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: pid, Title: "Example task", Author: "tester"})
+			require.NoError(t, err)
+			if change == "rename" {
+				_, err = env.DB.RenameProject(t.Context(), pid, "current-project")
+				require.NoError(t, err)
+				_, err = env.DB.CreateProject(t.Context(), "old-project")
+			} else {
+				var project db.Project
+				project, err = env.DB.CreateProject(t.Context(), "current-project")
+				require.NoError(t, err)
+				_, err = env.DB.MergeProjects(t.Context(), db.MergeProjectsParams{SourceProjectID: pid, TargetProjectID: project.ID})
+			}
+			require.NoError(t, err)
+			target, err := env.DB.CreateProject(t.Context(), "target-project")
+			require.NoError(t, err)
+			path := filepath.Join(t.TempDir(), "refs")
+			require.NoError(t, os.WriteFile(path, []byte(issue.ShortID+"\n"), 0600))
+			_, _, err = executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "move", target.Name, "--refs-from", path, "--json")
+			require.NoError(t, err)
+			stored, err := env.DB.IssueByID(t.Context(), issue.ID)
+			require.NoError(t, err)
+			require.Equal(t, target.ID, stored.ProjectID)
+		})
+	}
 }
 
 func TestMoveBatchRefusalOutputModes(t *testing.T) {
