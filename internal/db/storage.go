@@ -248,9 +248,10 @@ type Storage interface {
 	// ChangeLabelsAndEvents removes p.Remove, then adds p.Add, in one transaction.
 	// Each label that actually changes emits one issue.unlabeled or issue.labeled
 	// event; absent removes and already-attached adds are skipped silently. An
-	// invalid label returns ErrLabelInvalid and rolls back every change. Returns
-	// the issue's labels after the change (sorted, non-nil) and the emitted
-	// events in order.
+	// invalid add label returns ErrLabelInvalid and rolls back every change;
+	// remove labels are not validated, so callers check them with ValidLabel.
+	// Returns the issue's labels after the change (sorted, non-nil) and the
+	// emitted events in order.
 	ChangeLabelsAndEvents(ctx context.Context, issueID int64, p ChangeLabelsParams) ([]string, []Event, error)
 	HasLabel(ctx context.Context, issueID int64, label string) (bool, error)
 	LabelByEndpoints(ctx context.Context, issueID int64, label string) (IssueLabel, error)

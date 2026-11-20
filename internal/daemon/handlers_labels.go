@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -79,8 +80,7 @@ func addLabelHandler(cfg ServerConfig) func(context.Context, *api.AddLabelReques
 			out.Body.Changed = false
 			return out, nil
 		case errors.Is(err, db.ErrLabelInvalid):
-			return nil, api.NewError(400, "validation",
-				"label must match charset [a-z0-9._:-] and length 1..64", "", nil)
+			return nil, api.NewError(400, "validation", invalidLabelMessage, "", nil)
 		case errors.Is(err, db.ErrFederatedReadOnly):
 			return nil, federationReadOnlyError(err)
 		case err != nil:
@@ -105,25 +105,7 @@ func addLabelHandler(cfg ServerConfig) func(context.Context, *api.AddLabelReques
 	}
 }
 
-// validLabelName mirrors the store's label rule: charset [a-z0-9._:-],
-// length 1..64. The PATCH handler checks both lists with it before writing
-// because the stores skip an absent remove without validating it, so a
-// mistyped remove would otherwise leave the issue carrying both labels.
-func validLabelName(label string) bool {
-	if len(label) == 0 || len(label) > 64 {
-		return false
-	}
-	for i := range len(label) {
-		c := label[i]
-		switch {
-		case c >= 'a' && c <= 'z', c >= '0' && c <= '9',
-			c == '.', c == '_', c == ':', c == '-':
-		default:
-			return false
-		}
-	}
-	return true
-}
+const invalidLabelMessage = "label must match charset [a-z0-9._:-] and length 1..64"
 
 func updateLabelsHandler(cfg ServerConfig) func(context.Context, *api.UpdateLabelsRequest) (*api.UpdateLabelsResponse, error) {
 	return func(ctx context.Context, in *api.UpdateLabelsRequest) (*api.UpdateLabelsResponse, error) {
@@ -131,17 +113,10 @@ func updateLabelsHandler(cfg ServerConfig) func(context.Context, *api.UpdateLabe
 		if err != nil {
 			return nil, err
 		}
-		for _, l := range in.Body.Add {
-			if !validLabelName(l) {
-				return nil, api.NewError(400, "validation",
-					"label must match charset [a-z0-9._:-] and length 1..64", "", nil)
-			}
-		}
-		for _, l := range in.Body.Remove {
-			if !validLabelName(l) {
-				return nil, api.NewError(400, "validation",
-					"label must match charset [a-z0-9._:-] and length 1..64", "", nil)
-			}
+		// The stores skip a remove that matches nothing without validating it,
+		// so a mistyped remove would leave the issue carrying both labels.
+		if slices.ContainsFunc(slices.Concat(in.Body.Add, in.Body.Remove), func(l string) bool { return !db.ValidLabel(l) }) {
+			return nil, api.NewError(400, "validation", invalidLabelMessage, "", nil)
 		}
 		add, remove := in.Body.Add, in.Body.Remove
 		if len(add) == 0 && len(remove) == 0 {
@@ -172,8 +147,7 @@ func updateLabelsHandler(cfg ServerConfig) func(context.Context, *api.UpdateLabe
 		})
 		switch {
 		case errors.Is(err, db.ErrLabelInvalid):
-			return nil, api.NewError(400, "validation",
-				"label must match charset [a-z0-9._:-] and length 1..64", "", nil)
+			return nil, api.NewError(400, "validation", invalidLabelMessage, "", nil)
 		case errors.Is(err, db.ErrNotFound):
 			return nil, api.NewError(404, "issue_not_found", "issue not found", "", nil)
 		case errors.Is(err, db.ErrFederatedReadOnly):
