@@ -154,7 +154,7 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 	}
 	if skippedUndeliverable > 0 {
 		fmt.Fprintf(os.Stderr,
-			"note: skipped %d link record(s) that cannot be delivered across these projects\n",
+			"note: skipped %d link record(s) between projects that a relay between hubs cannot deliver\n",
 			skippedUndeliverable)
 	}
 	if skippedCycles > 0 {
@@ -476,7 +476,7 @@ const (
 	linkSkipMissingPeer                   // peer issue absent from envelope/database
 	linkSkipDuplicate                     // edge already present (natural-key no-op)
 	linkSkipMapping                       // import_mapping references a skipped link
-	linkSkipUndeliverable                 // merge link that cannot be delivered across projects
+	linkSkipUndeliverable                 // merge link between projects that a relay cannot deliver
 	linkSkipParentCycle                   // merge parent link that would close a cycle in the target
 	linkSkipSecondParent                  // merge parent link for a task that already has a parent in the target
 )
@@ -848,9 +848,10 @@ func importLink(ctx context.Context, tx *sql.Tx, lk *db.LinkExport, mergeProject
 			}
 		}
 		// Historical links may predate connecting both projects to their hub.
+		var mismatch *db.LinkServerMismatchError
 		if err := ensureRelayLinkBoundaryTx(ctx, tx, lk.FromIssueID, lk.ToIssueID); errors.Is(err, db.ErrFederationCrossProjectBoundary) {
 			return linkSkipUndeliverable, nil
-		} else if err != nil && !errors.Is(err, db.ErrFederatedLinkServerMismatch) {
+		} else if err != nil && !errors.As(err, &mismatch) {
 			return linkSkipNone, fmt.Errorf("project merge link between issues %s and %s: %w", lk.FromIssueUID, lk.ToIssueUID, err)
 		}
 	}

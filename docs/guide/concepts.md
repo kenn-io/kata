@@ -83,8 +83,8 @@ links may span projects. Relationship flags accept `short_id` (same project),
 `project#short_id`, or a full ULID; foreign refs are forwarded to the daemon,
 which resolves them in the named project. Adding a link whose target is in an
 archived project is rejected; unarchive the project to add links to it.
-For a cross-project link, if either project syncs to a hub, both must sync to
-the same hub. Paused projects still count as synced.
+For a cross-project link, if either project syncs to a hub, both must have sync
+and push enabled on the same hub.
 
 | Relationship | Cardinality | Meaning |
 | --- | --- | --- |

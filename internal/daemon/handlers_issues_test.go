@@ -1,7 +1,6 @@
 package daemon_test
 
 import (
-	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"fmt"
@@ -2919,107 +2918,4 @@ func TestShowIssue_UnlabeledIssueHasEmptyLabelArray(t *testing.T) {
 	labels, ok := out.Issue["labels"]
 	require.True(t, ok, "issue.labels must be present")
 	assert.JSONEq(t, `[]`, string(labels))
-}
-
-func TestIssueServerBoundaryPreflight(t *testing.T) {
-	env := testenv.New(t)
-	ctx := t.Context()
-	a, err := env.DB.CreateProject(ctx, "server-a")
-	require.NoError(t, err)
-	b, err := env.DB.CreateProject(ctx, "server-b")
-	require.NoError(t, err)
-	from, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: a.ID, Title: "A", Author: "tester"})
-	require.NoError(t, err)
-	to, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: b.ID, Title: "B", Author: "tester"})
-	require.NoError(t, err)
-	path := issuePathRef(a.ID, from.ShortID, "")
-	payload := map[string]any{"actor": "tester", "links_delta": map[string]any{"add_blocks": []string{to.UID}}}
-	resp, raw := envDoRaw(t, env, http.MethodPatch, path, payload, nil)
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
-	create := map[string]any{"actor": "tester", "title": "reusable", "links": []map[string]any{{"type": "blocks", "to_ref": to.UID}}}
-	headers := map[string]string{"Idempotency-Key": "boundary-retry"}
-	resp, raw = envDoRaw(t, env, http.MethodPost, projectPath(a.ID)+"/issues", create, headers)
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
-
-	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: a.ID, Role: db.FederationRoleSpoke, HubURL: "https://a.example", HubProjectID: a.ID, HubProjectUID: a.UID, Actor: "tester"})
-	require.NoError(t, err)
-	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: b.ID, Role: db.FederationRoleSpoke, HubURL: "https://b.example", HubProjectID: b.ID, HubProjectUID: b.UID, Actor: "tester"})
-	require.NoError(t, err)
-	resp, raw = envDoRaw(t, env, http.MethodPost, projectPath(a.ID)+"/issues", create, headers)
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
-	require.Contains(t, string(raw), `"reused":true`)
-
-	before, err := env.DB.EventsAfter(ctx, db.EventsAfterParams{Limit: 100})
-	require.NoError(t, err)
-	resp, raw = envDoRaw(t, env, http.MethodPatch, path, payload, nil)
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
-	resp, raw = envDoRaw(t, env, http.MethodPatch, path, map[string]any{"actor": "tester", "links_delta": map[string]any{"remove_blocks": []string{to.UID}}}, nil)
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
-	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: b.ID, Role: db.FederationRoleSpoke, HubURL: "https://b.example", HubProjectID: b.ID, HubProjectUID: b.UID, Actor: "tester", Enabled: true})
-	require.NoError(t, err)
-	before, err = env.DB.EventsAfter(ctx, db.EventsAfterParams{Limit: 100})
-	require.NoError(t, err)
-	resp, raw = envDoRaw(t, env, http.MethodPatch, path, map[string]any{"actor": "tester", "title": "changed", "links_delta": map[string]any{"add_blocks": []string{to.UID}}}, nil)
-	assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "federated_link_server_mismatch")
-	require.Contains(t, string(raw), "connect server-b first")
-	issue, err := env.DB.IssueByID(ctx, from.ID)
-	require.NoError(t, err)
-	require.Equal(t, "A", issue.Title)
-	resp, raw = envDoRaw(t, env, http.MethodPost, projectPath(a.ID)+"/issues", map[string]any{"actor": "tester", "title": "rejected", "links": []map[string]any{{"type": "blocks", "to_ref": to.UID}}}, nil)
-	assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "federated_link_server_mismatch")
-	require.Contains(t, string(raw), "connect server-b first")
-	var listed struct {
-		Issues []struct {
-			Title string `json:"title"`
-		} `json:"issues"`
-	}
-	envGetJSON(t, env, projectPath(a.ID)+"/issues", &listed)
-	for _, item := range listed.Issues {
-		require.NotEqual(t, "rejected", item.Title)
-	}
-
-	after, err := env.DB.EventsAfter(ctx, db.EventsAfterParams{Limit: 100})
-	require.NoError(t, err)
-	require.Equal(t, before, after)
-}
-
-type unlinkAfterLookupStorage struct {
-	db.Storage
-	from, to db.Issue
-	unlinked bool
-}
-
-func (s *unlinkAfterLookupStorage) LinkByEndpoints(ctx context.Context, from, to int64, kind string) (db.Link, error) {
-	link, err := s.Storage.LinkByEndpoints(ctx, from, to, kind)
-	if err == nil && !s.unlinked && from == s.from.ID && to == s.to.ID && kind == "blocks" {
-		s.unlinked = true
-		_, err = s.Storage.DeleteLinkAndEvent(ctx, link, db.LinkEventParams{EventType: "issue.unlinked", EventIssueID: from, FromShortID: s.from.ShortID, FromUID: s.from.UID, ToShortID: s.to.ShortID, ToUID: s.to.UID, Actor: "other"})
-	}
-	return link, err
-}
-
-func TestEditLinkClaimConcurrentUnlink(t *testing.T) {
-	var gated *unlinkAfterLookupStorage
-	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
-		gated = &unlinkAfterLookupStorage{Storage: cfg.DB}
-		cfg.DB = gated
-	})
-	ctx := t.Context()
-	project, err := env.DB.CreateProject(ctx, "claim-race")
-	require.NoError(t, err)
-	from, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "source", Author: "agent"})
-	require.NoError(t, err)
-	to, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "target", Author: "agent"})
-	require.NoError(t, err)
-	_, err = env.DB.EnableProjectFederation(ctx, project.ID, "agent")
-	require.NoError(t, err)
-	_, _, err = env.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: from.ID, ToIssueID: to.ID, Type: "blocks", Author: "agent"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: from.ID, FromShortID: from.ShortID, FromUID: from.UID, ToShortID: to.ShortID, ToUID: to.UID, Actor: "agent"})
-	require.NoError(t, err)
-	acquireClaimGateIssue(t, env, project, to, "other")
-	gated.from, gated.to = from, to
-	resp, raw := envDoRaw(t, env, http.MethodPatch, issuePathRef(project.ID, from.ShortID, ""), map[string]any{"actor": "agent", "links_delta": map[string]any{"add_blocks": []string{to.UID}}}, nil)
-	require.True(t, gated.unlinked)
-	assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "claim_denied")
-	_, err = env.DB.LinkByEndpoints(ctx, from.ID, to.ID, "blocks")
-	require.ErrorIs(t, err, db.ErrNotFound)
 }

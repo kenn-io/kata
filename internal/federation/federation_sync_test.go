@@ -1036,20 +1036,7 @@ func TestSyncFederationOnceAutoRetriesFormerPeerReferenceQuarantine(t *testing.T
 	spoke := testenv.New(t)
 	project, err := spoke.DB.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
-	binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
-		ProjectID:            project.ID,
-		Role:                 db.FederationRoleSpoke,
-		HubURL:               "http://127.0.0.1:1",
-		HubProjectID:         42,
-		HubProjectUID:        project.UID,
-		ReplayHorizonEventID: 50,
-		PullCursorEventID:    49,
-		PushEnabled:          true,
-		Actor:                "tester",
-		PushCursorEventID:    0,
-		Enabled:              true,
-	})
-	require.NoError(t, err)
+
 	localIssue, localEvent, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: project.ID,
 		Title:     "pending local",
@@ -1077,6 +1064,20 @@ func TestSyncFederationOnceAutoRetriesFormerPeerReferenceQuarantine(t *testing.T
 		ToShortID:    peerIssue.ShortID,
 		ToUID:        peerIssue.UID,
 		Actor:        "tester",
+	})
+	require.NoError(t, err)
+	binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            project.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://127.0.0.1:1",
+		HubProjectID:         42,
+		HubProjectUID:        project.UID,
+		ReplayHorizonEventID: 50,
+		PullCursorEventID:    49,
+		PushEnabled:          true,
+		Actor:                "tester",
+		PushCursorEventID:    0,
+		Enabled:              true,
 	})
 	require.NoError(t, err)
 	_, err = spoke.DB.RecordFederationQuarantine(ctx, db.RecordFederationQuarantineParams{

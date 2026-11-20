@@ -303,7 +303,7 @@ func stringPointersEqual(left, right *string) bool {
 // DirectLinkAdditionPeers returns only explicit link additions eligible for
 // a supplemental direct-spoke proof. It never modifies the event payload.
 func DirectLinkAdditionPeers(event FoldEvent) (map[string]bool, error) {
-	if event.Type != "issue.created" && event.Type != "issue.links_changed" {
+	if event.Type != "issue.created" && event.Type != "issue.links_changed" && event.Type != "issue.linked" {
 		return nil, nil
 	}
 	var peers map[string]bool

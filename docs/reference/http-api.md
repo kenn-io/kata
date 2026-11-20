@@ -335,7 +335,6 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
-| `0.62.0` | Links across different servers return `409 federated_link_server_mismatch` with guidance to connect the other project. |
 | `0.60.0` | Enrollment join instructions use the signing hub's external URL and include signing key placeholders. |
 | `0.59.0` | Schedule and deadline civil dates and times accept an explicit `[Zone]` suffix. |
 | `0.58.0` | `GET /api/v1/projects/{project_id}/events` accepts `actor` so callers who may restore a soft-deleted issue can read its history. |

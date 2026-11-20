@@ -8,9 +8,6 @@ import (
 )
 
 func federationReadOnlyError(err error) error {
-	if errors.Is(err, db.ErrFederatedLinkServerMismatch) {
-		return api.NewError(409, "federated_link_server_mismatch", err.Error(), "", nil)
-	}
 	if errors.Is(err, db.ErrFederatedMoveUnsupported) {
 		return api.NewError(409, "federated_move_unsupported",
 			"cross-project moves involving a federated project are unsupported unless both projects use the same active hub",

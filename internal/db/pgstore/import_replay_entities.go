@@ -261,9 +261,10 @@ SELECT 1 FROM links WHERE type=$1 AND (
 			}
 		}
 		// Historical links may predate connecting both projects to their hub.
+		var mismatch *db.LinkServerMismatchError
 		if err := ensureRelayLinkBoundaryTx(ctx, tx, link.FromIssueID, link.ToIssueID); errors.Is(err, db.ErrFederationCrossProjectBoundary) {
 			return replayLinkUndeliverable, nil
-		} else if err != nil && !errors.Is(err, db.ErrFederatedLinkServerMismatch) {
+		} else if err != nil && !errors.As(err, &mismatch) {
 			return replayLinkInserted, fmt.Errorf("project merge link between issues %s and %s: %w", link.FromIssueUID, link.ToIssueUID, err)
 		}
 	}

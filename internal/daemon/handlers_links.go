@@ -342,18 +342,6 @@ func mapLinkBoundaryError(err error) error {
 	return nil
 }
 
-func checkLinkProjectsBeforeMutation(ctx context.Context, store db.Storage, fromProject int64, toProjects []int64) error {
-	if len(toProjects) == 0 {
-		return nil
-	}
-	if checker, ok := store.(interface {
-		CheckLinkProjectsBoundary(context.Context, int64, []int64) error
-	}); ok {
-		return mapLinkBoundaryError(checker.CheckLinkProjectsBoundary(ctx, fromProject, toProjects))
-	}
-	return nil
-}
-
 // parentReplaceWouldCycle reports whether making prospectiveParentID the parent
 // of childID would close a parent cycle, by walking the prospective parent's
 // ancestor chain upward via ParentOf. The cycle exists when childID is already

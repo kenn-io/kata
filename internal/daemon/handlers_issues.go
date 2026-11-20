@@ -216,9 +216,6 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := requireInitialLinkTargetsAddable(ctx, cfg.DB, in.ProjectID, linkTargets); err != nil {
 			return nil, err
 		}
-		if err := checkLinkProjectsBeforeMutation(ctx, cfg.DB, in.ProjectID, issueProjectIDs(linkTargets)); err != nil {
-			return nil, err
-		}
 		if err := requireFederatedLinkClaims(ctx, cfg, actor, linkTargets...); err != nil {
 			return nil, err
 		}
@@ -627,10 +624,6 @@ func editIssueHandler(cfg ServerConfig) func(context.Context, *api.EditIssueRequ
 			if err := validateResolvedLinksDelta(&params); err != nil {
 				return nil, err
 			}
-			if err := preflightAddedLinks(ctx, cfg.DB, issue, params); err != nil {
-				return nil, err
-			}
-			// An existing edge may disappear before the write, so check every requested target.
 			if err := requireFederatedLinksDeltaClaims(ctx, cfg, actor, issue, &params); err != nil {
 				return nil, err
 			}
@@ -682,53 +675,6 @@ func editIssueHandler(cfg ServerConfig) func(context.Context, *api.EditIssueRequ
 		}
 		return out, nil
 	}
-}
-
-func preflightAddedLinks(ctx context.Context, store db.Storage, issue db.Issue, params db.EditIssueAtomicParams) error {
-	var projects []int64
-	check := func(from, to int64, kind string) error {
-		peer := to
-		if from != issue.ID {
-			peer = from
-		}
-		if kind == "related" && from > to {
-			from, to = to, from
-		}
-		_, err := store.LinkByEndpoints(ctx, from, to, kind)
-		if err == nil {
-			return nil
-		}
-		if !errors.Is(err, db.ErrNotFound) {
-			return internalAPIError(err)
-		}
-		target, err := store.IssueByID(ctx, peer)
-		if err != nil {
-			return internalAPIError(err)
-		}
-		projects = append(projects, target.ProjectID)
-		return nil
-	}
-	if params.SetParent != nil {
-		if err := check(issue.ID, *params.SetParent, "parent"); err != nil {
-			return err
-		}
-	}
-	for _, group := range []struct {
-		ids      []int64
-		kind     string
-		incoming bool
-	}{{params.AddBlocks, "blocks", false}, {params.AddBlockedBy, "blocks", true}, {params.AddRelated, "related", false}} {
-		for _, id := range group.ids {
-			from, to := issue.ID, id
-			if group.incoming {
-				from, to = to, from
-			}
-			if err := check(from, to, group.kind); err != nil {
-				return err
-			}
-		}
-	}
-	return checkLinkProjectsBeforeMutation(ctx, store, issue.ProjectID, projects)
 }
 
 // linksDeltaRequiresAllProjectsBeforeResolution identifies relationship

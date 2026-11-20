@@ -215,11 +215,11 @@ func checkFederationControlLifecycle(t *testing.T, store db.Storage) error {
 	_, err = store.CreateLink(ctx, db.CreateLinkParams{
 		FromIssueID: spokeIssue.ID, ToIssueID: peerIssue.ID, Type: "blocks", Author: "member",
 	})
-	assert.ErrorIs(t, err, db.ErrFederatedLinkServerMismatch)
+	assert.ErrorIs(t, err, db.ErrFederatedReadOnly)
 	_, err = store.CreateLink(ctx, db.CreateLinkParams{
 		FromIssueID: spokeIssue.ID, ToIssueID: incompatibleIssue.ID, Type: "blocks", Author: "member",
 	})
-	assert.ErrorIs(t, err, db.ErrFederatedLinkServerMismatch)
+	assert.ErrorIs(t, err, db.ErrFederatedReadOnly)
 	spokeBinding.PushEnabled = true
 	if _, err := store.UpsertFederationBinding(ctx, spokeBinding); err != nil {
 		return err

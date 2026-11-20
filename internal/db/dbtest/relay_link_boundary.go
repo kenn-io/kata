@@ -207,14 +207,14 @@ func RunLinkServerBoundary(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	for _, pair := range [][2]db.Issue{{ai, bi}, {bi, ai}} {
 		err := link(pair[0], pair[1])
-		require.ErrorIs(t, err, db.ErrFederatedLinkServerMismatch)
+		require.ErrorIs(t, err, db.ErrFederatedReadOnly)
 		require.EqualError(t, err, "can't link: project server-b isn't synced to the same server as server-a; connect server-b first")
 	}
 	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: a.ID, Title: "Rejected", Author: "member", Links: []db.InitialLink{{Type: "parent", ToNumber: bi.ID}}})
-	require.ErrorIs(t, err, db.ErrFederatedLinkServerMismatch)
+	require.ErrorIs(t, err, db.ErrFederatedReadOnly)
 	title := "Changed"
 	_, err = store.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: ai.ID, Actor: "member", Title: &title, SetParent: &bi.ID})
-	require.ErrorIs(t, err, db.ErrFederatedLinkServerMismatch)
+	require.ErrorIs(t, err, db.ErrFederatedReadOnly)
 	unchanged, err := store.IssueByID(ctx, ai.ID)
 	require.NoError(t, err)
 	require.Equal(t, "A", unchanged.Title)
@@ -223,10 +223,10 @@ func RunLinkServerBoundary(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	require.Equal(t, before, after)
 	bind(b, db.FederationRoleSpoke, "https://other.example", "bob")
-	require.ErrorIs(t, link(ai, bi), db.ErrFederatedLinkServerMismatch)
-	require.ErrorIs(t, link(bi, ai), db.ErrFederatedLinkServerMismatch)
+	require.ErrorIs(t, link(ai, bi), db.ErrFederatedReadOnly)
+	require.ErrorIs(t, link(bi, ai), db.ErrFederatedReadOnly)
 	bind(b, db.FederationRoleSpoke, "https://hub.example/team-b", "bob")
-	require.ErrorIs(t, link(ai, bi), db.ErrFederatedLinkServerMismatch)
+	require.ErrorIs(t, link(ai, bi), db.ErrFederatedReadOnly)
 	bind(b, db.FederationRoleSpoke, "https://HUB.example:443/team-a/", "bob")
 	aBinding, err := store.FederationBindingByProject(ctx, a.ID)
 	require.NoError(t, err)
@@ -234,7 +234,6 @@ func RunLinkServerBoundary(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	checker := store.(interface {
 		CheckLinkBoundary(context.Context, int64, int64) error
-		CheckLinkProjectsBoundary(context.Context, int64, []int64) error
 	})
 	for _, tc := range []struct {
 		name                             string
@@ -252,17 +251,24 @@ func RunLinkServerBoundary(t *testing.T, store db.Storage) {
 			require.NoError(t, err)
 			_, err = store.UpsertFederationBinding(ctx, bBinding)
 			require.NoError(t, err)
+			before, err := store.EventsAfter(ctx, db.EventsAfterParams{Limit: 100})
+			require.NoError(t, err)
 			for _, pair := range [][2]db.Issue{{ai, bi}, {bi, ai}} {
-				require.NoError(t, checker.CheckLinkBoundary(ctx, pair[0].ID, pair[1].ID))
-				require.NoError(t, checker.CheckLinkProjectsBoundary(ctx, pair[0].ProjectID, []int64{pair[1].ProjectID}))
+				err := checker.CheckLinkBoundary(ctx, pair[0].ID, pair[1].ID)
+				require.ErrorIs(t, err, db.ErrFederatedReadOnly)
+				require.Contains(t, err.Error(), "resume sync or enable push")
+				require.ErrorIs(t, link(pair[0], pair[1]), db.ErrFederatedReadOnly)
 			}
+			after, err := store.EventsAfter(ctx, db.EventsAfterParams{Limit: 100})
+			require.NoError(t, err)
+			require.Equal(t, before, after)
 			bBinding.HubURL = "https://other.example"
 			_, err = store.UpsertFederationBinding(ctx, bBinding)
 			require.NoError(t, err)
 			for _, pair := range [][2]db.Issue{{ai, bi}, {bi, ai}} {
-				require.ErrorIs(t, checker.CheckLinkBoundary(ctx, pair[0].ID, pair[1].ID), db.ErrFederatedLinkServerMismatch)
-				require.ErrorIs(t, checker.CheckLinkProjectsBoundary(ctx, pair[0].ProjectID, []int64{pair[1].ProjectID}), db.ErrFederatedLinkServerMismatch)
+				require.ErrorIs(t, checker.CheckLinkBoundary(ctx, pair[0].ID, pair[1].ID), db.ErrFederatedReadOnly)
 			}
+
 			bBinding.HubURL = "https://hub.example/team-a"
 		})
 	}
@@ -285,8 +291,7 @@ func RunLinkServerBoundary(t *testing.T, store db.Storage) {
 		_, err := store.UpsertFederationBinding(ctx, aBinding)
 		require.NoError(t, err)
 		for _, pair := range [][2]db.Issue{{ai, ci}, {ci, ai}} {
-			require.ErrorIs(t, checker.CheckLinkBoundary(ctx, pair[0].ID, pair[1].ID), db.ErrFederatedLinkServerMismatch)
-			require.ErrorIs(t, checker.CheckLinkProjectsBoundary(ctx, pair[0].ProjectID, []int64{pair[1].ProjectID}), db.ErrFederatedLinkServerMismatch)
+			require.ErrorIs(t, checker.CheckLinkBoundary(ctx, pair[0].ID, pair[1].ID), db.ErrFederatedReadOnly)
 		}
 	}
 	require.NoError(t, link(ci, di))

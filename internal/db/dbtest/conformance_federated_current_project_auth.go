@@ -176,6 +176,21 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 	parent, err := store.ParentOf(ctx, child.ID)
 	require.NoError(t, err)
 	require.Equal(t, peer.ID, parent.ToIssueID)
+
+	directChild, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: route.ID, Title: "Direct link", Author: "worker"})
+	require.NoError(t, err)
+	directPayload, err := json.Marshal(map[string]string{"from_uid": directChild.UID, "to_uid": peer.UID, "type": "blocks"})
+	require.NoError(t, err)
+	direct := newRemoteEvent(t, route, &directChild.UID, "issue.linked", "worker", origin, at+1, directPayload)
+	direct.RelatedIssueUID = &peer.UID
+	direct.ContentHash, err = db.RemoteEventContentHash(direct)
+	require.NoError(t, err)
+	params.Events = []db.FederationIngestEvent{{SourceEventID: 2, Event: direct}}
+	_, err = store.IngestFederationEvents(ctx, params)
+	require.NoError(t, err)
+	_, err = store.LinkByEndpoints(ctx, directChild.ID, peer.ID, "blocks")
+	require.NoError(t, err)
+
 	// One edit can add a relationship and remove a different relationship
 	// to the same peer. Removing the parent still needs ordinary authority.
 	mixedPayload, err := json.Marshal(map[string]any{"parent_removed_uid": peer.UID, "related_added_uids": []string{peer.UID}})

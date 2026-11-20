@@ -108,7 +108,7 @@ func (s *Store) importReplayTx(
 	}
 	if skippedUndeliverable > 0 {
 		fmt.Fprintf(os.Stderr,
-			"note: skipped %d link record(s) that cannot be delivered across these projects\n",
+			"note: skipped %d link record(s) between projects that a relay between hubs cannot deliver\n",
 			skippedUndeliverable)
 	}
 	if skippedSecondParents > 0 {
