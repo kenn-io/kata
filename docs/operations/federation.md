@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-18
+last_edited: 2026-11-20
 ---
 
 # Federation
@@ -1419,6 +1419,13 @@ retry as for a first approval. A `denied` decision keeps the replica and its
 data; restore the earlier intent and restart to ask for that access again.
 An approval for a different hub project is refused as `binding_conflict`, and
 the binding is unchanged.
+
+Kata records the release in the saved request before sending it. If no answer
+arrives, for example because the provider failed or the daemon stopped, the
+provider may have revoked the old approval. The next attempt sends the release
+again and asks for a new approval, even when you restored the earlier intent.
+A provider that refuses the release still holds the old approval, so restoring
+the earlier intent keeps using it.
 
 Lowering to `read_only` waits for local work to finish, because a read-only
 replica refuses local edits and cannot push or claim. While the hub has not

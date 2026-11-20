@@ -100,7 +100,8 @@ func prepareFederationProvider(
 	}
 	if found {
 		reservation, err := matchFederationProvider(previous, project, store.InstanceUID(), base, catalog, mapping)
-		if !errors.Is(err, ErrFederationReplicaCredentialConflict) || !intentChangeAllowed(previous, mapping) {
+		if !releaseUnconfirmed(previous, mapping) &&
+			(!errors.Is(err, ErrFederationReplicaCredentialConflict) || !intentChangeAllowed(previous, mapping)) {
 			return reservation, false, err
 		}
 		kept := mapping
@@ -147,10 +148,19 @@ func prepareFederationProvider(
 // explicit leave.
 func intentChangeAllowed(saved config.FederationManagedCredentialReservation, mapping config.FederationProjectConfig) bool {
 	p := saved.Credential.Provider
-	switchable := func(intent federationprovider.Intent) bool {
-		return intent == federationprovider.IntentReadOnly || intent == federationprovider.IntentCollaborate
-	}
-	return p != nil && p.Intent != mapping.Intent && switchable(p.Intent) && switchable(mapping.Intent)
+	return p != nil && p.Intent != mapping.Intent && intentSwitchable(p.Intent) && intentSwitchable(mapping.Intent)
+}
+
+// releaseUnconfirmed reports a saved request whose release was sent without
+// an answer. The provider may have revoked it, so it is replaced even when
+// the mapping restored the request's intent.
+func releaseUnconfirmed(saved config.FederationManagedCredentialReservation, mapping config.FederationProjectConfig) bool {
+	p := saved.Credential.Provider
+	return p != nil && p.ReleaseStarted && intentSwitchable(p.Intent) && intentSwitchable(mapping.Intent)
+}
+
+func intentSwitchable(intent federationprovider.Intent) bool {
+	return intent == federationprovider.IntentReadOnly || intent == federationprovider.IntentCollaborate
 }
 
 // An unbound request has no local replica to keep, so its intent still
@@ -199,7 +209,7 @@ func changeFederationProviderIntent(
 	if err != nil {
 		return saved, err
 	}
-	response, releaseErr := releaseForIntentChange(ctx, store, mapping, saved)
+	saved, response, releaseErr := releaseForIntentChange(ctx, store, managed, mapping, saved)
 	leavePending, finishErr := finish(ctx, 0)
 	if finishErr != nil {
 		return saved, finishErr
@@ -236,6 +246,7 @@ func changeFederationProviderIntent(
 	next.EnrollmentID = 0
 	next.ExpiresAt = time.Time{}
 	next.PreviousActor = strings.TrimSpace(binding.Actor)
+	next.ReleaseStarted = false
 	replacement := saved
 	replacement.Credential.Token = token
 	replacement.Credential.Provider = &next
@@ -245,31 +256,63 @@ func changeFederationProviderIntent(
 	return replacement, nil
 }
 
+// releaseForIntentChange returns the saved request as it now stands: marked
+// while the provider's answer is unknown, unmarked once the provider refused
+// the release and so still holds the approval.
 func releaseForIntentChange(
-	ctx context.Context, store db.Storage, mapping config.FederationProjectConfig,
-	saved config.FederationManagedCredentialReservation,
-) (federationprovider.Response, error) {
+	ctx context.Context, store db.Storage, managed config.FederationManagedCredentialStore,
+	mapping config.FederationProjectConfig, saved config.FederationManagedCredentialReservation,
+) (config.FederationManagedCredentialReservation, federationprovider.Response, error) {
 	if mapping.Intent == federationprovider.IntentReadOnly {
 		project, err := store.ProjectByName(ctx, mapping.SpokeProject)
 		if err != nil {
-			return federationprovider.Response{}, errors.Join(ErrFederationProviderStorage, err)
+			return saved, federationprovider.Response{}, errors.Join(ErrFederationProviderStorage, err)
 		}
 		if _, err := store.DisableFederationPushWhenSettled(ctx, project.ID, store.InstanceUID()); err != nil {
 			if federationReplicaWorkOpen(err) {
-				return federationprovider.Response{}, errors.Join(ErrFederationProviderIntentChangeBlocked, err)
+				return saved, federationprovider.Response{}, errors.Join(ErrFederationProviderIntentChangeBlocked, err)
 			}
 			if errors.Is(err, db.ErrExternalRootFederationConflict) {
-				return federationprovider.Response{}, errors.Join(ErrFederationReplicaBindingConflict, err)
+				return saved, federationprovider.Response{}, errors.Join(ErrFederationReplicaBindingConflict, err)
 			}
-			return federationprovider.Response{}, errors.Join(ErrFederationProviderStorage, err)
+			return saved, federationprovider.Response{}, errors.Join(ErrFederationProviderStorage, err)
 		}
 	}
-	p := saved.Credential.Provider
-	return federationprovider.Exchange(ctx, p.Command, federationprovider.Request{
+	marked, err := withReleaseStarted(ctx, managed, saved, true)
+	if err != nil {
+		return saved, federationprovider.Response{}, err
+	}
+	p := marked.Credential.Provider
+	response, err := federationprovider.Exchange(ctx, p.Command, federationprovider.Request{
 		Version: 1, Operation: "release", RequestID: p.RequestID,
-		HubURL: saved.Credential.HubURL, Project: saved.Credential.HubProjectName,
+		HubURL: marked.Credential.HubURL, Project: marked.Credential.HubProjectName,
 		SpokeInstanceUID: p.SpokeInstanceUID, LocalProjectUID: p.LocalProjectUID, Intent: p.Intent,
 	})
+	if err != nil || response.Status == federationprovider.StatusReleased {
+		return marked, response, err
+	}
+	unmarked, err := withReleaseStarted(ctx, managed, marked, false)
+	if err != nil {
+		return marked, response, err
+	}
+	return unmarked, response, nil
+}
+
+func withReleaseStarted(
+	ctx context.Context, managed config.FederationManagedCredentialStore,
+	saved config.FederationManagedCredentialReservation, started bool,
+) (config.FederationManagedCredentialReservation, error) {
+	if saved.Credential.Provider.ReleaseStarted == started {
+		return saved, nil
+	}
+	next := *saved.Credential.Provider
+	next.ReleaseStarted = started
+	replacement := saved
+	replacement.Credential.Provider = &next
+	if err := managed.ReplaceManagedFederationCredential(ctx, saved, replacement); err != nil {
+		return saved, err
+	}
+	return replacement, nil
 }
 
 func matchFederationProvider(

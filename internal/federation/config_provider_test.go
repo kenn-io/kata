@@ -102,6 +102,11 @@ func TestReconcileProviderProcess(_ *testing.T) {
 			os.Exit(1)
 		}
 	}
+	if request.Operation == "release" && os.Getenv("KATA_TEST_PROVIDER_RELEASE_DECISION") == "exit-two" {
+		// The provider may have released the request before failing, so
+		// Kata cannot tell whether the old approval still works.
+		os.Exit(2)
+	}
 	if request.Operation == "release" {
 		saved, err := config.ReadFederationCredentials()
 		if err != nil {

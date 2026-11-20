@@ -388,3 +388,46 @@ func TestReconcileProviderDowngradeRetryRechecksClaims(t *testing.T) {
 	require.NoError(t, f.reconcile(t, federationprovider.IntentReadOnly))
 	assert.Equal(t, federationprovider.IntentReadOnly, f.saved(t).Credential.Provider.Intent)
 }
+
+// A release whose reply never arrived may have revoked the old approval.
+// Restoring the earlier intent must not reuse it: Kata repeats the release
+// and asks for a new approval for the restored intent.
+func TestReconcileProviderRestoredIntentAfterUnconfirmedReleaseRequestsNewApproval(t *testing.T) {
+	f := newIntentChangeFixture(t, federationprovider.IntentCollaborate)
+	require.NoError(t, f.reconcile(t, federationprovider.IntentCollaborate))
+	before := f.saved(t)
+
+	t.Setenv("KATA_TEST_PROVIDER_RELEASE_DECISION", "exit-two")
+	require.Error(t, f.reconcile(t, federationprovider.IntentReadOnly))
+	t.Setenv("KATA_TEST_PROVIDER_RELEASE_DECISION", "released")
+	require.NoError(t, f.reconcile(t, federationprovider.IntentCollaborate))
+
+	requests := f.requests(t)
+	require.Len(t, requests, 4)
+	assert.Equal(t, "release", requests[2].Operation)
+	assert.Equal(t, before.Credential.Provider.RequestID, requests[2].RequestID)
+	assert.Equal(t, "authorize", requests[3].Operation)
+	assert.Equal(t, federationprovider.IntentCollaborate, requests[3].Intent)
+	after := f.saved(t)
+	assert.NotEqual(t, before.Credential.Provider.RequestID, after.Credential.Provider.RequestID)
+	assert.Equal(t, requests[3].RequestID, after.Credential.Provider.RequestID)
+	_, binding := f.binding(t)
+	assert.True(t, binding.PushEnabled)
+}
+
+// A provider that answers a release with a refusal still holds the old
+// approval, so restoring the earlier intent keeps using it.
+func TestReconcileProviderRestoredIntentAfterRefusedReleaseKeepsApproval(t *testing.T) {
+	f := newIntentChangeFixture(t, federationprovider.IntentCollaborate)
+	require.NoError(t, f.reconcile(t, federationprovider.IntentCollaborate))
+	before := f.saved(t)
+
+	t.Setenv("KATA_TEST_PROVIDER_RELEASE_DECISION", "denied")
+	require.Error(t, f.reconcile(t, federationprovider.IntentReadOnly))
+	require.NoError(t, f.reconcile(t, federationprovider.IntentCollaborate))
+
+	assert.Len(t, f.requests(t), 2, "restoring the intent sends no new request")
+	assert.True(t, before.Credential.Equal(f.saved(t).Credential))
+	_, binding := f.binding(t)
+	assert.True(t, binding.PushEnabled)
+}

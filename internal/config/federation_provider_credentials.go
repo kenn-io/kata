@@ -26,6 +26,11 @@ type FederationProviderCredential struct {
 	// approval for the new intent may name a new actor, which takes its
 	// place once the replica has no open work under it.
 	PreviousActor string `toml:"previous_actor,omitempty"`
+	// ReleaseStarted records that an intent change sent release for this
+	// request and has not seen the provider's answer. The provider may have
+	// revoked the approval, so the next attempt finishes the release and asks
+	// for a new approval even when the mapping's intent matches this one.
+	ReleaseStarted bool `toml:"release_started,omitempty"`
 }
 
 // Equal compares the whole retained credential by value, including optional
@@ -55,6 +60,7 @@ func (credential FederationCredential) Equal(other FederationCredential) bool {
 		left.HubProjectUID != right.HubProjectUID ||
 		left.EnrollmentID != right.EnrollmentID ||
 		left.PreviousActor != right.PreviousActor ||
+		left.ReleaseStarted != right.ReleaseStarted ||
 		!left.ExpiresAt.Equal(right.ExpiresAt)) {
 		return false
 	}
