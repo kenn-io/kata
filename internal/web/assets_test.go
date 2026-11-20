@@ -5,6 +5,7 @@ import (
 	"testing/fstest"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestValidateReleaseDistributionRejectsCompilationStub(t *testing.T) {
@@ -12,6 +13,9 @@ func TestValidateReleaseDistributionRejectsCompilationStub(t *testing.T) {
 		"index.html": &fstest.MapFile{Data: []byte("Kata UI assets are not built")},
 	}
 	assert.Error(t, validateReleaseDistribution(stub))
+	_, release, err := newHandlerWithReleaseStatus(stub)
+	require.NoError(t, err)
+	assert.False(t, release)
 }
 
 func TestValidateReleaseDistributionAcceptsProductionMarkerAndManifest(t *testing.T) {
@@ -21,6 +25,9 @@ func TestValidateReleaseDistributionAcceptsProductionMarkerAndManifest(t *testin
 		"assets/app-a1b2c3d4.js": &fstest.MapFile{Data: []byte("export const ready = true")},
 	}
 	assert.NoError(t, validateReleaseDistribution(files))
+	_, release, err := newHandlerWithReleaseStatus(files)
+	require.NoError(t, err)
+	assert.True(t, release)
 }
 
 func TestWebHandlerRejectsUnsafeManifestAssetPaths(t *testing.T) {

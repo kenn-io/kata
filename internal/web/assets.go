@@ -66,15 +66,19 @@ func validateReleaseDistribution(files fs.FS) error {
 	if err != nil {
 		return fmt.Errorf("read release web index: %w", err)
 	}
+	catalog, err := loadAssetCatalog(files)
+	if err != nil {
+		return err
+	}
+	return validateReleaseCatalog(files, index, catalog)
+}
+
+func validateReleaseCatalog(files fs.FS, index []byte, catalog assetCatalog) error {
 	if !bytes.Contains(index, []byte(productionDistributionMarker)) {
 		return errors.New("embedded web distribution is the compilation stub or lacks its production marker")
 	}
 	if _, err := fs.Stat(files, viteManifestPath); err != nil {
 		return fmt.Errorf("release Vite manifest: %w", err)
-	}
-	catalog, err := loadAssetCatalog(files)
-	if err != nil {
-		return err
 	}
 	if len(catalog.immutable) == 0 {
 		return errors.New("release Vite manifest has no embedded assets")

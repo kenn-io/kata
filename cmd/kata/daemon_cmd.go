@@ -1487,7 +1487,11 @@ func runDaemonProcess(
 		insecureReadonly, allowLocalSession, allowTrustedProxySession, dcfg.Auth.Token,
 	)
 	webCapabilities := []string{webAuthentication, updates}
-	if kataweb.ValidateEmbeddedRelease() != nil {
+	webHandler, releaseAssets, err := kataweb.NewEmbeddedHandlerWithReleaseStatus()
+	if err != nil {
+		return fmt.Errorf("build embedded web handler: %w", err)
+	}
+	if !releaseAssets {
 		webCapabilities = append(webCapabilities, "placeholder-assets")
 	}
 	webRuntime, err := daemon.NewWebRuntime(daemon.WebRuntimeOptions{
@@ -1675,10 +1679,6 @@ func runDaemonProcess(
 			return fmt.Errorf("initialize federation signing: %w", err)
 		}
 		defer func() { _ = signingVerifier.Close() }()
-	}
-	webHandler, err := kataweb.NewEmbeddedHandler()
-	if err != nil {
-		return fmt.Errorf("build embedded web handler: %w", err)
 	}
 	docbankClient := docbank.New(dcfg.Docbank)
 	var mcpHandler http.Handler
