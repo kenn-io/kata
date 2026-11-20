@@ -51,7 +51,18 @@ test('Kenn links in issue bodies and comments work in read and edit views', asyn
     }
   }
 
-  await expectLinks(page.getByRole('region', { name: 'Kata issue detail', exact: true }))
+  const detail = page.getByRole('region', { name: 'Kata issue detail', exact: true })
+  await expectLinks(detail)
+  await page.evaluate(() => {
+    document.addEventListener('click', (event) => {
+      const link = (event.target as Element).closest('a')
+      if (!link) return
+      document.body.dataset.linkClick = JSON.stringify({ href: link.href, canceled: event.defaultPrevented })
+      event.preventDefault()
+    }, { once: true })
+  })
+  await detail.getByRole('link', { name: 'note', exact: true }).click()
+  await expect(page.locator('body')).toHaveAttribute('data-link-click', '{"href":"kenn://example/note","canceled":false}')
   await page.getByRole('button', { name: 'Edit issue' }).click()
   await expectLinks(page.getByRole('region', { name: 'Kata issue editor', exact: true }))
 })
