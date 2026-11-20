@@ -303,7 +303,7 @@ func stringPointersEqual(left, right *string) bool {
 // DirectLinkAdditionPeers returns only explicit link additions eligible for
 // a supplemental direct-spoke proof. It never modifies the event payload.
 func DirectLinkAdditionPeers(event FoldEvent) (map[string]bool, error) {
-	if event.Type != "issue.created" && event.Type != "issue.links_changed" && event.Type != "issue.linked" {
+	if !directLinkAdditionEligible(event) {
 		return nil, nil
 	}
 	var peers map[string]bool
@@ -328,6 +328,24 @@ func DirectLinkAdditionPeers(event FoldEvent) (map[string]bool, error) {
 		}
 	}
 	return peers, err
+}
+
+// directLinkAdditionEligible requires a parent link's primary issue to be the
+// child. A parent-primary event needs ordinary authority for the child.
+func directLinkAdditionEligible(event FoldEvent) bool {
+	switch event.Type {
+	case "issue.created", "issue.links_changed":
+		return true
+	case "issue.linked":
+	default:
+		return false
+	}
+	payload := PayloadMap(event.Payload)
+	if kind, _ := StringValue(payload["type"]); kind != "parent" {
+		return true
+	}
+	child, _ := StringValue(payload["from_uid"])
+	return child != "" && child == event.IssueUID
 }
 
 // DirectParentRemovals identifies the old endpoint of each parent assignment.
