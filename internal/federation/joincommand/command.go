@@ -13,7 +13,8 @@ import (
 
 // Build returns a shell command for joining the supplied grant, or an empty
 // string when the instructions lack the authority or target needed for a join.
-func Build(in api.FederationJoinInstructions) string {
+// signingTemplate adds placeholders for a required signing source.
+func Build(in api.FederationJoinInstructions, signingTemplate bool) string {
 	caps, err := db.CanonicalFederationCapabilities(in.Capabilities)
 	if err != nil || !slices.Contains(strings.Split(caps, ","), "pull") ||
 		in.HubURL == "" || in.ProjectName == "" || in.HubProjectID <= 0 ||
@@ -37,6 +38,9 @@ func Build(in api.FederationJoinInstructions) string {
 	}
 	if in.AdoptExisting {
 		args = append(args, "--adopt-existing")
+	}
+	if signingTemplate {
+		args = append(args, "--signing-key-id", "<signing-key-id>", "--signing-key-file", "<absolute-path-to-spoke-key>")
 	}
 	for i, arg := range args {
 		args[i] = ShellQuote(arg)

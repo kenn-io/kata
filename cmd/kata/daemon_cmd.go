@@ -1565,8 +1565,9 @@ func runDaemonProcess(
 		})
 	}
 	syncOutcome := daemon.NewSyncOutcomeObserver(telemetryReporter)
+	federationRetries := federation.NewSyncRetries()
 	federationWake := startFederationRunner(
-		ctx, workers, waitableDrainAdmission, store, publisher, daemonLog, syncOutcome, embeddingWake,
+		ctx, workers, waitableDrainAdmission, store, publisher, daemonLog, federationRetries, syncOutcome, embeddingWake,
 	)
 	startDueNotificationSweeper(
 		ctx, workers, waitableDrainAdmission, store, publisher, dcfg.Timezone, daemonLog,
@@ -1743,6 +1744,7 @@ func runDaemonProcess(
 		EmbeddingWake:          embeddingWake,
 		FederationCatalog:      append([]config.CatalogDaemonConfig(nil), dcfg.Daemons...),
 		WebDaemons:             append([]config.CatalogDaemonConfig(nil), dcfg.Daemons...),
+		WebSyncHubs:            dcfg.WebSyncHubs(),
 		ActiveWebDaemon:        dcfg.ActiveDaemon,
 		GitHubSyncFetcher:      gitHubSyncFetcher,
 		GitHubSyncConfig:       dcfg.GitHubSync,
@@ -1793,6 +1795,7 @@ func runDaemonProcess(
 		VectorIndex:            vectorIndex,
 		ReconcilerHealth:       reconcilerHealth,
 		FederationConfigHealth: federationConfigHealth,
+		FederationSyncRetry:    federationRetries.FederationSyncRetry,
 		IdleAdmission:          idleAdmission,
 		IdleShutdownHealth:     idleHealth,
 	})
@@ -2109,6 +2112,7 @@ func startFederationRunner(
 	store db.Storage,
 	publisher daemon.EventPublisher,
 	daemonLog *log.Logger,
+	retries *federation.SyncRetries,
 	onSpokeResult func(string, int64, error),
 	onSyncComplete ...func(),
 ) func() {
@@ -2125,6 +2129,7 @@ func startFederationRunner(
 		Interval:       federationRunnerInterval(),
 		Wake:           wake,
 		DrainAdmission: drainAdmission,
+		Retries:        retries,
 		OnError: func(err error) {
 			daemonLog.Printf("federation: %v", err)
 		},

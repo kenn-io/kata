@@ -1,7 +1,7 @@
 ---
 title: Web UI
 description: Browse and manage Kata projects and issues in the daemon-served browser application.
-last_edited: 2026-11-06
+last_edited: 2026-11-19
 ---
 
 # Web UI
@@ -142,8 +142,10 @@ When the editor pane is narrower than 640 pixels, the title appears above the
 actions so it remains readable.
 
 Mutations use the same daemon validation, actor attribution, revision checks,
-events, and hooks as the CLI. Controls are disabled while authority is stale,
-read-only, or another mutation is pending.
+events, and hooks as the CLI. Controls are disabled while the latest data is
+still loading, while you lack write access, or while another change is saving.
+A change that Kata cannot make shows
+`Can't make changes. Refresh or check access.`
 
 ![Kata Web UI issue detail with Markdown, properties, recurrence, links, checklist, and comment](/docs/assets/screenshots/web-ui/issue-detail.png)
 
@@ -169,7 +171,10 @@ one project from your account, or your token is limited to an issue subtree,
 the switcher lists only the local daemon. Configured target tokens do not carry
 your project limits, so the gateway refuses to use them for you. If you can
 see every project, or you are signed in as the daemon owner, the switcher
-lists every configured daemon. See
+lists configured daemons. A server used only for project sync, with no token
+saved for browsing, stays out of the switcher while browser access is unavailable
+and returns when access recovers. An explicitly selected server stays listed with
+its connection status. Projects keep syncing. See
 [Project access](../reference/http-api.md#project-access) for the exact rules.
 
 ![Kata Web UI switching between two synthetic configured daemons](/docs/assets/screenshots/web-ui/daemon-switcher.png)

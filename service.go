@@ -259,6 +259,7 @@ type Service struct {
 	broadcaster            *daemon.EventBroadcaster
 	publish                daemon.EventPublisher
 	federationWake         chan struct{}
+	federationRetries      *federation.SyncRetries
 	gitHubSyncWake         chan struct{}
 	gitHubSyncFetcher      githubsync.Fetcher
 	gitHubSyncProgress     *githubsync.ProgressTracker
@@ -555,6 +556,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 			controller: cfg.FederationAccess,
 		}
 	}
+	federationRetries := federation.NewSyncRetries()
 	serverConfig := daemon.ServerConfig{
 		DB:       store,
 		Embedder: embedder, VectorIndex: index, EmbeddingUnavailableReason: unavailable,
@@ -571,6 +573,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		FederationCredentials:     federationCredentials,
 		FederationPushPending:     federation.DirectSpokePushPending(store),
 		FederationHubClient:       federation.CredentialHTTPClient,
+		FederationSyncRetry:       federationRetries.FederationSyncRetry,
 		DisableFederationRebind:   true,
 		GitHubSyncFetcher:         gitHubSyncFetcher,
 		GitHubSyncProgress:        gitHubSyncProgress,
@@ -608,6 +611,15 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		EmbeddingProfile:          daemon.EmbeddingProfile(cfg.Profile),
 		Logger:                    logger,
 	}
+	if controller, ok := cfg.FederationAccess.(FederationReferenceAccessController); ok {
+		serverConfig.AuthorizeFederationReference = func(ctx context.Context, tx db.Transaction, route, peer daemon.HostFederationAccessRequest) error {
+			err := controller.AuthorizeFederationReference(ctx, tx, publicFederationRequest(route), publicFederationRequest(peer))
+			if errors.Is(err, ErrAccessDenied) {
+				return errors.Join(daemon.ErrHostAccessDenied, err)
+			}
+			return err
+		}
+	}
 	if reconciler != nil {
 		serverConfig.ReconcilerHealth = reconciler.Health
 		serverConfig.EmbeddingWake = reconciler.RetryNow
@@ -626,6 +638,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		broadcaster:            broadcaster,
 		publish:                publisher,
 		federationWake:         federationWake,
+		federationRetries:      federationRetries,
 		gitHubSyncWake:         gitHubSyncWake,
 		gitHubSyncFetcher:      gitHubSyncFetcher,
 		gitHubSyncProgress:     gitHubSyncProgress,
@@ -815,14 +828,8 @@ func (a hostFederationAccessControllerAdapter) AuthorizeFederation(
 	if a.controller == nil {
 		return daemon.HostFederationAccessDecision{}, nil
 	}
-	decision, err := a.controller.AuthorizeFederation(ctx, FederationAccessRequest{
-		Enrollment: publicFederationEnrollment(request.Enrollment, request.Project.UID),
-		Project:    publicProject(request.Project),
-		Capability: FederationCapability(request.Capability),
-		Operation: FederationOperation{
-			ID: request.Operation.ID, Mutation: request.Operation.Mutation,
-		},
-	})
+	decision, err := a.controller.AuthorizeFederation(ctx, publicFederationRequest(request))
+
 	if errors.Is(err, ErrAccessDenied) {
 		return daemon.HostFederationAccessDecision{}, daemon.ErrHostAccessDenied
 	}
@@ -843,6 +850,17 @@ func (a hostFederationAccessControllerAdapter) AuthorizeFederation(
 		}
 	}
 	return daemon.HostFederationAccessDecision{TransactionFence: transactionFence}, nil
+}
+
+func publicFederationRequest(request daemon.HostFederationAccessRequest) FederationAccessRequest {
+	return FederationAccessRequest{
+		Enrollment: publicFederationEnrollment(request.Enrollment, request.Project.UID),
+		Project:    publicProject(request.Project),
+		Capability: FederationCapability(request.Capability),
+		Operation: FederationOperation{
+			ID: request.Operation.ID, Mutation: request.Operation.Mutation,
+		},
+	}
 }
 
 func (a hostAccessControllerAdapter) Authorize(
@@ -1039,6 +1057,7 @@ func (s *Service) serviceWorkers() []namedWorker {
 		Credentials: s.federationCredentials,
 		Interval:    30 * time.Second,
 		Wake:        s.federationWake,
+		Retries:     s.federationRetries,
 		OnError: func(err error) {
 			s.logger.Error("kata federation worker", "err", err)
 		},

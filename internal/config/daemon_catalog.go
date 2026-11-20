@@ -61,6 +61,18 @@ func (c *DaemonConfig) CatalogDaemon(name string) (CatalogDaemonConfig, bool) {
 	return CatalogDaemonConfig{}, false
 }
 
+// WebSyncHubs names mapped hubs without browsing credentials.
+func (c *DaemonConfig) WebSyncHubs() []string {
+	var hubs []string
+	for _, project := range c.Federation.Projects {
+		daemon, ok := c.CatalogDaemon(project.Hub)
+		if ok && !daemon.HasClientToken() {
+			hubs = append(hubs, daemon.Name)
+		}
+	}
+	return hubs
+}
+
 // ActiveCatalogDaemon returns the entry active_daemon names.
 func (c *DaemonConfig) ActiveCatalogDaemon() (CatalogDaemonConfig, bool) {
 	if c.ActiveDaemon == "" {

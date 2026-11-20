@@ -12,6 +12,7 @@
     activeStatusTone?: 'error' | undefined
     disabled?: boolean | undefined
     onSelect: (id: string) => void
+    onOpen?: () => void
   }
 
   let {
@@ -21,6 +22,7 @@
     activeStatusTone = undefined,
     disabled = false,
     onSelect,
+    onOpen = () => {},
   }: Props = $props()
 
   let open = $state(false)
@@ -59,6 +61,7 @@
     aria-expanded={open}
     onclick={() => {
       open = !open
+      if (open) onOpen()
     }}
   >
     <ServerIcon class="chip-icon" size={13} strokeWidth={1.9} aria-hidden="true" />

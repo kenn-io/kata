@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -312,6 +313,94 @@ func TestCloseTranscript_MalformedConfigurationNamesFile(t *testing.T) {
 	assert.Nil(t, ref)
 	assert.Contains(t, stderr.String(), filepath.Join(home, "config.toml"))
 	assert.Contains(t, stderr.String(), "skipping attachment")
+}
+
+// clearTranscriptEnv blanks every variable that names a session or sets the mode.
+func clearTranscriptEnv(t *testing.T) {
+	t.Helper()
+	for _, name := range []string{
+		"KATA_CLOSE_TRANSCRIPT_ENABLED", "CODEX_THREAD_ID", "CODEX_SESSION_ID",
+		"CLAUDE_CODE_SESSION_ID", "KATA_TRANSCRIPT_AGENT", "KATA_TRANSCRIPT_SESSION_ID",
+	} {
+		t.Setenv(name, "")
+	}
+}
+
+// auto records a named session and stays quiet otherwise.
+func TestCloseTranscript_AutoModes(t *testing.T) {
+	for _, tc := range []struct {
+		name, enabled, session, agent, warning string
+		attach                                 bool
+	}{
+		{name: "auto records a valid session", enabled: "auto", session: transcriptSessionOne, attach: true},
+		{name: "auto is quiet without a session", enabled: "auto"},
+		{name: "auto warns when an agent is named without a session", enabled: "auto", agent: "codex", warning: "current session unavailable or invalid"},
+		{name: "auto warns when the named session is invalid", enabled: "auto", session: "/private/session/chat.jsonl", warning: "CODEX_THREAD_ID"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("KATA_HOME", t.TempDir())
+			clearTranscriptEnv(t)
+			t.Setenv("KATA_CLOSE_TRANSCRIPT_ENABLED", tc.enabled)
+			t.Setenv("CODEX_THREAD_ID", tc.session)
+			t.Setenv("KATA_TRANSCRIPT_AGENT", tc.agent)
+			cmd := &cobra.Command{}
+			var stderr bytes.Buffer
+			cmd.SetErr(&stderr)
+			cfg, err := config.ReadCloseTranscriptConfig()
+			require.NoError(t, err)
+			ref := closeTranscript(cmd, cfg)
+			if tc.attach {
+				require.NotNil(t, ref)
+				assert.Equal(t, "codex", ref.Agent)
+				assert.Equal(t, tc.session, ref.SessionID)
+			} else {
+				assert.Nil(t, ref)
+			}
+			if tc.warning == "" {
+				assert.Empty(t, stderr.String())
+			} else {
+				assert.Contains(t, stderr.String(), tc.warning)
+				assert.NotContains(t, stderr.String(), "/private")
+			}
+		})
+	}
+}
+
+// auto in a project entry behaves like auto globally; a project's true still
+// asks for the warning, and a project's false never records. What a project
+// records is covered through the close path in close_transcript_project_test.go.
+func TestCloseTranscript_AutoPerProject(t *testing.T) {
+	for _, tc := range []struct {
+		name, config, session string
+		warns                 bool
+	}{
+		{name: "global auto, no session", config: "[close.transcript]\nenabled=\"auto\"\n[close.transcript.project.team]\nenabled=\"auto\"\n"},
+		{name: "project auto under global false, no session", config: "[close.transcript.project.team]\nenabled=\"auto\"\n"},
+		{name: "project true, no session", config: "[close.transcript]\nenabled=\"auto\"\n[close.transcript.project.team]\nenabled=true\n", warns: true},
+		{name: "project auto, session", config: "[close.transcript.project.team]\nenabled=\"auto\"\n", session: transcriptSessionOne},
+		{name: "project false under global auto, session", config: "[close.transcript]\nenabled=\"auto\"\n[close.transcript.project.team]\nenabled=false\n", session: transcriptSessionOne},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("KATA_HOME", home)
+			clearTranscriptEnv(t)
+			t.Setenv("CODEX_THREAD_ID", tc.session)
+			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(tc.config), 0600))
+			cfg, err := config.ReadCloseTranscriptConfig()
+			require.NoError(t, err)
+			cmd := &cobra.Command{}
+			var stderr bytes.Buffer
+			cmd.SetErr(&stderr)
+			ref := closeTranscript(cmd, cfg)
+			if tc.session == "" {
+				assert.Nil(t, ref)
+				assert.Equal(t, tc.warns, stderr.Len() > 0, stderr.String())
+				return
+			}
+			require.NotNil(t, ref)
+			assert.Empty(t, stderr.String())
+		})
+	}
 }
 
 func TestCloseTranscript_NoProjectReadWithoutCandidate(t *testing.T) {

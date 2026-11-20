@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"go.kenn.io/kata/internal/federationsigning"
 	"go.kenn.io/kata/internal/httpurl"
@@ -27,6 +28,8 @@ type HubStatusError struct {
 	Path                   string
 	StatusCode             int
 	Body                   string
+	// RetryAfter is the hub's Retry-After hint, or zero when it sent none.
+	RetryAfter time.Duration
 }
 
 // Is classifies the canonical refusal even through joined sync errors.
@@ -130,7 +133,15 @@ func (c *Client) IngestProjectEventsWithOptions(
 	events []api.FederationIngestEventEnvelope,
 	opts IngestProjectEventsOptions,
 ) (api.FederationIngestEventsBody, error) {
-	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{c.client}))
+	httpClient := c.client
+	if len(opts.MoveSourceTokens) > 0 {
+		// Supplemental credentials belong to this mount. A redirect can name a
+		// different mount on the same origin and can replay the request body.
+		pinned := *httpClient
+		pinned.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		httpClient = &pinned
+	}
+	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{httpClient}))
 	if err != nil {
 		return api.FederationIngestEventsBody{}, err
 	}
@@ -312,7 +323,10 @@ func (d replicationDoer) Do(ctx context.Context, req *http.Request) (*http.Respo
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer func() { _ = resp.Body.Close() }()
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		failure := &HubStatusError{Path: req.URL.Path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
+		failure := &HubStatusError{
+			Path: req.URL.Path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body)),
+			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+		}
 		if resp.StatusCode == http.StatusConflict && federationHubErrorCode(string(body)) == "relay_cross_project_links" {
 			canonical, _ := json.Marshal(api.NewRelayCrossProjectLinksError("hub").Envelope())
 			failure.Body = string(canonical)

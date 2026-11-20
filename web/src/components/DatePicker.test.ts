@@ -25,9 +25,9 @@ describe('DatePicker', () => {
     await fireEvent.click(screen.getByRole('button', { name: /Due:/ }))
 
     expect(container.querySelector('.kit-calendar')).not.toBeNull()
-    expect(screen.getByRole('button', { name: /Jun 5, 2026/ }).getAttribute('aria-pressed')).toBe(
-      'true',
-    )
+    expect(
+      screen.getByRole('gridcell', { name: /June 5, 2026/ }).getAttribute('aria-selected'),
+    ).toBe('true')
   })
 
   test('opens on the current month when the stored date is malformed', async () => {
@@ -57,7 +57,7 @@ describe('DatePicker', () => {
 
     const trigger = screen.getByRole('button', { name: /Due:/ })
     await fireEvent.click(trigger)
-    await fireEvent.click(screen.getByRole('button', { name: /Jun 8, 2026/ }))
+    await fireEvent.click(screen.getByRole('gridcell', { name: /June 8, 2026/ }))
 
     expect(onchange).toHaveBeenCalledWith('2026-06-08')
     expect(screen.queryByRole('dialog', { name: 'Due' })).toBeNull()

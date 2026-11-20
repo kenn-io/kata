@@ -48,6 +48,7 @@ type StateListener<TIntent, TSnapshot extends SnapshotAuthority> = (
 export class SnapshotController<TIntent, TSnapshot extends SnapshotAuthority> {
   readonly #request: SnapshotRequest<TIntent, TSnapshot>
   readonly #key: (intent: TIntent) => string
+  readonly #sameList: (accepted: TIntent, requested: TIntent) => boolean
   readonly #listeners = new Set<StateListener<TIntent, TSnapshot>>()
   #abort: AbortController | undefined
   #acceptedKey = ''
@@ -65,9 +66,14 @@ export class SnapshotController<TIntent, TSnapshot extends SnapshotAuthority> {
     authenticationRequired: false,
   }
 
-  constructor(request: SnapshotRequest<TIntent, TSnapshot>, key: (intent: TIntent) => string) {
+  constructor(
+    request: SnapshotRequest<TIntent, TSnapshot>,
+    key: (intent: TIntent) => string,
+    sameList: (accepted: TIntent, requested: TIntent) => boolean = () => false,
+  ) {
     this.#request = request
     this.#key = key
+    this.#sameList = sameList
   }
 
   subscribe(listener: StateListener<TIntent, TSnapshot>): () => void {
@@ -85,17 +91,19 @@ export class SnapshotController<TIntent, TSnapshot extends SnapshotAuthority> {
     // Revalidating the shown intent keeps it usable: a 304 or a newer copy of
     // the same intent replaces it, and a failure still withdraws authority. A
     // full reload or another intent hides authority until its snapshot arrives.
-    const revalidation =
-      sameAuthority &&
-      options.full !== true &&
-      this.state.snapshot !== undefined &&
-      !this.state.stale
+    const usable = options.full !== true && this.state.snapshot !== undefined && !this.state.stale
+    const revalidation = sameAuthority && usable
+    // Selecting another task in the shown list keeps that list's write
+    // authority: the list and its projects stay as they are while the selected
+    // task's detail loads.
+    const selection =
+      usable && this.state.intent !== undefined && this.#sameList(this.state.intent, intent)
     this.#setState({
       ...this.state,
       generation,
       loading: !revalidation,
       error: undefined,
-      canMutate: revalidation && this.state.canMutate,
+      canMutate: (revalidation || selection) && this.state.canMutate,
       authenticationRequired: false,
     })
 
@@ -307,6 +315,19 @@ export function collectionIntentKey(intent: UISnapshotIntent): string {
     includeGraph: undefined,
     includeHistory: undefined,
   })
+}
+
+// Reports whether the requested intent shows the accepted list with only its
+// selected task changed. A graph loads more than the list, so it never counts.
+export function selectsInSameList(
+  accepted: UISnapshotIntent,
+  requested: UISnapshotIntent,
+): boolean {
+  return (
+    !accepted.includeGraph &&
+    !requested.includeGraph &&
+    collectionIntentKey(accepted) === collectionIntentKey(requested)
+  )
 }
 
 type ReadUISnapshot = typeof readUISnapshot

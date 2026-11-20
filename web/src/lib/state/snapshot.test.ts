@@ -4,11 +4,14 @@ import { parseRoute } from '../router'
 import {
   createUISnapshotRequest,
   projectUISnapshot,
+  selectsInSameList,
   SnapshotController,
   snapshotIntentForRoute,
   snapshotRequestIntent,
+  uiSnapshotIntentKey,
   type SnapshotRequest,
   type UISnapshot,
+  type UISnapshotIntent,
 } from './snapshot'
 
 interface TestIntent {
@@ -165,6 +168,37 @@ describe('SnapshotController', () => {
     void controller.load({ key: 'same-route' }, { full: true })
     expect(controller.state).toMatchObject({ loading: true, canMutate: false })
     void controller.load({ key: 'other-route' })
+    expect(controller.state).toMatchObject({ loading: true, canMutate: false })
+  })
+
+  it('keeps write authority while a selection in the shown list loads', async () => {
+    const pending: Array<ReturnType<typeof deferredSnapshot>> = []
+    const request: SnapshotRequest<UISnapshotIntent, TestSnapshot> = () => {
+      const deferred = deferredSnapshot()
+      pending.push(deferred)
+      return deferred.promise
+    }
+    const controller = new SnapshotController(request, uiSnapshotIntentKey, selectsInSameList)
+    const list = (selectedIssueUID?: string, includeGraph = false): UISnapshotIntent => ({
+      view: 'all-open',
+      statuses: [],
+      owners: [],
+      labels: [],
+      relationships: [],
+      ...(selectedIssueUID === undefined ? {} : { selectedIssueUID }),
+      includeGraph,
+      includeHistory: selectedIssueUID !== undefined,
+    })
+    const first = controller.load(list())
+    pending[0]?.resolve({ status: 200, etag: '"first"', snapshot: snapshot('first', 3) })
+    await first
+
+    void controller.load(list('01J00000000000000000000001'))
+    expect(controller.state).toMatchObject({ loading: true, canMutate: true })
+
+    void controller.load(list('01J00000000000000000000001', true))
+    expect(controller.state).toMatchObject({ loading: true, canMutate: false })
+    void controller.load({ ...list('01J00000000000000000000001'), view: 'closed' })
     expect(controller.state).toMatchObject({ loading: true, canMutate: false })
   })
 

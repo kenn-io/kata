@@ -183,6 +183,27 @@ func TestMergeSkipsLinkAcrossRelayedProjectPostgres(t *testing.T) {
 	checkMergeSkipsLinkAcrossRelayedProject(t, openPostgresImportTarget(t))
 }
 
+func checkMergePreservesLinkToUnconnectedProject(t *testing.T, target db.Storage) {
+	ctx := t.Context()
+	source := newCrossProjectLinkSource(t)
+	require.NoError(t, jsonl.ImportWithOptions(ctx, bytes.NewReader(source.firstExport), target, jsonl.ImportOptions{MergeProject: true}))
+	first, err := target.ProjectByName(ctx, "first-project")
+	require.NoError(t, err)
+	_, err = target.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: first.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: first.ID, HubProjectUID: first.UID, Actor: "member", Enabled: true, PushEnabled: true})
+	require.NoError(t, err)
+	err = jsonl.ImportWithOptions(ctx, bytes.NewReader(source.secondExport), target, jsonl.ImportOptions{MergeProject: true})
+	require.NoError(t, err)
+	var endpoints []string
+	for _, edge := range source.edges {
+		endpoints = append(endpoints, edge[0])
+	}
+	require.ElementsMatch(t, undirectedRelatedEdges(source.edges), undirectedRelatedEdges(crossProjectLinkEdges(t, target, endpoints...)))
+}
+
+func TestMergePreservesLinkToUnconnectedProjectPostgres(t *testing.T) {
+	checkMergePreservesLinkToUnconnectedProject(t, openPostgresImportTarget(t))
+}
+
 // Two snapshots taken at different times can each be valid and still disagree.
 // The first project was exported while A1 was a child of A2. That link was
 // then removed, and A2 became a child of B, and B a child of A1. Merging both

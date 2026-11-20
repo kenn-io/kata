@@ -85,6 +85,7 @@
     collectionIntentKey,
     createUISnapshotRequest,
     projectUISnapshot,
+    selectsInSameList,
     SnapshotController,
     snapshotIntentForRoute,
     snapshotRequestIntent,
@@ -162,8 +163,10 @@
   let liveUpdatesReconnecting = $state(false)
   let daemonInfos = $state<WebDaemonInfo[]>([])
   let activeDaemonID = $state<string | undefined>()
+  let explicitDaemonID = launchDaemonID
   let daemonRosterLoaded = false
   let daemonRosterAbort: AbortController | undefined
+  let daemonRefreshAbort: AbortController | undefined
   let authenticationRecoveryPending = false
   let authenticationRecoveryCompletion: Promise<boolean> | undefined
   let daemonSwitching = $state(false)
@@ -251,7 +254,11 @@
   $effect(() => {
     reportScreenViewed()
   })
-  const snapshots = new SnapshotController(createUISnapshotRequest(), uiSnapshotIntentKey)
+  const snapshots = new SnapshotController(
+    createUISnapshotRequest(),
+    uiSnapshotIntentKey,
+    selectsInSameList,
+  )
   const mutations = new MutationController({
     authority: () => ({
       canMutate: authority?.canMutate ?? false,
@@ -338,6 +345,17 @@
     setThemeMode(preferences.theme)
   })
 
+  $effect(() => {
+    if (
+      versionMismatch ||
+      mode === 'loading' ||
+      route.kind === 'route-error' ||
+      !authority?.snapshot
+    ) {
+      document.title = 'Kata'
+    }
+  })
+
   onMount(() => {
     const visibility = () => {
       scheduler.visibilityChanged(!document.hidden)
@@ -399,6 +417,7 @@
       invalidations.stop()
       snapshots.abort()
       daemonRosterAbort?.abort()
+      daemonRefreshAbort?.abort()
       referenceGeneration += 1
       referenceAbort?.abort()
       fenceCredentialAudit()
@@ -420,6 +439,7 @@
 
   function invalidateDaemonRoster(): void {
     daemonRosterAbort?.abort()
+    daemonRefreshAbort?.abort()
     if (!directDaemonTarget) daemonRosterLoaded = false
   }
 
@@ -1093,6 +1113,10 @@
     return accepted
   }
 
+  function readDaemonRoster(signal: AbortSignal): Promise<WebDaemonInfo[]> {
+    return fetchWebDaemons(browserFetch, signal, explicitDaemonID)
+  }
+
   async function loadDaemonRoster(): Promise<boolean> {
     if (daemonRosterLoaded) return directDaemonTarget || activeDaemonID !== undefined
     if (directDaemonTarget) {
@@ -1105,7 +1129,7 @@
     daemonRosterAbort?.abort()
     const abort = (daemonRosterAbort = new AbortController())
     try {
-      const loadedDaemons = await fetchWebDaemons(browserFetch, abort.signal)
+      const loadedDaemons = await readDaemonRoster(abort.signal)
       if (abort.signal.aborted || destroyed) return false
       const nextDaemonID =
         loadedDaemons.find(
@@ -1166,10 +1190,26 @@
     return true
   }
 
+  async function refreshDaemonRoster(): Promise<void> {
+    if (directDaemonTarget) return
+    daemonRefreshAbort?.abort()
+    const abort = (daemonRefreshAbort = new AbortController())
+    try {
+      const loaded = await readDaemonRoster(abort.signal)
+      if (abort.signal.aborted || destroyed) return
+      daemonInfos = loaded
+    } catch {
+      // Keep the current roster when refresh fails.
+    } finally {
+      if (daemonRefreshAbort === abort) daemonRefreshAbort = undefined
+    }
+  }
+
   async function switchDaemon(id: string): Promise<void> {
     if (daemonSwitching || authenticationRecoveryPending || id === activeDaemonID) return
     if (daemonInfos.find((daemon) => daemon.id === id)?.health === 'upgrade_required') return
     const sourceDaemon = activeDaemonID
+    const sourceExplicitDaemon = explicitDaemonID
     const sourceRoute = route.kind === 'route-error' ? acceptedRoute : route
     if (sourceDaemon && sourceRoute) saveDaemonRoute(sourceDaemon, serializeRoute(sourceRoute))
     const restoredPath = loadDaemonRoute(id) ?? `${routePath}?view=all-open`
@@ -1187,6 +1227,7 @@
     referenceAbort?.abort()
     references = undefined
     activeDaemonID = id
+    explicitDaemonID = id
     route = restored
     acceptedRoute = undefined
     history.replaceState(null, '', serializeRoute(restored))
@@ -1212,6 +1253,7 @@
     daemonError = `Could not connect to ${id}`
     if (sourceDaemon && sourceRoute) {
       activeDaemonID = sourceDaemon
+      explicitDaemonID = sourceExplicitDaemon
       route = sourceRoute
       acceptedRoute = undefined
       history.replaceState(null, '', serializeRoute(sourceRoute))
@@ -1335,6 +1377,7 @@
             activeStatusTone="error"
             disabled={daemonSwitching}
             onSelect={(id) => void switchDaemon(id)}
+            onOpen={() => void refreshDaemonRoster()}
           />
         {/if}
       </section>
@@ -1350,6 +1393,7 @@
             activeStatusTone={daemonError ? 'error' : undefined}
             disabled={daemonSwitching}
             onSelect={(id) => void switchDaemon(id)}
+            onOpen={() => void refreshDaemonRoster()}
           />
         {/if}
       </section>
@@ -1372,6 +1416,7 @@
         activeStatusTone={daemonError ? 'error' : undefined}
         disabled={daemonSwitching}
         onSelect={(id) => void switchDaemon(id)}
+        onOpen={() => void refreshDaemonRoster()}
       />
     {/if}
     {#if authority?.snapshot && (mode === 'ready' || mode === 'launch' || mode === 'login')}
@@ -1404,6 +1449,7 @@
         canAdministerDaemon={canAdministerDaemon()}
         onBackFromCredentials={returnFromCredentials}
         onSelectDaemon={(id) => void switchDaemon(id)}
+        onOpenDaemon={() => void refreshDaemonRoster()}
         onPreferencesChange={updatePreferences}
         ownerOptions={(references?.owners ?? []).map((owner) => ({ name: owner, label: owner }))}
         onNavigate={navigate}

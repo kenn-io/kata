@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte'
   import CommentRelations from './CommentRelations.svelte'
-  import { Button, Markdown } from '@kenn-io/kit-ui'
+  import { Avatar, Button, Markdown } from '@kenn-io/kit-ui'
   import {
     formatRelativeTime as timeAgo,
     formatTimestamp as localDateTimeLabel,
@@ -91,7 +91,7 @@
             {#if comment.handle}<span class="handle">{comment.handle}</span>{/if}
             {#if comment.editedAt}<span title={localDateTimeLabel(comment.editedAt)}>(edited)</span
               >{/if}
-            <span class="avatar" aria-hidden="true">{comment.author.slice(0, 1)}</span>
+            <Avatar name={comment.author} initials={comment.author.slice(0, 1).toUpperCase()} tone="neutral" decorative size={20} />
             <strong
               >{comment.teammate
                 ? `${comment.author} / ${comment.teammate}`
@@ -188,20 +188,6 @@
     gap: var(--space-4, 8px);
     margin-bottom: var(--space-3, 6px);
     font-size: var(--font-size-sm, 0.75rem);
-  }
-
-  .avatar {
-    display: inline-grid;
-    flex: 0 0 auto;
-    place-items: center;
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    background: var(--bg-inset, #ecedf2);
-    color: var(--text-secondary, #555b6e);
-    font-size: var(--font-size-2xs, 0.625rem);
-    font-weight: var(--font-weight-semibold, 600);
-    text-transform: uppercase;
   }
 
   strong {

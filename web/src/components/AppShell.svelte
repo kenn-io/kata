@@ -91,6 +91,7 @@
     canAdministerDaemon?: boolean | undefined
     onPreferencesChange?: ((preferences: Preferences) => void) | undefined
     onSelectDaemon?: ((id: string) => void) | undefined
+    onOpenDaemon?: (() => void) | undefined
     onAccessMutation?:
       | ((
           draft: unknown,
@@ -164,6 +165,7 @@
     canAdministerDaemon = false,
     onPreferencesChange = () => {},
     onSelectDaemon = () => {},
+    onOpenDaemon = () => {},
     onAccessMutation = undefined,
     onRefreshCredentials = () => {},
     onBackFromCredentials = () => {},
@@ -624,6 +626,10 @@
 
   function scopeLabel(): string {
     if (selectedProject) return selectedProject.name
+    return viewLabel()
+  }
+
+  function viewLabel(): string {
     return (
       [
         { name: 'inbox', label: 'Inbox' },
@@ -635,7 +641,25 @@
       ].find((view) => view.name === viewName)?.label ?? 'Kata'
     )
   }
+
+  function tabTitle(): string {
+    if (route.view === 'settings') return 'Settings'
+    if (route.view === 'credentials') return 'Credentials'
+    if (route.issueUID) {
+      if (projection.selected_state === 'archived') return `Archived issue ${route.issueUID}`
+      if (projection.selected_state === 'missing') return `Issue unavailable ${route.issueUID}`
+      const issue = projection.selected_detail?.issue
+      if (issue?.uid === route.issueUID) return `${issue.title} (${issue.qualified_id})`
+      return 'Issue'
+    }
+    if (selectedProject && viewName !== 'all') return `${viewLabel()} · ${selectedProject.name}`
+    return scopeLabel()
+  }
 </script>
+
+<svelte:head>
+  <title>{tabTitle()} · Kata</title>
+</svelte:head>
 
 {#snippet newTaskButton()}
   <!-- aria-disabled keeps the blocked button focusable so keyboard users reach its reason. -->
@@ -724,6 +748,7 @@
           activeStatusTone={daemonError ? 'error' : undefined}
           disabled={daemonSwitching || mutationPending}
           onSelect={onSelectDaemon}
+          onOpen={onOpenDaemon}
         />
       {:else if daemonError || reconnecting}
         <span

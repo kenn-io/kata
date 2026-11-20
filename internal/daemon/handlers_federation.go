@@ -234,6 +234,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := addFederationRelayCapacityStatus(ctx, cfg, &body); err != nil {
 			return nil, err
 		}
+		addFederationSyncRetryStatus(cfg, &body)
 		return &api.FederationStatusResponse{Body: body}, nil
 	})
 
@@ -370,7 +371,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "POST",
 		Path:        "/api/v1/federation/enrollments",
 		Summary:     "Create a federation enrollment",
-		Description: "Creates a hub-side transport grant. Database account tokens must include relay configuration so the grant remains bound to the account credential; legacy grants require daemon-owner authorization. In identity mode, bootstrap credentials require actor to name an existing hub account with an unscoped API token, including expired or revoked tokens. The actor must be able to see a project-scoped grant's project. Direct grants remain valid after account tokens expire or are revoked. When the request includes a caller-supplied token, an exact retry returns the same active enrollment; reusing that token for different attributes or after enrollment revocation returns 409.",
+		Description: "Creates a hub-side transport grant. When signing is required, the join command uses the configured external URL and ignores hub_url. Database account tokens must include relay configuration so the grant remains bound to the account credential; legacy grants require daemon-owner authorization. In identity mode, bootstrap credentials require actor to name an existing hub account with an unscoped API token, including expired or revoked tokens. The actor must be able to see a project-scoped grant's project. Direct grants remain valid after account tokens expire or are revoked. When the request includes a caller-supplied token, an exact retry returns the same active enrollment; reusing that token for different attributes or after enrollment revocation returns 409.",
 	}, func(ctx context.Context, in *api.CreateFederationEnrollmentRequest) (*api.CreateFederationEnrollmentResponse, error) {
 		if in.Body.Relay != nil {
 			return createRelayEnrollment(ctx, cfg, in)
@@ -412,7 +413,11 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		hubURL := in.Body.HubURL
 		allowInsecure := in.Body.AllowInsecure
-		if hubURL != "" {
+		signingTemplate := cfg.FederationSigningRequired && cfg.FederationSigning != nil
+		if signingTemplate {
+			hubURL = cfg.FederationSigning.Base()
+			allowInsecure = false
+		} else if hubURL != "" {
 			baseURL, err := httpurl.CanonicalHTTPBaseURL(hubURL)
 			if err != nil {
 				return nil, api.NewError(http.StatusBadRequest, "validation", "hub_url must be an HTTP(S) base URL allowed by transport policy", "", nil)
@@ -469,7 +474,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if join != nil {
 			join.Token, join.Actor, join.Capabilities = created.Token, created.Enrollment.Actor, created.Enrollment.Capabilities
 			join.PushEnabled = slices.Contains(strings.Split(created.Enrollment.Capabilities, ","), "push")
-			join.JoinCommand = joincommand.Build(*join)
+			join.JoinCommand = joincommand.Build(*join, signingTemplate)
 			out.Join = join
 		}
 		return &api.CreateFederationEnrollmentResponse{Body: out}, nil
@@ -1018,11 +1023,11 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := validateFederationAdoptionBaseline(in.Body.AdoptionBaseline, in.Body.AdoptionBaselineEndEventID); err != nil {
 			return nil, err
 		}
-		moveSources, err := authenticateFederationMoveSources(ctx, cfg, principal, in.Body.MoveSourceTokens)
+		moveSources, hasReference, err := authenticateFederationMoveSources(ctx, cfg, principal, in.Body.MoveSourceTokens)
 		if err != nil {
 			return nil, err
 		}
-		result, err := cfg.DB.IngestFederationEvents(ctx, db.FederationIngestParams{
+		params := db.FederationIngestParams{
 			MoveSourceEnrollmentIDs: moveSources,
 			AuthorizeMove: func(ctx context.Context, transaction db.Transaction, sourceGrant db.FederationEnrollment, source db.Project) error {
 				return authorizeFederationMoveSource(ctx, cfg, transaction, sourceGrant, source)
@@ -1036,7 +1041,13 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			AdoptionBaseline:                 in.Body.AdoptionBaseline,
 			AdoptionBaselineEndSourceEventID: in.Body.AdoptionBaselineEndEventID,
 			Events:                           federationIngestEventsToDB(in.Body.Events),
-		})
+		}
+		if hasReference {
+			params.AuthorizeReference = func(ctx context.Context, tx db.Transaction, grant db.FederationEnrollment, project db.Project) error {
+				return authorizeFederationReference(ctx, cfg, principal, tx, grant, project)
+			}
+		}
+		result, err := cfg.DB.IngestFederationEvents(ctx, params)
 		if err != nil {
 			return nil, federationIngestError(err)
 		}
@@ -1500,6 +1511,7 @@ func federationStatusBindings(ctx context.Context, store db.Storage, projectID *
 // relay checkpoint measurement; omitErrors then removes error text, which the
 // browser must not receive.
 func finishFederationProjectStatus(ctx context.Context, cfg ServerConfig, body *api.FederationStatusBody, compact, omitErrors bool) error {
+	addFederationSyncRetryStatus(cfg, body)
 	if !compact {
 		if err := addFederationRelayCapacityStatus(ctx, cfg, body); err != nil {
 			return err
@@ -1509,6 +1521,23 @@ func finishFederationProjectStatus(ctx context.Context, cfg ServerConfig, body *
 		omitFederationStatusErrors(body.Statuses)
 	}
 	return nil
+}
+
+// addFederationSyncRetryStatus attaches the runner's retry schedule to each
+// spoke binding it is holding back.
+func addFederationSyncRetryStatus(cfg ServerConfig, body *api.FederationStatusBody) {
+	if cfg.FederationSyncRetry == nil {
+		return
+	}
+	for i := range body.Statuses {
+		status := &body.Statuses[i]
+		if status.Role != string(db.FederationRoleSpoke) {
+			continue
+		}
+		if retry, ok := cfg.FederationSyncRetry(status.ProjectID); ok {
+			status.SyncRetry = &retry
+		}
+	}
 }
 
 // omitFederationStatusErrors clears every error text in statuses and flags a

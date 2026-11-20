@@ -739,7 +739,6 @@ func TestOpenClawTerminalFallbackWithoutAnotherPrompt(t *testing.T) {
 				for _, scope := range []string{"user", "project"} {
 					opts.Scope = scope
 					opts.Executable = filepath.Join(opts.Home, scope+"-record-kata")
-					opts.Executable = openClawInstallRecorder(t, opts.Executable)
 					executables = append(executables, opts.Executable)
 					p, err := planOpenClawAgentHooks(opts, false)
 					require.NoError(t, err)

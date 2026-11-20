@@ -12,6 +12,7 @@ import (
 )
 
 type federationPrincipal struct {
+	request                      HostFederationAccessRequest
 	RelayBindingUID              string
 	RelayProtocolVersion         int
 	RelayServeDownstream         bool
@@ -216,16 +217,9 @@ func evaluateFederationRequestForCapabilities(
 		)
 		transactionFence = composeFederationTransactionFences(transactionFence, sanitizeNativeFederationTransactionFence(cfg.DB.ProjectAccessTransactionFence(enrollment.Actor, []string{project.UID})))
 	}
+	request := HostFederationAccessRequest{Enrollment: enrollment, Project: project, Capability: capability, Operation: operation}
 	if cfg.HostFederationAccess != nil {
-		decision, accessErr := cfg.HostFederationAccess.AuthorizeFederation(
-			ctx,
-			HostFederationAccessRequest{
-				Enrollment: enrollment,
-				Project:    project,
-				Capability: capability,
-				Operation:  operation,
-			},
-		)
+		decision, accessErr := cfg.HostFederationAccess.AuthorizeFederation(ctx, request)
 		if errors.Is(accessErr, ErrHostAccessDenied) {
 			return federationAuthorization{}, federationCredentialDenied()
 		}
@@ -254,6 +248,7 @@ func evaluateFederationRequestForCapabilities(
 		capability: capability,
 		projectUID: project.UID,
 		principal: federationPrincipal{
+			request:                      request,
 			RelayBindingUID:              enrollment.RelayBindingUID,
 			RelayProtocolVersion:         enrollment.RelayProtocolVersion,
 			RelayServeDownstream:         enrollment.RelayServeDownstream,
@@ -329,19 +324,47 @@ func federationCredentialDenied() error {
 // applies the same host policy as the route. Storage has already proved and
 // fenced this enrollment; its temporary context does not widen the whole batch.
 func authorizeFederationMoveSource(ctx context.Context, cfg ServerConfig, transaction db.Transaction, enrollment db.FederationEnrollment, source db.Project) error {
-	if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil && decision.fixedUIDs != nil && !slices.Contains(decision.fixedUIDs, source.UID) {
+	return authorizeSupplementalProject(ctx, cfg, transaction, HostFederationAccessRequest{
+		Enrollment: enrollment, Project: source, Capability: "push",
+		Operation: federationTransportOperation("ingestFederationProjectEvents"),
+	})
+}
+
+func authorizeSupplementalProject(ctx context.Context, cfg ServerConfig, transaction db.Transaction, request HostFederationAccessRequest) error {
+	if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil && decision.fixedUIDs != nil && !slices.Contains(decision.fixedUIDs, request.Project.UID) {
 		return ErrHostAccessDenied
 	}
 	if cfg.HostFederationAccess == nil {
 		return nil
 	}
 	if projects, restricted := db.AuthorizedProjects(ctx); restricted {
-		ctx = db.WithAuthorizedProjects(ctx, append(slices.Clone(projects), source.UID))
+		ctx = db.WithAuthorizedProjects(ctx, append(slices.Clone(projects), request.Project.UID))
 	}
-	decision, err := cfg.HostFederationAccess.AuthorizeFederation(ctx, HostFederationAccessRequest{
-		Enrollment: enrollment, Project: source, Capability: "push",
-		Operation: federationTransportOperation("ingestFederationProjectEvents"),
-	})
+	decision, err := cfg.HostFederationAccess.AuthorizeFederation(ctx, request)
+	return runSupplementalFence(ctx, transaction, decision, err)
+}
+
+func authorizeFederationReference(ctx context.Context, cfg ServerConfig, principal federationPrincipal, transaction db.Transaction, grant db.FederationEnrollment, project db.Project) error {
+	if cfg.AuthorizeFederationReference == nil {
+		return db.ErrFederationMoveSourceUnauthorized
+	}
+	// The route already admitted this ingest. Authorize the peer as a
+	// supplemental push without admitting a second request.
+	peer := HostFederationAccessRequest{
+		Enrollment: grant, Project: project, Capability: "push",
+		Operation: HostFederationOperation{ID: "authorizeFederationIssueReference", Mutation: true},
+	}
+	if err := authorizeSupplementalProject(ctx, cfg, transaction, peer); err != nil {
+		return err
+	}
+	err := cfg.AuthorizeFederationReference(ctx, transaction, principal.request, peer)
+	if err != nil && !errors.Is(err, ErrHostAccessDenied) {
+		return errors.Join(errHostFederationAccessUnavailable, err)
+	}
+	return err
+}
+
+func runSupplementalFence(ctx context.Context, transaction db.Transaction, decision HostFederationAccessDecision, err error) error {
 	switch {
 	case errors.Is(err, ErrHostAccessDenied):
 		return ErrHostAccessDenied
@@ -359,7 +382,12 @@ func authorizeFederationMoveSource(ctx context.Context, cfg ServerConfig, transa
 // Invalid supplemental proofs grant nothing. Storage requires a live exact
 // grant for fresh cross-project effects; acknowledged duplicates need no new
 // authority. The mandatory route bearer is authenticated independently.
-func authenticateFederationMoveSources(ctx context.Context, cfg ServerConfig, principal federationPrincipal, tokens map[string]string) (map[string]int64, error) {
+func authenticateFederationMoveSources(ctx context.Context, cfg ServerConfig, principal federationPrincipal, tokens map[string]string) (map[string]int64, bool, error) {
+	// A composed request also carries ordinary principal authority for the
+	// route. Its fence does not cover a second actor on another project.
+	_, hasPrincipal := PrincipalFromContext(ctx)
+	allowReference := !hasPrincipal && cfg.AuthorizeFederationReference != nil && principal.ScopedProjectID != 0
+	hasReference := false
 	grants := make(map[string]int64, len(tokens))
 	lookupCtx := db.WithAuthorizedProjects(ctx, nil)
 	for projectUID, token := range tokens {
@@ -368,19 +396,23 @@ func authenticateFederationMoveSources(ctx context.Context, cfg ServerConfig, pr
 			continue
 		}
 		if err != nil {
-			return nil, internalAPIError(err)
+			return nil, false, internalAPIError(err)
 		}
 		grant, err := cfg.DB.AuthorizeFederationToken(lookupCtx, token, project.ID, "push")
 		if errors.Is(err, db.ErrNotFound) {
 			continue
 		}
 		if err != nil {
-			return nil, internalAPIError(err)
+			return nil, false, internalAPIError(err)
 		}
-		if grant.RelayProtocolVersion != 0 || grant.SpokeInstanceUID != principal.SpokeInstanceUID || grant.Actor != principal.Actor {
+		if grant.RelayProtocolVersion != 0 || grant.SpokeInstanceUID != principal.SpokeInstanceUID {
 			continue
 		}
+		if grant.Actor != principal.Actor && (!allowReference || grant.ProjectID == nil) {
+			continue
+		}
+		hasReference = hasReference || grant.Actor != principal.Actor
 		grants[projectUID] = grant.ID
 	}
-	return grants, nil
+	return grants, hasReference, nil
 }

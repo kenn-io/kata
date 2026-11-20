@@ -172,6 +172,10 @@ var storageScenarios = []scenario{
 		RunRelayLinkBoundaryKeepsSameProjectEffects(t, store)
 		return nil
 	}},
+	{name: "link server boundary", methods: []string{"CreateProject", "CreateIssue", "CreateLinkAndEvent", "EditIssueAtomic", "EventsAfter", "IssueByID", "LinksByIssue", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error {
+		RunLinkServerBoundary(t, store)
+		return nil
+	}},
 	{name: "relay link boundary follows active grants", methods: []string{"CreateAPIToken", "CreateIssue", "CreateLinkAndEvent", "CreateProject", "CreateRelayEnrollment", "IngestFederationEvents", "LinksByIssue", "MaterializeFederatedProject", "PinRootAuthority", "RevokeFederationEnrollment", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error {
 		RunRelayLinkBoundaryFollowsActiveGrants(t, store)
 		return nil
@@ -344,6 +348,7 @@ var storageScenarios = []scenario{
 	{name: "federated move snapshot authority", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "EnableProjectFederation", "CreateFederationEnrollment", "IngestFederationEvents", "MaterializeFederatedProject"}, run: checkFederatedMoveSnapshotAuthority},
 	{name: "moved ordinary issue adoption", methods: []string{"CreateProject", "CreateIssue", "MoveIssueProject", "AdoptProjectIntoFederation", "IssueByUID", "PendingFederationPushEvents"}, run: checkMovedOrdinaryIssueAdoption},
 	{name: "federated cron run issue authority", methods: []string{"IngestFederationEvents", "MoveIssueProject", "ObserveCronRun"}, run: checkFederatedCronRunIssueAuthority},
+	{name: "federated reference batch authority", methods: []string{"IngestFederationEvents"}, run: checkFederatedReferenceBatchAuthority},
 	{name: "federated fresh current project authority", methods: []string{"IngestFederationEvents", "MoveIssueProject"}, run: checkFederatedFreshCurrentProjectAuthority},
 	{name: "federated move reset after acknowledged source leave", methods: []string{"CreateIssue", "MoveIssueProject", "AdvanceFederationPushCursor", "LeaveFederationReplica", "ResetFederatedProject", "ResetFederatedProjectIfNoPendingPush"}, run: checkFederatedMoveResetAfterAcknowledgedSourceLeave},
 	{name: "federated move reset retained link", methods: []string{"CreateLinkAndEvent", "ResetFederatedProject", "ResetFederatedProjectIfNoPendingPush"}, run: checkFederatedMoveResetRetainedLink},

@@ -12,7 +12,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
-	"go.kenn.io/kata/internal/db"
 )
 
 const relayRefusalBody = `{"error":{"code":"relay_cross_project_links","message":"this daemon's copy of the project has cross-project issue links","hint":"private remedy","data":{"secret":"private diagnostic"}}}`
@@ -61,21 +60,21 @@ func TestRelayRefusalRetryLifecycle(t *testing.T) {
 		{10 * time.Minute, []time.Duration{10 * time.Minute, 10 * time.Minute, 10 * time.Minute, 10 * time.Minute, 10 * time.Minute, 10 * time.Minute}},
 	} {
 		t.Run(tc.interval.String(), func(t *testing.T) {
-			binding := db.FederationBinding{ProjectID: 1}
+			const projectID = 1
 			completed := time.Date(2026, 1, 1, 0, 0, 10, 0, time.UTC)
 			refused := fmt.Errorf("sync failed: %w", &HubStatusError{StatusCode: 409, relayCrossProjectLinks: true})
-			states := make(relayRefusalRetries)
+			states := newSyncRetries(noJitter)
 			for _, delay := range tc.delays {
-				states.record(binding, refused, tc.interval, completed)
-				require.True(t, states.blocked(binding, completed.Add(delay-time.Nanosecond)))
-				require.False(t, states.blocked(binding, completed.Add(delay)))
+				states.record(projectID, [32]byte{}, refused, tc.interval, completed)
+				require.True(t, states.blocked(projectID, [32]byte{}, completed.Add(delay-time.Nanosecond)))
+				require.False(t, states.blocked(projectID, [32]byte{}, completed.Add(delay)))
 				completed = completed.Add(delay + 10*time.Second)
 			}
 			for _, err := range []error{nil, errors.New("different failure")} {
-				states.record(binding, err, tc.interval, completed)
-				require.False(t, states.blocked(binding, completed))
-				states.record(binding, refused, tc.interval, completed)
-				require.False(t, states.blocked(binding, completed.Add(tc.delays[0])), "a fresh refusal starts at the first delay")
+				states.record(projectID, [32]byte{}, err, tc.interval, completed)
+				require.False(t, states.blocked(projectID, [32]byte{}, completed))
+				states.record(projectID, [32]byte{}, refused, tc.interval, completed)
+				require.False(t, states.blocked(projectID, [32]byte{}, completed.Add(tc.delays[0])), "a fresh refusal starts at the first delay")
 			}
 		})
 	}
