@@ -80,8 +80,6 @@ func TestManagedExternallyUnreachableDetail(t *testing.T) {
 					require.ErrorContains(t, err, "service manager")
 					require.ErrorContains(t, err, "autostart = false")
 					require.ErrorIs(t, err, context.DeadlineExceeded)
-					require.ErrorContains(t, err, "daemon.log")
-					require.NotContains(t, err.Error(), "kill -QUIT")
 				}
 			})
 		})

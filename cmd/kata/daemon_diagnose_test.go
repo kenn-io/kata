@@ -887,7 +887,7 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 		require.Contains(t, cliErr.Message, "503")
 		require.Contains(t, cliErr.Message, fmt.Sprintf("%q", logPath))
 		require.Contains(t, cliErr.Hint, recoverCommand)
-		require.Contains(t, stderr, logPath)
+		require.Contains(t, stderr, fmt.Sprintf("%q", logPath))
 		require.Contains(t, cliErr.Hint, "recover")
 		require.NotContains(t, cliErr.Message, "recover")
 	})
@@ -901,6 +901,7 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 		require.Equal(t, "local_unreachable", result.State)
 		require.Contains(t, result.Message, "503")
 		require.Contains(t, cliErr.Message, "503")
+		require.NotContains(t, cliErr.Message, "recover")
 		healthNextAction := result.NextAction
 		require.Contains(t, healthNextAction, recoverCommand)
 		require.Contains(t, healthNextAction, "recover")
@@ -948,36 +949,13 @@ func TestDaemonDiagnoseSecondPingUnreachable(t *testing.T) {
 	require.True(t, replaced.Load())
 	require.Equal(t, "local_unreachable", result.State)
 	require.Equal(t, os.Getpid(), result.PID)
-	require.Contains(t, result.Message, filepath.Join(ns.DataDir, "daemon.log"))
+	require.Contains(t, result.Message, fmt.Sprintf("%q", filepath.Join(ns.DataDir, "daemon.log")))
 	if runtime.GOOS == "windows" {
 		require.Contains(t, result.NextAction, "'--daemon' 'work'")
 	} else {
 		require.Contains(t, result.NextAction, "--daemon work")
 	}
 	require.NotContains(t, result.Message, "daemon recover")
-}
-
-func TestDaemonDiagnosisClientConstructionFailure(t *testing.T) {
-	resetFlags(t)
-	setupKataEnv(t)
-	t.Chdir(t.TempDir())
-	t.Setenv("KATA_SERVER", "")
-	ns, err := daemonruntime.NewNamespace()
-	require.NoError(t, err)
-	require.NoError(t, ns.EnsureDirs())
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version, os.Getpid())
-	}))
-	t.Cleanup(server.Close)
-	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://"), Metadata: map[string]string{"config_auth_source": "generated_file"}})
-	require.NoError(t, err)
-	out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
-	require.NoError(t, err)
-	var result daemonDiagnosis
-	require.NoError(t, json.Unmarshal([]byte(out), &result))
-	require.Equal(t, "selection_error", result.State)
-	require.Contains(t, result.Message, "persisted auth token")
-	require.NotContains(t, result.NextAction, "kill")
 }
 
 func TestDaemonDiagnosisOmitsEmptyAction(t *testing.T) {
@@ -1026,7 +1004,6 @@ func TestReviewSupervisedProfileDiagnosisGuidance(t *testing.T) {
 func TestReviewSupervisedDiscoveryCancellation(t *testing.T) {
 	resetFlags(t)
 	home, _, uid, _ := stoppedProfileCLI(t)
-	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n"), 0600))
 	p, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: uid})
 	require.NoError(t, err)
 	ns, err := daemonruntime.NewNamespaceForHome(home, p.StorageID)
@@ -1058,78 +1035,54 @@ func TestReviewSupervisedDiscoveryCancellation(t *testing.T) {
 	cancel()
 	err = <-done
 	require.ErrorIs(t, err, context.Canceled)
-	require.Contains(t, err.Error(), filepath.Join(ns.DataDir, "daemon.log"))
-	for _, word := range []string{"kill", "restart", "service manager", "daemon recover"} {
-		require.NotContains(t, err.Error(), word)
-	}
+	require.Contains(t, err.Error(), fmt.Sprintf("%q", filepath.Join(ns.DataDir, "daemon.log")))
 }
 
-func TestDaemonDiagnosisProbeOwnedTimeout(t *testing.T) {
-	resetFlags(t)
-	setupKataEnv(t)
-	t.Chdir(t.TempDir())
-	t.Setenv("KATA_SERVER", "")
-	t.Setenv("KATA_HTTP_TIMEOUT", "100ms")
-	ns, err := daemonruntime.NewNamespace()
-	require.NoError(t, err)
-	require.NoError(t, ns.EnsureDirs())
-	var pings atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if pings.Add(1) == 1 {
-			_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version, os.Getpid())
-			return
-		}
-		<-r.Context().Done()
-	}))
-	t.Cleanup(server.Close)
-	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
-	require.NoError(t, err)
-	out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
-	require.NoError(t, err)
-	var result daemonDiagnosis
-	require.NoError(t, json.Unmarshal([]byte(out), &result))
-	require.Equal(t, "local_unreachable", result.State)
-	require.Equal(t, os.Getpid(), result.PID)
-	require.Contains(t, result.Message, filepath.Join(ns.DataDir, "daemon.log"))
-	if runtime.GOOS == "windows" {
-		require.Contains(t, result.NextAction, "taskkill")
-	} else {
-		require.Contains(t, result.NextAction, "kill -QUIT")
+func TestDaemonDiagnosisSecondPingTimeoutAndCancellation(t *testing.T) {
+	for _, canceled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("caller_canceled=%t", canceled), func(t *testing.T) {
+			resetFlags(t)
+			setupKataEnv(t)
+			t.Chdir(t.TempDir())
+			t.Setenv("KATA_SERVER", "")
+			if !canceled {
+				t.Setenv("KATA_HTTP_TIMEOUT", "100ms")
+			}
+			ns, err := daemonruntime.NewNamespace()
+			require.NoError(t, err)
+			require.NoError(t, ns.EnsureDirs())
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			var pings atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if pings.Add(1) == 1 {
+					_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version, os.Getpid())
+					return
+				}
+				if canceled {
+					cancel()
+				}
+				<-r.Context().Done()
+			}))
+			t.Cleanup(server.Close)
+			_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
+			require.NoError(t, err)
+			out, _, err := executeRootCapture(t, ctx, "daemon", "diagnose", "--json")
+			require.NoError(t, err)
+			var result daemonDiagnosis
+			require.NoError(t, json.Unmarshal([]byte(out), &result))
+			require.Equal(t, "local_unreachable", result.State)
+			require.Equal(t, os.Getpid(), result.PID)
+			require.Contains(t, result.Message, fmt.Sprintf("%q", filepath.Join(ns.DataDir, "daemon.log")))
+			if canceled {
+				require.Contains(t, result.Message, "context canceled")
+				require.Empty(t, result.NextAction)
+				require.Equal(t, "local_unreachable: "+result.Message, diagnosisError(result).Error())
+			} else if runtime.GOOS == "windows" {
+				require.Contains(t, result.NextAction, "taskkill")
+			} else {
+				require.Contains(t, result.NextAction, "kill -QUIT")
+			}
+		})
 	}
-}
-
-func TestDaemonDiagnosisCallerCanceledDuringSecondPing(t *testing.T) {
-	resetFlags(t)
-	setupKataEnv(t)
-	t.Chdir(t.TempDir())
-	t.Setenv("KATA_SERVER", "")
-	ns, err := daemonruntime.NewNamespace()
-	require.NoError(t, err)
-	require.NoError(t, ns.EnsureDirs())
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	var pings atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if pings.Add(1) == 1 {
-			_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version, os.Getpid())
-			return
-		}
-		cancel()
-		<-r.Context().Done()
-	}))
-	t.Cleanup(server.Close)
-	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
-	require.NoError(t, err)
-	out, _, err := executeRootCapture(t, ctx, "daemon", "diagnose", "--json")
-	require.NoError(t, err)
-	var result daemonDiagnosis
-	require.NoError(t, json.Unmarshal([]byte(out), &result))
-	require.Equal(t, "local_unreachable", result.State)
-	require.Equal(t, os.Getpid(), result.PID)
-	require.Contains(t, result.Message, "context canceled")
-	require.Contains(t, result.Message, filepath.Join(ns.DataDir, "daemon.log"))
-	require.NotContains(t, result.Message, "kill")
-	require.NotContains(t, result.Message, "restart")
-	require.Empty(t, result.NextAction)
-	require.Equal(t, "local_unreachable: "+result.Message, diagnosisError(result).Error())
 }

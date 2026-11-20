@@ -28,7 +28,6 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/gofrs/flock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/activity"
@@ -620,6 +619,7 @@ func TestDaemonStatusReportsWebURLAndRecoveryAdvice(t *testing.T) {
 	assert.True(t, strings.HasPrefix(string(out), "OK daemon status=running web_url=http://127.0.0.1:28888 selected_state=local_unreachable selected_profile=\"\" message="))
 	assert.Contains(t, string(out), "unreachable")
 	assert.Contains(t, string(out), "daemon.log")
+	assert.Contains(t, string(out), " next_action=")
 	resetFlags(t)
 	human, stderr, err := executeRootCapture(t, t.Context(), "daemon", "status")
 	require.Error(t, err)
@@ -4122,49 +4122,6 @@ func TestDaemonControlsSkipUnknownRecord(t *testing.T) {
 			}
 			assert.Contains(t, stderr, fmt.Sprintf("skipping daemon pid=%d (unverifiable identity)\n", unknownPID))
 			assert.FileExists(t, path)
-		})
-	}
-}
-
-func TestReviewStatusCutoverAndSupervisorGuidance(t *testing.T) {
-	for _, tc := range []struct {
-		name                  string
-		migration, supervised bool
-	}{
-		{"migration", true, false}, {"supervised", false, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			resetFlags(t)
-			home := setupKataEnv(t)
-			t.Chdir(t.TempDir())
-			if tc.supervised {
-				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n"), 0600))
-			}
-			dbPath := filepath.Join(home, "kata.db")
-			if tc.migration {
-				lock := flock.New(dbPath + ".import.lock")
-				require.NoError(t, lock.Lock())
-				t.Cleanup(func() { require.NoError(t, lock.Close()) })
-			}
-			ns, err := daemonruntime.NewNamespace()
-			require.NoError(t, err)
-			require.NoError(t, ns.EnsureDirs())
-			_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1", Metadata: map[string]string{"db_path": dbPath}})
-			require.NoError(t, err)
-			stdout, _, err := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
-			require.Error(t, err)
-			var result daemonStatusOutput
-			require.NoError(t, json.Unmarshal([]byte(stdout), &result))
-			require.NotNil(t, result.Selected)
-			hint := result.Selected.Message + result.Selected.NextAction
-			require.Contains(t, hint, "daemon.log")
-			if tc.migration {
-				require.Contains(t, hint, "Wait")
-			} else {
-				require.Contains(t, hint, "service manager")
-			}
-			require.NotContains(t, hint, "kill")
-			require.NotContains(t, hint, "daemon restart")
 		})
 	}
 }

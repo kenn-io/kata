@@ -375,7 +375,7 @@ func TestResolvedDaemonRunningPreservesEndpointMetadata(t *testing.T) {
 				BaseURL: "http://127.0.0.1:27123",
 				Record:  kitdaemon.RuntimeRecord{Address: "127.0.0.1:27123"},
 			}),
-			want: RunningDaemon{BaseURL: "http://127.0.0.1:27123", Address: "127.0.0.1:27123", Network: "tcp", Scheme: "http"},
+			want: RunningDaemon{BaseURL: "http://127.0.0.1:27123", Address: "127.0.0.1:27123", Network: "tcp", Scheme: "http", record: &kitdaemon.RuntimeRecord{Address: "127.0.0.1:27123"}},
 		},
 		{
 			name: "local unix",
@@ -397,13 +397,7 @@ func TestResolvedDaemonRunningPreservesEndpointMetadata(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.in.Running()
-			assert.Equal(t, tt.want.BaseURL, got.BaseURL)
-			assert.Equal(t, tt.want.Address, got.Address)
-			assert.Equal(t, tt.want.Network, got.Network)
-			assert.Equal(t, tt.want.Scheme, got.Scheme)
-			assert.Equal(t, tt.want.ConfiguredRemote, got.ConfiguredRemote)
-			assert.Equal(t, tt.want.PersistedAuth, got.PersistedAuth)
+			assert.Equal(t, tt.want, tt.in.Running())
 			assert.Equal(t, tt.wantUnixSocket, tt.in.UnixSocket)
 		})
 	}
@@ -501,8 +495,12 @@ local = true
 	resolved, ok, err := DiscoverSelected(t.Context(), DiscoverRequest{Name: "local"})
 	require.NoError(t, err)
 	assert.True(t, ok)
-	assert.Equal(t, baseURL, resolved.Running().BaseURL)
-	assert.Equal(t, address, resolved.Running().Address)
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	records, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).List()
+	require.NoError(t, err)
+	require.Len(t, records, 1)
+	assert.Equal(t, RunningDaemon{BaseURL: baseURL, Address: address, Network: "tcp", Scheme: "http", record: &records[0]}, resolved.Running())
 }
 
 func TestDiscoverSelectedProbesNamedRemoteOnRequest(t *testing.T) {

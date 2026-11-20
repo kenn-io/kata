@@ -16,7 +16,9 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
 	kitdaemon "go.kenn.io/kit/daemon"
 	"go.kenn.io/kit/safefileio"
@@ -197,7 +199,7 @@ func TestLiveUnreachableRecoveryAdvice(t *testing.T) {
 				require.ErrorAs(t, errs[0], &evidence)
 				require.Equal(t, os.Getpid(), evidence.PID)
 				require.Equal(t, dir, evidence.DataDir)
-				require.Contains(t, errs[0].Error(), filepath.Join(dir, "daemon.log"))
+				require.Contains(t, errs[0].Error(), fmt.Sprintf("%q", filepath.Join(dir, "daemon.log")))
 				require.Contains(t, errs[0].Error(), fmt.Sprint(os.Getpid()))
 				for _, text := range []string{"kill", "restart", "service manager", "daemon recover"} {
 					require.NotContains(t, errs[0].Error(), text)
@@ -205,56 +207,57 @@ func TestLiveUnreachableRecoveryAdvice(t *testing.T) {
 			})
 		})
 	}
-	for identity, verified := range map[kitdaemon.ProcessIdentity]bool{"": true, "future-v1:12345": false} {
-		record := kitdaemon.RuntimeRecord{PID: os.Getpid(), ProcessIdentityV2: identity, Network: "tcp", Address: "127.0.0.1:1"}
-		reader := func(string) ([]kitdaemon.RuntimeRecord, error) { return []kitdaemon.RuntimeRecord{record}, nil }
-		probe := func(context.Context, string) (string, PingInfo, error) {
-			return "", PingInfo{}, errors.New("probe failed")
-		}
-		for _, err := range liveDaemonsUsing(t.Context(), t.TempDir(), reader, probe) {
-			require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
-			var evidence *LocalDaemonUnreachableError
-			require.ErrorAs(t, err, &evidence)
-			require.Equal(t, verified, evidence.VerifiedProcess)
-			break
-		}
-	}
 }
 
 func TestUnreachableErrorRelaunchPaths(t *testing.T) {
-	setupKataEnv(t)
+	home := setupKataEnv(t)
 	for _, tc := range []struct {
-		name                   string
-		managed, auto, profile bool
-		want                   string
+		name                                          string
+		managed, auto, profile, migration, unverified bool
+		want                                          string
 	}{
-		{"manual", false, false, false, "start it again the way you originally started it (same options and environment)"},
-		{"automatic", false, true, false, "rerun the command that failed"},
-		{"managed", true, false, false, "service manager"},
-		{"profile", false, false, true, "kata --daemon work daemon recover"},
+		{"manual", false, false, false, false, false, "start it again the way you originally started it (same options and environment)"},
+		{"automatic", false, true, false, false, false, "rerun the command that failed"},
+		{"managed", true, false, false, false, false, "service manager"},
+		{"profile", false, false, true, false, false, "kata --daemon work daemon recover"},
+		{"migration", false, false, false, true, false, "Wait for the migration"},
+		{"unverified", false, false, false, false, true, "unreachable"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
+			if tc.managed {
+				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n"), 0600))
+				t.Cleanup(func() { require.NoError(t, os.Remove(filepath.Join(home, "config.toml"))) })
+			}
 			record := kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1", Metadata: map[string]string{}}
+			if tc.unverified {
+				record.ProcessIdentityV2 = "future-v1:12345"
+			}
+			if tc.migration {
+				record.Metadata["db_path"] = filepath.Join(dir, "kata.db")
+				lock := flock.New(record.Metadata["db_path"] + ".import.lock")
+				require.NoError(t, lock.Lock())
+				t.Cleanup(func() { require.NoError(t, lock.Close()) })
+			}
 			if tc.auto {
 				record.Metadata[daemonruntime.RuntimeAutoStartKey] = "1"
 			}
 			e := newUnreachable(t.Context(), dir, record, errors.New("failed"))
-			e.ManagedExternally, e.profileAutostart = tc.managed, tc.profile
 			if tc.profile {
-				e.Profile = "work"
+				annotateUnreachable(e, ResolvedDaemon{Name: "work", profileConfig: &config.LocalProfileConfig{Config: &config.DaemonConfig{}}})
 			}
 			text := e.Error()
 			require.NotContains(t, text, "kata daemon restart")
-			require.Contains(t, text, filepath.Join(dir, "daemon.log"))
+			require.Contains(t, text, fmt.Sprintf("%q", filepath.Join(dir, "daemon.log")))
 			require.Contains(t, text, fmt.Sprint(os.Getpid()))
 			want := tc.want
 			if tc.profile && runtime.GOOS == "windows" {
 				want = "'--daemon' 'work' 'daemon' 'recover'"
 			}
 			require.Contains(t, text, want)
-			if tc.managed {
+			if tc.managed || tc.migration || tc.unverified {
 				require.NotContains(t, text, "kill -QUIT")
+				require.NotContains(t, text, "taskkill")
 				return
 			}
 			if runtime.GOOS == "windows" {
