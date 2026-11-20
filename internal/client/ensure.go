@@ -248,6 +248,12 @@ func waitForSupervisedDaemon(
 			running = runningDaemonForLive(found.Daemon)
 			return true, nil
 		case daemonScanStale:
+			if (daemonVersionCheckSkipped() || daemonVersionCompatible(found.Daemon.Info)) && placeholderDaemon(ctx, found.Daemon) {
+				if err := refuseDaemonDowngrade(found.Daemon.Info); err != nil {
+					return false, err
+				}
+				return false, fmt.Errorf("%w: the daemon has no web UI; restart it with your service manager (autostart = false)", ErrDaemonNotReplaceable)
+			}
 			return false, externallyManagedVersionError(found.Daemon.Info)
 		}
 		return false, nil
