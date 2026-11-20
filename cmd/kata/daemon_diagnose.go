@@ -532,7 +532,7 @@ func diagnosisError(result daemonDiagnosis) error {
 	data, _ := json.Marshal(result)
 	message, hint := result.State+": "+result.NextAction, ""
 	if result.State == "local_unreachable" && result.Message != "" {
-		message, hint = result.State+": "+result.Message, result.NextAction
+		message, hint = result.Message, result.NextAction
 	}
 	return &cliError{Message: message, Hint: hint, Code: result.State, Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail, Data: data}
 }

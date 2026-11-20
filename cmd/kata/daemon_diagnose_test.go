@@ -1093,7 +1093,7 @@ func TestDaemonDiagnosisSecondPingTimeoutAndCancellation(t *testing.T) {
 			if canceled {
 				require.Contains(t, result.Message, "context canceled")
 				require.Empty(t, result.NextAction)
-				require.Equal(t, "local_unreachable: "+result.Message, diagnosisError(result).Error())
+				require.Equal(t, result.Message, diagnosisError(result).Error())
 			} else if runtime.GOOS == "windows" {
 				require.Contains(t, result.NextAction, "taskkill")
 			} else {
