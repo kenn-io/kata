@@ -153,6 +153,7 @@ func TestAuthMiddleware_IssueScopedTokenUsesExplicitRouteAllowlist(t *testing.T)
 		{name: "add attachment", method: http.MethodPost, path: "/api/v1/projects/1/issues/abc4/attachments", want: http.StatusNoContent},
 		{name: "link attachment", method: http.MethodPost, path: "/api/v1/projects/1/issues/abc4/attachments/links", want: http.StatusNoContent},
 		{name: "edit issue", method: http.MethodPatch, path: "/api/v1/projects/1/issues/abc4", want: http.StatusNoContent},
+		{name: "swap labels", method: http.MethodPatch, path: "/api/v1/projects/1/issues/abc4/labels", want: http.StatusNoContent},
 		{name: "link issues", method: http.MethodPost, path: "/api/v1/projects/1/issues/abc4/links", want: http.StatusNoContent},
 		{name: "renew lease", method: http.MethodPost, path: "/api/v1/projects/1/issues/abc4/lease/actions/renew", want: http.StatusNoContent},
 		{name: "stream activity", method: http.MethodGet, path: "/api/v1/events/stream", want: http.StatusNoContent},

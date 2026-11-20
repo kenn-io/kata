@@ -1159,7 +1159,7 @@ explicitly asks for that exact operation and ref.
 ## Labels, ownership, and claiming
 
 ```sh
-kata label add <ref> <label> [--remove <label>]... [--comment TEXT]
+kata label add <ref> <label> [--comment TEXT]
 kata label rm <ref> <label> [--comment TEXT]
 kata labels
 
@@ -1167,13 +1167,6 @@ kata assign <ref> <owner> [--comment TEXT]
 kata unassign <ref> [--expect-owner <owner>] [--comment TEXT]
 kata claim <ref> [--ttl <duration>] [--force | --if-unowned] [--comment TEXT]
 ```
-
-`kata label add <ref> <label> --remove <label>` attaches and detaches labels in
-one request, so a triage swap such as `kata label add <ref> ready-for-human
---remove ready-for-agent` never leaves the issue with both labels or neither.
-`--remove` repeats. The command prints the labels the issue ended with (`--json`
-returns the daemon response with `labels` and `events`). It requires daemon API
-`0.62.0` or newer and sends nothing to an older daemon.
 
 `kata claim` atomically assigns the issue to the current actor and fails if
 someone else is assigned unless `--force` is used. Add `--ttl` to make the

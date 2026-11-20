@@ -297,25 +297,12 @@ func (d *Store) changeLabelsAndEvents(ctx context.Context, issueID int64, p db.C
 		}
 	}
 
-	rows, err := tx.QueryContext(ctx,
-		`SELECT label FROM issue_labels WHERE issue_id = ? ORDER BY label ASC`, issueID)
+	labels, err := federationIssueLabels(ctx, tx, issueID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("list labels: %w", err)
+		return nil, nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	labels := []string{}
-	for rows.Next() {
-		var label string
-		if err := rows.Scan(&label); err != nil {
-			return nil, nil, fmt.Errorf("scan label: %w", err)
-		}
-		labels = append(labels, label)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, nil, fmt.Errorf("list labels: %w", err)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, nil, fmt.Errorf("close labels: %w", err)
+	if labels == nil {
+		labels = []string{}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, nil, fmt.Errorf("commit: %w", err)

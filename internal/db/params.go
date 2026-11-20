@@ -451,7 +451,7 @@ type LabelEventParams struct {
 }
 
 // ChangeLabelsParams removes and adds labels on one issue in one transaction.
-// Callers pass disjoint, deduplicated Add and Remove lists.
+// Callers pass disjoint Add and Remove lists.
 type ChangeLabelsParams struct {
 	Add    []string
 	Remove []string

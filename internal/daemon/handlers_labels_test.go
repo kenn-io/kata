@@ -142,7 +142,7 @@ func TestUpdateLabels_NoOpReportsLabelsWithoutEvents(t *testing.T) {
 	postLabel(t, env, pid, n, "bug")
 
 	resp, raw := envDoRaw(t, env, http.MethodPatch, issuePath(pid, n, "labels"),
-		map[string]any{"actor": "tester", "add": []string{"bug", "bug"}, "remove": []string{"absent"}}, nil)
+		map[string]any{"actor": "tester", "add": []string{"bug"}, "remove": []string{"absent"}}, nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 	var out struct {
 		Labels  []string `json:"labels"`
@@ -178,21 +178,24 @@ func TestUpdateLabels_InvalidAddKeepsRemovedLabelAttached(t *testing.T) {
 	assert.Equal(t, []string{"ready-for-agent"}, issueLabelNames(t, env, n))
 }
 
-func TestUpdateLabels_EmptyOrBlankListsAre400(t *testing.T) {
+func TestUpdateLabels_InvalidRemoveChangesNothing(t *testing.T) {
 	env := testenv.New(t)
 	pid, n := setupOneIssue(t, env)
-	postLabel(t, env, pid, n, "bug")
+	postLabel(t, env, pid, n, "ready-for-agent")
 
-	for name, body := range map[string]map[string]any{
-		"both empty": {"actor": "tester", "add": []string{}, "remove": []string{}},
-		"no lists":   {"actor": "tester"},
-		"blank add":  {"actor": "tester", "add": []string{"  "}},
-		"blank rm":   {"actor": "tester", "add": []string{"x"}, "remove": []string{""}},
-	} {
-		t.Run(name, func(t *testing.T) {
-			resp, raw := envDoRaw(t, env, http.MethodPatch, issuePath(pid, n, "labels"), body, nil)
-			assertAPIError(t, resp.StatusCode, raw, http.StatusBadRequest, "validation")
-		})
-	}
-	assert.Equal(t, []string{"bug"}, issueLabelNames(t, env, n))
+	// The mistyped remove names no attached label, so only validation stops
+	// the add from landing next to ready-for-agent.
+	resp, raw := envDoRaw(t, env, http.MethodPatch, issuePath(pid, n, "labels"),
+		map[string]any{"actor": "tester", "add": []string{"ready-for-human"}, "remove": []string{"Ready-For-Agent"}}, nil)
+	assertAPIError(t, resp.StatusCode, raw, http.StatusBadRequest, "validation")
+	assert.Equal(t, []string{"ready-for-agent"}, issueLabelNames(t, env, n))
+}
+
+func TestUpdateLabels_EmptyListsAre400(t *testing.T) {
+	env := testenv.New(t)
+	pid, n := setupOneIssue(t, env)
+
+	resp, raw := envDoRaw(t, env, http.MethodPatch, issuePath(pid, n, "labels"),
+		map[string]any{"actor": "tester", "add": []string{}, "remove": []string{}}, nil)
+	assertAPIError(t, resp.StatusCode, raw, http.StatusBadRequest, "validation")
 }

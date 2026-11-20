@@ -28,27 +28,14 @@ func labelAddCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add <issue-ref> <label>",
 		Short: "attach a label to an issue",
-		Long: `Attach one label to an issue. Use needs-review with --comment to hand off unfinished work.
-Add --remove <label> (repeatable) to detach labels in the same request, so a
-triage swap never leaves the issue with both labels or neither. The output lists
-the labels the issue ended with. --remove needs a daemon on API 0.62.0 or newer.`,
+		Long:  `Attach one label to an issue. Use needs-review with --comment to hand off unfinished work.`,
 		Example: `  kata label add abc4 bug --agent
-  kata label add abc4 needs-review --comment "Fix drafted; focused test still fails." --agent
-  kata label add abc4 ready-for-human --remove ready-for-agent --agent`,
+  kata label add abc4 needs-review --comment "Fix drafted; focused test still fails." --agent`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			label := args[1]
 			if strings.TrimSpace(label) == "" {
 				return &cliError{Message: "label must not be empty", Kind: kindValidation, ExitCode: ExitValidation}
-			}
-			remove, err := cmd.Flags().GetStringArray("remove")
-			if err != nil {
-				return err
-			}
-			for _, r := range remove {
-				if strings.TrimSpace(r) == "" {
-					return &cliError{Message: "--remove label must not be empty", Kind: kindValidation, ExitCode: ExitValidation}
-				}
 			}
 			comment, handle, err := prepareFollowupComment(cmd)
 			if err != nil {
@@ -62,26 +49,6 @@ the labels the issue ended with. --remove needs a daemon on API 0.62.0 or newer.
 			apiClient, err := project.generatedClient()
 			if err != nil {
 				return err
-			}
-			if len(remove) > 0 {
-				if err := requireDaemonAPIVersion(project.api.ctx, project.api.client, project.api.baseURL, apiVersionLabelChange, "label add --remove"); err != nil {
-					return err
-				}
-				response, callErr := apiClient.UpdateLabelsWithResponse(project.api.ctx, &generated.UpdateLabelsRequestOptions{
-					PathParams: &generated.UpdateLabelsPath{ProjectID: project.selector, Ref: issue.RefForAPI},
-					Body:       &generated.UpdateLabelsBody{Actor: &actor, Add: []string{label}, Remove: remove},
-				})
-				if err := externalCLITransportError(response, callErr); err != nil {
-					return err
-				}
-				bs, err := project.finishMutation(response.HTTPResponse, response.Body, callErr)
-				if err != nil {
-					return err
-				}
-				if err := project.comment(bs, actor, comment, handle); err != nil {
-					return err
-				}
-				return printLabelsUpdated(cmd, bs, project.name)
 			}
 			response, callErr := apiClient.AddLabelWithResponse(project.api.ctx, &generated.AddLabelRequestOptions{
 				PathParams: &generated.AddLabelPath{ProjectID: project.selector, Ref: issue.RefForAPI},
@@ -101,7 +68,6 @@ the labels the issue ended with. --remove needs a daemon on API 0.62.0 or newer.
 		},
 	}
 	addCommentFlag(cmd)
-	cmd.Flags().StringArray("remove", nil, "label to detach in the same request (repeatable)")
 	return cmd
 }
 
@@ -244,49 +210,6 @@ func newLabelsCmd() *cobra.Command {
 }
 
 // printLabelMutation formats AddLabelResponse for the three output modes.
-// printLabelsUpdated renders the PATCH /labels response; unlike the single
-// label forms it reports the labels the issue ended with.
-func printLabelsUpdated(cmd *cobra.Command, bs []byte, requestedProject string) error {
-	mode := currentOutputMode()
-	if mode == outputJSON {
-		var buf bytes.Buffer
-		if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
-			return err
-		}
-		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
-		return err
-	}
-	displayRef, err := mutationIssueRefForOutput(cmd, bs, requestedProject)
-	if err != nil {
-		return err
-	}
-	var b struct {
-		Labels []string `json:"labels"`
-	}
-	if err := json.Unmarshal(bs, &b); err != nil {
-		return err
-	}
-	if mode == outputAgent {
-		var m agentIssueMutation
-		if err := json.Unmarshal(bs, &m); err != nil {
-			return err
-		}
-		m.Issue.ShortID = displayRef
-		return printAgentMutationDecoded(cmd.OutOrStdout(), "label", m, true, func(w io.Writer, _ agentIssueMutation) error {
-			return writeAgentField(w, "Labels", agentValue(strings.Join(b.Labels, ",")))
-		})
-	}
-	if flags.Quiet {
-		return nil
-	}
-	if len(b.Labels) == 0 {
-		_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s has no labels\n", displayRef)
-		return err
-	}
-	_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s labels: %s\n", displayRef, strings.Join(b.Labels, ", "))
-	return err
-}
-
 func printLabelMutation(cmd *cobra.Command, bs []byte, requestedProject string) error {
 	mode := currentOutputMode()
 	if mode == outputJSON {

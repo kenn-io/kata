@@ -588,6 +588,7 @@ func checkChangeLabels(t *testing.T, store db.Storage) error {
 	assert.Equal(t, before.Revision, after.Revision, "label edits do not bump revision")
 
 	eventsAfterSwap := eventCount()
+	time.Sleep(5 * time.Millisecond) // a store that touches updated_at on a no-op must show a later stamp
 	labels, events, err = store.ChangeLabelsAndEvents(ctx, issueID, params)
 	if err != nil {
 		return fmt.Errorf("repeat swap: %w", err)

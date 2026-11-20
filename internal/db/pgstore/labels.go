@@ -155,20 +155,11 @@ func (s *Store) ChangeLabelsAndEvents(
 				return err
 			}
 		}
-		rows, err := tx.QueryContext(ctx,
-			`SELECT label FROM issue_labels WHERE issue_id = $1 ORDER BY label ASC`, issue.ID)
-		if err != nil {
-			return mapSQLError(err, nil)
+		labels, err = federationIssueLabels(ctx, tx, issue.ID)
+		if labels == nil {
+			labels = []string{}
 		}
-		defer func() { _ = rows.Close() }()
-		for rows.Next() {
-			var label string
-			if err := rows.Scan(&label); err != nil {
-				return mapSQLError(err, nil)
-			}
-			labels = append(labels, label)
-		}
-		return mapSQLError(rows.Err(), nil)
+		return err
 	})
 	if err != nil {
 		return nil, nil, err
