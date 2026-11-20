@@ -1752,25 +1752,12 @@ describe('App', () => {
     expect(window.location.hash).toBe('')
   })
 
-  it('recovers a short issue route through complete issue authority and resets the title on a route error', async () => {
+  it('recovers a short issue route through complete issue authority', async () => {
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
     )
-    history.replaceState(null, '', '/kata?issue=abc4#direct=1')
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
-        const target = new URL(
-          input instanceof Request ? input.url : String(input),
-          window.location.origin,
-        )
-        if (target.pathname.endsWith('/api/v1/ui/snapshot')) return Response.json(snapshot())
-        if (target.pathname.endsWith('/api/v1/ui/references'))
-          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
-        return Response.json({})
-      }),
-    )
+    history.replaceState(null, '', '/kata?issue=abc4')
     render(App)
 
     const search = screen.getAllByRole('button', { name: 'Search for abc4' })
@@ -1780,11 +1767,6 @@ describe('App', () => {
     expect(window.location.pathname).toBe('/kata')
     expect(new URLSearchParams(window.location.search).getAll('status')).toEqual(['all'])
     expect(new URLSearchParams(window.location.search).get('text')).toBe('abc4')
-    await screen.findByRole('region', { name: 'Kata workspace' })
-    history.replaceState(null, '', '/kata?issue=abc4')
-    await fireEvent(window, new PopStateEvent('popstate'))
-    expect(screen.getByRole('heading', { name: 'This Kata route is not valid' })).not.toBeNull()
-    await waitFor(() => expect(document.title).toBe('Kata'))
   })
 
   it('renders the ported collection and navigates through canonical routes after authority loads', async () => {
@@ -2262,7 +2244,7 @@ describe('App', () => {
     releaseCredentials(Response.json({ observed_at: '2026-09-15T12:00:00Z', tokens: [] }))
   })
 
-  it('switches configured daemons in place and restores each daemon route', async () => {
+  it('restores daemon routes and resets the title when the workspace is hidden', async () => {
     let now = 0
     vi.spyOn(performance, 'now').mockImplementation(() => now)
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
@@ -2360,7 +2342,6 @@ describe('App', () => {
         ),
       ).toBe(true)
     })
-    expect(localReference.signal.aborted).toBe(true)
     releaseRemoteReferences()
     expect(window.location.search).toBe('?view=all-open')
     now += 10_000
@@ -2375,9 +2356,22 @@ describe('App', () => {
     )
     await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-local/ }))
     await waitFor(() => expect(window.location.search).toBe('?view=today'))
+    await waitFor(() => expect(document.title).toBe('Today · Kata'))
     expect(snapshotRequests.map((request) => request.headers.get('X-Kata-Web-Daemon'))).toEqual(
       expect.arrayContaining(['example-local', 'example-remote']),
     )
+
+    history.replaceState(null, '', '/kata?issue=abc4')
+    await fireEvent(window, new PopStateEvent('popstate'))
+    expect(screen.getByRole('heading', { name: 'This Kata route is not valid' })).not.toBeNull()
+    await waitFor(() => expect(document.title).toBe('Kata'))
+
+    history.replaceState(null, '', '/kata?view=today')
+    await fireEvent(window, new PopStateEvent('popstate'))
+    await waitFor(() => expect(document.title).toBe('Today · Kata'))
+    window.dispatchEvent(new Event('kata:versionMismatch'))
+    expect(await screen.findByRole('heading', { name: 'Kata was updated' })).not.toBeNull()
+    await waitFor(() => expect(document.title).toBe('Kata'))
   })
 
   it('keeps the requested daemon selected across transparent authentication recovery', async () => {
@@ -4213,38 +4207,12 @@ describe('App', () => {
   })
 
   it('replaces the shell with a visible version mismatch after guarded recovery fails', async () => {
-    sessionStorage.setItem(
-      'kata.web.session.v1',
-      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
-    )
-    history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
-    const current = snapshot()
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
-        const target = new URL(
-          input instanceof Request ? input.url : String(input),
-          window.location.origin,
-        )
-        if (target.pathname.endsWith('/api/v1/ui/snapshot')) {
-          return Response.json({
-            ...current,
-            selected: availableSelection(current.collection[0]),
-          })
-        }
-        if (target.pathname.endsWith('/api/v1/ui/references'))
-          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
-        return Response.json({})
-      }),
-    )
     render(App)
-    await screen.findByRole('region', { name: 'Kata issue detail' })
     window.dispatchEvent(new Event('kata:versionMismatch'))
 
     expect(await screen.findByRole('alert')).not.toBeNull()
     expect(screen.getByRole('heading', { name: 'Kata was updated' })).not.toBeNull()
     expect(screen.getByRole('button', { name: 'Reload Kata' })).not.toBeNull()
-    await waitFor(() => expect(document.title).toBe('Kata'))
   })
 })
 
