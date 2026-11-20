@@ -45,7 +45,7 @@ func TestHistoricalMCPOutputsUseCurrentProject(t *testing.T) {
 				args["label"] = "example-label"
 				args["present"] = true
 			case "kata.restore":
-				_, _, _, err := store.SoftDeleteIssue(t.Context(), issue.ID, "worker")
+				_, _, _, err := store.SoftDeleteIssue(t.Context(), issue.ID, "worker", "")
 				require.NoError(t, err)
 			}
 			output := callWorkflowTool(t, session, tool, args)
@@ -72,7 +72,7 @@ func TestHistoricalMCPDestructiveConfirmationUsesCurrentProject(t *testing.T) {
 			verb := "DELETE"
 			if tool == "kata.purge" {
 				verb = "PURGE"
-				_, _, _, err := store.SoftDeleteIssue(t.Context(), issue.ID, "worker")
+				_, _, _, err := store.SoftDeleteIssue(t.Context(), issue.ID, "worker", "")
 				require.NoError(t, err)
 			}
 			canonical := target.Name + "#" + moved.ShortID
@@ -111,7 +111,7 @@ func TestHistoricalMCPDestructiveConfirmationCannotCrossStartupScope(t *testing.
 			verb := "DELETE"
 			if tool == "kata.purge" {
 				verb = "PURGE"
-				_, _, _, err := store.SoftDeleteIssue(t.Context(), issue.ID, "worker")
+				_, _, _, err := store.SoftDeleteIssue(t.Context(), issue.ID, "worker", "")
 				require.NoError(t, err)
 			}
 			before, err := store.MaxEventID(t.Context())

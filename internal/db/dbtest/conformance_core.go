@@ -904,13 +904,20 @@ func checkIssueLifecycle(t *testing.T, store db.Storage) error {
 	assert.Equal(t, "open", reopened.Status)
 	require.NotNil(t, reopenEvent)
 
-	deleted, deleteEvent, changed, err := store.SoftDeleteIssue(ctx, issue.ID, "conformance-agent")
+	deleted, deleteEvent, changed, err := store.SoftDeleteIssue(ctx, issue.ID, "conformance-agent", "duplicate of the import task")
 	if err != nil {
 		return fmt.Errorf("soft delete issue: %w", err)
 	}
 	assert.True(t, changed)
 	require.NotNil(t, deleted.DeletedAt)
 	require.NotNil(t, deleteEvent)
+	var deletePayload struct {
+		DeletedAt string `json:"deleted_at"`
+		Reason    string `json:"reason"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(deleteEvent.Payload), &deletePayload))
+	assert.NotEmpty(t, deletePayload.DeletedAt)
+	assert.Equal(t, "duplicate of the import task", deletePayload.Reason)
 	_, err = store.IssueByShortID(ctx, project.ID, issue.ShortID, db.IncludeDeletedNo)
 	assert.ErrorIs(t, err, db.ErrNotFound)
 	for _, lookupCtx := range []context.Context{ctx, db.WithAuthorizedProjects(ctx, []string{project.UID})} {

@@ -40,7 +40,7 @@ func registerDestructiveHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, issue, actor); err != nil {
 			return nil, err
 		}
-		updated, evt, changed, err := cfg.DB.SoftDeleteIssue(ctx, issue.ID, actor)
+		updated, evt, changed, err := cfg.DB.SoftDeleteIssue(ctx, issue.ID, actor, in.Body.Reason)
 		if errors.Is(err, db.ErrNotFound) {
 			return nil, api.NewError(404, "issue_not_found", "issue not found", "", nil)
 		}

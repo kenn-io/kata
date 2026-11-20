@@ -622,7 +622,7 @@ func TestLegacyExportUIDOnlyPeersRespectProjection(t *testing.T) {
 				peer := createTesterIssue(ctx, t, source, peerProject.ID, "Peer issue", "")
 				peerUID = peer.UID
 				if peerState == "soft-deleted" {
-					_, _, _, err = source.SoftDeleteIssue(ctx, peer.ID, "tester")
+					_, _, _, err = source.SoftDeleteIssue(ctx, peer.ID, "tester", "")
 					require.NoError(t, err)
 				}
 			}
@@ -948,7 +948,7 @@ func TestExportV33LiveOnlyPreservesSignedSoftDeletedPeerOnRestore(t *testing.T) 
 			require.NoError(t, source.ApplyUpstreamAttribution(ctx, pin, receipt))
 			_, err = source.LeaveFederationReplica(ctx, project.ID)
 			require.NoError(t, err)
-			_, _, changed, err := source.SoftDeleteIssue(ctx, peer.ID, "example-actor")
+			_, _, changed, err := source.SoftDeleteIssue(ctx, peer.ID, "example-actor", "")
 			require.NoError(t, err)
 			require.True(t, changed)
 			_, err = source.ExecContext(ctx,

@@ -2363,7 +2363,7 @@ func TestSyncFederationOncePushesAdoptedIssueSnapshotsAndLinks(t *testing.T) {
 		Author:    "legacy-deleted",
 	})
 	require.NoError(t, err)
-	deleted, _, _, err = spoke.DB.SoftDeleteIssue(ctx, deleted.ID, "tester")
+	deleted, _, _, err = spoke.DB.SoftDeleteIssue(ctx, deleted.ID, "tester", "")
 	require.NoError(t, err)
 	comment, _, err := spoke.DB.CreateComment(ctx, db.CreateCommentParams{
 		IssueID: source.ID,

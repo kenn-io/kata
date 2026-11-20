@@ -2,12 +2,19 @@ package main
 
 import (
 	"bytes"
+	"encoding/json/v2"
+	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 )
 
 func TestDelete_NoForceIsValidationError(t *testing.T) {
@@ -25,6 +32,52 @@ func TestDelete_ForceWithConfirmSoftDeletes(t *testing.T) {
 
 	require.NoError(t, f.execute("delete", short, "--force", "--confirm", "DELETE kata#"+short))
 	assert.Contains(t, f.buf.String(), "deleted")
+}
+
+func TestDelete_ReasonIsRecordedOnTheDeleteEvent(t *testing.T) {
+	f := newCLIFixture(t)
+	issue := createIssueViaHTTPFull(t, f.env, f.dir, "to be deleted")
+
+	require.NoError(t, f.execute("delete", issue.ShortID, "--force", "--confirm", "DELETE kata#"+issue.ShortID,
+		"--reason", "duplicate of the import task"))
+
+	events, err := f.env.DB.EventsAfter(t.Context(), db.EventsAfterParams{
+		IssueUID: issue.UID, Types: []string{"issue.soft_deleted"}, Limit: 10,
+	})
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	var payload struct {
+		Reason string `json:"reason"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(events[0].Payload), &payload))
+	assert.Equal(t, "duplicate of the import task", payload.Reason)
+}
+
+func TestDelete_ReasonRejectsOldDaemon(t *testing.T) {
+	env, dir, _ := setupCLIWorkspace(t)
+	short := createIssueViaHTTP(t, env, dir, "to be deleted")
+	target, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	var deletes atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/health" {
+			_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.61.0"}`))
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/actions/delete") {
+			deletes.Add(1)
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	defer server.Close()
+	old := *env
+	old.URL = server.URL
+
+	_, err = runCLICapture(t, &old, dir, "delete", short, "--force", "--confirm", "DELETE kata#"+short,
+		"--reason", "duplicate of the import task")
+	require.ErrorContains(t, err, "requires daemon API 0.63.0")
+	assert.Zero(t, deletes.Load())
 }
 
 func TestDelete_AgentOutput(t *testing.T) {

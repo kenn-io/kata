@@ -23,7 +23,7 @@ import (
 // where the user types the short_id.
 func newDeleteCmd() *cobra.Command {
 	var force bool
-	var confirm string
+	var confirm, reason string
 	cmd := &cobra.Command{
 		Use:   "delete <issue-ref>",
 		Short: "soft-delete an issue (reversible via kata restore)",
@@ -52,17 +52,29 @@ the user asked for this exact issue.`,
 			if err != nil {
 				return err
 			}
+			var extra map[string]any
+			if reason != "" {
+				client, err := httpClientFor(ctx, baseURL)
+				if err != nil {
+					return err
+				}
+				if err := requireDaemonAPIVersion(ctx, client, baseURL, apiVersionDeleteReason, "delete --reason"); err != nil {
+					return err
+				}
+				extra = map[string]any{"reason": reason}
+			}
 			expected := fmt.Sprintf("DELETE %s", issue.QualifiedID)
 			confirm, err = resolveConfirm(cmd, confirm, expected,
 				fmt.Sprintf("Type %q to confirm: ", expected))
 			if err != nil {
 				return err
 			}
-			return runDestructive(ctx, cmd, baseURL, pid, issue.RefForAPI, issue.QualifiedID, requestedProject, "delete", confirm, nil)
+			return runDestructive(ctx, cmd, baseURL, pid, issue.RefForAPI, issue.QualifiedID, requestedProject, "delete", confirm, extra)
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "required to perform the soft delete")
 	cmd.Flags().StringVar(&confirm, "confirm", "", `exact confirmation string ("DELETE <qualified-id>")`)
+	cmd.Flags().StringVar(&reason, "reason", "", "free-text reason recorded on the issue.soft_deleted event")
 	return cmd
 }
 

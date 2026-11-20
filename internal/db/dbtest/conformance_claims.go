@@ -197,7 +197,7 @@ func checkClaimLeaseLifecycle(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return fmt.Errorf("claim issue before deletion: %w", err)
 	}
-	if _, _, _, err := store.SoftDeleteIssue(ctx, deleted.ID, "worker"); err != nil {
+	if _, _, _, err := store.SoftDeleteIssue(ctx, deleted.ID, "worker", ""); err != nil {
 		return err
 	}
 	status, err = store.ClaimStatusReadOnly(ctx, project.ID, deleted.UID, now.Add(12*time.Hour))
@@ -616,7 +616,7 @@ func checkPendingClaimAndCacheLifecycle(t *testing.T, store db.Storage, backend 
 	assert.ErrorIs(t, err, db.ErrNotFound)
 	assert.ErrorIs(t, store.MarkClaimStatusRefreshError(ctx, 0, issue.UID, 500, "bad", now), db.ErrNotFound)
 
-	if _, _, _, err := store.SoftDeleteIssue(ctx, deletedIssue.ID, "worker"); err != nil {
+	if _, _, _, err := store.SoftDeleteIssue(ctx, deletedIssue.ID, "worker", ""); err != nil {
 		return err
 	}
 	deletedClaimUID, err := uid.New()

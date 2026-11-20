@@ -213,7 +213,7 @@ agentsview_url="https://second.example"
 			issue, err := env.DB.IssueByShortID(t.Context(), pid, ref, db.IncludeDeletedNo)
 			require.NoError(t, err)
 			if change == "deleted" {
-				_, _, _, err = env.DB.SoftDeleteIssue(t.Context(), issue.ID, "tester")
+				_, _, _, err = env.DB.SoftDeleteIssue(t.Context(), issue.ID, "tester", "")
 			} else {
 				var target db.Project
 				target, err = env.DB.CreateProject(t.Context(), "other")

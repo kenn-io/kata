@@ -43,9 +43,9 @@ func checkCommentGraphDeletedSource(t *testing.T, store db.Storage) error {
 		IfMatchRev: currentMoved.Revision, Actor: "worker",
 	})
 	require.NoError(t, err)
-	_, _, _, err = store.SoftDeleteIssue(ctx, removedTarget.ID, "worker")
+	_, _, _, err = store.SoftDeleteIssue(ctx, removedTarget.ID, "worker", "")
 	require.NoError(t, err)
-	_, _, _, err = store.SoftDeleteIssue(ctx, source.ID, "worker")
+	_, _, _, err = store.SoftDeleteIssue(ctx, source.ID, "worker", "")
 	require.NoError(t, err)
 
 	graph, err := store.ReadCommentGraph(ctx, db.CommentGraphQuery{

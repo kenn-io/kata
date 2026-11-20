@@ -36,7 +36,7 @@ func TestRelayRestoredArtifactDelivery(t *testing.T) {
 				original, err := sender.store.PendingRelayDeliveries(t.Context(), binding.RelayConfig.BindingUID, db.RelayStreamArtifact, 32)
 				require.NoError(t, err)
 				require.Len(t, original, 1)
-				_, _, _, err = sender.store.SoftDeleteIssue(t.Context(), issue.ID, sender.account)
+				_, _, _, err = sender.store.SoftDeleteIssue(t.Context(), issue.ID, sender.account, "")
 				require.NoError(t, err)
 				syncRelayMatrixNode(t, personal)
 				_, err = receiver.store.(db.EmbeddingArtifactStorage).StoredEmbeddingArtifact(t.Context(), root.project.UID, artifact.Digest)
@@ -75,7 +75,7 @@ func TestRelayRestoredArtifactDelivery(t *testing.T) {
 					require.Empty(t, pending, "repeat retention must not create another generation")
 					require.Equal(t, retained, restoredArtifactOutbox(t, sender.store, original[0].Sequence), "old emitted envelope and acknowledgement remain immutable")
 					if cycle == 0 {
-						_, _, _, err = sender.store.SoftDeleteIssue(t.Context(), issue.ID, sender.account)
+						_, _, _, err = sender.store.SoftDeleteIssue(t.Context(), issue.ID, sender.account, "")
 						require.NoError(t, err)
 						syncRelayMatrixNode(t, personal)
 					}

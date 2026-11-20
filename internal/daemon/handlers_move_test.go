@@ -526,7 +526,7 @@ func TestEditIssue_CrossProjectLinkTargets(t *testing.T) {
 		ProjectID: tgt.ID, Title: "soft-deleted foreign peer", Author: "tester",
 	})
 	require.NoError(t, err)
-	_, _, _, err = env.DB.SoftDeleteIssue(t.Context(), softDeleted.ID, "tester")
+	_, _, _, err = env.DB.SoftDeleteIssue(t.Context(), softDeleted.ID, "tester", "")
 	require.NoError(t, err)
 	body = fmt.Sprintf(`{"actor":"tester","links_delta":{"add_related":[%q]}}`, softDeleted.UID)
 	resp = doPatch(t, env, subjectPath, body, "")

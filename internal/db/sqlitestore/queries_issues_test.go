@@ -168,7 +168,7 @@ func TestIssueByShortID_DefaultExcludesSoftDeleted(t *testing.T) {
 		Author:    "tester",
 	})
 	require.NoError(t, err)
-	_, _, _, err = d.SoftDeleteIssue(ctx, created.ID, "tester")
+	_, _, _, err = d.SoftDeleteIssue(ctx, created.ID, "tester", "")
 	require.NoError(t, err)
 
 	_, err = d.IssueByShortID(ctx, p.ID, created.ShortID, db.IncludeDeletedNo)
@@ -190,7 +190,7 @@ func TestIssueByShortID_IncludeDeletedYesResolvesSoftDeleted(t *testing.T) {
 		Author:    "tester",
 	})
 	require.NoError(t, err)
-	_, _, _, err = d.SoftDeleteIssue(ctx, created.ID, "tester")
+	_, _, _, err = d.SoftDeleteIssue(ctx, created.ID, "tester", "")
 	require.NoError(t, err)
 
 	got, err := d.IssueByShortID(ctx, p.ID, created.ShortID, db.IncludeDeletedYes)
@@ -288,7 +288,7 @@ func TestListAllIssues_ExcludesSoftDeleted(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
 	live, _ := createTesterIssue(ctx, t, d, p.ID, "live")
 	doomed, _ := createTesterIssue(ctx, t, d, p.ID, "doomed")
-	_, _, _, err := d.SoftDeleteIssue(ctx, doomed.ID, "x")
+	_, _, _, err := d.SoftDeleteIssue(ctx, doomed.ID, "x", "")
 	require.NoError(t, err)
 
 	got, err := d.ListAllIssues(ctx, db.ListAllIssuesParams{})

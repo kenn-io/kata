@@ -753,7 +753,7 @@ func TestOutcomesEmptySearchCLI(t *testing.T) {
 				require.NoError(t, json.Unmarshal([]byte(output), &page))
 				require.NotEmpty(t, page.Next)
 				for _, issue := range issues {
-					_, _, _, err := env.DB.SoftDeleteIssue(t.Context(), issue.ID, "example-user")
+					_, _, _, err := env.DB.SoftDeleteIssue(t.Context(), issue.ID, "example-user", "")
 					require.NoError(t, err)
 				}
 				tc.args = append(tc.args, "--cursor", page.Next)

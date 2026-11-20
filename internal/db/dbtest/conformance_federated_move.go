@@ -41,7 +41,7 @@ func checkFederatedIssueMove(t *testing.T, hub db.Storage, backend Backend) erro
 		historical, err := hub.IssueByShortID(ctx, source.ID, "d4ex", db.IncludeDeletedNo)
 		require.NoError(t, err)
 		require.Equal(t, issue.UID, historical.UID)
-		_, _, _, err = hub.SoftDeleteIssue(ctx, got.ID, "worker")
+		_, _, _, err = hub.SoftDeleteIssue(ctx, got.ID, "worker", "")
 		require.NoError(t, err)
 		_, err = hub.PurgeIssue(ctx, got.ID, "worker", nil)
 		require.NoError(t, err)

@@ -66,7 +66,7 @@ func TestAutoCutoverPreservesIssueContentRevision(t *testing.T) {
 				IssueID: deleted.ID, Title: &title, Actor: "tester",
 			})
 			require.NoError(t, err)
-			_, _, _, err = source.SoftDeleteIssue(ctx, deleted.ID, "tester")
+			_, _, _, err = source.SoftDeleteIssue(ctx, deleted.ID, "tester", "")
 			require.NoError(t, err)
 
 			zeroEdits, _, err := source.CreateIssue(ctx, db.CreateIssueParams{

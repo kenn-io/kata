@@ -71,7 +71,7 @@ func checkLocalCommentReplies(t *testing.T, store db.Storage) error {
 	params.ReplyToUID = foreignComment.UID
 	_, _, err = store.CreateComment(ctx, params)
 	require.ErrorIs(t, err, db.ErrCommentReplyTarget)
-	_, _, _, err = store.SoftDeleteIssue(ctx, target.ID, "worker")
+	_, _, _, err = store.SoftDeleteIssue(ctx, target.ID, "worker", "")
 	require.NoError(t, err)
 	params.ReplyToUID = finding.UID
 	_, _, err = store.CreateComment(ctx, params)

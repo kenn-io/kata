@@ -837,7 +837,7 @@ func TestMCPEventsIssueLifecycleWakesOnlyTheRequestedRecipient(t *testing.T) {
 
 		// childIssue carries no request; publicIssue asks example-user for work.
 		deleteAndRestore := func(issue db.Issue) {
-			_, _, _, err := store.SoftDeleteIssue(ctx, issue.ID, "coordinator")
+			_, _, _, err := store.SoftDeleteIssue(ctx, issue.ID, "coordinator", "")
 			require.NoError(t, err)
 			_, _, _, err = store.RestoreIssue(ctx, issue.ID, "coordinator")
 			require.NoError(t, err)
@@ -945,7 +945,7 @@ func TestMCPEventsScopedRestoreOfAnIntermediateParentWakes(t *testing.T) {
 					args.IssueUID = grandchild.UID
 				}
 				subscribeEvents(t, service, f.scoped, args)
-				_, _, _, err = store.SoftDeleteIssue(ctx, f.childIssue.ID, "coordinator")
+				_, _, _, err = store.SoftDeleteIssue(ctx, f.childIssue.ID, "coordinator", "")
 				require.NoError(t, err)
 				require.NoError(t, service.Drain(ctx))
 				got.pings.Store(0)

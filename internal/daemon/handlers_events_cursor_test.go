@@ -136,10 +136,10 @@ func TestScopedEventPayloadProjectsLifecycleAndMoveEvents(t *testing.T) {
 		want      string
 	}{
 		{
-			name:      "soft delete timestamp",
+			name:      "soft delete timestamp and reason",
 			eventType: "issue.soft_deleted",
-			payload:   `{"deleted_at":"2026-09-15T01:02:03Z"}`,
-			want:      `{"deleted_at":"2026-09-15T01:02:03Z"}`,
+			payload:   `{"deleted_at":"2026-09-15T01:02:03Z","reason":"duplicate of the import task"}`,
+			want:      `{"deleted_at":"2026-09-15T01:02:03Z","reason":"duplicate of the import task"}`,
 		},
 		{
 			name:      "restore timestamps",

@@ -212,7 +212,7 @@ func checkListExactTitle(t *testing.T, store db.Storage) error {
 		create(project.ID, title)
 	}
 	deleted := create(project.ID, "Inventory crash!")
-	_, _, _, err = store.SoftDeleteIssue(ctx, deleted.ID, "tester")
+	_, _, _, err = store.SoftDeleteIssue(ctx, deleted.ID, "tester", "")
 	require.NoError(t, err)
 	params := db.ListIssuesParams{ProjectID: project.ID, ExactTitle: "Inventory crash!", CreatedFirst: true, Limit: 20}
 	rows, err := store.ListIssues(ctx, params)
