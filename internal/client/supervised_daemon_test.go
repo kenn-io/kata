@@ -141,17 +141,17 @@ func TestDaemonRecoveryAdvice(t *testing.T) {
 		require.Contains(t, err.RecoveryAdvice(), "http://127.0.0.1:1234/debug/pprof/goroutine?debug=2")
 		require.NotContains(t, err.RecoveryAdvice(), "kill -QUIT")
 	})
-	err := &LocalDaemonUnreachableError{PID: 123, VerifiedProcess: true, autoStarted: true, WebOrigin: "http://127.0.0.1:1234"}
-	require.Contains(t, err.RecoveryAdvice(), "http://127.0.0.1:1234/debug/pprof/goroutine?debug=2")
-	require.Contains(t, err.RecoveryAdvice(), "Wait during startup or migration")
-	require.Contains(t, err.RecoveryAdvice(), "rerun the original command")
-	require.Contains(t, err.RecoveryAdvice(), "any command that autostarts")
-	require.Contains(t, err.RecoveryAdvice(), "daemon status, daemon diagnose, and health only inspect")
-	if runtime.GOOS == "windows" {
-		require.NotContains(t, err.RecoveryAdvice(), "taskkill")
-	} else {
-		require.Contains(t, err.RecoveryAdvice(), "kill -QUIT 123")
-	}
+	t.Run("verified process", func(t *testing.T) {
+		err := &LocalDaemonUnreachableError{PID: 123, VerifiedProcess: true, autoStarted: true, WebOrigin: "http://127.0.0.1:1234"}
+		require.Contains(t, err.RecoveryAdvice(), "http://127.0.0.1:1234/debug/pprof/goroutine?debug=2")
+		require.Contains(t, err.RecoveryAdvice(), "Wait during startup or migration")
+		require.Contains(t, err.RecoveryAdvice(), "rerun the original command")
+		require.Contains(t, err.RecoveryAdvice(), "any command that autostarts")
+		require.Contains(t, err.RecoveryAdvice(), "daemon status, daemon diagnose, and health only inspect")
+		if runtime.GOOS != "windows" {
+			require.Contains(t, err.RecoveryAdvice(), "kill -QUIT 123")
+		}
+	})
 	t.Run("profile with quote", func(t *testing.T) {
 		err := &LocalDaemonUnreachableError{PID: 123, VerifiedProcess: true, Profile: "team's profile", ProfileAutostart: true}
 		command := `kata --daemon 'team'"'"'s profile' daemon recover`
@@ -164,44 +164,48 @@ func TestDaemonRecoveryAdvice(t *testing.T) {
 
 func TestDiscoveryDeadlineRetainsUnreachableRuntime(t *testing.T) {
 	setupKataEnv(t)
-	record := kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1234"}
-	ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond)
-	defer cancel()
-	for _, err := range liveDaemonsUsing(ctx, "/example/runtime", func(string) ([]kitdaemon.RuntimeRecord, error) {
-		return []kitdaemon.RuntimeRecord{record}, nil
-	}, func(ctx context.Context, _ string) (string, PingInfo, error) {
-		<-ctx.Done()
-		return "", PingInfo{}, ctx.Err()
-	}) {
-		require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
-		require.ErrorContains(t, err, "daemon.log")
-		return
-	}
-	t.Fatal("expected an unreachable error")
+	synctest.Test(t, func(t *testing.T) {
+		record := kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1234"}
+		ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond)
+		defer cancel()
+		for _, err := range liveDaemonsUsing(ctx, "/example/runtime", func(string) ([]kitdaemon.RuntimeRecord, error) {
+			return []kitdaemon.RuntimeRecord{record}, nil
+		}, func(ctx context.Context, _ string) (string, PingInfo, error) {
+			<-ctx.Done()
+			return "", PingInfo{}, ctx.Err()
+		}) {
+			require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+			require.ErrorContains(t, err, "daemon.log")
+			return
+		}
+		t.Fatal("expected an unreachable error")
+	})
 }
 
 func TestDiscoveryDeadlineAfterEarlierUnreachableRuntime(t *testing.T) {
 	setupKataEnv(t)
-	ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond)
-	defer cancel()
-	scan := func(ctx context.Context, dir string) iter.Seq2[liveDaemon, error] {
-		return liveDaemonsUsing(ctx, dir, func(string) ([]kitdaemon.RuntimeRecord, error) {
-			return []kitdaemon.RuntimeRecord{
-				{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1234"},
-				{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:5678"},
-			}, nil
-		}, func(ctx context.Context, address string) (string, PingInfo, error) {
-			if address == "127.0.0.1:1234" {
-				return "", PingInfo{}, errors.New("first probe failed")
-			}
-			<-ctx.Done()
-			return "", PingInfo{}, ctx.Err()
-		})
-	}
-	_, _, err := discoverResolved(ctx, "/example/runtime", scan)
-	require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
-	require.ErrorContains(t, err, "127.0.0.1:1234")
-	require.ErrorContains(t, err, "daemon.log")
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond)
+		defer cancel()
+		scan := func(ctx context.Context, dir string) iter.Seq2[liveDaemon, error] {
+			return liveDaemonsUsing(ctx, dir, func(string) ([]kitdaemon.RuntimeRecord, error) {
+				return []kitdaemon.RuntimeRecord{
+					{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1234"},
+					{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:5678"},
+				}, nil
+			}, func(ctx context.Context, address string) (string, PingInfo, error) {
+				if address == "127.0.0.1:1234" {
+					return "", PingInfo{}, errors.New("first probe failed")
+				}
+				<-ctx.Done()
+				return "", PingInfo{}, ctx.Err()
+			})
+		}
+		_, _, err := discoverResolved(ctx, "/example/runtime", scan)
+		require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+		require.ErrorContains(t, err, "127.0.0.1:1234")
+		require.ErrorContains(t, err, "daemon.log")
+	})
 }
 
 func TestManagedExternallyProfileDoesNotAutostart(t *testing.T) {

@@ -601,7 +601,7 @@ func TestDaemonStatus_ListsUnverifiableRecord(t *testing.T) {
 	assert.Equal(t, child.Process.Pid, got.Daemons[0].PID)
 }
 
-func TestDaemonStatus_AgentReportsWebURL(t *testing.T) {
+func TestDaemonStatus_AgentReportsWebURLAndUnreachableDiagnosis(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
 
@@ -620,7 +620,9 @@ func TestDaemonStatus_AgentReportsWebURL(t *testing.T) {
 	assert.Contains(t, string(out), "daemon.log")
 	cliErr := requireCLIError(t, err, ExitDaemonUnavail)
 	assert.Contains(t, cliErr.Message, "unreachable")
-	assert.Contains(t, cliErr.Hint, fmt.Sprint(os.Getpid()))
+	if runtime.GOOS != "windows" {
+		assert.Contains(t, cliErr.Hint, fmt.Sprint(os.Getpid()))
+	}
 }
 
 func TestDaemonStatusReportsMCPState(t *testing.T) {

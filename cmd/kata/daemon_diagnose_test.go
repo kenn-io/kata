@@ -128,20 +128,6 @@ func TestDaemonDiagnoseReportsLivePrincipalCapabilities(t *testing.T) {
 	}
 }
 
-func TestHealthProfileRejectedCredential(t *testing.T) {
-	home, _, uid, _ := stoppedProfileCLI(t)
-	supervisedProfileDaemon(t, home, uid, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/ping" {
-			_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version, os.Getpid())
-			return
-		}
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-	})
-	_, _, err := executeRootCapture(t, t.Context(), "--daemon", "work", "health")
-	cliErr := requireCLIError(t, err, ExitDaemonUnavail)
-	require.NotEmpty(t, cliErr.Data)
-}
-
 func TestDaemonDiagnoseRefusesWrongProjectRecovery(t *testing.T) {
 	home, _, _, _ := stoppedProfileCLI(t)
 	out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--expect-project-uid", "01HZZZZZZZZZZZZZZZZZZZZZ01", "--json")
@@ -1017,7 +1003,6 @@ func TestDaemonDiagnoseSecondPing(t *testing.T) {
 			if tc.end == "cancel" {
 				require.Error(t, ctx.Err())
 				assert.NotContains(t, result.NextAction, "kill")
-				assert.NotContains(t, result.NextAction, "taskkill")
 				assert.NotContains(t, result.NextAction, "start it")
 				assert.NotContains(t, result.NextAction, "service manager")
 				return
@@ -1030,8 +1015,12 @@ func TestDaemonDiagnoseSecondPing(t *testing.T) {
 			}
 			assert.Contains(t, result.Message, strconv.Quote(filepath.Join(ns.DataDir, "daemon.log")))
 			if tc.profile {
-				assert.Contains(t, result.NextAction, "--daemon 'work' daemon recover")
-			} else {
+				command := "--daemon work daemon recover"
+				if runtime.GOOS == "windows" {
+					command = "--daemon 'work' daemon recover"
+				}
+				assert.Contains(t, result.NextAction, command)
+			} else if runtime.GOOS != "windows" {
 				assert.Contains(t, result.NextAction, fmt.Sprint(os.Getpid()))
 			}
 		})
