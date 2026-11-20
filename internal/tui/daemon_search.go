@@ -281,8 +281,12 @@ func (m Model) guardAnswer(connGen uint64, req int64, query SearchQuery) (Model,
 func (m Model) failAsk(err error) Model {
 	m.list.ranked.pending = false
 	m.list.ranked.err = err
-	m.list.status = errorStyle.Render("search failed: " + sanitizeForLine(err.Error()))
+	m.list.status = searchFailedStatus(err)
 	return m
+}
+
+func searchFailedStatus(err error) string {
+	return errorStyle.Render("search failed: " + sanitizeForLine(err.Error()))
 }
 
 func (m Model) handleDaemonSearchDone(msg daemonSearchDoneMsg) (Model, tea.Cmd) {

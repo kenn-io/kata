@@ -161,11 +161,10 @@ func TestDaemonSearch_FailureBeforeAnyAnswerShowsOnceAtEverySize(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
 		width, height int
-		want          int
 	}{
-		{"full height", 80, 24, 1},
-		{"compact", 100, 8, 1},
-		{"split", 160, 40, 1},
+		{"full height", 80, 24},
+		{"compact", 100, 8},
+		{"split", 160, 40},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m, api := daemonSearchFixture(t)
@@ -175,8 +174,11 @@ func TestDaemonSearch_FailureBeforeAnyAnswerShowsOnceAtEverySize(t *testing.T) {
 			m, _ = stepModel(m, ctrlT)
 			m, cmds := typeText(m, "pay")
 			m = settleSearch(m, cmds...)
+			require.Equal(t, 1, strings.Count(stripANSI(m.View().Content), "search failed"))
 
-			require.Equal(t, tc.want, strings.Count(stripANSI(m.View().Content), "search failed"))
+			// A later reply that takes the status line must not hide the failure.
+			m.list.status = "closed #42"
+			require.Equal(t, 1, strings.Count(stripANSI(m.View().Content), "search failed"))
 		})
 	}
 }

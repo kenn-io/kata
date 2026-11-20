@@ -103,9 +103,9 @@ func (lm listModel) ViewBody(width, bodyRows int, chrome viewChrome) string {
 }
 
 // statsNote is the daemon-search note for the stats line. A failure before
-// any answer is left off when the info line already draws it in full.
+// any answer is left off while the info line draws that failure in full.
 func (lm listModel) statsNote(chrome viewChrome) string {
-	if chrome.statusOnInfo && lm.ranked.err != nil && lm.status != "" && !lm.rankedShown() {
+	if chrome.statusOnInfo && lm.ranked.err != nil && !lm.rankedShown() && lm.status == searchFailedStatus(lm.ranked.err) {
 		return ""
 	}
 	return lm.rankedNote()
