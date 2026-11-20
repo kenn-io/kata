@@ -2,8 +2,15 @@ package pgstore
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/hkdf"
+	"crypto/rand"
+	"crypto/sha256"
 	"database/sql/driver"
-	"encoding/json/v2"
+	"encoding/base64"
+	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sync"
@@ -13,9 +20,24 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-// federationPollWakeChannel is shared by every schema in a database; each
-// notification names its schema so other installations ignore it.
-const federationPollWakeChannel = "kata_federation_poll"
+// LISTEN and NOTIFY carry no privileges: any role that can connect to the
+// database can listen on a channel or notify it. The channel name and an AES-GCM
+// key are therefore derived from meta.instance_uid, which a role without access
+// to this schema cannot read, so such a role can neither find the channel, read
+// which project committed, nor wake held polls. The schema name is part of the
+// derivation so schemas that share an instance UID, as an import can leave
+// them, stay apart.
+const (
+	pollWakeChannelInfo = "kata federation poll wake channel v1\x00"
+	pollWakeKeyInfo     = "kata federation poll wake key v1\x00"
+	// pollWakeChannelBytes keeps the hex channel name within PostgreSQL's
+	// 63-byte identifier limit.
+	pollWakeChannelBytes = 24
+	pollWakeSenderBytes  = 16
+	pollWakeHeaderBytes  = pollWakeSenderBytes + 8
+	// pollWakeMaxNotifyBytes is PostgreSQL's limit on a NOTIFY payload.
+	pollWakeMaxNotifyBytes = 7999
+)
 
 var _ db.FederationPollWakeBus = (*Store)(nil)
 
@@ -25,6 +47,19 @@ type pollWakeState struct {
 	mu        sync.Mutex
 	closed    bool
 	listeners map[*context.CancelFunc]struct{}
+	// sender and counter let listeners drop replayed notifications. publishMu
+	// holds the counter through the NOTIFY so counters commit in order.
+	sender    [pollWakeSenderBytes]byte
+	publishMu sync.Mutex
+	counter   uint64
+}
+
+func newPollWakeState() (*pollWakeState, error) {
+	state := &pollWakeState{listeners: map[*context.CancelFunc]struct{}{}}
+	if _, err := rand.Read(state.sender[:]); err != nil {
+		return nil, fmt.Errorf("generate federation poll wake sender: %w", err)
+	}
+	return state, nil
 }
 
 // close marks the bus closed and ends every listener. It reports whether this
@@ -66,9 +101,28 @@ func (p *pollWakeState) listen(ctx context.Context) (context.Context, func(), bo
 	}, true
 }
 
-type federationPollWakeNotification struct {
-	Schema  string `json:"schema"`
-	Payload string `json:"payload"`
+// pollWakeKeys derives the channel name and payload cipher for this schema.
+func (s *Store) pollWakeKeys() (string, cipher.AEAD, error) {
+	if s.instanceUID == "" {
+		return "", nil, errors.New("federation poll wake needs the instance UID")
+	}
+	channel, err := hkdf.Key(sha256.New, []byte(s.instanceUID), nil, pollWakeChannelInfo+s.schema, pollWakeChannelBytes)
+	if err != nil {
+		return "", nil, fmt.Errorf("derive federation poll wake channel: %w", err)
+	}
+	key, err := hkdf.Key(sha256.New, []byte(s.instanceUID), nil, pollWakeKeyInfo+s.schema, 32)
+	if err != nil {
+		return "", nil, fmt.Errorf("derive federation poll wake key: %w", err)
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", nil, fmt.Errorf("federation poll wake cipher: %w", err)
+	}
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", nil, fmt.Errorf("federation poll wake cipher: %w", err)
+	}
+	return hex.EncodeToString(channel), aead, nil
 }
 
 // PublishFederationPollWake notifies every hub process listening on this
@@ -77,11 +131,27 @@ func (s *Store) PublishFederationPollWake(ctx context.Context, payload string) e
 	if s.pollWakeDB == nil || s.pollWake.isClosed() {
 		return db.ErrFederationPollWakeClosed
 	}
-	message, err := json.Marshal(federationPollWakeNotification{Schema: s.schema, Payload: payload})
+	channel, aead, err := s.pollWakeKeys()
 	if err != nil {
 		return err
 	}
-	if _, err := s.pollWakeDB.ExecContext(ctx, `SELECT pg_notify($1,$2)`, federationPollWakeChannel, string(message)); err != nil {
+	p := s.pollWake
+	p.publishMu.Lock()
+	defer p.publishMu.Unlock()
+	p.counter++
+	plaintext := make([]byte, pollWakeHeaderBytes, pollWakeHeaderBytes+len(payload))
+	copy(plaintext, p.sender[:])
+	binary.BigEndian.PutUint64(plaintext[pollWakeSenderBytes:], p.counter)
+	plaintext = append(plaintext, payload...)
+	nonce := make([]byte, aead.NonceSize(), aead.NonceSize()+len(plaintext)+aead.Overhead())
+	if _, err := rand.Read(nonce); err != nil {
+		return fmt.Errorf("generate federation poll wake nonce: %w", err)
+	}
+	message := base64.RawStdEncoding.EncodeToString(aead.Seal(nonce, nonce, plaintext, nil))
+	if len(message) > pollWakeMaxNotifyBytes {
+		return fmt.Errorf("federation poll wake payload of %d bytes exceeds the NOTIFY limit", len(payload))
+	}
+	if _, err := s.pollWakeDB.ExecContext(ctx, `SELECT pg_notify($1,$2)`, channel, message); err != nil {
 		return s.pollWakeError("publish federation poll wake", err)
 	}
 	return nil
@@ -98,6 +168,10 @@ func (s *Store) ListenFederationPollWake(ctx context.Context, listening func(), 
 		return db.ErrFederationPollWakeClosed
 	}
 	defer done()
+	channel, aead, err := s.pollWakeKeys()
+	if err != nil {
+		return err
+	}
 	conn, err := s.pollWakeDB.Conn(ctx)
 	if err != nil {
 		return s.pollWakeError("open federation poll wake listener", err)
@@ -105,7 +179,7 @@ func (s *Store) ListenFederationPollWake(ctx context.Context, listening func(), 
 	defer func() { _ = conn.Close() }()
 	err = conn.Raw(func(driverConn any) error {
 		// The connection holds LISTEN, so it must never return to the pool.
-		return errors.Join(listenFederationPollWake(ctx, s.schema, driverConn, listening, deliver), driver.ErrBadConn)
+		return errors.Join(listenFederationPollWake(ctx, channel, aead, driverConn, listening, deliver), driver.ErrBadConn)
 	})
 	return s.pollWakeError("listen for federation poll wakes", err)
 }
@@ -122,25 +196,41 @@ func (s *Store) pollWakeError(action string, err error) error {
 	return fmt.Errorf("%s: %w", action, err)
 }
 
-func listenFederationPollWake(ctx context.Context, schema string, driverConn any, listening func(), deliver func(payload string)) error {
+func listenFederationPollWake(ctx context.Context, channel string, aead cipher.AEAD, driverConn any, listening func(), deliver func(payload string)) error {
 	raw, ok := driverConn.(*stdlib.Conn)
 	if !ok {
 		return fmt.Errorf("unexpected postgres driver connection %T", driverConn)
 	}
 	listener := raw.Conn()
-	if _, err := listener.Exec(ctx, "LISTEN "+pgx.Identifier{federationPollWakeChannel}.Sanitize()); err != nil {
+	if _, err := listener.Exec(ctx, "LISTEN "+pgx.Identifier{channel}.Sanitize()); err != nil {
 		return fmt.Errorf("listen for federation poll wakes: %w", err)
 	}
 	listening()
+	// Each sender's counter only grows, so a notification at or below the last
+	// one seen from that sender is a replay.
+	seen := map[[pollWakeSenderBytes]byte]uint64{}
 	for {
 		notification, err := listener.WaitForNotification(ctx)
 		if err != nil {
 			return fmt.Errorf("wait for federation poll wake: %w", err)
 		}
-		var message federationPollWakeNotification
-		if json.Unmarshal([]byte(notification.Payload), &message) != nil || message.Schema != schema {
+		sealed, err := base64.RawStdEncoding.DecodeString(notification.Payload)
+		if err != nil {
 			continue
 		}
-		deliver(message.Payload)
+		if len(sealed) < aead.NonceSize() {
+			continue
+		}
+		plaintext, err := aead.Open(nil, sealed[:aead.NonceSize()], sealed[aead.NonceSize():], nil)
+		if err != nil || len(plaintext) < pollWakeHeaderBytes {
+			continue
+		}
+		sender := [pollWakeSenderBytes]byte(plaintext[:pollWakeSenderBytes])
+		counter := binary.BigEndian.Uint64(plaintext[pollWakeSenderBytes:pollWakeHeaderBytes])
+		if counter <= seen[sender] {
+			continue
+		}
+		seen[sender] = counter
+		deliver(string(plaintext[pollWakeHeaderBytes:]))
 	}
 }
