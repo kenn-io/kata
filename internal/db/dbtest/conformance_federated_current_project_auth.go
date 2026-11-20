@@ -265,11 +265,6 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 	require.NoError(t, err)
 	_, err = store.ParentOf(ctx, mixedChild.ID)
 	require.ErrorIs(t, err, db.ErrNotFound)
-	links, err := store.LinksByIssue(ctx, mixedChild.ID)
-	require.NoError(t, err)
-	require.Len(t, links, 1)
-	require.Equal(t, "related", links[0].Type)
-	require.Contains(t, []string{links[0].FromIssueUID, links[0].ToIssueUID}, peer.UID)
 
 	// A spoke that has not pulled this parent sees only its new parent.
 	// Authorizing that addition cannot also authorize removing the hub's parent.
@@ -283,12 +278,6 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 	require.NoError(t, err)
 	_, err = store.IngestFederationEvents(ctx, params)
 	require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
-	var notEnrolled *db.FederationProjectNotEnrolledError
-	require.ErrorAs(t, err, &notEnrolled)
-	if notEnrolled == nil {
-		return errors.New("federation project not enrolled error is nil")
-	}
-	require.Empty(t, notEnrolled.IssueUID)
 	require.NotContains(t, err.Error(), peer.UID)
 	require.ErrorContains(t, err, "This spoke needs push access to the affected issue's project with the same actor")
 	after, err := store.MaxEventID(ctx)

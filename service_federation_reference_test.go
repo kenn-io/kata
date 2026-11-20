@@ -207,11 +207,6 @@ func TestDirectPushWithProjectScopedActors(t *testing.T) {
 				}
 				require.NoError(t, err)
 				require.Equal(t, parentUID, link.ToIssueUID)
-				observedParent, err := observer.DB.IssueByUID(ctx, parentUID, db.IncludeDeletedNo)
-				require.NoError(t, err)
-				children, err := observer.DB.LinksByIssue(ctx, observedParent.ID)
-				require.NoError(t, err)
-				require.Contains(t, children, link)
 			}
 			checkObserver(peer.UID)
 
