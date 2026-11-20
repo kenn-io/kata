@@ -229,6 +229,36 @@ func TestRefreshMirrorProjectPolicyAdvancesPastExcludedPage(t *testing.T) {
 	}
 }
 
+func TestRefreshMirrorProjectPolicyChangesBetweenPages(t *testing.T) {
+	ctx := t.Context()
+	ix := openTestIndex(t)
+	st := &fakeStorage{}
+	for i := range mirrorPageSize + 1 {
+		st.issues = append(st.issues, db.IssueContent{ID: int64(i + 1), UID: fmt.Sprint(i), ProjectUID: "project", Title: "issue", ContentRevision: 1})
+	}
+	calls := 0
+	_, err := ix.RefreshMirror(ctx, st, func(_ context.Context, project string) (bool, error) {
+		if project != "project" {
+			t.Fatalf("unexpected project %q", project)
+		}
+		calls++
+		return calls == 1, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := ix.MirrorRowsForTest(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != mirrorPageSize {
+		t.Fatalf("mirror rows = %d, want %d", len(rows), mirrorPageSize)
+	}
+	if _, ok := rows[fmt.Sprint(mirrorPageSize)]; ok {
+		t.Fatal("issue on denied page was mirrored")
+	}
+}
+
 func TestRefreshMirrorProjectPolicyErrorPreservesRows(t *testing.T) {
 	ctx := t.Context()
 	ix := openTestIndex(t)

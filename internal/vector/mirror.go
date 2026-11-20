@@ -101,7 +101,6 @@ func loadMirrorKeys(ctx context.Context, queryer mirrorQuerier, query string) (m
 // remove only after every page has been read successfully.
 func syncMirror(ctx context.Context, store db.Storage, known map[string]mirrorKey, allowed func(context.Context, string) (bool, error), upsert func([]db.IssueContent) (int, error)) (changed int, leftovers []string, err error) {
 	var afterID int64
-	projects := make(map[string]bool)
 	for {
 		page, err := store.ListIssueContent(ctx, afterID, mirrorPageSize)
 		if err != nil {
@@ -110,6 +109,7 @@ func syncMirror(ctx context.Context, store db.Storage, known map[string]mirrorKe
 		if len(page) == 0 {
 			break
 		}
+		projects := make(map[string]bool)
 		var updates []db.IssueContent
 		for _, issue := range page {
 			afterID = issue.ID
