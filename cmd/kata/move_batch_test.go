@@ -85,9 +85,12 @@ func TestMoveBatchMovesOnlyListedIssues(t *testing.T) {
 	require.NoError(t, err)
 	second, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "second", Author: "tester"})
 	require.NoError(t, err)
-	out, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "move", first.UID, second.UID, target.Name, "--json")
+	out, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "--project", source.Name, "move", first.UID, second.ShortID, target.Name, "--json")
 	require.NoError(t, err, out)
 	require.Contains(t, out, `"moved":2`)
+	moved, err := env.DB.IssueByID(t.Context(), second.ID)
+	require.NoError(t, err)
+	require.Equal(t, target.ID, moved.ProjectID)
 	got, err := env.DB.IssueByID(t.Context(), child.ID)
 	require.NoError(t, err)
 	require.Equal(t, source.ID, got.ProjectID)
@@ -149,7 +152,7 @@ func TestMoveBatchCancelMarksOnlyDispatchedMovesUnknown(t *testing.T) {
 }
 
 func TestMoveBatchFileParsingLimit(t *testing.T) {
-	rows, err := parseRefsFrom(strings.NewReader("\nsource#abc4\nsource#def5\tother\n"), "target")
+	rows, err := parseRefsFrom(strings.NewReader("\ufeffsource#abc4\nsource#def5\tother\n"), "target")
 	require.NoError(t, err)
 	require.Equal(t, []moveBatchRow{{Ref: "source#abc4", Target: "target"}, {Ref: "source#def5", Target: "other"}}, rows)
 	input := strings.Repeat("source#abc4\n", 5001) + strings.Repeat("x", 100000)
@@ -220,7 +223,7 @@ func TestMoveBatchGatewayAndResponseOutcomes(t *testing.T) {
 			require.Equal(t, issue.UID, reply.Results[0].UID)
 			require.Equal(t, target.Name, reply.Results[0].Target)
 			require.Contains(t, reply.Results[0].Hint, "outcome unconfirmed")
-			require.Contains(t, reply.Results[0].Hint, "kata show "+issue.UID+" --project TARGET --json --workspace "+shellQuote(dir))
+			require.Contains(t, reply.Results[0].Hint, "kata show "+issue.UID+" --project "+strconv.FormatInt(target.ID, 10)+" --json --workspace "+shellQuote(dir))
 			require.Contains(t, reply.Results[0].Hint, "Check move history before retrying")
 			require.Zero(t, comments.Load())
 		})
@@ -238,67 +241,6 @@ func TestMoveBatchNumericSourceName(t *testing.T) {
 	stored, err := env.DB.IssueByID(t.Context(), issue.ID)
 	require.NoError(t, err)
 	require.Equal(t, target.ID, stored.ProjectID)
-}
-
-func TestMoveBatchLookupFailureStopsConflictingMove(t *testing.T) {
-	for _, failure := range []string{"503", "transport"} {
-		t.Run(failure, func(t *testing.T) {
-			env, dir, source, target, issue := setupMoveCLIProjects(t)
-			other, err := env.DB.CreateProject(t.Context(), "other-project")
-			require.NoError(t, err)
-			var posts atomic.Int32
-			baseURL := interceptingProxy(t, env, func(w http.ResponseWriter, r *http.Request) bool {
-				if r.URL.Path == "/api/v1/issues/"+issue.UID {
-					if failure == "transport" {
-						c, _, err := w.(http.Hijacker).Hijack()
-						if err == nil {
-							_ = c.Close()
-						}
-					} else {
-						http.Error(w, "unavailable", http.StatusServiceUnavailable)
-					}
-					return true
-				}
-				if strings.HasSuffix(r.URL.Path, "/actions/move") {
-					posts.Add(1)
-				}
-				return false
-			})
-			path := filepath.Join(t.TempDir(), "refs")
-			input := issue.UID + "\t" + target.Name + "\n" + source.Name + "#" + issue.ShortID + "\t" + other.Name + "\n"
-			require.NoError(t, os.WriteFile(path, []byte(input), 0600))
-			out, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), baseURL), "--workspace", dir, "move", "--refs-from", path, "--json")
-			require.Error(t, err)
-			var reply struct {
-				Results []moveBatchResult `json:"results"`
-			}
-			require.NoError(t, json.Unmarshal([]byte(out), &reply))
-			require.Len(t, reply.Results, 2)
-			require.Equal(t, "unattempted", reply.Results[0].Result)
-			require.NotEmpty(t, reply.Results[0].Message)
-			require.Equal(t, "not sent; safe to rerun", reply.Results[0].Hint)
-			require.Equal(t, "unattempted", reply.Results[1].Result)
-			require.Zero(t, posts.Load())
-			stored, err := env.DB.IssueByID(t.Context(), issue.ID)
-			require.NoError(t, err)
-			require.Equal(t, source.ID, stored.ProjectID)
-		})
-	}
-}
-
-func TestMoveBatchPossiblySentIsUnknown(t *testing.T) {
-	hc := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-		return nil, &daemonTransportError{method: http.MethodPost, possiblyTransmitted: true, cause: context.Canceled}
-	})}
-	client, err := kataclient.NewWithHTTPClient("http://example.test", hc)
-	require.NoError(t, err)
-	a := daemonAPI{ctx: t.Context(), baseURL: "http://example.test", client: hc}
-	prepared := &moveBatchPrepared{issue: moveIssueWire{UID: "01ARZ3NDEKTSV4RRFFQ69G5FAV"}, target: projectRef{ID: 1, UID: "01ARZ3NDEKTSV4RRFFQ69G5FAW"}, pid: 2, ref: "abc4"}
-	result := moveBatchResult{Result: "unattempted", UID: prepared.issue.UID}
-	var halt atomic.Bool
-	moveBatchOne(a, client, prepared, &result, "tester", true, &halt)
-	require.Equal(t, "unknown", result.Result)
-	require.True(t, halt.Load())
 }
 
 func TestMoveBatchRejectsInvalidLookupUID(t *testing.T) {
@@ -319,23 +261,40 @@ func TestMoveBatchRejectsInvalidLookupUID(t *testing.T) {
 	})
 	path := filepath.Join(t.TempDir(), "refs")
 	require.NoError(t, os.WriteFile(path, []byte(source.Name+"#"+issue.ShortID+"\n"), 0600))
-	_, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), baseURL), "--workspace", dir, "move", target.Name, "--refs-from", path, "--json")
+	out, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), baseURL), "--workspace", dir, "move", target.Name, "--refs-from", path, "--json")
 	require.Error(t, err)
+	var reply struct {
+		Results []moveBatchResult `json:"results"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &reply))
+	require.Len(t, reply.Results, 1)
+	require.Equal(t, "unattempted", reply.Results[0].Result)
 	require.Zero(t, posts.Load())
 }
 
 func TestMoveBatchDuplicateResolvedUID(t *testing.T) {
-	for _, conflict := range []bool{false, true} {
-		t.Run(strconv.FormatBool(conflict), func(t *testing.T) {
+	for _, scenario := range []string{"duplicate", "conflict", "503", "transport"} {
+		t.Run(scenario, func(t *testing.T) {
 			env, dir, source, target, issue := setupMoveCLIProjects(t)
 			other, err := env.DB.CreateProject(t.Context(), "other-project")
 			require.NoError(t, err)
 			secondTarget := target.Name
-			if conflict {
+			if scenario != "duplicate" {
 				secondTarget = other.Name
 			}
 			var posts atomic.Int32
-			baseURL := interceptingProxy(t, env, func(_ http.ResponseWriter, r *http.Request) bool {
+			baseURL := interceptingProxy(t, env, func(w http.ResponseWriter, r *http.Request) bool {
+				if r.URL.Path == "/api/v1/issues/"+issue.UID && (scenario == "503" || scenario == "transport") {
+					if scenario == "transport" {
+						c, _, err := w.(http.Hijacker).Hijack()
+						if err == nil {
+							_ = c.Close()
+						}
+					} else {
+						http.Error(w, "unavailable", http.StatusServiceUnavailable)
+					}
+					return true
+				}
 				if strings.HasSuffix(r.URL.Path, "/actions/move") {
 					posts.Add(1)
 				}
@@ -353,7 +312,14 @@ func TestMoveBatchDuplicateResolvedUID(t *testing.T) {
 			require.Len(t, reply.Results, 2)
 			stored, err := env.DB.IssueByID(t.Context(), issue.ID)
 			require.NoError(t, err)
-			if conflict {
+			if scenario == "503" || scenario == "transport" {
+				require.Zero(t, posts.Load())
+				require.Equal(t, source.ID, stored.ProjectID)
+				require.Equal(t, "unattempted", reply.Results[0].Result)
+				require.NotEmpty(t, reply.Results[0].Message)
+				require.Equal(t, "not sent; safe to rerun", reply.Results[0].Hint)
+				require.Equal(t, "unattempted", reply.Results[1].Result)
+			} else if scenario == "conflict" {
 				require.Zero(t, posts.Load())
 				require.Equal(t, source.ID, stored.ProjectID)
 				require.Equal(t, "refused", reply.Results[0].Result)
@@ -366,22 +332,6 @@ func TestMoveBatchDuplicateResolvedUID(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestMoveBatchRefusalOutputErrors(t *testing.T) {
-	env, dir, _, target, _ := setupMoveCLIProjects(t)
-	path := filepath.Join(t.TempDir(), "refs")
-	require.NoError(t, os.WriteFile(path, []byte("invalid\n"), 0600))
-	args := []string{"--workspace", dir, "move", target.Name, "--refs-from", path}
-	resetFlags(t)
-	cmd := newRootCmd()
-	cmd.SetOut(cliSearchErrorWriter{})
-	cmd.SetArgs(args)
-	err := cmd.ExecuteContext(contextWithBaseURL(t.Context(), env.URL))
-	require.ErrorIs(t, err, errCLISearchWrite)
-	var stderr bytes.Buffer
-	emitRootError(&stderr, cmd, args, err, runEEntered)
-	require.Contains(t, stderr.String(), errCLISearchWrite.Error())
 }
 
 func TestMoveBatchCommentFailureVisibleInRowAndQuiet(t *testing.T) {
@@ -419,7 +369,7 @@ func TestMoveBatchCommentFailureVisibleInRowAndQuiet(t *testing.T) {
 			out, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL), args...)
 			require.Error(t, err)
 			require.NotEmpty(t, commentKey)
-			retry := "kata comment " + issue.UID + " --project TARGET --body ... --idempotency-key " + shellQuote(commentKey) + " --workspace " + shellQuote(dir) + " --as test-actor --teammate test-teammate"
+			retry := "kata comment " + issue.UID + " --project " + strconv.FormatInt(target.ID, 10) + " --body ... --idempotency-key " + shellQuote(commentKey) + " --workspace " + shellQuote(dir) + " --as test-actor --teammate test-teammate"
 			if quiet {
 				require.Contains(t, stderr, retry)
 			} else {
@@ -457,4 +407,69 @@ func TestMoveBatchQuietOutput(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMoveBatchInvalidDefaultTargetWithRowOverrides(t *testing.T) {
+	env, dir, source, target, issue := setupMoveCLIProjects(t)
+	path := filepath.Join(t.TempDir(), "refs")
+	require.NoError(t, os.WriteFile(path, []byte(issue.UID+"\t"+target.Name+"\n"), 0600))
+	_, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "move", "missing-project", "--refs-from", path, "--json")
+	require.ErrorContains(t, err, "missing-project")
+	stored, err := env.DB.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	require.Equal(t, source.ID, stored.ProjectID)
+}
+
+func TestMoveBatchRefusalOutputModes(t *testing.T) {
+	for _, mode := range []string{"human", "json", "agent", "write-error"} {
+		t.Run(mode, func(t *testing.T) {
+			env, dir, _, target, issue := setupMoveCLIProjects(t)
+			path := filepath.Join(t.TempDir(), "refs")
+			require.NoError(t, os.WriteFile(path, []byte(issue.UID+"\ninvalid\n"), 0600))
+			args := []string{"--workspace", dir, "move", target.Name, "--refs-from", path}
+			if mode == "write-error" {
+				resetFlags(t)
+				cmd := newRootCmd()
+				cmd.SetOut(cliSearchErrorWriter{})
+				cmd.SetArgs(args)
+				err := cmd.ExecuteContext(contextWithBaseURL(t.Context(), env.URL))
+				require.ErrorIs(t, err, errCLISearchWrite)
+				var stderr bytes.Buffer
+				emitRootError(&stderr, cmd, args, err, runEEntered)
+				require.Contains(t, stderr.String(), errCLISearchWrite.Error())
+				return
+			}
+			if mode != "human" {
+				args = append(args, "--"+mode)
+			}
+			out, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), args...)
+			require.Error(t, err)
+			require.Equal(t, ExitConflict, exitCodeForErr(err, true))
+			switch mode {
+			case "human":
+				require.Contains(t, out, "1 moved, 1 refused")
+				require.Contains(t, out, "result=refused")
+				require.Empty(t, stderr)
+			case "agent":
+				require.Contains(t, out, "refused=1")
+				require.Contains(t, out, "result=refused")
+				require.Contains(t, stderr, "some issues were refused")
+			case "json":
+				var result struct {
+					Summary moveBatchSummary  `json:"summary"`
+					Results []moveBatchResult `json:"results"`
+				}
+				require.NoError(t, json.Unmarshal([]byte(out), &result))
+				require.Equal(t, 1, result.Summary.Refused)
+				require.Len(t, result.Results, 2)
+				require.Equal(t, "refused", result.Results[1].Result)
+				require.Contains(t, stderr, "some issues were refused")
+			}
+		})
+	}
+}
+
+func TestMoveHelpRefsFormatOnce(t *testing.T) {
+	out := string(executeRoot(t, newRootCmd(), "move", "--help"))
+	require.Equal(t, 1, strings.Count(out, "ref<TAB>project"))
 }

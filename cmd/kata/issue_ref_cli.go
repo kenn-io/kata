@@ -5,6 +5,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	kataclient "go.kenn.io/kata/pkg/client"
@@ -62,6 +63,20 @@ func resolveIssueRefForCommandWithOptions(
 			Message:  err.Error(),
 			Kind:     kindValidation,
 			ExitCode: ExitValidation,
+		}
+	}
+	if !strings.Contains(ref, "#") && strings.TrimSpace(flags.Project) != "" {
+		if _, err := strconv.ParseInt(bareProject, 10, 64); err == nil {
+			var project projectRef
+			if includeArchivedProject {
+				project, err = resolveProjectSelectorIncludingArchived(a, bareProject)
+			} else {
+				project, err = resolveProjectSelector(a, bareProject)
+			}
+			if err != nil {
+				return nil, "", 0, resolvedIssueRef{}, err
+			}
+			return a.ctx, a.baseURL, project.ID, resolvedIssueRef{RefForAPI: parsed.RefForAPI, ProjectName: project.Name}, nil
 		}
 	}
 	pid, projectName, err := resolveProjectIDAndNameForRef(

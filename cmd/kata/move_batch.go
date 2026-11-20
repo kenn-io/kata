@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http/httptrace"
 	"os"
 	"strings"
 	"sync"
@@ -59,7 +58,7 @@ func parseRefsFrom(r io.Reader, sharedTarget string) ([]moveBatchRow, error) {
 	scanner := bufio.NewScanner(r)
 	var rows []moveBatchRow
 	for line := 1; len(rows) <= moveBatchMaxItems && scanner.Scan(); line++ {
-		text := scanner.Text()
+		text := strings.TrimPrefix(scanner.Text(), "\ufeff")
 		if strings.TrimSpace(text) == "" {
 			continue
 		}
@@ -137,6 +136,9 @@ func runMoveBatch(cmd *cobra.Command, args []string, refsFrom string) error {
 	if err != nil {
 		return errors.Join(err, printMoveBatch(cmd, results))
 	}
+	if err := validateMoveBatchDefault(args, refsFrom, projects); err != nil {
+		return errors.Join(err, printMoveBatch(cmd, results))
+	}
 	client, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
 	if err != nil {
 		return errors.Join(err, printMoveBatch(cmd, results))
@@ -155,30 +157,7 @@ func runMoveBatch(cmd *cobra.Command, args []string, refsFrom string) error {
 	runMoveBatchJobs(a, &halt, len(rows), func(i int) {
 		prepared[i] = resolveMoveBatchOne(a, client, projects, rows[i], &results[i], &halt)
 	})
-	groups := make(map[string][]int)
-	for i, p := range prepared {
-		if p != nil {
-			groups[p.issue.UID] = append(groups[p.issue.UID], i)
-		}
-	}
-	for _, indexes := range groups {
-		conflict := false
-		for _, i := range indexes[1:] {
-			// Each non-nil index belongs to one UID group, which clears rows only after its comparisons.
-			//nolint:nilaway // The group still contains non-nil rows.
-			conflict = conflict || prepared[i].target.ID != prepared[indexes[0]].target.ID
-		}
-		for n, i := range indexes {
-			if conflict || n > 0 {
-				results[i].Result, results[i].Code, results[i].Hint = "refused", "duplicate_ref", ""
-				results[i].Message = "issue appears more than once"
-				if conflict {
-					results[i].Message = "issue has conflicting target projects"
-				}
-				prepared[i] = nil
-			}
-		}
-	}
+	refuseDuplicateMoveBatchRows(prepared, results)
 	runMoveBatchJobs(a, &halt, len(rows), func(i int) {
 		if prepared[i] != nil {
 			moveBatchOne(a, client, prepared[i], &results[i], actor, subtreeSupported, &halt)
@@ -203,7 +182,7 @@ func runMoveBatch(cmd *cobra.Command, args []string, refsFrom string) error {
 		if e != nil {
 			detail := strings.Replace(e.Error(), " (rerun the original kata close command with the same --idempotency-key)", "", 1)
 			r.Message = strings.TrimSpace(r.Message + " comment failed: " + detail)
-			r.Hint = fmt.Sprintf("retry with: kata comment %s --project TARGET --body ... --idempotency-key %s%s", r.UID, key, moveBatchRecoveryFlags())
+			r.Hint = fmt.Sprintf("retry with: kata comment %s --project %d --body ... --idempotency-key %s%s", r.UID, r.targetID, key, moveBatchRecoveryFlags())
 			if cmd.Flags().Changed("as") {
 				r.Hint += " --as " + shellQuote(flags.As)
 			}
@@ -240,6 +219,51 @@ func runMoveBatch(cmd *cobra.Command, args []string, refsFrom string) error {
 	return errors.Join(outcome, printErr)
 }
 
+// validateMoveBatchDefault checks the optional positional target of a refs
+// file, which rows that name their own project never consult.
+func validateMoveBatchDefault(args []string, refsFrom string, projects []projectRef) error {
+	if refsFrom == "" || len(args) == 0 {
+		return nil
+	}
+	_, err := resolveProjectSelectorFromRefs(strings.TrimSpace(args[0]), projects)
+	return err
+}
+
+func refuseDuplicateMoveBatchRows(prepared []*moveBatchPrepared, results []moveBatchResult) {
+	groups := make(map[string][]int)
+	for i, p := range prepared {
+		if p != nil {
+			groups[p.issue.UID] = append(groups[p.issue.UID], i)
+		}
+	}
+	for _, indexes := range groups {
+		conflict := false
+		for _, i := range indexes[1:] {
+			// Each non-nil index belongs to one UID group, which clears rows only after its comparisons.
+			//nolint:nilaway // The group still contains non-nil rows.
+			conflict = conflict || prepared[i].target.ID != prepared[indexes[0]].target.ID
+		}
+		for n, i := range indexes {
+			if conflict || n > 0 {
+				results[i].Result, results[i].Code, results[i].Hint = "refused", "duplicate_ref", ""
+				results[i].Message = "issue appears more than once"
+				if conflict {
+					results[i].Message = "issue has conflicting target projects"
+				}
+				prepared[i] = nil
+			}
+		}
+	}
+}
+
+func moveBatchSourceProject(selector string, projects []projectRef) (projectRef, error) {
+	source, found, err := uniqueProjectMatch(selector, projects, projectNameExact)
+	if err == nil && !found {
+		err = fmt.Errorf("project selector %q did not match any project", selector)
+	}
+	return source, err
+}
+
 func runMoveBatchJobs(a daemonAPI, halt *atomic.Bool, count int, job func(int)) {
 	jobs := make(chan int)
 	var wg sync.WaitGroup
@@ -270,8 +294,11 @@ func resolveMoveBatchOne(a daemonAPI, client *kataclient.Client, projects []proj
 		}
 	}
 	parsed, err := shortid.Parse(row.Ref)
+	if err == nil && parsed.ULID == "" && parsed.Project == "" {
+		parsed.Project = strings.TrimSpace(flags.Project)
+	}
 	if err != nil || (parsed.ULID == "" && parsed.Project == "") {
-		refuse("invalid_ref", errors.New("use project#id or the issue UID"))
+		refuse("invalid_ref", errors.New("use project#id, the issue UID, or --project with a short ID"))
 		return nil
 	}
 	target, err := resolveProjectSelectorFromRefs(strings.TrimSpace(row.Target), projects)
@@ -286,10 +313,7 @@ func resolveMoveBatchOne(a daemonAPI, client *kataclient.Client, projects []proj
 	result.Target, result.targetID = target.Name, target.ID
 	pid, ref := target.ID, parsed.ULID
 	if parsed.Project != "" {
-		source, found, e := uniqueProjectMatch(parsed.Project, projects, projectNameExact)
-		if e == nil && !found {
-			e = fmt.Errorf("project selector %q did not match any project", parsed.Project)
-		}
+		source, e := moveBatchSourceProject(parsed.Project, projects)
 		if e != nil {
 			refuse("invalid_ref", e)
 			return nil
@@ -327,17 +351,15 @@ func moveBatchOne(a daemonAPI, client *kataclient.Client, prepared *moveBatchPre
 		return
 	}
 	request := moveRequest(pid, ref, actor, target.UID, issue.Revision, false, subtreeSupported)
-	var dispatched atomic.Bool
-	ctx := httptrace.WithClientTrace(a.ctx, &httptrace.ClientTrace{WroteRequest: func(httptrace.WroteRequestInfo) { dispatched.Store(true) }})
-	response, callErr := client.MoveIssueWithResponse(ctx, request)
+	response, callErr := client.MoveIssueWithResponse(a.ctx, request)
 	unknown := func() {
 		halt.Store(true)
 		result.Result = "unknown"
-		result.Hint = fmt.Sprintf("outcome unconfirmed; run kata show %s --project TARGET --json%s to inspect the target. Check move history before retrying if the issue may have moved more than once.", result.UID, moveBatchRecoveryFlags())
+		result.Hint = fmt.Sprintf("outcome unconfirmed; run kata show %s --project %d --json%s to inspect the target. Check move history before retrying if the issue may have moved more than once.", result.UID, result.targetID, moveBatchRecoveryFlags())
 	}
 	if response == nil {
 		transportErr, marked := errors.AsType[*daemonTransportError](callErr)
-		if !dispatched.Load() && (!marked || !transportErr.mutationOutcomeUnknown()) {
+		if marked && !transportErr.mutationOutcomeUnknown() {
 			if callErr != nil && a.ctx.Err() == nil {
 				result.Message = callErr.Error()
 			}

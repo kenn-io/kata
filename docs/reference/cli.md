@@ -46,7 +46,7 @@ compactly; `kata --help` has their full descriptions.
 | Flag | Meaning |
 | --- | --- |
 | `--workspace <path>` | Resolve project context from a specific workspace. |
-| `--project <name>` | Select a project explicitly; otherwise resolve `.kata.toml` at or above `--workspace`. |
+| `--project <name-or-id>` | Select a project by name; `show` and `comment` also accept a numeric project ID. Otherwise resolve `.kata.toml` at or above `--workspace`. Qualified refs select their project by exact name. |
 | `--daemon <name>` | Target a named daemon catalog entry. Without it, select `KATA_SERVER`, workspace config, `active_daemon`, then local. |
 | `--as <actor>` | Override the actor for this command. An explicitly empty value is a validation error; actor fallback applies only when the flag is absent. |
 | `--teammate <handle>` | Attribute supported comments, new issues, and cron run observations to one teammate under the accountable actor. An explicit empty value suppresses `KATA_TEAMMATE`. |
@@ -989,9 +989,11 @@ kata move --refs-from refs.txt target-project
 ```
 
 A refs file has one `ref` or `ref<TAB>project` per line; a row's project wins
-over the positional target. Blank lines are ignored, and there is no comment
-syntax: `# note` is treated as an issue ref. Refs must be project-qualified
-short IDs or issue UIDs. A malformed row or more than 5,000 rows fails before
+over the positional target, which must still name a project when given. A
+leading UTF-8 byte order mark is ignored. Blank lines are ignored, and there is
+no comment syntax: `# note` is treated as an issue ref. Refs must be
+project-qualified short IDs or issue UIDs; with an explicit `--project`, bare
+short IDs are read in that project. A malformed row or more than 5,000 rows fails before
 any move; an empty file succeeds without contacting the daemon. An invalid ref
 or unknown target is refused while other rows still move. When refs resolve to
 the same issue, only the first moves; if they name different targets, all are
