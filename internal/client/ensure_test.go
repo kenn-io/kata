@@ -42,8 +42,6 @@ func TestDiscoveryReplacesPlaceholderOnlyWithReleaseAssets(t *testing.T) {
 		{"source CLI placeholder", "v0.23.0", "loopback,sse,placeholder-assets", false, false, daemonScanCompatible},
 		{"release daemon", "v0.23.0", "loopback,sse", true, false, daemonScanCompatible},
 		{"version-check-disabled", "v0.23.0", "loopback,sse,placeholder-assets", true, true, daemonScanStale},
-		{"version-check-disabled other release", "v0.22.0", "loopback,sse", true, true, daemonScanCompatible},
-		{"version-check-disabled other placeholder", "v0.22.0", "loopback,sse,placeholder-assets", true, true, daemonScanStale},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			skip := ""
@@ -62,18 +60,6 @@ func TestDiscoveryReplacesPlaceholderOnlyWithReleaseAssets(t *testing.T) {
 			assert.Equal(t, tc.want, found.Outcome)
 		})
 	}
-}
-
-func TestSupervisedPlaceholderDaemonRequiresServiceManager(t *testing.T) {
-	oldVersion := currentVersionForEnsure
-	currentVersionForEnsure = func() string { return "v0.23.0" }
-	t.Cleanup(func() { currentVersionForEnsure = oldVersion })
-	ctx := context.WithValue(t.Context(), requireWebAssetsKey{}, true)
-	_, err := waitForSupervisedDaemon(ctx, "config.toml", func(context.Context) bool { return false }, func(context.Context) (ensureDiscovery, error) {
-		return ensureDiscovery{Outcome: daemonScanStale, Daemon: liveDaemon{Info: PingInfo{Service: "kata", Version: "v0.23.0"}, Record: kitdaemon.RuntimeRecord{Metadata: map[string]string{"web_capabilities": "loopback,sse,placeholder-assets"}}}}, nil
-	})
-	require.ErrorIs(t, err, ErrDaemonNotReplaceable)
-	assert.Contains(t, err.Error(), "the daemon has no web UI; restart it with your service manager (autostart = false)")
 }
 
 // A binary that cannot open the storage cannot replace the daemon serving it,

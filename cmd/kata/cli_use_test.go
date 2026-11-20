@@ -104,8 +104,25 @@ func TestCLIUseSkipsTaggedGoInstall(t *testing.T) {
 	t.Setenv("TELEMETRY_ENABLED", "1")
 	t.Setenv("KATA_TELEMETRY_ENABLED", "")
 	t.Setenv(hooks.HookVersionEnv, "")
+	t.Setenv("KATA_HOME", t.TempDir())
 	stubIsTTY(t, true)
 	assert.False(t, reportsCLIUse(findCommand(t, "projects", "list")))
+	target := newCLIUseDaemon(t)
+	settledCLIUse(t, func(t *testing.T) {
+		cmd := findCommand(t, "agent-contract-hook")
+		cmd.SetContext(t.Context())
+		cliUseTarget.Store(&client.ResolvedDaemon{BaseURL: target.url})
+		t.Cleanup(func() { cliUseTarget.Store(nil) })
+		require.True(t, reportsAgentUse(cmd))
+		reportCLIUse(cmd)
+		synctest.Wait()
+		assert.Zero(t, target.posts.Load())
+		version.Commit = "1234567"
+		require.True(t, telemetry.Eligible())
+		reportCLIUse(cmd)
+		synctest.Wait()
+		target.waitForPosts(t, 1)
+	})
 }
 
 // newCLIUseEnv boots a daemon whose reporter is reporter, for a person at a

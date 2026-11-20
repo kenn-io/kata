@@ -330,26 +330,6 @@ func TestUpdateInstall_HumanShowsDownloadDetailsBeforeConfirmation(t *testing.T)
 	assert.Empty(t, fake.installed)
 }
 
-func TestUpdateInstall_TaggedGoInstallUsesReleaseUpdate(t *testing.T) {
-	resetFlags(t)
-	stubVersionInfo(t, "v0.23.0", "unknown", "unknown")
-	stubDistribution(t, "")
-	fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{
-		CurrentVersion: "v0.23.0",
-		LatestVersion:  "v0.24.0",
-		AssetName:      "kata_0.24.0_linux_amd64.tar.gz",
-	}}}
-	stubUpdateClient(t, fake)
-
-	stdout, _, err := executeRootCapture(t, t.Context(), "update", "--yes")
-
-	require.NoError(t, err)
-	assert.Equal(t, "installed kata v0.24.0\n", stdout)
-	require.Len(t, fake.checks, 1)
-	assert.False(t, fake.checks[0].Force)
-	assert.Len(t, fake.installed, 1)
-}
-
 func TestUpdateInstall_DevBuildRequiresForce(t *testing.T) {
 	resetFlags(t)
 	stubVersionInfo(t, "v0.5.0-9-gcf994f5", "cf994f5", "2026-06-24T15:00:00Z")

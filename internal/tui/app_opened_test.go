@@ -65,12 +65,19 @@ func TestTaggedGoInstallDoesNotSendTUIUsage(t *testing.T) {
 	version.Version, version.Commit = "v0.23.0", "unknown"
 	t.Cleanup(func() { version.Version, version.Commit = oldVersion, oldCommit })
 	t.Setenv("TELEMETRY_ENABLED", "1")
-	recorder := &recordingTelemetry{}
-	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = recorder })
-	c := NewClient(env.URL, env.HTTP)
+	t.Setenv("KATA_HOME", t.TempDir())
+	var requests atomic.Int32
+	hc := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		requests.Add(1)
+		return &http.Response{StatusCode: http.StatusAccepted, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"status":"queued"}`)), Request: r}, nil
+	})}
+	c := NewClient("http://127.0.0.1:27123", hc)
 	require.NoError(t, c.ReportAppOpened(t.Context()))
 	assert.Nil(t, issueActionSurface(t.Context()))
-	assert.Empty(t, recorder.events)
+	assert.Zero(t, requests.Load())
+	version.Commit = "1234567"
+	require.NoError(t, c.ReportAppOpened(t.Context()))
+	assert.EqualValues(t, 1, requests.Load())
 }
 
 func TestReportAppOpenedReachesDaemonCapture(t *testing.T) {

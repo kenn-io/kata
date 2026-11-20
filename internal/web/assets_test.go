@@ -15,6 +15,7 @@ func TestHandlerReleaseStatusRejectsCompilationStub(t *testing.T) {
 	_, release, err := newHandlerWithReleaseStatus(stub)
 	require.NoError(t, err)
 	assert.False(t, release)
+	assert.Error(t, validateReleaseDistribution(stub))
 }
 
 func TestHandlerReleaseStatusAcceptsProductionMarkerAndManifest(t *testing.T) {
@@ -26,6 +27,7 @@ func TestHandlerReleaseStatusAcceptsProductionMarkerAndManifest(t *testing.T) {
 	_, release, err := newHandlerWithReleaseStatus(files)
 	require.NoError(t, err)
 	assert.True(t, release)
+	assert.NoError(t, validateReleaseDistribution(files))
 }
 
 func TestWebHandlerRejectsUnsafeManifestAssetPaths(t *testing.T) {

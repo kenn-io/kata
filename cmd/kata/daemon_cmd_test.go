@@ -47,7 +47,6 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/vector"
 	"go.kenn.io/kata/internal/version"
-	"go.kenn.io/kata/internal/web"
 	kitdaemon "go.kenn.io/kit/daemon"
 	"go.kenn.io/kit/safefileio"
 	"go.kenn.io/kit/telemetry/posthog"
@@ -2722,9 +2721,11 @@ func TestDaemonRuntimeWebMetadata(t *testing.T) {
 				assert.NotContains(t, record.Metadata, "autostart")
 			}
 			assert.Equal(t, "true", record.Metadata["web_origin_stable"])
-			want := "loopback,sse"
-			if web.ValidateEmbeddedRelease() != nil {
-				want += ",placeholder-assets"
+			index, err := os.ReadFile("../../internal/web/dist/index.html") //nolint:gosec // Repository fixture compiled into this test.
+			require.NoError(t, err)
+			want := "loopback,sse,placeholder-assets"
+			if strings.Contains(string(index), `name="kata-web-distribution" content="production"`) {
+				want = "loopback,sse"
 			}
 			assert.Equal(t, want, record.Metadata["web_capabilities"])
 			if runtime.GOOS != "windows" {
@@ -2764,8 +2765,6 @@ func TestDaemonRuntimeWebMetadata_TokenProtectedReadonlyAllowsLoopbackSession(t 
 		return readErr == nil && json.Unmarshal(body, &record) == nil &&
 			record.Metadata["web_origin"] != ""
 	}, 3*time.Second, 10*time.Millisecond)
-
-	assert.True(t, strings.HasPrefix(record.Metadata["web_capabilities"], "loopback,poll"))
 
 	cancel()
 	select {

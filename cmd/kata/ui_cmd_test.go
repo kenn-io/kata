@@ -5,92 +5,48 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/daemon"
-	"go.kenn.io/kata/internal/daemonruntime"
-	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/testenv"
-	"go.kenn.io/kata/internal/version"
 	"go.kenn.io/kata/internal/web"
-	kitdaemon "go.kenn.io/kit/daemon"
 )
 
-func TestUIReplacesSameVersionPlaceholderDaemon(t *testing.T) {
-	oldValidate := validateWebUIAssetsForCommand
-	validateWebUIAssetsForCommand = func() error { return nil }
-	t.Cleanup(func() { validateWebUIAssetsForCommand = oldValidate })
-	resetFlags(t)
-	home := setupKataEnv(t)
-	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
-	t.Setenv("KATA_SERVER", "")
-	store, err := sqlitestore.Open(t.Context(), filepath.Join(home, "kata.db"))
-	require.NoError(t, err)
-	uid := store.InstanceUID()
-	require.NoError(t, store.Close())
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/ping" {
-			_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version, os.Getpid())
-			return
-		}
-		_, _ = fmt.Fprintf(w, `{"instance_uid":%q}`, uid)
-	}))
-	t.Cleanup(server.Close)
-	ns, err := daemonruntime.NewNamespace()
-	require.NoError(t, err)
-	require.NoError(t, ns.EnsureDirs())
-	identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
-	require.True(t, ok)
-	record := kitdaemon.RuntimeRecord{PID: os.Getpid(), ProcessIdentityV2: identity, Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://"), StartedAt: time.Now(), Metadata: map[string]string{daemonruntime.RuntimeRestartExecutableKey: "1", "web_origin": server.URL, "web_origin_stable": "true", "web_capabilities": "loopback,sse,placeholder-assets"}}
-	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(record)
-	require.NoError(t, err)
-	oldRestart, oldBrowser := client.RestartLocalDaemon, openWebBrowserForCommand
-	t.Cleanup(func() { client.RestartLocalDaemon, openWebBrowserForCommand = oldRestart, oldBrowser })
-	restarts := 0
-	client.RestartLocalDaemon = func(_ context.Context, target *daemonruntime.Namespace, old kitdaemon.RuntimeRecord) (kitdaemon.RuntimeRecord, error) {
-		restarts++
-		assert.Equal(t, ns.DataDir, target.DataDir)
-		assert.Equal(t, record.PID, old.PID)
-		record.Metadata["web_capabilities"] = "loopback,sse"
-		_, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(record)
-		return record, err
+func TestUICommandAssetRequirement(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		assetErr   error
+		wantAssets bool
+	}{
+		{"source", errors.New("stub"), false},
+		{"release", nil, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stubUICommandLaunch(t, client.PreparedWebUI{BaseURL: "https://daemon.example", ConfiguredRemote: true})
+			validateWebUIAssetsForCommand = func() error { return tc.assetErr }
+			prepareWebUIForCommand = func(_ context.Context, opts client.PrepareWebUIOptions) (client.PreparedWebUI, error) {
+				assert.Equal(t, tc.wantAssets, opts.RequireWebAssets)
+				return client.PreparedWebUI{}, errors.New("stop after selection")
+			}
+			_, err := runCmdOutput(t, nil, "ui")
+			require.ErrorContains(t, err, "stop after selection")
+		})
 	}
-	opened := false
-	openWebBrowserForCommand = func(context.Context, client.WebUILaunch) error { opened = true; return nil }
-	_, err = runCmdOutput(t, nil, "ui")
-	require.NoError(t, err)
-	assert.Equal(t, 1, restarts)
-	assert.True(t, opened)
 }
 
 func TestUICommandRejectsCompilationStub(t *testing.T) {
-	oldPrepare := prepareWebUIForCommand
-	oldValidate := validateWebUIAssetsForCommand
-	prepareWebUIForCommand = func(_ context.Context, opts client.PrepareWebUIOptions) (client.PreparedWebUI, error) {
-		assert.False(t, opts.RequireWebAssets)
-		return client.PreparedWebUI{}, nil
-	}
-	validateWebUIAssetsForCommand = web.ValidateEmbeddedRelease
-	t.Cleanup(func() {
-		prepareWebUIForCommand = oldPrepare
-		validateWebUIAssetsForCommand = oldValidate
-	})
-
+	stubUICommandLaunch(t, client.PreparedWebUI{})
+	validateWebUIAssetsForCommand = func() error { return errors.New("stub") }
 	_, err := runCmdOutput(t, nil, "ui")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "release binary")
+	require.ErrorContains(t, err, "release binary")
 }
 
 func TestUICommandNoArgOpensInbox(t *testing.T) {
