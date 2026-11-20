@@ -12,15 +12,15 @@ import (
 	"go.kenn.io/kata/internal/uid"
 )
 
-// relayLinkBoundaryFixture is a root hub project with a sibling hub project in
-// the same group, a pinned root key and a parent credential for relay grants.
+// relayLinkBoundaryFixture has a root hub project, a sibling, a pinned root key,
+// and a parent credential for relay grants.
 type relayLinkBoundaryFixture struct {
 	project, sibling db.Project
 	parentTokenID    int64
 	signer           db.RootAttributionSigner
 }
 
-func newRelayLinkBoundaryFixture(t *testing.T, store db.Storage, name string) relayLinkBoundaryFixture {
+func newRelayLinkBoundaryFixture(t *testing.T, store db.Storage, name string, shared ...bool) relayLinkBoundaryFixture {
 	t.Helper()
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, name)
@@ -28,7 +28,7 @@ func newRelayLinkBoundaryFixture(t *testing.T, store db.Storage, name string) re
 	sibling, err := store.CreateProject(ctx, name+"-sibling")
 	require.NoError(t, err)
 	for _, p := range []db.Project{project, sibling} {
-		_, err := store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: p.ID, Role: db.FederationRoleHub, HubProjectID: p.ID, HubProjectUID: p.UID, Enabled: true})
+		_, err := store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: p.ID, Role: db.FederationRoleHub, HubProjectID: p.ID, HubProjectUID: p.UID, Enabled: p.ID == project.ID || len(shared) > 0 && shared[0]})
 		require.NoError(t, err)
 	}
 	public, private, err := ed25519.GenerateKey(nil)
@@ -62,7 +62,7 @@ func linkTargetUIDs(t *testing.T, store db.Storage, issueID int64) []string {
 func RunRelayLinkBoundaryKeepsSameProjectEffects(t *testing.T, store db.Storage) {
 	t.Run("relay composite creation", func(t *testing.T) {
 		ctx := t.Context()
-		fixture := newRelayLinkBoundaryFixture(t, store, "relay-composite")
+		fixture := newRelayLinkBoundaryFixture(t, store, "relay-composite", true)
 		peerInstanceUID, err := uid.New()
 		require.NoError(t, err)
 		//nolint:gosec // This is a deterministic fixture credential, never an operational secret.
@@ -98,7 +98,7 @@ func RunRelayLinkBoundaryKeepsSameProjectEffects(t *testing.T, store db.Storage)
 	})
 	t.Run("legacy composite survives relay enrollment", func(t *testing.T) {
 		ctx := t.Context()
-		fixture := newRelayLinkBoundaryFixture(t, store, "legacy-composite")
+		fixture := newRelayLinkBoundaryFixture(t, store, "legacy-composite", true)
 		localPeer, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.project.ID, Title: "Local peer", Author: "member"})
 		require.NoError(t, err)
 		siblingPeer, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.sibling.ID, Title: "Sibling peer", Author: "member"})
@@ -161,6 +161,8 @@ func RunRelayLinkBoundaryFollowsActiveGrants(t *testing.T, store db.Storage) {
 	_, _, err = store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: source.ID, ToIssueID: target.ID, Type: "blocks", Author: "member"}, linkEvent)
 	require.NoError(t, err, "revoking the last relay grant allows local cross-project links again")
 	require.Equal(t, []string{target.UID}, linkTargetUIDs(t, store, source.ID))
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: fixture.sibling.ID, Role: db.FederationRoleHub, HubProjectID: fixture.sibling.ID, HubProjectUID: fixture.sibling.UID, Enabled: true})
+	require.NoError(t, err)
 
 	spokeInstanceUID, err := uid.New()
 	require.NoError(t, err)

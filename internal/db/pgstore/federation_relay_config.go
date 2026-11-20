@@ -52,8 +52,10 @@ func (d *Store) SetRelayBindingConfig(ctx context.Context, projectID int64, conf
 		if err != nil {
 			return err
 		}
-		if err := rejectRelayProjectLinksTx(ctx, tx, projectID); err != nil {
-			return err
+		if binding.RelayConfig == nil {
+			if err := rejectRelayProjectLinksTx(ctx, tx, projectID); err != nil {
+				return err
+			}
 		}
 		if pin.AuthorityUID != config.AuthorityUID {
 			return errors.New("relay authority differs from pinned root")
