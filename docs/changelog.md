@@ -126,6 +126,14 @@ All notable changes to kata, grouped by release. Versioned releases start with
   issues from the whole workspace. Kata now reads issues through the team
   itself, so it receives only that team's issues.
 
+- Set `[close.transcript] enabled = "auto"`, or
+  `KATA_CLOSE_TRANSCRIPT_ENABLED=auto`, to attach the closing session when one
+  is named and close without a warning when none is. `true` still warns. A
+  mistyped `enabled` value only warns when you close; it no longer stops the
+  daemon. A `[close.transcript.project.<name>]` entry takes the same values, so
+  `"auto"` there records when a session is named. A close that names no session
+  warns only when some target is `true`.
+
 - See in `kata tui` which issues an agent marked `stuck` or `needs-human`: the list row gets a leading `!`, and the issue detail shows the `work.attention` value with its `work.attention_msg`. See [work conventions](reference/metadata.md#orchestration-conventions-work-keys).
 
 - Keep Linear discussion when you sync a Linear team: comments on imported

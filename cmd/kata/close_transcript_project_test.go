@@ -97,6 +97,7 @@ func TestCloseTranscriptProjectLookupFailure(t *testing.T) {
 	}{
 		{"issue", "", false, false, true},
 		{"issue with override", "true", false, false, true},
+		{"issue with auto override", "auto", false, false, true},
 		{"project name", "", true, false, true},
 		{"retry after failed lookup", "", false, true, true},
 		{"retry during failed lookup", "", false, true, false},
@@ -143,16 +144,16 @@ func TestCloseTranscriptProjectLookupFailure(t *testing.T) {
 			out, stderr, err := runCLIWithErr(t, env, dir, args...)
 			require.NoError(t, err)
 			got := closeReceiptTranscript(t, out)
-			if tc.failFirst && tc.override != "true" {
+			if tc.failFirst && tc.override == "" {
 				assert.Nil(t, got)
 			} else {
 				require.NotNil(t, got)
-				if tc.override == "true" {
+				if tc.override != "" {
 					assert.Empty(t, got.URL)
 				}
 			}
 			if tc.failFirst {
-				if tc.override == "true" {
+				if tc.override != "" {
 					assert.Contains(t, stderr, "project unavailable; a new close can record only the session identifier")
 				} else {
 					assert.Contains(t, stderr, "project unavailable; a new close will omit the transcript")
@@ -164,6 +165,31 @@ func TestCloseTranscriptProjectLookupFailure(t *testing.T) {
 				require.NoError(t, err)
 				assert.Contains(t, out, `"reused":true`)
 			}
+		})
+	}
+}
+
+func TestCloseTranscriptProjectAuto(t *testing.T) {
+	for _, tc := range []struct {
+		name, config string
+		attach       bool
+	}{
+		{"project auto under global false", "[close.transcript.project.kata]\nenabled=\"auto\"\n", true},
+		{"project auto under global auto", "[close.transcript]\nenabled=\"auto\"\n[close.transcript.project.kata]\nenabled=\"auto\"\n", true},
+		{"project false under global auto", "[close.transcript]\nenabled=\"auto\"\n[close.transcript.project.kata]\nenabled=false\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env, dir, _, ref := setupWorkspaceWithIssue(t, "Complete example work")
+			transcriptProjectConfig(t, tc.config)
+			out, stderr, err := runCLIWithErr(t, env, dir, "--json", "close", ref, "--done", "--message", "Implemented behavior and ran the example package tests.", "--test", "go test ./internal/example")
+			require.NoError(t, err)
+			got := closeReceiptTranscript(t, out)
+			if tc.attach {
+				require.NotNil(t, got)
+			} else {
+				assert.Nil(t, got)
+			}
+			assert.Empty(t, stderr)
 		})
 	}
 }
