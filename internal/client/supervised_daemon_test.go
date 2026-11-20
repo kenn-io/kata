@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -177,6 +178,30 @@ func TestDiscoveryDeadlineRetainsUnreachableRuntime(t *testing.T) {
 		return
 	}
 	t.Fatal("expected an unreachable error")
+}
+
+func TestDiscoveryDeadlineAfterEarlierUnreachableRuntime(t *testing.T) {
+	setupKataEnv(t)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond)
+	defer cancel()
+	scan := func(ctx context.Context, dir string) iter.Seq2[liveDaemon, error] {
+		return liveDaemonsUsing(ctx, dir, func(string) ([]kitdaemon.RuntimeRecord, error) {
+			return []kitdaemon.RuntimeRecord{
+				{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1234"},
+				{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:5678"},
+			}, nil
+		}, func(ctx context.Context, address string) (string, PingInfo, error) {
+			if address == "127.0.0.1:1234" {
+				return "", PingInfo{}, errors.New("first probe failed")
+			}
+			<-ctx.Done()
+			return "", PingInfo{}, ctx.Err()
+		})
+	}
+	_, _, err := discoverResolved(ctx, "/example/runtime", scan)
+	require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+	require.ErrorContains(t, err, "127.0.0.1:1234")
+	require.ErrorContains(t, err, "daemon.log")
 }
 
 func TestManagedExternallyProfileDoesNotAutostart(t *testing.T) {
