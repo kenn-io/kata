@@ -12,6 +12,7 @@ import (
 
 	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/teammate"
+	katauid "go.kenn.io/kata/internal/uid"
 )
 
 // EventTimestampFormat is the millisecond UTC representation covered by portable event hashes.
@@ -387,14 +388,7 @@ func DirectParentRemovals(ctx context.Context, tx Transaction, events []RemoteEv
 	for _, event := range ordered {
 		if event.Type == "issue.unlinked" || event.Type == "issue.links_changed" {
 			payload := PayloadMap(event.Payload)
-			var from, to string
-			if event.Type == "issue.links_changed" {
-				from = event.IssueUID
-				to, _ = StringValue(payload["parent_removed_uid"])
-			} else if kind, _ := StringValue(payload["type"]); kind == "parent" {
-				from, _ = StringValue(payload["link_from_uid"])
-				to, _ = StringValue(payload["link_to_uid"])
-			}
+			from, to := parentRemovalEndpoints(event, payload)
 			if from != "" && to != "" {
 				previous, err := parentOf(from)
 				if err != nil {
@@ -421,6 +415,71 @@ func DirectParentRemovals(ctx context.Context, tx Transaction, events []RemoteEv
 		}
 	}
 	return removed, nil
+}
+
+// parentRemovalEndpoints returns the child-to-parent storage endpoints removed
+// by event. Old parent unlinks without storage endpoints are read as
+// from_uid -> to_uid only when the event's primary issue is the child.
+func parentRemovalEndpoints(event FoldEvent, payload map[string]jsontext.Value) (string, string) {
+	if event.Type == "issue.links_changed" {
+		to, _ := StringValue(payload["parent_removed_uid"])
+		return event.IssueUID, to
+	}
+	if kind, _ := StringValue(payload["type"]); kind != "parent" {
+		return "", ""
+	}
+	_, fromPresent := payload["link_from_uid"]
+	_, toPresent := payload["link_to_uid"]
+	if !fromPresent && !toPresent {
+		from, _ := StringValue(payload["from_uid"])
+		to, _ := StringValue(payload["to_uid"])
+		if from != event.IssueUID {
+			return "", ""
+		}
+		return from, to
+	}
+	from, _ := StringValue(payload["link_from_uid"])
+	to, _ := StringValue(payload["link_to_uid"])
+	return from, to
+}
+
+// ValidateUnlinkStorageEndpoints checks the optional directional storage
+// endpoints of an issue.unlinked event. Blocks unlinks must carry them. Parent
+// unlinks may omit both only in the old form whose primary issue is the
+// payload from_uid (the child). The payload is never rewritten.
+func ValidateUnlinkStorageEndpoints(
+	event RemoteEvent,
+	payload map[string]jsontext.Value,
+	linkType, primaryUID, fromUID, toUID string,
+) error {
+	if event.Type != "issue.unlinked" {
+		return nil
+	}
+	rawFrom, fromPresent := payload["link_from_uid"]
+	rawTo, toPresent := payload["link_to_uid"]
+	if fromPresent != toPresent {
+		return fmt.Errorf("%w: issue.unlinked storage endpoints must be paired", ErrFederationIngestValidation)
+	}
+	if !fromPresent {
+		if linkType == "blocks" || (linkType == "parent" && primaryUID != fromUID) {
+			return fmt.Errorf("%w: issue.unlinked missing directional storage endpoints", ErrFederationIngestValidation)
+		}
+		return nil
+	}
+	linkFromUID, fromOK := StringValue(rawFrom)
+	linkToUID, toOK := StringValue(rawTo)
+	if !fromOK || !toOK {
+		return fmt.Errorf("%w: issue.unlinked storage endpoints must be strings", ErrFederationIngestValidation)
+	}
+	if !katauid.Valid(linkFromUID) || !katauid.Valid(linkToUID) || linkFromUID == linkToUID {
+		return fmt.Errorf("%w: issue.unlinked has invalid storage endpoints", ErrFederationIngestValidation)
+	}
+	matchesForward := linkFromUID == fromUID && linkToUID == toUID
+	matchesReverse := linkFromUID == toUID && linkToUID == fromUID
+	if !matchesForward && !matchesReverse {
+		return fmt.Errorf("%w: issue.unlinked storage endpoints disagree with payload endpoints", ErrFederationIngestValidation)
+	}
+	return nil
 }
 
 func directParentAssignments(event FoldEvent) ([]FoldLinkKey, error) {

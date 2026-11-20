@@ -777,8 +777,8 @@ func payloadDeferredLinkIssueUIDs(
 		if err := validateFederationLinkPeer(primaryIssueUID, peerUID); err != nil {
 			return nil, err
 		}
-		if err := validateFederationUnlinkStorageEndpoints(
-			event, payload, linkType, fromUID, toUID,
+		if err := db.ValidateUnlinkStorageEndpoints(
+			event, payload, linkType, primaryIssueUID, fromUID, toUID,
 		); err != nil {
 			return nil, err
 		}
@@ -804,48 +804,6 @@ func payloadDeferredLinkIssueUIDs(
 		}
 	}
 	return deferred, nil
-}
-
-func validateFederationUnlinkStorageEndpoints(
-	event db.RemoteEvent,
-	payload map[string]jsontext.Value,
-	linkType string,
-	fromUID string,
-	toUID string,
-) error {
-	if event.Type != "issue.unlinked" {
-		return nil
-	}
-	rawFrom, fromPresent := payload["link_from_uid"]
-	rawTo, toPresent := payload["link_to_uid"]
-	if fromPresent != toPresent {
-		return fmt.Errorf("%w: issue.unlinked storage endpoints must be paired",
-			db.ErrFederationIngestValidation)
-	}
-	if !fromPresent {
-		if linkType == "blocks" || linkType == "parent" {
-			return fmt.Errorf("%w: issue.unlinked missing directional storage endpoints",
-				db.ErrFederationIngestValidation)
-		}
-		return nil
-	}
-	linkFromUID, fromOK := db.StringValue(rawFrom)
-	linkToUID, toOK := db.StringValue(rawTo)
-	if !fromOK || !toOK {
-		return fmt.Errorf("%w: issue.unlinked storage endpoints must be strings",
-			db.ErrFederationIngestValidation)
-	}
-	if !katauid.Valid(linkFromUID) || !katauid.Valid(linkToUID) || linkFromUID == linkToUID {
-		return fmt.Errorf("%w: issue.unlinked has invalid storage endpoints",
-			db.ErrFederationIngestValidation)
-	}
-	matchesForward := linkFromUID == fromUID && linkToUID == toUID
-	matchesReverse := linkFromUID == toUID && linkToUID == fromUID
-	if !matchesForward && !matchesReverse {
-		return fmt.Errorf("%w: issue.unlinked storage endpoints disagree with payload endpoints",
-			db.ErrFederationIngestValidation)
-	}
-	return nil
 }
 
 func payloadLinksChangedIssueUIDs(
