@@ -458,7 +458,7 @@ type FederationProjectNotEnrolledError struct {
 
 func (e *FederationProjectNotEnrolledError) Error() string {
 	if e.IssueUID == "" {
-		return "an affected issue belongs to a project where this spoke has no push enrollment with the same actor"
+		return "This spoke needs push access to the affected issue's project with the same actor"
 	}
 	return fmt.Sprintf("issue %s now belongs to a project where this spoke has no push enrollment with the same actor", e.IssueUID)
 }

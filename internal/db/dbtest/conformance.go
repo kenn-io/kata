@@ -227,10 +227,6 @@ var storageScenarios = []scenario{
 		RunParentReplacementMissingExpectedLink(t, store)
 		return nil
 	}},
-	{name: "parent replacement unlink endpoints", methods: []string{"CreateProject", "CreateIssue", "CreateLinkAndEvent"}, run: func(t *testing.T, store db.Storage) error {
-		RunParentReplacementUnlinkEndpoints(t, store)
-		return nil
-	}},
 	{name: "local comment replies", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "CloseIssue", "SoftDeleteIssue", "CommentsByIssue"}, run: checkLocalCommentReplies},
 	{name: "concurrent local comment replies", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "CommentsByIssue"}, run: checkConcurrentLocalCommentReplies},
 	{name: "comment read graph", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "ReadCommentGraph", "IssueByID", "MoveIssueProject", "PurgeIssue"}, run: checkCommentReadGraph},

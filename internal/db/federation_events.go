@@ -324,20 +324,16 @@ func DirectLinkPeers(event FoldEvent) (map[string]bool, error) {
 		payload := PayloadMap(event.Payload)
 		if event.Type == "issue.links_changed" {
 			uid, _ := StringValue(payload["parent_removed_uid"])
-			if peers[uid] {
-				delete(peers, uid)
-			} else {
-				add(uid)
-			}
+			add(uid)
 			for _, key := range []string{"blocks_removed_uids", "blocked_by_removed_uids", "related_removed_uids"} {
 				for _, uid := range StringSlice(payload[key]) {
 					delete(peers, uid)
 				}
 			}
 		} else if kind, _ := StringValue(payload["type"]); kind == "parent" {
-			for _, key := range []string{"from_uid", "to_uid"} {
-				uid, _ := StringValue(payload[key])
-				add(uid)
+			child, parent := parentRemovalEndpoints(event, payload)
+			if child == event.IssueUID {
+				add(parent)
 			}
 		}
 	}
@@ -362,7 +358,7 @@ func directLinkAdditionEligible(event FoldEvent) bool {
 	return child != "" && child == event.IssueUID
 }
 
-// DirectParentRemovals checks parent operations against current links.
+// DirectParentRemovals checks parent operations against current links and retained assignment clocks.
 func DirectParentRemovals(ctx context.Context, tx federationHistoryQuery, events []RemoteEvent) (map[string][]string, error) {
 	ordered := make([]FoldEvent, 0, len(events))
 	for _, event := range events {
@@ -374,6 +370,7 @@ func DirectParentRemovals(ctx context.Context, tx federationHistoryQuery, events
 
 func currentParentRemovals(ctx context.Context, tx federationHistoryQuery, ordered []FoldEvent) (map[string][]string, error) {
 	parents := map[string]string{}
+	clocks := map[string]FoldClock{}
 	removed := map[string][]string{}
 	parentOf := func(child string) (string, error) {
 		if parent, known := parents[child]; known {
@@ -385,6 +382,43 @@ func currentParentRemovals(ctx context.Context, tx federationHistoryQuery, order
 			return "", err
 		}
 		parents[child] = parent
+		if parent != "" {
+			// A retained assignment may be newer than a queued unlink. Read only
+			// events indexed by either endpoint; snapshots can name incoming links.
+			rows, err := tx.QueryContext(ctx, `SELECT uid,origin_instance_uid,issue_uid,type,payload,hlc_physical_ms,hlc_counter
+FROM events WHERE (issue_uid IN ($1,$2) OR related_issue_uid IN ($1,$2))
+AND type IN ('issue.created','issue.snapshot','issue.linked','issue.links_changed')`, child, parent)
+			if err != nil {
+				return "", err
+			}
+			for rows.Next() {
+				var event FoldEvent
+				var issue sql.NullString
+				var payload string
+				if err := rows.Scan(&event.UID, &event.OriginInstanceUID, &issue, &event.Type, &payload, &event.HLCPhysicalMS, &event.HLCCounter); err != nil {
+					_ = rows.Close()
+					return "", err
+				}
+				event.IssueUID, event.Payload = issue.String, jsontext.Value(payload)
+				assignments, err := directParentAssignments(event)
+				if err != nil {
+					_ = rows.Close()
+					return "", err
+				}
+				for _, key := range assignments {
+					if key.FromUID == child && key.ToUID == parent && compareClock(clocks[child], clockOf(event)) < 0 {
+						clocks[child] = clockOf(event)
+					}
+				}
+			}
+			if err := rows.Err(); err != nil {
+				_ = rows.Close()
+				return "", err
+			}
+			if err := rows.Close(); err != nil {
+				return "", err
+			}
+		}
 		return parent, nil
 	}
 	for _, event := range ordered {
@@ -398,9 +432,9 @@ func currentParentRemovals(ctx context.Context, tx federationHistoryQuery, order
 				_, hasFrom := PayloadMap(event.Payload)["link_from_uid"]
 				_, hasTo := PayloadMap(event.Payload)["link_to_uid"]
 				if event.Type == "issue.unlinked" && !hasFrom && !hasTo && parent != to {
-					return nil, fmt.Errorf("%w: The parent this older change tries to remove is not the issue's current parent", ErrFederationIngestValidation)
+					return nil, fmt.Errorf("%w: This older change tries to remove a parent the issue no longer has", ErrFederationIngestValidation)
 				}
-				if parent == to {
+				if parent == to && compareClock(clockOf(event), clocks[from]) >= 0 {
 					parents[from] = ""
 				}
 			}

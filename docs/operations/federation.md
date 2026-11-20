@@ -2443,14 +2443,11 @@ return `invalid_federation_schema`.
 
 Parent replacement events queued by v0.19.0 through v0.23.0 can omit
 `link_from_uid` and `link_to_uid`. An upgraded hub accepts this legacy parent
-unlink only when its primary issue is `from_uid`, the child. Blocks unlinks
-without storage endpoints, parent unlinks whose primary issue is `to_uid`, and
-unlinks with only one storage endpoint remain rejected. Kata does not rewrite
-the stored event.
+unlink only when its primary issue is `from_uid`, the child. Kata does not
+rewrite the stored event.
 
-If the spoke already quarantined such a batch, upgrade the hub first. Inspect
-the batch with `kata federation quarantine show <id>`, then explicitly retry it
-as described in [other validation quarantines](#other-validation-quarantines).
+If the spoke already quarantined such a batch, upgrade the hub first, then
+explicitly retry it as described in [other validation quarantines](#other-validation-quarantines).
 
 Older kata builds may already have quarantined a batch after a transient
 schema-skew rejection. After upgrading the hub, upgrade and restart each spoke

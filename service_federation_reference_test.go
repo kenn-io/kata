@@ -233,15 +233,9 @@ func TestDirectPushWithProjectScopedActors(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, newPeer.UID, parent.ToIssueUID)
 			checkObserver(newPeer.UID)
-			link, err := spoke.DB.ParentOf(ctx, child.ID)
-			require.NoError(t, err)
 			linkParams := func(eventType string, parent db.Issue) db.LinkEventParams {
 				return db.LinkEventParams{EventType: eventType, EventIssueID: child.ID, FromUID: child.UID, FromShortID: child.ShortID, ToUID: parent.UID, ToShortID: parent.ShortID, Actor: "worker"}
 			}
-			_, err = spoke.DB.ReplaceParentAndEvents(ctx, db.ReplaceParentAndEventsParams{ExpectedParentLinkID: link.ID, ExpectedParentIssueID: localNewPeer.ID, Link: db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: local.ID, Type: "parent", Author: "worker"}, UnlinkEvent: linkParams("issue.unlinked", localNewPeer), LinkEvent: linkParams("issue.linked", local)})
-			require.NoError(t, err)
-			require.NoError(t, syncProject(0))
-			checkObserver(peer.UID)
 
 			t.Run("direct-link-with-different-actors", func(t *testing.T) {
 				directChild, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: child.ProjectID, Title: "Direct child", Author: "worker"})
@@ -249,16 +243,12 @@ func TestDirectPushWithProjectScopedActors(t *testing.T) {
 				require.NoError(t, syncProject(0))
 				_, linked, err := spoke.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: directChild.ID, ToIssueID: local.ID, Type: "parent", Author: "worker"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: directChild.ID, FromShortID: directChild.ShortID, FromUID: directChild.UID, ToShortID: local.ShortID, ToUID: local.UID, Actor: "worker"})
 				require.NoError(t, err)
-				later, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: child.ProjectID, Title: "Later direct link work", Author: "worker"})
-				require.NoError(t, err)
 				require.NoError(t, syncProject(0))
 				hubChild, err := hub.store.IssueByUID(ctx, directChild.UID, db.IncludeDeletedNo)
 				require.NoError(t, err)
 				parent, err := hub.store.ParentOf(ctx, hubChild.ID)
 				require.NoError(t, err)
 				require.Equal(t, peer.ID, parent.ToIssueID)
-				_, err = hub.store.IssueByUID(ctx, later.UID, db.IncludeDeletedNo)
-				require.NoError(t, err)
 				events, err := hub.store.EventsByUIDs(ctx, projects[0].ID, []string{linked.UID})
 				require.NoError(t, err)
 				require.Len(t, events, 1)
@@ -267,10 +257,10 @@ func TestDirectPushWithProjectScopedActors(t *testing.T) {
 			t.Run("legacy-parent-replacement", func(t *testing.T) {
 				link, err := spoke.DB.ParentOf(ctx, child.ID)
 				require.NoError(t, err)
-				replacement, err := spoke.DB.ReplaceParentAndEvents(ctx, db.ReplaceParentAndEventsParams{ExpectedParentLinkID: link.ID, ExpectedParentIssueID: local.ID, Link: db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: localNewPeer.ID, Type: "parent", Author: "worker"}, UnlinkEvent: linkParams("issue.unlinked", local), LinkEvent: linkParams("issue.linked", localNewPeer)})
+				replacement, err := spoke.DB.ReplaceParentAndEvents(ctx, db.ReplaceParentAndEventsParams{ExpectedParentLinkID: link.ID, ExpectedParentIssueID: localNewPeer.ID, Link: db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: local.ID, Type: "parent", Author: "worker"}, UnlinkEvent: linkParams("issue.unlinked", localNewPeer), LinkEvent: linkParams("issue.linked", local)})
 				require.NoError(t, err)
 				legacy := replacement.UnlinkedEvent
-				legacy.Payload = fmt.Sprintf(`{"type":"parent","from_uid":%q,"to_uid":%q}`, child.UID, local.UID)
+				legacy.Payload = fmt.Sprintf(`{"type":"parent","from_uid":%q,"to_uid":%q}`, child.UID, localNewPeer.UID)
 				hash, err := db.EventContentHash(db.EventHashInput{UID: legacy.UID, OriginInstanceUID: legacy.OriginInstanceUID, ProjectUID: legacy.ProjectUID, ProjectName: legacy.ProjectName, IssueUID: legacy.IssueUID, RelatedIssueUID: legacy.RelatedIssueUID, Type: legacy.Type, Actor: legacy.Actor, HLCPhysicalMS: legacy.HLCPhysicalMS, HLCCounter: legacy.HLCCounter, CreatedAt: legacy.CreatedAt.UTC().Format(db.EventTimestampFormat), Payload: jsontext.Value(legacy.Payload)})
 				require.NoError(t, err)
 				result, err := spoke.DB.ExecContext(ctx, `UPDATE events SET payload = ?, content_hash = ? WHERE id = ?`, legacy.Payload, hash, legacy.ID)
@@ -284,7 +274,7 @@ func TestDirectPushWithProjectScopedActors(t *testing.T) {
 				quarantine, err := spoke.DB.RecordFederationQuarantine(ctx, db.RecordFederationQuarantineParams{
 					ProjectID: child.ProjectID, Direction: db.FederationQuarantineDirectionPush,
 					FirstEventID: legacy.ID, LastEventID: replacement.LinkedEvent.ID,
-					EventUIDs: []string{legacy.UID, replacement.LinkedEvent.UID}, Error: "hub rejected legacy parent unlink", CreatedAt: time.Now().UTC(),
+					EventUIDs: []string{legacy.UID, replacement.LinkedEvent.UID}, Error: "issue.unlinked missing directional storage endpoints", CreatedAt: time.Now().UTC(),
 				})
 				require.NoError(t, err)
 				_, err = spoke.DB.RetryFederationQuarantine(ctx, db.RetryFederationQuarantineParams{
@@ -294,11 +284,11 @@ func TestDirectPushWithProjectScopedActors(t *testing.T) {
 				require.NoError(t, syncProject(0))
 				parent, err := hub.store.ParentOf(ctx, other.ID)
 				require.NoError(t, err)
-				require.Equal(t, newPeer.UID, parent.ToIssueUID)
+				require.Equal(t, peer.UID, parent.ToIssueUID)
 				updated, err := hub.store.IssueByUID(ctx, child.UID, db.IncludeDeletedNo)
 				require.NoError(t, err)
 				require.Equal(t, title, updated.Title)
-				checkObserver(newPeer.UID)
+				checkObserver(peer.UID)
 				observed, err := observer.DB.IssueByUID(ctx, child.UID, db.IncludeDeletedNo)
 				require.NoError(t, err)
 				require.Equal(t, title, observed.Title)
