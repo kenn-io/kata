@@ -11,16 +11,8 @@ import (
 func TestDirectParentRemovalsRejectsStaleLegacyUnlink(t *testing.T) {
 	pool := sql.OpenDB(referenceConnector{&referenceWork{}})
 	t.Cleanup(func() { _ = pool.Close() })
-	for _, query := range []string{
-		`CREATE TABLE projects(id INTEGER PRIMARY KEY, uid TEXT)`,
-		`CREATE TABLE events(uid TEXT, origin_instance_uid TEXT, project_id INTEGER, issue_uid TEXT, related_issue_uid TEXT, type TEXT, actor TEXT, payload TEXT, hlc_physical_ms INTEGER, hlc_counter INTEGER)`,
-		`CREATE TABLE links(from_issue_uid TEXT, to_issue_uid TEXT, type TEXT)`,
-		`INSERT INTO projects VALUES (1, 'project')`,
-		`INSERT INTO events VALUES ('old','origin',1,'child','parent','issue.linked','actor','{"type":"parent","from_uid":"child","to_uid":"parent"}',1,0)`,
-	} {
-		_, err := pool.ExecContext(t.Context(), query)
-		require.NoError(t, err)
-	}
+	_, err := pool.ExecContext(t.Context(), `CREATE TABLE links(from_issue_uid TEXT, to_issue_uid TEXT, type TEXT)`)
+	require.NoError(t, err)
 	tx, err := pool.BeginTx(t.Context(), nil)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = tx.Rollback() })
