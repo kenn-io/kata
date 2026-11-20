@@ -316,7 +316,7 @@ func moveBatchOne(a daemonAPI, client *kataclient.Client, projects []projectRef,
 			return
 		}
 		result.Result = "unknown"
-		result.Hint = fmt.Sprintf("outcome unconfirmed; run kata show %s --json. If issue.project_id is %d, it reached the target; if issue.project_id is %d, it is safe to retry. For any other project, check move history before retrying.", shellQuote(result.UID), result.targetID, result.sourceID)
+		result.Hint = fmt.Sprintf("outcome unconfirmed; run kata show %s --json to see the current issue.project_id. Source project ID: %d; target project ID: %d. Check move history before retrying if the issue may have moved more than once.", shellQuote(result.UID), result.sourceID, result.targetID)
 		return
 	}
 	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {

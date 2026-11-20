@@ -78,8 +78,8 @@ func TestMoveBatchLostResponseUsesUIDAndHistory(t *testing.T) {
 	require.Equal(t, "unknown", reply.Results[0].Result)
 	require.Equal(t, issue.UID, reply.Results[0].UID)
 	require.Equal(t, target.Name, reply.Results[0].Target)
-	require.Contains(t, reply.Results[0].Hint, "check move history")
-	require.Contains(t, reply.Results[0].Hint, "any other project")
+	require.Contains(t, reply.Results[0].Hint, "Check move history before retrying if the issue may have moved more than once")
+	require.NotContains(t, reply.Results[0].Hint, "safe to retry")
 	for _, workspace := range []string{t.TempDir(), dir} {
 		shown, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", workspace, "show", issue.UID, "--json")
 		require.NoError(t, err, shown)
@@ -91,8 +91,8 @@ func TestMoveBatchLostResponseUsesUIDAndHistory(t *testing.T) {
 		require.NoError(t, json.Unmarshal([]byte(shown), &result))
 		require.Equal(t, target.ID, result.Issue.ProjectID)
 	}
-	require.Contains(t, reply.Results[0].Hint, fmt.Sprintf("issue.project_id is %d", target.ID))
-	require.Contains(t, reply.Results[0].Hint, fmt.Sprintf("issue.project_id is %d", source.ID))
+	require.Contains(t, reply.Results[0].Hint, fmt.Sprintf("target project ID: %d", target.ID))
+	require.Contains(t, reply.Results[0].Hint, fmt.Sprintf("Source project ID: %d", source.ID))
 }
 
 func TestMoveBatchCancelMarksOnlyDispatchedMovesUnknown(t *testing.T) {
