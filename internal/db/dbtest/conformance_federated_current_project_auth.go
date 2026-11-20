@@ -302,8 +302,10 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 				_, err = store.IngestFederationEvents(ctx, params)
 				params.AuthorizeReference = authorize
 				require.ErrorIs(t, err, db.ErrFederationIngestValidation)
-				if !batch {
-					link, err := store.ParentOf(ctx, child.ID)
+				link, err := store.ParentOf(ctx, child.ID)
+				if batch {
+					require.ErrorIs(t, err, db.ErrNotFound)
+				} else {
 					require.NoError(t, err)
 					require.Equal(t, parent.ID, link.ToIssueID)
 				}
