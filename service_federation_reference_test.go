@@ -2,6 +2,8 @@ package kata
 
 import (
 	"context"
+	"encoding/json/jsontext"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -256,6 +258,36 @@ func TestDirectPushWithProjectScopedActors(t *testing.T) {
 			checkObserver(newPeer.UID)
 			_, err = hub.store.IssueByUID(ctx, queued.UID, db.IncludeDeletedNo)
 			require.NoError(t, err)
+
+			t.Run("legacy-parent-replacement", func(t *testing.T) {
+				link, err := spoke.DB.ParentOf(ctx, child.ID)
+				require.NoError(t, err)
+				replacement, err := spoke.DB.ReplaceParentAndEvents(ctx, db.ReplaceParentAndEventsParams{ExpectedParentLinkID: link.ID, ExpectedParentIssueID: localNewPeer.ID, Link: db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: local.ID, Type: "parent", Author: "worker"}, UnlinkEvent: linkParams("issue.unlinked", localNewPeer), LinkEvent: linkParams("issue.linked", local)})
+				require.NoError(t, err)
+				legacy := replacement.UnlinkedEvent
+				legacy.Payload = fmt.Sprintf(`{"type":"parent","from_uid":%q,"to_uid":%q}`, child.UID, localNewPeer.UID)
+				hash, err := db.EventContentHash(db.EventHashInput{UID: legacy.UID, OriginInstanceUID: legacy.OriginInstanceUID, ProjectUID: legacy.ProjectUID, ProjectName: legacy.ProjectName, IssueUID: legacy.IssueUID, RelatedIssueUID: legacy.RelatedIssueUID, Type: legacy.Type, Actor: legacy.Actor, HLCPhysicalMS: legacy.HLCPhysicalMS, HLCCounter: legacy.HLCCounter, CreatedAt: legacy.CreatedAt.UTC().Format(db.EventTimestampFormat), Payload: jsontext.Value(legacy.Payload)})
+				require.NoError(t, err)
+				result, err := spoke.DB.ExecContext(ctx, `UPDATE events SET payload = ?, content_hash = ? WHERE id = ?`, legacy.Payload, hash, legacy.ID)
+				require.NoError(t, err)
+				count, err := result.RowsAffected()
+				require.NoError(t, err)
+				require.EqualValues(t, 1, count)
+				title := "Updated after replacement"
+				_, err = spoke.DB.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: child.ID, Actor: "worker", Title: &title})
+				require.NoError(t, err)
+				require.NoError(t, syncProject(0))
+				parent, err := hub.store.ParentOf(ctx, other.ID)
+				require.NoError(t, err)
+				require.Equal(t, peer.UID, parent.ToIssueUID)
+				updated, err := hub.store.IssueByUID(ctx, child.UID, db.IncludeDeletedNo)
+				require.NoError(t, err)
+				require.Equal(t, title, updated.Title)
+				checkObserver(peer.UID)
+				observed, err := observer.DB.IssueByUID(ctx, child.UID, db.IncludeDeletedNo)
+				require.NoError(t, err)
+				require.Equal(t, title, observed.Title)
+			})
 
 			t.Run("delete-peer-before-link-push", func(t *testing.T) {
 				_, linkedEvent, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
