@@ -825,15 +825,19 @@ func TestStopRunningDaemonsDoesNotSignalAfterProbeDeadline(t *testing.T) {
 	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
 	tmp := setupKataEnv(t)
 	child, _ := startLongLivedTestProcess(t)
+	oldPID, blockedPID := os.Getpid(), child.Process.Pid
+	if fmt.Sprint(oldPID) > fmt.Sprint(blockedPID) {
+		oldPID, blockedPID = blockedPID, oldPID
+	}
 	_, addr := startMockDaemonPing(t, map[string]any{
-		"ok": true, "service": "kata", "version": "old-version", "pid": os.Getpid(),
+		"ok": true, "service": "kata", "version": "old-version", "pid": oldPID,
 	})
-	require.NoError(t, writeRuntimeRecordForPID(t, tmp, os.Getpid(), addr))
+	require.NoError(t, writeRuntimeRecordForPID(t, tmp, oldPID, addr))
 	blocked := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
 	}))
 	t.Cleanup(blocked.Close)
-	require.NoError(t, writeRuntimeRecordForPID(t, tmp, child.Process.Pid, strings.TrimPrefix(blocked.URL, "http://")))
+	require.NoError(t, writeRuntimeRecordForPID(t, tmp, blockedPID, strings.TrimPrefix(blocked.URL, "http://")))
 	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	origSignal := signalDaemonStopForEnsure

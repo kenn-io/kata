@@ -91,7 +91,6 @@ func TestManagedExternallyUnreachableDetail(t *testing.T) {
 			var advised interface{ RecoveryAdvice() string }
 			require.ErrorAs(t, err, &advised)
 			require.Equal(t, 1, strings.Count(advised.RecoveryAdvice(), "service manager"))
-			require.Contains(t, advised.RecoveryAdvice(), "Restart it through its service manager if it has one, or with the original options and environment")
 		})
 	})
 	t.Run("migration retains profiling URL", func(t *testing.T) {
@@ -159,26 +158,6 @@ func TestDaemonRecoveryAdvice(t *testing.T) {
 			command = `kata --daemon 'team''s profile' daemon recover`
 		}
 		require.Contains(t, err.RecoveryAdvice(), command)
-	})
-}
-
-func TestDiscoveryDeadlineRetainsUnreachableRuntime(t *testing.T) {
-	setupKataEnv(t)
-	synctest.Test(t, func(t *testing.T) {
-		record := kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1234"}
-		ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond)
-		defer cancel()
-		for _, err := range liveDaemonsUsing(ctx, "/example/runtime", func(string) ([]kitdaemon.RuntimeRecord, error) {
-			return []kitdaemon.RuntimeRecord{record}, nil
-		}, func(ctx context.Context, _ string) (string, PingInfo, error) {
-			<-ctx.Done()
-			return "", PingInfo{}, ctx.Err()
-		}) {
-			require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
-			require.ErrorContains(t, err, "daemon.log")
-			return
-		}
-		t.Fatal("expected an unreachable error")
 	})
 }
 

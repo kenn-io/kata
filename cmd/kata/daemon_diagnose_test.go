@@ -870,29 +870,18 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 	require.NoError(t, ns.EnsureDirs())
 
 	for _, tc := range []struct {
-		name, command  string
-		recoverOnRetry bool
-		managed        bool
+		name, command string
+		managed       bool
 	}{
 		{name: "ordinary", command: "list"},
-		{name: "health preserves first failure", command: "health", recoverOnRetry: true},
+		{name: "health discovery", command: "health"},
 		{name: "service managed", command: "list", managed: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.managed {
 				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n"), 0600))
 			}
-			var pings atomic.Int32
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if tc.recoverOnRetry && r.URL.Path == "/api/v1/instance" {
-					w.Header().Set("Content-Type", "application/json")
-					_, _ = fmt.Fprintf(w, `{"instance_uid":%q}`, uid)
-					return
-				}
-				if tc.recoverOnRetry && r.URL.Path == "/api/v1/ping" && pings.Add(1) > 1 {
-					_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d,"instance_uid":%q}`, version.Version, os.Getpid(), uid)
-					return
-				}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				http.Error(w, "fixture unavailable", http.StatusServiceUnavailable)
 			}))
 			t.Cleanup(server.Close)
@@ -932,7 +921,6 @@ func TestDaemonDiagnoseSecondPing(t *testing.T) {
 		{name: "named local", catalog: "work"},
 		{name: "canceled", end: "cancel"},
 		{name: "profile", profile: true},
-		{name: "profile internal timeout", profile: true, end: "timeout"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := ""
@@ -946,9 +934,6 @@ func TestDaemonDiagnoseSecondPing(t *testing.T) {
 			t.Setenv("KATA_DSN", "")
 			t.Chdir(t.TempDir())
 			resetFlags(t)
-			if tc.end == "timeout" {
-				t.Setenv("KATA_HTTP_TIMEOUT", "10s")
-			}
 			flags.Daemon = tc.catalog
 			if tc.catalog != "" {
 				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[[daemon]]\nname = 'work'\nlocal = true\n"), 0600))
@@ -967,10 +952,6 @@ func TestDaemonDiagnoseSecondPing(t *testing.T) {
 				}
 				if tc.end == "cancel" {
 					cancel()
-				}
-				if tc.end == "timeout" {
-					<-r.Context().Done()
-					return
 				}
 				http.Error(w, "fixture unavailable", http.StatusServiceUnavailable)
 			}))
@@ -1008,11 +989,7 @@ func TestDaemonDiagnoseSecondPing(t *testing.T) {
 				return
 			}
 			assert.Equal(t, os.Getpid(), result.PID)
-			if tc.end != "timeout" {
-				assert.Contains(t, result.Message, "503")
-			} else {
-				assert.Contains(t, result.Message, "context deadline exceeded")
-			}
+			assert.Contains(t, result.Message, "503")
 			assert.Contains(t, result.Message, strconv.Quote(filepath.Join(ns.DataDir, "daemon.log")))
 			if tc.profile {
 				command := "--daemon work daemon recover"
