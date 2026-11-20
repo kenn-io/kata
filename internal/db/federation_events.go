@@ -358,7 +358,7 @@ func directLinkAdditionEligible(event FoldEvent) bool {
 	return child != "" && child == event.IssueUID
 }
 
-// DirectParentRemovals checks parent operations against current links and retained assignment clocks.
+// DirectParentRemovals checks parent operations against current links.
 func DirectParentRemovals(ctx context.Context, tx federationHistoryQuery, events []RemoteEvent) (map[string][]string, error) {
 	ordered := make([]FoldEvent, 0, len(events))
 	for _, event := range events {
@@ -368,23 +368,9 @@ func DirectParentRemovals(ctx context.Context, tx federationHistoryQuery, events
 	return currentParentRemovals(ctx, tx, ordered)
 }
 
-// ValidateRelayParentRemovals checks new submissions against the current parent.
-// An upstream delivery has already passed that check at its source and may
-// reach a replica whose parent has since changed.
-func ValidateRelayParentRemovals(ctx context.Context, tx federationHistoryQuery, events []RemoteEvent, upstream bool) error {
-	if upstream {
-		return nil
-	}
-	_, err := DirectParentRemovals(ctx, tx, events)
-	return err
-}
-
 func currentParentRemovals(ctx context.Context, tx federationHistoryQuery, ordered []FoldEvent) (map[string][]string, error) {
 	parents := map[string]string{}
-	clocks := map[string]FoldClock{}
 	removed := map[string][]string{}
-	// A parent can own many children; decode its history once for the batch.
-	parentHistory := map[string]map[FoldLinkKey]FoldClock{}
 	parentOf := func(child string) (string, error) {
 		if parent, known := parents[child]; known {
 			return parent, nil
@@ -395,23 +381,6 @@ func currentParentRemovals(ctx context.Context, tx federationHistoryQuery, order
 			return "", err
 		}
 		parents[child] = parent
-		if parent != "" {
-			history, err := parentAssignmentClocks(ctx, tx, child, false)
-			if err != nil {
-				return "", err
-			}
-			if _, ok := parentHistory[parent]; !ok {
-				parentHistory[parent], err = parentAssignmentClocks(ctx, tx, parent, true)
-				if err != nil {
-					return "", err
-				}
-			}
-			key := FoldLinkKey{FromUID: child, ToUID: parent, Type: "parent"}
-			clocks[child] = history[key]
-			if clock := parentHistory[parent][key]; compareClock(clock, clocks[child]) > 0 {
-				clocks[child] = clock
-			}
-		}
 		return parent, nil
 	}
 	for _, event := range ordered {
@@ -427,7 +396,7 @@ func currentParentRemovals(ctx context.Context, tx federationHistoryQuery, order
 				if event.Type == "issue.unlinked" && !hasFrom && !hasTo && parent != to {
 					return nil, fmt.Errorf("%w: This older change tries to remove a parent the issue no longer has", ErrFederationIngestValidation)
 				}
-				if parent == to && compareClock(clockOf(event), clocks[from]) >= 0 {
+				if parent == to {
 					parents[from] = ""
 				}
 			}
@@ -441,49 +410,13 @@ func currentParentRemovals(ctx context.Context, tx federationHistoryQuery, order
 			if err != nil {
 				return nil, err
 			}
-			if compareClock(clockOf(event), clocks[key.FromUID]) < 0 {
-				continue
-			}
 			if parent != "" && parent != key.ToUID {
 				removed[event.UID] = append(removed[event.UID], parent)
 			}
 			parents[key.FromUID] = key.ToUID
-			clocks[key.FromUID] = clockOf(event)
 		}
 	}
 	return removed, nil
-}
-
-func parentAssignmentClocks(ctx context.Context, tx federationHistoryQuery, uid string, primaryOnly bool) (map[FoldLinkKey]FoldClock, error) {
-	query := `SELECT uid,origin_instance_uid,issue_uid,type,payload,hlc_physical_ms,hlc_counter FROM events WHERE (issue_uid=$1 OR related_issue_uid=$1) AND type IN ('issue.created','issue.snapshot','issue.linked','issue.links_changed')`
-	if primaryOnly {
-		query = `SELECT uid,origin_instance_uid,issue_uid,type,payload,hlc_physical_ms,hlc_counter FROM events WHERE issue_uid=$1 AND type IN ('issue.created','issue.snapshot','issue.linked','issue.links_changed')`
-	}
-	rows, err := tx.QueryContext(ctx, query, uid)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	clocks := map[FoldLinkKey]FoldClock{}
-	for rows.Next() {
-		var event FoldEvent
-		var issue sql.NullString
-		var payload string
-		if err := rows.Scan(&event.UID, &event.OriginInstanceUID, &issue, &event.Type, &payload, &event.HLCPhysicalMS, &event.HLCCounter); err != nil {
-			return nil, err
-		}
-		event.IssueUID, event.Payload = issue.String, jsontext.Value(payload)
-		assignments, err := directParentAssignments(event)
-		if err != nil {
-			return nil, err
-		}
-		for _, key := range assignments {
-			if clock := clockOf(event); compareClock(clock, clocks[key]) > 0 {
-				clocks[key] = clock
-			}
-		}
-	}
-	return clocks, rows.Err()
 }
 
 // parentRemovalEndpoints returns the child-to-parent storage endpoints removed

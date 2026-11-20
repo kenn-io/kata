@@ -250,7 +250,7 @@ func (d *Store) AcceptRelayDeliveries(ctx context.Context, bindingUID string, ba
 			result.Through = envelope.Sequence
 			result.Digest = envelope.Digest
 		}
-		if err := db.ValidateRelayParentRemovals(ctx, tx, acceptedSources, grant.ID <= 0); err != nil {
+		if _, err := db.DirectParentRemovals(ctx, tx, acceptedSources); err != nil {
 			return err
 		}
 		if len(result.InsertedEventUIDs) > 0 {

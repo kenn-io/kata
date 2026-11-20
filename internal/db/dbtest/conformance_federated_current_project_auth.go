@@ -301,27 +301,6 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 	require.Equal(t, "related", links[0].Type)
 	require.Contains(t, []string{links[0].FromIssueUID, links[0].ToIssueUID}, peer.UID)
 
-	t.Run("stale-unlink-before-replacement", func(t *testing.T) {
-		other, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: route.ID, Title: "Other child", Author: "worker"})
-		require.NoError(t, err)
-		attach := newRemoteEvent(t, route, &other.UID, "issue.links_changed", "worker", origin, at+3, payload)
-		params.Events = []db.FederationIngestEvent{{SourceEventID: 4, Event: attach}}
-		_, err = store.IngestFederationEvents(ctx, params)
-		require.NoError(t, err)
-		unlink, err := json.Marshal(map[string]string{"type": "parent", "from_uid": other.UID, "to_uid": peer.UID, "link_from_uid": other.UID, "link_to_uid": peer.UID})
-		require.NoError(t, err)
-		set, err := json.Marshal(map[string]string{"parent_set_uid": directChild.UID})
-		require.NoError(t, err)
-		params.Events = []db.FederationIngestEvent{
-			{SourceEventID: 5, Event: newRemoteEvent(t, route, &other.UID, "issue.unlinked", "worker", origin, at+2, unlink)},
-			{SourceEventID: 6, Event: newRemoteEvent(t, route, &other.UID, "issue.links_changed", "worker", origin, at+4, set)},
-		}
-		_, err = store.IngestFederationEvents(ctx, params)
-		require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
-		parent, err := store.ParentOf(ctx, other.ID)
-		require.NoError(t, err)
-		require.Equal(t, peer.ID, parent.ToIssueID)
-	})
 	// A spoke that has not pulled this parent sees only its new parent.
 	// Authorizing that addition cannot also authorize removing the hub's parent.
 	second, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "New parent", Author: "peer-member"})
