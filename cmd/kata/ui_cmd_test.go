@@ -39,11 +39,12 @@ func TestUICommandRejectsCompilationStub(t *testing.T) {
 
 func TestUICommandRejectsDaemonWithPlaceholderAssets(t *testing.T) {
 	stubUICommandLaunch(t, client.PreparedWebUI{
-		Runtime: client.DiscoveredWebRuntime{Capabilities: []string{"placeholder-assets"}},
+		LocalProfileHome: "/example/work home",
+		Runtime:          client.DiscoveredWebRuntime{Capabilities: []string{"placeholder-assets"}},
 	})
 
 	_, err := runCmdOutput(t, nil, "--daemon", "example-local", "ui")
-	require.ErrorContains(t, err, "set KATA_HOME to the daemon's home and run `kata daemon restart`")
+	require.ErrorContains(t, err, `set KATA_HOME to "/example/work home" and run `+"`kata daemon restart`")
 	assert.Empty(t, openedUIURL)
 }
 

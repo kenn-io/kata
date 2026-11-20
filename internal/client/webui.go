@@ -35,6 +35,7 @@ type PreparedWebUI struct {
 	BaseURL             string
 	ConfiguredRemote    bool
 	DaemonName          string
+	LocalProfileHome    string
 	AllowInsecure       bool
 	TrustPrivateNetwork bool
 	Client              *http.Client
@@ -92,6 +93,7 @@ func PrepareWebUI(ctx context.Context, opts PrepareWebUIOptions) (PreparedWebUI,
 
 	if resolved.LocalProfile != nil {
 		prepared.DaemonName = ""
+		prepared.LocalProfileHome = resolved.LocalProfile.Home
 	}
 	var dataDir string
 	if resolved.LocalProfile != nil {
