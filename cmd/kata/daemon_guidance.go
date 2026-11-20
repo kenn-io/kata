@@ -22,10 +22,13 @@ func daemonRecoveryAdvice(err error, goos string) string {
 	if errors.Is(err, client.ErrSQLiteMigrationActive) {
 		return advice + ". Wait for the migration to finish, then retry."
 	}
-	if errors.Is(err, context.Canceled) {
-		return advice
+	if errors.Is(err, client.ErrDaemonManagedExternally) {
+		return advice + ". Restart it through its service manager."
 	}
-	if e.ManagedExternally || errors.Is(err, client.ErrDaemonManagedExternally) {
+	if (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) && !errors.Is(err, client.ErrLocalDaemonUnreachable) {
+		return ""
+	}
+	if e.ManagedExternally {
 		return advice + ". Restart it through its service manager."
 	}
 	if e.VerifiedProcess {

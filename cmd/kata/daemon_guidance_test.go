@@ -51,7 +51,7 @@ func TestDaemonRecoveryAdvice(t *testing.T) {
 
 func TestDaemonRecoveryGuidanceDuringMigration(t *testing.T) {
 	evidence := &client.LocalDaemonUnreachableError{PID: 42, DataDir: "/runtime", VerifiedProcess: true}
-	err := errors.Join(client.ErrSQLiteMigrationActive, evidence)
+	err := errors.Join(client.ErrSQLiteMigrationActive, context.DeadlineExceeded, evidence)
 	hint := daemonRecoveryAdvice(err, "linux")
 	require.Contains(t, hint, "daemon.log")
 	require.Contains(t, hint, "Wait")
@@ -61,15 +61,14 @@ func TestDaemonRecoveryGuidanceDuringMigration(t *testing.T) {
 
 func TestReviewRecoveryGuidanceContracts(t *testing.T) {
 	e := &client.LocalDaemonUnreachableError{PID: 42, DataDir: "/runtime", WebOrigin: "http://127.0.0.1:7777", VerifiedProcess: true}
-	t.Run("caller cancellation", func(t *testing.T) {
-		hint := daemonRecoveryAdvice(errors.Join(context.Canceled, e), "linux")
-		require.NotContains(t, hint, "kill")
-		require.NotContains(t, hint, "restart")
+	t.Run("probe timeout", func(t *testing.T) {
+		hint := daemonRecoveryAdvice(errors.Join(context.DeadlineExceeded, e), "linux")
+		require.Contains(t, hint, "kill")
 	})
 	t.Run("service manager", func(t *testing.T) {
 		for _, name := range []string{"", "work"} {
 			e.Profile = name
-			hint := daemonRecoveryAdvice(errors.Join(client.ErrDaemonManagedExternally, e), "linux")
+			hint := daemonRecoveryAdvice(errors.Join(client.ErrDaemonManagedExternally, context.DeadlineExceeded, e), "linux")
 			require.Contains(t, hint, "service manager")
 			require.NotContains(t, hint, "kill")
 			require.NotContains(t, hint, "daemon restart")

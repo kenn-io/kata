@@ -1014,10 +1014,7 @@ func TestReviewSupervisedDiscoveryDeadline(t *testing.T) {
 			_, err = discoverDaemonResolved(ctx)
 			require.ErrorIs(t, err, context.DeadlineExceeded)
 			hint := cliErrorForErr(err, true).Hint
-			require.Contains(t, hint, "service manager")
-			require.NotContains(t, hint, "kill")
-			require.NotContains(t, hint, "daemon restart")
-			require.NotContains(t, hint, "daemon recover")
+			require.Empty(t, hint)
 		})
 	}
 }

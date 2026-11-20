@@ -4192,7 +4192,21 @@ func TestReviewCanceledDiscoveryDoesNotSuggestStopping(t *testing.T) {
 	_, _, err = client.DiscoverResolved(ctx, ns.DataDir)
 	require.ErrorIs(t, err, context.Canceled)
 	hint := cliErrorForErr(err, true).Hint
-	require.Contains(t, hint, "daemon.log")
-	require.NotContains(t, hint, "kill")
-	require.NotContains(t, hint, "restart")
+	require.Empty(t, hint)
+}
+
+func TestReviewCallerDeadlineHasNoRecoveryHint(t *testing.T) {
+	setupKataEnv(t)
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+	t.Cleanup(server.Close)
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	_, _, err = client.DiscoverResolved(ctx, ns.DataDir)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Empty(t, cliErrorForErr(err, true).Hint)
 }
