@@ -65,7 +65,7 @@ func TestRelayPreparedArtifactBackupRoundTrip(t *testing.T) {
 			postCheckpointArtifact := relayBackupArtifact(t, root, postCheckpoint)
 			_, err = root.store.(db.EmbeddingArtifactStorage).RetainEmbeddingArtifact(t.Context(), postCheckpointArtifact)
 			require.NoError(t, err)
-			_, _, changed, err := root.store.SoftDeleteIssue(t.Context(), issue.ID, root.account)
+			_, _, changed, err := root.store.SoftDeleteIssue(t.Context(), issue.ID, root.account, "")
 			require.NoError(t, err)
 			require.True(t, changed)
 			_, restoredEvent, changed, err := root.store.RestoreIssue(t.Context(), issue.ID, root.account)

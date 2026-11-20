@@ -34,7 +34,7 @@ func checkSetupFinishedDelivery(t *testing.T, store db.Storage, backend Backend)
 			case "closed":
 				_, _, _, err = target.CloseIssue(ctx, issue.ID, "done", "tester", "Completed issue", nil)
 			case "deleted-only":
-				_, _, _, err = target.SoftDeleteIssue(ctx, issue.ID, "tester")
+				_, _, _, err = target.SoftDeleteIssue(ctx, issue.ID, "tester", "")
 			case "archived project":
 				_, _, err = target.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: project.ID, Actor: "tester", Force: true})
 			}
@@ -74,7 +74,7 @@ func checkSetupFinishedDelivery(t *testing.T, store db.Storage, backend Backend)
 	for delivery := range deliveries {
 		require.Equal(t, pending, delivery)
 	}
-	_, _, _, err = store.SoftDeleteIssue(ctx, issue.ID, "tester")
+	_, _, _, err = store.SoftDeleteIssue(ctx, issue.ID, "tester", "")
 	require.NoError(t, err)
 	retry, _, err := other.PrepareSetupFinished(ctx, observed.Add(time.Hour))
 	require.NoError(t, err)

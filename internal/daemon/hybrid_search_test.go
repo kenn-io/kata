@@ -53,7 +53,7 @@ func TestHybridSearchHubFindsLiveHitAfterDeletedWindow(t *testing.T) {
 	for range 50 {
 		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "deleted locally", Author: "tester"})
 		require.NoError(t, err)
-		_, _, _, err = store.SoftDeleteIssue(ctx, issue.ID, "tester")
+		_, _, _, err = store.SoftDeleteIssue(ctx, issue.ID, "tester", "")
 		require.NoError(t, err)
 		hits = append(hits, api.FederationSearchHit{Issue: issue, Score: 0.9})
 	}
@@ -120,7 +120,7 @@ func TestHybridSearchHubDeletedHitsExhaustCap(t *testing.T) {
 	for range 200 {
 		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "deleted locally", Author: "tester"})
 		require.NoError(t, err)
-		_, _, _, err = store.SoftDeleteIssue(ctx, issue.ID, "tester")
+		_, _, _, err = store.SoftDeleteIssue(ctx, issue.ID, "tester", "")
 		require.NoError(t, err)
 		hits = append(hits, api.FederationSearchHit{Issue: issue, Score: 0.9})
 	}
@@ -469,7 +469,7 @@ func TestVectorLegExcludesOtherProjectsAndDeleted(t *testing.T) {
 
 	// Soft-delete after filling: the sidecar still holds an embedding for it,
 	// so only the live-row hydration in runVectorLeg can filter it out.
-	if _, _, _, err := store.SoftDeleteIssue(ctx, toDeleteA.ID, "a"); err != nil {
+	if _, _, _, err := store.SoftDeleteIssue(ctx, toDeleteA.ID, "a", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -567,7 +567,7 @@ func TestVectorLegSoftDeleteDropsFromIndexUntilRestore(t *testing.T) {
 	idx := openTestVectorIndex(t)
 	activateFixedGeneration(ctx, t, store, idx)
 
-	if _, _, _, err := store.SoftDeleteIssue(ctx, iss.ID, "a"); err != nil {
+	if _, _, _, err := store.SoftDeleteIssue(ctx, iss.ID, "a", ""); err != nil {
 		t.Fatal(err)
 	}
 

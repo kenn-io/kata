@@ -257,7 +257,7 @@ func TestFederationIssueHistoryRetainsEnvelopeAndPagination(t *testing.T) {
 	require.NoError(t, err)
 	unrelated, _, err := hub.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: projects[1].ID, Title: "unrelated destination issue", Author: "worker"})
 	require.NoError(t, err)
-	_, _, _, err = hub.DB.SoftDeleteIssue(t.Context(), unrelated.ID, "worker")
+	_, _, _, err = hub.DB.SoftDeleteIssue(t.Context(), unrelated.ID, "worker", "")
 	require.NoError(t, err)
 	_, err = hub.DB.PurgeIssue(t.Context(), unrelated.ID, "worker", nil)
 	require.NoError(t, err)

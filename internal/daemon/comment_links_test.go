@@ -137,7 +137,7 @@ func TestDeletedIssueCommentSelectors(t *testing.T) {
 	require.NoError(t, err)
 	reply, _, err := h.DB().CreateComment(t.Context(), db.CreateCommentParams{IssueID: id, Author: "worker", Body: "Answer", ReplyToUID: root.UID, ReplyKind: "reply"})
 	require.NoError(t, err)
-	_, _, _, err = h.DB().SoftDeleteIssue(t.Context(), id, "worker")
+	_, _, _, err = h.DB().SoftDeleteIssue(t.Context(), id, "worker", "")
 	require.NoError(t, err)
 	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("%s/api/v1/projects/%d/issues/%s?include_deleted=true&thread=%s&since=%s", ts.URL, pid, issue.ShortID, root.UID, root.UID), nil)
 	require.NoError(t, reqErr)
@@ -188,10 +188,10 @@ func TestDeletedSourceCommentRetainsReplyEndpointState(t *testing.T) {
 				})
 				require.NoError(t, err)
 			} else {
-				_, _, _, err = h.DB().SoftDeleteIssue(t.Context(), targetIssue.ID, "coordinator")
+				_, _, _, err = h.DB().SoftDeleteIssue(t.Context(), targetIssue.ID, "coordinator", "")
 				require.NoError(t, err)
 			}
-			_, _, _, err = h.DB().SoftDeleteIssue(t.Context(), sourceIssue.ID, "coordinator")
+			_, _, _, err = h.DB().SoftDeleteIssue(t.Context(), sourceIssue.ID, "coordinator", "")
 			require.NoError(t, err)
 
 			path := fmt.Sprintf("%s/api/v1/projects/%d/issues/%s?include_deleted=true",

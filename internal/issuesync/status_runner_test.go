@@ -394,7 +394,7 @@ func TestStatusRunnerLocatorBackfillSkipsDeletedLocalMappingsAndAdvancesPage(t *
 		_, err := s.ExecContext(t.Context(), `UPDATE import_mappings SET external_id=$1 WHERE id=$2`, externalID, ms[i].Mapping.ID)
 		require.NoError(t, err)
 	}
-	_, _, _, err := s.SoftDeleteIssue(t.Context(), *ms[0].Mapping.IssueID, "worker")
+	_, _, _, err := s.SoftDeleteIssue(t.Context(), *ms[0].Mapping.IssueID, "worker", "")
 	require.NoError(t, err)
 	var pages []int
 	run := &locatorTestRun{

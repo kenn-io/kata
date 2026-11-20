@@ -44,7 +44,7 @@ func RunUISnapshotGraphReachContract(t *testing.T, open func(*testing.T) db.Stor
 	} {
 		createCursorLink(ctx, t, store, link.from, link.to, link.kind)
 	}
-	_, _, _, err = store.SoftDeleteIssue(ctx, d.ID, "user-a")
+	_, _, _, err = store.SoftDeleteIssue(ctx, d.ID, "user-a", "")
 	require.NoError(t, err)
 	_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: archived.ID, Actor: "user-a", Force: true})
 	require.NoError(t, err)
@@ -285,7 +285,7 @@ func RunUISnapshotCollectionContract(t *testing.T, open func(*testing.T) db.Stor
 	createCursorLink(ctx, t, store, child, parent, "parent")
 	createCursorLink(ctx, t, store, blocker, blocked, "blocks")
 	createCursorLink(ctx, t, store, removed, parent, "parent")
-	_, _, changed, err := store.SoftDeleteIssue(ctx, removed.ID, "user-a")
+	_, _, changed, err := store.SoftDeleteIssue(ctx, removed.ID, "user-a", "")
 	require.NoError(t, err)
 	require.True(t, changed)
 
@@ -440,7 +440,7 @@ func RunUISnapshotChildLinkContract(t *testing.T, open func(*testing.T) db.Stora
 	_, _, changed, err := store.CloseIssue(ctx, closedChild.ID, "done", "user-a", "Completed", nil)
 	require.NoError(t, err)
 	require.True(t, changed)
-	_, _, changed, err = store.SoftDeleteIssue(ctx, deletedChild.ID, "user-a")
+	_, _, changed, err = store.SoftDeleteIssue(ctx, deletedChild.ID, "user-a", "")
 	require.NoError(t, err)
 	require.True(t, changed)
 	_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{
@@ -1139,7 +1139,7 @@ func cursorReopen(ctx context.Context, t *testing.T, store db.Storage) {
 func cursorDelete(ctx context.Context, t *testing.T, store db.Storage) {
 	t.Helper()
 	issue := createCursorFixtureIssue(ctx, t, store)
-	_, _, changed, err := store.SoftDeleteIssue(ctx, issue.ID, "user-a")
+	_, _, changed, err := store.SoftDeleteIssue(ctx, issue.ID, "user-a", "")
 	require.NoError(t, err)
 	require.True(t, changed)
 }
@@ -1147,7 +1147,7 @@ func cursorDelete(ctx context.Context, t *testing.T, store db.Storage) {
 func cursorRestore(ctx context.Context, t *testing.T, store db.Storage) {
 	t.Helper()
 	issue := createCursorFixtureIssue(ctx, t, store)
-	_, _, _, err := store.SoftDeleteIssue(ctx, issue.ID, "user-a")
+	_, _, _, err := store.SoftDeleteIssue(ctx, issue.ID, "user-a", "")
 	require.NoError(t, err)
 	_, _, changed, err := store.RestoreIssue(ctx, issue.ID, "user-a")
 	require.NoError(t, err)

@@ -189,7 +189,7 @@ func TestReadUILaunchTargetHidesDeletedAndArchivedIssues(t *testing.T) {
 			})
 			require.NoError(t, err)
 			if lifecycle == "deleted-issue" {
-				_, _, _, err = dbh.db.SoftDeleteIssue(t.Context(), issue.ID, "user-a")
+				_, _, _, err = dbh.db.SoftDeleteIssue(t.Context(), issue.ID, "user-a", "")
 			} else {
 				_, _, err = dbh.db.RemoveProject(t.Context(), db.RemoveProjectParams{
 					ProjectID: project.ID, Actor: "user-a", Force: true,
@@ -266,7 +266,7 @@ func TestReadUILaunchTargetConcealsHostResourceState(t *testing.T) {
 		ProjectID: activeProject.ID, Title: "Deleted task", Author: "user-a",
 	})
 	require.NoError(t, err)
-	_, _, _, err = dbh.db.SoftDeleteIssue(t.Context(), deletedIssue.ID, "user-a")
+	_, _, _, err = dbh.db.SoftDeleteIssue(t.Context(), deletedIssue.ID, "user-a", "")
 	require.NoError(t, err)
 	deniedIssue, _, err := dbh.db.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: deniedProject.ID, Title: "Denied task", Author: "user-a",

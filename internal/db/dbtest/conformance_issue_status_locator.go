@@ -39,7 +39,7 @@ func checkIssueStatusLocator(t *testing.T, store db.Storage, backend Backend) er
 	require.NoError(t, err)
 	inactiveMapping, err := store.UpsertImportMapping(ctx, db.ImportMappingParams{ProjectID: f.Project.ID, Source: b.SourceKey, ObjectType: "issue", ExternalID: "issue:inactive-node", IssueID: &inactiveIssue.ID})
 	require.NoError(t, err)
-	_, _, _, err = store.SoftDeleteIssue(ctx, inactiveIssue.ID, "worker")
+	_, _, _, err = store.SoftDeleteIssue(ctx, inactiveIssue.ID, "worker", "")
 	require.NoError(t, err)
 	inactiveLocator := db.IssueStatusLocator{ExternalID: "issue-id:456", LegacyExternalIDs: []string{inactiveMapping.ExternalID}, Locator: "8"}
 	inactiveSaved, err := locators.SaveIssueStatusLocator(ctx, guard, inactiveLocator)

@@ -149,7 +149,7 @@ func TestStandaloneCopyPreservesContentWithoutRestoringAuthority(t *testing.T) {
 	one := createTesterIssue(ctx, t, source, first.ID, "First task", "Historical body", "label-a")
 	two := createTesterIssue(ctx, t, source, second.ID, "Second task", "Another body", "label-b")
 	deleted := createTesterIssue(ctx, t, source, first.ID, "Deleted task", "Retained content")
-	_, _, _, err = source.SoftDeleteIssue(ctx, deleted.ID, "user-a")
+	_, _, _, err = source.SoftDeleteIssue(ctx, deleted.ID, "user-a", "")
 	require.NoError(t, err)
 	createTesterIssue(ctx, t, source, archive.ID, "Archived task", "Still archived")
 	_, _, err = source.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: archive.ID, Actor: "user-a", Force: true})

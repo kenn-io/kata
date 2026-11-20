@@ -2136,7 +2136,7 @@ func TestCreate_IdempotencyDeletedIs409(t *testing.T) {
 	// Soft-delete the issue at the DB layer (Task 5 ships SoftDeleteIssue;
 	// the daemon wraps it in Task 10. We can call DB directly because the
 	// test server shares the same *sqlitestore.Store as the handler.)
-	_, _, _, err := h.DB().SoftDeleteIssue(t.Context(), firstResp.Issue.ID, "agent-1")
+	_, _, _, err := h.DB().SoftDeleteIssue(t.Context(), firstResp.Issue.ID, "agent-1", "")
 	require.NoError(t, err)
 
 	second := postWithHeader(t, ts, path, map[string]string{"Idempotency-Key": "K-DEL"},

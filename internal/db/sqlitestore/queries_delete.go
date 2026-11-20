@@ -12,16 +12,17 @@ import (
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
-// SoftDeleteIssue sets deleted_at on the issue and emits issue.soft_deleted.
+// SoftDeleteIssue sets deleted_at on the issue and emits issue.soft_deleted,
+// whose payload carries reason when it is non-empty.
 // Already-deleted issues are returned as a no-op envelope (nil event,
 // changed=false). Unknown issues return ErrNotFound.
-func (d *Store) SoftDeleteIssue(ctx context.Context, issueID int64, actor string) (db.Issue, *db.Event, bool, error) {
+func (d *Store) SoftDeleteIssue(ctx context.Context, issueID int64, actor, reason string) (db.Issue, *db.Event, bool, error) {
 	return retryWrite3(ctx, d, func() (db.Issue, *db.Event, bool, error) {
-		return d.softDeleteIssue(ctx, issueID, actor)
+		return d.softDeleteIssue(ctx, issueID, actor, reason)
 	})
 }
 
-func (d *Store) softDeleteIssue(ctx context.Context, issueID int64, actor string) (db.Issue, *db.Event, bool, error) {
+func (d *Store) softDeleteIssue(ctx context.Context, issueID int64, actor, reason string) (db.Issue, *db.Event, bool, error) {
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return db.Issue{}, nil, false, err
@@ -78,7 +79,8 @@ func (d *Store) softDeleteIssue(ctx context.Context, issueID int64, actor string
 	}
 	payload, err := json.Marshal(struct {
 		DeletedAt string `json:"deleted_at"`
-	}{DeletedAt: deletedAt})
+		Reason    string `json:"reason,omitzero"`
+	}{DeletedAt: deletedAt, Reason: reason})
 	if err != nil {
 		return db.Issue{}, nil, false, fmt.Errorf("soft delete payload: %w", err)
 	}

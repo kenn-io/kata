@@ -214,7 +214,7 @@ func TestSearchFTSAny_LookalikeSizeAndOrder(t *testing.T) {
 							}
 						case "deletion":
 							capture.beforeQuery = func() {
-								_, _, _, err := store.SoftDeleteIssue(ctx, candidate.ID, "tester")
+								_, _, _, err := store.SoftDeleteIssue(ctx, candidate.ID, "tester", "")
 								require.NoError(t, err)
 							}
 						}

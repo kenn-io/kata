@@ -209,7 +209,7 @@ func TestCommentMutationResponsesRedactHostDeniedMovedReplyTargets(t *testing.T)
 			require.NoError(t, err)
 
 			if test.deleted {
-				_, _, changed, err := h.DB().SoftDeleteIssue(t.Context(), targetIssue.ID, "coordinator")
+				_, _, changed, err := h.DB().SoftDeleteIssue(t.Context(), targetIssue.ID, "coordinator", "")
 				require.NoError(t, err)
 				require.True(t, changed)
 			}
@@ -379,7 +379,7 @@ func TestDeletedSourceShowRedactsHostDeniedMovedReplyTarget(t *testing.T) {
 		IfMatchRev: targetIssue.Revision, Actor: "coordinator",
 	})
 	require.NoError(t, err)
-	_, _, _, err = h.DB().SoftDeleteIssue(t.Context(), sourceIssue.ID, "coordinator")
+	_, _, _, err = h.DB().SoftDeleteIssue(t.Context(), sourceIssue.ID, "coordinator", "")
 	require.NoError(t, err)
 
 	server := daemon.NewServer(daemon.ServerConfig{
@@ -763,7 +763,7 @@ func TestCommentEndpoint_IdempotencyReplayRejectsSoftDeletedIssue(t *testing.T) 
 	path := issueURLRef(pid, issue.UID, "comments")
 	requireOK(t, postWithHeader(t, ts, path, headers, body))
 
-	_, _, _, err = h.DB().SoftDeleteIssue(t.Context(), issueID, "agent")
+	_, _, _, err = h.DB().SoftDeleteIssue(t.Context(), issueID, "agent", "")
 	require.NoError(t, err)
 
 	retry := postWithHeader(t, ts, path, headers, body)

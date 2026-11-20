@@ -279,7 +279,7 @@ func buildRichJSONLFixture(t *testing.T) richJSONLFixture {
 		Actor: "tester",
 	})
 	require.NoError(t, err)
-	_, _, _, err = d.SoftDeleteIssue(ctx, softDeleted.ID, "tester")
+	_, _, _, err = d.SoftDeleteIssue(ctx, softDeleted.ID, "tester", "")
 	require.NoError(t, err)
 	reason := "roundtrip fixture"
 	pl, err := d.PurgeIssue(ctx, purged.ID, "tester", &reason)

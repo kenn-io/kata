@@ -57,7 +57,7 @@ func TestHistoricalMutationClaimGate(t *testing.T) {
 				require.NoError(t, err)
 			}
 			if tc.prepare == "delete" {
-				_, _, _, err = env.DB.SoftDeleteIssue(t.Context(), issue.ID, "coordinator")
+				_, _, _, err = env.DB.SoftDeleteIssue(t.Context(), issue.ID, "coordinator", "")
 				require.NoError(t, err)
 			}
 			_, err = env.DB.EnableProjectFederation(t.Context(), target.ID, "coordinator")
@@ -97,7 +97,7 @@ func TestHistoricalMutationKeyedCloseRetry(t *testing.T) {
 			first, raw := envDoRaw(t, env, http.MethodPost, path, body, headers)
 			require.Equal(t, http.StatusOK, first.StatusCode, string(raw))
 			if deleted {
-				_, _, _, err := env.DB.SoftDeleteIssue(t.Context(), issue.ID, "agent")
+				_, _, _, err := env.DB.SoftDeleteIssue(t.Context(), issue.ID, "agent", "")
 				require.NoError(t, err)
 			}
 			retry, raw := envDoRaw(t, env, http.MethodPost, path, body, headers)
@@ -130,7 +130,7 @@ func TestHistoricalMutationPublishesCurrentProject(t *testing.T) {
 			headers := map[string]string{"Authorization": "Bearer tok"}
 			body := map[string]any{"actor": "agent"}
 			if action == "restore" {
-				_, _, _, err := env.DB.SoftDeleteIssue(t.Context(), issue.ID, "agent")
+				_, _, _, err := env.DB.SoftDeleteIssue(t.Context(), issue.ID, "agent", "")
 				require.NoError(t, err)
 			}
 			if action == "delete" {
@@ -253,7 +253,7 @@ func TestHistoricalMutationKeyedCloseRetryAcrossMultipleMoves(t *testing.T) {
 			_, err = env.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: intermediate.ID, ToProjectID: target.ID, IfMatchRev: current.Revision, Actor: "coordinator"})
 			require.NoError(t, err)
 			if deleted {
-				_, _, _, err = env.DB.SoftDeleteIssue(t.Context(), issue.ID, "agent")
+				_, _, _, err = env.DB.SoftDeleteIssue(t.Context(), issue.ID, "agent", "")
 				require.NoError(t, err)
 			}
 			for _, route := range []int64{source.ID, target.ID} {

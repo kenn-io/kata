@@ -523,8 +523,9 @@ func scopedEventPayload(event db.Event) (string, bool) {
 		"issue.unlinked":          keySet("type", "from_short_id", "from_uid", "to_short_id", "to_uid", "incoming"),
 		"issue.closed":            keySet("reason", "closed_at", "message", "evidence", "transcript"),
 		"issue.reopened":          keySet("reopened_at"),
-		// Ladder verbs carry only mutation timestamps.
-		"issue.soft_deleted": keySet("deleted_at"),
+		// Ladder verbs carry mutation timestamps; a delete also carries the
+		// reason its caller gave.
+		"issue.soft_deleted": keySet("deleted_at", "reason"),
 		"issue.restored":     keySet("restored_at", "updated_at"),
 		// Moves are recorded in the target project, so a scoped client only
 		// ever sees arrivals into its own project. The projection keeps the

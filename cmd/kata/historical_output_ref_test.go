@@ -70,7 +70,7 @@ func TestHistoricalIssueOutputRefRoundTripsToMovedIssue(t *testing.T) {
 					require.NoError(t, err)
 					args = []string{"comment", "edit", oldRef, comment.UID, "--body", "Updated discussion"}
 				case "restore":
-					_, _, _, err := env.DB.SoftDeleteIssue(t.Context(), moved.ID, "worker")
+					_, _, _, err := env.DB.SoftDeleteIssue(t.Context(), moved.ID, "worker", "")
 					require.NoError(t, err)
 					args = []string{"restore", oldRef}
 				}
