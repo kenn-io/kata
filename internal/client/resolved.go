@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"go.kenn.io/kata/internal/config"
+	kitdaemon "go.kenn.io/kit/daemon"
 )
 
 // DaemonSource names the input that selected a daemon. The source is carried
@@ -49,6 +50,7 @@ func (s DaemonSource) String() string {
 // for that source. Client construction consumes this value without resolving
 // those inputs again.
 type ResolvedDaemon struct {
+	RuntimeRecord       *kitdaemon.RuntimeRecord
 	SourcePath          string
 	RuntimeDir          string
 	LocalProfile        *LocalProfileIdentity
@@ -323,5 +325,6 @@ func localRuntimeResolved(candidate liveDaemon) ResolvedDaemon {
 		DaemonSourceLocalRuntime, "", runningDaemonForLive(candidate),
 	).withGlobalAuth()
 	resolved.UnixSocket = candidate.UnixSocket
+	resolved.RuntimeRecord = &candidate.Record
 	return resolved
 }

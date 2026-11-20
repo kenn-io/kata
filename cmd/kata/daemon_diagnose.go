@@ -17,7 +17,6 @@ import (
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
-	"go.kenn.io/kata/internal/daemonadvice"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/storeopen"
@@ -341,7 +340,10 @@ func probeDaemonSelection(
 		}
 		resolved, found, err = client.DiscoverResolved(ctx, ns.DataDir)
 		if found && selection.Resolved.Name != "" {
+			record := resolved.RuntimeRecord
 			resolved = selection.Resolved.WithRunning(resolved.Running())
+			resolved.RuntimeRecord = record
+			resolved.RuntimeDir = ns.DataDir
 		}
 	}
 	if err != nil {
@@ -380,17 +382,25 @@ func probeDaemonSelection(
 		return result, selection, err
 	}
 	ping, err := apiClient.Ping(ctx)
+	if err == nil && (ping == nil || !ping.Ok || ping.Service != "kata") {
+		err = errors.New("ping returned an unhealthy response")
+	}
 	if err != nil {
 		result.State = "local_unreachable"
 		if result.Kind == "remote" {
 			result.State = unavailableRemoteState(result.Endpoint)
-		}
-		return withDiagnosisAction(result), selection, nil
-	}
-	if ping == nil || !ping.Ok || ping.Service != "kata" {
-		result.State = "local_unreachable"
-		if result.Kind == "remote" {
-			result.State = unavailableRemoteState(result.Endpoint)
+		} else if resolved.RuntimeRecord != nil {
+			dir := resolved.RuntimeDir
+			if resolved.LocalProfile != nil {
+				dir = resolved.LocalProfile.DataDir
+			}
+			e := client.NewLocalDaemonUnreachable(dir, *resolved.RuntimeRecord, err)
+			if selection.Profile != nil {
+				e.Profile = resolved.Name
+				e.ProfileAutostart = selection.Profile.Config.AutostartEnabled()
+				e.ManagedExternally = !e.ProfileAutostart
+			}
+			result = diagnosisUnreachable(result, e)
 		}
 		return withDiagnosisAction(result), selection, nil
 	}
@@ -475,7 +485,7 @@ func safeDaemonOrigin(value string) string {
 
 func diagnosisUnreachable(result daemonDiagnosis, err error) daemonDiagnosis {
 	if e, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok {
-		result.Message, result.NextAction, result.PID, result.Endpoint = e.Summary(), daemonadvice.Recovery(e), e.PID, e.Address
+		result.Message, result.NextAction, result.PID, result.Endpoint = e.Summary(), e.RecoveryAdvice(), e.PID, e.Address
 	}
 	return result
 }

@@ -938,6 +938,55 @@ func TestHealthPreservesFirstProfileFailure(t *testing.T) {
 	require.ErrorContains(t, err, "503")
 }
 
+func TestDaemonDiagnoseSecondPingUnreachable(t *testing.T) {
+	home, _, uid, _ := stoppedProfileCLI(t)
+	var pings atomic.Int32
+	var replaceRecord func()
+	var replaced atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/ping" {
+			if pings.Add(1) > 1 {
+				replaceRecord()
+				http.Error(w, "unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version, os.Getpid())
+			return
+		}
+		_, _ = fmt.Fprintf(w, `{"instance_uid":%q}`, uid)
+	}))
+	t.Cleanup(server.Close)
+	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: uid})
+	require.NoError(t, err)
+	ns, err := daemonruntime.NewNamespaceForHome(home, profile.StorageID)
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	store := kitdaemon.RuntimeStore{Dir: ns.DataDir}
+	_, err = store.Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
+	require.NoError(t, err)
+	replaceRecord = func() {
+		_, err := store.Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1"})
+		if err == nil {
+			replaced.Store(true)
+		}
+	}
+	out, _, err := executeRootCapture(t, t.Context(), "--daemon", "work", "daemon", "diagnose", "--json")
+	require.NoError(t, err)
+	var result daemonDiagnosis
+	require.NoError(t, json.Unmarshal([]byte(out), &result))
+	require.True(t, replaced.Load())
+	require.Equal(t, "local_unreachable", result.State)
+	require.Equal(t, os.Getpid(), result.PID)
+	require.Equal(t, strings.TrimPrefix(server.URL, "http://"), result.Endpoint)
+	require.Contains(t, result.Message, fmt.Sprintf("%q", filepath.Join(ns.DataDir, "daemon.log")))
+	if runtime.GOOS == "windows" {
+		require.Contains(t, result.NextAction, "'--daemon' 'work'")
+	} else {
+		require.Contains(t, result.NextAction, "--daemon work")
+	}
+	require.NotContains(t, result.Message, "daemon recover")
+}
+
 func TestDaemonDiagnosisOmitsEmptyAction(t *testing.T) {
 	resetFlags(t)
 	cmd := newRootCmd()
@@ -1032,4 +1081,35 @@ func TestSupervisedDiscoveryCancellation(t *testing.T) {
 	err = <-done
 	require.ErrorIs(t, err, context.Canceled)
 	require.Contains(t, err.Error(), fmt.Sprintf("%q", filepath.Join(ns.DataDir, "daemon.log")))
+}
+
+func TestDaemonStatusRecoveryAdvice(t *testing.T) {
+	resetFlags(t)
+	setupKataEnv(t)
+
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
+		PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:7777",
+		Metadata: map[string]string{"web_origin": "http://127.0.0.1:28888"},
+	})
+	require.NoError(t, err)
+
+	stdout, _, _ := executeRootCapture(t, t.Context(), "--agent", "daemon", "status")
+	out := []byte(stdout)
+	assert.True(t, strings.HasPrefix(string(out), "OK daemon status=running web_url=http://127.0.0.1:28888 selected_state=local_unreachable selected_profile=\"\" message="))
+	assert.Contains(t, string(out), "unreachable")
+	assert.Contains(t, string(out), "daemon.log")
+	assert.Contains(t, string(out), " next_action=")
+	resetFlags(t)
+	human, stderr, err := executeRootCapture(t, t.Context(), "daemon", "status")
+	require.Error(t, err)
+	assert.Contains(t, string(human), "  reason:")
+	assert.Contains(t, string(human), "daemon.log")
+	assert.Equal(t, 1, strings.Count(human+stderr, "daemon.log"))
+	assert.Contains(t, human, "  next:")
+	jsonOut, jsonErr, err := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
+	require.Error(t, err)
+	assert.Equal(t, 1, strings.Count(jsonOut+jsonErr, "daemon.log"))
 }

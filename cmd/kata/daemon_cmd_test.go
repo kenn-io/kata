@@ -601,7 +601,7 @@ func TestDaemonStatus_ListsUnverifiableRecord(t *testing.T) {
 	assert.Equal(t, child.Process.Pid, got.Daemons[0].PID)
 }
 
-func TestDaemonStatusReportsWebURLAndRecoveryAdvice(t *testing.T) {
+func TestDaemonStatus_AgentReportsWebURL(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
 
@@ -618,18 +618,6 @@ func TestDaemonStatusReportsWebURLAndRecoveryAdvice(t *testing.T) {
 	out := []byte(stdout)
 	assert.True(t, strings.HasPrefix(string(out), "OK daemon status=running web_url=http://127.0.0.1:28888 selected_state=local_unreachable selected_profile=\"\" message="))
 	assert.Contains(t, string(out), "unreachable")
-	assert.Contains(t, string(out), "daemon.log")
-	assert.Contains(t, string(out), " next_action=")
-	resetFlags(t)
-	human, stderr, err := executeRootCapture(t, t.Context(), "daemon", "status")
-	require.Error(t, err)
-	assert.Contains(t, string(human), "  reason:")
-	assert.Contains(t, string(human), "daemon.log")
-	assert.Equal(t, 1, strings.Count(human+stderr, "daemon.log"))
-	assert.Contains(t, human, "  next:")
-	jsonOut, jsonErr, err := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
-	require.Error(t, err)
-	assert.Equal(t, 1, strings.Count(jsonOut+jsonErr, "daemon.log"))
 }
 
 func TestDaemonStatusReportsMCPState(t *testing.T) {

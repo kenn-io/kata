@@ -20,7 +20,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/client"
-	"go.kenn.io/kata/internal/daemonadvice"
 )
 
 // defaultHTTPTimeout is the per-request budget for non-streaming CLI calls.
@@ -188,7 +187,7 @@ func cliDaemonTargetError(err error) error {
 		}
 	}
 	if e, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok && errors.Is(err, client.ErrLocalDaemonUnreachable) && !errors.Is(err, client.ErrDaemonManagedExternally) {
-		return &cliError{Message: e.Summary(), Hint: daemonadvice.Recovery(e), Code: "local_unreachable", Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
+		return &cliError{Message: e.Summary(), Hint: e.RecoveryAdvice(), Code: "local_unreachable", Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
 	}
 	if errors.Is(err, client.ErrRemoteUnavailable) ||
 		errors.Is(err, client.ErrLocalDaemonUnreachable) ||

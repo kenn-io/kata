@@ -110,6 +110,7 @@ func discoverLocalProfileWithVerifier(
 			return resolved, false, err
 		}
 		resolved = resolved.WithRunning(runningDaemonForLive(candidate))
+		resolved.RuntimeRecord = &candidate.Record
 		resolved.UnixSocket = candidate.UnixSocket
 		if verify != nil {
 			if err := verify(ctx, resolved); err != nil {

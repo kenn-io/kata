@@ -62,7 +62,7 @@ func TestManagedExternallyUnreachableDetail(t *testing.T) {
 		defer cancel()
 		_, err := waitForSupervisedDaemon(ctx, "/example/config.toml", func(context.Context) bool { return false }, func(ctx context.Context) (ensureDiscovery, error) {
 			cancel()
-			return ensureDiscovery{}, newUnreachable("/example/runtime", kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1"}, ctx.Err())
+			return ensureDiscovery{}, NewLocalDaemonUnreachable("/example/runtime", kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1"}, ctx.Err())
 		})
 		require.ErrorIs(t, err, context.Canceled)
 		require.ErrorContains(t, err, fmt.Sprintf("%q", filepath.Join("/example/runtime", "daemon.log")))

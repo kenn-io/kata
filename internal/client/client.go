@@ -189,7 +189,7 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 			address := ep.ConfigAddress()
 			url, info, probeErr := probe(ctx, address)
 			if probeErr != nil {
-				evidence := newUnreachable(dataDir, r, probeErr)
+				evidence := NewLocalDaemonUnreachable(dataDir, r, probeErr)
 				if !yield(liveDaemon{}, evidence) || ctx.Err() != nil {
 					return
 				}
@@ -215,7 +215,8 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 	}
 }
 
-func newUnreachable(dataDir string, r kitdaemon.RuntimeRecord, cause error) *LocalDaemonUnreachableError {
+// NewLocalDaemonUnreachable retains the selected runtime and failed probe.
+func NewLocalDaemonUnreachable(dataDir string, r kitdaemon.RuntimeRecord, cause error) *LocalDaemonUnreachableError {
 	enabled, _, err := config.ReadAutostartEnabled()
 	origin := ""
 	if web, err := DiscoverWebRuntime(r); err == nil {
