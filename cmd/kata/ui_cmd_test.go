@@ -37,6 +37,16 @@ func TestUICommandRejectsCompilationStub(t *testing.T) {
 	assert.Contains(t, err.Error(), "release binary")
 }
 
+func TestUICommandRejectsDaemonWithPlaceholderAssets(t *testing.T) {
+	stubUICommandLaunch(t, client.PreparedWebUI{
+		Runtime: client.DiscoveredWebRuntime{Capabilities: []string{"placeholder-assets"}},
+	})
+
+	_, err := runCmdOutput(t, nil, "ui")
+	require.ErrorContains(t, err, "the running daemon was built without the web UI; run `kata daemon restart`")
+	assert.Empty(t, openedUIURL)
+}
+
 func TestUICommandNoArgOpensInbox(t *testing.T) {
 	stubUICommandLaunch(t, client.PreparedWebUI{
 		BaseURL:          "https://daemon.example",

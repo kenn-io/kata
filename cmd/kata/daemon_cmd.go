@@ -1487,6 +1487,9 @@ func runDaemonProcess(
 		insecureReadonly, allowLocalSession, allowTrustedProxySession, dcfg.Auth.Token,
 	)
 	webCapabilities := []string{webAuthentication, updates}
+	if kataweb.ValidateEmbeddedRelease() != nil {
+		webCapabilities = append(webCapabilities, "placeholder-assets")
+	}
 	webRuntime, err := daemon.NewWebRuntime(daemon.WebRuntimeOptions{
 		Origin:       webEndpoint.Origin,
 		OriginStable: webEndpoint.OriginStable,

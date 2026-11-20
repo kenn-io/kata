@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -50,6 +51,9 @@ func newUICmd() *cobra.Command {
 				if err := validateWebUIAssetsForCommand(); err != nil {
 					return fmt.Errorf("kata ui is unavailable in this module-source build; install a release binary or build from a clone with `make install`: %w", err)
 				}
+			}
+			if slices.Contains(prepared.Runtime.Capabilities, "placeholder-assets") {
+				return errors.New("the running daemon was built without the web UI; run `kata daemon restart`")
 			}
 			returnPath := "/kata"
 			if len(args) == 1 {

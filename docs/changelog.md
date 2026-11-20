@@ -48,8 +48,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 **Improvements**
 
-- See the release version when Kata is installed with `go install` at a tag.
-  `kata update` can replace it with a release, and it can send opt-in usage telemetry.
+- `kata version` reports the release when Kata is installed with `go install` at a tag.
 - Let a service manager own the local daemon. Set top-level `autostart = false`
   in `config.toml`, and Kata commands, including `kata daemon recover`, wait up
   to 30 seconds for the supervised daemon instead of starting their own. See

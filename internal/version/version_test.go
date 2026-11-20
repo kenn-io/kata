@@ -3,7 +3,6 @@ package version
 
 import (
 	"runtime/debug"
-	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -14,12 +13,14 @@ func mockBuildInfo(t *testing.T, moduleVersion, revision, buildTime string, modi
 	orig := readBuildInfo
 	t.Cleanup(func() { readBuildInfo = orig })
 
-	var settings []debug.BuildSetting
-	if revision != "" {
-		settings = append(settings, debug.BuildSetting{Key: settingRevision, Value: revision}, debug.BuildSetting{Key: settingModified, Value: strconv.FormatBool(modified)})
+	settings := []debug.BuildSetting{
+		{Key: "vcs.revision", Value: revision},
 	}
 	if buildTime != "" {
-		settings = append(settings, debug.BuildSetting{Key: settingBuildTime, Value: buildTime})
+		settings = append(settings, debug.BuildSetting{Key: "vcs.time", Value: buildTime})
+	}
+	if modified {
+		settings = append(settings, debug.BuildSetting{Key: "vcs.modified", Value: "true"})
 	}
 	readBuildInfo = func() (*debug.BuildInfo, bool) {
 		return &debug.BuildInfo{Main: debug.Module{Version: moduleVersion}, Settings: settings}, true
@@ -27,12 +28,12 @@ func mockBuildInfo(t *testing.T, moduleVersion, revision, buildTime string, modi
 }
 
 func TestVersionFromVCSPrefixesShortRevisionWithG(t *testing.T) {
-	mockBuildInfo(t, "", "1697674abcdef", "", false)
+	mockBuildInfo(t, "(devel)", "1697674abcdef", "", false)
 	assert.Equal(t, "g1697674", versionFromVCS())
 }
 
 func TestVersionFromVCSPrefixesDirtyRevisionWithG(t *testing.T) {
-	mockBuildInfo(t, "", "1697674abcdef", "", true)
+	mockBuildInfo(t, "(devel)", "1697674abcdef", "", true)
 	assert.Equal(t, "g1697674-dirty", versionFromVCS())
 }
 
@@ -55,21 +56,21 @@ func TestVersionFromModuleBuildInfo(t *testing.T) {
 }
 
 func TestCommitReturnsShortRevisionFromBuildInfo(t *testing.T) {
-	mockBuildInfo(t, "", "1697674abcdef0123456789", "", false)
+	mockBuildInfo(t, "(devel)", "1697674abcdef0123456789", "", false)
 	assert.Equal(t, "1697674", commitFromVCS())
 }
 
 func TestCommitReturnsUnknownWhenBuildInfoMissingRevision(t *testing.T) {
-	mockBuildInfo(t, "", "", "", false)
+	mockBuildInfo(t, "v1.2.3", "", "", false)
 	assert.Equal(t, "unknown", commitFromVCS())
 }
 
 func TestBuildDateReturnsVCSTime(t *testing.T) {
-	mockBuildInfo(t, "", "1697674abcdef", "2026-02-10T01:00:19Z", false)
+	mockBuildInfo(t, "(devel)", "1697674abcdef", "2026-02-10T01:00:19Z", false)
 	assert.Equal(t, "2026-02-10T01:00:19Z", buildDateFromVCS())
 }
 
 func TestBuildDateReturnsUnknownWhenBuildInfoMissingTime(t *testing.T) {
-	mockBuildInfo(t, "", "1697674abcdef", "", false)
+	mockBuildInfo(t, "v1.2.3", "", "", false)
 	assert.Equal(t, "unknown", buildDateFromVCS())
 }
