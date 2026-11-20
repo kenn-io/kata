@@ -255,9 +255,17 @@ func TestUnreachableErrorRelaunchPaths(t *testing.T) {
 				want = "'--daemon' 'work' 'daemon' 'recover'"
 			}
 			require.Contains(t, text, want)
-			if tc.managed || tc.migration || tc.unverified {
+			if tc.migration || tc.unverified {
 				require.NotContains(t, text, "kill -QUIT")
 				require.NotContains(t, text, "taskkill")
+				return
+			}
+			if tc.managed {
+				if runtime.GOOS == "windows" {
+					require.NotContains(t, text, "taskkill")
+				} else {
+					require.Contains(t, text, fmt.Sprintf("kill -QUIT %d", os.Getpid()))
+				}
 				return
 			}
 			if runtime.GOOS == "windows" {
@@ -275,4 +283,60 @@ func TestUnreachableErrorRelaunchPaths(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWithCallerContextDistinguishesOperationTimeoutFromCallerCancel(t *testing.T) {
+	setupKataEnv(t)
+	dataDir := t.TempDir()
+	record := kitdaemon.NewRuntimeRecord("kata", "test", kitdaemon.Endpoint{
+		Network: "tcp", Address: "127.0.0.1:1",
+	})
+
+	callerCtx, cancelCaller := context.WithCancel(t.Context())
+	workCtx, cancelWork := context.WithTimeout(WithCallerContext(callerCtx, callerCtx), time.Second)
+	cancelCaller()
+	<-workCtx.Done()
+	canceled := newUnreachable(workCtx, dataDir, record, workCtx.Err())
+	cancelWork()
+	require.True(t, canceled.callerStopped)
+	require.Empty(t, canceled.RecoveryAdvice())
+
+	callerCtx = t.Context()
+	workCtx, cancelWork = context.WithCancel(WithCallerContext(callerCtx, callerCtx))
+	cancelWork()
+	<-workCtx.Done()
+	timedOut := newUnreachable(workCtx, dataDir, record, workCtx.Err())
+	require.False(t, timedOut.callerStopped)
+	require.Contains(t, timedOut.RecoveryAdvice(), "kill -QUIT")
+}
+
+func TestUnreachableMigrationAdviceUsesRedactedRuntimeSQLitePath(t *testing.T) {
+	setupKataEnv(t)
+	dir := filepath.Join(t.TempDir(), "database directory")
+	require.NoError(t, os.Mkdir(dir, 0700))
+	dsn := "sqlite://" + filepath.Join(dir, "kata database.db")
+	lock := flock.New(strings.TrimPrefix(dsn, "sqlite://") + ".import.lock")
+	require.NoError(t, lock.Lock())
+	t.Cleanup(func() { require.NoError(t, lock.Close()) })
+
+	record := kitdaemon.RuntimeRecord{
+		PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1",
+		Metadata: map[string]string{"db_path": config.RedactDSN(dsn)},
+	}
+	e := newUnreachable(t.Context(), dir, record, errors.New("probe failed"))
+
+	require.True(t, e.migrationActive)
+	require.Contains(t, e.RecoveryAdvice(), "Wait for the migration")
+	require.NotContains(t, e.RecoveryAdvice(), "kill -QUIT")
+}
+
+func TestConfiguredSQLiteDSNKeepsLiteralEscapedPath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "kata%20database.db")
+	decodedPath := filepath.Join(dir, "kata database.db")
+	lock := flock.New(decodedPath + ".import.lock")
+	require.NoError(t, lock.Lock())
+	t.Cleanup(func() { require.NoError(t, lock.Close()) })
+
+	require.False(t, sqliteCutoverLockedForDSN("sqlite://"+path))
 }

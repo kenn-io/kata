@@ -71,6 +71,17 @@ type PingInfo struct {
 // recorded endpoint could not be reached.
 var ErrLocalDaemonUnreachable = errors.New("local daemon is unreachable")
 
+type callerContextKey struct{}
+
+// WithCallerContext keeps ctx's deadline for bounded work while using
+// callerCtx to distinguish an operation timeout from caller cancellation.
+func WithCallerContext(ctx, callerCtx context.Context) context.Context {
+	if callerCtx == nil {
+		callerCtx = ctx
+	}
+	return context.WithValue(ctx, callerContextKey{}, callerCtx)
+}
+
 // LocalDaemonUnreachableError retains the failed process and its evidence paths.
 type LocalDaemonUnreachableError struct {
 	PID               int
@@ -109,10 +120,13 @@ func (e *LocalDaemonUnreachableError) RecoveryAdvice() string {
 		return message + "Wait for the migration to finish, then retry; do not interrupt the daemon"
 	}
 	if e.ManagedExternally {
+		if e.VerifiedProcess && goruntime.GOOS != "windows" {
+			message += fmt.Sprintf("Use kill -QUIT %d to dump goroutines. ", e.PID)
+		}
 		return message + "Restart it through its service manager"
 	}
 	if !e.VerifiedProcess {
-		return strings.TrimSuffix(message, ". ")
+		return "Inspect the selected process and its credentials; do not switch databases"
 	}
 	if goruntime.GOOS == "windows" {
 		message += fmt.Sprintf("Stop it with taskkill /PID %d /F", e.PID)
@@ -191,7 +205,7 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 			url, info, probeErr := probe(ctx, address)
 			if probeErr != nil {
 				evidence := newUnreachable(ctx, dataDir, r, probeErr)
-				if !yield(liveDaemon{}, evidence) || evidence.callerStopped {
+				if !yield(liveDaemon{}, evidence) || evidence.callerStopped || ctx.Err() != nil {
 					return
 				}
 				continue
@@ -217,9 +231,13 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 }
 
 func newUnreachable(ctx context.Context, dataDir string, r kitdaemon.RuntimeRecord, cause error) *LocalDaemonUnreachableError {
-	stopped := ctx.Err() != nil
+	callerCtx := ctx
+	if original, ok := ctx.Value(callerContextKey{}).(context.Context); ok {
+		callerCtx = original
+	}
+	stopped := callerCtx.Err() != nil
 	if stopped {
-		cause = ctx.Err()
+		cause = callerCtx.Err()
 	}
 	enabled, _, err := config.ReadAutostartEnabled()
 	origin := ""
@@ -230,7 +248,7 @@ func newUnreachable(ctx context.Context, dataDir string, r kitdaemon.RuntimeReco
 		PID: r.PID, Address: r.Endpoint().ConfigAddress(), DataDir: dataDir,
 		WebOrigin:         origin,
 		VerifiedProcess:   daemonruntime.RuntimeProcessAlive(r),
-		migrationActive:   sqliteCutoverLockedForDSN(r.Metadata["db_path"]),
+		migrationActive:   sqliteCutoverLockedForRuntimeDSN(r.Metadata["db_path"]),
 		ManagedExternally: err == nil && !enabled,
 		callerStopped:     stopped,
 		autoStarted:       r.Metadata[daemonruntime.RuntimeAutoStartKey] == "1",

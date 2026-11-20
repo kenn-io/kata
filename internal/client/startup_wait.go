@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -190,11 +191,39 @@ func sqliteCutoverLockedForDSN(dsn string) bool {
 	if dsn == "" || strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
 		return false
 	}
-	lock := flock.New(strings.TrimPrefix(dsn, "sqlite://")+".import.lock", flock.SetFlag(os.O_RDONLY))
-	locked, err := lock.TryLock()
-	if err != nil {
+	return sqliteCutoverLockedForPaths(strings.TrimPrefix(dsn, "sqlite://"))
+}
+
+// Runtime metadata redacts DSNs through URL serialization, which escapes
+// spaces in SQLite paths. Check both spellings because the original DSN is
+// unavailable once the runtime record has been written.
+func sqliteCutoverLockedForRuntimeDSN(dsn string) bool {
+	if dsn == "" || strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
 		return false
 	}
-	defer func() { _ = lock.Close() }()
-	return !locked
+	path := strings.TrimPrefix(dsn, "sqlite://")
+	if !strings.HasPrefix(dsn, "sqlite://") {
+		return sqliteCutoverLockedForPaths(path)
+	}
+	decoded, err := url.PathUnescape(path)
+	if err == nil && decoded != path {
+		return sqliteCutoverLockedForPaths(path, decoded)
+	}
+	return sqliteCutoverLockedForPaths(path)
+}
+
+func sqliteCutoverLockedForPaths(paths ...string) bool {
+	for _, path := range paths {
+		lock := flock.New(path+".import.lock", flock.SetFlag(os.O_RDONLY))
+		locked, err := lock.TryLock()
+		if err == nil {
+			_ = lock.Close()
+			if !locked {
+				return true
+			}
+		} else {
+			_ = lock.Close()
+		}
+	}
+	return false
 }

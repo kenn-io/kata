@@ -178,6 +178,7 @@ func diagnoseDaemonSelection(
 	callerCtx := ctx
 	ctx, cancel := context.WithTimeout(ctx, envHTTPTimeout(defaultHTTPTimeout))
 	defer cancel()
+	ctx = client.WithCallerContext(ctx, callerCtx)
 	var err error
 	result := selectedDaemonDiagnosis(selection, expectedProject)
 	result.Project = strings.TrimSpace(flags.Project)
@@ -263,7 +264,7 @@ func diagnoseDaemonSelection(
 			return withDiagnosisAction(result), selection, nil
 		}
 	}
-	result, selection, err = probeDaemonSelection(callerCtx, result, selection)
+	result, selection, err = probeDaemonSelection(ctx, result, selection)
 	if result.State == "ready" {
 		result.Writable, result.ActorPolicy = liveDaemonCapabilities(ctx, selection.Resolved)
 		result.RootSigning = liveRootSigningHealth(ctx, selection.Resolved)

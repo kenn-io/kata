@@ -19,6 +19,7 @@ import (
 	"github.com/gofrs/flock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db"
@@ -965,6 +966,49 @@ func TestDaemonDiagnosisOmitsEmptyAction(t *testing.T) {
 	cmd.SetOut(&out)
 	require.NoError(t, printDaemonDiagnosis(cmd, daemonDiagnosis{State: "local_unreachable", Message: "context canceled", PID: 1}))
 	require.NotContains(t, out.String(), "next:")
+}
+
+func TestDaemonDiagnosisKeepsGenericActionWhenProcessCannotBeVerified(t *testing.T) {
+	result := diagnosisUnreachable(
+		daemonDiagnosis{State: "local_unreachable"},
+		&client.LocalDaemonUnreachableError{
+			PID: 123, Address: "127.0.0.1:7777", DataDir: t.TempDir(),
+		},
+	)
+	require.Contains(t, result.NextAction, "Inspect the selected process")
+}
+
+func TestDiagnoseDiscoveryUsesOverallProbeTimeout(t *testing.T) {
+	resetFlags(t)
+	setupKataEnv(t)
+	t.Setenv(client.HTTPTimeoutEnvVar, "100ms")
+	requestDuration := make(chan time.Duration, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		started := time.Now()
+		<-r.Context().Done()
+		requestDuration <- time.Since(started)
+	}))
+	t.Cleanup(server.Close)
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	record := kitdaemon.NewRuntimeRecord("kata", version.Version, kitdaemon.Endpoint{
+		Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://"),
+	})
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(record)
+	require.NoError(t, err)
+
+	result, _, err := diagnoseDaemon(t.Context(), "")
+	require.NoError(t, err)
+	require.Equal(t, "local_unreachable", result.State)
+	select {
+	case elapsed := <-requestDuration:
+		require.Greater(t, elapsed, time.Duration(0))
+		require.LessOrEqual(t, elapsed, 750*time.Millisecond)
+	case <-time.After(2 * time.Second):
+		t.Fatal("diagnosis did not probe the runtime endpoint")
+	}
+	require.NotEmpty(t, result.NextAction)
 }
 
 func TestReviewSupervisedProfileDiagnosisGuidance(t *testing.T) {
