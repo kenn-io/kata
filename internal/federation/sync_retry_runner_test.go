@@ -219,6 +219,26 @@ func TestRefusedSpokeRetriesAtOnceAfterCredentialChange(t *testing.T) {
 	require.True(t, ok)
 }
 
+// A wake for one project syncs only that project's binding. The other
+// bindings keep their retry schedules, so the next full pass still holds them.
+func TestRefusedSpokeKeepsWaitingAfterAnotherProjectsWake(t *testing.T) {
+	ctx := t.Context()
+	fleet := newSpokeFleet(t, 2)
+	retries := newSyncRetries(noJitter)
+	fleet.pass(ctx, retries)
+	require.Equal(t, int64(2), fleet.requests.Load())
+
+	fleet.now = fleet.now.Add(30 * time.Second)
+	_, _, _, _ = fleet.runner.runOnce(ctx, nil, map[int64]bool{fleet.projects[0].ID: true}, retries)
+	status, ok := retries.FederationSyncRetry(fleet.projects[1].ID)
+	require.True(t, ok, "the binding the wake skipped keeps its schedule")
+	require.Equal(t, syncRetryRefused, status.Reason)
+
+	fleet.now = fleet.now.Add(10 * time.Second)
+	fleet.pass(ctx, retries)
+	require.Equal(t, int64(2), fleet.requests.Load(), "both bindings still wait")
+}
+
 func TestRefusedSpokeRetriesAtOnceAfterRebind(t *testing.T) {
 	ctx := t.Context()
 	fleet := newSpokeFleet(t, 1)
