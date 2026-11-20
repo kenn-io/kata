@@ -622,8 +622,9 @@ held polls. The hub answers a held poll as soon as an event commits in that
 project, or after at most 45 seconds when nothing changes, so hub events reach
 the spoke without waiting for the interval. While a binding's poll is held,
 interval passes skip that binding's pull and still push, renew claims, and
-update sync status. Relay bindings and hubs without held-poll support keep
-pulling on the interval.
+update sync status. The last successful pull time moves when the hub answers
+the held poll. Relay bindings and hubs without held-poll support keep pulling
+on the interval.
 
 Held polls need a few things from the deployment:
 
@@ -634,9 +635,11 @@ Held polls need a few things from the deployment:
   open requests than it did with interval polls.
 - A hub holds at most 256 polls, and at most 32 per spoke credential. Signed
   polls can use at most half of the hub's federation control slots. Past a
-  limit the hub answers at once and the spoke falls back to its interval.
+  limit the hub answers at once and the spoke falls back to its interval. It
+  asks for a held poll again after a growing delay, up to 16 intervals.
 - The spoke asks for a wait 15 seconds shorter than its request budget, so a
-  `KATA_HTTP_TIMEOUT` under 16 seconds turns held polls off.
+  `KATA_HTTP_TIMEOUT` under 16 seconds turns held polls off. The daemon log
+  says so once for each binding.
 
 The hub checks the poll's full authorization again before it answers a held
 poll, including the signing key of a signed poll, so a revoked credential,

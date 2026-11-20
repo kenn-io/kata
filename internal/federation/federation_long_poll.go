@@ -2,17 +2,20 @@ package federation
 
 import (
 	"context"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"net/http/httptrace"
 	"strconv"
 	"sync"
 	"time"
 
-	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 	"go.kenn.io/kata/internal/activity"
 	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/pkg/client/generated"
+	"go.kenn.io/kata/internal/federationcoord"
 )
 
 const (
@@ -27,32 +30,10 @@ const (
 	federationPollWaitMaxHeader = "X-Kata-Federation-Poll-Wait-Max"
 )
 
-// longPollProjectEvents asks the hub to hold a caught-up poll for up to wait.
-// It reports the hub's advertised maximum wait, zero when the hub does not
-// support held polls.
-func (c *Client) longPollProjectEvents(ctx context.Context, hubProjectID, afterID int64, wait time.Duration) (api.PollEventsBody, time.Duration, error) {
-	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{c.client}))
-	if err != nil {
-		return api.PollEventsBody{}, 0, err
-	}
-	seconds := int64(wait / time.Second)
-	limit := int64(1)
-	response, callErr := apiClient.PollFederationProjectEventsWithResponse(ctx, &generated.PollFederationProjectEventsRequestOptions{
-		PathParams: &generated.PollFederationProjectEventsPath{ProjectID: hubProjectID},
-		Query:      &generated.PollFederationProjectEventsQuery{AfterID: &afterID, Limit: &limit, Wait: &seconds},
-	})
-	var body api.PollEventsBody
-	if response == nil {
-		return body, 0, callErr
-	}
-	if err := decodeReplicationResponse(response.HTTPResponse, response.Body, &body); err != nil {
-		return body, 0, err
-	}
-	advertised, err := strconv.Atoi(response.HTTPResponse.Header.Get(federationPollWaitMaxHeader))
-	if err != nil || advertised <= 0 {
-		return body, 0, nil
-	}
-	return body, time.Duration(advertised) * time.Second, nil
+// heldPollTarget names the hub address, bearer and hub project a held poll
+// was sent with.
+func (c *Client) heldPollTarget(hubProjectID int64) string {
+	return c.baseURL + " " + hex.EncodeToString(c.tokenDigest[:]) + " " + strconv.FormatInt(hubProjectID, 10)
 }
 
 // hubLongPolls keeps one held poll open per direct spoke binding whose hub
@@ -67,6 +48,9 @@ type hubLongPolls struct {
 	// admission gates the store reads a watcher makes between held polls. A
 	// held poll itself takes no lease, so it never keeps the daemon awake.
 	admission activity.WaitableAdmission
+	// notice reports held-poll problems to the runner's error log; nil drops
+	// them.
+	notice func(error)
 	// ctx bounds the watchers; stopAll cancels it.
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -82,8 +66,11 @@ type hubLongPolls struct {
 type hubLongPoll struct {
 	cancel context.CancelFunc
 	done   chan struct{}
-	// held is the cursor of an in-flight poll the hub is known to hold, or -1.
-	held int64
+	// held is the cursor of an in-flight poll, or -1; heldTarget names where
+	// it was sent, and cancelHeld ends it.
+	held       int64
+	heldTarget string
+	cancelHeld context.CancelFunc
 }
 
 func newHubLongPolls(
@@ -93,11 +80,12 @@ func newHubLongPolls(
 	opts clientpkg.Opts,
 	interval time.Duration,
 	admission activity.WaitableAdmission,
+	notice func(error),
 ) *hubLongPolls {
 	ctx, cancel := context.WithCancel(ctx)
 	return &hubLongPolls{
 		store: store, credentials: credentials, opts: opts, interval: interval, admission: admission,
-		ctx: ctx, cancel: cancel,
+		notice: notice, ctx: ctx, cancel: cancel,
 		changed: make(chan struct{}, 1), polls: map[int64]*hubLongPoll{}, passDone: make(chan struct{}),
 	}
 }
@@ -112,8 +100,11 @@ func withHubLongPolls(ctx context.Context, polls *hubLongPolls) context.Context 
 }
 
 // hubHoldsPull reports whether the hub is holding this binding's poll at
-// cursor, so an ordinary poll now would return an empty page.
-func hubHoldsPull(ctx context.Context, projectID, cursor int64) bool {
+// cursor for the same hub address, bearer and hub project, so an ordinary poll
+// now would return an empty page. A poll held for another target, such as the
+// address before an endpoint change, no longer stands for the binding; it is
+// ended so the watcher polls the current target.
+func hubHoldsPull(ctx context.Context, projectID, cursor int64, target string) bool {
 	polls, _ := ctx.Value(hubLongPollsContextKey{}).(*hubLongPolls)
 	if polls == nil {
 		return false
@@ -121,7 +112,14 @@ func hubHoldsPull(ctx context.Context, projectID, cursor int64) bool {
 	polls.mu.Lock()
 	defer polls.mu.Unlock()
 	poll := polls.polls[projectID]
-	return poll != nil && poll.held >= 0 && poll.held == cursor
+	if poll == nil || poll.held < 0 {
+		return false
+	}
+	if poll.heldTarget != target {
+		poll.cancelHeld()
+		return false
+	}
+	return poll.held == cursor
 }
 
 // passCompleted releases polls that are waiting for the runner to apply what
@@ -139,12 +137,16 @@ func (p *hubLongPolls) nextPass() <-chan struct{} {
 	return p.passDone
 }
 
-func (p *hubLongPolls) setHeld(projectID, cursor int64) {
+func (p *hubLongPolls) setHeld(projectID, cursor int64, target string, cancel context.CancelFunc) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if poll := p.polls[projectID]; poll != nil {
-		poll.held = cursor
+		poll.held, poll.heldTarget, poll.cancelHeld = cursor, target, cancel
 	}
+}
+
+func (p *hubLongPolls) clearHeld(projectID int64) {
+	p.setHeld(projectID, -1, "", nil)
 }
 
 // admit takes the runner's drain admission for one short unit of store work.
@@ -215,6 +217,14 @@ func (p *hubLongPolls) stopAll() {
 	}
 }
 
+// heldAnswer is a held poll the hub answered with nothing new: a successful
+// pull at cursor that the watcher records once it can check the binding again.
+type heldAnswer struct {
+	cursor int64
+	target string
+	at     time.Time
+}
+
 // watch holds polls for one binding until ctx ends. Errors and refusals back
 // off; the runner's interval pass keeps pulling meanwhile.
 func (p *hubLongPolls) watch(ctx context.Context, projectID int64) {
@@ -222,7 +232,11 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64) {
 		client    *Client
 		clientFor config.FederationCredential
 		supported time.Duration
+		answered  *heldAnswer
 	)
+	// unread is the cursor of a page handed to the runner, until a pass
+	// moves the binding past it.
+	unread := int64(-1)
 	backoff := p.interval
 	for ctx.Err() == nil {
 		release, admitted, retry := p.admit()
@@ -237,20 +251,53 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64) {
 			}
 			continue
 		}
-		binding, credential, ok := p.pollTarget(ctx, projectID)
-		release()
-		if !ok {
+		// An endpoint change drains the project's transport work under this
+		// gate. Holding it from reading the target until the request is sent
+		// keeps the bearer from reaching an address the change has retired.
+		finishSync, err := federationcoord.BeginSync(ctx, federationcoord.Key(p.store.InstanceUID(), projectID), p.store, projectID)
+		if err != nil {
+			release()
 			if !sleepContext(ctx, backoff) {
 				return
 			}
 			backoff = min(backoff*2, 16*p.interval)
 			continue
 		}
+		binding, credential, ok := p.pollTarget(ctx, projectID)
+		if !ok {
+			finishSync()
+			release()
+			if !sleepContext(ctx, backoff) {
+				return
+			}
+			backoff = min(backoff*2, 16*p.interval)
+			continue
+		}
+		cursor := binding.PullCursorEventID
+		if unread >= 0 {
+			if cursor == unread {
+				// The pass that took the page left the binding where it was,
+				// as one that fails before its pull does. Wait for another pass
+				// instead of handing the same page over again at once.
+				finishSync()
+				release()
+				select {
+				case <-ctx.Done():
+					return
+				case <-p.nextPass():
+				case <-time.After(backoff):
+				}
+				backoff = min(backoff*2, 16*p.interval)
+				continue
+			}
+			unread, backoff = -1, p.interval
+		}
 		opts := clientOptsForCredential(p.opts, credential)
 		if client == nil || !sameLongPollCredential(clientFor, credential) {
-			var err error
 			if client, err = NewClient(ctx, credential.HubURL, credential.Token, opts); err != nil {
 				client = nil
+				finishSync()
+				release()
 				if !sleepContext(ctx, backoff) {
 					return
 				}
@@ -258,24 +305,51 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64) {
 			}
 			clientFor = credential
 		}
+		target := client.heldPollTarget(credential.HubProjectID)
+		if answered != nil {
+			if answered.cursor == cursor && answered.target == target {
+				p.recordHeldAnswer(ctx, projectID, answered.at)
+			}
+			answered = nil
+		}
 		wait := federationLongPollWait
 		if supported > 0 {
 			wait = min(wait, supported)
 		}
 		wait = min(wait, opts.Timeout-federationLongPollMargin)
 		if wait < time.Second {
+			finishSync()
+			release()
+			p.report(fmt.Errorf("held federation polls off for project %d: request timeout %s is under the %s minimum; the spoke keeps its interval pull",
+				projectID, opts.Timeout, federationLongPollMargin+time.Second))
 			return
 		}
-		cursor := binding.PullCursorEventID
-		// Interval passes skip this binding's pull while the poll is out. A
-		// hub that cannot hold it answers at once, which ends the skip.
-		p.setHeld(projectID, cursor)
+		release()
+		// Interval passes skip this binding's pull while the poll is out at
+		// this target. A hub that cannot hold it answers at once, which ends
+		// the skip.
+		requestCtx, cancelRequest := context.WithCancel(ctx)
+		p.setHeld(projectID, cursor, target, cancelRequest)
 		started := time.Now()
-		body, advertised, err := client.longPollProjectEvents(ctx, credential.HubProjectID, cursor, wait)
-		p.setHeld(projectID, -1)
+		requestCtx = httptrace.WithClientTrace(requestCtx, &httptrace.ClientTrace{
+			WroteRequest: func(info httptrace.WroteRequestInfo) {
+				if info.Err == nil {
+					finishSync()
+				}
+			},
+		})
+		body, advertised, err := client.pollProjectEvents(requestCtx, credential.HubProjectID, "", cursor, 1, wait)
+		finishSync()
+		p.clearHeld(projectID)
+		superseded := errors.Is(requestCtx.Err(), context.Canceled)
+		cancelRequest()
 		switch {
 		case ctx.Err() != nil:
 			return
+		case err != nil && superseded:
+			// The runner ended a poll held for a target the binding no longer
+			// uses. Poll the current target at once.
+			continue
 		case err != nil:
 			supported = 0
 			if !sleepContext(ctx, backoff) {
@@ -295,28 +369,59 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64) {
 			}
 			continue
 		}
-		backoff = p.interval
 		if pollChanged(body, cursor) {
 			supported = advertised
+			// Take the pass signal before waking the runner, so a pass that
+			// ends before this goroutine looks again is not missed.
+			next := p.nextPass()
 			p.signal()
-			// Let the runner apply the page before polling from the new cursor.
 			select {
 			case <-ctx.Done():
 				return
-			case <-p.nextPass():
+			case <-next:
 			case <-time.After(p.interval):
 			}
+			unread = cursor
 			continue
 		}
-		if time.Since(started) < wait/2 {
+		if time.Since(started) < min(wait, advertised)/2 {
 			// The hub answered at once: it is at its bound for held polls.
+			// The interval pass pulls meanwhile, so retry less often each time.
 			supported = 0
-			if !sleepContext(ctx, p.interval) {
+			if !sleepContext(ctx, backoff) {
 				return
 			}
+			backoff = min(backoff*2, 16*p.interval)
 			continue
 		}
 		supported = advertised
+		backoff = p.interval
+		answered = &heldAnswer{cursor: cursor, target: target, at: time.Now().UTC()}
+	}
+}
+
+// recordHeldAnswer records a held poll the hub answered with nothing new as a
+// successful pull, unless a pass started or finished a pull since.
+func (p *hubLongPolls) recordHeldAnswer(ctx context.Context, projectID int64, at time.Time) {
+	status, err := p.store.FederationSyncStatusByProject(ctx, projectID)
+	if err != nil && !errors.Is(err, db.ErrNotFound) {
+		p.report(fmt.Errorf("record held federation poll for project %d: %w", projectID, err))
+		return
+	}
+	at = at.Truncate(time.Millisecond)
+	for _, previous := range []*time.Time{status.LastPullStartedAt, status.LastPullSuccessAt} {
+		if previous != nil && !at.After(*previous) {
+			return
+		}
+	}
+	if err := p.store.RecordFederationSyncPullSuccess(ctx, projectID, at); err != nil {
+		p.report(fmt.Errorf("record held federation poll for project %d: %w", projectID, err))
+	}
+}
+
+func (p *hubLongPolls) report(err error) {
+	if p.notice != nil && p.ctx.Err() == nil {
+		p.notice(err)
 	}
 }
 
@@ -369,13 +474,4 @@ func sleepContext(ctx context.Context, delay time.Duration) bool {
 	case <-timer.C:
 		return true
 	}
-}
-
-// pullCompletedAt keeps a pull's success time from preceding its start.
-func pullCompletedAt(startedAt time.Time) time.Time {
-	completedAt := time.Now().UTC()
-	if completedAt.Before(startedAt) {
-		return startedAt
-	}
-	return completedAt
 }

@@ -411,6 +411,13 @@ func syncDirectSpoke(
 			}()
 		}
 	}
+	if hubHoldsPull(ctx, binding.ProjectID, binding.PullCursorEventID, client.heldPollTarget(hubProjectID)) {
+		// A poll at this cursor is out at the hub, which answers it as soon as
+		// anything new is visible, and that answer wakes the runner. An
+		// ordinary poll now would return an empty page. The watcher records
+		// the pull when the hub answers.
+		return nil
+	}
 	resumePull, pullStartedAt, err := startFederationPull(ctx, store, binding.ProjectID)
 	if err != nil {
 		return err
@@ -425,12 +432,6 @@ func syncDirectSpoke(
 			pullErr = errors.Join(pushErr, pullErr)
 		}
 		return recordFederationSyncErrorAt(ctx, store, binding.ProjectID, pullErr, at)
-	}
-	if !resumePull && hubHoldsPull(ctx, binding.ProjectID, binding.PullCursorEventID) {
-		// A poll at this cursor is out at the hub, which answers it as soon as
-		// anything new is visible, and that answer wakes the runner. An
-		// ordinary poll now would return an empty page.
-		return store.RecordFederationSyncPullSuccess(ctx, binding.ProjectID, pullCompletedAt(pullStartedAt))
 	}
 	body, err := client.PollProjectEvents(ctx, hubProjectID, binding.PullCursorEventID, federationPollLimit)
 	if err != nil {
@@ -1748,7 +1749,7 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 	if credentials == nil {
 		credentials = config.DefaultFederationCredentialStore()
 	}
-	polls := newHubLongPolls(ctx, r.DB, credentials, r.clientOpts(), interval, r.DrainAdmission)
+	polls := newHubLongPolls(ctx, r.DB, credentials, r.clientOpts(), interval, r.DrainAdmission, r.OnError)
 	r.longPolls = polls
 	defer func() {
 		polls.stopAll()
@@ -1794,6 +1795,8 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-ticker.C:
+				pending = nil
+			case <-polls.changed:
 				pending = nil
 			case <-r.Wake:
 				pending = nil
