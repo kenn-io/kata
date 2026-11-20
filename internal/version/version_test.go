@@ -37,6 +37,28 @@ func TestVersionFromVCSPrefixesDirtyRevisionWithG(t *testing.T) {
 	assert.Equal(t, "g1697674-dirty", versionFromVCS())
 }
 
+func TestVersionFromModuleBuildInfo(t *testing.T) {
+	orig := readBuildInfo
+	t.Cleanup(func() { readBuildInfo = orig })
+
+	for _, tc := range []struct {
+		name, moduleVersion, revision, want string
+	}{
+		{name: "release", moduleVersion: "v1.2.3", want: "v1.2.3"},
+		{name: "release with revision", moduleVersion: "v1.2.3", revision: "1697674abcdef", want: "v1.2.3"},
+		{name: "development with revision", moduleVersion: "(devel)", revision: "1697674abcdef", want: "g1697674"},
+		{name: "development without revision", moduleVersion: "(devel)", want: "dev"},
+		{name: "empty version", want: "dev"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			readBuildInfo = func() (*debug.BuildInfo, bool) {
+				return &debug.BuildInfo{Main: debug.Module{Version: tc.moduleVersion}, Settings: []debug.BuildSetting{{Key: settingRevision, Value: tc.revision}}}, true
+			}
+			assert.Equal(t, tc.want, versionFromVCS())
+		})
+	}
+}
+
 func TestCommitReturnsShortRevisionFromBuildInfo(t *testing.T) {
 	mockBuildInfo(t, "1697674abcdef0123456789", "", false)
 	assert.Equal(t, "1697674", commitFromVCS())

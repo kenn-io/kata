@@ -21,7 +21,7 @@ var readBuildInfo = debug.ReadBuildInfo
 
 // Version is the build identifier shared by the CLI, daemon, and TUI.
 // Release builds can override it with ldflags; development builds use
-// Go's embedded VCS metadata.
+// Go's embedded module version or VCS metadata.
 var Version = defaultVersion
 
 // Commit is the short VCS revision the binary was built from. Release
@@ -54,6 +54,9 @@ func versionFromVCS() string {
 	info, ok := readBuildInfo()
 	if !ok {
 		return defaultVersion
+	}
+	if info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
 	}
 	var rev string
 	var dirty bool
