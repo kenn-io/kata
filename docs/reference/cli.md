@@ -992,13 +992,17 @@ kata move --refs-from refs.txt target-project
 ```
 
 A refs file has one `ref` or `ref<TAB>project` per line and can be at most 8 MiB.
-Blank lines are ignored.
+Blank lines are ignored. Refs files have no comment syntax; a line such as
+`# note` is treated as an issue ref.
 A row's own project wins over the positional target. An empty refs file succeeds
 without contacting the daemon. Batch refs must be project-qualified short IDs
 or issue UIDs.
 
 A malformed file row or more than 5,000 rows fails the command before it sends a move request. An invalid issue ref,
 a bare ref, or an unknown target is refused; other rows can still move.
+When multiple refs resolve to the same issue, only the first can move; later rows are
+refused. If those rows name different targets, all are refused before any move
+for that issue.
 `--dry` and `--single` are available only for the
 single-issue form; batches reject them.
 
@@ -1010,7 +1014,7 @@ Each input gets a result, in input order:
 | --- | --- |
 | `moved` | The issue moved. |
 | `refused` | The ref or target is invalid, or a move rule refused it. |
-| `unknown` | The move request lost its response. Check the issue and its move history before retrying. |
+| `unknown` | The move response could not confirm the outcome. Check the issue and its move history before retrying. |
 | `unattempted` | The CLI stopped before sending it. Retry it. |
 
 To retry after a partial run, remove rows that were `moved` before re-running the same refs file. Check `unknown` rows before retrying them, and fix the errors on `refused` rows. For a shared target, save the JSON results and extract the `unattempted` refs:

@@ -28,6 +28,12 @@ const (
 )
 
 type moveBatchRow struct{ Ref, Target string }
+type moveBatchPrepared struct {
+	issue  moveIssueWire
+	target projectRef
+	pid    int64
+	ref    string
+}
 type moveBatchResult struct {
 	Index      int    `json:"index"`
 	Ref        string `json:"ref"`
@@ -151,29 +157,38 @@ func runMoveBatch(cmd *cobra.Command, args []string, refsFrom string) error {
 		subtreeSupported = false
 	}
 	actor, _ := resolveActor(a.ctx, flags.As, nil)
-	jobs := make(chan int)
-	var wg sync.WaitGroup
 	var halt atomic.Bool
-	for range moveBatchWorkers {
-		wg.Go(func() {
-			for i := range jobs {
-				moveBatchOne(a, client, projects, rows[i], &results[i], actor, subtreeSupported, &halt)
+	prepared := make([]*moveBatchPrepared, len(rows))
+	runMoveBatchJobs(a, &halt, len(rows), func(i int) {
+		prepared[i] = resolveMoveBatchOne(a, client, projects, rows[i], &results[i], &halt)
+	})
+	groups := make(map[string][]int)
+	for i, p := range prepared {
+		if p != nil {
+			groups[p.issue.UID] = append(groups[p.issue.UID], i)
+		}
+	}
+	for _, indexes := range groups {
+		conflict := false
+		for _, i := range indexes[1:] {
+			conflict = conflict || prepared[i].target.ID != prepared[indexes[0]].target.ID
+		}
+		for n, i := range indexes {
+			if conflict || n > 0 {
+				results[i].Result, results[i].Code, results[i].Hint = "refused", "duplicate_ref", ""
+				results[i].Message = "issue appears more than once"
+				if conflict {
+					results[i].Message = "issue has conflicting target projects"
+				}
+				prepared[i] = nil
 			}
-		})
-	}
-dispatch:
-	for i := range rows {
-		if a.ctx.Err() != nil || halt.Load() {
-			break
-		}
-		select {
-		case jobs <- i:
-		case <-a.ctx.Done():
-			break dispatch
 		}
 	}
-	close(jobs)
-	wg.Wait()
+	runMoveBatchJobs(a, &halt, len(rows), func(i int) {
+		if prepared[i] != nil {
+			moveBatchOne(a, client, prepared[i], &results[i], actor, subtreeSupported, &halt)
+		}
+	})
 	var commentErrs []error
 	for i := range results {
 		r := &results[i]
@@ -234,9 +249,34 @@ dispatch:
 	return errors.Join(outcome, printErr)
 }
 
-func moveBatchOne(a daemonAPI, client *kataclient.Client, projects []projectRef, row moveBatchRow, result *moveBatchResult, actor string, subtreeSupported bool, halt *atomic.Bool) {
+func runMoveBatchJobs(a daemonAPI, halt *atomic.Bool, count int, job func(int)) {
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for range moveBatchWorkers {
+		wg.Go(func() {
+			for i := range jobs {
+				job(i)
+			}
+		})
+	}
+dispatch:
+	for i := range count {
+		if a.ctx.Err() != nil || halt.Load() {
+			break
+		}
+		select {
+		case jobs <- i:
+		case <-a.ctx.Done():
+			break dispatch
+		}
+	}
+	close(jobs)
+	wg.Wait()
+}
+
+func resolveMoveBatchOne(a daemonAPI, client *kataclient.Client, projects []projectRef, row moveBatchRow, result *moveBatchResult, halt *atomic.Bool) *moveBatchPrepared {
 	if a.ctx.Err() != nil || halt.Load() {
-		return
+		return nil
 	}
 	refuse := func(code string, err error) {
 		if a.ctx.Err() == nil {
@@ -246,25 +286,25 @@ func moveBatchOne(a daemonAPI, client *kataclient.Client, projects []projectRef,
 	if !utf8.ValidString(row.Ref) {
 		result.Ref = strconv.Quote(row.Ref)
 		refuse("invalid_ref", errors.New("issue ref must be valid UTF-8"))
-		return
+		return nil
 	}
 	if !utf8.ValidString(row.Target) {
 		refuse("invalid_target", errors.New("target project must be valid UTF-8"))
-		return
+		return nil
 	}
 	parsed, err := shortid.Parse(row.Ref)
 	if err != nil || (parsed.ULID == "" && parsed.Project == "") {
 		refuse("invalid_ref", errors.New("use project#id or the issue UID"))
-		return
+		return nil
 	}
 	target, err := resolveProjectSelectorFromRefs(strings.TrimSpace(row.Target), projects)
 	if err != nil {
 		refuse("invalid_target", err)
-		return
+		return nil
 	}
 	if target.UID == "" {
 		refuse("invalid_target", fmt.Errorf("project %q has no UID", target.Name))
-		return
+		return nil
 	}
 	result.Target, result.targetID = target.Name, target.ID
 	pid, ref := target.ID, parsed.ULID
@@ -272,7 +312,7 @@ func moveBatchOne(a daemonAPI, client *kataclient.Client, projects []projectRef,
 		source, e := resolveProjectSelectorFromRefs(parsed.Project, projects)
 		if e != nil {
 			refuse("invalid_ref", e)
-			return
+			return nil
 		}
 		pid, ref = source.ID, parsed.ShortID
 	}
@@ -298,7 +338,7 @@ func moveBatchOne(a daemonAPI, client *kataclient.Client, projects []projectRef,
 		} else {
 			refuse("issue_lookup", err)
 		}
-		return
+		return nil
 	}
 	result.UID = issue.UID
 	result.sourceID = issue.ProjectID
@@ -310,17 +350,21 @@ func moveBatchOne(a daemonAPI, client *kataclient.Client, projects []projectRef,
 	}
 	if result.source == "" {
 		refuse("issue_lookup", errors.New("source project not found"))
-		return
+		return nil
 	}
+	if issue.UID == "" {
+		refuse("issue_lookup", errors.New("issue has no UID"))
+		return nil
+	}
+	return &moveBatchPrepared{issue: issue, target: target, pid: pid, ref: ref}
+}
+
+func moveBatchOne(a daemonAPI, client *kataclient.Client, prepared *moveBatchPrepared, result *moveBatchResult, actor string, subtreeSupported bool, halt *atomic.Bool) {
+	issue, target, pid, ref := prepared.issue, prepared.target, prepared.pid, prepared.ref
 	if a.ctx.Err() != nil || halt.Load() {
 		return
 	}
-	etag := fmt.Sprintf(`"rev-%d"`, issue.Revision)
-	single := true
-	request := &generated.MoveIssueRequestOptions{PathParams: &generated.MoveIssuePath{ProjectID: pid, Ref: ref}, Header: &generated.MoveIssueHeaders{IfMatch: &etag}, Body: &generated.MoveIssueBody{Actor: &actor, ToProjectUID: target.UID}}
-	if subtreeSupported {
-		request.Body.Single = &single
-	}
+	request := moveRequest(pid, ref, actor, target.UID, issue.Revision, false, subtreeSupported)
 	var dispatched atomic.Bool
 	ctx := httptrace.WithClientTrace(a.ctx, &httptrace.ClientTrace{WroteRequest: func(httptrace.WroteRequestInfo) { dispatched.Store(true) }})
 	response, callErr := client.MoveIssueWithResponse(ctx, request)
@@ -340,16 +384,8 @@ func moveBatchOne(a daemonAPI, client *kataclient.Client, projects []projectRef,
 		return
 	}
 	if response.StatusCode >= 500 && response.StatusCode <= 599 {
-		var envelope struct {
-			Error struct {
-				Code    string `json:"code"`
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-		if json.Unmarshal(response.Body, &envelope) != nil || envelope.Error.Code == "" || envelope.Error.Message == "" {
-			unknown()
-			return
-		}
+		unknown()
+		return
 	}
 	if response.StatusCode != 200 {
 		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {

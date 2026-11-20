@@ -139,19 +139,7 @@ func runMove(cmd *cobra.Command, rawRef, targetProject string, dryRun, single bo
 	if err != nil {
 		return err
 	}
-	request := &generated.MoveIssueRequestOptions{
-		PathParams: &generated.MoveIssuePath{ProjectID: pid, Ref: ref.RefForAPI},
-		Body:       &generated.MoveIssueBody{Actor: &actor, ToProjectUID: target.UID},
-	}
-	if dryRun {
-		request.Body.DryRun = &dryRun
-	} else {
-		etag := fmt.Sprintf(`"rev-%d"`, sourceIssue.Revision)
-		request.Header = &generated.MoveIssueHeaders{IfMatch: &etag}
-	}
-	if single && subtreeSupported {
-		request.Body.Single = &single
-	}
+	request := moveRequest(pid, ref.RefForAPI, actor, target.UID, sourceIssue.Revision, dryRun, single && subtreeSupported)
 	response, callErr := apiClient.MoveIssueWithResponse(ctx, request)
 	if response == nil {
 		return externalCLITransportError(response, callErr)
@@ -183,6 +171,23 @@ func runMove(cmd *cobra.Command, rawRef, targetProject string, dryRun, single bo
 		return err
 	}
 	return printMove(cmd, bs, sourceProject, sourceIssue.ShortID, target.Name)
+}
+
+func moveRequest(pid int64, ref, actor, targetUID string, revision int64, dryRun, single bool) *generated.MoveIssueRequestOptions {
+	request := &generated.MoveIssueRequestOptions{
+		PathParams: &generated.MoveIssuePath{ProjectID: pid, Ref: ref},
+		Body:       &generated.MoveIssueBody{Actor: &actor, ToProjectUID: targetUID},
+	}
+	if dryRun {
+		request.Body.DryRun = &dryRun
+	} else {
+		etag := fmt.Sprintf(`"rev-%d"`, revision)
+		request.Header = &generated.MoveIssueHeaders{IfMatch: &etag}
+	}
+	if single {
+		request.Body.Single = &single
+	}
+	return request
 }
 
 func moveSourceProjectName(ctx context.Context, client *http.Client, baseURL string, requestedProjectID, currentProjectID int64, requestedName string) (string, error) {
