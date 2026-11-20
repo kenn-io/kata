@@ -464,9 +464,10 @@ func TestWebDaemonGatewayDefaultWithDownSyncHub(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var probes, requests atomic.Int64
 			other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path == "/api/v1/instance" {
+				switch r.URL.Path {
+				case "/api/v1/instance":
 					probes.Add(1)
-				} else if r.URL.Path == "/api/v1/ui/issue-reference" {
+				case "/api/v1/ui/issue-reference":
 					requests.Add(1)
 				}
 				w.WriteHeader(http.StatusNoContent)
