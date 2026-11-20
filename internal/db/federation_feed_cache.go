@@ -36,11 +36,14 @@ type federationFeedFacts struct {
 	// No issue.moved event stamped to the project has an ID at or below
 	// movesThrough.
 	movesThrough int64
-	// issues is how many issues the project owned when a read last counted
-	// them, if issuesKnown. It only sizes page windows: a stale count changes
-	// what a poll costs, never what it returns.
+	// issues is how many issues the project owned in the snapshot whose
+	// newest event ID is issuesAt, if issuesKnown. When issuesKnown is false,
+	// issuesAt is the snapshot in which a read found the count stale. The
+	// count only sizes page windows: a stale count changes what a poll costs,
+	// never what it returns.
 	issues      int64
 	issuesKnown bool
+	issuesAt    int64
 }
 
 // FederationFeedRead carries one read transaction's view of the cache and the
@@ -53,8 +56,8 @@ type FederationFeedRead struct {
 	// noMovesAfter is true when this transaction found no issue.moved event
 	// stamped to the project above known.movesThrough.
 	noMovesAfter bool
-	// counted is true when this transaction counted the project's issues.
-	counted bool
+	// snapshot is the newest event ID in this transaction's snapshot.
+	snapshot int64
 }
 
 // Begin returns the remembered facts for one read of project.
@@ -87,6 +90,11 @@ func (r *FederationFeedRead) Commit() {
 		learned.movesThrough = max(learned.movesThrough, current.movesThrough)
 		if current.foreignThrough > learned.foreignThrough {
 			learned.foreignFrom, learned.foreignThrough = current.foreignFrom, current.foreignThrough
+		}
+		// A count or recount mark from a newer snapshot wins; at the same
+		// snapshot, a count wins over a mark.
+		if current.issuesAt > learned.issuesAt || (current.issuesAt == learned.issuesAt && current.issuesKnown) {
+			learned.issues, learned.issuesKnown, learned.issuesAt = current.issues, current.issuesKnown, current.issuesAt
 		}
 	}
 	if r.cache.entries == nil {
@@ -125,27 +133,32 @@ func (r *FederationFeedRead) knownIssues() (int64, bool) {
 	return r.known.issues, true
 }
 
-// recordIssues notes how many issues the project owns.
+// recordIssues notes how many issues the project owns in this snapshot. Call
+// it after recordSnapshot.
 func (r *FederationFeedRead) recordIssues(issues int64) {
 	if r != nil {
-		r.learned.issues, r.learned.issuesKnown, r.counted = issues, true, true
+		r.learned.issues, r.learned.issuesKnown, r.learned.issuesAt = issues, true, r.snapshot
 	}
 }
 
 // recordEvents notes that the read returned events. Every change to which
 // issues the project owns reaches its feed as an event, and a move out of the
-// project is stamped to the destination, so a count this read reused may be
-// stale; the next read counts again.
+// project is stamped to the destination, so a count from an older snapshot
+// may be stale; the next read counts again.
 func (r *FederationFeedRead) recordEvents() {
-	if r != nil && !r.counted {
-		r.learned.issues, r.learned.issuesKnown = 0, false
+	if r != nil && r.learned.issuesAt < r.snapshot {
+		r.learned.issues, r.learned.issuesKnown, r.learned.issuesAt = 0, false, r.snapshot
 	}
 }
 
 // recordSnapshot notes maxID, the newest event ID in the read's snapshot. The
 // move check covers the whole snapshot, whatever the read returned.
 func (r *FederationFeedRead) recordSnapshot(maxID int64) {
-	if r != nil && r.noMovesAfter {
+	if r == nil {
+		return
+	}
+	r.snapshot = maxID
+	if r.noMovesAfter {
 		r.learned.movesThrough = max(r.learned.movesThrough, maxID)
 	}
 }

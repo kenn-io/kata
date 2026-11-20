@@ -53,6 +53,7 @@ func TestFederationFeedCacheForgetsReusedIssueCountAfterEvents(t *testing.T) {
 	var cache FederationFeedCache
 	project := Project{ID: 7, UID: "01M8000000000000000000000P", Revision: 1}
 	counting := cache.Begin(project, FederationBinding{})
+	counting.recordSnapshot(40)
 	counting.recordIssues(40)
 	counting.recordEvents()
 	counting.Commit()
@@ -61,8 +62,36 @@ func TestFederationFeedCacheForgetsReusedIssueCountAfterEvents(t *testing.T) {
 	require.Equal(t, int64(40), issues)
 
 	reusing := cache.Begin(project, FederationBinding{})
+	reusing.recordSnapshot(50)
 	reusing.recordEvents()
 	reusing.Commit()
 	_, ok = cache.Begin(project, FederationBinding{}).knownIssues()
 	require.False(t, ok)
+}
+
+// A quiet poll that read an older snapshot and commits last must not restore
+// a count that a newer read already found stale.
+func TestFederationFeedCacheKeepsNewerRecountAfterOlderQuietPoll(t *testing.T) {
+	var cache FederationFeedCache
+	project := Project{ID: 7, UID: "01M8000000000000000000000P", Revision: 1}
+	warm := cache.Begin(project, FederationBinding{})
+	warm.recordSnapshot(10)
+	warm.recordIssues(500)
+	warm.Commit()
+
+	quiet := cache.Begin(project, FederationBinding{})
+	quiet.recordSnapshot(20)
+	quiet.recordQuiet(0, 20)
+
+	moved := cache.Begin(project, FederationBinding{})
+	moved.recordSnapshot(30)
+	moved.recordEvents()
+	moved.Commit()
+
+	quiet.Commit()
+	_, ok := cache.Begin(project, FederationBinding{}).knownIssues()
+	require.False(t, ok, "the older quiet poll restored a stale count")
+	after, ok := cache.Begin(project, FederationBinding{}).foreignChecked(0)
+	require.True(t, ok)
+	require.Equal(t, int64(20), after, "quiet range")
 }
