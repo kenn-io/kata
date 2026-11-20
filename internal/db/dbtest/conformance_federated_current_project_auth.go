@@ -13,6 +13,38 @@ import (
 	"go.kenn.io/kata/internal/uid"
 )
 
+func checkFederatedParentWithoutReferenceController(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	route, err := store.CreateProject(ctx, "ordinary-route")
+	require.NoError(t, err)
+	other, err := store.CreateProject(ctx, "ordinary-other")
+	require.NoError(t, err)
+	_, err = store.EnableProjectFederation(ctx, route.ID, "worker")
+	require.NoError(t, err)
+	child, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: route.ID, Title: "Child", Author: "worker"})
+	require.NoError(t, err)
+	current, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: other.ID, Title: "Current parent", Author: "worker"})
+	require.NoError(t, err)
+	queued, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: route.ID, Title: "Queued parent", Author: "worker"})
+	require.NoError(t, err)
+	_, _, err = store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: current.ID, Type: "parent", Author: "worker"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: child.ID, FromUID: child.UID, FromShortID: child.ShortID, ToUID: current.UID, ToShortID: current.ShortID, Actor: "worker"})
+	require.NoError(t, err)
+	origin, err := uid.New()
+	require.NoError(t, err)
+	grant, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: origin, ProjectID: &route.ID, Capabilities: "push,pull", Actor: "worker"})
+	require.NoError(t, err)
+	payload, err := json.Marshal(map[string]string{"parent_set_uid": queued.UID})
+	require.NoError(t, err)
+	event := newRemoteEvent(t, route, &child.UID, "issue.links_changed", "worker", origin, 1, payload)
+	result, err := store.IngestFederationEvents(ctx, db.FederationIngestParams{ProjectID: route.ID, SpokeInstanceUID: origin, BoundActor: "worker", FederationEnrollmentID: grant.Enrollment.ID, EventFeatures: db.SupportedEventFeatures, Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: event}}})
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Accepted)
+	parent, err := store.ParentOf(ctx, child.ID)
+	require.NoError(t, err)
+	require.Equal(t, current.UID, parent.ToIssueUID)
+	return nil
+}
+
 // Fresh source-stream work can alter an issue which now belongs elsewhere;
 // credential, actor, and host authority follow that current project.
 func checkFederatedFreshCurrentProjectAuthority(t *testing.T, store db.Storage) error {

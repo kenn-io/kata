@@ -1,33 +1,11 @@
 package sqlitestore
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 )
-
-func TestFederationParentReplacementWithoutReferenceController(t *testing.T) {
-	d, project, child := incrementalTestStore(t)
-	ctx := t.Context()
-	other, err := d.CreateProject(ctx, "other")
-	require.NoError(t, err)
-	oldParent, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: other.ID, Title: "old parent", Author: "tester"})
-	require.NoError(t, err)
-	newParent, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "new parent", Author: "tester"})
-	require.NoError(t, err)
-	_, _, err = d.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: oldParent.ID, Type: "parent", Author: "tester"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: child.ID, FromUID: child.UID, FromShortID: child.ShortID, ToUID: oldParent.UID, ToShortID: oldParent.ShortID, Actor: "tester"})
-	require.NoError(t, err)
-	event := incrementalRemoteEvent(t, project, child.UID, "issue.links_changed", fmt.Sprintf(`{"parent_set_uid":%q}`, newParent.UID), 1)
-	grant, err := d.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: event.OriginInstanceUID, ProjectID: &project.ID, Capabilities: "push,pull", Actor: "tester"})
-	require.NoError(t, err)
-	_, err = d.IngestFederationEvents(ctx, db.FederationIngestParams{ProjectID: project.ID, SpokeInstanceUID: event.OriginInstanceUID, BoundActor: "tester", FederationEnrollmentID: grant.Enrollment.ID, EventFeatures: db.SupportedEventFeatures, Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: event}}})
-	require.NoError(t, err)
-	parent, err := d.ParentOf(ctx, child.ID)
-	require.NoError(t, err)
-	require.Equal(t, oldParent.UID, parent.ToIssueUID)
-}
 
 func TestFederationIngestRechecksCurrentProjectAfterConcurrentMove(t *testing.T) {
 	d, source, issue := incrementalTestStore(t)
