@@ -285,6 +285,9 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 	require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
 	var notEnrolled *db.FederationProjectNotEnrolledError
 	require.ErrorAs(t, err, &notEnrolled)
+	if notEnrolled == nil {
+		return errors.New("federation project not enrolled error is nil")
+	}
 	require.Empty(t, notEnrolled.IssueUID)
 	require.NotContains(t, err.Error(), peer.UID)
 	require.ErrorContains(t, err, "This spoke needs push access to the affected issue's project with the same actor")

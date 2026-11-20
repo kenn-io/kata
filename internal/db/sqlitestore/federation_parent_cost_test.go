@@ -44,7 +44,7 @@ func TestFederationIngestOrdinaryParentAssignmentAvoidsTrackerQuery(t *testing.T
 	require.NoError(t, err)
 	drv, err := registeredSQLiteDriver()
 	require.NoError(t, err)
-	capture := &parentQueryConnector{queuedConnector: queuedConnector{dsn: "file:" + sqliteURIPath(d.Path()) + "?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)", driver: drv, queue: newWriteQueue()}}
+	capture := &parentQueryConnector{dsn: "file:" + sqliteURIPath(d.Path()) + "?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)", driver: drv, queue: newWriteQueue()}
 	original := d.DB
 	d.DB = sql.OpenDB(capture)
 	t.Cleanup(func() { require.NoError(t, original.Close()) })
