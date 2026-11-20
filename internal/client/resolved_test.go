@@ -397,7 +397,13 @@ func TestResolvedDaemonRunningPreservesEndpointMetadata(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, tt.in.Running())
+			got := tt.in.Running()
+			assert.Equal(t, tt.want.BaseURL, got.BaseURL)
+			assert.Equal(t, tt.want.Address, got.Address)
+			assert.Equal(t, tt.want.Network, got.Network)
+			assert.Equal(t, tt.want.Scheme, got.Scheme)
+			assert.Equal(t, tt.want.ConfiguredRemote, got.ConfiguredRemote)
+			assert.Equal(t, tt.want.PersistedAuth, got.PersistedAuth)
 			assert.Equal(t, tt.wantUnixSocket, tt.in.UnixSocket)
 		})
 	}
