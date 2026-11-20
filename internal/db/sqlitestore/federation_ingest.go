@@ -1575,10 +1575,8 @@ func (d *Store) authorizeFederationMoveTx(ctx context.Context, tx *sql.Tx, p db.
 // affected issue's current owner. Duplicates already passed this acceptance
 // boundary and must not acquire new authority merely to acknowledge a retry.
 func (d *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.Tx, p db.FederationIngestParams, events, parentEvents []db.RemoteEvent, moveSnapshots *db.FederationMoveSnapshotValidator) error {
+	// Report graph validation only after checking current project authority.
 	parentRemovals, err := db.DirectParentRemovals(ctx, tx, parentEvents)
-	if err != nil {
-		return err
-	}
 	staged := map[string]int64{}
 	type checkedProject struct {
 		id        int64
@@ -1674,7 +1672,7 @@ func (d *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.
 			staged[primary] = to
 		}
 	}
-	return nil
+	return err
 }
 
 // A supplemental project uses the route grant only when that grant covers it.

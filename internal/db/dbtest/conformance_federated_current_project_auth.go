@@ -16,6 +16,60 @@ import (
 // Fresh source-stream work can alter an issue which now belongs elsewhere;
 // credential, actor, and host authority follow that current project.
 func checkFederatedFreshCurrentProjectAuthority(t *testing.T, store db.Storage) error {
+	t.Run("legacy-unlink-moved-child", func(t *testing.T) {
+		ctx := t.Context()
+		source, target, child, _ := federatedRehomeFixture(t, store, "legacy-unlink-moved")
+		parents, err := store.CreateProject(ctx, "legacy-unlink-parents")
+		require.NoError(t, err)
+		_, err = store.EnableProjectFederation(ctx, parents.ID, "worker")
+		require.NoError(t, err)
+		parent, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: parents.ID, Title: "Current parent", Author: "worker"})
+		require.NoError(t, err)
+		other, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: parents.ID, Title: "Other parent", Author: "worker"})
+		require.NoError(t, err)
+		_, err = store.CreateLink(ctx, db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: parent.ID, Type: "parent", Author: "worker"})
+		require.NoError(t, err)
+		child, err = store.IssueByUID(ctx, child.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: child.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: child.Revision, Actor: "worker"})
+		require.NoError(t, err)
+		origin, err := uid.New()
+		require.NoError(t, err)
+		grant, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: origin, ProjectID: &source.ID, Capabilities: "push,pull", Actor: "worker"})
+		require.NoError(t, err)
+		for _, named := range []struct{ name, uid string }{{"mismatched", other.UID}, {"current", parent.UID}} {
+			t.Run(named.name, func(t *testing.T) {
+				payload, err := json.Marshal(map[string]string{"type": "parent", "from_uid": child.UID, "to_uid": named.uid})
+				require.NoError(t, err)
+				event := newRemoteEvent(t, source, &child.UID, "issue.unlinked", "worker", origin, time.Now().Add(time.Hour).UnixMilli(), payload)
+				before, err := store.MaxEventID(ctx)
+				require.NoError(t, err)
+				_, err = store.IngestFederationEvents(ctx, db.FederationIngestParams{ProjectID: source.ID, FederationEnrollmentID: grant.Enrollment.ID, SpokeInstanceUID: origin, BoundActor: "worker", EventFeatures: db.SupportedEventFeatures, Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: event}}})
+				after, maxErr := store.MaxEventID(ctx)
+				require.NoError(t, maxErr)
+				require.Equal(t, before, after)
+				var notEnrolled *db.FederationProjectNotEnrolledError
+				require.ErrorAs(t, err, &notEnrolled)
+				require.Equal(t, child.UID, notEnrolled.IssueUID)
+			})
+		}
+		t.Run("authorized-mismatch", func(t *testing.T) {
+			origin, err := uid.New()
+			require.NoError(t, err)
+			grant, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: origin, Capabilities: "push,pull", Actor: "worker"})
+			require.NoError(t, err)
+			payload, err := json.Marshal(map[string]string{"type": "parent", "from_uid": child.UID, "to_uid": other.UID})
+			require.NoError(t, err)
+			event := newRemoteEvent(t, source, &child.UID, "issue.unlinked", "worker", origin, time.Now().Add(time.Hour).UnixMilli(), payload)
+			before, err := store.MaxEventID(ctx)
+			require.NoError(t, err)
+			_, err = store.IngestFederationEvents(ctx, db.FederationIngestParams{ProjectID: source.ID, FederationEnrollmentID: grant.Enrollment.ID, SpokeInstanceUID: origin, BoundActor: "worker", EventFeatures: db.SupportedEventFeatures, Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: event}}})
+			require.ErrorIs(t, err, db.ErrFederationIngestValidation)
+			after, err := store.MaxEventID(ctx)
+			require.NoError(t, err)
+			require.Equal(t, before, after)
+		})
+	})
 	for _, kind := range []string{"missing-proof", "link-peer", "pull-only", "revoked", "wrong-actor", "wrong-spoke", "actor-denied", "host-denied", "authorized", "global-grant"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx := t.Context()
