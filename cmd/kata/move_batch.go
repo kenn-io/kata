@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -9,16 +10,13 @@ import (
 	"net/http/httptrace"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/shortid"
 	kataclient "go.kenn.io/kata/pkg/client"
-	"go.kenn.io/kata/pkg/client/generated"
 )
 
 const (
@@ -33,22 +31,24 @@ type moveBatchPrepared struct {
 	pid    int64
 	ref    string
 }
+type moveBatchSummary struct {
+	Moved       int `json:"moved"`
+	Refused     int `json:"refused"`
+	Unknown     int `json:"unknown"`
+	Unattempted int `json:"unattempted"`
+}
 type moveBatchResult struct {
-	Index      int    `json:"index"`
-	Ref        string `json:"ref"`
-	UID        string `json:"uid,omitempty"`
-	Target     string `json:"target,omitempty"`
-	Result     string `json:"result"`
-	Code       string `json:"code,omitempty"`
-	Message    string `json:"message,omitempty"`
-	Hint       string `json:"hint,omitempty"`
-	From       string `json:"from,omitempty"`
-	To         string `json:"to,omitempty"`
-	NewShortID string `json:"new_short_id,omitempty"`
-	EventID    int64  `json:"event_id,omitempty,omitzero"`
-	source     string
-	sourceID   int64
-	targetID   int64
+	Ref      string `json:"ref"`
+	UID      string `json:"uid,omitempty"`
+	Target   string `json:"target,omitempty"`
+	Result   string `json:"result"`
+	Code     string `json:"code,omitempty"`
+	Message  string `json:"message,omitempty"`
+	Hint     string `json:"hint,omitempty"`
+	To       string `json:"to,omitempty"`
+	EventID  int64  `json:"event_id,omitempty,omitzero"`
+	sourceID int64
+	targetID int64
 }
 
 func moveBatchUsage(format string, args ...any) error {
@@ -60,7 +60,7 @@ func parseRefsFrom(r io.Reader, sharedTarget string) ([]moveBatchRow, error) {
 	scanner := bufio.NewScanner(r)
 	var rows []moveBatchRow
 	for line := 1; len(rows) <= moveBatchMaxItems && scanner.Scan(); line++ {
-		text := strings.TrimSuffix(scanner.Text(), "\r")
+		text := scanner.Text()
 		if strings.TrimSpace(text) == "" {
 			continue
 		}
@@ -121,7 +121,7 @@ func runMoveBatch(cmd *cobra.Command, args []string, refsFrom string) error {
 	}
 	results := make([]moveBatchResult, len(rows))
 	for i, row := range rows {
-		results[i] = moveBatchResult{Index: i, Ref: row.Ref, Result: "unattempted", Hint: "not sent; safe to rerun"}
+		results[i] = moveBatchResult{Ref: row.Ref, Result: "unattempted", Hint: "not sent; safe to rerun"}
 	}
 	if len(rows) == 0 {
 		return printMoveBatch(cmd, results)
@@ -154,7 +154,7 @@ func runMoveBatch(cmd *cobra.Command, args []string, refsFrom string) error {
 	var halt atomic.Bool
 	prepared := make([]*moveBatchPrepared, len(rows))
 	runMoveBatchJobs(a, &halt, len(rows), func(i int) {
-		prepared[i] = resolveMoveBatchOne(a, client, projects, rows[i], &results[i], &halt)
+		prepared[i] = resolveMoveBatchOne(a, client, projects, rows[i], &results[i])
 	})
 	groups := make(map[string][]int)
 	for i, p := range prepared {
@@ -189,48 +189,31 @@ func runMoveBatch(cmd *cobra.Command, args []string, refsFrom string) error {
 		if r.Result != "moved" || comment == "" {
 			continue
 		}
-		var e error
-		if a.ctx.Err() != nil {
-			e = a.ctx.Err()
-		} else {
+		e := a.ctx.Err()
+		if e == nil {
 			e = postFollowupComment(a.ctx, a.client, a.baseURL, r.targetID, r.UID, actor, comment, handle)
 		}
 		if e != nil {
-			retry := fmt.Sprintf("kata comment %s --project %s --body ...", r.UID, shellQuote(r.Target))
-			message := strings.Replace(e.Error(), "retry with: kata comment "+r.UID+" --body ...", "retry with: "+retry, 1)
-			if a.ctx.Err() != nil {
-				message = fmt.Sprintf("comment for %s failed: %v; retry with: %s", r.UID, e, retry)
-			}
 			detail := strings.Replace(e.Error(), " (retry with: kata comment "+r.UID+" --body ...)", "", 1)
 			r.Message = strings.TrimSpace(r.Message + " comment failed: " + detail)
-			r.Hint = "retry with: " + retry
-			commentErrs = append(commentErrs, errors.New(message))
+			r.Hint = fmt.Sprintf("retry with: kata comment %s --project %s --body ...", r.UID, shellQuote(r.Target))
+			commentErrs = append(commentErrs, fmt.Errorf("comment for %s failed: %s; %s", r.UID, detail, r.Hint))
 		}
 	}
 	printErr := printMoveBatch(cmd, results)
-	var unknown, unattempted, refused int
-	for _, r := range results {
-		switch r.Result {
-		case "unknown":
-			unknown++
-		case "unattempted":
-			unattempted++
-		case "refused":
-			refused++
-		}
-	}
+	summary := summarizeMoveBatch(results)
 	var outcome error
 	if a.ctx.Err() != nil {
-		msg := fmt.Sprintf("batch move cancelled; %d rows not attempted", unattempted)
-		if unknown > 0 {
+		msg := fmt.Sprintf("batch move cancelled; %d rows not attempted", summary.Unattempted)
+		if summary.Unknown > 0 {
 			msg = "batch move cancelled; check unknown rows before retrying"
 		}
 		outcome = &cliError{Message: msg, Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
-	} else if unknown > 0 {
+	} else if summary.Unknown > 0 {
 		outcome = &cliError{Message: "check unknown rows before retrying", Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
-	} else if unattempted > 0 {
-		outcome = &cliError{Message: fmt.Sprintf("%d rows not attempted", unattempted), Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
-	} else if refused > 0 {
+	} else if summary.Unattempted > 0 {
+		outcome = &cliError{Message: fmt.Sprintf("%d rows not attempted", summary.Unattempted), Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
+	} else if summary.Refused > 0 {
 		outcome = moveBatchRefusalError(printErr)
 	}
 	if len(commentErrs) > 0 {
@@ -253,38 +236,24 @@ func runMoveBatchJobs(a daemonAPI, halt *atomic.Bool, count int, job func(int)) 
 			}
 		})
 	}
-dispatch:
 	for i := range count {
 		if a.ctx.Err() != nil || halt.Load() {
 			break
 		}
-		select {
-		case jobs <- i:
-		case <-a.ctx.Done():
-			break dispatch
-		}
+		jobs <- i
 	}
 	close(jobs)
 	wg.Wait()
 }
 
-func resolveMoveBatchOne(a daemonAPI, client *kataclient.Client, projects []projectRef, row moveBatchRow, result *moveBatchResult, halt *atomic.Bool) *moveBatchPrepared {
-	if a.ctx.Err() != nil || halt.Load() {
+func resolveMoveBatchOne(a daemonAPI, client *kataclient.Client, projects []projectRef, row moveBatchRow, result *moveBatchResult) *moveBatchPrepared {
+	if a.ctx.Err() != nil {
 		return nil
 	}
 	refuse := func(code string, err error) {
 		if a.ctx.Err() == nil {
 			result.Result, result.Code, result.Message, result.Hint = "refused", code, err.Error(), ""
 		}
-	}
-	if !utf8.ValidString(row.Ref) {
-		result.Ref = strconv.Quote(row.Ref)
-		refuse("invalid_ref", errors.New("issue ref must be valid UTF-8"))
-		return nil
-	}
-	if !utf8.ValidString(row.Target) {
-		refuse("invalid_target", errors.New("target project must be valid UTF-8"))
-		return nil
 	}
 	parsed, err := shortid.Parse(row.Ref)
 	if err != nil || (parsed.ULID == "" && parsed.Project == "") {
@@ -312,17 +281,8 @@ func resolveMoveBatchOne(a daemonAPI, client *kataclient.Client, projects []proj
 	}
 	var issue moveIssueWire
 	if parsed.ULID != "" {
-		response, callErr := client.ShowIssueByUIDWithResponse(a.ctx, &generated.ShowIssueByUIDRequestOptions{PathParams: &generated.ShowIssueByUIDPath{UID: parsed.ULID}})
-		if response == nil {
-			err = externalCLITransportError(response, callErr)
-		} else if err = externalCLIResponseError(response.StatusCode, response.Body, callErr); err == nil {
-			var body struct {
-				Issue moveIssueWire `json:"issue"`
-			}
-			err = json.Unmarshal(response.Body, &body)
-			issue = body.Issue
-			pid = issue.ProjectID
-		}
+		issue, err = fetchIssueByUID(a.ctx, client, parsed.ULID)
+		pid = issue.ProjectID
 	} else {
 		issue, err = fetchMoveIssue(a.ctx, a.client, a.baseURL, pid, ref)
 	}
@@ -334,22 +294,7 @@ func resolveMoveBatchOne(a daemonAPI, client *kataclient.Client, projects []proj
 		}
 		return nil
 	}
-	result.UID = issue.UID
-	result.sourceID = issue.ProjectID
-	for _, p := range projects {
-		if p.ID == issue.ProjectID {
-			result.source = p.Name
-			break
-		}
-	}
-	if result.source == "" {
-		refuse("issue_lookup", errors.New("source project not found"))
-		return nil
-	}
-	if issue.UID == "" {
-		refuse("issue_lookup", errors.New("issue has no UID"))
-		return nil
-	}
+	result.UID, result.sourceID = issue.UID, issue.ProjectID
 	return &moveBatchPrepared{issue: issue, target: target, pid: pid, ref: ref}
 }
 
@@ -388,13 +333,16 @@ func moveBatchOne(a daemonAPI, client *kataclient.Client, prepared *moveBatchPre
 		}
 	}
 	var moved moveResponseWire
-	if err := json.Unmarshal(response.Body, &moved); err != nil || moved.Issue.ShortID == "" {
+	if err := json.Unmarshal(response.Body, &moved); err != nil || !moveBatchComplete(moved, target.ID) {
 		unknown()
 		return
 	}
 	result.Result, result.Hint = "moved", ""
-	result.From, result.To = moveQualifiedID(result.source, issue.ShortID), moveQualifiedID(target.Name, moved.Issue.ShortID)
-	result.NewShortID, result.EventID = moved.NewShortID, moved.EventID
+	result.To, result.EventID = moveQualifiedID(target.Name, moved.Issue.ShortID), moved.EventID
+}
+
+func moveBatchComplete(moved moveResponseWire, targetID int64) bool {
+	return moved.Changed && moved.EventID != 0 && moved.Issue.ProjectID == targetID && moved.Issue.ShortID != "" && moved.NewShortID == moved.Issue.ShortID
 }
 
 func moveBatchRefusalError(printErr error) error {
@@ -406,29 +354,9 @@ func moveBatchRefusalError(printErr error) error {
 	}
 	return err
 }
-func printMoveBatch(cmd *cobra.Command, results []moveBatchResult) error {
-	quiet := flags.Quiet && currentOutputMode() == outputHuman
-	if quiet {
-		actionable := false
-		for _, r := range results {
-			if r.Result != "moved" || r.Message != "" || r.Hint != "" {
-				actionable = true
-				break
-			}
-		}
-		if !actionable {
-			return nil
-		}
-	}
-	var summary struct {
-		Moved       int `json:"moved"`
-		Refused     int `json:"refused"`
-		Unknown     int `json:"unknown"`
-		Unattempted int `json:"unattempted"`
-	}
-	for i := range results {
-		r := &results[i]
 
+func summarizeMoveBatch(results []moveBatchResult) (summary moveBatchSummary) {
+	for _, r := range results {
 		switch r.Result {
 		case "moved":
 			summary.Moved++
@@ -440,41 +368,32 @@ func printMoveBatch(cmd *cobra.Command, results []moveBatchResult) error {
 			summary.Unattempted++
 		}
 	}
+	return summary
+}
+
+func printMoveBatch(cmd *cobra.Command, results []moveBatchResult) error {
+	summary := summarizeMoveBatch(results)
 	out := cmd.OutOrStdout()
 	if currentOutputMode() == outputJSON {
-		return json.MarshalWrite(out, map[string]any{"includes_descendants": false, "summary": summary, "results": results})
+		return json.MarshalWrite(out, map[string]any{"includes_descendants": false, "summary": summary, "results": results}, jsontext.AllowInvalidUTF8(true))
 	}
-	var b strings.Builder
-	if currentOutputMode() == outputAgent {
-		fmt.Fprintf(&b, "OK move-batch requested=%d moved=%d refused=%d unknown=%d unattempted=%d includes_descendants=false\n", len(results), summary.Moved, summary.Refused, summary.Unknown, summary.Unattempted)
-	} else {
-		fmt.Fprintf(&b, "Move batch (listed issues only; descendants excluded): %d moved, %d refused, %d unknown, %d unattempted\n", summary.Moved, summary.Refused, summary.Unknown, summary.Unattempted)
-	}
+	quiet := flags.Quiet && currentOutputMode() == outputHuman
+	var rows strings.Builder
 	for _, r := range results {
 		if quiet && r.Result == "moved" && r.Message == "" && r.Hint == "" {
 			continue
 		}
-		fmt.Fprintf(&b, "- ref=%s result=%s", agentValue(r.Ref), r.Result)
-		if r.UID != "" {
-			fmt.Fprintf(&b, " uid=%s", agentValue(r.UID))
-		}
-		if r.Target != "" {
-			fmt.Fprintf(&b, " target=%s", agentValue(r.Target))
-		}
-		if r.To != "" {
-			fmt.Fprintf(&b, " to=%s", agentValue(r.To))
-		}
-		if r.Code != "" {
-			fmt.Fprintf(&b, " code=%s", r.Code)
-		}
-		if r.Message != "" {
-			fmt.Fprintf(&b, " message=%s", agentValue(r.Message))
-		}
-		if r.Hint != "" {
-			fmt.Fprintf(&b, " hint=%s", agentValue(r.Hint))
-		}
-		b.WriteByte('\n')
+		_ = writeAgentKVRow(&rows, agentRowField("ref", r.Ref), agentRowField("result", r.Result),
+			agentOptionalRowField("uid", &r.UID), agentOptionalRowField("target", &r.Target), agentOptionalRowField("to", &r.To),
+			agentOptionalRowField("code", &r.Code), agentOptionalRowField("message", &r.Message), agentOptionalRowField("hint", &r.Hint))
 	}
-	_, err := io.WriteString(out, b.String())
+	if quiet && rows.Len() == 0 {
+		return nil
+	}
+	header := fmt.Sprintf("Move batch (listed issues only; descendants excluded): %d moved, %d refused, %d unknown, %d unattempted\n", summary.Moved, summary.Refused, summary.Unknown, summary.Unattempted)
+	if currentOutputMode() == outputAgent {
+		header = fmt.Sprintf("OK move-batch requested=%d moved=%d refused=%d unknown=%d unattempted=%d includes_descendants=false\n", len(results), summary.Moved, summary.Refused, summary.Unknown, summary.Unattempted)
+	}
+	_, err := io.WriteString(out, header+rows.String())
 	return err
 }

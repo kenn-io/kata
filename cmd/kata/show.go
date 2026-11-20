@@ -68,36 +68,35 @@ func runShow(cmd *cobra.Command, issueRef, agentOperation string, opts showRunOp
 			ExitCode: ExitUsage,
 		}
 	}
-	var ctx context.Context
-	var baseURL string
-	var pid int64
-	var ref resolvedIssueRef
-	var err error
-	parsed, parseErr := shortid.Parse(issueRef)
-	byUID := parseErr == nil && parsed.ULID != "" && flags.Project == ""
-	if byUID {
-		a, dialErr := dialDaemon(cmd.Context())
-		if dialErr != nil {
-			return dialErr
-		}
-		ctx, baseURL = a.ctx, a.baseURL
-		ref.RefForAPI = parsed.ULID
-	} else {
-		ctx, baseURL, pid, ref, err = resolveIssueRefForCommand(cmd, issueRef)
-		if err != nil {
-			return err
-		}
+	ctx, baseURL, pid, ref, err := resolveShowIssueRef(cmd, issueRef)
+	if err != nil {
+		return err
 	}
 	client, err := httpClientFor(ctx, baseURL)
 	if err != nil {
 		return err
 	}
-	if !opts.PlanningDates && opts.Selectors != (commentref.Options{}) {
+	if opts.PlanningDates {
+		c, err := kataclient.NewWithHTTPClient(baseURL, client)
+		if err != nil {
+			return err
+		}
+		response, err := c.IssuePlanningDatesWithResponse(ctx, &generated.IssuePlanningDatesRequestOptions{PathParams: &generated.IssuePlanningDatesPath{ProjectID: pid, Ref: ref.RefForAPI}})
+		if response == nil {
+			return externalCLITransportError(response, err)
+		}
+		raw, err := cronCLIResponse(response.StatusCode, response.Body, err)
+		if err != nil {
+			return err
+		}
+		return emitJSON(cmd.OutOrStdout(), jsontext.Value(raw))
+	}
+	if opts.Selectors != (commentref.Options{}) {
 		if err := requireDaemonAPIVersion(ctx, client, baseURL, apiVersionCommentLinks, "comment selectors"); err != nil {
 			return err
 		}
 	}
-	if !opts.PlanningDates && opts.Selectors.Inbound == "@self" {
+	if opts.Selectors.Inbound == "@self" {
 		actor, _ := resolveActor(ctx, flags.As, nil)
 		var instance instanceStatusForCLI
 		if err := getInstanceStatus(ctx, client, baseURL, &instance); err != nil {
@@ -108,66 +107,13 @@ func runShow(cmd *cobra.Command, issueRef, agentOperation string, opts showRunOp
 		}
 		opts.Selectors.Inbound = actor
 	}
-	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
+	_, bs, err := fetchMetaIssue(ctx, client, baseURL, pid, ref.RefForAPI, opts.Selectors)
 	if err != nil {
 		return err
 	}
-	var bs []byte
-	if byUID {
-		query := &generated.ShowIssueByUIDQuery{}
-		if !opts.PlanningDates {
-			query.Thread = nonemptyStringPointer(opts.Selectors.Thread)
-			query.Inbound = nonemptyStringPointer(opts.Selectors.Inbound)
-			query.Kind = (*generated.ShowIssueByUIDQueryKind)(nonemptyStringPointer(opts.Selectors.Kind))
-			query.Since = nonemptyStringPointer(opts.Selectors.Since)
-		}
-		response, callErr := apiClient.ShowIssueByUIDWithResponse(ctx, &generated.ShowIssueByUIDRequestOptions{PathParams: &generated.ShowIssueByUIDPath{UID: parsed.ULID}, Query: query})
-		if response == nil {
-			return externalCLITransportError(response, callErr)
-		}
-		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
-			return err
-		}
-		bs = response.Body
-		var body struct {
-			Issue struct {
-				ProjectID int64 `json:"project_id"`
-			} `json:"issue"`
-		}
-		if err := json.Unmarshal(bs, &body); err != nil {
-			return err
-		}
-		pid = body.Issue.ProjectID
-		if currentOutputMode() != outputJSON {
-			project, err := apiClient.ShowProjectWithResponse(ctx, &generated.ShowProjectRequestOptions{PathParams: &generated.ShowProjectPath{ProjectID: pid}})
-			if project != nil && externalCLIResponseError(project.StatusCode, project.Body, err) == nil {
-				var body struct {
-					Project struct {
-						Name string `json:"name"`
-					} `json:"project"`
-				}
-				if json.Unmarshal(project.Body, &body) == nil {
-					ref.ProjectName = body.Project.Name
-				}
-			}
-		}
-	}
-	if opts.PlanningDates {
-		response, err := apiClient.IssuePlanningDatesWithResponse(ctx, &generated.IssuePlanningDatesRequestOptions{PathParams: &generated.IssuePlanningDatesPath{ProjectID: pid, Ref: ref.RefForAPI}})
-		if response == nil {
-			return externalCLITransportError(response, err)
-		}
-		raw, err := cronCLIResponse(response.StatusCode, response.Body, err)
-		if err != nil {
-			return err
-		}
-		return emitJSON(cmd.OutOrStdout(), jsontext.Value(raw))
-	}
-	if !byUID {
-		_, bs, err = fetchMetaIssue(ctx, client, baseURL, pid, ref.RefForAPI, opts.Selectors)
-		if err != nil {
-			return err
-		}
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
+	if err != nil {
+		return err
 	}
 	recurrence := showRecurrenceFor(ctx, apiClient, bs)
 	mode := currentOutputMode()
@@ -219,6 +165,30 @@ func runShow(cmd *cobra.Command, issueRef, agentOperation string, opts showRunOp
 	return renderAndPrintShowHuman(
 		cmd.Context(), rows.downsample(out), b, ref.ProjectName, renderer, width,
 	)
+}
+
+// resolveShowIssueRef looks up a full UID daemon-wide when no project is
+// selected, so `kata show <UID>` finds an issue after it moves out of the
+// workspace's project.
+func resolveShowIssueRef(cmd *cobra.Command, issueRef string) (context.Context, string, int64, resolvedIssueRef, error) {
+	parsed, err := shortid.Parse(issueRef)
+	if err != nil || parsed.ULID == "" || flags.Project != "" {
+		return resolveIssueRefForCommand(cmd, issueRef)
+	}
+	a, err := dialDaemon(cmd.Context())
+	if err != nil {
+		return nil, "", 0, resolvedIssueRef{}, err
+	}
+	client, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+	if err != nil {
+		return nil, "", 0, resolvedIssueRef{}, err
+	}
+	issue, err := fetchIssueByUID(a.ctx, client, parsed.ULID)
+	if err != nil {
+		return nil, "", 0, resolvedIssueRef{}, err
+	}
+	_, name, _ := issueRefAndProjectForOutput(a, 0, "", issueIdentityForOutput{ProjectID: issue.ProjectID, UID: issue.UID, ShortID: issue.ShortID})
+	return a.ctx, a.baseURL, issue.ProjectID, resolvedIssueRef{RefForAPI: parsed.ULID, ProjectName: name}, nil
 }
 
 func printShowHuman(

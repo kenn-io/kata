@@ -45,9 +45,6 @@ assigned in the target project.`,
 			if dryRun {
 				return moveBatchUsage("--dry accepts one issue ref and a target project")
 			}
-			if single {
-				return moveBatchUsage("--single accepts one issue ref and a target project")
-			}
 			return runMoveBatch(cmd, args, refsFrom)
 		},
 	}
@@ -232,6 +229,22 @@ func fetchMoveIssue(ctx context.Context, client *http.Client, baseURL string, pr
 		return moveIssueWire{}, err
 	}
 	return out.Issue, nil
+}
+
+// fetchIssueByUID looks up an issue by UID in any project.
+func fetchIssueByUID(ctx context.Context, client *kataclient.Client, uid string) (moveIssueWire, error) {
+	response, callErr := client.ShowIssueByUIDWithResponse(ctx, &generated.ShowIssueByUIDRequestOptions{PathParams: &generated.ShowIssueByUIDPath{UID: uid}})
+	if response == nil {
+		return moveIssueWire{}, externalCLITransportError(response, callErr)
+	}
+	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+		return moveIssueWire{}, err
+	}
+	var out struct {
+		Issue moveIssueWire `json:"issue"`
+	}
+	err := json.Unmarshal(response.Body, &out)
+	return out.Issue, err
 }
 
 func printMove(cmd *cobra.Command, bs []byte, sourceProject, oldShortID, targetProject string) error {

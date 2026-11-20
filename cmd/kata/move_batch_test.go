@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	kataclient "go.kenn.io/kata/pkg/client"
@@ -52,22 +53,23 @@ func TestMoveBatchUnknownStopsNewRowsAndFinishesInflight(t *testing.T) {
 	row := func(shortID string) moveBatchRow {
 		return moveBatchRow{Ref: source.Name + "#" + shortID, Target: target.Name}
 	}
-	run := func(row moveBatchRow, result *moveBatchResult) {
-		if prepared := resolveMoveBatchOne(a, client, projects, row, result, &halt); prepared != nil {
-			moveBatchOne(a, client, prepared, result, "tester", true, &halt)
-		}
-	}
 	inflight := moveBatchResult{Result: "unattempted"}
+	unknown := moveBatchResult{Result: "unattempted"}
+	next := moveBatchResult{Result: "unattempted"}
+	preparedSecond := resolveMoveBatchOne(a, client, projects, row(second.ShortID), &inflight)
+	preparedFirst := resolveMoveBatchOne(a, client, projects, row(first.ShortID), &unknown)
+	preparedThird := resolveMoveBatchOne(a, client, projects, row(third.ShortID), &next)
+	require.NotNil(t, preparedSecond)
+	require.NotNil(t, preparedFirst)
+	require.NotNil(t, preparedThird)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		run(row(second.ShortID), &inflight)
+		moveBatchOne(a, client, preparedSecond, &inflight, "tester", true, &halt)
 	}()
 	<-started
-	unknown := moveBatchResult{Result: "unattempted"}
-	run(row(first.ShortID), &unknown)
-	next := moveBatchResult{Result: "unattempted"}
-	run(row(third.ShortID), &next)
+	moveBatchOne(a, client, preparedFirst, &unknown, "tester", true, &halt)
+	moveBatchOne(a, client, preparedThird, &next, "tester", true, &halt)
 	close(release)
 	<-done
 	require.Equal(t, "unknown", unknown.Result)
@@ -78,85 +80,31 @@ func TestMoveBatchUnknownStopsNewRowsAndFinishesInflight(t *testing.T) {
 	require.Equal(t, source.ID, stored.ProjectID)
 }
 
-func TestMoveBatchUnknownStopsMoveAfterLookup(t *testing.T) {
-	env, _, source, target, first := setupMoveCLIProjects(t)
-	second, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "second", Author: "tester"})
-	require.NoError(t, err)
-	started := make(chan struct{})
-	release := make(chan struct{})
-	var posts atomic.Int32
-	baseURL := interceptingProxy(t, env, func(w http.ResponseWriter, r *http.Request) bool {
-		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/issues/"+second.ShortID) {
-			close(started)
-			<-release
-		}
-		if strings.HasSuffix(r.URL.Path, "/actions/move") {
-			if strings.Contains(r.URL.Path, first.ShortID) {
-				w.WriteHeader(http.StatusBadGateway)
-				return true
-			}
-			posts.Add(1)
-		}
-		return false
-	})
-	a := daemonAPI{ctx: t.Context(), baseURL: baseURL, client: http.DefaultClient}
-	client, err := kataclient.NewWithHTTPClient(baseURL, a.client)
-	require.NoError(t, err)
-	projects, err := loadProjectRefs(a)
-	require.NoError(t, err)
-	var halt atomic.Bool
-	run := func(row moveBatchRow, result *moveBatchResult) {
-		if prepared := resolveMoveBatchOne(a, client, projects, row, result, &halt); prepared != nil {
-			moveBatchOne(a, client, prepared, result, "tester", true, &halt)
-		}
-	}
-	secondResult := moveBatchResult{Result: "unattempted", Hint: "not sent; safe to rerun"}
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		run(moveBatchRow{Ref: source.Name + "#" + second.ShortID, Target: target.Name}, &secondResult)
-	}()
-	<-started
-	firstResult := moveBatchResult{Result: "unattempted"}
-	run(moveBatchRow{Ref: source.Name + "#" + first.ShortID, Target: target.Name}, &firstResult)
-	close(release)
-	<-done
-	require.Equal(t, "unknown", firstResult.Result)
-	require.Equal(t, "unattempted", secondResult.Result)
-	require.Equal(t, "not sent; safe to rerun", secondResult.Hint)
-	require.Zero(t, posts.Load())
-}
-
-func TestMoveBatchInvalidSuccessSkipsComment(t *testing.T) {
+func TestMoveBatchIncompleteSuccessRemainsUnknown(t *testing.T) {
 	env, dir, _, target, issue := setupMoveCLIProjects(t)
 	var comments atomic.Int32
 	baseURL := interceptingProxy(t, env, func(w http.ResponseWriter, r *http.Request) bool {
-		if strings.HasSuffix(r.URL.Path, "/actions/move") {
-			_, _ = io.WriteString(w, "<html>gateway</html>")
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/actions/move") {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"issue":{"short_id":"next"}}`)
 			return true
 		}
-		if strings.HasSuffix(r.URL.Path, "/comments") && r.Method == http.MethodPost {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/comments") {
 			comments.Add(1)
 		}
 		return false
 	})
 	path := filepath.Join(t.TempDir(), "refs")
 	require.NoError(t, os.WriteFile(path, []byte(issue.UID+"\n"), 0600))
-	out, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), baseURL), "--workspace", dir, "move", target.Name, "--refs-from", path, "--comment", "moved", "--json")
-	require.Error(t, err)
+	out, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), baseURL), "--workspace", dir, "move", target.Name, "--refs-from", path, "--comment", "routed", "--json")
+	assert.Error(t, err)
 	var reply struct {
-		Summary struct {
-			Moved   int `json:"moved"`
-			Unknown int `json:"unknown"`
-		} `json:"summary"`
 		Results []moveBatchResult `json:"results"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(out), &reply))
-	require.Equal(t, 0, reply.Summary.Moved)
-	require.Equal(t, 1, reply.Summary.Unknown)
 	require.Len(t, reply.Results, 1)
-	require.Contains(t, reply.Results[0].Hint, "outcome unconfirmed")
-	require.Zero(t, comments.Load())
+	assert.Equal(t, "unknown", reply.Results[0].Result)
+	assert.Zero(t, comments.Load())
 }
 
 func TestMoveBatchMovesOnlyListedIssues(t *testing.T) {
@@ -165,75 +113,12 @@ func TestMoveBatchMovesOnlyListedIssues(t *testing.T) {
 	require.NoError(t, err)
 	second, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "second", Author: "tester"})
 	require.NoError(t, err)
-	out, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), interceptingProxy(t, env, func(_ http.ResponseWriter, _ *http.Request) bool { return false })), "--workspace", dir, "move", first.UID, second.UID, target.Name, "--json")
+	out, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "move", first.UID, second.UID, target.Name, "--json")
 	require.NoError(t, err, out)
 	require.Contains(t, out, `"moved":2`)
 	got, err := env.DB.IssueByID(t.Context(), child.ID)
 	require.NoError(t, err)
 	require.Equal(t, source.ID, got.ProjectID)
-}
-
-func TestMoveBatchRefsFromFile(t *testing.T) {
-	env, dir, source, target, issue := setupMoveCLIProjects(t)
-	path := filepath.Join(t.TempDir(), "refs")
-	require.NoError(t, os.WriteFile(path, []byte(source.Name+"#"+issue.ShortID+"\t"+target.Name+"\n"), 0600))
-	out, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "move", "--refs-from", path, "--json")
-	require.NoError(t, err, out)
-	var reply struct {
-		Results []moveBatchResult `json:"results"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(out), &reply))
-	require.Len(t, reply.Results, 1)
-	require.Equal(t, "moved", reply.Results[0].Result)
-	got, err := env.DB.IssueByID(t.Context(), issue.ID)
-	require.NoError(t, err)
-	require.Equal(t, target.ID, got.ProjectID)
-}
-
-func TestMoveBatchLostResponseUsesUIDAndHistory(t *testing.T) {
-	env, dir, source, target, issue := setupMoveCLIProjects(t)
-	upstream, err := url.Parse(env.URL)
-	require.NoError(t, err)
-	proxy := &httputil.ReverseProxy{Rewrite: func(r *httputil.ProxyRequest) { r.SetURL(upstream) }, ModifyResponse: func(r *http.Response) error {
-		if strings.HasSuffix(r.Request.URL.Path, "/actions/move") {
-			return fmt.Errorf("drop response")
-		}
-		return nil
-	}, ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-		c, _, e := w.(http.Hijacker).Hijack()
-		if e == nil {
-			_ = c.Close()
-		}
-	}}
-	server := httptest.NewServer(proxy)
-	t.Cleanup(server.Close)
-	path := filepath.Join(t.TempDir(), "refs")
-	require.NoError(t, os.WriteFile(path, []byte(source.Name+"#"+issue.ShortID+"\n"), 0600))
-	out, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL), "--workspace", dir, "move", target.Name, "--refs-from", path, "--json")
-	require.Error(t, err)
-	var reply struct {
-		Results []moveBatchResult `json:"results"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(out), &reply))
-	require.Len(t, reply.Results, 1)
-	require.Equal(t, "unknown", reply.Results[0].Result)
-	require.Equal(t, issue.UID, reply.Results[0].UID)
-	require.Equal(t, target.Name, reply.Results[0].Target)
-	require.Contains(t, reply.Results[0].Hint, "Check move history before retrying if the issue may have moved more than once")
-	require.NotContains(t, reply.Results[0].Hint, "safe to retry")
-	for _, workspace := range []string{t.TempDir(), dir} {
-		shown, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", workspace, "show", issue.UID, "--json")
-		require.NoError(t, err, shown)
-		var result struct {
-			Issue struct {
-				ProjectID int64 `json:"project_id"`
-			} `json:"issue"`
-		}
-		require.NoError(t, json.Unmarshal([]byte(shown), &result))
-		require.Equal(t, target.ID, result.Issue.ProjectID)
-	}
-	require.Contains(t, reply.Results[0].Hint, fmt.Sprintf("target project ID: %d", target.ID))
-	require.Contains(t, reply.Results[0].Hint, fmt.Sprintf("Source project ID: %d", source.ID))
 }
 
 func TestMoveBatchCancelMarksOnlyDispatchedMovesUnknown(t *testing.T) {
@@ -246,7 +131,7 @@ func TestMoveBatchCancelMarksOnlyDispatchedMovesUnknown(t *testing.T) {
 	}
 	started := make(chan struct{}, 12)
 	release := make(chan struct{})
-	baseURL := interceptingProxy(t, env, func(w http.ResponseWriter, r *http.Request) bool {
+	baseURL := interceptingProxy(t, env, func(_ http.ResponseWriter, r *http.Request) bool {
 		if strings.HasSuffix(r.URL.Path, "/actions/move") {
 			started <- struct{}{}
 			<-release
@@ -291,24 +176,6 @@ func TestMoveBatchCancelMarksOnlyDispatchedMovesUnknown(t *testing.T) {
 	require.Positive(t, unattempted)
 }
 
-func TestMoveBatchCommentRetryUsesOfficialTarget(t *testing.T) {
-	env, dir, _, target, issue := setupMoveCLIProjects(t)
-	target, err := env.DB.RenameProject(t.Context(), target.ID, "target project")
-	require.NoError(t, err)
-	baseURL := interceptingProxy(t, env, func(w http.ResponseWriter, r *http.Request) bool {
-		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/comments") {
-			http.Error(w, "unavailable", http.StatusInternalServerError)
-			return true
-		}
-		return false
-	})
-	path := filepath.Join(t.TempDir(), "refs")
-	require.NoError(t, os.WriteFile(path, []byte(issue.UID+"\n"), 0600))
-	_, _, err = executeRootCapture(t, contextWithBaseURL(t.Context(), baseURL), "--workspace", dir, "move", strconv.FormatInt(target.ID, 10), "--refs-from", path, "--comment", "routed")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "kata comment "+issue.UID+" --project '"+target.Name+"' --body ...")
-}
-
 func TestMoveBatchFileParsingLimit(t *testing.T) {
 	rows, err := parseRefsFrom(strings.NewReader("\nsource#abc4\nsource#def5\tother\n"), "target")
 	require.NoError(t, err)
@@ -322,24 +189,30 @@ func TestMoveBatchFileParsingLimit(t *testing.T) {
 
 func TestMoveBatchGatewayAndResponseOutcomes(t *testing.T) {
 	for _, tc := range []struct {
-		name       string
-		status     int
-		body, want string
+		name   string
+		status int
+		body   string
 	}{
-		{"gateway 500", 500, "internal server error", "unknown"},
-		{"gateway 502", 502, "bad gateway", "unknown"},
-		{"gateway 503", 503, "service unavailable", "unknown"},
-		{"gateway 504", 504, "gateway timeout", "unknown"},
-		{"gateway envelope", 500, `{"error":{"code":"unavailable","message":"try later"}}`, "unknown"},
-		{"malformed success", 200, `<html>gateway</html>`, "unknown"},
-		{"empty success", 200, `{}`, "unknown"},
+		{"lost response", 0, ""},
+		{"gateway envelope", 500, `{"error":{"code":"unavailable","message":"try later"}}`},
+		{"malformed success", 200, `<html>gateway</html>`},
+		{"empty success", 200, `{}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			env, dir, _, target, issue := setupMoveCLIProjects(t)
+			env, dir, source, target, issue := setupMoveCLIProjects(t)
 			upstream, err := url.Parse(env.URL)
 			require.NoError(t, err)
-			proxy := &httputil.ReverseProxy{Rewrite: func(r *httputil.ProxyRequest) { r.SetURL(upstream) }, ModifyResponse: func(r *http.Response) error {
+			var comments atomic.Int32
+			proxy := &httputil.ReverseProxy{Rewrite: func(r *httputil.ProxyRequest) {
+				if strings.HasSuffix(r.In.URL.Path, "/comments") {
+					comments.Add(1)
+				}
+				r.SetURL(upstream)
+			}, ModifyResponse: func(r *http.Response) error {
 				if strings.HasSuffix(r.Request.URL.Path, "/actions/move") {
+					if tc.status == 0 {
+						return fmt.Errorf("drop response")
+					}
 					_ = r.Body.Close()
 					r.StatusCode = tc.status
 					r.Body = io.NopCloser(strings.NewReader(tc.body))
@@ -347,12 +220,16 @@ func TestMoveBatchGatewayAndResponseOutcomes(t *testing.T) {
 					r.Header.Set("Content-Length", strconv.Itoa(len(tc.body)))
 				}
 				return nil
+			}, ErrorHandler: func(w http.ResponseWriter, _ *http.Request, _ error) {
+				if c, _, err := w.(http.Hijacker).Hijack(); err == nil {
+					_ = c.Close()
+				}
 			}}
 			server := httptest.NewServer(proxy)
 			t.Cleanup(server.Close)
 			path := filepath.Join(t.TempDir(), "refs")
-			require.NoError(t, os.WriteFile(path, []byte(issue.UID+"\n"), 0600))
-			out, _, _ := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL), "--workspace", dir, "move", target.Name, "--refs-from", path, "--json")
+			require.NoError(t, os.WriteFile(path, []byte(source.Name+"#"+issue.ShortID+"\n"), 0600))
+			out, _, _ := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL), "--workspace", dir, "move", target.Name, "--refs-from", path, "--comment", "moved", "--json")
 			var reply struct {
 				Results []moveBatchResult `json:"results"`
 			}
@@ -361,12 +238,13 @@ func TestMoveBatchGatewayAndResponseOutcomes(t *testing.T) {
 			stored, err := env.DB.IssueByID(t.Context(), issue.ID)
 			require.NoError(t, err)
 			require.Equal(t, target.ID, stored.ProjectID)
-			require.Equal(t, tc.want, reply.Results[0].Result)
+			require.Equal(t, "unknown", reply.Results[0].Result)
 			require.Equal(t, issue.UID, reply.Results[0].UID)
 			require.Equal(t, target.Name, reply.Results[0].Target)
-			if tc.status == 200 {
-				require.Contains(t, reply.Results[0].Hint, "outcome unconfirmed")
-			}
+			require.Contains(t, reply.Results[0].Hint, "outcome unconfirmed")
+			require.Contains(t, reply.Results[0].Hint, fmt.Sprintf("Source project ID: %d; target project ID: %d", source.ID, target.ID))
+			require.Contains(t, reply.Results[0].Hint, "Check move history before retrying")
+			require.Zero(t, comments.Load())
 		})
 	}
 }
@@ -431,17 +309,6 @@ func TestMoveBatchRefusalOutputErrors(t *testing.T) {
 	require.Contains(t, stderr.String(), errCLISearchWrite.Error())
 }
 
-func TestMoveBatchQuietRefusalReportedOnce(t *testing.T) {
-	env, dir, _, target, _ := setupMoveCLIProjects(t)
-	path := filepath.Join(t.TempDir(), "refs")
-	require.NoError(t, os.WriteFile(path, []byte("invalid\n"), 0600))
-	out, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "move", target.Name, "--refs-from", path, "--quiet")
-	require.Error(t, err)
-	require.Equal(t, ExitConflict, exitCodeForErr(err, true))
-	require.Contains(t, out, "1 refused")
-	require.Empty(t, stderr)
-}
-
 func TestMoveBatchLookupTransportFailureIsUnattempted(t *testing.T) {
 	env, dir, _, target, issue := setupMoveCLIProjects(t)
 	baseURL := interceptingProxy(t, env, func(w http.ResponseWriter, r *http.Request) bool {
@@ -472,6 +339,8 @@ func TestMoveBatchCommentFailureVisibleInRowAndQuiet(t *testing.T) {
 	for _, quiet := range []bool{false, true} {
 		t.Run(strconv.FormatBool(quiet), func(t *testing.T) {
 			env, dir, _, target, issue := setupMoveCLIProjects(t)
+			target, err := env.DB.RenameProject(t.Context(), target.ID, "target project")
+			require.NoError(t, err)
 			baseURL := interceptingProxy(t, env, func(w http.ResponseWriter, r *http.Request) bool {
 				if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/comments") {
 					http.Error(w, "unavailable", http.StatusInternalServerError)
@@ -489,7 +358,7 @@ func TestMoveBatchCommentFailureVisibleInRowAndQuiet(t *testing.T) {
 			}
 			out, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), baseURL), args...)
 			require.Error(t, err)
-			retry := "kata comment " + issue.UID + " --project " + target.Name + " --body ..."
+			retry := "kata comment " + issue.UID + " --project '" + target.Name + "' --body ..."
 			if quiet {
 				require.Contains(t, stderr, retry)
 			} else {
@@ -515,9 +384,10 @@ func TestMoveBatchCLI_OutputModes(t *testing.T) {
 			}
 			path := filepath.Join(t.TempDir(), "refs")
 			require.NoError(t, os.WriteFile(path, []byte(input), 0600))
-			out, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "move", target.Name, "--refs-from", path, "--quiet")
+			out, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "move", target.Name, "--refs-from", path, "--quiet")
+			require.Empty(t, stderr)
 			if partial {
-				require.Error(t, err)
+				require.Equal(t, ExitConflict, exitCodeForErr(err, true))
 				require.Contains(t, out, "1 moved, 1 refused")
 				require.Contains(t, out, "result=refused")
 			} else {

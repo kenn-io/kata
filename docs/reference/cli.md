@@ -981,8 +981,7 @@ move. Read-only tokens and `--insecure-readonly` clients cannot preview.
 ### Move many issues
 
 Two or more refs, or `--refs-from`, move each issue alone, without its
-descendants. One ref plus a target, `kata move <issue-ref> <project>`, still
-moves the subtree.
+descendants; a single ref still moves the subtree. Batches reject `--dry`.
 
 ```sh
 kata move source#abc4 source#def5 target-project --comment "routed"
@@ -991,43 +990,34 @@ kata list --label triaged --limit 0 --json | jq -r '.issues[].uid' > refs.txt
 kata move --refs-from refs.txt target-project
 ```
 
-A refs file has one `ref` or `ref<TAB>project` per line.
-Blank lines are ignored. Refs files have no comment syntax; a line such as
-`# note` is treated as an issue ref.
-A row's own project wins over the positional target. An empty refs file succeeds
-without contacting the daemon. Batch refs must be project-qualified short IDs
-or issue UIDs.
+A refs file has one `ref` or `ref<TAB>project` per line; a row's project wins
+over the positional target. Blank lines are ignored, and there is no comment
+syntax: `# note` is treated as an issue ref. Refs must be project-qualified
+short IDs or issue UIDs. A malformed row or more than 5,000 rows fails before
+any move; an empty file succeeds without contacting the daemon. An invalid ref
+or unknown target is refused while other rows still move. When refs resolve to
+the same issue, only the first moves; if they name different targets, all are
+refused.
 
-A malformed file row or more than 5,000 rows fails the command before it sends a move request. An invalid issue ref,
-a bare ref, or an unknown target is refused; other rows can still move.
-When multiple refs resolve to the same issue, only the first can move; later rows are
-refused. If those rows name different targets, all are refused before any move
-for that issue.
-`--dry` and `--single` are available only for the
-single-issue form; batches reject them.
-
-Human output names the scope. Agent and JSON output include
-`includes_descendants=false` and `"includes_descendants": false`, respectively.
-Each input gets a result, in input order:
+Up to six issues move concurrently. Agent and JSON output include
+`includes_descendants=false`. Each input gets a result, in input order:
 
 | Result | Meaning |
 | --- | --- |
 | `moved` | The issue moved. |
-| `refused` | The ref or target is invalid, or a move rule refused it. |
+| `refused` | The ref or target is invalid, or a move rule refused it. Exits 5. |
 | `unknown` | The move response could not confirm the outcome. Check the issue and its move history before retrying. |
 | `unattempted` | The CLI stopped before sending it. Retry it. |
 
-To retry after a partial run, remove rows that were `moved` before re-running the same refs file. Check `unknown` rows before retrying them, and fix the errors on `refused` rows. For a shared target, save the JSON results and extract the `unattempted` refs:
+`--comment` is posted to each moved issue; a failed comment leaves the move in
+place. To retry, remove `moved` rows from the refs file, check `unknown` rows,
+and fix `refused` rows. For a shared target, extract the `unattempted` refs:
 
 ```sh
 kata move --refs-from refs.txt target-project --json > results.json
 jq -r '.results[] | select(.result == "unattempted") | .ref' results.json > retry.txt
 kata move --refs-from retry.txt target-project
 ```
-
-The CLI moves up to six issues concurrently. A refusal never stops other items; it exits 5. `--comment` is
-posted to each moved issue after its move, and a failed comment leaves the move
-in place.
 
 Federated moves require both projects to use the same active hub. Spokes require
 both projects to be joined, use the same federation actor, and have push enabled

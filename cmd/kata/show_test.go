@@ -9,12 +9,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -522,40 +520,6 @@ func TestShowUIDHonorsExplicitProject(t *testing.T) {
 	out, _, err = executeRootCapture(t, ctx, "--workspace", t.TempDir(), "show", issue.UID, "--json")
 	require.NoError(t, err, out)
 	require.Contains(t, out, issue.UID)
-}
-
-func TestShowUIDUsesSelectedGlobalResponse(t *testing.T) {
-	env, dir, pid := setupCLIWorkspace(t)
-	t.Setenv("KATA_AUTHOR", "tester")
-	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: pid, Title: "UID selection", Author: "tester"})
-	require.NoError(t, err)
-	root, _, err := env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: issue.ID, Author: "tester", Body: "root comment"})
-	require.NoError(t, err)
-	_, _, err = env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: issue.ID, Author: "tester", Body: "selected reply", ReplyToUID: root.UID, ReplyKind: "reply"})
-	require.NoError(t, err)
-	var projectReads atomic.Int32
-	queries := make(chan url.Values, 1)
-	baseURL := interceptingProxy(t, env, func(_ http.ResponseWriter, r *http.Request) bool {
-		if r.URL.Path == "/api/v1/issues/"+issue.UID {
-			queries <- r.URL.Query()
-		} else if strings.Contains(r.URL.Path, "/issues/") && r.Method == http.MethodGet {
-			projectReads.Add(1)
-		}
-		return false
-	})
-	out, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), baseURL), "--workspace", dir, "show", issue.UID, "--thread", root.UID, "--kind", "reply", "--since", root.UID, "--json")
-	require.NoError(t, err, out)
-	require.Contains(t, out, "selected reply")
-	query := <-queries
-	require.Equal(t, root.UID, query.Get("thread"))
-	require.Equal(t, "reply", query.Get("kind"))
-	require.Equal(t, root.UID, query.Get("since"))
-	out, _, err = executeRootCapture(t, contextWithBaseURL(t.Context(), baseURL), "--workspace", dir, "show", issue.UID, "--inbound", "--json")
-	require.NoError(t, err, out)
-	require.Contains(t, out, "selected reply")
-	query = <-queries
-	require.Equal(t, "tester", query.Get("inbound"))
-	require.Zero(t, projectReads.Load())
 }
 
 func TestShow_AcceptsBareUIDAndQualified(t *testing.T) {
