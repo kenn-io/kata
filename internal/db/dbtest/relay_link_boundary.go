@@ -175,3 +175,72 @@ func RunRelayLinkBoundaryFollowsActiveGrants(t *testing.T, store db.Storage) {
 	require.NoError(t, store.MaterializeFederatedProject(ctx, fixture.project.ID))
 	require.Empty(t, linkTargetUIDs(t, store, source.ID), "a later group materialization does not bring the removed link back")
 }
+
+// RunLinkServerBoundary checks link admission and transaction rollback across servers.
+func RunLinkServerBoundary(t *testing.T, store db.Storage) {
+	ctx := t.Context()
+	a, err := store.CreateProject(ctx, "server-a")
+	require.NoError(t, err)
+	b, err := store.CreateProject(ctx, "server-b")
+	require.NoError(t, err)
+	ai, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: a.ID, Title: "A", Author: "member"})
+	require.NoError(t, err)
+	bi, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: b.ID, Title: "B", Author: "member"})
+	require.NoError(t, err)
+	oldParent, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: a.ID, Title: "Old parent", Author: "member"})
+	require.NoError(t, err)
+	_, err = store.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: ai.ID, Actor: "member", SetParent: &oldParent.ID})
+	require.NoError(t, err)
+	bind := func(p db.Project, role db.FederationRole, hub, actor string) {
+		t.Helper()
+		_, err := store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: p.ID, Role: role, HubURL: hub, HubProjectID: p.ID, HubProjectUID: p.UID, Actor: actor, Enabled: true, PushEnabled: true})
+		require.NoError(t, err)
+	}
+	link := func(from, to db.Issue) error {
+		t.Helper()
+		_, _, err := store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: from.ID, ToIssueID: to.ID, Type: "blocks", Author: "member"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: from.ID, FromShortID: from.ShortID, FromUID: from.UID, ToShortID: to.ShortID, ToUID: to.UID, Actor: "member"})
+		return err
+	}
+	bind(a, db.FederationRoleSpoke, "https://hub.example/team-a", "alice")
+	before, err := store.EventsAfter(ctx, db.EventsAfterParams{Limit: 100})
+	require.NoError(t, err)
+	for _, pair := range [][2]db.Issue{{ai, bi}, {bi, ai}} {
+		err := link(pair[0], pair[1])
+		require.ErrorIs(t, err, db.ErrFederatedLinkServerMismatch)
+		require.EqualError(t, err, "can't link: project server-b isn't synced to the same server as server-a; connect server-b first")
+	}
+	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: a.ID, Title: "Rejected", Author: "member", Links: []db.InitialLink{{Type: "parent", ToNumber: bi.ID}}})
+	require.ErrorIs(t, err, db.ErrFederatedLinkServerMismatch)
+	title := "Changed"
+	_, err = store.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: ai.ID, Actor: "member", Title: &title, SetParent: &bi.ID})
+	require.ErrorIs(t, err, db.ErrFederatedLinkServerMismatch)
+	unchanged, err := store.IssueByID(ctx, ai.ID)
+	require.NoError(t, err)
+	require.Equal(t, "A", unchanged.Title)
+	require.Equal(t, []string{oldParent.UID}, linkTargetUIDs(t, store, ai.ID))
+	after, err := store.EventsAfter(ctx, db.EventsAfterParams{Limit: 100})
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	bind(b, db.FederationRoleSpoke, "https://other.example", "bob")
+	require.ErrorIs(t, link(ai, bi), db.ErrFederatedLinkServerMismatch)
+	require.ErrorIs(t, link(bi, ai), db.ErrFederatedLinkServerMismatch)
+	bind(b, db.FederationRoleSpoke, "https://hub.example/team-b", "bob")
+	require.ErrorIs(t, link(ai, bi), db.ErrFederatedLinkServerMismatch)
+	bind(b, db.FederationRoleSpoke, "https://HUB.example:443/team-a/", "bob")
+	require.NoError(t, link(ai, bi))
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: b.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example/team-a", HubProjectID: b.ID, HubProjectUID: b.UID, Actor: "bob"})
+	require.NoError(t, err)
+	require.NoError(t, link(bi, ai))
+
+	c, err := store.CreateProject(ctx, "server-c")
+	require.NoError(t, err)
+	d, err := store.CreateProject(ctx, "server-d")
+	require.NoError(t, err)
+	ci, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: c.ID, Title: "C", Author: "member"})
+	require.NoError(t, err)
+	di, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: d.ID, Title: "D", Author: "member"})
+	require.NoError(t, err)
+	require.NoError(t, link(ci, di))
+	bind(c, db.FederationRoleHub, "", "")
+	require.NoError(t, link(di, ci))
+}

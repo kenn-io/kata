@@ -172,6 +172,10 @@ var storageScenarios = []scenario{
 		RunRelayLinkBoundaryKeepsSameProjectEffects(t, store)
 		return nil
 	}},
+	{name: "link server boundary", methods: []string{"CreateProject", "CreateIssue", "CreateLinkAndEvent", "EditIssueAtomic", "EventsAfter", "IssueByID", "LinksByIssue", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error {
+		RunLinkServerBoundary(t, store)
+		return nil
+	}},
 	{name: "relay link boundary follows active grants", methods: []string{"CreateAPIToken", "CreateIssue", "CreateLinkAndEvent", "CreateProject", "CreateRelayEnrollment", "IngestFederationEvents", "LinksByIssue", "MaterializeFederatedProject", "PinRootAuthority", "RevokeFederationEnrollment", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error {
 		RunRelayLinkBoundaryFollowsActiveGrants(t, store)
 		return nil

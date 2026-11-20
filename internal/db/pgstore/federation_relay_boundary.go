@@ -29,7 +29,7 @@ func ensureRelayLinkBoundaryTx(ctx context.Context, tx *sql.Tx, fromID, toID int
 	if relayed {
 		return errors.Join(db.ErrFederatedReadOnly, db.ErrFederationCrossProjectBoundary)
 	}
-	return nil
+	return db.CheckLinkSameServer(ctx, tx, fromProject, toProject)
 }
 
 func relayProjectsActiveTx(ctx context.Context, tx *sql.Tx, fromProject, toProject int64) (bool, error) {

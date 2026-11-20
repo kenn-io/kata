@@ -260,7 +260,7 @@ SELECT 1 FROM links WHERE type=$1 AND (
 				return replayLinkInserted, fmt.Errorf("project merge parent link from issue %s to %s: %w", link.FromIssueUID, link.ToIssueUID, err)
 			}
 		}
-		if err := ensureRelayLinkBoundaryTx(ctx, tx, link.FromIssueID, link.ToIssueID); errors.Is(err, db.ErrFederationCrossProjectBoundary) {
+		if err := ensureRelayLinkBoundaryTx(ctx, tx, link.FromIssueID, link.ToIssueID); errors.Is(err, db.ErrFederationCrossProjectBoundary) || errors.Is(err, db.ErrFederatedLinkServerMismatch) {
 			return replayLinkUndeliverable, nil
 		} else if err != nil {
 			return replayLinkInserted, fmt.Errorf("project merge link between issues %s and %s: %w", link.FromIssueUID, link.ToIssueUID, err)

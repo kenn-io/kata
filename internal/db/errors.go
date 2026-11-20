@@ -255,6 +255,8 @@ var (
 	// is blocked because there are pending push events.
 	ErrFederationCrossProjectBoundary = errors.New("cross-project links involving a relayed project are unsupported")
 
+	ErrFederatedLinkServerMismatch = errors.New("linked projects use different servers")
+
 	ErrFederationResetBlockedByDownstream = errors.New("federation change blocked by active downstream enrollments")
 
 	ErrFederationResetBlockedByPendingPush = errors.New("federation reset blocked by pending push")
@@ -299,6 +301,19 @@ var (
 	// ErrFederationProjectNotEmpty requires explicit adoption of local data.
 	ErrFederationProjectNotEmpty = errors.New("federation attachment requires an empty project")
 )
+
+// LinkServerMismatchError identifies the project that needs a connection.
+type LinkServerMismatchError struct {
+	From, To string
+}
+
+func (e *LinkServerMismatchError) Error() string {
+	return fmt.Sprintf("can't link: project %s isn't synced to the same server as %s; connect %s first", e.To, e.From, e.To)
+}
+
+func (e *LinkServerMismatchError) Unwrap() []error {
+	return []error{ErrFederatedReadOnly, ErrFederatedLinkServerMismatch}
+}
 
 // LinkTargetNotFoundError carries the requested issue row id (globally unique
 // since storage v16) when an add-edge or set-parent operation references an

@@ -96,3 +96,29 @@ func TestProofBearingIngestReturnsHubRedirect(t *testing.T) {
 	require.ErrorAs(t, err, &status)
 	require.Equal(t, http.StatusSeeOther, status.StatusCode)
 }
+
+func TestDirectProjectLinksSameServerSync(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "source", "peer")
+	writer := newMoveDeliverySpoke(t, hub, projects, "writer", "writer")
+	receiver := newMoveDeliverySpoke(t, hub, projects)
+	parent, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[1].ID, Title: "Parent", Author: "worker"})
+	require.NoError(t, err)
+	for i := range projects {
+		require.NoError(t, writer.sync(t, i))
+		require.NoError(t, receiver.sync(t, i))
+	}
+	localParent, err := writer.env.DB.IssueByUID(ctx, parent.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	child, _, err := writer.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: writer.projects[0].ID, Title: "Child", Author: "writer", Links: []db.InitialLink{{Type: "parent", ToNumber: localParent.ID}}})
+	require.NoError(t, err)
+	require.NoError(t, writer.sync(t, 0))
+	require.NoError(t, receiver.sync(t, 0))
+	for _, store := range []db.Storage{hub.DB, receiver.env.DB} {
+		got, err := store.IssueByUID(ctx, child.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		link, err := store.ParentOf(ctx, got.ID)
+		require.NoError(t, err)
+		require.Equal(t, parent.UID, link.ToIssueUID)
+	}
+}

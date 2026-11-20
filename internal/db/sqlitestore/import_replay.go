@@ -847,7 +847,7 @@ func importLink(ctx context.Context, tx *sql.Tx, lk *db.LinkExport, mergeProject
 				return linkSkipNone, fmt.Errorf("project merge parent link from issue %s to %s: %w", lk.FromIssueUID, lk.ToIssueUID, err)
 			}
 		}
-		if err := ensureRelayLinkBoundaryTx(ctx, tx, lk.FromIssueID, lk.ToIssueID); errors.Is(err, db.ErrFederationCrossProjectBoundary) {
+		if err := ensureRelayLinkBoundaryTx(ctx, tx, lk.FromIssueID, lk.ToIssueID); errors.Is(err, db.ErrFederationCrossProjectBoundary) || errors.Is(err, db.ErrFederatedLinkServerMismatch) {
 			return linkSkipUndeliverable, nil
 		} else if err != nil {
 			return linkSkipNone, fmt.Errorf("project merge link between issues %s and %s: %w", lk.FromIssueUID, lk.ToIssueUID, err)
