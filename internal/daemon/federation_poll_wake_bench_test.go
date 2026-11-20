@@ -3,15 +3,11 @@ package daemon_test
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -19,6 +15,7 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
+	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 )
 
@@ -163,35 +160,14 @@ func BenchmarkFederationPollWake(b *testing.B) {
 		return store
 	}
 	b.Run("postgres", func(b *testing.B) {
-		dsn := benchPostgresDatabase(b)
+		dsn, cleanup := pgstoretest.NewDatabase(b, b.Context())
+		b.Cleanup(cleanup)
 		store := openPostgres(b, dsn)
 		newBenchHub(b, store, store).run(b)
 	})
 	b.Run("postgres-two-processes", func(b *testing.B) {
-		dsn := benchPostgresDatabase(b)
+		dsn, cleanup := pgstoretest.NewDatabase(b, b.Context())
+		b.Cleanup(cleanup)
 		newBenchHub(b, openPostgres(b, dsn), openPostgres(b, dsn)).run(b)
 	})
-}
-
-// benchPostgresDatabase creates an empty database on the server named by
-// KATA_TEST_POSTGRES_DSN and drops it when the benchmark ends.
-func benchPostgresDatabase(b *testing.B) string {
-	b.Helper()
-	serverDSN := os.Getenv("KATA_TEST_POSTGRES_DSN")
-	if serverDSN == "" {
-		b.Skip("KATA_TEST_POSTGRES_DSN is not set")
-	}
-	server, err := sql.Open("pgx", serverDSN)
-	require.NoError(b, err)
-	b.Cleanup(func() { _ = server.Close() })
-	name := "kata_bench_" + strings.ToLower(strings.ReplaceAll(b.Name(), "/", "_")) + fmt.Sprintf("_%d", time.Now().UnixNano())
-	_, err = server.ExecContext(b.Context(), `CREATE DATABASE "`+name+`"`) // #nosec G202 -- generated benchmark database name.
-	require.NoError(b, err)
-	b.Cleanup(func() {
-		_, _ = server.ExecContext(context.WithoutCancel(b.Context()), `DROP DATABASE IF EXISTS "`+name+`" WITH (FORCE)`) // #nosec G202 -- generated benchmark database name.
-	})
-	parsed, err := url.Parse(serverDSN)
-	require.NoError(b, err)
-	parsed.Path = "/" + name
-	return parsed.String()
 }

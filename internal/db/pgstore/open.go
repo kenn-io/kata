@@ -191,6 +191,8 @@ func openInternal(
 	s.pollWake = pollWake
 	// Opened lazily: only a serving hub listens or publishes poll wakeups.
 	s.pollWakeDB = newPostgresPool(*connConfig, pollWakeMaxOpenConns, pollWakeMaxOpenConns)
+	// The store owns this context's lifetime; Close cancels it.
+	s.pollWakeCtx, s.stopPollWake = context.WithCancel(context.Background())
 	if err := s.federationLockDB.PingContext(ctx); err != nil {
 		_ = s.Close()
 		return nil, fmt.Errorf("ping postgres federation lock coordinator: %w", err)
