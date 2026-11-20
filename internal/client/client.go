@@ -75,9 +75,6 @@ type callerContextKey struct{}
 // WithCallerContext keeps ctx's deadline for bounded work while using
 // callerCtx to distinguish an operation timeout from caller cancellation.
 func WithCallerContext(ctx, callerCtx context.Context) context.Context {
-	if callerCtx == nil {
-		callerCtx = ctx
-	}
 	return context.WithValue(ctx, callerContextKey{}, callerCtx)
 }
 

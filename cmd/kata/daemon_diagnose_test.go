@@ -24,7 +24,6 @@ import (
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
-	"go.kenn.io/kata/internal/tui"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
@@ -876,9 +875,7 @@ instance_uid = %q
 `, profileName, home, uid)
 	require.NoError(t, os.WriteFile(filepath.Join(personalHome, "config.toml"), []byte(catalog), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.local.toml"), []byte(fmt.Sprintf("version = 1\n[server]\ndaemon = %q\n", profileName)), 0600))
-	var pings atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		pings.Add(1)
 		http.Error(w, "fixture unavailable", http.StatusServiceUnavailable)
 	}))
 	t.Cleanup(server.Close)
@@ -908,9 +905,7 @@ instance_uid = %q
 		require.NotContains(t, cliErr.Message, "recover")
 	})
 	t.Run("health keeps the failure in the error text", func(t *testing.T) {
-		before := pings.Load()
 		_, stderr, err := executeRootCapture(t, t.Context(), "--daemon", profileName, "health")
-		require.Equal(t, before+1, pings.Load(), "health must keep the first failed probe")
 		cliErr := requireCLIError(t, err, ExitDaemonUnavail)
 		require.Equal(t, "local_unreachable", cliErr.Code)
 		require.Equal(t, kindDaemonUnavail, cliErr.Kind)
@@ -930,18 +925,6 @@ instance_uid = %q
 		require.NotContains(t, stderr, "kill -QUIT")
 		require.NotContains(t, stderr, "taskkill")
 		require.NotContains(t, stderr, "daemon recover")
-	})
-	t.Run("tui startup keeps profile recovery", func(t *testing.T) {
-		old := runTUI
-		runTUI = func(context.Context, tui.Options) error {
-			return &client.LocalDaemonUnreachableError{PID: os.Getpid(), Address: "127.0.0.1:1", DataDir: ns.DataDir, VerifiedProcess: true, Profile: profileName, ProfileAutostart: true}
-		}
-		t.Cleanup(func() { runTUI = old })
-		_, stderr, err := executeRootCapture(t, t.Context(), "--daemon", profileName, "tui")
-		require.Error(t, err)
-		require.Contains(t, stderr, recoverCommand)
-		require.Contains(t, stderr, "daemon")
-		require.Contains(t, stderr, "recover")
 	})
 }
 
@@ -1003,16 +986,6 @@ func TestDaemonDiagnosisOmitsEmptyAction(t *testing.T) {
 	require.NotContains(t, out.String(), "next:")
 }
 
-func TestDaemonDiagnosisKeepsGenericActionWhenProcessCannotBeVerified(t *testing.T) {
-	result := diagnosisUnreachable(
-		daemonDiagnosis{State: "local_unreachable"},
-		&client.LocalDaemonUnreachableError{
-			PID: 123, Address: "127.0.0.1:7777", DataDir: t.TempDir(),
-		},
-	)
-	require.Contains(t, result.NextAction, "Inspect the selected process")
-}
-
 func TestDiagnoseDiscoveryUsesOverallProbeTimeout(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
@@ -1038,49 +1011,13 @@ func TestDiagnoseDiscoveryUsesOverallProbeTimeout(t *testing.T) {
 	require.Equal(t, "local_unreachable", result.State)
 	select {
 	case elapsed := <-requestDuration:
-		require.Greater(t, elapsed, time.Duration(0))
 		require.LessOrEqual(t, elapsed, 750*time.Millisecond)
 	case <-time.After(2 * time.Second):
 		t.Fatal("diagnosis did not probe the runtime endpoint")
 	}
-	require.NotEmpty(t, result.NextAction)
 }
 
-func TestReviewSupervisedProfileDiagnosisGuidance(t *testing.T) {
-	for _, migration := range []bool{false, true} {
-		t.Run(fmt.Sprintf("migration=%t", migration), func(t *testing.T) {
-			home, _, uid, _ := stoppedProfileCLI(t)
-			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n"), 0600))
-			dbPath := filepath.Join(home, "kata.db")
-			if migration {
-				lock := flock.New(dbPath + ".import.lock")
-				require.NoError(t, lock.Lock())
-				t.Cleanup(func() { require.NoError(t, lock.Close()) })
-			}
-			profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: uid})
-			require.NoError(t, err)
-			ns, err := daemonruntime.NewNamespaceForHome(home, profile.StorageID)
-			require.NoError(t, err)
-			require.NoError(t, ns.EnsureDirs())
-			_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1", Metadata: map[string]string{"db_path": dbPath}})
-			require.NoError(t, err)
-			out, _, err := executeRootCapture(t, t.Context(), "--daemon", "work", "daemon", "diagnose", "--json")
-			require.NoError(t, err)
-			var result daemonDiagnosis
-			require.NoError(t, json.Unmarshal([]byte(out), &result))
-			require.Equal(t, "local_unreachable", result.State)
-			if migration {
-				require.Contains(t, result.NextAction, "Wait")
-			} else {
-				require.Contains(t, result.NextAction, "service manager")
-			}
-			require.NotContains(t, result.Message, "kill")
-			require.NotContains(t, result.Message, "daemon recover")
-		})
-	}
-}
-
-func TestReviewSupervisedDiscoveryCancellation(t *testing.T) {
+func TestSupervisedDiscoveryCancellation(t *testing.T) {
 	resetFlags(t)
 	home, _, uid, _ := stoppedProfileCLI(t)
 	p, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: uid})

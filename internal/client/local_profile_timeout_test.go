@@ -152,27 +152,16 @@ func TestLocalProfileUnreachableInstanceKeepsEvidence(t *testing.T) {
 	t.Setenv("KATA_HTTP_TIMEOUT", "50ms")
 	selection, err := InspectSelection(t.Context(), root, "")
 	require.NoError(t, err)
-	for _, tc := range []struct {
-		name string
-		run  func() error
-	}{
-		{"discover", func() error { _, _, err := DiscoverLocalProfileSelection(t.Context(), selection); return err }},
-		{"ensure", func() error { _, err := EnsureLocalProfileSelection(t.Context(), selection); return err }},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			err := tc.run()
-			waitEntered(t)
-			var evidence *LocalDaemonUnreachableError
-			require.ErrorAs(t, err, &evidence)
-			require.Equal(t, "work", evidence.Profile)
-			require.Equal(t, ns.DataDir, evidence.DataDir)
-			require.Equal(t, os.Getpid(), evidence.PID)
-			require.Contains(t, err.Error(), fmt.Sprintf("%q", filepath.Join(ns.DataDir, "daemon.log")))
-			require.Contains(t, err.Error(), "recover")
-			require.Contains(t, err.Error(), "work")
-			require.NotContains(t, err.Error(), "kata daemon restart")
-		})
-	}
+	t.Run("discover", func(t *testing.T) {
+		_, _, err := DiscoverLocalProfileSelection(t.Context(), selection)
+		waitEntered(t)
+		var evidence *LocalDaemonUnreachableError
+		require.ErrorAs(t, err, &evidence)
+		require.Equal(t, "work", evidence.Profile)
+		require.Equal(t, ns.DataDir, evidence.DataDir)
+		require.Equal(t, os.Getpid(), evidence.PID)
+		require.Contains(t, err.Error(), fmt.Sprintf("%q", filepath.Join(ns.DataDir, "daemon.log")))
+	})
 	t.Run("supervised", func(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(profile.Home, "config.toml"), []byte("autostart = false\n"), 0600))
 		t.Cleanup(func() { require.NoError(t, os.Remove(filepath.Join(profile.Home, "config.toml"))) })
@@ -207,5 +196,4 @@ func TestLocalProfileUnreachableInstanceKeepsEvidence(t *testing.T) {
 		require.Equal(t, ns.DataDir, evidence.DataDir)
 		require.Contains(t, err.Error(), fmt.Sprintf("%q", filepath.Join(ns.DataDir, "daemon.log")))
 	})
-
 }

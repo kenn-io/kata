@@ -136,9 +136,6 @@ func discoverDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) 
 		ProbeRemote:    flags.Daemon != "",
 	})
 	if err != nil || !found {
-		if _, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok && errors.Is(err, client.ErrLocalDaemonUnreachable) {
-			return resolved, cliDaemonTargetError(err)
-		}
 		if resolved.LocalProfile != nil && ctx.Err() == nil {
 			diagnosis, _, _ := diagnoseDaemon(ctx, "")
 			return resolved, diagnosisError(diagnosis)

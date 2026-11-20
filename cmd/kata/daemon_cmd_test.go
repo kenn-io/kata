@@ -610,13 +610,13 @@ func TestDaemonStatusReportsWebURLAndRecoveryAdvice(t *testing.T) {
 	require.NoError(t, ns.EnsureDirs())
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
 		PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:7777",
-		Metadata: map[string]string{"web_origin": "http://127.0.0.1:28888", daemonruntime.RuntimeAutoStartKey: "1"},
+		Metadata: map[string]string{"web_origin": "http://127.0.0.1:28888"},
 	})
 	require.NoError(t, err)
 
 	stdout, _, _ := executeRootCapture(t, t.Context(), "--agent", "daemon", "status")
 	out := []byte(stdout)
-	assert.True(t, strings.HasPrefix(string(out), "OK daemon status=running web_url=http://127.0.0.1:28888 auto_started=true selected_state=local_unreachable selected_profile=\"\" message="))
+	assert.True(t, strings.HasPrefix(string(out), "OK daemon status=running web_url=http://127.0.0.1:28888 selected_state=local_unreachable selected_profile=\"\" message="))
 	assert.Contains(t, string(out), "unreachable")
 	assert.Contains(t, string(out), "daemon.log")
 	assert.Contains(t, string(out), " next_action=")
@@ -627,7 +627,6 @@ func TestDaemonStatusReportsWebURLAndRecoveryAdvice(t *testing.T) {
 	assert.Contains(t, string(human), "daemon.log")
 	assert.Equal(t, 1, strings.Count(human+stderr, "daemon.log"))
 	assert.Contains(t, human, "  next:")
-	assert.Contains(t, human, "kata daemon start")
 	jsonOut, jsonErr, err := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
 	require.Error(t, err)
 	assert.Equal(t, 1, strings.Count(jsonOut+jsonErr, "daemon.log"))

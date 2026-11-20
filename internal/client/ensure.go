@@ -233,7 +233,6 @@ func waitForSupervisedDaemon(
 	ctx context.Context, configPath string, migrating func(context.Context) bool,
 	scan func(context.Context) (ensureDiscovery, error),
 ) (RunningDaemon, error) {
-	callerCtx := ctx
 	ctx, cancel := context.WithTimeout(ctx, daemonStartupWait)
 	defer cancel()
 	var running RunningDaemon
@@ -262,25 +261,9 @@ func waitForSupervisedDaemon(
 	if !errors.Is(err, ErrLocalDaemonUnreachable) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
 		return RunningDaemon{}, err
 	}
-	migrationActive := migrating(ctx)
-	e, hasUnreachable := errors.AsType[*LocalDaemonUnreachableError](unreachable)
-	if migrationActive && hasUnreachable {
-		e.migrationActive = true
-	}
-	if callerCtx.Err() != nil {
-		if hasUnreachable {
-			e.callerStopped = true
-		}
-		if migrationActive && !hasUnreachable {
-			return RunningDaemon{}, errors.Join(ErrDaemonManagedExternally, fmt.Errorf("%w; wait for it to finish; do not interrupt the daemon", ErrSQLiteMigrationActive), unreachable, callerCtx.Err())
-		}
-		return RunningDaemon{}, errors.Join(ErrDaemonManagedExternally, unreachable, callerCtx.Err())
-	}
 	message := fmt.Errorf("%w; did not become ready (limit %s or the caller's deadline); start or restart it with your service manager (%s)", ErrDaemonManagedExternally, daemonStartupWait, configPath)
-	if hasUnreachable && (migrationActive || e.ManagedExternally) {
-		message = ErrDaemonManagedExternally
-	} else if migrationActive {
-		message = fmt.Errorf("%w; %w; retry when it finishes and do not interrupt the daemon (%s)", ErrDaemonManagedExternally, ErrSQLiteMigrationActive, configPath)
+	if migrating(ctx) {
+		message = fmt.Errorf("%w; a SQLite migration is in progress; retry when it finishes and do not interrupt the daemon (%s)", ErrDaemonManagedExternally, configPath)
 	}
 	if unreachable != nil {
 		message = fmt.Errorf("%w: %w", message, unreachable)
