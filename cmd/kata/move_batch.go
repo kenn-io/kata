@@ -153,16 +153,17 @@ func runMoveBatch(cmd *cobra.Command, args []string, refsFrom string) error {
 	actor, _ := resolveActor(a.ctx, flags.As, nil)
 	jobs := make(chan int)
 	var wg sync.WaitGroup
+	var halt atomic.Bool
 	for range moveBatchWorkers {
 		wg.Go(func() {
 			for i := range jobs {
-				moveBatchOne(a, client, projects, rows[i], &results[i], actor, subtreeSupported)
+				moveBatchOne(a, client, projects, rows[i], &results[i], actor, subtreeSupported, &halt)
 			}
 		})
 	}
 dispatch:
 	for i := range rows {
-		if a.ctx.Err() != nil {
+		if a.ctx.Err() != nil || halt.Load() {
 			break
 		}
 		select {
@@ -233,8 +234,8 @@ dispatch:
 	return errors.Join(outcome, printErr)
 }
 
-func moveBatchOne(a daemonAPI, client *kataclient.Client, projects []projectRef, row moveBatchRow, result *moveBatchResult, actor string, subtreeSupported bool) {
-	if a.ctx.Err() != nil {
+func moveBatchOne(a daemonAPI, client *kataclient.Client, projects []projectRef, row moveBatchRow, result *moveBatchResult, actor string, subtreeSupported bool, halt *atomic.Bool) {
+	if a.ctx.Err() != nil || halt.Load() {
 		return
 	}
 	refuse := func(code string, err error) {
@@ -324,6 +325,7 @@ func moveBatchOne(a daemonAPI, client *kataclient.Client, projects []projectRef,
 	ctx := httptrace.WithClientTrace(a.ctx, &httptrace.ClientTrace{WroteRequest: func(httptrace.WroteRequestInfo) { dispatched.Store(true) }})
 	response, callErr := client.MoveIssueWithResponse(ctx, request)
 	unknown := func() {
+		halt.Store(true)
 		result.Result = "unknown"
 		result.Hint = fmt.Sprintf("outcome unconfirmed; run kata show %s --json to see the current issue.project_id. Source project ID: %d; target project ID: %d. Check move history before retrying if the issue may have moved more than once.", shellQuote(result.UID), result.sourceID, result.targetID)
 	}
@@ -356,11 +358,11 @@ func moveBatchOne(a daemonAPI, client *kataclient.Client, projects []projectRef,
 		}
 	}
 	var moved moveResponseWire
-	result.Result, result.Hint = "moved", ""
 	if err := json.Unmarshal(response.Body, &moved); err != nil || moved.Issue.ShortID == "" {
-		result.Message = "move succeeded; response details unavailable"
+		unknown()
 		return
 	}
+	result.Result, result.Hint = "moved", ""
 	result.From, result.To = moveQualifiedID(result.source, issue.ShortID), moveQualifiedID(target.Name, moved.Issue.ShortID)
 	result.NewShortID, result.EventID = moved.NewShortID, moved.EventID
 }

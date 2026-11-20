@@ -13,11 +13,96 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	kataclient "go.kenn.io/kata/pkg/client"
 )
+
+func TestMoveBatchUnknownStopsNewRowsAndFinishesInflight(t *testing.T) {
+	env, _, source, target, first := setupMoveCLIProjects(t)
+	second, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "second", Author: "tester"})
+	require.NoError(t, err)
+	third, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "third", Author: "tester"})
+	require.NoError(t, err)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	baseURL := interceptingProxy(t, env, func(w http.ResponseWriter, r *http.Request) bool {
+		if strings.HasSuffix(r.URL.Path, "/actions/move") {
+			if strings.Contains(r.URL.Path, first.ShortID) {
+				w.WriteHeader(http.StatusBadGateway)
+				return true
+			}
+			if strings.Contains(r.URL.Path, second.ShortID) {
+				close(started)
+				<-release
+			}
+		}
+		return false
+	})
+	a := daemonAPI{ctx: t.Context(), baseURL: baseURL, client: http.DefaultClient}
+	client, err := kataclient.NewWithHTTPClient(baseURL, a.client)
+	require.NoError(t, err)
+	projects, err := loadProjectRefs(a)
+	require.NoError(t, err)
+	var halt atomic.Bool
+	row := func(shortID string) moveBatchRow {
+		return moveBatchRow{Ref: source.Name + "#" + shortID, Target: target.Name}
+	}
+	inflight := moveBatchResult{Result: "unattempted"}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		moveBatchOne(a, client, projects, row(second.ShortID), &inflight, "tester", true, &halt)
+	}()
+	<-started
+	unknown := moveBatchResult{Result: "unattempted"}
+	moveBatchOne(a, client, projects, row(first.ShortID), &unknown, "tester", true, &halt)
+	next := moveBatchResult{Result: "unattempted"}
+	moveBatchOne(a, client, projects, row(third.ShortID), &next, "tester", true, &halt)
+	close(release)
+	<-done
+	require.Equal(t, "unknown", unknown.Result)
+	require.Equal(t, "unattempted", next.Result)
+	require.Equal(t, "moved", inflight.Result)
+	stored, err := env.DB.IssueByID(t.Context(), third.ID)
+	require.NoError(t, err)
+	require.Equal(t, source.ID, stored.ProjectID)
+}
+
+func TestMoveBatchInvalidSuccessSkipsComment(t *testing.T) {
+	env, dir, _, target, issue := setupMoveCLIProjects(t)
+	var comments atomic.Int32
+	baseURL := interceptingProxy(t, env, func(w http.ResponseWriter, r *http.Request) bool {
+		if strings.HasSuffix(r.URL.Path, "/actions/move") {
+			_, _ = io.WriteString(w, "<html>gateway</html>")
+			return true
+		}
+		if strings.HasSuffix(r.URL.Path, "/comments") && r.Method == http.MethodPost {
+			comments.Add(1)
+		}
+		return false
+	})
+	path := filepath.Join(t.TempDir(), "refs")
+	require.NoError(t, os.WriteFile(path, []byte(issue.UID+"\n"), 0600))
+	out, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), baseURL), "--workspace", dir, "move", target.Name, "--refs-from", path, "--comment", "moved", "--json")
+	require.Error(t, err)
+	var reply struct {
+		Summary struct {
+			Moved   int `json:"moved"`
+			Unknown int `json:"unknown"`
+		} `json:"summary"`
+		Results []moveBatchResult `json:"results"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &reply))
+	require.Equal(t, 0, reply.Summary.Moved)
+	require.Equal(t, 1, reply.Summary.Unknown)
+	require.Len(t, reply.Results, 1)
+	require.Contains(t, reply.Results[0].Hint, "outcome unconfirmed")
+	require.Zero(t, comments.Load())
+}
 
 func TestMoveBatchMovesOnlyListedIssues(t *testing.T) {
 	env, dir, source, target, first := setupMoveCLIProjects(t)
@@ -190,7 +275,8 @@ func TestMoveBatchGatewayAndResponseOutcomes(t *testing.T) {
 		{"gateway 503", 503, "service unavailable", "unknown"},
 		{"gateway 504", 504, "gateway timeout", "unknown"},
 		{"kata refusal", 503, `{"error":{"code":"unavailable","message":"try later"}}`, "refused"},
-		{"malformed success", 200, `{`, "moved"},
+		{"malformed success", 200, `<html>gateway</html>`, "unknown"},
+		{"empty success", 200, `{}`, "unknown"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env, dir, _, target, issue := setupMoveCLIProjects(t)
@@ -239,7 +325,7 @@ func TestMoveBatchGatewayAndResponseOutcomes(t *testing.T) {
 				require.Equal(t, target.ID, stored.ProjectID)
 			}
 			if tc.status == 200 {
-				require.Contains(t, reply.Results[0].Message, "response details")
+				require.Contains(t, reply.Results[0].Hint, "outcome unconfirmed")
 			}
 		})
 	}
