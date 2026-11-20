@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 
@@ -8,33 +9,35 @@ import (
 	"go.kenn.io/kit/agenthook"
 )
 
-// daemonRecoveryAdvice presents the evidence retained by discovery and the
-// recovery commands that fit the launch mode.
-func daemonRecoveryAdvice(e *client.LocalDaemonUnreachableError, profile, goos string) string {
-	advice := fmt.Sprintf("Read %q, if present, or the daemon's retained stderr", filepath.Join(e.DataDir, "daemon.log"))
+func daemonRecoveryAdvice(err error, goos string) string {
+	e, ok := errors.AsType[*client.LocalDaemonUnreachableError](err)
+	if !ok {
+		return ""
+	}
+	advice := fmt.Sprintf("Read %q", filepath.Join(e.DataDir, "daemon.log"))
 	if e.WebOrigin != "" {
-		advice += fmt.Sprintf(". After independently confirming %[1]s is this daemon's browser origin, capture %[1]s/debug/pprof/goroutine?debug=2 with daemon-owner access", e.WebOrigin)
+		advice += ". Capture " + e.WebOrigin + "/debug/pprof/goroutine?debug=2"
 	}
-	advice += fmt.Sprintf(". If you choose to stop it, immediately recheck that PID %d is still this daemon and the selected endpoint still fails", e.PID)
-	if e.VerifiedProcess && goos == "windows" {
-		advice += fmt.Sprintf(". Then taskkill /PID %d /F stops it", e.PID)
-	} else if e.VerifiedProcess {
-		advice += fmt.Sprintf(". Then kill -QUIT %d stops it and writes goroutine stacks to its stderr, which are lost if stderr is discarded", e.PID)
+	if errors.Is(err, client.ErrSQLiteMigrationActive) {
+		return advice + ". Wait for the migration to finish, then retry."
 	}
-	advice += ". After it exits, restart a supervised or foreground daemon through its supervisor or original command. "
-	if profile != "" {
-		return advice + "For a named profile Kata normally starts, run " + profileRecoveryCommand(profile, goos) + "."
+	if e.VerifiedProcess {
+		if goos == "windows" {
+			advice += fmt.Sprintf(". Stop it with taskkill /PID %d /F", e.PID)
+		} else {
+			advice += fmt.Sprintf(". Stop it with kill -QUIT %d", e.PID)
+		}
 	}
-	return advice + "For an auto-started current home, run kata daemon restart with the original KATA_HOME and storage environment."
+	if e.Profile != "" {
+		return advice + ". Then run " + profileRecoveryCommand(e.Profile, goos) + "."
+	}
+	return advice + ". Then run kata daemon restart for the selected home."
 }
 
-// profileRecoveryCommand quotes any catalog name, which is free-form text, for
-// the shell that will run the command. Windows output is labeled PowerShell.
 func profileRecoveryCommand(name, goos string) string {
-	arg := "--daemon=" + name
-	if goos != "windows" {
-		return "kata " + shellQuoteArg(arg) + " daemon recover"
+	commands, _ := agenthook.BuildCommand("kata", "--daemon", name, "daemon", "recover")
+	if goos == "windows" {
+		return "in PowerShell " + commands.PowerShell
 	}
-	commands, _ := agenthook.BuildCommand("kata", arg, "daemon", "recover") // the executable is never blank
-	return "in PowerShell " + commands.PowerShell
+	return commands.POSIX
 }

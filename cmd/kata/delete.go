@@ -257,12 +257,13 @@ func isShellSafeArg(s string) bool {
 	if s == "" {
 		return false
 	}
-	for _, r := range s {
+	for i, r := range s {
 		switch {
 		case r >= 'a' && r <= 'z':
 		case r >= 'A' && r <= 'Z':
 		case r >= '0' && r <= '9':
 		case strings.ContainsRune("@%_+=:,./-", r):
+		case r == '#' && i > 0:
 		default:
 			return false
 		}

@@ -91,7 +91,7 @@ func daemonRecoverCmd() *cobra.Command {
 			return diagnosisError(result)
 		}
 		if _, err := client.EnsureLocalProfileSelection(cmd.Context(), selection); err != nil {
-			return cliDaemonTargetError(err, selection.Resolved.Name)
+			return cliDaemonTargetError(err)
 		}
 		result, _, err := diagnoseDaemonSelection(cmd.Context(), expected, selection)
 		if err != nil {
@@ -319,7 +319,9 @@ func probeDaemonSelection(
 	var err error
 	var resolved client.ResolvedDaemon
 	var found bool
+	dataDir := ""
 	if selection.Profile != nil {
+		dataDir = selection.Resolved.LocalProfile.DataDir
 		resolved, found, err = client.DiscoverLocalProfileSelection(ctx, selection)
 	} else if result.Kind == "remote" {
 		resolved = selection.Resolved
@@ -329,6 +331,7 @@ func probeDaemonSelection(
 		if namespaceErr != nil {
 			return result, selection, namespaceErr
 		}
+		dataDir = ns.DataDir
 		if _, err = os.Stat(ns.DataDir); errors.Is(err, os.ErrNotExist) {
 			return withDiagnosisAction(result), selection, nil
 		} else if err != nil {
@@ -346,9 +349,7 @@ func probeDaemonSelection(
 	}
 	if err != nil {
 		result.Message = err.Error()
-		if unreachable, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok {
-			result.NextAction = daemonRecoveryAdvice(unreachable, result.Profile, runtime.GOOS)
-		}
+		result = diagnosisUnreachable(result, err)
 		if errors.Is(err, client.ErrProfileIdentityMismatch) {
 			result.State = "wrong_database"
 			if mismatch, ok := errors.AsType[*client.LocalProfileIdentityError](err); ok {
@@ -386,6 +387,8 @@ func probeDaemonSelection(
 		result.State = "local_unreachable"
 		if result.Kind == "remote" {
 			result.State = unavailableRemoteState(result.Endpoint)
+		} else {
+			result = diagnosisUnreachable(result, resolved.LocalDaemonUnreachable(dataDir, err))
 		}
 		return withDiagnosisAction(result), selection, nil
 	}
@@ -393,6 +396,8 @@ func probeDaemonSelection(
 		result.State = "local_unreachable"
 		if result.Kind == "remote" {
 			result.State = unavailableRemoteState(result.Endpoint)
+		} else {
+			result = diagnosisUnreachable(result, resolved.LocalDaemonUnreachable(dataDir, errors.New("ping returned an unhealthy response")))
 		}
 		return withDiagnosisAction(result), selection, nil
 	}
@@ -473,6 +478,14 @@ func safeDaemonOrigin(value string) string {
 		return ""
 	}
 	return parsed.Scheme + "://" + parsed.Host
+}
+
+func diagnosisUnreachable(result daemonDiagnosis, err error) daemonDiagnosis {
+	if e, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok {
+		result.Message, result.PID, result.Endpoint = err.Error(), e.PID, e.Address
+		result.NextAction = daemonRecoveryAdvice(err, runtime.GOOS)
+	}
+	return result
 }
 
 func withDiagnosisAction(result daemonDiagnosis) daemonDiagnosis {

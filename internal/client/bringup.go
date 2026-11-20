@@ -80,7 +80,8 @@ func bringUpSelection(
 	}
 	switch {
 	case selection.Profile != nil:
-		return up.profile(ctx, selection)
+		resolved, found, err := up.profile(ctx, selection)
+		return resolved, found, profileUnreachable(err, selection.Resolved.Name)
 	case selection.Resolved.ConfiguredRemote():
 		if probe && !probeRemote(ctx, selection.Resolved.BaseURL) {
 			return ResolvedDaemon{}, false, remoteUnavailableError(ctx, selection.Resolved, workspaceStart)

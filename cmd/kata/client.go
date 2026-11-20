@@ -64,14 +64,14 @@ func ensureDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) {
 	if flags.Daemon != "" {
 		resolved, err := client.PrepareResolvedNamed(ctx, flags.Daemon)
 		if err != nil {
-			return client.ResolvedDaemon{}, cliDaemonTargetError(err, resolvedProfileName(resolved))
+			return client.ResolvedDaemon{}, cliDaemonTargetError(err)
 		}
 		return resolved, nil
 	}
 	workspaceStart := workspaceStartForRemote()
 	resolved, err := client.PrepareResolvedInWorkspace(ctx, workspaceStart)
 	if err != nil {
-		return client.ResolvedDaemon{}, cliDaemonTargetError(err, resolvedProfileName(resolved))
+		return client.ResolvedDaemon{}, cliDaemonTargetError(err)
 	}
 	return resolved, nil
 }
@@ -136,7 +136,7 @@ func discoverDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) 
 		ProbeRemote:    flags.Daemon != "",
 	})
 	if err != nil || !found {
-		if resolved.LocalProfile != nil {
+		if resolved.LocalProfile != nil && ctx.Err() == nil {
 			diagnosis, _, diagnoseErr := diagnoseDaemon(ctx, "")
 			if diagnoseErr != nil {
 				return resolved, diagnoseErr
@@ -144,7 +144,7 @@ func discoverDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) 
 			return resolved, diagnosisError(diagnosis)
 		}
 		if err != nil {
-			return resolved, cliDaemonTargetError(err, "")
+			return resolved, cliDaemonTargetError(err)
 		}
 		return resolved, noDaemonRunningError()
 	}
@@ -166,17 +166,11 @@ func noDaemonRunningError() error {
 	}
 }
 
-func resolvedProfileName(resolved client.ResolvedDaemon) string {
-	if resolved.LocalProfile != nil {
-		return resolved.Name
+func cliDaemonTargetError(err error) error {
+	if errors.Is(err, client.ErrLocalDaemonUnreachable) || errors.Is(err, client.ErrDaemonManagedExternally) {
+		return &cliError{Message: err.Error(), Hint: daemonRecoveryAdvice(err, runtime.GOOS), Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
 	}
-	return ""
-}
 
-func cliDaemonTargetError(err error, profile string) error {
-	if unreachable, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok {
-		return &cliError{Message: err.Error(), Hint: daemonRecoveryAdvice(unreachable, profile, runtime.GOOS), Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
-	}
 	code := ""
 	switch {
 	case errors.Is(err, client.ErrProfileStorageUnavailable):

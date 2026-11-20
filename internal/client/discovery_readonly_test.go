@@ -178,8 +178,9 @@ func TestLiveUnreachableRecoveryAdvice(t *testing.T) {
 				if !deadline {
 					go func() { <-started; cancel() }()
 				}
+				dir := t.TempDir()
 				var errs []error
-				for _, err := range liveDaemonsUsing(ctx, t.TempDir(), reader, probe) {
+				for _, err := range liveDaemonsUsing(ctx, dir, reader, probe) {
 					errs = append(errs, err)
 				}
 				require.Len(t, errs, 1)
@@ -191,7 +192,9 @@ func TestLiveUnreachableRecoveryAdvice(t *testing.T) {
 				require.ErrorIs(t, errs[0], want)
 				require.NotErrorIs(t, errs[0], ErrLocalDaemonUnreachable)
 				var evidence *LocalDaemonUnreachableError
-				require.False(t, errors.As(errs[0], &evidence))
+				require.ErrorAs(t, errs[0], &evidence)
+				require.Equal(t, os.Getpid(), evidence.PID)
+				require.Equal(t, dir, evidence.DataDir)
 			})
 		})
 	}

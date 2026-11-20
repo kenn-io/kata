@@ -67,6 +67,7 @@ type BaseURLKey struct{}
 // ConfiguredRemote instead of inferring locality from the endpoint address:
 // a configured remote may be reached through a loopback SSH tunnel.
 type RunningDaemon struct {
+	record           *kitdaemon.RuntimeRecord
 	BaseURL          string
 	Address          string
 	Network          string
@@ -80,6 +81,9 @@ const (
 	skipDaemonVersionEnvVar = "KATA_SKIP_DAEMON_VERSION_CHECK"
 	daemonStartupWait       = 30 * time.Second
 )
+
+// ErrSQLiteMigrationActive means an active SQLite migration must finish first.
+var ErrSQLiteMigrationActive = errors.New("a SQLite migration is in progress")
 
 // ErrDaemonManagedExternally means the home's supervisor owns implicit startup.
 var ErrDaemonManagedExternally = errors.New("kata daemon is not ready; it is managed externally (autostart = false)")
@@ -236,6 +240,9 @@ func waitForSupervisedDaemon(
 	err := waitForDaemonStartup(ctx, nil, daemonStartupWait, nil, func(ctx context.Context) (bool, error) {
 		found, err := scan(ctx)
 		if err != nil && !errors.Is(err, ErrLocalDaemonUnreachable) {
+			if _, ok := errors.AsType[*LocalDaemonUnreachableError](err); ok {
+				unreachable = err
+			}
 			return false, err
 		}
 		unreachable = err
@@ -256,7 +263,7 @@ func waitForSupervisedDaemon(
 	}
 	message := fmt.Errorf("%w; did not become ready (limit %s or the caller's deadline); start or restart it with your service manager (%s)", ErrDaemonManagedExternally, daemonStartupWait, configPath)
 	if migrating(ctx) {
-		message = fmt.Errorf("%w; a SQLite migration is in progress; retry when it finishes and do not interrupt the daemon (%s)", ErrDaemonManagedExternally, configPath)
+		message = fmt.Errorf("%w; %w; retry when it finishes and do not interrupt the daemon (%s)", ErrDaemonManagedExternally, ErrSQLiteMigrationActive, configPath)
 	}
 	if unreachable != nil {
 		message = fmt.Errorf("%w: %w", message, unreachable)
@@ -430,6 +437,7 @@ func discoverForEnsureUsing(ctx context.Context, dataDir string, scan liveDaemon
 
 func runningDaemonForLive(candidate liveDaemon) RunningDaemon {
 	running := localRunningDaemon(candidate.BaseURL, candidate.Record.Endpoint().ConfigAddress())
+	running.record = &candidate.Record
 	source := candidate.Record.Metadata["config_auth_source"]
 	running.PersistedAuth = source == "generated_file" || source == "persisted_file"
 	return running

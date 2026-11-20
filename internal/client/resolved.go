@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"go.kenn.io/kata/internal/config"
+	kitdaemon "go.kenn.io/kit/daemon"
 )
 
 // DaemonSource names the input that selected a daemon. The source is carried
@@ -49,6 +50,7 @@ func (s DaemonSource) String() string {
 // for that source. Client construction consumes this value without resolving
 // those inputs again.
 type ResolvedDaemon struct {
+	record              *kitdaemon.RuntimeRecord
 	SourcePath          string
 	RuntimeDir          string
 	LocalProfile        *LocalProfileIdentity
@@ -101,7 +103,18 @@ func (d ResolvedDaemon) Running() RunningDaemon {
 		Scheme:           d.Scheme,
 		ConfiguredRemote: d.ConfiguredRemote(),
 		PersistedAuth:    d.persistedAuth,
+		record:           d.record,
 	}
+}
+
+// LocalDaemonUnreachable retains the runtime selected by discovery.
+func (d ResolvedDaemon) LocalDaemonUnreachable(dataDir string, cause error) error {
+	if d.record == nil {
+		return nil
+	}
+	err := unreachableRuntime(*d.record, dataDir, cause)
+	err.Profile = d.Name
+	return err
 }
 
 // WithRunning replaces only the selected runtime endpoint metadata. It keeps
@@ -128,6 +141,7 @@ func (d ResolvedDaemon) WithRunning(running RunningDaemon) ResolvedDaemon {
 
 func resolvedForRunning(source DaemonSource, name string, running RunningDaemon) ResolvedDaemon {
 	resolved := ResolvedDaemon{
+		record:        running.record,
 		Source:        source,
 		Name:          name,
 		BaseURL:       running.BaseURL,

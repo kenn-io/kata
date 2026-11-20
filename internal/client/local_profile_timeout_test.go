@@ -119,3 +119,40 @@ func TestLocalProfileIdentityProbeDistinguishesAuthenticationFailures(t *testing
 		})
 	}
 }
+
+func TestLocalProfileUnreachableInstanceKeepsEvidence(t *testing.T) {
+	profile, root := localProfileFixture(t)
+	ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/ping" {
+			_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, currentVersionForEnsure(), os.Getpid())
+			return
+		}
+		<-r.Context().Done()
+	}))
+	t.Cleanup(server.Close)
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
+	require.NoError(t, err)
+	t.Setenv("KATA_HTTP_TIMEOUT", "50ms")
+	selection, err := InspectSelection(t.Context(), root, "")
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name string
+		run  func() error
+	}{
+		{"discover", func() error { _, _, err := DiscoverLocalProfileSelection(t.Context(), selection); return err }},
+		{"ensure", func() error { _, err := EnsureLocalProfileSelection(t.Context(), selection); return err }},
+		{"named", func() error { _, err := PrepareResolvedNamed(t.Context(), "work"); return err }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.run()
+			var evidence *LocalDaemonUnreachableError
+			require.ErrorAs(t, err, &evidence)
+			require.Equal(t, "work", evidence.Profile)
+			require.Equal(t, ns.DataDir, evidence.DataDir)
+			require.Equal(t, os.Getpid(), evidence.PID)
+		})
+	}
+}

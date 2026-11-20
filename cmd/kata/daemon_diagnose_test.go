@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -857,6 +858,7 @@ func supervisedProfileDaemon(t *testing.T, home, uid string, handler http.Handle
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
 	require.NoError(t, err)
 }
+
 func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 	home, _, uid, _ := stoppedProfileCLI(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -879,7 +881,7 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 			require.ErrorAs(t, err, &cliErr)
 			require.Contains(t, cliErr.Message, "503")
 			require.Contains(t, cliErr.Hint, fmt.Sprintf("%q", logPath))
-			require.Contains(t, cliErr.Hint, "--daemon=work")
+			require.Contains(t, cliErr.Hint, "--daemon work")
 			require.Contains(t, cliErr.Hint, "recover")
 		}
 	})
@@ -894,9 +896,52 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 		require.Contains(t, result.Message, "503")
 		require.Contains(t, cliErr.Message, "503")
 		healthNextAction := result.NextAction
-		require.Contains(t, healthNextAction, "--daemon=work")
+		require.Contains(t, healthNextAction, "--daemon work")
 		require.Contains(t, healthNextAction, "recover")
 		require.Contains(t, cliErr.Message, healthNextAction)
 		require.Contains(t, stderr, healthNextAction)
 	})
+}
+
+func TestDaemonDiagnoseSecondPingUnreachable(t *testing.T) {
+	home, _, uid, _ := stoppedProfileCLI(t)
+	var pings atomic.Int32
+	var replaceRecord func()
+	var replaced atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/ping" {
+			if pings.Add(1) > 1 {
+				replaceRecord()
+				http.Error(w, "unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version, os.Getpid())
+			return
+		}
+		_, _ = fmt.Fprintf(w, `{"instance_uid":%q}`, uid)
+	}))
+	t.Cleanup(server.Close)
+	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: uid})
+	require.NoError(t, err)
+	ns, err := daemonruntime.NewNamespaceForHome(home, profile.StorageID)
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	store := kitdaemon.RuntimeStore{Dir: ns.DataDir}
+	recordPath, err := store.Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
+	require.NoError(t, err)
+	replaceRecord = func() {
+		path, err := store.Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid() + 100000, Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
+		if err == nil && os.Rename(path, recordPath) == nil {
+			replaced.Store(true)
+		}
+	}
+	out, _, err := executeRootCapture(t, t.Context(), "--daemon", "work", "daemon", "diagnose", "--json")
+	require.NoError(t, err)
+	var result daemonDiagnosis
+	require.NoError(t, json.Unmarshal([]byte(out), &result))
+	require.True(t, replaced.Load())
+	require.Equal(t, "local_unreachable", result.State)
+	require.Equal(t, os.Getpid(), result.PID)
+	require.Contains(t, result.NextAction, filepath.Join(ns.DataDir, "daemon.log"))
+	require.Contains(t, result.NextAction, "--daemon work")
 }

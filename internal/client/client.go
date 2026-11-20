@@ -76,6 +76,8 @@ type LocalDaemonUnreachableError struct {
 	DataDir         string
 	WebOrigin       string
 	VerifiedProcess bool
+	Profile         string
+	callerStopped   bool
 	cause           error
 }
 
@@ -89,7 +91,7 @@ func (e *LocalDaemonUnreachableError) Unwrap() error {
 
 // Is reports whether target is the local daemon unreachable sentinel.
 func (e *LocalDaemonUnreachableError) Is(target error) bool {
-	return target == ErrLocalDaemonUnreachable
+	return target == ErrLocalDaemonUnreachable && !e.callerStopped
 }
 
 // liveDaemon is one runtime record that answered /api/v1/ping: the record
@@ -141,7 +143,12 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 			url, info, probeErr := probe(ctx, address)
 			if probeErr != nil {
 				if err := ctx.Err(); err != nil {
-					yield(liveDaemon{}, err)
+					if !errors.Is(probeErr, err) {
+						probeErr = errors.Join(probeErr, err)
+					}
+					evidence := unreachableRuntime(r, dataDir, probeErr)
+					evidence.callerStopped = true
+					yield(liveDaemon{}, evidence)
 					return
 				}
 				if !yield(liveDaemon{}, unreachableRuntime(r, dataDir, probeErr)) {

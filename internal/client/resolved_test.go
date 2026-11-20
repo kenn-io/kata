@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -494,7 +495,8 @@ local = true
 	resolved, ok, err := DiscoverSelected(t.Context(), DiscoverRequest{Name: "local"})
 	require.NoError(t, err)
 	assert.True(t, ok)
-	assert.Equal(t, localRunningDaemon(baseURL, address), resolved.Running())
+	assert.Equal(t, baseURL, resolved.Running().BaseURL)
+	assert.Equal(t, address, resolved.Running().Address)
 }
 
 func TestDiscoverSelectedProbesNamedRemoteOnRequest(t *testing.T) {
@@ -603,4 +605,16 @@ func writeNeutralWorkspaceMarker(t *testing.T, workspace string) {
 	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.toml"), []byte(
 		"version = 1\n\n[project]\nidentity = \"example.test/spoke-project\"\nname = \"spoke-project\"\n",
 	), 0o600))
+}
+
+func TestResolvedDaemonUnreachableRetainsSelectedRuntime(t *testing.T) {
+	record := kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1234"}
+	resolved := resolvedForRunning(DaemonSourceLocalRuntime, "work", runningDaemonForLive(liveDaemon{Record: record, BaseURL: "http://127.0.0.1:1234"}))
+	err := resolved.LocalDaemonUnreachable("/runtime", errors.New("ping failed"))
+	var unreachable *LocalDaemonUnreachableError
+	require.ErrorAs(t, err, &unreachable)
+	require.Equal(t, record.PID, unreachable.PID)
+	require.Equal(t, "/runtime", unreachable.DataDir)
+	require.Equal(t, "work", unreachable.Profile)
+	require.Nil(t, (ResolvedDaemon{}).LocalDaemonUnreachable("/runtime", errors.New("failed")))
 }

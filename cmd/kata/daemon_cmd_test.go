@@ -621,7 +621,8 @@ func TestDaemonStatusReportsWebURLAndRecoveryAdvice(t *testing.T) {
 	assert.Contains(t, string(out), "next_action=")
 	assert.Contains(t, string(out), "daemon.log")
 	resetFlags(t)
-	human := executeRoot(t, newRootCmd(), "daemon", "status")
+	human, _, err := executeRootCapture(t, t.Context(), "daemon", "status")
+	require.Error(t, err)
 	assert.Contains(t, string(human), "  next:")
 	assert.Contains(t, string(human), "daemon.log")
 }

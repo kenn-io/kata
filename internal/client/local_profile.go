@@ -128,6 +128,9 @@ func verifyLocalProfileInstance(ctx context.Context, resolved ResolvedDaemon) er
 	}
 	resp, err := apiClient.InstanceWithResponse(ctx)
 	if resp == nil {
+		if evidence := resolved.LocalDaemonUnreachable(resolved.LocalProfile.DataDir, err); evidence != nil {
+			return evidence
+		}
 		return fmt.Errorf("local profile instance is unavailable: %w", ErrLocalDaemonUnreachable)
 	}
 	if resp.StatusCode != 200 {
@@ -225,7 +228,8 @@ func DiscoverLocalProfileSelection(ctx context.Context, selection DaemonSelectio
 	if selection.Profile == nil || selection.Resolved.LocalProfile == nil {
 		return selection.Resolved, false, errors.New("selection is not a registered local profile")
 	}
-	return discoverLocalProfile(ctx, selection)
+	resolved, found, err := discoverLocalProfile(ctx, selection)
+	return resolved, found, profileUnreachable(err, selection.Resolved.Name)
 }
 
 // EnsureLocalProfileSelection starts only the home pinned by this snapshot.
@@ -233,7 +237,8 @@ func EnsureLocalProfileSelection(ctx context.Context, selection DaemonSelection)
 	if selection.Profile == nil || selection.Resolved.LocalProfile == nil {
 		return selection.Resolved, errors.New("selection is not a registered local profile")
 	}
-	return ensureLocalProfile(ctx, selection)
+	resolved, err := ensureLocalProfile(ctx, selection)
+	return resolved, profileUnreachable(err, selection.Resolved.Name)
 }
 
 // EnsureSameLocalProfile refreshes the original profile snapshot without reading
@@ -275,3 +280,9 @@ func profileCutoverLocked(profile config.LocalProfileConfig) func(context.Contex
 	return func(context.Context) bool { return sqliteCutoverLockedForDSN(profile.DSN) }
 }
 
+func profileUnreachable(err error, name string) error {
+	if evidence, ok := errors.AsType[*LocalDaemonUnreachableError](err); ok {
+		evidence.Profile = name
+	}
+	return err
+}
