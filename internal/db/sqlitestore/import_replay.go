@@ -847,9 +847,10 @@ func importLink(ctx context.Context, tx *sql.Tx, lk *db.LinkExport, mergeProject
 				return linkSkipNone, fmt.Errorf("project merge parent link from issue %s to %s: %w", lk.FromIssueUID, lk.ToIssueUID, err)
 			}
 		}
-		if err := ensureRelayLinkBoundaryTx(ctx, tx, lk.FromIssueID, lk.ToIssueID); errors.Is(err, db.ErrFederationCrossProjectBoundary) || errors.Is(err, db.ErrFederatedLinkServerMismatch) {
+		// Historical links may predate connecting both projects to their hub.
+		if err := ensureRelayLinkBoundaryTx(ctx, tx, lk.FromIssueID, lk.ToIssueID); errors.Is(err, db.ErrFederationCrossProjectBoundary) {
 			return linkSkipUndeliverable, nil
-		} else if err != nil {
+		} else if err != nil && !errors.Is(err, db.ErrFederatedLinkServerMismatch) {
 			return linkSkipNone, fmt.Errorf("project merge link between issues %s and %s: %w", lk.FromIssueUID, lk.ToIssueUID, err)
 		}
 	}

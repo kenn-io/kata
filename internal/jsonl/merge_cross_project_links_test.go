@@ -39,7 +39,7 @@ func newCrossProjectLinkSource(t *testing.T) crossProjectLinkSource {
 		from, to db.Issue
 		typ      string
 	}{{blocker, blocked, "blocks"}, {child, epic, "parent"}, {peer, related, "related"}} {
-		created, err := source.CreateLink(ctx, db.CreateLinkParams{FromIssueID: link.from.ID, ToIssueID: link.to.ID, Type: link.typ, Author: "link-author"})
+		created, _, err := source.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: link.from.ID, ToIssueID: link.to.ID, Type: link.typ, Author: "link-author"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: link.from.ID, FromShortID: link.from.ShortID, FromUID: link.from.UID, ToShortID: link.to.ShortID, ToUID: link.to.UID, Actor: "link-author"})
 		require.NoError(t, err)
 		out.edges = append(out.edges, [3]string{created.FromIssueUID, created.ToIssueUID, link.typ})
 	}
@@ -183,7 +183,7 @@ func TestMergeSkipsLinkAcrossRelayedProjectPostgres(t *testing.T) {
 	checkMergeSkipsLinkAcrossRelayedProject(t, openPostgresImportTarget(t))
 }
 
-func checkMergeSkipsLinkToUnconnectedProject(t *testing.T, target db.Storage) {
+func checkMergePreservesLinkToUnconnectedProject(t *testing.T, target db.Storage) {
 	ctx := t.Context()
 	source := newCrossProjectLinkSource(t)
 	require.NoError(t, jsonl.ImportWithOptions(ctx, bytes.NewReader(source.firstExport), target, jsonl.ImportOptions{MergeProject: true}))
@@ -191,26 +191,26 @@ func checkMergeSkipsLinkToUnconnectedProject(t *testing.T, target db.Storage) {
 	require.NoError(t, err)
 	_, err = target.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: first.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: first.ID, HubProjectUID: first.UID, Actor: "member", Enabled: true, PushEnabled: true})
 	require.NoError(t, err)
-	stderr, restore := captureStderr(t)
 	err = jsonl.ImportWithOptions(ctx, bytes.NewReader(source.secondExport), target, jsonl.ImportOptions{MergeProject: true})
-	restore()
 	require.NoError(t, err)
-	require.Contains(t, stderr.String(), "link record(s) that cannot be delivered across these projects")
-	_, err = target.ProjectByName(ctx, "second-project")
+	second, err := target.ProjectByName(ctx, "second-project")
 	require.NoError(t, err)
 	var endpoints []string
 	for _, edge := range source.edges {
 		endpoints = append(endpoints, edge[0])
 	}
-	require.Empty(t, crossProjectLinkEdges(t, target, endpoints...))
+	require.ElementsMatch(t, undirectedRelatedEdges(source.edges), undirectedRelatedEdges(crossProjectLinkEdges(t, target, endpoints...)))
+	_, err = target.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: second.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: second.ID, HubProjectUID: second.UID, Actor: "member", Enabled: true, PushEnabled: true})
+	require.NoError(t, err)
+	require.ElementsMatch(t, undirectedRelatedEdges(source.edges), undirectedRelatedEdges(crossProjectLinkEdges(t, target, endpoints...)))
 }
 
-func TestMergeSkipsLinkToUnconnectedProjectSQLite(t *testing.T) {
-	checkMergeSkipsLinkToUnconnectedProject(t, openImportTargetDB(t))
+func TestMergePreservesLinkToUnconnectedProjectSQLite(t *testing.T) {
+	checkMergePreservesLinkToUnconnectedProject(t, openImportTargetDB(t))
 }
 
-func TestMergeSkipsLinkToUnconnectedProjectPostgres(t *testing.T) {
-	checkMergeSkipsLinkToUnconnectedProject(t, openPostgresImportTarget(t))
+func TestMergePreservesLinkToUnconnectedProjectPostgres(t *testing.T) {
+	checkMergePreservesLinkToUnconnectedProject(t, openPostgresImportTarget(t))
 }
 
 // Two snapshots taken at different times can each be valid and still disagree.

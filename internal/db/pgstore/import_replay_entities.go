@@ -260,9 +260,10 @@ SELECT 1 FROM links WHERE type=$1 AND (
 				return replayLinkInserted, fmt.Errorf("project merge parent link from issue %s to %s: %w", link.FromIssueUID, link.ToIssueUID, err)
 			}
 		}
-		if err := ensureRelayLinkBoundaryTx(ctx, tx, link.FromIssueID, link.ToIssueID); errors.Is(err, db.ErrFederationCrossProjectBoundary) || errors.Is(err, db.ErrFederatedLinkServerMismatch) {
+		// Historical links may predate connecting both projects to their hub.
+		if err := ensureRelayLinkBoundaryTx(ctx, tx, link.FromIssueID, link.ToIssueID); errors.Is(err, db.ErrFederationCrossProjectBoundary) {
 			return replayLinkUndeliverable, nil
-		} else if err != nil {
+		} else if err != nil && !errors.Is(err, db.ErrFederatedLinkServerMismatch) {
 			return replayLinkInserted, fmt.Errorf("project merge link between issues %s and %s: %w", link.FromIssueUID, link.ToIssueUID, err)
 		}
 	}
