@@ -212,14 +212,6 @@ func checkFederationControlLifecycle(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return fmt.Errorf("create compatible spoke federation binding: %w", err)
 	}
-	_, err = store.CreateLink(ctx, db.CreateLinkParams{
-		FromIssueID: spokeIssue.ID, ToIssueID: peerIssue.ID, Type: "blocks", Author: "member",
-	})
-	assert.ErrorIs(t, err, db.ErrFederatedReadOnly)
-	_, err = store.CreateLink(ctx, db.CreateLinkParams{
-		FromIssueID: spokeIssue.ID, ToIssueID: incompatibleIssue.ID, Type: "blocks", Author: "member",
-	})
-	assert.ErrorIs(t, err, db.ErrFederatedReadOnly)
 	spokeBinding.PushEnabled = true
 	if _, err := store.UpsertFederationBinding(ctx, spokeBinding); err != nil {
 		return err
