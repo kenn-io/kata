@@ -105,6 +105,32 @@ func RunSignedRelayResetCommitments(t *testing.T, store db.Storage) {
 	manifest, err := db.SignRootResetManifest(db.RootResetManifest{Version: 1, ProjectUID: project.UID, AuthorityUID: rootUID, KeyID: pin.KeyID, ResetEpoch: 3, SnapshotUID: snapshotUID, RootBaselines: db.RelayStreamCursors{Events: 11, Receipts: 13, Artifacts: 17}}, snapshot, private)
 	require.NoError(t, err)
 	translation := db.RelayResetTranslation{Authority: db.RelayHopAuthority{BindingUID: bindingUID, ProjectUID: project.UID, AuthorityUID: rootUID, SenderInstanceUID: rootUID, ReceiverInstanceUID: store.InstanceUID(), Epoch: 19}, SnapshotUID: snapshotUID, SnapshotDigest: manifest.SnapshotDigest, HopBaselines: db.RelayStreamCursors{Events: 101, Receipts: 113, Artifacts: 117}}
+	if !t.Run("reject parent-side legacy unlink", func(t *testing.T) {
+		parentUID, err := uid.New()
+		require.NoError(t, err)
+		parent := newRemoteEvent(t, project, &parentUID, "issue.created", "source-assistant", rootUID, 301, IssueDocument(t, parentUID, jsontext.Value(`{"uid":"`+parentUID+`","title":"Parent","author":"source-assistant","metadata":{}}`)))
+		linked := newRemoteEvent(t, project, &issueUID, "issue.linked", "source-assistant", rootUID, 302, jsontext.Value(`{"type":"parent","from_uid":"`+issueUID+`","to_uid":"`+parentUID+`"}`))
+		unlinked := newRemoteEvent(t, project, &parentUID, "issue.unlinked", "source-assistant", rootUID, 303, jsontext.Value(`{"type":"parent","from_uid":"`+parentUID+`","to_uid":"`+issueUID+`"}`))
+		bodies := [][]byte{sourceBytes}
+		for _, event := range []db.RemoteEvent{parent, linked, unlinked} {
+			body, err := db.EncodeRelaySourceEvent(event)
+			require.NoError(t, err)
+			bodies = append(bodies, body)
+		}
+		badSnapshot := snapshot
+		badSnapshot.Events, err = json.Marshal(bodies)
+		require.NoError(t, err)
+		badManifest, err := db.SignRootResetManifest(manifest, badSnapshot, private)
+		require.NoError(t, err)
+		badTranslation := translation
+		badTranslation.SnapshotDigest = badManifest.SnapshotDigest
+		err = installer.InstallRelayReset(ctx, bindingUID, badManifest, badSnapshot, badTranslation)
+		require.ErrorIs(t, err, db.ErrFederationIngestValidation)
+		_, err = store.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
+		require.ErrorIs(t, err, db.ErrNotFound)
+	}) {
+		return
+	}
 	for _, name := range []string{"signature", "snapshot", "hop", "hidden"} {
 		t.Run(name, func(t *testing.T) {
 			badManifest, badSnapshot, badTranslation := manifest, snapshot, translation

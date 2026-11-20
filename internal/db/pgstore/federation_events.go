@@ -71,7 +71,12 @@ ORDER BY e.id ASC`, projectID, originInstanceUID, output[len(output)-1].ID, runS
 		}
 		break
 	}
-	return output, nil
+	return db.KeepLegacyParentReplacements(ctx, output, func(ctx context.Context, afterID int64, limit int) ([]db.Event, error) {
+		return s.queryPendingFederationPushEvents(ctx, eventSelect+`
+WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3
+  AND `+pgFederationPushEventTypeCondition("e.type")+`
+ORDER BY e.id ASC LIMIT $4`, projectID, originInstanceUID, afterID, limit)
+	})
 }
 
 func (s *Store) queryPendingFederationPushEvents(ctx context.Context, query string, args ...any) ([]db.Event, error) {

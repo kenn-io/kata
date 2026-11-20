@@ -1024,6 +1024,11 @@ var storageScenarios = []scenario{
 		run: checkProjectFederationEnrollmentScope,
 	},
 	{
+		name:    "federation push legacy replacement page",
+		methods: []string{"CreateProject", "CreateIssue", "CreateComment", "InsertRemoteEvent", "PendingFederationPushEvents"},
+		run:     checkFederationPushLegacyReplacementPage,
+	},
+	{
 		name:    "federation push snapshot runs",
 		methods: []string{"CreateProject", "CreateIssue", "InsertRemoteEvent", "PendingFederationPushEvents"},
 		run:     checkFederationPushSnapshotRuns,

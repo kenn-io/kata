@@ -427,9 +427,6 @@ AND (e.issue_uid=$1 OR e.related_issue_uid=$1 OR e.payload LIKE '%' || $1 || '%'
 			}
 			seen[e.UID] = true
 			e.IssueUID, e.Payload = issue.String, jsontext.Value(payload)
-			if e.Type == "issue.moved" {
-				e.Type, e.Payload = "issue.snapshot", PayloadMap(e.Payload)["snapshot"]
-			}
 			ordered = append(ordered, e)
 		}
 		if err := rows.Err(); err != nil {
@@ -441,35 +438,14 @@ AND (e.issue_uid=$1 OR e.related_issue_uid=$1 OR e.payload LIKE '%' || $1 || '%'
 		}
 	}
 	slices.SortStableFunc(ordered, func(a, b FoldEvent) int { return compareClock(clockOf(a), clockOf(b)) })
+	ordered = FederationMoveBaselineEvents(ordered)
 	projection := FoldEvents(nil)
+	projection.seedMoveBaselines(ordered)
 	for _, event := range ordered {
 		payload := PayloadMap(event.Payload)
-		if fresh[event.UID] && event.Type == "issue.unlinked" {
-			kind, _ := StringValue(payload["type"])
-			_, fromPresent := payload["link_from_uid"]
-			_, toPresent := payload["link_to_uid"]
-			if kind == "parent" && !fromPresent && !toPresent {
-				from, to := parentRemovalEndpoints(event, payload)
-				forward := projection.Links[FoldLinkKey{FromUID: from, ToUID: to, Type: "parent"}].Present
-				reverse := projection.Links[FoldLinkKey{FromUID: to, ToUID: from, Type: "parent"}].Present
-				companion := false
-				for _, later := range ordered {
-					if !fresh[later.UID] || later.Type != "issue.linked" || later.IssueUID != from || compareClock(clockOf(later), clockOf(event)) <= 0 {
-						continue
-					}
-					links, err := directParentAssignments(later)
-					if err != nil {
-						return nil, err
-					}
-					for _, link := range links {
-						if link.FromUID == from && link.ToUID != to {
-							companion = true
-						}
-					}
-				}
-				if from == "" || to == "" || reverse || (!forward && !companion) {
-					return nil, fmt.Errorf("%w: Cannot tell which issue was the child in this parent removal.", ErrFederationIngestValidation)
-				}
+		if fresh[event.UID] {
+			if err := rejectAmbiguousParentRemoval(event, payload, &projection, ordered, fresh); err != nil {
+				return nil, err
 			}
 		}
 		if fresh[event.UID] {
@@ -495,6 +471,65 @@ AND (e.issue_uid=$1 OR e.related_issue_uid=$1 OR e.payload LIKE '%' || $1 || '%'
 		projection.apply(event)
 	}
 	return removed, nil
+}
+
+// rejectAmbiguousParentRemoval refuses a fresh endpoint-less legacy parent
+// unlink whose child the projection and later fresh links cannot establish.
+func rejectAmbiguousParentRemoval(event FoldEvent, payload map[string]jsontext.Value, projection *FoldProjection, ordered []FoldEvent, fresh map[string]bool) error {
+	if event.Type != "issue.unlinked" {
+		return nil
+	}
+	kind, _ := StringValue(payload["type"])
+	_, fromPresent := payload["link_from_uid"]
+	_, toPresent := payload["link_to_uid"]
+	if kind != "parent" || fromPresent || toPresent {
+		return nil
+	}
+	from, to := parentRemovalEndpoints(event, payload)
+	forward := projection.Links[FoldLinkKey{FromUID: from, ToUID: to, Type: "parent"}].Present
+	reverse := projection.Links[FoldLinkKey{FromUID: to, ToUID: from, Type: "parent"}].Present
+	companion := false
+	for _, later := range ordered {
+		if !fresh[later.UID] || later.Type != "issue.linked" || later.IssueUID != from || compareClock(clockOf(later), clockOf(event)) <= 0 {
+			continue
+		}
+		links, err := directParentAssignments(later)
+		if err != nil {
+			return err
+		}
+		for _, link := range links {
+			if link.FromUID == from && link.ToUID != to {
+				companion = true
+			}
+		}
+	}
+	if from == "" || to == "" || reverse || (!forward && !companion) {
+		return fmt.Errorf("%w: Cannot tell which issue was the child in this parent removal.", ErrFederationIngestValidation)
+	}
+	return nil
+}
+
+// ValidateParentRemovalDirections applies the live-ingest parent removal
+// direction rule to a self-contained event history, such as a signed checkpoint.
+func ValidateParentRemovalDirections(events []RemoteEvent) error {
+	fresh := make(map[string]bool, len(events))
+	ordered := make([]FoldEvent, 0, len(events))
+	for _, event := range events {
+		fold := moveSnapshotFoldEvent(event)
+		fresh[fold.UID] = true
+		ordered = append(ordered, fold)
+	}
+	slices.SortStableFunc(ordered, func(a, b FoldEvent) int { return compareClock(clockOf(a), clockOf(b)) })
+	ordered = FederationMoveBaselineEvents(ordered)
+	projection := FoldEvents(nil)
+	projection.seedMoveBaselines(ordered)
+	for _, event := range ordered {
+		if err := rejectAmbiguousParentRemoval(event, PayloadMap(event.Payload), &projection, ordered, fresh); err != nil {
+			return err
+		}
+		projection.apply(event)
+	}
+	return nil
 }
 
 // currentParentRemovals handles batches that do not need event-time history.

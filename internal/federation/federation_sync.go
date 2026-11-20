@@ -797,10 +797,30 @@ func nextFederationPushIngestBatch(events []db.Event) ([]db.Event, string, int64
 			return nil, "", 0, err
 		}
 		if size > maxFederationPushIngestBodyBytes && i > 0 {
-			return events[:i], "", 0, nil
+			return events[:federationPushSplitIndex(events, i)], "", 0, nil
 		}
 	}
 	return events, "", 0, nil
+}
+
+// federationPushSplitIndex moves a cut ahead of an endpoint-less parent unlink
+// whose replacement link would land in the next request. The hub accepts such
+// an unlink only with that replacement or retained forward history.
+func federationPushSplitIndex(events []db.Event, cut int) int {
+	for j := 1; j < cut; j++ {
+		if !db.IsLegacyParentUnlink(events[j]) {
+			continue
+		}
+		for k, later := range events[j+1:] {
+			if db.IsLegacyParentReplacement(events[j], later) {
+				if j+1+k >= cut {
+					return j
+				}
+				break
+			}
+		}
+	}
+	return cut
 }
 
 func nextFederationPushAdoptionBaselineIngestBatch(events []db.Event) ([]db.Event, string, int64, error) {

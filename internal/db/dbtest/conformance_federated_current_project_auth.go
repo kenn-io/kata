@@ -267,6 +267,37 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 	// child's original hub parent, even if neither event names that parent.
 	setLocal, err := json.Marshal(map[string]string{"parent_set_uid": other.UID})
 	require.NoError(t, err)
+	t.Run("delayed-unlink-across-move", func(t *testing.T) {
+		movedChild, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "Moved child", Author: "worker", Links: []db.InitialLink{{Type: "parent", ToNumber: peer.ID}}})
+		require.NoError(t, err)
+		body := "Changed before move"
+		movedChild, between, _, err := store.EditIssue(ctx, db.EditIssueParams{IssueID: movedChild.ID, Body: &body, Actor: "worker"})
+		require.NoError(t, err)
+		moved, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: movedChild.ID, FromProjectID: source.ID, ToProjectID: route.ID, IfMatchRev: movedChild.Revision, Actor: "worker"})
+		require.NoError(t, err)
+		require.Contains(t, moved.Event.Payload, peer.UID)
+		clearPeer, err := json.Marshal(map[string]string{"parent_removed_uid": peer.UID})
+		require.NoError(t, err)
+		delayed := newRemoteEvent(t, route, &movedChild.UID, "issue.links_changed", "worker", origin, between.HLCPhysicalMS, clearPeer)
+		delayed.HLCCounter = between.HLCCounter
+		delayed.ContentHash, err = db.RemoteEventContentHash(delayed)
+		require.NoError(t, err)
+		params.Events = []db.FederationIngestEvent{{SourceEventID: 4, Event: delayed}}
+		_, err = store.IngestFederationEvents(ctx, params)
+		require.NoError(t, err)
+		_, err = store.ParentOf(ctx, movedChild.ID)
+		require.ErrorIs(t, err, db.ErrNotFound)
+		clearLocal, err := json.Marshal(map[string]string{"parent_removed_uid": other.UID})
+		require.NoError(t, err)
+		params.Events = []db.FederationIngestEvent{
+			{SourceEventID: 5, Event: newRemoteEvent(t, route, &movedChild.UID, "issue.links_changed", "worker", origin, moved.Event.HLCPhysicalMS+1000, setLocal)},
+			{SourceEventID: 6, Event: newRemoteEvent(t, route, &movedChild.UID, "issue.links_changed", "worker", origin, moved.Event.HLCPhysicalMS+1001, clearLocal)},
+		}
+		_, err = store.IngestFederationEvents(ctx, params)
+		require.NoError(t, err)
+		_, err = store.ParentOf(ctx, movedChild.ID)
+		require.ErrorIs(t, err, db.ErrNotFound)
+	})
 	t.Run("superseded-parent-assignment", func(t *testing.T) {
 		params.Events = []db.FederationIngestEvent{{SourceEventID: 4, Event: newRemoteEvent(t, route, &child.UID, "issue.links_changed", "worker", origin, at-1, setLocal)}}
 		_, err := store.IngestFederationEvents(ctx, params)
@@ -347,10 +378,10 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 		require.Len(t, removed.Events, 1)
 		_, err = store.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: staleChild.ID, Actor: "worker", SetParent: &peer.ID})
 		require.NoError(t, err)
-		clear, err := json.Marshal(map[string]string{"parent_removed_uid": peer.UID})
+		clearParent, err := json.Marshal(map[string]string{"parent_removed_uid": peer.UID})
 		require.NoError(t, err)
 		params.Events = []db.FederationIngestEvent{
-			{SourceEventID: 4, Event: newRemoteEvent(t, route, &staleChild.UID, "issue.links_changed", "worker", origin, removed.Events[0].HLCPhysicalMS, clear)},
+			{SourceEventID: 4, Event: newRemoteEvent(t, route, &staleChild.UID, "issue.links_changed", "worker", origin, removed.Events[0].HLCPhysicalMS, clearParent)},
 			{SourceEventID: 5, Event: newRemoteEvent(t, route, &staleChild.UID, "issue.links_changed", "worker", origin, at+3600000, setLocal)},
 		}
 		_, err = store.IngestFederationEvents(ctx, params)
@@ -398,13 +429,13 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 		require.NoError(t, err)
 		set, err := json.Marshal(map[string]string{"parent_set_uid": parent.UID})
 		require.NoError(t, err)
-		clear, err := json.Marshal(map[string]string{"parent_removed_uid": parent.UID})
+		clearParent, err := json.Marshal(map[string]string{"parent_removed_uid": parent.UID})
 		require.NoError(t, err)
 		reverse, err := json.Marshal(map[string]string{"parent_set_uid": child.UID})
 		require.NoError(t, err)
 		params.Events = []db.FederationIngestEvent{
 			{SourceEventID: 4, Event: newRemoteEvent(t, route, &child.UID, "issue.links_changed", "worker", origin, at+100, set)},
-			{SourceEventID: 5, Event: newRemoteEvent(t, route, &child.UID, "issue.links_changed", "worker", origin, at+300, clear)},
+			{SourceEventID: 5, Event: newRemoteEvent(t, route, &child.UID, "issue.links_changed", "worker", origin, at+300, clearParent)},
 			{SourceEventID: 6, Event: newRemoteEvent(t, route, &parent.UID, "issue.links_changed", "worker", origin, at+500, reverse)},
 		}
 		_, err = store.IngestFederationEvents(ctx, params)
