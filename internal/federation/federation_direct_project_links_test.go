@@ -1,6 +1,7 @@
 package federation
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -61,6 +62,31 @@ func TestLinkChangeSelectsPeerProof(t *testing.T) {
 	tokens, err := federationMoveSourceTokens(ctx, spoke.env.DB, spoke.credentials, binding, hub.URL, []db.Event{linked}, clientpkg.Opts{})
 	require.NoError(t, err)
 	require.Empty(t, tokens)
+}
+
+func TestParentRemovalSelectsPeerProof(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "route", "peer")
+	spoke := newMoveDeliverySpoke(t, hub, projects, "worker", "peer-member")
+	peer, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[1].ID, Title: "Parent", Author: "peer-member"})
+	require.NoError(t, err)
+	child, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "Child", Author: "worker", Links: []db.InitialLink{{Type: "parent", ToNumber: peer.ID}, {Type: "blocks", ToNumber: peer.ID}, {Type: "related", ToNumber: peer.ID}}})
+	require.NoError(t, err)
+	removal, err := spoke.env.DB.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: child.ID, Actor: "worker", RemoveParent: &peer.ID, RemoveBlocks: []int64{peer.ID}, RemoveRelated: []int64{peer.ID}})
+	require.NoError(t, err)
+	require.Len(t, removal.Events, 1)
+	legacy := removal.Events[0]
+	legacy.Type = "issue.unlinked"
+	legacy.Payload = fmt.Sprintf(`{"type":"parent","from_uid":%q,"to_uid":%q}`, child.UID, peer.UID)
+	binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
+	require.NoError(t, err)
+	for name, event := range map[string]db.Event{"legacy unlink": legacy, "combined removal": removal.Events[0]} {
+		t.Run(name, func(t *testing.T) {
+			tokens, err := federationMoveSourceTokens(ctx, spoke.env.DB, spoke.credentials, binding, hub.URL, []db.Event{event}, clientpkg.Opts{})
+			require.NoError(t, err)
+			require.Equal(t, map[string]string{projects[1].UID: spoke.credentials[projects[1].UID].Token}, tokens)
+		})
+	}
 }
 
 func TestLinkPeerProofUsesOwnPlaintextPolicy(t *testing.T) {

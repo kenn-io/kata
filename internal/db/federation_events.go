@@ -323,12 +323,16 @@ func DirectLinkPeers(event FoldEvent) (map[string]bool, error) {
 	if event.Type == "issue.links_changed" || event.Type == "issue.unlinked" {
 		payload := PayloadMap(event.Payload)
 		if event.Type == "issue.links_changed" {
-			uid, _ := StringValue(payload["parent_removed_uid"])
-			add(uid)
 			for _, key := range []string{"blocks_removed_uids", "blocked_by_removed_uids", "related_removed_uids"} {
 				for _, uid := range StringSlice(payload[key]) {
 					delete(peers, uid)
 				}
+			}
+			uid, _ := StringValue(payload["parent_removed_uid"])
+			if peers[uid] {
+				delete(peers, uid)
+			} else {
+				add(uid)
 			}
 		} else if kind, _ := StringValue(payload["type"]); kind == "parent" {
 			for _, key := range []string{"from_uid", "to_uid"} {
