@@ -279,7 +279,7 @@ func TestEmbeddingProducerStatusReportsRejectedArtifact(t *testing.T) {
 		require.NoError(t, err)
 		recipe, err := client.ArtifactIdentity("", "", store.InstanceUID())
 		require.NoError(t, err)
-		_, err = ix.ReconcileArtifacts(ctx, key, store, recipe)
+		_, err = ix.ReconcileArtifacts(ctx, key, store, recipe, nil)
 		require.NoError(t, err)
 		server := daemon.NewServer(daemon.ServerConfig{DB: store, VectorIndex: ix, Embedder: client, Auth: config.AuthConfig{Token: "bootstrap-test-token", RequireTokenIdentity: true}})
 		t.Cleanup(func() { require.NoError(t, server.Close()) })

@@ -169,7 +169,7 @@ func TestArtifactCaptureBoundsPreserveLocalIndexing(t *testing.T) {
 				}
 				return values, nil
 			}
-			stats, err := idx.FillWithArtifacts(ctx, key, source, recipe, encode, 0, nil, nil)
+			stats, err := idx.FillWithArtifacts(ctx, key, source, recipe, encode, 0, nil, nil, nil)
 			require.NoError(t, err, "portable limits must not turn successful local generation into a retry loop")
 			require.Greater(t, stats.Chunks, embedding.MaxArtifactChunks)
 			require.Equal(t, stats.Chunks, inputs)
@@ -247,7 +247,7 @@ func TestArtifactCaptureRuneWindowBoundsPreserveLocalIndexing(t *testing.T) {
 				return values, nil
 			}
 
-			stats, err := idx.FillWithArtifacts(ctx, key, source, recipe, encode, 0, nil, nil)
+			stats, err := idx.FillWithArtifacts(ctx, key, source, recipe, encode, 0, nil, nil, nil)
 			require.NoError(t, err, "successful local vectors must not fail portable artifact capture")
 			require.Positive(t, stats.Chunks)
 			embedded, skipped, pending, err := idx.Coverage(ctx, key)

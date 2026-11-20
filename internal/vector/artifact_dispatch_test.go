@@ -74,7 +74,7 @@ func TestEmbeddingArtifactArrivalBeforeDispatch(t *testing.T) {
 			require.NoError(t, err)
 			key := client.Generation().Fingerprint()
 			require.NoError(t, ix.EnsureBuilding(ctx, key, client.Generation()))
-			n, err := ix.ReconcileArtifacts(ctx, key, source, recipe)
+			n, err := ix.ReconcileArtifacts(ctx, key, source, recipe, nil)
 			require.NoError(t, err)
 			require.Zero(t, n, "no artifact exists during the initial reconciliation")
 			identity := recipe
@@ -99,7 +99,7 @@ func TestEmbeddingArtifactArrivalBeforeDispatch(t *testing.T) {
 				}
 				cursors = append(cursors, cursor)
 			})
-			_, err = ix.FillWithArtifacts(ctx, key, source, recipe, client.EncodeFunc(), 1, nil, nil)
+			_, err = ix.FillWithArtifacts(ctx, key, source, recipe, client.EncodeFunc(), 1, nil, nil, nil)
 			require.NoError(t, err)
 			require.True(t, arrived)
 			require.Equal(t, []string{"", issue.UID}, cursors, "a fully reused page advances the wrapper cursor")
@@ -112,7 +112,7 @@ func TestEmbeddingArtifactArrivalBeforeDispatch(t *testing.T) {
 			require.Len(t, hits, 1)
 			require.Equal(t, issue.UID, hits[0].Doc)
 			require.Equal(t, 1, hits[0].ChunkIndex)
-			reused, err := ix.ReconcileArtifacts(ctx, key, source, recipe)
+			reused, err := ix.ReconcileArtifacts(ctx, key, source, recipe, nil)
 			require.NoError(t, err)
 			require.Zero(t, reused, "an unchanged sweep must not rewrite current index chunks")
 		})

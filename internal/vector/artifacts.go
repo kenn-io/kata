@@ -105,7 +105,7 @@ func (ix *Index) ArtifactRejected(digest string) bool {
 // ReconcileArtifacts reuses one bounded pending page before local fill. The
 // fill worker rechecks subsequent pages immediately before dispatch. Already
 // indexed documents cause no portable-byte reads or vector-index rewrites.
-func (ix *Index) ReconcileArtifacts(ctx context.Context, key string, source db.Storage, recipe embedding.ArtifactIdentity) (int, error) {
+func (ix *Index) ReconcileArtifacts(ctx context.Context, key string, source db.Storage, recipe embedding.ArtifactIdentity, allowed func(context.Context, string) (bool, error)) (int, error) {
 	exporter, ok := source.(db.EmbeddingArtifactExporter)
 	if !ok {
 		return 0, nil
@@ -142,6 +142,15 @@ func (ix *Index) ReconcileArtifacts(ctx context.Context, key string, source db.S
 		comparison.InputHash, comparison.ProducerInstanceUID = "", ""
 		if received != comparison {
 			continue
+		}
+		if allowed != nil {
+			permitted, err := allowed(ctx, artifact.ProjectUID)
+			if err != nil {
+				return reused, err
+			}
+			if !permitted {
+				continue
+			}
 		}
 		imported, err := ix.reuseArtifact(ctx, key, source, artifact, expected, doc.Revision)
 		if errors.Is(err, kitvec.ErrStale) || (err == nil && !imported) {

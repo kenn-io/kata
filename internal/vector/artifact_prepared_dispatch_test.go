@@ -115,7 +115,7 @@ func TestEmbeddingPreparedPageRechecksBeforePaidDispatch(t *testing.T) {
 					}
 					return !revoked, nil
 				}
-				_, err = ix.FillWithArtifacts(ctx, key, source, recipe, client.EncodeFunc(), 2, batchOptions, nil, allowed)
+				_, err = ix.FillWithArtifacts(ctx, key, source, recipe, client.EncodeFunc(), 2, batchOptions, nil, nil, allowed)
 				require.NoError(t, err, "a deferred document must not abort the fill")
 				require.GreaterOrEqual(t, checks, 2)
 				backlog, err := ix.Backlog(ctx, key)
@@ -134,7 +134,7 @@ func TestEmbeddingPreparedPageRechecksBeforePaidDispatch(t *testing.T) {
 					require.Zero(t, requests.Load(), "a prepared page must not dispatch already-received input")
 					require.Zero(t, backlog)
 				}
-				_, err = ix.FillWithArtifacts(ctx, key, source, recipe, client.EncodeFunc(), 2, batchOptions, nil, func(context.Context, string) (bool, error) { return true, nil })
+				_, err = ix.FillWithArtifacts(ctx, key, source, recipe, client.EncodeFunc(), 2, batchOptions, nil, nil, func(context.Context, string) (bool, error) { return true, nil })
 				require.NoError(t, err)
 				switch {
 				case strings.HasPrefix(mode, "received"):
@@ -219,7 +219,7 @@ func TestEmbeddingPreparedPageRevalidatesProjectAuthorityOncePerDispatchBatch(t 
 					return vectors, nil
 				}
 
-				_, err = ix.FillWithArtifacts(ctx, key, source, recipe, encode, 2, options, nil, eligible)
+				_, err = ix.FillWithArtifacts(ctx, key, source, recipe, encode, 2, options, nil, nil, eligible)
 				require.NoError(t, err)
 				require.Equal(t, expectedDispatches, dispatches.Load())
 				// Preparing the page authorizes the shared project once for both

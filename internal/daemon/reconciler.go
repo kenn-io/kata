@@ -359,7 +359,7 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) error {
 			return err
 		}
 		portableRecipe = &recipe
-		if _, err := r.idx.ReconcileArtifacts(ctx, key, r.store, recipe); err != nil {
+		if _, err := r.idx.ReconcileArtifacts(ctx, key, r.store, recipe, r.cfg.EmbeddingProjectAllowed); err != nil {
 			r.markError(err)
 			return err
 		}
@@ -379,7 +379,7 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) error {
 		// connection defers its remaining documents until the next fill, while
 		// successful connections still revalidate live authority per document.
 		checked := make(map[string]bool)
-		_, eligibilityDeferred, fillErr = r.idx.FillWithArtifactsDetailed(ctx, key, r.store, *portableRecipe, r.emb.EncodeFunc(), r.cfg.BatchSize, r.cfg.BatchOptions, r.markDocumentFilled, func(ctx context.Context, projectUID string) (bool, error) {
+		_, eligibilityDeferred, fillErr = r.idx.FillWithArtifactsDetailed(ctx, key, r.store, *portableRecipe, r.emb.EncodeFunc(), r.cfg.BatchSize, r.cfg.BatchOptions, r.markDocumentFilled, r.cfg.EmbeddingProjectAllowed, func(ctx context.Context, projectUID string) (bool, error) {
 			previous, exists := checked[projectUID]
 			if exists && !previous && r.cfg.EmbeddingProjectAllowed == nil {
 				return false, nil

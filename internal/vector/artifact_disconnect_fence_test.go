@@ -116,7 +116,7 @@ func TestEmbeddingArtifactFinishingAfterDisconnectFence(t *testing.T) {
 			}
 			done := make(chan error, 1)
 			go func() {
-				_, err := idx.FillWithArtifacts(ctx, key, source, recipe, encode, 0, nil, nil)
+				_, err := idx.FillWithArtifacts(ctx, key, source, recipe, encode, 0, nil, nil, nil)
 				done <- err
 			}()
 			select {
