@@ -166,17 +166,24 @@ func runMoveBatch(cmd *cobra.Command, args []string, refsFrom string) error {
 	commentErrs := postMoveBatchComments(cmd, a, results, actor, comment, handle)
 	printErr := printMoveBatch(cmd, results)
 	summary := summarizeMoveBatch(results)
+	summaryShown := summary.Unattempted > 0 && printErr == nil && currentOutputMode() == outputHuman
 	var outcome error
 	if a.ctx.Err() != nil {
 		msg := fmt.Sprintf("batch move cancelled; %d rows not attempted", summary.Unattempted)
 		if summary.Unknown > 0 {
 			msg = "batch move cancelled; check unknown rows before retrying"
+		} else if summaryShown {
+			msg = "batch move cancelled"
 		}
 		outcome = &cliError{Message: msg, Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
 	} else if summary.Unknown > 0 {
 		outcome = &cliError{Message: "check unknown rows before retrying", Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
 	} else if summary.Unattempted > 0 {
-		outcome = &cliError{Message: fmt.Sprintf("%d rows not attempted", summary.Unattempted), Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
+		msg := fmt.Sprintf("%d rows not attempted", summary.Unattempted)
+		if summaryShown {
+			msg = ""
+		}
+		outcome = &cliError{Message: msg, Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
 	} else if summary.Refused > 0 {
 		outcome = moveBatchRefusalError(printErr)
 	}

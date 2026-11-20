@@ -152,6 +152,68 @@ func TestMoveBatchCancelMarksOnlyDispatchedMovesUnknown(t *testing.T) {
 	require.Positive(t, unattempted)
 }
 
+func TestMoveBatchUnsentSummaryDoesNotRepeatOnStderr(t *testing.T) {
+	for _, cancelled := range []bool{false, true} {
+		t.Run(strconv.FormatBool(cancelled), func(t *testing.T) {
+			env, dir, source, target, issue := setupMoveCLIProjects(t)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			var moves atomic.Int32
+			baseURL := interceptingProxy(t, env, func(w http.ResponseWriter, r *http.Request) bool {
+				if r.URL.Path == "/api/v1/issues/"+issue.UID {
+					if cancelled {
+						cancel()
+					}
+					http.Error(w, "unavailable", http.StatusServiceUnavailable)
+					return true
+				}
+				if strings.HasSuffix(r.URL.Path, "/actions/move") {
+					moves.Add(1)
+				}
+				return false
+			})
+			path := filepath.Join(t.TempDir(), "refs")
+			require.NoError(t, os.WriteFile(path, []byte(issue.UID+"\n"), 0600))
+			out, stderr, err := executeRootCapture(t, contextWithBaseURL(ctx, baseURL), "--workspace", dir, "move", target.Name, "--refs-from", path)
+			require.Error(t, err)
+			require.Equal(t, ExitDaemonUnavail, exitCodeForErr(err, true))
+			require.Contains(t, out, "0 unknown, 1 unattempted")
+			if cancelled {
+				require.Contains(t, stderr, "batch move cancelled")
+			}
+			require.Zero(t, moves.Load())
+			stored, err := env.DB.IssueByID(t.Context(), issue.ID)
+			require.NoError(t, err)
+			require.Equal(t, source.ID, stored.ProjectID)
+			require.NotContains(t, stderr, "1 rows not attempted")
+		})
+	}
+}
+
+func TestMoveBatchUnsentCountSurvivesSummaryWriteFailure(t *testing.T) {
+	env, dir, _, target, issue := setupMoveCLIProjects(t)
+	baseURL := interceptingProxy(t, env, func(w http.ResponseWriter, r *http.Request) bool {
+		if r.URL.Path == "/api/v1/issues/"+issue.UID {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return true
+		}
+		return false
+	})
+	path := filepath.Join(t.TempDir(), "refs")
+	require.NoError(t, os.WriteFile(path, []byte(issue.UID+"\n"), 0600))
+	args := []string{"--workspace", dir, "move", target.Name, "--refs-from", path}
+	resetFlags(t)
+	cmd := newRootCmd()
+	cmd.SetOut(cliSearchErrorWriter{})
+	cmd.SetArgs(args)
+	err := cmd.ExecuteContext(contextWithBaseURL(t.Context(), baseURL))
+	require.ErrorIs(t, err, errCLISearchWrite)
+	require.Equal(t, ExitDaemonUnavail, exitCodeForErr(err, true))
+	var stderr bytes.Buffer
+	emitRootError(&stderr, cmd, args, err, runEEntered)
+	require.Contains(t, stderr.String(), "1 rows not attempted")
+}
+
 func TestMoveBatchFileParsingLimit(t *testing.T) {
 	rows, err := parseRefsFrom(strings.NewReader("\ufeffsource#abc4\nsource#def5\tother\n"), "target")
 	require.NoError(t, err)
