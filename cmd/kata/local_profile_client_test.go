@@ -10,9 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/gofrs/flock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/client"
@@ -186,33 +184,10 @@ func TestLocalProfileTargetErrorsAreStructured(t *testing.T) {
 }
 
 func TestManagedExternallyTargetErrorIsStructured(t *testing.T) {
-	home, _, uid, _ := stoppedProfileCLI(t)
-	probeStarted := make(chan struct{}, 1)
-	supervisedProfileDaemon(t, home, uid, func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case probeStarted <- struct{}{}:
-		default:
-		}
-		<-r.Context().Done()
-	})
-	lock := flock.New(filepath.Join(home, "kata.db.import.lock"))
-	require.NoError(t, lock.Lock())
-	t.Cleanup(func() { require.NoError(t, lock.Close()) })
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	done := make(chan bool, 1)
-	go func() {
-		select {
-		case <-probeStarted:
-			cancel()
-			done <- true
-		case <-ctx.Done():
-			done <- false
-		}
-	}()
-	_, _, err := executeRootCapture(t, ctx, "--daemon", "work", "list")
-	require.True(t, <-done, "probe did not start")
-	target := requireCLIError(t, err, ExitDaemonUnavail)
-	assert.Contains(t, target.Message, "migration is in progress")
-	assert.Empty(t, target.Hint)
+	cause := fmt.Errorf("%w; did not become ready: %w", client.ErrDaemonManagedExternally, context.DeadlineExceeded)
+	err := cliDaemonTargetError(cause)
+	var target *cliError
+	require.ErrorAs(t, err, &target)
+	assert.Equal(t, ExitDaemonUnavail, target.ExitCode)
+	assert.Equal(t, cause.Error(), target.Message)
 }

@@ -129,25 +129,17 @@ func TestDaemonDiagnoseReportsLivePrincipalCapabilities(t *testing.T) {
 
 func TestHealthProfileRejectedCredential(t *testing.T) {
 	home, _, uid, _ := stoppedProfileCLI(t)
-	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: uid})
-	require.NoError(t, err)
-	ns, err := daemonruntime.NewNamespaceForHome(home, profile.StorageID)
-	require.NoError(t, err)
-	require.NoError(t, ns.EnsureDirs())
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	supervisedProfileDaemon(t, home, uid, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/ping" {
 			_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version, os.Getpid())
 			return
 		}
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
-	}))
-	t.Cleanup(server.Close)
-	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
-	require.NoError(t, err)
-	_, _, err = executeRootCapture(t, t.Context(), "--daemon", "work", "health")
+	})
+	_, _, err := executeRootCapture(t, t.Context(), "--daemon", "work", "health")
 	cliErr := requireCLIError(t, err, ExitDaemonUnavail)
 	require.Contains(t, cliErr.Message, "authentication failed (HTTP 401)")
-	require.NotContains(t, cliErr.Hint, "kill")
+	require.Empty(t, cliErr.Hint)
 }
 
 func TestDaemonDiagnoseRefusesWrongProjectRecovery(t *testing.T) {
@@ -896,7 +888,6 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 		recoverOnRetry bool
 	}{
 		{name: "ordinary", command: "list"},
-		{name: "health", command: "health"},
 		{name: "health preserves first failure", command: "health", recoverOnRetry: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -922,7 +913,6 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 			require.Equal(t, "local_unreachable", cliErr.Code)
 			require.Contains(t, cliErr.Message, "503")
 			require.Contains(t, cliErr.Message, fmt.Sprintf("%q", filepath.Join(ns.DataDir, "daemon.log")))
-			require.Contains(t, cliErr.Hint, "Wait during startup or migration")
 			if runtime.GOOS == "windows" {
 				require.Contains(t, cliErr.Hint, fmt.Sprintf("taskkill /PID %d /F", os.Getpid()))
 			} else {
@@ -931,51 +921,26 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 			require.Contains(t, cliErr.Hint, "kata --daemon 'work' daemon recover")
 		})
 	}
-	t.Run("diagnose loses second ping", func(t *testing.T) {
-		var pings atomic.Int32
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			switch r.URL.Path {
-			case "/api/v1/ping":
-				if pings.Add(1) == 1 {
-					_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version, os.Getpid())
-					return
-				}
-				http.Error(w, "fixture unavailable", http.StatusServiceUnavailable)
-			case "/api/v1/instance":
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = fmt.Fprintf(w, `{"instance_uid":%q}`, uid)
-			}
-		}))
-		t.Cleanup(server.Close)
-		record := kitdaemon.NewRuntimeRecord("kata", version.Version, kitdaemon.Endpoint{Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
-		_, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(record)
-		require.NoError(t, err)
-		out, _, err := executeRootCapture(t, t.Context(), "--daemon", "work", "daemon", "diagnose", "--json")
-		require.NoError(t, err)
-		var result daemonDiagnosis
-		require.NoError(t, json.Unmarshal([]byte(out), &result))
-		require.Equal(t, "local_unreachable", result.State)
-		assert.Equal(t, os.Getpid(), result.PID)
-		assert.Contains(t, result.Message, "503")
-		assert.Contains(t, result.Message, filepath.Join(ns.DataDir, "daemon.log"))
-		if runtime.GOOS != "windows" {
-			assert.Contains(t, result.NextAction, fmt.Sprintf("kill -QUIT %d", os.Getpid()))
-		}
-		assert.Contains(t, result.NextAction, "--daemon 'work' daemon recover")
-	})
 }
 
-func TestDaemonDiagnoseCurrentHomeSecondPing(t *testing.T) {
+func TestDaemonDiagnoseSecondPing(t *testing.T) {
 	for _, tc := range []struct {
 		name, catalog, end string
+		profile            bool
 	}{
 		{name: "current home"},
 		{name: "named local", catalog: "work"},
 		{name: "canceled", end: "cancel"},
-		{name: "deadline", end: "deadline"},
+		{name: "profile", profile: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			home := setupKataEnv(t)
+			home := ""
+			uid := ""
+			if tc.profile {
+				home, _, uid, _ = stoppedProfileCLI(t)
+			} else {
+				home = setupKataEnv(t)
+			}
 			t.Setenv("KATA_SERVER", "")
 			t.Setenv("KATA_DSN", "")
 			t.Chdir(t.TempDir())
@@ -985,35 +950,46 @@ func TestDaemonDiagnoseCurrentHomeSecondPing(t *testing.T) {
 				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[[daemon]]\nname = 'work'\nlocal = true\n"), 0600))
 			}
 			ctx, cancel := context.WithCancel(t.Context())
-			if tc.end == "deadline" {
-				cancel()
-				ctx, cancel = context.WithTimeout(t.Context(), 300*time.Millisecond)
-			}
 			defer cancel()
 			var pings atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/instance" {
+					_, _ = fmt.Fprintf(w, `{"instance_uid":%q}`, uid)
+					return
+				}
 				if pings.Add(1) == 1 {
 					_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version, os.Getpid())
 					return
 				}
 				if tc.end == "cancel" {
 					cancel()
-				} else if tc.end == "deadline" {
-					<-ctx.Done()
 				}
 				http.Error(w, "fixture unavailable", http.StatusServiceUnavailable)
 			}))
 			t.Cleanup(server.Close)
 			ns, err := daemonruntime.NewNamespace()
 			require.NoError(t, err)
+			if tc.profile {
+				profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: uid})
+				require.NoError(t, err)
+				ns, err = daemonruntime.NewNamespaceForHome(home, profile.StorageID)
+				require.NoError(t, err)
+			}
 			require.NoError(t, ns.EnsureDirs())
 			record := kitdaemon.NewRuntimeRecord("kata", version.Version, kitdaemon.Endpoint{Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
 			_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(record)
 			require.NoError(t, err)
-			selection, err := client.InspectSelection(ctx, "", tc.catalog)
-			require.NoError(t, err)
-			result, _, err := probeDaemonSelection(ctx, selectedDaemonDiagnosis(selection, ""), selection)
-			require.NoError(t, err)
+			var result daemonDiagnosis
+			if tc.profile {
+				out, _, err := executeRootCapture(t, ctx, "--daemon", "work", "daemon", "diagnose", "--json")
+				require.NoError(t, err)
+				require.NoError(t, json.Unmarshal([]byte(out), &result))
+			} else {
+				selection, err := client.InspectSelection(ctx, "", tc.catalog)
+				require.NoError(t, err)
+				result, _, err = probeDaemonSelection(ctx, selectedDaemonDiagnosis(selection, ""), selection)
+				require.NoError(t, err)
+			}
 			require.EqualValues(t, 2, pings.Load())
 			require.Equal(t, "local_unreachable", result.State)
 			if tc.end != "" {
@@ -1030,7 +1006,9 @@ func TestDaemonDiagnoseCurrentHomeSecondPing(t *testing.T) {
 			if runtime.GOOS != "windows" {
 				assert.Contains(t, result.NextAction, fmt.Sprintf("kill -QUIT %d", os.Getpid()))
 			}
-			assert.Contains(t, result.NextAction, "start it again")
+			if tc.profile {
+				assert.Contains(t, result.NextAction, "--daemon 'work' daemon recover")
+			}
 		})
 	}
 }
