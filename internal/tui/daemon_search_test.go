@@ -157,6 +157,30 @@ func TestDaemonSearch_ErrorKeepsRowsAndShowsInStatusLine(t *testing.T) {
 	require.Contains(t, stripANSI(m.list.status), "embedding service refused")
 }
 
+func TestDaemonSearch_FailureBeforeAnyAnswerShowsOnceAtEverySize(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		width, height int
+		want          int
+	}{
+		{"full height", 80, 24, 1},
+		{"compact", 100, 8, 1},
+		{"split", 160, 40, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, api := daemonSearchFixture(t)
+			api.searchFn = func(SearchQuery) (*SearchAnswer, error) { return nil, errors.New("embedding service refused") }
+			m = resizeModel(m, tc.width, tc.height)
+			m = openBarFromCmd(t, m, '/')
+			m, _ = stepModel(m, ctrlT)
+			m, cmds := typeText(m, "pay")
+			m = settleSearch(m, cmds...)
+
+			require.Equal(t, tc.want, strings.Count(stripANSI(m.View().Content), "search failed"))
+		})
+	}
+}
+
 func TestDaemonSearch_EscRestoresPreviousListAndDropsPendingAsk(t *testing.T) {
 	m, api := daemonSearchFixture(t)
 	_, beta, gamma := searchTestIssues()

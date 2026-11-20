@@ -47,6 +47,7 @@ type viewChrome struct {
 	deleteHidden  bool             // the connected credentials cannot delete
 	moveHidden    bool             // move is not on offer (credentials, saved context, or a pending lookup)
 	daemonSearch  daemonSearchHint // the search bar can ask the daemon (one project in scope)
+	statusOnInfo  bool             // the info line draws the list's status (full list, or split with list focus)
 }
 
 // View renders the list under the M3.5 chrome layer:
@@ -66,7 +67,8 @@ func (lm listModel) View(width, height int, chrome viewChrome) string {
 		return lm.renderTinyFallback(width, height, chrome)
 	}
 	title := renderTitleBar(width, chrome.scope, chrome.version, chrome.daemon)
-	stats := renderStatsLine(width, lm.issueCounts(), lm.filter, chrome.input, lm.rankedNote())
+	chrome.statusOnInfo = true
+	stats := renderStatsLine(width, lm.issueCounts(), lm.filter, chrome.input, lm.statsNote(chrome))
 	helpRows := listHelpRows(lm, chrome)
 	footerLines := helpLines(helpRows, width)
 	footer := renderFooterHelpTable(helpRows, width)
@@ -96,8 +98,17 @@ func (lm listModel) View(width, height int, chrome viewChrome) string {
 // title-bar / info-line / footer are composed by renderSplit, not
 // here — this returns just the body region.
 func (lm listModel) ViewBody(width, bodyRows int, chrome viewChrome) string {
-	return renderStatsLine(width, lm.issueCounts(), lm.filter, chrome.input, lm.rankedNote()) + "\n" +
+	return renderStatsLine(width, lm.issueCounts(), lm.filter, chrome.input, lm.statsNote(chrome)) + "\n" +
 		lm.renderBodyArea(width, bodyRows-1, chrome)
+}
+
+// statsNote is the daemon-search note for the stats line. A failure before
+// any answer is left off when the info line already draws it in full.
+func (lm listModel) statsNote(chrome viewChrome) string {
+	if chrome.statusOnInfo && lm.ranked.err != nil && lm.status != "" && !lm.rankedShown() {
+		return ""
+	}
+	return lm.rankedNote()
 }
 
 // listMinHeight is the smallest height for the full list chrome.
