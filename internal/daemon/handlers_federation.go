@@ -12,6 +12,7 @@ import (
 	"go.kenn.io/kata/internal/federation/joincommand"
 	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 	"go.kenn.io/kata/internal/httpurl"
+	"go.kenn.io/kata/internal/shellquote"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -1167,7 +1168,7 @@ func federationRelayLeaveAPIError(ctx context.Context, store db.Storage, binding
 	if lookupErr != nil {
 		return federationReplicaAPIError(err)
 	}
-	hint := fmt.Sprintf("let the bridge sync its retained deliveries, or detach a bridge whose hub is gone with `kata federation bridge disconnect --project %s --local-only`", joincommand.ShellQuote(project.Name))
+	hint := fmt.Sprintf("let the bridge sync its retained deliveries, or detach a bridge whose hub is gone with `kata federation bridge disconnect --project %s --local-only`", shellquote.Quote(project.Name))
 	if errors.Is(err, db.ErrFederationResetBlockedByDownstream) {
 		hint = "revoke or detach the downstream relay enrollments with `kata federation revoke <id>`, then retry"
 	}

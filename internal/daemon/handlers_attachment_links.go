@@ -10,8 +10,8 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/docbank"
-	"go.kenn.io/kata/internal/federation/joincommand"
 	"go.kenn.io/kata/internal/metadata"
+	"go.kenn.io/kata/internal/shellquote"
 )
 
 var docbankLinkErrors = map[int]error{
@@ -88,7 +88,7 @@ func attachmentForVersion(iss db.Issue, version docbank.Version) (string, metada
 		}
 		attachment, valid := metadata.Valid(raw)
 		if !valid {
-			message := fmt.Sprintf("cannot read %q; remove it with kata docbank attachments rm %s %s", key, joincommand.ShellQuote(iss.ShortID), joincommand.ShellQuote(id))
+			message := fmt.Sprintf("cannot read %q; remove it with kata docbank attachments rm %s %s", key, shellquote.Quote(iss.ShortID), shellquote.Quote(id))
 			return "", metadata.Attachment{}, api.NewError(400, "attachment_invalid", message, "", nil)
 		}
 		if attachment.DocbankVersion != version.ID {

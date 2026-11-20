@@ -22,8 +22,8 @@ import (
 
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
-	"go.kenn.io/kata/internal/federation/joincommand"
 	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
+	"go.kenn.io/kata/internal/shellquote"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
@@ -115,7 +115,7 @@ func (e *LocalDaemonUnreachableError) RecoveryAdvice() string {
 		if goruntime.GOOS == "windows" {
 			return message + "Then run in PowerShell kata --daemon '" + strings.ReplaceAll(e.Profile, "'", "''") + "' daemon recover"
 		}
-		return message + "Then run kata --daemon " + joincommand.ShellQuote(e.Profile) + " daemon recover"
+		return message + "Then run kata --daemon " + shellquote.Quote(e.Profile) + " daemon recover"
 	case e.autoStarted:
 		return message + "Then rerun the original command or any command that autostarts the daemon. daemon status, daemon diagnose, and health only inspect"
 	default:
