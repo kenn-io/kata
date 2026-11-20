@@ -642,9 +642,9 @@ Held polls need a few things from the deployment:
   says so once for each binding.
 
 The hub checks the poll's full authorization again before it answers a held
-poll, including the signing key of a signed poll, so a revoked credential,
-removed membership, or retired signing key stops the poll when it wakes or
-expires. Hubs that share a PostgreSQL database wake each other's held polls
+poll, including the signing key of a signed poll, and checks that key once more
+after the final read. A revoked credential, removed membership, or retired
+signing key stops the poll when it wakes or expires. Hubs that share a PostgreSQL database wake each other's held polls
 with `LISTEN/NOTIFY`; a SQLite hub wakes them in process. A wake names no
 project, so a commit on one hub process wakes every held poll on the others,
 and each poll reads its own project again.

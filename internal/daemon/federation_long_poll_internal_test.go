@@ -17,6 +17,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 )
 
 func TestFederationPollWaitsKeepHalfTheControlAdmissionSlotsFree(t *testing.T) {
@@ -209,4 +210,36 @@ func TestFederationPollWaitCapsOversizedWaits(t *testing.T) {
 	wait, err := federationPollWait(t.Context(), api.OptionalInt{IsSet: true, Value: 9223372037})
 	require.NoError(t, err)
 	assert.Equal(t, federationPollWaitMax, wait)
+}
+
+// A held signed poll can pass its signing recheck just before the key's
+// deadline and then read events committed after it. The hub must not return
+// that page under the retired key.
+func TestHeldSignedPollRechecksItsKeyAfterTheFinalRead(t *testing.T) {
+	waits := newFederationPollWaits(16)
+	project := db.Project{ID: 7, UID: "01HZNQ7VFPK1XGD8R5MABCD4EA"}
+	retired := false
+	ctx := withFederationSigningRecheck(t.Context(), func() error {
+		if retired {
+			return signingpolicy.ErrKeyRejected
+		}
+		return nil
+	})
+	waiter, ok := waits.admit(ctx, NewEventBroadcaster(), 1, project)
+	require.True(t, ok)
+	defer waiter.release()
+	waits.remote.wake()
+	reauthorize := func() (context.Context, error) {
+		return ctx, recheckFederationSigning(ctx)
+	}
+	read := func(context.Context) (db.FederationReadResult, error) {
+		// The key's deadline passes while the read waits for its snapshot.
+		retired = true
+		return db.FederationReadResult{Events: []db.Event{{ID: 2}}, NextAfterID: 2}, nil
+	}
+	_, err := holdFederationPoll(ctx, waiter, time.Minute, db.FederationReadResult{NextAfterID: 1}, reauthorize, read)
+	var apiErr *api.APIError
+	require.ErrorAs(t, err, &apiErr, "a page read after the key retired must not be returned")
+	assert.Equal(t, http.StatusUnauthorized, apiErr.Status)
+	assert.Equal(t, "signature_invalid", apiErr.Code)
 }

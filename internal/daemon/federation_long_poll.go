@@ -378,6 +378,11 @@ func holdFederationPoll(
 		if result, err = read(readCtx); err != nil {
 			return result, err
 		}
+		// The key can retire while the read waits for its snapshot, so the
+		// page it returns is checked against the key again.
+		if err := recheckFederationSigning(ctx); err != nil {
+			return result, err
+		}
 	}
 	return result, nil
 }

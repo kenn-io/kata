@@ -304,8 +304,8 @@ the hub accepts in `X-Kata-Federation-Poll-Wait-Max`, 45 seconds. A spoke holds
 polls only at hubs that send that header and keeps its interval pull
 otherwise. Before answering a held poll, the hub runs the request's full
 federation authorization again without the per-request cache, and checks a
-signed request's signing key again, so revocation or a retired key ends a held
-poll at its next wake or at its expiry. The hub bounds held polls in total, per
+signed request's signing key again before and after it reads the page, so
+revocation or a retired key ends a held poll at its next wake or at its expiry. The hub bounds held polls in total, per
 credential, and for signed requests holding a control slot; past a bound it
 answers at once. Hub processes sharing a PostgreSQL database relay commit
 wakeups to each other with `LISTEN/NOTIFY` on a dedicated connection. A wakeup
