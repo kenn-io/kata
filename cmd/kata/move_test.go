@@ -40,6 +40,20 @@ func TestMoveCLI_RoundTrip(t *testing.T) {
 	assert.NotEmpty(t, stored.ShortID)
 }
 
+func TestMoveCLI_EmptyRefsFileDoesNotMoveTree(t *testing.T) {
+	env, dir, source, target, root := setupMoveCLIProjects(t)
+	child, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "child", Author: "tester", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
+	require.NoError(t, err)
+	_, _, err = executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "move", "--refs-from", "", source.Name+"#"+root.ShortID, target.Name)
+	assert.Error(t, err)
+	storedRoot, err := env.DB.IssueByID(t.Context(), root.ID)
+	require.NoError(t, err)
+	assert.Equal(t, source.ID, storedRoot.ProjectID)
+	storedChild, err := env.DB.IssueByID(t.Context(), child.ID)
+	require.NoError(t, err)
+	assert.Equal(t, source.ID, storedChild.ProjectID)
+}
+
 func TestMoveCLI_DryRunDoesNotMoveIssue(t *testing.T) {
 	env, dir, source, target, issue := setupMoveCLIProjects(t)
 
