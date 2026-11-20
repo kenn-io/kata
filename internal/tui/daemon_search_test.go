@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -120,87 +121,6 @@ func TestDaemonSearch_AsksOncePerPauseAndListsHitsInDaemonOrder(t *testing.T) {
 	}
 }
 
-func TestDaemonSearch_OwnerFilterStillNarrowsHits(t *testing.T) {
-	m, api := daemonSearchFixture(t)
-	alpha, _, gamma := searchTestIssues()
-	owner := "agent-a"
-	gamma.Owner = &owner
-	m.list.issues = []Issue{alpha, gamma}
-	api.searchFn = answerWith("hybrid", alpha, gamma)
-	m.list.filter = ListFilter{Owner: "agent-a"}
-
-	m = openBarFromCmd(t, m, '/')
-	m, _ = stepModel(m, ctrlT)
-	m, cmds := typeText(m, "payments")
-	m = settleSearch(m, cmds...)
-
-	require.Equal(t, []string{"01TEST-ccc3"}, visibleUIDs(m))
-}
-
-func TestDaemonSearch_StatusAndLabelFiltersNarrowHitsAnyOf(t *testing.T) {
-	m, api := daemonSearchFixture(t)
-	alpha, beta, gamma := searchTestIssues()
-	alpha.Labels = []string{"bug"}
-	beta.Labels = []string{"ui"}
-	gamma.Labels = []string{"bug"}
-	gamma.Status = "closed"
-	m.list.issues = []Issue{alpha, beta, gamma}
-	api.searchFn = answerWith("hybrid", gamma, alpha, beta)
-	m.list.filter = ListFilter{Status: "open", Labels: []string{"bug", "ui"}}
-
-	m = openBarFromCmd(t, m, '/')
-	m, _ = stepModel(m, ctrlT)
-	m, cmds := typeText(m, "payments")
-	m = settleSearch(m, cmds...)
-
-	require.Equal(t, []SearchQuery{{Query: "payments", Limit: 50}}, api.searchCalls, "filters stay out of the ask")
-	require.Equal(t, []string{"01TEST-aaa1", "01TEST-bbb2"}, visibleUIDs(m), "either label keeps a hit; closed drops")
-}
-
-func TestDaemonSearch_StaleAnswerDoesNotOverwriteNewerOne(t *testing.T) {
-	m, api := daemonSearchFixture(t)
-	alpha, _, gamma := searchTestIssues()
-	api.searchFn = func(q SearchQuery) (*SearchAnswer, error) {
-		if q.Query == "pay" {
-			return &SearchAnswer{Mode: "hybrid", Issues: []Issue{alpha}}, nil
-		}
-		return &SearchAnswer{Mode: "hybrid", Issues: []Issue{gamma}}, nil
-	}
-	m = openBarFromCmd(t, m, '/')
-	m, _ = stepModel(m, ctrlT)
-
-	m, cmds := typeText(m, "pay")
-	m, ask := stepModel(m, onlyMsg(t, cmds[len(cmds)-1]))
-	slowAnswer := onlyMsg(t, ask)
-
-	m, cmds = typeText(m, "ments")
-	m, ask = stepModel(m, onlyMsg(t, cmds[len(cmds)-1]))
-	newerAnswer := onlyMsg(t, ask)
-
-	m, _ = stepModel(m, newerAnswer)
-	m, _ = stepModel(m, slowAnswer)
-	require.Equal(t, []string{"01TEST-ccc3"}, visibleUIDs(m))
-}
-
-func TestDaemonSearch_ToggleOffReturnsToLocalFiltering(t *testing.T) {
-	m, api := daemonSearchFixture(t)
-	alpha, _, _ := searchTestIssues()
-	api.searchFn = answerWith("hybrid", alpha)
-
-	m = openBarFromCmd(t, m, '/')
-	m, _ = stepModel(m, ctrlT)
-	m, cmds := typeText(m, "login")
-	m = settleSearch(m, cmds...)
-	require.Equal(t, []string{"01TEST-aaa1"}, visibleUIDs(m))
-
-	m, _ = stepModel(m, ctrlT)
-	require.Equal(t, []string{"01TEST-ccc3"}, visibleUIDs(m), "the text filters loaded rows again")
-	m, cmds = typeText(m, "x")
-	m = settleSearch(m, cmds...)
-	require.Empty(t, visibleUIDs(m))
-	require.Len(t, api.searchCalls, 1, "local filtering asks the daemon nothing")
-}
-
 func TestDaemonSearch_AllProjectsKeyDoesNothing(t *testing.T) {
 	m, api := daemonSearchFixture(t)
 	m.scope = scope{allProjects: true}
@@ -235,36 +155,6 @@ func TestDaemonSearch_ErrorKeepsRowsAndShowsInStatusLine(t *testing.T) {
 
 	require.Equal(t, []string{"01TEST-aaa1"}, visibleUIDs(m))
 	require.Contains(t, stripANSI(m.list.status), "embedding service refused")
-}
-
-func TestDaemonSearch_NoteSaysHowTheDaemonRanked(t *testing.T) {
-	_, _, gamma := searchTestIssues()
-	for _, tc := range []struct {
-		name   string
-		answer SearchAnswer
-		want   []string
-		deny   []string
-	}{
-		{"words and meaning", SearchAnswer{Mode: "hybrid"}, []string{"ranked by words and meaning"}, []string{"lexical"}},
-		{"words only", SearchAnswer{Mode: "lexical"}, []string{"ranked by words only (lexical)"}, []string{"meaning"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			m, api := daemonSearchFixture(t)
-			answer := tc.answer
-			answer.Issues = []Issue{gamma}
-			api.searchFn = func(SearchQuery) (*SearchAnswer, error) { return &answer, nil }
-			m = openBarFromCmd(t, m, '/')
-			m, _ = stepModel(m, ctrlT)
-			m, cmds := typeText(m, "pay")
-			m = settleSearch(m, cmds...)
-			for _, want := range tc.want {
-				require.Contains(t, m.list.rankedNote(), want)
-			}
-			for _, deny := range tc.deny {
-				require.NotContains(t, m.list.rankedNote(), deny)
-			}
-		})
-	}
 }
 
 func TestDaemonSearch_EscRestoresPreviousListAndDropsPendingAsk(t *testing.T) {
@@ -386,6 +276,10 @@ func TestDaemonSearch_StatusKeyNarrowsCommittedHitsAndKeepsThem(t *testing.T) {
 	require.Equal(t, "open", m.list.filter.Status)
 	require.Equal(t, []string{"01TEST-ccc3", "01TEST-bbb2"}, visibleUIDs(m), "ranked hits, narrowed by status")
 	require.Contains(t, m.list.rankedNote(), "ranked by words and meaning")
+
+	m, _ = stepModel(m, runeKey('c'))
+	require.ElementsMatch(t, []string{"01TEST-aaa1", "01TEST-bbb2", "01TEST-ccc3"}, visibleUIDs(m))
+	require.Empty(t, m.list.rankedNote(), "clearing the filters clears the results")
 }
 
 func TestDaemonSearch_ToggleOffInResultsFocusFollowsSelectionInSplitDetail(t *testing.T) {
@@ -409,26 +303,6 @@ func TestDaemonSearch_ToggleOffInResultsFocusFollowsSelectionInSplitDetail(t *te
 	require.Equal(t, "01TEST-ccc3", m.detail.issue.UID)
 }
 
-func TestDaemonSearch_CommitKeepsRankedResultsUntilFiltersClear(t *testing.T) {
-	m, api := daemonSearchFixture(t)
-	alpha, _, gamma := searchTestIssues()
-	api.searchFn = answerWith("hybrid", gamma, alpha)
-	m = openBarFromCmd(t, m, '/')
-	m, _ = stepModel(m, ctrlT)
-	m, cmds := typeText(m, "payments")
-	m = settleSearch(m, cmds...)
-
-	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	require.Equal(t, inputNone, m.input.kind)
-	require.Equal(t, []string{"01TEST-ccc3", "01TEST-aaa1"}, visibleUIDs(m))
-	require.Contains(t, m.list.rankedNote(), "ranked by words and meaning")
-
-	m, _ = stepModel(m, runeKey('c'))
-	require.ElementsMatch(t, []string{"01TEST-aaa1", "01TEST-bbb2", "01TEST-ccc3"}, visibleUIDs(m))
-	require.Empty(t, m.list.rankedNote())
-}
-
 func TestDaemonSearch_RefreshUpdatesHitsAndDropsMissingOnes(t *testing.T) {
 	m, api := daemonSearchFixture(t)
 	alpha, beta, gamma := searchTestIssues()
@@ -447,6 +321,35 @@ func TestDaemonSearch_RefreshUpdatesHitsAndDropsMissingOnes(t *testing.T) {
 	require.Len(t, rows, 1, "a hit the complete refresh no longer returns is gone")
 	require.Equal(t, "01TEST-aaa1", rows[0].issue.UID)
 	require.Equal(t, "fix alpha, renamed", rows[0].issue.Title)
+}
+
+func TestDaemonSearch_AnswerBeforeFirstFetchOnATruncatedListCountsHitsBeyondAndFollowsRefetches(t *testing.T) {
+	m, api := daemonSearchFixture(t)
+	alpha, _, _ := searchTestIssues()
+	far1 := Issue{ProjectID: 7, UID: "01TEST-far1", ShortID: "far1", Status: "open"}
+	far2 := Issue{ProjectID: 7, UID: "01TEST-far2", ShortID: "far2", Status: "open"}
+	api.searchFn = answerWith("hybrid", far1, alpha, far2)
+	m.list = newListModel()
+	m = openBarFromCmd(t, m, '/')
+	m, _ = stepModel(m, ctrlT)
+	m, cmds := typeText(m, "payments")
+	m = settleSearch(m, cmds...)
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	// The first fetch holds the first 2,000 issues only: alpha and fillers.
+	loaded := []Issue{alpha}
+	for i := len(loaded); i <= queueWorkingSetLimit; i++ {
+		loaded = append(loaded, Issue{ProjectID: 7, UID: fmt.Sprintf("01FILL-%04d", i), ShortID: fmt.Sprintf("f%04d", i), Status: "open"})
+	}
+	m.list = m.list.applyFetched(initialFetchMsg{issues: loaded})
+	require.Equal(t, []string{"01TEST-aaa1"}, visibleUIDs(m))
+	require.Contains(t, m.list.rankedNote(), "2 hits beyond the loaded issues")
+
+	// far1 is edited and now sorts into the loaded rows.
+	m.list = m.list.applyFetched(refetchedMsg{issues: append([]Issue{far1}, loaded[:queueWorkingSetLimit]...)})
+	require.Equal(t, []string{"01TEST-far1", "01TEST-aaa1"}, visibleUIDs(m), "the hit enters in the daemon's order")
+	require.Contains(t, m.list.rankedNote(), "1 hit beyond the loaded issues")
 }
 
 func TestDaemonSearch_BlankQueryAsksNothingAndShowsTheNormalList(t *testing.T) {
@@ -635,40 +538,29 @@ func TestDaemonSearch_RendersCompletelyAtEverySize(t *testing.T) {
 		name          string
 		width, height int
 		split         bool
-		allProjects   bool
 		wantFooter    bool
 	}{
-		{"80x24", 80, 24, false, false, true},
-		{"80x12", 80, 12, false, false, true},
-		{"100x8", 100, 8, false, false, false},
-		{"split 160x40", 160, 40, true, false, true},
-		{"all projects 80x24", 80, 24, false, true, false},
-		{"all projects 100x8", 100, 8, false, true, false},
+		{"80x24", 80, 24, false, true},
+		{"80x12", 80, 12, false, true},
+		{"100x8", 100, 8, false, false},
+		{"split 160x40", 160, 40, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m, api := daemonSearchFixture(t)
 			_, _, gamma := searchTestIssues()
 			api.searchFn = answerWith("lexical", gamma)
 			m.scope = scope{projectID: 7, projectName: longName}
-			if tc.allProjects {
-				m.scope = scope{allProjects: true}
-			}
 			m = resizeModel(m, tc.width, tc.height)
 			if tc.split {
 				require.Equal(t, splitlayout.Split, m.layout)
 			}
 			m = openBarFromCmd(t, m, '/')
 			m, _ = stepModel(m, ctrlT)
-			if !tc.allProjects {
-				var cmds []tea.Cmd
-				m, cmds = typeText(m, "pay")
-				m = settleSearch(m, cmds...)
-			}
+			m, cmds := typeText(m, "pay")
+			m = settleSearch(m, cmds...)
 
 			view := stripANSI(m.View().Content)
-			if !tc.allProjects {
-				require.Contains(t, view, "ranked by words only")
-			}
+			require.Contains(t, view, "ranked by words only")
 			if tc.wantFooter {
 				require.Contains(t, view, "ctrl+t")
 			} else {

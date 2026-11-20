@@ -2466,8 +2466,8 @@ func (m Model) cancelInput() (Model, tea.Cmd) {
 		// An answer still in flight belongs to the query being discarded.
 		// The saved answer predates any refresh since the bar opened, so bring
 		// it up to the loaded rows before it comes back.
-		m.list.ranked = m.input.preRanked.discardInFlight().loadedOnly(m.list.issues)
-		m.searchTickGen++
+		m.list.ranked = m.input.preRanked.discardInFlight()
+		m.list = m.list.narrowRanked()
 		snapshot := m.input.preListSelection
 		m.list.cursor = snapshot.cursor
 		m.list.windowStart = snapshot.windowStart

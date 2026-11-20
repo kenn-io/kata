@@ -37,31 +37,40 @@ type rankedSearch struct {
 	hasAnswer bool
 	// answered is the query the hits answer.
 	answered SearchQuery
-	// hits are the answer's issues that are among the loaded rows, in the
-	// daemon's order, each the list's own copy of the issue. A refresh swaps in
-	// the fresher copy and drops a hit the list no longer holds.
-	hits []Issue
-	// beyond counts the answer's hits that were not among the loaded rows.
+	// all is the answer's issues in the daemon's order. hits are those among
+	// the loaded rows, each the list's own copy, rebuilt from all on every
+	// fetch so a hit enters or leaves as the loaded rows change.
+	all, hits []Issue
+	// beyond counts the answer's hits that are not among the loaded rows.
 	beyond  int
 	lexical bool
 }
 
-// loadedOnly keeps the hits the loaded issues hold, in the daemon's order, each
-// as the list's own copy. The route's hits carry no labels or planning dates and
+// loadedOnly rebuilds hits from all: the ones the loaded issues hold, in the
+// daemon's order, each as the list's own copy. The route's hits carry no labels or planning dates and
 // may be stale; the loaded rows are what every other list filter reads.
 func (r rankedSearch) loadedOnly(issues []Issue) rankedSearch {
 	byUID := make(map[string]Issue, len(issues))
 	for _, iss := range issues {
 		byUID[iss.UID] = iss
 	}
-	hits := make([]Issue, 0, len(r.hits))
-	for _, hit := range r.hits {
+	r.hits = make([]Issue, 0, len(r.all))
+	for _, hit := range r.all {
 		if cur, ok := byUID[hit.UID]; ok {
-			hits = append(hits, cur)
+			r.hits = append(r.hits, cur)
 		}
 	}
-	r.hits = hits
+	r.beyond = len(r.all) - len(r.hits)
 	return r
+}
+
+// narrowRanked applies loadedOnly once there are loaded rows to judge against:
+// a list still loading is empty, so its hits stay as the answer gave them.
+func (lm listModel) narrowRanked() listModel {
+	if !lm.loading {
+		lm.ranked = lm.ranked.loadedOnly(lm.issues)
+	}
+	return lm
 }
 
 // discardInFlight keeps a saved answer but makes any ask still out stale. The
@@ -130,7 +139,11 @@ func (lm listModel) rankedNote() string {
 		}
 		if lm.truncated && r.beyond > 0 {
 			// The list holds the first issues only; say what the answer had past them.
-			note += fmt.Sprintf(" · %d hits beyond the loaded issues", r.beyond)
+			hits := "hits"
+			if r.beyond == 1 {
+				hits = "hit"
+			}
+			note += fmt.Sprintf(" · %d %s beyond the loaded issues", r.beyond, hits)
 		}
 		return note
 	case r.err != nil:
@@ -177,7 +190,6 @@ func (m Model) toggleDaemonSearch() (Model, tea.Cmd) {
 		return m, nil
 	}
 	m.daemonSearch = !m.daemonSearch
-	m.searchTickGen++
 	prevPID, prevUID, prevHas := highlightedIdentity(m.list)
 	m = m.syncDaemonSearch()
 	m.list = m.list.dropRanked()
@@ -296,17 +308,12 @@ func (m Model) applyAnswer(query SearchQuery, answer *SearchAnswer) (Model, tea.
 	}
 	r.err = nil
 	r.hasAnswer = true
-	r.hits, r.beyond = answer.Issues, 0
+	r.all, r.hits = answer.Issues, answer.Issues
 	r.answered = query
 	r.lexical = answer.Mode == "" || answer.Mode == "lexical"
 	prevPID, prevUID, prevHas := highlightedIdentity(m.list)
-	if !m.list.loading {
-		// A list still loading is empty, so nothing can be judged against it;
-		// its first fetch narrows the hits.
-		r = r.loadedOnly(m.list.issues)
-		r.beyond = len(answer.Issues) - len(r.hits)
-	}
 	m.list.ranked = r
+	m.list = m.list.narrowRanked()
 	m.list.cursor, m.list.windowStart = 0, 0
 	m.list.selectedUID, m.list.selectedProjectID = "", 0
 	m.list = m.list.syncSelection(m.list.visibleRows())

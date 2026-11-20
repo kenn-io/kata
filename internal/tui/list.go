@@ -894,13 +894,13 @@ func (lm listModel) storeFetched(msg tea.Msg) listModel {
 		lm.err = m.err
 		if m.err == nil {
 			lm.issues, lm.truncated = trimQueueWorkingSet(m.issues)
-			lm.ranked = lm.ranked.loadedOnly(lm.issues)
+			lm = lm.narrowRanked()
 		}
 	case refetchedMsg:
 		lm.err = m.err
 		if m.err == nil {
 			lm.issues, lm.truncated = trimQueueWorkingSet(m.issues)
-			lm.ranked = lm.ranked.loadedOnly(lm.issues)
+			lm = lm.narrowRanked()
 		}
 	}
 	return lm

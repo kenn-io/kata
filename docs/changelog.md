@@ -43,7 +43,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Find an issue in `kata tui` by what it is about: press `/` in a project, then
   `ctrl+t` to ask the daemon for ranked results instead of filtering the loaded
-  rows. A note shows whether it ranked by words and meaning or by words only.
+  rows. Results come from the issues the TUI has loaded (up to 2,000 per
+  project), and a note shows whether the daemon ranked by words and meaning or
+  by words only, and counts hits beyond the loaded issues.
   See [search by meaning in the TUI](guide/semantic-search.md#search-by-meaning-in-the-tui).
 - Let a service manager own the local daemon. Set top-level `autostart = false`
   in `config.toml`, and Kata commands, including `kata daemon recover`, wait up
