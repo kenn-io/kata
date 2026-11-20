@@ -190,6 +190,16 @@ type FederationProjectStatus struct {
 	LastError                   *string                       `json:"last_error,omitempty"`
 	HasSyncError                bool                          `json:"has_sync_error,omitempty" doc:"True when a sync error was recorded and omit_errors removed its text."`
 	LastResetAt                 *time.Time                    `json:"last_reset_at,omitempty"`
+	SyncRetry                   *FederationSyncRetry          `json:"sync_retry,omitempty" doc:"Present while this daemon's federation runner waits before it contacts the hub for this spoke binding again."`
+}
+
+// FederationSyncRetry is a spoke binding's automatic retry schedule after the
+// hub refused, throttled, or could not serve its last attempt.
+type FederationSyncRetry struct {
+	Reason        string    `json:"reason" enum:"refused,unavailable,relay_cross_project_links" doc:"refused: the hub rejected the credential (401 or 403); it waits up to 15 minutes between attempts, or longer when the hub also sent Retry-After, and retries at once when the credential or binding changes. unavailable: the hub throttled the request or was unavailable (429 or 503); it waits up to 5 minutes, or longer when the hub sent Retry-After. relay_cross_project_links: a relay hub refused the project's cross-project issue links."`
+	HTTPStatus    int       `json:"http_status" doc:"Hub response status of the last attempt."`
+	Failures      int       `json:"failures" doc:"Consecutive attempts that ended for this reason."`
+	NextAttemptAt time.Time `json:"next_attempt_at" doc:"Earliest time the runner contacts the hub again. The attempt happens on the runner's first pass at or after this time."`
 }
 
 // FederationQuarantineSummary is an unresolved poisoned federation batch shown

@@ -36,6 +36,7 @@ func TestPostgresReconcilerWritesHonorTransactionFence(t *testing.T) {
 	_, err = idx.RefreshMirror(fenced, store)
 	require.ErrorIs(t, err, denied)
 	require.ErrorIs(t, idx.EnsureBuilding(fenced, "first", generation), denied, "an active generation still checks authority before the provider runs")
+	require.ErrorIs(t, idx.EnsureBuilding(fenced, "second", generation), denied, "Kit must reject a building generation without authority")
 	require.ErrorIs(t, idx.SaveVectorsForTest(fenced, "first", issue.UID, revision, []kitvec.ChunkVector{{ChunkIndex: 0, Vector: kitvec.Vector{1, 0}}}), denied)
 	require.ErrorIs(t, idx.CutOver(fenced, "second"), denied)
 	var mirror, generations, chunks, stamps int
@@ -64,4 +65,46 @@ func TestPostgresReconcilerWritesHonorTransactionFence(t *testing.T) {
 	rows, err := idx.MirrorRowsForTest(ctx)
 	require.NoError(t, err)
 	require.Len(t, rows, 506)
+}
+
+func TestPostgresCutOverReclaimsAlreadyRetiredGeneration(t *testing.T) {
+	ctx := t.Context()
+	store, idx := openVectorBackend(t, "postgres")
+	pg := store.(*pgstore.Store)
+	project, err := store.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "first issue", Author: "user-a"})
+	require.NoError(t, err)
+	_, err = idx.RefreshMirror(ctx, store)
+	require.NoError(t, err)
+	a := kitvec.Generation{Model: "model-a", Dimensions: 2}
+	b := kitvec.Generation{Model: "model-b", Dimensions: 2}
+	aKey, bKey := a.Fingerprint(), b.Fingerprint()
+	require.NoError(t, idx.EnsureBuilding(ctx, aKey, a))
+	require.NoError(t, idx.SaveVectorsForTest(ctx, aKey, issue.UID, issue.ContentRevision, nil))
+	require.NoError(t, idx.CutOver(ctx, aKey))
+	require.NoError(t, idx.EnsureBuilding(ctx, bKey, b))
+	require.NoError(t, idx.SaveVectorsForTest(ctx, bKey, issue.UID, issue.ContentRevision, nil))
+	denied := errors.New("worker authority revoked")
+	fenced := db.WithTransactionFence(ctx, func(ctx context.Context, tx db.Transaction) error {
+		var state string
+		if err := tx.QueryRowContext(ctx, `SELECT state FROM issue_vector_generations WHERE gen_key = $1`, aKey).Scan(&state); err != nil {
+			return err
+		}
+		if state == "retired" {
+			return denied
+		}
+		return nil
+	})
+	require.ErrorIs(t, idx.CutOver(fenced, bKey), denied)
+	var state string
+	var stamps int
+	err = pg.DB.QueryRowContext(ctx, `SELECT g.state, count(s.doc_key) FROM issue_vector_generations g LEFT JOIN issue_vector_stamps s ON s.generation_id = g.id WHERE g.gen_key = $1 GROUP BY g.state`, aKey).Scan(&state, &stamps)
+	require.NoError(t, err)
+	require.Equal(t, "retired", state)
+	require.Equal(t, 1, stamps)
+	require.NoError(t, idx.CutOver(ctx, bKey))
+	err = pg.DB.QueryRowContext(ctx, `SELECT count(*) FROM issue_vector_stamps s JOIN issue_vector_generations g ON g.id = s.generation_id WHERE g.gen_key = $1`, aKey).Scan(&stamps)
+	require.NoError(t, err)
+	require.Zero(t, stamps)
 }

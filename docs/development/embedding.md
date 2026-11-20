@@ -569,8 +569,10 @@ approval when metadata retrieval or local attachment fails. The provider resolve
 the requested project key to those identifiers. That key need not equal Kata's
 internal project name, and a rename does not change the approved identity.
 
-- `read_only` and `collaborate` attach only an empty local project. Existing
-  tasks, recurring tasks, or project metadata require `migrate` approval.
+- `read_only` and `collaborate` attach an empty local project or rejoin a
+  detached project whose UID matches the approved hub project. A project with
+  a different UID and existing tasks, recurring tasks, or project metadata
+  requires `migrate` approval.
 - `migrate` uses the existing adoption path to import local data.
 - Push is enabled only when the approved credential permits it.
 - Attachment replaces old local catalog events when the project takes the

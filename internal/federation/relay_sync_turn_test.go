@@ -311,8 +311,10 @@ func TestRunnerLeavesSpokesWithFailedClaimRetriesOnTheInterval(t *testing.T) {
 			var metadata atomic.Int32
 			rootHandler := root.http.Config.Handler
 			proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// A 502 fails the claim without asking the spoke to
+				// wait, so the sync turn still runs.
 				if strings.Contains(r.URL.Path, "acquire") {
-					w.WriteHeader(http.StatusServiceUnavailable)
+					w.WriteHeader(http.StatusBadGateway)
 					return
 				}
 				if strings.HasSuffix(r.URL.Path, "/federation/metadata") {
@@ -353,7 +355,7 @@ func TestRunnerLeavesSpokesWithFailedClaimRetriesOnTheInterval(t *testing.T) {
 			go func() { done <- runner.Run(runCtx) }()
 			select {
 			case err := <-failed:
-				require.ErrorContains(t, err, "503")
+				require.ErrorContains(t, err, "502")
 			case <-time.After(20 * time.Second):
 				t.Fatal("the failed claim retry was not reported")
 			}
