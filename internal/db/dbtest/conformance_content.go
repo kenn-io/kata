@@ -519,6 +519,111 @@ func checkLabels(t *testing.T, store db.Storage) error {
 	return nil
 }
 
+func checkChangeLabels(t *testing.T, store db.Storage) error {
+	t.Helper()
+	ctx := t.Context()
+	fixture, err := createIssueFixture(ctx, store, "change-labels-project", "swap labels", "label-author", nil)
+	if err != nil {
+		return err
+	}
+	issueID := fixture.Issue.ID
+	_, err = store.AddLabel(ctx, issueID, "ready-for-agent", "label-author")
+	require.NoError(t, err)
+	labelNames := func() []string {
+		t.Helper()
+		rows, err := store.LabelsByIssue(ctx, issueID)
+		require.NoError(t, err)
+		names := make([]string, 0, len(rows))
+		for _, row := range rows {
+			names = append(names, row.Label)
+		}
+		return names
+	}
+	eventCount := func() int {
+		t.Helper()
+		events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: fixture.Project.ID, Limit: 1000})
+		require.NoError(t, err)
+		return len(events)
+	}
+	labelEventPayload := func(e db.Event) (label, updatedAt string) {
+		t.Helper()
+		var payload struct {
+			IssueUID  string `json:"issue_uid"`
+			Label     string `json:"label"`
+			UpdatedAt string `json:"updated_at"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(e.Payload), &payload))
+		assert.Equal(t, fixture.Issue.UID, payload.IssueUID)
+		return payload.Label, payload.UpdatedAt
+	}
+
+	before, err := store.IssueByID(ctx, issueID)
+	require.NoError(t, err)
+	time.Sleep(5 * time.Millisecond)
+	params := db.ChangeLabelsParams{
+		Add:    []string{"ready-for-human"},
+		Remove: []string{"ready-for-agent"},
+		Actor:  "label-author",
+	}
+	labels, events, err := store.ChangeLabelsAndEvents(ctx, issueID, params)
+	if err != nil {
+		return fmt.Errorf("swap labels: %w", err)
+	}
+	assert.Equal(t, []string{"ready-for-human"}, labels)
+	require.Len(t, events, 2)
+	assert.Equal(t, "issue.unlabeled", events[0].Type)
+	assert.Equal(t, "issue.labeled", events[1].Type)
+	assert.Equal(t, "label-author", events[0].Actor)
+	assert.Equal(t, "label-author", events[1].Actor)
+	removedLabel, removedAt := labelEventPayload(events[0])
+	addedLabel, addedAt := labelEventPayload(events[1])
+	assert.Equal(t, "ready-for-agent", removedLabel)
+	assert.Equal(t, "ready-for-human", addedLabel)
+	assert.Equal(t, removedAt, addedAt, "events of one call share a timestamp")
+	assert.Less(t, events[0].ID, events[1].ID)
+	assert.Equal(t, []string{"ready-for-human"}, labelNames())
+	after, err := store.IssueByID(ctx, issueID)
+	require.NoError(t, err)
+	assert.True(t, after.UpdatedAt.After(before.UpdatedAt), "updated_at must move")
+	assert.Equal(t, before.Revision, after.Revision, "label edits do not bump revision")
+
+	eventsAfterSwap := eventCount()
+	labels, events, err = store.ChangeLabelsAndEvents(ctx, issueID, params)
+	if err != nil {
+		return fmt.Errorf("repeat swap: %w", err)
+	}
+	assert.Equal(t, []string{"ready-for-human"}, labels)
+	assert.Empty(t, events)
+	assert.Equal(t, eventsAfterSwap, eventCount())
+	repeated, err := store.IssueByID(ctx, issueID)
+	require.NoError(t, err)
+	assert.True(t, after.UpdatedAt.Equal(repeated.UpdatedAt), "no-op call must not touch updated_at")
+
+	labels, events, err = store.ChangeLabelsAndEvents(ctx, issueID, db.ChangeLabelsParams{
+		Remove: []string{"ready-for-human"}, Actor: "label-author",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{}, labels, "no labels is an empty slice, not nil")
+	assert.Len(t, events, 1)
+	_, err = store.AddLabel(ctx, issueID, "ready-for-human", "label-author")
+	require.NoError(t, err)
+
+	eventsBeforeInvalid := eventCount()
+	_, events, err = store.ChangeLabelsAndEvents(ctx, issueID, db.ChangeLabelsParams{
+		Add:    []string{"fine-label", "Not Valid!"},
+		Remove: []string{"ready-for-human"},
+		Actor:  "label-author",
+	})
+	assert.ErrorIs(t, err, db.ErrLabelInvalid)
+	assert.Empty(t, events)
+	assert.Equal(t, []string{"ready-for-human"}, labelNames(), "invalid add must roll back earlier changes")
+	assert.Equal(t, eventsBeforeInvalid, eventCount())
+
+	_, _, err = store.ChangeLabelsAndEvents(ctx, issueID+1_000_000, params)
+	assert.ErrorIs(t, err, db.ErrNotFound)
+	return nil
+}
+
 func checkLinksAndRelationshipProjections(t *testing.T, store db.Storage) error {
 	t.Helper()
 	ctx := t.Context()

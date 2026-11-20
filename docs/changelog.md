@@ -41,6 +41,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
   fix it. Upgrade a federated hub and its spokes in one window: a hub that
   refuses a pushed definition can quarantine that spoke's relay batch.
 
+- Swap triage labels in one request: `kata label add <ref> ready-for-human
+  --remove ready-for-agent` detaches and attaches together, so a failure never
+  leaves the issue with both labels or neither, and the output lists the labels
+  it ended with. Needs a daemon on API 0.62.0 or newer. See
+  [labels](reference/cli.md#labels-ownership-and-claiming).
 - Let a service manager own the local daemon. Set top-level `autostart = false`
   in `config.toml`, and Kata commands, including `kata daemon recover`, wait up
   to 30 seconds for the supervised daemon instead of starting their own. See

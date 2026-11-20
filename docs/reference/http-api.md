@@ -335,6 +335,7 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
+| `0.62.0` | Added `PATCH /api/v1/projects/{project_id}/issues/{ref}/labels`, which applies `add` and `remove` label lists in one transaction and answers with the issue's resulting `labels`. |
 | `0.60.0` | Enrollment join instructions use the signing hub's external URL and include signing key placeholders. |
 | `0.59.0` | Schedule and deadline civil dates and times accept an explicit `[Zone]` suffix. |
 | `0.58.0` | `GET /api/v1/projects/{project_id}/events` accepts `actor` so callers who may restore a soft-deleted issue can read its history. |
@@ -1077,6 +1078,32 @@ original author, UID, creation time, and thread position. This is the supported
 primitive for redacting comment text before enrolling a project in federation.
 It is not a purge mechanism for data that has already crossed into another
 federated event log.
+
+## Label Endpoints
+
+`POST /api/v1/projects/{project_id}/issues/{ref}/labels` attaches one label and
+`DELETE /api/v1/projects/{project_id}/issues/{ref}/labels/{label}` detaches one.
+
+To change several labels at once, for example moving an issue from
+`ready-for-agent` to `ready-for-human`, send `PATCH
+/api/v1/projects/{project_id}/issues/{ref}/labels` with `add` and `remove`
+lists (API `0.62.0` or newer):
+
+```json
+{"actor": "reviewer", "add": ["ready-for-human"], "remove": ["ready-for-agent"]}
+```
+
+The daemon removes the `remove` labels, then attaches the `add` labels, in one
+transaction. If any label is invalid, nothing changes. Labels already attached
+or already absent are skipped without an event. The response carries `issue`,
+`labels` (the issue's labels after the change, sorted, read in the same
+transaction), `events` (`issue.unlabeled` then `issue.labeled`, empty when
+nothing changed), and `changed`.
+
+A request returns `400 validation` when both lists are empty, a label is blank
+or does not match `[a-z0-9._:-]` with length 1..64, or the same label appears
+in both lists. Repeats inside one list are collapsed. Like the other label
+routes, the project path accepts a `name:` selector.
 
 ## Attachment Endpoints
 
