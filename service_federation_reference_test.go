@@ -264,7 +264,6 @@ func TestDirectPushWithProjectScopedActors(t *testing.T) {
 				require.Len(t, events, 1)
 			})
 
-
 			t.Run("legacy-parent-replacement", func(t *testing.T) {
 				link, err := spoke.DB.ParentOf(ctx, child.ID)
 				require.NoError(t, err)
