@@ -244,7 +244,7 @@ func TestUnreachableErrorRelaunchPaths(t *testing.T) {
 			}
 			e := newUnreachable(t.Context(), dir, record, errors.New("failed"))
 			if tc.profile {
-				annotateUnreachable(e, ResolvedDaemon{Name: "work", profileConfig: &config.LocalProfileConfig{Config: &config.DaemonConfig{}}})
+				require.ErrorAs(t, annotateUnreachable(e, ResolvedDaemon{Name: "work", profileConfig: &config.LocalProfileConfig{Config: &config.DaemonConfig{}}}), &e)
 			}
 			text := e.Error()
 			require.NotContains(t, text, "kata daemon restart")
