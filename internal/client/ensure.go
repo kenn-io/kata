@@ -248,7 +248,7 @@ func waitForSupervisedDaemon(
 			running = runningDaemonForLive(found.Daemon)
 			return true, nil
 		case daemonScanStale:
-			if placeholderDaemon(ctx, found.Daemon) {
+			if (daemonVersionCheckSkipped() || daemonVersionCompatible(found.Daemon.Info)) && placeholderDaemon(ctx, found.Daemon) {
 				return false, fmt.Errorf("%w: the daemon has no web UI; restart it with your service manager (autostart = false)", ErrDaemonNotReplaceable)
 			}
 			return false, externallyManagedVersionError(found.Daemon.Info)
@@ -454,7 +454,7 @@ func discoverForEnsureUsing(ctx context.Context, dataDir string, scan liveDaemon
 			}
 			return ensureDiscovery{}, err
 		}
-		if daemonVersionCheckSkipped() || daemonCompatible(ctx, candidate) {
+		if daemonCompatible(ctx, candidate) {
 			return ensureDiscovery{Outcome: daemonScanCompatible, Daemon: candidate}, nil
 		}
 		if stale.Outcome == daemonScanNone {
@@ -484,11 +484,11 @@ func daemonVersionCompatible(info PingInfo) bool {
 
 func placeholderDaemon(ctx context.Context, candidate liveDaemon) bool {
 	required, _ := ctx.Value(requireWebAssetsKey{}).(bool)
-	return required && daemonVersionCompatible(candidate.Info) && slices.Contains(strings.Split(candidate.Record.Metadata["web_capabilities"], ","), daemonruntime.WebCapabilityPlaceholderAssets)
+	return required && slices.Contains(strings.Split(candidate.Record.Metadata["web_capabilities"], ","), daemonruntime.WebCapabilityPlaceholderAssets)
 }
 
 func daemonCompatible(ctx context.Context, candidate liveDaemon) bool {
-	return daemonVersionCompatible(candidate.Info) && !placeholderDaemon(ctx, candidate)
+	return (daemonVersionCheckSkipped() || daemonVersionCompatible(candidate.Info)) && !placeholderDaemon(ctx, candidate)
 }
 
 func stopRunningDaemons(ctx context.Context, dataDir, dbhash string) error {

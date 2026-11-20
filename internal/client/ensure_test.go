@@ -34,20 +34,27 @@ func TestDiscoveryReplacesPlaceholderOnlyWithReleaseAssets(t *testing.T) {
 	t.Cleanup(func() { currentVersionForEnsure = oldVersion })
 	currentVersionForEnsure = func() string { return "v0.23.0" }
 	for _, tc := range []struct {
-		name, capabilities string
-		assets             bool
-		want               daemonScanOutcome
+		name, version, capabilities string
+		assets, skip                bool
+		want                        daemonScanOutcome
 	}{
-		{"same release placeholder", "loopback,sse,placeholder-assets", true, daemonScanStale},
-		{"source CLI placeholder", "loopback,sse,placeholder-assets", false, daemonScanCompatible},
-		{"release daemon", "loopback,sse", true, daemonScanCompatible},
+		{"same release placeholder", "v0.23.0", "loopback,sse,placeholder-assets", true, false, daemonScanStale},
+		{"source CLI placeholder", "v0.23.0", "loopback,sse,placeholder-assets", false, false, daemonScanCompatible},
+		{"release daemon", "v0.23.0", "loopback,sse", true, false, daemonScanCompatible},
+		{"version-check-disabled", "v0.23.0", "loopback,sse,placeholder-assets", true, true, daemonScanStale},
+		{"version-check-disabled other release", "v0.22.0", "loopback,sse", true, true, daemonScanCompatible},
+		{"version-check-disabled other placeholder", "v0.22.0", "loopback,sse,placeholder-assets", true, true, daemonScanStale},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+			skip := ""
+			if tc.skip {
+				skip = "1"
+			}
+			t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", skip)
 			ctx := context.WithValue(t.Context(), requireWebAssetsKey{}, tc.assets)
 			scan := func(context.Context, string) iter.Seq2[liveDaemon, error] {
 				return func(yield func(liveDaemon, error) bool) {
-					yield(liveDaemon{Info: PingInfo{Service: "kata", Version: "v0.23.0"}, Record: kitdaemon.RuntimeRecord{Metadata: map[string]string{"web_capabilities": tc.capabilities}}}, nil)
+					yield(liveDaemon{Info: PingInfo{Service: "kata", Version: tc.version}, Record: kitdaemon.RuntimeRecord{Metadata: map[string]string{"web_capabilities": tc.capabilities}}}, nil)
 				}
 			}
 			found, err := discoverForEnsureUsing(ctx, "", scan)
