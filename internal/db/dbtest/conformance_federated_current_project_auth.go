@@ -302,6 +302,7 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 		require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
 		var notEnrolled *db.FederationProjectNotEnrolledError
 		require.ErrorAs(t, err, &notEnrolled)
+		require.NotNil(t, notEnrolled)
 		require.Equal(t, peer.UID, notEnrolled.IssueUID)
 		require.Equal(t, "issue "+peer.UID+" now belongs to a project where this spoke has no push enrollment with the same actor", notEnrolled.Error())
 		parent, err = store.ParentOf(ctx, child.ID)
@@ -333,6 +334,7 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 	require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
 	var notEnrolled *db.FederationProjectNotEnrolledError
 	require.ErrorAs(t, err, &notEnrolled)
+	require.NotNil(t, notEnrolled)
 	require.Empty(t, notEnrolled.IssueUID)
 	require.NotContains(t, err.Error(), peer.UID)
 	require.ErrorContains(t, err, "an affected issue belongs to a project where this spoke has no push enrollment with the same actor")
