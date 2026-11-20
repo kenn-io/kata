@@ -66,9 +66,9 @@ func TestMoveBatchUnknownStopsNewRowsAndFinishesInflight(t *testing.T) {
 	inflight := moveBatchResult{Result: "unattempted"}
 	unknown := moveBatchResult{Result: "unattempted"}
 	next := moveBatchResult{Result: "unattempted"}
-	preparedSecond := resolveMoveBatchOne(a, client, projects, row(second.ShortID), &inflight, &halt)
-	preparedFirst := resolveMoveBatchOne(a, client, projects, row(first.ShortID), &unknown, &halt)
-	preparedThird := resolveMoveBatchOne(a, client, projects, row(third.ShortID), &next, &halt)
+	preparedSecond := resolveMoveBatchOne(a, client, projects, row(second.ShortID), nil, &inflight, &halt)
+	preparedFirst := resolveMoveBatchOne(a, client, projects, row(first.ShortID), nil, &unknown, &halt)
+	preparedThird := resolveMoveBatchOne(a, client, projects, row(third.ShortID), nil, &next, &halt)
 	require.NotNil(t, preparedSecond)
 	require.NotNil(t, preparedFirst)
 	require.NotNil(t, preparedThird)
