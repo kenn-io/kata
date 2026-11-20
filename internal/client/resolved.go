@@ -104,16 +104,28 @@ func (d ResolvedDaemon) Running() RunningDaemon {
 		ConfiguredRemote: d.ConfiguredRemote(),
 		PersistedAuth:    d.persistedAuth,
 		record:           d.record,
+		dataDir:          d.RuntimeDir,
 	}
 }
 
-// LocalDaemonUnreachable retains the runtime selected by discovery.
-func (d ResolvedDaemon) LocalDaemonUnreachable(dataDir string, cause error) error {
+// Unreachable retains the runtime selected by discovery.
+func (d ResolvedDaemon) Unreachable(ctx context.Context, cause error) error {
 	if d.record == nil {
 		return nil
 	}
-	err := unreachableRuntime(*d.record, dataDir, cause)
-	err.Profile = d.Name
+	dir := d.RuntimeDir
+	if d.LocalProfile != nil {
+		dir = d.LocalProfile.DataDir
+	}
+	return annotateUnreachable(newUnreachable(ctx, dir, *d.record, cause), d)
+}
+
+func annotateUnreachable(err error, d ResolvedDaemon) error {
+	if e, ok := errors.AsType[*LocalDaemonUnreachableError](err); ok && d.profileConfig != nil {
+		e.Profile = d.Name
+		e.profileAutostart = d.profileConfig.Config.AutostartEnabled()
+		e.ManagedExternally = !e.profileAutostart
+	}
 	return err
 }
 
@@ -130,6 +142,9 @@ func (d ResolvedDaemon) WithRunning(running RunningDaemon) ResolvedDaemon {
 	refreshed.profileConfig = d.profileConfig
 	refreshed.SourcePath = d.SourcePath
 	refreshed.RuntimeDir = d.RuntimeDir
+	if running.dataDir != "" {
+		refreshed.RuntimeDir = running.dataDir
+	}
 	refreshed.credentialError = d.credentialError
 	refreshed.implicitToken = d.implicitToken
 	if d.implicitToken && !running.PersistedAuth {
@@ -142,6 +157,7 @@ func (d ResolvedDaemon) WithRunning(running RunningDaemon) ResolvedDaemon {
 func resolvedForRunning(source DaemonSource, name string, running RunningDaemon) ResolvedDaemon {
 	resolved := ResolvedDaemon{
 		record:        running.record,
+		RuntimeDir:    running.dataDir,
 		Source:        source,
 		Name:          name,
 		BaseURL:       running.BaseURL,

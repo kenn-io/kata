@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"runtime"
 	"strconv"
 	"strings"
 
@@ -176,6 +175,7 @@ func currentHomeStorageIsAbsent(dsn string, openErr error) bool {
 func diagnoseDaemonSelection(
 	ctx context.Context, expectedProject string, selection client.DaemonSelection,
 ) (daemonDiagnosis, client.DaemonSelection, error) {
+	callerCtx := ctx
 	ctx, cancel := context.WithTimeout(ctx, envHTTPTimeout(defaultHTTPTimeout))
 	defer cancel()
 	var err error
@@ -263,7 +263,7 @@ func diagnoseDaemonSelection(
 			return withDiagnosisAction(result), selection, nil
 		}
 	}
-	result, selection, err = probeDaemonSelection(ctx, result, selection)
+	result, selection, err = probeDaemonSelection(callerCtx, result, selection)
 	if result.State == "ready" {
 		result.Writable, result.ActorPolicy = liveDaemonCapabilities(ctx, selection.Resolved)
 		result.RootSigning = liveRootSigningHealth(ctx, selection.Resolved)
@@ -319,9 +319,7 @@ func probeDaemonSelection(
 	var err error
 	var resolved client.ResolvedDaemon
 	var found bool
-	dataDir := ""
 	if selection.Profile != nil {
-		dataDir = selection.Resolved.LocalProfile.DataDir
 		resolved, found, err = client.DiscoverLocalProfileSelection(ctx, selection)
 	} else if result.Kind == "remote" {
 		resolved = selection.Resolved
@@ -331,7 +329,6 @@ func probeDaemonSelection(
 		if namespaceErr != nil {
 			return result, selection, namespaceErr
 		}
-		dataDir = ns.DataDir
 		if _, err = os.Stat(ns.DataDir); errors.Is(err, os.ErrNotExist) {
 			return withDiagnosisAction(result), selection, nil
 		} else if err != nil {
@@ -349,7 +346,7 @@ func probeDaemonSelection(
 	}
 	if err != nil {
 		result.Message = err.Error()
-		result = diagnosisUnreachable(result, err, selection)
+		result = diagnosisUnreachable(result, err)
 		if errors.Is(err, client.ErrProfileIdentityMismatch) {
 			result.State = "wrong_database"
 			if mismatch, ok := errors.AsType[*client.LocalProfileIdentityError](err); ok {
@@ -376,6 +373,10 @@ func probeDaemonSelection(
 	}
 	hc, err := client.NewHTTPClientForResolved(ctx, probeTarget, client.Opts{Timeout: envHTTPTimeout(defaultHTTPTimeout)})
 	if err != nil {
+		if evidence := resolved.Unreachable(ctx, err); evidence != nil {
+			result.State = "local_unreachable"
+			return withDiagnosisAction(diagnosisUnreachable(result, evidence)), selection, nil
+		}
 		return result, selection, err
 	}
 	apiClient, err := kataapi.NewWithHTTPClient(resolved.BaseURL, hc)
@@ -388,7 +389,7 @@ func probeDaemonSelection(
 		if result.Kind == "remote" {
 			result.State = unavailableRemoteState(result.Endpoint)
 		} else {
-			result = diagnosisUnreachable(result, resolved.LocalDaemonUnreachable(dataDir, err), selection)
+			result = diagnosisUnreachable(result, resolved.Unreachable(ctx, err))
 		}
 		return withDiagnosisAction(result), selection, nil
 	}
@@ -397,7 +398,7 @@ func probeDaemonSelection(
 		if result.Kind == "remote" {
 			result.State = unavailableRemoteState(result.Endpoint)
 		} else {
-			result = diagnosisUnreachable(result, resolved.LocalDaemonUnreachable(dataDir, errors.New("ping returned an unhealthy response")), selection)
+			result = diagnosisUnreachable(result, resolved.Unreachable(ctx, errors.New("ping returned an unhealthy response")))
 		}
 		return withDiagnosisAction(result), selection, nil
 	}
@@ -480,17 +481,9 @@ func safeDaemonOrigin(value string) string {
 	return parsed.Scheme + "://" + parsed.Host
 }
 
-func diagnosisUnreachable(result daemonDiagnosis, err error, selection client.DaemonSelection) daemonDiagnosis {
+func diagnosisUnreachable(result daemonDiagnosis, err error) daemonDiagnosis {
 	if e, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok {
 		result.Message, result.PID, result.Endpoint = err.Error(), e.PID, e.Address
-		supervised := false
-		if selection.Profile != nil {
-			supervised = !selection.Profile.Config.AutostartEnabled()
-		} else if enabled, _, configErr := config.ReadAutostartEnabled(); configErr == nil {
-			supervised = !enabled
-		}
-		e.ManagedExternally = supervised
-		result.NextAction = daemonRecoveryAdvice(err, runtime.GOOS)
 	}
 	return result
 }

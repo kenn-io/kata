@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/daemonruntime"
 	kitdaemon "go.kenn.io/kit/daemon"
 	"go.kenn.io/kit/safefileio"
 )
@@ -140,6 +142,12 @@ func TestLiveUnreachableRecoveryAdvice(t *testing.T) {
 			require.Contains(t, err.Error(), server.Listener.Addr().String())
 			require.Equal(t, dir, observed.DataDir)
 			require.Equal(t, tc.want, observed.WebOrigin)
+			if tc.want == "" {
+				require.NotContains(t, err.Error(), "/debug/pprof/")
+			} else {
+				require.Contains(t, err.Error(), tc.want+"/debug/pprof/goroutine?debug=2")
+				require.Contains(t, err.Error(), "Authorization: Bearer")
+			}
 			require.True(t, observed.VerifiedProcess)
 		})
 	}
@@ -195,6 +203,11 @@ func TestLiveUnreachableRecoveryAdvice(t *testing.T) {
 				require.ErrorAs(t, errs[0], &evidence)
 				require.Equal(t, os.Getpid(), evidence.PID)
 				require.Equal(t, dir, evidence.DataDir)
+				require.Contains(t, errs[0].Error(), filepath.Join(dir, "daemon.log"))
+				require.Contains(t, errs[0].Error(), fmt.Sprint(os.Getpid()))
+				for _, text := range []string{"kill", "restart", "service manager", "daemon recover"} {
+					require.NotContains(t, errs[0].Error(), text)
+				}
 			})
 		})
 	}
@@ -230,4 +243,56 @@ func TestLiveUnreachableRecoveryAdvice(t *testing.T) {
 		require.ErrorAs(t, observed, &evidence)
 		require.False(t, evidence.VerifiedProcess)
 	})
+}
+
+func TestUnreachableErrorRelaunchPaths(t *testing.T) {
+	setupKataEnv(t)
+	for _, tc := range []struct {
+		name                   string
+		managed, auto, profile bool
+		want                   string
+	}{
+		{"manual", false, false, false, "run the original command"},
+		{"automatic", false, true, false, "rerun the command that failed"},
+		{"managed", true, false, false, "service manager"},
+		{"profile", false, false, true, "kata --daemon work daemon recover"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			record := kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1", Metadata: map[string]string{}}
+			if tc.auto {
+				record.Metadata[daemonruntime.RuntimeAutoStartKey] = "1"
+			}
+			e := newUnreachable(t.Context(), dir, record, errors.New("failed"))
+			e.ManagedExternally, e.profileAutostart = tc.managed, tc.profile
+			if tc.profile {
+				e.Profile = "work"
+			}
+			text := e.Error()
+			require.Contains(t, text, filepath.Join(dir, "daemon.log"))
+			require.Contains(t, text, fmt.Sprint(os.Getpid()))
+			want := tc.want
+			if tc.profile && runtime.GOOS == "windows" {
+				want = "'--daemon' 'work' 'daemon' 'recover'"
+			}
+			require.Contains(t, text, want)
+			if tc.managed {
+				require.NotContains(t, text, "kill -QUIT")
+				return
+			}
+			if runtime.GOOS == "windows" {
+				require.Contains(t, text, "taskkill")
+			} else {
+				require.Contains(t, text, "kill -QUIT")
+			}
+			_, afterKill, ok := strings.Cut(text, ". Then ")
+			require.True(t, ok)
+			require.NotContains(t, afterKill, "daemon restart")
+			for _, other := range []string{"run the original command", "rerun the command that failed", "service manager", "kata --daemon work daemon recover"} {
+				if other != tc.want {
+					require.NotContains(t, afterKill, other)
+				}
+			}
+		})
+	}
 }

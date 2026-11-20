@@ -98,6 +98,7 @@ func discoverLocalProfileWithVerifier(
 	var unreachable error
 	for candidate, err := range scan(ctx, resolved.LocalProfile.DataDir) {
 		if err != nil {
+			err = annotateUnreachable(err, selection.Resolved)
 			if errors.Is(err, ErrLocalDaemonUnreachable) {
 				unreachable = err
 				continue
@@ -128,7 +129,7 @@ func verifyLocalProfileInstance(ctx context.Context, resolved ResolvedDaemon) er
 	}
 	resp, err := apiClient.InstanceWithResponse(ctx)
 	if resp == nil {
-		if evidence := resolved.LocalDaemonUnreachable(resolved.LocalProfile.DataDir, err); evidence != nil {
+		if evidence := resolved.Unreachable(ctx, err); evidence != nil {
 			return evidence
 		}
 		return fmt.Errorf("local profile instance is unavailable: %w", ErrLocalDaemonUnreachable)
@@ -229,7 +230,7 @@ func DiscoverLocalProfileSelection(ctx context.Context, selection DaemonSelectio
 		return selection.Resolved, false, errors.New("selection is not a registered local profile")
 	}
 	resolved, found, err := discoverLocalProfile(ctx, selection)
-	return resolved, found, profileUnreachable(err, selection.Resolved.Name, !selection.Profile.Config.AutostartEnabled())
+	return resolved, found, annotateUnreachable(err, selection.Resolved)
 }
 
 // EnsureLocalProfileSelection starts only the home pinned by this snapshot.
@@ -238,7 +239,7 @@ func EnsureLocalProfileSelection(ctx context.Context, selection DaemonSelection)
 		return selection.Resolved, errors.New("selection is not a registered local profile")
 	}
 	resolved, err := ensureLocalProfile(ctx, selection)
-	return resolved, profileUnreachable(err, selection.Resolved.Name, !selection.Profile.Config.AutostartEnabled())
+	return resolved, annotateUnreachable(err, selection.Resolved)
 }
 
 // EnsureSameLocalProfile refreshes the original profile snapshot without reading
@@ -263,7 +264,7 @@ func waitForSupervisedProfile(ctx context.Context, resolved ResolvedDaemon, prof
 		}
 		found, err := discoverForEnsure(ctx, dir)
 		if err != nil || found.Outcome == daemonScanNone {
-			return found, err
+			return found, annotateUnreachable(err, resolved)
 		}
 		resolved = resolved.WithRunning(runningDaemonForLive(found.Daemon))
 		resolved.UnixSocket = found.Daemon.UnixSocket
@@ -278,12 +279,4 @@ func waitForSupervisedProfile(ctx context.Context, resolved ResolvedDaemon, prof
 
 func profileCutoverLocked(profile config.LocalProfileConfig) func(context.Context) bool {
 	return func(context.Context) bool { return sqliteCutoverLockedForDSN(profile.DSN) }
-}
-
-func profileUnreachable(err error, name string, managed bool) error {
-	if evidence, ok := errors.AsType[*LocalDaemonUnreachableError](err); ok {
-		evidence.Profile = name
-		evidence.ManagedExternally = managed
-	}
-	return err
 }

@@ -33,7 +33,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/activity"
 	"go.kenn.io/kata/internal/api"
-	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/daemonruntime"
@@ -620,12 +619,11 @@ func TestDaemonStatusReportsWebURLAndRecoveryAdvice(t *testing.T) {
 	out := []byte(stdout)
 	assert.True(t, strings.HasPrefix(string(out), "OK daemon status=running web_url=http://127.0.0.1:28888 selected_state=local_unreachable selected_profile=\"\" message="))
 	assert.Contains(t, string(out), "unreachable")
-	assert.Contains(t, string(out), "next_action=")
 	assert.Contains(t, string(out), "daemon.log")
 	resetFlags(t)
 	human, _, err := executeRootCapture(t, t.Context(), "daemon", "status")
 	require.Error(t, err)
-	assert.Contains(t, string(human), "  next:")
+	assert.Contains(t, string(human), "  reason:")
 	assert.Contains(t, string(human), "daemon.log")
 }
 
@@ -4153,7 +4151,7 @@ func TestReviewStatusCutoverAndSupervisorGuidance(t *testing.T) {
 			var result daemonStatusOutput
 			require.NoError(t, json.Unmarshal([]byte(stdout), &result))
 			require.NotNil(t, result.Selected)
-			hint := result.Selected.NextAction
+			hint := result.Selected.Message
 			require.Contains(t, hint, "daemon.log")
 			if tc.migration {
 				require.Contains(t, hint, "Wait")
@@ -4171,42 +4169,4 @@ func TestReviewStatusCutoverAndSupervisorGuidance(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestReviewCanceledDiscoveryDoesNotSuggestStopping(t *testing.T) {
-	setupKataEnv(t)
-	ns, err := daemonruntime.NewNamespace()
-	require.NoError(t, err)
-	require.NoError(t, ns.EnsureDirs())
-	started := make(chan struct{})
-	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		close(started)
-		<-r.Context().Done()
-	}))
-	t.Cleanup(server.Close)
-	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
-	require.NoError(t, err)
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	go func() { <-started; cancel() }()
-	_, _, err = client.DiscoverResolved(ctx, ns.DataDir)
-	require.ErrorIs(t, err, context.Canceled)
-	hint := cliErrorForErr(err, true).Hint
-	require.Empty(t, hint)
-}
-
-func TestReviewCallerDeadlineHasNoRecoveryHint(t *testing.T) {
-	setupKataEnv(t)
-	ns, err := daemonruntime.NewNamespace()
-	require.NoError(t, err)
-	require.NoError(t, ns.EnsureDirs())
-	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
-	t.Cleanup(server.Close)
-	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
-	require.NoError(t, err)
-	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
-	defer cancel()
-	_, _, err = client.DiscoverResolved(ctx, ns.DataDir)
-	require.ErrorIs(t, err, context.DeadlineExceeded)
-	require.Empty(t, cliErrorForErr(err, true).Hint)
 }

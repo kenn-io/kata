@@ -10,7 +10,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"runtime"
 	"slices"
 	"strings"
 	"syscall"
@@ -362,7 +361,6 @@ func cliErrorForErr(err error, runEReached bool) *cliError {
 			Kind:     kindForExit(exit),
 			ExitCode: exit,
 		}
-		cli.Hint = daemonRecoveryAdvice(err, runtime.GOOS)
 	}
 	return cli
 }

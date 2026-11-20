@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
+	"go.kenn.io/kit/agenthook"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
@@ -78,13 +80,50 @@ type LocalDaemonUnreachableError struct {
 	VerifiedProcess   bool
 	ManagedExternally bool
 	Profile           string
+	profileAutostart  bool
+	autoStarted       bool
 	callerStopped     bool
 	migrationActive   bool
 	cause             error
 }
 
 func (e *LocalDaemonUnreachableError) Error() string {
-	return fmt.Sprintf("daemon pid %d is running at %s but is unreachable: %v", e.PID, e.Address, e.cause)
+	message := fmt.Sprintf("daemon pid %d is running at %s but is unreachable: %v. Check for logs at %q if it exists", e.PID, e.Address, e.cause, filepath.Join(e.DataDir, "daemon.log"))
+	if e.callerStopped && !e.migrationActive {
+		return message
+	}
+	if e.WebOrigin != "" {
+		message += ". Capture " + e.WebOrigin + "/debug/pprof/goroutine?debug=2; send the daemon token as an Authorization: Bearer header if one is set"
+	}
+	if e.migrationActive {
+		return message + ". Wait for the migration to finish, then retry; do not interrupt the daemon"
+	}
+	if e.ManagedExternally {
+		return message + ". Restart it through its service manager"
+	}
+	if e.Profile == "" {
+		message += ". While it runs, kata daemon restart keeps its options"
+	}
+	if !e.VerifiedProcess {
+		return message
+	}
+	if goruntime.GOOS == "windows" {
+		message += fmt.Sprintf(". Stop it with taskkill /PID %d /F", e.PID)
+	} else {
+		message += fmt.Sprintf(". Use kill -QUIT %d to dump goroutines and stop it", e.PID)
+	}
+	switch {
+	case e.Profile != "" && e.profileAutostart:
+		commands, _ := agenthook.BuildCommand("kata", "--daemon", e.Profile, "daemon", "recover")
+		if goruntime.GOOS == "windows" {
+			return message + ". Then run in PowerShell " + commands.PowerShell
+		}
+		return message + ". Then run " + commands.POSIX
+	case e.autoStarted:
+		return message + ". Then rerun the command that failed"
+	default:
+		return message + ". Then run the original command"
+	}
 }
 
 func (e *LocalDaemonUnreachableError) Unwrap() error {
@@ -102,6 +141,7 @@ func (e *LocalDaemonUnreachableError) Is(target error) bool {
 // daemon worth talking to" so discovery call sites can filter one scan.
 type liveDaemon struct {
 	Record     kitdaemon.RuntimeRecord
+	DataDir    string
 	BaseURL    string
 	UnixSocket string
 	Info       PingInfo
@@ -144,20 +184,13 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 			address := ep.ConfigAddress()
 			url, info, probeErr := probe(ctx, address)
 			if probeErr != nil {
-				if err := ctx.Err(); err != nil {
-					if !errors.Is(probeErr, err) {
-						probeErr = errors.Join(probeErr, err)
-					}
-					evidence := unreachableRuntime(r, dataDir, probeErr)
-					evidence.callerStopped = true
-					yield(liveDaemon{}, evidence)
-					return
-				}
-				if !yield(liveDaemon{}, unreachableRuntime(r, dataDir, probeErr)) {
+				evidence := newUnreachable(ctx, dataDir, r, probeErr)
+				if !yield(liveDaemon{}, evidence) || evidence.callerStopped {
 					return
 				}
 				continue
 			}
+
 			// A reused PID can keep an old record alive after another daemon
 			// takes over its endpoint. The responding daemon is not this record's
 			// process; keep scanning for its matching record. Do not delete the
@@ -167,7 +200,7 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 			if info.PID != r.PID && (info.PID != 0 || !daemonruntime.RuntimeProcessAlive(r)) {
 				continue
 			}
-			candidate := liveDaemon{Record: r, BaseURL: url, Info: info}
+			candidate := liveDaemon{Record: r, DataDir: dataDir, BaseURL: url, Info: info}
 			if ep.IsUnix() {
 				candidate.UnixSocket = ep.Address
 			}
@@ -178,17 +211,25 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 	}
 }
 
-func unreachableRuntime(r kitdaemon.RuntimeRecord, dataDir string, cause error) *LocalDaemonUnreachableError {
+func newUnreachable(ctx context.Context, dataDir string, r kitdaemon.RuntimeRecord, cause error) *LocalDaemonUnreachableError {
+	stopped := ctx.Err() != nil
+	if stopped {
+		cause = ctx.Err()
+	}
+	enabled, _, err := config.ReadAutostartEnabled()
 	origin := ""
 	if web, err := DiscoverWebRuntime(r); err == nil {
 		origin = web.Origin
 	}
 	return &LocalDaemonUnreachableError{
 		PID: r.PID, Address: r.Endpoint().ConfigAddress(), DataDir: dataDir,
-		WebOrigin:       origin,
-		VerifiedProcess: daemonruntime.RuntimeProcessAlive(r),
-		migrationActive: sqliteCutoverLockedForDSN(r.Metadata["db_path"]),
-		cause:           cause,
+		WebOrigin:         origin,
+		VerifiedProcess:   daemonruntime.RuntimeProcessAlive(r),
+		migrationActive:   sqliteCutoverLockedForDSN(r.Metadata["db_path"]),
+		ManagedExternally: err == nil && !enabled,
+		callerStopped:     stopped,
+		autoStarted:       r.Metadata[daemonruntime.RuntimeAutoStartKey] == "1",
+		cause:             cause,
 	}
 }
 

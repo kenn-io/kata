@@ -59,7 +59,8 @@ func TestManagedExternallyUnreachableDetail(t *testing.T) {
 	for _, clear := range []bool{false, true} {
 		t.Run(fmt.Sprintf("clear=%t", clear), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				cause := fmt.Errorf("daemon endpoint unreachable: %w", ErrLocalDaemonUnreachable)
+				cause := newUnreachable(t.Context(), "/example/runtime", kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1"}, errors.New("daemon endpoint unreachable"))
+				cause.ManagedExternally = true
 				calls := 0
 				scan := func(context.Context) (ensureDiscovery, error) {
 					calls++
@@ -78,6 +79,9 @@ func TestManagedExternallyUnreachableDetail(t *testing.T) {
 					require.ErrorIs(t, err, cause)
 					require.ErrorContains(t, err, "service manager")
 					require.ErrorContains(t, err, "autostart = false")
+					require.ErrorIs(t, err, context.DeadlineExceeded)
+					require.ErrorContains(t, err, "daemon.log")
+					require.NotContains(t, err.Error(), "kill -QUIT")
 				}
 			})
 		})

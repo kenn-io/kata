@@ -81,7 +81,7 @@ func bringUpSelection(
 	switch {
 	case selection.Profile != nil:
 		resolved, found, err := up.profile(ctx, selection)
-		return resolved, found, profileUnreachable(err, selection.Resolved.Name, !selection.Profile.Config.AutostartEnabled())
+		return resolved, found, annotateUnreachable(err, selection.Resolved)
 	case selection.Resolved.ConfiguredRemote():
 		if probe && !probeRemote(ctx, selection.Resolved.BaseURL) {
 			return ResolvedDaemon{}, false, remoteUnavailableError(ctx, selection.Resolved, workspaceStart)
@@ -181,7 +181,7 @@ func supervisedDiscovery(
 		if resolved, ok, err = discover(ctx, selection); ok {
 			return ensureDiscovery{Outcome: daemonScanCompatible}, nil
 		}
-		return ensureDiscovery{}, err
+		return ensureDiscovery{}, annotateUnreachable(err, selection.Resolved)
 	})
 	return resolved, ok, err
 }
