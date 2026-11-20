@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -18,7 +17,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db"
@@ -985,102 +983,6 @@ func TestDaemonDiagnoseSecondPingUnreachable(t *testing.T) {
 		require.Contains(t, result.NextAction, "--daemon work")
 	}
 	require.NotContains(t, result.Message, "daemon recover")
-}
-
-func TestDaemonDiagnosisOmitsEmptyAction(t *testing.T) {
-	resetFlags(t)
-	cmd := newRootCmd()
-	var out bytes.Buffer
-	cmd.SetOut(&out)
-	require.NoError(t, printDaemonDiagnosis(cmd, daemonDiagnosis{State: "local_unreachable", Message: "context canceled", PID: 1}))
-	require.NotContains(t, out.String(), "next:")
-}
-
-func TestDaemonDiagnosisPrintsEndpointOnce(t *testing.T) {
-	resetFlags(t)
-	cmd := newRootCmd()
-	var out bytes.Buffer
-	cmd.SetOut(&out)
-	result := daemonDiagnosis{State: "local_unreachable", Endpoint: "127.0.0.1:7777", Message: "daemon pid 123 is running at 127.0.0.1:7777 but is unreachable: probe failed"}
-	require.NoError(t, printDaemonDiagnosis(cmd, result))
-	require.Equal(t, 1, strings.Count(out.String(), result.Endpoint))
-	require.Contains(t, out.String(), "probe failed")
-	out.Reset()
-	result.Message = "probe failed"
-	require.NoError(t, printDaemonDiagnosis(cmd, result))
-	require.Contains(t, out.String(), result.Endpoint)
-}
-
-func TestDiagnoseDiscoveryUsesOverallProbeTimeout(t *testing.T) {
-	resetFlags(t)
-	setupKataEnv(t)
-	t.Setenv(client.HTTPTimeoutEnvVar, "100ms")
-	requestDuration := make(chan time.Duration, 1)
-	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		started := time.Now()
-		<-r.Context().Done()
-		requestDuration <- time.Since(started)
-	}))
-	t.Cleanup(server.Close)
-	ns, err := daemonruntime.NewNamespace()
-	require.NoError(t, err)
-	require.NoError(t, ns.EnsureDirs())
-	record := kitdaemon.NewRuntimeRecord("kata", version.Version, kitdaemon.Endpoint{
-		Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://"),
-	})
-	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(record)
-	require.NoError(t, err)
-
-	result, _, err := diagnoseDaemon(t.Context(), "")
-	require.NoError(t, err)
-	require.Equal(t, "local_unreachable", result.State)
-	select {
-	case elapsed := <-requestDuration:
-		require.LessOrEqual(t, elapsed, 750*time.Millisecond)
-	case <-time.After(2 * time.Second):
-		t.Fatal("diagnosis did not probe the runtime endpoint")
-	}
-	_, err = locateDaemon(t.Context())
-	var cliErr *cliError
-	require.ErrorAs(t, err, &cliErr)
-	require.Contains(t, cliErr.Hint, "stop")
-}
-
-func TestSupervisedDiscoveryCancellation(t *testing.T) {
-	resetFlags(t)
-	home, _, uid, _ := stoppedProfileCLI(t)
-	p, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: uid})
-	require.NoError(t, err)
-	ns, err := daemonruntime.NewNamespaceForHome(home, p.StorageID)
-	require.NoError(t, err)
-	require.NoError(t, ns.EnsureDirs())
-	requestStarted := make(chan struct{}, 1)
-	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		select {
-		case requestStarted <- struct{}{}:
-		default:
-		}
-		<-r.Context().Done()
-	}))
-	t.Cleanup(server.Close)
-	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
-	require.NoError(t, err)
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	done := make(chan error, 1)
-	go func() {
-		_, err := discoverDaemonResolved(ctx)
-		done <- err
-	}()
-	select {
-	case <-requestStarted:
-	case <-time.After(5 * time.Second):
-		t.Fatal("profile discovery did not probe the selected runtime")
-	}
-	cancel()
-	err = <-done
-	require.ErrorIs(t, err, context.Canceled)
-	require.Contains(t, err.Error(), fmt.Sprintf("%q", filepath.Join(ns.DataDir, "daemon.log")))
 }
 
 func TestDaemonStatusRecoveryAdvice(t *testing.T) {

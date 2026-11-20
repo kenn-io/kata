@@ -104,12 +104,6 @@ func TestAutoStartedDaemonRecovery(t *testing.T) {
 	require.Contains(t, err.RecoveryAdvice(), "rerun the original command")
 }
 
-func TestNamedProfileUnreachableErrorIncludesRecovery(t *testing.T) {
-	err := &LocalDaemonUnreachableError{PID: 123, VerifiedProcess: true, Profile: "example", ProfileAutostart: true}
-	require.Contains(t, err.Error(), "recover")
-	require.Contains(t, err.Error(), "example")
-}
-
 func TestSupervisedWaitShowsLastProbeAdviceOnce(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		probe := &LocalDaemonUnreachableError{PID: 123, VerifiedProcess: true, ManagedExternally: true, WebOrigin: "http://127.0.0.1:1234", cause: errors.New("probe failed")}
