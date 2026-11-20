@@ -398,7 +398,7 @@ func currentParentRemovals(ctx context.Context, tx Transaction, ordered []FoldEv
 				_, hasFrom := PayloadMap(event.Payload)["link_from_uid"]
 				_, hasTo := PayloadMap(event.Payload)["link_to_uid"]
 				if event.Type == "issue.unlinked" && !hasFrom && !hasTo && parent != to {
-					return nil, fmt.Errorf("%w: cannot tell which issue was the child in this parent removal", ErrFederationIngestValidation)
+					return nil, fmt.Errorf("%w: legacy parent unlink does not match the current parent", ErrFederationIngestValidation)
 				}
 				if parent == to {
 					parents[from] = ""
