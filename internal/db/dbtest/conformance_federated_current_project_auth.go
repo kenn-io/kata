@@ -42,6 +42,11 @@ func checkFederatedParentWithoutReferenceController(t *testing.T, store db.Stora
 	parent, err := store.ParentOf(ctx, child.ID)
 	require.NoError(t, err)
 	require.Equal(t, current.UID, parent.ToIssueUID)
+	payload, err = json.Marshal(map[string]string{"type": "parent", "from_uid": child.UID, "to_uid": queued.UID})
+	require.NoError(t, err)
+	stale := newRemoteEvent(t, route, &child.UID, "issue.unlinked", "worker", origin, 2, payload)
+	_, err = store.IngestFederationEvents(ctx, db.FederationIngestParams{ProjectID: route.ID, SpokeInstanceUID: origin, BoundActor: "worker", FederationEnrollmentID: grant.Enrollment.ID, EventFeatures: db.SupportedEventFeatures, Events: []db.FederationIngestEvent{{SourceEventID: 2, Event: stale}}})
+	require.ErrorIs(t, err, db.ErrFederationIngestValidation)
 	return nil
 }
 

@@ -358,6 +358,31 @@ func directLinkAdditionEligible(event FoldEvent) bool {
 	return child != "" && child == event.IssueUID
 }
 
+// DirectParentRemovalsForIngest tracks parent operations only when needed for
+// reference authorization or validation of an older child-primary unlink.
+func DirectParentRemovalsForIngest(ctx context.Context, tx federationHistoryQuery, events []RemoteEvent, authorizeReference bool) (map[string][]string, error) {
+	if !authorizeReference {
+		needed := false
+		for _, event := range events {
+			if event.Type != "issue.unlinked" {
+				continue
+			}
+			payload := PayloadMap(event.Payload)
+			_, hasFrom := payload["link_from_uid"]
+			_, hasTo := payload["link_to_uid"]
+			child, parent := parentRemovalEndpoints(moveSnapshotFoldEvent(event), payload)
+			if !hasFrom && !hasTo && child != "" && parent != "" {
+				needed = true
+				break
+			}
+		}
+		if !needed {
+			return nil, nil
+		}
+	}
+	return DirectParentRemovals(ctx, tx, events)
+}
+
 // DirectParentRemovals checks parent operations against current links.
 func DirectParentRemovals(ctx context.Context, tx federationHistoryQuery, events []RemoteEvent) (map[string][]string, error) {
 	ordered := make([]FoldEvent, 0, len(events))

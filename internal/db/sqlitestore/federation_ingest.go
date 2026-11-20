@@ -1577,7 +1577,7 @@ func (d *Store) authorizeFederationMoveTx(ctx context.Context, tx *sql.Tx, p db.
 // boundary and must not acquire new authority merely to acknowledge a retry.
 func (d *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.Tx, p db.FederationIngestParams, events, parentEvents []db.RemoteEvent, moveSnapshots *db.FederationMoveSnapshotValidator) error {
 	// Report graph validation only after checking current project authority.
-	parentRemovals, err := db.DirectParentRemovals(ctx, tx, parentEvents)
+	parentRemovals, err := db.DirectParentRemovalsForIngest(ctx, tx, parentEvents, p.AuthorizeReference != nil)
 	staged := map[string]int64{}
 	type checkedProject struct {
 		id        int64
