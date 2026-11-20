@@ -2441,13 +2441,14 @@ Malformed schema declarations are not rolling-upgrade skew. Missing schema
 versions fail request validation, and explicit non-positive schema versions
 return `invalid_federation_schema`.
 
-Legacy v0.9 directional unlink payloads are also outside the supported ingest
-contract. `blocks` and `parent` unlinks must include storage-oriented
-`link_from_uid` and `link_to_uid`; the hub rejects events that omit them and
-never guesses orientation from the current graph. Such a validation quarantine
-is not released by upgrading or retrying because kata does not rewrite the
-stored event. Handle it through the normal explicit quarantine disposition
-workflow.
+Parent replacement events queued by v0.19.0 through v0.23.0 can omit
+`link_from_uid` and `link_to_uid`. An upgraded hub accepts this legacy parent
+unlink only when its primary issue is `from_uid`, the child, and the hub still
+holds that parent. A mismatched unlink keeps the batch quarantined until an
+operator resolves it. Kata does not rewrite the stored event.
+
+If the spoke already quarantined such a batch, upgrade the hub first, then
+explicitly retry it as described in [other validation quarantines](#other-validation-quarantines).
 
 Older kata builds may already have quarantined a batch after a transient
 schema-skew rejection. After upgrading the hub, upgrade and restart each spoke

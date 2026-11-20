@@ -40,6 +40,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
   a job saved earlier with such a schedule in `kata cron job edit <job-uid>` to
   fix it. Upgrade a federated hub and its spokes in one window: a hub that
   refuses a pushed definition can quarantine that spoke's relay batch.
+- Sync same-project parent replacements through the hub, and remove or replace
+  cross-project parents when a host supports project-scoped actors. Upgrade the
+  hub before push-enabled spokes to use cross-project actor proofs. A parent
+  replacement queued by v0.19.0 through v0.23.0 can sync after the hub upgrade;
+  an already-quarantined batch requires an [explicit retry](operations/federation.md#other-validation-quarantines).
 
 - Let a service manager own the local daemon. Set top-level `autostart = false`
   in `config.toml`, and Kata commands, including `kata daemon recover`, wait up
