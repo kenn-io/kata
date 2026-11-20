@@ -138,6 +138,7 @@ func (m Model) handleDaemonSwitchResult(msg daemonSwitchResultMsg) (Model, tea.C
 func (m Model) installDaemonConnection(conn daemonConnection) (Model, tea.Cmd) {
 	actor := m.list.actor
 	previousView := m.view
+	m = m.cancelSearchReads()
 	m.connGen++
 	conn.api.telemetry = m.telemetry
 	m.api = newUndoClient(conn.api)

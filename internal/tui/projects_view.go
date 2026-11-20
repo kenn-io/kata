@@ -198,6 +198,7 @@ func (m Model) applyProjectsViewSelection(rows []projectsRow) (Model, tea.Cmd) {
 		return m, nil
 	}
 	m.inboxReturn = nil
+	m = m.cancelSearchReads()
 	m.scopeGen++
 	if r.sentinel {
 		m.scope = scope{allProjects: true, scopeGen: m.scopeGen}

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -27,8 +28,8 @@ func (a searchModelAPI) SearchIssues(ctx context.Context, pid int64, q SearchQue
 	return a.fake.SearchIssues(ctx, pid, q)
 }
 
-func (a searchModelAPI) ReadIssue(ctx context.Context, pid int64, ref string) (*Issue, error) {
-	return a.fake.ReadIssue(ctx, pid, ref)
+func (a searchModelAPI) IssueWithLabels(ctx context.Context, pid int64, ref string) (*Issue, error) {
+	return a.fake.IssueWithLabels(ctx, pid, ref)
 }
 
 var ctrlT = tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl}
@@ -47,6 +48,7 @@ func daemonSearchFixture(t *testing.T) (Model, *fakeListAPI) {
 	m := newTestModel()
 	m.api = searchModelAPI{fake: api}
 	m.view = viewList
+	m.list.loading = false
 	alpha, beta, gamma := searchTestIssues()
 	m.list.issues = []Issue{alpha, beta, gamma}
 	m = resizeModel(m, 80, 24)
@@ -80,7 +82,7 @@ func settleSearch(m Model, cmds ...tea.Cmd) Model {
 		queue = queue[1:]
 		for _, msg := range runCmdTree(cmd) {
 			switch msg.(type) {
-			case daemonSearchTickMsg, daemonSearchDoneMsg:
+			case daemonSearchTickMsg, daemonSearchDoneMsg, daemonSearchHydrateMsg:
 				var next tea.Cmd
 				m, next = stepModel(m, msg)
 				queue = append(queue, next)
@@ -520,6 +522,7 @@ func TestDaemonSearch_HitsBeyondTheLoadedListAreReadBeforeFiltering(t *testing.T
 	alpha, _, _ := searchTestIssues()
 	alpha.Labels = []string{"bug"}
 	m.list.issues = []Issue{alpha}
+	m.list.truncated = true
 	far := Issue{ProjectID: 7, UID: "01TEST-far1", ShortID: "far1", Title: "beyond the limit", Status: "open"}
 	deleted := Issue{ProjectID: 7, UID: "01TEST-del1", ShortID: "del1", Title: "deleted", Status: "open"}
 	moved := Issue{ProjectID: 7, UID: "01TEST-mov1", ShortID: "mov1", Title: "moved", Status: "open"}
@@ -552,6 +555,7 @@ func TestDaemonSearch_RefreshRechecksHitsMissingFromATruncatedList(t *testing.T)
 	m, api := daemonSearchFixture(t)
 	alpha, _, _ := searchTestIssues()
 	m.list.issues = []Issue{alpha}
+	m.list.truncated = true
 	far := Issue{ProjectID: 7, UID: "01TEST-far1", ShortID: "far1", Title: "beyond the limit", Status: "open"}
 	api.searchFn = answerWith("hybrid", far, alpha)
 	api.readFn = func(string) (*Issue, error) { return &far, nil }
@@ -565,18 +569,10 @@ func TestDaemonSearch_RefreshRechecksHitsMissingFromATruncatedList(t *testing.T)
 
 	// Someone else deletes the far issue; the refresh holds only the first 2,000.
 	api.readFn = func(string) (*Issue, error) { return nil, &APIError{Status: http.StatusNotFound} }
-	refetched := []Issue{alpha}
-	for i := range queueWorkingSetLimit {
-		refetched = append(refetched, Issue{ProjectID: 7, UID: fmt.Sprintf("01FILL-%04d", i), ShortID: fmt.Sprintf("f%04d", i), Status: "open"})
-	}
-	m, cmd := stepModel(m, refetchedMsg{dispatchKey: m.currentCacheKey(), issues: refetched})
+	m, cmd := stepModel(m, truncatedRefetch(m, alpha))
 	require.True(t, m.list.truncated)
 	require.Equal(t, []string{"01TEST-far1", "01TEST-aaa1"}, visibleUIDs(m), "an incomplete list cannot say it is gone")
-	for _, msg := range runCmdTree(cmd) {
-		if recheck, ok := msg.(daemonSearchRecheckMsg); ok {
-			m, _ = stepModel(m, recheck)
-		}
-	}
+	m = settleRecheck(m, cmd)
 
 	require.Equal(t, []string{"01TEST-aaa1"}, visibleUIDs(m))
 }
@@ -631,10 +627,191 @@ func TestDaemonSearch_AnswerForEarlierTextIsDroppedAndAskedAgain(t *testing.T) {
 	m, _ = typeText(m, "ments") // the next ask has not gone out yet
 
 	m, _ = stepModel(m, slow)
+	require.Len(t, visibleUIDs(m), 3, "an answer for \"pay\" must not replace rows for \"payments\"")
 
-	require.False(t, m.list.ranked.hasAnswer, "an answer for \"pay\" must not replace rows for \"payments\"")
-	require.Len(t, visibleUIDs(m), 3)
-	require.Empty(t, m.list.ranked.asked, "typing \"pay\" again would ask again")
+	var erase []tea.Cmd
+	for range "ments" {
+		var cmd tea.Cmd
+		m, cmd = stepModel(m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+		erase = append(erase, cmd)
+	}
+	m = settleSearch(m, erase...)
+	require.Len(t, api.searchCalls, 2, "typing \"pay\" again asks again")
+	require.Equal(t, []string{"01TEST-aaa1"}, visibleUIDs(m))
+}
+
+// truncatedRefetch is a refresh cut off at the working-set limit that holds keep
+// and nothing else the tests care about.
+func truncatedRefetch(m Model, keep ...Issue) refetchedMsg {
+	issues := append([]Issue{}, keep...)
+	for i := len(issues); i <= queueWorkingSetLimit; i++ {
+		issues = append(issues, Issue{
+			ProjectID: 7, UID: fmt.Sprintf("01FILL-%04d", i), ShortID: fmt.Sprintf("f%04d", i), Status: "open",
+		})
+	}
+	return refetchedMsg{dispatchKey: m.currentCacheKey(), issues: issues}
+}
+
+// settleRecheck plays the recheck reads a refresh started and nothing else.
+func settleRecheck(m Model, cmd tea.Cmd) Model {
+	for _, msg := range runCmdTree(cmd) {
+		if recheck, ok := msg.(daemonSearchRecheckMsg); ok {
+			m, _ = stepModel(m, recheck)
+		}
+	}
+	return m
+}
+
+// committedFarSearch commits a ranked search whose second hit is beyond the
+// loaded list, with the list cut off at the working-set limit.
+func committedFarSearch(t *testing.T) (m Model, api *fakeListAPI, loaded Issue) {
+	t.Helper()
+	m, api = daemonSearchFixture(t)
+	alpha, _, _ := searchTestIssues()
+	m.list.issues = []Issue{alpha}
+	m.list.truncated = true
+	far := Issue{ProjectID: 7, UID: "01TEST-far1", ShortID: "far1", Title: "beyond the limit", Status: "open"}
+	api.searchFn = answerWith("hybrid", far, alpha)
+	api.readFn = func(string) (*Issue, error) { return &far, nil }
+	m = openBarFromCmd(t, m, '/')
+	m, _ = stepModel(m, ctrlT)
+	m, cmds := typeText(m, "payments")
+	m = settleSearch(m, cmds...)
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.Equal(t, []string{"01TEST-far1", "01TEST-aaa1"}, visibleUIDs(m))
+	return m, api, alpha
+}
+
+func TestDaemonSearch_EscKeepsLaterRechecksWorkingAfterOneFinishedWhileTheBarWasOpen(t *testing.T) {
+	m, api, alpha := committedFarSearch(t)
+	m, recheck := stepModel(m, truncatedRefetch(m, alpha)) // a recheck is out
+	m = openBarFromCmd(t, m, '/')
+	m = settleRecheck(m, recheck) // it finishes while the bar is open
+	m, afterEsc := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = settleRecheck(m, afterEsc)
+	reads := len(api.readRefs)
+
+	_, again := stepModel(m, truncatedRefetch(m, alpha))
+	var rechecks int
+	for _, msg := range runCmdTree(again) {
+		if _, ok := msg.(daemonSearchRecheckMsg); ok {
+			rechecks++
+		}
+	}
+
+	require.Equal(t, 1, rechecks, "a later refresh still rechecks")
+	require.Greater(t, len(api.readRefs), reads)
+}
+
+func TestDaemonSearch_CompleteListDropsMissingHitsWithoutReading(t *testing.T) {
+	m, api := daemonSearchFixture(t)
+	alpha, _, _ := searchTestIssues()
+	m.list.issues = []Issue{alpha}
+	closedElsewhere := Issue{ProjectID: 7, UID: "01TEST-cls1", ShortID: "cls1", Title: "not in this list", Status: "closed"}
+	api.searchFn = answerWith("hybrid", closedElsewhere, alpha)
+	m = openBarFromCmd(t, m, '/')
+	m, _ = stepModel(m, ctrlT)
+	m, cmds := typeText(m, "payments")
+	m = settleSearch(m, cmds...)
+
+	require.Equal(t, []string{"01TEST-aaa1"}, visibleUIDs(m))
+	require.Empty(t, api.readRefs, "a complete list already says the hit is outside it")
+}
+
+func TestDaemonSearch_HitPushedPastTheCapBeforeTheAnswerIsRead(t *testing.T) {
+	m, api := daemonSearchFixture(t)
+	alpha, _, gamma := searchTestIssues()
+	m.list.issues = []Issue{alpha, gamma}
+	api.searchFn = answerWith("hybrid", gamma, alpha)
+	api.readFn = func(string) (*Issue, error) {
+		labelled := gamma
+		labelled.Labels = []string{"bug"}
+		return &labelled, nil
+	}
+	m.list.filter.Labels = []string{"bug"}
+	m = openBarFromCmd(t, m, '/')
+	m, _ = stepModel(m, ctrlT)
+	m, cmds := typeText(m, "payments")
+	m, ask := stepModel(m, onlyMsg(t, cmds[len(cmds)-1]))
+	answer := onlyMsg(t, ask)
+	m, _ = stepModel(m, truncatedRefetch(m, alpha)) // gamma falls past the cap
+
+	m, read := stepModel(m, answer)
+	m = settleSearch(m, read)
+
+	require.Equal(t, []string{"01TEST-ccc3"}, visibleUIDs(m))
+	require.Equal(t, []string{gamma.UID}, api.readRefs)
+}
+
+func TestDaemonSearch_EscStopsReadsOfTheAskInFlight(t *testing.T) {
+	m, api := daemonSearchFixture(t)
+	alpha, _, _ := searchTestIssues()
+	m.list.issues = []Issue{alpha}
+	m.list.truncated = true
+	far := Issue{ProjectID: 7, UID: "01TEST-far1", ShortID: "far1", Status: "open"}
+	api.searchFn = answerWith("hybrid", far)
+	api.readStarted = make(chan struct{}, daemonSearchLimit)
+	m = openBarFromCmd(t, m, '/')
+	m, _ = stepModel(m, ctrlT)
+	m, cmds := typeText(m, "payments")
+	m, ask := stepModel(m, onlyMsg(t, cmds[len(cmds)-1]))
+	m, read := stepModel(m, onlyMsg(t, ask))
+	finished := make(chan struct{})
+	go func() { runCmdTree(read); close(finished) }()
+	<-api.readStarted
+
+	stepModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+
+	select {
+	case <-finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the read of the cancelled ask kept running")
+	}
+}
+
+func TestDaemonSearch_FormCancelDoesNotRecheck(t *testing.T) {
+	m, api, alpha := committedFarSearch(t)
+	m, recheck := stepModel(m, truncatedRefetch(m, alpha))
+	m = settleRecheck(m, recheck)
+	reads := len(api.readRefs)
+
+	m, _ = m.openInput(inputFilterForm)
+	_, cmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+
+	for _, msg := range runCmdTree(cmd) {
+		_, recheck := msg.(daemonSearchRecheckMsg)
+		require.False(t, recheck, "cancelling a form must not recheck ranked hits")
+	}
+	require.Len(t, api.readRefs, reads)
+}
+
+func TestDaemonSearch_FailedReadFailsTheAskAndKeepsRows(t *testing.T) {
+	m, api := daemonSearchFixture(t)
+	alpha, _, _ := searchTestIssues()
+	m.list.issues = []Issue{alpha}
+	m.list.truncated = true
+	far := Issue{ProjectID: 7, UID: "01TEST-far1", ShortID: "far1", Status: "open"}
+	api.searchFn = answerWith("hybrid", far)
+	api.readFn = func(string) (*Issue, error) { return nil, errors.New("daemon unavailable") }
+	m = openBarFromCmd(t, m, '/')
+	m, _ = stepModel(m, ctrlT)
+	m, cmds := typeText(m, "payments")
+	m = settleSearch(m, cmds...)
+
+	require.Contains(t, stripANSI(m.list.status), "search failed")
+	require.Contains(t, stripANSI(m.list.status), "daemon unavailable")
+	require.Equal(t, []string{"01TEST-aaa1"}, visibleUIDs(m), "the loaded rows stay")
+}
+
+func TestDaemonSearch_FailedReadDuringRecheckKeepsTheHit(t *testing.T) {
+	m, api, alpha := committedFarSearch(t)
+	api.readFn = func(string) (*Issue, error) { return nil, errors.New("daemon unavailable") }
+
+	m, recheck := stepModel(m, truncatedRefetch(m, alpha))
+	m = settleRecheck(m, recheck)
+
+	require.Equal(t, []string{"01TEST-far1", "01TEST-aaa1"}, visibleUIDs(m))
 }
 
 func TestDaemonSearch_RendersCompletelyAtEverySize(t *testing.T) {

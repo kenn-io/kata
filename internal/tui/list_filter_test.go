@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
@@ -47,18 +48,30 @@ type fakeListAPI struct {
 	searchFn    func(SearchQuery) (*SearchAnswer, error)
 	searchCalls []SearchQuery
 	searchPIDs  []int64
-	// readFn answers ReadIssue by ref; the ref is recorded first.
+	// readFn answers IssueWithLabels by ref; the ref is recorded first.
 	readFn   func(ref string) (*Issue, error)
 	readRefs []string
 	readMu   sync.Mutex
+	// readStarted, when set, is signalled by each read, which then waits for
+	// its context to end instead of answering.
+	readStarted chan struct{}
 }
 
-func (f *fakeListAPI) ReadIssue(_ context.Context, _ int64, ref string) (*Issue, error) {
+func (f *fakeListAPI) IssueWithLabels(ctx context.Context, _ int64, ref string) (*Issue, error) {
 	f.readMu.Lock()
 	f.readRefs = append(f.readRefs, ref)
 	f.readMu.Unlock()
+	if f.readStarted != nil {
+		f.readStarted <- struct{}{}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(5 * time.Second):
+			return nil, errors.New("read was never cancelled")
+		}
+	}
 	if f.readFn == nil {
-		return nil, errors.New("unexpected ReadIssue " + ref)
+		return nil, errors.New("unexpected IssueWithLabels " + ref)
 	}
 	return f.readFn(ref)
 }

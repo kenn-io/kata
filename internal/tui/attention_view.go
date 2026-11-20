@@ -236,6 +236,7 @@ func (m Model) prepareAttentionGlobalExit() (Model, tea.Cmd) {
 func (m Model) prepareAttentionListNavigation() (Model, tea.Cmd) {
 	var cmd tea.Cmd
 	if m.attention.returnToAttention && m.scope.projectID == 0 && !m.scope.allProjects {
+		m = m.cancelSearchReads()
 		m.scopeGen++
 		m.scope = scope{allProjects: true, scopeGen: m.scopeGen}
 		actor := m.list.actor

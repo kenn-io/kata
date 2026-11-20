@@ -20,8 +20,8 @@ type listAPI interface {
 	ListIssues(ctx context.Context, projectID int64, f ListFilter) ([]Issue, error)
 	ListAllIssues(ctx context.Context, f ListFilter) ([]Issue, error)
 	SearchIssues(ctx context.Context, projectID int64, q SearchQuery) (*SearchAnswer, error)
-	// ReadIssue reads one issue with its labels and planning dates.
-	ReadIssue(ctx context.Context, projectID int64, ref string) (*Issue, error)
+	// IssueWithLabels reads one issue with its labels and planning dates.
+	IssueWithLabels(ctx context.Context, projectID int64, ref string) (*Issue, error)
 	CreateIssue(
 		ctx context.Context, projectID int64, body CreateIssueBody,
 	) (*MutationResp, error)
@@ -89,6 +89,13 @@ func queueFetchFilterForScope(sc scope) ListFilter {
 		filter.Status = "open"
 	}
 	return filter
+}
+
+// complete reports whether the loaded issues are everything the fetch matched:
+// loaded without error and not cut off at the working-set limit. Only then does
+// a missing issue mean it is outside the list.
+func (lm listModel) complete() bool {
+	return !lm.loading && lm.err == nil && !lm.truncated
 }
 
 func trimQueueWorkingSet(issues []Issue) ([]Issue, bool) {

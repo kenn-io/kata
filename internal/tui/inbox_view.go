@@ -91,6 +91,7 @@ func (m Model) handleInboxProjectLoaded(msg inboxProjectLoadedMsg) (Model, tea.C
 	}
 	m.inboxReturn = &inboxReturnState{scope: m.scope, list: m.list, detail: m.detail, view: m.view, prevView: m.prevView, focus: m.focus}
 	actor := m.list.actor
+	m = m.cancelSearchReads()
 	m.scopeGen++
 	m.scope = scope{projectID: msg.project.ID, projectName: msg.project.Name, inbox: true,
 		scopeGen:      m.scopeGen,
@@ -121,6 +122,7 @@ func (m Model) leaveInbox() (Model, tea.Cmd) {
 	// nonce into the restored scope so every ordinary-scope era keys
 	// distinctly. Wire filters are untouched — this only discriminates
 	// client-side cache slots.
+	m = m.cancelSearchReads()
 	m.scopeGen++
 	previous.scope.scopeGen = m.scopeGen
 	m.scope, m.list, m.detail = previous.scope, previous.list, previous.detail

@@ -223,6 +223,13 @@ type Model struct {
 	// searchTickGen does the same for the typing-pause timer.
 	nextSearchReq int64
 	searchTickGen int64
+	// askCancel stops the reads of the newest ask and recheckCancel those of
+	// the recheck in flight, recheckReq naming it. They live here, not in the
+	// ranked answer, because that value is saved and restored by Esc and the
+	// Inbox, which must not bring back a recheck that is long finished.
+	askCancel     context.CancelFunc
+	recheckCancel context.CancelFunc
+	recheckReq    int64
 }
 
 // initialModel constructs the root Bubble Tea model. Style vars are
@@ -2458,13 +2465,6 @@ func dispatchFormEditBody(
 // no live mirror: the filter form writes lm.filter only on commit, so
 // cancelling it just closes it.
 func (m Model) cancelInput() (Model, tea.Cmd) {
-	m, cmd := m.closeInput()
-	var recheckCmd tea.Cmd
-	m, recheckCmd = m.recheckRankedHits()
-	return m, combineCmds(cmd, recheckCmd)
-}
-
-func (m Model) closeInput() (Model, tea.Cmd) {
 	searchCanceled := m.input.kind.isCommandBar()
 	restoreSplitDetail := searchCanceled && m.input.restoreSplitDetail
 	preSplitDetail := m.input.preSplitDetail
@@ -2474,9 +2474,10 @@ func (m Model) closeInput() (Model, tea.Cmd) {
 		pre.Day = m.list.filter.Day
 		m.list.filter = pre
 		// An answer still in flight belongs to the query being discarded.
+		m = m.cancelSearchReads()
 		// The saved answer predates any refresh since the bar opened, so bring
 		// it up to the loaded rows before it comes back.
-		m.list.ranked = m.input.preRanked.discardInFlight().refreshed(m.list.issues, !m.list.truncated)
+		m.list.ranked = m.input.preRanked.discardInFlight().refreshed(m.list.issues, m.list.complete())
 		m.searchTickGen++
 		snapshot := m.input.preListSelection
 		m.list.cursor = snapshot.cursor
@@ -2487,13 +2488,20 @@ func (m Model) closeInput() (Model, tea.Cmd) {
 	}
 	m.input = inputState{}
 	m.undoCloseEntryID = 0
-	if restoreSplitDetail {
-		return m.restoreSearchDetailIfNeeded(preSplitDetail, nil)
+	var cmd tea.Cmd
+	switch {
+	case restoreSplitDetail:
+		m, cmd = m.restoreSearchDetailIfNeeded(preSplitDetail, nil)
+	case searchCanceled:
+		m, cmd = m.followSearchResultIfNeeded(nil)
 	}
 	if searchCanceled {
-		return m.followSearchResultIfNeeded(nil)
+		// Only the search bar restores a saved answer that may be out of date.
+		var recheckCmd tea.Cmd
+		m, recheckCmd = m.recheckRankedHits()
+		cmd = combineCmds(cmd, recheckCmd)
 	}
-	return m, nil
+	return m, cmd
 }
 
 func snapshotListSelection(lm listModel) listSelectionSnapshot {
