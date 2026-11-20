@@ -836,6 +836,29 @@ func TestDaemonSearch_AnswerBeforeTheFirstFetchOfASwitchedProjectKeepsHits(t *te
 	require.Equal(t, []string{"01TEST-spk1"}, visibleUIDs(m))
 }
 
+func TestDaemonSearch_StaleRecheckOfALeftScopeStartsTheCurrentListsRecheck(t *testing.T) {
+	m, api, alpha := committedFarSearch(t)
+	m, staleRecheck := stepModel(m, truncatedRefetch(m, alpha)) // project 7's recheck is out
+
+	// The user moves to project 8, whose truncated list already holds a committed
+	// answer with a hit the list does not.
+	farInEight := Issue{ProjectID: 8, UID: "01TEST-far8", ShortID: "far8", Title: "other project", Status: "open"}
+	m.scope.projectID = 8
+	m.list.ranked.hits = []Issue{farInEight}
+	api.readFn = func(string) (*Issue, error) { return &farInEight, nil }
+	api.readRefs = nil
+
+	var next tea.Cmd
+	for _, msg := range runCmdTree(staleRecheck) {
+		if recheck, ok := msg.(daemonSearchRecheckMsg); ok {
+			m, next = stepModel(m, recheck)
+		}
+	}
+	m = settleRecheck(m, next)
+
+	require.Equal(t, []string{farInEight.UID}, api.readRefs[len(api.readRefs)-1:], "the new list's hit is read")
+}
+
 func TestDaemonSearch_RendersCompletelyAtEverySize(t *testing.T) {
 	longName := strings.Repeat("example-project-", 5)
 	for _, tc := range []struct {

@@ -153,8 +153,7 @@ func (m Model) cancelRecheck() Model {
 	return m
 }
 
-// cancelSearchReads stops every search read still out: on leaving the search,
-// or when the scope or daemon its answers belong to goes away.
+// cancelSearchReads stops every search read still out, on leaving the search.
 func (m Model) cancelSearchReads() Model {
 	return m.cancelAskReads().cancelRecheck()
 }
@@ -189,7 +188,9 @@ func (m Model) handleDaemonSearchRecheck(msg daemonSearchRecheckMsg) (Model, tea
 	}
 	m = m.cancelRecheck()
 	if m.staleConnMsg(msg.connGen) || m.scope.allProjects || m.scope.projectID != msg.projectID {
-		return m, nil
+		// The recheck belonged to a scope or daemon that was left. It held off
+		// the current list's recheck while it was out, so start that one now.
+		return m.recheckRankedHits()
 	}
 	prevPID, prevUID, prevHas := highlightedIdentity(m.list)
 	hits, _ := mergeReads(m.list.ranked.hits, msg.reads, false)
