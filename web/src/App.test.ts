@@ -660,7 +660,7 @@ describe('App', () => {
       )
       let snapshotReads = 0
       let rosterRequests = 0
-      const failedResponse = new Response('', { status: 400 })
+      const failedResponse = new Response('', { status: 403 })
       vi.stubGlobal(
         'fetch',
         vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -730,95 +730,69 @@ describe('App', () => {
     },
   )
 
-  it('keeps an unavailable explicitly selected daemon instead of opening local', async () => {
-    history.replaceState(null, '', '/kata#daemon=hub-a')
-    sessionStorage.setItem(
-      'kata.web.session.v1',
-      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
-    )
-    const selected: Array<string | null> = []
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const request = requestOf(input, init)
-        const path = new URL(request.url).pathname
-        if (path === '/api/v1/ui/daemons')
-          return Response.json({
-            daemons: [
-              ...daemonRoster().daemons,
-              ...(request.headers.get('X-Kata-Web-Daemon') === 'hub-a'
-                ? [
-                    {
-                      id: 'hub-a',
-                      url: 'https://hub.example',
-                      default: false,
-                      auth: 'none',
-                      health: 'down',
-                    },
-                  ]
-                : []),
-            ],
-          })
-        if (path === '/api/v1/ui/telemetry') return telemetryAccepted()
-        if (path.startsWith('/api/v1/ui/proxy/')) {
-          selected.push(request.headers.get('X-Kata-Web-Daemon'))
-          if (request.headers.get('X-Kata-Web-Daemon') === 'example-local') {
-            return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+  it.each([false, true])(
+    'honors an explicitly selected gateway daemon on first authority load, down: %s',
+    async (down) => {
+      vi.useFakeTimers()
+      const id = down ? 'hub-a' : 'example-remote'
+      history.replaceState(null, '', `/kata#daemon=${id}`)
+      sessionStorage.setItem(
+        'kata.web.session.v1',
+        JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+      )
+      const selected: Array<string | null> = []
+      let rosterSelection: string | null = null
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = requestOf(input, init)
+          const path = new URL(request.url).pathname
+          if (path === '/api/v1/ui/daemons') {
+            rosterSelection = request.headers.get('X-Kata-Web-Daemon')
+            return Response.json({
+              daemons: [
+                ...daemonRoster().daemons,
+                ...(rosterSelection === id
+                  ? [
+                      {
+                        id,
+                        url: 'https://daemon.example',
+                        default: false,
+                        auth: 'none',
+                        health: down ? 'down' : 'connected',
+                      },
+                    ]
+                  : []),
+              ],
+            })
           }
-          return new Response('', { status: 502 })
-        }
-        return Response.json({ issues: [], labels: [], owners: [], projects: [] })
-      }),
-    )
-    render(App)
-    await waitFor(() => expect(selected).toContain('hub-a'))
-    expect(await screen.findByRole('alert', {}, { timeout: 12_000 })).not.toBeNull()
-    expect(screen.getByTestId('daemon-chip').textContent).toContain('hub-a')
-  }, 15_000)
+          if (path.endsWith('/api/v1/ui/references')) {
+            return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+          }
+          if (path === '/api/v1/ui/telemetry') return telemetryAccepted()
+          if (path.endsWith('/api/v1/ui/snapshot')) {
+            selected.push(request.headers.get('X-Kata-Web-Daemon'))
+            if (down) return new Response('', { status: 502 })
+          }
+          return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+        }),
+      )
 
-  it('honors an explicitly selected gateway daemon on first authority load', async () => {
-    history.replaceState(null, '', '/kata#daemon=example-remote')
-    sessionStorage.setItem(
-      'kata.web.session.v1',
-      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
-    )
-    const selected: Array<string | null> = []
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const request =
-          input instanceof Request
-            ? input
-            : new Request(new URL(String(input), window.location.origin), init)
-        const path = new URL(request.url).pathname
-        if (path === '/api/v1/ui/daemons') {
-          return Response.json({
-            daemons: [
-              ...daemonRoster().daemons,
-              {
-                id: 'example-remote',
-                url: 'https://daemon.example',
-                default: false,
-                auth: 'token',
-                health: 'connected',
-              },
-            ],
-          })
-        }
-        if (path.endsWith('/api/v1/ui/references')) {
-          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
-        }
-        if (path === '/api/v1/ui/telemetry') return telemetryAccepted()
-        selected.push(request.headers.get('X-Kata-Web-Daemon'))
-        return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
-      }),
-    )
-
-    render(App)
-
-    expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
-    expect(selected[0]).toBe('example-remote')
-  })
+      render(App)
+      await vi.advanceTimersByTimeAsync(0)
+      if (down) {
+        await vi.advanceTimersByTimeAsync(7000)
+        await tick()
+        expect(screen.getByRole('alert')).not.toBeNull()
+        expect(screen.getByTestId('daemon-chip').textContent).toContain('hub-a')
+      } else {
+        expect(screen.getByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+      }
+      expect(rosterSelection).toBe(id)
+      expect(selected.length).toBeGreaterThan(0)
+      expect(selected.every((selection) => selection === id)).toBe(true)
+    },
+  )
 
   it('keeps an explicitly direct daemon pinned across reload', async () => {
     history.replaceState(null, '', '/kata#direct=1')

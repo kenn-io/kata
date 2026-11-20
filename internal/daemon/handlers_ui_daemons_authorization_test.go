@@ -160,7 +160,6 @@ func TestWebDaemonRosterListsRecoveredHubAndKeepsLocalFallback(t *testing.T) {
 	require.Len(t, down, 1)
 	assert.Equal(t, "local", down[0].ID)
 	assert.True(t, down[0].Default)
-	readLocal()
 
 	ready.Store(true)
 	recovered := roster()

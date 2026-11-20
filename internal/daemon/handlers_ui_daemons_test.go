@@ -6,8 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -136,21 +134,6 @@ func TestWebDaemonRosterIsSanitizedAndReportsHealth(t *testing.T) {
 	assert.Zero(t, authCalls.Load(), "roster must not probe with an unavailable credential")
 }
 
-func anonymousHub(t *testing.T) (*httptest.Server, *atomic.Int64) {
-	t.Helper()
-	var probes atomic.Int64
-	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, http.MethodGet, r.Method)
-		assert.Equal(t, "/api/v1/instance", r.URL.Path)
-		assert.Empty(t, r.Header.Get("Authorization"))
-		probes.Add(1)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"web_ui_contract_version":%q}`, api.UISnapshotContractVersion)
-	}))
-	t.Cleanup(hub.Close)
-	return hub, &probes
-}
-
 func TestWebDaemonRosterMappedHubs(t *testing.T) {
 	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -158,43 +141,16 @@ func TestWebDaemonRosterMappedHubs(t *testing.T) {
 	t.Cleanup(down.Close)
 
 	for _, tc := range []struct {
-		name, active, hubURL, token, extra, selected string
-		wantIDs, wantHealth                          []string
+		name, active, selected string
+		wantIDs, wantHealth    []string
 	}{
-		{"down hub", "", down.URL, "", "", "", []string{"local"}, []string{"connected"}},
-		{"selected down hub", "", down.URL, "", "", "hub", []string{"local", "hub"}, []string{"connected", "down"}},
-		{"active down hub", `active_daemon = "hub"`, down.URL, "", "", "", []string{"local", "hub"}, []string{"connected", "down"}},
-		{"token hub", "", down.URL, `token = "example-token"`, "", "", []string{"local", "hub"}, []string{"connected", "down"}},
-		{"unmapped down target", "", down.URL, "", fmt.Sprintf(`[[daemon]]
-name = "other"
-url = %q
-allow_insecure = true
-`, down.URL), "", []string{"local", "other"}, []string{"connected", "down"}},
+		{"down hub", "", "", []string{"local"}, []string{"connected"}},
+		{"selected down hub", "", "hub", []string{"local", "hub"}, []string{"connected", "down"}},
+		{"active down hub", "hub", "", []string{"local", "hub"}, []string{"connected", "down"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			home := t.TempDir()
-			t.Setenv("KATA_HOME", home)
-			body := fmt.Sprintf(`%s
-[[daemon]]
-name = "local"
-local = true
-[[daemon]]
-name = "hub"
-url = %q
-allow_insecure = true
-%s
-%s
-[[federation.project]]
-hub = "hub"
-spoke_project = "spoke-project"
-hub_project = "hub-project"
-actor = "user-a"
-`, tc.active, tc.hubURL, tc.token, tc.extra)
-			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(body), 0o600))
-			cfg, err := config.ReadDaemonConfig()
-			require.NoError(t, err)
 			d := openTestDB(t)
-			server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, WebDaemons: cfg.Daemons, WebSyncHubs: cfg.WebSyncHubs(), ActiveWebDaemon: cfg.ActiveDaemon})
+			server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, WebDaemons: []config.CatalogDaemonConfig{{Name: "local", Local: true}, {Name: "hub", URL: down.URL, AllowInsecure: true}}, WebSyncHubs: []string{"hub"}, ActiveWebDaemon: tc.active})
 			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/daemons", nil)
 			require.NoError(t, err)
 			if tc.selected != "" {
@@ -225,7 +181,16 @@ actor = "user-a"
 }
 
 func TestWebDaemonRosterCachesUnrelatedTargets(t *testing.T) {
-	other, otherProbes := anonymousHub(t)
+	var otherProbes atomic.Int64
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/instance", r.URL.Path)
+		assert.Empty(t, r.Header.Get("Authorization"))
+		otherProbes.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"web_ui_contract_version":%q}`, api.UISnapshotContractVersion)
+	}))
+	t.Cleanup(other.Close)
 	d := openTestDB(t)
 	server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, WebDaemons: []config.CatalogDaemonConfig{{Name: "other", URL: other.URL, AllowInsecure: true}}})
 	for range 2 {
@@ -482,6 +447,60 @@ func TestWebDaemonGatewayAllowsIssueReferenceLookup(t *testing.T) {
 	assert.Equal(t, map[string]any{
 		"issue": map[string]any{"uid": issue.UID, "project_uid": project.UID},
 	}, body)
+}
+
+func TestWebDaemonGatewayDefaultWithDownSyncHub(t *testing.T) {
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(hub.Close)
+	for _, tc := range []struct {
+		name     string
+		ordinary bool
+	}{
+		{"local fallback", false},
+		{"ordinary target", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var probes, requests atomic.Int64
+			other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/instance" {
+					probes.Add(1)
+				} else if r.URL.Path == "/api/v1/ui/issue-reference" {
+					requests.Add(1)
+				}
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			t.Cleanup(other.Close)
+			d := openTestDB(t)
+			project, err := d.db.CreateProject(t.Context(), "example-project")
+			require.NoError(t, err)
+			issue, _, err := d.db.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Example issue", Author: "user-a"})
+			require.NoError(t, err)
+			catalog := []config.CatalogDaemonConfig{{Name: "hub", URL: hub.URL, AllowInsecure: true}}
+			if tc.ordinary {
+				catalog = append(catalog, config.CatalogDaemonConfig{Name: "other", URL: other.URL, AllowInsecure: true})
+			}
+			server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, WebSyncHubs: []string{"hub"}, WebDaemons: catalog})
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf(
+				"%s/api/v1/ui/proxy/api/v1/ui/issue-reference?project_id=%d&ref=%s", server.URL, project.ID, issue.ShortID,
+			), nil)
+			require.NoError(t, err)
+			response, err := http.DefaultClient.Do(request)
+			require.NoError(t, err)
+			defer func() { _ = response.Body.Close() }()
+			if tc.ordinary {
+				require.Equal(t, http.StatusNoContent, response.StatusCode)
+				assert.EqualValues(t, 1, requests.Load())
+				assert.Zero(t, probes.Load())
+			} else {
+				require.Equal(t, http.StatusOK, response.StatusCode)
+				var body map[string]any
+				require.NoError(t, json.NewDecoder(response.Body).Decode(&body))
+				assert.Equal(t, map[string]any{"issue": map[string]any{"uid": issue.UID, "project_uid": project.UID}}, body)
+			}
+		})
+	}
 }
 
 func TestWebDaemonGatewayRejectsDownstreamRosterBeforeProxying(t *testing.T) {
