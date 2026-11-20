@@ -117,7 +117,7 @@ func runReusedArtifactReoffer(t *testing.T, reuse func(context.Context, *testing
 		t.Cleanup(func() { require.NoError(t, ix.Close()) })
 		key := client.Generation().Fingerprint()
 		require.NoError(t, ix.EnsureBuilding(ctx, key, client.Generation()))
-		_, err = ix.RefreshMirror(ctx, store)
+		_, err = ix.RefreshMirror(ctx, store, nil)
 		require.NoError(t, err)
 		recipe, err := client.ArtifactIdentity("", "", store.InstanceUID())
 		require.NoError(t, err)

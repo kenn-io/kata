@@ -166,7 +166,7 @@ func (p *postgresIndex) coverage(ctx context.Context, key string) (embedded, ski
 	return embedded, total - backlog - embedded, backlog, nil
 }
 
-func (p *postgresIndex) refreshMirror(ctx context.Context, store db.Storage) (int, error) {
+func (p *postgresIndex) refreshMirror(ctx context.Context, store db.Storage, allowed func(context.Context, string) (bool, error)) (int, error) {
 	executor, err := p.reconcilerExecutor()
 	if err != nil {
 		return 0, fmt.Errorf("vector: refresh postgres mirror: %w", err)
@@ -175,7 +175,7 @@ func (p *postgresIndex) refreshMirror(ctx context.Context, store db.Storage) (in
 	if err != nil {
 		return 0, fmt.Errorf("vector: scan postgres mirror keys: %w", err)
 	}
-	changed, stale, err := syncMirror(ctx, store, known, func(page []db.IssueContent) (int, error) {
+	changed, stale, err := syncMirror(ctx, store, known, allowed, func(page []db.IssueContent) (int, error) {
 		tx, err := p.beginReconcilerTx(ctx)
 		if err != nil {
 			return 0, fmt.Errorf("vector: begin postgres mirror upsert: %w", err)

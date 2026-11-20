@@ -202,6 +202,9 @@ type Config struct {
 	TickTickSync TickTickSyncConfig
 	Docbank      DocbankConfig
 	Embeddings   EmbeddingsConfig
+	// EmbeddingProjectAllowed controls which project UIDs may use the embedding
+	// provider. Nil allows all projects. Errors abort the current attempt.
+	EmbeddingProjectAllowed func(context.Context, string) (bool, error)
 	// WebHandler optionally serves public, data-free browser assets alongside
 	// the API. Non-API paths bypass Kata's bearer check. Nil keeps the service
 	// API-only. Import go.kenn.io/kata/webui to opt into the bundled application.
@@ -439,7 +442,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	publisher := daemon.NewEventPublisher(broadcaster, hookSink)
 	var reconciler *daemon.Reconciler
 	if index != nil && embedder != nil {
-		reconciler = daemon.NewConfiguredEmbeddingReconciler(store, index, embedder, cfg.Embeddings, publisher, nil, federationCredentials, federation.EmbeddingProducerConnected, federation.EmbeddingProducerAuthorized)
+		reconciler = daemon.NewConfiguredEmbeddingReconciler(store, index, embedder, cfg.Embeddings, publisher, nil, federationCredentials, federation.EmbeddingProducerConnected, federation.EmbeddingProducerAuthorized, cfg.EmbeddingProjectAllowed)
 	}
 	federationWake := make(chan struct{}, 1)
 	wakeFederation := func() {
@@ -558,8 +561,9 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	}
 	federationRetries := federation.NewSyncRetries()
 	serverConfig := daemon.ServerConfig{
-		DB:       store,
-		Embedder: embedder, VectorIndex: index, EmbeddingUnavailableReason: unavailable,
+		EmbeddingProjectAllowed: cfg.EmbeddingProjectAllowed,
+		DB:                      store,
+		Embedder:                embedder, VectorIndex: index, EmbeddingUnavailableReason: unavailable,
 		Docbank:         docbankClient,
 		DocbankFolder:   docbankConfig.Folder,
 		WebHandler:      cfg.WebHandler,

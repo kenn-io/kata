@@ -52,7 +52,7 @@ func TestEmbeddingArtifactArrivalBeforeDispatch(t *testing.T) {
 			require.NoError(t, err)
 			issue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Complete received chunks", Body: strings.Repeat("界", 2500), Author: "member"})
 			require.NoError(t, err)
-			_, err = ix.RefreshMirror(ctx, source)
+			_, err = ix.RefreshMirror(ctx, source, nil)
 			require.NoError(t, err)
 			var requests atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

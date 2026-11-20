@@ -27,14 +27,15 @@ type embedder interface {
 
 // ReconcilerConfig tunes the reconciler.
 type ReconcilerConfig struct {
-	BatchSize      int
-	BatchOptions   []kitvec.BatchOption
-	SweepEvery     time.Duration // periodic safety sweep; default 5m
-	MinBackoff     time.Duration // default 1s
-	MaxBackoff     time.Duration // default 5m
-	Now            func() time.Time
-	DrainAdmission activity.WaitableAdmission
-	OnProjectEvent func(db.Event, activity.Admission)
+	EmbeddingProjectAllowed func(context.Context, string) (bool, error)
+	BatchSize               int
+	BatchOptions            []kitvec.BatchOption
+	SweepEvery              time.Duration // periodic safety sweep; default 5m
+	MinBackoff              time.Duration // default 1s
+	MaxBackoff              time.Duration // default 5m
+	Now                     func() time.Time
+	DrainAdmission          activity.WaitableAdmission
+	OnProjectEvent          func(db.Event, activity.Admission)
 	// The final argument requests artifact synchronization before authorization.
 	// Later documents in the same fill need only fresh authority checks.
 	FederationProducerAllowed func(context.Context, string, embedding.ArtifactIdentity, activity.Admission, bool) (bool, error)
@@ -96,9 +97,10 @@ type embeddingProgress struct {
 const progressRateAlpha = 0.3
 
 // NewConfiguredEmbeddingReconciler shares the embedding producer policy across hosts.
-func NewConfiguredEmbeddingReconciler(store db.Storage, idx *vector.Index, emb *embedding.Client, cfg config.EmbeddingsConfig, publisher EventPublisher, admission activity.WaitableAdmission, credentials config.FederationCredentialStore, connected, authorized func(context.Context, db.Storage, config.FederationCredentialStore, string, embedding.ArtifactIdentity) (bool, error)) *Reconciler {
+func NewConfiguredEmbeddingReconciler(store db.Storage, idx *vector.Index, emb *embedding.Client, cfg config.EmbeddingsConfig, publisher EventPublisher, admission activity.WaitableAdmission, credentials config.FederationCredentialStore, connected, authorized func(context.Context, db.Storage, config.FederationCredentialStore, string, embedding.ArtifactIdentity) (bool, error), allowed func(context.Context, string) (bool, error)) *Reconciler {
 	return NewReconciler(store, idx, emb, ReconcilerConfig{
-		BatchSize: cfg.BatchSize, BatchOptions: embedding.BatchOptions(cfg, emb.BatchSize()), DrainAdmission: admission,
+		EmbeddingProjectAllowed: allowed,
+		BatchSize:               cfg.BatchSize, BatchOptions: embedding.BatchOptions(cfg, emb.BatchSize()), DrainAdmission: admission,
 		OnProjectEvent: func(event db.Event, fork activity.Admission) { publisher.EventFrom(event.ProjectID, event, fork) },
 		FederationProducerAllowed: func(ctx context.Context, projectUID string, recipe embedding.ArtifactIdentity, _ activity.Admission, syncArtifacts bool) (bool, error) {
 			if syncArtifacts {
@@ -328,7 +330,7 @@ func requestRejected(apiErr *embedclient.APIError) bool {
 // documents are filled; documents withheld by shared-project policy do not
 // keep the old recipe active.
 func (r *Reconciler) reconcileOnce(ctx context.Context) error {
-	if _, err := r.idx.RefreshMirror(ctx, r.store); err != nil {
+	if _, err := r.idx.RefreshMirror(ctx, r.store, r.cfg.EmbeddingProjectAllowed); err != nil {
 		r.markError(err)
 		return err
 	}
@@ -379,7 +381,7 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) error {
 		checked := make(map[string]bool)
 		_, eligibilityDeferred, fillErr = r.idx.FillWithArtifactsDetailed(ctx, key, r.store, *portableRecipe, r.emb.EncodeFunc(), r.cfg.BatchSize, r.cfg.BatchOptions, r.markDocumentFilled, func(ctx context.Context, projectUID string) (bool, error) {
 			previous, exists := checked[projectUID]
-			if exists && !previous {
+			if exists && !previous && r.cfg.EmbeddingProjectAllowed == nil {
 				return false, nil
 			}
 			allowed, err := r.projectGenerationAllowed(ctx, projectUID, *portableRecipe, !exists)

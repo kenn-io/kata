@@ -107,7 +107,8 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 			res.Mode = modeLexical
 		} else {
 			params := hybridParams{
-				ProjectID: in.ProjectID, Query: in.Query, Limit: limit, ProbeLimit: probeLimit,
+				EmbeddingProjectAllowed: cfg.EmbeddingProjectAllowed,
+				ProjectID:               in.ProjectID, Query: in.Query, Limit: limit, ProbeLimit: probeLimit,
 				IncludeDeleted: in.IncludeDeleted, Requested: mode,
 				Labels: in.Labels, ExcludeLabels: in.ExcludeLabels, Status: in.Status,
 				IssueScope: issueScopeFromContext(ctx),

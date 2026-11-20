@@ -15,18 +15,19 @@ import (
 )
 
 type hybridParams struct {
-	Status          string
-	ProjectID       int64
-	Query           string
-	Limit           int // requested result count
-	ProbeLimit      int // retrieval count, including any one-row pagination lookahead
-	IncludeDeleted  bool
-	Requested       string // raw mode param
-	Labels          []string
-	ExcludeLabels   []string
-	AllowedIssueIDs []int64
-	IssueScope      *db.APITokenScope
-	Hub             func(context.Context, hybridParams, int) ([]api.FederationSearchHit, bool, error)
+	EmbeddingProjectAllowed func(context.Context, string) (bool, error)
+	Status                  string
+	ProjectID               int64
+	Query                   string
+	Limit                   int // requested result count
+	ProbeLimit              int // retrieval count, including any one-row pagination lookahead
+	IncludeDeleted          bool
+	Requested               string // raw mode param
+	Labels                  []string
+	ExcludeLabels           []string
+	AllowedIssueIDs         []int64
+	IssueScope              *db.APITokenScope
+	Hub                     func(context.Context, hybridParams, int) ([]api.FederationSearchHit, bool, error)
 }
 
 type hybridResult struct {
@@ -251,6 +252,15 @@ func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 		}
 		bounded = bounded || (deleted && len(hits) == fetchCap && len(candidates) < p.retrievalLimit())
 		return candidates, bounded, nil
+	}
+	if p.EmbeddingProjectAllowed != nil {
+		allowed, err := p.EmbeddingProjectAllowed(ctx, project.UID)
+		if err != nil {
+			return nil, false, err
+		}
+		if !allowed {
+			return nil, false, errors.New("semantic search is unavailable for this project")
+		}
 	}
 	if err := emb.MissingCredentialError(); err != nil {
 		return nil, false, err

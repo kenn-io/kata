@@ -2253,7 +2253,7 @@ func startEmbeddingReconciler(
 	if len(publishers) > 0 {
 		publisher = publishers[0]
 	}
-	reconciler := daemon.NewConfiguredEmbeddingReconciler(store, idx, embedder, ec, publisher, drainAdmission, config.DefaultFederationCredentialStore(), federation.EmbeddingProducerConnected, federation.EmbeddingProducerAuthorized)
+	reconciler := daemon.NewConfiguredEmbeddingReconciler(store, idx, embedder, ec, publisher, drainAdmission, config.DefaultFederationCredentialStore(), federation.EmbeddingProducerConnected, federation.EmbeddingProducerAuthorized, nil)
 	workers.Go(func() {
 		if err := reconciler.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			daemonLog.Printf("reconciler: %v", err)

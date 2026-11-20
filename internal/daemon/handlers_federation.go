@@ -137,7 +137,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			limit = 20
 		}
 		limit = min(limit, fetchCap)
-		res, err := hybridSearch(ctx, cfg.DB, cfg.VectorIndex, cfg.Embedder, hybridParams{ProjectID: in.ProjectID, Query: in.Query, ProbeLimit: limit, Requested: "semantic", Status: in.Status, Labels: in.Labels, ExcludeLabels: in.ExcludeLabels})
+		res, err := hybridSearch(ctx, cfg.DB, cfg.VectorIndex, cfg.Embedder, hybridParams{ProjectID: in.ProjectID, Query: in.Query, ProbeLimit: limit, Requested: "semantic", Status: in.Status, Labels: in.Labels, ExcludeLabels: in.ExcludeLabels, EmbeddingProjectAllowed: cfg.EmbeddingProjectAllowed})
 		if err != nil {
 			if me, ok := errors.AsType[*modeError](err); ok {
 				return nil, api.NewError(me.Status(), "unavailable", me.Error(), "", nil)

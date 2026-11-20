@@ -275,7 +275,7 @@ func TestEmbeddingProducerStatusReportsRejectedArtifact(t *testing.T) {
 		require.NoError(t, err)
 		key := client.Generation().Fingerprint()
 		require.NoError(t, ix.EnsureBuilding(ctx, key, client.Generation()))
-		_, err = ix.RefreshMirror(ctx, store)
+		_, err = ix.RefreshMirror(ctx, store, nil)
 		require.NoError(t, err)
 		recipe, err := client.ArtifactIdentity("", "", store.InstanceUID())
 		require.NoError(t, err)
