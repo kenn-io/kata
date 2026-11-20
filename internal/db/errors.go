@@ -449,15 +449,17 @@ const FederationProjectNotEnrolledCode = "federation_project_not_enrolled"
 // FederationProjectNotEnrolledError reports pushed work that touches an issue
 // whose current project has no matching push enrollment for this spoke and
 // actor. The route credential is valid; only the other project's grant is
-// missing, revoked, or bound to a different spoke or actor. The error names
-// only the issue, which the spoke already holds, and not the project it has
-// not joined.
+// missing, revoked, or bound to a different spoke or actor. The error may
+// name an issue the spoke already holds, but not the project it has not joined.
 type FederationProjectNotEnrolledError struct {
 	IssueUID string
 	Err      error
 }
 
 func (e *FederationProjectNotEnrolledError) Error() string {
+	if e.IssueUID == "" {
+		return "an affected issue belongs to a project where this spoke has no push enrollment with the same actor"
+	}
 	return fmt.Sprintf("issue %s now belongs to a project where this spoke has no push enrollment with the same actor", e.IssueUID)
 }
 
