@@ -387,6 +387,7 @@ func TestReconcileProviderUsesApprovedMetadataWithoutCatalogAdministration(t *te
 			if tc.existingData {
 				local, err := store.ProjectByName(t.Context(), mapping.SpokeProject)
 				require.NoError(t, err)
+				require.NotEqual(t, hubProjectUID, local.UID)
 				_, _, err = store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: local.ID, Title: "Import this task", Author: "Original Author"})
 				require.NoError(t, err)
 			}

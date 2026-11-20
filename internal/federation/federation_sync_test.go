@@ -5000,7 +5000,7 @@ func TestSyncFederationMoveProofRejectsOtherOrigin(t *testing.T) {
 			binding, err := spoke.DB.FederationBindingByProject(ctx, replicas[1].ID)
 			require.NoError(t, err)
 			runner := Runner{DB: spoke.DB}
-			_, err = runner.runSpoke(ctx, activeSpokeBinding{project: replicas[1], binding: binding}, credentials, nil, nil)
+			_, _, err = runner.runSpoke(ctx, activeSpokeBinding{project: replicas[1], binding: binding}, credentials, nil, nil)
 			require.Error(t, err, "a pending move must not cross an altered source credential origin")
 			var status *HubStatusError
 			require.False(t, errors.As(err, &status), "reject the target mismatch locally before sending source proof")
@@ -5064,7 +5064,7 @@ func TestFederationMoveSourceProofPreservesPlaintextPolicy(t *testing.T) {
 			require.NoError(t, err)
 			credentials := newMoveCredentialStore()
 			require.NoError(t, credentials.StoreFederationCredential(ctx, source.UID, config.FederationCredential{HubURL: "http://daemon.example", HubProjectID: source.ID, Actor: "worker", Token: "source-plaintext-proof", AllowInsecure: test.credentialAllow}))
-			tokens, err := federationMoveSourceTokens(ctx, env.DB, credentials, destinationBinding, destinationBinding.HubURL, move.Events, clientpkg.Opts{})
+			tokens, err := federationMoveSourceTokens(ctx, env.DB, credentials, destinationBinding, destinationBinding.HubURL, move.Events, clientpkg.Opts{AllowInsecure: true})
 			if test.wantError {
 				require.Error(t, err)
 				require.Empty(t, tokens)

@@ -186,6 +186,10 @@ type ServerConfig struct {
 	// /health. Nil means no mappings are configured, so the block is omitted.
 	FederationConfigHealth func() api.FederationConfigHealth
 
+	// FederationSyncRetry reports a spoke binding's automatic retry schedule
+	// for federation status. Nil means this server has no federation runner.
+	FederationSyncRetry func(projectID int64) (api.FederationSyncRetry, bool)
+
 	// HostAccess enables in-process authentication and authorization supplied
 	// by a mounting application. It is nil for the standalone daemon.
 	HostAccess HostAccessController
@@ -197,7 +201,8 @@ type ServerConfig struct {
 
 	// HostFederationAccess optionally adds host-owned authorization after Kata
 	// authenticates a project-scoped federation enrollment.
-	HostFederationAccess HostFederationAccessController
+	HostFederationAccess         HostFederationAccessController
+	AuthorizeFederationReference func(context.Context, db.Transaction, HostFederationAccessRequest, HostFederationAccessRequest) error
 
 	// IdleAdmission admits ordinary HTTP requests as foreground daemon work.
 	// Nil disables idle lifecycle handling.

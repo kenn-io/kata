@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-16
+last_edited: 2026-11-19
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -245,6 +245,11 @@ of week. It may instead be a descriptor such as `@hourly`, `@daily`, `@weekly`,
   and `*/60 * * * *`; write `@daily` or `@hourly` instead.
 - A step that starts at one weekday continues through 7, which is Sunday.
   `0 9 * * 5/2` runs on Fridays and Sundays.
+- A schedule must fire. Kata refuses a day of month that never occurs in the
+  chosen months, such as `0 0 30 2 *` (February 30), and the `@manual`,
+  `@triggered`, and `@none` descriptors. `0 0 29 2 *` is accepted. A job an
+  older release saved with such a schedule still opens in
+  `kata cron job edit <job-uid>` so you can fix it.
 
 A rejected expression's error says why. For `L`, `W`, `#`, or `H` syntax, it
 names the unsupported feature. Otherwise it shows the parser's message, with a

@@ -67,6 +67,9 @@ type Verifier struct {
 	now            func() time.Time
 }
 
+// Base returns the canonical external URL used to verify requests.
+func (v *Verifier) Base() string { return v.base.String() }
+
 // NewVerifier starts quarantined and locks the durable admission-expiry watermark.
 // Each concurrently serving replica must use distinct enrollment signing keys.
 // Unavailable sources reject their own requests without disabling the daemon.

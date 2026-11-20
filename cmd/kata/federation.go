@@ -246,7 +246,7 @@ func federationEnrollCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&spokeName, "spoke-name", "", "unique hub-local name for this spoke instance")
 	cmd.Flags().StringVar(&spokeInstance, "spoke-instance", "", "spoke instance UID from `kata federation identity`")
-	cmd.Flags().StringVar(&hubURL, "hub-url", "", "hub URL reachable by the spoke")
+	cmd.Flags().StringVar(&hubURL, "hub-url", "", "hub API URL for enrollment; signing hubs use external_url for join")
 	cmd.Flags().StringVar(&capabilities, "capabilities", "pull,push,lease", "comma-separated capabilities: pull,push,lease (claim is the API name for lease)")
 	cmd.Flags().StringVar(&token, "token", "", "explicit enrollment token (default: generated)")
 	cmd.Flags().StringVar(&hubTokenEnv, "hub-token-env", "", "environment variable containing the hub admin token (highest precedence)")
@@ -1631,7 +1631,13 @@ func printFederationEnrollment(
 	enrollment api.FederationEnrollmentOut,
 	bundle federationJoinBundle,
 ) error {
-	bundle.JoinCommand = federationJoinCommand(bundle)
+	if enrollment.Join != nil && enrollment.Join.JoinCommand != "" {
+		bundle.HubURL = enrollment.Join.HubURL
+		bundle.AllowInsecure = enrollment.Join.AllowInsecure
+		bundle.JoinCommand = joinCommandWithInvokedBinary(enrollment.Join.JoinCommand)
+	} else {
+		bundle.JoinCommand = federationJoinCommand(bundle)
+	}
 	enrollment.Join = nil // The CLI exposes its own join bundle with the invoked binary name.
 	if currentOutputMode() == outputJSON {
 		return emitJSON(cmd.OutOrStdout(), struct {
@@ -1849,10 +1855,14 @@ func federationJoinCommand(bundle federationJoinBundle) string {
 		BaselineThroughEventID: bundle.BaselineThroughEventID, Token: bundle.Token, Actor: bundle.Actor,
 		Capabilities: bundle.Capabilities, PushEnabled: bundle.PushEnabled,
 		AdoptExisting: bundle.AdoptExisting, AllowInsecure: bundle.AllowInsecure,
-	})
+	}, false)
 	if command == "" {
 		return ""
 	}
+	return joinCommandWithInvokedBinary(command)
+}
+
+func joinCommandWithInvokedBinary(command string) string {
 	return shellQuote(invokedKataCommand()) + strings.TrimPrefix(command, "kata")
 }
 
@@ -2322,6 +2332,9 @@ func printFederationStatus(cmd *cobra.Command, body api.FederationStatusBody) er
 		if status.CredentialExpiresAt != nil {
 			lines = append(lines, "access expires: "+formatFederationStatusTime(status.CredentialExpiresAt))
 		}
+		if status.SyncRetry != nil {
+			lines = append(lines, "sync retry: "+formatFederationSyncRetry(*status.SyncRetry, status.ProviderStatus != ""))
+		}
 		for _, line := range lines {
 			if _, err := fmt.Fprintf(out, "  %s\n", line); err != nil {
 				return err
@@ -2351,6 +2364,33 @@ func printFederationStatus(cmd *cobra.Command, body api.FederationStatusBody) er
 		}
 	}
 	return nil
+}
+
+// formatFederationSyncRetry describes a binding's retry schedule. A refused
+// manually joined spoke also learns how to retry at once; a provider-managed
+// spoke's provider line already says what to do.
+func formatFederationSyncRetry(retry api.FederationSyncRetry, providerManaged bool) string {
+	reason := textsafe.Line(retry.Reason)
+	switch retry.Reason {
+	case "refused":
+		reason = "hub refused the credential"
+	case "unavailable":
+		reason = "hub unavailable"
+	case "relay_cross_project_links":
+		reason = "relay hub refused cross-project links"
+	}
+	attempts := "attempts"
+	if retry.Failures == 1 {
+		attempts = "attempt"
+	}
+	line := fmt.Sprintf("%s (%d) on %d %s; next attempt %s",
+		reason, retry.HTTPStatus, retry.Failures, attempts, retry.NextAttemptAt.UTC().Format(time.RFC3339))
+	if retry.Reason == "refused" && !providerManaged {
+		// A new credential resets the schedule; a hub-side grant waits for
+		// the next attempt.
+		line += "; to retry now, enroll again on the hub and run the join command it prints"
+	}
+	return line
 }
 
 func formatProviderStatus(status string) string {
@@ -2428,6 +2468,11 @@ func printFederationStatusAgent(cmd *cobra.Command, body api.FederationStatusBod
 			checkpointCapacity = strconv.FormatInt(status.RelayCheckpointCapacity, 10)
 		}
 		checkpointError := status.RelayCheckpointError
+		var retryReason, retryStatus, retryFailures, retryNext string
+		if retry := status.SyncRetry; retry != nil {
+			retryReason, retryStatus, retryFailures = retry.Reason, strconv.Itoa(retry.HTTPStatus), strconv.Itoa(retry.Failures)
+			retryNext = retry.NextAttemptAt.UTC().Format(time.RFC3339)
+		}
 		if err := writeAgentKVRow(out,
 			agentRowField("project", status.ProjectName),
 			agentRowField("role", status.Role),
@@ -2445,6 +2490,10 @@ func printFederationStatusAgent(cmd *cobra.Command, body api.FederationStatusBod
 			agentRowField("enrollments", strconv.FormatInt(status.EnrollmentCount, 10)),
 			agentRowField("active_quarantine", strconv.FormatInt(status.ActiveQuarantineCount, 10)),
 			agentRowField("reset_blocker", formatFederationResetBlocker(status.ResetBlocker)),
+			agentOptionalRowField("sync_retry", &retryReason),
+			agentOptionalRowField("sync_retry_status", &retryStatus),
+			agentOptionalRowField("sync_retry_failures", &retryFailures),
+			agentOptionalRowField("sync_retry_next_attempt", &retryNext),
 			agentOptionalRowField("root_signing_key", &status.RootSigningKey),
 			agentOptionalRowField("relay_checkpoint_bytes", &checkpointBytes),
 			agentOptionalRowField("relay_checkpoint_capacity_bytes", &checkpointCapacity),

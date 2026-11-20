@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-18
+last_edited: 2026-11-19
 ---
 
 # CLI reference
@@ -2523,8 +2523,10 @@ kata federation quarantine skip <id> --confirm "SKIP FEDERATION BATCH <id>" --re
 `kata federation status --project <project>` shows detailed sync status for one
 project using the selected daemon. Project readers need a CLI with scoped
 status support and daemon API 0.49.0 or later. Owners can use this command
-with older daemons. Without `--project`, status covers all bound projects and
-requires daemon-owner authority.
+with older daemons. If the project has no federation status, the command prints
+`no federation status for project "<project>"` and exits 4 (not found). Without
+`--project`, status covers all bound projects and requires daemon-owner
+authority.
 
 `kata federation embedding-recipe` exports JSON for the exact document recipe
 in the selected local Kata home's configuration. It makes no daemon or provider
@@ -2596,23 +2598,27 @@ administration authority. See [spoke names](../operations/federation.md#operator
 for naming rules, backups and relay enrollment.
 
 `kata federation enroll --project <project> --hub-url <url>` sends the
-enrollment API call to `<url>` using `--hub-token-env` or a daemon catalog
-credential whose URL matches the hub origin. When entries share an origin,
-the matching URL path takes precedence. A selected `--daemon` entry chooses
-the hub credential only when its full base URL matches `--hub-url`.
-It never forwards the local
-daemon's global `KATA_AUTH_TOKEN` to the hub; callers that used that variable
-for enrollment must pass the hub credential through `--hub-token-env` or a matching
-catalog entry. In identity mode, use the hub's bootstrap token and set `--actor`
-to an existing account with an unscoped API token, which may be expired or
-revoked. First enable the hub project with an account token using
-`kata federation enable`. Bootstrap enrollment reads the enabled hub's metadata
-and creates a grant bound to the selected
-actor's project visibility. Select the project with a positional argument,
-`--project`, or a bound workspace. Outside identity mode, enrollment can create
-a missing project selected with `--project` and enable it. The CLI
-should otherwise remain pointed at the spoke daemon so the printed join
-command can include `--adopt-existing` when the spoke project already exists.
+enrollment API call to the hub main API at `<url>` using `--hub-token-env` or
+a daemon catalog credential whose URL matches the hub origin. When entries
+share an origin, the matching URL path takes precedence. A selected `--daemon`
+entry chooses the hub credential only when its full base URL matches `--hub-url`.
+It never forwards the local daemon's global `KATA_AUTH_TOKEN` to the hub;
+callers that used that variable for enrollment must pass the hub credential
+through `--hub-token-env` or a matching catalog entry. In identity mode, use
+the hub's bootstrap token and set `--actor` to an existing account with an
+unscoped API token, which may be expired or revoked. First enable the hub
+project with an account token using `kata federation enable`. Bootstrap enrollment
+reads the enabled hub's metadata and creates a grant bound to the selected actor's
+project visibility. Select the project with a positional argument, `--project`,
+or a bound workspace.
+Outside identity mode, enrollment can create a missing project selected with
+`--project` and enable it. The CLI should otherwise remain pointed at the spoke
+daemon so the printed join command can include `--adopt-existing` when the
+spoke project already exists.
+A required-signing hub prints its configured `external_url` in the join command
+with signing key placeholders. See
+[federation signing](../operations/federation-signing.md#prepare-the-hub-and-spoke)
+for replacing them and re-running enrollment.
 Each `enroll` with a new token creates another grant and leaves earlier tokens
 valid. Replace a project-scoped token with the
 [rotation API](http-api.md#federation-enrollment-and-health-endpoints), which
@@ -2620,8 +2626,8 @@ revokes active grants for that spoke and project. See the
 [bootstrap rotation example](../operations/federation.md#token-boundaries).
 Use `kata federation enroll --adopt-existing` when adopting a differently named
 spoke project, then edit the printed join command's `--project` value. Join
-fetches the current hub metadata when run. CLI and TUI output call the coordination
-capability `lease`; JSON and API fields use `claim`.
+fetches the current hub metadata when run. CLI and TUI output call the
+coordination capability `lease`; JSON and API fields use `claim`.
 
 `--adopt-existing` is a current-state cutover. It removes the spoke project's
 pre-adoption event history from the live event stream and queues fresh snapshots

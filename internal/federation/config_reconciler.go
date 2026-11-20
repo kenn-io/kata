@@ -426,10 +426,15 @@ func laterTime(current, candidate *time.Time) *time.Time {
 }
 
 func doubledDelay(delay time.Duration) time.Duration {
-	if delay >= maxRetryDelay/2 {
-		return maxRetryDelay
+	return doubledDelayTo(delay, maxRetryDelay)
+}
+
+// doubledDelayTo doubles delay without passing limit or overflowing.
+func doubledDelayTo(delay, limit time.Duration) time.Duration {
+	if delay >= limit/2 {
+		return limit
 	}
-	return min(delay*2, maxRetryDelay)
+	return min(delay*2, limit)
 }
 
 type wallClock struct{}
