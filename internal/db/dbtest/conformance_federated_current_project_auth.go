@@ -300,6 +300,9 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 		params.Events = []db.FederationIngestEvent{{SourceEventID: 3, Event: mixed}}
 		_, err = store.IngestFederationEvents(ctx, params)
 		require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
+		var notEnrolled *db.FederationProjectNotEnrolledError
+		require.ErrorAs(t, err, &notEnrolled)
+		require.Equal(t, peer.UID, notEnrolled.IssueUID)
 		parent, err = store.ParentOf(ctx, child.ID)
 		require.NoError(t, err)
 		require.Equal(t, peer.ID, parent.ToIssueID)
@@ -327,6 +330,9 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 	require.NoError(t, err)
 	_, err = store.IngestFederationEvents(ctx, params)
 	require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
+	var notEnrolled *db.FederationProjectNotEnrolledError
+	require.ErrorAs(t, err, &notEnrolled)
+	require.Empty(t, notEnrolled.IssueUID)
 	after, err := store.MaxEventID(ctx)
 	require.NoError(t, err)
 	require.Equal(t, before, after)

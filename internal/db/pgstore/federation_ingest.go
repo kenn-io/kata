@@ -7,6 +7,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"go.kenn.io/kata/internal/db"
@@ -1046,6 +1047,7 @@ func (s *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.
 		if err != nil {
 			return err
 		}
+		explicitRefs := refs
 		for _, previous := range parentRemovals[event.EventUID] {
 			refs = append(refs, previous)
 			delete(peers, previous)
@@ -1078,6 +1080,9 @@ func (s *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.
 			}
 			if err := s.authorizeFederationAffectedProjectTx(ctx, tx, p, current, project.UID, reference); err != nil {
 				if errors.Is(err, db.ErrFederationMoveSourceUnauthorized) {
+					if issueUID != primary && !slices.Contains(explicitRefs, issueUID) {
+						issueUID = ""
+					}
 					return &db.FederationProjectNotEnrolledError{IssueUID: issueUID, Err: err}
 				}
 				return err
