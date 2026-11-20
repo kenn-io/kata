@@ -248,7 +248,7 @@ func (d *Store) AcceptRelayDeliveries(ctx context.Context, bindingUID string, ba
 			result.Digest = envelope.Digest
 		}
 		if len(result.InsertedEventUIDs) > 0 {
-			if err := d.materializeFederatedProjectRelayTx(ctx, tx, projectID, linksAffected, result.InsertedEventUIDs, cronValidator); err != nil {
+			if err := d.materializeFederatedProjectTx(ctx, tx, projectID, linksAffected, result.InsertedEventUIDs, cronValidator); err != nil {
 				return err
 			}
 			// Relayed rows are stored by issue UID; name the local issues the

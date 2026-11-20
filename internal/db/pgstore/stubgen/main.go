@@ -121,6 +121,7 @@ var alreadyImplemented = map[string]bool{
 	"AccessibleProjectUIDs":                true, // project_access.go
 	"AnonymousAccessibleProjectUIDs":       true, // project_access.go
 	"ProjectAccessRevision":                true, // project_access.go
+	"ProjectByUIDTx":                       true, // projects.go
 	"ProjectAccessTransactionFence":        true, // project_access.go
 	"ExportProjectAccess":                  true, // project_access.go
 	"ApplyExternalFieldProjection":         true, // external_roots.go

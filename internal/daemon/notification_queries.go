@@ -141,11 +141,11 @@ func notificationPeerProjectReadableTx(ctx context.Context, tx db.Transaction, p
 
 // peerFenceRejection carries a peer fence's rejection out of the write
 // transaction. Stores roll back on any error but finish host cleanup only for
-// their own begin-time fences, so the handler finishes this one.
+// their own begin-time fences, so the handler finishes this one. The cause is
+// hidden until then so a transient error cannot trigger a retry first.
 type peerFenceRejection struct{ err error }
 
 func (e *peerFenceRejection) Error() string { return e.err.Error() }
-func (e *peerFenceRejection) Unwrap() error { return e.err }
 
 // finishPeerFenceRejection runs host cleanup for a peer fence rejection after
 // the store has rolled back and released the transaction's connection. Other

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"slices"
 	"time"
+
+	"go.kenn.io/kata/internal/notification"
 )
 
 // RepeatedImportEventType is the event a hub writes for a winning repeated
@@ -14,7 +16,7 @@ import (
 // updated_at. The hub decides that the copy wins when it arrives, and writes
 // the event with the snapshot's clock, so replay applies it where the snapshot
 // would have been. A reader needs RepeatedAdoptionEventFeature to replay it.
-const RepeatedImportEventType = "issue.restated"
+const RepeatedImportEventType = notification.RepeatedImportEventType
 
 // RepeatedSnapshotDelta is one event the hub writes in place of a repeated
 // issue.snapshot. Actor is the event actor. RelatedIssueUID names the other

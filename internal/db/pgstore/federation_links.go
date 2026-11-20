@@ -111,6 +111,10 @@ func federationBindingGroupProjectIDs(
 	tx *sql.Tx,
 	current db.FederationBinding,
 ) ([]int64, error) {
+	return federationBindingGroupProjectIDsWithLock(ctx, tx, current, true)
+}
+
+func federationBindingGroupProjectIDsWithLock(ctx context.Context, tx *sql.Tx, current db.FederationBinding, lock bool) ([]int64, error) {
 	switch current.Role {
 	case db.FederationRoleHub:
 	case db.FederationRoleSpoke:
@@ -125,9 +129,11 @@ func federationBindingGroupProjectIDs(
 			return nil, err
 		}
 	}
-	rows, err := tx.QueryContext(ctx,
-		federationBindingSelect+` WHERE role=$1 AND enabled=1 ORDER BY project_id ASC FOR UPDATE`,
-		string(current.Role))
+	query := federationBindingSelect + ` WHERE role=$1 AND enabled=1 ORDER BY project_id ASC`
+	if lock {
+		query += ` FOR UPDATE`
+	}
+	rows, err := tx.QueryContext(ctx, query, string(current.Role))
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}
