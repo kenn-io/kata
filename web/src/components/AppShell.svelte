@@ -91,6 +91,7 @@
     canAdministerDaemon?: boolean | undefined
     onPreferencesChange?: ((preferences: Preferences) => void) | undefined
     onSelectDaemon?: ((id: string) => void) | undefined
+    onOpenDaemon?: (() => void) | undefined
     onAccessMutation?:
       | ((
           draft: unknown,
@@ -164,6 +165,7 @@
     canAdministerDaemon = false,
     onPreferencesChange = () => {},
     onSelectDaemon = () => {},
+    onOpenDaemon = () => {},
     onAccessMutation = undefined,
     onRefreshCredentials = () => {},
     onBackFromCredentials = () => {},
@@ -746,6 +748,7 @@
           activeStatusTone={daemonError ? 'error' : undefined}
           disabled={daemonSwitching || mutationPending}
           onSelect={onSelectDaemon}
+          onOpen={onOpenDaemon}
         />
       {:else if daemonError || reconnecting}
         <span

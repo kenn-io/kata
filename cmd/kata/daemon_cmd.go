@@ -1744,6 +1744,7 @@ func runDaemonProcess(
 		EmbeddingWake:          embeddingWake,
 		FederationCatalog:      append([]config.CatalogDaemonConfig(nil), dcfg.Daemons...),
 		WebDaemons:             append([]config.CatalogDaemonConfig(nil), dcfg.Daemons...),
+		WebSyncHubs:            dcfg.WebSyncHubs(),
 		ActiveWebDaemon:        dcfg.ActiveDaemon,
 		GitHubSyncFetcher:      gitHubSyncFetcher,
 		GitHubSyncConfig:       dcfg.GitHubSync,

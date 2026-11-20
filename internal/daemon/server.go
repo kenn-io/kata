@@ -152,7 +152,9 @@ type ServerConfig struct {
 	// WebDaemons is the client daemon catalog exposed to the first-class web
 	// UI. Credentials remain server-side and are used only by the selected-
 	// daemon proxy. ActiveWebDaemon selects the initial catalog entry.
-	WebDaemons      []config.CatalogDaemonConfig
+	WebDaemons []config.CatalogDaemonConfig
+	// WebSyncHubs names mapped hubs without a browsing token.
+	WebSyncHubs     []string
 	ActiveWebDaemon string
 
 	// InsecureReadonly permits unauthenticated GETs on non-loopback TCP
