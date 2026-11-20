@@ -43,7 +43,7 @@ async function pickStartDate(label: string, nextMonths = 0): Promise<void> {
   for (let i = 0; i < nextMonths; i += 1) {
     await fireEvent.click(screen.getByRole('button', { name: 'Next month' }))
   }
-  await fireEvent.click(screen.getByRole('button', { name: label }))
+  await fireEvent.click(screen.getByRole('gridcell', { name: new RegExp(label) }))
 }
 
 function expectDropdown(title: string, value: string): void {
@@ -655,7 +655,7 @@ describe('RecurrenceEditor — edit diff', () => {
     [
       'yearly omitted BYMONTH',
       { rrule: 'FREQ=YEARLY;INTERVAL=1', dtstart: '2026-05-20' },
-      'Jun 20, 2026',
+      'June 20, 2026',
       '2026-06-20',
       'FREQ=YEARLY;INTERVAL=1;BYMONTH=5',
       1,
