@@ -1433,8 +1433,10 @@ Lowering to `read_only` waits for local work to finish, because a read-only
 replica refuses local edits and cannot push or claim. While the hub has not
 accepted every local change, another project still has to deliver a task moved
 out of this one, or this replica holds a live claim or a queued claim request,
-reconciliation reports `binding_conflict`, keeps collaborating, and retries. `kata federation status` shows the pending push depth and claim
-counts. Once the hub accepts the pushed changes and you release the claims,
+reconciliation reports `binding_conflict`, keeps collaborating, and retries.
+`kata federation status` shows the pending push depth and claim counts. It
+does not show owed task moves; for those, wait until the destination project
+syncs. Once the hub accepts the pushed changes and you release the claims,
 the change completes on the next attempt.
 
 A claim request already on its way to the hub finishes before Kata checks for

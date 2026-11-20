@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-11-19
+last_edited: 2026-11-20
 ---
 
 # Configuration
@@ -945,11 +945,7 @@ actor. `migrate` asks the hub to approve importing local tasks and authors.
 The helper cannot silently downgrade write access or upgrade read-only access.
 
 An attached replica can switch between `read_only` and `collaborate`: edit
-`intent` and restart the daemon. Kata keeps the project, its tasks and history,
-and the binding, then asks the helper for the new access. Lowering to
-`read_only` waits until the hub has accepted every local change and the replica
-holds no claims. A new actor named by the new approval replaces the bound actor
-once no work under the old actor remains open; see
+`intent` and restart the daemon; see
 [Change replica intent](../operations/federation.md#change-replica-intent).
 Changing to or from `migrate` still requires leaving the hub first.
 

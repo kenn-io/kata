@@ -182,11 +182,7 @@ func requireBoundProviderReplica(ctx context.Context, store db.Storage, project 
 	// Sync and claims send the credential to the binding's address. A rebind
 	// that saved the new address only in the credential must finish first,
 	// or a token approved for one address would go to the other.
-	bindingBase, err := httpurl.CanonicalHTTPBaseURL(binding.HubURL)
-	if err != nil {
-		return binding, ErrFederationReplicaBindingConflict
-	}
-	if bindingBase != saved.Credential.HubURL {
+	if bindingBase, err := httpurl.CanonicalHTTPBaseURL(binding.HubURL); err != nil || bindingBase != saved.Credential.HubURL {
 		return binding, ErrFederationReplicaBindingConflict
 	}
 	return binding, nil
