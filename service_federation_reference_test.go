@@ -288,6 +288,9 @@ func TestDirectPushWithProjectScopedActors(t *testing.T) {
 				title := "Updated after replacement"
 				_, err = spoke.DB.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: child.ID, Actor: "worker", Title: &title})
 				require.NoError(t, err)
+				controller.allow.Store(false)
+				require.ErrorContains(t, syncProject(0), "403")
+				controller.allow.Store(true)
 				require.NoError(t, syncProject(0))
 				parent, err := hub.store.ParentOf(ctx, other.ID)
 				require.NoError(t, err)

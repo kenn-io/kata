@@ -72,15 +72,7 @@ func (d *Store) PendingFederationPushEvents(
 		}
 		break
 	}
-	return db.KeepLegacyParentReplacements(ctx, out, func(ctx context.Context, afterID int64, limit int) ([]db.Event, error) {
-		return d.queryPendingFederationPushEvents(ctx, `
-		WHERE e.project_id = ?
-		  AND e.origin_instance_uid = ?
-		  AND e.id > ?
-		  AND `+federationPushEventTypeCondition("e.type")+`
-		ORDER BY e.id ASC
-		LIMIT ?`, projectID, originInstanceUID, afterID, limit)
-	})
+	return out, nil
 }
 
 func (d *Store) queryPendingFederationPushEvents(ctx context.Context, where string, args ...any) ([]db.Event, error) {

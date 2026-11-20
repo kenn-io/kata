@@ -25,16 +25,6 @@ func FoldEvents(events []FoldEvent) FoldProjection {
 	sort.SliceStable(ordered, func(i, j int) bool {
 		return compareClock(clockOf(ordered[i]), clockOf(ordered[j])) < 0
 	})
-	p.seedMoveBaselines(ordered)
-	for _, e := range ordered {
-		p.apply(e)
-	}
-	return p
-}
-
-// seedMoveBaselines seeds each issue's first available move snapshot before
-// deltas replay, so authorization and materialization share baseline rules.
-func (p *FoldProjection) seedMoveBaselines(ordered []FoldEvent) {
 	// A destination cursor can start after creation. Seed its first available
 	// move snapshot before replaying deltas, including deltas preceding the move.
 	// The snapshot is a baseline rather than a later content edit.
@@ -63,6 +53,10 @@ func (p *FoldProjection) seedMoveBaselines(ordered []FoldEvent) {
 			}
 		}
 	}
+	for _, e := range ordered {
+		p.apply(e)
+	}
+	return p
 }
 
 func (p *FoldProjection) apply(e FoldEvent) {

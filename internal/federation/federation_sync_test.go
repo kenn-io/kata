@@ -2989,32 +2989,6 @@ func TestNextFederationPushIngestBatchMarksSingleSnapshotBaselineComplete(t *tes
 	assert.Equal(t, int64(1), adoptionBaselineEndEventID)
 }
 
-func TestNextFederationPushIngestBatchKeepsLegacyReplacementTogether(t *testing.T) {
-	project, child, oldParent, newParent := mustTestUID(t), mustTestUID(t), mustTestUID(t), mustTestUID(t)
-	events := []db.Event{
-		syncTestEvent(t, 1, project, "spoke-project", &child, "issue.updated", `{"body":""}`),
-		syncTestEvent(t, 2, project, "spoke-project", &child, "issue.unlinked", `{"type":"parent","from_uid":"`+child+`","to_uid":"`+oldParent+`"}`),
-		syncTestEvent(t, 3, project, "spoke-project", &child, "issue.linked", `{"type":"parent","from_uid":"`+child+`","to_uid":"`+newParent+`"}`),
-	}
-	size, err := federationIngestRequestSize(federationIngestEnvelopes(events[:2]), "", 0)
-	require.NoError(t, err)
-	events[0].Payload = `{"body":"` + strings.Repeat("x", maxFederationPushIngestBodyBytes-size-1) + `"}`
-	size, err = federationIngestRequestSize(federationIngestEnvelopes(events[:2]), "", 0)
-	require.NoError(t, err)
-	require.LessOrEqual(t, size, maxFederationPushIngestBodyBytes)
-	size, err = federationIngestRequestSize(federationIngestEnvelopes(events), "", 0)
-	require.NoError(t, err)
-	require.Greater(t, size, maxFederationPushIngestBodyBytes)
-	batch, _, _, err := nextFederationPushIngestBatch(events)
-	require.NoError(t, err)
-	require.Equal(t, 1, len(batch), "the unlink must travel with its replacement")
-	batch, _, _, err = nextFederationPushIngestBatch(events[len(batch):])
-	require.NoError(t, err)
-	require.Len(t, batch, 2)
-	require.Equal(t, "issue.unlinked", batch[0].Type)
-	require.Equal(t, "issue.linked", batch[1].Type)
-}
-
 func TestSyncFederationOncePushesAllPendingBatchesBeforePull(t *testing.T) {
 	ctx := t.Context()
 	spoke := testenv.New(t)

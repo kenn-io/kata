@@ -1117,45 +1117,6 @@ func checkFederationEnrollmentRotation(t *testing.T, store db.Storage, backend B
 	return nil
 }
 
-func checkFederationPushLegacyReplacementPage(t *testing.T, store db.Storage) error {
-	ctx := t.Context()
-	project, err := store.CreateProject(ctx, "legacy-replacement-page")
-	require.NoError(t, err)
-	child, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Child", Author: "tester"})
-	require.NoError(t, err)
-	oldParent, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Old parent", Author: "tester"})
-	require.NoError(t, err)
-	newParent, last, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "New parent", Author: "tester"})
-	require.NoError(t, err)
-	for i := range 998 {
-		_, _, err = store.CreateComment(ctx, db.CreateCommentParams{IssueID: child.ID, Author: "tester", Body: fmt.Sprintf("comment %d", i)})
-		require.NoError(t, err)
-	}
-	for i, item := range []struct{ kind, parent string }{{"issue.unlinked", oldParent.UID}, {"issue.linked", newParent.UID}} {
-		if i == 1 {
-			_, _, err = store.CreateComment(ctx, db.CreateCommentParams{IssueID: child.ID, Author: "tester", Body: "between parent events"})
-			require.NoError(t, err)
-		}
-		payload := jsontext.Value(`{"type":"parent","from_uid":"` + child.UID + `","to_uid":"` + item.parent + `"}`)
-		event := newRemoteEvent(t, project, &child.UID, item.kind, "tester", store.InstanceUID(), time.Now().UnixMilli(), payload)
-		_, err = store.InsertRemoteEvent(ctx, project.ID, event)
-		require.NoError(t, err)
-	}
-	first, err := store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), last.ID, 1000)
-	require.NoError(t, err)
-	require.Equal(t, 998, len(first))
-	second, err := store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), first[len(first)-1].ID, 1000)
-	require.NoError(t, err)
-	require.Len(t, second, 3)
-	require.Equal(t, "issue.unlinked", second[0].Type)
-	require.Equal(t, "issue.commented", second[1].Type)
-	require.Equal(t, "issue.linked", second[2].Type)
-	single, err := store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), first[len(first)-1].ID, 1)
-	require.NoError(t, err)
-	require.Equal(t, []db.Event{second[0], second[1], second[2]}, single)
-	return nil
-}
-
 func checkFederationEventTransport(t *testing.T, store db.Storage, backend Backend) error {
 	t.Helper()
 	ctx := t.Context()

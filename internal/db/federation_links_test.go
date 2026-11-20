@@ -68,21 +68,6 @@ func TestFederationEventAffectsLinks(t *testing.T) {
 	}
 }
 
-func TestValidateParentRemovalDirectionsUsesMoveBaseline(t *testing.T) {
-	child := "child"
-	events := []db.RemoteEvent{
-		{EventUID: "unlink", IssueUID: &child, Type: "issue.unlinked", HLCPhysicalMS: 1,
-			Payload: jsontext.Value(`{"type":"parent","from_uid":"child","to_uid":"parent"}`)},
-		{EventUID: "move", IssueUID: &child, Type: "issue.moved", HLCPhysicalMS: 2,
-			Payload: jsontext.Value(`{"from_project_uid":"source","to_project_uid":"destination","snapshot":{"uid":"child","title":"Child","author":"tester","status":"open","links":[{"type":"parent","to_issue_uid":"parent"}]}}`)},
-	}
-	require.NoError(t, db.ValidateParentRemovalDirections(events))
-}
-
-// Link reconciliation reads only FoldProjection.Links, and the group fold is
-// restricted to FederationLinkAffectingEventTypes for cost. That restriction is
-// only sound if it cannot change Links, so assert the two folds agree over a
-// stream that mixes link-bearing and unrelated events.
 func TestFoldingOnlyLinkAffectingEventsPreservesLinks(t *testing.T) {
 	const projectUID = "01HZNQ7VFPK1XGD8R5MABCD4EY"
 	child := "01HZNQ7VFPK1XGD8R5MABCD4EA"

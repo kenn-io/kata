@@ -184,21 +184,12 @@ func (p RelayResetProtocol) InstallReset(ctx context.Context, bindingUID string,
 	if err := p.installBlockers(ctx, install.projectID); err != nil {
 		return err
 	}
-	if err := p.validateResetEvents(install); err != nil {
+	if err := p.Backend.ValidateRelayResetEvents(install.projectUID, install.events); err != nil {
 		return err
 	}
 	install.config = *binding.RelayConfig
 	install.config.ResetEpoch = translation.Authority.Epoch
 	return p.applyReset(ctx, install)
-}
-
-// validateResetEvents runs the backend's event validation, then the parent
-// removal direction rule shared with live ingest.
-func (p RelayResetProtocol) validateResetEvents(install relayResetInstall) error {
-	if err := p.Backend.ValidateRelayResetEvents(install.projectUID, install.events); err != nil {
-		return err
-	}
-	return ValidateParentRemovalDirections(install.events)
 }
 
 // installBlockers refuses an installation while the project holds quarantined
