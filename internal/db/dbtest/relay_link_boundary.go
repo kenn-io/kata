@@ -80,6 +80,7 @@ func RunRelayLinkBoundaryKeepsSameProjectEffects(t *testing.T, store db.Storage)
 		writeCtx := db.WithRootAttribution(ctx, fixture.signer, "relay-member")
 		_, err = store.AcceptRelayDeliveries(writeCtx, grant.Enrollment.RelayBindingUID, db.RelayBatch{Stream: db.RelayStreamEvent, Envelopes: []db.RelayEnvelope{envelope}})
 		require.ErrorIs(t, err, db.ErrFederationIngestValidation)
+		require.ErrorContains(t, err, "Cannot tell which issue was the child in this parent removal.")
 	})
 	t.Run("relay composite creation", func(t *testing.T) {
 		ctx := t.Context()

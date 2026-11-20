@@ -475,7 +475,7 @@ AND (e.issue_uid=$1 OR e.related_issue_uid=$1 OR (e.type IN ('issue.created','is
 					}
 				}
 				if from == "" || to == "" || reverse || (!forward && !companion) {
-					return nil, fmt.Errorf("%w: issue.unlinked has ambiguous parent direction", ErrFederationIngestValidation)
+					return nil, fmt.Errorf("%w: Cannot tell which issue was the child in this parent removal.", ErrFederationIngestValidation)
 				}
 			}
 		}
