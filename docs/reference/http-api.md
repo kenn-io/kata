@@ -1177,6 +1177,10 @@ empty, when a label in either list does not match `[a-z0-9._:-]` with length
 1..64 (a mistyped `remove` entry included), or when the same label appears in
 both lists. The PATCH route's project path accepts a `name:` selector.
 
+Labels `p0` through `p4` and labels beginning with `priority:` are reserved.
+Set issue priority through the priority field. You can remove a priority label
+already attached to the issue.
+
 ## Attachment Endpoints
 
 `POST /api/v1/projects/{project_id}/issues/{ref}/attachments?name=<file>`

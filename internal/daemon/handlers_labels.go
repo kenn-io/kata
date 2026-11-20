@@ -60,11 +60,7 @@ func addLabelHandler(cfg ServerConfig) func(context.Context, *api.AddLabelReques
 			return nil, err
 		}
 		if db.IsPriorityLabel(in.Body.Label) {
-			project, err := activeProjectByID(ctx, cfg.DB, issue.ProjectID)
-			if err != nil {
-				return nil, err
-			}
-			return nil, api.NewError(400, "validation", "use the priority field: kata edit "+qualifiedID(project.Name, issue.ShortID)+" --priority N or kata.edit with priority", "", nil)
+			return nil, priorityLabelError(ctx, cfg.DB, issue)
 		}
 
 		ev := db.LabelEventParams{
@@ -114,6 +110,14 @@ func addLabelHandler(cfg ServerConfig) func(context.Context, *api.AddLabelReques
 
 const invalidLabelMessage = "label must match charset [a-z0-9._:-] and length 1..64"
 
+func priorityLabelError(ctx context.Context, store db.Storage, issue db.Issue) error {
+	project, err := activeProjectByID(ctx, store, issue.ProjectID)
+	if err != nil {
+		return err
+	}
+	return api.NewError(400, "validation", "use the priority field: kata edit "+qualifiedID(project.Name, issue.ShortID)+" --priority N or kata.edit with priority", "", nil)
+}
+
 func updateLabelsHandler(cfg ServerConfig) func(context.Context, *api.UpdateLabelsRequest) (*api.UpdateLabelsResponse, error) {
 	return func(ctx context.Context, in *api.UpdateLabelsRequest) (*api.UpdateLabelsResponse, error) {
 		actor, err := attributedActor(ctx, in.Body.Actor)
@@ -145,6 +149,9 @@ func updateLabelsHandler(cfg ServerConfig) func(context.Context, *api.UpdateLabe
 		}
 		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, issue, actor); err != nil {
 			return nil, err
+		}
+		if slices.ContainsFunc(add, db.IsPriorityLabel) {
+			return nil, priorityLabelError(ctx, cfg.DB, issue)
 		}
 
 		labels, events, err := cfg.DB.ChangeLabelsAndEvents(ctx, issue.ID, db.ChangeLabelsParams{

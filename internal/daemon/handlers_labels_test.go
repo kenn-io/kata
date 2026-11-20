@@ -36,6 +36,18 @@ func TestAddLabel_PriorityLabelRejected(t *testing.T) {
 	}
 }
 
+func TestUpdateLabels_PriorityAddChangesNothing(t *testing.T) {
+	env := testenv.New(t)
+	pid, issueID := setupOneIssue(t, env)
+	postLabel(t, env, pid, issueID, "bug")
+
+	resp, raw := envDoRaw(t, env, http.MethodPatch, issuePath(pid, issueID, "labels"),
+		map[string]any{"actor": "tester", "add": []string{"priority:high"}, "remove": []string{"bug"}}, nil)
+	assertAPIError(t, resp.StatusCode, raw, http.StatusBadRequest, "validation")
+	assert.Contains(t, string(raw), "--priority N")
+	assert.Equal(t, []string{"bug"}, issueLabelNames(t, env, issueID))
+}
+
 func TestAddLabel_HappyPath(t *testing.T) {
 	env := testenv.New(t)
 	pid, n := setupOneIssue(t, env)
