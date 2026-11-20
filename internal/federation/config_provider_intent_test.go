@@ -389,6 +389,26 @@ func TestReconcileProviderDowngradeRetryRechecksClaims(t *testing.T) {
 	assert.Equal(t, federationprovider.IntentReadOnly, f.saved(t).Credential.Provider.Intent)
 }
 
+// Rebind saves the new hub address in the credential before the binding. A
+// switch in between would get a token approved for the new address while
+// sync and claims still go to the binding's old one, so it waits for rebind.
+func TestReconcileProviderIntentChangeRefusesHalfFinishedRebind(t *testing.T) {
+	f := newIntentChangeFixture(t, federationprovider.IntentReadOnly)
+	require.NoError(t, f.reconcile(t, federationprovider.IntentReadOnly))
+	before := f.saved(t)
+	_, binding := f.binding(t)
+	binding.HubURL = "https://former-hub.example/tasks"
+	_, err := f.store.UpsertFederationBinding(t.Context(), binding)
+	require.NoError(t, err)
+
+	err = f.reconcile(t, federationprovider.IntentCollaborate)
+	require.ErrorIs(t, err, federation.ErrBindingConflict)
+	assert.Len(t, f.requests(t), 1, "no release or new authorize reaches the provider")
+	assert.True(t, before.Credential.Equal(f.saved(t).Credential), "the saved approval is unchanged")
+	_, after := f.binding(t)
+	assert.False(t, after.PushEnabled)
+}
+
 // A release whose reply never arrived may have revoked the old approval.
 // Restoring the earlier intent must not reuse it: Kata repeats the release
 // and asks for a new approval for the restored intent.

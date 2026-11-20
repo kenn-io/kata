@@ -1418,7 +1418,9 @@ hub. Its local tasks stay readable. Pending approval and temporary failures
 retry as for a first approval. A `denied` decision keeps the replica and its
 data; restore the earlier intent and restart to ask for that access again.
 An approval for a different hub project is refused as `binding_conflict`, and
-the binding is unchanged.
+the binding is unchanged. A switch also reports `binding_conflict`, and contacts
+no provider, while an interrupted `kata federation rebind` has left the binding
+on the old hub address; rerun the rebind first.
 
 Kata records the release in the saved request before sending it. If no answer
 arrives, for example because the provider failed or the daemon stopped, the
