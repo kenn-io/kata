@@ -64,7 +64,7 @@ func TestManagedExternallyUnreachableDetail(t *testing.T) {
 			return ensureDiscovery{}, newUnreachable(ctx, "/example/runtime", kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1"}, ctx.Err())
 		})
 		require.ErrorIs(t, err, context.Canceled)
-		require.ErrorContains(t, err, "/example/runtime")
+		require.ErrorContains(t, err, fmt.Sprintf("%q", filepath.Join("/example/runtime", "daemon.log")))
 	})
 	for _, clear := range []bool{false, true} {
 		t.Run(fmt.Sprintf("clear=%t", clear), func(t *testing.T) {
