@@ -432,6 +432,17 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+      - name: Build release targets
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.restore-go-cache.outputs.cache-hit != 'true'
+        run: |
+          make web-embed
+          # Mirror the targets in .goreleaser.yaml.
+          for os in linux darwin windows; do
+            for arch in amd64 arm64; do
+              CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -buildvcs=false -o /dev/null ./cmd/kata
+            done
+          done
+
       - name: Trim unused Linux Go cache entries
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.restore-go-cache.outputs.cache-hit != 'true'
         run: |
@@ -443,17 +454,6 @@ jobs:
             ! -newer "$RUNNER_TEMP/go-cache-used-after" -exec rm -rf -- {} +
           echo 'Go cache sizes after trimming:'
           du -sh "$cache" "$modules"
-
-      - name: Build release targets
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.restore-go-cache.outputs.cache-hit != 'true'
-        run: |
-          make web-embed
-          # Mirror the targets in .goreleaser.yaml.
-          for os in linux darwin windows; do
-            for arch in amd64 arm64; do
-              CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -buildvcs=false -o /dev/null ./cmd/kata
-            done
-          done
 
       - name: Save Linux Go cache
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.restore-go-cache.outputs.cache-hit != 'true'
