@@ -356,7 +356,7 @@ var storageScenarios = []scenario{
 		checkFederatedReadPages(t, store, backend)
 		return nil
 	}},
-	{name: "federated quiet poll feed", methods: []string{"ReadFederation", "MoveIssueProject"}, runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+	{name: "federated quiet poll feed", methods: []string{"ReadFederation", "MoveIssueProject", "PurgeIssue"}, runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
 		checkFederatedQuietPollFeed(t, store, backend)
 		return nil
 	}},

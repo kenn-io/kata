@@ -15,29 +15,42 @@ import (
 // RunQuietFederationPollGrowth checks that repeating an empty federation poll
 // of a quiet hub project costs the same whatever the project's size: while an
 // unrelated project keeps writing past the poll's cursor, after the hub wrote
-// long past it, and while nothing on the hub writes at all. An empty poll
-// never moves the spoke's cursor, so a project that stays quiet for long sits
-// behind every write the hub made since. The caller chooses the cost measure
-// and its minimum meaningful value.
+// long past it, while nothing on the hub writes at all, and when the
+// project's issues all moved in from another project. An empty poll never
+// moves the spoke's cursor, so a project that stays quiet for long sits behind
+// every write the hub made since. The caller chooses the cost measure and its
+// minimum meaningful value.
 func RunQuietFederationPollGrowth(t *testing.T, open func(*testing.T) db.Storage, measure growthtest.Measure, floor float64) {
 	t.Helper()
 	for _, hubCase := range []struct {
-		name      string
-		behind    int
-		hubWrites bool
+		name         string
+		small, large int
+		maxRatio     float64
+		behind       int
+		hubWrites    bool
+		movedIn      bool
 	}{
-		{name: "busy hub", hubWrites: true},
-		{name: "busy hub long after the cursor", behind: 3000, hubWrites: true},
-		{name: "idle hub after writes past the cursor", behind: 500},
-		{name: "idle hub"},
+		{name: "busy hub", small: 100, large: 1000, maxRatio: 2, hubWrites: true},
+		// Ten times the issues, where a per-issue cost per poll would show.
+		{name: "busy hub large project", small: 1000, large: 10000, maxRatio: 1.5, hubWrites: true},
+		{name: "busy hub long after the cursor", small: 100, large: 1000, maxRatio: 2, behind: 3000, hubWrites: true},
+		{name: "idle hub after writes past the cursor", small: 100, large: 1000, maxRatio: 2, behind: 500},
+		{name: "idle hub", small: 100, large: 1000, maxRatio: 2},
+		{name: "idle hub with moved-in issues", small: 100, large: 1000, maxRatio: 2, movedIn: true},
 	} {
 		t.Run(hubCase.name, func(t *testing.T) {
 			growthtest.Run(t, growthtest.Check{
-				Small: 100, Large: 1000,
-				MaxRatio: 2, Floor: floor,
+				Small: hubCase.small, Large: hubCase.large,
+				MaxRatio: hubCase.maxRatio, Floor: floor,
 				Measure: measure,
 				Build: func(_ testing.TB, size int) (run, reset func()) {
-					hub := newQuietPollHub(t, open(t), size)
+					var hub *quietPollHub
+					if hubCase.movedIn {
+						hub = newQuietPollHub(t, open(t), 0)
+						hub.moveIn(size)
+					} else {
+						hub = newQuietPollHub(t, open(t), size)
+					}
 					hub.unrelatedEvents(hubCase.behind)
 					reset = func() {}
 					if hubCase.hubWrites {
@@ -126,10 +139,29 @@ func newQuietPollHub(t *testing.T, store db.Storage, issues int) *quietPollHub {
 		_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: hub.quiet.ID, Title: "Quiet", Author: "tester"})
 		require.NoError(t, err)
 	}
-	for page := hub.poll(); len(page.Events) > 0; page = hub.poll() {
-		hub.cursor = page.NextAfterID
-	}
+	hub.catchUp()
 	return hub
+}
+
+func (h *quietPollHub) catchUp() {
+	h.t.Helper()
+	for page := h.poll(); len(page.Events) > 0; page = h.poll() {
+		h.cursor = page.NextAfterID
+	}
+}
+
+// moveIn moves n new busy-project issues into the quiet project and catches
+// the cursor up past the moves.
+func (h *quietPollHub) moveIn(n int) {
+	h.t.Helper()
+	ctx := h.t.Context()
+	for range n {
+		issue, _, err := h.store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: h.busy.ID, Title: "Moved", Author: "tester"})
+		require.NoError(h.t, err)
+		_, err = h.store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: h.busy.ID, ToProjectID: h.quiet.ID, IfMatchRev: issue.Revision, Actor: "tester"})
+		require.NoError(h.t, err)
+	}
+	h.catchUp()
 }
 
 func (h *quietPollHub) poll() db.FederationReadResult {

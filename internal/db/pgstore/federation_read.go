@@ -23,7 +23,7 @@ func (s *Store) ReadFederation(ctx context.Context, in db.FederationReadParams) 
 		}
 		feed = nil
 		if !in.Metadata {
-			feed = s.federationFeed.Begin(project, binding)
+			feed = s.federationFeed.Begin(project, binding, true)
 		}
 		refresh := func() (db.FederationBinding, error) {
 			event, err := s.insertFederationBaselineEventsTx(ctx, tx, project, "federation")

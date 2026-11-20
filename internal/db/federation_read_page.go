@@ -15,20 +15,18 @@ func ReadFederationEventPage(ctx context.Context, tx *sql.Tx, project Project, i
 	if issueUID != "" {
 		return query(` WHERE e.issue_uid=$1 AND e.type<>'sync.reset_required' AND e.id>$2 ORDER BY e.id LIMIT $3`, issueUID, afterID, limit)
 	}
-	movedFrom := `json_extract(e.payload,'$.from_project_uid')`
-	projectIndex, movedIndex, identityIndex, subjectUID := "", "", "", "subject.uid"
-	if postgres {
-		movedFrom = `e.payload::jsonb->>'from_project_uid'`
-	} else {
-		// ANALYZE can otherwise favor an ID walk through unrelated history.
-		projectIndex, movedIndex, identityIndex = " INDEXED BY idx_events_project", " INDEXED BY idx_events_moved_from_id", " INDEXED BY idx_events_issue_uid_id"
-		subjectUID = "+subject.uid"
+	movedFrom, projectIndex, movedIndex := federationFeedSQL(postgres)
+	identityIndex, subjectUID := "", "subject.uid"
+	if !postgres {
+		identityIndex, subjectUID = " INDEXED BY idx_events_issue_uid_id", "+subject.uid"
 	}
 	var maxID int64
 	var own bool
+	// Ordering by the project index keeps a PostgreSQL generic plan from
+	// scanning every event when one project owns most of them.
 	//nolint:gosec // G202: fixed backend fragments only; values stay bound.
 	err := tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT MAX(id) FROM events),0),
- EXISTS(SELECT 1 FROM events e`+projectIndex+` WHERE e.project_id=$1 AND e.id>$2 AND e.type<>'sync.reset_required')`,
+ (SELECT e.id FROM events e`+projectIndex+` WHERE e.project_id=$1 AND e.id>$2 AND e.type<>'sync.reset_required' ORDER BY e.project_id, e.id LIMIT 1) IS NOT NULL`,
 		project.ID, afterID).Scan(&maxID, &own)
 	if err != nil {
 		return nil, fmt.Errorf("federation event presence: %w", err)
@@ -102,4 +100,15 @@ func ReadFederationEventPage(ctx context.Context, tx *sql.Tx, project Project, i
 		feed.recordEvents()
 	}
 	return events, nil
+}
+
+// federationFeedSQL returns the backend's expression for an issue.moved
+// event's source project UID and the index hints that keep the feed's
+// presence checks on index seeks.
+func federationFeedSQL(postgres bool) (movedFrom, projectIndex, movedIndex string) {
+	if postgres {
+		return `e.payload::jsonb->>'from_project_uid'`, "", ""
+	}
+	// ANALYZE can otherwise favor an ID walk through unrelated history.
+	return `json_extract(e.payload,'$.from_project_uid')`, " INDEXED BY idx_events_project", " INDEXED BY idx_events_moved_from_id"
 }

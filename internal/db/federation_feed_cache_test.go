@@ -13,12 +13,12 @@ func TestFederationFeedCacheKeepsNewestProofs(t *testing.T) {
 	project := Project{ID: 7, UID: "01M8000000000000000000000P", Revision: 1}
 	binding := FederationBinding{}
 
-	movesChecked := cache.Begin(project, binding)
+	movesChecked := cache.Begin(project, binding, false)
 	movesChecked.recordMoves(false)
 	movesChecked.recordSnapshot(50)
 	movesChecked.recordQuiet(0, 50)
 
-	rangeChecked := cache.Begin(project, binding)
+	rangeChecked := cache.Begin(project, binding, false)
 	rangeChecked.recordMoves(true)
 	rangeChecked.recordSnapshot(60)
 	rangeChecked.recordQuiet(0, 60)
@@ -26,7 +26,7 @@ func TestFederationFeedCacheKeepsNewestProofs(t *testing.T) {
 	movesChecked.Commit()
 	rangeChecked.Commit()
 
-	next := cache.Begin(project, binding)
+	next := cache.Begin(project, binding, false)
 	require.Equal(t, int64(50), next.movesAfter(), "move check")
 	after, ok := next.foreignChecked(0)
 	require.True(t, ok)
@@ -38,10 +38,10 @@ func TestFederationFeedCacheKeepsNewestProofs(t *testing.T) {
 func TestFederationFeedCacheReusesZeroIssueCount(t *testing.T) {
 	var cache FederationFeedCache
 	project := Project{ID: 7, UID: "01M8000000000000000000000P", Revision: 1}
-	read := cache.Begin(project, FederationBinding{})
+	read := cache.Begin(project, FederationBinding{}, false)
 	read.recordIssues(0)
 	read.Commit()
-	issues, ok := cache.Begin(project, FederationBinding{}).knownIssues()
+	issues, ok := cache.Begin(project, FederationBinding{}, false).knownIssues()
 	require.True(t, ok)
 	require.Zero(t, issues)
 }
@@ -52,20 +52,20 @@ func TestFederationFeedCacheReusesZeroIssueCount(t *testing.T) {
 func TestFederationFeedCacheForgetsReusedIssueCountAfterEvents(t *testing.T) {
 	var cache FederationFeedCache
 	project := Project{ID: 7, UID: "01M8000000000000000000000P", Revision: 1}
-	counting := cache.Begin(project, FederationBinding{})
+	counting := cache.Begin(project, FederationBinding{}, false)
 	counting.recordSnapshot(40)
 	counting.recordIssues(40)
 	counting.recordEvents()
 	counting.Commit()
-	issues, ok := cache.Begin(project, FederationBinding{}).knownIssues()
+	issues, ok := cache.Begin(project, FederationBinding{}, false).knownIssues()
 	require.True(t, ok)
 	require.Equal(t, int64(40), issues)
 
-	reusing := cache.Begin(project, FederationBinding{})
+	reusing := cache.Begin(project, FederationBinding{}, false)
 	reusing.recordSnapshot(50)
 	reusing.recordEvents()
 	reusing.Commit()
-	_, ok = cache.Begin(project, FederationBinding{}).knownIssues()
+	_, ok = cache.Begin(project, FederationBinding{}, false).knownIssues()
 	require.False(t, ok)
 }
 
@@ -74,24 +74,24 @@ func TestFederationFeedCacheForgetsReusedIssueCountAfterEvents(t *testing.T) {
 func TestFederationFeedCacheKeepsNewerRecountAfterOlderQuietPoll(t *testing.T) {
 	var cache FederationFeedCache
 	project := Project{ID: 7, UID: "01M8000000000000000000000P", Revision: 1}
-	warm := cache.Begin(project, FederationBinding{})
+	warm := cache.Begin(project, FederationBinding{}, false)
 	warm.recordSnapshot(10)
 	warm.recordIssues(500)
 	warm.Commit()
 
-	quiet := cache.Begin(project, FederationBinding{})
+	quiet := cache.Begin(project, FederationBinding{}, false)
 	quiet.recordSnapshot(20)
 	quiet.recordQuiet(0, 20)
 
-	moved := cache.Begin(project, FederationBinding{})
+	moved := cache.Begin(project, FederationBinding{}, false)
 	moved.recordSnapshot(30)
 	moved.recordEvents()
 	moved.Commit()
 
 	quiet.Commit()
-	_, ok := cache.Begin(project, FederationBinding{}).knownIssues()
+	_, ok := cache.Begin(project, FederationBinding{}, false).knownIssues()
 	require.False(t, ok, "the older quiet poll restored a stale count")
-	after, ok := cache.Begin(project, FederationBinding{}).foreignChecked(0)
+	after, ok := cache.Begin(project, FederationBinding{}, false).foreignChecked(0)
 	require.True(t, ok)
 	require.Equal(t, int64(20), after, "quiet range")
 }

@@ -217,20 +217,46 @@ func ProjectRequiredEventFeatures(ctx context.Context, q featureQuerier, project
 	return projectRequiredEventFeatures(ctx, q, projectUID, nil)
 }
 
-// projectRequiredEventFeatures skips the move events feed has already checked.
+// projectRequiredEventFeatures skips the move checks feed already answered.
 func projectRequiredEventFeatures(ctx context.Context, q featureQuerier, projectUID string, feed *FederationFeedRead) (string, error) {
-	var cronPresent, issueMoved bool
-	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM projects p WHERE p.uid=$1 AND (
+	const cron = `EXISTS(SELECT 1 FROM projects p WHERE p.uid=$1 AND (
  EXISTS(SELECT 1 FROM cron_jobs WHERE project_id=p.id) OR
  EXISTS(SELECT 1 FROM cron_workflows WHERE project_id=p.id) OR
  EXISTS(SELECT 1 FROM cron_runs WHERE project_id=p.id) OR
-	 EXISTS(SELECT 1 FROM events WHERE project_id=p.id AND type LIKE 'cron.%'))),
- EXISTS(SELECT 1 FROM projects p WHERE p.uid=$1 AND p.name<>$2 AND EXISTS(
-  SELECT 1 FROM events e WHERE e.project_id=p.id AND e.id>$3 AND e.type='issue.moved'))`, projectUID, SystemProjectName, feed.movesAfter()).Scan(&cronPresent, &issueMoved)
-	if err != nil {
-		return "", err
+	 EXISTS(SELECT 1 FROM events WHERE project_id=p.id AND type LIKE 'cron.%')))`
+	const moves = `EXISTS(SELECT 1 FROM projects p WHERE p.uid=$1 AND p.name<>$2 AND EXISTS(
+  SELECT 1 FROM events e WHERE e.project_id=p.id AND e.id>$3 AND e.type='issue.moved'))`
+	var cronPresent, issueMoved bool
+	through, knownMoved, knownNative := feed.moveFeatures()
+	recheck := through == 0
+	if recheck {
+		if err := q.QueryRowContext(ctx, `SELECT `+cron+`,`+moves, projectUID, SystemProjectName, feed.movesAfter()).Scan(&cronPresent, &issueMoved); err != nil {
+			return "", err
+		}
+	} else {
+		// The remembered move facts hold unless an event stamped to the
+		// project, a move out of it, or an issue purge in it followed them.
+		// PostgreSQL plans every subquery in a statement, even one that never
+		// runs, so the move check runs on its own only when they no longer
+		// hold.
+		movedFrom, projectIndex, movedIndex := feed.sql()
+		//nolint:gosec // G202: fixed backend fragments only; values stay bound.
+		err := q.QueryRowContext(ctx, `SELECT `+cron+`, (SELECT e.id FROM events e`+projectIndex+` WHERE e.project_id=$2 AND e.id>$3 ORDER BY e.project_id, e.id LIMIT 1) IS NOT NULL
+ OR EXISTS(SELECT 1 FROM events e`+movedIndex+` WHERE e.type='issue.moved' AND `+movedFrom+`=$1 AND e.id>$3)
+ OR EXISTS(SELECT 1 FROM purge_log WHERE project_id=$2 AND purge_reset_after_event_id>$3)`, projectUID, feed.projectID, through).Scan(&cronPresent, &recheck)
+		if err != nil {
+			return "", err
+		}
+		issueMoved = knownMoved
+		if recheck {
+			if err := q.QueryRowContext(ctx, `SELECT `+moves, projectUID, SystemProjectName, feed.movesAfter()).Scan(&issueMoved); err != nil {
+				return "", err
+			}
+		}
 	}
-	feed.recordMoves(issueMoved)
+	if recheck {
+		feed.recordMoves(issueMoved)
+	}
 	required := ""
 	if issueMoved {
 		required = MergeEventFeatures(required, IssueMoveEventFeature)
@@ -260,10 +286,17 @@ func projectRequiredEventFeatures(ctx context.Context, q featureQuerier, project
 		}
 	}
 	if issueMoved {
+		if !recheck {
+			if knownNative {
+				return MergeEventFeatures(required, CronEventFeature), nil
+			}
+			return required, nil
+		}
 		native, err := nativeProjectionRequired(ctx, q, `SELECT DISTINCT 'projection.issue',i.metadata FROM events e JOIN projects p ON p.id=e.project_id JOIN issues i ON i.uid=e.issue_uid AND i.project_id=e.project_id WHERE p.uid=$1 AND e.type='issue.moved' AND (i.metadata LIKE '%"cron.occurrence"%' OR i.metadata LIKE '%"cron.progress.%' OR i.metadata LIKE '%\u%' ESCAPE '!')`, projectUID)
 		if err != nil {
 			return "", err
 		}
+		feed.recordNativeMoves(native)
 		if native {
 			return MergeEventFeatures(required, CronEventFeature), nil
 		}

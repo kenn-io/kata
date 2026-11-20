@@ -14,7 +14,8 @@ import (
 // checkFederatedQuietPollFeed repeats one spoke's polls of a quiet project
 // while another store handle on the same database, as another process would,
 // writes every kind of event that can reach the project's feed. Each poll must
-// return what a store that has never polled returns.
+// return the events and required features a store that has never polled
+// returns.
 //
 // The quiet project runs once with one issue and once with more issues than
 // most gaps below have events, because the store checks a short gap event by
@@ -53,26 +54,34 @@ func checkFederatedQuietPollFeedWith(t *testing.T, store db.Storage, backend Bac
 		_, _, err := writer.CreateComment(ctx, db.CreateCommentParams{IssueID: busyIssue.ID, Body: "busy", Author: "tester"})
 		require.NoError(t, err)
 	}
-	ids := func(s db.Storage, after int64) []int64 {
+	type pollResult struct {
+		ids      []int64
+		required string
+	}
+	read := func(s db.Storage, after int64) pollResult {
 		t.Helper()
 		out, err := s.ReadFederation(ctx, db.FederationReadParams{ProjectID: quiet.ID, Features: db.SupportedEventFeatures, AfterID: after, Limit: 1000})
 		require.NoError(t, err)
-		got := make([]int64, 0, len(out.Events))
+		got := pollResult{ids: make([]int64, 0, len(out.Events)), required: out.RequiredFeatures}
 		for _, event := range out.Events {
-			got = append(got, event.ID)
+			got.ids = append(got.ids, event.ID)
 		}
 		return got
 	}
-	// poll reads through the long-lived store, checks it against a store
-	// that has never polled, and requires polls to have seen want.
-	poll := func(after int64, want ...int64) []int64 {
+	// pollFeatures reads through the long-lived store, checks it against a
+	// store that has never polled, and requires polls to have seen want.
+	pollFeatures := func(after int64, want ...int64) pollResult {
 		t.Helper()
-		got := ids(store, after)
-		require.Equal(t, ids(backend.OpenSame(t, store), after), got, "poll after %d", after)
+		got := read(store, after)
+		require.Equal(t, read(backend.OpenSame(t, store), after), got, "poll after %d", after)
 		for _, id := range want {
-			require.Contains(t, got, id, "poll after %d", after)
+			require.Contains(t, got.ids, id, "poll after %d", after)
 		}
 		return got
+	}
+	poll := func(after int64, want ...int64) []int64 {
+		t.Helper()
+		return pollFeatures(after, want...).ids
 	}
 	// quietAt repeats an empty poll across unrelated writes so the store
 	// remembers what those polls found.
@@ -131,5 +140,45 @@ func checkFederatedQuietPollFeedWith(t *testing.T, store db.Storage, backend Bac
 	quietAt(cursor)
 	_, own, err := writer.CreateComment(ctx, db.CreateCommentParams{IssueID: incoming.ID, Body: "after the move", Author: "tester"})
 	require.NoError(t, err)
-	poll(cursor, own.ID)
+	got = poll(cursor, own.ID)
+	cursor = got[len(got)-1]
+
+	// A moved-in issue's cron delivery state makes the feed require the cron
+	// feature, and the store remembers that decision between polls. Only a
+	// hub cron dispatch writes that state, so the fixture sets it directly.
+	moveInDelivered := func() db.Issue {
+		t.Helper()
+		delivered, _, err := writer.CreateIssue(ctx, db.CreateIssueParams{ProjectID: busy.ID, Title: "Delivered", Author: "tester"})
+		require.NoError(t, err)
+		_, err = executor.ExecContext(ctx, `UPDATE issues SET metadata=$1 WHERE id=$2`, `{"cron.progress.example":true}`, delivered.ID)
+		require.NoError(t, err)
+		quietAt(cursor)
+		moved, err := writer.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: delivered.ID, FromProjectID: busy.ID, ToProjectID: quiet.ID, IfMatchRev: delivered.Revision, Actor: "tester"})
+		require.NoError(t, err)
+		native := pollFeatures(cursor, moved.EventID)
+		require.Contains(t, native.required, db.CronEventFeature)
+		cursor = native.ids[len(native.ids)-1]
+		quietAt(cursor)
+		delivered, err = writer.IssueByUID(ctx, delivered.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		return delivered
+	}
+	quietAt(cursor)
+	require.NotContains(t, pollFeatures(cursor).required, db.CronEventFeature)
+
+	// Moving that issue out drops the requirement, though the move is
+	// stamped to the destination.
+	delivered := moveInDelivered()
+	_, err = writer.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: delivered.ID, FromProjectID: quiet.ID, ToProjectID: busy.ID, IfMatchRev: delivered.Revision, Actor: "tester"})
+	require.NoError(t, err)
+	movedOut := pollFeatures(cursor)
+	require.NotContains(t, movedOut.required, db.CronEventFeature)
+	cursor = movedOut.ids[len(movedOut.ids)-1]
+
+	// So does purging it, which deletes its events and stamps no event to the
+	// project.
+	delivered = moveInDelivered()
+	_, err = writer.PurgeIssue(ctx, delivered.ID, "tester", nil)
+	require.NoError(t, err)
+	require.NotContains(t, pollFeatures(cursor).required, db.CronEventFeature)
 }

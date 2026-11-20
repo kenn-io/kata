@@ -5,9 +5,9 @@ import "sync"
 // FederationFeedCache remembers, per hub project, event-ID ranges already
 // proven to hold no event that reaches the project's federation feed only
 // because the project owns its issue. Finding such an event otherwise means
-// probing every issue the project owns on each poll. It also remembers the
-// newest event ID through which no moved issue entered the project, so a poll
-// need not reread the project's move history.
+// probing every issue the project owns on each poll. It also remembers what
+// the project's move history requires of a peer, so a poll need not reread
+// that history.
 //
 // A remembered range stays true. Event inserts take IDs in commit order, so
 // once a read sees an event ID, no event with a lower ID can appear later; an
@@ -34,8 +34,17 @@ type federationFeedFacts struct {
 	// has an ID in (foreignFrom, foreignThrough].
 	foreignFrom, foreignThrough int64
 	// No issue.moved event stamped to the project has an ID at or below
-	// movesThrough.
+	// movesThrough. Deleting events cannot make this false.
 	movesThrough int64
+	// When featuresThrough is set, moved and nativeMoved held when the newest
+	// event ID was featuresThrough: whether an issue.moved event is stamped to
+	// the project, and whether an issue it moved in still carries cron
+	// delivery state. A change to either adds an event stamped to the project,
+	// moves an issue out of it, or purges one of its issues with a reset
+	// cursor above every event it saw, so they hold until one of those
+	// follows featuresThrough.
+	featuresThrough    int64
+	moved, nativeMoved bool
 	// issues is how many issues the project owned in the snapshot whose
 	// newest event ID is issuesAt, if issuesKnown. When issuesKnown is false,
 	// issuesAt is the snapshot in which a read found the count stale. The
@@ -51,22 +60,24 @@ type federationFeedFacts struct {
 type FederationFeedRead struct {
 	cache     *FederationFeedCache
 	projectID int64
+	postgres  bool
 	known     federationFeedFacts
 	learned   federationFeedFacts
-	// noMovesAfter is true when this transaction found no issue.moved event
-	// stamped to the project above known.movesThrough.
-	noMovesAfter bool
+	// The move checks this read ran, remembered once the read learns its
+	// snapshot's newest event ID.
+	movesChecked, moved, nativeChecked, nativeMoved bool
 	// snapshot is the newest event ID in this transaction's snapshot.
 	snapshot int64
 }
 
-// Begin returns the remembered facts for one read of project.
-func (c *FederationFeedCache) Begin(project Project, binding FederationBinding) *FederationFeedRead {
+// Begin returns the remembered facts for one read of project on a PostgreSQL
+// or SQLite store.
+func (c *FederationFeedCache) Begin(project Project, binding FederationBinding, postgres bool) *FederationFeedRead {
 	if c == nil {
 		return nil
 	}
 	key := federationFeedKey{projectUID: project.UID, projectRevision: project.Revision, replayHorizon: binding.ReplayHorizonEventID}
-	read := &FederationFeedRead{cache: c, projectID: project.ID, known: federationFeedFacts{key: key}}
+	read := &FederationFeedRead{cache: c, projectID: project.ID, postgres: postgres, known: federationFeedFacts{key: key}}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if facts, ok := c.entries[project.ID]; ok && facts.key == key {
@@ -91,6 +102,9 @@ func (r *FederationFeedRead) Commit() {
 		if current.foreignThrough > learned.foreignThrough {
 			learned.foreignFrom, learned.foreignThrough = current.foreignFrom, current.foreignThrough
 		}
+		if current.featuresThrough > learned.featuresThrough {
+			learned.featuresThrough, learned.moved, learned.nativeMoved = current.featuresThrough, current.moved, current.nativeMoved
+		}
 		// A count or recount mark from a newer snapshot wins; at the same
 		// snapshot, a count wins over a mark.
 		if current.issuesAt > learned.issuesAt || (current.issuesAt == learned.issuesAt && current.issuesKnown) {
@@ -110,10 +124,32 @@ func (r *FederationFeedRead) movesAfter() int64 {
 	return r.known.movesThrough
 }
 
+// moveFeatures returns the remembered move facts and the event ID they held
+// at, if any.
+func (r *FederationFeedRead) moveFeatures() (through int64, moved, nativeMoved bool) {
+	if r == nil {
+		return 0, false, false
+	}
+	return r.known.featuresThrough, r.known.moved, r.known.nativeMoved
+}
+
+// recordMoves notes whether an issue.moved event is stamped to the project.
 func (r *FederationFeedRead) recordMoves(found bool) {
 	if r != nil {
-		r.noMovesAfter = !found
+		r.movesChecked, r.moved = true, found
 	}
+}
+
+// recordNativeMoves notes whether an issue the project moved in still
+// carries cron delivery state.
+func (r *FederationFeedRead) recordNativeMoves(native bool) {
+	if r != nil {
+		r.nativeChecked, r.nativeMoved = true, native
+	}
+}
+
+func (r *FederationFeedRead) sql() (movedFrom, projectIndex, movedIndex string) {
+	return federationFeedSQL(r.postgres)
 }
 
 // foreignChecked returns the ID after which foreign events must be rechecked,
@@ -152,14 +188,19 @@ func (r *FederationFeedRead) recordEvents() {
 }
 
 // recordSnapshot notes maxID, the newest event ID in the read's snapshot. The
-// move check covers the whole snapshot, whatever the read returned.
+// move checks cover the whole snapshot, whatever the read returned.
 func (r *FederationFeedRead) recordSnapshot(maxID int64) {
 	if r == nil {
 		return
 	}
 	r.snapshot = maxID
-	if r.noMovesAfter {
+	switch {
+	case !r.movesChecked:
+	case !r.moved:
 		r.learned.movesThrough = max(r.learned.movesThrough, maxID)
+		r.learned.featuresThrough, r.learned.moved, r.learned.nativeMoved = maxID, false, false
+	case r.nativeChecked:
+		r.learned.featuresThrough, r.learned.moved, r.learned.nativeMoved = maxID, true, r.nativeMoved
 	}
 }
 
