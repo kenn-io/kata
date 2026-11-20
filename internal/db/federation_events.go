@@ -406,11 +406,23 @@ func DirectParentRemovals(ctx context.Context, tx interface {
 		return removed, err
 	}
 	seen := map[string]bool{}
+	uidList := make([]string, 0, len(uids))
 	for uid := range uids {
-		rows, err := tx.QueryContext(ctx, `SELECT e.uid,e.origin_instance_uid,p.uid,e.issue_uid,e.type,e.actor,e.payload,e.hlc_physical_ms,e.hlc_counter
+		uidList = append(uidList, uid)
+	}
+	// Keep the query within both backends' parameter limits for large batches.
+	for batch := range slices.Chunk(uidList, 500) {
+		values := make([]string, len(batch))
+		args := make([]any, len(batch))
+		for i, uid := range batch {
+			values[i] = fmt.Sprintf("($%d)", i+1)
+			args[i] = uid
+		}
+		rows, err := tx.QueryContext(ctx, `WITH requested(uid) AS (VALUES `+strings.Join(values, ",")+`)
+SELECT e.uid,e.origin_instance_uid,p.uid,e.issue_uid,e.type,e.actor,e.payload,e.hlc_physical_ms,e.hlc_counter
 FROM events e JOIN projects p ON p.id=e.project_id
 WHERE e.type IN ('issue.created','issue.snapshot','issue.moved','issue.linked','issue.unlinked','issue.links_changed')
-AND (e.issue_uid=$1 OR e.related_issue_uid=$1 OR e.payload LIKE '%' || $1 || '%')`, uid)
+AND EXISTS (SELECT 1 FROM requested r WHERE e.issue_uid=r.uid OR e.related_issue_uid=r.uid OR e.payload LIKE '%' || r.uid || '%')`, args...)
 		if err != nil {
 			return nil, err
 		}
