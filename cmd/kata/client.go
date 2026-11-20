@@ -21,6 +21,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/client"
+	"go.kenn.io/kata/internal/config"
 )
 
 // defaultHTTPTimeout is the per-request budget for non-streaming CLI calls.
@@ -144,6 +145,11 @@ func discoverDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) 
 			return resolved, diagnosisError(diagnosis)
 		}
 		if err != nil {
+			if evidence, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok && resolved.LocalProfile == nil {
+				if enabled, _, configErr := config.ReadAutostartEnabled(); configErr == nil {
+					evidence.ManagedExternally = !enabled
+				}
+			}
 			return resolved, cliDaemonTargetError(err)
 		}
 		return resolved, noDaemonRunningError()
@@ -191,9 +197,7 @@ func cliDaemonTargetError(err error) error {
 			ExitCode: ExitValidation,
 		}
 	}
-	if errors.Is(err, client.ErrRemoteUnavailable) ||
-		errors.Is(err, client.ErrLocalDaemonUnreachable) ||
-		errors.Is(err, client.ErrDaemonManagedExternally) {
+	if errors.Is(err, client.ErrRemoteUnavailable) {
 		return &cliError{
 			Message:  err.Error(),
 			Kind:     kindDaemonUnavail,

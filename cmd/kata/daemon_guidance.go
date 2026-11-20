@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -14,12 +15,18 @@ func daemonRecoveryAdvice(err error, goos string) string {
 	if !ok {
 		return ""
 	}
-	advice := fmt.Sprintf("Read %q", filepath.Join(e.DataDir, "daemon.log"))
+	advice := fmt.Sprintf("Check for logs at %q", filepath.Join(e.DataDir, "daemon.log"))
 	if e.WebOrigin != "" {
-		advice += ". Capture " + e.WebOrigin + "/debug/pprof/goroutine?debug=2"
+		advice += ". Capture " + e.WebOrigin + "/debug/pprof/goroutine?debug=2; if configured, send the daemon token in the Authorization: Bearer header"
 	}
 	if errors.Is(err, client.ErrSQLiteMigrationActive) {
 		return advice + ". Wait for the migration to finish, then retry."
+	}
+	if errors.Is(err, context.Canceled) {
+		return advice
+	}
+	if e.ManagedExternally || errors.Is(err, client.ErrDaemonManagedExternally) {
+		return advice + ". Restart it through its service manager."
 	}
 	if e.VerifiedProcess {
 		if goos == "windows" {

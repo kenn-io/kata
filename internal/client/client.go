@@ -71,14 +71,16 @@ var ErrLocalDaemonUnreachable = errors.New("local daemon is unreachable")
 
 // LocalDaemonUnreachableError retains the failed process and its evidence paths.
 type LocalDaemonUnreachableError struct {
-	PID             int
-	Address         string
-	DataDir         string
-	WebOrigin       string
-	VerifiedProcess bool
-	Profile         string
-	callerStopped   bool
-	cause           error
+	PID               int
+	Address           string
+	DataDir           string
+	WebOrigin         string
+	VerifiedProcess   bool
+	ManagedExternally bool
+	Profile           string
+	callerStopped     bool
+	migrationActive   bool
+	cause             error
 }
 
 func (e *LocalDaemonUnreachableError) Error() string {
@@ -89,9 +91,9 @@ func (e *LocalDaemonUnreachableError) Unwrap() error {
 	return e.cause
 }
 
-// Is reports whether target is the local daemon unreachable sentinel.
+// Is reports whether the probe failed or its selected storage is migrating.
 func (e *LocalDaemonUnreachableError) Is(target error) bool {
-	return target == ErrLocalDaemonUnreachable && !e.callerStopped
+	return target == ErrLocalDaemonUnreachable && !e.callerStopped || target == ErrSQLiteMigrationActive && e.migrationActive
 }
 
 // liveDaemon is one runtime record that answered /api/v1/ping: the record
@@ -185,6 +187,7 @@ func unreachableRuntime(r kitdaemon.RuntimeRecord, dataDir string, cause error) 
 		PID: r.PID, Address: r.Endpoint().ConfigAddress(), DataDir: dataDir,
 		WebOrigin:       origin,
 		VerifiedProcess: daemonruntime.RuntimeProcessAlive(r),
+		migrationActive: sqliteCutoverLockedForDSN(r.Metadata["db_path"]),
 		cause:           cause,
 	}
 }

@@ -28,10 +28,12 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/activity"
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/daemonruntime"
@@ -4119,4 +4121,78 @@ func TestDaemonControlsSkipUnknownRecord(t *testing.T) {
 			assert.FileExists(t, path)
 		})
 	}
+}
+
+func TestReviewStatusCutoverAndSupervisorGuidance(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		migration, supervised bool
+	}{
+		{"migration", true, false}, {"supervised", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetFlags(t)
+			home := setupKataEnv(t)
+			t.Chdir(t.TempDir())
+			if tc.supervised {
+				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n"), 0600))
+			}
+			dbPath := filepath.Join(home, "kata.db")
+			if tc.migration {
+				lock := flock.New(dbPath + ".import.lock")
+				require.NoError(t, lock.Lock())
+				t.Cleanup(func() { require.NoError(t, lock.Close()) })
+			}
+			ns, err := daemonruntime.NewNamespace()
+			require.NoError(t, err)
+			require.NoError(t, ns.EnsureDirs())
+			_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1", Metadata: map[string]string{"db_path": dbPath}})
+			require.NoError(t, err)
+			stdout, _, err := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
+			require.Error(t, err)
+			var result daemonStatusOutput
+			require.NoError(t, json.Unmarshal([]byte(stdout), &result))
+			require.NotNil(t, result.Selected)
+			hint := result.Selected.NextAction
+			require.Contains(t, hint, "daemon.log")
+			if tc.migration {
+				require.Contains(t, hint, "Wait")
+			} else {
+				require.Contains(t, hint, "service manager")
+			}
+			require.NotContains(t, hint, "kill")
+			require.NotContains(t, hint, "daemon restart")
+			if tc.supervised {
+				_, stderr, err := executeRootCapture(t, t.Context(), "health")
+				require.Error(t, err)
+				require.Contains(t, stderr, "service manager")
+				require.NotContains(t, stderr, "kill")
+				require.NotContains(t, stderr, "daemon restart")
+			}
+		})
+	}
+}
+
+func TestReviewCanceledDiscoveryDoesNotSuggestStopping(t *testing.T) {
+	setupKataEnv(t)
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	started := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-r.Context().Done()
+	}))
+	t.Cleanup(server.Close)
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go func() { <-started; cancel() }()
+	_, _, err = client.DiscoverResolved(ctx, ns.DataDir)
+	require.ErrorIs(t, err, context.Canceled)
+	hint := cliErrorForErr(err, true).Hint
+	require.Contains(t, hint, "daemon.log")
+	require.NotContains(t, hint, "kill")
+	require.NotContains(t, hint, "restart")
 }

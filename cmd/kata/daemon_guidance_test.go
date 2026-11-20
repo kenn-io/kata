@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -56,4 +57,31 @@ func TestDaemonRecoveryGuidanceDuringMigration(t *testing.T) {
 	require.Contains(t, hint, "Wait")
 	require.NotContains(t, hint, "kill")
 	require.NotContains(t, hint, "restart")
+}
+
+func TestReviewRecoveryGuidanceContracts(t *testing.T) {
+	e := &client.LocalDaemonUnreachableError{PID: 42, DataDir: "/runtime", WebOrigin: "http://127.0.0.1:7777", VerifiedProcess: true}
+	t.Run("caller cancellation", func(t *testing.T) {
+		hint := daemonRecoveryAdvice(errors.Join(context.Canceled, e), "linux")
+		require.NotContains(t, hint, "kill")
+		require.NotContains(t, hint, "restart")
+	})
+	t.Run("service manager", func(t *testing.T) {
+		for _, name := range []string{"", "work"} {
+			e.Profile = name
+			hint := daemonRecoveryAdvice(errors.Join(client.ErrDaemonManagedExternally, e), "linux")
+			require.Contains(t, hint, "service manager")
+			require.NotContains(t, hint, "kill")
+			require.NotContains(t, hint, "daemon restart")
+			require.NotContains(t, hint, "daemon recover")
+		}
+	})
+	t.Run("log and authenticated profile", func(t *testing.T) {
+		t.Setenv("KATA_AUTH_TOKEN", "fixture-secret")
+		hint := daemonRecoveryAdvice(e, "linux")
+		require.Contains(t, hint, "Check for logs")
+		require.Contains(t, hint, "daemon token")
+		require.Contains(t, hint, "Authorization")
+		require.NotContains(t, hint, "fixture-secret")
+	})
 }

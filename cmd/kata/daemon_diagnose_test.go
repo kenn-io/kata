@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
@@ -944,4 +945,79 @@ func TestDaemonDiagnoseSecondPingUnreachable(t *testing.T) {
 	require.Equal(t, os.Getpid(), result.PID)
 	require.Contains(t, result.NextAction, filepath.Join(ns.DataDir, "daemon.log"))
 	require.Contains(t, result.NextAction, "--daemon work")
+}
+
+func TestReviewSupervisedProfileDiagnosisGuidance(t *testing.T) {
+	for _, migration := range []bool{false, true} {
+		t.Run(fmt.Sprintf("migration=%t", migration), func(t *testing.T) {
+			home, _, uid, _ := stoppedProfileCLI(t)
+			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n"), 0600))
+			dbPath := filepath.Join(home, "kata.db")
+			if migration {
+				lock := flock.New(dbPath + ".import.lock")
+				require.NoError(t, lock.Lock())
+				t.Cleanup(func() { require.NoError(t, lock.Close()) })
+			}
+			profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: uid})
+			require.NoError(t, err)
+			ns, err := daemonruntime.NewNamespaceForHome(home, profile.StorageID)
+			require.NoError(t, err)
+			require.NoError(t, ns.EnsureDirs())
+			_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1", Metadata: map[string]string{"db_path": dbPath}})
+			require.NoError(t, err)
+			out, _, err := executeRootCapture(t, t.Context(), "--daemon", "work", "daemon", "diagnose", "--json")
+			require.NoError(t, err)
+			var result daemonDiagnosis
+			require.NoError(t, json.Unmarshal([]byte(out), &result))
+			require.Equal(t, "local_unreachable", result.State)
+			if migration {
+				require.Contains(t, result.NextAction, "Wait")
+			} else {
+				require.Contains(t, result.NextAction, "service manager")
+			}
+			require.NotContains(t, result.NextAction, "kill")
+			require.NotContains(t, result.NextAction, "daemon recover")
+		})
+	}
+}
+
+func TestReviewSupervisedDiscoveryDeadline(t *testing.T) {
+	for _, profile := range []bool{false, true} {
+		t.Run(fmt.Sprintf("profile=%t", profile), func(t *testing.T) {
+			resetFlags(t)
+			var home, uid string
+			if profile {
+				home, _, uid, _ = stoppedProfileCLI(t)
+			} else {
+				home = setupKataEnv(t)
+				t.Chdir(t.TempDir())
+				t.Setenv("KATA_SERVER", "")
+			}
+			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n"), 0600))
+			var ns *daemonruntime.Namespace
+			var err error
+			if profile {
+				p, resolveErr := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: uid})
+				require.NoError(t, resolveErr)
+				ns, err = daemonruntime.NewNamespaceForHome(home, p.StorageID)
+			} else {
+				ns, err = daemonruntime.NewNamespace()
+			}
+			require.NoError(t, err)
+			require.NoError(t, ns.EnsureDirs())
+			server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+			t.Cleanup(server.Close)
+			_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
+			require.NoError(t, err)
+			ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+			defer cancel()
+			_, err = discoverDaemonResolved(ctx)
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+			hint := cliErrorForErr(err, true).Hint
+			require.Contains(t, hint, "service manager")
+			require.NotContains(t, hint, "kill")
+			require.NotContains(t, hint, "daemon restart")
+			require.NotContains(t, hint, "daemon recover")
+		})
+	}
 }

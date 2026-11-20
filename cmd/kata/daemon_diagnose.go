@@ -349,7 +349,7 @@ func probeDaemonSelection(
 	}
 	if err != nil {
 		result.Message = err.Error()
-		result = diagnosisUnreachable(result, err)
+		result = diagnosisUnreachable(result, err, selection)
 		if errors.Is(err, client.ErrProfileIdentityMismatch) {
 			result.State = "wrong_database"
 			if mismatch, ok := errors.AsType[*client.LocalProfileIdentityError](err); ok {
@@ -388,7 +388,7 @@ func probeDaemonSelection(
 		if result.Kind == "remote" {
 			result.State = unavailableRemoteState(result.Endpoint)
 		} else {
-			result = diagnosisUnreachable(result, resolved.LocalDaemonUnreachable(dataDir, err))
+			result = diagnosisUnreachable(result, resolved.LocalDaemonUnreachable(dataDir, err), selection)
 		}
 		return withDiagnosisAction(result), selection, nil
 	}
@@ -397,7 +397,7 @@ func probeDaemonSelection(
 		if result.Kind == "remote" {
 			result.State = unavailableRemoteState(result.Endpoint)
 		} else {
-			result = diagnosisUnreachable(result, resolved.LocalDaemonUnreachable(dataDir, errors.New("ping returned an unhealthy response")))
+			result = diagnosisUnreachable(result, resolved.LocalDaemonUnreachable(dataDir, errors.New("ping returned an unhealthy response")), selection)
 		}
 		return withDiagnosisAction(result), selection, nil
 	}
@@ -480,9 +480,16 @@ func safeDaemonOrigin(value string) string {
 	return parsed.Scheme + "://" + parsed.Host
 }
 
-func diagnosisUnreachable(result daemonDiagnosis, err error) daemonDiagnosis {
+func diagnosisUnreachable(result daemonDiagnosis, err error, selection client.DaemonSelection) daemonDiagnosis {
 	if e, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok {
 		result.Message, result.PID, result.Endpoint = err.Error(), e.PID, e.Address
+		supervised := false
+		if selection.Profile != nil {
+			supervised = !selection.Profile.Config.AutostartEnabled()
+		} else if enabled, _, configErr := config.ReadAutostartEnabled(); configErr == nil {
+			supervised = !enabled
+		}
+		e.ManagedExternally = supervised
 		result.NextAction = daemonRecoveryAdvice(err, runtime.GOOS)
 	}
 	return result
