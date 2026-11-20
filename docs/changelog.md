@@ -94,6 +94,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
   cycles topological, temporal, and priority order. Priority order matches
   `kata next`: highest priority first, unprioritized last, then most recently
   updated.
+- Swap triage labels in one request: `kata label add <ref> ready-for-human
+  --remove ready-for-agent` detaches and attaches together, so a failure never
+  leaves the issue with both labels or neither, and the output lists the labels
+  it ended with. Needs a daemon on API 0.70.0 or newer. See
+  [labels](reference/cli.md#labels-ownership-and-claiming).
 - Let a service manager own the local daemon. Set top-level `autostart = false`
   in `config.toml`, and Kata commands, including `kata daemon recover`, wait up
   to 30 seconds for the supervised daemon instead of starting their own. See

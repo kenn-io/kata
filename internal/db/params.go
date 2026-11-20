@@ -450,6 +450,14 @@ type LabelEventParams struct {
 	Actor     string
 }
 
+// ChangeLabelsParams removes and adds labels on one issue in one transaction.
+// Callers pass disjoint, deduplicated Add and Remove lists.
+type ChangeLabelsParams struct {
+	Add    []string
+	Remove []string
+	Actor  string
+}
+
 // AliasRow is the slim view of a project alias the hook resolver needs.
 // Field naming is normalized vs. ProjectAlias (which uses Alias-prefixed
 // fields) so resolver call sites read cleanly.

@@ -1,11 +1,18 @@
 package main
 
 import (
+	"encoding/json/v2"
+	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/testenv"
 )
 
 func TestLabelAdd_HappyPath(t *testing.T) {
@@ -114,4 +121,73 @@ func TestCreate_RejectsWhitespaceLabel(t *testing.T) {
 	_, _, err := executeRootCapture(t, t.Context(), "create", "title", "--label", "   ")
 	ce := requireCLIError(t, err, ExitValidation)
 	assert.Contains(t, ce.Message, "label must not be empty")
+}
+
+func issueLabelsViaShow(t *testing.T, env *testenv.Env, dir, ref string) []string {
+	t.Helper()
+	var shown struct {
+		Issue struct {
+			Labels []string `json:"labels"`
+		} `json:"issue"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(runCLI(t, env, dir, "--json", "show", ref)), &shown))
+	return shown.Issue.Labels
+}
+
+func TestLabelAdd_RemoveSwapsLabelsAndPrintsResult(t *testing.T) {
+	env, dir, _, ref := setupWorkspaceWithIssue(t, "a")
+	runCLI(t, env, dir, "label", "add", ref, "ready-for-agent")
+	runCLI(t, env, dir, "label", "add", ref, "keep")
+
+	out := runCLI(t, env, dir, "label", "add", ref, "ready-for-human", "--remove", "ready-for-agent")
+
+	assert.Contains(t, out, "keep, ready-for-human")
+	assert.NotContains(t, out, "ready-for-agent")
+	assert.ElementsMatch(t, []string{"keep", "ready-for-human"}, issueLabelsViaShow(t, env, dir, ref))
+}
+
+func TestLabelAdd_RemoveAgentAndJSONOutput(t *testing.T) {
+	env, dir, _, ref := setupWorkspaceWithIssue(t, "a")
+	runCLI(t, env, dir, "label", "add", ref, "ready-for-agent")
+
+	agent := runCLI(t, env, dir, "--agent", "label", "add", ref, "ready-for-human", "--remove", "ready-for-agent")
+	assert.Regexp(t, `(?m)^OK label \S+ changed=true`, agent)
+	assert.Contains(t, agent, "Labels: ready-for-human")
+
+	jsonOut := runCLI(t, env, dir, "--json", "label", "add", ref, "x-new", "--remove", "ready-for-human")
+	var got struct {
+		Labels []string `json:"labels"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(jsonOut), &got))
+	assert.Equal(t, []string{"x-new"}, got.Labels)
+}
+
+func TestLabelAdd_RemoveRefusesOldDaemonWithoutWriting(t *testing.T) {
+	env, dir, _, ref := setupWorkspaceWithIssue(t, "a")
+	runCLI(t, env, dir, "label", "add", ref, "ready-for-agent")
+
+	target, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	var writes atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/health" {
+			_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.61.0"}`))
+			return
+		}
+		if r.Method != http.MethodGet && r.URL.Path != "/api/v1/projects/resolve" {
+			writes.Add(1)
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	defer server.Close()
+	old := *env
+	old.URL = server.URL
+
+	_, err = runCLICapture(t, &old, dir, "label", "add", ref, "ready-for-human", "--remove", "ready-for-agent")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "requires daemon API 0.70.0")
+	assert.Zero(t, writes.Load())
+	assert.Equal(t, []string{"ready-for-agent"}, issueLabelsViaShow(t, env, dir, ref))
 }

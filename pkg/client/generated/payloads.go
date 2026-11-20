@@ -132,6 +132,8 @@ type CreateCommentBody = CommentRequestBody
 
 type EditCommentBody = EditCommentRequestBody
 
+type UpdateLabelsBody = UpdateLabelsRequestBody
+
 type AddLabelBody = AddLabelRequestBody
 
 type AcquireIssueLeaseBody = ClaimActionBody
