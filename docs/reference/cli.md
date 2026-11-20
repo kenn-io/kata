@@ -1271,7 +1271,7 @@ explicitly asks for that exact operation and ref.
 Labels `p0` through `p4` and labels beginning with `priority:` are reserved. Set priority with `kata edit <ref> --priority N` or `kata create --priority N`.
 
 ```sh
-kata label add <ref> <label> [--remove <label>]... [--comment TEXT]
+kata label add <ref> <label> [--comment TEXT]
 kata label rm <ref> <label> [--comment TEXT]
 kata labels
 
@@ -1279,13 +1279,6 @@ kata assign <ref> <owner> [--comment TEXT]
 kata unassign <ref> [--expect-owner <owner>] [--comment TEXT]
 kata claim <ref> [--ttl <duration>] [--force | --if-unowned] [--comment TEXT]
 ```
-
-`kata label add <ref> <label> --remove <label>` attaches and detaches labels in
-one request, so a triage swap such as `kata label add <ref> ready-for-human
---remove ready-for-agent` never leaves the issue with both labels or neither.
-`--remove` repeats. The command prints the labels the issue ended with (`--json`
-returns the daemon response with `labels` and `events`). It requires daemon API
-`0.70.0` or newer and sends nothing to an older daemon.
 
 `kata claim` atomically assigns the issue to the current actor and fails if
 someone else already holds it, unless you pass `--force`. To make the assignment

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -113,23 +112,24 @@ func addLabelHandler(cfg ServerConfig) func(context.Context, *api.AddLabelReques
 	}
 }
 
-// dedupLabels collapses repeats within one list, keeping first-seen order,
-// and rejects blank entries. Labels are never trimmed: a label with stray
-// whitespace is invalid and the store reports it as such.
-func dedupLabels(field string, labels []string) ([]string, error) {
-	seen := make(map[string]struct{}, len(labels))
-	out := make([]string, 0, len(labels))
-	for _, l := range labels {
-		if strings.TrimSpace(l) == "" {
-			return nil, api.NewError(400, "validation", field+" must not contain a blank label", "", nil)
-		}
-		if _, dup := seen[l]; dup {
-			continue
-		}
-		seen[l] = struct{}{}
-		out = append(out, l)
+// validLabelName mirrors the store's label rule: charset [a-z0-9._:-],
+// length 1..64. The PATCH handler checks both lists with it before writing
+// because the stores skip an absent remove without validating it, so a
+// mistyped remove would otherwise leave the issue carrying both labels.
+func validLabelName(label string) bool {
+	if len(label) == 0 || len(label) > 64 {
+		return false
 	}
-	return out, nil
+	for i := range len(label) {
+		c := label[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= '0' && c <= '9',
+			c == '.', c == '_', c == ':', c == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func updateLabelsHandler(cfg ServerConfig) func(context.Context, *api.UpdateLabelsRequest) (*api.UpdateLabelsResponse, error) {
@@ -138,14 +138,19 @@ func updateLabelsHandler(cfg ServerConfig) func(context.Context, *api.UpdateLabe
 		if err != nil {
 			return nil, err
 		}
-		add, err := dedupLabels("add", in.Body.Add)
-		if err != nil {
-			return nil, err
+		for _, l := range in.Body.Add {
+			if !validLabelName(l) {
+				return nil, api.NewError(400, "validation",
+					"label must match charset [a-z0-9._:-] and length 1..64", "", nil)
+			}
 		}
-		remove, err := dedupLabels("remove", in.Body.Remove)
-		if err != nil {
-			return nil, err
+		for _, l := range in.Body.Remove {
+			if !validLabelName(l) {
+				return nil, api.NewError(400, "validation",
+					"label must match charset [a-z0-9._:-] and length 1..64", "", nil)
+			}
 		}
+		add, remove := in.Body.Add, in.Body.Remove
 		if len(add) == 0 && len(remove) == 0 {
 			return nil, api.NewError(400, "validation", "add or remove must name at least one label", "", nil)
 		}
@@ -184,9 +189,11 @@ func updateLabelsHandler(cfg ServerConfig) func(context.Context, *api.UpdateLabe
 			return nil, internalAPIError(err)
 		}
 
+		// Publish the committed batch before projecting so a projection
+		// error cannot leave a committed event unpublished.
+		cfg.Publish().EventsByProject(events)
 		projectedEvents := make([]db.Event, 0, len(events))
 		for i := range events {
-			cfg.Publish().Event(events[i].ProjectID, events[i])
 			projected, err := scopedMutationEvent(ctx, cfg.DB, &events[i])
 			if err != nil {
 				return nil, err
@@ -198,9 +205,6 @@ func updateLabelsHandler(cfg ServerConfig) func(context.Context, *api.UpdateLabe
 		updatedIssue, err := cfg.DB.IssueByID(ctx, issue.ID)
 		if err != nil {
 			return nil, internalAPIError(err)
-		}
-		if labels == nil {
-			labels = []string{}
 		}
 		out := &api.UpdateLabelsResponse{}
 		out.Body.Issue = updatedIssue

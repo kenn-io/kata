@@ -754,6 +754,7 @@ These operations accept either a numeric project ID or a `name:` selector:
 | `PATCH` | `/api/v1/projects/name:example-project/issues/{ref}` |
 | `POST` | `/api/v1/projects/name:example-project/issues/{ref}/comments` |
 | `POST` | `/api/v1/projects/name:example-project/issues/{ref}/labels` |
+| `PATCH` | `/api/v1/projects/name:example-project/issues/{ref}/labels` |
 
 URL-encode the project selector as a single path segment. Numeric paths such as
 `/api/v1/projects/42/issues` remain valid, and the issue ref and mutation body
@@ -1166,16 +1167,15 @@ lists (API `0.70.0` or newer):
 ```
 
 The daemon removes the `remove` labels, then attaches the `add` labels, in one
-transaction. If any label is invalid, nothing changes. Labels already attached
-or already absent are skipped without an event. The response carries `issue`,
-`labels` (the issue's labels after the change, sorted, read in the same
-transaction), `events` (`issue.unlabeled` then `issue.labeled`, empty when
-nothing changed), and `changed`.
+transaction. Labels already attached or already absent are skipped without an
+event. The response carries `issue`, `labels` (the issue's labels after the
+change, sorted, read in the same transaction), `events` (`issue.unlabeled` then
+`issue.labeled`, empty when nothing changed), and `changed`.
 
-A request returns `400 validation` when both lists are empty, a label is blank
-or does not match `[a-z0-9._:-]` with length 1..64, or the same label appears
-in both lists. Repeats inside one list are collapsed. Like the other label
-routes, the project path accepts a `name:` selector.
+A request returns `400 validation` and changes nothing when both lists are
+empty, when a label in either list does not match `[a-z0-9._:-]` with length
+1..64 (a mistyped `remove` entry included), or when the same label appears in
+both lists. The PATCH route's project path accepts a `name:` selector.
 
 ## Attachment Endpoints
 
