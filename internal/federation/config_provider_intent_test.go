@@ -415,6 +415,28 @@ func TestReconcileProviderRestoredIntentAfterUnconfirmedReleaseRequestsNewApprov
 	assert.True(t, binding.PushEnabled)
 }
 
+// A provider that is unavailable when the release is repeated has still not
+// said whether the old approval works, so Kata keeps trying to release it.
+func TestReconcileProviderUnavailableReleaseKeepsReleasePending(t *testing.T) {
+	f := newIntentChangeFixture(t, federationprovider.IntentCollaborate)
+	require.NoError(t, f.reconcile(t, federationprovider.IntentCollaborate))
+	before := f.saved(t)
+
+	t.Setenv("KATA_TEST_PROVIDER_RELEASE_DECISION", "exit-two")
+	require.Error(t, f.reconcile(t, federationprovider.IntentReadOnly))
+	t.Setenv("KATA_TEST_PROVIDER_RELEASE_DECISION", "unavailable")
+	require.Error(t, f.reconcile(t, federationprovider.IntentCollaborate))
+	t.Setenv("KATA_TEST_PROVIDER_RELEASE_DECISION", "released")
+	require.NoError(t, f.reconcile(t, federationprovider.IntentCollaborate))
+
+	requests := f.requests(t)
+	require.Len(t, requests, 5)
+	assert.Equal(t, "release", requests[3].Operation)
+	assert.Equal(t, before.Credential.Provider.RequestID, requests[3].RequestID)
+	assert.Equal(t, "authorize", requests[4].Operation)
+	assert.Equal(t, requests[4].RequestID, f.saved(t).Credential.Provider.RequestID)
+}
+
 // A provider that answers a release with a refusal still holds the old
 // approval, so restoring the earlier intent keeps using it.
 func TestReconcileProviderRestoredIntentAfterRefusedReleaseKeepsApproval(t *testing.T) {

@@ -258,7 +258,8 @@ func changeFederationProviderIntent(
 
 // releaseForIntentChange returns the saved request as it now stands: marked
 // while the provider's answer is unknown, unmarked once the provider refused
-// the release and so still holds the approval.
+// the release and so still holds the approval. An unavailable provider has
+// not answered either way, so the mark stays.
 func releaseForIntentChange(
 	ctx context.Context, store db.Storage, managed config.FederationManagedCredentialStore,
 	mapping config.FederationProjectConfig, saved config.FederationManagedCredentialReservation,
@@ -288,7 +289,7 @@ func releaseForIntentChange(
 		HubURL: marked.Credential.HubURL, Project: marked.Credential.HubProjectName,
 		SpokeInstanceUID: p.SpokeInstanceUID, LocalProjectUID: p.LocalProjectUID, Intent: p.Intent,
 	})
-	if err != nil || response.Status == federationprovider.StatusReleased {
+	if err != nil || (response.Status != federationprovider.StatusDenied && response.Status != federationprovider.StatusConflict) {
 		return marked, response, err
 	}
 	unmarked, err := withReleaseStarted(ctx, managed, marked, false)
