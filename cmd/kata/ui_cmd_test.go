@@ -5,20 +5,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
 	"strings"
-	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/client"
-	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/web"
@@ -223,50 +219,6 @@ func TestUICommandResolvesBeforeOpening(t *testing.T) {
 	assert.Equal(t,
 		"/kata?scope=01HZNQ7VFPK1XGD8R5MABCD4EY&issue=01HZNQ7VFPK1XGD8R5MABCD4EX",
 		openedUIReturnPath)
-}
-
-func TestUICommandPinsGatewaySelectionAcrossRecovery(t *testing.T) {
-	var ready atomic.Bool
-	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		if !ready.Load() {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			return
-		}
-		_, _ = fmt.Fprintf(w, `{"web_ui_contract_version":%q}`, api.UISnapshotContractVersion)
-	}))
-	t.Cleanup(hub.Close)
-	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
-		cfg.WebDaemons = []config.CatalogDaemonConfig{{Name: "hub", URL: hub.URL, AllowInsecure: true}}
-		cfg.WebSyncHubs = []string{"hub"}
-	})
-	workspace, _ := initLocalBoundWorkspace(t, env, "example-project")
-	issue := createIssueViaHTTPFull(t, env, workspace, "Open in browser")
-	var headers []string
-	clientWithRecovery := *env.HTTP
-	base := env.HTTP.Transport
-	if base == nil {
-		base = http.DefaultTransport
-	}
-	clientWithRecovery.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		if strings.HasPrefix(r.URL.Path, "/api/v1/ui/proxy/") {
-			headers = append(headers, r.Header.Get("X-Kata-Web-Daemon"))
-		}
-		response, err := base.RoundTrip(r)
-		if err == nil && r.URL.Path == "/api/v1/ui/proxy/api/v1/projects/resolve" {
-			ready.Store(true)
-			status, roster := env.Get(t, "/api/v1/ui/daemons")
-			require.Equal(t, http.StatusOK, status)
-			assert.Contains(t, string(roster), `"id":"hub"`)
-			assert.Contains(t, string(roster), `"id":"local"`)
-		}
-		return response, err
-	})
-	stubUICommandLaunch(t, client.PreparedWebUI{BaseURL: env.URL, Client: &clientWithRecovery, Runtime: client.DiscoveredWebRuntime{Origin: env.URL, OriginStable: true, Capabilities: []string{"loopback"}}})
-	_, err := runCmdOutput(t, nil, "--project", "example-project", "ui", issue.ShortID)
-	require.NoError(t, err)
-	assert.Equal(t, []string{"", "local"}, headers)
-	assert.Contains(t, openedUIURL, "#daemon=local")
-	assert.Equal(t, "/kata?scope="+issue.ProjectUID+"&issue="+issue.UID, openedUIReturnPath)
 }
 
 func TestUICommandResolvesRefsThroughLocalDaemonGateway(t *testing.T) {

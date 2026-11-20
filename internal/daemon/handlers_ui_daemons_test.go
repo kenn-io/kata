@@ -449,62 +449,6 @@ func TestWebDaemonGatewayAllowsIssueReferenceLookup(t *testing.T) {
 	}, body)
 }
 
-func TestWebDaemonGatewayDefaultWithDownSyncHub(t *testing.T) {
-	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusServiceUnavailable)
-	}))
-	t.Cleanup(hub.Close)
-	for _, tc := range []struct {
-		name     string
-		ordinary bool
-	}{
-		{"local fallback", false},
-		{"ordinary target", true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var probes, requests atomic.Int64
-			other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				switch r.URL.Path {
-				case "/api/v1/instance":
-					probes.Add(1)
-				case "/api/v1/ui/issue-reference":
-					requests.Add(1)
-				}
-				w.WriteHeader(http.StatusNoContent)
-			}))
-			t.Cleanup(other.Close)
-			d := openTestDB(t)
-			project, err := d.db.CreateProject(t.Context(), "example-project")
-			require.NoError(t, err)
-			issue, _, err := d.db.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Example issue", Author: "user-a"})
-			require.NoError(t, err)
-			catalog := []config.CatalogDaemonConfig{{Name: "hub", URL: hub.URL, AllowInsecure: true}}
-			if tc.ordinary {
-				catalog = append(catalog, config.CatalogDaemonConfig{Name: "other", URL: other.URL, AllowInsecure: true})
-			}
-			server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, WebSyncHubs: []string{"hub"}, WebDaemons: catalog})
-			request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf(
-				"%s/api/v1/ui/proxy/api/v1/ui/issue-reference?project_id=%d&ref=%s", server.URL, project.ID, issue.ShortID,
-			), nil)
-			require.NoError(t, err)
-			response, err := http.DefaultClient.Do(request)
-			require.NoError(t, err)
-			defer func() { _ = response.Body.Close() }()
-			assert.Empty(t, response.Header.Get("X-Kata-Web-Daemon"))
-			if tc.ordinary {
-				require.Equal(t, http.StatusNoContent, response.StatusCode)
-				assert.EqualValues(t, 1, requests.Load())
-				assert.Zero(t, probes.Load())
-			} else {
-				require.Equal(t, http.StatusOK, response.StatusCode)
-				var body map[string]any
-				require.NoError(t, json.NewDecoder(response.Body).Decode(&body))
-				assert.Equal(t, map[string]any{"issue": map[string]any{"uid": issue.UID, "project_uid": project.UID}}, body)
-			}
-		})
-	}
-}
-
 func TestWebDaemonGatewayRejectsDownstreamRosterBeforeProxying(t *testing.T) {
 	var calls atomic.Int64
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

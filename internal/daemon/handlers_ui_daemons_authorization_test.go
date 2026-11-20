@@ -20,6 +20,50 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
+type observedDoneContext struct {
+	context.Context
+	observed chan struct{}
+}
+
+func (c observedDoneContext) Done() <-chan struct{} {
+	select {
+	case c.observed <- struct{}{}:
+	default:
+	}
+	return c.Context.Done()
+}
+
+func TestWebDaemonHealthRetriesCanceledSharedProbe(t *testing.T) {
+	started := make(chan struct{})
+	var requests atomic.Int64
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if requests.Add(1) == 1 {
+			close(started)
+			<-r.Context().Done()
+			return
+		}
+		_, _ = fmt.Fprintf(w, `{"web_ui_contract_version":%q}`, api.UISnapshotContractVersion)
+	}))
+	t.Cleanup(hub.Close)
+	gateway := &webDaemonGateway{health: make(map[string]webDaemonHealthEntry), inflight: make(map[string]*webDaemonInflightProbe)}
+	target := resolvedWebDaemon{id: "hub", baseURL: hub.URL, allowInsecure: true}
+	owner, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	ownerDone := make(chan string, 1)
+	go func() { ownerDone <- gateway.daemonHealth(owner, target, true) }()
+	<-started
+	joined := make(chan struct{}, 1)
+	waiterDone := make(chan string, 1)
+	go func() {
+		waiterDone <- gateway.daemonHealth(observedDoneContext{Context: t.Context(), observed: joined}, target, false)
+	}()
+	<-joined
+	cancel()
+	<-ownerDone
+	assert.Equal(t, "connected", <-waiterDone)
+	assert.EqualValues(t, 2, requests.Load())
+}
+
 func TestWebDaemonGatewayAppliesWebLocalProjectPolicyBeforeForwarding(t *testing.T) {
 	var calls int
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -125,15 +169,11 @@ func TestWebDaemonGatewayKeepsAutomaticLocalFallbackAfterRecovery(t *testing.T) 
 		_, _ = fmt.Fprintf(w, `{"web_ui_contract_version":%q}`, api.UISnapshotContractVersion)
 	}))
 	t.Cleanup(hub.Close)
-	localMux := http.NewServeMux()
-	localMux.HandleFunc("POST /api/v1/projects/resolve", func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "local") })
-	gateway := &webDaemonGateway{catalog: []config.CatalogDaemonConfig{{Name: "hub", URL: hub.URL, AllowInsecure: true}}, syncHubs: map[string]bool{"hub": true}, localMux: localMux, health: make(map[string]webDaemonHealthEntry), inflight: make(map[string]*webDaemonInflightProbe), proxies: make(map[string]http.Handler)}
+	gateway := &webDaemonGateway{catalog: []config.CatalogDaemonConfig{{Name: "hub", URL: hub.URL, AllowInsecure: true}}, syncHubs: map[string]bool{"hub": true}, health: make(map[string]webDaemonHealthEntry), inflight: make(map[string]*webDaemonInflightProbe)}
 	ctx := WithPrincipal(t.Context(), Principal{Kind: PrincipalWebLocal})
-	request := httptest.NewRequestWithContext(ctx, http.MethodPost, "http://127.0.0.1/api/v1/projects/resolve", strings.NewReader(`{"name":"example-project"}`))
-	response := httptest.NewRecorder()
-	gateway.ServeHTTP(response, request)
-	require.Equal(t, "local", response.Body.String())
-	assert.Equal(t, "local", response.Header().Get(webDaemonHeaderName))
+	down := httptest.NewRecorder()
+	gateway.list(down, httptest.NewRequestWithContext(ctx, http.MethodGet, "http://127.0.0.1/api/v1/ui/daemons", nil))
+	require.Contains(t, down.Body.String(), `"id":"local"`)
 	ready.Store(true)
 	roster := httptest.NewRecorder()
 	gateway.list(roster, httptest.NewRequestWithContext(ctx, http.MethodGet, "http://127.0.0.1/api/v1/ui/daemons", nil))

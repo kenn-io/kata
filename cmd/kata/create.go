@@ -445,7 +445,7 @@ func resolveProjectIDAndNameWithClient(
 	a daemonAPI,
 	startPath string,
 ) (int64, string, error) {
-	return resolveProjectIDAndNameWithDaemonHeaders(a, startPath, nil, nil)
+	return resolveProjectIDAndNameWithDaemonHeaders(a, startPath, nil)
 }
 
 func resolveProjectIDAndNameWithClientHeaders(
@@ -454,17 +454,15 @@ func resolveProjectIDAndNameWithClientHeaders(
 	baseURL string,
 	startPath string,
 	headers map[string]string,
-	selectedDaemon *string,
 ) (int64, string, error) {
 	return resolveProjectIDAndNameWithDaemonHeaders(
-		daemonAPI{ctx: ctx, client: client, baseURL: baseURL}, startPath, headers, selectedDaemon)
+		daemonAPI{ctx: ctx, client: client, baseURL: baseURL}, startPath, headers)
 }
 
 func resolveProjectIDAndNameWithDaemonHeaders(
 	a daemonAPI,
 	startPath string,
 	headers map[string]string,
-	selectedDaemon *string,
 ) (int64, string, error) {
 	body, repair, err := buildResolveRequest(a.ctx, startPath)
 	if err != nil {
@@ -494,9 +492,6 @@ func resolveProjectIDAndNameWithDaemonHeaders(
 	}
 	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 		return 0, "", err
-	}
-	if selectedDaemon != nil && response.HTTPResponse != nil {
-		*selectedDaemon = response.HTTPResponse.Header.Get("X-Kata-Web-Daemon")
 	}
 	bs := response.Body
 	var b struct {
