@@ -78,7 +78,8 @@ func TestUIReplacesSameVersionPlaceholderDaemon(t *testing.T) {
 func TestUICommandRejectsCompilationStub(t *testing.T) {
 	oldPrepare := prepareWebUIForCommand
 	oldValidate := validateWebUIAssetsForCommand
-	prepareWebUIForCommand = func(context.Context, client.PrepareWebUIOptions) (client.PreparedWebUI, error) {
+	prepareWebUIForCommand = func(_ context.Context, opts client.PrepareWebUIOptions) (client.PreparedWebUI, error) {
+		assert.False(t, opts.RequireWebAssets)
 		return client.PreparedWebUI{}, nil
 	}
 	validateWebUIAssetsForCommand = web.ValidateEmbeddedRelease
