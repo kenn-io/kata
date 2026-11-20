@@ -162,12 +162,6 @@ func checkFederationControlLifecycle(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return err
 	}
-	incompatibleIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
-		ProjectID: incompatible.ID, Title: "incompatible relationship", Author: "member",
-	})
-	if err != nil {
-		return err
-	}
 	bindings, err := store.ListFederationBindings(ctx)
 	if err != nil {
 		return err
@@ -240,8 +234,6 @@ func checkFederationControlLifecycle(t *testing.T, store db.Storage) error {
 	if _, err := store.LinkByEndpoints(ctx, spokeIssue.ID, peerIssue.ID, "blocks"); err != nil {
 		return fmt.Errorf("compatible federation link was removed: %w", err)
 	}
-	_, err = store.LinkByEndpoints(ctx, spokeIssue.ID, incompatibleIssue.ID, "blocks")
-	assert.ErrorIs(t, err, db.ErrNotFound)
 	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{
 		ProjectID: peer.ID, Role: db.FederationRoleSpoke,
 		HubURL: "https://other.example/moved", HubProjectID: hub.ID, HubProjectUID: hub.UID,

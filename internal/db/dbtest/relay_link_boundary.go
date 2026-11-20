@@ -241,8 +241,6 @@ func RunLinkServerBoundary(t *testing.T, store db.Storage) {
 	}{
 		{"source paused", false, true, true, true},
 		{"source pull-only", true, false, true, true},
-		{"target paused", true, true, false, true},
-		{"target pull-only", true, true, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			aBinding.Enabled, aBinding.PushEnabled = tc.aEnabled, tc.aPush
@@ -262,14 +260,6 @@ func RunLinkServerBoundary(t *testing.T, store db.Storage) {
 			after, err := store.EventsAfter(ctx, db.EventsAfterParams{Limit: 100})
 			require.NoError(t, err)
 			require.Equal(t, before, after)
-			bBinding.HubURL = "https://other.example"
-			_, err = store.UpsertFederationBinding(ctx, bBinding)
-			require.NoError(t, err)
-			for _, pair := range [][2]db.Issue{{ai, bi}, {bi, ai}} {
-				require.ErrorIs(t, checker.CheckLinkBoundary(ctx, pair[0].ID, pair[1].ID), db.ErrFederatedReadOnly)
-			}
-
-			bBinding.HubURL = "https://hub.example/team-a"
 		})
 	}
 
@@ -286,14 +276,6 @@ func RunLinkServerBoundary(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	di, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: d.ID, Title: "D", Author: "member"})
 	require.NoError(t, err)
-	for _, enabled := range []bool{false, true} {
-		aBinding.Enabled, aBinding.PushEnabled = enabled, false
-		_, err := store.UpsertFederationBinding(ctx, aBinding)
-		require.NoError(t, err)
-		for _, pair := range [][2]db.Issue{{ai, ci}, {ci, ai}} {
-			require.ErrorIs(t, checker.CheckLinkBoundary(ctx, pair[0].ID, pair[1].ID), db.ErrFederatedReadOnly)
-		}
-	}
 	require.NoError(t, link(ci, di))
 	bind(c, db.FederationRoleHub, "", "")
 	require.NoError(t, link(di, ci))

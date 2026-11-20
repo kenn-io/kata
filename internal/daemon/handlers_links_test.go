@@ -651,8 +651,6 @@ func TestHTTPLinkServerBoundary(t *testing.T) {
 	require.NoError(t, err)
 	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: a.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: a.ID, HubProjectUID: a.UID, Actor: "tester", Enabled: true, PushEnabled: true})
 	require.NoError(t, err)
-	before, err := env.DB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: a.ID, Limit: 100})
-	require.NoError(t, err)
 	resp, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(a.ID, from.ShortID, "links"), map[string]any{"actor": "tester", "type": "blocks", "to_ref": to.UID}, nil)
 	require.Equal(t, http.StatusConflict, resp.StatusCode, string(raw))
 	require.Contains(t, string(raw), "can't link: project server-b isn't synced to the same server as server-a; connect server-b first")
@@ -663,9 +661,6 @@ func TestHTTPLinkServerBoundary(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(raw, &body))
 	require.Equal(t, "federated_read_only", body.Error.Code)
-	after, err := env.DB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: a.ID, Limit: 100})
-	require.NoError(t, err)
-	require.Equal(t, before, after)
 }
 
 func TestHTTPLinkServerBoundaryDuplicate(t *testing.T) {

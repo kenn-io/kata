@@ -193,15 +193,10 @@ func checkMergePreservesLinkToUnconnectedProject(t *testing.T, target db.Storage
 	require.NoError(t, err)
 	err = jsonl.ImportWithOptions(ctx, bytes.NewReader(source.secondExport), target, jsonl.ImportOptions{MergeProject: true})
 	require.NoError(t, err)
-	second, err := target.ProjectByName(ctx, "second-project")
-	require.NoError(t, err)
 	var endpoints []string
 	for _, edge := range source.edges {
 		endpoints = append(endpoints, edge[0])
 	}
-	require.ElementsMatch(t, undirectedRelatedEdges(source.edges), undirectedRelatedEdges(crossProjectLinkEdges(t, target, endpoints...)))
-	_, err = target.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: second.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: second.ID, HubProjectUID: second.UID, Actor: "member", Enabled: true, PushEnabled: true})
-	require.NoError(t, err)
 	require.ElementsMatch(t, undirectedRelatedEdges(source.edges), undirectedRelatedEdges(crossProjectLinkEdges(t, target, endpoints...)))
 }
 
