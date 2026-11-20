@@ -368,6 +368,17 @@ func DirectParentRemovals(ctx context.Context, tx federationHistoryQuery, events
 	return currentParentRemovals(ctx, tx, ordered)
 }
 
+// ValidateRelayParentRemovals checks new submissions against the current parent.
+// An upstream delivery has already passed that check at its source and may
+// reach a replica whose parent has since changed.
+func ValidateRelayParentRemovals(ctx context.Context, tx federationHistoryQuery, events []RemoteEvent, upstream bool) error {
+	if upstream {
+		return nil
+	}
+	_, err := DirectParentRemovals(ctx, tx, events)
+	return err
+}
+
 func currentParentRemovals(ctx context.Context, tx federationHistoryQuery, ordered []FoldEvent) (map[string][]string, error) {
 	parents := map[string]string{}
 	clocks := map[string]FoldClock{}

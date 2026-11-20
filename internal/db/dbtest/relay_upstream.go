@@ -80,3 +80,55 @@ func RunRelayUpstreamLocalAuthority(t *testing.T, store db.Storage) {
 		})
 	}
 }
+
+func RunRelayUpstreamStaleParentRemoval(t *testing.T, store db.Storage) {
+	for _, hasLocalParent := range []bool{false, true} {
+		t.Run(map[bool]string{false: "locally removed", true: "locally replaced"}[hasLocalParent], func(t *testing.T) {
+			ctx := t.Context()
+			project, err := store.CreateProject(ctx, "relay-parent-"+map[bool]string{false: "removed", true: "replaced"}[hasLocalParent])
+			require.NoError(t, err)
+			old, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Old parent", Author: "member"})
+			require.NoError(t, err)
+			local, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Local parent", Author: "member"})
+			require.NoError(t, err)
+			next, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "New parent", Author: "member"})
+			require.NoError(t, err)
+			params := db.CreateIssueParams{ProjectID: project.ID, Title: "Child", Author: "member", Links: []db.InitialLink{{Type: "parent", ToNumber: old.ID}}}
+			child, _, err := store.CreateIssue(ctx, params)
+			require.NoError(t, err)
+			require.Equal(t, []string{old.UID}, linkTargetUIDs(t, store, child.ID))
+			edit := db.EditIssueAtomicParams{IssueID: child.ID, Actor: "member", RemoveParent: &old.ID}
+			if hasLocalParent {
+				edit.RemoveParent, edit.SetParent = nil, &local.ID
+			}
+			_, err = store.EditIssueAtomic(ctx, edit)
+			require.NoError(t, err)
+			if hasLocalParent {
+				require.Equal(t, []string{local.UID}, linkTargetUIDs(t, store, child.ID))
+			} else {
+				require.Empty(t, linkTargetUIDs(t, store, child.ID))
+			}
+			rootUID := "00000000000000000000000002"
+			public, private, err := ed25519.GenerateKey(nil)
+			require.NoError(t, err)
+			pin := db.RootKeyPin{ProjectUID: project.UID, AuthorityUID: rootUID, KeyID: db.RootPublicKeyID(public), PublicKey: public}
+			require.NoError(t, store.PinRootAuthority(ctx, pin))
+			_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: project.UID, Actor: "member", Enabled: true, PushEnabled: true})
+			require.NoError(t, err)
+			binding, err := uid.New()
+			require.NoError(t, err)
+			_, err = store.SetRelayBindingConfig(ctx, project.ID, db.RelayBindingConfig{ProtocolVersion: db.RelayProtocolVersion, BindingUID: binding, AuthorityUID: rootUID, UpstreamInstanceUID: rootUID, HubPath: []string{rootUID, store.InstanceUID()}, LocalActor: "member", ServeDownstream: true, ResetEpoch: 1})
+			require.NoError(t, err)
+			root := &rootResetFixture{t: t, project: project, pin: pin, private: private, rootUID: rootUID, relayUID: store.InstanceUID(), binding: binding}
+			at := time.Now().Add(time.Hour).UnixMilli()
+			unlink := newRemoteEvent(t, project, &child.UID, "issue.unlinked", "member", rootUID, at, jsontext.Value(`{"type":"parent","from_uid":"`+child.UID+`","to_uid":"`+old.UID+`"}`))
+			replacement := newRemoteEvent(t, project, &child.UID, "issue.links_changed", "member", rootUID, at+1, jsontext.Value(`{"parent_set_uid":"`+next.UID+`"}`))
+			for i, event := range []db.RemoteEvent{unlink, replacement} {
+				body, err := db.EncodeRelaySourceEvent(event)
+				require.NoError(t, err)
+				root.deliver(ctx, store, db.RelayStreamEvent, 1, int64(i+1), event.EventUID, event.ContentHash, body)
+			}
+			require.Equal(t, []string{next.UID}, linkTargetUIDs(t, store, child.ID))
+		})
+	}
+}
