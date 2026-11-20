@@ -426,7 +426,7 @@ func syncDirectSpoke(
 		}
 		return recordFederationSyncErrorAt(ctx, store, binding.ProjectID, pullErr, at)
 	}
-	if !resumePull && hubHoldsPull(ctx, binding.ProjectID, binding.PullCursorEventID) {
+	if !resumePull && hubHoldsPull(ctx, binding) {
 		// A poll at this cursor is out at the hub, which answers it as soon as
 		// anything new is visible, and that answer wakes the runner. An
 		// ordinary poll now would return an empty page.
@@ -1272,6 +1272,7 @@ func (r *Runner) runOnce(
 			r.longPolls.start(spoke)
 		}
 		if spokeErr != nil {
+			r.longPolls.stop(spoke.binding.ProjectID)
 			errs = append(errs, spokeErr)
 			// A turn that failed anywhere, including its claim retries, waits
 			// for the interval like a drained project; only a clean turn that
@@ -1788,12 +1789,14 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 		pending = remaining
 		if len(pending) > 0 {
 			// A budgeted turn left deliveries pending. Serve those spokes again
-			// now instead of after an interval; a tick or wake that has already
-			// arrived widens the pass to every spoke.
+			// now instead of after an interval; a tick, wake, or held-poll
+			// answer that has already arrived widens the pass to every spoke.
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-ticker.C:
+				pending = nil
+			case <-polls.changed:
 				pending = nil
 			case <-r.Wake:
 				pending = nil

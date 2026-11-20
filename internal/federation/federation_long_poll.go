@@ -82,8 +82,10 @@ type hubLongPolls struct {
 type hubLongPoll struct {
 	cancel context.CancelFunc
 	done   chan struct{}
-	// held is the cursor of an in-flight poll the hub is known to hold, or -1.
-	held int64
+	// held is the cursor of an in-flight poll the hub is known to hold, or -1,
+	// and heldAt is the hub address that poll went to.
+	held   int64
+	heldAt string
 }
 
 func newHubLongPolls(
@@ -111,17 +113,18 @@ func withHubLongPolls(ctx context.Context, polls *hubLongPolls) context.Context 
 	return context.WithValue(ctx, hubLongPollsContextKey{}, polls)
 }
 
-// hubHoldsPull reports whether the hub is holding this binding's poll at
-// cursor, so an ordinary poll now would return an empty page.
-func hubHoldsPull(ctx context.Context, projectID, cursor int64) bool {
+// hubHoldsPull reports whether the binding's hub address is holding its poll
+// at the binding's cursor, so an ordinary poll now would return an empty page.
+// A poll held at an address the binding has since moved from does not count.
+func hubHoldsPull(ctx context.Context, binding db.FederationBinding) bool {
 	polls, _ := ctx.Value(hubLongPollsContextKey{}).(*hubLongPolls)
 	if polls == nil {
 		return false
 	}
 	polls.mu.Lock()
 	defer polls.mu.Unlock()
-	poll := polls.polls[projectID]
-	return poll != nil && poll.held >= 0 && poll.held == cursor
+	poll := polls.polls[binding.ProjectID]
+	return poll != nil && poll.held >= 0 && poll.held == binding.PullCursorEventID && poll.heldAt == binding.HubURL
 }
 
 // passCompleted releases polls that are waiting for the runner to apply what
@@ -139,11 +142,11 @@ func (p *hubLongPolls) nextPass() <-chan struct{} {
 	return p.passDone
 }
 
-func (p *hubLongPolls) setHeld(projectID, cursor int64) {
+func (p *hubLongPolls) setHeld(projectID, cursor int64, hubURL string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if poll := p.polls[projectID]; poll != nil {
-		poll.held = cursor
+		poll.held, poll.heldAt = cursor, hubURL
 	}
 }
 
@@ -179,6 +182,22 @@ func (p *hubLongPolls) reconcile(spokes []activeSpokeBinding) {
 			poll.cancel()
 			delete(p.polls, projectID)
 		}
+	}
+}
+
+// stop ends the binding's watcher after a pass for it failed. A held poll
+// answers at once while the binding has unapplied work, so a watcher kept
+// through failing passes would start a new pass after every failure. The
+// interval retries the binding, and its next clean pass starts a new watcher.
+func (p *hubLongPolls) stop(projectID int64) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if poll := p.polls[projectID]; poll != nil {
+		poll.cancel()
+		delete(p.polls, projectID)
 	}
 }
 
@@ -269,10 +288,10 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64) {
 		cursor := binding.PullCursorEventID
 		// Interval passes skip this binding's pull while the poll is out. A
 		// hub that cannot hold it answers at once, which ends the skip.
-		p.setHeld(projectID, cursor)
+		p.setHeld(projectID, cursor, binding.HubURL)
 		started := time.Now()
 		body, advertised, err := client.longPollProjectEvents(ctx, credential.HubProjectID, cursor, wait)
-		p.setHeld(projectID, -1)
+		p.setHeld(projectID, -1, "")
 		switch {
 		case ctx.Err() != nil:
 			return
@@ -298,12 +317,15 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64) {
 		backoff = p.interval
 		if pollChanged(body, cursor) {
 			supported = advertised
+			// Take the next pass before waking the runner, so a pass that
+			// finishes in between still releases this watcher.
+			applied := p.nextPass()
 			p.signal()
 			// Let the runner apply the page before polling from the new cursor.
 			select {
 			case <-ctx.Done():
 				return
-			case <-p.nextPass():
+			case <-applied:
 			case <-time.After(p.interval):
 			}
 			continue
