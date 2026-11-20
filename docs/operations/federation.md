@@ -649,8 +649,9 @@ turn, so queued lease requests and the pull and push wait for the next
 attempt. A success clears the schedule. A wait never shortens the sync
 interval, and a wake from a local write does not bring a waiting project
 forward. A refused move of one pushed issue, `403
-federation_project_not_enrolled`, does not count as a refused credential.
-Other projects keep syncing.
+federation_project_not_enrolled`, does not count as a refused credential,
+and neither does a `403` to a queued lease request, which rejects that lease
+only. Other projects keep syncing.
 
 `kata federation status` shows a waiting project's reason, the status code
 that set it, failure count, and next attempt, for example `sync retry: hub
@@ -659,6 +660,20 @@ refused the credential (403) on 5 attempts; next attempt
 schedule lives in the daemon running the federation runner, so restarting it
 makes a fresh attempt for every project, and with PostgreSQL only the runner
 leader reports it.
+
+To end a refusal without waiting, give the spoke a credential the hub accepts;
+the next pass then retries at once:
+
+- A manually joined spoke enrolls again on the hub and runs the join command
+  it prints ([Spoke setup](#spoke-setup)).
+- A spoke from a `[[federation.project]]` mapping runs
+  `kata federation leave <spoke-project>` and restarts the daemon
+  ([Config-driven enrollment](#config-driven-enrollment)).
+- A spoke with a credential provider waits for the provider's approval, which
+  `kata federation status` shows
+  ([External credential providers](#external-credential-providers)).
+- A relay's downstream enrollment is issued as described in
+  [Credential-bound relay transport](#credential-bound-relay-transport).
 
 ### Relay checkpoint capacity
 

@@ -1601,13 +1601,10 @@ func retryPendingClaim(
 	if err != nil {
 		if statusErr, ok := errors.AsType[*HubStatusError](err); ok {
 			if statusErr.StatusCode == http.StatusForbidden || statusErr.StatusCode == http.StatusConflict {
-				rejectErr := store.RejectPendingClaim(ctx, pending.RequestUID, statusErr.Error(), now)
-				if statusErr.StatusCode == http.StatusForbidden && federationHubErrorCode(statusErr.Body) == hubCredentialRefusedCode {
-					// The hub refused the credential, not this lease. Keep its
-					// answer so the turn backs off as refused.
-					return errors.Join(err, rejectErr)
-				}
-				return rejectErr
+				// A 403 here can deny one lease, such as for an issue the hub
+				// moved out of this enrollment's projects, so it does not
+				// refuse the binding. The pull reports a refused credential.
+				return store.RejectPendingClaim(ctx, pending.RequestUID, statusErr.Error(), now)
 			}
 		}
 		if markErr := store.MarkPendingClaimAttempt(ctx, pending.RequestUID, err.Error(), now); markErr != nil {

@@ -201,10 +201,6 @@ func (s *SyncRetries) reset() {
 	clear(s.states)
 }
 
-// hubCredentialRefusedCode is the error code a hub sends when it refuses the
-// spoke's credential.
-const hubCredentialRefusedCode = "auth_invalid"
-
 // classifySyncRetry finds the hub response that decides a failed turn's retry
 // schedule. A refused credential outranks a throttled request because only an
 // operator or hub change can clear it. The longest Retry-After hint from any
