@@ -165,6 +165,7 @@ func runMoveBatch(cmd *cobra.Command, args []string, refsFrom string) error {
 	for _, indexes := range groups {
 		conflict := false
 		for _, i := range indexes[1:] {
+			//nolint:nilaway // Group indexes only reference non-nil prepared rows.
 			conflict = conflict || prepared[i].target.ID != prepared[indexes[0]].target.ID
 		}
 		for n, i := range indexes {
