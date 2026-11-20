@@ -12,18 +12,18 @@ var embeddedDistribution embed.FS
 
 // NewEmbeddedHandler serves the distribution compiled into the Kata binary.
 func NewEmbeddedHandler() (http.Handler, error) {
-	files, err := fs.Sub(embeddedDistribution, "dist")
+	files, err := embeddedFiles()
 	if err != nil {
-		return nil, fmt.Errorf("open embedded web distribution: %w", err)
+		return nil, err
 	}
 	return NewHandler(files)
 }
 
 // NewEmbeddedHandlerWithReleaseStatus reports whether the embedded assets are a release distribution.
 func NewEmbeddedHandlerWithReleaseStatus() (http.Handler, bool, error) {
-	files, err := fs.Sub(embeddedDistribution, "dist")
+	files, err := embeddedFiles()
 	if err != nil {
-		return nil, false, fmt.Errorf("open embedded web distribution: %w", err)
+		return nil, false, err
 	}
 	return newHandlerWithReleaseStatus(files)
 }
@@ -40,9 +40,17 @@ func newHandlerWithReleaseStatus(files fs.FS) (http.Handler, bool, error) {
 // distributions. Installers and release smoke tests call this through the
 // hidden CLI verifier after the final binary has been assembled.
 func ValidateEmbeddedRelease() error {
-	files, err := fs.Sub(embeddedDistribution, "dist")
+	files, err := embeddedFiles()
 	if err != nil {
-		return fmt.Errorf("open embedded web distribution: %w", err)
+		return err
 	}
 	return validateReleaseDistribution(files)
+}
+
+func embeddedFiles() (fs.FS, error) {
+	files, err := fs.Sub(embeddedDistribution, "dist")
+	if err != nil {
+		return nil, fmt.Errorf("open embedded web distribution: %w", err)
+	}
+	return files, nil
 }

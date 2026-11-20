@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -92,6 +93,8 @@ var ErrDaemonNotReplaceable = errors.New("left the running daemon in place")
 // RestartLocalDaemon is installed by the CLI to replace a capable daemon in
 // its own environment. The caller holds the start lock through readiness.
 var RestartLocalDaemon func(context.Context, *daemonruntime.Namespace, kitdaemon.RuntimeRecord) (kitdaemon.RuntimeRecord, error)
+
+type requireWebAssetsKey struct{}
 
 var (
 	currentVersionForEnsure      = func() string { return version.Version }
@@ -245,6 +248,9 @@ func waitForSupervisedDaemon(
 			running = runningDaemonForLive(found.Daemon)
 			return true, nil
 		case daemonScanStale:
+			if placeholderDaemon(ctx, found.Daemon) {
+				return false, fmt.Errorf("%w: the daemon has no web UI; restart it with your service manager (autostart = false)", ErrDaemonNotReplaceable)
+			}
 			return false, externallyManagedVersionError(found.Daemon.Info)
 		}
 		return false, nil
@@ -448,7 +454,7 @@ func discoverForEnsureUsing(ctx context.Context, dataDir string, scan liveDaemon
 			}
 			return ensureDiscovery{}, err
 		}
-		if daemonVersionCheckSkipped() || daemonVersionCompatible(candidate.Info) {
+		if daemonVersionCheckSkipped() || daemonCompatible(ctx, candidate) {
 			return ensureDiscovery{Outcome: daemonScanCompatible, Daemon: candidate}, nil
 		}
 		if stale.Outcome == daemonScanNone {
@@ -476,6 +482,15 @@ func daemonVersionCompatible(info PingInfo) bool {
 	return info.Service == daemonServiceName && info.Version == currentVersionForEnsure()
 }
 
+func placeholderDaemon(ctx context.Context, candidate liveDaemon) bool {
+	required, _ := ctx.Value(requireWebAssetsKey{}).(bool)
+	return required && daemonVersionCompatible(candidate.Info) && slices.Contains(strings.Split(candidate.Record.Metadata["web_capabilities"], ","), daemonruntime.WebCapabilityPlaceholderAssets)
+}
+
+func daemonCompatible(ctx context.Context, candidate liveDaemon) bool {
+	return daemonVersionCompatible(candidate.Info) && !placeholderDaemon(ctx, candidate)
+}
+
 func stopRunningDaemons(ctx context.Context, dataDir, dbhash string) error {
 	var targets []kitdaemon.RuntimeRecord
 	var unreachable error
@@ -487,7 +502,7 @@ func stopRunningDaemons(ctx context.Context, dataDir, dbhash string) error {
 			}
 			return err
 		}
-		if candidate.Info.Service != daemonServiceName || daemonVersionCompatible(candidate.Info) {
+		if candidate.Info.Service != daemonServiceName || daemonCompatible(ctx, candidate) {
 			continue
 		}
 		address := candidate.Record.Endpoint().ConfigAddress()

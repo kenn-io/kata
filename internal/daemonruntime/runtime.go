@@ -17,6 +17,9 @@ const RuntimeRestartMetadataKey = "restart_signal"
 // RuntimeRestartExecutableKey marks a daemon that accepts an installed-executable restart request.
 const RuntimeRestartExecutableKey = "restart_executable"
 
+// WebCapabilityPlaceholderAssets marks a daemon without release web assets.
+const WebCapabilityPlaceholderAssets = "placeholder-assets"
+
 // RuntimeRestartReplyKey names the restart request a replacement daemon was started for.
 const RuntimeRestartReplyKey = "restart_reply"
 

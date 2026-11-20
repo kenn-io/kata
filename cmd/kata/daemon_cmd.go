@@ -1492,7 +1492,7 @@ func runDaemonProcess(
 		return fmt.Errorf("build embedded web handler: %w", err)
 	}
 	if !releaseAssets {
-		webCapabilities = append(webCapabilities, "placeholder-assets")
+		webCapabilities = append(webCapabilities, daemonruntime.WebCapabilityPlaceholderAssets)
 	}
 	webRuntime, err := daemon.NewWebRuntime(daemon.WebRuntimeOptions{
 		Origin:       webEndpoint.Origin,

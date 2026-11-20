@@ -46,9 +46,6 @@ All notable changes to kata, grouped by release. Versioned releases start with
   replacement queued by v0.19.0 through v0.23.0 can sync after the hub upgrade;
   an already-quarantined batch requires an [explicit retry](operations/federation.md#other-validation-quarantines).
 
-**Improvements**
-
-- `kata version` reports the release when Kata is installed with `go install` at a tag.
 - Let a service manager own the local daemon. Set top-level `autostart = false`
   in `config.toml`, and Kata commands, including `kata daemon recover`, wait up
   to 30 seconds for the supervised daemon instead of starting their own. See
@@ -328,6 +325,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Move up to 5,000 issues at once with `kata move <ref>... <project>` or
   `--refs-from`. Each issue moves alone and gets its own result, so one refusal
   doesn't stop the rest.
+
+**Improvements**
+
+- `kata version` reports the release when Kata is installed with `go install` at a tag.
 
 ## 0.23.0
 <small>2026-11-09</small>

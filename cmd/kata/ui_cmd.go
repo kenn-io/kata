@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/client"
+	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/uid"
 	"go.kenn.io/kata/internal/web"
 	kataclient "go.kenn.io/kata/pkg/client"
@@ -36,9 +37,11 @@ func newUICmd() *cobra.Command {
 			if ctx == nil {
 				ctx = context.Background()
 			}
+			assetsErr := validateWebUIAssetsForCommand()
 			prepared, err := prepareWebUIForCommand(ctx, client.PrepareWebUIOptions{
-				WorkspaceStart: workspaceStartForRemote(),
-				DaemonName:     flags.Daemon,
+				WorkspaceStart:   workspaceStartForRemote(),
+				DaemonName:       flags.Daemon,
+				RequireWebAssets: assetsErr == nil,
 			})
 			if err != nil {
 				if flags.Daemon != "" || errors.Is(err, client.ErrRemoteUnavailable) ||
@@ -48,15 +51,12 @@ func newUICmd() *cobra.Command {
 				return err
 			}
 			if !prepared.ConfiguredRemote {
-				if err := validateWebUIAssetsForCommand(); err != nil {
-					return fmt.Errorf("kata ui is unavailable in this module-source build; install a release binary or build from a clone with `make install`: %w", err)
+				if assetsErr != nil {
+					return fmt.Errorf("kata ui is unavailable in this module-source build; install a release binary or build from a clone with `make install`: %w", assetsErr)
 				}
 			}
-			if slices.Contains(prepared.Runtime.Capabilities, "placeholder-assets") {
-				if prepared.LocalProfileHome != "" {
-					return fmt.Errorf("the running daemon was built without the web UI; set KATA_HOME to %q and run `kata daemon restart`", prepared.LocalProfileHome)
-				}
-				return errors.New("the running daemon was built without the web UI; run `kata daemon restart`")
+			if slices.Contains(prepared.Runtime.Capabilities, daemonruntime.WebCapabilityPlaceholderAssets) {
+				return errors.New("the running daemon was built without the web UI; restart it using its original environment")
 			}
 			returnPath := "/kata"
 			if len(args) == 1 {

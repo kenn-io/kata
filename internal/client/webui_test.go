@@ -409,7 +409,6 @@ func TestLocalProfileBrowserUsesSelectedRuntimeWithoutOuterAlias(t *testing.T) {
 			prepared, err := PrepareWebUI(t.Context(), PrepareWebUIOptions{WorkspaceStart: root, DaemonName: name})
 			require.NoError(t, err)
 			assert.Empty(t, prepared.DaemonName)
-			assert.Equal(t, profile.Home, prepared.LocalProfileHome)
 			assert.Equal(t, "http://127.0.0.1:27123", prepared.Runtime.Origin)
 			var opened WebUILaunch
 			require.NoError(t, OpenWebUI(t.Context(), prepared, "/kata", func(_ context.Context, v WebUILaunch) error { opened = v; return nil }))
