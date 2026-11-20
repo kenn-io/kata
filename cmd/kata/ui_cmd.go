@@ -6,12 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/client"
-	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/uid"
 	"go.kenn.io/kata/internal/web"
 	kataclient "go.kenn.io/kata/pkg/client"
@@ -54,9 +52,6 @@ func newUICmd() *cobra.Command {
 				if assetsErr != nil {
 					return fmt.Errorf("kata ui is unavailable in this module-source build; install a release binary or build from a clone with `make install`: %w", assetsErr)
 				}
-			}
-			if slices.Contains(prepared.Runtime.Capabilities, daemonruntime.WebCapabilityPlaceholderAssets) {
-				return errors.New("the running daemon was built without the web UI; restart it using its original environment")
 			}
 			returnPath := "/kata"
 			if len(args) == 1 {

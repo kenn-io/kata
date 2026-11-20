@@ -114,16 +114,6 @@ func TestUICommandRejectsCompilationStub(t *testing.T) {
 	assert.Contains(t, err.Error(), "release binary")
 }
 
-func TestUICommandRejectsDaemonWithPlaceholderAssets(t *testing.T) {
-	stubUICommandLaunch(t, client.PreparedWebUI{
-		Runtime: client.DiscoveredWebRuntime{Capabilities: []string{"placeholder-assets"}},
-	})
-
-	_, err := runCmdOutput(t, nil, "--daemon", "example-local", "ui")
-	require.ErrorContains(t, err, "restart it using its original environment")
-	assert.Empty(t, openedUIURL)
-}
-
 func TestUICommandNoArgOpensInbox(t *testing.T) {
 	stubUICommandLaunch(t, client.PreparedWebUI{
 		BaseURL:          "https://daemon.example",

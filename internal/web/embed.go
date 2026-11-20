@@ -12,45 +12,35 @@ var embeddedDistribution embed.FS
 
 // NewEmbeddedHandler serves the distribution compiled into the Kata binary.
 func NewEmbeddedHandler() (http.Handler, error) {
-	files, err := embeddedFiles()
-	if err != nil {
-		return nil, err
-	}
-	return NewHandler(files)
+	h, _, err := NewEmbeddedHandlerWithReleaseStatus()
+	return h, err
 }
 
-// NewEmbeddedHandlerWithReleaseStatus reports whether the embedded assets are a release distribution.
+// NewEmbeddedHandlerWithReleaseStatus also reports whether the embedded assets are a release distribution.
 func NewEmbeddedHandlerWithReleaseStatus() (http.Handler, bool, error) {
-	files, err := embeddedFiles()
+	files, err := fs.Sub(embeddedDistribution, "dist")
 	if err != nil {
-		return nil, false, err
+		return nil, false, fmt.Errorf("open embedded web distribution: %w", err)
 	}
 	return newHandlerWithReleaseStatus(files)
 }
 
 func newHandlerWithReleaseStatus(files fs.FS) (http.Handler, bool, error) {
-	handler, err := newHandler(files)
+	served, err := NewHandler(files)
 	if err != nil {
 		return nil, false, err
 	}
-	return handler, validateReleaseCatalog(files, handler.index, handler.assets) == nil, nil
+	h := served.(*handler)
+	return h, validateReleaseCatalog(files, h.index, h.assets) == nil, nil
 }
 
 // ValidateEmbeddedRelease rejects the compilation stub and incomplete release
 // distributions. Installers and release smoke tests call this through the
 // hidden CLI verifier after the final binary has been assembled.
 func ValidateEmbeddedRelease() error {
-	files, err := embeddedFiles()
-	if err != nil {
-		return err
-	}
-	return validateReleaseDistribution(files)
-}
-
-func embeddedFiles() (fs.FS, error) {
 	files, err := fs.Sub(embeddedDistribution, "dist")
 	if err != nil {
-		return nil, fmt.Errorf("open embedded web distribution: %w", err)
+		return fmt.Errorf("open embedded web distribution: %w", err)
 	}
-	return files, nil
+	return validateReleaseDistribution(files)
 }

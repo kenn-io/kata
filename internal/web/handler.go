@@ -48,14 +48,6 @@ type handler struct {
 
 // NewHandler constructs the hardened static and navigation-fallback handler.
 func NewHandler(files fs.FS) (http.Handler, error) {
-	h, err := newHandler(files)
-	if err != nil {
-		return nil, err
-	}
-	return h, nil
-}
-
-func newHandler(files fs.FS) (*handler, error) {
 	index, err := fs.ReadFile(files, "index.html")
 	if err != nil {
 		return nil, fmt.Errorf("read embedded web index: %w", err)
