@@ -1657,7 +1657,7 @@ func (d *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.
 			}
 			refs = append(refs, replyIssues...)
 		}
-		peers, err := db.DirectLinkAdditionPeers(db.FoldEvent{Type: event.Type, UID: event.EventUID, Payload: event.Payload})
+		peers, err := db.DirectLinkAdditionPeers(db.FoldEvent{Type: event.Type, UID: event.EventUID, IssueUID: primary, Payload: event.Payload})
 		if err != nil {
 			return err
 		}

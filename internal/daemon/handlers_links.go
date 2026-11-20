@@ -102,7 +102,6 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 		if err := requireFederatedIssueClaim(ctx, cfg, from.ProjectID, from, actor); err != nil {
 			return nil, err
 		}
-
 		// Reject self-link before mutating state. The DB will catch this anyway,
 		// but in the --replace path we delete the existing parent before we'd
 		// see that error from CreateLinkAndEvent — leaving us with an
@@ -113,10 +112,6 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 		if from.ID == to.ID {
 			return nil, api.NewError(400, "validation", "cannot link an issue to itself", "", nil)
 		}
-		if err := checkLinkBoundaryBeforeMutation(ctx, cfg.DB, from.ID, to.ID); err != nil {
-			return nil, err
-		}
-
 		// Storage endpoints: canonical (from < to) for related; otherwise as-is.
 		// canonicalFrom/canonicalTo match the Link row's actual columns
 		// and feed the LinkOut wire projection (so the response shows the
@@ -140,6 +135,9 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 			return mutationLinkResponse(from, existing, canonicalFromPeer, canonicalToPeer, nil, false), nil
 		} else if !errors.Is(lookupErr, db.ErrNotFound) {
 			return nil, internalAPIError(lookupErr)
+		}
+		if err := checkLinkBoundaryBeforeMutation(ctx, cfg.DB, from.ID, to.ID); err != nil {
+			return nil, err
 		}
 		if err := requireFederatedIssueClaim(ctx, cfg, to.ProjectID, to, actor); err != nil {
 			return nil, err

@@ -300,6 +300,19 @@ var (
 	ErrFederationProjectNotEmpty = errors.New("federation attachment requires an empty project")
 )
 
+// LinkServerMismatchError identifies projects that cannot sync a link.
+type LinkServerMismatchError struct {
+	From, To string
+}
+
+func (e *LinkServerMismatchError) Error() string {
+	return fmt.Sprintf("can't link: connect project %s to the same server as %s first", e.To, e.From)
+}
+
+func (e *LinkServerMismatchError) Unwrap() error {
+	return ErrFederatedReadOnly
+}
+
 // LinkTargetNotFoundError carries the requested issue row id (globally unique
 // since storage v16) when an add-edge or set-parent operation references an
 // issue that doesn't exist. Wraps ErrNotFound so existing errors.Is checks

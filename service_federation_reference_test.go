@@ -159,6 +159,27 @@ func TestDirectPushWithProjectScopedActors(t *testing.T) {
 				require.Equal(t, original[i].Actor, event.Actor)
 			}
 
+			t.Run("direct-link-with-different-actors", func(t *testing.T) {
+				directChild, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: child.ProjectID, Title: "Direct child", Author: "worker"})
+				require.NoError(t, err)
+				require.NoError(t, syncProject(0))
+				_, linked, err := spoke.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: directChild.ID, ToIssueID: local.ID, Type: "parent", Author: "worker"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: directChild.ID, FromShortID: directChild.ShortID, FromUID: directChild.UID, ToShortID: local.ShortID, ToUID: local.UID, Actor: "worker"})
+				require.NoError(t, err)
+				later, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: child.ProjectID, Title: "Later direct link work", Author: "worker"})
+				require.NoError(t, err)
+				require.NoError(t, syncProject(0))
+				hubChild, err := hub.store.IssueByUID(ctx, directChild.UID, db.IncludeDeletedNo)
+				require.NoError(t, err)
+				parent, err := hub.store.ParentOf(ctx, hubChild.ID)
+				require.NoError(t, err)
+				require.Equal(t, peer.ID, parent.ToIssueID)
+				_, err = hub.store.IssueByUID(ctx, later.UID, db.IncludeDeletedNo)
+				require.NoError(t, err)
+				events, err := hub.store.EventsByUIDs(ctx, projects[0].ID, []string{linked.UID})
+				require.NoError(t, err)
+				require.Len(t, events, 1)
+			})
+
 			t.Run("delete-peer-before-link-push", func(t *testing.T) {
 				_, linkedEvent, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
 					ProjectID: child.ProjectID, Title: "Queued link", Author: "worker",
