@@ -257,6 +257,9 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 	params.Events = []db.FederationIngestEvent{{SourceEventID: 3, Event: newRemoteEvent(t, route, &mixedChild.UID, "issue.links_changed", "worker", origin, at+1, payload)}}
 	_, err = store.IngestFederationEvents(ctx, params)
 	require.NoError(t, err)
+	parent, err = store.ParentOf(ctx, mixedChild.ID)
+	require.NoError(t, err)
+	require.Equal(t, peer.ID, parent.ToIssueID)
 	combinedPayload, err := json.Marshal(map[string]any{"parent_removed_uid": peer.UID, "related_added_uids": []string{peer.UID}})
 	require.NoError(t, err)
 	combined := newRemoteEvent(t, route, &mixedChild.UID, "issue.links_changed", "worker", origin, at+2, combinedPayload)

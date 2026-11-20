@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
-	"strings"
+	"regexp"
 	"sync/atomic"
 	"testing"
 
@@ -30,8 +30,10 @@ type parentQueryConn struct {
 	queries *atomic.Int64
 }
 
+var linksRead = regexp.MustCompile(`(?i)\b(?:from|join)\s+links\b`)
+
 func (c *parentQueryConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
-	if strings.Join(strings.Fields(strings.ToLower(query)), " ") == "select to_issue_uid from links where from_issue_uid=$1 and type='parent'" {
+	if linksRead.MatchString(query) {
 		c.queries.Add(1)
 	}
 	return c.sqliteConn.QueryContext(ctx, query, args)
@@ -52,8 +54,8 @@ func TestFederationIngestOrdinaryParentAssignmentAvoidsTrackerQuery(t *testing.T
 	result, err := d.IngestFederationEvents(ctx, db.FederationIngestParams{ProjectID: project.ID, SpokeInstanceUID: event.OriginInstanceUID, Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: event}}})
 	require.NoError(t, err)
 	require.Equal(t, 1, result.Accepted)
+	require.EqualValues(t, 1, capture.queries.Load(), "ordinary pushes only read links for materialization")
 	link, err := d.ParentOf(ctx, child.ID)
 	require.NoError(t, err)
 	require.Equal(t, parent.UID, link.ToIssueUID)
-	require.Zero(t, capture.queries.Load(), "ordinary pushes do not need the parent tracker")
 }
