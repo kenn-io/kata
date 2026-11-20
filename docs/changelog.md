@@ -308,6 +308,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
   `--hub-token-env` or `kata mcp --http-token-env` variable now reports
   `env:<NAME>: environment variable is unset or empty`.
 
+- Move up to 5,000 issues at once with `kata move <ref>... <project>` or
+  `--refs-from`. Each issue moves alone and gets its own result, so one refusal
+  doesn't stop the rest.
+
 ## 0.23.0
 <small>2026-11-09</small>
 

@@ -18,24 +18,42 @@ import (
 
 func newMoveCmd() *cobra.Command {
 	var dryRun, single bool
+	var refsFrom string
 	cmd := &cobra.Command{
-		Use:   "move <issue-ref> <project>",
-		Short: "move an issue subtree to another project",
+		Use:   "move <issue-ref>... <project>",
+		Short: "move issues to another project",
 		Long: `Move an issue and all its descendants to another project.
 Use --single to move only the selected issue.
+
+Two or more refs, or --refs-from, move each issue alone and report a result
+for every input.
 
 The issue keeps its UID, comments, history, and all of its links
 (parent, blocks/blocked-by, related) — relationships are never severed
 by a move and may span projects afterward. A fresh short_id is
 assigned in the target project.`,
-		Example: `  kata move abc4 example-project --dry --agent`,
-		Args:    cobra.ExactArgs(2),
+		Example: `  kata move abc4 example-project --dry --agent
+  kata move source#abc4 source#def5 example-project
+  kata move --refs-from routing.tsv --comment "routed"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMove(cmd, args[0], args[1], dryRun, single)
+			if cmd.Flags().Changed("refs-from") && refsFrom == "" {
+				return moveBatchUsage("--refs-from requires a file path")
+			}
+			if !cmd.Flags().Changed("refs-from") && len(args) == 2 {
+				return runMove(cmd, args[0], args[1], dryRun, single)
+			}
+			if dryRun {
+				return moveBatchUsage("--dry accepts one issue ref and a target project")
+			}
+			if single {
+				return moveBatchUsage("--single accepts one issue ref and a target project")
+			}
+			return runMoveBatch(cmd, args, refsFrom)
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry", false, "validate and preview without mutating")
 	cmd.Flags().BoolVar(&single, "single", false, "move only the selected issue")
+	cmd.Flags().StringVar(&refsFrom, "refs-from", "", "read ref or ref<TAB>project per line from a file")
 	addCommentFlag(cmd)
 	return cmd
 }

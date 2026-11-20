@@ -328,6 +328,9 @@ func emitJSONError(w io.Writer, err error, runEReached bool) {
 
 func emitHumanError(w io.Writer, err error, runEReached bool) {
 	cli := cliErrorForErr(err, runEReached)
+	if cli.Code == "batch_refused_reported" {
+		return
+	}
 	message := cli.Message
 	if cli.Code == "duplicate_candidates" {
 		message = appendCreateConflictRefs(message, cli)
