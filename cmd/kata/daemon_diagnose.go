@@ -522,7 +522,7 @@ func withDiagnosisAction(result daemonDiagnosis) daemonDiagnosis {
 	case "selection_error":
 		result.NextAction = "repair the selected routing configuration; current-home processes are listed separately"
 	default:
-		if result.State != "local_unreachable" || result.NextAction == "" {
+		if result.State != "local_unreachable" || (result.NextAction == "" && (result.Message == "" || result.PID == 0)) {
 			result.NextAction = "inspect the selected process and its credentials; do not switch databases"
 		}
 	}
@@ -533,7 +533,10 @@ func diagnosisError(result daemonDiagnosis) error {
 	data, _ := json.Marshal(result)
 	message := result.State + ": " + result.NextAction
 	if result.State == "local_unreachable" && result.Message != "" {
-		message = result.State + ": " + result.Message + ". " + result.NextAction
+		message = result.State + ": " + result.Message
+		if result.NextAction != "" {
+			message += ". " + result.NextAction
+		}
 	}
 	return &cliError{Message: message, Code: result.State, Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail, Data: data}
 }

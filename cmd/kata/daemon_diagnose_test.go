@@ -1096,4 +1096,6 @@ func TestDaemonDiagnosisCallerCanceledDuringSecondPing(t *testing.T) {
 	require.Contains(t, result.Message, filepath.Join(ns.DataDir, "daemon.log"))
 	require.NotContains(t, result.Message, "kill")
 	require.NotContains(t, result.Message, "restart")
+	require.Empty(t, result.NextAction)
+	require.Equal(t, "local_unreachable: "+result.Message, diagnosisError(result).Error())
 }
