@@ -2443,8 +2443,9 @@ return `invalid_federation_schema`.
 
 Parent replacement events queued by v0.19.0 through v0.23.0 can omit
 `link_from_uid` and `link_to_uid`. An upgraded hub accepts this legacy parent
-unlink only when its primary issue is `from_uid`, the child. Kata does not
-rewrite the stored event.
+unlink only when its primary issue is `from_uid`, the child, and the hub still
+holds that parent. A mismatched unlink keeps the batch quarantined until an
+operator resolves it. Kata does not rewrite the stored event.
 
 If the spoke already quarantined such a batch, upgrade the hub first, then
 explicitly retry it as described in [other validation quarantines](#other-validation-quarantines).

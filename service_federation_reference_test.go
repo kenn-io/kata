@@ -2,8 +2,8 @@ package kata
 
 import (
 	"context"
+	"encoding/json"
 	"encoding/json/jsontext"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -261,13 +261,31 @@ func TestDirectPushWithProjectScopedActors(t *testing.T) {
 				require.Equal(t, title, updated.Title)
 			})
 
+			t.Run("new-parent-replacement", func(t *testing.T) {
+				link, err := spoke.DB.ParentOf(ctx, child.ID)
+				require.NoError(t, err)
+				_, err = spoke.DB.ReplaceParentAndEvents(ctx, db.ReplaceParentAndEventsParams{ExpectedParentLinkID: link.ID, ExpectedParentIssueID: localNewPeer.ID, Link: db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: local.ID, Type: "parent", Author: "worker"}, UnlinkEvent: linkParams("issue.unlinked", localNewPeer), LinkEvent: linkParams("issue.linked", local)})
+				require.NoError(t, err)
+				require.NoError(t, syncProject(0))
+				parent, err := hub.store.ParentOf(ctx, other.ID)
+				require.NoError(t, err)
+				require.Equal(t, peer.UID, parent.ToIssueUID)
+				checkObserver(peer.UID)
+			})
+
 			t.Run("legacy-parent-replacement", func(t *testing.T) {
 				link, err := spoke.DB.ParentOf(ctx, child.ID)
 				require.NoError(t, err)
-				replacement, err := spoke.DB.ReplaceParentAndEvents(ctx, db.ReplaceParentAndEventsParams{ExpectedParentLinkID: link.ID, ExpectedParentIssueID: localNewPeer.ID, Link: db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: local.ID, Type: "parent", Author: "worker"}, UnlinkEvent: linkParams("issue.unlinked", localNewPeer), LinkEvent: linkParams("issue.linked", local)})
+				replacement, err := spoke.DB.ReplaceParentAndEvents(ctx, db.ReplaceParentAndEventsParams{ExpectedParentLinkID: link.ID, ExpectedParentIssueID: local.ID, Link: db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: localNewPeer.ID, Type: "parent", Author: "worker"}, UnlinkEvent: linkParams("issue.unlinked", local), LinkEvent: linkParams("issue.linked", localNewPeer)})
 				require.NoError(t, err)
 				legacy := replacement.UnlinkedEvent
-				legacy.Payload = fmt.Sprintf(`{"type":"parent","from_uid":%q,"to_uid":%q}`, child.UID, localNewPeer.UID)
+				var payload map[string]jsontext.Value
+				require.NoError(t, json.Unmarshal([]byte(legacy.Payload), &payload))
+				delete(payload, "link_from_uid")
+				delete(payload, "link_to_uid")
+				legacyPayload, err := json.Marshal(payload)
+				require.NoError(t, err)
+				legacy.Payload = string(legacyPayload)
 				hash, err := db.EventContentHash(db.EventHashInput{UID: legacy.UID, OriginInstanceUID: legacy.OriginInstanceUID, ProjectUID: legacy.ProjectUID, ProjectName: legacy.ProjectName, IssueUID: legacy.IssueUID, RelatedIssueUID: legacy.RelatedIssueUID, Type: legacy.Type, Actor: legacy.Actor, HLCPhysicalMS: legacy.HLCPhysicalMS, HLCCounter: legacy.HLCCounter, CreatedAt: legacy.CreatedAt.UTC().Format(db.EventTimestampFormat), Payload: jsontext.Value(legacy.Payload)})
 				require.NoError(t, err)
 				result, err := spoke.DB.ExecContext(ctx, `UPDATE events SET payload = ?, content_hash = ? WHERE id = ?`, legacy.Payload, hash, legacy.ID)
@@ -291,11 +309,11 @@ func TestDirectPushWithProjectScopedActors(t *testing.T) {
 				require.NoError(t, syncProject(0))
 				parent, err := hub.store.ParentOf(ctx, other.ID)
 				require.NoError(t, err)
-				require.Equal(t, peer.UID, parent.ToIssueUID)
+				require.Equal(t, newPeer.UID, parent.ToIssueUID)
 				updated, err := hub.store.IssueByUID(ctx, child.UID, db.IncludeDeletedNo)
 				require.NoError(t, err)
 				require.Equal(t, title, updated.Title)
-				checkObserver(peer.UID)
+				checkObserver(newPeer.UID)
 				observed, err := observer.DB.IssueByUID(ctx, child.UID, db.IncludeDeletedNo)
 				require.NoError(t, err)
 				require.Equal(t, title, observed.Title)
