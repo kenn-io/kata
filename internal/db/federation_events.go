@@ -362,7 +362,7 @@ func directLinkAdditionEligible(event FoldEvent) bool {
 	return child != "" && child == event.IssueUID
 }
 
-// DirectParentRemovals checks parent operations against the current links.
+// DirectParentRemovals checks parent operations against current links and retained assignment clocks.
 func DirectParentRemovals(ctx context.Context, tx federationHistoryQuery, events []RemoteEvent) (map[string][]string, error) {
 	ordered := make([]FoldEvent, 0, len(events))
 	for _, event := range events {
