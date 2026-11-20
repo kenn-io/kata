@@ -2133,7 +2133,6 @@ func (m Model) commitFilterForm(form inputState) (Model, tea.Cmd) {
 	m.list.cursor = 0
 	m.list.selectedUID = ""
 	m.list.status = ""
-	m.list.ranked = rankedSearch{}
 	m.input = inputState{}
 	m, cmd := m.reconcileSplitDetailAfterRefetch(prevPID, prevUID, prevHas)
 	cmd = combineCmds(cmd, m.checkDateFilter())

@@ -175,13 +175,17 @@ func (m Model) toggleDaemonSearch() (Model, tea.Cmd) {
 	}
 	m.daemonSearch = !m.daemonSearch
 	m.searchTickGen++
+	prevPID, prevUID, prevHas := highlightedIdentity(m.list)
 	m = m.syncDaemonSearch()
 	m.list = m.list.dropRanked()
+	var askCmd tea.Cmd
 	if !m.daemonSearch {
 		m.list = m.list.clampCursorToFilter()
-		return m, nil
+	} else {
+		m, askCmd = m.askDaemonIfStale()
 	}
-	return m.askDaemonIfStale()
+	m, followCmd := m.reconcileSplitDetailAfterRefetch(prevPID, prevUID, prevHas)
+	return m, combineCmds(askCmd, followCmd)
 }
 
 // debounceDaemonSearch runs after a keystroke changed the bar's text: a blank

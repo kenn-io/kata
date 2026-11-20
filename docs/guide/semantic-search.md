@@ -177,7 +177,7 @@ daemon ranked by words and meaning or by words only.
 
 The choice lasts until you quit. Press `ctrl+t` again to filter the loaded rows
 by text. Results come after you stop typing; a blank query shows the normal
-list. `enter` keeps the results while the query and filters stay; `esc` restores
+list. `enter` keeps the results while the query stays; `esc` restores
 the previous list, and `c` clears the filters and the results. Daemon search
 needs one project, so in the all-projects view `ctrl+t` does nothing. It does
 not set up embeddings: without them the daemon ranks by words, and the note

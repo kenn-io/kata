@@ -735,7 +735,6 @@ func (lm listModel) applyFilterKey(msg tea.KeyPressMsg, km keymap) (listModel, t
 		lm.windowStart = 0
 		lm.selectedUID = ""
 		lm.status = ""
-		lm.ranked = rankedSearch{}
 		return lm, nil, true
 	case km.ClearFilters.matches(msg):
 		lm.filter = ListFilter{}

@@ -366,6 +366,48 @@ func TestDaemonSearch_AnswerFollowsSelectionInSplitDetail(t *testing.T) {
 	require.Equal(t, "01TEST-ccc3", m.detail.issue.UID, "the detail pane follows the first ranked hit")
 }
 
+func TestDaemonSearch_StatusKeyNarrowsCommittedHitsAndKeepsThem(t *testing.T) {
+	m, api := daemonSearchFixture(t)
+	alpha, beta, gamma := searchTestIssues()
+	alpha.Status = "closed"
+	m.list.issues = []Issue{alpha, beta, gamma}
+	api.searchFn = answerWith("hybrid", gamma, alpha, beta)
+	m = openBarFromCmd(t, m, '/')
+	m, _ = stepModel(m, ctrlT)
+	m, cmds := typeText(m, "payments")
+	m = settleSearch(m, cmds...)
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.Equal(t, []string{"01TEST-ccc3", "01TEST-aaa1", "01TEST-bbb2"}, visibleUIDs(m))
+
+	m, _ = stepModel(m, runeKey('s'))
+
+	require.Equal(t, "open", m.list.filter.Status)
+	require.Equal(t, []string{"01TEST-ccc3", "01TEST-bbb2"}, visibleUIDs(m), "ranked hits, narrowed by status")
+	require.Contains(t, m.list.rankedNote(), "ranked by words and meaning")
+}
+
+func TestDaemonSearch_ToggleOffInResultsFocusFollowsSelectionInSplitDetail(t *testing.T) {
+	m, api := daemonSearchFixture(t)
+	alpha, _, gamma := searchTestIssues()
+	api.searchFn = answerWith("hybrid", gamma, alpha)
+	m = resizeModel(m, 160, 40)
+	require.Equal(t, splitlayout.Split, m.layout)
+	m = openBarFromCmd(t, m, '/')
+	m, _ = stepModel(m, ctrlT)
+	m, cmds := typeText(m, "login")
+	m = settleSearch(m, cmds...)
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyDown})
+	require.NotNil(t, m.detail.issue)
+	require.Equal(t, "01TEST-aaa1", m.detail.issue.UID, "the detail pane follows the second ranked hit")
+
+	m, _ = stepModel(m, ctrlT)
+
+	require.Equal(t, []string{"01TEST-ccc3"}, visibleUIDs(m), "the text filters loaded rows again")
+	require.NotNil(t, m.detail.issue)
+	require.Equal(t, "01TEST-ccc3", m.detail.issue.UID)
+}
+
 func TestDaemonSearch_CommitKeepsRankedResultsUntilFiltersClear(t *testing.T) {
 	m, api := daemonSearchFixture(t)
 	alpha, _, gamma := searchTestIssues()
