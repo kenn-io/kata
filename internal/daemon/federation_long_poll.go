@@ -14,6 +14,8 @@ import (
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/federationsigning"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 )
 
 const (
@@ -61,6 +63,32 @@ type federationControlAdmissionContextKey struct{}
 // control admission slot for its whole lifetime.
 func withFederationControlAdmission(ctx context.Context) context.Context {
 	return context.WithValue(ctx, federationControlAdmissionContextKey{}, true)
+}
+
+type federationSigningRecheckContextKey struct{}
+
+// withFederationSigningRecheck records how to confirm that the key that signed
+// this request still verifies it.
+func withFederationSigningRecheck(ctx context.Context, recheck func() error) context.Context {
+	return context.WithValue(ctx, federationSigningRecheckContextKey{}, recheck)
+}
+
+// recheckFederationSigning confirms a signed request's key before the hub
+// answers it after a hold. An unsigned request has nothing to recheck.
+func recheckFederationSigning(ctx context.Context) error {
+	recheck, _ := ctx.Value(federationSigningRecheckContextKey{}).(func() error)
+	if recheck == nil {
+		return nil
+	}
+	err := recheck()
+	if err == nil {
+		return nil
+	}
+	status := http.StatusUnauthorized
+	if errors.Is(err, signingpolicy.ErrKey) || errors.Is(err, federationsigning.ErrState) {
+		status = http.StatusServiceUnavailable
+	}
+	return api.NewError(status, "signature_invalid", "federation signature rejected", "", nil)
 }
 
 func holdsFederationControlAdmission(ctx context.Context) bool {
@@ -385,10 +413,14 @@ func heldFederationPollAllowed(ctx context.Context) bool {
 
 // reauthorizeFederationPoll repeats the poll's federation authorization
 // without the authorization cached for the request: credential, project
-// membership and the host federation decision are all read again.
+// membership, the host federation decision and, for a signed request, its
+// signing key are all checked again.
 func reauthorizeFederationPoll(ctx context.Context, cfg ServerConfig, authHeader string, projectID int64, operation HostFederationOperation) (context.Context, error) {
 	authorization, err := evaluateFederationRequestForCapabilities(ctx, cfg, authHeader, projectID, []string{"pull"}, operation)
 	if err != nil {
+		return ctx, err
+	}
+	if err := recheckFederationSigning(ctx); err != nil {
 		return ctx, err
 	}
 	if err := rejectRelayCredentialOnLegacyEvents(authorization.principal); err != nil {

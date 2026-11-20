@@ -549,3 +549,39 @@ func TestTransportCannotReplaySignatureAfterLostResponse(t *testing.T) {
 	require.Len(t, retryInputs, 2)
 	require.NotEqual(t, retryInputs[0], retryInputs[1], "native retry generates a fresh nonce")
 }
+
+// Contract: a hub holding a signed request open, such as a held event poll,
+// can confirm the signing key still verifies it before it answers. The check
+// never spends the request's nonce again.
+func TestRecheckRejectsAKeyRetiredAfterAdmission(t *testing.T) {
+	for _, mode := range []string{"unchanged", "not after", "removed", "rotated", "other enrollment"} {
+		t.Run(mode, func(t *testing.T) {
+			s := testSource(t)
+			v := testVerifier(t, "https://hub.example", s)
+			r := signed(t, s)
+			require.NoError(t, v.Verify(r, 7))
+			enrollment := int64(7)
+			switch mode {
+			case "not after":
+				k := v.keys[s.KeyID]
+				k.NotAfter = time.Now().Add(time.Second).Unix()
+				v.keys[s.KeyID] = k
+				v.now = func() time.Time { return time.Now().Add(2 * time.Second) }
+			case "removed":
+				t.Setenv(s.KeyEnv, "")
+			case "rotated":
+				t.Setenv(s.KeyEnv, strings.Repeat("c", 64))
+			case "other enrollment":
+				enrollment = 8
+			}
+			err := v.Recheck(r, enrollment)
+			if mode == "unchanged" {
+				require.NoError(t, err)
+				require.NoError(t, v.Recheck(r, enrollment), "a recheck can repeat")
+			} else {
+				require.ErrorIs(t, err, signingpolicy.ErrKeyRejected)
+			}
+			require.Len(t, v.seen, 1, "a recheck never admits the nonce again")
+		})
+	}
+}

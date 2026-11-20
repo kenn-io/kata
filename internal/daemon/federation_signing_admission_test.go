@@ -272,3 +272,61 @@ func TestSignedUploadHoldsIdleForegroundDuringVerification(t *testing.T) {
 		require.Equal(t, daemon.IdleStateArmed, idle.Snapshot().State)
 	})
 }
+
+// Contract: the hub rejects old signing keys at their deadline. A signed poll
+// the hub holds open rechecks its signing key before it answers, so a key
+// removed during the hold stops the answer.
+func TestHeldSignedPollRechecksItsSigningKey(t *testing.T) {
+	for _, retire := range []bool{false, true} {
+		t.Run(fmt.Sprintf("retired=%t", retire), func(t *testing.T) {
+			t.Setenv("TEST_HELD_POLL_KEY", strings.Repeat("k", 64))
+			source := signingpolicy.Source{KeyID: "key-a", KeyEnv: "TEST_HELD_POLL_KEY"}
+			env := testenv.New(t)
+			project := createFederatedHubProject(t, env, "hub-project")
+			enrollment, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{
+				Token: "enrollment", SpokeInstanceUID: federationTestSpokeUID,
+				ProjectID: &project.ID, Capabilities: "pull", Actor: "example-actor",
+			})
+			require.NoError(t, err)
+			tip, err := env.DB.ReadFederation(t.Context(), db.FederationReadParams{ProjectID: project.ID, Limit: 100})
+			require.NoError(t, err)
+			synctest.Test(t, func(t *testing.T) {
+				state := filepath.Join(t.TempDir(), "replay.state")
+				require.NoError(t, federationsigning.InitializeReplayState(state))
+				v, err := federationsigning.NewVerifier("https://hub.example", []signingpolicy.Key{
+					{Source: source, EnrollmentID: enrollment.Enrollment.ID},
+				}, state)
+				require.NoError(t, err)
+				defer func() { require.NoError(t, v.Close()) }()
+				time.Sleep(federationsigning.Quarantine)
+				ingress, err := daemon.NewServer(daemon.ServerConfig{DB: env.DB, FederationSigning: v}).HandlerFor(daemon.ListenerPolicy{Kind: daemon.ListenerFederation})
+				require.NoError(t, err)
+				req := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+					"https://hub.example"+projectPath(project.ID)+fmt.Sprintf("/federation/events?after_id=%d&wait=30", tip.NextAfterID), nil)
+				req.Header.Set("Authorization", "Bearer "+enrollment.Token)
+				require.NoError(t, federationsigning.Sign(req, source))
+				w := httptest.NewRecorder()
+				done := make(chan struct{})
+				go func() {
+					defer close(done)
+					ingress.ServeHTTP(w, req)
+				}()
+				synctest.Wait()
+				select {
+				case <-done:
+					t.Fatalf("the hub answered a caught-up signed poll at once: %d %s", w.Code, w.Body.String())
+				default:
+				}
+				if retire {
+					t.Setenv(source.KeyEnv, "")
+				}
+				<-done
+				if retire {
+					assertAPIError(t, w.Code, w.Body.Bytes(), http.StatusUnauthorized, "signature_invalid")
+					return
+				}
+				require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+			})
+		})
+	}
+}

@@ -203,6 +203,10 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 					return
 				}
 			}
+			verified, enrollmentID := r, authorization.principal.EnrollmentID
+			ctx = withFederationSigningRecheck(ctx, func() error {
+				return s.cfg.FederationSigning.Recheck(verified, enrollmentID)
+			})
 		}
 		if relayCleanup {
 			next.ServeHTTP(w, r.WithContext(ctx))

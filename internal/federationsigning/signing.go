@@ -217,13 +217,7 @@ func (v *Verifier) Verify(r *http.Request, enrollmentID int64) error {
 	if subtle.ConstantTimeCompare(secret, []byte(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))) == 1 {
 		return signingpolicy.ErrKey
 	}
-	cloned := r.Clone(r.Context())
-	u := *r.URL
-	u.Scheme, u.Host, u.Path = v.base.Scheme, v.base.Host, v.base.Path+r.URL.Path
-	cloned.URL, cloned.Host = &u, v.base.Host
-	vc := httpsign.NewVerifyConfig().SetVerifyCreated(false).SetRejectExpired(false).SetKeyID(k.KeyID)
-	verifier, err := httpsign.NewHMACSHA256Verifier(secret, vc, httpsign.Headers(components...))
-	if err != nil || httpsign.VerifyRequest("sig1", *verifier, cloned) != nil {
+	if !v.macVerifies(r, k, secret) {
 		return signingpolicy.ErrInvalid
 	}
 	if r.ContentLength > MaxBodyBytes {
@@ -429,6 +423,52 @@ func InitializeReplayState(path string) error {
 }
 
 // Close releases replay ownership and permanently fences this verifier.
+// macVerifies checks the request's signature against the public base URL.
+func (v *Verifier) macVerifies(r *http.Request, k signingpolicy.Key, secret []byte) bool {
+	cloned := r.Clone(r.Context())
+	u := *r.URL
+	u.Scheme, u.Host, u.Path = v.base.Scheme, v.base.Host, v.base.Path+r.URL.Path
+	cloned.URL, cloned.Host = &u, v.base.Host
+	vc := httpsign.NewVerifyConfig().SetVerifyCreated(false).SetRejectExpired(false).SetKeyID(k.KeyID)
+	verifier, err := httpsign.NewHMACSHA256Verifier(secret, vc, httpsign.Headers(components...))
+	return err == nil && httpsign.VerifyRequest("sig1", *verifier, cloned) == nil
+}
+
+// Recheck confirms that the key that signed a request Verify already admitted
+// still verifies it: the key is still configured for the enrollment, its
+// source still loads, it has not reached NotAfter, and its current secret
+// still matches the signature. A hub calls it before it answers a request it
+// held open, so a key retired during the hold stops the answer. It never
+// admits the nonce again and never reads the body.
+func (v *Verifier) Recheck(r *http.Request, enrollmentID int64) error {
+	v.mu.Lock()
+	unavailable := v.closed || v.failed
+	v.mu.Unlock()
+	if unavailable {
+		return ErrState
+	}
+	d, err := httpsign.RequestDetails("sig1", r)
+	if err != nil || d.KeyID == nil {
+		return signingpolicy.ErrInvalid
+	}
+	now := v.now()
+	if !fresh(d, now) {
+		return signingpolicy.ErrInvalid
+	}
+	k, ok := v.keys[*d.KeyID]
+	if !ok || k.EnrollmentID != enrollmentID || (k.NotAfter != 0 && now.Unix() >= k.NotAfter) {
+		return signingpolicy.ErrKeyRejected
+	}
+	secret, err := k.Load()
+	if err != nil {
+		return err
+	}
+	if !v.macVerifies(r, k, secret) {
+		return signingpolicy.ErrKeyRejected
+	}
+	return nil
+}
+
 func (v *Verifier) Close() error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
