@@ -317,3 +317,18 @@ func TestUnreachableMigrationAdviceUsesRedactedRuntimeSQLitePath(t *testing.T) {
 	require.Contains(t, e.RecoveryAdvice(), "Wait for the migration")
 	require.NotContains(t, e.RecoveryAdvice(), "kill -QUIT")
 }
+
+func TestUnreachableMigrationAdviceKeepsLiteralBarePath(t *testing.T) {
+	setupKataEnv(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "kata%20database.db")
+	lock := flock.New(filepath.Join(dir, "kata database.db") + ".import.lock")
+	require.NoError(t, lock.Lock())
+	t.Cleanup(func() { require.NoError(t, lock.Close()) })
+
+	record := kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1", Metadata: map[string]string{"db_path": config.RedactDSN(path)}}
+	e := newUnreachable(t.Context(), dir, record, errors.New("probe failed"))
+	require.False(t, e.migrationActive)
+	require.NotEmpty(t, e.RecoveryAdvice())
+	require.NotContains(t, e.RecoveryAdvice(), "Wait for the migration")
+}
