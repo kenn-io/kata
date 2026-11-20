@@ -19,6 +19,7 @@ import (
 type listAPI interface {
 	ListIssues(ctx context.Context, projectID int64, f ListFilter) ([]Issue, error)
 	ListAllIssues(ctx context.Context, f ListFilter) ([]Issue, error)
+	SearchIssues(ctx context.Context, projectID int64, q SearchQuery) (*SearchAnswer, error)
 	CreateIssue(
 		ctx context.Context, projectID int64, body CreateIssueBody,
 	) (*MutationResp, error)
@@ -69,6 +70,8 @@ type listModel struct {
 	// see what kata is waiting for. Mirrors vim's modifier-then-motion
 	// pattern but for a small finite priority space.
 	pendingPriority bool
+	// ranked is the daemon's answer to the search bar's query; see rankedSearch.
+	ranked rankedSearch
 }
 
 const queueWorkingSetLimit = 2000
@@ -273,7 +276,15 @@ func (lm listModel) targetQueueRow() (queueRow, bool) {
 }
 
 func (lm listModel) visibleRows() []queueRow {
-	return buildQueueRowsWithView(lm.issues, lm.filter, lm.expanded, lm.childSort, lm.viewMode)
+	if lm.rankedShown() {
+		return lm.rankedRows()
+	}
+	filter := lm.filter
+	if lm.ranked.live {
+		// The typed text is a question for the daemon, not a row filter.
+		filter.Search = ""
+	}
+	return buildQueueRowsWithView(lm.issues, filter, lm.expanded, lm.childSort, lm.viewMode)
 }
 
 // projectIDForRow picks the right project_id for the row's mutation.
@@ -724,6 +735,7 @@ func (lm listModel) applyFilterKey(msg tea.KeyPressMsg, km keymap) (listModel, t
 		lm.windowStart = 0
 		lm.selectedUID = ""
 		lm.status = ""
+		lm.ranked = rankedSearch{}
 		return lm, nil, true
 	case km.ClearFilters.matches(msg):
 		lm.filter = ListFilter{}
@@ -731,6 +743,7 @@ func (lm listModel) applyFilterKey(msg tea.KeyPressMsg, km keymap) (listModel, t
 		lm.windowStart = 0
 		lm.selectedUID = ""
 		lm.status = ""
+		lm.ranked = rankedSearch{}
 		return lm, nil, true
 	}
 	return lm, nil, false
@@ -882,11 +895,13 @@ func (lm listModel) storeFetched(msg tea.Msg) listModel {
 		lm.err = m.err
 		if m.err == nil {
 			lm.issues, lm.truncated = trimQueueWorkingSet(m.issues)
+			lm.ranked = lm.ranked.refreshed(lm.issues)
 		}
 	case refetchedMsg:
 		lm.err = m.err
 		if m.err == nil {
 			lm.issues, lm.truncated = trimQueueWorkingSet(m.issues)
+			lm.ranked = lm.ranked.refreshed(lm.issues)
 		}
 	}
 	return lm

@@ -41,7 +41,8 @@ func (m Model) deleteHidden() bool {
 }
 
 // helpKeymap is the keymap the help overlay lists: without the delete and
-// move keys when they are not on offer.
+// move keys when they are not on offer, and without the daemon-search key
+// when the search bar is not open over one project.
 func (m Model) helpKeymap() keymap {
 	km := m.keymap
 	if m.deleteHidden() {
@@ -49,6 +50,9 @@ func (m Model) helpKeymap() keymap {
 	}
 	if m.moveHidden() {
 		km.MoveIssue = key{}
+	}
+	if !m.daemonSearchAvailable() {
+		km.DaemonSearch = key{}
 	}
 	return km
 }
@@ -225,6 +229,7 @@ func (lm listModel) droppingIssues(anchor string, gone []string) listModel {
 	rows := lm.visibleRows()
 	at := slices.IndexFunc(rows, func(row queueRow) bool { return row.issue.UID == anchor })
 	lm.issues = slices.DeleteFunc(slices.Clone(lm.issues), func(issue Issue) bool { return isGone(issue.UID) })
+	lm.ranked.hits = slices.DeleteFunc(slices.Clone(lm.ranked.hits), func(issue Issue) bool { return isGone(issue.UID) })
 	if at < 0 || lm.selectedUID != anchor {
 		return lm.restoreCursorToSelection()
 	}

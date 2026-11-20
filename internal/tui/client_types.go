@@ -233,6 +233,28 @@ type ListFilter struct {
 	Limit  int
 }
 
+// SearchQuery is one ranked search of a project. Mode is the daemon's search
+// mode ("auto" lets it pick words or words and meaning); Status and Labels are
+// the filters the route applies before ranking.
+type SearchQuery struct {
+	Query  string
+	Mode   string
+	Status string
+	Labels []string
+	Limit  int
+}
+
+// SearchAnswer is the daemon's ranked answer: Issues in its order, the Mode it
+// actually ran ("lexical", "hybrid", ...), why it fell short when Degraded, and
+// whether more issues matched than Limit.
+type SearchAnswer struct {
+	Issues         []Issue
+	Mode           string
+	Degraded       bool
+	DegradedReason string
+	Truncated      bool
+}
+
 // CreateInitialLinkBody requests a link created atomically with a new
 // issue. ToRef is a short_id, qualified short_id ("kata#abc4"), or a
 // 26-char ULID; the daemon resolves it to the target issue at request
