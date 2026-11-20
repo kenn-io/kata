@@ -2018,6 +2018,93 @@ describe('AppShell', () => {
     ).toBe('true')
   })
 
+  test('names the current issue, project, or view in the tab', async () => {
+    const current = snapshot()
+    const filters = { status: [], owner: [], label: [], relationship: [] }
+    const view = render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          issueUID: '01J00000000000000000000001',
+          graph: false,
+          filters,
+        },
+        snapshot: current,
+        loading: false,
+        ...mutationProps(),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+    await waitFor(() => expect(document.title).toBe('Issue · Kata'))
+    current.selected = {
+      state: 'available',
+      issue: current.collection![0]!,
+      comments: [],
+      labels: [],
+      links: [],
+      recurrences: [],
+      history: [],
+    }
+    await view.rerender({ snapshot: current })
+    await waitFor(() => expect(document.title).toBe('Example issue (example-project#a1) · Kata'))
+    await view.rerender({
+      route: { kind: 'kata', projectUID: '01J00000000000000000000002', graph: false, filters },
+    })
+    await waitFor(() => expect(document.title).toBe('example-project · Kata'))
+    await view.rerender({
+      route: {
+        kind: 'kata',
+        view: 'today',
+        projectUID: '01J00000000000000000000002',
+        graph: false,
+        filters,
+      },
+    })
+    await waitFor(() => expect(document.title).toBe('Today · example-project · Kata'))
+    await view.rerender({
+      route: {
+        kind: 'kata',
+        view: 'inbox',
+        projectUID: '01J00000000000000000000002',
+        graph: false,
+        filters,
+      },
+    })
+    await waitFor(() => expect(document.title).toBe('Inbox · example-project · Kata'))
+    await view.rerender({ route: { kind: 'kata', view: 'inbox', graph: false, filters } })
+    await waitFor(() => expect(document.title).toBe('Inbox · Kata'))
+    await view.rerender({ route: { kind: 'kata', view: 'all-open', graph: false, filters } })
+    await waitFor(() => expect(document.title).toBe('All Open · Kata'))
+    await view.rerender({ route: { kind: 'kata', view: 'settings', graph: false, filters } })
+    await waitFor(() => expect(document.title).toBe('Settings · Kata'))
+    await view.rerender({ route: { kind: 'kata', view: 'credentials', graph: false, filters } })
+    await waitFor(() => expect(document.title).toBe('Credentials · Kata'))
+    const issueRoute = {
+      kind: 'kata' as const,
+      issueUID: '01J00000000000000000000003',
+      graph: false,
+      filters,
+    }
+    current.selected = {
+      state: 'missing',
+      comments: [],
+      labels: [],
+      links: [],
+      recurrences: [],
+      history: [],
+    }
+    await view.rerender({ route: issueRoute, snapshot: current })
+    await waitFor(() =>
+      expect(document.title).toBe('Issue unavailable 01J00000000000000000000003 · Kata'),
+    )
+    current.selected = { ...current.selected, state: 'archived' }
+    await view.rerender({ snapshot: current })
+    await waitFor(() =>
+      expect(document.title).toBe('Archived issue 01J00000000000000000000003 · Kata'),
+    )
+  })
+
   test('keeps the canonical issue route while authority is missing or archived', async () => {
     const missing = snapshot()
     missing.selected = {

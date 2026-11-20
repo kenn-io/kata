@@ -2244,7 +2244,7 @@ describe('App', () => {
     releaseCredentials(Response.json({ observed_at: '2026-09-15T12:00:00Z', tokens: [] }))
   })
 
-  it('switches configured daemons in place and restores each daemon route', async () => {
+  it('restores daemon routes and resets the title when the workspace is hidden', async () => {
     let now = 0
     vi.spyOn(performance, 'now').mockImplementation(() => now)
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
@@ -2257,6 +2257,12 @@ describe('App', () => {
     const local = snapshot()
     const remote = structuredClone(local)
     remote.collection[0]!.title = 'Remote issue'
+    let releaseRemote!: () => void
+    const remoteReleased = new Promise<void>((resolve) => (releaseRemote = resolve))
+    let releaseRemoteReferences!: () => void
+    const remoteReferencesReleased = new Promise<void>(
+      (resolve) => (releaseRemoteReferences = resolve),
+    )
     const snapshotRequests: Request[] = []
     const referenceRequests: Request[] = []
     vi.stubGlobal(
@@ -2288,11 +2294,19 @@ describe('App', () => {
         }
         if (path.endsWith('/api/v1/ui/references')) {
           referenceRequests.push(request)
+          const daemon = request.headers.get('X-Kata-Web-Daemon')
+          if (daemon === 'example-local') {
+            await new Promise<void>((resolve) => {
+              request.signal.addEventListener('abort', () => resolve(), { once: true })
+            })
+          }
+          if (daemon === 'example-remote') await remoteReferencesReleased
           return Response.json({ issues: [], labels: [], owners: [], projects: [] })
         }
         if (path.endsWith('/api/v1/ui/snapshot')) {
           snapshotRequests.push(request)
           const daemon = request.headers.get('X-Kata-Web-Daemon')
+          if (daemon === 'example-remote') await remoteReleased
           return Response.json(daemon === 'example-remote' ? remote : local, {
             headers: { ETag: `"${daemon ?? 'default'}-${snapshotRequests.length}"` },
           })
@@ -2305,10 +2319,30 @@ describe('App', () => {
     expect(await screen.findByRole('button', { name: /Example issue/ })).not.toBeNull()
     await fireEvent.click(screen.getByRole('button', { name: 'Today' }))
     await waitFor(() => expect(window.location.search).toBe('?view=today'))
+    await waitFor(() => expect(document.title).toBe('Today · Kata'))
+    let localReference!: Request
+    await waitFor(() => {
+      localReference = referenceRequests.findLast(
+        (request) => request.headers.get('X-Kata-Web-Daemon') === 'example-local',
+      )!
+      expect(localReference?.signal.aborted).toBe(false)
+    })
     now = 120_000
     await fireEvent.click(screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }))
     await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
+    expect(await screen.findByText('Loading Kata…')).not.toBeNull()
+    await waitFor(() => expect(document.title).toBe('Kata'))
+    expect(localReference.signal.aborted).toBe(true)
+    releaseRemote()
     expect(await screen.findByRole('button', { name: /Remote issue/ })).not.toBeNull()
+    await waitFor(() => {
+      expect(
+        referenceRequests.some(
+          (request) => request.headers.get('X-Kata-Web-Daemon') === 'example-remote',
+        ),
+      ).toBe(true)
+    })
+    releaseRemoteReferences()
     expect(window.location.search).toBe('?view=all-open')
     now += 10_000
     window.dispatchEvent(new Event('pagehide'))
@@ -2317,20 +2351,27 @@ describe('App', () => {
     await expect(telemetry[1]!.json()).resolves.toMatchObject({
       properties: { duration_bucket: '1_to_5m' },
     })
-    expect(
-      referenceRequests.find(
-        (request) => request.headers.get('X-Kata-Web-Daemon') === 'example-local',
-      )?.signal.aborted,
-    ).toBe(true)
-
     await fireEvent.click(
       screen.getByRole('button', { name: 'Switch Kata daemon: example-remote' }),
     )
     await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-local/ }))
     await waitFor(() => expect(window.location.search).toBe('?view=today'))
+    await waitFor(() => expect(document.title).toBe('Today · Kata'))
     expect(snapshotRequests.map((request) => request.headers.get('X-Kata-Web-Daemon'))).toEqual(
       expect.arrayContaining(['example-local', 'example-remote']),
     )
+
+    history.replaceState(null, '', '/kata?issue=abc4')
+    await fireEvent(window, new PopStateEvent('popstate'))
+    expect(screen.getByRole('heading', { name: 'This Kata route is not valid' })).not.toBeNull()
+    await waitFor(() => expect(document.title).toBe('Kata'))
+
+    history.replaceState(null, '', '/kata?view=today')
+    await fireEvent(window, new PopStateEvent('popstate'))
+    await waitFor(() => expect(document.title).toBe('Today · Kata'))
+    window.dispatchEvent(new Event('kata:versionMismatch'))
+    expect(await screen.findByRole('heading', { name: 'Kata was updated' })).not.toBeNull()
+    await waitFor(() => expect(document.title).toBe('Kata'))
   })
 
   it('keeps the requested daemon selected across transparent authentication recovery', async () => {
@@ -3428,15 +3469,7 @@ describe('App', () => {
             return Response.json(
               {
                 ...current,
-                selected: {
-                  state: 'available',
-                  issue: current.collection[0],
-                  comments: [],
-                  labels: [],
-                  links: [],
-                  recurrences: [],
-                  history: [],
-                },
+                selected: availableSelection(current.collection[0]),
               },
               { headers: { ETag: '"snapshot-selected"' } },
             )
@@ -4175,7 +4208,6 @@ describe('App', () => {
 
   it('replaces the shell with a visible version mismatch after guarded recovery fails', async () => {
     render(App)
-
     window.dispatchEvent(new Event('kata:versionMismatch'))
 
     expect(await screen.findByRole('alert')).not.toBeNull()
@@ -4183,6 +4215,18 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Reload Kata' })).not.toBeNull()
   })
 })
+
+function availableSelection(issue: ReturnType<typeof snapshot>['collection'][number] | undefined) {
+  return {
+    state: 'available',
+    issue,
+    comments: [],
+    labels: [],
+    links: [],
+    recurrences: [],
+    history: [],
+  }
+}
 
 function snapshot() {
   return {

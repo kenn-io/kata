@@ -119,6 +119,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Keep existing PostgreSQL semantic-search vectors when upgrading to schema 52
   without re-embedding; see the [schema 52 guide](development/postgres-migrations.md#schema-52-shared-vector-catalog).
 
+- Identify open Kata browser tabs by their issue, project, or view as you navigate.
+
 - Sync a Linear team that every run had refused with `linear issue is outside
   selected scope`. For some teams, Linear's issue filter on the team ID returns
   issues from the whole workspace. Kata now reads issues through the team
