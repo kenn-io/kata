@@ -2553,8 +2553,24 @@ func TestEnsureFederationReplicaReplacesOnlyTheNamedBoundActor(t *testing.T) {
 
 // A sync turn reads the binding once. One that started while the replica was
 // read-only would reset the project without checking for local changes, so
-// turning writes on for a changed intent waits for running syncs to finish.
-func TestEnsureFederationReplicaIntentChangeWaitsForRunningSync(t *testing.T) {
+// turning writes on waits for running syncs to finish. That holds for a new
+// approval naming a new actor, and for an approval reused after a downgrade
+// turned push off and then failed to release it.
+func TestEnsureFederationReplicaPushChangeWaitsForRunningSync(t *testing.T) {
+	for _, tc := range []struct {
+		name, actor, replaces string
+	}{
+		{name: "new approval with new actor", actor: "sync-agent-renewed", replaces: "sync-agent"},
+		{name: "reused approval", actor: "sync-agent"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			checkPushChangeWaitsForRunningSync(t, tc.actor, tc.replaces)
+		})
+	}
+}
+
+func checkPushChangeWaitsForRunningSync(t *testing.T, actor, replaces string) {
+	t.Helper()
 	store := openReplicaServiceStore(t)
 	credentials := newReplicaCredentialStore()
 	first := replicaServiceParams()
@@ -2575,9 +2591,9 @@ func TestEnsureFederationReplicaIntentChangeWaitsForRunningSync(t *testing.T) {
 		}
 	}()
 	second := replicaServiceParams()
-	second.Credential.Actor = "sync-agent-renewed"
+	second.Credential.Actor = actor
 	second.ExpectedCredential = &saved
-	second.ReplacesBoundActor = "sync-agent"
+	second.ReplacesBoundActor = replaces
 	type outcome struct {
 		result daemon.EnsureFederationReplicaResult
 		err    error
@@ -2591,7 +2607,7 @@ func TestEnsureFederationReplicaIntentChangeWaitsForRunningSync(t *testing.T) {
 	for {
 		select {
 		case got := <-done:
-			require.Failf(t, "intent change did not wait for the running sync", "push enabled %v, err %v", got.result.Binding.PushEnabled, got.err)
+			require.Failf(t, "turning push on did not wait for the running sync", "push enabled %v, err %v", got.result.Binding.PushEnabled, got.err)
 		default:
 		}
 		release, err := federationcoord.TryBeginSync(t.Context(), key, store, result.Project.ID)
@@ -2612,5 +2628,5 @@ func TestEnsureFederationReplicaIntentChangeWaitsForRunningSync(t *testing.T) {
 	got := <-done
 	require.NoError(t, got.err)
 	assert.True(t, got.result.Binding.PushEnabled)
-	assert.Equal(t, "sync-agent-renewed", got.result.Binding.Actor)
+	assert.Equal(t, actor, got.result.Binding.Actor)
 }
