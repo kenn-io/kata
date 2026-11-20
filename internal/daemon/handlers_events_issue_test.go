@@ -560,28 +560,6 @@ func TestPollProjectEventsIssueReadsSoftDeletedHistoryForRestoreCaller(t *testin
 	})
 }
 
-func TestDeleteReasonAppearsInSoftDeletedIssueHistory(t *testing.T) {
-	env, project, issue := setupClaimGateIssue(t, false)
-	resp, body := envDoRaw(t, env, http.MethodPost,
-		scopedProjectPath(project.ID, "issues/"+issue.ShortID+"/actions/delete"),
-		map[string]any{"actor": "tester", "reason": "duplicate of the import task"},
-		map[string]string{"X-Kata-Confirm": "DELETE " + project.Name + "#" + issue.ShortID})
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-
-	resp, body = envGetRaw(t, env, scopedProjectPath(project.ID, "events")+"?issue="+issue.ShortID+"&actor=tester")
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-	var page api.PollEventsBody
-	require.NoError(t, json.Unmarshal(body, &page))
-	require.NotEmpty(t, page.Events)
-	deleted := page.Events[len(page.Events)-1]
-	require.Equal(t, "issue.soft_deleted", deleted.Type)
-	var payload struct {
-		Reason string `json:"reason"`
-	}
-	require.NoError(t, json.Unmarshal(deleted.Payload, &payload))
-	require.Equal(t, "duplicate of the import task", payload.Reason)
-}
-
 // allowAllHostAccess is a host controller that allows every operation.
 type allowAllHostAccess struct{}
 

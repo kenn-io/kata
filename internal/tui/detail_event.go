@@ -54,7 +54,7 @@ var eventDescribers = map[string]eventDescriber{
 	"issue.priority_cleared":   priorityClearedDesc,
 	"issue.updated":            staticDesc("updated"),
 	"issue.restated":           staticDesc("updated from an imported copy"),
-	"issue.soft_deleted":       staticDesc("deleted"),
+	"issue.soft_deleted":       func(e EventLogEntry) string { return "deleted" + reasonSuffix(e) },
 	"issue.restored":           staticDesc("restored"),
 }
 

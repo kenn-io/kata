@@ -317,8 +317,7 @@ only with `issue=` on a soft-deleted issue and is ignored otherwise.
 
 `POST /api/v1/projects/{project_id}/issues/{ref}/actions/delete` records its
 optional `reason` on the `issue.soft_deleted` event, so whoever reads that
-history sees why the issue was deleted. Purge stores its `reason` in
-`purge_log.reason`.
+history sees why the issue was deleted.
 
 Clients that need close evidence can set
 `include_effective_close_event_uid=true`. The response includes
