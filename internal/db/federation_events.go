@@ -332,11 +332,7 @@ func DirectLinkPeers(event FoldEvent) (map[string]bool, error) {
 			}
 		} else if kind, _ := StringValue(payload["type"]); kind == "parent" {
 			child, parent := parentRemovalEndpoints(event, payload)
-			if child == event.IssueUID {
-				add(parent)
-			} else if parent == event.IssueUID {
-				add(child)
-			}
+			add(map[string]string{child: parent, parent: child}[event.IssueUID])
 		}
 	}
 	return peers, err
