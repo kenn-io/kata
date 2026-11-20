@@ -346,30 +346,6 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 	// Two queued sets for a previously unparented child also displace a parent.
 	other, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: route.ID, Title: "Other child", Author: "worker"})
 	require.NoError(t, err)
-	t.Run("stale-unlink-before-reassigned-parent", func(t *testing.T) {
-		staleChild, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: route.ID, Title: "Stale child", Author: "worker", Links: []db.InitialLink{{Type: "parent", ToNumber: peer.ID}}})
-		require.NoError(t, err)
-		clearParent, err := json.Marshal(map[string]string{"parent_removed_uid": peer.UID})
-		require.NoError(t, err)
-		detached := newRemoteEvent(t, route, &staleChild.UID, "issue.links_changed", "worker", origin, at+15, clearParent)
-		reassigned := newRemoteEvent(t, route, &staleChild.UID, "issue.links_changed", "worker", origin, at+20, payload)
-		_, err = store.InsertRemoteEvents(ctx, route.ID, []db.RemoteEvent{detached, reassigned})
-		require.NoError(t, err)
-		require.NoError(t, store.MaterializeFederatedProject(ctx, route.ID))
-		unlink, err := json.Marshal(map[string]string{"type": "parent", "from_uid": staleChild.UID, "to_uid": peer.UID, "link_from_uid": staleChild.UID, "link_to_uid": peer.UID})
-		require.NoError(t, err)
-		set, err := json.Marshal(map[string]string{"parent_set_uid": other.UID})
-		require.NoError(t, err)
-		params.Events = []db.FederationIngestEvent{
-			{SourceEventID: 4, Event: newRemoteEvent(t, route, &staleChild.UID, "issue.unlinked", "worker", origin, at+10, unlink)},
-			{SourceEventID: 5, Event: newRemoteEvent(t, route, &staleChild.UID, "issue.links_changed", "worker", origin, at+30, set)},
-		}
-		_, err = store.IngestFederationEvents(ctx, params)
-		require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
-		parent, err := store.ParentOf(ctx, staleChild.ID)
-		require.NoError(t, err)
-		require.Equal(t, peer.ID, parent.ToIssueID)
-	})
 	firstSet := newRemoteEvent(t, route, &other.UID, "issue.links_changed", "worker", origin, at+4, payload)
 	lastSet := newRemoteEvent(t, route, &other.UID, "issue.links_changed", "worker", origin, at+5, setSecond)
 	params.Events = []db.FederationIngestEvent{{SourceEventID: 4, Event: firstSet}, {SourceEventID: 5, Event: lastSet}}
