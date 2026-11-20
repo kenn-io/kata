@@ -443,7 +443,7 @@ func TestMoveBatchCommentFailureVisibleInRowAndQuiet(t *testing.T) {
 	for _, quiet := range []bool{false, true} {
 		t.Run(strconv.FormatBool(quiet), func(t *testing.T) {
 			env, dir, _, target, issue := setupMoveCLIProjects(t)
-			target, err := env.DB.RenameProject(t.Context(), target.ID, "target project")
+			target, err := env.DB.RenameProject(t.Context(), target.ID, "target & project")
 			require.NoError(t, err)
 			var commentKey string
 			upstream, err := url.Parse(env.URL)
@@ -479,6 +479,7 @@ func TestMoveBatchCommentFailureVisibleInRowAndQuiet(t *testing.T) {
 			retry := "kata comment " + issue.UID + " --project " + strconv.FormatInt(target.ID, 10) + " --body ... --idempotency-key " + shellQuote(commentKey) + " --workspace " + shellQuote(dir) + " --as test-actor --teammate test-teammate"
 			if quiet {
 				require.Contains(t, stderr, retry)
+				require.NotContains(t, stderr, target.Name)
 			} else {
 				var reply struct {
 					Results []moveBatchResult `json:"results"`
@@ -487,6 +488,7 @@ func TestMoveBatchCommentFailureVisibleInRowAndQuiet(t *testing.T) {
 				require.Equal(t, "moved", reply.Results[0].Result)
 				require.Contains(t, reply.Results[0].Message, "comment")
 				require.Contains(t, reply.Results[0].Hint, retry)
+				require.NotContains(t, reply.Results[0].Hint, target.Name)
 			}
 			out, _, err = executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "--as", "test-actor", "--teammate", "test-teammate", "--project", strconv.FormatInt(target.ID, 10), "comment", issue.UID, "--body", "routed", "--idempotency-key", commentKey, "--json")
 			require.NoError(t, err, out)
