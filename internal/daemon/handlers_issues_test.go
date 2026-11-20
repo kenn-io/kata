@@ -1,6 +1,7 @@
 package daemon_test
 
 import (
+	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"fmt"
@@ -2980,4 +2981,45 @@ func TestIssueServerBoundaryPreflight(t *testing.T) {
 	after, err := env.DB.EventsAfter(ctx, db.EventsAfterParams{Limit: 100})
 	require.NoError(t, err)
 	require.Equal(t, before, after)
+}
+
+type unlinkAfterLookupStorage struct {
+	db.Storage
+	from, to db.Issue
+	unlinked bool
+}
+
+func (s *unlinkAfterLookupStorage) LinkByEndpoints(ctx context.Context, from, to int64, kind string) (db.Link, error) {
+	link, err := s.Storage.LinkByEndpoints(ctx, from, to, kind)
+	if err == nil && !s.unlinked && from == s.from.ID && to == s.to.ID && kind == "blocks" {
+		s.unlinked = true
+		_, err = s.Storage.DeleteLinkAndEvent(ctx, link, db.LinkEventParams{EventType: "issue.unlinked", EventIssueID: from, FromShortID: s.from.ShortID, FromUID: s.from.UID, ToShortID: s.to.ShortID, ToUID: s.to.UID, Actor: "other"})
+	}
+	return link, err
+}
+
+func TestEditLinkClaimConcurrentUnlink(t *testing.T) {
+	var gated *unlinkAfterLookupStorage
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+		gated = &unlinkAfterLookupStorage{Storage: cfg.DB}
+		cfg.DB = gated
+	})
+	ctx := t.Context()
+	project, err := env.DB.CreateProject(ctx, "claim-race")
+	require.NoError(t, err)
+	from, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "source", Author: "agent"})
+	require.NoError(t, err)
+	to, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "target", Author: "agent"})
+	require.NoError(t, err)
+	_, err = env.DB.EnableProjectFederation(ctx, project.ID, "agent")
+	require.NoError(t, err)
+	_, _, err = env.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: from.ID, ToIssueID: to.ID, Type: "blocks", Author: "agent"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: from.ID, FromShortID: from.ShortID, FromUID: from.UID, ToShortID: to.ShortID, ToUID: to.UID, Actor: "agent"})
+	require.NoError(t, err)
+	acquireClaimGateIssue(t, env, project, to, "other")
+	gated.from, gated.to = from, to
+	resp, raw := envDoRaw(t, env, http.MethodPatch, issuePathRef(project.ID, from.ShortID, ""), map[string]any{"actor": "agent", "links_delta": map[string]any{"add_blocks": []string{to.UID}}}, nil)
+	require.True(t, gated.unlinked)
+	assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "claim_denied")
+	_, err = env.DB.LinkByEndpoints(ctx, from.ID, to.ID, "blocks")
+	require.ErrorIs(t, err, db.ErrNotFound)
 }

@@ -627,11 +627,11 @@ func editIssueHandler(cfg ServerConfig) func(context.Context, *api.EditIssueRequ
 			if err := validateResolvedLinksDelta(&params); err != nil {
 				return nil, err
 			}
-			claims, err := preflightAddedLinks(ctx, cfg.DB, issue, params)
-			if err != nil {
+			if err := preflightAddedLinks(ctx, cfg.DB, issue, params); err != nil {
 				return nil, err
 			}
-			if err := requireFederatedLinksDeltaClaims(ctx, cfg, actor, issue, &claims); err != nil {
+			// An existing edge may disappear before the write, so check every requested target.
+			if err := requireFederatedLinksDeltaClaims(ctx, cfg, actor, issue, &params); err != nil {
 				return nil, err
 			}
 		}
@@ -684,13 +684,11 @@ func editIssueHandler(cfg ServerConfig) func(context.Context, *api.EditIssueRequ
 	}
 }
 
-func preflightAddedLinks(ctx context.Context, store db.Storage, issue db.Issue, params db.EditIssueAtomicParams) (db.EditIssueAtomicParams, error) {
-	claims := params
+func preflightAddedLinks(ctx context.Context, store db.Storage, issue db.Issue, params db.EditIssueAtomicParams) error {
 	var projects []int64
-	issueID := issue.ID
-	check := func(from, to int64, kind string) (bool, error) {
+	check := func(from, to int64, kind string) error {
 		peer := to
-		if from != issueID {
+		if from != issue.ID {
 			peer = from
 		}
 		if kind == "related" && from > to {
@@ -698,55 +696,39 @@ func preflightAddedLinks(ctx context.Context, store db.Storage, issue db.Issue, 
 		}
 		_, err := store.LinkByEndpoints(ctx, from, to, kind)
 		if err == nil {
-			return false, nil
+			return nil
 		}
 		if !errors.Is(err, db.ErrNotFound) {
-			return false, internalAPIError(err)
+			return internalAPIError(err)
 		}
 		target, err := store.IssueByID(ctx, peer)
 		if err != nil {
-			return false, internalAPIError(err)
+			return internalAPIError(err)
 		}
 		projects = append(projects, target.ProjectID)
-		return true, nil
+		return nil
 	}
 	if params.SetParent != nil {
-		add, err := check(issueID, *params.SetParent, "parent")
-		if err != nil {
-			return claims, err
-		}
-		if !add {
-			claims.SetParent = nil
+		if err := check(issue.ID, *params.SetParent, "parent"); err != nil {
+			return err
 		}
 	}
-	filter := func(ids []int64, kind string, incoming bool) ([]int64, error) {
-		var out []int64
-		for _, id := range ids {
-			from, to := issueID, id
-			if incoming {
+	for _, group := range []struct {
+		ids      []int64
+		kind     string
+		incoming bool
+	}{{params.AddBlocks, "blocks", false}, {params.AddBlockedBy, "blocks", true}, {params.AddRelated, "related", false}} {
+		for _, id := range group.ids {
+			from, to := issue.ID, id
+			if group.incoming {
 				from, to = to, from
 			}
-			add, err := check(from, to, kind)
-			if err != nil {
-				return nil, err
-			}
-			if add {
-				out = append(out, id)
+			if err := check(from, to, group.kind); err != nil {
+				return err
 			}
 		}
-		return out, nil
 	}
-	var err error
-	if claims.AddBlocks, err = filter(params.AddBlocks, "blocks", false); err != nil {
-		return claims, err
-	}
-	if claims.AddBlockedBy, err = filter(params.AddBlockedBy, "blocks", true); err != nil {
-		return claims, err
-	}
-	if claims.AddRelated, err = filter(params.AddRelated, "related", false); err != nil {
-		return claims, err
-	}
-	return claims, checkLinkProjectsBeforeMutation(ctx, store, issue.ProjectID, projects)
+	return checkLinkProjectsBeforeMutation(ctx, store, issue.ProjectID, projects)
 }
 
 // linksDeltaRequiresAllProjectsBeforeResolution identifies relationship

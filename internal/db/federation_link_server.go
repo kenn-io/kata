@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 
 	"go.kenn.io/kata/internal/httpurl"
 )
@@ -44,4 +45,27 @@ func CheckLinkSameServer(ctx context.Context, q moveQuery, fromProject, toProjec
 		from, to = to, from
 	}
 	return &LinkServerMismatchError{From: from.name, To: to.name}
+}
+
+// CheckLinkProjectsAccess checks access to each project in the current transaction.
+func CheckLinkProjectsAccess(ctx context.Context, tx Transaction, fromProject int64, toProjects []int64) error {
+	seen := map[int64]bool{}
+	for _, id := range append([]int64{fromProject}, toProjects...) {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		var uid string
+		err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=$1`, id).Scan(&uid)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if err := CheckProjectAccessTransaction(ctx, tx, uid); err != nil {
+			return err
+		}
+	}
+	return nil
 }

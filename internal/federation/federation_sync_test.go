@@ -1497,7 +1497,7 @@ func TestFederationMultiProjectEnrollmentSyncMatrix(t *testing.T) {
 				if !project.before {
 					project.issue = matrixCreateInitialState(t, spoke.DB, project.local, project.tag)
 				}
-				if !linked && first.issue.ID != 0 && peer.issue.ID != 0 {
+				if !linked && first.enrolled && peer.enrolled && first.issue.ID != 0 && peer.issue.ID != 0 {
 					matrixCreateCrossProjectLink(t, spoke.DB, first.issue, peer.issue)
 					linked = true
 				}
