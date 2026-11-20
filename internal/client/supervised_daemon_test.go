@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -67,7 +68,22 @@ func TestManagedExternallyUnreachableDetail(t *testing.T) {
 		require.ErrorIs(t, err, context.Canceled)
 		require.ErrorContains(t, err, fmt.Sprintf("%q", filepath.Join("/example/runtime", "daemon.log")))
 		require.Equal(t, 1, strings.Count(err.Error(), "context canceled"))
-		require.NotContains(t, err.Error(), "restart")
+		var advised interface{ RecoveryAdvice() string }
+		require.ErrorAs(t, err, &advised)
+		require.Empty(t, advised.RecoveryAdvice())
+	})
+	t.Run("last typed probe", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			probe := &LocalDaemonUnreachableError{PID: 123, Address: "127.0.0.1:1234", DataDir: "/example/runtime", VerifiedProcess: true, WebOrigin: "http://127.0.0.1:1234", cause: errors.New("probe failed")}
+			_, err := waitForSupervisedDaemon(t.Context(), "/example/config.toml", func(context.Context) bool { return false }, func(context.Context) (ensureDiscovery, error) {
+				return ensureDiscovery{}, probe
+			})
+			require.NotContains(t, err.Error(), "service manager")
+			var advised interface{ RecoveryAdvice() string }
+			require.ErrorAs(t, err, &advised)
+			require.Contains(t, advised.RecoveryAdvice(), "http://127.0.0.1:1234/debug/pprof/goroutine?debug=2")
+			require.Equal(t, 1, strings.Count(advised.RecoveryAdvice(), "service manager"))
+		})
 	})
 	for _, clear := range []bool{false, true} {
 		t.Run(fmt.Sprintf("clear=%t", clear), func(t *testing.T) {
@@ -102,19 +118,13 @@ func TestManagedExternallyUnreachableDetail(t *testing.T) {
 func TestAutoStartedDaemonRecovery(t *testing.T) {
 	err := &LocalDaemonUnreachableError{PID: 123, VerifiedProcess: true, autoStarted: true}
 	require.Contains(t, err.RecoveryAdvice(), "rerun the original command")
-}
-
-func TestSupervisedWaitShowsLastProbeAdviceOnce(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		probe := &LocalDaemonUnreachableError{PID: 123, VerifiedProcess: true, ManagedExternally: true, WebOrigin: "http://127.0.0.1:1234", cause: errors.New("probe failed")}
-		_, err := waitForSupervisedDaemon(t.Context(), "/example/config.toml", func(context.Context) bool { return false }, func(context.Context) (ensureDiscovery, error) {
-			return ensureDiscovery{}, probe
-		})
-		require.NotContains(t, err.Error(), "service manager")
-		var advised interface{ RecoveryAdvice() string }
-		require.ErrorAs(t, err, &advised)
-		require.Contains(t, advised.RecoveryAdvice(), "http://127.0.0.1:1234/debug/pprof/goroutine?debug=2")
-		require.Equal(t, 1, strings.Count(advised.RecoveryAdvice(), "service manager"))
+	t.Run("named profile", func(t *testing.T) {
+		err := &LocalDaemonUnreachableError{PID: 123, VerifiedProcess: true, Profile: "work profile", ProfileAutostart: true}
+		command := "kata --daemon 'work profile' daemon recover"
+		if runtime.GOOS == "windows" {
+			command = "'kata' '--daemon' 'work profile' 'daemon' 'recover'"
+		}
+		require.Contains(t, err.RecoveryAdvice(), command)
 	})
 }
 

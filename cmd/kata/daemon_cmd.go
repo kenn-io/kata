@@ -672,10 +672,6 @@ func daemonStatusCmd() *cobra.Command {
 				statusErr = cliDaemonTargetError(err)
 			} else if selected.State != "ready" {
 				statusErr = diagnosisError(selected)
-				if selected.State == "local_unreachable" && selected.Message != "" {
-					e := statusErr.(*cliError)
-					e.Message, e.Hint, e.Data = selected.State, "", nil
-				}
 			}
 			for _, r := range recs {
 				// Match discovery, which can select a record controls skip.
@@ -713,9 +709,6 @@ func daemonStatusCmd() *cobra.Command {
 				if selected.Message != "" {
 					message = " message=" + agentValue(selected.Message)
 				}
-				if selected.NextAction != "" && selected.State == "local_unreachable" {
-					message += " next_action=" + agentValue(selected.NextAction)
-				}
 				if selected.RootSigning != nil {
 					message += " root_signing=unavailable"
 				}
@@ -734,11 +727,6 @@ func daemonStatusCmd() *cobra.Command {
 			}
 			if selected.Message != "" {
 				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "  reason: %s\n", selected.Message); err != nil {
-					return err
-				}
-			}
-			if selected.State == "local_unreachable" && selected.NextAction != "" {
-				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "  next: %s\n", selected.NextAction); err != nil {
 					return err
 				}
 			}

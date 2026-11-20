@@ -237,9 +237,6 @@ func waitForSupervisedDaemon(
 	err := waitForDaemonStartup(ctx, nil, daemonStartupWait, nil, func(ctx context.Context) (bool, error) {
 		found, err := scan(ctx)
 		if err != nil && !errors.Is(err, ErrLocalDaemonUnreachable) {
-			if _, ok := errors.AsType[*LocalDaemonUnreachableError](err); ok {
-				unreachable = err
-			}
 			return false, err
 		}
 		unreachable = err
@@ -259,9 +256,8 @@ func waitForSupervisedDaemon(
 		return RunningDaemon{}, err
 	}
 	message := fmt.Errorf("%w; did not become ready (limit %s or the caller's deadline) (%s)", ErrDaemonManagedExternally, daemonStartupWait, configPath)
-	migrationActive := migrating(ctx)
 	advice := ""
-	if migrationActive {
+	if migrating(ctx) {
 		message = fmt.Errorf("%w; a SQLite migration is in progress; retry when it finishes and do not interrupt the daemon (%s)", ErrDaemonManagedExternally, configPath)
 	} else if !errors.Is(caller.Err(), context.Canceled) {
 		advice = "start or restart it with your service manager"

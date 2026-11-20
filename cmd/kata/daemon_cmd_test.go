@@ -614,10 +614,13 @@ func TestDaemonStatus_AgentReportsWebURL(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	stdout, _, _ := executeRootCapture(t, t.Context(), "--agent", "daemon", "status")
+	stdout, _, err := executeRootCapture(t, t.Context(), "--agent", "daemon", "status")
 	out := []byte(stdout)
 	assert.True(t, strings.HasPrefix(string(out), "OK daemon status=running web_url=http://127.0.0.1:28888 selected_state=local_unreachable selected_profile=\"\" message="))
-	assert.Contains(t, string(out), "unreachable")
+	assert.Contains(t, string(out), "daemon.log")
+	cliErr := requireCLIError(t, err, ExitDaemonUnavail)
+	assert.Contains(t, cliErr.Message, "unreachable")
+	assert.Contains(t, cliErr.Hint, "Recheck the PID")
 }
 
 func TestDaemonStatusReportsMCPState(t *testing.T) {

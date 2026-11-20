@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -184,10 +185,12 @@ func TestLocalProfileTargetErrorsAreStructured(t *testing.T) {
 }
 
 func TestManagedExternallyTargetErrorIsStructured(t *testing.T) {
-	cause := fmt.Errorf("%w; did not become ready: %w", client.ErrDaemonManagedExternally, context.DeadlineExceeded)
+	advice := &client.LocalDaemonUnreachableError{PID: 123, ManagedExternally: true, VerifiedProcess: true}
+	cause := errors.Join(client.ErrDaemonManagedExternally, context.DeadlineExceeded, advice)
 	err := cliDaemonTargetError(cause)
 	var target *cliError
 	require.ErrorAs(t, err, &target)
 	assert.Equal(t, ExitDaemonUnavail, target.ExitCode)
 	assert.Equal(t, cause.Error(), target.Message)
+	assert.Equal(t, advice.RecoveryAdvice(), target.Hint)
 }

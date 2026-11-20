@@ -97,9 +97,6 @@ func (e *LocalDaemonUnreachableError) Summary() string {
 // RecoveryAdvice describes actions appropriate for the selected process.
 func (e *LocalDaemonUnreachableError) RecoveryAdvice() string {
 	message := ""
-	if errors.Is(e.cause, context.Canceled) {
-		return message
-	}
 	if e.WebOrigin != "" {
 		message = "Try to save goroutine stacks from " + e.WebOrigin + "/debug/pprof/goroutine?debug=2 without a token. If authentication is required, send the token in an Authorization: Bearer header only to an independently verified endpoint, such as the owner-only Unix socket. "
 	}
@@ -189,8 +186,11 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 			address := ep.ConfigAddress()
 			url, info, probeErr := probe(ctx, address)
 			if probeErr != nil {
-				evidence := NewLocalDaemonUnreachable(dataDir, r, probeErr)
-				if !yield(liveDaemon{}, evidence) || ctx.Err() != nil {
+				if err := ctx.Err(); err != nil {
+					yield(liveDaemon{}, err)
+					return
+				}
+				if !yield(liveDaemon{}, NewLocalDaemonUnreachable(dataDir, r, probeErr)) {
 					return
 				}
 				continue
