@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -46,6 +47,20 @@ type fakeListAPI struct {
 	searchFn    func(SearchQuery) (*SearchAnswer, error)
 	searchCalls []SearchQuery
 	searchPIDs  []int64
+	// readFn answers ReadIssue by ref; the ref is recorded first.
+	readFn   func(ref string) (*Issue, error)
+	readRefs []string
+	readMu   sync.Mutex
+}
+
+func (f *fakeListAPI) ReadIssue(_ context.Context, _ int64, ref string) (*Issue, error) {
+	f.readMu.Lock()
+	f.readRefs = append(f.readRefs, ref)
+	f.readMu.Unlock()
+	if f.readFn == nil {
+		return nil, errors.New("unexpected ReadIssue " + ref)
+	}
+	return f.readFn(ref)
 }
 
 func (f *fakeListAPI) SearchIssues(

@@ -491,6 +491,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m, postFetchCmd = m.reconcileSplitDetailAfterRefetch(prevPID, prevUID, prevHas)
 		}
+		var recheckCmd tea.Cmd
+		m, recheckCmd = m.recheckRankedHits()
+		postFetchCmd = combineCmds(postFetchCmd, recheckCmd)
 	}
 	if mut, ok := msg.(mutationDoneMsg); ok {
 		m = m.recordUndoAttempt(mut)
@@ -2090,6 +2093,16 @@ func (m Model) commitInput() (Model, tea.Cmd) {
 			}, m.connGen)
 		}
 	}
+	if kind == inputSearchBar {
+		// Closing the bar ends the live ranked view, so the rows can change
+		// to a plain text filter; selection and the split detail follow.
+		prevPID, prevUID, prevHas := highlightedIdentity(m.list)
+		m.input = inputState{}
+		m = m.syncDaemonSearch()
+		m.list = m.list.clampCursorToFilter()
+		m.list = m.list.syncSelection(m.list.visibleRows())
+		return m.reconcileSplitDetailAfterRefetch(prevPID, prevUID, prevHas)
+	}
 	m.input = inputState{}
 	return m, nil
 }
@@ -2445,6 +2458,13 @@ func dispatchFormEditBody(
 // no live mirror: the filter form writes lm.filter only on commit, so
 // cancelling it just closes it.
 func (m Model) cancelInput() (Model, tea.Cmd) {
+	m, cmd := m.closeInput()
+	var recheckCmd tea.Cmd
+	m, recheckCmd = m.recheckRankedHits()
+	return m, combineCmds(cmd, recheckCmd)
+}
+
+func (m Model) closeInput() (Model, tea.Cmd) {
 	searchCanceled := m.input.kind.isCommandBar()
 	restoreSplitDetail := searchCanceled && m.input.restoreSplitDetail
 	preSplitDetail := m.input.preSplitDetail
@@ -2454,7 +2474,9 @@ func (m Model) cancelInput() (Model, tea.Cmd) {
 		pre.Day = m.list.filter.Day
 		m.list.filter = pre
 		// An answer still in flight belongs to the query being discarded.
-		m.list.ranked = m.input.preRanked.discardInFlight()
+		// The saved answer predates any refresh since the bar opened, so bring
+		// it up to the loaded rows before it comes back.
+		m.list.ranked = m.input.preRanked.discardInFlight().refreshed(m.list.issues, !m.list.truncated)
 		m.searchTickGen++
 		snapshot := m.input.preListSelection
 		m.list.cursor = snapshot.cursor

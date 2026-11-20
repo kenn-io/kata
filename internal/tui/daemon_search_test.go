@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -24,6 +25,10 @@ type searchModelAPI struct {
 
 func (a searchModelAPI) SearchIssues(ctx context.Context, pid int64, q SearchQuery) (*SearchAnswer, error) {
 	return a.fake.SearchIssues(ctx, pid, q)
+}
+
+func (a searchModelAPI) ReadIssue(ctx context.Context, pid int64, ref string) (*Issue, error) {
+	return a.fake.ReadIssue(ctx, pid, ref)
 }
 
 var ctrlT = tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl}
@@ -508,6 +513,128 @@ func TestDaemonSearch_FooterHintFollowsTheKey(t *testing.T) {
 			assertHelpItemPresent(t, rows, *tc.want)
 		})
 	}
+}
+
+func TestDaemonSearch_HitsBeyondTheLoadedListAreReadBeforeFiltering(t *testing.T) {
+	m, api := daemonSearchFixture(t)
+	alpha, _, _ := searchTestIssues()
+	alpha.Labels = []string{"bug"}
+	m.list.issues = []Issue{alpha}
+	far := Issue{ProjectID: 7, UID: "01TEST-far1", ShortID: "far1", Title: "beyond the limit", Status: "open"}
+	deleted := Issue{ProjectID: 7, UID: "01TEST-del1", ShortID: "del1", Title: "deleted", Status: "open"}
+	moved := Issue{ProjectID: 7, UID: "01TEST-mov1", ShortID: "mov1", Title: "moved", Status: "open"}
+	api.searchFn = answerWith("hybrid", far, alpha, deleted, moved)
+	api.readFn = func(ref string) (*Issue, error) {
+		switch ref {
+		case far.UID:
+			labelled := far
+			labelled.Labels = []string{"bug"}
+			return &labelled, nil
+		case moved.UID:
+			elsewhere := moved
+			elsewhere.ProjectID = 8
+			return &elsewhere, nil
+		}
+		return nil, &APIError{Status: http.StatusNotFound}
+	}
+	m.list.filter.Labels = []string{"bug"}
+
+	m = openBarFromCmd(t, m, '/')
+	m, _ = stepModel(m, ctrlT)
+	m, cmds := typeText(m, "payments")
+	m = settleSearch(m, cmds...)
+
+	require.Equal(t, []string{"01TEST-far1", "01TEST-aaa1"}, visibleUIDs(m), "daemon order; gone and moved hits dropped")
+	require.ElementsMatch(t, []string{far.UID, deleted.UID, moved.UID}, api.readRefs, "loaded hits are not read")
+}
+
+func TestDaemonSearch_RefreshRechecksHitsMissingFromATruncatedList(t *testing.T) {
+	m, api := daemonSearchFixture(t)
+	alpha, _, _ := searchTestIssues()
+	m.list.issues = []Issue{alpha}
+	far := Issue{ProjectID: 7, UID: "01TEST-far1", ShortID: "far1", Title: "beyond the limit", Status: "open"}
+	api.searchFn = answerWith("hybrid", far, alpha)
+	api.readFn = func(string) (*Issue, error) { return &far, nil }
+	m = openBarFromCmd(t, m, '/')
+	m, _ = stepModel(m, ctrlT)
+	m, cmds := typeText(m, "payments")
+	m = settleSearch(m, cmds...)
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.Equal(t, []string{"01TEST-far1", "01TEST-aaa1"}, visibleUIDs(m))
+
+	// Someone else deletes the far issue; the refresh holds only the first 2,000.
+	api.readFn = func(string) (*Issue, error) { return nil, &APIError{Status: http.StatusNotFound} }
+	refetched := []Issue{alpha}
+	for i := range queueWorkingSetLimit {
+		refetched = append(refetched, Issue{ProjectID: 7, UID: fmt.Sprintf("01FILL-%04d", i), ShortID: fmt.Sprintf("f%04d", i), Status: "open"})
+	}
+	m, cmd := stepModel(m, refetchedMsg{dispatchKey: m.currentCacheKey(), issues: refetched})
+	require.True(t, m.list.truncated)
+	require.Equal(t, []string{"01TEST-far1", "01TEST-aaa1"}, visibleUIDs(m), "an incomplete list cannot say it is gone")
+	for _, msg := range runCmdTree(cmd) {
+		if recheck, ok := msg.(daemonSearchRecheckMsg); ok {
+			m, _ = stepModel(m, recheck)
+		}
+	}
+
+	require.Equal(t, []string{"01TEST-aaa1"}, visibleUIDs(m))
+}
+
+func TestDaemonSearch_EscRestoresRankedHitsBroughtUpToDate(t *testing.T) {
+	m, api := daemonSearchFixture(t)
+	alpha, _, gamma := searchTestIssues()
+	api.searchFn = answerWith("hybrid", gamma, alpha)
+	m = openBarFromCmd(t, m, '/')
+	m, _ = stepModel(m, ctrlT)
+	m, cmds := typeText(m, "payments")
+	m = settleSearch(m, cmds...)
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	m = openBarFromCmd(t, m, '/')
+	m, _ = stepModel(m, refetchedMsg{dispatchKey: m.currentCacheKey(), issues: []Issue{alpha}})
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+
+	require.Equal(t, []string{"01TEST-aaa1"}, visibleUIDs(m), "the issue deleted meanwhile does not return")
+}
+
+func TestDaemonSearch_CommitWhileAskPendingFollowsSelectionInSplitDetail(t *testing.T) {
+	m, api := daemonSearchFixture(t)
+	_, _, gamma := searchTestIssues()
+	api.searchFn = answerWith("hybrid", gamma)
+	m = resizeModel(m, 160, 40)
+	require.Equal(t, splitlayout.Split, m.layout)
+	m = openBarFromCmd(t, m, '/')
+	m, _ = stepModel(m, ctrlT)
+	m, cmds := typeText(m, "login")
+	m, _ = stepModel(m, onlyMsg(t, cmds[len(cmds)-1])) // the ask goes out; its answer never arrives
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.NotNil(t, m.detail.issue)
+	require.NotEqual(t, "01TEST-ccc3", m.detail.issue.UID, "the pane follows the unfiltered row while asking")
+
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	require.Equal(t, []string{"01TEST-ccc3"}, visibleUIDs(m), "the committed text filters loaded rows")
+	require.Equal(t, "01TEST-ccc3", m.detail.issue.UID)
+}
+
+func TestDaemonSearch_AnswerForEarlierTextIsDroppedAndAskedAgain(t *testing.T) {
+	m, api := daemonSearchFixture(t)
+	alpha, _, _ := searchTestIssues()
+	api.searchFn = answerWith("hybrid", alpha)
+	m = openBarFromCmd(t, m, '/')
+	m, _ = stepModel(m, ctrlT)
+	m, cmds := typeText(m, "pay")
+	m, ask := stepModel(m, onlyMsg(t, cmds[len(cmds)-1]))
+	slow := onlyMsg(t, ask)
+	m, _ = typeText(m, "ments") // the next ask has not gone out yet
+
+	m, _ = stepModel(m, slow)
+
+	require.False(t, m.list.ranked.hasAnswer, "an answer for \"pay\" must not replace rows for \"payments\"")
+	require.Len(t, visibleUIDs(m), 3)
+	require.Empty(t, m.list.ranked.asked, "typing \"pay\" again would ask again")
 }
 
 func TestDaemonSearch_RendersCompletelyAtEverySize(t *testing.T) {
