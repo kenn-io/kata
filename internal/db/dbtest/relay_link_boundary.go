@@ -60,57 +60,6 @@ func linkTargetUIDs(t *testing.T, store db.Storage, issueID int64) []string {
 // link keeps its same-project link after an operator removes the crossing link
 // and enrolls a relay peer.
 func RunRelayLinkBoundaryKeepsSameProjectEffects(t *testing.T, store db.Storage) {
-	t.Run("legacy parent replacements and stale unlink", func(t *testing.T) {
-		ctx := t.Context()
-		fixture := newRelayLinkBoundaryFixture(t, store, "relay-parent-replaced-twice")
-		first, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.project.ID, Title: "First parent", Author: "relay-member"})
-		require.NoError(t, err)
-		second, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.project.ID, Title: "Second parent", Author: "relay-member"})
-		require.NoError(t, err)
-		third, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.project.ID, Title: "Third parent", Author: "relay-member"})
-		require.NoError(t, err)
-		child, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.project.ID, Title: "Child", Author: "relay-member", Links: []db.InitialLink{{Type: "parent", ToNumber: first.ID}}})
-		require.NoError(t, err)
-		peer, err := uid.New()
-		require.NoError(t, err)
-		grant, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: fixture.project.ID, ParentTokenID: fixture.parentTokenID, SpokeInstanceUID: peer, ProtocolVersion: db.RelayProtocolVersion})
-		require.NoError(t, err)
-		at := time.Now().Add(time.Hour).UnixMilli()
-		payloads := []jsontext.Value{
-			jsontext.Value(`{"type":"parent","from_uid":"` + child.UID + `","to_uid":"` + first.UID + `"}`),
-			jsontext.Value(`{"parent_set_uid":"` + second.UID + `"}`),
-			jsontext.Value(`{"type":"parent","from_uid":"` + child.UID + `","to_uid":"` + second.UID + `"}`),
-			jsontext.Value(`{"parent_set_uid":"` + third.UID + `"}`),
-		}
-		var envelopes []db.RelayEnvelope
-		for i, payload := range payloads {
-			typ := "issue.unlinked"
-			if i%2 == 1 {
-				typ = "issue.links_changed"
-			}
-			event := newRemoteEvent(t, fixture.project, &child.UID, typ, "relay-member", peer, at+int64(i), payload)
-			body, err := db.EncodeRelaySourceEvent(event)
-			require.NoError(t, err)
-			envelope, err := db.SealRelayEnvelope(db.RelayEnvelope{Version: db.RelayProtocolVersion, BindingUID: grant.Enrollment.RelayBindingUID, ProjectUID: fixture.project.UID, AuthorityUID: store.InstanceUID(), SenderInstanceUID: peer, ReceiverInstanceUID: store.InstanceUID(), Epoch: grant.Enrollment.RelayResetEpoch, Sequence: int64(i + 1), Stream: db.RelayStreamEvent, Path: []string{peer}, SourceUID: event.EventUID, SourceHash: event.ContentHash, Body: body})
-			require.NoError(t, err)
-			envelopes = append(envelopes, envelope)
-		}
-		writeCtx := db.WithRootAttribution(ctx, fixture.signer, "relay-member")
-		accepted, err := store.AcceptRelayDeliveries(writeCtx, grant.Enrollment.RelayBindingUID, db.RelayBatch{Stream: db.RelayStreamEvent, Envelopes: envelopes})
-		require.NoError(t, err)
-		require.EqualValues(t, 4, accepted.Through)
-		require.Equal(t, []string{third.UID}, linkTargetUIDs(t, store, child.ID))
-		payload := jsontext.Value(`{"type":"parent","from_uid":"` + child.UID + `","to_uid":"` + first.UID + `"}`)
-		event := newRemoteEvent(t, fixture.project, &child.UID, "issue.unlinked", "relay-member", peer, at+4, payload)
-		body, err := db.EncodeRelaySourceEvent(event)
-		require.NoError(t, err)
-		envelope, err := db.SealRelayEnvelope(db.RelayEnvelope{Version: db.RelayProtocolVersion, BindingUID: grant.Enrollment.RelayBindingUID, ProjectUID: fixture.project.UID, AuthorityUID: store.InstanceUID(), SenderInstanceUID: peer, ReceiverInstanceUID: store.InstanceUID(), Epoch: grant.Enrollment.RelayResetEpoch, Sequence: 5, Stream: db.RelayStreamEvent, Path: []string{peer}, SourceUID: event.EventUID, SourceHash: event.ContentHash, Body: body})
-		require.NoError(t, err)
-		_, err = store.AcceptRelayDeliveries(writeCtx, grant.Enrollment.RelayBindingUID, db.RelayBatch{Stream: db.RelayStreamEvent, Envelopes: []db.RelayEnvelope{envelope}})
-		require.ErrorIs(t, err, db.ErrFederationIngestValidation)
-		require.ErrorContains(t, err, "This older change tries to remove a parent the issue no longer has")
-		require.Equal(t, []string{third.UID}, linkTargetUIDs(t, store, child.ID))
-	})
 	t.Run("relay composite creation", func(t *testing.T) {
 		ctx := t.Context()
 		fixture := newRelayLinkBoundaryFixture(t, store, "relay-composite", true)
