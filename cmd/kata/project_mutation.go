@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"go.kenn.io/kata/internal/shortid"
 	kataclient "go.kenn.io/kata/pkg/client"
 )
 
@@ -84,20 +83,6 @@ func prepareIssueMutation(cmd *cobra.Command, ref string, resolveNow bool) (*pro
 		return p, resolvedIssueRef{RefForAPI: parsed.RefForAPI, ProjectName: p.name}, nil
 	}
 	p := &projectMutation{api: a, name: parsed.ProjectName, selector: "name:" + parsed.ProjectName}
-	issueID, parseErr := shortid.Parse(ref)
-	if cmd.Name() == "comment" && flags.Project != "" && parseErr == nil && issueID.ULID != "" {
-		if id, e := strconv.ParseInt(project, 10, 64); e == nil && id > 0 {
-			p.id, p.selector = id, project
-			if resolveNow {
-				matched, e := resolveProjectSelector(a, project)
-				if e != nil {
-					return nil, resolvedIssueRef{}, e
-				}
-				p.name = matched.Name
-			}
-			return p, resolvedIssueRef{RefForAPI: parsed.RefForAPI, ProjectName: p.name}, nil
-		}
-	}
 	if resolveNow {
 		p.id, p.name, err = resolveProjectIDAndNameForRef(a, start, parsed.ProjectName, false)
 		if err != nil {

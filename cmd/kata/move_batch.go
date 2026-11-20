@@ -203,7 +203,7 @@ func runMoveBatch(cmd *cobra.Command, args []string, refsFrom string) error {
 		if e != nil {
 			detail := strings.Replace(e.Error(), " (rerun the original kata close command with the same --idempotency-key)", "", 1)
 			r.Message = strings.TrimSpace(r.Message + " comment failed: " + detail)
-			r.Hint = fmt.Sprintf("retry with: kata comment %s --project %d --body ... --idempotency-key %s%s", r.UID, r.targetID, key, moveBatchRecoveryFlags())
+			r.Hint = fmt.Sprintf("retry with: kata comment %s --project TARGET --body ... --idempotency-key %s%s", r.UID, key, moveBatchRecoveryFlags())
 			if cmd.Flags().Changed("as") {
 				r.Hint += " --as " + shellQuote(flags.As)
 			}
@@ -333,7 +333,7 @@ func moveBatchOne(a daemonAPI, client *kataclient.Client, prepared *moveBatchPre
 	unknown := func() {
 		halt.Store(true)
 		result.Result = "unknown"
-		result.Hint = fmt.Sprintf("outcome unconfirmed; run kata show %s --project %d --json%s to inspect the target. Check move history before retrying if the issue may have moved more than once.", result.UID, result.targetID, moveBatchRecoveryFlags())
+		result.Hint = fmt.Sprintf("outcome unconfirmed; run kata show %s --project TARGET --json%s to inspect the target. Check move history before retrying if the issue may have moved more than once.", result.UID, moveBatchRecoveryFlags())
 	}
 	if response == nil {
 		transportErr, marked := errors.AsType[*daemonTransportError](callErr)
