@@ -74,7 +74,7 @@ func runShow(cmd *cobra.Command, issueRef, agentOperation string, opts showRunOp
 	var ref resolvedIssueRef
 	var err error
 	parsed, parseErr := shortid.Parse(issueRef)
-	byUID := parseErr == nil && parsed.ULID != ""
+	byUID := parseErr == nil && parsed.ULID != "" && flags.Project == ""
 	if byUID {
 		a, dialErr := dialDaemon(cmd.Context())
 		if dialErr != nil {

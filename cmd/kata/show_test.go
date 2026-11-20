@@ -511,6 +511,19 @@ func TestShow_LinkLabelInvertsOnToSide(t *testing.T) {
 		"showing the parent issue must label the link as `child` from its POV")
 }
 
+func TestShowUIDHonorsExplicitProject(t *testing.T) {
+	env, dir, source, target, issue := setupMoveCLIProjects(t)
+	ctx := contextWithBaseURL(t.Context(), env.URL)
+	out, _, err := executeRootCapture(t, ctx, "--workspace", dir, "--project", source.Name, "show", issue.UID, "--json")
+	require.NoError(t, err, out)
+	require.Contains(t, out, issue.UID)
+	_, _, err = executeRootCapture(t, ctx, "--workspace", dir, "--project", target.Name, "show", issue.UID, "--json")
+	require.Error(t, err)
+	out, _, err = executeRootCapture(t, ctx, "--workspace", t.TempDir(), "show", issue.UID, "--json")
+	require.NoError(t, err, out)
+	require.Contains(t, out, issue.UID)
+}
+
 func TestShowUIDUsesSelectedGlobalResponse(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
 	t.Setenv("KATA_AUTHOR", "tester")

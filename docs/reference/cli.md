@@ -991,7 +991,7 @@ kata list --label triaged --limit 0 --json | jq -r '.issues[].uid' > refs.txt
 kata move --refs-from refs.txt target-project
 ```
 
-A refs file has one `ref` or `ref<TAB>project` per line and can be at most 8 MiB.
+A refs file has one `ref` or `ref<TAB>project` per line.
 Blank lines are ignored. Refs files have no comment syntax; a line such as
 `# note` is treated as an issue ref.
 A row's own project wins over the positional target. An empty refs file succeeds

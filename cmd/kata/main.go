@@ -328,7 +328,7 @@ func emitJSONError(w io.Writer, err error, runEReached bool) {
 
 func emitHumanError(w io.Writer, err error, runEReached bool) {
 	cli := cliErrorForErr(err, runEReached)
-	if cli.Code == "batch_refused_reported" {
+	if cli.Message == "" {
 		return
 	}
 	message := cli.Message

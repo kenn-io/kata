@@ -22,9 +22,8 @@ import (
 )
 
 const (
-	moveBatchMaxItems     = 5000
-	moveBatchMaxFileBytes = 8 * 1024 * 1024
-	moveBatchWorkers      = 6
+	moveBatchMaxItems = 5000
+	moveBatchWorkers  = 6
 )
 
 type moveBatchRow struct{ Ref, Target string }
@@ -58,9 +57,7 @@ func moveBatchUsage(format string, args ...any) error {
 
 // parseRefsFrom reads one `ref` or `ref<TAB>target` row per line.
 func parseRefsFrom(r io.Reader, sharedTarget string) ([]moveBatchRow, error) {
-	limited := &io.LimitedReader{R: r, N: moveBatchMaxFileBytes + 1}
-	scanner := bufio.NewScanner(limited)
-	scanner.Buffer(make([]byte, 4096), moveBatchMaxFileBytes+2)
+	scanner := bufio.NewScanner(r)
 	var rows []moveBatchRow
 	for line := 1; len(rows) <= moveBatchMaxItems && scanner.Scan(); line++ {
 		text := strings.TrimSuffix(scanner.Text(), "\r")
@@ -76,9 +73,6 @@ func parseRefsFrom(r io.Reader, sharedTarget string) ([]moveBatchRow, error) {
 			return nil, moveBatchUsage("refs file line %d: expected ref or ref<TAB>project", line)
 		}
 		rows = append(rows, row)
-	}
-	if limited.N == 0 {
-		return nil, moveBatchUsage("refs file exceeds %d bytes; split the input into separate runs", moveBatchMaxFileBytes)
 	}
 	if scanner.Err() != nil {
 		return nil, moveBatchUsage("read refs file: %v", scanner.Err())
@@ -243,7 +237,7 @@ func runMoveBatch(cmd *cobra.Command, args []string, refsFrom string) error {
 		combined := errors.Join(outcome, errors.Join(commentErrs...))
 		cli := *cliErrorForErr(combined, true)
 		cli.Code = ""
-		cli.Message = combined.Error()
+		cli.Message = strings.TrimSpace(combined.Error())
 		return errors.Join(&cli, printErr)
 	}
 	return errors.Join(outcome, printErr)
@@ -408,7 +402,7 @@ func moveBatchRefusalError(printErr error) error {
 	if printErr != nil {
 		err.Message += ": " + printErr.Error()
 	} else if currentOutputMode() == outputHuman {
-		err.Code = "batch_refused_reported"
+		err.Message = ""
 	}
 	return err
 }
