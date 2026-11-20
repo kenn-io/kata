@@ -573,7 +573,7 @@ func printDaemonDiagnosis(cmd *cobra.Command, result daemonDiagnosis) error {
 			return err
 		}
 	}
-	if result.Endpoint != "" {
+	if result.Endpoint != "" && !strings.Contains(result.Message, result.Endpoint) {
 		if _, err = fmt.Fprintf(cmd.OutOrStdout(), "  endpoint: %s\n", result.Endpoint); err != nil {
 			return err
 		}

@@ -986,6 +986,21 @@ func TestDaemonDiagnosisOmitsEmptyAction(t *testing.T) {
 	require.NotContains(t, out.String(), "next:")
 }
 
+func TestDaemonDiagnosisPrintsEndpointOnce(t *testing.T) {
+	resetFlags(t)
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	result := daemonDiagnosis{State: "local_unreachable", Endpoint: "127.0.0.1:7777", Message: "daemon pid 123 is running at 127.0.0.1:7777 but is unreachable: probe failed"}
+	require.NoError(t, printDaemonDiagnosis(cmd, result))
+	require.Equal(t, 1, strings.Count(out.String(), result.Endpoint))
+	require.Contains(t, out.String(), "probe failed")
+	out.Reset()
+	result.Message = "probe failed"
+	require.NoError(t, printDaemonDiagnosis(cmd, result))
+	require.Contains(t, out.String(), result.Endpoint)
+}
+
 func TestDiagnoseDiscoveryUsesOverallProbeTimeout(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
