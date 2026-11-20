@@ -333,7 +333,7 @@ jobs:
         with:
           persist-credentials: false
 
-      # Go tests is the only writer of the per-commit Linux Go cache.
+      # Go tests is the only writer of the per-commit Linux Go cache; PostgreSQL jobs restore it.
       - name: Set up Go
         id: setup-go
         uses: actions/setup-go@v7.0.0
@@ -436,7 +436,7 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.restore-go-cache.outputs.cache-hit != 'true'
         run: |
           make web-embed
-          # Mirror the targets in .goreleaser.yaml.
+          # Mirror .goreleaser.yaml's kata targets and flags: CGO_ENABLED=0, -trimpath, and -buildvcs=false.
           for os in linux darwin windows; do
             for arch in amd64 arm64; do
               CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -buildvcs=false -o /dev/null ./cmd/kata
