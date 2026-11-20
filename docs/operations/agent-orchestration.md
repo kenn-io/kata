@@ -167,7 +167,7 @@ workspace contract and removes an untracked duplicate. Tracked workspace hook
 files keep both hooks for teammates without a user hook. The normal attention
 entry keeps its trust key, and `kata init` warns when removing a duplicate
 shifts surviving hooks and requires re-trust through `/hooks`. If you remove the
-user hook, re-run `kata init` to restore workspace contract injection. See the
+user hook, re-run `kata init --with-codex-hooks` to restore workspace contract injection. See the
 [init reference](../reference/cli.md#workspace-initialization) for ownership,
 config selection, and the tracked-file exception.
 
