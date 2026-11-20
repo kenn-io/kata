@@ -252,7 +252,7 @@ func TestUnreachableErrorRelaunchPaths(t *testing.T) {
 		managed, auto, profile bool
 		want                   string
 	}{
-		{"manual", false, false, false, "run the original command"},
+		{"manual", false, false, false, "start it again the way you originally started it (same options and environment)"},
 		{"automatic", false, true, false, "rerun the command that failed"},
 		{"managed", true, false, false, "service manager"},
 		{"profile", false, false, true, "kata --daemon work daemon recover"},
@@ -289,7 +289,7 @@ func TestUnreachableErrorRelaunchPaths(t *testing.T) {
 			_, afterKill, ok := strings.Cut(text, ". Then ")
 			require.True(t, ok)
 			require.NotContains(t, afterKill, "daemon restart")
-			for _, other := range []string{"run the original command", "rerun the command that failed", "service manager", "kata --daemon work daemon recover"} {
+			for _, other := range []string{"start it again the way you originally started it (same options and environment)", "rerun the command that failed", "service manager", "kata --daemon work daemon recover"} {
 				if other != tc.want {
 					require.NotContains(t, afterKill, other)
 				}

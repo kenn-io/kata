@@ -133,7 +133,7 @@ func (e *LocalDaemonUnreachableError) RecoveryAdvice() string {
 	case e.autoStarted:
 		return message + ". Then rerun the command that failed"
 	default:
-		return message + ". Then run the original command"
+		return message + ". Then start it again the way you originally started it (same options and environment)"
 	}
 }
 
