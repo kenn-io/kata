@@ -2,6 +2,10 @@ package main
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -78,9 +82,17 @@ func TestIssueRefCommandsProjectIDAndQualifiedName(t *testing.T) {
 	out, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "--project", selector, "show", issue.UID)
 	require.NoError(t, err)
 	require.Contains(t, out, issue.Title)
-	out, _, err = executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "--project", selector, "comment", issue.UID, "--body", "recovered comment")
+	upstream, err := url.Parse(env.URL)
 	require.NoError(t, err)
-	require.Contains(t, out, "comment appended")
+	proxy := &httputil.ReverseProxy{Rewrite: func(r *httputil.ProxyRequest) { r.SetURL(upstream) }, ModifyResponse: func(r *http.Response) error {
+		r.Header.Del("X-Kata-Project-Name")
+		return nil
+	}}
+	server := httptest.NewServer(proxy)
+	t.Cleanup(server.Close)
+	out, _, err = executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL), "--workspace", dir, "--project", selector, "comment", issue.UID, "--body", "recovered comment", "--agent")
+	require.NoError(t, err)
+	require.Contains(t, out, "OK comment "+issue.ShortID)
 	stored := fetchIssueViaHTTPWithComments(t, env, target.ID, issue.ShortID)
 	require.Len(t, stored.Comments, 1)
 	require.Equal(t, "recovered comment", stored.Comments[0].Body)

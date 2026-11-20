@@ -65,19 +65,12 @@ func resolveIssueRefForCommandWithOptions(
 			ExitCode: ExitValidation,
 		}
 	}
-	if !strings.Contains(ref, "#") && strings.TrimSpace(flags.Project) != "" {
-		if _, err := strconv.ParseInt(bareProject, 10, 64); err == nil {
-			var project projectRef
-			if includeArchivedProject {
-				project, err = resolveProjectSelectorIncludingArchived(a, bareProject)
-			} else {
-				project, err = resolveProjectSelector(a, bareProject)
-			}
-			if err != nil {
-				return nil, "", 0, resolvedIssueRef{}, err
-			}
-			return a.ctx, a.baseURL, project.ID, resolvedIssueRef{RefForAPI: parsed.RefForAPI, ProjectName: project.Name}, nil
-		}
+	project, numeric, err := resolveNumericRefProject(a, ref, includeArchivedProject)
+	if err != nil {
+		return nil, "", 0, resolvedIssueRef{}, err
+	}
+	if numeric {
+		return a.ctx, a.baseURL, project.ID, resolvedIssueRef{RefForAPI: parsed.RefForAPI, ProjectName: project.Name}, nil
 	}
 	pid, projectName, err := resolveProjectIDAndNameForRef(
 		a, start, parsed.ProjectName, includeArchivedProject,
@@ -89,6 +82,23 @@ func resolveIssueRefForCommandWithOptions(
 		RefForAPI:   parsed.RefForAPI,
 		ProjectName: projectName,
 	}, nil
+}
+
+// resolveNumericRefProject handles an explicit numeric flag only for bare refs.
+func resolveNumericRefProject(a daemonAPI, ref string, includeArchived bool) (projectRef, bool, error) {
+	selector := strings.TrimSpace(flags.Project)
+	if selector == "" || strings.Contains(ref, "#") {
+		return projectRef{}, false, nil
+	}
+	if _, err := strconv.ParseInt(selector, 10, 64); err != nil {
+		return projectRef{}, false, nil
+	}
+	if includeArchived {
+		project, err := resolveProjectSelectorIncludingArchived(a, selector)
+		return project, true, err
+	}
+	project, err := resolveProjectSelector(a, selector)
+	return project, true, err
 }
 
 // resolveProjectIDAndNameForRef resolves the project ID + canonical project
