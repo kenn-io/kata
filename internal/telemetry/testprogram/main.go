@@ -10,8 +10,9 @@ import (
 
 func main() {
 	version := flag.String("version", "v1.2.3", "build version")
+	commit := flag.String("commit", "1234567", "build commit")
 	flag.Parse()
-	reporter, err := telemetry.NewReporter(telemetry.Options{DistinctID: "anonymous-instance-id", Version: *version})
+	reporter, err := telemetry.NewReporter(telemetry.Options{DistinctID: "anonymous-instance-id", Version: *version, Commit: *commit})
 	if err != nil {
 		panic(err)
 	}

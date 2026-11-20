@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"go.kenn.io/kata/internal/version"
 	"go.kenn.io/kit/telemetry/posthog"
 )
 
@@ -53,10 +54,23 @@ type Options struct {
 	Commit      string
 }
 
+// Eligible reports whether this build can forward usage events.
+func Eligible() bool {
+	return eligibleBuild(version.Commit) && posthog.Eligible(envPrefix, version.Version)
+}
+
+func eligibleBuild(commit string) bool {
+	// Tagged Go installs have a release version but no embedded revision.
+	return commit != "unknown"
+}
+
 // NewReporter builds an enabled reporter, or a disabled one that keeps the
 // allowlist when telemetry is opted out or the build has no PostHog project
 // key. Release builds set that key at link time.
 func NewReporter(opts Options) (*Reporter, error) {
+	if !eligibleBuild(opts.Commit) {
+		opts.Version = "dev"
+	}
 	reporter, err := posthog.NewReporter(posthog.Options{
 		Logger:      slog.New(slog.DiscardHandler),
 		Endpoint:    postHogEndpoint,

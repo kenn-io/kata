@@ -25,6 +25,7 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/telemetry"
 	"go.kenn.io/kata/internal/testenv"
+	"go.kenn.io/kata/internal/version"
 )
 
 type recordingTelemetry struct {
@@ -57,6 +58,19 @@ func (r *recordingTelemetry) Capture(event string, properties map[string]any) er
 		close(r.finished)
 	}
 	return nil
+}
+
+func TestTaggedGoInstallDoesNotSendTUIUsage(t *testing.T) {
+	oldVersion, oldCommit := version.Version, version.Commit
+	version.Version, version.Commit = "v0.23.0", "unknown"
+	t.Cleanup(func() { version.Version, version.Commit = oldVersion, oldCommit })
+	t.Setenv("TELEMETRY_ENABLED", "1")
+	recorder := &recordingTelemetry{}
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = recorder })
+	c := NewClient(env.URL, env.HTTP)
+	require.NoError(t, c.ReportAppOpened(t.Context()))
+	assert.Nil(t, issueActionSurface(t.Context()))
+	assert.Empty(t, recorder.events)
 }
 
 func TestReportAppOpenedReachesDaemonCapture(t *testing.T) {

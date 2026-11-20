@@ -60,14 +60,15 @@ func TestStandaloneTelemetryAdmission(t *testing.T) {
 	release := build("telemetry-release", "-ldflags", testProjectKeyFlag)
 	source := build("telemetry-source")
 	for _, tc := range []struct {
-		name, binary, shared, product, version, want string
-		consent                                      *bool
+		name, binary, shared, product, version, want, commit string
+		consent                                              *bool
 	}{
-		{"fresh home", release, "", "", "v1.2.3", "disabled", nil},
-		{"consent yes", release, "", "", "v1.2.3", "enabled", new(true)},
-		{"product veto", release, "", "0", "v1.2.3", "disabled", new(true)},
-		{"development", release, "1", "", "dev", "disabled", nil},
-		{"no project key", source, "1", "", "v1.2.3", "disabled", nil},
+		{"fresh home", release, "", "", "v1.2.3", "disabled", "1234567", nil},
+		{"consent yes", release, "", "", "v1.2.3", "enabled", "1234567", new(true)},
+		{"product veto", release, "", "0", "v1.2.3", "disabled", "1234567", new(true)},
+		{"development", release, "1", "", "dev", "disabled", "1234567", nil},
+		{"no project key", source, "1", "", "v1.2.3", "disabled", "1234567", nil},
+		{"tagged go install", release, "1", "", "v0.23.0", "disabled", "unknown", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
@@ -76,7 +77,7 @@ func TestStandaloneTelemetryAdmission(t *testing.T) {
 			if tc.consent != nil {
 				require.NoError(t, posthog.RecordConsent(*tc.consent))
 			}
-			command := exec.CommandContext(t.Context(), tc.binary, "-version", tc.version) //nolint:gosec // test-owned standalone fixture
+			command := exec.CommandContext(t.Context(), tc.binary, "-version", tc.version, "-commit", tc.commit) //nolint:gosec // test-owned standalone fixture
 			command.Env = slices.DeleteFunc(os.Environ(), func(entry string) bool {
 				key, _, _ := strings.Cut(entry, "=")
 				return strings.EqualFold(key, "TELEMETRY_ENABLED") || strings.EqualFold(key, EnabledEnv)

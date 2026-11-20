@@ -30,6 +30,7 @@ import (
 	"go.kenn.io/kata/internal/telemetry"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/tui"
+	"go.kenn.io/kata/internal/version"
 	kataclient "go.kenn.io/kata/pkg/client"
 )
 
@@ -95,6 +96,17 @@ func settledCLIUse(t *testing.T, run func(*testing.T)) {
 }
 
 var cliSurface = []map[string]any{{"surface": "cli"}}
+
+func TestCLIUseSkipsTaggedGoInstall(t *testing.T) {
+	oldVersion, oldCommit := version.Version, version.Commit
+	version.Version, version.Commit = "v0.23.0", "unknown"
+	t.Cleanup(func() { version.Version, version.Commit = oldVersion, oldCommit })
+	t.Setenv("TELEMETRY_ENABLED", "1")
+	t.Setenv("KATA_TELEMETRY_ENABLED", "")
+	t.Setenv(hooks.HookVersionEnv, "")
+	stubIsTTY(t, true)
+	assert.False(t, reportsCLIUse(findCommand(t, "projects", "list")))
+}
 
 // newCLIUseEnv boots a daemon whose reporter is reporter, for a person at a
 // terminal with no hook marker inherited.
