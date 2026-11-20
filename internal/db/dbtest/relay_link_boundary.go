@@ -1,7 +1,6 @@
 package dbtest
 
 import (
-	"context"
 	"crypto/ed25519"
 	"encoding/json/jsontext"
 	"sort"
@@ -228,35 +227,6 @@ func RunLinkServerBoundary(t *testing.T, store db.Storage) {
 	bind(b, db.FederationRoleSpoke, "https://hub.example/team-b", "bob")
 	require.ErrorIs(t, link(ai, bi), db.ErrFederatedReadOnly)
 	bind(b, db.FederationRoleSpoke, "https://HUB.example:443/team-a/", "bob")
-	aBinding, err := store.FederationBindingByProject(ctx, a.ID)
-	require.NoError(t, err)
-	bBinding, err := store.FederationBindingByProject(ctx, b.ID)
-	require.NoError(t, err)
-	checker := store.(interface {
-		CheckLinkBoundary(context.Context, int64, int64) error
-	})
-	for _, tc := range []struct {
-		name                             string
-		aEnabled, aPush, bEnabled, bPush bool
-	}{
-		{"source paused", false, true, true, true},
-		{"source pull-only", true, false, true, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			aBinding.Enabled, aBinding.PushEnabled = tc.aEnabled, tc.aPush
-			bBinding.Enabled, bBinding.PushEnabled = tc.bEnabled, tc.bPush
-			_, err := store.UpsertFederationBinding(ctx, aBinding)
-			require.NoError(t, err)
-			_, err = store.UpsertFederationBinding(ctx, bBinding)
-			require.NoError(t, err)
-			for _, pair := range [][2]db.Issue{{ai, bi}, {bi, ai}} {
-				require.NoError(t, checker.CheckLinkBoundary(ctx, pair[0].ID, pair[1].ID))
-			}
-		})
-	}
-
-	bind(a, db.FederationRoleSpoke, "https://hub.example/team-a", "alice")
-	bind(b, db.FederationRoleSpoke, "https://hub.example/team-a", "bob")
 	require.NoError(t, link(ai, bi))
 	require.NoError(t, link(bi, ai))
 

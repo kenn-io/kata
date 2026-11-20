@@ -172,7 +172,7 @@ var storageScenarios = []scenario{
 		RunRelayLinkBoundaryKeepsSameProjectEffects(t, store)
 		return nil
 	}},
-	{name: "link server boundary", methods: []string{"CreateProject", "CreateIssue", "CreateLinkAndEvent", "EditIssueAtomic", "EventsAfter", "FederationBindingByProject", "IssueByID", "LinksByIssue", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error {
+	{name: "link server boundary", methods: []string{"CreateProject", "CreateIssue", "CreateLinkAndEvent", "EditIssueAtomic", "EventsAfter", "IssueByID", "LinksByIssue", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error {
 		RunLinkServerBoundary(t, store)
 		return nil
 	}},

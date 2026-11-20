@@ -39,7 +39,7 @@ func newCrossProjectLinkSource(t *testing.T) crossProjectLinkSource {
 		from, to db.Issue
 		typ      string
 	}{{blocker, blocked, "blocks"}, {child, epic, "parent"}, {peer, related, "related"}} {
-		created, _, err := source.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: link.from.ID, ToIssueID: link.to.ID, Type: link.typ, Author: "link-author"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: link.from.ID, FromShortID: link.from.ShortID, FromUID: link.from.UID, ToShortID: link.to.ShortID, ToUID: link.to.UID, Actor: "link-author"})
+		created, err := source.CreateLink(ctx, db.CreateLinkParams{FromIssueID: link.from.ID, ToIssueID: link.to.ID, Type: link.typ, Author: "link-author"})
 		require.NoError(t, err)
 		out.edges = append(out.edges, [3]string{created.FromIssueUID, created.ToIssueUID, link.typ})
 	}

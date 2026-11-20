@@ -99,6 +99,9 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 		if err := requireLinkTargetAddable(ctx, cfg.DB, in.ProjectID, to); err != nil {
 			return nil, err
 		}
+		if err := requireFederatedIssueClaim(ctx, cfg, from.ProjectID, from, actor); err != nil {
+			return nil, err
+		}
 		// Reject self-link before mutating state. The DB will catch this anyway,
 		// but in the --replace path we delete the existing parent before we'd
 		// see that error from CreateLinkAndEvent — leaving us with an
@@ -129,17 +132,11 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 			canonicalFromPeer, canonicalToPeer = canonicalToPeer, canonicalFromPeer
 		}
 		if existing, lookupErr := cfg.DB.LinkByEndpoints(ctx, storageFromID, storageToID, in.Body.Type); lookupErr == nil {
-			if err := requireFederatedIssueClaim(ctx, cfg, from.ProjectID, from, actor); err != nil {
-				return nil, err
-			}
 			return mutationLinkResponse(from, existing, canonicalFromPeer, canonicalToPeer, nil, false), nil
 		} else if !errors.Is(lookupErr, db.ErrNotFound) {
 			return nil, internalAPIError(lookupErr)
 		}
 		if err := checkLinkBoundaryBeforeMutation(ctx, cfg.DB, from.ID, to.ID); err != nil {
-			return nil, err
-		}
-		if err := requireFederatedIssueClaim(ctx, cfg, from.ProjectID, from, actor); err != nil {
 			return nil, err
 		}
 		if err := requireFederatedIssueClaim(ctx, cfg, to.ProjectID, to, actor); err != nil {

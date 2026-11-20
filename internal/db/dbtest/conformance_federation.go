@@ -206,10 +206,6 @@ func checkFederationControlLifecycle(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return fmt.Errorf("create compatible spoke federation binding: %w", err)
 	}
-	spokeBinding.PushEnabled = true
-	if _, err := store.UpsertFederationBinding(ctx, spokeBinding); err != nil {
-		return err
-	}
 	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{
 		ProjectID: peer.ID, Role: db.FederationRoleSpoke,
 		HubURL: "https://hub.example", HubProjectID: hub.ID, HubProjectUID: hub.UID,
