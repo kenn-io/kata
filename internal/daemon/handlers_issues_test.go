@@ -2919,3 +2919,65 @@ func TestShowIssue_UnlabeledIssueHasEmptyLabelArray(t *testing.T) {
 	require.True(t, ok, "issue.labels must be present")
 	assert.JSONEq(t, `[]`, string(labels))
 }
+
+func TestIssueServerBoundaryPreflight(t *testing.T) {
+	env := testenv.New(t)
+	ctx := t.Context()
+	a, err := env.DB.CreateProject(ctx, "server-a")
+	require.NoError(t, err)
+	b, err := env.DB.CreateProject(ctx, "server-b")
+	require.NoError(t, err)
+	from, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: a.ID, Title: "A", Author: "tester"})
+	require.NoError(t, err)
+	to, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: b.ID, Title: "B", Author: "tester"})
+	require.NoError(t, err)
+	path := issuePathRef(a.ID, from.ShortID, "")
+	payload := map[string]any{"actor": "tester", "links_delta": map[string]any{"add_blocks": []string{to.UID}}}
+	resp, raw := envDoRaw(t, env, http.MethodPatch, path, payload, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	create := map[string]any{"actor": "tester", "title": "reusable", "links": []map[string]any{{"type": "blocks", "to_ref": to.UID}}}
+	headers := map[string]string{"Idempotency-Key": "boundary-retry"}
+	resp, raw = envDoRaw(t, env, http.MethodPost, projectPath(a.ID)+"/issues", create, headers)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+
+	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: a.ID, Role: db.FederationRoleSpoke, HubURL: "https://a.example", HubProjectID: a.ID, HubProjectUID: a.UID, Actor: "tester"})
+	require.NoError(t, err)
+	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: b.ID, Role: db.FederationRoleSpoke, HubURL: "https://b.example", HubProjectID: b.ID, HubProjectUID: b.UID, Actor: "tester"})
+	require.NoError(t, err)
+	resp, raw = envDoRaw(t, env, http.MethodPost, projectPath(a.ID)+"/issues", create, headers)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	require.Contains(t, string(raw), `"reused":true`)
+
+	before, err := env.DB.EventsAfter(ctx, db.EventsAfterParams{Limit: 100})
+	require.NoError(t, err)
+	resp, raw = envDoRaw(t, env, http.MethodPatch, path, payload, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	resp, raw = envDoRaw(t, env, http.MethodPatch, path, map[string]any{"actor": "tester", "links_delta": map[string]any{"remove_blocks": []string{to.UID}}}, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: b.ID, Role: db.FederationRoleSpoke, HubURL: "https://b.example", HubProjectID: b.ID, HubProjectUID: b.UID, Actor: "tester", Enabled: true})
+	require.NoError(t, err)
+	before, err = env.DB.EventsAfter(ctx, db.EventsAfterParams{Limit: 100})
+	require.NoError(t, err)
+	resp, raw = envDoRaw(t, env, http.MethodPatch, path, map[string]any{"actor": "tester", "title": "changed", "links_delta": map[string]any{"add_blocks": []string{to.UID}}}, nil)
+	assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "federated_link_server_mismatch")
+	require.Contains(t, string(raw), "connect server-b first")
+	issue, err := env.DB.IssueByID(ctx, from.ID)
+	require.NoError(t, err)
+	require.Equal(t, "A", issue.Title)
+	resp, raw = envDoRaw(t, env, http.MethodPost, projectPath(a.ID)+"/issues", map[string]any{"actor": "tester", "title": "rejected", "links": []map[string]any{{"type": "blocks", "to_ref": to.UID}}}, nil)
+	assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "federated_link_server_mismatch")
+	require.Contains(t, string(raw), "connect server-b first")
+	var listed struct {
+		Issues []struct {
+			Title string `json:"title"`
+		} `json:"issues"`
+	}
+	envGetJSON(t, env, projectPath(a.ID)+"/issues", &listed)
+	for _, item := range listed.Issues {
+		require.NotEqual(t, "rejected", item.Title)
+	}
+
+	after, err := env.DB.EventsAfter(ctx, db.EventsAfterParams{Limit: 100})
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+}

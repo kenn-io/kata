@@ -216,6 +216,9 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := requireInitialLinkTargetsAddable(ctx, cfg.DB, in.ProjectID, linkTargets); err != nil {
 			return nil, err
 		}
+		if err := checkLinkProjectsBeforeMutation(ctx, cfg.DB, in.ProjectID, issueProjectIDs(linkTargets)); err != nil {
+			return nil, err
+		}
 		if err := requireFederatedLinkClaims(ctx, cfg, actor, linkTargets...); err != nil {
 			return nil, err
 		}
@@ -624,7 +627,11 @@ func editIssueHandler(cfg ServerConfig) func(context.Context, *api.EditIssueRequ
 			if err := validateResolvedLinksDelta(&params); err != nil {
 				return nil, err
 			}
-			if err := requireFederatedLinksDeltaClaims(ctx, cfg, actor, issue, &params); err != nil {
+			claims, err := preflightAddedLinks(ctx, cfg.DB, issue, params)
+			if err != nil {
+				return nil, err
+			}
+			if err := requireFederatedLinksDeltaClaims(ctx, cfg, actor, issue, &claims); err != nil {
 				return nil, err
 			}
 		}
@@ -675,6 +682,71 @@ func editIssueHandler(cfg ServerConfig) func(context.Context, *api.EditIssueRequ
 		}
 		return out, nil
 	}
+}
+
+func preflightAddedLinks(ctx context.Context, store db.Storage, issue db.Issue, params db.EditIssueAtomicParams) (db.EditIssueAtomicParams, error) {
+	claims := params
+	var projects []int64
+	issueID := issue.ID
+	check := func(from, to int64, kind string) (bool, error) {
+		peer := to
+		if from != issueID {
+			peer = from
+		}
+		if kind == "related" && from > to {
+			from, to = to, from
+		}
+		_, err := store.LinkByEndpoints(ctx, from, to, kind)
+		if err == nil {
+			return false, nil
+		}
+		if !errors.Is(err, db.ErrNotFound) {
+			return false, internalAPIError(err)
+		}
+		target, err := store.IssueByID(ctx, peer)
+		if err != nil {
+			return false, internalAPIError(err)
+		}
+		projects = append(projects, target.ProjectID)
+		return true, nil
+	}
+	if params.SetParent != nil {
+		add, err := check(issueID, *params.SetParent, "parent")
+		if err != nil {
+			return claims, err
+		}
+		if !add {
+			claims.SetParent = nil
+		}
+	}
+	filter := func(ids []int64, kind string, incoming bool) ([]int64, error) {
+		var out []int64
+		for _, id := range ids {
+			from, to := issueID, id
+			if incoming {
+				from, to = to, from
+			}
+			add, err := check(from, to, kind)
+			if err != nil {
+				return nil, err
+			}
+			if add {
+				out = append(out, id)
+			}
+		}
+		return out, nil
+	}
+	var err error
+	if claims.AddBlocks, err = filter(params.AddBlocks, "blocks", false); err != nil {
+		return claims, err
+	}
+	if claims.AddBlockedBy, err = filter(params.AddBlockedBy, "blocks", true); err != nil {
+		return claims, err
+	}
+	if claims.AddRelated, err = filter(params.AddRelated, "related", false); err != nil {
+		return claims, err
+	}
+	return claims, checkLinkProjectsBeforeMutation(ctx, store, issue.ProjectID, projects)
 }
 
 // linksDeltaRequiresAllProjectsBeforeResolution identifies relationship

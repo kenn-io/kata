@@ -19,17 +19,28 @@ func ensureRelayLinkBoundaryTx(ctx context.Context, tx *sql.Tx, fromID, toID int
 	if err != nil {
 		return err
 	}
-	if fromProject == toProject {
-		return nil
+	return ensureLinkProjectsBoundaryTx(ctx, tx, fromProject, toProject)
+}
+
+func ensureLinkProjectsBoundaryTx(ctx context.Context, tx *sql.Tx, fromProject int64, toProjects ...int64) error {
+	seen := map[int64]bool{fromProject: true}
+	for _, toProject := range toProjects {
+		if seen[toProject] {
+			continue
+		}
+		seen[toProject] = true
+		relayed, err := relayProjectsActiveTx(ctx, tx, fromProject, toProject)
+		if err != nil {
+			return err
+		}
+		if relayed {
+			return errors.Join(db.ErrFederatedReadOnly, db.ErrFederationCrossProjectBoundary)
+		}
+		if err := db.CheckLinkSameServer(ctx, tx, fromProject, toProject); err != nil {
+			return err
+		}
 	}
-	relayed, err := relayProjectsActiveTx(ctx, tx, fromProject, toProject)
-	if err != nil {
-		return err
-	}
-	if relayed {
-		return errors.Join(db.ErrFederatedReadOnly, db.ErrFederationCrossProjectBoundary)
-	}
-	return db.CheckLinkSameServer(ctx, tx, fromProject, toProject)
+	return nil
 }
 
 func relayProjectsActiveTx(ctx context.Context, tx *sql.Tx, fromProject, toProject int64) (bool, error) {

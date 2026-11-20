@@ -1,6 +1,7 @@
 package dbtest
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/json/jsontext"
 	"sort"
@@ -231,17 +232,18 @@ func RunLinkServerBoundary(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	bBinding, err := store.FederationBindingByProject(ctx, b.ID)
 	require.NoError(t, err)
+	checker := store.(interface {
+		CheckLinkBoundary(context.Context, int64, int64) error
+		CheckLinkProjectsBoundary(context.Context, int64, []int64) error
+	})
 	for _, tc := range []struct {
-		name             string
-		aEnabled, aPush  bool
-		bEnabled, bPush  bool
-		forward, reverse string
+		name                             string
+		aEnabled, aPush, bEnabled, bPush bool
 	}{
-		{"source sync paused", false, true, true, true, a.Name, a.Name},
-		{"source push paused", true, false, true, true, a.Name, a.Name},
-		{"target sync paused", true, true, false, true, b.Name, b.Name},
-		{"target push paused", true, true, true, false, b.Name, b.Name},
-		{"both paused", false, false, false, false, a.Name, b.Name},
+		{"source paused", false, true, true, true},
+		{"source pull-only", true, false, true, true},
+		{"target paused", true, true, false, true},
+		{"target pull-only", true, true, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			aBinding.Enabled, aBinding.PushEnabled = tc.aEnabled, tc.aPush
@@ -250,23 +252,21 @@ func RunLinkServerBoundary(t *testing.T, store db.Storage) {
 			require.NoError(t, err)
 			_, err = store.UpsertFederationBinding(ctx, bBinding)
 			require.NoError(t, err)
-			before, err := store.EventsAfter(ctx, db.EventsAfterParams{Limit: 100})
-			require.NoError(t, err)
-			for _, pair := range []struct {
-				from, to db.Issue
-				paused   string
-			}{{ai, bi, tc.forward}, {bi, ai, tc.reverse}} {
-				err := link(pair.from, pair.to)
-				require.ErrorIs(t, err, db.ErrFederatedLinkServerMismatch)
-				require.EqualError(t, err, "can't link: enable sync and push for project "+pair.paused+" first")
+			for _, pair := range [][2]db.Issue{{ai, bi}, {bi, ai}} {
+				require.NoError(t, checker.CheckLinkBoundary(ctx, pair[0].ID, pair[1].ID))
+				require.NoError(t, checker.CheckLinkProjectsBoundary(ctx, pair[0].ProjectID, []int64{pair[1].ProjectID}))
 			}
-			require.Equal(t, []string{oldParent.UID}, linkTargetUIDs(t, store, ai.ID))
-			require.Empty(t, linkTargetUIDs(t, store, bi.ID))
-			after, err := store.EventsAfter(ctx, db.EventsAfterParams{Limit: 100})
+			bBinding.HubURL = "https://other.example"
+			_, err = store.UpsertFederationBinding(ctx, bBinding)
 			require.NoError(t, err)
-			require.Equal(t, before, after)
+			for _, pair := range [][2]db.Issue{{ai, bi}, {bi, ai}} {
+				require.ErrorIs(t, checker.CheckLinkBoundary(ctx, pair[0].ID, pair[1].ID), db.ErrFederatedLinkServerMismatch)
+				require.ErrorIs(t, checker.CheckLinkProjectsBoundary(ctx, pair[0].ProjectID, []int64{pair[1].ProjectID}), db.ErrFederatedLinkServerMismatch)
+			}
+			bBinding.HubURL = "https://hub.example/team-a"
 		})
 	}
+
 	bind(a, db.FederationRoleSpoke, "https://hub.example/team-a", "alice")
 	bind(b, db.FederationRoleSpoke, "https://hub.example/team-a", "bob")
 	require.NoError(t, link(ai, bi))
@@ -280,6 +280,15 @@ func RunLinkServerBoundary(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	di, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: d.ID, Title: "D", Author: "member"})
 	require.NoError(t, err)
+	for _, enabled := range []bool{false, true} {
+		aBinding.Enabled, aBinding.PushEnabled = enabled, false
+		_, err := store.UpsertFederationBinding(ctx, aBinding)
+		require.NoError(t, err)
+		for _, pair := range [][2]db.Issue{{ai, ci}, {ci, ai}} {
+			require.ErrorIs(t, checker.CheckLinkBoundary(ctx, pair[0].ID, pair[1].ID), db.ErrFederatedLinkServerMismatch)
+			require.ErrorIs(t, checker.CheckLinkProjectsBoundary(ctx, pair[0].ProjectID, []int64{pair[1].ProjectID}), db.ErrFederatedLinkServerMismatch)
+		}
+	}
 	require.NoError(t, link(ci, di))
 	bind(c, db.FederationRoleHub, "", "")
 	require.NoError(t, link(di, ci))

@@ -303,16 +303,12 @@ var (
 	ErrFederationProjectNotEmpty = errors.New("federation attachment requires an empty project")
 )
 
-// LinkServerMismatchError identifies the project that needs an active connection.
+// LinkServerMismatchError identifies projects on different servers.
 type LinkServerMismatchError struct {
 	From, To string
-	Paused   bool
 }
 
 func (e *LinkServerMismatchError) Error() string {
-	if e.Paused {
-		return fmt.Sprintf("can't link: enable sync and push for project %s first", e.To)
-	}
 	return fmt.Sprintf("can't link: project %s isn't synced to the same server as %s; connect %s first", e.To, e.From, e.To)
 }
 

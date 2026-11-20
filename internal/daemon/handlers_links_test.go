@@ -666,20 +666,6 @@ func TestHTTPLinkServerBoundary(t *testing.T) {
 	after, err := env.DB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: a.ID, Limit: 100})
 	require.NoError(t, err)
 	require.Equal(t, before, after)
-	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: b.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: b.ID, HubProjectUID: b.UID, Actor: "tester", Enabled: true})
-	require.NoError(t, err)
-	resp, raw = envDoRaw(t, env, http.MethodPost, issuePathRef(a.ID, from.ShortID, "links"), map[string]any{"actor": "tester", "type": "blocks", "to_ref": to.UID}, nil)
-	require.Equal(t, http.StatusConflict, resp.StatusCode, string(raw))
-	require.Contains(t, string(raw), "can't link: enable sync and push for project server-b first")
-	body.Error.Code = ""
-	require.NoError(t, json.Unmarshal(raw, &body))
-	require.Equal(t, "federated_link_server_mismatch", body.Error.Code)
-	resp, raw = envDoRaw(t, env, http.MethodPost, issuePathRef(b.ID, to.ShortID, "links"), map[string]any{"actor": "tester", "type": "blocks", "to_ref": from.UID}, nil)
-	require.Equal(t, http.StatusConflict, resp.StatusCode, string(raw))
-	require.Contains(t, string(raw), "can't link: enable sync and push for project server-b first")
-	after, err = env.DB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: a.ID, Limit: 100})
-	require.NoError(t, err)
-	require.Equal(t, before, after)
 }
 
 func TestHTTPLinkServerBoundaryDuplicate(t *testing.T) {
