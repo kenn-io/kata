@@ -334,3 +334,26 @@ func TestUnreachableMigrationAdviceKeepsLiteralBarePath(t *testing.T) {
 	require.NotEmpty(t, e.RecoveryAdvice())
 	require.NotContains(t, e.RecoveryAdvice(), "Wait for the migration")
 }
+
+func TestUnreachableMigrationAdviceKeepsLiteralSQLiteURLPath(t *testing.T) {
+	setupKataEnv(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "kata%20database.db")
+	lock := flock.New(filepath.Join(dir, "kata database.db") + ".import.lock")
+	require.NoError(t, lock.Lock())
+	t.Cleanup(func() { require.NoError(t, lock.Close()) })
+
+	runtimeDSN := "sqlite://" + strings.ReplaceAll(filepath.ToSlash(path), "%", "%25")
+	escapedLock := flock.New(filepath.Join(dir, "kata%2520database.db") + ".import.lock")
+	require.NoError(t, escapedLock.Lock())
+	t.Cleanup(func() { require.NoError(t, escapedLock.Close()) })
+	record := kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1", Metadata: map[string]string{"db_path": runtimeDSN}}
+	e := newUnreachable(t.Context(), dir, record, errors.New("probe failed"))
+	require.False(t, e.migrationActive)
+	require.NotEmpty(t, e.RecoveryAdvice())
+
+	selectedLock := flock.New(path + ".import.lock")
+	require.NoError(t, selectedLock.Lock())
+	t.Cleanup(func() { require.NoError(t, selectedLock.Close()) })
+	require.True(t, newUnreachable(t.Context(), dir, record, errors.New("probe failed")).migrationActive)
+}

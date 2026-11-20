@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json/v2"
 	"errors"
@@ -1250,17 +1251,17 @@ func runDaemon(ctx context.Context) error {
 }
 
 // redactRuntimeDSN returns dsn safe for inclusion in the runtime file and
-// the `kata daemon status` output. Bare paths and sqlite DSNs pass through
-// unchanged via config.RedactDSN; a postgres DSN has its password masked.
+// the `kata daemon status` output. SQLite DSN percent signs are escaped to
+// preserve literal paths; config.RedactDSN masks passwords.
 // The fallback to dsn handles the (defensive) ambiguous-credentials case
 // where config.RedactDSN returns ""; in practice KataDSN validation has
 // already rejected the bleed shape upstream, so this branch is unreachable
 // through the normal startup path.
 func redactRuntimeDSN(dsn string) string {
-	if r := config.RedactDSN(dsn); r != "" {
-		return r
+	if strings.HasPrefix(dsn, "sqlite://") {
+		dsn = strings.ReplaceAll(dsn, "%", "%25")
 	}
-	return dsn
+	return cmp.Or(config.RedactDSN(dsn), dsn)
 }
 
 func newAutostartIdleController(

@@ -200,8 +200,8 @@ func sqliteCutoverLockedForDSN(dsn string) bool {
 	return !locked
 }
 
-// Runtime metadata escapes spaces in SQLite URLs, so check the decoded path too.
+// Runtime metadata URL-encodes SQLite paths; bare paths remain literal.
 func sqliteCutoverLockedForRuntimeDSN(dsn string) bool {
 	decoded, err := url.PathUnescape(dsn)
-	return strings.HasPrefix(dsn, "sqlite://") && err == nil && decoded != dsn && sqliteCutoverLockedForDSN(decoded) || sqliteCutoverLockedForDSN(dsn)
+	return strings.HasPrefix(dsn, "sqlite://") && err == nil && sqliteCutoverLockedForDSN(decoded) || !strings.HasPrefix(dsn, "sqlite://") && sqliteCutoverLockedForDSN(dsn)
 }
