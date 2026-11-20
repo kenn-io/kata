@@ -2039,8 +2039,8 @@ named daemon exits 3; other invalid routing configuration, such as a malformed
 In agent mode, the `OK daemon` report on stdout indicates that the report was
 produced; a non-ready selection also emits an `ERR status` line on stderr. See
 the [agent output contract](agent-output.md#stability-contract).
-For a live but unreachable selected daemon, the diagnosis includes recovery
-guidance in its `message`. `daemon diagnose` inspects selection, home,
+For a live but unreachable selected daemon, `message` contains process evidence
+and `next_action` contains any recovery guidance. `daemon diagnose` inspects selection, home,
 database/project identity, schema, process, and federation origin without
 starting or changing anything.
 `daemon recover` starts only a registered existing local profile, verifies its
