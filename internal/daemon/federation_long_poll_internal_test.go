@@ -14,6 +14,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 )
@@ -215,4 +216,10 @@ func TestFederationPollWaitReleasesWaitersWhenClientsDisconnect(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return hub.waits.heldFor(hub.enrollmentID) == 0 && hub.waits.heldTotal() == 0
 	}, 5*time.Second, 5*time.Millisecond, "the hub kept slots for polls whose clients disconnected")
+}
+
+func TestFederationPollWaitCapsOversizedWaits(t *testing.T) {
+	wait, err := federationPollWait(t.Context(), api.OptionalInt{IsSet: true, Value: 9223372037})
+	require.NoError(t, err)
+	assert.Equal(t, federationPollWaitMax, wait)
 }

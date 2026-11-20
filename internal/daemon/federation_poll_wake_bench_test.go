@@ -67,26 +67,40 @@ type benchPollPage struct {
 }
 
 func (h benchHub) poll(b *testing.B, afterID int64, wait string) benchPollPage {
+	page, err := h.pollPage(b.Context(), afterID, wait)
+	require.NoError(b, err)
+	return page
+}
+
+// pollPage reports failures as an error, so a worker goroutine can hand them
+// back to the benchmark goroutine.
+func (h benchHub) pollPage(ctx context.Context, afterID int64, wait string) (benchPollPage, error) {
 	url := fmt.Sprintf("%s/api/v1/projects/%d/federation/events?after_id=%d", h.pollerURL, h.projectID, afterID)
 	if wait != "" {
 		url += "&wait=" + wait
 	}
-	request, err := http.NewRequestWithContext(b.Context(), http.MethodGet, url, nil)
-	require.NoError(b, err)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return benchPollPage{}, err
+	}
 	request.Header.Set("Authorization", "Bearer bench-pull-token")
 	response, err := http.DefaultClient.Do(request) //nolint:gosec // test-owned loopback hub
-	require.NoError(b, err)
+	if err != nil {
+		return benchPollPage{}, err
+	}
 	defer func() { _ = response.Body.Close() }()
-	require.Equal(b, http.StatusOK, response.StatusCode)
+	if response.StatusCode != http.StatusOK {
+		return benchPollPage{}, fmt.Errorf("poll answered %d", response.StatusCode)
+	}
 	var page benchPollPage
-	require.NoError(b, json.NewDecoder(response.Body).Decode(&page))
-	return page
+	return page, json.NewDecoder(response.Body).Decode(&page)
 }
 
 func (h benchHub) commit(b *testing.B) {
 	request, err := http.NewRequestWithContext(b.Context(), http.MethodPost,
 		fmt.Sprintf("%s/api/v1/projects/%d/issues", h.writerURL, h.projectID),
-		bytes.NewBufferString(`{"actor":"tester","title":"Wakes the held poll"}`))
+		// A unique title keeps the hub's duplicate-issue check from refusing a repeat.
+		bytes.NewBufferString(fmt.Sprintf(`{"actor":"tester","title":"Wakes the held poll %d"}`, time.Now().UnixNano())))
 	require.NoError(b, err)
 	request.Header.Set("Content-Type", "application/json")
 	response, err := http.DefaultClient.Do(request) //nolint:gosec // test-owned loopback hub
@@ -103,12 +117,16 @@ func (h benchHub) run(b *testing.B) {
 	b.ResetTimer()
 	for range b.N {
 		b.StopTimer()
-		delivered := make(chan int64, 1)
+		type delivery struct {
+			cursor int64
+			err    error
+		}
+		delivered := make(chan delivery, 1)
 		go func() {
 			for {
-				page := h.poll(b, cursor, "45")
-				if len(page.Events) > 0 {
-					delivered <- page.NextAfterID
+				page, err := h.pollPage(b.Context(), cursor, "45")
+				if err != nil || len(page.Events) > 0 {
+					delivered <- delivery{cursor: page.NextAfterID, err: err}
 					return
 				}
 				//nolint:kennlint // sleeptest: models the spoke interval a hub without held polls leaves to the spoke.
@@ -119,7 +137,13 @@ func (h benchHub) run(b *testing.B) {
 		time.Sleep(100 * time.Millisecond)
 		b.StartTimer()
 		h.commit(b)
-		cursor = <-delivered
+		select {
+		case got := <-delivered:
+			require.NoError(b, got.err)
+			cursor = got.cursor
+		case <-time.After(2 * benchHubIntervalFallback):
+			b.Fatal("the committed event never reached the poll")
+		}
 	}
 }
 
