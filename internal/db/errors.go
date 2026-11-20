@@ -303,13 +303,9 @@ var (
 // LinkServerMismatchError identifies projects that cannot sync a link.
 type LinkServerMismatchError struct {
 	From, To string
-	Paused   string
 }
 
 func (e *LinkServerMismatchError) Error() string {
-	if e.Paused != "" {
-		return fmt.Sprintf("can't link: resume sync or enable push on project %s first", e.Paused)
-	}
 	return fmt.Sprintf("can't link: project %s isn't synced to the same server as %s; connect %s first", e.To, e.From, e.To)
 }
 

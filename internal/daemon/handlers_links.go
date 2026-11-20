@@ -321,13 +321,6 @@ func checkLinkBoundaryBeforeMutation(ctx context.Context, store db.Storage, from
 		return nil
 	}
 	if err := checker.CheckLinkBoundary(ctx, fromIssueID, toIssueID); err != nil {
-		return mapLinkBoundaryError(err)
-	}
-	return nil
-}
-
-func mapLinkBoundaryError(err error) error {
-	if err != nil {
 		if errors.Is(err, db.ErrFederatedReadOnly) {
 			return federationReadOnlyError(err)
 		}

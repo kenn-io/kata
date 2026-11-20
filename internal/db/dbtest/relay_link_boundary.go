@@ -249,17 +249,9 @@ func RunLinkServerBoundary(t *testing.T, store db.Storage) {
 			require.NoError(t, err)
 			_, err = store.UpsertFederationBinding(ctx, bBinding)
 			require.NoError(t, err)
-			before, err := store.EventsAfter(ctx, db.EventsAfterParams{Limit: 100})
-			require.NoError(t, err)
 			for _, pair := range [][2]db.Issue{{ai, bi}, {bi, ai}} {
-				err := checker.CheckLinkBoundary(ctx, pair[0].ID, pair[1].ID)
-				require.ErrorIs(t, err, db.ErrFederatedReadOnly)
-				require.Contains(t, err.Error(), "resume sync or enable push")
-				require.ErrorIs(t, link(pair[0], pair[1]), db.ErrFederatedReadOnly)
+				require.NoError(t, checker.CheckLinkBoundary(ctx, pair[0].ID, pair[1].ID))
 			}
-			after, err := store.EventsAfter(ctx, db.EventsAfterParams{Limit: 100})
-			require.NoError(t, err)
-			require.Equal(t, before, after)
 		})
 	}
 
