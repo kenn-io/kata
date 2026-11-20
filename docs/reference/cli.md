@@ -1013,7 +1013,13 @@ Each input gets a result, in input order:
 | `unknown` | The move request lost its response. Check the issue and its move history before retrying. |
 | `unattempted` | The CLI stopped before sending it. Retry it. |
 
-To retry after a partial run, remove rows that were `moved` before re-running the same refs file. Check `unknown` rows before retrying them, then retry `unattempted` rows.
+To retry after a partial run, remove rows that were `moved` before re-running the same refs file. Check `unknown` rows before retrying them, and fix the errors on `refused` rows. For a shared target, save the JSON results and extract the `unattempted` refs:
+
+```sh
+kata move --refs-from refs.txt target-project --json > results.json
+jq -r '.results[] | select(.result == "unattempted") | .ref' results.json > retry.txt
+kata move --refs-from retry.txt target-project
+```
 
 The CLI moves up to six issues concurrently. A refusal never stops other items; it exits 5. `--comment` is
 posted to each moved issue after its move, and a failed comment leaves the move

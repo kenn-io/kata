@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http/httptrace"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -186,11 +187,14 @@ dispatch:
 		}
 		if e != nil {
 			retry := fmt.Sprintf("kata comment %s --project %s --body ...", r.UID, shellQuote(r.Target))
+			message := strings.Replace(e.Error(), "retry with: kata comment "+r.UID+" --body ...", "retry with: "+retry, 1)
 			if a.ctx.Err() != nil {
-				commentErrs = append(commentErrs, fmt.Errorf("comment for %s failed: %w; retry with: %s", r.UID, e, retry))
-			} else {
-				commentErrs = append(commentErrs, errors.New(strings.Replace(e.Error(), "kata comment "+r.UID+" --body ...", retry, 1)))
+				message = fmt.Sprintf("comment for %s failed: %v; retry with: %s", r.UID, e, retry)
 			}
+			detail := strings.Replace(e.Error(), " (retry with: kata comment "+r.UID+" --body ...)", "", 1)
+			r.Message = strings.TrimSpace(r.Message + " comment failed: " + detail)
+			r.Hint = "retry with: " + retry
+			commentErrs = append(commentErrs, errors.New(message))
 		}
 	}
 	printErr := printMoveBatch(cmd, results)
@@ -219,7 +223,14 @@ dispatch:
 	} else if refused > 0 {
 		outcome = moveBatchRefusalError()
 	}
-	return errors.Join(outcome, printErr, errors.Join(commentErrs...))
+	if len(commentErrs) > 0 {
+		combined := errors.Join(outcome, errors.Join(commentErrs...))
+		cli := *cliErrorForErr(combined, true)
+		cli.Code = ""
+		cli.Message = combined.Error()
+		return errors.Join(&cli, printErr)
+	}
+	return errors.Join(outcome, printErr)
 }
 
 func moveBatchOne(a daemonAPI, client *kataclient.Client, projects []projectRef, row moveBatchRow, result *moveBatchResult, actor string, subtreeSupported bool) {
@@ -281,7 +292,11 @@ func moveBatchOne(a daemonAPI, client *kataclient.Client, projects []projectRef,
 		issue, err = fetchMoveIssue(a.ctx, a.client, a.baseURL, pid, ref)
 	}
 	if err != nil {
-		refuse("issue_lookup", err)
+		if _, ok := errors.AsType[*url.Error](err); ok {
+			result.Message = err.Error()
+		} else {
+			refuse("issue_lookup", err)
+		}
 		return
 	}
 	result.UID = issue.UID
@@ -308,6 +323,10 @@ func moveBatchOne(a daemonAPI, client *kataclient.Client, projects []projectRef,
 	var dispatched atomic.Bool
 	ctx := httptrace.WithClientTrace(a.ctx, &httptrace.ClientTrace{WroteRequest: func(httptrace.WroteRequestInfo) { dispatched.Store(true) }})
 	response, callErr := client.MoveIssueWithResponse(ctx, request)
+	unknown := func() {
+		result.Result = "unknown"
+		result.Hint = fmt.Sprintf("outcome unconfirmed; run kata show %s --json to see the current issue.project_id. Source project ID: %d; target project ID: %d. Check move history before retrying if the issue may have moved more than once.", shellQuote(result.UID), result.sourceID, result.targetID)
+	}
 	if response == nil {
 		if !dispatched.Load() {
 			if callErr != nil && a.ctx.Err() == nil {
@@ -315,20 +334,33 @@ func moveBatchOne(a daemonAPI, client *kataclient.Client, projects []projectRef,
 			}
 			return
 		}
-		result.Result = "unknown"
-		result.Hint = fmt.Sprintf("outcome unconfirmed; run kata show %s --json to see the current issue.project_id. Source project ID: %d; target project ID: %d. Check move history before retrying if the issue may have moved more than once.", shellQuote(result.UID), result.sourceID, result.targetID)
+		unknown()
 		return
 	}
-	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
-		result.Result, result.Code, result.Message, result.Hint = "refused", "move_refused", err.Error(), ""
-		return
+	if response.StatusCode >= 502 && response.StatusCode <= 504 {
+		var envelope struct {
+			Error struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if json.Unmarshal(response.Body, &envelope) != nil || envelope.Error.Code == "" || envelope.Error.Message == "" {
+			unknown()
+			return
+		}
+	}
+	if response.StatusCode != 200 {
+		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+			result.Result, result.Code, result.Message, result.Hint = "refused", "move_refused", err.Error(), ""
+			return
+		}
 	}
 	var moved moveResponseWire
-	if err := json.Unmarshal(response.Body, &moved); err != nil {
-		result.Result, result.Code, result.Message, result.Hint = "refused", "invalid_response", err.Error(), ""
+	result.Result, result.Hint = "moved", ""
+	if err := json.Unmarshal(response.Body, &moved); err != nil || moved.Issue.ShortID == "" {
+		result.Message = "move succeeded; response details unavailable"
 		return
 	}
-	result.Result, result.Hint = "moved", ""
 	result.From, result.To = moveQualifiedID(result.source, issue.ShortID), moveQualifiedID(target.Name, moved.Issue.ShortID)
 	result.NewShortID, result.EventID = moved.NewShortID, moved.EventID
 }
@@ -341,8 +373,18 @@ func moveBatchRefusalError() error {
 	return err
 }
 func printMoveBatch(cmd *cobra.Command, results []moveBatchResult) error {
-	if flags.Quiet && currentOutputMode() == outputHuman {
-		return nil
+	quiet := flags.Quiet && currentOutputMode() == outputHuman
+	if quiet {
+		actionable := false
+		for _, r := range results {
+			if r.Result != "moved" || r.Message != "" || r.Hint != "" {
+				actionable = true
+				break
+			}
+		}
+		if !actionable {
+			return nil
+		}
 	}
 	var summary struct {
 		Moved       int `json:"moved"`
@@ -375,6 +417,9 @@ func printMoveBatch(cmd *cobra.Command, results []moveBatchResult) error {
 		fmt.Fprintf(&b, "Move batch (listed issues only; descendants excluded): %d moved, %d refused, %d unknown, %d unattempted\n", summary.Moved, summary.Refused, summary.Unknown, summary.Unattempted)
 	}
 	for _, r := range results {
+		if quiet && r.Result == "moved" && r.Message == "" && r.Hint == "" {
+			continue
+		}
 		fmt.Fprintf(&b, "- ref=%s result=%s", agentValue(r.Ref), r.Result)
 		if r.UID != "" {
 			fmt.Fprintf(&b, " uid=%s", agentValue(r.UID))

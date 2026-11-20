@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json/v2"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -177,4 +178,155 @@ func TestMoveBatchFileParsingLimit(t *testing.T) {
 	_, err = parseRefsFrom(reader, "target")
 	require.ErrorContains(t, err, "at most 5000 items")
 	require.Less(t, len(input)-reader.Len(), len(input)/2)
+}
+
+func TestMoveBatchGatewayAndResponseOutcomes(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		status     int
+		body, want string
+	}{
+		{"gateway 502", 502, "bad gateway", "unknown"},
+		{"gateway 503", 503, "service unavailable", "unknown"},
+		{"gateway 504", 504, "gateway timeout", "unknown"},
+		{"kata refusal", 503, `{"error":{"code":"unavailable","message":"try later"}}`, "refused"},
+		{"malformed success", 200, `{`, "moved"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env, dir, _, target, issue := setupMoveCLIProjects(t)
+			baseURL := ""
+			if tc.name == "kata refusal" {
+				baseURL = interceptingProxy(t, env, func(w http.ResponseWriter, r *http.Request) bool {
+					if strings.HasSuffix(r.URL.Path, "/actions/move") {
+						w.Header().Set("Content-Type", "application/json")
+						w.WriteHeader(tc.status)
+						_, _ = w.Write([]byte(tc.body))
+						return true
+					}
+					return false
+				})
+			} else {
+				upstream, err := url.Parse(env.URL)
+				require.NoError(t, err)
+				proxy := &httputil.ReverseProxy{Rewrite: func(r *httputil.ProxyRequest) { r.SetURL(upstream) }, ModifyResponse: func(r *http.Response) error {
+					if strings.HasSuffix(r.Request.URL.Path, "/actions/move") {
+						_ = r.Body.Close()
+						r.StatusCode = tc.status
+						r.Body = io.NopCloser(strings.NewReader(tc.body))
+						r.ContentLength = int64(len(tc.body))
+						r.Header.Set("Content-Length", strconv.Itoa(len(tc.body)))
+					}
+					return nil
+				}}
+				server := httptest.NewServer(proxy)
+				t.Cleanup(server.Close)
+				baseURL = server.URL
+			}
+			path := filepath.Join(t.TempDir(), "refs")
+			require.NoError(t, os.WriteFile(path, []byte(issue.UID+"\n"), 0600))
+			out, _, _ := executeRootCapture(t, contextWithBaseURL(t.Context(), baseURL), "--workspace", dir, "move", target.Name, "--refs-from", path, "--json")
+			var reply struct {
+				Results []moveBatchResult `json:"results"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(out), &reply))
+			require.Len(t, reply.Results, 1)
+			require.Equal(t, tc.want, reply.Results[0].Result)
+			require.Equal(t, issue.UID, reply.Results[0].UID)
+			require.Equal(t, target.Name, reply.Results[0].Target)
+			if tc.name != "kata refusal" {
+				stored, err := env.DB.IssueByID(t.Context(), issue.ID)
+				require.NoError(t, err)
+				require.Equal(t, target.ID, stored.ProjectID)
+			}
+			if tc.status == 200 {
+				require.Contains(t, reply.Results[0].Message, "response details")
+			}
+		})
+	}
+}
+
+func TestMoveBatchLookupTransportFailureIsUnattempted(t *testing.T) {
+	env, dir, _, target, issue := setupMoveCLIProjects(t)
+	baseURL := interceptingProxy(t, env, func(w http.ResponseWriter, r *http.Request) bool {
+		if r.URL.Path == "/api/v1/issues/"+issue.UID {
+			c, _, err := w.(http.Hijacker).Hijack()
+			if err == nil {
+				_ = c.Close()
+			}
+			return true
+		}
+		return false
+	})
+	path := filepath.Join(t.TempDir(), "refs")
+	require.NoError(t, os.WriteFile(path, []byte(issue.UID+"\n"), 0600))
+	out, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), baseURL), "--workspace", dir, "move", target.Name, "--refs-from", path, "--json")
+	require.Error(t, err)
+	var reply struct {
+		Results []moveBatchResult `json:"results"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &reply))
+	require.Len(t, reply.Results, 1)
+	require.Equal(t, "unattempted", reply.Results[0].Result)
+	require.NotEmpty(t, reply.Results[0].Message)
+	require.Equal(t, "not sent; safe to rerun", reply.Results[0].Hint)
+}
+
+func TestMoveBatchCommentFailureVisibleInRowAndQuiet(t *testing.T) {
+	for _, quiet := range []bool{false, true} {
+		t.Run(strconv.FormatBool(quiet), func(t *testing.T) {
+			env, dir, _, target, issue := setupMoveCLIProjects(t)
+			baseURL := interceptingProxy(t, env, func(w http.ResponseWriter, r *http.Request) bool {
+				if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/comments") {
+					http.Error(w, "unavailable", http.StatusInternalServerError)
+					return true
+				}
+				return false
+			})
+			path := filepath.Join(t.TempDir(), "refs")
+			require.NoError(t, os.WriteFile(path, []byte(issue.UID+"\ninvalid\n"), 0600))
+			args := []string{"--workspace", dir, "move", strconv.FormatInt(target.ID, 10), "--refs-from", path, "--comment", "routed"}
+			if quiet {
+				args = append(args, "--quiet")
+			} else {
+				args = append(args, "--json")
+			}
+			out, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), baseURL), args...)
+			require.Error(t, err)
+			retry := "kata comment " + issue.UID + " --project " + target.Name + " --body ..."
+			if quiet {
+				require.Contains(t, stderr, retry)
+			} else {
+				var reply struct {
+					Results []moveBatchResult `json:"results"`
+				}
+				require.NoError(t, json.Unmarshal([]byte(out), &reply))
+				require.Equal(t, "moved", reply.Results[0].Result)
+				require.Contains(t, reply.Results[0].Message, "comment")
+				require.Contains(t, reply.Results[0].Hint, retry)
+			}
+		})
+	}
+}
+
+func TestMoveBatchCLI_OutputModes(t *testing.T) {
+	for _, partial := range []bool{false, true} {
+		t.Run(strconv.FormatBool(partial), func(t *testing.T) {
+			env, dir, _, target, issue := setupMoveCLIProjects(t)
+			input := issue.UID + "\n"
+			if partial {
+				input += "invalid\n"
+			}
+			path := filepath.Join(t.TempDir(), "refs")
+			require.NoError(t, os.WriteFile(path, []byte(input), 0600))
+			out, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "move", target.Name, "--refs-from", path, "--quiet")
+			if partial {
+				require.Error(t, err)
+				require.Contains(t, out, "1 moved, 1 refused")
+				require.Contains(t, out, "result=refused")
+			} else {
+				require.NoError(t, err)
+				require.Empty(t, out)
+			}
+		})
+	}
 }
