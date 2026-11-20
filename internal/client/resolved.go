@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"go.kenn.io/kata/internal/config"
+	kitdaemon "go.kenn.io/kit/daemon"
 )
 
 // DaemonSource names the input that selected a daemon. The source is carried
@@ -53,6 +54,7 @@ type ResolvedDaemon struct {
 	RuntimeDir          string
 	LocalProfile        *LocalProfileIdentity
 	profileConfig       *config.LocalProfileConfig
+	runtime             *kitdaemon.RuntimeRecord
 	Source              DaemonSource
 	Name                string
 	BaseURL             string
@@ -323,5 +325,36 @@ func localRuntimeResolved(candidate liveDaemon) ResolvedDaemon {
 		DaemonSourceLocalRuntime, "", runningDaemonForLive(candidate),
 	).withGlobalAuth()
 	resolved.UnixSocket = candidate.UnixSocket
+	resolved.runtime = &candidate.Record
 	return resolved
+}
+
+// Unreachable reports cause as a live local daemon failure using the runtime
+// record discovery already selected. Other targets return cause unchanged.
+func (d ResolvedDaemon) Unreachable(ctx context.Context, cause error) error {
+	if ctx.Err() != nil || d.runtime == nil {
+		return cause
+	}
+	if cause == nil {
+		cause = errors.New("unexpected ping response")
+	}
+	dataDir := d.RuntimeDir
+	if d.LocalProfile != nil {
+		dataDir = d.LocalProfile.DataDir
+	}
+	e := NewLocalDaemonUnreachable(dataDir, *d.runtime, cause)
+	if d.LocalProfile != nil && d.profileConfig != nil {
+		e.Profile = d.Name
+		e.ProfileAutostart = d.profileConfig.Config.AutostartEnabled()
+		e.ManagedExternally = !e.ProfileAutostart
+	}
+	return e
+}
+
+// WithDiscovered retains the selected credentials and the discovered runtime.
+func (d ResolvedDaemon) WithDiscovered(discovered ResolvedDaemon) ResolvedDaemon {
+	d = d.WithRunning(discovered.Running())
+	d.runtime = discovered.runtime
+	d.RuntimeDir = discovered.RuntimeDir
+	return d
 }

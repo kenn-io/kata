@@ -340,7 +340,7 @@ func probeDaemonSelection(
 		}
 		resolved, found, err = client.DiscoverResolved(ctx, ns.DataDir)
 		if found && selection.Resolved.Name != "" {
-			resolved = selection.Resolved.WithRunning(resolved.Running())
+			resolved = selection.Resolved.WithDiscovered(resolved)
 		}
 	}
 	if err != nil {
@@ -379,14 +379,8 @@ func probeDaemonSelection(
 		return result, selection, err
 	}
 	ping, err := apiClient.Ping(ctx)
-	if err != nil {
-		result.State = "local_unreachable"
-		if result.Kind == "remote" {
-			result.State = unavailableRemoteState(result.Endpoint)
-		}
-		return withDiagnosisAction(result), selection, nil
-	}
-	if ping == nil || !ping.Ok || ping.Service != "kata" {
+	if err != nil || ping == nil || !ping.Ok || ping.Service != "kata" {
+		result = diagnosisUnreachable(result, resolved.Unreachable(ctx, err))
 		result.State = "local_unreachable"
 		if result.Kind == "remote" {
 			result.State = unavailableRemoteState(result.Endpoint)
