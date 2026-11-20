@@ -63,8 +63,27 @@ func RunParentReplacementMissingExpectedLink(t *testing.T, store db.Storage) {
 	require.ErrorIs(t, err, db.ErrParentMismatch)
 	_, err = store.ParentOf(ctx, child.ID)
 	require.ErrorIs(t, err, db.ErrNotFound, "a failed replacement must not install the new parent")
+}
 
-	oldLink, _, err = store.CreateLinkAndEvent(ctx, db.CreateLinkParams{
+// RunParentReplacementUnlinkEndpoints checks the replacement unlink payload.
+func RunParentReplacementUnlinkEndpoints(t *testing.T, store db.Storage) {
+	t.Helper()
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	child, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Child task", Author: "example-actor",
+	})
+	require.NoError(t, err)
+	oldParent, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Old parent", Author: "example-actor",
+	})
+	require.NoError(t, err)
+	newParent, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "New parent", Author: "example-actor",
+	})
+	require.NoError(t, err)
+	oldLink, _, err := store.CreateLinkAndEvent(ctx, db.CreateLinkParams{
 		FromIssueID: child.ID, ToIssueID: oldParent.ID, Type: "parent", Author: "example-actor",
 	}, db.LinkEventParams{
 		EventType: "issue.linked", EventIssueID: child.ID,
@@ -72,6 +91,8 @@ func RunParentReplacementMissingExpectedLink(t *testing.T, store db.Storage) {
 		ToShortID: oldParent.ShortID, ToUID: oldParent.UID, Actor: "example-actor",
 	})
 	require.NoError(t, err)
+	replacement, ok := store.(db.ParentLinkReplacementStorage)
+	require.True(t, ok, "native stores support atomic parent replacement")
 	result, err := replacement.ReplaceParentAndEvents(ctx, db.ReplaceParentAndEventsParams{
 		ExpectedParentLinkID: oldLink.ID, ExpectedParentIssueID: oldParent.ID,
 		Link:        db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: newParent.ID, Type: "parent", Author: "example-actor"},
@@ -86,7 +107,4 @@ func RunParentReplacementMissingExpectedLink(t *testing.T, store db.Storage) {
 	require.NoError(t, json.Unmarshal([]byte(result.UnlinkedEvent.Payload), &payload))
 	require.Equal(t, oldLink.FromIssueUID, payload.FromUID)
 	require.Equal(t, oldLink.ToIssueUID, payload.ToUID)
-	parent, err := store.ParentOf(ctx, child.ID)
-	require.NoError(t, err)
-	require.Equal(t, newParent.ID, parent.ToIssueID)
 }

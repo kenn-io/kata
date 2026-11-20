@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
@@ -228,6 +229,9 @@ func TestDirectPushWithProjectScopedActors(t *testing.T) {
 			_, err = spoke.DB.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: child.ID, Actor: "worker", SetParent: &localNewPeer.ID})
 			require.NoError(t, err)
 			require.NoError(t, syncProject(0))
+			parent, err = hub.store.ParentOf(ctx, other.ID)
+			require.NoError(t, err)
+			require.Equal(t, newPeer.UID, parent.ToIssueUID)
 			checkObserver(newPeer.UID)
 			link, err := spoke.DB.ParentOf(ctx, child.ID)
 			require.NoError(t, err)
@@ -278,9 +282,16 @@ func TestDirectPushWithProjectScopedActors(t *testing.T) {
 				title := "Updated after replacement"
 				_, err = spoke.DB.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: child.ID, Actor: "worker", Title: &title})
 				require.NoError(t, err)
-				controller.allow.Store(false)
-				require.ErrorContains(t, syncProject(0), "403")
-				controller.allow.Store(true)
+				quarantine, err := spoke.DB.RecordFederationQuarantine(ctx, db.RecordFederationQuarantineParams{
+					ProjectID: child.ProjectID, Direction: db.FederationQuarantineDirectionPush,
+					FirstEventID: legacy.ID, LastEventID: replacement.LinkedEvent.ID,
+					EventUIDs: []string{legacy.UID, replacement.LinkedEvent.UID}, Error: "hub rejected legacy parent unlink", CreatedAt: time.Now().UTC(),
+				})
+				require.NoError(t, err)
+				_, err = spoke.DB.RetryFederationQuarantine(ctx, db.RetryFederationQuarantineParams{
+					ID: quarantine.ID, ProjectID: child.ProjectID, Actor: "worker", Reason: "hub upgraded", Now: time.Now().UTC(),
+				})
+				require.NoError(t, err)
 				require.NoError(t, syncProject(0))
 				parent, err := hub.store.ParentOf(ctx, other.ID)
 				require.NoError(t, err)

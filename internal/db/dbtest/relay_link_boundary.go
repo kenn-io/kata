@@ -60,7 +60,7 @@ func linkTargetUIDs(t *testing.T, store db.Storage, issueID int64) []string {
 // link keeps its same-project link after an operator removes the crossing link
 // and enrolls a relay peer.
 func RunRelayLinkBoundaryKeepsSameProjectEffects(t *testing.T, store db.Storage) {
-	t.Run("ambiguous parent unlink", func(t *testing.T) {
+	t.Run("stale legacy parent unlink", func(t *testing.T) {
 		ctx := t.Context()
 		fixture := newRelayLinkBoundaryFixture(t, store, "relay-ambiguous-parent")
 		child, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.project.ID, Title: "Child", Author: "relay-member"})

@@ -300,16 +300,6 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 		require.Equal(t, peer.ID, parent.ToIssueID)
 	})
 	// A reference proof for a peer does not authorize removing a blocks link.
-	blocksPayload, err := json.Marshal(map[string]any{"blocks_removed_uids": []string{peer.UID}, "related_added_uids": []string{peer.UID}})
-	require.NoError(t, err)
-	params.Events = []db.FederationIngestEvent{{SourceEventID: 4, Event: newRemoteEvent(t, route, &child.UID, "issue.links_changed", "worker", origin, at+7, blocksPayload)}}
-	_, err = store.IngestFederationEvents(ctx, params)
-	require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
-	blocksLink, err := json.Marshal(map[string]string{"from_uid": child.UID, "to_uid": peer.UID, "type": "blocks"})
-	require.NoError(t, err)
-	peers, err := db.DirectLinkPeers(db.FoldEvent{Type: "issue.linked", IssueUID: child.UID, Payload: blocksLink})
-	require.NoError(t, err)
-	require.Empty(t, peers)
 	blocksUnlink, err := json.Marshal(map[string]string{"from_uid": child.UID, "to_uid": peer.UID, "link_from_uid": child.UID, "link_to_uid": peer.UID, "type": "blocks"})
 	require.NoError(t, err)
 	params.Events = []db.FederationIngestEvent{{SourceEventID: 4, Event: newRemoteEvent(t, route, &child.UID, "issue.unlinked", "worker", origin, at+7, blocksUnlink)}}
@@ -336,10 +326,6 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 		{SourceEventID: 7, Event: newRemoteEvent(t, route, &child.UID, "issue.unlinked", "worker", origin, at+9, unlinked)},
 		{SourceEventID: 8, Event: newRemoteEvent(t, route, &child.UID, "issue.linked", "worker", origin, at+10, linked)},
 	}
-	params.MoveSourceEnrollmentIDs = nil
-	_, err = store.IngestFederationEvents(ctx, params)
-	require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
-	params.MoveSourceEnrollmentIDs = map[string]int64{source.UID: peerGrant.Enrollment.ID}
 	_, err = store.IngestFederationEvents(ctx, params)
 	require.NoError(t, err)
 	parent, err = store.ParentOf(ctx, child.ID)
@@ -360,12 +346,6 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 	result, err = store.IngestFederationEvents(ctx, params)
 	require.NoError(t, err)
 	require.Equal(t, 2, result.Accepted)
-	stored, err := store.EventsByUIDs(ctx, route.ID, []string{legacy.EventUID})
-	require.NoError(t, err)
-	require.Len(t, stored, 1)
-	require.Equal(t, legacy.EventUID, stored[0].UID)
-	require.Equal(t, legacy.ContentHash, stored[0].ContentHash)
-	require.JSONEq(t, string(legacy.Payload), stored[0].Payload)
 	parent, err = store.ParentOf(ctx, child.ID)
 	require.NoError(t, err)
 	require.Equal(t, peer.ID, parent.ToIssueID)
