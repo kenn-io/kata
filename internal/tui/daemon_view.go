@@ -2,8 +2,11 @@ package tui
 
 import (
 	"context"
+	"errors"
 
 	tea "charm.land/bubbletea/v2"
+	"go.kenn.io/kata/internal/client"
+	"go.kenn.io/kata/internal/daemonadvice"
 )
 
 type daemonRow struct {
@@ -124,7 +127,11 @@ func (m Model) handleDaemonSwitchResult(msg daemonSwitchResultMsg) (Model, tea.C
 	}
 	if msg.err != nil {
 		name := sanitizeForLine(daemonTargetDisplay(msg.target))
-		errText := sanitizeForLine(msg.err.Error())
+		errText := msg.err.Error()
+		if e, ok := errors.AsType[*client.LocalDaemonUnreachableError](msg.err); ok && errors.Is(msg.err, client.ErrLocalDaemonUnreachable) && !errors.Is(msg.err, client.ErrDaemonManagedExternally) {
+			errText = e.Summary() + ". " + daemonadvice.Recovery(e)
+		}
+		errText = sanitizeForLine(errText)
 		m.toast = &toast{
 			text:      "daemon " + quoteForToast(name) + ": " + errText,
 			level:     toastError,

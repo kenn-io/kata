@@ -143,6 +143,9 @@ func TestLiveUnreachableRecoveryAdvice(t *testing.T) {
 			} else {
 				require.Contains(t, err.Error(), tc.want+"/debug/pprof/goroutine?debug=2")
 				require.Contains(t, err.Error(), "Authorization: Bearer")
+				require.Contains(t, err.Error(), "independently verified endpoint")
+				require.Contains(t, err.Error(), "goroutine stacks")
+				require.Contains(t, err.Error(), "without a token")
 			}
 			require.True(t, observed.VerifiedProcess)
 		})
@@ -217,9 +220,9 @@ func TestUnreachableErrorRelaunchPaths(t *testing.T) {
 		want                                          string
 	}{
 		{"manual", false, false, false, false, false, "start it again the way you originally started it (same options and environment)"},
-		{"automatic", false, true, false, false, false, "rerun the command that failed"},
+		{"automatic", false, true, false, false, false, "kata daemon start"},
 		{"managed", true, false, false, false, false, "service manager"},
-		{"profile", false, false, true, false, false, "kata --daemon work daemon recover"},
+		{"profile", false, false, true, false, false, ""},
 		{"migration", false, false, false, true, false, "Wait for the migration"},
 		{"unverified", false, false, false, false, true, "unreachable"},
 	} {
@@ -251,8 +254,12 @@ func TestUnreachableErrorRelaunchPaths(t *testing.T) {
 			require.Contains(t, text, fmt.Sprintf("%q", filepath.Join(dir, "daemon.log")))
 			require.Contains(t, text, fmt.Sprint(os.Getpid()))
 			want := tc.want
-			if tc.profile && runtime.GOOS == "windows" {
-				want = "'--daemon' 'work' 'daemon' 'recover'"
+			if tc.profile {
+				if runtime.GOOS == "windows" {
+					want = "taskkill"
+				} else {
+					want = "dump goroutines"
+				}
 			}
 			require.Contains(t, text, want)
 			if tc.migration || tc.unverified {
@@ -260,11 +267,16 @@ func TestUnreachableErrorRelaunchPaths(t *testing.T) {
 				require.NotContains(t, text, "taskkill")
 				return
 			}
+			if !tc.managed || runtime.GOOS != "windows" {
+				require.Contains(t, text, "Recheck the PID and endpoint")
+			}
 			if tc.managed {
 				if runtime.GOOS == "windows" {
 					require.NotContains(t, text, "taskkill")
 				} else {
 					require.Contains(t, text, fmt.Sprintf("kill -QUIT %d", os.Getpid()))
+					require.Contains(t, text, "standard error")
+					require.Contains(t, text, "stop")
 				}
 				return
 			}
@@ -272,12 +284,16 @@ func TestUnreachableErrorRelaunchPaths(t *testing.T) {
 				require.Contains(t, text, "taskkill")
 			} else {
 				require.Contains(t, text, "kill -QUIT")
+				require.Contains(t, text, "standard error")
+			}
+			if tc.profile {
+				return
 			}
 			_, afterKill, ok := strings.Cut(text, ". Then ")
 			require.True(t, ok)
 			require.NotContains(t, afterKill, "daemon restart")
 			for _, other := range []string{"start it again the way you originally started it (same options and environment)", "rerun the command that failed", "service manager", "kata --daemon work daemon recover"} {
-				if other != tc.want {
+				if !strings.Contains(tc.want, other) {
 					require.NotContains(t, afterKill, other)
 				}
 			}
@@ -292,30 +308,36 @@ func TestWithCallerContextDistinguishesOperationTimeoutFromCallerCancel(t *testi
 		Network: "tcp", Address: "127.0.0.1:1",
 	})
 
-	callerCtx, cancelCaller := context.WithCancel(t.Context())
+	callerCtx, cancelCaller := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+	defer cancelCaller()
 	workCtx, cancelWork := context.WithTimeout(WithCallerContext(callerCtx, callerCtx), time.Second)
-	cancelCaller()
+	defer cancelWork()
 	<-workCtx.Done()
 	canceled := newUnreachable(workCtx, dataDir, record, workCtx.Err())
-	cancelWork()
 	require.True(t, canceled.callerStopped)
+	require.ErrorIs(t, canceled, context.DeadlineExceeded)
 	require.Empty(t, canceled.RecoveryAdvice())
 
 	callerCtx = t.Context()
-	workCtx, cancelWork = context.WithCancel(WithCallerContext(callerCtx, callerCtx))
-	cancelWork()
+	workCtx, cancelWork = context.WithDeadline(WithCallerContext(callerCtx, callerCtx), time.Now().Add(-time.Second))
+	defer cancelWork()
 	<-workCtx.Done()
 	timedOut := newUnreachable(workCtx, dataDir, record, workCtx.Err())
 	require.False(t, timedOut.callerStopped)
-	require.Contains(t, timedOut.RecoveryAdvice(), "kill -QUIT")
+	if runtime.GOOS == "windows" {
+		require.Contains(t, timedOut.RecoveryAdvice(), "taskkill")
+	} else {
+		require.Contains(t, timedOut.RecoveryAdvice(), "kill -QUIT")
+	}
 }
 
 func TestUnreachableMigrationAdviceUsesRedactedRuntimeSQLitePath(t *testing.T) {
 	setupKataEnv(t)
 	dir := filepath.Join(t.TempDir(), "database directory")
 	require.NoError(t, os.Mkdir(dir, 0700))
-	dsn := "sqlite://" + filepath.Join(dir, "kata database.db")
-	lock := flock.New(strings.TrimPrefix(dsn, "sqlite://") + ".import.lock")
+	dbPath := filepath.Join(dir, "kata database.db")
+	dsn := "sqlite://" + filepath.ToSlash(dbPath)
+	lock := flock.New(dbPath + ".import.lock")
 	require.NoError(t, lock.Lock())
 	t.Cleanup(func() { require.NoError(t, lock.Close()) })
 

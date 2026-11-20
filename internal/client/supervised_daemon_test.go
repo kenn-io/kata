@@ -56,6 +56,43 @@ func TestManagedExternallyDoesNotAutostart(t *testing.T) {
 }
 
 func TestManagedExternallyUnreachableDetail(t *testing.T) {
+	t.Run("show restart advice once", func(t *testing.T) {
+		home := setupKataEnv(t)
+		require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n"), 0600))
+		synctest.Test(t, func(t *testing.T) {
+			_, err := waitForSupervisedDaemon(t.Context(), filepath.Join(home, "config.toml"), func(context.Context) bool { return false }, func(ctx context.Context) (ensureDiscovery, error) {
+				return ensureDiscovery{}, newUnreachable(ctx, home, kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1"}, errors.New("unreachable"))
+			})
+			require.Error(t, err)
+			require.Equal(t, 1, strings.Count(err.Error(), "service manager"))
+		})
+	})
+	t.Run("caller cancels while probing", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		_, err := waitForSupervisedDaemon(ctx, "/example/config.toml", func(context.Context) bool { return false }, func(ctx context.Context) (ensureDiscovery, error) {
+			cancel()
+			return ensureDiscovery{}, newUnreachable(ctx, "/example/runtime", kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1"}, ctx.Err())
+		})
+		require.ErrorIs(t, err, context.Canceled)
+		require.ErrorContains(t, err, "/example/runtime")
+		require.NotContains(t, err.Error(), "restart")
+		require.NotContains(t, err.Error(), "start it")
+	})
+	t.Run("caller cancels after probe fails", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		_, err := waitForSupervisedDaemon(ctx, "/example/config.toml", func(context.Context) bool { return false }, func(ctx context.Context) (ensureDiscovery, error) {
+			unreachable := newUnreachable(ctx, "/example/runtime", kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1"}, errors.New("unreachable"))
+			cancel()
+			return ensureDiscovery{}, unreachable
+		})
+		require.ErrorIs(t, err, context.Canceled)
+		require.ErrorContains(t, err, "/example/runtime")
+		require.NotContains(t, err.Error(), "kill -QUIT")
+		require.NotContains(t, err.Error(), "taskkill")
+		require.NotContains(t, err.Error(), "restart")
+	})
 	for _, clear := range []bool{false, true} {
 		t.Run(fmt.Sprintf("clear=%t", clear), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {

@@ -17,6 +17,7 @@ import (
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonadvice"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/storeopen"
@@ -481,7 +482,7 @@ func safeDaemonOrigin(value string) string {
 
 func diagnosisUnreachable(result daemonDiagnosis, err error) daemonDiagnosis {
 	if e, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok {
-		result.Message, result.NextAction, result.PID, result.Endpoint = e.Summary(), e.RecoveryAdvice(), e.PID, e.Address
+		result.Message, result.NextAction, result.PID, result.Endpoint = e.Summary(), daemonadvice.Recovery(e), e.PID, e.Address
 	}
 	return result
 }

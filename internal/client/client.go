@@ -23,7 +23,6 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
-	"go.kenn.io/kit/agenthook"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
@@ -91,7 +90,7 @@ type LocalDaemonUnreachableError struct {
 	VerifiedProcess   bool
 	ManagedExternally bool
 	Profile           string
-	profileAutostart  bool
+	ProfileAutostart  bool
 	autoStarted       bool
 	callerStopped     bool
 	migrationActive   bool
@@ -114,34 +113,31 @@ func (e *LocalDaemonUnreachableError) RecoveryAdvice() string {
 		return message
 	}
 	if e.WebOrigin != "" {
-		message = "Capture " + e.WebOrigin + "/debug/pprof/goroutine?debug=2; send the daemon token as an Authorization: Bearer header if one is set. "
+		message = "Save goroutine stacks from " + e.WebOrigin + "/debug/pprof/goroutine?debug=2 without a token. For authenticated capture, send the token in an Authorization: Bearer header only to an independently verified endpoint, such as the owner-only Unix socket. "
 	}
 	if e.migrationActive {
 		return message + "Wait for the migration to finish, then retry; do not interrupt the daemon"
 	}
 	if e.ManagedExternally {
 		if e.VerifiedProcess && goruntime.GOOS != "windows" {
-			message += fmt.Sprintf("Use kill -QUIT %d to dump goroutines. ", e.PID)
+			message += fmt.Sprintf("Recheck the PID and endpoint before stopping it. Use kill -QUIT %d to dump goroutines to standard error and stop it. ", e.PID)
 		}
 		return message + "Restart it through its service manager"
 	}
 	if !e.VerifiedProcess {
 		return "Inspect the selected process and its credentials; do not switch databases"
 	}
+	message += "Recheck the PID and endpoint before stopping it. "
 	if goruntime.GOOS == "windows" {
 		message += fmt.Sprintf("Stop it with taskkill /PID %d /F", e.PID)
 	} else {
-		message += fmt.Sprintf("Use kill -QUIT %d to dump goroutines and stop it", e.PID)
+		message += fmt.Sprintf("Use kill -QUIT %d to dump goroutines to standard error and stop it", e.PID)
 	}
 	switch {
-	case e.Profile != "" && e.profileAutostart:
-		commands, _ := agenthook.BuildCommand("kata", "--daemon", e.Profile, "daemon", "recover")
-		if goruntime.GOOS == "windows" {
-			return message + ". Then run in PowerShell " + commands.PowerShell
-		}
-		return message + ". Then run " + commands.POSIX
+	case e.Profile != "" && e.ProfileAutostart:
+		return message
 	case e.autoStarted:
-		return message + ". Then rerun the command that failed"
+		return message + ". Then run kata daemon start"
 	default:
 		return message + ". Then start it again the way you originally started it (same options and environment)"
 	}

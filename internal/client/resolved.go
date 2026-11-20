@@ -122,8 +122,8 @@ func (d ResolvedDaemon) Unreachable(ctx context.Context, cause error) error {
 func annotateUnreachable(err error, d ResolvedDaemon) error {
 	if e, ok := errors.AsType[*LocalDaemonUnreachableError](err); ok && d.profileConfig != nil {
 		e.Profile = d.Name
-		e.profileAutostart = d.profileConfig.Config.AutostartEnabled()
-		e.ManagedExternally = !e.profileAutostart
+		e.ProfileAutostart = d.profileConfig.Config.AutostartEnabled()
+		e.ManagedExternally = !e.ProfileAutostart
 	}
 	return err
 }

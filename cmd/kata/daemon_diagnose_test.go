@@ -24,6 +24,7 @@ import (
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/tui"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
@@ -863,26 +864,40 @@ func supervisedProfileDaemon(t *testing.T, home, uid string, handler http.Handle
 }
 
 func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
-	home, _, uid, _ := stoppedProfileCLI(t)
+	home, workspace, uid, _ := stoppedProfileCLI(t)
+	profileName := "work profile"
+	personalHome := t.TempDir()
+	t.Setenv("KATA_HOME", personalHome)
+	catalog := fmt.Sprintf(`[[daemon]]
+name = %q
+local = true
+home = %q
+instance_uid = %q
+`, profileName, home, uid)
+	require.NoError(t, os.WriteFile(filepath.Join(personalHome, "config.toml"), []byte(catalog), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.local.toml"), []byte(fmt.Sprintf("version = 1\n[server]\ndaemon = %q\n", profileName)), 0600))
+	var pings atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		pings.Add(1)
 		http.Error(w, "fixture unavailable", http.StatusServiceUnavailable)
 	}))
 	t.Cleanup(server.Close)
-	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: uid})
+	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: profileName, Local: true, Home: home, InstanceUID: uid})
 	require.NoError(t, err)
 	ns, err := daemonruntime.NewNamespaceForHome(home, profile.StorageID)
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
-	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
+	dbPath := filepath.Join(home, "kata.db")
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://"), Metadata: map[string]string{"db_path": dbPath}})
 	require.NoError(t, err)
 	logPath := filepath.Join(ns.DataDir, "daemon.log")
-	recoverCommand := "--daemon work"
+	recoverCommand := "--daemon 'work profile'"
 	if runtime.GOOS == "windows" {
-		recoverCommand = "'--daemon' 'work'"
+		recoverCommand = "'--daemon' 'work profile'"
 	}
 
 	t.Run("ordinary", func(t *testing.T) {
-		_, stderr, err := executeRootCapture(t, t.Context(), "--daemon", "work", "list")
+		_, stderr, err := executeRootCapture(t, t.Context(), "--daemon", profileName, "list")
 		var cliErr *cliError
 		require.ErrorAs(t, err, &cliErr)
 		require.Contains(t, cliErr.Message, "503")
@@ -893,21 +908,40 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 		require.NotContains(t, cliErr.Message, "recover")
 	})
 	t.Run("health keeps the failure in the error text", func(t *testing.T) {
-		_, stderr, err := executeRootCapture(t, t.Context(), "--daemon", "work", "health")
+		before := pings.Load()
+		_, stderr, err := executeRootCapture(t, t.Context(), "--daemon", profileName, "health")
+		require.Equal(t, before+1, pings.Load(), "health must keep the first failed probe")
 		cliErr := requireCLIError(t, err, ExitDaemonUnavail)
 		require.Equal(t, "local_unreachable", cliErr.Code)
 		require.Equal(t, kindDaemonUnavail, cliErr.Kind)
-		var result daemonDiagnosis
-		require.NoError(t, json.Unmarshal(cliErr.Data, &result))
-		require.Equal(t, "local_unreachable", result.State)
-		require.Contains(t, result.Message, "503")
 		require.Contains(t, cliErr.Message, "503")
 		require.NotContains(t, cliErr.Message, "recover")
-		healthNextAction := result.NextAction
-		require.Contains(t, healthNextAction, recoverCommand)
-		require.Contains(t, healthNextAction, "recover")
-		require.Equal(t, healthNextAction, cliErr.Hint)
-		require.Contains(t, stderr, healthNextAction)
+		require.Contains(t, cliErr.Hint, recoverCommand)
+		require.Contains(t, cliErr.Hint, "recover")
+		require.Contains(t, stderr, cliErr.Hint)
+	})
+	t.Run("migration waits without recovery", func(t *testing.T) {
+		lock := flock.New(dbPath + ".import.lock")
+		require.NoError(t, lock.Lock())
+		t.Cleanup(func() { require.NoError(t, lock.Close()) })
+		_, stderr, err := executeRootCapture(t, t.Context(), "--daemon", profileName, "list")
+		require.Error(t, err)
+		require.Contains(t, stderr, "Wait for the migration")
+		require.NotContains(t, stderr, "kill -QUIT")
+		require.NotContains(t, stderr, "taskkill")
+		require.NotContains(t, stderr, "daemon recover")
+	})
+	t.Run("tui startup keeps profile recovery", func(t *testing.T) {
+		old := runTUI
+		runTUI = func(context.Context, tui.Options) error {
+			return &client.LocalDaemonUnreachableError{PID: os.Getpid(), Address: "127.0.0.1:1", DataDir: ns.DataDir, VerifiedProcess: true, Profile: profileName, ProfileAutostart: true}
+		}
+		t.Cleanup(func() { runTUI = old })
+		_, stderr, err := executeRootCapture(t, t.Context(), "--daemon", profileName, "tui")
+		require.Error(t, err)
+		require.Contains(t, stderr, recoverCommand)
+		require.Contains(t, stderr, "daemon")
+		require.Contains(t, stderr, "recover")
 	})
 }
 
@@ -935,11 +969,11 @@ func TestDaemonDiagnoseSecondPingUnreachable(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	store := kitdaemon.RuntimeStore{Dir: ns.DataDir}
-	recordPath, err := store.Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
+	_, err = store.Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
 	require.NoError(t, err)
 	replaceRecord = func() {
-		path, err := store.Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid() + 100000, Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
-		if err == nil && os.Rename(path, recordPath) == nil {
+		_, err := store.Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1"})
+		if err == nil {
 			replaced.Store(true)
 		}
 	}
@@ -950,6 +984,7 @@ func TestDaemonDiagnoseSecondPingUnreachable(t *testing.T) {
 	require.True(t, replaced.Load())
 	require.Equal(t, "local_unreachable", result.State)
 	require.Equal(t, os.Getpid(), result.PID)
+	require.Equal(t, strings.TrimPrefix(server.URL, "http://"), result.Endpoint)
 	require.Contains(t, result.Message, fmt.Sprintf("%q", filepath.Join(ns.DataDir, "daemon.log")))
 	if runtime.GOOS == "windows" {
 		require.Contains(t, result.NextAction, "'--daemon' 'work'")

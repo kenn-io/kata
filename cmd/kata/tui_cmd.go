@@ -58,7 +58,7 @@ Set [tui] confirm_quit = false in <KATA_HOME>/config.toml to make q quit immedia
 					return err
 				}
 			}
-			return runTUI(ctx, tui.Options{
+			return cliDaemonTargetError(runTUI(ctx, tui.Options{
 				Stdout:           cmd.OutOrStdout(),
 				Stderr:           cmd.ErrOrStderr(),
 				DisplayUIDFormat: uidFormat,
@@ -68,7 +68,7 @@ Set [tui] confirm_quit = false in <KATA_HOME>/config.toml to make q quit immedia
 				InitialIssueRef:  initialIssueRef,
 				ProjectName:      strings.TrimSpace(flags.Project),
 				Workspace:        workspace,
-			})
+			}))
 		},
 	}
 	cmd.Flags().StringVar(&uidFormat, "uid-format", "none", "show issue UIDs in detail (none|short|full)")

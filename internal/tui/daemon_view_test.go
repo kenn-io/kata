@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -138,6 +140,19 @@ func TestDaemonView_EnterDispatchesSwitchCommand(t *testing.T) {
 	assert.Equal(t, "prod", sw.conn.target.Name)
 	assert.Equal(t, uint64(1), sw.attempt)
 	assert.Equal(t, uint64(1), out.daemonSwitchAttempt)
+}
+
+func TestDaemonView_UnreachableProfileRecovery(t *testing.T) {
+	m := setupDaemonView()
+	err := &clientpkg.LocalDaemonUnreachableError{PID: os.Getpid(), Address: "127.0.0.1:1", DataDir: t.TempDir(), VerifiedProcess: true, Profile: "work profile", ProfileAutostart: true}
+	out, _ := m.handleDaemonSwitchResult(daemonSwitchResultMsg{target: daemonTarget{Name: "work profile"}, err: err})
+	require.NotNil(t, out.toast)
+	command := "--daemon 'work profile'"
+	if runtime.GOOS == "windows" {
+		command = "'--daemon' 'work profile'"
+	}
+	require.Contains(t, stripANSI(renderToast(out.toast)), command)
+	require.Contains(t, stripANSI(renderToast(out.toast)), "recover")
 }
 
 func TestDaemonSwitchDropsOutOfOrderAttempt(t *testing.T) {
