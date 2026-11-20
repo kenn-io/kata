@@ -355,17 +355,28 @@ describe('IssueProperties', () => {
   })
 
   it('keeps the property editor open when a property mutation fails', async () => {
-    renderProperties({
-      onPatchMetadata: vi.fn(async () => false),
+    const onPatchMetadata = vi.fn(async () => false)
+    const view = renderProperties({
+      draftResetGeneration: 0,
+      onPatchMetadata,
     })
 
     await fireEvent.click(screen.getByRole('button', { name: 'Edit scheduled' }))
     await fireEvent.click(screen.getByRole('button', { name: /Scheduled:/ }))
     await fireEvent.click(screen.getByRole('gridcell', { name: /June 10, 2026/ }))
+    expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', { scheduled_on: '2026-06-10' })
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Scheduled: Jun 10/ })).toBeTruthy()
     })
+    await view.rerender({
+      draftResetGeneration: 1,
+      issue: makeIssue({
+        owner: 'user-a',
+        metadata: { scheduled_on: '2026-06-01', deadline_on: '2026-06-05' },
+      }),
+    })
+    expect(screen.getByRole('button', { name: /Scheduled: Jun 10/ })).toBeTruthy()
   })
 
   it('assigns highlighted, custom, and unassigned owners', async () => {
