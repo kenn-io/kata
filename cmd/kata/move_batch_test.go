@@ -312,19 +312,20 @@ func TestMoveBatchDuplicateResolvedUID(t *testing.T) {
 			require.Len(t, reply.Results, 2)
 			stored, err := env.DB.IssueByID(t.Context(), issue.ID)
 			require.NoError(t, err)
-			if scenario == "503" || scenario == "transport" {
+			switch scenario {
+			case "503", "transport":
 				require.Zero(t, posts.Load())
 				require.Equal(t, source.ID, stored.ProjectID)
 				require.Equal(t, "unattempted", reply.Results[0].Result)
 				require.NotEmpty(t, reply.Results[0].Message)
 				require.Equal(t, "not sent; safe to rerun", reply.Results[0].Hint)
 				require.Equal(t, "unattempted", reply.Results[1].Result)
-			} else if scenario == "conflict" {
+			case "conflict":
 				require.Zero(t, posts.Load())
 				require.Equal(t, source.ID, stored.ProjectID)
 				require.Equal(t, "refused", reply.Results[0].Result)
 				require.Equal(t, "refused", reply.Results[1].Result)
-			} else {
+			default:
 				require.EqualValues(t, 1, posts.Load())
 				require.Equal(t, target.ID, stored.ProjectID)
 				require.Equal(t, "moved", reply.Results[0].Result)

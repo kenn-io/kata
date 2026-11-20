@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/shortid"
 )
 
 // resolveIssueRefForCommand parses one positional issue-ref argument, resolves
@@ -65,7 +66,7 @@ func resolveIssueRefForCommandWithOptions(
 			ExitCode: ExitValidation,
 		}
 	}
-	project, numeric, err := resolveNumericRefProject(a, ref, includeArchivedProject)
+	project, numeric, err := resolveNumericRefProject(cmd, a, ref, includeArchivedProject)
 	if err != nil {
 		return nil, "", 0, resolvedIssueRef{}, err
 	}
@@ -84,10 +85,17 @@ func resolveIssueRefForCommandWithOptions(
 	}, nil
 }
 
-// resolveNumericRefProject handles an explicit numeric flag only for bare refs.
-func resolveNumericRefProject(a daemonAPI, ref string, includeArchived bool) (projectRef, bool, error) {
+// resolveNumericRefProject supports numeric project IDs for bare UIDs in show and comment.
+func resolveNumericRefProject(cmd *cobra.Command, a daemonAPI, ref string, includeArchived bool) (projectRef, bool, error) {
+	if cmd.Name() != "show" && cmd.Name() != "comment" && (cmd.Parent() == nil || cmd.Parent().Name() != "comment") {
+		return projectRef{}, false, nil
+	}
+	parsed, err := shortid.Parse(ref)
+	if err != nil || parsed.ULID == "" {
+		return projectRef{}, false, nil
+	}
 	selector := strings.TrimSpace(flags.Project)
-	if selector == "" || strings.Contains(ref, "#") {
+	if selector == "" {
 		return projectRef{}, false, nil
 	}
 	if _, err := strconv.ParseInt(selector, 10, 64); err != nil {

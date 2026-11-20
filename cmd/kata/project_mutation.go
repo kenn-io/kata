@@ -83,7 +83,7 @@ func prepareIssueMutation(cmd *cobra.Command, ref string, resolveNow bool) (*pro
 		return p, resolvedIssueRef{RefForAPI: parsed.RefForAPI, ProjectName: p.name}, nil
 	}
 	p := &projectMutation{api: a, name: parsed.ProjectName, selector: "name:" + parsed.ProjectName}
-	selected, numeric, err := resolveNumericRefProject(a, ref, false)
+	selected, numeric, err := resolveNumericRefProject(cmd, a, ref, false)
 	if err != nil {
 		return nil, resolvedIssueRef{}, err
 	}

@@ -46,7 +46,7 @@ compactly; `kata --help` has their full descriptions.
 | Flag | Meaning |
 | --- | --- |
 | `--workspace <path>` | Resolve project context from a specific workspace. |
-| `--project <name-or-id>` | Select a project by name; `show` and `comment` also accept a numeric project ID. Otherwise resolve `.kata.toml` at or above `--workspace`. Qualified refs select their project by exact name. |
+| `--project <name-or-id>` | Select a project by name; `show` and `comment` also accept a numeric project ID for bare UID refs. Otherwise resolve `.kata.toml` at or above `--workspace`. Qualified refs select their project by exact name. |
 | `--daemon <name>` | Target a named daemon catalog entry. Without it, select `KATA_SERVER`, workspace config, `active_daemon`, then local. |
 | `--as <actor>` | Override the actor for this command. An explicitly empty value is a validation error; actor fallback applies only when the flag is absent. |
 | `--teammate <handle>` | Attribute supported comments, new issues, and cron run observations to one teammate under the accountable actor. An explicit empty value suppresses `KATA_TEAMMATE`. |
