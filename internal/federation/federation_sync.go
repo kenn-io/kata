@@ -1272,6 +1272,12 @@ func (r *Runner) runOnce(
 	if err != nil {
 		return nil, false, nil, err
 	}
+	if len(only) == 0 {
+		// This pass serves every spoke, which covers the wakes queued so far.
+		// Take them only now: a pass that fails before this point leaves them
+		// queued, so they retry after the debounce instead of the interval.
+		r.Wake.take()
+	}
 	active := make(map[int64]bool, len(spokes))
 	for _, spoke := range spokes {
 		active[spoke.binding.ProjectID] = true
@@ -1816,10 +1822,6 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 			if err := validateLease(ctx); err != nil {
 				return err
 			}
-		}
-		if only == nil {
-			// This pass serves every spoke, which covers the wakes queued so far.
-			r.Wake.take()
 		}
 		retry, denied, remaining, err := r.runOnce(ctx, validateLease, only, retries)
 		polls.passCompleted()

@@ -1,7 +1,10 @@
 package federation
 
 import (
+	"context"
+	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -157,4 +160,44 @@ func TestRunnerKeepsEveryProjectWakeThatArrivesBeforeAPass(t *testing.T) {
 	awaitDebounce(t, debounces)
 	assert.ElementsMatch(t, []int64{a.spoke.ID, b.spoke.ID, a.spoke.ID, b.spoke.ID, c.spoke.ID}, results.since(start),
 		"a wake for every spoke absorbs a later project wake")
+}
+
+// listFailingStore fails the next binding listing, the first read of a pass.
+type listFailingStore struct {
+	db.Storage
+	failNext atomic.Bool
+}
+
+func (s *listFailingStore) ListFederationBindings(ctx context.Context) ([]db.FederationBinding, error) {
+	if s.failNext.CompareAndSwap(true, false) {
+		return nil, errors.New("database unavailable")
+	}
+	return s.Storage.ListFederationBindings(ctx)
+}
+
+// A write waiting for a full pass still syncs soon when that pass fails
+// before it reaches any spoke, instead of waiting for the next interval.
+func TestRunnerKeepsWakesWhenAPassFailsToListSpokes(t *testing.T) {
+	hub := testenv.New(t)
+	spoke := testenv.New(t)
+	t.Setenv("KATA_HOME", t.TempDir())
+	a := bindSpokeProjects(t, hub.DB, spoke.DB, hub.URL, 1)[0]
+	store := &listFailingStore{Storage: spoke.DB}
+	store.failNext.Store(true)
+
+	wake := NewWakeQueue()
+	wake.WakeProject(a.spoke.ID)
+	results := newSpokeResults()
+	failed := make(chan error, 1)
+	runner := &Runner{
+		DB:            store,
+		Interval:      time.Hour,
+		Wake:          wake,
+		Debounce:      time.Millisecond,
+		OnSpokeResult: results.record,
+		OnError:       func(err error) { failed <- err },
+	}
+	go func() { _ = runner.Run(t.Context()) }()
+	require.ErrorContains(t, <-failed, "database unavailable")
+	results.await(t, a.spoke.ID)
 }
