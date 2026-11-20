@@ -50,24 +50,13 @@ func TestLinkChangeSelectsPeerProof(t *testing.T) {
 	require.NoError(t, err)
 	binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
 	require.NoError(t, err)
-	for _, events := range [][]db.Event{removal.Events, {removed, added}} {
+	for _, events := range [][]db.Event{removal.Events, {removed}, {added}} {
 		tokens, err := federationMoveSourceTokens(ctx, spoke.env.DB, spoke.credentials, binding, hub.URL, events, clientpkg.Opts{})
 		require.NoError(t, err)
 		require.Equal(t, map[string]string{projects[1].UID: spoke.credentials[projects[1].UID].Token}, tokens)
 	}
-}
-
-func TestNonParentLinkDoesNotSelectPeerProof(t *testing.T) {
-	ctx := t.Context()
-	hub, projects := newMoveDeliveryHub(t, "route", "peer")
-	spoke := newMoveDeliverySpoke(t, hub, projects, "worker", "peer-member")
-	peer, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[1].ID, Title: "Peer", Author: "peer-member"})
-	require.NoError(t, err)
-	child, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "Child", Author: "worker"})
-	require.NoError(t, err)
-	_, linked, err := spoke.env.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: peer.ID, Type: "blocks", Author: "worker"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: child.ID, FromUID: child.UID, FromShortID: child.ShortID, ToUID: peer.UID, ToShortID: peer.ShortID, Actor: "worker"})
-	require.NoError(t, err)
-	binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
+	params.EventType = "issue.linked"
+	_, linked, err := spoke.env.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: peer.ID, Type: "blocks", Author: "worker"}, params)
 	require.NoError(t, err)
 	tokens, err := federationMoveSourceTokens(ctx, spoke.env.DB, spoke.credentials, binding, hub.URL, []db.Event{linked}, clientpkg.Opts{})
 	require.NoError(t, err)

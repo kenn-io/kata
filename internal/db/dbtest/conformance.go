@@ -363,7 +363,6 @@ var storageScenarios = []scenario{
 	{name: "moved ordinary issue adoption", methods: []string{"CreateProject", "CreateIssue", "MoveIssueProject", "AdoptProjectIntoFederation", "IssueByUID", "PendingFederationPushEvents"}, run: checkMovedOrdinaryIssueAdoption},
 	{name: "federated cron run issue authority", methods: []string{"IngestFederationEvents", "MoveIssueProject", "ObserveCronRun"}, run: checkFederatedCronRunIssueAuthority},
 	{name: "federated reference batch authority", methods: []string{"IngestFederationEvents"}, run: checkFederatedReferenceBatchAuthority},
-	{name: "federated legacy parent unlink", methods: []string{"IngestFederationEvents"}, run: checkFederatedLegacyParentUnlink},
 	{name: "federated fresh current project authority", methods: []string{"IngestFederationEvents", "MoveIssueProject"}, run: checkFederatedFreshCurrentProjectAuthority},
 	{name: "federated move reset after acknowledged source leave", methods: []string{"CreateIssue", "MoveIssueProject", "AdvanceFederationPushCursor", "LeaveFederationReplica", "ResetFederatedProject", "ResetFederatedProjectIfNoPendingPush"}, run: checkFederatedMoveResetAfterAcknowledgedSourceLeave},
 	{name: "federated move reset retained link", methods: []string{"CreateLinkAndEvent", "ResetFederatedProject", "ResetFederatedProjectIfNoPendingPush"}, run: checkFederatedMoveResetRetainedLink},

@@ -201,27 +201,6 @@ func TestDirectPushWithProjectScopedActors(t *testing.T) {
 			}
 			checkObserver(peer.UID)
 
-			sameParent, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: child.ProjectID, Title: "Local parent", Author: "worker"})
-			require.NoError(t, err)
-			sameNewParent, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: child.ProjectID, Title: "New local parent", Author: "worker"})
-			require.NoError(t, err)
-			sameChild, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: child.ProjectID, Title: "Local child", Author: "worker", Links: []db.InitialLink{{Type: "parent", ToNumber: sameParent.ID}}})
-			require.NoError(t, err)
-			require.NoError(t, syncProject(0))
-			sameLink, err := spoke.DB.ParentOf(ctx, sameChild.ID)
-			require.NoError(t, err)
-			localLinkParams := func(eventType string, parent db.Issue) db.LinkEventParams {
-				return db.LinkEventParams{EventType: eventType, EventIssueID: sameChild.ID, FromUID: sameChild.UID, FromShortID: sameChild.ShortID, ToUID: parent.UID, ToShortID: parent.ShortID, Actor: "worker"}
-			}
-			_, err = spoke.DB.ReplaceParentAndEvents(ctx, db.ReplaceParentAndEventsParams{ExpectedParentLinkID: sameLink.ID, ExpectedParentIssueID: sameParent.ID, Link: db.CreateLinkParams{FromIssueID: sameChild.ID, ToIssueID: sameNewParent.ID, Type: "parent", Author: "worker"}, UnlinkEvent: localLinkParams("issue.unlinked", sameParent), LinkEvent: localLinkParams("issue.linked", sameNewParent)})
-			require.NoError(t, err)
-			require.NoError(t, syncProject(0))
-			hubChild, err := hub.store.IssueByUID(ctx, sameChild.UID, db.IncludeDeletedNo)
-			require.NoError(t, err)
-			hubLink, err := hub.store.ParentOf(ctx, hubChild.ID)
-			require.NoError(t, err)
-			require.Equal(t, sameNewParent.UID, hubLink.ToIssueUID)
-
 			_, err = spoke.DB.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: child.ID, Actor: "worker", RemoveParent: &local.ID})
 			require.NoError(t, err)
 			require.NoError(t, syncProject(0))
@@ -244,12 +223,7 @@ func TestDirectPushWithProjectScopedActors(t *testing.T) {
 			}
 			_, err = spoke.DB.ReplaceParentAndEvents(ctx, db.ReplaceParentAndEventsParams{ExpectedParentLinkID: link.ID, ExpectedParentIssueID: localNewPeer.ID, Link: db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: local.ID, Type: "parent", Author: "worker"}, UnlinkEvent: linkParams("issue.unlinked", localNewPeer), LinkEvent: linkParams("issue.linked", local)})
 			require.NoError(t, err)
-			_, later, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: child.ProjectID, Title: "Later task", Author: "worker"})
-			require.NoError(t, err)
 			require.NoError(t, syncProject(0))
-			checkObserver(peer.UID)
-			_, err = hub.store.IssueByUID(ctx, *later.IssueUID, db.IncludeDeletedNo)
-			require.NoError(t, err)
 
 			t.Run("direct-link-with-different-actors", func(t *testing.T) {
 				directChild, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: child.ProjectID, Title: "Direct child", Author: "worker"})

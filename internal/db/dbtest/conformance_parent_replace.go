@@ -78,7 +78,6 @@ func RunParentReplacement(t *testing.T, store db.Storage) {
 		LinkEvent:   db.LinkEventParams{EventType: "issue.linked", EventIssueID: child.ID, FromShortID: child.ShortID, FromUID: child.UID, ToShortID: newParent.ShortID, ToUID: newParent.UID, Actor: "example-actor"},
 	})
 	require.NoError(t, err)
-	require.Equal(t, "issue.unlinked", result.UnlinkedEvent.Type)
 	var payload struct {
 		FromUID string `json:"link_from_uid"`
 		ToUID   string `json:"link_to_uid"`

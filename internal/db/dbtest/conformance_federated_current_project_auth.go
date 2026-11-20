@@ -318,5 +318,29 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 	parent, err = store.ParentOf(ctx, child.ID)
 	require.NoError(t, err)
 	require.Equal(t, second.ID, parent.ToIssueID)
+
+	// Older replacement events omit directional fields and retain their
+	// original identity when accepted.
+	legacyPayload, err := json.Marshal(map[string]string{"from_uid": child.UID, "to_uid": second.UID, "type": "parent"})
+	require.NoError(t, err)
+	legacy := newRemoteEvent(t, route, &child.UID, "issue.unlinked", "worker", origin, at+12, legacyPayload)
+	legacyLinked, err := json.Marshal(map[string]string{"from_uid": child.UID, "to_uid": peer.UID, "type": "parent"})
+	require.NoError(t, err)
+	params.Events = []db.FederationIngestEvent{
+		{SourceEventID: 9, Event: legacy},
+		{SourceEventID: 10, Event: newRemoteEvent(t, route, &child.UID, "issue.linked", "worker", origin, at+13, legacyLinked)},
+	}
+	result, err = store.IngestFederationEvents(ctx, params)
+	require.NoError(t, err)
+	require.Equal(t, 2, result.Accepted)
+	stored, err := store.EventsByUIDs(ctx, route.ID, []string{legacy.EventUID})
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	require.Equal(t, legacy.EventUID, stored[0].UID)
+	require.Equal(t, legacy.ContentHash, stored[0].ContentHash)
+	require.JSONEq(t, string(legacy.Payload), stored[0].Payload)
+	parent, err = store.ParentOf(ctx, child.ID)
+	require.NoError(t, err)
+	require.Equal(t, peer.ID, parent.ToIssueID)
 	return nil
 }
