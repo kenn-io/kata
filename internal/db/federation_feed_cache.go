@@ -148,10 +148,6 @@ func (r *FederationFeedRead) recordNativeMoves(native bool) {
 	}
 }
 
-func (r *FederationFeedRead) sql() (movedFrom, projectIndex, movedIndex string) {
-	return federationFeedSQL(r.postgres)
-}
-
 // foreignChecked returns the ID after which foreign events must be rechecked,
 // when the remembered range covers everything from afterID on.
 func (r *FederationFeedRead) foreignChecked(afterID int64) (int64, bool) {

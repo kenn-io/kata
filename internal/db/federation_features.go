@@ -228,7 +228,8 @@ func projectRequiredEventFeatures(ctx context.Context, q featureQuerier, project
   SELECT 1 FROM events e WHERE e.project_id=p.id AND e.id>$3 AND e.type='issue.moved'))`
 	var cronPresent, issueMoved bool
 	through, knownMoved, knownNative := feed.moveFeatures()
-	recheck := through == 0
+	// Without remembered move facts, read the move history.
+	recheck := feed == nil || through == 0
 	if recheck {
 		if err := q.QueryRowContext(ctx, `SELECT `+cron+`,`+moves, projectUID, SystemProjectName, feed.movesAfter()).Scan(&cronPresent, &issueMoved); err != nil {
 			return "", err
@@ -239,7 +240,7 @@ func projectRequiredEventFeatures(ctx context.Context, q featureQuerier, project
 		// PostgreSQL plans every subquery in a statement, even one that never
 		// runs, so the move check runs on its own only when they no longer
 		// hold.
-		movedFrom, projectIndex, movedIndex := feed.sql()
+		movedFrom, projectIndex, movedIndex := federationFeedSQL(feed.postgres)
 		//nolint:gosec // G202: fixed backend fragments only; values stay bound.
 		err := q.QueryRowContext(ctx, `SELECT `+cron+`, (SELECT e.id FROM events e`+projectIndex+` WHERE e.project_id=$2 AND e.id>$3 ORDER BY e.project_id, e.id LIMIT 1) IS NOT NULL
  OR EXISTS(SELECT 1 FROM events e`+movedIndex+` WHERE e.type='issue.moved' AND `+movedFrom+`=$1 AND e.id>$3)
