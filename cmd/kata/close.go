@@ -368,7 +368,7 @@ func runActionWithHeaders(
 	default:
 		return fmt.Errorf("unknown issue action %q", action)
 	}
-	if action == "close" && extra["dry_run"] == true {
+	if extra["dry_run"] == true {
 		return printMutationWithApplied(cmd, bs, nil, issue.ProjectName)
 	}
 	commentKey := ""
