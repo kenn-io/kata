@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json/v2"
+	"errors"
 	"net/http"
 	"slices"
 	"sort"
@@ -16,6 +17,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/internal/uid"
 )
 
@@ -104,11 +106,19 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Path:        "/api/v1/ui/issue-reference",
 		Summary:     "Resolve an active issue to its browser route identity",
 	}, func(ctx context.Context, in *api.UIIssueReferenceRequest) (*api.UIIssueReferenceResponse, error) {
-		ctx, err := authorizeHostProjectScope(ctx, []int64{in.ProjectID}, nil, false)
+		projectID := in.ProjectID
+		var err error
+		if projectID == 0 {
+			projectID, err = uiReferenceProject(ctx, cfg.DB, in.Project, in.Ref)
+			if err != nil {
+				return nil, err
+			}
+		}
+		ctx, err = authorizeHostProjectScope(ctx, []int64{projectID}, nil, false)
 		if err != nil {
 			return nil, err
 		}
-		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
+		issue, err := activeIssueByRef(ctx, cfg.DB, projectID, in.Ref, db.IncludeDeletedNo)
 		if err != nil {
 			return nil, err
 		}
@@ -376,6 +386,42 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			return referencesResponse(data, policy, validator), nil
 		})
+}
+
+func uiReferenceProject(ctx context.Context, store db.Storage, selector, ref string) (int64, error) {
+	notFound := api.NewError(http.StatusNotFound, "issue_not_found", "issue not found", "", nil)
+	if selector == "" {
+		parsed, err := shortid.Parse(ref)
+		if err != nil || parsed.Project == "" {
+			return 0, notFound
+		}
+		project, err := store.ProjectByName(ctx, parsed.Project)
+		if errors.Is(err, db.ErrNotFound) {
+			return 0, notFound
+		}
+		if err != nil {
+			return 0, internalAPIError(err)
+		}
+		return project.ID, nil
+	}
+	byName, nameErr := store.ProjectByName(ctx, selector)
+	byUID, uidErr := store.ProjectByUID(ctx, selector)
+	if nameErr != nil && !errors.Is(nameErr, db.ErrNotFound) {
+		return 0, internalAPIError(nameErr)
+	}
+	if uidErr != nil && !errors.Is(uidErr, db.ErrNotFound) {
+		return 0, internalAPIError(uidErr)
+	}
+	if nameErr == nil && uidErr == nil && byName.ID != byUID.ID {
+		return 0, notFound
+	}
+	if nameErr == nil {
+		return byName.ID, nil
+	}
+	if uidErr == nil {
+		return byUID.ID, nil
+	}
+	return 0, notFound
 }
 
 func applyIssueScopeToUISnapshot(

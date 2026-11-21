@@ -23,6 +23,27 @@ test('canonical routes survive reload and UID issue deep links', async ({ page, 
   )
 })
 
+test('qualified short issue links survive reload', async ({ page, kata }) => {
+  const credentials = await kata.launch(page, '/kata?view=all-open')
+  const issue = await kata.seedIssue(page, credentials, { title: 'Short link task' })
+  const url = `${kata.origin}/kata?issue=example-project%23${issue.short_id}`
+  await page.goto(url)
+  await expect(page.getByRole('region', { name: 'Kata issue detail' })).toContainText(
+    'Short link task',
+  )
+  await page.reload()
+  await expect(page).toHaveURL(url)
+  await expect(page.getByRole('region', { name: 'Kata issue detail' })).toContainText(
+    'Short link task',
+  )
+  await page
+    .getByRole('region', { name: 'Kata issue detail' })
+    .getByRole('button', { name: 'Open reachable graph' })
+    .click()
+  await expect(page).toHaveURL(`${url}&graph=1`)
+  await expect(page.getByRole('region', { name: 'Reachable task graph' })).toBeVisible()
+})
+
 test('issue selection preserves the active Forge project scope', async ({ page, kata }) => {
   const credentials = await kata.launch(page, '/kata?view=all-open')
   const issue = await kata.seedIssue(page, credentials, { title: 'Scoped route task' })

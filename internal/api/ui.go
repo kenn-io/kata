@@ -145,7 +145,8 @@ type UIReferencesResponse struct {
 // UIIssueReferenceRequest resolves one active issue for browser routing
 // without exposing the issue-detail projection.
 type UIIssueReferenceRequest struct {
-	ProjectID int64  `query:"project_id" required:"true"`
+	ProjectID int64  `query:"project_id"`
+	Project   string `query:"project"`
 	Ref       string `query:"ref" required:"true"`
 }
 

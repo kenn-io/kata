@@ -29,6 +29,147 @@ describe('App', () => {
     vi.restoreAllMocks()
   })
 
+  it('opens a qualified short link with one selected snapshot', async () => {
+    history.replaceState(null, '', '/kata?issue=example-project%23abc4')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const requests: URL[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const target = new URL(requestOf(input, init).url)
+        if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (target.pathname.endsWith('/api/v1/ui/issue-reference')) {
+          expect(target.searchParams.get('ref')).toBe('example-project#abc4')
+          expect(target.searchParams.has('project_id')).toBe(false)
+          return Response.json({
+            issue: { uid: '01J00000000000000000000001', project_uid: '01J00000000000000000000002' },
+          })
+        }
+        if (target.pathname.endsWith('/api/v1/ui/references'))
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        if (target.pathname.endsWith('/api/v1/ui/snapshot')) {
+          requests.push(target)
+          const data = snapshot()
+          return Response.json(
+            { ...data, selected: availableSelection(data.collection[0]) },
+            { headers: { ETag: '"snapshot-1"' } },
+          )
+        }
+        return Response.json({}, { status: 404 })
+      }),
+    )
+    render(App)
+    await screen.findByText('Example issue', { selector: 'h2' })
+    expect(location.search).toBe('?issue=example-project%23abc4')
+    expect(requests).toHaveLength(1)
+    expect(requests[0]!.searchParams.get('selected_issue_uid')).toBe('01J00000000000000000000001')
+  })
+
+  it('offers to search for an unresolved qualified link', async () => {
+    history.replaceState(null, '', '/kata?issue=example-project%23missing')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const target = new URL(requestOf(input, init).url)
+        if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+        return Response.json({ error: { code: 'not_found' } }, { status: 404 })
+      }),
+    )
+    render(App)
+    expect(
+      await screen.findByRole('button', { name: 'Search for example-project#missing' }),
+    ).not.toBeNull()
+  })
+
+  it('retries resolving a short link after a server failure', async () => {
+    history.replaceState(null, '', '/kata?scope=example-project&issue=abc4')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    let resolutions = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const target = new URL(requestOf(input, init).url)
+        if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (target.pathname.endsWith('/api/v1/ui/issue-reference')) {
+          expect(target.searchParams.get('project')).toBe('example-project')
+          if (++resolutions === 1) return Response.json({}, { status: 500 })
+          return Response.json({
+            issue: { uid: '01J00000000000000000000001', project_uid: '01J00000000000000000000002' },
+          })
+        }
+        if (target.pathname.endsWith('/api/v1/ui/references'))
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        if (target.pathname.endsWith('/api/v1/ui/snapshot')) {
+          const data = snapshot()
+          return Response.json(
+            { ...data, selected: availableSelection(data.collection[0]) },
+            { headers: { ETag: '"snapshot-1"' } },
+          )
+        }
+        return Response.json({}, { status: 404 })
+      }),
+    )
+    render(App)
+    await fireEvent.click(await screen.findByRole('button', { name: 'Retry' }))
+    await screen.findByText('Example issue', { selector: 'h2' })
+    expect(resolutions).toBe(2)
+    expect(location.search).toBe('?scope=example-project&issue=abc4')
+  })
+
+  it('discards a short link result after navigation', async () => {
+    history.replaceState(null, '', '/kata?issue=example-project%23abc4')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    let finishResolution: (response: Response) => void = () => {}
+    let resolving = false
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const target = new URL(requestOf(input, init).url)
+        if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (target.pathname.endsWith('/api/v1/ui/issue-reference')) {
+          resolving = true
+          return new Promise<Response>((resolve) => {
+            finishResolution = resolve
+          })
+        }
+        if (target.pathname.endsWith('/api/v1/ui/references'))
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        if (target.pathname.endsWith('/api/v1/ui/snapshot'))
+          return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+        return Response.json({}, { status: 404 })
+      }),
+    )
+    render(App)
+    await waitFor(() => expect(resolving).toBe(true))
+    history.pushState(null, '', '/kata?view=all-open')
+    await fireEvent(window, new PopStateEvent('popstate'))
+    finishResolution(
+      Response.json({
+        issue: { uid: '01J00000000000000000000001', project_uid: '01J00000000000000000000002' },
+      }),
+    )
+    await screen.findByRole('button', { name: /Example issue/ })
+    expect(location.search).toBe('?view=all-open')
+    expect(screen.queryByRole('region', { name: 'Kata issue detail' })).toBeNull()
+  })
+
   it('shows a clicked project from the loaded list and keeps it current', async () => {
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
     history.replaceState(null, '', '/kata?view=all-open')

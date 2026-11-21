@@ -10217,6 +10217,7 @@ func (c *Client) ResolveUIIssueReference(ctx context.Context, options *ResolveUI
 	var err error
 
 	queryEncoding := map[string]runtime.QueryEncoding{
+		"project":    {Style: "form", Explode: &[]bool{false}[0]},
 		"project_id": {Style: "form", Explode: &[]bool{false}[0]},
 		"ref":        {Style: "form", Explode: &[]bool{false}[0]},
 	}

@@ -19,6 +19,50 @@ type historicalUIReferenceHostAccess struct {
 	deniedProjectID int64
 }
 
+func TestUIIssueReferenceProjectSelector(t *testing.T) {
+	dbh := openTestDB(t)
+	project, err := dbh.db.CreateProject(t.Context(), "example")
+	require.NoError(t, err)
+	issue, _, err := dbh.db.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Target", Author: "worker"})
+	require.NoError(t, err)
+	collision, err := dbh.db.CreateProject(t.Context(), project.UID)
+	require.NoError(t, err)
+	collisionIssue, _, err := dbh.db.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: collision.ID, Title: "Collision", Author: "worker"})
+	require.NoError(t, err)
+	server := httptest.NewServer(daemon.NewServer(daemon.ServerConfig{DB: dbh.db, StartedAt: dbh.now}).Handler())
+	t.Cleanup(server.Close)
+	for _, tc := range []struct {
+		name, selector, ref, wantUID string
+		status                       int
+	}{
+		{"qualified", "", project.Name + "#" + issue.ShortID, issue.UID, http.StatusOK},
+		{"name", project.Name, issue.ShortID, issue.UID, http.StatusOK},
+		{"uid", collision.UID, collisionIssue.ShortID, collisionIssue.UID, http.StatusOK},
+		{"ambiguous", project.UID, issue.ShortID, "", http.StatusNotFound},
+		{"qualified UID-shaped name", "", collision.Name + "#" + collisionIssue.ShortID, collisionIssue.UID, http.StatusOK},
+		{"unknown", "missing", issue.ShortID, "", http.StatusNotFound},
+		{"wrong qualifier", project.Name, "other#" + issue.ShortID, "", http.StatusNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			query := url.Values{"ref": {tc.ref}}
+			if tc.selector != "" {
+				query.Set("project", tc.selector)
+			}
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/issue-reference?"+query.Encode(), nil)
+			require.NoError(t, err)
+			response, err := server.Client().Do(request)
+			require.NoError(t, err)
+			defer func() { _ = response.Body.Close() }()
+			body, err := io.ReadAll(response.Body)
+			require.NoError(t, err)
+			require.Equal(t, tc.status, response.StatusCode, string(body))
+			if tc.status == http.StatusOK {
+				require.Contains(t, string(body), tc.wantUID)
+			}
+		})
+	}
+}
+
 func (a historicalUIReferenceHostAccess) Authorize(_ context.Context, request daemon.HostAccessRequest) (daemon.HostAccessDecision, error) {
 	if request.Operation.AllProjects || slices.Contains(request.Operation.ProjectIDs, a.deniedProjectID) {
 		return daemon.HostAccessDecision{}, daemon.ErrHostAccessDenied

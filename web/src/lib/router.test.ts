@@ -5,6 +5,26 @@ import { parseRoute, serializeRoute, screenNameForRoute } from './router'
 const issueUID = '01HZNQ7VFPK1XGD8R5MABCD4EX'
 
 describe('canonical Kata routes', () => {
+  it.each([
+    ['scope=example&issue=abc4', { scope: 'example', issue: 'abc4' }],
+    [`scope=${issueUID}&issue=abc4`, { scope: issueUID, issue: 'abc4' }],
+    [`scope=example&issue=${issueUID}`, { scope: 'example', issue: issueUID }],
+    ['scope=%20example%20&issue=abc4', { scope: ' example ', issue: 'abc4' }],
+    [`issue=${issueUID}%23abc4`, { issue: `${issueUID}#abc4` }],
+  ])('preserves link values in %s', (query, link) => {
+    const route = parseRoute(new URL(`https://daemon.example/kata?${query}&graph=1&label=ready`))
+    expect(route).toMatchObject({ kind: 'kata', link, graph: true })
+    expect(parseRoute(new URL(serializeRoute(route), 'https://daemon.example'))).toEqual(route)
+  })
+  it('keeps a qualified short issue reference in the route', () => {
+    const route = parseRoute(new URL('https://daemon.example/kata?issue=example%23abc4'))
+    expect(route).toMatchObject({ kind: 'kata', link: { issue: 'example#abc4' } })
+    expect(serializeRoute(route)).toBe('/kata?issue=example%23abc4')
+    if (route.kind !== 'kata') throw new Error('Expected a Kata route')
+    expect(serializeRoute({ ...route, projectUID: issueUID, issueUID })).toBe(
+      '/kata?issue=example%23abc4',
+    )
+  })
   it('keeps Forge view, scope, and issue state independent', () => {
     const projectUID = '01HZNQ7VFPK1XGD8R5MABCD4EW'
     const route = parseRoute(

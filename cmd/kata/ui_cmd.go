@@ -129,7 +129,7 @@ func resolveUIIssuePath(cmd *cobra.Command, prepared client.PreparedWebUI, rawRe
 		return "", err
 	}
 	wire, callErr := apiClient.ResolveUIIssueReferenceWithResponse(cmd.Context(), &generated.ResolveUIIssueReferenceRequestOptions{
-		Query: &generated.ResolveUIIssueReferenceQuery{ProjectID: projectID, Ref: parsed.RefForAPI},
+		Query: &generated.ResolveUIIssueReferenceQuery{ProjectID: &projectID, Ref: parsed.RefForAPI},
 	}, func(_ context.Context, request *http.Request) error {
 		for key, value := range gatewayHeaders {
 			request.Header.Set(key, value)

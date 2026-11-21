@@ -155,6 +155,24 @@ describe('browser session bootstrap', () => {
     expect(window.location.hash).toBe('')
   })
 
+  it('preserves a literal issue reference fragment', () => {
+    history.replaceState(null, '', '/kata?issue=example#abc4')
+    expect(consumeLaunchFragment(window.location, history.replaceState.bind(history))).toEqual({
+      kind: 'none',
+      returnPath: '/kata?issue=example%23abc4',
+    })
+    expect(window.location.pathname + window.location.search).toBe('/kata?issue=example%23abc4')
+  })
+
+  it('keeps a full issue UID when the link has a fragment', () => {
+    history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#comments')
+    expect(consumeLaunchFragment(window.location, history.replaceState.bind(history))).toEqual({
+      kind: 'none',
+      returnPath: '/kata?issue=01J00000000000000000000001',
+    })
+    expect(window.location.search).toBe('?issue=01J00000000000000000000001')
+  })
+
   it('consumes an explicit daemon launch target before routing', () => {
     history.replaceState(null, '', '/kata#daemon=example-remote')
 

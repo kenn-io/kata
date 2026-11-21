@@ -189,6 +189,11 @@ export class SnapshotController<TIntent, TSnapshot extends SnapshotAuthority> {
     this.#setAuthenticationRequired(this.state.generation)
   }
 
+  markFailure(): void {
+    this.#abort?.abort()
+    this.#setFailure(this.state.generation + 1)
+  }
+
   #setFailure(generation: number): void {
     this.#setState({
       ...this.state,

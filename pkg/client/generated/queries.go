@@ -528,8 +528,9 @@ func (r ReadyIssuesGlobalQuery) Validate() error {
 }
 
 type ResolveUIIssueReferenceQuery struct {
-	ProjectID int64  `json:"project_id"`
-	Ref       string `json:"ref" validate:"required"`
+	ProjectID *int64  `json:"project_id,omitempty"`
+	Project   *string `json:"project,omitempty"`
+	Ref       string  `json:"ref" validate:"required"`
 }
 
 func (r ResolveUIIssueReferenceQuery) Validate() error {

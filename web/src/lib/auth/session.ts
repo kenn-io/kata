@@ -1,4 +1,5 @@
 import { applicationRequest, applicationRoutePath } from '../applicationBase'
+import { validUID } from '../router'
 import { assertValidIssueScopedCapabilities } from './scopedAuthority'
 
 export const sessionStorageKey = 'kata.web.session.v1'
@@ -79,7 +80,21 @@ export function consumeLaunchFragment(
   replaceState: History['replaceState'],
   storage: Storage = sessionStorage,
 ): LaunchState {
-  const currentPath = location.pathname + location.search
+  let currentPath = location.pathname + location.search
+  if (location.hash && !location.hash.includes('=')) {
+    const query = new URLSearchParams(location.search)
+    const issue = query.get('issue')
+    if (issue && !issue.includes('#') && !validUID(issue)) {
+      query.set('issue', `${issue}${location.hash}`)
+      currentPath = `${location.pathname}?${query.toString()}`
+      replaceState(null, '', currentPath)
+      return {
+        kind: 'none',
+        returnPath: currentPath,
+        ...(storage.getItem(directTargetStorageKey) === '1' ? { directTarget: true } : {}),
+      }
+    }
+  }
   if (!location.hash) {
     return {
       kind: 'none',

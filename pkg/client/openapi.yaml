@@ -12775,10 +12775,14 @@ paths:
         - explode: false
           in: query
           name: project_id
-          required: true
           schema:
             format: int64
             type: integer
+        - explode: false
+          in: query
+          name: project
+          schema:
+            type: string
         - explode: false
           in: query
           name: ref
