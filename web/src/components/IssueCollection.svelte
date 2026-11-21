@@ -152,7 +152,7 @@
     narrow: {
       id: 'minmax(56px, 72px)',
       project: 'minmax(96px, 130px)',
-      updated: 'minmax(58px, 72px)',
+      updated: null,
       priority: 'minmax(62px, 74px)',
       due: 'minmax(54px, 68px)',
       owner: null,
@@ -168,7 +168,13 @@
     narrow: 'minmax(140px, 1fr)',
   }
 
-  const DEFAULT_COLUMN_WIDTHS: Record<KataOptionalTaskColumn, number> = {
+  const DEFAULT_COLUMN_WIDTHS: Record<
+    KataOptionalTaskColumn | 'title' | 'date' | 'closed',
+    number
+  > = {
+    title: 240,
+    date: 128,
+    closed: 150,
     id: 64,
     project: 136,
     due: 64,
@@ -182,14 +188,6 @@
   const dateView = $derived(currentView.name === 'today' || currentView.name === 'scheduled')
   const logbookView = $derived(currentView.name === 'logbook')
   const todayDate = $derived(localDateString(new Date(now)))
-  const visibleOptionalColumns = $derived(
-    KATA_OPTIONAL_TASK_COLUMNS.filter((column) => {
-      if (column.id === 'project' && projectView) return false
-      if (dateView && (column.id === 'due' || column.id === 'updated')) return false
-      if (logbookView && ['due', 'updated', 'priority'].includes(column.id)) return false
-      return columnVisibility[column.id]
-    }),
-  )
   const displayColumns = $derived(
     KATA_OPTIONAL_TASK_COLUMNS.filter((column) => {
       if (column.id === 'project' && projectView) return false
@@ -197,6 +195,9 @@
       if (logbookView && ['due', 'updated', 'priority'].includes(column.id)) return false
       return true
     }),
+  )
+  const visibleOptionalColumns = $derived(
+    displayColumns.filter((column) => columnVisibility[column.id]),
   )
   type RenderedColumn =
     | { kind: 'task'; id: KataOptionalTaskColumn }
@@ -228,10 +229,18 @@
 
   function taskGridColumns(layout: TaskGridLayout): string {
     return [
-      TASK_TITLE_TRACKS[layout],
+      columnWidths.title === undefined
+        ? TASK_TITLE_TRACKS[layout]
+        : `minmax(48px, ${columnWidths.title}px)`,
       ...renderedColumns.map((column) => {
-        if (column.kind === 'date') return 'minmax(96px, 128px)'
-        if (column.kind === 'closed') return 'minmax(110px, 150px)'
+        if (column.kind === 'date')
+          return columnWidths.date === undefined
+            ? 'minmax(96px, 128px)'
+            : `minmax(48px, ${columnWidths.date}px)`
+        if (column.kind === 'closed')
+          return columnWidths.closed === undefined
+            ? 'minmax(110px, 150px)'
+            : `minmax(48px, ${columnWidths.closed}px)`
         return trackForColumn(layout, column.id) ?? ''
       }),
     ].join(' ')
@@ -275,11 +284,11 @@
     return children
   })
 
-  // When the user is scoped to a single project, server-side groupings
-  // like "Today / This Evening" feel like noise — they're a kata
-  // today-bucket detail that doesn't carry inside a project view.
-  // Collapse to a flat list and let the sort drive the order.
-  let isProjectScoped = $derived(Boolean(scopedProjectName))
+  // Project lists are flat; system views retain their date and handoff groups.
+  let isProjectScoped = $derived(
+    Boolean(scopedProjectName) &&
+      !['today', 'scheduled', 'delegated', 'logbook'].includes(currentView.name),
+  )
   let statusVisibleGroups = $derived(filterGroupsByStatus(currentView.groups, statusFilter))
   let flatIssues = $derived(
     isProjectScoped ? topLevelIssues(statusVisibleGroups.flatMap((group) => group.issues)) : [],
@@ -482,10 +491,12 @@
     persistKataTaskColumnVisibility(next)
   }
 
-  let resizeStartWidths: Partial<Record<KataOptionalTaskColumn, number>> = {}
+  let resizeStartWidths: Partial<
+    Record<KataOptionalTaskColumn | 'title' | 'date' | 'closed', number>
+  > = {}
 
   function resizeStartWidth(
-    column: KataOptionalTaskColumn,
+    column: KataOptionalTaskColumn | 'title' | 'date' | 'closed',
     event: KeyboardEvent | PointerEvent,
   ): number {
     const heading = (event.currentTarget as HTMLElement | null)?.parentElement?.parentElement
@@ -496,19 +507,25 @@
   }
 
   function beginColumnResize(
-    column: KataOptionalTaskColumn,
+    column: KataOptionalTaskColumn | 'title' | 'date' | 'closed',
     event: KeyboardEvent | PointerEvent,
   ): void {
     resizeStartWidths = { ...resizeStartWidths, [column]: resizeStartWidth(column, event) }
   }
 
-  function updateColumnWidth(column: KataOptionalTaskColumn, event: SplitResizeEvent): void {
+  function updateColumnWidth(
+    column: KataOptionalTaskColumn | 'title' | 'date' | 'closed',
+    event: SplitResizeEvent,
+  ): void {
     const start = resizeStartWidths[column] ?? DEFAULT_COLUMN_WIDTHS[column]
     const width = Math.round(Math.max(48, Math.min(480, start + event.delta)))
     columnWidths = { ...columnWidths, [column]: width }
   }
 
-  function persistColumnWidth(column: KataOptionalTaskColumn, event: SplitResizeEvent): void {
+  function persistColumnWidth(
+    column: KataOptionalTaskColumn | 'title' | 'date' | 'closed',
+    event: SplitResizeEvent,
+  ): void {
     updateColumnWidth(column, event)
     persistKataTaskColumnWidths(columnWidths)
   }
@@ -537,12 +554,6 @@
     if (scopeLabel) return scopeLabel
     if (view.name === 'all') return 'All open'
     return view.name.charAt(0).toUpperCase() + view.name.slice(1)
-  }
-
-  // Kept source-aligned with the port while the count display uses the filtered total.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  function totalIssues(view: KataCurrentView): number {
-    return view.groups.reduce((sum, group) => sum + group.issues.length, 0)
   }
 
   function totalFilteredIssues(): number {
@@ -1100,6 +1111,25 @@
          ↔ to expand or collapse subtasks. -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="table-body" bind:this={tableBody} onkeydown={handleListKeydown}>
+      {#snippet resizeHandle(
+        column: KataOptionalTaskColumn | 'title' | 'date' | 'closed',
+        label: string,
+      )}
+        <div class="column-resize">
+          <SplitResizeHandle
+            orientation="horizontal"
+            variant="column"
+            ariaLabel={`Resize ${label} column`}
+            ariaValueMin={48}
+            ariaValueMax={480}
+            ariaValueNow={columnWidths[column] ?? DEFAULT_COLUMN_WIDTHS[column]}
+            keyboardStep={8}
+            onResizeStart={(event) => beginColumnResize(column, event)}
+            onResize={(event) => updateColumnWidth(column, event)}
+            onResizeEnd={(event) => persistColumnWidth(column, event)}
+          />
+        </div>
+      {/snippet}
       <div class="table-header">
         <div class="column-heading column-heading-title">
           <button
@@ -1117,18 +1147,20 @@
               <ChevronDownIcon size={11} strokeWidth={2} />
             {/if}
           </button>
+          {@render resizeHandle('title', 'Title')}
         </div>
         {#each renderedColumns as column (column.kind === 'task' ? column.id : column.kind)}
           {#if column.kind === 'date'}
-            <div class="column-heading"><span class="col col-static">Date</span></div>
+            <div class="column-heading">
+              <span class="col col-static">Date</span>{@render resizeHandle('date', 'Date')}
+            </div>
           {:else if column.kind === 'closed'}
-            <div class="column-heading"><span class="col col-static">Closed</span></div>
+            <div class="column-heading">
+              <span class="col col-static">Closed</span>{@render resizeHandle('closed', 'Closed')}
+            </div>
           {:else}
             {@const label =
-              column.id === 'tags'
-                ? 'Labels'
-                : (KATA_OPTIONAL_TASK_COLUMNS.find((item) => item.id === column.id)?.label ??
-                  column.id)}
+              KATA_OPTIONAL_TASK_COLUMNS.find((item) => item.id === column.id)?.label ?? column.id}
             <div class={`column-heading column-heading-${column.id}`}>
               {#if ['id', 'due', 'updated', 'priority', 'owner'].includes(column.id)}
                 <button
@@ -1148,20 +1180,9 @@
               {:else}
                 <span class="col col-static">{label}</span>
               {/if}
-              <div class="column-resize">
-                <SplitResizeHandle
-                  orientation="horizontal"
-                  variant="column"
-                  ariaLabel={`Resize ${label} column`}
-                  ariaValueMin={48}
-                  ariaValueMax={480}
-                  ariaValueNow={columnWidths[column.id] ?? DEFAULT_COLUMN_WIDTHS[column.id]}
-                  keyboardStep={8}
-                  onResizeStart={(event) => beginColumnResize(column.id, event)}
-                  onResize={(event) => updateColumnWidth(column.id, event)}
-                  onResizeEnd={(event) => persistColumnWidth(column.id, event)}
-                />
-              </div>
+              {#if column.id !== 'project' || !detailBeside}
+                {@render resizeHandle(column.id, label)}
+              {/if}
             </div>
           {/if}
         {/each}
@@ -1272,7 +1293,7 @@
           <span class="cell cell-closed" title={issue.closed_at ?? ''}>
             {closedReasonLabel(issue.closed_reason)}
             {#if issue.closed_at}
-              {shortDate(issue.closed_at, new Date(now))}{/if}
+              {shortDate(localDateString(new Date(issue.closed_at)), new Date(now))}{/if}
           </span>
         {:else if column.id === 'id'}
           <span class="cell cell-id" title={issue.qualified_id}>{issue.short_id}</span>
@@ -1287,7 +1308,11 @@
             {/if}
           </span>
         {:else if column.id === 'due'}
-          <span class="cell cell-due" title={deadline ?? ''}>
+          <span
+            class="cell cell-due"
+            class:cell-date--overdue={Boolean(deadline && deadline < todayDate)}
+            title={deadline ?? ''}
+          >
             {#if deadline}{shortDate(deadline, new Date(now))}{/if}
           </span>
         {:else if column.id === 'updated'}
@@ -1337,7 +1362,6 @@
           ariaLabel={`Copy task ID ${issue.short_id}`}
           copiedAriaLabel={`Copied task ID ${issue.short_id}`}
           title={`Copy task ID ${issue.short_id}`}
-          revealOnHover
         />
       </div>
     {/if}
@@ -1915,10 +1939,6 @@
     font-variant-numeric: tabular-nums;
   }
 
-  .cell-date--overdue {
-    color: var(--accent-red);
-  }
-
   /* The +N stays visible: only the ID list ellipsizes. */
   .cell-blocked-by {
     display: flex;
@@ -1940,6 +1960,12 @@
     color: var(--text-muted);
     font-variant-numeric: tabular-nums;
     text-align: right;
+  }
+
+  .cell-date--overdue,
+  .row.selected .cell-date--overdue,
+  .row:focus-visible .cell-date--overdue {
+    color: var(--accent-red);
   }
 
   .row--child .cell-title {

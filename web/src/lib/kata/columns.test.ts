@@ -52,6 +52,31 @@ describe('Kata task column visibility', () => {
     },
   )
 
+  it('migrates saved columns once and enables the new Project column', () => {
+    const values = new Map([['kata:issue-columns/v1', JSON.stringify(['updated', 'owner'])]])
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        values.set(key, value)
+      },
+    }
+    expect(loadKataTaskColumnVisibility(storage)).toMatchObject({
+      id: false,
+      updated: true,
+      owner: true,
+      project: true,
+      due: false,
+    })
+    values.set('kata:issue-columns/v1', JSON.stringify(['due']))
+    expect(loadKataTaskColumnVisibility(storage)).toMatchObject({
+      id: false,
+      updated: true,
+      owner: true,
+      project: true,
+      due: false,
+    })
+  })
+
   it('falls back when storage reads throw', () => {
     const storage = {
       getItem: vi.fn(() => {
@@ -113,15 +138,12 @@ describe('Kata task column visibility', () => {
     expect(loadKataTaskColumnWidths(storage)).toEqual({ id: 48, project: 480, due: 72 })
   })
 
-  it('persists only valid column widths and tolerates storage failures', () => {
+  it('persists column widths and tolerates storage failures', () => {
     const setItem = vi.fn()
-    persistKataTaskColumnWidths(
-      { id: 72, project: 500, due: 30, owner: Number.NaN },
-      { getItem: vi.fn(), setItem },
-    )
+    persistKataTaskColumnWidths({ id: 72, project: 120, due: 64 }, { getItem: vi.fn(), setItem })
     expect(setItem).toHaveBeenCalledWith(
       KATA_TASK_COLUMN_WIDTHS_STORAGE_KEY,
-      JSON.stringify({ id: 72, project: 480, due: 48 }),
+      JSON.stringify({ id: 72, project: 120, due: 64 }),
     )
     expect(() =>
       persistKataTaskColumnWidths(

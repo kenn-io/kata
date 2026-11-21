@@ -589,6 +589,39 @@ describe('IssueCollection', () => {
     expect(row.getAttribute('aria-keyshortcuts')).toBe('c')
   })
 
+  it('shows the local closing date in Logbook', () => {
+    const closed = task({
+      status: 'closed',
+      closed_reason: 'done',
+      closed_at: new Date(2026, 4, 14, 23).toISOString(),
+    })
+    const { container } = render(IssueCollection, {
+      props: {
+        currentView: { ...viewWithIssues([closed]), name: 'logbook' },
+        now: new Date('2026-05-16T12:00:00Z').getTime(),
+        selectedIssueUID: null,
+        loading: false,
+        onSelect: () => {},
+      },
+    })
+    expect(container.querySelector('.cell-closed')?.textContent).toContain('May 14')
+  })
+
+  it('marks a past due date in the Due column', () => {
+    const { container } = render(IssueCollection, {
+      props: {
+        currentView: viewWithIssues([baseIssues[0]!]),
+        now: new Date('2026-05-16T12:00:00Z').getTime(),
+        selectedIssueUID: null,
+        loading: false,
+        onSelect: () => {},
+      },
+    })
+    expect(container.querySelector('.cell-due')?.classList.contains('cell-date--overdue')).toBe(
+      true,
+    )
+  })
+
   it('resizes a column from the keyboard and saves its width', async () => {
     render(IssueCollection, {
       props: {
@@ -606,6 +639,68 @@ describe('IssueCollection', () => {
     expect(JSON.parse(localStorage.getItem(KATA_TASK_COLUMN_WIDTHS_STORAGE_KEY)!)).toEqual({
       due: 72,
     })
+  })
+
+  it.each([
+    ['all', 'Title'],
+    ['today', 'Date'],
+    ['logbook', 'Closed'],
+  ] as const)('resizes the %s view %s column', async (name, label) => {
+    render(IssueCollection, {
+      props: {
+        currentView: { ...viewWithIssues([baseIssues[0]!]), name },
+        selectedIssueUID: null,
+        loading: false,
+        onSelect: () => {},
+      },
+    })
+    const handle = screen.getByRole('separator', { name: `Resize ${label} column` })
+    const before = Number(handle.getAttribute('aria-valuenow'))
+    await fireEvent.keyDown(handle, { key: 'ArrowRight' })
+    expect(Number(handle.getAttribute('aria-valuenow'))).toBe(before + 8)
+  })
+
+  it('keeps date groups when filtering by project', () => {
+    render(IssueCollection, {
+      props: {
+        currentView,
+        scopedProjectName: 'example-project',
+        selectedIssueUID: null,
+        loading: false,
+        onSelect: () => {},
+      },
+    })
+    expect(screen.getByText('Overdue')).toBeTruthy()
+    expect(screen.getByRole('heading', { name: /Today 1/, level: 3 })).toBeTruthy()
+  })
+
+  it('keeps handoff groups when filtering by project', () => {
+    render(IssueCollection, {
+      props: {
+        currentView: {
+          name: 'delegated',
+          groups: [{ id: 'handoff', title: 'user-b for user-a', issues: [baseIssues[0]!] }],
+        },
+        scopedProjectName: 'example-project',
+        selectedIssueUID: null,
+        loading: false,
+        onSelect: () => {},
+      },
+    })
+    expect(screen.getByRole('heading', { name: /user-b for user-a/, level: 3 })).toBeTruthy()
+  })
+
+  it('does not offer Project resizing beside the task pane', () => {
+    render(IssueCollection, {
+      props: {
+        currentView: viewWithIssues([baseIssues[0]!]),
+        detailBeside: true,
+        selectedIssueUID: null,
+        loading: false,
+        onSelect: () => {},
+      },
+    })
+    expect(screen.queryByRole('separator', { name: 'Resize Project column' })).toBeNull()
   })
 
   it('sorts due dates with overdue tasks first and undated tasks last', async () => {

@@ -413,4 +413,14 @@ describe('kata task view builder', () => {
       ['2026-05-14', 'Thu, May 14', ['Done earlier']],
     ])
   })
+  test('includes the year in date groups outside the current year', () => {
+    const view = buildKataTaskView({
+      view: 'logbook',
+      issues: [issue('old', 'Old task', 'project-workspace', {}, 'closed', '2025-05-14T12:00:00Z')],
+      projects,
+      today,
+      fetched_at: fetchedAt,
+    })
+    expect(view.groups[0]?.title).toBe('Wed, May 14, 2025')
+  })
 })

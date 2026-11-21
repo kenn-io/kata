@@ -20,6 +20,60 @@ describe('AppShell', () => {
     vi.useRealTimers()
   })
 
+  test.each([
+    ['closed', 4],
+    ['all', 7],
+  ] as const)('uses the %s task count for filtered totals', (status, total) => {
+    const current = snapshot()
+    current.catalog[0]!.stats = { Open: 3, Closed: 4, LastEventAt: null }
+    current.collection[0]!.status = 'closed'
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'all-open',
+          graph: false,
+          filters: { status: [status], owner: [], label: [], relationship: [], text: 'Example' },
+        },
+        snapshot: current,
+        loading: false,
+        ...mutationProps(),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+    expect(screen.getByText(new RegExp(`of ${total} task`))).toBeTruthy()
+  })
+
+  test('clearing a search keeps the other filters and project scope', async () => {
+    const onNavigate = vi.fn()
+    const filters = {
+      status: ['closed'],
+      owner: ['user-a'],
+      label: ['planning'],
+      relationship: [],
+      text: 'missing',
+    }
+    const projectUID = '01J00000000000000000000002'
+    render(AppShell, {
+      props: {
+        route: { kind: 'kata', view: 'all-open', projectUID, graph: false, filters },
+        snapshot: snapshot(),
+        loading: false,
+        ...mutationProps(),
+        onNavigate,
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Clear search' }))
+    expect(onNavigate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectUID,
+        filters: { status: ['closed'], owner: ['user-a'], label: ['planning'], relationship: [] },
+      }),
+    )
+  })
+
   test('advances Updated labels while the task snapshot stays unchanged', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-01T12:00:16Z'))

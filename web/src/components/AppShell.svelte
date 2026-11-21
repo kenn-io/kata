@@ -353,10 +353,15 @@
       (inputFilters.scope.kind === 'project' && !projectView) ||
       inputFilters.status !== defaultKataTaskSearchFilters(viewName).status,
   )
-  let unfilteredTaskCount = $derived(
-    selectedProject?.open_count ??
-      projection.projects.reduce((count, project) => count + project.open_count, 0),
-  )
+  let unfilteredTaskCount = $derived.by(() => {
+    const projects = selectedProject ? [selectedProject] : projection.projects
+    return projects.reduce((count, project) => {
+      if (searchFilters.status === 'closed') return count + (project.closed_count ?? 0)
+      if (searchFilters.status === 'all')
+        return count + project.open_count + (project.closed_count ?? 0)
+      return count + project.open_count
+    }, 0)
+  })
   let noMatchingTasks = $derived(
     !loading &&
       hasActiveTaskFilters &&
@@ -523,6 +528,10 @@
   }
 
   function clearTaskFilters(): void {
+    if (inputFilters.query.trim()) {
+      updateFilters({ ...inputFilters, query: '' }, 'query')
+      return
+    }
     const next = { ...withResolvedView(filterRoute), filters: emptyShareableFilters() }
     if (projectView && inputFilters.scope.kind === 'project') {
       next.projectUID = inputFilters.scope.project_uid
@@ -966,7 +975,9 @@
         {projectView}
         {detailBeside}
         unfilteredTotal={unfilteredTaskCount}
-        showFilteredTotal={hasActiveTaskFilters && (projectView || currentView.view === 'all')}
+        showFilteredTotal={hasActiveTaskFilters &&
+          searchFilters.status !== 'ready' &&
+          (projectView || currentView.view === 'all')}
         splitDirection={preferences.splitDirection}
         onSplitDirectionChange={setSplitDirection}
         {selectedIssueUID}

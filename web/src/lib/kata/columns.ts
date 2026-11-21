@@ -16,7 +16,9 @@ export const KATA_OPTIONAL_TASK_COLUMNS = [
 
 export type KataOptionalTaskColumn = (typeof KATA_OPTIONAL_TASK_COLUMNS)[number]['id']
 export type KataTaskColumnVisibility = Record<KataOptionalTaskColumn, boolean>
-export type KataTaskColumnWidths = Partial<Record<KataOptionalTaskColumn, number>>
+export type KataTaskColumnWidths = Partial<
+  Record<KataOptionalTaskColumn | 'title' | 'date' | 'closed', number>
+>
 
 const BLOCKED_BY_VISIBLE_IDS = 3
 
@@ -56,6 +58,7 @@ export function summarizeBlockedBy(
 type ColumnStorage = Pick<Storage, 'getItem' | 'setItem'>
 
 const knownColumns = new Set<string>(KATA_OPTIONAL_TASK_COLUMNS.map((column) => column.id))
+const widthColumns = new Set([...knownColumns, 'title', 'date', 'closed'])
 
 export function defaultKataTaskColumnVisibility(): KataTaskColumnVisibility {
   return {
@@ -84,13 +87,23 @@ export function loadKataTaskColumnVisibility(
 ): KataTaskColumnVisibility {
   if (!storage) return defaultKataTaskColumnVisibility()
   try {
-    const raw = storage.getItem(KATA_TASK_COLUMNS_STORAGE_KEY)
+    const current = storage.getItem(KATA_TASK_COLUMNS_STORAGE_KEY)
+    const raw = current ?? storage.getItem('kata:issue-columns/v1')
     if (raw === null) return defaultKataTaskColumnVisibility()
     const parsed: unknown = JSON.parse(raw)
     if (!Array.isArray(parsed) || !parsed.every((value) => typeof value === 'string')) {
       return defaultKataTaskColumnVisibility()
     }
     const visible = new Set(parsed.filter((value) => knownColumns.has(value)))
+    if (current === null) {
+      visible.delete('id')
+      visible.add('project')
+      try {
+        storage.setItem(KATA_TASK_COLUMNS_STORAGE_KEY, JSON.stringify([...visible]))
+      } catch {
+        // Keep the migrated choices in memory when storage is unavailable.
+      }
+    }
     return Object.fromEntries(
       KATA_OPTIONAL_TASK_COLUMNS.map((column) => [column.id, visible.has(column.id)]),
     ) as KataTaskColumnVisibility
@@ -129,7 +142,7 @@ export function loadKataTaskColumnWidths(
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
     return Object.fromEntries(
       Object.entries(parsed).flatMap(([key, value]) =>
-        knownColumns.has(key) && typeof value === 'number' && Number.isFinite(value)
+        widthColumns.has(key) && typeof value === 'number' && Number.isFinite(value)
           ? [[key, clampColumnWidth(value)]]
           : [],
       ),
@@ -145,14 +158,7 @@ export function persistKataTaskColumnWidths(
 ): void {
   if (!storage) return
   try {
-    const valid = Object.fromEntries(
-      Object.entries(widths).flatMap(([key, width]) =>
-        knownColumns.has(key) && typeof width === 'number' && Number.isFinite(width)
-          ? [[key, clampColumnWidth(width)]]
-          : [],
-      ),
-    )
-    storage.setItem(KATA_TASK_COLUMN_WIDTHS_STORAGE_KEY, JSON.stringify(valid))
+    storage.setItem(KATA_TASK_COLUMN_WIDTHS_STORAGE_KEY, JSON.stringify(widths))
   } catch {
     // Browser storage is best-effort. Keep the in-memory preference usable.
   }

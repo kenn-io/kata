@@ -28,6 +28,7 @@ export function agendaDateTitle(date: string, today: string): string {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
+    ...(date.slice(0, 4) !== today.slice(0, 4) ? { year: 'numeric' } : {}),
   })
 }
 

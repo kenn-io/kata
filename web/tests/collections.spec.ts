@@ -112,7 +112,9 @@ test('sorts by due date, keeps a resized width, and copies a short task ID', asy
   })
   const row = page.getByRole('button', { name: /Overdue example task/ })
   await row.hover()
-  await expect(page.getByRole('button', { name: `Copy task ID ${overdue.short_id}` })).toBeVisible()
+  const copy = page.getByRole('button', { name: `Copy task ID ${overdue.short_id}` })
+  await expect(copy).toBeVisible()
+  await expect(copy).toHaveCSS('opacity', '1')
   await row.focus()
   await page.keyboard.press('c')
   await expect

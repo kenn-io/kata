@@ -190,6 +190,21 @@ test('task rows stay 36px tall at desktop and mobile widths, including hover', a
   }
 })
 
+test('shows the project mark and full title beside an open task', async ({ page, kata }) => {
+  await page.setViewportSize({ width: 1440, height: 800 })
+  const credentials = await kata.launch(page)
+  await kata.seedIssue(page, credentials, { title: 'Add retries to the incident poller' })
+  await page.goto(`${kata.origin}/kata?view=all-open`)
+  const row = page.getByRole('button', { name: /Add retries to the incident poller/ })
+  await row.click()
+  const title = row.locator('.title-text')
+  const project = row.locator('.cell-project')
+  await expect(page.getByRole('separator', { name: 'Resize Project column' })).toHaveCount(0)
+  await expect(project.locator('.project-mark')).toBeVisible()
+  expect(await title.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+  expect((await project.boundingBox())!.width).toBeLessThanOrEqual(16)
+})
+
 test('the task count sits beside the list title', async ({ page, kata }) => {
   await page.setViewportSize({ width: 1440, height: 800 })
   const credentials = await kata.launch(page)
