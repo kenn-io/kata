@@ -986,8 +986,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, federationFeatureError(err)
 		}
-		return &api.PollEventsResponse{EventFeatures: db.SupportedEventFeatures, RequiredEventFeatures: result.RequiredFeatures, Body: api.PollEventsBody{Events: toEnvelopes(result.Events), NextAfterID: result.NextAfterID, ResetRequired: result.ResetAfterID > 0, ResetAfterID: result.ResetAfterID}}, nil
+		return &api.PollEventsResponse{EventFeatures: federationPollEventFeatures(ctx, cfg), RequiredEventFeatures: result.RequiredFeatures, Body: api.PollEventsBody{Events: toEnvelopes(result.Events), NextAfterID: result.NextAfterID, ResetRequired: result.ResetAfterID > 0, ResetAfterID: result.ResetAfterID}}, nil
 	})
+	registerFederationBatchPollHandler(humaAPI, cfg)
 
 	huma.Register(humaAPI, huma.Operation{
 		OperationID:  "ingestFederationProjectEvents",

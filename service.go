@@ -221,6 +221,11 @@ type Config struct {
 	// authenticated a project-scoped federation credential. It does not replace
 	// Kata's credential authentication.
 	FederationAccess FederationAccessController
+	// FederationBatchPoll lets spokes poll several hub projects in one
+	// request. Middleware in front of the service sees only that request, not
+	// the per-project polls Kata serves inside it, so enable it only when such
+	// middleware does not authorize individual project paths.
+	FederationBatchPoll bool
 	// WorkerTransactionFence revalidates host authority from inside every
 	// background-worker writable storage transaction. It is required when
 	// Access is set.
@@ -614,6 +619,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		HostAccess:                hostAccess,
 		TrustCallerAuthentication: cfg.Auth.TrustCallerAuthentication,
 		HostFederationAccess:      hostFederationAccess,
+		FederationBatchPoll:       cfg.FederationBatchPoll,
 		EmbeddingProfile:          daemon.EmbeddingProfile(cfg.Profile),
 		Logger:                    logger,
 	}

@@ -117,6 +117,10 @@ type RevokeFederationEnrollmentResponse = RevokeFederationEnrollmentBody
 
 type RevokeFederationEnrollmentErrorResponse = ErrorEnvelope
 
+type PollFederationEventsBatchResponse = FederationBatchPollBody
+
+type PollFederationEventsBatchErrorResponse = ErrorEnvelope
+
 type CreateFederationReplicaResponse = CreateFederationReplicaResponseBody
 
 type CreateFederationReplicaErrorResponse = ErrorEnvelope
@@ -851,6 +855,19 @@ type RevokeFederationEnrollmentResp struct {
 	StatusCode   int
 	JSON200      *RevokeFederationEnrollmentResponse
 	JSONDefault  *RevokeFederationEnrollmentErrorResponse
+}
+
+type PollFederationEventsBatchResp200Headers struct {
+	XKataEventFeatures string `header:"X-Kata-Event-Features"`
+}
+
+type PollFederationEventsBatchResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *PollFederationEventsBatchResponse
+	Headers200   *PollFederationEventsBatchResp200Headers
+	JSONDefault  *PollFederationEventsBatchErrorResponse
 }
 
 type CreateFederationReplicaResp struct {

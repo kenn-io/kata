@@ -121,6 +121,13 @@ All notable changes to kata, grouped by release. Versioned releases start with
   from data it already holds instead of waiting up to half a second for a
   remote daemon.
 - Usage telemetry is off unless you have opted in or set `TELEMETRY_ENABLED=1`. See [Usage reporting](reference/configuration.md#usage-reporting).
+- Let spokes that reach several hub projects with one shared credential check
+  them for new events in one request per pass. Set `[federation] batch_poll =
+  true` on the hub, or `FederationBatchPoll` when embedding Kata, and an idle
+  pass over 50 such projects is 1 request instead of 50; projects with new
+  events still poll on their own. Spokes with one credential per project,
+  signed spokes, and hubs that require signed requests keep one poll per
+  project. See [Sync scheduling](operations/federation.md#sync-scheduling).
 - Click another task in the web UI's list and New task stays available while
   the task's comments, links, and history load. The button had been disabled
   until that task's snapshot arrived, about a second per click on a large

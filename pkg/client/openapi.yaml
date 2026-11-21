@@ -2246,6 +2246,61 @@ components:
         - reopen_requests
         - paused
       type: object
+    FederationBatchPollBody:
+      properties:
+        projects:
+          items:
+            $ref: "#/components/schemas/FederationBatchPollPage"
+          type: array
+      required:
+        - projects
+      type: object
+    FederationBatchPollCursor:
+      additionalProperties: false
+      properties:
+        after_id:
+          format: int64
+          minimum: 0
+          type: integer
+        project_id:
+          format: int64
+          minimum: 1
+          type: integer
+      required:
+        - project_id
+        - after_id
+      type: object
+    FederationBatchPollPage:
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorEnvelope"
+          description: Present when status is not 200; the single-project route's error body.
+        idle:
+          description: True when status is 200 and a single-project poll from after_id would return no events, no reset, and the same cursor.
+          type: boolean
+        project_id:
+          format: int64
+          type: integer
+        status:
+          description: HTTP status the single-project poll route returned for this project.
+          format: int64
+          type: integer
+      required:
+        - project_id
+        - status
+      type: object
+    FederationBatchPollRequestBody:
+      additionalProperties: false
+      properties:
+        projects:
+          items:
+            $ref: "#/components/schemas/FederationBatchPollCursor"
+          maxItems: 100
+          minItems: 1
+          type: array
+      required:
+        - projects
+      type: object
     FederationBindingOut:
       properties:
         actor:
@@ -7463,7 +7518,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.63.0
+  version: 0.64.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:
@@ -8128,6 +8183,43 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
+  /api/v1/federation/events:poll:
+    post:
+      description: "Checks each listed project through GET /api/v1/projects/{project_id}/federation/events exactly as that route would serve the same request, and reports whether it is idle. It returns no events: poll a project that is not idle with the single-project route. A refusal is that project's error, not the batch's. Signed requests and hubs that require signing use the single-project route."
+      operationId: pollFederationEventsBatch
+      parameters:
+        - in: header
+          name: X-Kata-Event-Features
+          schema:
+            type: string
+        - in: header
+          name: Authorization
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FederationBatchPollRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FederationBatchPollBody"
+          description: OK
+          headers:
+            X-Kata-Event-Features:
+              schema:
+                type: string
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+      summary: Check several federated projects for new events with one credential
   /api/v1/federation/replicas:
     post:
       operationId: createFederationReplica

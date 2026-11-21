@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-18
+last_edited: 2026-11-21
 ---
 
 # HTTP API schema
@@ -335,6 +335,7 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
+| `0.64.0` | `POST /api/v1/federation/events:poll` polls several projects that share one federation credential. |
 | `0.63.0` | Browser issue reference resolution accepts a project name or UID and qualified references without a project ID. |
 | `0.62.0` | Federation peers advertise `relay_cross_links_v1` in `X-Kata-Event-Features`. A common root can link issues across projects with a shared relay audience. Relays check access to each referenced project they can resolve before releasing events or checkpoints, and pause for older peers with `409 unsupported_event_features` at crossing links or links with unresolved endpoints. An unresolved endpoint may belong to another project. |
 | `0.60.0` | Enrollment join instructions use the signing hub's external URL and include signing key placeholders. |
@@ -926,6 +927,29 @@ session header and `Last-Event-ID` through `fetch`. In unauthenticated
 snapshots because the event stream remains protected.
 
 ## Federation Enrollment and Health Endpoints
+
+`POST /api/v1/federation/events:poll` tells a spoke which of up to 100
+projects have new events, with one federation credential. It returns no
+events: the spoke polls each project that is not idle with the single-project
+route. Hubs serve it only with `[federation] batch_poll = true` and answer
+`404` otherwise. The body lists `projects` as `project_id` and `after_id`
+pairs. The hub checks each project with its own
+`GET /api/v1/projects/{project_id}/federation/events` request for one event,
+with the same headers, so each project gets that route's authentication,
+project access, host authorization, transaction fences and revocation checks.
+Results come back in request order:
+
+| Field | Meaning |
+| --- | --- |
+| `status` | The status that project's single-project poll returned. |
+| `idle` | `true` when `status` is `200` and a poll from `after_id` would return no events, no reset, and the same cursor. |
+| `error` | That poll's error body when `status` is not `200`. A refused project does not fail the batch. |
+
+Duplicate project IDs and more than 100 projects return `400 validation`. A
+signed request returns `400 validation`, because no layer verifies a signature
+over a batch, and a hub that requires signed requests answers `404`. A hub that
+serves the route adds `batched_poll_v1` to the `X-Kata-Event-Features` header
+of single-project poll responses.
 
 `POST /api/v1/projects/{project_id}/federation/events:ingest` returns
 `400 validation` when a fresh event names a stored sibling-project issue through

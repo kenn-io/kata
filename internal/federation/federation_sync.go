@@ -438,7 +438,7 @@ func syncDirectSpoke(
 		}
 		return recordFederationSyncErrorAt(ctx, store, binding.ProjectID, pullErr, at)
 	}
-	body, err := client.PollProjectEvents(ctx, hubProjectID, binding.PullCursorEventID, federationPollLimit)
+	body, err := firstFederationPoll(ctx, client, hubProjectID, binding.PullCursorEventID)
 	if err != nil {
 		return recordPullError(err)
 	}
@@ -1144,6 +1144,9 @@ type Runner struct {
 	// debounceTimer starts the wait between a wake and the pass it causes. Nil
 	// means a real timer.
 	debounceTimer func(time.Duration) Timer
+	// batchPolls records which credential groups their hub serves batched
+	// polls to.
+	batchPolls batchPollStates
 }
 
 func (r *Runner) newDebounceTimer(delay time.Duration) Timer {
@@ -1248,9 +1251,16 @@ func (r *Runner) runOnce(
 	if credentialStore == nil {
 		credentialStore = config.DefaultFederationCredentialStore()
 	}
+	include := func(spoke activeSpokeBinding) bool {
+		return (len(only) == 0 || only[spoke.binding.ProjectID]) && !r.retryBlocked(ctx, retries, spoke, credentialStore)
+	}
+	prefetched, retry, denied := r.prefetchPass(ctx, spokes, credentialStore, validateLease, include, retries)
+	if denied {
+		return retry, true, nil, nil
+	}
 	var errs []error
 	for _, spoke := range spokes {
-		if (len(only) > 0 && !only[spoke.binding.ProjectID]) || r.retryBlocked(ctx, retries, spoke, credentialStore) {
+		if !include(spoke) {
 			continue
 		}
 		var drain *activity.Lease
@@ -1265,7 +1275,11 @@ func (r *Runner) runOnce(
 			if drain != nil {
 				defer drain.Release()
 			}
-			return r.runSpoke(ctx, spoke, credentialStore, validateLease, drain)
+			spokeCtx := ctx
+			if page := prefetched[spoke.binding.ProjectID]; page != nil {
+				spokeCtx = context.WithValue(ctx, prefetchedFederationPollKey{}, page)
+			}
+			return r.runSpoke(spokeCtx, spoke, credentialStore, validateLease, drain)
 		}()
 		retries.record(spoke.binding.ProjectID, identity, spokeErr, r.effectiveInterval(), r.refusalNow())
 		if errors.Is(spokeErr, context.Canceled) || errors.Is(spokeErr, errFederationRunnerLeaseInvalid) {
@@ -1390,9 +1404,17 @@ func (r *Runner) runSpoke(
 	cred = config.FederationTransportCredential(
 		binding.HubURL, binding.HubProjectID, binding.AllowInsecure, cred,
 	)
+	if page, _ := ctx.Value(prefetchedFederationPollKey{}).(*prefetchedFederationPoll); page != nil {
+		if key, ok := batchPollGroupKey(binding, cred); !ok || key != page.key || cred.HubProjectID != page.hubProjectID {
+			// The binding or credential changed after the batch was read, so
+			// this turn polls the hub it is bound to now.
+			ctx = context.WithValue(ctx, prefetchedFederationPollKey{}, (*prefetchedFederationPoll)(nil))
+		}
+	}
 	opts := r.clientOpts()
 	var errs []error
-	if err := retryPendingClaimsOnceWithFence(ctx, r.DB, binding, cred, opts, validateLease); err != nil {
+	turnCtx, observation := withFederationTurnObservation(ctx)
+	if err := retryPendingClaimsOnceWithFence(turnCtx, r.DB, binding, cred, opts, validateLease); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, errFederationRunnerLeaseInvalid) {
 			return false, identity, err
 		}
@@ -1412,7 +1434,10 @@ func (r *Runner) runSpoke(
 			r.OnPulledEventsFrom(projectID, events, fork)
 		}
 	}
-	remaining, syncErr := syncFederationOnceWithFence(ctx, r.DB, binding, cred, binding.PushEnabled, opts, onPulledEvents, validateLease, credentialStore)
+	remaining, syncErr := syncFederationOnceWithFence(turnCtx, r.DB, binding, cred, binding.PushEnabled, opts, onPulledEvents, validateLease, credentialStore)
+	if key, ok := batchPollGroupKey(binding, cred); ok && observation.polled {
+		r.batchPolls.learn(key, observation.pollFeatures)
+	}
 	if r.OnSyncComplete != nil {
 		r.OnSyncComplete()
 	}
@@ -1482,6 +1507,8 @@ func retryPendingClaimsOnceWithFence(
 	if len(pending) == 0 {
 		return nil
 	}
+	// Retrying a claim can write hub events; the turn's pull must follow it.
+	observeFederationHubWrite(ctx)
 	if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 		return err
 	}

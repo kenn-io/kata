@@ -340,3 +340,32 @@ func TestServiceSemanticSearchWithoutEmbeddings(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, status)
 	require.Contains(t, body, "embeddings are not configured")
 }
+
+func TestServiceServesBatchedFederationPollOnlyWhenEnabled(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprint(enabled), func(t *testing.T) {
+			service, err := kata.New(t.Context(), kata.Config{
+				DSN:                 filepath.Join(t.TempDir(), "service.db"),
+				Auth:                kata.AuthConfig{TrustCallerAuthentication: true},
+				FederationBatchPoll: enabled,
+			})
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, service.Close()) })
+			server := httptest.NewServer(service.Handler())
+			t.Cleanup(server.Close)
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/api/v1/federation/events:poll",
+				strings.NewReader(`{"projects":[{"project_id":1,"after_id":0}]}`))
+			require.NoError(t, err)
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer example-federation-token")
+			resp, err := http.DefaultClient.Do(req)
+			require.NoError(t, err)
+			require.NoError(t, resp.Body.Close())
+			if enabled {
+				assert.Equal(t, http.StatusOK, resp.StatusCode)
+			} else {
+				assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+			}
+		})
+	}
+}

@@ -362,6 +362,16 @@ enrollment without its token hash, the resolved project, the exact `pull`,
 disclosing which outside condition changed. Standalone behavior is unchanged
 when the controller is absent.
 
+`Config.FederationBatchPoll` lets spokes that share a credential ask which of
+several projects have new events in one `POST /api/v1/federation/events:poll`
+request. It is off by default. Kata checks each project in that request with a
+separate single-project poll inside its own handler, so `FederationAccess` sees
+one `pollFederationProjectEvents` request per project, but middleware outside
+Kata sees only the batch request. Turn it on only when the outer server does not
+authorize individual project paths. An outer server that filters federation
+routes must also allow the batch route and preserve its `Authorization` header;
+when it answers `404`, spokes keep one poll per project.
+
 Federation mutations require the controller to return a `TransactionFence`.
 Kata runs it inside the same storage transaction as event ingest or lease state,
 so a concurrent revocation is ordered with the protected write. A missing fence
