@@ -794,7 +794,7 @@
     </div>
 
     <div class="kata-main">
-      {#if mutationMessage && !captureOpen && (!credentialRoute || !accessAdministrationAvailable || !onAccessMutation)}
+      {#if mutationMessage && (!credentialRoute || !accessAdministrationAvailable || !onAccessMutation)}
         <p class="mutation-message" role="alert">{mutationMessage}</p>
       {/if}
       {#if credentialRoute}
@@ -816,7 +816,7 @@
                   <AccessManagement
                     projects={snapshot.catalog}
                     pending={mutationPending || loading || !accessAdministrationAvailable}
-                    message={captureOpen ? undefined : mutationMessage}
+                    message={mutationMessage}
                     onMutation={onAccessMutation}
                   />
                 {/key}
@@ -967,7 +967,7 @@
         {onMoveIssue}
         {onPatchMetadata}
         {onAddComment}
-        commentError={captureOpen ? undefined : mutationMessage}
+        commentError={mutationMessage}
         {selectedCommentUID}
         {returnComment}
         {onEditIssue}

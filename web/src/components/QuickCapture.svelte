@@ -27,7 +27,6 @@
   let input = $state<HTMLInputElement>()
   let title = $state('')
   let pending = $state(false)
-  let error = $state<string | null>(null)
   let lastDraftFenceGeneration = $state<number | null>(null)
 
   $effect(() => {
@@ -38,7 +37,6 @@
     if (!open) {
       title = ''
       pending = false
-      error = null
     }
   })
 
@@ -58,13 +56,10 @@
     const value = title.trim()
     if (!value || pending || disabled) return
     pending = true
-    error = null
     try {
       await onSubmit(value)
       title = ''
       onClose()
-    } catch (err) {
-      error = err instanceof Error ? err.message : 'Could not create task.'
     } finally {
       pending = false
     }
@@ -96,7 +91,6 @@
       onkeydown={handleKeydown}
       disabled={pending || disabled}
     />
-    {#if error}<p class="capture-error" role="alert">{error}</p>{/if}
     {#if inboxName}
       <p class="capture-destination">
         Captured in <strong>{inboxName}</strong>
@@ -152,15 +146,6 @@
     gap: 6px;
     margin: 0;
     color: var(--text-secondary);
-    font-size: var(--font-size-sm);
-  }
-
-  .capture-error {
-    margin: 0;
-    padding: 8px 10px;
-    border-radius: var(--radius-sm);
-    background: color-mix(in srgb, var(--accent-red) 12%, transparent);
-    color: var(--accent-red);
     font-size: var(--font-size-sm);
   }
 

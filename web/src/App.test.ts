@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte'
 import { tick } from 'svelte'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 
 vi.mock('./lib/kata/projection', async (importOriginal) => {
   const original = await importOriginal<typeof import('./lib/kata/projection')>()
@@ -4422,6 +4422,12 @@ describe('App', () => {
         action === 'create' ? ['accepted', 'refused', 'missing-project'] : ['accepted', 'refused'],
       )(`${action} reports refusals or marks accepted web requests, %s`, async (result) => {
         const refused = result !== 'accepted'
+        const rejections: unknown[] = []
+        const onRejection = (error: unknown) => rejections.push(error)
+        process.on('unhandledRejection', onRejection)
+        onTestFinished(() => {
+          process.off('unhandledRejection', onRejection)
+        })
         history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
         sessionStorage.setItem(
           'kata.web.session.v1',
@@ -4517,23 +4523,16 @@ describe('App', () => {
           await fireEvent.click(buttons[buttons.length - 1]!)
         }
         if (result === 'missing-project') {
-          expect((await screen.findByRole('alert')).textContent).toBe(
-            'Task project is not available.',
+          await waitFor(() =>
+            expect(rejections).toEqual([new Error('Task project is not available.')]),
           )
-          expect(
-            (screen.getByRole('textbox', { name: 'Quick capture' }) as HTMLInputElement).value,
-          ).toBe('Example task')
           expect(shownErrors).toEqual([])
           expect(actionRequests).toHaveLength(0)
           return
         }
         await waitFor(() => expect(writes).toBe(1))
-        if (action === 'create' && refused) {
-          expect(screen.getByRole('dialog', { name: 'New task' })).not.toBeNull()
-          expect(
-            (screen.getByRole('textbox', { name: 'Quick capture' }) as HTMLInputElement).value,
-          ).toBe('Example task')
-        }
+        if (action === 'create' && refused)
+          await waitFor(() => expect(rejections).toEqual([new Error('validation: Action refused')]))
         if (refused) {
           expect(await screen.findAllByText('validation: Action refused')).toHaveLength(1)
           await waitFor(() =>

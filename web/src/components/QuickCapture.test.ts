@@ -6,20 +6,6 @@ import QuickCapture from './QuickCapture.svelte'
 describe('QuickCapture', () => {
   afterEach(cleanup)
 
-  it('keeps the draft and shows the error when capture fails', async () => {
-    const onClose = vi.fn()
-    const onSubmit = vi.fn().mockRejectedValue(new Error('Server unavailable'))
-    render(QuickCapture, { props: { open: true, onClose, onSubmit } })
-    const input = screen.getByRole('textbox', { name: 'Quick capture' }) as HTMLInputElement
-    await fireEvent.input(input, { target: { value: 'Draft task' } })
-    await fireEvent.click(screen.getByRole('button', { name: 'Capture' }))
-
-    expect((await screen.findByRole('alert')).textContent).toBe('Server unavailable')
-    expect(input.value).toBe('Draft task')
-    expect(onSubmit).toHaveBeenCalledWith('Draft task')
-    expect(onClose).not.toHaveBeenCalled()
-  })
-
   it('uses shared Kit UI actions', () => {
     render(QuickCapture, {
       props: {

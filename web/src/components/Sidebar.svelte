@@ -118,8 +118,6 @@
   // is highlighted only while browsing that project on its own.
   function isProjectActive(uid: string): boolean {
     return (
-      !settingsActive &&
-      !credentialAuditActive &&
       currentView.name === 'all' &&
       searchFilters.scope.kind === 'project' &&
       searchFilters.scope.project_uid === uid
