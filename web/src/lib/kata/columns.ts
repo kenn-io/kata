@@ -96,7 +96,6 @@ export function loadKataTaskColumnVisibility(
     }
     const visible = new Set(parsed.filter((value) => knownColumns.has(value)))
     if (current === null) {
-      visible.delete('id')
       visible.add('project')
       try {
         storage.setItem(KATA_TASK_COLUMNS_STORAGE_KEY, JSON.stringify([...visible]))

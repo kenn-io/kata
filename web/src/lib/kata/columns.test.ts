@@ -53,7 +53,7 @@ describe('Kata task column visibility', () => {
   )
 
   it('migrates saved columns once and enables the new Project column', () => {
-    const values = new Map([['kata:issue-columns/v1', JSON.stringify(['updated', 'owner'])]])
+    const values = new Map([['kata:issue-columns/v1', JSON.stringify(['id', 'updated', 'owner'])]])
     const storage = {
       getItem: (key: string) => values.get(key) ?? null,
       setItem: (key: string, value: string) => {
@@ -61,7 +61,7 @@ describe('Kata task column visibility', () => {
       },
     }
     expect(loadKataTaskColumnVisibility(storage)).toMatchObject({
-      id: false,
+      id: true,
       updated: true,
       owner: true,
       project: true,
@@ -69,7 +69,7 @@ describe('Kata task column visibility', () => {
     })
     values.set('kata:issue-columns/v1', JSON.stringify(['due']))
     expect(loadKataTaskColumnVisibility(storage)).toMatchObject({
-      id: false,
+      id: true,
       updated: true,
       owner: true,
       project: true,
