@@ -39,6 +39,7 @@ test('keeps daemon names readable alongside health and recovery hints', async ({
   }
   const row = (await page.getByTestId('daemon-row-example-down-server').boundingBox())!
   const hint = (await page.getByText('daemon is not reachable').boundingBox())!
+  await expect(page.getByText('unreachable daemon is not reachable', { exact: true })).toBeVisible()
   expect(hint.y).toBeGreaterThanOrEqual(row.y + row.height)
 })
 

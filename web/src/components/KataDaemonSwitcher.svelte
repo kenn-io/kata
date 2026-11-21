@@ -125,11 +125,6 @@
   .daemon-chip:global([aria-expanded='true']) {
     background: var(--bg-surface-hover);
   }
-  .daemon-chip :global(.kit-avatar),
-  .daemon-chip :global(.kit-status-dot),
-  .daemon-chip :global(svg) {
-    flex: none;
-  }
   .chip-label,
   .row-name {
     min-width: 0;
