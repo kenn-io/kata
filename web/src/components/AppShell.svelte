@@ -790,9 +790,7 @@
   {/if}
   <div class="kata-layout" aria-busy={loading}>
     <div class="desktop-navigation">
-      {#if !mobileNavigationOpen}
-        {@render navigationSidebar()}
-      {/if}
+      {@render navigationSidebar()}
     </div>
 
     <div class="kata-main">
