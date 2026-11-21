@@ -59,7 +59,7 @@ func TestUIIssueReferenceProjectSelector(t *testing.T) {
 			require.JSONEq(t, tc.want, body)
 		})
 	}
-	status, body := getUIIssueReference(t, server, url.Values{"project_id": {fmt.Sprint(project.ID)}, "ref": {collisionIssue.UID}})
+	status, body := getUIIssueReference(t, server, url.Values{"project_id": {fmt.Sprint(project.ID)}, "project": {collision.Name}, "ref": {collisionIssue.UID}})
 	require.Equal(t, http.StatusNotFound, status, body)
 }
 
@@ -83,7 +83,7 @@ func getUIIssueReference(t *testing.T, server *httptest.Server, query url.Values
 }
 
 func TestUIIssueReferenceHistoricalCurrentProject(t *testing.T) {
-	for _, state := range []string{"active", "archived", "host-active", "host-denied", "same-project-denied", "scope-denied"} {
+	for _, state := range []string{"active", "archived", "host-active", "host-denied", "host-source-denied", "host-source-allowed", "same-project-denied", "scope-denied"} {
 		t.Run(state, func(t *testing.T) {
 			dbh := openTestDB(t)
 			source, err := dbh.db.CreateProject(t.Context(), "source-project")
@@ -108,13 +108,13 @@ func TestUIIssueReferenceHistoricalCurrentProject(t *testing.T) {
 				require.NoError(t, err)
 			}
 			cfg := daemon.ServerConfig{DB: dbh.db, StartedAt: dbh.now}
-			host := state == "host-active" || state == "host-denied" || state == "same-project-denied"
+			host := state == "host-active" || state == "host-denied" || state == "host-source-denied" || state == "host-source-allowed" || state == "same-project-denied"
 			if host {
 				access := historicalUIReferenceHostAccess{}
 				switch state {
 				case "host-denied":
 					access.deniedProjectID = target.ID
-				case "same-project-denied":
+				case "same-project-denied", "host-source-denied":
 					access.deniedProjectID = source.ID
 				}
 				cfg.HostAccess = access
@@ -133,6 +133,12 @@ func TestUIIssueReferenceHistoricalCurrentProject(t *testing.T) {
 			for _, ref := range []string{issue.ShortID, source.Name + "#" + issue.ShortID, issue.UID} {
 				t.Run(ref, func(t *testing.T) {
 					query := url.Values{"project_id": {fmt.Sprint(source.ID)}, "ref": {ref}}
+					if state == "host-source-denied" || state == "host-source-allowed" {
+						if ref != source.Name+"#"+issue.ShortID {
+							t.Skip("qualified reference")
+						}
+						query.Del("project_id")
+					}
 					req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+"/api/v1/ui/issue-reference?"+query.Encode(), nil)
 					require.NoError(t, err)
 					if state == "scope-denied" {
@@ -143,7 +149,7 @@ func TestUIIssueReferenceHistoricalCurrentProject(t *testing.T) {
 					defer func() { _ = response.Body.Close() }()
 					body, err := io.ReadAll(response.Body)
 					require.NoError(t, err)
-					if state != "active" && state != "host-active" {
+					if state != "active" && state != "host-active" && state != "host-source-allowed" {
 						require.Equal(t, http.StatusNotFound, response.StatusCode, string(body))
 						require.NotContains(t, string(body), issue.UID)
 						require.NotContains(t, string(body), target.UID)

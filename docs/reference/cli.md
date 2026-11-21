@@ -1859,7 +1859,8 @@ issue selection preserves the active collection and project context. `/`
 redirects visibly to `/kata`. Collection filters also stay in the query string.
 Issue links also accept `issue=project%23short`, or `scope=project&issue=short`
 with an exact project name or UID. If that name is another project's UID, use
-`issue=project%23short`. A name scope without an issue is unsupported. The
+`issue=project%23short`. Use `%23` when a qualified link has a scope or its
+project name looks like a UID. A name scope without an issue is unsupported. The
 address bar keeps the short link through graph and filter changes, and returns
 to UIDs when you select another issue, close it, or change scope. Full UIDs
 survive renames, moves, and status changes.

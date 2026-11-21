@@ -17,6 +17,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/internal/uid"
 )
 
@@ -105,7 +106,7 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Path:        "/api/v1/ui/issue-reference",
 		Summary:     "Resolve an active issue to its browser route identity",
 	}, func(ctx context.Context, in *api.UIIssueReferenceRequest) (*api.UIIssueReferenceResponse, error) {
-		projectID, scopeID := in.ProjectID, int64(0)
+		projectID, scopeID, referenceProjectID := in.ProjectID, int64(0), int64(0)
 		ref := in.Ref
 		if projectID == 0 {
 			var err error
@@ -117,9 +118,20 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, hideMissingProject(ctx, err)
 			}
+			parsed, _ := shortid.Parse(ref)
+			if parsed.Project != "" {
+				project, err := cfg.DB.ProjectByNameIncludingArchived(ctx, parsed.Project)
+				if err != nil {
+					if errors.Is(err, db.ErrNotFound) {
+						return nil, hideMissingProject(ctx, api.NewError(http.StatusNotFound, "issue_not_found", "issue not found", "", nil))
+					}
+					return nil, internalAPIError(err)
+				}
+				referenceProjectID = project.ID
+			}
 			projectID, ref = issue.ProjectID, issue.UID
 		}
-		ctx, err := authorizeHostProjectScope(ctx, []int64{scopeID, projectID}, nil, false)
+		ctx, err := authorizeHostProjectScope(ctx, []int64{scopeID, referenceProjectID, projectID}, nil, false)
 		if err != nil {
 			return nil, err
 		}

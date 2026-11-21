@@ -88,7 +88,8 @@ export function consumeLaunchFragment(
     !location.hash.includes('=') &&
     !!issue &&
     !issue.includes('#') &&
-    (!validUID(issue) || /^#[0-9a-hjkmnp-tv-z]{4,26}$/.test(location.hash))
+    !validUID(issue) &&
+    !query.has('scope')
   if (joinIssue || !location.hash) {
     if (joinIssue) {
       query.set('issue', `${issue}${location.hash}`)
