@@ -26,6 +26,7 @@ func TestUIIssueReferenceHidesRestrictedProjectName(t *testing.T) {
 	restricted, err := env.DB.CreateProject(t.Context(), "restricted")
 	require.NoError(t, err)
 	root := createScopedHTTPTestIssue(t, env, allowed.ID, "Root", nil)
+	hidden := createScopedHTTPTestIssue(t, env, restricted.ID, "Hidden", nil)
 	expires := time.Now().UTC().Add(time.Hour)
 	_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: "worker-token", Actor: "worker-a", AdminActor: db.BootstrapActor,
@@ -61,6 +62,9 @@ func TestUIIssueReferenceHidesRestrictedProjectName(t *testing.T) {
 			resp, body := envDoRaw(t, tc.env, http.MethodGet, "/api/v1/ui/issue-reference?"+query.Encode(), nil, tc.headers)
 			require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 			require.Contains(t, string(body), root.UID)
+			query.Set("ref", hidden.UID)
+			resp, body = envDoRaw(t, tc.env, http.MethodGet, "/api/v1/ui/issue-reference?"+query.Encode(), nil, tc.headers)
+			require.Equal(t, http.StatusNotFound, resp.StatusCode, string(body))
 		})
 	}
 	t.Run("issue outside subtree", func(t *testing.T) {

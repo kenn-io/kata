@@ -108,16 +108,38 @@ describe('App', () => {
     expect(
       await screen.findByRole('button', { name: 'Search for example-project#missing' }),
     ).not.toBeNull()
-    cleanup()
-    history.replaceState(null, '', '/kata')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(location.search).toBe('?issue=example-project%23missing')
+    expect(screen.getByRole('button', { name: 'Search for example-project#missing' })).not.toBeNull()
+  })
+
+  it('returns to the previous daemon when resolving its saved link fails', async () => {
+    localStorage.setItem(
+      'kata.web.workspace-state.v1',
+      JSON.stringify({
+        version: 1,
+        daemons: { 'example-remote': '/kata?issue=example-project%23abc4' },
+      }),
+    )
+    const roster = daemonRoster()
+    roster.daemons.push({
+      id: 'example-remote',
+      url: 'https://daemon.example',
+      default: false,
+      auth: 'token',
+      health: 'connected',
+    })
+    stubShortLink(() => {
+      throw new TypeError('connection failed')
+    }, roster)
     render(App)
     await fireEvent.click(
       await screen.findByRole('button', { name: 'Switch Kata daemon: example-local' }),
     )
     await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
-    expect(
-      await screen.findByRole('button', { name: 'Search for example-project#missing' }),
-    ).not.toBeNull()
+    expect(await screen.findByText('Could not connect to example-remote')).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Switch Kata daemon: example-local' })).not.toBeNull()
+    expect(location.search).toBe('')
   })
 
   it('retries resolving a short link after a server failure', async () => {
