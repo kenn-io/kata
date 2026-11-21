@@ -139,13 +139,15 @@
   }
   :global(.daemon-menu .kit-menu__radio-item) {
     box-sizing: border-box;
-    height: 28px;
     min-height: 28px;
-    padding-block: 0;
+    padding-block: 4px;
     font-size: 14px;
   }
   :global(.daemon-menu .kit-menu__radio-content) {
     flex: 1;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
   }
   :global(.daemon-menu .kit-menu__radio-item .kit-menu__indicator) {
     order: 1;
@@ -179,8 +181,15 @@
   .row-status {
     margin-left: auto;
     white-space: nowrap;
+    flex: none;
+  }
+  .row-name {
+    flex: 1;
   }
   .row-hint {
     display: block;
+    padding-left: 24px;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 </style>

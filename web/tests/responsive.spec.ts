@@ -47,7 +47,7 @@ test('mobile navigation stays out of the task flow until opened', async ({ page,
   await expect(page).toHaveURL(/view=today/)
 })
 
-test('New task closes mobile navigation before choosing an Inbox', async ({ page, kata }) => {
+test('New task closes mobile navigation before capture', async ({ page, kata }) => {
   await page.setViewportSize({ width: 600, height: 684 })
   await kata.launch(page)
 
@@ -56,7 +56,8 @@ test('New task closes mobile navigation before choosing an Inbox', async ({ page
   await navigation.getByRole('button', { name: 'New task' }).click()
 
   await expect(navigation).toBeHidden()
-  await expect(page.getByRole('dialog', { name: 'Choose Inbox project' })).toBeVisible()
+  const capture = page.getByRole('dialog', { name: 'New task' })
+  await expect(capture.getByRole('textbox', { name: 'Quick capture' })).toBeVisible()
 })
 
 test('sidebar navigation rows keep their height on hover', async ({ page, kata }) => {
