@@ -135,7 +135,10 @@ function buildToday(issues: KataTaskSummary[], today: string): KataTaskGroup[] {
     const deadlineDue = deadlineOn !== undefined && deadlineOn <= today
     if (!scheduledDue && !deadlineDue) continue
 
-    if (deadlineOn !== undefined && deadlineOn < today) {
+    if (
+      (deadlineOn !== undefined && deadlineOn < today) ||
+      (scheduledOn !== undefined && scheduledOn < today)
+    ) {
       groups[0]!.issues.push(issue)
     } else if (issue.metadata.today_bucket === 'evening') {
       groups[2]!.issues.push(issue)

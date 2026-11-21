@@ -97,11 +97,6 @@ export function loadKataTaskColumnVisibility(
     const visible = new Set(parsed.filter((value) => knownColumns.has(value)))
     if (current === null) {
       visible.add('project')
-      try {
-        storage.setItem(KATA_TASK_COLUMNS_STORAGE_KEY, JSON.stringify([...visible]))
-      } catch {
-        // Keep the migrated choices in memory when storage is unavailable.
-      }
     }
     return Object.fromEntries(
       KATA_OPTIONAL_TASK_COLUMNS.map((column) => [column.id, visible.has(column.id)]),
@@ -126,7 +121,7 @@ export function persistKataTaskColumnVisibility(
   }
 }
 
-function clampColumnWidth(width: number): number {
+export function clampColumnWidth(width: number): number {
   return Math.round(Math.max(48, Math.min(480, width)))
 }
 

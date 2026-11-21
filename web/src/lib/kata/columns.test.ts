@@ -52,13 +52,12 @@ describe('Kata task column visibility', () => {
     },
   )
 
-  it('migrates saved columns once and enables the new Project column', () => {
-    const values = new Map([['kata:issue-columns/v1', JSON.stringify(['updated', 'owner'])]])
+  it('enables Project for saved v1 columns without writing on load', () => {
     const storage = {
-      getItem: (key: string) => values.get(key) ?? null,
-      setItem: (key: string, value: string) => {
-        values.set(key, value)
-      },
+      getItem: vi.fn((key: string) =>
+        key === 'kata:issue-columns/v1' ? JSON.stringify(['updated', 'owner']) : null,
+      ),
+      setItem: vi.fn(),
     }
     expect(loadKataTaskColumnVisibility(storage)).toMatchObject({
       id: false,
@@ -67,14 +66,7 @@ describe('Kata task column visibility', () => {
       project: true,
       due: false,
     })
-    values.set('kata:issue-columns/v1', JSON.stringify(['due']))
-    expect(loadKataTaskColumnVisibility(storage)).toMatchObject({
-      id: false,
-      updated: true,
-      owner: true,
-      project: true,
-      due: false,
-    })
+    expect(storage.setItem).not.toHaveBeenCalled()
   })
 
   it('falls back when storage reads throw', () => {

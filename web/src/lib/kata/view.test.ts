@@ -99,15 +99,13 @@ describe('kata task view builder', () => {
           issues: [
             expect.objectContaining({ title: 'Deadline slipped' }),
             expect.objectContaining({ title: 'Future scheduled but overdue' }),
+            expect.objectContaining({ title: 'Started yesterday' }),
           ],
         },
         {
           id: 'today',
           title: 'Today',
-          issues: [
-            expect.objectContaining({ title: 'Morning review' }),
-            expect.objectContaining({ title: 'Started yesterday' }),
-          ],
+          issues: [expect.objectContaining({ title: 'Morning review' })],
         },
         {
           id: 'evening',

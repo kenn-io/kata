@@ -345,28 +345,6 @@
       : undefined
   })
   let projectView = $derived(Boolean(route.projectUID && !route.view))
-  let hasActiveTaskFilters = $derived(
-    inputFilters.query.trim() !== '' ||
-      inputFilters.owner.trim() !== '' ||
-      inputFilters.label.trim() !== '' ||
-      Boolean(inputFilters.relationships?.length) ||
-      (inputFilters.scope.kind === 'project' && !projectView) ||
-      inputFilters.status !== defaultKataTaskSearchFilters(viewName).status,
-  )
-  let unfilteredTaskCount = $derived.by(() => {
-    const projects = selectedProject ? [selectedProject] : projection.projects
-    return projects.reduce((count, project) => {
-      if (searchFilters.status === 'closed') return count + (project.closed_count ?? 0)
-      if (searchFilters.status === 'all')
-        return count + project.open_count + (project.closed_count ?? 0)
-      return count + project.open_count
-    }, 0)
-  })
-  let noMatchingTasks = $derived(
-    !loading &&
-      hasActiveTaskFilters &&
-      currentView.groups.every((group) => group.issues.length === 0),
-  )
   let selectedCommentUID = $state<string | undefined>()
   let returnComment = $state<{ issueUID: string; commentUID: string } | undefined>()
   let selectedIssueUID = $derived(route.issueUID ?? null)
@@ -525,20 +503,6 @@
 
   function setSplitDirection(direction: 'horizontal' | 'vertical'): void {
     onPreferencesChange({ ...preferences, splitDirection: direction })
-  }
-
-  function clearTaskFilters(): void {
-    if (inputFilters.query.trim()) {
-      updateFilters({ ...inputFilters, query: '' }, 'query')
-      return
-    }
-    const next = { ...withResolvedView(filterRoute), filters: emptyShareableFilters() }
-    if (projectView && inputFilters.scope.kind === 'project') {
-      next.projectUID = inputFilters.scope.project_uid
-    } else {
-      delete next.projectUID
-    }
-    navigate(next)
   }
 
   function resizeSplit(size: number): void {
@@ -973,10 +937,6 @@
         scopedProjectName={selectedProject?.name ?? null}
         {projectView}
         {detailBeside}
-        unfilteredTotal={unfilteredTaskCount}
-        showFilteredTotal={hasActiveTaskFilters &&
-          searchFilters.status !== 'ready' &&
-          (projectView || currentView.view === 'all')}
         splitDirection={preferences.splitDirection}
         onSplitDirectionChange={setSplitDirection}
         {selectedIssueUID}
@@ -985,22 +945,9 @@
         readyIssueUIDs={projection.member_issue_uid_set}
         onSelect={(issue) => selectIssue(issue.uid)}
         onOpenGraph={(issue) => openGraph(issue.uid)}
-        empty={noMatchingTasks
-          ? noMatchingTasksSnippet
-          : !loading && projection.projects.length === 0
-            ? noProjects
-            : undefined}
+        empty={!loading && projection.projects.length === 0 ? noProjects : undefined}
       />
     {/if}
-  </div>
-{/snippet}
-
-{#snippet noMatchingTasksSnippet()}
-  <div class="empty-search">
-    <span>No matching tasks</span>
-    <button type="button" onclick={clearTaskFilters}>
-      {inputFilters.query.trim() ? 'Clear search' : 'Clear filters'}
-    </button>
   </div>
 {/snippet}
 
@@ -1268,26 +1215,6 @@
     padding: var(--space-6);
     color: var(--text-muted);
     text-align: center;
-  }
-
-  .empty-search {
-    display: grid;
-    justify-items: center;
-    gap: 12px;
-    padding: 48px 12px;
-    color: var(--text-muted);
-    font-size: var(--font-size-md);
-    text-align: center;
-  }
-
-  .empty-search button {
-    padding: 0;
-    border: 0;
-    background: transparent;
-    color: var(--accent-blue);
-    font: inherit;
-    font-size: var(--font-size-sm);
-    cursor: pointer;
   }
 
   .mutation-message {
