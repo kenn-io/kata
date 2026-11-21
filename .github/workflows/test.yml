@@ -412,7 +412,7 @@ jobs:
           cli1_pid=$!
           env -u KATA_AUTH_TOKEN go tool gotestsum --format pkgname-and-test-fails --format-icons text \
             --jsonfile "gotestsum/go-cli-2.json" --rerun-fails=2 --rerun-fails-report "gotestsum/go-cli-2-reruns.txt" \
-            --packages ./cmd/kata -- -count=1 -run . -skip "$cli_shard" 2>&1 | sed -u 's/^/[cli-2] /' &
+            --packages ./cmd/kata -- -count=1 -skip "$cli_shard" 2>&1 | sed -u 's/^/[cli-2] /' &
           cli2_pid=$!
           status=0
           wait "$packages_pid" || status=1
