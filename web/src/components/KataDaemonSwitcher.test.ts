@@ -77,4 +77,30 @@ describe('KataDaemonSwitcher', () => {
     ).not.toBeNull()
     expect(screen.getByText('example-local')).not.toBeNull()
   })
+
+  test('opens with the keyboard and returns focus without selecting on Escape', async () => {
+    const onSelect = vi.fn()
+    const onOpen = vi.fn()
+    render(KataDaemonSwitcher, {
+      props: {
+        daemons: [
+          { id: 'local', url: '', default: true, auth: 'none', health: 'connected' },
+          { id: 'remote', url: '', default: false, auth: 'none', health: 'connected' },
+        ],
+        activeId: 'local',
+        onSelect,
+        onOpen,
+      },
+    })
+    const trigger = screen.getByRole('button', { name: 'Switch Kata daemon: local' })
+    trigger.focus()
+    await fireEvent.keyDown(trigger, { key: 'ArrowDown' })
+    const first = await screen.findByRole('menuitemradio', { name: /local/ })
+    await fireEvent.keyDown(first, { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(screen.getByRole('menuitemradio', { name: /remote/ }))
+    await fireEvent.keyDown(document.activeElement!, { key: 'Escape' })
+    expect(document.activeElement).toBe(trigger)
+    expect(onOpen).toHaveBeenCalledOnce()
+    expect(onSelect).not.toHaveBeenCalled()
+  })
 })

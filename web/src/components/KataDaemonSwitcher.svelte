@@ -1,8 +1,14 @@
 <script lang="ts">
-  import CheckIcon from '@lucide/svelte/icons/check'
   import ChevronDownIcon from '@lucide/svelte/icons/chevron-down'
-  import ServerIcon from '@lucide/svelte/icons/server'
-
+  import {
+    Avatar,
+    Menu,
+    MenuContent,
+    MenuRadioGroup,
+    MenuRadioItem,
+    MenuTrigger,
+    StatusDot,
+  } from '@kenn-io/kit-ui'
   import type { WebDaemonInfo } from '../lib/daemons/client'
 
   interface Props {
@@ -11,252 +17,131 @@
     activeStatusLabel?: string | undefined
     activeStatusTone?: 'error' | undefined
     disabled?: boolean | undefined
+    account?: string | undefined
+    credential?: string | undefined
     onSelect: (id: string) => void
     onOpen?: () => void
   }
-
   let {
     daemons,
     activeId,
-    activeStatusLabel = undefined,
-    activeStatusTone = undefined,
+    activeStatusLabel,
+    activeStatusTone,
     disabled = false,
+    account = 'Local, no sign-in',
+    credential,
     onSelect,
     onOpen = () => {},
   }: Props = $props()
-
-  let open = $state(false)
   let displayId = $derived(
     activeId ?? daemons.find((daemon) => daemon.default)?.id ?? daemons[0]?.id,
   )
-
-  function choose(daemon: WebDaemonInfo): void {
-    if (disabled || daemon.health === 'upgrade_required') return
-    open = false
-    if (daemon.id !== activeId) onSelect(daemon.id)
-  }
-
-  function daemonStatusLabel(daemon: WebDaemonInfo): string {
+  function status(daemon: WebDaemonInfo): string {
     if (daemon.id === displayId && activeStatusLabel) return activeStatusLabel
-    if (daemon.health === 'connected') return 'connected'
     if (daemon.health === 'auth_required') return 'needs auth'
     if (daemon.health === 'upgrade_required') return 'update required'
-    return 'unreachable'
-  }
-
-  function daemonStatusTone(daemon: WebDaemonInfo): string {
-    if (daemon.id === displayId && activeStatusTone) return activeStatusTone
-    return daemon.health
+    if (daemon.health !== 'connected') return 'unreachable'
+    return ''
   }
 </script>
 
-<div class="daemon-switcher">
-  <button
-    type="button"
-    class="daemon-chip"
-    data-testid="daemon-chip"
-    aria-label={`Switch Kata daemon: ${displayId ?? 'default'}`}
-    title="Switch Kata daemon"
-    aria-haspopup="menu"
-    aria-expanded={open}
-    onclick={() => {
-      open = !open
-      if (open) onOpen()
-    }}
-  >
-    <ServerIcon class="chip-icon" size={13} strokeWidth={1.9} aria-hidden="true" />
-    <span class="chip-label">{displayId ?? 'kata'}</span>
-    <span
-      class="status-indicator"
-      class:active={Boolean(activeStatusLabel)}
-      class:error={activeStatusTone === 'error'}
-      title={activeStatusLabel}
-      aria-hidden="true"
-    ></span>
-    {#if activeStatusLabel}
-      <span class="kit-sr-only" role="status" aria-label="Kata daemon status">
-        {activeStatusLabel}
-      </span>
-    {/if}
-    <ChevronDownIcon size={12} strokeWidth={2} aria-hidden="true" />
-  </button>
-
-  {#if open}
-    <div class="daemon-menu kit-popover-card" role="menu" aria-label="Configured Kata daemons">
+<Menu
+  onopenchange={(open) => {
+    if (open) onOpen()
+  }}
+>
+  <MenuTrigger ariaLabel={`Switch Kata daemon: ${displayId ?? 'default'}`}>
+    {#snippet child({ attachment })}
+      <button class="daemon-chip" data-testid="daemon-chip" {@attach attachment}>
+        <Avatar name={displayId ?? 'Kata'} size={24} shape="rounded" decorative />
+        <span class="chip-label">{displayId ?? 'kata'}</span>
+        {#if activeStatusLabel}<span
+            class="kit-sr-only"
+            role="status"
+            aria-label="Kata daemon status">{activeStatusLabel}</span
+          ><StatusDot
+            status={activeStatusTone === 'error' ? 'unclean' : 'stale'}
+            label={activeStatusLabel}
+          />{/if}
+        <ChevronDownIcon size={12} aria-hidden="true" />
+      </button>
+    {/snippet}
+  </MenuTrigger>
+  <MenuContent ariaLabel="Configured Kata daemons" class="daemon-menu">
+    <div class="account"><span>Account</span><strong>{account}</strong></div>
+    {#if credential}<div class="account">
+        <span>Credential</span><strong>{credential}</strong>
+      </div>{/if}
+    <MenuRadioGroup
+      value={activeId ?? ''}
+      onchange={(id) => {
+        if (id !== activeId) onSelect(id)
+      }}
+    >
       {#each daemons as daemon (daemon.id)}
-        <button
-          type="button"
-          class="daemon-row"
-          class:selected={daemon.id === activeId}
-          data-testid={`daemon-row-${daemon.id}`}
-          role="menuitemradio"
-          aria-checked={daemon.id === activeId}
+        <MenuRadioItem
+          value={daemon.id}
           disabled={disabled || daemon.health === 'upgrade_required'}
-          onclick={() => choose(daemon)}
+          closeOnSelect
+          textValue={daemon.id}
         >
-          <span class={`dot dot--${daemonStatusTone(daemon)}`} aria-hidden="true"></span>
-          <span class="row-name">{daemon.id}</span>
-          <span class="row-meta" title={daemonStatusLabel(daemon)}>{daemonStatusLabel(daemon)}</span
+          <span class="daemon-row" data-testid={`daemon-row-${daemon.id}`}
+            ><Avatar name={daemon.id} size={24} shape="rounded" decorative /><span class="row-name"
+              >{daemon.id}</span
+            >{#if status(daemon)}<span class="row-status">{status(daemon)}</span>{/if}</span
           >
-          {#if daemon.id === activeId}
-            <CheckIcon class="check" size={13} strokeWidth={2} aria-hidden="true" />
-          {/if}
-          {#if daemon.hint}
-            <span class="row-hint">{daemon.hint}</span>
-          {/if}
-        </button>
+          {#if daemon.hint}<span class="row-hint">{daemon.hint}</span>{/if}
+        </MenuRadioItem>
       {/each}
-    </div>
-  {/if}
-</div>
+    </MenuRadioGroup>
+  </MenuContent>
+</Menu>
 
 <style>
-  .daemon-switcher {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-3);
-  }
-
   .daemon-chip {
-    height: 28px;
-    border: 1px solid var(--border-default);
-    border-radius: var(--radius-sm);
-    background: var(--bg-surface);
-    color: var(--text-primary);
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 0 8px;
-    font-size: var(--font-size-sm);
-    line-height: 1;
-    cursor: pointer;
-  }
-
-  .daemon-chip:hover {
-    background: var(--bg-surface-hover);
-  }
-
-  .chip-label {
     min-width: 0;
-    max-width: 120px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .chip-icon {
-    color: var(--text-muted);
-    flex: none;
-  }
-
-  .status-indicator {
-    width: 6px;
-    height: 6px;
-    border-radius: 999px;
-    background: var(--accent-amber);
-    flex: none;
-    visibility: hidden;
-  }
-
-  .status-indicator.active {
-    visibility: visible;
-  }
-
-  .status-indicator.error {
-    background: var(--accent-red);
-  }
-
-  .dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 999px;
-    flex: none;
-  }
-
-  .dot--connected {
-    background: var(--accent-green);
-  }
-
-  .dot--auth_required {
-    background: var(--accent-amber);
-  }
-
-  .dot--down {
-    background: var(--text-muted);
-  }
-
-  .dot--upgrade_required {
-    background: var(--accent-amber);
-  }
-
-  .dot--error {
-    background: var(--accent-red);
-  }
-
-  .daemon-menu {
-    position: absolute;
-    top: calc(100% + 6px);
-    left: 0;
-    z-index: 30;
-    width: min(280px, calc(100vw - 16px));
-    padding: 5px;
-  }
-
-  .daemon-row {
-    width: 100%;
-    border: 0;
     border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text-primary);
-    display: grid;
-    grid-template-columns: 14px minmax(0, 1fr) auto auto;
-    align-items: center;
-    gap: var(--space-4);
-    padding: 7px 8px;
-    text-align: left;
-    font-size: var(--font-size-sm);
-    cursor: pointer;
   }
-
-  .daemon-row:hover:not(:disabled) {
-    background: var(--bg-surface-hover);
-  }
-
-  .daemon-row:disabled {
-    color: var(--text-muted);
-    cursor: not-allowed;
-    opacity: var(--opacity-disabled);
-  }
-
-  .daemon-row.selected {
-    background: var(--bg-inset);
-  }
-
+  .chip-label,
   .row-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  :global(.daemon-menu) {
+    width: min(280px, calc(100vw - 16px));
+  }
+  .account {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px;
+    color: var(--text-muted);
+    font-size: var(--font-size-xs);
+  }
+  .account strong {
+    color: var(--text-secondary);
+    font-weight: normal;
+  }
+  .daemon-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
-
-  .row-meta {
-    color: var(--text-muted);
-    font-size: var(--font-size-xs);
-    max-width: 132px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
+  .row-status,
   .row-hint {
-    grid-column: 2 / -1;
     color: var(--text-muted);
     font-size: var(--font-size-xs);
-    line-height: 1.3;
   }
-
-  .check {
-    color: var(--accent-blue);
+  .row-status {
+    margin-left: auto;
+    white-space: nowrap;
+  }
+  .row-hint {
+    display: block;
   }
 </style>

@@ -355,11 +355,7 @@ describe('AppShell', () => {
     })
 
     expect(screen.queryByRole('status', { name: 'Active connection' })).toBeNull()
-    const header = container.querySelector('header.kata-header')
-    expect(header).not.toBeNull()
-    expect(header?.classList.contains('kit-top-bar')).toBe(true)
-    expect(within(header as HTMLElement).getByRole('heading', { name: 'Kata' })).not.toBeNull()
-    expect(within(header as HTMLElement).getByRole('button', { name: 'New task' })).not.toBeNull()
+    expect(within(container).getByRole('button', { name: 'New task' })).not.toBeNull()
   })
 
   test.each([
@@ -368,8 +364,8 @@ describe('AppShell', () => {
     ['insecure_readonly', 'Anonymous (read-only)'],
     ['unauthenticated_private_network', 'Unauthenticated private network'],
     ['trusted_proxy_absent', 'Proxy without account'],
-    ['web_local', 'Local connection'],
-    ['none', 'Local connection'],
+    ['web_local', 'Local, no sign-in'],
+    ['none', 'Local, no sign-in'],
   ])('labels an actorless %s connection as %s', (authKind, label) => {
     const current = snapshot()
     Object.assign(current.capabilities, { auth_kind: authKind })
@@ -772,7 +768,7 @@ describe('AppShell', () => {
         (screen.getByRole('button', { name: 'Create team' }) as HTMLButtonElement).disabled,
       ).toBe(false),
     )
-    expect(screen.queryByRole('button', { name: 'New task' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'New task' })).not.toBeNull()
   })
 
   test('offers team and visibility management in the authorized credential screen', () => {
@@ -1353,7 +1349,7 @@ describe('AppShell', () => {
     expect(screen.getByRole('heading', { name: 'Credentials' })).not.toBeNull()
     expect(screen.getByText('Worker')).not.toBeNull()
     expect(screen.queryByLabelText('Search tasks')).toBeNull()
-    expect(screen.queryByRole('button', { name: 'New task' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'New task' })).not.toBeNull()
     expect(screen.getByRole('button', { name: 'Credentials' }).classList).toContain('active')
     expect(screen.getByRole('button', { name: 'Today' }).classList).not.toContain('active')
 
@@ -1442,7 +1438,7 @@ describe('AppShell', () => {
 
     expect(screen.getByRole('heading', { name: 'Settings' })).not.toBeNull()
     expect(await screen.findByText(/kata\.example\.com/)).not.toBeNull()
-    expect(screen.queryByRole('button', { name: 'New task' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'New task' })).not.toBeNull()
     expect(screen.queryByRole('button', { name: /layout/ })).toBeNull()
 
     await fireEvent.click(screen.getByRole('button', { name: 'Back to issues' }))
@@ -1769,12 +1765,6 @@ describe('AppShell', () => {
       },
     })
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Theme: System' }))
-    expect(onPreferencesChange).toHaveBeenCalledWith(
-      expect.objectContaining({ theme: 'light', splitDirection: 'horizontal' }),
-    )
-    onPreferencesChange.mockClear()
-
     expect(screen.getByRole('separator', { name: 'Resize Kata panes' })).not.toBeNull()
     await fireEvent.click(screen.getByRole('button', { name: 'Switch to stacked layout' }))
     expect(onPreferencesChange).toHaveBeenCalledWith(
@@ -1892,7 +1882,7 @@ describe('AppShell', () => {
         },
       })
       await fireEvent.click(screen.getByRole('button', { name: 'New task' }))
-      const drawer = screen.getByRole('dialog', { name: 'Kata navigation' })
+      const drawer = screen.getByRole('dialog', { name: 'Navigation' })
       const input = within(drawer).getByRole('textbox', { name: 'New project name' })
       await fireEvent.input(input, { target: { value: 'example-project' } })
       await fireEvent.keyDown(input, { key: 'Enter' })

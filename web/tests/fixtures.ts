@@ -273,7 +273,7 @@ listen = "127.0.0.1:${port}"
     },
     async launch(page, route = '/kata?view=all-open') {
       await page.goto(`${origin}${route}`)
-      await expect(page.getByRole('button', { name: 'New task' })).toBeVisible()
+      await expect(page.getByRole('region', { name: 'Kata workspace' })).toBeVisible()
       const credentials = await page.evaluate(() => {
         const value = sessionStorage.getItem('kata.web.session.v1')
         if (!value) return null

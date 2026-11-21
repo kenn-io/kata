@@ -77,12 +77,10 @@ describe('Sidebar', () => {
     renderSidebar()
 
     const navigation = screen.getByRole('region', { name: 'Kata navigation' })
-    const systemViewLabels = ['Inbox', 'Today 0', 'Delegated', 'Scheduled']
+    const systemViewLabels = ['Inbox', 'Today 0', 'Scheduled', 'Delegated', 'All open', 'Logbook']
     const systemViewButtons = systemViewLabels.map((name) =>
       within(navigation).getByRole('button', { name }),
     )
-    expect(within(navigation).queryByRole('button', { name: 'All Open' })).toBeNull()
-    expect(within(navigation).queryByRole('button', { name: 'Logbook' })).toBeNull()
     expect(within(navigation).queryByRole('button', { name: 'Upcoming' })).toBeNull()
     expect(within(navigation).queryByRole('button', { name: /^Deadlines?$/ })).toBeNull()
     const personal = within(navigation).getByRole('button', { name: /^Personal\s+1$/ })
@@ -153,6 +151,17 @@ describe('Sidebar', () => {
       screen.getByRole('button', { name: /^example-project\b/ }).classList.contains('active'),
     ).toBe(true)
     expect(screen.getByRole('button', { name: 'Inbox' }).classList.contains('active')).toBe(false)
+    expect(screen.getByRole('button', { name: 'All open' }).classList.contains('active')).toBe(
+      false,
+    )
+  })
+
+  it('opens Settings from the footer and clears the current view highlight', async () => {
+    const onOpenSettings = vi.fn()
+    renderSidebar({ settingsActive: true, onOpenSettings })
+    expect(screen.getByRole('button', { name: 'Today 0' }).classList.contains('active')).toBe(false)
+    await fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
+    expect(onOpenSettings).toHaveBeenCalledOnce()
   })
 
   it('keeps area collapse state while mounted and resets it after remount', async () => {
@@ -186,6 +195,9 @@ describe('Sidebar', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: 'Delegated' }))
     expect(onOpenView).toHaveBeenCalledWith('delegated')
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Logbook' }))
+    expect(onOpenView).toHaveBeenCalledWith('logbook')
 
     await fireEvent.click(screen.getByRole('button', { name: /^example-project\b/ }))
     expect(onOpenProject).toHaveBeenCalledWith('project-example')

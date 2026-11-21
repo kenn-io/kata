@@ -1,7 +1,7 @@
 <script lang="ts">
   import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left'
   import { PageHeader, SearchByMeaningRow, type SearchByMeaningState } from '@kenn-io/kit-ui'
-  import { untrack } from 'svelte'
+  import { untrack, type Snippet } from 'svelte'
 
   import { orvalFetch } from '../lib/api/client'
   import {
@@ -13,6 +13,7 @@
   } from '../lib/api/generated'
 
   interface Props {
+    children?: Snippet | undefined
     canAdministerDaemon: boolean
     onback: () => void
     /**
@@ -26,6 +27,7 @@
   }
 
   let {
+    children,
     canAdministerDaemon,
     onback,
     postFetch,
@@ -271,6 +273,7 @@
         </button>
       {/snippet}
     </PageHeader>
+    {#if children}{@render children()}{/if}
     {#if row}
       <div class="search-row" class:turning-on={turning}>
         <!-- Disables Turn on while its request is in flight. -->

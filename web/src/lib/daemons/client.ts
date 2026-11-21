@@ -16,6 +16,7 @@ export interface WebDaemonInfo {
 
 const daemonHeader = 'X-Kata-Web-Daemon'
 const daemonProxyPrefix = '/api/v1/ui/proxy'
+const rosterUnavailable = 'Check that Kata is running, then try again.'
 
 export function createDaemonFetch(
   readDaemon: () => string | undefined,
@@ -66,18 +67,18 @@ export async function fetchWebDaemons(
   )
   if (response.status === 401) {
     throw new AuthenticationRequiredError(
-      'Configured daemons are unavailable',
+      rosterUnavailable,
       responseTriggeredAuthenticationTransition(response),
     )
   }
-  if (!response.ok) throw new Error('Configured daemons are unavailable')
+  if (!response.ok) throw new Error(rosterUnavailable)
   const value: unknown = JSON.parse(body as string)
   if (!isRecord(value) || !Array.isArray(value.daemons)) {
-    throw new Error('Configured daemons are unavailable')
+    throw new Error(rosterUnavailable)
   }
   const daemons = value.daemons.map(parseDaemon)
   if (daemons.length === 0 || daemons.filter((daemon) => daemon.default).length !== 1) {
-    throw new Error('Configured daemons are unavailable')
+    throw new Error(rosterUnavailable)
   }
   return daemons
 }
@@ -108,7 +109,7 @@ function proxyablePath(raw: string): boolean {
 }
 
 function parseDaemon(value: unknown): WebDaemonInfo {
-  if (!isRecord(value)) throw new Error('Configured daemons are unavailable')
+  if (!isRecord(value)) throw new Error(rosterUnavailable)
   const { id, url, default: isDefault, auth, health, hint, local } = value
   if (
     typeof id !== 'string' ||
@@ -123,7 +124,7 @@ function parseDaemon(value: unknown): WebDaemonInfo {
       health !== 'upgrade_required') ||
     (hint !== undefined && typeof hint !== 'string')
   ) {
-    throw new Error('Configured daemons are unavailable')
+    throw new Error(rosterUnavailable)
   }
   return {
     id,

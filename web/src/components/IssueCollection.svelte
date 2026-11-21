@@ -35,6 +35,7 @@
   }
 
   interface Props {
+    headerActions?: Snippet | undefined
     currentView: KataCurrentView
     now: number
     resultsKey?: string
@@ -57,6 +58,7 @@
   const EMPTY_READY_ISSUE_UIDS: ReadonlySet<string> = new Set()
 
   let {
+    headerActions,
     currentView,
     now,
     resultsKey = '',
@@ -903,6 +905,7 @@
         >
       {/snippet}
       {#snippet actions()}
+        {#if headerActions}{@render headerActions()}{/if}
         <ColumnPicker
           visibility={columnVisibility}
           onchange={setColumnVisibility}

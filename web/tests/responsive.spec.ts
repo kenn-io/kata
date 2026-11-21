@@ -24,7 +24,7 @@ test('mobile navigation stays out of the task flow until opened', async ({ page,
   await kata.launch(page)
 
   const layout = await page.locator('.kata-feature').evaluate((element) => {
-    const header = element.querySelector('.kata-header')?.getBoundingClientRect()
+    const header = element.querySelector('.mobile-navigation-trigger')?.getBoundingClientRect()
     const main = element.querySelector('.kata-main')?.getBoundingClientRect()
     if (!header || !main) throw new Error('Kata header or main pane is missing')
     return {
@@ -36,7 +36,7 @@ test('mobile navigation stays out of the task flow until opened', async ({ page,
   expect(layout.mainTop).toBe(layout.headerBottom)
 
   await page.getByRole('button', { name: 'Open navigation' }).click()
-  const navigation = page.getByRole('dialog', { name: 'Kata navigation' })
+  const navigation = page.getByRole('dialog', { name: 'Navigation' })
   await expect(navigation).toBeVisible()
   await navigation.getByRole('button', { name: 'Today' }).click()
   await expect(navigation).toBeHidden()

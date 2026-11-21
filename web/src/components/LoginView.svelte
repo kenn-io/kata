@@ -1,4 +1,5 @@
 <script lang="ts">
+  import StatusPage from './shared/StatusPage.svelte'
   import { Button } from '@kenn-io/kit-ui'
 
   interface Props {
@@ -20,18 +21,23 @@
       await onLogin(token, returnPath)
       token = ''
     } catch {
-      error = 'Login failed. Check the token and try again.'
+      error = "That token didn't work. Check it and try again."
     } finally {
       submitting = false
     }
   }
 </script>
 
-<section class="login-view" aria-labelledby="login-heading">
-  <h2 id="login-heading">Log in to Kata</h2>
-  <form aria-label="Log in to Kata" onsubmit={submit}>
+<StatusPage title="Log in">
+  <form aria-label="Log in" onsubmit={submit}>
     <label for="kata-token">Token</label>
-    <input id="kata-token" type="password" autocomplete="current-password" bind:value={token} />
+    <input
+      id="kata-token"
+      type="password"
+      autocomplete="current-password"
+      aria-invalid={error ? true : undefined}
+      bind:value={token}
+    />
     <Button
       type="submit"
       tone="info"
@@ -42,24 +48,13 @@
     />
   </form>
   {#if error}<p role="alert">{error}</p>{/if}
-</section>
+</StatusPage>
 
 <style>
-  .login-view {
-    display: grid;
-    width: min(calc(100vw - var(--space-8)), 360px);
-    gap: var(--space-6);
-    text-align: left;
-  }
-
-  h2 {
-    font-size: var(--font-size-xl);
-    line-height: 1.25;
-    text-align: center;
-  }
-
   form {
     display: grid;
+    width: 100%;
+    text-align: left;
     gap: var(--space-4);
   }
 
@@ -71,7 +66,6 @@
 
   input {
     width: 100%;
-    min-height: 36px;
   }
 
   form :global(.login-submit) {
