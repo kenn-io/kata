@@ -233,6 +233,45 @@ func TestFederationPollWaitDefersProjectRevocationUntilNextPoll(t *testing.T) {
 	})
 }
 
+func TestFederationPollWaitReturnsEmptyWhenReadCrossesDeadline(t *testing.T) {
+	for _, wake := range []bool{false, true} {
+		name := "initial read"
+		if wake {
+			name = "read after wake"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newSignedPollFixture(t)
+			synctest.Test(t, func(t *testing.T) {
+				h := f.serve(t, 0)
+				cursor := h.cursor(t)
+				var done <-chan *httptest.ResponseRecorder
+				if wake {
+					done = h.startHeldPoll(t, cursor, "30")
+				}
+				h.reads.beforeRead(func(int) error {
+					time.Sleep(31 * time.Second)
+					return h.revokeProjectAccess(t)
+				})
+				var response *httptest.ResponseRecorder
+				if wake {
+					h.broadcaster.Broadcast(daemon.NewResetMsg(h.project.ID, 1))
+					response = <-done
+				} else {
+					response = h.send(h.request(t, cursor, "30"))
+				}
+				require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+				var page pollBodyForTest
+				require.NoError(t, json.Unmarshal(response.Body.Bytes(), &page))
+				assert.Empty(t, page.Events)
+				assert.Equal(t, cursor, page.NextAfterID)
+				assert.False(t, page.ResetRequired)
+				response = h.send(h.request(t, cursor, ""))
+				assert.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
+			})
+		})
+	}
+}
+
 func TestFederationPollWaitEndsBeforeTheRequestDeadlineAfterASlowRead(t *testing.T) {
 	f := newSignedPollFixture(t)
 	synctest.Test(t, func(t *testing.T) {

@@ -321,7 +321,7 @@ verified with. After a poll waits and wakes, the hub checks authorization once
 more before releasing the page. On timeout it returns the empty page already
 read. The next poll checks authorization and reads again, so it sees
 revocations, retired keys, and events whose wakeup was lost. The hub holds at
-most 32 polls per available CPU, up to 256 total, and also bounds polls per
+most 32 polls per `GOMAXPROCS`, up to 256 total, and also bounds polls per
 credential and signed requests holding a control slot; past a bound it answers
 at once.
 

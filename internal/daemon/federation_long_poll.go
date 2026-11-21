@@ -339,7 +339,7 @@ func publishFederationPollWakes(ctx context.Context, bus db.FederationPollWakeBu
 			return
 		}
 		if err != nil && ctx.Err() == nil {
-			logger.WarnContext(ctx, "federation poll wake publish failed; remote held polls answer when their wait expires", "error", err)
+			logger.WarnContext(ctx, "federation poll wake publish failed; missed events reach remote spokes on their next poll", "error", err)
 		}
 	}
 }
@@ -431,7 +431,7 @@ func holdFederationPoll(
 			return result, waited, false, err
 		}
 	}
-	return result, waited, false, nil
+	return result, waited, federationPollCaughtUp(result), nil
 }
 
 // heldFederationPollAllowed reports whether the hub can authorize a held poll
