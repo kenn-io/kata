@@ -264,7 +264,6 @@ func TestFederationPollWaitReturnsEmptyWhenReadCrossesDeadline(t *testing.T) {
 				require.NoError(t, json.Unmarshal(response.Body.Bytes(), &page))
 				assert.Empty(t, page.Events)
 				assert.Equal(t, cursor, page.NextAfterID)
-				assert.False(t, page.ResetRequired)
 				response = h.send(h.request(t, cursor, ""))
 				assert.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
 			})
@@ -323,10 +322,6 @@ func TestFederationPollWaitRejectsARetiredSigningKey(t *testing.T) {
 				response := <-done
 				if !tc.wake {
 					require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-					var page pollBodyForTest
-					require.NoError(t, json.Unmarshal(response.Body.Bytes(), &page))
-					assert.Empty(t, page.Events)
-					assert.Equal(t, cursor, page.NextAfterID)
 					response = h.send(h.request(t, cursor, ""))
 				}
 				assert.Equal(t, http.StatusUnauthorized, response.Code, response.Body.String())

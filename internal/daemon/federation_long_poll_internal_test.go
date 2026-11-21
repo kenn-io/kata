@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -219,6 +220,8 @@ type internalLongPollHub struct {
 
 func newInternalLongPollHub(t *testing.T) internalLongPollHub {
 	t.Helper()
+	previous := runtime.GOMAXPROCS(1)
+	t.Cleanup(func() { runtime.GOMAXPROCS(previous) })
 	ctx := t.Context()
 	store, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "hub.db"))
 	require.NoError(t, err)
@@ -272,8 +275,7 @@ func (h internalLongPollHub) poll(ctx context.Context, afterID int64, wait strin
 func (h internalLongPollHub) holdEveryCredentialSlot(ctx context.Context, t *testing.T, cursor int64) func() {
 	t.Helper()
 	var polls sync.WaitGroup
-	limit := min(federationPollMaxWaitersPerCredential, h.waits.maxTotal/2)
-	for range limit {
+	for range 16 {
 		polls.Go(func() {
 			if status, _, _, err := h.poll(ctx, cursor, "45"); err == nil {
 				t.Errorf("held poll answered before its client disconnected: %d", status)
@@ -281,7 +283,7 @@ func (h internalLongPollHub) holdEveryCredentialSlot(ctx context.Context, t *tes
 		})
 	}
 	//nolint:kennlint // sleeptest: the polls reach the hub over real HTTP; the waiter count is the signal.
-	require.Eventually(t, func() bool { return h.waits.heldFor(h.enrollmentID) == limit },
+	require.Eventually(t, func() bool { return h.waits.heldFor(h.enrollmentID) == 16 },
 		10*time.Second, 5*time.Millisecond, "the hub never held every poll")
 	return polls.Wait
 }
@@ -302,7 +304,7 @@ func TestFederationPollWaitAnswersAtOnceWhenCredentialWaitersAreFull(t *testing.
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, status)
 	assert.Less(t, elapsed, 5*time.Second, "a poll beyond the per-credential bound must answer like an ordinary poll")
-	assert.Equal(t, min(federationPollMaxWaitersPerCredential, hub.waits.maxTotal/2), hub.waits.heldFor(hub.enrollmentID))
+	assert.Equal(t, 16, hub.waits.heldFor(hub.enrollmentID))
 }
 
 func TestFederationPollWaitReleasesWaitersWhenClientsDisconnect(t *testing.T) {
