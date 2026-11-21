@@ -741,7 +741,6 @@
       <div class="header-task">
         {#if newTaskBlockedReason}
           <Tooltip text={newTaskBlockedReason}>{@render newTaskButton()}</Tooltip>
-          <span id={newTaskReasonID} class="kit-sr-only">{newTaskBlockedReason}</span>
         {:else}
           {@render newTaskButton()}
         {/if}
@@ -751,6 +750,9 @@
 {/snippet}
 
 <section class="kata-feature" aria-label="Kata workspace">
+  {#if newTaskBlockedReason}
+    <span id={newTaskReasonID} class="kit-sr-only">{newTaskBlockedReason}</span>
+  {/if}
   {#if connectionStatus !== 'Connected'}
     <div class="active-connection" role="status" aria-label="Active connection">
       <span
@@ -781,7 +783,6 @@
         {#if mediumScreen.current}
           {#if newTaskBlockedReason}
             <Tooltip text={newTaskBlockedReason}>{@render newTaskButton()}</Tooltip>
-            <span id={newTaskReasonID} class="kit-sr-only">{newTaskBlockedReason}</span>
           {:else}
             {@render newTaskButton()}
           {/if}
