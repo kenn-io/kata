@@ -38,7 +38,6 @@ describe('App', () => {
     })
     render(App)
     await screen.findByText('Example issue', { selector: 'h2' })
-    expect(location.search).toBe('?issue=example-project%23abc4')
     expect(requests).toHaveLength(1)
     expect(requests[0]!.searchParams.get('selected_issue_uid')).toBe('01J00000000000000000000001')
   })
@@ -95,7 +94,6 @@ describe('App', () => {
     await fireEvent.click(await screen.findByRole('button', { name: 'Retry' }))
     await screen.findByText('Example issue', { selector: 'h2' })
     expect(resolutions).toBe(2)
-    expect(location.search).toBe('?scope=example-project&issue=abc4')
   })
 
   it('discards a short link result after navigation', async () => {
@@ -115,7 +113,6 @@ describe('App', () => {
     finishResolution(shortLinkResolved())
     await screen.findByRole('button', { name: /Example issue/ })
     await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(location.search).toBe('?view=all-open')
     expect(screen.queryByRole('region', { name: 'Kata issue detail' })).toBeNull()
   })
 

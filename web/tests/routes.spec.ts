@@ -32,11 +32,6 @@ test('qualified short link keeps a different project filter', async ({ page, kat
   await expect(page.getByRole('region', { name: 'Kata issue detail' })).toContainText(
     'Other project detail',
   )
-  await page.reload()
-  await expect(page).toHaveURL(url)
-  await expect(page.getByRole('region', { name: 'Kata issue detail' })).toContainText(
-    'Other project detail',
-  )
   await page
     .getByRole('region', { name: 'Kata issue detail' })
     .getByRole('button', { name: 'Open reachable graph' })

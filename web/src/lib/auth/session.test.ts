@@ -155,31 +155,20 @@ describe('browser session bootstrap', () => {
     expect(window.location.hash).toBe('')
   })
 
-  it('preserves a literal issue reference fragment', () => {
-    history.replaceState(null, '', '/kata?issue=example#abc4')
+  it.each([
+    ['/kata?issue=example#abc4', '/kata?issue=example%23abc4'],
+    ['/kata?issue=01J00000000000000000000001#comments', '/kata?issue=01J00000000000000000000001'],
+    [
+      '/kata?issue=01J00000000000000000000001#abc4',
+      '/kata?issue=01J00000000000000000000001%23abc4',
+    ],
+  ])('handles issue fragment in %s', (url, expected) => {
+    history.replaceState(null, '', url)
     expect(consumeLaunchFragment(window.location, history.replaceState.bind(history))).toEqual({
       kind: 'none',
-      returnPath: '/kata?issue=example%23abc4',
+      returnPath: expected,
     })
-    expect(window.location.pathname + window.location.search).toBe('/kata?issue=example%23abc4')
-  })
-
-  it('keeps a full issue UID when the link has a fragment', () => {
-    history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#comments')
-    expect(consumeLaunchFragment(window.location, history.replaceState.bind(history))).toEqual({
-      kind: 'none',
-      returnPath: '/kata?issue=01J00000000000000000000001',
-    })
-    expect(window.location.search).toBe('?issue=01J00000000000000000000001')
-  })
-
-  it('preserves a short reference under a UID-shaped project name', () => {
-    history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#abc4')
-    expect(consumeLaunchFragment(window.location, history.replaceState.bind(history))).toEqual({
-      kind: 'none',
-      returnPath: '/kata?issue=01J00000000000000000000001%23abc4',
-    })
-    expect(window.location.search).toBe('?issue=01J00000000000000000000001%23abc4')
+    expect(window.location.pathname + window.location.search).toBe(expected)
   })
 
   it('consumes an explicit daemon launch target before routing', () => {
