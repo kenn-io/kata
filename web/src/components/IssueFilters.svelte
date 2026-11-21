@@ -155,6 +155,7 @@
     box-sizing: border-box;
     min-height: var(--layout-header-h);
     display: flex;
+    flex-shrink: 0;
     align-items: center;
     padding: var(--space-4) 12px;
     border-bottom: 1px solid var(--border-muted);
