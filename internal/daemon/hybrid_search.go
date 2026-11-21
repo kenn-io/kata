@@ -27,6 +27,8 @@ type hybridParams struct {
 	AllowedIssueIDs []int64
 	IssueScope      *db.APITokenScope
 	Hub             func(context.Context, hybridParams, int) ([]api.FederationSearchHit, bool, error)
+	// EmbeddingProjectAllowed gates query embedding for the searched project.
+	EmbeddingProjectAllowed func(context.Context, string) (bool, error)
 }
 
 type hybridResult struct {
@@ -215,6 +217,12 @@ func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 	// The vector index ranks only the searched project's chunks, so another
 	// project's closer chunks cannot starve this one out of the window.
 	ctx = db.WithAuthorizedProjects(ctx, []string{project.UID})
+	if p.EmbeddingProjectAllowed != nil {
+		allowed, err := p.EmbeddingProjectAllowed(ctx, project.UID)
+		if err != nil || !allowed {
+			return nil, false, errors.New("semantic search is unavailable for this project")
+		}
+	}
 	if p.Hub != nil {
 		hits, bounded, err := p.Hub(ctx, p, fetchCap)
 		if err != nil {

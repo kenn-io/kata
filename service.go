@@ -202,6 +202,11 @@ type Config struct {
 	TickTickSync TickTickSyncConfig
 	Docbank      DocbankConfig
 	Embeddings   EmbeddingsConfig
+	// EmbeddingProjectAllowed controls which project UIDs may use the embedding
+	// provider. Nil allows all projects. Errors abort the current attempt.
+	// Daemons sharing a PostgreSQL schema must return the same decision for each
+	// project because they share the mirror, vector index, and reconciler lease.
+	EmbeddingProjectAllowed func(context.Context, string) (bool, error)
 	// WebHandler optionally serves public, data-free browser assets alongside
 	// the API. Non-API paths bypass Kata's bearer check. Nil keeps the service
 	// API-only. Import go.kenn.io/kata/webui to opt into the bundled application.
@@ -439,7 +444,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	publisher := daemon.NewEventPublisher(broadcaster, hookSink)
 	var reconciler *daemon.Reconciler
 	if index != nil && embedder != nil {
-		reconciler = daemon.NewConfiguredEmbeddingReconciler(store, index, embedder, cfg.Embeddings, publisher, nil, federationCredentials, federation.EmbeddingProducerConnected, federation.EmbeddingProducerAuthorized)
+		reconciler = daemon.NewConfiguredEmbeddingReconciler(store, index, embedder, cfg.Embeddings, publisher, nil, federationCredentials, federation.EmbeddingProducerConnected, federation.EmbeddingProducerAuthorized, cfg.EmbeddingProjectAllowed)
 	}
 	federationWake := make(chan struct{}, 1)
 	wakeFederation := func() {
@@ -575,6 +580,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		FederationHubClient:       federation.CredentialHTTPClient,
 		FederationSyncRetry:       federationRetries.FederationSyncRetry,
 		DisableFederationRebind:   true,
+		EmbeddingProjectAllowed:   cfg.EmbeddingProjectAllowed,
 		GitHubSyncFetcher:         gitHubSyncFetcher,
 		GitHubSyncProgress:        gitHubSyncProgress,
 		GitHubSyncConfig:          gitHubSyncConfig,

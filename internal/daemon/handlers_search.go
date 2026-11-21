@@ -110,7 +110,8 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 				ProjectID: in.ProjectID, Query: in.Query, Limit: limit, ProbeLimit: probeLimit,
 				IncludeDeleted: in.IncludeDeleted, Requested: mode,
 				Labels: in.Labels, ExcludeLabels: in.ExcludeLabels, Status: in.Status,
-				IssueScope: issueScopeFromContext(ctx),
+				IssueScope:              issueScopeFromContext(ctx),
+				EmbeddingProjectAllowed: cfg.EmbeddingProjectAllowed,
 			}
 			if direct {
 				params.Hub = func(ctx context.Context, p hybridParams, fetch int) ([]api.FederationSearchHit, bool, error) {

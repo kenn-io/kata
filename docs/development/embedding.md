@@ -29,6 +29,15 @@ another replica or from host-owned workers that write directly to storage can
 wait until the next sweep, which defaults to five minutes, plus indexing time
 before they appear in semantic search.
 A host worker fence stops the embedding worker when it rejects a transaction.
+Set `Config.EmbeddingProjectAllowed` to limit indexing and query embedding to
+host-approved project UIDs. Returning false excludes a project and removes its
+existing mirror and vectors on the next refresh. Returning an error aborts the
+attempt; the worker retries with backoff. Kata checks the callback again on
+later attempts. A nil callback allows every project. For excluded projects,
+explicit semantic and hybrid searches return unavailable, while auto search
+falls back to keyword search.
+Daemons sharing a PostgreSQL schema must return the same decision for each
+project because they share the mirror, vector index, and reconciler lease.
 The Postgres database needs the pgvector extension. Without it, lexical search
 remains available and semantic search reports the missing extension. After
 installing pgvector, have the schema owner open the service once with

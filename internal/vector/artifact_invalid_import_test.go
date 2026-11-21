@@ -86,9 +86,9 @@ func TestEmbeddingInvalidRetainedArtifactDoesNotStopFill(t *testing.T) {
 
 			key := client.Generation().Fingerprint()
 			require.NoError(t, ix.EnsureBuilding(ctx, key, client.Generation()))
-			_, err = ix.RefreshMirror(ctx, source)
+			_, err = ix.RefreshMirror(ctx, source, nil)
 			require.NoError(t, err)
-			reused, err := ix.ReconcileArtifacts(ctx, key, source, recipe)
+			reused, err := ix.ReconcileArtifacts(ctx, key, source, recipe, nil)
 			require.NoError(t, err, "one invalid artifact must not stop reconciliation")
 			require.Zero(t, reused)
 			require.True(t, ix.ArtifactRejected(mismatched.Digest), "the rejected artifact is visible to status")
