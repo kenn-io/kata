@@ -20,6 +20,7 @@
       label={`Search for ${route.searchRef}`}
       onclick={() => onSearch(route.searchRef ?? '')}
     />
+  {:else}
+    <Button tone="info" surface="solid" label="Open Inbox" onclick={onOpenInbox} />
   {/if}
-  <Button tone="info" surface="solid" label="Open Inbox" onclick={onOpenInbox} />
 </StatusPage>

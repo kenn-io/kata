@@ -11,6 +11,7 @@
   import { ScrollBox, showFlash, Tooltip } from '@kenn-io/kit-ui'
 
   import GroupedSidebarSection from './GroupedSidebarSection.svelte'
+  import { markColor } from '../lib/marks'
 
   import type {
     KataTaskMutationResponse,
@@ -18,7 +19,6 @@
     KataTaskViewName,
   } from '../lib/kata/types'
   import type { KataAreaSummary, KataCurrentView } from '../lib/kata/authority'
-  import { projectMarkColor } from '../lib/kata/projectColor'
   import type { Snippet } from 'svelte'
 
   interface Props {
@@ -118,8 +118,6 @@
   // is highlighted only while browsing that project on its own.
   function isProjectActive(uid: string): boolean {
     return (
-      !settingsActive &&
-      !credentialAuditActive &&
       currentView.name === 'all' &&
       searchFilters.scope.kind === 'project' &&
       searchFilters.scope.project_uid === uid
@@ -161,7 +159,7 @@
     aria-describedby={projectCreationBlockedReason ? createReasonID : undefined}
     onclick={startCreatingProject}
   >
-    <PlusIcon size={13} strokeWidth={1.9} />
+    <span class="nav-icon"><PlusIcon size={16} /></span>
     <span>New project</span>
   </button>
 {/snippet}
@@ -185,7 +183,7 @@
             void onOpenView(view.name)
           }}
         >
-          <span class="nav-icon"><Icon size={14} strokeWidth={1.75} /></span>
+          <span class="nav-icon"><Icon size={16} /></span>
           <span class="nav-label">{view.label}</span>
           {#if count !== undefined}
             <span class="nav-count">{count}</span>
@@ -208,7 +206,7 @@
             class:active={isProjectActive(project.uid)}
             onclick={() => void onOpenProject(project.uid)}
           >
-            <span class="project-mark" style:background={projectMarkColor(project.name)}></span>
+            <span class="project-mark" style:background={markColor(project.name)}></span>
             <span class="project-name">{project.name}</span>
             <span class="project-count count">{project.open_count}</span>
           </button>
@@ -262,12 +260,12 @@
         class:active={credentialAuditActive}
         onclick={() => void onOpenCredentials()}
       >
-        <span class="nav-icon"><KeyRoundIcon size={16} strokeWidth={1.75} /></span>
+        <span class="nav-icon"><KeyRoundIcon size={16} /></span>
         <span class="nav-label">Credentials</span>
       </button>
     {/if}
     <button type="button" class:active={settingsActive} onclick={() => void onOpenSettings()}>
-      <span class="nav-icon"><SettingsIcon size={16} strokeWidth={1.75} /></span>
+      <span class="nav-icon"><SettingsIcon size={16} /></span>
       <span class="nav-label">Settings</span>
     </button>
   </nav>
@@ -359,9 +357,8 @@
     color: var(--text-primary);
   }
 
-  .kata-nav button.active .nav-label,
-  .project-select-button.active .project-name {
-    font-weight: var(--font-weight-medium);
+  .kata-nav button.active .nav-icon {
+    color: var(--text-primary);
   }
 
   .nav-label,
@@ -374,8 +371,8 @@
 
   .nav-count,
   .project-count {
-    color: var(--text-muted);
-    font-size: var(--font-size-xs);
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
     font-variant-numeric: tabular-nums;
   }
 
@@ -389,8 +386,8 @@
 
   .project-mark {
     justify-self: center;
-    width: 12px;
-    height: 12px;
+    width: 10px;
+    height: 10px;
     border-radius: 3px;
   }
 

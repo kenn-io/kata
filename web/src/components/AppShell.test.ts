@@ -1826,8 +1826,8 @@ describe('AppShell', () => {
     expect(onPreferencesChange).toHaveBeenCalledWith(expect.objectContaining({ theme: 'light' }))
   })
 
-  test('quick-captures a new task through the ported workspace action', async () => {
-    const onCreateIssue = vi.fn(async () => {})
+  test('closes navigation and shows a rejected capture error once', async () => {
+    const onCreateIssue = vi.fn().mockRejectedValue(new Error('validation: Action refused'))
     vi.stubGlobal('matchMedia', (media: string) => ({
       matches: true,
       media,
@@ -1839,11 +1839,11 @@ describe('AppShell', () => {
       ...(accepted.catalog![0]!.project.metadata ?? {}),
       role: 'inbox',
     }
-    const { container } = render(AppShell, {
+    const view = render(AppShell, {
       props: {
         route: {
           kind: 'kata',
-          view: 'inbox',
+          view: 'settings',
           graph: false,
           filters: { status: [], owner: [], label: [], relationship: [] },
         },
@@ -1859,14 +1859,17 @@ describe('AppShell', () => {
     const drawer = screen.getByRole('dialog', { name: 'Navigation' })
     await fireEvent.click(within(drawer).getByRole('button', { name: 'New task' }))
     expect(screen.queryByRole('dialog', { name: 'Navigation' })).toBeNull()
-    await fireEvent.input(within(container).getByRole('textbox', { name: 'Quick capture' }), {
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Quick capture' }), {
       target: { value: 'New example task' },
     })
-    await fireEvent.keyDown(within(container).getByRole('textbox', { name: 'Quick capture' }), {
+    await fireEvent.keyDown(screen.getByRole('textbox', { name: 'Quick capture' }), {
       key: 'Enter',
     })
 
     expect(onCreateIssue).toHaveBeenCalledWith('New example task')
+    await within(screen.getByRole('dialog', { name: 'New task' })).findByRole('alert')
+    await view.rerender({ mutationMessage: 'validation: Action refused' })
+    expect(screen.getAllByText('validation: Action refused')).toHaveLength(1)
   })
 
   test('distinguishes empty projects from empty tasks and keeps refused capture closed', async () => {
@@ -2128,7 +2131,7 @@ describe('AppShell', () => {
     await view.rerender({ route: { kind: 'kata', view: 'inbox', graph: false, filters } })
     await waitFor(() => expect(document.title).toBe('Inbox · Kata'))
     await view.rerender({ route: { kind: 'kata', view: 'all-open', graph: false, filters } })
-    await waitFor(() => expect(document.title).toBe('All Open · Kata'))
+    await waitFor(() => expect(document.title).toBe('All open · Kata'))
     await view.rerender({ route: { kind: 'kata', view: 'settings', graph: false, filters } })
     await waitFor(() => expect(document.title).toBe('Settings · Kata'))
     await view.rerender({ route: { kind: 'kata', view: 'credentials', graph: false, filters } })

@@ -50,12 +50,16 @@
     border: 0;
     border-radius: var(--radius-md);
     background: transparent;
-    color: var(--text-primary);
+    color: var(--text-secondary);
     cursor: pointer;
     font-family: inherit;
     font-size: var(--font-size-xs);
     font-weight: var(--font-weight-semibold);
     text-align: left;
+  }
+
+  .sidebar-group-header:hover {
+    color: var(--text-primary);
   }
 
   .sidebar-group-header__chevron {
@@ -89,7 +93,7 @@
 
   .sidebar-group-header__count {
     flex-shrink: 0;
-    font-size: var(--font-size-xs);
+    font-size: var(--font-size-sm);
     font-variant-numeric: tabular-nums;
   }
 

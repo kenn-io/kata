@@ -13,7 +13,7 @@
   import { tick } from 'svelte'
 
   import type { KataProjectSummary, KataTaskSearchFilters } from '../lib/kata/types'
-  import { projectMarkColor } from '../lib/kata/projectColor'
+  import { markColor } from '../lib/marks'
 
   interface Props {
     onSubmitSearch?: ((query: string) => void) | undefined
@@ -259,7 +259,7 @@
         <div class="filter-chip">
           <span
             class="project-mark"
-            style:background={projectMarkColor(selectedProject?.name ?? draft.scope.project_uid)}
+            style:background={markColor(selectedProject?.name ?? draft.scope.project_uid)}
           ></span>
           <span class="filter-chip__label">
             {selectedProject?.name ?? draft.scope.project_uid}

@@ -39,7 +39,7 @@
     type KataTaskColumnWidths,
   } from '../lib/kata/columns'
   import { closedReasonLabel, deadlineDate, scheduledDate } from '../lib/kata/view'
-  import { projectMarkColor } from '../lib/kata/projectColor'
+  import { markColor } from '../lib/marks'
 
   export interface KataIssueRevealRequest {
     uid: string
@@ -71,7 +71,7 @@
     revealRequest?: KataIssueRevealRequest | null
     onSelect: (issue: KataTaskSummary) => void
     onOpenGraph?: ((issue: KataTaskSummary) => void) | undefined
-    /** Replaces the bare `No tasks` line when the list has no rows. */
+    /** Replaces the list, its controls, and the toolbar under the title. */
     empty?: Snippet | undefined
   }
 
@@ -1073,184 +1073,189 @@
 <svelte:window onkeyup={handleWindowKeyup} onblur={handleWindowBlur} />
 
 <section class="issue-list" aria-label="Issues">
-  <div class="pane-header">
-    <PageHeader level={2} title={viewTitle(currentView)}>
-      {#snippet trailing()}
-        <span class="count">
-          {#if showFilteredTotal && unfilteredTotal !== undefined}
-            {totalFilteredIssues()} of {unfilteredTotal}
-          {:else}
-            {totalFilteredIssues()}
+  <div class="pane-header" class:empty-header={!!empty}>
+    {#if empty}
+      <PageHeader level={2} title={viewTitle(currentView)} />
+    {:else}
+      <PageHeader level={2} title={viewTitle(currentView)}>
+        {#snippet trailing()}
+          <span class="count">
+            {#if showFilteredTotal && unfilteredTotal !== undefined}
+              {totalFilteredIssues()} of {unfilteredTotal}
+            {:else}
+              {totalFilteredIssues()}
+            {/if}
+            {totalFilteredIssues() === 1 ? ' task' : ' tasks'}
+          </span>
+        {/snippet}
+        {#snippet actions()}
+          {#if hasExpandableVisibleRows || hasAnyExpandedRows}
+            <div class="tree-actions" aria-label="Task tree controls">
+              <button
+                class="tree-action"
+                type="button"
+                aria-label={allKnownExpandableRowsExpanded
+                  ? 'Collapse all tasks'
+                  : 'Expand all tasks'}
+                title={allKnownExpandableRowsExpanded ? 'Collapse all tasks' : 'Expand all tasks'}
+                disabled={allKnownExpandableRowsExpanded ? !hasAnyExpandedRows : false}
+                onclick={allKnownExpandableRowsExpanded ? collapseAllVisible : expandAllVisible}
+              >
+                {#if allKnownExpandableRowsExpanded}
+                  <ListChevronsDownUpIcon size={13} strokeWidth={2} />
+                  <span class="action-label">Collapse all</span>
+                {:else}
+                  <ListChevronsUpDownIcon size={13} strokeWidth={2} />
+                  <span class="action-label">Expand all</span>
+                {/if}
+              </button>
+            </div>
           {/if}
-          {totalFilteredIssues() === 1 ? ' task' : ' tasks'}
-        </span>
-      {/snippet}
-      {#snippet actions()}
-        {#if hasExpandableVisibleRows || hasAnyExpandedRows}
-          <div class="tree-actions" aria-label="Task tree controls">
-            <button
-              class="tree-action"
-              type="button"
-              aria-label={allKnownExpandableRowsExpanded
-                ? 'Collapse all tasks'
-                : 'Expand all tasks'}
-              title={allKnownExpandableRowsExpanded ? 'Collapse all tasks' : 'Expand all tasks'}
-              disabled={allKnownExpandableRowsExpanded ? !hasAnyExpandedRows : false}
-              onclick={allKnownExpandableRowsExpanded ? collapseAllVisible : expandAllVisible}
-            >
-              {#if allKnownExpandableRowsExpanded}
-                <ListChevronsDownUpIcon size={13} strokeWidth={2} />
-                <span class="action-label">Collapse all</span>
-              {:else}
-                <ListChevronsUpDownIcon size={13} strokeWidth={2} />
-                <span class="action-label">Expand all</span>
-              {/if}
-            </button>
-          </div>
-        {/if}
-        <ColumnPicker
-          visibility={columnVisibility}
-          columns={displayColumns}
-          {splitDirection}
-          {onSplitDirectionChange}
-          onchange={setColumnVisibility}
-        />
-      {/snippet}
-    </PageHeader>
-    {#if toolbar}{@render toolbar()}{/if}
+          <ColumnPicker
+            visibility={columnVisibility}
+            columns={displayColumns}
+            {splitDirection}
+            {onSplitDirectionChange}
+            onchange={setColumnVisibility}
+          />
+        {/snippet}
+      </PageHeader>
+    {/if}
     {#if loading}
       <span class="kit-sr-only" aria-live="polite">Loading snapshot</span>
     {/if}
   </div>
+  {#if empty}
+    <div class="table-body">{@render empty()}</div>
+  {:else}
+    {#if toolbar}{@render toolbar()}{/if}
 
-  <div
-    class="table"
-    class:table--project-scoped={isProjectScoped}
-    class:table--detail-beside={detailBeside}
-    class:table--keep-owner-sort={effectiveSort.key === 'owner' && columnVisibility.owner}
-    style:--table-cols-wide={wideGridColumns}
-    style:--table-cols-medium={mediumGridColumns}
-    style:--table-cols-compact={compactGridColumns}
-    style:--table-cols-narrow={narrowGridColumns}
-  >
-    <!-- The table-body is the keyboard-nav root: any row inside this
+    <div
+      class="table"
+      class:table--project-scoped={isProjectScoped}
+      class:table--detail-beside={detailBeside}
+      class:table--keep-owner-sort={effectiveSort.key === 'owner' && columnVisibility.owner}
+      style:--table-cols-wide={wideGridColumns}
+      style:--table-cols-medium={mediumGridColumns}
+      style:--table-cols-compact={compactGridColumns}
+      style:--table-cols-narrow={narrowGridColumns}
+    >
+      <!-- The table-body is the keyboard-nav root: any row inside this
          container is reachable via ↓/↑ (j/k), Home/End (g/G), and
          ↔ to expand or collapse subtasks. -->
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="table-body" bind:this={tableBody} onkeydown={handleListKeydown}>
-      {#snippet resizeHandle(
-        column: KataOptionalTaskColumn | 'title' | 'date' | 'closed',
-        label: string,
-      )}
-        <div class="column-resize">
-          <SplitResizeHandle
-            orientation="horizontal"
-            variant="column"
-            ariaLabel={`Resize ${label} column`}
-            ariaValueMin={48}
-            ariaValueMax={480}
-            ariaValueNow={columnWidths[column] ?? DEFAULT_COLUMN_WIDTHS[column]}
-            keyboardStep={8}
-            onResizeStart={(event) => beginColumnResize(column, event)}
-            onResize={(event) => updateColumnWidth(column, event)}
-            onResizeEnd={(event) => persistColumnWidth(column, event)}
-          />
-        </div>
-      {/snippet}
-      <div class="table-header">
-        <div class="column-heading column-heading-title">
-          <button
-            class="col col-title"
-            type="button"
-            aria-label={sortLabel('title', 'Title')}
-            aria-pressed={sortIndicator('title') !== null}
-            onclick={() => handleSortClick('title')}
-          >
-            <span class="chevron chevron--placeholder" aria-hidden="true"></span>
-            <span>Title</span>
-            {#if sortIndicator('title') === 'asc'}
-              <ChevronUpIcon size={11} strokeWidth={2} />
-            {:else if sortIndicator('title') === 'desc'}
-              <ChevronDownIcon size={11} strokeWidth={2} />
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="table-body" bind:this={tableBody} onkeydown={handleListKeydown}>
+        {#snippet resizeHandle(
+          column: KataOptionalTaskColumn | 'title' | 'date' | 'closed',
+          label: string,
+        )}
+          <div class="column-resize">
+            <SplitResizeHandle
+              orientation="horizontal"
+              variant="column"
+              ariaLabel={`Resize ${label} column`}
+              ariaValueMin={48}
+              ariaValueMax={480}
+              ariaValueNow={columnWidths[column] ?? DEFAULT_COLUMN_WIDTHS[column]}
+              keyboardStep={8}
+              onResizeStart={(event) => beginColumnResize(column, event)}
+              onResize={(event) => updateColumnWidth(column, event)}
+              onResizeEnd={(event) => persistColumnWidth(column, event)}
+            />
+          </div>
+        {/snippet}
+        <div class="table-header">
+          <div class="column-heading column-heading-title">
+            <button
+              class="col col-title"
+              type="button"
+              aria-label={sortLabel('title', 'Title')}
+              aria-pressed={sortIndicator('title') !== null}
+              onclick={() => handleSortClick('title')}
+            >
+              <span class="chevron chevron--placeholder" aria-hidden="true"></span>
+              <span>Title</span>
+              {#if sortIndicator('title') === 'asc'}
+                <ChevronUpIcon size={11} strokeWidth={2} />
+              {:else if sortIndicator('title') === 'desc'}
+                <ChevronDownIcon size={11} strokeWidth={2} />
+              {/if}
+            </button>
+            {@render resizeHandle('title', 'Title')}
+          </div>
+          {#each renderedColumns as column (column.kind === 'task' ? column.id : column.kind)}
+            {#if column.kind === 'date'}
+              <div class="column-heading">
+                <span class="col col-static">Date</span>{@render resizeHandle('date', 'Date')}
+              </div>
+            {:else if column.kind === 'closed'}
+              <div class="column-heading">
+                <span class="col col-static">Closed</span>{@render resizeHandle('closed', 'Closed')}
+              </div>
+            {:else}
+              {@const label =
+                KATA_OPTIONAL_TASK_COLUMNS.find((item) => item.id === column.id)?.label ??
+                column.id}
+              <div class={`column-heading column-heading-${column.id}`}>
+                {#if ['id', 'due', 'updated', 'priority', 'owner'].includes(column.id)}
+                  <button
+                    class={`col col-${column.id}`}
+                    type="button"
+                    aria-label={sortLabel(column.id as KataTaskSortKey, label)}
+                    aria-pressed={sortIndicator(column.id as KataTaskSortKey) !== null}
+                    onclick={() => handleSortClick(column.id as KataTaskSortKey)}
+                  >
+                    <span>{label}</span>
+                    {#if sortIndicator(column.id as KataTaskSortKey) === 'asc'}
+                      <ChevronUpIcon size={11} strokeWidth={2} />
+                    {:else if sortIndicator(column.id as KataTaskSortKey) === 'desc'}
+                      <ChevronDownIcon size={11} strokeWidth={2} />
+                    {/if}
+                  </button>
+                {:else}
+                  <span class="col col-static">{label}</span>
+                {/if}
+                {#if column.id !== 'project' || !detailBeside}
+                  {@render resizeHandle(column.id, label)}
+                {/if}
+              </div>
             {/if}
-          </button>
-          {@render resizeHandle('title', 'Title')}
+          {/each}
         </div>
-        {#each renderedColumns as column (column.kind === 'task' ? column.id : column.kind)}
-          {#if column.kind === 'date'}
-            <div class="column-heading">
-              <span class="col col-static">Date</span>{@render resizeHandle('date', 'Date')}
-            </div>
-          {:else if column.kind === 'closed'}
-            <div class="column-heading">
-              <span class="col col-static">Closed</span>{@render resizeHandle('closed', 'Closed')}
-            </div>
-          {:else}
-            {@const label =
-              KATA_OPTIONAL_TASK_COLUMNS.find((item) => item.id === column.id)?.label ?? column.id}
-            <div class={`column-heading column-heading-${column.id}`}>
-              {#if ['id', 'due', 'updated', 'priority', 'owner'].includes(column.id)}
-                <button
-                  class={`col col-${column.id}`}
-                  type="button"
-                  aria-label={sortLabel(column.id as KataTaskSortKey, label)}
-                  aria-pressed={sortIndicator(column.id as KataTaskSortKey) !== null}
-                  onclick={() => handleSortClick(column.id as KataTaskSortKey)}
-                >
-                  <span>{label}</span>
-                  {#if sortIndicator(column.id as KataTaskSortKey) === 'asc'}
-                    <ChevronUpIcon size={11} strokeWidth={2} />
-                  {:else if sortIndicator(column.id as KataTaskSortKey) === 'desc'}
-                    <ChevronDownIcon size={11} strokeWidth={2} />
-                  {/if}
-                </button>
-              {:else}
-                <span class="col col-static">{label}</span>
-              {/if}
-              {#if column.id !== 'project' || !detailBeside}
-                {@render resizeHandle(column.id, label)}
-              {/if}
-            </div>
-          {/if}
-        {/each}
-      </div>
 
-      {#if visibleRootIssues.length === 0}
-        {#if empty}
-          {@render empty()}
-        {:else}
+        {#if visibleRootIssues.length === 0}
           <div class="empty">No tasks</div>
         {/if}
-      {/if}
 
-      {#if hasTemporaryReveal || isProjectScoped || shouldFlatten || currentView.name === 'inbox'}
-        {#each renderedRoots as issue (issue.uid)}
-          {@render row(issue)}
-        {/each}
-      {:else}
-        {#each renderedGroups as group (group.id)}
-          <section class="group" aria-labelledby={`group-${group.id}`}>
-            <h3 class="group-title" id={`group-${group.id}`}>
-              {#if group.handoff}
-                <span class="handoff-avatars" aria-hidden="true">
-                  <Avatar name={group.handoff.teammate} size={16} decorative />
-                  <Avatar name={group.handoff.author} size={16} decorative />
-                </span>
-              {/if}
-              <span>{group.title}</span>
-              <span class="group-count">{group.total}</span>
-            </h3>
-            {#each group.issues as issue (issue.uid)}
-              {@render row(issue)}
-            {/each}
-          </section>
-        {/each}
-      {/if}
-      {#if hasHiddenRows}
-        <div class="row-sentinel" bind:this={rowSentinel} aria-hidden="true"></div>
-      {/if}
+        {#if hasTemporaryReveal || isProjectScoped || shouldFlatten || currentView.name === 'inbox'}
+          {#each renderedRoots as issue (issue.uid)}
+            {@render row(issue)}
+          {/each}
+        {:else}
+          {#each renderedGroups as group (group.id)}
+            <section class="group" aria-labelledby={`group-${group.id}`}>
+              <h3 class="group-title" id={`group-${group.id}`}>
+                {#if group.handoff}
+                  <span class="handoff-avatars" aria-hidden="true">
+                    <Avatar name={group.handoff.teammate} size={16} decorative />
+                    <Avatar name={group.handoff.author} size={16} decorative />
+                  </span>
+                {/if}
+                <span>{group.title}</span>
+                <span class="group-count">{group.total}</span>
+              </h3>
+              {#each group.issues as issue (issue.uid)}
+                {@render row(issue)}
+              {/each}
+            </section>
+          {/each}
+        {/if}
+        {#if hasHiddenRows}
+          <div class="row-sentinel" bind:this={rowSentinel} aria-hidden="true"></div>
+        {/if}
+      </div>
     </div>
-  </div>
+  {/if}
 </section>
 
 {#snippet row(issue: KataTaskSummary, depth = 0)}
@@ -1326,8 +1331,7 @@
           <span class="cell cell-id" title={issue.qualified_id}>{issue.short_id}</span>
         {:else if column.id === 'project'}
           <span class="cell cell-project" title={issue.project_name}>
-            <span class="project-mark" style:background={projectMarkColor(issue.project_name)}
-            ></span>
+            <span class="project-mark" style:background={markColor(issue.project_name)}></span>
             {#if detailBeside}
               <span class="kit-sr-only">{issue.project_name}</span>
             {:else}
@@ -1460,6 +1464,14 @@
     flex-shrink: 0;
     padding: 8px 12px 0;
     background: var(--bg-surface);
+  }
+
+  .pane-header.empty-header {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    min-height: var(--layout-header-h);
+    padding: 0 16px;
   }
 
   .count {

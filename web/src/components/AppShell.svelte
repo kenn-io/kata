@@ -671,7 +671,7 @@
         { name: 'today', label: 'Today' },
         { name: 'delegated', label: 'Delegated' },
         { name: 'scheduled', label: 'Scheduled' },
-        { name: 'all', label: 'All Open' },
+        { name: 'all', label: 'All open' },
         { name: 'logbook', label: 'Logbook' },
       ].find((view) => view.name === viewName)?.label ?? 'Kata'
     )
@@ -700,13 +700,14 @@
   <!-- aria-disabled keeps the blocked button focusable so keyboard users reach its reason. -->
   <button
     type="button"
-    class="accent-button header-action"
+    class="quiet-button header-action"
     aria-disabled={newTaskBlockedReason ? 'true' : undefined}
     aria-describedby={newTaskBlockedReason ? newTaskReasonID : undefined}
+    title={newTaskBlockedReason ? undefined : 'New task'}
     onclick={beginNewTask}
   >
-    <PlusIcon size={13} strokeWidth={1.9} aria-hidden="true" />
-    <span>New task</span>
+    <PlusIcon size={16} aria-hidden="true" />
+    <span class="kit-sr-only">New task</span>
   </button>
 {/snippet}
 
@@ -831,13 +832,11 @@
   {/if}
   <div class="kata-layout" aria-busy={loading}>
     <div class="desktop-navigation">
-      {#if !mobileNavigationOpen}
-        {@render navigationSidebar()}
-      {/if}
+      {@render navigationSidebar()}
     </div>
 
     <div class="kata-main">
-      {#if mutationMessage && (!credentialRoute || !accessAdministrationAvailable || !onAccessMutation)}
+      {#if mutationMessage && !captureOpen && (!credentialRoute || !accessAdministrationAvailable || !onAccessMutation)}
         <p class="mutation-message" role="alert">{mutationMessage}</p>
       {/if}
       {#if credentialRoute}
@@ -859,7 +858,7 @@
                   <AccessManagement
                     projects={snapshot.catalog}
                     pending={mutationPending || loading || !accessAdministrationAvailable}
-                    message={mutationMessage}
+                    message={captureOpen ? undefined : mutationMessage}
                     onMutation={onAccessMutation}
                   />
                 {/key}
@@ -1032,7 +1031,7 @@
         {onMoveIssue}
         {onPatchMetadata}
         {onAddComment}
-        commentError={mutationMessage}
+        commentError={captureOpen ? undefined : mutationMessage}
         {selectedCommentUID}
         {returnComment}
         {onEditIssue}
@@ -1116,11 +1115,16 @@
     overflow-wrap: anywhere;
   }
 
+  :global(.no-projects .kit-empty-state__title) {
+    color: var(--text-secondary);
+    line-height: 1.5;
+  }
+
   /* The kata init line sits under New project, not beside it. */
   :global(.no-projects .kit-empty-state__actions) {
     flex-direction: column;
     align-items: center;
-    gap: var(--space-2);
+    gap: var(--space-4);
   }
   .no-projects-hint {
     margin: 0;
@@ -1142,27 +1146,42 @@
     white-space: nowrap;
   }
 
-  .header-action {
+  .quiet-button.header-action {
     display: inline-flex;
+    flex: 0 0 auto;
     align-items: center;
-    gap: var(--space-1);
-    white-space: nowrap;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
   }
 
-  .header-action.accent-button {
-    padding-inline: 2px;
+  .quiet-button.header-action:hover:not([aria-disabled='true']) {
+    background: var(--bg-surface-hover);
+    color: var(--text-primary);
+  }
+
+  .quiet-button[aria-disabled='true'] {
+    color: var(--text-muted);
+    cursor: not-allowed;
   }
 
   .accent-button {
     border: 1px solid var(--accent-blue);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     background: var(--accent-blue);
     color: var(--bg-surface);
-    min-height: 28px;
-    padding: 4px 10px;
+    height: 28px;
+    padding: 0 var(--space-5);
     font: inherit;
-    font-size: var(--font-size-sm);
+    font-size: var(--font-size-md);
     font-weight: 600;
+    line-height: 16px;
   }
 
   .accent-button:hover:not([aria-disabled='true']) {

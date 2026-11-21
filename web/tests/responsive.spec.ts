@@ -18,9 +18,11 @@ test('a long server name leaves New task reachable', async ({ page, kata }) => {
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 800 })
     if (width === 390) await page.getByRole('button', { name: 'Open navigation' }).click()
-    const sidebar = page.locator('.sidebar-header')
-    const task = page.getByRole('button', { name: 'New task' })
-    await expect(task).toHaveText('New task')
+    const sidebar =
+      width === 390
+        ? page.getByRole('dialog', { name: 'Navigation' }).locator('.sidebar-header')
+        : page.locator('.desktop-navigation .sidebar-header')
+    const task = sidebar.getByRole('button', { name: 'New task' })
     const bounds = (await sidebar.boundingBox())!
     const button = (await task.boundingBox())!
     expect(button.x + button.width).toBeLessThanOrEqual(bounds.x + bounds.width)
@@ -75,21 +77,30 @@ test('mobile navigation stays out of the task flow until opened', async ({ page,
   await page.getByRole('button', { name: 'Open navigation' }).click()
   const navigation = page.getByRole('dialog', { name: 'Navigation' })
   await expect(navigation).toBeVisible()
-  await expect(page.locator('[data-testid="daemon-chip"]')).toHaveCount(1)
+  await expect(navigation.locator('[data-testid="daemon-chip"]')).toHaveCount(1)
   await navigation.getByRole('button', { name: 'Today' }).click()
   await expect(navigation).toBeHidden()
   await expect(page).toHaveURL(/view=today/)
 })
 
-test('resizing an open navigation drawer restores desktop navigation', async ({ page, kata }) => {
-  await page.setViewportSize({ width: 600, height: 684 })
+test('resizing an open drawer restores desktop navigation and its project state', async ({
+  page,
+  kata,
+}) => {
+  await page.setViewportSize({ width: 1000, height: 684 })
   await kata.launch(page)
+  const projects = page.getByRole('button', { name: /Projects/ })
+  await projects.click()
+  await expect(projects).toHaveAttribute('aria-expanded', 'false')
+
+  await page.setViewportSize({ width: 600, height: 684 })
   await page.getByRole('button', { name: 'Open navigation' }).click()
   await expect(page.getByRole('dialog', { name: 'Navigation' })).toBeVisible()
-
   await page.setViewportSize({ width: 1000, height: 684 })
+
   await expect(page.getByRole('dialog', { name: 'Navigation' })).toBeHidden()
   await expect(page.getByRole('button', { name: 'Today' })).toBeVisible()
+  await expect(projects).toHaveAttribute('aria-expanded', 'false')
 })
 
 test('Appearance changes the sidebar color', async ({ page, kata }) => {
@@ -128,12 +139,7 @@ test('task filters stay inside a narrow list pane without overlapping', async ({
     if (!tableBody) throw new Error('Task list is missing')
     const controls = Array.from(toolbar.querySelectorAll('input, button'), (element) => {
       const rect = element.getBoundingClientRect()
-      return {
-        left: rect.left,
-        right: rect.right,
-        top: rect.top,
-        bottom: rect.bottom,
-      }
+      return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom }
     })
     const overlaps = controls.some((control, index) =>
       controls
