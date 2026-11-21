@@ -109,7 +109,7 @@ func (w *federationPollWaits) admit(ctx context.Context, broadcaster *EventBroad
 	signed := holdsFederationControlAdmission(ctx)
 	w.mu.Lock()
 	if w.total >= w.maxTotal ||
-		w.byCredential[enrollmentID] >= federationPollMaxWaitersPerCredential ||
+		w.byCredential[enrollmentID] >= min(federationPollMaxWaitersPerCredential, w.maxTotal/2) ||
 		(signed && w.signed >= w.maxSigned) {
 		w.mu.Unlock()
 		return nil, false

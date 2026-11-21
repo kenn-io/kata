@@ -65,6 +65,28 @@ func TestFederationPollWaitsBoundEveryHeldPoll(t *testing.T) {
 	}
 }
 
+func TestFederationPollWaitsReserveCapacityForOtherCredentials(t *testing.T) {
+	for _, tc := range []struct{ cpus, limit int }{{1, 16}, {8, 32}} {
+		t.Run(fmt.Sprintf("%d CPUs", tc.cpus), func(t *testing.T) {
+			waits := newFederationPollWaits(16, tc.cpus)
+			broadcaster := NewEventBroadcaster()
+			for projectID := range int64(tc.limit) {
+				waiter, ok := waits.admit(t.Context(), broadcaster, 1, db.Project{ID: projectID + 1})
+				require.True(t, ok)
+				t.Cleanup(waiter.release)
+			}
+			extra, ok := waits.admit(t.Context(), broadcaster, 1, db.Project{ID: 100})
+			if ok {
+				extra.release()
+			}
+			assert.False(t, ok)
+			other, ok := waits.admit(t.Context(), broadcaster, 2, db.Project{ID: 101})
+			require.True(t, ok)
+			other.release()
+		})
+	}
+}
+
 func TestFederationPollWakeIgnoresItsOwnInstance(t *testing.T) {
 	waits := newFederationPollWaits(16, 8)
 	woken, unsubscribe := waits.remote.subscribe(SubFilter{})
