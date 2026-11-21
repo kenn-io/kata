@@ -40,6 +40,7 @@ describe('KataDaemonSwitcher', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }))
     expect(screen.getByRole('menu', { name: 'Configured Kata daemons' })).not.toBeNull()
+    expect(screen.queryByText('Local, no sign-in')).toBeNull()
     expect(screen.getByText('needs auth')).not.toBeNull()
     expect(screen.getByText('update required')).not.toBeNull()
     await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
@@ -88,6 +89,8 @@ describe('KataDaemonSwitcher', () => {
           { id: 'remote', url: '', default: false, auth: 'none', health: 'connected' },
         ],
         activeId: 'local',
+        account: 'Example account',
+        credential: 'Read-only',
         onSelect,
         onOpen,
       },
@@ -96,10 +99,13 @@ describe('KataDaemonSwitcher', () => {
     trigger.focus()
     await fireEvent.keyDown(trigger, { key: 'ArrowDown' })
     const first = await screen.findByRole('menuitemradio', { name: /local/ })
+    expect(screen.getByText('Example account')).not.toBeNull()
+    expect(screen.getByText('Read-only')).not.toBeNull()
     await fireEvent.keyDown(first, { key: 'ArrowDown' })
     expect(document.activeElement).toBe(screen.getByRole('menuitemradio', { name: /remote/ }))
     await fireEvent.keyDown(document.activeElement!, { key: 'Escape' })
     expect(document.activeElement).toBe(trigger)
+    expect(screen.queryByRole('menuitemradio')).toBeNull()
     expect(onOpen).toHaveBeenCalledOnce()
     expect(onSelect).not.toHaveBeenCalled()
   })

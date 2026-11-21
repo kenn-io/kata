@@ -309,7 +309,7 @@
   }
 
   .sidebar-header {
-    height: 48px;
+    height: var(--layout-header-h);
     flex: none;
     display: flex;
     align-items: center;
@@ -326,7 +326,7 @@
   .project-select-button,
   .project-create-button {
     width: 100%;
-    min-height: 34px;
+    min-height: var(--nav-item-h);
     border: 0;
     border-radius: var(--radius-md);
     background: transparent;
@@ -397,7 +397,7 @@
   }
 
   .project-select-button {
-    min-height: 26px;
+    min-height: var(--nav-subitem-h);
   }
 
   .project-mark {

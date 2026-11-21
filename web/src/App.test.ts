@@ -765,6 +765,7 @@ describe('App', () => {
     render(App)
 
     expect(screen.getByRole('main', { name: 'Kata' })).not.toBeNull()
+    expect(screen.getByRole('heading', { name: 'Loading…' })).not.toBeNull()
     expect(screen.getByRole('status').textContent).toBe('Loading…')
   })
 

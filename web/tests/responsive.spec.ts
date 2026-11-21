@@ -38,9 +38,68 @@ test('mobile navigation stays out of the task flow until opened', async ({ page,
   await page.getByRole('button', { name: 'Open navigation' }).click()
   const navigation = page.getByRole('dialog', { name: 'Navigation' })
   await expect(navigation).toBeVisible()
+  await expect(page.locator('[data-testid="daemon-chip"]')).toHaveCount(1)
+  await page.setViewportSize({ width: 853, height: 684 })
+  expect((await page.locator('.kata-main').boundingBox())!.width).toBeGreaterThan(500)
+  await page.setViewportSize({ width: 600, height: 684 })
   await navigation.getByRole('button', { name: 'Today' }).click()
   await expect(navigation).toBeHidden()
   await expect(page).toHaveURL(/view=today/)
+})
+
+test('New task closes mobile navigation before choosing an Inbox', async ({ page, kata }) => {
+  await page.setViewportSize({ width: 600, height: 684 })
+  await kata.launch(page)
+
+  await page.getByRole('button', { name: 'Open navigation' }).click()
+  const navigation = page.getByRole('dialog', { name: 'Navigation' })
+  await navigation.getByRole('button', { name: 'New task' }).click()
+
+  await expect(navigation).toBeHidden()
+  await expect(page.getByRole('dialog', { name: 'Choose Inbox project' })).toBeVisible()
+})
+
+test('sidebar navigation rows keep their height on hover', async ({ page, kata }) => {
+  await page.setViewportSize({ width: 1440, height: 800 })
+  await kata.launch(page)
+
+  const today = page.getByRole('button', { name: /^Today(?: \d+)?$/ })
+  const before = (await today.boundingBox())!
+  await today.hover()
+  const after = (await today.boundingBox())!
+
+  expect(after.height).toBe(before.height)
+})
+
+test('Appearance changes and keeps the workspace theme', async ({ page, kata }) => {
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await kata.launch(page)
+
+  const sidebarColor = () =>
+    page.locator('.kata-sidebar').evaluate((element) => getComputedStyle(element).backgroundColor)
+  const darkColor = await sidebarColor()
+  expect(await page.locator('html').evaluate((element) => element.classList.contains('dark'))).toBe(
+    true,
+  )
+
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await page.getByRole('radio', { name: 'Light', exact: true }).click()
+  await expect
+    .poll(() => page.locator('html').evaluate((element) => element.classList.contains('dark')))
+    .toBe(false)
+  const lightColor = await sidebarColor()
+  expect(lightColor).not.toBe(darkColor)
+
+  await page.reload()
+  await expect
+    .poll(() => page.locator('html').evaluate((element) => element.classList.contains('dark')))
+    .toBe(false)
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await page.getByRole('radio', { name: 'Dark', exact: true }).click()
+  await expect
+    .poll(() => page.locator('html').evaluate((element) => element.classList.contains('dark')))
+    .toBe(true)
+  await expect.poll(sidebarColor).toBe(darkColor)
 })
 
 test('task filters stay inside a narrow list pane without overlapping', async ({ page, kata }) => {

@@ -501,6 +501,7 @@
 
   function beginNewTask(): void {
     if (newTaskBlockedReason) return
+    mobileNavigationOpen = false
     if (scopedAuthority) {
       captureOpen = true
       return
@@ -781,7 +782,9 @@
   {/if}
   <div class="kata-layout" aria-busy={loading}>
     <div class="desktop-navigation">
-      {@render navigationSidebar()}
+      {#if !mobileNavigationOpen}
+        {@render navigationSidebar()}
+      {/if}
     </div>
 
     <div class="kata-main">
@@ -837,7 +840,7 @@
           </SearchSettings>
         {/key}
       {:else}
-        {#if mutationMessage}
+        {#if mutationMessage && !captureOpen}
           <p class="mutation-message" role="alert">{mutationMessage}</p>
         {/if}
         <SplitLayout

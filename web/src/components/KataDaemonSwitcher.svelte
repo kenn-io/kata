@@ -28,7 +28,7 @@
     activeStatusLabel,
     activeStatusTone,
     disabled = false,
-    account = 'Local, no sign-in',
+    account,
     credential,
     onSelect,
     onOpen = () => {},
@@ -68,12 +68,14 @@
     {/snippet}
   </MenuTrigger>
   <MenuContent ariaLabel="Configured Kata daemons" class="daemon-menu">
-    <dl class="account">
-      <dt>Account</dt>
-      <dd>{account}</dd>
-      {#if credential}<dt>Credential</dt>
-        <dd>{credential}</dd>{/if}
-    </dl>
+    {#if account}
+      <dl class="account">
+        <dt>Account</dt>
+        <dd>{account}</dd>
+        {#if credential}<dt>Credential</dt>
+          <dd>{credential}</dd>{/if}
+      </dl>
+    {/if}
     <MenuRadioGroup
       value={activeId ?? ''}
       onchange={(id) => {

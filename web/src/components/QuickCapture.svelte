@@ -27,6 +27,7 @@
   let input = $state<HTMLInputElement>()
   let title = $state('')
   let pending = $state(false)
+  let error = $state<string>()
   let lastDraftFenceGeneration = $state<number | null>(null)
 
   $effect(() => {
@@ -37,6 +38,7 @@
     if (!open) {
       title = ''
       pending = false
+      error = undefined
     }
   })
 
@@ -50,16 +52,21 @@
     lastDraftFenceGeneration = nextGeneration
     title = ''
     pending = false
+    error = undefined
   })
 
   async function submit(): Promise<void> {
     const value = title.trim()
     if (!value || pending || disabled) return
     pending = true
+    error = undefined
     try {
       await onSubmit(value)
       title = ''
       onClose()
+    } catch (reason) {
+      error = reason instanceof Error ? reason.message : 'Could not create task.'
+      throw reason
     } finally {
       pending = false
     }
@@ -81,6 +88,7 @@
       void submit()
     }}
   >
+    {#if error}<p class="capture-error" role="alert">{error}</p>{/if}
     <input
       bind:this={input}
       class="capture-input"
@@ -126,6 +134,11 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+  }
+
+  .capture-error {
+    color: var(--accent-red);
+    font-size: var(--font-size-sm);
   }
 
   .capture-input {

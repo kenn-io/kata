@@ -1483,7 +1483,7 @@
         {/if}
       </StatusPage>
     {:else}
-      <p role="status">Loading…</p>
+      <div role="status"><h2 class="loading-heading">Loading…</h2></div>
     {/if}
   {:else if route.kind === 'route-error'}
     <RouteError
