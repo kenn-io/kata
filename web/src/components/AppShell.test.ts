@@ -337,26 +337,6 @@ describe('AppShell', () => {
     }
   })
 
-  test('keeps the healthy workspace toolbar free of a connection banner', () => {
-    render(AppShell, {
-      props: {
-        route: {
-          kind: 'kata',
-          view: 'all-open',
-          graph: false,
-          filters: { status: [], owner: [], label: [], relationship: [] },
-        },
-        snapshot: snapshot(),
-        loading: false,
-        ...mutationProps(),
-        onNavigate: vi.fn(),
-        onCreateProject: vi.fn(async () => ({ changed: true })),
-      },
-    })
-
-    expect(screen.queryByRole('status', { name: 'Active connection' })).toBeNull()
-  })
-
   test.each([
     ['static_token', 'Shared daemon token'],
     ['bootstrap', 'Bootstrap token'],
@@ -1386,7 +1366,6 @@ describe('AppShell', () => {
 
   test('renders Settings as a daemon screen for the remote host and returns to issues', async () => {
     const onBackFromCredentials = vi.fn()
-    const onPreferencesChange = vi.fn()
     setGeneratedFetch(
       vi.fn(async () =>
         Response.json({
@@ -1427,9 +1406,9 @@ describe('AppShell', () => {
         ],
         activeDaemonID: 'team',
         canAdministerDaemon: false,
-        onPreferencesChange,
         onBackFromCredentials,
         ...mutationProps(),
+        mutationMessage: 'validation: Action refused',
         onNavigate: vi.fn(),
         onCreateProject: vi.fn(async () => ({ changed: true })),
       },
@@ -1438,9 +1417,7 @@ describe('AppShell', () => {
     expect(screen.getByRole('heading', { name: 'Settings' })).not.toBeNull()
     expect(await screen.findByText(/kata\.example\.com/)).not.toBeNull()
     expect(screen.queryByRole('button', { name: /layout/ })).toBeNull()
-
-    await fireEvent.click(screen.getByRole('radio', { name: 'Light' }))
-    expect(onPreferencesChange).toHaveBeenCalledWith(expect.objectContaining({ theme: 'light' }))
+    expect(screen.getByRole('alert').textContent).toBe('validation: Action refused')
 
     await fireEvent.click(screen.getByRole('button', { name: 'Back to issues' }))
     expect(onBackFromCredentials).toHaveBeenCalledOnce()
@@ -1742,7 +1719,7 @@ describe('AppShell', () => {
       history: [],
     }
     const onPreferencesChange = vi.fn()
-    render(AppShell, {
+    const view = render(AppShell, {
       props: {
         route: {
           kind: 'kata',
@@ -1771,10 +1748,26 @@ describe('AppShell', () => {
     expect(onPreferencesChange).toHaveBeenCalledWith(
       expect.objectContaining({ splitDirection: 'vertical', splitSize: 420 }),
     )
+    await view.rerender({
+      route: {
+        kind: 'kata',
+        view: 'settings',
+        graph: false,
+        filters: { status: [], owner: [], label: [], relationship: [] },
+      },
+    })
+    await fireEvent.click(screen.getByRole('radio', { name: 'Light' }))
+    expect(onPreferencesChange).toHaveBeenCalledWith(expect.objectContaining({ theme: 'light' }))
   })
 
   test('quick-captures a new task through the ported workspace action', async () => {
     const onCreateIssue = vi.fn(async () => {})
+    vi.stubGlobal('matchMedia', (media: string) => ({
+      matches: true,
+      media,
+      addEventListener() {},
+      removeEventListener() {},
+    }))
     const accepted = snapshot()
     accepted.catalog![0]!.project.metadata = {
       ...(accepted.catalog![0]!.project.metadata ?? {}),
@@ -1796,7 +1789,10 @@ describe('AppShell', () => {
       },
     })
 
-    await fireEvent.click(within(container).getByRole('button', { name: 'New task' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Open navigation' }))
+    const drawer = screen.getByRole('dialog', { name: 'Navigation' })
+    await fireEvent.click(within(drawer).getByRole('button', { name: 'New task' }))
+    expect(screen.queryByRole('dialog', { name: 'Navigation' })).toBeNull()
     await fireEvent.input(within(container).getByRole('textbox', { name: 'Quick capture' }), {
       target: { value: 'New example task' },
     })

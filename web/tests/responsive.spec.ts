@@ -69,19 +69,6 @@ test('mobile navigation stays out of the task flow until opened', async ({ page,
   await expect(page).toHaveURL(/view=today/)
 })
 
-test('New task closes mobile navigation before capture', async ({ page, kata }) => {
-  await page.setViewportSize({ width: 600, height: 684 })
-  await kata.launch(page)
-
-  await page.getByRole('button', { name: 'Open navigation' }).click()
-  const navigation = page.getByRole('dialog', { name: 'Navigation' })
-  await navigation.getByRole('button', { name: 'New task' }).click()
-
-  await expect(navigation).toBeHidden()
-  const capture = page.getByRole('dialog', { name: 'New task' })
-  await expect(capture.getByRole('textbox', { name: 'Quick capture' })).toBeVisible()
-})
-
 test('resizing an open navigation drawer restores desktop navigation', async ({ page, kata }) => {
   await page.setViewportSize({ width: 600, height: 684 })
   await kata.launch(page)

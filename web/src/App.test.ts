@@ -2032,29 +2032,12 @@ describe('App', () => {
     )
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      vi.fn(async (input: RequestInfo | URL) => {
         const target = new URL(
           input instanceof Request ? input.url : String(input),
           window.location.origin,
         )
         if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
-        if (target.pathname === '/api/v1/ui/session/login') {
-          expect(JSON.parse(String(init?.body))).toEqual({
-            token: 'example-token',
-            return_path: '/kata?view=today',
-          })
-          return new Response(
-            JSON.stringify({
-              session: 'new-session',
-              csrf: 'new-csrf',
-              return_path: '/kata?view=today',
-              writable: true,
-              updates: 'poll',
-              actor_policy: 'identity',
-            }),
-            { status: 200 },
-          )
-        }
         if (
           target.pathname.endsWith('/api/v1/ui/references') &&
           sessionStorage.getItem('kata.web.session.v1')?.includes('revoked-session')
@@ -2074,30 +2057,47 @@ describe('App', () => {
     render(App)
 
     expect(await screen.findByRole('form', { name: 'Log in' })).not.toBeNull()
-    expect
-      .soft(screen.queryByRole('button', { name: 'Switch Kata daemon: example-local' }))
-      .not.toBeNull()
+    expect(
+      screen.queryByRole('button', { name: 'Switch Kata daemon: example-local' }),
+    ).not.toBeNull()
     expect(sessionStorage.getItem('kata.web.session.v1')).toBeNull()
     expect(screen.queryByRole('region', { name: 'Kata workspace' })).toBeNull()
-    await fireEvent.input(screen.getByLabelText('Token'), { target: { value: 'example-token' } })
-    await fireEvent.click(screen.getByRole('button', { name: 'Log in' }))
-    expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
-    expect(window.location.search).toBe('?view=today')
   })
 
-  it('shows configured-origin login without probing authority or losing the requested route', () => {
-    const fetcher = vi.fn()
+  it('returns to the requested route after configured-origin login', async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const target = new URL(
+        input instanceof Request ? input.url : String(input),
+        window.location.origin,
+      )
+      if (target.pathname === '/api/v1/ui/session/login') {
+        expect(JSON.parse(String(init?.body))).toEqual({
+          token: 'example-token',
+          return_path: '/kata?view=today',
+        })
+        return Response.json({
+          session: 'new-session',
+          csrf: 'new-csrf',
+          return_path: '/kata?view=today',
+          writable: true,
+          updates: 'poll',
+          actor_policy: 'identity',
+        })
+      }
+      if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+      return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+    })
     vi.stubGlobal('fetch', fetcher)
-    history.replaceState(
-      null,
-      '',
-      '/kata#login=1&return_path=%2Fkata%3Fscope%3D01HZNQ7VFPK1XGD8R5MABCD4EX%26label%3Dready',
-    )
+    history.replaceState(null, '', '/kata#login=1&return_path=%2Fkata%3Fview%3Dtoday')
     render(App)
 
     expect(screen.getByRole('form', { name: 'Log in' })).not.toBeNull()
     expect(fetcher).not.toHaveBeenCalled()
     expect(window.location.hash).toBe('')
+    await fireEvent.input(screen.getByLabelText('Token'), { target: { value: 'example-token' } })
+    await fireEvent.click(screen.getByRole('button', { name: 'Log in' }))
+    expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+    expect(window.location.search).toBe('?view=today')
   })
 
   it('recovers a short issue route through complete issue authority', async () => {
@@ -4416,51 +4416,6 @@ describe('App', () => {
     })
   })
 
-  it('shows a task creation error in Settings', async () => {
-    const rejections: unknown[] = []
-    const onRejection = (error: unknown) => rejections.push(error)
-    process.on('unhandledRejection', onRejection)
-    onTestFinished(() => process.off('unhandledRejection', onRejection))
-    history.replaceState(null, '', '/kata?view=settings#direct=1')
-    sessionStorage.setItem(
-      'kata.web.session.v1',
-      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
-    )
-    const data = snapshot()
-    data.catalog[0]!.project.metadata.role = 'inbox'
-    let writes = 0
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const request = requestOf(input, init)
-        const path = new URL(request.url).pathname
-        if (request.method === 'POST' && path.endsWith('/issues')) {
-          writes += 1
-          return Response.json({ code: 'validation', detail: 'Action refused' }, { status: 422 })
-        }
-        if (path === '/api/v1/ui/telemetry') return telemetryAccepted()
-        if (path === '/api/v1/ui/daemons') return Response.json(daemonRoster())
-        if (path.endsWith('/references')) return references()
-        return Response.json(data, { headers: { ETag: '"snapshot-1"' } })
-      }),
-    )
-
-    render(App)
-    await fireEvent.click(await screen.findByRole('button', { name: 'New task' }))
-    await fireEvent.input(await screen.findByRole('textbox', { name: 'Quick capture' }), {
-      target: { value: 'Example task' },
-    })
-    await fireEvent.click(screen.getByRole('button', { name: 'Capture' }))
-    await waitFor(() => expect(writes).toBe(1))
-    await waitFor(() => expect(rejections).toEqual([new Error('validation: Action refused')]))
-    expect(screen.getByRole('dialog', { name: 'New task' })).not.toBeNull()
-    expect((screen.getByRole('textbox', { name: 'Quick capture' }) as HTMLInputElement).value).toBe(
-      'Example task',
-    )
-    await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-    expect((await screen.findByRole('alert')).textContent).toContain('Action refused')
-  })
-
   describe('completed issue action telemetry', () => {
     for (const action of ['create', 'close'] as const) {
       it.each(
@@ -4576,8 +4531,13 @@ describe('App', () => {
           return
         }
         await waitFor(() => expect(writes).toBe(1))
-        if (action === 'create' && refused)
+        if (action === 'create' && refused) {
           await waitFor(() => expect(rejections).toEqual([new Error('validation: Action refused')]))
+          expect(screen.getByRole('dialog', { name: 'New task' })).not.toBeNull()
+          expect(
+            (screen.getByRole('textbox', { name: 'Quick capture' }) as HTMLInputElement).value,
+          ).toBe('Example task')
+        }
         if (refused) {
           expect(await screen.findAllByText('validation: Action refused')).toHaveLength(1)
           await waitFor(() =>
