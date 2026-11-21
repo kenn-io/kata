@@ -82,8 +82,8 @@ type quietPollHub struct {
 	inserted  int
 }
 
-// newQuietPollHub seeds a quiet federated project with the given number of issues and a
-// busy one, and catches a poll cursor up to the quiet project's feed.
+// newQuietPollHub seeds a quiet federated project with the given number of
+// issues and a busy one, and catches a poll cursor up to the quiet project's feed.
 func newQuietPollHub(t *testing.T, store db.Storage, issues int) *quietPollHub {
 	t.Helper()
 	ctx := t.Context()
@@ -104,6 +104,9 @@ func newQuietPollHub(t *testing.T, store db.Storage, issues int) *quietPollHub {
 	return hub
 }
 
+// appendQuietIssues seeds issues without CreateIssue's per-issue cost. Like
+// appendUnrelatedEvents, it uses a transaction; it writes one issue.updated
+// event per issue. Keep its inserts in step with the issues and events schema.
 func appendQuietIssues(t *testing.T, store db.Storage, project db.Project, n int) {
 	t.Helper()
 	ctx := t.Context()
