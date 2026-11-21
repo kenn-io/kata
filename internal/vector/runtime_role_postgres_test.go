@@ -45,7 +45,7 @@ func TestPostgresRuntimeRoleSwitchesModelsWithoutCreate(t *testing.T) {
 	release, err := ix.AcquireReconcilerLease(ctx)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, release()) })
-	_, err = ix.RefreshMirror(ctx, owner, nil)
+	_, err = ix.RefreshMirror(ctx, owner)
 	require.NoError(t, err)
 	encode := func(_ context.Context, texts []string) ([][]float32, error) {
 		out := make([][]float32, len(texts))

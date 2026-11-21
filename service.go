@@ -563,9 +563,8 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	}
 	federationRetries := federation.NewSyncRetries()
 	serverConfig := daemon.ServerConfig{
-		EmbeddingProjectAllowed: cfg.EmbeddingProjectAllowed,
-		DB:                      store,
-		Embedder:                embedder, VectorIndex: index, EmbeddingUnavailableReason: unavailable,
+		DB:       store,
+		Embedder: embedder, VectorIndex: index, EmbeddingUnavailableReason: unavailable,
 		Docbank:         docbankClient,
 		DocbankFolder:   docbankConfig.Folder,
 		WebHandler:      cfg.WebHandler,
@@ -581,6 +580,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		FederationHubClient:       federation.CredentialHTTPClient,
 		FederationSyncRetry:       federationRetries.FederationSyncRetry,
 		DisableFederationRebind:   true,
+		EmbeddingProjectAllowed:   cfg.EmbeddingProjectAllowed,
 		GitHubSyncFetcher:         gitHubSyncFetcher,
 		GitHubSyncProgress:        gitHubSyncProgress,
 		GitHubSyncConfig:          gitHubSyncConfig,

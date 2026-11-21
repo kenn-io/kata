@@ -19,7 +19,11 @@ const mirrorPageSize = 500
 // endpoint, and deleting an issue must stop that outbound flow. A restore
 // puts the issue back in the feed, re-mirroring and re-embedding it. It
 // returns the number of rows written or removed.
-func (ix *Index) RefreshMirror(ctx context.Context, store db.Storage, allowed func(context.Context, string) (bool, error)) (int, error) {
+func (ix *Index) RefreshMirror(ctx context.Context, store db.Storage, scope ...func(context.Context, string) (bool, error)) (int, error) {
+	var allowed func(context.Context, string) (bool, error)
+	if len(scope) > 0 {
+		allowed = scope[0]
+	}
 	if ix.pg != nil {
 		return ix.pg.refreshMirror(ctx, store, allowed)
 	}

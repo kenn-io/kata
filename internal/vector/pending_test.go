@@ -20,7 +20,7 @@ func TestPendingForGenerationCursor(t *testing.T) {
 		require.NoError(t, err)
 		issues = append(issues, issue)
 	}
-	_, err = idx.RefreshMirror(ctx, store, nil)
+	_, err = idx.RefreshMirror(ctx, store)
 	require.NoError(t, err)
 	gen := kitvec.Generation{Model: "example", Dimensions: 2}
 	key := gen.Fingerprint()

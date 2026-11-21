@@ -84,7 +84,7 @@ func TestEmbeddingArtifactFinishingAfterDisconnectFence(t *testing.T) {
 					require.NoError(t, source.AckRelayDeliveries(ctx, relayConfig.BindingUID, last.Epoch, stream, last.Sequence, last.Digest))
 				}
 			}
-			_, err = idx.RefreshMirror(ctx, source, nil)
+			_, err = idx.RefreshMirror(ctx, source)
 			require.NoError(t, err)
 			client, err := embedding.New(embedding.Config{BaseURL: "https://encoder.example/v1", Model: "example-model", Dims: 2})
 			require.NoError(t, err)
@@ -116,7 +116,7 @@ func TestEmbeddingArtifactFinishingAfterDisconnectFence(t *testing.T) {
 			}
 			done := make(chan error, 1)
 			go func() {
-				_, err := idx.FillWithArtifacts(ctx, key, source, recipe, encode, 0, nil, nil, nil)
+				_, err := idx.FillWithArtifacts(ctx, key, source, recipe, encode, 0, nil, nil)
 				done <- err
 			}()
 			select {

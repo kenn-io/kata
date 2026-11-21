@@ -30,7 +30,7 @@ func TestRefreshMirrorMatchesLiveFeedAcrossBackends(t *testing.T) {
 				issues[i], _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: fmt.Sprintf("task %d", i), Body: "original body", Author: "tester"})
 				require.NoError(t, err)
 			}
-			changed, err := idx.RefreshMirror(ctx, store, nil)
+			changed, err := idx.RefreshMirror(ctx, store)
 			require.NoError(t, err)
 			require.Equal(t, 506, changed)
 			initial, err := idx.MirrorRowsForTest(ctx)
@@ -52,7 +52,7 @@ func TestRefreshMirrorMatchesLiveFeedAcrossBackends(t *testing.T) {
 
 			_, _, _, err = store.SoftDeleteIssue(ctx, issues[504].ID, "tester")
 			require.NoError(t, err)
-			changed, err = idx.RefreshMirror(ctx, store, nil)
+			changed, err = idx.RefreshMirror(ctx, store)
 			require.NoError(t, err)
 			require.Equal(t, 1, changed)
 			_, _, _, err = store.RestoreIssue(ctx, issues[504].ID, "tester")
@@ -64,7 +64,7 @@ func TestRefreshMirrorMatchesLiveFeedAcrossBackends(t *testing.T) {
 			_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issues[501].ID, FromProjectID: project.ID, ToProjectID: target.ID, IfMatchRev: issues[501].Revision, Actor: "tester", Single: true})
 			require.NoError(t, err)
 
-			changed, err = idx.RefreshMirror(ctx, store, nil)
+			changed, err = idx.RefreshMirror(ctx, store)
 			require.NoError(t, err)
 			require.Equal(t, 4, changed)
 			want := make(map[string]vector.MirrorRowForTest)
@@ -87,7 +87,7 @@ func TestRefreshMirrorMatchesLiveFeedAcrossBackends(t *testing.T) {
 			count, err = idx.VectorCountForTest(ctx)
 			require.NoError(t, err)
 			require.Equal(t, 505, count, "the removed issue loses its stored vector")
-			changed, err = idx.RefreshMirror(ctx, store, nil)
+			changed, err = idx.RefreshMirror(ctx, store)
 			require.NoError(t, err)
 			require.Zero(t, changed)
 		})
@@ -107,7 +107,7 @@ func TestListIssueContentExcludesDirectSpokesAcrossBackends(t *testing.T) {
 			require.NoError(t, err)
 			localIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: local.ID, Title: "local issue", Author: "tester"})
 			require.NoError(t, err)
-			_, err = idx.RefreshMirror(ctx, store, nil)
+			_, err = idx.RefreshMirror(ctx, store)
 			require.NoError(t, err)
 			for _, enabled := range []bool{true, false} {
 				_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: shared.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: shared.UID, Enabled: enabled})
@@ -117,7 +117,7 @@ func TestListIssueContentExcludesDirectSpokesAcrossBackends(t *testing.T) {
 				require.Len(t, page, 1)
 				require.Equal(t, localIssue.UID, page[0].UID)
 			}
-			_, err = idx.RefreshMirror(ctx, store, nil)
+			_, err = idx.RefreshMirror(ctx, store)
 			require.NoError(t, err)
 			rows, err := idx.MirrorRowsForTest(ctx)
 			require.NoError(t, err)

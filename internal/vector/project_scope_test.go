@@ -72,7 +72,7 @@ func TestProjectAccessVectorCandidatesBeforeLimit(t *testing.T) {
 				_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: private.ID, Title: fmt.Sprintf("private-result-%d", i), Author: "member"})
 				require.NoError(t, err)
 			}
-			_, err = idx.RefreshMirror(ctx, store, nil)
+			_, err = idx.RefreshMirror(ctx, store)
 			require.NoError(t, err)
 			var queryCalls atomic.Int32
 			embedder := mappedEmbedder(t, func(string) []float32 { queryCalls.Add(1); return []float32{1, 0} })
@@ -154,7 +154,7 @@ func TestEmbeddingArtifactImportSemanticRetrieval(t *testing.T) {
 			require.NoError(t, err)
 			issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Received complete vectors", Body: strings.Repeat("界", 2500), Author: "member"})
 			require.NoError(t, err)
-			_, err = idx.RefreshMirror(ctx, store, nil)
+			_, err = idx.RefreshMirror(ctx, store)
 			require.NoError(t, err)
 			content, err := store.ListIssueContent(ctx, 0, 10)
 			require.NoError(t, err)

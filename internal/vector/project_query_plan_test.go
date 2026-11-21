@@ -36,7 +36,7 @@ func TestAuthorizedQueryUsesVec0KNNWithProjectPrefilter(t *testing.T) {
 		_, _, err = source.CreateIssue(ctx, db.CreateIssueParams{ProjectID: other.ID, Title: "closer", Author: "a"})
 		require.NoError(t, err)
 	}
-	_, err = ix.RefreshMirror(ctx, source, nil)
+	_, err = ix.RefreshMirror(ctx, source)
 	require.NoError(t, err)
 	gen := kitvec.Generation{Model: "m", Dimensions: 2}
 	key := gen.Fingerprint()

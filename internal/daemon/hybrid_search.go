@@ -15,19 +15,20 @@ import (
 )
 
 type hybridParams struct {
+	Status          string
+	ProjectID       int64
+	Query           string
+	Limit           int // requested result count
+	ProbeLimit      int // retrieval count, including any one-row pagination lookahead
+	IncludeDeleted  bool
+	Requested       string // raw mode param
+	Labels          []string
+	ExcludeLabels   []string
+	AllowedIssueIDs []int64
+	IssueScope      *db.APITokenScope
+	Hub             func(context.Context, hybridParams, int) ([]api.FederationSearchHit, bool, error)
+	// EmbeddingProjectAllowed gates query embedding for the searched project.
 	EmbeddingProjectAllowed func(context.Context, string) (bool, error)
-	Status                  string
-	ProjectID               int64
-	Query                   string
-	Limit                   int // requested result count
-	ProbeLimit              int // retrieval count, including any one-row pagination lookahead
-	IncludeDeleted          bool
-	Requested               string // raw mode param
-	Labels                  []string
-	ExcludeLabels           []string
-	AllowedIssueIDs         []int64
-	IssueScope              *db.APITokenScope
-	Hub                     func(context.Context, hybridParams, int) ([]api.FederationSearchHit, bool, error)
 }
 
 type hybridResult struct {

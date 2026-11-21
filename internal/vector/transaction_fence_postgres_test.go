@@ -21,7 +21,7 @@ func TestPostgresReconcilerWritesHonorTransactionFence(t *testing.T) {
 	require.NoError(t, err)
 	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "first issue", Author: "user-a"})
 	require.NoError(t, err)
-	_, err = idx.RefreshMirror(ctx, store, nil)
+	_, err = idx.RefreshMirror(ctx, store)
 	require.NoError(t, err)
 	generation := kitvec.Generation{Model: "example", Dimensions: 2}
 	require.NoError(t, idx.EnsureBuilding(ctx, "first", generation))
@@ -33,7 +33,7 @@ func TestPostgresReconcilerWritesHonorTransactionFence(t *testing.T) {
 	fenced := db.WithTransactionFence(ctx, func(context.Context, db.Transaction) error { return denied })
 	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "second issue", Author: "user-a"})
 	require.NoError(t, err)
-	_, err = idx.RefreshMirror(fenced, store, nil)
+	_, err = idx.RefreshMirror(fenced, store)
 	require.ErrorIs(t, err, denied)
 	require.ErrorIs(t, idx.EnsureBuilding(fenced, "first", generation), denied, "an active generation still checks authority before the provider runs")
 	require.ErrorIs(t, idx.EnsureBuilding(fenced, "second", generation), denied, "Kit must reject a building generation without authority")
@@ -51,14 +51,14 @@ func TestPostgresReconcilerWritesHonorTransactionFence(t *testing.T) {
 	}
 	var fences atomic.Int32
 	counted := db.WithTransactionFence(ctx, func(context.Context, db.Transaction) error { fences.Add(1); return nil })
-	changed, err := idx.RefreshMirror(counted, store, nil)
+	changed, err := idx.RefreshMirror(counted, store)
 	require.NoError(t, err)
 	require.Equal(t, 505, changed)
 	require.EqualValues(t, 2, fences.Load(), "each upsert page is fenced")
 	_, err = pg.DB.ExecContext(ctx, `INSERT INTO issue_vector_mirror(issue_uid, project_uid, content, content_revision) SELECT 'stale-' || n, $1, 'stale', 1 FROM generate_series(1, 501) n`, project.UID)
 	require.NoError(t, err)
 	fences.Store(0)
-	changed, err = idx.RefreshMirror(counted, store, nil)
+	changed, err = idx.RefreshMirror(counted, store)
 	require.NoError(t, err)
 	require.Equal(t, 501, changed)
 	require.EqualValues(t, 2, fences.Load(), "each stale-delete page is fenced")
@@ -75,7 +75,7 @@ func TestPostgresCutOverReclaimsAlreadyRetiredGeneration(t *testing.T) {
 	require.NoError(t, err)
 	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "first issue", Author: "user-a"})
 	require.NoError(t, err)
-	_, err = idx.RefreshMirror(ctx, store, nil)
+	_, err = idx.RefreshMirror(ctx, store)
 	require.NoError(t, err)
 	a := kitvec.Generation{Model: "model-a", Dimensions: 2}
 	b := kitvec.Generation{Model: "model-b", Dimensions: 2}

@@ -16,8 +16,8 @@ import (
 
 // FillWithArtifacts uses the existing kit fill flow and local serialization.
 // Canonical artifacts are retained before backend-specific vector conversion.
-func (ix *Index) FillWithArtifacts(ctx context.Context, key string, source db.Storage, recipe embedding.ArtifactIdentity, enc kitvec.EncodeFunc, scanBatch int, batchOptions []kitvec.BatchOption, onDocument func(bool), allowed func(context.Context, string) (bool, error), eligibility ...func(context.Context, string) (bool, error)) (kitvec.FillStats, error) {
-	stats, _, err := ix.FillWithArtifactsDetailed(ctx, key, source, recipe, enc, scanBatch, batchOptions, onDocument, allowed, eligibility...)
+func (ix *Index) FillWithArtifacts(ctx context.Context, key string, source db.Storage, recipe embedding.ArtifactIdentity, enc kitvec.EncodeFunc, scanBatch int, batchOptions []kitvec.BatchOption, onDocument func(bool), eligibility ...func(context.Context, string) (bool, error)) (kitvec.FillStats, error) {
+	stats, _, err := ix.FillWithArtifactsDetailed(ctx, key, source, recipe, enc, scanBatch, batchOptions, onDocument, nil, eligibility...)
 	return stats, err
 }
 

@@ -61,7 +61,7 @@ func TestEmbeddingPreparedPageRechecksBeforePaidDispatch(t *testing.T) {
 					require.NoError(t, err)
 					issues = append(issues, issue)
 				}
-				_, err = ix.RefreshMirror(ctx, source, nil)
+				_, err = ix.RefreshMirror(ctx, source)
 				require.NoError(t, err)
 				var requests atomic.Int32
 				provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -115,7 +115,7 @@ func TestEmbeddingPreparedPageRechecksBeforePaidDispatch(t *testing.T) {
 					}
 					return !revoked, nil
 				}
-				_, err = ix.FillWithArtifacts(ctx, key, source, recipe, client.EncodeFunc(), 2, batchOptions, nil, nil, allowed)
+				_, err = ix.FillWithArtifacts(ctx, key, source, recipe, client.EncodeFunc(), 2, batchOptions, nil, allowed)
 				require.NoError(t, err, "a deferred document must not abort the fill")
 				require.GreaterOrEqual(t, checks, 2)
 				backlog, err := ix.Backlog(ctx, key)
@@ -127,14 +127,14 @@ func TestEmbeddingPreparedPageRechecksBeforePaidDispatch(t *testing.T) {
 				case strings.HasPrefix(mode, "edited"):
 					require.EqualValues(t, editedRequests, requests.Load(), "only the unchanged document is dispatched")
 					require.EqualValues(t, 1, backlog, "the edited document stays pending")
-					_, err = ix.RefreshMirror(ctx, source, nil)
+					_, err = ix.RefreshMirror(ctx, source)
 					require.NoError(t, err)
 					requests.Store(0)
 				default:
 					require.Zero(t, requests.Load(), "a prepared page must not dispatch already-received input")
 					require.Zero(t, backlog)
 				}
-				_, err = ix.FillWithArtifacts(ctx, key, source, recipe, client.EncodeFunc(), 2, batchOptions, nil, nil, func(context.Context, string) (bool, error) { return true, nil })
+				_, err = ix.FillWithArtifacts(ctx, key, source, recipe, client.EncodeFunc(), 2, batchOptions, nil, func(context.Context, string) (bool, error) { return true, nil })
 				require.NoError(t, err)
 				switch {
 				case strings.HasPrefix(mode, "received"):
@@ -189,7 +189,7 @@ func TestEmbeddingPreparedPageRevalidatesProjectAuthorityOncePerDispatchBatch(t 
 					})
 					require.NoError(t, err)
 				}
-				_, err = ix.RefreshMirror(ctx, source, nil)
+				_, err = ix.RefreshMirror(ctx, source)
 				require.NoError(t, err)
 				client, err := embedding.New(embedding.Config{BaseURL: "https://encoder.example/v1", Model: "example-model", Dims: 2})
 				require.NoError(t, err)
@@ -219,7 +219,7 @@ func TestEmbeddingPreparedPageRevalidatesProjectAuthorityOncePerDispatchBatch(t 
 					return vectors, nil
 				}
 
-				_, err = ix.FillWithArtifacts(ctx, key, source, recipe, encode, 2, options, nil, nil, eligible)
+				_, err = ix.FillWithArtifacts(ctx, key, source, recipe, encode, 2, options, nil, eligible)
 				require.NoError(t, err)
 				require.Equal(t, expectedDispatches, dispatches.Load())
 				// Preparing the page authorizes the shared project once for both
@@ -242,7 +242,7 @@ func TestEmbeddingArtifactDenialDefersDispatch(t *testing.T) {
 	require.NoError(t, err)
 	issue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Private text", Author: "member"})
 	require.NoError(t, err)
-	_, err = ix.RefreshMirror(ctx, source, nil)
+	_, err = ix.RefreshMirror(ctx, source)
 	require.NoError(t, err)
 	client, err := embedding.New(embedding.Config{BaseURL: "https://encoder.example/v1", Model: "example-model", Dims: 2})
 	require.NoError(t, err)
@@ -269,7 +269,7 @@ func TestEmbeddingArtifactDenialDefersDispatch(t *testing.T) {
 		dispatches++
 		return [][]float32{{1, 0}}, nil
 	}
-	_, err = ix.FillWithArtifacts(ctx, key, source, recipe, encode, 1, nil, nil, allowed, allowed)
+	_, _, err = ix.FillWithArtifactsDetailed(ctx, key, source, recipe, encode, 1, nil, nil, allowed, allowed)
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, checks, 3)
 	require.Zero(t, dispatches, "a denied artifact check must defer its document")

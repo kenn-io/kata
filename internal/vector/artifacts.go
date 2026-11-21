@@ -105,7 +105,11 @@ func (ix *Index) ArtifactRejected(digest string) bool {
 // ReconcileArtifacts reuses one bounded pending page before local fill. The
 // fill worker rechecks subsequent pages immediately before dispatch. Already
 // indexed documents cause no portable-byte reads or vector-index rewrites.
-func (ix *Index) ReconcileArtifacts(ctx context.Context, key string, source db.Storage, recipe embedding.ArtifactIdentity, allowed func(context.Context, string) (bool, error)) (int, error) {
+func (ix *Index) ReconcileArtifacts(ctx context.Context, key string, source db.Storage, recipe embedding.ArtifactIdentity, scope ...func(context.Context, string) (bool, error)) (int, error) {
+	var allowed func(context.Context, string) (bool, error)
+	if len(scope) > 0 {
+		allowed = scope[0]
+	}
 	exporter, ok := source.(db.EmbeddingArtifactExporter)
 	if !ok {
 		return 0, nil

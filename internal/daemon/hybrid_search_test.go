@@ -1035,7 +1035,7 @@ func TestVectorLegLabelFilterRetriesPastStaleInitialSQLiteWindow(t *testing.T) {
 	} else if !changed {
 		t.Fatal("fixture edit must advance the stale issue's content revision")
 	}
-	if _, err := idx.RefreshMirror(ctx, store, nil); err != nil {
+	if _, err := idx.RefreshMirror(ctx, store); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1395,7 +1395,7 @@ func TestSearchLabelCeilingProbeSurvivesStaleSQLiteVector(t *testing.T) {
 	} else if !changed {
 		t.Fatal("fixture edit must advance the stale issue's content revision")
 	}
-	if _, err := idx.RefreshMirror(ctx, store, nil); err != nil {
+	if _, err := idx.RefreshMirror(ctx, store); err != nil {
 		t.Fatal(err)
 	}
 

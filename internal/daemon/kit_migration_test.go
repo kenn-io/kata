@@ -27,7 +27,7 @@ func TestKitMigrationReusesPersistedEmbeddingsForIndexingAndServing(t *testing.T
 	path := filepath.Join(t.TempDir(), "vectors.db")
 	index, err := vector.Open(ctx, path)
 	require.NoError(t, err)
-	_, err = index.RefreshMirror(ctx, store, nil)
+	_, err = index.RefreshMirror(ctx, store)
 	require.NoError(t, err)
 	legacy := kitvec.Generation{Model: "example-model", Dimensions: 2, Params: map[string]string{"recipe": "2", "salt": "example-weights"}}
 	key := legacy.Fingerprint()
@@ -82,7 +82,7 @@ func TestKitMigrationReusesPersistedEmbeddingsForIndexingAndServing(t *testing.T
 	updated, _, changed, err := store.EditIssue(ctx, db.EditIssueParams{IssueID: issue.ID, Title: &updatedTitle, Actor: "example-author"})
 	require.NoError(t, err)
 	require.True(t, changed)
-	_, err = index.RefreshMirror(ctx, store, nil)
+	_, err = index.RefreshMirror(ctx, store)
 	require.NoError(t, err)
 	hits, err := index.Query(ctx, key, kitvec.Vector{1, 0}, 10)
 	require.NoError(t, err)

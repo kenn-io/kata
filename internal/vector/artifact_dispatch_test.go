@@ -52,7 +52,7 @@ func TestEmbeddingArtifactArrivalBeforeDispatch(t *testing.T) {
 			require.NoError(t, err)
 			issue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Complete received chunks", Body: strings.Repeat("界", 2500), Author: "member"})
 			require.NoError(t, err)
-			_, err = ix.RefreshMirror(ctx, source, nil)
+			_, err = ix.RefreshMirror(ctx, source)
 			require.NoError(t, err)
 			var requests atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -74,7 +74,7 @@ func TestEmbeddingArtifactArrivalBeforeDispatch(t *testing.T) {
 			require.NoError(t, err)
 			key := client.Generation().Fingerprint()
 			require.NoError(t, ix.EnsureBuilding(ctx, key, client.Generation()))
-			n, err := ix.ReconcileArtifacts(ctx, key, source, recipe, nil)
+			n, err := ix.ReconcileArtifacts(ctx, key, source, recipe)
 			require.NoError(t, err)
 			require.Zero(t, n, "no artifact exists during the initial reconciliation")
 			identity := recipe
@@ -99,7 +99,7 @@ func TestEmbeddingArtifactArrivalBeforeDispatch(t *testing.T) {
 				}
 				cursors = append(cursors, cursor)
 			})
-			_, err = ix.FillWithArtifacts(ctx, key, source, recipe, client.EncodeFunc(), 1, nil, nil, nil)
+			_, err = ix.FillWithArtifacts(ctx, key, source, recipe, client.EncodeFunc(), 1, nil, nil)
 			require.NoError(t, err)
 			require.True(t, arrived)
 			require.Equal(t, []string{"", issue.UID}, cursors, "a fully reused page advances the wrapper cursor")
@@ -112,7 +112,7 @@ func TestEmbeddingArtifactArrivalBeforeDispatch(t *testing.T) {
 			require.Len(t, hits, 1)
 			require.Equal(t, issue.UID, hits[0].Doc)
 			require.Equal(t, 1, hits[0].ChunkIndex)
-			reused, err := ix.ReconcileArtifacts(ctx, key, source, recipe, nil)
+			reused, err := ix.ReconcileArtifacts(ctx, key, source, recipe)
 			require.NoError(t, err)
 			require.Zero(t, reused, "an unchanged sweep must not rewrite current index chunks")
 		})
