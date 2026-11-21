@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-19
+last_edited: 2026-11-20
 ---
 
 # CLI reference
@@ -2338,6 +2338,10 @@ order. Returning from flat to nested starts with parents collapsed. In nested
 view, `space` or right arrow expands the selected parent, left arrow collapses
 it, and `E` toggles every parent in the current list. `E` expands all when any
 parent is collapsed, then collapses all when every parent is already expanded.
+`o` cycles the order of an expanded parent's children: topological (blockers
+before the issues they block, otherwise list order), temporal (list order),
+and priority (P0 first, unprioritized last, then most recently updated, the
+same order `kata next` uses).
 
 `PgUp` and `PgDn` page by the visible issue-list window. When a page lands on
 the first or final page, the cursor keeps its screen row; pressing the same page

@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-19
+last_edited: 2026-11-20
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -48,6 +48,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
   replacement queued by v0.19.0 through v0.23.0 can sync after the hub upgrade;
   an already-quarantined batch requires an [explicit retry](operations/federation.md#other-validation-quarantines).
 
+- Order an expanded parent's children by priority in `kata tui`: `o` now
+  cycles topological, temporal, and priority order. Priority order matches
+  `kata next`: highest priority first, unprioritized last, then most recently
+  updated.
 - Let a service manager own the local daemon. Set top-level `autostart = false`
   in `config.toml`, and Kata commands, including `kata daemon recover`, wait up
   to 30 seconds for the supervised daemon instead of starting their own. See
