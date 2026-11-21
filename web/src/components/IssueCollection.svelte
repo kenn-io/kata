@@ -29,6 +29,7 @@
   import ColumnPicker from './ColumnPicker.svelte'
   import {
     KATA_OPTIONAL_TASK_COLUMNS,
+    clampColumnWidth,
     loadKataTaskColumnVisibility,
     loadKataTaskColumnWidths,
     persistKataTaskColumnVisibility,
@@ -58,8 +59,6 @@
     scopedProjectName?: string | null
     projectView?: boolean
     detailBeside?: boolean
-    unfilteredTotal?: number
-    showFilteredTotal?: boolean
     splitDirection?: 'horizontal' | 'vertical'
     onSplitDirectionChange?: (direction: 'horizontal' | 'vertical') => void
     selectedIssueUID?: string | null
@@ -87,8 +86,6 @@
     scopedProjectName = null,
     projectView = false,
     detailBeside = false,
-    unfilteredTotal = undefined,
-    showFilteredTotal = false,
     splitDirection = 'horizontal',
     onSplitDirectionChange = () => {},
     selectedIssueUID = null,
@@ -199,9 +196,6 @@
   const visibleOptionalColumns = $derived(
     displayColumns.filter((column) => columnVisibility[column.id]),
   )
-  const projectMarkBesideTitle = $derived(
-    detailBeside && visibleOptionalColumns.some((column) => column.id === 'project'),
-  )
   type RenderedColumn =
     | { kind: 'task'; id: KataOptionalTaskColumn }
     | { kind: 'date' }
@@ -213,8 +207,7 @@
     }))
     return [
       ...taskColumns.filter((column) => column.id === 'id'),
-      // Beside an open task the project shrinks to its mark next to the title.
-      ...(projectMarkBesideTitle ? [] : taskColumns.filter((column) => column.id === 'project')),
+      ...taskColumns.filter((column) => column.id === 'project'),
       ...(dateView ? [{ kind: 'date' as const }] : []),
       ...(logbookView ? [{ kind: 'closed' as const }] : []),
       ...taskColumns.filter((column) => column.id !== 'id' && column.id !== 'project'),
@@ -229,6 +222,7 @@
   })
 
   function trackForColumn(layout: TaskGridLayout, column: KataOptionalTaskColumn): string | null {
+    if (column === 'project' && detailBeside) return '16px'
     const base =
       TASK_COLUMN_TRACKS[layout][column] ??
       (column === 'owner' && effectiveSort.key === 'owner' ? TASK_COLUMN_TRACKS.medium.owner : null)
@@ -263,6 +257,18 @@
 
   let expanded: Record<string, boolean> = $state({})
   let tableBody: HTMLDivElement | null = $state(null)
+  // The rows sit beside the list's reserved scrollbar gutter, so the controls
+  // above them step in by the same width to end where the rows end.
+  let scrollbarWidth = $state(0)
+  $effect(() => {
+    const body = tableBody
+    if (!body) return
+    const observer = new ResizeObserver(() => {
+      scrollbarWidth = body.offsetWidth - body.clientWidth
+    })
+    observer.observe(body)
+    return () => observer.disconnect()
+  })
   let lastResetGeneration = $state<number | null>(null)
   let temporaryRevealChain = $state<readonly KataTaskSummary[]>([])
   let revealOwnedExpansionUIDs = $state<ReadonlySet<string>>(new Set())
@@ -548,8 +554,7 @@
     event: SplitResizeEvent,
   ): void {
     const start = resizeStartWidths[column] ?? DEFAULT_COLUMN_WIDTHS[column]
-    const width = Math.round(Math.max(48, Math.min(480, start + event.delta)))
-    columnWidths = { ...columnWidths, [column]: width }
+    columnWidths = { ...columnWidths, [column]: clampColumnWidth(start + event.delta) }
   }
 
   function persistColumnWidth(
@@ -1075,7 +1080,11 @@
 
 <svelte:window onkeyup={handleWindowKeyup} onblur={handleWindowBlur} />
 
-<section class="issue-list" aria-label="Issues">
+<section
+  class="issue-list"
+  aria-label="Issues"
+  style:--list-scrollbar-width={`${scrollbarWidth}px`}
+>
   <div class="pane-header" class:empty-header={!!empty}>
     {#if empty}
       <PageHeader level={2} title={viewTitle(currentView)} />
@@ -1083,11 +1092,7 @@
       <PageHeader level={2} title={viewTitle(currentView)}>
         {#snippet trailing()}
           <span class="count">
-            {#if showFilteredTotal && unfilteredTotal !== undefined}
-              {totalFilteredIssues()} of {unfilteredTotal}
-            {:else}
-              {totalFilteredIssues()}
-            {/if}
+            {totalFilteredIssues()}
             {totalFilteredIssues() === 1 ? ' task' : ' tasks'}
           </span>
         {/snippet}
@@ -1136,6 +1141,7 @@
     <div
       class="table"
       class:table--project-scoped={isProjectScoped}
+      class:table--detail-beside={detailBeside}
       class:table--keep-owner-sort={effectiveSort.key === 'owner' && columnVisibility.owner}
       style:--table-cols-wide={wideGridColumns}
       style:--table-cols-medium={mediumGridColumns}
@@ -1182,6 +1188,22 @@
                 <ChevronDownIcon size={11} strokeWidth={2} />
               {/if}
             </button>
+            {#if effectiveSort.key === 'updated'}
+              <!-- Names the order when a narrow list hides the Updated column. -->
+              <span class="sort-hint">
+                <span aria-hidden="true">Updated</span>
+                {#if effectiveSort.direction === 'asc'}
+                  <ChevronUpIcon size={11} strokeWidth={2} aria-hidden="true" />
+                {:else}
+                  <ChevronDownIcon size={11} strokeWidth={2} aria-hidden="true" />
+                {/if}
+                <span class="kit-sr-only">
+                  Sorted by Updated, {effectiveSort.direction === 'asc'
+                    ? 'oldest first'
+                    : 'newest first'}
+                </span>
+              </span>
+            {/if}
             {@render resizeHandle('title', 'Title')}
           </div>
           {#each renderedColumns as column (column.kind === 'task' ? column.id : column.kind)}
@@ -1216,7 +1238,9 @@
                 {:else}
                   <span class="col col-static">{label}</span>
                 {/if}
-                {@render resizeHandle(column.id, label)}
+                {#if column.id !== 'project' || !detailBeside}
+                  {@render resizeHandle(column.id, label)}
+                {/if}
               </div>
             {/if}
           {/each}
@@ -1314,13 +1338,6 @@
           aria-hidden="true"
         ></span>
         <span class="title-text" id={titleId}>{issue.title}</span>
-        {#if projectMarkBesideTitle}
-          <span
-            class="project-mark"
-            style:background={markColor(issue.project_name)}
-            title={issue.project_name}
-          ></span>
-        {/if}
       </span>
       {#each renderedColumns as column (column.kind === 'task' ? column.id : column.kind)}
         {#if column.kind === 'date'}
@@ -1338,7 +1355,11 @@
         {:else if column.id === 'project'}
           <span class="cell cell-project" title={issue.project_name}>
             <span class="project-mark" style:background={markColor(issue.project_name)}></span>
-            <span class="project-name">{issue.project_name}</span>
+            {#if detailBeside}
+              <span class="kit-sr-only">{issue.project_name}</span>
+            {:else}
+              <span class="project-name">{issue.project_name}</span>
+            {/if}
           </span>
         {:else if column.id === 'due'}
           <span
@@ -1459,8 +1480,15 @@
        media query would miss that. */
     container-type: inline-size;
     container-name: list;
+    /* The toolbar, headings, and selected row all end this far inside the
+       scrollbar gutter; cells stop a further --row-inset inside the selection. */
+    --list-inset: 12px;
+    --list-inset-right: calc(var(--list-inset) + var(--list-scrollbar-width, 0px));
+    --row-inset: 10px;
   }
 
+  /* Controls sit 16px down at the detail pane's button height, so both
+     panes' header buttons share one line. */
   .pane-header {
     position: relative;
     box-sizing: border-box;
@@ -1468,7 +1496,7 @@
     align-items: center;
     flex-shrink: 0;
     min-height: var(--layout-header-h);
-    padding: 0 12px;
+    padding: 16px var(--list-inset-right) 8px var(--list-inset);
     background: var(--bg-surface);
   }
 
@@ -1499,7 +1527,7 @@
     align-items: center;
     justify-content: center;
     gap: var(--space-2);
-    min-height: 28px;
+    height: 24px;
     padding: 0 8px;
     border: 1px solid var(--border-default);
     border-radius: var(--radius-md);
@@ -1544,7 +1572,7 @@
     min-width: var(--table-min-width);
     height: 32px;
     box-sizing: border-box;
-    padding: 0 22px 0 12px;
+    padding: 0 calc(var(--list-inset) + var(--row-inset)) 0 var(--list-inset);
     align-items: center;
     background: var(--bg-surface);
     border-bottom: 1px solid var(--border-muted);
@@ -1563,8 +1591,15 @@
 
   /* Title starts over the row titles, past the chevron and status columns. */
   .column-heading-title .col {
-    width: 100%;
+    flex: 1 1 auto;
     padding-left: 40px;
+  }
+
+  .sort-hint {
+    display: none;
+    flex: none;
+    align-items: center;
+    gap: var(--space-1);
   }
 
   .column-resize {
@@ -1639,6 +1674,10 @@
     font-variant-numeric: tabular-nums;
   }
 
+  .table--detail-beside .column-heading-project {
+    visibility: hidden;
+  }
+
   .table-body {
     flex: 1;
     overflow: auto;
@@ -1700,9 +1739,9 @@
     margin-left: -5px;
   }
 
-  /* The row reaches 10px past the cells so selection keeps a right inset. */
+  /* The selection reaches past the cells to the list's shared right edge. */
   .row {
-    width: calc(100% + 10px);
+    width: calc(100% + var(--row-inset));
     min-width: 0;
     grid-column: 1 / -1;
     grid-row: 1;
@@ -1713,7 +1752,7 @@
     height: 36px;
     min-height: 36px;
     box-sizing: border-box;
-    padding: 0 10px 0 0;
+    padding: 0 var(--row-inset) 0 0;
     border-radius: 0;
     text-align: left;
     border: 0;
@@ -1732,7 +1771,7 @@
     width: 100%;
     min-width: var(--table-min-width);
     height: 36px;
-    padding: 0 22px 0 12px;
+    padding: 0 calc(var(--list-inset) + var(--row-inset)) 0 var(--list-inset);
     /* Rows below the fold skip layout and paint until they scroll near, so a
        long list paints its first screen at once. */
     content-visibility: auto;
@@ -1788,7 +1827,7 @@
   }
 
   .title-text {
-    flex: 0 1 auto;
+    flex: 1;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2092,6 +2131,10 @@
     .cell-updated,
     .graph-action {
       display: none;
+    }
+
+    .sort-hint {
+      display: inline-flex;
     }
 
     .table {

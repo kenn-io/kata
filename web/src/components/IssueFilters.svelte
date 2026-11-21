@@ -310,7 +310,7 @@
     flex-direction: column;
     gap: 6px;
     flex-shrink: 0;
-    padding: 0 12px 8px;
+    padding: 0 var(--list-inset-right, 12px) 8px var(--list-inset, 12px);
     border-bottom: 1px solid var(--border-muted);
     background: var(--bg-surface);
   }

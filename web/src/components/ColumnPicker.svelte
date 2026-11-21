@@ -111,7 +111,7 @@
     align-items: center;
     justify-content: center;
     gap: var(--space-2);
-    min-height: 28px;
+    height: 24px;
     padding: 0 9px;
     border: 1px solid var(--border-default);
     border-radius: var(--radius-md);

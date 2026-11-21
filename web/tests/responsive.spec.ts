@@ -204,16 +204,22 @@ test('shows the project mark and full title beside an open task', async ({ page,
     priority: 1,
     metadata: { deadline_on: '2026-11-25' },
   })
+  await kata.seedIssue(page, credentials, { title: 'Pin it' })
   await page.goto(`${kata.origin}/kata?view=all-open`)
   const row = page.getByRole('button', { name: /Add retries to the task worker/ })
   await row.click()
   const title = row.locator('.title-text')
-  const mark = row.locator('.cell-title .project-mark')
-  await expect(mark).toBeVisible()
-  await expect(page.locator('.column-heading-project')).toHaveCount(0)
+  const project = row.locator('.cell-project')
+  await expect(project.locator('.project-mark')).toBeVisible()
+  await expect(page.locator('.column-heading-project')).toBeHidden()
   expect(await title.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+  expect((await project.boundingBox())!.width).toBeLessThanOrEqual(16)
+  // The mark sits in its own column, not after each title.
+  const shortMark = page
+    .getByRole('button', { name: /Pin it/ })
+    .locator('.cell-project .project-mark')
+  expect((await shortMark.boundingBox())!.x).toBe((await project.boundingBox())!.x)
   const titleBox = (await title.boundingBox())!
-  expect((await mark.boundingBox())!.x - titleBox.x - titleBox.width).toBeLessThan(10)
   const titleHeading = (await page.locator('.column-heading-title .col span').boundingBox())!
   expect(Math.abs(titleHeading.x - titleBox.x)).toBeLessThan(1)
   const search = (await page.locator('.kata-search-toolbar .kit-search-input').boundingBox())!
@@ -221,9 +227,6 @@ test('shows the project mark and full title beside an open task', async ({ page,
     .getByRole('heading', { name: 'All open', exact: true })
     .boundingBox())!
   expect(Math.abs(search.x - listTitle.x)).toBeLessThan(1)
-  const rowBox = (await row.boundingBox())!
-  const priorityBox = (await row.locator('.pri-pill').boundingBox())!
-  expect(rowBox.x + rowBox.width - priorityBox.x - priorityBox.width).toBeGreaterThanOrEqual(8)
   for (const column of ['due', 'priority']) {
     const header = await page.locator(`.column-heading-${column} .col`).boundingBox()
     const cell = await row.locator(`.cell-${column}`).boundingBox()
@@ -241,6 +244,69 @@ test('shows the project mark and full title beside an open task', async ({ page,
     expect(cell).not.toBeNull()
     expect(Math.abs(header!.x + header!.width - cell!.x - cell!.width)).toBeLessThan(1)
   }
+})
+
+test('the list controls and selected row share a right edge beside an open task', async ({
+  page,
+  kata,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 800 })
+  const credentials = await kata.launch(page)
+  await kata.seedIssue(page, credentials, { title: 'Edge example task', priority: 1 })
+  await page.goto(`${kata.origin}/kata?view=all-open`)
+  const row = page.getByRole('button', { name: /Edge example task/ })
+  await row.click()
+  await expect(row).toHaveClass(/selected/)
+
+  const right = (box: { x: number; width: number } | null) => box!.x + box!.width
+  const toolbar = right(await page.locator('.kata-search-toolbar').boundingBox())
+  const display = right(await page.getByRole('button', { name: 'Display' }).boundingBox())
+  const selection = right(await row.boundingBox())
+  expect(Math.abs(display - toolbar)).toBeLessThan(1)
+  expect(Math.abs(selection - toolbar)).toBeLessThan(1)
+  // Cells stop inside the selection, and the last heading ends over them.
+  const priority = right(await row.locator('.pri-pill').boundingBox())
+  const heading = right(await page.locator('.column-heading-priority .col').boundingBox())
+  expect(selection - priority).toBeGreaterThanOrEqual(8)
+  expect(Math.abs(heading - right(await row.locator('.cell-priority').boundingBox()))).toBeLessThan(
+    1,
+  )
+})
+
+test('the list and the open task put their header controls on one line', async ({ page, kata }) => {
+  await page.setViewportSize({ width: 1440, height: 800 })
+  const credentials = await kata.launch(page)
+  await kata.seedIssue(page, credentials, { title: 'Header line example' })
+  await page.goto(`${kata.origin}/kata?view=all-open`)
+  await page.getByRole('button', { name: /Header line example/ }).click()
+
+  const display = (await page.getByRole('button', { name: 'Display' }).boundingBox())!
+  const edit = (await page.getByRole('button', { name: 'Edit issue' }).boundingBox())!
+  expect(Math.abs(display.y - edit.y)).toBeLessThan(1)
+  expect(Math.abs(display.height - edit.height)).toBeLessThan(1)
+})
+
+test('a narrow list names the Updated sort its hidden column applies', async ({ page, kata }) => {
+  await page.setViewportSize({ width: 1440, height: 800 })
+  const credentials = await kata.launch(page)
+  await kata.seedIssue(page, credentials, { title: 'Sort hint example', priority: 2 })
+  await page.goto(`${kata.origin}/kata?view=all-open`)
+  const header = page.locator('.table-header')
+  const updated = header.getByText('Updated', { exact: true }).filter({ visible: true })
+  // At full width the Updated column shows the sort itself.
+  await expect(updated).toHaveCount(1)
+  await expect(header.getByRole('button', { name: /^Sort by Updated, currently/ })).toBeVisible()
+
+  await page.getByRole('button', { name: /Sort hint example/ }).click()
+  await expect(header.getByRole('button', { name: /^Sort by Updated/ })).toBeHidden()
+  await expect(updated).toHaveCount(1)
+  const hint = (await updated.boundingBox())!
+  const title = (await header.locator('.column-heading-title').boundingBox())!
+  expect(hint.x + hint.width).toBeLessThanOrEqual(title.x + title.width)
+
+  await header.getByRole('button', { name: 'Sort by Due' }).click()
+  await expect(updated).toHaveCount(0)
+  await expect(header.getByRole('button', { name: /^Sort by Due, currently/ })).toBeVisible()
 })
 
 test('the task count sits beside the list title', async ({ page, kata }) => {
