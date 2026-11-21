@@ -118,17 +118,6 @@ func newFederationPollScopeFixture(t *testing.T, store db.Storage) federationPol
 	}
 }
 
-// A federation poll is authorized against its own project, so admitting it
-// must not read every public project on the hub.
-func TestFederationPollAdmitsOnlyItsProject(t *testing.T) {
-	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
-		fixture := newFederationPollScopeFixture(t, store)
-		response := fixture.poll(fixture.token)
-		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-		require.Zero(t, fixture.store.anonymousLists.Load(), "poll admission read the anonymous project list")
-	})
-}
-
 // A refused poll keeps its refusal when an unrelated project's policy changes
 // while the request is in flight.
 func TestFederationPollRefusalIgnoresUnrelatedPolicyChanges(t *testing.T) {
@@ -142,16 +131,17 @@ func TestFederationPollRefusalIgnoresUnrelatedPolicyChanges(t *testing.T) {
 	})
 }
 
-// A poll whose policy revision moves before its response is released rechecks
-// only its own project.
+// A federation poll is authorized against its own project. Neither its
+// admission nor the release recheck after its policy revision moves reads a
+// hub-wide project list.
 func TestFederationPollReleaseRechecksOnlyItsProject(t *testing.T) {
 	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
 		fixture := newFederationPollScopeFixture(t, store)
 		fixture.store.afterRead = fixture.restrictPolicy(fixture.other)
 		response := fixture.poll(fixture.token)
 		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-		require.Zero(t, fixture.store.actorLists.Load(), "release recheck read the actor's project list")
-		require.Zero(t, fixture.store.anonymousLists.Load(), "release recheck read the anonymous project list")
+		require.Zero(t, fixture.store.actorLists.Load(), "poll read the actor's project list")
+		require.Zero(t, fixture.store.anonymousLists.Load(), "poll read the anonymous project list")
 	})
 }
 
