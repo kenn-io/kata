@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-20
+last_edited: 2026-11-21
 ---
 
 # HTTP API schema
@@ -335,8 +335,8 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
+| `0.64.0` | `POST /api/v1/federation/events:poll` polls several projects that share one federation credential. |
 | `0.63.0` | Browser issue reference resolution accepts a project name or UID and qualified references without a project ID. |
-| `0.63.0` | `POST /api/v1/federation/events:poll` polls several projects that share one federation credential. |
 | `0.62.0` | Federation peers advertise `relay_cross_links_v1` in `X-Kata-Event-Features`. A common root can link issues across projects with a shared relay audience. Relays check access to each referenced project they can resolve before releasing events or checkpoints, and pause for older peers with `409 unsupported_event_features` at crossing links or links with unresolved endpoints. An unresolved endpoint may belong to another project. |
 | `0.60.0` | Enrollment join instructions use the signing hub's external URL and include signing key placeholders. |
 | `0.59.0` | Schedule and deadline civil dates and times accept an explicit `[Zone]` suffix. |
