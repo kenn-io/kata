@@ -1017,6 +1017,8 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, err
 			}
 		}
+		// A timeout returns the previously authorized empty page. A poll
+		// that woke checks authorization again after its last read.
 		if timedOut {
 			releaseProjectAccess(requestCtx)
 		} else if waited {
