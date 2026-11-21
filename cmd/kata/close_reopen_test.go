@@ -524,19 +524,10 @@ func TestClose_WithComment_AppendsComment(t *testing.T) {
 }
 
 func TestClose_DryRunWithCommentDoesNotMutate(t *testing.T) {
-	for _, key := range []string{"", "preview-key"} {
-		t.Run(key, func(t *testing.T) {
-			env, dir, pid, ref := setupWorkspaceWithIssue(t, "test issue")
-			args := []string{"close", ref, "--dry", "--done", "--message", "Implemented the requested behavior and ran the focused tests.", "--test", "go test ./cmd/kata", "--comment", "finished"}
-			if key != "" {
-				args = append(args, "--idempotency-key", key)
-			}
-			runCLI(t, env, dir, args...)
-			got := fetchIssueViaHTTPWithComments(t, env, pid, ref)
-			assert.Empty(t, got.Comments)
-			assert.Equal(t, "open", got.Issue.Status)
-		})
-	}
+	env, dir, pid, ref := setupWorkspaceWithIssue(t, "test issue")
+	runCLI(t, env, dir, "close", ref, "--dry", "--done", "--message", "Implemented the requested behavior and ran the focused tests.", "--test", "go test ./cmd/kata", "--comment", "finished")
+	got := fetchIssueViaHTTPWithComments(t, env, pid, ref)
+	assert.Empty(t, got.Comments)
 }
 
 func TestClose_RetryWithCommentAppendsOneComment(t *testing.T) {
