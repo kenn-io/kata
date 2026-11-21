@@ -3,6 +3,8 @@ package dbtest
 import (
 	"context"
 	"database/sql"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"strings"
 	"testing"
@@ -106,8 +108,7 @@ func newQuietPollHub(t *testing.T, store db.Storage, issues int) *quietPollHub {
 
 // appendQuietIssues seeds issues without CreateIssue's per-issue cost. Like
 // appendUnrelatedEvents, it uses a transaction. Call it once per fresh store:
-// its UIDs start at zero. One issue.updated event per issue is enough because
-// the poll uses issue_uid to find owned events and includes that event type.
+// its UIDs start at zero. Each issue has its creation event, as in production.
 // Keep its inserts in step with the issues and events schema.
 func appendQuietIssues(t *testing.T, store db.Storage, project db.Project, n int) {
 	t.Helper()
@@ -119,16 +120,21 @@ func appendQuietIssues(t *testing.T, store db.Storage, project db.Project, n int
 	tx, err := beginner.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback() }()
-	issues, err := tx.PrepareContext(ctx, `INSERT INTO issues(uid,short_id,project_id,title,author) VALUES($1,$2,$3,'Quiet','tester')`)
+	issues, err := tx.PrepareContext(ctx, `INSERT INTO issues(uid,short_id,project_id,title,author) VALUES($1,$2,$3,'Quiet','tester') RETURNING id,created_at`)
 	require.NoError(t, err)
-	events, err := tx.PrepareContext(ctx, quietPollEventInsert)
+	events, err := tx.PrepareContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,issue_id,issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash)
+ VALUES($1,$2,$3,$4,$5,$6,'issue.created','tester',$7,1,0,$8)`)
 	require.NoError(t, err)
 	hash := strings.Repeat("a", 64)
 	for i := range n {
 		uid := fmt.Sprintf("%026d", i)
-		_, err = issues.ExecContext(ctx, uid, uid[20:], project.ID)
+		var issueID int64
+		var createdAt string
+		err = issues.QueryRowContext(ctx, uid, uid[20:], project.ID).Scan(&issueID, &createdAt)
 		require.NoError(t, err)
-		_, err = events.ExecContext(ctx, fmt.Sprintf("01M7%022d", i), store.InstanceUID(), project.ID, project.Name, uid, hash)
+		payload, err := json.Marshal(db.IssueDocumentPayload{UID: uid, ShortID: uid[20:], Title: "Quiet", Author: "tester", Status: "open", Metadata: jsontext.Value(`{}`), CreatedAt: createdAt})
+		require.NoError(t, err)
+		_, err = events.ExecContext(ctx, fmt.Sprintf("01M7%022d", i), store.InstanceUID(), project.ID, project.Name, issueID, uid, string(payload), hash)
 		require.NoError(t, err)
 	}
 	require.NoError(t, issues.Close())
