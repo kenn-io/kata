@@ -20,6 +20,8 @@ type RotateFederationEnrollmentBody = RotateFederationEnrollmentRequestBody
 
 type SetFederationSpokeNameBody = SetFederationSpokeNameRequestBody
 
+type PollFederationEventsBatchBody = FederationBatchPollRequestBody
+
 type CreateFederationReplicaBody = CreateFederationReplicaRequestBody
 
 type LeaveFederationReplicaBody = LeaveFederationReplicaRequestBody

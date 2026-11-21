@@ -42,7 +42,7 @@ func federationReplicationOperation(operation *huma.Operation) bool {
 		return false
 	}
 	switch operation.OperationID {
-	case "pollFederationProjectEvents", "getFederationProjectMetadata",
+	case "pollFederationProjectEvents", "pollFederationEventsBatch", "getFederationProjectMetadata",
 		"offerRelayDeliveries", "getRelayReset":
 		return true
 	default:

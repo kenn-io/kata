@@ -810,6 +810,16 @@ disabled, or `127.0.0.1:0` when enabled without an address. See
 [Federation request signing](../operations/federation-signing.md) for key setup,
 replay initialization, topology, limits and recovery.
 
+### Batched federation polls
+
+`[federation] batch_poll = true` lets spokes ask which of this hub's projects
+have new events in one request when they share a credential. It is off by
+default.
+Turn it on only when nothing in front of the daemon authorizes individual
+`/api/v1/projects/{project_id}/...` paths: such a proxy sees only
+`POST /api/v1/federation/events:poll`, never the per-project polls inside it.
+See [Sync scheduling](../operations/federation.md#sync-scheduling).
+
 ### Declarative federation mappings
 
 A spoke daemon maps local projects to projects on remote daemon-catalog targets.

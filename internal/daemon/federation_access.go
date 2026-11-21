@@ -50,8 +50,11 @@ var federationTransportOperations = map[string]HostFederationOperation{
 	"getIssueLeaseStatus": {ID: "getIssueLeaseStatus", Mutation: true},
 	// Fenced despite its read policy: projectFederationBody can call
 	// RefreshProjectFederationBaseline, so this GET writes.
-	"getFederationProjectMetadata":  {ID: "getFederationProjectMetadata", Mutation: true},
-	"pollFederationProjectEvents":   {ID: "pollFederationProjectEvents"},
+	"getFederationProjectMetadata": {ID: "getFederationProjectMetadata", Mutation: true},
+	"pollFederationProjectEvents":  {ID: "pollFederationProjectEvents"},
+	// The batch authenticates nothing itself: each project is served as its
+	// own pollFederationProjectEvents request, with that route's facts.
+	"pollFederationEventsBatch":     {ID: "pollFederationEventsBatch"},
 	"searchFederationProject":       {ID: "searchFederationProject"},
 	"ingestFederationProjectEvents": {ID: "ingestFederationProjectEvents", Mutation: true},
 }

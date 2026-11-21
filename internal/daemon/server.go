@@ -50,7 +50,12 @@ type ServerConfig struct {
 	EmbeddingProjectAllowed   func(context.Context, string) (bool, error)
 	FederationSigning         *federationsigning.Verifier
 	FederationSigningRequired bool
-	DB                        db.Storage
+	// FederationBatchPoll serves and advertises the batched federation poll
+	// on non-federation listeners. It is off by default because middleware
+	// in front of Kata sees only the batch request, never the per-project
+	// polls inside it.
+	FederationBatchPoll bool
+	DB                  db.Storage
 	// RootSigning holds private local signing material. Nil leaves an embedded
 	// server without a signing authority; daemon startup loads its owner-only
 	// key. The key is never exposed through API configuration or status.
@@ -483,6 +488,9 @@ func (s *Server) HandlerFor(policy ListenerPolicy) (http.Handler, error) {
 	handler, err := ApplyListenerPolicy(base, policy)
 	if err != nil {
 		return nil, err
+	}
+	if s.cfg.FederationBatchPoll {
+		handler = withFederationBatchPoll(handler)
 	}
 	return handler, nil
 }

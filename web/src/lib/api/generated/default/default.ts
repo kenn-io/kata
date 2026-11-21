@@ -102,6 +102,8 @@ import type {
   ExternalRootActionRequestBody,
   ExternalRootBridgeOut,
   ExternalRootRunOut,
+  FederationBatchPollBody,
+  FederationBatchPollRequestBody,
   FederationBridgeBody,
   FederationBridgeDisconnectResult,
   FederationBridgeStatusBody,
@@ -1397,6 +1399,55 @@ export const revokeFederationEnrollment = async (
       method: 'POST',
     },
   )
+}
+
+export type pollFederationEventsBatchResponse200 = {
+  data: FederationBatchPollBody
+  status: 200
+}
+
+export type pollFederationEventsBatchResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type pollFederationEventsBatchResponseSuccess = pollFederationEventsBatchResponse200 & {
+  headers: Headers
+}
+export type pollFederationEventsBatchResponseError = pollFederationEventsBatchResponseDefault & {
+  headers: Headers
+}
+
+export type pollFederationEventsBatchResponse =
+  | pollFederationEventsBatchResponseSuccess
+  | pollFederationEventsBatchResponseError
+
+export const getPollFederationEventsBatchUrl = () => {
+  return `/api/v1/federation/events:poll`
+}
+
+/**
+ * Checks each listed project through GET /api/v1/projects/{project_id}/federation/events exactly as that route would serve the same request, and reports whether it is idle. It returns no events: poll a project that is not idle with the single-project route. A refusal is that project's error, not the batch's. Signed requests and hubs that require signing use the single-project route.
+ * @summary Check several federated projects for new events with one credential
+ */
+export const pollFederationEventsBatch = async (
+  federationBatchPollRequestBody: FederationBatchPollRequestBody,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<pollFederationEventsBatchResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<pollFederationEventsBatchResponse>(getPollFederationEventsBatchUrl(), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(federationBatchPollRequestBody),
+  })
 }
 
 export type createFederationReplicaResponse200 = {
