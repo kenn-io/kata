@@ -405,11 +405,11 @@ jobs:
           packages_pid=$!
           env -u KATA_AUTH_TOKEN go tool gotestsum --format pkgname-and-test-fails --format-icons text \
             --jsonfile "gotestsum/go-cli-1.json" --rerun-fails=2 --rerun-fails-report "gotestsum/go-cli-1-reruns.txt" \
-            --packages ./cmd/kata -- -count=1 -run '^Test[A-CFR]' &
+            --packages ./cmd/kata -- -count=1 -run '^Test[A-CFM]' &
           cli1_pid=$!
           env -u KATA_AUTH_TOKEN go tool gotestsum --format pkgname-and-test-fails --format-icons text \
             --jsonfile "gotestsum/go-cli-2.json" --rerun-fails=2 --rerun-fails-report "gotestsum/go-cli-2-reruns.txt" \
-            --packages ./cmd/kata -- -count=1 -run . -skip '^Test[A-CFR]' &
+            --packages ./cmd/kata -- -count=1 -run . -skip '^Test[A-CFM]' &
           cli2_pid=$!
           status=0
           wait "$packages_pid" || status=1
