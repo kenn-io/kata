@@ -132,12 +132,23 @@ test('task filters stay inside a narrow list pane without overlapping', async ({
   const issue = await kata.seedIssue(page, credentials, { title: 'Narrow pane example' })
   await page.goto(`${kata.origin}/kata?view=all-open&issue=${issue.uid}`)
   await page.getByRole('button', { name: 'Switch to side-by-side layout' }).click()
+  await page.setViewportSize({ width: 900, height: 800 })
 
-  const layout = await page.locator('.kata-search-toolbar').evaluate((toolbar) => {
-    const container = toolbar.getBoundingClientRect()
+  const layout = await page.locator('.kata-search-panel').evaluate((panel) => {
+    const panelBounds = panel.getBoundingClientRect()
+    const toolbar = panel.querySelector('.kata-search-toolbar')
+    const listHeader = document.querySelector('.issue-list .pane-header')
+    if (!toolbar || !listHeader) throw new Error('Task filters or list header are missing')
+    const toolbarBounds = toolbar.getBoundingClientRect()
+    const listHeaderBounds = listHeader.getBoundingClientRect()
     const controls = Array.from(toolbar.querySelectorAll('input, button'), (element) => {
       const rect = element.getBoundingClientRect()
-      return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom }
+      return {
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom,
+      }
     })
     const overlaps = controls.some((control, index) =>
       controls
@@ -151,16 +162,28 @@ test('task filters stay inside a narrow list pane without overlapping', async ({
         ),
     )
     return {
-      height: container.height,
-      contained: controls.every(
-        (control) => control.left >= container.left && control.right <= container.right,
+      panelHeight: panelBounds.height,
+      panelContainsToolbar: panelBounds.bottom >= toolbarBounds.bottom,
+      panelBeforeList: panelBounds.bottom <= listHeaderBounds.top,
+      controlsContained: controls.every(
+        (control) =>
+          control.left >= panelBounds.left &&
+          control.right <= panelBounds.right &&
+          control.top >= panelBounds.top &&
+          control.bottom <= panelBounds.bottom,
       ),
       overlaps,
     }
   })
 
-  expect(layout).toEqual({ height: expect.any(Number), contained: true, overlaps: false })
-  expect(layout.height).toBeGreaterThan(30)
+  expect(layout).toEqual({
+    panelHeight: expect.any(Number),
+    panelContainsToolbar: true,
+    panelBeforeList: true,
+    controlsContained: true,
+    overlaps: false,
+  })
+  expect(layout.panelHeight).toBeGreaterThan(48)
 })
 
 test('the task count sits beside the list title', async ({ page, kata }) => {

@@ -651,17 +651,19 @@
 </svelte:head>
 
 {#snippet newTaskButton()}
-  <!-- aria-disabled keeps the blocked button focusable so keyboard users reach its reason. -->
-  <button
-    type="button"
-    class="accent-button header-action"
-    aria-disabled={newTaskBlockedReason ? 'true' : undefined}
-    aria-describedby={newTaskBlockedReason ? newTaskReasonID : undefined}
-    onclick={beginNewTask}
-  >
-    <PlusIcon size={13} strokeWidth={1.9} aria-hidden="true" />
-    <span>New task</span>
-  </button>
+  {#if !readOnly && snapshot.capabilities.writable}
+    <!-- aria-disabled keeps the blocked button focusable so keyboard users reach its reason. -->
+    <button
+      type="button"
+      class="accent-button header-action"
+      aria-disabled={newTaskBlockedReason ? 'true' : undefined}
+      aria-describedby={newTaskBlockedReason ? newTaskReasonID : undefined}
+      onclick={beginNewTask}
+    >
+      <PlusIcon size={13} strokeWidth={1.9} aria-hidden="true" />
+      <span>New task</span>
+    </button>
+  {/if}
 {/snippet}
 
 {#snippet createProjectButton()}
