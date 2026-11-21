@@ -14,13 +14,12 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 
-	"go.kenn.io/kit/telemetry/posthog"
-
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	mcpserver "go.kenn.io/kata/internal/mcp"
 	"go.kenn.io/kata/internal/storageadmin"
+	"go.kenn.io/kata/internal/telemetry"
 	"go.kenn.io/kata/internal/version"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -233,7 +232,7 @@ func newMCPAPIClients(ctx context.Context, resolved client.ResolvedDaemon, httpC
 
 // drainOnStop lets modern request cleanup finish queued observations within one second.
 func startMCPAgentUseReporter(ctx context.Context, apiClient *kataclient.Client, target client.ResolvedDaemon, drainOnStop bool) (func(), context.CancelFunc) {
-	if !posthog.Eligible("KATA", version.Version) {
+	if !telemetry.Eligible() {
 		return nil, func() {}
 	}
 	reportCtx, cancel := context.WithCancel(ctx)

@@ -382,7 +382,7 @@ func checkSameHubMoveGates(t *testing.T, store db.Storage) error {
 func checkFederatedMoveGuards(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
 	t.Run("source lifecycle awaits destination move", func(t *testing.T) {
-		for _, operation := range []string{"leave", "archive", "prepare-fence"} {
+		for _, operation := range []string{"leave", "archive", "prepare-fence", "disable-push", "replace-actor"} {
 			t.Run(operation, func(t *testing.T) {
 				source, err := store.CreateProject(ctx, operation+"-lifecycle-source")
 				require.NoError(t, err)
@@ -405,6 +405,14 @@ func checkFederatedMoveGuards(t *testing.T, store db.Storage) error {
 				_, err = store.LeaveFederationReplica(ctx, unrelated.ID)
 				require.NoError(t, err, "unrelated pending moves must not block teardown")
 				teardown := func() error {
+					switch operation {
+					case "disable-push":
+						_, err := store.DisableFederationPushWhenSettled(ctx, source.ID, store.InstanceUID())
+						return err
+					case "replace-actor":
+						_, err := store.ReplaceFederationBoundActorWhenSettled(ctx, source.ID, store.InstanceUID(), "worker", "other-worker")
+						return err
+					}
 					if operation == "prepare-fence" {
 						return store.(db.RelayDisconnectFenceStore).FenceRelayDisconnect(ctx, source.ID)
 					}

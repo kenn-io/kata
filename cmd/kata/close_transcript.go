@@ -44,7 +44,7 @@ func prepareCloseTranscript(ctx context.Context, cmd *cobra.Command, baseURL str
 		_, configured := cfg.Project[hydrated.ProjectName]
 		unconfigured = !configured
 		target = cfg.Target(hydrated.ProjectName)
-		selection = &api.TranscriptSelection{ProjectID: hydrated.CurrentProjectID, Record: *target.Enabled}
+		selection = &api.TranscriptSelection{ProjectID: hydrated.CurrentProjectID, Record: *target.Mode != config.CloseTranscriptOff}
 	}
 	if target.AgentsViewURL != "" && (selection == nil || selection.Record) {
 		link, err := ref.Link(target.AgentsViewURL)
@@ -84,6 +84,9 @@ func closeTranscript(cmd *cobra.Command, cfg config.CloseTranscriptConfig) *tran
 				source = variable.name
 			}
 		}
+	}
+	if !cfg.AnyOn() && agent == "" && id == "" {
+		return nil
 	}
 	ref := &transcript.Transcript{Agent: agent, SessionID: id}
 	if err := ref.Validate(); err != nil {

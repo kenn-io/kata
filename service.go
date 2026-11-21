@@ -202,6 +202,11 @@ type Config struct {
 	TickTickSync TickTickSyncConfig
 	Docbank      DocbankConfig
 	Embeddings   EmbeddingsConfig
+	// EmbeddingProjectAllowed controls which project UIDs may use the embedding
+	// provider. Nil allows all projects. Errors abort the current attempt.
+	// Daemons sharing a PostgreSQL schema must return the same decision for each
+	// project because they share the mirror, vector index, and reconciler lease.
+	EmbeddingProjectAllowed func(context.Context, string) (bool, error)
 	// WebHandler optionally serves public, data-free browser assets alongside
 	// the API. Non-API paths bypass Kata's bearer check. Nil keeps the service
 	// API-only. Import go.kenn.io/kata/webui to opt into the bundled application.
@@ -259,6 +264,7 @@ type Service struct {
 	broadcaster            *daemon.EventBroadcaster
 	publish                daemon.EventPublisher
 	federationWake         chan struct{}
+	federationRetries      *federation.SyncRetries
 	gitHubSyncWake         chan struct{}
 	gitHubSyncFetcher      githubsync.Fetcher
 	gitHubSyncProgress     *githubsync.ProgressTracker
@@ -438,7 +444,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	publisher := daemon.NewEventPublisher(broadcaster, hookSink)
 	var reconciler *daemon.Reconciler
 	if index != nil && embedder != nil {
-		reconciler = daemon.NewConfiguredEmbeddingReconciler(store, index, embedder, cfg.Embeddings, publisher, nil, federationCredentials, federation.EmbeddingProducerConnected, federation.EmbeddingProducerAuthorized)
+		reconciler = daemon.NewConfiguredEmbeddingReconciler(store, index, embedder, cfg.Embeddings, publisher, nil, federationCredentials, federation.EmbeddingProducerConnected, federation.EmbeddingProducerAuthorized, cfg.EmbeddingProjectAllowed)
 	}
 	federationWake := make(chan struct{}, 1)
 	wakeFederation := func() {
@@ -555,6 +561,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 			controller: cfg.FederationAccess,
 		}
 	}
+	federationRetries := federation.NewSyncRetries()
 	serverConfig := daemon.ServerConfig{
 		DB:       store,
 		Embedder: embedder, VectorIndex: index, EmbeddingUnavailableReason: unavailable,
@@ -571,7 +578,9 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		FederationCredentials:     federationCredentials,
 		FederationPushPending:     federation.DirectSpokePushPending(store),
 		FederationHubClient:       federation.CredentialHTTPClient,
+		FederationSyncRetry:       federationRetries.FederationSyncRetry,
 		DisableFederationRebind:   true,
+		EmbeddingProjectAllowed:   cfg.EmbeddingProjectAllowed,
 		GitHubSyncFetcher:         gitHubSyncFetcher,
 		GitHubSyncProgress:        gitHubSyncProgress,
 		GitHubSyncConfig:          gitHubSyncConfig,
@@ -608,6 +617,15 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		EmbeddingProfile:          daemon.EmbeddingProfile(cfg.Profile),
 		Logger:                    logger,
 	}
+	if controller, ok := cfg.FederationAccess.(FederationReferenceAccessController); ok {
+		serverConfig.AuthorizeFederationReference = func(ctx context.Context, tx db.Transaction, route, peer daemon.HostFederationAccessRequest) error {
+			err := controller.AuthorizeFederationReference(ctx, tx, publicFederationRequest(route), publicFederationRequest(peer))
+			if errors.Is(err, ErrAccessDenied) {
+				return errors.Join(daemon.ErrHostAccessDenied, err)
+			}
+			return err
+		}
+	}
 	if reconciler != nil {
 		serverConfig.ReconcilerHealth = reconciler.Health
 		serverConfig.EmbeddingWake = reconciler.RetryNow
@@ -626,6 +644,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		broadcaster:            broadcaster,
 		publish:                publisher,
 		federationWake:         federationWake,
+		federationRetries:      federationRetries,
 		gitHubSyncWake:         gitHubSyncWake,
 		gitHubSyncFetcher:      gitHubSyncFetcher,
 		gitHubSyncProgress:     gitHubSyncProgress,
@@ -815,14 +834,7 @@ func (a hostFederationAccessControllerAdapter) AuthorizeFederation(
 	if a.controller == nil {
 		return daemon.HostFederationAccessDecision{}, nil
 	}
-	decision, err := a.controller.AuthorizeFederation(ctx, FederationAccessRequest{
-		Enrollment: publicFederationEnrollment(request.Enrollment, request.Project.UID),
-		Project:    publicProject(request.Project),
-		Capability: FederationCapability(request.Capability),
-		Operation: FederationOperation{
-			ID: request.Operation.ID, Mutation: request.Operation.Mutation,
-		},
-	})
+	decision, err := a.controller.AuthorizeFederation(ctx, publicFederationRequest(request))
 	if errors.Is(err, ErrAccessDenied) {
 		return daemon.HostFederationAccessDecision{}, daemon.ErrHostAccessDenied
 	}
@@ -843,6 +855,17 @@ func (a hostFederationAccessControllerAdapter) AuthorizeFederation(
 		}
 	}
 	return daemon.HostFederationAccessDecision{TransactionFence: transactionFence}, nil
+}
+
+func publicFederationRequest(request daemon.HostFederationAccessRequest) FederationAccessRequest {
+	return FederationAccessRequest{
+		Enrollment: publicFederationEnrollment(request.Enrollment, request.EnrollmentProjectUID),
+		Project:    publicProject(request.Project),
+		Capability: FederationCapability(request.Capability),
+		Operation: FederationOperation{
+			ID: request.Operation.ID, Mutation: request.Operation.Mutation,
+		},
+	}
 }
 
 func (a hostAccessControllerAdapter) Authorize(
@@ -1039,6 +1062,7 @@ func (s *Service) serviceWorkers() []namedWorker {
 		Credentials: s.federationCredentials,
 		Interval:    30 * time.Second,
 		Wake:        s.federationWake,
+		Retries:     s.federationRetries,
 		OnError: func(err error) {
 			s.logger.Error("kata federation worker", "err", err)
 		},

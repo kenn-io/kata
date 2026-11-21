@@ -116,6 +116,45 @@ func TestFederationProviderAttachesEmptyReplicaWithoutAdoption(t *testing.T) {
 	assert.Len(t, events, 1, "resuming must not create another catalog event")
 }
 
+func TestFederationProviderRejoinsDetachedProject(t *testing.T) {
+	for _, intent := range []federationprovider.Intent{"read_only", "collaborate"} {
+		t.Run(string(intent), func(t *testing.T) {
+			catalog, mapping := providerMapping(t)
+			mapping.Intent = intent
+			t.Setenv("KATA_TEST_PROVIDER_STATUS", "ready")
+			store := openReplicaServiceStore(t)
+			ctx := t.Context()
+			project, err := store.CreateProjectWithUID(ctx, mapping.SpokeProject, replicaHubProjectUID)
+			require.NoError(t, err)
+			issue, event, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "local task", Author: "Example User"})
+			require.NoError(t, err)
+			credentials := config.DefaultFederationCredentialStore()
+			ready, err := daemon.AuthorizeFederationProvider(ctx, store, credentials, catalog, mapping)
+			require.NoError(t, err)
+			result, err := daemon.EnsureFederationReplica(ctx, store, credentials, nil, daemon.EnsureFederationReplicaParams{
+				HubURL: catalog.URL, HubProjectID: 42, HubProjectUID: replicaHubProjectUID,
+				ProjectName: project.Name, ReplayHorizonEventID: 9, Credential: ready.Credential,
+				PushEnabled: intent == "collaborate", AttachEmpty: true,
+				ManagedReservation: &daemon.FederationReplicaManagedReservation{ProjectUID: ready.ProjectUID, Expected: ready.Credential},
+			})
+			require.NoError(t, err)
+			assert.Equal(t, project.ID, result.Project.ID)
+			binding, err := store.FederationBindingByProject(ctx, project.ID)
+			require.NoError(t, err)
+			assert.Equal(t, intent == "collaborate", binding.PushEnabled)
+			if intent == "collaborate" {
+				assert.Zero(t, binding.PushCursorEventID)
+			}
+			got, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			assert.Equal(t, project.ID, got.ProjectID)
+			events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, IssueUID: issue.UID, Limit: 10})
+			require.NoError(t, err)
+			assert.Contains(t, events, event)
+		})
+	}
+}
+
 func TestFederationProviderPersistsBeforeContactAndResumes(t *testing.T) {
 	catalog, mapping := providerMapping(t)
 	store := openReplicaServiceStore(t)
@@ -169,6 +208,10 @@ func TestFederationProviderPersistsBeforeContactAndResumes(t *testing.T) {
 	changed.HubProject = "another-project"
 	_, err = daemon.AuthorizeFederationProvider(t.Context(), store, credentials, catalog, changed)
 	require.ErrorIs(t, err, daemon.ErrFederationReplicaCredentialConflict)
+	changed = mapping
+	changed.Intent = "read_only"
+	_, err = daemon.AuthorizeFederationProvider(t.Context(), store, credentials, catalog, changed)
+	require.ErrorIs(t, err, daemon.ErrFederationReplicaCredentialConflict, "an unbound request has no replica to switch in place")
 	changed = mapping
 	changed.CredentialProvider = append(slices.Clone(mapping.CredentialProvider), "--different-profile")
 	_, err = daemon.AuthorizeFederationProvider(t.Context(), store, credentials, catalog, changed)

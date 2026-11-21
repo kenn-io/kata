@@ -155,6 +155,19 @@ describe('browser session bootstrap', () => {
     expect(window.location.hash).toBe('')
   })
 
+  it.each([
+    ['/kata?issue=example#abc4', '/kata?issue=example%23abc4'],
+    ['/kata?issue=01J00000000000000000000001#comments', '/kata?issue=01J00000000000000000000001'],
+    ['/kata?scope=example&issue=abc4#top', '/kata?scope=example&issue=abc4'],
+  ])('handles issue fragment in %s', (url, expected) => {
+    history.replaceState(null, '', url)
+    expect(consumeLaunchFragment(window.location, history.replaceState.bind(history))).toEqual({
+      kind: 'none',
+      returnPath: expected,
+    })
+    expect(window.location.pathname + window.location.search).toBe(expected)
+  })
+
   it('consumes an explicit daemon launch target before routing', () => {
     history.replaceState(null, '', '/kata#daemon=example-remote')
 

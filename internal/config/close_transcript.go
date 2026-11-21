@@ -11,19 +11,48 @@ import (
 	"go.kenn.io/kata/internal/transcript"
 )
 
+// CloseTranscriptMode says when a close attaches the closing session.
+type CloseTranscriptMode int
+
+const (
+	// CloseTranscriptOff attaches nothing.
+	CloseTranscriptOff CloseTranscriptMode = iota
+	// CloseTranscriptOn attaches the closing session and warns when none is
+	// available.
+	CloseTranscriptOn
+	// CloseTranscriptAuto attaches the closing session when one is named and
+	// stays quiet when none is.
+	CloseTranscriptAuto
+)
+
 // CloseTranscriptConfig is a client preference, read from the invoking
 // client's Kata home even when it targets a remote daemon.
 type CloseTranscriptConfig struct {
-	Enabled       bool                             `toml:"enabled"`
-	AgentsViewURL string                           `toml:"agentsview_url"`
-	SessionIDEnv  map[string]string                `toml:"session_id_env"`
-	Project       map[string]CloseTranscriptTarget `toml:"project"`
-	override      *bool
+	Mode          CloseTranscriptMode
+	AgentsViewURL string
+	SessionIDEnv  map[string]string
+	Project       map[string]CloseTranscriptTarget
+	override      *CloseTranscriptMode
 }
 
 // CloseTranscriptTarget configures attachment and the locator for a project.
+// An omitted Mode inherits the global mode.
 type CloseTranscriptTarget struct {
-	Enabled       *bool  `toml:"enabled"`
+	Mode          *CloseTranscriptMode
+	AgentsViewURL string
+}
+
+// closeTranscriptFile is [close.transcript] as written. The daemon decodes it
+// only to accept its keys; enabled stays raw so only kata close checks it.
+type closeTranscriptFile struct {
+	Enabled       any                                  `toml:"enabled"`
+	AgentsViewURL string                               `toml:"agentsview_url"`
+	SessionIDEnv  map[string]string                    `toml:"session_id_env"`
+	Project       map[string]closeTranscriptFileTarget `toml:"project"`
+}
+
+type closeTranscriptFileTarget struct {
+	Enabled       any    `toml:"enabled"`
 	AgentsViewURL string `toml:"agentsview_url"`
 }
 
@@ -34,55 +63,71 @@ func (cfg CloseTranscriptConfig) Target(project string) CloseTranscriptTarget {
 		target.AgentsViewURL = cfg.AgentsViewURL
 	}
 	if cfg.override != nil {
-		target.Enabled = cfg.override
-	} else if target.Enabled == nil {
-		target.Enabled = &cfg.Enabled
+		target.Mode = cfg.override
+	} else if target.Mode == nil {
+		target.Mode = &cfg.Mode
 	}
 	return target
 }
 
 // AnyEnabled reports whether any configured target can record a session.
 func (cfg CloseTranscriptConfig) AnyEnabled() bool {
+	return cfg.anyMode(func(m CloseTranscriptMode) bool { return m != CloseTranscriptOff })
+}
+
+// AnyOn reports whether any configured target is true, so a close that names
+// no session should warn. Auto targets never warn about a missing session.
+func (cfg CloseTranscriptConfig) AnyOn() bool {
+	return cfg.anyMode(func(m CloseTranscriptMode) bool { return m == CloseTranscriptOn })
+}
+
+func (cfg CloseTranscriptConfig) anyMode(match func(CloseTranscriptMode) bool) bool {
 	if cfg.override != nil {
-		return *cfg.override
+		return match(*cfg.override)
 	}
-	if cfg.Enabled {
+	if match(cfg.Mode) {
 		return true
 	}
 	for name := range cfg.Project {
-		if *cfg.Target(name).Enabled {
+		if match(*cfg.Target(name).Mode) {
 			return true
 		}
 	}
 	return false
 }
 
-// ForceEnabled reports whether the process explicitly enabled recording.
+// ForceEnabled reports whether the process explicitly enabled recording, with
+// true or auto.
 func (cfg CloseTranscriptConfig) ForceEnabled() bool {
-	return cfg.override != nil && *cfg.override
+	return cfg.override != nil && *cfg.override != CloseTranscriptOff
 }
 
 // ReadCloseTranscriptConfig avoids daemon policy and credential resolution.
-// KATA_CLOSE_TRANSCRIPT_ENABLED overrides the file's enabled flag for one
-// process; false skips the file, so its transcript settings cannot warn.
+// KATA_CLOSE_TRANSCRIPT_ENABLED (true, false or auto) overrides the file's
+// enabled setting for one process; false skips the file, so its transcript
+// settings cannot warn.
 func ReadCloseTranscriptConfig() (CloseTranscriptConfig, error) {
 	value := strings.TrimSpace(os.Getenv("KATA_CLOSE_TRANSCRIPT_ENABLED"))
 	if value == "" {
 		return readCloseTranscriptFile()
 	}
-	enabled, err := strconv.ParseBool(value)
-	if err != nil {
-		return CloseTranscriptConfig{}, errors.New("KATA_CLOSE_TRANSCRIPT_ENABLED must be true or false")
-	}
-	if !enabled {
-		return CloseTranscriptConfig{}, nil
+	mode := CloseTranscriptAuto
+	if !strings.EqualFold(value, "auto") {
+		on, err := strconv.ParseBool(value)
+		if err != nil {
+			return CloseTranscriptConfig{}, errors.New("KATA_CLOSE_TRANSCRIPT_ENABLED must be true, false or auto")
+		}
+		if !on {
+			return CloseTranscriptConfig{}, nil
+		}
+		mode = CloseTranscriptOn
 	}
 	cfg, err := readCloseTranscriptFile()
 	if err != nil {
 		return CloseTranscriptConfig{}, err
 	}
-	cfg.Enabled = true
-	cfg.override = &enabled
+	cfg.Mode = mode
+	cfg.override = &mode
 	return cfg, nil
 }
 
@@ -100,13 +145,50 @@ func readCloseTranscriptFile() (CloseTranscriptConfig, error) {
 	}
 	var file struct {
 		Close struct {
-			Transcript CloseTranscriptConfig `toml:"transcript"`
+			Transcript closeTranscriptFile `toml:"transcript"`
 		} `toml:"close"`
 	}
 	if _, err = toml.Decode(string(data), &file); err != nil {
 		return CloseTranscriptConfig{}, fmt.Errorf("parse %s: %w", path, err)
 	}
-	return checkSessionIDEnv(path, file.Close.Transcript)
+	raw := file.Close.Transcript
+	cfg := CloseTranscriptConfig{AgentsViewURL: raw.AgentsViewURL, SessionIDEnv: raw.SessionIDEnv}
+	if mode, err := fileCloseTranscriptMode(path, "close.transcript.enabled", raw.Enabled); err != nil {
+		return CloseTranscriptConfig{}, err
+	} else if mode != nil {
+		cfg.Mode = *mode
+	}
+	for name, target := range raw.Project {
+		mode, err := fileCloseTranscriptMode(path, "close.transcript.project."+name+".enabled", target.Enabled)
+		if err != nil {
+			return CloseTranscriptConfig{}, err
+		}
+		if cfg.Project == nil {
+			cfg.Project = map[string]CloseTranscriptTarget{}
+		}
+		cfg.Project[name] = CloseTranscriptTarget{Mode: mode, AgentsViewURL: target.AgentsViewURL}
+	}
+	return checkSessionIDEnv(path, cfg)
+}
+
+// fileCloseTranscriptMode reads an enabled value as written in the file. It
+// returns nil when the key is absent.
+func fileCloseTranscriptMode(path, key string, value any) (*CloseTranscriptMode, error) {
+	var mode CloseTranscriptMode
+	switch value {
+	case nil:
+		return nil, nil
+	case false:
+		mode = CloseTranscriptOff
+	case true:
+		mode = CloseTranscriptOn
+	default:
+		if s, ok := value.(string); !ok || !strings.EqualFold(s, "auto") {
+			return nil, fmt.Errorf("%s: %s must be true, false or \"auto\"", path, key)
+		}
+		mode = CloseTranscriptAuto
+	}
+	return &mode, nil
 }
 
 // checkSessionIDEnv rejects agent names the API would refuse. Only the client

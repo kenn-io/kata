@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kit/search/sqlquery"
 	kitvec "go.kenn.io/kit/vector"
 	"go.kenn.io/kit/vector/sqlitevec"
 )
@@ -27,11 +28,13 @@ type QueryWindow struct {
 // not use kitvec.Search: kata serves exactly one generation (the building one
 // must not answer mid-fill) and embeds the query once under a tight timeout.
 func (ix *Index) Query(ctx context.Context, key string, query kitvec.Vector, limit int) ([]kitvec.Hit[string], error) {
-	if ix.pg != nil {
-		return ix.pg.QueryGeneration(ctx, key, query, limit)
-	}
 	if limit <= 0 {
 		return nil, nil
+	}
+	if ix.pg != nil {
+		var args []any
+		predicate := db.AuthorizedProjectPredicate(ctx, "d.project_uid", func(value any) string { args = append(args, value); return "?" })
+		return ix.pgStore.QueryGenerationWithPredicate(ctx, key, query, limit, sqlquery.Predicate{SQL: predicate, Args: args})
 	}
 	if _, restricted := db.AuthorizedProjects(ctx); restricted {
 		return ix.queryAuthorizedSQLite(ctx, key, query, limit)

@@ -118,7 +118,7 @@ describe('IssueProperties', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Edit scheduled' }))
     expect(screen.getByRole('button', { name: /Scheduled:/ }).textContent).toContain('Sep 1')
     await fireEvent.click(screen.getByRole('button', { name: /Scheduled:/ }))
-    await fireEvent.click(screen.getByRole('button', { name: /Sep 1, 2026/ }))
+    await fireEvent.click(screen.getByRole('gridcell', { name: /September 1, 2026/ }))
     expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', { scheduled_on: '2026-09-01' })
   })
 
@@ -221,7 +221,7 @@ describe('IssueProperties', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: 'Edit due date' }))
     await fireEvent.click(screen.getByRole('button', { name: /Due:/ }))
-    await fireEvent.click(screen.getByRole('button', { name: /Jun 8, 2026/ }))
+    await fireEvent.click(screen.getByRole('gridcell', { name: /June 8, 2026/ }))
 
     expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', { deadline_on: '2026-06-08' })
 
@@ -257,7 +257,7 @@ describe('IssueProperties', () => {
       await fireEvent.click(screen.getByRole('button', { name: edit }))
       const trigger = screen.getByRole('button', { name: new RegExp(`${picker}: Aug 31`) })
       await fireEvent.click(trigger)
-      await fireEvent.click(screen.getByRole('button', { name: /Aug 31, 2026/ }))
+      await fireEvent.click(screen.getByRole('gridcell', { name: /August 31, 2026/ }))
       expect(onPatchMetadata).not.toHaveBeenCalled()
     },
   )
@@ -276,7 +276,7 @@ describe('IssueProperties', () => {
     })
     await fireEvent.click(screen.getByRole('button', { name: edit }))
     await fireEvent.click(screen.getByRole('button', { name: new RegExp(picker) }))
-    await fireEvent.click(screen.getByRole('button', { name: /Jun 10, 2026/ }))
+    await fireEvent.click(screen.getByRole('gridcell', { name: /June 10, 2026/ }))
     expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', { [key]: '2026-06-10[Europe/Paris]' })
   })
 
@@ -286,7 +286,7 @@ describe('IssueProperties', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: 'Edit scheduled' }))
     await fireEvent.click(screen.getByRole('button', { name: /Scheduled:/ }))
-    await fireEvent.click(screen.getByRole('button', { name: /Jun 10, 2026/ }))
+    await fireEvent.click(screen.getByRole('gridcell', { name: /June 10, 2026/ }))
 
     expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', { scheduled_on: '2026-06-10' })
     expect(screen.getByRole('button', { name: /Scheduled: Jun 10/ })).toBeTruthy()
@@ -301,7 +301,7 @@ describe('IssueProperties', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: 'Edit due date' }))
     await fireEvent.click(screen.getByRole('button', { name: /Due:/ }))
-    await fireEvent.click(screen.getByRole('button', { name: /Jun 8, 2026/ }))
+    await fireEvent.click(screen.getByRole('gridcell', { name: /June 8, 2026/ }))
 
     expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', { deadline_on: '2026-06-08' })
     expect(screen.getByRole('button', { name: /Due: Jun 8/ })).toBeTruthy()
@@ -355,17 +355,28 @@ describe('IssueProperties', () => {
   })
 
   it('keeps the property editor open when a property mutation fails', async () => {
-    renderProperties({
-      onPatchMetadata: vi.fn(async () => false),
+    const onPatchMetadata = vi.fn(async () => false)
+    const view = renderProperties({
+      draftResetGeneration: 0,
+      onPatchMetadata,
     })
 
     await fireEvent.click(screen.getByRole('button', { name: 'Edit scheduled' }))
     await fireEvent.click(screen.getByRole('button', { name: /Scheduled:/ }))
-    await fireEvent.click(screen.getByRole('button', { name: /Jun 10, 2026/ }))
+    await fireEvent.click(screen.getByRole('gridcell', { name: /June 10, 2026/ }))
+    expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', { scheduled_on: '2026-06-10' })
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Scheduled: Jun 10/ })).toBeTruthy()
     })
+    await view.rerender({
+      draftResetGeneration: 1,
+      issue: makeIssue({
+        owner: 'user-a',
+        metadata: { scheduled_on: '2026-06-01', deadline_on: '2026-06-05' },
+      }),
+    })
+    expect(screen.getByRole('button', { name: /Scheduled: Jun 10/ })).toBeTruthy()
   })
 
   it('assigns highlighted, custom, and unassigned owners', async () => {
@@ -538,7 +549,7 @@ describe('IssueProperties', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: 'Edit scheduled' }))
     await fireEvent.click(screen.getByRole('button', { name: /Scheduled:/ }))
-    await fireEvent.click(screen.getByRole('button', { name: /Jun 10, 2026/ }))
+    await fireEvent.click(screen.getByRole('gridcell', { name: /June 10, 2026/ }))
     expect(screen.getByRole('button', { name: /Scheduled: Jun 10/ })).toBeTruthy()
 
     await view.rerender({

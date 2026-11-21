@@ -5,7 +5,11 @@
 //nolint:revive // var-naming flags `version` as stdlib-conflicting but no such stdlib package exists.
 package version
 
-import "runtime/debug"
+import (
+	"runtime/debug"
+
+	"golang.org/x/mod/module"
+)
 
 const (
 	defaultVersion   = "dev"
@@ -21,7 +25,7 @@ var readBuildInfo = debug.ReadBuildInfo
 
 // Version is the build identifier shared by the CLI, daemon, and TUI.
 // Release builds can override it with ldflags; development builds use
-// Go's embedded VCS metadata.
+// Go's embedded module version or VCS metadata.
 var Version = defaultVersion
 
 // Commit is the short VCS revision the binary was built from. Release
@@ -66,6 +70,9 @@ func versionFromVCS() string {
 		}
 	}
 	if rev == "" {
+		if info.Main.Version != "" && info.Main.Version != "(devel)" && !module.IsPseudoVersion(info.Main.Version) {
+			return info.Main.Version
+		}
 		return defaultVersion
 	}
 	if len(rev) > shortHashLen {

@@ -268,6 +268,24 @@ var (
 	// Relay delivery cannot be discarded by advancing the legacy push cursor.
 	ErrRelayQuarantineSkipUnsupported = errors.New("relay quarantine requires retry after compatible recovery; skip is unsupported")
 
+	// ErrFederationPushPending is returned when push cannot be turned off
+	// because local-origin events still wait for the hub to accept them.
+	ErrFederationPushPending = errors.New("federation push has local changes the hub has not accepted")
+
+	// ErrFederationClaimsHeld is returned when push cannot be turned off
+	// because this replica still holds a live claim or has a claim request
+	// waiting for the hub.
+	ErrFederationClaimsHeld = errors.New("federation replica holds live claims or pending claim requests")
+
+	// ErrFederationRunsActive is returned when a spoke's bound actor still has
+	// a running cron run, which a later observation must continue as the same
+	// actor.
+	ErrFederationRunsActive = errors.New("federation replica has unfinished cron runs")
+
+	// ErrFederationBoundActorChanged is returned when a binding's bound actor
+	// is neither the expected old actor nor the requested new one.
+	ErrFederationBoundActorChanged = errors.New("federation bound actor changed")
+
 	// ErrFederationResetBlockedByQuarantine is returned when a federation reset
 	// cannot proceed due to an active quarantine.
 	ErrFederationResetBlockedByQuarantine = errors.New("federation reset blocked by quarantine")
@@ -299,6 +317,19 @@ var (
 	// ErrFederationProjectNotEmpty requires explicit adoption of local data.
 	ErrFederationProjectNotEmpty = errors.New("federation attachment requires an empty project")
 )
+
+// LinkServerMismatchError identifies projects that cannot sync a link.
+type LinkServerMismatchError struct {
+	From, To string
+}
+
+func (e *LinkServerMismatchError) Error() string {
+	return fmt.Sprintf("can't link: connect project %s to the same server as %s first", e.To, e.From)
+}
+
+func (e *LinkServerMismatchError) Unwrap() error {
+	return ErrFederatedReadOnly
+}
 
 // LinkTargetNotFoundError carries the requested issue row id (globally unique
 // since storage v16) when an add-edge or set-parent operation references an
@@ -436,15 +467,17 @@ const FederationProjectNotEnrolledCode = "federation_project_not_enrolled"
 // FederationProjectNotEnrolledError reports pushed work that touches an issue
 // whose current project has no matching push enrollment for this spoke and
 // actor. The route credential is valid; only the other project's grant is
-// missing, revoked, or bound to a different spoke or actor. The error names
-// only the issue, which the spoke already holds, and not the project it has
-// not joined.
+// missing, revoked, or bound to a different spoke or actor. The error may
+// name an issue the spoke already holds, but not the project it has not joined.
 type FederationProjectNotEnrolledError struct {
 	IssueUID string
 	Err      error
 }
 
 func (e *FederationProjectNotEnrolledError) Error() string {
+	if e.IssueUID == "" {
+		return "This spoke needs push access to the affected issue's project with the same actor"
+	}
 	return fmt.Sprintf("issue %s now belongs to a project where this spoke has no push enrollment with the same actor", e.IssueUID)
 }
 

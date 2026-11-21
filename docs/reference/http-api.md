@@ -335,6 +335,9 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
+| `0.63.0` | Browser issue reference resolution accepts a project name or UID and qualified references without a project ID. |
+| `0.62.0` | Federation peers advertise `relay_cross_links_v1` in `X-Kata-Event-Features`. A common root can link issues across projects with a shared relay audience. Relays check access to each referenced project they can resolve before releasing events or checkpoints, and pause for older peers with `409 unsupported_event_features` at crossing links or links with unresolved endpoints. An unresolved endpoint may belong to another project. |
+| `0.60.0` | Enrollment join instructions use the signing hub's external URL and include signing key placeholders. |
 | `0.59.0` | Schedule and deadline civil dates and times accept an explicit `[Zone]` suffix. |
 | `0.58.0` | `GET /api/v1/projects/{project_id}/events` accepts `actor` so callers who may restore a soft-deleted issue can read its history. |
 | `0.57.0` | Cron run rows carry `job_name`, `workflow_name` and `issue_short_id`, resolved when read; deleted jobs, workflows and issues still name their runs. |
@@ -832,6 +835,10 @@ endpoints published in OpenAPI:
   only issue references, with empty projects, owners, and labels. Repeating
   `issue_uid` hydrates summaries for up to 200 stable issue UIDs and composes
   with the existing project and text filters.
+- `GET /api/v1/ui/issue-reference?ref=<ref>` resolves an issue reference to its
+  issue and project UIDs. A bare reference needs `project_id` or `project`, an
+  exact name or UID; `project` also returns `scope_project_uid`. When both are
+  supplied, `project_id` takes precedence and `project` is ignored.
 - `GET /api/v1/ui/launch-target?issue_uid=<uid>` validates one active issue and
   returns a safe absolute route into the standalone browser application:
 
@@ -953,16 +960,20 @@ capabilities, token, transport options, and `join_command`. Supply `hub_url`
 as an HTTP(S) base URL reachable by the spoke, optionally with a federation
 API reverse-proxy prefix. The server does not infer a federation address
 from its browser origin; dedicated browser listeners and authentication proxies
-may not serve federation transport. Non-loopback HTTP URLs, including private
-IP addresses, require `allow_insecure: true`. Without it, enrollment returns
-`400` before issuing a token. The returned join command carries
-`--allow-insecure`; HTTPS still verifies certificates.
+may not serve federation transport. For an ordinary join, non-loopback HTTP
+URLs, including private IP addresses, require `allow_insecure: true`. Without
+it, enrollment returns `400` before issuing a token. The returned command
+carries `--allow-insecure` when needed; HTTPS still verifies certificates.
+On a hub that requires signing, `join.hub_url` uses the hub's signing
+`external_url`. The hub ignores a supplied `hub_url`. The command includes
+signing key placeholders and does not include `--allow-insecure`.
 
 The returned command includes `--project` and the hub project ID, plus any
 push/adoption options. Join fetches the current UID and cursors from the hub
 when it runs, so a purge after enrollment does not leave it using an old baseline.
-Treat the response and command as secrets. Wildcard grants have no project join object; grants without `pull`, or servers without a
-supplied hub URL, have no runnable join command. Legacy API callers
+Treat the response and command as secrets. Wildcard grants have no project join
+object. Grants without `pull`, or without a supplied hub URL or a required-signing
+external URL, have no runnable join command. Legacy API callers
 omitting `hub_url` may issue a grant before enabling federation; those responses
 omit `join` until hub metadata exists. Listing grants
 never returns plaintext tokens or join commands.

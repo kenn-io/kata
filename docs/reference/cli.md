@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-18
+last_edited: 2026-11-20
 ---
 
 # CLI reference
@@ -46,7 +46,7 @@ compactly; `kata --help` has their full descriptions.
 | Flag | Meaning |
 | --- | --- |
 | `--workspace <path>` | Resolve project context from a specific workspace. |
-| `--project <name>` | Select a project explicitly; otherwise resolve `.kata.toml` at or above `--workspace`. |
+| `--project <name-or-id>` | Select a project by name; `show` and `comment` also accept a numeric project ID for bare UID refs. Otherwise resolve `.kata.toml` at or above `--workspace`. Qualified refs select their project by exact name. |
 | `--daemon <name>` | Target a named daemon catalog entry. Without it, select `KATA_SERVER`, workspace config, `active_daemon`, then local. |
 | `--as <actor>` | Override the actor for this command. An explicitly empty value is a validation error; actor fallback applies only when the flag is absent. |
 | `--teammate <handle>` | Attribute supported comments, new issues, and cron run observations to one teammate under the accountable actor. An explicit empty value suppresses `KATA_TEAMMATE`. |
@@ -976,6 +976,49 @@ request fields.
 A preview is a move request, so it needs the same write authority as a real
 move. Read-only tokens and `--insecure-readonly` clients cannot preview.
 
+### Move many issues
+
+Two or more refs, or `--refs-from`, move each issue alone, without its
+descendants; a single ref still moves the subtree. Batches reject `--dry`.
+
+```sh
+kata move source#abc4 source#def5 target-project --comment "routed"
+kata move --refs-from routing.tsv
+kata list --label triaged --limit 0 --json | jq -r '.issues[].uid' > refs.txt
+kata move --refs-from refs.txt target-project
+```
+
+A refs file has one `ref` or `ref<TAB>project` per line; a row's project wins
+over the positional target, which must still name a project when given. A
+leading UTF-8 byte order mark is ignored. Blank lines are ignored, and there is
+no comment syntax: `# note` is treated as an issue ref. Refs can be
+project-qualified short IDs or issue UIDs. Bare short IDs resolve in the
+`--project` project or, when omitted, the bound workspace. A malformed row or more than 5,000 rows fails before
+any move; an empty file succeeds without contacting the daemon. An invalid ref
+or unknown target is refused while other rows still move. When refs resolve to
+the same issue, only the first moves; if they name different targets, all are
+refused.
+
+Up to six issues move concurrently. Agent and JSON output include
+`includes_descendants=false`. Each input gets a result, in input order:
+
+| Result | Meaning |
+| --- | --- |
+| `moved` | The issue moved. |
+| `refused` | The ref or target is invalid, or a move rule refused it. Exits 5. |
+| `unknown` | The move response could not confirm the outcome. Check the issue and its move history before retrying. |
+| `unattempted` | The CLI stopped before sending it. Retry it. |
+
+`--comment` is posted to each moved issue; a failed comment leaves the move in
+place. To retry, remove `moved` rows from the refs file, check `unknown` rows,
+and fix `refused` rows. For a shared target, extract the `unattempted` refs:
+
+```sh
+kata move --refs-from refs.txt target-project --json > results.json
+jq -r '.results[] | select(.result == "unattempted") | .ref' results.json > retry.txt
+kata move --refs-from retry.txt target-project
+```
+
 Federated moves require both projects to use the same active hub. Spokes require
 both projects to be joined, use the same federation actor, and have push enabled
 for a local move. Relay-connected projects are unsupported. Different hubs,
@@ -1075,11 +1118,13 @@ for those workflows. Partial link failures leave the issue open and list the
 IDs already linked. See [document close evidence](../guide/attachments.md#cite-a-document-when-closing-work)
 for historical versions, offline closes and stable retries.
 
-`--dry` validates the close without changing the issue and reports the close
-event it would record. Releases before 0.19.0 spelled this flag `--dry-run`.
+`--dry` validates the close without changing the issue, reports the close
+event it would record, and skips posting `--comment`, though an empty
+`--comment` is still rejected. Releases before 0.19.0 spelled this flag
+`--dry-run`.
 
 `-m` is short for `--message`, and `--body` is accepted as an alias, matching
-`kata comment`. `--comment` still posts a separate follow-up comment.
+`kata comment`. Without `--dry`, `--comment` posts a separate follow-up comment.
 
 `--idempotency-key` makes a close safe to retry after a lost response. For
 seven days, an exact retry returns the original `issue.closed` event through
@@ -1814,8 +1859,13 @@ The canonical browser route is `/kata`. Its independent query state uses
 `view=<name>`, `scope=<project-uid>`, `issue=<issue-uid>`, and `graph=1`, so an
 issue selection preserves the active collection and project context. `/`
 redirects visibly to `/kata`. Collection filters also stay in the query string.
-Project and issue references use their full 26-character UIDs so renames,
-moves, and status changes do not break bookmarks.
+Issue links also accept `issue=project%23short`, or `scope=project&issue=short`
+with an exact project name or UID. If that name is another project's UID, use
+`issue=project%23short`. Use `%23` when a qualified link has a scope or its
+project name looks like a UID. A name scope without an issue is unsupported. The
+address bar keeps the short link through graph and filter changes, and returns
+to UIDs when you select another issue, close it, or change scope. Full UIDs
+survive renames, moves, and status changes.
 
 Local Unix-socket daemons bind an available loopback browser port by default.
 An explicit `[web].listen` wins; port `0` also asks the operating system to
@@ -2288,6 +2338,10 @@ order. Returning from flat to nested starts with parents collapsed. In nested
 view, `space` or right arrow expands the selected parent, left arrow collapses
 it, and `E` toggles every parent in the current list. `E` expands all when any
 parent is collapsed, then collapses all when every parent is already expanded.
+`o` cycles the order of an expanded parent's children: topological (blockers
+before the issues they block, otherwise list order), temporal (list order),
+and priority (P0 first, unprioritized last, then most recently updated, the
+same order `kata next` uses).
 
 `PgUp` and `PgDn` page by the visible issue-list window. When a page lands on
 the first or final page, the cursor keeps its screen row; pressing the same page
@@ -2523,8 +2577,10 @@ kata federation quarantine skip <id> --confirm "SKIP FEDERATION BATCH <id>" --re
 `kata federation status --project <project>` shows detailed sync status for one
 project using the selected daemon. Project readers need a CLI with scoped
 status support and daemon API 0.49.0 or later. Owners can use this command
-with older daemons. Without `--project`, status covers all bound projects and
-requires daemon-owner authority.
+with older daemons. If the project has no federation status, the command prints
+`no federation status for project "<project>"` and exits 4 (not found). Without
+`--project`, status covers all bound projects and requires daemon-owner
+authority.
 
 `kata federation embedding-recipe` exports JSON for the exact document recipe
 in the selected local Kata home's configuration. It makes no daemon or provider
@@ -2596,23 +2652,27 @@ administration authority. See [spoke names](../operations/federation.md#operator
 for naming rules, backups and relay enrollment.
 
 `kata federation enroll --project <project> --hub-url <url>` sends the
-enrollment API call to `<url>` using `--hub-token-env` or a daemon catalog
-credential whose URL matches the hub origin. When entries share an origin,
-the matching URL path takes precedence. A selected `--daemon` entry chooses
-the hub credential only when its full base URL matches `--hub-url`.
-It never forwards the local
-daemon's global `KATA_AUTH_TOKEN` to the hub; callers that used that variable
-for enrollment must pass the hub credential through `--hub-token-env` or a matching
-catalog entry. In identity mode, use the hub's bootstrap token and set `--actor`
-to an existing account with an unscoped API token, which may be expired or
-revoked. First enable the hub project with an account token using
-`kata federation enable`. Bootstrap enrollment reads the enabled hub's metadata
-and creates a grant bound to the selected
-actor's project visibility. Select the project with a positional argument,
-`--project`, or a bound workspace. Outside identity mode, enrollment can create
-a missing project selected with `--project` and enable it. The CLI
-should otherwise remain pointed at the spoke daemon so the printed join
-command can include `--adopt-existing` when the spoke project already exists.
+enrollment API call to the hub main API at `<url>` using `--hub-token-env` or
+a daemon catalog credential whose URL matches the hub origin. When entries
+share an origin, the matching URL path takes precedence. A selected `--daemon`
+entry chooses the hub credential only when its full base URL matches `--hub-url`.
+It never forwards the local daemon's global `KATA_AUTH_TOKEN` to the hub;
+callers that used that variable for enrollment must pass the hub credential
+through `--hub-token-env` or a matching catalog entry. In identity mode, use
+the hub's bootstrap token and set `--actor` to an existing account with an
+unscoped API token, which may be expired or revoked. First enable the hub
+project with an account token using `kata federation enable`. Bootstrap enrollment
+reads the enabled hub's metadata and creates a grant bound to the selected actor's
+project visibility. Select the project with a positional argument, `--project`,
+or a bound workspace.
+Outside identity mode, enrollment can create a missing project selected with
+`--project` and enable it. The CLI should otherwise remain pointed at the spoke
+daemon so the printed join command can include `--adopt-existing` when the
+spoke project already exists.
+A required-signing hub prints its configured `external_url` in the join command
+with signing key placeholders. See
+[federation signing](../operations/federation-signing.md#prepare-the-hub-and-spoke)
+for replacing them and re-running enrollment.
 Each `enroll` with a new token creates another grant and leaves earlier tokens
 valid. Replace a project-scoped token with the
 [rotation API](http-api.md#federation-enrollment-and-health-endpoints), which
@@ -2620,8 +2680,8 @@ revokes active grants for that spoke and project. See the
 [bootstrap rotation example](../operations/federation.md#token-boundaries).
 Use `kata federation enroll --adopt-existing` when adopting a differently named
 spoke project, then edit the printed join command's `--project` value. Join
-fetches the current hub metadata when run. CLI and TUI output call the coordination
-capability `lease`; JSON and API fields use `claim`.
+fetches the current hub metadata when run. CLI and TUI output call the
+coordination capability `lease`; JSON and API fields use `claim`.
 
 `--adopt-existing` is a current-state cutover. It removes the spoke project's
 pre-adoption event history from the live event stream and queues fresh snapshots

@@ -45,7 +45,7 @@ type EnableProjectFederationRequest struct {
 // ProjectFederationRequest reads federation metadata for one project.
 type ProjectFederationRequest struct {
 	ProjectID            int64 `path:"project_id"`
-	RelayProtocolVersion int   `query:"relay_protocol_version" minimum:"1" maximum:"1" doc:"Optionally check existing cross-project issue links for relay protocol 1 before enrollment. Returns 409 relay_cross_project_links when links must be removed."`
+	RelayProtocolVersion int   `query:"relay_protocol_version" minimum:"1" maximum:"1" doc:"Check existing cross-project links before relay enrollment. Links within a shared group are allowed; other links return 409 relay_cross_project_links."`
 }
 
 // RewriteAuthorIdentityRequest rewrites one exact author identity across a
@@ -119,7 +119,7 @@ type ProjectFederationBody struct {
 	ProjectName            string          `json:"project_name"`
 	ReplayHorizonEventID   int64           `json:"replay_horizon_event_id"`
 	BaselineThroughEventID int64           `json:"baseline_through_event_id"`
-	RelayLinksChecked      bool            `json:"relay_links_checked,omitempty" doc:"True when relay_protocol_version was requested and the project has no cross-project issue links. Older daemons omit it."`
+	RelayLinksChecked      bool            `json:"relay_links_checked,omitempty" doc:"True when relay_protocol_version was requested and all existing cross-project links are allowed within the shared group. Older daemons omit it."`
 }
 
 // ProjectFederationResponse wraps ProjectFederationBody.
@@ -190,6 +190,16 @@ type FederationProjectStatus struct {
 	LastError                   *string                       `json:"last_error,omitempty"`
 	HasSyncError                bool                          `json:"has_sync_error,omitempty" doc:"True when a sync error was recorded and omit_errors removed its text."`
 	LastResetAt                 *time.Time                    `json:"last_reset_at,omitempty"`
+	SyncRetry                   *FederationSyncRetry          `json:"sync_retry,omitempty" doc:"Present while this daemon's federation runner waits before it contacts the hub for this spoke binding again."`
+}
+
+// FederationSyncRetry is a spoke binding's automatic retry schedule after the
+// hub refused, throttled, or could not serve its last attempt.
+type FederationSyncRetry struct {
+	Reason        string    `json:"reason" enum:"refused,unavailable,relay_cross_project_links" doc:"refused: the hub rejected the credential (401 or 403); it waits up to 15 minutes between attempts, or longer when the hub also sent Retry-After, and retries at once when the credential or binding changes. unavailable: the hub throttled the request or was unavailable (429 or 503); it waits up to 5 minutes, or longer when the hub sent Retry-After. relay_cross_project_links: a relay hub refused the project's cross-project issue links."`
+	HTTPStatus    int       `json:"http_status" doc:"Hub response status of the last attempt."`
+	Failures      int       `json:"failures" doc:"Consecutive attempts that ended for this reason."`
+	NextAttemptAt time.Time `json:"next_attempt_at" doc:"Earliest time the runner contacts the hub again. The attempt happens on the runner's first pass at or after this time."`
 }
 
 // FederationQuarantineSummary is an unresolved poisoned federation batch shown
@@ -274,6 +284,7 @@ type RelayHandshake struct {
 
 // RelayOfferRequest selects an authenticated stream prefix or exact offered artifact misses.
 type RelayOfferRequest struct {
+	EventFeatures   string   `header:"X-Kata-Event-Features"`
 	ProjectID       int64    `path:"project_id"`
 	Authorization   string   `header:"Authorization"`
 	Stream          string   `query:"stream" enum:"events,receipts,artifacts"`
@@ -284,6 +295,7 @@ type RelayOfferRequest struct {
 
 // RelayResetRequest requests a checkpoint for the presented project transport grant.
 type RelayResetRequest struct {
+	EventFeatures string `header:"X-Kata-Event-Features"`
 	ProjectID     int64  `path:"project_id"`
 	Authorization string `header:"Authorization"`
 }

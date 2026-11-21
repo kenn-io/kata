@@ -92,7 +92,6 @@ func TestEventIssueUIDIndexMigrationUpgradesVersion50(t *testing.T) {
 	t.Cleanup(func() { _ = upgraded.Close() })
 	version, err := upgraded.SchemaVersion(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, 51, version)
 	assert.Equal(t, db.CurrentSchemaVersion(), version)
 	events, err := upgraded.EventsAfter(ctx, db.EventsAfterParams{IssueUID: issue.UID, Limit: 10})
 	require.NoError(t, err)

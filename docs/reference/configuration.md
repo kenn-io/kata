@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-11-18
+last_edited: 2026-11-20
 ---
 
 # Configuration
@@ -41,30 +41,44 @@ identifier. Set a project's `enabled` to `false` to omit its transcript.
 For keyed retries, the client still sends the candidate session identifier to
 the daemon; an opted-out close stores only its fingerprint, not the transcript.
 If the issue or project lookup fails, Kata warns and closes without provenance.
-An explicit process override of `true` records the identifier in that case.
+An explicit process override of `true` or `auto` records the identifier in
+that case.
 If the issue moves after selection and before close, the close returns an
 `issue_moved` conflict. Resolve the issue and retry with the same key.
 
-This is off by default and needs no daemon restart. Claude Code and Codex
-transcripts need HTTP API `0.26.0` or newer. Other agents need HTTP API
-`0.34.0` or newer.
+Claude Code and Codex transcripts need HTTP API `0.26.0` or newer. Other
+agents need HTTP API `0.34.0` or newer.
 Project targets need HTTP API `0.52.0` or newer. With an older daemon, a
 project without an entry retains the global transcript settings. A configured
 project or failed project lookup closes without a transcript. A move between
 lookup and close on an older daemon can record the former project's global
 transcript in the destination project. A keyed retry after such a move can
 conflict if the destination has an entry.
+
+This is off by default and needs no daemon restart. With `enabled = true`,
+every close that finds no current session warns on stderr. Set
+`enabled = "auto"` to attach a transcript when a session is named and stay
+quiet when none is; a session that is named but invalid still warns.
+In the file, `enabled` takes `true`, `false` or `"auto"`. Only `kata close`
+checks it: any other value warns there and skips attachment, but never stops
+the daemon or other commands. A project entry's `enabled` takes the same
+values and overrides the global mode for that project; `"auto"` there records
+when a session is named. A close that names no session warns only when some
+target is `true`, since kata does not look up the issue's project when no
+session is named; with only `auto` and `false` targets it stays quiet.
+
 Before attaching a transcript, `kata close` checks the daemon's API version. An older daemon
 causes a warning on stderr, and the close proceeds without the transcript.
 With attachment disabled, close requests remain unchanged.
 
 To turn attachment on or off for one process without editing the file, set
-`KATA_CLOSE_TRANSCRIPT_ENABLED` to a boolean such as `true` or `false`. `true`
-attaches transcripts even without a config file; `agentsview_url` and
-`session_id_env` still come from the file. It also overrides project enablement.
-`false` attaches nothing, even when
+`KATA_CLOSE_TRANSCRIPT_ENABLED` to `true`, `false` or `auto`. `true`
+attaches transcripts even without a config file; `auto` does the same but
+stays quiet when no session is named; `agentsview_url` and
+`session_id_env` still come from the file. Either one also overrides project
+enablement. `false` attaches nothing, even when
 the file enables attachment, and ignores the file's other transcript settings,
-so a mistake there doesn't warn. A value that isn't a boolean warns on stderr,
+so a mistake there doesn't warn. Any other value warns on stderr,
 and the close proceeds without a transcript. Unset or empty leaves the file in
 charge. An agent integration can set it with `KATA_TRANSCRIPT_AGENT` and
 `KATA_TRANSCRIPT_SESSION_ID` to attach its own sessions without changing
@@ -193,7 +207,7 @@ string; on a keyed retry use `original_event.payload`. Both contain the same
 | `KATA_POSTGRES_ALLOW_INSECURE` | Set to `1` only to permit a non-loopback Postgres connection without server-identity-verified TLS. |
 | `KATA_AUTHOR` | Default actor for mutations. |
 | `KATA_TEAMMATE` | Optional teammate attribution for comments and newly created issues. A command-level `--teammate` overrides it; `--teammate=''` suppresses it. |
-| `KATA_CLOSE_TRANSCRIPT_ENABLED` | Overrides `[close.transcript].enabled` for the process that runs `kata close`. Takes a boolean; `false` also ignores the file's other transcript settings. An invalid value warns and the close proceeds without a transcript. Set it again when retrying a keyed close that used it. |
+| `KATA_CLOSE_TRANSCRIPT_ENABLED` | Overrides `[close.transcript].enabled` for the process that runs `kata close`. Takes `true`, `false` or `auto`; `false` also ignores the file's other transcript settings. An invalid value warns and the close proceeds without a transcript. Set it again when retrying a keyed close that used it. |
 | `KATA_TRANSCRIPT_AGENT` | Agent name for an explicit `KATA_TRANSCRIPT_SESSION_ID`, using the token rules above; setting it skips variable discovery, and an agent alone warns and skips attachment. Preserves the original agent when replaying a keyed close from another shell. |
 | `KATA_TRANSCRIPT_SESSION_ID` | Explicit current closing session ID. Used only when close transcript attachment is enabled; overrides the configured session variables. |
 | `KATA_INBOX_USER` | Exact actor or `actor/teammate` inbox address for `kata inbox` when `--for` is omitted and the TUI Attention view (`T`), which otherwise falls back to the authenticated actor. It does not set attribution and is independent of `KATA_AUTHOR` and `KATA_TEAMMATE`. |
@@ -938,9 +952,16 @@ plaintext opt-in does not change that contract. Install the hub's CA in the
 daemon's trust store when using a private certificate authority.
 
 `read_only` permits pull only. `collaborate` permits pull and push; the hub may
-also grant task claiming. Both require an empty local project. `migrate` asks
-the hub to approve adoption of an existing project's tasks and authors.
+also grant task claiming. Both attach an empty project or rejoin a detached
+project matching the hub UID. Collaborative rejoin reoffers local-origin
+events; the hub deduplicates them, and new events must use the enrollment
+actor. `migrate` asks the hub to approve importing local tasks and authors.
 The helper cannot silently downgrade write access or upgrade read-only access.
+
+An attached replica can switch between `read_only` and `collaborate`: edit
+`intent` and restart the daemon; see
+[Change replica intent](../operations/federation.md#change-replica-intent).
+Changing to or from `migrate` still requires leaving the hub first.
 
 Kata retains the request across restarts and failed exchanges. A helper that
 exits `2` reports `configuration_conflict` in reconciliation health; check its
@@ -1179,10 +1200,10 @@ model    = "nomic-embed-text"
 # query_suffix = ""
 # request_dimensions = false    # send dims only if the provider supports it
 # dims                          # expected vector dimensionality (default 768)
-# batch_size                    # inputs per request (default 64)
+# batch_size                    # inputs per request (default 64; built-in server 8)
 # model_context_tokens          # model's maximum tokens for one input
 # max_batch_tokens              # provider's aggregate input-token cap per request
-# timeout_seconds               # per-request timeout (default 30)
+# timeout_seconds               # per-request timeout (default 30; built-in server 300)
 # trust_private_network = false # allow plaintext HTTP to literal non-public IPs
 ```
 
@@ -1353,6 +1374,16 @@ During that backfill the vector leg is unavailable (queries embedded under
 the new configuration cannot be scored against the old generation's vectors), so
 `auto` searches degrade to labeled lexical results and explicit
 `--hybrid`/`--semantic` requests return 503 until the cutover.
+
+<a id="telemetry"></a><a id="reporting-rules"></a>
+
+## Usage reporting
+
+Kata can send general, anonymous usage telemetry. Usage telemetry is off
+unless you have opted in or set `TELEMETRY_ENABLED=1`. Any of these turns it
+off: `KATA_TELEMETRY_ENABLED=0`, `TELEMETRY_ENABLED=0`,
+`DO_NOT_TRACK`, or `CI`. Development builds never send it.
+Tagged `go install` builds report their release version but send no usage telemetry because they lack version control revision metadata.
 
 ## Federation credentials
 

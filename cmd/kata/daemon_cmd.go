@@ -1487,6 +1487,13 @@ func runDaemonProcess(
 		insecureReadonly, allowLocalSession, allowTrustedProxySession, dcfg.Auth.Token,
 	)
 	webCapabilities := []string{webAuthentication, updates}
+	webHandler, releaseAssets, err := kataweb.NewEmbeddedHandlerWithReleaseStatus()
+	if err != nil {
+		return fmt.Errorf("build embedded web handler: %w", err)
+	}
+	if !releaseAssets {
+		webCapabilities = append(webCapabilities, daemonruntime.WebCapabilityPlaceholderAssets)
+	}
 	webRuntime, err := daemon.NewWebRuntime(daemon.WebRuntimeOptions{
 		Origin:       webEndpoint.Origin,
 		OriginStable: webEndpoint.OriginStable,
@@ -1565,8 +1572,9 @@ func runDaemonProcess(
 		})
 	}
 	syncOutcome := daemon.NewSyncOutcomeObserver(telemetryReporter)
+	federationRetries := federation.NewSyncRetries()
 	federationWake := startFederationRunner(
-		ctx, workers, waitableDrainAdmission, store, publisher, daemonLog, syncOutcome, embeddingWake,
+		ctx, workers, waitableDrainAdmission, store, publisher, daemonLog, federationRetries, syncOutcome, embeddingWake,
 	)
 	startDueNotificationSweeper(
 		ctx, workers, waitableDrainAdmission, store, publisher, dcfg.Timezone, daemonLog,
@@ -1672,10 +1680,6 @@ func runDaemonProcess(
 		}
 		defer func() { _ = signingVerifier.Close() }()
 	}
-	webHandler, err := kataweb.NewEmbeddedHandler()
-	if err != nil {
-		return fmt.Errorf("build embedded web handler: %w", err)
-	}
 	docbankClient := docbank.New(dcfg.Docbank)
 	var mcpHandler http.Handler
 	if dcfg.MCP.Enabled {
@@ -1743,6 +1747,7 @@ func runDaemonProcess(
 		EmbeddingWake:          embeddingWake,
 		FederationCatalog:      append([]config.CatalogDaemonConfig(nil), dcfg.Daemons...),
 		WebDaemons:             append([]config.CatalogDaemonConfig(nil), dcfg.Daemons...),
+		WebSyncHubs:            dcfg.WebSyncHubs(),
 		ActiveWebDaemon:        dcfg.ActiveDaemon,
 		GitHubSyncFetcher:      gitHubSyncFetcher,
 		GitHubSyncConfig:       dcfg.GitHubSync,
@@ -1793,6 +1798,7 @@ func runDaemonProcess(
 		VectorIndex:            vectorIndex,
 		ReconcilerHealth:       reconcilerHealth,
 		FederationConfigHealth: federationConfigHealth,
+		FederationSyncRetry:    federationRetries.FederationSyncRetry,
 		IdleAdmission:          idleAdmission,
 		IdleShutdownHealth:     idleHealth,
 	})
@@ -2109,6 +2115,7 @@ func startFederationRunner(
 	store db.Storage,
 	publisher daemon.EventPublisher,
 	daemonLog *log.Logger,
+	retries *federation.SyncRetries,
 	onSpokeResult func(string, int64, error),
 	onSyncComplete ...func(),
 ) func() {
@@ -2125,6 +2132,7 @@ func startFederationRunner(
 		Interval:       federationRunnerInterval(),
 		Wake:           wake,
 		DrainAdmission: drainAdmission,
+		Retries:        retries,
 		OnError: func(err error) {
 			daemonLog.Printf("federation: %v", err)
 		},
@@ -2248,7 +2256,7 @@ func startEmbeddingReconciler(
 	if len(publishers) > 0 {
 		publisher = publishers[0]
 	}
-	reconciler := daemon.NewConfiguredEmbeddingReconciler(store, idx, embedder, ec, publisher, drainAdmission, config.DefaultFederationCredentialStore(), federation.EmbeddingProducerConnected, federation.EmbeddingProducerAuthorized)
+	reconciler := daemon.NewConfiguredEmbeddingReconciler(store, idx, embedder, ec, publisher, drainAdmission, config.DefaultFederationCredentialStore(), federation.EmbeddingProducerConnected, federation.EmbeddingProducerAuthorized, nil)
 	workers.Go(func() {
 		if err := reconciler.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			daemonLog.Printf("reconciler: %v", err)

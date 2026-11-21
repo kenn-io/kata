@@ -340,11 +340,12 @@ func probeDaemonSelection(
 		}
 		resolved, found, err = client.DiscoverResolved(ctx, ns.DataDir)
 		if found && selection.Resolved.Name != "" {
-			resolved = selection.Resolved.WithRunning(resolved.Running())
+			resolved = selection.Resolved.WithDiscovered(resolved)
 		}
 	}
 	if err != nil {
 		result.Message = err.Error()
+		result = diagnosisUnreachable(result, err)
 		if errors.Is(err, client.ErrProfileIdentityMismatch) {
 			result.State = "wrong_database"
 			if mismatch, ok := errors.AsType[*client.LocalProfileIdentityError](err); ok {
@@ -378,14 +379,8 @@ func probeDaemonSelection(
 		return result, selection, err
 	}
 	ping, err := apiClient.Ping(ctx)
-	if err != nil {
-		result.State = "local_unreachable"
-		if result.Kind == "remote" {
-			result.State = unavailableRemoteState(result.Endpoint)
-		}
-		return withDiagnosisAction(result), selection, nil
-	}
-	if ping == nil || !ping.Ok || ping.Service != "kata" {
+	if err != nil || ping == nil || !ping.Ok || ping.Service != "kata" {
+		result = diagnosisUnreachable(result, resolved.Unreachable(ctx, err))
 		result.State = "local_unreachable"
 		if result.Kind == "remote" {
 			result.State = unavailableRemoteState(result.Endpoint)
@@ -471,6 +466,13 @@ func safeDaemonOrigin(value string) string {
 	return parsed.Scheme + "://" + parsed.Host
 }
 
+func diagnosisUnreachable(result daemonDiagnosis, err error) daemonDiagnosis {
+	if e, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok {
+		result.Message, result.NextAction, result.PID, result.Endpoint = e.Summary(), e.RecoveryAdvice(), e.PID, e.Address
+	}
+	return result
+}
+
 func withDiagnosisAction(result daemonDiagnosis) daemonDiagnosis {
 	switch result.State {
 	case "ready":
@@ -505,14 +507,20 @@ func withDiagnosisAction(result daemonDiagnosis) daemonDiagnosis {
 	case "selection_error":
 		result.NextAction = "repair the selected routing configuration; current-home processes are listed separately"
 	default:
-		result.NextAction = "inspect the selected process and its credentials; do not switch databases"
+		if result.State != "local_unreachable" || (result.NextAction == "" && (result.Message == "" || result.PID == 0)) {
+			result.NextAction = "inspect the selected process and its credentials; do not switch databases"
+		}
 	}
 	return result
 }
 
 func diagnosisError(result daemonDiagnosis) error {
 	data, _ := json.Marshal(result)
-	return &cliError{Message: result.State + ": " + result.NextAction, Code: result.State, Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail, Data: data}
+	message, hint := result.State+": "+result.NextAction, ""
+	if result.State == "local_unreachable" && result.Message != "" {
+		message, hint = result.Message, result.NextAction
+	}
+	return &cliError{Message: message, Hint: hint, Code: result.State, Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail, Data: data}
 }
 
 func printDaemonDiagnosis(cmd *cobra.Command, result daemonDiagnosis) error {

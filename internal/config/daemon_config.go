@@ -360,8 +360,8 @@ type CatalogDaemonConfig struct {
 
 // CloseConfig is the [close] block of <KATA_HOME>/config.toml.
 type CloseConfig struct {
-	Throttle   CloseThrottleConfig   `toml:"throttle"`
-	Transcript CloseTranscriptConfig `toml:"transcript"`
+	Throttle   CloseThrottleConfig `toml:"throttle"`
+	Transcript closeTranscriptFile `toml:"transcript"`
 }
 
 const defaultCloseThrottleWindow = 60 * time.Second

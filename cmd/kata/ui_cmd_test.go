@@ -20,21 +20,33 @@ import (
 	"go.kenn.io/kata/internal/web"
 )
 
-func TestUICommandRejectsCompilationStub(t *testing.T) {
-	oldPrepare := prepareWebUIForCommand
-	oldValidate := validateWebUIAssetsForCommand
-	prepareWebUIForCommand = func(context.Context, client.PrepareWebUIOptions) (client.PreparedWebUI, error) {
-		return client.PreparedWebUI{}, nil
+func TestUICommandAssetRequirement(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		assetErr   error
+		wantAssets bool
+	}{
+		{"source", errors.New("stub"), false},
+		{"release", nil, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stubUICommandLaunch(t, client.PreparedWebUI{BaseURL: "https://daemon.example", ConfiguredRemote: true})
+			validateWebUIAssetsForCommand = func() error { return tc.assetErr }
+			prepareWebUIForCommand = func(_ context.Context, opts client.PrepareWebUIOptions) (client.PreparedWebUI, error) {
+				assert.Equal(t, tc.wantAssets, opts.RequireWebAssets)
+				return client.PreparedWebUI{}, errors.New("stop after selection")
+			}
+			_, err := runCmdOutput(t, nil, "ui")
+			require.ErrorContains(t, err, "stop after selection")
+		})
 	}
-	validateWebUIAssetsForCommand = web.ValidateEmbeddedRelease
-	t.Cleanup(func() {
-		prepareWebUIForCommand = oldPrepare
-		validateWebUIAssetsForCommand = oldValidate
-	})
+}
 
+func TestUICommandRejectsCompilationStub(t *testing.T) {
+	stubUICommandLaunch(t, client.PreparedWebUI{})
+	validateWebUIAssetsForCommand = func() error { return errors.New("stub") }
 	_, err := runCmdOutput(t, nil, "ui")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "release binary")
+	require.ErrorContains(t, err, "release binary")
 }
 
 func TestUICommandNoArgOpensInbox(t *testing.T) {

@@ -1265,29 +1265,6 @@ func (d *Store) materializeFederatedProjectTx(
 	acceptedEventUIDs []string,
 	validator *db.CronReplayValidator,
 ) error {
-	return d.materializeFederatedProjectTxScoped(ctx, tx, projectID, reconcileLinks, acceptedEventUIDs, validator, false)
-}
-
-func (d *Store) materializeFederatedProjectRelayTx(
-	ctx context.Context,
-	tx *sql.Tx,
-	projectID int64,
-	reconcileLinks bool,
-	acceptedEventUIDs []string,
-	validator *db.CronReplayValidator,
-) error {
-	return d.materializeFederatedProjectTxScoped(ctx, tx, projectID, reconcileLinks, acceptedEventUIDs, validator, true)
-}
-
-func (d *Store) materializeFederatedProjectTxScoped(
-	ctx context.Context,
-	tx *sql.Tx,
-	projectID int64,
-	reconcileLinks bool,
-	acceptedEventUIDs []string,
-	validator *db.CronReplayValidator,
-	projectOnlyLinks bool,
-) error {
 	// Take this lock before reading anything. Besides serializing cron
 	// state, it makes a fresh deferred transaction, such as the one
 	// materializeFederatedProject begins, a writer before it reads the event
@@ -1358,12 +1335,7 @@ func (d *Store) materializeFederatedProjectTxScoped(
 		return err
 	}
 	if reconcileLinks {
-		if projectOnlyLinks {
-			err = reconcileFederatedLinkGroup(ctx, tx, []int64{projectID}, []int64{projectID}, projectID, issueIDs)
-		} else {
-			err = reconcileFederatedLinks(ctx, tx, binding, projectID, issueIDs)
-		}
-		if err != nil {
+		if err := reconcileFederatedLinks(ctx, tx, binding, projectID, issueIDs); err != nil {
 			return err
 		}
 	}

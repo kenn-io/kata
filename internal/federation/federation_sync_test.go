@@ -1036,20 +1036,6 @@ func TestSyncFederationOnceAutoRetriesFormerPeerReferenceQuarantine(t *testing.T
 	spoke := testenv.New(t)
 	project, err := spoke.DB.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
-	binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
-		ProjectID:            project.ID,
-		Role:                 db.FederationRoleSpoke,
-		HubURL:               "http://127.0.0.1:1",
-		HubProjectID:         42,
-		HubProjectUID:        project.UID,
-		ReplayHorizonEventID: 50,
-		PullCursorEventID:    49,
-		PushEnabled:          true,
-		Actor:                "tester",
-		PushCursorEventID:    0,
-		Enabled:              true,
-	})
-	require.NoError(t, err)
 	localIssue, localEvent, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: project.ID,
 		Title:     "pending local",
@@ -1077,6 +1063,20 @@ func TestSyncFederationOnceAutoRetriesFormerPeerReferenceQuarantine(t *testing.T
 		ToShortID:    peerIssue.ShortID,
 		ToUID:        peerIssue.UID,
 		Actor:        "tester",
+	})
+	require.NoError(t, err)
+	binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            project.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://127.0.0.1:1",
+		HubProjectID:         42,
+		HubProjectUID:        project.UID,
+		ReplayHorizonEventID: 50,
+		PullCursorEventID:    49,
+		PushEnabled:          true,
+		Actor:                "tester",
+		PushCursorEventID:    0,
+		Enabled:              true,
 	})
 	require.NoError(t, err)
 	_, err = spoke.DB.RecordFederationQuarantine(ctx, db.RecordFederationQuarantineParams{
@@ -1423,6 +1423,72 @@ func TestSyncFederationOnceResetBlockedByLocalEventCreatedDuringMetadataRefresh(
 	require.NoError(t, err)
 }
 
+// A caller reads the binding before it waits for its sync turn, and an intent
+// change can turn push on while it waits. The turn must guard its reset with
+// the binding stored when the turn starts; the caller's read-only copy would
+// reset without checking for local changes.
+func TestSyncFederationPullOnlyOnceGuardsResetWithBindingStoredAtTurnStart(t *testing.T) {
+	ctx := t.Context()
+	spoke := testenv.New(t)
+	project, err := spoke.DB.CreateProject(ctx, "hub")
+	require.NoError(t, err)
+	stored := db.FederationBinding{
+		ProjectID:            project.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://127.0.0.1:1",
+		HubProjectID:         42,
+		HubProjectUID:        project.UID,
+		ReplayHorizonEventID: 50,
+		PullCursorEventID:    49,
+		PushEnabled:          false,
+		Actor:                "tester",
+		Enabled:              true,
+	}
+	callerCopy, err := spoke.DB.UpsertFederationBinding(ctx, stored)
+	require.NoError(t, err)
+	stored.PushEnabled = true
+	_, err = spoke.DB.UpsertFederationBinding(ctx, stored)
+	require.NoError(t, err)
+	_, _, err = spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "created after writes turned on",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/projects/42/federation/events":
+			require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{
+				ResetRequired: true,
+				ResetAfterID:  90,
+				Events:        []api.EventEnvelope{},
+				NextAfterID:   90,
+			}))
+		case "/api/v1/projects/42/federation/metadata":
+			require.NoError(t, json.NewEncoder(w).Encode(api.ProjectFederationBody{
+				ProjectID:              42,
+				ProjectUID:             project.UID,
+				ProjectName:            project.Name,
+				ReplayHorizonEventID:   91,
+				BaselineThroughEventID: 91,
+			}))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(hub.Close)
+
+	err = SyncFederationPullOnlyOnce(ctx, spoke.DB, callerCopy, config.FederationCredential{
+		HubURL:       hub.URL,
+		HubProjectID: 42,
+		Token:        "token",
+	})
+
+	require.ErrorIs(t, err, ErrFederationResetBlockedByPendingPush)
+	_, err = spoke.DB.IssueByUID(ctx, mustIssueUIDByTitle(t, spoke.DB, "created after writes turned on"), db.IncludeDeletedNo)
+	require.NoError(t, err)
+}
+
 func TestFederationMultiProjectEnrollmentSyncMatrix(t *testing.T) {
 	type scenario struct {
 		firstTaskBeforeEnrollment bool
@@ -1497,7 +1563,7 @@ func TestFederationMultiProjectEnrollmentSyncMatrix(t *testing.T) {
 				if !project.before {
 					project.issue = matrixCreateInitialState(t, spoke.DB, project.local, project.tag)
 				}
-				if !linked && first.issue.ID != 0 && peer.issue.ID != 0 {
+				if !linked && first.enrolled && peer.enrolled && first.issue.ID != 0 && peer.issue.ID != 0 {
 					matrixCreateCrossProjectLink(t, spoke.DB, first.issue, peer.issue)
 					linked = true
 				}
@@ -5000,7 +5066,7 @@ func TestSyncFederationMoveProofRejectsOtherOrigin(t *testing.T) {
 			binding, err := spoke.DB.FederationBindingByProject(ctx, replicas[1].ID)
 			require.NoError(t, err)
 			runner := Runner{DB: spoke.DB}
-			_, err = runner.runSpoke(ctx, activeSpokeBinding{project: replicas[1], binding: binding}, credentials, nil, nil)
+			_, _, err = runner.runSpoke(ctx, activeSpokeBinding{project: replicas[1], binding: binding}, credentials, nil, nil)
 			require.Error(t, err, "a pending move must not cross an altered source credential origin")
 			var status *HubStatusError
 			require.False(t, errors.As(err, &status), "reject the target mismatch locally before sending source proof")
@@ -5064,7 +5130,7 @@ func TestFederationMoveSourceProofPreservesPlaintextPolicy(t *testing.T) {
 			require.NoError(t, err)
 			credentials := newMoveCredentialStore()
 			require.NoError(t, credentials.StoreFederationCredential(ctx, source.UID, config.FederationCredential{HubURL: "http://daemon.example", HubProjectID: source.ID, Actor: "worker", Token: "source-plaintext-proof", AllowInsecure: test.credentialAllow}))
-			tokens, err := federationMoveSourceTokens(ctx, env.DB, credentials, destinationBinding, destinationBinding.HubURL, move.Events, clientpkg.Opts{})
+			tokens, err := federationMoveSourceTokens(ctx, env.DB, credentials, destinationBinding, destinationBinding.HubURL, move.Events, clientpkg.Opts{AllowInsecure: true})
 			if test.wantError {
 				require.Error(t, err)
 				require.Empty(t, tokens)

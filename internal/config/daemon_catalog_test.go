@@ -10,6 +10,22 @@ import (
 	"go.kenn.io/kata/internal/config"
 )
 
+func TestWebSyncHubs(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		daemons []config.CatalogDaemonConfig
+		want    []string
+	}{
+		{"token hub", []config.CatalogDaemonConfig{{Name: "hub", Token: "example-token"}}, nil},
+		{"unmapped target", []config.CatalogDaemonConfig{{Name: "hub"}, {Name: "other"}}, []string{"hub"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := config.DaemonConfig{Daemons: tc.daemons, Federation: config.FederationConfig{Projects: []config.FederationProjectConfig{{Hub: "hub"}}}}
+			assert.Equal(t, tc.want, cfg.WebSyncHubs())
+		})
+	}
+}
+
 // Catalog credentials obey the same selected-source contract as auth and MCP:
 // inline > file > environment, with no fallback from a failed selected source.
 func TestCatalogClientTokenSources(t *testing.T) {

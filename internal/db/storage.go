@@ -154,6 +154,7 @@ type Storage interface {
 	ProjectByName(ctx context.Context, name string) (Project, error)
 	ProjectByNameIncludingArchived(ctx context.Context, name string) (Project, error)
 	ProjectByUID(ctx context.Context, uid string) (Project, error)
+	ProjectByUIDTx(ctx context.Context, tx Transaction, uid string) (Project, error)
 	ListProjects(ctx context.Context) ([]Project, error)
 	ListProjectsIncludingArchived(ctx context.Context) ([]Project, error)
 	RenameProject(ctx context.Context, id int64, name string) (Project, error)
@@ -486,6 +487,23 @@ type Storage interface {
 	// while the home has no other history of one of those issues.
 	AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string) error
 	EnableFederationPush(ctx context.Context, projectID int64, cursor int64) (FederationBinding, error)
+	// DisableFederationPushWhenSettled turns push off for a direct spoke
+	// binding in the same transaction that proves no local-origin event above
+	// the push cursor, no live claim held by this replica, no open claim
+	// request, and no cron run still running as the bound actor remains.
+	// Otherwise it changes nothing and returns ErrFederationPushPending,
+	// ErrFederationClaimsHeld, or ErrFederationRunsActive. An enabled binding
+	// whose project has an active external root binding returns
+	// ErrExternalRootFederationConflict, as UpsertFederationBinding does for a
+	// read-only spoke. A binding whose push is already off is returned
+	// unchanged once the same claim and cron run checks pass.
+	DisableFederationPushWhenSettled(ctx context.Context, projectID int64, originInstanceUID string) (FederationBinding, error)
+	// ReplaceFederationBoundActorWhenSettled changes a direct spoke binding's
+	// bound actor from fromActor to toActor under the same settled checks,
+	// with pending push checked only while push is on. It returns the binding
+	// unchanged when it already has toActor and ErrFederationBoundActorChanged
+	// when it has neither actor.
+	ReplaceFederationBoundActorWhenSettled(ctx context.Context, projectID int64, originInstanceUID, fromActor, toActor string) (FederationBinding, error)
 	ResetFederatedProjectIfNoPendingPush(ctx context.Context, projectID, replayHorizonEventID, pullCursorEventID int64, originInstanceUID string, pushCursorEventID int64) error
 	IngestFederationEvents(ctx context.Context, p FederationIngestParams) (FederationIngestResult, error)
 }

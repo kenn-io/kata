@@ -115,7 +115,16 @@ var storageScenarios = []scenario{
 	}},
 	{name: "relay topology", methods: []string{"SetRelayBindingConfig"}, run: func(t *testing.T, store db.Storage) error { RunRelayTopology(t, store); return nil }},
 	{name: "relay enrollment", methods: []string{"CreateRelayEnrollment"}, run: func(t *testing.T, store db.Storage) error { RunRelayEnrollmentScope(t, store); return nil }},
-	{name: "relay cross-project boundary", methods: []string{"AdoptProjectIntoFederation", "AuthorizeFederationToken", "CheckRelayProjectLinks", "CloseIssueWithEvents", "CreateAPIToken", "CreateIssue", "CreateLink", "CreateLinkAndEvent", "CreateProject", "CreateRelayEnrollment", "DeleteLinkAndEvent", "EditIssueAtomic", "EventsAfter", "FederationBindingByProject", "InstanceUID", "IssueByID", "LinkByID", "LinksByIssue", "MoveIssueProject", "ParentOf", "PendingRelayDeliveries", "PinRootAuthority", "ProjectByID", "SetRelayBindingConfig", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error { RunRelayCrossProjectBoundary(t, store); return nil }},
+	{name: "relay cross-project boundary", methods: []string{"AcceptRelayDeliveries", "AckRelayDeliveries", "AdoptProjectIntoFederation", "AuthorizeFederationToken", "CheckRelayProjectLinks", "CloseIssueWithEvents", "CreateAPIToken", "CreateIssue", "CreateLink", "CreateLinkAndEvent", "CreateProject", "CreateProjectWithUID", "CreateRelayEnrollment", "CreateTeam", "DeleteLinkAndEvent", "EditIssueAtomic", "EventsAfter", "FederationBindingByProject", "InstanceUID", "IssueByID", "IssueByUID", "LinkByID", "LinksByIssue", "MoveIssueProject", "ParentOf", "PendingRelayDeliveries", "PinRootAuthority", "ProjectAccessPolicy", "ProjectByID", "ProjectByUID", "RemoveProject", "RootAuthority", "SetProjectAccessPolicy", "SetRelayBindingConfig", "UpsertFederationBinding"}, runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+		RunRelayCrossProjectBoundary(t, store, backend)
+		return nil
+	}},
+	{name: "relay archived source restoration", runWithBackend: checkRelayArchivedSourceRestoration},
+	{name: "relay archived peer reconnect", run: checkRelayArchivedPeerReconnect},
+	{name: "relay cross-link reset history", runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+		RunRelayCrossLinkResetHistory(t, store, backend)
+		return nil
+	}},
 	{name: "relay checkpoint capacity", methods: []string{"CreateAPIToken", "CreateIssue", "CreateProject", "CreateRelayEnrollment", "ListFederationEnrollments", "PinRootAuthority", "UpsertFederationBinding"}, runWithBackend: func(t *testing.T, _ db.Storage, backend Backend) error {
 		RunRelayCheckpointCapacity(t, backend)
 		return nil
@@ -153,6 +162,11 @@ var storageScenarios = []scenario{
 		RunLegacyRelayParentUIDCollision(t, store)
 		return nil
 	}},
+	{name: "relay cross project removal", run: func(t *testing.T, store db.Storage) error { RunRelayCrossProjectRemoval(t, store); return nil }},
+	{name: "relay event release peer access", runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+		RunRelayEventReleasePeerAccess(t, store, backend)
+		return nil
+	}},
 	{name: "relay offers legacy ingested events", methods: []string{"IngestFederationEvents", "PendingRelayDeliveries", "PatchIssueMetadata"}, run: func(t *testing.T, store db.Storage) error {
 		RunRelayOffersLegacyIngestedEvents(t, store)
 		return nil
@@ -170,6 +184,10 @@ var storageScenarios = []scenario{
 	}},
 	{name: "relay link boundary keeps same-project effects", methods: []string{"AcceptRelayDeliveries", "CreateAPIToken", "CreateIssue", "CreateProject", "CreateRelayEnrollment", "DeleteLinkAndEvent", "IngestFederationEvents", "IssueByUID", "LinksByIssue", "MaterializeFederatedProject", "PinRootAuthority", "RevokeFederationEnrollment", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error {
 		RunRelayLinkBoundaryKeepsSameProjectEffects(t, store)
+		return nil
+	}},
+	{name: "link server boundary", methods: []string{"CreateProject", "CreateIssue", "CreateLinkAndEvent", "EditIssueAtomic", "EventsAfter", "IssueByID", "LinksByIssue", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error {
+		RunLinkServerBoundary(t, store)
 		return nil
 	}},
 	{name: "relay link boundary follows active grants", methods: []string{"CreateAPIToken", "CreateIssue", "CreateLinkAndEvent", "CreateProject", "CreateRelayEnrollment", "IngestFederationEvents", "LinksByIssue", "MaterializeFederatedProject", "PinRootAuthority", "RevokeFederationEnrollment", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error {
@@ -216,6 +234,9 @@ var storageScenarios = []scenario{
 	{name: "federated parked move recovery", methods: []string{"IsFederationRetainedProject", "MaxEventID", "LeaveFederationReplica", "FederationBindingByProject", "CreateComment", "PendingFederationPushEvents", "PendingFederationPushStats", "ResetFederatedProjectIfNoPendingPush", "AdvanceFederationPushCursor", "ResetFederatedProject", "EventsByUIDs", "CommentsByIssue", "ProjectByUID", "ProjectAccessPolicy", "RestoreProject", "CreateIssue", "CreateProject", "CreateProjectWithUID", "EnableProjectFederation", "InsertRemoteEvents", "CreateLinkAndEvent", "MaterializeFederatedProject", "MoveIssueProject", "UpsertFederationBinding", "IssueByUID"}, runWithBackend: checkFederatedParkedMoveRecovery},
 	{name: "remote event batch insert", methods: []string{"InsertRemoteEvents", "AdoptProjectIntoFederation", "MaterializeFederatedProject"}, runWithBackend: checkRemoteEventBatchInsert},
 	{name: "pushed definition authorship", methods: []string{"PutCronWorkflow", "IngestFederationEvents", "CronWorkflow"}, run: checkPushedDefinitionAuthorship},
+	{name: "federation push disable waits for local work", methods: []string{"CreateProject", "CreateIssue", "UpsertFederationBinding", "DisableFederationPushWhenSettled", "MaxLocalOriginEventID", "AdvanceFederationPushCursor", "UpsertClaimCache", "ApplyClaimStatus", "EnqueuePendingClaim", "RejectPendingClaim", "FederationBindingByProject", "IssueByID"}, run: checkFederationPushDisableWaitsForLocalWork},
+	{name: "federation push disable refuses an external root", methods: []string{"CreateProject", "CreateIssue", "CreateExternalRootBinding", "UpsertFederationBinding", "DisableFederationPushWhenSettled", "MaxLocalOriginEventID", "AdvanceFederationPushCursor", "FederationBindingByProject", "ExternalRootBindingByID"}, run: checkFederationPushDisableRefusesExternalRoot},
+	{name: "federation bound actor replacement waits for work", methods: []string{"CreateProject", "CreateIssue", "ObserveCronRun", "AdoptProjectIntoFederation", "EnableFederationPush", "ReplaceFederationBoundActorWhenSettled", "MaxLocalOriginEventID", "AdvanceFederationPushCursor", "FederationBindingByProject", "UpsertFederationBinding"}, run: checkFederationBoundActorReplacementWaitsForWork},
 	{name: "run actor survives push enablement", methods: []string{"ObserveCronRun", "AdoptProjectIntoFederation", "EnableFederationPush"}, run: checkRunActorSurvivesPushEnablement},
 	{name: "hub accepts known run actor", methods: []string{"ObserveCronRun", "IngestFederationEvents"}, run: checkHubAcceptsKnownRunActor},
 	{name: "cron reads tolerate tightened rules", methods: []string{"PutCronJob", "CronJob", "ListCronJobs", "ExportCronJobs"}, run: checkCronReadsTolerateTightenedRules},
@@ -329,7 +350,7 @@ var storageScenarios = []scenario{
 	{name: "issue status archive fence", methods: []string{"CreateProject", "ClaimIssueSyncBinding", "UpsertIssueSyncBinding", "RemoveProject", "RestoreProject"}, run: checkIssueStatusArchiveFence},
 	{name: "issue status locator", methods: []string{"CreateIssue", "CreateProject", "CloseIssue", "ClaimIssueSyncBinding", "SoftDeleteIssue", "UpsertIssueSyncBinding", "UpsertImportMapping"}, runWithBackend: checkIssueStatusLocator},
 	{name: "federated move cron metadata", methods: []string{"DispatchRecurringCron", "IngestFederationEvents"}, run: checkFederatedMoveCronMetadata},
-	{name: "federated move guards", methods: []string{"AdvanceFederationPushCursor", "ClaimExternalRootBinding", "CreateComment", "CreateExternalRootBinding", "CreateFederationEnrollment", "CreateIssue", "CreateProject", "CreateRecurrence", "EditIssue", "EnableProjectFederation", "FederationBindingByProject", "FederationEnrollmentTransactionFence", "IngestFederationEvents", "IssueByID", "LeaveFederationReplica", "MaterializeNext", "MaxEventID", "MoveIssueProject", "ProjectByID", "RecordFederationQuarantine", "RemoveProject", "SkipFederationQuarantine", "UpsertFederationBinding", "UpsertImportMapping", "UpsertIssueSyncBinding"}, run: checkFederatedMoveGuards},
+	{name: "federated move guards", methods: []string{"AdvanceFederationPushCursor", "ClaimExternalRootBinding", "CreateComment", "CreateExternalRootBinding", "CreateFederationEnrollment", "CreateIssue", "CreateProject", "CreateRecurrence", "DisableFederationPushWhenSettled", "EditIssue", "EnableProjectFederation", "FederationBindingByProject", "FederationEnrollmentTransactionFence", "IngestFederationEvents", "IssueByID", "LeaveFederationReplica", "MaterializeNext", "MaxEventID", "MoveIssueProject", "ProjectByID", "RecordFederationQuarantine", "RemoveProject", "ReplaceFederationBoundActorWhenSettled", "SkipFederationQuarantine", "UpsertFederationBinding", "UpsertImportMapping", "UpsertIssueSyncBinding"}, run: checkFederatedMoveGuards},
 	{name: "federated former project identity cleanup", methods: []string{"PurgeProject", "MergeProjects", "LeaveFederationReplica", "RemoveProject", "ResetFederatedProject"}, run: checkFederatedFormerProjectIdentityCleanup},
 	{name: "federated former project identity adoption", methods: []string{"AdoptProjectIntoFederation", "LeaveFederationReplica", "ResetFederatedProject"}, run: checkFederatedFormerProjectIdentityAdoption},
 	{name: "federated receiver departing references", methods: []string{"InsertRemoteEvents", "MaterializeFederatedProject", "IssueByShortID", "CreateIssue", "PurgeIssue", "MergeProjects"}, runWithBackend: checkFederatedReceiverDepartingReferences},
@@ -344,6 +365,8 @@ var storageScenarios = []scenario{
 	{name: "federated move snapshot authority", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "EnableProjectFederation", "CreateFederationEnrollment", "IngestFederationEvents", "MaterializeFederatedProject"}, run: checkFederatedMoveSnapshotAuthority},
 	{name: "moved ordinary issue adoption", methods: []string{"CreateProject", "CreateIssue", "MoveIssueProject", "AdoptProjectIntoFederation", "IssueByUID", "PendingFederationPushEvents"}, run: checkMovedOrdinaryIssueAdoption},
 	{name: "federated cron run issue authority", methods: []string{"IngestFederationEvents", "MoveIssueProject", "ObserveCronRun"}, run: checkFederatedCronRunIssueAuthority},
+	{name: "federated reference batch authority", methods: []string{"IngestFederationEvents"}, run: checkFederatedReferenceBatchAuthority},
+	{name: "federated parent without reference controller", methods: []string{"IngestFederationEvents"}, run: checkFederatedParentWithoutReferenceController},
 	{name: "federated fresh current project authority", methods: []string{"IngestFederationEvents", "MoveIssueProject"}, run: checkFederatedFreshCurrentProjectAuthority},
 	{name: "federated move reset after acknowledged source leave", methods: []string{"CreateIssue", "MoveIssueProject", "AdvanceFederationPushCursor", "LeaveFederationReplica", "ResetFederatedProject", "ResetFederatedProjectIfNoPendingPush"}, run: checkFederatedMoveResetAfterAcknowledgedSourceLeave},
 	{name: "federated move reset retained link", methods: []string{"CreateLinkAndEvent", "ResetFederatedProject", "ResetFederatedProjectIfNoPendingPush"}, run: checkFederatedMoveResetRetainedLink},
@@ -442,7 +465,7 @@ var storageScenarios = []scenario{
 		methods: []string{
 			"CreateProject", "CreateProjectAndEvent", "CreateProjectWithUID", "CreateProjectWithUIDAndEvent",
 			"ListProjects", "ListProjectsIncludingArchived", "ProjectByID", "ProjectByName",
-			"ProjectByNameIncludingArchived", "ProjectByUID", "RenameProject", "RenameProjectAndEvent",
+			"ProjectByNameIncludingArchived", "ProjectByUID", "ProjectByUIDTx", "RenameProject", "RenameProjectAndEvent",
 		},
 		run: checkProjects,
 	},

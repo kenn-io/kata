@@ -200,7 +200,7 @@ type PollProjectEventsQuery struct {
 }
 
 type GetProjectFederationQuery struct {
-	// RelayProtocolVersion Optionally check existing cross-project issue links for relay protocol 1 before enrollment. Returns 409 relay_cross_project_links when links must be removed.
+	// RelayProtocolVersion Check existing cross-project links before relay enrollment. Links within a shared group are allowed; other links return 409 relay_cross_project_links.
 	RelayProtocolVersion *int64 `json:"relay_protocol_version,omitempty" validate:"omitempty,gte=1,lte=1"`
 }
 
@@ -528,8 +528,9 @@ func (r ReadyIssuesGlobalQuery) Validate() error {
 }
 
 type ResolveUIIssueReferenceQuery struct {
-	ProjectID int64  `json:"project_id"`
-	Ref       string `json:"ref" validate:"required"`
+	ProjectID *int64  `json:"project_id,omitempty"`
+	Project   *string `json:"project,omitempty"`
+	Ref       string  `json:"ref" validate:"required"`
 }
 
 func (r ResolveUIIssueReferenceQuery) Validate() error {

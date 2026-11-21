@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-18
+last_edited: 2026-11-20
 ---
 
 # Federation
@@ -188,13 +188,9 @@ unsupported relay,
 provenance or embedding artifact protocols and local project-name collisions
 before enrollment.
 
-A relayed project cannot have cross-project issue links. Preflight and connect
-return `409 relay_cross_project_links` when the project has related, blocks, or
-parent links to another project, including incoming links and links on closed
-issues. The error says whether the links are on the hub or in this daemon's copy
-of the project. Remove them on that side and retry; ask an operator there to
-remove links to projects you cannot access. Links that were already removed do
-not count.
+The common root can link issues in projects that share a relay binding group and root authority. Preflight and connect return `409 relay_cross_project_links` for links outside that group. The root authors crossing links and relays forward them; a missing endpoint stays deferred until it arrives. An older peer receives the events before a crossing, then the stream pauses until the peer is upgraded.
+
+Relays check the peer's current access to each referenced project before release.
 
 Fresh direct-spoke pushes also reject additions, close parents, and
 duplicate or superseded evidence that name a stored sibling issue when either
@@ -628,6 +624,38 @@ delays the other streams, the other projects and local indexing by at most one
 bounded turn, and it does not make the runner poll unrelated hubs more often.
 A turn that stops before its outbound intent is drained does not request a
 signaled reset checkpoint; a later turn does.
+
+### Refused and unavailable hubs
+
+On current `main` (unreleased), the runner backs off a project whose hub keeps
+turning it away, so a spoke with many projects stops sending the hub a request
+for each one on every interval and every local write:
+
+| Hub response | First wait | Longest wait | Retries at once when |
+| --- | --- | --- | --- |
+| `401` or `403`, the credential was refused | 1 minute | 15 minutes | the credential, binding, or enabled state changes, or another sync of the project succeeds |
+| `429` or `503`, the hub is throttling or unavailable | the sync interval | 5 minutes, or longer when the hub sends `Retry-After` | the credential, binding, or enabled state changes, or another sync of the project succeeds |
+
+Each wait doubles after a failure of the same kind, and up to a quarter is
+taken off at random so spokes spread their retries. A `Retry-After` hint, in
+seconds or as an HTTP date, sets the shortest wait, capped at one hour; when a
+turn gets several hints, the longest one counts, even when a refusal in the
+same turn sets the reason. A `429` or `503` ends the
+turn, so queued lease requests and the pull and push wait for the next
+attempt. A success clears the schedule. A wait never shortens the sync
+interval, and a wake from a local write does not bring a waiting project
+forward. A refused move of one pushed issue, `403
+federation_project_not_enrolled`, does not count as a refused credential.
+Other projects keep syncing.
+
+`kata federation status` shows a waiting project's reason, last status code,
+failure count, and next attempt, for example `sync retry: hub refused the
+credential (403) on 5 attempts; next attempt 2026-01-01T00:15:00Z; to retry
+now, enroll again on the hub and run the join command it prints`. A
+provider-managed spoke gets no join hint; its provider line says what to do.
+The JSON form carries them in `sync_retry`. The schedule lives in the daemon running the federation runner,
+so restarting it makes a fresh attempt for every project, and with PostgreSQL
+only the runner leader reports it.
 
 ### Relay checkpoint capacity
 
@@ -1159,6 +1187,8 @@ the agent the hub's administration token.
 3. On the spoke, run the generated `kata federation join` command. Keep its
    hub URL, project ID, actor, and capability values intact. Join reads the
    current project UID and replay/baseline cursors from the hub when it runs.
+   For a hub that requires signing, replace the signing key placeholders as
+   described in [Federation signing](federation-signing.md#prepare-the-hub-and-spoke).
    A manual command has this shape:
 
    ```sh
@@ -1358,6 +1388,73 @@ Provider mappings differ from catalog-admin mappings when removed:
   unbound project was purged. A temporary database failure retries that cleanup.
 - If startup reports `credential_io`, correct the owner-private credential file
   and restart the daemon. Kata does not guess how to repair invalid credentials.
+
+### Change replica intent
+
+An attached replica can switch between `read_only` and `collaborate` without
+leaving the hub. Edit `intent` in the mapping and restart the daemon. Kata
+keeps the local project, its tasks and history, and the binding with its sync
+progress. It never asks the hub to delete anything.
+
+On restart, Kata:
+
+1. Turns push off first when the new intent is `read_only`.
+2. Asks the provider to release the saved request.
+3. Saves a new request and candidate token with the new intent, for the same
+   local and hub projects, and asks the provider to authorize it.
+4. Turns push on or off to match the approved permissions: `pull` alone is
+   read-only; `pull,push` or `claim,pull,push` collaborates. When the new
+   approval names a different actor, the replica takes that actor in the
+   same step. Local changes made after the switch are authored as the new
+   actor; changes the hub already accepted keep their author. A sync that
+   is already running finishes first, and new syncs wait for this step.
+
+Until the provider approves the new request, the replica cannot sync with the
+hub. Its local tasks stay readable. Pending approval and temporary failures
+retry as for a first approval. A `denied` decision keeps the replica and its
+data; restore the earlier intent and restart to ask for that access again.
+An approval for a different hub project is refused as `binding_conflict`, and
+the binding is unchanged. A switch also reports `binding_conflict`, and contacts
+no provider, while an interrupted `kata federation rebind` has left the binding
+on the old hub address; rerun the rebind first.
+
+Kata records the release in the saved request before sending it. If no answer
+arrives, for example because the provider failed or the daemon stopped, the
+provider may have revoked the old approval. The next attempt sends the release
+again and asks for a new approval, even when you restored the earlier intent.
+A provider that refuses the release still holds the old approval, so restoring
+the earlier intent keeps using it.
+
+Lowering to `read_only` waits for local work to finish, because a read-only
+replica refuses local edits and cannot push or claim. While the hub has not
+accepted every local change, another project still has to deliver a task moved
+out of this one, or this replica holds a live claim or a queued claim request,
+reconciliation reports `binding_conflict`, keeps collaborating, and retries.
+`kata federation status` shows the pending push depth and claim counts. It
+does not show owed task moves; for those, wait until the destination project
+syncs. Once the hub accepts the pushed changes and you release the claims,
+the change completes on the next attempt.
+
+A claim request already on its way to the hub finishes before Kata checks for
+claims, and new claim requests wait until the saved request is replaced. If an
+earlier attempt turned push off but the provider did not confirm the release,
+claims still work with the old approval, and a claim taken since then holds
+the switch the same way until you release it.
+
+The local changes and claims stay on this computer while Kata waits; nothing
+is dropped. If the hub no longer accepts this replica's changes, the wait does
+not end on its own. Get write access back, set the earlier intent, and restart
+so Kata can send them. Then lower the intent again.
+
+A project with an active external root binding cannot become read-only.
+Lowering its intent reports `binding_conflict` and keeps collaborating; unbind
+the external root first.
+
+A change of actor waits the same way in either direction. A cron run that the
+old actor started and that is still running also holds the switch until the
+run finishes, because a run continues only as the actor that started it.
+
+Changing to or from `migrate` is not done in place. Leave the hub first.
 
 ## Move an existing spoke to a new HTTPS endpoint
 
@@ -1665,8 +1762,9 @@ kata federation enroll --project fedlab \
 The hub binds the direct-spoke enrollment to the requested actor. Treat the
 actor and capabilities in the returned join command as the enrollment contract.
 
-The `--hub-url` value is the URL the spoke will store and use later for pull,
-push, and lease transport.
+The spoke stores the `--hub-url` value for later pull, push, and lease
+transport unless the hub requires signing, in which case it stores the hub's
+`external_url`; see [federation signing](federation-signing.md).
 
 Manual `--hub-url` values may include a reverse-proxy path prefix, such as
 `https://hub.example/kata`; the prefix is retained for later federation
@@ -2410,13 +2508,14 @@ Malformed schema declarations are not rolling-upgrade skew. Missing schema
 versions fail request validation, and explicit non-positive schema versions
 return `invalid_federation_schema`.
 
-Legacy v0.9 directional unlink payloads are also outside the supported ingest
-contract. `blocks` and `parent` unlinks must include storage-oriented
-`link_from_uid` and `link_to_uid`; the hub rejects events that omit them and
-never guesses orientation from the current graph. Such a validation quarantine
-is not released by upgrading or retrying because kata does not rewrite the
-stored event. Handle it through the normal explicit quarantine disposition
-workflow.
+Parent replacement events queued by v0.19.0 through v0.23.0 can omit
+`link_from_uid` and `link_to_uid`. An upgraded hub accepts this legacy parent
+unlink only when its primary issue is `from_uid`, the child, and the hub still
+holds that parent. A mismatched unlink keeps the batch quarantined until an
+operator resolves it. Kata does not rewrite the stored event.
+
+If the spoke already quarantined such a batch, upgrade the hub first, then
+explicitly retry it as described in [other validation quarantines](#other-validation-quarantines).
 
 Older kata builds may already have quarantined a batch after a transient
 schema-skew rejection. After upgrading the hub, upgrade and restart each spoke
@@ -2466,7 +2565,7 @@ the issues, and then the spoke operator retries the quarantine.
 
 ### Other validation quarantines
 
-A fresh cross-project addition involving a relayed project also returns
+A fresh direct-spoke cross-project addition involving a relayed project also returns
 `400 validation` and quarantines the whole push batch, including earlier valid
 events. The error names the offending event UID. Unlinking locally and retrying
 resends the same stored addition, so it is refused again while either project
@@ -2599,17 +2698,17 @@ local or downstream work blocks the reset, resolve the
 root can quarantine the same batch again. Do not skip relay data or edit a
 database cursor instead.
 
-A live cross-project link is unsupported. The root refuses to sign a checkpoint
-while the link exists and keeps the owner's link and events. The spoke reports
-`409 relay_cross_project_links` as a hub-side refusal. Ask a hub operator to
-remove cross-project related, blocks, and parent links. A reset never strips
-the link silently or shares its private endpoint.
+A relay checkpoint can contain links between projects in the same group and root.
+An older peer receives `409 unsupported_event_features` naming
+`relay_cross_links_v1`; upgrade it and retry.
 
 On current `main` (unreleased), automatic retries wait at least the greater of
 one minute and the sync interval, doubling to a ceiling of the greater of five
 minutes and the interval. Other projects keep syncing. Local edits remain
 available locally but wait until the next due attempt to reach the hub.
-Restarting the spoke daemon makes a fresh attempt immediately.
+`kata federation status` shows the wait as
+`sync retry: relay hub refused cross-project links (409)`. Restarting the
+spoke daemon makes a fresh attempt immediately.
 
 ## Purge and reset
 
@@ -2673,7 +2772,7 @@ Federation has expected stale or deferred states:
   Negotiated relays preserve source actors separately from accountable
   attribution; see [Project boundaries and attribution](#project-boundaries-and-attribution).
 - Direct-spoke links may span projects when neither project uses a relay;
-  negotiated relays reject cross-project links. For direct spokes, a missing peer
+  negotiated relays allow root-authored links inside a shared group. A missing peer
   does not quarantine push: the event and cursor advance while the edge remains
   absent. The edge materializes when both endpoint projects are enabled through
   the same hub federation group.

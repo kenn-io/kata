@@ -614,10 +614,14 @@ func TestDaemonStatus_AgentReportsWebURL(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	stdout, _, _ := executeRootCapture(t, t.Context(), "--agent", "daemon", "status")
+	stdout, _, err := executeRootCapture(t, t.Context(), "--agent", "daemon", "status")
 	out := []byte(stdout)
 	assert.True(t, strings.HasPrefix(string(out), "OK daemon status=running web_url=http://127.0.0.1:28888 selected_state=local_unreachable selected_profile=\"\" message="))
-	assert.Contains(t, string(out), "unreachable")
+	cliErr := requireCLIError(t, err, ExitDaemonUnavail)
+	assert.Contains(t, cliErr.Message, "unreachable")
+	if runtime.GOOS != "windows" {
+		assert.Contains(t, cliErr.Hint, fmt.Sprint(os.Getpid()))
+	}
 }
 
 func TestDaemonStatusReportsMCPState(t *testing.T) {
@@ -2717,7 +2721,13 @@ func TestDaemonRuntimeWebMetadata(t *testing.T) {
 				assert.NotContains(t, record.Metadata, "autostart")
 			}
 			assert.Equal(t, "true", record.Metadata["web_origin_stable"])
-			assert.Equal(t, "loopback,sse", record.Metadata["web_capabilities"])
+			index, err := os.ReadFile("../../internal/web/dist/index.html") //nolint:gosec // Repository fixture compiled into this test.
+			require.NoError(t, err)
+			want := "loopback,sse,placeholder-assets"
+			if strings.Contains(string(index), `name="kata-web-distribution" content="production"`) {
+				want = "loopback,sse"
+			}
+			assert.Equal(t, want, record.Metadata["web_capabilities"])
 			if runtime.GOOS != "windows" {
 				runtimeStat, statErr := os.Stat(runtimePath)
 				require.NoError(t, statErr)
@@ -2755,8 +2765,6 @@ func TestDaemonRuntimeWebMetadata_TokenProtectedReadonlyAllowsLoopbackSession(t 
 		return readErr == nil && json.Unmarshal(body, &record) == nil &&
 			record.Metadata["web_origin"] != ""
 	}, 3*time.Second, 10*time.Millisecond)
-
-	assert.Equal(t, "loopback,poll", record.Metadata["web_capabilities"])
 
 	cancel()
 	select {

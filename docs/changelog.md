@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-18
+last_edited: 2026-11-20
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -9,10 +9,141 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Open qualified short issue IDs and project-scoped short IDs in browser links.
+
+**Before upgrading**
+
+- Keep a [backup](operations/backup-restore.md) from before the upgrade. This
+  release upgrades the database from schema 50 through 51 to 52, and older
+  binaries cannot open the result.
+- PostgreSQL: stop daemons and imports, then run
+  `kata storage postgres migrate` with schema-owner credentials. The migration
+  rebuilds an index on `events` and blocks event writes, then converts existing
+  vector rows and rebuilds their index. Allow an offline window for both steps
+  that fits the event log and vector data sizes. Existing grants stay sufficient.
+  SQLite upgrades in place at startup. See the
+  [schema 51 migration requirements](development/postgres-migrations.md#schema-51-issue-history-index-on-the-event-header)
+  and [schema 52 migration requirements](development/postgres-migrations.md#schema-52-shared-vector-catalog).
+- Adoption: to repeat or resume an adoption push, run this release on the hub
+  and the pushing spoke. Once a newer copy wins on the hub, every spoke and
+  relay of that project must upgrade before it can pull again. See
+  [repeating an adoption](operations/federation.md#repeating-an-adoption).
+- Zoned dates: upgrade the hub, every spoke and relay, and every daemon that
+  shares the database *before* anyone writes a date with an explicit `[Zone]`.
+  Older peers cannot read them, so newer peers refuse to exchange them. See
+  [compatibility and rolling upgrades](operations/federation.md#compatibility-and-rolling-upgrades).
+- Search by meaning: upgrade hubs before direct spokes (daemon API 0.55.0). A
+  direct spoke now sends the search text for shared projects to its hub, which
+  embeds it with the hub's embedding provider. Against an older hub, automatic
+  search falls back to word matches. See
+  [semantic search on direct spokes](operations/federation.md#semantic-search-on-direct-spokes).
+- Cron: Kata now refuses schedules that never fire, such as `0 0 30 2 *`
+  (February 30), and the `@manual`, `@triggered`, and `@none` descriptors. Open
+  a job saved earlier with such a schedule in `kata cron job edit <job-uid>` to
+  fix it. Upgrade a federated hub and its spokes in one window: a hub that
+  refuses a pushed definition can quarantine that spoke's relay batch.
+- Sync same-project parent replacements through the hub, and remove or replace
+  cross-project parents when a host supports project-scoped actors. Upgrade the
+  hub before push-enabled spokes to use cross-project actor proofs. A parent
+  replacement queued by v0.19.0 through v0.23.0 can sync after the hub upgrade;
+  an already-quarantined batch requires an [explicit retry](operations/federation.md#other-validation-quarantines).
+
+- Order an expanded parent's children by priority in `kata tui`: `o` now
+  cycles topological, temporal, and priority order. Priority order matches
+  `kata next`: highest priority first, unprioritized last, then most recently
+  updated.
+- Let a service manager own the local daemon. Set top-level `autostart = false`
+  in `config.toml`, and Kata commands, including `kata daemon recover`, wait up
+  to 30 seconds for the supervised daemon instead of starting their own. See
+  [daemon config](reference/configuration.md#daemon-config).
+- See which daemons a Kata command started on its own: `kata daemon status`
+  shows `started: automatically by a kata command`, and JSON adds
+  `auto_started: true`.
+- Read a supervised daemon's diagnostics after it hangs. Foreground daemons also
+  write to `<KATA_HOME>/runtime/<storage-hash>/daemon.log`, including fatal
+  goroutine dumps, even when the supervisor discards stderr on Linux or macOS.
+  See [daemon and diagnostics](reference/cli.md#daemon-and-diagnostics).
+- Search shared projects by meaning from a direct spoke as soon as it joins.
+  The hub ranks shared issues, so the spoke embeds only its local projects.
+  See [semantic search on direct spokes](operations/federation.md#semantic-search-on-direct-spokes).
+- Catch a cron schedule that never fires when you save it: Kata refuses
+  `0 0 30 2 *` and the `@manual`, `@triggered`, and `@none` descriptors, and
+  still accepts `0 0 29 2 *`. See [cron expressions](reference/cron.md#cron-expressions).
+- See why a cron expression is rejected. The error now includes the parser's
+  message, with hints for `@reboot`, `L`, `W`, `#`, `H`, and `@every`, instead
+  of only `invalid cron expression`.
+- Deliver MCP Events to an HTTPS receiver on your private network, such as a
+  Tailscale host, by pinning its origin to private addresses in
+  `[[mcp_events.trusted_callbacks]]`. Other callbacks stay public-only. See
+  [trusted private callbacks](reference/configuration.md#trusted-private-callbacks).
+- Index with the built-in embeddings server on a slow CPU without stalling. It
+  now gets 8 inputs per request and a 5-minute timeout, and a request that
+  times out is split. Configured endpoints keep 64 inputs and 30 seconds, and
+  explicit `batch_size` and `timeout_seconds` still win.
+- See when cross-project links on the hub, not the spoke, block a relay reset.
+  The spoke reports `409 relay_cross_project_links` as a hub-side
+  refusal and backs off for that project, from one minute up to five, or the
+  sync interval if that is longer. Other projects keep syncing.
+- Find the federation signing keys that share a secret. Startup now fails with
+  `federation signing keys share one secret: keys "key-a" and "key-b"` instead
+  of `federation signing key unavailable`, and `kata doctor` fails its new
+  `config.federation_signing` check. Give each key its own secret.
+- See why `kata doctor`'s `config.daemon` check fails on a hub that enables
+  `[federation.ingress]` without `[federation.signing]`: the details now say so.
+- `kata federation status --project <project>` now shows only that project in
+  human, agent, and JSON output, and exits 4 when the project has no federation
+  status.
+- Name, rename, or clear an enrolled spoke from `kata tui`: press `F`, then `s`
+  for the hub's spoke list, and `N` on a spoke. See the
+  [TUI enrollment workflow](operations/federation.md#tui-enrollment-workflow).
+- See how a cron job or workflow has been doing in `kata tui`. Its detail
+  counts outcomes and draws an outcome strip from the project's latest 100
+  runs.
+- Sync a Linear issue that was created already closed. Kata now clamps a
+  closure time a few milliseconds after `updatedAt` to `updatedAt` instead of
+  failing the whole import.
+- Federate again from a SQLite hub with many bulk-moved issues. Folding a
+  project no longer rechecks every move for every event, so a fold that took
+  163 seconds, past the 60-second client timeout, takes about a second.
+- Run only the semantic indexer from a Postgres-backed Go host with
+  `Service.RunSemanticIndex`, without Kata's federation, sync, and cleanup
+  workers. See [semantic search](development/embedding.md#semantic-search).
+- Connector calls no longer fail with `external connector process failed` when
+  the connector answers and exits but its output pipe closes late, as on a busy
+  Windows host. A response that breaks the protocol reports that error instead.
+- Build from source with Go 1.27.4 or later, which fixes the `net/http`
+  vulnerability GO-2026-6859. Release binaries and images use it too.
+- Retry an attachment upload without a duplicate reference:
+  `kata docbank attachments add --reuse-existing` returns the existing
+  attachment when the retry resolves to the same Docbank version. It needs
+  daemon API 0.47.0. See [issue attachments](reference/cli.md#issue-attachments).
+- Click a task or project in the web UI and see it at once. The UI draws it
+  from data it already holds instead of waiting up to half a second for a
+  remote daemon.
+- Usage telemetry is off unless you have opted in or set `TELEMETRY_ENABLED=1`. See [Usage reporting](reference/configuration.md#usage-reporting).
+- Click another task in the web UI's list and New task stays available while
+  the task's comments, links, and history load. The button had been disabled
+  until that task's snapshot arrived, about a second per click on a large
+  workspace. A new view, filter, project, or graph still pauses changes until
+  its snapshot arrives.
+
+- Keep existing PostgreSQL semantic-search vectors when upgrading to schema 52
+  without re-embedding; see the [schema 52 guide](development/postgres-migrations.md#schema-52-shared-vector-catalog).
+
+- Identify open Kata browser tabs by their issue, project, or view as you navigate.
+
 - Sync a Linear team that every run had refused with `linear issue is outside
   selected scope`. For some teams, Linear's issue filter on the team ID returns
   issues from the whole workspace. Kata now reads issues through the team
   itself, so it receives only that team's issues.
+
+- Set `[close.transcript] enabled = "auto"`, or
+  `KATA_CLOSE_TRANSCRIPT_ENABLED=auto`, to attach the closing session when one
+  is named and close without a warning when none is. `true` still warns. A
+  mistyped `enabled` value only warns when you close; it no longer stops the
+  daemon. A `[close.transcript.project.<name>]` entry takes the same values, so
+  `"auto"` there records when a session is named. A close that names no session
+  warns only when some target is `true`.
 
 - See in `kata tui` which issues an agent marked `stuck` or `needs-human`: the list row gets a leading `!`, and the issue detail shows the `work.attention` value with its `work.attention_msg`. See [work conventions](reference/metadata.md#orchestration-conventions-work-keys).
 
@@ -39,7 +170,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Follow the event stream from Go with [`api.Events`](reference/go-client.md#follow-the-event-stream), which frames events, skips any over 8 MiB as an oversized event, and reports a required reset as a typed value. `kata tui` reads its live updates through it: an event over 8 MiB now refetches the view like a sync reset instead of being parsed, and `id:`, `event:` and `data:` lines with no space after the colon are now accepted.
 
-- See which issue is blocking a push when the hub refuses it because the issue now belongs to a project the spoke has not joined. The error names the issue and the missing enrollment, instead of reporting a credential failure, and the spoke keeps pulling hub changes while the push waits.
+- See which issue is blocking a push when the hub refuses it because the issue
+  now belongs to a project the spoke has not joined. Since daemon API 0.56.0 the
+  hub answers `403 federation_project_not_enrolled`, naming the issue and the
+  missing enrollment, instead of `403 auth_invalid`, and the spoke keeps
+  pulling hub changes while the push waits.
 
 - Start the Windows daemon again after a reboot, even when another account's
   process now has the old daemon's PID. Kata used to treat that process as the
@@ -151,6 +286,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
   `signature_invalid`, so spoke operators retry instead of checking keys and
   clocks. See [federation request signing](operations/federation-signing.md).
 
+- Enroll a spoke on a hub that requires signing and get a join command with the
+  hub's `external_url` and signing key ID and file placeholders. See
+  [federation signing](operations/federation-signing.md).
+
 - Use MCP Events through the daemon's `/mcp` endpoint with static or identity tokens.
 - Start search by meaning on the next SQLite daemon start after enabling the built-in server in a supported app on the same computer. PostgreSQL requires explicit setup. If Kata cannot confirm the shared choice was saved, setup succeeds and Kata logs the failure; other apps may miss the choice if it wasn't saved. Existing providers stay configured. See [semantic search](guide/semantic-search.md#enabling-it).
 
@@ -163,6 +302,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Keep syncing a joined project when issue history references projects the spoke
   has not joined. Issues moved out keep their folded hub content and local state
   in the retained counterpart; restore it and join with its local name to subscribe.
+- Diagnose a live but unreachable local daemon with its log path, available profiling endpoint, and recovery steps for the selected home or profile.
 
 - Keep a daemon catalog credential in an owner-only device file with
   `token_file`. Catalog entries use `token` > `token_file` > `token_env` and
@@ -187,6 +327,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
   `[search.embeddings]`, `token_env` for `[auth]` or `[mcp]`, or
   `--hub-token-env` or `kata mcp --http-token-env` variable now reports
   `env:<NAME>: environment variable is unset or empty`.
+
+- Move up to 5,000 issues at once with `kata move <ref>... <project>` or
+  `--refs-from`. Each issue moves alone and gets its own result, so one refusal
+  doesn't stop the rest.
+
+- `kata version` reports the release when Kata is installed with `go install` at a tag. A release binary's `kata ui` replaces a same-version local daemon without browser assets; if a service manager runs it, restart the daemon through the service manager.
 
 ## 0.23.0
 <small>2026-11-09</small>
@@ -616,6 +762,9 @@ the [federation procedure](operations/federation.md#compatibility-and-rolling-up
 - Generate API clients with typed UUIDs. The OpenAPI document marks UUID fields
   with `format: uuid`, and the Go client uses the standard library `uuid.UUID`.
   The wire format is unchanged.
+- Builds from plain `go build` or `go install` no longer send anonymous
+  telemetry. Only release builds and the Makefile `build` and `install` targets
+  report usage. See [Telemetry reporting rules](reference/configuration.md#reporting-rules).
 - Follow the new [Gated workflows](workflows/gated-workflows.md) guide to run
   agent work through human review stages.
 
@@ -758,6 +907,20 @@ the [federation procedure](operations/federation.md#compatibility-and-rolling-up
   stripped Linux/amd64 discovery program drops from 24.0 MB to 10.5 MB.
   Client-only discovery of a local PostgreSQL daemon whose DSN uses routing
   options now requires `KATA_SERVER`. See [Go client](reference/go-client.md).
+- Count daily feature use, first-issue setup, issue creates and closes, empty
+  searches, refused actions, and sync outages through optional usage reports.
+  Reports omit search queries and error text, and report project totals in
+  ranges. Web issue removal counts as a close. See
+  [Telemetry](reference/configuration.md#telemetry) for fields and opt-outs.
+- Return from completed commands, hooks, and TUI exits after waiting at most
+  50 ms for usage reporting. A failed human CLI report retries on the next
+  command; an unanswered report backs off for 15 minutes or until the next UTC
+  day. Agent reports stop for the day once the highest daily count bucket is
+  reached or telemetry is disabled.
+- Group telemetry by `goos` and `goarch` instead of the removed PostHog SDK
+  properties `$os`, `$os_version`, `$os_distro`, and `$go_version`. Project totals
+  now use `0-5`, `6-20`, `21-100`, and `over-100`; update insights to group by
+  those ranges instead of summing or averaging `project_count`.
 - Count a parent's children from the browser snapshot's `collection_links`.
   For `contract_version` `2`, these counts match the issue-list API's
   `child_counts`, including through the daemon switcher. See
@@ -817,6 +980,10 @@ the [federation procedure](operations/federation.md#compatibility-and-rolling-up
   falls in the skipped hour. A timezone directive without a schedule returns
   a validation error instead of crashing the parser. See
   [Cron triggers](reference/cron.md#triggers) for daylight-saving limits.
+- Keep telemetry opt-outs through local profile autostarts. `DO_NOT_TRACK`, any
+  present `CI` variable, and `TELEMETRY_ENABLED=0` are honored. CLI, TUI, and MCP
+  clients also honor their own preferences when using an enabled daemon. Only
+  plain release versions send reports.
 - Shut down services without reporting a worker failure when shutdown
   cancellation rolls back that worker's transaction.
 
@@ -829,7 +996,8 @@ the [federation procedure](operations/federation.md#compatibility-and-rolling-up
 - Thanks to [Marius van Niekerk](https://github.com/mariusvniekerk) for SQLite
   upgrade protection, smaller Go clients, cron parsing, batched search indexing,
   daemon downgrade protection, federation leave recovery, and build updates.
-- Thanks to [Rod Boev](https://github.com/rodboev) for clean service shutdown, and browser,
+- Thanks to [Rod Boev](https://github.com/rodboev) for usage reporting and
+  opt-outs, bounded telemetry waits, clean service shutdown, and browser,
   Windows, PostgreSQL, and test infrastructure improvements.
 - Thanks to [Phillip Cloud](https://github.com/cpcloud) for the read-only web
   toolbar fix and Node and Bun certificate distrust updates.
@@ -982,6 +1150,10 @@ procedure. This release also requires these changes:
 - Build Go integrations with daemon discovery, Unix-socket connections,
   structured errors, and a test helper that runs a real service. Embedded
   services can omit browser assets. See the [Go client](reference/go-client.md).
+- Anonymous usage reports now distinguish CLI, browser, and terminal use, and
+  count daily agent activity from hooks and MCP together. They include daily
+  screen views and session-duration buckets. `KATA_TELEMETRY_ENABLED=0` on the
+  daemon turns reporting off. See [Telemetry](reference/configuration.md#telemetry).
 
 **Bug fixes**
 
@@ -1023,7 +1195,7 @@ procedure. This release also requires these changes:
   views, `kata doctor`, local daemon profiles, coding-agent hook setup, new MCP
   tools, pagination, container deployment, embedding prefixes, closing-session
   references, CLI help and hints, and federation reliability fixes.
-- Thanks to [Rod Boev](https://github.com/rodboev) for the
+- Thanks to [Rod Boev](https://github.com/rodboev) for usage reporting, the
   terminal UI's shared Markdown renderer, preserved revisions across SQLite
   upgrades, client error handling, dependency security updates, and Windows and
   test reliability improvements.
@@ -2100,7 +2272,7 @@ automation for binary distribution.
 - Thanks to [Marius van Niekerk](https://github.com/mariusvniekerk) for TUI
   navigation and presentation work, Beads import and priority/schema-cutover
   support, SQLite contention retries, generated OpenAPI client support, issue
-  project moves, daemon lifecycle/git helper adoption, and module
+  project moves, daemon lifecycle/git helper adoption, telemetry, and module
   path migration.
 - Thanks to [Phillip Cloud](https://github.com/cpcloud) for agent guidance
   consolidation, hosted-mode `$PORT` binding and docs, trusted-proxy actor
@@ -2159,7 +2331,7 @@ automation for binary distribution.
 - Added docs infrastructure, SaaS tracker comparison material, Vercel deployment
   helpers, and curated design documentation.
 - Added Windows daemon support, Unix runtime URL publication, daemon lifecycle
-  adoption and storage abstraction groundwork.
+  adoption, telemetry, and storage abstraction groundwork.
 
 ### 2026-W22 (May 25 - May 31, 2026)
 

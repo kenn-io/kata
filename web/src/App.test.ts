@@ -29,6 +29,171 @@ describe('App', () => {
     vi.restoreAllMocks()
   })
 
+  it('opens a qualified short link with one selected snapshot', async () => {
+    history.replaceState(null, '', '/kata?issue=example-project%23abc4')
+    let resolution: URL | undefined
+    const data = snapshot()
+    data.catalog.push({
+      ...data.catalog[0]!,
+      project: {
+        ...data.catalog[0]!.project,
+        id: 8,
+        uid: '01J00000000000000000000003',
+        name: 'other-project',
+      },
+    })
+    data.collection.push({
+      ...data.collection[0]!,
+      id: 2,
+      uid: '01J00000000000000000000004',
+      project_id: 8,
+      project_uid: '01J00000000000000000000003',
+      project_name: 'other-project',
+      title: 'Other issue',
+    })
+    const requests = stubShortLink(
+      (target) => {
+        resolution = target
+        return shortLinkResolved()
+      },
+      daemonRoster(),
+      data,
+    )
+    render(App)
+    await screen.findByText('Example issue', { selector: 'h2' })
+    expect(resolution!.searchParams.get('ref')).toBe('example-project#abc4')
+    expect(resolution!.searchParams.has('project_id')).toBe(false)
+    expect(requests).toHaveLength(1)
+    expect(requests[0]!.searchParams.get('selected_issue_uid')).toBe('01J00000000000000000000001')
+    expect(screen.getByRole('button', { name: /Other issue/ })).not.toBeNull()
+  })
+
+  it.each([
+    {
+      status: 422,
+      ref: 'abc4',
+      expected: () => [
+        screen.getByText('Upgrade the selected daemon to open short issue links.'),
+        screen.getByRole('button', { name: 'Switch Kata daemon: example-remote' }),
+      ],
+      search: '?issue=example-project%23abc4',
+    },
+    {
+      status: 404,
+      ref: 'missing',
+      expected: () => [screen.getByRole('button', { name: 'Search for example-project#missing' })],
+      search: '?issue=example-project%23missing',
+    },
+    {
+      status: 0,
+      ref: 'abc4',
+      expected: () => [
+        screen.getByText('Could not connect to example-remote'),
+        screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }),
+      ],
+      search: '',
+    },
+  ])(
+    'handles saved short link failure $status when switching daemons',
+    async ({ status, ref, expected, search }) => {
+      localStorage.setItem(
+        'kata.web.workspace-state.v1',
+        JSON.stringify({
+          version: 1,
+          daemons: { 'example-remote': `/kata?issue=example-project%23${ref}` },
+        }),
+      )
+      const roster = daemonRoster()
+      roster.daemons.push({
+        id: 'example-remote',
+        url: 'https://daemon.example',
+        default: false,
+        auth: 'token',
+        health: 'connected',
+      })
+      stubShortLink(() => {
+        if (!status) throw new TypeError('connection failed')
+        return Response.json({}, { status })
+      }, roster)
+      render(App)
+      await fireEvent.click(
+        await screen.findByRole('button', { name: 'Switch Kata daemon: example-local' }),
+      )
+      await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
+      await waitFor(() => {
+        for (const element of expected()) expect(element).not.toBeNull()
+        expect(location.search).toBe(search)
+      })
+    },
+  )
+
+  it('retries resolving a short link after a server failure', async () => {
+    history.replaceState(null, '', '/kata?scope=example-project&issue=abc4')
+    const resolutions: URL[] = []
+    const data = snapshot()
+    data.catalog.push({
+      ...data.catalog[0]!,
+      project: {
+        ...data.catalog[0]!.project,
+        id: 8,
+        uid: '01J00000000000000000000003',
+        name: 'other-project',
+      },
+    })
+    data.collection.push({
+      ...data.collection[0]!,
+      id: 2,
+      uid: '01J00000000000000000000004',
+      project_id: 8,
+      project_uid: '01J00000000000000000000003',
+      project_name: 'other-project',
+      title: 'Other issue',
+    })
+    stubShortLink(
+      (target) => {
+        resolutions.push(target)
+        return resolutions.length === 1
+          ? Response.json({}, { status: 500 })
+          : Response.json({
+              issue: {
+                uid: '01J00000000000000000000001',
+                project_uid: '01J00000000000000000000002',
+              },
+              scope_project_uid: '01J00000000000000000000003',
+            })
+      },
+      daemonRoster(),
+      data,
+    )
+    render(App)
+    await fireEvent.click(await screen.findByRole('button', { name: 'Retry' }))
+    await screen.findByText('Example issue', { selector: 'h2' })
+    expect(resolutions).toHaveLength(2)
+    expect(resolutions[0]!.searchParams.get('project')).toBe('example-project')
+    expect(screen.getByRole('button', { name: /Other issue/ })).not.toBeNull()
+    expect(screen.queryByRole('button', { name: /Example issue/ })).toBeNull()
+  })
+
+  it('discards a short link result after navigation', async () => {
+    history.replaceState(null, '', '/kata?issue=example-project%23abc4')
+    let finishResolution: (response: Response) => void = () => {}
+    let resolving = false
+    stubShortLink(() => {
+      resolving = true
+      return new Promise<Response>((resolve) => {
+        finishResolution = resolve
+      })
+    })
+    render(App)
+    await waitFor(() => expect(resolving).toBe(true))
+    history.pushState(null, '', '/kata?view=all-open')
+    await fireEvent(window, new PopStateEvent('popstate'))
+    finishResolution(shortLinkResolved())
+    await screen.findByRole('button', { name: /Example issue/ })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(screen.queryByRole('region', { name: 'Kata issue detail' })).toBeNull()
+  })
+
   it('shows a clicked project from the loaded list and keeps it current', async () => {
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
     history.replaceState(null, '', '/kata?view=all-open')
@@ -114,6 +279,50 @@ describe('App', () => {
     const refresh = new URL(snapshotRequests[1]!.url)
     expect(refresh.searchParams.get('project_uid')).toBeNull()
     expect(snapshotRequests[1]!.headers.get('If-None-Match')).toBe('"snapshot-1"')
+  })
+
+  it('keeps New task available while a clicked task loads its snapshot', async () => {
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    history.replaceState(null, '', '/kata?view=all-open')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    let snapshotReads = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const target = new URL(requestOf(input, init).url)
+        if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (target.pathname.endsWith('/api/v1/ui/references')) {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (target.pathname.endsWith('/api/v1/ui/snapshot')) {
+          snapshotReads += 1
+          // The clicked task's snapshot stays in flight.
+          if (snapshotReads > 1) return new Promise<Response>(() => {})
+          return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+        }
+        return Response.json({ error: { code: 'not_found' } }, { status: 404 })
+      }),
+    )
+    render(App)
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
+      ).toBeNull(),
+    )
+
+    await fireEvent.click(screen.getByRole('button', { name: /Example issue/ }))
+
+    expect(new URL(window.location.href).searchParams.get('issue')).toBe(
+      '01J00000000000000000000001',
+    )
+    await waitFor(() => expect(snapshotReads).toBe(2))
+    expect(
+      screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
+    ).toBeNull()
   })
 
   it('blocks a task-limited New task after leaving the task for its project list', async () => {
@@ -607,49 +816,203 @@ describe('App', () => {
     expect(sessionStorage.getItem('kata.web.session.v1')).toContain('local-session')
   })
 
-  it('honors an explicitly selected gateway daemon on first authority load', async () => {
-    history.replaceState(null, '', '/kata#daemon=example-remote')
+  it.each([false, true])(
+    'refreshes the daemon menu without changing the workspace, failure: %s',
+    async (failure) => {
+      sessionStorage.setItem(
+        'kata.web.session.v1',
+        JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+      )
+      let snapshotReads = 0
+      let rosterRequests = 0
+      const failedResponse = new Response('', { status: 403 })
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = requestOf(input, init)
+          const url = new URL(request.url)
+          if (url.pathname === '/api/v1/ui/daemons') {
+            rosterRequests++
+            if (rosterRequests === 1)
+              return Response.json({
+                daemons: [
+                  {
+                    id: 'local',
+                    url: '',
+                    local: true,
+                    default: true,
+                    auth: 'none',
+                    health: 'connected',
+                  },
+                ],
+              })
+            if (failure) return failedResponse
+            return Response.json({
+              daemons: [
+                {
+                  id: 'local',
+                  url: '',
+                  local: true,
+                  default: false,
+                  auth: 'none',
+                  health: 'connected',
+                },
+                {
+                  id: 'hub',
+                  url: 'https://hub.example',
+                  default: true,
+                  auth: 'none',
+                  health: 'connected',
+                },
+              ],
+            })
+          }
+          if (url.pathname.endsWith('/api/v1/ui/snapshot')) {
+            snapshotReads++
+            return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+          }
+          if (url.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }),
+      )
+      render(App)
+      expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+      const reads = snapshotReads
+      const route = window.location.href
+      await fireEvent.click(screen.getByTestId('daemon-chip'))
+      await waitFor(() => expect(rosterRequests).toBe(2))
+      await tick()
+      if (failure) {
+        expect(screen.queryByRole('alert')).toBeNull()
+      } else {
+        expect(await screen.findByTestId('daemon-row-hub')).not.toBeNull()
+      }
+      expect(screen.getByTestId('daemon-row-local')).not.toBeNull()
+      expect(screen.getByTestId('daemon-chip').textContent).toContain('local')
+      expect(screen.getByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+      expect(snapshotReads).toBe(reads)
+      expect(window.location.href).toBe(route)
+    },
+  )
+
+  it('offers the local fallback when the automatic daemon goes down', async () => {
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
     )
-    const selected: Array<string | null> = []
+    const rosterHeaders: Array<string | null> = []
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const request =
-          input instanceof Request
-            ? input
-            : new Request(new URL(String(input), window.location.origin), init)
+        const request = requestOf(input, init)
         const path = new URL(request.url).pathname
         if (path === '/api/v1/ui/daemons') {
-          return Response.json({
-            daemons: [
-              ...daemonRoster().daemons,
-              {
-                id: 'example-remote',
-                url: 'https://daemon.example',
-                default: false,
-                auth: 'token',
-                health: 'connected',
-              },
-            ],
-          })
-        }
-        if (path.endsWith('/api/v1/ui/references')) {
-          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+          rosterHeaders.push(request.headers.get('X-Kata-Web-Daemon'))
+          const daemons =
+            rosterHeaders.length === 1 || rosterHeaders.at(-1) === 'hub'
+              ? [
+                  {
+                    id: 'hub',
+                    url: 'https://hub.example',
+                    default: true,
+                    auth: 'none',
+                    health: rosterHeaders.length === 1 ? 'connected' : 'down',
+                  },
+                ]
+              : [
+                  {
+                    id: 'local',
+                    url: '',
+                    local: true,
+                    default: true,
+                    auth: 'none',
+                    health: 'connected',
+                  },
+                ]
+          return Response.json({ daemons })
         }
         if (path === '/api/v1/ui/telemetry') return telemetryAccepted()
-        selected.push(request.headers.get('X-Kata-Web-Daemon'))
-        return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+        if (path.endsWith('/api/v1/ui/snapshot'))
+          return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+        return Response.json({ issues: [], labels: [], owners: [], projects: [] })
       }),
     )
-
     render(App)
-
     expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
-    expect(selected[0]).toBe('example-remote')
+    await fireEvent.click(screen.getByTestId('daemon-chip'))
+    expect(await screen.findByTestId('daemon-row-local')).not.toBeNull()
+    expect(rosterHeaders).toEqual([null, null])
+    expect(screen.getByTestId('daemon-chip').textContent).toContain('hub')
+    expect(screen.getByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+    await fireEvent.click(screen.getByTestId('daemon-row-local'))
+    await waitFor(() => expect(screen.getByTestId('daemon-chip').textContent).toContain('local'))
+    await fireEvent.click(screen.getByTestId('daemon-chip'))
+    await waitFor(() => expect(rosterHeaders.at(-1)).toBe('local'))
   })
+
+  it.each([false, true])(
+    'honors an explicitly selected gateway daemon on first authority load, down: %s',
+    async (down) => {
+      vi.useFakeTimers()
+      const id = down ? 'hub-a' : 'example-remote'
+      history.replaceState(null, '', `/kata#daemon=${id}`)
+      sessionStorage.setItem(
+        'kata.web.session.v1',
+        JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+      )
+      const selected: Array<string | null> = []
+      let rosterSelection: string | null = null
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = requestOf(input, init)
+          const path = new URL(request.url).pathname
+          if (path === '/api/v1/ui/daemons') {
+            rosterSelection = request.headers.get('X-Kata-Web-Daemon')
+            return Response.json({
+              daemons: [
+                ...daemonRoster().daemons,
+                ...(rosterSelection === id
+                  ? [
+                      {
+                        id,
+                        url: 'https://daemon.example',
+                        default: false,
+                        auth: 'none',
+                        health: down ? 'down' : 'connected',
+                      },
+                    ]
+                  : []),
+              ],
+            })
+          }
+          if (path.endsWith('/api/v1/ui/references')) {
+            return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+          }
+          if (path === '/api/v1/ui/telemetry') return telemetryAccepted()
+          if (path.endsWith('/api/v1/ui/snapshot')) {
+            selected.push(request.headers.get('X-Kata-Web-Daemon'))
+            if (down) return new Response('', { status: 502 })
+          }
+          return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+        }),
+      )
+
+      render(App)
+      await vi.advanceTimersByTimeAsync(0)
+      if (down) {
+        await vi.advanceTimersByTimeAsync(7000)
+        await tick()
+        expect(screen.getByRole('alert')).not.toBeNull()
+        expect(screen.getByTestId('daemon-chip').textContent).toContain('hub-a')
+      } else {
+        expect(screen.getByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+      }
+      expect(rosterSelection).toBe(id)
+      expect(selected.length).toBeGreaterThan(0)
+      expect(selected.every((selection) => selection === id)).toBe(true)
+    },
+  )
 
   it('keeps an explicitly direct daemon pinned across reload', async () => {
     history.replaceState(null, '', '/kata#direct=1')
@@ -2200,7 +2563,7 @@ describe('App', () => {
     releaseCredentials(Response.json({ observed_at: '2026-09-15T12:00:00Z', tokens: [] }))
   })
 
-  it('switches configured daemons in place and restores each daemon route', async () => {
+  it('restores daemon routes and resets the title when the workspace is hidden', async () => {
     let now = 0
     vi.spyOn(performance, 'now').mockImplementation(() => now)
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
@@ -2213,6 +2576,12 @@ describe('App', () => {
     const local = snapshot()
     const remote = structuredClone(local)
     remote.collection[0]!.title = 'Remote issue'
+    let releaseRemote!: () => void
+    const remoteReleased = new Promise<void>((resolve) => (releaseRemote = resolve))
+    let releaseRemoteReferences!: () => void
+    const remoteReferencesReleased = new Promise<void>(
+      (resolve) => (releaseRemoteReferences = resolve),
+    )
     const snapshotRequests: Request[] = []
     const referenceRequests: Request[] = []
     vi.stubGlobal(
@@ -2244,11 +2613,19 @@ describe('App', () => {
         }
         if (path.endsWith('/api/v1/ui/references')) {
           referenceRequests.push(request)
+          const daemon = request.headers.get('X-Kata-Web-Daemon')
+          if (daemon === 'example-local') {
+            await new Promise<void>((resolve) => {
+              request.signal.addEventListener('abort', () => resolve(), { once: true })
+            })
+          }
+          if (daemon === 'example-remote') await remoteReferencesReleased
           return Response.json({ issues: [], labels: [], owners: [], projects: [] })
         }
         if (path.endsWith('/api/v1/ui/snapshot')) {
           snapshotRequests.push(request)
           const daemon = request.headers.get('X-Kata-Web-Daemon')
+          if (daemon === 'example-remote') await remoteReleased
           return Response.json(daemon === 'example-remote' ? remote : local, {
             headers: { ETag: `"${daemon ?? 'default'}-${snapshotRequests.length}"` },
           })
@@ -2261,10 +2638,30 @@ describe('App', () => {
     expect(await screen.findByRole('button', { name: /Example issue/ })).not.toBeNull()
     await fireEvent.click(screen.getByRole('button', { name: 'Today' }))
     await waitFor(() => expect(window.location.search).toBe('?view=today'))
+    await waitFor(() => expect(document.title).toBe('Today · Kata'))
+    let localReference!: Request
+    await waitFor(() => {
+      localReference = referenceRequests.findLast(
+        (request) => request.headers.get('X-Kata-Web-Daemon') === 'example-local',
+      )!
+      expect(localReference?.signal.aborted).toBe(false)
+    })
     now = 120_000
     await fireEvent.click(screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }))
     await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
+    expect(await screen.findByText('Loading Kata…')).not.toBeNull()
+    await waitFor(() => expect(document.title).toBe('Kata'))
+    expect(localReference.signal.aborted).toBe(true)
+    releaseRemote()
     expect(await screen.findByRole('button', { name: /Remote issue/ })).not.toBeNull()
+    await waitFor(() => {
+      expect(
+        referenceRequests.some(
+          (request) => request.headers.get('X-Kata-Web-Daemon') === 'example-remote',
+        ),
+      ).toBe(true)
+    })
+    releaseRemoteReferences()
     expect(window.location.search).toBe('?view=all-open')
     now += 10_000
     window.dispatchEvent(new Event('pagehide'))
@@ -2273,20 +2670,27 @@ describe('App', () => {
     await expect(telemetry[1]!.json()).resolves.toMatchObject({
       properties: { duration_bucket: '1_to_5m' },
     })
-    expect(
-      referenceRequests.find(
-        (request) => request.headers.get('X-Kata-Web-Daemon') === 'example-local',
-      )?.signal.aborted,
-    ).toBe(true)
-
     await fireEvent.click(
       screen.getByRole('button', { name: 'Switch Kata daemon: example-remote' }),
     )
     await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-local/ }))
     await waitFor(() => expect(window.location.search).toBe('?view=today'))
+    await waitFor(() => expect(document.title).toBe('Today · Kata'))
     expect(snapshotRequests.map((request) => request.headers.get('X-Kata-Web-Daemon'))).toEqual(
       expect.arrayContaining(['example-local', 'example-remote']),
     )
+
+    history.replaceState(null, '', '/kata?issue=abc4')
+    await fireEvent(window, new PopStateEvent('popstate'))
+    expect(screen.getByRole('heading', { name: 'This Kata route is not valid' })).not.toBeNull()
+    await waitFor(() => expect(document.title).toBe('Kata'))
+
+    history.replaceState(null, '', '/kata?view=today')
+    await fireEvent(window, new PopStateEvent('popstate'))
+    await waitFor(() => expect(document.title).toBe('Today · Kata'))
+    window.dispatchEvent(new Event('kata:versionMismatch'))
+    expect(await screen.findByRole('heading', { name: 'Kata was updated' })).not.toBeNull()
+    await waitFor(() => expect(document.title).toBe('Kata'))
   })
 
   it('keeps the requested daemon selected across transparent authentication recovery', async () => {
@@ -3384,15 +3788,7 @@ describe('App', () => {
             return Response.json(
               {
                 ...current,
-                selected: {
-                  state: 'available',
-                  issue: current.collection[0],
-                  comments: [],
-                  labels: [],
-                  links: [],
-                  recurrences: [],
-                  history: [],
-                },
+                selected: availableSelection(current.collection[0]),
               },
               { headers: { ETag: '"snapshot-selected"' } },
             )
@@ -4131,7 +4527,6 @@ describe('App', () => {
 
   it('replaces the shell with a visible version mismatch after guarded recovery fails', async () => {
     render(App)
-
     window.dispatchEvent(new Event('kata:versionMismatch'))
 
     expect(await screen.findByRole('alert')).not.toBeNull()
@@ -4139,6 +4534,18 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Reload Kata' })).not.toBeNull()
   })
 })
+
+function availableSelection(issue: ReturnType<typeof snapshot>['collection'][number] | undefined) {
+  return {
+    state: 'available',
+    issue,
+    comments: [],
+    labels: [],
+    links: [],
+    recurrences: [],
+    history: [],
+  }
+}
 
 function snapshot() {
   return {
@@ -4202,6 +4609,44 @@ function daemonRoster() {
       },
     ],
   }
+}
+
+function stubShortLink(
+  resolve: (target: URL) => Response | Promise<Response>,
+  roster = daemonRoster(),
+  data = snapshot(),
+): URL[] {
+  sessionStorage.setItem(
+    'kata.web.session.v1',
+    JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+  )
+  const snapshots: URL[] = []
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const target = new URL(requestOf(input, init).url)
+      if (target.pathname === '/api/v1/ui/daemons') return Response.json(roster)
+      if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+      if (target.pathname.endsWith('/api/v1/ui/issue-reference')) return resolve(target)
+      if (target.pathname.endsWith('/api/v1/ui/references'))
+        return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+      if (target.pathname.endsWith('/api/v1/ui/snapshot')) {
+        snapshots.push(target)
+        const selected = target.searchParams.has('selected_issue_uid')
+          ? { selected: availableSelection(data.collection[0]) }
+          : {}
+        return Response.json({ ...data, ...selected }, { headers: { ETag: '"snapshot-1"' } })
+      }
+      return Response.json({}, { status: 404 })
+    }),
+  )
+  return snapshots
+}
+
+function shortLinkResolved(): Response {
+  return Response.json({
+    issue: { uid: '01J00000000000000000000001', project_uid: '01J00000000000000000000002' },
+  })
 }
 
 function requestOf(input: RequestInfo | URL, init?: RequestInit): Request {

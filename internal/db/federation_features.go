@@ -31,8 +31,11 @@ const IssueDateZoneEventFeature = "issue_date_zone_v1"
 // event a hub writes for a winning copy.
 const RepeatedAdoptionEventFeature = "repeated_adoption_v1"
 
+// RelayCrossLinksEventFeature identifies support for cross-project relay links.
+const RelayCrossLinksEventFeature = "relay_cross_links_v1"
+
 // SupportedEventFeatures lists event capabilities understood by this daemon.
-const SupportedEventFeatures = CronEventFeature + "," + IssueMoveEventFeature + "," + RepeatedAdoptionEventFeature + "," + IssueDateZoneEventFeature
+const SupportedEventFeatures = CronEventFeature + "," + IssueMoveEventFeature + "," + RepeatedAdoptionEventFeature + "," + IssueDateZoneEventFeature + "," + RelayCrossLinksEventFeature
 
 // Native cron job projections are immutable and retained as tombstones, so a
 // positive job result remains valid for that project UID's lifetime.
@@ -454,6 +457,41 @@ func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationRea
 		out.NextAfterID = event.ID
 	}
 	return out, nil
+}
+
+// WithRelayPeerEventFeatures carries the requesting peer's advertised formats.
+func WithRelayPeerEventFeatures(ctx context.Context, features string) context.Context {
+	return context.WithValue(ctx, relayPeerEventFeaturesKey{}, features)
+}
+
+type relayPeerEventFeaturesKey struct{}
+
+// RelayPeerEventFeatures returns the requesting peer's advertised formats.
+func RelayPeerEventFeatures(ctx context.Context) string {
+	features, _ := ctx.Value(relayPeerEventFeaturesKey{}).(string)
+	return features
+}
+
+// RelayEventFeaturePrefix returns the deliverable prefix supported by the peer.
+func RelayEventFeaturePrefix(ctx context.Context, backend interface {
+	AuthorizeRelayReleasePrefix(context.Context, string, []RemoteEvent) (int, error)
+}, projectUID string, envelopes []RelayEnvelope) ([]RemoteEvent, error) {
+	events := make([]RemoteEvent, 0, len(envelopes))
+	for _, envelope := range envelopes {
+		event, err := DecodeRelaySourceEvent(envelope.Body)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+	}
+	count, err := backend.AuthorizeRelayReleasePrefix(ctx, projectUID, events)
+	if errors.Is(err, ErrUnsupportedEventFeatures) && count > 0 {
+		return events[:count], nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return events[:count], nil
 }
 
 // A move in the replay can trigger a backfill from before the replay horizon.

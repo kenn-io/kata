@@ -43,6 +43,16 @@ func agentUseMCPSession(t *testing.T, apiClient *kataclient.Client) *sdkmcp.Clie
 	return session
 }
 
+func TestMCPAgentUseSkipsTaggedGoInstall(t *testing.T) {
+	oldVersion, oldCommit := version.Version, version.Commit
+	version.Version, version.Commit = "v0.23.0", "unknown"
+	t.Cleanup(func() { version.Version, version.Commit = oldVersion, oldCommit })
+	t.Setenv("TELEMETRY_ENABLED", "1")
+	observe, stop := startMCPAgentUseReporter(t.Context(), nil, client.ResolvedDaemon{}, false)
+	defer stop()
+	assert.Nil(t, observe)
+}
+
 func TestMCPCallsReportDailyAgentActivity(t *testing.T) {
 	capture := &cliUseTelemetry{}
 	env := newCLIUseEnv(t, capture)

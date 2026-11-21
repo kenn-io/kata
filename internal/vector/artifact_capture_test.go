@@ -66,7 +66,7 @@ func TestEmbeddingArtifactCaptureBeforeBackendConversion(t *testing.T) {
 						title := "Edited after embedding scan"
 						_, _, _, err := store.EditIssue(ctx, db.EditIssueParams{IssueID: issue.ID, Title: &title, Actor: "member"})
 						require.NoError(t, err)
-						_, err = idx.RefreshMirror(ctx, store)
+						_, err = idx.RefreshMirror(ctx, store, nil)
 						require.NoError(t, err)
 					}
 					data := []map[string]any{}
@@ -151,7 +151,7 @@ func TestArtifactCaptureBoundsPreserveLocalIndexing(t *testing.T) {
 			require.NoError(t, err)
 			_, _, err = source.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Local large input", Body: strings.Repeat("x", 2000+1800*embedding.MaxArtifactChunks), Author: "member"})
 			require.NoError(t, err)
-			_, err = idx.RefreshMirror(ctx, source)
+			_, err = idx.RefreshMirror(ctx, source, nil)
 			require.NoError(t, err)
 			client, err := embedding.New(embedding.Config{BaseURL: "https://encoder.example/v1", Model: "example-model", Dims: 2})
 			require.NoError(t, err)
@@ -231,7 +231,7 @@ func TestArtifactCaptureRuneWindowBoundsPreserveLocalIndexing(t *testing.T) {
 				Author:    "member",
 			})
 			require.NoError(t, err)
-			_, err = idx.RefreshMirror(ctx, source)
+			_, err = idx.RefreshMirror(ctx, source, nil)
 			require.NoError(t, err)
 			client, err := embedding.New(embedding.Config{BaseURL: "https://encoder.example/v1", Model: "example-model", Dims: 2})
 			require.NoError(t, err)

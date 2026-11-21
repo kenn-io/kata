@@ -23,7 +23,17 @@ func TestServicePostgresEmbeddingSearch(t *testing.T) {
 	dsn, cleanup := testenv.NewPostgresWithPgvectorContainer(t, ctx)
 	t.Cleanup(cleanup)
 	var providerCalls atomic.Int32
+	var deniedTextCalls atomic.Int32
+	var deniedQueryCalls atomic.Int32
+	var allowDenied atomic.Bool
+	var deniedUID atomic.Value
 	endpoint := testenv.NewEmbeddingServer(t, func(input string) []float32 {
+		if strings.Contains(input, "private indexing example") {
+			deniedTextCalls.Add(1)
+		}
+		if input == "private semantic query" {
+			deniedQueryCalls.Add(1)
+		}
 		switch {
 		case input == "database contention" || strings.Contains(input, "serialize concurrent writers"):
 			return []float32{1, 0}
@@ -32,13 +42,18 @@ func TestServicePostgresEmbeddingSearch(t *testing.T) {
 		}
 		return []float32{1, 1}
 	}, func() { providerCalls.Add(1) })
-	cfg := kata.Config{DSN: dsn, Auth: kata.AuthConfig{TrustCallerAuthentication: true}, Embeddings: kata.EmbeddingsConfig{BaseURL: endpoint.URL, Model: "test-model", Dims: 2, TrustPrivateNetwork: true}}
+	cfg := kata.Config{DSN: dsn, Auth: kata.AuthConfig{TrustCallerAuthentication: true}, Embeddings: kata.EmbeddingsConfig{BaseURL: endpoint.URL, Model: "test-model", Dims: 2, TrustPrivateNetwork: true}, EmbeddingProjectAllowed: func(_ context.Context, uid string) (bool, error) {
+		return uid != deniedUID.Load() || allowDenied.Load(), nil
+	}}
 	service, err := kata.New(ctx, cfg)
 	require.NoError(t, err)
 	server := httptest.NewServer(service.Handler())
 	projectID := createProject(t, server.URL, "embeddings").Project.ID
+	denied := createProject(t, server.URL, "restricted-embeddings").Project
+	deniedUID.Store(denied.UID)
 	createAccessIssue(t, server, projectID, "serialize concurrent writers")
 	createAccessIssue(t, server, projectID, "refresh dashboard")
+	createAccessIssue(t, server, denied.ID, "private indexing example")
 	runCtx, cancel := context.WithCancel(ctx)
 	done := make(chan error, 1)
 	go func() { done <- service.RunSemanticIndex(runCtx) }()
@@ -50,7 +65,20 @@ func TestServicePostgresEmbeddingSearch(t *testing.T) {
 	}
 	//nolint:kennlint // sleeptest: Postgres and HTTP worker progress requires real I/O.
 	require.Eventually(t, topResult("database contention", "semantic", "serialize concurrent writers"), 20*time.Second, 100*time.Millisecond)
+	require.Zero(t, deniedTextCalls.Load())
+	status, _, body := searchTitles(ctx, server, denied.ID, "private semantic query", "semantic")
+	require.Equal(t, http.StatusServiceUnavailable, status, body)
+	require.Zero(t, deniedQueryCalls.Load())
+	allowDenied.Store(true)
 	createAccessIssue(t, server, projectID, "fix deadlock")
+	//nolint:kennlint // sleeptest: Postgres and HTTP worker progress requires real I/O.
+	require.Eventually(t, func() bool { return deniedTextCalls.Load() > 0 }, 20*time.Second, 100*time.Millisecond)
+	//nolint:kennlint // sleeptest: Postgres and HTTP worker progress requires real I/O.
+	require.Eventually(t, func() bool {
+		status, titles, _ := searchTitles(ctx, server, denied.ID, "private semantic query", "semantic")
+		return status == http.StatusOK && len(titles) > 0 && titles[0] == "private indexing example"
+	}, 20*time.Second, 100*time.Millisecond)
+	require.Positive(t, deniedQueryCalls.Load())
 	//nolint:kennlint // sleeptest: Postgres and HTTP worker progress requires real I/O.
 	require.Eventually(t, topResult("deadlock", "semantic", "fix deadlock"), 10*time.Second, 100*time.Millisecond)
 	cancel()

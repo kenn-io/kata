@@ -3,13 +3,18 @@ package kata_test
 import (
 	"context"
 	"database/sql"
+	"encoding/json/v2"
+	"errors"
 	"net/http"
+	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -73,4 +78,85 @@ func TestServicePostgresFederationAccessFenceRollsBackClaimMutation(t *testing.T
 		`SELECT count(*) FROM kata.issue_claims`).Scan(&claims))
 	assert.Zero(t, markers)
 	assert.Zero(t, claims)
+}
+
+func TestServicePostgresFederationPollFencedWithoutEventPredicateLocks(t *testing.T) {
+	ctx := t.Context()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+
+	controller := &recordingFederationAccessController{
+		decide: func(request kata.FederationAccessRequest) (kata.FederationAccessDecision, error) {
+			if request.Operation.ID != "pollFederationProjectEvents" {
+				return kata.FederationAccessDecision{}, nil
+			}
+			return kata.FederationAccessDecision{TransactionFence: func(ctx context.Context, tx kata.Transaction) error {
+				var uses int
+				err := tx.QueryRowContext(ctx, `UPDATE federation_host.grant_state
+					SET uses=uses+1 WHERE allowed RETURNING uses`).Scan(&uses)
+				if errors.Is(err, sql.ErrNoRows) {
+					return kata.ErrAccessDenied
+				}
+				return err
+			}}, nil
+		},
+	}
+	service, err := kata.New(ctx, kata.Config{
+		DSN: dsn,
+		Postgres: kata.PostgresConfig{
+			Schema: "kata", SchemaMode: kata.PostgresSchemaBootstrap,
+		},
+		Auth:             kata.AuthConfig{TrustCallerAuthentication: true},
+		FederationAccess: controller,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	project := ensureEnrollmentTestProject(t, service, "01HZNQ7VFPK1XGD8R5MABCD4EX", "example-project")
+	enrollment, err := service.CreateFederationEnrollment(ctx, kata.FederationEnrollmentSpec{
+		ProjectUID:       project.UID,
+		SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA",
+		Capabilities:     "pull",
+		Actor:            "Example Operator",
+	})
+	require.NoError(t, err)
+	shortID := createFederationAccessIssue(t, service, project.ID)
+	inspection, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, inspection.Close()) })
+	_, err = inspection.ExecContext(ctx, `CREATE SCHEMA federation_host;
+		CREATE TABLE federation_host.grant_state (allowed boolean, uses int);
+		INSERT INTO federation_host.grant_state VALUES (true, 0)`)
+	require.NoError(t, err)
+
+	// Overlap the poll with another serializable transaction so PostgreSQL
+	// retains any predicate locks the poll acquires after it commits.
+	overlap, err := inspection.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	require.NoError(t, err)
+	defer func() { _ = overlap.Rollback() }()
+	var projects int
+	require.NoError(t, overlap.QueryRowContext(ctx, `SELECT count(*) FROM kata.projects`).Scan(&projects))
+
+	poll := func() *httptest.ResponseRecorder {
+		request := httptest.NewRequestWithContext(ctx, http.MethodGet,
+			"/kata/api/v1/projects/"+strconv.FormatInt(project.ID, 10)+"/federation/events", nil)
+		request.Header.Set("Authorization", "Bearer "+enrollment.Token)
+		response := httptest.NewRecorder()
+		http.StripPrefix("/kata", service.Handler()).ServeHTTP(response, request)
+		return response
+	}
+	response := poll()
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var page api.PollEventsBody
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &page))
+	require.NotEmpty(t, page.Events)
+	assert.Equal(t, &shortID, page.Events[len(page.Events)-1].IssueShortID)
+	assert.Equal(t, page.Events[len(page.Events)-1].EventID, page.NextAfterID)
+	var locks, uses int
+	require.NoError(t, inspection.QueryRowContext(ctx, `SELECT count(*) FROM pg_locks
+		WHERE mode='SIReadLock' AND database=(SELECT oid FROM pg_database WHERE datname=current_database())
+		AND (relation='kata.events'::regclass OR relation IN (SELECT indexrelid FROM pg_index WHERE indrelid='kata.events'::regclass))`).Scan(&locks))
+	assert.Zero(t, locks, "polls must leave the predicate-lock budget available to serializable writes")
+	require.NoError(t, inspection.QueryRowContext(ctx, `UPDATE federation_host.grant_state SET allowed=false RETURNING uses`).Scan(&uses))
+	assert.Equal(t, 1, uses, "the host fence's write must commit with the page")
+	assert.Equal(t, http.StatusForbidden, poll().Code)
 }

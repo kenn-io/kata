@@ -5,6 +5,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"testing"
@@ -12,9 +14,81 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
+
+func TestUIIssueReferenceHidesRestrictedProjectName(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+	allowed, err := env.DB.CreateProject(t.Context(), "allowed")
+	require.NoError(t, err)
+	restricted, err := env.DB.CreateProject(t.Context(), "restricted")
+	require.NoError(t, err)
+	root := createScopedHTTPTestIssue(t, env, allowed.ID, "Root", nil)
+	hidden := createScopedHTTPTestIssue(t, env, restricted.ID, "Hidden", nil)
+	expires := time.Now().UTC().Add(time.Hour)
+	_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
+		PlaintextToken: "worker-token", Actor: "worker-a", AdminActor: db.BootstrapActor,
+		Scope: &db.APITokenScope{Kind: db.APITokenScopeIssueSubtree, ProjectUID: allowed.UID, RootIssueUID: root.UID}, ExpiresAt: &expires,
+	})
+	require.NoError(t, err)
+	server := daemon.NewServer(daemon.ServerConfig{DB: env.DB, StartedAt: time.Now(), HostAccess: historicalUIReferenceHostAccess{deniedProjectID: restricted.ID}})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := daemon.WithPrincipal(r.Context(), daemon.Principal{Kind: daemon.PrincipalHost, Subject: "host-user", Actor: "worker"})
+		server.Handler().ServeHTTP(w, r.WithContext(ctx))
+	}))
+	t.Cleanup(ts.Close)
+	hostEnv := *env
+	hostEnv.URL, hostEnv.HTTP = ts.URL, ts.Client()
+	for name, tc := range map[string]struct {
+		env     *testenv.Env
+		headers map[string]string
+	}{
+		"host":          {env: &hostEnv},
+		"project scope": {env: env, headers: map[string]string{"Authorization": "Bearer bootstrap-token", "X-Kata-Project-Scope": `["` + allowed.UID + `"]`}},
+		"issue scope":   {env: env, headers: map[string]string{"Authorization": "Bearer worker-token"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var bodies []string
+			for _, project := range []string{"restricted", "missing"} {
+				ref := "abc4"
+				if project == "restricted" {
+					ref = hidden.ShortID
+				}
+				query := url.Values{"project": {project}, "ref": {ref}}
+				resp, body := envDoRaw(t, tc.env, http.MethodGet, "/api/v1/ui/issue-reference?"+query.Encode(), nil, tc.headers)
+				require.Equal(t, http.StatusNotFound, resp.StatusCode, string(body))
+				bodies = append(bodies, string(body))
+			}
+			require.JSONEq(t, bodies[0], bodies[1])
+			query := url.Values{"project": {allowed.Name}, "ref": {root.ShortID}}
+			resp, body := envDoRaw(t, tc.env, http.MethodGet, "/api/v1/ui/issue-reference?"+query.Encode(), nil, tc.headers)
+			require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+			require.Contains(t, string(body), root.UID)
+			query.Set("ref", hidden.UID)
+			resp, body = envDoRaw(t, tc.env, http.MethodGet, "/api/v1/ui/issue-reference?"+query.Encode(), nil, tc.headers)
+			require.Equal(t, http.StatusNotFound, resp.StatusCode, string(body))
+		})
+	}
+	t.Run("issue outside subtree", func(t *testing.T) {
+		outside := createScopedHTTPTestIssue(t, env, allowed.ID, "Outside", nil)
+		headers := map[string]string{"Authorization": "Bearer worker-token"}
+		t.Run("project name", func(t *testing.T) {
+			resp, body := envDoRaw(t, env, http.MethodGet, "/api/v1/ui/issue-reference?project="+url.QueryEscape(allowed.Name)+"&ref="+url.QueryEscape(outside.ShortID), nil, headers)
+			require.Equal(t, http.StatusNotFound, resp.StatusCode, string(body))
+			var result struct {
+				Error struct {
+					Code    string `json:"code"`
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			require.NoError(t, json.Unmarshal(body, &result))
+			require.Equal(t, "not_found", result.Error.Code)
+			require.Equal(t, "resource not found", result.Error.Message)
+		})
+	})
+}
 
 func TestIssueScopedIncompleteBodyDoesNotBlockAnotherMutation(t *testing.T) {
 	for _, scoped := range []bool{false, true} {

@@ -84,6 +84,7 @@ func reconcileProviderMapping(
 		ManagedReservation: &daemon.FederationReplicaManagedReservation{ProjectUID: reservation.ProjectUID, Expected: credential},
 		ProjectEventSink:   projectEventSink,
 		ProjectResetSink:   projectResetSink,
+		ReplacesBoundActor: decision.PreviousActor,
 	}
 	if reservation.ProjectUID != decision.HubProjectUID {
 		params.CredentialRekey = &daemon.FederationReplicaCredentialRekeySource{ProjectUID: reservation.ProjectUID, Expected: credential}
@@ -200,6 +201,14 @@ func providerReconciliationError(err error) error {
 		return reconcileError(ErrConfigurationConflict, "federation provider rejected its input; check the helper command and protocol version")
 	case errors.Is(err, config.ErrFederationCredentialConflict), errors.Is(err, daemon.ErrFederationReplicaCredentialConflict):
 		return reconcileError(ErrConfigurationConflict, "federation provider operation conflicts with local state")
+	case errors.Is(err, db.ErrExternalRootFederationConflict):
+		return reconcileError(ErrBindingConflict, "project has an active external root binding; unbind it before lowering this replica to read_only")
+	case errors.Is(err, daemon.ErrFederationProviderIntentChangeBlocked) && errors.Is(err, db.ErrFederationRunsActive):
+		return reconcileError(ErrBindingConflict, "changing federation intent waits until cron runs started by this replica's actor finish")
+	case errors.Is(err, daemon.ErrFederationProviderIntentChangeBlocked):
+		return reconcileError(ErrBindingConflict, "changing federation intent waits until the hub accepts the local changes not yet sent and this replica's claims and claim requests are released; "+
+			"they stay on this computer and are not dropped. If the hub no longer accepts this replica's changes, get write access back and set the earlier intent so they can be sent; "+
+			"kata federation status shows what is waiting")
 	case errors.Is(err, db.ErrFederationProjectNotEmpty), errors.Is(err, daemon.ErrFederationReplicaBindingConflict):
 		return reconcileError(ErrBindingConflict, "federation attachment requires an empty project or explicit migration approval")
 	case errors.Is(err, daemon.ErrFederationReplicaCredentialIO):
