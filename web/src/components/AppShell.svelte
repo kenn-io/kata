@@ -505,7 +505,7 @@
 
   function beginNewTask(): void {
     if (newTaskBlockedReason) return
-    mobileNavigationOpen = false
+    closeNavigation()
     if (scopedAuthority) {
       captureOpen = true
       return

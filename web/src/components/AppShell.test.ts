@@ -1814,6 +1814,75 @@ describe('AppShell', () => {
     expect(onPreferencesChange).toHaveBeenCalledWith(expect.objectContaining({ theme: 'light' }))
   })
 
+  test('closing navigation for task capture discards the project form', async () => {
+    vi.stubGlobal('matchMedia', (media: string) => ({
+      matches: true,
+      media,
+      addEventListener() {},
+      removeEventListener() {},
+    }))
+    const current = snapshot()
+    current.catalog![0]!.project.metadata = { role: 'inbox' }
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'all-open',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: current,
+        loading: false,
+        ...mutationProps(),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Open navigation' }))
+    let drawer = screen.getByRole('dialog', { name: 'Navigation' })
+    await fireEvent.click(within(drawer).getByRole('button', { name: 'New project' }))
+    expect(within(drawer).getByRole('textbox', { name: 'New project name' })).not.toBeNull()
+    await fireEvent.click(within(drawer).getByRole('button', { name: 'New task' }))
+    await fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('dialog', { name: 'New task' })).toBeNull()
+    await fireEvent.click(screen.getByRole('button', { name: 'Open navigation' }))
+    drawer = screen.getByRole('dialog', { name: 'Navigation' })
+    expect(within(drawer).queryByRole('textbox', { name: 'New project name' })).toBeNull()
+  })
+
+  test.each(['settings', 'credentials'] as const)(
+    'creates a task from %s without navigating away',
+    async (view) => {
+      const current = snapshot()
+      current.catalog![0]!.project.metadata = { role: 'inbox' }
+      const onCreateIssue = vi.fn(async () => {})
+      const onNavigate = vi.fn()
+      render(AppShell, {
+        props: {
+          route: {
+            kind: 'kata',
+            view,
+            graph: false,
+            filters: { status: [], owner: [], label: [], relationship: [] },
+          },
+          snapshot: current,
+          loading: false,
+          ...mutationProps({ onCreateIssue }),
+          onNavigate,
+          onCreateProject: vi.fn(async () => ({ changed: true })),
+        },
+      })
+
+      await fireEvent.click(screen.getByRole('button', { name: 'New task' }))
+      const input = screen.getByRole('textbox', { name: 'Quick capture' })
+      await fireEvent.input(input, { target: { value: 'Example task' } })
+      await fireEvent.keyDown(input, { key: 'Enter' })
+      await waitFor(() => expect(onCreateIssue).toHaveBeenCalledWith('Example task'))
+      expect(onNavigate).not.toHaveBeenCalled()
+    },
+  )
+
   test('closes navigation and shows a rejected capture error once', async () => {
     const onCreateIssue = vi.fn().mockRejectedValue(new Error('validation: Action refused'))
     vi.stubGlobal('matchMedia', (media: string) => ({
