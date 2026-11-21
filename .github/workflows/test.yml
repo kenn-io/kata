@@ -1,7 +1,8 @@
-name: Tests
+name: Tests (main and manual)
 
 on:
   workflow_call:
+  workflow_dispatch:
   push:
     branches:
       - main
