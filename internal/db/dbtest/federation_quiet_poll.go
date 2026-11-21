@@ -82,7 +82,7 @@ type quietPollHub struct {
 	inserted  int
 }
 
-// newQuietPollHub seeds a quiet federated project with issues issues and a
+// newQuietPollHub seeds a quiet federated project with the given number of issues and a
 // busy one, and catches a poll cursor up to the quiet project's feed.
 func newQuietPollHub(t *testing.T, store db.Storage, issues int) *quietPollHub {
 	t.Helper()
@@ -99,12 +99,37 @@ func newQuietPollHub(t *testing.T, store db.Storage, issues int) *quietPollHub {
 	}
 	hub.busyIssue, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: hub.busy.ID, Title: "Busy", Author: "tester"})
 	require.NoError(t, err)
-	for range issues {
-		_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: hub.quiet.ID, Title: "Quiet", Author: "tester"})
-		require.NoError(t, err)
-	}
+	appendQuietIssues(t, store, hub.quiet, issues)
 	hub.catchUp()
 	return hub
+}
+
+func appendQuietIssues(t *testing.T, store db.Storage, project db.Project, n int) {
+	t.Helper()
+	ctx := t.Context()
+	beginner, ok := store.(interface {
+		BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
+	})
+	require.True(t, ok, "backend must expose its database handle")
+	tx, err := beginner.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback() }()
+	issues, err := tx.PrepareContext(ctx, `INSERT INTO issues(uid,short_id,project_id,title,author) VALUES($1,$2,$3,'Quiet','tester')`)
+	require.NoError(t, err)
+	events, err := tx.PrepareContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash)
+ VALUES($1,$2,$3,$4,$5,'issue.updated','tester','{}',1,0,$6)`)
+	require.NoError(t, err)
+	hash := strings.Repeat("a", 64)
+	for i := range n {
+		uid := fmt.Sprintf("%026d", i)
+		_, err = issues.ExecContext(ctx, uid, uid[20:], project.ID)
+		require.NoError(t, err)
+		_, err = events.ExecContext(ctx, fmt.Sprintf("01M7%022d", i), store.InstanceUID(), project.ID, project.Name, uid, hash)
+		require.NoError(t, err)
+	}
+	require.NoError(t, issues.Close())
+	require.NoError(t, events.Close())
+	require.NoError(t, tx.Commit())
 }
 
 func (h *quietPollHub) catchUp() {
