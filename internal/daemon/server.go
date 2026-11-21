@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/pprof"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -404,7 +405,7 @@ func NewServer(cfg ServerConfig) *Server {
 	withExternalRootAdministration(humaAPI, cfg.Auth.AllowIdentityConnectorAdministration)
 
 	controlAdmission := make(chan struct{}, 16)
-	cfg.federationPollWaits = newFederationPollWaits(cap(controlAdmission))
+	cfg.federationPollWaits = newFederationPollWaits(cap(controlAdmission), runtime.GOMAXPROCS(0))
 	s := &Server{
 		cfg: cfg, api: humaAPI,
 		federationIngestAdmission:   make(chan struct{}, 2),

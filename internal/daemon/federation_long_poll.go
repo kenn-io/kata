@@ -29,6 +29,7 @@ const (
 	// A held poll keeps a connection, a goroutine and a broadcaster
 	// subscription. Polls beyond these bounds answer at once.
 	federationPollMaxWaiters              = 256
+	federationPollMaxWaitersPerCPU        = 32
 	federationPollMaxWaitersPerCredential = 32
 )
 
@@ -37,6 +38,7 @@ const (
 type federationPollWaits struct {
 	mu           sync.Mutex
 	total        int
+	maxTotal     int
 	byCredential map[int64]int
 	// signed counts held polls that also hold a federation control admission
 	// slot. They may use at most half of those slots, so held polls never
@@ -48,9 +50,10 @@ type federationPollWaits struct {
 	instance string
 }
 
-func newFederationPollWaits(controlAdmissionSlots int) *federationPollWaits {
+func newFederationPollWaits(controlAdmissionSlots, cpus int) *federationPollWaits {
 	return &federationPollWaits{
 		byCredential: map[int64]int{},
+		maxTotal:     min(federationPollMaxWaiters, federationPollMaxWaitersPerCPU*cpus),
 		maxSigned:    controlAdmissionSlots / 2,
 		remote:       newFederationPollWakeBus(),
 		instance:     rand.Text(),
@@ -105,7 +108,7 @@ type federationPollWaiter struct {
 func (w *federationPollWaits) admit(ctx context.Context, broadcaster *EventBroadcaster, enrollmentID int64, project db.Project) (*federationPollWaiter, bool) {
 	signed := holdsFederationControlAdmission(ctx)
 	w.mu.Lock()
-	if w.total >= federationPollMaxWaiters ||
+	if w.total >= w.maxTotal ||
 		w.byCredential[enrollmentID] >= federationPollMaxWaitersPerCredential ||
 		(signed && w.signed >= w.maxSigned) {
 		w.mu.Unlock()
@@ -399,11 +402,9 @@ func startFederationPollBridge(cfg ServerConfig) func() {
 }
 
 // holdFederationPoll waits on a caught-up page until the project may have new
-// events or the wait ends, then reads the page again. Before each read it
-// authorizes the request again from scratch, so revocation during the wait
-// still applies. The read after the wait ends returns events whose wakeup was
-// lost. The hold ends at deadline, fixed before the poll's first read, so a
-// slow first read shortens the hold.
+// events or the wait ends. It authorizes again before each read after a wake.
+// A lost wakeup reaches the spoke on its next poll. The deadline is fixed
+// before the first read, so a slow first read shortens the hold.
 func holdFederationPoll(
 	ctx context.Context,
 	waiter *federationPollWaiter,
@@ -411,24 +412,26 @@ func holdFederationPoll(
 	result db.FederationReadResult,
 	reauthorize func() (context.Context, error),
 	read func(context.Context) (db.FederationReadResult, error),
-) (db.FederationReadResult, error) {
+) (db.FederationReadResult, bool, bool, error) {
+	waited := false
 	for federationPollCaughtUp(result) && time.Now().Before(deadline) {
+		waited = true
 		woke, err := waiter.wait(ctx, deadline)
 		if err != nil {
-			return result, fmt.Errorf("held federation poll ended: %w", err)
+			return result, waited, false, fmt.Errorf("held federation poll ended: %w", err)
+		}
+		if !woke {
+			return result, waited, true, nil
 		}
 		readCtx, err := reauthorize()
 		if err != nil {
-			return result, err
+			return result, waited, false, err
 		}
 		if result, err = read(readCtx); err != nil {
-			return result, err
-		}
-		if !woke {
-			break
+			return result, waited, false, err
 		}
 	}
-	return result, nil
+	return result, waited, false, nil
 }
 
 // heldFederationPollAllowed reports whether the hub can authorize a held poll

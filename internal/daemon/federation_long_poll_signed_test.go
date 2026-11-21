@@ -190,17 +190,46 @@ func TestFederationPollRechecksAuthorizationAfterItsRead(t *testing.T) {
 	}
 }
 
-func TestFederationPollWaitReadsAgainWhenItExpires(t *testing.T) {
+func TestFederationPollWaitReturnsSavedPageWhenItExpires(t *testing.T) {
 	f := newSignedPollFixture(t)
 	synctest.Test(t, func(t *testing.T) {
 		h := f.serve(t, 0)
-		done := h.startHeldPoll(t, h.cursor(t), "30")
-		// A commit whose wakeup is lost reaches the poll only through the
-		// read it makes when its wait expires.
+		cursor := h.cursor(t)
+		reads := h.reads.readsReturned()
+		done := h.startHeldPoll(t, cursor, "30")
+		authCalls, revisionCalls := h.reads.accessCalls()
 		h.commit(t, "Committed without a wakeup", false)
 		response := <-done
 		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		var page pollBodyForTest
+		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &page))
+		assert.Empty(t, page.Events)
+		assert.Equal(t, cursor, page.NextAfterID)
+		assert.Equal(t, reads+1, h.reads.readsReturned())
+		authAfter, revisionAfter := h.reads.accessCalls()
+		assert.Equal(t, authCalls, authAfter)
+		assert.Equal(t, revisionCalls, revisionAfter)
+		response = h.send(h.request(t, cursor, ""))
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 		assert.Contains(t, response.Body.String(), "Committed without a wakeup")
+	})
+}
+
+func TestFederationPollWaitDefersProjectRevocationUntilNextPoll(t *testing.T) {
+	f := newSignedPollFixture(t)
+	synctest.Test(t, func(t *testing.T) {
+		h := f.serve(t, 0)
+		cursor := h.cursor(t)
+		done := h.startHeldPoll(t, cursor, "30")
+		require.NoError(t, h.revokeProjectAccess(t))
+		response := <-done
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		var page pollBodyForTest
+		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &page))
+		assert.Empty(t, page.Events)
+		assert.Equal(t, cursor, page.NextAfterID)
+		response = h.send(h.request(t, cursor, ""))
+		assert.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
 	})
 }
 
@@ -247,11 +276,20 @@ func TestFederationPollWaitRejectsARetiredSigningKey(t *testing.T) {
 			f := newSignedPollFixture(t)
 			synctest.Test(t, func(t *testing.T) {
 				h := f.serve(t, 20*time.Second)
-				done := h.startHeldPoll(t, h.cursor(t), "30")
+				cursor := h.cursor(t)
+				done := h.startHeldPoll(t, cursor, "30")
 				reads := h.reads.readsReturned()
 				time.Sleep(25 * time.Second)
 				h.commit(t, canary, tc.wake)
 				response := <-done
+				if !tc.wake {
+					require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+					var page pollBodyForTest
+					require.NoError(t, json.Unmarshal(response.Body.Bytes(), &page))
+					assert.Empty(t, page.Events)
+					assert.Equal(t, cursor, page.NextAfterID)
+					response = h.send(h.request(t, cursor, ""))
+				}
 				assert.Equal(t, http.StatusUnauthorized, response.Code, response.Body.String())
 				assert.NotContains(t, response.Body.String(), canary)
 				assert.Equal(t, reads, h.reads.readsReturned())

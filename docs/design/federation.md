@@ -317,11 +317,13 @@ first read shortens it. Before each read a held poll makes after waiting, the
 hub runs the request's full federation authorization again without the
 per-request cache. For a signed request this also confirms that the signing
 key has not passed its `not_after` and still holds the secret the request was
-verified with. The hub checks authorization once more before releasing the page.
-Revocation therefore ends a held poll at its next wake or at its expiry. When
-the wait ends without a wake, the hub reads once more, so events whose wakeup
-was lost still arrive. The hub bounds held polls in total, per credential, and
-for signed requests holding a control slot; past a bound it answers at once.
+verified with. After a poll waits and wakes, the hub checks authorization once
+more before releasing the page. On timeout it returns the empty page already
+read. The next poll checks authorization and reads again, so it sees
+revocations, retired keys, and events whose wakeup was lost. The hub holds at
+most 32 polls per available CPU, up to 256 total, and also bounds polls per
+credential and signed requests holding a control slot; past a bound it answers
+at once.
 
 Hub processes sharing a PostgreSQL database and schema relay commit wakeups to each other with `LISTEN/NOTIFY` on a dedicated connection. The channel derives from the instance UID and schema name, which distinguish installations but are not secrets. Any role connected to the database can derive it, listen for wakes, and send wakes. A wake carries the publishing process's instance tag and up to two keyed 64-bucket project tags. A receiving process wakes polls in those buckets, and each poll reauthorizes and rereads its own project. A role without access to application tables can observe wake activity and co-occurring buckets on a move. Notifications omit project IDs and issue content. Each process also wakes its held polls after its listener reconnects, because notifications sent while it was disconnected are lost.
 

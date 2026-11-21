@@ -21,7 +21,7 @@ import (
 )
 
 func TestFederationPollWaitsKeepHalfTheControlAdmissionSlotsFree(t *testing.T) {
-	waits := newFederationPollWaits(16)
+	waits := newFederationPollWaits(16, 8)
 	broadcaster := NewEventBroadcaster()
 	project := db.Project{ID: 7, UID: "01HZNQ7VFPK1XGD8R5MABCD4EA"}
 	signedCtx := withFederationControlAdmission(t.Context())
@@ -38,7 +38,7 @@ func TestFederationPollWaitsKeepHalfTheControlAdmissionSlotsFree(t *testing.T) {
 }
 
 func TestFederationPollWaitsBoundEveryHeldPoll(t *testing.T) {
-	waits := newFederationPollWaits(16)
+	waits := newFederationPollWaits(16, 8)
 	broadcaster := NewEventBroadcaster()
 	project := db.Project{ID: 7, UID: "01HZNQ7VFPK1XGD8R5MABCD4EA"}
 	for range federationPollMaxWaitersPerCredential {
@@ -48,17 +48,25 @@ func TestFederationPollWaitsBoundEveryHeldPoll(t *testing.T) {
 	}
 	_, ok := waits.admit(t.Context(), broadcaster, -1, project)
 	assert.False(t, ok)
-	for enrollment := range int64(federationPollMaxWaiters - federationPollMaxWaitersPerCredential) {
-		waiter, ok := waits.admit(t.Context(), broadcaster, enrollment, project)
-		require.True(t, ok)
-		t.Cleanup(waiter.release)
+
+	for _, tc := range []struct{ cpus, limit int }{{1, 32}, {8, 256}} {
+		t.Run(fmt.Sprintf("%d CPUs", tc.cpus), func(t *testing.T) {
+			waits := newFederationPollWaits(16, tc.cpus)
+			broadcaster := NewEventBroadcaster()
+			project := db.Project{ID: 7, UID: "01HZNQ7VFPK1XGD8R5MABCD4EA"}
+			for enrollment := range int64(tc.limit) {
+				waiter, ok := waits.admit(t.Context(), broadcaster, enrollment, project)
+				require.True(t, ok)
+				t.Cleanup(waiter.release)
+			}
+			_, ok := waits.admit(t.Context(), broadcaster, int64(tc.limit), project)
+			assert.False(t, ok)
+		})
 	}
-	_, ok = waits.admit(t.Context(), broadcaster, federationPollMaxWaiters, project)
-	assert.False(t, ok)
 }
 
 func TestFederationPollWakeIgnoresItsOwnInstance(t *testing.T) {
-	waits := newFederationPollWaits(16)
+	waits := newFederationPollWaits(16, 8)
 	woken, unsubscribe := waits.remote.subscribe(SubFilter{})
 	defer unsubscribe()
 	waits.remote.setSecret([]byte("test secret"))
@@ -67,6 +75,13 @@ func TestFederationPollWakeIgnoresItsOwnInstance(t *testing.T) {
 	case <-woken:
 		t.Fatal("a process must ignore the wakeups it published")
 	default:
+	}
+	other := newFederationPollWaits(16, 8)
+	waits.receive(other.message())
+	select {
+	case <-woken:
+	default:
+		t.Fatal("another process's wakeup was not delivered")
 	}
 }
 
@@ -85,7 +100,7 @@ func (recordingPollWakeBus) ListenFederationPollWake(ctx context.Context, _ func
 
 func TestFederationPollRemoteWakeMatchesProjectAndMoveSource(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		writer, reader := newFederationPollWaits(16), newFederationPollWaits(16)
+		writer, reader := newFederationPollWaits(16, 8), newFederationPollWaits(16, 8)
 		writer.remote.setSecret([]byte("test secret"))
 		reader.remote.setSecret([]byte("test secret"))
 		broadcaster := NewEventBroadcaster()
@@ -154,7 +169,7 @@ func TestFederationPollWakeBridgeStopsWhenItsStoreCloses(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		runFederationPollWakeBridge(t.Context(), closedPollWakeBus{}, NewEventBroadcaster(), newFederationPollWaits(16), slog.New(slog.DiscardHandler))
+		runFederationPollWakeBridge(t.Context(), closedPollWakeBus{}, NewEventBroadcaster(), newFederationPollWaits(16, 8), slog.New(slog.DiscardHandler))
 	}()
 	select {
 	case <-done:

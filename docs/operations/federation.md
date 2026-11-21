@@ -631,7 +631,8 @@ Held polls need a few things from the deployment:
 - Each idle binding keeps one request open at its hub. A host that limits
   concurrent requests per instance, such as some managed platforms, holds more
   open requests than it did with interval polls.
-- A hub holds at most 256 polls, and at most 32 per spoke credential. Signed
+- A hub holds at most 32 polls per available CPU, up to 256 total, and at most
+  32 per spoke credential. Signed
   polls can use at most half of the hub's federation control slots. Past a
   limit the hub answers at once and the spoke falls back to its interval. It
   asks for a held poll again after a growing delay, up to 16 intervals.
@@ -639,11 +640,11 @@ Held polls need a few things from the deployment:
   `KATA_HTTP_TIMEOUT` under 16 seconds turns held polls off. The daemon log
   says so once for each binding.
 
-The hub checks the poll's full authorization again before each read and after
-the last one, including the signing key for signed polls. A revoked
-credential, removed membership, or retired signing key therefore stops the poll
-when it wakes or expires. When the wait ends, the hub reads once more, so an
-event whose wakeup was lost still arrives. Hubs that share a PostgreSQL
+The hub checks the poll's full authorization again before each read after a
+wake and after the last read, including the signing key of a signed poll. A
+revoked credential, removed membership, or retired signing key stops a woken
+poll. When the wait expires, the hub returns the initial empty page and cursor.
+The next poll checks access and sees events whose wakeup was lost. Hubs that share a PostgreSQL
 database and schema wake each other's held polls with `LISTEN/NOTIFY` on a
 channel that other connected database roles can listen to or notify; a SQLite hub
 wakes them in process. A PostgreSQL wake carries the publishing process's instance tag and up to two

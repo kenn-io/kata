@@ -22,15 +22,38 @@ import (
 // goroutines while the test watches, so mu guards every field.
 type federationReadProbe struct {
 	db.Storage
-	mu       sync.Mutex
-	started  int
-	returned int
-	changed  chan struct{}
-	before   func(read int) error
+	mu            sync.Mutex
+	started       int
+	returned      int
+	authCalls     int
+	revisionCalls int
+	byProject     map[int64]int
+	changed       chan struct{}
+	before        func(read int) error
+}
+
+func (p *federationReadProbe) AuthorizeFederationToken(ctx context.Context, token string, projectID int64, capability string) (db.FederationEnrollment, error) {
+	p.mu.Lock()
+	p.authCalls++
+	p.mu.Unlock()
+	return p.Storage.AuthorizeFederationToken(ctx, token, projectID, capability)
+}
+
+func (p *federationReadProbe) ProjectAccessRevision(ctx context.Context) (int64, error) {
+	p.mu.Lock()
+	p.revisionCalls++
+	p.mu.Unlock()
+	return p.Storage.ProjectAccessRevision(ctx)
+}
+
+func (p *federationReadProbe) accessCalls() (int, int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.authCalls, p.revisionCalls
 }
 
 func newFederationReadProbe(store db.Storage) *federationReadProbe {
-	return &federationReadProbe{Storage: store, changed: make(chan struct{})}
+	return &federationReadProbe{Storage: store, changed: make(chan struct{}), byProject: make(map[int64]int)}
 }
 
 // storage returns the probe as the hub's store. A store shared by several hub
@@ -72,6 +95,7 @@ func (p *federationReadProbe) ReadFederation(ctx context.Context, params db.Fede
 	result, err := p.Storage.ReadFederation(ctx, params)
 	p.mu.Lock()
 	p.returned++
+	p.byProject[params.ProjectID]++
 	close(p.changed)
 	p.changed = make(chan struct{})
 	p.mu.Unlock()
@@ -100,6 +124,32 @@ func (p *federationReadProbe) waitForReads(t testing.TB, n int) {
 		case <-changed:
 		case <-deadline:
 			t.Fatalf("the hub returned %d federation reads, want %d", returned, n)
+		}
+	}
+}
+
+// projectReads reports the reads completed for one project.
+func (p *federationReadProbe) projectReads(projectID int64) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.byProject[projectID]
+}
+
+// waitForProjectReads waits for a specific project's reads to finish.
+func (p *federationReadProbe) waitForProjectReads(t testing.TB, projectID int64, n int) {
+	t.Helper()
+	deadline := time.After(10 * time.Second)
+	for {
+		p.mu.Lock()
+		returned, changed := p.byProject[projectID], p.changed
+		p.mu.Unlock()
+		if returned >= n {
+			return
+		}
+		select {
+		case <-changed:
+		case <-deadline:
+			t.Fatalf("project %d returned %d federation reads, want %d", projectID, returned, n)
 		}
 	}
 }
@@ -257,33 +307,31 @@ func TestFederationPollWaitHoldsUntilProjectEventCommits(t *testing.T) {
 }
 
 func TestFederationPollWaitReturnsEmptyWhenWaitExpires(t *testing.T) {
-	t.Run("no writes", func(t *testing.T) {
-		f := newLongPollFixture(t)
-		cursor := f.cursor(t)
-		result := f.poll(t, cursor, "1")
-		require.Equal(t, http.StatusOK, result.status, "%s", result.raw)
-		assert.Empty(t, result.body.Events)
-		assert.Equal(t, cursor, result.body.NextAfterID)
-		assert.GreaterOrEqual(t, result.elapsed, time.Second)
-		assert.Less(t, result.elapsed, 5*time.Second)
-	})
-	t.Run("another project writes", func(t *testing.T) {
-		f := newLongPollFixture(t)
-		other, err := f.env.DB.CreateProject(t.Context(), "other-project")
-		require.NoError(t, err)
-		cursor := f.cursor(t)
-		reads := f.reads.readsReturned()
-		done := f.startHeldPoll(t, cursor, "2")
-		createIssueAs(t, f.env, other.ID, "tester", "Belongs to another project")
-		result := <-done
-		require.NoError(t, result.err)
-		require.Equal(t, http.StatusOK, result.status, "%s", result.raw)
-		assert.Empty(t, result.body.Events)
-		assert.GreaterOrEqual(t, result.elapsed, 2*time.Second)
-		// The poll reads once before it waits and once when the wait ends. A
-		// wakeup for the other project would add a read in between.
-		assert.Equal(t, reads+2, f.reads.readsReturned())
-	})
+	f := newLongPollFixture(t)
+	cursor := f.cursor(t)
+	result := f.poll(t, cursor, "1")
+	require.Equal(t, http.StatusOK, result.status, "%s", result.raw)
+	assert.Empty(t, result.body.Events)
+	assert.Equal(t, cursor, result.body.NextAfterID)
+	assert.GreaterOrEqual(t, result.elapsed, time.Second)
+	assert.Less(t, result.elapsed, 5*time.Second)
+}
+
+func TestFederationPollWaitIgnoresOtherProjects(t *testing.T) {
+	f := newLongPollFixture(t)
+	other, err := f.env.DB.CreateProject(t.Context(), "other-project")
+	require.NoError(t, err)
+	cursor := f.cursor(t)
+	reads := f.reads.readsReturned()
+	done := f.startHeldPoll(t, cursor, "2")
+	createIssueAs(t, f.env, other.ID, "tester", "Belongs to another project")
+	result := <-done
+	require.NoError(t, result.err)
+	require.Equal(t, http.StatusOK, result.status, "%s", result.raw)
+	assert.Empty(t, result.body.Events)
+	assert.GreaterOrEqual(t, result.elapsed, 2*time.Second)
+	// A wakeup for the other project would add a read after the first.
+	assert.Equal(t, reads+1, f.reads.readsReturned())
 }
 
 func TestFederationPollWaitAnswersAtOnceWhenEventsArePending(t *testing.T) {
@@ -296,29 +344,33 @@ func TestFederationPollWaitAnswersAtOnceWhenEventsArePending(t *testing.T) {
 }
 
 func TestFederationPollWaitReauthorizesAfterWake(t *testing.T) {
-	for _, tc := range []struct {
-		name, wait string
-		wake       bool
-	}{{"wake", "30", true}, {"expiry", "2", false}} {
-		t.Run(tc.name, func(t *testing.T) {
-			f := newLongPollFixture(t)
-			cursor := f.cursor(t)
-			done := f.startHeldPoll(t, cursor, tc.wait)
-			reads := f.reads.readsReturned()
-			require.NoError(t, f.env.DB.RevokeFederationEnrollment(t.Context(), f.enrollment.Enrollment.ID))
-			if tc.wake {
-				createIssueAs(t, f.env, f.project.ID, "tester", "Committed after revocation")
-			}
-			var result longPollResult
-			select {
-			case result = <-done:
-			case <-time.After(10 * time.Second):
-				t.Fatal("held poll did not return")
-			}
-			require.NoError(t, result.err)
-			assert.Equal(t, http.StatusForbidden, result.status, "%s", result.raw)
-			assert.NotContains(t, string(result.raw), "Committed after revocation")
-			assert.Equal(t, reads, f.reads.readsReturned())
-		})
+	f := newLongPollFixture(t)
+	cursor := f.cursor(t)
+	done := f.startHeldPoll(t, cursor, "30")
+	reads := f.reads.readsReturned()
+	require.NoError(t, f.env.DB.RevokeFederationEnrollment(t.Context(), f.enrollment.Enrollment.ID))
+	createIssueAs(t, f.env, f.project.ID, "tester", "Committed after revocation")
+	var result longPollResult
+	select {
+	case result = <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("held poll did not return after a project event committed")
 	}
+	require.NoError(t, result.err)
+	assert.Equal(t, http.StatusForbidden, result.status, "%s", result.raw)
+	assert.NotContains(t, string(result.raw), "Committed after revocation")
+	assert.Equal(t, reads, f.reads.readsReturned())
+}
+
+func TestFederationPollWaitDefersRevocationUntilNextPoll(t *testing.T) {
+	f := newLongPollFixture(t)
+	cursor := f.cursor(t)
+	done := f.startHeldPoll(t, cursor, "2")
+	require.NoError(t, f.env.DB.RevokeFederationEnrollment(t.Context(), f.enrollment.Enrollment.ID))
+	result := <-done
+	require.NoError(t, result.err)
+	require.Equal(t, http.StatusOK, result.status, "%s", result.raw)
+	assert.Empty(t, result.body.Events)
+	assert.Equal(t, cursor, result.body.NextAfterID)
+	assert.Equal(t, http.StatusForbidden, f.poll(t, cursor, "").status)
 }
