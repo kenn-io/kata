@@ -1118,11 +1118,13 @@ for those workflows. Partial link failures leave the issue open and list the
 IDs already linked. See [document close evidence](../guide/attachments.md#cite-a-document-when-closing-work)
 for historical versions, offline closes and stable retries.
 
-`--dry` validates the close without changing the issue and reports the close
-event it would record. Releases before 0.19.0 spelled this flag `--dry-run`.
+`--dry` validates the close without changing the issue, reports the close
+event it would record, and skips posting `--comment`, though an empty
+`--comment` is still rejected. Releases before 0.19.0 spelled this flag
+`--dry-run`.
 
 `-m` is short for `--message`, and `--body` is accepted as an alias, matching
-`kata comment`. `--comment` still posts a separate follow-up comment.
+`kata comment`. Without `--dry`, `--comment` posts a separate follow-up comment.
 
 `--idempotency-key` makes a close safe to retry after a lost response. For
 seven days, an exact retry returns the original `issue.closed` event through
