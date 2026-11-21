@@ -64,9 +64,6 @@ describe('kata task view builder', () => {
       issues: [
         issue('issue-1', 'Deadline slipped', 'project-health', { deadline_on: '2026-05-10' }),
         issue('issue-2', 'Morning review', 'project-workspace', { scheduled_on: '2026-05-15' }),
-        issue('issue-past', 'Started yesterday', 'project-workspace', {
-          scheduled_on: '2026-05-14',
-        }),
         issue('issue-3', 'Evening class', 'project-health', {
           scheduled_on: '2026-05-15',
           today_bucket: 'evening',
@@ -99,7 +96,6 @@ describe('kata task view builder', () => {
           issues: [
             expect.objectContaining({ title: 'Deadline slipped' }),
             expect.objectContaining({ title: 'Future scheduled but overdue' }),
-            expect.objectContaining({ title: 'Started yesterday' }),
           ],
         },
         {

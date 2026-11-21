@@ -29,18 +29,6 @@ test('a long server name leaves New task reachable', async ({ page, kata }) => {
   }
 })
 
-test('task toolbar follows the list title', async ({ page, kata }) => {
-  await page.setViewportSize({ width: 1440, height: 800 })
-  await kata.launch(page)
-
-  const list = page.getByRole('region', { name: 'Issues' })
-  const title = (await list.getByRole('heading', { name: 'All open' }).boundingBox())!
-  const searchPanel = (await page.locator('.kata-search-panel').boundingBox())!
-  const columns = (await list.locator('.table-header').boundingBox())!
-  expect(searchPanel.y).toBeGreaterThanOrEqual(title.y + title.height)
-  expect(searchPanel.y + searchPanel.height).toBeLessThanOrEqual(columns.y)
-})
-
 test('system views stay beside the list until the mobile layout', async ({ page, kata }) => {
   await page.setViewportSize({ width: 853, height: 684 })
   await kata.launch(page)

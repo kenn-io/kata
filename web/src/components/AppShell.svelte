@@ -933,7 +933,7 @@
           fetched_at: currentView.fetched_at,
         }}
         issueCatalog={projection.issues}
-        scopeLabel={projectView ? selectedProject?.name : undefined}
+        scopeLabel={scopeLabel()}
         scopedProjectName={selectedProject?.name ?? null}
         {projectView}
         {detailBeside}

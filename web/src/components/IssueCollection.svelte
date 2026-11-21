@@ -55,7 +55,7 @@
     now: number
     resultsKey?: string
     issueCatalog: readonly KataTaskSummary[]
-    scopeLabel?: string | undefined
+    scopeLabel?: string
     scopedProjectName?: string | null
     projectView?: boolean
     detailBeside?: boolean
@@ -587,7 +587,6 @@
 
   function viewTitle(view: KataCurrentView): string {
     if (scopeLabel) return scopeLabel
-    if (view.name === 'all') return 'All open'
     return view.name.charAt(0).toUpperCase() + view.name.slice(1)
   }
 

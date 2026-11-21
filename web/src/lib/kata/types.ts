@@ -35,7 +35,6 @@ export interface KataProjectSummary {
   created_at?: string | undefined
   deleted_at?: string | undefined
   open_count: number
-  closed_count?: number | undefined
 }
 
 export interface KataLinkPeer {
