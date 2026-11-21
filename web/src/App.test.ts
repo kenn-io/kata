@@ -2147,7 +2147,7 @@ describe('App', () => {
     expect(await screen.findByRole('button', { name: /Example issue/ })).not.toBeNull()
     await fireEvent.click(screen.getByRole('button', { name: 'Today' }))
     await waitFor(() => expect(window.location.search).toBe('?view=today'))
-    expect(screen.getByRole('heading', { name: 'All Open' })).not.toBeNull()
+    expect(screen.getByRole('heading', { name: 'All open' })).not.toBeNull()
   })
 
   it('loads credential audit metadata without sending the credential route to snapshots and returns to the issue route', async () => {

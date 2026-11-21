@@ -156,7 +156,7 @@ test('the task count sits beside the list title', async ({ page, kata }) => {
   await page.goto(`${kata.origin}/kata?view=all-open`)
 
   const list = page.getByRole('region', { name: 'Issues' })
-  const title = (await list.getByRole('heading', { name: 'All Open' }).boundingBox())!
+  const title = (await list.getByRole('heading', { name: 'All open' }).boundingBox())!
   const count = (await list.getByText(/^\d+ tasks?$/).boundingBox())!
 
   expect(count.y).toBeLessThan(title.y + title.height)
