@@ -1514,7 +1514,7 @@
         onOpen={() => void refreshDaemonRoster()}
       />
     {/if}
-    {#if authority?.snapshot && (mode === 'ready' || mode === 'launch' || mode === 'login')}
+    {#if authority?.snapshot && mode === 'ready'}
       <AppShell
         {syncRefreshGeneration}
         {searchSettingsPostFetch}

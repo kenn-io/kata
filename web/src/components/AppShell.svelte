@@ -714,30 +714,34 @@
     onOpenCredentials={openCredentials}
   >
     {#snippet header()}
-      {#if daemons.length > 0}
-        <KataDaemonSwitcher
-          {daemons}
-          account={connectionAccount}
-          credential={connectionStatus === 'Connected' ? undefined : connectionStatus}
-          activeId={activeDaemonID}
-          activeStatusLabel={daemonError ?? (reconnecting ? 'Reconnecting…' : undefined)}
-          activeStatusTone={daemonError ? 'error' : undefined}
-          disabled={daemonSwitching || mutationPending}
-          onSelect={onSelectDaemon}
-          onOpen={onOpenDaemon}
-        />
-      {:else}
-        <strong>Kata</strong>
-        {#if daemonError || reconnecting}<span class="daemon-fallback-status" role="status"
-            >{daemonError ?? 'Reconnecting…'}</span
-          >{/if}
-      {/if}
-      {#if newTaskBlockedReason}
-        <Tooltip text={newTaskBlockedReason}>{@render newTaskButton()}</Tooltip>
-        <span id={newTaskReasonID} class="kit-sr-only">{newTaskBlockedReason}</span>
-      {:else}
-        {@render newTaskButton()}
-      {/if}
+      <div class="header-server">
+        {#if daemons.length > 0}
+          <KataDaemonSwitcher
+            {daemons}
+            account={connectionAccount}
+            credential={connectionStatus === 'Connected' ? undefined : connectionStatus}
+            activeId={activeDaemonID}
+            activeStatusLabel={daemonError ?? (reconnecting ? 'Reconnecting…' : undefined)}
+            activeStatusTone={daemonError ? 'error' : undefined}
+            disabled={daemonSwitching || mutationPending}
+            onSelect={onSelectDaemon}
+            onOpen={onOpenDaemon}
+          />
+        {:else}
+          <strong>Kata</strong>
+          {#if daemonError || reconnecting}<span class="daemon-fallback-status" role="status"
+              >{daemonError ?? 'Reconnecting…'}</span
+            >{/if}
+        {/if}
+      </div>
+      <div class="header-task">
+        {#if newTaskBlockedReason}
+          <Tooltip text={newTaskBlockedReason}>{@render newTaskButton()}</Tooltip>
+          <span id={newTaskReasonID} class="kit-sr-only">{newTaskBlockedReason}</span>
+        {:else}
+          {@render newTaskButton()}
+        {/if}
+      </div>
     {/snippet}
   </Sidebar>
 {/snippet}

@@ -2023,19 +2023,39 @@ describe('App', () => {
   })
 
   it('fences browser authority when a reference request rejects the session', async () => {
-    history.replaceState(null, '', '/kata#direct=1')
+    history.replaceState(null, '', '/kata?view=today#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'revoked-session', csrf: 'revoked-csrf' }),
     )
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const target = new URL(
           input instanceof Request ? input.url : String(input),
           window.location.origin,
         )
-        if (target.pathname === '/api/v1/ui/references') {
+        if (target.pathname === '/api/v1/ui/session/login') {
+          expect(JSON.parse(String(init?.body))).toEqual({
+            token: 'example-token',
+            return_path: '/kata?view=today',
+          })
+          return new Response(
+            JSON.stringify({
+              session: 'new-session',
+              csrf: 'new-csrf',
+              return_path: '/kata?view=today',
+              writable: true,
+              updates: 'poll',
+              actor_policy: 'identity',
+            }),
+            { status: 200 },
+          )
+        }
+        if (
+          target.pathname === '/api/v1/ui/references' &&
+          sessionStorage.getItem('kata.web.session.v1')?.includes('revoked-session')
+        ) {
           return new Response('', {
             status: 401,
             headers: { 'X-Kata-Web-Authentication': 'login' },
@@ -2052,9 +2072,11 @@ describe('App', () => {
 
     expect(await screen.findByRole('form', { name: 'Log in' })).not.toBeNull()
     expect(sessionStorage.getItem('kata.web.session.v1')).toBeNull()
-    expect(screen.getByRole('button', { name: 'New project' }).getAttribute('aria-disabled')).toBe(
-      'true',
-    )
+    expect(screen.queryByRole('region', { name: 'Kata workspace' })).toBeNull()
+    await fireEvent.input(screen.getByLabelText('Token'), { target: { value: 'example-token' } })
+    await fireEvent.click(screen.getByRole('button', { name: 'Log in' }))
+    expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+    expect(window.location.search).toBe('?view=today')
   })
 
   it('shows configured-origin login without probing authority or losing the requested route', () => {

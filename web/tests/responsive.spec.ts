@@ -2,6 +2,51 @@ import { expect, test } from './fixtures'
 
 test.use({ trace: 'off' })
 
+test('a long server name leaves New task reachable', async ({ page, kata }) => {
+  const name = 'example-local-server-with-a-very-long-configured-name'
+  await page.route('**/api/v1/**', async (route) => {
+    const headers = { ...route.request().headers() }
+    if (headers['x-kata-web-daemon'] === name) headers['x-kata-web-daemon'] = 'example-local'
+    if (new URL(route.request().url()).pathname === '/api/v1/ui/daemons') {
+      const response = await route.fetch({ headers })
+      const roster = await response.json()
+      for (const daemon of roster.daemons) if (daemon.id === 'example-local') daemon.id = name
+      await route.fulfill({ response, json: roster })
+    } else await route.continue({ headers })
+  })
+  await kata.launch(page)
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 800 })
+    if (width === 390) await page.getByRole('button', { name: 'Open navigation' }).click()
+    const sidebar = page.locator('.sidebar-header')
+    const task = page.getByRole('button', { name: 'New task' })
+    const bounds = (await sidebar.boundingBox())!
+    const button = (await task.boundingBox())!
+    expect(button.x + button.width).toBeLessThanOrEqual(bounds.x + bounds.width)
+    await task.click()
+    const capture = page.getByRole('dialog', { name: 'New task' })
+    await expect(capture).toBeVisible()
+    await page.keyboard.press('Escape')
+  }
+  await page.route('**/api/v1/ui/snapshot?*', async (route) => {
+    const response = await route.fetch({
+      headers: { ...route.request().headers(), 'x-kata-web-daemon': 'example-local' },
+    })
+    const snapshot = await response.json()
+    snapshot.capabilities.writable = false
+    snapshot.capabilities.updates = 'poll'
+    await route.fulfill({ response, json: snapshot })
+  })
+  await page.setViewportSize({ width: 1440, height: 800 })
+  await page.reload()
+  const task = page.getByRole('button', { name: 'New task' })
+  await expect(task).toBeDisabled()
+  await expect(task).toHaveAccessibleDescription('This credential is read-only.')
+  const sidebar = (await page.locator('.sidebar-header').boundingBox())!
+  const button = (await task.boundingBox())!
+  expect(button.x + button.width).toBeLessThanOrEqual(sidebar.x + sidebar.width)
+})
+
 test('system views stay beside the list until the mobile layout', async ({ page, kata }) => {
   await page.setViewportSize({ width: 853, height: 684 })
   await kata.launch(page)
@@ -17,6 +62,14 @@ test('system views stay beside the list until the mobile layout', async ({ page,
   })
 
   expect(layout).toEqual({ sameRow: true, sidebarBeforeMain: true })
+})
+
+test('direct connections keep New task in the sidebar', async ({ page, kata }) => {
+  await kata.launch(page, '/kata#direct=1')
+  const header = page.locator('.sidebar-header')
+  await expect(header.getByText('Kata', { exact: true })).toBeVisible()
+  await header.getByRole('button', { name: 'New task' }).click()
+  await expect(page.getByRole('dialog', { name: 'New task' })).toBeVisible()
 })
 
 test('mobile navigation stays out of the task flow until opened', async ({ page, kata }) => {
@@ -70,6 +123,10 @@ test('sidebar navigation rows keep their height on hover', async ({ page, kata }
   const after = (await today.boundingBox())!
 
   expect(after.height).toBe(before.height)
+  const newTask = page.getByRole('button', { name: 'New task' })
+  const taskHeight = (await newTask.boundingBox())!.height
+  await newTask.hover()
+  expect((await newTask.boundingBox())!.height).toBe(taskHeight)
 })
 
 test('Appearance changes and keeps the workspace theme', async ({ page, kata }) => {

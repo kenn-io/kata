@@ -11,11 +11,11 @@ test('standalone shell preserves the Forge base typography and header geometry',
 }) => {
   await kata.launch(page)
 
-  const shell = await page.locator('.kata-header').evaluate((element) => {
+  const shell = await page.locator('.sidebar-header').evaluate((element) => {
     const style = getComputedStyle(element)
     return { boxSizing: style.boxSizing, height: element.getBoundingClientRect().height }
   })
-  expect(shell).toEqual({ boxSizing: 'border-box', height: 44 })
+  expect(shell).toEqual({ boxSizing: 'border-box', height: 48 })
   await expect(page.locator('body')).toHaveCSS('font-size', '13px')
 })
 

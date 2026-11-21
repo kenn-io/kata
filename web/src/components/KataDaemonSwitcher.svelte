@@ -46,6 +46,7 @@
 </script>
 
 <Menu
+  class="daemon-menu-root"
   onopenchange={(open) => {
     if (open) onOpen()
   }}
@@ -92,9 +93,12 @@
           <span class="daemon-row" data-testid={`daemon-row-${daemon.id}`}
             ><Avatar name={daemon.id} size={16} shape="rounded" decorative /><span class="row-name"
               >{daemon.id}</span
-            >{#if status(daemon)}<span class="row-status">{status(daemon)}</span>{/if}</span
+            ></span
           >
-          {#if daemon.hint}<span class="row-hint">{daemon.hint}</span>{/if}
+          {#if status(daemon)}<span class="row-hint"
+              ><span class="row-status">{status(daemon)}</span>{#if daemon.hint}
+                {daemon.hint}{/if}</span
+            >{/if}
         </MenuRadioItem>
       {/each}
     </MenuRadioGroup>
@@ -102,12 +106,17 @@
 </Menu>
 
 <style>
+  :global(.daemon-menu-root) {
+    min-width: 0;
+    width: 100%;
+  }
   /* The negative margin keeps the tile on the header's 16px inset. */
   .daemon-chip {
     display: inline-flex;
     align-items: center;
     gap: 6px;
     min-width: 0;
+    max-width: 100%;
     margin-left: -8px;
     padding: 4px 8px;
     border-radius: var(--radius-md);
@@ -116,8 +125,14 @@
   .daemon-chip:global([aria-expanded='true']) {
     background: var(--bg-surface-hover);
   }
+  .daemon-chip :global(.kit-avatar),
+  .daemon-chip :global(.kit-status-dot),
+  .daemon-chip :global(svg) {
+    flex: none;
+  }
   .chip-label,
   .row-name {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -177,11 +192,6 @@
   .row-hint {
     color: var(--text-muted);
     font-size: var(--font-size-xs);
-  }
-  .row-status {
-    margin-left: auto;
-    white-space: nowrap;
-    flex: none;
   }
   .row-name {
     flex: 1;
