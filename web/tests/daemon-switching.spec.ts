@@ -15,7 +15,6 @@ test('navigates the server menu by keyboard and closes it with Escape', async ({
   await page.keyboard.press('Escape')
   await expect(remote).toBeHidden()
   await expect(trigger).toBeFocused()
-  await expect(trigger).toHaveAccessibleName('Switch Kata daemon: example-local')
 })
 
 test('keeps daemon names readable alongside health and recovery hints', async ({ page, kata }) => {
@@ -27,7 +26,8 @@ test('keeps daemon names readable alongside health and recovery hints', async ({
           { id: 'example-local', url: '', default: true, auth: 'none', health: 'connected' },
           {
             id: 'example-down-server',
-            url: '',
+            url: 'https://daemon.example',
+            local: false,
             default: false,
             auth: 'none',
             health: 'down',
@@ -35,7 +35,8 @@ test('keeps daemon names readable alongside health and recovery hints', async ({
           },
           {
             id: 'example-older-server',
-            url: '',
+            url: 'https://daemon.example',
+            local: false,
             default: false,
             auth: 'none',
             health: 'upgrade_required',

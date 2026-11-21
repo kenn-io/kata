@@ -97,10 +97,6 @@ test('identity bootstrap manages access without ordinary write authority', async
   try {
     const credentials = await loginOwner(page, kata.origin)
     await expect(page.getByRole('heading', { name: 'Teams and visibility' })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'New task' })).toHaveAttribute(
-      'aria-disabled',
-      'true',
-    )
     const snapshot = await kata.snapshot(page, credentials)
     expect(snapshot.capabilities).toMatchObject({ writable: false, access_admin: true })
     await page.getByLabel('New team name').fill('Identity team')

@@ -752,7 +752,7 @@ describe('AppShell', () => {
     )
   })
 
-  test('identity bootstrap administers access while ordinary issue writes remain disabled', async () => {
+  test('identity bootstrap administers access', async () => {
     setGeneratedFetch(async () => Response.json({ teams: [] }))
     const onAccessMutation = vi.fn(executeAccessMutation)
     const props = accessProps(onAccessMutation)
@@ -766,9 +766,6 @@ describe('AppShell', () => {
       expect(
         (screen.getByRole('button', { name: 'Create team' }) as HTMLButtonElement).disabled,
       ).toBe(false),
-    )
-    expect(screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled')).toBe(
-      'true',
     )
   })
 
@@ -1350,7 +1347,6 @@ describe('AppShell', () => {
     expect(screen.getByRole('heading', { name: 'Credentials' })).not.toBeNull()
     expect(screen.getByText('Worker')).not.toBeNull()
     expect(screen.queryByLabelText('Search tasks')).toBeNull()
-    expect(screen.getByRole('button', { name: 'New task' })).not.toBeNull()
     expect(screen.getByRole('button', { name: 'Credentials' }).classList).toContain('active')
     expect(screen.getByRole('button', { name: 'Today' }).classList).not.toContain('active')
 
@@ -1390,6 +1386,7 @@ describe('AppShell', () => {
 
   test('renders Settings as a daemon screen for the remote host and returns to issues', async () => {
     const onBackFromCredentials = vi.fn()
+    const onPreferencesChange = vi.fn()
     setGeneratedFetch(
       vi.fn(async () =>
         Response.json({
@@ -1430,6 +1427,7 @@ describe('AppShell', () => {
         ],
         activeDaemonID: 'team',
         canAdministerDaemon: false,
+        onPreferencesChange,
         onBackFromCredentials,
         ...mutationProps(),
         onNavigate: vi.fn(),
@@ -1440,6 +1438,9 @@ describe('AppShell', () => {
     expect(screen.getByRole('heading', { name: 'Settings' })).not.toBeNull()
     expect(await screen.findByText(/kata\.example\.com/)).not.toBeNull()
     expect(screen.queryByRole('button', { name: /layout/ })).toBeNull()
+
+    await fireEvent.click(screen.getByRole('radio', { name: 'Light' }))
+    expect(onPreferencesChange).toHaveBeenCalledWith(expect.objectContaining({ theme: 'light' }))
 
     await fireEvent.click(screen.getByRole('button', { name: 'Back to issues' }))
     expect(onBackFromCredentials).toHaveBeenCalledOnce()

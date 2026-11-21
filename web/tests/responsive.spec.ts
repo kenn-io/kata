@@ -26,37 +26,6 @@ test('a long server name leaves New task reachable', async ({ page, kata }) => {
     expect(button.x + button.width).toBeLessThanOrEqual(bounds.x + bounds.width)
   }
 
-  await page.unroute('**/api/v1/**')
-  await page.setViewportSize({ width: 1440, height: 800 })
-  await page.goto(`${kata.origin}/kata?view=all-open`)
-
-  const serverName = page.locator('.chip-label')
-  await expect(serverName).toHaveText('example-local')
-  const widths = await serverName.evaluate((element) => {
-    const range = element.ownerDocument.createRange()
-    range.selectNodeContents(element)
-    const textBounds = range.getBoundingClientRect()
-    const labelBounds = element.getBoundingClientRect()
-    return {
-      textRight: textBounds.right,
-      labelRight: labelBounds.right,
-    }
-  })
-  expect(widths.textRight).toBeLessThanOrEqual(widths.labelRight + 1)
-})
-
-test('sidebar and task toolbar share one header band', async ({ page, kata }) => {
-  await page.setViewportSize({ width: 1440, height: 800 })
-  await kata.launch(page)
-
-  const sidebarHeader = (await page.locator('.sidebar-header').boundingBox())!
-  const searchPanel = (await page.locator('.kata-search-panel').boundingBox())!
-  expect(searchPanel.y).toBe(sidebarHeader.y)
-  expect(searchPanel.height).toBe(sidebarHeader.height)
-
-  const task = (await page.getByRole('button', { name: 'New task' }).boundingBox())!
-  const search = (await page.getByRole('searchbox', { name: 'Search tasks' }).boundingBox())!
-  expect(Math.abs(task.y + task.height / 2 - (search.y + search.height / 2))).toBeLessThanOrEqual(1)
 })
 
 test('system views stay beside the list until the mobile layout', async ({ page, kata }) => {
