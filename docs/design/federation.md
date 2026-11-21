@@ -321,10 +321,9 @@ verified with. After a poll waits and wakes, the hub checks authorization once
 more before releasing the page. On timeout it returns the empty page already
 read. The next poll checks authorization and reads again, so it sees
 revocations, retired keys, and events whose wakeup was lost. The hub holds at
-most 32 polls per `GOMAXPROCS`, up to 256 total. At `GOMAXPROCS=1`, one
-credential can hold at most 16 of the 32 polls; at higher values it can hold
-at most 32. The hub also bounds signed requests holding a control slot; past a
-bound it answers at once.
+most 32 polls per `GOMAXPROCS`, up to 256 total. It also bounds held polls per
+credential and for signed requests holding a control slot; past a bound it
+answers at once.
 
 Hub processes sharing a PostgreSQL database and schema relay commit wakeups to each other with `LISTEN/NOTIFY` on a dedicated connection. The channel derives from the instance UID and schema name, which distinguish installations but are not secrets. Any role connected to the database can derive it, listen for wakes, and send wakes. A wake carries the publishing process's instance tag and up to two keyed 64-bucket project tags. A receiving process wakes polls in those buckets, and each poll reauthorizes and rereads its own project. A role without access to application tables can observe wake activity and co-occurring buckets on a move. Notifications omit project IDs and issue content. Each process also wakes its held polls after its listener reconnects, because notifications sent while it was disconnected are lost.
 
