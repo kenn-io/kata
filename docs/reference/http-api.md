@@ -837,7 +837,8 @@ endpoints published in OpenAPI:
   with the existing project and text filters.
 - `GET /api/v1/ui/issue-reference?ref=<ref>` resolves an issue reference to its
   issue and project UIDs. A bare reference needs `project_id` or `project`, an
-  exact name or UID; `project` also returns `scope_project_uid`.
+  exact name or UID; `project` also returns `scope_project_uid`. When both are
+  supplied, `project_id` takes precedence and `project` is ignored.
 - `GET /api/v1/ui/launch-target?issue_uid=<uid>` validates one active issue and
   returns a safe absolute route into the standalone browser application:
 
