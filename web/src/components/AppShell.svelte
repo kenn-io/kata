@@ -654,14 +654,13 @@
   <!-- aria-disabled keeps the blocked button focusable so keyboard users reach its reason. -->
   <button
     type="button"
-    class="new-task-button"
-    aria-label="New task"
+    class="new-task-button accent-button"
     aria-disabled={newTaskBlockedReason ? 'true' : undefined}
     aria-describedby={newTaskBlockedReason ? newTaskReasonID : undefined}
-    title={newTaskBlockedReason ? undefined : 'New task'}
     onclick={beginNewTask}
   >
     <PlusIcon size={13} strokeWidth={1.9} aria-hidden="true" />
+    <span>New task</span>
   </button>
 {/snippet}
 
@@ -1058,16 +1057,14 @@
   }
 
   .new-task-button {
-    display: inline-grid;
-    place-items: center;
-    width: 28px;
-    height: 28px;
-    border-radius: var(--radius-sm);
-    background: color-mix(in srgb, var(--accent-blue) 12%, transparent);
-    color: var(--accent-blue);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-1);
+    white-space: nowrap;
   }
-  .new-task-button:hover {
-    background: color-mix(in srgb, var(--accent-blue) 18%, transparent);
+  .new-task-button.accent-button {
+    padding-inline: 2px;
   }
   .appearance {
     display: flex;

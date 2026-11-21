@@ -20,10 +20,53 @@ test('a long server name leaves New task reachable', async ({ page, kata }) => {
     if (width === 390) await page.getByRole('button', { name: 'Open navigation' }).click()
     const sidebar = page.locator('.sidebar-header')
     const task = page.getByRole('button', { name: 'New task' })
+    await expect(task).toHaveText('New task')
+    const accentBackground = await task.evaluate((button) => {
+      const probe = button.ownerDocument.createElement('span')
+      probe.style.backgroundColor = 'var(--accent-blue)'
+      button.parentElement!.append(probe)
+      const color = button.ownerDocument.defaultView!.getComputedStyle(probe).backgroundColor
+      probe.remove()
+      return color
+    })
+    await expect(task).toHaveCSS('background-color', accentBackground)
     const bounds = (await sidebar.boundingBox())!
     const button = (await task.boundingBox())!
     expect(button.x + button.width).toBeLessThanOrEqual(bounds.x + bounds.width)
   }
+})
+
+test('desktop server name stays readable beside New task', async ({ page, kata }) => {
+  await page.setViewportSize({ width: 1440, height: 800 })
+  await kata.launch(page)
+
+  const serverName = page.locator('.chip-label')
+  await expect(serverName).toHaveText('example-local')
+  const widths = await serverName.evaluate((element) => {
+    const range = element.ownerDocument.createRange()
+    range.selectNodeContents(element)
+    const textBounds = range.getBoundingClientRect()
+    const labelBounds = element.getBoundingClientRect()
+    return {
+      textRight: textBounds.right,
+      labelRight: labelBounds.right,
+    }
+  })
+  expect(widths.textRight).toBeLessThanOrEqual(widths.labelRight + 1)
+})
+
+test('sidebar and task toolbar share one header band', async ({ page, kata }) => {
+  await page.setViewportSize({ width: 1440, height: 800 })
+  await kata.launch(page)
+
+  const sidebarHeader = (await page.locator('.sidebar-header').boundingBox())!
+  const searchPanel = (await page.locator('.kata-search-panel').boundingBox())!
+  expect(searchPanel.y).toBe(sidebarHeader.y)
+  expect(searchPanel.height).toBe(sidebarHeader.height)
+
+  const task = (await page.getByRole('button', { name: 'New task' }).boundingBox())!
+  const search = (await page.getByRole('searchbox', { name: 'Search tasks' }).boundingBox())!
+  expect(Math.abs(task.y + task.height / 2 - (search.y + search.height / 2))).toBeLessThanOrEqual(1)
 })
 
 test('system views stay beside the list until the mobile layout', async ({ page, kata }) => {
