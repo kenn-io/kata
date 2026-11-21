@@ -1408,7 +1408,6 @@ describe('AppShell', () => {
         canAdministerDaemon: false,
         onBackFromCredentials,
         ...mutationProps(),
-        mutationMessage: 'validation: Action refused',
         onNavigate: vi.fn(),
         onCreateProject: vi.fn(async () => ({ changed: true })),
       },
@@ -1417,10 +1416,28 @@ describe('AppShell', () => {
     expect(screen.getByRole('heading', { name: 'Settings' })).not.toBeNull()
     expect(await screen.findByText(/kata\.example\.com/)).not.toBeNull()
     expect(screen.queryByRole('button', { name: /layout/ })).toBeNull()
-    expect(screen.getByRole('alert').textContent).toBe('validation: Action refused')
-
     await fireEvent.click(screen.getByRole('button', { name: 'Back to issues' }))
     expect(onBackFromCredentials).toHaveBeenCalledOnce()
+  })
+
+  test('shows task creation errors on Settings', () => {
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'settings',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: snapshot(),
+        loading: false,
+        ...mutationProps({ mutationMessage: 'validation: Action refused' }),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+
+    expect(screen.getByRole('alert').textContent).toBe('validation: Action refused')
   })
 
   test('drops held keyboard selection when sidebar navigation begins', async () => {
