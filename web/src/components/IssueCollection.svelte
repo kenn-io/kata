@@ -216,12 +216,19 @@
       ...taskColumns.filter((column) => column.id !== 'id' && column.id !== 'project'),
     ]
   })
+  const effectiveSort = $derived.by(() => {
+    const keyColumn = optionalColumnForSort(sort.key)
+    return keyColumn &&
+      !renderedColumns.some((column) => column.kind === 'task' && column.id === keyColumn)
+      ? ({ key: 'title', direction: 'asc' } satisfies KataTaskSort)
+      : sort
+  })
 
   function trackForColumn(layout: TaskGridLayout, column: KataOptionalTaskColumn): string | null {
     if (column === 'project' && detailBeside) return '16px'
     const base =
       TASK_COLUMN_TRACKS[layout][column] ??
-      (column === 'owner' && sort.key === 'owner' ? TASK_COLUMN_TRACKS.medium.owner : null)
+      (column === 'owner' && effectiveSort.key === 'owner' ? TASK_COLUMN_TRACKS.medium.owner : null)
     if (!base) return null
     const width = columnWidths[column]
     return width === undefined ? base : `minmax(48px, ${width}px)`
@@ -231,7 +238,7 @@
     return [
       columnWidths.title === undefined
         ? TASK_TITLE_TRACKS[layout]
-        : `minmax(48px, ${columnWidths.title}px)`,
+        : `minmax(${columnWidths.title}px, 1fr)`,
       ...renderedColumns.map((column) => {
         if (column.kind === 'date')
           return columnWidths.date === undefined
@@ -272,25 +279,11 @@
     )
   }
 
-  let childrenByParentUID = $derived.by(() => {
-    const children = new Map<string, KataTaskSummary[]>()
-    for (const issue of issueCatalog) {
-      const parentUID = parentUIDOf(issue)
-      if (!parentUID) continue
-      const siblings = children.get(parentUID)
-      if (siblings) siblings.push(issue)
-      else children.set(parentUID, [issue])
-    }
-    return children
-  })
-
   const keepsSystemViewGroups = $derived(
     ['today', 'scheduled', 'delegated', 'logbook'].includes(currentView.name),
   )
   // Project lists are flat; system views retain their date and handoff groups.
-  let isProjectScoped = $derived(
-    Boolean(scopedProjectName) && !keepsSystemViewGroups,
-  )
+  let isProjectScoped = $derived(Boolean(scopedProjectName) && !keepsSystemViewGroups)
   let statusVisibleGroups = $derived(filterGroupsByStatus(currentView.groups, statusFilter))
   let flatIssues = $derived(
     isProjectScoped ? topLevelIssues(statusVisibleGroups.flatMap((group) => group.issues)) : [],
@@ -303,7 +296,7 @@
   // raw group data is untouched — purely a visual collapse, and the
   // merge only runs on the Today view so a future daemon-provided
   // "evening" bucket in any other view passes through unchanged.
-  let visibleGroups = $derived.by(() => {
+  let candidateGroups = $derived.by(() => {
     if (isProjectScoped) return []
     const groups = statusVisibleGroups.map((group) => ({ ...group, issues: [...group.issues] }))
     if (currentView.name === 'today') {
@@ -318,9 +311,38 @@
         }
       }
     }
-    const visibleKeys = new Set(groups.flatMap((group) => group.issues.map(issueHierarchyKey)))
     return groups
-      .map((group) => ({ ...group, issues: topLevelIssues(group.issues, visibleKeys) }))
+  })
+  let issueGroupByUID = $derived.by(() => {
+    const groupByUID = new Map<string, string>()
+    for (const group of candidateGroups) {
+      for (const issue of group.issues) groupByUID.set(issue.uid, group.id)
+    }
+    return groupByUID
+  })
+
+  let childrenByParentUID = $derived.by(() => {
+    const children = new Map<string, KataTaskSummary[]>()
+    for (const issue of issueCatalog) {
+      const parentUID = parentUIDOf(issue)
+      if (!parentUID) continue
+      const parentGroup = issueGroupByUID.get(parentUID)
+      const childGroup = issueGroupByUID.get(issue.uid)
+      if (parentGroup !== undefined && childGroup !== undefined && parentGroup !== childGroup)
+        continue
+      const siblings = children.get(parentUID)
+      if (siblings) siblings.push(issue)
+      else children.set(parentUID, [issue])
+    }
+    return children
+  })
+
+  let visibleGroups = $derived.by(() => {
+    return candidateGroups
+      .map((group) => {
+        const visibleKeys = new Set(group.issues.map(issueHierarchyKey))
+        return { ...group, issues: topLevelIssues(group.issues, visibleKeys) }
+      })
       .filter((group) => group.issues.length > 0)
   })
 
@@ -331,22 +353,25 @@
   let shouldFlatten = $derived(
     !isProjectScoped &&
       !keepsSystemViewGroups &&
-      (sort.key === 'updated' || sort.key === 'due') &&
+      (effectiveSort.key === 'updated' || effectiveSort.key === 'due') &&
       visibleGroups.length > 1,
   )
   let globalSortedIssues = $derived(
     shouldFlatten
       ? sortKataTasks(
           visibleGroups.flatMap((group) => group.issues),
-          sort,
+          effectiveSort,
         )
       : [],
   )
   let sortedGroups = $derived(
-    visibleGroups.map((group) => ({ ...group, issues: sortKataTasks(group.issues, sort) })),
+    visibleGroups.map((group) => ({
+      ...group,
+      issues: sortKataTasks(group.issues, effectiveSort),
+    })),
   )
   let ordinaryRootIssues = $derived.by(() => {
-    if (isProjectScoped) return sortKataTasks(flatIssues, sort)
+    if (isProjectScoped) return sortKataTasks(flatIssues, effectiveSort)
     if (shouldFlatten) return globalSortedIssues
     return sortedGroups.flatMap((group) => group.issues)
   })
@@ -532,9 +557,9 @@
     persistKataTaskColumnWidths(columnWidths)
   }
 
-  function copyTaskID(issue: KataTaskSummary, showMessage = false): void {
+  function copyTaskID(issue: KataTaskSummary): void {
     void copyToClipboard(issue.short_id).then((copied) => {
-      if (copied && showMessage) showFlash(`Copied ${issue.short_id}`, { tone: 'success' })
+      if (copied) showFlash(`Copied ${issue.short_id}`, { tone: 'success' })
     })
   }
 
@@ -695,7 +720,7 @@
   }
 
   function sortIndicator(key: KataTaskSortKey): 'asc' | 'desc' | null {
-    return sort.key === key ? sort.direction : null
+    return effectiveSort.key === key ? effectiveSort.direction : null
   }
 
   function sortLabel(key: KataTaskSortKey, label: string): string {
@@ -813,11 +838,11 @@
     if (!tableBody) return
     if (event.metaKey || event.ctrlKey || event.altKey) return
 
-    if (event.key.toLowerCase() === 'c' && !window.getSelection()?.toString()) {
+    if (event.key.toLowerCase() === 'c') {
       const issue = target.dataset.uid ? findIssueByUID(target.dataset.uid) : undefined
       if (issue) {
         event.preventDefault()
-        copyTaskID(issue, true)
+        copyTaskID(issue)
       }
       return
     }
@@ -1102,7 +1127,7 @@
     class="table"
     class:table--project-scoped={isProjectScoped}
     class:table--detail-beside={detailBeside}
-    class:table--keep-owner-sort={sort.key === 'owner' && columnVisibility.owner}
+    class:table--keep-owner-sort={effectiveSort.key === 'owner' && columnVisibility.owner}
     style:--table-cols-wide={wideGridColumns}
     style:--table-cols-medium={mediumGridColumns}
     style:--table-cols-compact={compactGridColumns}
@@ -1575,6 +1600,12 @@
     white-space: nowrap;
   }
 
+  .column-heading-due .col,
+  .column-heading-updated .col,
+  .column-heading-priority .col {
+    width: 100%;
+  }
+
   .col-priority,
   .col-due,
   .col-updated {
@@ -1585,6 +1616,10 @@
   .col-updated,
   .col-due {
     font-variant-numeric: tabular-nums;
+  }
+
+  .table--detail-beside .column-heading-project {
+    visibility: hidden;
   }
 
   .table-body {
@@ -2017,9 +2052,12 @@
     }
   }
 
+  /* The hover graph shortcut would cover the priority column here; the
+     detail pane's graph action stays available. */
   @container list (max-width: 520px) {
     .column-heading-updated,
-    .cell-updated {
+    .cell-updated,
+    .graph-action {
       display: none;
     }
 

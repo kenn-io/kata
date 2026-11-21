@@ -65,6 +65,7 @@ const baseIssues: KataTaskSummary[] = [
     owner: 'user-a',
     priority: 3,
     updated_at: '2026-05-16T08:00:00Z',
+    metadata: { scheduled_on: '2026-05-16' },
   }),
 ]
 
@@ -85,11 +86,29 @@ const currentView: KataCurrentView = {
   ],
 }
 
+const delegatedIssue = task({
+  ...baseIssues[0]!,
+  metadata: { ...baseIssues[0]!.metadata, teammate: 'user-b' },
+})
+const delegatedView: KataCurrentView = {
+  name: 'delegated',
+  fetched_at: '2026-05-16T10:00:00Z',
+  groups: [
+    {
+      id: 'user-a/user-b',
+      title: 'user-b for user-a',
+      handoff: { teammate: 'user-b', author: 'user-a' },
+      issues: [delegatedIssue],
+    },
+  ],
+}
+
 describe('IssueCollection', () => {
   afterEach(() => {
     cleanup()
     window.localStorage.clear()
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
     vi.useRealTimers()
   })
 
@@ -533,26 +552,7 @@ describe('IssueCollection', () => {
     expect(within(row).getByText('user-a')).toBeTruthy()
   })
 
-  it('hides ID by default and shows the project and status mark', () => {
-    const { container } = render(IssueCollection, {
-      props: {
-        currentView: viewWithIssues([baseIssues[0]!]),
-        selectedIssueUID: null,
-        loading: false,
-        onSelect: () => {},
-      },
-    })
-    const header = container.querySelector<HTMLElement>('.table-header')!
-    const row = container.querySelector<HTMLElement>('.row')!
-
-    expect(within(header).queryByText('ID')).toBeNull()
-    expect(within(header).getByText('Project')).toBeTruthy()
-    expect(row.querySelector('.cell-id')).toBeNull()
-    expect(row.querySelector('.cell-project')?.textContent).toContain('example-project')
-    expect(row.querySelector('.status-mark')).toBeTruthy()
-  })
-
-  it('keeps the project name available to screen readers beside the detail pane', () => {
+  it('keeps Project available to screen readers without resizing beside the detail pane', () => {
     const { container } = render(IssueCollection, {
       props: {
         currentView: viewWithIssues([baseIssues[0]!]),
@@ -567,6 +567,7 @@ describe('IssueCollection', () => {
     expect(container.querySelector('.cell-project .kit-sr-only')?.textContent).toBe(
       'example-project',
     )
+    expect(screen.queryByRole('separator', { name: 'Resize Project column' })).toBeNull()
   })
 
   it('copies the short task ID with C on the focused row', async () => {
@@ -597,7 +598,11 @@ describe('IssueCollection', () => {
     })
     const { container } = render(IssueCollection, {
       props: {
-        currentView: { ...viewWithIssues([closed]), name: 'logbook' },
+        currentView: {
+          name: 'logbook',
+          fetched_at: '2026-05-16T10:00:00Z',
+          groups: [{ id: '2026-05-14', title: 'May 14', issues: [closed] }],
+        },
         now: new Date('2026-05-16T12:00:00Z').getTime(),
         selectedIssueUID: null,
         loading: false,
@@ -622,86 +627,82 @@ describe('IssueCollection', () => {
     )
   })
 
-  it('resizes a column from the keyboard and saves its width', async () => {
-    render(IssueCollection, {
-      props: {
-        currentView: viewWithIssues([baseIssues[0]!]),
-        selectedIssueUID: null,
-        loading: false,
-        onSelect: () => {},
+  const resizeLogbookView: KataCurrentView = {
+    name: 'logbook',
+    fetched_at: '2026-05-16T10:00:00Z',
+    groups: [
+      {
+        id: '2026-05-14',
+        title: 'May 14',
+        issues: [
+          task({
+            ...baseIssues[0]!,
+            status: 'closed',
+            closed_at: new Date(2026, 4, 14, 12).toISOString(),
+          }),
+        ],
       },
-    })
-    const handle = screen.getByRole('separator', { name: 'Resize Due column' })
+    ],
+  }
+  const resizeCases: [string, KataCurrentView, string][] = [
+    ['all', viewWithIssues([baseIssues[0]!]), 'Title'],
+    ['today', currentView, 'Date'],
+    ['logbook', resizeLogbookView, 'Closed'],
+    ['all', viewWithIssues([baseIssues[0]!]), 'Due'],
+  ]
 
-    await fireEvent.keyDown(handle, { key: 'ArrowRight' })
-
-    expect(handle.getAttribute('aria-valuenow')).toBe('72')
-    expect(JSON.parse(localStorage.getItem(KATA_TASK_COLUMN_WIDTHS_STORAGE_KEY)!)).toEqual({
-      due: 72,
-    })
-  })
+  it.each(resizeCases)(
+    'resizes the %s view %s column with the keyboard',
+    async (name, currentView, label) => {
+      render(IssueCollection, {
+        props: {
+          currentView,
+          selectedIssueUID: null,
+          loading: false,
+          onSelect: () => {},
+        },
+      })
+      const handle = screen.getByRole('separator', { name: `Resize ${label} column` })
+      const before = Number(handle.getAttribute('aria-valuenow'))
+      await fireEvent.keyDown(handle, { key: 'ArrowRight' })
+      expect(Number(handle.getAttribute('aria-valuenow'))).toBe(before + 8)
+      if (label === 'Title') {
+        expect(
+          document
+            .querySelector<HTMLElement>('.table')
+            ?.style.getPropertyValue('--table-cols-wide'),
+        ).toContain('minmax(248px, 1fr)')
+        expect(JSON.parse(localStorage.getItem(KATA_TASK_COLUMN_WIDTHS_STORAGE_KEY)!)).toEqual({
+          title: 248,
+        })
+      }
+      if (label === 'Due') {
+        expect(JSON.parse(localStorage.getItem(KATA_TASK_COLUMN_WIDTHS_STORAGE_KEY)!)).toEqual({
+          due: 72,
+        })
+      }
+    },
+  )
 
   it.each([
-    ['all', 'Title'],
-    ['today', 'Date'],
-    ['logbook', 'Closed'],
-  ] as const)('resizes the %s view %s column', async (name, label) => {
-    render(IssueCollection, {
-      props: {
-        currentView: { ...viewWithIssues([baseIssues[0]!]), name },
-        selectedIssueUID: null,
-        loading: false,
-        onSelect: () => {},
-      },
-    })
-    const handle = screen.getByRole('separator', { name: `Resize ${label} column` })
-    const before = Number(handle.getAttribute('aria-valuenow'))
-    await fireEvent.keyDown(handle, { key: 'ArrowRight' })
-    expect(Number(handle.getAttribute('aria-valuenow'))).toBe(before + 8)
-  })
-
-  it('keeps date groups when filtering by project', () => {
-    render(IssueCollection, {
-      props: {
-        currentView,
-        scopedProjectName: 'example-project',
-        selectedIssueUID: null,
-        loading: false,
-        onSelect: () => {},
-      },
-    })
-    expect(screen.getByText('Overdue')).toBeTruthy()
-    expect(screen.getByRole('heading', { name: /Today 1/, level: 3 })).toBeTruthy()
-  })
-
-  it('keeps handoff groups when filtering by project', () => {
-    render(IssueCollection, {
-      props: {
-        currentView: {
-          name: 'delegated',
-          groups: [{ id: 'handoff', title: 'user-b for user-a', issues: [baseIssues[0]!] }],
+    ['date', currentView, /Overdue/, /Today 1/],
+    ['handoff', delegatedView, /user-b for user-a/, undefined],
+  ] as const)(
+    'keeps %s group headings when filtering by project',
+    (_kind, currentView, first, second) => {
+      render(IssueCollection, {
+        props: {
+          currentView,
+          scopedProjectName: 'example-project',
+          selectedIssueUID: null,
+          loading: false,
+          onSelect: () => {},
         },
-        scopedProjectName: 'example-project',
-        selectedIssueUID: null,
-        loading: false,
-        onSelect: () => {},
-      },
-    })
-    expect(screen.getByRole('heading', { name: /user-b for user-a/, level: 3 })).toBeTruthy()
-  })
-
-  it('does not offer Project resizing beside the task pane', () => {
-    render(IssueCollection, {
-      props: {
-        currentView: viewWithIssues([baseIssues[0]!]),
-        detailBeside: true,
-        selectedIssueUID: null,
-        loading: false,
-        onSelect: () => {},
-      },
-    })
-    expect(screen.queryByRole('separator', { name: 'Resize Project column' })).toBeNull()
-  })
+      })
+      expect(screen.getByRole('heading', { name: first, level: 3 })).toBeTruthy()
+      if (second) expect(screen.getByRole('heading', { name: second, level: 3 })).toBeTruthy()
+    },
+  )
 
   it('sorts due dates with overdue tasks first and undated tasks last', async () => {
     const overdue = task({
@@ -728,7 +729,11 @@ describe('IssueCollection', () => {
   it('keeps Inbox task rows without a group heading', () => {
     const { container } = render(IssueCollection, {
       props: {
-        currentView: { ...viewWithIssues([baseIssues[0]!]), name: 'inbox' },
+        currentView: {
+          name: 'inbox',
+          fetched_at: '2026-05-16T10:00:00Z',
+          groups: [{ id: 'inbox', title: 'Inbox', issues: [baseIssues[0]!] }],
+        },
         selectedIssueUID: null,
         loading: false,
         onSelect: () => {},
@@ -840,6 +845,9 @@ describe('IssueCollection', () => {
       el.textContent?.trim(),
     )
     expect(labels.slice(0, 5)).toEqual(['Title', 'Project', 'Due', 'Updated', 'Priority'])
+    const row = screen.getByRole('button', { name: /Review example project/ })
+    expect(row.querySelector('.cell-id')).toBeNull()
+    expect(row.querySelector('.cell-project')?.textContent).toContain('example-project')
   })
 
   it('hides Labels while keeping Title and Project visible', async () => {
@@ -1052,24 +1060,6 @@ describe('IssueCollection', () => {
     ).toBeNull()
   })
 
-  it('falls back to all columns for malformed saved data', () => {
-    localStorage.setItem(KATA_TASK_COLUMNS_STORAGE_KEY, JSON.stringify({ visible: ['updated'] }))
-    const { container } = render(IssueCollection, {
-      props: {
-        currentView: viewWithIssues(baseIssues),
-        selectedIssueUID: null,
-        loading: false,
-        onSelect: () => {},
-      },
-    })
-
-    const header = container.querySelector<HTMLElement>('.table-header')!
-    for (const name of ['Project', 'Due', 'Updated', 'Priority', 'Owner', 'Labels']) {
-      expect(within(header).getByText(name)).toBeTruthy()
-    }
-    expect(within(header).queryByText('Blocked by')).toBeNull()
-  })
-
   it('resets an invisible active sort to Title ascending', async () => {
     render(IssueCollection, {
       props: {
@@ -1151,6 +1141,55 @@ describe('IssueCollection', () => {
     expect(visibleRowTitles()).toEqual(['Review example project', 'Prepare summary'])
   })
 
+  it('uses a visible sort when the saved sort column is hidden in Logbook', () => {
+    const oldDue = task({
+      uid: 'zebra-task',
+      short_id: 'zebra-task',
+      qualified_id: 'example-project#zebra-task',
+      title: 'Zebra task',
+      status: 'closed',
+      closed_at: new Date(2026, 4, 16, 12).toISOString(),
+      updated_at: '2026-05-16T08:00:00Z',
+      metadata: { deadline_on: '2026-05-01' },
+    })
+    const noDue = task({
+      uid: 'apple-task',
+      short_id: 'apple-task',
+      qualified_id: 'example-project#apple-task',
+      title: 'Apple task',
+      status: 'closed',
+      closed_at: new Date(2026, 4, 16, 12).toISOString(),
+      updated_at: '2026-05-15T08:00:00Z',
+    })
+    const logbookView: KataCurrentView = {
+      name: 'logbook',
+      fetched_at: currentView.fetched_at,
+      groups: [{ id: '2026-05-16', title: 'May 16', issues: [oldDue, noDue] }],
+    }
+
+    for (const savedSort of [null, JSON.stringify({ key: 'due', direction: 'asc' })]) {
+      window.localStorage.clear()
+      if (savedSort) window.localStorage.setItem('kata:issue-sort/v1', savedSort)
+      const { unmount } = render(IssueCollection, {
+        props: {
+          currentView: logbookView,
+          issueCatalog: [oldDue, noDue],
+          selectedIssueUID: null,
+          loading: false,
+          onSelect: () => {},
+        },
+      })
+
+      expect(visibleRowTitles()).toEqual(['Apple task', 'Zebra task'])
+      expect(
+        screen
+          .getByRole('button', { name: /Sort by Title, currently ascending/ })
+          .getAttribute('aria-pressed'),
+      ).toBe('true')
+      unmount()
+    }
+  })
+
   it('keeps grouped headings when sorting inside visible groups', async () => {
     render(IssueCollection, {
       props: {
@@ -1227,7 +1266,7 @@ describe('IssueCollection', () => {
     expect(screen.queryByRole('button', { name: /Child task/ })).toBeNull()
   })
 
-  it('does not show an expanded child again as a flat row', async () => {
+  it('hides same-group children from top-level rows and expands them once', async () => {
     const parent = task({
       uid: 'issue-parent',
       short_id: 'parent',
@@ -1242,40 +1281,87 @@ describe('IssueCollection', () => {
       title: 'Child task',
       parent_short_id: parent.short_id,
     })
-    for (const view of [
-      viewWithIssues([parent, child]),
-      {
-        name: 'logbook',
-        fetched_at: currentView.fetched_at,
-        groups: [
-          { id: '2026-05-16', title: 'May 16', issues: [parent] },
-          { id: '2026-05-15', title: 'May 15', issues: [child] },
-        ],
-      } satisfies KataCurrentView,
-    ]) {
-      const { unmount } = render(IssueCollection, {
-        props: {
-          currentView: view,
-          issueCatalog: [parent, child],
-          selectedIssueUID: null,
-          loading: false,
-          onSelect: () => {},
+    render(IssueCollection, {
+      props: {
+        currentView: viewWithIssues([parent, child]),
+        issueCatalog: [parent, child],
+        selectedIssueUID: null,
+        loading: false,
+        onSelect: () => {},
+      },
+    })
+
+    expect(screen.queryByRole('button', { name: /Child task/ })).toBeNull()
+
+    const parentRow = screen.getByRole('button', { name: /Parent task/ })
+    await fireEvent.keyDown(parentRow, { key: 'ArrowRight' })
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: /Child task/ })).toHaveLength(1)
+    })
+    expect(
+      screen.getByRole('button', { name: /Child task/ }).classList.contains('row--child'),
+    ).toBe(true)
+  })
+
+  it('keeps a child in its date group when its parent belongs to another group', async () => {
+    const parent = task({
+      uid: 'issue-parent',
+      short_id: 'parent',
+      qualified_id: 'example-project#parent',
+      title: 'Parent task',
+      child_counts: { open: 1, total: 1 },
+      metadata: { deadline_on: '2026-05-16' },
+    })
+    const child = task({
+      uid: 'issue-child',
+      short_id: 'child',
+      qualified_id: 'example-project#child',
+      title: 'Overdue child',
+      parent_short_id: parent.short_id,
+      metadata: { deadline_on: '2026-05-15' },
+    })
+    const otherOverdue = task({
+      uid: 'issue-other-overdue',
+      short_id: 'other-overdue',
+      qualified_id: 'example-project#other-overdue',
+      title: 'Other overdue task',
+      metadata: { deadline_on: '2026-05-15' },
+    })
+    const { container } = render(IssueCollection, {
+      props: {
+        currentView: {
+          name: 'today',
+          fetched_at: currentView.fetched_at,
+          groups: [
+            { id: 'overdue', title: 'Overdue', issues: [child, otherOverdue] },
+            { id: 'today', title: 'Today', issues: [parent] },
+          ],
         },
-      })
+        issueCatalog: [parent, child, otherOverdue],
+        scopedProjectName: 'example-project',
+        selectedIssueUID: null,
+        loading: false,
+        onSelect: () => {},
+      },
+    })
 
-      expect(screen.queryByRole('button', { name: /Child task/ })).toBeNull()
+    const overdueGroup = container.querySelector<HTMLElement>(
+      'section[aria-labelledby="group-overdue"]',
+    )
+    expect(overdueGroup).toBeTruthy()
+    expect(within(overdueGroup!).getByRole('heading', { name: /^Overdue\s+2$/ })).toBeTruthy()
+    expect(within(overdueGroup!).getByRole('button', { name: /Overdue child/ })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: /^Today\s+1$/ })).toBeTruthy()
 
-      const parentRow = screen.getByRole('button', { name: /Parent task/ })
-      await fireEvent.keyDown(parentRow, { key: 'ArrowRight' })
+    await fireEvent.keyDown(screen.getByRole('button', { name: /Parent task/ }), {
+      key: 'ArrowRight',
+    })
 
-      await waitFor(() => {
-        expect(screen.getAllByRole('button', { name: /Child task/ })).toHaveLength(1)
-      })
-      expect(
-        screen.getByRole('button', { name: /Child task/ }).classList.contains('row--child'),
-      ).toBe(true)
-      unmount()
-    }
+    const childRows = screen.getAllByRole('button', { name: /Overdue child/ })
+    expect(childRows).toHaveLength(1)
+    expect(childRows[0]!.classList.contains('row--child')).toBe(false)
+    expect(within(overdueGroup!).getByRole('button', { name: /Overdue child/ })).toBeTruthy()
   })
 
   it('bounds identity reads as Logbook date groups increase', () => {

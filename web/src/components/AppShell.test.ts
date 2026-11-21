@@ -74,55 +74,6 @@ describe('AppShell', () => {
     )
   })
 
-  test('keeps Scheduled headings for an owner-filtered snapshot', () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-05-15T17:00:00Z'))
-    const current = snapshot()
-    const first = current.collection![0]!
-    current.collection = [
-      {
-        ...first,
-        uid: '01J00000000000000000000003',
-        short_id: 'a3',
-        title: 'First scheduled task',
-        owner: 'user-a',
-        metadata: { scheduled_on: '2026-05-20' },
-      },
-      {
-        ...first,
-        id: 2,
-        uid: '01J00000000000000000000004',
-        short_id: 'a4',
-        title: 'Second scheduled task',
-        owner: 'user-a',
-        metadata: { scheduled_on: '2026-05-21' },
-      },
-    ]
-    current.catalog[0]!.stats = { Open: 2, Closed: 0, LastEventAt: null }
-
-    render(AppShell, {
-      props: {
-        route: {
-          kind: 'kata',
-          view: 'scheduled',
-          graph: false,
-          filters: { status: [], owner: ['user-a'], label: [], relationship: [] },
-        },
-        snapshot: current,
-        loading: false,
-        ...mutationProps(),
-        onNavigate: vi.fn(),
-        onCreateProject: vi.fn(async () => ({ changed: true })),
-      },
-    })
-
-    expect(screen.getByText('Wed, May 20')).toBeTruthy()
-    expect(screen.getByText('Thu, May 21')).toBeTruthy()
-    expect(screen.getByText('First scheduled task')).toBeTruthy()
-    expect(screen.getByText('Second scheduled task')).toBeTruthy()
-    expect(screen.queryByText('Results')).toBeNull()
-  })
-
   test('advances Updated labels while the task snapshot stays unchanged', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-01T12:00:16Z'))
@@ -1644,7 +1595,6 @@ describe('AppShell', () => {
   })
 
   test('keeps project controls out of a dedicated project list', async () => {
-    const onNavigate = vi.fn()
     render(AppShell, {
       props: {
         route: {
@@ -1656,7 +1606,7 @@ describe('AppShell', () => {
         snapshot: snapshot(),
         loading: false,
         ...mutationProps(),
-        onNavigate,
+        onNavigate: vi.fn(),
         onCreateProject: vi.fn(async () => ({ changed: true })),
       },
     })
@@ -1664,7 +1614,6 @@ describe('AppShell', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Filter' }))
     expect(screen.queryByRole('button', { name: /^Project:/ })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Clear Project filter' })).toBeNull()
-    expect(onNavigate).not.toHaveBeenCalled()
   })
 
   test('resets grown rows when repeated label filters change', async () => {

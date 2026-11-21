@@ -125,23 +125,6 @@
     position()
   }
 
-  async function focusFilter(field: keyof KataTaskSearchFilters): Promise<void> {
-    if (!open) open = true
-    await tick()
-    position()
-    if (field === 'scope') {
-      panel?.querySelector<HTMLButtonElement>('.filter-control-project button')?.click()
-      await tick()
-    }
-    const selector =
-      field === 'scope'
-        ? '.filter-control-project input'
-        : field === 'relationships'
-          ? '.filter-control-relationship button'
-          : `[data-filter-field="${field}"]`
-    panel?.querySelector<HTMLElement>(selector)?.focus()
-  }
-
   function emit(changed: keyof KataTaskSearchFilters, next: Partial<KataTaskSearchFilters>): void {
     const nextFilters = {
       ...draft,
@@ -238,7 +221,6 @@
             <label for="task-owner-filter">Owner</label>
             <input
               id="task-owner-filter"
-              data-filter-field="owner"
               aria-label="Owner"
               value={draft.owner}
               placeholder="Any owner"
@@ -250,7 +232,6 @@
             <label for="task-label-filter">Label</label>
             <input
               id="task-label-filter"
-              data-filter-field="label"
               aria-label="Label"
               value={draft.label}
               placeholder="Any label"
@@ -280,9 +261,9 @@
             class="project-mark"
             style:background={projectMarkColor(selectedProject?.name ?? draft.scope.project_uid)}
           ></span>
-          <button type="button" onclick={() => void focusFilter('scope')}>
+          <span class="filter-chip__label">
             {selectedProject?.name ?? draft.scope.project_uid}
-          </button>
+          </span>
           <button type="button" aria-label="Clear Project filter" onclick={() => clear('scope')}>
             <XIcon size={12} aria-hidden="true" />
           </button>
@@ -290,9 +271,7 @@
       {/if}
       {#if draft.owner.trim()}
         <div class="filter-chip">
-          <button type="button" onclick={() => void focusFilter('owner')}
-            >Owner {draft.owner}</button
-          >
+          <span class="filter-chip__label">Owner {draft.owner}</span>
           <button type="button" aria-label="Clear Owner filter" onclick={() => clear('owner')}>
             <XIcon size={12} aria-hidden="true" />
           </button>
@@ -300,9 +279,7 @@
       {/if}
       {#if draft.label.trim()}
         <div class="filter-chip">
-          <button type="button" onclick={() => void focusFilter('label')}
-            >Label {draft.label}</button
-          >
+          <span class="filter-chip__label">Label {draft.label}</span>
           <button type="button" aria-label="Clear Label filter" onclick={() => clear('label')}>
             <XIcon size={12} aria-hidden="true" />
           </button>
@@ -310,9 +287,9 @@
       {/if}
       {#if draft.relationships?.[0]}
         <div class="filter-chip">
-          <button type="button" onclick={() => void focusFilter('relationships')}>
+          <span class="filter-chip__label">
             {relationshipLabel(draft.relationships[0])}
-          </button>
+          </span>
           <button
             type="button"
             aria-label="Clear Relationship filter"
@@ -482,6 +459,10 @@
     color: var(--text-secondary);
     font-size: var(--font-size-xs);
     white-space: nowrap;
+  }
+
+  .filter-chip__label {
+    padding: 0 3px;
   }
 
   .filter-chip button {

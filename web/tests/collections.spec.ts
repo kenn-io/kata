@@ -78,7 +78,7 @@ test('views, projects, filters, columns, hierarchy, and keyboard stay first-clas
   await expect(page).toHaveURL(`${kata.origin}/kata?scope=${kata.projectUID}`)
 })
 
-test('sorts by due date, keeps a resized width, and copies a short task ID', async ({
+test('keeps a resized width and copies a short task ID from the hovered row', async ({
   page,
   kata,
 }) => {
@@ -87,20 +87,7 @@ test('sorts by due date, keeps a resized width, and copies a short task ID', asy
     title: 'Overdue example task',
     metadata: { deadline_on: '2025-01-10' },
   })
-  const upcoming = await kata.seedIssue(page, credentials, {
-    title: 'Upcoming example task',
-    metadata: { deadline_on: '2026-12-10' },
-  })
-  const undated = await kata.seedIssue(page, credentials, { title: 'Undated example task' })
   await page.goto(`${kata.origin}/kata?view=all-open`)
-
-  await page.getByRole('button', { name: 'Sort by Due' }).click()
-  await expect(page.locator('.cell-id')).toHaveCount(0)
-  const rowOrder = await page
-    .locator('.row.issue-row')
-    .evaluateAll((rows) => rows.map((row) => row.getAttribute('data-uid')))
-  expect(rowOrder.indexOf(overdue.uid)).toBeLessThan(rowOrder.indexOf(upcoming.uid))
-  expect(rowOrder.indexOf(upcoming.uid)).toBeLessThan(rowOrder.indexOf(undated.uid))
 
   const handle = page.getByRole('separator', { name: 'Resize Due column' })
   await handle.focus()
@@ -115,8 +102,7 @@ test('sorts by due date, keeps a resized width, and copies a short task ID', asy
   const copy = page.getByRole('button', { name: `Copy task ID ${overdue.short_id}` })
   await expect(copy).toBeVisible()
   await expect(copy).toHaveCSS('opacity', '1')
-  await row.focus()
-  await page.keyboard.press('c')
+  await copy.click()
   await expect
     .poll(() => page.evaluate(() => navigator.clipboard.readText()))
     .toBe(overdue.short_id)
