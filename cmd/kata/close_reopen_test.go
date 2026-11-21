@@ -310,18 +310,21 @@ func TestCloseCmd_EvidenceValueWithCommaIsPreserved(t *testing.T) {
 }
 
 func TestCloseCmd_DryRunDoesNotMutate(t *testing.T) {
-	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
+	env, dir, pid, ref := setupWorkspaceWithIssue(t, "test issue")
 	out := runCLI(t, env, dir,
 		"close", ref,
 		"--done",
 		"--message", "Fixed Safari callback double-submit and ran tests.",
 		"--commit", "abc1234",
+		"--comment", "finished",
 		"--dry")
 	assert.Contains(t, out, "dry-run")
 	assert.Contains(t, out, "[open]")
 
 	show := runCLI(t, env, dir, "show", ref, "--json")
 	assert.Contains(t, show, `"status":"open"`)
+	got := fetchIssueViaHTTPWithComments(t, env, pid, ref)
+	assert.Empty(t, got.Comments)
 }
 
 func TestCloseCmd_RejectsDryRunSpelling(t *testing.T) {
@@ -521,13 +524,6 @@ func TestClose_WithComment_AppendsComment(t *testing.T) {
 	require.Len(t, got.Comments, 1, "close --comment must append exactly one comment")
 	assert.Equal(t, "fixed in abc1234", got.Comments[0].Body)
 	assert.Equal(t, "closed", got.Issue.Status)
-}
-
-func TestClose_DryRunWithCommentDoesNotMutate(t *testing.T) {
-	env, dir, pid, ref := setupWorkspaceWithIssue(t, "test issue")
-	runCLI(t, env, dir, "close", ref, "--dry", "--done", "--message", "Implemented the requested behavior and ran the focused tests.", "--test", "go test ./cmd/kata", "--comment", "finished")
-	got := fetchIssueViaHTTPWithComments(t, env, pid, ref)
-	assert.Empty(t, got.Comments)
 }
 
 func TestClose_RetryWithCommentAppendsOneComment(t *testing.T) {
