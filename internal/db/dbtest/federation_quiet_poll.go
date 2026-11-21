@@ -122,8 +122,7 @@ func appendQuietIssues(t *testing.T, store db.Storage, project db.Project, n int
 	defer func() { _ = tx.Rollback() }()
 	issues, err := tx.PrepareContext(ctx, `INSERT INTO issues(uid,short_id,project_id,title,author) VALUES($1,$2,$3,'Quiet','tester') RETURNING id,created_at`)
 	require.NoError(t, err)
-	events, err := tx.PrepareContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,issue_id,issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash)
- VALUES($1,$2,$3,$4,$5,$6,'issue.created','tester',$7,1,0,$8)`)
+	events, err := tx.PrepareContext(ctx, quietPollEventInsert)
 	require.NoError(t, err)
 	hash := strings.Repeat("a", 64)
 	for i := range n {
@@ -134,7 +133,7 @@ func appendQuietIssues(t *testing.T, store db.Storage, project db.Project, n int
 		require.NoError(t, err)
 		payload, err := json.Marshal(db.IssueDocumentPayload{UID: uid, ShortID: uid[20:], Title: "Quiet", Author: "tester", Status: "open", Metadata: jsontext.Value(`{}`), CreatedAt: createdAt})
 		require.NoError(t, err)
-		_, err = events.ExecContext(ctx, fmt.Sprintf("01M7%022d", i), store.InstanceUID(), project.ID, project.Name, issueID, uid, string(payload), hash)
+		_, err = events.ExecContext(ctx, fmt.Sprintf("01M7%022d", i), store.InstanceUID(), project.ID, project.Name, issueID, uid, "issue.created", string(payload), hash)
 		require.NoError(t, err)
 	}
 	require.NoError(t, issues.Close())
@@ -172,8 +171,8 @@ func (h *quietPollHub) unrelatedEvents(n int) {
 	h.inserted += n
 }
 
-const quietPollEventInsert = `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash)
- VALUES($1,$2,$3,$4,$5,'issue.updated','tester','{}',1,0,$6)`
+const quietPollEventInsert = `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,issue_id,issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash)
+ VALUES($1,$2,$3,$4,$5,$6,$7,'tester',$8,1,0,$9)`
 
 // appendUnrelatedEvents appends n events about issue, stamped to project, in
 // one transaction; creating thousands through the store API would dominate a
@@ -193,7 +192,7 @@ func appendUnrelatedEvents(t *testing.T, store db.Storage, project db.Project, i
 	require.NoError(t, err)
 	hash := strings.Repeat("b", 64)
 	for i := range n {
-		_, err = stmt.ExecContext(ctx, fmt.Sprintf("01M9%022d", first+i+1), store.InstanceUID(), project.ID, project.Name, issue.UID, hash)
+		_, err = stmt.ExecContext(ctx, fmt.Sprintf("01M9%022d", first+i+1), store.InstanceUID(), project.ID, project.Name, nil, issue.UID, "issue.updated", "{}", hash)
 		require.NoError(t, err)
 	}
 	require.NoError(t, stmt.Close())
