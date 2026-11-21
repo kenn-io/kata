@@ -164,6 +164,15 @@ describe('Sidebar', () => {
     expect(onOpenSettings).toHaveBeenCalledOnce()
   })
 
+  it('names both footer destinations in its navigation landmark', () => {
+    renderSidebar({ credentialAuditAvailable: true })
+    const footer = screen.getByRole('navigation', {
+      name: /settings.*credentials|credentials.*settings/i,
+    })
+    expect(within(footer).getByRole('button', { name: 'Settings' })).not.toBeNull()
+    expect(within(footer).getByRole('button', { name: 'Credentials' })).not.toBeNull()
+  })
+
   it('keeps area collapse state while mounted and resets it after remount', async () => {
     const view = renderSidebar()
     const personal = screen.getByRole('button', { name: /^Personal\s+1$/ })

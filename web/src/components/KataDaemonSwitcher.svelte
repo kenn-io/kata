@@ -96,8 +96,8 @@
             ></span
           >
           {#if status(daemon)}<span class="row-hint"
-              ><span class="row-status">{status(daemon)}</span>{#if daemon.hint}
-                {daemon.hint}{/if}</span
+              ><span class="row-status">{status(daemon)}</span
+              >{#if daemon.hint}{' '}{daemon.hint}{/if}</span
             >{/if}
         </MenuRadioItem>
       {/each}

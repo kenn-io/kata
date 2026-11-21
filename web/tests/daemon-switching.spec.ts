@@ -38,6 +38,9 @@ test('keeps daemon names readable alongside health and recovery hints', async ({
     expect((await name.boundingBox())!.width).toBeGreaterThan(60)
   }
   await expect(page.getByText('unreachable')).toBeVisible()
+  await expect(page.getByRole('menuitemradio', { name: /example-down-server/ })).toContainText(
+    'unreachable Check that the daemon is running and reachable.',
+  )
   await expect(page.getByText('update required')).toBeVisible()
   await expect(page.getByText('Check that the daemon is running and reachable.')).toBeVisible()
   await expect(page.getByText('Update this daemon to use the web interface.')).toBeVisible()

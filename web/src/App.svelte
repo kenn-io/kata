@@ -1433,12 +1433,7 @@
   }
 </script>
 
-<main
-  aria-labelledby="kata-heading"
-  class="kata-app"
-  class:ready={mode === 'ready' && !versionMismatch}
->
-  <h1 id="kata-heading" class="kit-sr-only">Kata</h1>
+<main aria-label="Kata" class="kata-app" class:ready={mode === 'ready' && !versionMismatch}>
   {#if versionMismatch}
     <VersionMismatch />
   {:else if mode === 'loading'}
@@ -1503,7 +1498,7 @@
     {:else if mode === 'login'}
       <LoginView {returnPath} onLogin={login} />
     {/if}
-    {#if !authority?.snapshot && daemonInfos.length > 0 && (mode === 'launch' || mode === 'login')}
+    {#if daemonInfos.length > 0 && (mode === 'launch' || mode === 'login')}
       <KataDaemonSwitcher
         daemons={daemonInfos}
         activeId={activeDaemonID}

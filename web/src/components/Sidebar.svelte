@@ -268,7 +268,10 @@
       {/if}
     </div>
   </ScrollBox>
-  <nav class="kata-nav sidebar-footer" aria-label="Settings">
+  <nav
+    class="kata-nav sidebar-footer"
+    aria-label={credentialAuditAvailable ? 'Credentials and Settings' : 'Settings'}
+  >
     {#if credentialAuditAvailable}
       <button
         type="button"

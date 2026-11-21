@@ -2023,7 +2023,7 @@ describe('App', () => {
   })
 
   it('fences browser authority when a reference request rejects the session', async () => {
-    history.replaceState(null, '', '/kata?view=today#direct=1')
+    history.replaceState(null, '', '/kata?view=today')
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'revoked-session', csrf: 'revoked-csrf' }),
@@ -2035,6 +2035,7 @@ describe('App', () => {
           input instanceof Request ? input.url : String(input),
           window.location.origin,
         )
+        if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
         if (target.pathname === '/api/v1/ui/session/login') {
           expect(JSON.parse(String(init?.body))).toEqual({
             token: 'example-token',
@@ -2053,7 +2054,7 @@ describe('App', () => {
           )
         }
         if (
-          target.pathname === '/api/v1/ui/references' &&
+          target.pathname.endsWith('/api/v1/ui/references') &&
           sessionStorage.getItem('kata.web.session.v1')?.includes('revoked-session')
         ) {
           return new Response('', {
@@ -2071,6 +2072,11 @@ describe('App', () => {
     render(App)
 
     expect(await screen.findByRole('form', { name: 'Log in' })).not.toBeNull()
+    expect
+      .soft(screen.queryByRole('button', { name: 'Switch Kata daemon: example-local' }))
+      .not.toBeNull()
+    expect.soft(screen.getAllByRole('heading')).toHaveLength(1)
+    expect.soft(screen.queryByRole('heading', { name: 'Log in' })).not.toBeNull()
     expect(sessionStorage.getItem('kata.web.session.v1')).toBeNull()
     expect(screen.queryByRole('region', { name: 'Kata workspace' })).toBeNull()
     await fireEvent.input(screen.getByLabelText('Token'), { target: { value: 'example-token' } })
