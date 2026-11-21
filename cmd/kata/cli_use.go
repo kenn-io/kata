@@ -17,7 +17,6 @@ import (
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/hooks"
 	"go.kenn.io/kata/internal/telemetry"
-	"go.kenn.io/kata/internal/version"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -48,7 +47,7 @@ func recordCLIUseTarget(resolved client.ResolvedDaemon) {
 
 // reportsCLIUse reports whether a successful cmd counts as a person's use.
 func reportsCLIUse(cmd *cobra.Command) bool {
-	if !posthog.Eligible("KATA", version.Version) {
+	if !telemetry.Eligible() {
 		return false
 	}
 	// A person at a prompt reads stdout on a terminal; agents and scripts read it through a pipe.
@@ -97,7 +96,7 @@ func reportsAgentUse(cmd *cobra.Command) bool {
 func reportCLIUse(cmd *cobra.Command) {
 	agent := reportsAgentUse(cmd)
 	target := cliUseTarget.Load()
-	if agent && !posthog.Eligible("KATA", version.Version) {
+	if agent && !telemetry.Eligible() {
 		return
 	}
 	if !agent && (target == nil || !reportsCLIUse(cmd)) {

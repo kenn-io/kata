@@ -35,9 +35,11 @@ func newUICmd() *cobra.Command {
 			if ctx == nil {
 				ctx = context.Background()
 			}
+			assetsErr := validateWebUIAssetsForCommand()
 			prepared, err := prepareWebUIForCommand(ctx, client.PrepareWebUIOptions{
-				WorkspaceStart: workspaceStartForRemote(),
-				DaemonName:     flags.Daemon,
+				WorkspaceStart:   workspaceStartForRemote(),
+				DaemonName:       flags.Daemon,
+				RequireWebAssets: assetsErr == nil,
 			})
 			if err != nil {
 				if flags.Daemon != "" || errors.Is(err, client.ErrRemoteUnavailable) ||
@@ -47,8 +49,8 @@ func newUICmd() *cobra.Command {
 				return err
 			}
 			if !prepared.ConfiguredRemote {
-				if err := validateWebUIAssetsForCommand(); err != nil {
-					return fmt.Errorf("kata ui is unavailable in this module-source build; install a release binary or build from a clone with `make install`: %w", err)
+				if assetsErr != nil {
+					return fmt.Errorf("kata ui is unavailable in this module-source build; install a release binary or build from a clone with `make install`: %w", assetsErr)
 				}
 			}
 			returnPath := "/kata"

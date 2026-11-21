@@ -1378,6 +1378,7 @@ Kata can send general, anonymous usage telemetry. Usage telemetry is off
 unless you have opted in or set `TELEMETRY_ENABLED=1`. Any of these turns it
 off: `KATA_TELEMETRY_ENABLED=0`, `TELEMETRY_ENABLED=0`,
 `DO_NOT_TRACK`, or `CI`. Development builds never send it.
+Tagged `go install` builds report their release version but send no usage telemetry because they lack version control revision metadata.
 
 ## Federation credentials
 

@@ -326,6 +326,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
   `--refs-from`. Each issue moves alone and gets its own result, so one refusal
   doesn't stop the rest.
 
+- `kata version` reports the release when Kata is installed with `go install` at a tag. A release binary's `kata ui` replaces a same-version local daemon without browser assets; if a service manager runs it, restart the daemon through the service manager.
+
 ## 0.23.0
 <small>2026-11-09</small>
 

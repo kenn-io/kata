@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"iter"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -27,6 +28,39 @@ import (
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
+
+func TestDiscoveryReplacesPlaceholderOnlyWithReleaseAssets(t *testing.T) {
+	oldVersion := currentVersionForEnsure
+	t.Cleanup(func() { currentVersionForEnsure = oldVersion })
+	currentVersionForEnsure = func() string { return "v0.23.0" }
+	for _, tc := range []struct {
+		name, version, capabilities string
+		assets, skip                bool
+		want                        daemonScanOutcome
+	}{
+		{"same release placeholder", "v0.23.0", "loopback,sse,placeholder-assets", true, false, daemonScanStale},
+		{"source CLI placeholder", "v0.23.0", "loopback,sse,placeholder-assets", false, false, daemonScanCompatible},
+		{"release daemon", "v0.23.0", "loopback,sse", true, false, daemonScanCompatible},
+		{"version-check-disabled", "v0.23.0", "loopback,sse,placeholder-assets", true, true, daemonScanStale},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			skip := ""
+			if tc.skip {
+				skip = "1"
+			}
+			t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", skip)
+			ctx := context.WithValue(t.Context(), requireWebAssetsKey{}, tc.assets)
+			scan := func(context.Context, string) iter.Seq2[liveDaemon, error] {
+				return func(yield func(liveDaemon, error) bool) {
+					yield(liveDaemon{Info: PingInfo{Service: "kata", Version: tc.version}, Record: kitdaemon.RuntimeRecord{Metadata: map[string]string{"web_capabilities": tc.capabilities}}}, nil)
+				}
+			}
+			found, err := discoverForEnsureUsing(ctx, "", scan)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, found.Outcome)
+		})
+	}
+}
 
 // A binary that cannot open the storage cannot replace the daemon serving it,
 // so the live daemon must keep running.

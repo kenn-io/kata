@@ -25,8 +25,9 @@ var errRemoteWebUILoginRequired = errors.New("remote web UI login required")
 // PrepareWebUIOptions selects the browser gateway or an explicitly named
 // daemon target.
 type PrepareWebUIOptions struct {
-	WorkspaceStart string
-	DaemonName     string
+	WorkspaceStart   string
+	DaemonName       string
+	RequireWebAssets bool
 }
 
 // PreparedWebUI is a validated daemon target ready for resolution and launch.
@@ -54,6 +55,9 @@ type WebUIOpener func(context.Context, WebUILaunch) error
 // PrepareWebUI resolves and probes the selected daemon and validates local
 // browser runtime metadata.
 func PrepareWebUI(ctx context.Context, opts PrepareWebUIOptions) (PreparedWebUI, error) {
+	if opts.RequireWebAssets {
+		ctx = context.WithValue(ctx, requireWebAssetsKey{}, true)
+	}
 	resolved, err := resolveWebUIHostTarget(ctx, opts)
 	if err != nil {
 		return PreparedWebUI{}, err

@@ -138,6 +138,8 @@ run the browser asset toolchain. To use `kata ui`, install a release binary or
 build from a clone with `make install` so the compiled browser bundle is
 embedded.
 
+For a tagged Go install, `kata update` replaces the binary with a release archive.
+
 Go writes the binary to `$(go env GOBIN)` when set, otherwise to
 `$(go env GOPATH)/bin`. Common defaults are `~/go/bin` on Unix and
 `%USERPROFILE%\go\bin` on Windows. Put that directory on `PATH`.

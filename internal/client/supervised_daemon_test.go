@@ -285,6 +285,30 @@ func TestExternallyManagedVersionErrorGuidesByDirection(t *testing.T) {
 	require.ErrorContains(t, err, "use a newer kata binary")
 }
 
+func TestSupervisedDaemonReportsStaleReason(t *testing.T) {
+	patchEnsureHooks(t, "v0.2.0", "http://spawned")
+	for _, tc := range []struct {
+		name, version, skip, want, absent string
+	}{
+		{"same version", "v0.2.0", "", "the daemon has no web UI; restart it with your service manager", "differs"},
+		{"older version", "v0.1.0", "", "differs from this kata binary", "no web UI"},
+		{"skipped version check", "v0.1.0", "1", "the daemon has no web UI; restart it with your service manager", "differs"},
+		{"newer version", "v0.3.0", "", "use a newer kata binary", "no web UI"},
+		{"skipped newer version", "v0.3.0", "1", "use a newer kata binary", "no web UI"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", tc.skip)
+			ctx := context.WithValue(t.Context(), requireWebAssetsKey{}, true)
+			_, err := waitForSupervisedDaemon(ctx, "config.toml", func(context.Context) bool { return false }, func(context.Context) (ensureDiscovery, error) {
+				return ensureDiscovery{Outcome: daemonScanStale, Daemon: liveDaemon{Info: PingInfo{Service: daemonServiceName, Version: tc.version}, Record: kitdaemon.RuntimeRecord{Metadata: map[string]string{"web_capabilities": "loopback,sse,placeholder-assets"}}}}, nil
+			})
+			require.ErrorIs(t, err, ErrDaemonNotReplaceable)
+			require.ErrorContains(t, err, tc.want)
+			require.NotContains(t, err.Error(), tc.absent)
+		})
+	}
+}
+
 // The daemon's own auth.token_env is supervisor-owned: selection must accept it
 // unresolved beside a separate catalog credential, and the live wait must send
 // that catalog credential, retry a transport failure and still check identity.

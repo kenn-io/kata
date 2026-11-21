@@ -54,7 +54,7 @@ func TestOpenClawContractSurvivesSlowAgentTelemetry(t *testing.T) {
 	opts := openClawTestOptions(t)
 	opts.Attention = false
 	opts.Dir = workspace
-	opts.Executable = kataTestBinary(t, "v1.2.3")
+	opts.Executable = testBinary(t, "kata-telemetry-release", "-buildvcs=false", "-ldflags", "-X go.kenn.io/kata/internal/version.Version=v1.2.3 -X go.kenn.io/kata/internal/version.Commit=1234567", "go.kenn.io/kata/cmd/kata")
 	plan, err := planOpenClawAgentHooks(opts, false)
 	require.NoError(t, err)
 	_, err = publishNativeAgentHookPlan(plan)
