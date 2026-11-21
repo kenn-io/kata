@@ -872,8 +872,7 @@ func TestReconcileDefersProjectAfterArtifactSyncUnavailable(t *testing.T) {
 	emb := newReconcilerArtifactEmbedder(t, "example-model")
 	unavailable := true
 	r := NewReconciler(store, openTestVectorIndex(t), emb, ReconcilerConfig{
-		BatchSize:               1,
-		EmbeddingProjectAllowed: func(context.Context, string) (bool, error) { return true, nil },
+		BatchSize: 1,
 		FederationProducerAllowed: func(_ context.Context, uid string, _ embedding.ArtifactIdentity, _ activity.Admission, syncArtifacts bool) (bool, error) {
 			require.Equal(t, project.UID, uid)
 			if unavailable && syncArtifacts {

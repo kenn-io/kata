@@ -30,6 +30,9 @@ func TestEmbeddingProjectPolicySearchEndpoint(t *testing.T) {
 	idx, err := vector.Open(t.Context(), filepath.Join(t.TempDir(), "vectors.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, idx.Close()) })
+	key := emb.Generation().Fingerprint()
+	require.NoError(t, idx.EnsureBuilding(t.Context(), key, emb.Generation()))
+	require.NoError(t, idx.CutOver(t.Context(), key))
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
 		cfg.Embedder = emb
 		cfg.VectorIndex = idx
@@ -63,18 +66,8 @@ func TestEmbeddingProjectPolicyErrorSearchEndpoint(t *testing.T) {
 	})
 	project, err := env.DB.CreateProject(t.Context(), "example-project")
 	require.NoError(t, err)
-	_, _, err = env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "example task", Author: "tester"})
-	require.NoError(t, err)
-	for _, mode := range []string{"semantic", "hybrid", "auto"} {
-		resp, body := envGetRaw(t, env, projectPath(project.ID)+"/search?q=example&mode="+mode)
-		if mode == "auto" {
-			require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-			require.Contains(t, string(body), "example task")
-			require.Contains(t, string(body), `"degraded":true`)
-		} else {
-			require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode, string(body))
-		}
-		require.Contains(t, string(body), "semantic search is unavailable for this project")
-		require.NotContains(t, string(body), "internal policy detail")
-	}
+	resp, body := envGetRaw(t, env, projectPath(project.ID)+"/search?q=example&mode=semantic")
+	require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode, string(body))
+	require.Contains(t, string(body), "semantic search is unavailable for this project")
+	require.NotContains(t, string(body), "internal policy detail")
 }

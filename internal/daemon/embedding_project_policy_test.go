@@ -77,13 +77,10 @@ func TestEmbeddingProjectPolicyBlocksHubQuery(t *testing.T) {
 func TestEmbeddingProjectPolicyRetainedArtifacts(t *testing.T) {
 	policyErr := errors.New("policy unavailable")
 	for _, tc := range []struct {
-		path string
+		name string
 		err  error
-	}{{"reconcile", nil}, {"reconcile", policyErr}, {"reconcile", kitvec.ErrStale}, {"fill", nil}, {"fill", policyErr}, {"fill", kitvec.ErrStale}} {
-		name := tc.path
-		if tc.err != nil {
-			name += "-error"
-		}
+	}{{"denied", nil}, {"policy-error", policyErr}, {"stale", kitvec.ErrStale}} {
+		name := tc.name
 		t.Run(name, func(t *testing.T) {
 			ctx := t.Context()
 			store := newReconcilerTestStore(t)
@@ -108,21 +105,15 @@ func TestEmbeddingProjectPolicyRetainedArtifacts(t *testing.T) {
 				require.Equal(t, project.UID, uid)
 				return false, tc.err
 			}
-			if tc.path == "reconcile" {
-				calls := 0
-				r := NewReconciler(store, idx, client, ReconcilerConfig{EmbeddingProjectAllowed: func(ctx context.Context, uid string) (bool, error) {
-					calls++
-					if calls == 1 {
-						return true, nil
-					}
-					return deny(ctx, uid)
-				}})
-				err = r.reconcileOnce(ctx)
-			} else {
-				_, err = idx.RefreshMirror(ctx, store)
-				require.NoError(t, err)
-				_, _, err = idx.FillWithArtifactsDetailed(ctx, key, store, recipe, client.EncodeFunc(), 1, nil, nil, deny, deny)
-			}
+			calls := 0
+			r := NewReconciler(store, idx, client, ReconcilerConfig{EmbeddingProjectAllowed: func(ctx context.Context, uid string) (bool, error) {
+				calls++
+				if calls == 1 {
+					return true, nil
+				}
+				return deny(ctx, uid)
+			}})
+			err = r.reconcileOnce(ctx)
 			if tc.err != nil {
 				require.ErrorIs(t, err, tc.err)
 			} else {

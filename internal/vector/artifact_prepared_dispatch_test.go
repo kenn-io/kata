@@ -3,6 +3,7 @@ package vector_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -276,4 +277,26 @@ func TestEmbeddingArtifactDenialDefersDispatch(t *testing.T) {
 	backlog, err := ix.Backlog(ctx, key)
 	require.NoError(t, err)
 	require.Zero(t, backlog, "a later allowed check can reuse the retained artifact")
+
+	issue, _, err = source.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Another task", Author: "member"})
+	require.NoError(t, err)
+	_, err = ix.RefreshMirror(ctx, source)
+	require.NoError(t, err)
+	identity.IssueUID = issue.UID
+	artifact, err = embedding.NewArtifact(identity, embedding.EmbedText(issue.Title, issue.Body), [][]float32{{1, 0}})
+	require.NoError(t, err)
+	retained, err := source.RetainEmbeddingArtifact(ctx, artifact)
+	require.NoError(t, err)
+	require.True(t, retained)
+	policyErr := errors.New("policy unavailable")
+	policyError := func(_ context.Context, projectUID string) (bool, error) {
+		require.Equal(t, project.UID, projectUID)
+		return false, policyErr
+	}
+	_, _, err = ix.FillWithArtifactsDetailed(ctx, key, source, recipe, encode, 1, nil, nil, policyError, policyError)
+	require.ErrorIs(t, err, policyErr)
+	require.Zero(t, dispatches)
+	backlog, err = ix.Backlog(ctx, key)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, backlog)
 }
