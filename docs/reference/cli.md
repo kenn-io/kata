@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-20
+last_edited: 2026-11-21
 ---
 
 # CLI reference
@@ -2131,7 +2131,7 @@ followed by `kata daemon start`.
 `KATA_HOME` and rejects `--daemon`. For a home without embeddings configured,
 the command uses a running Ollama without a download. To switch that home to the
 built-in server, run the command again. Otherwise, it shows the missing download
-size, about 290 MB on a fresh install, and asks before downloading files shared
+size, about 295 MB on a fresh install, and asks before downloading files shared
 by all Kenn apps. If you run the command without a terminal, pass `--yes`.
 
 The command keeps compatible Nomic vectors, config comments, and formatting
@@ -2803,8 +2803,9 @@ this daemon roots to the daemon's loaded `federation-root.key`, and creates the
 key file when it is missing. Use it to restore signed writes after the key is
 lost or replaced. Without `--previous-key-file`, the command retires the old
 pin, and downstream relays that pinned the old key can no longer sync the
-project. While the project has active relay enrollments, the command refuses
-unless you pass `--strand-relays`. With `--previous-key-file <path>`, where
+project. While the project has active relay enrollments, the command refuses a
+repin without `--previous-key-file` unless you pass `--strand-relays`.
+With `--previous-key-file <path>`, where
 `<path>` is an absolute path on the daemon host that the daemon reads itself,
 the previous key signs a rotation that downstream relays accept. Pass
 `--preflight` to report the method, whether the command would create a key file,
