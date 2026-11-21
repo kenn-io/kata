@@ -39,13 +39,13 @@ func TestRefreshMirrorFeedFailureKeepsUnseenRows(t *testing.T) {
 		{ID: 1, UID: "u1", ProjectUID: "p1", Title: "a", ContentRevision: 1},
 		{ID: 2, UID: "u2", ProjectUID: "p1", Title: "b", Body: "body", ContentRevision: 1},
 	}}
-	if _, err := ix.RefreshMirror(ctx, st); err != nil {
+	if _, err := ix.RefreshMirror(ctx, st, nil); err != nil {
 		t.Fatal(err)
 	}
 	st.issues = st.issues[:1]
 	st.issues[0].ContentRevision = 2
 	st.pageErr = errors.New("feed interrupted")
-	changed, err := ix.RefreshMirror(ctx, st)
+	changed, err := ix.RefreshMirror(ctx, st, nil)
 	if !errors.Is(err, st.pageErr) || changed != 1 {
 		t.Fatalf("interrupted refresh = (%d, %v), want (1, feed error)", changed, err)
 	}
@@ -74,14 +74,14 @@ func TestRefreshMirrorWithNothingChangedWritesNothing(t *testing.T) {
 	st := &fakeStorage{issues: []db.IssueContent{
 		{ID: 1, UID: "u1", ProjectUID: "p1", Title: "a", Body: "b", ContentRevision: 1},
 	}}
-	if _, err := ix.RefreshMirror(ctx, st); err != nil {
+	if _, err := ix.RefreshMirror(ctx, st, nil); err != nil {
 		t.Fatal(err)
 	}
 	ix.db.SetMaxOpenConns(1)
 	if _, err := ix.db.ExecContext(ctx, `PRAGMA query_only = ON`); err != nil {
 		t.Fatal(err)
 	}
-	changed, err := ix.RefreshMirror(ctx, st)
+	changed, err := ix.RefreshMirror(ctx, st, nil)
 	if err != nil || changed != 0 {
 		t.Fatalf("unchanged refresh = (%d, %v), want (0, nil)", changed, err)
 	}
@@ -109,14 +109,14 @@ func TestRefreshMirrorUpdatesProjectMoveWithoutRevisionBump(t *testing.T) {
 	st := &fakeStorage{issues: []db.IssueContent{
 		{ID: 1, UID: "u1", ProjectUID: "p1", Title: "a", Body: "b", ContentRevision: 1},
 	}}
-	if _, err := ix.RefreshMirror(ctx, st); err != nil {
+	if _, err := ix.RefreshMirror(ctx, st, nil); err != nil {
 		t.Fatal(err)
 	}
 
 	// Move the issue to another project without a content edit: same
 	// content_revision, changed ProjectUID. The mirror row must follow.
 	st.issues[0].ProjectUID = "p2"
-	if _, err := ix.RefreshMirror(ctx, st); err != nil {
+	if _, err := ix.RefreshMirror(ctx, st, nil); err != nil {
 		t.Fatal(err)
 	}
 	var projectUID string
@@ -136,7 +136,7 @@ func TestRefreshMirrorUpsertsAndDeletes(t *testing.T) {
 		{ID: 1, UID: "u1", ProjectUID: "p1", Title: "a", Body: "b", ContentRevision: 1},
 		{ID: 2, UID: "u2", ProjectUID: "p1", Title: "c", Body: "d", ContentRevision: 1},
 	}}
-	if _, err := ix.RefreshMirror(ctx, st); err != nil {
+	if _, err := ix.RefreshMirror(ctx, st, nil); err != nil {
 		t.Fatal(err)
 	}
 	var content string
@@ -152,7 +152,7 @@ func TestRefreshMirrorUpsertsAndDeletes(t *testing.T) {
 	st.issues = []db.IssueContent{
 		{ID: 1, UID: "u1", ProjectUID: "p1", Title: "a2", Body: "b", ContentRevision: 2},
 	}
-	if _, err := ix.RefreshMirror(ctx, st); err != nil {
+	if _, err := ix.RefreshMirror(ctx, st, nil); err != nil {
 		t.Fatal(err)
 	}
 	var n int
@@ -206,7 +206,7 @@ func TestRefreshMirrorProjectPolicyErrorPreservesRows(t *testing.T) {
 	ctx := t.Context()
 	ix := openTestIndex(t)
 	st := &fakeStorage{issues: []db.IssueContent{{ID: 1, UID: "u1", ProjectUID: "p1", Title: "one", ContentRevision: 1}}}
-	if _, err := ix.RefreshMirror(ctx, st); err != nil {
+	if _, err := ix.RefreshMirror(ctx, st, nil); err != nil {
 		t.Fatal(err)
 	}
 	policyErr := errors.New("policy unavailable")

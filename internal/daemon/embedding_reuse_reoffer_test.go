@@ -23,7 +23,7 @@ import (
 func TestReconcileArtifactsReoffersReusedArtifactToPrunedPeer(t *testing.T) {
 	for name, reuse := range map[string]func(context.Context, *testing.T, *vector.Index, string, db.Storage, embedding.ArtifactIdentity){
 		"reconcile": func(ctx context.Context, t *testing.T, ix *vector.Index, key string, store db.Storage, recipe embedding.ArtifactIdentity) {
-			reused, err := ix.ReconcileArtifacts(ctx, key, store, recipe)
+			reused, err := ix.ReconcileArtifacts(ctx, key, store, recipe, nil)
 			require.NoError(t, err)
 			require.Equal(t, 1, reused, "the revert reuses the retained bytes instead of embedding again")
 		},
@@ -117,7 +117,7 @@ func runReusedArtifactReoffer(t *testing.T, reuse func(context.Context, *testing
 		t.Cleanup(func() { require.NoError(t, ix.Close()) })
 		key := client.Generation().Fingerprint()
 		require.NoError(t, ix.EnsureBuilding(ctx, key, client.Generation()))
-		_, err = ix.RefreshMirror(ctx, store)
+		_, err = ix.RefreshMirror(ctx, store, nil)
 		require.NoError(t, err)
 		recipe, err := client.ArtifactIdentity("", "", store.InstanceUID())
 		require.NoError(t, err)
@@ -167,9 +167,9 @@ func TestReconcileArtifactsRetriesReofferAfterRetentionFailure(t *testing.T) {
 	runReusedArtifactReoffer(t, func(ctx context.Context, t *testing.T, ix *vector.Index, key string, store db.Storage, recipe embedding.ArtifactIdentity) {
 		failures := 1
 		failing := failingRetentionStore{Storage: store, failures: &failures}
-		_, err := ix.ReconcileArtifacts(ctx, key, failing, recipe)
+		_, err := ix.ReconcileArtifacts(ctx, key, failing, recipe, nil)
 		require.ErrorContains(t, err, "retention store unavailable")
-		reused, err := ix.ReconcileArtifacts(ctx, key, failing, recipe)
+		reused, err := ix.ReconcileArtifacts(ctx, key, failing, recipe, nil)
 		require.NoError(t, err)
 		require.Equal(t, 1, reused, "the document stayed pending until its re-offer was retained")
 	})

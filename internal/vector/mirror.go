@@ -18,12 +18,9 @@ const mirrorPageSize = 500
 // issues is a privacy contract: mirror content is sent to the embedding
 // endpoint, and deleting an issue must stop that outbound flow. A restore
 // puts the issue back in the feed, re-mirroring and re-embedding it. It
-// returns the number of rows written or removed.
-func (ix *Index) RefreshMirror(ctx context.Context, store db.Storage, scope ...func(context.Context, string) (bool, error)) (int, error) {
-	var allowed func(context.Context, string) (bool, error)
-	if len(scope) > 0 {
-		allowed = scope[0]
-	}
+// returns the number of rows written or removed. A nil allowed callback permits
+// every project.
+func (ix *Index) RefreshMirror(ctx context.Context, store db.Storage, allowed func(context.Context, string) (bool, error)) (int, error) {
 	if ix.pg != nil {
 		return ix.pg.refreshMirror(ctx, store, allowed)
 	}

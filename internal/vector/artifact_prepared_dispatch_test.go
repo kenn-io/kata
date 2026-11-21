@@ -62,7 +62,7 @@ func TestEmbeddingPreparedPageRechecksBeforePaidDispatch(t *testing.T) {
 					require.NoError(t, err)
 					issues = append(issues, issue)
 				}
-				_, err = ix.RefreshMirror(ctx, source)
+				_, err = ix.RefreshMirror(ctx, source, nil)
 				require.NoError(t, err)
 				var requests atomic.Int32
 				provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -128,7 +128,7 @@ func TestEmbeddingPreparedPageRechecksBeforePaidDispatch(t *testing.T) {
 				case strings.HasPrefix(mode, "edited"):
 					require.EqualValues(t, editedRequests, requests.Load(), "only the unchanged document is dispatched")
 					require.EqualValues(t, 1, backlog, "the edited document stays pending")
-					_, err = ix.RefreshMirror(ctx, source)
+					_, err = ix.RefreshMirror(ctx, source, nil)
 					require.NoError(t, err)
 					requests.Store(0)
 				default:
@@ -190,7 +190,7 @@ func TestEmbeddingPreparedPageRevalidatesProjectAuthorityOncePerDispatchBatch(t 
 					})
 					require.NoError(t, err)
 				}
-				_, err = ix.RefreshMirror(ctx, source)
+				_, err = ix.RefreshMirror(ctx, source, nil)
 				require.NoError(t, err)
 				client, err := embedding.New(embedding.Config{BaseURL: "https://encoder.example/v1", Model: "example-model", Dims: 2})
 				require.NoError(t, err)
@@ -243,7 +243,7 @@ func TestEmbeddingArtifactDenialDefersDispatch(t *testing.T) {
 	require.NoError(t, err)
 	issue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Private text", Author: "member"})
 	require.NoError(t, err)
-	_, err = ix.RefreshMirror(ctx, source)
+	_, err = ix.RefreshMirror(ctx, source, nil)
 	require.NoError(t, err)
 	client, err := embedding.New(embedding.Config{BaseURL: "https://encoder.example/v1", Model: "example-model", Dims: 2})
 	require.NoError(t, err)
@@ -280,7 +280,7 @@ func TestEmbeddingArtifactDenialDefersDispatch(t *testing.T) {
 
 	issue, _, err = source.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Another task", Author: "member"})
 	require.NoError(t, err)
-	_, err = ix.RefreshMirror(ctx, source)
+	_, err = ix.RefreshMirror(ctx, source, nil)
 	require.NoError(t, err)
 	identity.IssueUID = issue.UID
 	artifact, err = embedding.NewArtifact(identity, embedding.EmbedText(issue.Title, issue.Body), [][]float32{{1, 0}})
