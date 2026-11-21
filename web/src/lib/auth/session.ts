@@ -84,7 +84,11 @@ export function consumeLaunchFragment(
   if (location.hash && !location.hash.includes('=')) {
     const query = new URLSearchParams(location.search)
     const issue = query.get('issue')
-    if (issue && !issue.includes('#') && !validUID(issue)) {
+    if (
+      issue &&
+      !issue.includes('#') &&
+      (!validUID(issue) || /^#[0-9a-hjkmnp-tv-z]{4,26}$/.test(location.hash))
+    ) {
       query.set('issue', `${issue}${location.hash}`)
       currentPath = `${location.pathname}?${query.toString()}`
       replaceState(null, '', currentPath)

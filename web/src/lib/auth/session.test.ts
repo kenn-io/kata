@@ -173,6 +173,15 @@ describe('browser session bootstrap', () => {
     expect(window.location.search).toBe('?issue=01J00000000000000000000001')
   })
 
+  it('preserves a short reference under a UID-shaped project name', () => {
+    history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#abc4')
+    expect(consumeLaunchFragment(window.location, history.replaceState.bind(history))).toEqual({
+      kind: 'none',
+      returnPath: '/kata?issue=01J00000000000000000000001%23abc4',
+    })
+    expect(window.location.search).toBe('?issue=01J00000000000000000000001%23abc4')
+  })
+
   it('consumes an explicit daemon launch target before routing', () => {
     history.replaceState(null, '', '/kata#daemon=example-remote')
 
