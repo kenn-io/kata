@@ -795,6 +795,9 @@
     </div>
 
     <div class="kata-main">
+      {#if mutationMessage && (!credentialRoute || !accessAdministrationAvailable || !onAccessMutation)}
+        <p class="mutation-message" role="alert">{mutationMessage}</p>
+      {/if}
       {#if credentialRoute}
         <div class="credential-scene">
           <CredentialAudit
@@ -847,9 +850,6 @@
           </SearchSettings>
         {/key}
       {:else}
-        {#if mutationMessage}
-          <p class="mutation-message" role="alert">{mutationMessage}</p>
-        {/if}
         <SplitLayout
           orientation={preferences.splitDirection}
           primarySize={preferences.splitSize}

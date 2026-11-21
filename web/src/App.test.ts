@@ -4416,6 +4416,51 @@ describe('App', () => {
     })
   })
 
+  it('shows a task creation error in Settings', async () => {
+    const rejections: unknown[] = []
+    const onRejection = (error: unknown) => rejections.push(error)
+    process.on('unhandledRejection', onRejection)
+    onTestFinished(() => process.off('unhandledRejection', onRejection))
+    history.replaceState(null, '', '/kata?view=settings#direct=1')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const data = snapshot()
+    data.catalog[0]!.project.metadata.role = 'inbox'
+    let writes = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        const path = new URL(request.url).pathname
+        if (request.method === 'POST' && path.endsWith('/issues')) {
+          writes += 1
+          return Response.json({ code: 'validation', detail: 'Action refused' }, { status: 422 })
+        }
+        if (path === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (path === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (path.endsWith('/references')) return references()
+        return Response.json(data, { headers: { ETag: '"snapshot-1"' } })
+      }),
+    )
+
+    render(App)
+    await fireEvent.click(await screen.findByRole('button', { name: 'New task' }))
+    await fireEvent.input(await screen.findByRole('textbox', { name: 'Quick capture' }), {
+      target: { value: 'Example task' },
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Capture' }))
+    await waitFor(() => expect(writes).toBe(1))
+    await waitFor(() => expect(rejections).toEqual([new Error('validation: Action refused')]))
+    expect(screen.getByRole('dialog', { name: 'New task' })).not.toBeNull()
+    expect((screen.getByRole('textbox', { name: 'Quick capture' }) as HTMLInputElement).value).toBe(
+      'Example task',
+    )
+    await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('Action refused')
+  })
+
   describe('completed issue action telemetry', () => {
     for (const action of ['create', 'close'] as const) {
       it.each(
