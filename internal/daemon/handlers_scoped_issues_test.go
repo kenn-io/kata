@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
@@ -21,7 +23,7 @@ func TestUIIssueReferenceHidesRestrictedProjectName(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	allowed, err := env.DB.CreateProject(t.Context(), "allowed")
 	require.NoError(t, err)
-	_, err = env.DB.CreateProject(t.Context(), "restricted")
+	restricted, err := env.DB.CreateProject(t.Context(), "restricted")
 	require.NoError(t, err)
 	root := createScopedHTTPTestIssue(t, env, allowed.ID, "Root", nil)
 	expires := time.Now().UTC().Add(time.Hour)
@@ -30,21 +32,33 @@ func TestUIIssueReferenceHidesRestrictedProjectName(t *testing.T) {
 		Scope: &db.APITokenScope{Kind: db.APITokenScopeIssueSubtree, ProjectUID: allowed.UID, RootIssueUID: root.UID}, ExpiresAt: &expires,
 	})
 	require.NoError(t, err)
-	for name, headers := range map[string]map[string]string{
-		"project scope": {"Authorization": "Bearer bootstrap-token", "X-Kata-Project-Scope": `["` + allowed.UID + `"]`},
-		"issue scope":   {"Authorization": "Bearer worker-token"},
+	server := daemon.NewServer(daemon.ServerConfig{DB: env.DB, StartedAt: time.Now(), HostAccess: historicalUIReferenceHostAccess{deniedProjectID: restricted.ID}})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := daemon.WithPrincipal(r.Context(), daemon.Principal{Kind: daemon.PrincipalHost, Subject: "host-user", Actor: "worker"})
+		server.Handler().ServeHTTP(w, r.WithContext(ctx))
+	}))
+	t.Cleanup(ts.Close)
+	hostEnv := *env
+	hostEnv.URL, hostEnv.HTTP = ts.URL, ts.Client()
+	for name, tc := range map[string]struct {
+		env     *testenv.Env
+		headers map[string]string
+	}{
+		"host":          {env: &hostEnv},
+		"project scope": {env: env, headers: map[string]string{"Authorization": "Bearer bootstrap-token", "X-Kata-Project-Scope": `["` + allowed.UID + `"]`}},
+		"issue scope":   {env: env, headers: map[string]string{"Authorization": "Bearer worker-token"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			var bodies []string
 			for _, project := range []string{"restricted", "missing"} {
 				query := url.Values{"project": {project}, "ref": {"abc4"}}
-				resp, body := envDoRaw(t, env, http.MethodGet, "/api/v1/ui/issue-reference?"+query.Encode(), nil, headers)
+				resp, body := envDoRaw(t, tc.env, http.MethodGet, "/api/v1/ui/issue-reference?"+query.Encode(), nil, tc.headers)
 				require.Equal(t, http.StatusNotFound, resp.StatusCode, string(body))
 				bodies = append(bodies, string(body))
 			}
 			require.JSONEq(t, bodies[0], bodies[1])
 			query := url.Values{"project": {allowed.Name}, "ref": {root.ShortID}}
-			resp, body := envDoRaw(t, env, http.MethodGet, "/api/v1/ui/issue-reference?"+query.Encode(), nil, headers)
+			resp, body := envDoRaw(t, tc.env, http.MethodGet, "/api/v1/ui/issue-reference?"+query.Encode(), nil, tc.headers)
 			require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 			require.Contains(t, string(body), root.UID)
 		})

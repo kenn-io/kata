@@ -18,8 +18,6 @@ describe('canonical Kata routes', () => {
   })
   it('keeps a qualified short issue reference in the route', () => {
     const route = parseRoute(new URL('https://daemon.example/kata?issue=example%23abc4'))
-    expect(route).toMatchObject({ kind: 'kata', link: { issue: 'example#abc4' } })
-    expect(serializeRoute(route)).toBe('/kata?issue=example%23abc4')
     if (route.kind !== 'kata') throw new Error('Expected a Kata route')
     expect(serializeRoute({ ...route, projectUID: issueUID, issueUID })).toBe(
       '/kata?issue=example%23abc4',

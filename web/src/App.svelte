@@ -116,7 +116,6 @@
   const selectedAuthentication = selectAuthenticationMode(launch)
   const initialRoute = parseRoute(new URL(window.location.href))
   let route = $state(initialRoute)
-  let resolutionGeneration = 0
   let linkUpgradeRequired = false
   let acceptedRoute = $state<AppRoute | undefined>()
   let returnPath = $state(launch.returnPath)
@@ -470,9 +469,12 @@
   }
 
   function navigate(next: AppRoute): void {
+    const current = route.kind === 'kata' ? route : undefined
     if (
       next.link &&
-      (!next.issueUID || next.issueUID !== routeIssueUID() || next.projectUID !== routeProjectUID())
+      (!next.issueUID ||
+        next.issueUID !== current?.issueUID ||
+        next.projectUID !== current?.projectUID)
     ) {
       next = { ...next }
       delete next.link
@@ -498,14 +500,6 @@
     if (activeDaemonID) saveDaemonRoute(activeDaemonID, serializeRoute(next))
     mode = authority?.snapshot ? 'ready' : 'loading'
     loadRoute()
-  }
-
-  function routeIssueUID(): string | undefined {
-    return route.kind === 'kata' ? route.issueUID : undefined
-  }
-
-  function routeProjectUID(): string | undefined {
-    return route.kind === 'kata' ? route.projectUID : undefined
   }
 
   // Shows a list the accepted snapshot already holds, such as another project,
@@ -1292,7 +1286,6 @@
 
   async function refreshSnapshot(full: boolean): Promise<boolean> {
     if (route.kind === 'route-error') return false
-    const generation = ++resolutionGeneration
     if (route.link && !route.issueUID) {
       linkUpgradeRequired = false
       const pending = route
@@ -1304,13 +1297,7 @@
           ref: link.issue,
           ...(link.scope ? { project: link.scope } : {}),
         })
-        if (
-          destroyed ||
-          generation !== resolutionGeneration ||
-          route !== pending ||
-          daemonID !== activeDaemonID
-        )
-          return false
+        if (destroyed || route !== pending || daemonID !== activeDaemonID) return false
         if (result.status === 401) {
           snapshots.markAuthenticationRequired()
           requireAuthentication()
@@ -1341,13 +1328,7 @@
           issueUID: result.data.issue.uid,
         }
       } catch {
-        if (
-          !destroyed &&
-          generation === resolutionGeneration &&
-          route === pending &&
-          daemonID === activeDaemonID
-        )
-          snapshots.markFailure()
+        if (!destroyed && route === pending && daemonID === activeDaemonID) snapshots.markFailure()
         return false
       }
     }

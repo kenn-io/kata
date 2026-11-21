@@ -31,46 +31,33 @@ func TestUIIssueReferenceProjectSelector(t *testing.T) {
 	require.NoError(t, err)
 	server := httptest.NewServer(daemon.NewServer(daemon.ServerConfig{DB: dbh.db, StartedAt: dbh.now}).Handler())
 	t.Cleanup(server.Close)
-	for _, tc := range []struct {
-		name, selector, ref, wantUID string
-		status                       int
-	}{
-		{"qualified", "", project.Name + "#" + issue.ShortID, issue.UID, http.StatusOK},
-		{"name", project.Name, issue.ShortID, issue.UID, http.StatusOK},
-		{"uid", collision.UID, collisionIssue.ShortID, collisionIssue.UID, http.StatusOK},
-		{"ambiguous", project.UID, issue.ShortID, "", http.StatusNotFound},
-		{"qualified UID-shaped name", "", collision.Name + "#" + collisionIssue.ShortID, collisionIssue.UID, http.StatusOK},
-		{"unknown", "missing", issue.ShortID, "", http.StatusNotFound},
-		{"wrong qualifier", project.Name, "other#" + issue.ShortID, "", http.StatusNotFound},
+	found := func(scope string, issue db.Issue, projectUID string) string {
+		return fmt.Sprintf(`{"scope_project_uid":%q,"issue":{"uid":%q,"project_uid":%q}}`, scope, issue.UID, projectUID)
+	}
+	for _, tc := range []struct{ name, selector, ref, want string }{
+		{"qualified", "", project.Name + "#" + issue.ShortID, fmt.Sprintf(`{"issue":{"uid":%q,"project_uid":%q}}`, issue.UID, project.UID)},
+		{"name", project.Name, issue.ShortID, found(project.UID, issue, project.UID)},
+		{"uid", collision.UID, collisionIssue.ShortID, found(collision.UID, collisionIssue, collision.UID)},
+		{"ambiguous", project.UID, issue.ShortID, ""},
+		{"qualified UID-shaped name", "", collision.Name + "#" + collisionIssue.ShortID, fmt.Sprintf(`{"issue":{"uid":%q,"project_uid":%q}}`, collisionIssue.UID, collision.UID)},
+		{"qualified with another scope", project.Name, collision.Name + "#" + collisionIssue.ShortID, found(project.UID, collisionIssue, collision.UID)},
+		{"unknown", "missing", issue.ShortID, ""},
+		{"wrong qualifier", project.Name, "other#" + issue.ShortID, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			query := url.Values{"ref": {tc.ref}}
 			if tc.selector != "" {
 				query.Set("project", tc.selector)
 			}
-			request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/issue-reference?"+query.Encode(), nil)
-			require.NoError(t, err)
-			response, err := server.Client().Do(request)
-			require.NoError(t, err)
-			defer func() { _ = response.Body.Close() }()
-			body, err := io.ReadAll(response.Body)
-			require.NoError(t, err)
-			require.Equal(t, tc.status, response.StatusCode, string(body))
-			if tc.status == http.StatusOK {
-				require.Contains(t, string(body), tc.wantUID)
+			status, body := getUIIssueReference(t, server, query)
+			if tc.want == "" {
+				require.Equal(t, http.StatusNotFound, status, body)
+				return
 			}
+			require.Equal(t, http.StatusOK, status, body)
+			require.JSONEq(t, tc.want, body)
 		})
 	}
-	query := url.Values{"project": {project.Name}, "ref": {collision.Name + "#" + collisionIssue.ShortID}}
-	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/issue-reference?"+query.Encode(), nil)
-	require.NoError(t, err)
-	response, err := server.Client().Do(request)
-	require.NoError(t, err)
-	defer func() { _ = response.Body.Close() }()
-	body, err := io.ReadAll(response.Body)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, response.StatusCode, string(body))
-	require.JSONEq(t, fmt.Sprintf(`{"scope_project_uid":%q,"issue":{"uid":%q,"project_uid":%q}}`, project.UID, collisionIssue.UID, collision.UID), string(body))
 }
 
 func (a historicalUIReferenceHostAccess) Authorize(_ context.Context, request daemon.HostAccessRequest) (daemon.HostAccessDecision, error) {
@@ -80,44 +67,16 @@ func (a historicalUIReferenceHostAccess) Authorize(_ context.Context, request da
 	return daemon.HostAccessDecision{}, nil
 }
 
-func TestUIIssueReferenceHidesHostDeniedProjectName(t *testing.T) {
-	dbh := openTestDB(t)
-	project, err := dbh.db.CreateProject(t.Context(), "restricted")
+func getUIIssueReference(t *testing.T, server *httptest.Server, query url.Values) (int, string) {
+	t.Helper()
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/issue-reference?"+query.Encode(), nil)
 	require.NoError(t, err)
-	allowed, err := dbh.db.CreateProject(t.Context(), "allowed")
+	response, err := server.Client().Do(request)
 	require.NoError(t, err)
-	issue, _, err := dbh.db.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: allowed.ID, Title: "Allowed", Author: "worker"})
+	defer func() { _ = response.Body.Close() }()
+	body, err := io.ReadAll(response.Body)
 	require.NoError(t, err)
-	server := daemon.NewServer(daemon.ServerConfig{DB: dbh.db, StartedAt: dbh.now, HostAccess: historicalUIReferenceHostAccess{deniedProjectID: project.ID}})
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := daemon.WithPrincipal(r.Context(), daemon.Principal{Kind: daemon.PrincipalHost, Subject: "host-user", Actor: "worker"})
-		server.Handler().ServeHTTP(w, r.WithContext(ctx))
-	}))
-	t.Cleanup(ts.Close)
-	var bodies []string
-	for _, name := range []string{"restricted", "missing"} {
-		query := url.Values{"project": {name}, "ref": {"abc4"}}
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+"/api/v1/ui/issue-reference?"+query.Encode(), nil)
-		require.NoError(t, err)
-		resp, err := ts.Client().Do(req)
-		require.NoError(t, err)
-		body, err := io.ReadAll(resp.Body)
-		require.NoError(t, err)
-		require.NoError(t, resp.Body.Close())
-		require.Equal(t, http.StatusNotFound, resp.StatusCode)
-		bodies = append(bodies, string(body))
-	}
-	require.JSONEq(t, bodies[0], bodies[1])
-	query := url.Values{"project": {allowed.Name}, "ref": {issue.ShortID}}
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+"/api/v1/ui/issue-reference?"+query.Encode(), nil)
-	require.NoError(t, err)
-	resp, err := ts.Client().Do(req)
-	require.NoError(t, err)
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-	require.Contains(t, string(body), issue.UID)
+	return response.StatusCode, string(body)
 }
 
 func TestUIIssueReferenceHistoricalCurrentProject(t *testing.T) {

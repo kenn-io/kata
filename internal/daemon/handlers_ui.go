@@ -106,42 +106,30 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Path:        "/api/v1/ui/issue-reference",
 		Summary:     "Resolve an active issue to its browser route identity",
 	}, func(ctx context.Context, in *api.UIIssueReferenceRequest) (*api.UIIssueReferenceResponse, error) {
-		projectID := in.ProjectID
-		var err error
-		var scopeUID string
+		projectID, scopeID := in.ProjectID, int64(0)
 		if projectID == 0 {
-			projectID, err = uiReferenceProject(ctx, cfg.DB, in.Project, in.Ref)
+			var err error
+			scopeID, projectID, err = uiReferenceProjects(ctx, cfg.DB, in.Project, in.Ref)
 			if err != nil {
 				return nil, hideMissingProject(ctx, err)
 			}
 		}
-		ctx, err = authorizeHostProjectScope(ctx, []int64{projectID}, nil, false)
+		ctx, err := authorizeHostProjectScope(ctx, []int64{scopeID, projectID}, nil, false)
 		if err != nil {
 			return nil, err
 		}
-		if in.ProjectID == 0 && in.Project != "" {
-			project, err := activeProjectByID(ctx, cfg.DB, projectID)
+		out := &api.UIIssueReferenceResponse{}
+		if scopeID != 0 {
+			scope, err := activeProjectByID(ctx, cfg.DB, scopeID)
 			if err != nil {
 				return nil, hideMissingProject(ctx, err)
 			}
-			scopeUID = project.UID
-			if parsed, parseErr := shortid.Parse(in.Ref); parseErr == nil && parsed.Project != "" {
-				projectID, err = uiReferenceProject(ctx, cfg.DB, "", in.Ref)
-				if err != nil {
-					return nil, hideMissingProject(ctx, err)
-				}
-				ctx, err = authorizeHostProjectScope(ctx, []int64{projectID}, nil, false)
-				if err != nil {
-					return nil, err
-				}
-			}
+			out.Body.ScopeProjectUID = scope.UID
 		}
 		issue, err := activeIssueByRef(ctx, cfg.DB, projectID, in.Ref, db.IncludeDeletedNo)
 		if err != nil {
 			return nil, hideMissingProject(ctx, err)
 		}
-		out := &api.UIIssueReferenceResponse{}
-		out.Body.ScopeProjectUID = scopeUID
 		out.Body.Issue.UID = issue.UID
 		out.Body.Issue.ProjectUID = issue.ProjectUID
 		return out, nil
@@ -407,40 +395,42 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 		})
 }
 
-func uiReferenceProject(ctx context.Context, store db.Storage, selector, ref string) (int64, error) {
+// uiReferenceProjects selects the view scope by exact name or UID, rejecting a
+// value that matches two projects, and the issue project by a ref's qualifier.
+func uiReferenceProjects(ctx context.Context, store db.Storage, selector, ref string) (int64, int64, error) {
 	notFound := api.NewError(http.StatusNotFound, "issue_not_found", "issue not found", "", nil)
-	if selector == "" {
-		parsed, err := shortid.Parse(ref)
-		if err != nil || parsed.Project == "" {
-			return 0, notFound
+	var scopeID int64
+	if selector != "" {
+		byName, nameErr := store.ProjectByName(ctx, selector)
+		byUID, uidErr := store.ProjectByUID(ctx, selector)
+		switch {
+		case nameErr != nil && !errors.Is(nameErr, db.ErrNotFound):
+			return 0, 0, internalAPIError(nameErr)
+		case uidErr != nil && !errors.Is(uidErr, db.ErrNotFound):
+			return 0, 0, internalAPIError(uidErr)
+		case nameErr == nil && (uidErr != nil || byUID.ID == byName.ID):
+			scopeID = byName.ID
+		case nameErr != nil && uidErr == nil:
+			scopeID = byUID.ID
+		default:
+			return 0, 0, notFound
 		}
+	}
+	issueProjectID := scopeID
+	if parsed, err := shortid.Parse(ref); err == nil && parsed.Project != "" {
 		project, err := store.ProjectByName(ctx, parsed.Project)
 		if errors.Is(err, db.ErrNotFound) {
-			return 0, notFound
+			return 0, 0, notFound
 		}
 		if err != nil {
-			return 0, internalAPIError(err)
+			return 0, 0, internalAPIError(err)
 		}
-		return project.ID, nil
+		issueProjectID = project.ID
 	}
-	byName, nameErr := store.ProjectByName(ctx, selector)
-	byUID, uidErr := store.ProjectByUID(ctx, selector)
-	if nameErr != nil && !errors.Is(nameErr, db.ErrNotFound) {
-		return 0, internalAPIError(nameErr)
+	if issueProjectID == 0 {
+		return 0, 0, notFound
 	}
-	if uidErr != nil && !errors.Is(uidErr, db.ErrNotFound) {
-		return 0, internalAPIError(uidErr)
-	}
-	if nameErr == nil && uidErr == nil && byName.ID != byUID.ID {
-		return 0, notFound
-	}
-	if nameErr == nil {
-		return byName.ID, nil
-	}
-	if uidErr == nil {
-		return byUID.ID, nil
-	}
-	return 0, notFound
+	return scopeID, issueProjectID, nil
 }
 
 func applyIssueScopeToUISnapshot(
