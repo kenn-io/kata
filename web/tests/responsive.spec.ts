@@ -25,7 +25,6 @@ test('a long server name leaves New task reachable', async ({ page, kata }) => {
     const button = (await task.boundingBox())!
     expect(button.x + button.width).toBeLessThanOrEqual(bounds.x + bounds.width)
   }
-
 })
 
 test('system views stay beside the list until the mobile layout', async ({ page, kata }) => {

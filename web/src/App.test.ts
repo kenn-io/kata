@@ -2719,7 +2719,9 @@ describe('App', () => {
     await fireEvent(window, new PopStateEvent('popstate'))
     await waitFor(() => expect(document.title).toBe('Today · Kata'))
     window.dispatchEvent(new Event('kata:versionMismatch'))
-    expect(await screen.findByRole('heading', { name: 'Kata was updated', level: 1 })).not.toBeNull()
+    expect(
+      await screen.findByRole('heading', { name: 'Kata was updated', level: 1 }),
+    ).not.toBeNull()
     await waitFor(() => expect(document.title).toBe('Kata'))
   })
 
