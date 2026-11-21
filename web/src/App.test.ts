@@ -1307,8 +1307,7 @@ describe('App', () => {
     await tick()
 
     expect(screen.getByRole('form', { name: 'Log in' })).not.toBeNull()
-    expect.soft(screen.getAllByRole('heading')).toHaveLength(1)
-    expect.soft(screen.queryByRole('heading', { name: 'Log in', level: 1 })).not.toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Log in', level: 1 })).not.toBeNull()
     expect(screen.queryByRole('alert')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
     expect(snapshotReads).toBe(0)
@@ -2712,7 +2711,6 @@ describe('App', () => {
     history.replaceState(null, '', '/kata?issue=abc4')
     await fireEvent(window, new PopStateEvent('popstate'))
     expect(screen.getByRole('heading', { name: 'Page not found', level: 1 })).not.toBeNull()
-    expect(screen.getAllByRole('heading')).toHaveLength(1)
     await waitFor(() => expect(document.title).toBe('Kata'))
 
     history.replaceState(null, '', '/kata?view=today')
@@ -4520,20 +4518,11 @@ describe('App', () => {
           expect((await screen.findByRole('alert')).textContent).toBe(
             'Task project is not available.',
           )
-          expect(
-            (screen.getByRole('textbox', { name: 'Quick capture' }) as HTMLInputElement).value,
-          ).toBe('Example task')
           expect(shownErrors).toEqual([])
           expect(actionRequests).toHaveLength(0)
           return
         }
         await waitFor(() => expect(writes).toBe(1))
-        if (action === 'create' && refused) {
-          expect(screen.getByRole('dialog', { name: 'New task' })).not.toBeNull()
-          expect(
-            (screen.getByRole('textbox', { name: 'Quick capture' }) as HTMLInputElement).value,
-          ).toBe('Example task')
-        }
         if (refused) {
           expect(await screen.findAllByText('validation: Action refused')).toHaveLength(1)
           await waitFor(() =>

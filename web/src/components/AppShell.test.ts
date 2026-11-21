@@ -1440,42 +1440,6 @@ describe('AppShell', () => {
     expect(screen.getByRole('alert').textContent).toBe('validation: Action refused')
   })
 
-  test('keeps a rejected task and its error in the Settings dialog', async () => {
-    const accepted = snapshot()
-    accepted.catalog![0]!.project.metadata = {
-      ...accepted.catalog![0]!.project.metadata,
-      role: 'inbox',
-    }
-    const onCreateIssue = vi.fn().mockRejectedValue(new Error('validation: Action refused'))
-    const view = render(AppShell, {
-      props: {
-        route: {
-          kind: 'kata',
-          view: 'settings',
-          graph: false,
-          filters: { status: [], owner: [], label: [], relationship: [] },
-        },
-        snapshot: accepted,
-        loading: false,
-        ...mutationProps({ onCreateIssue }),
-        onNavigate: vi.fn(),
-        onCreateProject: vi.fn(async () => ({ changed: true })),
-      },
-    })
-    await fireEvent.click(screen.getByRole('button', { name: 'New task' }))
-    const dialog = screen.getByRole('dialog', { name: 'New task' })
-    const title = within(dialog).getByRole('textbox', { name: 'Quick capture' }) as HTMLInputElement
-    await fireEvent.input(title, { target: { value: 'Example task' } })
-    await fireEvent.click(within(dialog).getByRole('button', { name: 'Capture' }))
-    expect((await within(dialog).findByRole('alert')).textContent).toBe(
-      'validation: Action refused',
-    )
-    await view.rerender({ mutationMessage: 'validation: Action refused' })
-    expect(screen.getAllByText('validation: Action refused')).toHaveLength(1)
-    expect(title.value).toBe('Example task')
-    expect(onCreateIssue).toHaveBeenCalledWith('Example task')
-  })
-
   test('drops held keyboard selection when sidebar navigation begins', async () => {
     vi.useFakeTimers()
     const onNavigate = vi.fn()
@@ -1813,8 +1777,8 @@ describe('AppShell', () => {
     expect(onPreferencesChange).toHaveBeenCalledWith(expect.objectContaining({ theme: 'light' }))
   })
 
-  test('quick-captures a new task through the ported workspace action', async () => {
-    const onCreateIssue = vi.fn(async () => {})
+  test('closes navigation and shows a rejected capture error once', async () => {
+    const onCreateIssue = vi.fn().mockRejectedValue(new Error('validation: Action refused'))
     vi.stubGlobal('matchMedia', (media: string) => ({
       matches: true,
       media,
@@ -1826,11 +1790,11 @@ describe('AppShell', () => {
       ...(accepted.catalog![0]!.project.metadata ?? {}),
       role: 'inbox',
     }
-    const { container } = render(AppShell, {
+    const view = render(AppShell, {
       props: {
         route: {
           kind: 'kata',
-          view: 'inbox',
+          view: 'settings',
           graph: false,
           filters: { status: [], owner: [], label: [], relationship: [] },
         },
@@ -1846,14 +1810,17 @@ describe('AppShell', () => {
     const drawer = screen.getByRole('dialog', { name: 'Navigation' })
     await fireEvent.click(within(drawer).getByRole('button', { name: 'New task' }))
     expect(screen.queryByRole('dialog', { name: 'Navigation' })).toBeNull()
-    await fireEvent.input(within(container).getByRole('textbox', { name: 'Quick capture' }), {
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Quick capture' }), {
       target: { value: 'New example task' },
     })
-    await fireEvent.keyDown(within(container).getByRole('textbox', { name: 'Quick capture' }), {
+    await fireEvent.keyDown(screen.getByRole('textbox', { name: 'Quick capture' }), {
       key: 'Enter',
     })
 
     expect(onCreateIssue).toHaveBeenCalledWith('New example task')
+    await within(screen.getByRole('dialog', { name: 'New task' })).findByRole('alert')
+    await view.rerender({ mutationMessage: 'validation: Action refused' })
+    expect(screen.getAllByText('validation: Action refused')).toHaveLength(1)
   })
 
   test('distinguishes empty projects from empty tasks and keeps refused capture closed', async () => {

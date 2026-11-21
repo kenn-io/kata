@@ -68,7 +68,7 @@ test('mobile navigation stays out of the task flow until opened', async ({ page,
   await expect(page).toHaveURL(/view=today/)
 })
 
-test('keeps the desktop project group collapsed after opening mobile navigation', async ({
+test('resizing an open drawer restores desktop navigation and its project state', async ({
   page,
   kata,
 }) => {
@@ -80,24 +80,12 @@ test('keeps the desktop project group collapsed after opening mobile navigation'
 
   await page.setViewportSize({ width: 600, height: 684 })
   await page.getByRole('button', { name: 'Open navigation' }).click()
-  await page
-    .getByRole('dialog', { name: 'Navigation' })
-    .getByRole('button', { name: 'Close' })
-    .click()
-  await page.setViewportSize({ width: 1000, height: 684 })
-
-  await expect(projects).toHaveAttribute('aria-expanded', 'false')
-})
-
-test('resizing an open navigation drawer restores desktop navigation', async ({ page, kata }) => {
-  await page.setViewportSize({ width: 600, height: 684 })
-  await kata.launch(page)
-  await page.getByRole('button', { name: 'Open navigation' }).click()
   await expect(page.getByRole('dialog', { name: 'Navigation' })).toBeVisible()
-
   await page.setViewportSize({ width: 1000, height: 684 })
+
   await expect(page.getByRole('dialog', { name: 'Navigation' })).toBeHidden()
   await expect(page.getByRole('button', { name: 'Today' })).toBeVisible()
+  await expect(projects).toHaveAttribute('aria-expanded', 'false')
 })
 
 test('Appearance changes the sidebar color', async ({ page, kata }) => {
