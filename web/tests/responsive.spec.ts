@@ -18,7 +18,7 @@ test('a long server name leaves New task reachable', async ({ page, kata }) => {
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 800 })
     if (width === 390) await page.getByRole('button', { name: 'Open navigation' }).click()
-    const sidebar = page.locator('.sidebar-header')
+    const sidebar = page.locator('.sidebar-header:visible')
     const task = page.getByRole('button', { name: 'New task' })
     const bounds = (await sidebar.boundingBox())!
     const button = (await task.boundingBox())!
