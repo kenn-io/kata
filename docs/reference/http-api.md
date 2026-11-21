@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-24
+last_edited: 2026-11-25
 ---
 
 # HTTP API schema
@@ -373,6 +373,7 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
+| `0.71.0` | `POST /api/v1/federation/events:poll` polls several projects that share one federation credential. |
 | `0.70.0` | Added `PATCH /api/v1/projects/{project_id}/issues/{ref}/labels`, which applies `add` and `remove` label lists in one transaction and answers with the issue's resulting `labels`. |
 | `0.69.0` | Close responses can include a `parent_ready` issue reference. |
 | `0.67.0` | Federation event polls accept `wait` and advertise `X-Kata-Federation-Poll-Wait-Max`. |
@@ -995,6 +996,30 @@ authority and polls snapshots because the event stream remains protected.
 `wait` in seconds. A caught-up poll may wait up to 45 seconds for new events;
 a zero or omitted wait answers at once. Successful responses advertise the
 maximum wait in seconds in `X-Kata-Federation-Poll-Wait-Max`.
+
+`POST /api/v1/federation/events:poll` tells a spoke which of up to 100
+projects have new events, with one federation credential. It returns no
+events: the spoke polls each project that is not idle with the single-project
+route. Hubs serve it only with `[federation] batch_poll = true` and answer
+`404` otherwise. The body lists `projects` as `project_id` and `after_id`
+pairs. The hub checks each project with its own
+`GET /api/v1/projects/{project_id}/federation/events` request for one event,
+with the same headers, so each project gets that route's authentication,
+project access, host authorization, transaction fences and revocation checks.
+Results come back in request order:
+
+| Field | Meaning |
+| --- | --- |
+| `status` | The status that project's single-project poll returned. |
+| `idle` | `true` when `status` is `200` and a poll from `after_id` would return no events and no reset. |
+| `next_after_id` | When `idle`, the cursor that poll would return. |
+| `error` | That poll's error body when `status` is not `200`. A refused project does not fail the batch. |
+
+Duplicate project IDs and more than 100 projects return `400 validation`. A
+signed request returns `400 validation`, because no layer verifies a signature
+over a batch, and a hub that requires signed requests answers `404`. A hub that
+serves the route adds `batched_poll_v1` to the `X-Kata-Event-Features` header
+of single-project poll responses.
 
 `POST /api/v1/projects/{project_id}/federation/events:ingest` returns
 `400 validation` when a fresh event references a stored sibling-project issue

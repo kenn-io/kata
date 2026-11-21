@@ -1029,11 +1029,12 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 		}
 		return &api.FederationPollEventsResponse{
-			EventFeatures: db.SupportedEventFeatures, RequiredEventFeatures: result.RequiredFeatures,
+			EventFeatures: federationPollEventFeatures(ctx, cfg), RequiredEventFeatures: result.RequiredFeatures,
 			PollWaitMax: int(federationPollWaitMax / time.Second),
 			Body:        api.PollEventsBody{Events: toEnvelopes(result.Events), NextAfterID: result.NextAfterID, ResetRequired: result.ResetAfterID > 0, ResetAfterID: result.ResetAfterID},
 		}, nil
 	})
+	registerFederationBatchPollHandler(humaAPI, cfg)
 
 	huma.Register(humaAPI, huma.Operation{
 		OperationID:  "ingestFederationProjectEvents",

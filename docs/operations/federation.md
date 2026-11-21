@@ -713,6 +713,28 @@ bounded turn, without making the runner poll unrelated hubs more often. A turn
 that stops before draining its outbound intent does not request a signaled
 reset checkpoint; a later turn does.
 
+Projects that share one credential on the same hub can be checked together
+when the hub sets `[federation] batch_poll = true`. At the start of a pass, the
+runner sends one batched poll per shared credential, covering up to 100
+projects. The hub answers which projects are idle and sends no events. An idle
+project's turn skips its poll; a project with new events polls on its own as
+before. The runner takes each project's sync lock and rereads its binding and
+credential before sending, and leaves out a project that is being rebound. A
+project also polls on its own when it pushed or retried a claim earlier in its
+turn, or when its binding, credential or cursor changed after the batch was
+sent. On a PostgreSQL spoke, which holds 25 lock connections, a larger group
+goes out in one batch per 25 projects.
+
+The runner batches only after a hub's poll response advertises the batched
+route, so other hubs keep receiving one poll per project. When a batch is
+refused with `404` or `405`, or times out, the runner reports it once through
+its error log and polls that hub's projects one at a time for the next hour. A
+`403` does the same for that credential's projects only. A `429` or `503` is
+logged once and holds the group's projects on the retry schedule described
+below, as if each project's own poll had been throttled. Signed credentials
+and relay bindings always poll one project at a time, because a signature
+covers one project's request.
+
 ### Refused and unavailable hubs
 
 On current `main` (unreleased), the runner backs off a project whose hub keeps

@@ -243,6 +243,18 @@ func (homeFederationCredentialStore) FederationCredential(
 	return credential, ok, nil
 }
 
+// FederationCredentialSnapshot reads every project's credential in one file
+// read, keyed by project UID.
+func (homeFederationCredentialStore) FederationCredentialSnapshot(
+	_ context.Context,
+) (map[string]FederationCredential, error) {
+	credentials, err := ReadFederationCredentials()
+	if err != nil {
+		return nil, err
+	}
+	return credentials.Projects, nil
+}
+
 func (homeFederationCredentialStore) StoreFederationCredential(
 	_ context.Context, projectUID string, credential FederationCredential,
 ) error {

@@ -2531,6 +2531,94 @@ func (e ExternalRootRunOut) Validate() error {
 	return errors
 }
 
+type FederationBatchPollBody struct {
+	Projects []FederationBatchPollPage `json:"projects" validate:"required"`
+}
+
+func (f FederationBatchPollBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(f.Projects, "required"); err != nil {
+		errors = errors.Append("Projects", err)
+	}
+	for i, item := range f.Projects {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Projects[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type FederationBatchPollCursor struct {
+	AfterID   int64 `json:"after_id" validate:"gte=0"`
+	ProjectID int64 `json:"project_id" validate:"gte=1"`
+}
+
+func (f FederationBatchPollCursor) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(f))
+}
+
+type FederationBatchPollPage struct {
+	ErrorData *ErrorEnvelope `json:"error,omitempty"`
+
+	// Idle True when status is 200 and a single-project poll from after_id would return no events and no reset.
+	Idle *bool `json:"idle,omitempty"`
+
+	// NextAfterID When idle, the cursor that single-project poll would return.
+	NextAfterID *int64 `json:"next_after_id,omitempty"`
+	ProjectID   int64  `json:"project_id"`
+
+	// Status HTTP status the single-project poll route returned for this project.
+	Status int64 `json:"status"`
+}
+
+func (f FederationBatchPollPage) Validate() error {
+	var errors runtime.ValidationErrors
+	if f.ErrorData != nil {
+		if v, ok := any(f.ErrorData).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("ErrorData", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type FederationBatchPollRequestBody struct {
+	Projects []FederationBatchPollCursor `json:"projects" validate:"required"`
+}
+
+func (f FederationBatchPollRequestBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(f.Projects, "required"); err != nil {
+		errors = errors.Append("Projects", err)
+	}
+	if f.Projects != nil && len(f.Projects) < 1 {
+		errors = errors.Add("Projects", fmt.Sprintf("must have at least 1 items, got %d", len(f.Projects)))
+	}
+	if len(f.Projects) > 100 {
+		errors = errors.Add("Projects", fmt.Sprintf("must have at most 100 items, got %d", len(f.Projects)))
+	}
+	for i, item := range f.Projects {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Projects[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type FederationBindingOut struct {
 	Actor                *string    `json:"actor,omitempty"`
 	CreatedAt            time.Time  `json:"created_at" validate:"required"`

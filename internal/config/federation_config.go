@@ -12,9 +12,11 @@ import (
 
 // FederationConfig is the [federation] block of <KATA_HOME>/config.toml.
 type FederationConfig struct {
-	Signing  FederationSigningConfig   `toml:"signing"`
-	Ingress  FederationIngressConfig   `toml:"ingress"`
-	Projects []FederationProjectConfig `toml:"project"`
+	Signing FederationSigningConfig `toml:"signing"`
+	Ingress FederationIngressConfig `toml:"ingress"`
+	// BatchPoll lets spokes poll several hub projects in one request.
+	BatchPoll bool                      `toml:"batch_poll"`
+	Projects  []FederationProjectConfig `toml:"project"`
 }
 
 // FederationProjectConfig declares one spoke-to-hub project mapping.

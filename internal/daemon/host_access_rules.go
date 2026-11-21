@@ -53,6 +53,11 @@ func buildHostAccessRules() map[string]hostAccessRule {
 	registerHostAccessRules(rules, hostAccessRule{
 		SelfAuthenticated: true, AcceptsFederationBearer: true, NoProjectData: true,
 	}, "disconnectRelayEnrollment")
+	// The batch reads nothing itself: each listed project is served as its own
+	// single-project poll request, which applies that route's rule.
+	registerHostAccessRules(rules, hostAccessRule{
+		SelfAuthenticated: true, AcceptsFederationBearer: true, NoProjectData: true,
+	}, "pollFederationEventsBatch")
 	registerHostAccessRules(rules, hostAccessRule{
 		SelfAuthenticated: true, AcceptsFederationBearer: true,
 	}, "federatedDocbankCapabilities", "uploadFederatedDocbank", "linkFederatedDocbank", "federatedDocbankContent")

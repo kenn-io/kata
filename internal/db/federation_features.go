@@ -557,3 +557,9 @@ func requireFederationEventFeatures(features string, event Event) (string, error
 	}
 	return required, RequireEventFeatures(features, required)
 }
+
+// FederationBatchPollFeature appears in a hub's X-Kata-Event-Features poll
+// response header when the hub serves the batched poll route for unsigned
+// requests. It names a transport route, not an event format, so peers never
+// send it and no event requires it.
+const FederationBatchPollFeature = "batched_poll_v1"

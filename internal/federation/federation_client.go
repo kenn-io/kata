@@ -128,6 +128,9 @@ func (c *Client) pollProjectEvents(
 	if err != nil {
 		return body, 0, err
 	}
+	if issueUID == "" {
+		observeFederationPoll(ctx, response.HTTPResponse.Header.Get(db.EventFeaturesHeader))
+	}
 	advertised, parseErr := strconv.Atoi(response.HTTPResponse.Header.Get(federationPollWaitMaxHeader))
 	if parseErr != nil || advertised <= 0 {
 		return body, 0, nil
@@ -354,6 +357,9 @@ type replicationDoer struct{ client *http.Client }
 
 func (d replicationDoer) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
 	req.Header.Set(db.EventFeaturesHeader, db.SupportedEventFeatures)
+	if req.Method != http.MethodGet && req.Method != http.MethodHead {
+		observeFederationHubWrite(ctx)
+	}
 	resp, err := d.client.Do(req.WithContext(ctx)) //nolint:gosec // G704: generated replication routes use the explicitly configured trusted federation hub.
 	if err != nil {
 		return nil, err

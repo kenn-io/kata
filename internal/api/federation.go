@@ -859,3 +859,49 @@ type FederationSpokeNameOut struct {
 
 // SetFederationSpokeNameResponse wraps the updated label.
 type SetFederationSpokeNameResponse struct{ Body FederationSpokeNameOut }
+
+// FederationBatchPollMaxProjects bounds the project cursors in one batched
+// federation poll.
+const FederationBatchPollMaxProjects = 100
+
+// FederationBatchPollRequest asks which of several hub projects have new
+// events, with one federation credential. Each project is checked through the
+// single-project poll route exactly as that route would serve the same request.
+type FederationBatchPollRequest struct {
+	EventFeatures string `header:"X-Kata-Event-Features"`
+	Authorization string `header:"Authorization"`
+	Body          FederationBatchPollRequestBody
+}
+
+// FederationBatchPollRequestBody lists the project cursors to check.
+type FederationBatchPollRequestBody struct {
+	Projects []FederationBatchPollCursor `json:"projects" minItems:"1" maxItems:"100"`
+}
+
+// FederationBatchPollCursor is one project's poll position.
+type FederationBatchPollCursor struct {
+	ProjectID int64 `json:"project_id" minimum:"1"`
+	AfterID   int64 `json:"after_id" minimum:"0"`
+}
+
+// FederationBatchPollResponse wraps FederationBatchPollBody.
+type FederationBatchPollResponse struct {
+	EventFeatures string `header:"X-Kata-Event-Features"`
+	Body          FederationBatchPollBody
+}
+
+// FederationBatchPollBody holds one result per requested project, in request
+// order.
+type FederationBatchPollBody struct {
+	Projects []FederationBatchPollPage `json:"projects"`
+}
+
+// FederationBatchPollPage is one project's result. It carries no events: a
+// project that is not idle must be polled with the single-project route.
+type FederationBatchPollPage struct {
+	ProjectID   int64          `json:"project_id"`
+	Status      int            `json:"status" doc:"HTTP status the single-project poll route returned for this project."`
+	Idle        bool           `json:"idle,omitzero" doc:"True when status is 200 and a single-project poll from after_id would return no events and no reset."`
+	NextAfterID int64          `json:"next_after_id,omitzero" doc:"When idle, the cursor that single-project poll would return."`
+	Error       *ErrorEnvelope `json:"error,omitempty" doc:"Present when status is not 200; the single-project route's error body."`
+}

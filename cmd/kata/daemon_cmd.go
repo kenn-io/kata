@@ -1743,6 +1743,7 @@ func runDaemonProcess(
 		MCPHandler:                mcpHandler,
 		FederationSigning:         signingVerifier,
 		FederationSigningRequired: dcfg.Federation.Signing.Required,
+		FederationBatchPoll:       dcfg.Federation.BatchPoll,
 		DB:                        store,
 		RootSigning:               rootSigning,
 		DefaultTimezone:           dcfg.Timezone,
