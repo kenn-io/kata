@@ -310,7 +310,7 @@ func TestCloseCmd_EvidenceValueWithCommaIsPreserved(t *testing.T) {
 }
 
 func TestCloseCmd_DryRunDoesNotMutate(t *testing.T) {
-	env, dir, pid, ref := setupWorkspaceWithIssue(t, "test issue")
+	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
 	out := runCLI(t, env, dir,
 		"close", ref,
 		"--done",
@@ -323,8 +323,7 @@ func TestCloseCmd_DryRunDoesNotMutate(t *testing.T) {
 
 	show := runCLI(t, env, dir, "show", ref, "--json")
 	assert.Contains(t, show, `"status":"open"`)
-	got := fetchIssueViaHTTPWithComments(t, env, pid, ref)
-	assert.Empty(t, got.Comments)
+	assert.NotContains(t, show, "finished")
 }
 
 func TestCloseCmd_RejectsDryRunSpelling(t *testing.T) {

@@ -1119,8 +1119,9 @@ IDs already linked. See [document close evidence](../guide/attachments.md#cite-a
 for historical versions, offline closes and stable retries.
 
 `--dry` validates the close without changing the issue, reports the close
-event it would record, and skips `--comment`. Releases before 0.19.0 spelled
-this flag `--dry-run`.
+event it would record, and skips posting `--comment`, though an empty
+`--comment` is still rejected. Releases before 0.19.0 spelled this flag
+`--dry-run`.
 
 `-m` is short for `--message`, and `--body` is accepted as an alias, matching
 `kata comment`. Without `--dry`, `--comment` posts a separate follow-up comment.
