@@ -57,6 +57,7 @@ for (const view of ['desktop detail', 'desktop editor', 'responsive editor']) {
     await expect(page.getByRole('button', { name: 'Open workspace' })).toHaveCount(0)
     await expect(page.getByRole('dialog', { name: 'Command palette' })).toHaveCount(0)
     await expect(page.getByRole('region', { name: 'Kata issue detail' })).toBeVisible()
+    await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1)
 
     if (view !== 'desktop detail') {
       await page.getByRole('button', { name: 'Edit issue' }).click()

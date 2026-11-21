@@ -1434,6 +1434,7 @@
 </script>
 
 <main aria-label="Kata" class="kata-app" class:ready={mode === 'ready' && !versionMismatch}>
+  {#if mode === 'ready' && !versionMismatch}<h1 class="kit-sr-only">Kata</h1>{/if}
   {#if versionMismatch}
     <VersionMismatch />
   {:else if mode === 'loading'}
