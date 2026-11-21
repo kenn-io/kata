@@ -188,6 +188,9 @@ for the offline window, grants, and rollback. SQLite replaces the index in place
 The schema 51→52 migration converts existing semantic-search vectors in place;
 see the [schema 52 migration requirements](../development/postgres-migrations.md#schema-52-shared-vector-catalog).
 
+The schema 52→53 migration adds an index of move events by destination project;
+see the [schema 53 migration requirements](../development/postgres-migrations.md#schema-53-move-events-by-destination-project).
+
 After preparation, grant the runtime role DML access and set default privileges
 for objects created by future migrations:
 

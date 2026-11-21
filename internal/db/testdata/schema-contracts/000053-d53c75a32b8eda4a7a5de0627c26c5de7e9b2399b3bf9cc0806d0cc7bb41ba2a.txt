@@ -1,0 +1,1 @@
+Index move events by their destination project so a federation poll checks for incoming moves with one lookup.

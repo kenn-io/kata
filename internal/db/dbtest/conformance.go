@@ -213,7 +213,7 @@ var storageScenarios = []scenario{
 		RunUpstreamAttribution(t, store)
 		return nil
 	}},
-	{name: "project access", methods: []string{"CreateTeam", "TeamByUID", "ListTeams", "DeleteTeam", "TeamMembers", "SetTeamMembership", "MigrateTeamActor", "ProjectAccessPolicy", "SetProjectAccessPolicy", "AccessibleProjectUIDs", "AnonymousAccessibleProjectUIDs", "ProjectAccessRevision", "ProjectAccessTransactionFence", "ExportProjectAccess"}, run: func(t *testing.T, store db.Storage) error {
+	{name: "project access", methods: []string{"CreateTeam", "TeamByUID", "ListTeams", "DeleteTeam", "TeamMembers", "SetTeamMembership", "MigrateTeamActor", "ProjectAccessPolicy", "SetProjectAccessPolicy", "AccessibleProjectUIDs", "ProjectAccessibleToActor", "AnonymousAccessibleProjectUIDs", "AnonymousProjectAccess", "ProjectAccessRevision", "ProjectAccessTransactionFence", "ExportProjectAccess"}, run: func(t *testing.T, store db.Storage) error {
 		RunProjectAccessMergeIsolation(t, store)
 		RunProjectAccessConformance(t, store)
 		RunProjectAccessTokenEnrollment(t, store)
@@ -377,6 +377,10 @@ var storageScenarios = []scenario{
 	{name: "federated move replay embedding artifacts", methods: []string{"IngestFederationEvents", "InsertRemoteEvents", "MaterializeFederatedProject"}, run: checkFederatedMoveReplayEmbeddingArtifacts},
 	{name: "federated read pages", methods: []string{"ReadFederation"}, runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
 		checkFederatedReadPages(t, store, backend)
+		return nil
+	}},
+	{name: "federated quiet poll feed", methods: []string{"ReadFederation", "MoveIssueProject", "PurgeIssue"}, runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+		checkFederatedQuietPollFeed(t, store, backend)
 		return nil
 	}},
 	{name: "federated move remote edit history", methods: []string{"AdvanceFederationPushCursor", "CreateProject", "CreateIssue", "EditIssue", "EventsByUIDs", "MoveIssueProject", "InsertRemoteEvents", "MaterializeFederatedProject", "ResetFederatedProject", "UpsertFederationBinding", "IssueByUID", "ReadFederation"}, runWithBackend: checkFederatedMoveRemoteEditHistory},

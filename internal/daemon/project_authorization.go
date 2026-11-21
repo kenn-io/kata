@@ -33,6 +33,10 @@ type ProjectAccessDecision struct {
 	// at the high-water mark read before admission. A project whose lifecycle
 	// event follows it is new to the stream and still has that event to deliver.
 	streamCursor int64
+	// urlProjectID and urlProjectUID name the project a request was admitted
+	// for alone; see hostAccessRule.URLProjectAuthority.
+	urlProjectID  int64
+	urlProjectUID string
 }
 
 // advanceProjectAccessStreamCursor records that the stream has delivered every
@@ -137,6 +141,54 @@ func accessibleProjectUIDs(ctx context.Context, store db.Storage, actor string) 
 	return uids, nil
 }
 
+// admitURLProject admits the request with the anonymous decision for the
+// project with projectID alone: that project when anonymous reads may select
+// it, otherwise none.
+func (d *ProjectAccessDecision) admitURLProject(ctx context.Context, projectID int64) error {
+	projectUID, accessible, err := d.store.AnonymousProjectAccess(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("reading anonymous project access: %w", err)
+	}
+	d.urlProjectID, d.urlProjectUID = projectID, projectUID
+	d.ProjectUIDs = []string{}
+	if accessible {
+		d.ProjectUIDs = []string{projectUID}
+	}
+	return nil
+}
+
+// selectableProjectUIDs returns the projects the decision's actor may select
+// under the current policy. A request admitted for its URL project alone, and
+// still holding no other project, rechecks only that project, even one that
+// did not exist at admission; its release then also holds exposed issues to
+// that project.
+func (d *ProjectAccessDecision) selectableProjectUIDs(ctx context.Context) ([]string, error) {
+	if d.urlProjectID == 0 || slices.ContainsFunc(d.ProjectUIDs, func(uid string) bool { return uid != d.urlProjectUID }) {
+		return accessibleProjectUIDs(ctx, d.store, d.Actor)
+	}
+	if d.Actor == "" {
+		projectUID, allowed, err := d.store.AnonymousProjectAccess(ctx, d.urlProjectID)
+		if err != nil {
+			return nil, fmt.Errorf("reading anonymous project access: %w", err)
+		}
+		if !allowed || (d.urlProjectUID != "" && projectUID != d.urlProjectUID) {
+			return []string{}, nil
+		}
+		return []string{projectUID}, nil
+	}
+	if d.urlProjectUID == "" {
+		return []string{}, nil
+	}
+	allowed, err := d.store.ProjectAccessibleToActor(ctx, d.Actor, d.urlProjectUID)
+	if err != nil {
+		return nil, fmt.Errorf("reading project access: %w", err)
+	}
+	if !allowed {
+		return []string{}, nil
+	}
+	return []string{d.urlProjectUID}, nil
+}
+
 // refresh re-reads the caller's projects after the policy revision moved. It
 // reports kept=false when the caller lost a project admitted for this request;
 // otherwise the decision adopts the current set and returns the projects it
@@ -163,7 +215,7 @@ func (d *ProjectAccessDecision) refreshProjects(ctx context.Context, rejectLoss 
 	}
 	accessible := slices.Clone(d.fixedUIDs)
 	if !d.owner {
-		accessible, err = accessibleProjectUIDs(ctx, d.store, d.Actor)
+		accessible, err = d.selectableProjectUIDs(ctx)
 		if err != nil {
 			return nil, false, true, err
 		}
@@ -245,12 +297,19 @@ func withProjectAuthorization(store db.Storage, hosted, trustedCaller bool, tran
 			return
 		}
 		decision.PolicyRevision = revision
-		if owner {
+		urlProjectID := transportRoutes.match(r).urlProjectID
+		switch {
+		case owner:
 			// Transport handlers resolve their credentials after dispatch, but an
 			// owner principal already present here must retain the same unrestricted
 			// project selection as every other route.
 			decision.ProjectUIDs = nil
-		} else {
+		case !authenticated && urlProjectID != 0:
+			// The handler authorizes its credential against this project and
+			// narrows the request to it, so until then only this project's
+			// anonymous decision applies.
+			err = decision.admitURLProject(r.Context(), urlProjectID)
+		default:
 			decision.ProjectUIDs, err = accessibleProjectUIDs(r.Context(), store, principal.Actor)
 		}
 		if err != nil {

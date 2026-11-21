@@ -121,6 +121,8 @@ var alreadyImplemented = map[string]bool{
 	"ProjectAccessPolicy":                  true, // project_access.go
 	"SetProjectAccessPolicy":               true, // project_access.go
 	"AccessibleProjectUIDs":                true, // project_access.go
+	"ProjectAccessibleToActor":             true, // project_access.go
+	"AnonymousProjectAccess":               true, // project_access.go
 	"AnonymousAccessibleProjectUIDs":       true, // project_access.go
 	"ProjectAccessRevision":                true, // project_access.go
 	"ProjectByUIDTx":                       true, // projects.go
