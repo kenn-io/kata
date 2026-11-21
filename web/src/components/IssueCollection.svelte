@@ -284,10 +284,12 @@
     return children
   })
 
+  const keepsSystemViewGroups = $derived(
+    ['today', 'scheduled', 'delegated', 'logbook'].includes(currentView.name),
+  )
   // Project lists are flat; system views retain their date and handoff groups.
   let isProjectScoped = $derived(
-    Boolean(scopedProjectName) &&
-      !['today', 'scheduled', 'delegated', 'logbook'].includes(currentView.name),
+    Boolean(scopedProjectName) && !keepsSystemViewGroups,
   )
   let statusVisibleGroups = $derived(filterGroupsByStatus(currentView.groups, statusFilter))
   let flatIssues = $derived(
@@ -328,7 +330,7 @@
   // so keep its labeled region instead of dropping it to a bare list.
   let shouldFlatten = $derived(
     !isProjectScoped &&
-      !['today', 'scheduled', 'delegated', 'logbook'].includes(currentView.name) &&
+      !keepsSystemViewGroups &&
       (sort.key === 'updated' || sort.key === 'due') &&
       visibleGroups.length > 1,
   )

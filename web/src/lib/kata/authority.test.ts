@@ -40,11 +40,92 @@ describe('projectKataWorkspaceView', () => {
       view: 'scheduled',
       filters: { ...defaultKataTaskSearchFilters('scheduled'), owner: 'user-a' },
       snapshot: { projects, fetched_at: '2026-05-15T16:00:00.000Z' },
-      issues: [issue('dated', { deadline_on: '2026-05-20' }), issue('undated')],
+      issues: [
+        issue('first-date', { deadline_on: '2026-05-20' }),
+        issue('second-date', { scheduled_on: '2026-05-21' }),
+        issue('undated'),
+      ],
       today: '2026-05-15',
     })
 
-    expect(titles(view)).toEqual(['dated'])
+    expect(view.groups.map((group) => [group.title, group.issues.map((item) => item.title)])).toEqual(
+      [
+        ['Wed, May 20', ['first-date']],
+        ['Thu, May 21', ['second-date']],
+      ],
+    )
+  })
+
+  test('keeps Today date groups when the task set is narrowed by search', () => {
+    const view = projectKataWorkspaceView({
+      view: 'today',
+      filters: { ...defaultKataTaskSearchFilters('today'), query: 'alert' },
+      snapshot: { projects, fetched_at: '2026-05-15T16:00:00.000Z' },
+      issues: [
+        issue('late', { deadline_on: '2026-05-14' }),
+        issue('today', { deadline_on: '2026-05-15' }),
+      ],
+      today: '2026-05-15',
+    })
+
+    expect(view.groups.map((group) => [group.title, group.issues.map((item) => item.title)])).toEqual(
+      [
+        ['Overdue', ['late']],
+        ['Today', ['today']],
+      ],
+    )
+  })
+
+  test('keeps Delegated handoff groups when narrowed by a relationship filter', () => {
+    const view = projectKataWorkspaceView({
+      view: 'delegated',
+      filters: {
+        ...defaultKataTaskSearchFilters('delegated'),
+        relationships: ['blocks'],
+      },
+      snapshot: { projects, fetched_at: '2026-05-15T16:00:00.000Z' },
+      issues: [issue('handoff', { teammate: 'reviewer-7' })],
+      today: '2026-05-15',
+    })
+
+    expect(view.groups.map((group) => [group.title, group.issues.map((item) => item.title)])).toEqual(
+      [['reviewer-7 for user-a', ['handoff']]],
+    )
+  })
+
+  test('keeps Scheduled groups for Ready status', () => {
+    const view = projectKataWorkspaceView({
+      view: 'scheduled',
+      filters: { ...defaultKataTaskSearchFilters('scheduled'), status: 'ready' },
+      snapshot: { projects, fetched_at: '2026-05-15T16:00:00.000Z' },
+      issues: [issue('ready', { scheduled_on: '2026-05-20' })],
+      today: '2026-05-15',
+    })
+
+    expect(view.groups.map((group) => [group.title, group.issues.map((item) => item.title)])).toEqual(
+      [['Wed, May 20', ['ready']]],
+    )
+  })
+
+  test.each([
+    ['closed', [{ ...issue('closed-task'), status: 'closed' as const }], ['closed-task']],
+    [
+      'all',
+      [issue('open-task'), { ...issue('closed-task'), status: 'closed' as const }],
+      ['open-task', 'closed-task'],
+    ],
+  ] as const)('keeps Results when Today expands to %s tasks', (status, issues, expected) => {
+    const view = projectKataWorkspaceView({
+      view: 'today',
+      filters: { ...defaultKataTaskSearchFilters('today'), status },
+      snapshot: { projects, fetched_at: '2026-05-15T16:00:00.000Z' },
+      issues,
+      today: '2026-05-15',
+    })
+
+    expect(view.groups.map((group) => [group.title, group.issues.map((item) => item.title)])).toEqual(
+      [['Results', expected]],
+    )
   })
 
   test('holds future start dates out of filtered Inbox results', () => {
