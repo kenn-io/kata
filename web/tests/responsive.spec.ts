@@ -19,7 +19,7 @@ test('a long server name leaves New task reachable', async ({ page, kata }) => {
     await page.setViewportSize({ width, height: 800 })
     if (width === 390) await page.getByRole('button', { name: 'Open navigation' }).click()
     const sidebar = page.locator('.sidebar-header:visible')
-    const task = page.getByRole('button', { name: 'New task' })
+    const task = sidebar.getByRole('button', { name: 'New task' })
     const bounds = (await sidebar.boundingBox())!
     const button = (await task.boundingBox())!
     expect(button.x + button.width).toBeLessThanOrEqual(bounds.x + bounds.width)
@@ -41,6 +41,14 @@ test('system views stay beside the list until the mobile layout', async ({ page,
   })
 
   expect(layout).toEqual({ sameRow: true, sidebarBeforeMain: true })
+})
+
+test('mobile bar opens task capture without opening navigation', async ({ page, kata }) => {
+  await page.setViewportSize({ width: 390, height: 800 })
+  await kata.launch(page)
+
+  await page.locator('.mobile-navigation-trigger').getByRole('button', { name: 'New task' }).click()
+  await expect(page.getByRole('dialog', { name: 'New task' })).toBeVisible()
 })
 
 test('mobile navigation stays out of the task flow until opened', async ({ page, kata }) => {

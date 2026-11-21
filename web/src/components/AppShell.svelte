@@ -777,6 +777,16 @@
           >{settingsRoute ? 'Settings' : credentialRoute ? 'Credentials' : scopeLabel()}</strong
         >
       {/snippet}
+      {#snippet right()}
+        {#if mediumScreen.current}
+          {#if newTaskBlockedReason}
+            <Tooltip text={newTaskBlockedReason}>{@render newTaskButton()}</Tooltip>
+            <span id={newTaskReasonID} class="kit-sr-only">{newTaskBlockedReason}</span>
+          {:else}
+            {@render newTaskButton()}
+          {/if}
+        {/if}
+      {/snippet}
     </TopBar>
   </div>
   {#if selectedProject && !daemonRoute && !stale && !daemonSwitching && !reconnecting && !credentialExpired && !daemonError && !scopedAuthority && (!activeDaemonID || activeConnection?.local === true)}
