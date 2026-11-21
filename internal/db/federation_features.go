@@ -210,56 +210,21 @@ func EventRequiredFeatures(kind string) string {
 	return ""
 }
 
-type featureQuerier interface {
+// ProjectRequiredEventFeatures inspects current cron data and native issue state.
+func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-}
-
-// ProjectRequiredEventFeatures inspects current cron data and native issue state.
-func ProjectRequiredEventFeatures(ctx context.Context, q featureQuerier, projectUID string) (string, error) {
-	return projectRequiredEventFeatures(ctx, q, projectUID, nil)
-}
-
-// projectRequiredEventFeatures skips the move checks feed already answered.
-func projectRequiredEventFeatures(ctx context.Context, q featureQuerier, projectUID string, feed *FederationFeedRead) (string, error) {
-	const cron = `EXISTS(SELECT 1 FROM projects p WHERE p.uid=$1 AND (
+}, projectUID string) (string, error) {
+	var cronPresent, issueMoved bool
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM projects p WHERE p.uid=$1 AND (
  EXISTS(SELECT 1 FROM cron_jobs WHERE project_id=p.id) OR
  EXISTS(SELECT 1 FROM cron_workflows WHERE project_id=p.id) OR
  EXISTS(SELECT 1 FROM cron_runs WHERE project_id=p.id) OR
-	 EXISTS(SELECT 1 FROM events WHERE project_id=p.id AND type LIKE 'cron.%')))`
-	const moves = `EXISTS(SELECT 1 FROM projects p WHERE p.uid=$1 AND p.name<>$2 AND EXISTS(
-  SELECT 1 FROM events e WHERE e.project_id=p.id AND e.id>$3 AND e.type='issue.moved'))`
-	var cronPresent, issueMoved bool
-	through, knownMoved, knownNative := feed.moveFeatures()
-	// Without remembered move facts, read the move history.
-	recheck := feed == nil || through == 0
-	if recheck {
-		if err := q.QueryRowContext(ctx, `SELECT `+cron+`,`+moves, projectUID, SystemProjectName, feed.movesAfter()).Scan(&cronPresent, &issueMoved); err != nil {
-			return "", err
-		}
-	} else {
-		// The remembered move facts hold unless an event stamped to the
-		// project, a move out of it, or an issue purge in it followed them.
-		// PostgreSQL plans every subquery in a statement, even one that never
-		// runs, so the move check runs on its own only when they no longer
-		// hold.
-		movedFrom, projectIndex, movedIndex := federationFeedSQL(feed.postgres)
-		//nolint:gosec // G202: fixed backend fragments only; values stay bound.
-		err := q.QueryRowContext(ctx, `SELECT `+cron+`, (SELECT e.id FROM events e`+projectIndex+` WHERE e.project_id=$2 AND e.id>$3 ORDER BY e.project_id, e.id LIMIT 1) IS NOT NULL
- OR EXISTS(SELECT 1 FROM events e`+movedIndex+` WHERE e.type='issue.moved' AND `+movedFrom+`=$1 AND e.id>$3)
- OR EXISTS(SELECT 1 FROM purge_log WHERE project_id=$2 AND purge_reset_after_event_id>$3)`, projectUID, feed.projectID, through).Scan(&cronPresent, &recheck)
-		if err != nil {
-			return "", err
-		}
-		issueMoved = knownMoved
-		if recheck {
-			if err := q.QueryRowContext(ctx, `SELECT `+moves, projectUID, SystemProjectName, feed.movesAfter()).Scan(&issueMoved); err != nil {
-				return "", err
-			}
-		}
-	}
-	if recheck {
-		feed.recordMoves(issueMoved)
+	 EXISTS(SELECT 1 FROM events WHERE project_id=p.id AND type LIKE 'cron.%'))),
+ EXISTS(SELECT 1 FROM projects p WHERE p.uid=$1 AND p.name<>$2 AND EXISTS(
+  SELECT 1 FROM events e WHERE e.project_id=p.id AND e.type='issue.moved'))`, projectUID, SystemProjectName).Scan(&cronPresent, &issueMoved)
+	if err != nil {
+		return "", err
 	}
 	required := ""
 	if issueMoved {
@@ -290,17 +255,10 @@ func projectRequiredEventFeatures(ctx context.Context, q featureQuerier, project
 		}
 	}
 	if issueMoved {
-		if !recheck {
-			if knownNative {
-				return MergeEventFeatures(required, CronEventFeature), nil
-			}
-			return required, nil
-		}
 		native, err := nativeProjectionRequired(ctx, q, `SELECT DISTINCT 'projection.issue',i.metadata FROM events e JOIN projects p ON p.id=e.project_id JOIN issues i ON i.uid=e.issue_uid AND i.project_id=e.project_id WHERE p.uid=$1 AND e.type='issue.moved' AND (i.metadata LIKE '%"cron.occurrence"%' OR i.metadata LIKE '%"cron.progress.%' OR i.metadata LIKE '%\u%' ESCAPE '!')`, projectUID)
 		if err != nil {
 			return "", err
 		}
-		feed.recordNativeMoves(native)
 		if native {
 			return MergeEventFeatures(required, CronEventFeature), nil
 		}
@@ -381,11 +339,10 @@ type FederationReadResult struct {
 
 // ReadFederationTransaction supplies common decisions while each backend owns
 // its isolation/retry/fences, baseline event writer and event row decoder.
-// feed is the read's federation feed cache view, shared with readEvents.
-func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationReadParams, project Project, binding FederationBinding, feed *FederationFeedRead, refresh func() (FederationBinding, error), readEvents func(int64, int) ([]Event, error)) (FederationReadResult, error) {
+func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationReadParams, project Project, binding FederationBinding, refresh func() (FederationBinding, error), readEvents func(int64, int) ([]Event, error)) (FederationReadResult, error) {
 	out := FederationReadResult{Project: project, Binding: binding, Events: []Event{}, NextAfterID: in.AfterID}
 	var err error
-	out.RequiredFeatures, err = projectRequiredEventFeatures(ctx, tx, project.UID, feed)
+	out.RequiredFeatures, err = ProjectRequiredEventFeatures(ctx, tx, project.UID)
 	if err != nil {
 		return out, err
 	}
@@ -406,10 +363,12 @@ func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationRea
 		after = binding.ReplayHorizonEventID
 	}
 	var reset sql.NullInt64
-	err = tx.QueryRowContext(ctx, `SELECT MAX(cursor) FROM (
+	var newest int64
+	err = tx.QueryRowContext(ctx, `SELECT (SELECT MAX(cursor) FROM (
  SELECT MAX(purge_reset_after_event_id) AS cursor FROM purge_log WHERE project_id=$1 AND purge_reset_after_event_id>$2
  UNION ALL SELECT MAX(purge_reset_after_event_id) AS cursor FROM project_purge_log WHERE project_id=$1 AND purge_reset_after_event_id>$2
- UNION ALL SELECT CAST(value AS BIGINT) AS cursor FROM meta WHERE key=$3 AND CAST(value AS BIGINT)>$2) resets`, project.ID, after, ProjectStreamResetMetadataPrefix+project.UID).Scan(&reset)
+ UNION ALL SELECT CAST(value AS BIGINT) AS cursor FROM meta WHERE key=$3 AND CAST(value AS BIGINT)>$2) resets),
+ COALESCE((SELECT MAX(id) FROM events),0)`, project.ID, after, ProjectStreamResetMetadataPrefix+project.UID).Scan(&reset, &newest)
 	if err != nil {
 		return out, err
 	}
@@ -443,6 +402,15 @@ func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationRea
 	out.Events, err = readEvents(in.AfterID, in.Limit)
 	if err != nil {
 		return out, err
+	}
+	if len(out.Events) == 0 && in.IssueUID == "" {
+		// An empty page read every event through the snapshot's newest, and
+		// event IDs follow commit order, so no feed event at or below it can
+		// appear later. Moving the cursor there keeps the next poll's read to
+		// what the hub writes after this one. A move into the project later
+		// exposes older history filed elsewhere; spokes read that through the
+		// moved issue's own history, whatever their cursor.
+		out.NextAfterID = max(in.AfterID, newest)
 	}
 	// Inspect the returned page itself, including when a store was imported from
 	// an earlier snapshot with a missing protocol latch. Never trust a pre-read.

@@ -35,6 +35,8 @@ func TestReadFederationQuietPageBudget(t *testing.T) {
 	_, err = d.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash)
  VALUES('00000000000000000000999999',$1,$2,'quiet-project',$3,'sync.reset_required','tester','{}',1,0,$4)`, d.InstanceUID(), project.ID, issue.UID, strings.Repeat("a", 64))
 	require.NoError(t, err)
+	newest, err := d.MaxEventID(ctx)
+	require.NoError(t, err)
 
 	for _, analyzed := range []bool{false, true} {
 		if analyzed {
@@ -50,7 +52,13 @@ func TestReadFederationQuietPageBudget(t *testing.T) {
 				result, err := store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, IssueUID: subject, AfterID: after, Limit: 100, Features: db.SupportedEventFeatures})
 				require.NoError(t, err)
 				require.Empty(t, result.Events)
-				require.Equal(t, after, result.NextAfterID)
+				// An empty project poll moves the cursor past everything it
+				// checked; an issue history read keeps its cursor.
+				want := newest
+				if subject != "" {
+					want = after
+				}
+				require.Equal(t, want, result.NextAfterID)
 				conn, err = raw.Conn(ctx)
 				require.NoError(t, err)
 				pages := sqlitePageFetches(t, conn, false)
@@ -77,7 +85,7 @@ func TestReadFederationBulkMovePageBudget(t *testing.T) {
 			require.NoError(t, conn.Close())
 			tx, err := raw.BeginTx(t.Context(), nil)
 			require.NoError(t, err)
-			events, err := db.ReadFederationEventPage(t.Context(), tx, project, "", after, 1, false, nil, func(where string, args ...any) ([]db.Event, error) {
+			events, err := db.ReadFederationEventPage(t.Context(), tx, project, "", after, 1, false, func(where string, args ...any) ([]db.Event, error) {
 				return (sqlquery.Query{SQL: sqlitestore.EventSelectForTest + where, Args: args}).All(t.Context(), tx, func(rows *sql.Rows) (db.Event, error) { return sqlitestore.ScanEventForTest(rows) })
 			})
 			require.NoError(t, err)
@@ -133,7 +141,7 @@ func TestReadFederationSparseCatchupPageBudget(t *testing.T) {
 		windows++
 		return (sqlquery.Query{SQL: sqlitestore.EventSelectForTest + where, Args: args}).All(ctx, tx, func(rows *sql.Rows) (db.Event, error) { return sqlitestore.ScanEventForTest(rows) })
 	}
-	events, err := db.ReadFederationEventPage(ctx, tx, project, "", after, limit, false, nil, query)
+	events, err := db.ReadFederationEventPage(ctx, tx, project, "", after, limit, false, query)
 	require.NoError(t, err)
 	require.Len(t, events, limit)
 	for i, event := range events {

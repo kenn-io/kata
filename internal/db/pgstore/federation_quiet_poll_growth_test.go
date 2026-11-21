@@ -21,13 +21,6 @@ func TestResumedFederationPollGrowth(t *testing.T) {
 	dbtest.RunResumedFederationPollGrowth(t, open, measure, 1)
 }
 
-func TestRememberedFederationPollCost(t *testing.T) {
-	open, measure := postgresQuietPollGrowth(t)
-	dbtest.RunRememberedFederationPollCost(t, open, func(store db.Storage) {
-		pgstore.ForgetFederationFeedForTest(store.(*pgstore.Store))
-	}, measure, 1)
-}
-
 // postgresQuietPollGrowth opens single-connection stores and measures the
 // blocks one steady-state poll reads.
 func postgresQuietPollGrowth(t *testing.T) (func(*testing.T) db.Storage, growthtest.Measure) {

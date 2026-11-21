@@ -10,20 +10,23 @@ All notable changes to kata, grouped by release. Versioned releases start with
 ## Unreleased
 
 - Open qualified short issue IDs and project-scoped short IDs in browser links.
+- A federation hub's work to answer a quiet project's poll now grows only with what the hub wrote since the previous poll. An empty poll moves the spoke's cursor to the newest event the hub checked.
 
 **Before upgrading**
 
 - Keep a [backup](operations/backup-restore.md) from before the upgrade. This
-  release upgrades the database from schema 50 through 51 to 52, and older
+  release upgrades the database from schema 50 through 53, and older
   binaries cannot open the result.
 - PostgreSQL: stop daemons and imports, then run
   `kata storage postgres migrate` with schema-owner credentials. The migration
-  rebuilds an index on `events` and blocks event writes, then converts existing
-  vector rows and rebuilds their index. Allow an offline window for both steps
-  that fits the event log and vector data sizes. Existing grants stay sufficient.
+  rebuilds an index on `events` and blocks event writes, converts existing
+  vector rows and rebuilds their index, then adds another index on `events`.
+  Allow an offline window for these steps that fits the event log and vector
+  data sizes. Existing grants stay sufficient.
   SQLite upgrades in place at startup. See the
   [schema 51 migration requirements](development/postgres-migrations.md#schema-51-issue-history-index-on-the-event-header)
-  and [schema 52 migration requirements](development/postgres-migrations.md#schema-52-shared-vector-catalog).
+  [schema 52 migration requirements](development/postgres-migrations.md#schema-52-shared-vector-catalog),
+  and [schema 53 migration requirements](development/postgres-migrations.md#schema-53-move-events-by-destination-project).
 - Adoption: to repeat or resume an adoption push, run this release on the hub
   and the pushing spoke. Once a newer copy wins on the hub, every spoke and
   relay of that project must upgrade before it can pull again. See

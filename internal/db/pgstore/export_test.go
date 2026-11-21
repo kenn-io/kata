@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv/sqlcount"
 )
 
@@ -71,10 +70,4 @@ func CountStatementsForTest() func() {
 		return sqlcount.WrapConnector(previous(connector))
 	}
 	return func() { wrapPostgresConnector = previous }
-}
-
-// ForgetFederationFeedForTest clears what store remembers about earlier
-// federation polls.
-func ForgetFederationFeedForTest(store *Store) {
-	store.federationFeed = &db.FederationFeedCache{}
 }

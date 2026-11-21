@@ -10,50 +10,32 @@ import (
 // ReadFederationEventPage skips unrelated gaps within the caller's snapshot.
 // query appends a suffix to the backend event projection and decodes its rows.
 // ReadFederationTransaction validates issue ownership before reading pages.
-// feed, when set, lets a quiet project's poll skip probing every issue it owns.
-func ReadFederationEventPage(ctx context.Context, tx *sql.Tx, project Project, issueUID string, afterID int64, limit int, postgres bool, feed *FederationFeedRead, query func(string, ...any) ([]Event, error)) ([]Event, error) {
+func ReadFederationEventPage(ctx context.Context, tx *sql.Tx, project Project, issueUID string, afterID int64, limit int, postgres bool, query func(string, ...any) ([]Event, error)) ([]Event, error) {
 	if issueUID != "" {
 		return query(` WHERE e.issue_uid=$1 AND e.type<>'sync.reset_required' AND e.id>$2 ORDER BY e.id LIMIT $3`, issueUID, afterID, limit)
 	}
-	movedFrom, projectIndex, movedIndex := federationFeedSQL(postgres)
-	identityIndex, subjectUID := "", "subject.uid"
-	if !postgres {
-		identityIndex, subjectUID = " INDEXED BY idx_events_issue_uid_id", "+subject.uid"
+	movedFrom := `json_extract(e.payload,'$.from_project_uid')`
+	projectIndex, movedIndex, identityIndex, subjectUID := "", "", "", "subject.uid"
+	if postgres {
+		movedFrom = `e.payload::jsonb->>'from_project_uid'`
+	} else {
+		// ANALYZE can otherwise favor an ID walk through unrelated history.
+		projectIndex, movedIndex, identityIndex = " INDEXED BY idx_events_project", " INDEXED BY idx_events_moved_from_id", " INDEXED BY idx_events_issue_uid_id"
+		subjectUID = "+subject.uid"
 	}
 	var maxID int64
-	var own bool
-	// Ordering by the project index keeps a PostgreSQL generic plan from
-	// scanning every event when one project owns most of them.
-	//nolint:gosec // G202: fixed backend fragments only; values stay bound.
-	err := tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT MAX(id) FROM events),0),
- (SELECT e.id FROM events e`+projectIndex+` WHERE e.project_id=$1 AND e.id>$2 AND e.type<>'sync.reset_required' ORDER BY e.project_id, e.id LIMIT 1) IS NOT NULL`,
-		project.ID, afterID).Scan(&maxID, &own)
-	if err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),0) FROM events`).Scan(&maxID); err != nil {
 		return nil, fmt.Errorf("federation event presence: %w", err)
 	}
-	feed.recordSnapshot(maxID)
-	// A remembered quiet range held no feed event when a poll proved it, and
-	// IDs follow commit order, so the page read can start where it ends. The
-	// exception is an event stamped to the project since afterID: a move into
-	// the project turns earlier history filed elsewhere into feed events. A
-	// quiet project polled from an old cursor then reads only what the hub
-	// wrote since the previous poll.
-	start := afterID
-	issueCount, counted := feed.knownIssues()
-	if after, cleared := feed.foreignChecked(afterID); cleared && !own {
-		start = after
-	} else {
-		counted = false
-	}
-	if start >= maxID {
-		feed.recordQuiet(afterID, maxID)
+	if maxID <= afterID {
 		return []Event{}, nil
 	}
-	if !counted {
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM issues WHERE project_id=$1`, project.ID).Scan(&issueCount); err != nil {
-			return nil, fmt.Errorf("federation issue count: %w", err)
-		}
-		feed.recordIssues(issueCount)
+	// The count only sizes the page windows, so it stops one past the gap:
+	// any larger count picks the same windows. Spokes move their cursor past
+	// every empty poll, so the gap is what the hub wrote since the last one.
+	var issueCount int64
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM (SELECT 1 FROM issues WHERE project_id=$1 LIMIT $2) owned`, project.ID, maxID-afterID+1).Scan(&issueCount); err != nil {
+		return nil, fmt.Errorf("federation issue count: %w", err)
 	}
 	width := max(int64(limit), issueCount)
 	// Both forms select the same events. Looking up each event's issue costs
@@ -69,7 +51,7 @@ func ReadFederationEventPage(ctx context.Context, tx *sql.Tx, project Project, i
  ) candidates)`
 	events := []Event{}
 	// Nothing in this snapshot is newer than maxID.
-	for pos, span := start, width; len(events) < limit && pos < maxID; {
+	for pos, span := afterID, width; len(events) < limit && pos < maxID; {
 		end := pos + min(span, math.MaxInt64-pos)
 		owned := ownedByIssue
 		if min(end, maxID)-pos < issueCount {
@@ -94,21 +76,5 @@ func ReadFederationEventPage(ctx context.Context, tx *sql.Tx, project Project, i
 			pos, span = candidate[0].ID-1, width
 		}
 	}
-	if len(events) == 0 {
-		feed.recordQuiet(afterID, maxID)
-	} else {
-		feed.recordEvents()
-	}
 	return events, nil
-}
-
-// federationFeedSQL returns the backend's expression for an issue.moved
-// event's source project UID and the index hints that keep the feed's
-// presence checks on index seeks.
-func federationFeedSQL(postgres bool) (movedFrom, projectIndex, movedIndex string) {
-	if postgres {
-		return `e.payload::jsonb->>'from_project_uid'`, "", ""
-	}
-	// ANALYZE can otherwise favor an ID walk through unrelated history.
-	return `json_extract(e.payload,'$.from_project_uid')`, " INDEXED BY idx_events_project", " INDEXED BY idx_events_moved_from_id"
 }

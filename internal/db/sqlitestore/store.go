@@ -55,7 +55,6 @@ type Store struct {
 	federationIngestPrepared     func()
 	relayHistoryFullScanObserver func()
 	relayCheckpointCapacityBytes int64
-	federationFeed               *db.FederationFeedCache
 	relayHistoryCache            *relayHistoryValidationCache
 }
 
@@ -119,7 +118,7 @@ func Open(ctx context.Context, path string, opts ...db.OpenOption) (*Store, erro
 		_ = sdb.Close()
 		return nil, fmt.Errorf("configure %s: %w", path, err)
 	}
-	d := &Store{DB: sdb, path: path, idempotencyLocks: newIdempotencyLockSet(), relayHistoryCache: newRelayHistoryValidationCache(), relayCheckpointCapacityBytes: cfg.RelayCheckpointCapacity, federationFeed: &db.FederationFeedCache{}}
+	d := &Store{DB: sdb, path: path, idempotencyLocks: newIdempotencyLockSet(), relayHistoryCache: newRelayHistoryValidationCache(), relayCheckpointCapacityBytes: cfg.RelayCheckpointCapacity}
 	d.readQ = sdb
 	if err := d.bootstrap(ctx); err != nil {
 		_ = sdb.Close()
@@ -325,7 +324,7 @@ func openReadOnly(ctx context.Context, path string, busyTimeout time.Duration) (
 		_ = sdb.Close()
 		return nil, fmt.Errorf("ping read-only %s: %w", path, err)
 	}
-	s := &Store{DB: sdb, path: path, readOnly: true, idempotencyLocks: newIdempotencyLockSet(), relayHistoryCache: newRelayHistoryValidationCache(), federationFeed: &db.FederationFeedCache{}}
+	s := &Store{DB: sdb, path: path, readOnly: true, idempotencyLocks: newIdempotencyLockSet(), relayHistoryCache: newRelayHistoryValidationCache()}
 	s.readQ = sdb
 	return s, nil
 }

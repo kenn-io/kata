@@ -7,7 +7,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/dbtest"
-	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kit/growthtest"
 )
 
@@ -19,13 +18,6 @@ func TestQuietFederationPollGrowth(t *testing.T) {
 func TestResumedFederationPollGrowth(t *testing.T) {
 	open, measure := sqliteQuietPollGrowth(t)
 	dbtest.RunResumedFederationPollGrowth(t, open, measure, 1)
-}
-
-func TestRememberedFederationPollCost(t *testing.T) {
-	open, measure := sqliteQuietPollGrowth(t)
-	dbtest.RunRememberedFederationPollCost(t, open, func(store db.Storage) {
-		sqlitestore.ForgetFederationFeedForTest(store.(*sqlitestore.Store))
-	}, measure, 1)
 }
 
 // sqliteQuietPollGrowth opens stores whose page reads can be counted and

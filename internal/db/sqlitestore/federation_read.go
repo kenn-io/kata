@@ -12,7 +12,6 @@ import (
 // ReadFederation reads a consistent federation projection and cursor.
 func (d *Store) ReadFederation(ctx context.Context, in db.FederationReadParams) (db.FederationReadResult, error) {
 	var out db.FederationReadResult
-	var feed *db.FederationFeedRead
 	run := func(tx *sql.Tx) error {
 		project, err := scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id=$1 AND deleted_at IS NULL`, in.ProjectID))
 		if err != nil {
@@ -21,10 +20,6 @@ func (d *Store) ReadFederation(ctx context.Context, in db.FederationReadParams) 
 		binding, err := scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id=$1`, in.ProjectID))
 		if err != nil {
 			return err
-		}
-		feed = nil
-		if !in.Metadata {
-			feed = d.federationFeed.Begin(project, binding, false)
 		}
 		refresh := func() (db.FederationBinding, error) {
 			event, err := d.insertFederationBaselineEventsTx(ctx, tx, project, "federation")
@@ -38,7 +33,7 @@ func (d *Store) ReadFederation(ctx context.Context, in db.FederationReadParams) 
 			return scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id=$1`, project.ID))
 		}
 		readPage := func(afterID int64, limit int) ([]db.Event, error) {
-			return db.ReadFederationEventPage(ctx, tx, project, in.IssueUID, afterID, limit, false, feed, func(where string, args ...any) ([]db.Event, error) {
+			return db.ReadFederationEventPage(ctx, tx, project, in.IssueUID, afterID, limit, false, func(where string, args ...any) ([]db.Event, error) {
 				return (sqlquery.Query{SQL: strings.TrimSuffix(eventSelectByID, " WHERE e.id = ?") + where, Args: args}).All(ctx, tx, func(rows *sql.Rows) (db.Event, error) {
 					return scanEvent(rows)
 				})
@@ -47,7 +42,7 @@ func (d *Store) ReadFederation(ctx context.Context, in db.FederationReadParams) 
 		readEvents := func(afterID int64, limit int) ([]db.Event, error) {
 			return db.ReadFederationMoveHistory(ctx, tx, afterID, limit, readPage)
 		}
-		out, err = db.ReadFederationTransaction(ctx, tx, in, project, binding, feed, refresh, readEvents)
+		out, err = db.ReadFederationTransaction(ctx, tx, in, project, binding, refresh, readEvents)
 		return err
 	}
 	err := d.RetryTransient(ctx, func() error {
@@ -61,8 +56,5 @@ func (d *Store) ReadFederation(ctx context.Context, in db.FederationReadParams) 
 		}
 		return tx.Commit()
 	})
-	if err == nil {
-		feed.Commit()
-	}
 	return out, err
 }

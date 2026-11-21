@@ -98,23 +98,33 @@ func BenchmarkFederationPoll(b *testing.B, store db.Storage) {
 		busy.Wait()
 	})
 
-	run := func(name string, afterID int64, wantEvents int) {
+	// follow moves the cursor where each poll says, as a spoke does; the
+	// other polls repeat the same cursor to measure one fixed page.
+	run := func(name string, afterID int64, wantEvents int, follow bool) {
 		b.Run(name, func(b *testing.B) {
 			var counter sqlcount.Counter
 			pollCtx := counter.Context(b.Context())
-			if got := len(events(b, poll(b, pollCtx, afterID)).Events); got != wantEvents {
+			first := events(b, poll(b, pollCtx, afterID))
+			if got := len(first.Events); got != wantEvents {
 				b.Fatalf("poll after %d returned %d events, want %d", afterID, got, wantEvents)
+			}
+			cursor := afterID
+			if follow {
+				cursor = first.NextAfterID
 			}
 			counter.Reset()
 			for b.Loop() {
-				poll(b, pollCtx, afterID)
+				recorder := poll(b, pollCtx, cursor)
+				if follow {
+					cursor = events(b, recorder).NextAfterID
+				}
 			}
 			b.ReportMetric(float64(counter.Count())/float64(b.N), "stmts/op")
 		})
 	}
-	run("empty", latest.ID, 0)
-	run("one_event", latest.ID-1, 1)
-	run("first_page", 0, 1000)
+	run("empty", latest.ID, 0, true)
+	run("one_event", latest.ID-1, 1, false)
+	run("first_page", 0, 1000, false)
 }
 
 type federationPollHub struct {

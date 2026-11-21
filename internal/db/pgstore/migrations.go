@@ -83,6 +83,9 @@ var eventIssueUIDIDIndexMigrationSQL string
 //go:embed migrations/000052_kit_vector_catalog.up.sql
 var kitVectorCatalogMigrationSQL string
 
+//go:embed migrations/000053_event_project_moves_index.up.sql
+var eventProjectMovesIndexMigrationSQL string
+
 // Migration is one immutable Postgres schema transition. Assets form an exact
 // version chain; callers applying them externally must stamp ToVersion only
 // after SQL succeeds in the same transaction.
@@ -146,6 +149,7 @@ var migrationAssets = []Migration{
 	{FromVersion: 49, ToVersion: 50, Name: "000050_mcp_event_subscriptions.up.sql", SQL: mcpEventSubscriptionsMigrationSQL},
 	{FromVersion: 50, ToVersion: 51, Name: "000051_event_issue_uid_id_index.up.sql", SQL: eventIssueUIDIDIndexMigrationSQL},
 	{FromVersion: 51, ToVersion: 52, Name: "000052_kit_vector_catalog.up.sql", SQL: kitVectorCatalogMigrationSQL},
+	{FromVersion: 52, ToVersion: 53, Name: "000053_event_project_moves_index.up.sql", SQL: eventProjectMovesIndexMigrationSQL},
 }
 
 // Migrations returns forward migrations from previously released Postgres
