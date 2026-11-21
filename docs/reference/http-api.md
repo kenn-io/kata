@@ -838,7 +838,9 @@ endpoints published in OpenAPI:
 - `GET /api/v1/ui/issue-reference?ref=<ref>` resolves a qualified issue
   reference to its issue and project UIDs. Pass `project` as an exact project
   name or UID for a bare reference, or `project_id` as a numeric project ID.
-  A `project` matching different projects by name and UID returns 404.
+  A `project` matching different projects by name and UID returns 404. With
+  `project`, the response also contains `scope_project_uid`. A qualified
+  reference can select an issue from a different project than that scope.
 - `GET /api/v1/ui/launch-target?issue_uid=<uid>` validates one active issue and
   returns a safe absolute route into the standalone browser application:
 

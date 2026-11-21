@@ -108,21 +108,40 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 	}, func(ctx context.Context, in *api.UIIssueReferenceRequest) (*api.UIIssueReferenceResponse, error) {
 		projectID := in.ProjectID
 		var err error
+		var scopeUID string
 		if projectID == 0 {
 			projectID, err = uiReferenceProject(ctx, cfg.DB, in.Project, in.Ref)
 			if err != nil {
-				return nil, err
+				return nil, hideMissingProject(ctx, err)
 			}
 		}
 		ctx, err = authorizeHostProjectScope(ctx, []int64{projectID}, nil, false)
 		if err != nil {
 			return nil, err
 		}
+		if in.ProjectID == 0 && in.Project != "" {
+			project, err := activeProjectByID(ctx, cfg.DB, projectID)
+			if err != nil {
+				return nil, hideMissingProject(ctx, err)
+			}
+			scopeUID = project.UID
+			if parsed, parseErr := shortid.Parse(in.Ref); parseErr == nil && parsed.Project != "" {
+				projectID, err = uiReferenceProject(ctx, cfg.DB, "", in.Ref)
+				if err != nil {
+					return nil, hideMissingProject(ctx, err)
+				}
+				ctx, err = authorizeHostProjectScope(ctx, []int64{projectID}, nil, false)
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
 		issue, err := activeIssueByRef(ctx, cfg.DB, projectID, in.Ref, db.IncludeDeletedNo)
 		if err != nil {
-			return nil, err
+			return nil, hideMissingProject(ctx, err)
 		}
 		out := &api.UIIssueReferenceResponse{}
+		out.Body.ScopeProjectUID = scopeUID
 		out.Body.Issue.UID = issue.UID
 		out.Body.Issue.ProjectUID = issue.ProjectUID
 		return out, nil

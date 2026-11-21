@@ -26,7 +26,6 @@
     createRecurrence as createRecurrenceRequest,
     deleteRecurrence as deleteRecurrenceRequest,
     editIssue as editIssueRequest,
-    health,
     initProject,
     listTokens,
     moveIssue as moveIssueRequest,
@@ -1301,28 +1300,6 @@
       const daemonID = activeDaemonID
       mode = 'loading'
       try {
-        const healthResult = await health()
-        if (
-          destroyed ||
-          generation !== resolutionGeneration ||
-          route !== pending ||
-          daemonID !== activeDaemonID
-        )
-          return false
-        if (healthResult.status === 401) {
-          snapshots.markAuthenticationRequired()
-          requireAuthentication()
-          return false
-        }
-        if (healthResult.status !== 200) {
-          snapshots.markFailure()
-          return false
-        }
-        if (!supportsIssueLinks(healthResult.data.api_schema_version)) {
-          linkUpgradeRequired = true
-          snapshots.markFailure('Upgrade the selected daemon to open short issue links.')
-          return false
-        }
         const result = await resolveUIIssueReference({
           ref: link.issue,
           ...(link.scope ? { project: link.scope } : {}),
@@ -1337,6 +1314,11 @@
         if (result.status === 401) {
           snapshots.markAuthenticationRequired()
           requireAuthentication()
+          return false
+        }
+        if (result.status === 422) {
+          linkUpgradeRequired = true
+          snapshots.markFailure('Upgrade the selected daemon to open short issue links.')
           return false
         }
         if (result.status === 404) {
@@ -1355,7 +1337,7 @@
         }
         route = {
           ...pending,
-          projectUID: result.data.issue.project_uid,
+          projectUID: result.data.scope_project_uid ?? result.data.issue.project_uid,
           issueUID: result.data.issue.uid,
         }
       } catch {
@@ -1389,14 +1371,6 @@
       return accepted
     }
     return false
-  }
-
-  function supportsIssueLinks(version: string | undefined): boolean {
-    const parts = version?.trim().match(/^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/)
-    if (!parts) return false
-    const major = Number(parts[1])
-    const minor = Number(parts[2])
-    return major > 0 || (major === 0 && minor >= 63)
   }
 
   async function refreshCredentials(): Promise<void> {

@@ -7265,6 +7265,8 @@ components:
       properties:
         issue:
           $ref: "#/components/schemas/IssueStruct"
+        scope_project_uid:
+          type: string
       required:
         - issue
       type: object

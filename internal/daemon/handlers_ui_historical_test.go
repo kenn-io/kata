@@ -61,6 +61,16 @@ func TestUIIssueReferenceProjectSelector(t *testing.T) {
 			}
 		})
 	}
+	query := url.Values{"project": {project.Name}, "ref": {collision.Name + "#" + collisionIssue.ShortID}}
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/issue-reference?"+query.Encode(), nil)
+	require.NoError(t, err)
+	response, err := server.Client().Do(request)
+	require.NoError(t, err)
+	defer func() { _ = response.Body.Close() }()
+	body, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, response.StatusCode, string(body))
+	require.JSONEq(t, fmt.Sprintf(`{"scope_project_uid":%q,"issue":{"uid":%q,"project_uid":%q}}`, project.UID, collisionIssue.UID, collision.UID), string(body))
 }
 
 func (a historicalUIReferenceHostAccess) Authorize(_ context.Context, request daemon.HostAccessRequest) (daemon.HostAccessDecision, error) {
@@ -68,6 +78,46 @@ func (a historicalUIReferenceHostAccess) Authorize(_ context.Context, request da
 		return daemon.HostAccessDecision{}, daemon.ErrHostAccessDenied
 	}
 	return daemon.HostAccessDecision{}, nil
+}
+
+func TestUIIssueReferenceHidesHostDeniedProjectName(t *testing.T) {
+	dbh := openTestDB(t)
+	project, err := dbh.db.CreateProject(t.Context(), "restricted")
+	require.NoError(t, err)
+	allowed, err := dbh.db.CreateProject(t.Context(), "allowed")
+	require.NoError(t, err)
+	issue, _, err := dbh.db.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: allowed.ID, Title: "Allowed", Author: "worker"})
+	require.NoError(t, err)
+	server := daemon.NewServer(daemon.ServerConfig{DB: dbh.db, StartedAt: dbh.now, HostAccess: historicalUIReferenceHostAccess{deniedProjectID: project.ID}})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := daemon.WithPrincipal(r.Context(), daemon.Principal{Kind: daemon.PrincipalHost, Subject: "host-user", Actor: "worker"})
+		server.Handler().ServeHTTP(w, r.WithContext(ctx))
+	}))
+	t.Cleanup(ts.Close)
+	var bodies []string
+	for _, name := range []string{"restricted", "missing"} {
+		query := url.Values{"project": {name}, "ref": {"abc4"}}
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+"/api/v1/ui/issue-reference?"+query.Encode(), nil)
+		require.NoError(t, err)
+		resp, err := ts.Client().Do(req)
+		require.NoError(t, err)
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		require.Equal(t, http.StatusNotFound, resp.StatusCode)
+		bodies = append(bodies, string(body))
+	}
+	require.JSONEq(t, bodies[0], bodies[1])
+	query := url.Values{"project": {allowed.Name}, "ref": {issue.ShortID}}
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+"/api/v1/ui/issue-reference?"+query.Encode(), nil)
+	require.NoError(t, err)
+	resp, err := ts.Client().Do(req)
+	require.NoError(t, err)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	require.Contains(t, string(body), issue.UID)
 }
 
 func TestUIIssueReferenceHistoricalCurrentProject(t *testing.T) {

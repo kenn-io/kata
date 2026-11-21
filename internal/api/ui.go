@@ -153,7 +153,8 @@ type UIIssueReferenceRequest struct {
 // UIIssueReferenceResponse contains only the canonical route identity.
 type UIIssueReferenceResponse struct {
 	Body struct {
-		Issue struct {
+		ScopeProjectUID string `json:"scope_project_uid,omitempty"`
+		Issue           struct {
 			UID        string `json:"uid"`
 			ProjectUID string `json:"project_uid"`
 		} `json:"issue"`

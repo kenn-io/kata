@@ -44,6 +44,22 @@ test('qualified short issue links survive reload', async ({ page, kata }) => {
   await expect(page.getByRole('region', { name: 'Reachable task graph' })).toBeVisible()
 })
 
+test('qualified short link keeps a different project filter', async ({ page, kata }) => {
+  const credentials = await kata.launch(page, '/kata?view=all-open')
+  const issue = await kata.seedIssue(page, credentials, { title: 'Other project detail' })
+  const url = `${kata.origin}/kata?scope=example-inbox&issue=example-project%23${issue.short_id}`
+  await page.goto(url)
+  await expect(page.getByRole('heading', { name: 'example-inbox', exact: true })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Kata issue detail' })).toContainText(
+    'Other project detail',
+  )
+  await page.reload()
+  await expect(page).toHaveURL(url)
+  await expect(page.getByRole('region', { name: 'Kata issue detail' })).toContainText(
+    'Other project detail',
+  )
+})
+
 test('issue selection preserves the active Forge project scope', async ({ page, kata }) => {
   const credentials = await kata.launch(page, '/kata?view=all-open')
   const issue = await kata.seedIssue(page, credentials, { title: 'Scoped route task' })
