@@ -1324,7 +1324,7 @@
         }
         route = {
           ...pending,
-          projectUID: result.data.scope_project_uid ?? result.data.issue.project_uid,
+          projectUID: result.data.scope_project_uid,
           issueUID: result.data.issue.uid,
         }
       } catch {

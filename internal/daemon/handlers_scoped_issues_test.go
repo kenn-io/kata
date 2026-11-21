@@ -52,7 +52,11 @@ func TestUIIssueReferenceHidesRestrictedProjectName(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			var bodies []string
 			for _, project := range []string{"restricted", "missing"} {
-				query := url.Values{"project": {project}, "ref": {"abc4"}}
+				ref := "abc4"
+				if project == "restricted" {
+					ref = hidden.ShortID
+				}
+				query := url.Values{"project": {project}, "ref": {ref}}
 				resp, body := envDoRaw(t, tc.env, http.MethodGet, "/api/v1/ui/issue-reference?"+query.Encode(), nil, tc.headers)
 				require.Equal(t, http.StatusNotFound, resp.StatusCode, string(body))
 				bodies = append(bodies, string(body))
