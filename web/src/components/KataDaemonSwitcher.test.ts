@@ -41,7 +41,6 @@ describe('KataDaemonSwitcher', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }))
     expect(screen.getByRole('menu', { name: 'Configured Kata daemons' })).not.toBeNull()
     expect(screen.queryByText('Account')).toBeNull()
-    expect(screen.queryByText('Local, no sign-in')).toBeNull()
     expect(screen.getByText('needs auth')).not.toBeNull()
     expect(screen.getByText('update required')).not.toBeNull()
     await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))

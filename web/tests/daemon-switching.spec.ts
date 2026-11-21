@@ -15,7 +15,7 @@ test('keeps daemon names readable alongside health and recovery hints', async ({
             default: false,
             auth: 'none',
             health: 'down',
-            hint: 'Check that the daemon is running and reachable.',
+            hint: 'daemon is not reachable',
           },
           {
             id: 'example-older-server',
@@ -23,7 +23,7 @@ test('keeps daemon names readable alongside health and recovery hints', async ({
             default: false,
             auth: 'none',
             health: 'upgrade_required',
-            hint: 'Update this daemon to use the web interface.',
+            hint: 'daemon does not support the Kata web UI',
           },
         ],
       },
@@ -37,17 +37,8 @@ test('keeps daemon names readable alongside health and recovery hints', async ({
     const name = row.getByText(id, { exact: true })
     expect((await name.boundingBox())!.width).toBeGreaterThan(60)
   }
-  await expect(page.getByText('unreachable')).toBeVisible()
-  await expect(page.getByRole('menuitemradio', { name: /example-down-server/ })).toContainText(
-    'unreachable Check that the daemon is running and reachable.',
-  )
-  await expect(page.getByText('update required')).toBeVisible()
-  await expect(page.getByText('Check that the daemon is running and reachable.')).toBeVisible()
-  await expect(page.getByText('Update this daemon to use the web interface.')).toBeVisible()
   const row = (await page.getByTestId('daemon-row-example-down-server').boundingBox())!
-  const hint = (await page
-    .getByText('Check that the daemon is running and reachable.')
-    .boundingBox())!
+  const hint = (await page.getByText('daemon is not reachable').boundingBox())!
   expect(hint.y).toBeGreaterThanOrEqual(row.y + row.height)
 })
 

@@ -1368,7 +1368,7 @@ describe('App', () => {
     await tick()
     expect(screen.getByRole('form', { name: 'Log in' })).not.toBeNull()
     expect(screen.queryByRole('alert')).toBeNull()
-    expect(screen.queryByText('Configured daemons are unavailable')).toBeNull()
+    expect(screen.queryByText('Check that Kata is running, then try again.')).toBeNull()
   })
 
   it('keeps roster recovery when a delayed 401 belongs to superseded credentials', async () => {

@@ -158,19 +158,19 @@ describe('Sidebar', () => {
 
   it('opens Settings from the footer and clears the current view highlight', async () => {
     const onOpenSettings = vi.fn()
-    renderSidebar({ settingsActive: true, onOpenSettings })
+    const view = renderSidebar({
+      settingsActive: true,
+      onOpenSettings,
+      credentialAuditAvailable: true,
+    })
+    const footer = screen.getByRole('navigation', { name: 'Credentials and Settings' })
+    expect(within(footer).getByRole('button', { name: 'Settings' })).not.toBeNull()
+    expect(within(footer).getByRole('button', { name: 'Credentials' })).not.toBeNull()
     expect(screen.getByRole('button', { name: 'Today 0' }).classList.contains('active')).toBe(false)
     await fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
     expect(onOpenSettings).toHaveBeenCalledOnce()
-  })
-
-  it('names both footer destinations in its navigation landmark', () => {
-    renderSidebar({ credentialAuditAvailable: true })
-    const footer = screen.getByRole('navigation', {
-      name: /settings.*credentials|credentials.*settings/i,
-    })
-    expect(within(footer).getByRole('button', { name: 'Settings' })).not.toBeNull()
-    expect(within(footer).getByRole('button', { name: 'Credentials' })).not.toBeNull()
+    await view.rerender({ credentialAuditAvailable: false })
+    expect(screen.getByRole('navigation', { name: 'Settings' })).not.toBeNull()
   })
 
   it('keeps area collapse state while mounted and resets it after remount', async () => {

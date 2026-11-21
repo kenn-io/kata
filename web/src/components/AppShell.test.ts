@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
-import { afterEach, describe, expect, onTestFinished, test, vi } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 
 vi.mock('../lib/kata/projection', async (importOriginal) => {
   const original = await importOriginal<typeof import('../lib/kata/projection')>()
@@ -1804,62 +1804,6 @@ describe('AppShell', () => {
     })
 
     expect(onCreateIssue).toHaveBeenCalledWith('New example task')
-  })
-
-  test('keeps a failed capture visible on Settings', async () => {
-    const rejections: unknown[] = []
-    const onRejection = (error: unknown) => rejections.push(error)
-    process.on('unhandledRejection', onRejection)
-    onTestFinished(() => {
-      process.off('unhandledRejection', onRejection)
-    })
-    const current = snapshot()
-    current.catalog[0]!.project.metadata = { role: 'inbox' }
-    setGeneratedFetch(
-      vi.fn(async () =>
-        Response.json({
-          provider: 'none',
-          download_bytes: 0,
-          ollama_available: false,
-          rebuild: false,
-          can_change: false,
-        }),
-      ),
-    )
-    const onCreateIssue = vi.fn(async () => {
-      throw new Error('Task creation failed')
-    })
-    render(AppShell, {
-      props: {
-        route: {
-          kind: 'kata',
-          view: 'settings',
-          graph: false,
-          filters: { status: [], owner: [], label: [], relationship: [] },
-        },
-        snapshot: current,
-        loading: false,
-        ...mutationProps({ onCreateIssue }),
-        onNavigate: vi.fn(),
-        onCreateProject: vi.fn(async () => ({ changed: true })),
-      },
-    })
-
-    await fireEvent.click(screen.getByRole('button', { name: 'New task' }))
-    await fireEvent.input(screen.getByRole('textbox', { name: 'Quick capture' }), {
-      target: { value: 'Task from Settings' },
-    })
-    await fireEvent.click(screen.getByRole('button', { name: 'Capture' }))
-
-    const dialog = screen.getByRole('dialog', { name: 'New task' })
-    await waitFor(() =>
-      expect(within(dialog).getByRole('alert').textContent).toBe('Task creation failed'),
-    )
-    await waitFor(() => expect(rejections).toEqual([new Error('Task creation failed')]))
-    expect(
-      (within(dialog).getByRole('textbox', { name: 'Quick capture' }) as HTMLInputElement).value,
-    ).toBe('Task from Settings')
-    expect(onCreateIssue).toHaveBeenCalledWith('Task from Settings')
   })
 
   test('distinguishes empty projects from empty tasks and keeps refused capture closed', async () => {

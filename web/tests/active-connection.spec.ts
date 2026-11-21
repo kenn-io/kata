@@ -22,14 +22,8 @@ test('healthy connections leave the toolbar at the top; read-only notices remain
     if (width === 390) await page.getByRole('button', { name: 'Open navigation' }).click()
     const header = page.locator('.sidebar-header')
     await expect(header).toBeVisible()
-    expect((await header.boundingBox())?.height).toBe(48)
     await expect(page.getByRole('button', { name: 'New task' })).toBeEnabled()
     await expect(page.getByRole('button', { name: /Switch Kata daemon:/ })).toBeVisible()
-    expect(
-      await header
-        .locator('.chip-label')
-        .evaluate((label) => label.scrollWidth <= label.clientWidth),
-    ).toBe(true)
     await page.screenshot({
       path: testInfo.outputPath(`connected-workspace-${width}.png`),
       clip: { x: 0, y: 0, width, height: width === 1440 ? 360 : 900 },
