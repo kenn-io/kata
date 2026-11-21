@@ -73,6 +73,20 @@
     { name: 'logbook', label: 'Logbook', icon: BookCheckIcon },
   ]
 
+  // Project marks take the prototype's soft hues from kit-ui's theme, so
+  // they follow light and dark. Red and amber are left out: they mean
+  // overdue, high priority, and warnings.
+  const projectMarkPalette = [
+    'var(--accent-green)',
+    'var(--accent-purple)',
+    'var(--accent-teal)',
+    'var(--status-waiting)',
+    'var(--text-muted)',
+    'color-mix(in srgb, var(--accent-blue) 50%, var(--accent-purple))',
+    'var(--accent-blue)',
+    'color-mix(in srgb, var(--accent-teal) 55%, var(--text-primary))',
+  ]
+
   let creatingProject = $derived(creationIntent !== null)
   $effect(() => {
     if (creatingProject) queueMicrotask(() => createInput?.focus())
@@ -174,6 +188,7 @@
         {@const count = viewCount(view.name)}
         <button
           type="button"
+          class:group-start={view.name === 'all'}
           class:active={!credentialAuditActive &&
             !settingsActive &&
             currentView.name === view.name &&
@@ -206,7 +221,10 @@
             class:active={isProjectActive(project.uid)}
             onclick={() => void onOpenProject(project.uid)}
           >
-            <span class="project-mark" style:background={hashColor(project.name)}></span>
+            <span
+              class="project-mark"
+              style:background={hashColor(project.name, projectMarkPalette)}
+            ></span>
             <span class="project-name">{project.name}</span>
             <span class="project-count count">{project.open_count}</span>
           </button>
@@ -282,7 +300,12 @@
   .kata-nav {
     display: grid;
     gap: var(--space-1);
-    padding: 12px 12px var(--space-4);
+    padding: var(--space-2) 8px var(--space-2);
+  }
+
+  /* All open and Logbook start a second group of views. */
+  .kata-nav button.group-start {
+    margin-top: calc(var(--space-4) - var(--space-1));
   }
 
   .sidebar-header {
@@ -291,12 +314,12 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 16px;
+    padding: 0 8px 0 16px;
   }
 
   .sidebar-footer {
     margin-top: auto;
-    padding-bottom: 12px;
+    padding-bottom: var(--space-4);
   }
 
   .kata-nav button,
@@ -309,10 +332,10 @@
     background: transparent;
     color: var(--text-secondary);
     display: grid;
-    grid-template-columns: 18px minmax(0, 1fr) auto;
+    grid-template-columns: 16px minmax(0, 1fr) auto;
     align-items: center;
     gap: var(--space-4);
-    padding: 0 10px;
+    padding: 0 8px;
     text-align: left;
     font: inherit;
     font-size: var(--font-size-md);
@@ -344,10 +367,6 @@
     color: var(--text-muted);
   }
 
-  .kata-nav button.active .nav-icon {
-    color: var(--accent-blue);
-  }
-
   .project-select-button.active .project-count,
   .kata-nav button.active .nav-count {
     color: var(--text-primary);
@@ -374,16 +393,15 @@
   }
 
   .project-create {
-    padding: 0 12px 12px;
+    padding: 0 8px 12px;
   }
 
   .project-select-button {
-    grid-template-columns: 12px minmax(0, 1fr) auto;
     min-height: 26px;
-    padding-left: 16px;
   }
 
   .project-mark {
+    justify-self: center;
     width: 12px;
     height: 12px;
     border-radius: 3px;
@@ -391,14 +409,14 @@
 
   .project-create-form input {
     width: 100%;
-    min-height: 30px;
+    min-height: var(--nav-subitem-h);
     border: 1px solid var(--border-default);
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     background: var(--bg-primary);
     color: var(--text-primary);
     font: inherit;
     font-size: var(--font-size-sm);
-    padding: 5px 8px;
+    padding: 3px 8px;
   }
 
   .project-create-form input:focus {

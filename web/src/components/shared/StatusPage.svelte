@@ -78,4 +78,9 @@
     gap: var(--space-5);
     width: 100%;
   }
+
+  /* kit-ui's small-button inset, so a lone action is no wider than the prototype's. */
+  .status-page-actions :global(.kit-button) {
+    padding-inline: 12px;
+  }
 </style>

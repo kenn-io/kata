@@ -678,7 +678,7 @@
 {/snippet}
 
 {#snippet noProjects()}
-  <EmptyState title="No projects yet">
+  <EmptyState title="No projects yet" class="no-projects">
     {#if projectCreationBlockedReason}
       <Tooltip text={projectCreationBlockedReason}>
         {@render createProjectButton()}
@@ -687,7 +687,7 @@
     {:else}
       {@render createProjectButton()}
     {/if}
-    <p>Or run <code>kata init</code> in a repository.</p>
+    <p class="no-projects-hint">Or run <code>kata init</code> in a repository.</p>
   </EmptyState>
 {/snippet}
 
@@ -1038,6 +1038,18 @@
     overflow-wrap: anywhere;
   }
 
+  /* The kata init line sits under New project, not beside it. */
+  :global(.no-projects .kit-empty-state__actions) {
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-2);
+  }
+  .no-projects-hint {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+  }
+
   .new-task-button {
     display: inline-grid;
     place-items: center;
@@ -1096,8 +1108,16 @@
     display: flex;
   }
 
+  /* The slim bar and the drawer's header take the sidebar header's 48px. */
   .mobile-navigation-trigger {
     display: none;
+    --header-height: var(--layout-header-h);
+  }
+
+  :global(.kit-detail-drawer:has(.kata-sidebar) > .kit-detail-drawer__header) {
+    box-sizing: border-box;
+    height: var(--layout-header-h);
+    padding-block: 0;
   }
 
   .kata-main {

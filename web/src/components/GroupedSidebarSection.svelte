@@ -37,7 +37,7 @@
   .sidebar-list-group {
     display: grid;
     gap: var(--space-1);
-    padding: var(--space-2) 12px var(--space-4);
+    padding: var(--space-2) 8px var(--space-4);
   }
 
   .sidebar-group-header {
@@ -50,16 +50,12 @@
     border: 0;
     border-radius: var(--radius-md);
     background: transparent;
-    color: var(--text-muted);
+    color: var(--text-primary);
     cursor: pointer;
     font-family: inherit;
     font-size: var(--font-size-xs);
-    font-weight: var(--font-weight-medium);
+    font-weight: var(--font-weight-semibold);
     text-align: left;
-  }
-
-  .sidebar-group-header:hover {
-    color: var(--text-primary);
   }
 
   .sidebar-group-header__chevron {
@@ -91,7 +87,6 @@
 
   .sidebar-group-header__count {
     flex-shrink: 0;
-    color: var(--text-muted);
     font-size: var(--font-size-xs);
     font-variant-numeric: tabular-nums;
   }

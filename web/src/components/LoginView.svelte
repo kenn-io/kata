@@ -64,13 +64,29 @@
     font-weight: var(--font-weight-semibold);
   }
 
+  /* The field takes kit-ui's control height, the same as the Log in button. */
   input {
+    box-sizing: border-box;
     width: 100%;
+    height: var(--kit-control-height, 28px);
+    padding-block: 0;
+  }
+
+  input[aria-invalid='true'] {
+    border-color: var(--accent-red);
   }
 
   form :global(.login-submit) {
     width: 100%;
     margin-top: var(--space-2);
+  }
+
+  /* Until a token is typed, Log in stays the page's blue action, dimmed. */
+  form :global(.kit-button.kit-button--solid.login-submit:disabled) {
+    background: var(--accent-blue);
+    border-color: var(--accent-blue);
+    color: var(--bg-surface);
+    opacity: var(--opacity-disabled);
   }
 
   [role='alert'] {

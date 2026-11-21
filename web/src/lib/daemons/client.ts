@@ -16,7 +16,7 @@ export interface WebDaemonInfo {
 
 const daemonHeader = 'X-Kata-Web-Daemon'
 const daemonProxyPrefix = '/api/v1/ui/proxy'
-const rosterUnavailable = 'Check that Kata is running, then try again.'
+export const rosterUnavailable = 'Check that Kata is running, then try again.'
 
 export function createDaemonFetch(
   readDaemon: () => string | undefined,

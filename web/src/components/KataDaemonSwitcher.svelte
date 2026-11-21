@@ -53,7 +53,7 @@
   <MenuTrigger ariaLabel={`Switch Kata daemon: ${displayId ?? 'default'}`}>
     {#snippet child({ attachment })}
       <button class="daemon-chip" data-testid="daemon-chip" {@attach attachment}>
-        <Avatar name={displayId ?? 'Kata'} size={24} shape="rounded" decorative />
+        <Avatar name={displayId ?? 'Kata'} size={16} shape="rounded" decorative />
         <span class="chip-label">{displayId ?? 'kata'}</span>
         {#if activeStatusLabel}<span
             class="kit-sr-only"
@@ -68,10 +68,12 @@
     {/snippet}
   </MenuTrigger>
   <MenuContent ariaLabel="Configured Kata daemons" class="daemon-menu">
-    <div class="account"><span>Account</span><strong>{account}</strong></div>
-    {#if credential}<div class="account">
-        <span>Credential</span><strong>{credential}</strong>
-      </div>{/if}
+    <dl class="account">
+      <dt>Account</dt>
+      <dd>{account}</dd>
+      {#if credential}<dt>Credential</dt>
+        <dd>{credential}</dd>{/if}
+    </dl>
     <MenuRadioGroup
       value={activeId ?? ''}
       onchange={(id) => {
@@ -86,7 +88,7 @@
           textValue={daemon.id}
         >
           <span class="daemon-row" data-testid={`daemon-row-${daemon.id}`}
-            ><Avatar name={daemon.id} size={24} shape="rounded" decorative /><span class="row-name"
+            ><Avatar name={daemon.id} size={16} shape="rounded" decorative /><span class="row-name"
               >{daemon.id}</span
             >{#if status(daemon)}<span class="row-status">{status(daemon)}</span>{/if}</span
           >
@@ -98,12 +100,19 @@
 </Menu>
 
 <style>
+  /* The negative margin keeps the tile on the header's 16px inset. */
   .daemon-chip {
     display: inline-flex;
     align-items: center;
     gap: 6px;
     min-width: 0;
-    border-radius: var(--radius-sm);
+    margin-left: -8px;
+    padding: 4px 8px;
+    border-radius: var(--radius-md);
+  }
+  .daemon-chip:hover,
+  .daemon-chip:global([aria-expanded='true']) {
+    background: var(--bg-surface-hover);
   }
   .chip-label,
   .row-name {
@@ -111,22 +120,50 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  :global(.daemon-menu) {
+  /* Outranks kit-ui's scoped width: max-content so the menu holds 280px. */
+  /* Its surface sits near the sidebar's; kit-ui derives the menu's hover
+     and selected fills from --bg-popover, so they follow. */
+  :global(.kit-menu__content.kit-popover-card.daemon-menu) {
+    --bg-popover: var(--bg-surface);
     width: min(280px, calc(100vw - 16px));
   }
+  /* The active server sits in a well darker than the menu, its check in
+     primary ink at the row's right end. Every server name is primary ink. */
+  :global(.daemon-menu .kit-menu__item.kit-menu__radio-item:not([aria-disabled='true'])) {
+    color: var(--text-primary);
+  }
+  :global(.daemon-menu .kit-menu__radio-item[aria-checked='true']) {
+    background: var(--bg-inset);
+  }
+  :global(.daemon-menu .kit-menu__radio-item) {
+    box-sizing: border-box;
+    height: 28px;
+    min-height: 28px;
+    padding-block: 0;
+    font-size: 14px;
+  }
+  :global(.daemon-menu .kit-menu__radio-content) {
+    flex: 1;
+  }
+  :global(.daemon-menu .kit-menu__radio-item .kit-menu__indicator) {
+    order: 1;
+    color: var(--text-primary);
+  }
   .account {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
+    display: grid;
+    grid-template-columns: 72px minmax(0, 1fr);
+    gap: var(--space-2) var(--space-4);
+    margin: 0 0 var(--space-2);
     padding: 8px;
     color: var(--text-muted);
     font-size: var(--font-size-xs);
   }
-  .account strong {
+  .account dd {
+    margin: 0;
     color: var(--text-secondary);
-    font-weight: normal;
   }
   .daemon-row {
+    flex: 1;
     display: flex;
     align-items: center;
     gap: 8px;

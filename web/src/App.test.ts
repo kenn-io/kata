@@ -1246,7 +1246,7 @@ describe('App', () => {
     render(App)
 
     expect((await screen.findByRole('alert')).textContent).toContain(
-      'Configured daemons are unavailable',
+      'Check that Kata is running, then try again.',
     )
     expect(screen.getByRole('button', { name: 'Try again' })).not.toBeNull()
     expect(snapshotReads).toBe(0)
@@ -1358,7 +1358,7 @@ describe('App', () => {
     render(App)
 
     expect((await screen.findByRole('alert')).textContent).toContain(
-      'Configured daemons are unavailable',
+      'Check that Kata is running, then try again.',
     )
     await fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
     await rosterRequested
@@ -1409,7 +1409,7 @@ describe('App', () => {
     )
 
     expect((await screen.findByRole('alert')).textContent).toContain(
-      'Configured daemons are unavailable',
+      'Check that Kata is running, then try again.',
     )
     expect(screen.getByRole('button', { name: 'Try again' })).not.toBeNull()
     expect(sessionStorage.getItem('kata.web.session.v1')).toContain('renewed-session')
@@ -1780,7 +1780,7 @@ describe('App', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Today' }))
 
     expect((await screen.findByRole('alert')).textContent).toContain(
-      'Configured daemons are unavailable',
+      'Check that Kata is running, then try again.',
     )
     expect(screen.getByRole('button', { name: 'Try again' })).not.toBeNull()
     expect(snapshotDaemons).toEqual(['example-remote', 'example-remote'])

@@ -48,7 +48,12 @@
     type UIReferencesResponseBody,
     type TokenOut,
   } from './lib/api/generated'
-  import { createDaemonFetch, fetchWebDaemons, type WebDaemonInfo } from './lib/daemons/client'
+  import {
+    createDaemonFetch,
+    fetchWebDaemons,
+    rosterUnavailable,
+    type WebDaemonInfo,
+  } from './lib/daemons/client'
   import { loadDaemonRoute, saveDaemonRoute } from './lib/daemons/state'
   import {
     AuthenticationRequiredError,
@@ -1197,7 +1202,7 @@
       references = undefined
       acceptedRoute = undefined
       mode = 'loading'
-      daemonError = 'Configured daemons are unavailable'
+      daemonError = rosterUnavailable
       return false
     } finally {
       if (daemonRosterAbort === abort) daemonRosterAbort = undefined
@@ -1439,7 +1444,12 @@
   {:else if mode === 'loading'}
     {#if daemonError}
       <StatusPage alert tone="danger" title="Can't reach a server" description={daemonError}>
-        <Button label="Try again" onclick={() => void startAuthority()} />
+        <Button
+          tone="info"
+          surface="solid"
+          label="Try again"
+          onclick={() => void startAuthority()}
+        />
         {#if daemonInfos.length > 0}
           <KataDaemonSwitcher
             daemons={daemonInfos}
@@ -1459,7 +1469,7 @@
         title="Kata couldn't load this workspace"
         description={authority.error}
       >
-        <Button label="Retry" onclick={() => void startAuthority()} />
+        <Button tone="info" surface="solid" label="Retry" onclick={() => void startAuthority()} />
         {#if daemonInfos.length > 0}
           <KataDaemonSwitcher
             daemons={daemonInfos}
