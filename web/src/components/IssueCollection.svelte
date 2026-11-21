@@ -36,6 +36,8 @@
 
   interface Props {
     headerActions?: Snippet | undefined
+    /** Search and filter controls, shown under the view title. */
+    toolbar?: Snippet | undefined
     currentView: KataCurrentView
     now: number
     resultsKey?: string
@@ -51,7 +53,7 @@
     revealRequest?: KataIssueRevealRequest | null
     onSelect: (issue: KataTaskSummary) => void
     onOpenGraph?: ((issue: KataTaskSummary) => void) | undefined
-    /** Replaces the bare `No tasks` line when the list has no rows. */
+    /** Replaces the list, its controls, and the toolbar under the title. */
     empty?: Snippet | undefined
   }
 
@@ -59,6 +61,7 @@
 
   let {
     headerActions,
+    toolbar,
     currentView,
     now,
     resultsKey = '',
@@ -898,183 +901,188 @@
 
 <section class="issue-list" aria-label="Issues">
   <div class="pane-header">
-    <PageHeader level={2} title={viewTitle(currentView)}>
-      {#snippet trailing()}
-        <span class="count"
-          >{totalFilteredIssues()} {totalFilteredIssues() === 1 ? 'task' : 'tasks'}</span
-        >
-      {/snippet}
-      {#snippet actions()}
-        {#if headerActions}{@render headerActions()}{/if}
-        <ColumnPicker
-          visibility={columnVisibility}
-          onchange={setColumnVisibility}
-          onShowAll={showAllColumns}
-        />
-        {#if hasExpandableVisibleRows || hasAnyExpandedRows}
-          <div class="tree-actions" aria-label="Task tree controls">
-            <button
-              class="tree-action"
-              type="button"
-              aria-label="Expand all tasks"
-              title="Expand all tasks"
-              disabled={allKnownExpandableRowsExpanded}
-              onclick={expandAllVisible}
-            >
-              <ListChevronsUpDownIcon size={13} strokeWidth={2} />
-              <span class="action-label">Expand all</span>
-            </button>
-            <button
-              class="tree-action"
-              type="button"
-              aria-label="Collapse all tasks"
-              title="Collapse all tasks"
-              disabled={!hasAnyExpandedRows}
-              onclick={collapseAllVisible}
-            >
-              <ListChevronsDownUpIcon size={13} strokeWidth={2} />
-              <span class="action-label">Collapse all</span>
-            </button>
-          </div>
-        {/if}
-      {/snippet}
-    </PageHeader>
+    {#if empty}
+      <PageHeader level={2} title={viewTitle(currentView)} />
+    {:else}
+      <PageHeader level={2} title={viewTitle(currentView)}>
+        {#snippet trailing()}
+          <span class="count"
+            >{totalFilteredIssues()} {totalFilteredIssues() === 1 ? 'task' : 'tasks'}</span
+          >
+        {/snippet}
+        {#snippet actions()}
+          {#if headerActions}{@render headerActions()}{/if}
+          <ColumnPicker
+            visibility={columnVisibility}
+            onchange={setColumnVisibility}
+            onShowAll={showAllColumns}
+          />
+          {#if hasExpandableVisibleRows || hasAnyExpandedRows}
+            <div class="tree-actions" aria-label="Task tree controls">
+              <button
+                class="tree-action"
+                type="button"
+                aria-label="Expand all tasks"
+                title="Expand all tasks"
+                disabled={allKnownExpandableRowsExpanded}
+                onclick={expandAllVisible}
+              >
+                <ListChevronsUpDownIcon size={13} strokeWidth={2} />
+                <span class="action-label">Expand all</span>
+              </button>
+              <button
+                class="tree-action"
+                type="button"
+                aria-label="Collapse all tasks"
+                title="Collapse all tasks"
+                disabled={!hasAnyExpandedRows}
+                onclick={collapseAllVisible}
+              >
+                <ListChevronsDownUpIcon size={13} strokeWidth={2} />
+                <span class="action-label">Collapse all</span>
+              </button>
+            </div>
+          {/if}
+        {/snippet}
+      </PageHeader>
+    {/if}
     {#if loading}
       <span class="kit-sr-only" aria-live="polite">Loading snapshot</span>
     {/if}
   </div>
+  {#if empty}
+    {@render empty()}
+  {:else}
+    {#if toolbar}{@render toolbar()}{/if}
 
-  <div
-    class="table"
-    class:table--project-scoped={isProjectScoped}
-    class:table--keep-owner-sort={sort.key === 'owner' && columnVisibility.owner}
-    style:--table-cols-wide={wideGridColumns}
-    style:--table-cols-medium={mediumGridColumns}
-    style:--table-cols-compact={compactGridColumns}
-    style:--table-cols-narrow={narrowGridColumns}
-  >
-    <!-- The table-body is the keyboard-nav root: any row inside this
+    <div
+      class="table"
+      class:table--project-scoped={isProjectScoped}
+      class:table--keep-owner-sort={sort.key === 'owner' && columnVisibility.owner}
+      style:--table-cols-wide={wideGridColumns}
+      style:--table-cols-medium={mediumGridColumns}
+      style:--table-cols-compact={compactGridColumns}
+      style:--table-cols-narrow={narrowGridColumns}
+    >
+      <!-- The table-body is the keyboard-nav root: any row inside this
          container is reachable via ↓/↑ (j/k), Home/End (g/G), and
          ↔ to expand or collapse subtasks. -->
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="table-body" bind:this={tableBody} onkeydown={handleListKeydown}>
-      <div class="table-header">
-        <button
-          class="col col-id"
-          type="button"
-          aria-label={sortLabel('id', 'ID')}
-          aria-pressed={sortIndicator('id') !== null}
-          onclick={() => handleSortClick('id')}
-        >
-          <span>ID</span>
-          {#if sortIndicator('id') === 'asc'}
-            <ChevronUpIcon size={11} strokeWidth={2} />
-          {:else if sortIndicator('id') === 'desc'}
-            <ChevronDownIcon size={11} strokeWidth={2} />
-          {/if}
-        </button>
-        <button
-          class="col col-title"
-          type="button"
-          aria-label={sortLabel('title', 'Title')}
-          aria-pressed={sortIndicator('title') !== null}
-          onclick={() => handleSortClick('title')}
-        >
-          <!-- Spacer matches the chevron column in body rows so the
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="table-body" bind:this={tableBody} onkeydown={handleListKeydown}>
+        <div class="table-header">
+          <button
+            class="col col-id"
+            type="button"
+            aria-label={sortLabel('id', 'ID')}
+            aria-pressed={sortIndicator('id') !== null}
+            onclick={() => handleSortClick('id')}
+          >
+            <span>ID</span>
+            {#if sortIndicator('id') === 'asc'}
+              <ChevronUpIcon size={11} strokeWidth={2} />
+            {:else if sortIndicator('id') === 'desc'}
+              <ChevronDownIcon size={11} strokeWidth={2} />
+            {/if}
+          </button>
+          <button
+            class="col col-title"
+            type="button"
+            aria-label={sortLabel('title', 'Title')}
+            aria-pressed={sortIndicator('title') !== null}
+            onclick={() => handleSortClick('title')}
+          >
+            <!-- Spacer matches the chevron column in body rows so the
                "Title" label aligns with the title text underneath. -->
-          <span class="chevron chevron--placeholder" aria-hidden="true"></span>
-          <span>Title</span>
-          {#if sortIndicator('title') === 'asc'}
-            <ChevronUpIcon size={11} strokeWidth={2} />
-          {:else if sortIndicator('title') === 'desc'}
-            <ChevronDownIcon size={11} strokeWidth={2} />
+            <span class="chevron chevron--placeholder" aria-hidden="true"></span>
+            <span>Title</span>
+            {#if sortIndicator('title') === 'asc'}
+              <ChevronUpIcon size={11} strokeWidth={2} />
+            {:else if sortIndicator('title') === 'desc'}
+              <ChevronDownIcon size={11} strokeWidth={2} />
+            {/if}
+          </button>
+          {#if columnVisibility.updated}
+            <button
+              class="col col-updated"
+              type="button"
+              aria-label={sortLabel('updated', 'Updated')}
+              aria-pressed={sortIndicator('updated') !== null}
+              onclick={() => handleSortClick('updated')}
+            >
+              <span>Updated</span>
+              {#if sortIndicator('updated') === 'asc'}
+                <ChevronUpIcon size={11} strokeWidth={2} />
+              {:else if sortIndicator('updated') === 'desc'}
+                <ChevronDownIcon size={11} strokeWidth={2} />
+              {/if}
+            </button>
           {/if}
-        </button>
-        {#if columnVisibility.updated}
-          <button
-            class="col col-updated"
-            type="button"
-            aria-label={sortLabel('updated', 'Updated')}
-            aria-pressed={sortIndicator('updated') !== null}
-            onclick={() => handleSortClick('updated')}
-          >
-            <span>Updated</span>
-            {#if sortIndicator('updated') === 'asc'}
-              <ChevronUpIcon size={11} strokeWidth={2} />
-            {:else if sortIndicator('updated') === 'desc'}
-              <ChevronDownIcon size={11} strokeWidth={2} />
-            {/if}
-          </button>
-        {/if}
-        {#if columnVisibility.priority}
-          <button
-            class="col col-priority"
-            type="button"
-            aria-label={sortLabel('priority', 'Priority')}
-            aria-pressed={sortIndicator('priority') !== null}
-            onclick={() => handleSortClick('priority')}
-          >
-            <span>Priority</span>
-            {#if sortIndicator('priority') === 'asc'}
-              <ChevronUpIcon size={11} strokeWidth={2} />
-            {:else if sortIndicator('priority') === 'desc'}
-              <ChevronDownIcon size={11} strokeWidth={2} />
-            {/if}
-          </button>
-        {/if}
-        {#if columnVisibility.due}<span class="col col-due col-static">Due</span>{/if}
-        {#if columnVisibility.owner}
-          <button
-            class="col col-owner"
-            type="button"
-            aria-label={sortLabel('owner', 'Owner')}
-            aria-pressed={sortIndicator('owner') !== null}
-            onclick={() => handleSortClick('owner')}
-          >
-            <span>Owner</span>
-            {#if sortIndicator('owner') === 'asc'}
-              <ChevronUpIcon size={11} strokeWidth={2} />
-            {:else if sortIndicator('owner') === 'desc'}
-              <ChevronDownIcon size={11} strokeWidth={2} />
-            {/if}
-          </button>
-        {/if}
-        {#if columnVisibility.blockedBy}
-          <span class="col col-blocked-by col-static">Blocked by</span>
-        {/if}
-        {#if columnVisibility.tags}<span class="col col-tags col-static">Tags</span>{/if}
-      </div>
+          {#if columnVisibility.priority}
+            <button
+              class="col col-priority"
+              type="button"
+              aria-label={sortLabel('priority', 'Priority')}
+              aria-pressed={sortIndicator('priority') !== null}
+              onclick={() => handleSortClick('priority')}
+            >
+              <span>Priority</span>
+              {#if sortIndicator('priority') === 'asc'}
+                <ChevronUpIcon size={11} strokeWidth={2} />
+              {:else if sortIndicator('priority') === 'desc'}
+                <ChevronDownIcon size={11} strokeWidth={2} />
+              {/if}
+            </button>
+          {/if}
+          {#if columnVisibility.due}<span class="col col-due col-static">Due</span>{/if}
+          {#if columnVisibility.owner}
+            <button
+              class="col col-owner"
+              type="button"
+              aria-label={sortLabel('owner', 'Owner')}
+              aria-pressed={sortIndicator('owner') !== null}
+              onclick={() => handleSortClick('owner')}
+            >
+              <span>Owner</span>
+              {#if sortIndicator('owner') === 'asc'}
+                <ChevronUpIcon size={11} strokeWidth={2} />
+              {:else if sortIndicator('owner') === 'desc'}
+                <ChevronDownIcon size={11} strokeWidth={2} />
+              {/if}
+            </button>
+          {/if}
+          {#if columnVisibility.blockedBy}
+            <span class="col col-blocked-by col-static">Blocked by</span>
+          {/if}
+          {#if columnVisibility.tags}<span class="col col-tags col-static">Tags</span>{/if}
+        </div>
 
-      {#if visibleRootIssues.length === 0}
-        {#if empty}
-          {@render empty()}
-        {:else}
+        {#if visibleRootIssues.length === 0}
           <div class="empty">No tasks</div>
         {/if}
-      {/if}
 
-      {#if hasTemporaryReveal || isProjectScoped || shouldFlatten}
-        {#each renderedRoots as issue (issue.uid)}
-          {@render row(issue)}
-        {/each}
-      {:else}
-        {#each renderedGroups as group (group.id)}
-          <section class="group" aria-labelledby={`group-${group.id}`}>
-            <h3 class="group-title" id={`group-${group.id}`}>
-              <span>{group.title}</span>
-              <span class="group-count">{group.total}</span>
-            </h3>
-            {#each group.issues as issue (issue.uid)}
-              {@render row(issue)}
-            {/each}
-          </section>
-        {/each}
-      {/if}
-      {#if hasHiddenRows}
-        <div class="row-sentinel" bind:this={rowSentinel} aria-hidden="true"></div>
-      {/if}
+        {#if hasTemporaryReveal || isProjectScoped || shouldFlatten}
+          {#each renderedRoots as issue (issue.uid)}
+            {@render row(issue)}
+          {/each}
+        {:else}
+          {#each renderedGroups as group (group.id)}
+            <section class="group" aria-labelledby={`group-${group.id}`}>
+              <h3 class="group-title" id={`group-${group.id}`}>
+                <span>{group.title}</span>
+                <span class="group-count">{group.total}</span>
+              </h3>
+              {#each group.issues as issue (issue.uid)}
+                {@render row(issue)}
+              {/each}
+            </section>
+          {/each}
+        {/if}
+        {#if hasHiddenRows}
+          <div class="row-sentinel" bind:this={rowSentinel} aria-hidden="true"></div>
+        {/if}
+      </div>
     </div>
-  </div>
+  {/if}
 </section>
 
 {#snippet row(issue: KataTaskSummary, depth = 0)}

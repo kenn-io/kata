@@ -10,6 +10,7 @@
     StatusDot,
   } from '@kenn-io/kit-ui'
   import type { WebDaemonInfo } from '../lib/daemons/client'
+  import { markColor } from '../lib/marks'
 
   interface Props {
     daemons: WebDaemonInfo[]
@@ -45,6 +46,10 @@
   }
 </script>
 
+{#snippet serverMark(name: string)}
+  <Avatar {name} class="server-mark" tone="neutral" size={16} shape="rounded" decorative />
+{/snippet}
+
 <Menu
   class="daemon-menu-root"
   onopenchange={(open) => {
@@ -53,8 +58,13 @@
 >
   <MenuTrigger ariaLabel={`Switch Kata daemon: ${displayId ?? 'default'}`}>
     {#snippet child({ attachment })}
-      <button class="daemon-chip" data-testid="daemon-chip" {@attach attachment}>
-        <Avatar name={displayId ?? 'Kata'} size={16} shape="rounded" decorative />
+      <button
+        class="daemon-chip"
+        data-testid="daemon-chip"
+        style:--mark={markColor(displayId ?? 'Kata')}
+        {@attach attachment}
+      >
+        {@render serverMark(displayId ?? 'Kata')}
         <span class="chip-label">{displayId ?? 'kata'}</span>
         {#if activeStatusLabel}<span
             class="kit-sr-only"
@@ -64,7 +74,7 @@
             status={activeStatusTone === 'error' ? 'unclean' : 'stale'}
             label={activeStatusLabel}
           />{/if}
-        <ChevronDownIcon size={12} aria-hidden="true" />
+        <ChevronDownIcon class="chip-chevron" size={14} aria-hidden="true" />
       </button>
     {/snippet}
   </MenuTrigger>
@@ -90,10 +100,11 @@
           closeOnSelect
           textValue={daemon.id}
         >
-          <span class="daemon-row" data-testid={`daemon-row-${daemon.id}`}
-            ><Avatar name={daemon.id} size={16} shape="rounded" decorative /><span class="row-name"
-              >{daemon.id}</span
-            ></span
+          <span
+            class="daemon-row"
+            data-testid={`daemon-row-${daemon.id}`}
+            style:--mark={markColor(daemon.id)}
+            >{@render serverMark(daemon.id)}<span class="row-name">{daemon.id}</span></span
           >
           {#if status(daemon)}<span class="row-hint"
               ><span class="row-status">{status(daemon)}</span
@@ -114,7 +125,7 @@
   .daemon-chip {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
     min-width: 0;
     max-width: 100%;
     margin-left: -8px;
@@ -124,6 +135,20 @@
   .daemon-chip:hover,
   .daemon-chip:global([aria-expanded='true']) {
     background: var(--bg-surface-hover);
+  }
+  /* A server's tile: kit-ui's neutral Avatar, tinted with the server's mark hue. */
+  .daemon-chip :global(.server-mark),
+  .daemon-row :global(.server-mark) {
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--mark) 22%, var(--bg-surface));
+    color: color-mix(in srgb, var(--mark) 60%, var(--text-primary));
+    font-size: 8px;
+    letter-spacing: -0.02em;
+  }
+  /* The chevron keeps its distance whether or not a status dot shows. */
+  .daemon-chip :global(.chip-chevron) {
+    flex: none;
+    margin-left: 10px;
   }
   .chip-label,
   .row-name {
@@ -138,6 +163,7 @@
   :global(.kit-menu__content.kit-popover-card.daemon-menu) {
     --bg-popover: var(--bg-surface);
     width: min(280px, calc(100vw - 16px));
+    margin-top: 2px;
   }
   /* The active server sits in a well darker than the menu, its check in
      primary ink at the row's right end. Every server name is primary ink. */
@@ -151,7 +177,8 @@
     box-sizing: border-box;
     min-height: 28px;
     padding-block: 4px;
-    font-size: 14px;
+    font-size: var(--font-size-md);
+    line-height: 16px;
   }
   :global(.daemon-menu .kit-menu__radio-content) {
     flex: 1;
@@ -168,13 +195,17 @@
     grid-template-columns: 72px minmax(0, 1fr);
     gap: var(--space-2) var(--space-4);
     margin: 0 0 var(--space-2);
-    padding: 8px;
-    color: var(--text-muted);
-    font-size: var(--font-size-xs);
+    padding: var(--space-2) 8px var(--space-4);
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
   }
   .account dd {
     margin: 0;
-    color: var(--text-secondary);
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-primary);
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .daemon-row {
     flex: 1;

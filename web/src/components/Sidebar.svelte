@@ -8,9 +8,10 @@
   import SettingsIcon from '@lucide/svelte/icons/settings'
   import StarIcon from '@lucide/svelte/icons/star'
   import UsersIcon from '@lucide/svelte/icons/users'
-  import { hashColor, ScrollBox, showFlash, Tooltip } from '@kenn-io/kit-ui'
+  import { ScrollBox, showFlash, Tooltip } from '@kenn-io/kit-ui'
 
   import GroupedSidebarSection from './GroupedSidebarSection.svelte'
+  import { markColor } from '../lib/marks'
 
   import type {
     KataTaskMutationResponse,
@@ -71,20 +72,6 @@
     { name: 'delegated', label: 'Delegated', icon: UsersIcon },
     { name: 'all', label: 'All open', icon: ListTodoIcon },
     { name: 'logbook', label: 'Logbook', icon: BookCheckIcon },
-  ]
-
-  // Project marks take the prototype's soft hues from kit-ui's theme, so
-  // they follow light and dark. Red and amber are left out: they mean
-  // overdue, high priority, and warnings.
-  const projectMarkPalette = [
-    'var(--accent-green)',
-    'var(--accent-purple)',
-    'var(--accent-teal)',
-    'var(--status-waiting)',
-    'var(--text-muted)',
-    'color-mix(in srgb, var(--accent-blue) 50%, var(--accent-purple))',
-    'var(--accent-blue)',
-    'color-mix(in srgb, var(--accent-teal) 55%, var(--text-primary))',
   ]
 
   let creatingProject = $derived(creationIntent !== null)
@@ -174,7 +161,7 @@
     aria-describedby={projectCreationBlockedReason ? createReasonID : undefined}
     onclick={startCreatingProject}
   >
-    <PlusIcon size={13} strokeWidth={1.9} />
+    <span class="nav-icon"><PlusIcon size={16} /></span>
     <span>New project</span>
   </button>
 {/snippet}
@@ -198,7 +185,7 @@
             void onOpenView(view.name)
           }}
         >
-          <span class="nav-icon"><Icon size={14} strokeWidth={1.75} /></span>
+          <span class="nav-icon"><Icon size={16} /></span>
           <span class="nav-label">{view.label}</span>
           {#if count !== undefined}
             <span class="nav-count">{count}</span>
@@ -221,10 +208,7 @@
             class:active={isProjectActive(project.uid)}
             onclick={() => void onOpenProject(project.uid)}
           >
-            <span
-              class="project-mark"
-              style:background={hashColor(project.name, projectMarkPalette)}
-            ></span>
+            <span class="project-mark" style:background={markColor(project.name)}></span>
             <span class="project-name">{project.name}</span>
             <span class="project-count count">{project.open_count}</span>
           </button>
@@ -278,12 +262,12 @@
         class:active={credentialAuditActive}
         onclick={() => void onOpenCredentials()}
       >
-        <span class="nav-icon"><KeyRoundIcon size={16} strokeWidth={1.75} /></span>
+        <span class="nav-icon"><KeyRoundIcon size={16} /></span>
         <span class="nav-label">Credentials</span>
       </button>
     {/if}
     <button type="button" class:active={settingsActive} onclick={() => void onOpenSettings()}>
-      <span class="nav-icon"><SettingsIcon size={16} strokeWidth={1.75} /></span>
+      <span class="nav-icon"><SettingsIcon size={16} /></span>
       <span class="nav-label">Settings</span>
     </button>
   </nav>
@@ -375,9 +359,8 @@
     color: var(--text-primary);
   }
 
-  .kata-nav button.active .nav-label,
-  .project-select-button.active .project-name {
-    font-weight: var(--font-weight-medium);
+  .kata-nav button.active .nav-icon {
+    color: var(--text-primary);
   }
 
   .nav-label,
@@ -390,8 +373,8 @@
 
   .nav-count,
   .project-count {
-    color: var(--text-muted);
-    font-size: var(--font-size-xs);
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
     font-variant-numeric: tabular-nums;
   }
 
@@ -405,8 +388,8 @@
 
   .project-mark {
     justify-self: center;
-    width: 12px;
-    height: 12px;
+    width: 10px;
+    height: 10px;
     border-radius: 3px;
   }
 

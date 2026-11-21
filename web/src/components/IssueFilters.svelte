@@ -152,18 +152,12 @@
 
 <style>
   .kata-search-panel {
-    box-sizing: border-box;
-    min-height: var(--layout-header-h);
-    display: flex;
-    flex-shrink: 0;
-    align-items: center;
     padding: var(--space-4) 12px;
     border-bottom: 1px solid var(--border-muted);
     background: var(--bg-surface);
   }
 
   .kata-search-toolbar {
-    width: 100%;
     display: flex;
     align-items: center;
     gap: var(--space-3);

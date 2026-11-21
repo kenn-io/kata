@@ -17,13 +17,6 @@ test('standalone shell preserves the Forge base typography and header geometry',
     return { boxSizing: style.boxSizing, height: element.getBoundingClientRect().height }
   })
   expect(shell).toEqual({ boxSizing: 'border-box', height: 48 })
-  const sidebarHeader = (await page.locator('.sidebar-header').boundingBox())!
-  const searchPanel = (await page.locator('.kata-search-panel').boundingBox())!
-  expect(searchPanel.y).toBe(sidebarHeader.y)
-  expect(searchPanel.height).toBe(sidebarHeader.height)
-  const task = (await page.getByRole('button', { name: 'New task' }).boundingBox())!
-  const search = (await page.getByRole('searchbox', { name: 'Search tasks' }).boundingBox())!
-  expect(Math.abs(task.y + task.height / 2 - (search.y + search.height / 2))).toBeLessThanOrEqual(1)
   await expect(page.locator('body')).toHaveCSS('font-size', '13px')
 })
 
