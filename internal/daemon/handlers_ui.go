@@ -128,7 +128,10 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		issue, err := activeIssueByRef(ctx, cfg.DB, projectID, in.Ref, db.IncludeDeletedNo)
 		if err != nil {
-			return nil, hideMissingProject(ctx, err)
+			if in.ProjectID == 0 {
+				err = hideMissingProject(ctx, err)
+			}
+			return nil, err
 		}
 		out.Body.Issue.UID = issue.UID
 		out.Body.Issue.ProjectUID = issue.ProjectUID
