@@ -552,7 +552,7 @@ describe('IssueCollection', () => {
     expect(within(row).getByText('user-a')).toBeTruthy()
   })
 
-  it('keeps Project available to screen readers without resizing beside the detail pane', () => {
+  it('moves the project mark beside the title next to the detail pane', () => {
     const { container } = render(IssueCollection, {
       props: {
         currentView: viewWithIssues([baseIssues[0]!]),
@@ -563,10 +563,10 @@ describe('IssueCollection', () => {
       },
     })
 
-    expect(container.querySelector('.cell-project')).toBeTruthy()
-    expect(container.querySelector('.cell-project .kit-sr-only')?.textContent).toBe(
+    expect(container.querySelector('.cell-title .project-mark')?.getAttribute('title')).toBe(
       'example-project',
     )
+    expect(container.querySelector('.cell-project')).toBeNull()
     expect(screen.queryByRole('separator', { name: 'Resize Project column' })).toBeNull()
   })
 
@@ -671,7 +671,7 @@ describe('IssueCollection', () => {
           document
             .querySelector<HTMLElement>('.table')
             ?.style.getPropertyValue('--table-cols-wide'),
-        ).toContain('minmax(248px, 1fr)')
+        ).toContain('minmax(48px, 248px)')
         expect(JSON.parse(localStorage.getItem(KATA_TASK_COLUMN_WIDTHS_STORAGE_KEY)!)).toEqual({
           title: 248,
         })

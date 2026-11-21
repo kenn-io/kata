@@ -111,14 +111,14 @@
     align-items: center;
     justify-content: center;
     gap: var(--space-2);
-    min-height: 32px;
+    min-height: 28px;
     padding: 0 9px;
     border: 1px solid var(--border-default);
     border-radius: var(--radius-md);
     background: var(--bg-surface);
     color: var(--text-secondary);
     font: inherit;
-    font-size: var(--font-size-xs);
+    font-size: var(--font-size-sm);
     font-weight: var(--font-weight-medium);
     white-space: nowrap;
     cursor: pointer;
@@ -156,7 +156,7 @@
     font-weight: var(--font-weight-medium);
   }
 
-  @container list (max-width: 680px) {
+  @container list (max-width: 420px) {
     .action-label {
       display: none;
     }

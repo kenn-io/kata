@@ -208,11 +208,22 @@ test('shows the project mark and full title beside an open task', async ({ page,
   const row = page.getByRole('button', { name: /Add retries to the task worker/ })
   await row.click()
   const title = row.locator('.title-text')
-  const project = row.locator('.cell-project')
-  await expect(project.locator('.project-mark')).toBeVisible()
-  await expect(page.locator('.table--detail-beside .column-heading-project')).toBeHidden()
+  const mark = row.locator('.cell-title .project-mark')
+  await expect(mark).toBeVisible()
+  await expect(page.locator('.column-heading-project')).toHaveCount(0)
   expect(await title.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
-  expect((await project.boundingBox())!.width).toBeLessThanOrEqual(16)
+  const titleBox = (await title.boundingBox())!
+  expect((await mark.boundingBox())!.x - titleBox.x - titleBox.width).toBeLessThan(10)
+  const titleHeading = (await page.locator('.column-heading-title .col span').boundingBox())!
+  expect(Math.abs(titleHeading.x - titleBox.x)).toBeLessThan(1)
+  const search = (await page.locator('.kata-search-toolbar .kit-search-input').boundingBox())!
+  const listTitle = (await page
+    .getByRole('heading', { name: 'All open', exact: true })
+    .boundingBox())!
+  expect(Math.abs(search.x - listTitle.x)).toBeLessThan(1)
+  const rowBox = (await row.boundingBox())!
+  const priorityBox = (await row.locator('.pri-pill').boundingBox())!
+  expect(rowBox.x + rowBox.width - priorityBox.x - priorityBox.width).toBeGreaterThanOrEqual(8)
   for (const column of ['due', 'priority']) {
     const header = await page.locator(`.column-heading-${column} .col`).boundingBox()
     const cell = await row.locator(`.cell-${column}`).boundingBox()

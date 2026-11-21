@@ -199,6 +199,9 @@
   const visibleOptionalColumns = $derived(
     displayColumns.filter((column) => columnVisibility[column.id]),
   )
+  const projectMarkBesideTitle = $derived(
+    detailBeside && visibleOptionalColumns.some((column) => column.id === 'project'),
+  )
   type RenderedColumn =
     | { kind: 'task'; id: KataOptionalTaskColumn }
     | { kind: 'date' }
@@ -210,7 +213,8 @@
     }))
     return [
       ...taskColumns.filter((column) => column.id === 'id'),
-      ...taskColumns.filter((column) => column.id === 'project'),
+      // Beside an open task the project shrinks to its mark next to the title.
+      ...(projectMarkBesideTitle ? [] : taskColumns.filter((column) => column.id === 'project')),
       ...(dateView ? [{ kind: 'date' as const }] : []),
       ...(logbookView ? [{ kind: 'closed' as const }] : []),
       ...taskColumns.filter((column) => column.id !== 'id' && column.id !== 'project'),
@@ -225,7 +229,6 @@
   })
 
   function trackForColumn(layout: TaskGridLayout, column: KataOptionalTaskColumn): string | null {
-    if (column === 'project' && detailBeside) return '16px'
     const base =
       TASK_COLUMN_TRACKS[layout][column] ??
       (column === 'owner' && effectiveSort.key === 'owner' ? TASK_COLUMN_TRACKS.medium.owner : null)
@@ -1133,7 +1136,6 @@
     <div
       class="table"
       class:table--project-scoped={isProjectScoped}
-      class:table--detail-beside={detailBeside}
       class:table--keep-owner-sort={effectiveSort.key === 'owner' && columnVisibility.owner}
       style:--table-cols-wide={wideGridColumns}
       style:--table-cols-medium={mediumGridColumns}
@@ -1173,7 +1175,6 @@
               aria-pressed={sortIndicator('title') !== null}
               onclick={() => handleSortClick('title')}
             >
-              <span class="chevron chevron--placeholder" aria-hidden="true"></span>
               <span>Title</span>
               {#if sortIndicator('title') === 'asc'}
                 <ChevronUpIcon size={11} strokeWidth={2} />
@@ -1215,9 +1216,7 @@
                 {:else}
                   <span class="col col-static">{label}</span>
                 {/if}
-                {#if column.id !== 'project' || !detailBeside}
-                  {@render resizeHandle(column.id, label)}
-                {/if}
+                {@render resizeHandle(column.id, label)}
               </div>
             {/if}
           {/each}
@@ -1315,6 +1314,13 @@
           aria-hidden="true"
         ></span>
         <span class="title-text" id={titleId}>{issue.title}</span>
+        {#if projectMarkBesideTitle}
+          <span
+            class="project-mark"
+            style:background={markColor(issue.project_name)}
+            title={issue.project_name}
+          ></span>
+        {/if}
       </span>
       {#each renderedColumns as column (column.kind === 'task' ? column.id : column.kind)}
         {#if column.kind === 'date'}
@@ -1332,11 +1338,7 @@
         {:else if column.id === 'project'}
           <span class="cell cell-project" title={issue.project_name}>
             <span class="project-mark" style:background={markColor(issue.project_name)}></span>
-            {#if detailBeside}
-              <span class="kit-sr-only">{issue.project_name}</span>
-            {:else}
-              <span class="project-name">{issue.project_name}</span>
-            {/if}
+            <span class="project-name">{issue.project_name}</span>
           </span>
         {:else if column.id === 'due'}
           <span
@@ -1461,16 +1463,21 @@
 
   .pane-header {
     position: relative;
-    flex-shrink: 0;
-    padding: 8px 12px 0;
-    background: var(--bg-surface);
-  }
-
-  .pane-header.empty-header {
     box-sizing: border-box;
     display: flex;
     align-items: center;
+    flex-shrink: 0;
     min-height: var(--layout-header-h);
+    padding: 0 12px;
+    background: var(--bg-surface);
+  }
+
+  .pane-header > :global(.kit-page-header) {
+    flex: 1;
+    align-items: center;
+  }
+
+  .pane-header.empty-header {
     padding: 0 16px;
   }
 
@@ -1492,7 +1499,7 @@
     align-items: center;
     justify-content: center;
     gap: var(--space-2);
-    min-height: 26px;
+    min-height: 28px;
     padding: 0 8px;
     border: 1px solid var(--border-default);
     border-radius: var(--radius-md);
@@ -1537,7 +1544,7 @@
     min-width: var(--table-min-width);
     height: 32px;
     box-sizing: border-box;
-    padding: 0 12px;
+    padding: 0 22px 0 12px;
     align-items: center;
     background: var(--bg-surface);
     border-bottom: 1px solid var(--border-muted);
@@ -1554,8 +1561,10 @@
     height: 100%;
   }
 
+  /* Title starts over the row titles, past the chevron and status columns. */
   .column-heading-title .col {
     width: 100%;
+    padding-left: 40px;
   }
 
   .column-resize {
@@ -1630,10 +1639,6 @@
     font-variant-numeric: tabular-nums;
   }
 
-  .table--detail-beside .column-heading-project {
-    visibility: hidden;
-  }
-
   .table-body {
     flex: 1;
     overflow: auto;
@@ -1695,8 +1700,9 @@
     margin-left: -5px;
   }
 
+  /* The row reaches 10px past the cells so selection keeps a right inset. */
   .row {
-    width: 100%;
+    width: calc(100% + 10px);
     min-width: 0;
     grid-column: 1 / -1;
     grid-row: 1;
@@ -1707,7 +1713,7 @@
     height: 36px;
     min-height: 36px;
     box-sizing: border-box;
-    padding: 0;
+    padding: 0 10px 0 0;
     border-radius: 0;
     text-align: left;
     border: 0;
@@ -1726,14 +1732,14 @@
     width: 100%;
     min-width: var(--table-min-width);
     height: 36px;
-    padding: 0 12px;
+    padding: 0 22px 0 12px;
     /* Rows below the fold skip layout and paint until they scroll near, so a
        long list paints its first screen at once. */
     content-visibility: auto;
     contain-intrinsic-block-size: auto 36px;
   }
 
-  .row:hover {
+  .row-frame:hover .row:not(.selected, :focus-visible) {
     background: var(--bg-surface-hover);
   }
 
@@ -1782,7 +1788,7 @@
   }
 
   .title-text {
-    flex: 1;
+    flex: 0 1 auto;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1866,6 +1872,19 @@
   .row-frame:focus-within .id-hover {
     opacity: 1;
     pointer-events: auto;
+  }
+
+  /* The ID covers the row's tail, so it carries the row's own fill. */
+  .row-frame:hover .id-hover {
+    background: var(--bg-surface-hover);
+  }
+
+  .row.selected + .id-hover {
+    background: color-mix(in srgb, var(--accent-blue) 12%, var(--bg-surface));
+  }
+
+  .row:focus-visible + .id-hover {
+    background: color-mix(in srgb, var(--accent-blue) 16%, var(--bg-surface));
   }
 
   .id-hover :global(.kit-copy-btn) {
@@ -2058,7 +2077,9 @@
     .table.table--keep-owner-sort {
       --table-min-width: 500px;
     }
+  }
 
+  @container list (max-width: 420px) {
     .pane-header :global(.action-label) {
       display: none;
     }

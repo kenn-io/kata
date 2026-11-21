@@ -310,7 +310,7 @@
     flex-direction: column;
     gap: 6px;
     flex-shrink: 0;
-    padding: 4px 0 8px;
+    padding: 0 12px 8px;
     border-bottom: 1px solid var(--border-muted);
     background: var(--bg-surface);
   }
@@ -351,8 +351,21 @@
     border-color: var(--accent-blue);
   }
 
+  /* Status matches the outlined search field and Filter button beside it. */
+  .filter-control-status {
+    --kit-control-height: 28px;
+    --kit-control-font-size: var(--font-size-sm);
+    --kit-control-radius: var(--radius-md);
+  }
+
   .filter-control-status :global(.kit-select-dropdown) {
     width: 140px;
+  }
+
+  .filter-control-status :global(.kit-select-dropdown__trigger) {
+    border-color: var(--border-default);
+    background: var(--bg-surface);
+    font-weight: var(--font-weight-medium);
   }
 
   .filter-control-relationship :global(.kit-select-dropdown) {
@@ -378,7 +391,7 @@
     align-items: center;
     justify-content: center;
     gap: 6px;
-    min-height: 30px;
+    height: 28px;
     padding: 0 9px;
     border: 1px solid var(--border-default);
     border-radius: var(--radius-md);
