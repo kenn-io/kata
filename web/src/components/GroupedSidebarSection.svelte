@@ -43,10 +43,10 @@
   .sidebar-group-header {
     display: flex;
     align-items: center;
-    gap: var(--space-3);
+    gap: var(--space-4);
     width: 100%;
     min-height: 26px;
-    padding: 0 10px;
+    padding: 0 8px;
     border: 0;
     border-radius: var(--radius-md);
     background: transparent;
@@ -60,6 +60,8 @@
 
   .sidebar-group-header__chevron {
     display: inline-flex;
+    justify-content: center;
+    width: 16px;
     flex-shrink: 0;
     transition: transform 120ms ease;
   }

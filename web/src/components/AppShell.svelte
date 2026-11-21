@@ -1063,9 +1063,11 @@
     width: 28px;
     height: 28px;
     border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--accent-blue) 12%, transparent);
+    color: var(--accent-blue);
   }
   .new-task-button:hover {
-    background: var(--bg-surface-hover);
+    background: color-mix(in srgb, var(--accent-blue) 18%, transparent);
   }
   .appearance {
     display: flex;

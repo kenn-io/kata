@@ -114,7 +114,7 @@
   .daemon-chip {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     min-width: 0;
     max-width: 100%;
     margin-left: -8px;
