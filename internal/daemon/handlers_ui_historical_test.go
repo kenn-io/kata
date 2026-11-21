@@ -130,13 +130,15 @@ func TestUIIssueReferenceHistoricalCurrentProject(t *testing.T) {
 				server.Handler().ServeHTTP(w, r)
 			}))
 			t.Cleanup(ts.Close)
-			for _, ref := range []string{issue.ShortID, source.Name + "#" + issue.ShortID, issue.UID} {
+			refs := []string{issue.ShortID, source.Name + "#" + issue.ShortID, issue.UID}
+			qualifiedOnly := state == "host-source-denied" || state == "host-source-allowed"
+			if qualifiedOnly {
+				refs = []string{source.Name + "#" + issue.ShortID}
+			}
+			for _, ref := range refs {
 				t.Run(ref, func(t *testing.T) {
 					query := url.Values{"project_id": {fmt.Sprint(source.ID)}, "ref": {ref}}
-					if state == "host-source-denied" || state == "host-source-allowed" {
-						if ref != source.Name+"#"+issue.ShortID {
-							t.Skip("qualified reference")
-						}
+					if qualifiedOnly {
 						query.Del("project_id")
 					}
 					req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+"/api/v1/ui/issue-reference?"+query.Encode(), nil)

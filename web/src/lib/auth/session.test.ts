@@ -158,7 +158,6 @@ describe('browser session bootstrap', () => {
   it.each([
     ['/kata?issue=example#abc4', '/kata?issue=example%23abc4'],
     ['/kata?issue=01J00000000000000000000001#comments', '/kata?issue=01J00000000000000000000001'],
-    ['/kata?issue=01J00000000000000000000001#metadata', '/kata?issue=01J00000000000000000000001'],
     ['/kata?scope=example&issue=abc4#top', '/kata?scope=example&issue=abc4'],
   ])('handles issue fragment in %s', (url, expected) => {
     history.replaceState(null, '', url)

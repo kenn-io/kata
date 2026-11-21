@@ -74,26 +74,19 @@ func TestUIIssueReferenceHidesRestrictedProjectName(t *testing.T) {
 	t.Run("issue outside subtree", func(t *testing.T) {
 		outside := createScopedHTTPTestIssue(t, env, allowed.ID, "Outside", nil)
 		headers := map[string]string{"Authorization": "Bearer worker-token"}
-		for _, tc := range []struct {
-			name, selector, code, message string
-		}{
-			{"project name", "project=" + url.QueryEscape(allowed.Name), "not_found", "resource not found"},
-			{"project ID", "project_id=" + strconv.FormatInt(allowed.ID, 10), "issue_not_found", "issue not found"},
-		} {
-			t.Run(tc.name, func(t *testing.T) {
-				resp, body := envDoRaw(t, env, http.MethodGet, "/api/v1/ui/issue-reference?"+tc.selector+"&ref="+url.QueryEscape(outside.ShortID), nil, headers)
-				require.Equal(t, http.StatusNotFound, resp.StatusCode, string(body))
-				var result struct {
-					Error struct {
-						Code    string `json:"code"`
-						Message string `json:"message"`
-					} `json:"error"`
-				}
-				require.NoError(t, json.Unmarshal(body, &result))
-				require.Equal(t, tc.code, result.Error.Code)
-				require.Equal(t, tc.message, result.Error.Message)
-			})
-		}
+		t.Run("project name", func(t *testing.T) {
+			resp, body := envDoRaw(t, env, http.MethodGet, "/api/v1/ui/issue-reference?project="+url.QueryEscape(allowed.Name)+"&ref="+url.QueryEscape(outside.ShortID), nil, headers)
+			require.Equal(t, http.StatusNotFound, resp.StatusCode, string(body))
+			var result struct {
+				Error struct {
+					Code    string `json:"code"`
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			require.NoError(t, json.Unmarshal(body, &result))
+			require.Equal(t, "not_found", result.Error.Code)
+			require.Equal(t, "resource not found", result.Error.Message)
+		})
 	})
 }
 

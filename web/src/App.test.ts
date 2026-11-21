@@ -33,6 +33,15 @@ describe('App', () => {
     history.replaceState(null, '', '/kata?issue=example-project%23abc4')
     let resolution: URL | undefined
     const data = snapshot()
+    data.catalog.push({
+      ...data.catalog[0]!,
+      project: {
+        ...data.catalog[0]!.project,
+        id: 8,
+        uid: '01J00000000000000000000003',
+        name: 'other-project',
+      },
+    })
     data.collection.push({
       ...data.collection[0]!,
       id: 2,
@@ -63,24 +72,30 @@ describe('App', () => {
     {
       status: 422,
       ref: 'abc4',
-      message: 'Upgrade the selected daemon to open short issue links.',
-      selected: 'example-remote',
+      expected: () => [
+        screen.getByText('Upgrade the selected daemon to open short issue links.'),
+        screen.getByRole('button', { name: 'Switch Kata daemon: example-remote' }),
+      ],
+      search: '?issue=example-project%23abc4',
     },
     {
       status: 404,
       ref: 'missing',
-      message: 'Search for example-project#missing',
-      selected: 'example-remote',
+      expected: () => [screen.getByRole('button', { name: 'Search for example-project#missing' })],
+      search: '?issue=example-project%23missing',
     },
     {
       status: 0,
       ref: 'abc4',
-      message: 'Could not connect to example-remote',
-      selected: 'example-local',
+      expected: () => [
+        screen.getByText('Could not connect to example-remote'),
+        screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }),
+      ],
+      search: '',
     },
   ])(
     'handles saved short link failure $status when switching daemons',
-    async ({ status, ref, message, selected }) => {
+    async ({ status, ref, expected, search }) => {
       localStorage.setItem(
         'kata.web.workspace-state.v1',
         JSON.stringify({
@@ -105,14 +120,10 @@ describe('App', () => {
         await screen.findByRole('button', { name: 'Switch Kata daemon: example-local' }),
       )
       await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
-      if (status === 404) await screen.findByRole('button', { name: message })
-      else await screen.findByText(message)
-      await new Promise((resolve) => setTimeout(resolve, 0))
-      if (status !== 404)
-        expect(
-          screen.getByRole('button', { name: `Switch Kata daemon: ${selected}` }),
-        ).not.toBeNull()
-      expect(location.search).toBe(status ? `?issue=example-project%23${ref}` : '')
+      await waitFor(() => {
+        for (const element of expected()) expect(element).not.toBeNull()
+        expect(location.search).toBe(search)
+      })
     },
   )
 
