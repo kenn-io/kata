@@ -148,6 +148,18 @@ func syncFederationOnceWithPulledEvents(
 		return fmt.Errorf("coordinate federation sync: %w", err)
 	}
 	defer finish()
+	// The caller read the binding before waiting for this turn. An intent
+	// change can turn push on meanwhile, and a read-only copy would reset
+	// the project without checking for local changes.
+	current, err := store.FederationBindingByProject(ctx, binding.ProjectID)
+	if err != nil {
+		return fmt.Errorf("reload federation binding after waiting to sync: %w", err)
+	}
+	if !current.Enabled || current.Role != binding.Role || current.HubProjectUID != binding.HubProjectUID ||
+		current.HubProjectID != binding.HubProjectID || (current.RelayConfig == nil) != (binding.RelayConfig == nil) {
+		return errors.New("federation binding changed while waiting to sync")
+	}
+	binding = current
 	for {
 		pushThisTurn := allowPush && binding.PushEnabled
 		remaining, err := syncFederationOnceWithFence(ctx, store, binding, creds, pushThisTurn, opts, onPulledEvents, nil, credentialStores...)

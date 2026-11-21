@@ -109,6 +109,8 @@ var alreadyImplemented = map[string]bool{
 	"AttributionReceiptsAfter": true, // federation_provenance.go
 	"ExportAttribution":        true, // federation_provenance.go
 
+	"ReplaceFederationBoundActorWhenSettled": true, // federation_control.go
+
 	"CreateTeam":                           true, // project_access.go
 	"TeamByUID":                            true, // project_access.go
 	"ListTeams":                            true, // project_access.go
@@ -138,6 +140,7 @@ var alreadyImplemented = map[string]bool{
 	"CreateProjectFederationEnrollment":    true, // federation_control.go
 	"RotateFederationEnrollment":           true, // federation_control.go
 	"EnableFederationPush":                 true, // federation_control.go
+	"DisableFederationPushWhenSettled":     true, // federation_control.go
 	"EnableProjectFederation":              true, // federation_projection.go
 	"ExportFederationBindings":             true, // export.go
 	"ExportFederationEnrollments":          true, // export.go

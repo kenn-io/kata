@@ -209,6 +209,10 @@ func TestFederationProviderPersistsBeforeContactAndResumes(t *testing.T) {
 	_, err = daemon.AuthorizeFederationProvider(t.Context(), store, credentials, catalog, changed)
 	require.ErrorIs(t, err, daemon.ErrFederationReplicaCredentialConflict)
 	changed = mapping
+	changed.Intent = "read_only"
+	_, err = daemon.AuthorizeFederationProvider(t.Context(), store, credentials, catalog, changed)
+	require.ErrorIs(t, err, daemon.ErrFederationReplicaCredentialConflict, "an unbound request has no replica to switch in place")
+	changed = mapping
 	changed.CredentialProvider = append(slices.Clone(mapping.CredentialProvider), "--different-profile")
 	_, err = daemon.AuthorizeFederationProvider(t.Context(), store, credentials, catalog, changed)
 	require.ErrorIs(t, err, daemon.ErrFederationReplicaCredentialConflict)

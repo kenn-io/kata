@@ -1423,6 +1423,72 @@ func TestSyncFederationOnceResetBlockedByLocalEventCreatedDuringMetadataRefresh(
 	require.NoError(t, err)
 }
 
+// A caller reads the binding before it waits for its sync turn, and an intent
+// change can turn push on while it waits. The turn must guard its reset with
+// the binding stored when the turn starts; the caller's read-only copy would
+// reset without checking for local changes.
+func TestSyncFederationPullOnlyOnceGuardsResetWithBindingStoredAtTurnStart(t *testing.T) {
+	ctx := t.Context()
+	spoke := testenv.New(t)
+	project, err := spoke.DB.CreateProject(ctx, "hub")
+	require.NoError(t, err)
+	stored := db.FederationBinding{
+		ProjectID:            project.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://127.0.0.1:1",
+		HubProjectID:         42,
+		HubProjectUID:        project.UID,
+		ReplayHorizonEventID: 50,
+		PullCursorEventID:    49,
+		PushEnabled:          false,
+		Actor:                "tester",
+		Enabled:              true,
+	}
+	callerCopy, err := spoke.DB.UpsertFederationBinding(ctx, stored)
+	require.NoError(t, err)
+	stored.PushEnabled = true
+	_, err = spoke.DB.UpsertFederationBinding(ctx, stored)
+	require.NoError(t, err)
+	_, _, err = spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "created after writes turned on",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/projects/42/federation/events":
+			require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{
+				ResetRequired: true,
+				ResetAfterID:  90,
+				Events:        []api.EventEnvelope{},
+				NextAfterID:   90,
+			}))
+		case "/api/v1/projects/42/federation/metadata":
+			require.NoError(t, json.NewEncoder(w).Encode(api.ProjectFederationBody{
+				ProjectID:              42,
+				ProjectUID:             project.UID,
+				ProjectName:            project.Name,
+				ReplayHorizonEventID:   91,
+				BaselineThroughEventID: 91,
+			}))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(hub.Close)
+
+	err = SyncFederationPullOnlyOnce(ctx, spoke.DB, callerCopy, config.FederationCredential{
+		HubURL:       hub.URL,
+		HubProjectID: 42,
+		Token:        "token",
+	})
+
+	require.ErrorIs(t, err, ErrFederationResetBlockedByPendingPush)
+	_, err = spoke.DB.IssueByUID(ctx, mustIssueUIDByTitle(t, spoke.DB, "created after writes turned on"), db.IncludeDeletedNo)
+	require.NoError(t, err)
+}
+
 func TestFederationMultiProjectEnrollmentSyncMatrix(t *testing.T) {
 	type scenario struct {
 		firstTaskBeforeEnrollment bool

@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-18
+last_edited: 2026-11-20
 ---
 
 # Federation
@@ -1388,6 +1388,73 @@ Provider mappings differ from catalog-admin mappings when removed:
   unbound project was purged. A temporary database failure retries that cleanup.
 - If startup reports `credential_io`, correct the owner-private credential file
   and restart the daemon. Kata does not guess how to repair invalid credentials.
+
+### Change replica intent
+
+An attached replica can switch between `read_only` and `collaborate` without
+leaving the hub. Edit `intent` in the mapping and restart the daemon. Kata
+keeps the local project, its tasks and history, and the binding with its sync
+progress. It never asks the hub to delete anything.
+
+On restart, Kata:
+
+1. Turns push off first when the new intent is `read_only`.
+2. Asks the provider to release the saved request.
+3. Saves a new request and candidate token with the new intent, for the same
+   local and hub projects, and asks the provider to authorize it.
+4. Turns push on or off to match the approved permissions: `pull` alone is
+   read-only; `pull,push` or `claim,pull,push` collaborates. When the new
+   approval names a different actor, the replica takes that actor in the
+   same step. Local changes made after the switch are authored as the new
+   actor; changes the hub already accepted keep their author. A sync that
+   is already running finishes first, and new syncs wait for this step.
+
+Until the provider approves the new request, the replica cannot sync with the
+hub. Its local tasks stay readable. Pending approval and temporary failures
+retry as for a first approval. A `denied` decision keeps the replica and its
+data; restore the earlier intent and restart to ask for that access again.
+An approval for a different hub project is refused as `binding_conflict`, and
+the binding is unchanged. A switch also reports `binding_conflict`, and contacts
+no provider, while an interrupted `kata federation rebind` has left the binding
+on the old hub address; rerun the rebind first.
+
+Kata records the release in the saved request before sending it. If no answer
+arrives, for example because the provider failed or the daemon stopped, the
+provider may have revoked the old approval. The next attempt sends the release
+again and asks for a new approval, even when you restored the earlier intent.
+A provider that refuses the release still holds the old approval, so restoring
+the earlier intent keeps using it.
+
+Lowering to `read_only` waits for local work to finish, because a read-only
+replica refuses local edits and cannot push or claim. While the hub has not
+accepted every local change, another project still has to deliver a task moved
+out of this one, or this replica holds a live claim or a queued claim request,
+reconciliation reports `binding_conflict`, keeps collaborating, and retries.
+`kata federation status` shows the pending push depth and claim counts. It
+does not show owed task moves; for those, wait until the destination project
+syncs. Once the hub accepts the pushed changes and you release the claims,
+the change completes on the next attempt.
+
+A claim request already on its way to the hub finishes before Kata checks for
+claims, and new claim requests wait until the saved request is replaced. If an
+earlier attempt turned push off but the provider did not confirm the release,
+claims still work with the old approval, and a claim taken since then holds
+the switch the same way until you release it.
+
+The local changes and claims stay on this computer while Kata waits; nothing
+is dropped. If the hub no longer accepts this replica's changes, the wait does
+not end on its own. Get write access back, set the earlier intent, and restart
+so Kata can send them. Then lower the intent again.
+
+A project with an active external root binding cannot become read-only.
+Lowering its intent reports `binding_conflict` and keeps collaborating; unbind
+the external root first.
+
+A change of actor waits the same way in either direction. A cron run that the
+old actor started and that is still running also holds the switch until the
+run finishes, because a run continues only as the actor that started it.
+
+Changing to or from `migrate` is not done in place. Leave the hub first.
 
 ## Move an existing spoke to a new HTTPS endpoint
 

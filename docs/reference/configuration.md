@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-11-19
+last_edited: 2026-11-20
 ---
 
 # Configuration
@@ -957,6 +957,11 @@ project matching the hub UID. Collaborative rejoin reoffers local-origin
 events; the hub deduplicates them, and new events must use the enrollment
 actor. `migrate` asks the hub to approve importing local tasks and authors.
 The helper cannot silently downgrade write access or upgrade read-only access.
+
+An attached replica can switch between `read_only` and `collaborate`: edit
+`intent` and restart the daemon; see
+[Change replica intent](../operations/federation.md#change-replica-intent).
+Changing to or from `migrate` still requires leaving the hub first.
 
 Kata retains the request across restarts and failed exchanges. A helper that
 exits `2` reports `configuration_conflict` in reconciliation health; check its
