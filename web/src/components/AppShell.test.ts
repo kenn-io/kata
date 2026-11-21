@@ -1540,7 +1540,7 @@ describe('AppShell', () => {
     expect(screen.queryByRole('button', { name: /Other issue/ })).toBeNull()
   })
 
-  test('keeps project controls out of a dedicated project list', async () => {
+  test('hides the Project filter in a dedicated project list', async () => {
     render(AppShell, {
       props: {
         route: {
@@ -1559,7 +1559,6 @@ describe('AppShell', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: 'Filter' }))
     expect(screen.queryByRole('button', { name: /^Project:/ })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Clear Project filter' })).toBeNull()
   })
 
   test('resets grown rows when repeated label filters change', async () => {

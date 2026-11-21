@@ -40,27 +40,6 @@ function titles(view: ReturnType<typeof projectKataWorkspaceView>): string[] {
 }
 
 describe('projectKataWorkspaceView', () => {
-  test('keeps filtered Scheduled results to dated issues', () => {
-    const view = projectKataWorkspaceView({
-      view: 'scheduled',
-      filters: defaultKataTaskSearchFilters('scheduled'),
-      snapshot: { projects, fetched_at: '2026-05-15T16:00:00.000Z' },
-      issues: [
-        issue('first-date', { deadline_on: '2026-05-20' }),
-        issue('second-date', { scheduled_on: '2026-05-21' }),
-        issue('undated'),
-      ],
-      today: '2026-05-15',
-    })
-
-    expect(
-      view.groups.map((group) => [group.title, group.issues.map((item) => item.title)]),
-    ).toEqual([
-      ['Wed, May 20', ['first-date']],
-      ['Thu, May 21', ['second-date']],
-    ])
-  })
-
   const groupedFilterCases: [
     string,
     {
@@ -125,6 +104,11 @@ describe('projectKataWorkspaceView', () => {
           {
             ...issue('second-scheduled-task', { deadline_on: '2026-05-21' }),
             title: 'Second scheduled task',
+            owner: 'user-a',
+          },
+          {
+            ...issue('undated-scheduled-task'),
+            title: 'Undated scheduled task',
             owner: 'user-a',
           },
         ],

@@ -530,6 +530,18 @@
   let resizeStartWidths: Partial<
     Record<KataOptionalTaskColumn | 'title' | 'date' | 'closed', number>
   > = {}
+  let measuredColumnWidths = $state<KataTaskColumnWidths>({})
+
+  function rememberColumnWidth(
+    column: KataOptionalTaskColumn | 'title' | 'date' | 'closed',
+    event: FocusEvent,
+  ): void {
+    const heading = (event.currentTarget as HTMLElement | null)?.parentElement
+    const measured = heading?.getBoundingClientRect().width
+    if (measured && measured > 0) {
+      measuredColumnWidths = { ...measuredColumnWidths, [column]: Math.round(measured) }
+    }
+  }
 
   function resizeStartWidth(
     column: KataOptionalTaskColumn | 'title' | 'date' | 'closed',
@@ -1156,14 +1168,16 @@
           column: KataOptionalTaskColumn | 'title' | 'date' | 'closed',
           label: string,
         )}
-          <div class="column-resize">
+          <div class="column-resize" onfocusin={(event) => rememberColumnWidth(column, event)}>
             <SplitResizeHandle
               orientation="horizontal"
               variant="column"
               ariaLabel={`Resize ${label} column`}
               ariaValueMin={48}
               ariaValueMax={480}
-              ariaValueNow={columnWidths[column] ?? DEFAULT_COLUMN_WIDTHS[column]}
+              ariaValueNow={columnWidths[column] ??
+                measuredColumnWidths[column] ??
+                DEFAULT_COLUMN_WIDTHS[column]}
               keyboardStep={8}
               onResizeStart={(event) => beginColumnResize(column, event)}
               onResize={(event) => updateColumnWidth(column, event)}

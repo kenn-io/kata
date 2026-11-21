@@ -373,39 +373,46 @@ describe('kata task view builder', () => {
     ])
   })
 
-  test('builds Logbook from closed issues grouped by closed_at day', () => {
-    const view = buildKataTaskView({
-      view: 'logbook',
-      issues: [
-        issue(
-          'issue-2',
-          'Done later',
-          'project-workspace',
-          {},
-          'closed',
-          '2026-05-15T15:00:00.000Z',
-        ),
-        issue(
-          'issue-1',
-          'Done earlier',
-          'project-health',
-          {},
-          'closed',
-          '2026-05-14T09:00:00.000Z',
-        ),
-        issue('issue-3', 'Still open', 'project-workspace'),
-      ],
-      projects,
-      today,
-      fetched_at: fetchedAt,
-    })
+  test('builds Logbook groups by the local closing date', () => {
+    const originalTimezone = process.env.TZ
+    process.env.TZ = 'America/Los_Angeles'
+    try {
+      const view = buildKataTaskView({
+        view: 'logbook',
+        issues: [
+          issue(
+            'issue-2',
+            'Done later',
+            'project-workspace',
+            {},
+            'closed',
+            '2026-05-15T15:00:00.000Z',
+          ),
+          issue(
+            'issue-1',
+            'Done earlier',
+            'project-health',
+            {},
+            'closed',
+            '2026-05-15T04:00:00.000Z',
+          ),
+          issue('issue-3', 'Still open', 'project-workspace'),
+        ],
+        projects,
+        today,
+        fetched_at: fetchedAt,
+      })
 
-    expect(
-      view.groups.map((group) => [group.id, group.title, group.issues.map((item) => item.title)]),
-    ).toEqual([
-      ['2026-05-15', 'Today', ['Done later']],
-      ['2026-05-14', 'Thu, May 14', ['Done earlier']],
-    ])
+      expect(
+        view.groups.map((group) => [group.id, group.title, group.issues.map((item) => item.title)]),
+      ).toEqual([
+        ['2026-05-15', 'Today', ['Done later']],
+        ['2026-05-14', 'Thu, May 14', ['Done earlier']],
+      ])
+    } finally {
+      if (originalTimezone === undefined) delete process.env.TZ
+      else process.env.TZ = originalTimezone
+    }
   })
   test('includes the year in date groups outside the current year', () => {
     const view = buildKataTaskView({

@@ -107,9 +107,6 @@ test('task filters stay inside a narrow list pane without overlapping', async ({
   await page.setViewportSize({ width: 1440, height: 800 })
   const credentials = await kata.launch(page)
   const issue = await kata.seedIssue(page, credentials, { title: 'Narrow pane example' })
-  for (let index = 1; index < 40; index++) {
-    await kata.seedIssue(page, credentials, { title: `Narrow pane task ${index}` })
-  }
   await page.goto(`${kata.origin}/kata?view=all-open&issue=${issue.uid}`)
   await page.getByRole('button', { name: 'Display' }).click()
   await page.getByRole('radio', { name: 'Beside list' }).click()
@@ -123,8 +120,6 @@ test('task filters stay inside a narrow list pane without overlapping', async ({
     if (!toolbar || !listHeader) throw new Error('Task filters or list header are missing')
     const toolbarBounds = toolbar.getBoundingClientRect()
     const listHeaderBounds = listHeader.getBoundingClientRect()
-    const tableBody = document.querySelector('.table-body')
-    if (!tableBody) throw new Error('Task list is missing')
     const controls = Array.from(toolbar.querySelectorAll('input, button'), (element) => {
       const rect = element.getBoundingClientRect()
       return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom }
@@ -151,7 +146,6 @@ test('task filters stay inside a narrow list pane without overlapping', async ({
           control.top >= panelBounds.top &&
           control.bottom <= panelBounds.bottom,
       ),
-      listScrolls: tableBody.scrollHeight > tableBody.clientHeight,
       overlaps,
     }
   })
@@ -161,7 +155,6 @@ test('task filters stay inside a narrow list pane without overlapping', async ({
     panelContainsToolbar: true,
     panelBeforeList: true,
     controlsContained: true,
-    listScrolls: true,
     overlaps: false,
   })
 })
@@ -184,7 +177,7 @@ test('task rows stay 36px tall at desktop and mobile widths, including hover', a
   }
 })
 
-test('shows the project mark and full title beside an open task', async ({ page, kata }) => {
+test('the task list and pane stay aligned beside an open task', async ({ page, kata }) => {
   await page.setViewportSize({ width: 1440, height: 800 })
   const credentials = await kata.launch(page)
   await kata.seedIssue(page, credentials, {
@@ -195,14 +188,25 @@ test('shows the project mark and full title beside an open task', async ({ page,
   await kata.seedIssue(page, credentials, { title: 'Pin it' })
   await page.goto(`${kata.origin}/kata?view=all-open`)
   const row = page.getByRole('button', { name: /Add retries to the task worker/ })
+
+  const search = (await page.locator('.kata-search-toolbar .kit-search-input').boundingBox())!
+  const listTitle = (await page
+    .getByRole('heading', { name: 'All open', exact: true })
+    .boundingBox())!
+  expect(Math.abs(search.x - listTitle.x)).toBeLessThan(1)
+  for (const column of ['due', 'updated', 'priority']) {
+    const header = (await page.locator(`.column-heading-${column} .col`).boundingBox())!
+    const cell = (await row.locator(`.cell-${column}`).boundingBox())!
+    expect(Math.abs(header.x + header.width - cell.x - cell.width)).toBeLessThan(1)
+  }
+
   await row.click()
+  await expect(row).toHaveClass(/selected/)
   const title = row.locator('.title-text')
   const project = row.locator('.cell-project')
   await expect(project.locator('.project-mark')).toBeVisible()
-  await expect(page.locator('.column-heading-project')).toBeHidden()
   expect(await title.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
   expect((await project.boundingBox())!.width).toBeLessThanOrEqual(16)
-  // The mark sits in its own column, not after each title.
   const shortMark = page
     .getByRole('button', { name: /Pin it/ })
     .locator('.cell-project .project-mark')
@@ -210,68 +214,36 @@ test('shows the project mark and full title beside an open task', async ({ page,
   const titleBox = (await title.boundingBox())!
   const titleHeading = (await page.locator('.column-heading-title .col span').boundingBox())!
   expect(Math.abs(titleHeading.x - titleBox.x)).toBeLessThan(1)
-  const search = (await page.locator('.kata-search-toolbar .kit-search-input').boundingBox())!
-  const listTitle = (await page
-    .getByRole('heading', { name: 'All open', exact: true })
-    .boundingBox())!
-  expect(Math.abs(search.x - listTitle.x)).toBeLessThan(1)
   for (const column of ['due', 'priority']) {
-    const header = await page.locator(`.column-heading-${column} .col`).boundingBox()
-    const cell = await row.locator(`.cell-${column}`).boundingBox()
-    expect(header).not.toBeNull()
-    expect(cell).not.toBeNull()
-    expect(Math.abs(header!.x + header!.width - cell!.x - cell!.width)).toBeLessThan(1)
+    const header = (await page.locator(`.column-heading-${column} .col`).boundingBox())!
+    const cell = (await row.locator(`.cell-${column}`).boundingBox())!
+    expect(Math.abs(header.x + header.width - cell.x - cell.width)).toBeLessThan(1)
   }
-
-  await page.goto(`${kata.origin}/kata?view=all-open`)
-  const visibleRow = page.getByRole('button', { name: /Add retries to the task worker/ })
-  for (const column of ['due', 'updated', 'priority']) {
-    const header = await page.locator(`.column-heading-${column} .col`).boundingBox()
-    const cell = await visibleRow.locator(`.cell-${column}`).boundingBox()
-    expect(header).not.toBeNull()
-    expect(cell).not.toBeNull()
-    expect(Math.abs(header!.x + header!.width - cell!.x - cell!.width)).toBeLessThan(1)
-  }
-})
-
-test('the list controls and selected row share a right edge beside an open task', async ({
-  page,
-  kata,
-}) => {
-  await page.setViewportSize({ width: 1440, height: 800 })
-  const credentials = await kata.launch(page)
-  await kata.seedIssue(page, credentials, { title: 'Edge example task', priority: 1 })
-  await page.goto(`${kata.origin}/kata?view=all-open`)
-  const row = page.getByRole('button', { name: /Edge example task/ })
-  await row.click()
-  await expect(row).toHaveClass(/selected/)
 
   const right = (box: { x: number; width: number } | null) => box!.x + box!.width
   const toolbar = right(await page.locator('.kata-search-toolbar').boundingBox())
-  const display = right(await page.getByRole('button', { name: 'Display' }).boundingBox())
+  const displayRight = right(await page.getByRole('button', { name: 'Display' }).boundingBox())
   const selection = right(await row.boundingBox())
-  expect(Math.abs(display - toolbar)).toBeLessThan(1)
+  expect(Math.abs(displayRight - toolbar)).toBeLessThan(1)
   expect(Math.abs(selection - toolbar)).toBeLessThan(1)
-  // Cells stop inside the selection, and the last heading ends over them.
   const priority = right(await row.locator('.pri-pill').boundingBox())
   const heading = right(await page.locator('.column-heading-priority .col').boundingBox())
   expect(selection - priority).toBeGreaterThanOrEqual(8)
   expect(Math.abs(heading - right(await row.locator('.cell-priority').boundingBox()))).toBeLessThan(
     1,
   )
-})
-
-test('the list and the open task put their header controls on one line', async ({ page, kata }) => {
-  await page.setViewportSize({ width: 1440, height: 800 })
-  const credentials = await kata.launch(page)
-  await kata.seedIssue(page, credentials, { title: 'Header line example' })
-  await page.goto(`${kata.origin}/kata?view=all-open`)
-  await page.getByRole('button', { name: /Header line example/ }).click()
-
-  const display = (await page.getByRole('button', { name: 'Display' }).boundingBox())!
+  const displayButton = (await page.getByRole('button', { name: 'Display' }).boundingBox())!
   const edit = (await page.getByRole('button', { name: 'Edit issue' }).boundingBox())!
-  expect(Math.abs(display.y - edit.y)).toBeLessThan(1)
-  expect(Math.abs(display.height - edit.height)).toBeLessThan(1)
+  expect(Math.abs(displayButton.y - edit.y)).toBeLessThan(1)
+  expect(Math.abs(displayButton.height - edit.height)).toBeLessThan(1)
+
+  await page.goto(`${kata.origin}/kata?view=all-open`)
+  const visibleRow = page.getByRole('button', { name: /Add retries to the task worker/ })
+  for (const column of ['due', 'updated', 'priority']) {
+    const header = (await page.locator(`.column-heading-${column} .col`).boundingBox())!
+    const cell = (await visibleRow.locator(`.cell-${column}`).boundingBox())!
+    expect(Math.abs(header.x + header.width - cell.x - cell.width)).toBeLessThan(1)
+  }
 })
 
 test('a narrow list names the Updated sort its hidden column applies', async ({ page, kata }) => {

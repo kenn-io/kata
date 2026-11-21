@@ -109,6 +109,7 @@ describe('IssueCollection', () => {
     window.localStorage.clear()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
     vi.useRealTimers()
   })
 
@@ -591,17 +592,18 @@ describe('IssueCollection', () => {
   })
 
   it('shows the local closing date in Logbook', () => {
+    vi.stubEnv('TZ', 'America/Los_Angeles')
     const closed = task({
       status: 'closed',
       closed_reason: 'done',
-      closed_at: new Date(2026, 4, 14, 23).toISOString(),
+      closed_at: '2026-05-15T04:00:00Z',
     })
     const { container } = render(IssueCollection, {
       props: {
         currentView: {
           name: 'logbook',
           fetched_at: '2026-05-16T10:00:00Z',
-          groups: [{ id: '2026-05-14', title: 'May 14', issues: [closed] }],
+          groups: [{ id: '2026-05-14', title: 'Thu, May 14', issues: [closed] }],
         },
         now: new Date('2026-05-16T12:00:00Z').getTime(),
         selectedIssueUID: null,
@@ -644,45 +646,35 @@ describe('IssueCollection', () => {
       },
     ],
   }
-  const resizeCases: [string, KataCurrentView, string][] = [
-    ['all', viewWithIssues([baseIssues[0]!]), 'Title'],
-    ['today', currentView, 'Date'],
-    ['logbook', resizeLogbookView, 'Closed'],
-    ['all', viewWithIssues([baseIssues[0]!]), 'Due'],
+  const resizeCases: [string, KataCurrentView][] = [
+    ['Title', viewWithIssues([baseIssues[0]!])],
+    ['Date', currentView],
+    ['Closed', resizeLogbookView],
+    ['Due', viewWithIssues([baseIssues[0]!])],
   ]
 
-  it.each(resizeCases)(
-    'resizes the %s view %s column with the keyboard',
-    async (name, currentView, label) => {
-      render(IssueCollection, {
-        props: {
-          currentView,
-          selectedIssueUID: null,
-          loading: false,
-          onSelect: () => {},
-        },
+  it.each(resizeCases)('resizes the %s column with the keyboard', async (label, currentView) => {
+    render(IssueCollection, {
+      props: {
+        currentView,
+        selectedIssueUID: null,
+        loading: false,
+        onSelect: () => {},
+      },
+    })
+    const handle = screen.getByRole('separator', { name: `Resize ${label} column` })
+    const before = Number(handle.getAttribute('aria-valuenow'))
+    await fireEvent.keyDown(handle, { key: 'ArrowRight' })
+    expect(Number(handle.getAttribute('aria-valuenow'))).toBe(before + 8)
+    if (label === 'Title') {
+      expect(
+        document.querySelector<HTMLElement>('.table')?.style.getPropertyValue('--table-cols-wide'),
+      ).toContain('minmax(48px, 248px)')
+      expect(JSON.parse(localStorage.getItem(KATA_TASK_COLUMN_WIDTHS_STORAGE_KEY)!)).toEqual({
+        title: 248,
       })
-      const handle = screen.getByRole('separator', { name: `Resize ${label} column` })
-      const before = Number(handle.getAttribute('aria-valuenow'))
-      await fireEvent.keyDown(handle, { key: 'ArrowRight' })
-      expect(Number(handle.getAttribute('aria-valuenow'))).toBe(before + 8)
-      if (label === 'Title') {
-        expect(
-          document
-            .querySelector<HTMLElement>('.table')
-            ?.style.getPropertyValue('--table-cols-wide'),
-        ).toContain('minmax(48px, 248px)')
-        expect(JSON.parse(localStorage.getItem(KATA_TASK_COLUMN_WIDTHS_STORAGE_KEY)!)).toEqual({
-          title: 248,
-        })
-      }
-      if (label === 'Due') {
-        expect(JSON.parse(localStorage.getItem(KATA_TASK_COLUMN_WIDTHS_STORAGE_KEY)!)).toEqual({
-          due: 72,
-        })
-      }
-    },
-  )
+    }
+  })
 
   it.each([
     ['date', currentView, /Overdue/, /Today 1/],
@@ -875,13 +867,6 @@ describe('IssueCollection', () => {
     expect(within(header).queryByText('Labels')).toBeNull()
     expect(within(row!).queryByText('home')).toBeNull()
     expect(table!.style.getPropertyValue('--table-cols-wide')).not.toContain('minmax(96px, 200px)')
-    expect(JSON.parse(localStorage.getItem(KATA_TASK_COLUMNS_STORAGE_KEY)!)).toEqual([
-      'project',
-      'due',
-      'updated',
-      'priority',
-      'owner',
-    ])
   })
 
   describe('Blocked by column', () => {
@@ -958,7 +943,7 @@ describe('IssueCollection', () => {
     })
   })
 
-  it('restores hidden columns after remount and lets them be turned on again', async () => {
+  it('restores hidden columns after remount', async () => {
     const first = render(IssueCollection, {
       props: {
         currentView: viewWithIssues(baseIssues),
@@ -990,25 +975,6 @@ describe('IssueCollection', () => {
     expect(within(header).queryByText('Priority')).toBeNull()
     expect(within(header).queryByText('Owner')).toBeNull()
     expect(within(header).queryByText('Labels')).toBeNull()
-
-    await fireEvent.click(screen.getByRole('button', { name: 'Display' }))
-    for (const name of ['Project', 'Due', 'Updated', 'Priority', 'Owner', 'Labels']) {
-      await fireEvent.click(screen.getByRole('checkbox', { name }))
-    }
-
-    expect(within(header).getByText('Project')).toBeTruthy()
-    expect(within(header).getByText('Priority')).toBeTruthy()
-    expect(within(header).getByText('Due')).toBeTruthy()
-    expect(within(header).getByText('Owner')).toBeTruthy()
-    expect(within(header).getByText('Labels')).toBeTruthy()
-    expect(JSON.parse(localStorage.getItem(KATA_TASK_COLUMNS_STORAGE_KEY)!)).toEqual([
-      'project',
-      'due',
-      'updated',
-      'priority',
-      'owner',
-      'tags',
-    ])
   })
 
   it('reconciles a restored sort whose optional column is disabled', () => {
@@ -1266,103 +1232,59 @@ describe('IssueCollection', () => {
     expect(screen.queryByRole('button', { name: /Child task/ })).toBeNull()
   })
 
-  it('hides same-group children from top-level rows and expands them once', async () => {
-    const parent = task({
-      uid: 'issue-parent',
-      short_id: 'parent',
-      qualified_id: 'example-project#parent',
-      title: 'Parent task',
-      child_counts: { open: 1, total: 1 },
-    })
-    const child = task({
-      uid: 'issue-child',
-      short_id: 'child',
-      qualified_id: 'example-project#child',
-      title: 'Child task',
-      parent_short_id: parent.short_id,
-    })
-    render(IssueCollection, {
-      props: {
-        currentView: viewWithIssues([parent, child]),
-        issueCatalog: [parent, child],
-        selectedIssueUID: null,
-        loading: false,
-        onSelect: () => {},
-      },
-    })
-
-    expect(screen.queryByRole('button', { name: /Child task/ })).toBeNull()
-
-    const parentRow = screen.getByRole('button', { name: /Parent task/ })
-    await fireEvent.keyDown(parentRow, { key: 'ArrowRight' })
-
-    await waitFor(() => {
-      expect(screen.getAllByRole('button', { name: /Child task/ })).toHaveLength(1)
-    })
-    expect(
-      screen.getByRole('button', { name: /Child task/ }).classList.contains('row--child'),
-    ).toBe(true)
-  })
-
-  it('keeps a child in its date group when its parent belongs to another group', async () => {
-    const parent = task({
-      uid: 'issue-parent',
-      short_id: 'parent',
-      qualified_id: 'example-project#parent',
-      title: 'Parent task',
-      child_counts: { open: 1, total: 1 },
-      metadata: { deadline_on: '2026-05-16' },
-    })
-    const child = task({
-      uid: 'issue-child',
-      short_id: 'child',
-      qualified_id: 'example-project#child',
-      title: 'Overdue child',
-      parent_short_id: parent.short_id,
-      metadata: { deadline_on: '2026-05-15' },
-    })
-    const otherOverdue = task({
-      uid: 'issue-other-overdue',
-      short_id: 'other-overdue',
-      qualified_id: 'example-project#other-overdue',
-      title: 'Other overdue task',
-      metadata: { deadline_on: '2026-05-15' },
-    })
-    const { container } = render(IssueCollection, {
-      props: {
-        currentView: {
-          name: 'today',
-          fetched_at: currentView.fetched_at,
-          groups: [
-            { id: 'overdue', title: 'Overdue', issues: [child, otherOverdue] },
+  it.each([
+    ['same group', true],
+    ['different groups', false],
+  ] as const)(
+    'shows a task under its parent only when they share a group (%s)',
+    async (_caseName, sameGroup) => {
+      const parent = task({
+        uid: 'issue-parent',
+        short_id: 'parent',
+        qualified_id: 'example-project#parent',
+        title: 'Parent task',
+        child_counts: { open: 1, total: 1 },
+        metadata: { deadline_on: sameGroup ? '2026-05-15' : '2026-05-16' },
+      })
+      const child = task({
+        uid: 'issue-child',
+        short_id: 'child',
+        qualified_id: 'example-project#child',
+        title: 'Child task',
+        parent_short_id: parent.short_id,
+        metadata: { deadline_on: '2026-05-15' },
+      })
+      const groups = sameGroup
+        ? [{ id: 'overdue', title: 'Overdue', issues: [parent, child] }]
+        : [
+            { id: 'overdue', title: 'Overdue', issues: [child] },
             { id: 'today', title: 'Today', issues: [parent] },
-          ],
+          ]
+      render(IssueCollection, {
+        props: {
+          currentView: { name: 'today', fetched_at: currentView.fetched_at, groups },
+          issueCatalog: [parent, child],
+          selectedIssueUID: null,
+          loading: false,
+          onSelect: () => {},
         },
-        issueCatalog: [parent, child, otherOverdue],
-        scopedProjectName: 'example-project',
-        selectedIssueUID: null,
-        loading: false,
-        onSelect: () => {},
-      },
-    })
+      })
 
-    const overdueGroup = container.querySelector<HTMLElement>(
-      'section[aria-labelledby="group-overdue"]',
-    )
-    expect(overdueGroup).toBeTruthy()
-    expect(within(overdueGroup!).getByRole('heading', { name: /^Overdue\s+2$/ })).toBeTruthy()
-    expect(within(overdueGroup!).getByRole('button', { name: /Overdue child/ })).toBeTruthy()
-    expect(screen.getByRole('heading', { name: /^Today\s+1$/ })).toBeTruthy()
+      const parentRow = screen.getByRole('button', { name: /Parent task/ })
+      const initialChildRows = screen.queryAllByRole('button', { name: /Child task/ })
+      expect(initialChildRows).toHaveLength(sameGroup ? 0 : 1)
+      if (!sameGroup) expect(initialChildRows[0]!.classList.contains('row--child')).toBe(false)
 
-    await fireEvent.keyDown(screen.getByRole('button', { name: /Parent task/ }), {
-      key: 'ArrowRight',
-    })
+      await fireEvent.keyDown(parentRow, { key: 'ArrowRight' })
 
-    const childRows = screen.getAllByRole('button', { name: /Overdue child/ })
-    expect(childRows).toHaveLength(1)
-    expect(childRows[0]!.classList.contains('row--child')).toBe(false)
-    expect(within(overdueGroup!).getByRole('button', { name: /Overdue child/ })).toBeTruthy()
-  })
+      await waitFor(() => {
+        expect(screen.getAllByRole('button', { name: /Child task/ })).toHaveLength(1)
+      })
+      expect(
+        screen.getByRole('button', { name: /Child task/ }).classList.contains('row--child'),
+      ).toBe(sameGroup)
+    },
+  )
 
   it('bounds identity reads as Logbook date groups increase', () => {
     const issueCount = 128

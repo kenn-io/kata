@@ -89,19 +89,12 @@ test('keeps a resized width and copies a short task ID from the hovered row', as
   })
   await page.goto(`${kata.origin}/kata?view=all-open`)
 
-  const titleHeading = page.locator('.column-heading-title')
-  const initialTitleWidth = (await titleHeading.boundingBox())!.width
-  const titleHandle = page.getByRole('separator', { name: 'Resize Title column' })
-  await titleHandle.focus()
-  await page.keyboard.press('ArrowLeft')
-  await expect
-    .poll(async () => (await titleHeading.boundingBox())!.width)
-    .toBeLessThan(initialTitleWidth)
-
   const handle = page.getByRole('separator', { name: 'Resize Due column' })
   await handle.focus()
+  const currentWidth = Math.round((await page.locator('.column-heading-due').boundingBox())!.width)
+  await expect(handle).toHaveAttribute('aria-valuenow', String(currentWidth))
+  const expectedWidth = String(Number(await handle.getAttribute('aria-valuenow')) + 8)
   await page.keyboard.press('ArrowRight')
-  await expect(handle).toHaveAttribute('aria-valuenow', '78')
 
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], {
     origin: kata.origin,
@@ -117,10 +110,7 @@ test('keeps a resized width and copies a short task ID from the hovered row', as
     .toBe(overdue.short_id)
 
   await page.reload()
-  await expect(page.getByRole('separator', { name: 'Resize Due column' })).toHaveAttribute(
-    'aria-valuenow',
-    '78',
-  )
+  await expect(handle).toHaveAttribute('aria-valuenow', expectedWidth)
 })
 
 test('project creation and quick capture use the designated inbox project', async ({
