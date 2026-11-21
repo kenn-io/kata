@@ -105,8 +105,10 @@ func newQuietPollHub(t *testing.T, store db.Storage, issues int) *quietPollHub {
 }
 
 // appendQuietIssues seeds issues without CreateIssue's per-issue cost. Like
-// appendUnrelatedEvents, it uses a transaction; it writes one issue.updated
-// event per issue. Keep its inserts in step with the issues and events schema.
+// appendUnrelatedEvents, it uses a transaction. Call it once per fresh store:
+// its UIDs start at zero. One issue.updated event per issue is enough because
+// the poll uses issue_uid to find owned events and includes that event type.
+// Keep its inserts in step with the issues and events schema.
 func appendQuietIssues(t *testing.T, store db.Storage, project db.Project, n int) {
 	t.Helper()
 	ctx := t.Context()
