@@ -27,6 +27,18 @@ test('a long server name leaves New task reachable', async ({ page, kata }) => {
   }
 })
 
+test('task toolbar follows the list title', async ({ page, kata }) => {
+  await page.setViewportSize({ width: 1440, height: 800 })
+  await kata.launch(page)
+
+  const list = page.getByRole('region', { name: 'Issues' })
+  const title = (await list.getByRole('heading', { name: 'All open' }).boundingBox())!
+  const searchPanel = (await page.locator('.kata-search-panel').boundingBox())!
+  const columns = (await list.locator('.table-header').boundingBox())!
+  expect(searchPanel.y).toBeGreaterThanOrEqual(title.y + title.height)
+  expect(searchPanel.y + searchPanel.height).toBeLessThanOrEqual(columns.y)
+})
+
 test('system views stay beside the list until the mobile layout', async ({ page, kata }) => {
   await page.setViewportSize({ width: 853, height: 684 })
   await kata.launch(page)
@@ -100,13 +112,15 @@ test('task filters stay inside a narrow list pane without overlapping', async ({
     await kata.seedIssue(page, credentials, { title: `Narrow pane task ${index}` })
   }
   await page.goto(`${kata.origin}/kata?view=all-open&issue=${issue.uid}`)
-  await page.getByRole('button', { name: 'Switch to side-by-side layout' }).click()
+  await page.getByRole('button', { name: 'Display' }).click()
+  await page.getByRole('radio', { name: 'Beside list' }).click()
+  await page.keyboard.press('Escape')
   await page.setViewportSize({ width: 900, height: 800 })
 
   const layout = await page.locator('.kata-search-panel').evaluate((panel) => {
     const panelBounds = panel.getBoundingClientRect()
     const toolbar = panel.querySelector('.kata-search-toolbar')
-    const listHeader = document.querySelector('.issue-list .pane-header')
+    const listHeader = document.querySelector('.issue-list .table-header')
     if (!toolbar || !listHeader) throw new Error('Task filters or list header are missing')
     const toolbarBounds = toolbar.getBoundingClientRect()
     const listHeaderBounds = listHeader.getBoundingClientRect()
@@ -156,7 +170,24 @@ test('task filters stay inside a narrow list pane without overlapping', async ({
     listScrolls: true,
     overlaps: false,
   })
-  expect(layout.panelHeight).toBeGreaterThan(48)
+})
+
+test('task rows stay 36px tall at desktop and mobile widths, including hover', async ({
+  page,
+  kata,
+}) => {
+  const credentials = await kata.launch(page)
+  await kata.seedIssue(page, credentials, { title: 'Compact example task' })
+  await page.goto(`${kata.origin}/kata?view=all-open`)
+  const row = page.getByRole('button', { name: /Compact example task/ })
+
+  for (const width of [1440, 1024, 600]) {
+    await page.setViewportSize({ width, height: 800 })
+    await expect(row).toBeVisible()
+    expect(await row.evaluate((element) => element.getBoundingClientRect().height)).toBe(36)
+    await row.hover()
+    expect(await row.evaluate((element) => element.getBoundingClientRect().height)).toBe(36)
+  }
 })
 
 test('the task count sits beside the list title', async ({ page, kata }) => {
@@ -166,8 +197,8 @@ test('the task count sits beside the list title', async ({ page, kata }) => {
   await page.goto(`${kata.origin}/kata?view=all-open`)
 
   const list = page.getByRole('region', { name: 'Issues' })
-  const title = (await list.getByRole('heading', { name: 'All Open' }).boundingBox())!
-  const count = (await list.getByText(/^\d+ tasks?$/).boundingBox())!
+  const title = (await list.getByRole('heading', { name: 'All open' }).boundingBox())!
+  const count = (await list.locator('.count').boundingBox())!
 
   expect(count.y).toBeLessThan(title.y + title.height)
   expect(count.y + count.height).toBeGreaterThan(title.y)

@@ -268,6 +268,7 @@
   let captureOpen = $state(false)
   let inboxChooserOpen = $state(false)
   let mobileNavigationOpen = $state(false)
+  let detailBeside = $state(false)
   let creationIntent = $state<'project' | 'task' | null>(null)
   const mediumScreen = new MediaQuery(MEDIA.medium)
   let linkFilters = $state(createKataLinkFilters('all'))
@@ -343,6 +344,24 @@
       ? projection.projects.find((project) => project.uid === scope.project_uid)
       : undefined
   })
+  let projectView = $derived(Boolean(route.projectUID && !route.view))
+  let hasActiveTaskFilters = $derived(
+    inputFilters.query.trim() !== '' ||
+      inputFilters.owner.trim() !== '' ||
+      inputFilters.label.trim() !== '' ||
+      Boolean(inputFilters.relationships?.length) ||
+      (inputFilters.scope.kind === 'project' && !projectView) ||
+      inputFilters.status !== defaultKataTaskSearchFilters(viewName).status,
+  )
+  let unfilteredTaskCount = $derived(
+    selectedProject?.open_count ??
+      projection.projects.reduce((count, project) => count + project.open_count, 0),
+  )
+  let noMatchingTasks = $derived(
+    !loading &&
+      hasActiveTaskFilters &&
+      currentView.groups.every((group) => group.issues.length === 0),
+  )
   let selectedCommentUID = $state<string | undefined>()
   let returnComment = $state<{ issueUID: string; commentUID: string } | undefined>()
   let selectedIssueUID = $derived(route.issueUID ?? null)
@@ -497,6 +516,20 @@
       ...preferences,
       splitDirection: preferences.splitDirection === 'vertical' ? 'horizontal' : 'vertical',
     })
+  }
+
+  function setSplitDirection(direction: 'horizontal' | 'vertical'): void {
+    onPreferencesChange({ ...preferences, splitDirection: direction })
+  }
+
+  function clearTaskFilters(): void {
+    const next = { ...withResolvedView(filterRoute), filters: emptyShareableFilters() }
+    if (projectView && inputFilters.scope.kind === 'project') {
+      next.projectUID = inputFilters.scope.project_uid
+    } else {
+      delete next.projectUID
+    }
+    navigate(next)
   }
 
   function resizeSplit(size: number): void {
@@ -858,6 +891,7 @@
           responsiveBreakpoint={700}
           ariaLabel="Resize Kata panes"
           onResize={resizeSplit}
+          bind:secondaryBeside={detailBeside}
           primary={listPane}
           secondary={route.issueUID ? detailPane : undefined}
         />
@@ -906,14 +940,18 @@
         </section>
       {/if}
     {:else}
-      <IssueFilters
-        filters={inputFilters}
-        projects={projection.projects}
-        onChange={updateFilters}
-        onSubmitSearch={submitSearch}
-      />
+      {#snippet filtersToolbar()}
+        <IssueFilters
+          filters={inputFilters}
+          projects={projection.projects}
+          {projectView}
+          showStatus={currentView.view !== 'logbook'}
+          onChange={updateFilters}
+          onSubmitSearch={submitSearch}
+        />
+      {/snippet}
       <IssueCollection
-        headerActions={paneDirection}
+        toolbar={filtersToolbar}
         now={connectionNow}
         resultsKey={JSON.stringify([route.projectUID ?? null, route.filters])}
         {navigationGeneration}
@@ -923,17 +961,36 @@
           fetched_at: currentView.fetched_at,
         }}
         issueCatalog={projection.issues}
-        scopeLabel={scopeLabel()}
+        scopeLabel={projectView ? selectedProject?.name : undefined}
         scopedProjectName={selectedProject?.name ?? null}
+        {projectView}
+        {detailBeside}
+        unfilteredTotal={unfilteredTaskCount}
+        showFilteredTotal={hasActiveTaskFilters && (projectView || currentView.view === 'all')}
+        splitDirection={preferences.splitDirection}
+        onSplitDirectionChange={setSplitDirection}
         {selectedIssueUID}
         {loading}
         statusFilter={searchFilters.status}
         readyIssueUIDs={projection.member_issue_uid_set}
         onSelect={(issue) => selectIssue(issue.uid)}
         onOpenGraph={(issue) => openGraph(issue.uid)}
-        empty={!loading && projection.projects.length === 0 ? noProjects : undefined}
+        empty={noMatchingTasks
+          ? noMatchingTasksSnippet
+          : !loading && projection.projects.length === 0
+            ? noProjects
+            : undefined}
       />
     {/if}
+  </div>
+{/snippet}
+
+{#snippet noMatchingTasksSnippet()}
+  <div class="empty-search">
+    <span>No matching tasks</span>
+    <button type="button" onclick={clearTaskFilters}>
+      {inputFilters.query.trim() ? 'Clear search' : 'Clear filters'}
+    </button>
   </div>
 {/snippet}
 
@@ -1181,6 +1238,26 @@
     padding: var(--space-6);
     color: var(--text-muted);
     text-align: center;
+  }
+
+  .empty-search {
+    display: grid;
+    justify-items: center;
+    gap: 12px;
+    padding: 48px 12px;
+    color: var(--text-muted);
+    font-size: var(--font-size-md);
+    text-align: center;
+  }
+
+  .empty-search button {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--accent-blue);
+    font: inherit;
+    font-size: var(--font-size-sm);
+    cursor: pointer;
   }
 
   .mutation-message {

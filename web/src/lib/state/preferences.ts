@@ -11,8 +11,8 @@ export interface Preferences {
 export const defaultPreferences: Preferences = {
   theme: 'system',
   columns: ['status', 'title'],
-  splitDirection: 'vertical',
-  splitSize: 420,
+  splitDirection: 'horizontal',
+  splitSize: 480,
   collapsedGroups: [],
 }
 

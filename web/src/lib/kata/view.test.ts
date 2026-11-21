@@ -64,6 +64,9 @@ describe('kata task view builder', () => {
       issues: [
         issue('issue-1', 'Deadline slipped', 'project-health', { deadline_on: '2026-05-10' }),
         issue('issue-2', 'Morning review', 'project-workspace', { scheduled_on: '2026-05-15' }),
+        issue('issue-past', 'Started yesterday', 'project-workspace', {
+          scheduled_on: '2026-05-14',
+        }),
         issue('issue-3', 'Evening class', 'project-health', {
           scheduled_on: '2026-05-15',
           today_bucket: 'evening',
@@ -101,7 +104,10 @@ describe('kata task view builder', () => {
         {
           id: 'today',
           title: 'Today',
-          issues: [expect.objectContaining({ title: 'Morning review' })],
+          issues: [
+            expect.objectContaining({ title: 'Morning review' }),
+            expect.objectContaining({ title: 'Started yesterday' }),
+          ],
         },
         {
           id: 'evening',
@@ -174,8 +180,8 @@ describe('kata task view builder', () => {
     ).toEqual([
       ['overdue', 'Overdue', ['Pay rent']],
       ['today', 'Today', ['Sign contract', 'Started last week']],
-      ['2026-05-16', '2026-05-16', ['Tomorrow']],
-      ['2026-05-20', '2026-05-20', ['Due before start', 'Start then due']],
+      ['2026-05-16', 'Sat, May 16', ['Tomorrow']],
+      ['2026-05-20', 'Wed, May 20', ['Due before start', 'Start then due']],
     ])
   })
 
@@ -240,8 +246,8 @@ describe('kata task view builder', () => {
     expect(
       view.groups.map((group) => [group.id, group.title, group.issues.map((item) => item.title)]),
     ).toEqual([
-      ['another-author/agent-2', 'another-author/agent-2', ['Another pair']],
-      ['coordinator/reviewer-7', 'coordinator/reviewer-7', ['First task', 'Second task']],
+      ['another-author/agent-2', 'agent-2 for another-author', ['Another pair']],
+      ['coordinator/reviewer-7', 'reviewer-7 for coordinator', ['First task', 'Second task']],
     ])
   })
 
@@ -403,8 +409,8 @@ describe('kata task view builder', () => {
     expect(
       view.groups.map((group) => [group.id, group.title, group.issues.map((item) => item.title)]),
     ).toEqual([
-      ['2026-05-15', '2026-05-15', ['Done later']],
-      ['2026-05-14', '2026-05-14', ['Done earlier']],
+      ['2026-05-15', 'Today', ['Done later']],
+      ['2026-05-14', 'Thu, May 14', ['Done earlier']],
     ])
   })
 })

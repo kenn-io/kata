@@ -14,7 +14,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { KataTaskSummary } from '../lib/kata/types'
 import type { KataCurrentView } from '../lib/kata/authority'
 import IssueCollection from './IssueCollection.svelte'
-import { KATA_TASK_COLUMNS_STORAGE_KEY } from '../lib/kata/columns'
+import {
+  KATA_TASK_COLUMNS_STORAGE_KEY,
+  KATA_TASK_COLUMN_WIDTHS_STORAGE_KEY,
+} from '../lib/kata/columns'
 
 interface IssueListRenderOptions {
   props: {
@@ -508,7 +511,7 @@ describe('IssueCollection', () => {
 
     expect(screen.getByRole('heading', { name: 'Today' })).toBeTruthy()
     expect(screen.getByRole('button', { name: /Sort by Priority/ })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Sort by Updated/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Sort by Updated/ })).toBeNull()
     expect(screen.getByRole('button', { name: /Sort by Title/ })).toBeTruthy()
 
     const row = screen.getByRole('button', {
@@ -518,15 +521,125 @@ describe('IssueCollection', () => {
         name.includes('project: example-project') &&
         name.includes('owner: user-a') &&
         name.includes('priority: 0') &&
-        name.includes('home · monthly'),
+        name.includes('home') &&
+        name.includes('monthly'),
     })
     expect(row.getAttribute('aria-current')).toBe('true')
     expect(row.classList.contains('selected')).toBe(true)
     expect(within(row).getByText('Review example project')).toBeTruthy()
-    expect(within(row).getByText('example-project#pay-rent')).toBeTruthy()
     expect(within(row).getByText('P0')).toBeTruthy()
-    expect(within(row).getByText('home · monthly')).toBeTruthy()
+    expect(within(row).getByText('home')).toBeTruthy()
+    expect(within(row).getByText('monthly')).toBeTruthy()
     expect(within(row).getByText('user-a')).toBeTruthy()
+  })
+
+  it('hides ID by default and shows the project and status mark', () => {
+    const { container } = render(IssueCollection, {
+      props: {
+        currentView: viewWithIssues([baseIssues[0]!]),
+        selectedIssueUID: null,
+        loading: false,
+        onSelect: () => {},
+      },
+    })
+    const header = container.querySelector<HTMLElement>('.table-header')!
+    const row = container.querySelector<HTMLElement>('.row')!
+
+    expect(within(header).queryByText('ID')).toBeNull()
+    expect(within(header).getByText('Project')).toBeTruthy()
+    expect(row.querySelector('.cell-id')).toBeNull()
+    expect(row.querySelector('.cell-project')?.textContent).toContain('example-project')
+    expect(row.querySelector('.status-mark')).toBeTruthy()
+  })
+
+  it('keeps the project name available to screen readers beside the detail pane', () => {
+    const { container } = render(IssueCollection, {
+      props: {
+        currentView: viewWithIssues([baseIssues[0]!]),
+        selectedIssueUID: null,
+        loading: false,
+        detailBeside: true,
+        onSelect: () => {},
+      },
+    })
+
+    expect(container.querySelector('.cell-project')).toBeTruthy()
+    expect(container.querySelector('.cell-project .kit-sr-only')?.textContent).toBe(
+      'example-project',
+    )
+  })
+
+  it('copies the short task ID with C on the focused row', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
+    render(IssueCollection, {
+      props: {
+        currentView: viewWithIssues([baseIssues[0]!]),
+        selectedIssueUID: null,
+        loading: false,
+        onSelect: () => {},
+      },
+    })
+    const row = screen.getByRole('button', { name: /Review example project/ })
+    row.focus()
+
+    await fireEvent.keyDown(row, { key: 'c' })
+
+    expect(writeText).toHaveBeenCalledWith('pay-rent')
+    expect(row.getAttribute('aria-keyshortcuts')).toBe('c')
+  })
+
+  it('resizes a column from the keyboard and saves its width', async () => {
+    render(IssueCollection, {
+      props: {
+        currentView: viewWithIssues([baseIssues[0]!]),
+        selectedIssueUID: null,
+        loading: false,
+        onSelect: () => {},
+      },
+    })
+    const handle = screen.getByRole('separator', { name: 'Resize Due column' })
+
+    await fireEvent.keyDown(handle, { key: 'ArrowRight' })
+
+    expect(handle.getAttribute('aria-valuenow')).toBe('72')
+    expect(JSON.parse(localStorage.getItem(KATA_TASK_COLUMN_WIDTHS_STORAGE_KEY)!)).toEqual({
+      due: 72,
+    })
+  })
+
+  it('sorts due dates with overdue tasks first and undated tasks last', async () => {
+    const overdue = task({
+      uid: 'overdue',
+      short_id: 'overdue',
+      metadata: { deadline_on: '2026-05-10' },
+    })
+    const later = task({ uid: 'later', short_id: 'later', metadata: { deadline_on: '2026-05-20' } })
+    const undated = task({ uid: 'undated', short_id: 'undated' })
+    render(IssueCollection, {
+      props: {
+        currentView: viewWithIssues([undated, later, overdue]),
+        selectedIssueUID: null,
+        loading: false,
+        onSelect: () => {},
+      },
+    })
+
+    await fireEvent.click(screen.getByRole('button', { name: /Sort by Due/ }))
+
+    expect(visibleRows().map((row) => row.dataset.uid)).toEqual(['overdue', 'later', 'undated'])
+  })
+
+  it('keeps Inbox task rows without a group heading', () => {
+    const { container } = render(IssueCollection, {
+      props: {
+        currentView: { ...viewWithIssues([baseIssues[0]!]), name: 'inbox' },
+        selectedIssueUID: null,
+        loading: false,
+        onSelect: () => {},
+      },
+    })
+    expect(container.querySelector('.group-title')).toBeNull()
   })
 
   it('renders the projected deadline date in the due column and accessible text', () => {
@@ -582,7 +695,7 @@ describe('IssueCollection', () => {
     const onOpenGraph = vi.fn()
     render(IssueCollection, {
       props: {
-        currentView,
+        currentView: viewWithIssues(baseIssues),
         selectedIssueUID: null,
         loading: false,
         onSelect,
@@ -614,10 +727,10 @@ describe('IssueCollection', () => {
     expect(screen.queryByText('Updating')).toBeNull()
   })
 
-  it('keeps the header in the scrolling table and places Updated third', () => {
+  it('keeps the header in the scrolling table with Project and Due before Updated', () => {
     const { container } = render(IssueCollection, {
       props: {
-        currentView,
+        currentView: viewWithIssues(baseIssues),
         selectedIssueUID: null,
         loading: false,
         onSelect: () => {},
@@ -631,13 +744,13 @@ describe('IssueCollection', () => {
     const labels = Array.from(tableHeader?.querySelectorAll('.col') ?? []).map((el) =>
       el.textContent?.trim(),
     )
-    expect(labels.slice(0, 3)).toEqual(['ID', 'Title', 'Updated'])
+    expect(labels.slice(0, 5)).toEqual(['Title', 'Project', 'Due', 'Updated', 'Priority'])
   })
 
-  it('hides an optional column while keeping ID and Title visible', async () => {
+  it('hides Labels while keeping Title and Project visible', async () => {
     const { container } = render(IssueCollection, {
       props: {
-        currentView,
+        currentView: viewWithIssues(baseIssues),
         selectedIssueUID: null,
         loading: false,
         onSelect: () => {},
@@ -651,18 +764,19 @@ describe('IssueCollection', () => {
     expect(table).not.toBeNull()
     expect(table!.style.getPropertyValue('--table-cols-wide')).toContain('minmax(96px, 200px)')
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Columns' }))
-    await fireEvent.click(screen.getByRole('checkbox', { name: 'Tags' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Display' }))
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'Labels' }))
 
-    expect(within(header).getByText('ID')).toBeTruthy()
     expect(within(header).getByText('Title')).toBeTruthy()
-    expect(within(header).queryByText('Tags')).toBeNull()
-    expect(within(row!).queryByText('home · monthly')).toBeNull()
+    expect(within(header).getByText('Project')).toBeTruthy()
+    expect(within(header).queryByText('Labels')).toBeNull()
+    expect(within(row!).queryByText('home')).toBeNull()
     expect(table!.style.getPropertyValue('--table-cols-wide')).not.toContain('minmax(96px, 200px)')
     expect(JSON.parse(localStorage.getItem(KATA_TASK_COLUMNS_STORAGE_KEY)!)).toEqual([
+      'project',
+      'due',
       'updated',
       'priority',
-      'due',
       'owner',
     ])
   })
@@ -691,7 +805,7 @@ describe('IssueCollection', () => {
     function enableColumn() {
       localStorage.setItem(
         KATA_TASK_COLUMNS_STORAGE_KEY,
-        JSON.stringify(['updated', 'priority', 'due', 'owner', 'blockedBy', 'tags']),
+        JSON.stringify(['project', 'due', 'updated', 'priority', 'owner', 'blockedBy', 'tags']),
       )
     }
 
@@ -741,25 +855,25 @@ describe('IssueCollection', () => {
     })
   })
 
-  it('restores hidden columns after remount and Show all resets the preference', async () => {
+  it('restores hidden columns after remount and lets them be turned on again', async () => {
     const first = render(IssueCollection, {
       props: {
-        currentView,
+        currentView: viewWithIssues(baseIssues),
         selectedIssueUID: null,
         loading: false,
         onSelect: () => {},
       },
     })
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Columns' }))
-    for (const name of ['Updated', 'Priority', 'Due', 'Owner', 'Tags']) {
+    await fireEvent.click(screen.getByRole('button', { name: 'Display' }))
+    for (const name of ['Project', 'Due', 'Updated', 'Priority', 'Owner', 'Labels']) {
       await fireEvent.click(screen.getByRole('checkbox', { name }))
     }
     first.unmount()
 
     const second = render(IssueCollection, {
       props: {
-        currentView,
+        currentView: viewWithIssues(baseIssues),
         selectedIssueUID: null,
         loading: false,
         onSelect: () => {},
@@ -767,26 +881,29 @@ describe('IssueCollection', () => {
     })
 
     const header = second.container.querySelector<HTMLElement>('.table-header')!
+    expect(within(header).queryByText('Project')).toBeNull()
+    expect(within(header).queryByText('Due')).toBeNull()
     expect(within(header).queryByText('Updated')).toBeNull()
     expect(within(header).queryByText('Priority')).toBeNull()
-    expect(within(header).queryByText('Due')).toBeNull()
     expect(within(header).queryByText('Owner')).toBeNull()
-    expect(within(header).queryByText('Tags')).toBeNull()
+    expect(within(header).queryByText('Labels')).toBeNull()
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Columns' }))
-    await fireEvent.click(screen.getByRole('button', { name: 'Show all' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Display' }))
+    for (const name of ['Project', 'Due', 'Updated', 'Priority', 'Owner', 'Labels']) {
+      await fireEvent.click(screen.getByRole('checkbox', { name }))
+    }
 
+    expect(within(header).getByText('Project')).toBeTruthy()
     expect(within(header).getByText('Priority')).toBeTruthy()
     expect(within(header).getByText('Due')).toBeTruthy()
     expect(within(header).getByText('Owner')).toBeTruthy()
-    expect(within(header).getByText('Tags')).toBeTruthy()
-    expect(within(header).getByText('Blocked by')).toBeTruthy()
+    expect(within(header).getByText('Labels')).toBeTruthy()
     expect(JSON.parse(localStorage.getItem(KATA_TASK_COLUMNS_STORAGE_KEY)!)).toEqual([
+      'project',
+      'due',
       'updated',
       'priority',
-      'due',
       'owner',
-      'blockedBy',
       'tags',
     ])
   })
@@ -832,7 +949,7 @@ describe('IssueCollection', () => {
       },
     })
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Columns' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Display' }))
     await fireEvent.click(screen.getByRole('checkbox', { name: 'Owner' }))
 
     expect(
@@ -844,7 +961,7 @@ describe('IssueCollection', () => {
     localStorage.setItem(KATA_TASK_COLUMNS_STORAGE_KEY, JSON.stringify({ visible: ['updated'] }))
     const { container } = render(IssueCollection, {
       props: {
-        currentView,
+        currentView: viewWithIssues(baseIssues),
         selectedIssueUID: null,
         loading: false,
         onSelect: () => {},
@@ -852,7 +969,7 @@ describe('IssueCollection', () => {
     })
 
     const header = container.querySelector<HTMLElement>('.table-header')!
-    for (const name of ['Updated', 'Priority', 'Due', 'Owner', 'Tags']) {
+    for (const name of ['Project', 'Due', 'Updated', 'Priority', 'Owner', 'Labels']) {
       expect(within(header).getByText(name)).toBeTruthy()
     }
     expect(within(header).queryByText('Blocked by')).toBeNull()
@@ -875,7 +992,7 @@ describe('IssueCollection', () => {
         .getAttribute('aria-pressed'),
     ).toBe('true')
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Columns' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Display' }))
     await fireEvent.click(screen.getByRole('checkbox', { name: 'Priority' }))
 
     expect(screen.queryByRole('button', { name: /Sort by Priority/ })).toBeNull()
@@ -927,7 +1044,7 @@ describe('IssueCollection', () => {
   it('clicking the Updated column header flips the default recency order', async () => {
     render(IssueCollection, {
       props: {
-        currentView,
+        currentView: viewWithIssues(baseIssues),
         selectedIssueUID: null,
         loading: false,
         onSelect: () => {},
@@ -1260,8 +1377,6 @@ describe('IssueCollection', () => {
     })
 
     const expandAll = screen.getByRole('button', { name: 'Expand all tasks' })
-    const collapseAll = screen.getByRole('button', { name: 'Collapse all tasks' })
-    expect(collapseAll.hasAttribute('disabled')).toBe(true)
 
     await fireEvent.click(expandAll)
 
@@ -1271,7 +1386,7 @@ describe('IssueCollection', () => {
     expect(parentRow.getAttribute('aria-expanded')).toBe('true')
     expect(childRow.getAttribute('aria-expanded')).toBe('true')
     expect(grandchildRow.classList.contains('row--child')).toBe(true)
-    expect(expandAll.hasAttribute('disabled')).toBe(true)
+    const collapseAll = screen.getByRole('button', { name: 'Collapse all tasks' })
     expect(collapseAll.hasAttribute('disabled')).toBe(false)
 
     await fireEvent.click(collapseAll)
@@ -1281,7 +1396,9 @@ describe('IssueCollection', () => {
     })
     expect(screen.queryByRole('button', { name: /Child task/ })).toBeNull()
     expect(screen.queryByRole('button', { name: /Grandchild task/ })).toBeNull()
-    expect(collapseAll.hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: 'Expand all tasks' }).hasAttribute('disabled')).toBe(
+      false,
+    )
   })
 
   it('j and k move focus and selection through rows', async () => {

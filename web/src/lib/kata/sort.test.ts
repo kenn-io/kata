@@ -29,6 +29,21 @@ function task(overrides: Partial<KataTaskSummary>): KataTaskSummary {
 }
 
 describe('kata task sorting', () => {
+  test('sorts deadlines while leaving undated tasks last in either direction', () => {
+    const tasks = [
+      task({ uid: 'none' }),
+      task({ uid: 'later', deadline_on_date: '2026-05-20' }),
+      task({ uid: 'early', metadata: { deadline_on: '2026-05-01' } }),
+    ]
+    expect(sortKataTasks(tasks, { key: 'due', direction: 'asc' }).map((item) => item.uid)).toEqual([
+      'early',
+      'later',
+      'none',
+    ])
+    expect(sortKataTasks(tasks, { key: 'due', direction: 'desc' }).map((item) => item.uid)).toEqual(
+      ['later', 'early', 'none'],
+    )
+  })
   test('defaults to recently updated first and toggles the active key', () => {
     expect(DEFAULT_KATA_TASK_SORT).toEqual({ key: 'updated', direction: 'desc' })
     expect(toggleKataTaskSort(DEFAULT_KATA_TASK_SORT, 'updated')).toEqual({

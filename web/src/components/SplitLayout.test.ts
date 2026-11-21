@@ -41,6 +41,7 @@ describe('SplitLayout', () => {
     render(SplitLayoutTestHarness, { props: { onResize } })
 
     const handle = screen.getByRole('separator', { name: 'Resize Kata panes' })
+    expect(screen.getByTestId('secondary-beside').textContent).toBe('true')
     expect(handle.getAttribute('aria-orientation')).toBe('vertical')
     expect(handle.getAttribute('aria-valuemin')).toBe('200')
     expect(handle.getAttribute('aria-valuemax')).toBe('600')
@@ -67,6 +68,7 @@ describe('SplitLayout', () => {
 
     const handle = screen.getByRole('separator', { name: 'Resize Kata panes' })
     expect(handle.getAttribute('aria-orientation')).toBe('horizontal')
+    expect(screen.getByTestId('secondary-beside').textContent).toBe('false')
     expect(handle.getAttribute('aria-valuemax')).toBe('400')
     expect(handle.getAttribute('aria-valuenow')).toBe('210')
 
@@ -92,6 +94,7 @@ describe('SplitLayout', () => {
     expect(
       screen.getByRole('separator', { name: 'Resize Kata panes' }).getAttribute('aria-orientation'),
     ).toBe('horizontal')
+    expect(screen.getByTestId('secondary-beside').textContent).toBe('false')
   })
 
   it('preserves the split preference while the detail pane is closed', () => {

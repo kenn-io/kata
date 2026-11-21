@@ -21,6 +21,31 @@ function issueDate(value: string | undefined): string | undefined {
   return value?.slice(0, 10)
 }
 
+export function agendaDateTitle(date: string, today: string): string {
+  if (date === today) return 'Today'
+  const [year, month, day] = date.split('-').map(Number) as [number, number, number]
+  return new Date(year, month - 1, day).toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
+export function closedReasonLabel(reason: KataTaskSummary['closed_reason']): string {
+  switch (reason) {
+    case 'wontfix':
+      return "Won't do"
+    case 'duplicate':
+      return 'Duplicate'
+    case 'superseded':
+      return 'Superseded'
+    case 'audit-no-change':
+      return 'No change needed'
+    default:
+      return 'Done'
+  }
+}
+
 export function scheduledDate(issue: KataTaskSummary): string | undefined {
   return issue.scheduled_on_date ?? issueDate(issue.metadata.scheduled_on)
 }
@@ -109,10 +134,7 @@ function buildToday(issues: KataTaskSummary[], today: string): KataTaskGroup[] {
     const deadlineDue = deadlineOn !== undefined && deadlineOn <= today
     if (!scheduledDue && !deadlineDue) continue
 
-    if (
-      (deadlineOn !== undefined && deadlineOn < today) ||
-      (scheduledOn !== undefined && scheduledOn < today)
-    ) {
+    if (deadlineOn !== undefined && deadlineOn < today) {
       groups[0]!.issues.push(issue)
     } else if (issue.metadata.today_bucket === 'evening') {
       groups[2]!.issues.push(issue)
@@ -149,7 +171,8 @@ function buildDelegated(issues: KataTaskSummary[]): KataTaskGroup[] {
     const attribution = `${issue.author}/${teammate}`
     const group = groups.get(attribution) ?? {
       id: attribution,
-      title: attribution,
+      title: `${teammate} for ${issue.author}`,
+      handoff: { teammate, author: issue.author },
       issues: [],
     }
     group.issues.push(issue)
@@ -192,7 +215,11 @@ function buildScheduled(issues: KataTaskSummary[], today: string): KataTaskGroup
       dueToday.issues.push(issue)
       continue
     }
-    const group = futureByDate.get(keyDate) ?? { id: keyDate, title: keyDate, issues: [] }
+    const group = futureByDate.get(keyDate) ?? {
+      id: keyDate,
+      title: agendaDateTitle(keyDate, today),
+      issues: [],
+    }
     group.issues.push(issue)
     futureByDate.set(keyDate, group)
   }
@@ -207,14 +234,20 @@ function buildScheduled(issues: KataTaskSummary[], today: string): KataTaskGroup
   return [...pinned, ...future].filter((group) => group.issues.length > 0)
 }
 
-function buildLogbook(issues: KataTaskSummary[]): KataTaskGroup[] {
+function buildLogbook(issues: KataTaskSummary[], today: string): KataTaskGroup[] {
   const groups = new Map<string, KataTaskGroup>()
   for (const issue of issues) {
     if (issue.status !== 'closed') continue
-    const closedOn = issueDate(issue.closed_at)
+    const closedAt = issue.closed_at && new Date(issue.closed_at)
+    const closedOn =
+      closedAt && !Number.isNaN(closedAt.getTime()) ? localDateString(closedAt) : undefined
     if (!closedOn) continue
 
-    const group = groups.get(closedOn) ?? { id: closedOn, title: closedOn, issues: [] }
+    const group = groups.get(closedOn) ?? {
+      id: closedOn,
+      title: agendaDateTitle(closedOn, today),
+      issues: [],
+    }
     group.issues.push(issue)
     groups.set(closedOn, group)
   }
@@ -246,7 +279,7 @@ export function buildKataTaskView(options: BuildKataTaskViewOptions): KataTaskVi
       groups = buildAll(options.issues, projects)
       break
     case 'logbook':
-      groups = buildLogbook(options.issues)
+      groups = buildLogbook(options.issues, today)
       break
   }
 

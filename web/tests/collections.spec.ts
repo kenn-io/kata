@@ -25,8 +25,8 @@ test('views, projects, filters, columns, hierarchy, and keyboard stay first-clas
   await page.getByRole('button', { name: /Example parent task/ }).press('ArrowRight')
   await expect(page.getByRole('button', { name: /Example child task/ })).toBeVisible()
 
-  await page.getByRole('button', { name: 'Columns' }).click()
-  await expect(page.getByText('Shown when space allows')).toBeVisible()
+  await page.getByRole('button', { name: 'Display' }).click()
+  await expect(page.getByText('Columns, shown when space allows')).toBeVisible()
   await expect(page.getByRole('checkbox', { name: 'Owner' })).toBeChecked()
   await page.keyboard.press('Escape')
 
@@ -76,6 +76,54 @@ test('views, projects, filters, columns, hierarchy, and keyboard stay first-clas
   await expect(page.getByRole('button', { name: 'Upcoming' })).toHaveCount(0)
   await page.getByRole('button', { name: /^example-project \d+$/ }).click()
   await expect(page).toHaveURL(`${kata.origin}/kata?scope=${kata.projectUID}`)
+})
+
+test('sorts by due date, keeps a resized width, and copies a short task ID', async ({
+  page,
+  kata,
+}) => {
+  const credentials = await kata.launch(page)
+  const overdue = await kata.seedIssue(page, credentials, {
+    title: 'Overdue example task',
+    metadata: { deadline_on: '2025-01-10' },
+  })
+  const upcoming = await kata.seedIssue(page, credentials, {
+    title: 'Upcoming example task',
+    metadata: { deadline_on: '2026-12-10' },
+  })
+  const undated = await kata.seedIssue(page, credentials, { title: 'Undated example task' })
+  await page.goto(`${kata.origin}/kata?view=all-open`)
+
+  await page.getByRole('button', { name: 'Sort by Due' }).click()
+  await expect(page.locator('.cell-id')).toHaveCount(0)
+  const rowOrder = await page
+    .locator('.row.issue-row')
+    .evaluateAll((rows) => rows.map((row) => row.getAttribute('data-uid')))
+  expect(rowOrder.indexOf(overdue.uid)).toBeLessThan(rowOrder.indexOf(upcoming.uid))
+  expect(rowOrder.indexOf(upcoming.uid)).toBeLessThan(rowOrder.indexOf(undated.uid))
+
+  const handle = page.getByRole('separator', { name: 'Resize Due column' })
+  await handle.focus()
+  await page.keyboard.press('ArrowRight')
+  await expect(handle).toHaveAttribute('aria-valuenow', '78')
+
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], {
+    origin: kata.origin,
+  })
+  const row = page.getByRole('button', { name: /Overdue example task/ })
+  await row.hover()
+  await expect(page.getByRole('button', { name: `Copy task ID ${overdue.short_id}` })).toBeVisible()
+  await row.focus()
+  await page.keyboard.press('c')
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe(overdue.short_id)
+
+  await page.reload()
+  await expect(page.getByRole('separator', { name: 'Resize Due column' })).toHaveAttribute(
+    'aria-valuenow',
+    '78',
+  )
 })
 
 test('project creation and quick capture use the designated inbox project', async ({

@@ -91,6 +91,7 @@ export interface KataTaskGroup {
   id: string
   title: string
   issues: KataTaskSummary[]
+  handoff?: { teammate: string; author: string }
 }
 
 export interface KataTaskViewResponse {

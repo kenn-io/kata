@@ -8,7 +8,7 @@
   import SettingsIcon from '@lucide/svelte/icons/settings'
   import StarIcon from '@lucide/svelte/icons/star'
   import UsersIcon from '@lucide/svelte/icons/users'
-  import { hashColor, ScrollBox, showFlash, Tooltip } from '@kenn-io/kit-ui'
+  import { ScrollBox, showFlash, Tooltip } from '@kenn-io/kit-ui'
 
   import GroupedSidebarSection from './GroupedSidebarSection.svelte'
 
@@ -18,6 +18,7 @@
     KataTaskViewName,
   } from '../lib/kata/types'
   import type { KataAreaSummary, KataCurrentView } from '../lib/kata/authority'
+  import { projectMarkColor } from '../lib/kata/projectColor'
   import type { Snippet } from 'svelte'
 
   interface Props {
@@ -71,20 +72,6 @@
     { name: 'delegated', label: 'Delegated', icon: UsersIcon },
     { name: 'all', label: 'All open', icon: ListTodoIcon },
     { name: 'logbook', label: 'Logbook', icon: BookCheckIcon },
-  ]
-
-  // Project marks take the prototype's soft hues from kit-ui's theme, so
-  // they follow light and dark. Red and amber are left out: they mean
-  // overdue, high priority, and warnings.
-  const projectMarkPalette = [
-    'var(--accent-green)',
-    'var(--accent-purple)',
-    'var(--accent-teal)',
-    'var(--status-waiting)',
-    'var(--text-muted)',
-    'color-mix(in srgb, var(--accent-blue) 50%, var(--accent-purple))',
-    'var(--accent-blue)',
-    'color-mix(in srgb, var(--accent-teal) 55%, var(--text-primary))',
   ]
 
   let creatingProject = $derived(creationIntent !== null)
@@ -221,10 +208,7 @@
             class:active={isProjectActive(project.uid)}
             onclick={() => void onOpenProject(project.uid)}
           >
-            <span
-              class="project-mark"
-              style:background={hashColor(project.name, projectMarkPalette)}
-            ></span>
+            <span class="project-mark" style:background={projectMarkColor(project.name)}></span>
             <span class="project-name">{project.name}</span>
             <span class="project-count count">{project.open_count}</span>
           </button>

@@ -1,6 +1,7 @@
 import type { KataTaskSummary } from './types'
+import { deadlineDate } from './view'
 
-export type KataTaskSortKey = 'priority' | 'title' | 'updated' | 'owner' | 'id'
+export type KataTaskSortKey = 'priority' | 'title' | 'updated' | 'owner' | 'id' | 'due'
 export type KataTaskSortDirection = 'asc' | 'desc'
 
 export interface KataTaskSort {
@@ -14,6 +15,7 @@ export const KATA_TASK_NATURAL_DIRECTION: Record<KataTaskSortKey, KataTaskSortDi
   updated: 'desc',
   owner: 'asc',
   id: 'asc',
+  due: 'asc',
 }
 
 export const DEFAULT_KATA_TASK_SORT: KataTaskSort = {
@@ -59,9 +61,9 @@ function compareMissing(a: KataTaskSummary, b: KataTaskSummary, key: KataTaskSor
     if (am && bm) return 0
     if (am) return 1
     if (bm) return -1
-  } else if (key === 'owner') {
-    const am = !a.owner
-    const bm = !b.owner
+  } else if (key === 'owner' || key === 'due') {
+    const am = key === 'owner' ? !a.owner : !deadlineDate(a)
+    const bm = key === 'owner' ? !b.owner : !deadlineDate(b)
     if (am && bm) return 0
     if (am) return 1
     if (bm) return -1
@@ -87,5 +89,7 @@ function compareKey(a: KataTaskSummary, b: KataTaskSummary, key: KataTaskSortKey
       return (a.owner ?? '').localeCompare(b.owner ?? '', undefined, { sensitivity: 'base' })
     case 'id':
       return a.qualified_id.localeCompare(b.qualified_id, undefined, { numeric: true })
+    case 'due':
+      return (deadlineDate(a) ?? '').localeCompare(deadlineDate(b) ?? '')
   }
 }

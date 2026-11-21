@@ -22,7 +22,7 @@ const MONTHS_SHORT = [
 
 /**
  * Compact relative-time label suitable for a dense table column.
- * Mirrors the Linear/Things shorthand: "now", "5m", "3h", "2d" for
+ * Uses compact labels such as "just now", "5m ago", "3h ago", and "2d ago" for
  * recent events; calendar month+day for older dates this year; month+
  * 2-digit year for prior years. Returns "-" if the input is empty or
  * unparseable so the column never collapses on missing data.
@@ -52,13 +52,13 @@ export function relativeTime(iso: string | undefined, now = new Date()): string 
   if (Number.isNaN(ts)) return '-'
   const then = new Date(ts)
   const seconds = Math.round((now.getTime() - ts) / 1000)
-  if (seconds < 45) return 'now'
+  if (seconds < 45) return 'just now'
   const minutes = Math.round(seconds / 60)
-  if (minutes < 60) return `${minutes}m`
+  if (minutes < 60) return `${minutes}m ago`
   const hours = Math.round(minutes / 60)
-  if (hours < 24) return `${hours}h`
+  if (hours < 24) return `${hours}h ago`
   const days = Math.round(hours / 24)
-  if (days < 7) return `${days}d`
+  if (days < 7) return `${days}d ago`
   const monthDay = `${MONTHS_SHORT[then.getMonth()]} ${then.getDate()}`
   if (then.getFullYear() === now.getFullYear()) return monthDay
   return `${monthDay} '${String(then.getFullYear()).slice(-2)}`

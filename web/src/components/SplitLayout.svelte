@@ -8,6 +8,7 @@
   interface Props {
     orientation: Orientation
     primarySize: number
+    secondaryBeside?: boolean
     minPrimary?: number
     minSecondary?: number
     responsiveBreakpoint?: number
@@ -20,6 +21,7 @@
   let {
     orientation,
     primarySize,
+    secondaryBeside = $bindable(false),
     minPrimary = 200,
     minSecondary = 200,
     responsiveBreakpoint = 0,
@@ -42,6 +44,9 @@
       ? 'vertical'
       : orientation,
   )
+  $effect(() => {
+    secondaryBeside = Boolean(secondary) && effectiveOrientation === 'horizontal'
+  })
   const totalSize = $derived(effectiveOrientation === 'vertical' ? containerHeight : containerWidth)
 
   function axisSize(rect: DOMRect): number {

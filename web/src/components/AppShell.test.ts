@@ -41,11 +41,11 @@ describe('AppShell', () => {
         onCreateProject: vi.fn(async () => ({ changed: true })),
       },
     })
-    expect(screen.getByText('now')).not.toBeNull()
+    expect(screen.getByText('just now')).not.toBeNull()
     const normalizations = vi.mocked(normalizeKataUISnapshot).mock.calls.length
     expect(normalizations).toBeGreaterThan(0)
     await vi.advanceTimersByTimeAsync(45_000)
-    expect(screen.getByText('1m')).not.toBeNull()
+    expect(screen.getByText('1m ago')).not.toBeNull()
     expect(normalizeKataUISnapshot).toHaveBeenCalledTimes(normalizations)
   })
 
@@ -721,7 +721,8 @@ describe('AppShell', () => {
       graph: true,
     })
 
-    await fireEvent.click(screen.getByRole('button', { name: /Project scope: All projects/i }))
+    await fireEvent.click(screen.getByRole('button', { name: /^Filter$/ }))
+    await fireEvent.click(screen.getByRole('button', { name: /Project: All projects/i }))
     await fireEvent.mouseDown(screen.getByRole('option', { name: /example-project/ }))
     await waitFor(() =>
       expect(onNavigate).toHaveBeenLastCalledWith({
@@ -1523,6 +1524,7 @@ describe('AppShell', () => {
         route: {
           kind: 'kata',
           projectUID: '01J00000000000000000000002',
+          view: 'inbox',
           graph: false,
           filters: { status: [], owner: [], label: [], relationship: [] },
         },
@@ -1538,7 +1540,7 @@ describe('AppShell', () => {
     expect(screen.queryByRole('button', { name: /Other issue/ })).toBeNull()
   })
 
-  test('clears project scope when All projects is selected', async () => {
+  test('keeps project controls out of a dedicated project list', async () => {
     const onNavigate = vi.fn()
     render(AppShell, {
       props: {
@@ -1556,16 +1558,10 @@ describe('AppShell', () => {
       },
     })
 
-    await fireEvent.click(screen.getByRole('button', { name: /Project scope: example-project/i }))
-    await fireEvent.mouseDown(screen.getByRole('option', { name: 'All projects' }))
-
-    await waitFor(() =>
-      expect(onNavigate).toHaveBeenCalledWith({
-        kind: 'kata',
-        graph: false,
-        filters: { status: [], owner: [], label: [], relationship: [] },
-      }),
-    )
+    await fireEvent.click(screen.getByRole('button', { name: 'Filter' }))
+    expect(screen.queryByRole('button', { name: /^Project:/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Clear Project filter' })).toBeNull()
+    expect(onNavigate).not.toHaveBeenCalled()
   })
 
   test('resets grown rows when repeated label filters change', async () => {
@@ -1761,7 +1757,8 @@ describe('AppShell', () => {
     })
 
     expect(screen.getByRole('separator', { name: 'Resize Kata panes' })).not.toBeNull()
-    await fireEvent.click(screen.getByRole('button', { name: 'Switch to stacked layout' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Display' }))
+    await fireEvent.click(screen.getByRole('radio', { name: 'Below list' }))
     expect(onPreferencesChange).toHaveBeenCalledWith(
       expect.objectContaining({ splitDirection: 'vertical', splitSize: 420 }),
     )
