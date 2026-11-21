@@ -83,6 +83,43 @@ describe('App', () => {
     expect(location.search).toBe('?issue=example-project%23abc4')
   })
 
+  it('keeps a daemon selected when its saved short link is missing', async () => {
+    localStorage.setItem(
+      'kata.web.workspace-state.v1',
+      JSON.stringify({
+        version: 1,
+        daemons: { 'example-remote': '/kata?issue=example-project%23missing' },
+      }),
+    )
+    const roster = daemonRoster()
+    roster.daemons.push({
+      id: 'example-remote',
+      url: 'https://daemon.example',
+      default: false,
+      auth: 'token',
+      health: 'connected',
+    })
+    stubShortLink(() => Response.json({}, { status: 404 }), roster)
+    render(App)
+    await fireEvent.click(
+      await screen.findByRole('button', { name: 'Switch Kata daemon: example-local' }),
+    )
+    await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
+    expect(
+      await screen.findByRole('button', { name: 'Search for example-project#missing' }),
+    ).not.toBeNull()
+    cleanup()
+    history.replaceState(null, '', '/kata')
+    render(App)
+    await fireEvent.click(
+      await screen.findByRole('button', { name: 'Switch Kata daemon: example-local' }),
+    )
+    await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
+    expect(
+      await screen.findByRole('button', { name: 'Search for example-project#missing' }),
+    ).not.toBeNull()
+  })
+
   it('retries resolving a short link after a server failure', async () => {
     history.replaceState(null, '', '/kata?scope=example-project&issue=abc4')
     let resolutions = 0

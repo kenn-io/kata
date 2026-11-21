@@ -1265,7 +1265,7 @@
       return
     }
 
-    if (linkUpgradeRequired && activeDaemonID === id) {
+    if ((linkUpgradeRequired || route.kind === 'route-error') && activeDaemonID === id) {
       daemonSwitching = false
       return
     }

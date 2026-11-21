@@ -60,6 +60,43 @@ func TestUIIssueReferenceProjectSelector(t *testing.T) {
 	}
 }
 
+func TestUIIssueReferenceFullUIDWithViewingProject(t *testing.T) {
+	dbh := openTestDB(t)
+	scope, err := dbh.db.CreateProject(t.Context(), "scope-project")
+	require.NoError(t, err)
+	target, err := dbh.db.CreateProject(t.Context(), "target-project")
+	require.NoError(t, err)
+	issue, _, err := dbh.db.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: target.ID, Title: "Target", Author: "worker"})
+	require.NoError(t, err)
+	server := httptest.NewServer(daemon.NewServer(daemon.ServerConfig{DB: dbh.db, StartedAt: dbh.now}).Handler())
+	t.Cleanup(server.Close)
+	for _, tc := range []struct {
+		name, selector, scopeHeader string
+		status                      int
+	}{
+		{"both allowed", "project=" + scope.Name, fmt.Sprintf(`["%s","%s"]`, scope.UID, target.UID), http.StatusOK},
+		{"target denied", "project=" + scope.Name, fmt.Sprintf(`["%s"]`, scope.UID), http.StatusNotFound},
+		{"numeric project restriction", fmt.Sprintf("project_id=%d", scope.ID), "", http.StatusNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/issue-reference?"+tc.selector+"&ref="+issue.UID, nil)
+			require.NoError(t, err)
+			if tc.scopeHeader != "" {
+				req.Header.Set("X-Kata-Project-Scope", tc.scopeHeader)
+			}
+			resp, err := server.Client().Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			require.Equal(t, tc.status, resp.StatusCode, string(body))
+			if tc.status == http.StatusOK {
+				require.JSONEq(t, fmt.Sprintf(`{"scope_project_uid":%q,"issue":{"uid":%q,"project_uid":%q}}`, scope.UID, issue.UID, target.UID), string(body))
+			}
+		})
+	}
+}
+
 func (a historicalUIReferenceHostAccess) Authorize(_ context.Context, request daemon.HostAccessRequest) (daemon.HostAccessDecision, error) {
 	if request.Operation.AllProjects || slices.Contains(request.Operation.ProjectIDs, a.deniedProjectID) {
 		return daemon.HostAccessDecision{}, daemon.ErrHostAccessDenied
