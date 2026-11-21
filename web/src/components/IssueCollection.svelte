@@ -900,7 +900,7 @@
 <svelte:window onkeyup={handleWindowKeyup} onblur={handleWindowBlur} />
 
 <section class="issue-list" aria-label="Issues">
-  <div class="pane-header">
+  <div class="pane-header" class:empty-header={!!empty}>
     {#if empty}
       <PageHeader level={2} title={viewTitle(currentView)} />
     {:else}
@@ -951,7 +951,7 @@
     {/if}
   </div>
   {#if empty}
-    {@render empty()}
+    <div class="table-body">{@render empty()}</div>
   {:else}
     {#if toolbar}{@render toolbar()}{/if}
 
@@ -1244,6 +1244,14 @@
     flex-shrink: 0;
     padding: 12px 12px 8px;
     background: var(--bg-surface);
+  }
+
+  .pane-header.empty-header {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    min-height: var(--layout-header-h);
+    padding: 0 16px;
   }
 
   .count {

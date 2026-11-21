@@ -1053,13 +1053,14 @@
 
   :global(.no-projects .kit-empty-state__title) {
     color: var(--text-secondary);
+    line-height: 1.5;
   }
 
   /* The kata init line sits under New project, not beside it. */
   :global(.no-projects .kit-empty-state__actions) {
     flex-direction: column;
     align-items: center;
-    gap: var(--space-2);
+    gap: var(--space-4);
   }
   .no-projects-hint {
     margin: 0;
