@@ -1440,6 +1440,42 @@ describe('AppShell', () => {
     expect(screen.getByRole('alert').textContent).toBe('validation: Action refused')
   })
 
+  test('keeps a rejected task and its error in the Settings dialog', async () => {
+    const accepted = snapshot()
+    accepted.catalog![0]!.project.metadata = {
+      ...accepted.catalog![0]!.project.metadata,
+      role: 'inbox',
+    }
+    const onCreateIssue = vi.fn().mockRejectedValue(new Error('validation: Action refused'))
+    const view = render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'settings',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: accepted,
+        loading: false,
+        ...mutationProps({ onCreateIssue }),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'New task' }))
+    const dialog = screen.getByRole('dialog', { name: 'New task' })
+    const title = within(dialog).getByRole('textbox', { name: 'Quick capture' }) as HTMLInputElement
+    await fireEvent.input(title, { target: { value: 'Example task' } })
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Capture' }))
+    expect((await within(dialog).findByRole('alert')).textContent).toBe(
+      'validation: Action refused',
+    )
+    await view.rerender({ mutationMessage: 'validation: Action refused' })
+    expect(screen.getAllByText('validation: Action refused')).toHaveLength(1)
+    expect(title.value).toBe('Example task')
+    expect(onCreateIssue).toHaveBeenCalledWith('Example task')
+  })
+
   test('drops held keyboard selection when sidebar navigation begins', async () => {
     vi.useFakeTimers()
     const onNavigate = vi.fn()
