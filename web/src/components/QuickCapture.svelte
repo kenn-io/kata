@@ -66,7 +66,6 @@
       onClose()
     } catch (reason) {
       error = reason instanceof Error ? reason.message : 'Could not create task.'
-      throw reason
     } finally {
       pending = false
     }

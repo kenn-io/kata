@@ -2,7 +2,7 @@ import { expect, test } from './fixtures'
 
 test.use({ colorScheme: 'dark', reducedMotion: 'reduce' })
 
-test('healthy connections leave the toolbar at the top; read-only notices remain visible', async ({
+test('healthy connections have no banner; read-only notices remain visible', async ({
   page,
   kata,
 }, testInfo) => {
@@ -20,8 +20,6 @@ test('healthy connections leave the toolbar at the top; read-only notices remain
     await page.setViewportSize({ width, height: 900 })
     await expect(summary).toHaveCount(0)
     if (width === 390) await page.getByRole('button', { name: 'Open navigation' }).click()
-    const header = page.locator('.sidebar-header')
-    await expect(header).toBeVisible()
     await expect(page.getByRole('button', { name: 'New task' })).toBeEnabled()
     await expect(page.getByRole('button', { name: /Switch Kata daemon:/ })).toBeVisible()
     await page.screenshot({

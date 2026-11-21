@@ -338,7 +338,7 @@ describe('AppShell', () => {
   })
 
   test('keeps the healthy workspace toolbar free of a connection banner', () => {
-    const { container } = render(AppShell, {
+    render(AppShell, {
       props: {
         route: {
           kind: 'kata',
@@ -355,7 +355,6 @@ describe('AppShell', () => {
     })
 
     expect(screen.queryByRole('status', { name: 'Active connection' })).toBeNull()
-    expect(within(container).getByRole('button', { name: 'New task' })).not.toBeNull()
   })
 
   test.each([
@@ -768,7 +767,9 @@ describe('AppShell', () => {
         (screen.getByRole('button', { name: 'Create team' }) as HTMLButtonElement).disabled,
       ).toBe(false),
     )
-    expect(screen.getByRole('button', { name: 'New task' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled')).toBe(
+      'true',
+    )
   })
 
   test('offers team and visibility management in the authorized credential screen', () => {
@@ -1438,7 +1439,6 @@ describe('AppShell', () => {
 
     expect(screen.getByRole('heading', { name: 'Settings' })).not.toBeNull()
     expect(await screen.findByText(/kata\.example\.com/)).not.toBeNull()
-    expect(screen.getByRole('button', { name: 'New task' })).not.toBeNull()
     expect(screen.queryByRole('button', { name: /layout/ })).toBeNull()
 
     await fireEvent.click(screen.getByRole('button', { name: 'Back to issues' }))

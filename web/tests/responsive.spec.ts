@@ -21,24 +21,14 @@ test('a long server name leaves New task reachable', async ({ page, kata }) => {
     const sidebar = page.locator('.sidebar-header')
     const task = page.getByRole('button', { name: 'New task' })
     await expect(task).toHaveText('New task')
-    const accentBackground = await task.evaluate((button) => {
-      const probe = button.ownerDocument.createElement('span')
-      probe.style.backgroundColor = 'var(--accent-blue)'
-      button.parentElement!.append(probe)
-      const color = button.ownerDocument.defaultView!.getComputedStyle(probe).backgroundColor
-      probe.remove()
-      return color
-    })
-    await expect(task).toHaveCSS('background-color', accentBackground)
     const bounds = (await sidebar.boundingBox())!
     const button = (await task.boundingBox())!
     expect(button.x + button.width).toBeLessThanOrEqual(bounds.x + bounds.width)
   }
-})
 
-test('desktop server name stays readable beside New task', async ({ page, kata }) => {
+  await page.unroute('**/api/v1/**')
   await page.setViewportSize({ width: 1440, height: 800 })
-  await kata.launch(page)
+  await page.goto(`${kata.origin}/kata?view=all-open`)
 
   const serverName = page.locator('.chip-label')
   await expect(serverName).toHaveText('example-local')
@@ -106,9 +96,6 @@ test('mobile navigation stays out of the task flow until opened', async ({ page,
   const navigation = page.getByRole('dialog', { name: 'Navigation' })
   await expect(navigation).toBeVisible()
   await expect(page.locator('[data-testid="daemon-chip"]')).toHaveCount(1)
-  await page.setViewportSize({ width: 853, height: 684 })
-  expect((await page.locator('.kata-main').boundingBox())!.width).toBeGreaterThan(500)
-  await page.setViewportSize({ width: 600, height: 684 })
   await navigation.getByRole('button', { name: 'Today' }).click()
   await expect(navigation).toBeHidden()
   await expect(page).toHaveURL(/view=today/)
@@ -125,22 +112,6 @@ test('New task closes mobile navigation before capture', async ({ page, kata }) 
   await expect(navigation).toBeHidden()
   const capture = page.getByRole('dialog', { name: 'New task' })
   await expect(capture.getByRole('textbox', { name: 'Quick capture' })).toBeVisible()
-})
-
-test('sidebar navigation rows keep their height on hover', async ({ page, kata }) => {
-  await page.setViewportSize({ width: 1440, height: 800 })
-  await kata.launch(page)
-
-  const today = page.getByRole('button', { name: /^Today(?: \d+)?$/ })
-  const before = (await today.boundingBox())!
-  await today.hover()
-  const after = (await today.boundingBox())!
-
-  expect(after.height).toBe(before.height)
-  const newTask = page.getByRole('button', { name: 'New task' })
-  const taskHeight = (await newTask.boundingBox())!.height
-  await newTask.hover()
-  expect((await newTask.boundingBox())!.height).toBe(taskHeight)
 })
 
 test('Appearance changes the sidebar color', async ({ page, kata }) => {

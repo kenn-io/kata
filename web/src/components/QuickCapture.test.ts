@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte'
-import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import QuickCapture from './QuickCapture.svelte'
 
@@ -31,12 +31,6 @@ describe('QuickCapture', () => {
   })
 
   it('keeps the task title after capture fails', async () => {
-    const rejections: unknown[] = []
-    const onRejection = (error: unknown) => rejections.push(error)
-    process.on('unhandledRejection', onRejection)
-    onTestFinished(() => {
-      process.off('unhandledRejection', onRejection)
-    })
     const onSubmit = vi.fn(async () => {
       throw new Error('Task creation failed')
     })
@@ -45,7 +39,6 @@ describe('QuickCapture', () => {
     await fireEvent.input(title, { target: { value: 'Task from Settings' } })
     await fireEvent.click(screen.getByRole('button', { name: 'Capture' }))
     await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('Task creation failed'))
-    await waitFor(() => expect(rejections).toEqual([new Error('Task creation failed')]))
     expect(title.value).toBe('Task from Settings')
     expect(onSubmit).toHaveBeenCalledWith('Task from Settings')
   })

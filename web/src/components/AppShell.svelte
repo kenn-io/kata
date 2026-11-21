@@ -654,7 +654,7 @@
   <!-- aria-disabled keeps the blocked button focusable so keyboard users reach its reason. -->
   <button
     type="button"
-    class="new-task-button accent-button"
+    class="accent-button header-action"
     aria-disabled={newTaskBlockedReason ? 'true' : undefined}
     aria-describedby={newTaskBlockedReason ? newTaskReasonID : undefined}
     onclick={beginNewTask}
@@ -1056,16 +1056,6 @@
     font-size: var(--font-size-sm);
   }
 
-  .new-task-button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-1);
-    white-space: nowrap;
-  }
-  .new-task-button.accent-button {
-    padding-inline: 2px;
-  }
   .appearance {
     display: flex;
     align-items: center;
@@ -1078,6 +1068,17 @@
     color: var(--text-muted);
     font-size: var(--font-size-xs);
     white-space: nowrap;
+  }
+
+  .header-action {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    white-space: nowrap;
+  }
+
+  .header-action.accent-button {
+    padding-inline: 2px;
   }
 
   .accent-button {
