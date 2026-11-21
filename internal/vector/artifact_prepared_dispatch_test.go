@@ -266,7 +266,7 @@ func TestEmbeddingArtifactDenialDefersDispatch(t *testing.T) {
 		}
 		return checks != 3, nil
 	}
-	encode := func(_ context.Context, texts []string) ([][]float32, error) {
+	encode := func(_ context.Context, _ []string) ([][]float32, error) {
 		dispatches++
 		return [][]float32{{1, 0}}, nil
 	}
