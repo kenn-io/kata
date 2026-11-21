@@ -29,7 +29,7 @@
   <span class="status-mark" data-tone={tone} aria-hidden="true">
     {#if tone === 'danger'}<TriangleAlert size={20} />{:else}<ListChecks size={20} />{/if}
   </span>
-  <h2 id={headingID}>{title}</h2>
+  <h1 id={headingID}>{title}</h1>
   {#if description}<p>{description}</p>{/if}
   {#if detail}<div class="status-page-detail">{@render detail()}</div>{/if}
   {#if children}<div class="status-page-actions">{@render children()}</div>{/if}
@@ -60,7 +60,7 @@
     color: var(--accent-red);
   }
 
-  h2 {
+  h1 {
     margin: 0;
     font-size: var(--font-size-xl);
     line-height: 1.25;

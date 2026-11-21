@@ -398,6 +398,10 @@
     creationIntent = null
   }
 
+  $effect(() => {
+    if (!mediumScreen.current) closeNavigation()
+  })
+
   function openView(name: KataTaskViewName): void {
     closeNavigation()
     navigate({
@@ -843,7 +847,7 @@
           </SearchSettings>
         {/key}
       {:else}
-        {#if mutationMessage && !captureOpen}
+        {#if mutationMessage}
           <p class="mutation-message" role="alert">{mutationMessage}</p>
         {/if}
         <SplitLayout

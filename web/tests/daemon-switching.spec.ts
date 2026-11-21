@@ -2,6 +2,22 @@ import { expect, test } from './fixtures'
 
 test.use({ trace: 'off' })
 
+test('navigates the server menu by keyboard and closes it with Escape', async ({ page, kata }) => {
+  await kata.launch(page)
+  const trigger = page.getByRole('button', { name: 'Switch Kata daemon: example-local' })
+  await trigger.focus()
+  await page.keyboard.press('Enter')
+  const local = page.getByRole('menuitemradio', { name: /example-local/ })
+  const remote = page.getByRole('menuitemradio', { name: /example-remote/ })
+  await expect(local).toBeFocused()
+  await page.keyboard.press('ArrowDown')
+  await expect(remote).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(remote).toBeHidden()
+  await expect(trigger).toBeFocused()
+  await expect(trigger).toHaveAccessibleName('Switch Kata daemon: example-local')
+})
+
 test('keeps daemon names readable alongside health and recovery hints', async ({ page, kata }) => {
   await kata.launch(page)
   await page.route('**/api/v1/ui/daemons', (route) =>

@@ -114,6 +114,17 @@ test('New task closes mobile navigation before capture', async ({ page, kata }) 
   await expect(capture.getByRole('textbox', { name: 'Quick capture' })).toBeVisible()
 })
 
+test('resizing an open navigation drawer restores desktop navigation', async ({ page, kata }) => {
+  await page.setViewportSize({ width: 600, height: 684 })
+  await kata.launch(page)
+  await page.getByRole('button', { name: 'Open navigation' }).click()
+  await expect(page.getByRole('dialog', { name: 'Navigation' })).toBeVisible()
+
+  await page.setViewportSize({ width: 1000, height: 684 })
+  await expect(page.getByRole('dialog', { name: 'Navigation' })).toBeHidden()
+  await expect(page.getByRole('button', { name: 'Today' })).toBeVisible()
+})
+
 test('Appearance changes the sidebar color', async ({ page, kata }) => {
   await page.emulateMedia({ colorScheme: 'dark' })
   await kata.launch(page)

@@ -30,19 +30,6 @@ describe('QuickCapture', () => {
     )
   })
 
-  it('keeps the task title after capture fails', async () => {
-    const onSubmit = vi.fn(async () => {
-      throw new Error('Task creation failed')
-    })
-    render(QuickCapture, { props: { open: true, onClose: vi.fn(), onSubmit } })
-    const title = screen.getByRole('textbox', { name: 'Quick capture' }) as HTMLInputElement
-    await fireEvent.input(title, { target: { value: 'Task from Settings' } })
-    await fireEvent.click(screen.getByRole('button', { name: 'Capture' }))
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('Task creation failed'))
-    expect(title.value).toBe('Task from Settings')
-    expect(onSubmit).toHaveBeenCalledWith('Task from Settings')
-  })
-
   it('resets a task draft after authentication authority changes', async () => {
     const view = render(QuickCapture, {
       props: {

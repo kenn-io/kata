@@ -765,7 +765,7 @@ describe('App', () => {
     render(App)
 
     expect(screen.getByRole('main', { name: 'Kata' })).not.toBeNull()
-    expect(screen.getByRole('heading', { name: 'Loading…' })).not.toBeNull()
+    expect(screen.getByRole('heading', { name: 'Loading…', level: 1 })).not.toBeNull()
     expect(screen.getByRole('status').textContent).toBe('Loading…')
   })
 
@@ -2076,7 +2076,7 @@ describe('App', () => {
       .soft(screen.queryByRole('button', { name: 'Switch Kata daemon: example-local' }))
       .not.toBeNull()
     expect.soft(screen.getAllByRole('heading')).toHaveLength(1)
-    expect.soft(screen.queryByRole('heading', { name: 'Log in' })).not.toBeNull()
+    expect.soft(screen.queryByRole('heading', { name: 'Log in', level: 1 })).not.toBeNull()
     expect(sessionStorage.getItem('kata.web.session.v1')).toBeNull()
     expect(screen.queryByRole('region', { name: 'Kata workspace' })).toBeNull()
     await fireEvent.input(screen.getByLabelText('Token'), { target: { value: 'example-token' } })
@@ -2711,14 +2711,15 @@ describe('App', () => {
 
     history.replaceState(null, '', '/kata?issue=abc4')
     await fireEvent(window, new PopStateEvent('popstate'))
-    expect(screen.getByRole('heading', { name: 'Page not found' })).not.toBeNull()
+    expect(screen.getByRole('heading', { name: 'Page not found', level: 1 })).not.toBeNull()
+    expect(screen.getAllByRole('heading')).toHaveLength(1)
     await waitFor(() => expect(document.title).toBe('Kata'))
 
     history.replaceState(null, '', '/kata?view=today')
     await fireEvent(window, new PopStateEvent('popstate'))
     await waitFor(() => expect(document.title).toBe('Today · Kata'))
     window.dispatchEvent(new Event('kata:versionMismatch'))
-    expect(await screen.findByRole('heading', { name: 'Kata was updated' })).not.toBeNull()
+    expect(await screen.findByRole('heading', { name: 'Kata was updated', level: 1 })).not.toBeNull()
     await waitFor(() => expect(document.title).toBe('Kata'))
   })
 
