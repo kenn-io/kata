@@ -74,7 +74,12 @@ type ServerConfig struct {
 	// MCPEventsDisabledReason is the status reason when MCPEvents is nil.
 	// Empty reports mcpevents.ReasonNotConfigured.
 	MCPEventsDisabledReason string
-	FederationWake          func()
+	// FederationWake asks the federation runner for a pass over every spoke
+	// binding.
+	FederationWake func()
+	// FederationWakeProject asks the federation runner for a pass over the
+	// spoke binding of one local project.
+	FederationWakeProject func(projectID int64)
 	// FederationPushPending drains existing direct push replication under caller-held coordination.
 	FederationPushPending func(context.Context, db.FederationBinding, config.FederationCredential) error
 	// FederationHubClient builds the bearer-pinned hub client for a stored
