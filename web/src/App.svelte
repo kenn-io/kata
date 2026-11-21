@@ -1265,7 +1265,7 @@
       return
     }
 
-    if ((linkUpgradeRequired || route.kind === 'route-error') && activeDaemonID === id) {
+    if ((linkUpgradeRequired || currentRoute().kind === 'route-error') && activeDaemonID === id) {
       daemonSwitching = false
       return
     }
@@ -1322,17 +1322,18 @@
           snapshots.markFailure()
           return false
         }
-        route = {
-          ...pending,
-          projectUID: result.data.scope_project_uid,
-          issueUID: result.data.issue.uid,
-        }
+        const resolved: AppRoute = { ...pending, issueUID: result.data.issue.uid }
+        if (result.data.scope_project_uid) resolved.projectUID = result.data.scope_project_uid
+        else delete resolved.projectUID
+        route = resolved
       } catch {
         if (!destroyed && route === pending && daemonID === activeDaemonID) snapshots.markFailure()
         return false
       }
     }
-    const accepted = await snapshots.load(requestIntentForRoute(route), { full })
+    const snapshotRoute = currentRoute()
+    if (snapshotRoute.kind === 'route-error') return false
+    const accepted = await snapshots.load(requestIntentForRoute(snapshotRoute), { full })
     if (snapshots.state.authenticationRequired) {
       requireAuthentication()
       return false
