@@ -399,18 +399,20 @@ jobs:
           KATA_TEST_POSTGRES_AUTO_CONTAINER: "0"
           KATA_SKIP_OPENAPI_CLIENT_CHECK: "1"
         run: |
+          set -o pipefail
+          # A local per-test profile split this selector at 468s versus 461s.
           cli_shard='^Test[A-CFM]'
           env -u KATA_AUTH_TOKEN go tool gotestsum --format pkgname-and-test-fails --format-icons text \
             --jsonfile "gotestsum/go.json" --rerun-fails=2 --rerun-fails-report "gotestsum/go-reruns.txt" \
-            --packages "$(go list ./... | grep -v -e '/e2e$' -e '/cmd/kata$')" -- -count=1 &
+            --packages "$(go list ./... | grep -v -e '/e2e$' -e '/cmd/kata$')" -- -count=1 2>&1 | sed -u 's/^/[packages] /' &
           packages_pid=$!
           env -u KATA_AUTH_TOKEN go tool gotestsum --format pkgname-and-test-fails --format-icons text \
             --jsonfile "gotestsum/go-cli-1.json" --rerun-fails=2 --rerun-fails-report "gotestsum/go-cli-1-reruns.txt" \
-            --packages ./cmd/kata -- -count=1 -run "$cli_shard" &
+            --packages ./cmd/kata -- -count=1 -run "$cli_shard" 2>&1 | sed -u 's/^/[cli-1] /' &
           cli1_pid=$!
           env -u KATA_AUTH_TOKEN go tool gotestsum --format pkgname-and-test-fails --format-icons text \
             --jsonfile "gotestsum/go-cli-2.json" --rerun-fails=2 --rerun-fails-report "gotestsum/go-cli-2-reruns.txt" \
-            --packages ./cmd/kata -- -count=1 -run . -skip "$cli_shard" &
+            --packages ./cmd/kata -- -count=1 -run . -skip "$cli_shard" 2>&1 | sed -u 's/^/[cli-2] /' &
           cli2_pid=$!
           status=0
           wait "$packages_pid" || status=1
