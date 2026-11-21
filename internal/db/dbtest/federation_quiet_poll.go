@@ -121,8 +121,7 @@ func appendQuietIssues(t *testing.T, store db.Storage, project db.Project, n int
 	defer func() { _ = tx.Rollback() }()
 	issues, err := tx.PrepareContext(ctx, `INSERT INTO issues(uid,short_id,project_id,title,author) VALUES($1,$2,$3,'Quiet','tester')`)
 	require.NoError(t, err)
-	events, err := tx.PrepareContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash)
- VALUES($1,$2,$3,$4,$5,'issue.updated','tester','{}',1,0,$6)`)
+	events, err := tx.PrepareContext(ctx, quietPollEventInsert)
 	require.NoError(t, err)
 	hash := strings.Repeat("a", 64)
 	for i := range n {
@@ -167,6 +166,9 @@ func (h *quietPollHub) unrelatedEvents(n int) {
 	h.inserted += n
 }
 
+const quietPollEventInsert = `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash)
+ VALUES($1,$2,$3,$4,$5,'issue.updated','tester','{}',1,0,$6)`
+
 // appendUnrelatedEvents appends n events about issue, stamped to project, in
 // one transaction; creating thousands through the store API would dominate a
 // test's run time. Event UIDs continue from first, so each caller keeps its
@@ -181,8 +183,7 @@ func appendUnrelatedEvents(t *testing.T, store db.Storage, project db.Project, i
 	tx, err := beginner.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback() }()
-	stmt, err := tx.PrepareContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash)
- VALUES($1,$2,$3,$4,$5,'issue.updated','tester','{}',1,0,$6)`)
+	stmt, err := tx.PrepareContext(ctx, quietPollEventInsert)
 	require.NoError(t, err)
 	hash := strings.Repeat("b", 64)
 	for i := range n {
