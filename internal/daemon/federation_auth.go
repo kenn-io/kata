@@ -214,11 +214,11 @@ func evaluateFederationRequestForCapabilities(
 		// that actor's single authorized project.
 		accessCtx = db.WithAuthorizedProjects(ctx, nil)
 	}
-	allowed, err := cfg.DB.AccessibleProjectUIDs(accessCtx, enrollment.Actor)
+	allowed, err := cfg.DB.ProjectAccessibleToActor(accessCtx, enrollment.Actor, project.UID)
 	if err != nil {
 		return federationAuthorization{}, internalAPIError(err)
 	}
-	if !slices.Contains(allowed, project.UID) {
+	if !allowed {
 		return federationAuthorization{}, projectAccessDenied()
 	}
 	var transactionFence db.TransactionFence

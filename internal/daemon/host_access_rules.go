@@ -34,6 +34,13 @@ type hostAccessRule struct {
 	// or relationship-state oracles.
 	RequiresAllProjects bool
 
+	// URLProjectAuthority marks a self-authenticated route whose handler
+	// authorizes the request against the {project_id} project, and narrows the
+	// request to that project, before it reads project data. An
+	// unauthenticated request to it is admitted with the anonymous decision for
+	// that project alone, so no other project's policy can change its outcome.
+	URLProjectAuthority bool
+
 	// NoProjectData marks a route that reads no project data at all, so a
 	// missing URL scope must not be widened to every project.
 	NoProjectData bool
@@ -48,10 +55,13 @@ func buildHostAccessRules() map[string]hostAccessRule {
 	}, "disconnectRelayEnrollment")
 	registerHostAccessRules(rules, hostAccessRule{
 		SelfAuthenticated: true, AcceptsFederationBearer: true,
-	}, "getRelayReset", "offerRelayDeliveries", "acceptRelayDeliveries", "ackRelayDeliveries", "getFederationProjectMetadata", "pollFederationProjectEvents", "searchFederationProject",
+	}, "getRelayReset", "offerRelayDeliveries", "acceptRelayDeliveries", "ackRelayDeliveries", "getFederationProjectMetadata", "searchFederationProject",
 		"ingestFederationProjectEvents", "acquireIssueLease", "renewIssueLease",
 		"releaseIssueLease", "getIssueLeaseStatus", "claimIssue",
 		"createCronJob", "replaceCronJob", "archiveCronJob", "restoreCronJob")
+	registerHostAccessRules(rules, hostAccessRule{
+		SelfAuthenticated: true, AcceptsFederationBearer: true, URLProjectAuthority: true,
+	}, "pollFederationProjectEvents")
 	registerHostAccessRules(rules, hostAccessRule{SelfAuthenticated: true},
 		"forceReleaseIssueLease")
 	registerHostAccessRules(rules, hostAccessRule{ResolvedByHandler: true},
@@ -96,6 +106,9 @@ func hostAccessRuleConflict(rule hostAccessRule) string {
 			"authority over every project"
 	case rule.AcceptsFederationBearer && !rule.SelfAuthenticated:
 		return "a federation bearer cannot reach a route the bearer middleware pre-empts"
+	case rule.URLProjectAuthority && (!rule.SelfAuthenticated || rule.NoProjectData || rule.RequiresAllProjects):
+		return "only a self-authenticated route that reads one URL project can take " +
+			"its authority from that project"
 	default:
 		return ""
 	}
@@ -109,6 +122,8 @@ func hostAccessRuleFor(operationID string) hostAccessRule {
 type routeTemplate struct {
 	Method string
 	Path   string
+	// URLProjectAuthority copies the route's access rule; see hostAccessRule.
+	URLProjectAuthority bool
 }
 
 // registeredOperations returns every operation huma registered on doc, keyed by

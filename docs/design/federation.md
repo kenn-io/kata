@@ -296,6 +296,14 @@ applies hub events in order, deduplicates by event UID and content hash, folds
 portable payloads into the local projection, and advances its pull cursor only
 after successful application.
 
+A poll that finds no events returns the newest hub event ID it checked as
+`next_after_id`, and the spoke advances to it. The hub read every event up to
+that ID, and event IDs follow commit order, so no later event can take a lower
+ID. A quiet project's next poll then reads only what the hub wrote since the
+previous one. When an issue later moves in, its earlier history may sit below
+the cursor; the spoke reads that history through the moved issue's own
+history route, whatever its cursor.
+
 SQLite direct spokes prepare pulled issue histories and projection differences
 before taking the writer lock, then update only the touched issues and changed
 comments, labels and links. Ordinary local issue push echoes need no materialization.

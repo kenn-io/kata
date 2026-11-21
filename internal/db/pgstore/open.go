@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"net"
@@ -200,8 +201,11 @@ func openInternal(
 	return s, nil
 }
 
+// wrapPostgresConnector lets a test observe the statements every pool runs.
+var wrapPostgresConnector = func(connector driver.Connector) driver.Connector { return connector }
+
 func newPostgresPool(connConfig pgx.ConnConfig, maxOpen, maxIdle int) *sql.DB {
-	pool := sql.OpenDB(stdlib.GetConnector(connConfig))
+	pool := sql.OpenDB(wrapPostgresConnector(stdlib.GetConnector(connConfig)))
 	pool.SetMaxOpenConns(maxOpen)
 	pool.SetMaxIdleConns(maxIdle)
 	pool.SetConnMaxIdleTime(defaultConnMaxIdleTime)

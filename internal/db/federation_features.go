@@ -363,10 +363,12 @@ func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationRea
 		after = binding.ReplayHorizonEventID
 	}
 	var reset sql.NullInt64
-	err = tx.QueryRowContext(ctx, `SELECT MAX(cursor) FROM (
+	var newest int64
+	err = tx.QueryRowContext(ctx, `SELECT (SELECT MAX(cursor) FROM (
  SELECT MAX(purge_reset_after_event_id) AS cursor FROM purge_log WHERE project_id=$1 AND purge_reset_after_event_id>$2
  UNION ALL SELECT MAX(purge_reset_after_event_id) AS cursor FROM project_purge_log WHERE project_id=$1 AND purge_reset_after_event_id>$2
- UNION ALL SELECT CAST(value AS BIGINT) AS cursor FROM meta WHERE key=$3 AND CAST(value AS BIGINT)>$2) resets`, project.ID, after, ProjectStreamResetMetadataPrefix+project.UID).Scan(&reset)
+ UNION ALL SELECT CAST(value AS BIGINT) AS cursor FROM meta WHERE key=$3 AND CAST(value AS BIGINT)>$2) resets),
+ COALESCE((SELECT MAX(id) FROM events),0)`, project.ID, after, ProjectStreamResetMetadataPrefix+project.UID).Scan(&reset, &newest)
 	if err != nil {
 		return out, err
 	}
@@ -400,6 +402,15 @@ func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationRea
 	out.Events, err = readEvents(in.AfterID, in.Limit)
 	if err != nil {
 		return out, err
+	}
+	if len(out.Events) == 0 && in.IssueUID == "" {
+		// An empty page read every event through the snapshot's newest, and
+		// event IDs follow commit order, so no feed event at or below it can
+		// appear later. Moving the cursor there keeps the next poll's read to
+		// what the hub writes after this one. A move into the project later
+		// exposes older history filed elsewhere; spokes read that through the
+		// moved issue's own history, whatever their cursor.
+		out.NextAfterID = max(in.AfterID, newest)
 	}
 	// Inspect the returned page itself, including when a store was imported from
 	// an earlier snapshot with a missing protocol latch. Never trust a pre-read.

@@ -15,7 +15,8 @@ import (
 func selfAuthenticatedRoutes(doc *huma.OpenAPI) []routeTemplate {
 	var routes []routeTemplate
 	for operationID, template := range registeredOperations(doc) {
-		if hostAccessRuleFor(operationID).SelfAuthenticated {
+		if rule := hostAccessRuleFor(operationID); rule.SelfAuthenticated {
+			template.URLProjectAuthority = rule.URLProjectAuthority
 			routes = append(routes, template)
 		}
 	}
@@ -43,10 +44,18 @@ type selfAuthenticatedRouteMatcher struct {
 
 type selfAuthenticatedMatchKey struct{}
 
+// selfAuthenticatedMatch is what one probe of the matcher found.
+type selfAuthenticatedMatch struct {
+	matched bool
+	// urlProjectID is the {project_id} of a matched route that takes its
+	// authority from that project, and zero otherwise.
+	urlProjectID int64
+}
+
 func newSelfAuthenticatedRouteMatcher(routes []routeTemplate) selfAuthenticatedRouteMatcher {
 	mux := http.NewServeMux()
 	for _, route := range routes {
-		mux.Handle(route.Method+" "+route.Path, markSelfAuthenticatedMatch(route.Method))
+		mux.Handle(route.Method+" "+route.Path, markSelfAuthenticatedMatch(route))
 	}
 	return selfAuthenticatedRouteMatcher{mux: mux}
 }
@@ -56,33 +65,42 @@ func newSelfAuthenticatedRouteMatcher(routes []routeTemplate) selfAuthenticatedR
 // against a project it can identify, so a project id that is not a positive
 // integer keeps requiring the daemon's bearer token instead of reaching an
 // unauthenticated handler.
-func markSelfAuthenticatedMatch(method string) http.HandlerFunc {
+func markSelfAuthenticatedMatch(route routeTemplate) http.HandlerFunc {
 	return func(_ http.ResponseWriter, r *http.Request) {
-		if r.Method != method {
+		if r.Method != route.Method {
 			return
 		}
-		matched, ok := r.Context().Value(selfAuthenticatedMatchKey{}).(*bool)
+		match, ok := r.Context().Value(selfAuthenticatedMatchKey{}).(*selfAuthenticatedMatch)
 		if !ok {
 			return
 		}
+		var projectID int64
 		if raw := r.PathValue("project_id"); raw != "" {
-			if _, valid := positiveProjectID(raw); !valid {
+			var valid bool
+			if projectID, valid = positiveProjectID(raw); !valid {
 				return
 			}
 		}
-		*matched = true
+		match.matched = true
+		if route.URLProjectAuthority {
+			match.urlProjectID = projectID
+		}
 	}
 }
 
-func (m selfAuthenticatedRouteMatcher) matches(r *http.Request) bool {
+func (m selfAuthenticatedRouteMatcher) match(r *http.Request) selfAuthenticatedMatch {
+	var match selfAuthenticatedMatch
 	if m.mux == nil {
-		return false
+		return match
 	}
-	matched := false
 	probe := r.WithContext(context.WithValue(
-		r.Context(), selfAuthenticatedMatchKey{}, &matched))
+		r.Context(), selfAuthenticatedMatchKey{}, &match))
 	m.mux.ServeHTTP(discardResponseWriter{}, probe)
-	return matched
+	return match
+}
+
+func (m selfAuthenticatedRouteMatcher) matches(r *http.Request) bool {
+	return m.match(r).matched
 }
 
 type noProjectDataRouteMatcher struct {
