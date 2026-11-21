@@ -89,6 +89,15 @@ test('keeps a resized width and copies a short task ID from the hovered row', as
   })
   await page.goto(`${kata.origin}/kata?view=all-open`)
 
+  const titleHeading = page.locator('.column-heading-title')
+  const initialTitleWidth = (await titleHeading.boundingBox())!.width
+  const titleHandle = page.getByRole('separator', { name: 'Resize Title column' })
+  await titleHandle.focus()
+  await page.keyboard.press('ArrowLeft')
+  await expect
+    .poll(async () => (await titleHeading.boundingBox())!.width)
+    .toBeLessThan(initialTitleWidth)
+
   const handle = page.getByRole('separator', { name: 'Resize Due column' })
   await handle.focus()
   await page.keyboard.press('ArrowRight')

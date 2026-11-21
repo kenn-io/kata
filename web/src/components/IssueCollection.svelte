@@ -238,7 +238,7 @@
     return [
       columnWidths.title === undefined
         ? TASK_TITLE_TRACKS[layout]
-        : `minmax(${columnWidths.title}px, 1fr)`,
+        : `minmax(48px, ${columnWidths.title}px)`,
       ...renderedColumns.map((column) => {
         if (column.kind === 'date')
           return columnWidths.date === undefined
