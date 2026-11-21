@@ -1859,8 +1859,13 @@ The canonical browser route is `/kata`. Its independent query state uses
 `view=<name>`, `scope=<project-uid>`, `issue=<issue-uid>`, and `graph=1`, so an
 issue selection preserves the active collection and project context. `/`
 redirects visibly to `/kata`. Collection filters also stay in the query string.
-Project and issue references use their full 26-character UIDs so renames,
-moves, and status changes do not break bookmarks.
+Issue links also accept `issue=project%23short`, or `scope=project&issue=short`
+with an exact project name or UID. If that name is another project's UID, use
+`issue=project%23short`. Use `%23` when a qualified link has a scope or its
+project name looks like a UID. A name scope without an issue is unsupported. The
+address bar keeps the short link through graph and filter changes, and returns
+to UIDs when you select another issue, close it, or change scope. Full UIDs
+survive renames, moves, and status changes.
 
 Local Unix-socket daemons bind an available loopback browser port by default.
 An explicit `[web].listen` wins; port `0` also asks the operating system to

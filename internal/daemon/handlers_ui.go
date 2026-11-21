@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json/v2"
+	"errors"
 	"net/http"
 	"slices"
 	"sort"
@@ -16,6 +17,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/internal/uid"
 )
 
@@ -104,15 +106,50 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Path:        "/api/v1/ui/issue-reference",
 		Summary:     "Resolve an active issue to its browser route identity",
 	}, func(ctx context.Context, in *api.UIIssueReferenceRequest) (*api.UIIssueReferenceResponse, error) {
-		ctx, err := authorizeHostProjectScope(ctx, []int64{in.ProjectID}, nil, false)
-		if err != nil {
-			return nil, err
+		projectID, scopeID, referenceProjectID := in.ProjectID, int64(0), int64(0)
+		ref := in.Ref
+		if projectID == 0 {
+			var err error
+			scopeID, err = uiReferenceProjects(ctx, cfg.DB, in.Project)
+			if err != nil {
+				return nil, hideMissingProject(ctx, err)
+			}
+			issue, err := resolveLinkTargetRef(ctx, cfg.DB, scopeID, ref, db.IncludeDeletedNo)
+			if err != nil {
+				return nil, hideMissingProject(ctx, err)
+			}
+			parsed, _ := shortid.Parse(ref)
+			if parsed.Project != "" {
+				project, err := cfg.DB.ProjectByNameIncludingArchived(ctx, parsed.Project)
+				if err != nil {
+					if errors.Is(err, db.ErrNotFound) {
+						return nil, hideMissingProject(ctx, api.NewError(http.StatusNotFound, "issue_not_found", "issue not found", "", nil))
+					}
+					return nil, internalAPIError(err)
+				}
+				referenceProjectID = project.ID
+			}
+			projectID, ref = issue.ProjectID, issue.UID
 		}
-		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
+		ctx, err := authorizeHostProjectScope(ctx, []int64{scopeID, referenceProjectID, projectID}, nil, false)
 		if err != nil {
 			return nil, err
 		}
 		out := &api.UIIssueReferenceResponse{}
+		if scopeID != 0 {
+			scope, err := activeProjectByID(ctx, cfg.DB, scopeID)
+			if err != nil {
+				return nil, hideMissingProject(ctx, err)
+			}
+			out.Body.ScopeProjectUID = scope.UID
+		}
+		issue, err := activeIssueByRef(ctx, cfg.DB, projectID, ref, db.IncludeDeletedNo)
+		if err != nil {
+			if in.ProjectID == 0 {
+				err = hideMissingProject(ctx, err)
+			}
+			return nil, err
+		}
 		out.Body.Issue.UID = issue.UID
 		out.Body.Issue.ProjectUID = issue.ProjectUID
 		return out, nil
@@ -376,6 +413,30 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			return referencesResponse(data, policy, validator), nil
 		})
+}
+
+// uiReferenceProjects selects the view scope by exact name or UID, rejecting a
+// value that matches two projects.
+func uiReferenceProjects(ctx context.Context, store db.Storage, selector string) (int64, error) {
+	notFound := api.NewError(http.StatusNotFound, "issue_not_found", "issue not found", "", nil)
+	var scopeID int64
+	if selector != "" {
+		byName, nameErr := store.ProjectByName(ctx, selector)
+		byUID, uidErr := store.ProjectByUID(ctx, selector)
+		switch {
+		case nameErr != nil && !errors.Is(nameErr, db.ErrNotFound):
+			return 0, internalAPIError(nameErr)
+		case uidErr != nil && !errors.Is(uidErr, db.ErrNotFound):
+			return 0, internalAPIError(uidErr)
+		case nameErr == nil && (uidErr != nil || byUID.ID == byName.ID):
+			scopeID = byName.ID
+		case nameErr != nil && uidErr == nil:
+			scopeID = byUID.ID
+		default:
+			return 0, notFound
+		}
+	}
+	return scopeID, nil
 }
 
 func applyIssueScopeToUISnapshot(

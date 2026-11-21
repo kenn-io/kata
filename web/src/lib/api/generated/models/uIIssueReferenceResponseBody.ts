@@ -5,5 +5,6 @@ import type { IssueStruct } from './issueStruct.ts'
 
 export interface UIIssueReferenceResponseBody {
   issue: IssueStruct
+  scope_project_uid?: string
   [key: string]: unknown
 }

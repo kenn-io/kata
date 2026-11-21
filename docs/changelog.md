@@ -9,6 +9,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Open qualified short issue IDs and project-scoped short IDs in browser links.
+
 **Before upgrading**
 
 - Keep a [backup](operations/backup-restore.md) from before the upgrade. This

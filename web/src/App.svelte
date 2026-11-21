@@ -33,6 +33,7 @@
     patchProjectMetadata,
     patchRecurrence as patchRecurrenceRequest,
     readUIReferences,
+    resolveUIIssueReference,
     removeLabel as removeLabelRequest,
     reopenIssue as reopenIssueRequest,
     setIssuePriority,
@@ -115,6 +116,7 @@
   const selectedAuthentication = selectAuthenticationMode(launch)
   const initialRoute = parseRoute(new URL(window.location.href))
   let route = $state(initialRoute)
+  let linkUpgradeRequired = false
   let acceptedRoute = $state<AppRoute | undefined>()
   let returnPath = $state(launch.returnPath)
   let mode = $state(initialMode(launch, initialRoute, selectedAuthentication))
@@ -335,7 +337,8 @@
       state.snapshot &&
       !state.loading &&
       !state.authenticationRequired &&
-      route.kind !== 'route-error'
+      route.kind !== 'route-error' &&
+      (!route.link || route.issueUID !== undefined)
     ) {
       mode = 'ready'
     }
@@ -379,7 +382,7 @@
         mode = 'route-error'
         return
       }
-      mode = authority?.snapshot ? 'ready' : 'loading'
+      mode = authority?.snapshot && !next.link ? 'ready' : 'loading'
       loadRoute()
     }
     document.addEventListener('visibilitychange', visibility)
@@ -466,6 +469,16 @@
   }
 
   function navigate(next: AppRoute): void {
+    const current = route.kind === 'kata' ? route : undefined
+    if (
+      next.link &&
+      (!next.issueUID ||
+        next.issueUID !== current?.issueUID ||
+        next.projectUID !== current?.projectUID)
+    ) {
+      next = { ...next }
+      delete next.link
+    }
     const opensCredentials =
       route.kind !== 'route-error' && !isDaemonView(route.view) && isDaemonView(next.view)
     if (opensCredentials && route.kind !== 'route-error') {
@@ -512,6 +525,7 @@
     const accepted = snapshots.state
     return (
       next.issueUID === undefined &&
+      !next.link &&
       !isDaemonView(next.view) &&
       accepted.snapshot !== undefined &&
       accepted.intent !== undefined &&
@@ -1228,6 +1242,7 @@
     references = undefined
     activeDaemonID = id
     explicitDaemonID = id
+    linkUpgradeRequired = false
     route = restored
     acceptedRoute = undefined
     history.replaceState(null, '', serializeRoute(restored))
@@ -1250,6 +1265,11 @@
       return
     }
 
+    if ((linkUpgradeRequired || currentRoute().kind === 'route-error') && activeDaemonID === id) {
+      daemonSwitching = false
+      return
+    }
+
     daemonError = `Could not connect to ${id}`
     if (sourceDaemon && sourceRoute) {
       activeDaemonID = sourceDaemon
@@ -1266,7 +1286,54 @@
 
   async function refreshSnapshot(full: boolean): Promise<boolean> {
     if (route.kind === 'route-error') return false
-    const accepted = await snapshots.load(requestIntentForRoute(route), { full })
+    if (route.link && !route.issueUID) {
+      linkUpgradeRequired = false
+      const pending = route
+      const link = route.link
+      const daemonID = activeDaemonID
+      mode = 'loading'
+      try {
+        const result = await resolveUIIssueReference({
+          ref: link.issue,
+          ...(link.scope ? { project: link.scope } : {}),
+        })
+        if (destroyed || route !== pending || daemonID !== activeDaemonID) return false
+        if (result.status === 401) {
+          snapshots.markAuthenticationRequired()
+          requireAuthentication()
+          return false
+        }
+        if (result.status === 422) {
+          linkUpgradeRequired = true
+          snapshots.markFailure('Upgrade the selected daemon to open short issue links.')
+          return false
+        }
+        if (result.status === 404) {
+          route = {
+            kind: 'route-error',
+            path: window.location.pathname + window.location.search,
+            reason: 'issue_uid',
+            searchRef: link.issue,
+          }
+          mode = 'route-error'
+          return false
+        }
+        if (result.status !== 200) {
+          snapshots.markFailure()
+          return false
+        }
+        const resolved: AppRoute = { ...pending, issueUID: result.data.issue.uid }
+        if (result.data.scope_project_uid) resolved.projectUID = result.data.scope_project_uid
+        else delete resolved.projectUID
+        route = resolved
+      } catch {
+        if (!destroyed && route === pending && daemonID === activeDaemonID) snapshots.markFailure()
+        return false
+      }
+    }
+    const snapshotRoute = currentRoute()
+    if (snapshotRoute.kind === 'route-error') return false
+    const accepted = await snapshots.load(requestIntentForRoute(snapshotRoute), { full })
     if (snapshots.state.authenticationRequired) {
       requireAuthentication()
       return false

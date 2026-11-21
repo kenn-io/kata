@@ -145,14 +145,16 @@ type UIReferencesResponse struct {
 // UIIssueReferenceRequest resolves one active issue for browser routing
 // without exposing the issue-detail projection.
 type UIIssueReferenceRequest struct {
-	ProjectID int64  `query:"project_id" required:"true"`
+	ProjectID int64  `query:"project_id"`
+	Project   string `query:"project"`
 	Ref       string `query:"ref" required:"true"`
 }
 
 // UIIssueReferenceResponse contains only the canonical route identity.
 type UIIssueReferenceResponse struct {
 	Body struct {
-		Issue struct {
+		ScopeProjectUID string `json:"scope_project_uid,omitempty"`
+		Issue           struct {
 			UID        string `json:"uid"`
 			ProjectUID string `json:"project_uid"`
 		} `json:"issue"`

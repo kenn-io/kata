@@ -7483,6 +7483,8 @@ components:
       properties:
         issue:
           $ref: "#/components/schemas/IssueStruct"
+        scope_project_uid:
+          type: string
       required:
         - issue
       type: object
@@ -7685,7 +7687,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.62.0
+  version: 0.63.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:
@@ -12999,10 +13001,14 @@ paths:
         - explode: false
           in: query
           name: project_id
-          required: true
           schema:
             format: int64
             type: integer
+        - explode: false
+          in: query
+          name: project
+          schema:
+            type: string
         - explode: false
           in: query
           name: ref

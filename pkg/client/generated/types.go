@@ -7615,7 +7615,8 @@ func (u UIIssueReference) Validate() error {
 }
 
 type UIIssueReferenceResponseBody struct {
-	Issue IssueStruct `json:"issue"`
+	Issue           IssueStruct `json:"issue"`
+	ScopeProjectUID *string     `json:"scope_project_uid,omitempty"`
 }
 
 func (u UIIssueReferenceResponseBody) Validate() error {

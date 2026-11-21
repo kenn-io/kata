@@ -335,6 +335,7 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
+| `0.63.0` | Browser issue reference resolution accepts a project name or UID and qualified references without a project ID. |
 | `0.62.0` | Federation peers advertise `relay_cross_links_v1` in `X-Kata-Event-Features`. A common root can link issues across projects with a shared relay audience. Relays check access to each referenced project they can resolve before releasing events or checkpoints, and pause for older peers with `409 unsupported_event_features` at crossing links or links with unresolved endpoints. An unresolved endpoint may belong to another project. |
 | `0.60.0` | Enrollment join instructions use the signing hub's external URL and include signing key placeholders. |
 | `0.59.0` | Schedule and deadline civil dates and times accept an explicit `[Zone]` suffix. |
@@ -834,6 +835,10 @@ endpoints published in OpenAPI:
   only issue references, with empty projects, owners, and labels. Repeating
   `issue_uid` hydrates summaries for up to 200 stable issue UIDs and composes
   with the existing project and text filters.
+- `GET /api/v1/ui/issue-reference?ref=<ref>` resolves an issue reference to its
+  issue and project UIDs. A bare reference needs `project_id` or `project`, an
+  exact name or UID; `project` also returns `scope_project_uid`. When both are
+  supplied, `project_id` takes precedence and `project` is ignored.
 - `GET /api/v1/ui/launch-target?issue_uid=<uid>` validates one active issue and
   returns a safe absolute route into the standalone browser application:
 
