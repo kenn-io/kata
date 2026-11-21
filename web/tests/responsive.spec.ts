@@ -49,6 +49,7 @@ test('mobile bar opens task capture without opening navigation', async ({ page, 
 
   await page.locator('.mobile-navigation-trigger').getByRole('button', { name: 'New task' }).click()
   await expect(page.getByRole('dialog', { name: 'New task' })).toBeVisible()
+  await expect(page.getByRole('dialog', { name: 'Navigation' })).toHaveCount(0)
 })
 
 test('mobile navigation stays out of the task flow until opened', async ({ page, kata }) => {

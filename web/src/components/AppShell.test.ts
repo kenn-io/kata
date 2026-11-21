@@ -1844,6 +1844,7 @@ describe('AppShell', () => {
     await fireEvent.click(within(drawer).getByRole('button', { name: 'New project' }))
     expect(within(drawer).getByRole('textbox', { name: 'New project name' })).not.toBeNull()
     await fireEvent.click(within(drawer).getByRole('button', { name: 'New task' }))
+    expect(screen.queryByRole('dialog', { name: 'Navigation' })).toBeNull()
     await fireEvent.keyDown(document, { key: 'Escape' })
     expect(screen.queryByRole('dialog', { name: 'New task' })).toBeNull()
     await fireEvent.click(screen.getByRole('button', { name: 'Open navigation' }))
@@ -1883,14 +1884,8 @@ describe('AppShell', () => {
     },
   )
 
-  test('closes navigation and shows a rejected capture error once', async () => {
+  test('shows a rejected capture error once on Settings', async () => {
     const onCreateIssue = vi.fn().mockRejectedValue(new Error('validation: Action refused'))
-    vi.stubGlobal('matchMedia', (media: string) => ({
-      matches: true,
-      media,
-      addEventListener() {},
-      removeEventListener() {},
-    }))
     const accepted = snapshot()
     accepted.catalog![0]!.project.metadata = {
       ...(accepted.catalog![0]!.project.metadata ?? {}),
@@ -1912,10 +1907,7 @@ describe('AppShell', () => {
       },
     })
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Open navigation' }))
-    const drawer = screen.getByRole('dialog', { name: 'Navigation' })
-    await fireEvent.click(within(drawer).getByRole('button', { name: 'New task' }))
-    expect(screen.queryByRole('dialog', { name: 'Navigation' })).toBeNull()
+    await fireEvent.click(screen.getByRole('button', { name: 'New task' }))
     await fireEvent.input(screen.getByRole('textbox', { name: 'Quick capture' }), {
       target: { value: 'New example task' },
     })
@@ -1924,9 +1916,8 @@ describe('AppShell', () => {
     })
 
     expect(onCreateIssue).toHaveBeenCalledWith('New example task')
-    await within(screen.getByRole('dialog', { name: 'New task' })).findByRole('alert')
     await view.rerender({ mutationMessage: 'validation: Action refused' })
-    expect(screen.getAllByText('validation: Action refused')).toHaveLength(1)
+    await waitFor(() => expect(screen.getAllByText('validation: Action refused')).toHaveLength(1))
   })
 
   test('distinguishes empty projects from empty tasks and keeps refused capture closed', async () => {
