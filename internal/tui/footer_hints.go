@@ -15,7 +15,7 @@ func (m Model) helpRows() [][]helplayout.HelpItem {
 		return modalHelpRows(m.modal, m.move.step())
 	}
 	if m.input.kind != inputNone {
-		return inputHelpRows(m.input)
+		return inputHelpRows(m.input, m.daemonSearchHint())
 	}
 	if m.layout == splitlayout.Split {
 		return m.splitHelpRows()
@@ -36,7 +36,7 @@ func (m Model) queueHelpRows() [][]helplayout.HelpItem {
 		return modalHelpRows(m.modal, m.move.step())
 	}
 	if m.input.kind != inputNone {
-		return inputHelpRows(m.input)
+		return inputHelpRows(m.input, m.daemonSearchHint())
 	}
 	return m.list.queueHelpRows(m.deleteHidden(), m.moveHidden())
 }
@@ -46,7 +46,7 @@ func (m Model) detailHelpRows() [][]helplayout.HelpItem {
 		return modalHelpRows(m.modal, m.move.step())
 	}
 	if m.input.kind != inputNone {
-		return inputHelpRows(m.input)
+		return inputHelpRows(m.input, m.daemonSearchHint())
 	}
 	return m.detail.detailHelpRows(m.deleteHidden())
 }
@@ -56,7 +56,7 @@ func (m Model) splitHelpRows() [][]helplayout.HelpItem {
 		return modalHelpRows(m.modal, m.move.step())
 	}
 	if m.input.kind != inputNone {
-		return inputHelpRows(m.input)
+		return inputHelpRows(m.input, m.daemonSearchHint())
 	}
 	if m.focus == focusDetail {
 		return m.detail.detailHelpRows(m.deleteHidden())
@@ -69,7 +69,7 @@ func listHelpRows(lm listModel, chrome viewChrome) [][]helplayout.HelpItem {
 		return modalHelpRows(chrome.modal, chrome.moveStep)
 	}
 	if chrome.input.kind != inputNone {
-		return inputHelpRows(chrome.input)
+		return inputHelpRows(chrome.input, chrome.daemonSearch)
 	}
 	return appendUndoHint(lm.queueHelpRows(chrome.deleteHidden, chrome.moveHidden), chrome.undoAvailable)
 }
@@ -79,7 +79,7 @@ func detailHelpRows(dm detailModel, chrome viewChrome) [][]helplayout.HelpItem {
 		return modalHelpRows(chrome.modal, chrome.moveStep)
 	}
 	if chrome.input.kind != inputNone {
-		return inputHelpRows(chrome.input)
+		return inputHelpRows(chrome.input, chrome.daemonSearch)
 	}
 	return appendUndoHint(dm.detailHelpRows(chrome.deleteHidden), chrome.undoAvailable)
 }
@@ -94,21 +94,23 @@ func appendUndoHint(rows [][]helplayout.HelpItem, available bool) [][]helplayout
 	return out
 }
 
-func inputHelpRows(input inputState) [][]helplayout.HelpItem {
+func inputHelpRows(input inputState, daemon daemonSearchHint) [][]helplayout.HelpItem {
 	if input.kind == inputSearchBar && input.searchFocus == searchFocusResults {
-		return [][]helplayout.HelpItem{{
+		row := []helplayout.HelpItem{
 			{Key: "↑↓", Description: "move"},
 			{Key: "enter", Description: "apply"},
 			{Key: "esc", Description: "query"},
 			{Key: "/", Description: "query"},
-		}}
+		}
+		return [][]helplayout.HelpItem{withDaemonSearchHint(row, daemon)}
 	}
 	if input.kind == inputSearchBar {
-		return [][]helplayout.HelpItem{{
+		row := []helplayout.HelpItem{
 			{Key: "↑↓/enter", Description: "results"},
 			{Key: "esc", Description: "cancel"},
 			{Key: "ctrl+u", Description: "clear"},
-		}}
+		}
+		return [][]helplayout.HelpItem{withDaemonSearchHint(row, daemon)}
 	}
 	kind := input.kind
 	switch {
@@ -151,6 +153,13 @@ func inputHelpRows(input inputState) [][]helplayout.HelpItem {
 		}}
 	}
 	return nil
+}
+
+func withDaemonSearchHint(row []helplayout.HelpItem, daemon daemonSearchHint) []helplayout.HelpItem {
+	if !daemon.available {
+		return row
+	}
+	return append(row, daemon.helpItem())
 }
 
 func saveCancelFieldControls() []helplayout.HelpItem {

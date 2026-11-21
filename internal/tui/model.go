@@ -215,6 +215,14 @@ type Model struct {
 	reopenLookupPending      bool
 	move                     moveState
 	mutationEpoch            uint64
+	// daemonSearch is the ctrl+t toggle: the search bar asks the daemon for
+	// ranked results instead of filtering the loaded rows. It lasts for the
+	// session and only takes effect while one project is in scope.
+	daemonSearch bool
+	// nextSearchReq numbers daemon searches so only the newest answer lands;
+	// searchTickGen does the same for the typing-pause timer.
+	nextSearchReq int64
+	searchTickGen int64
 }
 
 // initialModel constructs the root Bubble Tea model. Style vars are
@@ -413,7 +421,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	previousReads := m.detail.reads
 	previousConn, previousScope := m.connGen, m.scopeGen
 	next, cmd := m.update(msg)
-	m = next.(Model)
+	m = next.(Model).syncDaemonSearch()
 	query := strings.TrimSpace(m.list.filter.Search)
 	if query != m.searchQuery {
 		m.searchQuery = ""
@@ -458,6 +466,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return next, cmd
 	}
 	if next, cmd, ok := m.routeSSE(msg); ok {
+		return next, cmd
+	}
+	if next, cmd, ok := m.routeDaemonSearch(msg); ok {
 		return next, cmd
 	}
 	var postFetchCmd tea.Cmd
@@ -921,6 +932,9 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 			m.input, _ = m.input.delegateToField(msg)
 			if m.input.kind.isCommandBar() {
 				m = m.applyLiveBarFilter()
+				var searchCmd tea.Cmd
+				m, searchCmd = m.debounceDaemonSearch()
+				return m, searchCmd, true
 			}
 		}
 		return m, nil, true
@@ -1230,9 +1244,12 @@ func (m Model) openInputFromMsg(msg openInputMsg) (Model, tea.Cmd) {
 	case kind == inputSearchBar:
 		s := newSearchBar(m.list.filter)
 		s.preListSelection = snapshotListSelection(m.list)
+		s.preRanked = m.list.ranked
 		m.input = s
+		m = m.syncDaemonSearch()
 		m = m.applyListViewportCache()
 		m = m.captureSearchSplitDetail()
+		return m.askDaemonIfStale()
 	case kind == inputNewIssueForm:
 		m.nextFormGen++
 		s := newNewIssueForm()
@@ -1406,28 +1423,36 @@ func (m Model) routeInputKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	case actionEditorHandoff:
 		return m.handoffToEditor()
 	}
+	var searchCmd tea.Cmd
 	if m.input.kind.isCommandBar() {
 		m = m.applyLiveBarFilter()
+		m, searchCmd = m.debounceDaemonSearch()
 	}
 	if isLabelPromptKind(prevKind) {
 		m = m.applyLabelPromptKey(msg)
 	}
-	return m, nil
+	return m, searchCmd
 }
 
 func (m Model) routeSearchInputKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
+	if m.keymap.DaemonSearch.matches(msg) {
+		next, cmd := m.toggleDaemonSearch()
+		return next, cmd, true
+	}
 	if m.input.searchFocus == searchFocusQuery {
 		switch msg.String() {
 		case "enter":
-			m.list = m.list.syncSelection(m.list.visibleRows())
 			m.input.searchFocus, m.input.searchSubmitted = searchFocusResults, true
-			next, cmd := m.submitSearch()
-			next, cmd = next.followSearchResultIfNeeded(cmd)
+			next, askCmd := m.askDaemonIfStale()
+			next.list = next.list.syncSelection(next.list.visibleRows())
+			next, cmd := next.submitSearch()
+			next, cmd = next.followSearchResultIfNeeded(combineCmds(askCmd, cmd))
 			return next, cmd, true
 		case "up", "down":
 			m.input.searchFocus = searchFocusResults
-			next, cmd := m.dispatchListKey(msg)
-			next, cmd = next.followSearchResultIfNeeded(cmd)
+			next, askCmd := m.askDaemonIfStale()
+			next, cmd := next.dispatchListKey(msg)
+			next, cmd = next.followSearchResultIfNeeded(combineCmds(askCmd, cmd))
 			return next, cmd, true
 		}
 		return m, nil, false
@@ -2008,6 +2033,7 @@ func (m Model) applyLiveBarFilter() Model {
 	v := field.value()
 	if m.input.kind == inputSearchBar {
 		m.list.filter.Search = v
+		m = m.syncDaemonSearch()
 	}
 	// Filter changed — clamp the cursor to the new visible-row count
 	// so the highlighted row never falls past the end.
@@ -2063,6 +2089,16 @@ func (m Model) commitInput() (Model, tea.Cmd) {
 				return mut
 			}, m.connGen)
 		}
+	}
+	if kind == inputSearchBar {
+		// Closing the bar ends the live ranked view, so the rows can change
+		// to a plain text filter; selection and the split detail follow.
+		prevPID, prevUID, prevHas := highlightedIdentity(m.list)
+		m.input = inputState{}
+		m = m.syncDaemonSearch()
+		m.list = m.list.clampCursorToFilter()
+		m.list = m.list.syncSelection(m.list.visibleRows())
+		return m.reconcileSplitDetailAfterRefetch(prevPID, prevUID, prevHas)
 	}
 	m.input = inputState{}
 	return m, nil
@@ -2427,6 +2463,11 @@ func (m Model) cancelInput() (Model, tea.Cmd) {
 		pre := m.input.preFilter
 		pre.Day = m.list.filter.Day
 		m.list.filter = pre
+		// An answer still in flight belongs to the query being discarded.
+		// The saved answer predates any refresh since the bar opened, so bring
+		// it up to the loaded rows before it comes back.
+		m.list.ranked = m.input.preRanked.discardInFlight()
+		m.list = m.list.narrowRanked()
 		snapshot := m.input.preListSelection
 		m.list.cursor = snapshot.cursor
 		m.list.windowStart = snapshot.windowStart
@@ -2436,13 +2477,14 @@ func (m Model) cancelInput() (Model, tea.Cmd) {
 	}
 	m.input = inputState{}
 	m.undoCloseEntryID = 0
-	if restoreSplitDetail {
-		return m.restoreSearchDetailIfNeeded(preSplitDetail, nil)
+	var cmd tea.Cmd
+	switch {
+	case restoreSplitDetail:
+		m, cmd = m.restoreSearchDetailIfNeeded(preSplitDetail, nil)
+	case searchCanceled:
+		m, cmd = m.followSearchResultIfNeeded(nil)
 	}
-	if searchCanceled {
-		return m.followSearchResultIfNeeded(nil)
-	}
-	return m, nil
+	return m, cmd
 }
 
 func snapshotListSelection(lm listModel) listSelectionSnapshot {
@@ -3946,6 +3988,7 @@ func (m Model) chrome() viewChrome {
 		undoAvailable: len(m.undoHistory.entries) > 0,
 		deleteHidden:  m.deleteHidden(),
 		moveHidden:    m.moveHidden(),
+		daemonSearch:  m.daemonSearchHint(),
 		moveStep:      m.move.step(),
 	}
 }

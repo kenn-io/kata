@@ -233,6 +233,20 @@ type ListFilter struct {
 	Limit  int
 }
 
+// SearchQuery is one ranked search of a project: the text to rank for and the
+// most hits to return.
+type SearchQuery struct {
+	Query string
+	Limit int
+}
+
+// SearchAnswer is the daemon's ranked answer: Issues in its order and the Mode
+// it actually ran ("lexical", "hybrid", ...).
+type SearchAnswer struct {
+	Issues []Issue
+	Mode   string
+}
+
 // CreateInitialLinkBody requests a link created atomically with a new
 // issue. ToRef is a short_id, qualified short_id ("kata#abc4"), or a
 // 26-char ULID; the daemon resolves it to the target issue at request

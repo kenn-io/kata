@@ -1,7 +1,7 @@
 ---
 title: Semantic search
 description: Configure hybrid semantic search and understand embeddings, ranking, fallbacks, and operations.
-last_edited: 2026-11-12
+last_edited: 2026-11-20
 ---
 
 # Semantic search
@@ -164,6 +164,26 @@ when you want pure concept matching regardless of wording.
 The effective mode is reported back on every response. In `--json` and `--agent`
 output it appears as a `mode` field (`lexical`, `hybrid`, or `semantic`); see the
 [agent output reference](../reference/agent-output.md) for the exact shape.
+
+## Search by meaning in the TUI
+
+`kata tui`'s `/` search filters the rows already loaded, by title and ID. To
+find an issue by what it is about, press `/` in a project, then `ctrl+t` to ask
+the daemon instead. The daemon ranks the project's issues in auto mode, so
+the results follow its order, flat rather than nested. The TUI shows only hits
+among the issues it has loaded (up to 2,000 per project), and the other list
+filters (status, labels, owner, date) still narrow what shows. A note beside the
+search line says whether the daemon ranked by words and meaning or by words
+only, and, in a project with more issues than the TUI loads, how many hits lie
+beyond them.
+
+The choice lasts until you quit. Press `ctrl+t` again to filter the loaded rows
+by text. Results come after you stop typing; a blank query shows the normal
+list. `enter` keeps the results while the query stays; `esc` restores
+the previous list, and `c` clears the filters and the results. Daemon search
+needs one project, so in the all-projects view `ctrl+t` does nothing. It does
+not set up embeddings: without them the daemon ranks by words, and the note
+says so.
 
 ## Freshness: lexical is instant, semantic is eventual
 

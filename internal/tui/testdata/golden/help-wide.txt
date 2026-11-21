@@ -9,11 +9,11 @@ I         inbox                        e              edit body                 
 D         daemons                      c              new comment
 F         federation                   R              typed reply to selected comment    Filters
 C         credentials                  ]              next comment link                  /       search
-T         attention                    [              previous comment link              s       cycle status filter
-L         toggle layout                p              set parent                         f       filter (form)
-                                       b              add blocker                        c       clear filters
-Graph                                  l              add related                        ctrl+r  reset filter form
-k           up                         +              add label
+T         attention                    [              previous comment link              ctrl+t  daemon search (in /)
+L         toggle layout                p              set parent                         s       cycle status filter
+                                       b              add blocker                        f       filter (form)
+Graph                                  l              add related                        c       clear filters
+k           up                         +              add label                          ctrl+r  reset filter form
 j           down                       -              remove label
 up/C-p      scroll up                  a              assign owner
 down/C-n    scroll down                A              clear owner

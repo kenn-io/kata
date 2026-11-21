@@ -73,6 +73,7 @@ ctrl+u         clear prompt
 
 Filters
 /       search
+ctrl+t  daemon search (in /)
 s       cycle status filter
 f       filter (form)
 c       clear filters
