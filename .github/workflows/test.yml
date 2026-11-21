@@ -398,19 +398,33 @@ jobs:
           KATA_TEST_FAST_SQLITE: "1"
           KATA_TEST_POSTGRES_AUTO_CONTAINER: "0"
           KATA_SKIP_OPENAPI_CLIENT_CHECK: "1"
-        run: >-
-          env -u KATA_AUTH_TOKEN
-          go tool gotestsum --format pkgname-and-test-fails --format-icons text
-          --jsonfile "gotestsum/go.json" --rerun-fails=2
-          --rerun-fails-report "gotestsum/go-reruns.txt"
-          --packages "$(go list ./... | grep -v '/e2e$')" -- -count=1
+        run: |
+          env -u KATA_AUTH_TOKEN go tool gotestsum --format pkgname-and-test-fails --format-icons text \
+            --jsonfile "gotestsum/go.json" --rerun-fails=2 --rerun-fails-report "gotestsum/go-reruns.txt" \
+            --packages "$(go list ./... | grep -v -e '/e2e$' -e '/cmd/kata$')" -- -count=1 &
+          packages_pid=$!
+          env -u KATA_AUTH_TOKEN go tool gotestsum --format pkgname-and-test-fails --format-icons text \
+            --jsonfile "gotestsum/go-cli-1.json" --rerun-fails=2 --rerun-fails-report "gotestsum/go-cli-1-reruns.txt" \
+            --packages ./cmd/kata -- -count=1 -run '^Test([A-C]|F)' &
+          cli1_pid=$!
+          env -u KATA_AUTH_TOKEN go tool gotestsum --format pkgname-and-test-fails --format-icons text \
+            --jsonfile "gotestsum/go-cli-2.json" --rerun-fails=2 --rerun-fails-report "gotestsum/go-cli-2-reruns.txt" \
+            --packages ./cmd/kata -- -count=1 -run . -skip '^Test([A-C]|F)' &
+          cli2_pid=$!
+          status=0
+          wait "$packages_pid" || status=1
+          wait "$cli1_pid" || status=1
+          wait "$cli2_pid" || status=1
+          exit "$status"
 
       - name: Upload Go test results
-        if: failure() || github.run_attempt > 1 || hashFiles('gotestsum/go-reruns.txt') != ''
+        if: failure() || github.run_attempt > 1 || hashFiles('gotestsum/go-reruns.txt', 'gotestsum/go-cli-*-reruns.txt') != ''
         uses: actions/upload-artifact@v7.0.2
         with:
           name: gotestsum-go-attempt-${{ github.run_attempt }}
-          path: gotestsum/go.json
+          path: |
+            gotestsum/go.json
+            gotestsum/go-cli-*.json
           retention-days: 14
           if-no-files-found: ignore
 
