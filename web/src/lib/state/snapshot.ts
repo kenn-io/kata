@@ -189,18 +189,18 @@ export class SnapshotController<TIntent, TSnapshot extends SnapshotAuthority> {
     this.#setAuthenticationRequired(this.state.generation)
   }
 
-  markFailure(): void {
+  markFailure(message?: string): void {
     this.#abort?.abort()
-    this.#setFailure(this.state.generation + 1)
+    this.#setFailure(this.state.generation + 1, message)
   }
 
-  #setFailure(generation: number): void {
+  #setFailure(generation: number, message = "Couldn't load workspace"): void {
     this.#setState({
       ...this.state,
       generation,
       loading: false,
       stale: this.state.snapshot !== undefined,
-      error: "Couldn't load workspace",
+      error: message,
       canMutate: false,
       authenticationRequired: false,
     })

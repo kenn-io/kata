@@ -26,6 +26,7 @@
     createRecurrence as createRecurrenceRequest,
     deleteRecurrence as deleteRecurrenceRequest,
     editIssue as editIssueRequest,
+    health,
     initProject,
     listTokens,
     moveIssue as moveIssueRequest,
@@ -117,6 +118,7 @@
   const initialRoute = parseRoute(new URL(window.location.href))
   let route = $state(initialRoute)
   let resolutionGeneration = 0
+  let linkUpgradeRequired = false
   let acceptedRoute = $state<AppRoute | undefined>()
   let returnPath = $state(launch.returnPath)
   let mode = $state(initialMode(launch, initialRoute, selectedAuthentication))
@@ -1247,6 +1249,7 @@
     references = undefined
     activeDaemonID = id
     explicitDaemonID = id
+    linkUpgradeRequired = false
     route = restored
     acceptedRoute = undefined
     history.replaceState(null, '', serializeRoute(restored))
@@ -1269,6 +1272,11 @@
       return
     }
 
+    if (linkUpgradeRequired && activeDaemonID === id) {
+      daemonSwitching = false
+      return
+    }
+
     daemonError = `Could not connect to ${id}`
     if (sourceDaemon && sourceRoute) {
       activeDaemonID = sourceDaemon
@@ -1287,11 +1295,34 @@
     if (route.kind === 'route-error') return false
     const generation = ++resolutionGeneration
     if (route.link && !route.issueUID) {
+      linkUpgradeRequired = false
       const pending = route
       const link = route.link
       const daemonID = activeDaemonID
       mode = 'loading'
       try {
+        const healthResult = await health()
+        if (
+          destroyed ||
+          generation !== resolutionGeneration ||
+          route !== pending ||
+          daemonID !== activeDaemonID
+        )
+          return false
+        if (healthResult.status === 401) {
+          snapshots.markAuthenticationRequired()
+          requireAuthentication()
+          return false
+        }
+        if (healthResult.status !== 200) {
+          snapshots.markFailure()
+          return false
+        }
+        if (!supportsIssueLinks(healthResult.data.api_schema_version)) {
+          linkUpgradeRequired = true
+          snapshots.markFailure('Upgrade the selected daemon to open short issue links.')
+          return false
+        }
         const result = await resolveUIIssueReference({
           ref: link.issue,
           ...(link.scope ? { project: link.scope } : {}),
@@ -1358,6 +1389,14 @@
       return accepted
     }
     return false
+  }
+
+  function supportsIssueLinks(version: string | undefined): boolean {
+    const parts = version?.trim().match(/^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/)
+    if (!parts) return false
+    const major = Number(parts[1])
+    const minor = Number(parts[2])
+    return major > 0 || (major === 0 && minor >= 63)
   }
 
   async function refreshCredentials(): Promise<void> {

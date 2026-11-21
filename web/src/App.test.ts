@@ -29,45 +29,53 @@ describe('App', () => {
     vi.restoreAllMocks()
   })
 
-  it('opens a qualified short link with one selected snapshot', async () => {
-    history.replaceState(null, '', '/kata?issue=example-project%23abc4')
-    sessionStorage.setItem(
-      'kata.web.session.v1',
-      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
-    )
-    const requests: URL[] = []
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const target = new URL(requestOf(input, init).url)
-        if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
-        if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
-        if (target.pathname.endsWith('/api/v1/ui/issue-reference')) {
-          expect(target.searchParams.get('ref')).toBe('example-project#abc4')
-          expect(target.searchParams.has('project_id')).toBe(false)
-          return Response.json({
-            issue: { uid: '01J00000000000000000000001', project_uid: '01J00000000000000000000002' },
-          })
-        }
-        if (target.pathname.endsWith('/api/v1/ui/references'))
-          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
-        if (target.pathname.endsWith('/api/v1/ui/snapshot')) {
-          requests.push(target)
-          const data = snapshot()
-          return Response.json(
-            { ...data, selected: availableSelection(data.collection[0]) },
-            { headers: { ETag: '"snapshot-1"' } },
-          )
-        }
-        return Response.json({}, { status: 404 })
-      }),
-    )
-    render(App)
-    await screen.findByText('Example issue', { selector: 'h2' })
-    expect(location.search).toBe('?issue=example-project%23abc4')
-    expect(requests).toHaveLength(1)
-    expect(requests[0]!.searchParams.get('selected_issue_uid')).toBe('01J00000000000000000000001')
-  })
+  it.each(['0.63.0', '0.64.0', '1.0.0'])(
+    'opens a qualified short link on API %s',
+    async (version) => {
+      history.replaceState(null, '', '/kata?issue=example-project%23abc4')
+      sessionStorage.setItem(
+        'kata.web.session.v1',
+        JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+      )
+      const requests: URL[] = []
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const target = new URL(requestOf(input, init).url)
+          if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+          if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+          if (target.pathname.endsWith('/api/v1/health'))
+            return Response.json({ api_schema_version: version })
+          if (target.pathname.endsWith('/api/v1/ui/issue-reference')) {
+            expect(target.searchParams.get('ref')).toBe('example-project#abc4')
+            expect(target.searchParams.has('project_id')).toBe(false)
+            return Response.json({
+              issue: {
+                uid: '01J00000000000000000000001',
+                project_uid: '01J00000000000000000000002',
+              },
+            })
+          }
+          if (target.pathname.endsWith('/api/v1/ui/references'))
+            return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+          if (target.pathname.endsWith('/api/v1/ui/snapshot')) {
+            requests.push(target)
+            const data = snapshot()
+            return Response.json(
+              { ...data, selected: availableSelection(data.collection[0]) },
+              { headers: { ETag: '"snapshot-1"' } },
+            )
+          }
+          return Response.json({}, { status: 404 })
+        }),
+      )
+      render(App)
+      await screen.findByText('Example issue', { selector: 'h2' })
+      expect(location.search).toBe('?issue=example-project%23abc4')
+      expect(requests).toHaveLength(1)
+      expect(requests[0]!.searchParams.get('selected_issue_uid')).toBe('01J00000000000000000000001')
+    },
+  )
 
   it('offers to search for an unresolved qualified link', async () => {
     history.replaceState(null, '', '/kata?issue=example-project%23missing')
@@ -81,6 +89,8 @@ describe('App', () => {
         const target = new URL(requestOf(input, init).url)
         if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
         if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (target.pathname.endsWith('/api/v1/health'))
+          return Response.json({ api_schema_version: '0.63.0' })
         return Response.json({ error: { code: 'not_found' } }, { status: 404 })
       }),
     )
@@ -88,6 +98,94 @@ describe('App', () => {
     expect(
       await screen.findByRole('button', { name: 'Search for example-project#missing' }),
     ).not.toBeNull()
+  })
+
+  it.each(['0.62.0', undefined, 'invalid'])(
+    'asks for an upgrade when the selected daemon reports %s',
+    async (version) => {
+      history.replaceState(null, '', '/kata?issue=example-project%23abc4')
+      sessionStorage.setItem(
+        'kata.web.session.v1',
+        JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+      )
+      const calls: Request[] = []
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = requestOf(input, init)
+          const target = new URL(request.url)
+          calls.push(request)
+          if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+          if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+          if (target.pathname === '/api/v1/ui/proxy/api/v1/health')
+            return Response.json({ api_schema_version: version })
+          return Response.json({}, { status: 500 })
+        }),
+      )
+      render(App)
+      expect(
+        await screen.findByText('Upgrade the selected daemon to open short issue links.'),
+      ).not.toBeNull()
+      const request = calls.find((call) => new URL(call.url).pathname.endsWith('/api/v1/health'))
+      expect(request?.headers.get('X-Kata-Web-Daemon')).toBe('example-local')
+      expect(
+        calls.some((call) => new URL(call.url).pathname.endsWith('/api/v1/ui/issue-reference')),
+      ).toBe(false)
+    },
+  )
+
+  it('keeps an older daemon selected when its saved short link needs an upgrade', async () => {
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    localStorage.setItem(
+      'kata.web.workspace-state.v1',
+      JSON.stringify({
+        version: 1,
+        daemons: { 'example-remote': '/kata?issue=example-project%23abc4' },
+      }),
+    )
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        const target = new URL(request.url)
+        if (target.pathname === '/api/v1/ui/daemons')
+          return Response.json({
+            daemons: [
+              { id: 'example-local', url: '', default: true, auth: 'none', health: 'connected' },
+              {
+                id: 'example-remote',
+                url: 'https://daemon.example',
+                default: false,
+                auth: 'token',
+                health: 'connected',
+              },
+            ],
+          })
+        if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (target.pathname.endsWith('/api/v1/health'))
+          return Response.json({ api_schema_version: '0.62.0' })
+        if (target.pathname.endsWith('/api/v1/ui/references'))
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        if (target.pathname.endsWith('/api/v1/ui/snapshot'))
+          return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+        return Response.json({}, { status: 404 })
+      }),
+    )
+    render(App)
+    await fireEvent.click(
+      await screen.findByRole('button', { name: 'Switch Kata daemon: example-local' }),
+    )
+    await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
+    expect(
+      await screen.findByText('Upgrade the selected daemon to open short issue links.'),
+    ).not.toBeNull()
+    expect(
+      screen.getByRole('button', { name: 'Switch Kata daemon: example-remote' }),
+    ).not.toBeNull()
+    expect(location.search).toBe('?issue=example-project%23abc4')
   })
 
   it('retries resolving a short link after a server failure', async () => {
@@ -103,6 +201,8 @@ describe('App', () => {
         const target = new URL(requestOf(input, init).url)
         if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
         if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (target.pathname.endsWith('/api/v1/health'))
+          return Response.json({ api_schema_version: '0.63.0' })
         if (target.pathname.endsWith('/api/v1/ui/issue-reference')) {
           expect(target.searchParams.get('project')).toBe('example-project')
           if (++resolutions === 1) return Response.json({}, { status: 500 })
@@ -143,6 +243,8 @@ describe('App', () => {
         const target = new URL(requestOf(input, init).url)
         if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
         if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (target.pathname.endsWith('/api/v1/health'))
+          return Response.json({ api_schema_version: '0.63.0' })
         if (target.pathname.endsWith('/api/v1/ui/issue-reference')) {
           resolving = true
           return new Promise<Response>((resolve) => {
@@ -168,6 +270,44 @@ describe('App', () => {
     await screen.findByRole('button', { name: /Example issue/ })
     expect(location.search).toBe('?view=all-open')
     expect(screen.queryByRole('region', { name: 'Kata issue detail' })).toBeNull()
+  })
+
+  it('does not resolve a short link after navigation during the health check', async () => {
+    history.replaceState(null, '', '/kata?issue=example-project%23abc4')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    let finishHealth: (response: Response) => void = () => {}
+    let checking = false
+    let resolved = false
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const target = new URL(requestOf(input, init).url)
+        if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (target.pathname.endsWith('/api/v1/health')) {
+          checking = true
+          return new Promise<Response>((resolve) => {
+            finishHealth = resolve
+          })
+        }
+        if (target.pathname.endsWith('/api/v1/ui/issue-reference')) resolved = true
+        if (target.pathname.endsWith('/api/v1/ui/references'))
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        if (target.pathname.endsWith('/api/v1/ui/snapshot'))
+          return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+        return Response.json({}, { status: 404 })
+      }),
+    )
+    render(App)
+    await waitFor(() => expect(checking).toBe(true))
+    history.pushState(null, '', '/kata?view=all-open')
+    await fireEvent(window, new PopStateEvent('popstate'))
+    finishHealth(Response.json({ api_schema_version: '0.63.0' }))
+    await screen.findByRole('button', { name: /Example issue/ })
+    expect(resolved).toBe(false)
   })
 
   it('shows a clicked project from the loaded list and keeps it current', async () => {
