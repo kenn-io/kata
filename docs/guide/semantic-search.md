@@ -311,8 +311,10 @@ pgvector tables in its selected Kata schema when that optional extension is
 installed. Both JSONL [backup/export](../operations/backup-restore.md) forms,
 full backups and project exports, keep complete portable embedding artifacts,
 and a project export includes only that project's artifacts. A restore
-validates those artifacts and reuses the vectors without requesting new
-embeddings. Legacy index embeddings are still excluded. Archives exported by
+validates those artifacts and reuses an artifact's vectors without requesting
+new embeddings only when the artifact's input and recipe match the daemon's
+current embedding configuration. The daemon re-embeds issues without a matching
+artifact. Legacy index embeddings are still excluded. Archives exported by
 older kata versions that still contain embedding records import cleanly; Kata
 skips those records and the reconciler rebuilds the vectors.
 
