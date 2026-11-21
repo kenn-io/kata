@@ -9650,6 +9650,14 @@ paths:
           schema:
             format: int64
             type: integer
+        - description: Seconds the hub may hold a caught-up project poll until an event commits. The hub caps it at the value in X-Kata-Federation-Poll-Wait-Max and answers at once when it cannot hold the request.
+          explode: false
+          in: query
+          name: wait
+          schema:
+            description: Seconds the hub may hold a caught-up project poll until an event commits. The hub caps it at the value in X-Kata-Federation-Poll-Wait-Max and answers at once when it cannot hold the request.
+            format: int64
+            type: integer
       responses:
         "200":
           content:
@@ -9665,6 +9673,11 @@ paths:
               schema:
                 description: Resolved subject UID when the issue filter is applied, including empty pages.
                 type: string
+            X-Kata-Federation-Poll-Wait-Max:
+              schema:
+                description: Longest wait, in seconds, this hub accepts on a project event poll.
+                format: int64
+                type: integer
             X-Kata-Required-Event-Features:
               schema:
                 type: string

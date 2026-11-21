@@ -168,6 +168,10 @@ type ServerConfig struct {
 	// per-test logger so output is observable and isolated.
 	Logger *slog.Logger
 
+	// federationPollWaits is owned by the server NewServer builds; it bounds
+	// and wakes held federation event polls.
+	federationPollWaits *federationPollWaits
+
 	// Embedder is the semantic-search embedding client. Nil means semantic
 	// search is disabled and the search handler falls back to lexical-only.
 	Embedder      *embedding.Client
@@ -287,6 +291,7 @@ func NewDefaultGitHubSyncRunner(cfg GitHubSyncRunnerConfig) GitHubSyncRunner {
 type Server struct {
 	federationIngestAdmission  chan struct{}
 	federationControlAdmission chan struct{}
+	stopFederationPollBridge   func()
 	cfg                        ServerConfig
 	baseHandler                http.Handler
 	handler                    http.Handler
@@ -394,12 +399,15 @@ func NewServer(cfg ServerConfig) *Server {
 	withRootAttribution(humaAPI, cfg.RootSigning)
 	withExternalRootAdministration(humaAPI, cfg.Auth.AllowIdentityConnectorAdministration)
 
+	controlAdmission := make(chan struct{}, 16)
+	cfg.federationPollWaits = newFederationPollWaits(cap(controlAdmission))
 	s := &Server{
 		cfg: cfg, api: humaAPI,
 		federationIngestAdmission:  make(chan struct{}, 2),
-		federationControlAdmission: make(chan struct{}, 16),
+		federationControlAdmission: controlAdmission,
 	}
 	registerRoutes(humaAPI, mux, cfg)
+	s.stopFederationPollBridge = startFederationPollBridge(cfg)
 	if cfg.WebSessions != nil {
 		registerUISessionHandlers(mux, cfg.WebSessions)
 	}
@@ -493,6 +501,9 @@ func (s *Server) API() huma.API { return s.api }
 // Close releases signing replay ownership. Call it after HTTP handlers drain;
 // the database remains owned by the caller.
 func (s *Server) Close() error {
+	if s.stopFederationPollBridge != nil {
+		s.stopFederationPollBridge()
+	}
 	if s.cfg.FederationSigning != nil {
 		return s.cfg.FederationSigning.Close()
 	}

@@ -31,16 +31,22 @@ import (
 // derived from it.
 type Store struct {
 	*sql.DB
-	dsn                          string
-	schema                       string
-	schemaOwner                  string
-	instanceUID                  string
-	readOnly                     bool
-	installedFreshSchema         bool
-	servingConn                  *sql.Conn
-	federationLease              *federationRunnerLeaseState
-	federationLockSlots          chan struct{}
-	federationLockDB             *sql.DB
+	dsn                  string
+	schema               string
+	schemaOwner          string
+	instanceUID          string
+	readOnly             bool
+	installedFreshSchema bool
+	servingConn          *sql.Conn
+	federationLease      *federationRunnerLeaseState
+	federationLockSlots  chan struct{}
+	federationLockDB     *sql.DB
+	pollWakeDB           *sql.DB
+	// pollWakeCtx ends the wake listeners when Close cancels it; the store
+	// owns its lifetime. The wake bridge reads pollWakeDB from its own
+	// goroutines, so Close keeps the field in place.
+	pollWakeCtx                  context.Context
+	stopPollWake                 context.CancelFunc
 	idempotencyDB                *sql.DB
 	exportQ                      exportQueryer
 	rotationStage                func(context.Context) error
@@ -75,10 +81,16 @@ func (s *Store) Close() error {
 		federationLockErr = s.federationLockDB.Close()
 		s.federationLockDB = nil
 	}
+	var pollWakeErr error
+	if s.pollWakeDB != nil && !s.pollWakeClosed() {
+		s.stopPollWake()
+		pollWakeErr = s.pollWakeDB.Close()
+	}
 	return errors.Join(
 		leaseErr,
 		idempotencyErr,
 		federationLockErr,
+		pollWakeErr,
 		s.DB.Close(),
 	)
 }
