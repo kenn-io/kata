@@ -46,7 +46,7 @@ compactly; `kata --help` has their full descriptions.
 | Flag | Meaning |
 | --- | --- |
 | `--workspace <path>` | Resolve project context from a specific workspace. |
-| `--project <name>` | Select a project explicitly; otherwise resolve `.kata.toml` at or above `--workspace`. |
+| `--project <name-or-id>` | Select a project by name; `show` and `comment` also accept a numeric project ID for bare UID refs. Otherwise resolve `.kata.toml` at or above `--workspace`. Qualified refs select their project by exact name. |
 | `--daemon <name>` | Target a named daemon catalog entry. Without it, select `KATA_SERVER`, workspace config, `active_daemon`, then local. |
 | `--as <actor>` | Override the actor for this command. An explicitly empty value is a validation error; actor fallback applies only when the flag is absent. |
 | `--teammate <handle>` | Attribute supported comments, new issues, and cron run observations to one teammate under the accountable actor. An explicit empty value suppresses `KATA_TEAMMATE`. |
@@ -975,6 +975,49 @@ daemon API 0.23.0 or newer. The CLI checks compatibility before sending new
 request fields.
 A preview is a move request, so it needs the same write authority as a real
 move. Read-only tokens and `--insecure-readonly` clients cannot preview.
+
+### Move many issues
+
+Two or more refs, or `--refs-from`, move each issue alone, without its
+descendants; a single ref still moves the subtree. Batches reject `--dry`.
+
+```sh
+kata move source#abc4 source#def5 target-project --comment "routed"
+kata move --refs-from routing.tsv
+kata list --label triaged --limit 0 --json | jq -r '.issues[].uid' > refs.txt
+kata move --refs-from refs.txt target-project
+```
+
+A refs file has one `ref` or `ref<TAB>project` per line; a row's project wins
+over the positional target, which must still name a project when given. A
+leading UTF-8 byte order mark is ignored. Blank lines are ignored, and there is
+no comment syntax: `# note` is treated as an issue ref. Refs can be
+project-qualified short IDs or issue UIDs. Bare short IDs resolve in the
+`--project` project or, when omitted, the bound workspace. A malformed row or more than 5,000 rows fails before
+any move; an empty file succeeds without contacting the daemon. An invalid ref
+or unknown target is refused while other rows still move. When refs resolve to
+the same issue, only the first moves; if they name different targets, all are
+refused.
+
+Up to six issues move concurrently. Agent and JSON output include
+`includes_descendants=false`. Each input gets a result, in input order:
+
+| Result | Meaning |
+| --- | --- |
+| `moved` | The issue moved. |
+| `refused` | The ref or target is invalid, or a move rule refused it. Exits 5. |
+| `unknown` | The move response could not confirm the outcome. Check the issue and its move history before retrying. |
+| `unattempted` | The CLI stopped before sending it. Retry it. |
+
+`--comment` is posted to each moved issue; a failed comment leaves the move in
+place. To retry, remove `moved` rows from the refs file, check `unknown` rows,
+and fix `refused` rows. For a shared target, extract the `unattempted` refs:
+
+```sh
+kata move --refs-from refs.txt target-project --json > results.json
+jq -r '.results[] | select(.result == "unattempted") | .ref' results.json > retry.txt
+kata move --refs-from retry.txt target-project
+```
 
 Federated moves require both projects to use the same active hub. Spokes require
 both projects to be joined, use the same federation actor, and have push enabled

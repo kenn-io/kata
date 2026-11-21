@@ -98,7 +98,7 @@ func newRootCmd() *cobra.Command {
 	cmd.PersistentFlags().String("teammate", "", "teammate attribution (default: $KATA_TEAMMATE; empty suppresses inheritance)")
 	cmd.PersistentFlags().StringVar(&flags.As, "as", "", "override actor (default: $KATA_AUTHOR > $USER > git > anonymous)")
 	cmd.PersistentFlags().StringVar(&flags.Workspace, "workspace", "", "path used for project resolution (default: cwd)")
-	cmd.PersistentFlags().StringVar(&flags.Project, "project", "", "project name (default: from .kata.toml at or above --workspace)")
+	cmd.PersistentFlags().StringVar(&flags.Project, "project", "", "project name (show and comment also accept project ID for bare UID refs; default: from .kata.toml at or above --workspace)")
 	cmd.PersistentFlags().StringVar(&flags.Daemon, "daemon", "", "named daemon catalog entry (default: KATA_SERVER, workspace, active_daemon, local)")
 	// Root-local, not persistent: `kata --version` is the conventional
 	// spelling, while `kata list --version` should stay an unknown flag.
@@ -328,6 +328,9 @@ func emitJSONError(w io.Writer, err error, runEReached bool) {
 
 func emitHumanError(w io.Writer, err error, runEReached bool) {
 	cli := cliErrorForErr(err, runEReached)
+	if cli.Message == "" {
+		return
+	}
 	message := cli.Message
 	if cli.Code == "duplicate_candidates" {
 		message = appendCreateConflictRefs(message, cli)
