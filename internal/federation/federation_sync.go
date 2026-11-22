@@ -417,17 +417,33 @@ func publishRetainedLinkPeers(ctx context.Context, store db.Storage, binding *db
 		return false, nil
 	}
 	for _, event := range batch {
-		var peers []string
-		_, _, err := db.StripCrossProjectLinkAdditions(db.FoldEvent{Type: event.Type, UID: event.UID, Payload: jsontext.Value(event.Payload)}, func(uid string) bool {
+		fold := db.FoldEvent{Type: event.Type, UID: event.UID, Payload: jsontext.Value(event.Payload)}
+		if event.IssueUID != nil {
+			fold.IssueUID = *event.IssueUID
+		}
+		if event.RelatedIssueUID != nil {
+			fold.RelatedIssueUID = *event.RelatedIssueUID
+		}
+		peers, err := db.DirectLinkPeers(fold)
+		if err != nil {
+			return false, err
+		}
+		if peers == nil {
+			peers = make(map[string]bool)
+		}
+		_, _, err = db.StripCrossProjectLinkAdditions(fold, func(uid string) bool {
 			if uid != "" && (event.IssueUID == nil || uid != *event.IssueUID) {
-				peers = append(peers, uid)
+				peers[uid] = true
 			}
 			return false
 		})
 		if err != nil {
 			return false, err
 		}
-		for _, peer := range peers {
+		for peer := range peers {
+			if peer == "" || peer == fold.IssueUID {
+				continue
+			}
 			if sent[peer] {
 				continue
 			}
