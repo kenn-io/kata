@@ -1588,10 +1588,21 @@
     padding: 0 calc(var(--list-inset) + var(--row-inset)) 0 var(--list-inset);
     align-items: center;
     background: var(--bg-surface);
-    border-bottom: 1px solid var(--border-muted);
+    border-bottom: 0;
     color: var(--text-muted);
     font-size: var(--font-size-xs);
     font-weight: var(--font-weight-medium);
+  }
+
+  .table-header::after {
+    position: absolute;
+    right: var(--list-inset);
+    bottom: 0;
+    left: 0;
+    height: 1px;
+    background: var(--border-muted);
+    content: '';
+    pointer-events: none;
   }
 
   .column-heading {
@@ -1602,9 +1613,13 @@
     height: 100%;
   }
 
+  .column-heading-title {
+    gap: var(--space-1);
+  }
+
   /* Title starts over the row titles, past the chevron and status columns. */
   .column-heading-title .col {
-    flex: 1 1 auto;
+    flex: 0 0 auto;
     padding-left: 40px;
   }
 

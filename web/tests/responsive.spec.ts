@@ -236,6 +236,19 @@ test('the task list and pane stay aligned beside an open task', async ({ page, k
   const edit = (await page.getByRole('button', { name: 'Edit issue' }).boundingBox())!
   expect(Math.abs(displayButton.y - edit.y)).toBeLessThan(1)
   expect(Math.abs(displayButton.height - edit.height)).toBeLessThan(1)
+  const titleLabel = (await page.locator('.column-heading-title .col-title span').boundingBox())!
+  const sortHint = (await page.locator('.column-heading-title .sort-hint').boundingBox())!
+  expect(sortHint.x - (titleLabel.x + titleLabel.width)).toBeLessThan(16)
+  const header = page.locator('.table-header')
+  const headerRight = await header.evaluate((element) => {
+    const bounds = element.getBoundingClientRect()
+    const divider = getComputedStyle(element, '::after')
+    const inset = Number.parseFloat(divider.right)
+    return divider.content === 'none' || !Number.isFinite(inset)
+      ? bounds.right
+      : bounds.right - inset
+  })
+  expect(Math.abs(headerRight - selection)).toBeLessThan(1)
 
   await page.goto(`${kata.origin}/kata?view=all-open`)
   const visibleRow = page.getByRole('button', { name: /Add retries to the task worker/ })
