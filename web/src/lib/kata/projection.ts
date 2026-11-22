@@ -368,8 +368,6 @@ function normalizeEvent(
     actor: event.actor,
     payload: parseEventPayload(event.payload),
     created_at: event.created_at,
-    hlc_physical_ms: event.hlc_physical_ms,
-    hlc_counter: event.hlc_counter,
   }
 }
 
@@ -393,6 +391,9 @@ function normalizeSelectedDetail(
   const parent = selectedIssue.parent ? issuesByUID.get(selectedIssue.parent.uid) : undefined
   return {
     issue: { ...selectedIssue, body: selectedIssue.body ?? '' },
+    ...(selected.effective_close_event_uid
+      ? { effective_close_event_uid: selected.effective_close_event_uid }
+      : {}),
     comments: (selected.comments ?? []).map((comment) => ({
       id: comment.id,
       ...(comment.uid === undefined ? {} : { uid: comment.uid }),
@@ -470,7 +471,6 @@ function normalizeIssue(
     deadline_on_date: issue.deadline_on_date,
     metadata: { ...issue.metadata },
     revision: issue.revision,
-    content_revision: issue.content_revision,
     owner: issue.owner,
     assignment_expires_on: issue.assignment_expires_on,
     author: issue.author,

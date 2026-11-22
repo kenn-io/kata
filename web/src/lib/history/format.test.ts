@@ -15,8 +15,6 @@ function makeEvent(type: string, payload?: Record<string, unknown>): KataTaskEve
     actor: 'tester',
     payload,
     created_at: '2026-05-16T00:00:00Z',
-    hlc_physical_ms: 1,
-    hlc_counter: 0,
   }
 }
 

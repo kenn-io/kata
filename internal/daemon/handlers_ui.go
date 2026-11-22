@@ -280,7 +280,7 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 						return nil, internalAPIError(err)
 					}
 					recordUISnapshotDependencies(ctx, cachedDependencies)
-					return snapshotResponse(ctx, cachedResponse, intent, policy, validator)
+					return snapshotResponseWithClose(ctx, cfg.DB, cfg.UIStore, cachedResponse, intent, policy, validator)
 				}
 			}
 			query := intent.storeQuery()
@@ -318,7 +318,7 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, internalAPIError(err)
 			}
 			recordUISnapshotDependencies(ctx, dependencies)
-			return snapshotResponse(ctx, data, intent, policy, validator)
+			return snapshotResponseWithClose(ctx, cfg.DB, cfg.UIStore, data, intent, policy, validator)
 		})
 
 	referencesOperation := huma.Operation{
@@ -868,6 +868,29 @@ func matchesStrongETag(header, current string) bool {
 		}
 	}
 	return false
+}
+
+func snapshotResponseWithClose(ctx context.Context, store db.Storage, uiStore db.UIStore, data db.UISnapshotData,
+	intent normalizedUISnapshotIntent, policy uiPolicy, validator string,
+) (*api.UISnapshotResponse, error) {
+	out, err := snapshotResponse(ctx, data, intent, policy, validator)
+	if err != nil || out.Body.Selected == nil || data.SelectedIssue == nil || !intent.IncludeHistory || data.SelectedIssue.Status != "closed" {
+		return out, err
+	}
+	uid, err := effectiveIssueCloseEventUID(ctx, store, data.SelectedIssue.Issue)
+	if err != nil {
+		return nil, internalAPIError(err)
+	}
+	cursor, err := uiStore.UIEventCursor(ctx)
+	if err != nil {
+		return nil, internalAPIError(err)
+	}
+	// The fold reads after the snapshot transaction. A newer cursor means it
+	// may describe a close that the captured snapshot does not contain.
+	if cursor == data.Cursor {
+		out.Body.Selected.EffectiveCloseEventUID = uid
+	}
+	return out, nil
 }
 
 func snapshotResponse(ctx context.Context, data db.UISnapshotData, intent normalizedUISnapshotIntent,

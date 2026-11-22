@@ -198,7 +198,9 @@ describe('normalizeKataUISnapshot', () => {
   })
 
   test('adapts the native snapshot to the ported immutable collection model', () => {
-    const projection = normalizeKataUISnapshot(snapshot(), '2026-08-01T12:30:00.000Z')
+    const wire = snapshot()
+    wire.selected!.effective_close_event_uid = 'close-event-1'
+    const projection = normalizeKataUISnapshot(wire, '2026-08-01T12:30:00.000Z')
 
     expect(projection.projects).toEqual([
       expect.objectContaining({
@@ -230,6 +232,7 @@ describe('normalizeKataUISnapshot', () => {
     expect(projection.member_issue_uid_set.has('issue-child')).toBe(true)
     expect(projection.selected_state).toBe('available')
     expect(projection.selected_revision).toBe('"rev-3"')
+    expect(projection.selected_detail?.effective_close_event_uid).toBe('close-event-1')
     expect(projection.selected_recurrences).toEqual([
       expect.objectContaining({ uid: 'recurrence-1', template_title: 'Weekly example' }),
     ])
