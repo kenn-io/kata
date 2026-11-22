@@ -12,6 +12,7 @@ import (
 
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
+	"go.kenn.io/kata/internal/linkpath"
 )
 
 const daemonChildExitGrace = 5 * time.Second
@@ -190,11 +191,19 @@ func SQLiteCutoverLockedForDSN(dsn string) bool {
 	if dsn == "" || strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
 		return false
 	}
-	lock := flock.New(strings.TrimPrefix(dsn, "sqlite://")+".import.lock", flock.SetFlag(os.O_RDONLY))
-	locked, err := lock.TryLock()
-	if err != nil {
-		return false
+	for _, name := range linkpath.Chain(strings.TrimPrefix(dsn, "sqlite://")) {
+		if importLockHeld(name + ".import.lock") {
+			return true
+		}
 	}
-	defer func() { _ = lock.Close() }()
-	return !locked
+	return false
+}
+
+// importLockHeld probes lockPath read-only and reports whether another
+// process holds it.
+func importLockHeld(lockPath string) bool {
+	lock := flock.New(lockPath, flock.SetFlag(os.O_RDONLY))
+	locked, err := lock.TryLock()
+	_ = lock.Close()
+	return err == nil && !locked
 }

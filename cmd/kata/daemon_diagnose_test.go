@@ -1033,6 +1033,22 @@ func TestDaemonDiagnoseStorageBusy(t *testing.T) {
 	assertDiagnosticState(t, out, "storage_busy")
 }
 
+func TestDaemonDiagnoseMissingSymlinkTargetStorageBusy(t *testing.T) {
+	home, _, _, _ := stoppedProfileCLI(t)
+	path := filepath.Join(home, "kata.db")
+	target := filepath.Join(t.TempDir(), "kata.db")
+	require.NoError(t, os.Remove(path))
+	if err := os.Symlink(target, path); err != nil {
+		t.Skipf("cannot create symlink: %v", err)
+	}
+	lock := flock.New(target + ".import.lock")
+	require.NoError(t, lock.Lock())
+	defer func() { _ = lock.Close() }()
+	out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
+	require.NoError(t, err)
+	assertDiagnosticState(t, out, "storage_busy")
+}
+
 func TestDaemonDiagnoseCurrentHomeStorageBusy(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
