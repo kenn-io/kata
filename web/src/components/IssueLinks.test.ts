@@ -106,6 +106,25 @@ describe('IssueLinks', () => {
     await view.rerender({ linkFilters: createKataLinkFilters('open') })
     expect(screen.queryByRole('button', { name: /example-workspace#parent-1/ })).toBeNull()
   })
+
+  it('lets users restore links when active filters hide a short list', async () => {
+    const selected = issue()
+    selected.links = [link(1, 'related', 'issue-selected', 'issue-related')]
+    const onLinkFiltersChange = vi.fn()
+    const view = renderLinks({
+      issue: selected,
+      linkFilters: createKataLinkFilters('closed'),
+      onLinkFiltersChange,
+    })
+
+    expect(screen.getByText('No matching links')).toBeTruthy()
+    await fireEvent.click(screen.getByRole('button', { name: 'Filter links' }))
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'Open' }))
+
+    const nextFilters = onLinkFiltersChange.mock.calls[0]![0]!
+    await view.rerender({ linkFilters: nextFilters })
+    expect(screen.getByRole('button', { name: /Related related-1/ })).toBeTruthy()
+  })
 })
 
 function renderLinks(overrides: Record<string, unknown> = {}) {

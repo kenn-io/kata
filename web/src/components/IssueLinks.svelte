@@ -4,6 +4,7 @@
   import { markColor } from '../lib/marks'
 
   import {
+    KATA_LINK_RELATIONS,
     kataLinkMatchesFilters,
     relationForKataLink,
     type KataLinkFilters,
@@ -78,6 +79,11 @@
     issue.links.filter((link) =>
       kataLinkMatchesFilters(link, issue.issue.uid, peerResolution(link), linkFilters),
     ),
+  )
+  const hasAppliedLinkFilters = $derived(
+    !linkFilters.statuses.open ||
+      !linkFilters.statuses.closed ||
+      KATA_LINK_RELATIONS.some((relation) => !linkFilters.relations[relation]),
   )
 
   $effect(() => {
@@ -231,7 +237,7 @@
         : undefined}
 >
   {#snippet actions()}
-    {#if issue.links.length > 8}<LinkFilterMenu
+    {#if issue.links.length > 8 || hasAppliedLinkFilters}<LinkFilterMenu
         filters={linkFilters}
         onChange={onLinkFiltersChange}
       />{/if}

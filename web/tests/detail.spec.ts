@@ -83,8 +83,13 @@ test('comments, links, checklist, and history update without API fan-out', async
 test('task status circle opens completion for the selected task', async ({ page, kata }) => {
   const credentials = await kata.launch(page)
   const first = await kata.seedIssue(page, credentials, { title: 'First task' })
-  const second = await kata.seedIssue(page, credentials, { title: 'Second task' })
+  const second = await kata.seedIssue(page, credentials, {
+    title: 'Second task',
+    links: [{ type: 'parent', to_ref: first.uid }],
+  })
   await page.goto(`${kata.origin}/kata?issue=${first.uid}`)
+  await page.getByRole('button', { name: /First task/ }).press('ArrowRight')
+  await expect(page.locator(`button.row--child[data-uid="${second.uid}"]`)).toBeVisible()
   await page.getByRole('button', { name: `Complete ${second.short_id}` }).click()
   const dialog = page.getByRole('dialog', { name: 'Complete task' })
   await expect(dialog).toContainText('Second task')
