@@ -44,9 +44,8 @@ test('detail editing and close reasons round-trip through live Kata authority', 
   await page.getByRole('button', { name: 'Complete…' }).click()
   const wontDo = page.getByRole('dialog', { name: 'Complete task' })
   await wontDo.getByRole('radio', { name: /Won't do/ }).click()
-  await wontDo
-    .getByLabel('Completion note')
-    .fill('This example task is no longer needed after the completed workflow was verified.')
+  await expect(wontDo.getByLabel('Completion note')).toBeEmpty()
+  await expect(wontDo.getByRole('button', { name: 'Complete' })).toBeEnabled()
   await wontDo.getByRole('button', { name: 'Complete' }).click()
   await expect(page.getByRole('button', { name: 'Reopen' })).toBeVisible()
 })

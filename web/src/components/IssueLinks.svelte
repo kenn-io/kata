@@ -237,7 +237,7 @@
         : undefined}
 >
   {#snippet actions()}
-    {#if issue.links.length > 8 || hasAppliedLinkFilters}<LinkFilterMenu
+    {#if issue.links.length > 1 || hasAppliedLinkFilters}<LinkFilterMenu
         filters={linkFilters}
         onChange={onLinkFiltersChange}
       />{/if}

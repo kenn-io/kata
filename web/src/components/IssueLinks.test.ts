@@ -107,21 +107,37 @@ describe('IssueLinks', () => {
     expect(screen.queryByRole('button', { name: /example-workspace#parent-1/ })).toBeNull()
   })
 
-  it('lets users restore links when active filters hide a short list', async () => {
+  it('filters relationships when a task has five links', async () => {
+    const onLinkFiltersChange = vi.fn()
+    const view = renderLinks({ onLinkFiltersChange })
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Filter links' }))
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'Parent' }))
+    await view.rerender({ linkFilters: onLinkFiltersChange.mock.calls[0]![0]! })
+    expect(screen.queryByRole('button', { name: /Parent parent-1/ })).toBeNull()
+    expect(screen.getByRole('button', { name: /Child child-1/ })).toBeTruthy()
+  })
+
+  it('hides the filter for one link with default filters', () => {
     const selected = issue()
     selected.links = [link(1, 'related', 'issue-selected', 'issue-related')]
-    const onLinkFiltersChange = vi.fn()
-    const view = renderLinks({
-      issue: selected,
-      linkFilters: createKataLinkFilters('closed'),
-      onLinkFiltersChange,
-    })
+    renderLinks({ issue: selected })
+    expect(screen.queryByRole('button', { name: 'Filter links' })).toBeNull()
+  })
 
-    expect(screen.getByText('No matching links')).toBeTruthy()
+  it('lets users restore links when active filters hide a short list', async () => {
+    const selected = issue()
+    const onLinkFiltersChange = vi.fn()
+    const view = renderLinks({ issue: selected, onLinkFiltersChange })
+
     await fireEvent.click(screen.getByRole('button', { name: 'Filter links' }))
     await fireEvent.click(screen.getByRole('checkbox', { name: 'Open' }))
+    selected.links = [link(1, 'related', 'issue-selected', 'issue-related')]
+    await view.rerender({ issue: selected, linkFilters: onLinkFiltersChange.mock.calls[0]![0]! })
+    expect(screen.getByText('No matching links')).toBeTruthy()
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'Open' }))
 
-    const nextFilters = onLinkFiltersChange.mock.calls[0]![0]!
+    const nextFilters = onLinkFiltersChange.mock.calls[1]![0]!
     await view.rerender({ linkFilters: nextFilters })
     expect(screen.getByRole('button', { name: /Related related-1/ })).toBeTruthy()
   })
