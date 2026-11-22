@@ -381,6 +381,28 @@ func TestDaemonStatus_HumanReportsLifecycleDetails(t *testing.T) {
 	assert.Regexp(t, `(?m)^  uptime:  52m3[3-4]s$`, out)
 }
 
+func TestDaemonStatus_HumanReportsUnreachableReason(t *testing.T) {
+	resetFlags(t)
+	home := setupKataEnv(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(server.Close)
+	address := strings.TrimPrefix(server.URL, "http://")
+
+	require.NoError(t, writeRuntimeFor(home, address))
+
+	out, _, err := executeRootCapture(t, t.Context(), "daemon", "status")
+	assert.Equal(t, kindDaemonUnavail, requireCLIError(t, err, ExitDaemonUnavail).Kind)
+
+	_, reason, ok := strings.Cut(out, "  reason: ")
+	require.True(t, ok)
+	reason, _, _ = strings.Cut(reason, "\n")
+	assert.NotContains(t, reason, "daemon pid "+strconv.Itoa(os.Getpid()))
+	assert.NotContains(t, reason, address)
+	assert.Contains(t, reason, "daemon ping returned 503")
+}
+
 func TestDaemonStatusAutoStarted(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)

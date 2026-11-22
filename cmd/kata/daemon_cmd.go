@@ -726,7 +726,14 @@ func daemonStatusCmd() *cobra.Command {
 				return err
 			}
 			if selected.Message != "" {
-				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "  reason: %s\n", selected.Message); err != nil {
+				reason := selected.Message
+				for _, d := range out.Daemons {
+					if selected.statusReason != "" && d.PID == selected.PID && d.Address == selected.Endpoint {
+						reason = selected.statusReason
+						break
+					}
+				}
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "  reason: %s\n", reason); err != nil {
 					return err
 				}
 			}
