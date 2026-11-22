@@ -20,9 +20,13 @@ func TestValidateAttention(t *testing.T) {
 	for _, raw := range []string{`"working"`, `"\"needs-human\""`, `""`, `true`} {
 		err := Validate(IssueRegistry, "work.attention", jsontext.Value(raw))
 		require.ErrorIs(t, err, ErrInvalidValue)
+		assert.Equal(t, "invalid value: work.attention must be one of ok, needs-human, stuck", err.Error())
+	}
+	for _, raw := range []string{`"working"`, `null`, ``} {
+		err := ValidateCreateValue(IssueRegistry, "work.attention", jsontext.Value(raw))
+		require.ErrorIs(t, err, ErrInvalidValue)
 		assert.Contains(t, err.Error(), "ok, needs-human, stuck")
 	}
-	assert.ErrorIs(t, ValidateCreateValue(IssueRegistry, "work.attention", jsontext.Value(`"working"`)), ErrInvalidValue)
 }
 
 // TestValidateCreateValue_RejectsNullAndEmpty pins the create-time rule that a

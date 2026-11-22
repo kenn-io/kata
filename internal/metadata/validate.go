@@ -27,6 +27,9 @@ var reULID = regexp.MustCompile(`^[0-9A-HJKMNP-TV-Z]{26}$`)
 // phrasing, no per-key prefix.
 func ValidateCreateValue(registry map[string]Entry, key string, raw jsontext.Value) error {
 	if len(raw) == 0 || string(raw) == "null" {
+		if registry[key].Type == TypeAttention {
+			return validateAttention(raw)
+		}
 		return fmt.Errorf("%w: null values are not allowed at creation", ErrInvalidValue)
 	}
 	return Validate(registry, key, raw)
@@ -72,7 +75,7 @@ func validateAttention(raw jsontext.Value) error {
 	if err := json.Unmarshal(raw, &value); err == nil && (value == "ok" || value == "needs-human" || value == "stuck") {
 		return nil
 	}
-	return fmt.Errorf("%w: work.attention must be one of ok, needs-human, stuck; got %s", ErrInvalidValue, raw)
+	return fmt.Errorf("%w: work.attention must be one of ok, needs-human, stuck", ErrInvalidValue)
 }
 
 func validateSchedule(raw jsontext.Value) error {

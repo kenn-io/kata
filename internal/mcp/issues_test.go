@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/testenv"
 	kataclient "go.kenn.io/kata/pkg/client"
 )
@@ -222,6 +223,12 @@ func TestSchedulingMetadataAcceptsCivilTimeFormatsAndSomeday(t *testing.T) {
 	require.Contains(t, patch, "someday")
 	require.Nil(t, patch["someday"])
 	require.Nil(t, patch["scheduled_on"])
+}
+
+func TestCreateMetadataNullAttentionNamesValues(t *testing.T) {
+	_, err := createMetadata(CreateInput{Metadata: map[string]any{"work.attention": nil}})
+	require.ErrorIs(t, err, metadata.ErrInvalidValue)
+	require.Contains(t, err.Error(), "ok, needs-human, stuck")
 }
 
 func TestEditSchedulingRejectsSetClearAndMetadataCollisions(t *testing.T) {
