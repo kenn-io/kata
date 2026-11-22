@@ -245,9 +245,7 @@ func TestSyncFederationPullsAwaitedHistoryWithHeldPoll(t *testing.T) {
 	require.NoError(t, err)
 	client, err := NewClient(ctx, home.creds.HubURL, home.creds.Token, clientOptsWithDefault(clientpkg.Opts{}))
 	require.NoError(t, err)
-	polls := &hubLongPolls{polls: map[int64]*hubLongPoll{
-		binding.ProjectID: {held: binding.PullCursorEventID, heldTarget: client.heldPollTarget(hubProject.ID)},
-	}}
+	polls := heldPollFixture(binding.ProjectID, binding.PullCursorEventID, client.heldPollTarget(hubProject.ID))
 	require.NoError(t, SyncFederationOnce(withHubLongPolls(ctx, polls), home.env.DB, binding, home.creds))
 	after, err := home.env.DB.FederationBindingByProject(ctx, home.projectID)
 	require.NoError(t, err)

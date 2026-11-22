@@ -60,13 +60,6 @@ func TestFederationPollWakeIgnoresItsOwnInstance(t *testing.T) {
 		t.Fatal("a process must ignore the wakeups it published")
 	default:
 	}
-	other := newFederationPollWaits(16)
-	waits.receive(other.message())
-	select {
-	case <-woken:
-	default:
-		t.Fatal("another process's wakeup was not delivered")
-	}
 }
 
 // recordingPollWakeBus records what a hub process publishes to the others.
@@ -80,31 +73,6 @@ func (b recordingPollWakeBus) PublishFederationPollWake(_ context.Context, paylo
 func (recordingPollWakeBus) ListenFederationPollWake(ctx context.Context, _ func(), _ func(string)) error {
 	<-ctx.Done()
 	return ctx.Err()
-}
-
-func TestFederationPollWakeNamesAffectedProjects(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		waits := newFederationPollWaits(16)
-		broadcaster := NewEventBroadcaster()
-		bus := recordingPollWakeBus{published: make(chan string, 1)}
-		ctx, cancel := context.WithCancel(t.Context())
-		done := make(chan struct{})
-		go func() {
-			defer close(done)
-			runFederationPollWakeBridge(ctx, bus, broadcaster, waits, slog.New(slog.DiscardHandler))
-		}()
-		defer func() { cancel(); <-done }()
-		synctest.Wait()
-		payload := `{"from_project_uid":"01HZNQ7VFPK1XGD8R5MABCD4EA"}`
-		broadcaster.Broadcast(NewEventMsg(4242, db.Event{Type: "issue.moved", Payload: payload}))
-		synctest.Wait()
-		select {
-		case published := <-bus.published:
-			assert.Equal(t, waits.instance+" 4242 01HZNQ7VFPK1XGD8R5MABCD4EA", published)
-		default:
-			t.Fatal("the commit published no wake")
-		}
-	})
 }
 
 func TestFederationPollRemoteWakeMatchesProjectAndMoveSource(t *testing.T) {
@@ -129,7 +97,9 @@ func TestFederationPollRemoteWakeMatchesProjectAndMoveSource(t *testing.T) {
 		synctest.Wait()
 		broadcaster.Broadcast(NewEventMsg(2, db.Event{Type: "issue.moved", Payload: `{"from_project_uid":"source"}`}))
 		synctest.Wait()
-		reader.receive(<-bus.published)
+		published := <-bus.published
+		assert.Equal(t, writer.instance+" 2 source", published)
+		reader.receive(published)
 		for i, waiter := range waiters {
 			select {
 			case <-waiter.remote:

@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 )
@@ -288,6 +289,25 @@ func TestSyncRetryKeepsNewerHeldPollDeadlineAfterConcurrentFailure(t *testing.T)
 }
 
 func TestHeldRetryClearsWhenBindingRoleOrEnabledChanges(t *testing.T) {
+	t.Run("push cursor", func(t *testing.T) {
+		h := newHubSpokeHarness(t, false)
+		ctx := t.Context()
+		binding, err := h.spokeDB.FederationBindingByProject(ctx, h.spokeProject.ID)
+		require.NoError(t, err)
+		credentials := config.DefaultFederationCredentialStore()
+		credential, _, err := credentials.FederationCredential(ctx, h.spokeProject.UID)
+		require.NoError(t, err)
+		identity, err := heldRetryIdentity(binding, credential)
+		require.NoError(t, err)
+		retries := NewSyncRetries()
+		polls := newHubLongPolls(ctx, h.spokeDB, credentials, clientpkg.Opts{}, time.Second, nil, nil, retries, time.Now)
+		err = h.spokeDB.AdvanceFederationPushCursor(ctx, binding.ProjectID, binding.PushCursorEventID+1)
+		require.NoError(t, err)
+		polls.recordHeldRetry(binding.ProjectID, identity, &HubStatusError{StatusCode: http.StatusServiceUnavailable, RetryAfter: 120 * time.Second})
+		binding, err = h.spokeDB.FederationBindingByProject(ctx, binding.ProjectID)
+		require.NoError(t, err)
+		require.True(t, retries.blockedFor(binding.ProjectID, binding, credential, time.Now()), "the concurrent push must not clear the held poll's Retry-After")
+	})
 	binding := db.FederationBinding{ProjectID: 1, Role: db.FederationRoleSpoke, Enabled: true, HubURL: "https://hub.example", HubProjectID: 42}
 	credential := config.FederationCredential{HubURL: binding.HubURL, HubProjectID: 42, Token: "token"}
 	for _, tc := range []struct {
@@ -296,6 +316,7 @@ func TestHeldRetryClearsWhenBindingRoleOrEnabledChanges(t *testing.T) {
 	}{
 		{"role", func(b *db.FederationBinding) { b.Role = db.FederationRoleHub }},
 		{"disabled", func(b *db.FederationBinding) { b.Enabled = false }},
+		{"endpoint", func(b *db.FederationBinding) { b.HubURL += "/moved" }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)

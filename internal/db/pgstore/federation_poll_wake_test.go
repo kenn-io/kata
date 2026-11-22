@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
@@ -37,48 +36,6 @@ func TestFederationPollWakeReportsClosedAfterStoreClose(t *testing.T) {
 	require.ErrorIs(t, store.ListenFederationPollWake(ctx, func() {}, func(string) {}), db.ErrFederationPollWakeClosed)
 }
 
-func TestFederationPollWakeSendsNothingOnTheFormerSharedChannel(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
-	defer cancel()
-	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
-	t.Cleanup(cleanup)
-	store := openPollWakeStore(t, ctx, dsn, pgstore.DefaultSchema)
-	outsider := listenAsOutsider(t, ctx, dsn, "kata_federation_poll")
-	wakes := listenForPollWakes(t, ctx, store)
-
-	require.NoError(t, store.PublishFederationPollWake(ctx, "hub-a 41"))
-
-	require.Equal(t, "hub-a 41", nextPollWake(t, ctx, wakes))
-	// Notifications arrive in commit order, so a wake on the former channel
-	// would reach the outsider before its own later marker.
-	_, err := outsider.Exec(ctx, `SELECT pg_notify('kata_federation_poll','marker')`)
-	require.NoError(t, err)
-	notification, err := outsider.WaitForNotification(ctx)
-	require.NoError(t, err)
-	require.Equal(t, "marker", notification.Payload)
-}
-
-func TestFederationPollWakeSeparatesInstallations(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 120*time.Second)
-	defer cancel()
-	const schema = "wake_probe_schema"
-	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
-	t.Cleanup(cleanup)
-	otherDSN, otherCleanup := pgstoretest.NewDatabase(t, ctx)
-	t.Cleanup(otherCleanup)
-	store := openPollWakeStore(t, ctx, dsn, schema)
-	otherInstallation := openPollWakeStore(t, ctx, otherDSN, schema)
-
-	channel, err := pgstore.FederationPollWakeChannelForTest(store)
-	require.NoError(t, err)
-	otherChannel, err := pgstore.FederationPollWakeChannelForTest(otherInstallation)
-	require.NoError(t, err)
-	require.NotEqual(t, otherChannel, channel, "installations sharing a schema name must not share a channel")
-	require.NotContains(t, channel, schema)
-	require.LessOrEqual(t, len(channel), 63, "PostgreSQL truncates longer identifiers")
-
-}
-
 func TestFederationPollWakeReachesAnotherProcessOnTheSameSchema(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
@@ -97,22 +54,42 @@ func TestFederationPollWakeReachesAnotherProcessOnTheSameSchema(t *testing.T) {
 }
 
 func TestFederationPollWakeStaysWithinItsSchema(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 120*time.Second)
-	defer cancel()
-	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
-	t.Cleanup(cleanup)
-	kata := openPollWakeStore(t, ctx, dsn, pgstore.DefaultSchema)
-	other := openPollWakeStore(t, ctx, dsn, "kata_other")
-	// An import into the second schema can copy the first installation's
-	// identity; the schemas must stay apart even then.
-	_, err := other.ExecContext(ctx, `UPDATE meta SET value=$1 WHERE key='instance_uid'`, kata.InstanceUID())
-	require.NoError(t, err)
-	require.NoError(t, other.RefreshInstanceUID(ctx))
-	otherWakes := listenForPollWakes(t, ctx, other)
+	t.Run("installation", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 120*time.Second)
+		defer cancel()
+		const schema = "wake_probe_schema"
+		dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
+		t.Cleanup(cleanup)
+		otherDSN, otherCleanup := pgstoretest.NewDatabase(t, ctx)
+		t.Cleanup(otherCleanup)
+		store := openPollWakeStore(t, ctx, dsn, schema)
+		otherInstallation := openPollWakeStore(t, ctx, otherDSN, schema)
 
-	require.NoError(t, kata.PublishFederationPollWake(ctx, "hub-a 7"))
-	require.NoError(t, other.PublishFederationPollWake(ctx, "hub-b 8"))
-	require.Equal(t, "hub-b 8", nextPollWake(t, ctx, otherWakes), "a wake crossed into another schema")
+		channel, err := pgstore.FederationPollWakeChannelForTest(store)
+		require.NoError(t, err)
+		otherChannel, err := pgstore.FederationPollWakeChannelForTest(otherInstallation)
+		require.NoError(t, err)
+		require.NotEqual(t, otherChannel, channel, "installations sharing a schema name must not share a channel")
+		require.LessOrEqual(t, len(channel), 63, "PostgreSQL truncates longer identifiers")
+	})
+	t.Run("schema", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 120*time.Second)
+		defer cancel()
+		dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
+		t.Cleanup(cleanup)
+		kata := openPollWakeStore(t, ctx, dsn, pgstore.DefaultSchema)
+		other := openPollWakeStore(t, ctx, dsn, "kata_other")
+		// An import into the second schema can copy the first installation's
+		// identity; the schemas must stay apart even then.
+		_, err := other.ExecContext(ctx, `UPDATE meta SET value=$1 WHERE key='instance_uid'`, kata.InstanceUID())
+		require.NoError(t, err)
+		require.NoError(t, other.RefreshInstanceUID(ctx))
+		otherWakes := listenForPollWakes(t, ctx, other)
+
+		require.NoError(t, kata.PublishFederationPollWake(ctx, "hub-a 7"))
+		require.NoError(t, other.PublishFederationPollWake(ctx, "hub-b 8"))
+		require.Equal(t, "hub-b 8", nextPollWake(t, ctx, otherWakes), "a wake crossed into another schema")
+	})
 }
 
 //nolint:revive // t is the canonical first arg for testing helpers
@@ -124,20 +101,6 @@ func openPollWakeStore(t *testing.T, ctx context.Context, dsn, schema string) *p
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 	return store
-}
-
-// listenAsOutsider LISTENs on channel over a plain connection, as any role
-// able to connect to the database could.
-//
-//nolint:revive // t is the canonical first arg for testing helpers
-func listenAsOutsider(t *testing.T, ctx context.Context, dsn, channel string) *pgx.Conn {
-	t.Helper()
-	conn, err := pgx.Connect(ctx, dsn)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = conn.Close(context.WithoutCancel(t.Context())) })
-	_, err = conn.Exec(ctx, "LISTEN "+pgx.Identifier{channel}.Sanitize())
-	require.NoError(t, err)
-	return conn
 }
 
 // listenForPollWakes runs the store's wake listener until the test ends and

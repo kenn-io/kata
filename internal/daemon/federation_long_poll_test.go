@@ -249,19 +249,13 @@ func (f longPollFixture) startHeldPoll(t *testing.T, afterID int64, wait string)
 	return done
 }
 
-func TestFederationPollAdvertisesWaitMaximum(t *testing.T) {
-	f := newLongPollFixture(t)
-	result := f.poll(t, 0, "")
-	require.Equal(t, http.StatusOK, result.status, "%s", result.raw)
-	assert.Equal(t, "45", result.header.Get("X-Kata-Federation-Poll-Wait-Max"))
-}
-
 func TestFederationPollWithoutWaitAnswersAtOnce(t *testing.T) {
 	f := newLongPollFixture(t)
 	cursor := f.cursor(t)
 	result := f.poll(t, cursor, "")
 	require.Equal(t, http.StatusOK, result.status, "%s", result.raw)
 	assert.Empty(t, result.body.Events)
+	assert.Equal(t, "45", result.header.Get("X-Kata-Federation-Poll-Wait-Max"))
 	assert.Less(t, result.elapsed, time.Second)
 }
 
@@ -324,30 +318,31 @@ func TestFederationPollWaitAnswersAtOnceWhenEventsArePending(t *testing.T) {
 }
 
 func TestFederationPollWaitReauthorizesAfterWake(t *testing.T) {
-	f := newLongPollFixture(t)
-	cursor := f.cursor(t)
-	done := f.startHeldPoll(t, cursor, "30")
-	require.NoError(t, f.env.DB.RevokeFederationEnrollment(t.Context(), f.enrollment.Enrollment.ID))
-	createIssueAs(t, f.env, f.project.ID, "tester", "Committed after revocation")
-	var result longPollResult
-	select {
-	case result = <-done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("held poll did not return after a project event committed")
+	for _, tc := range []struct {
+		name, wait string
+		wake       bool
+	}{{"wake", "30", true}, {"expiry", "2", false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newLongPollFixture(t)
+			cursor := f.cursor(t)
+			done := f.startHeldPoll(t, cursor, tc.wait)
+			reads := f.reads.readsReturned()
+			require.NoError(t, f.env.DB.RevokeFederationEnrollment(t.Context(), f.enrollment.Enrollment.ID))
+			if tc.wake {
+				createIssueAs(t, f.env, f.project.ID, "tester", "Committed after revocation")
+			}
+			var result longPollResult
+			select {
+			case result = <-done:
+			case <-time.After(10 * time.Second):
+				t.Fatal("held poll did not return")
+			}
+			require.NoError(t, result.err)
+			assert.Equal(t, http.StatusForbidden, result.status, "%s", result.raw)
+			assert.NotContains(t, string(result.raw), "Committed after revocation")
+			assert.Equal(t, reads, f.reads.readsReturned())
+		})
 	}
-	require.NoError(t, result.err)
-	assert.Equal(t, http.StatusForbidden, result.status, "%s", result.raw)
-	assert.NotContains(t, string(result.raw), "Committed after revocation")
-}
-
-func TestFederationPollWaitReauthorizesWhenWaitExpires(t *testing.T) {
-	f := newLongPollFixture(t)
-	cursor := f.cursor(t)
-	done := f.startHeldPoll(t, cursor, "2")
-	require.NoError(t, f.env.DB.RevokeFederationEnrollment(t.Context(), f.enrollment.Enrollment.ID))
-	result := <-done
-	require.NoError(t, result.err)
-	assert.Equal(t, http.StatusForbidden, result.status, "%s", result.raw)
 }
 
 func TestFederationPollWaitRejectsANegativeWait(t *testing.T) {
