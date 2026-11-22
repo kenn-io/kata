@@ -130,9 +130,9 @@ describe('projectKataWorkspaceView', () => {
       today: '2026-05-15',
     })
 
-    expect(
-      view.groups.map((group) => [group.id, group.issues.map((item) => item.title)]),
-    ).toEqual(expected)
+    expect(view.groups.map((group) => [group.id, group.issues.map((item) => item.title)])).toEqual(
+      expected,
+    )
   })
 
   test.each([
