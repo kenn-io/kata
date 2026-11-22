@@ -1041,10 +1041,15 @@ func TestDaemonDiagnoseCurrentHomeStorageBusy(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, locked)
 	defer func() { require.NoError(t, lock.Close()) }()
-	out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--agent")
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
-	assert.Contains(t, out, "state=storage_busy")
-	assert.Contains(t, out, "wait for the SQLite upgrade or import")
+	out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
+	require.NoError(t, err)
+	var result daemonDiagnosis
+	require.NoError(t, json.Unmarshal([]byte(out), &result))
+	assert.Equal(t, "storage_busy", result.State)
+	assert.Equal(t, ns.DBHash, result.StorageID)
+	assert.Contains(t, result.NextAction, "wait for the SQLite upgrade or import")
 	for _, suffix := range []string{"-wal", "-shm"} {
 		_, err = os.Stat(path + suffix)
 		assert.ErrorIs(t, err, os.ErrNotExist)
@@ -1087,9 +1092,8 @@ func TestDaemonDiagnoseReadOnlyDirectoryWithoutMarker(t *testing.T) {
 func TestLockDiagnosisStoragePostgres(t *testing.T) {
 	t.Chdir(t.TempDir())
 	result := daemonDiagnosis{}
-	release, busy, err := lockDiagnosisStorage(&result, "postgres://example.invalid/example")
-	require.NoError(t, err)
-	require.False(t, busy)
+	release, ok := lockDiagnosisStorage(&result, "postgres://example.invalid/example")
+	require.True(t, ok)
 	release()
 	entries, err := os.ReadDir(".")
 	require.NoError(t, err)
@@ -1097,97 +1101,29 @@ func TestLockDiagnosisStoragePostgres(t *testing.T) {
 }
 
 func TestDaemonDiagnoseAllowsConcurrentSQLiteOpen(t *testing.T) {
-	home, workspace, _, _ := stoppedProfileCLI(t)
-	resetFlags(t)
-	path := filepath.Join(home, "kata.db")
-	raw, err := sql.Open("sqlite", path)
-	require.NoError(t, err)
-	defer func() { _ = raw.Close() }()
-	conn, err := raw.Conn(t.Context())
-	require.NoError(t, err)
-	defer func() { _ = conn.Close() }()
-	_, err = conn.ExecContext(t.Context(), "PRAGMA journal_mode=DELETE")
-	require.NoError(t, err)
-	_, err = conn.ExecContext(t.Context(), "BEGIN EXCLUSIVE")
-	require.NoError(t, err)
-	selection, err := client.InspectSelection(t.Context(), workspace, "")
-	require.NoError(t, err)
-	ctx, cancel := context.WithCancel(t.Context())
-	diagnosis := make(chan daemonDiagnosis, 1)
-	var opened chan error
-	defer func() {
-		_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
-		cancel()
-		if diagnosis != nil {
-			select {
-			case <-diagnosis:
-			case <-time.After(10 * time.Second):
-				t.Error("diagnosis did not stop")
-			}
-		}
-		if opened != nil {
-			select {
-			case <-opened:
-			case <-time.After(10 * time.Second):
-				t.Error("SQLite open did not stop")
-			}
-		}
-	}()
-	go func() {
-		result, _, _ := diagnoseDaemonSelection(ctx, "", selection)
-		diagnosis <- result
-	}()
-	marker := flock.New(path + ".import.lock")
-	defer func() { _ = marker.Close() }()
-	require.Eventually(t, func() bool {
-		locked, err := marker.TryLock()
-		if err != nil {
-			return false
-		}
-		if locked {
-			_ = marker.Unlock()
-			return false
-		}
-		return true
-	}, 3*time.Second, 10*time.Millisecond)
-	require.NoError(t, marker.Close())
-	opened = make(chan error, 1)
-	go func() {
+	diagnoseWhileSQLiteBusy(t, nil, func(ctx context.Context, path string) error {
 		store, err := storeopen.Open(ctx, path)
 		if err == nil {
 			err = store.Close()
 		}
-		opened <- err
-	}()
-	var openErr error
-	finished := false
-	select {
-	case openErr = <-opened:
-		finished = true
-		opened = nil
-	case <-time.After(1500 * time.Millisecond):
-	}
-	_, err = conn.ExecContext(t.Context(), "ROLLBACK")
-	require.NoError(t, err)
-	if !finished {
-		select {
-		case openErr = <-opened:
-			opened = nil
-		case <-time.After(5 * time.Second):
-			t.Fatal("SQLite open did not finish")
-		}
-	}
-	select {
-	case result := <-diagnosis:
-		diagnosis = nil
-		require.NoError(t, openErr)
-		require.Equal(t, "stopped_local_profile", result.State)
-	case <-time.After(5 * time.Second):
-		t.Fatal("diagnosis did not finish")
-	}
+		return err
+	}, "stopped_local_profile")
 }
 
 func TestDaemonDiagnoseAllowsDelayedUpgrade(t *testing.T) {
+	path := diagnoseWhileSQLiteBusy(t, []string{
+		"DROP INDEX idx_events_project_moves",
+		"UPDATE meta SET value='52' WHERE key='schema_version'",
+	}, jsonl.AutoCutover, "version_mismatch")
+	version, err := sqlitestore.PeekSchemaVersion(t.Context(), path)
+	require.NoError(t, err)
+	require.Equal(t, db.CurrentSchemaVersion(), version)
+}
+
+// diagnoseWhileSQLiteBusy keeps diagnosis inside its shared lock past the
+// one-second lock retry, runs contender beside it, and checks both finish.
+func diagnoseWhileSQLiteBusy(t *testing.T, setup []string, contender func(context.Context, string) error, want string) string {
+	t.Helper()
 	home, workspace, _, _ := stoppedProfileCLI(t)
 	resetFlags(t)
 	path := filepath.Join(home, "kata.db")
@@ -1197,14 +1133,10 @@ func TestDaemonDiagnoseAllowsDelayedUpgrade(t *testing.T) {
 	conn, err := raw.Conn(t.Context())
 	require.NoError(t, err)
 	defer func() { _ = conn.Close() }()
-	_, err = conn.ExecContext(t.Context(), "PRAGMA journal_mode=DELETE")
-	require.NoError(t, err)
-	_, err = conn.ExecContext(t.Context(), "DROP INDEX idx_events_project_moves")
-	require.NoError(t, err)
-	_, err = conn.ExecContext(t.Context(), "UPDATE meta SET value='52' WHERE key='schema_version'")
-	require.NoError(t, err)
-	_, err = conn.ExecContext(t.Context(), "BEGIN EXCLUSIVE")
-	require.NoError(t, err)
+	for _, stmt := range append(append([]string{"PRAGMA journal_mode=DELETE"}, setup...), "BEGIN EXCLUSIVE") {
+		_, err = conn.ExecContext(t.Context(), stmt)
+		require.NoError(t, err)
+	}
 	selection, err := client.InspectSelection(t.Context(), workspace, "")
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(t.Context())
@@ -1248,7 +1180,7 @@ func TestDaemonDiagnoseAllowsDelayedUpgrade(t *testing.T) {
 	require.NoError(t, marker.Close())
 	opened = make(chan error, 1)
 	go func() {
-		opened <- jsonl.AutoCutover(ctx, path)
+		opened <- contender(ctx, path)
 	}()
 	var openErr error
 	finished := false
@@ -1272,13 +1204,11 @@ func TestDaemonDiagnoseAllowsDelayedUpgrade(t *testing.T) {
 	case result := <-diagnosis:
 		diagnosis = nil
 		require.NoError(t, openErr)
-		require.Equal(t, "version_mismatch", result.State)
-		version, err := sqlitestore.PeekSchemaVersion(t.Context(), path)
-		require.NoError(t, err)
-		require.Equal(t, db.CurrentSchemaVersion(), version)
+		require.Equal(t, want, result.State)
 	case <-time.After(5 * time.Second):
 		t.Fatal("diagnosis did not finish")
 	}
+	return path
 }
 
 func TestDaemonDiagnoseDuringReadinessInspection(t *testing.T) {
@@ -1316,30 +1246,6 @@ func TestDaemonDiagnoseUnreadableProfileMarker(t *testing.T) {
 	out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
 	require.NoError(t, err)
 	assertDiagnosticState(t, out, "unreadable_storage")
-}
-
-func TestDaemonDiagnoseCurrentHomeBusyStorageID(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("KATA_HOME", home)
-	t.Setenv("KATA_DB", "")
-	t.Setenv("KATA_DSN", "")
-	t.Setenv("KATA_SERVER", "")
-	t.Chdir(t.TempDir())
-	path := filepath.Join(home, "kata.db")
-	store, err := sqlitestore.Open(t.Context(), path)
-	require.NoError(t, err)
-	require.NoError(t, store.Close())
-	lock := flock.New(path + ".import.lock")
-	require.NoError(t, lock.Lock())
-	defer func() { _ = lock.Close() }()
-	ns, err := daemonruntime.NewNamespace()
-	require.NoError(t, err)
-	out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
-	require.NoError(t, err)
-	var result daemonDiagnosis
-	require.NoError(t, json.Unmarshal([]byte(out), &result))
-	require.Equal(t, "storage_busy", result.State)
-	require.Equal(t, ns.DBHash, result.StorageID)
 }
 
 func TestDaemonDiagnoseUpgradeBeginsDuringDiscovery(t *testing.T) {

@@ -219,51 +219,48 @@ func recheckDiagnosisStorage(ctx context.Context, result *daemonDiagnosis, selec
 	} else {
 		dsn, err = config.KataDSN(ctx)
 	}
-	if err == nil {
-		var release func()
-		release, _, err = lockDiagnosisStorage(result, dsn)
-		if release != nil {
-			release()
-		}
-	}
 	if err != nil {
 		result.State = "unreadable_storage"
 		result.Message = err.Error()
+	} else if release, ok := lockDiagnosisStorage(result, dsn); ok {
+		release()
 	}
 }
 
-func lockDiagnosisStorage(result *daemonDiagnosis, dsn string) (func(), bool, error) {
-	backend, err := storeopen.BackendForDSN(dsn)
-	if err != nil {
-		return nil, false, err
-	}
-	if backend == storeopen.BackendPostgres {
-		return func() {}, false, nil
-	}
-	path := strings.TrimPrefix(dsn, "sqlite://")
-	_, err = os.Stat(path)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, false, err
-	}
-	release, busy, err := cutoverlock.TryReadLock(path, err == nil)
-	if busy {
+// lockDiagnosisStorage records storage_busy or unreadable_storage when the
+// selected SQLite storage can't be locked for inspection.
+func lockDiagnosisStorage(result *daemonDiagnosis, dsn string) (func(), bool) {
+	release, busy, err := func() (func(), bool, error) {
+		backend, err := storeopen.BackendForDSN(dsn)
+		if err != nil || backend == storeopen.BackendPostgres {
+			return func() {}, false, err
+		}
+		path := strings.TrimPrefix(dsn, "sqlite://")
+		_, err = os.Stat(path)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, false, err
+		}
+		return cutoverlock.TryReadLock(path, err == nil)
+	}()
+	switch {
+	case busy:
 		result.State = "storage_busy"
 		result.Message = "another kata process holds the SQLite storage lock, usually a daemon upgrading the database"
+	case err != nil:
+		result.State = "unreadable_storage"
+		result.Message = err.Error()
+	default:
+		return release, true
 	}
-	return release, busy, err
+	return nil, false
 }
 
 func inspectDiagnosisStorage(ctx context.Context, result *daemonDiagnosis, selection client.DaemonSelection, expectedProject string) (bool, error) {
 	var store db.Storage
 	if selection.Profile != nil {
 		profile := *selection.Profile
-		release, busy, lockErr := lockDiagnosisStorage(result, profile.DSN)
-		if busy {
-			return false, nil
-		}
-		if lockErr != nil {
-			result.State = "unreadable_storage"
-			result.Message = lockErr.Error()
+		release, ok := lockDiagnosisStorage(result, profile.DSN)
+		if !ok {
 			return false, nil
 		}
 		defer release()
@@ -300,13 +297,8 @@ func inspectDiagnosisStorage(ctx context.Context, result *daemonDiagnosis, selec
 			return false, err
 		}
 		result.StorageID = ns.DBHash
-		release, busy, lockErr := lockDiagnosisStorage(result, dsn)
-		if busy {
-			return false, nil
-		}
-		if lockErr != nil {
-			result.State = "unreadable_storage"
-			result.Message = lockErr.Error()
+		release, ok := lockDiagnosisStorage(result, dsn)
+		if !ok {
 			return false, nil
 		}
 		defer release()
