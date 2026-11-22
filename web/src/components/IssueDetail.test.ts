@@ -1,8 +1,14 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte'
 import type { ComponentProps } from 'svelte'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { KataProjectSummary, KataTaskDetail, KataTaskSummary } from '../lib/kata/types'
+import type {
+  KataProjectSummary,
+  KataTaskDetail,
+  KataTaskEvent,
+  KataTaskSummary,
+} from '../lib/kata/types'
 import { createCredentialedFetch, setGeneratedFetch } from '../lib/api/client'
+import type { UIIssueReference } from '../lib/api/generated'
 
 import IssueDetail from './IssueDetail.svelte'
 
@@ -67,6 +73,18 @@ function makeSummary(): KataTaskSummary {
   }
 }
 
+function makeReference(task: KataTaskSummary): UIIssueReference {
+  return {
+    uid: task.uid,
+    short_id: task.short_id,
+    qualified_id: task.qualified_id,
+    project_uid: task.project_uid,
+    project_name: task.project_name,
+    title: task.title,
+    status: task.status,
+  }
+}
+
 function renderDetail(props: Partial<IssueDetailProps> = {}) {
   return render(IssueDetail, {
     props: {
@@ -119,7 +137,7 @@ describe('IssueDetail', () => {
   it('resolves a blocker title when the selected task list omits the blocker', async () => {
     const blocker = makeSummary()
     const searchReferences = vi.fn(async (query: string) =>
-      query === blocker.qualified_id ? [blocker] : [],
+      query === blocker.qualified_id ? [makeReference(blocker)] : [],
     )
     renderDetail({
       issue: makeIssue({
@@ -270,12 +288,45 @@ describe('IssueDetail', () => {
           project_name: 'Inbox',
           actor: 'user-a',
           created_at: '2026-06-01T12:00:00Z',
+          hlc_physical_ms: 1,
+          hlc_counter: 0,
           payload: { reason: 'done', evidence: [{ type: 'test', command: 'go test ./example' }] },
         },
       ],
     })
     expect(view.container.querySelector('.state-line')?.textContent).toMatch(/Done\s*·\s*You/)
     expect(screen.getByText('go test ./example')).toBeTruthy()
+  })
+
+  it('shows the newest close by clock when an older close arrives later', () => {
+    const close = (
+      event_id: number,
+      hlc_physical_ms: number,
+      actor: string,
+      reason: string,
+    ): KataTaskEvent => ({
+      event_id,
+      event_uid: `close-${event_id}`,
+      origin_instance_uid: 'instance-1',
+      type: 'issue.closed',
+      project_id: 1,
+      project_uid: 'project-1',
+      project_name: 'Inbox',
+      actor,
+      created_at: '2026-06-02T12:00:00Z',
+      hlc_physical_ms,
+      hlc_counter: 0,
+      payload: { reason },
+    })
+    const view = renderDetail({
+      issue: makeIssue({ status: 'closed', closed_reason: 'done' }),
+      selfActor: 'user-a',
+      // History arrives newest local event first; the federated close is older by clock.
+      events: [close(9, 1000, 'user-b', 'wontfix'), close(4, 2000, 'user-c', 'done')],
+    })
+    const line = view.container.querySelector('.state-line')?.textContent ?? ''
+    expect(line).toMatch(/Done\s*·\s*user-c/)
+    expect(line).not.toContain('user-b')
   })
 
   it('waits for the requested task before opening its completion dialog', async () => {
@@ -452,6 +503,8 @@ describe('IssueDetail', () => {
           project_name: 'example-project',
           actor: 'user-a',
           created_at: '2026-06-01T12:31:00Z',
+          hlc_physical_ms: 1,
+          hlc_counter: 0,
         },
       ],
       selectedRecurrences: [

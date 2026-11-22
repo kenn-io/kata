@@ -368,6 +368,8 @@ function normalizeEvent(
     actor: event.actor,
     payload: parseEventPayload(event.payload),
     created_at: event.created_at,
+    hlc_physical_ms: event.hlc_physical_ms,
+    hlc_counter: event.hlc_counter,
   }
 }
 

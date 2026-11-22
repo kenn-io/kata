@@ -303,7 +303,9 @@
   })
   const blockerTitle = $derived(
     blockerTitleFromCatalog ??
-      (fetchedBlockerTitle?.uid === blocker?.uid ? fetchedBlockerTitle.title : ''),
+      (fetchedBlockerTitle && fetchedBlockerTitle.uid === blocker?.uid
+        ? fetchedBlockerTitle.title
+        : ''),
   )
   const due = $derived(deadlineDate(issue.issue))
   const lateDays = $derived(
@@ -311,7 +313,22 @@
       ? Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${due}T00:00:00Z`)) / 86400000)
       : 0,
   )
-  const closeEvent = $derived(events.find((event) => event.type === 'issue.closed'))
+  // Federation can deliver an older close after a newer one, so pick by the
+  // fold's clock order (internal/db/fold.go compareClock), not history order.
+  function clockAfter(a: KataTaskEvent, b: KataTaskEvent): boolean {
+    if (a.hlc_physical_ms !== b.hlc_physical_ms) return a.hlc_physical_ms > b.hlc_physical_ms
+    if (a.hlc_counter !== b.hlc_counter) return a.hlc_counter > b.hlc_counter
+    if (a.origin_instance_uid !== b.origin_instance_uid)
+      return a.origin_instance_uid > b.origin_instance_uid
+    return a.event_uid > b.event_uid
+  }
+  const closeEvent = $derived(
+    events.reduce<KataTaskEvent | undefined>(
+      (latest, event) =>
+        event.type === 'issue.closed' && (!latest || clockAfter(event, latest)) ? event : latest,
+      undefined,
+    ),
+  )
   // "Nov 18", with the year when it isn't this one.
   function dayLabel(value: string): string {
     const date = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T00:00:00`) : new Date(value)
@@ -581,7 +598,7 @@
             {#if blocker}<span class="state-separator" aria-hidden="true">·</span>{/if}
             <span class="state-icon state-icon--danger" aria-hidden="true"
               ><CircleAlertIcon size={14} /></span
-            >Due {dayLabel(due)}, {lateDays} {lateDays === 1 ? 'day' : 'days'} late
+            >{`Due ${dayLabel(due)}, ${lateDays} ${lateDays === 1 ? 'day' : 'days'} late`}
           {/if}
         </p>
       {/if}

@@ -219,6 +219,8 @@ export interface KataTaskEvent {
   actor: string
   payload?: Record<string, unknown> | undefined
   created_at: string
+  hlc_physical_ms: number
+  hlc_counter: number
 }
 
 export interface KataRecurrence {

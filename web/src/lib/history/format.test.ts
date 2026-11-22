@@ -15,6 +15,8 @@ function makeEvent(type: string, payload?: Record<string, unknown>): KataTaskEve
     actor: 'tester',
     payload,
     created_at: '2026-05-16T00:00:00Z',
+    hlc_physical_ms: 1,
+    hlc_counter: 0,
   }
 }
 
@@ -41,10 +43,7 @@ describe('describeKataEvent', () => {
   test.each([
     [{ reason: 'wontfix' }, "closed as Won't do"],
     [undefined, 'closed as Done'],
-    [
-      { reason: 'duplicate', evidence: [{ issue_ref: 'ap44' }] },
-      'closed as Duplicate of ap44',
-    ],
+    [{ reason: 'duplicate', evidence: [{ issue_ref: 'ap44' }] }, 'closed as Duplicate of ap44'],
   ])('issue.closed with %j reads as %s', (payload, label) => {
     const descriptor = describeKataEvent(makeEvent('issue.closed', payload))
     expect(descriptor.label).toBe(label)

@@ -15,6 +15,8 @@ function event(uid: string, created_at: string): KataTaskEvent {
     project_name: 'example-project',
     actor: 'user-a',
     created_at,
+    hlc_physical_ms: 1,
+    hlc_counter: 0,
   }
 }
 

@@ -15,6 +15,8 @@ function closeEvent(evidence: Record<string, unknown>): KataTaskEvent {
     actor: 'tester',
     payload: { evidence: [evidence] },
     created_at: '2026-11-03T00:00:00Z',
+    hlc_physical_ms: 1,
+    hlc_counter: 0,
   }
 }
 
