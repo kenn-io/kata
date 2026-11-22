@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -580,9 +581,22 @@ func TestHeldPollRetryAfterBlocksRunner(t *testing.T) {
 		}
 		hub.ServeHTTP(w, r)
 	})
-	retries := NewSyncRetries()
+	scheduled := make(chan struct{}, 1)
+	retries := newSyncRetries(func(time.Duration) time.Duration {
+		select {
+		case scheduled <- struct{}{}:
+		default:
+		}
+		return 0
+	})
 	stop := h.startConfiguredRunner(t, &Runner{DB: h.spokeDB, Interval: 100 * time.Millisecond, Retries: retries})
-	require.Eventually(t, func() bool { _, ok := retries.FederationSyncRetry(h.spokeProject.ID); return ok }, 10*time.Second, 20*time.Millisecond)
+	select {
+	case <-scheduled:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the held poll did not record a retry")
+	}
+	_, ok := retries.FederationSyncRetry(h.spokeProject.ID)
+	require.True(t, ok)
 	beforeHeld, beforeOrdinary := held.Load(), ordinary.Load()
 	h.wake <- struct{}{}
 	//nolint:kennlint // sleeptest: observe real HTTP requests across several runner intervals.
@@ -749,34 +763,37 @@ func TestStoppedWatcherIsJoinedAtShutdown(t *testing.T) {
 	} {
 		t.Run(stop.name, func(t *testing.T) {
 			h := newHubSpokeHarness(t, false)
-			store := &blockedWatcherRead{Storage: h.spokeDB, started: make(chan struct{}), release: make(chan struct{})}
-			polls := newHubLongPolls(context.WithoutCancel(t.Context()), store, config.DefaultFederationCredentialStore(),
-				clientOptsWithDefault(clientpkg.Opts{}), time.Hour, nil, nil, nil, time.Now)
-			polls.start(activeSpokeBinding{binding: db.FederationBinding{ProjectID: h.spokeProject.ID}})
-			select {
-			case <-store.started:
-			case <-time.After(10 * time.Second):
+			synctest.Test(t, func(t *testing.T) {
+				store := &blockedWatcherRead{Storage: h.spokeDB, started: make(chan struct{}), release: make(chan struct{})}
+				polls := newHubLongPolls(context.WithoutCancel(t.Context()), store, config.DefaultFederationCredentialStore(),
+					clientOptsWithDefault(clientpkg.Opts{}), time.Hour, nil, nil, nil, time.Now)
+				polls.start(activeSpokeBinding{binding: db.FederationBinding{ProjectID: h.spokeProject.ID}})
+				select {
+				case <-store.started:
+				case <-time.After(10 * time.Second):
+					close(store.release)
+					polls.stopAll()
+					t.Fatal("watcher did not start its read")
+				}
+				watcher := polls.polls[h.spokeProject.ID]
+				stop.stop(polls, h.spokeProject.ID)
+				done := make(chan struct{})
+				go func() { polls.stopAll(); close(done) }()
+				synctest.Wait()
+				select {
+				case <-done:
+					close(store.release)
+					<-watcher.done
+					t.Fatal("shutdown returned before the retired watcher finished its read")
+				default:
+				}
 				close(store.release)
-				polls.stopAll()
-				t.Fatal("watcher did not start its read")
-			}
-			watcher := polls.polls[h.spokeProject.ID]
-			stop.stop(polls, h.spokeProject.ID)
-			done := make(chan struct{})
-			go func() { polls.stopAll(); close(done) }()
-			select {
-			case <-done:
-				close(store.release)
-				<-watcher.done
-				t.Fatal("shutdown returned before the retired watcher finished its read")
-			case <-time.After(100 * time.Millisecond):
-			}
-			close(store.release)
-			select {
-			case <-done:
-			case <-time.After(10 * time.Second):
-				t.Fatal("shutdown did not join the watcher")
-			}
+				select {
+				case <-done:
+				case <-time.After(10 * time.Second):
+					t.Fatal("shutdown did not join the watcher")
+				}
+			})
 		})
 	}
 }
