@@ -1731,7 +1731,6 @@ describe('AppShell', () => {
 
     expect(onEditIssue).toHaveBeenCalledWith('01J00000000000000000000001', {
       title: 'Updated example issue',
-      expected_content_revision: 0,
     })
   })
 

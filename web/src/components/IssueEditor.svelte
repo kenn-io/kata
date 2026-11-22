@@ -1,6 +1,5 @@
 <script lang="ts">
-  import { tick } from 'svelte'
-  import { Avatar, CopyButton, Markdown, Notice, type TypeaheadOption } from '@kenn-io/kit-ui'
+  import { Avatar, CopyButton, Markdown, type TypeaheadOption } from '@kenn-io/kit-ui'
   import { IssueAttachments, projectIssueDetail } from '@kenn-io/kata-ui'
   import NetworkIcon from '@lucide/svelte/icons/network'
   import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert'
@@ -157,14 +156,6 @@
   let savingBody = $state(false)
   let titleDraft = $state('')
   let bodyDraft = $state('')
-  let titleRevision = $state<number | undefined>()
-  let bodyRevision = $state<number | undefined>()
-  let titleConflict = $state(false)
-  let bodyConflict = $state(false)
-  let titleStart = $state('')
-  let bodyStart = ''
-  let bodyTitleStart = ''
-  let titleBodyStart = ''
   let titleInput: HTMLInputElement | null = $state(null)
   let bodyTextarea: HTMLTextAreaElement | null = $state(null)
   let cancelingTitle = $state(false)
@@ -219,7 +210,6 @@
     if (uid === lastIssueUID) return
     lastIssueUID = uid
     editingTitle = false
-    titleConflict = false
     editingBody = false
     savingTitle = false
     savingBody = false
@@ -264,7 +254,6 @@
     editingTitle = false
     cancelingTitle = false
     titleDraft = ''
-    titleConflict = false
     pendingTitleResetUID = null
     pendingTitleResetGeneration = null
   }
@@ -313,21 +302,10 @@
       ? Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${due}T00:00:00Z`)) / 86400000)
       : 0,
   )
-  // Federation can deliver an older close after a newer one, so pick by the
-  // fold's clock order (internal/db/fold.go compareClock), not history order.
-  function clockAfter(a: KataTaskEvent, b: KataTaskEvent): boolean {
-    if (a.hlc_physical_ms !== b.hlc_physical_ms) return a.hlc_physical_ms > b.hlc_physical_ms
-    if (a.hlc_counter !== b.hlc_counter) return a.hlc_counter > b.hlc_counter
-    if (a.origin_instance_uid !== b.origin_instance_uid)
-      return a.origin_instance_uid > b.origin_instance_uid
-    return a.event_uid > b.event_uid
-  }
   const closeEvent = $derived(
-    events.reduce<KataTaskEvent | undefined>(
-      (latest, event) =>
-        event.type === 'issue.closed' && (!latest || clockAfter(event, latest)) ? event : latest,
-      undefined,
-    ),
+    issue.effective_close_event_uid
+      ? events.find((event) => event.event_uid === issue.effective_close_event_uid)
+      : undefined,
   )
   // "Nov 18", with the year when it isn't this one.
   function dayLabel(value: string): string {
@@ -366,10 +344,6 @@
     if (actionsDisabled) return
     cancelingTitle = false
     titleDraft = issue.issue.title
-    titleStart = issue.issue.title
-    titleBodyStart = issue.issue.body
-    titleRevision = issue.issue.content_revision
-    titleConflict = false
     editingTitle = true
     queueMicrotask(() => {
       titleInput?.focus()
@@ -393,10 +367,7 @@
     const resetGeneration = draftResetGeneration
     savingTitle = true
     try {
-      const result = await onEditIssue(mutationUID, {
-        title: next,
-        ...(titleRevision === undefined ? {} : { expected_content_revision: titleRevision }),
-      })
+      const result = await onEditIssue(mutationUID, { title: next })
       if (result === true) {
         if (issue.issue.uid !== mutationUID) return
         if (draftResetGeneration !== resetGeneration) {
@@ -404,15 +375,6 @@
         } else {
           pendingTitleResetUID = mutationUID
           pendingTitleResetGeneration = resetGeneration
-        }
-      } else {
-        await tick()
-        if (
-          issue.issue.uid === mutationUID &&
-          (issue.issue.title !== titleStart || issue.issue.body !== titleBodyStart)
-        ) {
-          titleConflict = true
-          titleRevision = issue.issue.content_revision
         }
       }
     } finally {
@@ -428,17 +390,12 @@
       event.preventDefault()
       cancelingTitle = true
       editingTitle = false
-      titleConflict = false
     }
   }
 
   function startEditingBody(): void {
     if (actionsDisabled) return
     bodyDraft = issue.issue.body
-    bodyStart = issue.issue.body
-    bodyTitleStart = issue.issue.title
-    bodyRevision = issue.issue.content_revision
-    bodyConflict = false
     editingBody = true
     queueMicrotask(() => bodyTextarea?.focus())
   }
@@ -454,10 +411,7 @@
     const resetGeneration = draftResetGeneration
     savingBody = true
     try {
-      const result = await onEditIssue(mutationUID, {
-        body: next,
-        ...(bodyRevision === undefined ? {} : { expected_content_revision: bodyRevision }),
-      })
+      const result = await onEditIssue(mutationUID, { body: next })
       if (result === true) {
         if (issue.issue.uid !== mutationUID) return
         if (draftResetGeneration !== resetGeneration) {
@@ -465,15 +419,6 @@
         } else {
           pendingBodyResetUID = mutationUID
           pendingBodyResetGeneration = resetGeneration
-        }
-      } else {
-        await tick()
-        if (
-          issue.issue.uid === mutationUID &&
-          (issue.issue.body !== bodyStart || issue.issue.title !== bodyTitleStart)
-        ) {
-          bodyConflict = true
-          bodyRevision = issue.issue.content_revision
         }
       }
     } finally {
@@ -549,15 +494,6 @@
           >
         {/if}
       </h2>
-      {#if titleConflict}
-        <Notice tone="error" class="detail-conflict">
-          {#snippet icon()}<CircleAlertIcon size={14} aria-hidden="true" />{/snippet}
-          {issue.issue.title !== titleStart
-            ? `Someone renamed this to "${issue.issue.title}" while you were editing.`
-            : 'Someone changed this task while you were editing.'} Press Enter to save yours, or Esc to
-          keep theirs.
-        </Notice>
-      {/if}
       {#if issue.issue.status === 'closed'}
         {@const reason = closeEvent?.payload?.reason ?? issue.issue.closed_reason ?? 'done'}
         <p class="state-line">
@@ -653,11 +589,6 @@
         {/if}
       {/snippet}
       {#if editingBody}
-        {#if bodyConflict}<Notice tone="error" class="detail-conflict-inline">
-            {#snippet icon()}<CircleAlertIcon size={14} aria-hidden="true" />{/snippet}
-            Someone changed the description while you were editing. Save to keep yours, or Cancel to keep
-            theirs.
-          </Notice>{/if}
         <textarea
           class="body-edit"
           aria-label="Edit description"
@@ -900,12 +831,6 @@
     border-color: var(--border-default);
     background: var(--bg-primary);
     color: var(--text-primary);
-  }
-  .detail-top :global(.detail-conflict) {
-    margin: 2px 0 6px;
-  }
-  :global(.detail-conflict-inline) {
-    margin-bottom: 8px;
   }
   .state-line,
   .state-detail,

@@ -206,76 +206,40 @@ describe('IssueDetail', () => {
     expect(view.container.querySelector('.state-line')?.textContent).toContain('1 day late')
   })
 
-  it('keeps a renamed title draft and retries against the new revision', async () => {
-    let finish!: (ok: boolean) => void
-    const pending = new Promise<boolean>((resolve) => {
-      finish = resolve
-    })
-    const onEditIssue = vi.fn().mockReturnValueOnce(pending).mockResolvedValueOnce(true)
-    const view = renderDetail({ issue: makeIssue({ content_revision: 2 }), onEditIssue })
+  it('keeps title and description drafts after a failed save', async () => {
+    const onEditIssue = vi.fn(async () => false)
+    renderDetail({ onEditIssue })
     await fireEvent.click(screen.getByRole('button', { name: 'Edit title' }))
     await fireEvent.input(screen.getByRole('textbox', { name: 'Edit title' }), {
       target: { value: 'My title' },
     })
     await fireEvent.keyDown(screen.getByRole('textbox', { name: 'Edit title' }), { key: 'Enter' })
-    await view.rerender({ issue: makeIssue({ title: 'Their title', content_revision: 3 }) })
-    finish(false)
-    await vi.waitFor(() => expect(screen.getByText(/while you were editing/)).toBeTruthy())
+    await vi.waitFor(() =>
+      expect(onEditIssue).toHaveBeenCalledWith('issue-1', { title: 'My title' }),
+    )
     expect((screen.getByRole('textbox', { name: 'Edit title' }) as HTMLInputElement).value).toBe(
       'My title',
     )
-    await fireEvent.keyDown(screen.getByRole('textbox', { name: 'Edit title' }), { key: 'Enter' })
-    expect(onEditIssue).toHaveBeenLastCalledWith('issue-1', {
-      title: 'My title',
-      expected_content_revision: 3,
-    })
-  })
 
-  it('keeps a description draft and warns when another edit changes the content', async () => {
-    let finish!: (ok: boolean) => void
-    const pending = new Promise<boolean>((resolve) => {
-      finish = resolve
-    })
-    const onEditIssue = vi.fn().mockReturnValueOnce(pending).mockResolvedValueOnce(true)
-    const view = renderDetail({ issue: makeIssue({ content_revision: 2 }), onEditIssue })
     await fireEvent.click(screen.getByRole('button', { name: 'Edit description' }))
     await fireEvent.input(screen.getByRole('textbox', { name: 'Edit description' }), {
       target: { value: 'My description' },
     })
     await fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-    await view.rerender({ issue: makeIssue({ body: 'Their description', content_revision: 3 }) })
-    finish(false)
     await vi.waitFor(() =>
-      expect(screen.getByText(/changed the description while you were editing/)).toBeTruthy(),
+      expect(onEditIssue).toHaveBeenCalledWith('issue-1', { body: 'My description' }),
     )
     expect(
       (screen.getByRole('textbox', { name: 'Edit description' }) as HTMLTextAreaElement).value,
     ).toBe('My description')
-    await fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-    expect(onEditIssue).toHaveBeenLastCalledWith('issue-1', {
-      body: 'My description',
-      expected_content_revision: 3,
-    })
-  })
-
-  it('saves a content draft after a metadata-only update', async () => {
-    const onEditIssue = vi.fn(async () => true)
-    const view = renderDetail({ issue: makeIssue({ content_revision: 2 }), onEditIssue })
-    await fireEvent.click(screen.getByRole('button', { name: 'Edit title' }))
-    await fireEvent.input(screen.getByRole('textbox', { name: 'Edit title' }), {
-      target: { value: 'New title' },
-    })
-    await view.rerender({ issue: makeIssue({ content_revision: 2, revision: 2, priority: 1 }) })
-    await fireEvent.keyDown(screen.getByRole('textbox', { name: 'Edit title' }), { key: 'Enter' })
-    expect(onEditIssue).toHaveBeenCalledWith('issue-1', {
-      title: 'New title',
-      expected_content_revision: 2,
-    })
   })
 
   it('shows the close reason, actor, and evidence on a closed task', () => {
     const view = renderDetail({
-      issue: makeIssue({ status: 'closed', closed_reason: 'done' }),
+      issue: {
+        ...makeIssue({ status: 'closed', closed_reason: 'done' }),
+        effective_close_event_uid: 'event-1',
+      },
       selfActor: 'user-a',
       events: [
         {
@@ -288,8 +252,6 @@ describe('IssueDetail', () => {
           project_name: 'Inbox',
           actor: 'user-a',
           created_at: '2026-06-01T12:00:00Z',
-          hlc_physical_ms: 1,
-          hlc_counter: 0,
           payload: { reason: 'done', evidence: [{ type: 'test', command: 'go test ./example' }] },
         },
       ],
@@ -298,13 +260,8 @@ describe('IssueDetail', () => {
     expect(screen.getByText('go test ./example')).toBeTruthy()
   })
 
-  it('shows the newest close by clock when an older close arrives later', () => {
-    const close = (
-      event_id: number,
-      hlc_physical_ms: number,
-      actor: string,
-      reason: string,
-    ): KataTaskEvent => ({
+  it('shows the close the snapshot names, even when a later close is in history', () => {
+    const close = (event_id: number, actor: string, reason: string): KataTaskEvent => ({
       event_id,
       event_uid: `close-${event_id}`,
       origin_instance_uid: 'instance-1',
@@ -314,19 +271,50 @@ describe('IssueDetail', () => {
       project_name: 'Inbox',
       actor,
       created_at: '2026-06-02T12:00:00Z',
-      hlc_physical_ms,
-      hlc_counter: 0,
       payload: { reason },
     })
     const view = renderDetail({
-      issue: makeIssue({ status: 'closed', closed_reason: 'done' }),
+      issue: {
+        ...makeIssue({ status: 'closed', closed_reason: 'done' }),
+        effective_close_event_uid: 'close-4',
+      },
       selfActor: 'user-a',
-      // History arrives newest local event first; the federated close is older by clock.
-      events: [close(9, 1000, 'user-b', 'wontfix'), close(4, 2000, 'user-c', 'done')],
+      events: [close(9, 'user-b', 'wontfix'), close(4, 'user-c', 'done')],
     })
     const line = view.container.querySelector('.state-line')?.textContent ?? ''
     expect(line).toMatch(/Done\s*·\s*user-c/)
     expect(line).not.toContain('user-b')
+  })
+
+  it('shows only the task close reason and date when the snapshot names no close', () => {
+    const view = renderDetail({
+      issue: makeIssue({
+        status: 'closed',
+        closed_reason: 'wontfix',
+        closed_at: '2026-06-03T12:00:00Z',
+      }),
+      selfActor: 'user-a',
+      events: [
+        {
+          event_id: 7,
+          event_uid: 'close-7',
+          origin_instance_uid: 'instance-1',
+          type: 'issue.closed',
+          project_id: 1,
+          project_uid: 'project-1',
+          project_name: 'Inbox',
+          actor: 'user-a',
+          created_at: '2026-06-02T12:00:00Z',
+          payload: { reason: 'done', message: 'Stale close note' },
+        },
+      ],
+    })
+    const line = view.container.querySelector('.state-line')?.textContent ?? ''
+    expect(line).toContain("Won't do")
+    expect(line).toContain('Jun 3')
+    expect(line).not.toContain('Done')
+    expect(line).not.toContain('You')
+    expect(screen.queryByText('Stale close note')).toBeNull()
   })
 
   it('waits for the requested task before opening its completion dialog', async () => {
@@ -503,8 +491,6 @@ describe('IssueDetail', () => {
           project_name: 'example-project',
           actor: 'user-a',
           created_at: '2026-06-01T12:31:00Z',
-          hlc_physical_ms: 1,
-          hlc_counter: 0,
         },
       ],
       selectedRecurrences: [
