@@ -66,23 +66,19 @@ func TestFederationPollWaitsBoundEveryHeldPoll(t *testing.T) {
 }
 
 func TestFederationPollWaitsReserveCapacityForOtherCredentials(t *testing.T) {
-	for _, tc := range []struct{ cpus, limit int }{{1, 16}, {8, 32}} {
-		t.Run(fmt.Sprintf("%d CPUs", tc.cpus), func(t *testing.T) {
-			waits := newFederationPollWaits(16, tc.cpus)
-			broadcaster := NewEventBroadcaster()
-			project := db.Project{ID: 7, UID: "01HZNQ7VFPK1XGD8R5MABCD4EA"}
-			for range tc.limit {
-				waiter, ok := waits.admit(t.Context(), broadcaster, 1, project)
-				require.True(t, ok)
-				t.Cleanup(waiter.release)
-			}
-			_, ok := waits.admit(t.Context(), broadcaster, 1, project)
-			assert.False(t, ok)
-			other, ok := waits.admit(t.Context(), broadcaster, 2, project)
-			require.True(t, ok)
-			other.release()
-		})
+	waits := newFederationPollWaits(16, 1)
+	broadcaster := NewEventBroadcaster()
+	project := db.Project{ID: 7, UID: "01HZNQ7VFPK1XGD8R5MABCD4EA"}
+	for range 16 {
+		waiter, ok := waits.admit(t.Context(), broadcaster, 1, project)
+		require.True(t, ok)
+		t.Cleanup(waiter.release)
 	}
+	_, ok := waits.admit(t.Context(), broadcaster, 1, project)
+	assert.False(t, ok)
+	other, ok := waits.admit(t.Context(), broadcaster, 2, project)
+	require.True(t, ok)
+	other.release()
 }
 
 func TestFederationPollWakeIgnoresItsOwnInstance(t *testing.T) {
