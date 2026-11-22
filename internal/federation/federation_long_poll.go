@@ -61,6 +61,9 @@ type hubLongPolls struct {
 
 	mu    sync.Mutex
 	polls map[int64]*hubLongPoll
+	// watchers joins every watcher goroutine, including those retired by stop
+	// or reconcile, so shutdown returns only after each has exited.
+	watchers sync.WaitGroup
 	// passDone is closed after each runner pass and then replaced.
 	passDone chan struct{}
 }
@@ -224,22 +227,21 @@ func (p *hubLongPolls) start(spoke activeSpokeBinding) {
 	pollCtx, cancel := context.WithCancel(p.ctx)
 	poll := &hubLongPoll{cancel: cancel, done: make(chan struct{}), held: -1}
 	p.polls[projectID] = poll
-	go func() {
+	p.watchers.Go(func() {
 		defer close(poll.done)
 		p.watch(pollCtx, projectID, poll)
-	}()
+	})
 }
 
+// stopAll cancels every watcher, retired ones included, and waits for them. It
+// takes the lock after canceling so a start that passed its context check has
+// already registered with the wait group.
 func (p *hubLongPolls) stopAll() {
 	p.cancel()
 	p.mu.Lock()
-	polls := p.polls
 	p.polls = map[int64]*hubLongPoll{}
 	p.mu.Unlock()
-	for _, poll := range polls {
-		poll.cancel()
-		<-poll.done
-	}
+	p.watchers.Wait()
 }
 
 // heldAnswer is a held poll the hub answered with nothing new: a successful
@@ -298,8 +300,8 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 			backoff = min(backoff*2, 16*p.interval)
 			continue
 		}
-		identity, err := syncRetryIdentity(binding, credential)
-		if err != nil || p.retries.blocked(projectID, identity, p.now()) {
+		identity, err := heldRetryIdentity(binding, credential)
+		if err != nil || p.retries.blockedFor(projectID, binding, credential, p.now()) {
 			finishSync()
 			release()
 			if !sleepContext(ctx, p.interval) {
@@ -390,7 +392,7 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 			continue
 		case err != nil:
 			if hubAskedToWait(err) {
-				p.retries.record(projectID, identity, err, p.interval, p.now())
+				p.recordHeldRetry(projectID, identity, err)
 			}
 			supported = 0
 			if !sleepContext(ctx, backoff) {
@@ -439,6 +441,11 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 		backoff = p.interval
 		answered = &heldAnswer{cursor: cursor, target: target, at: time.Now().UTC()}
 	}
+}
+
+// recordHeldRetry retains the identity captured when the poll started.
+func (p *hubLongPolls) recordHeldRetry(projectID int64, identity [32]byte, err error) {
+	p.retries.recordSchedule(projectID, identity, true, err, p.interval, p.now(), nil)
 }
 
 // recordHeldAnswer records a held poll the hub answered with nothing new as a

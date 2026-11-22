@@ -68,6 +68,10 @@ type syncRetry struct {
 	// different fingerprint means the operator or a successful sync changed
 	// something, and the schedule starts over.
 	identity [32]byte
+	// held marks a schedule a held poll recorded. Its identity leaves out the
+	// sync-progress timestamps, so a push that lands while the refusal is being
+	// recorded cannot erase it. blockedFor compares it that way.
+	held bool
 }
 
 // NewSyncRetries returns an empty schedule set with random jitter.
@@ -121,7 +125,34 @@ func (s *SyncRetries) blocked(projectID int64, identity [32]byte, now time.Time)
 	if !ok {
 		return false
 	}
-	if state.Reason != syncRetryRelayCrossProjectLinks && state.identity != identity {
+	if state.Reason != syncRetryRelayCrossProjectLinks && !state.held && state.identity != identity {
+		delete(s.states, projectID)
+		return false
+	}
+	return now.Before(state.NextAttemptAt)
+}
+
+// blockedFor is blocked for a binding and credential. The mutex guards both
+// the choice of identity and its comparison: a held poll's schedule compares
+// heldRetryIdentity, any other compares syncRetryIdentity.
+func (s *SyncRetries) blockedFor(projectID int64, binding db.FederationBinding, credential config.FederationCredential, now time.Time) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state, ok := s.states[projectID]
+	if !ok {
+		return false
+	}
+	identity, err := syncRetryIdentity(binding, credential)
+	if state.held {
+		identity, err = heldRetryIdentity(binding, credential)
+	}
+	if err != nil {
+		return false
+	}
+	if state.identity != identity {
 		delete(s.states, projectID)
 		return false
 	}
@@ -146,6 +177,12 @@ func (s *SyncRetries) record(projectID int64, identity [32]byte, err error, inte
 
 // recordTurn preserves a schedule written after the turn started.
 func (s *SyncRetries) recordTurn(projectID int64, identity [32]byte, err error, interval time.Duration, completed time.Time, started *uint64) {
+	s.recordSchedule(projectID, identity, false, err, interval, completed, started)
+}
+
+// recordSchedule is recordTurn with the schedule's identity mode: held marks a
+// held poll's schedule, whose identity heldRetryIdentity builds.
+func (s *SyncRetries) recordSchedule(projectID int64, identity [32]byte, held bool, err error, interval time.Duration, completed time.Time, started *uint64) {
 	if s == nil {
 		return
 	}
@@ -166,7 +203,7 @@ func (s *SyncRetries) recordTurn(projectID int64, identity [32]byte, err error, 
 		ok = false
 	}
 	s.next++
-	next := syncRetry{identity: identity, version: s.next}
+	next := syncRetry{identity: identity, held: held, version: s.next}
 	next.Reason, next.HTTPStatus = reason, status
 	next.Failures = 1
 	if ok {
@@ -317,6 +354,27 @@ func syncRetryIdentity(binding db.FederationBinding, credential config.Federatio
 	})
 	if err != nil {
 		return [32]byte{}, fmt.Errorf("fingerprint federation binding for retry: %w", err)
+	}
+	return sha256.Sum256(material), nil
+}
+
+// heldRetryIdentity is syncRetryIdentity without the timestamps a sync moves
+// (UpdatedAt, LastSyncAt), so a push or pull that lands during a held poll's
+// refusal leaves its schedule alone. The endpoint, credential, and the rest of
+// the configuration still change it.
+func heldRetryIdentity(binding db.FederationBinding, credential config.FederationCredential) ([32]byte, error) {
+	binding.UpdatedAt, binding.LastSyncAt = time.Time{}, nil
+	identity, err := syncRetryIdentity(binding, credential)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	material, err := json.Marshal(struct {
+		Identity [32]byte
+		Role     db.FederationRole
+		Enabled  bool
+	}{identity, binding.Role, binding.Enabled})
+	if err != nil {
+		return [32]byte{}, err
 	}
 	return sha256.Sum256(material), nil
 }

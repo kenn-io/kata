@@ -18,7 +18,9 @@ import (
 
 // PostgreSQL permits every connected role to listen and notify on any channel.
 // The instance UID and schema distinguish installations; they are not secrets.
-// The payload names no project, and every receiver rechecks authorization.
+// The payload names the committing project and, for an issue move, the project
+// it left, so any role that can connect can follow project activity by ID. It
+// carries no issue content, and every receiver rechecks authorization.
 const (
 	pollWakeChannelInfo = "kata federation poll wake channel v1\x00"
 	// pollWakeChannelBytes keeps the hex channel name within PostgreSQL's

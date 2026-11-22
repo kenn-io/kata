@@ -474,7 +474,7 @@ func (h *hubSpokeHarness) allowPush(tb testing.TB) {
 	h.pullToken = created.Token
 	binding, err := h.spokeDB.FederationBindingByProject(ctx, h.spokeProject.ID)
 	require.NoError(tb, err)
-	binding.PushEnabled, binding.Actor = true, "worker"
+	binding.PushEnabled, binding.Actor = true, "tester"
 	_, err = h.spokeDB.UpsertFederationBinding(ctx, binding)
 	require.NoError(tb, err)
 	require.NoError(tb, config.WriteFederationCredential(h.spokeProject.UID, config.FederationCredential{
@@ -613,6 +613,7 @@ func TestRebindEndsHeldPoll(t *testing.T) {
 
 func TestHeldRetrySurvivesConcurrentSuccessfulPass(t *testing.T) {
 	h := newHubSpokeHarness(t, false)
+	h.allowPush(t)
 	held := make(chan struct{}, 1)
 	var ordinary atomic.Int64
 	failHeld := make(chan struct{})
@@ -635,6 +636,7 @@ func TestHeldRetrySurvivesConcurrentSuccessfulPass(t *testing.T) {
 	retries := NewSyncRetries()
 	var armed atomic.Bool
 	passFinished := make(chan struct{}, 1)
+	passErrors := make(chan error, 1)
 	releasePass := make(chan struct{})
 	defer func() {
 		select {
@@ -644,6 +646,10 @@ func TestHeldRetrySurvivesConcurrentSuccessfulPass(t *testing.T) {
 		}
 	}()
 	runner := &Runner{DB: h.spokeDB, Interval: time.Hour, Retries: retries, OnSpokeResult: func(_ int64, err error) {
+		if err != nil && armed.Load() {
+			passErrors <- err
+			return
+		}
 		if err == nil && armed.CompareAndSwap(true, false) {
 			passFinished <- struct{}{}
 			<-releasePass
@@ -655,10 +661,16 @@ func TestHeldRetrySurvivesConcurrentSuccessfulPass(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("held poll did not start")
 	}
+	_, _, err := h.spokeDB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: h.spokeProject.ID, Title: "Concurrent push", Author: "tester",
+	})
+	require.NoError(t, err)
 	armed.Store(true)
 	h.wake <- struct{}{}
 	select {
 	case <-passFinished:
+	case err := <-passErrors:
+		t.Fatalf("pass failed: %v", err)
 	case <-time.After(10 * time.Second):
 		t.Fatal("pass did not finish")
 	}
@@ -689,4 +701,80 @@ func TestRetiredWatcherDoesNotClearReplacementPoll(t *testing.T) {
 	polls.setProbed(old, "old")
 	polls.reconcile([]activeSpokeBinding{{binding: db.FederationBinding{ProjectID: projectID, HubURL: "new"}}})
 	require.True(t, hubHoldsPull(withHubLongPolls(t.Context(), polls), projectID, 4, "new"), "retired watcher changed its replacement's target")
+}
+
+type blockedWatcherRead struct {
+	db.Storage
+	started chan struct{}
+	release chan struct{}
+}
+
+func (s *blockedWatcherRead) FederationBindingByProject(ctx context.Context, projectID int64) (db.FederationBinding, error) {
+	close(s.started)
+	<-s.release
+	return s.Storage.FederationBindingByProject(ctx, projectID)
+}
+
+func TestStoppedWatcherIsJoinedAtShutdown(t *testing.T) {
+	for _, stop := range []struct {
+		name string
+		stop func(*hubLongPolls, int64)
+	}{
+		{"failed pass", func(p *hubLongPolls, id int64) { p.stop(id) }},
+		{"removed binding", func(p *hubLongPolls, _ int64) { p.reconcile(nil) }},
+	} {
+		t.Run(stop.name, func(t *testing.T) {
+			h := newHubSpokeHarness(t, false)
+			store := &blockedWatcherRead{Storage: h.spokeDB, started: make(chan struct{}), release: make(chan struct{})}
+			polls := newHubLongPolls(context.WithoutCancel(t.Context()), store, config.DefaultFederationCredentialStore(),
+				clientOptsWithDefault(clientpkg.Opts{}), time.Hour, nil, nil, nil, time.Now)
+			polls.start(activeSpokeBinding{binding: db.FederationBinding{ProjectID: h.spokeProject.ID}})
+			select {
+			case <-store.started:
+			case <-time.After(10 * time.Second):
+				close(store.release)
+				polls.stopAll()
+				t.Fatal("watcher did not start its read")
+			}
+			watcher := polls.polls[h.spokeProject.ID]
+			stop.stop(polls, h.spokeProject.ID)
+			done := make(chan struct{})
+			go func() { polls.stopAll(); close(done) }()
+			select {
+			case <-done:
+				close(store.release)
+				<-watcher.done
+				t.Fatal("shutdown returned before the retired watcher finished its read")
+			case <-time.After(100 * time.Millisecond):
+			}
+			close(store.release)
+			select {
+			case <-done:
+			case <-time.After(10 * time.Second):
+				t.Fatal("shutdown did not join the watcher")
+			}
+		})
+	}
+}
+
+func TestHeldRetrySurvivesPushDuringRetryRecording(t *testing.T) {
+	h := newHubSpokeHarness(t, false)
+	ctx := t.Context()
+	binding, err := h.spokeDB.FederationBindingByProject(ctx, h.spokeProject.ID)
+	require.NoError(t, err)
+	credentials := config.DefaultFederationCredentialStore()
+	credential, _, err := credentials.FederationCredential(ctx, h.spokeProject.UID)
+	require.NoError(t, err)
+	identity, err := heldRetryIdentity(binding, credential)
+	require.NoError(t, err)
+	retries := NewSyncRetries()
+	polls := newHubLongPolls(ctx, h.spokeDB, credentials, clientpkg.Opts{}, time.Second, nil, nil, retries, time.Now)
+	err = h.spokeDB.AdvanceFederationPushCursor(ctx, binding.ProjectID, binding.PushCursorEventID+1)
+	require.NoError(t, err)
+	polls.recordHeldRetry(binding.ProjectID, identity, &HubStatusError{StatusCode: http.StatusServiceUnavailable, RetryAfter: 120 * time.Second})
+	binding, err = h.spokeDB.FederationBindingByProject(ctx, binding.ProjectID)
+	require.NoError(t, err)
+	require.True(t, retries.blockedFor(binding.ProjectID, binding, credential, time.Now()), "the concurrent push must not clear the held poll's Retry-After")
+	binding.Role = db.FederationRoleHub
+	require.False(t, retries.blockedFor(binding.ProjectID, binding, credential, time.Now()), "a changed binding must clear the held poll's Retry-After")
 }

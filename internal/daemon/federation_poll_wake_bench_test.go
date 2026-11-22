@@ -241,9 +241,7 @@ func BenchmarkFederationPollWakeFanout(b *testing.B) {
 				}
 				b.StartTimer()
 				hubs[0].commit(b)
-				for i, hub := range hubs {
-					poller.reads.waitForProjectReads(b, hub.projectID, before[i]+2)
-				}
+				poller.reads.waitForProjectReads(b, hubs[0].projectID, before[0]+2)
 				select {
 				case got := <-target:
 					require.NoError(b, got.err)
@@ -253,6 +251,9 @@ func BenchmarkFederationPollWakeFanout(b *testing.B) {
 					b.Fatal("target poll did not receive the committed event")
 				}
 				b.StopTimer()
+				// Allow unrelated wakes already delivered by the bridge to reach
+				// their reads before counting them.
+				time.Sleep(100 * time.Millisecond) //nolint:kennlint // sleeptest: observes asynchronous wake fan-out outside the timed interval.
 				for i, hub := range hubs[1:] {
 					unrelatedReads += poller.reads.projectReads(hub.projectID) - before[i+1] - 1
 				}

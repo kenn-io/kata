@@ -52,7 +52,7 @@ func TestFederationPollWaitsBoundEveryHeldPoll(t *testing.T) {
 
 func TestFederationPollWakeIgnoresItsOwnInstance(t *testing.T) {
 	waits := newFederationPollWaits(16)
-	woken, unsubscribe := waits.remote.subscribe()
+	woken, unsubscribe := waits.remote.subscribe(SubFilter{})
 	defer unsubscribe()
 	waits.receive(waits.message())
 	select {
@@ -82,9 +82,7 @@ func (recordingPollWakeBus) ListenFederationPollWake(ctx context.Context, _ func
 	return ctx.Err()
 }
 
-// Every role that can connect to a shared PostgreSQL database can listen on
-// the wake channel, so a wake names no project.
-func TestFederationPollWakeNamesNoProject(t *testing.T) {
+func TestFederationPollWakeNamesAffectedProjects(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		waits := newFederationPollWaits(16)
 		broadcaster := NewEventBroadcaster()
@@ -102,9 +100,47 @@ func TestFederationPollWakeNamesNoProject(t *testing.T) {
 		synctest.Wait()
 		select {
 		case published := <-bus.published:
-			assert.Equal(t, waits.instance, published, "a wake carries only the publishing instance")
+			assert.Equal(t, waits.instance+" 4242 01HZNQ7VFPK1XGD8R5MABCD4EA", published)
 		default:
 			t.Fatal("the commit published no wake")
+		}
+	})
+}
+
+func TestFederationPollRemoteWakeMatchesProjectAndMoveSource(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		writer, reader := newFederationPollWaits(16), newFederationPollWaits(16)
+		broadcaster := NewEventBroadcaster()
+		bus := recordingPollWakeBus{published: make(chan string, 1)}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			publishFederationPollWakes(ctx, bus, broadcaster, writer, slog.New(slog.DiscardHandler))
+		}()
+		defer func() { cancel(); <-done }()
+		var waiters []*federationPollWaiter
+		for i, uid := range []string{"source", "destination", "unrelated"} {
+			waiter, ok := reader.admit(ctx, NewEventBroadcaster(), int64(i+1), db.Project{ID: int64(i + 1), UID: uid})
+			require.True(t, ok)
+			defer waiter.release()
+			waiters = append(waiters, waiter)
+		}
+		synctest.Wait()
+		broadcaster.Broadcast(NewEventMsg(2, db.Event{Type: "issue.moved", Payload: `{"from_project_uid":"source"}`}))
+		synctest.Wait()
+		reader.receive(<-bus.published)
+		for i, waiter := range waiters {
+			select {
+			case <-waiter.remote:
+				if i == 2 {
+					t.Error("unrelated project woke for a move")
+				}
+			default:
+				if i != 2 {
+					t.Errorf("project %d did not wake for a move", i+1)
+				}
+			}
 		}
 	})
 }

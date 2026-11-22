@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -114,7 +116,7 @@ func (w *federationPollWaits) admit(ctx context.Context, broadcaster *EventBroad
 	}
 	w.mu.Unlock()
 	filter := SubFilter{ProjectID: project.ID, ProjectUID: project.UID}
-	remote, unsubRemote := w.remote.subscribe()
+	remote, unsubRemote := w.remote.subscribe(filter)
 	return &federationPollWaiter{
 		waits: w, broadcaster: broadcaster, filter: filter,
 		local: broadcaster.Subscribe(filter), remote: remote, unsubRemote: unsubRemote,
@@ -177,26 +179,32 @@ func federationPollCaughtUp(result db.FederationReadResult) bool {
 }
 
 // federationPollWakeBus fans wakeups received from other hub processes out to
-// the polls this process holds. A wake names no project: every role that can
-// connect to a shared PostgreSQL database can listen on the channel. Each
-// woken poll reads its own project again under its authorization, which costs
-// one read per held poll per commit on another process.
+// the polls this process holds. A wake names the project a commit belongs to
+// and, for an issue move, the project it left, so it reaches only the polls
+// SubFilter matches for them. A wake that names no project reaches every poll.
+// Each woken poll reads its own project again under its authorization.
 type federationPollWakeBus struct {
 	mu     sync.Mutex
 	nextID int
-	subs   map[int]chan struct{}
+	subs   map[int]federationPollWakeSub
+}
+
+type federationPollWakeSub struct {
+	filter SubFilter
+	ch     chan struct{}
 }
 
 func newFederationPollWakeBus() *federationPollWakeBus {
-	return &federationPollWakeBus{subs: map[int]chan struct{}{}}
+	return &federationPollWakeBus{subs: map[int]federationPollWakeSub{}}
 }
 
-func (b *federationPollWakeBus) subscribe() (<-chan struct{}, func()) {
+// subscribe registers a held poll for matching wakes.
+func (b *federationPollWakeBus) subscribe(filter SubFilter) (<-chan struct{}, func()) {
 	ch := make(chan struct{}, 1)
 	b.mu.Lock()
 	id := b.nextID
 	b.nextID++
-	b.subs[id] = ch
+	b.subs[id] = federationPollWakeSub{filter: filter, ch: ch}
 	b.mu.Unlock()
 	return ch, func() {
 		b.mu.Lock()
@@ -207,26 +215,65 @@ func (b *federationPollWakeBus) subscribe() (<-chan struct{}, func()) {
 
 // wake signals every held poll.
 func (b *federationPollWakeBus) wake() {
+	b.wakeMatching(StreamMsg{})
+}
+
+// wakeMatching signals the held polls whose filter matches msg. A msg with no
+// project signals every held poll.
+func (b *federationPollWakeBus) wakeMatching(msg StreamMsg) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	for _, ch := range b.subs {
+	for _, sub := range b.subs {
+		if msg.ProjectID != 0 && !sub.filter.matches(msg) {
+			continue
+		}
 		select {
-		case ch <- struct{}{}:
+		case sub.ch <- struct{}{}:
 		default:
 		}
 	}
 }
 
-// message is the payload this process publishes: only its instance tag.
+// message is the payload that wakes every poll in the other processes: only
+// this process's instance tag.
 func (w *federationPollWaits) message() string {
 	return w.instance
 }
 
-func (w *federationPollWaits) receive(payload string) {
-	if payload == "" || payload == w.instance {
-		return
+// messageFor is "<instance> <project id> [<moved-from project uid>]" for a
+// committed event, or message for a stream message that names no project.
+func (w *federationPollWaits) messageFor(msg StreamMsg) string {
+	if msg.ProjectID == 0 {
+		return w.message()
 	}
-	w.remote.wake()
+	return strings.TrimSpace(w.instance + " " + strconv.FormatInt(msg.ProjectID, 10) + " " + msg.movedFromProjectUID)
+}
+
+// decodeWake reads a payload published by messageFor. It reports false for
+// this process's own wakes and for payloads it cannot read.
+func (w *federationPollWaits) decodeWake(payload string) (StreamMsg, bool) {
+	fields := strings.Fields(payload)
+	if len(fields) == 0 || fields[0] == w.instance {
+		return StreamMsg{}, false
+	}
+	msg := StreamMsg{Kind: StreamKindEvent}
+	if len(fields) > 1 {
+		id, err := strconv.ParseInt(fields[1], 10, 64)
+		if err != nil || id < 0 {
+			return StreamMsg{}, false
+		}
+		msg.ProjectID = id
+	}
+	if len(fields) > 2 {
+		msg.movedFromProjectUID = fields[2]
+	}
+	return msg, true
+}
+
+func (w *federationPollWaits) receive(payload string) {
+	if msg, ok := w.decodeWake(payload); ok {
+		w.remote.wakeMatching(msg)
+	}
 }
 
 // runFederationPollWakeBridge publishes this process's committed events to the
@@ -243,21 +290,24 @@ func runFederationPollWakeBridge(ctx context.Context, bus db.FederationPollWakeB
 	wg.Wait()
 }
 
+// publishFederationPollWakes names each committed event's project in its wake.
+// When overflow drops the subscription, the events it dropped still committed;
+// the closed channel yields a message with no project, and that wake covers them.
 func publishFederationPollWakes(ctx context.Context, bus db.FederationPollWakeBus, broadcaster *EventBroadcaster, waits *federationPollWaits, logger *slog.Logger) {
 	sub := broadcaster.Subscribe(SubFilter{})
 	defer func() { sub.Unsub() }()
 	for {
+		var message string
 		select {
 		case <-ctx.Done():
 			return
-		case _, open := <-sub.Ch:
+		case msg, open := <-sub.Ch:
+			message = waits.messageFor(msg)
 			if !open {
-				// Overflow dropped the subscription; the events it dropped still
-				// committed, and this wake covers them.
 				sub = broadcaster.Subscribe(SubFilter{})
 			}
 		}
-		err := bus.PublishFederationPollWake(ctx, waits.message())
+		err := bus.PublishFederationPollWake(ctx, message)
 		if errors.Is(err, db.ErrFederationPollWakeClosed) {
 			return
 		}

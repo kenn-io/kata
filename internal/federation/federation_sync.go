@@ -402,13 +402,13 @@ func syncDirectSpoke(
 	credentials config.FederationCredentialStore,
 	opts clientpkg.Opts,
 ) (retErr error) {
-	runStartBinding := binding
+	runStartBinding, awaited := binding, false
 	var pushErr error
 	if pushThisTurn {
 		// A push that waits for the hub's history is finished by the pull
-		// below and the next cycle's push.
-		if err := pushDirectSpoke(ctx, store, &binding, hubProjectID, client, onPulledEvents, validateLease, credentials, opts); err != nil &&
-			!errors.Is(err, db.ErrFederationPushAwaitsPull) {
+		// below, which a held poll does not replace, and the next push.
+		err := pushDirectSpoke(ctx, store, &binding, hubProjectID, client, onPulledEvents, validateLease, credentials, opts)
+		if awaited = errors.Is(err, db.ErrFederationPushAwaitsPull); err != nil && !awaited {
 			if !isFederationProjectNotEnrolledError(err) {
 				return err
 			}
@@ -423,7 +423,7 @@ func syncDirectSpoke(
 			}()
 		}
 	}
-	if hubHoldsPull(ctx, binding.ProjectID, binding.PullCursorEventID, client.heldPollTarget(hubProjectID)) {
+	if pushErr == nil && !awaited && hubHoldsPull(ctx, binding.ProjectID, binding.PullCursorEventID, client.heldPollTarget(hubProjectID)) {
 		interrupted, err := federationPullInterrupted(ctx, store, binding.ProjectID)
 		if err != nil {
 			return err
@@ -1347,11 +1347,7 @@ func (r *Runner) retryBlocked(
 	if err != nil {
 		return false
 	}
-	identity, err := syncRetryIdentity(spoke.binding, credential)
-	if err != nil {
-		return false
-	}
-	return retries.blocked(spoke.binding.ProjectID, identity, r.refusalNow())
+	return retries.blockedFor(spoke.binding.ProjectID, spoke.binding, credential, r.refusalNow())
 }
 
 // retryIdentityAfterTurn fingerprints a refused or throttled turn, so the next
