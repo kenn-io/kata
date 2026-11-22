@@ -1201,6 +1201,7 @@ func TestEnsureRunningReportsLiveUnreachableDaemonWithoutAutoStart(t *testing.T)
 	assert.Contains(t, err.Error(), fmt.Sprintf("daemon pid %d is running", os.Getpid()))
 	assert.Contains(t, err.Error(), address)
 	assert.Contains(t, err.Error(), "missing.sock")
+	assert.NotContains(t, err.Error(), "kata.invalid")
 	unreachable, ok := errors.AsType[*LocalDaemonUnreachableError](err)
 	require.True(t, ok)
 	assert.Equal(t, os.Getpid(), unreachable.PID)
@@ -1219,12 +1220,17 @@ func TestUnreachableDaemonKeepsSocketPathContainingSyntheticHost(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, os.RemoveAll(socketDir)) })
 	socket := socketDir + "/http://kata.invalid/missing.sock"
-	client, base := LocalHTTPClient("unix://" + socket)
-	_, cause := Probe(t.Context(), client, base)
-	require.Error(t, cause)
-	unreachable := &LocalDaemonUnreachableError{cause: cause}
+	tmp := setupKataEnv(t)
+	require.NoError(t, writeRuntimeRecord(t, tmp, "unix://"+socket))
+	patchEnsureHooks(t, currentVersionForEnsure(), "http://new-daemon")
+	_, err = EnsureRunning(t.Context())
+	unreachable, ok := errors.AsType[*LocalDaemonUnreachableError](err)
+	require.True(t, ok)
 	assert.Contains(t, unreachable.Summary(), `Get "/api/v1/ping"`)
 	assert.Contains(t, unreachable.Summary(), "dial unix "+socket)
+	urlErr, ok := errors.AsType[*url.Error](err)
+	require.True(t, ok)
+	assert.Equal(t, "http://kata.invalid/api/v1/ping", urlErr.URL)
 }
 
 func TestEnsureRunningPrioritizesUnreachableDaemonOverIncompatibleDaemon(t *testing.T) {
