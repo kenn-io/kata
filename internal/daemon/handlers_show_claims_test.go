@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"encoding/json/jsontext"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -20,6 +23,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/testenv"
+	"go.kenn.io/kata/internal/testfix"
 )
 
 type showIssueClaimBody struct {
@@ -516,80 +520,88 @@ func TestShowIssueClaimRefreshHubUnreachableFallsBackToCachedClaimAndPending(t *
 }
 
 func TestShowIssueClaimSpokeBoundsRemoteRefreshHeaders(t *testing.T) {
-	spoke, project, issue, pending := newShowClaimTimeoutSpoke(t)
-	hub := newBlockingClaimStatusHub(t, false)
-	writeShowClaimSpokeBinding(t, spoke, project, hub.URL(), "claim-token", "claim")
+	synctest.Test(t, func(t *testing.T) {
+		spoke, project, issue, pending := newShowClaimTimeoutSpoke(t)
+		hub := newBlockingClaimStatusHub(t, false)
+		writeShowClaimSpokeBinding(t, spoke, project, hub.URL(), "claim-token", "claim")
 
-	started := time.Now()
-	body := getShowIssueClaimBodyWithTimeout(t, spoke, project.ID, issue.ShortID, 2*time.Second)
-	elapsed := time.Since(started)
+		started := time.Now()
+		body := getShowIssueClaimBodyWithTimeout(t, spoke, project.ID, issue.ShortID, 2*time.Second)
+		elapsed := time.Since(started)
 
-	require.NotNil(t, body.Claim)
-	assert.Equal(t, "cached-holder", body.Claim.Holder)
-	require.Len(t, body.PendingClaims, 1)
-	assert.Equal(t, pending.RequestUID, body.PendingClaims[0].RequestUID)
-	assert.Less(t, elapsed, 1500*time.Millisecond)
-	assert.EqualValues(t, 1, hub.calls.Load())
-	hub.requireCanceled(t)
+		require.NotNil(t, body.Claim)
+		assert.Equal(t, "cached-holder", body.Claim.Holder)
+		require.Len(t, body.PendingClaims, 1)
+		assert.Equal(t, pending.RequestUID, body.PendingClaims[0].RequestUID)
+		assert.Equal(t, 100*time.Millisecond, elapsed)
+		assert.EqualValues(t, 1, hub.calls.Load())
+		hub.requireCanceled(t)
+	})
 }
 
 func TestShowIssueClaimSpokeBoundsRemoteRefreshBody(t *testing.T) {
-	spoke, project, issue, pending := newShowClaimTimeoutSpoke(t)
-	hub := newBlockingClaimStatusHub(t, true)
-	writeShowClaimSpokeBinding(t, spoke, project, hub.URL(), "claim-token", "claim")
+	synctest.Test(t, func(t *testing.T) {
+		spoke, project, issue, pending := newShowClaimTimeoutSpoke(t)
+		hub := newBlockingClaimStatusHub(t, true)
+		writeShowClaimSpokeBinding(t, spoke, project, hub.URL(), "claim-token", "claim")
 
-	started := time.Now()
-	body := getShowIssueClaimBodyWithTimeout(t, spoke, project.ID, issue.ShortID, 2*time.Second)
-	elapsed := time.Since(started)
+		started := time.Now()
+		body := getShowIssueClaimBodyWithTimeout(t, spoke, project.ID, issue.ShortID, 2*time.Second)
+		elapsed := time.Since(started)
 
-	require.NotNil(t, body.Claim)
-	assert.Equal(t, "cached-holder", body.Claim.Holder)
-	require.Len(t, body.PendingClaims, 1)
-	assert.Equal(t, pending.RequestUID, body.PendingClaims[0].RequestUID)
-	assert.Less(t, elapsed, 1500*time.Millisecond)
-	assert.EqualValues(t, 1, hub.calls.Load())
-	hub.requireCanceled(t)
+		require.NotNil(t, body.Claim)
+		assert.Equal(t, "cached-holder", body.Claim.Holder)
+		require.Len(t, body.PendingClaims, 1)
+		assert.Equal(t, pending.RequestUID, body.PendingClaims[0].RequestUID)
+		assert.Equal(t, 100*time.Millisecond, elapsed)
+		assert.EqualValues(t, 1, hub.calls.Load())
+		hub.requireCanceled(t)
+	})
 }
 
 func TestShowIssueClaimSpokeTimeoutSuppressesImmediateRetryWithoutPendingClaim(t *testing.T) {
-	ctx := t.Context()
-	daemon.SetShowClaimStatusRefreshTimeoutForTest(t, 100*time.Millisecond) //nolint:kennlint // deadlinetest: the hub withholds its response until cancellation; the test asserts cached claim state after refresh timeout
-	spoke := testenv.New(t)
-	project, issue := createShowClaimSpokeProject(t, spoke)
-	cachedAt := time.Date(2026, 5, 23, 14, 0, 0, 0, time.UTC)
-	require.NoError(t, spoke.DB.ApplyClaimStatus(ctx, project.ID, issue.UID, db.ClaimStatus{
-		Held: true,
-		Holder: db.ClaimPrincipal{
-			HolderInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4CD",
-			Holder:            "cached-holder",
-			ClientKind:        "cli",
-		},
-		Claim:  showIssueCachedClaim(issue, "cached-holder", cachedAt),
-		HubNow: cachedAt,
-	}))
-	hub := newBlockingClaimStatusHub(t, false)
-	writeShowClaimSpokeBinding(t, spoke, project, hub.URL(), "claim-token", "claim")
+	synctest.Test(t, func(t *testing.T) {
+		ctx := t.Context()
+		daemon.SetShowClaimStatusRefreshTimeoutForTest(t, 100*time.Millisecond) //nolint:kennlint // deadlinetest: the hub withholds its response until cancellation; the test asserts cached claim state after refresh timeout
+		spoke := newShowClaimTimeoutEnv(t)
+		project, issue := createShowClaimSpokeProject(t, spoke)
+		cachedAt := time.Date(2026, 5, 23, 14, 0, 0, 0, time.UTC)
+		require.NoError(t, spoke.DB.ApplyClaimStatus(ctx, project.ID, issue.UID, db.ClaimStatus{
+			Held: true,
+			Holder: db.ClaimPrincipal{
+				HolderInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4CD",
+				Holder:            "cached-holder",
+				ClientKind:        "cli",
+			},
+			Claim:  showIssueCachedClaim(issue, "cached-holder", cachedAt),
+			HubNow: cachedAt,
+		}))
+		hub := newBlockingClaimStatusHub(t, false)
+		writeShowClaimSpokeBinding(t, spoke, project, hub.URL(), "claim-token", "claim")
 
-	first := getShowIssueClaimBodyWithTimeout(t, spoke, project.ID, issue.ShortID, 2*time.Second)
-	require.NotNil(t, first.Claim)
-	assert.Equal(t, "cached-holder", first.Claim.Holder)
-	second := getShowIssueClaimBodyWithTimeout(t, spoke, project.ID, issue.ShortID, 2*time.Second)
-	require.NotNil(t, second.Claim)
-	assert.Equal(t, "cached-holder", second.Claim.Holder)
-	assert.EqualValues(t, 1, hub.calls.Load())
+		first := getShowIssueClaimBodyWithTimeout(t, spoke, project.ID, issue.ShortID, 2*time.Second)
+		require.NotNil(t, first.Claim)
+		assert.Equal(t, "cached-holder", first.Claim.Holder)
+		second := getShowIssueClaimBodyWithTimeout(t, spoke, project.ID, issue.ShortID, 2*time.Second)
+		require.NotNil(t, second.Claim)
+		assert.Equal(t, "cached-holder", second.Claim.Holder)
+		assert.EqualValues(t, 1, hub.calls.Load())
+	})
 }
 
 func TestShowIssueClaimSpokeRemoteBudgetKeepsParentContextForCacheWrites(t *testing.T) {
-	spoke, project, issue, _ := newShowClaimTimeoutSpoke(t)
-	hub := newBlockingClaimStatusHub(t, false)
-	writeShowClaimSpokeBinding(t, spoke, project, hub.URL(), "claim-token", "claim")
+	synctest.Test(t, func(t *testing.T) {
+		spoke, project, issue, _ := newShowClaimTimeoutSpoke(t)
+		hub := newBlockingClaimStatusHub(t, false)
+		writeShowClaimSpokeBinding(t, spoke, project, hub.URL(), "claim-token", "claim")
 
-	_ = getShowIssueClaimBodyWithTimeout(t, spoke, project.ID, issue.ShortID, 2*time.Second)
+		_ = getShowIssueClaimBodyWithTimeout(t, spoke, project.ID, issue.ShortID, 2*time.Second)
 
-	refreshErr, err := spoke.DB.ClaimStatusRefreshError(t.Context(), project.ID, issue.UID)
-	require.NoError(t, err)
-	assert.Contains(t, refreshErr.LastError, "status refresh transport")
-	assert.EqualValues(t, 1, hub.calls.Load())
+		refreshErr, err := spoke.DB.ClaimStatusRefreshError(t.Context(), project.ID, issue.UID)
+		require.NoError(t, err)
+		assert.Contains(t, refreshErr.LastError, "status refresh transport")
+		assert.EqualValues(t, 1, hub.calls.Load())
+	})
 }
 
 func TestShowIssueClaimRefreshForbiddenRecordsErrorAndDoesNotHotLoop(t *testing.T) {
@@ -695,7 +707,7 @@ func newBlockingClaimStatusHub(t *testing.T, blockBody bool) *blockingClaimStatu
 		canceled: make(chan struct{}),
 		release:  make(chan struct{}),
 	}
-	hub.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	hub.server = httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hub.calls.Add(1)
 		if blockBody {
 			w.Header().Set("Content-Type", "application/json")
@@ -711,6 +723,13 @@ func newBlockingClaimStatusHub(t *testing.T, blockBody bool) *blockingClaimStatu
 		case <-hub.release:
 		}
 	}))
+	// Route the production hub client over the in-memory network so fake time
+	// advances only after the request and handler have blocked.
+	previousTransport := http.DefaultTransport
+	http.DefaultTransport = hub.server.Client().Transport
+	// Keep the fixture origin inside the production plaintext loopback policy.
+	hub.server.URL = "http://127.0.0.1"
+	t.Cleanup(func() { http.DefaultTransport = previousTransport })
 	t.Cleanup(func() {
 		hub.releaseOnce.Do(func() { close(hub.release) })
 		hub.server.Close()
@@ -731,13 +750,37 @@ func (h *blockingClaimStatusHub) requireCanceled(t *testing.T) {
 	}
 }
 
+// newShowClaimTimeoutEnv serves the real daemon routes over an in-memory
+// network. All callers run inside synctest so scheduler delays spend no budget.
+func newShowClaimTimeoutEnv(t *testing.T) *testenv.Env {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_DB", filepath.Join(home, "kata.db"))
+	store, err := testfix.OpenSQLite(t.Context(), filepath.Join(home, "kata.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	server := daemon.NewServer(daemon.ServerConfig{DB: store})
+	t.Cleanup(func() { require.NoError(t, server.Close()) })
+	handler := server.Handler()
+	httpServer := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The in-memory connection has no IP; retain testenv.New's owner-local
+		// authority by supplying both ends of its loopback connection.
+		r.RemoteAddr = "127.0.0.1:1234"
+		ctx := context.WithValue(r.Context(), http.LocalAddrContextKey, &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1235})
+		handler.ServeHTTP(w, r.WithContext(ctx))
+	}))
+	client := httpServer.Client()
+	return &testenv.Env{DB: store, Home: home, URL: httpServer.URL, HTTP: client}
+}
+
 func newShowClaimTimeoutSpoke(
 	t *testing.T,
 ) (*testenv.Env, db.Project, db.Issue, db.PendingClaimRequest) {
 	t.Helper()
 	ctx := t.Context()
 	daemon.SetShowClaimStatusRefreshTimeoutForTest(t, 100*time.Millisecond) //nolint:kennlint // deadlinetest: the hub withholds its response until cancellation; the test asserts cached claim state after refresh timeout
-	spoke := testenv.New(t)
+	spoke := newShowClaimTimeoutEnv(t)
 	project, issue := createShowClaimSpokeProject(t, spoke)
 	cachedAt := time.Date(2026, 5, 23, 14, 0, 0, 0, time.UTC)
 	require.NoError(t, spoke.DB.ApplyClaimStatus(ctx, project.ID, issue.UID, db.ClaimStatus{
