@@ -93,8 +93,9 @@ test('keeps a resized width and copies a short task ID from the hovered row', as
   await handle.focus()
   const currentWidth = Math.round((await page.locator('.column-heading-due').boundingBox())!.width)
   await expect(handle).toHaveAttribute('aria-valuenow', String(currentWidth))
-  const expectedWidth = String(Number(await handle.getAttribute('aria-valuenow')) + 8)
+  const expectedWidth = String(currentWidth + 8)
   await page.keyboard.press('ArrowRight')
+  await expect(handle).toHaveAttribute('aria-valuenow', expectedWidth)
 
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], {
     origin: kata.origin,
