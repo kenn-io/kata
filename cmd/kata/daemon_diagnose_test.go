@@ -60,6 +60,9 @@ instance_uid = %q
 
 func TestDaemonDiagnoseStoppedProfileReadOnly(t *testing.T) {
 	home, _, uid, projectUID := stoppedProfileCLI(t)
+	marker := filepath.Join(home, "kata.db.import.lock")
+	_, err := os.Stat(marker)
+	require.ErrorIs(t, err, os.ErrNotExist)
 	for _, mode := range []string{"--json", "--agent", ""} {
 		args := []string{"daemon", "diagnose"}
 		if mode != "" {
@@ -79,7 +82,9 @@ func TestDaemonDiagnoseStoppedProfileReadOnly(t *testing.T) {
 		}
 		assert.NotContains(t, out, "personal-token")
 	}
-	_, err := os.Stat(filepath.Join(home, "runtime"))
+	_, err = os.Stat(marker)
+	require.NoError(t, err)
+	_, err = os.Stat(filepath.Join(home, "runtime"))
 	assert.ErrorIs(t, err, os.ErrNotExist)
 }
 
@@ -1011,6 +1016,7 @@ func TestDaemonDiagnoseStorageBusy(t *testing.T) {
 	assertDiagnosticState(t, out, "storage_busy")
 	_, _, err = executeRootCapture(t, t.Context(), "daemon", "recover")
 	require.ErrorContains(t, err, "wait for the SQLite upgrade or import")
+	requireCLIError(t, err, ExitDaemonUnavail)
 	require.NoError(t, lock.Close())
 	out, _, err = executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
 	require.NoError(t, err)
@@ -1299,4 +1305,93 @@ func TestDaemonDiagnoseIgnoresOtherDatabaseCutover(t *testing.T) {
 	out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
 	require.NoError(t, err)
 	assertDiagnosticState(t, out, "stopped_local_profile")
+}
+
+func TestDaemonDiagnoseUnreadableProfileMarker(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("file permissions do not block reads")
+	}
+	home, _, _, _ := stoppedProfileCLI(t)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "kata.db.import.lock"), nil, 0200))
+	out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
+	require.NoError(t, err)
+	assertDiagnosticState(t, out, "unreadable_storage")
+}
+
+func TestDaemonDiagnoseCurrentHomeBusyStorageID(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_DB", "")
+	t.Setenv("KATA_DSN", "")
+	t.Setenv("KATA_SERVER", "")
+	t.Chdir(t.TempDir())
+	path := filepath.Join(home, "kata.db")
+	store, err := sqlitestore.Open(t.Context(), path)
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+	lock := flock.New(path + ".import.lock")
+	require.NoError(t, lock.Lock())
+	defer func() { _ = lock.Close() }()
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
+	require.NoError(t, err)
+	var result daemonDiagnosis
+	require.NoError(t, json.Unmarshal([]byte(out), &result))
+	require.Equal(t, "storage_busy", result.State)
+	require.Equal(t, ns.DBHash, result.StorageID)
+}
+
+func TestDaemonDiagnoseUpgradeBeginsDuringDiscovery(t *testing.T) {
+	home, _, uid, _ := stoppedProfileCLI(t)
+	acquired := make(chan error, 1)
+	lock := flock.New(filepath.Join(home, "kata.db.import.lock"))
+	defer func() { _ = lock.Close() }()
+	supervisedProfileDaemon(t, home, uid, func(w http.ResponseWriter, r *http.Request) {
+		acquired <- lock.Lock()
+		_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version, os.Getpid()+1)
+	})
+	out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
+	require.NoError(t, err)
+	select {
+	case lockErr := <-acquired:
+		require.NoError(t, lockErr)
+	case <-time.After(5 * time.Second):
+		t.Fatal("discovery did not reach the endpoint")
+	}
+	assertDiagnosticState(t, out, "storage_busy")
+}
+
+func TestDaemonDiagnoseCurrentHomeUpgradeBeginsDuringDiscovery(t *testing.T) {
+	home := setupKataEnv(t)
+	t.Setenv("KATA_DSN", "")
+	t.Setenv("KATA_SERVER", "")
+	t.Chdir(t.TempDir())
+	path := filepath.Join(home, "kata.db")
+	store, err := sqlitestore.Open(t.Context(), path)
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+	acquired := make(chan error, 1)
+	lock := flock.New(path + ".import.lock")
+	defer func() { _ = lock.Close() }()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		acquired <- lock.Lock()
+		_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version, os.Getpid()+1)
+	}))
+	defer server.Close()
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	record := kitdaemon.NewRuntimeRecord("kata", version.Version, kitdaemon.Endpoint{Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(record)
+	require.NoError(t, err)
+	out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
+	require.NoError(t, err)
+	select {
+	case lockErr := <-acquired:
+		require.NoError(t, lockErr)
+	case <-time.After(5 * time.Second):
+		t.Fatal("discovery did not reach the endpoint")
+	}
+	assertDiagnosticState(t, out, "storage_busy")
 }

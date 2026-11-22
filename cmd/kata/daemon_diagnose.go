@@ -197,6 +197,9 @@ func diagnoseDaemonSelection(
 		return withDiagnosisAction(result), selection, nil
 	}
 	result, selection, err = probeDaemonSelection(ctx, result, selection)
+	if err == nil && (result.State == "local_stopped" || result.State == "stopped_local_profile") {
+		recheckDiagnosisStorage(ctx, &result, selection)
+	}
 	if result.State == "ready" {
 		result.Writable, result.ActorPolicy = liveDaemonCapabilities(ctx, selection.Resolved)
 		result.RootSigning = liveRootSigningHealth(ctx, selection.Resolved)
@@ -206,6 +209,27 @@ func diagnoseDaemonSelection(
 		result.State = "version_mismatch"
 	}
 	return withDiagnosisAction(result), selection, err
+}
+
+func recheckDiagnosisStorage(ctx context.Context, result *daemonDiagnosis, selection client.DaemonSelection) {
+	var dsn string
+	var err error
+	if selection.Profile != nil {
+		dsn = selection.Profile.DSN
+	} else {
+		dsn, err = config.KataDSN(ctx)
+	}
+	if err == nil {
+		var release func()
+		release, _, err = lockDiagnosisStorage(result, dsn)
+		if release != nil {
+			release()
+		}
+	}
+	if err != nil {
+		result.State = "unreadable_storage"
+		result.Message = err.Error()
+	}
 }
 
 func lockDiagnosisStorage(result *daemonDiagnosis, dsn string) (func(), bool, error) {
@@ -238,7 +262,7 @@ func inspectDiagnosisStorage(ctx context.Context, result *daemonDiagnosis, selec
 			return false, nil
 		}
 		if lockErr != nil {
-			result.State = "missing_profile_storage"
+			result.State = "unreadable_storage"
 			result.Message = lockErr.Error()
 			return false, nil
 		}
@@ -271,6 +295,11 @@ func inspectDiagnosisStorage(ctx context.Context, result *daemonDiagnosis, selec
 		if err != nil {
 			return false, err
 		}
+		ns, err := daemonruntime.NewNamespace()
+		if err != nil {
+			return false, err
+		}
+		result.StorageID = ns.DBHash
 		release, busy, lockErr := lockDiagnosisStorage(result, dsn)
 		if busy {
 			return false, nil
@@ -281,11 +310,6 @@ func inspectDiagnosisStorage(ctx context.Context, result *daemonDiagnosis, selec
 			return false, nil
 		}
 		defer release()
-		ns, err := daemonruntime.NewNamespace()
-		if err != nil {
-			return false, err
-		}
-		result.StorageID = ns.DBHash
 		store, err = storeopen.OpenReadOnly(ctx, dsn)
 		if err != nil || store == nil {
 			if err != nil && !currentHomeStorageIsAbsent(dsn, err) {
@@ -547,7 +571,7 @@ func withDiagnosisAction(result daemonDiagnosis) daemonDiagnosis {
 	case "storage_busy":
 		result.NextAction = "wait for the SQLite upgrade or import to finish, then rerun kata daemon diagnose"
 	case "unreadable_storage":
-		result.NextAction = "restore access to the current home's existing storage metadata before starting its daemon"
+		result.NextAction = "restore access to the selected storage metadata before starting its daemon"
 	case "wrong_database":
 		result.NextAction = "check the profile home and pinned instance_uid; do not substitute another database"
 	case "missing_project":

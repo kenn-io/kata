@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-20
+last_edited: 2026-11-22
 ---
 
 # CLI reference
@@ -2091,7 +2091,9 @@ produced; a non-ready selection also emits an `ERR status` line on stderr. See
 the [agent output contract](agent-output.md#stability-contract).
 `daemon diagnose` inspects selection, home,
 database/project identity, schema, process, and federation origin without
-starting or changing anything.
+starting a daemon or changing database data or routing. It may create an empty
+SQLite coordination marker beside an existing database. When storage is busy,
+`daemon diagnose` reports `storage_busy`; `daemon recover` exits with code 7.
 `daemon recover` starts only a registered existing local profile, verifies its
 pinned database UID, and optionally checks `--expect-project-uid` before and
 after startup. It never initializes storage or projects or changes routing. See
