@@ -383,25 +383,14 @@ func TestDaemonStatus_HumanReportsLifecycleDetails(t *testing.T) {
 
 func TestDaemonStatus_HumanReportsUnreachableReason(t *testing.T) {
 	resetFlags(t)
-	setupKataEnv(t)
+	home := setupKataEnv(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	t.Cleanup(server.Close)
 	address := strings.TrimPrefix(server.URL, "http://")
 
-	ns, err := daemonruntime.NewNamespace()
-	require.NoError(t, err)
-	require.NoError(t, ns.EnsureDirs())
-	identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
-	require.True(t, ok)
-	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
-		ProcessIdentityV2: identity,
-		PID:               os.Getpid(),
-		Network:           "tcp",
-		Address:           address,
-	})
-	require.NoError(t, err)
+	require.NoError(t, writeRuntimeFor(home, address))
 
 	out, _, err := executeRootCapture(t, t.Context(), "daemon", "status")
 	requireCLIError(t, err, ExitDaemonUnavail)
