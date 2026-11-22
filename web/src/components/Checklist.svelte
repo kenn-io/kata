@@ -95,12 +95,7 @@
     queueMicrotask(() => checklistInput?.focus())
   }
 
-  async function replaceChecklist(uid: string, next: KataTaskChecklistItem[]): Promise<boolean> {
-    const changed = await onPatchMetadata(uid, { checklist: next })
-    return changed
-  }
-
-  async function guarded(work: () => Promise<boolean>): Promise<boolean> {
+  async function guarded(work: () => boolean | Promise<boolean>): Promise<boolean> {
     if (disabled || checklistPending) return false
     checklistPending = true
     try {
@@ -113,20 +108,16 @@
   async function toggleChecklistItem(id: string, done: boolean): Promise<void> {
     const uid = issue.issue.uid
     await guarded(() =>
-      replaceChecklist(
-        uid,
-        checklistItems().map((item) => (item.id === id ? { ...item, done } : item)),
-      ),
+      onPatchMetadata(uid, {
+        checklist: checklistItems().map((item) => (item.id === id ? { ...item, done } : item)),
+      }),
     )
   }
 
   async function removeChecklistItem(id: string): Promise<void> {
     const uid = issue.issue.uid
     await guarded(() =>
-      replaceChecklist(
-        uid,
-        checklistItems().filter((item) => item.id !== id),
-      ),
+      onPatchMetadata(uid, { checklist: checklistItems().filter((item) => item.id !== id) }),
     )
   }
 
@@ -135,10 +126,9 @@
     if (!text) return
     const uid = issue.issue.uid
     const changed = await guarded(() =>
-      replaceChecklist(
-        uid,
-        checklistItems().map((item) => (item.id === id ? { ...item, text } : item)),
-      ),
+      onPatchMetadata(uid, {
+        checklist: checklistItems().map((item) => (item.id === id ? { ...item, text } : item)),
+      }),
     )
     if (changed && uid === issue.issue.uid && renamingID === id) renamingID = null
   }
@@ -149,7 +139,9 @@
     const mutationUID = issue.issue.uid
     const resetGeneration = draftResetGeneration
     const changed = await guarded(() =>
-      replaceChecklist(mutationUID, [...checklistItems(), { id: createULID(), text, done: false }]),
+      onPatchMetadata(mutationUID, {
+        checklist: [...checklistItems(), { id: createULID(), text, done: false }],
+      }),
     )
     if (!changed || issue.issue.uid !== mutationUID) return
     if (draftResetGeneration !== resetGeneration) {

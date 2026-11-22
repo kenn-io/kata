@@ -4,7 +4,6 @@
   import { markColor } from '../lib/marks'
 
   import {
-    KATA_LINK_RELATIONS,
     kataLinkMatchesFilters,
     relationForKataLink,
     type KataLinkFilters,
@@ -67,12 +66,6 @@
       kataLinkMatchesFilters(link, issue.issue.uid, peerResolution(link), linkFilters),
     ),
   )
-  const hasAppliedLinkFilters = $derived(
-    !linkFilters.statuses.open ||
-      !linkFilters.statuses.closed ||
-      KATA_LINK_RELATIONS.some((relation) => !linkFilters.relations[relation]),
-  )
-
   $effect(() => {
     const nextGeneration = draftFenceGeneration
     if (lastDraftFenceGeneration === null) {
@@ -183,10 +176,7 @@
         : undefined}
 >
   {#snippet actions()}
-    {#if issue.links.length > 1 || hasAppliedLinkFilters}<LinkFilterMenu
-        filters={linkFilters}
-        onChange={onLinkFiltersChange}
-      />{/if}
+    <LinkFilterMenu filters={linkFilters} onChange={onLinkFiltersChange} />
     <button
       type="button"
       class="section-action"
