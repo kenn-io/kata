@@ -455,6 +455,16 @@ func (s *Store) RecordFederationSyncPullSuccess(ctx context.Context, projectID i
 	return s.upsertFederationSyncTime(ctx, projectID, "last_pull_success_at", at)
 }
 
+// RecordFederationHeldPullSuccess records an idle poll without hiding an unfinished pull.
+func (s *Store) RecordFederationHeldPullSuccess(ctx context.Context, projectID int64, at time.Time) error {
+	_, err := s.ExecContext(ctx, `INSERT INTO federation_sync_status(project_id,last_pull_success_at)
+SELECT $1,$2 WHERE EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=$1)
+ON CONFLICT(project_id) DO UPDATE SET last_pull_success_at=EXCLUDED.last_pull_success_at
+WHERE (federation_sync_status.last_pull_started_at IS NULL OR (federation_sync_status.last_pull_success_at IS NOT NULL AND federation_sync_status.last_pull_started_at <= federation_sync_status.last_pull_success_at))
+AND (federation_sync_status.last_pull_success_at IS NULL OR federation_sync_status.last_pull_success_at < EXCLUDED.last_pull_success_at)`, projectID, storedTime(at))
+	return mapSQLError(err, nil)
+}
+
 // RecordFederationSyncPushStarted records the start of a push attempt.
 func (s *Store) RecordFederationSyncPushStarted(ctx context.Context, projectID int64, at time.Time) error {
 	return s.upsertFederationSyncTime(ctx, projectID, "last_push_started_at", at)

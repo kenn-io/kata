@@ -52,7 +52,7 @@ func TestFederationPollWaitsBoundEveryHeldPoll(t *testing.T) {
 
 func TestFederationPollWakeIgnoresItsOwnInstance(t *testing.T) {
 	waits := newFederationPollWaits(16)
-	woken, unsubscribe := waits.remote.subscribe(SubFilter{})
+	woken, unsubscribe := waits.remote.subscribe()
 	defer unsubscribe()
 	waits.receive(waits.message())
 	select {
@@ -75,7 +75,7 @@ func (recordingPollWakeBus) ListenFederationPollWake(ctx context.Context, _ func
 	return ctx.Err()
 }
 
-func TestFederationPollRemoteWakeMatchesProjectAndMoveSource(t *testing.T) {
+func TestFederationPollRemoteWakeOmitsProjects(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		writer, reader := newFederationPollWaits(16), newFederationPollWaits(16)
 		broadcaster := NewEventBroadcaster()
@@ -98,18 +98,13 @@ func TestFederationPollRemoteWakeMatchesProjectAndMoveSource(t *testing.T) {
 		broadcaster.Broadcast(NewEventMsg(2, db.Event{Type: "issue.moved", Payload: `{"from_project_uid":"source"}`}))
 		synctest.Wait()
 		published := <-bus.published
-		assert.Equal(t, writer.instance+" 2 source", published)
+		assert.Equal(t, writer.instance, published)
 		reader.receive(published)
 		for i, waiter := range waiters {
 			select {
 			case <-waiter.remote:
-				if i == 2 {
-					t.Error("unrelated project woke for a move")
-				}
 			default:
-				if i != 2 {
-					t.Errorf("project %d did not wake for a move", i+1)
-				}
+				t.Errorf("project %d did not wake for a move", i+1)
 			}
 		}
 	})

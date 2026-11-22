@@ -428,6 +428,27 @@ func TestAnsweredHeldPollRecordsAPullSuccess(t *testing.T) {
 		10*time.Second, 20*time.Millisecond, "an answered held poll did not record its pull")
 }
 
+func TestHeldAnswerDoesNotHideUnfinishedPull(t *testing.T) {
+	h := newHubSpokeHarness(t, false)
+	ctx := t.Context()
+	start := time.Now().UTC().Truncate(time.Millisecond)
+	require.NoError(t, h.spokeDB.RecordFederationSyncPullStarted(ctx, h.spokeProject.ID, start))
+	polls := newHubLongPolls(ctx, h.spokeDB, nil, clientpkg.Opts{}, time.Second, nil, nil, NewSyncRetries(), time.Now)
+	polls.recordHeldAnswer(ctx, h.spokeProject.ID, start.Add(time.Second))
+	status, err := h.spokeDB.FederationSyncStatusByProject(ctx, h.spokeProject.ID)
+	require.NoError(t, err)
+	require.Nil(t, status.LastPullSuccessAt)
+	require.NoError(t, h.spokeDB.RecordFederationSyncPullSuccess(ctx, h.spokeProject.ID, start.Add(2*time.Second)))
+	polls.recordHeldAnswer(ctx, h.spokeProject.ID, start.Add(time.Second))
+	status, err = h.spokeDB.FederationSyncStatusByProject(ctx, h.spokeProject.ID)
+	require.NoError(t, err)
+	require.Equal(t, start.Add(2*time.Second), *status.LastPullSuccessAt)
+	polls.recordHeldAnswer(ctx, h.spokeProject.ID, start.Add(3*time.Second))
+	status, err = h.spokeDB.FederationSyncStatusByProject(ctx, h.spokeProject.ID)
+	require.NoError(t, err)
+	require.Equal(t, start.Add(3*time.Second), *status.LastPullSuccessAt)
+}
+
 // A pass that keeps failing before its pull leaves the hub's page unread. The
 // watcher must not re-poll and re-trigger a pass at network speed.
 func TestWatcherBacksOffWhenPassesLeaveItsPageUnread(t *testing.T) {

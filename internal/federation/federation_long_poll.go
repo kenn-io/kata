@@ -291,6 +291,7 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 			backoff = min(backoff*2, 16*p.interval)
 			continue
 		}
+		version := p.retries.version(projectID)
 		binding, credential, ok := p.pollTargetUnlocked(ctx, projectID)
 		if !ok {
 			finishSync()
@@ -302,7 +303,7 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 			continue
 		}
 		identity, err := heldRetryIdentity(binding, credential)
-		if err != nil || p.retries.blockedFor(projectID, binding, credential, p.now()) {
+		if err != nil || p.retries.blockedFor(ctx, projectID, binding, credential, p.now(), version) {
 			finishSync()
 			release()
 			if !sleepContext(ctx, p.interval) {
@@ -402,7 +403,7 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 			continue
 		case err != nil:
 			if hubAskedToWait(err) {
-				p.recordHeldRetry(projectID, identity, err)
+				p.retries.recordSchedule(projectID, identity, identity, true, err, p.interval, p.now(), &version)
 			}
 			supported = 0
 			if !sleepContext(ctx, backoff) {
@@ -451,26 +452,10 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 	}
 }
 
-// recordHeldRetry retains the identity captured when the poll started.
-func (p *hubLongPolls) recordHeldRetry(projectID int64, identity [32]byte, err error) {
-	p.retries.recordSchedule(projectID, identity, true, err, p.interval, p.now(), nil)
-}
-
 // recordHeldAnswer records a held poll the hub answered with nothing new as a
 // successful pull, unless a pass started or finished a pull since.
 func (p *hubLongPolls) recordHeldAnswer(ctx context.Context, projectID int64, at time.Time) {
-	status, err := p.store.FederationSyncStatusByProject(ctx, projectID)
-	if err != nil && !errors.Is(err, db.ErrNotFound) {
-		p.report(fmt.Errorf("record held federation poll for project %d: %w", projectID, err))
-		return
-	}
-	at = at.Truncate(time.Millisecond)
-	for _, previous := range []*time.Time{status.LastPullStartedAt, status.LastPullSuccessAt} {
-		if previous != nil && !at.After(*previous) {
-			return
-		}
-	}
-	if err := p.store.RecordFederationSyncPullSuccess(ctx, projectID, at); err != nil {
+	if err := p.store.RecordFederationHeldPullSuccess(ctx, projectID, at.Truncate(time.Millisecond)); err != nil {
 		p.report(fmt.Errorf("record held federation poll for project %d: %w", projectID, err))
 	}
 }

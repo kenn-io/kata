@@ -1,6 +1,7 @@
 package federation
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json/v2"
 	"errors"
@@ -68,6 +69,7 @@ type syncRetry struct {
 	// different fingerprint means the operator or a successful sync changed
 	// something, and the schedule starts over.
 	identity [32]byte
+	target   [32]byte
 	// held marks a schedule a held poll recorded. Its identity leaves out the
 	// sync-progress timestamps, so a push that lands while the refusal is being
 	// recorded cannot erase it. blockedFor compares it that way.
@@ -135,13 +137,16 @@ func (s *SyncRetries) blocked(projectID int64, identity [32]byte, now time.Time)
 // blockedFor is blocked for a binding and credential. The mutex guards both
 // the choice of identity and its comparison: a held poll's schedule compares
 // heldRetryIdentity, any other compares syncRetryIdentity.
-func (s *SyncRetries) blockedFor(projectID int64, binding db.FederationBinding, credential config.FederationCredential, now time.Time) bool {
+func (s *SyncRetries) blockedFor(ctx context.Context, projectID int64, binding db.FederationBinding, credential config.FederationCredential, now time.Time, version uint64) bool {
 	if s == nil {
 		return false
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	state, ok := s.states[projectID]
+	if ctx.Err() != nil || (ok && state.version != version) {
+		return true
+	}
 	if !ok {
 		return false
 	}
@@ -172,12 +177,12 @@ func (s *SyncRetries) version(projectID int64) uint64 {
 // record schedules the binding's next attempt after a turn that completed at
 // completed. A turn that ended without a retryable refusal clears the schedule.
 func (s *SyncRetries) record(projectID int64, identity [32]byte, err error, interval time.Duration, completed time.Time) {
-	s.recordSchedule(projectID, identity, false, err, interval, completed, nil)
+	s.recordSchedule(projectID, identity, identity, false, err, interval, completed, nil)
 }
 
 // recordSchedule preserves a schedule written after the turn started. held
 // marks a held poll's schedule, whose identity heldRetryIdentity builds.
-func (s *SyncRetries) recordSchedule(projectID int64, identity [32]byte, held bool, err error, interval time.Duration, completed time.Time, started *uint64) {
+func (s *SyncRetries) recordSchedule(projectID int64, identity, target [32]byte, held bool, err error, interval time.Duration, completed time.Time, started *uint64) {
 	if s == nil {
 		return
 	}
@@ -191,14 +196,18 @@ func (s *SyncRetries) recordSchedule(projectID int64, identity [32]byte, held bo
 		return
 	}
 	previous, ok := s.states[projectID]
-	if ok && started != nil && previous.version != *started && previous.identity != identity {
+	hadPrevious := ok
+	if ok && started != nil && previous.version != *started && previous.target != target {
 		return
 	}
-	if ok && previous.Reason != reason {
+	if ok && (previous.Reason != reason || previous.target != target) {
 		ok = false
 	}
 	s.next++
-	next := syncRetry{identity: identity, held: held, version: s.next}
+	next := syncRetry{identity: identity, target: target, held: held, version: s.next}
+	if hadPrevious && started != nil && previous.version != *started && previous.target == target {
+		next.identity, next.held = target, true
+	}
 	next.Reason, next.HTTPStatus = reason, status
 	next.Failures = 1
 	if ok {
@@ -222,6 +231,9 @@ func (s *SyncRetries) recordSchedule(projectID int64, identity [32]byte, held bo
 		wait = max(next.delay-s.jitter(next.delay/4), interval, min(retryAfter, maxHonoredRetryAfter))
 	}
 	next.NextAttemptAt = completed.Add(wait).UTC()
+	if hadPrevious && previous.target == target && previous.NextAttemptAt.After(next.NextAttemptAt) {
+		next.NextAttemptAt = previous.NextAttemptAt
+	}
 	s.states[projectID] = next
 }
 
