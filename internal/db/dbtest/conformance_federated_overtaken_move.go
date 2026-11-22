@@ -7,7 +7,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-func checkFederatedOvertakenMoveSourceLeave(t *testing.T, store db.Storage, backend Backend) error {
+func checkFederatedOvertakenMoveSourceLeave(t *testing.T, _ db.Storage, backend Backend) error {
 	// overtakenMoveSpoke joins the spoke to the first joined hub projects; a hub
 	// move into a later one parks the issue on the spoke.
 	overtakenMoveSpoke := func(t *testing.T, joined int, names ...string) (hub, spoke db.Storage, remote, local []db.Project) {

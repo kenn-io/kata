@@ -3,7 +3,6 @@ package federation
 import (
 	"net/http"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
@@ -164,11 +163,12 @@ func TestSyncFederationResetWithOvertakenMove(t *testing.T) {
 	require.NoError(t, err)
 	move, err := spoke.env.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: local.ID, FromProjectID: spoke.projects[0].ID, ToProjectID: spoke.projects[1].ID, IfMatchRev: local.Revision, Actor: "worker"})
 	require.NoError(t, err)
-	// Independent clocks can otherwise give both moves the same timestamp.
-	require.Eventually(t, func() bool { return time.Now().UnixMilli() > move.Event.HLCPhysicalMS }, time.Second, time.Millisecond)
+	_, _, err = spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "unrelated issue", Author: "worker"})
+	require.NoError(t, err)
+	require.NoError(t, spoke.sync(t, 0))
 	away, err := hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[2].ID, IfMatchRev: issue.Revision, Actor: "worker"})
 	require.NoError(t, err)
-	require.Greater(t, away.Event.HLCPhysicalMS, move.Event.HLCPhysicalMS)
+	require.True(t, away.Event.HLCPhysicalMS > move.Event.HLCPhysicalMS || (away.Event.HLCPhysicalMS == move.Event.HLCPhysicalMS && away.Event.HLCCounter > move.Event.HLCCounter))
 	require.NoError(t, spoke.sync(t, 0))
 	purged, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[1].ID, Title: "purge to reset", Author: "worker"})
 	require.NoError(t, err)
