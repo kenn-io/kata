@@ -63,6 +63,8 @@ func checkFederatedQuietPollFeedWith(t *testing.T, store db.Storage, backend Bac
 	executor := writer.(interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 	})
+	_, err = executor.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,$2)`, fmt.Sprintf("unrelated-text-%d", extraIssues), "not a cursor")
+	require.NoError(t, err)
 	var cursor int64
 	// poll reads one page from the cursor, moves the cursor where the hub
 	// says, and requires the page to hold want.

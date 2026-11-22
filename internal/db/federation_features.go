@@ -354,7 +354,7 @@ func QuietFederationPoll(ctx context.Context, q interface {
  EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=p.id),
  EXISTS(SELECT 1 FROM purge_log WHERE project_id=p.id AND purge_reset_after_event_id>$2) OR
  EXISTS(SELECT 1 FROM project_purge_log WHERE project_id=p.id AND purge_reset_after_event_id>$2) OR
- EXISTS(SELECT 1 FROM meta WHERE key=$3 || p.uid AND CAST(value AS BIGINT)>$2),
+ EXISTS(SELECT 1 FROM meta WHERE CASE WHEN key=$3 || p.uid THEN CAST(value AS BIGINT) END>$2),
  CASE WHEN bounds.newest<=$2 THEN false
  WHEN (SELECT COUNT(*) FROM (SELECT 1 FROM issues WHERE project_id=$1 LIMIT (SELECT newest-$2+1 FROM bounds)) owned) >= bounds.newest-$2
  THEN EXISTS(SELECT 1 FROM events e WHERE e.id>$2 AND e.id<=bounds.newest AND e.type<>'sync.reset_required' AND
