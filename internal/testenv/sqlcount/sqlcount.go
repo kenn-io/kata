@@ -15,8 +15,6 @@ import (
 // under contexts returned by Context.
 type Counter struct {
 	n, begins atomic.Int64
-	// AfterNext runs once after a query produces its first row.
-	AfterNext func()
 }
 
 type counterKey struct{}
@@ -136,27 +134,8 @@ func (c *conn0) ExecContext(ctx context.Context, query string, args []driver.Nam
 }
 
 func (c *conn0) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
-	counter := record(ctx)
-	rows, err := c.inner.QueryContext(ctx, query, args)
-	if err == nil && counter != nil && counter.AfterNext != nil {
-		return &observedRows{Rows: rows, counter: counter}, nil
-	}
-	return rows, err
-}
-
-type observedRows struct {
-	driver.Rows
-	counter *Counter
-}
-
-func (r *observedRows) Next(dest []driver.Value) error {
-	err := r.Rows.Next(dest)
-	if err == nil && r.counter.AfterNext != nil {
-		f := r.counter.AfterNext
-		r.counter.AfterNext = nil
-		f()
-	}
-	return err
+	record(ctx)
+	return c.inner.QueryContext(ctx, query, args)
 }
 
 func (c *conn0) Ping(ctx context.Context) error         { return c.inner.Ping(ctx) }

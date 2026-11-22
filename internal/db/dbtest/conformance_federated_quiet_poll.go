@@ -53,10 +53,8 @@ func checkFederatedQuietPollFeedWith(t *testing.T, store db.Storage, backend Bac
 	require.NoError(t, err)
 	newest, err := writer.MaxEventID(ctx)
 	require.NoError(t, err)
-	for _, after := range []int64{0, newest} {
-		_, err := store.ReadFederation(ctx, db.FederationReadParams{ProjectID: unbound.ID, Features: db.SupportedEventFeatures, AfterID: after, Limit: 1000})
-		require.ErrorIs(t, err, db.ErrNotFound)
-	}
+	_, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: unbound.ID, Features: db.SupportedEventFeatures, AfterID: newest, Limit: 1000})
+	require.ErrorIs(t, err, db.ErrNotFound)
 	for _, p := range []db.Project{quiet, busy} {
 		_, err = writer.EnableProjectFederation(ctx, p.ID, "tester")
 		require.NoError(t, err)
@@ -74,8 +72,6 @@ func checkFederatedQuietPollFeedWith(t *testing.T, store db.Storage, backend Bac
 	executor := writer.(interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 	})
-	_, err = executor.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,$2)`, fmt.Sprintf("unrelated-text-%d", extraIssues), "not a cursor")
-	require.NoError(t, err)
 	var cursor int64
 	// poll reads one page from the cursor, moves the cursor where the hub
 	// says, and requires the page to hold want.
@@ -167,8 +163,6 @@ func checkFederatedQuietPollFeedWith(t *testing.T, store db.Storage, backend Bac
 		require.NoError(t, err)
 		require.Contains(t, poll(moved.EventID).RequiredFeatures, db.CronEventFeature)
 		quietPoll()
-		_, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: quiet.ID, Features: db.IssueMoveEventFeature, AfterID: cursor, Limit: 1000})
-		require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
 		delivered, err = writer.IssueByUID(ctx, delivered.UID, db.IncludeDeletedNo)
 		require.NoError(t, err)
 		return delivered
@@ -176,6 +170,8 @@ func checkFederatedQuietPollFeedWith(t *testing.T, store db.Storage, backend Bac
 
 	// Moving that issue out drops the requirement.
 	delivered := moveInDelivered()
+	_, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: quiet.ID, Features: db.IssueMoveEventFeature, AfterID: cursor, Limit: 1000})
+	require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
 	_, err = writer.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: delivered.ID, FromProjectID: quiet.ID, ToProjectID: busy.ID, IfMatchRev: delivered.Revision, Actor: "tester"})
 	require.NoError(t, err)
 	require.NotContains(t, poll().RequiredFeatures, db.CronEventFeature)

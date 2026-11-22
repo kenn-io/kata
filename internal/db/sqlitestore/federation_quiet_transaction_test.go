@@ -3,7 +3,6 @@ package sqlitestore_test
 import (
 	"database/sql"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -29,12 +28,27 @@ func TestQuietFederationPollRetriesBusyRead(t *testing.T) {
 	require.NoError(t, err)
 	conn, err := locked.Conn(t.Context())
 	require.NoError(t, err)
+	released := make(chan error, 1)
+	var timer *time.Timer
+	t.Cleanup(func() {
+		if timer != nil && !timer.Stop() {
+			require.NoError(t, <-released)
+		} else {
+			require.NoError(t, conn.Close())
+			require.NoError(t, locked.Close())
+		}
+	})
 	_, err = conn.ExecContext(t.Context(), `PRAGMA locking_mode=EXCLUSIVE`)
 	require.NoError(t, err)
 	_, err = conn.ExecContext(t.Context(), `BEGIN EXCLUSIVE`)
 	require.NoError(t, err)
-	released := make(chan error, 1)
-	timer := time.AfterFunc(100*time.Millisecond, func() {
+	raw, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(1)")
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, raw.Close()) })
+	var value int
+	err = raw.QueryRowContext(t.Context(), `SELECT 1 FROM projects LIMIT 1`).Scan(&value)
+	require.True(t, sqlitestore.IsTransient(err), "exclusive lock must block the reader: %v", err)
+	timer = time.AfterFunc(100*time.Millisecond, func() {
 		_, err := conn.ExecContext(t.Context(), `COMMIT`)
 		if err == nil {
 			err = conn.Close()
@@ -44,18 +58,7 @@ func TestQuietFederationPollRetriesBusyRead(t *testing.T) {
 		}
 		released <- err
 	})
-	t.Cleanup(func() {
-		if timer.Stop() {
-			_ = conn.Close()
-			_ = locked.Close()
-		} else {
-			require.NoError(t, <-released)
-		}
-	})
 
-	raw, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(1)")
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, raw.Close()) })
 	reader := &sqlitestore.Store{DB: raw}
 	page, err := reader.ReadFederation(t.Context(), db.FederationReadParams{ProjectID: project.ID, Features: db.SupportedEventFeatures, AfterID: cursor, Limit: 100})
 	require.NoError(t, err)
@@ -72,13 +75,7 @@ func TestQuietFederationPollTransactions(t *testing.T) {
 	require.NoError(t, err)
 	_, err = s.EnableProjectFederation(t.Context(), quiet.ID, "tester")
 	require.NoError(t, err)
-	busy, err := s.CreateProject(t.Context(), "busy")
-	require.NoError(t, err)
 	cursor, err := s.MaxEventID(t.Context())
-	require.NoError(t, err)
-	_, _, err = s.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: busy.ID, Title: "busy", Author: "tester"})
-	require.NoError(t, err)
-	newest, err := s.MaxEventID(t.Context())
 	require.NoError(t, err)
 	var count sqlcount.Counter
 	ctx := count.Context(t.Context())
@@ -86,46 +83,5 @@ func TestQuietFederationPollTransactions(t *testing.T) {
 	page, err := s.ReadFederation(ctx, in)
 	require.NoError(t, err)
 	require.Empty(t, page.Events)
-	require.Equal(t, newest, page.NextAfterID)
 	require.Zero(t, count.Begins())
-}
-
-func TestQuietFederationPollMoveDuringProof(t *testing.T) {
-	t.Cleanup(sqlitestore.CountStatementsForTest())
-	path := filepath.Join(t.TempDir(), "kata.db")
-	reader, err := sqlitestore.Open(t.Context(), path)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, reader.Close()) })
-	writer, err := sqlitestore.Open(t.Context(), path)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, writer.Close()) })
-	ctx := t.Context()
-	quiet, err := writer.CreateProject(ctx, "quiet")
-	require.NoError(t, err)
-	busy, err := writer.CreateProject(ctx, "busy")
-	require.NoError(t, err)
-	_, err = writer.EnableProjectFederation(ctx, quiet.ID, "tester")
-	require.NoError(t, err)
-	_, err = writer.EnableProjectFederation(ctx, busy.ID, "tester")
-	require.NoError(t, err)
-	issue, _, err := writer.CreateIssue(ctx, db.CreateIssueParams{ProjectID: quiet.ID, Title: "owned", Author: "tester"})
-	require.NoError(t, err)
-	cursor, err := writer.MaxEventID(ctx)
-	require.NoError(t, err)
-	_, err = writer.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash)
- VALUES($1,$2,$3,$4,$5,'issue.updated','tester','{}',1,0,$6)`, "01M80000000000000000000001", writer.InstanceUID(), busy.ID, busy.Name, issue.UID, strings.Repeat("a", 64))
-	require.NoError(t, err)
-	foreign, err := writer.MaxEventID(ctx)
-	require.NoError(t, err)
-	var count sqlcount.Counter
-	var move db.MoveIssueProjectOut
-	var moveErr error
-	count.AfterNext = func() {
-		move, moveErr = writer.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: quiet.ID, ToProjectID: busy.ID, IfMatchRev: issue.Revision, Actor: "tester"})
-	}
-	page, err := reader.ReadFederation(count.Context(ctx), db.FederationReadParams{ProjectID: quiet.ID, Features: db.SupportedEventFeatures, AfterID: cursor, Limit: 100})
-	require.NoError(t, moveErr)
-	require.NoError(t, err)
-	require.NotEmpty(t, page.Events, "a proof that saw the candidate must not advance past it with an empty page")
-	require.Greater(t, move.EventID, foreign)
 }

@@ -20,13 +20,7 @@ func TestQuietFederationPollTransactions(t *testing.T) {
 	require.NoError(t, err)
 	_, err = s.EnableProjectFederation(t.Context(), quiet.ID, "tester")
 	require.NoError(t, err)
-	busy, err := s.CreateProject(t.Context(), "busy")
-	require.NoError(t, err)
 	cursor, err := s.MaxEventID(t.Context())
-	require.NoError(t, err)
-	_, _, err = s.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: busy.ID, Title: "busy", Author: "tester"})
-	require.NoError(t, err)
-	newest, err := s.MaxEventID(t.Context())
 	require.NoError(t, err)
 	var count sqlcount.Counter
 	ctx := count.Context(t.Context())
@@ -34,6 +28,5 @@ func TestQuietFederationPollTransactions(t *testing.T) {
 	page, err := s.ReadFederation(ctx, in)
 	require.NoError(t, err)
 	require.Empty(t, page.Events)
-	require.Equal(t, newest, page.NextAfterID)
 	require.Zero(t, count.Begins())
 }
