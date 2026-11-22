@@ -26,19 +26,11 @@ func TestQuietFederationPollRetriesBusyRead(t *testing.T) {
 
 	locked, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(1)")
 	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, locked.Close()) })
 	conn, err := locked.Conn(t.Context())
 	require.NoError(t, err)
-	released := make(chan error, 1)
-	var timer *time.Timer
-	t.Cleanup(func() {
-		if timer != nil && !timer.Stop() {
-			require.NoError(t, <-released)
-		} else {
-			require.NoError(t, conn.Close())
-			require.NoError(t, locked.Close())
-		}
-	})
-	_, err = conn.ExecContext(t.Context(), `PRAGMA locking_mode=EXCLUSIVE`)
+	t.Cleanup(func() { require.NoError(t, conn.Close()) })
+	_, err = conn.ExecContext(t.Context(), `PRAGMA journal_mode=DELETE`)
 	require.NoError(t, err)
 	_, err = conn.ExecContext(t.Context(), `BEGIN EXCLUSIVE`)
 	require.NoError(t, err)
@@ -48,16 +40,7 @@ func TestQuietFederationPollRetriesBusyRead(t *testing.T) {
 	var value int
 	err = raw.QueryRowContext(t.Context(), `SELECT 1 FROM projects LIMIT 1`).Scan(&value)
 	require.True(t, sqlitestore.IsTransient(err), "exclusive lock must block the reader: %v", err)
-	timer = time.AfterFunc(100*time.Millisecond, func() { //nolint:kennlint // deadlinetest: release the lock within the retry budget after the reader encounters it
-		_, err := conn.ExecContext(t.Context(), `COMMIT`)
-		if err == nil {
-			err = conn.Close()
-		}
-		if err == nil {
-			err = locked.Close()
-		}
-		released <- err
-	})
+	releaseSQLiteWriteLockAfter(t.Context(), t, conn, 100*time.Millisecond)
 
 	reader := &sqlitestore.Store{DB: raw}
 	page, err := reader.ReadFederation(t.Context(), db.FederationReadParams{ProjectID: project.ID, Features: db.SupportedEventFeatures, AfterID: cursor, Limit: 100})
