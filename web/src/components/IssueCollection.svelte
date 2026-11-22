@@ -1614,7 +1614,7 @@
   }
 
   .column-heading-title {
-    gap: var(--space-1);
+    gap: var(--space-3);
   }
 
   /* Title starts over the row titles, past the chevron and status columns. */
