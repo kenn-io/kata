@@ -11,7 +11,6 @@ import (
 
 	"github.com/gofrs/flock"
 
-	"go.kenn.io/kata/internal/cutoverlock"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/linkpath"
@@ -20,7 +19,7 @@ import (
 
 // ErrCutoverInProgress identifies an active cutover or unresolved swap state.
 // Interrupted imports are preserved before retrying from an intact old source.
-var ErrCutoverInProgress = cutoverlock.ErrInProgress
+var ErrCutoverInProgress = errors.New("jsonl cutover in progress")
 
 var errSourceChangedDuringCutover = errors.New("source changed during cutover; stop all database users and retry; original source retained")
 
@@ -51,17 +50,11 @@ func WithCutoverLock(ctx context.Context, path string, fn func() error) error {
 	// files, so it takes the target's lock too, after the configured one.
 	// Compare resolved names: one file can be spelled two ways, and locking it
 	// twice would make this process wait on itself.
-	lockCtx, cancel := context.WithTimeout(ctx, 5*time.Minute+time.Second)
-	defer cancel()
-	acquired := false
-	err := withCutoverLocks(lockCtx, cutoverlock.Paths(path), func() error {
-		acquired = true
-		return fn()
-	})
-	if !acquired && errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
-		return fmt.Errorf("%w: timed out waiting for SQLite inspections", ErrCutoverInProgress)
+	locks := []string{linkpath.Chain(path + ".import.lock")[0]}
+	if target := cutoverFilePath(path) + ".import.lock"; target != locks[0] {
+		locks = append(locks, target)
 	}
-	return err
+	return withCutoverLocks(ctx, locks, fn)
 }
 
 func withCutoverLocks(ctx context.Context, paths []string, fn func() error) error {
@@ -72,27 +65,19 @@ func withCutoverLocks(ctx context.Context, paths []string, fn func() error) erro
 	// different inodes at the same pathname.
 	lock := flock.New(paths[0])
 	defer func() { _ = lock.Close() }()
-	for {
-		lockCtx, cancel := context.WithTimeout(ctx, time.Second)
-		locked, err := lock.TryLockContext(lockCtx, 10*time.Millisecond)
-		cancel()
-		if err != nil && (!errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil) {
-			return fmt.Errorf("lock SQLite cutover: %w", err)
-		}
-		if locked {
-			break
-		}
-		// Shared readers can be slow when SQLite is busy. Another exclusive
-		// holder is a competing cutover and should still be reported promptly.
-		probe := flock.New(paths[0], flock.SetFlag(os.O_RDONLY))
-		shared, err := probe.TryRLock()
-		_ = probe.Close()
-		if err != nil {
-			return fmt.Errorf("probe SQLite cutover: %w", err)
-		}
-		if !shared {
-			return fmt.Errorf("%w: another process holds %s; wait for migration and inspect kata daemon logs", ErrCutoverInProgress, lock.Path())
-		}
+	// Readiness polling briefly probes this same lock. Retry transient
+	// contention before treating it as another importer holding the source.
+	lockCtx, cancel := context.WithTimeout(ctx, time.Second)
+	locked, err := lock.TryLockContext(lockCtx, 10*time.Millisecond)
+	cancel()
+	if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+		err = nil
+	}
+	if err != nil {
+		return fmt.Errorf("lock SQLite cutover: %w", err)
+	}
+	if !locked {
+		return fmt.Errorf("%w: another process holds %s; wait for migration and inspect kata daemon logs", ErrCutoverInProgress, lock.Path())
 	}
 	return withCutoverLocks(ctx, paths[1:], fn)
 }

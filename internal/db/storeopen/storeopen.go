@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/cutoverlock"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/sqlitestore"
@@ -201,7 +200,7 @@ func openSQLite(ctx context.Context, path string, cfg db.OpenConfig, opts []db.O
 	var ver int
 	var hasTables bool
 	var peekErr error
-	if err := cutoverlock.WithReadLock(ctx, path, func() error {
+	if err := jsonl.WithCutoverLock(ctx, path, func() error {
 		if err := jsonl.CheckCutoverSource(ctx, path); err != nil {
 			return err
 		}

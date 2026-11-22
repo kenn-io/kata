@@ -291,14 +291,6 @@ func TestMigrationPendingKeepsCutoverLockThroughSchemaPeek(t *testing.T) {
 	require.True(t, pending)
 	require.True(t, inspector.peekCalled)
 	require.False(t, inspector.cutoverLockAcquiredDuringPeek, "schema peek must run while the cutover lock is held")
-	lock := flock.New(path + ".import.lock")
-	require.NoError(t, lock.RLock())
-	defer func() { _ = lock.Close() }()
-	require.False(t, sqliteCutoverLockedForDSN(path))
-	inspector = &lockCheckingInspector{t: t, path: path}
-	require.True(t, sqliteMigrationPendingForPath(t.Context(), path, inspector))
-	require.True(t, inspector.peekCalled)
-	require.False(t, inspector.cutoverLockAcquiredDuringPeek)
 }
 
 // lockCheckingInspector reads real storage and records whether a competing

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -25,8 +24,6 @@ import (
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
-	"go.kenn.io/kata/internal/db/storeopen"
-	"go.kenn.io/kata/internal/jsonl"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
@@ -84,7 +81,7 @@ func TestDaemonDiagnoseStoppedProfileReadOnly(t *testing.T) {
 		assert.NotContains(t, out, "personal-token")
 	}
 	_, err = os.Stat(marker)
-	require.NoError(t, err)
+	require.ErrorIs(t, err, os.ErrNotExist)
 	_, err = os.Stat(filepath.Join(home, "runtime"))
 	assert.ErrorIs(t, err, os.ErrNotExist)
 }
@@ -1009,15 +1006,10 @@ func TestDaemonDiagnoseStorageBusy(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, store.Close())
 	lock := flock.New(path + ".import.lock")
-	require.NoError(t, lock.RLock())
-	out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
-	require.NoError(t, err)
-	assertDiagnosticState(t, out, "version_mismatch")
-	require.NoError(t, lock.Unlock())
 	locked, err := lock.TryLock()
 	require.NoError(t, err)
 	require.True(t, locked)
-	out, _, err = executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
+	out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
 	require.NoError(t, err)
 	assertDiagnosticState(t, out, "storage_busy")
 	_, _, err = executeRootCapture(t, t.Context(), "daemon", "recover")
@@ -1076,153 +1068,18 @@ func TestDaemonDiagnoseMissingDatabaseWithHeldMarker(t *testing.T) {
 	assertDiagnosticState(t, out, "storage_busy")
 }
 
-func TestDaemonDiagnoseProfileMarkerPermissions(t *testing.T) {
-	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
-		t.Skip("file permissions do not block access")
-	}
-	for _, tc := range []struct {
-		name, state string
-		marker      bool
-	}{
-		{name: "read-only directory", state: "stopped_local_profile"},
-		{name: "unreadable marker", state: "unreadable_storage", marker: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			home, _, _, _ := stoppedProfileCLI(t)
-			if tc.marker {
-				require.NoError(t, os.WriteFile(filepath.Join(home, "kata.db.import.lock"), nil, 0200))
-			} else {
-				store, err := sqlitestore.Open(t.Context(), filepath.Join(home, "kata.db"))
-				require.NoError(t, err)
-				_, err = store.ExecContext(t.Context(), "PRAGMA journal_mode=DELETE")
-				require.NoError(t, err)
-				require.NoError(t, store.Close())
-				require.NoError(t, os.Chmod(home, 0500))       //nolint:gosec // G302: exercise a read-only directory.
-				t.Cleanup(func() { _ = os.Chmod(home, 0700) }) //nolint:gosec // G302: restore access for cleanup.
-			}
-			out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
-			require.NoError(t, err)
-			assertDiagnosticState(t, out, tc.state)
-		})
-	}
-}
-
-func TestDaemonDiagnoseAllowsConcurrentSQLiteOpen(t *testing.T) {
-	diagnoseWhileSQLiteBusy(t, nil, func(ctx context.Context, path string) error {
-		store, err := storeopen.Open(ctx, path)
-		if err == nil {
-			err = store.Close()
-		}
-		return err
-	}, "stopped_local_profile")
-}
-
-func TestDaemonDiagnoseAllowsDelayedUpgrade(t *testing.T) {
-	path := diagnoseWhileSQLiteBusy(t, []string{
-		"DROP INDEX idx_events_project_moves",
-		"UPDATE meta SET value='52' WHERE key='schema_version'",
-	}, jsonl.AutoCutover, "version_mismatch")
-	version, err := sqlitestore.PeekSchemaVersion(t.Context(), path)
-	require.NoError(t, err)
-	require.Equal(t, db.CurrentSchemaVersion(), version)
-}
-
-// diagnoseWhileSQLiteBusy keeps diagnosis inside its shared lock past the
-// one-second lock retry, runs contender beside it, and checks both finish.
-func diagnoseWhileSQLiteBusy(t *testing.T, setup []string, contender func(context.Context, string) error, want string) string {
-	t.Helper()
-	home, workspace, _, _ := stoppedProfileCLI(t)
-	resetFlags(t)
-	path := filepath.Join(home, "kata.db")
-	raw, err := sql.Open("sqlite", path)
-	require.NoError(t, err)
-	defer func() { _ = raw.Close() }()
-	conn, err := raw.Conn(t.Context())
-	require.NoError(t, err)
-	defer func() { _ = conn.Close() }()
-	for _, stmt := range append(append([]string{"PRAGMA journal_mode=DELETE"}, setup...), "BEGIN EXCLUSIVE") {
-		_, err = conn.ExecContext(t.Context(), stmt)
-		require.NoError(t, err)
-	}
-	selection, err := client.InspectSelection(t.Context(), workspace, "")
-	require.NoError(t, err)
-	ctx, cancel := context.WithCancel(t.Context())
-	diagnosis := make(chan daemonDiagnosis, 1)
-	var opened chan error
-	var diagnosisRead, openRead bool
-	defer func() {
-		_, _ = conn.ExecContext(t.Context(), "ROLLBACK")
-		cancel()
-		if !diagnosisRead {
-			select {
-			case <-diagnosis:
-			case <-time.After(10 * time.Second):
-				t.Error("diagnosis did not stop")
-			}
-		}
-		if opened != nil && !openRead {
-			select {
-			case <-opened:
-			case <-time.After(10 * time.Second):
-				t.Error("SQLite open did not stop")
-			}
-		}
-	}()
-	go func() {
-		result, _, _ := diagnoseDaemonSelection(ctx, "", selection)
-		diagnosis <- result
-	}()
-	marker := flock.New(path + ".import.lock")
-	defer func() { _ = marker.Close() }()
-	//nolint:kennlint // sleeptest: observing the filesystem lock requires real elapsed time.
-	require.Eventually(t, func() bool {
-		locked, err := marker.TryLock()
-		if err != nil {
-			return false
-		}
-		if locked {
-			_ = marker.Unlock()
-			return false
-		}
-		return true
-	}, 3*time.Second, 10*time.Millisecond)
-	require.NoError(t, marker.Close())
-	opened = make(chan error, 1)
-	go func() {
-		opened <- contender(ctx, path)
-	}()
-	var openErr error
-	select {
-	case openErr = <-opened:
-		openRead = true
-	case <-time.After(1500 * time.Millisecond):
-	}
-	_, err = conn.ExecContext(t.Context(), "ROLLBACK")
-	require.NoError(t, err)
-	if !openRead {
-		select {
-		case openErr = <-opened:
-			openRead = true
-		case <-time.After(5 * time.Second):
-			t.Fatal("SQLite open did not finish")
-		}
-	}
-	select {
-	case result := <-diagnosis:
-		diagnosisRead = true
-		require.NoError(t, openErr)
-		require.Equal(t, want, result.State)
-	case <-time.After(5 * time.Second):
-		t.Fatal("diagnosis did not finish")
-	}
-	return path
-}
-
 func TestDaemonDiagnoseUpgradeBeginsDuringDiscovery(t *testing.T) {
-	for _, profile := range []bool{true, false} {
-		t.Run(fmt.Sprintf("profile=%t", profile), func(t *testing.T) {
+	for _, tc := range []struct {
+		profile, unreachable bool
+	}{
+		{profile: true},
+		{profile: false},
+		{profile: true, unreachable: true},
+		{profile: false, unreachable: true},
+	} {
+		t.Run(fmt.Sprintf("profile=%t/unreachable=%t", tc.profile, tc.unreachable), func(t *testing.T) {
 			var home, uid string
-			if profile {
+			if tc.profile {
 				home, _, uid, _ = stoppedProfileCLI(t)
 			} else {
 				home = setupKataEnv(t)
@@ -1239,12 +1096,16 @@ func TestDaemonDiagnoseUpgradeBeginsDuringDiscovery(t *testing.T) {
 			var once sync.Once
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				once.Do(func() { acquired <- lock.Lock() })
+				if tc.unreachable {
+					http.Error(w, "unreachable", http.StatusServiceUnavailable)
+					return
+				}
 				_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version, os.Getpid()+1)
 			}))
 			defer server.Close()
 			var ns *daemonruntime.Namespace
 			var err error
-			if profile {
+			if tc.profile {
 				cfg, resolveErr := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: uid})
 				require.NoError(t, resolveErr)
 				ns, err = daemonruntime.NewNamespaceForHome(home, cfg.StorageID)
