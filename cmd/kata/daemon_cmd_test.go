@@ -61,49 +61,53 @@ func TestDaemonStatus_NoDaemonReportsAbsent(t *testing.T) {
 }
 
 func TestDaemonStatus_HumanUnreachableDoesNotRepeatError(t *testing.T) {
-	resetFlags(t)
-	home := setupKataEnv(t)
-	t.Chdir(t.TempDir())
-	t.Setenv("KATA_DSN", "")
-	t.Setenv("KATA_SERVER", "")
-	require.NoError(t, writeRuntimeFor(home, "127.0.0.1:0"))
+	for _, tc := range []struct {
+		name     string
+		canceled bool
+		hint     string
+	}{
+		{"refused", false, "hint: Wait during startup or migration. If the daemon is stuck, recheck the PID and endpoint before stopping it."},
+		{"canceled", true, "hint: inspect the selected process and its credentials; do not switch databases"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := setupKataEnv(t)
+			t.Chdir(t.TempDir())
+			t.Setenv("KATA_DSN", "")
+			t.Setenv("KATA_SERVER", "")
+			ctx := t.Context()
+			address := "127.0.0.1:7777"
+			var probes atomic.Int32
+			if tc.canceled {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				defer cancel()
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path != "/api/v1/ping" {
+						http.NotFound(w, r)
+						return
+					}
+					if probes.Add(1) == 2 {
+						cancel()
+						return
+					}
+					_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":"v1.2.3","pid":%d}`, os.Getpid())
+				}))
+				t.Cleanup(server.Close)
+				address = strings.TrimPrefix(server.URL, "http://")
+			}
+			require.NoError(t, writeRuntimeFor(home, address))
 
-	stdout, stderr, err := executeRootCapture(t, t.Context(), "daemon", "status")
-	assert.Equal(t, ExitDaemonUnavail, exitCodeForErr(err, true))
-	assert.Contains(t, stdout, "Selected daemon: local_unreachable")
-	assert.NotContains(t, stderr, "kata: ")
-	assert.Contains(t, stderr, "hint: ")
-}
-
-func TestDaemonStatus_HumanCanceledProbeKeepsAdvice(t *testing.T) {
-	resetFlags(t)
-	home := setupKataEnv(t)
-	t.Chdir(t.TempDir())
-	t.Setenv("KATA_DSN", "")
-	t.Setenv("KATA_SERVER", "")
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	var probes atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/ping" {
-			http.NotFound(w, r)
-			return
-		}
-		if probes.Add(1) == 2 {
-			cancel()
-			return
-		}
-		_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":"v1.2.3","pid":%d}`, os.Getpid())
-	}))
-	t.Cleanup(server.Close)
-	require.NoError(t, writeRuntimeFor(home, strings.TrimPrefix(server.URL, "http://")))
-
-	stdout, stderr, err := executeRootCapture(t, ctx, "daemon", "status")
-	assert.Equal(t, int32(2), probes.Load())
-	assert.Equal(t, ExitDaemonUnavail, exitCodeForErr(err, true))
-	assert.Contains(t, stdout, "Selected daemon: local_unreachable")
-	assert.NotContains(t, stderr, "local_unreachable")
-	assert.Contains(t, stderr, "hint: inspect the selected process and its credentials")
+			stdout, stderr, err := executeRootCapture(t, ctx, "daemon", "status")
+			if tc.canceled {
+				assert.Equal(t, int32(2), probes.Load())
+			}
+			assert.Equal(t, ExitDaemonUnavail, exitCodeForErr(err, true))
+			assert.Contains(t, stdout, "Selected daemon: local_unreachable")
+			assert.NotContains(t, stderr, "kata: ")
+			assert.NotContains(t, stderr, "local_unreachable")
+			assert.Contains(t, stderr, tc.hint)
+		})
+	}
 }
 
 func TestDaemonStatusReadinessExit(t *testing.T) {
