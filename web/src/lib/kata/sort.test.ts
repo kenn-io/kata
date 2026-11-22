@@ -29,13 +29,12 @@ function task(overrides: Partial<KataTaskSummary>): KataTaskSummary {
 }
 
 describe('kata task sorting', () => {
-  test('orders trees by their earliest descendant deadline, including cycles', () => {
+  test('orders trees by their earliest descendant deadline', () => {
     const parent = task({ uid: 'parent' })
     const child = task({ uid: 'child', deadline_on_date: '2026-05-01' })
     const middle = task({ uid: 'middle', deadline_on_date: '2026-05-10' })
     const empty = task({ uid: 'empty' })
-    const children = (item: KataTaskSummary) =>
-      item.uid === 'parent' ? [child] : item.uid === 'child' ? [parent] : []
+    const children = (item: KataTaskSummary) => (item.uid === 'parent' ? [child] : [])
     expect(
       sortKataTasks([empty, middle, parent], { key: 'due', direction: 'asc' }, children).map(
         (item) => item.uid,

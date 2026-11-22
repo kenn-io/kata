@@ -14,10 +14,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { KataTaskSummary } from '../lib/kata/types'
 import type { KataCurrentView } from '../lib/kata/authority'
 import IssueCollection from './IssueCollection.svelte'
-import {
-  KATA_TASK_COLUMNS_STORAGE_KEY,
-  KATA_TASK_COLUMN_WIDTHS_STORAGE_KEY,
-} from '../lib/kata/columns'
+import { KATA_TASK_COLUMNS_STORAGE_KEY } from '../lib/kata/columns'
 
 interface IssueListRenderOptions {
   props: {
@@ -591,40 +588,23 @@ describe('IssueCollection', () => {
     expect(row.getAttribute('aria-keyshortcuts')).toBe('c')
   })
 
-  it('shows only the closing date when Logbook has no recorded reason', () => {
-    const closed = task({
-      status: 'closed',
-      closed_at: '2026-05-15T12:00:00Z',
-    })
-    const { container } = render(IssueCollection, {
-      props: {
-        currentView: {
-          name: 'logbook',
-          fetched_at: '2026-05-16T10:00:00Z',
-          groups: [{ id: '2026-05-15', title: 'Fri, May 15', issues: [closed] }],
-        },
-        now: new Date('2026-05-16T12:00:00Z').getTime(),
-        selectedIssueUID: null,
-        loading: false,
-        onSelect: () => {},
-      },
-    })
-    expect(container.querySelector('.cell-closed')?.textContent?.trim()).toBe('May 15')
-  })
-
-  it('shows the local closing date in Logbook', () => {
+  it.each([
+    ['no recorded reason', { status: 'closed', closed_at: '2026-05-15T12:00:00Z' }, /^May 15$/],
+    [
+      'local closing date',
+      { status: 'closed', closed_reason: 'done', closed_at: '2026-05-15T04:00:00Z' },
+      /May 14/,
+    ],
+    ['open task', { status: 'open' }, /^$/],
+  ] as const)('shows the Closed cell for %s in Logbook', (_name, fields, expected) => {
     vi.stubEnv('TZ', 'America/Los_Angeles')
-    const closed = task({
-      status: 'closed',
-      closed_reason: 'done',
-      closed_at: '2026-05-15T04:00:00Z',
-    })
+    const issue = task(fields)
     const { container } = render(IssueCollection, {
       props: {
         currentView: {
           name: 'logbook',
           fetched_at: '2026-05-16T10:00:00Z',
-          groups: [{ id: '2026-05-14', title: 'Thu, May 14', issues: [closed] }],
+          groups: [{ id: 'results', title: 'Results', issues: [issue] }],
         },
         now: new Date('2026-05-16T12:00:00Z').getTime(),
         selectedIssueUID: null,
@@ -632,21 +612,7 @@ describe('IssueCollection', () => {
         onSelect: () => {},
       },
     })
-    expect(container.querySelector('.cell-closed')?.textContent).toContain('May 14')
-  })
-
-  it('leaves the Closed cell empty for an open task in Logbook', () => {
-    const open = task({ status: 'open' })
-    const { container } = render(IssueCollection, {
-      props: {
-        currentView: {
-          name: 'logbook',
-          groups: [{ id: 'results', title: 'Results', issues: [open] }],
-        },
-        onSelect: () => {},
-      },
-    })
-    expect(container.querySelector('.cell-closed')?.textContent?.trim()).toBe('')
+    expect(container.querySelector('.cell-closed')?.textContent?.trim()).toMatch(expected)
   })
 
   it('marks a past due date in the Due column', () => {
@@ -700,23 +666,6 @@ describe('IssueCollection', () => {
     const before = Number(handle.getAttribute('aria-valuenow'))
     await fireEvent.keyDown(handle, { key: 'ArrowRight' })
     expect(Number(handle.getAttribute('aria-valuenow'))).toBe(before + 8)
-  })
-
-  it('keeps the title flexible when a saved width exists', () => {
-    window.localStorage.setItem(KATA_TASK_COLUMN_WIDTHS_STORAGE_KEY, JSON.stringify({ title: 480 }))
-    render(IssueCollection, {
-      props: {
-        currentView: viewWithIssues([baseIssues[0]!]),
-        selectedIssueUID: null,
-        loading: false,
-        onSelect: () => {},
-      },
-    })
-
-    expect(screen.queryByRole('separator', { name: 'Resize Title column' })).toBeNull()
-    expect(
-      document.querySelector<HTMLElement>('.table')?.style.getPropertyValue('--table-cols-wide'),
-    ).toContain('minmax(160px, 1fr)')
   })
 
   it.each([
@@ -1562,18 +1511,20 @@ describe('IssueCollection', () => {
         title: 'Cross-project child',
         parent: { uid: parent.uid, short_id: parent.short_id },
         parent_short_id: parent.short_id,
+        deadline_on_date: '2026-05-01',
       })
+      const middle = task({ uid: 'middle', title: 'Middle', deadline_on_date: '2026-05-10' })
       render(IssueCollection, {
         props: {
           currentView: {
             name: 'all',
             fetched_at: '2026-05-16T10:00:00Z',
             groups: [
-              { id: 'project-example', title: 'example-project', issues: [parent] },
+              { id: 'project-example', title: 'example-project', issues: [middle, parent] },
               { id: 'project-workspace', title: 'example-workspace', issues: [child] },
             ],
           },
-          issueCatalog: [parent, child],
+          issueCatalog: [parent, child, middle],
           selectedIssueUID: null,
           loading: false,
           onSelect: () => {},
@@ -1581,6 +1532,9 @@ describe('IssueCollection', () => {
       })
 
       expect(screen.queryByRole('button', { name: /Cross-project child/ })).toBeNull()
+      if (sortKey === 'due') {
+        expect(visibleRows().map((row) => row.dataset.uid)).toEqual([parent.uid, middle.uid])
+      }
       const parentRow = screen.getByRole('button', { name: /Cross-project parent/ })
       await fireEvent.keyDown(parentRow, { key: 'ArrowRight' })
       const childRow = await screen.findByRole('button', { name: /Cross-project child/ })

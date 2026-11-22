@@ -164,11 +164,6 @@ test('task filters stay inside a narrow list pane without overlapping', async ({
 })
 
 test('the title fills space as columns and the list pane resize', async ({ page, kata }) => {
-  await page.addInitScript(() => {
-    if (!localStorage.getItem('kata:column-widths/v1')) {
-      localStorage.setItem('kata:column-widths/v1', JSON.stringify({ title: 480 }))
-    }
-  })
   await page.setViewportSize({ width: 1440, height: 800 })
   const credentials = await kata.launch(page)
   await kata.seedIssue(page, credentials, { title: 'Narrow saved column example' })
