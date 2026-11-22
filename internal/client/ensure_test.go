@@ -1200,18 +1200,18 @@ func TestEnsureRunningReportsLiveUnreachableDaemonWithoutAutoStart(t *testing.T)
 				t.Skip("Unix sockets are unsupported on Windows")
 			}
 			tmp := setupKataEnv(t)
-			socket := filepath.Join(tmp, "missing.sock")
+			socketDir, err := os.MkdirTemp("", "sock-")
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, os.RemoveAll(socketDir)) })
+			socket := filepath.Join(socketDir, "missing.sock")
 			if custom {
-				socketDir, err := os.MkdirTemp("", "sock-")
-				require.NoError(t, err)
-				t.Cleanup(func() { require.NoError(t, os.RemoveAll(socketDir)) })
 				socket = socketDir + "/http://kata.invalid/missing.sock"
 			}
 			address := "unix://" + socket
 			require.NoError(t, writeRuntimeRecord(t, tmp, address))
 			restore := patchEnsureHooks(t, currentVersionForEnsure(), "http://new-daemon")
 
-			_, err := EnsureRunning(t.Context())
+			_, err = EnsureRunning(t.Context())
 
 			require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
 			assert.Contains(t, err.Error(), fmt.Sprintf("daemon pid %d is running", os.Getpid()))
