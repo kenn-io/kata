@@ -37,24 +37,24 @@
   .sidebar-list-group {
     display: grid;
     gap: var(--space-1);
-    padding: var(--space-2) 12px var(--space-4);
+    padding: var(--space-2) 8px var(--space-4);
   }
 
   .sidebar-group-header {
     display: flex;
     align-items: center;
-    gap: var(--space-3);
+    gap: var(--space-4);
     width: 100%;
     min-height: 26px;
-    padding: 0 10px;
+    padding: 0 8px;
     border: 0;
     border-radius: var(--radius-md);
     background: transparent;
-    color: var(--text-muted);
+    color: var(--text-secondary);
     cursor: pointer;
     font-family: inherit;
     font-size: var(--font-size-xs);
-    font-weight: var(--font-weight-medium);
+    font-weight: var(--font-weight-semibold);
     text-align: left;
   }
 
@@ -64,6 +64,8 @@
 
   .sidebar-group-header__chevron {
     display: inline-flex;
+    justify-content: center;
+    width: 16px;
     flex-shrink: 0;
     transition: transform 120ms ease;
   }
@@ -91,8 +93,7 @@
 
   .sidebar-group-header__count {
     flex-shrink: 0;
-    color: var(--text-muted);
-    font-size: var(--font-size-xs);
+    font-size: var(--font-size-sm);
     font-variant-numeric: tabular-nums;
   }
 

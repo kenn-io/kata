@@ -11,6 +11,7 @@
   import LaunchHint from './components/LaunchHint.svelte'
   import LoginView from './components/LoginView.svelte'
   import RouteError from './components/RouteError.svelte'
+  import StatusPage from './components/shared/StatusPage.svelte'
   import VersionMismatch from './components/VersionMismatch.svelte'
   import { createCredentialedFetch, setGeneratedFetch } from './lib/api/client'
   import {
@@ -47,7 +48,12 @@
     type UIReferencesResponseBody,
     type TokenOut,
   } from './lib/api/generated'
-  import { createDaemonFetch, fetchWebDaemons, type WebDaemonInfo } from './lib/daemons/client'
+  import {
+    createDaemonFetch,
+    fetchWebDaemons,
+    rosterUnavailable,
+    type WebDaemonInfo,
+  } from './lib/daemons/client'
   import { loadDaemonRoute, saveDaemonRoute } from './lib/daemons/state'
   import {
     AuthenticationRequiredError,
@@ -1196,7 +1202,7 @@
       references = undefined
       acceptedRoute = undefined
       mode = 'loading'
-      daemonError = 'Configured daemons are unavailable'
+      daemonError = rosterUnavailable
       return false
     } finally {
       if (daemonRosterAbort === abort) daemonRosterAbort = undefined
@@ -1427,15 +1433,19 @@
   }
 </script>
 
-<main aria-labelledby="kata-heading" class="kata-app" class:ready={mode === 'ready'}>
-  <h1 id="kata-heading" class:kit-sr-only={mode === 'ready'}>Kata</h1>
+<main aria-label="Kata" class="kata-app" class:ready={mode === 'ready' && !versionMismatch}>
+  {#if mode === 'ready' && !versionMismatch}<h1 class="kit-sr-only">Kata</h1>{/if}
   {#if versionMismatch}
     <VersionMismatch />
   {:else if mode === 'loading'}
     {#if daemonError}
-      <section class="kata-authority-recovery" role="alert">
-        <span>{daemonError}</span>
-        <Button label="Retry daemon roster" onclick={() => void startAuthority()} />
+      <StatusPage alert tone="danger" title="Can't reach a server" description={daemonError}>
+        <Button
+          tone="info"
+          surface="solid"
+          label="Try again"
+          onclick={() => void startAuthority()}
+        />
         {#if daemonInfos.length > 0}
           <KataDaemonSwitcher
             daemons={daemonInfos}
@@ -1447,11 +1457,15 @@
             onOpen={() => void refreshDaemonRoster()}
           />
         {/if}
-      </section>
+      </StatusPage>
     {:else if authority?.error && !authority.loading}
-      <section class="kata-authority-recovery" role="alert">
-        <span>{authority.error}</span>
-        <Button label="Retry" onclick={() => void startAuthority()} />
+      <StatusPage
+        alert
+        tone="danger"
+        title="Kata couldn't load this workspace"
+        description={authority.error}
+      >
+        <Button tone="info" surface="solid" label="Retry" onclick={() => void startAuthority()} />
         {#if daemonInfos.length > 0}
           <KataDaemonSwitcher
             daemons={daemonInfos}
@@ -1463,19 +1477,29 @@
             onOpen={() => void refreshDaemonRoster()}
           />
         {/if}
-      </section>
+      </StatusPage>
     {:else}
-      <p role="status">Loading Kata…</p>
+      <div role="status"><h1 class="loading-heading">Loading…</h1></div>
     {/if}
   {:else if route.kind === 'route-error'}
-    <RouteError {route} onSearch={search} />
+    <RouteError
+      {route}
+      onSearch={search}
+      onOpenInbox={() =>
+        navigate({
+          kind: 'kata',
+          view: 'inbox',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [], text: '' },
+        })}
+    />
   {:else}
     {#if mode === 'launch'}
       <LaunchHint issueRef={undefined} />
     {:else if mode === 'login'}
       <LoginView {returnPath} onLogin={login} />
     {/if}
-    {#if !authority?.snapshot && daemonInfos.length > 0 && (mode === 'launch' || mode === 'login')}
+    {#if daemonInfos.length > 0 && (mode === 'launch' || mode === 'login')}
       <KataDaemonSwitcher
         daemons={daemonInfos}
         activeId={activeDaemonID}
@@ -1486,7 +1510,7 @@
         onOpen={() => void refreshDaemonRoster()}
       />
     {/if}
-    {#if authority?.snapshot && (mode === 'ready' || mode === 'launch' || mode === 'login')}
+    {#if authority?.snapshot && mode === 'ready'}
       <AppShell
         {syncRefreshGeneration}
         {searchSettingsPostFetch}

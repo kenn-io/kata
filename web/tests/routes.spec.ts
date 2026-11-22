@@ -67,7 +67,7 @@ test('short issue references remain invalid routes with an explicit search recov
     title: 'Short reference search task',
   })
   await page.goto(`${kata.origin}/kata?issue=${issue.short_id}`)
-  await expect(page.getByRole('heading', { name: 'This Kata route is not valid' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible()
   await page.getByRole('button', { name: `Search for ${issue.short_id}` }).click()
   await expect(page).toHaveURL(
     new RegExp(`/kata\\?view=all-open&status=all&text=${encodeURIComponent(issue.short_id)}`),

@@ -1,7 +1,7 @@
 <script lang="ts">
   import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left'
   import { PageHeader, SearchByMeaningRow, type SearchByMeaningState } from '@kenn-io/kit-ui'
-  import { untrack } from 'svelte'
+  import { untrack, type Snippet } from 'svelte'
 
   import { orvalFetch } from '../lib/api/client'
   import {
@@ -13,6 +13,7 @@
   } from '../lib/api/generated'
 
   interface Props {
+    children?: Snippet | undefined
     canAdministerDaemon: boolean
     onback: () => void
     /**
@@ -26,6 +27,7 @@
   }
 
   let {
+    children,
     canAdministerDaemon,
     onback,
     postFetch,
@@ -263,7 +265,7 @@
 
 <section class="search-settings" aria-label="Settings">
   <div class="settings-content">
-    <PageHeader level={2} title="Settings" description="For this daemon and every project on it.">
+    <PageHeader level={2} title="Settings">
       {#snippet before()}
         <button type="button" class="back-button" aria-label="Back to issues" onclick={onback}>
           <ArrowLeftIcon size={14} strokeWidth={1.8} aria-hidden="true" />
@@ -271,35 +273,45 @@
         </button>
       {/snippet}
     </PageHeader>
-    {#if row}
-      <div class="search-row" class:turning-on={turning}>
-        <!-- Disables Turn on while its request is in flight. -->
-        <fieldset class="row-actions" disabled={posting}>
-          <SearchByMeaningRow
-            state={row}
-            itemNoun={count === 1 ? 'issue' : 'issues'}
-            labels={restarting ? restartLabels : countFree ? turningOnLabels : labels}
-            {readonly}
-            onturnon={restarting ? restartDaemon : turnOn}
-            onusebuiltin={() => {}}
-          />
-        </fieldset>
-        {#if failure}
-          <p class="settings-note" role="alert">{failure}</p>
-        {/if}
-        {#if indexingFailed}
-          <p class="settings-note" role="alert">
-            Indexing hit an error and will retry. Run <code>kata health --json</code> for details.
-          </p>
-        {/if}
-      </div>
-    {:else if loading}
-      <p class="settings-note" role="status">Loading…</p>
-    {:else}
-      <p class="settings-note" role="status">
-        Search by meaning status is unavailable for this daemon.
-      </p>
+    {#if children}
+      <section class="settings-scope" aria-labelledby="browser-settings-scope">
+        <h3 id="browser-settings-scope" class="settings-scope-title">This browser</h3>
+        {@render children()}
+      </section>
     {/if}
+    <section class="settings-scope" aria-labelledby="server-settings-scope">
+      <h3 id="server-settings-scope" class="settings-scope-title">This server</h3>
+      <p class="settings-scope-description">For this daemon and every project on it.</p>
+      {#if row}
+        <div class="search-row" class:turning-on={turning}>
+          <!-- Disables Turn on while its request is in flight. -->
+          <fieldset class="row-actions" disabled={posting}>
+            <SearchByMeaningRow
+              state={row}
+              itemNoun={count === 1 ? 'issue' : 'issues'}
+              labels={restarting ? restartLabels : countFree ? turningOnLabels : labels}
+              {readonly}
+              onturnon={restarting ? restartDaemon : turnOn}
+              onusebuiltin={() => {}}
+            />
+          </fieldset>
+          {#if failure}
+            <p class="settings-note" role="alert">{failure}</p>
+          {/if}
+          {#if indexingFailed}
+            <p class="settings-note" role="alert">
+              Indexing hit an error and will retry. Run <code>kata health --json</code> for details.
+            </p>
+          {/if}
+        </div>
+      {:else if loading}
+        <p class="settings-note" role="status">Loading…</p>
+      {:else}
+        <p class="settings-note" role="status">
+          Search by meaning status is unavailable for this daemon.
+        </p>
+      {/if}
+    </section>
   </div>
 </section>
 
@@ -317,6 +329,26 @@
     display: grid;
     gap: var(--space-5);
     max-width: 880px;
+  }
+
+  .settings-scope {
+    display: grid;
+    gap: var(--space-2);
+  }
+
+  .settings-scope-title {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-semibold);
+    letter-spacing: var(--letter-spacing-label);
+    text-transform: uppercase;
+  }
+
+  .settings-scope-description {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
   }
 
   /* Matches the row's own line gap, so a failure reads as part of the row. */

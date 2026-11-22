@@ -9,16 +9,13 @@
     PageHeader,
     Tooltip,
     TopBar,
+    SegmentedControl,
     type TypeaheadOption,
   } from '@kenn-io/kit-ui'
   import LayoutPanelLeftIcon from '@lucide/svelte/icons/layout-panel-left'
   import LayoutPanelTopIcon from '@lucide/svelte/icons/layout-panel-top'
-  import MonitorIcon from '@lucide/svelte/icons/monitor'
   import MenuIcon from '@lucide/svelte/icons/menu'
-  import MoonIcon from '@lucide/svelte/icons/moon'
   import PlusIcon from '@lucide/svelte/icons/plus'
-  import SettingsIcon from '@lucide/svelte/icons/settings'
-  import SunIcon from '@lucide/svelte/icons/sun'
 
   import type { TokenOut, UIIssueReference } from '../lib/api/generated'
   import type { WebDaemonInfo } from '../lib/daemons/client'
@@ -251,8 +248,8 @@
                   : 'Connected',
   )
   const actorlessConnectionLabels: Record<string, string> = {
-    none: 'Local connection',
-    web_local: 'Local connection',
+    none: 'Local, no sign-in',
+    web_local: 'Local, no sign-in',
     static_token: 'Shared daemon token',
     bootstrap: 'Bootstrap token',
     insecure_readonly: 'Anonymous (read-only)',
@@ -401,6 +398,10 @@
     creationIntent = null
   }
 
+  $effect(() => {
+    if (!mediumScreen.current) closeNavigation()
+  })
+
   function openView(name: KataTaskViewName): void {
     closeNavigation()
     navigate({
@@ -432,6 +433,7 @@
   }
 
   function openSettings(): void {
+    closeNavigation()
     navigate({
       kind: 'kata',
       view: 'settings',
@@ -501,14 +503,9 @@
     onPreferencesChange({ ...preferences, splitSize: size })
   }
 
-  function cycleTheme(): void {
-    const theme =
-      preferences.theme === 'system' ? 'light' : preferences.theme === 'light' ? 'dark' : 'system'
-    onPreferencesChange({ ...preferences, theme })
-  }
-
   function beginNewTask(): void {
     if (newTaskBlockedReason) return
+    closeNavigation()
     if (scopedAuthority) {
       captureOpen = true
       return
@@ -545,10 +542,6 @@
 
   function submitCapture(title: string): void | Promise<void> {
     return scopedAuthority && childParent ? onCreateIssue(title, childParent) : onCreateIssue(title)
-  }
-
-  function themeLabel(): string {
-    return preferences.theme[0]!.toUpperCase() + preferences.theme.slice(1)
   }
 
   function viewNameForRoute(current: AppRoute): KataTaskViewName {
@@ -636,7 +629,7 @@
         { name: 'today', label: 'Today' },
         { name: 'delegated', label: 'Delegated' },
         { name: 'scheduled', label: 'Scheduled' },
-        { name: 'all', label: 'All Open' },
+        { name: 'all', label: 'All open' },
         { name: 'logbook', label: 'Logbook' },
       ].find((view) => view.name === viewName)?.label ?? 'Kata'
     )
@@ -665,14 +658,14 @@
   <!-- aria-disabled keeps the blocked button focusable so keyboard users reach its reason. -->
   <button
     type="button"
-    class="accent-button header-action"
+    class="quiet-button header-action"
     aria-disabled={newTaskBlockedReason ? 'true' : undefined}
     aria-describedby={newTaskBlockedReason ? newTaskReasonID : undefined}
     title={newTaskBlockedReason ? undefined : 'New task'}
     onclick={beginNewTask}
   >
-    <PlusIcon size={13} strokeWidth={1.9} aria-hidden="true" />
-    <span>New task</span>
+    <PlusIcon size={16} aria-hidden="true" />
+    <span class="kit-sr-only">New task</span>
   </button>
 {/snippet}
 
@@ -690,7 +683,7 @@
 {/snippet}
 
 {#snippet noProjects()}
-  <EmptyState title="No projects yet" description="Create a project, or run kata init in a repo.">
+  <EmptyState title="No projects yet" class="no-projects">
     {#if projectCreationBlockedReason}
       <Tooltip text={projectCreationBlockedReason}>
         {@render createProjectButton()}
@@ -699,6 +692,7 @@
     {:else}
       {@render createProjectButton()}
     {/if}
+    <p class="no-projects-hint">Or run <code>kata init</code> in a repository.</p>
   </EmptyState>
 {/snippet}
 
@@ -716,14 +710,49 @@
     {draftFenceGeneration}
     credentialAuditAvailable={snapshot.capabilities.token_audit_read === true}
     credentialAuditActive={credentialRoute}
+    settingsActive={settingsRoute}
+    onOpenSettings={openSettings}
     onOpenView={openView}
     onOpenProject={openProject}
     onCreateProject={createProject}
     onOpenCredentials={openCredentials}
-  />
+  >
+    {#snippet header()}
+      <div class="header-server">
+        {#if daemons.length > 0}
+          <KataDaemonSwitcher
+            {daemons}
+            account={connectionAccount}
+            credential={connectionStatus === 'Connected' ? undefined : connectionStatus}
+            activeId={activeDaemonID}
+            activeStatusLabel={daemonError ?? (reconnecting ? 'Reconnecting…' : undefined)}
+            activeStatusTone={daemonError ? 'error' : undefined}
+            disabled={daemonSwitching || mutationPending}
+            onSelect={onSelectDaemon}
+            onOpen={onOpenDaemon}
+          />
+        {:else}
+          <strong>Kata</strong>
+          {#if daemonError || reconnecting}<span class="daemon-fallback-status" role="status"
+              >{daemonError ?? 'Reconnecting…'}</span
+            >{/if}
+        {/if}
+      </div>
+      <div class="header-task">
+        {#if newTaskBlockedReason}
+          <Tooltip text={newTaskBlockedReason}>{@render newTaskButton()}</Tooltip>
+        {:else}
+          {@render newTaskButton()}
+        {/if}
+      </div>
+    {/snippet}
+  </Sidebar>
 {/snippet}
 
 <section class="kata-feature" aria-label="Kata workspace">
+  {#if newTaskBlockedReason}
+    <span id={newTaskReasonID} class="kit-sr-only">{newTaskBlockedReason}</span>
+  {/if}
   {#if connectionStatus !== 'Connected'}
     <div class="active-connection" role="status" aria-label="Active connection">
       <span
@@ -737,83 +766,30 @@
       {/if}
     </div>
   {/if}
-  <TopBar class="kata-header" ariaLabel="Kata workspace">
-    {#snippet left()}
-      <h1 class="kata-brand">Kata</h1>
-      {#if daemons.length > 0}
-        <KataDaemonSwitcher
-          {daemons}
-          activeId={activeDaemonID}
-          activeStatusLabel={daemonError ?? (reconnecting ? 'Reconnecting…' : undefined)}
-          activeStatusTone={daemonError ? 'error' : undefined}
-          disabled={daemonSwitching || mutationPending}
-          onSelect={onSelectDaemon}
-          onOpen={onOpenDaemon}
-        />
-      {:else if daemonError || reconnecting}
-        <span
-          class="daemon-fallback-status"
-          class:error={daemonError}
-          role="status"
-          aria-label="Kata daemon status"
+  <div class="mobile-navigation-trigger">
+    <TopBar ariaLabel="Kata workspace">
+      {#snippet left()}
+        <IconButton
+          ariaLabel="Open navigation"
+          onclick={() => {
+            mobileNavigationOpen = true
+          }}><MenuIcon size={18} /></IconButton
         >
-          {daemonError ?? 'Reconnecting…'}
-        </span>
-      {/if}
-    {/snippet}
-    {#snippet right()}
-      <div class="kata-header-actions">
-        <span class="mobile-navigation-trigger">
-          <IconButton
-            ariaLabel="Open navigation"
-            title="Open navigation"
-            onclick={() => {
-              mobileNavigationOpen = true
-            }}
-          >
-            <MenuIcon size={15} strokeWidth={1.8} aria-hidden="true" />
-          </IconButton>
-        </span>
-        <IconButton ariaLabel={`Theme: ${themeLabel()}`} title="Change theme" onclick={cycleTheme}>
-          {#if preferences.theme === 'light'}
-            <SunIcon size={15} strokeWidth={1.8} aria-hidden="true" />
-          {:else if preferences.theme === 'dark'}
-            <MoonIcon size={15} strokeWidth={1.8} aria-hidden="true" />
-          {:else}
-            <MonitorIcon size={15} strokeWidth={1.8} aria-hidden="true" />
-          {/if}
-        </IconButton>
-        <IconButton ariaLabel="Settings" title="Settings" onclick={openSettings}>
-          <SettingsIcon size={15} strokeWidth={1.8} aria-hidden="true" />
-        </IconButton>
-        {#if !daemonRoute}
-          <IconButton
-            ariaLabel={preferences.splitDirection === 'vertical'
-              ? 'Switch to side-by-side layout'
-              : 'Switch to stacked layout'}
-            title={preferences.splitDirection === 'vertical'
-              ? 'Side-by-side (list left, detail right)'
-              : 'Stacked (list top, detail bottom)'}
-            onclick={toggleSplitDirection}
-          >
-            {#if preferences.splitDirection === 'vertical'}
-              <LayoutPanelLeftIcon size={15} strokeWidth={1.8} aria-hidden="true" />
-            {:else}
-              <LayoutPanelTopIcon size={15} strokeWidth={1.8} aria-hidden="true" />
-            {/if}
-          </IconButton>
+        <strong
+          >{settingsRoute ? 'Settings' : credentialRoute ? 'Credentials' : scopeLabel()}</strong
+        >
+      {/snippet}
+      {#snippet right()}
+        {#if mediumScreen.current}
           {#if newTaskBlockedReason}
-            <Tooltip text={newTaskBlockedReason} align="end">
-              {@render newTaskButton()}
-            </Tooltip>
-            <span id={newTaskReasonID} class="kit-sr-only">{newTaskBlockedReason}</span>
+            <Tooltip text={newTaskBlockedReason}>{@render newTaskButton()}</Tooltip>
           {:else}
             {@render newTaskButton()}
           {/if}
         {/if}
-      </div>
-    {/snippet}
-  </TopBar>
+      {/snippet}
+    </TopBar>
+  </div>
   {#if selectedProject && !daemonRoute && !stale && !daemonSwitching && !reconnecting && !credentialExpired && !daemonError && !scopedAuthority && (!activeDaemonID || activeConnection?.local === true)}
     {#key `${activeDaemonID ?? 'direct'}:${draftFenceGeneration}:${selectedProject.uid}`}
       <ProjectSyncStatus
@@ -829,6 +805,9 @@
     </div>
 
     <div class="kata-main">
+      {#if mutationMessage && !captureOpen && (!credentialRoute || !accessAdministrationAvailable || !onAccessMutation)}
+        <p class="mutation-message" role="alert">{mutationMessage}</p>
+      {/if}
       {#if credentialRoute}
         <div class="credential-scene">
           <CredentialAudit
@@ -848,7 +827,7 @@
                   <AccessManagement
                     projects={snapshot.catalog}
                     pending={mutationPending || loading || !accessAdministrationAvailable}
-                    message={mutationMessage}
+                    message={captureOpen ? undefined : mutationMessage}
                     onMutation={onAccessMutation}
                   />
                 {/key}
@@ -864,12 +843,23 @@
             originStable={snapshot.origin_stable}
             onback={onBackFromCredentials}
             remoteHost={settingsHost}
-          />
+          >
+            <div class="appearance">
+              <span>Theme</span><SegmentedControl
+                ariaLabel="Theme"
+                options={[
+                  { value: 'system', label: 'System' },
+                  { value: 'light', label: 'Light' },
+                  { value: 'dark', label: 'Dark' },
+                ]}
+                value={preferences.theme}
+                onchange={(theme) =>
+                  onPreferencesChange({ ...preferences, theme: theme as Preferences['theme'] })}
+              />
+            </div>
+          </SearchSettings>
         {/key}
       {:else}
-        {#if mutationMessage}
-          <p class="mutation-message" role="alert">{mutationMessage}</p>
-        {/if}
         <SplitLayout
           orientation={preferences.splitDirection}
           primarySize={preferences.splitSize}
@@ -887,20 +877,39 @@
 </section>
 
 {#if mobileNavigationOpen}
-  <DetailDrawer
-    title="Kata navigation"
-    width="min(320px, calc(100vw - 40px))"
-    onclose={closeNavigation}
-  >
+  <DetailDrawer title="Navigation" width="min(320px, calc(100vw - 40px))" onclose={closeNavigation}>
     {@render navigationSidebar()}
   </DetailDrawer>
 {/if}
+
+{#snippet paneDirection()}
+  <IconButton
+    ariaLabel={preferences.splitDirection === 'vertical'
+      ? 'Switch to side-by-side layout'
+      : 'Switch to stacked layout'}
+    onclick={toggleSplitDirection}
+  >
+    {#if preferences.splitDirection === 'vertical'}<LayoutPanelLeftIcon
+        size={15}
+      />{:else}<LayoutPanelTopIcon size={15} />{/if}
+  </IconButton>
+{/snippet}
+
+{#snippet issueFilters()}
+  <IssueFilters
+    filters={inputFilters}
+    projects={projection.projects}
+    onChange={updateFilters}
+    onSubmitSearch={submitSearch}
+  />
+{/snippet}
 
 {#snippet listPane()}
   <div class="list-column kata-list">
     {#if route.issueUID && route.graph}
       {#if projection.selected_graph && projection.selected_detail}
         <IssueGraph
+          headerActions={paneDirection}
           graph={projection.selected_graph}
           sourceIssue={projection.selected_detail.issue}
           selectedUID={graphSelectedUID}
@@ -916,13 +925,9 @@
         </section>
       {/if}
     {:else}
-      <IssueFilters
-        filters={inputFilters}
-        projects={projection.projects}
-        onChange={updateFilters}
-        onSubmitSearch={submitSearch}
-      />
       <IssueCollection
+        headerActions={paneDirection}
+        toolbar={!loading && projection.projects.length === 0 ? undefined : issueFilters}
         now={connectionNow}
         resultsKey={JSON.stringify([route.projectUID ?? null, route.filters])}
         {navigationGeneration}
@@ -973,7 +978,7 @@
         {onMoveIssue}
         {onPatchMetadata}
         {onAddComment}
-        commentError={mutationMessage}
+        commentError={captureOpen ? undefined : mutationMessage}
         {selectedCommentUID}
         {returnComment}
         {onEditIssue}
@@ -1050,19 +1055,36 @@
     padding: 0.375rem 0.75rem;
     border-start-start-radius: 0;
     border-end-start-radius: 0;
-    border-inline-start: 0.25rem solid var(--accent-yellow);
-    background: var(--bg-connection);
-    color: var(--text-connection);
+    border-inline-start: 0.25rem solid var(--accent-amber);
+    background: color-mix(in srgb, var(--accent-amber) 15%, var(--bg-surface));
+    color: var(--text-primary);
     font-size: var(--font-size-xs);
     overflow-wrap: anywhere;
   }
 
-  .kata-brand {
+  :global(.no-projects .kit-empty-state__title) {
+    color: var(--text-secondary);
+    line-height: 1.5;
+  }
+
+  /* The kata init line sits under New project, not beside it. */
+  :global(.no-projects .kit-empty-state__actions) {
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-4);
+  }
+  .no-projects-hint {
     margin: 0;
-    font-size: var(--font-size-lg);
-    font-weight: 650;
-    line-height: 1.2;
-    white-space: nowrap;
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+  }
+
+  .appearance {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px 0;
   }
 
   .daemon-fallback-status {
@@ -1071,34 +1093,42 @@
     white-space: nowrap;
   }
 
-  .daemon-fallback-status.error {
-    color: var(--accent-red);
-  }
-
-  .kata-header-actions {
-    display: flex;
-    align-items: center;
-    gap: var(--space-4);
-    flex: 0 0 auto;
-  }
-
-  .header-action {
+  .quiet-button.header-action {
     display: inline-flex;
+    flex: 0 0 auto;
     align-items: center;
-    gap: var(--space-2);
-    white-space: nowrap;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+
+  .quiet-button.header-action:hover:not([aria-disabled='true']) {
+    background: var(--bg-surface-hover);
+    color: var(--text-primary);
+  }
+
+  .quiet-button[aria-disabled='true'] {
+    color: var(--text-muted);
+    cursor: not-allowed;
   }
 
   .accent-button {
     border: 1px solid var(--accent-blue);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     background: var(--accent-blue);
     color: var(--bg-surface);
-    min-height: 28px;
-    padding: 4px 10px;
+    height: 28px;
+    padding: 0 var(--space-5);
     font: inherit;
-    font-size: var(--font-size-sm);
+    font-size: var(--font-size-md);
     font-weight: 600;
+    line-height: 16px;
   }
 
   .accent-button:hover:not([aria-disabled='true']) {
@@ -1123,8 +1153,16 @@
     display: flex;
   }
 
+  /* The slim bar and the drawer's header take the sidebar header's 48px. */
   .mobile-navigation-trigger {
     display: none;
+    --header-height: var(--layout-header-h);
+  }
+
+  :global(.kit-detail-drawer:has(.kata-sidebar) > .kit-detail-drawer__header) {
+    box-sizing: border-box;
+    height: var(--layout-header-h);
+    padding-block: 0;
   }
 
   .kata-main {
@@ -1204,7 +1242,7 @@
     }
 
     .mobile-navigation-trigger {
-      display: inline-flex;
+      display: block;
     }
   }
 </style>

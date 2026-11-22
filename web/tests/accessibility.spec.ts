@@ -9,13 +9,14 @@ test('standalone shell preserves the Forge base typography and header geometry',
   page,
   kata,
 }) => {
+  await page.setViewportSize({ width: 1440, height: 800 })
   await kata.launch(page)
 
-  const shell = await page.locator('.kata-header').evaluate((element) => {
+  const shell = await page.locator('.sidebar-header').evaluate((element) => {
     const style = getComputedStyle(element)
     return { boxSizing: style.boxSizing, height: element.getBoundingClientRect().height }
   })
-  expect(shell).toEqual({ boxSizing: 'border-box', height: 44 })
+  expect(shell).toEqual({ boxSizing: 'border-box', height: 48 })
   await expect(page.locator('body')).toHaveCSS('font-size', '13px')
 })
 
@@ -57,6 +58,7 @@ for (const view of ['desktop detail', 'desktop editor', 'responsive editor']) {
     await expect(page.getByRole('button', { name: 'Open workspace' })).toHaveCount(0)
     await expect(page.getByRole('dialog', { name: 'Command palette' })).toHaveCount(0)
     await expect(page.getByRole('region', { name: 'Kata issue detail' })).toBeVisible()
+    await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1)
 
     if (view !== 'desktop detail') {
       await page.getByRole('button', { name: 'Edit issue' }).click()

@@ -50,8 +50,7 @@ the standalone `kata ui` command keeps its existing route.
 
 ## Navigate projects and collections
 
-The sidebar lists **Inbox**, **Today**, **Delegated**, and **Scheduled**, then
-individual projects:
+The sidebar lists **Inbox**, **Today**, **Scheduled**, **Delegated**, **All open**, and **Logbook**, then individual projects. **Settings** is at the bottom:
 
 - **Inbox** shows open tasks from every project. A task with a future
   `scheduled_on` stays out of Inbox until that day; a deadline never hides it.
@@ -70,7 +69,7 @@ individual projects:
 - **Scheduled** is the agenda of every open task with a start date or deadline:
   missed deadlines under **Overdue**, actionable tasks under **Today**, then
   one group per future date.
-- **All Open** and **Logbook** remain available as bookmarkable views for
+- **All open** and **Logbook** are bookmarkable views for
   active and completed work.
 - Project entries scope the collection to one project. Projects without an
   `area` are listed under **Projects**. **New project** creates a daemon
@@ -88,8 +87,8 @@ them in the hover title. Blockers from the task's own project show their short
 ID; blockers from another project show the qualified ID. Closed blockers are
 left out, and the column hides at narrow list widths.
 
-At narrow window widths the task list stays primary: below 700px the sidebar
-moves into a drawer, and filter controls wrap to fit the list pane, including
+At narrow window widths the task list stays primary: at 760px and below the menu button opens the sidebar
+in a drawer, and filter controls wrap to fit the list pane, including
 side-by-side detail layouts.
 
 ![Kata Web UI showing a synthetic project and issue hierarchy](/docs/assets/screenshots/web-ui/workspace.png)

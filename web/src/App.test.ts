@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte'
 import { tick } from 'svelte'
-import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('./lib/kata/projection', async (importOriginal) => {
   const original = await importOriginal<typeof import('./lib/kata/projection')>()
@@ -666,7 +666,7 @@ describe('App', () => {
     await fireEvent.keyDown(input, { key: 'Enter' })
     await tick()
     expect(telemetry).toEqual([])
-    expect(screen.queryByRole('heading', { name: 'Launch Kata securely' })).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Open Kata from a terminal' })).toBeNull()
     await fireEvent.input(input, { target: { value: 'Example' } })
     await screen.findByRole('button', { name: /Example issue/ })
     expect(searches).toContain('Example')
@@ -765,7 +765,8 @@ describe('App', () => {
     render(App)
 
     expect(screen.getByRole('main', { name: 'Kata' })).not.toBeNull()
-    expect(screen.getByRole('status').textContent).toBe('Loading Kata…')
+    expect(screen.getByRole('heading', { name: 'Loading…', level: 1 })).not.toBeNull()
+    expect(screen.getByRole('status').textContent).toBe('Loading…')
   })
 
   it('opens a direct local tab with a transparent browser session', async () => {
@@ -1189,11 +1190,11 @@ describe('App', () => {
       )
       render(App)
       await vi.advanceTimersByTimeAsync(0)
-      expect(screen.queryByRole('button', { name: 'Retry daemon roster' })).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
       await vi.advanceTimersByTimeAsync(exhausted ? 7000 : 1000)
       await tick()
       if (exhausted) {
-        await fireEvent.click(screen.getByRole('button', { name: 'Retry daemon roster' }))
+        await fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
         await vi.advanceTimersByTimeAsync(0)
         await tick()
       }
@@ -1246,9 +1247,9 @@ describe('App', () => {
     render(App)
 
     expect((await screen.findByRole('alert')).textContent).toContain(
-      'Configured daemons are unavailable',
+      'Check that Kata is running, then try again.',
     )
-    expect(screen.getByRole('button', { name: 'Retry daemon roster' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Try again' })).not.toBeNull()
     expect(snapshotReads).toBe(0)
     expect(screen.queryByRole('region', { name: 'Kata workspace' })).toBeNull()
   })
@@ -1305,9 +1306,10 @@ describe('App', () => {
     await rosterClassified
     await tick()
 
-    expect(screen.getByRole('form', { name: 'Log in to Kata' })).not.toBeNull()
+    expect(screen.getByRole('form', { name: 'Log in' })).not.toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Log in', level: 1 })).not.toBeNull()
     expect(screen.queryByRole('alert')).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Retry daemon roster' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
     expect(snapshotReads).toBe(0)
     expect(paths).toEqual(['/api/v1/ui/session/local', '/api/v1/ui/daemons'])
   })
@@ -1358,16 +1360,16 @@ describe('App', () => {
     render(App)
 
     expect((await screen.findByRole('alert')).textContent).toContain(
-      'Configured daemons are unavailable',
+      'Check that Kata is running, then try again.',
     )
-    await fireEvent.click(screen.getByRole('button', { name: 'Retry daemon roster' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
     await rosterRequested
     releaseRoster(authenticationChallenge)
     await rosterClassified
     await tick()
-    expect(screen.getByRole('form', { name: 'Log in to Kata' })).not.toBeNull()
+    expect(screen.getByRole('form', { name: 'Log in' })).not.toBeNull()
     expect(screen.queryByRole('alert')).toBeNull()
-    expect(screen.queryByText('Configured daemons are unavailable')).toBeNull()
+    expect(screen.queryByText('Check that Kata is running, then try again.')).toBeNull()
   })
 
   it('keeps roster recovery when a delayed 401 belongs to superseded credentials', async () => {
@@ -1409,9 +1411,9 @@ describe('App', () => {
     )
 
     expect((await screen.findByRole('alert')).textContent).toContain(
-      'Configured daemons are unavailable',
+      'Check that Kata is running, then try again.',
     )
-    expect(screen.getByRole('button', { name: 'Retry daemon roster' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Try again' })).not.toBeNull()
     expect(sessionStorage.getItem('kata.web.session.v1')).toContain('renewed-session')
   })
 
@@ -1497,9 +1499,9 @@ describe('App', () => {
 
     render(App)
 
-    expect(await screen.findByRole('heading', { name: 'Launch Kata securely' })).not.toBeNull()
+    expect(await screen.findByRole('heading', { name: 'Open Kata from a terminal' })).not.toBeNull()
     expect(sessionStorage.getItem('kata.web.session.v1')).toBeNull()
-    expect(screen.queryByText('Loading Kata…')).toBeNull()
+    expect(screen.queryByText('Loading…')).toBeNull()
   })
 
   it('renews an expired session on a server-advertised custom loopback origin', async () => {
@@ -1780,9 +1782,9 @@ describe('App', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Today' }))
 
     expect((await screen.findByRole('alert')).textContent).toContain(
-      'Configured daemons are unavailable',
+      'Check that Kata is running, then try again.',
     )
-    expect(screen.getByRole('button', { name: 'Retry daemon roster' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Try again' })).not.toBeNull()
     expect(snapshotDaemons).toEqual(['example-remote', 'example-remote'])
     expect(screen.queryByText('Wrong workspace issue')).toBeNull()
     expect(sessionStorage.getItem('kata.web.session.v1')).toBeNull()
@@ -1956,7 +1958,7 @@ describe('App', () => {
     await fireEvent.input(input, { target: { value: 'example-workspace' } })
     await fireEvent.keyDown(input, { key: 'Enter' })
 
-    expect(await screen.findByRole('heading', { name: 'Launch Kata securely' })).not.toBeNull()
+    expect(await screen.findByRole('heading', { name: 'Open Kata from a terminal' })).not.toBeNull()
     expect(sessionStorage.getItem('kata.web.session.v1')).toBeNull()
     expect(
       fetcher.mock.calls.some(
@@ -2022,7 +2024,7 @@ describe('App', () => {
   })
 
   it('fences browser authority when a reference request rejects the session', async () => {
-    history.replaceState(null, '', '/kata#direct=1')
+    history.replaceState(null, '', '/kata?view=today')
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'revoked-session', csrf: 'revoked-csrf' }),
@@ -2034,7 +2036,11 @@ describe('App', () => {
           input instanceof Request ? input.url : String(input),
           window.location.origin,
         )
-        if (target.pathname === '/api/v1/ui/references') {
+        if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (
+          target.pathname.endsWith('/api/v1/ui/references') &&
+          sessionStorage.getItem('kata.web.session.v1')?.includes('revoked-session')
+        ) {
           return new Response('', {
             status: 401,
             headers: { 'X-Kata-Web-Authentication': 'login' },
@@ -2049,26 +2055,48 @@ describe('App', () => {
 
     render(App)
 
-    expect(await screen.findByRole('form', { name: 'Log in to Kata' })).not.toBeNull()
+    expect(await screen.findByRole('form', { name: 'Log in' })).not.toBeNull()
+    expect(
+      screen.queryByRole('button', { name: 'Switch Kata daemon: example-local' }),
+    ).not.toBeNull()
     expect(sessionStorage.getItem('kata.web.session.v1')).toBeNull()
-    expect(screen.getByRole('button', { name: 'New project' }).getAttribute('aria-disabled')).toBe(
-      'true',
-    )
+    expect(screen.queryByRole('region', { name: 'Kata workspace' })).toBeNull()
   })
 
-  it('shows configured-origin login without probing authority or losing the requested route', () => {
-    const fetcher = vi.fn()
+  it('returns to the requested route after configured-origin login', async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const target = new URL(
+        input instanceof Request ? input.url : String(input),
+        window.location.origin,
+      )
+      if (target.pathname === '/api/v1/ui/session/login') {
+        expect(JSON.parse(String(init?.body))).toEqual({
+          token: 'example-token',
+          return_path: '/kata?view=today',
+        })
+        return Response.json({
+          session: 'new-session',
+          csrf: 'new-csrf',
+          return_path: '/kata?view=today',
+          writable: true,
+          updates: 'poll',
+          actor_policy: 'identity',
+        })
+      }
+      if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+      return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+    })
     vi.stubGlobal('fetch', fetcher)
-    history.replaceState(
-      null,
-      '',
-      '/kata#login=1&return_path=%2Fkata%3Fscope%3D01HZNQ7VFPK1XGD8R5MABCD4EX%26label%3Dready',
-    )
+    history.replaceState(null, '', '/kata#login=1&return_path=%2Fkata%3Fview%3Dtoday')
     render(App)
 
-    expect(screen.getByRole('form', { name: 'Log in to Kata' })).not.toBeNull()
+    expect(screen.getByRole('form', { name: 'Log in' })).not.toBeNull()
     expect(fetcher).not.toHaveBeenCalled()
     expect(window.location.hash).toBe('')
+    await fireEvent.input(screen.getByLabelText('Token'), { target: { value: 'example-token' } })
+    await fireEvent.click(screen.getByRole('button', { name: 'Log in' }))
+    expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+    expect(window.location.search).toBe('?view=today')
   })
 
   it('recovers a short issue route through complete issue authority', async () => {
@@ -2118,7 +2146,7 @@ describe('App', () => {
     expect(await screen.findByRole('button', { name: /Example issue/ })).not.toBeNull()
     await fireEvent.click(screen.getByRole('button', { name: 'Today' }))
     await waitFor(() => expect(window.location.search).toBe('?view=today'))
-    expect(screen.getByRole('heading', { name: 'All Open' })).not.toBeNull()
+    expect(screen.getByRole('heading', { name: 'All open' })).not.toBeNull()
   })
 
   it('loads credential audit metadata without sending the credential route to snapshots and returns to the issue route', async () => {
@@ -2363,7 +2391,7 @@ describe('App', () => {
         await waitFor(() => expect(posts).toHaveLength(1))
         expect(sessionStorage.getItem('kata.web.session.v1')).toContain('tab-session')
       } else {
-        await screen.findByRole('form', { name: 'Log in to Kata' })
+        await screen.findByRole('form', { name: 'Log in' })
         expect(sessionStorage.getItem('kata.web.session.v1')).toBeNull()
       }
       expect(statusPath).toBe('/api/v1/ui/proxy/api/v1/embeddings/local')
@@ -2408,7 +2436,7 @@ describe('App', () => {
 
     render(App)
 
-    expect(await screen.findByRole('form', { name: 'Log in to Kata' })).not.toBeNull()
+    expect(await screen.findByRole('form', { name: 'Log in' })).not.toBeNull()
     expect(sessionStorage.getItem('kata.web.session.v1')).toBeNull()
   })
 
@@ -2649,7 +2677,7 @@ describe('App', () => {
     now = 120_000
     await fireEvent.click(screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }))
     await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
-    expect(await screen.findByText('Loading Kata…')).not.toBeNull()
+    expect(await screen.findByText('Loading…')).not.toBeNull()
     await waitFor(() => expect(document.title).toBe('Kata'))
     expect(localReference.signal.aborted).toBe(true)
     releaseRemote()
@@ -2682,14 +2710,16 @@ describe('App', () => {
 
     history.replaceState(null, '', '/kata?issue=abc4')
     await fireEvent(window, new PopStateEvent('popstate'))
-    expect(screen.getByRole('heading', { name: 'This Kata route is not valid' })).not.toBeNull()
+    expect(screen.getByRole('heading', { name: 'Page not found', level: 1 })).not.toBeNull()
     await waitFor(() => expect(document.title).toBe('Kata'))
 
     history.replaceState(null, '', '/kata?view=today')
     await fireEvent(window, new PopStateEvent('popstate'))
     await waitFor(() => expect(document.title).toBe('Today · Kata'))
     window.dispatchEvent(new Event('kata:versionMismatch'))
-    expect(await screen.findByRole('heading', { name: 'Kata was updated' })).not.toBeNull()
+    expect(
+      await screen.findByRole('heading', { name: 'Kata was updated', level: 1 }),
+    ).not.toBeNull()
     await waitFor(() => expect(document.title).toBe('Kata'))
   })
 
@@ -3128,7 +3158,8 @@ describe('App', () => {
     render(App)
 
     expect(document.documentElement.classList.contains('dark')).toBe(true)
-    await fireEvent.click(await screen.findByRole('button', { name: 'Theme: Dark' }))
+    await fireEvent.click(await screen.findByRole('button', { name: 'Settings' }))
+    await fireEvent.click(await screen.findByRole('radio', { name: 'System' }))
     expect(JSON.parse(localStorage.getItem(preferencesStorageKey) ?? '{}')).toEqual(
       expect.objectContaining({ theme: 'system', splitDirection: 'horizontal', splitSize: 520 }),
     )
@@ -4389,12 +4420,6 @@ describe('App', () => {
         action === 'create' ? ['accepted', 'refused', 'missing-project'] : ['accepted', 'refused'],
       )(`${action} reports refusals or marks accepted web requests, %s`, async (result) => {
         const refused = result !== 'accepted'
-        const rejections: unknown[] = []
-        const onRejection = (error: unknown) => rejections.push(error)
-        process.on('unhandledRejection', onRejection)
-        onTestFinished(() => {
-          process.off('unhandledRejection', onRejection)
-        })
         history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
         sessionStorage.setItem(
           'kata.web.session.v1',
@@ -4490,16 +4515,14 @@ describe('App', () => {
           await fireEvent.click(buttons[buttons.length - 1]!)
         }
         if (result === 'missing-project') {
-          await waitFor(() =>
-            expect(rejections).toEqual([new Error('Task project is not available.')]),
+          expect((await screen.findByRole('alert')).textContent).toBe(
+            'Task project is not available.',
           )
           expect(shownErrors).toEqual([])
           expect(actionRequests).toHaveLength(0)
           return
         }
         await waitFor(() => expect(writes).toBe(1))
-        if (action === 'create' && refused)
-          await waitFor(() => expect(rejections).toEqual([new Error('validation: Action refused')]))
         if (refused) {
           expect(await screen.findAllByText('validation: Action refused')).toHaveLength(1)
           await waitFor(() =>
@@ -4531,7 +4554,7 @@ describe('App', () => {
 
     expect(await screen.findByRole('alert')).not.toBeNull()
     expect(screen.getByRole('heading', { name: 'Kata was updated' })).not.toBeNull()
-    expect(screen.getByRole('button', { name: 'Reload Kata' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Reload' })).not.toBeNull()
   })
 })
 

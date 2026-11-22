@@ -6,49 +6,58 @@ import KataDaemonSwitcher from './KataDaemonSwitcher.svelte'
 describe('KataDaemonSwitcher', () => {
   afterEach(cleanup)
 
-  test('ports configured daemon health and in-place selection', async () => {
+  test('routes daemon health, selection, and account information', async () => {
     const onSelect = vi.fn()
-    render(KataDaemonSwitcher, {
-      props: {
-        daemons: [
-          {
-            id: 'example-local',
-            url: '',
-            default: true,
-            auth: 'none',
-            health: 'connected',
-          },
-          {
-            id: 'example-remote',
-            url: 'https://daemon.example',
-            default: false,
-            auth: 'token',
-            health: 'auth_required',
-          },
-          {
-            id: 'example-legacy',
-            url: 'https://daemon.example',
-            default: false,
-            auth: 'none',
-            health: 'upgrade_required',
-          },
-        ],
-        activeId: 'example-local',
-        onSelect,
-      },
-    })
+    const onOpen = vi.fn()
+    const props = {
+      daemons: [
+        {
+          id: 'example-local',
+          url: '',
+          default: true,
+          auth: 'none' as const,
+          health: 'connected' as const,
+        },
+        {
+          id: 'example-remote',
+          url: 'https://daemon.example',
+          default: false,
+          auth: 'token' as const,
+          health: 'auth_required' as const,
+        },
+        {
+          id: 'example-legacy',
+          url: 'https://daemon.example',
+          default: false,
+          auth: 'none' as const,
+          health: 'upgrade_required' as const,
+        },
+      ],
+      activeId: 'example-local',
+      onSelect,
+      onOpen,
+    }
+    const { rerender } = render(KataDaemonSwitcher, { props })
 
     await fireEvent.click(screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }))
     expect(screen.getByRole('menu', { name: 'Configured Kata daemons' })).not.toBeNull()
+    expect(onOpen).toHaveBeenCalledOnce()
+    expect(onSelect).not.toHaveBeenCalled()
+    expect(screen.queryByText('Account')).toBeNull()
     expect(screen.getByText('needs auth')).not.toBeNull()
     expect(screen.getByText('update required')).not.toBeNull()
+    expect(
+      screen.getByRole('menuitemradio', { name: /example-legacy/ }).getAttribute('aria-disabled'),
+    ).toBe('true')
+    await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-legacy/ }))
+    expect(onSelect).not.toHaveBeenCalledWith('example-legacy')
     await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
     expect(onSelect).toHaveBeenCalledWith('example-remote')
 
-    onSelect.mockClear()
+    await rerender({ ...props, account: 'Example account', credential: 'Read-only' })
     await fireEvent.click(screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }))
-    await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-legacy/ }))
-    expect(onSelect).not.toHaveBeenCalled()
+    expect(screen.getByText('Example account')).not.toBeNull()
+    expect(screen.getByText('Read-only')).not.toBeNull()
   })
 
   test('shows reconnecting status without replacing the active daemon label', () => {

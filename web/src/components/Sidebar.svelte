@@ -1,13 +1,17 @@
 <script lang="ts">
   import AlarmClockIcon from '@lucide/svelte/icons/alarm-clock'
+  import BookCheckIcon from '@lucide/svelte/icons/book-check'
   import InboxIcon from '@lucide/svelte/icons/inbox'
   import KeyRoundIcon from '@lucide/svelte/icons/key-round'
+  import ListTodoIcon from '@lucide/svelte/icons/list-todo'
   import PlusIcon from '@lucide/svelte/icons/plus'
+  import SettingsIcon from '@lucide/svelte/icons/settings'
   import StarIcon from '@lucide/svelte/icons/star'
   import UsersIcon from '@lucide/svelte/icons/users'
   import { ScrollBox, showFlash, Tooltip } from '@kenn-io/kit-ui'
 
   import GroupedSidebarSection from './GroupedSidebarSection.svelte'
+  import { markColor } from '../lib/marks'
 
   import type {
     KataTaskMutationResponse,
@@ -15,6 +19,7 @@
     KataTaskViewName,
   } from '../lib/kata/types'
   import type { KataAreaSummary, KataCurrentView } from '../lib/kata/authority'
+  import type { Snippet } from 'svelte'
 
   interface Props {
     areas: KataAreaSummary[]
@@ -26,10 +31,13 @@
     draftFenceGeneration?: number | undefined
     credentialAuditAvailable?: boolean | undefined
     credentialAuditActive?: boolean | undefined
+    settingsActive?: boolean | undefined
+    header?: Snippet | undefined
     onOpenView: (name: KataTaskViewName) => void | Promise<void>
     onOpenProject: (projectUID: string) => void | Promise<void>
     onCreateProject: (name: string) => Promise<KataTaskMutationResponse>
     onOpenCredentials?: (() => void | Promise<void>) | undefined
+    onOpenSettings?: (() => void | Promise<void>) | undefined
   }
 
   let {
@@ -41,10 +49,13 @@
     draftFenceGeneration = 0,
     credentialAuditAvailable = false,
     credentialAuditActive = false,
+    settingsActive = false,
+    header,
     onOpenView,
     onOpenProject,
     onCreateProject,
     onOpenCredentials = () => {},
+    onOpenSettings = () => {},
   }: Props = $props()
 
   const controlID = $props.id()
@@ -57,8 +68,10 @@
   }> = [
     { name: 'inbox', label: 'Inbox', icon: InboxIcon },
     { name: 'today', label: 'Today', icon: StarIcon },
-    { name: 'delegated', label: 'Delegated', icon: UsersIcon },
     { name: 'scheduled', label: 'Scheduled', icon: AlarmClockIcon },
+    { name: 'delegated', label: 'Delegated', icon: UsersIcon },
+    { name: 'all', label: 'All open', icon: ListTodoIcon },
+    { name: 'logbook', label: 'Logbook', icon: BookCheckIcon },
   ]
 
   let creatingProject = $derived(creationIntent !== null)
@@ -146,12 +159,13 @@
     aria-describedby={projectCreationBlockedReason ? createReasonID : undefined}
     onclick={startCreatingProject}
   >
-    <PlusIcon size={13} strokeWidth={1.9} />
+    <span class="nav-icon"><PlusIcon size={16} /></span>
     <span>New project</span>
   </button>
 {/snippet}
 
 <div class="kata-sidebar" aria-label="Kata navigation">
+  {#if header}<div class="sidebar-header">{@render header()}</div>{/if}
   <ScrollBox label="Kata navigation">
     <nav class="kata-nav" aria-label="System views">
       {#each systemViews as view (view.name)}
@@ -159,30 +173,23 @@
         {@const count = viewCount(view.name)}
         <button
           type="button"
-          class:active={!credentialAuditActive && currentView.name === view.name}
+          class:group-start={view.name === 'all'}
+          class:active={!credentialAuditActive &&
+            !settingsActive &&
+            currentView.name === view.name &&
+            (view.name !== 'all' || searchFilters.scope.kind === 'all')}
           aria-label={count !== undefined ? `${view.label} ${count}` : view.label}
           onclick={() => {
             void onOpenView(view.name)
           }}
         >
-          <span class="nav-icon"><Icon size={14} strokeWidth={1.75} /></span>
+          <span class="nav-icon"><Icon size={16} /></span>
           <span class="nav-label">{view.label}</span>
           {#if count !== undefined}
             <span class="nav-count">{count}</span>
           {/if}
         </button>
       {/each}
-      {#if credentialAuditAvailable}
-        <button
-          type="button"
-          class:active={credentialAuditActive}
-          aria-label="Credentials"
-          onclick={() => void onOpenCredentials()}
-        >
-          <span class="nav-icon"><KeyRoundIcon size={14} strokeWidth={1.75} /></span>
-          <span class="nav-label">Credentials</span>
-        </button>
-      {/if}
     </nav>
 
     {#each areas as area (area.name)}
@@ -199,6 +206,7 @@
             class:active={isProjectActive(project.uid)}
             onclick={() => void onOpenProject(project.uid)}
           >
+            <span class="project-mark" style:background={markColor(project.name)}></span>
             <span class="project-name">{project.name}</span>
             <span class="project-count count">{project.open_count}</span>
           </button>
@@ -242,6 +250,25 @@
       {/if}
     </div>
   </ScrollBox>
+  <nav
+    class="kata-nav sidebar-footer"
+    aria-label={credentialAuditAvailable ? 'Credentials and Settings' : 'Settings'}
+  >
+    {#if credentialAuditAvailable}
+      <button
+        type="button"
+        class:active={credentialAuditActive}
+        onclick={() => void onOpenCredentials()}
+      >
+        <span class="nav-icon"><KeyRoundIcon size={16} /></span>
+        <span class="nav-label">Credentials</span>
+      </button>
+    {/if}
+    <button type="button" class:active={settingsActive} onclick={() => void onOpenSettings()}>
+      <span class="nav-icon"><SettingsIcon size={16} /></span>
+      <span class="nav-label">Settings</span>
+    </button>
+  </nav>
 </div>
 
 <style>
@@ -258,23 +285,42 @@
   .kata-nav {
     display: grid;
     gap: var(--space-1);
-    padding: 12px 12px var(--space-4);
+    padding: var(--space-2) 8px var(--space-2);
+  }
+
+  /* All open and Logbook start a second group of views. */
+  .kata-nav button.group-start {
+    margin-top: calc(var(--space-4) - var(--space-1));
+  }
+
+  .sidebar-header {
+    height: var(--layout-header-h);
+    flex: none;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    padding: 0 8px 0 16px;
+  }
+
+  .sidebar-footer {
+    margin-top: auto;
+    padding-bottom: var(--space-4);
   }
 
   .kata-nav button,
   .project-select-button,
   .project-create-button {
     width: 100%;
-    min-height: 30px;
+    min-height: var(--nav-item-h);
     border: 0;
     border-radius: var(--radius-md);
     background: transparent;
     color: var(--text-secondary);
     display: grid;
-    grid-template-columns: 18px minmax(0, 1fr) auto;
+    grid-template-columns: 16px minmax(0, 1fr) auto;
     align-items: center;
     gap: var(--space-4);
-    padding: 0 10px;
+    padding: 0 8px;
     text-align: left;
     font: inherit;
     font-size: var(--font-size-md);
@@ -295,7 +341,7 @@
 
   .kata-nav button.active,
   .project-select-button.active {
-    background: color-mix(in srgb, var(--accent-blue) 12%, var(--bg-surface));
+    background: var(--selected-list-bg);
     color: var(--text-primary);
   }
 
@@ -306,18 +352,13 @@
     color: var(--text-muted);
   }
 
-  .kata-nav button.active .nav-icon {
-    color: var(--accent-blue);
-  }
-
   .project-select-button.active .project-count,
   .kata-nav button.active .nav-count {
     color: var(--text-primary);
   }
 
-  .kata-nav button.active .nav-label,
-  .project-select-button.active .project-name {
-    font-weight: var(--font-weight-medium);
+  .kata-nav button.active .nav-icon {
+    color: var(--text-primary);
   }
 
   .nav-label,
@@ -330,30 +371,36 @@
 
   .nav-count,
   .project-count {
-    color: var(--text-muted);
-    font-size: var(--font-size-xs);
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
     font-variant-numeric: tabular-nums;
   }
 
   .project-create {
-    padding: 0 12px 12px;
+    padding: 0 8px 12px;
   }
 
   .project-select-button {
-    grid-template-columns: minmax(0, 1fr) auto;
-    padding-left: 26px;
+    min-height: var(--nav-subitem-h);
+  }
+
+  .project-mark {
+    justify-self: center;
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
   }
 
   .project-create-form input {
     width: 100%;
-    min-height: 30px;
+    min-height: var(--nav-subitem-h);
     border: 1px solid var(--border-default);
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     background: var(--bg-primary);
     color: var(--text-primary);
     font: inherit;
     font-size: var(--font-size-sm);
-    padding: 5px 8px;
+    padding: 3px 8px;
   }
 
   .project-create-form input:focus {
