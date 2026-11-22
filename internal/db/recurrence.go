@@ -87,12 +87,18 @@ func composeRecurrenceIssueMetadata(
 	}
 	object["scheduled_on"] = scheduledOn
 	object["timezone"] = timezoneValue
+	// Attention is carried forward unchanged and may predate its validation.
+	attention, hasAttention := object["work.attention"]
+	delete(object, "work.attention")
 	validate := validateRecurrenceIssueMetadataObject
 	if template {
 		validate = validateRecurrenceTemplateMetadataObject
 	}
 	if err := validate(object); err != nil {
 		return nil, err
+	}
+	if hasAttention {
+		object["work.attention"] = attention
 	}
 	value, err := json.Marshal(object)
 	if err != nil {

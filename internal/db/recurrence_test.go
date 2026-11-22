@@ -43,3 +43,17 @@ func TestComposeRecurrenceIssueMetadataDefensivelyRejectsInvalidReservedValue(t 
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrInvalidRecurrence)
 }
+
+func TestComposeRecurrenceMetadataPreservesLegacyAttention(t *testing.T) {
+	for name, compose := range map[string]func(jsontext.Value, string, string) (jsontext.Value, error){
+		"template":       ComposeRecurrenceIssueMetadata,
+		"existing issue": ComposeExistingRecurrenceIssueMetadata,
+	} {
+		t.Run(name, func(t *testing.T) {
+			value, err := compose(jsontext.Value(`{"work.attention":"working"}`), "2026-11-23", "UTC")
+			require.NoError(t, err)
+			assert.JSONEq(t, `{"work.attention":"working","scheduled_on":"2026-11-23","timezone":"UTC"}`, string(value))
+		})
+	}
+	assert.ErrorIs(t, ValidateRecurrenceTemplate("Review", jsontext.Value(`{"work.attention":"working"}`)), ErrInvalidRecurrence)
+}
