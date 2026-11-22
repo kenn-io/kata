@@ -42,7 +42,7 @@ func ensureRelayLinkBoundaryTx(ctx context.Context, tx *sql.Tx, fromID, toID int
 
 func relayProjectsActiveTx(ctx context.Context, tx *sql.Tx, fromProject, toProject int64) (bool, error) {
 	var relayed bool
-	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings b WHERE b.project_id IN(?,?) AND (b.relay_config IS NOT NULL OR EXISTS(SELECT 1 FROM federation_enrollments e WHERE e.project_id=b.project_id AND e.relay_protocol_version=1 AND e.revoked_at IS NULL)))`, fromProject, toProject).Scan(&relayed)
+	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_enrollments e WHERE e.project_id IN(?1,?2) AND e.relay_protocol_version=1 AND e.revoked_at IS NULL) OR EXISTS(SELECT 1 FROM federation_bindings b WHERE b.project_id IN(?1,?2) AND b.relay_config IS NOT NULL)`, fromProject, toProject).Scan(&relayed)
 	return relayed, err
 }
 

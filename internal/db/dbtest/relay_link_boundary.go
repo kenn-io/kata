@@ -1,7 +1,9 @@
 package dbtest
 
 import (
+	"context"
 	"crypto/ed25519"
+	"database/sql"
 	"encoding/json/jsontext"
 	"sort"
 	"testing"
@@ -153,10 +155,23 @@ func RunRelayLinkBoundaryFollowsActiveGrants(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	target, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.sibling.ID, Title: "Sibling issue", Author: "member"})
 	require.NoError(t, err)
+	q := store.(interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	})
+	_, err = q.ExecContext(ctx, `DELETE FROM federation_bindings WHERE project_id=$1`, fixture.project.ID)
+	require.NoError(t, err)
+	events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: fixture.project.ID, Limit: 1000})
+	require.NoError(t, err)
 	linkEvent := db.LinkEventParams{EventType: "issue.linked", EventIssueID: source.ID, FromShortID: source.ShortID, FromUID: source.UID, ToShortID: target.ShortID, ToUID: target.UID, Actor: "member"}
 	_, _, err = store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: source.ID, ToIssueID: target.ID, Type: "blocks", Author: "member"}, linkEvent)
 	require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary, "an active relay grant refuses a local cross-project link")
+	require.Empty(t, linkTargetUIDs(t, store, source.ID))
+	after, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: fixture.project.ID, Limit: 1000})
+	require.NoError(t, err)
+	require.Equal(t, events, after)
 
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: fixture.project.ID, Role: db.FederationRoleHub, HubProjectID: fixture.project.ID, HubProjectUID: fixture.project.UID, Enabled: true})
+	require.NoError(t, err)
 	require.NoError(t, store.RevokeFederationEnrollment(ctx, grant.Enrollment.ID))
 	_, _, err = store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: source.ID, ToIssueID: target.ID, Type: "blocks", Author: "member"}, linkEvent)
 	require.NoError(t, err, "revoking the last relay grant allows local cross-project links again")
