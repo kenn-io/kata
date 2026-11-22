@@ -159,6 +159,9 @@ func (s *SyncRetries) recordTurn(projectID int64, identity [32]byte, err error, 
 		return
 	}
 	previous, ok := s.states[projectID]
+	if ok && started != nil && previous.version != *started && previous.identity != identity {
+		return
+	}
 	if ok && previous.Reason != reason {
 		ok = false
 	}
@@ -187,6 +190,9 @@ func (s *SyncRetries) recordTurn(projectID int64, identity [32]byte, err error, 
 		wait = max(next.delay-s.jitter(next.delay/4), interval, min(retryAfter, maxHonoredRetryAfter))
 	}
 	next.NextAttemptAt = completed.Add(wait).UTC()
+	if started != nil && previous.version != *started && previous.NextAttemptAt.After(next.NextAttemptAt) {
+		return
+	}
 	s.states[projectID] = next
 }
 

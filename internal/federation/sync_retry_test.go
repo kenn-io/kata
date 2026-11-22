@@ -275,3 +275,21 @@ func TestHubStatusErrorCarriesRetryAfter(t *testing.T) {
 	require.ErrorAs(t, err, &status)
 	require.Equal(t, 2*time.Minute, status.RetryAfter)
 }
+
+func TestSyncRetryKeepsNewerHeldPollDeadlineAfterConcurrentFailure(t *testing.T) {
+	retries := newSyncRetries(noJitter)
+	identity := [32]byte{1}
+	started := retries.version(1)
+	heldAt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	retries.record(1, identity, &HubStatusError{StatusCode: http.StatusServiceUnavailable, RetryAfter: 120 * time.Second}, time.Second, heldAt)
+	retries.recordTurn(1, identity, &HubStatusError{StatusCode: http.StatusServiceUnavailable}, time.Second, heldAt.Add(time.Second), &started)
+	retry, ok := retries.FederationSyncRetry(1)
+	require.True(t, ok)
+	require.Equal(t, heldAt.Add(120*time.Second), retry.NextAttemptAt)
+	require.True(t, retries.blocked(1, identity, heldAt.Add(119*time.Second)))
+
+	retries.recordTurn(1, identity, &HubStatusError{StatusCode: http.StatusServiceUnavailable, RetryAfter: 240 * time.Second}, time.Second, heldAt.Add(time.Second), &started)
+	retry, ok = retries.FederationSyncRetry(1)
+	require.True(t, ok)
+	require.Equal(t, heldAt.Add(241*time.Second), retry.NextAttemptAt)
+}
