@@ -1,8 +1,6 @@
 package dbtest
 
 import (
-	"context"
-	"database/sql"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -10,38 +8,6 @@ import (
 )
 
 func checkFederatedOvertakenMoveSourceLeave(t *testing.T, store db.Storage, backend Backend) error {
-	t.Run("held cursor lifecycle", func(t *testing.T) {
-		ctx := t.Context()
-		query := store.(interface {
-			QueryRowContext(context.Context, string, ...any) *sql.Row
-		})
-		for _, action := range []string{"rejoin", "purge"} {
-			t.Run(action, func(t *testing.T) {
-				project, err := store.CreateProject(ctx, "held-cursor-"+action)
-				require.NoError(t, err)
-				key := db.FederationHeldCursorPrefix + project.UID
-				binding := db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "worker", Enabled: true, PushEnabled: true}
-				_, err = store.UpsertFederationBinding(ctx, binding)
-				require.NoError(t, err)
-				_, err = store.LeaveFederationReplica(ctx, project.ID)
-				require.NoError(t, err)
-				var exists bool
-				require.NoError(t, query.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM meta WHERE key=$1)`, key).Scan(&exists))
-				require.True(t, exists)
-				if action == "rejoin" {
-					_, err = store.UpsertFederationBinding(ctx, binding)
-				} else {
-					_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: project.ID, Actor: "worker"})
-					if err == nil {
-						_, err = store.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: project.ID, Actor: "worker"})
-					}
-				}
-				require.NoError(t, err)
-				require.NoError(t, query.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM meta WHERE key=$1)`, key).Scan(&exists))
-				require.False(t, exists)
-			})
-		}
-	})
 	// overtakenMoveSpoke joins the spoke to the first joined hub projects; a hub
 	// move into a later one parks the issue on the spoke.
 	overtakenMoveSpoke := func(t *testing.T, joined int, names ...string) (hub, spoke db.Storage, remote, local []db.Project) {
@@ -67,6 +33,41 @@ func checkFederatedOvertakenMoveSourceLeave(t *testing.T, store db.Storage, back
 		}
 		return hub, spoke, remote, local
 	}
+	t.Run("held cursor lifecycle/rejoin", func(t *testing.T) {
+		ctx := t.Context()
+		hub, spoke, remote, local := overtakenMoveSpoke(t, 2, "cursor-source", "cursor-destination", "cursor-absent")
+		issue, creation, err := hub.CreateIssue(ctx, db.CreateIssueParams{ProjectID: remote[0].ID, Title: "cursor lifecycle", Author: "worker"})
+		require.NoError(t, err)
+		_, err = spoke.InsertRemoteEvents(ctx, local[0].ID, []db.RemoteEvent{portableNativeEvent(creation)})
+		require.NoError(t, err)
+		require.NoError(t, spoke.MaterializeFederatedProject(ctx, local[0].ID))
+		localIssue, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		move, err := spoke.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: localIssue.ID, FromProjectID: local[0].ID, ToProjectID: local[1].ID, IfMatchRev: localIssue.Revision, Actor: "worker"})
+		require.NoError(t, err)
+		away, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: remote[0].ID, ToProjectID: remote[2].ID, IfMatchRev: issue.Revision, Actor: "worker"})
+		require.NoError(t, err)
+		awayEvent := portableNativeEvent(*away.Event)
+		awayEvent.HLCPhysicalMS, awayEvent.HLCCounter = move.Event.HLCPhysicalMS, move.Event.HLCCounter+1
+		awayEvent.ContentHash, err = db.RemoteEventContentHash(awayEvent)
+		require.NoError(t, err)
+		_, err = spoke.InsertRemoteEvents(ctx, local[0].ID, []db.RemoteEvent{awayEvent})
+		require.NoError(t, err)
+		require.NoError(t, spoke.MaterializeFederatedProject(ctx, local[0].ID))
+		binding, err := spoke.FederationBindingByProject(ctx, local[0].ID)
+		require.NoError(t, err)
+		_, err = spoke.LeaveFederationReplica(ctx, local[0].ID)
+		require.NoError(t, err)
+		pending, err := spoke.PendingFederationPushEvents(ctx, local[1].ID, spoke.InstanceUID(), 0, 100)
+		require.NoError(t, err)
+		require.Empty(t, pending)
+		_, err = spoke.UpsertFederationBinding(ctx, binding)
+		require.NoError(t, err)
+		pending, err = spoke.PendingFederationPushEvents(ctx, local[1].ID, spoke.InstanceUID(), 0, 100)
+		require.NoError(t, err)
+		require.Len(t, pending, 1)
+		require.Equal(t, move.Event.UID, pending[0].UID)
+	})
 	enroll := func(t *testing.T, hub, spoke db.Storage, project db.Project) int64 {
 		grant, err := hub.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{SpokeInstanceUID: spoke.InstanceUID(), ProjectID: &project.ID, Capabilities: "push,pull", Actor: "worker"})
 		require.NoError(t, err)
