@@ -75,7 +75,7 @@ func TestDaemonStatus_HumanUnreachableDoesNotRepeatError(t *testing.T) {
 			t.Setenv("KATA_DSN", "")
 			t.Setenv("KATA_SERVER", "")
 			ctx := t.Context()
-			address := "127.0.0.1:7777"
+			var address string
 			var probes atomic.Int32
 			if tc.canceled {
 				var cancel context.CancelFunc
@@ -94,6 +94,11 @@ func TestDaemonStatus_HumanUnreachableDoesNotRepeatError(t *testing.T) {
 				}))
 				t.Cleanup(server.Close)
 				address = strings.TrimPrefix(server.URL, "http://")
+			} else {
+				listener, err := net.Listen("tcp", "127.0.0.1:0")
+				require.NoError(t, err)
+				address = listener.Addr().String()
+				require.NoError(t, listener.Close())
 			}
 			require.NoError(t, writeRuntimeFor(home, address))
 
