@@ -17,9 +17,9 @@ workflows:
         - 'actions/upload-artifact@v7.0.2'
         - 'astral-sh/setup-uv@v10.3.2'
         - 'jdx/mise-action@v5.2.4'
-        - 'kenn-io/actions@6a8b4227ec7ce3c28c6b042b735781b1601211f4'
+        - 'kenn-io/actions@a75fd176648b63e41d3db03d942ef101a69e0e50'
         - 'kenn-io/actions@main'
-        - 'kenn-io/kit@v0.47.3'
+        - 'kenn-io/kit@v0.58.1'
         - 'step-security/setup-bun@v2.1.3'
     '.github/workflows/workflow-validation.yml':
         - 'actions/cache@v6.1.0'
@@ -27,7 +27,7 @@ workflows:
         - 'actions/setup-go@v7.0.0'
         - 'actions/setup-node@v7.1.0'
         - 'actions/upload-artifact@v7.0.2'
-        - 'kenn-io/kit@v0.47.3'
+        - 'kenn-io/kit@v0.58.1'
         - 'step-security/goreleaser-action@v7.3.0'
         - 'step-security/jactionlint@v2.2.0'
         - 'step-security/setup-buildx-action@v4.4.1'
@@ -74,9 +74,9 @@ dependencies:
         commit: 'sha1-6be3c7ed4c21d4f76b208d351d95aac273ebb76d'
         owner_id: 216188
         repo_id: 738284564
-    'kenn-io/actions@6a8b4227ec7ce3c28c6b042b735781b1601211f4':
+    'kenn-io/actions@a75fd176648b63e41d3db03d942ef101a69e0e50':
         ref: 'main'
-        commit: 'sha1-6a8b4227ec7ce3c28c6b042b735781b1601211f4'
+        commit: 'sha1-a75fd176648b63e41d3db03d942ef101a69e0e50'
         owner_id: 259885253
         repo_id: 1427332808
         uses:
@@ -90,9 +90,9 @@ dependencies:
             - 'actions/checkout@v7.0.1'
             - 'actions/setup-go@v7.0.0'
             - 'step-security/paths-filter@v4.0.3'
-    'kenn-io/kit@v0.47.3':
-        ref: 'v0.47.3'
-        commit: 'sha1-19ca4ee42e3452f57ba6d72cf07ce5963b26219b'
+    'kenn-io/kit@v0.58.1':
+        ref: 'v0.58.1'
+        commit: 'sha1-839192443564f9b106f9e2b6ccb3072aa861d0f2'
         owner_id: 259885253
         repo_id: 1238000987
     'step-security/goreleaser-action@v7.3.0':
