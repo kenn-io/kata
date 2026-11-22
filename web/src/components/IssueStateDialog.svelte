@@ -32,6 +32,9 @@
     label: `${reason.label}. ${reason.description}`,
   }))
 
+  const defaultWontDoMessage =
+    'Removed from active work through the web issue detail because this task is no longer intended to be completed.'
+
   function chooseCloseReason(value: string | undefined): void {
     if (
       value === 'done' ||
@@ -105,8 +108,15 @@
     return 40
   }
 
+  function messageHint(): string {
+    const minimum = `at least ${messageMinimum()} characters`
+    return completeReason === 'wontfix' ? `optional; ${minimum} if written` : minimum
+  }
+
   function canComplete(): boolean {
-    if (completeMessage.trim().length < messageMinimum()) return false
+    const length = completeMessage.trim().length
+    if (completeReason === 'wontfix') return length === 0 || length >= messageMinimum()
+    if (length < messageMinimum()) return false
     if (completeReason === 'done') return evidenceValue.trim().length > 0
     if (completeReason === 'duplicate' || completeReason === 'superseded') {
       return targetIssue.trim().length > 0
@@ -148,7 +158,7 @@
                 : { type: 'test', command: value }
       return { reason: completeReason, message, evidence: [evidence] }
     }
-    return { reason: completeReason, message, evidence: [] }
+    return { reason: completeReason, message: message || defaultWontDoMessage, evidence: [] }
   }
 
   async function reopenIssue(): Promise<void> {
@@ -254,7 +264,7 @@
     {/if}
 
     <label class="complete-message">
-      <span>Completion note <small>(at least {messageMinimum()} characters, markdown)</small></span>
+      <span>Completion note <small>({messageHint()}, markdown)</small></span>
       <textarea
         bind:this={completeMessageInput}
         rows="4"

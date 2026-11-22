@@ -81,6 +81,48 @@ describe('IssueStateDialog', () => {
     })
   })
 
+  it('closes as wont-do with the default message when the note is blank', async () => {
+    const onCloseIssue = vi.fn(async () => true)
+
+    render(IssueStateDialog, {
+      props: { issue: makeIssue(), onCloseIssue, onReopenIssue: vi.fn() },
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Complete…' })!)
+    const dialog = screen.getByRole('dialog', { name: 'Complete task' })
+    await fireEvent.click(within(dialog).getByRole('radio', { name: /Won't do/ }))
+
+    expect(within(dialog).getByText(/optional; at least 60 characters if written/)).toBeTruthy()
+    const submit = within(dialog).getByRole('button', { name: 'Complete' })
+    expect(submit.hasAttribute('disabled')).toBe(false)
+    await fireEvent.click(submit)
+
+    expect(onCloseIssue).toHaveBeenCalledWith({
+      reason: 'wontfix',
+      message:
+        'Removed from active work through the web issue detail because this task is no longer intended to be completed.',
+      evidence: [],
+    })
+  })
+
+  it('keeps a short wont-do note disabled', async () => {
+    const onCloseIssue = vi.fn(async () => true)
+
+    render(IssueStateDialog, {
+      props: { issue: makeIssue(), onCloseIssue, onReopenIssue: vi.fn() },
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Complete…' })!)
+    const dialog = screen.getByRole('dialog', { name: 'Complete task' })
+    await fireEvent.click(within(dialog).getByRole('radio', { name: /Won't do/ }))
+    await fireEvent.input(within(dialog).getByLabelText(/Completion note/), {
+      target: { value: 'Not needed' },
+    })
+
+    const submit = within(dialog).getByRole('button', { name: 'Complete' })
+    expect(submit.hasAttribute('disabled')).toBe(true)
+    await fireEvent.click(submit)
+    expect(onCloseIssue).not.toHaveBeenCalled()
+  })
+
   it('collects completion evidence before enabling a done close', async () => {
     const onCloseIssue = vi.fn(async () => true)
 

@@ -1455,6 +1455,7 @@
       <button
         type="button"
         class="status-action"
+        tabindex="-1"
         aria-label={`${issue.status === 'closed' ? 'Reopen' : 'Complete'} ${issue.short_id}`}
         onclick={() => onStatusAction?.(issue)}
       ></button>

@@ -33,34 +33,38 @@
 </script>
 
 {#snippet recurrenceContent(rec: KataRecurrence)}
-  <div class="recurrence-icon" aria-hidden="true">
-    {#if status(rec) === 'deleted'}<Trash2 size={15} />
-    {:else if status(rec) === 'done'}<CheckCircle2 size={15} />
-    {:else}<CalendarClock size={15} />{/if}
-  </div>
-  <div class="recurrence-main">
-    <div class="recurrence-title">{rec.template_title}</div>
-    <div class="recurrence-meta">
-      <span>{formatRRule(rec.rrule)}</span>
-      <span>Start {rec.dtstart}</span>
-      <span>{rec.timezone}</span>
+  {#if compact}
+    <span class="compact-title">{rec.template_title}</span>
+    <span>{formatRRule(rec.rrule)}</span>
+  {:else}
+    <div class="recurrence-icon" aria-hidden="true">
+      {#if status(rec) === 'deleted'}<Trash2 size={15} />
+      {:else if status(rec) === 'done'}<CheckCircle2 size={15} />
+      {:else}<CalendarClock size={15} />{/if}
     </div>
-    <div class="recurrence-meta">
-      {#if status(rec) === 'deleted'}<span>Deleted</span>
-      {:else if rec.next_occurrence_key}<span>Next {rec.next_occurrence_key}</span>
-      {:else}<span>Done</span>{/if}
-      {#if rec.last_materialized_uid}<span>Last {rec.last_materialized_uid}</span>{/if}
-      {#if rec.template_labels.length > 0}<span>{rec.template_labels.join(' · ')}</span>{/if}
+    <div class="recurrence-main">
+      <div class="recurrence-title">{rec.template_title}</div>
+      <div class="recurrence-meta">
+        <span>{formatRRule(rec.rrule)}</span>
+        <span>Start {rec.dtstart}</span>
+        <span>{rec.timezone}</span>
+      </div>
+      <div class="recurrence-meta">
+        {#if status(rec) === 'deleted'}<span>Deleted</span>
+        {:else if rec.next_occurrence_key}<span>Next {rec.next_occurrence_key}</span>
+        {:else}<span>Done</span>{/if}
+        {#if rec.last_materialized_uid}<span>Last {rec.last_materialized_uid}</span>{/if}
+        {#if rec.template_labels.length > 0}<span>{rec.template_labels.join(' · ')}</span>{/if}
+      </div>
     </div>
-  </div>
+  {/if}
 {/snippet}
 
 {#if compact}
   <div class="compact-recurrences">
     {#each recurrences as rec (rec.uid)}
       <div class="compact-recurrence">
-        <span class="compact-title">{rec.template_title}</span>
-        <span>{formatRRule(rec.rrule)}</span>
+        {@render recurrenceContent(rec)}
         {#if !readOnly}
           <button type="button" class="compact-action" onclick={() => onEdit(rec)}>Edit</button>
           <button type="button" class="compact-action" onclick={() => onDelete(rec)}>Stop</button>
