@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte'
 import type { ComponentProps } from 'svelte'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { KataProjectSummary, KataTaskDetail } from '../lib/kata/types'
+import type { KataProjectSummary, KataTaskDetail, KataTaskSummary } from '../lib/kata/types'
 import { createCredentialedFetch, setGeneratedFetch } from '../lib/api/client'
 
 import IssueDetail from './IssueDetail.svelte'
@@ -45,6 +45,25 @@ function makeProject(uid: string, name: string, role = ''): KataProjectSummary {
     open_count: 1,
     revision: 1,
     created_at: '2026-06-01T12:00:00Z',
+  }
+}
+
+function makeSummary(): KataTaskSummary {
+  return {
+    id: 2,
+    uid: 'blocker-1',
+    project_id: 2,
+    project_uid: 'project-2',
+    project_name: 'Roadmap',
+    short_id: 'B-1',
+    qualified_id: 'Roadmap#B-1',
+    title: 'Verify example packages',
+    status: 'open',
+    metadata: {},
+    revision: 1,
+    author: 'user-a',
+    created_at: '2026-06-01T12:00:00Z',
+    updated_at: '2026-06-01T12:00:00Z',
   }
 }
 
@@ -95,6 +114,67 @@ describe('IssueDetail', () => {
     })
     await fireEvent.click(within(section).getByRole('button', { name: 'Save' }))
     expect(onEditIssue).toHaveBeenCalledWith('issue-1', { body: 'First description' })
+  })
+
+  it('resolves a blocker title when the selected task list omits the blocker', async () => {
+    const blocker = makeSummary()
+    const searchReferences = vi.fn(async (query: string) =>
+      query === blocker.qualified_id ? [blocker] : [],
+    )
+    renderDetail({
+      issue: makeIssue({
+        open_blocked_by: [
+          {
+            uid: blocker.uid,
+            short_id: blocker.short_id,
+            qualified_id: blocker.qualified_id,
+          },
+        ],
+      }),
+      issueCatalog: [],
+      searchReferences,
+    })
+
+    await vi.waitFor(() => expect(searchReferences).toHaveBeenCalledWith(blocker.qualified_id))
+    await vi.waitFor(() =>
+      expect(screen.getByRole('region', { name: 'Task detail' }).textContent).toContain(
+        'Verify example packages',
+      ),
+    )
+  })
+
+  it('shows the blocker and overdue date when both apply', () => {
+    const blocker = makeSummary()
+    const view = renderDetail({
+      issue: makeIssue({
+        open_blocked_by: [
+          {
+            uid: blocker.uid,
+            short_id: blocker.short_id,
+            qualified_id: blocker.qualified_id,
+          },
+        ],
+        metadata: { deadline_on: '2020-01-01' },
+      }),
+      issueCatalog: [blocker],
+    })
+
+    const stateLines = [...view.container.querySelectorAll('.state-line')]
+      .map((line) => line.textContent ?? '')
+      .join(' ')
+    expect(stateLines).toMatch(/Blocked by B-1 Verify example packages/)
+    expect(stateLines).toMatch(/Due Jan 1(?:, \d{4})?, \d+ days late/)
+  })
+
+  it('updates the overdue count when the current date changes', async () => {
+    const view = renderDetail({
+      issue: makeIssue({ metadata: { deadline_on: '2026-11-21' } }),
+      today: '2026-11-22',
+    })
+
+    expect(view.container.querySelector('.state-line')?.textContent).toContain('1 day late')
+    await view.rerender({ today: '2026-11-23' })
+    expect(view.container.querySelector('.state-line')?.textContent).toContain('2 days late')
   })
 
   it('keeps a renamed title draft and retries against the new revision', async () => {

@@ -59,6 +59,7 @@
   <div class="compact-recurrences">
     {#each recurrences as rec (rec.uid)}
       <div class="compact-recurrence">
+        <span class="compact-title">{rec.template_title}</span>
         <span>{formatRRule(rec.rrule)}</span>
         {#if !readOnly}
           <button type="button" class="compact-action" onclick={() => onEdit(rec)}>Edit</button>
@@ -126,6 +127,10 @@
   }
   .compact-recurrence > span {
     margin-right: 4px;
+  }
+  .compact-title {
+    color: var(--text-primary);
+    font-weight: var(--font-weight-medium);
   }
   /* Edit and Stop are quiet text actions beside the rule. */
   .compact-action {

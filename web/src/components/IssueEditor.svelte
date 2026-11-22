@@ -58,6 +58,7 @@
     returnComment?: { issueUID: string; commentUID: string } | undefined
     commentError?: string | undefined
     issue: KataTaskDetail
+    today?: string | undefined
     events?: readonly KataTaskEvent[] | undefined
     issueCatalog?: readonly KataTaskSummary[] | undefined
     searchReferences?: ((query: string) => Promise<Reference[]>) | undefined
@@ -113,6 +114,7 @@
     navigationActive = true,
     commentError = undefined,
     events = [],
+    today = localDateString(new Date()),
     issueCatalog = [],
     searchReferences = async () => [],
     linkFilters = createKataLinkFilters('all'),
@@ -275,9 +277,35 @@
   }
 
   const blocker = $derived(issue.issue.open_blocked_by?.[0])
-  const blockerTitle = $derived(issueCatalog.find((task) => task.uid === blocker?.uid)?.title ?? '')
+  const blockerTitleFromCatalog = $derived(
+    issueCatalog.find((task) => task.uid === blocker?.uid)?.title,
+  )
+  let fetchedBlockerTitle = $state<{ uid: string; title: string }>()
+  $effect(() => {
+    const uid = blocker?.uid
+    const qualifiedID = blocker?.qualified_id
+    if (!uid || !qualifiedID || blockerTitleFromCatalog) {
+      if (fetchedBlockerTitle?.uid !== uid) fetchedBlockerTitle = undefined
+      return
+    }
+
+    let active = true
+    void searchReferences(qualifiedID)
+      .then((references) => {
+        if (!active) return
+        const match = references.find((reference) => reference.uid === uid)
+        if (match) fetchedBlockerTitle = { uid, title: match.title }
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  })
+  const blockerTitle = $derived(
+    blockerTitleFromCatalog ??
+      (fetchedBlockerTitle?.uid === blocker?.uid ? fetchedBlockerTitle.title : ''),
+  )
   const due = $derived(deadlineDate(issue.issue))
-  const today = localDateString(new Date())
   const lateDays = $derived(
     due
       ? Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${due}T00:00:00Z`)) / 86400000)
@@ -540,21 +568,23 @@
               {#if attachment.href}<a href={attachment.href}>{attachment.label}</a
                 >{:else}{attachment.label}{/if}
             </p>{/each}{/if}
-      {:else if blocker}
+      {:else if blocker || (due && lateDays >= 0)}
         <p class="state-line">
-          <span class="state-icon state-icon--warning" aria-hidden="true"
-            ><TriangleAlertIcon size={14} /></span
-          >Blocked by <code>{blocker.short_id}</code>
-          {blockerTitle}{#if (issue.issue.open_blocked_by?.length ?? 0) > 1}, +{issue.issue
-              .open_blocked_by!.length - 1} more{/if}
-        </p>
-      {:else if due && lateDays >= 0}
-        <p class="state-line">
-          <span class="state-icon state-icon--danger" aria-hidden="true"
-            ><CircleAlertIcon size={14} /></span
-          >{lateDays === 0
-            ? 'Due today'
-            : `Due ${dayLabel(due)}, ${lateDays} ${lateDays === 1 ? 'day' : 'days'} late`}
+          {#if blocker}
+            <span class="state-icon state-icon--warning" aria-hidden="true"
+              ><TriangleAlertIcon size={14} /></span
+            >Blocked by <code>{blocker.short_id}</code>
+            {blockerTitle}{#if (issue.issue.open_blocked_by?.length ?? 0) > 1}, +{issue.issue
+                .open_blocked_by!.length - 1} more{/if}
+          {/if}
+          {#if due && lateDays >= 0}
+            {#if blocker}<span class="state-separator" aria-hidden="true">·</span>{/if}
+            <span class="state-icon state-icon--danger" aria-hidden="true"
+              ><CircleAlertIcon size={14} /></span
+            >{lateDays === 0
+              ? 'Due today'
+              : `Due ${dayLabel(due)}, ${lateDays} ${lateDays === 1 ? 'day' : 'days'} late`}
+          {/if}
         </p>
       {/if}
       <p class="created-line">
@@ -894,6 +924,10 @@
   }
   .state-icon--danger {
     color: var(--accent-red);
+  }
+  .state-separator {
+    padding-inline: 6px;
+    color: var(--text-muted);
   }
   .created-person {
     display: inline-flex;

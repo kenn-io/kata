@@ -982,6 +982,7 @@
     {#if projection.selected_state === 'available' && projection.selected_detail}
       <IssueDetail
         issue={projection.selected_detail}
+        {today}
         {selfActor}
         events={[...projection.selected_history]}
         issueCatalog={projection.issues}
