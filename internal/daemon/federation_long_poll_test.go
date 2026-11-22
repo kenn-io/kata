@@ -280,32 +280,33 @@ func TestFederationPollWaitHoldsUntilProjectEventCommits(t *testing.T) {
 }
 
 func TestFederationPollWaitReturnsEmptyWhenWaitExpires(t *testing.T) {
-	f := newLongPollFixture(t)
-	cursor := f.cursor(t)
-	result := f.poll(t, cursor, "1")
-	require.Equal(t, http.StatusOK, result.status, "%s", result.raw)
-	assert.Empty(t, result.body.Events)
-	assert.Equal(t, cursor, result.body.NextAfterID)
-	assert.GreaterOrEqual(t, result.elapsed, time.Second)
-	assert.Less(t, result.elapsed, 5*time.Second)
-}
-
-func TestFederationPollWaitIgnoresOtherProjects(t *testing.T) {
-	f := newLongPollFixture(t)
-	other, err := f.env.DB.CreateProject(t.Context(), "other-project")
-	require.NoError(t, err)
-	cursor := f.cursor(t)
-	reads := f.reads.readsReturned()
-	done := f.startHeldPoll(t, cursor, "2")
-	createIssueAs(t, f.env, other.ID, "tester", "Belongs to another project")
-	result := <-done
-	require.NoError(t, result.err)
-	require.Equal(t, http.StatusOK, result.status, "%s", result.raw)
-	assert.Empty(t, result.body.Events)
-	assert.GreaterOrEqual(t, result.elapsed, 2*time.Second)
-	// The poll reads once before it waits and once when the wait ends. A
-	// wakeup for the other project would add a read in between.
-	assert.Equal(t, reads+2, f.reads.readsReturned())
+	t.Run("no writes", func(t *testing.T) {
+		f := newLongPollFixture(t)
+		cursor := f.cursor(t)
+		result := f.poll(t, cursor, "1")
+		require.Equal(t, http.StatusOK, result.status, "%s", result.raw)
+		assert.Empty(t, result.body.Events)
+		assert.Equal(t, cursor, result.body.NextAfterID)
+		assert.GreaterOrEqual(t, result.elapsed, time.Second)
+		assert.Less(t, result.elapsed, 5*time.Second)
+	})
+	t.Run("another project writes", func(t *testing.T) {
+		f := newLongPollFixture(t)
+		other, err := f.env.DB.CreateProject(t.Context(), "other-project")
+		require.NoError(t, err)
+		cursor := f.cursor(t)
+		reads := f.reads.readsReturned()
+		done := f.startHeldPoll(t, cursor, "2")
+		createIssueAs(t, f.env, other.ID, "tester", "Belongs to another project")
+		result := <-done
+		require.NoError(t, result.err)
+		require.Equal(t, http.StatusOK, result.status, "%s", result.raw)
+		assert.Empty(t, result.body.Events)
+		assert.GreaterOrEqual(t, result.elapsed, 2*time.Second)
+		// The poll reads once before it waits and once when the wait ends. A
+		// wakeup for the other project would add a read in between.
+		assert.Equal(t, reads+2, f.reads.readsReturned())
+	})
 }
 
 func TestFederationPollWaitAnswersAtOnceWhenEventsArePending(t *testing.T) {

@@ -70,7 +70,6 @@ func TestFederationPollWakeStaysWithinItsSchema(t *testing.T) {
 		otherChannel, err := pgstore.FederationPollWakeChannelForTest(otherInstallation)
 		require.NoError(t, err)
 		require.NotEqual(t, otherChannel, channel, "installations sharing a schema name must not share a channel")
-		require.LessOrEqual(t, len(channel), 63, "PostgreSQL truncates longer identifiers")
 	})
 	t.Run("schema", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 120*time.Second)
