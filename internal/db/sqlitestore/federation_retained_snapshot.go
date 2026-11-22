@@ -43,7 +43,7 @@ func (d *Store) RetainedIssueSnapshot(ctx context.Context, projectID int64, issu
 			}
 			return db.Event{}, err
 		}
-		payload, err := d.federationIssueSnapshotPayload(ctx, tx, issue)
+		payload, err := d.federationIssueSnapshotPayload(ctx, tx, issue, true)
 		if err != nil {
 			return db.Event{}, err
 		}

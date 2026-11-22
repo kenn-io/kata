@@ -314,11 +314,38 @@ func pushDirectSpoke(
 					pending = pending[end:]
 					continue
 				}
-				batch, adoptionBaseline, adoptionBaselineEndEventID, err := nextFederationPushIngestBatch(pending[:end])
+				recovery := false
+				if binding.RetainedThroughEventID > 0 {
+					for i, event := range pending[:end] {
+						if event.Type != "issue.snapshot" || event.IssueUID == nil || event.ID <= binding.RetainedThroughEventID || event.OriginInstanceUID != store.InstanceUID() || event.Actor != binding.Actor {
+							continue
+						}
+						snapshot, _, err := store.RetainedIssueSnapshot(ctx, binding.ProjectID, *event.IssueUID)
+						if err != nil && !errors.Is(err, db.ErrNotFound) {
+							return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+						}
+						if err == nil && snapshot.UID == event.UID {
+							if i == 0 {
+								end, recovery = 1, true
+							} else {
+								end = i
+							}
+							break
+						}
+					}
+				}
+				var batch []db.Event
+				var adoptionBaseline string
+				var adoptionBaselineEndEventID int64
+				if recovery {
+					batch = pending[:1]
+				} else {
+					batch, adoptionBaseline, adoptionBaselineEndEventID, err = nextFederationPushIngestBatch(pending[:end])
+				}
 				if err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
-				retired, err := publishRetainedLinkPeers(ctx, store, binding, hubProjectID, client, batch, snapshotsSent, onPulledEvents, validateLease)
+				retired, err := publishRetainedLinkPeers(ctx, store, binding, hubProjectID, client, batch, snapshotsSent, onPulledEvents, validateLease, credentials, opts)
 				if err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
@@ -336,9 +363,33 @@ func pushDirectSpoke(
 						AdoptionBaselineEndEventID: adoptionBaselineEndEventID,
 					})
 				if err != nil {
+					if recovery && retainedSnapshotAlreadyKnown(err, *batch[0].IssueUID) {
+						if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+							return err
+						}
+						ackCtx, resets := db.WithFederationMoveResetCapture(ctx)
+						if err := store.AcknowledgeFederationPush(ackCtx, binding.ProjectID, batch[0].ID, []string{batch[0].UID}); err != nil {
+							return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+						}
+						if onPulledEvents != nil {
+							for _, reset := range resets.Resets {
+								onPulledEvents(reset.ProjectID, []db.Event{{ID: reset.EventID, ProjectID: reset.ProjectID, Type: db.ProjectScopeResetEventType}})
+							}
+						}
+						binding.PushCursorEventID = batch[0].ID
+						pending = pendingFederationEventsAfterCursor(pending, batch[0].ID)
+						continue
+					}
 					if issueUID := retainedUnknownIssue(err); issueUID != "" && !snapshotsSent[issueUID] {
 						snapshot, sourceID, snapshotErr := store.RetainedIssueSnapshot(ctx, binding.ProjectID, issueUID)
 						if snapshotErr == nil {
+							retired, peerErr := publishRetainedLinkPeers(ctx, store, binding, hubProjectID, client, []db.Event{snapshot}, snapshotsSent, onPulledEvents, validateLease, credentials, opts)
+							if peerErr != nil {
+								return recordFederationSyncError(ctx, store, binding.ProjectID, peerErr)
+							}
+							if retired {
+								break
+							}
 							envelope := federationIngestEnvelope(snapshot)
 							envelope.EventID = sourceID
 							_, snapshotErr = client.IngestProjectEventsWithOptions(ctx, hubProjectID, []api.FederationIngestEventEnvelope{envelope}, IngestProjectEventsOptions{})
@@ -402,10 +453,7 @@ func pushDirectSpoke(
 	return nil
 }
 
-func publishRetainedLinkPeers(ctx context.Context, store db.Storage, binding *db.FederationBinding, hubProjectID int64, client *Client, batch []db.Event, sent map[string]bool, onPulledEvents func(int64, []db.Event), validateLease func(context.Context) error) (bool, error) {
-	if binding.RetainedThroughEventID == 0 {
-		return false, nil
-	}
+func publishRetainedLinkPeers(ctx context.Context, store db.Storage, binding *db.FederationBinding, hubProjectID int64, client *Client, batch []db.Event, sent map[string]bool, onPulledEvents func(int64, []db.Event), validateLease func(context.Context) error, credentials config.FederationCredentialStore, opts clientpkg.Opts) (bool, error) {
 	for _, event := range batch {
 		fold := db.FoldEvent{Type: event.Type, UID: event.UID, Payload: jsontext.Value(event.Payload)}
 		if event.IssueUID != nil {
@@ -432,7 +480,46 @@ func publishRetainedLinkPeers(ctx context.Context, store db.Storage, binding *db
 			if peer == "" || peer == fold.IssueUID || sent[peer] {
 				continue
 			}
-			snapshot, sourceID, err := store.RetainedIssueSnapshot(ctx, binding.ProjectID, peer)
+			peerBinding, peerClient, peerHubID := binding, client, hubProjectID
+			issue, err := store.IssueByUID(ctx, peer, db.IncludeDeletedYes)
+			if errors.Is(err, db.ErrNotFound) {
+				continue
+			}
+			if err != nil {
+				return false, err
+			}
+			if issue.ProjectID != binding.ProjectID {
+				tokens, err := federationMoveSourceTokens(ctx, store, credentials, *binding, client.baseURL, batch, opts)
+				if err != nil {
+					return false, err
+				}
+				other, err := store.FederationBindingByProject(ctx, issue.ProjectID)
+				if errors.Is(err, db.ErrNotFound) {
+					continue
+				}
+				if err != nil {
+					return false, err
+				}
+				if tokens[other.HubProjectUID] == "" {
+					continue
+				}
+				credential, found, err := credentials.FederationCredential(ctx, other.HubProjectUID)
+				if err != nil {
+					return false, err
+				}
+				if !found {
+					continue
+				}
+				credential = config.FederationTransportCredential(other.HubURL, other.HubProjectID, other.AllowInsecure, credential)
+				peerOpts := opts
+				peerOpts.AllowInsecure = false
+				peerClient, err = NewClient(ctx, credential.HubURL, credential.Token, clientOptsForCredential(peerOpts, credential))
+				if err != nil {
+					return false, err
+				}
+				peerBinding, peerHubID = &other, other.HubProjectID
+			}
+			snapshot, sourceID, err := store.RetainedIssueSnapshot(ctx, peerBinding.ProjectID, peer)
 			if errors.Is(err, db.ErrNotFound) {
 				continue
 			}
@@ -441,7 +528,11 @@ func publishRetainedLinkPeers(ctx context.Context, store db.Storage, binding *db
 			}
 			envelope := federationIngestEnvelope(snapshot)
 			envelope.EventID = sourceID
-			_, err = client.IngestProjectEventsWithOptions(ctx, hubProjectID, []api.FederationIngestEventEnvelope{envelope}, IngestProjectEventsOptions{})
+			sourceTokens, err := federationMoveSourceTokens(ctx, store, credentials, *peerBinding, peerClient.baseURL, []db.Event{snapshot}, opts)
+			if err != nil {
+				return false, err
+			}
+			_, err = peerClient.IngestProjectEventsWithOptions(ctx, peerHubID, []api.FederationIngestEventEnvelope{envelope}, IngestProjectEventsOptions{MoveSourceTokens: sourceTokens})
 			if err != nil {
 				if !retainedSnapshotAlreadyKnown(err, peer) {
 					return false, err
@@ -453,7 +544,7 @@ func publishRetainedLinkPeers(ctx context.Context, store db.Storage, binding *db
 					return false, err
 				}
 				ackCtx, resets := db.WithFederationMoveResetCapture(ctx)
-				if err := store.AcknowledgeFederationPush(ackCtx, binding.ProjectID, binding.PushCursorEventID, []string{snapshot.UID}); err != nil {
+				if err := store.AcknowledgeFederationPush(ackCtx, peerBinding.ProjectID, peerBinding.PushCursorEventID, []string{snapshot.UID}); err != nil {
 					return false, err
 				}
 				if onPulledEvents != nil {

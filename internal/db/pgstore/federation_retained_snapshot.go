@@ -43,7 +43,7 @@ func (s *Store) RetainedIssueSnapshot(ctx context.Context, projectID int64, issu
 		if err != nil {
 			return err
 		}
-		payload, err := federationIssueSnapshotPayload(ctx, tx, issue)
+		payload, err := federationIssueSnapshotPayload(ctx, tx, issue, true)
 		if err != nil {
 			return err
 		}

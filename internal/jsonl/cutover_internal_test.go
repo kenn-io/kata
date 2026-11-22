@@ -154,10 +154,8 @@ func TestAutoCutoverPreservesArtifactsWhenRestoreFails(t *testing.T) {
 	require.ErrorIs(t, CheckCutoverSource(ctx, path), ErrCutoverInProgress)
 }
 
-// Index-only upgrades, and the one that adds the MCP Events table, must
-// match the fresh-store catalog without exporting.
-func TestAutoCutoverAddsIndexOnlyVersionsInPlace(t *testing.T) {
-	for _, version := range []int{41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 52} {
+func TestAutoCutoverOlderVersions(t *testing.T) {
+	for _, version := range []int{41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 52, 53} {
 		t.Run(strconv.Itoa(version), func(t *testing.T) {
 			t.Setenv("KATA_HOME", t.TempDir())
 			path := indexOnlySource(t, version)
@@ -173,7 +171,7 @@ func TestAutoCutoverAddsIndexOnlyVersionsInPlace(t *testing.T) {
 				},
 			})
 			require.NoError(t, err)
-			require.False(t, exported)
+			require.True(t, exported)
 			upgraded, err := sqlitestore.Open(t.Context(), path)
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, upgraded.Close()) })
@@ -194,6 +192,9 @@ func TestAutoCutoverAddsIndexOnlyVersionsInPlace(t *testing.T) {
 				return entries
 			}
 			require.Equal(t, catalog(fresh), catalog(upgraded))
+			var retained int64
+			require.NoError(t, upgraded.QueryRowContext(t.Context(), `SELECT retained_through_event_id FROM federation_bindings`).Scan(&retained))
+			require.Zero(t, retained)
 			var resolved, issueUID int
 			require.NoError(t, upgraded.QueryRowContext(t.Context(), `SELECT count(*) FROM sqlite_master WHERE type='index' AND name='idx_events_resolved_issue_uid'`).Scan(&resolved))
 			require.NoError(t, upgraded.QueryRowContext(t.Context(), `SELECT count(*) FROM sqlite_master WHERE type='index' AND name='idx_events_issue_uid_id'`).Scan(&issueUID))
@@ -203,40 +204,18 @@ func TestAutoCutoverAddsIndexOnlyVersionsInPlace(t *testing.T) {
 	}
 }
 
-func TestAutoCutoverInPlaceFailureLeavesSourceRetryable(t *testing.T) {
-	t.Setenv("KATA_HOME", t.TempDir())
-	path := indexOnlySource(t, 41)
-	raw, err := sql.Open("sqlite", path)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, raw.Close()) })
-	// Inject a conflicting index to fail the last step after earlier DDL ran.
-	_, err = raw.ExecContext(t.Context(), `CREATE INDEX idx_events_moved_from_id ON events(id)`)
-	require.NoError(t, err)
-	ops := cutoverOperations{exportSource: func(context.Context, string, string) (int64, error) {
-		t.Fatal("index-only upgrade exported the source")
-		return 0, nil
-	}, replaceFile: atomicfile.Replace}
-	require.ErrorContains(t, autoCutover(t.Context(), path, ops), "add index idx_events_moved_from_id")
-	var version, indexes int
-	require.NoError(t, raw.QueryRowContext(t.Context(), `SELECT value FROM meta WHERE key='schema_version'`).Scan(&version))
-	require.Equal(t, 41, version)
-	require.NoError(t, raw.QueryRowContext(t.Context(), `SELECT count(*) FROM sqlite_master WHERE name='idx_issues_project_created'`).Scan(&indexes))
-	require.Zero(t, indexes)
-	_, err = raw.ExecContext(t.Context(), `DROP INDEX idx_events_moved_from_id`)
-	require.NoError(t, err)
-	require.NoError(t, raw.Close())
-	require.NoError(t, autoCutover(t.Context(), path, ops))
-	version, err = sqlitestore.PeekSchemaVersion(t.Context(), path)
-	require.NoError(t, err)
-	require.Equal(t, db.CurrentSchemaVersion(), version)
-}
-
 func indexOnlySource(t *testing.T, version int) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	source, err := sqlitestore.Open(t.Context(), path)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = source.DB.Close() })
+	project, err := source.CreateProject(t.Context(), "cutover-project")
+	require.NoError(t, err)
+	_, err = source.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "http://daemon.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "worker"})
+	require.NoError(t, err)
+	_, err = source.ExecContext(t.Context(), `ALTER TABLE federation_bindings DROP COLUMN retained_through_event_id`)
+	require.NoError(t, err)
 	if version < 51 {
 		// Schema 51 replaced the released schema 43 index with a header-UID index.
 		var raw []byte

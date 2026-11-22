@@ -232,7 +232,7 @@ func (s *Store) insertFederationBaselineEventsTx(
 		return db.Event{}, err
 	}
 	for _, issue := range issues {
-		snapshot, err := federationIssueSnapshotPayload(ctx, tx, issue)
+		snapshot, err := federationIssueSnapshotPayload(ctx, tx, issue, false)
 		if err != nil {
 			return db.Event{}, err
 		}
@@ -274,12 +274,12 @@ func federationIssuesForSnapshot(ctx context.Context, tx *sql.Tx, projectID int6
 	return output, mapSQLError(rows.Err(), nil)
 }
 
-func federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, issue db.Issue) (string, error) {
+func federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, issue db.Issue, includeIncoming bool) (string, error) {
 	labels, err := federationIssueLabels(ctx, tx, issue.ID)
 	if err != nil {
 		return "", err
 	}
-	links, err := federationIssueLinks(ctx, tx, issue.ID)
+	links, err := federationIssueLinks(ctx, tx, issue.ID, includeIncoming)
 	if err != nil {
 		return "", err
 	}
@@ -336,14 +336,14 @@ func federationIssueLabels(ctx context.Context, tx *sql.Tx, issueID int64) ([]st
 	return output, mapSQLError(rows.Err(), nil)
 }
 
-func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]db.IssueDocumentLink, error) {
+func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64, includeIncoming bool) ([]db.IssueDocumentLink, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT l.type,peer.short_id,peer.uid,FALSE,l.author,l.created_at
 FROM links l JOIN issues peer ON peer.id=l.to_issue_id WHERE l.from_issue_id=$1
 UNION ALL
 SELECT l.type,peer.short_id,peer.uid,CASE WHEN l.type='related' THEN FALSE ELSE TRUE END,l.author,l.created_at
 FROM links l JOIN issues peer ON peer.id=l.from_issue_id WHERE l.to_issue_id=$1
-AND peer.project_id<>(SELECT project_id FROM issues WHERE id=$1)
-ORDER BY 1 ASC,3 ASC,4 ASC`, issueID)
+AND ($2 OR peer.project_id<>(SELECT project_id FROM issues WHERE id=$1))
+ORDER BY 1 ASC,3 ASC,4 ASC`, issueID, includeIncoming)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}

@@ -90,12 +90,45 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 		}
 		res, err := cfg.DB.MoveIssueProject(ctx, move)
 		if err == nil {
+			var snapshots []string
 			for _, issue := range res.Issues {
-				if err := requireFederatedIssueClaimWithRefresh(ctx, cfg, issue, actor, !in.Body.DryRun); err != nil {
+				var refresh claimRefreshResult
+				if err := requireFederatedIssueClaimWithResult(ctx, cfg, issue, actor, !in.Body.DryRun, &refresh); err != nil {
 					return nil, err
+				}
+				if in.Body.DryRun {
+					continue
+				}
+				binding, err := cfg.DB.FederationBindingByProject(ctx, issue.ProjectID)
+				if errors.Is(err, db.ErrNotFound) {
+					continue
+				}
+				if err != nil {
+					return nil, internalAPIError(err)
+				}
+				if !binding.Enabled || binding.Role != db.FederationRoleSpoke || !binding.PushEnabled {
+					continue
+				}
+				retained, snapshot, err := retainedIssueState(ctx, cfg.DB, binding, issue.UID)
+				if err != nil {
+					return nil, internalAPIError(err)
+				}
+				if !retained || snapshot {
+					continue
+				}
+				if !refresh.known {
+					return nil, api.NewError(503, "federation_offline", "the hub is unavailable", "retry the move when the hub is reachable", nil)
+				}
+				if refresh.missing {
+					snapshots = append(snapshots, issue.UID)
 				}
 			}
 			if !in.Body.DryRun {
+				for _, uid := range snapshots {
+					if _, _, err := cfg.DB.RetainedIssueSnapshot(ctx, iss.ProjectID, uid); err != nil {
+						return nil, internalAPIError(err)
+					}
+				}
 				move.DryRun = false
 				move.ExpectedIssueIDs = make([]int64, len(res.Issues))
 				for i, issue := range res.Issues {
