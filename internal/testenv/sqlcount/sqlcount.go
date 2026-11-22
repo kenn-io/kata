@@ -13,7 +13,9 @@ import (
 
 // Counter records the statements, including BEGIN, COMMIT and ROLLBACK, run
 // under contexts returned by Context.
-type Counter struct{ n atomic.Int64 }
+type Counter struct {
+	n, begins atomic.Int64
+}
 
 type counterKey struct{}
 
@@ -26,7 +28,10 @@ func (c *Counter) Context(ctx context.Context) context.Context {
 func (c *Counter) Count() int64 { return c.n.Load() }
 
 // Reset clears the count.
-func (c *Counter) Reset() { c.n.Store(0) }
+func (c *Counter) Reset() { c.n.Store(0); c.begins.Store(0) }
+
+// Begins returns the transaction starts recorded since the last Reset.
+func (c *Counter) Begins() int64 { return c.begins.Load() }
 
 func record(ctx context.Context) *Counter {
 	c, _ := ctx.Value(counterKey{}).(*Counter)
@@ -105,6 +110,9 @@ func (c *conn0) Begin() (driver.Tx, error) {
 
 func (c *conn0) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
 	counter := record(ctx)
+	if counter != nil {
+		counter.begins.Add(1)
+	}
 	tx, err := c.inner.BeginTx(ctx, opts)
 	if err != nil {
 		return nil, err
