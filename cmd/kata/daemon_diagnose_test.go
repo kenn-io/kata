@@ -25,6 +25,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/db/storeopen"
+	"go.kenn.io/kata/internal/jsonl"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
@@ -1178,4 +1179,124 @@ func TestDaemonDiagnoseAllowsConcurrentSQLiteOpen(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("diagnosis did not finish")
 	}
+}
+
+func TestDaemonDiagnoseAllowsDelayedUpgrade(t *testing.T) {
+	home, workspace, _, _ := stoppedProfileCLI(t)
+	resetFlags(t)
+	path := filepath.Join(home, "kata.db")
+	raw, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	defer func() { _ = raw.Close() }()
+	conn, err := raw.Conn(t.Context())
+	require.NoError(t, err)
+	defer func() { _ = conn.Close() }()
+	_, err = conn.ExecContext(t.Context(), "PRAGMA journal_mode=DELETE")
+	require.NoError(t, err)
+	_, err = conn.ExecContext(t.Context(), "DROP INDEX idx_events_project_moves")
+	require.NoError(t, err)
+	_, err = conn.ExecContext(t.Context(), "UPDATE meta SET value='52' WHERE key='schema_version'")
+	require.NoError(t, err)
+	_, err = conn.ExecContext(t.Context(), "BEGIN EXCLUSIVE")
+	require.NoError(t, err)
+	selection, err := client.InspectSelection(t.Context(), workspace, "")
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(t.Context())
+	diagnosis := make(chan daemonDiagnosis, 1)
+	var opened chan error
+	defer func() {
+		_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+		cancel()
+		if diagnosis != nil {
+			select {
+			case <-diagnosis:
+			case <-time.After(10 * time.Second):
+				t.Error("diagnosis did not stop")
+			}
+		}
+		if opened != nil {
+			select {
+			case <-opened:
+			case <-time.After(10 * time.Second):
+				t.Error("SQLite open did not stop")
+			}
+		}
+	}()
+	go func() {
+		result, _, _ := diagnoseDaemonSelection(ctx, "", selection)
+		diagnosis <- result
+	}()
+	marker := flock.New(path + ".import.lock")
+	defer func() { _ = marker.Close() }()
+	require.Eventually(t, func() bool {
+		locked, err := marker.TryLock()
+		if err != nil {
+			return false
+		}
+		if locked {
+			_ = marker.Unlock()
+			return false
+		}
+		return true
+	}, 3*time.Second, 10*time.Millisecond)
+	require.NoError(t, marker.Close())
+	opened = make(chan error, 1)
+	go func() {
+		opened <- jsonl.AutoCutover(ctx, path)
+	}()
+	var openErr error
+	finished := false
+	select {
+	case openErr = <-opened:
+		finished = true
+		opened = nil
+	case <-time.After(1500 * time.Millisecond):
+	}
+	_, err = conn.ExecContext(t.Context(), "ROLLBACK")
+	require.NoError(t, err)
+	if !finished {
+		select {
+		case openErr = <-opened:
+			opened = nil
+		case <-time.After(5 * time.Second):
+			t.Fatal("SQLite open did not finish")
+		}
+	}
+	select {
+	case result := <-diagnosis:
+		diagnosis = nil
+		require.NoError(t, openErr)
+		require.Equal(t, "version_mismatch", result.State)
+		version, err := sqlitestore.PeekSchemaVersion(t.Context(), path)
+		require.NoError(t, err)
+		require.Equal(t, db.CurrentSchemaVersion(), version)
+	case <-time.After(5 * time.Second):
+		t.Fatal("diagnosis did not finish")
+	}
+}
+
+func TestDaemonDiagnoseDuringReadinessInspection(t *testing.T) {
+	home, _, _, _ := stoppedProfileCLI(t)
+	path := filepath.Join(home, "kata.db")
+	store, err := sqlitestore.Open(t.Context(), path)
+	require.NoError(t, err)
+	_, err = store.ExecContext(t.Context(), "UPDATE meta SET value=? WHERE key='schema_version'", fmt.Sprint(db.CurrentSchemaVersion()-1))
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+	lock := flock.New(path + ".import.lock")
+	require.NoError(t, lock.RLock())
+	defer func() { _ = lock.Close() }()
+	out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
+	require.NoError(t, err)
+	assertDiagnosticState(t, out, "version_mismatch")
+}
+
+func TestDaemonDiagnoseIgnoresOtherDatabaseCutover(t *testing.T) {
+	stoppedProfileCLI(t)
+	lock := flock.New(filepath.Join(t.TempDir(), "kata.db.import.lock"))
+	require.NoError(t, lock.Lock())
+	defer func() { _ = lock.Close() }()
+	out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
+	require.NoError(t, err)
+	assertDiagnosticState(t, out, "stopped_local_profile")
 }

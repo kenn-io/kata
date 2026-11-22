@@ -1,30 +1,35 @@
 package jsonl
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/cutoverlock"
 )
 
 func TestCutoverReadLockCoordinatesReadersAndCutover(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kata.db")
 	require.NoError(t, os.WriteFile(path, nil, 0600))
-	release, busy, err := TryCutoverReadLock(path, true)
+	release, busy, err := cutoverlock.TryReadLock(path, true)
 	require.NoError(t, err)
 	require.False(t, busy)
 	info, err := os.Stat(path + ".import.lock")
 	require.NoError(t, err)
-	release2, busy, err := TryCutoverReadLock(path, true)
+	release2, busy, err := cutoverlock.TryReadLock(path, true)
 	require.NoError(t, err)
 	require.False(t, busy)
-	require.ErrorIs(t, WithCutoverLock(t.Context(), path, func() error { return nil }), ErrCutoverInProgress)
+	ctx, cancel := context.WithTimeout(t.Context(), 1100*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, WithCutoverLock(ctx, path, func() error { return nil }), context.DeadlineExceeded)
 	release2()
 	release()
 	require.NoError(t, WithCutoverLock(t.Context(), path, func() error { return nil }))
-	release, busy, err = TryCutoverReadLock(path, true)
+	release, busy, err = cutoverlock.TryReadLock(path, true)
 	require.NoError(t, err)
 	require.False(t, busy)
 	defer release()
@@ -37,7 +42,7 @@ func TestCutoverReadLockMissingAndSymlink(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "link.db")
 	target := filepath.Join(dir, "target.db")
-	release, busy, err := TryCutoverReadLock(path, false)
+	release, busy, err := cutoverlock.TryReadLock(path, false)
 	require.NoError(t, err)
 	require.False(t, busy)
 	release()
@@ -48,7 +53,7 @@ func TestCutoverReadLockMissingAndSymlink(t *testing.T) {
 		t.Skip(err)
 	}
 	require.NoError(t, WithCutoverLock(t.Context(), target, func() error {
-		_, busy, err := TryCutoverReadLock(path, true)
+		_, busy, err := cutoverlock.TryReadLock(path, true)
 		require.NoError(t, err)
 		require.True(t, busy)
 		return nil

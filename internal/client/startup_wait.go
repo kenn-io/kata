@@ -8,9 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofrs/flock"
-
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/cutoverlock"
 	"go.kenn.io/kata/internal/daemonruntime"
 )
 
@@ -162,16 +161,18 @@ func sqliteMigrationPending(ctx context.Context) bool {
 func sqliteMigrationPendingForPath(ctx context.Context, path string, inspector StorageInspector) bool {
 	// Hold the lock through the read and its connection close. A lock probe
 	// followed by a separate peek lets a cutover start between those operations.
-	lock := flock.New(path + ".import.lock")
-	locked, err := lock.TryLock()
-	if err != nil {
-		_ = lock.Close()
+	_, statErr := os.Stat(path)
+	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
 		return false
 	}
-	defer func() { _ = lock.Close() }()
-	if !locked {
+	release, busy, err := cutoverlock.TryReadLock(path, statErr == nil)
+	if err != nil {
+		return false
+	}
+	if busy {
 		return true
 	}
+	defer release()
 	// A read-only peek never initializes or upgrades storage. Check the source
 	// schema rather than temp-file growth: preflight and export can themselves
 	// take longer than the readiness budget, before any temp file exists.
@@ -190,11 +191,12 @@ func sqliteCutoverLockedForDSN(dsn string) bool {
 	if dsn == "" || strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
 		return false
 	}
-	lock := flock.New(strings.TrimPrefix(dsn, "sqlite://")+".import.lock", flock.SetFlag(os.O_RDONLY))
-	locked, err := lock.TryLock()
+	release, busy, err := cutoverlock.TryReadLock(strings.TrimPrefix(dsn, "sqlite://"), false)
 	if err != nil {
 		return false
 	}
-	defer func() { _ = lock.Close() }()
-	return !locked
+	if release != nil {
+		release()
+	}
+	return busy
 }

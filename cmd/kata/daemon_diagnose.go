@@ -16,11 +16,11 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/cutoverlock"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/storeopen"
-	"go.kenn.io/kata/internal/jsonl"
 	"go.kenn.io/kata/internal/storageinspect"
 	"go.kenn.io/kata/internal/version"
 	kataapi "go.kenn.io/kata/pkg/client"
@@ -221,7 +221,7 @@ func lockDiagnosisStorage(result *daemonDiagnosis, dsn string) (func(), bool, er
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, false, err
 	}
-	release, busy, err := jsonl.TryCutoverReadLock(path, err == nil)
+	release, busy, err := cutoverlock.TryReadLock(path, err == nil)
 	if busy {
 		result.State = "storage_busy"
 		result.Message = "another kata process holds the SQLite storage lock, usually a daemon upgrading the database"
