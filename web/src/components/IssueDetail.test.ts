@@ -453,6 +453,17 @@ describe('IssueDetail', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
+  it('passes comments to the selected task', async () => {
+    const onAddComment = vi.fn(async () => true)
+    renderDetail({ onAddComment })
+    await fireEvent.click(screen.getByRole('button', { name: 'Add comment' }))
+    await fireEvent.input(screen.getByLabelText('Comment'), {
+      target: { value: 'New comment' },
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Add comment' }))
+    expect(onAddComment).toHaveBeenCalledWith('issue-1', 'New comment')
+  })
+
   it('opens a related issue from the read view links', async () => {
     const onSelectIssue = vi.fn()
     renderDetail({
