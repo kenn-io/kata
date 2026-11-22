@@ -211,7 +211,7 @@
   function scheduledLabel(): string {
     const saved = issue.issue.metadata.scheduled_on
     const value = dateZone(saved) ? scheduledDate(issue.issue) : saved
-    return value ? formatDay(value) : ''
+    return value ? (value.includes('T') ? value : formatDay(value)) : ''
   }
 
   function dueLabel(): string {
