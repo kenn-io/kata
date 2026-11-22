@@ -1011,7 +1011,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		if waiter != nil {
-			result, _, err = holdFederationPoll(requestCtx, waiter, holdUntil, result, reauthorize, read)
+			result, err = holdFederationPoll(requestCtx, waiter, holdUntil, result, reauthorize, read)
 			if err != nil {
 				return nil, err
 			}

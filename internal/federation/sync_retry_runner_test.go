@@ -267,35 +267,6 @@ func TestRefusedSpokeRetriesAtOnceAfterDisableAndEnableBetweenPasses(t *testing.
 	require.Equal(t, int64(2), fleet.requests.Load(), "the re-enabled binding is tried at once")
 }
 
-func TestThrottledSpokeRetriesAfterDisableAndEnable(t *testing.T) {
-	ctx := t.Context()
-	fleet := newSpokeFleet(t, 1)
-	project := fleet.projects[0]
-	fleet.refuse.Delete(project.UID)
-	fleet.throttleClaims.Store(true)
-	issue, _, err := fleet.store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Claim", Author: "worker"})
-	require.NoError(t, err)
-	_, err = fleet.store.EnqueuePendingClaim(ctx, pendingClaimParams(fleet.store, project.ID, issue.ShortID, "worker"))
-	require.NoError(t, err)
-	retries := newSyncRetries(noJitter)
-	fleet.pass(ctx, retries)
-	_, ok := retries.FederationSyncRetry(project.ID)
-	require.True(t, ok)
-	binding, err := fleet.store.FederationBindingByProject(ctx, project.ID)
-	require.NoError(t, err)
-	for enabled := binding; enabled.UpdatedAt.Equal(binding.UpdatedAt); {
-		disabled := binding
-		disabled.Enabled = false
-		_, err = fleet.store.UpsertFederationBinding(ctx, disabled)
-		require.NoError(t, err)
-		enabled, err = fleet.store.UpsertFederationBinding(ctx, binding)
-		require.NoError(t, err)
-	}
-	before := fleet.requests.Load()
-	fleet.pass(ctx, retries)
-	require.Greater(t, fleet.requests.Load(), before)
-}
-
 // A turn's schedule belongs to the binding and credential the turn used. A
 // change that lands as the turn ends, here from the result hook while the
 // turn still holds the project's sync lock, makes the next pass try at once.

@@ -335,26 +335,24 @@ func holdFederationPoll(
 	result db.FederationReadResult,
 	reauthorize func() (context.Context, error),
 	read func(context.Context) (db.FederationReadResult, error),
-) (db.FederationReadResult, bool, error) {
-	waited := false
+) (db.FederationReadResult, error) {
 	for federationPollCaughtUp(result) && time.Now().Before(deadline) {
-		waited = true
 		woke, err := waiter.wait(ctx, deadline)
 		if err != nil {
-			return result, waited, fmt.Errorf("held federation poll ended: %w", err)
+			return result, fmt.Errorf("held federation poll ended: %w", err)
 		}
 		readCtx, err := reauthorize()
 		if err != nil {
-			return result, waited, err
+			return result, err
 		}
 		if result, err = read(readCtx); err != nil {
-			return result, waited, err
+			return result, err
 		}
 		if !woke {
 			break
 		}
 	}
-	return result, waited, nil
+	return result, nil
 }
 
 // heldFederationPollAllowed reports whether the hub can authorize a held poll
