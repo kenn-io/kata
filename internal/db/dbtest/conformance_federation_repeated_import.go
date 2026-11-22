@@ -599,7 +599,7 @@ func checkFederationAcknowledgePush(t *testing.T, store db.Storage) error {
 
 	// The first snapshot is the home's only record of its issue, so nothing
 	// is acknowledged.
-	err = store.AcknowledgeFederationPush(ctx, project.ID, edit.ID, []string{waiting.UID, held.UID})
+	err = store.AcknowledgeFederationPush(ctx, project.ID, edit.ID, []string{waiting.UID, held.UID}, nil)
 	require.ErrorIs(t, err, db.ErrFederationPushAwaitsPull)
 	require.ElementsMatch(t, []string{waiting.UID, held.UID, foreignUID}, listSnapshots())
 	binding, err := store.FederationBindingByProject(ctx, project.ID)
@@ -610,7 +610,7 @@ func checkFederationAcknowledgePush(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	for round := range 2 {
 		publishCtx, published := db.WithFederationMoveResetCapture(ctx)
-		require.NoError(t, store.AcknowledgeFederationPush(publishCtx, project.ID, edit.ID, []string{held.UID, edit.UID, foreignUID}))
+		require.NoError(t, store.AcknowledgeFederationPush(publishCtx, project.ID, edit.ID, []string{held.UID, edit.UID, foreignUID}, nil))
 		cursor, err := store.MaxEventID(ctx)
 		require.NoError(t, err)
 		require.Greater(t, cursor, shown, "the rebuild changes visible rows, so it writes an event that moves a browser's cursor")
@@ -645,7 +645,7 @@ func checkFederationAcknowledgePush(t *testing.T, store db.Storage) error {
 	resignNativeEvent(t, &earlier)
 	_, err = store.InsertRemoteEvents(ctx, project.ID, []db.RemoteEvent{earlier})
 	require.NoError(t, err)
-	require.NoError(t, store.AcknowledgeFederationPush(ctx, project.ID, edit.ID, []string{waiting.UID}))
+	require.NoError(t, store.AcknowledgeFederationPush(ctx, project.ID, edit.ID, []string{waiting.UID}, nil))
 	require.ElementsMatch(t, []string{earlier.EventUID, foreignUID}, listSnapshots())
 	return nil
 }

@@ -30,7 +30,7 @@ func (s *Store) PendingFederationPushEvents(
 		limit = 1000
 	}
 	output, err := s.queryPendingFederationPushEvents(ctx, eventSelect+`
-WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3
+WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND (e.id>$3 OR `+db.FederationHeldMoveSQL("e")+`)
   AND `+db.FederationOwedEventSQL("e")+`
 ORDER BY e.id ASC LIMIT $4`, projectID, originInstanceUID, afterID, limit)
 	if err != nil {
@@ -105,7 +105,7 @@ func (s *Store) PendingFederationPushStats(
 	var count int64
 	var highWater sql.NullInt64
 	err := s.QueryRowContext(ctx, `SELECT COUNT(*),MAX(e.id) FROM events e
-WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND `+db.FederationOwedEventSQL("e"),
+WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND (e.id>$3 OR `+db.FederationHeldMoveSQL("e")+`) AND `+db.FederationOwedEventSQL("e"),
 		projectID, originInstanceUID, afterID).Scan(&count, &highWater)
 	if err != nil {
 		return 0, 0, mapSQLError(err, nil)

@@ -486,7 +486,8 @@ type Storage interface {
 	// and rebuilds the project from the remaining history, all in one
 	// transaction. It changes nothing and returns ErrFederationPushAwaitsPull
 	// while the home has no other history of one of those issues.
-	AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string) error
+	// The sent events identify moves skipped before the acknowledged cursor.
+	AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string, sent []Event) error
 	EnableFederationPush(ctx context.Context, projectID int64, cursor int64) (FederationBinding, error)
 	// DisableFederationPushWhenSettled turns push off for a direct spoke
 	// binding in the same transaction that proves no local-origin event above

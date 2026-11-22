@@ -27,7 +27,8 @@ func IsFederationRetainedProject(ctx context.Context, queryer interface {
 func ClearFederationRetainedProject(ctx context.Context, tx interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }, uid string) error {
-	_, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key IN ($1,$2)`, FederationRetainedProjectPrefix+uid, FederationHeldCursorPrefix+uid)
+	_, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key IN ($1,$2)
+ OR (substr(key,1,length($3))=$3 AND (value=$4 OR key IN (SELECT $3||e.uid FROM events e JOIN projects p ON p.id=e.project_id WHERE p.uid=$4)))`, FederationRetainedProjectPrefix+uid, FederationHeldCursorPrefix+uid, FederationHeldMovePrefix, uid)
 	return err
 }
 
