@@ -21,6 +21,7 @@ import (
 	"go.kenn.io/kata/internal/textsafe"
 	"go.kenn.io/kit/atomicfile"
 	"go.kenn.io/kit/fslink"
+	"go.kenn.io/kit/pathresolve"
 )
 
 // initOptions holds the flags specific to `kata init`.
@@ -129,6 +130,38 @@ func kindForStatus(status int) errKind {
 	return kindInternal
 }
 
+// checkExplicitWorkspaceBinding refuses an explicit --workspace whose binding
+// lives outside it: an enclosing folder's .kata.toml, or a .kata.toml symlink
+// that resolves elsewhere. A workspace with no binding yet passes.
+func checkExplicitWorkspaceBinding(workspace string) error {
+	paths, err := config.DiscoverPaths(workspace)
+	if err != nil || paths.WorkspaceRoot == "" {
+		return nil
+	}
+	bindingPath := filepath.Join(paths.WorkspaceRoot, config.ProjectConfigFilename)
+	if !sameAgentHookFile(paths.WorkspaceRoot, workspace) {
+		return initBindingConflict(fmt.Sprintf("%q already binds %q.", bindingPath, workspace),
+			"To change the enclosing binding, set --workspace to its folder, keep your other options, and use --replace when changing projects.")
+	}
+	dir, err := pathresolve.EvalSymlinks(workspace)
+	if err != nil {
+		return err
+	}
+	target, err := pathresolve.EvalSymlinksAllowMissing(bindingPath)
+	if err != nil {
+		return err
+	}
+	if rel, err := filepath.Rel(dir, target); err != nil || !filepath.IsLocal(rel) {
+		return initBindingConflict(fmt.Sprintf("%q links to %q, outside %q.", bindingPath, target, workspace),
+			"Replace this workspace's .kata.toml symlink with a local binding before retrying.")
+	}
+	return nil
+}
+
+func initBindingConflict(message, hint string) error {
+	return &cliError{Message: message, Hint: hint, Kind: kindConflict, Code: "project_binding_conflict", ExitCode: ExitConflict}
+}
+
 // newInitCmd returns the cobra.Command for `kata init`.
 func newInitCmd() *cobra.Command {
 	var opts initOptions
@@ -176,11 +209,16 @@ Name agents for explicit setup; use --local for project scope. If a user-level h
 			if cmd.Flags().Changed("contract-only") && len(opts.AgentHooks) == 0 {
 				return agentHookUsage("init --contract-only requires --agent-hooks")
 			}
-			callOpts, err := prepareInitHookOptions(cmd.Context(), callInitOpts(opts))
+			startPath, err := resolveStartPath(flags.Workspace)
 			if err != nil {
 				return err
 			}
-			startPath, err := resolveStartPath(flags.Workspace)
+			if flags.Workspace != "" {
+				if err := checkExplicitWorkspaceBinding(startPath); err != nil {
+					return err
+				}
+			}
+			callOpts, err := prepareInitHookOptions(cmd.Context(), callInitOpts(opts))
 			if err != nil {
 				return err
 			}
