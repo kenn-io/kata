@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button, Chip } from '@kenn-io/kit-ui'
+  import { Button, Disclosure, Typeahead, type TypeaheadOption } from '@kenn-io/kit-ui'
 
   import {
     kataLinkMatchesFilters,
@@ -16,6 +16,7 @@
     KataTaskSummary,
   } from '../lib/kata/types'
   import LinkFilterMenu from './LinkFilterMenu.svelte'
+  import type { UIIssueReference } from '../lib/api/generated'
 
   interface IssueNavigationTarget {
     uid: string
@@ -24,6 +25,7 @@
   interface Props {
     issue: KataTaskDetail
     issueCatalog: readonly KataTaskSummary[]
+    searchReferences?: ((query: string) => Promise<UIIssueReference[]>) | undefined
     linkFilters: KataLinkFilters
     onLinkFiltersChange: (next: KataLinkFilters) => void
     actionsDisabled?: boolean | undefined
@@ -43,6 +45,7 @@
   let {
     issue,
     issueCatalog,
+    searchReferences = async () => [],
     linkFilters,
     onLinkFiltersChange,
     actionsDisabled = false,
@@ -52,6 +55,17 @@
     onSelectIssue,
   }: Props = $props()
 
+  let adding = $state(false)
+  let options = $state<TypeaheadOption[]>([])
+  let searchGeneration = 0
+  async function search(query: string): Promise<void> {
+    const generation = ++searchGeneration
+    const results = await searchReferences(query)
+    if (generation === searchGeneration)
+      options = results
+        .filter((task) => task.uid !== issue.issue.uid)
+        .map((task) => ({ name: task.qualified_id, label: task.title, meta: task.qualified_id }))
+  }
   let relatedDraft = $state('')
   let relatedDraftRevision = 0
   let lastDraftResetGeneration = $state<number | null>(null)
@@ -63,7 +77,6 @@
       kataLinkMatchesFilters(link, issue.issue.uid, peerResolution(link), linkFilters),
     ),
   )
-  const showStateChips = $derived(linkFilters.statuses.open && linkFilters.statuses.closed)
 
   $effect(() => {
     const nextGeneration = draftResetGeneration
@@ -95,6 +108,9 @@
     lastDraftFenceGeneration = nextGeneration
     relatedDraft = ''
     pendingRelatedReset = null
+    adding = false
+    options = []
+    searchGeneration += 1
   })
 
   function updateRelatedDraft(value: string): void {
@@ -126,28 +142,36 @@
     return { kind: 'resolved', peer: peer ?? linkPeer(link) }
   }
 
+  function peerClosed(link: KataTaskLink): boolean {
+    return (
+      (issueCatalog.find((candidate) => candidate.uid === linkPeerUID(link)) ?? linkPeer(link))
+        .status === 'closed'
+    )
+  }
+
   const relationLabels: Record<KataLinkRelation, string> = {
-    parent: 'parent',
-    child: 'child',
-    blocks: 'blocks',
-    blocked_by: 'blocked_by',
-    related: 'related',
+    parent: 'Parent',
+    child: 'Child',
+    blocks: 'Blocks',
+    blocked_by: 'Blocked by',
+    related: 'Related',
   }
 
   function linkLabel(link: KataTaskLink): string {
     return relationLabels[relationForKataLink(link, issue.issue.uid)]
   }
 
-  async function submitRelatedLink(): Promise<void> {
-    if (actionsDisabled) return
+  async function submitRelatedLink(): Promise<boolean> {
+    if (actionsDisabled) return false
     const draft = relatedDraft
     const ref = draft.trim()
-    if (ref === '') return
+    if (ref === '') return false
     const mutationUID = issue.issue.uid
     const resetGeneration = draftResetGeneration
     const draftRevision = relatedDraftRevision
     const ok = await onEditIssue(mutationUID, { links_delta: { add_related: [ref] } })
-    if (!ok || issue.issue.uid !== mutationUID) return
+    if (ok === true) adding = false
+    if (ok !== true || issue.issue.uid !== mutationUID) return false
     if (draftResetGeneration !== resetGeneration) {
       if (relatedDraftRevision === draftRevision && relatedDraft === draft) relatedDraft = ''
     } else {
@@ -158,135 +182,115 @@
         revision: draftRevision,
       }
     }
-  }
-
-  function handleRelatedKeydown(event: KeyboardEvent): void {
-    if (event.key === 'Enter') {
-      event.preventDefault()
-      void submitRelatedLink()
-    }
+    return true
   }
 </script>
 
+{#snippet linkRow(link: KataTaskLink)}
+  {@const resolution = peerResolution(link)}
+  {@const peer = resolution.kind === 'resolved' ? resolution.peer : undefined}
+  <button
+    type="button"
+    class="link-row"
+    aria-label={`${linkLabel(link)} ${linkPeerLabel(link)} ${peer?.title ?? ''} ${peer?.status ?? ''}`}
+    onclick={() => void onSelectIssue({ uid: linkPeerUID(link) })}
+  >
+    <span class="link-status" class:closed={peer?.status === 'closed'} aria-hidden="true"></span>
+    <span class="link-peer">{linkPeerLabel(link)}</span>
+    {#if peer?.title}<span class="link-title">{peer.title}</span>{/if}
+  </button>
+{/snippet}
 <section class="task-links" aria-label="Links">
   <div class="section-header link-section-header">
-    <h3>Links</h3>
+    <h3>Links <span>{issue.links.length}</span></h3>
+    {#if issue.links.length === 0}<span class="link-empty">No links.</span>{/if}
     <div class="link-header-actions">
-      <span>
-        {visibleLinks.length === issue.links.length
-          ? issue.links.length
-          : `${visibleLinks.length} / ${issue.links.length}`}
-      </span>
-      <LinkFilterMenu filters={linkFilters} onChange={onLinkFiltersChange} />
+      {#if issue.links.length > 8}<LinkFilterMenu
+          filters={linkFilters}
+          onChange={onLinkFiltersChange}
+        />{/if}
+      <Button
+        size="sm"
+        label="Add"
+        disabled={actionsDisabled}
+        onclick={() => {
+          adding = !adding
+        }}
+      />
     </div>
   </div>
-  {#if issue.links.length === 0}
-    <p class="link-empty">No links.</p>
-  {:else if visibleLinks.length === 0}
-    <p class="link-empty">No links match these filters.</p>
-  {:else}
-    <div class="link-list">
-      {#each visibleLinks as link (link.id)}
-        {@const resolution = peerResolution(link)}
-        {@const peer = resolution.kind === 'resolved' ? resolution.peer : undefined}
-        <button
-          type="button"
-          class={[
-            'link-row',
-            (showStateChips || resolution.kind === 'failed') && 'link-row--with-state',
-          ]}
-          aria-label={`${linkLabel(link)} ${linkPeerLabel(link)} ${peer?.title ?? ''}${showStateChips && peer ? ` ${peer.status}` : ''}${resolution.kind === 'failed' ? ' state unavailable' : ''}`.trim()}
-          title={peer ? undefined : 'Task state unavailable; open to load details'}
-          onclick={() => {
-            void onSelectIssue({ uid: linkPeerUID(link) })
-          }}
-        >
-          <span class="link-kind">{linkLabel(link)}</span>
-          <span class="link-peer">{linkPeerLabel(link)}</span>
-          {#if peer?.title}<span class="link-title">{peer.title}</span>{/if}
-          {#if showStateChips && peer}
-            <Chip size="xs" uppercase={false} tone={peer.status === 'open' ? 'success' : 'muted'}
-              >{peer.status}</Chip
-            >
-          {:else if resolution.kind === 'failed'}
-            <Chip size="xs" uppercase={false} tone="muted" title="Task state unavailable"
-              >unknown</Chip
-            >
-          {/if}
-        </button>
-      {/each}
+  {#if adding}
+    <div class="link-form">
+      <span>Related</span>
+      <Typeahead
+        {options}
+        fallbackLabel="Find task"
+        placeholder="Search tasks"
+        remote
+        allowCustom
+        onquery={(query) => void search(query)}
+        onselect={async (value) => {
+          updateRelatedDraft(value)
+          return await submitRelatedLink()
+        }}
+      />
     </div>
   {/if}
-  <form
-    class="link-form"
-    onsubmit={(event) => {
-      event.preventDefault()
-      void submitRelatedLink()
-    }}
-  >
-    <label>
-      <span>Related issue</span>
-      <input
-        aria-label="Related issue"
-        placeholder="Short id"
-        bind:value={() => relatedDraft, updateRelatedDraft}
-        onkeydown={handleRelatedKeydown}
-        disabled={actionsDisabled}
-      />
-    </label>
-    <Button
-      type="submit"
-      surface="outline"
-      size="sm"
-      label="Link"
-      disabled={actionsDisabled || relatedDraft.trim() === ''}
-    />
-  </form>
+  {#if issue.links.length === 0}{:else if visibleLinks.length === 0}<p class="link-empty">
+      No links match these filters.
+    </p>
+  {:else}
+    {#each ['blocked_by', 'blocks', 'parent', 'child', 'related'] as group (group)}
+      {@const grouped = visibleLinks.filter(
+        (link) => relationForKataLink(link, issue.issue.uid) === group,
+      )}
+      {@const open = grouped.filter((link) => !peerClosed(link))}
+      {@const closed = grouped.filter(peerClosed)}
+      {#if grouped.length}
+        <div>
+          <strong>{relationLabels[group as KataLinkRelation]} {grouped.length}</strong>
+          {#each open as link (link.id)}{@render linkRow(link)}{/each}
+          {#if closed.length}<Disclosure variant="plain" title={`${closed.length} closed`}>
+              {#each closed as link (link.id)}{@render linkRow(link)}{/each}
+            </Disclosure>{/if}
+        </div>
+      {/if}
+    {/each}
+  {/if}
 </section>
 
 <style>
   .task-links {
     display: grid;
     gap: 8px;
-    margin: 0 0 18px;
+    margin: 0 0 24px;
   }
-
   .section-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    margin-bottom: 8px;
   }
-
   .section-header h3 {
     margin: 0;
-    color: var(--text-primary);
     font-size: var(--font-size-md);
     font-weight: var(--font-weight-semibold);
   }
-
-  .link-header-actions {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-3);
-  }
-
-  .link-header-actions > span,
+  .section-header h3 span,
   .link-empty {
     color: var(--text-muted);
     font-size: var(--font-size-xs);
   }
-
+  .link-header-actions,
+  .link-form {
+    display: flex;
+    gap: var(--space-3);
+    align-items: center;
+  }
   .link-empty {
     margin: 0;
+    margin-right: auto;
   }
-
-  .link-list {
-    display: grid;
-    gap: var(--space-1);
-  }
-
   .link-row {
     width: 100%;
     min-height: 32px;
@@ -294,8 +298,7 @@
     border-radius: 6px;
     background: transparent;
     color: var(--text-primary);
-    display: grid;
-    grid-template-columns: max-content max-content minmax(0, 1fr);
+    display: flex;
     align-items: center;
     gap: 8px;
     padding: 4px 6px;
@@ -304,61 +307,27 @@
     text-align: left;
     cursor: pointer;
   }
-
-  .link-row--with-state {
-    grid-template-columns: max-content max-content minmax(0, 1fr) max-content;
-  }
-
-  .link-row:hover:not(:disabled) {
+  .link-row:hover {
     background: var(--bg-surface-hover);
   }
-
-  .link-kind {
-    color: var(--text-muted);
-    font-size: var(--font-size-xs);
-    font-weight: 650;
+  .link-status {
+    width: 13px;
+    height: 13px;
+    flex: none;
+    border: 1.5px solid var(--text-muted);
+    border-radius: 50%;
   }
-
+  .link-status.closed {
+    background: var(--text-muted);
+  }
   .link-peer {
-    color: var(--text-primary);
     font-family: var(--font-mono);
     font-size: var(--font-size-xs);
   }
-
   .link-title {
     min-width: 0;
-    color: var(--text-secondary);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-
-  .link-form {
-    display: flex;
-    align-items: flex-end;
-    gap: 6px;
-  }
-
-  .link-form label {
-    min-width: 0;
-    flex: 1;
-    display: grid;
-    gap: var(--space-1);
-    color: var(--text-muted);
-    font-size: var(--font-size-xs);
-    font-weight: 650;
-  }
-
-  .link-form input {
-    width: 100%;
-    min-height: 28px;
-    border: 1px solid var(--border-default);
-    border-radius: 6px;
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    font: inherit;
-    font-size: var(--font-size-sm);
-    font-weight: 500;
-    padding: 4px 8px;
   }
 </style>

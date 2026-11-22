@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { Checkbox, IconButton } from '@kenn-io/kit-ui'
+  import { Checkbox, Disclosure, IconButton } from '@kenn-io/kit-ui'
   import PlusIcon from '@lucide/svelte/icons/plus'
+  import PencilIcon from '@lucide/svelte/icons/pencil'
   import XIcon from '@lucide/svelte/icons/x'
 
   import type { KataTaskChecklistItem, KataTaskDetail } from '../lib/kata/types'
@@ -8,26 +9,25 @@
 
   interface Props {
     issue: KataTaskDetail
-    revealed: boolean
     disabled?: boolean
     draftResetGeneration?: number
     draftFenceGeneration?: number
     onPatchMetadata: (uid: string, patch: Record<string, unknown>) => boolean | Promise<boolean>
-    onReveal: () => void
   }
 
   let {
     issue,
-    revealed,
     disabled = false,
     draftResetGeneration = 0,
     draftFenceGeneration = 0,
     onPatchMetadata,
-    onReveal,
   }: Props = $props()
 
   let checklistPending = $state(false)
   let checklistDraft = $state('')
+  let addingItem = $state(false)
+  let renamingID = $state<string | null>(null)
+  let renameDraft = $state('')
   let checklistInput: HTMLInputElement | null = $state(null)
   let trackedUID = $state<string | null>(null)
   let lastDraftResetGeneration = $state<number | null>(null)
@@ -35,7 +35,8 @@
   let pendingDraftResetUID = $state<string | null>(null)
   let pendingDraftResetGeneration = $state<number | null>(null)
 
-  const visible = $derived(checklistItems().length > 0 || revealed)
+  const doneItems = $derived(checklistItems().filter((item) => item.done))
+  const openItems = $derived(checklistItems().filter((item) => !item.done))
 
   $effect(() => {
     const uid = issue.issue.uid
@@ -46,6 +47,8 @@
     if (uid === trackedUID) return
     trackedUID = uid
     checklistDraft = ''
+    renamingID = null
+    renameDraft = ''
     checklistPending = false
     pendingDraftResetUID = null
     pendingDraftResetGeneration = null
@@ -84,6 +87,8 @@
 
   function resetChecklistDraft(): void {
     checklistDraft = ''
+    renamingID = null
+    renameDraft = ''
     pendingDraftResetUID = null
     pendingDraftResetGeneration = null
     queueMicrotask(() => checklistInput?.focus())
@@ -91,9 +96,6 @@
 
   async function replaceChecklist(uid: string, next: KataTaskChecklistItem[]): Promise<boolean> {
     const changed = await onPatchMetadata(uid, { checklist: next })
-    if (changed && next.length === 0) {
-      onReveal()
-    }
     return changed
   }
 
@@ -127,6 +129,19 @@
     )
   }
 
+  async function renameChecklistItem(id: string): Promise<void> {
+    const text = renameDraft.trim()
+    if (!text) return
+    const uid = issue.issue.uid
+    const changed = await guarded(() =>
+      replaceChecklist(
+        uid,
+        checklistItems().map((item) => (item.id === id ? { ...item, text } : item)),
+      ),
+    )
+    if (changed && uid === issue.issue.uid && renamingID === id) renamingID = null
+  }
+
   async function addChecklistItem(): Promise<void> {
     const text = checklistDraft.trim()
     if (!text) return
@@ -152,41 +167,59 @@
   }
 </script>
 
-{#if visible}
-  <section class="checklist" aria-label="Checklist">
-    <div class="section-header">
-      <h3>Checklist</h3>
-    </div>
-    {#if checklistItems().length > 0}
-      <div class="checklist-items">
-        {#each checklistItems() as item (item.id)}
-          <div class="checklist-row" class:done={item.done}>
-            <Checkbox
-              class="checklist-item"
-              checked={item.done}
-              disabled={disabled || checklistPending}
-              label={item.text}
-              onchange={(done) => {
-                void toggleChecklistItem(item.id, done)
-              }}
-            />
-            <IconButton
-              size="sm"
-              tone="danger"
-              class="row-remove"
-              ariaLabel={`Remove ${item.text}`}
-              disabled={disabled || checklistPending}
-              onclick={() => {
-                void removeChecklistItem(item.id)
-              }}
-            >
-              <XIcon size={13} strokeWidth={1.9} />
-            </IconButton>
-          </div>
-        {/each}
-      </div>
+{#snippet checklistRow(item: KataTaskChecklistItem)}
+  <div class="checklist-row" class:done={item.done}>
+    {#if renamingID === item.id}
+      <input
+        aria-label="Rename checklist item"
+        bind:value={renameDraft}
+        disabled={disabled || checklistPending}
+        onkeydown={(event) => {
+          if (event.key === 'Enter') void renameChecklistItem(item.id)
+          else if (event.key === 'Escape') renamingID = null
+        }}
+      />
+    {:else}
+      <Checkbox
+        class="checklist-item"
+        checked={item.done}
+        disabled={disabled || checklistPending}
+        label={item.text}
+        onchange={(done) => void toggleChecklistItem(item.id, done)}
+      />
+      <IconButton
+        size="sm"
+        class="row-remove"
+        ariaLabel={`Rename ${item.text}`}
+        disabled={disabled || checklistPending}
+        onclick={() => {
+          renamingID = item.id
+          renameDraft = item.text
+        }}><PencilIcon size={13} aria-hidden="true" /></IconButton
+      >
     {/if}
-    <div class="checklist-add">
+    <IconButton
+      size="sm"
+      tone="danger"
+      class="row-remove"
+      ariaLabel={`Remove ${item.text}`}
+      disabled={disabled || checklistPending}
+      onclick={() => void removeChecklistItem(item.id)}
+      ><XIcon size={13} strokeWidth={1.9} /></IconButton
+    >
+  </div>
+{/snippet}
+<section class="checklist" aria-label="Checklist">
+  <div class="section-header">
+    <h3>Checklist <span>{doneItems.length} of {checklistItems().length} done</span></h3>
+  </div>
+  {#each openItems as item (item.id)}{@render checklistRow(item)}{/each}
+  {#if doneItems.length}
+    <Disclosure variant="plain" title={`${doneItems.length} done`}>
+      {#each doneItems as item (item.id)}{@render checklistRow(item)}{/each}
+    </Disclosure>
+  {/if}
+  {#if addingItem}<div class="checklist-add">
       <PlusIcon size={13} strokeWidth={1.9} aria-hidden="true" />
       <input
         bind:this={checklistInput}
@@ -200,21 +233,38 @@
         type="button"
         class="add-checklist-button"
         disabled={disabled || checklistPending || checklistDraft.trim() === ''}
-        onclick={() => {
-          void addChecklistItem()
-        }}
+        onclick={() => void addChecklistItem()}>Add</button
       >
-        Add
-      </button>
-    </div>
-  </section>
-{/if}
+    </div>{:else}
+    <button
+      type="button"
+      class="add-item"
+      disabled={disabled || checklistPending}
+      onclick={() => {
+        addingItem = true
+        queueMicrotask(() => checklistInput?.focus())
+      }}><PlusIcon size={13} aria-hidden="true" /> Add item</button
+    >
+  {/if}
+</section>
 
 <style>
   .checklist {
     display: grid;
     gap: 6px;
-    margin: 0 0 18px;
+    margin: 0 0 24px;
+  }
+
+  .add-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border: 0;
+    background: transparent;
+    color: var(--text-muted);
+    font: inherit;
+    cursor: pointer;
+    padding: 4px;
   }
 
   .section-header {
@@ -230,11 +280,6 @@
     color: var(--text-primary);
     font-size: var(--font-size-md);
     font-weight: var(--font-weight-semibold);
-  }
-
-  .checklist-items {
-    display: grid;
-    gap: 2px;
   }
 
   .checklist-row {
@@ -274,6 +319,12 @@
   .checklist-row:hover :global(.row-remove),
   .checklist-row :global(.row-remove:focus-visible) {
     opacity: 1;
+  }
+
+  @media (hover: none) {
+    .checklist-row :global(.row-remove) {
+      opacity: 1;
+    }
   }
 
   .checklist-add {

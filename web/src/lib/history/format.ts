@@ -24,14 +24,33 @@ export interface KataEventDescriptor {
   tone: KataEventTone
 }
 
+export function describeResolution(event: KataTaskEvent): string {
+  const payload = event.payload ?? {}
+  const reason = typeof payload.reason === 'string' ? payload.reason : 'done'
+  const labels: Record<string, string> = {
+    done: 'Done',
+    wontfix: "Won't do",
+    duplicate: 'Duplicate',
+    superseded: 'Superseded',
+    'audit-no-change': 'No change needed',
+  }
+  const evidence = Array.isArray(payload.evidence) ? payload.evidence : []
+  const target = evidence.find(
+    (item) => item && typeof item === 'object' && typeof item.issue_ref === 'string',
+  )
+  const label = labels[reason] ?? reason
+  return target && (reason === 'duplicate' || reason === 'superseded')
+    ? `${label} ${reason === 'duplicate' ? 'of' : 'by'} ${target.issue_ref}`
+    : label
+}
+
 export function describeKataEvent(event: KataTaskEvent): KataEventDescriptor {
   const payload = event.payload ?? {}
   switch (event.type) {
     case 'issue.created':
       return { icon: PlusIcon, label: 'created the task', tone: 'neutral' }
     case 'issue.closed': {
-      const reason = (payload.reason as string | undefined) ?? 'done'
-      return { icon: CheckCircleIcon, label: `closed (${reason})`, tone: 'positive' }
+      return { icon: CheckCircleIcon, label: describeResolution(event), tone: 'positive' }
     }
     case 'issue.reopened':
       return { icon: RotateCcwIcon, label: 'reopened', tone: 'warning' }

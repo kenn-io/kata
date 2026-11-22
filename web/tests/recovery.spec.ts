@@ -28,9 +28,7 @@ test('a 412 refresh preserves the current checklist draft for explicit retry', a
   const credentials = await kata.launch(page)
   const issue = await kata.seedIssue(page, credentials, { title: 'Conflict example task' })
   await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
-  await page.getByRole('button', { name: 'Edit issue' }).click()
-  await page.getByRole('button', { name: 'More actions' }).click()
-  await page.getByRole('menuitem', { name: 'Add checklist' }).click()
+  await page.getByRole('button', { name: 'Add item' }).click()
   await page.getByRole('textbox', { name: 'New checklist item' }).fill('Local conflict draft')
 
   const external = await kata.request(
@@ -54,7 +52,6 @@ test('daemon restart keeps an old draft visible but unsubmittable', async ({ pag
   const credentials = await storedCredentials(page)
   const issue = await kata.seedIssue(page, credentials, { title: 'Restart draft example' })
   await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
-  await page.getByRole('button', { name: 'Edit issue' }).click()
   await page.getByRole('textbox', { name: 'Comment' }).fill('Draft survives process restart')
   await kata.restart()
   // Wait for the renewed session to restore writable authority, so the comment
@@ -87,7 +84,7 @@ test('read-only polling authority fences mutations without opening SSE', async (
   await expect(page.getByRole('status', { name: 'Active connection' })).toContainText(
     'Credential: Read-only',
   )
-  await expect(page.getByRole('button', { name: 'Edit issue' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Edit title' })).toBeDisabled()
   expect(streamRequests).toBe(0)
 })
 
@@ -117,9 +114,7 @@ test('structured 409 refusals preserve the draft and expose code and detail', as
   const credentials = await kata.launch(page)
   const issue = await kata.seedIssue(page, credentials, { title: 'Domain refusal example' })
   await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
-  await page.getByRole('button', { name: 'Edit issue' }).click()
-  await page.getByRole('button', { name: 'More actions' }).click()
-  await page.getByRole('menuitem', { name: 'Add checklist' }).click()
+  await page.getByRole('button', { name: 'Add item' }).click()
   await page.getByRole('textbox', { name: 'New checklist item' }).fill('Preserved refusal draft')
   await page.route('**/api/v1/projects/*/issues/*/metadata', async (route) => {
     await route.fulfill({
@@ -146,7 +141,6 @@ test('uncertain writes refresh authority before preserving an editable draft', a
   const credentials = await kata.launch(page)
   const issue = await kata.seedIssue(page, credentials, { title: 'Uncertain example task' })
   await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
-  await page.getByRole('button', { name: 'Edit issue' }).click()
   await page.route('**/api/v1/projects/*/issues/*', async (route) => {
     if (route.request().method() === 'PATCH') await route.abort('connectionreset')
     else await route.continue()

@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { KataTaskEvent } from '../lib/kata/types'
+  import { Disclosure } from '@kenn-io/kit-ui'
   import { formatTimestamp } from '@kenn-io/kit-ui/utils/time'
 
   import { closingAttachments } from '../lib/history/attachments'
@@ -8,12 +9,19 @@
 
   interface Props {
     events: readonly KataTaskEvent[]
+    selfActor?: string | undefined
     metadata?: Record<string, unknown> | undefined
     attachmentLinks?: boolean | undefined
     pending?: boolean | undefined
   }
 
-  let { events, metadata = {}, attachmentLinks = true, pending = false }: Props = $props()
+  let {
+    events,
+    selfActor = undefined,
+    metadata = {},
+    attachmentLinks = true,
+    pending = false,
+  }: Props = $props()
 
   const fullTimestamp = new Intl.DateTimeFormat(undefined, {
     dateStyle: 'full',
@@ -65,52 +73,58 @@
 </script>
 
 <section class="events" aria-labelledby="kata-events-title">
-  <h3 id="kata-events-title">Events</h3>
+  <h3 id="kata-events-title">
+    History {#if !pending && events.length === 0}<span>No events</span>{/if}
+  </h3>
   {#if pending}
     <p role="status" aria-label="Loading events">Loading events…</p>
-  {:else if events.length === 0}
-    <p>No events</p>
-  {:else}
-    <ul>
-      {#each events as event (event.event_uid)}
-        {@const descriptor = describeKataEvent(event)}
-        {@const EventIcon = descriptor.icon}
-        {@const time = eventTime(event.created_at)}
-        {@const session = closingSession(event)}
-        <li class="event-row" data-tone={descriptor.tone}>
-          <span class="event-icon" aria-hidden="true">
-            <EventIcon size={14} strokeWidth={1.8} />
-          </span>
-          <span class="event-label">{descriptor.label}</span>
-          {#if time}
-            <time class="event-time" datetime={event.created_at} title={time.full}
-              >{time.short}</time
+  {:else if events.length > 0}
+    <Disclosure
+      variant="plain"
+      title={`${events.length} ${events.length === 1 ? 'event' : 'events'}`}
+      ><ul>
+        {#each events as event (event.event_uid)}
+          {@const descriptor = describeKataEvent(event)}
+          {@const EventIcon = descriptor.icon}
+          {@const time = eventTime(event.created_at)}
+          {@const session = closingSession(event)}
+          <li class="event-row" data-tone={descriptor.tone}>
+            <span class="event-icon" aria-hidden="true">
+              <EventIcon size={14} strokeWidth={1.8} />
+            </span>
+            <span class="event-label"
+              >{event.actor === selfActor ? 'You' : event.actor} {descriptor.label}</span
             >
-          {/if}
-          {#each closingAttachments(event, metadata) as attachment, index (index)}
-            <span class="event-session">
-              {#if attachmentLinks && attachment.href}<a href={attachment.href}
-                  >{attachment.label}</a
-                >{:else}{attachment.label}{/if}
-            </span>
-          {/each}
-          {#if session}
-            <span class="event-session">
-              {#if session.url}
-                <a
-                  href={session.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title="Open session in AgentsView">{session.label}</a
-                >
-              {:else}
-                {session.label}
-              {/if}
-            </span>
-          {/if}
-        </li>
-      {/each}
-    </ul>
+            {#if time}
+              <time class="event-time" datetime={event.created_at} title={time.full}
+                >{time.short}</time
+              >
+            {/if}
+            {#each closingAttachments(event, metadata) as attachment, index (index)}
+              <span class="event-session">
+                {#if attachmentLinks && attachment.href}<a href={attachment.href}
+                    >{attachment.label}</a
+                  >{:else}{attachment.label}{/if}
+              </span>
+            {/each}
+            {#if session}
+              <span class="event-session">
+                {#if session.url}
+                  <a
+                    href={session.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="Open session in AgentsView">{session.label}</a
+                  >
+                {:else}
+                  {session.label}
+                {/if}
+              </span>
+            {/if}
+          </li>
+        {/each}
+      </ul></Disclosure
+    >
   {/if}
 </section>
 
@@ -120,6 +134,12 @@
     color: var(--text-primary);
     font-size: var(--font-size-md);
     font-weight: var(--font-weight-semibold);
+  }
+
+  .events h3 span {
+    color: var(--text-muted);
+    font-size: var(--font-size-xs);
+    font-weight: normal;
   }
 
   .events p {

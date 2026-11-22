@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte'
+import { cleanup, fireEvent, render, screen, within, waitFor } from '@testing-library/svelte'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createKataLinkFilters } from '../lib/kata/linkFilters'
@@ -8,51 +8,61 @@ import IssueLinks from './IssueLinks.svelte'
 describe('IssueLinks', () => {
   afterEach(cleanup)
 
-  it('renders parent, child, blocks, blocked-by, and related directions from accepted authority', () => {
+  it('groups links by direction', () => {
     renderLinks()
-
     const links = screen.getByRole('region', { name: 'Links' })
-    for (const relation of ['parent', 'child', 'blocks', 'blocked_by', 'related']) {
-      expect(within(links).getByText(relation)).not.toBeNull()
+    for (const group of ['Parent 1', 'Child 1', 'Blocks 1', 'Blocked by 1', 'Related 1']) {
+      expect(within(links).getByText(group)).not.toBeNull()
     }
   })
 
-  it('creates related links and preserves the draft until accepted replacement authority', async () => {
+  it('searches and adds a related task', async () => {
     const onEditIssue = vi.fn(async () => true)
-    const view = renderLinks({ onEditIssue, draftResetGeneration: 0 })
-
-    await fireEvent.input(screen.getByLabelText('Related issue'), {
-      target: { value: 'example-workspace#shared-1' },
+    const result = {
+      uid: 'peer',
+      qualified_id: 'example-workspace#shared-1',
+      short_id: 'shared-1',
+      project_uid: 'project-b',
+      project_name: 'example-workspace',
+      title: 'Shared task',
+      status: 'open',
+    }
+    renderLinks({ onEditIssue, searchReferences: vi.fn(async () => [result]) })
+    await fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Search tasks: Find task' }))
+    await fireEvent.input(screen.getByPlaceholderText('Search tasks'), {
+      target: { value: 'Shared' },
     })
-    await fireEvent.click(screen.getByRole('button', { name: 'Link' }))
-
-    expect(onEditIssue).toHaveBeenCalledWith('issue-selected', {
-      links_delta: { add_related: ['example-workspace#shared-1'] },
-    })
-    expect((screen.getByLabelText('Related issue') as HTMLInputElement).value).toBe(
-      'example-workspace#shared-1',
+    await waitFor(() => expect(screen.getByRole('option', { name: /Shared task/ })).toBeTruthy())
+    await fireEvent.mouseDown(screen.getByRole('option', { name: /Shared task/ }))
+    await waitFor(() =>
+      expect(onEditIssue).toHaveBeenCalledWith('issue-selected', {
+        links_delta: { add_related: ['example-workspace#shared-1'] },
+      }),
     )
-
-    await view.rerender({ draftResetGeneration: 1 })
-    expect((screen.getByLabelText('Related issue') as HTMLInputElement).value).toBe('')
   })
 
-  it('resets a related-link draft after authentication authority changes', async () => {
-    const view = renderLinks({ draftFenceGeneration: 0 })
-    await fireEvent.input(screen.getByLabelText('Related issue'), {
-      target: { value: 'old-authority-ref' },
+  it('accepts a manually entered task reference', async () => {
+    const onEditIssue = vi.fn(async () => true)
+    renderLinks({ onEditIssue })
+    await fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Search tasks: Find task' }))
+    await fireEvent.input(screen.getByPlaceholderText('Search tasks'), {
+      target: { value: 'other#abcd' },
     })
-
-    await view.rerender({ draftFenceGeneration: 1 })
-
-    expect((screen.getByLabelText('Related issue') as HTMLInputElement).value).toBe('')
+    await fireEvent.mouseDown(await screen.findByRole('option', { name: 'Use "other#abcd"' }))
+    await waitFor(() =>
+      expect(onEditIssue).toHaveBeenCalledWith('issue-selected', {
+        links_delta: { add_related: ['other#abcd'] },
+      }),
+    )
   })
 
   it('navigates resolved peers by their stable identity', async () => {
     const onSelectIssue = vi.fn()
     renderLinks({ onSelectIssue })
 
-    await fireEvent.click(screen.getByRole('button', { name: /parent parent-1 Parent issue/ }))
+    await fireEvent.click(screen.getByRole('button', { name: /Parent parent-1 Parent issue/ }))
     expect(onSelectIssue).toHaveBeenCalledWith({ uid: 'issue-parent' })
   })
 
@@ -61,7 +71,7 @@ describe('IssueLinks', () => {
     renderLinks({ issueCatalog: [], onSelectIssue })
 
     const parentLink = screen.getByRole('button', {
-      name: /parent parent-1 open/,
+      name: /Parent parent-1/,
     }) as HTMLButtonElement
     expect(parentLink.disabled).toBe(false)
     await fireEvent.click(parentLink)
@@ -86,7 +96,12 @@ describe('IssueLinks', () => {
       linkFilters: createKataLinkFilters('closed'),
     })
 
-    expect(screen.getByRole('button', { name: /parent example-workspace#parent-1/ })).not.toBeNull()
+    const closed = screen
+      .getByRole('button', { name: /Parent example-workspace#parent-1/ })
+      .closest('details')!
+    expect(closed.open).toBe(false)
+    await fireEvent.click(within(closed).getByText('1 closed'))
+    expect(closed.open).toBe(true)
 
     await view.rerender({ linkFilters: createKataLinkFilters('open') })
     expect(screen.queryByRole('button', { name: /example-workspace#parent-1/ })).toBeNull()

@@ -9,6 +9,7 @@
     recurrences: readonly KataRecurrence[]
     canCreate?: boolean
     readOnly?: boolean
+    compact?: boolean
     onCreate?: () => void
     onEdit?: (rec: KataRecurrence) => void
     onDelete?: (rec: KataRecurrence) => void
@@ -18,6 +19,7 @@
     recurrences,
     canCreate = false,
     readOnly = false,
+    compact = false,
     onCreate = () => {},
     onEdit = () => {},
     onDelete = () => {},
@@ -53,48 +55,60 @@
   </div>
 {/snippet}
 
-<section class="recurrence-panel" aria-label="Recurrences">
-  <header class="head">
-    <h3>Recurring</h3>
-    {#if !readOnly}
-      <button
-        type="button"
-        class="add"
-        disabled={!canCreate}
-        onclick={onCreate}
-        aria-label="+ New recurrence">+ New</button
-      >
+{#if compact}
+  <div class="compact-recurrences">
+    {#each recurrences as rec (rec.uid)}
+      <span>{formatRRule(rec.rrule)}</span>
+      {#if !readOnly}
+        <button type="button" onclick={() => onEdit(rec)}>Edit</button>
+        <button type="button" onclick={() => onDelete(rec)}>Stop</button>
+      {/if}
+    {/each}
+  </div>
+{:else}
+  <section class="recurrence-panel" aria-label="Recurrences">
+    <header class="head">
+      <h3>Recurring</h3>
+      {#if !readOnly}
+        <button
+          type="button"
+          class="add"
+          disabled={!canCreate}
+          onclick={onCreate}
+          aria-label="+ New recurrence">+ New</button
+        >
+      {/if}
+    </header>
+    {#if recurrences.length === 0}
+      <p class="empty">No recurring tasks</p>
+    {:else}
+      <div class="recurrence-list">
+        {#each recurrences as rec (rec.uid)}
+          <div class="recurrence-row">
+            {#if readOnly}
+              <div class="row-main read-only">{@render recurrenceContent(rec)}</div>
+            {:else}
+              <button
+                type="button"
+                class="row-main"
+                aria-label={rec.template_title}
+                onclick={() => onEdit(rec)}
+              >
+                {@render recurrenceContent(rec)}
+              </button>
+              <button
+                type="button"
+                class="row-delete"
+                aria-label="Delete recurrence"
+                onclick={() => onDelete(rec)}><Trash2 size={14} /></button
+              >
+            {/if}
+          </div>
+        {/each}
+      </div>
     {/if}
-  </header>
-  {#if recurrences.length === 0}
-    <p class="empty">No recurring tasks</p>
-  {:else}
-    <div class="recurrence-list">
-      {#each recurrences as rec (rec.uid)}
-        <div class="recurrence-row">
-          {#if readOnly}
-            <div class="row-main read-only">{@render recurrenceContent(rec)}</div>
-          {:else}
-            <button
-              type="button"
-              class="row-main"
-              aria-label={rec.template_title}
-              onclick={() => onEdit(rec)}
-            >
-              {@render recurrenceContent(rec)}
-            </button>
-            <button
-              type="button"
-              class="row-delete"
-              aria-label="Delete recurrence"
-              onclick={() => onDelete(rec)}><Trash2 size={14} /></button
-            >
-          {/if}
-        </div>
-      {/each}
-    </div>
-  {/if}
-</section>
+  </section>
+{/if}
 
 <style>
   .recurrence-panel {

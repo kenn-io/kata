@@ -3,7 +3,14 @@
   /* eslint-disable svelte/prefer-svelte-reactivity -- reference counts are a transient search-result lookup. */
   import { commentEvidenceLength, trimCommentEvidence } from '../lib/kata/commentEvidence'
   import { CommentRelations } from '@kenn-io/kata-ui'
-  import { Avatar, Button, Markdown, MentionTextarea, type MentionOption } from '@kenn-io/kit-ui'
+  import {
+    Avatar,
+    Button,
+    Markdown,
+    MentionTextarea,
+    SegmentedControl,
+    type MentionOption,
+  } from '@kenn-io/kit-ui'
   import {
     formatRelativeTime as timeAgo,
     formatTimestamp as localDateTimeLabel,
@@ -17,6 +24,7 @@
   type Reference = UIIssueReference
 
   interface Props {
+    selfActor?: string | undefined
     selectedCommentUID?: string | undefined
     // True while the task shows the list's copy and its comments load.
     pending?: boolean | undefined
@@ -53,6 +61,7 @@
 
   let {
     issue,
+    selfActor = undefined,
     selectedCommentUID,
     pending = false,
     navigationActive = true,
@@ -99,8 +108,6 @@
   })
 
   let commentDraft = $state('')
-  const replyKindID = $props.id()
-  const replyKinds: KataReplyKind[] = ['reply', 'confirm', 'refute', 'supersede']
   let replyDraft = $state<KataCommentReplyIntent | undefined>()
   let lastInitialReply: KataCommentReplyIntent | undefined
   $effect(() => {
@@ -256,8 +263,7 @@
   }
 </script>
 
-<section class="comments" aria-labelledby="kata-comments-title">
-  <h3 id="kata-comments-title">Comments</h3>
+{#snippet composer()}
   <form
     class="comment-composer"
     onsubmit={(event) => {
@@ -269,18 +275,24 @@
       <div class="reply-target">
         Reply to {issue.comments.find((c) => c.uid === replyDraft?.replyTo)?.handle ??
           replyDraft.replyTo}
-        <label for={replyKindID}>Reply kind</label>
-        <select
-          id={replyKindID}
-          aria-label="Reply kind"
+        <SegmentedControl
+          ariaLabel="Reply kind"
+          value={replyDraft.kind}
           disabled={actionsDisabled}
-          bind:value={() => replyDraft?.kind ?? 'reply', updateReplyKind}
-          >{#each replyKinds as kind (kind)}<option value={kind}>{kind}</option>{/each}</select
-        >
+          options={[
+            { value: 'reply', label: 'Reply' },
+            { value: 'confirm', label: 'Confirm, with evidence' },
+            { value: 'refute', label: 'Refute, with evidence' },
+            { value: 'supersede', label: 'Supersede this comment' },
+          ]}
+          onchange={(kind) => updateReplyKind(kind as KataReplyKind)}
+        />
         <Button size="sm" label="Cancel reply" disabled={actionsDisabled} onclick={cancelReply} />
       </div>
       {#if evidenceTooShort}<p>
-          Confirm and refute replies need at least 40 characters of evidence.
+          Confirm and refute replies need at least 40 characters of evidence. {commentEvidenceLength(
+            commentDraft,
+          )}/40
         </p>{/if}
     {/if}
     <MentionTextarea
@@ -315,12 +327,15 @@
         }}
       />{/if}
   </form>
+{/snippet}
+
+<section class="comments" aria-labelledby="kata-comments-title">
+  <h3 id="kata-comments-title">Comments</h3>
+
   {#if showList}
     {#if pending}
       <p role="status" aria-label="Loading comments">Loading comments…</p>
-    {:else if sortedComments.length === 0}
-      <p>No comments</p>
-    {:else}
+    {:else if sortedComments.length > 0}
       <div class="comment-list" bind:this={listElement}>
         {#each sortedComments as comment (comment.id)}
           <article
@@ -342,9 +357,9 @@
                 size={20}
               />
               <span class="author"
-                >{comment.teammate
-                  ? `${comment.author} / ${comment.teammate}`
-                  : comment.author}</span
+                >{comment.author === selfActor ? 'You' : comment.author}{comment.teammate
+                  ? ` / ${comment.teammate}`
+                  : ''}</span
               >
               <time datetime={comment.created_at} title={localDateTimeLabel(comment.created_at)}>
                 {timeAgo(comment.created_at)}
@@ -364,18 +379,24 @@
               partial={comment.backlinks_truncated ?? false}
               onOpen={onOpenComment ? (link) => openComment(link, comment.uid) : undefined}
             />
-            {#if comment.uid && comment.handle}<div class="comment-links">
-                {#each replyKinds as kind (kind)}<Button
-                    size="sm"
-                    label={kind[0]!.toUpperCase() + kind.slice(1)}
-                    disabled={actionsDisabled || issue.issue.status !== 'open'}
-                    onclick={() => beginReply(comment.uid!, kind)}
-                  />{/each}
-              </div>{/if}
+            {#if comment.uid && comment.handle}
+              <div class="comment-links">
+                <Button
+                  size="sm"
+                  label="Reply"
+                  disabled={actionsDisabled || issue.issue.status !== 'open'}
+                  onclick={() => beginReply(comment.uid!, 'reply')}
+                />
+              </div>
+              {#if replyDraft?.replyTo === comment.uid}{@render composer()}{/if}
+            {/if}
           </article>
         {/each}
       </div>
     {/if}
+  {/if}
+  {#if !replyDraft || !issue.comments.some((comment) => comment.uid === replyDraft?.replyTo)}
+    {@render composer()}
   {/if}
 </section>
 

@@ -12,7 +12,7 @@ test('fenced code highlights in the read-only issue description under the produc
   })
   await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
 
-  const detail = page.getByRole('region', { name: 'Kata issue detail', exact: true })
+  const detail = page.getByRole('region', { name: 'Task detail', exact: true })
   const code = detail.locator('.kit-markdown').first().locator('pre code')
   await expect(code).toBeVisible()
   await expect
@@ -51,7 +51,7 @@ test('Kenn links in issue bodies and comments work in read and edit views', asyn
     }
   }
 
-  const detail = page.getByRole('region', { name: 'Kata issue detail', exact: true })
+  const detail = page.getByRole('region', { name: 'Task detail', exact: true })
   await expectLinks(detail)
   await page.evaluate(() => {
     document.addEventListener(
@@ -73,6 +73,5 @@ test('Kenn links in issue bodies and comments work in read and edit views', asyn
     'data-link-click',
     '{"href":"kenn://example/note","canceled":false}',
   )
-  await page.getByRole('button', { name: 'Edit issue' }).click()
-  await expectLinks(page.getByRole('region', { name: 'Kata issue editor', exact: true }))
+  await expectLinks(page.getByRole('region', { name: 'Task detail', exact: true }))
 })

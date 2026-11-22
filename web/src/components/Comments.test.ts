@@ -16,7 +16,7 @@ describe('Comments', () => {
       target: { value: 'Too short' },
     })
     expect(
-      screen.getByText('Confirm and refute replies need at least 40 characters of evidence.'),
+      screen.getByText('Confirm and refute replies need at least 40 characters of evidence. 9/40'),
     ).toBeTruthy()
     expect(
       (screen.getByRole('button', { name: 'Add comment' }) as HTMLButtonElement).disabled,
@@ -109,6 +109,13 @@ describe('Comments', () => {
     const comments = screen.getAllByRole('article')
     await waitFor(() => expect(comments[0]?.textContent).toContain('Newest comment'))
     expect(comments[1]?.textContent).toContain('First comment')
+  })
+
+  it('identifies your comment while retaining its teammate', () => {
+    const task = issue()
+    task.comments[0]!.teammate = 'worker-a'
+    renderComments({ issue: task, selfActor: 'user-a' })
+    expect(screen.getByText('You / worker-a')).toBeTruthy()
   })
 
   it('offers force only for the draft that received a duplicate refusal', async () => {

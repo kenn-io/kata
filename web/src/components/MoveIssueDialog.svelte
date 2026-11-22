@@ -1,44 +1,22 @@
 <script lang="ts">
   /* eslint-disable svelte/prefer-svelte-reactivity */
-  import { IconButton, SearchInput } from '@kenn-io/kit-ui'
-  import MoreHorizontalIcon from '@lucide/svelte/icons/more-horizontal'
+  import { SearchInput } from '@kenn-io/kit-ui'
   import { tick } from 'svelte'
   import type { KataProjectSummary, KataTaskDetail } from '../lib/kata/types'
-  import DeleteIssueDialog from './DeleteIssueDialog.svelte'
 
   interface Props {
     issue: KataTaskDetail
     projects: KataProjectSummary[]
-    hasChecklist: boolean
-    hasRecurrence: boolean
     movePending?: boolean | undefined
     allowMove?: boolean | undefined
-    allowRecurrence?: boolean | undefined
-    allowDelete?: boolean | undefined
     onMoveIssue: (toProjectUID: string) => boolean | Promise<boolean>
-    onAddChecklist: () => void
-    onCreateRecurrence: () => void
-    onDeleteIssue: () => boolean | Promise<boolean>
   }
 
-  let {
-    issue,
-    projects,
-    hasChecklist,
-    hasRecurrence,
-    movePending = false,
-    allowMove = true,
-    allowRecurrence = true,
-    allowDelete = true,
-    onMoveIssue,
-    onAddChecklist,
-    onCreateRecurrence,
-    onDeleteIssue,
-  }: Props = $props()
+  let { issue, projects, movePending = false, allowMove = true, onMoveIssue }: Props = $props()
 
   let menuOpen = $state(false)
-  let menuView = $state<'actions' | 'move'>('actions')
   let menuRoot: HTMLDivElement | null = $state(null)
+  let trigger: HTMLElement | null = null
   let moveSearchInput = $state() as HTMLInputElement
   let moveQuery = $state('')
   let pendingMoves = $state.raw(
@@ -46,16 +24,12 @@
   )
   let interactionGeneration = 0
   let moveOperationGeneration = 0
-  let deleteOpen = $state(false)
   let trackedUID = $state<string | null>(null)
 
   const activeMove = $derived(pendingMoves.get(issue.issue.uid) ?? null)
   const activeMoveOperation = $derived(activeMove?.operation ?? null)
   const movingProjectUID = $derived(activeMove?.project.uid ?? null)
   const pendingProject = $derived(activeMove?.project ?? null)
-  const canAddChecklist = $derived(!hasChecklist)
-  const canCreateRecurrence = $derived(allowRecurrence && !hasRecurrence)
-  const canDeleteIssue = $derived(allowDelete && issue.issue.status !== 'closed')
   const eligibleProjects = $derived.by(() => {
     if (!allowMove) return []
     return projects
@@ -104,18 +78,13 @@
         )
       : available
   })
-  const hasAnyAction = $derived(
-    canAddChecklist || canCreateRecurrence || canDeleteIssue || eligibleProjects.length > 0,
-  )
 
   $effect(() => {
     if (issue.issue.uid === trackedUID) return
     trackedUID = issue.issue.uid
     interactionGeneration += 1
     menuOpen = false
-    menuView = 'actions'
     moveQuery = ''
-    deleteOpen = false
   })
 
   $effect(() => {
@@ -140,30 +109,21 @@
   }
 
   function triggerButton(): HTMLButtonElement | null {
-    return menuRoot?.querySelector<HTMLButtonElement>('.overflow-trigger') ?? null
+    return trigger instanceof HTMLButtonElement ? trigger : null
   }
 
   function closeMenu(force = false, restoreFocus = false): void {
     if ((movePending || activeMoveOperation !== null) && !force) return
     interactionGeneration += 1
     menuOpen = false
-    menuView = 'actions'
     moveQuery = ''
     if (restoreFocus) queueMicrotask(() => triggerButton()?.focus())
   }
 
-  function revealChecklist(): void {
-    closeMenu()
-    onAddChecklist()
-  }
-
-  function openCreateRecurrence(): void {
-    closeMenu()
-    onCreateRecurrence()
-  }
-
-  async function openMovePicker(): Promise<void> {
-    menuView = 'move'
+  export async function open(): Promise<void> {
+    if (!allowMove || movePending || activeMoveOperation !== null) return
+    trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    menuOpen = true
     moveQuery = ''
     await tick()
     moveSearchInput?.focus()
@@ -199,123 +159,45 @@
       }
     }
   }
-
-  function openDeleteDialog(): void {
-    closeMenu()
-    deleteOpen = true
-  }
 </script>
 
-{#if hasAnyAction}
-  <div class="overflow-host" bind:this={menuRoot} role="presentation">
-    <IconButton
-      class="overflow-trigger"
-      ariaLabel="More actions"
-      ariaHaspopup={menuView === 'move' ? 'dialog' : 'menu'}
-      ariaExpanded={menuOpen}
-      onclick={() => {
-        if (movePending || activeMoveOperation !== null) return
-        if (menuOpen) closeMenu()
-        else menuOpen = true
-      }}
+<div class="overflow-host" bind:this={menuRoot} role="presentation">
+  {#if menuOpen}
+    <div
+      class="move-picker kit-popover-card"
+      role="dialog"
+      aria-label="Move to another project"
+      tabindex="-1"
+      onkeydown={handleMoveKeydown}
     >
-      <MoreHorizontalIcon size={14} strokeWidth={1.9} />
-    </IconButton>
-    {#if menuOpen && menuView === 'actions'}
-      <ul class="overflow-menu kit-popover-card" role="menu" aria-label="Task actions">
-        {#if eligibleProjects.length > 0}
-          <li>
-            <button
-              type="button"
-              class="overflow-item"
-              role="menuitem"
-              onclick={() => void openMovePicker()}
-            >
-              Move to another project
-            </button>
-          </li>
-        {/if}
-        {#if canAddChecklist}
-          <li>
-            <button type="button" class="overflow-item" role="menuitem" onclick={revealChecklist}>
-              Add checklist
-            </button>
-          </li>
-        {/if}
-        {#if canCreateRecurrence}
-          <li>
-            <button
-              type="button"
-              class="overflow-item"
-              role="menuitem"
-              onclick={openCreateRecurrence}
-            >
-              Create recurrence...
-            </button>
-          </li>
-        {/if}
-        {#if canDeleteIssue}
-          {#if eligibleProjects.length > 0 || canAddChecklist || canCreateRecurrence}
-            <li class="overflow-separator" role="separator"></li>
-          {/if}
-          <li>
-            <button
-              type="button"
-              class="overflow-item overflow-item--danger"
-              role="menuitem"
-              onclick={openDeleteDialog}
-            >
-              Delete issue
-            </button>
-          </li>
-        {/if}
-      </ul>
-    {:else if menuOpen}
-      <div
-        class="move-picker kit-popover-card"
-        role="dialog"
-        aria-label="Move to another project"
-        tabindex="-1"
-        onkeydown={handleMoveKeydown}
-      >
-        <SearchInput
-          bind:value={moveQuery}
-          bind:inputEl={moveSearchInput}
-          block
-          ariaLabel="Find project"
-          placeholder="Search projects"
-        />
-        <div class="move-options" aria-label="Project destinations">
-          {#each displayedProjects as project (project.uid)}
-            <button
-              type="button"
-              disabled={movePending || activeMoveOperation !== null}
-              aria-busy={movingProjectUID === project.uid}
-              onclick={() => void moveIssue(project)}
-            >
-              <span class="move-project-name">{project.name}</span>
-              {#if destinationContext(project)}
-                <span class="move-project-context">{destinationContext(project)}</span>
-              {/if}
-              <span class="move-project-count">{project.open_count}</span>
-            </button>
-          {:else}
-            <p role="status">No matching projects</p>
-          {/each}
-        </div>
+      <SearchInput
+        bind:value={moveQuery}
+        bind:inputEl={moveSearchInput}
+        block
+        ariaLabel="Find project"
+        placeholder="Search projects"
+      />
+      <div class="move-options" aria-label="Project destinations">
+        {#each displayedProjects as project (project.uid)}
+          <button
+            type="button"
+            disabled={movePending || activeMoveOperation !== null}
+            aria-busy={movingProjectUID === project.uid}
+            onclick={() => void moveIssue(project)}
+          >
+            <span class="move-project-name">{project.name}</span>
+            {#if destinationContext(project)}
+              <span class="move-project-context">{destinationContext(project)}</span>
+            {/if}
+            <span class="move-project-count">{project.open_count}</span>
+          </button>
+        {:else}
+          <p role="status">No matching projects</p>
+        {/each}
       </div>
-    {/if}
-  </div>
-{/if}
-
-<DeleteIssueDialog
-  open={deleteOpen}
-  {issue}
-  onClose={() => {
-    deleteOpen = false
-  }}
-  {onDeleteIssue}
-/>
+    </div>
+  {/if}
+</div>
 
 <style>
   .overflow-host {
@@ -323,43 +205,12 @@
     display: inline-flex;
   }
 
-  .overflow-menu,
   .move-picker {
     position: absolute;
     top: calc(100% + 6px);
     right: 0;
     z-index: 35;
     margin: 0;
-  }
-
-  .overflow-menu {
-    min-width: 210px;
-    padding: 5px;
-    list-style: none;
-  }
-
-  .overflow-item {
-    width: 100%;
-    border-radius: 5px;
-    padding: 7px 9px;
-    color: var(--text-secondary);
-    font-size: var(--font-size-sm);
-    text-align: left;
-  }
-
-  .overflow-item:hover {
-    background: var(--bg-surface-hover);
-    color: var(--text-primary);
-  }
-
-  .overflow-item--danger {
-    color: var(--accent-red);
-  }
-
-  .overflow-separator {
-    height: 1px;
-    margin: 5px 2px;
-    background: var(--border-muted);
   }
 
   .move-picker {

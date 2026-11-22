@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button, ImagePreview, VideoPlayer } from '@kenn-io/kit-ui'
+  import { Button, CopyButton, ImagePreview, VideoPlayer } from '@kenn-io/kit-ui'
   import { SvelteMap } from 'svelte/reactivity'
   import { onDestroy, untrack } from 'svelte'
   import type { KataAttachment } from '../types.js'
@@ -7,6 +7,8 @@
   interface Props {
     attachments?: Record<string, KataAttachment> | undefined
     baseURL: string
+    issueRef?: string | undefined
+    showEmpty?: boolean | undefined
     fetchAttachment?: ((url: string) => Promise<Blob>) | undefined
     uploadAttachment?: ((file: File) => Promise<void>) | undefined
     attachmentsEnabled?: boolean | undefined
@@ -15,6 +17,8 @@
   let {
     attachments = {},
     baseURL,
+    issueRef,
+    showEmpty = false,
     fetchAttachment,
     uploadAttachment,
     attachmentsEnabled = false,
@@ -46,6 +50,9 @@
   )
   const references = new Map<string, string>()
   let previousBaseURL: string | undefined
+  function shellQuote(value: string): string {
+    return `'${value.replaceAll("'", "'\\''")}'`
+  }
   function clearPreviews(): void {
     generation++
     for (const url of previews.values()) URL.revokeObjectURL(url)
@@ -131,10 +138,11 @@
   }
 </script>
 
-{#if entries.length > 0 || canUpload}
+{#if entries.length > 0 || canUpload || showEmpty}
   <section aria-label="Attachments" class="attachments">
     <header>
       <h3>Attachments</h3>
+      {#if entries.length === 0 && showEmpty}<span class="empty">No attachments.</span>{/if}
       {#if canUpload}
         <Button
           size="sm"
@@ -164,7 +172,16 @@
             {#if attachmentsEnabled}
               <div class="file-actions">
                 {#if entry.size > 100 << 20}
-                  <code>kata docbank attachments get &lt;issue&gt; {entry.id}</code>
+                  {#if issueRef}
+                    {@const command = `kata docbank attachments get ${shellQuote(issueRef)} ${shellQuote(entry.id)}`}
+                    <code>{command}</code>
+                    <CopyButton
+                      text={command}
+                      ariaLabel={`Copy download command for ${entry.name}`}
+                    />
+                  {:else}
+                    <code>kata docbank attachments get &lt;issue&gt; {entry.id}</code>
+                  {/if}
                 {:else}
                   {#if (entry.image || entry.video) && !previews.has(entry.id)}
                     <Button
@@ -211,6 +228,11 @@
   }
   .attachments {
     min-width: 0;
+  }
+  .empty {
+    margin-right: auto;
+    color: var(--text-muted);
+    font-size: var(--font-size-xs);
   }
   .preview {
     grid-column: 1 / -1;

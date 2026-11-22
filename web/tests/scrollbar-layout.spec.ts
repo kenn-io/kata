@@ -99,8 +99,8 @@ test('issue actions stay in place when selecting a longer issue makes the detail
   await expect(page.getByRole('heading', { name: 'Scrollbar short detail' })).toBeVisible()
 
   await expectNoShiftWhenScrollbarAppears(
-    page.locator('.shared-detail'),
-    page.getByRole('button', { name: 'Edit issue' }),
+    page.locator('.kata-detail'),
+    page.getByRole('button', { name: 'Edit title' }),
     async () => {
       await page.getByRole('button', { name: /Scrollbar long detail/ }).click()
       await expect(page.getByRole('heading', { name: 'Scrollbar long detail' })).toBeVisible()
@@ -123,11 +123,10 @@ test('editor actions stay in place when selecting a longer issue makes the edito
     body: Array.from({ length: 200 }, (_, index) => `Paragraph ${index}.`).join('\n\n'),
   })
   await page.goto(`${kata.origin}/kata?issue=${short.uid}`)
-  await page.getByRole('button', { name: 'Edit issue' }).click()
 
   await expectNoShiftWhenScrollbarAppears(
     page.locator('.kata-detail'),
-    page.getByRole('button', { name: 'More actions' }),
+    page.getByRole('button', { name: 'Graph' }),
     async () => {
       await page
         .getByRole('button', { name: /Scrollbar long editor/ })
@@ -190,9 +189,7 @@ test('move picker counts stay in place when clearing its search makes the list s
   const issue = await kata.seedIssue(page, credentials, { title: 'Scrollbar move picker' })
   await addCatalogProjects(page)
   await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
-  await page.getByRole('button', { name: 'Edit issue' }).click()
-  await page.getByRole('button', { name: 'More actions' }).click()
-  await page.getByRole('menuitem', { name: 'Move to another project' }).click()
+  await page.getByRole('button', { name: 'example-project', exact: true }).click()
   const search = page.getByRole('searchbox', { name: 'Find project' })
   await search.fill('example-extra-39')
   const options = page.locator('.move-options')

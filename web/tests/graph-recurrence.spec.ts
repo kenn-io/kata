@@ -47,14 +47,11 @@ test('recurrence authority is shown and can be deleted from issue detail', async
   )
   expect(response.status()).toBe(201)
   await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
-  await page.getByRole('button', { name: 'Edit issue' }).click()
-  await expect(page.getByRole('region', { name: 'Recurrences' })).toContainText(
-    'Weekly example review',
-  )
-  await page.getByRole('button', { name: 'Delete recurrence' }).click()
+  await expect(page.getByText('Repeats', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Stop', exact: true }).click()
   await page
     .getByRole('dialog', { name: 'Delete recurrence' })
     .getByRole('button', { name: 'Delete' })
     .click()
-  await expect(page.getByText('Weekly example review')).toHaveCount(0)
+  await expect(page.getByText('Repeats', { exact: true })).toHaveCount(0)
 })

@@ -66,6 +66,7 @@
     route: AppRoute
     requestedRoute?: AppRoute | undefined
     snapshot: UISnapshot
+    selfActor?: string | undefined
     loading: boolean
     canMutate: boolean
     mutationPending: boolean
@@ -122,7 +123,6 @@
     onRemoveLabel: (uid: string, label: string) => void | Promise<void>
     onCloseIssue: (request: KataTaskCloseRequest) => boolean | Promise<boolean>
     onReopenIssue: () => void | Promise<void>
-    onDeleteIssue: () => boolean | Promise<boolean>
     onCreateRecurrence: (
       projectID: number,
       input: import('../lib/kata/types').KataCreateRecurrenceInput,
@@ -140,6 +140,7 @@
     route: acceptedRoute,
     requestedRoute = undefined,
     snapshot,
+    selfActor = undefined,
     loading,
     canMutate,
     mutationPending,
@@ -185,7 +186,6 @@
     onRemoveLabel,
     onCloseIssue,
     onReopenIssue,
-    onDeleteIssue,
     onCreateRecurrence,
     onPatchRecurrence,
     onDeleteRecurrence,
@@ -474,12 +474,21 @@
   }
 
   function selectIssue(issueUID: string): void {
+    statusRequest = null
     navigate({
       ...withResolvedView(filterRoute),
       issueUID,
       graph: false,
     })
   }
+
+  let statusRequest = $state<{ uid: string; generation: number } | null>(null)
+  let statusRequestGeneration = 0
+
+  $effect(() => {
+    if (!canMutate || (requestedRoute && requestedRoute.issueUID !== statusRequest?.uid))
+      statusRequest = null
+  })
 
   function openGraph(issueUID: string): void {
     navigate({
@@ -955,6 +964,12 @@
         statusFilter={searchFilters.status}
         readyIssueUIDs={projection.member_issue_uid_set}
         onSelect={(issue) => selectIssue(issue.uid)}
+        onStatusAction={canMutate && !mutationPending
+          ? (issue) => {
+              selectIssue(issue.uid)
+              statusRequest = { uid: issue.uid, generation: ++statusRequestGeneration }
+            }
+          : undefined}
         onOpenGraph={(issue) => openGraph(issue.uid)}
         empty={!loading && projection.projects.length === 0 ? noProjects : undefined}
       />
@@ -967,6 +982,7 @@
     {#if projection.selected_state === 'available' && projection.selected_detail}
       <IssueDetail
         issue={projection.selected_detail}
+        {selfActor}
         events={[...projection.selected_history]}
         issueCatalog={projection.issues}
         {searchReferences}
@@ -980,6 +996,12 @@
         actionsDisabled={!canMutate || mutationPending || projection.selected_pending === true}
         authorityBlocked={!canMutate || projection.selected_pending === true}
         pending={projection.selected_pending === true}
+        {statusRequest}
+        onStatusRequestConsumed={() => {
+          statusRequest = null
+        }}
+        graphOpen={route.graph}
+        onCloseGraph={closeGraph}
         attachmentsEnabled={snapshot.capabilities.attachments ?? false}
         {onUploadAttachment}
         administrativeActionsAllowed={!scopedAuthority}
@@ -1001,7 +1023,6 @@
         {onRemoveLabel}
         {onCloseIssue}
         {onReopenIssue}
-        {onDeleteIssue}
         onSelectIssue={(target) => {
           returnComment = target.returnComment
           selectedCommentUID = target.commentUID

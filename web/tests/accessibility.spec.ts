@@ -57,11 +57,10 @@ for (const view of ['desktop detail', 'desktop editor', 'responsive editor']) {
     await expect(page.getByRole('button', { name: 'Switch daemon' })).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Open workspace' })).toHaveCount(0)
     await expect(page.getByRole('dialog', { name: 'Command palette' })).toHaveCount(0)
-    await expect(page.getByRole('region', { name: 'Kata issue detail' })).toBeVisible()
+    await expect(page.getByRole('region', { name: 'Task detail' })).toBeVisible()
     await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1)
 
     if (view !== 'desktop detail') {
-      await page.getByRole('button', { name: 'Edit issue' }).click()
       await page.getByRole('button', { name: 'Edit title' }).click()
       await expect(page.getByRole('textbox', { name: 'Edit title' })).toBeFocused()
       await page.getByRole('textbox', { name: 'Edit title' }).press('Escape')
@@ -92,7 +91,7 @@ test('dark read-only detail actions keep a dark Kit UI surface', async ({ page, 
   const issue = await kata.seedIssue(page, credentials, { title: 'Dark theme example task' })
   await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
 
-  const action = page.getByRole('button', { name: 'Edit issue' })
+  const action = page.getByRole('button', { name: 'Complete…' })
   await expect(action).toBeDisabled()
   await expect(action).toHaveClass(/kit-button/)
   const appearance = await action.evaluate((element) => {
@@ -114,7 +113,6 @@ test('dark accent-filled editor controls keep AA text contrast', async ({ page, 
     body: 'Accent content',
   })
   await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
-  await page.getByRole('button', { name: 'Edit issue' }).click()
 
   await page.getByRole('button', { name: 'Edit description' }).first().click()
   await page.getByRole('textbox', { name: 'Edit description' }).fill('Changed accent content')
@@ -123,7 +121,7 @@ test('dark accent-filled editor controls keep AA text contrast', async ({ page, 
   expect(await textContrast(save)).toBeGreaterThanOrEqual(4.5)
   await page.getByRole('button', { name: 'Cancel', exact: true }).click()
 
-  await page.getByRole('button', { name: '+ New recurrence' }).click()
+  await page.getByRole('button', { name: '+ Repeats…' }).click()
   const pressed = page.getByRole('dialog').locator('[aria-pressed="true"]')
   await expect(pressed.first()).toBeVisible()
   for (const control of await pressed.all()) {

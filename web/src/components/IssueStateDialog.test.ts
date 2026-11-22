@@ -39,7 +39,7 @@ describe('IssueStateDialog', () => {
       props: { issue: makeIssue(), onCloseIssue: vi.fn(), onReopenIssue: vi.fn() },
     })
 
-    const trigger = screen.getByRole('button', { name: 'Complete' })
+    const trigger = screen.getByRole('button', { name: 'Complete…' })
     expect(trigger.classList).toContain('kit-button')
     await fireEvent.click(trigger)
 
@@ -61,7 +61,7 @@ describe('IssueStateDialog', () => {
       },
     })
 
-    await fireEvent.click(screen.getAllByRole('button', { name: 'Complete' })[0]!)
+    await fireEvent.click(screen.getByRole('button', { name: 'Complete…' })!)
     const dialog = screen.getByRole('dialog', { name: 'Complete task' })
 
     await fireEvent.click(within(dialog).getByRole('radio', { name: /Won't do/ }))
@@ -87,7 +87,7 @@ describe('IssueStateDialog', () => {
     render(IssueStateDialog, {
       props: { issue: makeIssue(), onCloseIssue, onReopenIssue: vi.fn() },
     })
-    await fireEvent.click(screen.getAllByRole('button', { name: 'Complete' })[0]!)
+    await fireEvent.click(screen.getByRole('button', { name: 'Complete…' })!)
     const dialog = screen.getByRole('dialog', { name: 'Complete task' })
     const submit = within(dialog).getByRole('button', { name: 'Complete' })
     expect(submit.hasAttribute('disabled')).toBe(true)
@@ -115,7 +115,7 @@ describe('IssueStateDialog', () => {
     render(IssueStateDialog, {
       props: { issue: makeIssue(), onCloseIssue, onReopenIssue: vi.fn() },
     })
-    await fireEvent.click(screen.getAllByRole('button', { name: 'Complete' })[0]!)
+    await fireEvent.click(screen.getByRole('button', { name: 'Complete…' })!)
     const dialog = screen.getByRole('dialog', { name: 'Complete task' })
     await fireEvent.change(within(dialog).getByLabelText('Evidence type'), {
       target: { value: 'external' },
@@ -141,7 +141,7 @@ describe('IssueStateDialog', () => {
     render(IssueStateDialog, {
       props: { issue: makeIssue(), onCloseIssue, onReopenIssue: vi.fn() },
     })
-    await fireEvent.click(screen.getAllByRole('button', { name: 'Complete' })[0]!)
+    await fireEvent.click(screen.getByRole('button', { name: 'Complete…' })!)
     const dialog = screen.getByRole('dialog', { name: 'Complete task' })
     await fireEvent.click(within(dialog).getByRole('radio', { name: /Duplicate/ }))
     await fireEvent.input(within(dialog).getByLabelText('Target issue'), {

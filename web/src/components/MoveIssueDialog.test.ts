@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte'
 import type { ComponentProps } from 'svelte'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { KataProjectSummary, KataTaskDetail } from '../lib/kata/types'
@@ -62,56 +62,28 @@ const projects = [
 
 type MenuProps = ComponentProps<typeof MoveIssueDialog>
 
+let openPicker: () => Promise<void>
+
 function renderMenu(overrides: Partial<MenuProps> = {}) {
-  return render(MoveIssueDialog, {
+  const view = render(MoveIssueDialog, {
     props: {
       issue: makeIssue(),
       projects,
-      hasChecklist: false,
-      hasRecurrence: false,
       onMoveIssue: vi.fn(async () => true),
-      onAddChecklist: vi.fn(),
-      onCreateRecurrence: vi.fn(),
-      onDeleteIssue: vi.fn(async () => true),
       ...overrides,
     },
   })
+  openPicker = () => view.component.open()
+  return view
 }
 
 async function openMovePicker(): Promise<void> {
-  await fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
-  await fireEvent.click(screen.getByRole('menuitem', { name: 'Move to another project' }))
+  await openPicker()
 }
 
 describe('MoveIssueDialog', () => {
   afterEach(() => {
     cleanup()
-  })
-
-  it('routes menu actions to their callbacks', async () => {
-    const onAddChecklist = vi.fn()
-    const onCreateRecurrence = vi.fn()
-    renderMenu({ onAddChecklist, onCreateRecurrence })
-
-    await fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
-    await fireEvent.click(screen.getByRole('menuitem', { name: 'Add checklist' }))
-    expect(onAddChecklist).toHaveBeenCalledTimes(1)
-
-    await fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
-    await fireEvent.click(screen.getByRole('menuitem', { name: 'Create recurrence...' }))
-    expect(onCreateRecurrence).toHaveBeenCalledTimes(1)
-  })
-
-  it('hides move when only the current and inbox projects exist', async () => {
-    renderMenu({
-      projects: [
-        makeProject('project-alpha', 'Alpha', 1),
-        makeProject('project-inbox', 'Inbox', 2, { role: 'inbox' }),
-      ],
-    })
-
-    await fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
-    expect(screen.queryByRole('menuitem', { name: 'Move to another project' })).toBeNull()
   })
 
   it('shows sorted eligible destinations with unambiguous duplicate context', async () => {
@@ -164,45 +136,6 @@ describe('MoveIssueDialog', () => {
 
     await view.rerender({ issue: makeIssue('open', { uid: 'issue-2' }) })
     expect(screen.queryByRole('searchbox', { name: 'Find project' })).toBeNull()
-    expect(screen.getByRole('button', { name: 'More actions' }).getAttribute('aria-expanded')).toBe(
-      'false',
-    )
-  })
-
-  it('blocks a second A move until the old A move settles after A to B to A navigation', async () => {
-    let finishOldMove!: (moved: boolean) => void
-    const oldMove = new Promise<boolean>((resolve) => {
-      finishOldMove = resolve
-    })
-    const onMoveIssue = vi
-      .fn()
-      .mockImplementationOnce(() => oldMove)
-      .mockResolvedValueOnce(true)
-    const view = renderMenu({ onMoveIssue })
-
-    await openMovePicker()
-    await fireEvent.click(screen.getByRole('button', { name: /Roadmap/ }))
-    await view.rerender({ issue: makeIssue('open', { uid: 'issue-b' }) })
-    await view.rerender({ issue: makeIssue('open', { uid: 'issue-1' }) })
-    await fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
-
-    expect(screen.queryByRole('menuitem', { name: 'Move to another project' })).toBeNull()
-    expect(onMoveIssue).toHaveBeenCalledTimes(1)
-
-    finishOldMove(true)
-    await oldMove
-    await waitFor(() => {
-      expect(
-        screen.getByRole('button', { name: 'More actions' }).getAttribute('aria-expanded'),
-      ).toBe('false')
-    })
-    await Promise.resolve()
-    await openMovePicker()
-    const destination = screen.getByRole('button', { name: /Roadmap/ }) as HTMLButtonElement
-    expect(destination.disabled).toBe(false)
-    await fireEvent.click(destination)
-    expect(onMoveIssue).toHaveBeenCalledTimes(2)
-    expect(screen.queryByRole('searchbox', { name: 'Find project' })).toBeNull()
   })
 
   it('updates destinations reactively and retains the pending destination snapshot', async () => {
@@ -234,24 +167,6 @@ describe('MoveIssueDialog', () => {
       projects: projects.filter((project) => project.uid !== 'project-roadmap'),
     })
     expect(screen.queryByRole('button', { name: /Roadmap 2027/ })).toBeNull()
-  })
-
-  it('dismisses an empty move picker with Escape and restores trigger focus', async () => {
-    const onMoveIssue = vi.fn(async () => true)
-    renderMenu({ onMoveIssue })
-
-    const trigger = screen.getByRole('button', { name: 'More actions' })
-    trigger.focus()
-    await fireEvent.click(trigger)
-    await fireEvent.click(screen.getByRole('menuitem', { name: 'Move to another project' }))
-
-    const search = screen.getByRole('searchbox', { name: 'Find project' })
-    await waitFor(() => expect(search).toBe(document.activeElement))
-    await fireEvent.keyDown(search, { key: 'Escape' })
-
-    expect(onMoveIssue).not.toHaveBeenCalled()
-    expect(screen.queryByRole('dialog', { name: 'Move to another project' })).toBeNull()
-    await waitFor(() => expect(trigger).toBe(document.activeElement))
   })
 
   it('clears a move search before Escape dismisses the picker', async () => {
@@ -291,34 +206,5 @@ describe('MoveIssueDialog', () => {
     expect(onMoveIssue).toHaveBeenCalledTimes(1)
     finishMove(false)
     await pendingMove
-  })
-
-  it('confirms delete through the menu', async () => {
-    const onDeleteIssue = vi.fn(async () => true)
-    renderMenu({
-      projects: [],
-      hasChecklist: true,
-      hasRecurrence: true,
-      onDeleteIssue,
-    })
-
-    await fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
-    await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete issue' }))
-
-    const dialog = screen.getByRole('dialog', { name: 'Delete issue' })
-    await fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
-
-    expect(onDeleteIssue).toHaveBeenCalledTimes(1)
-  })
-
-  it('hides the trigger when no actions are available', () => {
-    renderMenu({
-      issue: makeIssue('closed'),
-      projects: [],
-      hasChecklist: true,
-      hasRecurrence: true,
-    })
-
-    expect(screen.queryByRole('button', { name: 'More actions' })).toBeNull()
   })
 })

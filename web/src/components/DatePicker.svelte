@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte'
   import CalendarIcon from '@lucide/svelte/icons/calendar'
   import XIcon from '@lucide/svelte/icons/x'
   import { Button, Calendar, IconButton, todayStr } from '@kenn-io/kit-ui'
@@ -11,6 +12,7 @@
     disabled?: boolean
     clearable?: boolean
     clearLabel?: string
+    initiallyOpen?: boolean
     onEscape?: () => void
     class?: string
   }
@@ -23,11 +25,12 @@
     disabled = false,
     clearable = false,
     clearLabel,
+    initiallyOpen = false,
     onEscape,
     class: className = '',
   }: Props = $props()
 
-  let open = $state(false)
+  let open = $state(untrack(() => initiallyOpen))
   let rootEl = $state<HTMLDivElement>()
   let buttonEl = $state<HTMLButtonElement>()
   let calendarMonth = $derived(validISODate(value) ? value : todayStr())

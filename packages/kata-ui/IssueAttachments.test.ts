@@ -65,7 +65,9 @@ it.each([
       actionsDisabled: true,
       fetchAttachment,
     })
-    const button = screen.getByRole('button', { name: `${action} ${name}` }) as HTMLButtonElement
+    const button = screen.getByRole('button', {
+      name: `${action} ${name}`,
+    }) as HTMLButtonElement
     expect(button.disabled).toBe(false)
     await fireEvent.click(button)
     await waitFor(() => expect(fetchAttachment).toHaveBeenCalledWith(`/attachments/${id}/content`))
@@ -79,10 +81,13 @@ it('caps image previews at 20 MiB and shows the CLI hint above 100 MiB', () => {
       [id.slice(0, -1) + 'C']: { ...entry, name: 'large.png', size: 101 << 20 },
     },
     baseURL: '/attachments',
+    issueRef: 'example-project#abcd',
     fetchAttachment: vi.fn(),
   })
   expect(screen.queryByRole('button', { name: /Preview/ })).toBeNull()
-  expect(screen.getByText(/kata docbank attachments get/)).toBeTruthy()
+  expect(
+    screen.getByText(`kata docbank attachments get 'example-project#abcd' '${id.slice(0, -1)}C'`),
+  ).toBeTruthy()
 })
 it('shows an unavailable state while preserving name, type and size', async () => {
   render(IssueAttachments, {
@@ -248,6 +253,11 @@ it('offers downloads for types outside the inline list', () => {
 })
 
 it('gives each reference a stable history anchor', () => {
-  const { container } = render(IssueAttachments, { attachments: { [id]: entry }, baseURL: '/attachments' })
-  expect(container.querySelector(`[id="kata-attachment-${id}"]`)?.textContent).toContain('screen.png')
+  const { container } = render(IssueAttachments, {
+    attachments: { [id]: entry },
+    baseURL: '/attachments',
+  })
+  expect(container.querySelector(`[id="kata-attachment-${id}"]`)?.textContent).toContain(
+    'screen.png',
+  )
 })
