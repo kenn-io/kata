@@ -17,6 +17,7 @@
     type TypeaheadOption,
   } from '@kenn-io/kit-ui'
   import { formatTimestamp } from '@kenn-io/kit-ui/utils/time'
+  import { formatDay } from '../lib/kata/dates'
   import { markColor } from '../lib/marks'
   import type { KataTaskDetail } from '../lib/kata/types'
   import { deadlineDate, scheduledDate } from '../lib/kata/view'
@@ -207,28 +208,15 @@
     return issue.issue.uid
   }
 
-  function formatDate(value: string): string {
-    const parts = value.split('-')
-    if (parts.length !== 3) return value
-    const [year, month, day] = parts
-    const date = new Date(Number(year), Number(month) - 1, Number(day))
-    if (Number.isNaN(date.getTime())) return value
-    return date.toLocaleDateString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      year: new Date().getFullYear() === date.getFullYear() ? undefined : 'numeric',
-    })
-  }
-
   function scheduledLabel(): string {
     const saved = issue.issue.metadata.scheduled_on
     const value = dateZone(saved) ? scheduledDate(issue.issue) : saved
-    return value ? formatDate(value) : ''
+    return value ? formatDay(value) : ''
   }
 
   function dueLabel(): string {
     const value = deadlineDate(issue.issue)
-    return value ? formatDate(value) : ''
+    return value ? formatDay(value) : ''
   }
 
   const hasPriority = $derived(issue.issue.priority !== undefined && issue.issue.priority !== null)
@@ -256,7 +244,7 @@
     if (date.toDateString() === new Date().toDateString())
       return date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
     const pad = (part: number) => String(part).padStart(2, '0')
-    return formatDate(`${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`)
+    return formatDay(`${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`)
   }
 
   async function addPriority(): Promise<void> {

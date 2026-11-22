@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { UIIssueReference } from '../lib/api/generated'
@@ -132,6 +132,30 @@ describe('Comments', () => {
     const newest = await screen.findByText('Newest comment')
     expect(first.closest('article')?.textContent).toContain('c:abc123')
     expect(newest.closest('article')?.textContent).toContain('c:def456')
+  })
+
+  it('keeps a reply draft on its target until the draft is cleared', async () => {
+    const task = issue()
+    task.comments[0]!.uid = 'comment-one'
+    task.comments[0]!.handle = 'c:first'
+    task.comments[1]!.uid = 'comment-two'
+    task.comments[1]!.handle = 'c:second'
+    renderComments({ issue: task })
+    const first = (await screen.findByText('First comment')).closest('article')!
+    const second = (await screen.findByText('Newest comment')).closest('article')!
+    await fireEvent.click(within(first).getByRole('button', { name: 'Reply' }))
+    await fireEvent.input(within(first).getByLabelText('Reply evidence'), {
+      target: { value: 'For first' },
+    })
+    expect(
+      (within(second).getByRole('button', { name: 'Reply' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+    expect((within(first).getByLabelText('Reply evidence') as HTMLTextAreaElement).value).toBe(
+      'For first',
+    )
+    await fireEvent.input(within(first).getByLabelText('Reply evidence'), { target: { value: '' } })
+    await fireEvent.click(within(second).getByRole('button', { name: 'Reply' }))
+    expect((within(second).getByLabelText('Reply evidence') as HTMLTextAreaElement).value).toBe('')
   })
 
   it('identifies your comment while retaining its teammate', () => {

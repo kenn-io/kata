@@ -3323,6 +3323,7 @@ describe('App', () => {
     )
 
     render(App)
+    await fireEvent.click(await screen.findByRole('button', { name: 'Add comment' }))
     const editor = await screen.findByRole('textbox', { name: 'Comment' })
     await fireEvent.input(editor, { target: { value: 'Retry-safe comment' } })
     await fireEvent.click(screen.getByRole('button', { name: 'Add comment' }))
@@ -3491,6 +3492,7 @@ describe('App', () => {
     )
 
     render(App)
+    await fireEvent.click(await screen.findByRole('button', { name: 'Add comment' }))
     const editor = await screen.findByRole('textbox', { name: 'Comment' })
     await fireEvent.input(editor, { target: { value: 'Keep this draft' } })
     await fireEvent.click(screen.getByRole('button', { name: 'Add comment' }))

@@ -13,7 +13,7 @@
   import type { UIIssueReference } from '../lib/api/generated'
   import { fetchAttachmentBlob } from '../lib/api/client'
   import { deadlineDate, closedReasonLabel } from '../lib/kata/view'
-  import { localDateString } from '../lib/kata/dates'
+  import { formatDay, localDateString } from '../lib/kata/dates'
   import { describeResolution } from '../lib/history/format'
   import { closingAttachments } from '../lib/history/attachments'
   import { createKataLinkFilters, type KataLinkFilters } from '../lib/kata/linkFilters'
@@ -315,16 +315,6 @@
       : 0,
   )
   const closeEvent = $derived(issue.effective_close_event)
-  // "Nov 18", with the year when it isn't this one.
-  function dayLabel(value: string): string {
-    const date = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T00:00:00`) : new Date(value)
-    if (Number.isNaN(date.getTime())) return value
-    return date.toLocaleDateString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      year: date.getFullYear() === new Date().getFullYear() ? undefined : 'numeric',
-    })
-  }
   function actorName(actor: string): string {
     return actor === selfActor ? 'You' : actor
   }
@@ -561,7 +551,7 @@
             ? describeResolution(closeEvent)
             : (closedReasonLabel(issue.issue.closed_reason) ?? 'Closed')}{#if closeEvent}
             · {actorName(closeEvent.actor)}{/if}{#if issue.issue.closed_at}
-            · {dayLabel(issue.issue.closed_at)}{/if}
+            · {formatDay(issue.issue.closed_at)}{/if}
         </p>
         {#if typeof closeEvent?.payload?.message === 'string'}<p class="state-detail">
             {closeEvent.payload.message}
@@ -590,12 +580,12 @@
             {#if blocker}<span class="state-separator" aria-hidden="true">·</span>{/if}
             <span class="state-icon state-icon--danger" aria-hidden="true"
               ><CircleAlertIcon size={14} /></span
-            >{`Due ${dayLabel(due)}, ${lateDays} ${lateDays === 1 ? 'day' : 'days'} late`}
+            >{`Due ${formatDay(due)}, ${lateDays} ${lateDays === 1 ? 'day' : 'days'} late`}
           {/if}
         </p>
       {/if}
       <p class="created-line">
-        Created {dayLabel(issue.issue.created_at)} by
+        Created {formatDay(issue.issue.created_at)} by
         <span class="created-person"
           ><Avatar name={issue.issue.author} size={16} decorative />{actorName(
             issue.issue.author,
@@ -752,7 +742,7 @@
   <RecurrencePanel
     compact
     recurrences={visibleRecurrences}
-    readOnly={!administrativeActionsAllowed}
+    readOnly={!administrativeActionsAllowed || actionsDisabled || detailInert}
     onEdit={(recurrence) => recurrenceDialogs?.openEditRecurrence(recurrence)}
     onDelete={(recurrence) => recurrenceDialogs?.openDeleteRecurrence(recurrence)}
   />

@@ -436,6 +436,31 @@ describe('IssueDetail', () => {
     expect(screen.queryByRole('button', { name: 'Repeats…' })).toBeNull()
   })
 
+  it('withholds recurrence actions while a mutation is pending', async () => {
+    const recurrence = {
+      id: 1,
+      uid: 'rec-1',
+      project_id: 1,
+      rrule: 'FREQ=WEEKLY',
+      dtstart: '2026-05-20',
+      timezone: 'UTC',
+      template_title: 'Weekly task',
+      template_body: '',
+      template_owner: '',
+      template_labels: [],
+      template_metadata: {},
+      next_occurrence_key: '2026-05-27',
+      author: 'user-a',
+      revision: 1,
+      created_at: '2026-05-15T12:00:00Z',
+      updated_at: '2026-05-15T12:00:00Z',
+    }
+    const view = renderDetail({ selectedRecurrences: [recurrence] })
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy()
+    await view.rerender({ actionsDisabled: true, authorityBlocked: false })
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
+  })
+
   it('closes a recurrence draft after authentication authority changes', async () => {
     const view = renderDetail({
       issue: makeIssue({ metadata: {} }),

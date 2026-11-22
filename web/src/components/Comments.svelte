@@ -146,7 +146,12 @@
     ),
   )
   function beginReply(uid: string, kind: KataReplyKind): void {
-    if (actionsDisabled || issue.issue.status !== 'open') return
+    if (
+      actionsDisabled ||
+      issue.issue.status !== 'open' ||
+      (commentDraft && replyDraft?.replyTo !== uid)
+    )
+      return
     replyDraft = { replyTo: uid, kind, force: false }
   }
   function cancelReply(): void {
@@ -384,7 +389,9 @@
                 <button
                   type="button"
                   class="comment-action"
-                  disabled={actionsDisabled || issue.issue.status !== 'open'}
+                  disabled={actionsDisabled ||
+                    issue.issue.status !== 'open' ||
+                    Boolean(commentDraft && replyDraft?.replyTo !== comment.uid)}
                   onclick={() => beginReply(comment.uid!, 'reply')}>Reply</button
                 >
               {/if}
