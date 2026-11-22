@@ -1358,10 +1358,15 @@
             {date.label}
           </span>
         {:else if column.kind === 'closed'}
-          <span class="cell cell-closed" title={issue.closed_at ?? ''}>
-            {closedReasonLabel(issue.closed_reason)}
-            {#if issue.closed_at}
-              {shortDate(localDateString(new Date(issue.closed_at)), new Date(now))}{/if}
+          <span
+            class="cell cell-closed"
+            title={issue.status === 'closed' ? (issue.closed_at ?? '') : ''}
+          >
+            {#if issue.status === 'closed'}
+              {closedReasonLabel(issue.closed_reason)}
+              {#if issue.closed_at}
+                {shortDate(localDateString(new Date(issue.closed_at)), new Date(now))}{/if}
+            {/if}
           </span>
         {:else if column.id === 'id'}
           <span class="cell cell-id" title={issue.qualified_id}>{issue.short_id}</span>

@@ -614,6 +614,20 @@ describe('IssueCollection', () => {
     expect(container.querySelector('.cell-closed')?.textContent).toContain('May 14')
   })
 
+  it('leaves the Closed cell empty for an open task in Logbook', () => {
+    const open = task({ status: 'open' })
+    const { container } = render(IssueCollection, {
+      props: {
+        currentView: {
+          name: 'logbook',
+          groups: [{ id: 'results', title: 'Results', issues: [open] }],
+        },
+        onSelect: () => {},
+      },
+    })
+    expect(container.querySelector('.cell-closed')?.textContent?.trim()).toBe('')
+  })
+
   it('marks a past due date in the Due column', () => {
     const { container } = render(IssueCollection, {
       props: {
