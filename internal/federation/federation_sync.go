@@ -324,6 +324,17 @@ func pushDirectSpoke(
 				if err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
+				retired, err := publishRetainedLinkPeers(ctx, store, binding, hubProjectID, client, batch, snapshotsSent, onPulledEvents, validateLease)
+				if err != nil {
+					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+				}
+				if retired {
+					pending, err = store.PendingFederationPushEvents(ctx, binding.ProjectID, store.InstanceUID(), binding.PushCursorEventID, federationPollLimit)
+					if err != nil {
+						return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+					}
+					continue
+				}
 				sourceTokens, err := federationMoveSourceTokens(ctx, store, credentials, *binding, client.baseURL, batch, opts)
 				if err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
@@ -399,6 +410,74 @@ func pushDirectSpoke(
 		}
 	}
 	return nil
+}
+
+func publishRetainedLinkPeers(ctx context.Context, store db.Storage, binding *db.FederationBinding, hubProjectID int64, client *Client, batch []db.Event, sent map[string]bool, onPulledEvents func(int64, []db.Event), validateLease func(context.Context) error) (bool, error) {
+	if binding.RetainedThroughEventID == 0 {
+		return false, nil
+	}
+	for _, event := range batch {
+		var peers []string
+		_, _, err := db.StripCrossProjectLinkAdditions(db.FoldEvent{Type: event.Type, UID: event.UID, Payload: jsontext.Value(event.Payload)}, func(uid string) bool {
+			if uid != "" && (event.IssueUID == nil || uid != *event.IssueUID) {
+				peers = append(peers, uid)
+			}
+			return false
+		})
+		if err != nil {
+			return false, err
+		}
+		for _, peer := range peers {
+			if sent[peer] {
+				continue
+			}
+			snapshot, sourceID, err := store.RetainedIssueSnapshot(ctx, binding.ProjectID, peer)
+			if errors.Is(err, db.ErrNotFound) {
+				continue
+			}
+			if err != nil {
+				return false, err
+			}
+			envelope := federationIngestEnvelope(snapshot)
+			envelope.EventID = sourceID
+			_, err = client.IngestProjectEventsWithOptions(ctx, hubProjectID, []api.FederationIngestEventEnvelope{envelope}, IngestProjectEventsOptions{})
+			if err != nil {
+				if !retainedSnapshotAlreadyKnown(err, peer) {
+					return false, err
+				}
+				if err := federationFailpoint("before_retained_snapshot_retire"); err != nil {
+					return false, err
+				}
+				if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+					return false, err
+				}
+				ackCtx, resets := db.WithFederationMoveResetCapture(ctx)
+				if err := store.AcknowledgeFederationPush(ackCtx, binding.ProjectID, binding.PushCursorEventID, []string{snapshot.UID}); err != nil {
+					return false, err
+				}
+				if onPulledEvents != nil {
+					for _, reset := range resets.Resets {
+						onPulledEvents(reset.ProjectID, []db.Event{{ID: reset.EventID, ProjectID: reset.ProjectID, Type: db.ProjectScopeResetEventType}})
+					}
+				}
+				sent[peer] = true
+				return true, nil
+			} else if err := federationFailpoint("after_retained_snapshot_publish"); err != nil {
+				return false, err
+			}
+			sent[peer] = true
+		}
+	}
+	return false, nil
+}
+
+func retainedSnapshotAlreadyKnown(err error, issueUID string) bool {
+	status, ok := errors.AsType[*HubStatusError](err)
+	if !ok || status.StatusCode != http.StatusBadRequest {
+		return false
+	}
+	body, ok := federationQuarantineHubError(status.Body)
+	return ok && body.Code == "validation" && body.Message == "federation ingest validation: fresh issue.snapshot targets existing issue "+issueUID
 }
 
 var retainedUnknownIssuePattern = regexp.MustCompile(`^federation ingest validation: ([a-z._]+) references unknown issue ([0-9A-HJKMNP-TV-Z]{26})$`)
