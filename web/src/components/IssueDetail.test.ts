@@ -83,6 +83,20 @@ describe('IssueDetail', () => {
     expect(screen.queryByRole('button', { name: 'Done editing' })).toBeNull()
   })
 
+  it('keeps an empty description as a one-line section with its Edit action', async () => {
+    const onEditIssue = vi.fn(async () => true)
+    renderDetail({ issue: makeIssue({ body: '' }), onEditIssue })
+    const section = screen.getByRole('region', { name: 'Description' })
+    expect(within(section).getByText('No description')).toBeTruthy()
+    await fireEvent.click(within(section).getByRole('button', { name: 'Edit description' }))
+    expect(within(section).queryByText('No description')).toBeNull()
+    await fireEvent.input(within(section).getByRole('textbox', { name: 'Edit description' }), {
+      target: { value: 'First description' },
+    })
+    await fireEvent.click(within(section).getByRole('button', { name: 'Save' }))
+    expect(onEditIssue).toHaveBeenCalledWith('issue-1', { body: 'First description' })
+  })
+
   it('keeps a renamed title draft and retries against the new revision', async () => {
     let finish!: (ok: boolean) => void
     const pending = new Promise<boolean>((resolve) => {

@@ -590,68 +590,65 @@
   />
 
   <fieldset class="mutation-controls" disabled={actionsDisabled || detailInert}>
-    {#if editingBody || issue.issue.body}
-      <DetailSection title="Description">
-        {#snippet actions()}
-          {#if !editingBody}
+    <DetailSection
+      title="Description"
+      empty={editingBody || issue.issue.body ? undefined : 'No description'}
+    >
+      {#snippet actions()}
+        {#if !editingBody}
+          <button
+            type="button"
+            class="text-button"
+            aria-label="Edit description"
+            onclick={startEditingBody}
+          >
+            <PencilIcon size={13} strokeWidth={1.8} aria-hidden="true" />
+            <span>Edit</span>
+          </button>
+        {/if}
+      {/snippet}
+      {#if editingBody}
+        {#if bodyConflict}<Notice tone="error" class="detail-conflict-inline">
+            {#snippet icon()}<CircleAlertIcon size={14} aria-hidden="true" />{/snippet}
+            Someone changed the description while you were editing. Save to keep yours, or Cancel to keep
+            theirs.
+          </Notice>{/if}
+        <textarea
+          class="body-edit"
+          aria-label="Edit description"
+          rows="8"
+          bind:this={bodyTextarea}
+          bind:value={bodyDraft}
+          disabled={savingBody}
+          onkeydown={handleBodyKeydown}
+        ></textarea>
+        <div class="body-edit-actions">
+          <span>Cmd/Ctrl+Enter saves</span>
+          <div>
             <button
               type="button"
-              class="text-button"
-              aria-label="Edit description"
-              onclick={startEditingBody}
+              class="ghost-button"
+              disabled={savingBody}
+              onclick={() => {
+                editingBody = false
+              }}>Cancel</button
             >
-              <PencilIcon size={13} strokeWidth={1.8} aria-hidden="true" />
-              <span>Edit</span>
+            <button
+              type="button"
+              class="accent-button"
+              disabled={savingBody}
+              onclick={() => {
+                void commitBody()
+              }}
+            >
+              {savingBody ? 'Saving…' : 'Save'}
             </button>
-          {/if}
-        {/snippet}
-        {#if editingBody}
-          {#if bodyConflict}<Notice tone="error" class="detail-conflict-inline">
-              {#snippet icon()}<CircleAlertIcon size={14} aria-hidden="true" />{/snippet}
-              Someone changed the description while you were editing. Save to keep yours, or Cancel to
-              keep theirs.
-            </Notice>{/if}
-          <textarea
-            class="body-edit"
-            aria-label="Edit description"
-            rows="8"
-            bind:this={bodyTextarea}
-            bind:value={bodyDraft}
-            disabled={savingBody}
-            onkeydown={handleBodyKeydown}
-          ></textarea>
-          <div class="body-edit-actions">
-            <span>Cmd/Ctrl+Enter saves</span>
-            <div>
-              <button
-                type="button"
-                class="ghost-button"
-                disabled={savingBody}
-                onclick={() => {
-                  editingBody = false
-                }}>Cancel</button
-              >
-              <button
-                type="button"
-                class="accent-button"
-                disabled={savingBody}
-                onclick={() => {
-                  void commitBody()
-                }}
-              >
-                {savingBody ? 'Saving…' : 'Save'}
-              </button>
-            </div>
           </div>
-        {:else}
-          <Markdown source={issue.issue.body} class="body-display" />
-        {/if}
-      </DetailSection>
-    {:else}
-      <button type="button" class="add-description" onclick={startEditingBody}
-        >Add description</button
-      >
-    {/if}
+        </div>
+      {:else}
+        <Markdown source={issue.issue.body} class="body-display" />
+      {/if}
+    </DetailSection>
 
     <Checklist
       {issue}
@@ -920,19 +917,6 @@
   }
   .text-button:hover {
     background: var(--bg-surface-hover);
-    color: var(--text-primary);
-  }
-  .add-description {
-    align-self: flex-start;
-    border: 0;
-    padding: 2px 0;
-    background: transparent;
-    color: var(--text-secondary);
-    font: inherit;
-    font-size: var(--font-size-md);
-    cursor: text;
-  }
-  .add-description:hover {
     color: var(--text-primary);
   }
   /* A heading inside the description reads below the section's own. */
