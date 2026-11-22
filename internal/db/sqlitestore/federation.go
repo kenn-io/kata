@@ -639,7 +639,7 @@ func (d *Store) leaveFederationReplica(ctx context.Context, projectID int64, dis
 	if discardRelay {
 		err = d.discardRelayHopStateTx(ctx, tx, projectID, binding.RelayConfig)
 	} else {
-		err = d.validateRelayLifecycleTx(ctx, tx, projectID)
+		err = d.validateRelayLifecycleTx(ctx, tx, projectID, true)
 		if err == nil && binding.RelayConfig != nil {
 			err = deleteRelayBindingStateTx(ctx, tx, binding.RelayConfig.BindingUID)
 		}

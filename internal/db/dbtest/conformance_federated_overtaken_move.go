@@ -73,7 +73,7 @@ func checkFederatedOvertakenMoveSourceLeave(t *testing.T, _ db.Storage, backend 
 		require.NoError(t, err)
 		return grant.Enrollment.ID
 	}
-	for _, scenario := range []string{"older", "newer", "hub-only"} {
+	for _, scenario := range []string{"older", "newer", "newer-settled", "hub-only"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := t.Context()
 			hub, spoke, remote, local := overtakenMoveSpoke(t, 2, "source", "joined", "absent")
@@ -100,7 +100,7 @@ func checkFederatedOvertakenMoveSourceLeave(t *testing.T, _ db.Storage, backend 
 				remoteEvent.HLCCounter = localMove.Event.HLCCounter
 			}
 			switch scenario {
-			case "newer":
+			case "newer", "newer-settled":
 				remoteEvent.HLCCounter++
 			case "older":
 				remoteEvent.HLCPhysicalMS--
@@ -110,7 +110,7 @@ func checkFederatedOvertakenMoveSourceLeave(t *testing.T, _ db.Storage, backend 
 			_, err = spoke.InsertRemoteEvents(ctx, local[0].ID, []db.RemoteEvent{remoteEvent})
 			require.NoError(t, err)
 			require.NoError(t, spoke.MaterializeFederatedProject(ctx, local[0].ID))
-			superseded := scenario == "newer"
+			superseded := scenario == "newer" || scenario == "newer-settled"
 			if scenario != "hub-only" {
 				pending, err := spoke.PendingFederationPushEvents(ctx, local[1].ID, spoke.InstanceUID(), 0, 100)
 				require.NoError(t, err)
@@ -120,7 +120,30 @@ func checkFederatedOvertakenMoveSourceLeave(t *testing.T, _ db.Storage, backend 
 				require.Equal(t, localMove.Event.UID, pending[0].UID)
 				require.EqualValues(t, 1, count)
 				_, err = spoke.ReplaceFederationBoundActorWhenSettled(ctx, local[1].ID, spoke.InstanceUID(), "worker", "other-worker")
-				require.ErrorIs(t, err, db.ErrFederationPushPending)
+				if superseded {
+					require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush)
+				} else {
+					require.ErrorIs(t, err, db.ErrFederationPushPending)
+				}
+			}
+			if superseded {
+				_, _, err = spoke.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: local[0].ID, Actor: "worker", Force: true})
+				require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush)
+				_, err = spoke.DisableFederationPushWhenSettled(ctx, local[0].ID, spoke.InstanceUID())
+				require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush)
+				_, err = spoke.ReplaceFederationBoundActorWhenSettled(ctx, local[0].ID, spoke.InstanceUID(), "worker", "other-worker")
+				require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush)
+			}
+			if scenario == "newer-settled" {
+				require.NoError(t, spoke.AdvanceFederationPushCursor(ctx, local[0].ID, comment.ID))
+				require.NoError(t, spoke.AdvanceFederationPushCursor(ctx, local[1].ID, localMove.Event.ID))
+				_, err = spoke.ReplaceFederationBoundActorWhenSettled(ctx, local[0].ID, spoke.InstanceUID(), "worker", "other-worker")
+				require.NoError(t, err)
+				_, err = spoke.DisableFederationPushWhenSettled(ctx, local[0].ID, spoke.InstanceUID())
+				require.NoError(t, err)
+				_, _, err = spoke.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: local[0].ID, Actor: "worker", Force: true})
+				require.NoError(t, err)
+				return
 			}
 			_, err = spoke.LeaveFederationReplica(ctx, local[0].ID)
 			if !superseded {

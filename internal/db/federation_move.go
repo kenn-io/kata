@@ -65,7 +65,7 @@ func RetainFederationHeldCursor(ctx context.Context, tx *sql.Tx, projectID int64
 
 // CheckFederationMoveSourceLifecycle keeps a native source joined while a
 // destination still owes a locally authored move that needs its credential.
-func CheckFederationMoveSourceLifecycle(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string) error {
+func CheckFederationMoveSourceLifecycle(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string, leaving bool) error {
 	var sourceUID string
 	err := tx.QueryRowContext(ctx, `SELECT p.uid FROM projects p
  JOIN federation_bindings b ON b.project_id=p.id
@@ -78,13 +78,16 @@ func CheckFederationMoveSourceLifecycle(ctx context.Context, tx *sql.Tx, project
 	}
 	// A paused destination retains its owed move and may resume. Its durable
 	// acknowledgment cursor, rather than its current push flag, releases source
-	// authority for teardown. A superseded move is not owed; only moves out of
-	// this source are checked, so the cost does not grow with unrelated moves.
+	// authority for teardown. Leaving retains a held cursor for superseded moves.
+	supersededFilter := ""
+	if leaving {
+		supersededFilter = " AND NOT " + federationMoveSupersededSQL("e")
+	}
 	rows, err := tx.QueryContext(ctx, `SELECT e.payload FROM events e
  JOIN federation_bindings b ON b.project_id=e.project_id
  WHERE e.type='issue.moved' AND e.origin_instance_uid=$1
  AND b.role='spoke' AND b.relay_config IS NULL
- AND e.id>b.push_cursor_event_id AND NOT `+federationMoveSupersededSQL("e"), originInstanceUID)
+ AND e.id>b.push_cursor_event_id`+supersededFilter, originInstanceUID)
 	if err != nil {
 		return err
 	}
@@ -104,7 +107,7 @@ func CheckFederationMoveSourceLifecycle(ctx context.Context, tx *sql.Tx, project
 	if err := rows.Close(); err != nil {
 		return err
 	}
-	pending, err := federationMoveSourceHasPendingEvents(ctx, tx, projectID, originInstanceUID)
+	pending, err := federationMoveSourceHasPendingEvents(ctx, tx, projectID, originInstanceUID, supersededFilter)
 	if err != nil {
 		return err
 	}
@@ -123,14 +126,12 @@ func federationMoveSourceHasPendingEvents(
 	tx *sql.Tx,
 	projectID int64,
 	originInstanceUID string,
+	supersededFilter string,
 ) (bool, error) {
-	// Edits on an issue whose local moves were superseded stay held locally;
-	// they cannot reach the hub until the issue returns to a joined project.
 	movedIssueEvents := `SELECT EXISTS(SELECT 1 FROM events e
  JOIN federation_bindings b ON b.project_id=e.project_id
  JOIN issues i ON i.uid=e.issue_uid AND i.project_id<>e.project_id
- WHERE e.project_id=$1 AND e.origin_instance_uid=$2
- AND NOT ` + federationMoveSupersededSQL("e")
+ WHERE e.project_id=$1 AND e.origin_instance_uid=$2` + supersededFilter
 	var pending bool
 	if err := tx.QueryRowContext(ctx, movedIssueEvents+` AND e.id>b.push_cursor_event_id
  AND e.type IN (`+FederationPushEventTypesSQL()+`))`,

@@ -355,7 +355,7 @@ WHERE project_id=$1`, projectID); err != nil {
 func pgFederationReplicaSettledTx(ctx context.Context, tx *sql.Tx, binding db.FederationBinding, originInstanceUID string) error {
 	// A destination that still owes a move out of this project needs this
 	// project's current credential and actor to deliver it.
-	if err := db.CheckFederationMoveSourceLifecycle(ctx, tx, binding.ProjectID, originInstanceUID); err != nil {
+	if err := db.CheckFederationMoveSourceLifecycle(ctx, tx, binding.ProjectID, originInstanceUID, false); err != nil {
 		return err
 	}
 	if binding.PushEnabled {

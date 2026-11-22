@@ -10,7 +10,7 @@ import (
 
 // ValidateRelayLifecycle checks retained federation work before lifecycle changes.
 func (d *Store) ValidateRelayLifecycle(ctx context.Context, projectID int64) error {
-	return d.relayTx(ctx, func(tx *sql.Tx) error { return d.validateRelayLifecycleTx(ctx, tx, projectID) })
+	return d.relayTx(ctx, func(tx *sql.Tx) error { return d.validateRelayLifecycleTx(ctx, tx, projectID, false) })
 }
 
 // FenceRelayDisconnect validates retained relay work and disables writes in
@@ -26,15 +26,15 @@ func (d *Store) FenceRelayDisconnect(ctx context.Context, projectID int64) error
 		return db.ApplyTransactionFence(original, tx)
 	})
 	return d.relayTx(ctx, func(tx *sql.Tx) error {
-		if err := db.CheckFederationMoveSourceLifecycle(ctx, tx, projectID, d.InstanceUID()); err != nil {
+		if err := db.CheckFederationMoveSourceLifecycle(ctx, tx, projectID, d.InstanceUID(), false); err != nil {
 			return err
 		}
 		return d.relayReset(tx).FenceDisconnect(ctx, projectID)
 	})
 }
 
-func (d *Store) validateRelayLifecycleTx(ctx context.Context, tx *sql.Tx, projectID int64) error {
-	if err := db.CheckFederationMoveSourceLifecycle(ctx, tx, projectID, d.InstanceUID()); err != nil {
+func (d *Store) validateRelayLifecycleTx(ctx context.Context, tx *sql.Tx, projectID int64, leaving bool) error {
+	if err := db.CheckFederationMoveSourceLifecycle(ctx, tx, projectID, d.InstanceUID(), leaving); err != nil {
 		return err
 	}
 	return d.relayReset(tx).ValidateLifecycle(ctx, projectID)
