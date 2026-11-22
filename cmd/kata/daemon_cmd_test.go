@@ -373,13 +373,18 @@ func TestDaemonStatus_HumanReportsLifecycleDetails(t *testing.T) {
 		Address:           address,
 		Version:           "v-test-status",
 		StartedAt:         started,
-		Metadata:          map[string]string{"web_origin": "http://127.0.0.1:28888"},
+		Metadata:          map[string]string{"web_origin": server.URL},
 	})
 	require.NoError(t, err)
 
 	out, stderr, err := executeRootCapture(t, t.Context(), "daemon", "status")
 	requireCLIError(t, err, ExitDaemonUnavail)
-	assert.Empty(t, stderr)
+	assert.Contains(t, stderr, "kata: daemon is unreachable\n")
+	assert.Contains(t, stderr, "hint: ")
+	assert.Contains(t, stderr, "Wait during startup or migration")
+	assert.NotContains(t, stderr, "daemon pid "+strconv.Itoa(os.Getpid())+" is running at "+address)
+	assert.NotContains(t, stderr, "daemon ping returned 503")
+	assert.NotContains(t, stderr, "daemon.log")
 
 	_, reason, ok := strings.Cut(out, "  reason: ")
 	require.True(t, ok)
@@ -389,7 +394,7 @@ func TestDaemonStatus_HumanReportsLifecycleDetails(t *testing.T) {
 	assert.Contains(t, reason, "daemon.log")
 	assert.Contains(t, reason, "daemon ping returned 503")
 	assert.Contains(t, out, "kata running at "+server.URL+"\n")
-	assert.Contains(t, out, "  web UI:  http://127.0.0.1:28888\n")
+	assert.Contains(t, out, "  web UI:  "+server.URL+"\n")
 	assert.Contains(t, out, "  pid:     "+strconv.Itoa(os.Getpid())+"\n")
 	assert.Contains(t, out, "  version: v-test-status\n")
 	assert.Regexp(t, `(?m)^  uptime:  52m3[3-4]s$`, out)
