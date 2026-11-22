@@ -354,11 +354,6 @@ func TestDaemonLocate_HelpDocumentsResolutionOrder(t *testing.T) {
 func TestDaemonStatus_HumanReportsLifecycleDetails(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusServiceUnavailable)
-	}))
-	t.Cleanup(server.Close)
-	address := strings.TrimPrefix(server.URL, "http://")
 
 	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
@@ -370,10 +365,41 @@ func TestDaemonStatus_HumanReportsLifecycleDetails(t *testing.T) {
 		ProcessIdentityV2: identity,
 		PID:               os.Getpid(),
 		Network:           "tcp",
-		Address:           address,
+		Address:           "127.0.0.1:7777",
 		Version:           "v-test-status",
 		StartedAt:         started,
 		Metadata:          map[string]string{"web_origin": "http://127.0.0.1:28888"},
+	})
+	require.NoError(t, err)
+
+	out, _, _ := executeRootCapture(t, t.Context(), "daemon", "status")
+
+	assert.Contains(t, out, "kata running at http://127.0.0.1:7777\n")
+	assert.Contains(t, out, "  web UI:  http://127.0.0.1:28888\n")
+	assert.Contains(t, out, "  pid:     "+strconv.Itoa(os.Getpid())+"\n")
+	assert.Contains(t, out, "  version: v-test-status\n")
+	assert.Regexp(t, `(?m)^  uptime:  52m3[3-4]s$`, out)
+}
+
+func TestDaemonStatus_HumanReportsUnreachableReason(t *testing.T) {
+	resetFlags(t)
+	setupKataEnv(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(server.Close)
+	address := strings.TrimPrefix(server.URL, "http://")
+
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
+	require.True(t, ok)
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
+		ProcessIdentityV2: identity,
+		PID:               os.Getpid(),
+		Network:           "tcp",
+		Address:           address,
 	})
 	require.NoError(t, err)
 
@@ -393,10 +419,7 @@ func TestDaemonStatus_HumanReportsLifecycleDetails(t *testing.T) {
 	assert.Contains(t, reason, "daemon.log")
 	assert.Contains(t, reason, "daemon ping returned 503")
 	assert.Contains(t, out, "kata running at "+server.URL+"\n")
-	assert.Contains(t, out, "  web UI:  http://127.0.0.1:28888\n")
 	assert.Contains(t, out, "  pid:     "+strconv.Itoa(os.Getpid())+"\n")
-	assert.Contains(t, out, "  version: v-test-status\n")
-	assert.Regexp(t, `(?m)^  uptime:  52m3[3-4]s$`, out)
 }
 
 func TestDaemonStatusAutoStarted(t *testing.T) {
