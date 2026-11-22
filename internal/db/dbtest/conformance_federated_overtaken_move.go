@@ -13,7 +13,6 @@ func checkFederatedOvertakenMoveSourceLeave(t *testing.T, store db.Storage, back
 	t.Run("held cursor lifecycle", func(t *testing.T) {
 		ctx := t.Context()
 		query := store.(interface {
-			ExecContext(context.Context, string, ...any) (sql.Result, error)
 			QueryRowContext(context.Context, string, ...any) *sql.Row
 		})
 		for _, action := range []string{"rejoin", "purge"} {
@@ -21,10 +20,16 @@ func checkFederatedOvertakenMoveSourceLeave(t *testing.T, store db.Storage, back
 				project, err := store.CreateProject(ctx, "held-cursor-"+action)
 				require.NoError(t, err)
 				key := db.FederationHeldCursorPrefix + project.UID
-				_, err = query.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,'42')`, key)
+				binding := db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "worker", Enabled: true, PushEnabled: true}
+				_, err = store.UpsertFederationBinding(ctx, binding)
 				require.NoError(t, err)
+				_, err = store.LeaveFederationReplica(ctx, project.ID)
+				require.NoError(t, err)
+				var exists bool
+				require.NoError(t, query.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM meta WHERE key=$1)`, key).Scan(&exists))
+				require.True(t, exists)
 				if action == "rejoin" {
-					_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "worker", Enabled: true, PushEnabled: true})
+					_, err = store.UpsertFederationBinding(ctx, binding)
 				} else {
 					_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: project.ID, Actor: "worker"})
 					if err == nil {
@@ -32,7 +37,6 @@ func checkFederatedOvertakenMoveSourceLeave(t *testing.T, store db.Storage, back
 					}
 				}
 				require.NoError(t, err)
-				var exists bool
 				require.NoError(t, query.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM meta WHERE key=$1)`, key).Scan(&exists))
 				require.False(t, exists)
 			})
