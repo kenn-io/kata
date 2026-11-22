@@ -55,7 +55,7 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
-	{name: "rejoin retained history", methods: []string{"CreateProject", "CreateIssue", "UpsertFederationBinding", "RetainedIssueSnapshot", "AdvanceFederationPushCursor", "ResetFederatedProjectIfNoPendingPush", "InstanceUID", "EventsByUIDs", "MaterializeFederatedProject", "IssueByUID"}, run: checkRejoinRetainedHistory},
+	{name: "rejoin retained history", methods: []string{"CreateProject", "CreateIssue", "UpsertFederationBinding", "RetainedIssueSnapshot", "AdvanceFederationPushCursor", "ResetFederatedProject", "ResetFederatedProjectIfNoPendingPush", "InstanceUID", "EventsByUIDs", "MaterializeFederatedProject", "IssueByUID"}, run: checkRejoinRetainedHistory},
 	{name: "former instance identities", methods: []string{"ImportReplay", "FormerInstanceUIDs", "ExportMeta", "ExportEvents"}, runWithBackend: checkFormerInstanceIdentities},
 	{name: "attachment close evidence", methods: []string{"CloseIssueGuarded", "PatchIssueMetadata", "EventsByUIDs"}, run: checkAttachmentCloseEvidence},
 	{name: "search tokenizer words", methods: []string{"CreateProject", "CreateIssue", "SearchFTS", "SearchFTSAny"}, runWithBackend: checkSearchTokenizerWords},
