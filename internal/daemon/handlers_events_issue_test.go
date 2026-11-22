@@ -53,7 +53,7 @@ func TestUISnapshotOmitsEffectiveCloseWhenCursorAdvances(t *testing.T) {
 	path := "/api/v1/ui/snapshot?view=all-open&include_history=true&selected_issue_uid=" + issue.UID
 	resp, body := envGetRaw(t, env, path)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-	require.NotContains(t, string(body), `"effective_close_event_uid"`)
+	require.NotContains(t, string(body), `"effective_close_event"`)
 }
 
 // The issue history contract filters before limit and acknowledges the resolved
