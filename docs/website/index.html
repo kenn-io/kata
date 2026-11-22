@@ -150,8 +150,8 @@
         <div class="proof-grid">
           <article class="proof">
             <p class="proof-tag">Durable notes</p>
-            <h3>Write down the attempt.</h3>
-            <p>Comments capture decisions, partial attempts, and remaining work. Write them before a long pause, a compaction, or a handoff, and whoever resumes reads them first.</p>
+            <h3>Write down what you found.</h3>
+            <p>Comments capture findings a later reader needs. Before a long pause, a compaction, or a handoff, put what remains in <code>work.attention_msg</code>, and whoever resumes reads it first.</p>
           </article>
           <article class="proof">
             <p class="proof-tag">Planning state</p>
@@ -196,7 +196,7 @@
           <article class="proof">
             <p class="proof-tag">Handoff</p>
             <h3>Give work back without losing it.</h3>
-            <p><code>kata unassign</code> releases ownership with a comment explaining why. Labels like <code>needs-review</code> and <code>handoff</code> route work between agents and sessions mid-stream.</p>
+            <p><code>kata unassign</code> releases ownership without a comment, and <code>work.attention_msg</code> says what remains. Labels like <code>needs-review</code> and <code>handoff</code> route work between agents and sessions mid-stream.</p>
           </article>
           <article class="proof">
             <p class="proof-tag">Attention hooks</p>

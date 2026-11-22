@@ -49,8 +49,9 @@ kata is where agents write their state as they work, and where the next
 session finds it: run `kata list` cold and you know where the last session
 stopped.
 
-- **Durable notes.** Comments capture decisions, partial attempts, and
-  remaining work before a pause, compaction, or handoff.
+- **Durable notes.** Comments capture findings a later reader needs;
+  `work.attention_msg` holds what remains before a pause, compaction, or
+  handoff.
 - **Planning state.** `kata schedule` gates work until a date, `deadline`
   presses without parking, `someday` shelves an idea without losing it.
 - **The plan is a graph.** Parent/child hierarchy, `--blocks`/`--blocked-by`
@@ -72,8 +73,9 @@ calls per task. At 4ms each that costs half a second.
 - **Join on the event stream.** Create children under a tracking issue, launch
   agents, follow `kata events --tail` to return the moment a sub-task closes
   or needs a human.
-- **Handoff.** `kata unassign` releases ownership with a comment; labels like
-  `needs-review` route work between agents and sessions.
+- **Handoff.** `kata unassign` releases ownership without a comment;
+  `work.attention_msg` says what remains, and labels like `needs-review` route
+  work between agents and sessions.
 - **Attention hooks.** `kata init --with-hooks` installs session lifecycle
   hooks for Claude Code and Codex so the ledger knows which issues have an
   agent on them right now.

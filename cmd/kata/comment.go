@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"go.kenn.io/kata/internal/agentguide"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -22,8 +23,12 @@ func newCommentCmd() *cobra.Command {
 		Use:   "comment <issue-ref>",
 		Short: "append a comment to an issue",
 		Long: `Append a comment. Body comes from -m/--body, --body-file, or --body-stdin.
-KATA_TEAMMATE (or --teammate) records which teammate wrote it.`,
-		Example: `  kata comment abc4 -m "Reproduced on Safari 18; fix in progress." --agent
+KATA_TEAMMATE (or --teammate) records which teammate wrote it.
+
+` + agentguide.CommentRules,
+		Example: `  kata comment abc4 --body-stdin --agent <<'EOF'
+Safari 18 fires the callback twice; ` + "`retry()`" + ` runs on both.
+EOF
   kata comment abc4 --body-file notes.md --agent`,
 		Args: cobra.ExactArgs(1),
 	}

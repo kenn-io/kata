@@ -146,3 +146,30 @@ func TestNativeQuickstartNoShell(t *testing.T) {
 	require.Equal(t, "closed", final["status"])
 	require.Equal(t, "example-agent", final["owner"])
 }
+
+// Product contract (kata#5s85): every MCP guide and the comment tools say
+// comments carry findings, never progress.
+func TestNativeGuidesSayCommentsCarryFindings(t *testing.T) {
+	session := connectTestServer(t)
+	listed, err := session.ListTools(t.Context(), nil)
+	require.NoError(t, err)
+	descriptions := map[string]string{}
+	for _, tool := range listed.Tools {
+		descriptions[tool.Name] = tool.Description
+	}
+	require.NotRegexp(t, `\bprogress\b`, session.InitializeResult().Instructions)
+	require.Contains(t, descriptions["kata.comment"], "finding")
+	require.Contains(t, descriptions["kata.edit_comment"], "correct")
+	require.Contains(t, descriptions["kata.close"], "not merged")
+	for _, name := range []string{"kata.comment", "kata.edit_comment", "kata.close"} {
+		require.NotRegexp(t, `\bprogress\b`, descriptions[name], name)
+	}
+	for _, guide := range skillGuides {
+		md, ok := SkillMarkdown(guide.name)
+		require.True(t, ok, guide.name)
+		require.NotRegexp(t, `\bprogress\b`, md, guide.name)
+		for _, text := range []string{"work.attention_msg", "kata.edit_comment", "not merged", "needs-review"} {
+			require.Contains(t, md, text, guide.name)
+		}
+	}
+}

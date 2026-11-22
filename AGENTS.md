@@ -234,10 +234,9 @@ For long-running work, `kata events --tail` streams NDJSON.
 ## Closing issues
 
 Closing an issue asserts that the work is complete. This is a stronger
-claim than a comment. If the work is not actually done, DO NOT close.
-Instead:
-
-    kata label add <ref> needs-review --comment "<what remains>"
+claim than a comment. If the work is not actually done, or its PR is
+open and not merged, DO NOT close. Instead, leave it open, put what
+remains in `work.attention_msg`, and add the `needs-review` label.
 
 Close each issue as soon as its work is verified, not at the end of a
 batch. By default the daemon allows sibling close bursts when each close

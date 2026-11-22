@@ -19,7 +19,7 @@ func TestValidateCloseInput_DoneRequiresImplementationEvidence(t *testing.T) {
 		"Fixed the bug and ran tests on Safari and Chrome.", nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "evidence required")
-	assert.Contains(t, err.Error(), `kata label add <ref> needs-review --comment "<what remains>"`)
+	assert.Contains(t, err.Error(), "put what remains in work.attention_msg, and add the needs-review label")
 	assert.NotContains(t, err.Error(), "edit <ref> --label")
 }
 
@@ -125,7 +125,7 @@ func TestValidateCloseInput_MessageTrivialDenied(t *testing.T) {
 		[]api.Evidence{{Type: api.EvidenceCommit, SHA: "abc1234"}})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "trivial")
-	assert.Contains(t, err.Error(), `kata label add <ref> needs-review --comment "<what remains>"`)
+	assert.Contains(t, err.Error(), "put what remains in work.attention_msg, and add the needs-review label")
 	assert.NotContains(t, err.Error(), "edit <ref> --label")
 }
 

@@ -28,9 +28,9 @@ func labelAddCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add <issue-ref> <label>",
 		Short: "attach a label to an issue",
-		Long:  `Attach one label to an issue. Use needs-review with --comment to hand off unfinished work.`,
+		Long:  `Attach one label to an issue. To hand off unfinished work, put what remains in work.attention_msg and add needs-review.`,
 		Example: `  kata label add abc4 bug --agent
-  kata label add abc4 needs-review --comment "Fix drafted; focused test still fails." --agent`,
+  kata label add abc4 needs-review --agent`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			label := args[1]

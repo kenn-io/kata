@@ -37,8 +37,8 @@ claim costs about 20ms end to end, so agents check and re-check constantly.
 
 ## 04 / Write notes the next session can use
 
-Before a long pause, a context compaction, or a handoff, record the decision,
-the partial attempt, and what remains in a comment on the issue, where the
+Comment with findings a later reader needs. Before a long pause, a context
+compaction, or a handoff, put what remains in `work.attention_msg`, where the
 next actor will actually look. Planning state is native: `kata schedule` parks
 until a date, `kata deadline` presses without parking, `someday` shelves an
 idea without losing it.
@@ -66,8 +66,8 @@ issue-scoped credential on a daemon in token identity mode.
 
 Closing is a completion claim, and claims need evidence: real prose plus a
 commit, a test command, or typed evidence a reviewer can check later.
-Incomplete work gets a `needs-review` label and an honest comment instead of a
-close. `kata audit closes` replays close activity; `kata reopen` undoes what
+Incomplete work gets a `needs-review` label and what remains in
+`work.attention_msg` instead of a close. `kata audit closes` replays close activity; `kata reopen` undoes what
 doesn't hold up.
 
 → [Close discipline](https://katatracker.com/docs/guide/concepts/#close-discipline)

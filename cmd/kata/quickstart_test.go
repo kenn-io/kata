@@ -264,3 +264,57 @@ func TestQuickstartLocalProfileRecoveryGuidance(t *testing.T) {
 		assert.Contains(t, out, "Never remove a workspace override to repair a stopped daemon")
 	}
 }
+
+// Product contract (kata#5s85): every CLI guide says comments carry findings,
+// keeps live status in work.attention_msg, corrects a comment by editing it,
+// treats an open, unmerged PR as unfinished, and passes comment text through a
+// quoted heredoc whose flush-left terminator ends stdin.
+func TestGuidesSayCommentsCarryFindings(t *testing.T) {
+	guides := map[string]string{"managed block": agentsManagedBlock()}
+	for _, format := range []string{"human", "agent", "json", "contract"} {
+		resetFlags(t)
+		out := executeRoot(t, newRootCmd(), "quickstart", "--format", format)
+		if format == "json" {
+			var payload struct {
+				Quickstart string `json:"quickstart"`
+			}
+			require.NoError(t, json.Unmarshal(out, &payload))
+			out = []byte(payload.Quickstart)
+		}
+		guides["quickstart "+format] = string(out)
+	}
+	resetFlags(t)
+	guides["comment help"] = string(executeRoot(t, newRootCmd(), "comment", "--help"))
+	for name, text := range guides {
+		assert.Contains(t, text, "work.attention_msg", name)
+		assert.Contains(t, text, "kata comment edit", name)
+		assert.Contains(t, text, "not merged", name)
+		assertClosedBodyStdinHeredoc(t, name, text)
+	}
+	for _, args := range [][]string{{"--help"}, {"close", "--help"}, {"label", "add", "--help"}, {"claim", "--help"}} {
+		resetFlags(t)
+		guides[strings.Join(args, " ")] = string(executeRoot(t, newRootCmd(), args...))
+	}
+	for name, text := range guides {
+		assert.NotRegexp(t, `\bprogress\b`, text, name)
+		assert.NotContains(t, text, "needs-review --comment", name)
+	}
+}
+
+// A heredoc whose terminator is indented never ends, so the copied command
+// waits on stdin forever.
+func assertClosedBodyStdinHeredoc(t *testing.T, name, text string) {
+	t.Helper()
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		if !strings.Contains(line, "--body-stdin") || !strings.HasSuffix(line, "<<'EOF'") {
+			continue
+		}
+		for _, next := range lines[i+1:] {
+			if next == "EOF" {
+				return
+			}
+		}
+	}
+	t.Errorf("%s: no --body-stdin <<'EOF' example closed by a flush-left EOF line", name)
+}

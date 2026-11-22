@@ -379,10 +379,11 @@ canonical managed briefing without mutating the workspace; see
 
 ## Close with evidence
 
-Closing asserts completion. If work is incomplete, add context instead:
+Closing asserts completion. If work is incomplete, leave the issue open, put
+what remains in `work.attention_msg`, and add the `needs-review` label:
 
 ```sh
-kata label add abc4 needs-review --comment "Attempted the schema change; migration test still fails."
+kata label add abc4 needs-review
 ```
 
 When work is done, close with a reason, a substantive message, and evidence:

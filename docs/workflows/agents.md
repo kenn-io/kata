@@ -872,11 +872,11 @@ projects. Unlike `ready`, `list` does not remove issues with active blockers:
 kata list --all --status open --label handoff --no-label parked --agent
 ```
 
-Release ownership only when you are intentionally giving the work back:
+Release ownership only when you are intentionally giving the work back, with
+what remains in `work.attention_msg`:
 
 ```sh
-kata unassign abc4 --expect-owner agent-a \
-  --comment "Releasing; blocked on missing test fixture." --agent
+kata unassign abc4 --expect-owner agent-a --agent
 ```
 
 Use the owner reported by `status` as `--expect-owner`. If ownership changes
@@ -885,14 +885,21 @@ owner's assignment.
 
 ## Keep durable notes
 
-Record decisions, partial attempts, and remaining work in comments:
+Comment with findings a later reader needs, such as a confirmed cause or a
+decision and its reason. Pass the text on stdin with a quoted heredoc so the
+shell leaves backticks and `$` alone:
 
 ```sh
-kata comment abc4 --body "Verified the daemon rejects public IP listeners; docs still need hosted-mode wording." --agent
+kata comment abc4 --body-stdin --agent <<'EOF'
+Safari 18 fires the callback twice, so `retry()` runs on both.
+EOF
 ```
 
-This is especially important before a long pause, context compaction, or
-handoff to another agent.
+Typed replies such as `--reply c:<id>` take `--body-stdin` the same way.
+
+Keep live status in `work.attention_msg`, not in comments. To correct your own
+comment, edit it with `kata comment edit abc4 <comment-uid>`; `kata show`
+lists comment UIDs.
 
 ## Use relationships deliberately
 
@@ -955,10 +962,12 @@ claim and that the message and evidence should be specific to the issue.
 Closing as you finish each issue leaves a better audit trail. See
 [Close throttle](../reference/configuration.md#close-throttle).
 
-If work is incomplete:
+If work is incomplete, including work whose PR is open and not merged, leave
+the issue open, put what remains in `work.attention_msg`, and add the
+`needs-review` label:
 
 ```sh
-kata label add abc4 needs-review --comment "Drafted remote-daemon docs; still need token identity verification." --agent
+kata label add abc4 needs-review --agent
 ```
 
 ## Poll events during long runs
@@ -991,7 +1000,7 @@ not.
 1. Read `kata quickstart`.
 2. Search for existing work.
 3. Claim or create one issue.
-4. Record the intended approach in a comment for large work.
+4. Comment with findings a later reader needs; keep status in `work.attention_msg`.
 5. Implement and verify.
 6. Commit repository changes.
 7. Close the issue with evidence as soon as it is verified.
