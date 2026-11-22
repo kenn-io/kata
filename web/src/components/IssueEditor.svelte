@@ -568,7 +568,7 @@
               {#if attachment.href}<a href={attachment.href}>{attachment.label}</a
                 >{:else}{attachment.label}{/if}
             </p>{/each}{/if}
-      {:else if blocker || (due && lateDays >= 0)}
+      {:else if blocker || (due && lateDays > 0)}
         <p class="state-line">
           {#if blocker}
             <span class="state-icon state-icon--warning" aria-hidden="true"
@@ -577,13 +577,11 @@
             {blockerTitle}{#if (issue.issue.open_blocked_by?.length ?? 0) > 1}, +{issue.issue
                 .open_blocked_by!.length - 1} more{/if}
           {/if}
-          {#if due && lateDays >= 0}
+          {#if due && lateDays > 0}
             {#if blocker}<span class="state-separator" aria-hidden="true">·</span>{/if}
             <span class="state-icon state-icon--danger" aria-hidden="true"
               ><CircleAlertIcon size={14} /></span
-            >{lateDays === 0
-              ? 'Due today'
-              : `Due ${dayLabel(due)}, ${lateDays} ${lateDays === 1 ? 'day' : 'days'} late`}
+            >Due {dayLabel(due)}, {lateDays} {lateDays === 1 ? 'day' : 'days'} late
           {/if}
         </p>
       {/if}

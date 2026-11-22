@@ -177,6 +177,17 @@ describe('IssueDetail', () => {
     expect(view.container.querySelector('.state-line')?.textContent).toContain('2 days late')
   })
 
+  it('shows no overdue warning on the due date', async () => {
+    const view = renderDetail({
+      issue: makeIssue({ metadata: { deadline_on: '2026-11-22' } }),
+      today: '2026-11-22',
+    })
+
+    expect(view.container.querySelector('.state-line')).toBeNull()
+    await view.rerender({ today: '2026-11-23' })
+    expect(view.container.querySelector('.state-line')?.textContent).toContain('1 day late')
+  })
+
   it('keeps a renamed title draft and retries against the new revision', async () => {
     let finish!: (ok: boolean) => void
     const pending = new Promise<boolean>((resolve) => {

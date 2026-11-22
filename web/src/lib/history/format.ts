@@ -50,7 +50,7 @@ export function describeKataEvent(event: KataTaskEvent): KataEventDescriptor {
     case 'issue.created':
       return { icon: PlusIcon, label: 'created the task', tone: 'neutral' }
     case 'issue.closed': {
-      return { icon: CheckCircleIcon, label: describeResolution(event), tone: 'positive' }
+      return { icon: CheckCircleIcon, label: `closed as ${describeResolution(event)}`, tone: 'positive' }
     }
     case 'issue.reopened':
       return { icon: RotateCcwIcon, label: 'reopened', tone: 'warning' }
