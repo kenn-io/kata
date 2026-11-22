@@ -109,7 +109,7 @@ func (w *federationPollWaits) admit(ctx context.Context, broadcaster *EventBroad
 	signed := holdsFederationControlAdmission(ctx)
 	w.mu.Lock()
 	if w.total >= w.maxTotal ||
-		w.byCredential[enrollmentID] >= min(federationPollMaxWaitersPerCredential, w.maxTotal/2) ||
+		w.byCredential[enrollmentID] >= federationPollMaxWaitersPerCredential ||
 		(signed && w.signed >= w.maxSigned) {
 		w.mu.Unlock()
 		return nil, false
@@ -339,7 +339,7 @@ func publishFederationPollWakes(ctx context.Context, bus db.FederationPollWakeBu
 			return
 		}
 		if err != nil && ctx.Err() == nil {
-			logger.WarnContext(ctx, "federation poll wake publish failed; missed events reach remote spokes on their next poll", "error", err)
+			logger.WarnContext(ctx, "federation poll wake publish failed; remote held polls answer when their wait expires", "error", err)
 		}
 	}
 }
@@ -402,9 +402,12 @@ func startFederationPollBridge(cfg ServerConfig) func() {
 }
 
 // holdFederationPoll waits on a caught-up page until the project may have new
-// events or the wait ends. It authorizes again before each read after a wake.
-// A lost wakeup reaches the spoke on its next poll. The deadline is fixed
-// before the first read, so a slow first read shortens the hold.
+// events or the wait ends. After a wake it authorizes the request again from
+// scratch and reads again, so revocation during the wait still applies. When
+// the wait ends it reports timedOut and returns the page already read; the
+// spoke's next poll authorizes and reads from the same cursor. The hold ends at
+// deadline, fixed before the poll's first read, so a slow first read shortens
+// the hold.
 func holdFederationPoll(
 	ctx context.Context,
 	waiter *federationPollWaiter,
@@ -431,7 +434,7 @@ func holdFederationPoll(
 			return result, waited, false, err
 		}
 	}
-	return result, waited, federationPollCaughtUp(result), nil
+	return result, waited, false, nil
 }
 
 // heldFederationPollAllowed reports whether the hub can authorize a held poll

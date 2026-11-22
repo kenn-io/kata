@@ -40,9 +40,10 @@ type ProjectAccessDecision struct {
 	urlProjectUID string
 }
 
+// releaseProjectAccess marks the request's page as already authorized, so the
+// response check does not authorize it again.
 func releaseProjectAccess(ctx context.Context) {
-	decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision)
-	if decision != nil {
+	if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil {
 		decision.released = true
 	}
 }

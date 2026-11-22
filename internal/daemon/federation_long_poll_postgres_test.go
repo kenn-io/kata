@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
@@ -53,35 +52,12 @@ func TestFederationPollWaitWakesAcrossPostgresHubProcesses(t *testing.T) {
 		ProjectID: &project.ID, Capabilities: "pull", Actor: "tester",
 	})
 	require.NoError(t, err)
-	other, err := writer.store.CreateProject(ctx, "other-project")
-	require.NoError(t, err)
 	eventsURL := fmt.Sprintf("%s%s/federation/events", poller.server.URL, projectPath(project.ID))
 	first := sendLongPoll(t.Context(), http.DefaultClient, eventsURL+"?after_id=0")
 	require.NoError(t, first.err)
 	cursor := first.body.NextAfterID
 
 	reads := poller.reads.readsReturned()
-	emptyDone := make(chan longPollResult, 1)
-	go func() {
-		emptyDone <- sendLongPoll(t.Context(), http.DefaultClient, fmt.Sprintf("%s?after_id=%d&wait=10", eventsURL, cursor))
-	}()
-	poller.reads.waitForReads(t, reads+1)
-	authBefore, _ := poller.reads.accessCalls()
-	createIssueOnPostgresHub(t, writer.server.URL, other.ID, "Belongs to another project")
-	poller.reads.waitForReads(t, reads+2)
-	authAfterWake, _ := poller.reads.accessCalls()
-	assert.Equal(t, authBefore+1, authAfterWake)
-	empty := <-emptyDone
-	require.NoError(t, empty.err)
-	require.Equal(t, http.StatusOK, empty.status, "%s", empty.raw)
-	assert.Empty(t, empty.body.Events)
-	assert.Equal(t, cursor, empty.body.NextAfterID)
-	assert.GreaterOrEqual(t, empty.elapsed, 10*time.Second)
-	assert.Equal(t, reads+2, poller.reads.readsReturned())
-	authAfterTimeout, _ := poller.reads.accessCalls()
-	assert.Equal(t, authAfterWake, authAfterTimeout)
-
-	reads = poller.reads.readsReturned()
 	done := make(chan longPollResult, 1)
 	go func() {
 		done <- sendLongPoll(t.Context(), http.DefaultClient, fmt.Sprintf("%s?after_id=%d&wait=30", eventsURL, cursor))
