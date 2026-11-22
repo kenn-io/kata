@@ -200,7 +200,7 @@ func openSQLite(ctx context.Context, path string, cfg db.OpenConfig, opts []db.O
 	var ver int
 	var hasTables bool
 	var peekErr error
-	if err := jsonl.WithCutoverLock(ctx, path, func() error {
+	if err := jsonl.WithCutoverInspectionLock(ctx, path, func() error {
 		if err := jsonl.CheckCutoverSource(ctx, path); err != nil {
 			return err
 		}

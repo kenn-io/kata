@@ -62,6 +62,33 @@ func cutoverLockPaths(path string) []string {
 	return locks
 }
 
+// WithCutoverInspectionLock allows concurrent inspections while excluding cutover.
+func WithCutoverInspectionLock(ctx context.Context, path string, fn func() error) error {
+	var locks []*flock.Flock
+	defer func() {
+		for i := len(locks) - 1; i >= 0; i-- {
+			_ = locks[i].Close()
+		}
+	}()
+	for _, name := range cutoverLockPaths(path) {
+		lock := flock.New(name)
+		locks = append(locks, lock)
+		lockCtx, cancel := context.WithTimeout(ctx, time.Second)
+		locked, err := lock.TryRLockContext(lockCtx, 10*time.Millisecond)
+		cancel()
+		if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+			err = nil
+		}
+		if err != nil {
+			return fmt.Errorf("lock SQLite inspection: %w", err)
+		}
+		if !locked {
+			return fmt.Errorf("%w: another process holds %s; wait for migration and inspect kata daemon logs", ErrCutoverInProgress, name)
+		}
+	}
+	return fn()
+}
+
 // TryCutoverReadLock protects an inspection from a concurrent SQLite cutover.
 // The caller must release the locks after closing the inspected database.
 func TryCutoverReadLock(path string, create bool) (release func(), busy bool, err error) {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -23,6 +24,7 @@ import (
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
@@ -1085,4 +1087,95 @@ func TestLockDiagnosisStoragePostgres(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	require.NoError(t, err)
 	assert.Empty(t, entries)
+}
+
+func TestDaemonDiagnoseAllowsConcurrentSQLiteOpen(t *testing.T) {
+	home, workspace, _, _ := stoppedProfileCLI(t)
+	resetFlags(t)
+	path := filepath.Join(home, "kata.db")
+	raw, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	defer func() { _ = raw.Close() }()
+	conn, err := raw.Conn(t.Context())
+	require.NoError(t, err)
+	defer func() { _ = conn.Close() }()
+	_, err = conn.ExecContext(t.Context(), "PRAGMA journal_mode=DELETE")
+	require.NoError(t, err)
+	_, err = conn.ExecContext(t.Context(), "BEGIN EXCLUSIVE")
+	require.NoError(t, err)
+	selection, err := client.InspectSelection(t.Context(), workspace, "")
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(t.Context())
+	diagnosis := make(chan daemonDiagnosis, 1)
+	var opened chan error
+	defer func() {
+		_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+		cancel()
+		if diagnosis != nil {
+			select {
+			case <-diagnosis:
+			case <-time.After(10 * time.Second):
+				t.Error("diagnosis did not stop")
+			}
+		}
+		if opened != nil {
+			select {
+			case <-opened:
+			case <-time.After(10 * time.Second):
+				t.Error("SQLite open did not stop")
+			}
+		}
+	}()
+	go func() {
+		result, _, _ := diagnoseDaemonSelection(ctx, "", selection)
+		diagnosis <- result
+	}()
+	marker := flock.New(path + ".import.lock")
+	defer func() { _ = marker.Close() }()
+	require.Eventually(t, func() bool {
+		locked, err := marker.TryLock()
+		if err != nil {
+			return false
+		}
+		if locked {
+			_ = marker.Unlock()
+			return false
+		}
+		return true
+	}, 3*time.Second, 10*time.Millisecond)
+	require.NoError(t, marker.Close())
+	opened = make(chan error, 1)
+	go func() {
+		store, err := storeopen.Open(ctx, path)
+		if err == nil {
+			err = store.Close()
+		}
+		opened <- err
+	}()
+	var openErr error
+	finished := false
+	select {
+	case openErr = <-opened:
+		finished = true
+		opened = nil
+	case <-time.After(1500 * time.Millisecond):
+	}
+	_, err = conn.ExecContext(t.Context(), "ROLLBACK")
+	require.NoError(t, err)
+	if !finished {
+		select {
+		case openErr = <-opened:
+			opened = nil
+		case <-time.After(5 * time.Second):
+			t.Fatal("SQLite open did not finish")
+		}
+	}
+	select {
+	case result := <-diagnosis:
+		diagnosis = nil
+		require.NoError(t, openErr)
+		require.Equal(t, "stopped_local_profile", result.State)
+	case <-time.After(5 * time.Second):
+		t.Fatal("diagnosis did not finish")
+	}
 }
