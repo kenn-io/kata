@@ -434,7 +434,7 @@ func holdFederationPoll(
 			return result, waited, false, err
 		}
 	}
-	return result, waited, federationPollCaughtUp(result), nil
+	return result, waited, false, nil
 }
 
 // heldFederationPollAllowed reports whether the hub can authorize a held poll

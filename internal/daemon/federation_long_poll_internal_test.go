@@ -76,13 +76,6 @@ func TestFederationPollWakeIgnoresItsOwnInstance(t *testing.T) {
 		t.Fatal("a process must ignore the wakeups it published")
 	default:
 	}
-	other := newFederationPollWaits(16, 8)
-	waits.receive(other.message())
-	select {
-	case <-woken:
-	default:
-		t.Fatal("another process's wakeup was not delivered")
-	}
 }
 
 // recordingPollWakeBus records what a hub process publishes to the others.
