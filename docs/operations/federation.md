@@ -2141,13 +2141,10 @@ new enrollment. Events from an earlier actor stay on the spoke, including
 through a hub reset. When a new edit refers to a task the hub has never seen,
 Kata publishes a snapshot of the task before the edit.
 
-Upgrade the hub before upgrading its spokes. A schema 53 hub rejects ingest
-requests that declare schema 54.
-
 Kata upgrades SQLite databases to schema 54 at startup. Older binaries cannot
-open schema 54. To roll back, restore a backup made before the upgrade and use
-its matching binary. Stop the daemon before migrating PostgreSQL; the migration
-briefly locks the federation bindings table.
+open schema 54. To roll back, restore a backup made before the upgrade and use its matching
+binary. Stop the daemon before migrating PostgreSQL; the migration briefly locks
+the federation bindings table.
 
 A join that names a *different* project while a local project still holds the
 hub project's UID is refused with `federation_rejoin_name_mismatch`, which
