@@ -33,6 +33,17 @@ func checkFederatedQuietPollFeed(t *testing.T, store db.Storage, backend Backend
 
 func checkFederatedQuietPollFeedWith(t *testing.T, store db.Storage, backend Backend, extraIssues int) {
 	ctx := t.Context()
+	if backend.Name == "postgres" {
+		// PostgreSQL may scan metadata before checking its key. Exercise that
+		// plan even on a small fixture where it normally prefers the index.
+		pool := store.(interface {
+			SetMaxOpenConns(int)
+			ExecContext(context.Context, string, ...any) (sql.Result, error)
+		})
+		pool.SetMaxOpenConns(1)
+		_, err := pool.ExecContext(ctx, `SET enable_indexscan=off; SET enable_bitmapscan=off`)
+		require.NoError(t, err)
+	}
 	writer := backend.OpenSame(t, store)
 	quiet, err := writer.CreateProject(ctx, fmt.Sprintf("quiet-project-%d", extraIssues))
 	require.NoError(t, err)
