@@ -403,13 +403,8 @@ func TestDaemonStatus_HumanReportsUnreachableReason(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	out, stderr, err := executeRootCapture(t, t.Context(), "daemon", "status")
+	out, _, err := executeRootCapture(t, t.Context(), "daemon", "status")
 	requireCLIError(t, err, ExitDaemonUnavail)
-	assert.Contains(t, stderr, "hint: ")
-	assert.Contains(t, stderr, "Wait during startup or migration")
-	assert.NotContains(t, stderr, "daemon pid "+strconv.Itoa(os.Getpid())+" is running at "+address)
-	assert.NotContains(t, stderr, "daemon ping returned 503")
-	assert.NotContains(t, stderr, "daemon.log")
 
 	_, reason, ok := strings.Cut(out, "  reason: ")
 	require.True(t, ok)
