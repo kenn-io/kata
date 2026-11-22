@@ -275,8 +275,6 @@
   >
     {#if replyDraft}
       <div class="reply-target">
-        Reply to {issue.comments.find((c) => c.uid === replyDraft?.replyTo)?.handle ??
-          replyDraft.replyTo}
         <SegmentedControl
           ariaLabel="Reply kind"
           value={replyDraft.kind}
@@ -360,7 +358,6 @@
               {#if comment.edited_at}<span title={localDateTimeLabel(comment.edited_at)}
                   >(edited)</span
                 >{/if}
-              {#if comment.handle}<span class="comment-handle">{comment.handle}</span>{/if}
               {#if comment.uid && comment.handle}
                 <button
                   type="button"
@@ -431,12 +428,6 @@
 
   .comment-meta time {
     white-space: nowrap;
-  }
-
-  .comment-handle {
-    color: var(--text-muted);
-    font-family: var(--font-mono);
-    font-size: var(--font-size-xs);
   }
 
   /* Reply sits at the right inset and shows on hover and focus; a screen
