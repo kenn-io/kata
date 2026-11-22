@@ -2139,7 +2139,9 @@ Pull restarts from the hub's replay horizon, and already-applied events
 deduplicate by event UID. A push-enabled rejoin publishes new events using the
 new enrollment. Events from an earlier actor stay on the spoke, including
 through a hub reset. When a new edit refers to a task the hub has never seen,
-Kata publishes a snapshot of the task before the edit.
+Kata publishes a snapshot of the task before the edit. On the hub, that task
+and its comments and links are attributed to the new enrollment's actor. The
+spoke keeps the original events and their actors in its history.
 
 Kata upgrades SQLite databases to schema 54 at startup. Older binaries cannot
 open schema 54. To roll back, restore a backup made before the upgrade and use its matching

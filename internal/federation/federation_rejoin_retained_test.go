@@ -167,6 +167,23 @@ func TestRejoinPublishesRetainedLinkPeer(t *testing.T) {
 		require.Equal(t, "old-actor", old[0].Actor)
 		require.Equal(t, original.ContentHash, old[0].ContentHash)
 	}
+	localRetained, err := spoke.env.DB.IssueByUID(ctx, retained.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "old-actor", localRetained.Author)
+	localComments, err := spoke.env.DB.CommentsByIssue(ctx, localRetained.ID)
+	require.NoError(t, err)
+	require.Len(t, localComments, 1)
+	require.Equal(t, "old-actor", localComments[0].Author)
+	localLinks, err := spoke.env.DB.LinksByIssue(ctx, localRetained.ID)
+	require.NoError(t, err)
+	var oldLinkFound bool
+	for _, link := range localLinks {
+		if link.FromIssueUID == retained.UID && link.ToIssueUID == known.UID {
+			oldLinkFound = true
+			require.Equal(t, "new-actor", link.Author)
+		}
+	}
+	require.True(t, oldLinkFound)
 	assertNoRejoinPushPending(t, spoke)
 }
 
