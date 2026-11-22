@@ -1301,7 +1301,7 @@ func (r *Runner) runOnce(
 			}
 			return r.runSpoke(ctx, spoke, credentialStore, validateLease, drain)
 		}()
-		retries.recordTurn(spoke.binding.ProjectID, identity, spokeErr, r.effectiveInterval(), r.refusalNow(), &started)
+		retries.recordSchedule(spoke.binding.ProjectID, identity, false, spokeErr, r.effectiveInterval(), r.refusalNow(), &started)
 		if errors.Is(spokeErr, context.Canceled) || errors.Is(spokeErr, errFederationRunnerLeaseInvalid) {
 			return nil, false, nil, spokeErr
 		}

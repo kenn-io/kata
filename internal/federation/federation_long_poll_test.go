@@ -775,6 +775,6 @@ func TestHeldRetrySurvivesPushDuringRetryRecording(t *testing.T) {
 	binding, err = h.spokeDB.FederationBindingByProject(ctx, binding.ProjectID)
 	require.NoError(t, err)
 	require.True(t, retries.blockedFor(binding.ProjectID, binding, credential, time.Now()), "the concurrent push must not clear the held poll's Retry-After")
-	binding.Role = db.FederationRoleHub
+	binding.HubURL += "/moved"
 	require.False(t, retries.blockedFor(binding.ProjectID, binding, credential, time.Now()), "a changed binding must clear the held poll's Retry-After")
 }

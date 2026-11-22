@@ -278,18 +278,37 @@ func TestHubStatusErrorCarriesRetryAfter(t *testing.T) {
 
 func TestSyncRetryKeepsNewerHeldPollDeadlineAfterConcurrentFailure(t *testing.T) {
 	retries := newSyncRetries(noJitter)
-	identity := [32]byte{1}
 	started := retries.version(1)
 	heldAt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	retries.record(1, identity, &HubStatusError{StatusCode: http.StatusServiceUnavailable, RetryAfter: 120 * time.Second}, time.Second, heldAt)
-	retries.recordTurn(1, identity, &HubStatusError{StatusCode: http.StatusServiceUnavailable}, time.Second, heldAt.Add(time.Second), &started)
+	retries.recordSchedule(1, [32]byte{2}, true, &HubStatusError{StatusCode: http.StatusServiceUnavailable, RetryAfter: 120 * time.Second}, time.Second, heldAt, nil)
+	retries.recordSchedule(1, [32]byte{1}, false, &HubStatusError{StatusCode: http.StatusServiceUnavailable}, time.Second, heldAt.Add(time.Second), &started)
 	retry, ok := retries.FederationSyncRetry(1)
 	require.True(t, ok)
 	require.Equal(t, heldAt.Add(120*time.Second), retry.NextAttemptAt)
-	require.True(t, retries.blocked(1, identity, heldAt.Add(119*time.Second)))
+}
 
-	retries.recordTurn(1, identity, &HubStatusError{StatusCode: http.StatusServiceUnavailable, RetryAfter: 240 * time.Second}, time.Second, heldAt.Add(time.Second), &started)
-	retry, ok = retries.FederationSyncRetry(1)
-	require.True(t, ok)
-	require.Equal(t, heldAt.Add(241*time.Second), retry.NextAttemptAt)
+func TestHeldRetryClearsWhenBindingRoleOrEnabledChanges(t *testing.T) {
+	binding := db.FederationBinding{ProjectID: 1, Role: db.FederationRoleSpoke, Enabled: true, HubURL: "https://hub.example", HubProjectID: 42}
+	credential := config.FederationCredential{HubURL: binding.HubURL, HubProjectID: 42, Token: "token"}
+	for _, tc := range []struct {
+		name   string
+		change func(*db.FederationBinding)
+	}{
+		{"role", func(b *db.FederationBinding) { b.Role = db.FederationRoleHub }},
+		{"disabled", func(b *db.FederationBinding) { b.Enabled = false }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+			identity, err := heldRetryIdentity(binding, credential)
+			require.NoError(t, err)
+			retries := newSyncRetries(noJitter)
+			retries.recordSchedule(binding.ProjectID, identity, true, &HubStatusError{StatusCode: http.StatusServiceUnavailable, RetryAfter: 120 * time.Second}, time.Second, now, nil)
+			require.True(t, retries.blockedFor(binding.ProjectID, binding, credential, now))
+			changed := binding
+			tc.change(&changed)
+			require.False(t, retries.blockedFor(binding.ProjectID, changed, credential, now), "a changed binding must clear the held retry")
+			_, ok := retries.FederationSyncRetry(binding.ProjectID)
+			require.False(t, ok)
+		})
+	}
 }
