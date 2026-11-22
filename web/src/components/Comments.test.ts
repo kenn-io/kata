@@ -111,6 +111,21 @@ describe('Comments', () => {
     expect(comments[1]?.textContent).toContain('First comment')
   })
 
+  it('shows each comment handle for CLI references', async () => {
+    const task = issue()
+    task.comments[0]!.uid = 'comment-one'
+    task.comments[0]!.handle = 'c:abc123'
+    task.comments[1]!.uid = 'comment-two'
+    task.comments[1]!.handle = 'c:def456'
+
+    renderComments({ issue: task })
+
+    const first = await screen.findByText('First comment')
+    const newest = await screen.findByText('Newest comment')
+    expect(first.closest('article')?.textContent).toContain('c:abc123')
+    expect(newest.closest('article')?.textContent).toContain('c:def456')
+  })
+
   it('identifies your comment while retaining its teammate', () => {
     const task = issue()
     task.comments[0]!.teammate = 'worker-a'

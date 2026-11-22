@@ -355,6 +355,7 @@
               <time datetime={comment.created_at} title={localDateTimeLabel(comment.created_at)}>
                 {timeAgo(comment.created_at)}
               </time>
+              {#if comment.handle}<span class="comment-handle">{comment.handle}</span>{/if}
               {#if comment.edited_at}<span title={localDateTimeLabel(comment.edited_at)}
                   >(edited)</span
                 >{/if}
@@ -428,6 +429,12 @@
 
   .comment-meta time {
     white-space: nowrap;
+  }
+
+  .comment-handle {
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-xs);
   }
 
   /* Reply sits at the right inset and shows on hover and focus; a screen
