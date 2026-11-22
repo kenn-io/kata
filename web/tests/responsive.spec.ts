@@ -163,6 +163,34 @@ test('task filters stay inside a narrow list pane without overlapping', async ({
   })
 })
 
+test('saved task columns resize from their rendered width in a narrow pane', async ({
+  page,
+  kata,
+}) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('kata:column-widths/v1', JSON.stringify({ title: 480 }))
+  })
+  await page.setViewportSize({ width: 1440, height: 800 })
+  const credentials = await kata.launch(page)
+  const issue = await kata.seedIssue(page, credentials, { title: 'Narrow saved column example' })
+  await page.goto(`${kata.origin}/kata?view=all-open&issue=${issue.uid}`)
+  await page.getByRole('button', { name: 'Display' }).click()
+  await page.getByRole('radio', { name: 'Beside list' }).click()
+  await page.keyboard.press('Escape')
+  await page.setViewportSize({ width: 900, height: 800 })
+
+  const heading = page.locator('.column-heading-title')
+  const handle = page.getByRole('separator', { name: 'Resize Title column' })
+  const displayedWidth = Math.round((await heading.boundingBox())!.width)
+  expect(displayedWidth).toBeLessThan(480)
+
+  await handle.focus()
+  await expect(handle).toHaveAttribute('aria-valuenow', String(displayedWidth))
+  await page.keyboard.press('ArrowLeft')
+  await expect(handle).toHaveAttribute('aria-valuenow', String(displayedWidth - 8))
+  expect(Math.round((await heading.boundingBox())!.width)).toBe(displayedWidth - 8)
+})
+
 test('task rows stay 36px tall at desktop and mobile widths, including hover', async ({
   page,
   kata,

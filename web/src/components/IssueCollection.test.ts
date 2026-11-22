@@ -690,6 +690,30 @@ describe('IssueCollection', () => {
     }
   })
 
+  it('resizes a saved title column from its displayed width', async () => {
+    window.localStorage.setItem(KATA_TASK_COLUMN_WIDTHS_STORAGE_KEY, JSON.stringify({ title: 480 }))
+    render(IssueCollection, {
+      props: {
+        currentView: viewWithIssues([baseIssues[0]!]),
+        selectedIssueUID: null,
+        loading: false,
+        onSelect: () => {},
+      },
+    })
+
+    const heading = document.querySelector<HTMLElement>('.column-heading-title')!
+    vi.spyOn(heading, 'getBoundingClientRect').mockReturnValue({ width: 144 } as DOMRect)
+    const handle = screen.getByRole('separator', { name: 'Resize Title column' })
+    await fireEvent.focusIn(handle.parentElement!)
+
+    expect(Number(handle.getAttribute('aria-valuenow'))).toBe(144)
+    await fireEvent.keyDown(handle, { key: 'ArrowLeft' })
+    expect(Number(handle.getAttribute('aria-valuenow'))).toBe(136)
+    expect(
+      document.querySelector<HTMLElement>('.table')?.style.getPropertyValue('--table-cols-wide'),
+    ).toContain('minmax(48px, 136px)')
+  })
+
   it.each([
     ['date', currentView, /Overdue/, /Today 1/],
     ['handoff', delegatedView, /user-b for user-a/, undefined],
@@ -1391,6 +1415,59 @@ describe('IssueCollection', () => {
     })
     expect(await screen.findAllByRole('button', { name: /Cross-project child/ })).toHaveLength(1)
   })
+
+  it.each(['updated', 'due'] as const)(
+    'keeps cross-project children in the task tree when sorting by %s',
+    async (sortKey) => {
+      window.localStorage.setItem(
+        'kata:issue-sort/v1',
+        JSON.stringify({ key: sortKey, direction: sortKey === 'due' ? 'asc' : 'desc' }),
+      )
+      const parent = task({
+        uid: 'issue-cross-project-parent',
+        project_id: 2,
+        project_uid: 'project-example',
+        project_name: 'example-project',
+        short_id: 'parent',
+        qualified_id: 'example-project#parent',
+        title: 'Cross-project parent',
+        child_counts: { open: 1, total: 1 },
+      })
+      const child = task({
+        uid: 'issue-cross-project-child',
+        project_id: 3,
+        project_uid: 'project-workspace',
+        project_name: 'example-workspace',
+        short_id: 'child',
+        qualified_id: 'example-workspace#child',
+        title: 'Cross-project child',
+        parent: { uid: parent.uid, short_id: parent.short_id },
+        parent_short_id: parent.short_id,
+      })
+      render(IssueCollection, {
+        props: {
+          currentView: {
+            name: 'all',
+            fetched_at: '2026-05-16T10:00:00Z',
+            groups: [
+              { id: 'project-example', title: 'example-project', issues: [parent] },
+              { id: 'project-workspace', title: 'example-workspace', issues: [child] },
+            ],
+          },
+          issueCatalog: [parent, child],
+          selectedIssueUID: null,
+          loading: false,
+          onSelect: () => {},
+        },
+      })
+
+      expect(screen.queryByRole('button', { name: /Cross-project child/ })).toBeNull()
+      const parentRow = screen.getByRole('button', { name: /Cross-project parent/ })
+      await fireEvent.keyDown(parentRow, { key: 'ArrowRight' })
+      const childRow = await screen.findByRole('button', { name: /Cross-project child/ })
+      expect(childRow.classList.contains('row--child')).toBe(true)
+    },
+  )
 
   it('renders a matched child as a top-level row when its parent is absent', async () => {
     // A search or filter can surface a child whose parent is not in the

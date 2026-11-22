@@ -330,6 +330,13 @@
     return groupByUID
   })
 
+  let shouldFlatten = $derived(
+    !isProjectScoped &&
+      !keepsSystemViewGroups &&
+      (effectiveSort.key === 'updated' || effectiveSort.key === 'due') &&
+      candidateGroups.length > 1,
+  )
+
   let childrenByParentUID = $derived.by(() => {
     const children = new Map<string, KataTaskSummary[]>()
     for (const issue of issueCatalog) {
@@ -337,7 +344,12 @@
       if (!parentUID) continue
       const parentGroup = issueGroupByUID.get(parentUID)
       const childGroup = issueGroupByUID.get(issue.uid)
-      if (parentGroup !== undefined && childGroup !== undefined && parentGroup !== childGroup)
+      if (
+        !shouldFlatten &&
+        parentGroup !== undefined &&
+        childGroup !== undefined &&
+        parentGroup !== childGroup
+      )
         continue
       const siblings = children.get(parentUID)
       if (siblings) siblings.push(issue)
@@ -355,20 +367,10 @@
       .filter((group) => group.issues.length > 0)
   })
 
-  // Sorting by "updated" collapses multi-group views (e.g. Today's
-  // Overdue/Today buckets) into one global list so the order isn't reset
-  // per group. A single-group view (like Inbox) has nothing to collapse,
-  // so keep its labeled region instead of dropping it to a bare list.
-  let shouldFlatten = $derived(
-    !isProjectScoped &&
-      !keepsSystemViewGroups &&
-      (effectiveSort.key === 'updated' || effectiveSort.key === 'due') &&
-      visibleGroups.length > 1,
-  )
   let globalSortedIssues = $derived(
     shouldFlatten
       ? sortKataTasks(
-          visibleGroups.flatMap((group) => group.issues),
+          topLevelIssues(candidateGroups.flatMap((group) => group.issues)),
           effectiveSort,
         )
       : [],
@@ -549,9 +551,9 @@
   ): number {
     const heading = (event.currentTarget as HTMLElement | null)?.parentElement?.parentElement
     const measured = heading?.getBoundingClientRect().width
-    return (
-      columnWidths[column] ?? (measured && measured > 0 ? measured : DEFAULT_COLUMN_WIDTHS[column])
-    )
+    return measured && measured > 0
+      ? Math.round(measured)
+      : (columnWidths[column] ?? DEFAULT_COLUMN_WIDTHS[column])
   }
 
   function beginColumnResize(
@@ -566,7 +568,9 @@
     event: SplitResizeEvent,
   ): void {
     const start = resizeStartWidths[column] ?? DEFAULT_COLUMN_WIDTHS[column]
-    columnWidths = { ...columnWidths, [column]: clampColumnWidth(start + event.delta) }
+    const width = clampColumnWidth(start + event.delta)
+    columnWidths = { ...columnWidths, [column]: width }
+    measuredColumnWidths = { ...measuredColumnWidths, [column]: width }
   }
 
   function persistColumnWidth(
@@ -1102,10 +1106,9 @@
     {:else}
       <PageHeader level={2} title={viewTitle(currentView)}>
         {#snippet trailing()}
-          <span class="count">
-            {totalFilteredIssues()}
-            {totalFilteredIssues() === 1 ? ' task' : ' tasks'}
-          </span>
+          <span class="count"
+            >{totalFilteredIssues()} {totalFilteredIssues() === 1 ? 'task' : 'tasks'}</span
+          >
         {/snippet}
         {#snippet actions()}
           {#if hasExpandableVisibleRows || hasAnyExpandedRows}
@@ -1175,8 +1178,8 @@
               ariaLabel={`Resize ${label} column`}
               ariaValueMin={48}
               ariaValueMax={480}
-              ariaValueNow={columnWidths[column] ??
-                measuredColumnWidths[column] ??
+              ariaValueNow={measuredColumnWidths[column] ??
+                columnWidths[column] ??
                 DEFAULT_COLUMN_WIDTHS[column]}
               keyboardStep={8}
               onResizeStart={(event) => beginColumnResize(column, event)}
