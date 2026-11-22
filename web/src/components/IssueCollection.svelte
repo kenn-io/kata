@@ -371,21 +371,17 @@
 
   let globalSortedIssues = $derived(
     shouldFlatten
-      ? sortKataTasks(
-          topLevelIssues(candidateGroups.flatMap((group) => group.issues)),
-          effectiveSort,
-          unsortedVisibleChildren,
-        )
+      ? sortIssues(topLevelIssues(candidateGroups.flatMap((group) => group.issues)))
       : [],
   )
   let sortedGroups = $derived(
     visibleGroups.map((group) => ({
       ...group,
-      issues: sortKataTasks(group.issues, effectiveSort, unsortedVisibleChildren),
+      issues: sortIssues(group.issues),
     })),
   )
   let ordinaryRootIssues = $derived.by(() => {
-    if (isProjectScoped) return sortKataTasks(flatIssues, effectiveSort, unsortedVisibleChildren)
+    if (isProjectScoped) return sortIssues(flatIssues)
     if (shouldFlatten) return globalSortedIssues
     return sortedGroups.flatMap((group) => group.issues)
   })
@@ -604,6 +600,15 @@
     if (!scheduled) return { label: '', overdue: false }
     const date = scheduled === todayDate ? 'today' : shortDate(scheduled, new Date(now))
     return { label: `Scheduled ${date}`, overdue: false }
+  }
+
+  function sortIssues(issues: readonly KataTaskSummary[]): KataTaskSummary[] {
+    return sortKataTasks(
+      issues,
+      effectiveSort,
+      unsortedVisibleChildren,
+      dateView ? (issue) => deadlineDate(issue) ?? scheduledDate(issue) : deadlineDate,
+    )
   }
 
   function viewTitle(view: KataCurrentView): string {
@@ -980,7 +985,7 @@
   }
 
   function visibleChildren(issue: KataTaskSummary): KataTaskSummary[] {
-    return sortKataTasks(unsortedVisibleChildren(issue), effectiveSort, unsortedVisibleChildren)
+    return sortIssues(unsortedVisibleChildren(issue))
   }
 
   $effect.pre(() => {

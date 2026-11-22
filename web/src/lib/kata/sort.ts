@@ -34,12 +34,16 @@ export function sortKataTasks(
   issues: readonly KataTaskSummary[],
   sort: KataTaskSort,
   childrenOf?: (issue: KataTaskSummary) => readonly KataTaskSummary[],
+  dateOf: (issue: KataTaskSummary) => string | undefined = deadlineDate,
 ): KataTaskSummary[] {
-  const dueDate = dueDateLookup(childrenOf)
+  const dueDate = dueDateLookup(childrenOf, dateOf)
   return [...issues].sort((a, b) => compareWithDueDate(a, b, sort, dueDate))
 }
 
-function dueDateLookup(childrenOf?: (issue: KataTaskSummary) => readonly KataTaskSummary[]) {
+function dueDateLookup(
+  childrenOf?: (issue: KataTaskSummary) => readonly KataTaskSummary[],
+  dateOf: (issue: KataTaskSummary) => string | undefined = deadlineDate,
+) {
   const dates = new Map<KataTaskSummary, string | undefined>()
   return (issue: KataTaskSummary): string | undefined => {
     if (dates.has(issue)) return dates.get(issue)
@@ -47,7 +51,7 @@ function dueDateLookup(childrenOf?: (issue: KataTaskSummary) => readonly KataTas
     const visit = (item: KataTaskSummary): string | undefined => {
       if (seen.has(item.uid)) return undefined
       seen.add(item.uid)
-      let earliest = deadlineDate(item)
+      let earliest = dateOf(item)
       for (const child of childrenOf?.(item) ?? []) {
         const date = visit(child)
         if (date && (!earliest || date < earliest)) earliest = date

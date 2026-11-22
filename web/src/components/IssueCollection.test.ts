@@ -808,8 +808,13 @@ describe('IssueCollection', () => {
   })
 
   it('sorts Scheduled groups by Date and restores the sort', async () => {
-    const early = task({ uid: 'early', title: 'Z early', deadline_on_date: '2026-05-01' })
-    const late = task({ uid: 'late', title: 'A late', deadline_on_date: '2026-05-20' })
+    const early = task({ uid: 'early', title: 'Z early', scheduled_on_date: '2026-05-01' })
+    const late = task({
+      uid: 'late',
+      title: 'A late',
+      deadline_on_date: '2026-05-20',
+      scheduled_on_date: '2026-04-01',
+    })
     const earlySecond = task({
       uid: 'early-second',
       title: 'Z early',
