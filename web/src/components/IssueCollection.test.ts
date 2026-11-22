@@ -591,6 +591,27 @@ describe('IssueCollection', () => {
     expect(row.getAttribute('aria-keyshortcuts')).toBe('c')
   })
 
+  it('shows only the closing date when Logbook has no recorded reason', () => {
+    const closed = task({
+      status: 'closed',
+      closed_at: '2026-05-15T12:00:00Z',
+    })
+    const { container } = render(IssueCollection, {
+      props: {
+        currentView: {
+          name: 'logbook',
+          fetched_at: '2026-05-16T10:00:00Z',
+          groups: [{ id: '2026-05-15', title: 'Fri, May 15', issues: [closed] }],
+        },
+        now: new Date('2026-05-16T12:00:00Z').getTime(),
+        selectedIssueUID: null,
+        loading: false,
+        onSelect: () => {},
+      },
+    })
+    expect(container.querySelector('.cell-closed')?.textContent?.trim()).toBe('May 15')
+  })
+
   it('shows the local closing date in Logbook', () => {
     vi.stubEnv('TZ', 'America/Los_Angeles')
     const closed = task({

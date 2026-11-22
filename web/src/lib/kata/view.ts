@@ -32,8 +32,10 @@ export function agendaDateTitle(date: string, today: string): string {
   })
 }
 
-export function closedReasonLabel(reason: KataTaskSummary['closed_reason']): string {
+export function closedReasonLabel(reason: KataTaskSummary['closed_reason']): string | undefined {
   switch (reason) {
+    case 'done':
+      return 'Done'
     case 'wontfix':
       return "Won't do"
     case 'duplicate':
@@ -43,7 +45,7 @@ export function closedReasonLabel(reason: KataTaskSummary['closed_reason']): str
     case 'audit-no-change':
       return 'No change needed'
     default:
-      return 'Done'
+      return undefined
   }
 }
 
