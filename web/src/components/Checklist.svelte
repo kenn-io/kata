@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Checkbox, Disclosure, IconButton } from '@kenn-io/kit-ui'
+  import { Button, Checkbox, Disclosure, IconButton } from '@kenn-io/kit-ui'
   import DetailSection from './DetailSection.svelte'
   import PlusIcon from '@lucide/svelte/icons/plus'
   import PencilIcon from '@lucide/svelte/icons/pencil'
@@ -215,7 +215,21 @@
   count={checklistItems().length > 0
     ? `${doneItems.length} of ${checklistItems().length} done`
     : undefined}
+  hideBody={checklistItems().length === 0 && !addingItem}
 >
+  {#snippet actions()}
+    {#if checklistItems().length === 0 && !addingItem}
+      <Button
+        size="sm"
+        label="Add item"
+        disabled={disabled || checklistPending}
+        onclick={() => {
+          addingItem = true
+          queueMicrotask(() => checklistInput?.focus())
+        }}
+      />
+    {/if}
+  {/snippet}
   {#if openItems.length}<div class="checklist-items">
       {#each openItems as item (item.id)}{@render checklistRow(item)}{/each}
     </div>{/if}

@@ -109,6 +109,8 @@
   })
 
   let commentDraft = $state('')
+  let addingComment = $state(false)
+  let composerElement = $state<HTMLFormElement>()
   let replyDraft = $state<KataCommentReplyIntent | undefined>()
   let lastInitialReply: KataCommentReplyIntent | undefined
   $effect(() => {
@@ -266,6 +268,7 @@
 
 {#snippet composer()}
   <form
+    bind:this={composerElement}
     class="comment-composer"
     class:comment-composer--active={Boolean(replyDraft) || commentDraft !== ''}
     onsubmit={(event) => {
@@ -332,7 +335,25 @@
 <DetailSection
   title="Comments"
   count={!pending && issue.comments.length ? issue.comments.length : undefined}
+  hideBody={!pending &&
+    issue.comments.length === 0 &&
+    !addingComment &&
+    !replyDraft &&
+    !commentDraft}
 >
+  {#snippet actions()}
+    {#if !pending && issue.comments.length === 0 && !addingComment && !replyDraft && !commentDraft}
+      <Button
+        size="sm"
+        label="Add comment"
+        disabled={actionsDisabled}
+        onclick={() => {
+          addingComment = true
+          void tick().then(() => composerElement?.querySelector('textarea')?.focus())
+        }}
+      />
+    {/if}
+  {/snippet}
   {#if showList}
     {#if pending}
       <p role="status" aria-label="Loading comments">Loading comments…</p>

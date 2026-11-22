@@ -10,6 +10,16 @@ type Reference = UIIssueReference
 describe('Comments', () => {
   afterEach(cleanup)
 
+  it('keeps an empty section on its heading line until adding a comment', async () => {
+    const task = issue()
+    task.comments = []
+    renderComments({ issue: task })
+    const section = screen.getByRole('region', { name: 'Comments' })
+    expect(section.querySelector('.detail-section-body')).toBeNull()
+    await fireEvent.click(screen.getByRole('button', { name: 'Add comment' }))
+    expect(screen.getByLabelText('Comment')).toBeTruthy()
+  })
+
   it('explains the evidence limit for a confirmation reply', async () => {
     renderComments({ initialReply: { replyTo: 'target-one', kind: 'confirm', force: false } })
     await fireEvent.input(screen.getByLabelText('Reply evidence'), {

@@ -52,6 +52,7 @@ test('daemon restart keeps an old draft visible but unsubmittable', async ({ pag
   const credentials = await storedCredentials(page)
   const issue = await kata.seedIssue(page, credentials, { title: 'Restart draft example' })
   await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
+  await page.getByRole('button', { name: 'Add comment' }).click()
   await page.getByRole('textbox', { name: 'Comment' }).fill('Draft survives process restart')
   await kata.restart()
   // Wait for the renewed session to restore writable authority, so the comment

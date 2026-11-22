@@ -62,6 +62,13 @@ test('comments, links, checklist, and history update without API fan-out', async
   })
   await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
 
+  for (const name of ['Checklist', 'Comments']) {
+    const section = page.getByRole('region', { name })
+    const bounds = await section.boundingBox()
+    const heading = await section.locator('header').boundingBox()
+    expect(bounds?.height).toBe(heading?.height)
+  }
+  await page.getByRole('button', { name: 'Add comment' }).click()
   await page.getByRole('textbox', { name: 'Comment' }).fill('A neutral collaboration note')
   await page.getByRole('button', { name: 'Add comment' }).click()
   await expect(page.getByText('A neutral collaboration note')).toBeVisible()

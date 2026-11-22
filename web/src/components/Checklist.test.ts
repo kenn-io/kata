@@ -40,6 +40,8 @@ describe('Checklist', () => {
 
   it('reveals the add field when requested', async () => {
     render(Checklist, { props: { issue: makeIssue(), onPatchMetadata: vi.fn(async () => true) } })
+    const section = screen.getByRole('region', { name: 'Checklist' })
+    expect(section.querySelector('.detail-section-body')).toBeNull()
     expect(screen.queryByRole('textbox', { name: 'New checklist item' })).toBeNull()
     await fireEvent.click(screen.getByRole('button', { name: 'Add item' }))
     expect(screen.getByRole('textbox', { name: 'New checklist item' })).toBeTruthy()

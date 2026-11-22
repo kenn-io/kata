@@ -100,6 +100,7 @@ test('captures stable Web UI documentation states from synthetic issues', async 
   await page.evaluate(() => {
     document.documentElement.style.zoom = '0.875'
   })
+  await page.getByRole('button', { name: 'Add comment' }).click()
   await page
     .getByRole('textbox', { name: 'Comment' })
     .fill('The synthetic release is ready for documentation review.')

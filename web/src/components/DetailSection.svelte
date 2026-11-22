@@ -10,6 +10,7 @@
     count?: string | number | undefined
     empty?: string | undefined
     folded?: boolean | undefined
+    hideBody?: boolean | undefined
     actions?: Snippet | undefined
     children?: Snippet | undefined
   }
@@ -19,6 +20,7 @@
     count = undefined,
     empty = undefined,
     folded = undefined,
+    hideBody = false,
     actions = undefined,
     children = undefined,
   }: Props = $props()
@@ -53,7 +55,7 @@
       <div class="detail-section-actions">{@render actions()}</div>
     {/if}
   </header>
-  {#if open && !empty && children}
+  {#if open && !empty && !hideBody && children}
     <div class="detail-section-body">{@render children()}</div>
   {/if}
 </section>
