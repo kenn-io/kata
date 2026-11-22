@@ -104,7 +104,10 @@
   const restoredColumnVisibility = loadKataTaskColumnVisibility()
   const restoredColumnWidths = loadKataTaskColumnWidths()
   const restoredSort = loadSort()
-  const initialSort = sortForColumnVisibility(restoredSort, restoredColumnVisibility)
+  const initialSort =
+    restoredSort.key === 'id'
+      ? restoredSort
+      : sortForColumnVisibility(restoredSort, restoredColumnVisibility)
   let sort: KataTaskSort = $state(initialSort)
   let columnVisibility = $state(restoredColumnVisibility)
   let columnWidths = $state<KataTaskColumnWidths>(restoredColumnWidths)
@@ -212,6 +215,7 @@
   const effectiveSort = $derived.by(() => {
     const keyColumn = optionalColumnForSort(sort.key)
     return keyColumn &&
+      keyColumn !== 'id' &&
       !renderedColumns.some(
         (column) =>
           (column.kind === 'task' && column.id === keyColumn) ||
@@ -519,7 +523,11 @@
   }
 
   function setColumnVisibility(next: KataTaskColumnVisibility): void {
-    const nextSort = sortForColumnVisibility(sort, next)
+    const activeSortColumn = optionalColumnForSort(sort.key)
+    const nextSort =
+      activeSortColumn && columnVisibility[activeSortColumn]
+        ? sortForColumnVisibility(sort, next)
+        : sort
     if (nextSort !== sort) {
       sort = nextSort
       persistSort(sort)

@@ -1138,6 +1138,30 @@ describe('IssueCollection', () => {
     })
   })
 
+  it('restores ID sorting when the ID column is hidden by default', async () => {
+    localStorage.setItem('kata:issue-sort/v1', JSON.stringify({ key: 'id', direction: 'asc' }))
+
+    render(IssueCollection, {
+      props: { currentView: viewWithIssues(baseIssues), onSelect: () => {} },
+    })
+
+    expect(visibleRowTitles()).toEqual(['Review example project', 'Prepare summary'])
+    expect(JSON.parse(localStorage.getItem('kata:issue-sort/v1')!)).toEqual({
+      key: 'id',
+      direction: 'asc',
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Display' }))
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'Owner' }))
+    expect(visibleRowTitles()).toEqual(['Review example project', 'Prepare summary'])
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'ID' }))
+    expect(screen.getByRole('button', { name: 'Sort by ID, currently ascending' })).toBeTruthy()
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'ID' }))
+    expect(JSON.parse(localStorage.getItem('kata:issue-sort/v1')!)).toEqual({
+      key: 'title',
+      direction: 'asc',
+    })
+  })
+
   it('keeps column toggles usable when localStorage writes fail', async () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new Error('quota')
