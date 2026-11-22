@@ -92,7 +92,7 @@ func (e *LocalDaemonUnreachableError) Error() string {
 
 // Summary describes the selected process and probe failure.
 func (e *LocalDaemonUnreachableError) Summary() string {
-	return fmt.Sprintf("daemon pid %d is running at %s but is unreachable: %s", e.PID, e.Address, e.reason(e.cause))
+	return fmt.Sprintf("daemon pid %d is running at %s but is unreachable: %s", e.PID, e.Address, strings.Replace(e.reason(e.cause), `Get "`+UnixBase+`/`, `Get "/`, 1))
 }
 
 // Reason describes the probe failure and where to find its logs.

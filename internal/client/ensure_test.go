@@ -3,12 +3,14 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"iter"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1199,6 +1201,15 @@ func TestEnsureRunningReportsLiveUnreachableDaemonWithoutAutoStart(t *testing.T)
 	assert.Contains(t, err.Error(), fmt.Sprintf("daemon pid %d is running", os.Getpid()))
 	assert.Contains(t, err.Error(), address)
 	assert.Contains(t, err.Error(), "missing.sock")
+	assert.NotContains(t, err.Error(), "kata.invalid")
+	assert.Contains(t, err.Error(), `Get "/api/v1/ping"`)
+	unreachable, ok := errors.AsType[*LocalDaemonUnreachableError](err)
+	require.True(t, ok)
+	assert.Equal(t, os.Getpid(), unreachable.PID)
+	assert.Equal(t, address, unreachable.Address)
+	urlErr, ok := errors.AsType[*url.Error](err)
+	require.True(t, ok)
+	assert.Equal(t, "http://kata.invalid/api/v1/ping", urlErr.URL)
 	assert.Zero(t, restore.startCalls)
 }
 
