@@ -725,9 +725,10 @@ func daemonStatusCmd() *cobra.Command {
 			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Selected daemon: %s (source: %s)\n", selected.State, selected.Source); err != nil {
 				return err
 			}
-			// When the reason is shown, stderr keeps only the recovery hint.
-			if cli, ok := errors.AsType[*cliError](statusErr); ok && selected.State == "local_unreachable" && selected.Message != "" {
+			// The selected state is already shown; stderr keeps the recovery hint.
+			if cli, ok := errors.AsType[*cliError](statusErr); ok && selected.State == "local_unreachable" {
 				cli.Message = ""
+				cli.Hint = selected.NextAction
 			}
 			if selected.Message != "" {
 				reason := selected.Message

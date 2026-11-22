@@ -102,7 +102,8 @@ func TestDaemonStatus_HumanCanceledProbeKeepsAdvice(t *testing.T) {
 	assert.Equal(t, int32(2), probes.Load())
 	assert.Equal(t, ExitDaemonUnavail, exitCodeForErr(err, true))
 	assert.Contains(t, stdout, "Selected daemon: local_unreachable")
-	assert.Contains(t, stderr, "inspect the selected process and its credentials")
+	assert.NotContains(t, stderr, "local_unreachable")
+	assert.Contains(t, stderr, "hint: inspect the selected process and its credentials")
 }
 
 func TestDaemonStatusReadinessExit(t *testing.T) {
