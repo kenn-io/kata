@@ -41,6 +41,7 @@ func FederationOwedEventSQL(alias string) string {
 	return alias + `.type IN (` + FederationPushEventTypesSQL() + `) AND (` + alias + `.type<>'issue.moved' OR NOT ` + federationMoveSupersededSQL(alias) + `)`
 }
 
+// FederationHeldMovePrefix identifies moves held after a later push.
 const FederationHeldMovePrefix = "federation_held_move."
 
 // FederationHeldMoveSQL selects skipped moves whose source is joined again.
