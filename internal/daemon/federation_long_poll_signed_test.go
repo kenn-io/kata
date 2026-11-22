@@ -170,18 +170,6 @@ func TestFederationPollRechecksAuthorizationAfterItsRead(t *testing.T) {
 		{"project access revoked", (*signedPollHub).revokeProjectAccess, http.StatusNotFound},
 	}
 	for _, revocation := range revocations {
-		t.Run(revocation.name+" before an ordinary poll reads", func(t *testing.T) {
-			f := newSignedPollFixture(t)
-			synctest.Test(t, func(t *testing.T) {
-				h := f.serve(t, 0)
-				cursor := h.cursor(t)
-				h.commit(t, canary, false)
-				h.reads.beforeRead(func(int) error { return revocation.revoke(h, t) })
-				response := h.send(h.request(t, cursor, ""))
-				assert.Equal(t, revocation.status, response.Code, response.Body.String())
-				assert.NotContains(t, response.Body.String(), canary)
-			})
-		})
 		t.Run(revocation.name+" before a held poll reads after waking", func(t *testing.T) {
 			f := newSignedPollFixture(t)
 			synctest.Test(t, func(t *testing.T) {

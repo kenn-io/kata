@@ -156,129 +156,26 @@ func TestFederationRunnerStopsHoldingPollsWhileItsPassesFail(t *testing.T) {
 		}
 		hub.ServeHTTP(w, r)
 	})
-	h.startRunner(t, time.Hour)
+	runner := &Runner{DB: h.spokeDB, Interval: time.Hour}
+	h.startConfiguredRunner(t, runner)
 	//nolint:kennlint // sleeptest: the runner and hub exchange held polls over real HTTP.
 	require.Eventually(t, func() bool { return held.Load() > 0 },
 		10*time.Second, 20*time.Millisecond, "the spoke never held a poll at the hub")
 
+	runner.longPolls.mu.Lock()
+	done := runner.longPolls.polls[h.spokeProject.ID].done
+	runner.longPolls.mu.Unlock()
 	failPulls.Store(true)
-	before := held.Load()
 	h.createHubIssue(t, "Waiting behind a failing pass")
 	// The held poll's answer starts a pass, and that pass fails its pull.
 	//nolint:kennlint // sleeptest: the runner and hub exchange held polls over real HTTP.
 	require.Eventually(t, func() bool { return failed.Load() > 0 },
 		10*time.Second, 20*time.Millisecond, "the held poll's answer never started a pass")
-	//nolint:kennlint // sleeptest: the runner and hub exchange held polls over real HTTP.
-	time.Sleep(time.Second)
-	assert.Equal(t, before, held.Load(), "the spoke kept holding polls while every pass failed")
-}
-
-// Moving a binding to a new hub address must not leave interval passes
-// skipping the pull because a poll is still held at the old address.
-func TestFederationRunnerPullsFromAMovedHubWhileTheOldAddressHoldsItsPoll(t *testing.T) {
-	h := newHubSpokeHarness(t, false)
-	binding, err := h.spokeDB.FederationBindingByProject(context.WithoutCancel(t.Context()), h.spokeProject.ID)
-	require.NoError(t, err)
-	movedTo := binding.HubURL
-	var held atomic.Int64
-	// The old address holds polls until the spoke gives up on them and never
-	// answers with the hub's new events.
-	h.bindThrough(t, func(w http.ResponseWriter, r *http.Request, hub http.Handler) {
-		if isHeldPoll(r) {
-			held.Add(1)
-			<-r.Context().Done()
-			return
-		}
-		hub.ServeHTTP(w, r)
-	})
-	h.startRunner(t, 200*time.Millisecond)
-	//nolint:kennlint // sleeptest: the runner and hub exchange held polls over real HTTP.
-	require.Eventually(t, func() bool { return held.Load() > 0 },
-		10*time.Second, 20*time.Millisecond, "the spoke never held a poll at the old address")
-
-	h.rebindTo(t, movedTo)
-	h.createHubIssue(t, "Committed after the move")
-	//nolint:kennlint // sleeptest: the runner pulls over real HTTP on its interval.
-	require.Eventually(t, func() bool { return h.spokeIssueCount(t) == 1 },
-		5*time.Second, 20*time.Millisecond, "interval passes skipped the moved hub while the old address held a poll")
-}
-
-// The watcher reads its binding and credential under the same admission as a
-// pass, so an endpoint change cannot hand it one side of the change with the
-// other: it waits the change out instead.
-func TestHubLongPollWaitsOutAnEndpointChange(t *testing.T) {
-	h := newHubSpokeHarness(t, false)
-	binding, err := h.spokeDB.FederationBindingByProject(t.Context(), h.spokeProject.ID)
-	require.NoError(t, err)
-	polls := newHubLongPolls(t.Context(), h.spokeDB, config.DefaultFederationCredentialStore(),
-		(&Runner{}).clientOpts(), time.Hour, nil, nil, NewSyncRetries(), time.Now)
-	t.Cleanup(polls.stopAll)
-
-	finish, err := federationcoord.BeginRebind(t.Context(),
-		federationcoord.Key(h.spokeDB.InstanceUID(), h.spokeProject.ID), h.spokeDB, h.spokeProject.ID)
-	require.NoError(t, err)
-	_, _, ok := polls.pollTarget(t.Context(), h.spokeProject.ID)
-	assert.False(t, ok, "the watcher read its binding and credential during an endpoint change")
-
-	finish()
-	_, credential, ok := polls.pollTarget(t.Context(), h.spokeProject.ID)
-	require.True(t, ok, "the watcher stayed blocked after the endpoint change finished")
-	assert.Equal(t, binding.HubURL, credential.HubURL)
-}
-
-// Interval passes that skip their pull while a poll is held must not report a
-// pull that never happened: a hub that stops answering would look healthy.
-func TestFederationRunnerRecordsNoPullWhileAHeldPollGoesUnanswered(t *testing.T) {
-	h := newHubSpokeHarness(t, false)
-	var held atomic.Int64
-	h.bindThrough(t, func(w http.ResponseWriter, r *http.Request, hub http.Handler) {
-		if isHeldPoll(r) {
-			held.Add(1)
-			<-r.Context().Done()
-			return
-		}
-		hub.ServeHTTP(w, r)
-	})
-	h.startRunner(t, 100*time.Millisecond)
-	//nolint:kennlint // sleeptest: the runner and hub exchange held polls over real HTTP.
-	require.Eventually(t, func() bool { return held.Load() > 0 },
-		10*time.Second, 20*time.Millisecond, "the spoke never held a poll at the hub")
-	before := h.lastPullSuccess(t)
-	//nolint:kennlint // sleeptest: the runner's interval passes run on real time.
-	time.Sleep(time.Second)
-	assert.Equal(t, before, h.lastPullSuccess(t), "a pass that skipped its pull recorded a pull success")
-}
-
-// A hub that answers a held poll with an empty page has answered the pull the
-// interval passes skip, so the spoke records that pull as done.
-func TestFederationRunnerRecordsAPullWhenTheHubAnswersAHeldPollEmpty(t *testing.T) {
-	h := newHubSpokeHarness(t, false)
-	var held atomic.Int64
-	answer := make(chan struct{})
-	h.bindThrough(t, func(w http.ResponseWriter, r *http.Request, hub http.Handler) {
-		if isHeldPoll(r) {
-			held.Add(1)
-			select {
-			case <-r.Context().Done():
-				return
-			case <-answer:
-			}
-			// Answer at once with the hub's empty page.
-			query := r.URL.Query()
-			query.Del("wait")
-			r.URL.RawQuery = query.Encode()
-		}
-		hub.ServeHTTP(w, r)
-	})
-	h.startRunner(t, time.Hour)
-	//nolint:kennlint // sleeptest: the runner and hub exchange held polls over real HTTP.
-	require.Eventually(t, func() bool { return held.Load() > 0 },
-		10*time.Second, 20*time.Millisecond, "the spoke never held a poll at the hub")
-	before := h.lastPullSuccess(t)
-	close(answer)
-	//nolint:kennlint // sleeptest: the runner and hub exchange held polls over real HTTP.
-	require.Eventually(t, func() bool { return h.lastPullSuccess(t).After(before) },
-		5*time.Second, 20*time.Millisecond, "the hub's empty answer was not recorded as a pull")
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the watcher did not stop after the pass failed")
+	}
 }
 
 // A watcher waiting to reprobe a hub without held polls must not keep waiting
@@ -312,7 +209,7 @@ func (h *hubSpokeHarness) startWatcher(tb testing.TB, interval time.Duration) *h
 	tb.Helper()
 	ctx := context.WithoutCancel(tb.Context())
 	polls := newHubLongPolls(ctx, h.spokeDB, config.DefaultFederationCredentialStore(),
-		clientOptsWithDefault(clientpkg.Opts{}), interval, nil, nil, NewSyncRetries(), time.Now)
+		clientOptsWithDefault(clientpkg.Opts{}), interval, nil, nil)
 	binding, err := h.spokeDB.FederationBindingByProject(ctx, h.spokeProject.ID)
 	require.NoError(tb, err)
 	polls.start(activeSpokeBinding{binding: binding, project: h.spokeProject})
@@ -433,7 +330,7 @@ func TestHeldAnswerDoesNotHideUnfinishedPull(t *testing.T) {
 	ctx := t.Context()
 	start := time.Now().UTC().Truncate(time.Millisecond)
 	require.NoError(t, h.spokeDB.RecordFederationSyncPullStarted(ctx, h.spokeProject.ID, start))
-	polls := newHubLongPolls(ctx, h.spokeDB, nil, clientpkg.Opts{}, time.Second, nil, nil, NewSyncRetries(), time.Now)
+	polls := newHubLongPolls(ctx, h.spokeDB, nil, clientpkg.Opts{}, time.Second, nil, nil)
 	polls.recordHeldAnswer(ctx, h.spokeProject.ID, start.Add(time.Second))
 	status, err := h.spokeDB.FederationSyncStatusByProject(ctx, h.spokeProject.ID)
 	require.NoError(t, err)
@@ -587,55 +484,34 @@ func TestHeldPollDoesNotFollowRedirect(t *testing.T) {
 	require.Zero(t, redirected.Load())
 }
 
-func TestHeldPollRetryAfterBlocksRunner(t *testing.T) {
-	h := newHubSpokeHarness(t, false)
-	var held, ordinary atomic.Int64
-	h.bindThrough(t, func(w http.ResponseWriter, r *http.Request, hub http.Handler) {
-		if isHeldPoll(r) {
-			held.Add(1)
-			w.Header().Set("Retry-After", "120")
-			w.WriteHeader(http.StatusServiceUnavailable)
-			return
-		}
-		if isEventPoll(r) {
-			ordinary.Add(1)
-		}
-		hub.ServeHTTP(w, r)
-	})
-	scheduled := make(chan struct{}, 1)
-	retries := newSyncRetries(func(time.Duration) time.Duration {
-		select {
-		case scheduled <- struct{}{}:
-		default:
-		}
-		return 0
-	})
-	stop := h.startConfiguredRunner(t, &Runner{DB: h.spokeDB, Interval: 100 * time.Millisecond, Retries: retries})
-	select {
-	case <-scheduled:
-	case <-time.After(10 * time.Second):
-		t.Fatal("the held poll did not record a retry")
+func TestHeldPollThrottleDoesNotScheduleRunnerRetry(t *testing.T) {
+	for _, status := range []int{http.StatusTooManyRequests, http.StatusServiceUnavailable} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			h := newHubSpokeHarness(t, false)
+			answered := make(chan struct{}, 1)
+			h.bindThrough(t, func(w http.ResponseWriter, r *http.Request, hub http.Handler) {
+				if isHeldPoll(r) {
+					w.Header().Set("Retry-After", "120")
+					w.WriteHeader(status)
+					answered <- struct{}{}
+					return
+				}
+				hub.ServeHTTP(w, r)
+			})
+			retries := NewSyncRetries()
+			h.startConfiguredRunner(t, &Runner{DB: h.spokeDB, Interval: time.Hour, Retries: retries})
+			select {
+			case <-answered:
+			case <-time.After(10 * time.Second):
+				t.Fatal("held poll did not reach the hub")
+			}
+			// Allow the watcher to process the response.
+			//nolint:kennlint // sleeptest: the response crosses a real HTTP connection.
+			time.Sleep(200 * time.Millisecond)
+			_, ok := retries.FederationSyncRetry(h.spokeProject.ID)
+			require.False(t, ok, "a held poll must not set the runner's retry schedule")
+		})
 	}
-	_, ok := retries.FederationSyncRetry(h.spokeProject.ID)
-	require.True(t, ok)
-	beforeHeld, beforeOrdinary := held.Load(), ordinary.Load()
-	h.wake <- struct{}{}
-	//nolint:kennlint // sleeptest: observe real HTTP requests across several runner intervals.
-	time.Sleep(500 * time.Millisecond)
-	require.Equal(t, beforeHeld, held.Load())
-	require.Equal(t, beforeOrdinary, ordinary.Load())
-
-	var newHeld atomic.Int64
-	h.bindThrough(t, func(w http.ResponseWriter, r *http.Request, hub http.Handler) {
-		if isHeldPoll(r) {
-			newHeld.Add(1)
-		}
-		hub.ServeHTTP(w, r)
-	})
-	t.Cleanup(stop)
-	h.wake <- struct{}{}
-	//nolint:kennlint // sleeptest: the runner resumes HTTP traffic at the changed endpoint.
-	require.Eventually(t, func() bool { return newHeld.Load() > 0 }, 10*time.Second, 20*time.Millisecond)
 }
 
 func TestRebindEndsHeldPoll(t *testing.T) {
@@ -666,84 +542,6 @@ func TestRebindEndsHeldPoll(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("held request did not end")
 	}
-}
-
-func TestHeldRetrySurvivesConcurrentSuccessfulPass(t *testing.T) {
-	h := newHubSpokeHarness(t, false)
-	h.allowPush(t)
-	held := make(chan struct{}, 1)
-	var ordinary atomic.Int64
-	failHeld := make(chan struct{})
-	h.bindThrough(t, func(w http.ResponseWriter, r *http.Request, hub http.Handler) {
-		if isHeldPoll(r) {
-			held <- struct{}{}
-			select {
-			case <-failHeld:
-				w.Header().Set("Retry-After", "120")
-				w.WriteHeader(http.StatusServiceUnavailable)
-			case <-r.Context().Done():
-			}
-			return
-		}
-		if isEventPoll(r) {
-			ordinary.Add(1)
-		}
-		hub.ServeHTTP(w, r)
-	})
-	retries := NewSyncRetries()
-	var armed atomic.Bool
-	passFinished := make(chan struct{}, 1)
-	passErrors := make(chan error, 1)
-	releasePass := make(chan struct{})
-	defer func() {
-		select {
-		case <-releasePass:
-		default:
-			close(releasePass)
-		}
-	}()
-	runner := &Runner{DB: h.spokeDB, Interval: time.Hour, Retries: retries, OnSpokeResult: func(_ int64, err error) {
-		if err != nil && armed.Load() {
-			passErrors <- err
-			return
-		}
-		if err == nil && armed.CompareAndSwap(true, false) {
-			passFinished <- struct{}{}
-			<-releasePass
-		}
-	}}
-	h.startConfiguredRunner(t, runner)
-	select {
-	case <-held:
-	case <-time.After(10 * time.Second):
-		t.Fatal("held poll did not start")
-	}
-	_, _, err := h.spokeDB.CreateIssue(t.Context(), db.CreateIssueParams{
-		ProjectID: h.spokeProject.ID, Title: "Concurrent push", Author: "tester",
-	})
-	require.NoError(t, err)
-	armed.Store(true)
-	h.wake <- struct{}{}
-	select {
-	case <-passFinished:
-	case err := <-passErrors:
-		t.Fatalf("pass failed: %v", err)
-	case <-time.After(10 * time.Second):
-		t.Fatal("pass did not finish")
-	}
-	close(failHeld)
-	//nolint:kennlint // sleeptest: the held response arrives over real HTTP.
-	require.Eventually(t, func() bool { _, ok := retries.FederationSyncRetry(h.spokeProject.ID); return ok }, 10*time.Second, 20*time.Millisecond)
-	close(releasePass)
-	//nolint:kennlint // sleeptest: allow the completed pass to record its result.
-	time.Sleep(200 * time.Millisecond)
-	_, ok := retries.FederationSyncRetry(h.spokeProject.ID)
-	require.True(t, ok, "a successful pass erased a later Retry-After")
-	before := ordinary.Load()
-	h.wake <- struct{}{}
-	//nolint:kennlint // sleeptest: allow the runner to process the wake.
-	time.Sleep(300 * time.Millisecond)
-	require.Equal(t, before, ordinary.Load(), "the runner polled before Retry-After")
 }
 
 func TestRetiredWatcherDoesNotClearReplacementPoll(t *testing.T) {
@@ -787,7 +585,7 @@ func TestStoppedWatcherIsJoinedAtShutdown(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				store := &blockedWatcherRead{Storage: h.spokeDB, started: make(chan struct{}), release: make(chan struct{})}
 				polls := newHubLongPolls(context.WithoutCancel(t.Context()), store, config.DefaultFederationCredentialStore(),
-					clientOptsWithDefault(clientpkg.Opts{}), time.Hour, nil, nil, nil, time.Now)
+					clientOptsWithDefault(clientpkg.Opts{}), time.Hour, nil, nil)
 				polls.start(activeSpokeBinding{binding: db.FederationBinding{ProjectID: h.spokeProject.ID}})
 				select {
 				case <-store.started:

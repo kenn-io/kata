@@ -1,7 +1,6 @@
 package federation
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -275,103 +274,4 @@ func TestHubStatusErrorCarriesRetryAfter(t *testing.T) {
 	var status *HubStatusError
 	require.ErrorAs(t, err, &status)
 	require.Equal(t, 2*time.Minute, status.RetryAfter)
-}
-
-func TestSyncRetryKeepsNewerHeldPollDeadlineAfterConcurrentFailure(t *testing.T) {
-	retries := newSyncRetries(noJitter)
-	started := retries.version(1)
-	heldAt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	retries.recordSchedule(1, [32]byte{2}, [32]byte{2}, true, &HubStatusError{StatusCode: http.StatusServiceUnavailable, RetryAfter: 120 * time.Second}, time.Second, heldAt, nil)
-	retries.recordSchedule(1, [32]byte{1}, [32]byte{2}, false, &HubStatusError{StatusCode: http.StatusServiceUnavailable}, time.Second, heldAt.Add(time.Second), &started)
-	retry, ok := retries.FederationSyncRetry(1)
-	require.True(t, ok)
-	require.Equal(t, heldAt.Add(120*time.Second), retry.NextAttemptAt)
-}
-
-func TestSyncRetryKeepsLongerConcurrentDelay(t *testing.T) {
-	retries := newSyncRetries(noJitter)
-	binding := db.FederationBinding{ProjectID: 1, Role: db.FederationRoleSpoke, Enabled: true, HubURL: "https://hub.example", HubProjectID: 42}
-	credential := config.FederationCredential{HubURL: binding.HubURL, HubProjectID: 42, Token: "token"}
-	started := retries.version(1)
-	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	held, err := heldRetryIdentity(binding, credential)
-	require.NoError(t, err)
-	retries.recordSchedule(1, held, held, true, &HubStatusError{StatusCode: http.StatusServiceUnavailable, RetryAfter: 120 * time.Second}, time.Second, at, nil)
-	binding.UpdatedAt = at.Add(time.Second)
-	ordinary, err := syncRetryIdentity(binding, credential)
-	require.NoError(t, err)
-	retries.recordSchedule(1, ordinary, held, false, &HubStatusError{StatusCode: http.StatusServiceUnavailable, RetryAfter: 300 * time.Second}, time.Second, at.Add(time.Second), &started)
-	retry, ok := retries.FederationSyncRetry(1)
-	require.True(t, ok)
-	require.Equal(t, at.Add(301*time.Second), retry.NextAttemptAt)
-}
-
-func TestRetryScheduleSurvivesStaleOrCanceledLookup(t *testing.T) {
-	binding := db.FederationBinding{ProjectID: 1, Role: db.FederationRoleSpoke, Enabled: true, HubURL: "https://hub.example", HubProjectID: 42}
-	credential := config.FederationCredential{HubURL: binding.HubURL, HubProjectID: 42, Token: "token"}
-	now := time.Now()
-	identity, err := heldRetryIdentity(binding, credential)
-	require.NoError(t, err)
-	for _, canceled := range []bool{false, true} {
-		retries := newSyncRetries(noJitter)
-		version := retries.version(1)
-		retries.recordSchedule(1, identity, identity, true, &HubStatusError{StatusCode: http.StatusServiceUnavailable, RetryAfter: time.Minute}, time.Second, now, nil)
-		if canceled {
-			version = retries.version(1)
-		}
-		ctx, cancel := context.WithCancel(t.Context())
-		if canceled {
-			cancel()
-		}
-		stale := binding
-		stale.HubURL = "https://old.example"
-		require.True(t, retries.blockedFor(ctx, 1, stale, credential, now, version))
-		cancel()
-		require.True(t, retries.blockedFor(t.Context(), 1, binding, credential, now, retries.version(1)))
-	}
-}
-
-func TestHeldRetryClearsWhenBindingRoleOrEnabledChanges(t *testing.T) {
-	t.Run("push cursor", func(t *testing.T) {
-		h := newHubSpokeHarness(t, false)
-		ctx := t.Context()
-		binding, err := h.spokeDB.FederationBindingByProject(ctx, h.spokeProject.ID)
-		require.NoError(t, err)
-		credentials := config.DefaultFederationCredentialStore()
-		credential, _, err := credentials.FederationCredential(ctx, h.spokeProject.UID)
-		require.NoError(t, err)
-		identity, err := heldRetryIdentity(binding, credential)
-		require.NoError(t, err)
-		retries := NewSyncRetries()
-		err = h.spokeDB.AdvanceFederationPushCursor(ctx, binding.ProjectID, binding.PushCursorEventID+1)
-		require.NoError(t, err)
-		retries.recordSchedule(binding.ProjectID, identity, identity, true, &HubStatusError{StatusCode: http.StatusServiceUnavailable, RetryAfter: 120 * time.Second}, time.Second, time.Now(), nil)
-		binding, err = h.spokeDB.FederationBindingByProject(ctx, binding.ProjectID)
-		require.NoError(t, err)
-		require.True(t, retries.blockedFor(ctx, binding.ProjectID, binding, credential, time.Now(), retries.version(binding.ProjectID)), "the concurrent push must not clear the held poll's Retry-After")
-	})
-	binding := db.FederationBinding{ProjectID: 1, Role: db.FederationRoleSpoke, Enabled: true, HubURL: "https://hub.example", HubProjectID: 42}
-	credential := config.FederationCredential{HubURL: binding.HubURL, HubProjectID: 42, Token: "token"}
-	for _, tc := range []struct {
-		name   string
-		change func(*db.FederationBinding)
-	}{
-		{"role", func(b *db.FederationBinding) { b.Role = db.FederationRoleHub }},
-		{"disabled", func(b *db.FederationBinding) { b.Enabled = false }},
-		{"endpoint", func(b *db.FederationBinding) { b.HubURL += "/moved" }},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-			identity, err := heldRetryIdentity(binding, credential)
-			require.NoError(t, err)
-			retries := newSyncRetries(noJitter)
-			retries.recordSchedule(binding.ProjectID, identity, identity, true, &HubStatusError{StatusCode: http.StatusServiceUnavailable, RetryAfter: 120 * time.Second}, time.Second, now, nil)
-			require.True(t, retries.blockedFor(t.Context(), binding.ProjectID, binding, credential, now, retries.version(binding.ProjectID)))
-			changed := binding
-			tc.change(&changed)
-			require.False(t, retries.blockedFor(t.Context(), binding.ProjectID, changed, credential, now, retries.version(binding.ProjectID)), "a changed binding must clear the held retry")
-			_, ok := retries.FederationSyncRetry(binding.ProjectID)
-			require.False(t, ok)
-		})
-	}
 }

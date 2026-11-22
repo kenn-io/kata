@@ -304,6 +304,8 @@ previous one. When an issue later moves in, its earlier history may sit below
 the cursor; the spoke reads that history through the moved issue's own
 history route, whatever its cursor.
 
+An endpoint change ends held polls in the same daemon before the change completes.
+
 The event poll accepts an optional `wait` in seconds. When the cursor is caught
 up, the hub holds the request until an event commits in the project, including
 a move out of it, or until the wait ends, and then answers with the page as it
@@ -315,8 +317,7 @@ first read shortens it. Before each read a held poll makes after waiting, the
 hub runs the request's full federation authorization again without the
 per-request cache. For a signed request this also confirms that the signing
 key has not passed its `not_after` and still holds the secret the request was
-verified with. Every event-poll read, held or not, is followed by one more
-authorization check, and the hub releases the page only if it still passes.
+verified with. After a poll waits, the hub checks authorization once more before releasing the page.
 Revocation therefore ends a held poll at its next wake or at its expiry. When
 the wait ends without a wake, the hub reads once more, so events whose wakeup
 was lost still arrive. The hub bounds held polls in total, per credential, and

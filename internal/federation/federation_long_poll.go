@@ -45,8 +45,6 @@ type hubLongPolls struct {
 	credentials config.FederationCredentialStore
 	opts        clientpkg.Opts
 	interval    time.Duration
-	retries     *SyncRetries
-	now         func() time.Time
 	// admission gates the store reads a watcher makes between held polls. A
 	// held poll itself takes no lease, so it never keeps the daemon awake.
 	admission activity.WaitableAdmission
@@ -86,12 +84,11 @@ func newHubLongPolls(
 	interval time.Duration,
 	admission activity.WaitableAdmission,
 	notice func(error),
-	retries *SyncRetries, now func() time.Time,
 ) *hubLongPolls {
 	ctx, cancel := context.WithCancel(ctx)
 	return &hubLongPolls{
 		store: store, credentials: credentials, opts: opts, interval: interval, admission: admission,
-		notice: notice, ctx: ctx, cancel: cancel, retries: retries, now: now,
+		notice: notice, ctx: ctx, cancel: cancel,
 		changed: make(chan struct{}, 1), polls: map[int64]*hubLongPoll{}, passDone: make(chan struct{}),
 	}
 }
@@ -265,7 +262,6 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 	// moves the binding past it.
 	unread := int64(-1)
 	backoff := p.interval
-	var retryDelay time.Duration
 	for ctx.Err() == nil {
 		release, admitted, retry := p.admit()
 		if !admitted {
@@ -291,8 +287,7 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 			backoff = min(backoff*2, 16*p.interval)
 			continue
 		}
-		version := p.retries.version(projectID)
-		binding, credential, ok := p.pollTargetUnlocked(ctx, projectID)
+		binding, credential, ok := p.pollTarget(ctx, projectID)
 		if !ok {
 			finishSync()
 			release()
@@ -300,15 +295,6 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 				return
 			}
 			backoff = min(backoff*2, 16*p.interval)
-			continue
-		}
-		identity, err := heldRetryIdentity(binding, credential)
-		if err != nil || p.retries.blockedFor(ctx, projectID, binding, credential, p.now(), version) {
-			finishSync()
-			release()
-			if !sleepContext(ctx, p.interval) {
-				return
-			}
 			continue
 		}
 		credential = config.FederationTransportCredential(binding.HubURL, binding.HubProjectID, binding.AllowInsecure, credential)
@@ -352,15 +338,6 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 			}
 			answered = nil
 		}
-		if retryDelay > 0 {
-			finishSync()
-			release()
-			if !sleepContext(ctx, retryDelay) {
-				return
-			}
-			retryDelay = 0
-			continue
-		}
 		wait := federationLongPollWait
 		if supported > 0 {
 			wait = min(wait, supported)
@@ -402,9 +379,6 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 			// uses. Poll the current target at once.
 			continue
 		case err != nil:
-			if hubAskedToWait(err) {
-				p.retries.recordSchedule(projectID, identity, identity, true, err, p.interval, p.now(), &version)
-			}
 			supported = 0
 			if !sleepContext(ctx, backoff) {
 				return
@@ -438,17 +412,19 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 			unread = cursor
 			continue
 		}
-		answered = &heldAnswer{cursor: cursor, target: target, at: time.Now().UTC()}
 		if time.Since(started) < min(wait, advertised)/2 {
 			// The hub answered at once: it is at its bound for held polls.
 			// The interval pass pulls meanwhile, so retry less often each time.
 			supported = 0
-			retryDelay = backoff
+			if !sleepContext(ctx, backoff) {
+				return
+			}
 			backoff = min(backoff*2, 16*p.interval)
 			continue
 		}
 		supported = advertised
 		backoff = p.interval
+		answered = &heldAnswer{cursor: cursor, target: target, at: time.Now().UTC()}
 	}
 }
 
@@ -478,23 +454,9 @@ func (p *hubLongPolls) signal() {
 	}
 }
 
-// pollTarget resolves the binding and transport credential exactly as the
-// runner's pass does.
+// pollTarget resolves the binding and stored credential the runner's pass
+// uses.
 func (p *hubLongPolls) pollTarget(ctx context.Context, projectID int64) (db.FederationBinding, config.FederationCredential, bool) {
-	// Read the binding and credential under a pass's sync admission, so an
-	// endpoint change cannot pair one side of the change with the other. The
-	// admission ends before the poll is sent: a held poll must not keep an
-	// endpoint change waiting, and a later change only leaves this watcher
-	// polling the hub its credential names until its next read.
-	finish, err := federationcoord.TryBeginSync(ctx, federationcoord.Key(p.store.InstanceUID(), projectID), p.store, projectID)
-	if err != nil {
-		return db.FederationBinding{}, config.FederationCredential{}, false
-	}
-	defer finish()
-	return p.pollTargetUnlocked(ctx, projectID)
-}
-
-func (p *hubLongPolls) pollTargetUnlocked(ctx context.Context, projectID int64) (db.FederationBinding, config.FederationCredential, bool) {
 	binding, err := p.store.FederationBindingByProject(ctx, projectID)
 	if err != nil || !binding.Enabled || binding.Role != db.FederationRoleSpoke || binding.RelayConfig != nil {
 		return binding, config.FederationCredential{}, false
