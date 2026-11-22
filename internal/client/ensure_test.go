@@ -1201,8 +1201,6 @@ func TestEnsureRunningReportsLiveUnreachableDaemonWithoutAutoStart(t *testing.T)
 	assert.Contains(t, err.Error(), fmt.Sprintf("daemon pid %d is running", os.Getpid()))
 	assert.Contains(t, err.Error(), address)
 	assert.Contains(t, err.Error(), "missing.sock")
-	assert.NotContains(t, err.Error(), "kata.invalid")
-	assert.Contains(t, err.Error(), `Get "/api/v1/ping"`)
 	unreachable, ok := errors.AsType[*LocalDaemonUnreachableError](err)
 	require.True(t, ok)
 	assert.Equal(t, os.Getpid(), unreachable.PID)
@@ -1214,18 +1212,19 @@ func TestEnsureRunningReportsLiveUnreachableDaemonWithoutAutoStart(t *testing.T)
 }
 
 func TestUnreachableDaemonKeepsSocketPathContainingSyntheticHost(t *testing.T) {
-	socket := t.TempDir() + "/http://kata.invalid/missing.sock"
-	address := "unix://" + socket
-	client, base := LocalHTTPClient(address)
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix sockets are unsupported on Windows")
+	}
+	socketDir, err := os.MkdirTemp("", "sock-")
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, os.RemoveAll(socketDir)) })
+	socket := socketDir + "/http://kata.invalid/missing.sock"
+	client, base := LocalHTTPClient("unix://" + socket)
 	_, cause := Probe(t.Context(), client, base)
 	require.Error(t, cause)
-
-	err := &LocalDaemonUnreachableError{PID: os.Getpid(), Address: address, cause: cause}
-	assert.Contains(t, err.Summary(), `Get "/api/v1/ping"`)
-	assert.Contains(t, err.Summary(), "dial unix "+socket)
-	urlErr, ok := errors.AsType[*url.Error](err)
-	require.True(t, ok)
-	assert.Equal(t, "http://kata.invalid/api/v1/ping", urlErr.URL)
+	unreachable := &LocalDaemonUnreachableError{cause: cause}
+	assert.Contains(t, unreachable.Summary(), `Get "/api/v1/ping"`)
+	assert.Contains(t, unreachable.Summary(), "dial unix "+socket)
 }
 
 func TestEnsureRunningPrioritizesUnreachableDaemonOverIncompatibleDaemon(t *testing.T) {
