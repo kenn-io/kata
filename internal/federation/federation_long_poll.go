@@ -265,6 +265,7 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 	// moves the binding past it.
 	unread := int64(-1)
 	backoff := p.interval
+	var retryDelay time.Duration
 	for ctx.Err() == nil {
 		release, admitted, retry := p.admit()
 		if !admitted {
@@ -350,6 +351,15 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 			}
 			answered = nil
 		}
+		if retryDelay > 0 {
+			finishSync()
+			release()
+			if !sleepContext(ctx, retryDelay) {
+				return
+			}
+			retryDelay = 0
+			continue
+		}
 		wait := federationLongPollWait
 		if supported > 0 {
 			wait = min(wait, supported)
@@ -427,19 +437,17 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 			unread = cursor
 			continue
 		}
+		answered = &heldAnswer{cursor: cursor, target: target, at: time.Now().UTC()}
 		if time.Since(started) < min(wait, advertised)/2 {
 			// The hub answered at once: it is at its bound for held polls.
 			// The interval pass pulls meanwhile, so retry less often each time.
 			supported = 0
-			if !sleepContext(ctx, backoff) {
-				return
-			}
+			retryDelay = backoff
 			backoff = min(backoff*2, 16*p.interval)
 			continue
 		}
 		supported = advertised
 		backoff = p.interval
-		answered = &heldAnswer{cursor: cursor, target: target, at: time.Now().UTC()}
 	}
 }
 
@@ -471,42 +479,6 @@ func (p *hubLongPolls) report(err error) {
 	if p.notice != nil && p.ctx.Err() == nil {
 		p.notice(err)
 	}
-}
-
-// recordAnsweredPull records the hub's empty answer to a held poll as the
-// pull the runner's interval passes skipped while it was out. It records
-// nothing when the binding has moved off the polled address or cursor since,
-// or when a pass began a pull that has not finished, which owns the result.
-// A store error sends the watcher to its backoff like a failed poll.
-func (p *hubLongPolls) recordAnsweredPull(ctx context.Context, projectID int64, hubURL string, cursor int64) error {
-	release, admitted, _ := p.admit()
-	if !admitted {
-		// Pull status is not worth holding a draining daemon awake.
-		return nil
-	}
-	defer release()
-	binding, err := p.store.FederationBindingByProject(ctx, projectID)
-	if errors.Is(err, db.ErrNotFound) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if !binding.Enabled || binding.HubURL != hubURL || binding.PullCursorEventID != cursor {
-		return nil
-	}
-	status, err := p.store.FederationSyncStatusByProject(ctx, projectID)
-	if err != nil && !errors.Is(err, db.ErrNotFound) {
-		return err
-	}
-	if pullInterrupted(status) {
-		return nil
-	}
-	at := time.Now().UTC()
-	if status.LastPullStartedAt != nil {
-		at = pullCompletedAt(*status.LastPullStartedAt)
-	}
-	return p.store.RecordFederationSyncPullSuccess(ctx, projectID, at)
 }
 
 // pollChanged reports whether a page has anything for the runner to apply.

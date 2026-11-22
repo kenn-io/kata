@@ -78,10 +78,3 @@ func CountStatementsForTest() func() {
 	}
 	return func() { wrapPostgresConnector = previous }
 }
-
-// FederationPollWakeChannelForTest returns the LISTEN channel that store's
-// federation poll wake bus uses, so tests can listen as an outside role would.
-func FederationPollWakeChannelForTest(store *Store) (string, error) {
-	channel, _, err := store.pollWakeKeys()
-	return channel, err
-}

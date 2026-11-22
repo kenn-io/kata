@@ -98,7 +98,11 @@ func (c *Client) PollIssueEvents(ctx context.Context, hubProjectID int64, issueU
 func (c *Client) pollProjectEvents(
 	ctx context.Context, hubProjectID int64, issueUID string, afterID int64, limit int, wait time.Duration,
 ) (api.PollEventsBody, time.Duration, error) {
-	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{c.client}))
+	httpClient := c.client
+	if wait > 0 {
+		httpClient = noRedirects(httpClient)
+	}
+	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{httpClient}))
 	if err != nil {
 		return api.PollEventsBody{}, 0, err
 	}
@@ -160,9 +164,7 @@ func (c *Client) IngestProjectEventsWithOptions(
 	if len(opts.MoveSourceTokens) > 0 {
 		// Supplemental credentials belong to this mount. A redirect can name a
 		// different mount on the same origin and can replay the request body.
-		pinned := *httpClient
-		pinned.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-		httpClient = &pinned
+		httpClient = noRedirects(httpClient)
 	}
 	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{httpClient}))
 	if err != nil {
@@ -382,4 +384,10 @@ func decodeReplicationResponse(resp *http.Response, body []byte, out any) error 
 		return fmt.Errorf("decode hub %s response: %w", resp.Request.URL.Path, err)
 	}
 	return nil
+}
+
+func noRedirects(client *http.Client) *http.Client {
+	pinned := *client
+	pinned.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return &pinned
 }

@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"sync"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -26,27 +25,11 @@ const (
 	// pollWakeChannelBytes keeps the hex channel name within PostgreSQL's
 	// 63-byte identifier limit.
 	pollWakeChannelBytes = 24
-	pollWakeSenderBytes  = 16
-	pollWakeHeaderBytes  = pollWakeSenderBytes + 8
 	// pollWakeMaxNotifyBytes is PostgreSQL's limit on a NOTIFY payload.
 	pollWakeMaxNotifyBytes = 7999
 )
 
 var _ db.FederationPollWakeBus = (*Store)(nil)
-
-type pollWakeState struct {
-	sender    [pollWakeSenderBytes]byte
-	publishMu sync.Mutex
-	counter   uint64
-}
-
-func newPollWakeState() (*pollWakeState, error) {
-	state := &pollWakeState{}
-	if _, err := rand.Read(state.sender[:]); err != nil {
-		return nil, fmt.Errorf("generate federation poll wake sender: %w", err)
-	}
-	return state, nil
-}
 
 // pollWakeClosed reports whether Close has run.
 func (s *Store) pollWakeClosed() bool {
@@ -93,10 +76,6 @@ func (s *Store) ListenFederationPollWake(ctx context.Context, listening func(), 
 	if s.pollWakeClosed() {
 		return db.ErrFederationPollWakeClosed
 	}
-	channel, aead, err := s.pollWakeKeys()
-	if err != nil {
-		return err
-	}
 	// Closing the pool does not interrupt a connection in use, so Close ends
 	// the listener through its context.
 	ctx, cancel := context.WithCancel(ctx)
@@ -140,9 +119,6 @@ func listenFederationPollWake(ctx context.Context, channel string, driverConn an
 		return fmt.Errorf("listen for federation poll wakes: %w", err)
 	}
 	listening()
-	// Each sender's counter only grows, so a notification at or below the last
-	// one seen from that sender is a replay.
-	seen := map[[pollWakeSenderBytes]byte]uint64{}
 	for {
 		notification, err := listener.WaitForNotification(ctx)
 		if err != nil {
