@@ -115,6 +115,7 @@ describe('Checklist', () => {
     await fireEvent.keyDown(screen.getByRole('textbox', { name: 'Rename checklist item' }), {
       key: 'Enter',
     })
+    expect(onPatchMetadata).toHaveBeenCalledTimes(2)
     expect(onPatchMetadata).toHaveBeenLastCalledWith('issue-1', {
       checklist: [{ id: 'item-1', text: 'Send report', done: false }],
     })

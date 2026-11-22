@@ -264,6 +264,24 @@ describe('IssueProperties', () => {
       }),
     })
     expect(screen.queryByRole('button', { name: /Due:/ })).toBeNull()
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Priority' }))
+    await fireEvent.click(await screen.findByRole('menuitemradio', { name: 'P1' }))
+    expect(screen.getByRole('button', { name: 'Priority: P1' })).toBeTruthy()
+
+    await view.rerender({
+      draftResetGeneration: 3,
+      issue: makeIssue({ owner: 'user-a', priority: 3 }),
+    })
+    expect(screen.getByRole('button', { name: 'Priority: P3' })).toBeTruthy()
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Add label' }))
+    await fireEvent.input(screen.getByLabelText('New label'), { target: { value: 'urgent' } })
+    await fireEvent.keyDown(screen.getByLabelText('New label'), { key: 'Enter' })
+    expect((screen.getByLabelText('New label') as HTMLInputElement).value).toBe('urgent')
+
+    await view.rerender({ draftResetGeneration: 4 })
+    expect(screen.queryByLabelText('New label')).toBeNull()
   })
 
   it('clears date properties and closes date editors on Escape', async () => {
@@ -487,41 +505,6 @@ describe('IssueProperties', () => {
     })
 
     expect((screen.getByRole('combobox', { name: 'Owner' }) as HTMLInputElement).value).toBe('')
-  })
-
-  it('resets successful date, priority, and label drafts only after accepted replacement', async () => {
-    const view = renderProperties({ draftResetGeneration: 0 })
-
-    await fireEvent.click(screen.getByRole('button', { name: 'Edit scheduled' }))
-    await fireEvent.click(screen.getByRole('gridcell', { name: /June 10, 2026/ }))
-    expect(screen.getByRole('button', { name: /Scheduled: Jun 10/ })).toBeTruthy()
-
-    await view.rerender({
-      draftResetGeneration: 1,
-      issue: makeIssue({
-        owner: 'user-a',
-        metadata: { scheduled_on: '2026-06-10', deadline_on: '2026-06-05' },
-      }),
-    })
-    expect(screen.queryByRole('button', { name: /Scheduled:/ })).toBeNull()
-
-    await fireEvent.click(screen.getByRole('button', { name: 'Priority' }))
-    await fireEvent.click(await screen.findByRole('menuitemradio', { name: 'P1' }))
-    expect(screen.getByRole('button', { name: 'Priority: P1' })).toBeTruthy()
-
-    await view.rerender({
-      draftResetGeneration: 2,
-      issue: makeIssue({ owner: 'user-a', priority: 3 }),
-    })
-    expect(screen.getByRole('button', { name: 'Priority: P3' })).toBeTruthy()
-
-    await fireEvent.click(screen.getByRole('button', { name: 'Add label' }))
-    await fireEvent.input(screen.getByLabelText('New label'), { target: { value: 'urgent' } })
-    await fireEvent.keyDown(screen.getByLabelText('New label'), { key: 'Enter' })
-    expect((screen.getByLabelText('New label') as HTMLInputElement).value).toBe('urgent')
-
-    await view.rerender({ draftResetGeneration: 3 })
-    expect(screen.queryByLabelText('New label')).toBeNull()
   })
 
   it.each([

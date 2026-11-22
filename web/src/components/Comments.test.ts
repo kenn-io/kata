@@ -112,26 +112,20 @@ describe('Comments', () => {
   })
 
   it('renders accepted comments newest first', async () => {
-    renderComments()
+    const task = issue()
+    task.comments[0]!.uid = 'comment-one'
+    task.comments[0]!.handle = 'c:abc123'
+    task.comments[0]!.teammate = 'worker-a'
+    task.comments[1]!.uid = 'comment-two'
+    task.comments[1]!.handle = 'c:def456'
+    renderComments({ issue: task, selfActor: 'user-a' })
 
     const comments = screen.getAllByRole('article')
     await waitFor(() => expect(comments[0]?.textContent).toContain('Newest comment'))
     expect(comments[1]?.textContent).toContain('First comment')
-  })
-
-  it('shows each comment handle for CLI references', async () => {
-    const task = issue()
-    task.comments[0]!.uid = 'comment-one'
-    task.comments[0]!.handle = 'c:abc123'
-    task.comments[1]!.uid = 'comment-two'
-    task.comments[1]!.handle = 'c:def456'
-
-    renderComments({ issue: task })
-
-    const first = await screen.findByText('First comment')
-    const newest = await screen.findByText('Newest comment')
-    expect(first.closest('article')?.textContent).toContain('c:abc123')
-    expect(newest.closest('article')?.textContent).toContain('c:def456')
+    expect(comments[0]?.textContent).toContain('c:def456')
+    expect(comments[1]?.textContent).toContain('c:abc123')
+    expect(comments[1]?.textContent).toContain('You / worker-a')
   })
 
   it('keeps a reply draft on its target until the draft is cleared', async () => {
@@ -156,13 +150,6 @@ describe('Comments', () => {
     await fireEvent.input(within(first).getByLabelText('Reply evidence'), { target: { value: '' } })
     await fireEvent.click(within(second).getByRole('button', { name: 'Reply' }))
     expect((within(second).getByLabelText('Reply evidence') as HTMLTextAreaElement).value).toBe('')
-  })
-
-  it('identifies your comment while retaining its teammate', () => {
-    const task = issue()
-    task.comments[0]!.teammate = 'worker-a'
-    renderComments({ issue: task, selfActor: 'user-a' })
-    expect(screen.getByText('You / worker-a')).toBeTruthy()
   })
 
   it('offers force only for the draft that received a duplicate refusal', async () => {

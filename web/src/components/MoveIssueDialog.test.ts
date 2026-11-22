@@ -142,7 +142,8 @@ describe('MoveIssueDialog', () => {
     const pendingMove = new Promise<boolean>((resolve) => {
       finishMove = resolve
     })
-    const view = renderMenu({ onMoveIssue: vi.fn(() => pendingMove) })
+    const onMoveIssue = vi.fn().mockReturnValueOnce(pendingMove).mockResolvedValueOnce(true)
+    const view = renderMenu({ onMoveIssue })
 
     await openMovePicker()
     await view.rerender({
@@ -172,6 +173,10 @@ describe('MoveIssueDialog', () => {
     })
     await openMovePicker()
     expect(screen.queryByRole('button', { name: /Roadmap 2027/ })).toBeNull()
+    expect(screen.getByRole('dialog', { name: 'Move to another project' })).toBeTruthy()
+    await fireEvent.click(screen.getByRole('button', { name: /Shared.*Work/ }))
+    expect(onMoveIssue).toHaveBeenLastCalledWith('project-shared-work')
+    expect(onMoveIssue).toHaveBeenCalledTimes(2)
   })
 
   it('clears a move search before Escape dismisses the picker', async () => {
