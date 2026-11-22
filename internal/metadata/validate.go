@@ -70,12 +70,15 @@ func Validate(registry map[string]Entry, key string, raw jsontext.Value) error {
 	}
 }
 
+// AttentionValuesMessage names the accepted work.attention values.
+const AttentionValuesMessage = "work.attention must be one of ok, needs-human, stuck"
+
 func validateAttention(raw jsontext.Value) error {
 	var value string
 	if err := json.Unmarshal(raw, &value); err == nil && (value == "ok" || value == "needs-human" || value == "stuck") {
 		return nil
 	}
-	return fmt.Errorf("%w: work.attention must be one of ok, needs-human, stuck", ErrInvalidValue)
+	return fmt.Errorf("%w: %s", ErrInvalidValue, AttentionValuesMessage)
 }
 
 func validateSchedule(raw jsontext.Value) error {

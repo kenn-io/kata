@@ -14,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/commentref"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/textsafe"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -52,7 +53,7 @@ See kata meta --help for the keys agents use.`,
   kata meta set abc4 someday true --json-value --agent`,
 		Args: cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			value, err := parseMetaSetValue(args[2], jsonValue)
+			value, err := parseMetaSetValue(args[1], args[2], jsonValue)
 			if err != nil {
 				return err
 			}
@@ -182,9 +183,12 @@ type metaGetKeyJSON struct {
 	Value    jsontext.Value `json:"value"`
 }
 
-func parseMetaSetValue(raw string, asJSON bool) (jsontext.Value, error) {
-	return parseMetaValue(raw, asJSON,
-		"null is not allowed with --json-value; use `kata meta unset` to clear a key")
+func parseMetaSetValue(key, raw string, asJSON bool) (jsontext.Value, error) {
+	message := "null is not allowed with --json-value; use `kata meta unset` to clear a key"
+	if metadata.IssueRegistry[key].Type == metadata.TypeAttention {
+		message = metadata.AttentionValuesMessage + "; " + message
+	}
+	return parseMetaValue(raw, asJSON, message)
 }
 
 func parseMetaGuardValue(raw string, asJSON bool) (jsontext.Value, error) {

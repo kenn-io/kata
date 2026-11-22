@@ -58,3 +58,10 @@ func TestComposeRecurrenceMetadataPreservesLegacyAttention(t *testing.T) {
 	}
 	assert.ErrorIs(t, ValidateRecurrenceTemplate("Review", jsontext.Value(`{"work.attention":"working"}`)), ErrInvalidRecurrence)
 }
+
+func TestValidateRecurrenceTemplatePatchSkipsOnlySavedLegacyAttention(t *testing.T) {
+	saved := jsontext.Value(`{"work.attention":"working"}`)
+	require.NoError(t, ValidateRecurrenceTemplatePatch("Review", saved, nil))
+	assert.ErrorIs(t, ValidateRecurrenceTemplatePatch("Review", jsontext.Value(`{"work.attention":"working","someday":"yes"}`), nil), ErrInvalidRecurrence)
+	assert.ErrorIs(t, ValidateRecurrenceTemplatePatch("Review", jsontext.Value(`{}`), &saved), ErrInvalidRecurrence)
+}

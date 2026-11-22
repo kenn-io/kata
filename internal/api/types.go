@@ -1835,11 +1835,12 @@ type MoveIssueResponse struct {
 // Server-reserved issue metadata keys (mirrors internal/metadata.IssueRegistry).
 // Keys outside this set are accepted opaquely by the daemon.
 const (
-	MetadataKeyScheduledOn = "scheduled_on"
-	MetadataKeyDeadlineOn  = "deadline_on"
-	MetadataKeySomeday     = "someday"
-	MetadataKeyChecklist   = "checklist"
-	MetadataKeyTimezone    = "timezone"
+	MetadataKeyScheduledOn   = "scheduled_on"
+	MetadataKeyDeadlineOn    = "deadline_on"
+	MetadataKeySomeday       = "someday"
+	MetadataKeyChecklist     = "checklist"
+	MetadataKeyTimezone      = "timezone"
+	MetadataKeyWorkAttention = "work.attention"
 )
 
 // Server-reserved project metadata keys (mirrors internal/metadata.ProjectRegistry).

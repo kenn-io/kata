@@ -132,6 +132,16 @@ func TestMetaSetJSONValueRejectsNullWithUnsetHint(t *testing.T) {
 	assert.Contains(t, stderr, "use `kata meta unset`")
 }
 
+func TestMetaSetJSONValueRejectsNullAttentionWithValues(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createIssue(t, env, pid, "null attention issue")
+
+	_, stderr, err := runCLIWithErr(t, env, dir, "meta", "set", "--json-value", ref, "work.attention", `null`)
+	requireCLIError(t, err, ExitValidation)
+	assert.Contains(t, stderr, "ok, needs-human, stuck")
+	assert.Contains(t, stderr, "use `kata meta unset`")
+}
+
 func TestMetaUnsetRemovesKey(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "unset metadata issue")

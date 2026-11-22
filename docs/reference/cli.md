@@ -1305,10 +1305,13 @@ The command prints the issue's `scheduled_on` and `timezone` and the rule as it
 now stands. A change prints the recurrence's new rule, start, and zone too, and
 notes that the issue's own date and zone did not change, so its `timezone` can
 differ from the recurrence's. The recurrence template copies
-the issue's title, body, priority, and labels, never its owner or metadata. For
-an issue that already belongs to a recurrence, the same command changes its
-rule, start, and zone. If the recurrence changed after the CLI read it, nothing
-is written and the error reports the recurrence's current rule.
+the issue's title, body, priority, and labels, never its owner or metadata.
+The issue keeps its `work.attention` even when Kata no longer accepts that
+value. New occurrences of an older template omit an unsupported
+`work.attention`; the template keeps it. For an issue that already belongs to
+a recurrence, the same command changes its rule, start, and zone. If the
+recurrence changed after the CLI read it, nothing is written and the error
+reports the recurrence's current rule.
 
 The rule is sent as written. The daemon is the only validator, and its error is
 printed. The zone is `--timezone`, else, when changing, the recurrence's own
