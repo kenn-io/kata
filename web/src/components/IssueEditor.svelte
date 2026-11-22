@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte'
   import { Avatar, CopyButton, Markdown, Notice, type TypeaheadOption } from '@kenn-io/kit-ui'
-  import { IssueAttachments, projectIssueDetail } from '@kenn-io/kata-ui'
+  import { CreationAttribution, IssueAttachments, projectIssueDetail } from '@kenn-io/kata-ui'
   import NetworkIcon from '@lucide/svelte/icons/network'
   import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert'
   import CircleAlertIcon from '@lucide/svelte/icons/circle-alert'
@@ -314,11 +314,7 @@
       ? Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${due}T00:00:00Z`)) / 86400000)
       : 0,
   )
-  const closeEvent = $derived(
-    issue.effective_close_event_uid
-      ? events.find((event) => event.event_uid === issue.effective_close_event_uid)
-      : undefined,
-  )
+  const closeEvent = $derived(issue.effective_close_event)
   // "Nov 18", with the year when it isn't this one.
   function dayLabel(value: string): string {
     const date = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T00:00:00`) : new Date(value)
@@ -399,7 +395,9 @@
         await tick()
         if (
           issue.issue.uid === mutationUID &&
-          (issue.issue.title !== titleStart || issue.issue.body !== titleBodyStart)
+          (issue.issue.content_revision !== titleRevision ||
+            issue.issue.title !== titleStart ||
+            issue.issue.body !== titleBodyStart)
         ) {
           titleConflict = true
           titleRevision = issue.issue.content_revision
@@ -460,7 +458,9 @@
         await tick()
         if (
           issue.issue.uid === mutationUID &&
-          (issue.issue.title !== bodyTitleStart || issue.issue.body !== bodyStart)
+          (issue.issue.content_revision !== bodyRevision ||
+            issue.issue.title !== bodyTitleStart ||
+            issue.issue.body !== bodyStart)
         ) {
           bodyConflict = true
           bodyRevision = issue.issue.content_revision
@@ -488,7 +488,7 @@
   aria-busy={actionsDisabled || detailInert}
   inert={detailInert}
 >
-  <fieldset class="mutation-controls" disabled={actionsDisabled || detailInert}>
+  <fieldset class="mutation-controls">
     <header class="detail-top">
       <div class="detail-heading">
         <div class="detail-kicker">
@@ -525,9 +525,11 @@
             aria-label="Edit title"
             bind:this={titleInput}
             bind:value={titleDraft}
-            disabled={savingTitle}
+            disabled={savingTitle || actionsDisabled}
             onkeydown={handleTitleKeydown}
-            onblur={() => void commitTitle()}
+            onblur={() => {
+              if (!titleConflict) void commitTitle()
+            }}
           />
         {:else}
           <button
@@ -601,6 +603,7 @@
         >
         · Updated {timeAgo(issue.issue.updated_at)}
       </p>
+      <CreationAttribution creation={projectIssueDetail(issue).issue.creation} />
     </header>
   </fieldset>
 
@@ -624,7 +627,7 @@
     {onRemoveLabel}
   />
 
-  <fieldset class="mutation-controls" disabled={actionsDisabled || detailInert}>
+  <fieldset class="mutation-controls">
     <DetailSection
       title="Description"
       empty={editingBody || issue.issue.body ? undefined : 'No description'}
@@ -635,6 +638,7 @@
             type="button"
             class="text-button"
             aria-label="Edit description"
+            disabled={actionsDisabled || detailInert}
             onclick={startEditingBody}
           >
             <PencilIcon size={13} strokeWidth={1.8} aria-hidden="true" />
@@ -656,7 +660,7 @@
           rows="8"
           bind:this={bodyTextarea}
           bind:value={bodyDraft}
-          disabled={savingBody}
+          disabled={savingBody || actionsDisabled}
           onkeydown={handleBodyKeydown}
         ></textarea>
         <div class="body-edit-actions">
@@ -665,7 +669,7 @@
             <button
               type="button"
               class="ghost-button"
-              disabled={savingBody}
+              disabled={savingBody || actionsDisabled}
               onclick={() => {
                 editingBody = false
                 bodyConflict = false
@@ -674,7 +678,7 @@
             <button
               type="button"
               class="accent-button"
-              disabled={savingBody}
+              disabled={savingBody || actionsDisabled}
               onclick={() => {
                 void commitBody()
               }}
@@ -741,13 +745,7 @@
           void onSelectIssue?.({ uid, commentUID, returnComment })}
       />
     </div>
-    <IssueHistory
-      {events}
-      {selfActor}
-      metadata={issue.issue.metadata}
-      attachmentLinks={false}
-      {pending}
-    />
+    <IssueHistory {events} {selfActor} metadata={issue.issue.metadata} {pending} />
   {/key}
 </section>
 

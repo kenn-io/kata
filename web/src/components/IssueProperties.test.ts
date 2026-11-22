@@ -93,6 +93,15 @@ describe('IssueProperties', () => {
     expect(screen.getByText('Closed')).toBeTruthy()
   })
 
+  it('offers missing properties on a closed task', () => {
+    const issue = makeIssue({ status: 'closed' })
+    issue.labels = []
+    renderProperties({ issue })
+    for (const name of ['Priority', 'Scheduled', 'Due', 'Labels']) {
+      expect(screen.getByRole('button', { name })).toBeTruthy()
+    }
+  })
+
   it('shows the projected day for a zoned schedule in the property pill', () => {
     renderProperties({
       issue: makeIssue({

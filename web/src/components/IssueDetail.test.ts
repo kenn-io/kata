@@ -111,6 +111,33 @@ describe('IssueDetail', () => {
     vi.useRealTimers()
   })
 
+  it('keeps history and the graph available to read-only users', async () => {
+    renderDetail({
+      actionsDisabled: true,
+      authorityBlocked: false,
+      onOpenGraph: vi.fn(),
+      events: [
+        {
+          event_id: 1,
+          event_uid: 'event-1',
+          origin_instance_uid: 'instance-1',
+          type: 'issue.commented',
+          project_id: 1,
+          project_uid: 'project-1',
+          project_name: 'Inbox',
+          actor: 'user-a',
+          created_at: '2026-06-01T12:31:00Z',
+        },
+      ],
+    })
+    expect(screen.getByRole('button', { name: 'Graph' }).closest('fieldset[disabled]')).toBeNull()
+    await fireEvent.click(screen.getByRole('button', { name: 'Show history' }))
+    expect(screen.getByText(/commented/)).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Edit title' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    )
+  })
+
   it('edits the task in one view', () => {
     renderDetail()
     expect(screen.getByRole('heading', { name: 'Ship the thing' })).toBeTruthy()
@@ -133,7 +160,7 @@ describe('IssueDetail', () => {
     expect(onEditIssue).toHaveBeenCalledWith('issue-1', { body: 'First description' })
   })
 
-  it('retries a description save with the refreshed content revision', async () => {
+  it('retries a restored description with the refreshed content revision', async () => {
     let finish!: (ok: boolean) => void
     const pending = new Promise<boolean>((resolve) => {
       finish = resolve
@@ -150,7 +177,7 @@ describe('IssueDetail', () => {
       body: 'My description',
       expected_content_revision: 2,
     })
-    await view.rerender({ issue: makeIssue({ body: 'Their description', content_revision: 3 }) })
+    await view.rerender({ issue: makeIssue({ content_revision: 3 }) })
     finish(false)
     await vi.waitFor(() => expect(screen.getByText(/Someone changed this task/)).toBeTruthy())
     await vi.waitFor(() =>
@@ -247,10 +274,38 @@ describe('IssueDetail', () => {
     expect((screen.getByRole('textbox', { name: 'Edit title' }) as HTMLInputElement).value).toBe(
       'My title',
     )
+    await fireEvent.blur(screen.getByRole('textbox', { name: 'Edit title' }))
+    expect(onEditIssue).toHaveBeenCalledTimes(1)
     await fireEvent.keyDown(screen.getByRole('textbox', { name: 'Edit title' }), { key: 'Enter' })
     expect(onEditIssue).toHaveBeenLastCalledWith('issue-1', {
       title: 'My title',
       expected_content_revision: 3,
+    })
+  })
+
+  it('retries a restored title against the refreshed revision', async () => {
+    let finish!: (ok: boolean) => void
+    const onEditIssue = vi
+      .fn()
+      .mockReturnValueOnce(
+        new Promise<boolean>((resolve) => {
+          finish = resolve
+        }),
+      )
+      .mockResolvedValueOnce(true)
+    const view = renderDetail({ issue: makeIssue({ content_revision: 2 }), onEditIssue })
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit title' }))
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Edit title' }), {
+      target: { value: 'My title' },
+    })
+    await fireEvent.keyDown(screen.getByRole('textbox', { name: 'Edit title' }), { key: 'Enter' })
+    await view.rerender({ issue: makeIssue({ content_revision: 4 }) })
+    finish(false)
+    await vi.waitFor(() => expect(screen.getByText(/Someone changed this task/)).toBeTruthy())
+    await fireEvent.keyDown(screen.getByRole('textbox', { name: 'Edit title' }), { key: 'Enter' })
+    expect(onEditIssue).toHaveBeenLastCalledWith('issue-1', {
+      title: 'My title',
+      expected_content_revision: 4,
     })
   })
 
@@ -308,10 +363,10 @@ describe('IssueDetail', () => {
             closed_reason: kind === 'no effective event' ? 'wontfix' : 'done',
             closed_at: '2026-06-03T12:00:00Z',
           }),
-          ...(kind === 'no effective event' ? {} : { effective_close_event_uid: 'close-4' }),
+          ...(kind === 'no effective event' ? {} : { effective_close_event: event }),
         },
         selfActor: 'user-a',
-        events: [close(9, 'user-b', 'wontfix'), event],
+        events: [close(9, 'user-b', 'wontfix')],
       })
       const line = view.container.querySelector('.state-line')?.textContent ?? ''
       if (kind === 'evidence') {

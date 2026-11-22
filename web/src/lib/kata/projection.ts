@@ -391,8 +391,8 @@ function normalizeSelectedDetail(
   const parent = selectedIssue.parent ? issuesByUID.get(selectedIssue.parent.uid) : undefined
   return {
     issue: { ...selectedIssue, body: selectedIssue.body ?? '' },
-    ...(selected.effective_close_event_uid
-      ? { effective_close_event_uid: selected.effective_close_event_uid }
+    ...(selected.effective_close_event
+      ? { effective_close_event: normalizeEvent(selected.effective_close_event) }
       : {}),
     comments: (selected.comments ?? []).map((comment) => ({
       id: comment.id,

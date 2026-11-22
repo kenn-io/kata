@@ -877,7 +877,7 @@ func snapshotResponseWithClose(ctx context.Context, store db.Storage, uiStore db
 	if err != nil || out.Body.Selected == nil || data.SelectedIssue == nil || !intent.IncludeHistory || data.SelectedIssue.Status != "closed" {
 		return out, err
 	}
-	uid, err := effectiveIssueCloseEventUID(ctx, store, data.SelectedIssue.Issue)
+	event, err := effectiveIssueCloseEvent(ctx, store, data.SelectedIssue.Issue)
 	if err != nil {
 		return nil, internalAPIError(err)
 	}
@@ -887,8 +887,8 @@ func snapshotResponseWithClose(ctx context.Context, store db.Storage, uiStore db
 	}
 	// The fold reads after the snapshot transaction. A newer cursor means it
 	// may describe a close that the captured snapshot does not contain.
-	if cursor == data.Cursor {
-		out.Body.Selected.EffectiveCloseEventUID = uid
+	if cursor == data.Cursor && event != nil {
+		out.Body.Selected.EffectiveCloseEvent = event
 	}
 	return out, nil
 }

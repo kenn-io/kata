@@ -7411,8 +7411,8 @@ components:
           items:
             $ref: "#/components/schemas/CommentOut"
           type: array
-        effective_close_event_uid:
-          type: string
+        effective_close_event:
+          $ref: "#/components/schemas/Event"
         history:
           items:
             $ref: "#/components/schemas/Event"

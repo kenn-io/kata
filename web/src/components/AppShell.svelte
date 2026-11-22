@@ -995,7 +995,7 @@
         {ownerOptions}
         selectedRecurrences={[...projection.selected_recurrences]}
         actionsDisabled={!canMutate || mutationPending || projection.selected_pending === true}
-        authorityBlocked={!canMutate || projection.selected_pending === true}
+        authorityBlocked={stale || projection.selected_pending === true}
         pending={projection.selected_pending === true}
         {statusRequest}
         onStatusRequestConsumed={() => {

@@ -651,7 +651,7 @@
   {#if repeats}<dt>Repeats</dt>
     <dd>{@render repeats()}</dd>{/if}
 
-  {#if issue.issue.status === 'open' && addItems.length > 0}
+  {#if addItems.length > 0}
     <dt>Add</dt>
     <dd class="add-actions">
       {#each addItems as item (item.label)}

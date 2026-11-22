@@ -1,6 +1,6 @@
 <script lang="ts">
   /* eslint-disable svelte/prefer-svelte-reactivity */
-  import { SearchInput } from '@kenn-io/kit-ui'
+  import { autoReposition, floatingPopoverStyle, SearchInput } from '@kenn-io/kit-ui'
   import { tick } from 'svelte'
   import type { KataProjectSummary, KataTaskDetail } from '../lib/kata/types'
 
@@ -17,6 +17,8 @@
   let menuOpen = $state(false)
   let menuRoot: HTMLDivElement | null = $state(null)
   let trigger: HTMLElement | null = null
+  let panel = $state<HTMLDivElement>()
+  let panelStyle = $state('')
   let moveSearchInput = $state() as HTMLInputElement
   let moveQuery = $state('')
   let pendingMoves = $state.raw(
@@ -100,6 +102,23 @@
     }
   })
 
+  $effect(() => {
+    if (!menuOpen) return
+    return autoReposition(() => [panel], position)
+  })
+
+  function position(): void {
+    if (!trigger || !panel) return
+    panelStyle = floatingPopoverStyle({
+      trigger: trigger.getBoundingClientRect(),
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      popoverWidth: panel.offsetWidth,
+      popoverHeight: panel.offsetHeight,
+      align: 'start',
+    })
+  }
+
   function projectArea(project: KataProjectSummary): string {
     return typeof project.metadata.area === 'string' ? project.metadata.area.trim() : ''
   }
@@ -126,6 +145,7 @@
     menuOpen = true
     moveQuery = ''
     await tick()
+    position()
     moveSearchInput?.focus()
   }
 
@@ -165,6 +185,8 @@
   {#if menuOpen}
     <div
       class="move-picker kit-popover-card"
+      bind:this={panel}
+      style={panelStyle}
       role="dialog"
       aria-label="Move to another project"
       tabindex="-1"
@@ -206,9 +228,7 @@
   }
 
   .move-picker {
-    position: absolute;
-    top: calc(100% + 6px);
-    right: 0;
+    position: fixed;
     z-index: 35;
     margin: 0;
   }

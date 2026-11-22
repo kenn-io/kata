@@ -16,7 +16,7 @@ test('creation attribution distinguishes legacy, pending and verified records at
   )
   expect(comment.ok()).toBe(true)
   await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
-  const detail = page.getByRole('region', { name: 'Kata issue detail' })
+  const detail = page.getByRole('region', { name: 'Task detail' })
   // This first state comes from the native daemon, without response overrides.
   await expect(detail.getByText('Creation: legacy')).toHaveCount(2)
   await expect(detail).not.toContainText('Accountable:')

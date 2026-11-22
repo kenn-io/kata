@@ -101,6 +101,14 @@ func pollIssueHistory(ctx context.Context, store db.Storage, afterID int64, rawL
 // native close intent. Scoped history deliberately redacts origin identity and
 // status transitions, so clients cannot safely re-derive this choice.
 func effectiveIssueCloseEventUID(ctx context.Context, store db.Storage, issue db.Issue) (string, error) {
+	event, err := effectiveIssueCloseEvent(ctx, store, issue)
+	if err != nil || event == nil {
+		return "", err
+	}
+	return event.UID, nil
+}
+
+func effectiveIssueCloseEvent(ctx context.Context, store db.Storage, issue db.Issue) (*db.Event, error) {
 	scope := issueScopeFromContext(ctx)
 	projectUIDs, projectRestricted := db.AuthorizedProjects(ctx)
 	visibleProjects := make(map[string]struct{}, len(projectUIDs))
@@ -110,19 +118,19 @@ func effectiveIssueCloseEventUID(ctx context.Context, store db.Storage, issue db
 	var allowed map[int64]struct{}
 	if scope != nil {
 		if err := revalidateIssueScopedPrincipal(ctx, store); err != nil {
-			return "", err
+			return nil, err
 		}
 		var err error
 		allowed, _, err = issueScopedEventMembership(ctx, store, *scope)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 	}
 
 	const batchLimit = pollLimitMax
 	afterID := int64(0)
 	var foldEvents []db.FoldEvent
-	visibleCloseUIDs := make(map[string]struct{})
+	visibleCloses := make(map[string]db.Event)
 	eventIssueLookup := newProjectScopeEventIssueLookup(ctx, store)
 	// Status provenance must include transitions in projects the caller cannot
 	// inspect. Only a selected close event whose project, issue scope, and
@@ -134,17 +142,18 @@ func effectiveIssueCloseEventUID(ctx context.Context, store db.Storage, issue db
 			AfterID: afterID, IssueUID: issue.UID, Limit: batchLimit,
 		})
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		rows = attachResolvedIssueID(issue, rows)
 		previousAfterID := afterID
 		for _, event := range rows {
+			projected := event
 			visible := !projectRestricted
 			if projectRestricted {
 				_, visible = visibleProjects[event.ProjectUID]
 			}
 			if visible && scope != nil {
-				_, visible = projectIssueScopedEvent(event, allowed, scope.ProjectUID)
+				projected, visible = projectIssueScopedEvent(event, allowed, scope.ProjectUID)
 			}
 			if visible && event.Type == "issue.closed" {
 				requiresReset, err := db.EventRequiresProjectScopeReset(
@@ -152,7 +161,7 @@ func effectiveIssueCloseEventUID(ctx context.Context, store db.Storage, issue db
 					eventIssueLookup.CommentIssueByUID,
 				)
 				if err != nil {
-					return "", err
+					return nil, err
 				}
 				visible = !requiresReset
 			}
@@ -165,7 +174,7 @@ func effectiveIssueCloseEventUID(ctx context.Context, store db.Storage, issue db
 				Payload:   jsontext.Value(event.Payload),
 			})
 			if visible && event.Type == "issue.closed" {
-				visibleCloseUIDs[event.UID] = struct{}{}
+				visibleCloses[event.UID] = projected
 			}
 			afterID = event.ID
 		}
@@ -173,18 +182,19 @@ func effectiveIssueCloseEventUID(ctx context.Context, store db.Storage, issue db
 			break
 		}
 		if afterID <= previousAfterID {
-			return "", fmt.Errorf("issue history cursor did not advance")
+			return nil, fmt.Errorf("issue history cursor did not advance")
 		}
 	}
 
 	state := db.FoldEvents(foldEvents).Issues[issue.UID]
 	if state.Status != "closed" || state.StatusIntentUID == "" {
-		return "", nil
+		return nil, nil
 	}
-	if _, ok := visibleCloseUIDs[state.StatusIntentUID]; !ok {
-		return "", nil
+	event, ok := visibleCloses[state.StatusIntentUID]
+	if !ok {
+		return nil, nil
 	}
-	return state.StatusIntentUID, nil
+	return &event, nil
 }
 
 // attachResolvedIssueID lets the scoped projection authorize federated history

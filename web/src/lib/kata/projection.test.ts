@@ -4,6 +4,32 @@ import type { UISnapshot } from '../state/snapshot'
 import { normalizeKataUISnapshot } from './projection'
 
 describe('normalizeKataUISnapshot', () => {
+  test('projects the effective close independently of history', () => {
+    const wire = snapshot()
+    wire.selected!.history = []
+    wire.selected!.effective_close_event = {
+      id: 4,
+      uid: 'close-4',
+      origin_instance_uid: '',
+      project_id: 1,
+      project_uid: 'project-example',
+      project_name: 'example-project',
+      type: 'issue.closed',
+      actor: 'user-a',
+      payload: '{"reason":"done","message":"Finished"}',
+      hlc_counter: 0,
+      hlc_physical_ms: 1,
+      content_hash: '',
+      created_at: '2026-06-01T12:00:00Z',
+    }
+    const detail = normalizeKataUISnapshot(wire).selected_detail!
+    expect(detail.effective_close_event).toMatchObject({
+      event_uid: 'close-4',
+      actor: 'user-a',
+      payload: { message: 'Finished' },
+    })
+  })
+
   test.each([
     ['blocks hub', 4000, 16000],
     ['hub with back-link', 1000, 8000],
@@ -206,7 +232,6 @@ describe('normalizeKataUISnapshot', () => {
 
   test('adapts the native snapshot to the ported immutable collection model', () => {
     const wire = snapshot()
-    wire.selected!.effective_close_event_uid = 'close-event-1'
     const projection = normalizeKataUISnapshot(wire, '2026-08-01T12:30:00.000Z')
 
     expect(projection.projects).toEqual([
@@ -239,7 +264,6 @@ describe('normalizeKataUISnapshot', () => {
     expect(projection.member_issue_uid_set.has('issue-child')).toBe(true)
     expect(projection.selected_state).toBe('available')
     expect(projection.selected_revision).toBe('"rev-3"')
-    expect(projection.selected_detail?.effective_close_event_uid).toBe('close-event-1')
     expect(projection.selected_recurrences).toEqual([
       expect.objectContaining({ uid: 'recurrence-1', template_title: 'Weekly example' }),
     ])

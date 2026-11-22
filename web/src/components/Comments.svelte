@@ -3,7 +3,7 @@
   import { tick } from 'svelte'
   /* eslint-disable svelte/prefer-svelte-reactivity -- reference counts are a transient search-result lookup. */
   import { commentEvidenceLength, trimCommentEvidence } from '../lib/kata/commentEvidence'
-  import { CommentRelations } from '@kenn-io/kata-ui'
+  import { CommentRelations, CreationAttribution, creationFor } from '@kenn-io/kata-ui'
   import {
     Avatar,
     Button,
@@ -368,6 +368,7 @@
                 >
               {/if}
             </div>
+            <CreationAttribution creation={creationFor(comment).creation} />
             {#if comment.reply}<div class="comment-links">
                 ↳ <Button
                   size="sm"

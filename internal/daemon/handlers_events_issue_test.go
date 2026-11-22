@@ -277,15 +277,17 @@ func TestPollProjectEventsIssueReturnsEffectiveCloseEvent(t *testing.T) {
 		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 		var snapshot struct {
 			Selected struct {
-				EffectiveCloseEventUID string `json:"effective_close_event_uid"`
+				EffectiveCloseEvent *db.Event `json:"effective_close_event"`
 			} `json:"selected"`
 		}
 		require.NoError(t, json.Unmarshal(body, &snapshot))
-		require.Equal(t, closedEvents[0].UID, snapshot.Selected.EffectiveCloseEventUID)
+		require.NotNil(t, snapshot.Selected.EffectiveCloseEvent)
+		require.Equal(t, closedEvents[0].UID, snapshot.Selected.EffectiveCloseEvent.UID)
+		require.Empty(t, snapshot.Selected.EffectiveCloseEvent.OriginInstanceUID)
 		withoutHistory := "/api/v1/ui/snapshot?view=all-open&selected_issue_uid=" + issue.UID
 		resp, body = envDoRaw(t, env, http.MethodGet, withoutHistory, nil, map[string]string{"Authorization": "Bearer worker-token"})
 		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-		require.NotContains(t, string(body), `"effective_close_event_uid"`)
+		require.NotContains(t, string(body), `"effective_close_event"`)
 		baseHLC := closedEvents[0].HLCPhysicalMS
 		origin := "7ZZZZZZZZZZZZZZZZZZZZZZZZZ"
 		createdAt := closedEvents[0].CreatedAt
@@ -304,9 +306,9 @@ func TestPollProjectEventsIssueReturnsEffectiveCloseEvent(t *testing.T) {
 		require.NotContains(t, string(body), `"status":"open"`)
 		resp, body = envDoRaw(t, env, http.MethodGet, snapshotPath, nil, map[string]string{"Authorization": "Bearer worker-token"})
 		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-		snapshot.Selected.EffectiveCloseEventUID = ""
+		snapshot.Selected.EffectiveCloseEvent = nil
 		require.NoError(t, json.Unmarshal(body, &snapshot))
-		require.Empty(t, snapshot.Selected.EffectiveCloseEventUID)
+		require.Nil(t, snapshot.Selected.EffectiveCloseEvent)
 	})
 
 	t.Run("hidden project transitions cannot leave an older visible close selected", func(t *testing.T) {
@@ -362,6 +364,35 @@ func TestPollProjectEventsIssueReturnsEffectiveCloseEvent(t *testing.T) {
 		_, hasEffectiveClose := raw["effective_close_event_uid"]
 		require.False(t, hasEffectiveClose, string(body))
 		require.NotContains(t, string(body), hiddenCloseUID)
+	})
+}
+
+func TestUISnapshotReturnsCloseBeyondHistoryLimit(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		_, closed, changed, err := store.CloseIssueWithEvents(t.Context(), f.visible.ID, "done", "member", "Finished", nil)
+		require.NoError(t, err)
+		require.True(t, changed)
+		for range 501 {
+			_, _, err := store.CreateComment(t.Context(), db.CreateCommentParams{IssueID: f.visible.ID, Author: "member", Body: "follow-up"})
+			require.NoError(t, err)
+		}
+		path := "/api/v1/ui/snapshot?view=all-open&include_history=true&selected_issue_uid=" + f.visible.UID
+		status, _, body := f.request(t, http.MethodGet, path, "nonmember", nil, nil)
+		require.Equal(t, http.StatusOK, status, string(body))
+		var snapshot struct {
+			Selected struct {
+				EffectiveCloseEvent *db.Event  `json:"effective_close_event"`
+				History             []db.Event `json:"history"`
+			} `json:"selected"`
+		}
+		require.NoError(t, json.Unmarshal(body, &snapshot))
+		require.Len(t, snapshot.Selected.History, 500)
+		require.NotNil(t, snapshot.Selected.EffectiveCloseEvent)
+		require.Equal(t, closed[0].UID, snapshot.Selected.EffectiveCloseEvent.UID)
+		for _, event := range snapshot.Selected.History {
+			require.NotEqual(t, closed[0].UID, event.UID)
+		}
 	})
 }
 

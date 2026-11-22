@@ -85,6 +85,10 @@ test('read-only polling authority fences mutations without opening SSE', async (
     'Credential: Read-only',
   )
   await expect(page.getByRole('button', { name: 'Edit title' })).toBeDisabled()
+  await page.getByRole('button', { name: 'Show history' }).click()
+  await expect(page.getByRole('region', { name: 'History' })).toContainText('created')
+  await page.getByRole('button', { name: 'Graph', exact: true }).click()
+  await expect(page.getByRole('region', { name: 'Reachable task graph' })).toBeVisible()
   expect(streamRequests).toBe(0)
 })
 

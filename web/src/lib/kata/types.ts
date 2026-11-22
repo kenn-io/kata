@@ -193,7 +193,7 @@ export interface KataTaskDetail {
   comments: KataComment[]
   labels: KataTaskLabel[]
   links: KataTaskLink[]
-  effective_close_event_uid?: string | undefined
+  effective_close_event?: KataTaskEvent | undefined
   parent?: KataTaskRef | undefined
   children?: KataTaskSummary[] | undefined
   // Accepted snapshot enrichment carries the workspace action atomically
