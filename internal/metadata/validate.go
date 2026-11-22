@@ -60,9 +60,19 @@ func Validate(registry map[string]Entry, key string, raw jsontext.Value) error {
 		return validateTimezoneIANA(raw)
 	case TypeSchedule:
 		return validateSchedule(raw)
+	case TypeAttention:
+		return validateAttention(raw)
 	default:
 		return fmt.Errorf("no validator for type %d", entry.Type)
 	}
+}
+
+func validateAttention(raw jsontext.Value) error {
+	var value string
+	if err := json.Unmarshal(raw, &value); err == nil && (value == "ok" || value == "needs-human" || value == "stuck") {
+		return nil
+	}
+	return fmt.Errorf("%w: work.attention must be one of ok, needs-human, stuck; got %s", ErrInvalidValue, raw)
 }
 
 func validateSchedule(raw jsontext.Value) error {

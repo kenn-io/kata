@@ -53,6 +53,7 @@ rejected. Everything else is stored verbatim.
 | `someday` | Issue | Boolean |
 | `checklist` | Issue | Checklist structure |
 | `timezone` | Issue | IANA timezone name |
+| `work.attention` | Issue | `ok`, `needs-human`, or `stuck` |
 | `area` | Project | String |
 
 A date-only `scheduled_on` value becomes ready on that calendar day. A local
@@ -265,8 +266,8 @@ The TUI shows the same requests under `T`.
 
 `work.*` is a documented convention layered on top of the generic metadata
 model: a coordination contract between the tools that launch coding agents and
-the tools that watch them. kata itself does not validate these keys; it only stores
-and serves them. The convention is what makes them useful. See
+the tools that watch them. Kata validates `work.attention`; other `work.*` keys
+are stored without validation. See
 [Agent orchestration](../operations/agent-orchestration.md) for the operational
 recipe.
 
@@ -282,6 +283,8 @@ recipe.
     - `needs-human`: the agent wants human input or review; it may still be
       making progress.
     - `stuck`: the agent cannot proceed.
+  Kata refuses other values. Clearing the key works, and existing values remain
+  until the key is rewritten.
 - **`work.attention_msg`** (string): a one-line current-state message that
   accompanies the attention level.
 

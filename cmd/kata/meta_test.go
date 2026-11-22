@@ -65,6 +65,35 @@ func TestMetaSetStoresJSONStringAndGetReturnsValue(t *testing.T) {
 	assert.Equal(t, "needs-human", getOut)
 }
 
+func TestMetaAttentionValues(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createIssue(t, env, pid, "attention issue")
+	_, stderr, err := runCLIWithErr(t, env, dir, "meta", "set", ref, "work.attention", "working")
+	requireCLIError(t, err, ExitValidation)
+	assert.Contains(t, stderr, "ok, needs-human, stuck")
+	issue := fetchMetaIssueViaHTTP(t, env, pid, ref)
+	assert.JSONEq(t, `{}`, string(issue.Issue.Metadata))
+
+	_, stderr, err = runCLIWithErr(t, env, dir, "create", "invalid attention", "--meta", "work.attention=working")
+	requireCLIError(t, err, ExitValidation)
+	assert.Contains(t, stderr, "ok, needs-human, stuck")
+	issues, err := env.DB.ListIssues(t.Context(), db.ListIssuesParams{ProjectID: pid})
+	require.NoError(t, err)
+	assert.Len(t, issues, 1)
+
+	_, err = env.DB.ExecContext(t.Context(), `UPDATE issues SET metadata='{"work.attention":"on-fire"}' WHERE short_id=?`, ref)
+	require.NoError(t, err)
+	runCLI(t, env, dir, "meta", "set", ref, "work.branch", "x")
+	issue = fetchMetaIssueViaHTTP(t, env, pid, ref)
+	assert.JSONEq(t, `{"work.attention":"on-fire","work.branch":"x"}`, string(issue.Issue.Metadata))
+	runCLI(t, env, dir, "meta", "set", ref, "work.attention", "ok")
+	issue = fetchMetaIssueViaHTTP(t, env, pid, ref)
+	assert.JSONEq(t, `{"work.attention":"ok","work.branch":"x"}`, string(issue.Issue.Metadata))
+	runCLI(t, env, dir, "meta", "unset", ref, "work.attention")
+	issue = fetchMetaIssueViaHTTP(t, env, pid, ref)
+	assert.JSONEq(t, `{"work.branch":"x"}`, string(issue.Issue.Metadata))
+}
+
 func TestMetaSetJSONValueObjectRoundTrips(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "metadata object issue")
