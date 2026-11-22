@@ -187,34 +187,6 @@ describe('IssueProperties', () => {
     expect(screen.queryByLabelText('New label')).toBeNull()
   })
 
-  it('persists due date and priority changes', async () => {
-    const onPatchMetadata = vi.fn(async () => true)
-    const onSetPriority = vi.fn(async () => true)
-
-    render(IssueProperties, {
-      props: {
-        issue: makeIssue({ metadata: { deadline_on: '2026-06-05' } }),
-        ownerOptions: [],
-        onPatchMetadata,
-        onAssignOwner: vi.fn(async () => true),
-        onUnassignOwner: vi.fn(async () => true),
-        onSetPriority,
-        onAddLabel: vi.fn(async () => true),
-        onRemoveLabel: vi.fn(),
-      },
-    })
-
-    await fireEvent.click(screen.getByRole('button', { name: 'Edit due date' }))
-    await fireEvent.click(screen.getByRole('gridcell', { name: /June 8, 2026/ }))
-
-    expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', { deadline_on: '2026-06-08' })
-
-    await fireEvent.click(screen.getByRole('button', { name: 'Priority' }))
-    await fireEvent.click(await screen.findByRole('menuitemradio', { name: 'P1' }))
-
-    expect(onSetPriority).toHaveBeenCalledWith('issue-1', 1)
-  })
-
   it.each([
     ['deadline UTC instant', 'deadline_on', 'Edit due date', 'Due', '2026-09-01T00:30:00Z'],
     ['deadline local time', 'deadline_on', 'Edit due date', 'Due', '2026-09-01T09:00'],
@@ -245,8 +217,8 @@ describe('IssueProperties', () => {
   )
 
   it.each([
-    ['scheduled', 'scheduled_on', 'Edit scheduled', 'Scheduled:'],
-    ['deadline', 'deadline_on', 'Edit due date', 'Due:'],
+    ['scheduled', 'scheduled_on', 'Edit scheduled'],
+    ['deadline', 'deadline_on', 'Edit due date'],
   ])('keeps the zone when changing the day of a timed %s', async (_, key, edit) => {
     const onPatchMetadata = vi.fn(async () => true)
     renderProperties({
@@ -552,13 +524,16 @@ describe('IssueProperties', () => {
     expect(screen.queryByLabelText('New label')).toBeNull()
   })
 
-  it('clears the priority through the detail property control', async () => {
+  it.each([
+    ['P1', 1],
+    ['No priority', null],
+  ])('sets priority to %s through the detail property control', async (label, priority) => {
     const onSetPriority = vi.fn(async () => true)
     renderProperties({ issue: makeIssue({ priority: 2 }), onSetPriority })
 
     await fireEvent.click(screen.getByRole('button', { name: 'Priority: P2' }))
-    await fireEvent.click(await screen.findByRole('menuitemradio', { name: 'No priority' }))
+    await fireEvent.click(await screen.findByRole('menuitemradio', { name: label }))
 
-    expect(onSetPriority).toHaveBeenCalledWith('issue-1', null)
+    expect(onSetPriority).toHaveBeenCalledWith('issue-1', priority)
   })
 })

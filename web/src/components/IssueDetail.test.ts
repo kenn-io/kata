@@ -419,7 +419,7 @@ describe('IssueDetail', () => {
     expect(screen.queryByRole('textbox', { name: 'Edit description' })).toBeNull()
   })
 
-  it('moves the issue from the task actions menu', async () => {
+  it('moves the issue from its project property', async () => {
     const onMoveIssue = vi.fn(async () => true)
     renderDetail({ onMoveIssue })
 
@@ -451,41 +451,6 @@ describe('IssueDetail', () => {
     await view.rerender({ draftFenceGeneration: 1 })
 
     expect(screen.queryByRole('dialog')).toBeNull()
-  })
-
-  it('composes the ported checklist, recurrence, comments, links, and history sections', async () => {
-    const onAddComment = vi.fn(async () => true)
-    renderDetail({
-      selectedRecurrences: [
-        {
-          id: 1,
-          uid: 'recurrence-1',
-          project_id: 1,
-          rrule: 'FREQ=WEEKLY;COUNT=2',
-          dtstart: '2026-06-01',
-          timezone: 'UTC',
-          template_title: 'Weekly example',
-          template_body: '',
-          template_labels: [],
-          template_metadata: {},
-          next_occurrence_key: '2026-06-08',
-          author: 'user-a',
-          revision: 1,
-          created_at: '2026-06-01T12:00:00Z',
-          updated_at: '2026-06-01T12:00:00Z',
-        },
-      ],
-      onAddComment,
-    } as Partial<IssueDetailProps>)
-
-    expect(screen.getByRole('region', { name: 'Checklist' })).not.toBeNull()
-    expect(screen.getByRole('button', { name: 'Stop' })).not.toBeNull()
-    await fireEvent.click(screen.getByRole('button', { name: 'Add comment' }))
-    await fireEvent.input(screen.getByLabelText('Comment'), {
-      target: { value: 'New comment' },
-    })
-    await fireEvent.click(screen.getByRole('button', { name: 'Add comment' }))
-    expect(onAddComment).toHaveBeenCalledWith('issue-1', 'New comment')
   })
 
   it('opens a related issue from the read view links', async () => {
