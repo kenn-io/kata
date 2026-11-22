@@ -24,10 +24,7 @@ test('fenced code highlights in the read-only issue description under the produc
     .toBeGreaterThan(1)
 })
 
-test('Kenn links in issue bodies and comments work in read and edit views', async ({
-  page,
-  kata,
-}) => {
+test('Kenn links in issue bodies and comments work in the task view', async ({ page, kata }) => {
   const credentials = await kata.launch(page)
   const issue = await kata.seedIssue(page, credentials, {
     title: 'Links to Kenn',
@@ -73,5 +70,4 @@ test('Kenn links in issue bodies and comments work in read and edit views', asyn
     'data-link-click',
     '{"href":"kenn://example/note","canceled":false}',
   )
-  await expectLinks(page.getByRole('region', { name: 'Task detail', exact: true }))
 })

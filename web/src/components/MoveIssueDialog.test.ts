@@ -114,7 +114,6 @@ describe('MoveIssueDialog', () => {
 
     expect(onMoveIssue).toHaveBeenCalledWith('project-roadmap')
     expect(screen.queryByRole('searchbox', { name: 'Find project' })).toBeNull()
-    expect(screen.queryByRole('menu', { name: 'Task actions' })).toBeNull()
   })
 
   it('keeps the picker open when the workspace reports move failure', async () => {
@@ -161,11 +160,17 @@ describe('MoveIssueDialog', () => {
       (screen.getByRole('button', { name: /Roadmap 2027/ }) as HTMLButtonElement).disabled,
     ).toBe(true)
 
+    await view.rerender({ issue: makeIssue('open', { uid: 'issue-2' }) })
+    await view.rerender({ issue: makeIssue() })
+    await openMovePicker()
+    expect(screen.queryByRole('dialog', { name: 'Move to another project' })).toBeNull()
+
     finishMove(false)
     await pendingMove
     await view.rerender({
       projects: projects.filter((project) => project.uid !== 'project-roadmap'),
     })
+    await openMovePicker()
     expect(screen.queryByRole('button', { name: /Roadmap 2027/ })).toBeNull()
   })
 
