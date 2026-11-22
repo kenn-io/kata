@@ -644,10 +644,10 @@ the last one, including the signing key for signed polls. A revoked
 credential, removed membership, or retired signing key therefore stops the poll
 when it wakes or expires. When the wait ends, the hub reads once more, so an
 event whose wakeup was lost still arrives. Hubs that share a PostgreSQL
-database and schema wake each other's held polls with `LISTEN/NOTIFY` on an
-encrypted channel that other database roles cannot find or forge; a SQLite hub
-wakes them in process. A wake names no project, so it wakes every held poll
-in the receiving process.
+database and schema wake each other's held polls with `LISTEN/NOTIFY` on a
+channel that other connected database roles can listen to or notify; a SQLite hub
+wakes them in process. A wake names no project, so a commit on one hub process
+wakes every held poll on the others, and each poll reads its own project again.
 
 Sync runs in turns. One turn for a project pushes and pulls at most 8 batches
 per stream and direction (1000 deliveries per event or receipt batch, 32

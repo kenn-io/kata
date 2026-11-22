@@ -45,6 +45,8 @@ type hubLongPolls struct {
 	credentials config.FederationCredentialStore
 	opts        clientpkg.Opts
 	interval    time.Duration
+	retries     *SyncRetries
+	now         func() time.Time
 	// admission gates the store reads a watcher makes between held polls. A
 	// held poll itself takes no lease, so it never keeps the daemon awake.
 	admission activity.WaitableAdmission
@@ -81,11 +83,12 @@ func newHubLongPolls(
 	interval time.Duration,
 	admission activity.WaitableAdmission,
 	notice func(error),
+	retries *SyncRetries, now func() time.Time,
 ) *hubLongPolls {
 	ctx, cancel := context.WithCancel(ctx)
 	return &hubLongPolls{
 		store: store, credentials: credentials, opts: opts, interval: interval, admission: admission,
-		notice: notice, ctx: ctx, cancel: cancel,
+		notice: notice, ctx: ctx, cancel: cancel, retries: retries, now: now,
 		changed: make(chan struct{}, 1), polls: map[int64]*hubLongPoll{}, passDone: make(chan struct{}),
 	}
 }
@@ -137,24 +140,20 @@ func (p *hubLongPolls) nextPass() <-chan struct{} {
 	return p.passDone
 }
 
-func (p *hubLongPolls) setProbed(projectID int64, hubURL string) {
+func (p *hubLongPolls) setHeld(poll *hubLongPoll, cursor int64, target string, cancel context.CancelFunc) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if poll := p.polls[projectID]; poll != nil {
-		poll.probedAt = hubURL
-	}
+	poll.held, poll.heldTarget, poll.cancelHeld = cursor, target, cancel
 }
 
-func (p *hubLongPolls) setHeld(projectID, cursor int64, target string, cancel context.CancelFunc) {
+func (p *hubLongPolls) setProbed(poll *hubLongPoll, hubURL string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if poll := p.polls[projectID]; poll != nil {
-		poll.held, poll.heldTarget, poll.cancelHeld = cursor, target, cancel
-	}
+	poll.probedAt = hubURL
 }
 
-func (p *hubLongPolls) clearHeld(projectID int64) {
-	p.setHeld(projectID, -1, "", nil)
+func (p *hubLongPolls) clearHeld(poll *hubLongPoll) {
+	p.setHeld(poll, -1, "", nil)
 }
 
 // admit takes the runner's drain admission for one short unit of store work.
@@ -227,7 +226,7 @@ func (p *hubLongPolls) start(spoke activeSpokeBinding) {
 	p.polls[projectID] = poll
 	go func() {
 		defer close(poll.done)
-		p.watch(pollCtx, projectID)
+		p.watch(pollCtx, projectID, poll)
 	}()
 }
 
@@ -253,7 +252,7 @@ type heldAnswer struct {
 
 // watch holds polls for one binding until ctx ends. Errors and refusals back
 // off; the runner's interval pass keeps pulling meanwhile.
-func (p *hubLongPolls) watch(ctx context.Context, projectID int64) {
+func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLongPoll) {
 	var (
 		client    *Client
 		clientFor config.FederationCredential
@@ -299,7 +298,18 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64) {
 			backoff = min(backoff*2, 16*p.interval)
 			continue
 		}
+		identity, err := syncRetryIdentity(binding, credential)
+		if err != nil || p.retries.blocked(projectID, identity, p.now()) {
+			finishSync()
+			release()
+			if !sleepContext(ctx, p.interval) {
+				return
+			}
+			continue
+		}
+		credential = config.FederationTransportCredential(binding.HubURL, binding.HubProjectID, binding.AllowInsecure, credential)
 		cursor := binding.PullCursorEventID
+		p.setProbed(poll, binding.HubURL)
 		if unread >= 0 {
 			if cursor == unread {
 				// The pass that took the page left the binding where it was,
@@ -350,13 +360,13 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64) {
 				projectID, opts.Timeout, federationLongPollMargin+time.Second))
 			return
 		}
-		p.setProbed(projectID, binding.HubURL)
 		release()
 		// Interval passes skip this binding's pull while the poll is out at
 		// this target. A hub that cannot hold it answers at once, which ends
 		// the skip.
 		requestCtx, cancelRequest := context.WithCancel(ctx)
-		p.setHeld(projectID, cursor, target, cancelRequest)
+		doneHeld := federationcoord.BeginHeld(federationcoord.Key(p.store.InstanceUID(), projectID), cancelRequest)
+		p.setHeld(poll, cursor, target, cancelRequest)
 		started := time.Now()
 		requestCtx = httptrace.WithClientTrace(requestCtx, &httptrace.ClientTrace{
 			WroteRequest: func(info httptrace.WroteRequestInfo) {
@@ -367,7 +377,8 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64) {
 		})
 		body, advertised, err := client.pollProjectEvents(requestCtx, credential.HubProjectID, "", cursor, 1, wait)
 		finishSync()
-		p.clearHeld(projectID)
+		doneHeld()
+		p.clearHeld(poll)
 		superseded := errors.Is(requestCtx.Err(), context.Canceled)
 		cancelRequest()
 		switch {
@@ -378,6 +389,9 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64) {
 			// uses. Poll the current target at once.
 			continue
 		case err != nil:
+			if hubAskedToWait(err) {
+				p.retries.record(projectID, identity, err, p.interval, p.now())
+			}
 			supported = 0
 			if !sleepContext(ctx, backoff) {
 				return
@@ -529,8 +543,7 @@ func (p *hubLongPolls) pollTargetUnlocked(ctx context.Context, projectID int64) 
 	if err != nil || credential.RelayEnrollmentPending || credential.LeavePending {
 		return binding, config.FederationCredential{}, false
 	}
-	credential = config.FederationTransportCredential(binding.HubURL, binding.HubProjectID, binding.AllowInsecure, credential)
-	if credential.HubURL == "" || credential.HubProjectID == 0 {
+	if binding.HubURL == "" || binding.HubProjectID == 0 {
 		return binding, config.FederationCredential{}, false
 	}
 	return binding, credential, true

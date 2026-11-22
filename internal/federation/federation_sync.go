@@ -1786,7 +1786,7 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 	if credentials == nil {
 		credentials = config.DefaultFederationCredentialStore()
 	}
-	polls := newHubLongPolls(ctx, r.DB, credentials, r.clientOpts(), interval, r.DrainAdmission, r.OnError)
+	polls := newHubLongPolls(ctx, r.DB, credentials, r.clientOpts(), interval, r.DrainAdmission, r.OnError, retries, r.now)
 	r.longPolls = polls
 	defer func() {
 		polls.stopAll()

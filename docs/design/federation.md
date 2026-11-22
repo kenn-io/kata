@@ -322,7 +322,7 @@ the wait ends without a wake, the hub reads once more, so events whose wakeup
 was lost still arrive. The hub bounds held polls in total, per credential, and
 for signed requests holding a control slot; past a bound it answers at once.
 
-Hub processes sharing a PostgreSQL database and schema relay commit wakeups to each other with `LISTEN/NOTIFY` on a dedicated connection. The channel and payload key derive from the instance UID and schema name, which distinguish installations but are not secrets. Any role connected to the database can derive them, listen for wakes, and send wakes. A wake names no project, so it wakes every held poll in the receiving process, and each poll reads its own project again under its authorization. Each process wakes every held poll after its listener reconnects, because notifications sent while it was disconnected are lost.
+Hub processes sharing a PostgreSQL database and schema relay commit wakeups to each other with `LISTEN/NOTIFY` on a dedicated connection. The channel derives from the instance UID and schema name, which distinguish installations but are not secrets. Any role connected to the database can derive it, listen for wakes, and send wakes. A wake names no project, so it wakes every held poll in the receiving process, and each poll reads its own project again under its authorization. Each process wakes every held poll after its listener reconnects, because notifications sent while it was disconnected are lost.
 
 SQLite direct spokes prepare pulled issue histories and projection differences
 before taking the writer lock, then update only the touched issues and changed

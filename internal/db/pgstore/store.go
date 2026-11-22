@@ -42,7 +42,6 @@ type Store struct {
 	federationLockSlots  chan struct{}
 	federationLockDB     *sql.DB
 	pollWakeDB           *sql.DB
-	pollWake             *pollWakeState
 	// pollWakeCtx ends the wake listeners when Close cancels it; the store
 	// owns its lifetime. The wake bridge reads pollWakeDB from its own
 	// goroutines, so Close keeps the field in place.

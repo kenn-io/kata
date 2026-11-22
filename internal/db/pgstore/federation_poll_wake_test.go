@@ -62,7 +62,6 @@ func TestFederationPollWakeSeparatesInstallations(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 120*time.Second)
 	defer cancel()
 	const schema = "wake_probe_schema"
-	const message = "hub-a-instance 9876543210 01JWAKEPROBEMOVEDFROMUID00"
 	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
 	t.Cleanup(cleanup)
 	otherDSN, otherCleanup := pgstoretest.NewDatabase(t, ctx)
@@ -78,49 +77,6 @@ func TestFederationPollWakeSeparatesInstallations(t *testing.T) {
 	require.NotContains(t, channel, schema)
 	require.LessOrEqual(t, len(channel), 63, "PostgreSQL truncates longer identifiers")
 
-	outsider := listenAsOutsider(t, ctx, dsn, channel)
-	require.NoError(t, store.PublishFederationPollWake(ctx, message))
-	notification, err := outsider.WaitForNotification(ctx)
-	require.NoError(t, err)
-	for _, secret := range []string{schema, "9876543210", "01JWAKEPROBEMOVEDFROMUID00", "hub-a-instance"} {
-		require.NotContains(t, notification.Payload, secret)
-	}
-}
-
-func TestFederationPollWakeDropsForgedAndReplayedNotifications(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
-	defer cancel()
-	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
-	t.Cleanup(cleanup)
-	store := openPollWakeStore(t, ctx, dsn, pgstore.DefaultSchema)
-	channel, err := pgstore.FederationPollWakeChannelForTest(store)
-	require.NoError(t, err)
-	outsider := listenAsOutsider(t, ctx, dsn, channel)
-	wakes := listenForPollWakes(t, ctx, store)
-
-	for _, forged := range []string{
-		`{"schema":"kata","payload":"hub-b 1"}`,
-		"hub-b 1",
-		"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-	} {
-		_, err := outsider.Exec(ctx, `SELECT pg_notify($1,$2)`, channel, forged)
-		require.NoError(t, err)
-	}
-	require.NoError(t, store.PublishFederationPollWake(ctx, "hub-a 2"))
-	require.Equal(t, "hub-a 2", nextPollWake(t, ctx, wakes), "a forged notification woke the held polls")
-
-	// Every notification on the channel, forged ones included, reaches the
-	// outside listener in commit order; the last one is the genuine wake.
-	var captured string
-	for range 4 {
-		notification, err := outsider.WaitForNotification(ctx)
-		require.NoError(t, err)
-		captured = notification.Payload
-	}
-	_, err = outsider.Exec(ctx, `SELECT pg_notify($1,$2)`, channel, captured)
-	require.NoError(t, err)
-	require.NoError(t, store.PublishFederationPollWake(ctx, "hub-a 3"))
-	require.Equal(t, "hub-a 3", nextPollWake(t, ctx, wakes), "a replayed notification woke the held polls")
 }
 
 func TestFederationPollWakeReachesAnotherProcessOnTheSameSchema(t *testing.T) {

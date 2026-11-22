@@ -210,7 +210,7 @@ func TestHubLongPollWaitsOutAnEndpointChange(t *testing.T) {
 	binding, err := h.spokeDB.FederationBindingByProject(t.Context(), h.spokeProject.ID)
 	require.NoError(t, err)
 	polls := newHubLongPolls(t.Context(), h.spokeDB, config.DefaultFederationCredentialStore(),
-		(&Runner{}).clientOpts(), time.Hour, nil, nil)
+		(&Runner{}).clientOpts(), time.Hour, nil, nil, NewSyncRetries(), time.Now)
 	t.Cleanup(polls.stopAll)
 
 	finish, err := federationcoord.BeginRebind(t.Context(),
@@ -311,7 +311,7 @@ func (h *hubSpokeHarness) startWatcher(tb testing.TB, interval time.Duration) *h
 	tb.Helper()
 	ctx := context.WithoutCancel(tb.Context())
 	polls := newHubLongPolls(ctx, h.spokeDB, config.DefaultFederationCredentialStore(),
-		clientOptsWithDefault(clientpkg.Opts{}), interval, nil, nil)
+		clientOptsWithDefault(clientpkg.Opts{}), interval, nil, nil, NewSyncRetries(), time.Now)
 	binding, err := h.spokeDB.FederationBindingByProject(ctx, h.spokeProject.ID)
 	require.NoError(tb, err)
 	polls.start(activeSpokeBinding{binding: binding, project: h.spokeProject})
@@ -675,4 +675,18 @@ func TestHeldRetrySurvivesConcurrentSuccessfulPass(t *testing.T) {
 	//nolint:kennlint // sleeptest: allow the runner to process the wake.
 	time.Sleep(300 * time.Millisecond)
 	require.Equal(t, before, ordinary.Load(), "the runner polled before Retry-After")
+}
+
+func TestRetiredWatcherDoesNotClearReplacementPoll(t *testing.T) {
+	const projectID = 1
+	old := &hubLongPoll{held: 4, heldTarget: "old", cancel: func() {}}
+	polls := &hubLongPolls{polls: map[int64]*hubLongPoll{projectID: old}}
+	polls.stop(projectID)
+	replacement := &hubLongPoll{held: 4, heldTarget: "new", cancel: func() {}}
+	polls.polls[projectID] = replacement
+	polls.clearHeld(old)
+	require.True(t, hubHoldsPull(withHubLongPolls(t.Context(), polls), projectID, 4, "new"), "retired watcher cleared its replacement's held poll")
+	polls.setProbed(old, "old")
+	polls.reconcile([]activeSpokeBinding{{binding: db.FederationBinding{ProjectID: projectID, HubURL: "new"}}})
+	require.True(t, hubHoldsPull(withHubLongPolls(t.Context(), polls), projectID, 4, "new"), "retired watcher changed its replacement's target")
 }
