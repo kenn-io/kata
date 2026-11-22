@@ -27,7 +27,7 @@ func (d *Store) PendingFederationPushEvents(
 		WHERE e.project_id = ?
 		  AND e.origin_instance_uid = ?
 		  AND e.id > ?
-		  AND `+db.FederationOwedEventSQL("e", false)+`
+		  AND `+db.FederationPushableEventSQL("e", false)+`
 		ORDER BY e.id ASC
 		LIMIT ?`, projectID, originInstanceUID, afterID, limit)
 	if err != nil {
@@ -52,7 +52,7 @@ func (d *Store) PendingFederationPushEvents(
 			     WHERE barrier.project_id = ?
 			       AND barrier.origin_instance_uid = ?
 			       AND barrier.id > ?
-			       AND `+db.FederationOwedEventSQL("barrier", false)+`
+			       AND `+db.FederationPushableEventSQL("barrier", false)+`
 			       AND barrier.type NOT IN (`+db.FederationSnapshotEventTypesSQL()+`)
 			  ), 9223372036854775807)
 			ORDER BY e.id ASC`, projectID, originInstanceUID, out[len(out)-1].ID, projectID, originInstanceUID, runStartAfterID)
@@ -119,7 +119,7 @@ func (d *Store) PendingFederationPushStats(
 		 WHERE e.project_id = ?
 		   AND e.origin_instance_uid = ?
 		   AND e.id > ?
-		   AND `+db.FederationOwedEventSQL("e", false),
+		   AND `+db.FederationPushableEventSQL("e", false),
 		projectID, originInstanceUID, afterID).Scan(&count, &maxID); err != nil {
 		return 0, 0, fmt.Errorf("count pending federation push: %w", err)
 	}
@@ -344,7 +344,7 @@ func federationReplicaSettledTx(ctx context.Context, tx *sql.Tx, binding db.Fede
 			   WHERE e.project_id = ?
 			     AND e.origin_instance_uid = ?
 			     AND e.id > ?
-			     AND `+db.FederationOwedEventSQL("e", false)+`)`,
+			     AND `+db.FederationPushableEventSQL("e", false)+`)`,
 			binding.ProjectID, originInstanceUID, binding.PushCursorEventID).Scan(&pending); err != nil {
 			return fmt.Errorf("check pending federation push: %w", err)
 		}
@@ -425,9 +425,6 @@ func (d *Store) replaceFederationBoundActorWhenSettled(ctx context.Context, proj
 		return db.FederationBinding{}, fmt.Errorf("replace federation bound actor: only a direct spoke binding has a replaceable actor")
 	}
 	if err := federationReplicaSettledTx(ctx, tx, existing, originInstanceUID); err != nil {
-		return db.FederationBinding{}, err
-	}
-	if err := db.CheckFederationActorMoves(ctx, tx, existing, originInstanceUID); err != nil {
 		return db.FederationBinding{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `

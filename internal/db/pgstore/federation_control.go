@@ -361,7 +361,7 @@ func pgFederationReplicaSettledTx(ctx context.Context, tx *sql.Tx, binding db.Fe
 	if binding.PushEnabled {
 		var pending bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM events e
-WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND `+db.FederationOwedEventSQL("e", true)+`)`,
+WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND `+db.FederationPushableEventSQL("e", true)+`)`,
 			binding.ProjectID, originInstanceUID, binding.PushCursorEventID).Scan(&pending); err != nil {
 			return mapSQLError(err, nil)
 		}
@@ -425,9 +425,6 @@ func (s *Store) ReplaceFederationBoundActorWhenSettled(ctx context.Context, proj
 			return fmt.Errorf("replace federation bound actor: only a direct spoke binding has a replaceable actor")
 		}
 		if err := pgFederationReplicaSettledTx(ctx, tx, binding, originInstanceUID); err != nil {
-			return err
-		}
-		if err := db.CheckFederationActorMoves(ctx, tx, binding, originInstanceUID); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE federation_bindings SET bound_actor=$1,
