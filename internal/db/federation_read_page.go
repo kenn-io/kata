@@ -7,13 +7,7 @@ import (
 	"math"
 )
 
-// ReadFederationEventPage skips unrelated gaps within the caller's snapshot.
-// query appends a suffix to the backend event projection and decodes its rows.
-// ReadFederationTransaction validates issue ownership before reading pages.
-func ReadFederationEventPage(ctx context.Context, tx *sql.Tx, project Project, issueUID string, afterID int64, limit int, postgres bool, query func(string, ...any) ([]Event, error)) ([]Event, error) {
-	if issueUID != "" {
-		return query(` WHERE e.issue_uid=$1 AND e.type<>'sync.reset_required' AND e.id>$2 ORDER BY e.id LIMIT $3`, issueUID, afterID, limit)
-	}
+func federationCandidates(postgres bool) (string, string) {
 	movedFrom := `json_extract(e.payload,'$.from_project_uid')`
 	projectIndex, movedIndex, identityIndex, subjectUID := "", "", "", "subject.uid"
 	if postgres {
@@ -23,6 +17,21 @@ func ReadFederationEventPage(ctx context.Context, tx *sql.Tx, project Project, i
 		projectIndex, movedIndex, identityIndex = " INDEXED BY idx_events_project", " INDEXED BY idx_events_moved_from_id", " INDEXED BY idx_events_issue_uid_id"
 		subjectUID = "+subject.uid"
 	}
+	candidates := `SELECT (SELECT e.id FROM events e` + projectIndex + ` WHERE e.project_id=$1 AND e.id>$2 AND e.type<>'sync.reset_required' ORDER BY e.id LIMIT 1) AS id
+ UNION ALL SELECT (SELECT e.id FROM events e` + movedIndex + ` WHERE e.type='issue.moved' AND ` + movedFrom + `=$3 AND e.id>$2 ORDER BY e.id LIMIT 1)
+ UNION ALL SELECT (SELECT e.id FROM events e` + identityIndex + ` WHERE e.issue_uid=` + subjectUID + ` AND e.id>$2 AND e.type<>'sync.reset_required' ORDER BY e.id LIMIT 1)
+ FROM issues subject WHERE subject.project_id=$1`
+	return movedFrom, candidates
+}
+
+// ReadFederationEventPage skips unrelated gaps within the caller's snapshot.
+// query appends a suffix to the backend event projection and decodes its rows.
+// ReadFederationTransaction validates issue ownership before reading pages.
+func ReadFederationEventPage(ctx context.Context, tx *sql.Tx, project Project, issueUID string, afterID int64, limit int, postgres bool, query func(string, ...any) ([]Event, error)) ([]Event, error) {
+	if issueUID != "" {
+		return query(` WHERE e.issue_uid=$1 AND e.type<>'sync.reset_required' AND e.id>$2 ORDER BY e.id LIMIT $3`, issueUID, afterID, limit)
+	}
+	movedFrom, candidates := federationCandidates(postgres)
 	var maxID int64
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),0) FROM events`).Scan(&maxID); err != nil {
 		return nil, fmt.Errorf("federation event presence: %w", err)
@@ -43,12 +52,7 @@ func ReadFederationEventPage(ctx context.Context, tx *sql.Tx, project Project, i
 	// issue. Use whichever reads less for this window.
 	ownedByEvent := `(SELECT i.project_id FROM issues i WHERE i.uid=e.issue_uid)=$1`
 	ownedByIssue := `e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)`
-	next := ` WHERE e.id=(SELECT MIN(id) FROM (
- SELECT (SELECT e.id FROM events e` + projectIndex + ` WHERE e.project_id=$1 AND e.id>$2 AND e.type<>'sync.reset_required' ORDER BY e.id LIMIT 1) AS id
- UNION ALL SELECT (SELECT e.id FROM events e` + movedIndex + ` WHERE e.type='issue.moved' AND ` + movedFrom + `=$3 AND e.id>$2 ORDER BY e.id LIMIT 1)
- UNION ALL SELECT (SELECT e.id FROM events e` + identityIndex + ` WHERE e.issue_uid=` + subjectUID + ` AND e.id>$2 AND e.type<>'sync.reset_required' ORDER BY e.id LIMIT 1)
- FROM issues subject WHERE subject.project_id=$1
- ) candidates)`
+	next := ` WHERE e.id=(SELECT MIN(id) FROM (` + candidates + `) candidates)`
 	events := []Event{}
 	// Nothing in this snapshot is newer than maxID.
 	for pos, span := afterID, width; len(events) < limit && pos < maxID; {
