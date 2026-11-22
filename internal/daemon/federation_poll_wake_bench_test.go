@@ -28,6 +28,7 @@ type benchHub struct {
 	writerURL string
 	pollerURL string
 	projectID int64
+	token     string
 }
 
 func newBenchHubServer(b *testing.B, store db.Storage) string {
@@ -51,7 +52,7 @@ func newBenchHub(b *testing.B, writer, poller db.Storage) benchHub {
 		ProjectID: &project.ID, Capabilities: "pull", Actor: "tester",
 	})
 	require.NoError(b, err)
-	hub := benchHub{writerURL: newBenchHubServer(b, writer), projectID: project.ID}
+	hub := benchHub{writerURL: newBenchHubServer(b, writer), projectID: project.ID, token: "bench-pull-token"}
 	hub.pollerURL = hub.writerURL
 	if poller != writer {
 		hub.pollerURL = newBenchHubServer(b, poller)
@@ -75,7 +76,7 @@ func (h benchHub) pollPage(ctx context.Context, afterID int64, wait string) (ben
 	if err != nil {
 		return benchPollPage{}, err
 	}
-	request.Header.Set("Authorization", "Bearer bench-pull-token")
+	request.Header.Set("Authorization", "Bearer "+h.token)
 	response, err := http.DefaultClient.Do(request) //nolint:gosec // test-owned loopback hub
 	if err != nil {
 		return benchPollPage{}, err
@@ -175,4 +176,92 @@ func BenchmarkFederationPollWake(b *testing.B) {
 		dsn := newPostgres(b)
 		newBenchHub(b, openPostgres(b, dsn), openPostgres(b, dsn)).run(b)
 	})
+}
+
+// BenchmarkFederationPollWakeFanout measures the time and unrelated reads
+// after a commit wakes held polls on a second PostgreSQL hub server.
+func BenchmarkFederationPollWakeFanout(b *testing.B) {
+	if os.Getenv("KATA_TEST_POSTGRES_DSN") == "" {
+		b.Skip("set KATA_TEST_POSTGRES_DSN to benchmark PostgreSQL wakes")
+	}
+	for _, count := range []int{8, 32} {
+		b.Run(fmt.Sprintf("projects-%d", count), func(b *testing.B) {
+			dsn, cleanup := pgstoretest.NewDatabase(b, b.Context())
+			b.Cleanup(cleanup)
+			setup, err := pgstore.Open(b.Context(), dsn)
+			require.NoError(b, err)
+			hubs := make([]benchHub, count)
+			for i := range hubs {
+				project, err := setup.CreateProject(b.Context(), fmt.Sprintf("hub-project-%d", i))
+				require.NoError(b, err)
+				_, err = setup.EnableProjectFederation(b.Context(), project.ID, "tester")
+				require.NoError(b, err)
+				token := fmt.Sprintf("bench-pull-token-%d", i)
+				_, err = setup.CreateFederationEnrollment(b.Context(), db.CreateFederationEnrollmentParams{Token: token, SpokeInstanceUID: federationTestSpokeUID, ProjectID: &project.ID, Capabilities: "pull", Actor: "tester"})
+				require.NoError(b, err)
+				hubs[i] = benchHub{projectID: project.ID, token: token}
+			}
+			require.NoError(b, setup.Close())
+			writer := newPostgresHubProcess(b, dsn)
+			poller := newPostgresHubProcess(b, dsn)
+			for i := range hubs {
+				hubs[i].writerURL, hubs[i].pollerURL = writer.server.URL, poller.server.URL
+			}
+			cursors := make([]int64, count)
+			for i, hub := range hubs {
+				page, err := hub.pollPage(b.Context(), 0, "")
+				require.NoError(b, err)
+				cursors[i] = page.NextAfterID
+			}
+			var unrelatedReads int
+			b.ResetTimer()
+			for range b.N {
+				b.StopTimer()
+				ctx, cancel := context.WithCancel(b.Context())
+				type result struct {
+					page benchPollPage
+					err  error
+				}
+				target := make(chan result, 1)
+				results := make(chan error, count-1)
+				before := make([]int, count)
+				for i, hub := range hubs {
+					before[i] = poller.reads.projectReads(hub.projectID)
+					go func(h benchHub, cursor int64, first bool) {
+						page, err := h.pollPage(ctx, cursor, "45")
+						if first {
+							target <- result{page, err}
+						} else {
+							results <- err
+						}
+					}(hub, cursors[i], i == 0)
+				}
+				for i, hub := range hubs {
+					poller.reads.waitForProjectReads(b, hub.projectID, before[i]+1)
+				}
+				b.StartTimer()
+				hubs[0].commit(b)
+				for i, hub := range hubs {
+					poller.reads.waitForProjectReads(b, hub.projectID, before[i]+2)
+				}
+				select {
+				case got := <-target:
+					require.NoError(b, got.err)
+					require.NotEmpty(b, got.page.Events)
+					cursors[0] = got.page.NextAfterID
+				case <-time.After(10 * time.Second):
+					b.Fatal("target poll did not receive the committed event")
+				}
+				b.StopTimer()
+				for i, hub := range hubs[1:] {
+					unrelatedReads += poller.reads.projectReads(hub.projectID) - before[i+1] - 1
+				}
+				cancel()
+				for range hubs[1:] {
+					<-results
+				}
+			}
+			b.ReportMetric(float64(unrelatedReads)/float64(b.N), "unrelated-reads/op")
+		})
+	}
 }
