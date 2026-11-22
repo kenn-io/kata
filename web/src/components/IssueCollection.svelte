@@ -165,11 +165,7 @@
     narrow: 'minmax(140px, 1fr)',
   }
 
-  const DEFAULT_COLUMN_WIDTHS: Record<
-    KataOptionalTaskColumn | 'title' | 'date' | 'closed',
-    number
-  > = {
-    title: 240,
+  const DEFAULT_COLUMN_WIDTHS: Record<KataOptionalTaskColumn | 'date' | 'closed', number> = {
     date: 128,
     closed: 150,
     id: 64,
@@ -216,7 +212,11 @@
   const effectiveSort = $derived.by(() => {
     const keyColumn = optionalColumnForSort(sort.key)
     return keyColumn &&
-      !renderedColumns.some((column) => column.kind === 'task' && column.id === keyColumn)
+      !renderedColumns.some(
+        (column) =>
+          (column.kind === 'task' && column.id === keyColumn) ||
+          (column.kind === 'date' && keyColumn === 'due'),
+      )
       ? ({ key: 'title', direction: 'asc' } satisfies KataTaskSort)
       : sort
   })
@@ -233,9 +233,7 @@
 
   function taskGridColumns(layout: TaskGridLayout): string {
     return [
-      columnWidths.title === undefined
-        ? TASK_TITLE_TRACKS[layout]
-        : `minmax(48px, ${columnWidths.title}px)`,
+      TASK_TITLE_TRACKS[layout],
       ...renderedColumns.map((column) => {
         if (column.kind === 'date')
           return columnWidths.date === undefined
@@ -372,17 +370,18 @@
       ? sortKataTasks(
           topLevelIssues(candidateGroups.flatMap((group) => group.issues)),
           effectiveSort,
+          unsortedVisibleChildren,
         )
       : [],
   )
   let sortedGroups = $derived(
     visibleGroups.map((group) => ({
       ...group,
-      issues: sortKataTasks(group.issues, effectiveSort),
+      issues: sortKataTasks(group.issues, effectiveSort, unsortedVisibleChildren),
     })),
   )
   let ordinaryRootIssues = $derived.by(() => {
-    if (isProjectScoped) return sortKataTasks(flatIssues, effectiveSort)
+    if (isProjectScoped) return sortKataTasks(flatIssues, effectiveSort, unsortedVisibleChildren)
     if (shouldFlatten) return globalSortedIssues
     return sortedGroups.flatMap((group) => group.issues)
   })
@@ -529,13 +528,11 @@
     persistKataTaskColumnVisibility(next)
   }
 
-  let resizeStartWidths: Partial<
-    Record<KataOptionalTaskColumn | 'title' | 'date' | 'closed', number>
-  > = {}
+  let resizeStartWidths: Partial<Record<KataOptionalTaskColumn | 'date' | 'closed', number>> = {}
   let measuredColumnWidths = $state<KataTaskColumnWidths>({})
 
   function rememberColumnWidth(
-    column: KataOptionalTaskColumn | 'title' | 'date' | 'closed',
+    column: KataOptionalTaskColumn | 'date' | 'closed',
     event: FocusEvent,
   ): void {
     const heading = (event.currentTarget as HTMLElement | null)?.parentElement
@@ -546,7 +543,7 @@
   }
 
   function resizeStartWidth(
-    column: KataOptionalTaskColumn | 'title' | 'date' | 'closed',
+    column: KataOptionalTaskColumn | 'date' | 'closed',
     event: KeyboardEvent | PointerEvent,
   ): number {
     const heading = (event.currentTarget as HTMLElement | null)?.parentElement?.parentElement
@@ -557,14 +554,14 @@
   }
 
   function beginColumnResize(
-    column: KataOptionalTaskColumn | 'title' | 'date' | 'closed',
+    column: KataOptionalTaskColumn | 'date' | 'closed',
     event: KeyboardEvent | PointerEvent,
   ): void {
     resizeStartWidths = { ...resizeStartWidths, [column]: resizeStartWidth(column, event) }
   }
 
   function updateColumnWidth(
-    column: KataOptionalTaskColumn | 'title' | 'date' | 'closed',
+    column: KataOptionalTaskColumn | 'date' | 'closed',
     event: SplitResizeEvent,
   ): void {
     const start = resizeStartWidths[column] ?? DEFAULT_COLUMN_WIDTHS[column]
@@ -574,7 +571,7 @@
   }
 
   function persistColumnWidth(
-    column: KataOptionalTaskColumn | 'title' | 'date' | 'closed',
+    column: KataOptionalTaskColumn | 'date' | 'closed',
     event: SplitResizeEvent,
   ): void {
     updateColumnWidth(column, event)
@@ -962,7 +959,7 @@
     return catalogIssue && issueMatchesStatusFilter(catalogIssue) ? catalogIssue : undefined
   }
 
-  function visibleChildren(issue: KataTaskSummary): KataTaskSummary[] {
+  function unsortedVisibleChildren(issue: KataTaskSummary): KataTaskSummary[] {
     const children = childrenByParentUID.get(issue.uid) ?? []
     const successor = revealSuccessor(issue)
     const visible = children.filter(
@@ -972,6 +969,10 @@
       visible.push(successor)
     }
     return visible
+  }
+
+  function visibleChildren(issue: KataTaskSummary): KataTaskSummary[] {
+    return sortKataTasks(unsortedVisibleChildren(issue), effectiveSort, unsortedVisibleChildren)
   }
 
   $effect.pre(() => {
@@ -1167,10 +1168,7 @@
          ↔ to expand or collapse subtasks. -->
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="table-body" bind:this={tableBody} onkeydown={handleListKeydown}>
-        {#snippet resizeHandle(
-          column: KataOptionalTaskColumn | 'title' | 'date' | 'closed',
-          label: string,
-        )}
+        {#snippet resizeHandle(column: KataOptionalTaskColumn | 'date' | 'closed', label: string)}
           <div class="column-resize" onfocusin={(event) => rememberColumnWidth(column, event)}>
             <SplitResizeHandle
               orientation="horizontal"
@@ -1220,12 +1218,24 @@
                 </span>
               </span>
             {/if}
-            {@render resizeHandle('title', 'Title')}
           </div>
           {#each renderedColumns as column (column.kind === 'task' ? column.id : column.kind)}
             {#if column.kind === 'date'}
               <div class="column-heading">
-                <span class="col col-static">Date</span>{@render resizeHandle('date', 'Date')}
+                <button
+                  class="col"
+                  type="button"
+                  aria-label={sortLabel('due', 'Date')}
+                  aria-pressed={sortIndicator('due') !== null}
+                  onclick={() => handleSortClick('due')}
+                >
+                  <span>Date</span>
+                  {#if sortIndicator('due') === 'asc'}
+                    <ChevronUpIcon size={11} strokeWidth={2} />
+                  {:else if sortIndicator('due') === 'desc'}
+                    <ChevronDownIcon size={11} strokeWidth={2} />
+                  {/if}
+                </button>{@render resizeHandle('date', 'Date')}
               </div>
             {:else if column.kind === 'closed'}
               <div class="column-heading">

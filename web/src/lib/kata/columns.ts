@@ -17,7 +17,7 @@ export const KATA_OPTIONAL_TASK_COLUMNS = [
 export type KataOptionalTaskColumn = (typeof KATA_OPTIONAL_TASK_COLUMNS)[number]['id']
 export type KataTaskColumnVisibility = Record<KataOptionalTaskColumn, boolean>
 export type KataTaskColumnWidths = Partial<
-  Record<KataOptionalTaskColumn | 'title' | 'date' | 'closed', number>
+  Record<KataOptionalTaskColumn | 'date' | 'closed', number>
 >
 
 const BLOCKED_BY_VISIBLE_IDS = 3
@@ -58,7 +58,7 @@ export function summarizeBlockedBy(
 type ColumnStorage = Pick<Storage, 'getItem' | 'setItem'>
 
 const knownColumns = new Set<string>(KATA_OPTIONAL_TASK_COLUMNS.map((column) => column.id))
-const widthColumns = new Set([...knownColumns, 'title', 'date', 'closed'])
+const widthColumns = new Set([...knownColumns, 'date', 'closed'])
 
 export function defaultKataTaskColumnVisibility(): KataTaskColumnVisibility {
   return {

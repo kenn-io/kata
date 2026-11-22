@@ -87,6 +87,7 @@ updated time, priority, owner, and labels. The short ID appears on hover with a
 copy button; focus a row and press `C` to copy it. Select **Due** to sort by
 deadline, and drag a column edge to adjust and save its width. Parent and child
 issues can be expanded inline.
+In Today and Scheduled, select **Date** to sort each group by deadline.
 
 The optional **Blocked by** column is off by default. Turn it on in **Display**
 to see each task's open blockers in every collection view,

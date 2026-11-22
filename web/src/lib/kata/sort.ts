@@ -33,18 +33,54 @@ export function toggleKataTaskSort(current: KataTaskSort, key: KataTaskSortKey):
 export function sortKataTasks(
   issues: readonly KataTaskSummary[],
   sort: KataTaskSort,
+  childrenOf?: (issue: KataTaskSummary) => readonly KataTaskSummary[],
 ): KataTaskSummary[] {
-  return [...issues].sort((a, b) => compareKataTasks(a, b, sort))
+  const dueDate = dueDateLookup(childrenOf)
+  return [...issues].sort((a, b) => compareWithDueDate(a, b, sort, dueDate))
+}
+
+function dueDateLookup(childrenOf?: (issue: KataTaskSummary) => readonly KataTaskSummary[]) {
+  const dates = new Map<KataTaskSummary, string | undefined>()
+  return (issue: KataTaskSummary): string | undefined => {
+    if (dates.has(issue)) return dates.get(issue)
+    const seen = new Set<string>()
+    const visit = (item: KataTaskSummary): string | undefined => {
+      if (seen.has(item.uid)) return undefined
+      seen.add(item.uid)
+      let earliest = deadlineDate(item)
+      for (const child of childrenOf?.(item) ?? []) {
+        const date = visit(child)
+        if (date && (!earliest || date < earliest)) earliest = date
+      }
+      return earliest
+    }
+    const date = visit(issue)
+    dates.set(issue, date)
+    return date
+  }
 }
 
 export function compareKataTasks(
   a: KataTaskSummary,
   b: KataTaskSummary,
   sort: KataTaskSort,
+  childrenOf?: (issue: KataTaskSummary) => readonly KataTaskSummary[],
 ): number {
-  const missing = compareMissing(a, b, sort.key)
+  return compareWithDueDate(a, b, sort, dueDateLookup(childrenOf))
+}
+
+function compareWithDueDate(
+  a: KataTaskSummary,
+  b: KataTaskSummary,
+  sort: KataTaskSort,
+  dueDate: (issue: KataTaskSummary) => string | undefined,
+): number {
+  const missing = compareMissing(a, b, sort.key, dueDate)
   if (missing !== 0) return missing
-  const primary = compareKey(a, b, sort.key)
+  const primary =
+    sort.key === 'due'
+      ? (dueDate(a) ?? '').localeCompare(dueDate(b) ?? '')
+      : compareKey(a, b, sort.key)
   const ordered = sort.direction === 'asc' ? primary : -primary
   if (ordered !== 0) return ordered
   if (sort.key !== 'updated') {
@@ -54,7 +90,12 @@ export function compareKataTasks(
   return a.uid.localeCompare(b.uid)
 }
 
-function compareMissing(a: KataTaskSummary, b: KataTaskSummary, key: KataTaskSortKey): number {
+function compareMissing(
+  a: KataTaskSummary,
+  b: KataTaskSummary,
+  key: KataTaskSortKey,
+  dueDate: (issue: KataTaskSummary) => string | undefined,
+): number {
   if (key === 'priority') {
     const am = a.priority === undefined
     const bm = b.priority === undefined
@@ -62,8 +103,8 @@ function compareMissing(a: KataTaskSummary, b: KataTaskSummary, key: KataTaskSor
     if (am) return 1
     if (bm) return -1
   } else if (key === 'owner' || key === 'due') {
-    const am = key === 'owner' ? !a.owner : !deadlineDate(a)
-    const bm = key === 'owner' ? !b.owner : !deadlineDate(b)
+    const am = key === 'owner' ? !a.owner : !dueDate(a)
+    const bm = key === 'owner' ? !b.owner : !dueDate(b)
     if (am && bm) return 0
     if (am) return 1
     if (bm) return -1

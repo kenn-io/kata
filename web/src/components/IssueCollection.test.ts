@@ -682,7 +682,6 @@ describe('IssueCollection', () => {
     ],
   }
   const resizeCases: [string, KataCurrentView][] = [
-    ['Title', viewWithIssues([baseIssues[0]!])],
     ['Date', currentView],
     ['Closed', resizeLogbookView],
     ['Due', viewWithIssues([baseIssues[0]!])],
@@ -701,17 +700,9 @@ describe('IssueCollection', () => {
     const before = Number(handle.getAttribute('aria-valuenow'))
     await fireEvent.keyDown(handle, { key: 'ArrowRight' })
     expect(Number(handle.getAttribute('aria-valuenow'))).toBe(before + 8)
-    if (label === 'Title') {
-      expect(
-        document.querySelector<HTMLElement>('.table')?.style.getPropertyValue('--table-cols-wide'),
-      ).toContain('minmax(48px, 248px)')
-      expect(JSON.parse(localStorage.getItem(KATA_TASK_COLUMN_WIDTHS_STORAGE_KEY)!)).toEqual({
-        title: 248,
-      })
-    }
   })
 
-  it('resizes a saved title column from its displayed width', async () => {
+  it('keeps the title flexible when a saved width exists', () => {
     window.localStorage.setItem(KATA_TASK_COLUMN_WIDTHS_STORAGE_KEY, JSON.stringify({ title: 480 }))
     render(IssueCollection, {
       props: {
@@ -722,17 +713,10 @@ describe('IssueCollection', () => {
       },
     })
 
-    const heading = document.querySelector<HTMLElement>('.column-heading-title')!
-    vi.spyOn(heading, 'getBoundingClientRect').mockReturnValue({ width: 144 } as DOMRect)
-    const handle = screen.getByRole('separator', { name: 'Resize Title column' })
-    await fireEvent.focusIn(handle.parentElement!)
-
-    expect(Number(handle.getAttribute('aria-valuenow'))).toBe(144)
-    await fireEvent.keyDown(handle, { key: 'ArrowLeft' })
-    expect(Number(handle.getAttribute('aria-valuenow'))).toBe(136)
+    expect(screen.queryByRole('separator', { name: 'Resize Title column' })).toBeNull()
     expect(
       document.querySelector<HTMLElement>('.table')?.style.getPropertyValue('--table-cols-wide'),
-    ).toContain('minmax(48px, 136px)')
+    ).toContain('minmax(160px, 1fr)')
   })
 
   it.each([
@@ -780,6 +764,91 @@ describe('IssueCollection', () => {
 
     expect(dueSort.getAttribute('aria-pressed')).toBe('true')
     expect(visibleRows().map((row) => row.dataset.uid)).toEqual(['overdue', 'later'])
+  })
+
+  it('orders parents and expanded children by their earliest deadline', async () => {
+    const parent = task({
+      uid: 'parent',
+      short_id: 'parent',
+      title: 'Parent',
+      deadline_on_date: '2026-05-30',
+      child_counts: { open: 2, total: 2 },
+    })
+    const late = task({
+      uid: 'late',
+      title: 'Late child',
+      parent_short_id: 'parent',
+      deadline_on_date: '2026-05-25',
+    })
+    const early = task({
+      uid: 'early',
+      title: 'Early child',
+      parent_short_id: 'parent',
+      deadline_on_date: '2026-05-01',
+    })
+    const middle = task({ uid: 'middle', title: 'Middle', deadline_on_date: '2026-05-20' })
+    render(IssueCollection, {
+      props: {
+        currentView: viewWithIssues([middle, parent, late, early]),
+        issueCatalog: [middle, parent, late, early],
+        selectedIssueUID: null,
+        loading: false,
+        onSelect: () => {},
+      },
+    })
+    await fireEvent.click(screen.getByRole('button', { name: /Sort by Due/ }))
+    expect(visibleRows().map((row) => row.dataset.uid)).toEqual(['parent', 'middle'])
+    await fireEvent.keyDown(screen.getByRole('button', { name: /Parent/ }), { key: 'ArrowRight' })
+    expect(visibleRows().map((row) => row.dataset.uid)).toEqual([
+      'parent',
+      'early',
+      'late',
+      'middle',
+    ])
+  })
+
+  it('sorts Scheduled groups by Date and restores the sort', async () => {
+    const early = task({ uid: 'early', title: 'Z early', deadline_on_date: '2026-05-01' })
+    const late = task({ uid: 'late', title: 'A late', deadline_on_date: '2026-05-20' })
+    const earlySecond = task({
+      uid: 'early-second',
+      title: 'Z early',
+      deadline_on_date: '2026-05-02',
+    })
+    const lateSecond = task({ uid: 'late-second', title: 'A late', deadline_on_date: '2026-05-21' })
+    const view: KataCurrentView = {
+      name: 'scheduled',
+      fetched_at: '2026-05-16T10:00:00Z',
+      groups: [
+        { id: 'first', title: 'First', issues: [late, early] },
+        { id: 'second', title: 'Second', issues: [lateSecond, earlySecond] },
+      ],
+    }
+    const props = { currentView: view, selectedIssueUID: null, loading: false, onSelect: () => {} }
+    render(IssueCollection, { props })
+    expect(visibleRows().map((row) => row.dataset.uid)).toEqual([
+      'late',
+      'early',
+      'late-second',
+      'early-second',
+    ])
+    await fireEvent.click(screen.getByRole('button', { name: /Sort by Date/ }))
+    expect(visibleRows().map((row) => row.dataset.uid)).toEqual([
+      'early',
+      'late',
+      'early-second',
+      'late-second',
+    ])
+    expect(screen.getByRole('heading', { name: /First/ })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: /Second/ })).toBeTruthy()
+    cleanup()
+    render(IssueCollection, { props })
+    expect(visibleRows().map((row) => row.dataset.uid)).toEqual([
+      'early',
+      'late',
+      'early-second',
+      'late-second',
+    ])
   })
 
   it('keeps Inbox task rows without a group heading', () => {
