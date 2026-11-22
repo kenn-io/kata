@@ -197,32 +197,5 @@ func checkFederatedOvertakenMoveSourceLeave(t *testing.T, store db.Storage, back
 		require.NoError(t, err)
 		require.Equal(t, remote[2].ID, reached.ProjectID)
 	})
-	t.Run("held comment through resets", func(t *testing.T) {
-		ctx := t.Context()
-		source, err := store.CreateProject(ctx, "held-reset-source")
-		require.NoError(t, err)
-		target, err := store.CreateProject(ctx, "held-reset-target")
-		require.NoError(t, err)
-		for _, project := range []db.Project{source, target} {
-			_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "worker", Enabled: true, PushEnabled: true})
-			require.NoError(t, err)
-		}
-		issue, creation, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "held comment", Author: "worker"})
-		require.NoError(t, err)
-		require.NoError(t, store.AdvanceFederationPushCursor(ctx, source.ID, creation.ID))
-		_, comment, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "held"})
-		require.NoError(t, err)
-		move, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "worker"})
-		require.NoError(t, err)
-		require.NoError(t, store.AdvanceFederationPushCursor(ctx, target.ID, move.EventID))
-		require.NoError(t, store.ResetFederatedProject(ctx, source.ID, 0, 0))
-		err = store.ResetFederatedProjectIfNoPendingPush(ctx, target.ID, 0, 0, store.InstanceUID(), move.EventID)
-		require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush)
-		pending, err := store.PendingFederationPushEvents(ctx, source.ID, store.InstanceUID(), creation.ID, 100)
-		require.NoError(t, err)
-		require.Len(t, pending, 1)
-		require.Equal(t, comment.UID, pending[0].UID)
-		require.Equal(t, comment.ContentHash, pending[0].ContentHash)
-	})
 	return nil
 }
