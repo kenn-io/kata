@@ -49,6 +49,38 @@ it('loads image previews through the host fetch and revokes URLs on unmount', as
   result.unmount()
   expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview')
 })
+
+it('discards an open preview when only its origin changes', async () => {
+  const { rerender } = render(IssueAttachments, {
+    attachmentsEnabled: true,
+    attachments: { [id]: { ...entry, origin: 'spoke-one' } },
+    baseURL: '/attachments',
+    fetchAttachment: vi.fn(async () => new Blob(['image'])),
+  })
+  await fireEvent.click(screen.getByRole('button', { name: 'Preview screen.png' }))
+  await waitFor(() => expect(screen.getByAltText('screen.png')).toBeTruthy())
+  await rerender({ attachments: { [id]: { ...entry, origin: 'spoke-two' } } })
+  await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview'))
+  expect(screen.queryByAltText('screen.png')).toBeNull()
+})
+
+it('revokes previews when attachments become unavailable', async () => {
+  vi.mocked(URL.createObjectURL).mockReturnValueOnce('blob:new-origin')
+  const { rerender } = render(IssueAttachments, {
+    attachmentsEnabled: true,
+    attachments: { [id]: entry },
+    baseURL: '/attachments',
+    fetchAttachment: vi.fn(async () => new Blob(['image'], { type: 'image/png' })),
+  })
+  await fireEvent.click(screen.getByRole('button', { name: 'Preview screen.png' }))
+  await waitFor(() => expect(screen.getByAltText('screen.png').getAttribute('src')).toBe('blob:new-origin'))
+  await rerender({ attachmentsEnabled: false })
+  await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:new-origin'))
+  expect(screen.queryByAltText('screen.png')).toBeNull()
+  await rerender({ attachmentsEnabled: true })
+  expect(screen.getByRole('button', { name: 'Preview screen.png' })).toBeTruthy()
+})
+
 it.each([
   { action: 'Preview', name: 'screen.png', media_type: 'image/png' },
   { action: 'Play', name: 'clip.mp4', media_type: 'video/mp4' },

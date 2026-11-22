@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/sve
 import type { ComponentProps } from 'svelte'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { KataProjectSummary, KataTaskDetail } from '../lib/kata/types'
+import { createCredentialedFetch, setGeneratedFetch } from '../lib/api/client'
 
 import IssueDetail from './IssueDetail.svelte'
 
@@ -480,4 +481,47 @@ it('disables attachment uploads with blocked authority or disabled actions', asy
   expect(screen.getByRole('button', { name: 'Attach files' }).hasAttribute('disabled')).toBe(true)
   await view.rerender({ authorityBlocked: false, actionsDisabled: true })
   expect(screen.getByRole('button', { name: 'Attach files' }).hasAttribute('disabled')).toBe(true)
+})
+
+it('refreshes a task attachment preview when its origin changes', async () => {
+  const attachment = {
+    name: 'example.png',
+    media_type: 'image/png',
+    size: 12,
+    docbank_version: '6f1c2e8a-2222-4222-8222-222222222222',
+    origin: 'instance-a',
+  }
+  const fetchAttachment = vi.fn<typeof fetch>(
+    async () => new Response(new Blob(['image'], { type: 'image/png' })),
+  )
+  setGeneratedFetch(fetchAttachment)
+  vi.stubGlobal(
+    'URL',
+    Object.assign(class extends URL {}, {
+      createObjectURL: vi.fn(() => 'blob:preview'),
+      revokeObjectURL: vi.fn(),
+    }),
+  )
+  try {
+    const view = renderDetail({
+      issue: makeIssue({ metadata: { 'attachment.file': attachment } }),
+      attachmentsEnabled: true,
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Preview example.png' }))
+    await vi.waitFor(() => expect(screen.getByAltText('example.png')).toBeTruthy())
+    expect(String(fetchAttachment.mock.calls[0]![0])).toBe(
+      'http://localhost:3000/api/v1/projects/1/issues/issue-1/attachments/file/content',
+    )
+    await view.rerender({
+      issue: makeIssue({
+        metadata: { 'attachment.file': { ...attachment, origin: 'instance-b' } },
+      }),
+    })
+    await vi.waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview'))
+    expect(screen.queryByAltText('example.png')).toBeNull()
+  } finally {
+    cleanup()
+    vi.unstubAllGlobals()
+    setGeneratedFetch(createCredentialedFetch())
+  }
 })

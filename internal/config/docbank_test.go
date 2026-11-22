@@ -38,6 +38,18 @@ api_key="test-key"
 		require.Error(t, err, extra)
 	}
 }
+func TestDocbankConfigTrustedPrivateNetwork(t *testing.T) {
+	for _, u := range []string{"http://docbank:8485", "http://10.0.0.5:8485"} {
+		cfg, err := readDocbank(t, fmt.Sprintf("[docbank]\nurl=%q\napi_key=\"test-key\"\ntrust_private_network=true\n", u))
+		require.NoError(t, err, u)
+		require.Equal(t, u, cfg.Docbank.URL)
+
+		_, err = readDocbank(t, fmt.Sprintf("[docbank]\nurl=%q\napi_key=\"test-key\"\n", u))
+		require.ErrorContains(t, err, "trust_private_network", "plain HTTP off loopback stays refused without the opt-in: %s", u)
+	}
+	_, err := readDocbank(t, "[docbank]\nurl=\"http://8.8.8.8:8485\"\napi_key=\"test-key\"\ntrust_private_network=true\n")
+	require.Error(t, err, "the opt-in never admits a public address")
+}
 func TestDocbankLocalConfig(t *testing.T) {
 	cfg, err := readDocbank(t, "[docbank]\nlocal=true\n")
 	require.NoError(t, err, "the local Docbank publishes its own key")

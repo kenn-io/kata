@@ -1002,7 +1002,7 @@
         }}
         graphOpen={route.graph}
         onCloseGraph={closeGraph}
-        attachmentsEnabled={snapshot.capabilities.attachments ?? false}
+        attachmentsEnabled={Boolean(snapshot.capabilities.attachments)}
         {onUploadAttachment}
         administrativeActionsAllowed={!scopedAuthority}
         {draftResetGeneration}

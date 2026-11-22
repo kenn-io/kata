@@ -524,7 +524,7 @@ func TestRequireDeletedHistoryAccessMapsRefusalsToNotFoundAndKeepsHubErrors(t *t
 	}{
 		{name: "federated read only is refused", wantStatus: http.StatusNotFound, wantCode: "issue_not_found"},
 		{name: "hub rate limit keeps its status", hubStatus: http.StatusTooManyRequests, wantStatus: http.StatusTooManyRequests, wantCode: "hub_claim_failed"},
-		{name: "hub unauthorized keeps its status", hubStatus: http.StatusUnauthorized, wantStatus: http.StatusUnauthorized, wantCode: "hub_claim_failed"},
+		{name: "hub unauthorized reports a rejected hub credential", hubStatus: http.StatusUnauthorized, wantStatus: http.StatusBadGateway, wantCode: "hub_credential_rejected"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
