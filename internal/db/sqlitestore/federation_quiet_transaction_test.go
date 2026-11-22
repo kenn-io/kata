@@ -48,7 +48,7 @@ func TestQuietFederationPollRetriesBusyRead(t *testing.T) {
 	var value int
 	err = raw.QueryRowContext(t.Context(), `SELECT 1 FROM projects LIMIT 1`).Scan(&value)
 	require.True(t, sqlitestore.IsTransient(err), "exclusive lock must block the reader: %v", err)
-	timer = time.AfterFunc(100*time.Millisecond, func() {
+	timer = time.AfterFunc(100*time.Millisecond, func() { //nolint:kennlint // deadlinetest: release the lock within the retry budget after the reader encounters it
 		_, err := conn.ExecContext(t.Context(), `COMMIT`)
 		if err == nil {
 			err = conn.Close()
