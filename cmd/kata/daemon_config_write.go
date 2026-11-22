@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/BurntSushi/toml"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kit/atomicfile"
 )
@@ -30,6 +32,21 @@ func readDaemonConfig(path string) ([]byte, bool, error) {
 // this home's running daemons. It refuses when the file changed since the snapshot, and restores the
 // snapshot when a restart fails.
 func writeDaemonConfigAndRestart(ctx context.Context, stderr io.Writer, path string, original []byte, originalExists bool, proposed []byte) error {
+	if err := requireUnmanagedCurrentDaemon(ctx); err != nil {
+		return err
+	}
+	var proposedPolicy struct {
+		Mode string `toml:"socket_activation"`
+	}
+	if _, err := toml.Decode(string(proposed), &proposedPolicy); err != nil {
+		return err
+	}
+	if err := config.ValidateSocketActivation(proposedPolicy.Mode); err != nil {
+		return err
+	}
+	if proposedPolicy.Mode != "" {
+		return config.SocketActivationControlError(proposedPolicy.Mode)
+	}
 	ns, err := daemonruntime.NewNamespace()
 	if err != nil {
 		return err

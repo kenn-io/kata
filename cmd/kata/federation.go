@@ -395,17 +395,70 @@ func federationSpokeProbePreflight(ctx context.Context, spokeInstance string) er
 	return err
 }
 
-// Legacy enrollment can use a hub token in the caller environment. Only a
-// profile supplies a fully independent selected-home credential snapshot.
+// Spoke requests retain the selected transport, but ambient credentials may
+// belong to the hub. Only selected profiles and catalog credentials belong to
+// the spoke; environment/workspace URL selections deliberately remain anonymous.
 func ensureSpokeDaemonContext(ctx context.Context) (context.Context, string, error) {
 	resolved, err := ensureDaemonResolved(ctx)
 	if err != nil {
 		return ctx, "", err
 	}
-	if resolved.LocalProfile != nil {
-		ctx = context.WithValue(ctx, resolvedDaemonContextKey{}, resolved)
+	if resolved.LocalProfile == nil {
+		auth, err := federationSpokeTargetAuth(ctx, resolved)
+		if err != nil {
+			return ctx, "", err
+		}
+		resolved = resolved.WithTargetAuth(auth)
 	}
+	ctx = context.WithValue(ctx, resolvedDaemonContextKey{}, resolved)
 	return ctx, resolved.BaseURL, nil
+}
+
+func federationSpokeTargetAuth(ctx context.Context, resolved clientpkg.ResolvedDaemon) (clientpkg.TargetAuth, error) {
+	auth := clientpkg.TargetAuth{
+		AllowInsecure:       resolved.AllowInsecure,
+		TrustPrivateNetwork: resolved.TrustPrivateNetwork,
+	}
+	if resolved.Name != "" {
+		cfg, err := config.ReadDaemonCatalogAndAuthPolicy()
+		if err != nil {
+			return auth, err
+		}
+		entry := catalogByName(cfg, resolved.Name)
+		if entry == nil {
+			return auth, nil
+		}
+		// The catalog can change after resolution. Its token goes only to
+		// the endpoint the entry still names.
+		same, err := catalogEntryNamesEndpoint(entry, resolved)
+		if err != nil || !same {
+			return auth, err
+		}
+		auth.Token, err = selectedCatalogToken(entry)
+		return auth, err
+	}
+	if resolved.Source == clientpkg.DaemonSourceLocalRuntime {
+		// Active legacy local entries lose their catalog name during
+		// resolution, but their credential still belongs to this home,
+		// whether its runtime uses TCP or a Unix socket.
+		return federationImplicitSpokeTargetAuth(ctx, resolved.BaseURL)
+	}
+	return auth, nil
+}
+
+func catalogEntryNamesEndpoint(entry *config.CatalogDaemonConfig, resolved clientpkg.ResolvedDaemon) (bool, error) {
+	if entry.Local || !resolved.ConfiguredRemote() {
+		// Without a profile home, a local entry names the current home's daemon.
+		return entry.Local && entry.Home == "" && !resolved.ConfiguredRemote(), nil
+	}
+	if socket, unix, err := clientpkg.UnixSocketPath(entry.URL); err != nil || unix {
+		return err == nil && socket == resolved.UnixSocket, err
+	}
+	entryURL, err := clientpkg.NormalizeRemoteURL(entry.URL, entry.AllowInsecure)
+	if err != nil {
+		return false, err
+	}
+	return resolved.UnixSocket == "" && strings.TrimRight(entryURL, "/") == strings.TrimRight(resolved.BaseURL, "/"), nil
 }
 
 func federationSpokeHTTPClient(ctx context.Context, spokeURL string) (*http.Client, error) {

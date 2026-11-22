@@ -114,11 +114,11 @@ func inspectSelection(ctx context.Context, start, name string, keepActiveLocalCa
 			if entry.Local {
 				resolved = resolved.withLocalTargetAuth(token)
 			} else {
-				base, err := normalizeRemoteURL(entry.URL, entry.AllowInsecure)
+				endpoint, err := configuredEndpoint(source, name, entry.URL, entry.AllowInsecure)
 				if err != nil {
 					return DaemonSelection{}, err
 				}
-				resolved = resolvedForRunning(source, name, remoteRunningDaemon(base, true)).withRemoteTargetAuth(token, entry.AllowInsecure)
+				resolved = endpoint.withRemoteTargetAuth(token, entry.AllowInsecure)
 				resolved.SourcePath = sourcePath
 			}
 			return DaemonSelection{Resolved: resolved, credentialErr: credentialErr}, nil

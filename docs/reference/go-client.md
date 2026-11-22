@@ -1,7 +1,7 @@
 ---
 title: Go client
 description: Connect Go programs to a Kata daemon with the typed client, CLI-compatible daemon discovery, and an in-process test server.
-last_edited: 2026-11-20
+last_edited: 2026-11-23
 ---
 
 # Go client
@@ -63,6 +63,16 @@ start a stopped local daemon for you, set
 Your first request reports whether the remote is reachable; to check sooner,
 call `api.PingWithResponse(ctx)`.
 
+Not in the latest release yet: `KATA_SERVER`, workspace `server.url`, and named
+catalog URLs accept explicit `unix:///absolute/path/daemon.sock` endpoints. Discover does not
+require a runtime record or probe that socket. The first request reports
+reachability. `StartWith` is never used for an explicit endpoint, even when the
+socket is missing.
+
+A local reconnection retains its selected target and credential source. The
+shared internal `http://kata.invalid` request base is not a socket identity;
+it never selects another active target's credentials.
+
 `Discover` finds a PostgreSQL-backed default local daemon from its storage DSN.
 Because client-only programs do not include the PostgreSQL driver, they cannot
 resolve DSN routing options: the `host`, `port`, `dbname`, `service`, or
@@ -89,9 +99,11 @@ if target, ok := api.Discovered(); ok && target.Remote {
 ```
 
 `Discovered` returns a `client.DiscoveredDaemon` whose `Remote` field is true
-for a configured remote daemon. Kata clients treat a remote daemon as unable to
-read the caller's files, even at a loopback address, and resolve projects
-without sending local paths. This matches `kind=remote` in
+for a configured endpoint, including an explicit Unix socket. Kata clients do
+not assume such a target can read the caller's files or belongs to the current
+Kata home, even at a loopback address; it does not necessarily mean another
+machine. They resolve projects without sending local paths. This matches
+`kind=remote` in
 [`kata daemon locate`](daemon-discovery.md#output-contract). A pinned local
 profile selected by `[server].daemon` or `active_daemon` is local.
 
@@ -178,6 +190,11 @@ remote, or a local daemon whose process is running but unreachable. If the
 command fails, `Discover` returns an error matching
 `client.ErrDaemonUnavailable` with the command's output included. The child
 process inherits the calling process's environment and working directory.
+
+If the selected home has `socket_activation` configured, Discover refuses to
+execute `StartWith`; use its service manager or select the explicit socket
+address for cold activation. A compatible running managed daemon can still be
+discovered normally.
 
 ## Connect to a known endpoint
 

@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"strings"
 )
 
@@ -37,12 +38,17 @@ func (d CatalogDaemonConfig) HasClientToken() bool {
 	return d.Token != "" || d.TokenFile != "" || d.TokenEnv != ""
 }
 
-// DisplayEndpoint names where the entry points, for display: "local" for a
-// local entry, otherwise the URL's host and port. It never includes URL
-// userinfo; a URL without a host gives "".
+// DisplayEndpoint names where the entry points: "local", a Unix socket endpoint,
+// or an HTTP(S) host and port. It never includes HTTP URL userinfo.
 func (d CatalogDaemonConfig) DisplayEndpoint() string {
 	if d.Local {
 		return "local"
+	}
+	if socket, unix := strings.CutPrefix(d.URL, "unix://"); unix {
+		if filepath.IsAbs(socket) {
+			return d.URL
+		}
+		return ""
 	}
 	u, err := url.Parse(d.URL)
 	if err != nil {

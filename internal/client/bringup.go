@@ -82,7 +82,7 @@ func bringUpSelection(
 	case selection.Profile != nil:
 		return up.profile(ctx, selection)
 	case selection.Resolved.ConfiguredRemote():
-		if probe && !probeRemote(ctx, selection.Resolved.BaseURL) {
+		if probe && !probeConfigured(ctx, selection.Resolved) {
 			return ResolvedDaemon{}, false, remoteUnavailableError(ctx, selection.Resolved, workspaceStart)
 		}
 		return selection.Resolved, true, nil
@@ -109,7 +109,7 @@ func remoteUnavailableError(ctx context.Context, d ResolvedDaemon, workspaceStar
 	case DaemonSourceNamedCatalog:
 		source = fmt.Sprintf("%s daemon %q", daemonConfigSource(), d.Name)
 	}
-	return fmt.Errorf("%w: %s (%s)", ErrRemoteUnavailable, d.BaseURL, source)
+	return fmt.Errorf("%w: %s (%s)", ErrRemoteUnavailable, d.Address, source)
 }
 
 // liveDiscovery finds a running daemon and never starts one.
@@ -192,6 +192,18 @@ func (s executableStart) startIfStopped(
 	resolved, ok, err := discover(ctx, selection)
 	if err != nil || ok {
 		return resolved, ok, err
+	}
+	var home string
+	if selection.Resolved.LocalProfile != nil {
+		home = selection.Resolved.LocalProfile.Home
+	} else {
+		home, err = config.KataHome()
+		if err != nil {
+			return resolved, false, err
+		}
+	}
+	if err := config.RequireUnmanagedDaemonHome(ctx, home); err != nil {
+		return resolved, false, err
 	}
 	output, err := exec.CommandContext(ctx, s.executable, args...).CombinedOutput() //nolint:gosec // G204: the caller names its kata executable; arguments are fixed or caller-selected names.
 	if err != nil {
