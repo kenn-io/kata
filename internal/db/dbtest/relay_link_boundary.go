@@ -42,7 +42,7 @@ func newRelayLinkBoundaryFixture(t *testing.T, store db.Storage, name string, sh
 	return relayLinkBoundaryFixture{project: project, sibling: sibling, parentTokenID: parent.ID, signer: db.RootAttributionSigner{AuthorityUID: store.InstanceUID(), PrivateKey: private}}
 }
 
-// deleteRelayBinding constructs the orphaned enrollment state described in the issue.
+// deleteRelayBinding constructs an active enrollment without its binding for conformance tests.
 func deleteRelayBinding(t *testing.T, store db.Storage, projectID int64) {
 	t.Helper()
 	q := store.(interface {
