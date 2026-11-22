@@ -58,7 +58,7 @@ func TestFederationPollWakeSendsNothingOnTheFormerSharedChannel(t *testing.T) {
 	require.Equal(t, "marker", notification.Payload)
 }
 
-func TestFederationPollWakeHidesChannelAndPayloadFromOtherDatabaseRoles(t *testing.T) {
+func TestFederationPollWakeSeparatesInstallations(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 120*time.Second)
 	defer cancel()
 	const schema = "wake_probe_schema"

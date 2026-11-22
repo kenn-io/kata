@@ -20,13 +20,9 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-// LISTEN and NOTIFY carry no privileges: any role that can connect to the
-// database can listen on a channel or notify it. The channel name and an AES-GCM
-// key are therefore derived from meta.instance_uid, which a role without access
-// to this schema cannot read, so such a role can neither find the channel, read
-// which project committed, nor wake held polls. The schema name is part of the
-// derivation so schemas that share an instance UID, as an import can leave
-// them, stay apart.
+// PostgreSQL permits every connected role to listen and notify on any channel.
+// The instance UID and schema distinguish installations; they are not secrets.
+// The payload names no project, and every receiver rechecks authorization.
 const (
 	pollWakeChannelInfo = "kata federation poll wake channel v1\x00"
 	pollWakeKeyInfo     = "kata federation poll wake key v1\x00"
