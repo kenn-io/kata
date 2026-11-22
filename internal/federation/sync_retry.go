@@ -350,12 +350,10 @@ func syncRetryIdentity(binding db.FederationBinding, credential config.Federatio
 	return sha256.Sum256(material), nil
 }
 
-// heldRetryIdentity is syncRetryIdentity without the timestamps a sync moves
-// (UpdatedAt, LastSyncAt), so a push or pull that lands during a held poll's
-// refusal leaves its schedule alone. The endpoint, credential, and the rest of
-// the configuration still change it.
+// heldRetryIdentity omits LastSyncAt, so a push or pull that lands during a
+// held poll's refusal leaves its schedule alone. Binding changes still reset it.
 func heldRetryIdentity(binding db.FederationBinding, credential config.FederationCredential) ([32]byte, error) {
-	binding.UpdatedAt, binding.LastSyncAt = time.Time{}, nil
+	binding.LastSyncAt = nil
 	return syncRetryIdentity(binding, credential)
 }
 

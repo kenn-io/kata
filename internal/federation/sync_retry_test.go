@@ -286,6 +286,6 @@ func TestHeldRetrySurvivesEarlierSyncSuccess(t *testing.T) {
 	require.NoError(t, err)
 	retries.recordSchedule(1, identity, identity, true, &HubStatusError{StatusCode: http.StatusServiceUnavailable, RetryAfter: 2 * time.Minute}, time.Second, at, nil)
 	retries.recordSchedule(1, [32]byte{}, [32]byte{}, false, nil, time.Second, at.Add(time.Second), &started)
-	binding.UpdatedAt, binding.LastSyncAt = at, &at
+	binding.LastSyncAt = &at
 	require.True(t, retries.blockedFor(t.Context(), 1, binding, credential, at.Add(time.Second), retries.version(1)))
 }

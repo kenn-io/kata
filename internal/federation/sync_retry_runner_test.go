@@ -267,6 +267,37 @@ func TestRefusedSpokeRetriesAtOnceAfterDisableAndEnableBetweenPasses(t *testing.
 	require.Equal(t, int64(2), fleet.requests.Load(), "the re-enabled binding is tried at once")
 }
 
+func TestHeldRetryResetsAfterDisableAndEnableBetweenPasses(t *testing.T) {
+	ctx := t.Context()
+	fleet := newSpokeFleet(t, 1)
+	project := fleet.projects[0]
+	binding, err := fleet.store.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	credential, _, err := fleet.credentials.FederationCredential(ctx, project.UID)
+	require.NoError(t, err)
+	identity, err := heldRetryIdentity(binding, credential)
+	require.NoError(t, err)
+	retries := newSyncRetries(noJitter)
+	retries.recordSchedule(project.ID, identity, identity, true, &HubStatusError{StatusCode: http.StatusServiceUnavailable, RetryAfter: 2 * time.Minute}, time.Second, fleet.now, nil)
+	require.NoError(t, fleet.store.AdvanceFederationPushCursor(ctx, project.ID, binding.PushCursorEventID+1))
+	binding, err = fleet.store.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	spoke := activeSpokeBinding{binding: binding, project: project}
+	require.True(t, fleet.runner.retryBlocked(ctx, retries, spoke, fleet.credentials), "sync progress must preserve the delay")
+	for enabled := binding; enabled.UpdatedAt.Equal(binding.UpdatedAt); {
+		disabled := binding
+		disabled.Enabled = false
+		_, err = fleet.store.UpsertFederationBinding(ctx, disabled)
+		require.NoError(t, err)
+		enabled, err = fleet.store.UpsertFederationBinding(ctx, binding)
+		require.NoError(t, err)
+	}
+	require.NoError(t, fleet.store.AdvanceFederationPushCursor(ctx, project.ID, binding.PushCursorEventID+2))
+	spoke.binding, err = fleet.store.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	require.False(t, fleet.runner.retryBlocked(ctx, retries, spoke, fleet.credentials), "the re-enabled binding must retry at once")
+}
+
 // A turn's schedule belongs to the binding and credential the turn used. A
 // change that lands as the turn ends, here from the result hook while the
 // turn still holds the project's sync lock, makes the next pass try at once.

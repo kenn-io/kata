@@ -190,8 +190,7 @@ func advanceFederationPushCursor(ctx context.Context, exec interface {
 		         WHEN push_cursor_event_id < ? THEN ?
 		         ELSE push_cursor_event_id
 		       END,
-		       last_sync_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-		       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		       last_sync_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
 		 WHERE project_id = ?`,
 		nextCursor, nextCursor, projectID)
 	if err != nil {

@@ -384,8 +384,7 @@ func (d *Store) skipFederationQuarantine(ctx context.Context, p db.SkipFederatio
 			         WHEN push_cursor_event_id < ? THEN ?
 			         ELSE push_cursor_event_id
 			       END,
-			       last_sync_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-			       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			       last_sync_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
 			 WHERE project_id = ?`,
 			q.LastEventID, q.LastEventID, q.ProjectID); err != nil {
 			return db.FederationQuarantine{}, fmt.Errorf("advance quarantine push cursor: %w", err)
@@ -738,8 +737,7 @@ func (d *Store) AdvanceFederationPullCursor(ctx context.Context, projectID, next
 		res, err := d.ExecContext(ctx, `
 			UPDATE federation_bindings
 			   SET pull_cursor_event_id = MAX(pull_cursor_event_id, ?),
-			       last_sync_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-			       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			       last_sync_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
 			 WHERE project_id = ?`,
 			nextCursor, projectID)
 		if err != nil {
