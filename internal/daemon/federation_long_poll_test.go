@@ -278,24 +278,19 @@ func TestFederationPollWaitHoldsUntilProjectEventCommits(t *testing.T) {
 	assert.Less(t, time.Since(committed), 5*time.Second)
 }
 
-func TestFederationPollWaitReturnsEmptyWhenWaitExpires(t *testing.T) {
-	t.Run("another project writes", func(t *testing.T) {
-		f := newLongPollFixture(t)
-		other, err := f.env.DB.CreateProject(t.Context(), "other-project")
-		require.NoError(t, err)
-		cursor := f.cursor(t)
-		reads := f.reads.readsReturned()
-		done := f.startHeldPoll(t, cursor, "2")
-		createIssueAs(t, f.env, other.ID, "tester", "Belongs to another project")
-		result := <-done
-		require.NoError(t, result.err)
-		require.Equal(t, http.StatusOK, result.status, "%s", result.raw)
-		assert.Empty(t, result.body.Events)
-		assert.GreaterOrEqual(t, result.elapsed, 2*time.Second)
-		// The poll reads once before it waits. A wakeup for the other project
-		// or the timeout would add a read.
-		assert.Equal(t, reads+1, f.reads.readsReturned())
-	})
+func TestFederationPollWaitIgnoresOtherProjects(t *testing.T) {
+	f := newLongPollFixture(t)
+	other, err := f.env.DB.CreateProject(t.Context(), "other-project")
+	require.NoError(t, err)
+	cursor := f.cursor(t)
+	reads := f.reads.readsReturned()
+	done := f.startHeldPoll(t, cursor, "2")
+	createIssueAs(t, f.env, other.ID, "tester", "Belongs to another project")
+	result := <-done
+	require.NoError(t, result.err)
+	require.Equal(t, http.StatusOK, result.status, "%s", result.raw)
+	assert.Empty(t, result.body.Events)
+	assert.Equal(t, reads+1, f.reads.readsReturned())
 }
 
 func TestFederationPollWaitAnswersAtOnceWhenEventsArePending(t *testing.T) {

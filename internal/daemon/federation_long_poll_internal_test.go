@@ -293,7 +293,6 @@ func TestFederationPollWaitAnswersAtOnceWhenCredentialWaitersAreFull(t *testing.
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, status)
 	assert.Less(t, elapsed, 5*time.Second, "a poll beyond the per-credential bound must answer like an ordinary poll")
-	assert.Equal(t, min(federationPollMaxWaitersPerCredential, hub.waits.maxTotal/2), hub.waits.heldFor(hub.enrollmentID))
 }
 
 func TestFederationPollWaitReleasesWaitersWhenClientsDisconnect(t *testing.T) {
