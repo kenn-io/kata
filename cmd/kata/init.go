@@ -135,15 +135,22 @@ func kindForStatus(status int) errKind {
 // that resolves elsewhere. A workspace with no binding yet passes.
 func checkExplicitWorkspaceBinding(workspace string) error {
 	paths, err := config.DiscoverPaths(workspace)
-	if err != nil || paths.WorkspaceRoot == "" {
+	if err != nil {
 		return nil
 	}
-	bindingPath := filepath.Join(paths.WorkspaceRoot, config.ProjectConfigFilename)
-	if !sameAgentHookFile(paths.WorkspaceRoot, workspace) {
+	dest := config.WriteDestination(paths, workspace)
+	bindingPath := filepath.Join(dest, config.ProjectConfigFilename)
+	if paths.WorkspaceRoot != "" && !sameAgentHookFile(dest, workspace) {
 		return initBindingConflict(fmt.Sprintf("%q already binds %q.", bindingPath, workspace),
 			"To change the enclosing binding, set --workspace to its folder, keep your other options, and use --replace when changing projects.")
 	}
-	dir, err := pathresolve.EvalSymlinks(workspace)
+	return checkBindingLinkContained(dest, bindingPath, workspace)
+}
+
+// checkBindingLinkContained refuses a binding file whose symlink resolves
+// outside dir, the folder init writes it in.
+func checkBindingLinkContained(dir, bindingPath, workspace string) error {
+	dir, err := pathresolve.EvalSymlinks(dir)
 	if err != nil {
 		return err
 	}
