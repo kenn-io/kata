@@ -179,6 +179,9 @@ func (s *Store) leaveFederationReplica(ctx context.Context, projectID int64, dis
 		if err := db.ClearFederationProjectIdentityDependencies(ctx, tx, project.UID); err != nil {
 			return mapSQLError(err, nil)
 		}
+		if err := db.RetainFederationHeldCursor(ctx, tx, projectID, project.UID); err != nil {
+			return mapSQLError(err, nil)
+		}
 		for _, query := range []string{
 			`DELETE FROM federation_quarantine WHERE project_id=$1`,
 			`DELETE FROM federation_sync_status WHERE project_id=$1`,

@@ -650,6 +650,9 @@ func (d *Store) leaveFederationReplica(ctx context.Context, projectID int64, dis
 	if err := db.ClearFederationProjectIdentityDependencies(ctx, tx, uid); err != nil {
 		return db.LeaveFederationResult{}, fmt.Errorf("clear former project identity dependencies: %w", err)
 	}
+	if err := db.RetainFederationHeldCursor(ctx, tx, projectID, uid); err != nil {
+		return db.LeaveFederationResult{}, fmt.Errorf("retain held federation cursor: %w", err)
+	}
 	for _, stmt := range []string{
 		`DELETE FROM federation_quarantine WHERE project_id = ?`,
 		`DELETE FROM federation_sync_status WHERE project_id = ?`,

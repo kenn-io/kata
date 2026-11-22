@@ -149,3 +149,48 @@ func TestSyncFederationDelayedSourceCommentAfterLeave(t *testing.T) {
 	}
 	require.ElementsMatch(t, []string{"offline source comment", "destination follow-up"}, bodies)
 }
+
+func TestSyncFederationOvertakenMoveSurvivesResets(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "reset-source", "reset-joined", "reset-absent")
+	spoke := newMoveDeliverySpoke(t, hub, projects[:2])
+	issue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "reset move", Author: "worker"})
+	require.NoError(t, err)
+	for i := range spoke.projects {
+		require.NoError(t, spoke.sync(t, i))
+	}
+	local, err := spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	_, comment, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "held comment"})
+	require.NoError(t, err)
+	move, err := spoke.env.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: local.ID, FromProjectID: spoke.projects[0].ID, ToProjectID: spoke.projects[1].ID, IfMatchRev: local.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	away, err := hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[2].ID, IfMatchRev: issue.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	require.ErrorContains(t, spoke.sync(t, 1), "federation_project_not_enrolled")
+	require.ErrorContains(t, spoke.sync(t, 0), "federation_project_not_enrolled")
+	_, err = hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[2].ID, ToProjectID: projects[1].ID, IfMatchRev: away.Issue.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	require.NoError(t, spoke.env.DB.ResetFederatedProject(ctx, spoke.projects[0].ID, 0, 0))
+	binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[1].ID)
+	require.NoError(t, err)
+	require.NoError(t, spoke.env.DB.ResetFederatedProjectIfNoPendingPush(ctx, spoke.projects[1].ID, 0, 0, spoke.env.DB.InstanceUID(), binding.PushCursorEventID))
+	require.NoError(t, spoke.sync(t, 1))
+	require.NoError(t, spoke.sync(t, 0))
+	replayed, err := spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, spoke.projects[1].ID, replayed.ProjectID)
+	// Back in B, the local move is in force again and goes out on B's next push.
+	require.NoError(t, spoke.sync(t, 1))
+	sent, err := hub.DB.EventsByUIDs(ctx, projects[1].ID, []string{move.Event.UID})
+	require.NoError(t, err)
+	require.Len(t, sent, 1)
+	require.Equal(t, move.Event.ContentHash, sent[0].ContentHash)
+	settled, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, projects[1].ID, settled.ProjectID)
+	events, err := hub.DB.EventsByUIDs(ctx, projects[0].ID, []string{comment.UID})
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	require.Equal(t, comment.ContentHash, events[0].ContentHash)
+}

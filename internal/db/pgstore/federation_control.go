@@ -360,8 +360,8 @@ func pgFederationReplicaSettledTx(ctx context.Context, tx *sql.Tx, binding db.Fe
 	}
 	if binding.PushEnabled {
 		var pending bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM events
-WHERE project_id=$1 AND origin_instance_uid=$2 AND id>$3 AND `+pgFederationPushEventTypeCondition("type")+`)`,
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM events e
+WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND `+db.FederationOwedEventSQL("e")+`)`,
 			binding.ProjectID, originInstanceUID, binding.PushCursorEventID).Scan(&pending); err != nil {
 			return mapSQLError(err, nil)
 		}
