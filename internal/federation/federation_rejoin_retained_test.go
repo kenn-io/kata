@@ -16,7 +16,9 @@ import (
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/testenv"
 )
 
 func TestRejoinRetainedHistory(t *testing.T) {
@@ -26,12 +28,45 @@ func TestRejoinRetainedHistory(t *testing.T) {
 	t.Run("known link peer", checkRejoinLinkToKnownRetainedPeerAfterInterruptedRetire)
 	t.Run("mixed known and unknown link peers", checkRejoinMixedLinkPeers)
 	t.Run("reset preserves local projection", checkRejoinResetProjection)
+	t.Run("restore retained task and edit", checkRestoredRetainedTaskEdit)
 	t.Run("incoming retained link", checkRejoinPublishesIncomingRetainedLink)
 	t.Run("cross project retained peer", checkRejoinPublishesCrossProjectRetainedPeer)
 	t.Run("recovery snapshots with gaps", checkRejoinRecoverySnapshotGaps)
 	t.Run("move recovered task", func(t *testing.T) { checkRejoinMoveRetained(t, false, true) })
 	t.Run("move unpublished task", func(t *testing.T) { checkRejoinMoveRetained(t, false, false) })
 	t.Run("move already known task", func(t *testing.T) { checkRejoinMoveRetained(t, true, false) })
+}
+
+func checkRestoredRetainedTaskEdit(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "restored-project")
+	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
+	issue, old, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "local task", Author: "old-actor"})
+	require.NoError(t, err)
+	rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
+	require.NoError(t, pushRejoin(t, spoke))
+	records, err := dbtest.CollectImportRecords(ctx, spoke.env.DB, db.ExportFilter{IncludeDeleted: true})
+	require.NoError(t, err)
+	restored := testenv.New(t)
+	require.NoError(t, restored.DB.ImportReplay(ctx, records, db.ImportOptions{NewInstance: true}))
+	grant, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: restored.DB.InstanceUID(), ProjectID: &projects[0].ID, Capabilities: "push,pull", Actor: "new-actor"})
+	require.NoError(t, err)
+	spoke.env = restored
+	spoke.credentials[projects[0].UID] = config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[0].ID, Token: grant.Token, Actor: "new-actor"}
+	_, _, err = restored.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "after restore"})
+	require.NoError(t, err)
+	require.NoError(t, spoke.sync(t, 0))
+	remote, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	comments, err := hub.DB.CommentsByIssue(ctx, remote.ID)
+	require.NoError(t, err)
+	require.Len(t, comments, 1)
+	require.Equal(t, "after restore", comments[0].Body)
+	retained, err := restored.DB.EventsByUIDs(ctx, spoke.projects[0].ID, []string{old.UID})
+	require.NoError(t, err)
+	require.Len(t, retained, 1)
+	require.Equal(t, old.ContentHash, retained[0].ContentHash)
+	require.Equal(t, old.OriginInstanceUID, retained[0].OriginInstanceUID)
 }
 
 func checkRejoinResetProjection(t *testing.T) {

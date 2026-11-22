@@ -5,6 +5,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -278,6 +279,10 @@ func retainedIssueState(ctx context.Context, store db.Storage, binding db.Federa
 	if binding.RetainedThroughEventID == 0 {
 		return false, false, nil
 	}
+	former, err := store.FormerInstanceUIDs(ctx)
+	if err != nil {
+		return false, false, err
+	}
 	var afterID int64
 	retained, snapshot := false, false
 	for {
@@ -286,13 +291,15 @@ func retainedIssueState(ctx context.Context, store db.Storage, binding db.Federa
 			return false, false, err
 		}
 		for _, event := range events {
-			if event.OriginInstanceUID != store.InstanceUID() {
+			current := event.OriginInstanceUID == store.InstanceUID()
+			formerOrigin := slices.Contains(former, event.OriginInstanceUID)
+			if !current && !formerOrigin {
 				continue
 			}
-			if event.ID <= binding.RetainedThroughEventID && event.Actor != binding.Actor {
+			if event.ID <= binding.RetainedThroughEventID && (formerOrigin || event.Actor != binding.Actor) {
 				retained = true
 			}
-			if event.ID > binding.RetainedThroughEventID && event.Actor == binding.Actor && event.Type == "issue.snapshot" {
+			if current && event.ID > binding.RetainedThroughEventID && event.Actor == binding.Actor && event.Type == "issue.snapshot" {
 				snapshot = true
 			}
 		}

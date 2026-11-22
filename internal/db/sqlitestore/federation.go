@@ -530,7 +530,7 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 		return db.FederationBinding{}, err
 	}
 	if b.RetainHistory {
-		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),0) FROM events WHERE project_id=? AND origin_instance_uid=?`, b.ProjectID, d.InstanceUID()).Scan(&b.RetainedThroughEventID); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),0) FROM events WHERE project_id=? AND `+db.LocalInstanceOriginSQL("origin_instance_uid", "?"), b.ProjectID, d.InstanceUID()).Scan(&b.RetainedThroughEventID); err != nil {
 			return db.FederationBinding{}, err
 		}
 	}

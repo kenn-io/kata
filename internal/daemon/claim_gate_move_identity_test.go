@@ -13,6 +13,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -77,6 +78,30 @@ func TestPendingMovedIssueClaimRefreshIgnoresHubShortIDCollision(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestRestoredRetainedIssueEditAfterPushQueueDrains(t *testing.T) {
+	ctx := t.Context()
+	source := testenv.New(t)
+	project, err := source.DB.CreateProject(ctx, "restored-project")
+	require.NoError(t, err)
+	issue, created, err := source.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "old task", Author: "old-actor"})
+	require.NoError(t, err)
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":{"code":"issue_not_found","message":"not synchronized yet"}}`))
+	}))
+	t.Cleanup(hub.Close)
+	_, err = source.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: 42, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: true})
+	require.NoError(t, err)
+	require.NoError(t, source.DB.AdvanceFederationPushCursor(ctx, project.ID, created.ID))
+	records, err := dbtest.CollectImportRecords(ctx, source.DB, db.ExportFilter{IncludeDeleted: true})
+	require.NoError(t, err)
+	env := testenv.New(t)
+	require.NoError(t, env.DB.ImportReplay(ctx, records, db.ImportOptions{NewInstance: true}))
+	require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: 42, Token: "claim-token", Actor: "new-actor", Capabilities: "claim"}))
+	response, raw := envDoRaw(t, env, http.MethodPatch, issuePathRef(project.ID, issue.UID, ""), map[string]any{"actor": "new-actor", "title": "edited task"}, map[string]string{"If-Match": fmt.Sprintf(`"rev-%d"`, issue.Revision)})
+	require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
 }
 
 func TestRetainedIssueEditAfterPushQueueDrains(t *testing.T) {

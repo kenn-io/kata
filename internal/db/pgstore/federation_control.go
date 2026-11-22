@@ -148,7 +148,7 @@ WHERE project_id=$1 AND active=1 LIMIT 1`, input.ProjectID).Scan(&externalRootBi
 			return err
 		}
 		if input.RetainHistory {
-			if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),0) FROM events WHERE project_id=$1 AND origin_instance_uid=$2`, input.ProjectID, s.InstanceUID()).Scan(&input.RetainedThroughEventID); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),0) FROM events WHERE project_id=$1 AND `+db.LocalInstanceOriginSQL("origin_instance_uid", "$2"), input.ProjectID, s.InstanceUID()).Scan(&input.RetainedThroughEventID); err != nil {
 				return err
 			}
 		}

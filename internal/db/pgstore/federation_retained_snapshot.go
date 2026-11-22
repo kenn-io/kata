@@ -18,7 +18,7 @@ func (s *Store) RetainedIssueSnapshot(ctx context.Context, projectID int64, issu
 		if err != nil {
 			return err
 		}
-		err = tx.QueryRowContext(ctx, `SELECT id FROM events WHERE project_id=$1 AND issue_uid=$2 AND origin_instance_uid=$3 AND id<=$4 AND actor<>$5 AND type IN ('issue.created','issue.snapshot') ORDER BY id LIMIT 1`, projectID, issueUID, s.InstanceUID(), binding.RetainedThroughEventID, binding.Actor).Scan(&creationID)
+		err = tx.QueryRowContext(ctx, `SELECT id FROM events WHERE project_id=$1 AND issue_uid=$2 AND `+db.LocalInstanceOriginSQL("origin_instance_uid", "$3")+` AND id<=$4 AND (origin_instance_uid<>$3 OR actor<>$5) AND type IN ('issue.created','issue.snapshot') ORDER BY id LIMIT 1`, projectID, issueUID, s.InstanceUID(), binding.RetainedThroughEventID, binding.Actor).Scan(&creationID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return db.ErrNotFound
 		}
