@@ -11,9 +11,6 @@ import (
 
 // ReadFederation reads a consistent federation projection and cursor.
 func (d *Store) ReadFederation(ctx context.Context, in db.FederationReadParams) (db.FederationReadResult, error) {
-	if out, quiet, err := db.QuietFederationPoll(ctx, d, in, false); quiet || err != nil {
-		return out, err
-	}
 	var out db.FederationReadResult
 	run := func(tx *sql.Tx) error {
 		project, err := scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id=$1 AND deleted_at IS NULL`, in.ProjectID))
@@ -49,6 +46,12 @@ func (d *Store) ReadFederation(ctx context.Context, in db.FederationReadParams) 
 		return err
 	}
 	err := d.RetryTransient(ctx, func() error {
+		var quiet bool
+		var err error
+		out, quiet, err = db.QuietFederationPoll(ctx, d, in, false)
+		if quiet || err != nil {
+			return err
+		}
 		tx, err := d.BeginTx(ctx, &sql.TxOptions{ReadOnly: !in.Metadata})
 		if err != nil {
 			return err

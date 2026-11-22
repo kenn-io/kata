@@ -1,15 +1,67 @@
 package sqlitestore_test
 
 import (
+	"database/sql"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/testenv/sqlcount"
 )
+
+func TestQuietFederationPollRetriesBusyRead(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "kata.db")
+	setup, err := sqlitestore.Open(t.Context(), path)
+	require.NoError(t, err)
+	project, err := setup.CreateProject(t.Context(), "quiet")
+	require.NoError(t, err)
+	_, err = setup.EnableProjectFederation(t.Context(), project.ID, "tester")
+	require.NoError(t, err)
+	cursor, err := setup.MaxEventID(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, setup.Close())
+
+	locked, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(1)")
+	require.NoError(t, err)
+	conn, err := locked.Conn(t.Context())
+	require.NoError(t, err)
+	_, err = conn.ExecContext(t.Context(), `PRAGMA locking_mode=EXCLUSIVE`)
+	require.NoError(t, err)
+	_, err = conn.ExecContext(t.Context(), `BEGIN EXCLUSIVE`)
+	require.NoError(t, err)
+	released := make(chan error, 1)
+	timer := time.AfterFunc(100*time.Millisecond, func() {
+		_, err := conn.ExecContext(t.Context(), `COMMIT`)
+		if err == nil {
+			err = conn.Close()
+		}
+		if err == nil {
+			err = locked.Close()
+		}
+		released <- err
+	})
+	t.Cleanup(func() {
+		if timer.Stop() {
+			_ = conn.Close()
+			_ = locked.Close()
+		} else {
+			require.NoError(t, <-released)
+		}
+	})
+
+	raw, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(1)")
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, raw.Close()) })
+	reader := &sqlitestore.Store{DB: raw}
+	page, err := reader.ReadFederation(t.Context(), db.FederationReadParams{ProjectID: project.ID, Features: db.SupportedEventFeatures, AfterID: cursor, Limit: 100})
+	require.NoError(t, err)
+	require.Empty(t, page.Events)
+	require.Equal(t, cursor, page.NextAfterID)
+}
 
 func TestQuietFederationPollTransactions(t *testing.T) {
 	t.Cleanup(sqlitestore.CountStatementsForTest())
