@@ -22,12 +22,34 @@ import (
 // goroutines while the test watches, so mu guards every field.
 type federationReadProbe struct {
 	db.Storage
-	mu        sync.Mutex
-	started   int
-	returned  int
-	byProject map[int64]int
-	changed   chan struct{}
-	before    func(read int) error
+	mu            sync.Mutex
+	started       int
+	returned      int
+	authCalls     int
+	revisionCalls int
+	byProject     map[int64]int
+	changed       chan struct{}
+	before        func(read int) error
+}
+
+func (p *federationReadProbe) AuthorizeFederationToken(ctx context.Context, token string, projectID int64, capability string) (db.FederationEnrollment, error) {
+	p.mu.Lock()
+	p.authCalls++
+	p.mu.Unlock()
+	return p.Storage.AuthorizeFederationToken(ctx, token, projectID, capability)
+}
+
+func (p *federationReadProbe) ProjectAccessRevision(ctx context.Context) (int64, error) {
+	p.mu.Lock()
+	p.revisionCalls++
+	p.mu.Unlock()
+	return p.Storage.ProjectAccessRevision(ctx)
+}
+
+func (p *federationReadProbe) accessCalls() (int, int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.authCalls, p.revisionCalls
 }
 
 func newFederationReadProbe(store db.Storage) *federationReadProbe {
