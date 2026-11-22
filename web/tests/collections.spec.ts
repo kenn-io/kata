@@ -114,6 +114,46 @@ test('keeps a resized width and copies a short task ID from the hovered row', as
   await expect(handle).toHaveAttribute('aria-valuenow', expectedWidth)
 })
 
+test('sorts Scheduled date groups by deadline and keeps the order on reload', async ({
+  page,
+  kata,
+}) => {
+  const credentials = await kata.launch(page)
+  const late = await kata.seedIssue(page, credentials, {
+    title: 'A later deadline',
+    metadata: { scheduled_on: '2090-01-01', deadline_on: '2090-02-20' },
+  })
+  const early = await kata.seedIssue(page, credentials, {
+    title: 'Z earlier deadline',
+    metadata: { scheduled_on: '2090-01-01', deadline_on: '2090-02-10' },
+  })
+  const lateNext = await kata.seedIssue(page, credentials, {
+    title: 'A later next deadline',
+    metadata: { scheduled_on: '2090-01-02', deadline_on: '2090-02-21' },
+  })
+  const earlyNext = await kata.seedIssue(page, credentials, {
+    title: 'Z earlier next deadline',
+    metadata: { scheduled_on: '2090-01-02', deadline_on: '2090-02-11' },
+  })
+  await page.goto(`${kata.origin}/kata?view=scheduled`)
+  const rows = page.locator('.issue-row')
+  await expect
+    .poll(() => rows.evaluateAll((items) => items.map((item) => item.getAttribute('data-uid'))))
+    .toEqual([late.uid, early.uid, lateNext.uid, earlyNext.uid])
+  await page.getByRole('button', { name: 'Sort by Date' }).click()
+  await expect
+    .poll(() => rows.evaluateAll((items) => items.map((item) => item.getAttribute('data-uid'))))
+    .toEqual([early.uid, late.uid, earlyNext.uid, lateNext.uid])
+  await expect(page.locator('.group-title')).toHaveCount(2)
+  await page.reload()
+  await expect(
+    page.getByRole('button', { name: 'Sort by Date, currently ascending' }),
+  ).toHaveAttribute('aria-pressed', 'true')
+  await expect
+    .poll(() => rows.evaluateAll((items) => items.map((item) => item.getAttribute('data-uid'))))
+    .toEqual([early.uid, late.uid, earlyNext.uid, lateNext.uid])
+})
+
 test('project creation and quick capture use the designated inbox project', async ({
   page,
   kata,

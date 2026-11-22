@@ -163,32 +163,43 @@ test('task filters stay inside a narrow list pane without overlapping', async ({
   })
 })
 
-test('saved task columns resize from their rendered width in a narrow pane', async ({
-  page,
-  kata,
-}) => {
+test('the title fills space as columns and the list pane resize', async ({ page, kata }) => {
   await page.addInitScript(() => {
-    localStorage.setItem('kata:column-widths/v1', JSON.stringify({ title: 480 }))
+    if (!localStorage.getItem('kata:column-widths/v1')) {
+      localStorage.setItem('kata:column-widths/v1', JSON.stringify({ title: 480 }))
+    }
   })
   await page.setViewportSize({ width: 1440, height: 800 })
   const credentials = await kata.launch(page)
-  const issue = await kata.seedIssue(page, credentials, { title: 'Narrow saved column example' })
-  await page.goto(`${kata.origin}/kata?view=all-open&issue=${issue.uid}`)
+  await kata.seedIssue(page, credentials, { title: 'Narrow saved column example' })
+  await page.goto(`${kata.origin}/kata?view=all-open`)
+  const heading = page.locator('.column-heading-title')
+  const wideWidth = (await heading.boundingBox())!.width
+  const handle = page.getByRole('separator', { name: 'Resize Due column' })
+  await handle.focus()
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(async () => (await heading.boundingBox())!.width).toBeLessThan(wideWidth)
+  await page.getByRole('button', { name: /Narrow saved column example/ }).click()
   await page.getByRole('button', { name: 'Display' }).click()
   await page.getByRole('radio', { name: 'Beside list' }).click()
   await page.keyboard.press('Escape')
   await page.setViewportSize({ width: 900, height: 800 })
 
-  const heading = page.locator('.column-heading-title')
-  const handle = page.getByRole('separator', { name: 'Resize Title column' })
-  const displayedWidth = Math.round((await heading.boundingBox())!.width)
-  expect(displayedWidth).toBeLessThan(480)
+  await expect.poll(async () => (await heading.boundingBox())!.width).toBeLessThan(wideWidth)
+  await expect(page.getByRole('button', { name: /Narrow saved column example/ })).toBeVisible()
 
+  await page.evaluate(() =>
+    localStorage.setItem('kata:column-widths/v1', JSON.stringify({ due: 480 })),
+  )
+  await page.reload()
+  const dueHeading = page.locator('.column-heading-due')
+  const displayedWidth = Math.round((await dueHeading.boundingBox())!.width)
+  expect(displayedWidth).toBeLessThan(480)
   await handle.focus()
   await expect(handle).toHaveAttribute('aria-valuenow', String(displayedWidth))
   await page.keyboard.press('ArrowLeft')
   await expect(handle).toHaveAttribute('aria-valuenow', String(displayedWidth - 8))
-  expect(Math.round((await heading.boundingBox())!.width)).toBe(displayedWidth - 8)
+  expect(Math.round((await dueHeading.boundingBox())!.width)).toBe(displayedWidth - 8)
 })
 
 test('task rows stay 36px tall at desktop and mobile widths, including hover', async ({
