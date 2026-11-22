@@ -996,7 +996,7 @@ func TestDaemonDiagnoseStorageBusy(t *testing.T) {
 	path := filepath.Join(home, "kata.db")
 	store, err := sqlitestore.Open(t.Context(), path)
 	require.NoError(t, err)
-	_, err = store.ExecContext(t.Context(), "UPDATE meta SET value=? WHERE key='schema_version'", fmt.Sprint(db.CurrentSchemaVersion()+1))
+	_, err = store.ExecContext(t.Context(), "UPDATE meta SET value=? WHERE key='schema_version'", fmt.Sprint(db.CurrentSchemaVersion()-1))
 	require.NoError(t, err)
 	require.NoError(t, store.Close())
 	lock := flock.New(path + ".import.lock")
