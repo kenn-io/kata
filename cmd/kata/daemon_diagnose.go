@@ -20,6 +20,7 @@ import (
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/storeopen"
+	"go.kenn.io/kata/internal/jsonl"
 	"go.kenn.io/kata/internal/storageinspect"
 	"go.kenn.io/kata/internal/version"
 	kataapi "go.kenn.io/kata/pkg/client"
@@ -188,80 +189,12 @@ func diagnoseDaemonSelection(
 		}
 		result.Project = workspaceProjectName(start)
 	}
-	var store db.Storage
-	if selection.Profile != nil {
-		profile := *selection.Profile
-		identity, err := client.InspectLocalProfileStorage(ctx, profile)
-		result.ObservedInstanceUID = identity.InstanceUID
-		result.SchemaVersion = identity.SchemaVersion
-		if err != nil {
-			result.State = "missing_profile_storage"
-			result.Message = err.Error()
-			if errors.Is(err, client.ErrProfileIdentityMismatch) {
-				result.State = "wrong_database"
-			}
-			return withDiagnosisAction(result), selection, nil
-		}
-		if result.SchemaVersion != db.CurrentSchemaVersion() {
-			result.State = "version_mismatch"
-			return withDiagnosisAction(result), selection, nil
-		}
-		store, err = storageinspect.OpenProfileReadOnly(ctx, profile)
-		if err != nil {
-			result.State = "missing_profile_storage"
-			result.Message = err.Error()
-			return withDiagnosisAction(result), selection, nil
-		}
-		result.State = "stopped_local_profile"
-	} else if selection.Resolved.BaseURL == "" {
-		result.Home, _ = config.KataHome()
-		dsn, err := config.KataDSN(ctx)
-		if err != nil {
-			return result, selection, err
-		}
-		ns, err := daemonruntime.NewNamespace()
-		if err != nil {
-			return result, selection, err
-		}
-		result.StorageID = ns.DBHash
-		store, err = storeopen.OpenReadOnly(ctx, dsn)
-		if err != nil || store == nil {
-			if err != nil && !currentHomeStorageIsAbsent(dsn, err) {
-				result.State = "unreadable_storage"
-				result.Message = err.Error()
-				return withDiagnosisAction(result), selection, nil
-			}
-			store = nil
-		} else {
-			if err = store.RefreshInstanceUID(ctx); err != nil {
-				_ = store.Close()
-				result.State = "unreadable_storage"
-				result.Message = err.Error()
-				return withDiagnosisAction(result), selection, nil
-			}
-			result.ObservedInstanceUID = store.InstanceUID()
-			result.SchemaVersion, err = store.SchemaVersion(ctx)
-			if err != nil {
-				_ = store.Close()
-				result.State = "unreadable_storage"
-				result.Message = err.Error()
-				return withDiagnosisAction(result), selection, nil
-			}
-		}
+	proceed, err := inspectDiagnosisStorage(ctx, &result, selection, expectedProject)
+	if err != nil {
+		return result, selection, err
 	}
-	if store == nil && expectedProject != "" {
-		result.State = "project_unverifiable"
+	if !proceed {
 		return withDiagnosisAction(result), selection, nil
-	}
-	if store != nil {
-		defer func() { _ = store.Close() }()
-		if result.SchemaVersion != db.CurrentSchemaVersion() {
-			result.State = "version_mismatch"
-			return withDiagnosisAction(result), selection, nil
-		}
-		if !inspectDiagnosisProject(ctx, store, &result) {
-			return withDiagnosisAction(result), selection, nil
-		}
 	}
 	result, selection, err = probeDaemonSelection(ctx, result, selection)
 	if result.State == "ready" {
@@ -273,6 +206,126 @@ func diagnoseDaemonSelection(
 		result.State = "version_mismatch"
 	}
 	return withDiagnosisAction(result), selection, err
+}
+
+func lockDiagnosisStorage(result *daemonDiagnosis, dsn string) (func(), bool, error) {
+	backend, err := storeopen.BackendForDSN(dsn)
+	if err != nil {
+		return nil, false, err
+	}
+	if backend == storeopen.BackendPostgres {
+		return func() {}, false, nil
+	}
+	path := strings.TrimPrefix(dsn, "sqlite://")
+	_, err = os.Stat(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, false, err
+	}
+	release, busy, err := jsonl.TryCutoverReadLock(path, err == nil)
+	if busy {
+		result.State = "storage_busy"
+		result.Message = "another kata process holds the SQLite storage lock, usually a daemon upgrading the database"
+	}
+	return release, busy, err
+}
+
+func inspectDiagnosisStorage(ctx context.Context, result *daemonDiagnosis, selection client.DaemonSelection, expectedProject string) (bool, error) {
+	var store db.Storage
+	if selection.Profile != nil {
+		profile := *selection.Profile
+		release, busy, lockErr := lockDiagnosisStorage(result, profile.DSN)
+		if busy {
+			return false, nil
+		}
+		if lockErr != nil {
+			result.State = "missing_profile_storage"
+			result.Message = lockErr.Error()
+			return false, nil
+		}
+		defer release()
+		identity, err := client.InspectLocalProfileStorage(ctx, profile)
+		result.ObservedInstanceUID = identity.InstanceUID
+		result.SchemaVersion = identity.SchemaVersion
+		if err != nil {
+			result.State = "missing_profile_storage"
+			result.Message = err.Error()
+			if errors.Is(err, client.ErrProfileIdentityMismatch) {
+				result.State = "wrong_database"
+			}
+			return false, nil
+		}
+		if result.SchemaVersion != db.CurrentSchemaVersion() {
+			result.State = "version_mismatch"
+			return false, nil
+		}
+		store, err = storageinspect.OpenProfileReadOnly(ctx, profile)
+		if err != nil {
+			result.State = "missing_profile_storage"
+			result.Message = err.Error()
+			return false, nil
+		}
+		result.State = "stopped_local_profile"
+	} else if selection.Resolved.BaseURL == "" {
+		result.Home, _ = config.KataHome()
+		dsn, err := config.KataDSN(ctx)
+		if err != nil {
+			return false, err
+		}
+		release, busy, lockErr := lockDiagnosisStorage(result, dsn)
+		if busy {
+			return false, nil
+		}
+		if lockErr != nil {
+			result.State = "unreadable_storage"
+			result.Message = lockErr.Error()
+			return false, nil
+		}
+		defer release()
+		ns, err := daemonruntime.NewNamespace()
+		if err != nil {
+			return false, err
+		}
+		result.StorageID = ns.DBHash
+		store, err = storeopen.OpenReadOnly(ctx, dsn)
+		if err != nil || store == nil {
+			if err != nil && !currentHomeStorageIsAbsent(dsn, err) {
+				result.State = "unreadable_storage"
+				result.Message = err.Error()
+				return false, nil
+			}
+			store = nil
+		} else {
+			if err = store.RefreshInstanceUID(ctx); err != nil {
+				_ = store.Close()
+				result.State = "unreadable_storage"
+				result.Message = err.Error()
+				return false, nil
+			}
+			result.ObservedInstanceUID = store.InstanceUID()
+			result.SchemaVersion, err = store.SchemaVersion(ctx)
+			if err != nil {
+				_ = store.Close()
+				result.State = "unreadable_storage"
+				result.Message = err.Error()
+				return false, nil
+			}
+		}
+	}
+	if store == nil && expectedProject != "" {
+		result.State = "project_unverifiable"
+		return false, nil
+	}
+	if store != nil {
+		defer func() { _ = store.Close() }()
+		if result.SchemaVersion != db.CurrentSchemaVersion() {
+			result.State = "version_mismatch"
+			return false, nil
+		}
+		if !inspectDiagnosisProject(ctx, store, result) {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func inspectDiagnosisProject(ctx context.Context, store db.Storage, result *daemonDiagnosis) bool {
@@ -491,6 +544,8 @@ func withDiagnosisAction(result daemonDiagnosis) daemonDiagnosis {
 		result.NextAction = "restore the configured server connection; retain the selected target"
 	case "missing_profile_storage":
 		result.NextAction = "restore access to this profile's existing storage; recovery never initializes it"
+	case "storage_busy":
+		result.NextAction = "wait for the SQLite upgrade or import to finish, then rerun kata daemon diagnose"
 	case "unreadable_storage":
 		result.NextAction = "restore access to the current home's existing storage metadata before starting its daemon"
 	case "wrong_database":

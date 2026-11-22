@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/client"
@@ -348,7 +349,7 @@ func TestDaemonDiagnoseEmptyCurrentHomeDoesNotInitialize(t *testing.T) {
 	out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
 	require.NoError(t, err)
 	assertDiagnosticState(t, out, "local_stopped")
-	for _, name := range []string{"kata.db", "runtime"} {
+	for _, name := range []string{"kata.db", "kata.db.import.lock", "runtime"} {
 		_, err = os.Stat(filepath.Join(home, name))
 		assert.ErrorIs(t, err, os.ErrNotExist)
 	}
@@ -988,4 +989,100 @@ func TestDaemonDiagnoseSecondPing(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDaemonDiagnoseStorageBusy(t *testing.T) {
+	home, _, _, _ := stoppedProfileCLI(t)
+	path := filepath.Join(home, "kata.db")
+	store, err := sqlitestore.Open(t.Context(), path)
+	require.NoError(t, err)
+	_, err = store.ExecContext(t.Context(), "UPDATE meta SET value=? WHERE key='schema_version'", fmt.Sprint(db.CurrentSchemaVersion()+1))
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+	lock := flock.New(path + ".import.lock")
+	locked, err := lock.TryLock()
+	require.NoError(t, err)
+	require.True(t, locked)
+	out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
+	require.NoError(t, err)
+	assertDiagnosticState(t, out, "storage_busy")
+	_, _, err = executeRootCapture(t, t.Context(), "daemon", "recover")
+	require.ErrorContains(t, err, "wait for the SQLite upgrade or import")
+	require.NoError(t, lock.Close())
+	out, _, err = executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
+	require.NoError(t, err)
+	assertDiagnosticState(t, out, "version_mismatch")
+}
+
+func TestDaemonDiagnoseCurrentHomeStorageBusy(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_DB", "")
+	t.Setenv("KATA_DSN", "")
+	t.Setenv("KATA_SERVER", "")
+	t.Chdir(t.TempDir())
+	path := filepath.Join(home, "kata.db")
+	store, err := sqlitestore.Open(t.Context(), path)
+	require.NoError(t, err)
+	_, err = store.ExecContext(t.Context(), "PRAGMA journal_mode=WAL")
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+	lock := flock.New(path + ".import.lock")
+	locked, err := lock.TryLock()
+	require.NoError(t, err)
+	require.True(t, locked)
+	defer func() { require.NoError(t, lock.Close()) }()
+	out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--agent")
+	require.NoError(t, err)
+	assert.Contains(t, out, "state=storage_busy")
+	assert.Contains(t, out, "wait for the SQLite upgrade or import")
+	for _, suffix := range []string{"-wal", "-shm"} {
+		_, err = os.Stat(path + suffix)
+		assert.ErrorIs(t, err, os.ErrNotExist)
+	}
+}
+
+func TestDaemonDiagnoseMissingDatabaseWithHeldMarker(t *testing.T) {
+	home, _, _, _ := stoppedProfileCLI(t)
+	path := filepath.Join(home, "kata.db")
+	require.NoError(t, os.Remove(path))
+	lock := flock.New(path + ".import.lock")
+	locked, err := lock.TryLock()
+	require.NoError(t, err)
+	require.True(t, locked)
+	defer func() { require.NoError(t, lock.Close()) }()
+	out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
+	require.NoError(t, err)
+	assertDiagnosticState(t, out, "storage_busy")
+}
+
+func TestDaemonDiagnoseReadOnlyDirectoryWithoutMarker(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory permissions")
+	}
+	home, _, _, _ := stoppedProfileCLI(t)
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(home, "kata.db"))
+	require.NoError(t, err)
+	_, err = store.ExecContext(t.Context(), "PRAGMA journal_mode=DELETE")
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+	require.NoError(t, os.Chmod(home, 0500))
+	t.Cleanup(func() { _ = os.Chmod(home, 0700) })
+	out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
+	require.NoError(t, err)
+	assertDiagnosticState(t, out, "stopped_local_profile")
+	_, err = os.Stat(filepath.Join(home, "kata.db.import.lock"))
+	assert.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestLockDiagnosisStoragePostgres(t *testing.T) {
+	t.Chdir(t.TempDir())
+	result := daemonDiagnosis{}
+	release, busy, err := lockDiagnosisStorage(&result, "postgres://example.invalid/example")
+	require.NoError(t, err)
+	require.False(t, busy)
+	release()
+	entries, err := os.ReadDir(".")
+	require.NoError(t, err)
+	assert.Empty(t, entries)
 }

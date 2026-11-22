@@ -130,6 +130,7 @@ them.
 | `local_unreachable` | Check the process evidence in `message` and follow any recovery guidance in `next_action`. If no process evidence is available, inspect transport and credentials. |
 | `selection_error` | Repair routing with `daemon diagnose`; status retains the current-home process list. |
 | `missing_profile_storage` | Restore access to the profile's existing storage. |
+| `storage_busy` | Wait for the SQLite upgrade or import to finish, then rerun diagnose. |
 | `unreadable_storage` | Use `message` to restore access to the selected storage metadata. |
 | `unhealthy` | The selected daemon answered health but reported `ok=false`; inspect its health report and logs. |
 | `wrong_database` | Check the home and pinned instance UID. |

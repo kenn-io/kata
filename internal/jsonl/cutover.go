@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -50,11 +51,54 @@ func WithCutoverLock(ctx context.Context, path string, fn func() error) error {
 	// files, so it takes the target's lock too, after the configured one.
 	// Compare resolved names: one file can be spelled two ways, and locking it
 	// twice would make this process wait on itself.
+	return withCutoverLocks(ctx, cutoverLockPaths(path), fn)
+}
+
+func cutoverLockPaths(path string) []string {
 	locks := []string{linkpath.Chain(path + ".import.lock")[0]}
 	if target := cutoverFilePath(path) + ".import.lock"; target != locks[0] {
 		locks = append(locks, target)
 	}
-	return withCutoverLocks(ctx, locks, fn)
+	return locks
+}
+
+// TryCutoverReadLock protects an inspection from a concurrent SQLite cutover.
+// The caller must release the locks after closing the inspected database.
+func TryCutoverReadLock(path string, create bool) (release func(), busy bool, err error) {
+	var locks []*flock.Flock
+	release = func() {
+		for i := len(locks) - 1; i >= 0; i-- {
+			_ = locks[i].Close()
+		}
+	}
+	for _, name := range cutoverLockPaths(path) {
+		flag := os.O_RDONLY
+		if create {
+			flag |= os.O_CREATE
+		}
+		lock := flock.New(name, flock.SetFlag(flag))
+		locked, lockErr := lock.TryRLock()
+		if lockErr != nil {
+			_ = lock.Close()
+			if !create && errors.Is(lockErr, os.ErrNotExist) {
+				continue
+			}
+			if create && (errors.Is(lockErr, os.ErrPermission) || errors.Is(lockErr, syscall.EROFS)) {
+				if _, statErr := os.Lstat(name); errors.Is(statErr, os.ErrNotExist) {
+					continue
+				}
+			}
+			release()
+			return nil, false, fmt.Errorf("lock SQLite inspection: %w", lockErr)
+		}
+		if !locked {
+			_ = lock.Close()
+			release()
+			return nil, true, nil
+		}
+		locks = append(locks, lock)
+	}
+	return release, false, nil
 }
 
 func withCutoverLocks(ctx context.Context, paths []string, fn func() error) error {
