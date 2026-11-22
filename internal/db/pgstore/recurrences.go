@@ -388,7 +388,11 @@ func (s *Store) PatchRecurrence(ctx context.Context, input db.PatchRecurrenceIn)
 			addDiff("template_metadata", jsontext.Value(current.TemplateMetadata), *value)
 			next.TemplateMetadata = db.JSONBlob(*value)
 		}
-		if err := db.ValidateRecurrenceTemplate(next.TemplateTitle, jsontext.Value(next.TemplateMetadata)); err != nil {
+		var suppliedMetadata jsontext.Value
+		if input.Update.TemplateMetadata != nil {
+			suppliedMetadata = *input.Update.TemplateMetadata
+		}
+		if err := db.ValidateRecurrenceTemplate(next.TemplateTitle, suppliedMetadata); err != nil {
 			return err
 		}
 		if input.Update.Rule != nil || input.Update.DTStart != nil || input.Update.Timezone != nil {

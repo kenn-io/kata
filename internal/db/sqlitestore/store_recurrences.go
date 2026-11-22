@@ -320,8 +320,6 @@ func (d *Store) patchRecurrence(ctx context.Context, in db.PatchRecurrenceIn) (d
 		var nextMeta jsontext.Value
 		if in.Update.TemplateMetadata != nil {
 			nextMeta = *in.Update.TemplateMetadata
-		} else {
-			nextMeta = jsontext.Value(cur.TemplateMetadata)
 		}
 		if err := db.ValidateRecurrenceTemplate(nextTitle, nextMeta); err != nil {
 			return out, err

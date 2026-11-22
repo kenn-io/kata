@@ -787,6 +787,11 @@ var storageScenarios = []scenario{
 		run: checkAPITokensAndSystemProject,
 	},
 	{
+		name:    "legacy attention recurrence",
+		methods: []string{"CreateProject", "CreateIssue", "CreateRecurrence", "CreateRecurrenceForIssue", "PatchRecurrence", "GetRecurrenceByID", "MaterializeNext", "IssueByID"},
+		run:     checkLegacyAttentionRecurrence,
+	},
+	{
 		name: "recurrences",
 		methods: []string{
 			"CloseIssueWithEvents", "CreateIssue", "CreateProject", "CreateRecurrence", "CreateRecurrenceForIssue", "EventsAfter", "GetRecurrenceByID",

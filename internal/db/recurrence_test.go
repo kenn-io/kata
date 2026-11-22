@@ -45,15 +45,16 @@ func TestComposeRecurrenceIssueMetadataDefensivelyRejectsInvalidReservedValue(t 
 }
 
 func TestComposeRecurrenceMetadataPreservesLegacyAttention(t *testing.T) {
-	for name, compose := range map[string]func(jsontext.Value, string, string) (jsontext.Value, error){
-		"template":       ComposeRecurrenceIssueMetadata,
-		"existing issue": ComposeExistingRecurrenceIssueMetadata,
+	value, err := ComposeExistingRecurrenceIssueMetadata(jsontext.Value(`{"work.attention":"working"}`), "2026-11-23", "UTC")
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"work.attention":"working","scheduled_on":"2026-11-23","timezone":"UTC"}`, string(value))
+	for _, tc := range []struct{ input, want string }{
+		{`{"work.attention":"working","kind":"weekly"}`, `{"kind":"weekly","scheduled_on":"2026-11-23","timezone":"UTC"}`},
+		{`{"work.attention":"stuck"}`, `{"work.attention":"stuck","scheduled_on":"2026-11-23","timezone":"UTC"}`},
 	} {
-		t.Run(name, func(t *testing.T) {
-			value, err := compose(jsontext.Value(`{"work.attention":"working"}`), "2026-11-23", "UTC")
-			require.NoError(t, err)
-			assert.JSONEq(t, `{"work.attention":"working","scheduled_on":"2026-11-23","timezone":"UTC"}`, string(value))
-		})
+		value, err := ComposeRecurrenceIssueMetadata(jsontext.Value(tc.input), "2026-11-23", "UTC")
+		require.NoError(t, err)
+		assert.JSONEq(t, tc.want, string(value))
 	}
 	assert.ErrorIs(t, ValidateRecurrenceTemplate("Review", jsontext.Value(`{"work.attention":"working"}`)), ErrInvalidRecurrence)
 }

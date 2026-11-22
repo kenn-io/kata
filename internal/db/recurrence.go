@@ -87,7 +87,7 @@ func composeRecurrenceIssueMetadata(
 	}
 	object["scheduled_on"] = scheduledOn
 	object["timezone"] = timezoneValue
-	// Attention is carried forward unchanged and may predate its validation.
+	// Existing issues keep their attention; new occurrences omit invalid values.
 	attention, hasAttention := object["work.attention"]
 	delete(object, "work.attention")
 	validate := validateRecurrenceIssueMetadataObject
@@ -97,7 +97,7 @@ func composeRecurrenceIssueMetadata(
 	if err := validate(object); err != nil {
 		return nil, err
 	}
-	if hasAttention {
+	if hasAttention && (!template || metadata.ValidateCreateValue(metadata.IssueRegistry, "work.attention", attention) == nil) {
 		object["work.attention"] = attention
 	}
 	value, err := json.Marshal(object)
