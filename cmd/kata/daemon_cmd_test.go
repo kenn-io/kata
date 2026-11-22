@@ -374,6 +374,13 @@ func TestDaemonStatus_HumanReportsLifecycleDetails(t *testing.T) {
 
 	out, _, _ := executeRootCapture(t, t.Context(), "daemon", "status")
 
+	_, reason, ok := strings.Cut(out, "  reason: ")
+	require.True(t, ok)
+	reason, _, _ = strings.Cut(reason, "\n")
+	assert.NotContains(t, reason, strconv.Itoa(os.Getpid()))
+	assert.NotContains(t, reason, "127.0.0.1:7777")
+	assert.Contains(t, reason, "daemon.log")
+	assert.Contains(t, reason, "connection refused")
 	assert.Contains(t, out, "kata running at http://127.0.0.1:7777\n")
 	assert.Contains(t, out, "  web UI:  http://127.0.0.1:28888\n")
 	assert.Contains(t, out, "  pid:     "+strconv.Itoa(os.Getpid())+"\n")

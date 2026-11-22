@@ -28,6 +28,7 @@ import (
 
 // daemonDiagnosis contains operational identity, never authentication secrets.
 type daemonDiagnosis struct {
+	unreachable         *client.LocalDaemonUnreachableError
 	State               string `json:"state"`
 	Message             string `json:"message,omitempty"`
 	ProjectState        string `json:"project_state,omitempty"`
@@ -469,6 +470,7 @@ func safeDaemonOrigin(value string) string {
 func diagnosisUnreachable(result daemonDiagnosis, err error) daemonDiagnosis {
 	if e, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok {
 		result.Message, result.NextAction, result.PID, result.Endpoint = e.Summary(), e.RecoveryAdvice(), e.PID, e.Address
+		result.unreachable = e
 	}
 	return result
 }
