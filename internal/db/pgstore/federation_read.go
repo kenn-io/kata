@@ -10,6 +10,9 @@ import (
 
 // ReadFederation reads a consistent federation projection and cursor.
 func (s *Store) ReadFederation(ctx context.Context, in db.FederationReadParams) (db.FederationReadResult, error) {
+	if out, quiet, err := db.QuietFederationPoll(ctx, s, in, true); quiet || err != nil {
+		return out, err
+	}
 	var out db.FederationReadResult
 	run := func(tx *sql.Tx) error {
 		project, err := scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id=$1 AND deleted_at IS NULL`, in.ProjectID))

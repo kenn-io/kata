@@ -60,6 +60,61 @@ func TestDaemonStatus_NoDaemonReportsAbsent(t *testing.T) {
 	assert.Equal(t, "Selected daemon: local_stopped (source: local runtime)\nNo kata daemon is running in the current KATA_HOME.\n", string(out))
 }
 
+func TestDaemonStatus_HumanUnreachableDoesNotRepeatError(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		canceled bool
+		hint     string
+	}{
+		{"refused", false, "hint: Wait during startup or migration. If the daemon is stuck, recheck the PID and endpoint before stopping it."},
+		{"canceled", true, "hint: inspect the selected process and its credentials; do not switch databases"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := setupKataEnv(t)
+			t.Chdir(t.TempDir())
+			t.Setenv("KATA_DSN", "")
+			t.Setenv("KATA_SERVER", "")
+			ctx := t.Context()
+			var address string
+			var probes atomic.Int32
+			if tc.canceled {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				defer cancel()
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path != "/api/v1/ping" {
+						http.NotFound(w, r)
+						return
+					}
+					if probes.Add(1) == 2 {
+						cancel()
+						return
+					}
+					_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":"v1.2.3","pid":%d}`, os.Getpid())
+				}))
+				t.Cleanup(server.Close)
+				address = strings.TrimPrefix(server.URL, "http://")
+			} else {
+				listener, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
+				require.NoError(t, err)
+				address = listener.Addr().String()
+				require.NoError(t, listener.Close())
+			}
+			require.NoError(t, writeRuntimeFor(home, address))
+
+			stdout, stderr, err := executeRootCapture(t, ctx, "daemon", "status")
+			if tc.canceled {
+				assert.Equal(t, int32(2), probes.Load())
+			}
+			assert.Equal(t, ExitDaemonUnavail, exitCodeForErr(err, true))
+			assert.Contains(t, stdout, "Selected daemon: local_unreachable")
+			assert.NotContains(t, stderr, "kata: ")
+			assert.NotContains(t, stderr, "local_unreachable")
+			assert.Contains(t, stderr, tc.hint)
+		})
+	}
+}
+
 func TestDaemonStatusReadinessExit(t *testing.T) {
 	for _, mode := range []string{"human", "json", "agent"} {
 		for _, ready := range []bool{false, true} {

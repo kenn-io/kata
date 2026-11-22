@@ -33,11 +33,28 @@ func checkFederatedQuietPollFeed(t *testing.T, store db.Storage, backend Backend
 
 func checkFederatedQuietPollFeedWith(t *testing.T, store db.Storage, backend Backend, extraIssues int) {
 	ctx := t.Context()
+	if backend.Name == "postgres" {
+		// PostgreSQL may scan metadata before checking its key. Exercise that
+		// plan even on a small fixture where it normally prefers the index.
+		pool := store.(interface {
+			SetMaxOpenConns(int)
+			ExecContext(context.Context, string, ...any) (sql.Result, error)
+		})
+		pool.SetMaxOpenConns(1)
+		_, err := pool.ExecContext(ctx, `SET enable_indexscan=off; SET enable_bitmapscan=off`)
+		require.NoError(t, err)
+	}
 	writer := backend.OpenSame(t, store)
 	quiet, err := writer.CreateProject(ctx, fmt.Sprintf("quiet-project-%d", extraIssues))
 	require.NoError(t, err)
 	busy, err := writer.CreateProject(ctx, fmt.Sprintf("busy-project-%d", extraIssues))
 	require.NoError(t, err)
+	unbound, err := writer.CreateProject(ctx, fmt.Sprintf("unbound-project-%d", extraIssues))
+	require.NoError(t, err)
+	newest, err := writer.MaxEventID(ctx)
+	require.NoError(t, err)
+	_, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: unbound.ID, Features: db.SupportedEventFeatures, AfterID: newest, Limit: 1000})
+	require.ErrorIs(t, err, db.ErrNotFound)
 	for _, p := range []db.Project{quiet, busy} {
 		_, err = writer.EnableProjectFederation(ctx, p.ID, "tester")
 		require.NoError(t, err)
@@ -153,6 +170,8 @@ func checkFederatedQuietPollFeedWith(t *testing.T, store db.Storage, backend Bac
 
 	// Moving that issue out drops the requirement.
 	delivered := moveInDelivered()
+	_, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: quiet.ID, Features: db.IssueMoveEventFeature, AfterID: cursor, Limit: 1000})
+	require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
 	_, err = writer.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: delivered.ID, FromProjectID: quiet.ID, ToProjectID: busy.ID, IfMatchRev: delivered.Revision, Actor: "tester"})
 	require.NoError(t, err)
 	require.NotContains(t, poll().RequiredFeatures, db.CronEventFeature)
@@ -164,4 +183,5 @@ func checkFederatedQuietPollFeedWith(t *testing.T, store db.Storage, backend Bac
 	out, err := store.ReadFederation(ctx, db.FederationReadParams{ProjectID: quiet.ID, Features: db.SupportedEventFeatures, AfterID: cursor, Limit: 1000})
 	require.NoError(t, err)
 	require.NotContains(t, out.RequiredFeatures, db.CronEventFeature)
+	require.Greater(t, out.ResetAfterID, cursor)
 }
