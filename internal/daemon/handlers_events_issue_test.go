@@ -88,6 +88,26 @@ type snapshotHookStore struct {
 	afterRead func()
 }
 
+type delayedCursorStore struct {
+	*snapshotHookStore
+	delay    atomic.Bool
+	observed chan struct{}
+	release  chan struct{}
+}
+
+func (s *delayedCursorStore) UIEventCursor(ctx context.Context) (int64, error) {
+	cursor, err := s.UIStore.UIEventCursor(ctx)
+	if s.delay.CompareAndSwap(true, false) {
+		close(s.observed)
+		select {
+		case <-s.release:
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		}
+	}
+	return cursor, err
+}
+
 func (s *snapshotHookStore) ReadUISnapshot(ctx context.Context, query db.UISnapshotQuery) (db.UISnapshotData, error) {
 	data, err := s.UIStore.ReadUISnapshot(ctx, query)
 	if err == nil && s.afterRead != nil {
@@ -118,6 +138,55 @@ func TestUISnapshotOmitsEffectiveCloseWhenCursorAdvances(t *testing.T) {
 	resp, body := envGetRaw(t, env, path)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 	require.NotContains(t, string(body), `"effective_close_event"`)
+}
+
+func TestUISnapshotDoesNotReuseOmittedCloseAfterConcurrentCursorAdvance(t *testing.T) {
+	var store *delayedCursorStore
+	env := testenv.New(t, testenv.Option(func(cfg *daemon.ServerConfig) {
+		store = &delayedCursorStore{
+			snapshotHookStore: &snapshotHookStore{UIStore: cfg.DB.(db.UIStore)},
+			observed:          make(chan struct{}), release: make(chan struct{}),
+		}
+		cfg.UIStore = store
+	}))
+	project, err := env.DB.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	issue := createScopedHTTPTestIssue(t, env, project.ID, "Concurrent close", nil)
+	_, closed, changed, err := env.DB.CloseIssueWithEvents(t.Context(), issue.ID, "done", "tester", "Completed", nil)
+	require.NoError(t, err)
+	require.True(t, changed)
+	store.afterRead = func() {
+		insertRemoteIssueHistoryEvent(t, env, project, issue, "00000000000000000000000001", "7ZZZZZZZZZZZZZZZZZZZZZZZZZ", "issue.closed",
+			closed[0].HLCPhysicalMS+1, 0, `{"reason":"done"}`, closed[0].CreatedAt)
+	}
+	path := "/api/v1/ui/snapshot?view=all-open&include_history=true&selected_issue_uid=" + issue.UID
+	store.delay.Store(true)
+	released := false
+	defer func() {
+		if !released {
+			close(store.release)
+		}
+	}()
+	result := make(chan []byte, 1)
+	go func() {
+		_, body := envDoRaw(t, env, http.MethodGet, path, nil, map[string]string{"If-None-Match": `"old"`})
+		result <- body
+	}()
+	select {
+	case <-store.observed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cursor read did not start")
+	}
+	_, body := envGetRaw(t, env, path)
+	require.NotContains(t, string(body), `"effective_close_event"`)
+	close(store.release)
+	released = true
+	select {
+	case body = <-result:
+		require.Contains(t, string(body), `"effective_close_event"`)
+	case <-time.After(5 * time.Second):
+		t.Fatal("delayed request did not finish")
+	}
 }
 
 // The issue history contract filters before limit and acknowledges the resolved

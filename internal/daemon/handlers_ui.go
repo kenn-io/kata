@@ -326,7 +326,7 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if scopedIssueIDs == nil && !data.AuthorityReused {
 				authorityCache.put(authorityKey, data, nil, dependencies)
 			}
-			if scopedIssueIDs == nil && uiSnapshotHasEnrichment(intent) {
+			if scopedIssueIDs == nil && uiSnapshotHasEnrichment(intent) && (out.Body.Selected == nil || data.SelectedIssue == nil || !intent.IncludeHistory || data.SelectedIssue.Status != "closed" || out.Body.Selected.EffectiveCloseEvent != nil) {
 				var closeEvent *db.Event
 				if out.Body.Selected != nil {
 					closeEvent = out.Body.Selected.EffectiveCloseEvent
