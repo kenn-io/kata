@@ -105,7 +105,9 @@
   const restoredColumnWidths = loadKataTaskColumnWidths()
   const restoredSort = loadSort()
   const initialSort =
-    restoredSort.key === 'id'
+    restoredSort.key === 'id' ||
+    (restoredSort.key === 'due' &&
+      untrack(() => currentView.name === 'today' || currentView.name === 'scheduled'))
       ? restoredSort
       : sortForColumnVisibility(restoredSort, restoredColumnVisibility)
   let sort: KataTaskSort = $state(initialSort)

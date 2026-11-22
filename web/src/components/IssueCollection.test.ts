@@ -805,6 +805,38 @@ describe('IssueCollection', () => {
     ])
   })
 
+  it.each(['today', 'scheduled'] as const)(
+    'restores %s Date sorting after Due is hidden in All open',
+    async (name) => {
+      const early = task({ uid: 'early', title: 'Z early', deadline_on_date: '2026-05-01' })
+      const late = task({ uid: 'late', title: 'A late', deadline_on_date: '2026-05-20' })
+      const issues = [late, early]
+      const all = render(IssueCollection, {
+        props: { currentView: viewWithIssues(issues), onSelect: () => {} },
+      })
+      await fireEvent.click(screen.getByRole('button', { name: 'Display' }))
+      await fireEvent.click(screen.getByRole('checkbox', { name: 'Due' }))
+      all.unmount()
+
+      const props = {
+        currentView: { name, groups: [{ id: 'group', title: 'Group', issues }] },
+        onSelect: () => {},
+      }
+      const first = render(IssueCollection, { props })
+      await fireEvent.click(screen.getByRole('button', { name: 'Sort by Date' }))
+      expect(visibleRows().map((row) => row.dataset.uid)).toEqual(['early', 'late'])
+      first.unmount()
+      render(IssueCollection, { props })
+
+      expect(screen.getByRole('button', { name: 'Sort by Date, currently ascending' })).toBeTruthy()
+      expect(visibleRows().map((row) => row.dataset.uid)).toEqual(['early', 'late'])
+      expect(JSON.parse(localStorage.getItem('kata:issue-sort/v1')!)).toEqual({
+        key: 'due',
+        direction: 'asc',
+      })
+    },
+  )
+
   it('keeps Inbox task rows without a group heading', () => {
     const { container } = render(IssueCollection, {
       props: {
