@@ -65,6 +65,26 @@ func TestFederationPollWaitsBoundEveryHeldPoll(t *testing.T) {
 	}
 }
 
+func TestFederationPollWaitsReserveCapacityForOtherCredentials(t *testing.T) {
+	for _, tc := range []struct{ cpus, limit int }{{1, 16}, {8, 32}} {
+		t.Run(fmt.Sprintf("%d CPUs", tc.cpus), func(t *testing.T) {
+			waits := newFederationPollWaits(16, tc.cpus)
+			broadcaster := NewEventBroadcaster()
+			project := db.Project{ID: 7, UID: "01HZNQ7VFPK1XGD8R5MABCD4EA"}
+			for range tc.limit {
+				waiter, ok := waits.admit(t.Context(), broadcaster, 1, project)
+				require.True(t, ok)
+				t.Cleanup(waiter.release)
+			}
+			_, ok := waits.admit(t.Context(), broadcaster, 1, project)
+			assert.False(t, ok)
+			other, ok := waits.admit(t.Context(), broadcaster, 2, project)
+			require.True(t, ok)
+			other.release()
+		})
+	}
+}
+
 func TestFederationPollWakeIgnoresItsOwnInstance(t *testing.T) {
 	waits := newFederationPollWaits(16, 8)
 	woken, unsubscribe := waits.remote.subscribe(SubFilter{})
@@ -246,8 +266,9 @@ func (h internalLongPollHub) poll(ctx context.Context, afterID int64, wait strin
 // the returned function waits for those polls to end.
 func (h internalLongPollHub) holdEveryCredentialSlot(ctx context.Context, t *testing.T, cursor int64) func() {
 	t.Helper()
+	limit := min(federationPollMaxWaitersPerCredential, h.waits.maxTotal/2)
 	var polls sync.WaitGroup
-	for range federationPollMaxWaitersPerCredential {
+	for range limit {
 		polls.Go(func() {
 			if status, _, _, err := h.poll(ctx, cursor, "45"); err == nil {
 				t.Errorf("held poll answered before its client disconnected: %d", status)
@@ -255,7 +276,7 @@ func (h internalLongPollHub) holdEveryCredentialSlot(ctx context.Context, t *tes
 		})
 	}
 	//nolint:kennlint // sleeptest: the polls reach the hub over real HTTP; the waiter count is the signal.
-	require.Eventually(t, func() bool { return h.waits.heldFor(h.enrollmentID) == federationPollMaxWaitersPerCredential },
+	require.Eventually(t, func() bool { return h.waits.heldFor(h.enrollmentID) == limit },
 		10*time.Second, 5*time.Millisecond, "the hub never held every poll")
 	return polls.Wait
 }
@@ -276,7 +297,7 @@ func TestFederationPollWaitAnswersAtOnceWhenCredentialWaitersAreFull(t *testing.
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, status)
 	assert.Less(t, elapsed, 5*time.Second, "a poll beyond the per-credential bound must answer like an ordinary poll")
-	assert.Equal(t, federationPollMaxWaitersPerCredential, hub.waits.heldFor(hub.enrollmentID))
+	assert.Equal(t, min(federationPollMaxWaitersPerCredential, hub.waits.maxTotal/2), hub.waits.heldFor(hub.enrollmentID))
 }
 
 func TestFederationPollWaitReleasesWaitersWhenClientsDisconnect(t *testing.T) {

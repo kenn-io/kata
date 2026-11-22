@@ -631,11 +631,11 @@ Held polls need a few things from the deployment:
 - Each idle binding keeps one request open at its hub. A host that limits
   concurrent requests per instance, such as some managed platforms, holds more
   open requests than it did with interval polls.
-- A hub holds at most 32 polls per `GOMAXPROCS`, up to 256 total, and at most
-  32 per spoke credential. Signed polls can use at most half of the hub's
-  federation control slots. Past a limit the hub answers at once and the
-  spoke falls back to its interval. It asks for a held poll again after a
-  growing delay, up to 16 intervals.
+- A hub holds at most 32 polls per `GOMAXPROCS`, up to 256 total. Each spoke
+  credential can hold at most half the total limit, up to 32. Signed polls can
+  use at most half of the hub's federation control slots. Past a limit the hub
+  answers at once and the spoke falls back to its interval. It asks for a held
+  poll again after a growing delay, up to 16 intervals.
 - The spoke asks for a wait 15 seconds shorter than its request budget, so a
   `KATA_HTTP_TIMEOUT` under 16 seconds turns held polls off. The daemon log
   says so once for each binding.

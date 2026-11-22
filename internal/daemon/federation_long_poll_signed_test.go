@@ -244,6 +244,26 @@ func TestFederationPollWaitReauthorizesWhenWakeReadCrossesDeadline(t *testing.T)
 	})
 }
 
+func TestFederationPollWaitInitialReadCrossesDeadline(t *testing.T) {
+	f := newSignedPollFixture(t)
+	synctest.Test(t, func(t *testing.T) {
+		h := f.serve(t, 0)
+		cursor := h.cursor(t)
+		h.reads.beforeRead(func(int) error {
+			time.Sleep(31 * time.Second)
+			return h.revokeProjectAccess(t)
+		})
+		response := h.send(h.request(t, cursor, "30"))
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		var page pollBodyForTest
+		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &page))
+		assert.Empty(t, page.Events)
+		assert.GreaterOrEqual(t, page.NextAfterID, cursor)
+		response = h.send(h.request(t, page.NextAfterID, ""))
+		assert.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
+	})
+}
+
 func TestFederationPollWaitEndsBeforeTheRequestDeadlineAfterASlowRead(t *testing.T) {
 	f := newSignedPollFixture(t)
 	synctest.Test(t, func(t *testing.T) {
