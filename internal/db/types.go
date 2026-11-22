@@ -132,20 +132,20 @@ const (
 // meaningful for spoke bindings; hub bindings keep the local project identity
 // and replay horizon.
 type FederationBinding struct {
-	RelayConfig            *RelayBindingConfig
-	ProjectID              int64
-	Role                   FederationRole
-	HubURL                 string
-	HubProjectID           int64
-	HubProjectUID          string
-	ReplayHorizonEventID   int64
-	PullCursorEventID      int64
-	PushEnabled            bool
-	PushCursorEventID      int64
-	RetainedThroughEventID int64
+	RelayConfig          *RelayBindingConfig
+	ProjectID            int64
+	Role                 FederationRole
+	HubURL               string
+	HubProjectID         int64
+	HubProjectUID        string
+	ReplayHorizonEventID int64
+	PullCursorEventID    int64
+	PushEnabled          bool
+	PushCursorEventID    int64
+	Actor                string
 	// RetainHistory asks the store to capture the local event boundary during rejoin.
-	RetainHistory bool
-	Actor         string
+	RetainHistory          bool
+	RetainedThroughEventID int64
 	// AllowInsecure records the join-time plaintext-HTTP transport opt-in on
 	// the binding itself so leave can rebuild the hub client even when the
 	// credential file (the only other holder of the flag) is gone.

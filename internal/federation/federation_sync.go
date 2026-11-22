@@ -297,11 +297,12 @@ func pushDirectSpoke(
 				break
 			}
 			for len(pending) > 0 {
-				if retainedFederationEvent(pending[0], *binding, store.InstanceUID()) {
-					end := 1
-					for end < len(pending) && retainedFederationEvent(pending[end], *binding, store.InstanceUID()) {
-						end++
-					}
+				retained := retainedFederationEvent(pending[0], *binding, store.InstanceUID())
+				end := 1
+				for end < len(pending) && retainedFederationEvent(pending[end], *binding, store.InstanceUID()) == retained {
+					end++
+				}
+				if retained {
 					if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 						return err
 					}
@@ -313,13 +314,6 @@ func pushDirectSpoke(
 					pending = pending[end:]
 					continue
 				}
-				end := len(pending)
-				for i := 1; i < len(pending); i++ {
-					if retainedFederationEvent(pending[i], *binding, store.InstanceUID()) {
-						end = i
-						break
-					}
-				}
 				batch, adoptionBaseline, adoptionBaselineEndEventID, err := nextFederationPushIngestBatch(pending[:end])
 				if err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
@@ -329,11 +323,7 @@ func pushDirectSpoke(
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
 				if retired {
-					pending, err = store.PendingFederationPushEvents(ctx, binding.ProjectID, store.InstanceUID(), binding.PushCursorEventID, federationPollLimit)
-					if err != nil {
-						return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-					}
-					continue
+					break
 				}
 				sourceTokens, err := federationMoveSourceTokens(ctx, store, credentials, *binding, client.baseURL, batch, opts)
 				if err != nil {
@@ -346,7 +336,7 @@ func pushDirectSpoke(
 						AdoptionBaselineEndEventID: adoptionBaselineEndEventID,
 					})
 				if err != nil {
-					if issueUID := retainedUnknownIssue(err, batch); issueUID != "" && !snapshotsSent[issueUID] {
+					if issueUID := retainedUnknownIssue(err); issueUID != "" && !snapshotsSent[issueUID] {
 						snapshot, sourceID, snapshotErr := store.RetainedIssueSnapshot(ctx, binding.ProjectID, issueUID)
 						if snapshotErr == nil {
 							envelope := federationIngestEnvelope(snapshot)
@@ -432,19 +422,14 @@ func publishRetainedLinkPeers(ctx context.Context, store db.Storage, binding *db
 			peers = make(map[string]bool)
 		}
 		_, _, err = db.StripCrossProjectLinkAdditions(fold, func(uid string) bool {
-			if uid != "" && (event.IssueUID == nil || uid != *event.IssueUID) {
-				peers[uid] = true
-			}
+			peers[uid] = true
 			return false
 		})
 		if err != nil {
 			return false, err
 		}
 		for peer := range peers {
-			if peer == "" || peer == fold.IssueUID {
-				continue
-			}
-			if sent[peer] {
+			if peer == "" || peer == fold.IssueUID || sent[peer] {
 				continue
 			}
 			snapshot, sourceID, err := store.RetainedIssueSnapshot(ctx, binding.ProjectID, peer)
@@ -496,9 +481,9 @@ func retainedSnapshotAlreadyKnown(err error, issueUID string) bool {
 	return ok && body.Code == "validation" && body.Message == "federation ingest validation: fresh issue.snapshot targets existing issue "+issueUID
 }
 
-var retainedUnknownIssuePattern = regexp.MustCompile(`^federation ingest validation: ([a-z._]+) references unknown issue ([0-9A-HJKMNP-TV-Z]{26})$`)
+var retainedUnknownIssuePattern = regexp.MustCompile(`^federation ingest validation: [a-z._]+ references unknown issue ([0-9A-HJKMNP-TV-Z]{26})$`)
 
-func retainedUnknownIssue(err error, batch []db.Event) string {
+func retainedUnknownIssue(err error) string {
 	status, ok := errors.AsType[*HubStatusError](err)
 	if !ok || status.StatusCode != http.StatusBadRequest {
 		return ""
@@ -507,14 +492,8 @@ func retainedUnknownIssue(err error, batch []db.Event) string {
 	if !ok || body.Code != "validation" {
 		return ""
 	}
-	match := retainedUnknownIssuePattern.FindStringSubmatch(body.Message)
-	if match == nil {
-		return ""
-	}
-	for _, event := range batch {
-		if event.Type == match[1] && event.IssueUID != nil && *event.IssueUID == match[2] {
-			return match[2]
-		}
+	if match := retainedUnknownIssuePattern.FindStringSubmatch(body.Message); match != nil {
+		return match[1]
 	}
 	return ""
 }

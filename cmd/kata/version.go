@@ -36,17 +36,17 @@ func writeVersion(out io.Writer, mode outputMode) error {
 	case outputJSON:
 		var buf bytes.Buffer
 		payload := map[string]any{
-			"name":                    "kata",
-			"version":                 version.Version,
-			"commit":                  version.Commit,
-			"built":                   version.BuildDate,
-			"distribution":            version.Distribution,
-			"go":                      runtime.Version(),
-			"os":                      runtime.GOOS,
-			"arch":                    runtime.GOARCH,
-			"agent_format":            agentFormatVersion,
-			"rejoin_existing_replica": true,
+			"name":         "kata",
+			"version":      version.Version,
+			"commit":       version.Commit,
+			"built":        version.BuildDate,
+			"distribution": version.Distribution,
+			"go":           runtime.Version(),
+			"os":           runtime.GOOS,
+			"arch":         runtime.GOARCH,
+			"agent_format": agentFormatVersion,
 		}
+		payload["rejoin_existing_replica"] = true
 		if err := emitJSON(&buf, payload); err != nil {
 			return err
 		}
