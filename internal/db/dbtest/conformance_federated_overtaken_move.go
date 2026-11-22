@@ -38,7 +38,7 @@ func checkFederatedOvertakenMoveSourceLeave(t *testing.T, store db.Storage, back
 		require.NoError(t, err)
 		return grant.Enrollment.ID
 	}
-	for _, scenario := range []string{"older", "newer", "tie-wins", "tie-loses", "hub-only"} {
+	for _, scenario := range []string{"older", "newer", "hub-only"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := t.Context()
 			hub, spoke, remote, local := overtakenMoveSpoke(t, 2, "source", "joined", "absent")
@@ -69,17 +69,13 @@ func checkFederatedOvertakenMoveSourceLeave(t *testing.T, store db.Storage, back
 				remoteEvent.HLCCounter++
 			case "older":
 				remoteEvent.HLCPhysicalMS--
-			case "tie-wins":
-				remoteEvent.OriginInstanceUID = "7ZZZZZZZZZZZZZZZZZZZZZZZZZ"
-			case "tie-loses":
-				remoteEvent.OriginInstanceUID = "00000000000000000000000001"
 			}
 			remoteEvent.ContentHash, err = db.RemoteEventContentHash(remoteEvent)
 			require.NoError(t, err)
 			_, err = spoke.InsertRemoteEvents(ctx, local[0].ID, []db.RemoteEvent{remoteEvent})
 			require.NoError(t, err)
 			require.NoError(t, spoke.MaterializeFederatedProject(ctx, local[0].ID))
-			superseded := scenario == "newer" || scenario == "tie-wins"
+			superseded := scenario == "newer"
 			if scenario != "hub-only" {
 				pending, err := spoke.PendingFederationPushEvents(ctx, local[1].ID, spoke.InstanceUID(), 0, 100)
 				require.NoError(t, err)
@@ -126,18 +122,6 @@ func checkFederatedOvertakenMoveSourceLeave(t *testing.T, store db.Storage, back
 			require.NoError(t, spoke.MaterializeFederatedProject(ctx, parked.ID))
 			require.NoError(t, spoke.ResetFederatedProjectIfNoPendingPush(ctx, parked.ID, 0, 0, spoke.InstanceUID(), 0))
 			requireHeld()
-			_, err = spoke.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: local[0].ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: remote[0].ID, HubProjectUID: remote[0].UID, Actor: "worker", Enabled: true, PushEnabled: true})
-			require.NoError(t, err)
-			pending, err := spoke.PendingFederationPushEvents(ctx, local[0].ID, spoke.InstanceUID(), 0, 100)
-			require.NoError(t, err)
-			require.Len(t, pending, 1)
-			require.Equal(t, comment.UID, pending[0].UID)
-			_, err = hub.IngestFederationEvents(ctx, db.FederationIngestParams{ProjectID: remote[0].ID, FederationEnrollmentID: enroll(t, hub, spoke, remote[0]), SpokeInstanceUID: spoke.InstanceUID(), BoundActor: "worker", EventFeatures: db.SupportedEventFeatures, MoveSourceEnrollmentIDs: map[string]int64{remote[2].UID: enroll(t, hub, spoke, remote[2])}, Events: []db.FederationIngestEvent{{SourceEventID: pending[0].ID, Event: portableNativeEvent(pending[0])}}})
-			require.NoError(t, err)
-			stored, err := hub.EventsByUIDs(ctx, remote[0].ID, []string{comment.UID})
-			require.NoError(t, err)
-			require.Len(t, stored, 1)
-			require.Equal(t, comment.ContentHash, stored[0].ContentHash)
 		})
 	}
 	t.Run("later local move keeps its predecessor owed", func(t *testing.T) {

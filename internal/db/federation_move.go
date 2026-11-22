@@ -867,7 +867,7 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
 		return fmt.Errorf("preserve former project identity dependencies: %w", err)
 	}
 	// Keep this spoke's edits that a left project never had acknowledged. They
-	// are sent once the project is joined again.
+	// stay local.
 	//nolint:gosec // Only the fixed snapshot type list is joined; values are bound.
 	_, err = tx.ExecContext(ctx, `DELETE FROM events AS e WHERE e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)
  AND NOT (e.origin_instance_uid=$2
