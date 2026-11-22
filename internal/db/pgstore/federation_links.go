@@ -309,7 +309,11 @@ func federationFoldEventsOfTypes(
 	projectID int64,
 	eventTypes []string,
 ) ([]db.FoldEvent, error) {
-	query, args := federationFoldEventsQuery(projectID, eventTypes)
+	return federationFoldEventsScoped(ctx, tx, projectID, eventTypes, "")
+}
+
+func federationFoldEventsScoped(ctx context.Context, tx *sql.Tx, projectID int64, eventTypes []string, issueUID string) ([]db.FoldEvent, error) {
+	query, args := federationFoldEventsScopedQuery(projectID, eventTypes, issueUID)
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
@@ -349,6 +353,10 @@ func federationFoldEventsOfTypes(
 // pull may accept it. An issue with a retained move already joins every project's
 // history through the moved clause, so this gate never applies to it.
 func federationFoldEventsQuery(projectID int64, eventTypes []string) (string, []any) {
+	return federationFoldEventsScopedQuery(projectID, eventTypes, "")
+}
+
+func federationFoldEventsScopedQuery(projectID int64, eventTypes []string, issueUID string) (string, []any) {
 	query := `SELECT e.uid,e.origin_instance_uid,p.uid,e.issue_uid,
 e.related_issue_uid,e.type,e.actor,e.payload,e.hlc_physical_ms,e.hlc_counter,e.created_at
 FROM events e JOIN projects p ON p.id=e.project_id WHERE (e.project_id=$1 OR (e.issue_uid IN (
@@ -382,6 +390,10 @@ FROM events e JOIN projects p ON p.id=e.project_id WHERE (e.project_id=$1 OR (e.
 		}
 		//nolint:gosec // G202: generated $N placeholders only; values are bound separately.
 		query += " AND e.type IN (" + strings.Join(placeholders, ",") + ")"
+	}
+	if issueUID != "" {
+		query += fmt.Sprintf(" AND (e.issue_uid=$%d OR e.type LIKE 'project.%%')", len(args)+1)
+		args = append(args, issueUID)
 	}
 	return query + " ORDER BY e.id ASC", args
 }

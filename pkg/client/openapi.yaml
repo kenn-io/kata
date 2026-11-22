@@ -2803,6 +2803,9 @@ components:
           type: string
         reset_blocker:
           type: string
+        retained_event_count:
+          format: int64
+          type: integer
         role:
           type: string
         root_signing_key:
@@ -2826,6 +2829,7 @@ components:
         - pull_cursor_event_id
         - push_cursor_event_id
         - pending_push_count
+        - retained_event_count
         - pending_push_high_water_event_id
         - enrollment_count
         - live_claim_count

@@ -123,7 +123,7 @@ func (s *Store) moveIssueProjectTx(ctx context.Context, tx *sql.Tx, input db.Mov
 			return err
 		}
 		if err == nil && binding.RetainedThroughEventID > 0 {
-			retainedHistory, err = federationFoldEvents(ctx, tx, source.ID)
+			retainedHistory, err = federationFoldEventsScoped(ctx, tx, source.ID, nil, current.UID)
 			if err != nil {
 				return err
 			}

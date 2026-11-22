@@ -1358,6 +1358,33 @@ func TestFederationStatusNoBindingsIsEmpty(t *testing.T) {
 	assert.Empty(t, scoped.Statuses)
 }
 
+func TestFederationStatusRetainedEvents(t *testing.T) {
+	env := testenv.New(t)
+	ctx := t.Context()
+	project, err := env.DB.CreateProject(ctx, "retained-status")
+	require.NoError(t, err)
+	_, event, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "old task", Author: "old-actor"})
+	require.NoError(t, err)
+	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: true})
+	require.NoError(t, err)
+	require.NoError(t, env.DB.AdvanceFederationPushCursor(ctx, project.ID, event.ID))
+	var body struct {
+		Statuses []struct {
+			Pending  int64 `json:"pending_push_count"`
+			Retained int64 `json:"retained_event_count"`
+		} `json:"statuses"`
+	}
+	envGetJSON(t, env, "/api/v1/federation/status", &body)
+	require.Len(t, body.Statuses, 1)
+	require.Zero(t, body.Statuses[0].Pending)
+	require.Equal(t, int64(1), body.Statuses[0].Retained)
+	_, _, err = env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "new task", Author: "new-actor"})
+	require.NoError(t, err)
+	envGetJSON(t, env, "/api/v1/federation/status", &body)
+	require.Equal(t, int64(1), body.Statuses[0].Pending)
+	require.Equal(t, int64(1), body.Statuses[0].Retained)
+}
+
 func TestFederationStatusSpokeIncludesCursorsQueuesAndLastSync(t *testing.T) {
 	env := testenv.New(t)
 	ctx := t.Context()

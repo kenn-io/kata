@@ -464,6 +464,8 @@ func TestSyncFederationOnceHandlesResetRequired(t *testing.T) {
 	spoke := testenv.New(t)
 	project, err := spoke.DB.CreateProject(ctx, "hub")
 	require.NoError(t, err)
+	issue, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "retained task", Author: "old-actor"})
+	require.NoError(t, err)
 	binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
 		ProjectID:            project.ID,
 		Role:                 db.FederationRoleSpoke,
@@ -473,6 +475,8 @@ func TestSyncFederationOnceHandlesResetRequired(t *testing.T) {
 		ReplayHorizonEventID: 50,
 		PullCursorEventID:    49,
 		Enabled:              true,
+		Actor:                "new-actor",
+		RetainHistory:        true,
 	})
 	require.NoError(t, err)
 
@@ -512,6 +516,8 @@ func TestSyncFederationOnceHandlesResetRequired(t *testing.T) {
 		HubURL:       hub.URL,
 		HubProjectID: 42,
 	})
+	require.NoError(t, err)
+	_, err = spoke.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	assert.Equal(t, 2, polls, "reset should refresh metadata and re-poll from the new horizon")
 	status := requireFederationSyncStatus(t, spoke.DB, project.ID)

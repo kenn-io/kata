@@ -166,6 +166,7 @@ type FederationProjectStatus struct {
 	PullCursorEventID           int64                         `json:"pull_cursor_event_id"`
 	PushCursorEventID           int64                         `json:"push_cursor_event_id"`
 	PendingPushCount            int64                         `json:"pending_push_count"`
+	RetainedEventCount          int64                         `json:"retained_event_count"`
 	PendingPushHighWaterEventID int64                         `json:"pending_push_high_water_event_id"`
 	EnrollmentCount             int64                         `json:"enrollment_count"`
 	LiveClaimCount              int64                         `json:"live_claim_count"`

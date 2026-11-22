@@ -10,6 +10,29 @@ import (
 )
 
 func checkRejoinRetainedHistory(t *testing.T, store db.Storage) error {
+	t.Run("return to earlier actor", func(t *testing.T) {
+		ctx := t.Context()
+		project, err := store.CreateProject(ctx, "return-to-actor")
+		require.NoError(t, err)
+		issue, original, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "retained task", Author: "actor-a"})
+		require.NoError(t, err)
+		binding := db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "actor-b", Enabled: true, PushEnabled: true, RetainHistory: true}
+		_, err = store.UpsertFederationBinding(ctx, binding)
+		require.NoError(t, err)
+		require.NoError(t, store.AdvanceFederationPushCursor(ctx, project.ID, original.ID))
+		_, err = store.LeaveFederationReplica(ctx, project.ID)
+		require.NoError(t, err)
+		binding.Actor = "actor-a"
+		_, err = store.UpsertFederationBinding(ctx, binding)
+		require.NoError(t, err)
+		require.NoError(t, store.ResetFederatedProject(ctx, project.ID, 1, 0))
+		events, err := store.EventsByUIDs(ctx, project.ID, []string{original.UID})
+		require.NoError(t, err)
+		require.Len(t, events, 1)
+		require.Equal(t, original.ContentHash, events[0].ContentHash)
+		_, err = store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+	})
 	for _, guarded := range []bool{false, true} {
 		t.Run(fmt.Sprint("guarded=", guarded), func(t *testing.T) {
 			checkRejoinRetainedHistoryReset(t, store, guarded)

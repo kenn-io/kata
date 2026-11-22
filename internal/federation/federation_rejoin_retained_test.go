@@ -25,12 +25,34 @@ func TestRejoinRetainedHistory(t *testing.T) {
 	t.Run("unknown link peer", checkRejoinPublishesRetainedLinkPeer)
 	t.Run("known link peer", checkRejoinLinkToKnownRetainedPeerAfterInterruptedRetire)
 	t.Run("mixed known and unknown link peers", checkRejoinMixedLinkPeers)
+	t.Run("reset preserves local projection", checkRejoinResetProjection)
 	t.Run("incoming retained link", checkRejoinPublishesIncomingRetainedLink)
 	t.Run("cross project retained peer", checkRejoinPublishesCrossProjectRetainedPeer)
 	t.Run("recovery snapshots with gaps", checkRejoinRecoverySnapshotGaps)
 	t.Run("move recovered task", func(t *testing.T) { checkRejoinMoveRetained(t, false, true) })
 	t.Run("move unpublished task", func(t *testing.T) { checkRejoinMoveRetained(t, false, false) })
 	t.Run("move already known task", func(t *testing.T) { checkRejoinMoveRetained(t, true, false) })
+}
+
+func checkRejoinResetProjection(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "reset-project")
+	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
+	issue, old, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "local task", Author: "old-actor"})
+	require.NoError(t, err)
+	rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
+	require.NoError(t, pushRejoin(t, spoke))
+	_, changed, err := hub.DB.RefreshProjectFederationBaseline(ctx, projects[0].ID, "worker")
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.NoError(t, spoke.sync(t, 0))
+	got, err := spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "local task", got.Title)
+	events, err := spoke.env.DB.EventsByUIDs(ctx, spoke.projects[0].ID, []string{old.UID})
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	require.Equal(t, old.ContentHash, events[0].ContentHash)
 }
 
 func checkRejoinMixedLinkPeers(t *testing.T) {

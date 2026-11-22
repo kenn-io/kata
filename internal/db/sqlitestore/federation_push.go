@@ -454,22 +454,18 @@ func (d *Store) ResetFederatedProjectIfNoPendingPush(
 	originInstanceUID string,
 	pushCursorEventID int64,
 ) error {
-	return d.RetryTransient(ctx, func() error {
-		return d.resetFederatedProjectIfNoPendingPush(ctx, projectID, replayHorizonEventID, pullCursorEventID, originInstanceUID, pushCursorEventID)
+	return d.materializeFederatedProjectAfter(ctx, projectID, func(ctx context.Context, tx *sql.Tx) error {
+		return d.resetFederatedProjectIfNoPendingPush(ctx, tx, projectID, replayHorizonEventID, pullCursorEventID, originInstanceUID, pushCursorEventID)
 	})
 }
 
 func (d *Store) resetFederatedProjectIfNoPendingPush(
 	ctx context.Context,
+	tx *sql.Tx,
 	projectID, replayHorizonEventID, pullCursorEventID int64,
 	originInstanceUID string,
 	pushCursorEventID int64,
 ) error {
-	tx, err := d.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin guarded federated reset: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
 	if err := rejectLegacyFederationResetTx(ctx, tx, projectID); err != nil {
 		return err
 	}
@@ -530,9 +526,6 @@ func (d *Store) resetFederatedProjectIfNoPendingPush(
 	}
 	if err := clearFederatedProjection(ctx, tx, projectID); err != nil {
 		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit guarded federated reset: %w", err)
 	}
 	return nil
 }

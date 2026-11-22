@@ -1590,6 +1590,10 @@ func federationProjectStatus(
 	if err != nil {
 		return api.FederationProjectStatus{}, internalAPIError(err)
 	}
+	retainedEvents, err := federationRetainedEventCount(ctx, store, binding)
+	if err != nil {
+		return api.FederationProjectStatus{}, internalAPIError(err)
+	}
 	enrollments, err := federationEnrollmentCount(ctx, store, binding)
 	if err != nil {
 		return api.FederationProjectStatus{}, internalAPIError(err)
@@ -1648,6 +1652,7 @@ func federationProjectStatus(
 		PullCursorEventID:           binding.PullCursorEventID,
 		PushCursorEventID:           binding.PushCursorEventID,
 		PendingPushCount:            pendingPush,
+		RetainedEventCount:          retainedEvents,
 		PendingPushHighWaterEventID: pendingHighWater,
 		EnrollmentCount:             enrollments,
 		LiveClaimCount:              liveClaims,
@@ -1669,6 +1674,31 @@ func federationProjectStatus(
 		LastError:         syncStatus.LastError,
 		LastResetAt:       syncStatus.LastResetAt,
 	}, nil
+}
+
+func federationRetainedEventCount(ctx context.Context, store db.Storage, binding db.FederationBinding) (int64, error) {
+	if binding.Role != db.FederationRoleSpoke || binding.RetainedThroughEventID == 0 {
+		return 0, nil
+	}
+	var count, after int64
+	for {
+		events, err := store.PendingFederationPushEvents(ctx, binding.ProjectID, store.InstanceUID(), after, 1000)
+		if err != nil {
+			return 0, err
+		}
+		for _, event := range events {
+			if event.ID > binding.RetainedThroughEventID || event.ID > binding.PushCursorEventID {
+				return count, nil
+			}
+			if event.OriginInstanceUID == store.InstanceUID() && event.Actor != binding.Actor {
+				count++
+			}
+		}
+		if len(events) == 0 {
+			return count, nil
+		}
+		after = events[len(events)-1].ID
+	}
 }
 
 func federationQuarantineSummaries(quarantines []db.FederationQuarantine) []api.FederationQuarantineSummary {

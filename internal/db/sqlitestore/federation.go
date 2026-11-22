@@ -1434,20 +1434,14 @@ func updateFederatedProjectMetadataTx(ctx context.Context, tx *sql.Tx, projectID
 	return nil
 }
 
-// ResetFederatedProject clears a spoke project's pulled event/projection state
-// and rewinds its binding to the supplied hub horizon cursor.
+// ResetFederatedProject rewinds the pull boundary and rebuilds from retained history.
 func (d *Store) ResetFederatedProject(ctx context.Context, projectID, replayHorizonEventID, pullCursorEventID int64) error {
-	return d.RetryTransient(ctx, func() error {
-		return d.resetFederatedProject(ctx, projectID, replayHorizonEventID, pullCursorEventID)
+	return d.materializeFederatedProjectAfter(ctx, projectID, func(ctx context.Context, tx *sql.Tx) error {
+		return d.resetFederatedProject(ctx, tx, projectID, replayHorizonEventID, pullCursorEventID)
 	})
 }
 
-func (d *Store) resetFederatedProject(ctx context.Context, projectID, replayHorizonEventID, pullCursorEventID int64) error {
-	tx, err := d.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin federated reset: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
+func (d *Store) resetFederatedProject(ctx context.Context, tx *sql.Tx, projectID, replayHorizonEventID, pullCursorEventID int64) error {
 	if err := rejectLegacyFederationResetTx(ctx, tx, projectID); err != nil {
 		return err
 	}
@@ -1476,9 +1470,6 @@ func (d *Store) resetFederatedProject(ctx context.Context, projectID, replayHori
 	}
 	if n == 0 {
 		return db.ErrNotFound
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit federated reset: %w", err)
 	}
 	return nil
 }

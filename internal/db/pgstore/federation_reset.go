@@ -8,14 +8,14 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-// ResetFederatedProject clears one replica projection and rewinds its pull boundary.
+// ResetFederatedProject rewinds the pull boundary and rebuilds from retained history.
 func (s *Store) ResetFederatedProject(
 	ctx context.Context,
 	projectID int64,
 	replayHorizonEventID int64,
 	pullCursorEventID int64,
 ) error {
-	return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+	return s.materializeFederatedProjectAfter(ctx, projectID, func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := scanFederationBinding(tx.QueryRowContext(ctx,
 			federationBindingSelect+` WHERE project_id=$1 FOR UPDATE`, projectID)); err != nil {
 			return err
@@ -44,7 +44,7 @@ func (s *Store) ResetFederatedProjectIfNoPendingPush(
 	originInstanceUID string,
 	pushCursorEventID int64,
 ) error {
-	return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+	return s.materializeFederatedProjectAfter(ctx, projectID, func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := scanFederationBinding(tx.QueryRowContext(ctx,
 			federationBindingSelect+` WHERE project_id=$1 FOR UPDATE`, projectID)); err != nil {
 			return err

@@ -2935,6 +2935,7 @@ type FederationProjectStatus struct {
 	// RelayCheckpointError Why the relay checkpoint could not be measured for this status read. The size fields are omitted while it is set.
 	RelayCheckpointError     *string                                `json:"relay_checkpoint_error,omitempty"`
 	ResetBlocker             *string                                `json:"reset_blocker,omitempty"`
+	RetainedEventCount       int64                                  `json:"retained_event_count"`
 	Role                     string                                 `json:"role" validate:"required"`
 	RootSigningKey           *FederationProjectStatusRootSigningKey `json:"root_signing_key,omitempty"`
 	SyncRetry                *FederationSyncRetry                   `json:"sync_retry,omitempty"`
