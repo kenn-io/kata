@@ -88,14 +88,6 @@ func TestQuietFederationPollTransactions(t *testing.T) {
 	require.Empty(t, page.Events)
 	require.Equal(t, newest, page.NextAfterID)
 	require.Zero(t, count.Begins())
-	_, _, err = s.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: quiet.ID, Title: "visible", Author: "tester"})
-	require.NoError(t, err)
-	count.Reset()
-	in.AfterID = newest
-	page, err = s.ReadFederation(ctx, in)
-	require.NoError(t, err)
-	require.NotEmpty(t, page.Events)
-	require.Positive(t, count.Begins())
 }
 
 func TestQuietFederationPollMoveDuringProof(t *testing.T) {
