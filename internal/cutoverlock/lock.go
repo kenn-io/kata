@@ -33,34 +33,34 @@ func Paths(path string) []string {
 
 // WithReadLock allows concurrent inspections while excluding cutover.
 func WithReadLock(ctx context.Context, path string, fn func() error) error {
-	var locks []*flock.Flock
-	defer func() {
-		for i := len(locks) - 1; i >= 0; i-- {
-			_ = locks[i].Close()
-		}
-	}()
-	for _, name := range Paths(path) {
-		lock := flock.New(name)
-		locks = append(locks, lock)
+	release, busy, err := readLock(path, true, true, func(lock *flock.Flock) (bool, error) {
 		lockCtx, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
 		locked, err := lock.TryRLockContext(lockCtx, 10*time.Millisecond)
-		cancel()
 		if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
 			err = nil
 		}
-		if err != nil {
-			return fmt.Errorf("lock SQLite inspection: %w", err)
-		}
-		if !locked {
-			return fmt.Errorf("%w: another process holds %s; wait for migration and inspect kata daemon logs", ErrInProgress, name)
-		}
+		return locked, err
+	})
+	if err != nil {
+		return err
 	}
+	if busy != "" {
+		return fmt.Errorf("%w: another process holds %s; wait for migration and inspect kata daemon logs", ErrInProgress, busy)
+	}
+	defer release()
 	return fn()
 }
 
 // TryReadLock protects an inspection from a concurrent SQLite cutover.
 // The caller must release the locks after closing the inspected database.
 func TryReadLock(path string, create bool) (release func(), busy bool, err error) {
+	release, busyPath, err := readLock(path, create, false, (*flock.Flock).TryRLock)
+	return release, busyPath != "", err
+}
+
+// readLock uses the waiting opener's strict creation policy when wait is true.
+func readLock(path string, create, wait bool, try func(*flock.Flock) (bool, error)) (release func(), busy string, err error) {
 	var locks []*flock.Flock
 	release = func() {
 		for i := len(locks) - 1; i >= 0; i-- {
@@ -72,27 +72,34 @@ func TryReadLock(path string, create bool) (release func(), busy bool, err error
 		if create {
 			flag |= os.O_CREATE
 		}
-		lock := flock.New(name, flock.SetFlag(flag))
-		locked, lockErr := lock.TryRLock()
+		var lock *flock.Flock
+		if wait {
+			lock = flock.New(name)
+		} else {
+			lock = flock.New(name, flock.SetFlag(flag))
+		}
+		locked, lockErr := try(lock)
 		if lockErr != nil {
 			_ = lock.Close()
-			if !create && errors.Is(lockErr, os.ErrNotExist) {
-				continue
-			}
-			if create && (errors.Is(lockErr, os.ErrPermission) || errors.Is(lockErr, syscall.EROFS)) {
-				if _, statErr := os.Lstat(name); errors.Is(statErr, os.ErrNotExist) {
+			if !wait {
+				if !create && errors.Is(lockErr, os.ErrNotExist) {
 					continue
+				}
+				if create && (errors.Is(lockErr, os.ErrPermission) || errors.Is(lockErr, syscall.EROFS)) {
+					if _, statErr := os.Lstat(name); errors.Is(statErr, os.ErrNotExist) {
+						continue
+					}
 				}
 			}
 			release()
-			return nil, false, fmt.Errorf("lock SQLite inspection: %w", lockErr)
+			return nil, "", fmt.Errorf("lock SQLite inspection: %w", lockErr)
 		}
 		if !locked {
 			_ = lock.Close()
 			release()
-			return nil, true, nil
+			return nil, name, nil
 		}
 		locks = append(locks, lock)
 	}
-	return release, false, nil
+	return release, "", nil
 }
