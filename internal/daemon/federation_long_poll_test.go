@@ -22,16 +22,15 @@ import (
 // goroutines while the test watches, so mu guards every field.
 type federationReadProbe struct {
 	db.Storage
-	mu        sync.Mutex
-	started   int
-	returned  int
-	byProject map[int64]int
-	changed   chan struct{}
-	before    func(read int) error
+	mu       sync.Mutex
+	started  int
+	returned int
+	changed  chan struct{}
+	before   func(read int) error
 }
 
 func newFederationReadProbe(store db.Storage) *federationReadProbe {
-	return &federationReadProbe{Storage: store, changed: make(chan struct{}), byProject: make(map[int64]int)}
+	return &federationReadProbe{Storage: store, changed: make(chan struct{})}
 }
 
 // storage returns the probe as the hub's store. A store shared by several hub
@@ -68,7 +67,6 @@ func (p *federationReadProbe) ReadFederation(ctx context.Context, params db.Fede
 	result, err := p.Storage.ReadFederation(ctx, params)
 	p.mu.Lock()
 	p.returned++
-	p.byProject[params.ProjectID]++
 	close(p.changed)
 	p.changed = make(chan struct{})
 	p.mu.Unlock()
@@ -97,32 +95,6 @@ func (p *federationReadProbe) waitForReads(t testing.TB, n int) {
 		case <-changed:
 		case <-deadline:
 			t.Fatalf("the hub returned %d federation reads, want %d", returned, n)
-		}
-	}
-}
-
-// projectReads reports the reads completed for one project.
-func (p *federationReadProbe) projectReads(projectID int64) int {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.byProject[projectID]
-}
-
-// waitForProjectReads waits for a specific project's reads to finish.
-func (p *federationReadProbe) waitForProjectReads(t testing.TB, projectID int64, n int) {
-	t.Helper()
-	deadline := time.After(10 * time.Second)
-	for {
-		p.mu.Lock()
-		returned, changed := p.byProject[projectID], p.changed
-		p.mu.Unlock()
-		if returned >= n {
-			return
-		}
-		select {
-		case <-changed:
-		case <-deadline:
-			t.Fatalf("project %d returned %d federation reads, want %d", projectID, returned, n)
 		}
 	}
 }

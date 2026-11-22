@@ -170,6 +170,23 @@ func TestFederationPollRechecksAuthorizationAfterItsRead(t *testing.T) {
 		{"project access revoked", (*signedPollHub).revokeProjectAccess, http.StatusNotFound},
 	}
 	for _, revocation := range revocations {
+		t.Run(revocation.name+" before an immediate poll reads", func(t *testing.T) {
+			f := newSignedPollFixture(t)
+			synctest.Test(t, func(t *testing.T) {
+				h := f.serve(t, 0)
+				cursor := h.cursor(t)
+				h.reads.beforeRead(func(int) error {
+					if err := revocation.revoke(h, t); err != nil {
+						return err
+					}
+					h.commit(t, canary, false)
+					return nil
+				})
+				response := h.send(h.request(t, cursor, "0"))
+				assert.Equal(t, revocation.status, response.Code, response.Body.String())
+				assert.NotContains(t, response.Body.String(), canary)
+			})
+		})
 		t.Run(revocation.name+" before a held poll reads after waking", func(t *testing.T) {
 			f := newSignedPollFixture(t)
 			synctest.Test(t, func(t *testing.T) {
@@ -224,6 +241,18 @@ func TestFederationPollWaitEndsBeforeTheRequestDeadlineAfterASlowRead(t *testing
 
 func TestFederationPollWaitRejectsARetiredSigningKey(t *testing.T) {
 	const canary = "committed-after-the-key-retired"
+	t.Run("key expires while an immediate poll reads", func(t *testing.T) {
+		f := newSignedPollFixture(t)
+		synctest.Test(t, func(t *testing.T) {
+			h := f.serve(t, 20*time.Second)
+			cursor := h.cursor(t)
+			h.commit(t, canary, false)
+			h.reads.beforeRead(func(int) error { time.Sleep(25 * time.Second); return nil })
+			response := h.send(h.request(t, cursor, "0"))
+			assert.Equal(t, http.StatusUnauthorized, response.Code, response.Body.String())
+			assert.NotContains(t, response.Body.String(), canary)
+		})
+	})
 	for _, tc := range []struct {
 		name string
 		wake bool

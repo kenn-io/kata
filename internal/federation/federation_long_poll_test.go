@@ -489,17 +489,22 @@ func TestHeldPollThrottleDoesNotScheduleRunnerRetry(t *testing.T) {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			h := newHubSpokeHarness(t, false)
 			answered := make(chan struct{}, 1)
+			var held atomic.Int64
 			h.bindThrough(t, func(w http.ResponseWriter, r *http.Request, hub http.Handler) {
 				if isHeldPoll(r) {
+					held.Add(1)
 					w.Header().Set("Retry-After", "120")
 					w.WriteHeader(status)
-					answered <- struct{}{}
+					select {
+					case answered <- struct{}{}:
+					default:
+					}
 					return
 				}
 				hub.ServeHTTP(w, r)
 			})
 			retries := NewSyncRetries()
-			h.startConfiguredRunner(t, &Runner{DB: h.spokeDB, Interval: time.Hour, Retries: retries})
+			h.startConfiguredRunner(t, &Runner{DB: h.spokeDB, Interval: 200 * time.Millisecond, Retries: retries})
 			select {
 			case <-answered:
 			case <-time.After(10 * time.Second):
@@ -507,9 +512,10 @@ func TestHeldPollThrottleDoesNotScheduleRunnerRetry(t *testing.T) {
 			}
 			// Allow the watcher to process the response.
 			//nolint:kennlint // sleeptest: the response crosses a real HTTP connection.
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(time.Second)
 			_, ok := retries.FederationSyncRetry(h.spokeProject.ID)
 			require.False(t, ok, "a held poll must not set the runner's retry schedule")
+			assert.Equal(t, int64(1), held.Load(), "the spoke retried the held poll before Retry-After")
 		})
 	}
 }

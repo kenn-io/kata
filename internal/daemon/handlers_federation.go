@@ -1010,17 +1010,14 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		waited := false
 		if waiter != nil {
-			result, waited, err = holdFederationPoll(requestCtx, waiter, holdUntil, result, reauthorize, read)
+			result, _, err = holdFederationPoll(requestCtx, waiter, holdUntil, result, reauthorize, read)
 			if err != nil {
 				return nil, err
 			}
 		}
-		if waited {
-			if _, err := reauthorize(); err != nil {
-				return nil, err
-			}
+		if _, err := reauthorize(); err != nil {
+			return nil, err
 		}
 		return &api.FederationPollEventsResponse{
 			EventFeatures: db.SupportedEventFeatures, RequiredEventFeatures: result.RequiredFeatures,

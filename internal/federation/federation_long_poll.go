@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/http/httptrace"
 	"strconv"
 	"sync"
@@ -380,7 +381,11 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 			continue
 		case err != nil:
 			supported = 0
-			if !sleepContext(ctx, backoff) {
+			delay := backoff
+			if status, ok := errors.AsType[*HubStatusError](err); ok && (status.StatusCode == http.StatusTooManyRequests || status.StatusCode == http.StatusServiceUnavailable) {
+				delay = max(delay, min(status.RetryAfter, maxHonoredRetryAfter))
+			}
+			if !sleepContext(ctx, delay) {
 				return
 			}
 			backoff = min(backoff*2, 16*p.interval)
