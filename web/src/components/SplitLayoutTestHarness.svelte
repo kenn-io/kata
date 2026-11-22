@@ -20,6 +20,7 @@
     onResize = () => {},
     showSecondary = true,
   }: Props = $props()
+  let secondaryBeside = $state(false)
 </script>
 
 <SplitLayout
@@ -30,9 +31,11 @@
   {responsiveBreakpoint}
   ariaLabel="Resize Kata panes"
   {onResize}
+  bind:secondaryBeside
   secondary={showSecondary ? secondary : undefined}
 >
   {#snippet primary()}Primary{/snippet}
 </SplitLayout>
+<span data-testid="secondary-beside">{String(secondaryBeside)}</span>
 
 {#snippet secondary()}Secondary{/snippet}

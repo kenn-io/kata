@@ -174,8 +174,8 @@ describe('kata task view builder', () => {
     ).toEqual([
       ['overdue', 'Overdue', ['Pay rent']],
       ['today', 'Today', ['Sign contract', 'Started last week']],
-      ['2026-05-16', '2026-05-16', ['Tomorrow']],
-      ['2026-05-20', '2026-05-20', ['Due before start', 'Start then due']],
+      ['2026-05-16', 'Sat, May 16', ['Tomorrow']],
+      ['2026-05-20', 'Wed, May 20', ['Due before start', 'Start then due']],
     ])
   })
 
@@ -240,8 +240,8 @@ describe('kata task view builder', () => {
     expect(
       view.groups.map((group) => [group.id, group.title, group.issues.map((item) => item.title)]),
     ).toEqual([
-      ['another-author/agent-2', 'another-author/agent-2', ['Another pair']],
-      ['coordinator/reviewer-7', 'coordinator/reviewer-7', ['First task', 'Second task']],
+      ['another-author/agent-2', 'agent-2 for another-author', ['Another pair']],
+      ['coordinator/reviewer-7', 'reviewer-7 for coordinator', ['First task', 'Second task']],
     ])
   })
 
@@ -373,38 +373,64 @@ describe('kata task view builder', () => {
     ])
   })
 
-  test('builds Logbook from closed issues grouped by closed_at day', () => {
+  test('builds Logbook groups by the local closing date', () => {
+    const originalTimezone = process.env.TZ
+    process.env.TZ = 'America/Los_Angeles'
+    try {
+      const view = buildKataTaskView({
+        view: 'logbook',
+        issues: [
+          issue(
+            'issue-2',
+            'Done later',
+            'project-workspace',
+            {},
+            'closed',
+            '2026-05-15T15:00:00.000Z',
+          ),
+          issue(
+            'issue-1',
+            'Done earlier',
+            'project-health',
+            {},
+            'closed',
+            '2026-05-15T04:00:00.000Z',
+          ),
+          issue('issue-3', 'Still open', 'project-workspace'),
+        ],
+        projects,
+        today,
+        fetched_at: fetchedAt,
+      })
+
+      expect(
+        view.groups.map((group) => [group.id, group.title, group.issues.map((item) => item.title)]),
+      ).toEqual([
+        ['2026-05-15', 'Today', ['Done later']],
+        ['2026-05-14', 'Thu, May 14', ['Done earlier']],
+      ])
+    } finally {
+      if (originalTimezone === undefined) delete process.env.TZ
+      else process.env.TZ = originalTimezone
+    }
+  })
+  test('includes the year in date groups outside the current year', () => {
     const view = buildKataTaskView({
       view: 'logbook',
       issues: [
         issue(
-          'issue-2',
-          'Done later',
+          'old',
+          'Old task',
           'project-workspace',
           {},
           'closed',
-          '2026-05-15T15:00:00.000Z',
+          new Date(2025, 4, 14, 12).toISOString(),
         ),
-        issue(
-          'issue-1',
-          'Done earlier',
-          'project-health',
-          {},
-          'closed',
-          '2026-05-14T09:00:00.000Z',
-        ),
-        issue('issue-3', 'Still open', 'project-workspace'),
       ],
       projects,
       today,
       fetched_at: fetchedAt,
     })
-
-    expect(
-      view.groups.map((group) => [group.id, group.title, group.issues.map((item) => item.title)]),
-    ).toEqual([
-      ['2026-05-15', '2026-05-15', ['Done later']],
-      ['2026-05-14', '2026-05-14', ['Done earlier']],
-    ])
+    expect(view.groups[0]?.title).toBe('Wed, May 14, 2025')
   })
 })

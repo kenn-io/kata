@@ -93,8 +93,10 @@ test('captures stable Web UI documentation states from synthetic issues', async 
   await capture(page, join(outputDir, 'workspace.png'), replacements)
 
   await page.goto(`${kata.origin}/kata?issue=${parent.uid}`)
-  await page.getByRole('button', { name: 'Switch to side-by-side layout' }).click()
-  await expect(page.getByRole('button', { name: 'Switch to stacked layout' })).toBeVisible()
+  await page.getByRole('button', { name: 'Display' }).click()
+  await page.getByRole('radio', { name: 'Beside list' }).click()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('separator', { name: 'Resize Kata panes' })).toBeVisible()
   await page.evaluate(() => {
     document.documentElement.style.zoom = '0.875'
   })
@@ -133,7 +135,9 @@ test('captures stable Web UI documentation states from synthetic issues', async 
   await page.evaluate(() => {
     document.documentElement.style.zoom = ''
   })
-  await page.getByRole('button', { name: 'Switch to stacked layout' }).click()
+  await page.getByRole('button', { name: 'Display' }).click()
+  await page.getByRole('radio', { name: 'Below list' }).click()
+  await page.keyboard.press('Escape')
   await page.goto(`${kata.origin}/kata?issue=${parent.uid}&graph=1`)
   const graph = page.getByRole('region', { name: 'Reachable task graph' })
   await expect(graph).toBeVisible()

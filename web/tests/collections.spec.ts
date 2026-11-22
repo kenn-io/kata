@@ -25,8 +25,8 @@ test('views, projects, filters, columns, hierarchy, and keyboard stay first-clas
   await page.getByRole('button', { name: /Example parent task/ }).press('ArrowRight')
   await expect(page.getByRole('button', { name: /Example child task/ })).toBeVisible()
 
-  await page.getByRole('button', { name: 'Columns' }).click()
-  await expect(page.getByText('Shown when space allows')).toBeVisible()
+  await page.getByRole('button', { name: 'Display' }).click()
+  await expect(page.getByText('Columns, shown when space allows')).toBeVisible()
   await expect(page.getByRole('checkbox', { name: 'Owner' })).toBeChecked()
   await page.keyboard.press('Escape')
 
@@ -76,6 +76,80 @@ test('views, projects, filters, columns, hierarchy, and keyboard stay first-clas
   await expect(page.getByRole('button', { name: 'Upcoming' })).toHaveCount(0)
   await page.getByRole('button', { name: /^example-project \d+$/ }).click()
   await expect(page).toHaveURL(`${kata.origin}/kata?scope=${kata.projectUID}`)
+})
+
+test('keeps a resized width and copies a short task ID from the hovered row', async ({
+  page,
+  kata,
+}) => {
+  const credentials = await kata.launch(page)
+  const overdue = await kata.seedIssue(page, credentials, {
+    title: 'Overdue example task',
+    metadata: { deadline_on: '2025-01-10' },
+  })
+  await page.goto(`${kata.origin}/kata?view=all-open`)
+
+  const handle = page.getByRole('separator', { name: 'Resize Due column' })
+  await handle.focus()
+  const currentWidth = Math.round((await page.locator('.column-heading-due').boundingBox())!.width)
+  const expectedWidth = String(currentWidth + 8)
+  await page.keyboard.press('ArrowRight')
+
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], {
+    origin: kata.origin,
+  })
+  const row = page.getByRole('button', { name: /Overdue example task/ })
+  await row.hover()
+  const copy = page.getByRole('button', { name: `Copy task ID ${overdue.short_id}` })
+  await expect(copy).toBeVisible()
+  await expect(copy).toHaveCSS('opacity', '1')
+  await copy.click()
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe(overdue.short_id)
+
+  await page.reload()
+  await expect(handle).toHaveAttribute('aria-valuenow', expectedWidth)
+})
+
+test('sorts Scheduled date groups by deadline and keeps the order on reload', async ({
+  page,
+  kata,
+}) => {
+  const credentials = await kata.launch(page)
+  const late = await kata.seedIssue(page, credentials, {
+    title: 'A later deadline',
+    metadata: { scheduled_on: '2090-01-01', deadline_on: '2090-02-20' },
+  })
+  const early = await kata.seedIssue(page, credentials, {
+    title: 'Z earlier deadline',
+    metadata: { scheduled_on: '2090-01-01', deadline_on: '2090-02-10' },
+  })
+  const lateNext = await kata.seedIssue(page, credentials, {
+    title: 'A later next deadline',
+    metadata: { scheduled_on: '2090-01-02', deadline_on: '2090-02-21' },
+  })
+  const earlyNext = await kata.seedIssue(page, credentials, {
+    title: 'Z earlier next deadline',
+    metadata: { scheduled_on: '2090-01-02', deadline_on: '2090-02-11' },
+  })
+  await page.goto(`${kata.origin}/kata?view=scheduled`)
+  const rows = page.locator('.issue-row')
+  await expect
+    .poll(() => rows.evaluateAll((items) => items.map((item) => item.getAttribute('data-uid'))))
+    .toEqual([late.uid, early.uid, lateNext.uid, earlyNext.uid])
+  await page.getByRole('button', { name: 'Sort by Date' }).click()
+  await expect
+    .poll(() => rows.evaluateAll((items) => items.map((item) => item.getAttribute('data-uid'))))
+    .toEqual([early.uid, late.uid, earlyNext.uid, lateNext.uid])
+  await expect(page.locator('.group-title')).toHaveCount(2)
+  await page.reload()
+  await expect(
+    page.getByRole('button', { name: 'Sort by Date, currently ascending' }),
+  ).toHaveAttribute('aria-pressed', 'true')
+  await expect
+    .poll(() => rows.evaluateAll((items) => items.map((item) => item.getAttribute('data-uid'))))
+    .toEqual([early.uid, late.uid, earlyNext.uid, lateNext.uid])
 })
 
 test('project creation and quick capture use the designated inbox project', async ({

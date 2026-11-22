@@ -1,7 +1,7 @@
 ---
 title: Web UI
 description: Browse and manage Kata projects and issues in the daemon-served browser application.
-last_edited: 2026-11-19
+last_edited: 2026-11-21
 ---
 
 # Web UI
@@ -54,7 +54,7 @@ The sidebar lists **Inbox**, **Today**, **Scheduled**, **Delegated**, **All open
 
 - **Inbox** shows open tasks from every project. A task with a future
   `scheduled_on` stays out of Inbox until that day; a deadline never hides it.
-  Narrow Inbox to one project with the **Project scope** filter, and sort it
+  Narrow Inbox to one project with the **Project** filter, and sort it
   from the column headers. New tasks are captured in the designated
   [Inbox project](../reference/metadata.md#project-inbox-designation). With no
   projects, **New task** asks you to create one, makes it Inbox, and opens task
@@ -75,13 +75,22 @@ The sidebar lists **Inbox**, **Today**, **Scheduled**, **Delegated**, **All open
   `area` are listed under **Projects**. **New project** creates a daemon
   project without changing any workspace files.
 
-The collection toolbar filters by text, project, status, relationship, owner,
-and label. Parent and child issues can be expanded inline, and the column
-picker controls the visible fields. Collection, scope, filter, and
-selected-issue state stays in the URL, making the current view bookmarkable.
+Search and **Status** sit above each collection. The **Filter** menu holds
+Project, Relationship, Owner, and Label; active filters appear as chips you can
+remove individually. Project lists already have a fixed project, so their
+Filter menu omits Project. The **Display** menu controls which columns appear
+and whether an issue opens beside or below the list. Collection, scope, filter,
+and selected-issue state stays in the URL, so you can bookmark the current view.
 
-The optional **Blocked by** column is off by default. Turn it on from the
-column picker to see each task's open blockers in every collection view,
+Each task appears on one compact line with its title, project, due date,
+updated time, priority, owner, and labels. The short ID appears on hover with a
+copy button; focus a row and press `C` to copy it. Select **Due** to sort by
+deadline, and drag a column edge to adjust and save its width. Parent and child
+issues can be expanded inline.
+In Today and Scheduled, select **Date** to sort each group by deadline.
+
+The optional **Blocked by** column is off by default. Turn it on in **Display**
+to see each task's open blockers in every collection view,
 including Inbox and Today: up to three IDs, then `+N` for the rest, with all of
 them in the hover title. Blockers from the task's own project show their short
 ID; blockers from another project show the qualified ID. Closed blockers are

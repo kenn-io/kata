@@ -93,9 +93,11 @@ async function switchTo(page: Page, name: string): Promise<number> {
         ) {
           return false
         }
-        const badges = [...document.querySelectorAll('button.row[data-uid] .id-badge')]
-        if (expected !== '0' && badges.length === 0) return false
-        return badges.every((badge) => badge.getAttribute('title')?.startsWith(`${name}#`))
+        const rows = [...document.querySelectorAll<HTMLElement>('button.row[data-uid]')]
+        if (expected !== '0' && rows.length === 0) return false
+        return rows.every((row) =>
+          row.querySelector('.kit-sr-only')?.textContent?.trim().startsWith(`ID ${name}#`),
+        )
       }
       return new Promise<number>((resolve, reject) => {
         const start = performance.now()

@@ -268,6 +268,7 @@
   let captureOpen = $state(false)
   let inboxChooserOpen = $state(false)
   let mobileNavigationOpen = $state(false)
+  let detailBeside = $state(false)
   let creationIntent = $state<'project' | 'task' | null>(null)
   const mediumScreen = new MediaQuery(MEDIA.medium)
   let linkFilters = $state(createKataLinkFilters('all'))
@@ -343,6 +344,7 @@
       ? projection.projects.find((project) => project.uid === scope.project_uid)
       : undefined
   })
+  let projectView = $derived(Boolean(route.projectUID && !route.view))
   let selectedCommentUID = $state<string | undefined>()
   let returnComment = $state<{ issueUID: string; commentUID: string } | undefined>()
   let selectedIssueUID = $derived(route.issueUID ?? null)
@@ -497,6 +499,10 @@
       ...preferences,
       splitDirection: preferences.splitDirection === 'vertical' ? 'horizontal' : 'vertical',
     })
+  }
+
+  function setSplitDirection(direction: 'horizontal' | 'vertical'): void {
+    onPreferencesChange({ ...preferences, splitDirection: direction })
   }
 
   function resizeSplit(size: number): void {
@@ -868,6 +874,7 @@
           responsiveBreakpoint={700}
           ariaLabel="Resize Kata panes"
           onResize={resizeSplit}
+          bind:secondaryBeside={detailBeside}
           primary={listPane}
           secondary={route.issueUID ? detailPane : undefined}
         />
@@ -895,15 +902,6 @@
   </IconButton>
 {/snippet}
 
-{#snippet issueFilters()}
-  <IssueFilters
-    filters={inputFilters}
-    projects={projection.projects}
-    onChange={updateFilters}
-    onSubmitSearch={submitSearch}
-  />
-{/snippet}
-
 {#snippet listPane()}
   <div class="list-column kata-list">
     {#if route.issueUID && route.graph}
@@ -925,9 +923,18 @@
         </section>
       {/if}
     {:else}
+      {#snippet filtersToolbar()}
+        <IssueFilters
+          filters={inputFilters}
+          projects={projection.projects}
+          {projectView}
+          showStatus={currentView.view !== 'logbook'}
+          onChange={updateFilters}
+          onSubmitSearch={submitSearch}
+        />
+      {/snippet}
       <IssueCollection
-        headerActions={paneDirection}
-        toolbar={!loading && projection.projects.length === 0 ? undefined : issueFilters}
+        toolbar={filtersToolbar}
         now={connectionNow}
         resultsKey={JSON.stringify([route.projectUID ?? null, route.filters])}
         {navigationGeneration}
@@ -939,6 +946,10 @@
         issueCatalog={projection.issues}
         scopeLabel={scopeLabel()}
         scopedProjectName={selectedProject?.name ?? null}
+        {projectView}
+        {detailBeside}
+        splitDirection={preferences.splitDirection}
+        onSplitDirectionChange={setSplitDirection}
         {selectedIssueUID}
         {loading}
         statusFilter={searchFilters.status}

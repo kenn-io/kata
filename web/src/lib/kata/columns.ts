@@ -1,18 +1,24 @@
 import type { KataOpenBlocker } from './types'
 
-export const KATA_TASK_COLUMNS_STORAGE_KEY = 'kata:issue-columns/v1'
+export const KATA_TASK_COLUMNS_STORAGE_KEY = 'kata:issue-columns/v2'
+export const KATA_TASK_COLUMN_WIDTHS_STORAGE_KEY = 'kata:column-widths/v1'
 
 export const KATA_OPTIONAL_TASK_COLUMNS = [
+  { id: 'id', label: 'ID' },
+  { id: 'project', label: 'Project' },
+  { id: 'due', label: 'Due' },
   { id: 'updated', label: 'Updated' },
   { id: 'priority', label: 'Priority' },
-  { id: 'due', label: 'Due' },
   { id: 'owner', label: 'Owner' },
   { id: 'blockedBy', label: 'Blocked by' },
-  { id: 'tags', label: 'Tags' },
+  { id: 'tags', label: 'Labels' },
 ] as const
 
 export type KataOptionalTaskColumn = (typeof KATA_OPTIONAL_TASK_COLUMNS)[number]['id']
 export type KataTaskColumnVisibility = Record<KataOptionalTaskColumn, boolean>
+export type KataTaskColumnWidths = Partial<
+  Record<KataOptionalTaskColumn | 'date' | 'closed', number>
+>
 
 const BLOCKED_BY_VISIBLE_IDS = 3
 
@@ -52,9 +58,19 @@ export function summarizeBlockedBy(
 type ColumnStorage = Pick<Storage, 'getItem' | 'setItem'>
 
 const knownColumns = new Set<string>(KATA_OPTIONAL_TASK_COLUMNS.map((column) => column.id))
+const widthColumns = new Set([...knownColumns, 'date', 'closed'])
 
 export function defaultKataTaskColumnVisibility(): KataTaskColumnVisibility {
-  return { updated: true, priority: true, due: true, owner: true, blockedBy: false, tags: true }
+  return {
+    id: false,
+    project: true,
+    updated: true,
+    priority: true,
+    due: true,
+    owner: true,
+    blockedBy: false,
+    tags: true,
+  }
 }
 
 function browserStorage(): ColumnStorage | null {
@@ -71,13 +87,17 @@ export function loadKataTaskColumnVisibility(
 ): KataTaskColumnVisibility {
   if (!storage) return defaultKataTaskColumnVisibility()
   try {
-    const raw = storage.getItem(KATA_TASK_COLUMNS_STORAGE_KEY)
+    const current = storage.getItem(KATA_TASK_COLUMNS_STORAGE_KEY)
+    const raw = current ?? storage.getItem('kata:issue-columns/v1')
     if (raw === null) return defaultKataTaskColumnVisibility()
     const parsed: unknown = JSON.parse(raw)
     if (!Array.isArray(parsed) || !parsed.every((value) => typeof value === 'string')) {
       return defaultKataTaskColumnVisibility()
     }
     const visible = new Set(parsed.filter((value) => knownColumns.has(value)))
+    if (current === null) {
+      visible.add('project')
+    }
     return Object.fromEntries(
       KATA_OPTIONAL_TASK_COLUMNS.map((column) => [column.id, visible.has(column.id)]),
     ) as KataTaskColumnVisibility
@@ -96,6 +116,43 @@ export function persistKataTaskColumnVisibility(
       (column) => column.id,
     )
     storage.setItem(KATA_TASK_COLUMNS_STORAGE_KEY, JSON.stringify(visible))
+  } catch {
+    // Browser storage is best-effort. Keep the in-memory preference usable.
+  }
+}
+
+export function clampColumnWidth(width: number): number {
+  return Math.round(Math.max(48, Math.min(480, width)))
+}
+
+export function loadKataTaskColumnWidths(
+  storage: ColumnStorage | null = browserStorage(),
+): KataTaskColumnWidths {
+  if (!storage) return {}
+  try {
+    const raw = storage.getItem(KATA_TASK_COLUMN_WIDTHS_STORAGE_KEY)
+    if (raw === null) return {}
+    const parsed: unknown = JSON.parse(raw)
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    return Object.fromEntries(
+      Object.entries(parsed).flatMap(([key, value]) =>
+        widthColumns.has(key) && typeof value === 'number' && Number.isFinite(value)
+          ? [[key, clampColumnWidth(value)]]
+          : [],
+      ),
+    ) as KataTaskColumnWidths
+  } catch {
+    return {}
+  }
+}
+
+export function persistKataTaskColumnWidths(
+  widths: KataTaskColumnWidths,
+  storage: ColumnStorage | null = browserStorage(),
+): void {
+  if (!storage) return
+  try {
+    storage.setItem(KATA_TASK_COLUMN_WIDTHS_STORAGE_KEY, JSON.stringify(widths))
   } catch {
     // Browser storage is best-effort. Keep the in-memory preference usable.
   }

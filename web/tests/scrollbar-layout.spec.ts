@@ -129,7 +129,10 @@ test('editor actions stay in place when selecting a longer issue makes the edito
     page.locator('.kata-detail'),
     page.getByRole('button', { name: 'More actions' }),
     async () => {
-      await page.getByRole('button', { name: /Scrollbar long editor/ }).click()
+      await page
+        .getByRole('button', { name: /Scrollbar long editor/ })
+        .locator('.title-text')
+        .click()
       await expect(page.getByRole('region', { name: 'Task detail' })).toContainText(
         'Scrollbar long editor',
       )

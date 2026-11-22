@@ -758,7 +758,8 @@ describe('AppShell', () => {
       graph: true,
     })
 
-    await fireEvent.click(screen.getByRole('button', { name: /Project scope: All projects/i }))
+    await fireEvent.click(screen.getByRole('button', { name: /^Filter$/ }))
+    await fireEvent.click(screen.getByRole('button', { name: /Project: All projects/i }))
     await fireEvent.mouseDown(screen.getByRole('option', { name: /example-project/ }))
     await waitFor(() =>
       expect(onNavigate).toHaveBeenLastCalledWith({
@@ -1560,6 +1561,7 @@ describe('AppShell', () => {
         route: {
           kind: 'kata',
           projectUID: '01J00000000000000000000002',
+          view: 'inbox',
           graph: false,
           filters: { status: [], owner: [], label: [], relationship: [] },
         },
@@ -1575,8 +1577,7 @@ describe('AppShell', () => {
     expect(screen.queryByRole('button', { name: /Other issue/ })).toBeNull()
   })
 
-  test('clears project scope when All projects is selected', async () => {
-    const onNavigate = vi.fn()
+  test('hides the Project filter in a dedicated project list', async () => {
     render(AppShell, {
       props: {
         route: {
@@ -1588,21 +1589,13 @@ describe('AppShell', () => {
         snapshot: snapshot(),
         loading: false,
         ...mutationProps(),
-        onNavigate,
+        onNavigate: vi.fn(),
         onCreateProject: vi.fn(async () => ({ changed: true })),
       },
     })
 
-    await fireEvent.click(screen.getByRole('button', { name: /Project scope: example-project/i }))
-    await fireEvent.mouseDown(screen.getByRole('option', { name: 'All projects' }))
-
-    await waitFor(() =>
-      expect(onNavigate).toHaveBeenCalledWith({
-        kind: 'kata',
-        graph: false,
-        filters: { status: [], owner: [], label: [], relationship: [] },
-      }),
-    )
+    await fireEvent.click(screen.getByRole('button', { name: 'Filter' }))
+    expect(screen.queryByRole('button', { name: /^Project:/ })).toBeNull()
   })
 
   test('resets grown rows when repeated label filters change', async () => {
@@ -1798,7 +1791,8 @@ describe('AppShell', () => {
     })
 
     expect(screen.getByRole('separator', { name: 'Resize Kata panes' })).not.toBeNull()
-    await fireEvent.click(screen.getByRole('button', { name: 'Switch to stacked layout' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Display' }))
+    await fireEvent.click(screen.getByRole('radio', { name: 'Below list' }))
     expect(onPreferencesChange).toHaveBeenCalledWith(
       expect.objectContaining({ splitDirection: 'vertical', splitSize: 420 }),
     )
