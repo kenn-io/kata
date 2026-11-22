@@ -2,12 +2,15 @@ package daemon_test
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
@@ -19,6 +22,20 @@ type postgresHubProcess struct {
 	store  *pgstore.Store
 	reads  *federationReadProbe
 	server *httptest.Server
+	ready  <-chan struct{}
+}
+
+type readyPollWakeBus struct {
+	db.FederationPollWakeBus
+	ready chan struct{}
+	once  sync.Once
+}
+
+func (b *readyPollWakeBus) ListenFederationPollWake(ctx context.Context, listening func(), deliver func(string)) error {
+	return b.FederationPollWakeBus.ListenFederationPollWake(ctx, func() {
+		listening()
+		b.once.Do(func() { close(b.ready) })
+	}, deliver)
 }
 
 func newPostgresHubProcess(t testing.TB, dsn string) postgresHubProcess {
@@ -27,11 +44,16 @@ func newPostgresHubProcess(t testing.TB, dsn string) postgresHubProcess {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 	reads := newFederationReadProbe(store)
-	hub := daemon.NewServer(daemon.ServerConfig{DB: reads.storage(), StartedAt: time.Now().UTC()})
+	wakeBus := &readyPollWakeBus{FederationPollWakeBus: store, ready: make(chan struct{})}
+	storage := struct {
+		*federationReadProbe
+		*readyPollWakeBus
+	}{reads, wakeBus}
+	hub := daemon.NewServer(daemon.ServerConfig{DB: storage, StartedAt: time.Now().UTC()})
 	t.Cleanup(func() { _ = hub.Close() })
 	server := httptest.NewServer(hub.Handler())
 	t.Cleanup(server.Close)
-	return postgresHubProcess{store: store, reads: reads, server: server}
+	return postgresHubProcess{store: store, reads: reads, server: server, ready: wakeBus.ready}
 }
 
 func TestFederationPollWaitWakesAcrossPostgresHubProcesses(t *testing.T) {
@@ -43,6 +65,11 @@ func TestFederationPollWaitWakesAcrossPostgresHubProcesses(t *testing.T) {
 	t.Cleanup(cleanup)
 	writer := newPostgresHubProcess(t, dsn)
 	poller := newPostgresHubProcess(t, dsn)
+	select {
+	case <-poller.ready:
+	case <-time.After(10 * time.Second):
+		t.Fatal("poller did not start listening for remote wakes")
+	}
 	project, err := writer.store.CreateProject(ctx, "hub-project")
 	require.NoError(t, err)
 	_, err = writer.store.EnableProjectFederation(ctx, project.ID, "tester")
@@ -58,6 +85,27 @@ func TestFederationPollWaitWakesAcrossPostgresHubProcesses(t *testing.T) {
 	cursor := first.body.NextAfterID
 
 	reads := poller.reads.readsReturned()
+	emptyDone := make(chan longPollResult, 1)
+	go func() {
+		emptyDone <- sendLongPoll(t.Context(), http.DefaultClient, fmt.Sprintf("%s?after_id=%d&wait=2", eventsURL, cursor))
+	}()
+	poller.reads.waitForReads(t, reads+1)
+	authBefore, _ := poller.reads.accessCalls()
+	require.NoError(t, writer.store.PublishFederationPollWake(ctx, "other-hub"))
+	poller.reads.waitForReads(t, reads+2)
+	authAfterWake, _ := poller.reads.accessCalls()
+	assert.Equal(t, authBefore+1, authAfterWake)
+	empty := <-emptyDone
+	require.NoError(t, empty.err)
+	require.Equal(t, http.StatusOK, empty.status, "%s", empty.raw)
+	assert.Empty(t, empty.body.Events)
+	assert.GreaterOrEqual(t, empty.elapsed, 2*time.Second)
+	assert.Equal(t, reads+2, poller.reads.readsReturned())
+	authAfterTimeout, _ := poller.reads.accessCalls()
+	assert.Equal(t, authAfterWake, authAfterTimeout)
+	cursor = empty.body.NextAfterID
+
+	reads = poller.reads.readsReturned()
 	done := make(chan longPollResult, 1)
 	go func() {
 		done <- sendLongPoll(t.Context(), http.DefaultClient, fmt.Sprintf("%s?after_id=%d&wait=30", eventsURL, cursor))
