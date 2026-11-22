@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"net/http"
 	"net/http/httptrace"
 	"strconv"
 	"sync"
@@ -46,6 +45,8 @@ type hubLongPolls struct {
 	credentials config.FederationCredentialStore
 	opts        clientpkg.Opts
 	interval    time.Duration
+	retries     *SyncRetries
+	now         func() time.Time
 	// admission gates the store reads a watcher makes between held polls. A
 	// held poll itself takes no lease, so it never keeps the daemon awake.
 	admission activity.WaitableAdmission
@@ -85,11 +86,12 @@ func newHubLongPolls(
 	interval time.Duration,
 	admission activity.WaitableAdmission,
 	notice func(error),
+	retries *SyncRetries, now func() time.Time,
 ) *hubLongPolls {
 	ctx, cancel := context.WithCancel(ctx)
 	return &hubLongPolls{
 		store: store, credentials: credentials, opts: opts, interval: interval, admission: admission,
-		notice: notice, ctx: ctx, cancel: cancel,
+		notice: notice, ctx: ctx, cancel: cancel, retries: retries, now: now,
 		changed: make(chan struct{}, 1), polls: map[int64]*hubLongPoll{}, passDone: make(chan struct{}),
 	}
 }
@@ -288,6 +290,7 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 			backoff = min(backoff*2, 16*p.interval)
 			continue
 		}
+		version := p.retries.version(projectID)
 		binding, credential, ok := p.pollTarget(ctx, projectID)
 		if !ok {
 			finishSync()
@@ -296,6 +299,15 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 				return
 			}
 			backoff = min(backoff*2, 16*p.interval)
+			continue
+		}
+		identity, err := heldRetryIdentity(binding, credential)
+		if err != nil || p.retries.blockedFor(ctx, projectID, binding, credential, p.now(), version) {
+			finishSync()
+			release()
+			if !sleepContext(ctx, p.interval) {
+				return
+			}
 			continue
 		}
 		credential = config.FederationTransportCredential(binding.HubURL, binding.HubProjectID, binding.AllowInsecure, credential)
@@ -380,12 +392,11 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 			// uses. Poll the current target at once.
 			continue
 		case err != nil:
-			supported = 0
-			delay := backoff
-			if status, ok := errors.AsType[*HubStatusError](err); ok && (status.StatusCode == http.StatusTooManyRequests || status.StatusCode == http.StatusServiceUnavailable) {
-				delay = max(delay, min(status.RetryAfter, maxHonoredRetryAfter))
+			if hubAskedToWait(err) {
+				p.retries.recordSchedule(projectID, identity, identity, true, err, p.interval, p.now(), &version)
 			}
-			if !sleepContext(ctx, delay) {
+			supported = 0
+			if !sleepContext(ctx, backoff) {
 				return
 			}
 			backoff = min(backoff*2, 16*p.interval)

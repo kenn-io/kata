@@ -1,6 +1,7 @@
 package federation
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json/v2"
 	"errors"
@@ -48,24 +49,31 @@ const (
 )
 
 // SyncRetries holds the automatic runner's per-binding retry schedules. The
-// runner writes it; status readers may read it concurrently. State lives only
-// in memory: a runner that starts, or a daemon that becomes the runner leader,
+// runner and held-poll watchers write it; status readers may read it concurrently.
+// State lives only in memory: a runner that starts, or a daemon that becomes the runner leader,
 // makes a fresh attempt for every binding. Synchronous passes never consult it.
 type SyncRetries struct {
 	mu     sync.Mutex
 	states map[int64]syncRetry
+	next   uint64
 	// jitter returns how much to take off a delay, in [0, limit).
 	jitter func(limit time.Duration) time.Duration
 }
 
 type syncRetry struct {
 	api.FederationSyncRetry
+	version uint64
 	// delay is the unjittered delay the next failure doubles.
 	delay time.Duration
 	// identity fingerprints the binding and credential the failure used. A
 	// different fingerprint means the operator or a successful sync changed
 	// something, and the schedule starts over.
 	identity [32]byte
+	target   [32]byte
+	// held marks a schedule a held poll recorded. Its identity leaves out the
+	// sync-progress timestamps, so a push that lands while the refusal is being
+	// recorded cannot erase it. blockedFor compares it that way.
+	held bool
 }
 
 // NewSyncRetries returns an empty schedule set with random jitter.
@@ -126,9 +134,55 @@ func (s *SyncRetries) blocked(projectID int64, identity [32]byte, now time.Time)
 	return now.Before(state.NextAttemptAt)
 }
 
+// blockedFor is blocked for a binding and credential. The mutex guards both
+// the choice of identity and its comparison: a held poll's schedule compares
+// heldRetryIdentity, any other compares syncRetryIdentity.
+func (s *SyncRetries) blockedFor(ctx context.Context, projectID int64, binding db.FederationBinding, credential config.FederationCredential, now time.Time, version uint64) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state, ok := s.states[projectID]
+	if ctx.Err() != nil || (ok && state.version != version) {
+		return true
+	}
+	if !ok {
+		return false
+	}
+	identity, err := syncRetryIdentity(binding, credential)
+	if state.held {
+		identity, err = heldRetryIdentity(binding, credential)
+	}
+	if err != nil {
+		return false
+	}
+	if state.identity != identity {
+		delete(s.states, projectID)
+		return false
+	}
+	return now.Before(state.NextAttemptAt)
+}
+
+// version returns the schedule visible when an attempt starts.
+func (s *SyncRetries) version(projectID int64) uint64 {
+	if s == nil {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.states[projectID].version
+}
+
 // record schedules the binding's next attempt after a turn that completed at
 // completed. A turn that ended without a retryable refusal clears the schedule.
 func (s *SyncRetries) record(projectID int64, identity [32]byte, err error, interval time.Duration, completed time.Time) {
+	s.recordSchedule(projectID, identity, identity, false, err, interval, completed, nil)
+}
+
+// recordSchedule preserves a schedule written after the turn started. held
+// marks a held poll's schedule, whose identity heldRetryIdentity builds.
+func (s *SyncRetries) recordSchedule(projectID int64, identity, target [32]byte, held bool, err error, interval time.Duration, completed time.Time, started *uint64) {
 	if s == nil {
 		return
 	}
@@ -136,14 +190,24 @@ func (s *SyncRetries) record(projectID int64, identity [32]byte, err error, inte
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if reason == "" {
-		delete(s.states, projectID)
+		if started == nil || s.states[projectID].version == *started {
+			delete(s.states, projectID)
+		}
 		return
 	}
 	previous, ok := s.states[projectID]
-	if ok && previous.Reason != reason {
+	hadPrevious := ok
+	if ok && started != nil && previous.version != *started && previous.target != target {
+		return
+	}
+	if ok && (previous.Reason != reason || previous.target != target) {
 		ok = false
 	}
-	next := syncRetry{identity: identity}
+	s.next++
+	next := syncRetry{identity: identity, target: target, held: held, version: s.next}
+	if hadPrevious && started != nil && previous.version != *started && previous.target == target {
+		next.identity, next.held = target, true
+	}
 	next.Reason, next.HTTPStatus = reason, status
 	next.Failures = 1
 	if ok {
@@ -167,6 +231,9 @@ func (s *SyncRetries) record(projectID int64, identity [32]byte, err error, inte
 		wait = max(next.delay-s.jitter(next.delay/4), interval, min(retryAfter, maxHonoredRetryAfter))
 	}
 	next.NextAttemptAt = completed.Add(wait).UTC()
+	if hadPrevious && previous.target == target && previous.NextAttemptAt.After(next.NextAttemptAt) {
+		next.NextAttemptAt = previous.NextAttemptAt
+	}
 	s.states[projectID] = next
 }
 
@@ -272,20 +339,8 @@ func hubStatusErrors(err error) []*HubStatusError {
 // disabled and enabled again between two passes changes it too. The token is
 // hashed with the rest and never kept.
 func syncRetryIdentity(binding db.FederationBinding, credential config.FederationCredential) ([32]byte, error) {
-	material, err := json.Marshal(struct {
-		HubURL        string
-		HubProjectID  int64
-		HubProjectUID string
-		Actor         string
-		AllowInsecure bool
-		PushEnabled   bool
-		CreatedAt     time.Time
-		UpdatedAt     time.Time
-		LastSyncAt    *time.Time
-		RelayConfig   *db.RelayBindingConfig
-		Credential    config.FederationCredential
-	}{
-		binding.HubURL, binding.HubProjectID, binding.HubProjectUID, binding.Actor,
+	material, err := json.Marshal([]any{
+		binding.Role, binding.Enabled, binding.HubURL, binding.HubProjectID, binding.HubProjectUID, binding.Actor,
 		binding.AllowInsecure, binding.PushEnabled, binding.CreatedAt, binding.UpdatedAt, binding.LastSyncAt,
 		binding.RelayConfig, credential,
 	})
@@ -293,6 +348,15 @@ func syncRetryIdentity(binding db.FederationBinding, credential config.Federatio
 		return [32]byte{}, fmt.Errorf("fingerprint federation binding for retry: %w", err)
 	}
 	return sha256.Sum256(material), nil
+}
+
+// heldRetryIdentity is syncRetryIdentity without the timestamps a sync moves
+// (UpdatedAt, LastSyncAt), so a push or pull that lands during a held poll's
+// refusal leaves its schedule alone. The endpoint, credential, and the rest of
+// the configuration still change it.
+func heldRetryIdentity(binding db.FederationBinding, credential config.FederationCredential) ([32]byte, error) {
+	binding.UpdatedAt, binding.LastSyncAt = time.Time{}, nil
+	return syncRetryIdentity(binding, credential)
 }
 
 // parseRetryAfter reads a Retry-After header as delay seconds or an HTTP date.

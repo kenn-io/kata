@@ -209,7 +209,7 @@ func (h *hubSpokeHarness) startWatcher(tb testing.TB, interval time.Duration) *h
 	tb.Helper()
 	ctx := context.WithoutCancel(tb.Context())
 	polls := newHubLongPolls(ctx, h.spokeDB, config.DefaultFederationCredentialStore(),
-		clientOptsWithDefault(clientpkg.Opts{}), interval, nil, nil)
+		clientOptsWithDefault(clientpkg.Opts{}), interval, nil, nil, nil, time.Now)
 	binding, err := h.spokeDB.FederationBindingByProject(ctx, h.spokeProject.ID)
 	require.NoError(tb, err)
 	polls.start(activeSpokeBinding{binding: binding, project: h.spokeProject})
@@ -330,7 +330,7 @@ func TestHeldAnswerDoesNotHideUnfinishedPull(t *testing.T) {
 	ctx := t.Context()
 	start := time.Now().UTC().Truncate(time.Millisecond)
 	require.NoError(t, h.spokeDB.RecordFederationSyncPullStarted(ctx, h.spokeProject.ID, start))
-	polls := newHubLongPolls(ctx, h.spokeDB, nil, clientpkg.Opts{}, time.Second, nil, nil)
+	polls := newHubLongPolls(ctx, h.spokeDB, nil, clientpkg.Opts{}, time.Second, nil, nil, nil, time.Now)
 	polls.recordHeldAnswer(ctx, h.spokeProject.ID, start.Add(time.Second))
 	status, err := h.spokeDB.FederationSyncStatusByProject(ctx, h.spokeProject.ID)
 	require.NoError(t, err)
@@ -484,12 +484,12 @@ func TestHeldPollDoesNotFollowRedirect(t *testing.T) {
 	require.Zero(t, redirected.Load())
 }
 
-func TestHeldPollThrottleDoesNotScheduleRunnerRetry(t *testing.T) {
+func TestHeldPollThrottleDelaysIntervalSync(t *testing.T) {
 	for _, status := range []int{http.StatusTooManyRequests, http.StatusServiceUnavailable} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			h := newHubSpokeHarness(t, false)
 			answered := make(chan struct{}, 1)
-			var held atomic.Int64
+			var held, interval atomic.Int64
 			h.bindThrough(t, func(w http.ResponseWriter, r *http.Request, hub http.Handler) {
 				if isHeldPoll(r) {
 					held.Add(1)
@@ -501,6 +501,9 @@ func TestHeldPollThrottleDoesNotScheduleRunnerRetry(t *testing.T) {
 					}
 					return
 				}
+				if isEventPoll(r) {
+					interval.Add(1)
+				}
 				hub.ServeHTTP(w, r)
 			})
 			retries := NewSyncRetries()
@@ -510,12 +513,24 @@ func TestHeldPollThrottleDoesNotScheduleRunnerRetry(t *testing.T) {
 			case <-time.After(10 * time.Second):
 				t.Fatal("held poll did not reach the hub")
 			}
-			// Allow the watcher to process the response.
 			//nolint:kennlint // sleeptest: the response crosses a real HTTP connection.
+			require.Eventually(t, func() bool {
+				_, ok := retries.FederationSyncRetry(h.spokeProject.ID)
+				return ok
+			}, 5*time.Second, 20*time.Millisecond, "the hub's delay was not shared with the runner")
+			before := interval.Load()
+			h.wake <- struct{}{}
+			//nolint:kennlint // sleeptest: allow several runner intervals and a wake.
 			time.Sleep(time.Second)
-			_, ok := retries.FederationSyncRetry(h.spokeProject.ID)
-			require.False(t, ok, "a held poll must not set the runner's retry schedule")
+			assert.Equal(t, before, interval.Load(), "the spoke polled before Retry-After")
 			assert.Equal(t, int64(1), held.Load(), "the spoke retried the held poll before Retry-After")
+			h.rebindTo(t, h.hubURL)
+			h.wake <- struct{}{}
+			//nolint:kennlint // sleeptest: the runner reads the changed binding after a wake.
+			require.Eventually(t, func() bool {
+				_, ok := retries.FederationSyncRetry(h.spokeProject.ID)
+				return !ok
+			}, 5*time.Second, 20*time.Millisecond, "the changed endpoint did not clear the delay")
 		})
 	}
 }
@@ -591,7 +606,7 @@ func TestStoppedWatcherIsJoinedAtShutdown(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				store := &blockedWatcherRead{Storage: h.spokeDB, started: make(chan struct{}), release: make(chan struct{})}
 				polls := newHubLongPolls(context.WithoutCancel(t.Context()), store, config.DefaultFederationCredentialStore(),
-					clientOptsWithDefault(clientpkg.Opts{}), time.Hour, nil, nil)
+					clientOptsWithDefault(clientpkg.Opts{}), time.Hour, nil, nil, nil, time.Now)
 				polls.start(activeSpokeBinding{binding: db.FederationBinding{ProjectID: h.spokeProject.ID}})
 				select {
 				case <-store.started:
