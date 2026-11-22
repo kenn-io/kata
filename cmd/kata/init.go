@@ -414,7 +414,7 @@ func runNameInit(ctx context.Context, baseURL string, in localInit, opts callIni
 	guidanceWarning := ""
 	tomlChanged := needsTomlWrite(in.ExistingToml, resp.Project.Name)
 	if tomlChanged {
-		if err := config.WriteProjectConfig(dest, resp.Project.Name); err != nil {
+		if err := config.ReplaceProjectConfig(dest, resp.Project.Name); err != nil {
 			return "", fmt.Errorf("write .kata.toml: %w", err)
 		}
 	} else if tomlChanged, err = config.EnsureProjectConfigHeader(dest); err != nil {

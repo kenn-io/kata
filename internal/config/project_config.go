@@ -117,8 +117,22 @@ func WriteProjectConfig(workspaceRoot, name string) error {
 	if err := ValidateProjectName(name); err != nil {
 		return err
 	}
-	body := fmt.Sprintf("version = 1\n\n[project]\nname = %q\n", name)
-	return os.WriteFile(filepath.Join(workspaceRoot, ProjectConfigFilename), []byte(projectConfigHeader+body), 0o644) //nolint:gosec // committed project file, world-readable by design
+	return os.WriteFile(filepath.Join(workspaceRoot, ProjectConfigFilename), projectConfigBytes(name), 0o644) //nolint:gosec // committed project file, world-readable by design
+}
+
+// ReplaceProjectConfig writes .kata.toml like WriteProjectConfig, but swaps in
+// a new file, so a hard link to another workspace's binding is left unchanged.
+func ReplaceProjectConfig(workspaceRoot, name string) error {
+	name = strings.TrimSpace(name)
+	if err := ValidateProjectName(name); err != nil {
+		return err
+	}
+	return atomicfile.WriteFile(filepath.Join(workspaceRoot, ProjectConfigFilename), projectConfigBytes(name),
+		atomicfile.WithCreatePerm(0o644), atomicfile.WithPreserveMode(), atomicfile.WithFollowLink())
+}
+
+func projectConfigBytes(name string) []byte {
+	return []byte(projectConfigHeader + fmt.Sprintf("version = 1\n\n[project]\nname = %q\n", name))
 }
 
 // EnsureProjectConfigHeader prepends agent guidance while preserving existing contents.

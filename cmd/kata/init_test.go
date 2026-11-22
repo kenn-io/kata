@@ -267,6 +267,30 @@ func TestInit_ExplicitWorkspaceSymlinkBinding(t *testing.T) {
 	}
 }
 
+func TestInit_ExplicitWorkspaceHardLinkBinding(t *testing.T) {
+	base := t.TempDir()
+	other := filepath.Join(base, "other")
+	workspace := filepath.Join(base, "my workspace")
+	require.NoError(t, os.Mkdir(other, 0o755))
+	require.NoError(t, os.Mkdir(workspace, 0o755))
+	runGit(t, workspace, "init", "--quiet")
+	otherBinding := filepath.Join(other, ".kata.toml")
+	original := []byte("version = 1\n\n[project]\nname = \"notes\"\n")
+	require.NoError(t, os.WriteFile(otherBinding, original, 0o644))
+	if err := os.Link(otherBinding, filepath.Join(workspace, ".kata.toml")); err != nil {
+		t.Skipf("hard links unavailable: %v", err)
+	}
+	daemon := newFakeDaemon(t)
+
+	require.NoError(t, executeInitSetup(t, daemon.srv.URL, "--replace", "--workspace", workspace, "--project", "demo"))
+	got, err := os.ReadFile(otherBinding)
+	require.NoError(t, err)
+	assert.Equal(t, original, got)
+	got, err = os.ReadFile(filepath.Join(workspace, ".kata.toml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(got), `name = "demo"`)
+}
+
 // TestInit_RemoteClient_SendsNameNotPath verifies the CLI derives
 // the project name locally and omits start_path from the request body when it
 // can — that's the contract that lets a daemon on another host serve
