@@ -59,8 +59,6 @@ instance_uid = %q
 func TestDaemonDiagnoseStoppedProfileReadOnly(t *testing.T) {
 	home, _, uid, projectUID := stoppedProfileCLI(t)
 	marker := filepath.Join(home, "kata.db.import.lock")
-	_, err := os.Stat(marker)
-	require.ErrorIs(t, err, os.ErrNotExist)
 	for _, mode := range []string{"--json", "--agent", ""} {
 		args := []string{"daemon", "diagnose"}
 		if mode != "" {
@@ -80,7 +78,7 @@ func TestDaemonDiagnoseStoppedProfileReadOnly(t *testing.T) {
 		}
 		assert.NotContains(t, out, "personal-token")
 	}
-	_, err = os.Stat(marker)
+	_, err := os.Stat(marker)
 	require.ErrorIs(t, err, os.ErrNotExist)
 	_, err = os.Stat(filepath.Join(home, "runtime"))
 	assert.ErrorIs(t, err, os.ErrNotExist)
@@ -1002,6 +1000,8 @@ func TestDaemonDiagnoseStorageBusy(t *testing.T) {
 	path := filepath.Join(home, "kata.db")
 	store, err := sqlitestore.Open(t.Context(), path)
 	require.NoError(t, err)
+	_, err = store.ExecContext(t.Context(), "PRAGMA journal_mode=WAL")
+	require.NoError(t, err)
 	_, err = store.ExecContext(t.Context(), "UPDATE meta SET value=? WHERE key='schema_version'", fmt.Sprint(db.CurrentSchemaVersion()-1))
 	require.NoError(t, err)
 	require.NoError(t, store.Close())
@@ -1009,9 +1009,14 @@ func TestDaemonDiagnoseStorageBusy(t *testing.T) {
 	locked, err := lock.TryLock()
 	require.NoError(t, err)
 	require.True(t, locked)
+	defer func() { _ = lock.Close() }()
 	out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
 	require.NoError(t, err)
 	assertDiagnosticState(t, out, "storage_busy")
+	for _, suffix := range []string{"-wal", "-shm"} {
+		_, err = os.Stat(path + suffix)
+		assert.ErrorIs(t, err, os.ErrNotExist)
+	}
 	_, _, err = executeRootCapture(t, t.Context(), "daemon", "recover")
 	require.ErrorContains(t, err, "wait for the SQLite upgrade or import")
 	_ = requireCLIError(t, err, ExitDaemonUnavail)
@@ -1019,6 +1024,13 @@ func TestDaemonDiagnoseStorageBusy(t *testing.T) {
 	out, _, err = executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
 	require.NoError(t, err)
 	assertDiagnosticState(t, out, "version_mismatch")
+	require.NoError(t, os.Remove(path))
+	locked, err = lock.TryLock()
+	require.NoError(t, err)
+	require.True(t, locked)
+	out, _, err = executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
+	require.NoError(t, err)
+	assertDiagnosticState(t, out, "storage_busy")
 }
 
 func TestDaemonDiagnoseCurrentHomeStorageBusy(t *testing.T) {
@@ -1052,20 +1064,6 @@ func TestDaemonDiagnoseCurrentHomeStorageBusy(t *testing.T) {
 		_, err = os.Stat(path + suffix)
 		assert.ErrorIs(t, err, os.ErrNotExist)
 	}
-}
-
-func TestDaemonDiagnoseMissingDatabaseWithHeldMarker(t *testing.T) {
-	home, _, _, _ := stoppedProfileCLI(t)
-	path := filepath.Join(home, "kata.db")
-	require.NoError(t, os.Remove(path))
-	lock := flock.New(path + ".import.lock")
-	locked, err := lock.TryLock()
-	require.NoError(t, err)
-	require.True(t, locked)
-	defer func() { require.NoError(t, lock.Close()) }()
-	out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
-	require.NoError(t, err)
-	assertDiagnosticState(t, out, "storage_busy")
 }
 
 func TestDaemonDiagnoseUpgradeBeginsDuringDiscovery(t *testing.T) {
