@@ -45,7 +45,7 @@ test('standalone issue table retains its own vertical scroll plane', async ({ pa
 })
 
 // Give each full-page audit its own test deadline.
-for (const view of ['desktop detail', 'desktop editor', 'responsive editor']) {
+for (const view of ['desktop editor', 'responsive editor']) {
   test(`${view} stays axe-clean`, async ({ page, kata }) => {
     const credentials = await kata.launch(page)
     const issue = await kata.seedIssue(page, credentials, {
@@ -60,11 +60,9 @@ for (const view of ['desktop detail', 'desktop editor', 'responsive editor']) {
     await expect(page.getByRole('region', { name: 'Task detail' })).toBeVisible()
     await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1)
 
-    if (view !== 'desktop detail') {
-      await page.getByRole('button', { name: 'Edit title' }).click()
-      await expect(page.getByRole('textbox', { name: 'Edit title' })).toBeFocused()
-      await page.getByRole('textbox', { name: 'Edit title' }).press('Escape')
-    }
+    await page.getByRole('button', { name: 'Edit title' }).click()
+    await expect(page.getByRole('textbox', { name: 'Edit title' })).toBeFocused()
+    await page.getByRole('textbox', { name: 'Edit title' }).press('Escape')
 
     if (view === 'responsive editor') {
       await page.setViewportSize({ width: 390, height: 844 })

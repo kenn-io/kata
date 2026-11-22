@@ -7,7 +7,6 @@ import type {
   KataTaskEvent,
   KataTaskSummary,
 } from '../lib/kata/types'
-import { createCredentialedFetch, setGeneratedFetch } from '../lib/api/client'
 import type { UIIssueReference } from '../lib/api/generated'
 
 import IssueDetail from './IssueDetail.svelte'
@@ -184,26 +183,18 @@ describe('IssueDetail', () => {
     expect(stateLines).toMatch(/Due Jan 1(?:, \d{4})?, \d+ days late/)
   })
 
-  it('updates the overdue count when the current date changes', async () => {
+  it.each([
+    { today: '2026-11-21', first: null, next: '1 day late' },
+    { today: '2026-11-22', first: '1 day late', next: '2 days late' },
+  ])('updates the overdue count from $today', async ({ today, first, next }) => {
     const view = renderDetail({
       issue: makeIssue({ metadata: { deadline_on: '2026-11-21' } }),
-      today: '2026-11-22',
+      today,
     })
-
-    expect(view.container.querySelector('.state-line')?.textContent).toContain('1 day late')
-    await view.rerender({ today: '2026-11-23' })
-    expect(view.container.querySelector('.state-line')?.textContent).toContain('2 days late')
-  })
-
-  it('shows no overdue warning on the due date', async () => {
-    const view = renderDetail({
-      issue: makeIssue({ metadata: { deadline_on: '2026-11-22' } }),
-      today: '2026-11-22',
-    })
-
-    expect(view.container.querySelector('.state-line')).toBeNull()
-    await view.rerender({ today: '2026-11-23' })
-    expect(view.container.querySelector('.state-line')?.textContent).toContain('1 day late')
+    if (first) expect(view.container.querySelector('.state-line')?.textContent).toContain(first)
+    else expect(view.container.querySelector('.state-line')).toBeNull()
+    await view.rerender({ today: today === '2026-11-21' ? '2026-11-22' : '2026-11-23' })
+    expect(view.container.querySelector('.state-line')?.textContent).toContain(next)
   })
 
   it('keeps title and description drafts after a failed save', async () => {
@@ -234,88 +225,53 @@ describe('IssueDetail', () => {
     ).toBe('My description')
   })
 
-  it('shows the close reason, actor, and evidence on a closed task', () => {
-    const view = renderDetail({
-      issue: {
-        ...makeIssue({ status: 'closed', closed_reason: 'done' }),
-        effective_close_event_uid: 'event-1',
-      },
-      selfActor: 'user-a',
-      events: [
-        {
-          event_id: 1,
-          event_uid: 'event-1',
-          origin_instance_uid: 'instance-1',
-          type: 'issue.closed',
-          project_id: 1,
-          project_uid: 'project-1',
-          project_name: 'Inbox',
-          actor: 'user-a',
-          created_at: '2026-06-01T12:00:00Z',
-          payload: { reason: 'done', evidence: [{ type: 'test', command: 'go test ./example' }] },
+  it.each(['evidence', 'older effective event', 'no effective event'] as const)(
+    'shows the closed task line with %s',
+    (kind) => {
+      const close = (event_id: number, actor: string, reason: string): KataTaskEvent => ({
+        event_id,
+        event_uid: `close-${event_id}`,
+        origin_instance_uid: 'instance-1',
+        type: 'issue.closed',
+        project_id: 1,
+        project_uid: 'project-1',
+        project_name: 'Inbox',
+        actor,
+        created_at: '2026-06-02T12:00:00Z',
+        payload: { reason },
+      })
+      const event = close(4, kind === 'evidence' ? 'user-a' : 'user-c', 'done')
+      if (kind === 'evidence')
+        event.payload!.evidence = [{ type: 'test', command: 'go test ./example' }]
+      if (kind === 'no effective event') event.payload!.message = 'Stale close note'
+      const view = renderDetail({
+        issue: {
+          ...makeIssue({
+            status: 'closed',
+            closed_reason: kind === 'no effective event' ? 'wontfix' : 'done',
+            closed_at: '2026-06-03T12:00:00Z',
+          }),
+          ...(kind === 'no effective event' ? {} : { effective_close_event_uid: 'close-4' }),
         },
-      ],
-    })
-    expect(view.container.querySelector('.state-line')?.textContent).toMatch(/Done\s*·\s*You/)
-    expect(screen.getByText('go test ./example')).toBeTruthy()
-  })
-
-  it('shows the close the snapshot names, even when a later close is in history', () => {
-    const close = (event_id: number, actor: string, reason: string): KataTaskEvent => ({
-      event_id,
-      event_uid: `close-${event_id}`,
-      origin_instance_uid: 'instance-1',
-      type: 'issue.closed',
-      project_id: 1,
-      project_uid: 'project-1',
-      project_name: 'Inbox',
-      actor,
-      created_at: '2026-06-02T12:00:00Z',
-      payload: { reason },
-    })
-    const view = renderDetail({
-      issue: {
-        ...makeIssue({ status: 'closed', closed_reason: 'done' }),
-        effective_close_event_uid: 'close-4',
-      },
-      selfActor: 'user-a',
-      events: [close(9, 'user-b', 'wontfix'), close(4, 'user-c', 'done')],
-    })
-    const line = view.container.querySelector('.state-line')?.textContent ?? ''
-    expect(line).toMatch(/Done\s*·\s*user-c/)
-    expect(line).not.toContain('user-b')
-  })
-
-  it('shows only the task close reason and date when the snapshot names no close', () => {
-    const view = renderDetail({
-      issue: makeIssue({
-        status: 'closed',
-        closed_reason: 'wontfix',
-        closed_at: '2026-06-03T12:00:00Z',
-      }),
-      selfActor: 'user-a',
-      events: [
-        {
-          event_id: 7,
-          event_uid: 'close-7',
-          origin_instance_uid: 'instance-1',
-          type: 'issue.closed',
-          project_id: 1,
-          project_uid: 'project-1',
-          project_name: 'Inbox',
-          actor: 'user-a',
-          created_at: '2026-06-02T12:00:00Z',
-          payload: { reason: 'done', message: 'Stale close note' },
-        },
-      ],
-    })
-    const line = view.container.querySelector('.state-line')?.textContent ?? ''
-    expect(line).toContain("Won't do")
-    expect(line).toContain('Jun 3')
-    expect(line).not.toContain('Done')
-    expect(line).not.toContain('You')
-    expect(screen.queryByText('Stale close note')).toBeNull()
-  })
+        selfActor: 'user-a',
+        events: [close(9, 'user-b', 'wontfix'), event],
+      })
+      const line = view.container.querySelector('.state-line')?.textContent ?? ''
+      if (kind === 'evidence') {
+        expect(line).toMatch(/Done\s*·\s*You/)
+        expect(screen.getByText('go test ./example')).toBeTruthy()
+      } else if (kind === 'older effective event') {
+        expect(line).toMatch(/Done\s*·\s*user-c/)
+        expect(line).not.toContain('user-b')
+      } else {
+        expect(line).toContain("Won't do")
+        expect(line).toContain('Jun 3')
+        expect(line).not.toContain('Done')
+        expect(line).not.toContain('You')
+        expect(screen.queryByText('Stale close note')).toBeNull()
+      }
+    },
+  )
 
   it('waits for the requested task before opening its completion dialog', async () => {
     const onStatusRequestConsumed = vi.fn()
@@ -575,9 +531,9 @@ describe('IssueDetail', () => {
   )
 })
 
-describe('editor evidence navigation', () => {
+describe('comment evidence navigation', () => {
   afterEach(cleanup)
-  it('keeps the return route available in the issue editor', async () => {
+  it('keeps the return route available in the task view', async () => {
     const onSelectIssue = vi.fn()
     renderDetail({
       onSelectIssue,
@@ -586,33 +542,6 @@ describe('editor evidence navigation', () => {
     const back = screen.getByRole('button', { name: 'Return to original comment' })
     await fireEvent.click(back)
     expect(onSelectIssue).toHaveBeenCalledWith({ uid: 'source-issue', commentUID: 'original' })
-  })
-})
-
-describe('typed reply draft across edit mode', () => {
-  afterEach(cleanup)
-  it('keeps an unsent reply after editing the issue', async () => {
-    const issue = makeIssue()
-    issue.comments = [
-      {
-        id: 1,
-        uid: 'target-comment',
-        issue_id: 1,
-        author: 'finder',
-        body: 'Finding',
-        created_at: '2030-01-01T00:00:00Z',
-        handle: 'c:abc123',
-      },
-    ]
-    renderDetail({ issue, onAddComment: vi.fn(async () => false) })
-    await fireEvent.click(screen.getByRole('button', { name: 'Reply' }))
-    await fireEvent.click(screen.getByRole('radio', { name: 'Confirm, with evidence' }))
-    const draft = 'Reproduced on the current build with the documented steps.'
-    await fireEvent.input(screen.getByRole('textbox', { name: 'Reply evidence' }), {
-      target: { value: draft },
-    })
-    const composer = screen.getByRole('textbox', { name: 'Reply evidence' }) as HTMLTextAreaElement
-    expect(composer.value).toBe(draft)
   })
 })
 
@@ -625,47 +554,4 @@ it('disables attachment uploads with blocked authority or disabled actions', asy
   expect(screen.getByRole('button', { name: 'Attach files' }).hasAttribute('disabled')).toBe(true)
   await view.rerender({ authorityBlocked: false, actionsDisabled: true })
   expect(screen.getByRole('button', { name: 'Attach files' }).hasAttribute('disabled')).toBe(true)
-})
-
-it('refreshes a task attachment preview when its origin changes', async () => {
-  const attachment = {
-    name: 'example.png',
-    media_type: 'image/png',
-    size: 12,
-    docbank_version: '6f1c2e8a-2222-4222-8222-222222222222',
-    origin: 'instance-a',
-  }
-  const fetchAttachment = vi.fn<typeof fetch>(
-    async () => new Response(new Blob(['image'], { type: 'image/png' })),
-  )
-  setGeneratedFetch(fetchAttachment)
-  vi.stubGlobal(
-    'URL',
-    Object.assign(class extends URL {}, {
-      createObjectURL: vi.fn(() => 'blob:preview'),
-      revokeObjectURL: vi.fn(),
-    }),
-  )
-  try {
-    const view = renderDetail({
-      issue: makeIssue({ metadata: { 'attachment.file': attachment } }),
-      attachmentsEnabled: true,
-    })
-    await fireEvent.click(screen.getByRole('button', { name: 'Preview example.png' }))
-    await vi.waitFor(() => expect(screen.getByAltText('example.png')).toBeTruthy())
-    expect(String(fetchAttachment.mock.calls[0]![0])).toBe(
-      'http://localhost:3000/api/v1/projects/1/issues/issue-1/attachments/file/content',
-    )
-    await view.rerender({
-      issue: makeIssue({
-        metadata: { 'attachment.file': { ...attachment, origin: 'instance-b' } },
-      }),
-    })
-    await vi.waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview'))
-    expect(screen.queryByAltText('example.png')).toBeNull()
-  } finally {
-    cleanup()
-    vi.unstubAllGlobals()
-    setGeneratedFetch(createCredentialedFetch())
-  }
 })

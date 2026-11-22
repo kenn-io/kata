@@ -16,7 +16,10 @@ describe('IssueLinks', () => {
     }
   })
 
-  it('searches and adds a related task', async () => {
+  it.each([
+    { query: 'Shared', option: /Shared task/, ref: 'example-workspace#shared-1' },
+    { query: 'other#abcd', option: 'Use "other#abcd"', ref: 'other#abcd' },
+  ])('adds the selected reference for $query', async ({ query, option, ref }) => {
     const onEditIssue = vi.fn(async () => true)
     const result = {
       uid: 'peer',
@@ -27,33 +30,17 @@ describe('IssueLinks', () => {
       title: 'Shared task',
       status: 'open',
     }
-    renderLinks({ onEditIssue, searchReferences: vi.fn(async () => [result]) })
+    renderLinks({
+      onEditIssue,
+      searchReferences: vi.fn(async () => (query === 'Shared' ? [result] : [])),
+    })
     await fireEvent.click(screen.getByRole('button', { name: 'Add' }))
     await fireEvent.click(screen.getByRole('button', { name: 'Search tasks: Find task' }))
-    await fireEvent.input(screen.getByPlaceholderText('Search tasks'), {
-      target: { value: 'Shared' },
-    })
-    await waitFor(() => expect(screen.getByRole('option', { name: /Shared task/ })).toBeTruthy())
-    await fireEvent.mouseDown(screen.getByRole('option', { name: /Shared task/ }))
+    await fireEvent.input(screen.getByPlaceholderText('Search tasks'), { target: { value: query } })
+    await fireEvent.mouseDown(await screen.findByRole('option', { name: option }))
     await waitFor(() =>
       expect(onEditIssue).toHaveBeenCalledWith('issue-selected', {
-        links_delta: { add_related: ['example-workspace#shared-1'] },
-      }),
-    )
-  })
-
-  it('accepts a manually entered task reference', async () => {
-    const onEditIssue = vi.fn(async () => true)
-    renderLinks({ onEditIssue })
-    await fireEvent.click(screen.getByRole('button', { name: 'Add' }))
-    await fireEvent.click(screen.getByRole('button', { name: 'Search tasks: Find task' }))
-    await fireEvent.input(screen.getByPlaceholderText('Search tasks'), {
-      target: { value: 'other#abcd' },
-    })
-    await fireEvent.mouseDown(await screen.findByRole('option', { name: 'Use "other#abcd"' }))
-    await waitFor(() =>
-      expect(onEditIssue).toHaveBeenCalledWith('issue-selected', {
-        links_delta: { add_related: ['other#abcd'] },
+        links_delta: { add_related: [ref] },
       }),
     )
   })
@@ -107,38 +94,25 @@ describe('IssueLinks', () => {
     expect(screen.queryByRole('button', { name: /example-workspace#parent-1/ })).toBeNull()
   })
 
-  it('filters relationships when a task has five links', async () => {
+  it('filters five links and restores a carried filter on a short list', async () => {
+    const selected = issue()
+    const allLinks = [...selected.links]
+    selected.links = [link(1, 'related', 'issue-selected', 'issue-related')]
     const onLinkFiltersChange = vi.fn()
-    const view = renderLinks({ onLinkFiltersChange })
+    const view = renderLinks({ issue: selected, onLinkFiltersChange })
+    expect(screen.queryByRole('button', { name: 'Filter links' })).toBeNull()
 
+    await view.rerender({ issue: { ...selected, links: allLinks } })
     await fireEvent.click(screen.getByRole('button', { name: 'Filter links' }))
     await fireEvent.click(screen.getByRole('checkbox', { name: 'Parent' }))
     await view.rerender({ linkFilters: onLinkFiltersChange.mock.calls[0]![0]! })
     expect(screen.queryByRole('button', { name: /Parent parent-1/ })).toBeNull()
     expect(screen.getByRole('button', { name: /Child child-1/ })).toBeTruthy()
-  })
-
-  it('hides the filter for one link with default filters', () => {
-    const selected = issue()
-    selected.links = [link(1, 'related', 'issue-selected', 'issue-related')]
-    renderLinks({ issue: selected })
-    expect(screen.queryByRole('button', { name: 'Filter links' })).toBeNull()
-  })
-
-  it('lets users restore links when active filters hide a short list', async () => {
-    const selected = issue()
-    const onLinkFiltersChange = vi.fn()
-    const view = renderLinks({ issue: selected, onLinkFiltersChange })
-
-    await fireEvent.click(screen.getByRole('button', { name: 'Filter links' }))
     await fireEvent.click(screen.getByRole('checkbox', { name: 'Open' }))
-    selected.links = [link(1, 'related', 'issue-selected', 'issue-related')]
-    await view.rerender({ issue: selected, linkFilters: onLinkFiltersChange.mock.calls[0]![0]! })
+    await view.rerender({ issue: selected, linkFilters: onLinkFiltersChange.mock.calls[1]![0]! })
     expect(screen.getByText('No matching links')).toBeTruthy()
     await fireEvent.click(screen.getByRole('checkbox', { name: 'Open' }))
-
-    const nextFilters = onLinkFiltersChange.mock.calls[1]![0]!
-    await view.rerender({ linkFilters: nextFilters })
+    await view.rerender({ linkFilters: onLinkFiltersChange.mock.calls[2]![0]! })
     expect(screen.getByRole('button', { name: /Related related-1/ })).toBeTruthy()
   })
 })

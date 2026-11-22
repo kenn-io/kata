@@ -2268,11 +2268,28 @@ describe('AppShell', () => {
     ]
     scoped.selected = {
       state: 'available',
-      issue: { ...scoped.collection![0]!, body: 'Scoped body', revision: 3 },
+      issue: { ...scoped.collection![0]!, body: 'Scoped body', revision: 3, recurrence_id: 1 },
       comments: [],
       labels: [],
       links: [],
-      recurrences: [],
+      recurrences: [
+        {
+          id: 1,
+          uid: 'recurrence-1',
+          project_id: 7,
+          rrule: 'FREQ=WEEKLY',
+          dtstart: '2026-06-01',
+          timezone: 'UTC',
+          template_title: 'Weekly example',
+          template_body: '',
+          template_labels: [],
+          template_metadata: {},
+          author: 'user-a',
+          revision: 1,
+          created_at: '2026-06-01T12:00:00Z',
+          updated_at: '2026-06-01T12:00:00Z',
+        },
+      ],
       history: [],
     }
 
@@ -2308,7 +2325,10 @@ describe('AppShell', () => {
     )
 
     expect(screen.getByRole('region', { name: 'Checklist' })).not.toBeNull()
-    expect(screen.queryByRole('button', { name: /Move to another project/ })).toBeNull()
+    expect(
+      within(screen.getByRole('region', { name: 'Task detail' })).getByText('example-project'),
+    ).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Project:/ })).toBeNull()
     expect(screen.queryByText('Repeats')).toBeNull()
 
     await fireEvent.click(screen.getByRole('button', { name: 'New task' }))
@@ -2548,116 +2568,44 @@ describe('AppShell task selection', () => {
     expect(await screen.findAllByText('First comment')).not.toHaveLength(0)
   })
 
-  test('drops a pending completion request when write authority is lost', async () => {
-    const onNavigate = vi.fn()
-    const props = {
-      route: { ...listRoute, issueUID: firstUID },
-      snapshot: twoTaskSnapshot(),
-      loading: false,
-      ...mutationProps(),
-      onNavigate,
-      onCreateProject: vi.fn(async () => ({ changed: true })),
-    }
-    const { rerender } = render(AppShell, { props })
-    await fireEvent.click(screen.getByRole('button', { name: 'Complete a2' }))
-    await rerender({ loading: true, requestedRoute: onNavigate.mock.lastCall![0] })
-    expect(screen.queryByRole('dialog', { name: 'Complete task' })).toBeNull()
-    await rerender({ canMutate: false })
-    const arrived = twoTaskSnapshot()
-    arrived.selected = {
-      ...arrived.selected!,
-      issue: { ...arrived.collection![1]!, body: 'Second body' },
-    }
-    await rerender({
-      route: { ...listRoute, issueUID: secondUID },
-      snapshot: arrived,
-      loading: false,
-      requestedRoute: undefined,
-      canMutate: true,
-    })
-    expect(screen.queryByRole('dialog', { name: 'Complete task' })).toBeNull()
-  })
-
-  test('opens completion for the requested task after its detail arrives', async () => {
-    const onNavigate = vi.fn()
-    const props = {
-      route: { ...listRoute, issueUID: firstUID },
-      snapshot: twoTaskSnapshot(),
-      loading: false,
-      ...mutationProps(),
-      onNavigate,
-      onCreateProject: vi.fn(async () => ({ changed: true })),
-    }
-    const { rerender } = render(AppShell, { props })
-    await fireEvent.click(screen.getByRole('button', { name: 'Complete a2' }))
-    await rerender({ loading: true, requestedRoute: onNavigate.mock.lastCall![0] })
-    expect(screen.queryByRole('dialog', { name: 'Complete task' })).toBeNull()
-    const arrived = twoTaskSnapshot()
-    arrived.selected = {
-      ...arrived.selected!,
-      issue: { ...arrived.collection![1]!, body: 'Second body' },
-    }
-    await rerender({
-      route: { ...listRoute, issueUID: secondUID },
-      snapshot: arrived,
-      loading: false,
-      requestedRoute: undefined,
-    })
-    expect(screen.getByRole('dialog', { name: 'Complete task' }).textContent).toContain(
-      'Second issue',
-    )
-  })
-
-  test('cancels a pending completion request when another task is selected', async () => {
-    const onNavigate = vi.fn()
-    const props = {
-      route: { ...listRoute, issueUID: firstUID },
-      snapshot: twoTaskSnapshot(),
-      loading: false,
-      ...mutationProps(),
-      onNavigate,
-      onCreateProject: vi.fn(async () => ({ changed: true })),
-    }
-    const { rerender } = render(AppShell, { props })
-    await fireEvent.click(screen.getByRole('button', { name: 'Complete a2' }))
-    await rerender({ loading: true, requestedRoute: onNavigate.mock.lastCall![0] })
-    await fireEvent.click(screen.getByRole('button', { name: /Example issue/ }))
-    await rerender({ loading: false, requestedRoute: undefined })
-    expect(screen.queryByRole('dialog', { name: 'Complete task' })).toBeNull()
-    const arrived = twoTaskSnapshot()
-    arrived.selected = {
-      ...arrived.selected!,
-      issue: { ...arrived.collection![1]!, body: 'Second body' },
-    }
-    await rerender({ route: { ...listRoute, issueUID: secondUID }, snapshot: arrived })
-    expect(screen.queryByRole('dialog', { name: 'Complete task' })).toBeNull()
-  })
-
-  test('cancels pending completion when navigation requests a different task', async () => {
-    const onNavigate = vi.fn()
-    const props = {
-      route: { ...listRoute, issueUID: firstUID },
-      snapshot: twoTaskSnapshot(),
-      loading: false,
-      ...mutationProps(),
-      onNavigate,
-      onCreateProject: vi.fn(async () => ({ changed: true })),
-    }
-    const { rerender } = render(AppShell, { props })
-    await fireEvent.click(screen.getByRole('button', { name: 'Complete a2' }))
-    await rerender({ loading: true, requestedRoute: onNavigate.mock.lastCall![0] })
-    await rerender({ requestedRoute: { ...listRoute, issueUID: firstUID } })
-    const arrived = twoTaskSnapshot()
-    arrived.selected = {
-      ...arrived.selected!,
-      issue: { ...arrived.collection![1]!, body: 'Second body' },
-    }
-    await rerender({
-      route: { ...listRoute, issueUID: secondUID },
-      snapshot: arrived,
-      loading: false,
-      requestedRoute: undefined,
-    })
-    expect(screen.queryByRole('dialog', { name: 'Complete task' })).toBeNull()
-  })
+  test.each(['authority loss', 'arrival', 'another selection', 'different route'] as const)(
+    'handles a pending completion request after %s',
+    async (change) => {
+      const onNavigate = vi.fn()
+      const props = {
+        route: { ...listRoute, issueUID: firstUID },
+        snapshot: twoTaskSnapshot(),
+        loading: false,
+        ...mutationProps(),
+        onNavigate,
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      }
+      const { rerender } = render(AppShell, { props })
+      await fireEvent.click(screen.getByRole('button', { name: 'Complete a2' }))
+      await rerender({ loading: true, requestedRoute: onNavigate.mock.lastCall![0] })
+      if (change === 'authority loss') await rerender({ canMutate: false })
+      if (change === 'another selection') {
+        await fireEvent.click(screen.getByRole('button', { name: /Example issue/ }))
+        await rerender({ loading: false, requestedRoute: undefined })
+        expect(screen.queryByRole('dialog', { name: 'Complete task' })).toBeNull()
+      }
+      if (change === 'different route')
+        await rerender({ requestedRoute: { ...listRoute, issueUID: firstUID } })
+      const arrived = twoTaskSnapshot()
+      arrived.selected = {
+        ...arrived.selected!,
+        issue: { ...arrived.collection![1]!, body: 'Second body' },
+      }
+      await rerender({
+        route: { ...listRoute, issueUID: secondUID },
+        snapshot: arrived,
+        loading: false,
+        requestedRoute: undefined,
+        canMutate: true,
+      })
+      const dialog = screen.queryByRole('dialog', { name: 'Complete task' })
+      if (change === 'arrival') expect(dialog?.textContent).toContain('Second issue')
+      else expect(dialog).toBeNull()
+    },
+  )
 })
