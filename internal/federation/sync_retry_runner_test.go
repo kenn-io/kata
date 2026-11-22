@@ -278,7 +278,7 @@ func TestHeldRetryResetsAfterDisableAndEnableBetweenPasses(t *testing.T) {
 	identity, err := heldRetryIdentity(binding, credential)
 	require.NoError(t, err)
 	retries := newSyncRetries(noJitter)
-	retries.recordSchedule(project.ID, identity, identity, true, &HubStatusError{StatusCode: http.StatusServiceUnavailable, RetryAfter: 2 * time.Minute}, time.Second, fleet.now, nil)
+	retries.recordSchedule(project.ID, identity, identity, true, &HubStatusError{StatusCode: http.StatusServiceUnavailable, RetryAfter: 2 * time.Minute}, time.Second, fleet.now, nil, binding.UpdatedAt)
 	require.NoError(t, fleet.store.AdvanceFederationPushCursor(ctx, project.ID, binding.PushCursorEventID+1))
 	binding, err = fleet.store.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
@@ -292,7 +292,6 @@ func TestHeldRetryResetsAfterDisableAndEnableBetweenPasses(t *testing.T) {
 		enabled, err = fleet.store.UpsertFederationBinding(ctx, binding)
 		require.NoError(t, err)
 	}
-	require.NoError(t, fleet.store.AdvanceFederationPushCursor(ctx, project.ID, binding.PushCursorEventID+2))
 	spoke.binding, err = fleet.store.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
 	require.False(t, fleet.runner.retryBlocked(ctx, retries, spoke, fleet.credentials), "the re-enabled binding must retry at once")

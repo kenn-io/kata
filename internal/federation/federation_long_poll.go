@@ -393,7 +393,7 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 			continue
 		case err != nil:
 			if hubAskedToWait(err) {
-				p.retries.recordSchedule(projectID, identity, identity, true, err, p.interval, p.now(), &version)
+				p.retries.recordSchedule(projectID, identity, identity, true, err, p.interval, p.now(), &version, binding.UpdatedAt)
 			}
 			supported = 0
 			if !sleepContext(ctx, backoff) {

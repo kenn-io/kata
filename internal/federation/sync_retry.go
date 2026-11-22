@@ -73,7 +73,8 @@ type syncRetry struct {
 	// held marks a schedule a held poll recorded. Its identity leaves out the
 	// sync-progress timestamps, so a push that lands while the refusal is being
 	// recorded cannot erase it. blockedFor compares it that way.
-	held bool
+	held      bool
+	updatedAt time.Time
 }
 
 // NewSyncRetries returns an empty schedule set with random jitter.
@@ -153,6 +154,10 @@ func (s *SyncRetries) blockedFor(ctx context.Context, projectID int64, binding d
 	identity, err := syncRetryIdentity(binding, credential)
 	if state.held {
 		identity, err = heldRetryIdentity(binding, credential)
+		if !binding.UpdatedAt.Equal(state.updatedAt) && (binding.LastSyncAt == nil || !binding.UpdatedAt.Equal(*binding.LastSyncAt)) {
+			delete(s.states, projectID)
+			return false
+		}
 	}
 	if err != nil {
 		return false
@@ -177,12 +182,12 @@ func (s *SyncRetries) version(projectID int64) uint64 {
 // record schedules the binding's next attempt after a turn that completed at
 // completed. A turn that ended without a retryable refusal clears the schedule.
 func (s *SyncRetries) record(projectID int64, identity [32]byte, err error, interval time.Duration, completed time.Time) {
-	s.recordSchedule(projectID, identity, identity, false, err, interval, completed, nil)
+	s.recordSchedule(projectID, identity, identity, false, err, interval, completed, nil, time.Time{})
 }
 
 // recordSchedule preserves a schedule written after the turn started. held
 // marks a held poll's schedule, whose identity heldRetryIdentity builds.
-func (s *SyncRetries) recordSchedule(projectID int64, identity, target [32]byte, held bool, err error, interval time.Duration, completed time.Time, started *uint64) {
+func (s *SyncRetries) recordSchedule(projectID int64, identity, target [32]byte, held bool, err error, interval time.Duration, completed time.Time, started *uint64, updatedAt time.Time) {
 	if s == nil {
 		return
 	}
@@ -204,9 +209,12 @@ func (s *SyncRetries) recordSchedule(projectID int64, identity, target [32]byte,
 		ok = false
 	}
 	s.next++
-	next := syncRetry{identity: identity, target: target, held: held, version: s.next}
+	next := syncRetry{identity: identity, target: target, held: held, version: s.next, updatedAt: updatedAt}
 	if hadPrevious && started != nil && previous.version != *started && previous.target == target {
 		next.identity, next.held = target, true
+		if previous.held {
+			next.updatedAt = previous.updatedAt
+		}
 	}
 	next.Reason, next.HTTPStatus = reason, status
 	next.Failures = 1
@@ -350,10 +358,10 @@ func syncRetryIdentity(binding db.FederationBinding, credential config.Federatio
 	return sha256.Sum256(material), nil
 }
 
-// heldRetryIdentity omits LastSyncAt, so a push or pull that lands during a
-// held poll's refusal leaves its schedule alone. Binding changes still reset it.
+// heldRetryIdentity omits timestamps a sync can update. blockedFor checks the
+// binding's update time separately to detect operator changes.
 func heldRetryIdentity(binding db.FederationBinding, credential config.FederationCredential) ([32]byte, error) {
-	binding.LastSyncAt = nil
+	binding.UpdatedAt, binding.LastSyncAt = time.Time{}, nil
 	return syncRetryIdentity(binding, credential)
 }
 
