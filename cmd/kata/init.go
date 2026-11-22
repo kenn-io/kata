@@ -144,13 +144,22 @@ func checkExplicitWorkspaceBinding(workspace string) error {
 		return initBindingConflict(fmt.Sprintf("%q already binds %q.", bindingPath, workspace),
 			"To change the enclosing binding, set --workspace to its folder, keep your other options, and use --replace when changing projects.")
 	}
-	return checkBindingLinkContained(dest, bindingPath, workspace)
+	return checkBindingLink(workspace, bindingPath, paths.WorkspaceRoot != "")
+}
+
+// checkBindingLink checks the destination's binding against workspace. With no
+// discovered binding, only a symlink there is checked; a missing file passes.
+func checkBindingLink(workspace, bindingPath string, bound bool) error {
+	if info, err := os.Lstat(bindingPath); !bound && (err != nil || info.Mode()&os.ModeSymlink == 0) {
+		return nil
+	}
+	return checkBindingLinkContained(workspace, bindingPath)
 }
 
 // checkBindingLinkContained refuses a binding file whose symlink resolves
-// outside dir, the folder init writes it in.
-func checkBindingLinkContained(dir, bindingPath, workspace string) error {
-	dir, err := pathresolve.EvalSymlinks(dir)
+// outside the explicit workspace.
+func checkBindingLinkContained(workspace, bindingPath string) error {
+	dir, err := pathresolve.EvalSymlinks(workspace)
 	if err != nil {
 		return err
 	}

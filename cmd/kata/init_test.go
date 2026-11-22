@@ -288,6 +288,28 @@ func TestInit_ExplicitWorkspaceDanglingSymlinkBinding(t *testing.T) {
 	assert.NoFileExists(t, target)
 }
 
+func TestInit_ExplicitWorkspaceDanglingAncestorSymlinkBinding(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init", "--quiet")
+	workspace := filepath.Join(repo, "scratch")
+	require.NoError(t, os.Mkdir(workspace, 0o755))
+	sibling := filepath.Join(repo, "shared files")
+	require.NoError(t, os.Mkdir(sibling, 0o755))
+	target := filepath.Join(sibling, "notes.toml")
+	if err := os.Symlink(target, filepath.Join(repo, ".kata.toml")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	daemon := newFakeDaemon(t)
+
+	err := executeInitSetup(t, daemon.srv.URL, "--replace", "--workspace", workspace, "--project", "demo")
+	var ce *cliError
+	if assert.ErrorAs(t, err, &ce) {
+		assert.Equal(t, "project_binding_conflict", ce.Code)
+	}
+	assert.Nil(t, daemon.request())
+	assert.NoFileExists(t, target)
+}
+
 func TestInit_ExplicitWorkspaceHardLinkBinding(t *testing.T) {
 	base := t.TempDir()
 	other := filepath.Join(base, "other")
