@@ -13,7 +13,11 @@ import (
 
 // Counter records the statements, including BEGIN, COMMIT and ROLLBACK, run
 // under contexts returned by Context.
-type Counter struct{ n atomic.Int64 }
+type Counter struct {
+	n, begins atomic.Int64
+	// AfterNext runs once after a query produces its first row.
+	AfterNext func()
+}
 
 type counterKey struct{}
 
@@ -26,7 +30,10 @@ func (c *Counter) Context(ctx context.Context) context.Context {
 func (c *Counter) Count() int64 { return c.n.Load() }
 
 // Reset clears the count.
-func (c *Counter) Reset() { c.n.Store(0) }
+func (c *Counter) Reset() { c.n.Store(0); c.begins.Store(0) }
+
+// Begins returns the transaction starts recorded since the last Reset.
+func (c *Counter) Begins() int64 { return c.begins.Load() }
 
 func record(ctx context.Context) *Counter {
 	c, _ := ctx.Value(counterKey{}).(*Counter)
@@ -105,6 +112,9 @@ func (c *conn0) Begin() (driver.Tx, error) {
 
 func (c *conn0) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
 	counter := record(ctx)
+	if counter != nil {
+		counter.begins.Add(1)
+	}
 	tx, err := c.inner.BeginTx(ctx, opts)
 	if err != nil {
 		return nil, err
@@ -126,8 +136,27 @@ func (c *conn0) ExecContext(ctx context.Context, query string, args []driver.Nam
 }
 
 func (c *conn0) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
-	record(ctx)
-	return c.inner.QueryContext(ctx, query, args)
+	counter := record(ctx)
+	rows, err := c.inner.QueryContext(ctx, query, args)
+	if err == nil && counter != nil && counter.AfterNext != nil {
+		return &observedRows{Rows: rows, counter: counter}, nil
+	}
+	return rows, err
+}
+
+type observedRows struct {
+	driver.Rows
+	counter *Counter
+}
+
+func (r *observedRows) Next(dest []driver.Value) error {
+	err := r.Rows.Next(dest)
+	if err == nil && r.counter.AfterNext != nil {
+		f := r.counter.AfterNext
+		r.counter.AfterNext = nil
+		f()
+	}
+	return err
 }
 
 func (c *conn0) Ping(ctx context.Context) error         { return c.inner.Ping(ctx) }

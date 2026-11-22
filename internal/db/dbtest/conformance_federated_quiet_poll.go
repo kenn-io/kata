@@ -38,6 +38,14 @@ func checkFederatedQuietPollFeedWith(t *testing.T, store db.Storage, backend Bac
 	require.NoError(t, err)
 	busy, err := writer.CreateProject(ctx, fmt.Sprintf("busy-project-%d", extraIssues))
 	require.NoError(t, err)
+	unbound, err := writer.CreateProject(ctx, fmt.Sprintf("unbound-project-%d", extraIssues))
+	require.NoError(t, err)
+	newest, err := writer.MaxEventID(ctx)
+	require.NoError(t, err)
+	for _, after := range []int64{0, newest} {
+		_, err := store.ReadFederation(ctx, db.FederationReadParams{ProjectID: unbound.ID, Features: db.SupportedEventFeatures, AfterID: after, Limit: 1000})
+		require.ErrorIs(t, err, db.ErrNotFound)
+	}
 	for _, p := range []db.Project{quiet, busy} {
 		_, err = writer.EnableProjectFederation(ctx, p.ID, "tester")
 		require.NoError(t, err)
@@ -146,6 +154,8 @@ func checkFederatedQuietPollFeedWith(t *testing.T, store db.Storage, backend Bac
 		require.NoError(t, err)
 		require.Contains(t, poll(moved.EventID).RequiredFeatures, db.CronEventFeature)
 		quietPoll()
+		_, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: quiet.ID, Features: db.IssueMoveEventFeature, AfterID: cursor, Limit: 1000})
+		require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
 		delivered, err = writer.IssueByUID(ctx, delivered.UID, db.IncludeDeletedNo)
 		require.NoError(t, err)
 		return delivered
@@ -164,4 +174,5 @@ func checkFederatedQuietPollFeedWith(t *testing.T, store db.Storage, backend Bac
 	out, err := store.ReadFederation(ctx, db.FederationReadParams{ProjectID: quiet.ID, Features: db.SupportedEventFeatures, AfterID: cursor, Limit: 1000})
 	require.NoError(t, err)
 	require.NotContains(t, out.RequiredFeatures, db.CronEventFeature)
+	require.Greater(t, out.ResetAfterID, cursor)
 }
