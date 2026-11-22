@@ -641,11 +641,12 @@ Held polls need a few things from the deployment:
   `KATA_HTTP_TIMEOUT` under 16 seconds turns held polls off. The daemon log
   says so once for each binding.
 
-The hub checks the poll's full authorization again before each read after a
-wake and after the last read, including the signing key of a signed poll. A
-revoked credential, removed membership, or retired signing key stops a woken
-poll. When the wait expires, the hub returns the initial empty page and cursor.
-The next poll checks access and sees events whose wakeup was lost. Hubs that share a PostgreSQL
+The hub checks the poll's full authorization before each read after a wake,
+including the signing key of a signed poll. Before returning a page after a
+wake, it checks again after the last read. A revoked credential, removed
+membership, or retired signing key stops a woken poll. When the wait expires,
+the hub returns the initial empty page and cursor. The next poll
+checks access and sees events whose wakeup was lost. Hubs that share a PostgreSQL
 database and schema wake each other's held polls with `LISTEN/NOTIFY` on a
 channel that other connected database roles can listen to or notify; a SQLite hub
 wakes them in process. A PostgreSQL wake carries the publishing process's instance tag and up to two
