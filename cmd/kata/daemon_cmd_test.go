@@ -60,6 +60,28 @@ func TestDaemonStatus_NoDaemonReportsAbsent(t *testing.T) {
 	assert.Equal(t, "Selected daemon: local_stopped (source: local runtime)\nNo kata daemon is running in the current KATA_HOME.\n", string(out))
 }
 
+func TestDaemonStatus_HumanUnreachableDoesNotRepeatError(t *testing.T) {
+	resetFlags(t)
+	setupKataEnv(t)
+	t.Chdir(t.TempDir())
+	t.Setenv("KATA_DSN", "")
+	t.Setenv("KATA_SERVER", "")
+
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
+		PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:0",
+	})
+	require.NoError(t, err)
+
+	stdout, stderr, err := executeRootCapture(t, t.Context(), "daemon", "status")
+	assert.Equal(t, ExitDaemonUnavail, exitCodeForErr(err, true))
+	assert.Contains(t, stdout, "Selected daemon: local_unreachable")
+	assert.NotContains(t, stderr, "kata: ")
+	assert.Contains(t, stderr, "hint: ")
+}
+
 func TestDaemonStatusReadinessExit(t *testing.T) {
 	for _, mode := range []string{"human", "json", "agent"} {
 		for _, ready := range []bool{false, true} {
