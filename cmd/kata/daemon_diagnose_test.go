@@ -1057,8 +1057,8 @@ func TestDaemonDiagnoseMissingDatabaseWithHeldMarker(t *testing.T) {
 }
 
 func TestDaemonDiagnoseReadOnlyDirectoryWithoutMarker(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root bypasses directory permissions")
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("directory permissions do not block writes")
 	}
 	home, _, _, _ := stoppedProfileCLI(t)
 	store, err := sqlitestore.Open(t.Context(), filepath.Join(home, "kata.db"))
