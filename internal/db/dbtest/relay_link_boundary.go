@@ -1,7 +1,9 @@
 package dbtest
 
 import (
+	"context"
 	"crypto/ed25519"
+	"database/sql"
 	"encoding/json/jsontext"
 	"sort"
 	"testing"
@@ -38,6 +40,16 @@ func newRelayLinkBoundaryFixture(t *testing.T, store db.Storage, name string, sh
 	parent, _, err := store.CreateAPIToken(ctx, db.CreateAPITokenParams{PlaintextToken: name + "-parent-test-token", Actor: "relay-member", AdminActor: "admin"})
 	require.NoError(t, err)
 	return relayLinkBoundaryFixture{project: project, sibling: sibling, parentTokenID: parent.ID, signer: db.RootAttributionSigner{AuthorityUID: store.InstanceUID(), PrivateKey: private}}
+}
+
+// deleteRelayBinding constructs an active enrollment without its binding for conformance tests.
+func deleteRelayBinding(t *testing.T, store db.Storage, projectID int64) {
+	t.Helper()
+	q := store.(interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	})
+	_, err := q.ExecContext(t.Context(), `DELETE FROM federation_bindings WHERE project_id=$1`, projectID)
+	require.NoError(t, err)
 }
 
 func linkTargetUIDs(t *testing.T, store db.Storage, issueID int64) []string {
@@ -153,10 +165,14 @@ func RunRelayLinkBoundaryFollowsActiveGrants(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	target, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.sibling.ID, Title: "Sibling issue", Author: "member"})
 	require.NoError(t, err)
+	// An unbound enrollment also exercises the active enrollment guard.
+	deleteRelayBinding(t, store, fixture.project.ID)
 	linkEvent := db.LinkEventParams{EventType: "issue.linked", EventIssueID: source.ID, FromShortID: source.ShortID, FromUID: source.UID, ToShortID: target.ShortID, ToUID: target.UID, Actor: "member"}
 	_, _, err = store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: source.ID, ToIssueID: target.ID, Type: "blocks", Author: "member"}, linkEvent)
 	require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary, "an active relay grant refuses a local cross-project link")
 
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: fixture.project.ID, Role: db.FederationRoleHub, HubProjectID: fixture.project.ID, HubProjectUID: fixture.project.UID, Enabled: true})
+	require.NoError(t, err)
 	require.NoError(t, store.RevokeFederationEnrollment(ctx, grant.Enrollment.ID))
 	_, _, err = store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: source.ID, ToIssueID: target.ID, Type: "blocks", Author: "member"}, linkEvent)
 	require.NoError(t, err, "revoking the last relay grant allows local cross-project links again")
