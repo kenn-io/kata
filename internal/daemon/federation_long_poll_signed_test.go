@@ -241,6 +241,7 @@ func TestFederationPollWaitReturnsEmptyWhenReadCrossesDeadline(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				h := f.serve(t, 0)
 				cursor := h.cursor(t)
+				reads := h.reads.readsReturned()
 				var done <-chan *httptest.ResponseRecorder
 				if wake {
 					done = h.startHeldPoll(t, cursor, "30")
@@ -260,9 +261,14 @@ func TestFederationPollWaitReturnsEmptyWhenReadCrossesDeadline(t *testing.T) {
 				var page pollBodyForTest
 				require.NoError(t, json.Unmarshal(response.Body.Bytes(), &page))
 				assert.Empty(t, page.Events)
-				assert.Equal(t, cursor, page.NextAfterID)
-				response = h.send(h.request(t, cursor, ""))
+				wantReads := reads + 1
+				if wake {
+					wantReads++
+				}
+				assert.Equal(t, wantReads, h.reads.readsReturned())
+				response = h.send(h.request(t, page.NextAfterID, ""))
 				assert.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
+				assert.Equal(t, wantReads, h.reads.readsReturned())
 			})
 		})
 	}
@@ -322,8 +328,8 @@ func TestFederationPollWaitRejectsARetiredSigningKey(t *testing.T) {
 					var page pollBodyForTest
 					require.NoError(t, json.Unmarshal(response.Body.Bytes(), &page))
 					assert.Empty(t, page.Events)
-					assert.Equal(t, cursor, page.NextAfterID)
-					response = h.send(h.request(t, cursor, ""))
+					assert.Equal(t, reads, h.reads.readsReturned())
+					response = h.send(h.request(t, page.NextAfterID, ""))
 				}
 				assert.Equal(t, http.StatusUnauthorized, response.Code, response.Body.String())
 				assert.NotContains(t, response.Body.String(), canary)
