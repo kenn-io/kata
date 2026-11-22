@@ -101,5 +101,14 @@ func checkRelayArchivedPeerReconnect(t *testing.T, store db.Storage) error {
 		_, err = store.AuthorizeFederationToken(ctx, grant.Token, fixture.Projects[0].ID, "pull")
 		require.NoError(t, err)
 	})
+	deleteRelayBinding(t, store, fixture.Projects[0].ID)
+	links := linkTargetUIDs(t, store, fixture.Issues[0].ID)
+	events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: fixture.Projects[0].ID, Limit: 1000})
+	require.NoError(t, err)
+	require.ErrorIs(t, store.CheckRelayProjectLinks(ctx, fixture.Projects[0].ID), db.ErrFederationCrossProjectBoundary)
+	require.Equal(t, links, linkTargetUIDs(t, store, fixture.Issues[0].ID))
+	after, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: fixture.Projects[0].ID, Limit: 1000})
+	require.NoError(t, err)
+	require.Equal(t, events, after)
 	return nil
 }

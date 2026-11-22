@@ -213,7 +213,9 @@ func relayPeerRetainedTx(ctx context.Context, tx *sql.Tx, projectID, peerID int6
 		return false, err
 	}
 	if archived {
-		return relayProjectsActiveTx(ctx, tx, projectID, projectID)
+		var active bool
+		err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings b WHERE b.project_id=? AND (b.relay_config IS NOT NULL OR EXISTS(SELECT 1 FROM federation_enrollments e WHERE e.project_id=b.project_id AND e.relay_protocol_version=1 AND e.revoked_at IS NULL)))`, projectID).Scan(&active)
+		return active, err
 	}
 	return relaySharedProjectsTx(ctx, tx, projectID, peerID, false)
 }

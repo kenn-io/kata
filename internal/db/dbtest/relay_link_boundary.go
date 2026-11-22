@@ -42,6 +42,15 @@ func newRelayLinkBoundaryFixture(t *testing.T, store db.Storage, name string, sh
 	return relayLinkBoundaryFixture{project: project, sibling: sibling, parentTokenID: parent.ID, signer: db.RootAttributionSigner{AuthorityUID: store.InstanceUID(), PrivateKey: private}}
 }
 
+func deleteRelayBinding(t *testing.T, store db.Storage, projectID int64) {
+	t.Helper()
+	q := store.(interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	})
+	_, err := q.ExecContext(t.Context(), `DELETE FROM federation_bindings WHERE project_id=$1`, projectID)
+	require.NoError(t, err)
+}
+
 func linkTargetUIDs(t *testing.T, store db.Storage, issueID int64) []string {
 	t.Helper()
 	links, err := store.LinksByIssue(t.Context(), issueID)
@@ -155,11 +164,7 @@ func RunRelayLinkBoundaryFollowsActiveGrants(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	target, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.sibling.ID, Title: "Sibling issue", Author: "member"})
 	require.NoError(t, err)
-	q := store.(interface {
-		ExecContext(context.Context, string, ...any) (sql.Result, error)
-	})
-	_, err = q.ExecContext(ctx, `DELETE FROM federation_bindings WHERE project_id=$1`, fixture.project.ID)
-	require.NoError(t, err)
+	deleteRelayBinding(t, store, fixture.project.ID)
 	events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: fixture.project.ID, Limit: 1000})
 	require.NoError(t, err)
 	linkEvent := db.LinkEventParams{EventType: "issue.linked", EventIssueID: source.ID, FromShortID: source.ShortID, FromUID: source.UID, ToShortID: target.ShortID, ToUID: target.UID, Actor: "member"}
