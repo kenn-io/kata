@@ -101,5 +101,8 @@ func checkRelayArchivedPeerReconnect(t *testing.T, store db.Storage) error {
 		_, err = store.AuthorizeFederationToken(ctx, grant.Token, fixture.Projects[0].ID, "pull")
 		require.NoError(t, err)
 	})
+	// An unbound enrollment alone does not retain an archived peer.
+	deleteRelayBinding(t, store, fixture.Projects[0].ID)
+	require.ErrorIs(t, store.CheckRelayProjectLinks(ctx, fixture.Projects[0].ID), db.ErrFederationCrossProjectBoundary)
 	return nil
 }

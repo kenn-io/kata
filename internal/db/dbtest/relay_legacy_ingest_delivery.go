@@ -113,7 +113,7 @@ func RunLegacyRelayAdmission(t *testing.T, store db.Storage) {
 		return fmt.Sprintf("%026d", issueSequence)
 	}
 	for kind, modes := range map[string][]string{
-		"creation":           {"sibling", "same project", "relayed peer", "revoked", "missing", "retained"},
+		"creation":           {"sibling", "same project", "relayed peer", "unbound relayed peer", "revoked", "missing", "retained"},
 		"snapshot":           {"sibling", "missing"},
 		"single link":        {"sibling"},
 		"composite":          {"sibling"},
@@ -130,8 +130,8 @@ func RunLegacyRelayAdmission(t *testing.T, store db.Storage) {
 		for _, mode := range modes {
 			t.Run(kind+"/"+mode, func(t *testing.T) {
 				ctx := t.Context()
-				fixture := newRelayLinkBoundaryFixture(t, store, "legacy-"+kind+"-"+mode, mode == "relayed peer")
-				if mode == "relayed peer" {
+				fixture := newRelayLinkBoundaryFixture(t, store, "legacy-"+kind+"-"+mode, mode == "relayed peer" || mode == "unbound relayed peer")
+				if mode == "relayed peer" || mode == "unbound relayed peer" {
 					fixture.project, fixture.sibling = fixture.sibling, fixture.project
 				}
 				peerProject := fixture.sibling
@@ -148,7 +148,7 @@ func RunLegacyRelayAdmission(t *testing.T, store db.Storage) {
 				primary, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.project.ID, UID: nextIssueUID(), Title: "Primary", Author: "member"})
 				require.NoError(t, err)
 				relayProject := fixture.project
-				if mode == "relayed peer" {
+				if mode == "relayed peer" || mode == "unbound relayed peer" {
 					relayProject = fixture.sibling
 				}
 				instance, err := uid.New()
@@ -157,6 +157,9 @@ func RunLegacyRelayAdmission(t *testing.T, store db.Storage) {
 				require.NoError(t, err)
 				if mode == "revoked" || mode == "retained" {
 					require.NoError(t, store.RevokeFederationEnrollment(ctx, grant.Enrollment.ID))
+				}
+				if mode == "unbound relayed peer" {
+					deleteRelayBinding(t, store, relayProject.ID)
 				}
 				eventType := "issue.linked"
 				payload := `{"type":"related","from_uid":"` + primary.UID + `","to_uid":"` + peer.UID + `"}`
@@ -223,12 +226,16 @@ func RunLegacyRelayAdmission(t *testing.T, store db.Storage) {
 					require.ErrorIs(t, err, db.ErrFederationIngestValidation)
 					return
 				}
-				refuse := (mode == "sibling" || mode == "relayed peer") && kind != "unlink" && kind != "composite cleanup" && kind != "parent replacement"
+				refuse := (mode == "sibling" || mode == "relayed peer" || mode == "unbound relayed peer") && kind != "unlink" && kind != "composite cleanup" && kind != "parent replacement"
 				if refuse {
 					require.ErrorIs(t, err, db.ErrFederationIngestValidation)
 					require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary)
 					require.ErrorContains(t, err, event.EventUID)
 					require.NotContains(t, err.Error(), peer.UID)
+					if kind == "creation" || kind == "snapshot" {
+						_, lookupErr := store.IssueByUID(ctx, primary.UID, db.IncludeDeletedYes)
+						require.ErrorIs(t, lookupErr, db.ErrNotFound)
+					}
 					_, err = store.EventsByUIDs(ctx, fixture.project.ID, []string{event.EventUID})
 					require.ErrorIs(t, err, db.ErrNotFound)
 					if precedingUID != "" {
