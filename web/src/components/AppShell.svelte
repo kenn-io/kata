@@ -511,7 +511,7 @@
 
   function beginNewTask(): void {
     if (newTaskBlockedReason) return
-    mobileNavigationOpen = false
+    closeNavigation()
     if (scopedAuthority) {
       captureOpen = true
       return
@@ -747,7 +747,6 @@
       <div class="header-task">
         {#if newTaskBlockedReason}
           <Tooltip text={newTaskBlockedReason}>{@render newTaskButton()}</Tooltip>
-          <span id={newTaskReasonID} class="kit-sr-only">{newTaskBlockedReason}</span>
         {:else}
           {@render newTaskButton()}
         {/if}
@@ -757,6 +756,9 @@
 {/snippet}
 
 <section class="kata-feature" aria-label="Kata workspace">
+  {#if newTaskBlockedReason}
+    <span id={newTaskReasonID} class="kit-sr-only">{newTaskBlockedReason}</span>
+  {/if}
   {#if connectionStatus !== 'Connected'}
     <div class="active-connection" role="status" aria-label="Active connection">
       <span
@@ -782,6 +784,15 @@
         <strong
           >{settingsRoute ? 'Settings' : credentialRoute ? 'Credentials' : scopeLabel()}</strong
         >
+      {/snippet}
+      {#snippet right()}
+        {#if mediumScreen.current}
+          {#if newTaskBlockedReason}
+            <Tooltip text={newTaskBlockedReason}>{@render newTaskButton()}</Tooltip>
+          {:else}
+            {@render newTaskButton()}
+          {/if}
+        {/if}
       {/snippet}
     </TopBar>
   </div>

@@ -49,6 +49,8 @@ describe('KataDaemonSwitcher', () => {
     expect(
       screen.getByRole('menuitemradio', { name: /example-legacy/ }).getAttribute('aria-disabled'),
     ).toBe('true')
+    await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-legacy/ }))
+    expect(onSelect).not.toHaveBeenCalledWith('example-legacy')
     await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
     expect(onSelect).toHaveBeenCalledWith('example-remote')
 

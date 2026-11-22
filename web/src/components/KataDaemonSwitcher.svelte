@@ -141,7 +141,7 @@
   .daemon-row :global(.server-mark) {
     border-radius: 4px;
     background: color-mix(in srgb, var(--mark) 22%, var(--bg-surface));
-    color: color-mix(in srgb, var(--mark) 72%, var(--text-primary));
+    color: var(--text-primary);
     font-size: 8px;
     letter-spacing: -0.02em;
   }

@@ -217,6 +217,43 @@ describe('AppShell', () => {
     expect(screen.getByRole('button', { name: 'New project', description: reason })).not.toBeNull()
   })
 
+  test('mobile New task controls share one blocked-reason description', async () => {
+    vi.stubGlobal('matchMedia', (media: string) => ({
+      matches: true,
+      media,
+      addEventListener() {},
+      removeEventListener() {},
+    }))
+    const current = snapshot()
+    current.capabilities.writable = false
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'all-open',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: current,
+        loading: false,
+        readOnly: true,
+        ...mutationProps({ canMutate: false }),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Open navigation' }))
+    const controls = screen.getAllByRole('button', {
+      name: 'New task',
+      description: 'This credential is read-only.',
+    })
+    expect(controls).toHaveLength(3)
+    const id = controls[0]!.getAttribute('aria-describedby')!
+    expect(controls.every((control) => control.getAttribute('aria-describedby') === id)).toBe(true)
+    expect(document.querySelectorAll(`[id="${id}"]`)).toHaveLength(1)
+  })
+
   test.each(['stale', 'daemonSwitching', 'reconnecting', 'remote', 'expired', 'removed'])(
     'fences project sync display when authority is %s',
     async (reason) => {
@@ -1771,14 +1808,78 @@ describe('AppShell', () => {
     expect(onPreferencesChange).toHaveBeenCalledWith(expect.objectContaining({ theme: 'light' }))
   })
 
-  test('closes navigation and shows a rejected capture error once', async () => {
-    const onCreateIssue = vi.fn().mockRejectedValue(new Error('validation: Action refused'))
+  test('closing navigation for task capture discards the project form', async () => {
     vi.stubGlobal('matchMedia', (media: string) => ({
       matches: true,
       media,
       addEventListener() {},
       removeEventListener() {},
     }))
+    const current = snapshot()
+    current.catalog![0]!.project.metadata = { role: 'inbox' }
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'all-open',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: current,
+        loading: false,
+        ...mutationProps(),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Open navigation' }))
+    let drawer = screen.getByRole('dialog', { name: 'Navigation' })
+    await fireEvent.click(within(drawer).getByRole('button', { name: 'New project' }))
+    expect(within(drawer).getByRole('textbox', { name: 'New project name' })).not.toBeNull()
+    await fireEvent.click(within(drawer).getByRole('button', { name: 'New task' }))
+    expect(screen.queryByRole('dialog', { name: 'Navigation' })).toBeNull()
+    await fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('dialog', { name: 'New task' })).toBeNull()
+    await fireEvent.click(screen.getByRole('button', { name: 'Open navigation' }))
+    drawer = screen.getByRole('dialog', { name: 'Navigation' })
+    expect(within(drawer).queryByRole('textbox', { name: 'New project name' })).toBeNull()
+  })
+
+  test.each(['settings', 'credentials'] as const)(
+    'creates a task from %s without navigating away',
+    async (view) => {
+      const current = snapshot()
+      current.catalog![0]!.project.metadata = { role: 'inbox' }
+      const onCreateIssue = vi.fn(async () => {})
+      const onNavigate = vi.fn()
+      render(AppShell, {
+        props: {
+          route: {
+            kind: 'kata',
+            view,
+            graph: false,
+            filters: { status: [], owner: [], label: [], relationship: [] },
+          },
+          snapshot: current,
+          loading: false,
+          ...mutationProps({ onCreateIssue }),
+          onNavigate,
+          onCreateProject: vi.fn(async () => ({ changed: true })),
+        },
+      })
+
+      await fireEvent.click(screen.getByRole('button', { name: 'New task' }))
+      const input = screen.getByRole('textbox', { name: 'Quick capture' })
+      await fireEvent.input(input, { target: { value: 'Example task' } })
+      await fireEvent.keyDown(input, { key: 'Enter' })
+      await waitFor(() => expect(onCreateIssue).toHaveBeenCalledWith('Example task'))
+      expect(onNavigate).not.toHaveBeenCalled()
+    },
+  )
+
+  test('shows a rejected capture error once on Settings', async () => {
+    const onCreateIssue = vi.fn().mockRejectedValue(new Error('validation: Action refused'))
     const accepted = snapshot()
     accepted.catalog![0]!.project.metadata = {
       ...(accepted.catalog![0]!.project.metadata ?? {}),
@@ -1800,10 +1901,7 @@ describe('AppShell', () => {
       },
     })
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Open navigation' }))
-    const drawer = screen.getByRole('dialog', { name: 'Navigation' })
-    await fireEvent.click(within(drawer).getByRole('button', { name: 'New task' }))
-    expect(screen.queryByRole('dialog', { name: 'Navigation' })).toBeNull()
+    await fireEvent.click(screen.getByRole('button', { name: 'New task' }))
     await fireEvent.input(screen.getByRole('textbox', { name: 'Quick capture' }), {
       target: { value: 'New example task' },
     })
@@ -1812,9 +1910,8 @@ describe('AppShell', () => {
     })
 
     expect(onCreateIssue).toHaveBeenCalledWith('New example task')
-    await within(screen.getByRole('dialog', { name: 'New task' })).findByRole('alert')
     await view.rerender({ mutationMessage: 'validation: Action refused' })
-    expect(screen.getAllByText('validation: Action refused')).toHaveLength(1)
+    await waitFor(() => expect(screen.getAllByText('validation: Action refused')).toHaveLength(1))
   })
 
   test('distinguishes empty projects from empty tasks and keeps refused capture closed', async () => {
@@ -1892,7 +1989,8 @@ describe('AppShell', () => {
           onCreateProject,
         },
       })
-      await fireEvent.click(screen.getByRole('button', { name: 'New task' }))
+      const sidebar = document.querySelector<HTMLElement>('.desktop-navigation')!
+      await fireEvent.click(within(sidebar).getByRole('button', { name: 'New task' }))
       const drawer = screen.getByRole('dialog', { name: 'Navigation' })
       const input = within(drawer).getByRole('textbox', { name: 'New project name' })
       await fireEvent.input(input, { target: { value: 'example-project' } })
