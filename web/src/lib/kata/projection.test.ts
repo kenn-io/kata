@@ -231,8 +231,7 @@ describe('normalizeKataUISnapshot', () => {
   })
 
   test('adapts the native snapshot to the ported immutable collection model', () => {
-    const wire = snapshot()
-    const projection = normalizeKataUISnapshot(wire, '2026-08-01T12:30:00.000Z')
+    const projection = normalizeKataUISnapshot(snapshot(), '2026-08-01T12:30:00.000Z')
 
     expect(projection.projects).toEqual([
       expect.objectContaining({

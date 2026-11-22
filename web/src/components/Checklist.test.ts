@@ -40,8 +40,6 @@ describe('Checklist', () => {
 
   it('reveals the add field when requested', async () => {
     render(Checklist, { props: { issue: makeIssue(), onPatchMetadata: vi.fn(async () => true) } })
-    const section = screen.getByRole('region', { name: 'Checklist' })
-    expect(section.querySelector('.detail-section-body')).toBeNull()
     expect(screen.queryByRole('textbox', { name: 'New checklist item' })).toBeNull()
     await fireEvent.click(screen.getByRole('button', { name: 'Add item' }))
     expect(screen.getByRole('textbox', { name: 'New checklist item' })).toBeTruthy()
@@ -53,7 +51,6 @@ describe('Checklist', () => {
     const { rerender } = render(Checklist, {
       props: {
         issue: makeIssue([{ id: 'item-1', text: 'Send', done: false }]),
-
         onPatchMetadata,
       },
     })
@@ -77,7 +74,6 @@ describe('Checklist', () => {
         { id: 'item-1', text: 'Send', done: false },
         { id: 'item-2', text: 'Confirm', done: false },
       ]),
-
       draftResetGeneration: 1,
       onPatchMetadata,
     })
@@ -93,7 +89,6 @@ describe('Checklist', () => {
 
     await rerender({
       issue: makeIssue([{ id: 'item-1', text: 'Send', done: false }]),
-
       onPatchMetadata,
     })
     await fireEvent.click(screen.getByRole('button', { name: 'Remove Send' }))
@@ -129,7 +124,6 @@ describe('Checklist', () => {
     const { rerender } = render(Checklist, {
       props: {
         issue: makeIssue(),
-
         onPatchMetadata: vi.fn(async () => true),
       },
     })
@@ -140,7 +134,6 @@ describe('Checklist', () => {
     })
     await rerender({
       issue: makeIssue([], { uid: 'issue-2', short_id: 'I-2', qualified_id: 'example-project#2' }),
-
       onPatchMetadata: vi.fn(async () => true),
     })
 
@@ -152,7 +145,6 @@ describe('Checklist', () => {
     render(Checklist, {
       props: {
         issue: makeIssue(),
-
         onPatchMetadata,
       },
     })
@@ -173,7 +165,6 @@ describe('Checklist', () => {
     const view = render(Checklist, {
       props: {
         issue: makeIssue(),
-
         draftFenceGeneration: 0,
         onPatchMetadata: vi.fn(async () => true),
       },
@@ -193,7 +184,6 @@ describe('Checklist', () => {
     render(Checklist, {
       props: {
         issue: makeIssue([{ id: 'item-1', text: 'Send', done: false }]),
-
         disabled: true,
         onPatchMetadata,
       },

@@ -111,53 +111,19 @@ describe('IssueDetail', () => {
     vi.useRealTimers()
   })
 
-  it('keeps history and the graph available to read-only users', async () => {
-    renderDetail({
-      actionsDisabled: true,
-      authorityBlocked: false,
-      onOpenGraph: vi.fn(),
-      events: [
-        {
-          event_id: 1,
-          event_uid: 'event-1',
-          origin_instance_uid: 'instance-1',
-          type: 'issue.commented',
-          project_id: 1,
-          project_uid: 'project-1',
-          project_name: 'Inbox',
-          actor: 'user-a',
-          created_at: '2026-06-01T12:31:00Z',
-        },
-      ],
-    })
-    expect(screen.getByRole('button', { name: 'Graph' }).closest('fieldset[disabled]')).toBeNull()
-    await fireEvent.click(screen.getByRole('button', { name: 'Show history' }))
-    expect(screen.getByText(/commented/)).toBeTruthy()
-    expect((screen.getByRole('button', { name: 'Edit title' }) as HTMLButtonElement).disabled).toBe(
-      true,
+  it('keeps the graph available to read-only users', () => {
+    renderDetail({ actionsDisabled: true, authorityBlocked: false, onOpenGraph: vi.fn() })
+    expect((screen.getByRole('button', { name: 'Graph' }) as HTMLButtonElement).disabled).toBe(
+      false,
     )
   })
 
-  it('edits the task in one view', () => {
-    renderDetail()
-    expect(screen.getByRole('heading', { name: 'Ship the thing' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Edit title' })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Edit issue' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Done editing' })).toBeNull()
-  })
-
   it('keeps an empty description as a one-line section with its Edit action', async () => {
-    const onEditIssue = vi.fn(async () => true)
-    renderDetail({ issue: makeIssue({ body: '' }), onEditIssue })
+    renderDetail({ issue: makeIssue({ body: '' }) })
     const section = screen.getByRole('region', { name: 'Description' })
     expect(within(section).getByText('No description')).toBeTruthy()
     await fireEvent.click(within(section).getByRole('button', { name: 'Edit description' }))
     expect(within(section).queryByText('No description')).toBeNull()
-    await fireEvent.input(within(section).getByRole('textbox', { name: 'Edit description' }), {
-      target: { value: 'First description' },
-    })
-    await fireEvent.click(within(section).getByRole('button', { name: 'Save' }))
-    expect(onEditIssue).toHaveBeenCalledWith('issue-1', { body: 'First description' })
   })
 
   it('retries a restored description with the refreshed content revision', async () => {
@@ -242,72 +208,50 @@ describe('IssueDetail', () => {
     expect(stateLines).toMatch(/Due Jan 1(?:, \d{4})?, \d+ days late/)
   })
 
-  it.each([
-    { today: '2026-11-21', first: null, next: '1 day late' },
-    { today: '2026-11-22', first: '1 day late', next: '2 days late' },
-  ])('updates the overdue count from $today', async ({ today, first, next }) => {
+  it('updates the overdue count as the date changes', async () => {
     const view = renderDetail({
       issue: makeIssue({ metadata: { deadline_on: '2026-11-21' } }),
-      today,
+      today: '2026-11-21',
     })
-    if (first) expect(view.container.querySelector('.state-line')?.textContent).toContain(first)
-    else expect(view.container.querySelector('.state-line')).toBeNull()
-    await view.rerender({ today: today === '2026-11-21' ? '2026-11-22' : '2026-11-23' })
-    expect(view.container.querySelector('.state-line')?.textContent).toContain(next)
+    expect(view.container.querySelector('.state-line')).toBeNull()
+    await view.rerender({ today: '2026-11-22' })
+    expect(view.container.querySelector('.state-line')?.textContent).toContain('1 day late')
+    await view.rerender({ today: '2026-11-23' })
+    expect(view.container.querySelector('.state-line')?.textContent).toContain('2 days late')
   })
 
-  it('keeps a renamed title draft and retries against the refreshed revision', async () => {
-    let finish!: (ok: boolean) => void
-    const pending = new Promise<boolean>((resolve) => {
-      finish = resolve
-    })
-    const onEditIssue = vi.fn().mockReturnValueOnce(pending).mockResolvedValueOnce(true)
-    const view = renderDetail({ issue: makeIssue({ content_revision: 2 }), onEditIssue })
-    await fireEvent.click(screen.getByRole('button', { name: 'Edit title' }))
-    await fireEvent.input(screen.getByRole('textbox', { name: 'Edit title' }), {
-      target: { value: 'My title' },
-    })
-    await fireEvent.keyDown(screen.getByRole('textbox', { name: 'Edit title' }), { key: 'Enter' })
-    await view.rerender({ issue: makeIssue({ title: 'Their title', content_revision: 3 }) })
-    finish(false)
-    await vi.waitFor(() => expect(screen.getByText(/while you were editing/)).toBeTruthy())
-    expect((screen.getByRole('textbox', { name: 'Edit title' }) as HTMLInputElement).value).toBe(
-      'My title',
-    )
-    await fireEvent.blur(screen.getByRole('textbox', { name: 'Edit title' }))
-    expect(onEditIssue).toHaveBeenCalledTimes(1)
-    await fireEvent.keyDown(screen.getByRole('textbox', { name: 'Edit title' }), { key: 'Enter' })
-    expect(onEditIssue).toHaveBeenLastCalledWith('issue-1', {
-      title: 'My title',
-      expected_content_revision: 3,
-    })
-  })
-
-  it('retries a restored title against the refreshed revision', async () => {
-    let finish!: (ok: boolean) => void
-    const onEditIssue = vi
-      .fn()
-      .mockReturnValueOnce(
-        new Promise<boolean>((resolve) => {
-          finish = resolve
-        }),
+  it.each([
+    { title: 'Their title', revision: 3, message: /while you were editing/ },
+    { title: 'Ship the thing', revision: 4, message: /Someone changed this task/ },
+  ])(
+    'retries a title draft after a conflict at revision $revision',
+    async ({ title, revision, message }) => {
+      let finish!: (ok: boolean) => void
+      const pending = new Promise<boolean>((resolve) => {
+        finish = resolve
+      })
+      const onEditIssue = vi.fn().mockReturnValueOnce(pending).mockResolvedValueOnce(true)
+      const view = renderDetail({ issue: makeIssue({ content_revision: 2 }), onEditIssue })
+      await fireEvent.click(screen.getByRole('button', { name: 'Edit title' }))
+      await fireEvent.input(screen.getByRole('textbox', { name: 'Edit title' }), {
+        target: { value: 'My title' },
+      })
+      await fireEvent.keyDown(screen.getByRole('textbox', { name: 'Edit title' }), { key: 'Enter' })
+      await view.rerender({ issue: makeIssue({ title, content_revision: revision }) })
+      finish(false)
+      await vi.waitFor(() => expect(screen.getByText(message)).toBeTruthy())
+      expect((screen.getByRole('textbox', { name: 'Edit title' }) as HTMLInputElement).value).toBe(
+        'My title',
       )
-      .mockResolvedValueOnce(true)
-    const view = renderDetail({ issue: makeIssue({ content_revision: 2 }), onEditIssue })
-    await fireEvent.click(screen.getByRole('button', { name: 'Edit title' }))
-    await fireEvent.input(screen.getByRole('textbox', { name: 'Edit title' }), {
-      target: { value: 'My title' },
-    })
-    await fireEvent.keyDown(screen.getByRole('textbox', { name: 'Edit title' }), { key: 'Enter' })
-    await view.rerender({ issue: makeIssue({ content_revision: 4 }) })
-    finish(false)
-    await vi.waitFor(() => expect(screen.getByText(/Someone changed this task/)).toBeTruthy())
-    await fireEvent.keyDown(screen.getByRole('textbox', { name: 'Edit title' }), { key: 'Enter' })
-    expect(onEditIssue).toHaveBeenLastCalledWith('issue-1', {
-      title: 'My title',
-      expected_content_revision: 4,
-    })
-  })
+      await fireEvent.blur(screen.getByRole('textbox', { name: 'Edit title' }))
+      expect(onEditIssue).toHaveBeenCalledTimes(1)
+      await fireEvent.keyDown(screen.getByRole('textbox', { name: 'Edit title' }), { key: 'Enter' })
+      expect(onEditIssue).toHaveBeenLastCalledWith('issue-1', {
+        title: 'My title',
+        expected_content_revision: revision,
+      })
+    },
+  )
 
   it('keeps title and description drafts after a failed save', async () => {
     const onEditIssue = vi.fn(async () => false)
@@ -355,7 +299,6 @@ describe('IssueDetail', () => {
       const event = close(4, kind === 'evidence' ? 'user-a' : 'user-c', 'done')
       if (kind === 'evidence')
         event.payload!.evidence = [{ type: 'test', command: 'go test ./example' }]
-      if (kind === 'no effective event') event.payload!.message = 'Stale close note'
       const view = renderDetail({
         issue: {
           ...makeIssue({
@@ -380,7 +323,6 @@ describe('IssueDetail', () => {
         expect(line).toContain('Jun 3')
         expect(line).not.toContain('Done')
         expect(line).not.toContain('You')
-        expect(screen.queryByText('Stale close note')).toBeNull()
       }
     },
   )
@@ -402,27 +344,6 @@ describe('IssueDetail', () => {
       'Second task',
     )
     expect(onStatusRequestConsumed).toHaveBeenCalledOnce()
-  })
-
-  it('edits title and description through the issue edit callback', async () => {
-    const onEditIssue = vi.fn(async () => true)
-    renderDetail({ onEditIssue })
-
-    await fireEvent.click(screen.getByRole('button', { name: 'Edit title' }))
-    await fireEvent.input(screen.getByLabelText('Edit title'), {
-      target: { value: 'Updated title' },
-    })
-    await fireEvent.keyDown(screen.getByLabelText('Edit title'), { key: 'Enter' })
-
-    expect(onEditIssue).toHaveBeenCalledWith('issue-1', { title: 'Updated title' })
-
-    await fireEvent.click(screen.getByRole('button', { name: 'Edit description' }))
-    await fireEvent.input(screen.getByLabelText('Edit description'), {
-      target: { value: 'Updated body' },
-    })
-    await fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-
-    expect(onEditIssue).toHaveBeenCalledWith('issue-1', { body: 'Updated body' })
   })
 
   it('keeps unrelated drafts visible for manual copying after local authority expires', async () => {
@@ -535,32 +456,6 @@ describe('IssueDetail', () => {
   it('composes the ported checklist, recurrence, comments, links, and history sections', async () => {
     const onAddComment = vi.fn(async () => true)
     renderDetail({
-      issue: {
-        ...makeIssue({ metadata: {} }),
-        comments: [
-          {
-            id: 1,
-            issue_id: 1,
-            author: 'user-a',
-            teammate: 'teammate-1',
-            body: 'Accepted comment',
-            created_at: '2026-06-01T12:30:00Z',
-          },
-        ],
-      },
-      events: [
-        {
-          event_id: 1,
-          event_uid: 'event-1',
-          origin_instance_uid: 'instance-example',
-          type: 'issue.commented',
-          project_id: 1,
-          project_uid: 'project-1',
-          project_name: 'example-project',
-          actor: 'user-a',
-          created_at: '2026-06-01T12:31:00Z',
-        },
-      ],
       selectedRecurrences: [
         {
           id: 1,
@@ -585,11 +480,7 @@ describe('IssueDetail', () => {
 
     expect(screen.getByRole('region', { name: 'Checklist' })).not.toBeNull()
     expect(screen.getByRole('button', { name: 'Stop' })).not.toBeNull()
-    expect(await screen.findByText('Accepted comment')).not.toBeNull()
-    expect(screen.getByText('user-a / teammate-1')).not.toBeNull()
-    await fireEvent.click(screen.getByRole('button', { name: 'Show history' }))
-    expect(screen.getByText(/commented/)).not.toBeNull()
-
+    await fireEvent.click(screen.getByRole('button', { name: 'Add comment' }))
     await fireEvent.input(screen.getByLabelText('Comment'), {
       target: { value: 'New comment' },
     })

@@ -87,16 +87,12 @@ describe('IssueProperties', () => {
     cleanup()
   })
 
-  it('shows the status of a closed task', () => {
-    renderProperties({ issue: makeIssue({ status: 'closed' }) })
-    expect(screen.getByText('Status')).toBeTruthy()
-    expect(screen.getByText('Closed')).toBeTruthy()
-  })
-
-  it('offers missing properties on a closed task', () => {
+  it('shows the status and offers missing properties on a closed task', () => {
     const issue = makeIssue({ status: 'closed' })
     issue.labels = []
     renderProperties({ issue })
+    expect(screen.getByText('Status')).toBeTruthy()
+    expect(screen.getByText('Closed')).toBeTruthy()
     for (const name of ['Priority', 'Scheduled', 'Due', 'Labels']) {
       expect(screen.getByRole('button', { name })).toBeTruthy()
     }
@@ -464,8 +460,6 @@ describe('IssueProperties', () => {
       (screen.getByRole('button', { name: /^Priority: / }) as HTMLButtonElement).disabled,
     ).toBe(true)
 
-    await view.rerender({ actionsDisabled: false })
-    await view.rerender({ actionsDisabled: true })
     const removeLabel = screen.getByRole('button', {
       name: 'Remove label review',
     }) as HTMLButtonElement

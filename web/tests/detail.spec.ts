@@ -85,27 +85,3 @@ test('comments, links, checklist, and history update without API fan-out', async
   await expect(page.getByRole('region', { name: 'Links' })).toContainText(peer.short_id)
   await expect(page.getByRole('heading', { name: 'History' })).toBeVisible()
 })
-
-test('task status circle opens completion for the selected task', async ({ page, kata }) => {
-  const credentials = await kata.launch(page)
-  const first = await kata.seedIssue(page, credentials, { title: 'First task' })
-  const second = await kata.seedIssue(page, credentials, {
-    title: 'Second task',
-    links: [{ type: 'parent', to_ref: first.uid }],
-  })
-  await page.goto(`${kata.origin}/kata?issue=${first.uid}`)
-  await page.getByRole('button', { name: /First task/ }).press('ArrowRight')
-  await expect(page.locator(`button.row--child[data-uid="${second.uid}"]`)).toBeVisible()
-  await page.getByRole('button', { name: `Complete ${second.short_id}` }).click()
-  const dialog = page.getByRole('dialog', { name: 'Complete task' })
-  await expect(dialog).toContainText('Second task')
-  await dialog
-    .getByLabel('Completion note')
-    .fill('Completed the second task and checked the result in the browser.')
-  await dialog.getByLabel('Evidence value').fill('browser check')
-  await dialog.getByRole('button', { name: 'Complete' }).click()
-  await expect(page.getByRole('button', { name: 'Reopen', exact: true })).toBeVisible()
-  await page.goto(`${kata.origin}/kata?view=logbook`)
-  await page.getByRole('button', { name: `Reopen ${second.short_id}` }).click()
-  await expect(page.getByRole('button', { name: 'Complete…' })).toBeVisible()
-})

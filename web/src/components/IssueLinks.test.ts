@@ -126,7 +126,6 @@ function renderLinks(overrides: Record<string, unknown> = {}) {
       linkFilters: createKataLinkFilters('all'),
       onLinkFiltersChange: vi.fn(),
       actionsDisabled: false,
-      draftResetGeneration: 0,
       onEditIssue: vi.fn(async () => true),
       onSelectIssue: vi.fn(),
       ...overrides,

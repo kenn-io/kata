@@ -20,8 +20,7 @@ function event(uid: string, created_at: string): KataTaskEvent {
 
 async function renderHistory(options: Parameters<typeof render<typeof IssueHistory>>[1]) {
   const result = render(IssueHistory, options)
-  const trigger = screen.queryByRole('button', { name: 'Show history' })
-  if (trigger) await fireEvent.click(trigger)
+  await fireEvent.click(screen.getByRole('button', { name: 'Show history' }))
   return result
 }
 

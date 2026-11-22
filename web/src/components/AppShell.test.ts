@@ -1652,11 +1652,7 @@ describe('AppShell', () => {
     const selected = snapshot()
     selected.selected = {
       state: 'available',
-      issue: {
-        ...selected.collection![0]!,
-        body: 'Original body',
-        revision: 3,
-      },
+      issue: { ...selected.collection![0]!, body: 'Original body', revision: 3 },
       comments: [],
       labels: [],
       links: [],

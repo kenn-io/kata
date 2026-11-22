@@ -14,8 +14,6 @@ describe('Comments', () => {
     const task = issue()
     task.comments = []
     renderComments({ issue: task })
-    const section = screen.getByRole('region', { name: 'Comments' })
-    expect(section.querySelector('.detail-section-body')).toBeNull()
     await fireEvent.click(screen.getByRole('button', { name: 'Add comment' }))
     expect(screen.getByLabelText('Comment')).toBeTruthy()
   })

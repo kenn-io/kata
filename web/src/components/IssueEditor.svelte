@@ -709,7 +709,6 @@
       {linkFilters}
       {onLinkFiltersChange}
       actionsDisabled={actionsDisabled || detailInert}
-      {draftResetGeneration}
       {draftFenceGeneration}
       {onEditIssue}
       {onSelectIssue}

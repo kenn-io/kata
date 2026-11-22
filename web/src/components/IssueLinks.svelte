@@ -32,17 +32,9 @@
     linkFilters: KataLinkFilters
     onLinkFiltersChange: (next: KataLinkFilters) => void
     actionsDisabled?: boolean | undefined
-    draftResetGeneration?: number | undefined
     draftFenceGeneration?: number | undefined
     onEditIssue: (uid: string, patch: KataTaskEditPatch) => boolean | Promise<boolean>
     onSelectIssue: (target: IssueNavigationTarget) => void | Promise<void>
-  }
-
-  interface PendingDraftReset {
-    uid: string
-    generation: number
-    value: string
-    revision: number
   }
 
   let {
@@ -52,7 +44,6 @@
     linkFilters,
     onLinkFiltersChange,
     actionsDisabled = false,
-    draftResetGeneration = 0,
     draftFenceGeneration = 0,
     onEditIssue,
     onSelectIssue,
@@ -69,11 +60,7 @@
         .filter((task) => task.uid !== issue.issue.uid)
         .map((task) => ({ name: task.qualified_id, label: task.title, meta: task.qualified_id }))
   }
-  let relatedDraft = $state('')
-  let relatedDraftRevision = 0
-  let lastDraftResetGeneration = $state<number | null>(null)
   let lastDraftFenceGeneration = $state<number | null>(null)
-  let pendingRelatedReset = $state<PendingDraftReset | null>(null)
 
   const visibleLinks = $derived(
     issue.links.filter((link) =>
@@ -87,26 +74,6 @@
   )
 
   $effect(() => {
-    const nextGeneration = draftResetGeneration
-    if (lastDraftResetGeneration === null) {
-      lastDraftResetGeneration = nextGeneration
-      return
-    }
-    if (nextGeneration === lastDraftResetGeneration) return
-    lastDraftResetGeneration = nextGeneration
-    const uid = issue.issue.uid
-    if (pendingRelatedReset?.uid === uid && pendingRelatedReset.generation !== nextGeneration) {
-      if (
-        relatedDraftRevision === pendingRelatedReset.revision &&
-        relatedDraft === pendingRelatedReset.value
-      ) {
-        relatedDraft = ''
-      }
-    }
-    pendingRelatedReset = null
-  })
-
-  $effect(() => {
     const nextGeneration = draftFenceGeneration
     if (lastDraftFenceGeneration === null) {
       lastDraftFenceGeneration = nextGeneration
@@ -114,17 +81,10 @@
     }
     if (nextGeneration === lastDraftFenceGeneration) return
     lastDraftFenceGeneration = nextGeneration
-    relatedDraft = ''
-    pendingRelatedReset = null
     adding = false
     options = []
     searchGeneration += 1
   })
-
-  function updateRelatedDraft(value: string): void {
-    relatedDraft = value
-    relatedDraftRevision += 1
-  }
 
   function linkPeerUIDFor(link: KataTaskLink, selectedUID: string | undefined): string {
     return link.from.uid === selectedUID ? link.to.uid : link.from.uid
@@ -177,28 +137,14 @@
     return relationLabels[relationForKataLink(link, issue.issue.uid)]
   }
 
-  async function submitRelatedLink(): Promise<boolean> {
+  async function submitRelatedLink(value: string): Promise<boolean> {
     if (actionsDisabled) return false
-    const draft = relatedDraft
-    const ref = draft.trim()
+    const ref = value.trim()
     if (ref === '') return false
     const mutationUID = issue.issue.uid
-    const resetGeneration = draftResetGeneration
-    const draftRevision = relatedDraftRevision
     const ok = await onEditIssue(mutationUID, { links_delta: { add_related: [ref] } })
     if (ok === true) adding = false
-    if (ok !== true || issue.issue.uid !== mutationUID) return false
-    if (draftResetGeneration !== resetGeneration) {
-      if (relatedDraftRevision === draftRevision && relatedDraft === draft) relatedDraft = ''
-    } else {
-      pendingRelatedReset = {
-        uid: mutationUID,
-        generation: resetGeneration,
-        value: draft,
-        revision: draftRevision,
-      }
-    }
-    return true
+    return ok === true && issue.issue.uid === mutationUID
   }
 </script>
 
@@ -280,10 +226,7 @@
         remote
         allowCustom
         onquery={(query) => void search(query)}
-        onselect={async (value) => {
-          updateRelatedDraft(value)
-          return await submitRelatedLink()
-        }}
+        onselect={submitRelatedLink}
       />
     </div>
   {/if}
