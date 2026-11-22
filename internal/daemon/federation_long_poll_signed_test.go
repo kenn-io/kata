@@ -191,46 +191,43 @@ func TestFederationPollRechecksAuthorizationAfterItsRead(t *testing.T) {
 }
 
 func TestFederationPollWaitReturnsSavedPageWhenItExpires(t *testing.T) {
-	f := newSignedPollFixture(t)
-	synctest.Test(t, func(t *testing.T) {
-		h := f.serve(t, 0)
-		cursor := h.cursor(t)
-		reads := h.reads.readsReturned()
-		done := h.startHeldPoll(t, cursor, "30")
-		authCalls, revisionCalls := h.reads.accessCalls()
-		h.commit(t, "Committed without a wakeup", false)
-		response := <-done
-		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-		var page pollBodyForTest
-		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &page))
-		assert.Empty(t, page.Events)
-		assert.Equal(t, cursor, page.NextAfterID)
-		assert.Equal(t, reads+1, h.reads.readsReturned())
-		authAfter, revisionAfter := h.reads.accessCalls()
-		assert.Equal(t, authCalls, authAfter)
-		assert.Equal(t, revisionCalls, revisionAfter)
-		response = h.send(h.request(t, cursor, ""))
-		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-		assert.Contains(t, response.Body.String(), "Committed without a wakeup")
-	})
-}
-
-func TestFederationPollWaitDefersProjectRevocationUntilNextPoll(t *testing.T) {
-	f := newSignedPollFixture(t)
-	synctest.Test(t, func(t *testing.T) {
-		h := f.serve(t, 0)
-		cursor := h.cursor(t)
-		done := h.startHeldPoll(t, cursor, "30")
-		require.NoError(t, h.revokeProjectAccess(t))
-		response := <-done
-		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-		var page pollBodyForTest
-		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &page))
-		assert.Empty(t, page.Events)
-		assert.Equal(t, cursor, page.NextAfterID)
-		response = h.send(h.request(t, cursor, ""))
-		assert.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
-	})
+	for _, tc := range []struct {
+		name   string
+		revoke bool
+	}{{"commit without a wake", false}, {"project access revocation", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newSignedPollFixture(t)
+			synctest.Test(t, func(t *testing.T) {
+				h := f.serve(t, 0)
+				cursor := h.cursor(t)
+				reads := h.reads.readsReturned()
+				done := h.startHeldPoll(t, cursor, "30")
+				authCalls, revisionCalls := h.reads.accessCalls()
+				if tc.revoke {
+					require.NoError(t, h.revokeProjectAccess(t))
+				} else {
+					h.commit(t, "Committed without a wakeup", false)
+				}
+				response := <-done
+				require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+				var page pollBodyForTest
+				require.NoError(t, json.Unmarshal(response.Body.Bytes(), &page))
+				assert.Empty(t, page.Events)
+				assert.Equal(t, cursor, page.NextAfterID)
+				assert.Equal(t, reads+1, h.reads.readsReturned())
+				authAfter, revisionAfter := h.reads.accessCalls()
+				assert.Equal(t, authCalls, authAfter)
+				assert.Equal(t, revisionCalls, revisionAfter)
+				response = h.send(h.request(t, cursor, ""))
+				if tc.revoke {
+					assert.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
+				} else {
+					require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+					assert.Contains(t, response.Body.String(), "Committed without a wakeup")
+				}
+			})
+		})
+	}
 }
 
 func TestFederationPollWaitReturnsEmptyWhenReadCrossesDeadline(t *testing.T) {
@@ -309,7 +306,7 @@ func TestFederationPollWaitRejectsARetiredSigningKey(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		wake bool
-	}{{"woken after the key expires", true}, {"wait ends after the key expires", false}} {
+	}{{"woken after the key expires", true}, {"retirement applies to the next poll", false}} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newSignedPollFixture(t)
 			synctest.Test(t, func(t *testing.T) {
@@ -322,6 +319,10 @@ func TestFederationPollWaitRejectsARetiredSigningKey(t *testing.T) {
 				response := <-done
 				if !tc.wake {
 					require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+					var page pollBodyForTest
+					require.NoError(t, json.Unmarshal(response.Body.Bytes(), &page))
+					assert.Empty(t, page.Events)
+					assert.Equal(t, cursor, page.NextAfterID)
 					response = h.send(h.request(t, cursor, ""))
 				}
 				assert.Equal(t, http.StatusUnauthorized, response.Code, response.Body.String())

@@ -50,7 +50,7 @@ func TestFederationPollWaitsBoundEveryHeldPoll(t *testing.T) {
 	_, ok := waits.admit(t.Context(), broadcaster, -1, project)
 	assert.False(t, ok)
 
-	for _, tc := range []struct{ cpus, limit int }{{1, 32}, {8, 256}} {
+	for _, tc := range []struct{ cpus, limit int }{{1, 32}, {16, 256}} {
 		t.Run(fmt.Sprintf("%d CPUs", tc.cpus), func(t *testing.T) {
 			waits := newFederationPollWaits(16, tc.cpus)
 			broadcaster := NewEventBroadcaster()
