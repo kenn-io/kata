@@ -1213,6 +1213,21 @@ func TestEnsureRunningReportsLiveUnreachableDaemonWithoutAutoStart(t *testing.T)
 	assert.Zero(t, restore.startCalls)
 }
 
+func TestUnreachableDaemonKeepsSocketPathContainingSyntheticHost(t *testing.T) {
+	socket := t.TempDir() + "/http://kata.invalid/missing.sock"
+	address := "unix://" + socket
+	client, base := LocalHTTPClient(address)
+	_, cause := Probe(t.Context(), client, base)
+	require.Error(t, cause)
+
+	err := &LocalDaemonUnreachableError{PID: os.Getpid(), Address: address, cause: cause}
+	assert.Contains(t, err.Summary(), `Get "/api/v1/ping"`)
+	assert.Contains(t, err.Summary(), "dial unix "+socket)
+	urlErr, ok := errors.AsType[*url.Error](err)
+	require.True(t, ok)
+	assert.Equal(t, "http://kata.invalid/api/v1/ping", urlErr.URL)
+}
+
 func TestEnsureRunningPrioritizesUnreachableDaemonOverIncompatibleDaemon(t *testing.T) {
 	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
 	tmp := setupKataEnv(t)
