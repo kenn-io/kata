@@ -94,6 +94,7 @@ func TestVersion_JSONIncludesAgentFormat(t *testing.T) {
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(out, &got))
 	assert.Equal(t, float64(agentFormatVersion), got["agent_format"])
+	assert.Equal(t, true, got["rejoin_existing_replica"])
 }
 
 func TestVersion_IsWiredOnRoot(t *testing.T) {

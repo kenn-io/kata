@@ -4157,6 +4157,8 @@ func TestCreateFederationReplicaRejoinsAfterLeave(t *testing.T) {
 		fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", project.ID),
 		map[string]any{"disposition": "detach", "actor": "wesm"}, nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode, "leave: %s", raw)
+	_, retainedEvent, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "offline task", Author: "old-actor"})
+	require.NoError(t, err)
 
 	var out api.CreateFederationReplicaResponseBody
 	jresp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", map[string]any{
@@ -4178,7 +4180,8 @@ func TestCreateFederationReplicaRejoinsAfterLeave(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, rebound.PushEnabled)
 	assert.Equal(t, int64(0), rebound.PushCursorEventID,
-		"rejoin must re-offer local-origin events from 0 so the hub dedups what it has and absorbs standalone-era edits")
+		"rejoin starts publishing from the beginning of the local history")
+	assert.GreaterOrEqual(t, rebound.RetainedThroughEventID, retainedEvent.ID)
 	assert.Equal(t, int64(8), rebound.PullCursorEventID,
 		"rejoin restarts pull just below the replay horizon")
 	assert.Equal(t, "present", config.FederationCredentialMetadataFor(project.UID).Status)

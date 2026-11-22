@@ -532,7 +532,7 @@ func (d *Store) ExportFederationBindings(ctx context.Context, f db.ExportFilter)
 	                 replay_horizon_event_id, pull_cursor_event_id, push_enabled,
 	                 push_cursor_event_id, bound_actor, allow_insecure, enabled,
 	                 CAST(created_at AS TEXT), CAST(updated_at AS TEXT),
-	                 CAST(last_sync_at AS TEXT), relay_config
+	                 CAST(last_sync_at AS TEXT), relay_config, retained_through_event_id
 	          FROM federation_bindings`
 	query, args := withProjectIDFilter(query, f, "project_id")
 	query += ` ORDER BY project_id ASC`
@@ -544,7 +544,7 @@ func (d *Store) ExportFederationBindings(ctx context.Context, f db.ExportFilter)
 			if err := rows.Scan(&rec.ProjectID, &rec.Role, &rec.HubURL, &rec.HubProjectID,
 				&rec.HubProjectUID, &rec.ReplayHorizonEventID, &rec.PullCursorEventID,
 				&pushEnabled, &rec.PushCursorEventID, &rec.Actor, &allowInsecure, &enabled,
-				&rec.CreatedAt, &rec.UpdatedAt, &rec.LastSyncAt, &relayConfig); err != nil {
+				&rec.CreatedAt, &rec.UpdatedAt, &rec.LastSyncAt, &relayConfig, &rec.RetainedThroughEventID); err != nil {
 				return db.FederationBindingExport{}, scanError("federation_binding", err)
 			}
 			var err error

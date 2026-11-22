@@ -2135,12 +2135,16 @@ Rejoin also recovers a join that created the local project but failed before
 saving its binding. Repeat the join for the same local name and hub project
 identity to bind that existing project.
 
-Pull restarts from the hub's replay horizon (already-applied events
-deduplicate by event UID), and a push-enabled rejoin re-offers local-origin
-events from the beginning; the hub deduplicates what it already has and
-absorbs any edits made while the project was standalone. Rejoin with the same
-actor the enrollment is bound to; events authored as a different actor are
-rejected by the hub and quarantined.
+Pull restarts from the hub's replay horizon, and already-applied events
+deduplicate by event UID. A push-enabled rejoin publishes new events using the
+new enrollment. Events from an earlier actor stay on the spoke, including
+through a hub reset. When a new edit refers to a task the hub has never seen,
+Kata publishes a snapshot of the task before the edit.
+
+Kata upgrades SQLite databases to schema 54 at startup. Older binaries cannot
+open schema 54. To roll back, restore a backup made before the upgrade and use its matching
+binary. Stop the daemon before migrating PostgreSQL; the migration briefly locks
+the federation bindings table.
 
 A join that names a *different* project while a local project still holds the
 hub project's UID is refused with `federation_rejoin_name_mismatch`, which

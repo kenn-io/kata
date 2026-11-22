@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	canonicalColumnFingerprint     = "2c573a26533e056618e458d7addc7836bf7d95e98b0ad258b6b7c2a50725186d"
+	canonicalColumnFingerprint     = "89fe82c9515825cf136fd22f459b5cd209f274d116bf6d0db19ebd4977a4d2c1"
 	canonicalConstraintFingerprint = "21a6429d8b06093928339598c69f71d48d65330c78e3274cbe8bcabc9fd5ed14"
 	canonicalIndexFingerprint      = "0042f73b77279fa84d7fcfa7fd7631adba1832b2b346afff50840ff6f0728050"
 	vectorColumnFingerprint        = "fee1ce70eef6dbbf6bb0bb4bc609d03ddbdedde3b7450b34968a146ff1a58502"
@@ -45,7 +45,7 @@ var canonicalTableColumns = map[string]string{
 	"external_field_mappings":        "id,connector_instance,kata_field,external_field_id,external_field_name,accepted_kinds_json,nullable,writable,schema_revision,active,created_at,updated_at",
 	"external_field_states":          "binding_id,mapping_id,baseline_json,conflicted,conflict_kata,conflict_external,conflict_at,updated_at",
 	"external_root_bindings":         "id,uid,project_id,issue_id,root_mapping_id,connector_instance,external_root_key,external_account_key,active,enabled,paused_reason,receive_comments,receive_comments_after,publish_comments,publish_comments_after,complete_external,claim_token,claim_started_at,last_external_state,last_external_revision,pending_comment_uid,pending_comment_started_at,last_attempt_at,last_success_at,last_error_at,last_error,consecutive_failures,next_attempt_at,created_at,updated_at,unbound_at",
-	"federation_bindings":            "project_id,role,hub_url,hub_project_id,hub_project_uid,replay_horizon_event_id,pull_cursor_event_id,push_enabled,push_cursor_event_id,bound_actor,allow_insecure,enabled,created_at,updated_at,last_sync_at,relay_config",
+	"federation_bindings":            "project_id,role,hub_url,hub_project_id,hub_project_uid,replay_horizon_event_id,pull_cursor_event_id,push_enabled,push_cursor_event_id,bound_actor,allow_insecure,enabled,created_at,updated_at,last_sync_at,relay_config,retained_through_event_id",
 	"federation_enrollments":         "id,token_hash,spoke_instance_uid,project_id,capabilities,bound_actor,allow_adoption_snapshot_authors,adoption_baseline_open,adoption_baseline_next_source_event_id,adoption_baseline_end_source_event_id,created_at,updated_at,revoked_at,relay_binding_uid,relay_protocol_version,parent_token_id,relay_reset_epoch,relay_serve_downstream",
 	"federation_quarantine":          "id,project_id,direction,first_event_id,last_event_id,event_uids,error,created_at,skipped_at,skipped_by,skip_reason",
 	"federation_sync_status":         "project_id,last_pull_started_at,last_pull_success_at,last_push_started_at,last_push_success_at,last_error_at,last_error,last_reset_at",

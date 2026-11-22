@@ -817,15 +817,17 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
 	if err := PreserveFederationProjectIdentityDependencies(ctx, tx, projectID); err != nil {
 		return fmt.Errorf("preserve former project identity dependencies: %w", err)
 	}
-	_, err = tx.ExecContext(ctx, `DELETE FROM events AS e WHERE e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)`, projectID)
+	_, err = tx.ExecContext(ctx, `DELETE FROM events AS e WHERE e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)
+ AND NOT EXISTS(SELECT 1 FROM federation_bindings b WHERE b.project_id=e.project_id AND e.origin_instance_uid=$2 AND e.id<=b.retained_through_event_id AND e.actor<>b.bound_actor)`, projectID, originInstanceUID)
 	return err
 }
 
 // ClearFederatedProjectEvents retains source envelopes still contributing to
 // issues now owned elsewhere. A source reset cannot rewind those destinations.
-func ClearFederatedProjectEvents(ctx context.Context, tx *sql.Tx, projectID int64) error {
+func ClearFederatedProjectEvents(ctx context.Context, tx *sql.Tx, projectID int64, instanceUID string) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM events AS e WHERE e.project_id=$1
- AND NOT EXISTS(SELECT 1 FROM issues i WHERE i.uid=e.issue_uid AND i.project_id<>$1)`, projectID); err != nil {
+ AND NOT EXISTS(SELECT 1 FROM issues i WHERE i.uid=e.issue_uid AND i.project_id<>$1)
+ AND NOT EXISTS(SELECT 1 FROM federation_bindings b WHERE b.project_id=e.project_id AND e.origin_instance_uid=$2 AND e.id<=b.retained_through_event_id AND e.actor<>b.bound_actor)`, projectID, instanceUID); err != nil {
 		return err
 	}
 	// Retained envelopes may still refer numerically to a peer being reset.

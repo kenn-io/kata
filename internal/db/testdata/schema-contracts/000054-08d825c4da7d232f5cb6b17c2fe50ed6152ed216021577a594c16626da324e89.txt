@@ -1,0 +1,1 @@
+Retain local federation history across replica reenrollment.

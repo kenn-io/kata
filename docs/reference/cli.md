@@ -1960,9 +1960,12 @@ not require a workspace or a running daemon. The output is a single JSON object:
   "go": "go1.27.0",
   "os": "linux",
   "arch": "amd64",
-  "agent_format": 1
+  "agent_format": 1,
+  "rejoin_existing_replica": true
 }
 ```
+
+`rejoin_existing_replica` indicates that this build can publish new events after rejoining the same project.
 
 `name` is the canonical tool name. `version` is the semantic version for a
 release build; development builds may report a development identifier.

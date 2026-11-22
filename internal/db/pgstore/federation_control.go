@@ -15,7 +15,7 @@ import (
 const federationBindingSelect = `SELECT project_id, role, hub_url, hub_project_id,
        hub_project_uid, replay_horizon_event_id, pull_cursor_event_id, push_enabled,
        push_cursor_event_id, bound_actor, allow_insecure, enabled, created_at,
-       updated_at, last_sync_at, relay_config FROM federation_bindings`
+       updated_at, last_sync_at, relay_config, retained_through_event_id FROM federation_bindings`
 
 const federationSyncStatusSelect = `SELECT project_id, last_pull_started_at,
        last_pull_success_at, last_push_started_at, last_push_success_at,
@@ -147,11 +147,16 @@ WHERE project_id=$1 AND active=1 LIMIT 1`, input.ProjectID).Scan(&externalRootBi
 		if err := db.CheckRelayBindingUpdate(previous, input); err != nil {
 			return err
 		}
+		if input.RetainHistory {
+			if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),0) FROM events WHERE project_id=$1 AND origin_instance_uid=$2`, input.ProjectID, s.InstanceUID()).Scan(&input.RetainedThroughEventID); err != nil {
+				return err
+			}
+		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO federation_bindings(
   project_id, role, hub_url, hub_project_id, hub_project_uid,
   replay_horizon_event_id, pull_cursor_event_id, push_enabled,
-  push_cursor_event_id, bound_actor, allow_insecure, enabled
-) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+  push_cursor_event_id, bound_actor, allow_insecure, enabled, retained_through_event_id
+) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 ON CONFLICT(project_id) DO UPDATE SET role=EXCLUDED.role, hub_url=EXCLUDED.hub_url,
 hub_project_id=EXCLUDED.hub_project_id, hub_project_uid=EXCLUDED.hub_project_uid,
 replay_horizon_event_id=EXCLUDED.replay_horizon_event_id,
@@ -162,7 +167,7 @@ updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`,
 			input.ProjectID, string(input.Role), input.HubURL, input.HubProjectID,
 			input.HubProjectUID, input.ReplayHorizonEventID, input.PullCursorEventID,
 			storedBool(input.PushEnabled), input.PushCursorEventID, actor,
-			storedBool(input.AllowInsecure), storedBool(input.Enabled))
+			storedBool(input.AllowInsecure), storedBool(input.Enabled), input.RetainedThroughEventID)
 		if err != nil {
 			return mapSQLError(err, nil)
 		}
@@ -865,7 +870,7 @@ func scanFederationBinding(row rowScanner) (db.FederationBinding, error) {
 		&binding.HubProjectUID, &binding.ReplayHorizonEventID, &binding.PullCursorEventID,
 		(*storedBool)(&binding.PushEnabled), &binding.PushCursorEventID, &binding.Actor,
 		(*storedBool)(&binding.AllowInsecure), (*storedBool)(&binding.Enabled),
-		(*storedTime)(&binding.CreatedAt), (*storedTime)(&binding.UpdatedAt), &lastSyncAt, &relayConfig)
+		(*storedTime)(&binding.CreatedAt), (*storedTime)(&binding.UpdatedAt), &lastSyncAt, &relayConfig, &binding.RetainedThroughEventID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.FederationBinding{}, db.ErrNotFound
 	}

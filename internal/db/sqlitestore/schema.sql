@@ -366,6 +366,7 @@ CREATE TABLE federation_bindings (
   updated_at              DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   last_sync_at            DATETIME,
   relay_config TEXT,
+  retained_through_event_id INTEGER NOT NULL DEFAULT 0,
   CHECK (length(hub_project_uid) = 26),
   CHECK (role = 'hub' OR length(trim(hub_url)) > 0),
   CHECK (role = 'hub' OR hub_project_id > 0),

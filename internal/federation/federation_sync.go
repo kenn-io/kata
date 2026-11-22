@@ -262,6 +262,7 @@ func pushDirectSpoke(
 	opts clientpkg.Opts,
 ) error {
 	if binding.PushEnabled {
+		snapshotsSent := make(map[string]bool)
 		for {
 			if q, err := store.ActiveFederationQuarantine(ctx, binding.ProjectID, db.FederationQuarantineDirectionPush); err == nil {
 				quarantinedEvents, eventErr := store.EventsByUIDs(ctx, binding.ProjectID, q.EventUIDs)
@@ -296,7 +297,30 @@ func pushDirectSpoke(
 				break
 			}
 			for len(pending) > 0 {
-				batch, adoptionBaseline, adoptionBaselineEndEventID, err := nextFederationPushIngestBatch(pending)
+				if retainedFederationEvent(pending[0], *binding, store.InstanceUID()) {
+					end := 1
+					for end < len(pending) && retainedFederationEvent(pending[end], *binding, store.InstanceUID()) {
+						end++
+					}
+					if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+						return err
+					}
+					cursor := pending[end-1].ID
+					if err := store.AdvanceFederationPushCursor(ctx, binding.ProjectID, cursor); err != nil {
+						return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+					}
+					binding.PushCursorEventID = cursor
+					pending = pending[end:]
+					continue
+				}
+				end := len(pending)
+				for i := 1; i < len(pending); i++ {
+					if retainedFederationEvent(pending[i], *binding, store.InstanceUID()) {
+						end = i
+						break
+					}
+				}
+				batch, adoptionBaseline, adoptionBaselineEndEventID, err := nextFederationPushIngestBatch(pending[:end])
 				if err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
@@ -311,6 +335,21 @@ func pushDirectSpoke(
 						AdoptionBaselineEndEventID: adoptionBaselineEndEventID,
 					})
 				if err != nil {
+					if issueUID := retainedUnknownIssue(err, batch); issueUID != "" && !snapshotsSent[issueUID] {
+						snapshot, sourceID, snapshotErr := store.RetainedIssueSnapshot(ctx, binding.ProjectID, issueUID)
+						if snapshotErr == nil {
+							envelope := federationIngestEnvelope(snapshot)
+							envelope.EventID = sourceID
+							_, snapshotErr = client.IngestProjectEventsWithOptions(ctx, hubProjectID, []api.FederationIngestEventEnvelope{envelope}, IngestProjectEventsOptions{})
+							if snapshotErr == nil {
+								snapshotsSent[issueUID] = true
+								continue
+							}
+						}
+						if !errors.Is(snapshotErr, db.ErrNotFound) {
+							return recordFederationSyncError(ctx, store, binding.ProjectID, snapshotErr)
+						}
+					}
 					if isPoisonedFederationPushError(err) {
 						if qErr := recordFederationPushQuarantine(ctx, store, binding.ProjectID, batch, err); qErr != nil {
 							return recordFederationSyncError(ctx, store, binding.ProjectID, errors.Join(err, qErr))
@@ -360,6 +399,33 @@ func pushDirectSpoke(
 		}
 	}
 	return nil
+}
+
+var retainedUnknownIssuePattern = regexp.MustCompile(`^federation ingest validation: ([a-z._]+) references unknown issue ([0-9A-HJKMNP-TV-Z]{26})$`)
+
+func retainedUnknownIssue(err error, batch []db.Event) string {
+	status, ok := errors.AsType[*HubStatusError](err)
+	if !ok || status.StatusCode != http.StatusBadRequest {
+		return ""
+	}
+	body, ok := federationQuarantineHubError(status.Body)
+	if !ok || body.Code != "validation" {
+		return ""
+	}
+	match := retainedUnknownIssuePattern.FindStringSubmatch(body.Message)
+	if match == nil {
+		return ""
+	}
+	for _, event := range batch {
+		if event.Type == match[1] && event.IssueUID != nil && *event.IssueUID == match[2] {
+			return match[2]
+		}
+	}
+	return ""
+}
+
+func retainedFederationEvent(event db.Event, binding db.FederationBinding, instanceUID string) bool {
+	return event.OriginInstanceUID == instanceUID && event.ID <= binding.RetainedThroughEventID && event.Actor != binding.Actor
 }
 
 // PushDirectSpoke drains pending direct-spoke events without requiring pull authority.

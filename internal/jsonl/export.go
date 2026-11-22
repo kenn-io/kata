@@ -1376,22 +1376,23 @@ func exportFederationBindings(
 	sourceSchemaVersion int,
 ) error {
 	type record struct {
-		RelayConfig          *db.RelayBindingConfig `json:"relay_config,omitempty"`
-		ProjectID            int64                  `json:"project_id"`
-		Role                 string                 `json:"role"`
-		HubURL               string                 `json:"hub_url"`
-		HubProjectID         int64                  `json:"hub_project_id"`
-		HubProjectUID        string                 `json:"hub_project_uid"`
-		ReplayHorizonEventID int64                  `json:"replay_horizon_event_id"`
-		PullCursorEventID    int64                  `json:"pull_cursor_event_id"`
-		PushEnabled          bool                   `json:"push_enabled"`
-		PushCursorEventID    int64                  `json:"push_cursor_event_id"`
-		Actor                string                 `json:"bound_actor,omitempty"`
-		AllowInsecure        bool                   `json:"allow_insecure,omitzero"`
-		Enabled              bool                   `json:"enabled"`
-		CreatedAt            string                 `json:"created_at"`
-		UpdatedAt            string                 `json:"updated_at"`
-		LastSyncAt           *string                `json:"last_sync_at,omitempty"`
+		RelayConfig            *db.RelayBindingConfig `json:"relay_config,omitempty"`
+		ProjectID              int64                  `json:"project_id"`
+		Role                   string                 `json:"role"`
+		HubURL                 string                 `json:"hub_url"`
+		HubProjectID           int64                  `json:"hub_project_id"`
+		HubProjectUID          string                 `json:"hub_project_uid"`
+		ReplayHorizonEventID   int64                  `json:"replay_horizon_event_id"`
+		PullCursorEventID      int64                  `json:"pull_cursor_event_id"`
+		PushEnabled            bool                   `json:"push_enabled"`
+		PushCursorEventID      int64                  `json:"push_cursor_event_id"`
+		RetainedThroughEventID int64                  `json:"retained_through_event_id,omitempty"`
+		Actor                  string                 `json:"bound_actor,omitempty"`
+		AllowInsecure          bool                   `json:"allow_insecure,omitzero"`
+		Enabled                bool                   `json:"enabled"`
+		CreatedAt              string                 `json:"created_at"`
+		UpdatedAt              string                 `json:"updated_at"`
+		LastSyncAt             *string                `json:"last_sync_at,omitempty"`
 	}
 	actorSelect := `''`
 	if sourceSchemaVersion >= 13 {
@@ -1405,11 +1406,15 @@ func exportFederationBindings(
 	if sourceSchemaVersion >= 33 && opts.ProjectID <= 0 {
 		relayConfigSelect = `relay_config`
 	}
+	retainedSelect := `0`
+	if sourceSchemaVersion >= 54 {
+		retainedSelect = `retained_through_event_id`
+	}
 	query := `SELECT project_id, role, hub_url, hub_project_id, hub_project_uid,
 	                 replay_horizon_event_id, pull_cursor_event_id, push_enabled,
 	                 push_cursor_event_id, ` + actorSelect + `, ` + allowInsecureSelect + `, enabled,
 	                 CAST(created_at AS TEXT), CAST(updated_at AS TEXT),
-	                 CAST(last_sync_at AS TEXT), ` + relayConfigSelect + `
+	                 CAST(last_sync_at AS TEXT), ` + relayConfigSelect + `, ` + retainedSelect + `
 	          FROM federation_bindings`
 	args := []any{}
 	if opts.ProjectID > 0 {
@@ -1428,7 +1433,7 @@ func exportFederationBindings(
 		err := rows.Scan(&rec.ProjectID, &rec.Role, &rec.HubURL, &rec.HubProjectID,
 			&rec.HubProjectUID, &rec.ReplayHorizonEventID, &rec.PullCursorEventID,
 			&pushEnabled, &rec.PushCursorEventID, &rec.Actor, &allowInsecure, &enabled,
-			&rec.CreatedAt, &rec.UpdatedAt, &rec.LastSyncAt, &relayConfig)
+			&rec.CreatedAt, &rec.UpdatedAt, &rec.LastSyncAt, &relayConfig, &rec.RetainedThroughEventID)
 		if err != nil {
 			return rec, err
 		}

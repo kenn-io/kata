@@ -26,13 +26,13 @@ func pgReplayFederationBinding(
 	_, err = tx.ExecContext(ctx, `INSERT INTO federation_bindings(
 project_id,role,hub_url,hub_project_id,hub_project_uid,replay_horizon_event_id,
 pull_cursor_event_id,push_enabled,push_cursor_event_id,bound_actor,allow_insecure,
-enabled,created_at,updated_at,last_sync_at,relay_config
-) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+enabled,created_at,updated_at,last_sync_at,relay_config,retained_through_event_id
+) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
 		binding.ProjectID, binding.Role, binding.HubURL, binding.HubProjectID,
 		binding.HubProjectUID, binding.ReplayHorizonEventID, binding.PullCursorEventID,
 		pgReplayBoolInt(pushEnabled), binding.PushCursorEventID, actor,
 		pgReplayBoolInt(binding.AllowInsecure), pgReplayBoolInt(binding.Enabled),
-		binding.CreatedAt, binding.UpdatedAt, binding.LastSyncAt, raw)
+		binding.CreatedAt, binding.UpdatedAt, binding.LastSyncAt, raw, binding.RetainedThroughEventID)
 	return pgReplayError(db.ImportKindFederationBinding, err)
 }
 

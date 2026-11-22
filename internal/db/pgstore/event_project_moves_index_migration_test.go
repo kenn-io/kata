@@ -20,7 +20,9 @@ import (
 // restoreSchema50EventIndex; it does nothing once the index is gone.
 func dropSchema53ProjectMovesIndex(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
 	t.Helper()
-	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP INDEX IF EXISTS %s.idx_events_project_moves`, schema)) // #nosec G201 -- schema is a fixed test identifier.
+	_, err := admin.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE %s.federation_bindings DROP COLUMN IF EXISTS retained_through_event_id`, schema)) // #nosec G201 -- schema is a fixed test identifier.
+	require.NoError(t, err)
+	_, err = admin.ExecContext(ctx, fmt.Sprintf(`DROP INDEX IF EXISTS %s.idx_events_project_moves`, schema)) // #nosec G201 -- schema is a fixed test identifier.
 	require.NoError(t, err)
 }
 
