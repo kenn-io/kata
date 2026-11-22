@@ -153,13 +153,14 @@ describe('IssueCollection', () => {
     )
 
     it('renders every row when End is pressed and focuses the last one', async () => {
-      const { container } = renderMany(1000)
+      // One row beyond two 150-row chunks distinguishes End from loading just the next chunk.
+      const { container } = renderMany(301)
       const first = container.querySelector<HTMLElement>('button.row')!
       first.focus()
       await fireEvent.keyDown(first, { key: 'End' })
-      await waitFor(() => expect(visibleRows()).toHaveLength(1000))
+      await waitFor(() => expect(visibleRows()).toHaveLength(301))
       await waitFor(() =>
-        expect((document.activeElement as HTMLElement | null)?.dataset.uid).toBe('bulk-00999'),
+        expect((document.activeElement as HTMLElement | null)?.dataset.uid).toBe('bulk-00300'),
       )
     })
 
