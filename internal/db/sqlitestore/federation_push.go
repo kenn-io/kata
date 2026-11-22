@@ -26,8 +26,8 @@ func (d *Store) PendingFederationPushEvents(
 	out, err := d.queryPendingFederationPushEvents(ctx, `
 		WHERE e.project_id = ?
 		  AND e.origin_instance_uid = ?
-		  AND (e.id > ? OR `+db.FederationHeldMoveSQL("e")+`)
-		  AND `+db.FederationOwedEventSQL("e")+`
+		  AND e.id > ?
+		  AND `+db.FederationOwedEventSQL("e", false)+`
 		ORDER BY e.id ASC
 		LIMIT ?`, projectID, originInstanceUID, afterID, limit)
 	if err != nil {
@@ -52,7 +52,7 @@ func (d *Store) PendingFederationPushEvents(
 			     WHERE barrier.project_id = ?
 			       AND barrier.origin_instance_uid = ?
 			       AND barrier.id > ?
-			       AND `+db.FederationOwedEventSQL("barrier")+`
+			       AND `+db.FederationOwedEventSQL("barrier", false)+`
 			       AND barrier.type NOT IN (`+db.FederationSnapshotEventTypesSQL()+`)
 			  ), 9223372036854775807)
 			ORDER BY e.id ASC`, projectID, originInstanceUID, out[len(out)-1].ID, projectID, originInstanceUID, runStartAfterID)
@@ -118,8 +118,8 @@ func (d *Store) PendingFederationPushStats(
 		  FROM events e
 		 WHERE e.project_id = ?
 		   AND e.origin_instance_uid = ?
-		   AND (e.id > ? OR `+db.FederationHeldMoveSQL("e")+`)
-		   AND `+db.FederationOwedEventSQL("e"),
+		   AND e.id > ?
+		   AND `+db.FederationOwedEventSQL("e", false),
 		projectID, originInstanceUID, afterID).Scan(&count, &maxID); err != nil {
 		return 0, 0, fmt.Errorf("count pending federation push: %w", err)
 	}
@@ -138,31 +138,11 @@ func federationPushEventTypeCondition(column string) string {
 // rebuilds the project, so an interruption leaves either the whole batch to
 // push again or the finished progress, and the home never shows rows built
 // from a snapshot it no longer holds.
-func (d *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string, sent []db.Event) error {
+func (d *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string) error {
 	if len(supersededEventUIDs) == 0 {
-		return d.RetryTransient(ctx, func() error {
-			tx, err := d.BeginTx(ctx, nil)
-			if err != nil {
-				return err
-			}
-			defer func() { _ = tx.Rollback() }()
-			if len(sent) > 0 {
-				if err := db.RecordFederationHeldMoves(ctx, tx, projectID, nextCursor, d.instanceUID, sent); err != nil {
-					return err
-				}
-			}
-			if err := advanceFederationPushCursor(ctx, tx, projectID, nextCursor); err != nil {
-				return err
-			}
-			return tx.Commit()
-		})
+		return d.AdvanceFederationPushCursor(ctx, projectID, nextCursor)
 	}
 	return d.materializeFederatedProjectAfter(ctx, projectID, func(ctx context.Context, tx *sql.Tx) error {
-		if len(sent) > 0 {
-			if err := db.RecordFederationHeldMoves(ctx, tx, projectID, nextCursor, d.instanceUID, sent); err != nil {
-				return err
-			}
-		}
 		deleted, err := db.AcknowledgeSupersededFederationSnapshots(ctx, tx, projectID, d.instanceUID, supersededEventUIDs)
 		if err != nil {
 			return err
@@ -353,7 +333,7 @@ func (d *Store) disableFederationPushWhenSettled(ctx context.Context, projectID 
 func federationReplicaSettledTx(ctx context.Context, tx *sql.Tx, binding db.FederationBinding, originInstanceUID string) error {
 	// A destination that still owes a move out of this project needs this
 	// project's current credential and actor to deliver it.
-	if err := db.CheckFederationMoveSourceLifecycle(ctx, tx, binding.ProjectID, originInstanceUID, false); err != nil {
+	if err := db.CheckFederationMoveSourceLifecycle(ctx, tx, binding.ProjectID, originInstanceUID); err != nil {
 		return err
 	}
 	if binding.PushEnabled {
@@ -363,8 +343,8 @@ func federationReplicaSettledTx(ctx context.Context, tx *sql.Tx, binding db.Fede
 			  SELECT 1 FROM events e
 			   WHERE e.project_id = ?
 			     AND e.origin_instance_uid = ?
-			     AND (e.id > ? OR `+db.FederationHeldMoveSQL("e")+`)
-			     AND `+db.FederationOwedEventSQL("e")+`)`,
+			     AND e.id > ?
+			     AND `+db.FederationOwedEventSQL("e", false)+`)`,
 			binding.ProjectID, originInstanceUID, binding.PushCursorEventID).Scan(&pending); err != nil {
 			return fmt.Errorf("check pending federation push: %w", err)
 		}
@@ -447,6 +427,9 @@ func (d *Store) replaceFederationBoundActorWhenSettled(ctx context.Context, proj
 	if err := federationReplicaSettledTx(ctx, tx, existing, originInstanceUID); err != nil {
 		return db.FederationBinding{}, err
 	}
+	if err := db.CheckFederationActorMoves(ctx, tx, existing, originInstanceUID); err != nil {
+		return db.FederationBinding{}, err
+	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE federation_bindings
 		   SET bound_actor = ?,
@@ -505,8 +488,8 @@ func (d *Store) resetFederatedProjectIfNoPendingPush(
 		         FROM events e
 		        WHERE e.project_id = ?
 		          AND e.origin_instance_uid = ?
-		          AND (e.id > ? OR `+db.FederationHeldMoveSQL("e")+`)
-		          AND `+db.FederationOwedEventSQL("e")+`
+		          AND e.id > ?
+		          AND `+db.FederationOwedEventSQL("e", false)+`
 		   )
 		   AND NOT EXISTS (
 		       SELECT 1
@@ -542,7 +525,7 @@ func (d *Store) resetFederatedProjectIfNoPendingPush(
 		}
 		return db.ErrFederationResetBlockedByPendingPush
 	}
-	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID, d.instanceUID); err != nil {
+	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID, d.instanceUID, false); err != nil {
 		return err
 	}
 	if err := db.ClearFederatedProjectEvents(ctx, tx, projectID); err != nil {

@@ -190,23 +190,11 @@ func (s *Store) AdvanceFederationPullCursor(ctx context.Context, projectID, next
 // rebuilds the project, so an interruption leaves either the whole batch to
 // push again or the finished progress, and the home never shows rows built
 // from a snapshot it no longer holds.
-func (s *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string, sent []db.Event) error {
+func (s *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string) error {
 	if len(supersededEventUIDs) == 0 {
-		return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
-			if len(sent) > 0 {
-				if err := db.RecordFederationHeldMoves(ctx, tx, projectID, nextCursor, s.instanceUID, sent); err != nil {
-					return err
-				}
-			}
-			return updateFederationCursor(ctx, tx, projectID, nextCursor, true)
-		})
+		return s.AdvanceFederationPushCursor(ctx, projectID, nextCursor)
 	}
 	return s.materializeFederatedProjectAfter(ctx, projectID, func(ctx context.Context, tx *sql.Tx) error {
-		if len(sent) > 0 {
-			if err := db.RecordFederationHeldMoves(ctx, tx, projectID, nextCursor, s.instanceUID, sent); err != nil {
-				return err
-			}
-		}
 		deleted, err := db.AcknowledgeSupersededFederationSnapshots(ctx, tx, projectID, s.instanceUID, supersededEventUIDs)
 		if err != nil {
 			return err
@@ -367,13 +355,13 @@ WHERE project_id=$1`, projectID); err != nil {
 func pgFederationReplicaSettledTx(ctx context.Context, tx *sql.Tx, binding db.FederationBinding, originInstanceUID string) error {
 	// A destination that still owes a move out of this project needs this
 	// project's current credential and actor to deliver it.
-	if err := db.CheckFederationMoveSourceLifecycle(ctx, tx, binding.ProjectID, originInstanceUID, true); err != nil {
+	if err := db.CheckFederationMoveSourceLifecycle(ctx, tx, binding.ProjectID, originInstanceUID); err != nil {
 		return err
 	}
 	if binding.PushEnabled {
 		var pending bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM events e
-WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND (e.id>$3 OR `+db.FederationHeldMoveSQL("e")+`) AND `+db.FederationOwedEventSQL("e")+`)`,
+WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND `+db.FederationOwedEventSQL("e", true)+`)`,
 			binding.ProjectID, originInstanceUID, binding.PushCursorEventID).Scan(&pending); err != nil {
 			return mapSQLError(err, nil)
 		}
@@ -437,6 +425,9 @@ func (s *Store) ReplaceFederationBoundActorWhenSettled(ctx context.Context, proj
 			return fmt.Errorf("replace federation bound actor: only a direct spoke binding has a replaceable actor")
 		}
 		if err := pgFederationReplicaSettledTx(ctx, tx, binding, originInstanceUID); err != nil {
+			return err
+		}
+		if err := db.CheckFederationActorMoves(ctx, tx, binding, originInstanceUID); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE federation_bindings SET bound_actor=$1,

@@ -64,8 +64,8 @@ WHERE project_id=$1 AND skipped_at IS NULL ORDER BY id ASC LIMIT 1 FOR UPDATE`, 
 		}
 		var pending bool
 		err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events e
-WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND (e.id>$3 OR `+db.FederationHeldMoveSQL("e")+`) AND `+
-			db.FederationOwedEventSQL("e")+`)`, projectID, originInstanceUID, pushCursorEventID).
+WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND `+
+			db.FederationOwedEventSQL("e", true)+`)`, projectID, originInstanceUID, pushCursorEventID).
 			Scan(&pending)
 		if err != nil {
 			return mapSQLError(err, nil)
@@ -119,7 +119,7 @@ func clearRelayProjectTx(ctx context.Context, tx *sql.Tx, projectID int64, proje
 }
 
 func clearFederatedProjectTx(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string) error {
-	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID, originInstanceUID); err != nil {
+	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID, originInstanceUID, true); err != nil {
 		return err
 	}
 	if err := db.ClearFederatedProjectEvents(ctx, tx, projectID); err != nil {

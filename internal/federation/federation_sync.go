@@ -318,7 +318,7 @@ func pushDirectSpoke(
 					}
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
-				if ack.PushCursorEventID <= binding.PushCursorEventID && ack.PushCursorEventID < batch[0].ID {
+				if ack.PushCursorEventID <= binding.PushCursorEventID {
 					return recordFederationSyncError(ctx, store, binding.ProjectID,
 						errors.New("federation push cursor did not advance"))
 				}
@@ -337,7 +337,7 @@ func pushDirectSpoke(
 				// snapshot for them. Those snapshots go, and the project is
 				// rebuilt, in the same transaction that moves the cursor.
 				ackCtx, resets := db.WithFederationMoveResetCapture(ctx)
-				if err := store.AcknowledgeFederationPush(ackCtx, binding.ProjectID, ack.PushCursorEventID, ack.SupersededEventUIDs, batch); err != nil {
+				if err := store.AcknowledgeFederationPush(ackCtx, binding.ProjectID, ack.PushCursorEventID, ack.SupersededEventUIDs); err != nil {
 					// A push that waits for the hub's history is finished by the
 					// next pull and the push after it. The reason is recorded
 					// like any other, so a wait that does not end is visible in
@@ -351,7 +351,7 @@ func pushDirectSpoke(
 						onPulledEvents(reset.ProjectID, []db.Event{{ID: reset.EventID, ProjectID: reset.ProjectID, Type: db.ProjectScopeResetEventType}})
 					}
 				}
-				binding.PushCursorEventID = max(binding.PushCursorEventID, ack.PushCursorEventID)
+				binding.PushCursorEventID = ack.PushCursorEventID
 				pending = pendingFederationEventsAfterCursor(pending, ack.PushCursorEventID)
 			}
 		}
