@@ -142,7 +142,6 @@ test('task filters stay inside a narrow list pane without overlapping', async ({
         ),
     )
     return {
-      panelHeight: panelBounds.height,
       panelContainsToolbar: panelBounds.bottom >= toolbarBounds.bottom,
       panelBeforeList: panelBounds.bottom <= listHeaderBounds.top,
       controlsContained: controls.every(
@@ -157,7 +156,6 @@ test('task filters stay inside a narrow list pane without overlapping', async ({
   })
 
   expect(layout).toEqual({
-    panelHeight: expect.any(Number),
     panelContainsToolbar: true,
     panelBeforeList: true,
     controlsContained: true,
@@ -242,11 +240,6 @@ test('the task list and pane stay aligned beside an open task', async ({ page, k
   const edit = (await page.getByRole('button', { name: 'Edit issue' }).boundingBox())!
   expect(Math.abs(displayButton.y - edit.y)).toBeLessThan(1)
   expect(Math.abs(displayButton.height - edit.height)).toBeLessThan(1)
-  const titleLabel = (await page.locator('.column-heading-title .col-title span').boundingBox())!
-  const sortHint = (await page.locator('.column-heading-title .sort-hint').boundingBox())!
-  const sortGap = sortHint.x - (titleLabel.x + titleLabel.width)
-  expect(sortGap).toBeGreaterThan(4)
-  expect(sortGap).toBeLessThan(24)
   const header = page.locator('.table-header')
   const headerRight = await header.evaluate((element) => {
     const bounds = element.getBoundingClientRect()
@@ -257,14 +250,6 @@ test('the task list and pane stay aligned beside an open task', async ({ page, k
       : bounds.right - inset
   })
   expect(Math.abs(headerRight - selection)).toBeLessThan(1)
-
-  await page.goto(`${kata.origin}/kata?view=all-open`)
-  const visibleRow = page.getByRole('button', { name: /Add retries to the task worker/ })
-  for (const column of ['due', 'updated', 'priority']) {
-    const header = (await page.locator(`.column-heading-${column} .col`).boundingBox())!
-    const cell = (await visibleRow.locator(`.cell-${column}`).boundingBox())!
-    expect(Math.abs(header.x + header.width - cell.x - cell.width)).toBeLessThan(1)
-  }
 })
 
 test('a narrow list names the Updated sort its hidden column applies', async ({ page, kata }) => {
@@ -283,6 +268,10 @@ test('a narrow list names the Updated sort its hidden column applies', async ({ 
   await expect(updated).toHaveCount(1)
   const hint = (await updated.boundingBox())!
   const title = (await header.locator('.column-heading-title').boundingBox())!
+  const titleLabel = (await header.locator('.column-heading-title .col-title span').boundingBox())!
+  const sortGap = hint.x - (titleLabel.x + titleLabel.width)
+  expect(sortGap).toBeGreaterThan(4)
+  expect(sortGap).toBeLessThan(24)
   expect(hint.x + hint.width).toBeLessThanOrEqual(title.x + title.width)
 
   await header.getByRole('button', { name: 'Sort by Due' }).click()

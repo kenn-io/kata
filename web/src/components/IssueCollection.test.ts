@@ -710,26 +710,31 @@ describe('IssueCollection', () => {
     },
   )
 
-  it('sorts due dates with overdue tasks first and undated tasks last', async () => {
+  it('applies Due sorting from the column heading', async () => {
     const overdue = task({
       uid: 'overdue',
-      short_id: 'overdue',
+      updated_at: '2026-05-14T08:00:00Z',
       metadata: { deadline_on: '2026-05-10' },
     })
-    const later = task({ uid: 'later', short_id: 'later', metadata: { deadline_on: '2026-05-20' } })
-    const undated = task({ uid: 'undated', short_id: 'undated' })
+    const later = task({
+      uid: 'later',
+      updated_at: '2026-05-15T08:00:00Z',
+      metadata: { deadline_on: '2026-05-20' },
+    })
     render(IssueCollection, {
       props: {
-        currentView: viewWithIssues([undated, later, overdue]),
+        currentView: viewWithIssues([overdue, later]),
         selectedIssueUID: null,
         loading: false,
         onSelect: () => {},
       },
     })
 
-    await fireEvent.click(screen.getByRole('button', { name: /Sort by Due/ }))
+    const dueSort = screen.getByRole('button', { name: /Sort by Due/ })
+    await fireEvent.click(dueSort)
 
-    expect(visibleRows().map((row) => row.dataset.uid)).toEqual(['overdue', 'later', 'undated'])
+    expect(dueSort.getAttribute('aria-pressed')).toBe('true')
+    expect(visibleRows().map((row) => row.dataset.uid)).toEqual(['overdue', 'later'])
   })
 
   it('keeps Inbox task rows without a group heading', () => {

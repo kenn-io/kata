@@ -41,7 +41,6 @@ describe('SplitLayout', () => {
     render(SplitLayoutTestHarness, { props: { onResize } })
 
     const handle = screen.getByRole('separator', { name: 'Resize Kata panes' })
-    expect(screen.getByTestId('secondary-beside').textContent).toBe('true')
     expect(handle.getAttribute('aria-orientation')).toBe('vertical')
     expect(handle.getAttribute('aria-valuemin')).toBe('200')
     expect(handle.getAttribute('aria-valuemax')).toBe('600')
@@ -68,7 +67,6 @@ describe('SplitLayout', () => {
 
     const handle = screen.getByRole('separator', { name: 'Resize Kata panes' })
     expect(handle.getAttribute('aria-orientation')).toBe('horizontal')
-    expect(screen.getByTestId('secondary-beside').textContent).toBe('false')
     expect(handle.getAttribute('aria-valuemax')).toBe('400')
     expect(handle.getAttribute('aria-valuenow')).toBe('210')
 
@@ -80,21 +78,29 @@ describe('SplitLayout', () => {
     expect(onResize).toHaveBeenLastCalledWith(274)
   })
 
-  it('stacks a side-by-side split from the measured pane width', async () => {
+  it('reports when the secondary pane sits beside the primary pane', async () => {
+    mockRect()
+    const horizontal = render(SplitLayoutTestHarness)
+    await waitFor(() => expect(screen.getByTestId('secondary-beside').textContent).toBe('true'))
+
+    horizontal.unmount()
+    vi.restoreAllMocks()
+    mockRect()
+    const vertical = render(SplitLayoutTestHarness, { props: { orientation: 'vertical' } })
+    await waitFor(() => expect(screen.getByTestId('secondary-beside').textContent).toBe('false'))
+
+    vertical.unmount()
+    vi.restoreAllMocks()
     mockRect(620, 800)
-    const { container } = render(SplitLayoutTestHarness, {
+    const stacked = render(SplitLayoutTestHarness, {
       props: { orientation: 'horizontal', responsiveBreakpoint: 700 },
     })
-
-    await waitFor(() =>
-      expect(container.querySelector('.kata-sash')?.getAttribute('data-orientation')).toBe(
+    await waitFor(() => {
+      expect(stacked.container.querySelector('.kata-sash')?.getAttribute('data-orientation')).toBe(
         'vertical',
-      ),
-    )
-    expect(
-      screen.getByRole('separator', { name: 'Resize Kata panes' }).getAttribute('aria-orientation'),
-    ).toBe('horizontal')
-    expect(screen.getByTestId('secondary-beside').textContent).toBe('false')
+      )
+      expect(screen.getByTestId('secondary-beside').textContent).toBe('false')
+    })
   })
 
   it('preserves the split preference while the detail pane is closed', () => {

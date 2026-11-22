@@ -59,8 +59,8 @@ describe('projectKataWorkspaceView', () => {
           issue('alert-today', { deadline_on: '2026-05-15' }),
         ],
         expected: [
-          ['Overdue', ['alert-late']],
-          ['Today', ['alert-today']],
+          ['overdue', ['alert-late']],
+          ['today', ['alert-today']],
         ],
       },
     ],
@@ -78,7 +78,7 @@ describe('projectKataWorkspaceView', () => {
             blocks: [{ uid: 'blocked-task', short_id: 'blocked-task' }],
           },
         ],
-        expected: [['reviewer-7 for user-a', ['handoff']]],
+        expected: [['user-a/reviewer-7', ['handoff']]],
       },
     ],
     [
@@ -87,7 +87,7 @@ describe('projectKataWorkspaceView', () => {
         view: 'scheduled',
         filters: { ...defaultKataTaskSearchFilters('scheduled'), status: 'ready' },
         issues: [issue('ready', { scheduled_on: '2026-05-20' })],
-        expected: [['Wed, May 20', ['ready']]],
+        expected: [['2026-05-20', ['ready']]],
       },
     ],
     [
@@ -113,8 +113,8 @@ describe('projectKataWorkspaceView', () => {
           },
         ],
         expected: [
-          ['Wed, May 20', ['First scheduled task']],
-          ['Thu, May 21', ['Second scheduled task']],
+          ['2026-05-20', ['First scheduled task']],
+          ['2026-05-21', ['Second scheduled task']],
         ],
       },
     ],
@@ -131,7 +131,7 @@ describe('projectKataWorkspaceView', () => {
     })
 
     expect(
-      view.groups.map((group) => [group.title, group.issues.map((item) => item.title)]),
+      view.groups.map((group) => [group.id, group.issues.map((item) => item.title)]),
     ).toEqual(expected)
   })
 
