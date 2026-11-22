@@ -703,9 +703,11 @@
         ),
       )
     }
-    const body: { title?: string; body?: string } = {}
+    const body: { title?: string; body?: string; expected_content_revision?: number } = {}
     if (patch.title !== undefined) body.title = patch.title
     if (patch.body !== undefined) body.body = patch.body
+    if (patch.expected_content_revision !== undefined)
+      body.expected_content_revision = patch.expected_content_revision
     return runMutation({ draft: patch }, (context) =>
       editIssueRequest(
         { projectId: String(target.project_id), ref: target.ref },

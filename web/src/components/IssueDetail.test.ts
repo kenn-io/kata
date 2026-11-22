@@ -133,6 +133,38 @@ describe('IssueDetail', () => {
     expect(onEditIssue).toHaveBeenCalledWith('issue-1', { body: 'First description' })
   })
 
+  it('retries a description save with the refreshed content revision', async () => {
+    let finish!: (ok: boolean) => void
+    const pending = new Promise<boolean>((resolve) => {
+      finish = resolve
+    })
+    const onEditIssue = vi.fn().mockReturnValueOnce(pending).mockResolvedValueOnce(true)
+    const view = renderDetail({ issue: makeIssue({ content_revision: 2 }), onEditIssue })
+    const section = screen.getByRole('region', { name: 'Description' })
+    await fireEvent.click(within(section).getByRole('button', { name: 'Edit description' }))
+    await fireEvent.input(within(section).getByRole('textbox', { name: 'Edit description' }), {
+      target: { value: 'My description' },
+    })
+    await fireEvent.click(within(section).getByRole('button', { name: 'Save' }))
+    expect(onEditIssue).toHaveBeenLastCalledWith('issue-1', {
+      body: 'My description',
+      expected_content_revision: 2,
+    })
+    await view.rerender({ issue: makeIssue({ body: 'Their description', content_revision: 3 }) })
+    finish(false)
+    await vi.waitFor(() => expect(screen.getByText(/Someone changed this task/)).toBeTruthy())
+    await vi.waitFor(() =>
+      expect(within(section).getByRole('button', { name: 'Save' }).hasAttribute('disabled')).toBe(
+        false,
+      ),
+    )
+    await fireEvent.click(within(section).getByRole('button', { name: 'Save' }))
+    expect(onEditIssue).toHaveBeenLastCalledWith('issue-1', {
+      body: 'My description',
+      expected_content_revision: 3,
+    })
+  })
+
   it('resolves a blocker title when the selected task list omits the blocker', async () => {
     const blocker = makeSummary()
     const searchReferences = vi.fn(async (query: string) =>
@@ -195,6 +227,31 @@ describe('IssueDetail', () => {
     else expect(view.container.querySelector('.state-line')).toBeNull()
     await view.rerender({ today: today === '2026-11-21' ? '2026-11-22' : '2026-11-23' })
     expect(view.container.querySelector('.state-line')?.textContent).toContain(next)
+  })
+
+  it('keeps a renamed title draft and retries against the refreshed revision', async () => {
+    let finish!: (ok: boolean) => void
+    const pending = new Promise<boolean>((resolve) => {
+      finish = resolve
+    })
+    const onEditIssue = vi.fn().mockReturnValueOnce(pending).mockResolvedValueOnce(true)
+    const view = renderDetail({ issue: makeIssue({ content_revision: 2 }), onEditIssue })
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit title' }))
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Edit title' }), {
+      target: { value: 'My title' },
+    })
+    await fireEvent.keyDown(screen.getByRole('textbox', { name: 'Edit title' }), { key: 'Enter' })
+    await view.rerender({ issue: makeIssue({ title: 'Their title', content_revision: 3 }) })
+    finish(false)
+    await vi.waitFor(() => expect(screen.getByText(/while you were editing/)).toBeTruthy())
+    expect((screen.getByRole('textbox', { name: 'Edit title' }) as HTMLInputElement).value).toBe(
+      'My title',
+    )
+    await fireEvent.keyDown(screen.getByRole('textbox', { name: 'Edit title' }), { key: 'Enter' })
+    expect(onEditIssue).toHaveBeenLastCalledWith('issue-1', {
+      title: 'My title',
+      expected_content_revision: 3,
+    })
   })
 
   it('keeps title and description drafts after a failed save', async () => {

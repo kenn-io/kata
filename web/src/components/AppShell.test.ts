@@ -1652,7 +1652,11 @@ describe('AppShell', () => {
     const selected = snapshot()
     selected.selected = {
       state: 'available',
-      issue: { ...selected.collection![0]!, body: 'Original body', revision: 3 },
+      issue: {
+        ...selected.collection![0]!,
+        body: 'Original body',
+        revision: 3,
+      },
       comments: [],
       labels: [],
       links: [],
@@ -1697,7 +1701,12 @@ describe('AppShell', () => {
     const selected = snapshot()
     selected.selected = {
       state: 'available',
-      issue: { ...selected.collection![0]!, body: 'Original body', revision: 3 },
+      issue: {
+        ...selected.collection![0]!,
+        body: 'Original body',
+        revision: 3,
+        content_revision: 7,
+      },
       comments: [],
       labels: [],
       links: [],
@@ -1731,6 +1740,7 @@ describe('AppShell', () => {
 
     expect(onEditIssue).toHaveBeenCalledWith('01J00000000000000000000001', {
       title: 'Updated example issue',
+      expected_content_revision: 7,
     })
   })
 

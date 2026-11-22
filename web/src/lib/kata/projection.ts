@@ -471,6 +471,7 @@ function normalizeIssue(
     deadline_on_date: issue.deadline_on_date,
     metadata: { ...issue.metadata },
     revision: issue.revision,
+    content_revision: issue.content_revision,
     owner: issue.owner,
     assignment_expires_on: issue.assignment_expires_on,
     author: issue.author,

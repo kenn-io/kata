@@ -66,6 +66,7 @@ export interface KataTaskSummary extends KataCreationAttributionWire {
   deadline_on_date?: string | undefined
   metadata: KataTaskMetadata
   revision: number
+  content_revision?: number | undefined
   owner?: string | undefined
   assignment_expires_on?: string | undefined
   author: string
@@ -309,6 +310,7 @@ export interface KataTaskCreateDraft {
 export interface KataTaskEditPatch {
   title?: string | undefined
   body?: string | undefined
+  expected_content_revision?: number | undefined
   links_delta?: KataTaskLinkDelta | undefined
 }
 

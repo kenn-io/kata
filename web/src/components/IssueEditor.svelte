@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { Avatar, CopyButton, Markdown, type TypeaheadOption } from '@kenn-io/kit-ui'
+  import { tick } from 'svelte'
+  import { Avatar, CopyButton, Markdown, Notice, type TypeaheadOption } from '@kenn-io/kit-ui'
   import { IssueAttachments, projectIssueDetail } from '@kenn-io/kata-ui'
   import NetworkIcon from '@lucide/svelte/icons/network'
   import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert'
@@ -156,6 +157,14 @@
   let savingBody = $state(false)
   let titleDraft = $state('')
   let bodyDraft = $state('')
+  let titleRevision = $state<number | undefined>()
+  let bodyRevision = $state<number | undefined>()
+  let titleConflict = $state(false)
+  let bodyConflict = $state(false)
+  let titleStart = $state('')
+  let titleBodyStart = $state('')
+  let bodyTitleStart = $state('')
+  let bodyStart = $state('')
   let titleInput: HTMLInputElement | null = $state(null)
   let bodyTextarea: HTMLTextAreaElement | null = $state(null)
   let cancelingTitle = $state(false)
@@ -210,7 +219,9 @@
     if (uid === lastIssueUID) return
     lastIssueUID = uid
     editingTitle = false
+    titleConflict = false
     editingBody = false
+    bodyConflict = false
     savingTitle = false
     savingBody = false
     cancelingTitle = false
@@ -261,6 +272,7 @@
   function resetBodyDraft(): void {
     editingBody = false
     bodyDraft = ''
+    bodyConflict = false
     pendingBodyResetUID = null
     pendingBodyResetGeneration = null
   }
@@ -344,6 +356,10 @@
     if (actionsDisabled) return
     cancelingTitle = false
     titleDraft = issue.issue.title
+    titleStart = issue.issue.title
+    titleBodyStart = issue.issue.body
+    titleRevision = issue.issue.content_revision
+    titleConflict = false
     editingTitle = true
     queueMicrotask(() => {
       titleInput?.focus()
@@ -367,7 +383,10 @@
     const resetGeneration = draftResetGeneration
     savingTitle = true
     try {
-      const result = await onEditIssue(mutationUID, { title: next })
+      const result = await onEditIssue(mutationUID, {
+        title: next,
+        ...(titleRevision === undefined ? {} : { expected_content_revision: titleRevision }),
+      })
       if (result === true) {
         if (issue.issue.uid !== mutationUID) return
         if (draftResetGeneration !== resetGeneration) {
@@ -375,6 +394,15 @@
         } else {
           pendingTitleResetUID = mutationUID
           pendingTitleResetGeneration = resetGeneration
+        }
+      } else {
+        await tick()
+        if (
+          issue.issue.uid === mutationUID &&
+          (issue.issue.title !== titleStart || issue.issue.body !== titleBodyStart)
+        ) {
+          titleConflict = true
+          titleRevision = issue.issue.content_revision
         }
       }
     } finally {
@@ -390,12 +418,17 @@
       event.preventDefault()
       cancelingTitle = true
       editingTitle = false
+      titleConflict = false
     }
   }
 
   function startEditingBody(): void {
     if (actionsDisabled) return
     bodyDraft = issue.issue.body
+    bodyStart = issue.issue.body
+    bodyTitleStart = issue.issue.title
+    bodyRevision = issue.issue.content_revision
+    bodyConflict = false
     editingBody = true
     queueMicrotask(() => bodyTextarea?.focus())
   }
@@ -411,7 +444,10 @@
     const resetGeneration = draftResetGeneration
     savingBody = true
     try {
-      const result = await onEditIssue(mutationUID, { body: next })
+      const result = await onEditIssue(mutationUID, {
+        body: next,
+        ...(bodyRevision === undefined ? {} : { expected_content_revision: bodyRevision }),
+      })
       if (result === true) {
         if (issue.issue.uid !== mutationUID) return
         if (draftResetGeneration !== resetGeneration) {
@@ -419,6 +455,15 @@
         } else {
           pendingBodyResetUID = mutationUID
           pendingBodyResetGeneration = resetGeneration
+        }
+      } else {
+        await tick()
+        if (
+          issue.issue.uid === mutationUID &&
+          (issue.issue.title !== bodyTitleStart || issue.issue.body !== bodyStart)
+        ) {
+          bodyConflict = true
+          bodyRevision = issue.issue.content_revision
         }
       }
     } finally {
@@ -494,6 +539,15 @@
           >
         {/if}
       </h2>
+      {#if titleConflict}
+        <Notice tone="error" class="detail-conflict">
+          {#snippet icon()}<CircleAlertIcon size={14} aria-hidden="true" />{/snippet}
+          {issue.issue.title !== titleStart
+            ? `Someone renamed this to "${issue.issue.title}" while you were editing.`
+            : 'Someone changed this task while you were editing.'} Press Enter to save yours, or Esc to
+          keep theirs.
+        </Notice>
+      {/if}
       {#if issue.issue.status === 'closed'}
         {@const reason = closeEvent?.payload?.reason ?? issue.issue.closed_reason ?? 'done'}
         <p class="state-line">
@@ -589,6 +643,13 @@
         {/if}
       {/snippet}
       {#if editingBody}
+        {#if bodyConflict}
+          <Notice tone="error" class="detail-conflict">
+            {#snippet icon()}<CircleAlertIcon size={14} aria-hidden="true" />{/snippet}
+            Someone changed this task while you were editing. Save again to keep your description, or
+            cancel to keep the current version.
+          </Notice>
+        {/if}
         <textarea
           class="body-edit"
           aria-label="Edit description"
@@ -607,6 +668,7 @@
               disabled={savingBody}
               onclick={() => {
                 editingBody = false
+                bodyConflict = false
               }}>Cancel</button
             >
             <button
@@ -744,6 +806,9 @@
     display: grid;
     gap: 2px;
     min-width: 0;
+  }
+  .detail-top :global(.detail-conflict) {
+    margin: 2px 0 6px;
   }
   /* The 48px header band, level with the list's header beside it; the title
      starts 8px under it. */

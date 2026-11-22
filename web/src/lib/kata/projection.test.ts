@@ -180,6 +180,13 @@ describe('normalizeKataUISnapshot', () => {
     },
   )
 
+  test('keeps the selected task content revision for guarded edits', () => {
+    const wire = snapshot()
+    wire.selected!.issue!.content_revision = 7
+
+    expect(normalizeKataUISnapshot(wire).selected_detail?.issue.content_revision).toBe(7)
+  })
+
   test('selects only open blockers for the collection column', () => {
     const wire = snapshot()
     wire.collection_links = [
