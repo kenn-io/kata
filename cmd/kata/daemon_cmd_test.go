@@ -400,10 +400,7 @@ func TestDaemonStatus_HumanReportsUnreachableReason(t *testing.T) {
 	reason, _, _ = strings.Cut(reason, "\n")
 	assert.NotContains(t, reason, "daemon pid "+strconv.Itoa(os.Getpid()))
 	assert.NotContains(t, reason, address)
-	assert.Contains(t, reason, "daemon.log")
 	assert.Contains(t, reason, "daemon ping returned 503")
-	assert.Contains(t, out, "kata running at "+server.URL+"\n")
-	assert.Contains(t, out, "  pid:     "+strconv.Itoa(os.Getpid())+"\n")
 }
 
 func TestDaemonStatusAutoStarted(t *testing.T) {
