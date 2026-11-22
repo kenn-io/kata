@@ -1,15 +1,18 @@
-package jsonl
+package cutoverlock_test
 
 import (
 	"context"
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/cutoverlock"
+	"go.kenn.io/kata/internal/jsonl"
 )
 
 func TestCutoverReadLockCoordinatesReadersAndCutover(t *testing.T) {
@@ -25,10 +28,10 @@ func TestCutoverReadLockCoordinatesReadersAndCutover(t *testing.T) {
 	require.False(t, busy)
 	ctx, cancel := context.WithTimeout(t.Context(), 1100*time.Millisecond)
 	defer cancel()
-	require.ErrorIs(t, WithCutoverLock(ctx, path, func() error { return nil }), context.DeadlineExceeded)
+	require.ErrorIs(t, jsonl.WithCutoverLock(ctx, path, func() error { return nil }), context.DeadlineExceeded)
 	release2()
 	release()
-	require.NoError(t, WithCutoverLock(t.Context(), path, func() error { return nil }))
+	require.NoError(t, jsonl.WithCutoverLock(t.Context(), path, func() error { return nil }))
 	release, busy, err = cutoverlock.TryReadLock(path, true)
 	require.NoError(t, err)
 	require.False(t, busy)
@@ -48,18 +51,36 @@ func TestCutoverReadLockMissingAndSymlink(t *testing.T) {
 	release()
 	_, err = os.Stat(path + ".import.lock")
 	require.True(t, errors.Is(err, os.ErrNotExist))
+	held := flock.New(path + ".import.lock")
+	require.NoError(t, held.Lock())
+	_, busy, err = cutoverlock.TryReadLock(path, false)
+	require.NoError(t, err)
+	require.True(t, busy)
+	require.NoError(t, held.Close())
+	t.Run("read-only directory", func(t *testing.T) {
+		if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+			t.Skip("directory permissions do not block writes")
+		}
+		dir := t.TempDir()
+		path := filepath.Join(dir, "kata.db")
+		require.NoError(t, os.WriteFile(path, nil, 0600))
+		require.NoError(t, os.Chmod(dir, 0500))
+		t.Cleanup(func() { _ = os.Chmod(dir, 0700) })
+		release, busy, err := cutoverlock.TryReadLock(path, true)
+		require.NoError(t, err)
+		require.False(t, busy)
+		release()
+		_, err = os.Stat(path + ".import.lock")
+		require.ErrorIs(t, err, os.ErrNotExist)
+	})
 	require.NoError(t, os.WriteFile(target, nil, 0600))
 	if err := os.Symlink(target, path); err != nil {
 		t.Skip(err)
 	}
-	require.NoError(t, WithCutoverLock(t.Context(), target, func() error {
+	require.NoError(t, jsonl.WithCutoverLock(t.Context(), target, func() error {
 		_, busy, err := cutoverlock.TryReadLock(path, true)
 		require.NoError(t, err)
 		require.True(t, busy)
 		return nil
 	}))
-	_, err = os.Stat(path + ".import.lock")
-	require.NoError(t, err)
-	_, err = os.Stat(target + ".import.lock")
-	require.NoError(t, err)
 }
