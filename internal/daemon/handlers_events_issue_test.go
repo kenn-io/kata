@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,6 +19,78 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
+
+type countingEventStore struct {
+	db.Storage
+	reads atomic.Int64
+}
+
+func (s *countingEventStore) EventsAfter(ctx context.Context, params db.EventsAfterParams) ([]db.Event, error) {
+	s.reads.Add(1)
+	return s.Storage.EventsAfter(ctx, params)
+}
+
+func TestUISnapshotCachesEffectiveCloseEvent(t *testing.T) {
+	var store *countingEventStore
+	env := testenv.New(t, testenv.Option(func(cfg *daemon.ServerConfig) {
+		cfg.UIStore = cfg.DB.(db.UIStore)
+		store = &countingEventStore{Storage: cfg.DB}
+		cfg.DB = store
+	}))
+	project, err := env.DB.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	issue := createScopedHTTPTestIssue(t, env, project.ID, "Closed task", nil)
+	_, closed, changed, err := env.DB.CloseIssueWithEvents(t.Context(), issue.ID, "done", "tester", "Finished", nil)
+	require.NoError(t, err)
+	require.True(t, changed)
+	for range 501 {
+		_, _, err = env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: issue.ID, Author: "tester", Body: "Follow-up"})
+		require.NoError(t, err)
+	}
+	path := "/api/v1/ui/snapshot?view=all-open&include_history=true&selected_issue_uid=" + issue.UID
+	first, body := envGetRaw(t, env, path)
+	require.Equal(t, http.StatusOK, first.StatusCode, string(body))
+	var snapshot struct {
+		Selected struct {
+			EffectiveCloseEvent *db.Event  `json:"effective_close_event"`
+			History             []db.Event `json:"history"`
+		} `json:"selected"`
+	}
+	require.NoError(t, json.Unmarshal(body, &snapshot))
+	require.NotNil(t, snapshot.Selected.EffectiveCloseEvent)
+	require.Equal(t, closed[0].UID, snapshot.Selected.EffectiveCloseEvent.UID)
+	require.Len(t, snapshot.Selected.History, 500)
+	for _, event := range snapshot.Selected.History {
+		require.NotEqual(t, closed[0].UID, event.UID)
+	}
+	require.NotEmpty(t, first.Header.Get("ETag"))
+	reads := store.reads.Load()
+	require.Positive(t, reads)
+
+	second, body := envGetRaw(t, env, path)
+	require.Equal(t, http.StatusOK, second.StatusCode, string(body))
+	require.Equal(t, first.Header.Get("ETag"), second.Header.Get("ETag"))
+	snapshot.Selected.EffectiveCloseEvent = nil
+	require.NoError(t, json.Unmarshal(body, &snapshot))
+	require.NotNil(t, snapshot.Selected.EffectiveCloseEvent)
+	require.Equal(t, closed[0].UID, snapshot.Selected.EffectiveCloseEvent.UID)
+	require.Equal(t, reads, store.reads.Load())
+
+	third, body := envDoRaw(t, env, http.MethodGet, path, nil, map[string]string{"If-None-Match": first.Header.Get("ETag")})
+	require.Equal(t, http.StatusNotModified, third.StatusCode, string(body))
+	require.Equal(t, reads, store.reads.Load())
+
+	_, _, err = env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: issue.ID, Author: "tester", Body: "Follow-up"})
+	require.NoError(t, err)
+	fourth, body := envDoRaw(t, env, http.MethodGet, path, nil, map[string]string{"If-None-Match": first.Header.Get("ETag")})
+	require.Equal(t, http.StatusOK, fourth.StatusCode, string(body))
+	require.NotEqual(t, first.Header.Get("ETag"), fourth.Header.Get("ETag"))
+	snapshot.Selected.EffectiveCloseEvent = nil
+	require.NoError(t, json.Unmarshal(body, &snapshot))
+	require.NotNil(t, snapshot.Selected.EffectiveCloseEvent)
+	require.Equal(t, closed[0].UID, snapshot.Selected.EffectiveCloseEvent.UID)
+	require.Greater(t, store.reads.Load(), reads)
+}
 
 type snapshotHookStore struct {
 	db.UIStore

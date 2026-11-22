@@ -225,7 +225,7 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			// request-local prevents a future cache-key cleanup from widening or
 			// narrowing one subtree with another principal's materialized data.
 			if scopedIssueIDs == nil {
-				cachedAuthority, authorityDependencies, authorityCached = authorityCache.get(authorityKey)
+				cachedAuthority, _, authorityDependencies, authorityCached = authorityCache.get(authorityKey)
 			}
 			if scopedIssueIDs == nil && !authorityCached && intent.ProjectUID != "" && intent.Limit == 0 {
 				globalIntent := intent
@@ -236,11 +236,11 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 				}
 				// The project view keeps the global build's dependencies: a
 				// superset only withholds more, never less.
-				if globalAuthority, dependencies, ok := authorityCache.get(globalKey); ok {
+				if globalAuthority, _, dependencies, ok := authorityCache.get(globalKey); ok {
 					cachedAuthority = projectUISnapshotAuthority(globalAuthority, intent.ProjectUID)
 					authorityDependencies = dependencies
 					authorityCached = true
-					authorityCache.put(authorityKey, cachedAuthority, authorityDependencies)
+					authorityCache.put(authorityKey, cachedAuthority, nil, authorityDependencies)
 				}
 			}
 			enrichmentKey, err := uiSnapshotKey(intent)
@@ -248,9 +248,10 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, internalAPIError(err)
 			}
 			cachedEnrichment := db.UISnapshotData{}
+			var cachedCloseEvent *db.Event
 			enrichmentCached := false
 			if scopedIssueIDs == nil {
-				cachedEnrichment, enrichmentDependencies, enrichmentCached = enrichmentCache.get(enrichmentKey)
+				cachedEnrichment, cachedCloseEvent, enrichmentDependencies, enrichmentCached = enrichmentCache.get(enrichmentKey)
 			}
 			cachedResponse := db.UISnapshotData{}
 			var cachedDependencies []int64
@@ -280,7 +281,11 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 						return nil, internalAPIError(err)
 					}
 					recordUISnapshotDependencies(ctx, cachedDependencies)
-					return snapshotResponseWithClose(ctx, cfg.DB, cfg.UIStore, cachedResponse, intent, policy, validator)
+					out, err := snapshotResponse(ctx, cachedResponse, intent, policy, validator)
+					if err == nil && out.Body.Selected != nil {
+						out.Body.Selected.EffectiveCloseEvent = cachedCloseEvent
+					}
+					return out, err
 				}
 			}
 			query := intent.storeQuery()
@@ -297,28 +302,39 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, internalAPIError(err)
 			}
-			dependencies := db.ExposedIssues(buildCtx)
-			if data.AuthorityReused {
+			authorityReused := data.AuthorityReused
+			if authorityReused {
 				mergeUISnapshotAuthority(&data, cachedAuthority)
-				dependencies = slices.Concat(dependencies, authorityDependencies)
 			}
 			if scopedIssueIDs != nil {
 				if err := filterScopedUISnapshot(ctx, cfg.DB, &data, scopedIssueIDs, intent.ScopeProjectUID); err != nil {
 					return nil, internalAPIError(err)
 				}
 			}
-			if scopedIssueIDs == nil && !data.AuthorityReused {
-				authorityCache.put(authorityKey, data, dependencies)
-			}
-			if scopedIssueIDs == nil && uiSnapshotHasEnrichment(intent) {
-				enrichmentCache.put(enrichmentKey, data, dependencies)
-			}
 			validator, err := makeUIETag(intent, data.Cursor, policy)
 			if err != nil {
 				return nil, internalAPIError(err)
 			}
+			out, err := snapshotResponseWithClose(buildCtx, cfg.DB, cfg.UIStore, data, intent, policy, validator)
+			if err != nil {
+				return nil, err
+			}
+			dependencies := db.ExposedIssues(buildCtx)
+			if authorityReused {
+				dependencies = slices.Concat(dependencies, authorityDependencies)
+			}
+			if scopedIssueIDs == nil && !data.AuthorityReused {
+				authorityCache.put(authorityKey, data, nil, dependencies)
+			}
+			if scopedIssueIDs == nil && uiSnapshotHasEnrichment(intent) {
+				var closeEvent *db.Event
+				if out.Body.Selected != nil {
+					closeEvent = out.Body.Selected.EffectiveCloseEvent
+				}
+				enrichmentCache.put(enrichmentKey, data, closeEvent, dependencies)
+			}
 			recordUISnapshotDependencies(ctx, dependencies)
-			return snapshotResponseWithClose(ctx, cfg.DB, cfg.UIStore, data, intent, policy, validator)
+			return out, nil
 		})
 
 	referencesOperation := huma.Operation{
