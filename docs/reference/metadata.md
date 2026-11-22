@@ -285,6 +285,7 @@ recipe.
     - `stuck`: the agent cannot proceed.
   Kata refuses other values. Clearing the key works, and existing values remain
   until the key is rewritten.
+  New recurring issues omit unsupported attention values from older templates.
 - **`work.attention_msg`** (string): a one-line current-state message that
   accompanies the attention level.
 
