@@ -393,7 +393,7 @@ func TestDaemonStatus_HumanReportsUnreachableReason(t *testing.T) {
 	require.NoError(t, writeRuntimeFor(home, address))
 
 	out, _, err := executeRootCapture(t, t.Context(), "daemon", "status")
-	requireCLIError(t, err, ExitDaemonUnavail)
+	assert.Equal(t, kindDaemonUnavail, requireCLIError(t, err, ExitDaemonUnavail).Kind)
 
 	_, reason, ok := strings.Cut(out, "  reason: ")
 	require.True(t, ok)
