@@ -58,11 +58,13 @@
 {#if compact}
   <div class="compact-recurrences">
     {#each recurrences as rec (rec.uid)}
-      <span>{formatRRule(rec.rrule)}</span>
-      {#if !readOnly}
-        <button type="button" onclick={() => onEdit(rec)}>Edit</button>
-        <button type="button" onclick={() => onDelete(rec)}>Stop</button>
-      {/if}
+      <div class="compact-recurrence">
+        <span>{formatRRule(rec.rrule)}</span>
+        {#if !readOnly}
+          <button type="button" class="compact-action" onclick={() => onEdit(rec)}>Edit</button>
+          <button type="button" class="compact-action" onclick={() => onDelete(rec)}>Stop</button>
+        {/if}
+      </div>
     {/each}
   </div>
 {:else}
@@ -111,6 +113,35 @@
 {/if}
 
 <style>
+  .compact-recurrences {
+    display: grid;
+    gap: 2px;
+  }
+  .compact-recurrence {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    min-height: 24px;
+  }
+  .compact-recurrence > span {
+    margin-right: 4px;
+  }
+  /* Edit and Stop are quiet text actions beside the rule. */
+  .compact-action {
+    height: 24px;
+    border: 0;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    padding: 0 6px;
+    cursor: pointer;
+  }
+  .compact-action:hover {
+    background: var(--bg-surface-hover);
+    color: var(--text-primary);
+  }
   .recurrence-panel {
     display: grid;
     gap: var(--space-4);

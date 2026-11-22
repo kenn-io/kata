@@ -189,7 +189,7 @@ test('move picker counts stay in place when clearing its search makes the list s
   const issue = await kata.seedIssue(page, credentials, { title: 'Scrollbar move picker' })
   await addCatalogProjects(page)
   await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
-  await page.getByRole('button', { name: 'example-project', exact: true }).click()
+  await page.getByRole('button', { name: 'Project: example-project', exact: true }).click()
   const search = page.getByRole('searchbox', { name: 'Find project' })
   await search.fill('example-extra-39')
   const options = page.locator('.move-options')

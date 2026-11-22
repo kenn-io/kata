@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Checkbox, Disclosure, IconButton } from '@kenn-io/kit-ui'
+  import DetailSection from './DetailSection.svelte'
   import PlusIcon from '@lucide/svelte/icons/plus'
   import PencilIcon from '@lucide/svelte/icons/pencil'
   import XIcon from '@lucide/svelte/icons/x'
@@ -209,22 +210,21 @@
     >
   </div>
 {/snippet}
-<section class="checklist" aria-label="Checklist">
-  <div class="section-header">
-    <h3>Checklist <span>{doneItems.length} of {checklistItems().length} done</span></h3>
-  </div>
-  {#each openItems as item (item.id)}{@render checklistRow(item)}{/each}
-  {#if doneItems.length}
-    <Disclosure variant="plain" title={`${doneItems.length} done`}>
-      {#each doneItems as item (item.id)}{@render checklistRow(item)}{/each}
-    </Disclosure>
-  {/if}
+<DetailSection
+  title="Checklist"
+  count={checklistItems().length > 0
+    ? `${doneItems.length} of ${checklistItems().length} done`
+    : undefined}
+>
+  {#if openItems.length}<div class="checklist-items">
+      {#each openItems as item (item.id)}{@render checklistRow(item)}{/each}
+    </div>{/if}
   {#if addingItem}<div class="checklist-add">
-      <PlusIcon size={13} strokeWidth={1.9} aria-hidden="true" />
+      <PlusIcon size={14} aria-hidden="true" />
       <input
         bind:this={checklistInput}
         aria-label="New checklist item"
-        placeholder="Add subtask..."
+        placeholder="Add item"
         bind:value={checklistDraft}
         disabled={disabled || checklistPending}
         onkeydown={handleChecklistKeydown}
@@ -238,61 +238,43 @@
     </div>{:else}
     <button
       type="button"
-      class="add-item"
+      class="checklist-add add-item"
       disabled={disabled || checklistPending}
       onclick={() => {
         addingItem = true
         queueMicrotask(() => checklistInput?.focus())
-      }}><PlusIcon size={13} aria-hidden="true" /> Add item</button
+      }}><PlusIcon size={14} aria-hidden="true" />Add item</button
     >
   {/if}
-</section>
+  {#if doneItems.length}
+    <Disclosure variant="plain" title={`${doneItems.length} done`}>
+      <div class="checklist-items">
+        {#each doneItems as item (item.id)}{@render checklistRow(item)}{/each}
+      </div>
+    </Disclosure>
+  {/if}
+</DetailSection>
 
 <style>
-  .checklist {
+  .checklist-items {
     display: grid;
-    gap: 6px;
-    margin: 0 0 24px;
   }
 
-  .add-item {
+  /* A record row: the box starts at the pane inset and the highlight runs
+     to the pane's edges. */
+  .checklist-row,
+  .checklist-add {
+    min-height: 32px;
+    margin-inline: -16px;
     display: flex;
     align-items: center;
     gap: 8px;
-    border: 0;
-    background: transparent;
-    color: var(--text-muted);
-    font: inherit;
-    cursor: pointer;
-    padding: 4px;
+    padding: 2px 16px;
   }
 
-  .section-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 8px;
-  }
-
-  .section-header h3 {
-    margin: 0;
-    color: var(--text-primary);
-    font-size: var(--font-size-md);
-    font-weight: var(--font-weight-semibold);
-  }
-
-  .checklist-row {
-    min-height: 28px;
-    border-radius: 6px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    padding: 2px 4px;
-  }
-
-  .checklist-row:hover {
+  .checklist-row:hover,
+  .checklist-add:hover:not(:disabled),
+  .checklist-add:focus-within {
     background: var(--bg-surface-hover);
   }
 
@@ -302,7 +284,7 @@
   }
 
   :global(.checklist-item .kit-checkbox__label) {
-    color: var(--text-secondary);
+    color: var(--text-primary);
   }
 
   .checklist-row.done :global(.checklist-item .kit-checkbox__label) {
@@ -310,9 +292,17 @@
     text-decoration: line-through;
   }
 
-  /* The remove affordance stays hidden until its row is hovered or it
-     receives keyboard focus. */
+  .checklist-row input {
+    flex: 1;
+    min-width: 0;
+    height: 24px;
+    font: inherit;
+  }
+
+  /* Row actions stay hidden until the row is hovered or they receive
+     keyboard focus; a screen that can't hover shows them always. */
   .checklist-row :global(.row-remove) {
+    color: var(--text-secondary);
     opacity: 0;
   }
 
@@ -328,28 +318,34 @@
   }
 
   .checklist-add {
-    min-height: 30px;
-    border-radius: 6px;
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    padding: 2px 4px;
-    color: var(--text-muted);
+    width: calc(100% + 32px);
+    color: var(--text-secondary);
   }
 
-  .checklist-add:focus-within {
-    background: var(--bg-surface-hover);
+  .add-item {
+    border: 0;
+    background: transparent;
+    font: inherit;
+    font-size: var(--font-size-sm);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .checklist-add :global(svg) {
+    flex: none;
+    color: var(--text-muted);
   }
 
   .checklist-add input {
     flex: 1;
     min-width: 0;
+    height: 24px;
     border: 0;
     background: transparent;
     color: var(--text-primary);
     font: inherit;
     font-size: var(--font-size-sm);
-    padding: 4px 2px;
+    padding: 0;
   }
 
   .checklist-add input:focus {
@@ -359,12 +355,12 @@
   .add-checklist-button {
     min-height: 24px;
     border: 1px solid var(--border-default);
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     background: var(--bg-primary);
     color: var(--text-secondary);
     font: inherit;
-    font-size: var(--font-size-xs);
-    padding: 2px 8px;
+    font-size: var(--font-size-sm);
+    padding: 0 8px;
     cursor: pointer;
   }
 

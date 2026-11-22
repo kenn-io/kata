@@ -204,9 +204,8 @@ describe('IssueProperties', () => {
 
     expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', { deadline_on: '2026-06-08' })
 
-    await fireEvent.click(screen.getByRole('button', { name: /^(Edit priority|\+ Priority)$/ }))
-    await fireEvent.click(screen.getByRole('combobox', { name: /Priority/ }))
-    await fireEvent.click(screen.getByRole('option', { name: 'P1' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Priority' }))
+    await fireEvent.click(await screen.findByRole('menuitemradio', { name: 'P1' }))
 
     expect(onSetPriority).toHaveBeenCalledWith('issue-1', 1)
   })
@@ -450,11 +449,11 @@ describe('IssueProperties', () => {
 
     await view.rerender({ actionsDisabled: false })
     await fireEvent.keyDown(screen.getByRole('button', { name: /Scheduled:/ }), { key: 'Escape' })
-    await fireEvent.click(screen.getByRole('button', { name: /^(Edit priority|\+ Priority)$/ }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Priority' }))
     await view.rerender({ actionsDisabled: true })
-    expect((screen.getByRole('combobox', { name: /Priority/ }) as HTMLButtonElement).disabled).toBe(
-      true,
-    )
+    expect(
+      (screen.getByRole('button', { name: /^Priority: / }) as HTMLButtonElement).disabled,
+    ).toBe(true)
 
     await view.rerender({ actionsDisabled: false })
     await view.rerender({ actionsDisabled: true })
@@ -531,16 +530,15 @@ describe('IssueProperties', () => {
     })
     expect(screen.queryByRole('button', { name: /Scheduled:/ })).toBeNull()
 
-    await fireEvent.click(screen.getByRole('button', { name: /^(Edit priority|\+ Priority)$/ }))
-    await fireEvent.click(screen.getByRole('combobox', { name: /Priority/ }))
-    await fireEvent.click(screen.getByRole('option', { name: 'P1' }))
-    expect(screen.getByRole('combobox', { name: /Priority: P1/ })).toBeTruthy()
+    await fireEvent.click(screen.getByRole('button', { name: 'Priority' }))
+    await fireEvent.click(await screen.findByRole('menuitemradio', { name: 'P1' }))
+    expect(screen.getByRole('button', { name: 'Priority: P1' })).toBeTruthy()
 
     await view.rerender({
       draftResetGeneration: 2,
-      issue: makeIssue({ owner: 'user-a', priority: 1 }),
+      issue: makeIssue({ owner: 'user-a', priority: 3 }),
     })
-    expect(screen.queryByRole('combobox', { name: /Priority/ })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Priority: P3' })).toBeTruthy()
 
     await fireEvent.click(screen.getByRole('button', { name: 'Add label' }))
     await fireEvent.input(screen.getByLabelText('New label'), { target: { value: 'urgent' } })
@@ -555,9 +553,8 @@ describe('IssueProperties', () => {
     const onSetPriority = vi.fn(async () => true)
     renderProperties({ issue: makeIssue({ priority: 2 }), onSetPriority })
 
-    await fireEvent.click(screen.getByRole('button', { name: /^(Edit priority|\+ Priority)$/ }))
-    await fireEvent.click(screen.getByRole('combobox', { name: /Priority/ }))
-    await fireEvent.click(screen.getByRole('option', { name: 'No priority' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Priority: P2' }))
+    await fireEvent.click(await screen.findByRole('menuitemradio', { name: 'No priority' }))
 
     expect(onSetPriority).toHaveBeenCalledWith('issue-1', null)
   })

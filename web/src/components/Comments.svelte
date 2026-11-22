@@ -1,4 +1,5 @@
 <script lang="ts">
+  import DetailSection from './DetailSection.svelte'
   import { tick } from 'svelte'
   /* eslint-disable svelte/prefer-svelte-reactivity -- reference counts are a transient search-result lookup. */
   import { commentEvidenceLength, trimCommentEvidence } from '../lib/kata/commentEvidence'
@@ -266,6 +267,7 @@
 {#snippet composer()}
   <form
     class="comment-composer"
+    class:comment-composer--active={Boolean(replyDraft) || commentDraft !== ''}
     onsubmit={(event) => {
       event.preventDefault()
       void submitComment()
@@ -297,11 +299,11 @@
     {/if}
     <MentionTextarea
       ariaLabel={replyDraft ? 'Reply evidence' : 'Comment'}
-      rows={3}
+      rows={replyDraft || commentDraft ? 3 : 1}
       bind:value={() => commentDraft, updateCommentDraft}
       search={searchTaskReferences}
       emptyLabel="No matching tasks"
-      placeholder="Add a comment..."
+      placeholder={replyDraft ? 'Add your reply' : 'Add a comment'}
       disabled={actionsDisabled}
     />
     <Button
@@ -329,9 +331,10 @@
   </form>
 {/snippet}
 
-<section class="comments" aria-labelledby="kata-comments-title">
-  <h3 id="kata-comments-title">Comments</h3>
-
+<DetailSection
+  title="Comments"
+  count={!pending && issue.comments.length ? issue.comments.length : undefined}
+>
   {#if showList}
     {#if pending}
       <p role="status" aria-label="Loading comments">Loading comments…</p>
@@ -345,17 +348,7 @@
             tabindex="-1"
           >
             <div class="comment-meta">
-              {#if comment.handle}<span>{comment.handle}</span>{/if}
-              {#if comment.edited_at}<span title={localDateTimeLabel(comment.edited_at)}
-                  >(edited)</span
-                >{/if}
-              <Avatar
-                name={comment.author}
-                initials={comment.author.slice(0, 1).toUpperCase()}
-                tone="neutral"
-                decorative
-                size={20}
-              />
+              <Avatar name={comment.author} decorative size={20} />
               <span class="author"
                 >{comment.author === selfActor ? 'You' : comment.author}{comment.teammate
                   ? ` / ${comment.teammate}`
@@ -364,6 +357,18 @@
               <time datetime={comment.created_at} title={localDateTimeLabel(comment.created_at)}>
                 {timeAgo(comment.created_at)}
               </time>
+              {#if comment.edited_at}<span title={localDateTimeLabel(comment.edited_at)}
+                  >(edited)</span
+                >{/if}
+              {#if comment.handle}<span class="comment-handle">{comment.handle}</span>{/if}
+              {#if comment.uid && comment.handle}
+                <button
+                  type="button"
+                  class="comment-action"
+                  disabled={actionsDisabled || issue.issue.status !== 'open'}
+                  onclick={() => beginReply(comment.uid!, 'reply')}>Reply</button
+                >
+              {/if}
             </div>
             {#if comment.reply}<div class="comment-links">
                 ↳ <Button
@@ -379,16 +384,8 @@
               partial={comment.backlinks_truncated ?? false}
               onOpen={onOpenComment ? (link) => openComment(link, comment.uid) : undefined}
             />
-            {#if comment.uid && comment.handle}
-              <div class="comment-links">
-                <Button
-                  size="sm"
-                  label="Reply"
-                  disabled={actionsDisabled || issue.issue.status !== 'open'}
-                  onclick={() => beginReply(comment.uid!, 'reply')}
-                />
-              </div>
-              {#if replyDraft?.replyTo === comment.uid}{@render composer()}{/if}
+            {#if comment.uid && comment.handle && replyDraft?.replyTo === comment.uid}
+              <div class="reply-composer">{@render composer()}</div>
             {/if}
           </article>
         {/each}
@@ -398,51 +395,32 @@
   {#if !replyDraft || !issue.comments.some((comment) => comment.uid === replyDraft?.replyTo)}
     {@render composer()}
   {/if}
-</section>
+</DetailSection>
 
 <style>
+  .comment-list {
+    display: grid;
+    gap: 4px;
+    margin-bottom: 8px;
+  }
+
+  /* A record row: the avatar starts at the pane inset and a selected
+     comment's highlight runs to the pane's edges. */
+  .comment {
+    margin-inline: -16px;
+    padding: 6px 16px;
+  }
+
   .comment.selected {
     background: var(--bg-inset);
-    outline: 1px solid var(--border-muted);
-  }
-  .reply-target,
-  .comment-links {
-    display: flex;
-    gap: var(--space-3);
-    flex-wrap: wrap;
-    align-items: center;
-  }
-  .comments h3 {
-    margin: 0 0 var(--space-4);
-    color: var(--text-primary);
-    font-size: var(--font-size-md);
-    font-weight: var(--font-weight-semibold);
-  }
-
-  .comment-composer {
-    display: grid;
-    gap: var(--space-4);
-    margin-bottom: var(--space-4);
-  }
-
-  .comment-composer :global(.comment-submit) {
-    justify-self: end;
-  }
-
-  .comment {
-    padding: var(--space-5) 0;
-  }
-
-  .comment + .comment {
-    border-top: 1px solid var(--border-muted);
   }
 
   .comment-meta {
     display: flex;
     align-items: center;
-    gap: var(--space-4);
-    margin-bottom: var(--space-3);
-    color: var(--text-muted);
+    gap: 8px;
+    min-height: 24px;
+    color: var(--text-secondary);
     font-size: var(--font-size-sm);
   }
 
@@ -455,7 +433,88 @@
     white-space: nowrap;
   }
 
-  .comment > :global(.comment-body) {
+  .comment-handle {
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-xs);
+  }
+
+  /* Reply sits at the right inset and shows on hover and focus; a screen
+     that can't hover shows it always. */
+  .comment-action {
+    height: 24px;
+    margin-left: auto;
+    border: 0;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    padding: 0 8px;
+    cursor: pointer;
+    opacity: 0;
+  }
+
+  .comment:hover .comment-action,
+  .comment-action:focus-visible {
+    opacity: 1;
+  }
+
+  @media (hover: none) {
+    .comment-action {
+      opacity: 1;
+    }
+  }
+
+  .comment-action:hover:not(:disabled) {
+    background: var(--bg-surface-hover);
+    color: var(--text-primary);
+  }
+
+  .comment > :global(.comment-body),
+  .comment-links,
+  .reply-composer {
     padding-left: 28px;
+  }
+
+  .comment > :global(.comment-body) {
+    margin-top: 2px;
+  }
+
+  .reply-target,
+  .comment-links {
+    display: flex;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .reply-target {
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+  }
+
+  .reply-composer {
+    margin-top: 8px;
+  }
+
+  .comment-composer {
+    display: grid;
+    gap: 8px;
+  }
+
+  .comment-composer p {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+  }
+
+  .comment-composer :global(.comment-submit) {
+    justify-self: end;
+  }
+
+  /* An empty composer is one line; its actions appear once it has focus
+     or text. */
+  .comment-composer:not(.comment-composer--active):not(:focus-within) :global(.comment-submit) {
+    display: none;
   }
 </style>

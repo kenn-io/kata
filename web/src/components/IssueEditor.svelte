@@ -4,11 +4,11 @@
   import { IssueAttachments, projectIssueDetail } from '@kenn-io/kata-ui'
   import NetworkIcon from '@lucide/svelte/icons/network'
   import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert'
+  import CircleAlertIcon from '@lucide/svelte/icons/circle-alert'
+  import CircleCheckIcon from '@lucide/svelte/icons/circle-check'
+  import CircleSlashIcon from '@lucide/svelte/icons/circle-slash'
   import PencilIcon from '@lucide/svelte/icons/pencil'
-  import {
-    formatRelativeTime as timeAgo,
-    formatTimestamp as localDateTimeLabel,
-  } from '@kenn-io/kit-ui/utils/time'
+  import { formatRelativeTime as timeAgo } from '@kenn-io/kit-ui/utils/time'
 
   import type { UIIssueReference } from '../lib/api/generated'
   import { fetchAttachmentBlob } from '../lib/api/client'
@@ -33,6 +33,7 @@
   import Comments from './Comments.svelte'
   import IssueHistory from './IssueHistory.svelte'
   import IssueLinks from './IssueLinks.svelte'
+  import DetailSection from './DetailSection.svelte'
   import IssueStateDialog from './IssueStateDialog.svelte'
   import MoveIssueDialog from './MoveIssueDialog.svelte'
   import IssueProperties from './IssueProperties.svelte'
@@ -158,7 +159,7 @@
   let bodyRevision = $state<number | undefined>()
   let titleConflict = $state(false)
   let bodyConflict = $state(false)
-  let titleStart = ''
+  let titleStart = $state('')
   let bodyStart = ''
   let bodyTitleStart = ''
   let titleBodyStart = ''
@@ -283,6 +284,16 @@
       : 0,
   )
   const closeEvent = $derived(events.find((event) => event.type === 'issue.closed'))
+  // "Nov 18", with the year when it isn't this one.
+  function dayLabel(value: string): string {
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T00:00:00`) : new Date(value)
+    if (Number.isNaN(date.getTime())) return value
+    return date.toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: date.getFullYear() === new Date().getFullYear() ? undefined : 'numeric',
+    })
+  }
   function actorName(actor: string): string {
     return actor === selfActor ? 'You' : actor
   }
@@ -443,101 +454,119 @@
   inert={detailInert}
 >
   <fieldset class="mutation-controls" disabled={actionsDisabled || detailInert}>
-    <div class="detail-heading">
-      <div class="detail-kicker">
-        <span class="crumb-id">{issue.issue.short_id}</span>
-        <CopyButton
-          text={issue.issue.short_id}
-          ariaLabel={`Copy task ID ${issue.issue.short_id}`}
-        />
+    <header class="detail-top">
+      <div class="detail-heading">
+        <div class="detail-kicker">
+          <span class="crumb-id">{issue.issue.short_id}</span>
+          <CopyButton
+            text={issue.issue.short_id}
+            ariaLabel={`Copy task ID ${issue.issue.short_id}`}
+          />
+        </div>
+        <div class="detail-actions">
+          {#if onOpenGraph}
+            <button
+              type="button"
+              class="graph-toggle"
+              aria-label="Graph"
+              aria-pressed={graphOpen}
+              onclick={() => (graphOpen ? onCloseGraph?.() : onOpenGraph?.(issue.issue))}
+              ><NetworkIcon size={14} strokeWidth={1.9} aria-hidden="true" />Graph</button
+            >
+          {/if}
+          {#key draftFenceGeneration}<IssueStateDialog
+              bind:this={stateDialog}
+              {issue}
+              disabled={actionsDisabled || detailInert}
+              {onCloseIssue}
+              {onReopenIssue}
+            />{/key}
+        </div>
       </div>
-      <div class="detail-actions">
-        {#if onOpenGraph}
+      <h2 aria-label={issue.issue.title}>
+        {#if editingTitle}
+          <input
+            class="title-edit"
+            aria-label="Edit title"
+            bind:this={titleInput}
+            bind:value={titleDraft}
+            disabled={savingTitle}
+            onkeydown={handleTitleKeydown}
+            onblur={() => void commitTitle()}
+          />
+        {:else}
           <button
             type="button"
-            class="icon-detail-action"
-            aria-label="Graph"
-            aria-pressed={graphOpen}
-            onclick={() => (graphOpen ? onCloseGraph?.() : onOpenGraph?.(issue.issue))}
-            ><NetworkIcon size={14} strokeWidth={1.9} aria-hidden="true" />Graph</button
+            class="title-button"
+            aria-label="Edit title"
+            disabled={actionsDisabled || detailInert}
+            onclick={startEditingTitle}>{issue.issue.title}</button
           >
         {/if}
-        {#key draftFenceGeneration}<IssueStateDialog
-            bind:this={stateDialog}
-            {issue}
-            disabled={actionsDisabled || detailInert}
-            {onCloseIssue}
-            {onReopenIssue}
-          />{/key}
-      </div>
-    </div>
-    <h2 aria-label={issue.issue.title}>
-      {#if editingTitle}
-        <input
-          class="title-edit"
-          aria-label="Edit title"
-          bind:this={titleInput}
-          bind:value={titleDraft}
-          disabled={savingTitle}
-          onkeydown={handleTitleKeydown}
-          onblur={() => void commitTitle()}
-        />
-      {:else}
-        <button
-          type="button"
-          class="title-button"
-          aria-label="Edit title"
-          disabled={actionsDisabled || detailInert}
-          onclick={startEditingTitle}>{issue.issue.title}</button
-        >
+      </h2>
+      {#if titleConflict}
+        <Notice tone="error" class="detail-conflict">
+          {#snippet icon()}<CircleAlertIcon size={14} aria-hidden="true" />{/snippet}
+          {issue.issue.title !== titleStart
+            ? `Someone renamed this to "${issue.issue.title}" while you were editing.`
+            : 'Someone changed this task while you were editing.'} Press Enter to save yours, or Esc to
+          keep theirs.
+        </Notice>
       {/if}
-    </h2>
-    {#if titleConflict}
-      <Notice tone="warning"
-        >The task changed while you were editing. Press Enter to save your title, or Esc to keep
-        theirs.</Notice
-      >
-    {/if}
-    {#if issue.issue.status === 'closed'}
-      <p class="state-line">
-        {closeEvent
-          ? describeResolution(closeEvent)
-          : (closedReasonLabel(issue.issue.closed_reason) ?? 'Closed')}{#if closeEvent}
-          · {actorName(closeEvent.actor)}{/if}{#if issue.issue.closed_at}
-          · {localDateTimeLabel(issue.issue.closed_at)}{/if}
+      {#if issue.issue.status === 'closed'}
+        {@const reason = closeEvent?.payload?.reason ?? issue.issue.closed_reason ?? 'done'}
+        <p class="state-line">
+          <span class="state-icon" class:state-icon--done={reason === 'done'} aria-hidden="true"
+            >{#if reason === 'done'}<CircleCheckIcon size={14} />{:else}<CircleSlashIcon
+                size={14}
+              />{/if}</span
+          >{closeEvent
+            ? describeResolution(closeEvent)
+            : (closedReasonLabel(issue.issue.closed_reason) ?? 'Closed')}{#if closeEvent}
+            · {actorName(closeEvent.actor)}{/if}{#if issue.issue.closed_at}
+            · {dayLabel(issue.issue.closed_at)}{/if}
+        </p>
+        {#if typeof closeEvent?.payload?.message === 'string'}<p class="state-detail">
+            {closeEvent.payload.message}
+          </p>{/if}
+        {#if closeEvent}{#each closingProof(closeEvent) as proof, index (index)}<p
+              class="state-detail state-detail--code"
+            >
+              {proof}
+            </p>{/each}{/if}
+        {#if closeEvent}{#each closingAttachments(closeEvent, issue.issue.metadata) as attachment, index (index)}<p
+              class="state-detail"
+            >
+              {#if attachment.href}<a href={attachment.href}>{attachment.label}</a
+                >{:else}{attachment.label}{/if}
+            </p>{/each}{/if}
+      {:else if blocker}
+        <p class="state-line">
+          <span class="state-icon state-icon--warning" aria-hidden="true"
+            ><TriangleAlertIcon size={14} /></span
+          >Blocked by <code>{blocker.short_id}</code>
+          {blockerTitle}{#if (issue.issue.open_blocked_by?.length ?? 0) > 1}, +{issue.issue
+              .open_blocked_by!.length - 1} more{/if}
+        </p>
+      {:else if due && lateDays >= 0}
+        <p class="state-line">
+          <span class="state-icon state-icon--danger" aria-hidden="true"
+            ><CircleAlertIcon size={14} /></span
+          >{lateDays === 0
+            ? 'Due today'
+            : `Due ${dayLabel(due)}, ${lateDays} ${lateDays === 1 ? 'day' : 'days'} late`}
+        </p>
+      {/if}
+      <p class="created-line">
+        Created {dayLabel(issue.issue.created_at)} by
+        <span class="created-person"
+          ><Avatar name={issue.issue.author} size={16} decorative />{actorName(
+            issue.issue.author,
+          )}</span
+        >
+        · Updated {timeAgo(issue.issue.updated_at)}
       </p>
-      {#if typeof closeEvent?.payload?.message === 'string'}<p>{closeEvent.payload.message}</p>{/if}
-      {#if closeEvent}{#each closingProof(closeEvent) as proof, index (index)}<p>
-            {proof}
-          </p>{/each}{/if}
-      {#if closeEvent}{#each closingAttachments(closeEvent, issue.issue.metadata) as attachment, index (index)}<p
-          >
-            {#if attachment.href}<a href={attachment.href}>{attachment.label}</a
-              >{:else}{attachment.label}{/if}
-          </p>{/each}{/if}
-    {:else if blocker}
-      <p class="state-line">
-        <TriangleAlertIcon size={14} aria-hidden="true" /> Blocked by {blocker.short_id}
-        {blockerTitle}{#if (issue.issue.open_blocked_by?.length ?? 0) > 1}, +{issue.issue
-            .open_blocked_by!.length - 1} more{/if}
-      </p>
-    {:else if due && lateDays >= 0}
-      <p class="state-line">
-        <TriangleAlertIcon size={14} aria-hidden="true" />
-        {lateDays === 0
-          ? 'Due today'
-          : `Due ${due}, ${lateDays} ${lateDays === 1 ? 'day' : 'days'} late`}
-      </p>
-    {/if}
-    <p class="created-line">
-      Created {localDateTimeLabel(issue.issue.created_at)} by <Avatar
-        name={issue.issue.author}
-        initials={issue.issue.author.slice(0, 1).toUpperCase()}
-        size={20}
-        decorative
-      />
-      {actorName(issue.issue.author)} · Updated {timeAgo(issue.issue.updated_at)}
-    </p>
+    </header>
   </fieldset>
 
   <IssueProperties
@@ -560,75 +589,69 @@
     {onRemoveLabel}
   />
 
-  <MoveIssueDialog
-    bind:this={moveDialog}
-    {issue}
-    {projects}
-    {movePending}
-    allowMove={administrativeActionsAllowed && !actionsDisabled && !detailInert}
-    {onMoveIssue}
-  />
-
   <fieldset class="mutation-controls" disabled={actionsDisabled || detailInert}>
-    <section class="detail-description" aria-label="Description">
-      <div class="section-header">
-        <h3>Description</h3>
-        {#if !editingBody}
-          <button
-            type="button"
-            class="text-button"
-            aria-label="Edit description"
-            onclick={startEditingBody}
-          >
-            <PencilIcon size={13} strokeWidth={1.8} />
-            <span>Edit</span>
-          </button>
-        {/if}
-      </div>
-      {#if editingBody}
-        {#if bodyConflict}<Notice tone="warning"
-            >The task changed while you were editing. Save to keep your description, or cancel to
-            keep theirs.</Notice
-          >{/if}
-        <textarea
-          class="body-edit"
-          aria-label="Edit description"
-          rows="8"
-          bind:this={bodyTextarea}
-          bind:value={bodyDraft}
-          disabled={savingBody}
-          onkeydown={handleBodyKeydown}
-        ></textarea>
-        <div class="body-edit-actions">
-          <span>Cmd/Ctrl+Enter saves</span>
-          <div>
+    {#if editingBody || issue.issue.body}
+      <DetailSection title="Description">
+        {#snippet actions()}
+          {#if !editingBody}
             <button
               type="button"
-              class="ghost-button"
-              disabled={savingBody}
-              onclick={() => {
-                editingBody = false
-              }}>Cancel</button
+              class="text-button"
+              aria-label="Edit description"
+              onclick={startEditingBody}
             >
-            <button
-              type="button"
-              class="accent-button"
-              disabled={savingBody}
-              onclick={() => {
-                void commitBody()
-              }}
-            >
-              {savingBody ? 'Saving...' : 'Save'}
+              <PencilIcon size={13} strokeWidth={1.8} aria-hidden="true" />
+              <span>Edit</span>
             </button>
+          {/if}
+        {/snippet}
+        {#if editingBody}
+          {#if bodyConflict}<Notice tone="error" class="detail-conflict-inline">
+              {#snippet icon()}<CircleAlertIcon size={14} aria-hidden="true" />{/snippet}
+              Someone changed the description while you were editing. Save to keep yours, or Cancel to
+              keep theirs.
+            </Notice>{/if}
+          <textarea
+            class="body-edit"
+            aria-label="Edit description"
+            rows="8"
+            bind:this={bodyTextarea}
+            bind:value={bodyDraft}
+            disabled={savingBody}
+            onkeydown={handleBodyKeydown}
+          ></textarea>
+          <div class="body-edit-actions">
+            <span>Cmd/Ctrl+Enter saves</span>
+            <div>
+              <button
+                type="button"
+                class="ghost-button"
+                disabled={savingBody}
+                onclick={() => {
+                  editingBody = false
+                }}>Cancel</button
+              >
+              <button
+                type="button"
+                class="accent-button"
+                disabled={savingBody}
+                onclick={() => {
+                  void commitBody()
+                }}
+              >
+                {savingBody ? 'Saving…' : 'Save'}
+              </button>
+            </div>
           </div>
-        </div>
-      {:else if issue.issue.body}
-        <Markdown source={issue.issue.body} class="body-display" />
-      {:else}
-        <button type="button" class="text-button" onclick={startEditingBody}>Add description</button
-        >
-      {/if}
-    </section>
+        {:else}
+          <Markdown source={issue.issue.body} class="body-display" />
+        {/if}
+      </DetailSection>
+    {:else}
+      <button type="button" class="add-description" onclick={startEditingBody}
+        >Add description</button
+      >
+    {/if}
 
     <Checklist
       {issue}
@@ -652,7 +675,7 @@
       {onEditIssue}
       {onSelectIssue}
     />
-    <div class="detail-section">
+    <div>
       <IssueAttachments
         {attachments}
         showEmpty
@@ -666,7 +689,7 @@
         actionsDisabled={actionsDisabled || detailInert}
       />
     </div>
-    <div class="detail-section">
+    <div>
       <Comments
         {selfActor}
         {selectedCommentUID}
@@ -703,6 +726,15 @@
   />
 {/snippet}
 
+<MoveIssueDialog
+  bind:this={moveDialog}
+  {issue}
+  {projects}
+  {movePending}
+  allowMove={administrativeActionsAllowed && !actionsDisabled && !detailInert}
+  {onMoveIssue}
+/>
+
 <RecurrenceDialogs
   bind:this={recurrenceDialogs}
   selectedIssue={issue}
@@ -716,120 +748,215 @@
 />
 
 <style>
+  /* Sections stack 24px apart; the header block keeps its own tighter
+     rhythm. */
   .kata-detail {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
     flex: 1 1 auto;
     min-width: 0;
     min-height: 0;
     overflow: auto;
     scrollbar-gutter: stable;
     background: var(--bg-surface);
-    padding: 0 16px 24px;
+    padding: 0 16px 32px;
     container-type: inline-size;
     container-name: kata-detail;
   }
   .mutation-controls {
     display: contents;
   }
+  .detail-top {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+  /* The 48px header band, level with the list's header beside it; the title
+     starts 8px under it. */
   .detail-heading {
     display: flex;
     align-items: center;
     justify-content: space-between;
     min-height: 48px;
-    gap: var(--space-5);
-    margin-bottom: 8px;
+    gap: 12px;
+    margin-bottom: 6px;
   }
   .detail-kicker,
-  .detail-actions,
-  .created-line {
+  .detail-actions {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
+  }
+  .detail-kicker {
+    gap: 4px;
+    min-width: 0;
   }
   .crumb-id {
     color: var(--text-secondary);
-    font: 650 var(--font-size-xs) var(--font-mono);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-md);
   }
-  h2 {
-    margin: 0 0 8px;
-    font-size: var(--font-size-xl);
-  }
-  .state-line,
-  .created-line {
-    color: var(--text-muted);
-    font-size: var(--font-size-sm);
-    margin: 4px 0 12px;
-  }
-  .icon-detail-action {
-    min-height: 30px;
+  /* A labelled secondary button, pressed while the graph shows. */
+  .graph-toggle {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
+    height: 28px;
+    padding: 0 12px;
     border: 1px solid var(--border-default);
-    border-radius: 6px;
-    background: var(--bg-primary);
-    color: var(--text-secondary);
-    padding: 0 8px;
+    border-radius: var(--radius-md);
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    font: inherit;
+    font-size: var(--font-size-md);
+    white-space: nowrap;
     cursor: pointer;
   }
+  /* Header actions are 28px controls, Complete… included. */
+  .detail-actions :global(.kit-button) {
+    min-height: 28px;
+    padding: 0 12px;
+    font-size: var(--font-size-md);
+    font-weight: var(--font-weight-normal);
+  }
+  .graph-toggle:hover,
+  .graph-toggle[aria-pressed='true'] {
+    background: var(--bg-surface-hover);
+  }
+  h2 {
+    margin: 0 0 6px;
+    font-size: var(--font-size-xl);
+    font-weight: var(--font-weight-semibold);
+    line-height: 1.25;
+  }
+  /* The title edits in place: the button and its input share one box that
+     hangs its border and padding into the inset, so the text stays put and
+     clicking shows only the border and caret. */
+  .title-button,
+  .title-edit {
+    box-sizing: border-box;
+    display: block;
+    width: calc(100% + 18px);
+    margin: -3px -9px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    padding: 2px 8px;
+    font: inherit;
+    line-height: inherit;
+  }
   .title-button {
-    width: 100%;
-    border: 0;
     background: transparent;
     color: var(--text-primary);
-    padding: 0;
-    font: inherit;
     text-align: left;
     cursor: pointer;
   }
+  .title-button:hover:not(:disabled) {
+    background: var(--bg-surface-hover);
+  }
   .title-edit {
-    width: 100%;
-    border: 1px solid var(--border-default);
-    border-radius: 6px;
+    border-color: var(--border-default);
     background: var(--bg-primary);
     color: var(--text-primary);
-    font: inherit;
-    padding: 6px 8px;
   }
-  .detail-description {
-    margin: 0 0 24px;
+  .detail-top :global(.detail-conflict) {
+    margin: 2px 0 6px;
   }
-  .detail-section {
-    margin-bottom: 24px;
-  }
-  .section-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
+  :global(.detail-conflict-inline) {
     margin-bottom: 8px;
   }
-  .section-header h3 {
+  .state-line,
+  .state-detail,
+  .created-line {
     margin: 0;
-    font-size: var(--font-size-md);
-    font-weight: var(--font-weight-semibold);
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+    line-height: 18px;
+  }
+  .state-detail {
+    padding-left: 18px;
+    overflow-wrap: anywhere;
+  }
+  .state-detail--code,
+  .state-line code {
+    font-family: var(--font-mono);
+  }
+  /* Each state carries its mark: blocked an amber warning, overdue a red
+     alert, Done a green check, other resolutions a muted slashed circle. */
+  .state-icon {
+    display: inline-flex;
+    margin-inline-end: 4px;
+    vertical-align: -2px;
+    color: var(--text-muted);
+  }
+  .state-icon--done {
+    color: var(--accent-green);
+  }
+  .state-icon--warning {
+    color: var(--accent-amber);
+  }
+  .state-icon--danger {
+    color: var(--accent-red);
+  }
+  .created-person {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    vertical-align: bottom;
   }
   .text-button {
     border: 0;
-    border-radius: 5px;
+    border-radius: var(--radius-md);
     background: transparent;
-    color: var(--text-muted);
+    color: var(--text-secondary);
     display: inline-flex;
     align-items: center;
-    gap: var(--space-2);
-    padding: 2px 6px;
+    gap: 4px;
+    height: 24px;
+    padding: 0 8px;
     font: inherit;
-    font-size: var(--font-size-xs);
+    font-size: var(--font-size-md);
     cursor: pointer;
   }
+  .text-button:hover {
+    background: var(--bg-surface-hover);
+    color: var(--text-primary);
+  }
+  .add-description {
+    align-self: flex-start;
+    border: 0;
+    padding: 2px 0;
+    background: transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: var(--font-size-md);
+    cursor: text;
+  }
+  .add-description:hover {
+    color: var(--text-primary);
+  }
+  /* A heading inside the description reads below the section's own. */
+  .kata-detail :global(.body-display :is(h1, h2, h3, h4)) {
+    margin: 0 0 8px;
+    font-size: var(--font-size-lg);
+    font-weight: var(--font-weight-semibold);
+  }
+  .kata-detail :global(.body-display) {
+    font-size: var(--font-size-md);
+  }
   .body-edit {
-    width: 100%;
+    box-sizing: border-box;
+    display: block;
+    width: calc(100% + 18px);
+    margin: -7px -9px 0;
     resize: vertical;
     border: 1px solid var(--border-default);
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     background: var(--bg-primary);
     color: var(--text-primary);
     font: inherit;
-    padding: 8px 10px;
+    font-size: var(--font-size-md);
+    padding: 6px 8px;
   }
   .body-edit-actions {
     display: flex;
@@ -837,27 +964,38 @@
     justify-content: space-between;
     gap: 12px;
     margin-top: 8px;
-    color: var(--text-muted);
-    font-size: var(--font-size-xs);
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
   }
   .body-edit-actions div {
     display: inline-flex;
-    gap: 6px;
+    gap: 8px;
   }
+  /* Cancel is quiet; Save finishes the edit, so it is the primary. */
   .ghost-button,
   .accent-button {
-    min-height: 28px;
-    border: 1px solid var(--border-default);
-    border-radius: 6px;
-    background: var(--bg-primary);
+    height: 28px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    background: transparent;
     color: var(--text-secondary);
     font: inherit;
-    padding: 4px 10px;
+    font-size: var(--font-size-md);
+    padding: 0 12px;
     cursor: pointer;
+  }
+  .ghost-button:hover:not(:disabled) {
+    background: var(--bg-surface-hover);
+    color: var(--text-primary);
   }
   .accent-button {
     border-color: var(--accent-blue);
     background: var(--accent-blue);
     color: var(--bg-surface);
+  }
+  @container kata-detail (max-width: 480px) {
+    .detail-heading {
+      flex-wrap: wrap;
+    }
   }
 </style>

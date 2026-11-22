@@ -121,7 +121,7 @@ test('dark accent-filled editor controls keep AA text contrast', async ({ page, 
   expect(await textContrast(save)).toBeGreaterThanOrEqual(4.5)
   await page.getByRole('button', { name: 'Cancel', exact: true }).click()
 
-  await page.getByRole('button', { name: '+ Repeats…' }).click()
+  await page.getByRole('button', { name: 'Repeats…' }).click()
   const pressed = page.getByRole('dialog').locator('[aria-pressed="true"]')
   await expect(pressed.first()).toBeVisible()
   for (const control of await pressed.all()) {

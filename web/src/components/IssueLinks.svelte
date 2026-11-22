@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { Button, Disclosure, Typeahead, type TypeaheadOption } from '@kenn-io/kit-ui'
+  import { Disclosure, Typeahead, type TypeaheadOption } from '@kenn-io/kit-ui'
+  import DetailSection from './DetailSection.svelte'
+  import { markColor } from '../lib/marks'
 
   import {
     kataLinkMatchesFilters,
@@ -130,6 +132,14 @@
     return link.from.uid === issue.issue.uid ? link.to : link.from
   }
 
+  // A peer in another project names that project after its title.
+  function linkPeerProject(link: KataTaskLink): string {
+    const qualified = linkPeer(link).qualified_id
+    const separator = qualified.lastIndexOf('#')
+    const project = separator === -1 ? '' : qualified.slice(0, separator)
+    return project === issue.issue.project_name ? '' : project
+  }
+
   function linkPeerLabel(link: KataTaskLink): string {
     const peer = linkPeer(link)
     return peer.qualified_id.startsWith(`${issue.issue.project_name}#`)
@@ -192,36 +202,71 @@
   <button
     type="button"
     class="link-row"
+    class:link-row--closed={peer?.status === 'closed'}
     aria-label={`${linkLabel(link)} ${linkPeerLabel(link)} ${peer?.title ?? ''} ${peer?.status ?? ''}`}
     onclick={() => void onSelectIssue({ uid: linkPeerUID(link) })}
   >
     <span class="link-status" class:closed={peer?.status === 'closed'} aria-hidden="true"></span>
-    <span class="link-peer">{linkPeerLabel(link)}</span>
+    <span class="link-peer">{linkPeer(link).short_id}</span>
     {#if peer?.title}<span class="link-title">{peer.title}</span>{/if}
+    {#if linkPeerProject(link)}<span class="link-project"
+        ><span class="project-mark" style:background={markColor(linkPeerProject(link))}
+        ></span>{linkPeerProject(link)}</span
+      >{/if}
   </button>
 {/snippet}
-<section class="task-links" aria-label="Links">
-  <div class="section-header link-section-header">
-    <h3>Links <span>{issue.links.length}</span></h3>
-    {#if issue.links.length === 0}<span class="link-empty">No links.</span>{/if}
-    <div class="link-header-actions">
-      {#if issue.links.length > 8}<LinkFilterMenu
-          filters={linkFilters}
-          onChange={onLinkFiltersChange}
-        />{/if}
-      <Button
-        size="sm"
-        label="Add"
-        disabled={actionsDisabled}
-        onclick={() => {
-          adding = !adding
-        }}
-      />
-    </div>
-  </div>
+<DetailSection
+  title="Links"
+  count={issue.links.length === 0
+    ? undefined
+    : visibleLinks.length === issue.links.length
+      ? issue.links.length
+      : `${visibleLinks.length} of ${issue.links.length}`}
+  empty={adding
+    ? undefined
+    : issue.links.length === 0
+      ? 'No links'
+      : visibleLinks.length === 0
+        ? 'No matching links'
+        : undefined}
+>
+  {#snippet actions()}
+    {#if issue.links.length > 8}<LinkFilterMenu
+        filters={linkFilters}
+        onChange={onLinkFiltersChange}
+      />{/if}
+    <button
+      type="button"
+      class="section-action"
+      aria-expanded={adding}
+      disabled={actionsDisabled}
+      onclick={() => {
+        adding = !adding
+      }}>Add</button
+    >
+  {/snippet}
+  {#each ['blocked_by', 'blocks', 'parent', 'child', 'related'] as group (group)}
+    {@const grouped = visibleLinks.filter(
+      (link) => relationForKataLink(link, issue.issue.uid) === group,
+    )}
+    {@const open = grouped.filter((link) => !peerClosed(link))}
+    {@const closed = grouped.filter(peerClosed)}
+    {#if grouped.length}
+      <div class="link-group" role="group" aria-label={relationLabels[group as KataLinkRelation]}>
+        <p class="link-group-heading">
+          {relationLabels[group as KataLinkRelation]}
+          <span class="link-group-count">{grouped.length}</span>
+        </p>
+        {#each open as link (link.id)}{@render linkRow(link)}{/each}
+        {#if closed.length}<Disclosure variant="plain" title={`${closed.length} closed`}>
+            {#each closed as link (link.id)}{@render linkRow(link)}{/each}
+          </Disclosure>{/if}
+      </div>
+    {/if}
+  {/each}
   {#if adding}
     <div class="link-form">
-      <span>Related</span>
+      <span class="link-relation">Related</span>
       <Typeahead
         {options}
         fallbackLabel="Find task"
@@ -236,72 +281,53 @@
       />
     </div>
   {/if}
-  {#if issue.links.length === 0}{:else if visibleLinks.length === 0}<p class="link-empty">
-      No links match these filters.
-    </p>
-  {:else}
-    {#each ['blocked_by', 'blocks', 'parent', 'child', 'related'] as group (group)}
-      {@const grouped = visibleLinks.filter(
-        (link) => relationForKataLink(link, issue.issue.uid) === group,
-      )}
-      {@const open = grouped.filter((link) => !peerClosed(link))}
-      {@const closed = grouped.filter(peerClosed)}
-      {#if grouped.length}
-        <div>
-          <strong>{relationLabels[group as KataLinkRelation]} {grouped.length}</strong>
-          {#each open as link (link.id)}{@render linkRow(link)}{/each}
-          {#if closed.length}<Disclosure variant="plain" title={`${closed.length} closed`}>
-              {#each closed as link (link.id)}{@render linkRow(link)}{/each}
-            </Disclosure>{/if}
-        </div>
-      {/if}
-    {/each}
-  {/if}
-</section>
+</DetailSection>
 
 <style>
-  .task-links {
-    display: grid;
-    gap: 8px;
-    margin: 0 0 24px;
+  .link-group + .link-group {
+    margin-top: 8px;
   }
-  .section-header {
+  .link-group-heading {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-  }
-  .section-header h3 {
-    margin: 0;
-    font-size: var(--font-size-md);
+    align-items: baseline;
+    gap: 4px;
+    margin: 0 0 2px;
+    color: var(--text-secondary);
+    font-size: var(--font-size-xs);
     font-weight: var(--font-weight-semibold);
   }
-  .section-header h3 span,
-  .link-empty {
-    color: var(--text-muted);
-    font-size: var(--font-size-xs);
+  .link-group-count {
+    font-weight: var(--font-weight-normal);
   }
-  .link-header-actions,
-  .link-form {
-    display: flex;
-    gap: var(--space-3);
-    align-items: center;
-  }
-  .link-empty {
-    margin: 0;
-    margin-right: auto;
-  }
-  .link-row {
-    width: 100%;
-    min-height: 32px;
+  .section-action {
+    height: 24px;
     border: 0;
-    border-radius: 6px;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: var(--font-size-md);
+    padding: 0 8px;
+    cursor: pointer;
+  }
+  .section-action:hover:not(:disabled),
+  .section-action[aria-expanded='true'] {
+    background: var(--bg-surface-hover);
+    color: var(--text-primary);
+  }
+  /* A record row: its text starts at the pane inset and its highlight runs
+     to the pane's edges. */
+  .link-row {
+    width: calc(100% + 32px);
+    min-height: 32px;
+    margin-inline: -16px;
+    border: 0;
     background: transparent;
     color: var(--text-primary);
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 4px 6px;
+    padding: 6px 16px;
     font: inherit;
     font-size: var(--font-size-sm);
     text-align: left;
@@ -311,8 +337,8 @@
     background: var(--bg-surface-hover);
   }
   .link-status {
-    width: 13px;
-    height: 13px;
+    width: 14px;
+    height: 14px;
     flex: none;
     border: 1.5px solid var(--text-muted);
     border-radius: 50%;
@@ -320,14 +346,51 @@
   .link-status.closed {
     background: var(--text-muted);
   }
+  /* The title is what the row is about; the ID is muted mono. */
   .link-peer {
+    color: var(--text-secondary);
     font-family: var(--font-mono);
-    font-size: var(--font-size-xs);
   }
   .link-title {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .link-project {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    gap: 4px;
+    color: var(--text-secondary);
+  }
+  .project-mark {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+  }
+  .link-row--closed .link-title {
+    color: var(--text-muted);
+  }
+  .link-form {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-top: 8px;
+  }
+  .link-relation {
+    display: inline-flex;
+    align-items: center;
+    height: 28px;
+    padding: 0 12px;
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-semibold);
+  }
+  .link-form :global(.kit-typeahead) {
+    flex: 1;
+    min-width: 0;
   }
 </style>

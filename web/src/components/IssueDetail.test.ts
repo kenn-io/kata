@@ -97,9 +97,7 @@ describe('IssueDetail', () => {
     await fireEvent.keyDown(screen.getByRole('textbox', { name: 'Edit title' }), { key: 'Enter' })
     await view.rerender({ issue: makeIssue({ title: 'Their title', content_revision: 3 }) })
     finish(false)
-    await vi.waitFor(() =>
-      expect(screen.getByText(/The task changed while you were editing/)).toBeTruthy(),
-    )
+    await vi.waitFor(() => expect(screen.getByText(/while you were editing/)).toBeTruthy())
     expect((screen.getByRole('textbox', { name: 'Edit title' }) as HTMLInputElement).value).toBe(
       'My title',
     )
@@ -124,7 +122,9 @@ describe('IssueDetail', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await view.rerender({ issue: makeIssue({ body: 'Their description', content_revision: 3 }) })
     finish(false)
-    await vi.waitFor(() => expect(screen.getByText(/changed while you were editing/)).toBeTruthy())
+    await vi.waitFor(() =>
+      expect(screen.getByText(/changed the description while you were editing/)).toBeTruthy(),
+    )
     expect(
       (screen.getByRole('textbox', { name: 'Edit description' }) as HTMLTextAreaElement).value,
     ).toBe('My description')
@@ -290,7 +290,7 @@ describe('IssueDetail', () => {
     const onMoveIssue = vi.fn(async () => true)
     renderDetail({ onMoveIssue })
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Inbox' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Project: Inbox' }))
     await fireEvent.click(screen.getByRole('button', { name: 'Roadmap 1' }))
 
     expect(onMoveIssue).toHaveBeenCalledWith('project-2')
@@ -298,9 +298,9 @@ describe('IssueDetail', () => {
 
   it('offers recurrence creation only on an open task without a rule', async () => {
     const view = renderDetail({ issue: makeIssue({ metadata: {} }), selectedRecurrences: [] })
-    expect(screen.getByRole('button', { name: '+ Repeats…' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Repeats…' })).toBeTruthy()
     await view.rerender({ issue: makeIssue({ status: 'closed', metadata: {} }) })
-    expect(screen.queryByRole('button', { name: '+ Repeats…' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Repeats…' })).toBeNull()
   })
 
   it('closes a recurrence draft after authentication authority changes', async () => {
@@ -309,7 +309,7 @@ describe('IssueDetail', () => {
       selectedRecurrences: [],
       draftFenceGeneration: 0,
     })
-    await fireEvent.click(screen.getByRole('button', { name: '+ Repeats…' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Repeats…' }))
     const recurrenceDialog = screen.getByRole('dialog')
     await fireEvent.input(within(recurrenceDialog).getByLabelText(/Title/i), {
       target: { value: 'Old authority recurrence' },
@@ -375,7 +375,7 @@ describe('IssueDetail', () => {
     expect(screen.getByRole('button', { name: 'Stop' })).not.toBeNull()
     expect(await screen.findByText('Accepted comment')).not.toBeNull()
     expect(screen.getByText('user-a / teammate-1')).not.toBeNull()
-    await fireEvent.click(screen.getByText('1 event'))
+    await fireEvent.click(screen.getByRole('button', { name: 'Show history' }))
     expect(screen.getByText(/commented/)).not.toBeNull()
 
     await fireEvent.input(screen.getByLabelText('Comment'), {

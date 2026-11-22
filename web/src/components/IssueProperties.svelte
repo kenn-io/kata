@@ -1,10 +1,23 @@
 <script lang="ts">
-  import type { Snippet } from 'svelte'
+  import { tick, type Snippet } from 'svelte'
   import XIcon from '@lucide/svelte/icons/x'
+  import PlusIcon from '@lucide/svelte/icons/plus'
+  import CircleIcon from '@lucide/svelte/icons/circle'
+  import CircleCheckIcon from '@lucide/svelte/icons/circle-check'
   import ChevronDownIcon from '@lucide/svelte/icons/chevron-down'
-  import { Avatar, Typeahead, type TypeaheadOption } from '@kenn-io/kit-ui'
-  import { Chip, SelectDropdown } from '@kenn-io/kit-ui'
+  import {
+    Avatar,
+    Menu,
+    MenuContent,
+    MenuRadioGroup,
+    MenuRadioItem,
+    MenuTrigger,
+    SelectDropdown,
+    Typeahead,
+    type TypeaheadOption,
+  } from '@kenn-io/kit-ui'
   import { formatTimestamp } from '@kenn-io/kit-ui/utils/time'
+  import { markColor } from '../lib/marks'
   import type { KataTaskDetail } from '../lib/kata/types'
   import { deadlineDate, scheduledDate } from '../lib/kata/view'
   import DatePicker from './DatePicker.svelte'
@@ -88,6 +101,8 @@
   let assignmentTTLDraft = $state('')
   let addingLabel = $state(false)
   let labelDraft = $state('')
+  let labelInput: HTMLInputElement | null = $state(null)
+  let priorityMenuOpen = $state(false)
   let ownerEditVersion = $state(0)
   let ownerDraft = $state('')
   let ownerEditorOpen = $state(false)
@@ -208,18 +223,78 @@
   function scheduledLabel(): string {
     const saved = issue.issue.metadata.scheduled_on
     const value = dateZone(saved) ? scheduledDate(issue.issue) : saved
-    return value ? formatDate(value) : 'When'
+    return value ? formatDate(value) : ''
   }
 
   function dueLabel(): string {
     const value = deadlineDate(issue.issue)
-    return value ? formatDate(value) : 'No due date'
+    return value ? formatDate(value) : ''
   }
 
-  function priorityLabel(): string {
-    const priority = issue.issue.priority
-    return priority === undefined || priority === null ? 'No priority' : `P${priority}`
+  const hasPriority = $derived(issue.issue.priority !== undefined && issue.issue.priority !== null)
+  const shownPriority = $derived(
+    activeProperty === 'priority' ? priorityDraft : hasPriority ? String(issue.issue.priority) : '',
+  )
+
+  // The current owner leads the menu, then Unassigned, then everyone else.
+  const ownerMenu = $derived.by((): TypeaheadOption[] => {
+    const current = issue.issue.owner ?? ''
+    const unassigned = { name: '', label: 'Unassigned' }
+    const rest = ownerOptions.filter((option) => option.name !== current)
+    if (!current) return [unassigned, ...rest]
+    const currentOption = ownerOptions.find((option) => option.name === current) ?? {
+      name: current,
+      label: current,
+    }
+    return [currentOption, unassigned, ...rest]
+  })
+
+  // An assignment ending today names its time; a later one, its day.
+  function expiryLabel(value: string): string {
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return value
+    if (date.toDateString() === new Date().toDateString())
+      return date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+    const pad = (part: number) => String(part).padStart(2, '0')
+    return formatDate(`${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`)
   }
+
+  async function addPriority(): Promise<void> {
+    openProperty('priority')
+    await tick()
+    priorityMenuOpen = true
+  }
+
+  function priorityMenuChanged(open: boolean): void {
+    // An unset priority leaves its row again when its menu closes unchosen.
+    if (!open && activeProperty === 'priority' && priorityDraft === '' && !hasPriority)
+      activeProperty = null
+  }
+
+  function startLabel(): void {
+    addingLabel = true
+    void tick().then(() => labelInput?.focus())
+  }
+
+  const addItems = $derived(
+    actionsDisabled
+      ? []
+      : [
+          ...(hasPriority || activeProperty === 'priority'
+            ? []
+            : [{ label: 'Priority', onclick: () => void addPriority() }]),
+          ...(scheduledDate(issue.issue) || activeProperty === 'scheduled'
+            ? []
+            : [{ label: 'Scheduled', onclick: () => openProperty('scheduled') }]),
+          ...(deadlineDate(issue.issue) || activeProperty === 'due'
+            ? []
+            : [{ label: 'Due', onclick: () => openProperty('due') }]),
+          ...(issue.labels.length > 0 || addingLabel
+            ? []
+            : [{ label: 'Labels', onclick: startLabel }]),
+          ...(canCreateRecurrence ? [{ label: 'Repeats…', onclick: onCreateRecurrence }] : []),
+        ],
+  )
 
   function openProperty(property: PropertyKey): void {
     if (actionsDisabled) return
@@ -355,74 +430,108 @@
   }
 </script>
 
-<section class="properties" aria-label="Properties">
-  <div class="property-row">
-    <span>Status</span><strong
-      >{issue.issue.status === 'closed'
-        ? 'Closed'
-        : issue.issue.open_blocked_by?.length
-          ? 'Blocked'
-          : 'Open'}</strong
-    >
-  </div>
-  <div class="property-row">
-    <span>Project</span>
+<dl class="properties" aria-label="Properties">
+  <dt>Status</dt>
+  <dd>
+    <span class="value-text status">
+      {#if issue.issue.status === 'closed'}<CircleCheckIcon
+          size={14}
+          aria-hidden="true"
+          class="status-closed"
+        />Closed{:else}<CircleIcon size={14} aria-hidden="true" />Open{/if}
+    </span>
+  </dd>
+
+  <dt>Project</dt>
+  <dd>
     {#if administrativeActionsAllowed}
-      <button type="button" class="value" disabled={actionsDisabled} onclick={onMove}
-        >{issue.issue.project_name}</button
+      <button
+        type="button"
+        class="value-button"
+        aria-label={`Project: ${issue.issue.project_name}`}
+        title="Move to another project…"
+        disabled={actionsDisabled}
+        onclick={onMove}
+        ><span class="project-mark" style:background={markColor(issue.issue.project_name)}
+        ></span>{issue.issue.project_name}</button
       >
-    {:else}<strong>{issue.issue.project_name}</strong>{/if}
-  </div>
-  {#if issue.issue.priority !== undefined || activeProperty === 'priority'}
-    <div class="property-row">
-      <span>Priority</span>
-      {#if activeProperty === 'priority'}
-        <SelectDropdown
-          title="Priority"
-          value={priorityDraft}
-          options={priorityOptions}
+    {:else}
+      <span class="value-text"
+        ><span class="project-mark" style:background={markColor(issue.issue.project_name)}
+        ></span>{issue.issue.project_name}</span
+      >
+    {/if}
+  </dd>
+
+  {#if hasPriority || activeProperty === 'priority'}
+    <dt>Priority</dt>
+    <dd>
+      <Menu bind:open={priorityMenuOpen} onopenchange={priorityMenuChanged}>
+        <MenuTrigger
+          class="value-button priority-trigger"
+          ariaLabel={`Priority: ${shownPriority === '' ? 'No priority' : `P${shownPriority}`}`}
           disabled={actionsDisabled}
-          onchange={(value) => void updatePriority(value)}
-        />
-      {:else}<button
-          type="button"
-          class="value"
-          aria-label="Edit priority"
-          disabled={actionsDisabled}
-          onclick={() => openProperty('priority')}>{priorityLabel()}</button
-        >{/if}
-    </div>
+        >
+          {#if shownPriority === ''}<span class="muted">No priority</span>{:else}<span
+              class="priority-badge"
+              data-priority={shownPriority}>P{shownPriority}</span
+            >{/if}
+          <ChevronDownIcon size={14} aria-hidden="true" />
+        </MenuTrigger>
+        <MenuContent ariaLabel="Priority" class="priority-menu">
+          <MenuRadioGroup
+            value={shownPriority}
+            onchange={(value) => {
+              activeProperty = 'priority'
+              void updatePriority(value)
+            }}
+          >
+            {#each priorityOptions as option (option.value)}
+              <MenuRadioItem value={option.value} textValue={option.label} closeOnSelect>
+                {#if option.value === ''}{option.label}{:else}<span
+                    class="priority-badge"
+                    data-priority={option.value}>{option.label}</span
+                  >{/if}
+              </MenuRadioItem>
+            {/each}
+          </MenuRadioGroup>
+        </MenuContent>
+      </Menu>
+    </dd>
   {/if}
-  <div class="property-row">
-    <span>Owner</span>
+
+  <dt>Owner</dt>
+  <dd>
     <div
-      class="owner-controls"
+      class="owner-value"
       onfocusin={handleOwnerFocusIn}
       onfocusoutcapture={handleOwnerFocusOutCapture}
     >
       {#key ownerEditorGeneration}
         <Typeahead
-          options={ownerOptions}
+          options={ownerMenu}
           value={issue.issue.owner ?? ''}
           fallbackLabel="Unassigned"
           placeholder="Owner"
-          allowClear
           allowCustom
-          clearLabel="Unassigned"
           emptyLabel="Enter an owner"
           disabled={actionsDisabled && !ownerEditorOpen}
           onquery={trackOwnerQuery}
           onselect={updateOwner}
         >
+          {#snippet icon(option)}
+            {#if option.name}<Avatar name={option.name} size={16} decorative />{/if}
+          {/snippet}
           {#snippet trigger({ attachment })}
             <button
               type="button"
-              class="owner-trigger"
+              class="value-button owner-trigger"
+              class:muted={!issue.issue.owner}
               aria-label={`Owner: ${issue.issue.owner ?? 'Unassigned'}`}
               disabled={actionsDisabled && !ownerEditorOpen}
               {@attach attachment}
             >
-              {#if issue.issue.owner}<Avatar name={issue.issue.owner} size={20} decorative />{/if}
+              {#if issue.issue.owner}<Avatar name={issue.issue.owner} size={16} decorative />{/if}
               {issue.issue.owner ?? 'Unassigned'}
               <ChevronDownIcon size={14} aria-hidden="true" />
             </button>
@@ -430,20 +539,28 @@
         </Typeahead>
       {/key}
       {#if issue.issue.assignment_expires_on}<span
-          >until {formatTimestamp(issue.issue.assignment_expires_on)}</span
+          class="value-note"
+          title={formatTimestamp(issue.issue.assignment_expires_on)}
+          >until {expiryLabel(issue.issue.assignment_expires_on)}</span
         >{/if}
-      <SelectDropdown
-        title="Assignment duration"
-        value={assignmentTTLDraft}
-        options={assignmentTTLOptions}
-        disabled={actionsDisabled}
-        onchange={(value) => void claimAssignment(value)}
-      />
+      {#if issue.issue.status === 'open'}
+        <!-- Without a temporary assignment, its choice shows on hover and focus. -->
+        <div class="assignment" class:assignment--reveal={!issue.issue.assignment_expires_on}>
+          <SelectDropdown
+            title="Assignment duration"
+            value={assignmentTTLDraft}
+            options={assignmentTTLOptions}
+            disabled={actionsDisabled}
+            onchange={(value) => void claimAssignment(value)}
+          />
+        </div>
+      {/if}
     </div>
-  </div>
+  </dd>
+
   {#if scheduledDate(issue.issue) || activeProperty === 'scheduled'}
-    <div class="property-row">
-      <span>Scheduled</span>
+    <dt>Scheduled</dt>
+    <dd>
       {#if activeProperty === 'scheduled'}<DatePicker
           ariaLabel="Scheduled"
           value={scheduledDraft}
@@ -457,16 +574,17 @@
         />
       {:else}<button
           type="button"
-          class="value"
+          class="value-button"
           aria-label="Edit scheduled"
           disabled={actionsDisabled}
           onclick={() => openProperty('scheduled')}>{scheduledLabel()}</button
         >{/if}
-    </div>
+    </dd>
   {/if}
+
   {#if deadlineDate(issue.issue) || activeProperty === 'due'}
-    <div class="property-row">
-      <span>Due</span>
+    <dt>Due</dt>
+    <dd>
       {#if activeProperty === 'due'}<DatePicker
           ariaLabel="Due"
           clearLabel="Clear due date"
@@ -481,33 +599,36 @@
         />
       {:else}<button
           type="button"
-          class="value"
+          class="value-button"
           aria-label="Edit due date"
           disabled={actionsDisabled}
           onclick={() => openProperty('due')}>{dueLabel()}</button
         >{/if}
-    </div>
+    </dd>
   {/if}
-  <div class="property-row">
-    <span>Labels</span>
-    <div class="labels">
+
+  {#if issue.labels.length > 0 || addingLabel}
+    <dt>Labels</dt>
+    <dd>
       {#each issue.labels as label (label.label)}
-        <Chip
-          size="xs"
-          tone="muted"
-          uppercase={false}
-          interactive
-          ariaLabel={`Remove label ${label.label}`}
-          disabled={actionsDisabled}
-          onclick={() => {
-            if (!actionsDisabled) void onRemoveLabel(uid(), label.label)
-          }}>{label.label}<XIcon size={11} aria-hidden="true" /></Chip
+        <span class="label-chip" title={label.label}
+          ><span class="label-text">{label.label}</span><button
+            type="button"
+            class="label-remove"
+            aria-label={`Remove label ${label.label}`}
+            title={`Remove label ${label.label}`}
+            disabled={actionsDisabled}
+            onclick={() => {
+              if (!actionsDisabled) void onRemoveLabel(uid(), label.label)
+            }}><XIcon size={14} aria-hidden="true" /></button
+          ></span
         >
       {/each}
       {#if addingLabel}
         <input
           aria-label="New label"
           class="label-input"
+          bind:this={labelInput}
           value={labelDraft}
           disabled={actionsDisabled}
           oninput={(event) => {
@@ -517,110 +638,288 @@
           onblur={() => void submitLabel()}
         />
       {:else}<button
-          class="value"
+          class="value-button add-label"
           type="button"
           aria-label="Add label"
+          title="Add label"
           disabled={actionsDisabled}
-          onclick={() => {
-            addingLabel = true
-          }}>+</button
+          onclick={startLabel}><PlusIcon size={14} aria-hidden="true" /></button
         >{/if}
-    </div>
-  </div>
-  {#if repeats}<div class="property-row"><span>Repeats</span>{@render repeats()}</div>{/if}
-  {#if issue.issue.status === 'open'}
-    <div class="property-row">
-      <span>Add</span>
-      <div class="add-actions">
-        {#if issue.issue.priority === undefined && activeProperty !== 'priority'}<button
-            type="button"
-            disabled={actionsDisabled}
-            onclick={() => openProperty('priority')}>+ Priority</button
-          >{/if}
-        {#if !scheduledDate(issue.issue) && activeProperty !== 'scheduled'}<button
-            type="button"
-            disabled={actionsDisabled}
-            onclick={() => openProperty('scheduled')}>+ Scheduled</button
-          >{/if}
-        {#if !deadlineDate(issue.issue) && activeProperty !== 'due'}<button
-            type="button"
-            disabled={actionsDisabled}
-            onclick={() => openProperty('due')}>+ Due</button
-          >{/if}
-        {#if canCreateRecurrence}<button
-            type="button"
-            disabled={actionsDisabled}
-            onclick={onCreateRecurrence}>+ Repeats…</button
-          >{/if}
-      </div>
-    </div>
+    </dd>
   {/if}
-</section>
+
+  {#if repeats}<dt>Repeats</dt>
+    <dd>{@render repeats()}</dd>{/if}
+
+  {#if issue.issue.status === 'open' && addItems.length > 0}
+    <dt>Add</dt>
+    <dd class="add-actions">
+      {#each addItems as item (item.label)}
+        <button type="button" onclick={item.onclick}
+          ><PlusIcon size={14} aria-hidden="true" />{item.label}</button
+        >
+      {/each}
+    </dd>
+  {/if}
+</dl>
 
 <style>
+  /* Labels in a 96px column, values 12px after; every row is at least 32px
+     and each value's 24px control sits centered on its label's line. */
   .properties {
     display: grid;
-    gap: 0;
-    margin: 0 0 24px;
-  }
-  .property-row {
-    display: grid;
     grid-template-columns: 96px minmax(0, 1fr);
-    gap: 12px;
-    min-height: 32px;
-    align-items: center;
+    align-items: start;
+    column-gap: 12px;
+    margin: 0;
     font-size: var(--font-size-sm);
+    line-height: 18px;
   }
-  .property-row > span {
-    color: var(--text-muted);
+  dt {
+    min-height: 32px;
+    padding-top: 7px;
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
-  .property-row strong {
-    font-weight: 500;
-  }
-
-  .owner-controls {
+  dd {
+    min-height: 32px;
+    min-width: 0;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 6px;
+    align-content: flex-start;
+    gap: 4px;
+    padding-block: 4px;
+    margin: 0;
   }
-  .owner-trigger {
+  .value-text,
+  .value-note {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    border: 0;
-    background: transparent;
-    color: var(--text-primary);
-    font: inherit;
-    cursor: pointer;
-    padding: 4px;
+    gap: 4px;
+    min-height: 24px;
   }
-  .value,
-  .add-actions button {
-    border: 0;
-    background: transparent;
-    color: var(--text-primary);
-    font: inherit;
-    text-align: left;
-    padding: 4px;
-    cursor: pointer;
+  .value-note {
+    color: var(--text-secondary);
   }
-  .value:hover,
-  .add-actions button:hover {
-    background: var(--bg-surface-hover);
-  }
-  .labels,
-  .add-actions {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px;
-  }
-  .add-actions button {
+  .status :global(svg) {
     color: var(--text-muted);
   }
-  .label-input {
-    min-height: 28px;
+  .status :global(.status-closed) {
+    color: var(--accent-green);
+  }
+  .project-mark {
+    flex: 0 0 10px;
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+  }
+  .muted {
+    color: var(--text-secondary);
+  }
+
+  /* A value reads as text until hovered; its hover box hangs into the gap so
+     the text starts on the value column. */
+  .value-button,
+  dd :global(.value-button) {
+    min-height: 24px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-primary);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: -9px;
+    padding: 0 8px;
     font: inherit;
+    cursor: pointer;
+  }
+  dd :global(.value-button.muted) {
+    color: var(--text-secondary);
+  }
+  dd :global(.value-button svg) {
+    color: var(--text-muted);
+  }
+  dd :global(.value-button:hover:not(:disabled)),
+  dd :global(.value-button[aria-expanded='true']) {
+    background: var(--bg-surface-hover);
+  }
+  .value-button.add-label {
+    justify-content: center;
+    width: 24px;
+    margin-left: 0;
+    padding: 0;
+    color: var(--text-secondary);
+  }
+
+  .priority-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    height: 18px;
+    padding: 0 4px;
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+  .priority-badge[data-priority='0'] {
+    background: color-mix(in srgb, var(--accent-red) 16%, transparent);
+    color: color-mix(in srgb, var(--accent-red) 72%, var(--text-primary));
+    font-weight: var(--font-weight-semibold);
+  }
+  .priority-badge[data-priority='1'] {
+    background: color-mix(in srgb, var(--accent-amber) 16%, transparent);
+    color: color-mix(in srgb, var(--accent-amber) 72%, var(--text-primary));
+    font-weight: var(--font-weight-semibold);
+  }
+  .priority-badge[data-priority='2'] {
+    background: var(--bg-inset);
+  }
+  :global(.priority-menu .kit-menu__item) {
+    min-width: 120px;
+  }
+
+  /* The owner and its assignment choice share one line; the choice shrinks
+     rather than wrapping under the owner. */
+  .owner-value {
+    display: inline-flex;
+    flex-wrap: nowrap;
+    max-width: 100%;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+  }
+  .owner-value :global(.kit-typeahead) {
+    min-width: 0;
+    --typeahead-panel-min-width: 180px;
+  }
+  /* The assignment choice reads as quiet text until hovered. */
+  .assignment {
+    min-width: 0;
+  }
+  .assignment :global(.kit-select-dropdown),
+  :global(#app) .assignment :global(.kit-select-dropdown__trigger) {
+    min-width: 0;
+    max-width: 100%;
+  }
+  .owner-value :global(.kit-typeahead),
+  .value-note {
+    flex: none;
+  }
+  :global(#app) .assignment :global(.kit-select-dropdown__trigger) {
+    min-height: 24px;
+    height: 24px;
+    padding-inline: 8px;
+    border-color: transparent;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-normal);
+  }
+  :global(#app) .assignment :global(.kit-select-dropdown__trigger:hover:not(:disabled)),
+  :global(#app) .assignment :global(.kit-select-dropdown__trigger[aria-expanded='true']) {
+    background: var(--bg-surface-hover);
+  }
+  /* It keeps its place while hidden so the row doesn't jump. */
+  .assignment--reveal {
+    opacity: 0;
+  }
+  .owner-value:hover .assignment--reveal,
+  .owner-value:focus-within .assignment--reveal {
+    opacity: 1;
+  }
+  @media (hover: none) {
+    .assignment--reveal {
+      opacity: 1;
+    }
+  }
+
+  /* A label chip; its remove button opens inside the chip on hover and focus. */
+  .label-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    max-width: min(220px, 100%);
+    height: 24px;
+    padding: 0 8px;
+    border-radius: var(--radius-md);
+    background: var(--bg-inset);
+    color: var(--text-secondary);
+    white-space: nowrap;
+  }
+  .label-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .label-remove {
+    width: 0;
+    height: 16px;
+    overflow: hidden;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    display: inline-grid;
+    flex: none;
+    place-items: center;
+    margin-right: -4px;
+    padding: 0;
+    cursor: pointer;
+  }
+  .label-chip:hover .label-remove,
+  .label-remove:focus-visible {
+    width: 16px;
+  }
+  @media (hover: none) {
+    .label-remove {
+      width: 16px;
+    }
+  }
+  .label-remove:hover {
+    background: var(--bg-surface-hover);
+    color: var(--text-primary);
+  }
+  .label-input {
+    width: min(180px, 100%);
+    height: 24px;
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font: inherit;
+    padding: 0 8px;
+  }
+
+  /* Quiet buttons with no fill until hover; the first icon starts on the
+     value column. */
+  .add-actions {
+    margin-left: -8px;
+  }
+  .add-actions button {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 24px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    cursor: pointer;
+  }
+  .add-actions button:hover,
+  .add-actions button:focus-visible {
+    background: var(--bg-surface-hover);
+    color: var(--text-primary);
+  }
+  .add-actions :global(svg) {
+    color: var(--text-muted);
   }
 </style>

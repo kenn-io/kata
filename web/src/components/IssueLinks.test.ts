@@ -11,8 +11,8 @@ describe('IssueLinks', () => {
   it('groups links by direction', () => {
     renderLinks()
     const links = screen.getByRole('region', { name: 'Links' })
-    for (const group of ['Parent 1', 'Child 1', 'Blocks 1', 'Blocked by 1', 'Related 1']) {
-      expect(within(links).getByText(group)).not.toBeNull()
+    for (const group of ['Parent', 'Child', 'Blocks', 'Blocked by', 'Related']) {
+      expect(within(within(links).getByRole('group', { name: group })).getByText('1')).toBeTruthy()
     }
   })
 
