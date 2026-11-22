@@ -1022,7 +1022,7 @@ func TestDaemonDiagnoseStorageBusy(t *testing.T) {
 	assertDiagnosticState(t, out, "storage_busy")
 	_, _, err = executeRootCapture(t, t.Context(), "daemon", "recover")
 	require.ErrorContains(t, err, "wait for the SQLite upgrade or import")
-	requireCLIError(t, err, ExitDaemonUnavail)
+	_ = requireCLIError(t, err, ExitDaemonUnavail)
 	require.NoError(t, lock.Close())
 	out, _, err = executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
 	require.NoError(t, err)
@@ -1097,8 +1097,8 @@ func TestDaemonDiagnoseProfileMarkerPermissions(t *testing.T) {
 				_, err = store.ExecContext(t.Context(), "PRAGMA journal_mode=DELETE")
 				require.NoError(t, err)
 				require.NoError(t, store.Close())
-				require.NoError(t, os.Chmod(home, 0500))
-				t.Cleanup(func() { _ = os.Chmod(home, 0700) })
+				require.NoError(t, os.Chmod(home, 0500))       //nolint:gosec // G302: exercise a read-only directory.
+				t.Cleanup(func() { _ = os.Chmod(home, 0700) }) //nolint:gosec // G302: restore access for cleanup.
 			}
 			out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
 			require.NoError(t, err)
@@ -1151,7 +1151,7 @@ func diagnoseWhileSQLiteBusy(t *testing.T, setup []string, contender func(contex
 	var opened chan error
 	var diagnosisRead, openRead bool
 	defer func() {
-		_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+		_, _ = conn.ExecContext(t.Context(), "ROLLBACK")
 		cancel()
 		if !diagnosisRead {
 			select {
@@ -1174,6 +1174,7 @@ func diagnoseWhileSQLiteBusy(t *testing.T, setup []string, contender func(contex
 	}()
 	marker := flock.New(path + ".import.lock")
 	defer func() { _ = marker.Close() }()
+	//nolint:kennlint // sleeptest: observing the filesystem lock requires real elapsed time.
 	require.Eventually(t, func() bool {
 		locked, err := marker.TryLock()
 		if err != nil {

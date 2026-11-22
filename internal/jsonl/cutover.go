@@ -76,7 +76,7 @@ func withCutoverLocks(ctx context.Context, paths []string, fn func() error) erro
 		lockCtx, cancel := context.WithTimeout(ctx, time.Second)
 		locked, err := lock.TryLockContext(lockCtx, 10*time.Millisecond)
 		cancel()
-		if err != nil && !(errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil) {
+		if err != nil && (!errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil) {
 			return fmt.Errorf("lock SQLite cutover: %w", err)
 		}
 		if locked {

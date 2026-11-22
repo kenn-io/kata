@@ -64,8 +64,8 @@ func TestCutoverReadLockMissingAndSymlink(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "kata.db")
 		require.NoError(t, os.WriteFile(path, nil, 0600))
-		require.NoError(t, os.Chmod(dir, 0500))
-		t.Cleanup(func() { _ = os.Chmod(dir, 0700) })
+		require.NoError(t, os.Chmod(dir, 0500))       //nolint:gosec // G302: exercise a read-only directory.
+		t.Cleanup(func() { _ = os.Chmod(dir, 0700) }) //nolint:gosec // G302: restore access for cleanup.
 		release, busy, err := cutoverlock.TryReadLock(path, true)
 		require.NoError(t, err)
 		require.False(t, busy)

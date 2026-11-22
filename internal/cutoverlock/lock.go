@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"syscall"
 	"time"
 
@@ -63,8 +64,8 @@ func TryReadLock(path string, create bool) (release func(), busy bool, err error
 func readLock(path string, create, wait bool, try func(*flock.Flock) (bool, error)) (release func(), busy string, err error) {
 	var locks []*flock.Flock
 	release = func() {
-		for i := len(locks) - 1; i >= 0; i-- {
-			_ = locks[i].Close()
+		for _, lock := range slices.Backward(locks) {
+			_ = lock.Close()
 		}
 	}
 	for _, name := range Paths(path) {
