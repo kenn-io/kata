@@ -23,11 +23,11 @@ func IsFederationRetainedProject(ctx context.Context, queryer interface {
 	return found, err
 }
 
-// ClearFederationRetainedProject retires placeholder ownership on deletion.
+// ClearFederationRetainedProject retires placeholder ownership and the held cursor on deletion.
 func ClearFederationRetainedProject(ctx context.Context, tx interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }, uid string) error {
-	_, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=$1`, FederationRetainedProjectPrefix+uid)
+	_, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key IN ($1,$2)`, FederationRetainedProjectPrefix+uid, FederationHeldCursorPrefix+uid)
 	return err
 }
 

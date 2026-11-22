@@ -1,6 +1,8 @@
 package dbtest
 
 import (
+	"context"
+	"database/sql"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -8,6 +10,34 @@ import (
 )
 
 func checkFederatedOvertakenMoveSourceLeave(t *testing.T, store db.Storage, backend Backend) error {
+	t.Run("held cursor lifecycle", func(t *testing.T) {
+		ctx := t.Context()
+		query := store.(interface {
+			ExecContext(context.Context, string, ...any) (sql.Result, error)
+			QueryRowContext(context.Context, string, ...any) *sql.Row
+		})
+		for _, action := range []string{"rejoin", "purge"} {
+			t.Run(action, func(t *testing.T) {
+				project, err := store.CreateProject(ctx, "held-cursor-"+action)
+				require.NoError(t, err)
+				key := db.FederationHeldCursorPrefix + project.UID
+				_, err = query.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,'42')`, key)
+				require.NoError(t, err)
+				if action == "rejoin" {
+					_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "worker", Enabled: true, PushEnabled: true})
+				} else {
+					_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: project.ID, Actor: "worker"})
+					if err == nil {
+						_, err = store.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: project.ID, Actor: "worker"})
+					}
+				}
+				require.NoError(t, err)
+				var exists bool
+				require.NoError(t, query.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM meta WHERE key=$1)`, key).Scan(&exists))
+				require.False(t, exists)
+			})
+		}
+	})
 	// overtakenMoveSpoke joins the spoke to the first joined hub projects; a hub
 	// move into a later one parks the issue on the spoke.
 	overtakenMoveSpoke := func(t *testing.T, joined int, names ...string) (hub, spoke db.Storage, remote, local []db.Project) {
