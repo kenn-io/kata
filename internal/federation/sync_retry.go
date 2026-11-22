@@ -48,18 +48,20 @@ const (
 )
 
 // SyncRetries holds the automatic runner's per-binding retry schedules. The
-// runner writes it; status readers may read it concurrently. State lives only
-// in memory: a runner that starts, or a daemon that becomes the runner leader,
+// runner and held-poll watchers write it; status readers may read it concurrently.
+// State lives only in memory: a runner that starts, or a daemon that becomes the runner leader,
 // makes a fresh attempt for every binding. Synchronous passes never consult it.
 type SyncRetries struct {
 	mu     sync.Mutex
 	states map[int64]syncRetry
+	next   uint64
 	// jitter returns how much to take off a delay, in [0, limit).
 	jitter func(limit time.Duration) time.Duration
 }
 
 type syncRetry struct {
 	api.FederationSyncRetry
+	version uint64
 	// delay is the unjittered delay the next failure doubles.
 	delay time.Duration
 	// identity fingerprints the binding and credential the failure used. A
@@ -126,9 +128,24 @@ func (s *SyncRetries) blocked(projectID int64, identity [32]byte, now time.Time)
 	return now.Before(state.NextAttemptAt)
 }
 
+// version returns the schedule visible when an attempt starts.
+func (s *SyncRetries) version(projectID int64) uint64 {
+	if s == nil {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.states[projectID].version
+}
+
 // record schedules the binding's next attempt after a turn that completed at
 // completed. A turn that ended without a retryable refusal clears the schedule.
 func (s *SyncRetries) record(projectID int64, identity [32]byte, err error, interval time.Duration, completed time.Time) {
+	s.recordTurn(projectID, identity, err, interval, completed, nil)
+}
+
+// recordTurn preserves a schedule written after the turn started.
+func (s *SyncRetries) recordTurn(projectID int64, identity [32]byte, err error, interval time.Duration, completed time.Time, started *uint64) {
 	if s == nil {
 		return
 	}
@@ -136,14 +153,17 @@ func (s *SyncRetries) record(projectID int64, identity [32]byte, err error, inte
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if reason == "" {
-		delete(s.states, projectID)
+		if started == nil || s.states[projectID].version == *started {
+			delete(s.states, projectID)
+		}
 		return
 	}
 	previous, ok := s.states[projectID]
 	if ok && previous.Reason != reason {
 		ok = false
 	}
-	next := syncRetry{identity: identity}
+	s.next++
+	next := syncRetry{identity: identity, version: s.next}
 	next.Reason, next.HTTPStatus = reason, status
 	next.Failures = 1
 	if ok {

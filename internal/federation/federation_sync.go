@@ -1283,6 +1283,7 @@ func (r *Runner) runOnce(
 	}
 	var errs []error
 	for _, spoke := range spokes {
+		started := retries.version(spoke.binding.ProjectID)
 		if (len(only) > 0 && !only[spoke.binding.ProjectID]) || r.retryBlocked(ctx, retries, spoke, credentialStore) {
 			continue
 		}
@@ -1300,7 +1301,7 @@ func (r *Runner) runOnce(
 			}
 			return r.runSpoke(ctx, spoke, credentialStore, validateLease, drain)
 		}()
-		retries.record(spoke.binding.ProjectID, identity, spokeErr, r.effectiveInterval(), r.refusalNow())
+		retries.recordTurn(spoke.binding.ProjectID, identity, spokeErr, r.effectiveInterval(), r.refusalNow(), &started)
 		if errors.Is(spokeErr, context.Canceled) || errors.Is(spokeErr, errFederationRunnerLeaseInvalid) {
 			return nil, false, nil, spokeErr
 		}

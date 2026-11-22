@@ -525,3 +525,154 @@ func TestThrottledBindingHoldsNoPollBeforeItsRetry(t *testing.T) {
 	time.Sleep(time.Second)
 	assert.Equal(t, before, held.Load(), "the spoke held a poll before the hub's Retry-After ended")
 }
+func TestHeldPollDoesNotFollowRedirect(t *testing.T) {
+	var redirected atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/redirected" {
+			redirected.Add(1)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.Redirect(w, r, "/redirected", http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(server.Close)
+	client, err := NewClient(t.Context(), server.URL, "token", clientOptsWithDefault(clientpkg.Opts{}))
+	require.NoError(t, err)
+	_, _, err = client.pollProjectEvents(t.Context(), 1, "", 0, 1, time.Second)
+	require.Error(t, err)
+	require.Zero(t, redirected.Load())
+}
+
+func TestHeldPollRetryAfterBlocksRunner(t *testing.T) {
+	h := newHubSpokeHarness(t, false)
+	var held, ordinary atomic.Int64
+	h.bindThrough(t, func(w http.ResponseWriter, r *http.Request, hub http.Handler) {
+		if isHeldPoll(r) {
+			held.Add(1)
+			w.Header().Set("Retry-After", "120")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		if isEventPoll(r) {
+			ordinary.Add(1)
+		}
+		hub.ServeHTTP(w, r)
+	})
+	retries := NewSyncRetries()
+	stop := h.startConfiguredRunner(t, &Runner{DB: h.spokeDB, Interval: 100 * time.Millisecond, Retries: retries})
+	require.Eventually(t, func() bool { _, ok := retries.FederationSyncRetry(h.spokeProject.ID); return ok }, 10*time.Second, 20*time.Millisecond)
+	beforeHeld, beforeOrdinary := held.Load(), ordinary.Load()
+	h.wake <- struct{}{}
+	//nolint:kennlint // sleeptest: observe real HTTP requests across several runner intervals.
+	time.Sleep(500 * time.Millisecond)
+	require.Equal(t, beforeHeld, held.Load())
+	require.Equal(t, beforeOrdinary, ordinary.Load())
+
+	var newHeld atomic.Int64
+	h.bindThrough(t, func(w http.ResponseWriter, r *http.Request, hub http.Handler) {
+		if isHeldPoll(r) {
+			newHeld.Add(1)
+		}
+		hub.ServeHTTP(w, r)
+	})
+	t.Cleanup(stop)
+	h.wake <- struct{}{}
+	//nolint:kennlint // sleeptest: the runner resumes HTTP traffic at the changed endpoint.
+	require.Eventually(t, func() bool { return newHeld.Load() > 0 }, 10*time.Second, 20*time.Millisecond)
+}
+
+func TestRebindEndsHeldPoll(t *testing.T) {
+	h := newHubSpokeHarness(t, false)
+	started := make(chan struct{}, 1)
+	canceled := make(chan struct{}, 1)
+	h.bindThrough(t, func(w http.ResponseWriter, r *http.Request, hub http.Handler) {
+		if isHeldPoll(r) {
+			started <- struct{}{}
+			<-r.Context().Done()
+			canceled <- struct{}{}
+			return
+		}
+		hub.ServeHTTP(w, r)
+	})
+	h.startWatcher(t, time.Hour)
+	select {
+	case <-started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("poll did not start")
+	}
+	key := federationcoord.Key(h.spokeDB.InstanceUID(), h.spokeProject.ID)
+	release, err := federationcoord.BeginRebind(t.Context(), key, h.spokeDB, h.spokeProject.ID)
+	require.NoError(t, err)
+	defer release()
+	select {
+	case <-canceled:
+	case <-time.After(10 * time.Second):
+		t.Fatal("held request did not end")
+	}
+}
+
+func TestHeldRetrySurvivesConcurrentSuccessfulPass(t *testing.T) {
+	h := newHubSpokeHarness(t, false)
+	held := make(chan struct{}, 1)
+	var ordinary atomic.Int64
+	failHeld := make(chan struct{})
+	h.bindThrough(t, func(w http.ResponseWriter, r *http.Request, hub http.Handler) {
+		if isHeldPoll(r) {
+			held <- struct{}{}
+			select {
+			case <-failHeld:
+				w.Header().Set("Retry-After", "120")
+				w.WriteHeader(http.StatusServiceUnavailable)
+			case <-r.Context().Done():
+			}
+			return
+		}
+		if isEventPoll(r) {
+			ordinary.Add(1)
+		}
+		hub.ServeHTTP(w, r)
+	})
+	retries := NewSyncRetries()
+	var armed atomic.Bool
+	passFinished := make(chan struct{}, 1)
+	releasePass := make(chan struct{})
+	defer func() {
+		select {
+		case <-releasePass:
+		default:
+			close(releasePass)
+		}
+	}()
+	runner := &Runner{DB: h.spokeDB, Interval: time.Hour, Retries: retries, OnSpokeResult: func(_ int64, err error) {
+		if err == nil && armed.CompareAndSwap(true, false) {
+			passFinished <- struct{}{}
+			<-releasePass
+		}
+	}}
+	h.startConfiguredRunner(t, runner)
+	select {
+	case <-held:
+	case <-time.After(10 * time.Second):
+		t.Fatal("held poll did not start")
+	}
+	armed.Store(true)
+	h.wake <- struct{}{}
+	select {
+	case <-passFinished:
+	case <-time.After(10 * time.Second):
+		t.Fatal("pass did not finish")
+	}
+	close(failHeld)
+	//nolint:kennlint // sleeptest: the held response arrives over real HTTP.
+	require.Eventually(t, func() bool { _, ok := retries.FederationSyncRetry(h.spokeProject.ID); return ok }, 10*time.Second, 20*time.Millisecond)
+	close(releasePass)
+	//nolint:kennlint // sleeptest: allow the completed pass to record its result.
+	time.Sleep(200 * time.Millisecond)
+	_, ok := retries.FederationSyncRetry(h.spokeProject.ID)
+	require.True(t, ok, "a successful pass erased a later Retry-After")
+	before := ordinary.Load()
+	h.wake <- struct{}{}
+	//nolint:kennlint // sleeptest: allow the runner to process the wake.
+	time.Sleep(300 * time.Millisecond)
+	require.Equal(t, before, ordinary.Load(), "the runner polled before Retry-After")
+}
