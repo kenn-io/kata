@@ -354,6 +354,11 @@ func TestDaemonLocate_HelpDocumentsResolutionOrder(t *testing.T) {
 func TestDaemonStatus_HumanReportsLifecycleDetails(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(server.Close)
+	address := strings.TrimPrefix(server.URL, "http://")
 
 	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
@@ -365,23 +370,25 @@ func TestDaemonStatus_HumanReportsLifecycleDetails(t *testing.T) {
 		ProcessIdentityV2: identity,
 		PID:               os.Getpid(),
 		Network:           "tcp",
-		Address:           "127.0.0.1:7777",
+		Address:           address,
 		Version:           "v-test-status",
 		StartedAt:         started,
 		Metadata:          map[string]string{"web_origin": "http://127.0.0.1:28888"},
 	})
 	require.NoError(t, err)
 
-	out, _, _ := executeRootCapture(t, t.Context(), "daemon", "status")
+	out, stderr, err := executeRootCapture(t, t.Context(), "daemon", "status")
+	requireCLIError(t, err, ExitDaemonUnavail)
+	assert.Empty(t, stderr)
 
 	_, reason, ok := strings.Cut(out, "  reason: ")
 	require.True(t, ok)
 	reason, _, _ = strings.Cut(reason, "\n")
-	assert.NotContains(t, reason, strconv.Itoa(os.Getpid()))
-	assert.NotContains(t, reason, "127.0.0.1:7777")
+	assert.NotContains(t, reason, "daemon pid "+strconv.Itoa(os.Getpid()))
+	assert.NotContains(t, reason, address)
 	assert.Contains(t, reason, "daemon.log")
-	assert.Contains(t, reason, "connection refused")
-	assert.Contains(t, out, "kata running at http://127.0.0.1:7777\n")
+	assert.Contains(t, reason, "daemon ping returned 503")
+	assert.Contains(t, out, "kata running at "+server.URL+"\n")
 	assert.Contains(t, out, "  web UI:  http://127.0.0.1:28888\n")
 	assert.Contains(t, out, "  pid:     "+strconv.Itoa(os.Getpid())+"\n")
 	assert.Contains(t, out, "  version: v-test-status\n")

@@ -92,7 +92,7 @@ func (e *LocalDaemonUnreachableError) Error() string {
 
 // Summary describes the selected process and probe failure.
 func (e *LocalDaemonUnreachableError) Summary() string {
-	return fmt.Sprintf("daemon pid %d is running at %s but is unreachable: %v. Check for logs at %q if it exists", e.PID, e.Address, e.cause, filepath.Join(e.DataDir, "daemon.log"))
+	return fmt.Sprintf("daemon pid %d is running at %s but is unreachable: %s", e.PID, e.Address, e.reason(e.cause))
 }
 
 // Reason describes the probe failure and where to find its logs.
@@ -103,6 +103,10 @@ func (e *LocalDaemonUnreachableError) Reason() string {
 	} else if request, ok := errors.AsType[*url.Error](cause); ok {
 		cause = request.Err
 	}
+	return e.reason(cause)
+}
+
+func (e *LocalDaemonUnreachableError) reason(cause error) string {
 	return fmt.Sprintf("%v. Check for logs at %q if it exists", cause, filepath.Join(e.DataDir, "daemon.log"))
 }
 

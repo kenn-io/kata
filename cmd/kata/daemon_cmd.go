@@ -728,8 +728,11 @@ func daemonStatusCmd() *cobra.Command {
 			if selected.Message != "" {
 				reason := selected.Message
 				for _, d := range out.Daemons {
-					if selected.unreachable != nil && d.PID == selected.PID && d.Address == selected.Endpoint {
-						reason = selected.unreachable.Reason()
+					if selected.statusReason != "" && d.PID == selected.PID && d.Address == selected.Endpoint {
+						reason = selected.statusReason
+						if cli, ok := statusErr.(*cliError); ok {
+							cli.Message = ""
+						}
 						break
 					}
 				}
