@@ -691,28 +691,30 @@ func syncDirectSpoke(
 }
 
 func startFederationPull(ctx context.Context, store db.Storage, projectID int64) (bool, time.Time, error) {
-	previousPull, err := store.FederationSyncStatusByProject(ctx, projectID)
-	if err != nil && !errors.Is(err, db.ErrNotFound) {
-		return false, time.Time{}, err
-	}
-	resumePull := pullInterrupted(previousPull)
-	startedAt := time.Now().UTC().Truncate(time.Millisecond)
-	for _, previous := range []*time.Time{previousPull.LastPullStartedAt, previousPull.LastPullSuccessAt} {
-		if previous != nil && !startedAt.After(*previous) {
-			startedAt = previous.Truncate(time.Millisecond).Add(time.Millisecond)
-		}
-	}
-	if err := store.RecordFederationSyncPullStarted(ctx, projectID, startedAt); err != nil {
-		return false, time.Time{}, err
-	}
-	current, err := store.FederationSyncStatusByProject(ctx, projectID)
+	resumePull, err := federationPullInterrupted(ctx, store, projectID)
 	if err != nil {
 		return false, time.Time{}, err
 	}
-	if current.LastPullStartedAt != nil {
-		startedAt = *current.LastPullStartedAt
+	startedAt := time.Now().UTC().Truncate(time.Millisecond)
+	if err := store.RecordFederationSyncPullStarted(ctx, projectID, startedAt); err != nil {
+		return false, time.Time{}, err
 	}
-	return resumePull, startedAt, nil
+	startedAt, err = storedPullStart(ctx, store, projectID, startedAt)
+	return resumePull, startedAt, err
+}
+
+// storedPullStart returns the start the store kept, which it moves past any
+// earlier success. A binding left since the write has no status, so the
+// caller's own start stands.
+func storedPullStart(ctx context.Context, store db.Storage, projectID int64, startedAt time.Time) (time.Time, error) {
+	status, err := store.FederationSyncStatusByProject(ctx, projectID)
+	if errors.Is(err, db.ErrNotFound) || (err == nil && status.LastPullStartedAt == nil) {
+		return startedAt, nil
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	return *status.LastPullStartedAt, nil
 }
 
 // federationPullInterrupted reports whether the binding's last pull started
