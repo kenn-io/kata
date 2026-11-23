@@ -40,9 +40,9 @@ func TestCronPreparationBoundsIssueRows(t *testing.T) {
 					defer func() { _ = tx.Rollback() }()
 					var m federationMaterialization
 					if pull {
-						m, err = preparePulledFederationMaterialization(t.Context(), tx, p.ID, uids, pullPrepareComplete, d.instanceUID)
+						m, err = preparePulledFederationMaterialization(t.Context(), tx, p.ID, uids, pullPrepareComplete)
 					} else {
-						m, err = prepareFederationMaterializationTx(t.Context(), tx, p.ID, prepared, d.instanceUID)
+						m, err = prepareFederationMaterializationTx(t.Context(), tx, p.ID, prepared)
 					}
 					require.NoError(t, err)
 					require.False(t, m.fullReplay)

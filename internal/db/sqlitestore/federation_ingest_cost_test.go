@@ -95,6 +95,6 @@ func TestFederationPreparationLargeIssueScope(t *testing.T) {
 	tx, err := d.BeginTx(t.Context(), nil)
 	require.NoError(t, err)
 	defer func() { require.NoError(t, tx.Rollback()) }()
-	_, err = prepareFederationMaterializationTx(t.Context(), tx, p.ID, prepared, d.instanceUID)
+	_, err = prepareFederationMaterializationTx(t.Context(), tx, p.ID, prepared)
 	require.NoError(t, err)
 }

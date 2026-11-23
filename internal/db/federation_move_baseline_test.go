@@ -7,24 +7,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDropUnbasedLocalMoves(t *testing.T) {
-	events := []FoldEvent{
-		{UID: "local-unbased", IssueUID: "a", OriginInstanceUID: "local", Type: "issue.moved"},
-		{UID: "local-based", IssueUID: "b", OriginInstanceUID: "local", Type: "issue.moved"},
-		{UID: "baseline", IssueUID: "b", OriginInstanceUID: "remote", Type: "issue.created"},
-		{UID: "remote-unbased", IssueUID: "c", OriginInstanceUID: "remote", Type: "issue.moved"},
-		{UID: "local-snapshot", IssueUID: "d", OriginInstanceUID: "local", Type: "issue.moved"},
-		{UID: "snapshot", IssueUID: "d", OriginInstanceUID: "remote", Type: "issue.snapshot"},
-	}
-	require.Equal(t, []FoldEvent{
-		{UID: "local-based", IssueUID: "b", OriginInstanceUID: "local", Type: "issue.moved"},
-		{UID: "baseline", IssueUID: "b", OriginInstanceUID: "remote", Type: "issue.created"},
-		{UID: "remote-unbased", IssueUID: "c", OriginInstanceUID: "remote", Type: "issue.moved"},
-		{UID: "local-snapshot", IssueUID: "d", OriginInstanceUID: "local", Type: "issue.moved"},
-		{UID: "snapshot", IssueUID: "d", OriginInstanceUID: "remote", Type: "issue.snapshot"},
-	}, DropUnbasedLocalMoves(events, "local"))
-}
-
 func TestIndexFederatedMoveEvents(t *testing.T) {
 	events := []FoldEvent{
 		{UID: "latest-b", IssueUID: "a", Type: "issue.moved", HLCPhysicalMS: 10, HLCCounter: 1, OriginInstanceUID: "b"},

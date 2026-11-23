@@ -177,5 +177,5 @@ WHERE project_id=$1 AND role=$2 AND (enabled<>1 OR push_enabled<>0)`, projectID,
 }
 
 func (b relayResetBackend) ReconcileBindingTransitionLinks(ctx context.Context, previous *db.FederationBinding, next db.FederationBinding) error {
-	return reconcileFederationBindingTransitionLinks(ctx, b.tx, previous, next, b.d.instanceUID)
+	return reconcileFederationBindingTransitionLinks(ctx, b.tx, previous, next)
 }

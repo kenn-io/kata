@@ -2,23 +2,8 @@ package db
 
 import (
 	"encoding/json/v2"
-	"slices"
 	"time"
 )
-
-// DropUnbasedLocalMoves keeps a retained local move from recreating an issue
-// after reset removes its baseline. The event remains available for push.
-func DropUnbasedLocalMoves(events []FoldEvent, instanceUID string) []FoldEvent {
-	baselines := make(map[string]bool)
-	for _, event := range events {
-		if event.Type == "issue.created" || event.Type == "issue.snapshot" {
-			baselines[event.IssueUID] = true
-		}
-	}
-	return slices.DeleteFunc(events, func(event FoldEvent) bool {
-		return event.Type == "issue.moved" && event.OriginInstanceUID == instanceUID && !baselines[event.IssueUID]
-	})
-}
 
 // FederationMoveBaselineEvents assembles moved-issue replay from the effective
 // source enrollment baseline. Earlier initializers cannot restore an author

@@ -51,14 +51,13 @@ func reconcileFederationBindingTransitionLinks(
 	tx *sql.Tx,
 	previous *db.FederationBinding,
 	current db.FederationBinding,
-	instanceUID string,
 ) error {
 	if previous != nil && previous.Enabled {
 		remainingProjectIDs, err := federationBindingGroupProjectIDs(ctx, tx, *previous)
 		if err != nil {
 			return err
 		}
-		m := newFederatedLinkGroupMaterialization(remainingProjectIDs, 0, instanceUID)
+		m := newFederatedLinkGroupMaterialization(remainingProjectIDs, 0)
 		if err := reconcileFederatedLinkGroup(ctx, tx, m, nil); err != nil {
 			return err
 		}
@@ -81,7 +80,7 @@ func reconcileFederationBindingTransitionLinks(
 	if err := removeIncompatibleFederatedBoundaryLinks(ctx, tx, current.ProjectID, currentProjectIDs); err != nil {
 		return err
 	}
-	m := newFederatedLinkGroupMaterialization(currentProjectIDs, 0, instanceUID)
+	m := newFederatedLinkGroupMaterialization(currentProjectIDs, 0)
 	return reconcileFederatedLinkGroup(ctx, tx, m, nil)
 }
 
@@ -258,11 +257,9 @@ func federationGroupFoldProjection(
 func newFederatedLinkGroupMaterialization(
 	projectIDs []int64,
 	currentProjectID int64,
-	instanceUID string,
 ) *federatedMaterialization {
 	return &federatedMaterialization{
 		projectID:       currentProjectID,
-		instanceUID:     instanceUID,
 		groupProjectIDs: projectIDs,
 		events:          map[int64][]db.FoldEvent{},
 	}
@@ -289,7 +286,7 @@ func (m *federatedMaterialization) foldLinkEvents(
 	// link-affecting event filter for sibling projects instead of expanding a
 	// materialization to every event payload in every linked project.
 	events, err := federationFoldEventsOfTypes(
-		ctx, tx, projectID, db.FederationLinkAffectingEventTypes(), m.instanceUID,
+		ctx, tx, projectID, db.FederationLinkAffectingEventTypes(),
 	)
 	if err != nil {
 		return nil, err
@@ -298,8 +295,8 @@ func (m *federatedMaterialization) foldLinkEvents(
 	return events, nil
 }
 
-func federationFoldEvents(ctx context.Context, tx *sql.Tx, projectID int64, instanceUID string) ([]db.FoldEvent, error) {
-	return federationFoldEventsOfTypes(ctx, tx, projectID, nil, instanceUID)
+func federationFoldEvents(ctx context.Context, tx *sql.Tx, projectID int64) ([]db.FoldEvent, error) {
+	return federationFoldEventsOfTypes(ctx, tx, projectID, nil)
 }
 
 // federationFoldEventsOfTypes lists a project's fold events in event order,
@@ -311,7 +308,6 @@ func federationFoldEventsOfTypes(
 	tx *sql.Tx,
 	projectID int64,
 	eventTypes []string,
-	instanceUID string,
 ) ([]db.FoldEvent, error) {
 	query, args := federationFoldEventsQuery(projectID, eventTypes)
 	rows, err := tx.QueryContext(ctx, query, args...)
@@ -339,7 +335,7 @@ func federationFoldEventsOfTypes(
 		event.CreatedAt = createdAt
 		output = append(output, event)
 	}
-	return db.DropUnbasedLocalMoves(db.FederationMoveBaselineEvents(output), instanceUID), mapSQLError(rows.Err(), nil)
+	return db.FederationMoveBaselineEvents(output), mapSQLError(rows.Err(), nil)
 }
 
 // federationFoldEventsQuery builds the fold query. PostgreSQL scans events once

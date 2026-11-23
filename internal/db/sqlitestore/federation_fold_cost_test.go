@@ -26,7 +26,7 @@ func TestFederationFoldBulkMovePageBudget(t *testing.T) {
 			require.NoError(t, err)
 			defer func() { require.NoError(t, tx.Rollback()) }()
 			cronPullPageFetches(t, conn, true)
-			events, err := federationFoldEventsScoped(t.Context(), tx, project.ID, nil, nil, d.instanceUID)
+			events, err := federationFoldEventsScoped(t.Context(), tx, project.ID, nil, nil)
 			require.NoError(t, err)
 			pages := cronPullPageFetches(t, conn, false)
 			var retained int
@@ -62,9 +62,9 @@ func BenchmarkFederationFoldBulkMoves(b *testing.B) {
 				b.ReportAllocs()
 				for b.Loop() {
 					if group {
-						_, err = federationGroupFoldProjection(b.Context(), tx, projectIDs, d.instanceUID)
+						_, err = federationGroupFoldProjection(b.Context(), tx, projectIDs)
 					} else {
-						_, err = federationFoldEventsScoped(b.Context(), tx, project.ID, nil, nil, d.instanceUID)
+						_, err = federationFoldEventsScoped(b.Context(), tx, project.ID, nil, nil)
 					}
 					require.NoError(b, err)
 				}
@@ -95,7 +95,7 @@ func seedFederationFoldMoves(t testing.TB, history, moves int) (*Store, db.Proje
 	_, err = d.ExecContext(t.Context(), `WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<$1)
  INSERT INTO events(uid,origin_instance_uid,project_id,project_name,issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash)
  SELECT printf('%026d',x+$2),$3,$4,'hub-project',printf('%026d',x),'issue.moved','tester',
- json_object('issue_uid',printf('%026d',x),'from_project_uid',$5,'from_short_id',printf('%08d',x),'to_project_uid',$6,'to_short_id',printf('%08d',x),'updated_at','2026-05-23T12:00:00.000Z'),x+$2,0,$7 FROM n`, moves, history, "00000000000000000000000001", destination.ID, source.UID, destination.UID, strings.Repeat("b", 64))
+ json_object('issue_uid',printf('%026d',x),'from_project_uid',$5,'from_short_id',printf('%08d',x),'to_project_uid',$6,'to_short_id',printf('%08d',x),'updated_at','2026-05-23T12:00:00.000Z'),x+$2,0,$7 FROM n`, moves, history, d.InstanceUID(), destination.ID, source.UID, destination.UID, strings.Repeat("b", 64))
 	require.NoError(t, err)
 	return d, destination
 }
@@ -127,7 +127,7 @@ func TestFederationFoldScopedPageBudget(t *testing.T) {
 			require.NoError(t, err)
 			defer func() { require.NoError(t, tx.Rollback()) }()
 			cronPullPageFetches(t, conn, true)
-			events, err := federationFoldEventsForIssues(t.Context(), tx, project.ID, []string{"00000000000000000000000001"}, d.instanceUID)
+			events, err := federationFoldEventsForIssues(t.Context(), tx, project.ID, []string{"00000000000000000000000001"})
 			require.NoError(t, err)
 			pages := cronPullPageFetches(t, conn, false)
 			var ids []string
@@ -170,7 +170,7 @@ func TestFederationFoldSelection(t *testing.T) {
 			tx, err := d.BeginTx(t.Context(), nil)
 			require.NoError(t, err)
 			defer func() { require.NoError(t, tx.Rollback()) }()
-			events, err := federationFoldEventsScoped(t.Context(), tx, project.ID, tc.types, tc.scope, d.instanceUID)
+			events, err := federationFoldEventsScoped(t.Context(), tx, project.ID, tc.types, tc.scope)
 			require.NoError(t, err)
 			var ids []string
 			var projectEvent bool
@@ -200,7 +200,7 @@ func TestFederationFoldScopedMovedHistoryPageBudget(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { require.NoError(t, tx.Rollback()) }()
 	cronPullPageFetches(t, conn, true)
-	events, err := federationFoldEventsForIssues(t.Context(), tx, project.ID, []string{subject}, d.instanceUID)
+	events, err := federationFoldEventsForIssues(t.Context(), tx, project.ID, []string{subject})
 	require.NoError(t, err)
 	pages := cronPullPageFetches(t, conn, false)
 	var ids []string
