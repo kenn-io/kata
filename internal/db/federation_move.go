@@ -817,6 +817,7 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
 	if err := PreserveFederationProjectIdentityDependencies(ctx, tx, projectID); err != nil {
 		return fmt.Errorf("preserve former project identity dependencies: %w", err)
 	}
+	//nolint:gosec // G202: SQL expressions are constants and values are bound.
 	_, err = tx.ExecContext(ctx, `DELETE FROM events AS e WHERE e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)
  AND NOT EXISTS(SELECT 1 FROM federation_bindings b WHERE b.project_id=e.project_id AND `+LocalInstanceOriginSQL("e.origin_instance_uid", "$2")+` AND e.id<=b.retained_through_event_id)`, projectID, originInstanceUID)
 	return err

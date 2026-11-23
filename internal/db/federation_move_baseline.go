@@ -2,6 +2,7 @@ package db
 
 import (
 	"encoding/json/v2"
+	"errors"
 	"math"
 	"time"
 )
@@ -15,6 +16,9 @@ func FederationMoveSnapshotAuthors(payload string, events []FoldEvent, issueUID,
 	}
 	events = append(events, FoldEvent{IssueUID: issueUID, Type: "issue.moved", HLCPhysicalMS: math.MaxInt64, Payload: departure})
 	events = FederationMoveBaselineEvents(events)
+	if len(events) == 0 {
+		return "", errors.New("federation move baseline omitted the departure")
+	}
 	events = events[:len(events)-1]
 	projection := FoldEvents(events)
 	var doc IssueDocumentPayload

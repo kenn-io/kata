@@ -27,9 +27,9 @@ func RetainedCommentPayload(payload string, eventType, commentUID, actor, body s
 				break
 			}
 		}
-		if fields == nil {
-			return "", ErrNotFound
-		}
+	}
+	if fields == nil {
+		return "", ErrNotFound
 	}
 	author, err := json.Marshal(actor)
 	if err != nil {
