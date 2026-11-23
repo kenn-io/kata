@@ -1,7 +1,6 @@
 package db
 
 import (
-	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -15,15 +14,7 @@ import (
 // ValidateRecurrenceCore validates a rule, start date, and timezone together
 // and returns the first occurrence used to initialize the recurrence cursor.
 func ValidateRecurrenceCore(rule, dtstart, timezone string) (*string, error) {
-	return ValidateRecurrenceCoreContext(context.Background(), rule, dtstart, timezone)
-}
-
-// ValidateRecurrenceCoreContext validates the schedule until ctx is canceled.
-func ValidateRecurrenceCoreContext(ctx context.Context, rule, dtstart, timezone string) (*string, error) {
-	first, err := recurrence.NextContext(ctx, rule, dtstart, timezone)
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
-	}
+	first, err := recurrence.Next(rule, dtstart, timezone)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidRecurrence, err)
 	}

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button, SegmentedControl } from '@kenn-io/kit-ui'
+  import { Button, RadioGroup } from '@kenn-io/kit-ui'
   import CheckIcon from '@lucide/svelte/icons/check'
   import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw'
   import type { KataTaskCloseRequest, KataTaskDetail } from '../lib/kata/types'
@@ -9,22 +9,29 @@
   interface Props {
     issue: KataTaskDetail
     disabled?: boolean | undefined
-    error?: string | undefined
     onCloseIssue: (request: KataTaskCloseRequest) => boolean | Promise<boolean>
     onReopenIssue: () => void | Promise<void>
   }
 
-  let { issue, disabled = false, error = undefined, onCloseIssue, onReopenIssue }: Props = $props()
+  let { issue, disabled = false, onCloseIssue, onReopenIssue }: Props = $props()
 
   type CloseReason = 'done' | 'wontfix' | 'duplicate' | 'superseded'
   type DoneEvidence = 'test' | 'commit' | 'pr' | 'reviewed-paths' | 'external'
 
-  const closeReasonOptions = [
-    { value: 'done', label: 'Done' },
-    { value: 'wontfix', label: "Won't do" },
-    { value: 'duplicate', label: 'Duplicate' },
-    { value: 'superseded', label: 'Superseded' },
+  const closeReasons: ReadonlyArray<{
+    value: CloseReason
+    label: string
+    description: string
+  }> = [
+    { value: 'done', label: 'Done', description: 'Completed as intended.' },
+    { value: 'wontfix', label: "Won't do", description: 'Decided not to pursue.' },
+    { value: 'duplicate', label: 'Duplicate', description: 'Tracked elsewhere.' },
+    { value: 'superseded', label: 'Superseded', description: 'Replaced by another task.' },
   ]
+  const closeReasonOptions = closeReasons.map((reason) => ({
+    value: reason.value,
+    label: `${reason.label}. ${reason.description}`,
+  }))
 
   const defaultWontDoMessage =
     'Removed from active work through the web issue detail because this task is no longer intended to be completed.'
@@ -47,7 +54,6 @@
   let evidenceValue = $state('')
   let targetIssue = $state('')
   let pending = $state(false)
-  let refused = $state(false)
   let completeMessageInput: HTMLTextAreaElement | null = $state(null)
   let trackedUID = $state<string | null>(null)
   const blockedCount = $derived(
@@ -62,7 +68,6 @@
     trackedUID = issue.issue.uid
     completeOpen = false
     completeReason = 'done'
-    refused = false
     completeMessage = ''
     evidenceType = 'test'
     evidenceValue = ''
@@ -91,7 +96,6 @@
     pending = true
     try {
       const ok = await onCloseIssue(closeRequest())
-      refused = !ok
       if (ok) {
         completeOpen = false
         completeMessage = ''
@@ -109,6 +113,11 @@
     if (completeReason === 'wontfix') return 60
     if (completeReason === 'duplicate' || completeReason === 'superseded') return 20
     return 40
+  }
+
+  function messageHint(): string {
+    const minimum = `at least ${messageMinimum()} characters`
+    return completeReason === 'wontfix' ? `optional; ${minimum} if written` : minimum
   }
 
   function canComplete(): boolean {
@@ -207,15 +216,16 @@
   </Button>
 {/if}
 
-<Modal open={completeOpen} title="Complete task" onClose={closeCompleteDialog} width={560}>
+<Modal open={completeOpen} title="Complete task" onClose={closeCompleteDialog} width={480}>
   <div class="complete-dialog" onkeydown={handleCompleteKeydown} role="presentation">
     <div class="complete-context">
       <p class="complete-task-title">{issue.issue.title}</p>
       <p class="complete-task-id">{issue.issue.qualified_id}</p>
     </div>
 
-    <SegmentedControl
-      ariaLabel="Reason"
+    <RadioGroup
+      legend="Reason"
+      name="complete-reason"
       disabled={pending}
       value={completeReason}
       onchange={chooseCloseReason}
@@ -223,7 +233,6 @@
     />
 
     {#if completeReason === 'done'}
-      <span>Proof</span>
       <div class="complete-evidence">
         <label>
           <span>Evidence type</span>
@@ -262,34 +271,18 @@
     {/if}
 
     <label class="complete-message">
-      <span
-        >{completeReason === 'done'
-          ? 'What was done'
-          : completeReason === 'wontfix'
-            ? 'Why not (optional)'
-            : 'Note'}</span
-      >
+      <span>Completion note <small>({messageHint()}, markdown)</small></span>
       <textarea
         bind:this={completeMessageInput}
         rows="4"
+        placeholder="What was done? Any follow-ups? Cmd/Ctrl+Enter to confirm."
         bind:value={completeMessage}
         disabled={pending}
       ></textarea>
-      {#if completeMessage.trim().length > 0 && completeMessage.trim().length < messageMinimum()}
-        <small>{messageMinimum() - completeMessage.trim().length} more characters needed</small>
-      {/if}
     </label>
-    {#if refused && error}<p class="complete-error" role="alert">{error}</p>{/if}
     <Card padding="none" class="dialog-preview">
-      <div>Its comments, links, and attachments stay.</div>
-      {#if blockedCount}
-        <div>
-          {blockedCount} open {blockedCount === 1 ? 'task' : 'tasks'} it blocks {blockedCount === 1
-            ? 'loses'
-            : 'lose'} this blocker.
-        </div>
-      {/if}
-      <div>Reopen from the Logbook.</div>
+      <div>Comments and links stay.</div>
+      {#if blockedCount}<div>Unblocks {blockedCount} open tasks.</div>{/if}
     </Card>
   </div>
 
@@ -309,10 +302,6 @@
 </Modal>
 
 <style>
-  .complete-error {
-    color: var(--accent-red);
-    margin: 0;
-  }
   :global(.detail-action) {
     min-width: 98px;
   }

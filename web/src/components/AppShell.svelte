@@ -126,6 +126,7 @@
     onRemoveLabel: (uid: string, label: string) => void | Promise<void>
     onCloseIssue: (request: KataTaskCloseRequest) => boolean | Promise<boolean>
     onReopenIssue: () => void | Promise<void>
+    recurrenceRevision?: number
     onCreateRecurrence: (
       projectID: number,
       input: import('../lib/kata/types').KataCreateRecurrenceInput,
@@ -188,6 +189,7 @@
     onRemoveLabel,
     onCloseIssue,
     onReopenIssue,
+    recurrenceRevision = 0,
     onCreateRecurrence,
     onPatchRecurrence,
     onDeleteRecurrence,
@@ -943,17 +945,9 @@
             <ProjectRecurrences
               projectID={selectedProject.id}
               actor={selfActor ?? 'kata-web'}
-              {ownerOptions}
               disabled={!projectWideMutationAllowed || mutationPending}
               {draftFenceGeneration}
-              {mutationMessage}
-              snapshotRecurrences={snapshot.selected?.state === 'available' &&
-              snapshot.selected.issue?.project_id === selectedProject.id
-                ? snapshot.selected.recurrences
-                : !snapshot.selected && route.projectUID === selectedProject.uid
-                  ? snapshot.project_recurrences
-                  : undefined}
-              refreshGeneration={snapshot.cursor}
+              refreshKey={recurrenceRevision}
               onCreate={onCreateRecurrence}
               onPatch={onPatchRecurrence}
               onDelete={onDeleteRecurrence}
@@ -1051,8 +1045,6 @@
         }}
         onOpenGraph={(issue) => openGraph(issue.uid)}
         {onCreateRecurrence}
-        {onPatchRecurrence}
-        {onDeleteRecurrence}
       />
     {:else}
       <section class="detail-unavailable" role="status" aria-label="Selected issue status">

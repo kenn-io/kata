@@ -44,6 +44,77 @@ describe('QuickCapture', () => {
     expect(onSubmit).toHaveBeenCalledWith('Draft task', 'b')
   })
 
+  it('prefills the Inbox when the dialog opens again', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const view = render(QuickCapture, {
+      props: {
+        open: true,
+        projects: [
+          { uid: 'a', name: 'Alpha' },
+          { uid: 'b', name: 'Beta' },
+        ],
+        inboxUID: 'a',
+        onClose: vi.fn(),
+        onSubmit,
+      },
+    })
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Quick capture' }), {
+      target: { value: 'First task' },
+    })
+    await fireEvent.click(screen.getByRole('combobox', { name: 'Project: Alpha' }))
+    await fireEvent.click(screen.getByRole('option', { name: 'Beta' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+
+    await view.rerender({ open: false })
+    await view.rerender({ open: true })
+
+    expect(screen.getByRole('combobox', { name: 'Project: Alpha' })).toBeTruthy()
+  })
+
+  it('falls back to the Inbox when the selected project leaves the current options', async () => {
+    const onSubmit = vi.fn()
+    const view = render(QuickCapture, {
+      props: {
+        open: true,
+        projects: [
+          { uid: 'a', name: 'Alpha' },
+          { uid: 'b', name: 'Beta' },
+        ],
+        inboxUID: 'a',
+        onClose: vi.fn(),
+        onSubmit,
+      },
+    })
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Quick capture' }), {
+      target: { value: 'Draft task' },
+    })
+    await fireEvent.click(screen.getByRole('combobox', { name: 'Project: Alpha' }))
+    await fireEvent.click(screen.getByRole('option', { name: 'Beta' }))
+
+    await view.rerender({ projects: [{ uid: 'a', name: 'Alpha' }] })
+
+    expect(screen.getByRole('combobox', { name: 'Project: Alpha' })).toBeTruthy()
+    await fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    expect(onSubmit).toHaveBeenCalledWith('Draft task', 'a')
+  })
+
+  it('updates the default choice when the Inbox changes while open', async () => {
+    const view = render(QuickCapture, {
+      props: {
+        open: true,
+        projects: [
+          { uid: 'a', name: 'Alpha' },
+          { uid: 'b', name: 'Beta' },
+        ],
+        inboxUID: 'a',
+        onClose: vi.fn(),
+        onSubmit: vi.fn(),
+      },
+    })
+    await view.rerender({ inboxUID: 'b' })
+    expect(screen.getByRole('combobox', { name: 'Project: Beta' })).toBeTruthy()
+  })
+
   it('keeps the draft and shows the error when capture fails', async () => {
     const onClose = vi.fn()
     const onSubmit = vi.fn().mockRejectedValue(new Error('Server unavailable'))

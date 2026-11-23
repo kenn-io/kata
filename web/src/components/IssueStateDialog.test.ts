@@ -34,32 +34,19 @@ describe('IssueStateDialog', () => {
     cleanup()
   })
 
-  it('shows what closing preserves and the refusal', async () => {
+  it('shows what closing preserves and the open tasks it unblocks', async () => {
     const issue = makeIssue()
     issue.links.push({
-      id: 1,
-      project_id: 1,
-      type: 'blocks',
+      id: 1, project_id: 1, type: 'blocks',
       from: { uid: 'issue-1', short_id: 'I-1', qualified_id: 'INBOX-1', status: 'open' },
       to: { uid: 'issue-2', short_id: 'I-2', qualified_id: 'INBOX-2', status: 'open' },
-      author: 'user-a',
-      created_at: '',
+      author: 'user-a', created_at: '',
     })
-    render(IssueStateDialog, {
-      props: {
-        issue,
-        error: 'Open children remain',
-        onCloseIssue: vi.fn(async () => false),
-        onReopenIssue: vi.fn(),
-      },
-    })
+    render(IssueStateDialog, { props: { issue, onCloseIssue: vi.fn(), onReopenIssue: vi.fn() } })
     await fireEvent.click(screen.getByRole('button', { name: 'Complete…' }))
     const dialog = screen.getByRole('dialog', { name: 'Complete task' })
-    expect(within(dialog).getByText(/comments, links, and attachments stay/i)).toBeTruthy()
-    expect(within(dialog).getByText('1 open task it blocks loses this blocker.')).toBeTruthy()
-    await fireEvent.click(within(dialog).getByRole('radio', { name: "Won't do" }))
-    await fireEvent.click(within(dialog).getByRole('button', { name: 'Complete' }))
-    expect(within(dialog).getByText('Open children remain')).toBeTruthy()
+    expect(within(dialog).getByText('Comments and links stay.')).toBeTruthy()
+    expect(within(dialog).getByText('Unblocks 1 open tasks.')).toBeTruthy()
   })
 
   it('uses shared Kit UI actions', async () => {
@@ -73,7 +60,7 @@ describe('IssueStateDialog', () => {
 
     const dialog = screen.getByRole('dialog', { name: 'Complete task' })
     await fireEvent.click(within(dialog).getByRole('radio', { name: /Won't do/ }))
-    expect(within(dialog).getByLabelText('Why not (optional)')).toBeTruthy()
+    expect(within(dialog).getByText(/optional; at least 60 characters if written/)).toBeTruthy()
     expect(within(dialog).getByRole('button', { name: 'Cancel' }).classList).toContain('kit-button')
     expect(within(dialog).getByRole('button', { name: 'Complete' }).classList).toContain(
       'kit-button',
@@ -104,12 +91,9 @@ describe('IssueStateDialog', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Complete…' }))
     const dialog = screen.getByRole('dialog', { name: 'Complete task' })
     await fireEvent.click(within(dialog).getByRole('radio', { name: /Won't do/ }))
-    await fireEvent.input(
-      within(dialog).getByRole('textbox', { name: /What was done|Why not|Note/ }),
-      {
-        target: { value: note },
-      },
-    )
+    await fireEvent.input(within(dialog).getByLabelText(/Completion note/), {
+      target: { value: note },
+    })
     const submit = within(dialog).getByRole('button', { name: 'Complete' })
     expect(submit.hasAttribute('disabled')).toBe(!enabled)
     await fireEvent.click(submit)
@@ -129,14 +113,11 @@ describe('IssueStateDialog', () => {
     const submit = within(dialog).getByRole('button', { name: 'Complete' })
     expect(submit.hasAttribute('disabled')).toBe(true)
 
-    await fireEvent.input(
-      within(dialog).getByRole('textbox', { name: /What was done|Why not|Note/ }),
-      {
-        target: {
-          value: 'Completed the example behavior and confirmed the requested interaction works.',
-        },
+    await fireEvent.input(within(dialog).getByLabelText(/Completion note/), {
+      target: {
+        value: 'Completed the example behavior and confirmed the requested interaction works.',
       },
-    )
+    })
     await fireEvent.input(within(dialog).getByLabelText('Evidence value'), {
       target: { value: 'go test ./internal/example' },
     })
@@ -163,12 +144,9 @@ describe('IssueStateDialog', () => {
     await fireEvent.input(within(dialog).getByLabelText('Evidence value'), {
       target: { value: 'email thread archived; calendar hold sent' },
     })
-    await fireEvent.input(
-      within(dialog).getByRole('textbox', { name: /What was done|Why not|Note/ }),
-      {
-        target: { value: 'Arranged the meeting by email and sent the calendar hold.' },
-      },
-    )
+    await fireEvent.input(within(dialog).getByLabelText(/Completion note/), {
+      target: { value: 'Arranged the meeting by email and sent the calendar hold.' },
+    })
     await fireEvent.click(within(dialog).getByRole('button', { name: 'Complete' }))
 
     expect(onCloseIssue).toHaveBeenCalledWith({
@@ -190,12 +168,9 @@ describe('IssueStateDialog', () => {
     await fireEvent.input(within(dialog).getByLabelText('Target issue'), {
       target: { value: 'example-project#d4ex' },
     })
-    await fireEvent.input(
-      within(dialog).getByRole('textbox', { name: /What was done|Why not|Note/ }),
-      {
-        target: { value: 'The same work is already tracked by the referenced example issue.' },
-      },
-    )
+    await fireEvent.input(within(dialog).getByLabelText(/Completion note/), {
+      target: { value: 'The same work is already tracked by the referenced example issue.' },
+    })
     await fireEvent.click(within(dialog).getByRole('button', { name: 'Complete' }))
 
     expect(onCloseIssue).toHaveBeenCalledWith({

@@ -5871,15 +5871,6 @@ components:
         - created_at
         - updated_at
       type: object
-    RecurrencePreviewResponseBody:
-      properties:
-        dates:
-          items:
-            type: string
-          type: array
-      required:
-        - dates
-      type: object
     RecurrenceTemplateInput:
       additionalProperties: false
       properties:
@@ -7478,10 +7469,6 @@ components:
           type: string
         origin_stable:
           type: boolean
-        project_recurrences:
-          items:
-            $ref: "#/components/schemas/Recurrence"
-          type: array
         selected:
           $ref: "#/components/schemas/UISelectedAuthority"
       required:
@@ -7504,7 +7491,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.66.0
+  version: 0.65.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:
@@ -12436,47 +12423,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReadyResponseBody"
-          description: OK
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
-          description: Error
-  /api/v1/projects/{project_id}/recurrence-preview:
-    get:
-      operationId: previewRecurrence
-      parameters:
-        - in: path
-          name: project_id
-          required: true
-          schema:
-            format: int64
-            type: integer
-        - explode: false
-          in: query
-          name: rrule
-          required: true
-          schema:
-            type: string
-        - explode: false
-          in: query
-          name: dtstart
-          required: true
-          schema:
-            type: string
-        - explode: false
-          in: query
-          name: timezone
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RecurrencePreviewResponseBody"
           description: OK
         default:
           content:

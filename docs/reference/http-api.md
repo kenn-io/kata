@@ -120,11 +120,6 @@ Omit the field for an unconditional edit. A new issue starts at `content_revisio
 
 ## Recurrence timezones
 
-Local browser sessions can list a project's rules with
-`GET /api/v1/projects/{project_id}/recurrences`.
-
-`GET /api/v1/projects/{project_id}/recurrence-preview` accepts `rrule`, `dtstart`, and `timezone` query parameters and returns up to four scheduled dates in `dates`. It validates the same schedule as creation and does not save a rule.
-
 Use an IANA time zone such as `America/New_York` or `UTC` when creating a
 recurrence with `POST /api/v1/projects/{project_id}/recurrences`:
 

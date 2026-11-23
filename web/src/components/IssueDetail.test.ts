@@ -393,7 +393,7 @@ describe('IssueDetail', () => {
     renderDetail({ onMoveIssue })
 
     await fireEvent.click(screen.getByRole('button', { name: 'Project: Inbox' }))
-    await fireEvent.click(screen.getByRole('button', { name: 'Roadmap 1 open' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Roadmap' }))
 
     expect(onMoveIssue).toHaveBeenCalledWith('project-2')
   })

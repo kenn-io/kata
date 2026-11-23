@@ -766,6 +766,8 @@
     return accepted
   }
 
+  let recurrenceRevision = $state(0)
+
   async function createRecurrence(
     projectID: number,
     input: KataCreateRecurrenceInput,
@@ -784,6 +786,7 @@
       ),
     )
     if (!accepted) throw new Error(mutationMessage(mutationState) ?? 'Could not create recurrence.')
+    recurrenceRevision++
   }
 
   async function patchRecurrence(
@@ -803,28 +806,21 @@
         { headers: context.headers },
       ),
     )
-    if (accepted) return
+    if (accepted) {
+      recurrenceRevision++
+      return
+    }
     if (mutationState.kind === 'revision-conflict') {
-      const replacement =
-        authority?.stale === false &&
-        authority.snapshot?.selected?.issue?.project_id === recurrence.project_id
-          ? authority.snapshot.selected.recurrences.find(
-              (item) => item.uid === recurrence.uid && item.revision !== recurrence.revision,
-            )
-          : undefined
       throw Object.assign(new Error(mutationState.detail), {
         status: 412,
         code: mutationState.code,
-        ...(replacement
-          ? { response: { recurrence: replacement, etag: `"rev-${replacement.revision}"` } }
-          : {}),
       })
     }
     throw new Error(mutationMessage(mutationState) ?? 'Could not update recurrence.')
   }
 
   async function deleteRecurrence(recurrence: KataRecurrence): Promise<boolean> {
-    return runMutation(
+    const accepted = await runMutation(
       { draft: recurrence, revision: `"rev-${recurrence.revision}"` },
       async (context) => {
         const result = await deleteRecurrenceRequest(
@@ -837,6 +833,8 @@
         return { ...result, data: result.status === 204 ? true : result.data }
       },
     )
+    if (accepted) recurrenceRevision++
+    return accepted
   }
 
   function recurrenceTemplate(
@@ -1551,6 +1549,7 @@
         onRemoveLabel={removeLabel}
         onCloseIssue={closeIssue}
         onReopenIssue={reopenIssue}
+        {recurrenceRevision}
         onCreateRecurrence={createRecurrence}
         onPatchRecurrence={patchRecurrence}
         onDeleteRecurrence={deleteRecurrence}

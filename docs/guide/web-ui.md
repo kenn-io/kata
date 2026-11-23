@@ -55,11 +55,11 @@ The sidebar lists **Inbox**, **Today**, **Scheduled**, **Delegated**, **All open
 - **Inbox** shows open tasks from every project. A task with a future
   `scheduled_on` stays out of Inbox until that day; a deadline never hides it.
   Narrow Inbox to one project with the **Project** filter, and sort it
-  from the column headers. New tasks are captured in the designated
-  [Inbox project](../reference/metadata.md#project-inbox-designation). With no
-  projects, **New task** asks you to create one, makes it Inbox, and opens task
-  capture. With existing projects and no Inbox, choose a project in the
-  **New task** dialog. Change that selection to choose where future tasks go.
+  from the column headers. Choose a project in the **New task** dialog; each
+  task uses the choice you make there. The designated
+  [Inbox project](../reference/metadata.md#project-inbox-designation) is the
+  initial choice. With no projects, **New task** asks you to create one, makes
+  it Inbox, and opens task capture.
   This is separate from `kata inbox`,
   which reads
   [attention requests](../reference/cli.md#teammate-requests) for an actor or

@@ -19,7 +19,6 @@
   import { createKataLinkFilters, type KataLinkFilters } from '../lib/kata/linkFilters'
   import type {
     KataCreateRecurrenceInput,
-    KataPatchRecurrenceInput,
     KataProjectSummary,
     KataRecurrence,
     KataTaskDetail,
@@ -93,14 +92,6 @@
     onCreateRecurrence?:
       | ((projectID: number, input: KataCreateRecurrenceInput) => Promise<void>)
       | undefined
-    onPatchRecurrence?:
-      | ((
-          recurrence: KataRecurrence,
-          input: KataPatchRecurrenceInput,
-          etag: string,
-        ) => Promise<void>)
-      | undefined
-    onDeleteRecurrence?: ((recurrence: KataRecurrence) => Promise<boolean>) | undefined
     onOpenGraph?: ((issue: KataTaskDetail['issue']) => void) | undefined
     graphOpen?: boolean | undefined
     onCloseGraph?: (() => void) | undefined
@@ -146,8 +137,6 @@
     onReopenIssue,
     onSelectIssue = () => {},
     onCreateRecurrence = async () => {},
-    onPatchRecurrence = async () => {},
-    onDeleteRecurrence = async () => false,
     onOpenGraph = undefined,
     graphOpen = false,
     onCloseGraph = undefined,
@@ -184,8 +173,6 @@
   let consumedStatusGeneration = 0
   let recurrenceDialogs: {
     openCreateRecurrence: () => void
-    openEditRecurrence: (recurrence: KataRecurrence) => void
-    openDeleteRecurrence: (recurrence: KataRecurrence) => void
     closeAll: () => void
   } | null = $state(null)
 
@@ -506,7 +493,6 @@
           {#key draftFenceGeneration}<IssueStateDialog
               bind:this={stateDialog}
               {issue}
-              error={commentError}
               disabled={actionsDisabled || detailInert}
               {onCloseIssue}
               {onReopenIssue}
@@ -762,15 +748,13 @@
 <RecurrenceDialogs
   bind:this={recurrenceDialogs}
   selectedIssue={issue}
-  {ownerOptions}
   recurrences={selectedRecurrences}
   actor=""
   disabled={actionsDisabled || !administrativeActionsAllowed}
   {draftFenceGeneration}
-  mutationMessage={commentError}
   onCreate={onCreateRecurrence}
-  onPatch={onPatchRecurrence}
-  onDelete={onDeleteRecurrence}
+  onPatch={async () => {}}
+  onDelete={async () => false}
 />
 
 <style>

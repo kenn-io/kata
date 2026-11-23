@@ -1,11 +1,5 @@
 <script lang="ts">
-  import {
-    autoReposition,
-    Chip,
-    dismissable,
-    floatingPopoverStyle,
-    type TypeaheadOption,
-  } from '@kenn-io/kit-ui'
+  import { autoReposition, Chip, dismissable, floatingPopoverStyle } from '@kenn-io/kit-ui'
   import { tick } from 'svelte'
   import { listRecurrences } from '../lib/api/generated/default/default'
   import { formatDay } from '../lib/kata/dates'
@@ -20,12 +14,9 @@
   interface Props {
     projectID: number
     actor: string
-    ownerOptions?: TypeaheadOption[]
     disabled?: boolean
-    mutationMessage?: string | undefined
     draftFenceGeneration?: number
-    snapshotRecurrences?: readonly KataRecurrence[] | undefined
-    refreshGeneration?: number
+    refreshKey?: number
     onCreate: (projectID: number, input: KataCreateRecurrenceInput) => Promise<void>
     onPatch: (
       recurrence: KataRecurrence,
@@ -37,12 +28,9 @@
   let {
     projectID,
     actor,
-    ownerOptions = [],
     disabled = false,
-    mutationMessage = undefined,
     draftFenceGeneration = 0,
-    snapshotRecurrences = undefined,
-    refreshGeneration = 0,
+    refreshKey = 0,
     onCreate,
     onPatch,
     onDelete,
@@ -60,8 +48,6 @@
       }
     | undefined = $state()
   let generation = 0
-  let acceptedGeneration = 0
-  let reloadNeeded = false
 
   async function refresh(id: number): Promise<KataRecurrence[] | null> {
     const current = ++generation
@@ -73,10 +59,9 @@
       if (current === generation) {
         recurrences = loaded
         readError = false
-        acceptedGeneration = current
         return loaded
       }
-      return acceptedGeneration > current ? recurrences : null
+      return null
     } catch {
       if (current === generation) readError = true
       return null
@@ -84,12 +69,8 @@
   }
   $effect(() => {
     const id = projectID
-    void refreshGeneration
-    if (snapshotRecurrences !== undefined) {
-      recurrences = [...snapshotRecurrences]
-      acceptedGeneration = generation
-      readError = false
-    } else void refresh(id)
+    void refreshKey
+    void refresh(id)
     return () => {
       generation++
     }
@@ -126,6 +107,7 @@
   async function toggle(): Promise<void> {
     open = !open
     if (!open) return
+    void refresh(projectID)
     await tick()
     position()
   }
@@ -137,37 +119,18 @@
     try {
       await onPatch(recurrence, input, etag)
     } catch (error) {
-      const fresh = await refresh(projectID)
-      if (error instanceof Object && 'status' in error && error.status === 412) {
-        const replacement = fresh?.find((item) => item.id === recurrence.id)
-        throw Object.assign(error, {
-          response: replacement
-            ? { recurrence: replacement, etag: `"rev-${replacement.revision}"` }
-            : undefined,
-        })
-      }
+      await refresh(projectID)
       throw error
     }
   }
   async function stop(recurrence: KataRecurrence): Promise<boolean> {
-    if (reloadNeeded) {
-      const fresh = await refresh(projectID)
-      if (!fresh) return false
-      reloadNeeded = false
-      const replacement = fresh.find((item) => item.uid === recurrence.uid)
-      if (!replacement) return true
-      recurrence = replacement
-    }
     let stopped = false
     try {
       stopped = await onDelete(recurrence)
     } catch {
-      /* reload after any refusal */
+      // Refresh after a refusal.
     }
-    if (!stopped) {
-      reloadNeeded = true
-      if (await refresh(projectID)) reloadNeeded = false
-    }
+    if (!stopped) await refresh(projectID)
     return stopped
   }
 </script>
@@ -210,14 +173,11 @@
   selectedIssue={null}
   {recurrences}
   {actor}
-  {ownerOptions}
   {disabled}
-  {mutationMessage}
   {draftFenceGeneration}
   {onCreate}
   onPatch={patch}
   onDelete={stop}
-  reloadFailed={readError}
 />
 
 <style>

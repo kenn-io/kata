@@ -1,5 +1,4 @@
 <script lang="ts">
-  import type { TypeaheadOption } from '@kenn-io/kit-ui'
   import RecurrenceDeleteDialog from './RecurrenceDeleteDialog.svelte'
   import RecurrenceEditorDialog from './RecurrenceEditorDialog.svelte'
   import type {
@@ -13,11 +12,8 @@
     selectedIssue: KataTaskDetail | null
     recurrences: readonly KataRecurrence[]
     actor: string
-    ownerOptions?: TypeaheadOption[] | undefined
     disabled?: boolean | undefined
     draftFenceGeneration?: number | undefined
-    mutationMessage?: string | undefined
-    reloadFailed?: boolean | undefined
     onCreate: (projectID: number, input: KataCreateRecurrenceInput) => Promise<void>
     onPatch: (
       recurrence: KataRecurrence,
@@ -31,11 +27,8 @@
     selectedIssue,
     recurrences,
     actor,
-    ownerOptions = [],
     disabled = false,
     draftFenceGeneration = 0,
-    mutationMessage = undefined,
-    reloadFailed = false,
     onCreate,
     onPatch,
     onDelete,
@@ -51,7 +44,6 @@
     recurrence: null,
   })
   let deletingRecurrence = $state(false)
-  let deleteRefused = $state(false)
   let lastDraftFenceGeneration = $state<number | null>(null)
 
   $effect(() => {
@@ -88,7 +80,6 @@
 
   export function openDeleteRecurrence(recurrence: KataRecurrence): void {
     if (disabled) return
-    deleteRefused = false
     recurrenceDelete = { open: true, recurrence }
   }
 
@@ -100,13 +91,6 @@
   // A delete conflict (412) reloads the recurrence list; without reconciling,
   // the open delete dialog would retry with the stale revision forever.
   export function reconcileRecurrences(recurrences: readonly KataRecurrence[]): void {
-    if (
-      recurrenceDialog.open &&
-      recurrenceDialog.mode === 'edit' &&
-      !recurrences.some((item) => item.uid === recurrenceDialog.recurrence?.uid)
-    ) {
-      recurrenceDialog = { open: false, mode: 'create', recurrence: null, etag: '' }
-    }
     const target = recurrenceDelete.recurrence
     if (!recurrenceDelete.open || !target) return
     const fresh = recurrences.find((item) => item.uid === target.uid)
@@ -132,14 +116,13 @@
     const recurrence = recurrenceDelete.recurrence
     if (disabled || !recurrence || deletingRecurrence) return
     deletingRecurrence = true
-    deleteRefused = false
     try {
       const ok = await onDelete(recurrence)
       if (ok) {
         recurrenceDelete = { open: false, recurrence: null }
-      } else deleteRefused = true
+      }
     } catch {
-      deleteRefused = true
+      // Keep the dialog open for retry.
     } finally {
       deletingRecurrence = false
     }
@@ -154,11 +137,9 @@
           kind: 'create',
           projectID: selectedIssue.issue.project_id,
           initialIssueRef: selectedIssue.issue.short_id,
-          issue: selectedIssue,
         }
       : { kind: 'edit', recurrence: recurrenceDialog.recurrence!, etag: recurrenceDialog.etag }}
     {actor}
-    {ownerOptions}
     {disabled}
     onClose={closeRecurrenceDialog}
     {onCreate}
@@ -171,12 +152,6 @@
     open={recurrenceDelete.open}
     recurrence={recurrenceDelete.recurrence}
     disabled={disabled || deletingRecurrence}
-    retry={deleteRefused && reloadFailed}
-    error={deleteRefused
-      ? reloadFailed
-        ? 'Could not load repeating tasks. Try again.'
-        : (mutationMessage ?? 'Could not stop repeating. Try again.')
-      : undefined}
     onConfirm={() => {
       void confirmDeleteRecurrence()
     }}

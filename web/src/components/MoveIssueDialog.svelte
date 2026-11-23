@@ -2,10 +2,8 @@
   /* eslint-disable svelte/prefer-svelte-reactivity */
   import { Button, SearchInput } from '@kenn-io/kit-ui'
   import Modal from './Modal.svelte'
-  import { Card } from '@kenn-io/kit-ui'
   import { tick } from 'svelte'
   import type { KataProjectSummary, KataTaskDetail } from '../lib/kata/types'
-  import { markColor } from '../lib/marks'
 
   interface Props {
     issue: KataTaskDetail
@@ -176,31 +174,16 @@
           aria-busy={movingProjectUID === project.uid}
           onclick={() => void moveIssue(project)}
         >
-          <span class="move-project-name"
-            ><span class="project-mark" style:background={markColor(project.name)}
-            ></span>{project.name}</span
-          >
+          <span class="move-project-name">{project.name}</span>
           {#if destinationContext(project)}
             <span class="move-project-context">{destinationContext(project)}</span>
           {/if}
-          <span class="move-project-count">{project.open_count} open</span>
         </button>
       {:else}
         <p role="status">No matching projects</p>
       {/each}
     </div>
     {#if refused && error}<p class="move-error" role="alert">{error}</p>{/if}
-    <Card padding="none" class="dialog-preview">
-      <div>The task gets a new ID.</div>
-      {#if issue.issue.child_counts?.total}
-        <div>
-          Its {issue.issue.child_counts.total} child {issue.issue.child_counts.total === 1
-            ? 'task moves'
-            : 'tasks move'} with it.
-        </div>
-      {/if}
-      <div>Links, comments, and history come along.</div>
-    </Card>
   </div>
   {#snippet footer()}
     <Button
@@ -262,27 +245,10 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .project-mark {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    margin-right: 8px;
-    border-radius: 50%;
-  }
-
   .move-project-context {
     grid-column: 1;
     color: var(--text-muted);
     font-size: var(--font-size-xs);
-  }
-
-  .move-project-count {
-    grid-column: 2;
-    grid-row: 1 / span 2;
-    align-self: center;
-    color: var(--text-muted);
-    font-size: var(--font-size-xs);
-    font-variant-numeric: tabular-nums;
   }
 
   .move-options p {

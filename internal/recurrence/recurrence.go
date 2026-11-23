@@ -4,7 +4,6 @@
 package recurrence
 
 import (
-	"context"
 	"fmt"
 	"time"
 
@@ -17,14 +16,6 @@ const dateFmt = "2006-01-02"
 // Returns (nil, nil) when the series is exhausted (UNTIL/COUNT reached).
 // Returns (nil, err) when the rule cannot be parsed.
 func Walk(rule, dtstart, tz, after string) (*string, error) {
-	return WalkContext(context.Background(), rule, dtstart, tz, after)
-}
-
-// WalkContext stops searching when ctx is canceled.
-func WalkContext(ctx context.Context, rule, dtstart, tz, after string) (*string, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
 	loc, err := time.LoadLocation(tz)
 	if err != nil {
 		return nil, fmt.Errorf("load timezone %q: %w", tz, err)
@@ -48,39 +39,29 @@ func WalkContext(ctx context.Context, rule, dtstart, tz, after string) (*string,
 		return nil, fmt.Errorf("build rrule: %w", err)
 	}
 
-	// Iterate once so cancellation can interrupt high-frequency rules while
-	// skipping occurrences on the same date.
+	// Walk advances by date, not by sub-day occurrence. If the RRULE has
+	// sub-day components (FREQ=HOURLY, BYHOUR, etc.), r.After may return a
+	// time on the same calendar date as afterDate. Skip any same-date (or
+	// earlier) results by advancing until we get a strictly-later date or
+	// the series is exhausted.
 	afterFormatted := afterDate.Format(dateFmt)
-	next := r.Iterator()
-	for {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		n, ok := next()
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, nil
-		}
+	n := r.After(afterDate, false)
+	for !n.IsZero() {
 		cand := n.In(loc).Format(dateFmt)
 		if cand > afterFormatted {
+			// cand > afterFormatted is a safe lexicographic comparison for
+			// YYYY-MM-DD strings — equivalent to a calendar-date comparison.
 			return &cand, nil
 		}
+		// Same day or earlier — advance past this sub-day occurrence.
+		n = r.After(n, false)
 	}
+	return nil, nil
 }
 
 // Next returns the first occurrence on or after dtstart — useful when
 // materializing the initial instance of a fresh recurrence.
 func Next(rule, dtstart, tz string) (*string, error) {
-	return NextContext(context.Background(), rule, dtstart, tz)
-}
-
-// NextContext stops searching when ctx is canceled.
-func NextContext(ctx context.Context, rule, dtstart, tz string) (*string, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
 	loc, err := time.LoadLocation(tz)
 	if err != nil {
 		return nil, err
@@ -90,5 +71,5 @@ func NextContext(ctx context.Context, rule, dtstart, tz string) (*string, error)
 		return nil, err
 	}
 	prev := dt.AddDate(0, 0, -1).Format(dateFmt)
-	return WalkContext(ctx, rule, dtstart, tz, prev)
+	return Walk(rule, dtstart, tz, prev)
 }

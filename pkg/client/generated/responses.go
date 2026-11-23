@@ -567,10 +567,6 @@ type ReadyIssuesResponse = ReadyResponseBody
 
 type ReadyIssuesErrorResponse = ErrorEnvelope
 
-type PreviewRecurrenceResponse = RecurrencePreviewResponseBody
-
-type PreviewRecurrenceErrorResponse = ErrorEnvelope
-
 type ListRecurrencesResponse = ListRecurrencesResponseBody
 
 type ListRecurrencesErrorResponse = ErrorEnvelope
@@ -1917,14 +1913,6 @@ type ReadyIssuesResp struct {
 	StatusCode   int
 	JSON200      *ReadyIssuesResponse
 	JSONDefault  *ReadyIssuesErrorResponse
-}
-
-type PreviewRecurrenceResp struct {
-	HTTPResponse *http.Response
-	Body         []byte
-	StatusCode   int
-	JSON200      *PreviewRecurrenceResponse
-	JSONDefault  *PreviewRecurrenceErrorResponse
 }
 
 type ListRecurrencesResp struct {

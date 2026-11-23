@@ -1,25 +1,12 @@
 <script lang="ts">
-  import {
-    Card,
-    Checkbox,
-    Disclosure,
-    NumberInput,
-    RadioGroup,
-    SelectDropdown,
-    SegmentedControl,
-    Typeahead,
-    type TypeaheadOption,
-  } from '@kenn-io/kit-ui'
+  import { Checkbox, NumberInput, RadioGroup, SelectDropdown } from '@kenn-io/kit-ui'
   import type {
     KataCreateRecurrenceInput,
     KataPatchRecurrenceInput,
     KataRecurrence,
     KataRecurrenceTemplateUpdateInput,
-    KataTaskDetail,
   } from '../lib/kata/types'
   import DatePicker from './DatePicker.svelte'
-  import { previewRecurrence } from '../lib/api/generated/default/default'
-  import { formatDay } from '../lib/kata/dates'
   import {
     WEEKDAYS,
     WEEKDAY_LABEL,
@@ -35,13 +22,12 @@
   } from '../lib/recurrence/rrule'
 
   type Mode =
-    | { kind: 'create'; projectID: number; initialIssueRef: string; issue: KataTaskDetail }
+    | { kind: 'create'; projectID: number; initialIssueRef: string }
     | { kind: 'edit'; recurrence: KataRecurrence; etag: string }
 
   interface Props {
     mode: Mode
     actor: string
-    ownerOptions?: TypeaheadOption[]
     onCreate: (projectID: number, input: KataCreateRecurrenceInput) => Promise<void>
     onPatch: (
       recurrence: KataRecurrence,
@@ -51,7 +37,7 @@
     onSaved: () => void
   }
 
-  let { mode, actor, ownerOptions = [], onCreate, onPatch, onSaved }: Props = $props()
+  let { mode, actor, onCreate, onPatch, onSaved }: Props = $props()
 
   // --- Schedule state (Common mode) -------------------------------
   // Compute defaults from the initial dtstart once. Subsequent state
@@ -74,14 +60,12 @@
   let endDate: string = $state(INITIAL_DTSTART)
   let endCount = $state<number | null>(10)
 
-  let frequencyOptions = $derived(
-    [
-      { value: 'DAILY', label: 'day' },
-      { value: 'WEEKLY', label: 'week' },
-      { value: 'MONTHLY', label: 'month' },
-      { value: 'YEARLY', label: 'year' },
-    ].map((option) => ({ ...option, label: option.label + (interval === 1 ? '' : 's') })),
-  )
+  const frequencyOptions = [
+    { value: 'DAILY', label: 'Daily' },
+    { value: 'WEEKLY', label: 'Weekly' },
+    { value: 'MONTHLY', label: 'Monthly' },
+    { value: 'YEARLY', label: 'Yearly' },
+  ]
   const ordinalOptions = [
     { value: '1', label: '1st' },
     { value: '2', label: '2nd' },
@@ -131,7 +115,6 @@
   // edit-mode prefill block (below) can set it before any $derived
   // reads it.
   let mode_ = $state<'common' | 'advanced'>('common')
-  let moreOpen = $state(false)
   let advancedText: string = $state('')
 
   // --- Submit state ----------------------------------------------
@@ -139,12 +122,7 @@
   let conflictBanner: string | null = $state(null)
 
   // --- Baseline tracking (edit mode) ----------------------------
-  // The prop `mode` is owned by the dialog and we cannot mutate it.
-  // After a 412 conflict we need to remember the server's new
-  // Recurrence (for diffing) and etag (for the next PATCH) — track
-  // those locally so they survive the reload. Initial values are
-  // captured via plain functions so the $state initializers don't
-  // read the prop directly (avoids `state_referenced_locally`).
+  // Capture the revision the user opened so a conflict keeps their draft.
   let baselineRecurrence: KataRecurrence | null = $state(initialBaselineRecurrence())
   let baselineEtag: string | null = $state(initialBaselineEtag())
 
@@ -158,22 +136,10 @@
   applyEditPrefill()
   function applyEditPrefill(): void {
     const initialMode = mode
-    if (initialMode.kind === 'edit') {
-      applyRecurrenceToForm(initialMode.recurrence)
-    } else {
-      const issue = initialMode.issue
-      title = issue.issue.title
-      body = issue.issue.body
-      owner = issue.issue.owner ?? ''
-      priority = issue.issue.priority ?? null
-      labelsText = issue.labels.map((label) => label.label).join(', ')
-    }
+    if (initialMode.kind !== 'edit') return
+    applyRecurrenceToForm(initialMode.recurrence)
   }
 
-  // applyRecurrenceToForm fully resets every form field from the
-  // given Recurrence. Used for the initial prefill AND the 412
-  // reload, so Common-mode schedule fields always reflect the
-  // server's view (not the user's stale edits).
   function applyRecurrenceToForm(rec: KataRecurrence): void {
     title = rec.template_title
     body = rec.template_body ?? ''
@@ -190,7 +156,6 @@
     if (parsed.kind !== 'common') {
       advancedText = rec.rrule
       mode_ = 'advanced'
-      moreOpen = true
       return
     }
     applyCommonRuleToForm(parsed.rrule, rec.rrule)
@@ -256,35 +221,6 @@
   let activeRrule = $derived(
     mode_ === 'advanced' ? advancedText : serializeRRule(currentCommonRule),
   )
-  let dates = $state<string[]>([])
-  $effect(() => {
-    const rule = activeRrule
-    const start = dtstart
-    const zone = resolvedTimezone()
-    const create = mode.kind === 'create' ? mode : null
-    const valid =
-      mode_ === 'advanced'
-        ? advancedParse.kind !== 'invalid'
-        : isCommonFormValid() && (freq !== 'WEEKLY' || byDay.length > 0)
-    dates = []
-    if (!create || !valid) return
-    const controller = new AbortController()
-    const timer = setTimeout(() => {
-      void previewRecurrence(
-        { projectId: create.projectID },
-        { rrule: rule, dtstart: start, timezone: zone },
-        { signal: controller.signal },
-      )
-        .then((result) => {
-          if (!controller.signal.aborted && result.status === 200) dates = result.data.dates
-        })
-        .catch(() => {})
-    }, 250)
-    return () => {
-      clearTimeout(timer)
-      controller.abort()
-    }
-  })
 
   // The compact summary mirrors whatever rule we'd submit right now —
   // Common form in Common mode, raw textarea in Advanced mode. We hide
@@ -413,16 +349,8 @@
       onSaved()
     } catch (e) {
       if (isConflict(e)) {
-        const server = (e as { response?: { recurrence?: KataRecurrence; etag?: string } }).response
-        if (server?.recurrence) {
-          conflictBanner = 'Server version loaded; your unsaved edits were not applied.'
-          baselineRecurrence = server.recurrence
-          baselineEtag = server.etag ?? baselineEtag
-          applyRecurrenceToForm(server.recurrence)
-        } else {
-          conflictBanner =
-            'Could not load the latest version. Your draft is preserved; save again to retry.'
-        }
+        conflictBanner =
+          'This rule changed elsewhere. Your draft is kept. Copy it, close, and reopen the rule to see the current version.'
       } else {
         submitError = extractValidationMessage(e)
       }
@@ -617,23 +545,35 @@
     <div class="conflict" role="alert">{conflictBanner}</div>
   {/if}
 
+  {#if currentSummary}
+    <div class="summary" data-testid="recurrence-summary">{currentSummary}</div>
+  {/if}
+
   {#if submitError}
     <div class="submit-error" role="alert">{submitError}</div>
   {/if}
 
-  <label class="row">
-    <span>Title</span>
-    <input type="text" bind:value={title} data-autofocus required />
-  </label>
   <fieldset class="schedule">
+    <legend>Schedule</legend>
+
+    <div class="mode-toggle" role="group" aria-label="Editor mode">
+      <button
+        type="button"
+        class="toggle"
+        aria-pressed={mode_ === 'common'}
+        onclick={() => mode_ === 'advanced' && toCommonOrStay()}>Common</button
+      >
+      <button
+        type="button"
+        class="toggle"
+        aria-pressed={mode_ === 'advanced'}
+        onclick={() => mode_ === 'common' && toAdvanced()}>Advanced</button
+      >
+    </div>
+
     {#if mode_ === 'common'}
-      <div class="row">
-        <span>Repeats every</span>
-        <NumberInput
-          min={1}
-          bind:value={interval}
-          ariaLabel={`Every ${interval ?? ''} ${intervalLabel}`}
-        />
+      <label class="row">
+        <span>Frequency</span>
         <SelectDropdown
           title="Frequency"
           value={freq}
@@ -642,11 +582,20 @@
             freq = value as CommonRule['freq']
           }}
         />
-      </div>
+      </label>
+
+      <label class="row">
+        <span>Every</span>
+        <NumberInput
+          min={1}
+          bind:value={interval}
+          ariaLabel={`Every ${interval ?? ''} ${intervalLabel}`}
+        />
+        <span class="suffix">{intervalLabel}</span>
+      </label>
 
       {#if freq === 'WEEKLY'}
         <div class="row chips" role="group" aria-label="Weekdays">
-          <span>On</span>
           {#each WEEKDAYS as d (d)}
             <button
               type="button"
@@ -769,21 +718,10 @@
         </div>
       {/if}
 
-      <label class="row">
-        <span>Starts</span>
-        <DatePicker
-          ariaLabel="Start date"
-          value={dtstart}
-          onchange={(value) => {
-            dtstart = value
-          }}
-        />
-      </label>
-
       <div class="row end">
-        <span>Ends</span>
-        <SegmentedControl
-          ariaLabel="End condition"
+        <RadioGroup
+          legend="End condition"
+          name="end"
           value={endMode}
           onchange={(value) => {
             if (value === 'never' || value === 'until' || value === 'count') endMode = value
@@ -794,50 +732,84 @@
             { value: 'count', label: 'After' },
           ]}
         />
-        {#if endMode === 'until'}
-          <DatePicker
-            ariaLabel="End date"
-            value={endDate}
-            onchange={(value) => {
-              endDate = value
-            }}
-          />
-        {:else if endMode === 'count'}
-          <div class="row">
-            <NumberInput ariaLabel="occurrences" min={1} bind:value={endCount} />
-            <span>occurrences</span>
-          </div>
-        {/if}
-      </div>
-    {:else}
-      <label class="row">
-        <span>Starts</span>
         <DatePicker
-          ariaLabel="Start date"
-          value={dtstart}
+          ariaLabel="End date"
+          value={endDate}
+          disabled={endMode !== 'until'}
           onchange={(value) => {
-            dtstart = value
+            endDate = value
           }}
         />
-      </label>
+        <div class="row">
+          <NumberInput
+            ariaLabel="occurrences"
+            min={1}
+            bind:value={endCount}
+            disabled={endMode !== 'count'}
+          />
+          <span>occurrences</span>
+        </div>
+      </div>
     {/if}
+
+    {#if mode_ === 'advanced'}
+      <label class="row advanced">
+        <span>RRULE</span>
+        <textarea bind:value={advancedText} rows="3" aria-invalid={advancedParse.kind === 'invalid'}
+        ></textarea>
+      </label>
+      <div class="row feedback" data-testid="rrule-feedback">
+        {#if advancedParse.kind === 'invalid'}
+          <span class="error">Invalid: {advancedParse.error}</span>
+        {:else if advancedParse.kind === 'advanced'}
+          <span class="hint"
+            >Advanced{advancedParse.reason ? ` — ${advancedParse.reason}` : ''}</span
+          >
+        {:else}
+          <span class="ok">Common: {formatRRule(advancedText)}</span>
+          <button type="button" class="link" onclick={toCommonOrStay}>Use Common mode</button>
+        {/if}
+      </div>
+    {/if}
+
+    <label class="row">
+      <span>Start date</span>
+      <DatePicker
+        ariaLabel="Start date"
+        value={dtstart}
+        onchange={(value) => {
+          dtstart = value
+        }}
+      />
+    </label>
+
+    <label class="row">
+      <span>Timezone</span>
+      <SelectDropdown
+        title="Timezone"
+        value={timezone}
+        options={timezoneOptions}
+        onchange={(value) => {
+          timezone = value
+        }}
+      />
+    </label>
   </fieldset>
 
   <fieldset class="template">
-    <div class="row">
-      <span>Owner</span><Typeahead
-        title="Owner"
-        options={ownerOptions}
-        value={owner}
-        fallbackLabel="Choose owner"
-        placeholder="Find owner"
-        allowCustom
-        allowClear
-        onselect={(value) => {
-          owner = value
-        }}
-      />
-    </div>
+    <legend>Template</legend>
+    <label class="row">
+      <span>Title</span>
+      <input type="text" bind:value={title} required />
+    </label>
+    <label class="row">
+      <span>Body</span>
+      <textarea bind:value={body} rows="3"></textarea>
+    </label>
+    <label class="row">
+      <span>Owner</span>
+      <input type="text" bind:value={owner} placeholder="username or empty" />
+    </label>
     <label class="row">
       <span>Priority</span>
       <SelectDropdown
@@ -853,70 +825,11 @@
       <span>Labels</span>
       <input type="text" bind:value={labelsText} placeholder="comma-separated" />
     </label>
-  </fieldset>
-  <Disclosure title="More options" variant="plain" bind:open={moreOpen}>
     <label class="row">
-      <span>Description</span>
-      <textarea bind:value={body} rows="3"></textarea>
-    </label>
-    <label class="row">
-      <span>Timezone</span>
-      <SelectDropdown
-        title="Timezone"
-        value={timezone}
-        options={timezoneOptions}
-        onchange={(value) => {
-          timezone = value
-        }}
-      />
-    </label>
-    <label class="row">
-      <span>Metadata for each task</span>
+      <span>Metadata</span>
       <textarea bind:value={metadataText} rows="3" placeholder="JSON object (optional)"></textarea>
     </label>
-    {#if mode_ === 'common'}
-      <button type="button" class="link" onclick={toAdvanced}>Write as rule</button>
-    {/if}
-    {#if mode_ === 'advanced'}
-      <label class="row advanced">
-        <span>Rule</span>
-        <textarea
-          aria-label="RRULE"
-          bind:value={advancedText}
-          rows="3"
-          aria-invalid={advancedParse.kind === 'invalid'}
-        ></textarea>
-      </label>
-      <div class="row feedback" data-testid="rrule-feedback">
-        {#if advancedParse.kind === 'invalid'}
-          <span class="error">Invalid: {advancedParse.error}</span>
-        {:else if advancedParse.kind === 'advanced'}
-          <span class="hint"
-            >Advanced{advancedParse.reason ? ` — ${advancedParse.reason}` : ''}</span
-          >
-        {:else}
-          <span class="ok">Common: {formatRRule(advancedText)}</span>
-          <button type="button" class="link" onclick={toCommonOrStay}>Use the simple form</button>
-        {/if}
-      </div>
-    {/if}
-  </Disclosure>
-  {#if currentSummary}
-    <Card padding="none" class="dialog-preview">
-      <div data-testid="recurrence-summary">{currentSummary}</div>
-      {#if mode.kind === 'create' && dates.length}<div>
-          This task becomes the first, scheduled {formatDay(dates[0]!)}.
-        </div>{/if}
-      {#if mode.kind === 'create' && dates.length > 1}
-        <div>
-          Then {dates.slice(1).map(formatDay).join(' · ')}
-        </div>
-      {/if}
-      {#if mode.kind === 'create' && dates.length > 1}<div>
-          Marking each one Done makes the next.
-        </div>{/if}
-    </Card>
-  {/if}
+  </fieldset>
 </div>
 
 <style>
@@ -927,8 +840,14 @@
   .schedule {
     display: grid;
     gap: var(--space-4);
-    border: 0;
-    padding: 0;
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    padding: 12px;
+  }
+  legend {
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+    padding: 0 6px;
   }
   .row {
     display: flex;
@@ -937,15 +856,9 @@
     flex-wrap: wrap;
   }
   .row > span:first-child {
-    min-width: 96px;
+    min-width: 90px;
     color: var(--text-secondary);
     font-size: var(--font-size-sm);
-  }
-
-  @media (max-width: 640px) {
-    .row > span:first-child {
-      flex-basis: 100%;
-    }
   }
   .chips {
     gap: 4px;
@@ -964,10 +877,18 @@
     border-color: transparent;
   }
   .monthly,
-  .yearly-day {
+  .yearly-day,
+  .end {
     flex-direction: column;
     align-items: flex-start;
     gap: 6px;
+  }
+  .summary {
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    font-size: var(--font-size-sm);
   }
   .submit-error {
     padding: 8px 10px;
@@ -987,8 +908,36 @@
   .template {
     display: grid;
     gap: var(--space-4);
-    border: 0;
-    padding: 0;
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    padding: 12px;
+  }
+  .mode-toggle {
+    display: inline-flex;
+    gap: 0;
+    align-self: flex-start;
+  }
+  .toggle {
+    padding: 4px 10px;
+    border: 1px solid var(--border-default);
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+  }
+  .toggle:first-child {
+    border-top-left-radius: var(--radius-sm);
+    border-bottom-left-radius: var(--radius-sm);
+  }
+  .toggle:last-child {
+    border-top-right-radius: var(--radius-sm);
+    border-bottom-right-radius: var(--radius-sm);
+    border-left: none;
+  }
+  .toggle[aria-pressed='true'] {
+    background: var(--accent-blue);
+    color: var(--bg-surface);
+    border-color: transparent;
   }
   .advanced textarea {
     flex: 1;

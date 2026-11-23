@@ -86,12 +86,12 @@ describe('MoveIssueDialog', () => {
     cleanup()
   })
 
-  it('names the task and explains that its children move with it', async () => {
+  it('names the task', async () => {
     renderMenu({ issue: makeIssue('open', { child_counts: { open: 1, total: 2 } }) })
     await openMovePicker()
     const dialog = screen.getByRole('dialog', { name: 'Move task' })
     expect(within(dialog).getByText('Ship the thing')).toBeTruthy()
-    expect(within(dialog).getByText(/2 child tasks move with it/)).toBeTruthy()
+    expect(within(dialog).getByText('INBOX-1')).toBeTruthy()
   })
 
   it('shows sorted eligible destinations with unambiguous duplicate context', async () => {
@@ -103,9 +103,9 @@ describe('MoveIssueDialog', () => {
     )
     expect(
       destinations.slice(0, 2).map((button) => button.textContent?.replaceAll(/\s/g, '')),
-    ).toEqual(['Roadmap5open', 'Sharedproject-shared-home4open'])
-    expect(screen.getByRole('button', { name: /Shared.*project-shared-home-2.*1/ })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Shared.*Work.*2/ })).toBeTruthy()
+    ).toEqual(['Roadmap', 'Sharedproject-shared-home'])
+    expect(screen.getByRole('button', { name: /Shared.*project-shared-home-2/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Shared.*Work/ })).toBeTruthy()
     expect(screen.queryByText('Inbox')).toBeNull()
   })
 

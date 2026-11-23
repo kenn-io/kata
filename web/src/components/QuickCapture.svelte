@@ -30,6 +30,14 @@
   let error = $state<string | null>(null)
   let lastDraftFenceGeneration = $state<number | null>(null)
   let selectedProjectUID = $state<string | undefined>(undefined)
+  const effectiveProjectUID = $derived(
+    projects?.some((project) => project.uid === selectedProjectUID)
+      ? selectedProjectUID
+      : projects?.some((project) => project.uid === inboxUID)
+        ? inboxUID
+        : '',
+  )
+  const projectReady = $derived(!projects || !!effectiveProjectUID)
 
   $effect(() => {
     if (open && !disabled) input?.focus()
@@ -41,8 +49,6 @@
       pending = false
       error = null
       selectedProjectUID = undefined
-    } else if (selectedProjectUID === undefined) {
-      selectedProjectUID = inboxUID ?? ''
     }
   })
 
@@ -56,16 +62,16 @@
     lastDraftFenceGeneration = nextGeneration
     title = ''
     pending = false
-    selectedProjectUID = inboxUID ?? ''
+    selectedProjectUID = undefined
   })
 
   async function submit(): Promise<void> {
     const value = title.trim()
-    if (!value || pending || disabled || (projects && !selectedProjectUID)) return
+    if (!value || pending || disabled || !projectReady) return
     pending = true
     error = null
     try {
-      if (projects) await onSubmit(value, selectedProjectUID)
+      if (projects) await onSubmit(value, effectiveProjectUID)
       else await onSubmit(value)
       title = ''
       onClose()
@@ -111,7 +117,7 @@
         <span>Project</span>
         <SelectDropdown
           title="Project"
-          value={selectedProjectUID ?? ''}
+          value={effectiveProjectUID ?? ''}
           options={[
             { value: '', label: 'Choose a project', disabled: true },
             ...projects.map((project) => ({ value: project.uid, label: project.name })),
@@ -130,10 +136,7 @@
       surface="solid"
       label="Add"
       onclick={() => void submit()}
-      disabled={disabled ||
-        pending ||
-        title.trim().length === 0 ||
-        (projects !== undefined && !selectedProjectUID)}
+      disabled={disabled || pending || title.trim().length === 0 || !projectReady}
     >
       <PlusIcon size={12} strokeWidth={2} />
     </Button>
