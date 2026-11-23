@@ -43,10 +43,8 @@ type BodySources struct {
 // can inject a stub instead of touching the real `git config user.name`.
 type gitUserFn func(context.Context) (string, error)
 
-// resolveBody returns the resolved body text. Mutually exclusive sources;
-// returns error otherwise. An explicit empty --body or --body-file is
-// honored as a deliberate empty body — only no flag at all returns the
-// no-source default.
+// resolveBody returns text from at most one source. It returns an empty string
+// for an empty source or no source, and an error if reading a source fails.
 func resolveBody(b BodySources, stdin io.Reader) (string, error) {
 	count := 0
 	if b.BodySet {
@@ -65,9 +63,6 @@ func resolveBody(b BodySources, stdin io.Reader) (string, error) {
 	case b.BodySet:
 		return b.Body, nil
 	case b.FileSet:
-		if b.File == "" {
-			return "", &cliError{Message: "--body-file needs a non-empty path", Kind: kindValidation, ExitCode: ExitValidation}
-		}
 		//nolint:gosec // user-supplied path is the whole point of --body-file
 		bs, err := os.ReadFile(b.File)
 		if err != nil {

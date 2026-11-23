@@ -91,14 +91,6 @@ func TestResolveBody(t *testing.T) {
 			kind:    kindUsage, code: ExitUsage,
 		},
 		{
-			name: "empty file path",
-			setup: func(*testing.T) (BodySources, io.Reader) {
-				return BodySources{FileSet: true}, nil
-			},
-			wantErr: "--body-file needs a non-empty path",
-			kind:    kindValidation, code: ExitValidation,
-		},
-		{
 			name: "file read failure",
 			setup: func(t *testing.T) (BodySources, io.Reader) {
 				return BodySources{File: t.TempDir() + "/missing", FileSet: true}, nil
