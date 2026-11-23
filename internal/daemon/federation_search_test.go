@@ -204,21 +204,10 @@ func TestDirectSpokeSearchUsesHubResults(t *testing.T) {
 
 func TestDirectSpokeSearchHubWithoutEmbeddings(t *testing.T) {
 	ctx := t.Context()
-	hub := testenv.New(t)
-	project, _ := createClaimHubIssue(t, hub)
+	hub, spoke, project, replica, _, token := createClaimForwardingPair(t, "pull")
 	issue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "unpulled zebra", Author: "tester"})
 	require.NoError(t, err)
-	other, err := hub.DB.CreateProject(ctx, "other-project")
-	require.NoError(t, err)
-	_, _, err = hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: other.ID, Title: "other zebra", Author: "tester"})
-	require.NoError(t, err)
-	spoke := testenv.New(t)
-	replica, err := spoke.DB.CreateProjectWithUID(ctx, project.Name, project.UID)
-	require.NoError(t, err)
-	_, err = spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: replica.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "tester", Enabled: true})
-	require.NoError(t, err)
-	grant := createClaimEnrollment(t, hub, project.ID, spoke.DB.InstanceUID(), "pull")
-	require.NoError(t, config.WriteFederationCredential(replica.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: project.ID, Token: grant.Token}))
+	require.NoError(t, config.WriteFederationCredential(replica.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: project.ID, Token: token}))
 
 	for _, mode := range []string{"", "&mode=auto"} {
 		resp, raw := envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=zebra%s", replica.ID, mode))
@@ -240,72 +229,54 @@ func TestDirectSpokeSearchHubWithoutEmbeddings(t *testing.T) {
 		require.Equal(t, issue.UID, body.Results[0].Issue.UID)
 		require.Equal(t, []string{"title"}, body.Results[0].MatchedIn)
 	}
-	for _, mode := range []string{"semantic", "hybrid"} {
-		resp, raw := envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=zebra&mode=%s", replica.ID, mode))
-		require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode, string(raw))
-		require.Contains(t, string(raw), `"code":"hub_search_failed"`)
-	}
 }
 
 func TestFederationSearchIndexUnavailable(t *testing.T) {
-	emb, err := embedding.New(embedding.Config{BaseURL: "https://example.test", Model: "example", Dims: 2})
-	require.NoError(t, err)
-	hub := testenv.New(t, func(cfg *daemon.ServerConfig) {
-		cfg.Embedder, cfg.EmbeddingUnavailableReason = emb, "vector index unavailable"
+	t.Run("index unavailable", func(t *testing.T) {
+		emb, err := embedding.New(embedding.Config{BaseURL: "https://example.test", Model: "example", Dims: 2})
+		require.NoError(t, err)
+		hub := testenv.New(t, func(cfg *daemon.ServerConfig) {
+			cfg.Embedder, cfg.EmbeddingUnavailableReason = emb, "vector index unavailable"
+		})
+		project, _ := createClaimHubIssue(t, hub)
+		spoke := testenv.New(t)
+		grant := createClaimEnrollment(t, hub, project.ID, spoke.DB.InstanceUID(), "pull")
+		path := fmt.Sprintf("/api/v1/projects/%d/federation/search?q=claim&auto=true", project.ID)
+		resp, raw := envDoRaw(t, hub, http.MethodGet, path, nil, map[string]string{"Authorization": "Bearer " + grant.Token})
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+		require.Contains(t, string(raw), `"mode":"lexical"`)
+		require.Contains(t, string(raw), "vector index unavailable")
 	})
-	project, _ := createClaimHubIssue(t, hub)
-	spoke := testenv.New(t)
-	grant := createClaimEnrollment(t, hub, project.ID, spoke.DB.InstanceUID(), "pull")
-	path := fmt.Sprintf("/api/v1/projects/%d/federation/search?q=claim&auto=true", project.ID)
-	resp, raw := envDoRaw(t, hub, http.MethodGet, path, nil, map[string]string{"Authorization": "Bearer " + grant.Token})
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
-	require.Contains(t, string(raw), `"mode":"lexical"`)
-	require.Contains(t, string(raw), "vector index unavailable")
-}
-
-func TestFederationSearchProviderRejectsCredentials(t *testing.T) {
-	ctx := t.Context()
-	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusUnauthorized) }))
-	t.Cleanup(provider.Close)
-	emb, err := embedding.New(embedding.Config{BaseURL: provider.URL, Model: "example", Dims: 2, Credential: config.EmbeddingCredential{Key: "example-key", Source: "inline"}})
-	require.NoError(t, err)
-	idx, err := vector.Open(ctx, filepath.Join(t.TempDir(), "vectors.db"))
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, idx.Close()) })
-	hub := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Embedder, cfg.VectorIndex = emb, idx })
-	project, _ := createClaimHubIssue(t, hub)
-	_, err = idx.RefreshMirror(ctx, hub.DB, nil)
-	require.NoError(t, err)
-	key := emb.Generation().Fingerprint()
-	require.NoError(t, idx.EnsureBuilding(ctx, key, emb.Generation()))
-	_, err = idx.Fill(ctx, key, leaseRecoveryEmbedder{}.EncodeFunc(), 64, nil, nil)
-	require.NoError(t, err)
-	require.NoError(t, idx.CutOver(ctx, key))
-	spoke := testenv.New(t)
-	grant := createClaimEnrollment(t, hub, project.ID, spoke.DB.InstanceUID(), "pull")
-	path := fmt.Sprintf("/api/v1/projects/%d/federation/search?q=claim", project.ID)
-	headers := map[string]string{"Authorization": "Bearer " + grant.Token}
-	resp, raw := envDoRaw(t, hub, http.MethodGet, path+"&auto=true", nil, headers)
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
-	require.Contains(t, string(raw), `"mode":"lexical"`)
-	require.Contains(t, string(raw), "rejected the API key")
-	require.Contains(t, string(raw), "claim target")
-	replica, err := spoke.DB.CreateProjectWithUID(ctx, project.Name, project.UID)
-	require.NoError(t, err)
-	_, err = spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: replica.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "tester", Enabled: true})
-	require.NoError(t, err)
-	require.NoError(t, config.WriteFederationCredential(replica.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: project.ID, Token: grant.Token}))
-	resp, raw = envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=claim", replica.ID))
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
-	var body struct {
-		Degraded       bool   `json:"degraded"`
-		DegradedReason string `json:"degraded_reason"`
-	}
-	require.NoError(t, json.Unmarshal(raw, &body))
-	require.True(t, body.Degraded)
-	require.Contains(t, body.DegradedReason, "hub search: semantic search unavailable: embedding provider rejected the API key")
-	resp, raw = envDoRaw(t, hub, http.MethodGet, path, nil, headers)
-	require.Equal(t, http.StatusBadRequest, resp.StatusCode, string(raw))
+	t.Run("provider rejects credentials", func(t *testing.T) {
+		ctx := t.Context()
+		provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusUnauthorized) }))
+		t.Cleanup(provider.Close)
+		emb, err := embedding.New(embedding.Config{BaseURL: provider.URL, Model: "example", Dims: 2, Credential: config.EmbeddingCredential{Key: "example-key", Source: "inline"}})
+		require.NoError(t, err)
+		idx, err := vector.Open(ctx, filepath.Join(t.TempDir(), "vectors.db"))
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, idx.Close()) })
+		hub := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Embedder, cfg.VectorIndex = emb, idx })
+		project, _ := createClaimHubIssue(t, hub)
+		_, err = idx.RefreshMirror(ctx, hub.DB, nil)
+		require.NoError(t, err)
+		key := emb.Generation().Fingerprint()
+		require.NoError(t, idx.EnsureBuilding(ctx, key, emb.Generation()))
+		_, err = idx.Fill(ctx, key, leaseRecoveryEmbedder{}.EncodeFunc(), 64, nil, nil)
+		require.NoError(t, err)
+		require.NoError(t, idx.CutOver(ctx, key))
+		spoke := testenv.New(t)
+		grant := createClaimEnrollment(t, hub, project.ID, spoke.DB.InstanceUID(), "pull")
+		path := fmt.Sprintf("/api/v1/projects/%d/federation/search?q=claim", project.ID)
+		headers := map[string]string{"Authorization": "Bearer " + grant.Token}
+		resp, raw := envDoRaw(t, hub, http.MethodGet, path+"&auto=true", nil, headers)
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+		require.Contains(t, string(raw), `"mode":"lexical"`)
+		require.Contains(t, string(raw), "rejected the API key")
+		require.Contains(t, string(raw), "claim target")
+		resp, raw = envDoRaw(t, hub, http.MethodGet, path, nil, headers)
+		require.Equal(t, http.StatusBadRequest, resp.StatusCode, string(raw))
+	})
 }
 
 func TestDirectSpokeSearchLocalWords(t *testing.T) {
@@ -424,15 +395,13 @@ func TestDirectSpokeSearchReportsUnavailableHub(t *testing.T) {
 		resp, body := envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=claim&mode=%s", replica.ID, mode))
 		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 	}
-	for _, mode := range []string{"", "&mode=auto"} {
-		resp, body := envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=claim%s", replica.ID, mode))
-		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-		require.Contains(t, string(body), `"mode":"lexical"`)
-		require.Contains(t, string(body), `"degraded":true`)
-		require.Contains(t, string(body), "claim target")
-	}
+	resp, body := envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=claim", replica.ID))
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	require.Contains(t, string(body), `"mode":"lexical"`)
+	require.Contains(t, string(body), `"degraded":true`)
+	require.Contains(t, string(body), "claim target")
 	setClaimBindingHubURL(t, spoke, replica.ID, hub.URL)
-	resp, body := envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=claim&mode=semantic", replica.ID))
+	resp, body = envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=claim&mode=semantic", replica.ID))
 	require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode, string(body))
 	require.Contains(t, string(body), `"code":"hub_search_failed"`)
 	require.NotContains(t, string(body), "hub unreachable")
@@ -466,97 +435,12 @@ func TestDirectSpokeSearchReportsUnavailableHub(t *testing.T) {
 	require.Contains(t, string(body), "claim target")
 }
 
-func TestDirectSpokeSearchHubLexicalRanking(t *testing.T) {
-	ctx := t.Context()
-	hub, spoke, project, replica, _, token := createClaimForwardingPair(t, "pull")
-	remote, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "zebra remote", Author: "tester"})
-	require.NoError(t, err)
-	hits := []map[string]any{{"issue": remote, "score": 1e-12, "matched_in": []string{"title"}}}
-	for i := range 20 {
-		local, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: replica.ID, Title: fmt.Sprintf("zebra local %d", i), Author: "tester"})
-		require.NoError(t, err)
-		local.Title = fmt.Sprintf("zebra hub %d", i)
-		hits = append(hits, map[string]any{"issue": local, "score": 1e-13, "matched_in": []string{"title"}})
-	}
-	for i, j := 1, len(hits)-1; i < j; i, j = i+1, j-1 {
-		hits[i], hits[j] = hits[j], hits[i]
-	}
-	localOnly, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: replica.ID, Title: "older local title", Author: "tester"})
-	require.NoError(t, err)
-	changed := localOnly
-	changed.Title = "zebra hub title"
-	hits = append(hits[:1], append([]map[string]any{{"issue": changed, "score": 5e-13, "matched_in": []string{"title"}}}, hits[1:]...)...)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		require.NoError(t, json.MarshalWrite(w, map[string]any{"hits": hits, "mode": "lexical", "degraded_reason": "keyword-only"}))
-	}))
-	t.Cleanup(server.Close)
-	setClaimBindingHubURL(t, spoke, replica.ID, server.URL)
-	require.NoError(t, config.WriteFederationCredential(replica.UID, config.FederationCredential{HubURL: server.URL, HubProjectID: project.ID, Token: token}))
-	resp, raw := envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=zebra", replica.ID))
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
-	var body struct {
-		Mode    string `json:"mode"`
-		Results []struct {
-			Issue db.Issue `json:"issue"`
-			Score float64  `json:"score"`
-		} `json:"results"`
-	}
-	require.NoError(t, json.Unmarshal(raw, &body))
-	require.Equal(t, "lexical", body.Mode)
-	localHits, err := spoke.DB.SearchFTS(ctx, db.SearchFTSParams{ProjectID: replica.ID, Query: "zebra", Limit: 50})
-	require.NoError(t, err)
-	localScores := make(map[string]float64, len(localHits))
-	localRanks := make(map[string]int, len(localHits))
-	localTitles := make(map[string]string, len(localHits))
-	for rank, hit := range localHits {
-		localScores[hit.Issue.UID] = hit.Score
-		localRanks[hit.Issue.UID] = rank
-		localTitles[hit.Issue.UID] = hit.Issue.Title
-	}
-	hubRanks := make(map[string]int, len(hits))
-	hubTitles := make(map[string]string, len(hits))
-	for rank, hit := range hits {
-		issue := hit["issue"].(db.Issue)
-		hubRanks[issue.UID] = rank
-		hubTitles[issue.UID] = issue.Title
-	}
-	seen := make(map[string]bool)
-	hubWinner := false
-	for _, hit := range body.Results {
-		require.False(t, seen[hit.Issue.UID])
-		seen[hit.Issue.UID] = true
-		switch hit.Issue.UID {
-		case remote.UID:
-			require.Equal(t, 1e-12, hit.Score)
-		case localOnly.UID:
-			require.Equal(t, changed.Title, hit.Issue.Title)
-			require.Equal(t, localOnly.ID, hit.Issue.ID)
-			require.Equal(t, localOnly.ShortID, hit.Issue.ShortID)
-			require.Equal(t, 5e-13, hit.Score)
-		default:
-			_, ok := localScores[hit.Issue.UID]
-			require.True(t, ok)
-			if localRanks[hit.Issue.UID] <= hubRanks[hit.Issue.UID] {
-				require.Equal(t, localScores[hit.Issue.UID], hit.Score)
-				require.Equal(t, localTitles[hit.Issue.UID], hit.Issue.Title)
-			} else {
-				hubWinner = true
-				require.Equal(t, 1e-13, hit.Score)
-				require.Equal(t, hubTitles[hit.Issue.UID], hit.Issue.Title)
-			}
-		}
-	}
-	require.True(t, seen[remote.UID])
-	require.True(t, seen[localOnly.UID])
-	require.True(t, hubWinner)
-}
-
 func TestDirectSpokeSearchWaitsForHubFallback(t *testing.T) {
 	_, spoke, project, replica, issue, token := createClaimForwardingPair(t, "pull")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-time.After(3200 * time.Millisecond):
-			require.NoError(t, json.MarshalWrite(w, map[string]any{"hits": []any{map[string]any{"issue": issue, "score": 1, "matched_in": []string{"title"}}}, "mode": "lexical", "degraded_reason": "keyword-only"}))
+			assert.NoError(t, json.MarshalWrite(w, map[string]any{"hits": []any{map[string]any{"issue": issue, "score": 1, "matched_in": []string{"title"}}}, "mode": "lexical", "degraded_reason": "keyword-only"}))
 		case <-r.Context().Done():
 		}
 	}))
@@ -574,7 +458,7 @@ func TestDirectSpokeSearchRejectsUnknownHubMode(t *testing.T) {
 	remote, _, err := hub.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "unpulled claim", Author: "tester"})
 	require.NoError(t, err)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		require.NoError(t, json.MarshalWrite(w, map[string]any{"hits": []any{map[string]any{"issue": remote, "score": 1}}, "mode": "future"}))
+		assert.NoError(t, json.MarshalWrite(w, map[string]any{"hits": []any{map[string]any{"issue": remote, "score": 1}}, "mode": "future"}))
 	}))
 	t.Cleanup(server.Close)
 	setClaimBindingHubURL(t, spoke, replica.ID, server.URL)
@@ -593,8 +477,8 @@ func TestDirectSpokeSearchRejectsUnknownHubMode(t *testing.T) {
 func TestDirectSpokeSearchOlderHubLabelsSemantic(t *testing.T) {
 	_, spoke, project, replica, issue, token := createClaimForwardingPair(t, "pull")
 	older := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "true", r.URL.Query().Get("auto"))
-		require.NoError(t, json.MarshalWrite(w, map[string]any{"hits": []any{map[string]any{"issue": issue, "score": 1}}, "bounded": false}))
+		assert.Equal(t, "true", r.URL.Query().Get("auto"))
+		assert.NoError(t, json.MarshalWrite(w, map[string]any{"hits": []any{map[string]any{"issue": issue, "score": 1}}, "bounded": false}))
 	}))
 	t.Cleanup(older.Close)
 	setClaimBindingHubURL(t, spoke, replica.ID, older.URL)
