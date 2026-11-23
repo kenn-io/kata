@@ -1148,7 +1148,7 @@ func (d *Store) insertFederationBaselineEventsTx(
 		return db.Event{}, err
 	}
 	for _, issue := range issues {
-		payload, err := d.federationIssueSnapshotPayload(ctx, tx, issue)
+		payload, err := d.federationIssueSnapshotPayload(ctx, tx, issue, false)
 		if err != nil {
 			return db.Event{}, err
 		}
@@ -1710,12 +1710,12 @@ func federationIssuesForSnapshot(ctx context.Context, tx *sql.Tx, projectID int6
 	return out, nil
 }
 
-func (d *Store) federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, issue db.Issue) (string, error) {
+func (d *Store) federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, issue db.Issue, includeIncoming bool) (string, error) {
 	labels, err := federationIssueLabels(ctx, tx, issue.ID)
 	if err != nil {
 		return "", err
 	}
-	links, err := federationIssueLinks(ctx, tx, issue.ID)
+	links, err := federationIssueLinks(ctx, tx, issue.ID, includeIncoming)
 	if err != nil {
 		return "", err
 	}
@@ -1774,7 +1774,7 @@ func federationIssueLabels(ctx context.Context, tx *sql.Tx, issueID int64) ([]st
 	return out, rows.Err()
 }
 
-func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]db.IssueDocumentLink, error) {
+func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64, includeIncoming bool) ([]db.IssueDocumentLink, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT l.type, peer.short_id, peer.uid, 0 AS incoming, l.author, l.created_at
 		  FROM links l
@@ -1787,8 +1787,8 @@ func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]db.
 		  FROM links l
 		  JOIN issues peer ON peer.id = l.from_issue_id
 		 WHERE l.to_issue_id = ?
-		   AND peer.project_id <> (SELECT project_id FROM issues WHERE id = ?)
-		 ORDER BY type ASC, uid ASC, incoming ASC`, issueID, issueID, issueID)
+		   AND (? OR peer.project_id <> (SELECT project_id FROM issues WHERE id = ?))
+		 ORDER BY type ASC, uid ASC, incoming ASC`, issueID, issueID, includeIncoming, issueID)
 	if err != nil {
 		return nil, fmt.Errorf("list federation snapshot links: %w", err)
 	}
@@ -3236,7 +3236,7 @@ func (d *Store) adoptProjectIntoFederation(
 
 	var snapshotCount int64
 	for _, issue := range issues {
-		payload, err := d.federationIssueSnapshotPayload(ctx, tx, issue)
+		payload, err := d.federationIssueSnapshotPayload(ctx, tx, issue, false)
 		if err != nil {
 			return db.AdoptProjectIntoFederationResult{}, err
 		}

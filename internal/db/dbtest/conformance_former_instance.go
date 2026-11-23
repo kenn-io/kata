@@ -58,7 +58,16 @@ func checkFormerInstanceIdentities(t *testing.T, source db.Storage, backend Back
 }
 
 func checkRestoredRetainedHistory(t *testing.T, _ db.Storage, backend Backend) error {
-	for _, action := range []string{"reset", "guarded reset", "snapshot", "same actor snapshot", "former snapshot", "rejoin"} {
+	for _, restored := range []bool{false, true} {
+		for _, guarded := range []bool{false, true} {
+			t.Run(fmt.Sprintf("reset/restored=%t/guarded=%t", restored, guarded), func(t *testing.T) {
+				store := backend.Open(t)
+				t.Cleanup(func() { require.NoError(t, store.Close()) })
+				checkRejoinRetainedHistoryReset(t, store, backend, guarded, restored)
+			})
+		}
+	}
+	for _, action := range []string{"snapshot", "same actor snapshot", "former snapshot"} {
 		t.Run(action, func(t *testing.T) {
 			ctx := t.Context()
 			source := backend.Open(t)
@@ -85,48 +94,23 @@ func checkRestoredRetainedHistory(t *testing.T, _ db.Storage, backend Backend) e
 			restored := backend.Open(t)
 			t.Cleanup(func() { require.NoError(t, restored.Close()) })
 			require.NoError(t, restored.ImportReplay(ctx, records, db.ImportOptions{NewInstance: true}))
-			if action == "rejoin" {
-				_, err = restored.LeaveFederationReplica(ctx, project.ID)
-				require.NoError(t, err)
-				binding, err = restored.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: true})
-				require.NoError(t, err)
-				require.GreaterOrEqual(t, binding.RetainedThroughEventID, events[1].ID)
-			}
 			if action == "same actor snapshot" {
 				binding.Actor = "old-actor"
 				_, err = restored.UpsertFederationBinding(ctx, binding)
 				require.NoError(t, err)
 			}
-			if action == "snapshot" || action == "same actor snapshot" || action == "former snapshot" {
-				for i, issue := range issues {
-					snapshot, sourceID, err := restored.RetainedIssueSnapshot(ctx, project.ID, issue.UID)
-					require.NoError(t, err)
-					require.Equal(t, events[i].ID, sourceID)
-					require.Equal(t, restored.InstanceUID(), snapshot.OriginInstanceUID)
-					if action == "former snapshot" && i == 0 {
-						require.NotEqual(t, formerSnapshot.UID, snapshot.UID)
-						old, err := restored.EventsByUIDs(ctx, project.ID, []string{formerSnapshot.UID})
-						require.NoError(t, err)
-						require.Len(t, old, 1)
-						require.Equal(t, formerSnapshot.ContentHash, old[0].ContentHash)
-					}
-				}
-				return
-			}
-			if action == "guarded reset" {
-				err = restored.ResetFederatedProjectIfNoPendingPush(ctx, project.ID, 1, 0, restored.InstanceUID(), events[1].ID)
-			} else {
-				err = restored.ResetFederatedProject(ctx, project.ID, 1, 0)
-			}
-			require.NoError(t, err)
 			for i, issue := range issues {
-				retained, err := restored.EventsByUIDs(ctx, project.ID, []string{events[i].UID})
+				snapshot, sourceID, err := restored.RetainedIssueSnapshot(ctx, project.ID, issue.UID)
 				require.NoError(t, err)
-				require.Len(t, retained, 1)
-				require.Equal(t, events[i].OriginInstanceUID, retained[0].OriginInstanceUID)
-				require.Equal(t, events[i].ContentHash, retained[0].ContentHash)
-				_, err = restored.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-				require.NoError(t, err)
+				require.Equal(t, events[i].ID, sourceID)
+				require.Equal(t, restored.InstanceUID(), snapshot.OriginInstanceUID)
+				if action == "former snapshot" && i == 0 {
+					require.NotEqual(t, formerSnapshot.UID, snapshot.UID)
+					old, err := restored.EventsByUIDs(ctx, project.ID, []string{formerSnapshot.UID})
+					require.NoError(t, err)
+					require.Len(t, old, 1)
+					require.Equal(t, formerSnapshot.ContentHash, old[0].ContentHash)
+				}
 			}
 		})
 	}

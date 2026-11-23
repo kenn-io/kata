@@ -180,15 +180,15 @@ func TestOpen_UnknownSchemeIsUnsupported(t *testing.T) {
 	assert.True(t, strings.Contains(msg, "unsupported"), "error must mark scheme as unsupported, got %q", msg)
 }
 
-const preIndexOnlySchemaVersion = 40
+const legacySchemaVersion = 40
 
 // TestOpen_RunsCutoverOnPreCurrentSQLite confirms storeopen replaces schemas
-// that require more than index additions before opening.
+// that require export and replacement before opening.
 func TestOpen_RunsCutoverOnPreCurrentSQLite(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
-	stageLegacyPreCutoverFixture(t, path, preIndexOnlySchemaVersion)
+	stageLegacyPreCutoverFixture(t, path, legacySchemaVersion)
 	upgraded, err := storeopen.Open(ctx, path)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = upgraded.Close() })

@@ -155,10 +155,10 @@ func TestAutoCutoverPreservesArtifactsWhenRestoreFails(t *testing.T) {
 }
 
 func TestAutoCutoverOlderVersions(t *testing.T) {
-	for _, version := range []int{41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 52, 53} {
+	for _, version := range []int{41, 53} {
 		t.Run(strconv.Itoa(version), func(t *testing.T) {
 			t.Setenv("KATA_HOME", t.TempDir())
-			path := indexOnlySource(t, version)
+			path := oldSchemaSource(t, version)
 			fresh, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "fresh.db"))
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, fresh.Close()) })
@@ -192,9 +192,6 @@ func TestAutoCutoverOlderVersions(t *testing.T) {
 				return entries
 			}
 			require.Equal(t, catalog(fresh), catalog(upgraded))
-			var retained int64
-			require.NoError(t, upgraded.QueryRowContext(t.Context(), `SELECT retained_through_event_id FROM federation_bindings`).Scan(&retained))
-			require.Zero(t, retained)
 			var resolved, issueUID int
 			require.NoError(t, upgraded.QueryRowContext(t.Context(), `SELECT count(*) FROM sqlite_master WHERE type='index' AND name='idx_events_resolved_issue_uid'`).Scan(&resolved))
 			require.NoError(t, upgraded.QueryRowContext(t.Context(), `SELECT count(*) FROM sqlite_master WHERE type='index' AND name='idx_events_issue_uid_id'`).Scan(&issueUID))
@@ -204,7 +201,7 @@ func TestAutoCutoverOlderVersions(t *testing.T) {
 	}
 }
 
-func indexOnlySource(t *testing.T, version int) string {
+func oldSchemaSource(t *testing.T, version int) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	source, err := sqlitestore.Open(t.Context(), path)

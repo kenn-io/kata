@@ -21,7 +21,7 @@ import (
 // once the schema 51 index is gone, so callers may repeat it.
 func restoreSchema50EventIndex(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
 	t.Helper()
-	dropSchema53ProjectMovesIndex(ctx, t, admin, schema)
+	restoreSchema52(ctx, t, admin, schema)
 	var present bool
 	require.NoError(t, admin.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pg_indexes WHERE schemaname=$1 AND indexname='idx_events_issue_uid_id')`, schema).Scan(&present))
 	if !present {

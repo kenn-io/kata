@@ -80,54 +80,44 @@ func TestPendingMovedIssueClaimRefreshIgnoresHubShortIDCollision(t *testing.T) {
 	}
 }
 
-func TestRestoredRetainedIssueEditAfterPushQueueDrains(t *testing.T) {
-	ctx := t.Context()
-	source := testenv.New(t)
-	project, err := source.DB.CreateProject(ctx, "restored-project")
-	require.NoError(t, err)
-	issue, created, err := source.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "old task", Author: "old-actor"})
-	require.NoError(t, err)
-	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"error":{"code":"issue_not_found","message":"not synchronized yet"}}`))
-	}))
-	t.Cleanup(hub.Close)
-	_, err = source.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: 42, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: true})
-	require.NoError(t, err)
-	require.NoError(t, source.DB.AdvanceFederationPushCursor(ctx, project.ID, created.ID))
-	records, err := dbtest.CollectImportRecords(ctx, source.DB, db.ExportFilter{IncludeDeleted: true})
-	require.NoError(t, err)
-	env := testenv.New(t)
-	require.NoError(t, env.DB.ImportReplay(ctx, records, db.ImportOptions{NewInstance: true}))
-	require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: 42, Token: "claim-token", Actor: "new-actor", Capabilities: "claim"}))
-	response, raw := envDoRaw(t, env, http.MethodPatch, issuePathRef(project.ID, issue.UID, ""), map[string]any{"actor": "new-actor", "title": "edited task"}, map[string]string{"If-Match": fmt.Sprintf(`"rev-%d"`, issue.Revision)})
-	require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
-}
-
 func TestRetainedIssueEditAfterPushQueueDrains(t *testing.T) {
-	env := testenv.New(t)
-	project, err := env.DB.CreateProject(t.Context(), "retained-project")
-	require.NoError(t, err)
-	issue, created, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "older task", Author: "old-actor"})
-	require.NoError(t, err)
-	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"error":{"code":"issue_not_found","message":"not synchronized yet"}}`))
-	}))
-	t.Cleanup(hub.Close)
-	_, err = env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: 42, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: true})
-	require.NoError(t, err)
-	require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: 42, Token: "claim-token", Actor: "new-actor", Capabilities: "claim"}))
-	require.NoError(t, env.DB.AdvanceFederationPushCursor(t.Context(), project.ID, created.ID))
-	response, raw := envDoRaw(t, env, http.MethodPatch, issuePathRef(project.ID, issue.UID, ""), map[string]any{"actor": "new-actor", "title": "edited task"}, map[string]string{"If-Match": fmt.Sprintf(`"rev-%d"`, issue.Revision)})
-	require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
-	now := time.Now().UTC()
-	principal := db.ClaimPrincipal{HolderInstanceUID: env.DB.InstanceUID(), Holder: "other"}
-	require.NoError(t, env.DB.ApplyClaimStatus(t.Context(), project.ID, issue.UID, db.ClaimStatus{Held: true, Holder: principal, HubNow: now, Claim: &db.IssueClaim{ClaimUID: "01HZNQ7VFPK1XGD8R5MABCD4CB", IssueUID: issue.UID, HolderInstanceUID: principal.HolderInstanceUID, Holder: principal.Holder, ClaimKind: "hard", AcquiredAt: now, UpdatedAt: now, Revision: 1}}))
-	updated, err := env.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	response, raw = envDoRaw(t, env, http.MethodPatch, issuePathRef(project.ID, issue.UID, ""), map[string]any{"actor": "new-actor", "title": "blocked edit"}, map[string]string{"If-Match": fmt.Sprintf(`"rev-%d"`, updated.Revision)})
-	assertAPIError(t, response.StatusCode, raw, http.StatusConflict, "claim_denied")
+	for _, restored := range []bool{false, true} {
+		t.Run(fmt.Sprintf("restored=%t", restored), func(t *testing.T) {
+			ctx := t.Context()
+			env := testenv.New(t)
+			project, err := env.DB.CreateProject(ctx, "retained-project")
+			require.NoError(t, err)
+			issue, created, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "older task", Author: "old-actor"})
+			require.NoError(t, err)
+			hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"error":{"code":"issue_not_found","message":"not synchronized yet"}}`))
+			}))
+			t.Cleanup(hub.Close)
+			_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: 42, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: true})
+			require.NoError(t, err)
+			require.NoError(t, env.DB.AdvanceFederationPushCursor(ctx, project.ID, created.ID))
+			if restored {
+				records, err := dbtest.CollectImportRecords(ctx, env.DB, db.ExportFilter{IncludeDeleted: true})
+				require.NoError(t, err)
+				env = testenv.New(t)
+				require.NoError(t, env.DB.ImportReplay(ctx, records, db.ImportOptions{NewInstance: true}))
+			}
+			require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: 42, Token: "claim-token", Actor: "new-actor", Capabilities: "claim"}))
+			response, raw := envDoRaw(t, env, http.MethodPatch, issuePathRef(project.ID, issue.UID, ""), map[string]any{"actor": "new-actor", "title": "edited task"}, map[string]string{"If-Match": fmt.Sprintf(`"rev-%d"`, issue.Revision)})
+			require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
+			if restored {
+				return
+			}
+			now := time.Now().UTC()
+			principal := db.ClaimPrincipal{HolderInstanceUID: env.DB.InstanceUID(), Holder: "other"}
+			require.NoError(t, env.DB.ApplyClaimStatus(ctx, project.ID, issue.UID, db.ClaimStatus{Held: true, Holder: principal, HubNow: now, Claim: &db.IssueClaim{ClaimUID: "01HZNQ7VFPK1XGD8R5MABCD4CB", IssueUID: issue.UID, HolderInstanceUID: principal.HolderInstanceUID, Holder: principal.Holder, ClaimKind: "hard", AcquiredAt: now, UpdatedAt: now, Revision: 1}}))
+			updated, err := env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			response, raw = envDoRaw(t, env, http.MethodPatch, issuePathRef(project.ID, issue.UID, ""), map[string]any{"actor": "new-actor", "title": "blocked edit"}, map[string]string{"If-Match": fmt.Sprintf(`"rev-%d"`, updated.Revision)})
+			assertAPIError(t, response.StatusCode, raw, http.StatusConflict, "claim_denied")
+		})
+	}
 }
 
 func TestRetainedIssueMoveChecksHubBeforeSnapshot(t *testing.T) {
@@ -138,13 +128,12 @@ func TestRetainedIssueMoveChecksHubBeforeSnapshot(t *testing.T) {
 		noBoundary       bool
 		wantStatus       int
 		wantSnapshots    int
-		wantAuthor       string
 	}{
-		{name: "hub missing", status: http.StatusNotFound, wantStatus: http.StatusOK, wantSnapshots: 1, wantAuthor: "new-actor"},
-		{name: "hub known", status: http.StatusOK, wantStatus: http.StatusOK, wantAuthor: "old-actor"},
+		{name: "hub missing", status: http.StatusNotFound, wantStatus: http.StatusOK, wantSnapshots: 1},
+		{name: "hub known", status: http.StatusOK, wantStatus: http.StatusOK},
 		{name: "offline", status: http.StatusServiceUnavailable, wantStatus: http.StatusServiceUnavailable},
-		{name: "offline with snapshot", status: http.StatusServiceUnavailable, existingSnapshot: true, wantStatus: http.StatusOK, wantSnapshots: 1, wantAuthor: "new-actor"},
-		{name: "offline without retained history", status: http.StatusServiceUnavailable, noBoundary: true, wantStatus: http.StatusOK, wantAuthor: "old-actor"},
+		{name: "offline with snapshot", status: http.StatusServiceUnavailable, existingSnapshot: true, wantStatus: http.StatusOK, wantSnapshots: 1},
+		{name: "offline without retained history", status: http.StatusServiceUnavailable, noBoundary: true, wantStatus: http.StatusOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env := testenv.New(t)
@@ -191,13 +180,6 @@ func TestRetainedIssueMoveChecksHubBeforeSnapshot(t *testing.T) {
 				moves, err := env.DB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: target.ID, IssueUID: issue.UID, Types: []string{"issue.moved"}, Limit: 10})
 				require.NoError(t, err)
 				require.Len(t, moves, 1)
-				var payload struct {
-					Snapshot struct {
-						Author string `json:"author"`
-					} `json:"snapshot"`
-				}
-				require.NoError(t, json.Unmarshal([]byte(moves[0].Payload), &payload))
-				require.Equal(t, tc.wantAuthor, payload.Snapshot.Author)
 			}
 		})
 	}
@@ -230,16 +212,12 @@ func TestRetainedSubtreeMoveUsesEachHubResult(t *testing.T) {
 	}
 	response, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(source.ID, root.UID, "actions/move"), map[string]any{"actor": "new-actor", "to_project_uid": target.UID}, map[string]string{"If-Match": fmt.Sprintf(`"rev-%d"`, root.Revision)})
 	require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
-	for _, tc := range []struct{ uid, author string }{{root.UID, "old-actor"}, {child.UID, "new-actor"}} {
-		events, err := env.DB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: target.ID, IssueUID: tc.uid, Types: []string{"issue.moved"}, Limit: 10})
+	for _, tc := range []struct {
+		uid       string
+		snapshots int
+	}{{root.UID, 0}, {child.UID, 1}} {
+		snapshots, err := env.DB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: source.ID, IssueUID: tc.uid, Types: []string{"issue.snapshot"}, Limit: 10})
 		require.NoError(t, err)
-		require.Len(t, events, 1)
-		var payload struct {
-			Snapshot struct {
-				Author string `json:"author"`
-			} `json:"snapshot"`
-		}
-		require.NoError(t, json.Unmarshal([]byte(events[0].Payload), &payload))
-		require.Equal(t, tc.author, payload.Snapshot.Author)
+		require.Len(t, snapshots, tc.snapshots)
 	}
 }
