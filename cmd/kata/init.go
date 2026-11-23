@@ -132,28 +132,44 @@ func kindForStatus(status int) errKind {
 	return kindInternal
 }
 
+func prepareWorkspaceBinding(workspace string, opts *initOptions) error {
+	opts.SkipLocalWrites = false
+	if flags.Workspace == "" {
+		return nil
+	}
+	return checkExplicitWorkspaceBinding(workspace, opts)
+}
+
 // checkExplicitWorkspaceBinding refuses an explicit --workspace whose binding
-// lives outside it: an enclosing folder's .kata.toml, or a .kata.toml symlink
-// that resolves elsewhere. A workspace with no binding yet passes.
-func checkExplicitWorkspaceBinding(workspace string, opts initOptions) (bool, error) {
+// lives outside it and would be changed, or whose symlink resolves elsewhere.
+func checkExplicitWorkspaceBinding(workspace string, opts *initOptions) error {
 	paths, err := config.DiscoverPaths(workspace)
 	if err != nil {
-		return false, nil
+		return nil
 	}
 	dest := config.WriteDestination(paths, workspace)
-	bindingPath := filepath.Join(dest, config.ProjectConfigFilename)
 	if paths.WorkspaceRoot != "" && !sameAgentHookFile(dest, workspace) {
-		if enclosingInitIsNoOp(dest, opts) {
-			return true, nil
+		return checkEnclosingBinding(workspace, dest, opts)
+	}
+	return checkBindingLinks(workspace, dest)
+}
+
+func checkEnclosingBinding(workspace, dest string, opts *initOptions) error {
+	if enclosingInitIsNoOp(dest, *opts) {
+		opts.SkipLocalWrites = true
+		return nil
+	}
+	return initBindingConflict(fmt.Sprintf("%q already binds %q.", filepath.Join(dest, config.ProjectConfigFilename), workspace),
+		"To change the enclosing binding, set --workspace to its folder, keep your other options, and use --replace when changing projects.")
+}
+
+func checkBindingLinks(workspace, dest string) error {
+	for _, dir := range []string{workspace, dest} {
+		if _, err := bindingTarget(workspace, filepath.Join(dir, config.ProjectConfigFilename)); err != nil {
+			return err
 		}
-		return false, initBindingConflict(fmt.Sprintf("%q already binds %q.", bindingPath, workspace),
-			"To change the enclosing binding, set --workspace to its folder, keep your other options, and use --replace when changing projects.")
 	}
-	if _, err := checkBindingLink(workspace, filepath.Join(workspace, config.ProjectConfigFilename)); err != nil {
-		return false, err
-	}
-	_, err = checkBindingLink(workspace, bindingPath)
-	return false, err
+	return nil
 }
 
 func enclosingInitIsNoOp(dest string, opts initOptions) bool {
@@ -172,9 +188,9 @@ func enclosingInitIsNoOp(dest string, opts initOptions) bool {
 	return err == nil && hasGitignoreEntry(data, ".kata.local.toml")
 }
 
-// checkBindingLink refuses a binding symlink, dangling or not, that resolves
+// bindingTarget refuses a binding symlink, dangling or not, that resolves
 // outside the explicit workspace. A regular or missing file passes.
-func checkBindingLink(workspace, bindingPath string) (string, error) {
+func bindingTarget(workspace, bindingPath string) (string, error) {
 	dir, err := pathresolve.EvalSymlinks(workspace)
 	if err != nil {
 		return "", err
@@ -249,18 +265,13 @@ Name agents for explicit setup; use --local for project scope. If a user-level h
 			if err != nil {
 				return err
 			}
-			var skipLocalWrites bool
-			if flags.Workspace != "" {
-				skipLocalWrites, err = checkExplicitWorkspaceBinding(startPath, opts)
-				if err != nil {
-					return err
-				}
+			if err := prepareWorkspaceBinding(startPath, &opts); err != nil {
+				return err
 			}
 			callOpts, err := prepareInitHookOptions(cmd.Context(), callInitOpts(opts))
 			if err != nil {
 				return err
 			}
-			callOpts.SkipLocalWrites = skipLocalWrites
 			if _, _, err := planInitHookOptions(cmd.Context(), callOpts, startPath); err != nil {
 				return err
 			}
@@ -412,10 +423,7 @@ func computeAliasInfo(ctx context.Context, disc config.DiscoveredPaths, startPat
 	return &info, nil
 }
 
-// runNameInit POSTs the derived name to the daemon, then
-// writes .kata.toml and .gitignore on the client's filesystem. The
-// daemon never sees the client's workspace path.
-func runNameInit(ctx context.Context, baseURL string, in localInit, opts callInitOpts) (string, error) {
+func nameInitBody(in localInit, opts callInitOpts) map[string]any {
 	reqBody := map[string]any{
 		"name": in.Choice.Name,
 	}
@@ -434,7 +442,25 @@ func runNameInit(ctx context.Context, baseURL string, in localInit, opts callIni
 			"kind":     in.Alias.Kind,
 		}
 	}
-	bs, err := postProjects(ctx, baseURL, reqBody)
+	return reqBody
+}
+
+func initBindingTarget(in localInit, dest string) (string, error) {
+	path := filepath.Join(dest, config.ProjectConfigFilename)
+	if flags.Workspace == "" {
+		return pathresolve.EvalSymlinksAllowMissing(path)
+	}
+	if _, err := bindingTarget(in.StartPath, filepath.Join(in.StartPath, config.ProjectConfigFilename)); err != nil {
+		return "", err
+	}
+	return bindingTarget(in.StartPath, path)
+}
+
+// runNameInit POSTs the derived name to the daemon, then
+// writes .kata.toml and .gitignore on the client's filesystem. The
+// daemon never sees the client's workspace path.
+func runNameInit(ctx context.Context, baseURL string, in localInit, opts callInitOpts) (string, error) {
+	bs, err := postProjects(ctx, baseURL, nameInitBody(in, opts))
 	if err != nil {
 		return "", err
 	}
@@ -456,15 +482,7 @@ func runNameInit(ctx context.Context, baseURL string, in localInit, opts callIni
 		}
 		return formatInitOutput(bs, resp.Project.Name, dest, resp.Created, resp.Created, nil, "")
 	}
-	bindingPath := filepath.Join(dest, config.ProjectConfigFilename)
-	if flags.Workspace != "" {
-		if _, err := checkBindingLink(in.StartPath, filepath.Join(in.StartPath, config.ProjectConfigFilename)); err != nil {
-			return "", err
-		}
-		bindingPath, err = checkBindingLink(in.StartPath, bindingPath)
-	} else {
-		bindingPath, err = pathresolve.EvalSymlinksAllowMissing(bindingPath)
-	}
+	bindingPath, err := initBindingTarget(in, dest)
 	if err != nil {
 		return "", err
 	}
