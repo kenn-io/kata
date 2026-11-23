@@ -163,6 +163,8 @@ func checkRejoinRetainedHistoryReset(t *testing.T, store db.Storage, backend Bac
 	require.NoError(t, err)
 	issue, old, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "old task", Author: "old-actor"})
 	require.NoError(t, err)
+	other, otherEvent, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "another task", Author: "old-actor"})
+	require.NoError(t, err)
 	binding, err := store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: true})
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, binding.RetainedThroughEventID, old.ID)
@@ -179,6 +181,13 @@ func checkRejoinRetainedHistoryReset(t *testing.T, store db.Storage, backend Bac
 		store = backend.Open(t)
 		t.Cleanup(func() { require.NoError(t, store.Close()) })
 		require.NoError(t, store.ImportReplay(ctx, records, db.ImportOptions{NewInstance: true}))
+		_, err = store.LeaveFederationReplica(ctx, project.ID)
+		require.NoError(t, err)
+		binding.Actor = "old-actor"
+		binding.RetainHistory = true
+		binding, err = store.UpsertFederationBinding(ctx, binding)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, binding.RetainedThroughEventID, old.ID)
 	}
 	if guarded {
 		err = store.ResetFederatedProjectIfNoPendingPush(ctx, project.ID, snapshot.ID+1, snapshot.ID, store.InstanceUID(), snapshot.ID)
@@ -190,7 +199,12 @@ func checkRejoinRetainedHistoryReset(t *testing.T, store db.Storage, backend Bac
 	require.NoError(t, err)
 	require.Equal(t, old.ContentHash, events[0].ContentHash)
 	require.Equal(t, old.OriginInstanceUID, events[0].OriginInstanceUID)
-	require.NoError(t, store.MaterializeFederatedProject(ctx, project.ID))
+	events, err = store.EventsByUIDs(ctx, project.ID, []string{otherEvent.UID})
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	require.Equal(t, otherEvent.ContentHash, events[0].ContentHash)
+	_, err = store.IssueByUID(ctx, other.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
 	got, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.Equal(t, "old task", got.Title)

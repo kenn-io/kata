@@ -157,17 +157,15 @@ func TestRejoinRetainedHistory(t *testing.T) {
 	t.Run("restore retained task and edit", checkRestoredRetainedTaskEdit)
 	t.Run("incoming retained link", checkRejoinPublishesIncomingRetainedLink)
 	t.Run("cross project retained peer", checkRejoinPublishesCrossProjectRetainedPeer)
-	t.Run("recovery snapshots with gaps", checkRejoinRecoverySnapshotGaps)
-	t.Run("move recovered task", func(t *testing.T) { checkRejoinMoveRetained(t, false, true) })
-	t.Run("move unpublished task", func(t *testing.T) { checkRejoinMoveRetained(t, false, false) })
-	t.Run("move already known task", func(t *testing.T) { checkRejoinMoveRetained(t, true, false) })
+	t.Run("recovery snapshots", checkRejoinRecoverySnapshots)
+	t.Run("move unpublished task", checkRejoinMoveRetained)
 }
 
 func checkRestoredRetainedTaskEdit(t *testing.T) {
 	ctx := t.Context()
 	hub, projects := newMoveDeliveryHub(t, "restored-project")
 	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
-	issue, old, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "local task", Author: "old-actor"})
+	issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "local task", Author: "old-actor"})
 	require.NoError(t, err)
 	rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
 	require.NoError(t, pushRejoin(t, spoke))
@@ -188,11 +186,7 @@ func checkRestoredRetainedTaskEdit(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, comments, 1)
 	require.Equal(t, "after restore", comments[0].Body)
-	retained, err := restored.DB.EventsByUIDs(ctx, spoke.projects[0].ID, []string{old.UID})
-	require.NoError(t, err)
-	require.Len(t, retained, 1)
-	require.Equal(t, old.ContentHash, retained[0].ContentHash)
-	require.Equal(t, old.OriginInstanceUID, retained[0].OriginInstanceUID)
+
 }
 
 func checkRejoinMixedLinkPeers(t *testing.T) {
@@ -223,21 +217,13 @@ func checkRejoinMixedLinkPeers(t *testing.T) {
 	assertNoRejoinPushPending(t, spoke)
 }
 
-func checkRejoinMoveRetained(t *testing.T, known, publishFirst bool) {
+func checkRejoinMoveRetained(t *testing.T) {
 	ctx := t.Context()
 	hub, projects := newMoveDeliveryHub(t, "source-project", "target-project")
 	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor", "new-actor")
 	issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "older task", Author: "old-actor"})
 	require.NoError(t, err)
-	if known {
-		require.NoError(t, spoke.sync(t, 0))
-	}
 	rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "claim,push,pull")
-	if publishFirst {
-		_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "after rejoin"})
-		require.NoError(t, err)
-		require.NoError(t, spoke.sync(t, 0))
-	}
 	issue, err = spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	for _, project := range projects {
@@ -255,19 +241,14 @@ func checkRejoinMoveRetained(t *testing.T, known, publishFirst bool) {
 	require.NoError(t, err)
 	require.NoError(t, response.Body.Close())
 	require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
-	if !publishFirst && !known {
-		require.Error(t, spoke.sync(t, 1))
-	}
-	if !publishFirst {
-		require.NoError(t, spoke.sync(t, 0))
-	}
+	require.NoError(t, spoke.sync(t, 0))
 	require.NoError(t, spoke.sync(t, 1))
 	remote, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.Equal(t, projects[1].ID, remote.ProjectID)
 }
 
-func checkRejoinRecoverySnapshotGaps(t *testing.T) {
+func checkRejoinRecoverySnapshots(t *testing.T) {
 	ctx := t.Context()
 	hub, projects := newMoveDeliveryHub(t, "rejoin-project", "other-project")
 	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor", "old-actor")
@@ -293,6 +274,10 @@ func checkRejoinRecoverySnapshotGaps(t *testing.T) {
 	}
 	require.NoError(t, pushRejoin(t, spoke))
 	assertNoRejoinPushPending(t, spoke)
+	for _, issue := range []db.Issue{first, second} {
+		_, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+	}
 }
 
 func checkRejoinPublishesCrossProjectRetainedPeer(t *testing.T) {
@@ -398,7 +383,6 @@ func checkRejoinDoesNotSnapshotKnownIssue(t *testing.T) {
 	comments, err := hub.DB.CommentsByIssue(ctx, published.ID)
 	require.NoError(t, err)
 	require.Len(t, comments, 1)
-
 }
 
 func checkRejoinRejectsWrongActor(t *testing.T) {

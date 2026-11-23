@@ -178,6 +178,12 @@ func TestAutoCutoverOlderVersions(t *testing.T) {
 			got, err := upgraded.SchemaVersion(t.Context())
 			require.NoError(t, err)
 			require.Equal(t, db.CurrentSchemaVersion(), got)
+			project, err := upgraded.ProjectByName(t.Context(), "cutover-project")
+			require.NoError(t, err)
+			binding, err := upgraded.FederationBindingByProject(t.Context(), project.ID)
+			require.NoError(t, err)
+			require.Zero(t, binding.RetainedThroughEventID)
+			require.Equal(t, "worker", binding.Actor)
 			catalog := func(store *sqlitestore.Store) [][4]sql.NullString {
 				rows, err := store.QueryContext(t.Context(), `SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY name`)
 				require.NoError(t, err)

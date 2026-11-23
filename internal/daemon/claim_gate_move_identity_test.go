@@ -183,9 +183,10 @@ func TestRetainedIssueMoveChecksHubBeforeSnapshot(t *testing.T) {
 			}
 		})
 	}
+	t.Run("subtree uses each hub result", checkRetainedSubtreeMoveUsesEachHubResult)
 }
 
-func TestRetainedSubtreeMoveUsesEachHubResult(t *testing.T) {
+func checkRetainedSubtreeMoveUsesEachHubResult(t *testing.T) {
 	env := testenv.New(t)
 	ctx := t.Context()
 	source, err := env.DB.CreateProject(ctx, "source-project")
