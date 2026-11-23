@@ -10,8 +10,8 @@
     dismissable,
     floatingPopoverStyle,
   } from '@kenn-io/kit-ui'
+  import { formatRelativeTime } from '@kenn-io/kit-ui/utils/time'
   import { getProjectFederationStatus, type FederationProjectStatus } from '../lib/api/generated'
-  import { relativeTime } from '../lib/kata/dates'
   import { markColor } from '../lib/marks'
 
   interface Props {
@@ -47,8 +47,7 @@
   })
   let visible = $derived(error || status !== undefined)
   let chipLabel = $derived.by(() => {
-    if (error) return 'Sync status unavailable'
-    if (!status) return 'Sync status unavailable'
+    if (error || !status) return 'Sync status unavailable'
     if (status.has_sync_error) return 'Sync failed'
     if (!status.enabled) return 'Sync disabled'
     return status.pending_push_count > 0
@@ -84,19 +83,6 @@
       return 'Syncs with a hub'
     }
   })
-
-  // "12m" alone reads as a duration; say it is in the past.
-  function ago(iso: string): string {
-    const text = relativeTime(iso, new Date())
-    if (text === 'now') return 'Just now'
-    return /^\d+[mhd]$/.test(text) ? `${text} ago` : text
-  }
-
-  // Stored values ("stored_unindexed", "active") read as words.
-  function words(value: string): string {
-    const text = value.replaceAll('_', ' ')
-    return text.charAt(0).toUpperCase() + text.slice(1)
-  }
 
   // Only the counts that aren't zero, in one line.
   let artifactSummary = $derived(
@@ -352,17 +338,17 @@
                   <time
                     datetime={status.last_successful_sync_at}
                     title={new Date(status.last_successful_sync_at).toLocaleString()}
-                    >{ago(status.last_successful_sync_at)}</time
+                    >{formatRelativeTime(status.last_successful_sync_at)}</time
                   >
                 </dd>
               {/if}
               {#if status.credential_status}
                 <dt>Credential</dt>
-                <dd>{words(status.credential_status)}</dd>
+                <dd>{status.credential_status}</dd>
               {/if}
               {#if status.embedding}
                 <dt>Embeddings</dt>
-                <dd>{words(status.embedding.state)}</dd>
+                <dd>{status.embedding.state}</dd>
                 <dt>Producer</dt>
                 <dd>
                   {#if status.embedding.producer}

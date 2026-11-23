@@ -93,7 +93,7 @@ test('project readers see sync diagnostics with bounded embedding summaries at n
   expect(browserBody).not.toContain('example held-back batch failure')
   await chip.click()
   await expect(region.getByText('Sync failed', { exact: true })).toBeVisible()
-  await expect(region.getByText('Unconfigured')).toBeVisible()
+  await expect(region.getByText('unconfigured')).toBeVisible()
 
   // This response fixture covers browser rendering; native artifact reuse,
   // paid-call counts and PG authorization are proved in their backend suites.

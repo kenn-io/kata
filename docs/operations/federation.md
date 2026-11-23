@@ -926,17 +926,16 @@ and `last_error`. A `limited` inventory can omit older artifacts. These counts
 describe stored artifacts, not provider requests or billing. JSON output keeps
 the exact preferred recipe along with each retained artifact's digest and state.
 
-The web project's sync summary shows pending delivery, the last successful sync,
-credential state, producer, and retained-artifact counts. It refreshes every 30
-seconds while the tab is visible and when you return to the tab. To read the
-state now, open the project's sync chip in the project header and use **Refresh**
-in its panel. This read requires current project access and does not require
-credential inventory or administration. The summary clears when the session
-expires, the project leaves the visible catalog, or connection authority
-changes. It is available on the source daemon, including its local catalog
-entry. Remote workspaces do not delegate federation reads through their target
-credentials. Retained-window counts describe stored artifacts, not provider
-requests or billing.
+In the web UI, a project's sync summary shows pending delivery, the last
+successful sync, credential state, producer, and retained-artifact counts. It
+refreshes every 30 seconds while the tab is visible and when you return to the
+tab. To read the state right away, open the sync chip and click **Refresh**.
+This view requires current project access and does not require credential inventory or
+administration. The summary clears when the session expires, the project leaves
+the visible catalog, or connection authority changes. It is available on the
+source daemon, including its local catalog entry. Remote workspaces do not
+delegate federation reads through their target credentials. Retained-window
+counts describe stored artifacts, not provider requests or billing.
 
 The browser status summary withholds diagnostic error text. When sync needs
 attention, copy the diagnostic command for Bash/Zsh or PowerShell and connect
