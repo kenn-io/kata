@@ -36,6 +36,11 @@ without `--if-unowned`. An expired claim turns `work.attention` from `ok` to
 `needs-human`; reclaim and set it back to `ok` to keep working. A claim costs
 about 20ms end to end, so agents check and re-check constantly.
 
+```sh
+kata next --unowned --agent
+kata claim abc4 --ttl 2h --agent
+```
+
 → [The claim flow](https://katatracker.com/docs/workflows/agents/#claim-work)
 
 ## 04 / Write notes the next session can use

@@ -110,9 +110,7 @@ func (s *Store) ExpireAssignments(ctx context.Context, p db.ExpireAssignmentsPar
 				if err != nil {
 					return err
 				}
-				if updated.Changed {
-					events = append(events, updated.Event)
-				}
+				events = append(events, updated.Event)
 			}
 		}
 		return nil

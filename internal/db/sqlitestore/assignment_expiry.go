@@ -118,9 +118,7 @@ func (d *Store) expireAssignments(ctx context.Context, p db.ExpireAssignmentsPar
 			if err != nil {
 				return nil, err
 			}
-			if updated.Changed {
-				events = append(events, updated.Event)
-			}
+			events = append(events, updated.Event)
 		}
 	}
 	if err := tx.Commit(); err != nil {
