@@ -24,16 +24,28 @@ func TestEditBodySources(t *testing.T) {
 		assert.Equal(t, "first `command`\nsecond", fetchIssueViaHTTP(t, env, pid, issue).Issue.Body)
 	}
 	for _, args := range [][]string{{"--body", "", "--body-file", path}, {"--body", "", "--body-stdin"}, {"--body-file", path, "--body-stdin"}} {
-		_, _, err := executeRootCaptureWithInput(ctx, t, input, append([]string{"--workspace", dir, "edit", issue}, args...)...)
+		_, _, err := executeRootCaptureWithInput(ctx, t, input, append([]string{"--workspace", dir, "edit", issue, "--title", "changed"}, args...)...)
 		require.ErrorContains(t, err, "exactly one")
-		assert.Equal(t, "first `command`\nsecond", fetchIssueViaHTTP(t, env, pid, issue).Issue.Body)
+		got := fetchIssueViaHTTP(t, env, pid, issue).Issue
+		assert.Equal(t, "subject", got.Title)
+		assert.Equal(t, "first `command`\nsecond", got.Body)
 	}
 	writeStringFile(t, path, "")
-	for _, args := range [][]string{{"--body-stdin"}, {"--body-file", path}} {
-		_, _, err := executeRootCaptureWithInput(ctx, t, "", append([]string{"--workspace", dir, "edit", issue}, args...)...)
-		require.ErrorContains(t, err, `--body ""`)
+	for _, tc := range []struct {
+		args    []string
+		message string
+	}{
+		{[]string{"--body-stdin"}, `--body ""`},
+		{[]string{"--body-file", path}, `--body ""`},
+		{[]string{"--body-file", ""}, "--body-file needs a non-empty path"},
+		{[]string{"--body-file", filepath.Join(t.TempDir(), "missing")}, "read "},
+	} {
+		_, _, err := executeRootCaptureWithInput(ctx, t, "", append([]string{"--workspace", dir, "edit", issue, "--title", "changed"}, tc.args...)...)
+		require.ErrorContains(t, err, tc.message)
 		requireCLIError(t, err, ExitValidation)
-		assert.Equal(t, "first `command`\nsecond", fetchIssueViaHTTP(t, env, pid, issue).Issue.Body)
+		got := fetchIssueViaHTTP(t, env, pid, issue).Issue
+		assert.Equal(t, "subject", got.Title)
+		assert.Equal(t, "first `command`\nsecond", got.Body)
 	}
 	runCLI(t, env, dir, "edit", issue, "--body", "")
 	assert.Empty(t, fetchIssueViaHTTP(t, env, pid, issue).Issue.Body)

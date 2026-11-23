@@ -65,6 +65,9 @@ func resolveBody(b BodySources, stdin io.Reader) (string, error) {
 	case b.BodySet:
 		return b.Body, nil
 	case b.FileSet:
+		if b.File == "" {
+			return "", &cliError{Message: "--body-file needs a non-empty path", Kind: kindValidation, ExitCode: ExitValidation}
+		}
 		//nolint:gosec // user-supplied path is the whole point of --body-file
 		bs, err := os.ReadFile(b.File)
 		if err != nil {
