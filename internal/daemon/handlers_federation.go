@@ -157,7 +157,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out.Body.Mode = string(res.Mode)
 		out.Body.DegradedReason = res.DegradedReason
 		if mode == "auto" && res.Mode == modeLexical && !res.Degraded {
-			out.Body.DegradedReason = "hub semantic search is unavailable; results are keyword-only"
+			out.Body.DegradedReason = "semantic search is unavailable; results are keyword-only"
 		}
 		out.Body.Bounded = res.DegradedReason == filterCeilingReason
 		return out, nil

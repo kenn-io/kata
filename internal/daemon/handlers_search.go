@@ -153,7 +153,7 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 			markEmbeddingUnavailable(&res, cfg.EmbeddingUnavailableReason, mode)
 		}
 		if hubDegradedReason != "" {
-			res.Degraded, res.DegradedReason = true, hubDegradedReason
+			res.Degraded, res.DegradedReason = true, "hub search: "+hubDegradedReason
 		}
 		if hubMode == string(modeLexical) {
 			res.Mode = modeLexical

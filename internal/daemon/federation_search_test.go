@@ -235,7 +235,7 @@ func TestDirectSpokeSearchHubWithoutEmbeddings(t *testing.T) {
 		require.NoError(t, json.Unmarshal(raw, &body))
 		require.Equal(t, "lexical", body.Mode)
 		require.True(t, body.Degraded)
-		require.Contains(t, body.DegradedReason, "hub semantic search is unavailable; results are keyword-only")
+		require.Contains(t, body.DegradedReason, "hub search: semantic search is unavailable; results are keyword-only")
 		require.Len(t, body.Results, 1)
 		require.Equal(t, issue.UID, body.Results[0].Issue.UID)
 		require.Equal(t, []string{"title"}, body.Results[0].MatchedIn)
@@ -290,6 +290,20 @@ func TestFederationSearchProviderRejectsCredentials(t *testing.T) {
 	require.Contains(t, string(raw), `"mode":"lexical"`)
 	require.Contains(t, string(raw), "rejected the API key")
 	require.Contains(t, string(raw), "claim target")
+	replica, err := spoke.DB.CreateProjectWithUID(ctx, project.Name, project.UID)
+	require.NoError(t, err)
+	_, err = spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: replica.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "tester", Enabled: true})
+	require.NoError(t, err)
+	require.NoError(t, config.WriteFederationCredential(replica.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: project.ID, Token: grant.Token}))
+	resp, raw = envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=claim", replica.ID))
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	var body struct {
+		Degraded       bool   `json:"degraded"`
+		DegradedReason string `json:"degraded_reason"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &body))
+	require.True(t, body.Degraded)
+	require.Contains(t, body.DegradedReason, "hub search: semantic search unavailable: embedding provider rejected the API key")
 	resp, raw = envDoRaw(t, hub, http.MethodGet, path, nil, headers)
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode, string(raw))
 }
