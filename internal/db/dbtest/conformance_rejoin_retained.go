@@ -9,6 +9,24 @@ import (
 )
 
 func checkRejoinRetainedHistory(t *testing.T, store db.Storage) error {
+	t.Run("move fences comment changes", func(t *testing.T) {
+		ctx := t.Context()
+		source, err := store.CreateProject(ctx, "discussion-fence-source")
+		require.NoError(t, err)
+		target, err := store.CreateProject(ctx, "discussion-fence-target")
+		require.NoError(t, err)
+		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "task", Author: "worker"})
+		require.NoError(t, err)
+		comment, event, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "before"})
+		require.NoError(t, err)
+		_, _, _, err = store.EditComment(ctx, db.EditCommentParams{IssueID: issue.ID, CommentUID: comment.UID, Actor: "worker", Body: "after"})
+		require.NoError(t, err)
+		_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "worker", ExpectedDiscussionEventIDs: map[int64]int64{issue.ID: event.ID}})
+		require.ErrorIs(t, err, db.ErrIssueMoveTreeChanged)
+		stored, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		require.Equal(t, source.ID, stored.ProjectID)
+	})
 	t.Run("publish recovery event once after commit", func(t *testing.T) {
 		ctx := t.Context()
 		project, err := store.CreateProject(ctx, "recovery-publication")
