@@ -444,9 +444,10 @@ func (d *Store) replaceFederationBoundActorWhenSettled(ctx context.Context, proj
 	return binding, nil
 }
 
-// ResetFederatedProjectIfNoPendingPush clears a spoke only if no local-origin
-// events remain above pushCursorEventID. The guarded UPDATE takes SQLite's
-// write lock before projection/event deletion, so a concurrent local write
+// ResetFederatedProjectIfNoPendingPush retains pending events for issues in
+// another project and refuses a reset that would delete other pending events.
+// The guarded UPDATE takes SQLite's write lock before deleting the projection
+// and events, so a concurrent local write
 // cannot slip between the pending check and reset cleanup.
 func (d *Store) ResetFederatedProjectIfNoPendingPush(
 	ctx context.Context,
@@ -486,7 +487,7 @@ func (d *Store) resetFederatedProjectIfNoPendingPush(
 		        WHERE e.project_id = ?
 		          AND e.origin_instance_uid = ?
 		          AND e.id > ?
-		          AND `+db.FederationOwedEventSQL("e", false)+`
+		          AND `+db.FederationResetOwedEventSQL("e", false)+`
 		   )
 		   AND NOT EXISTS (
 		       SELECT 1

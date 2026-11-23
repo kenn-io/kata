@@ -63,7 +63,9 @@ func checkFederatedOvertakenMoveSourceLeave(t *testing.T, _ db.Storage, backend 
 			require.NoError(t, spoke.MaterializeFederatedProject(ctx, local[0].ID))
 			back, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: remote[2].ID, ToProjectID: remote[1].ID, IfMatchRev: away.Issue.Revision, Actor: "worker"})
 			require.NoError(t, err)
-			resetSource := func() { require.NoError(t, spoke.ResetFederatedProject(ctx, local[0].ID, 0, 0)) }
+			resetSource := func() {
+				require.NoError(t, spoke.ResetFederatedProjectIfNoPendingPush(ctx, local[0].ID, 0, 0, spoke.InstanceUID(), 0))
+			}
 			resetDestination := func() {
 				require.NoError(t, spoke.ResetFederatedProjectIfNoPendingPush(ctx, local[1].ID, 0, 0, spoke.InstanceUID(), 0))
 			}

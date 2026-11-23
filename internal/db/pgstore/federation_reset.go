@@ -34,8 +34,8 @@ WHERE project_id=$3`, replayHorizonEventID, pullCursorEventID, projectID)
 	})
 }
 
-// ResetFederatedProjectIfNoPendingPush clears one replica only after every
-// supported local event is acknowledged and every quarantine is resolved.
+// ResetFederatedProjectIfNoPendingPush retains pending events for issues in
+// another project and refuses a reset that would delete other pending events.
 func (s *Store) ResetFederatedProjectIfNoPendingPush(
 	ctx context.Context,
 	projectID int64,
@@ -65,7 +65,7 @@ WHERE project_id=$1 AND skipped_at IS NULL ORDER BY id ASC LIMIT 1 FOR UPDATE`, 
 		var pending bool
 		err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events e
 WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND `+
-			db.FederationOwedEventSQL("e", true)+`)`, projectID, originInstanceUID, pushCursorEventID).
+			db.FederationResetOwedEventSQL("e", true)+`)`, projectID, originInstanceUID, pushCursorEventID).
 			Scan(&pending)
 		if err != nil {
 			return mapSQLError(err, nil)

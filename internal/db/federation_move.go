@@ -49,6 +49,11 @@ func FederationOwedEventSQL(alias string, postgres bool) string {
 	return FederationPushableEventSQL(alias, postgres) + ` AND (` + alias + `.type<>'issue.moved' OR NOT ` + federationMoveSupersededSQL(alias) + `)`
 }
 
+// FederationResetOwedEventSQL excludes events retained for issues in another project.
+func FederationResetOwedEventSQL(alias string, postgres bool) string {
+	return FederationOwedEventSQL(alias, postgres) + ` AND NOT EXISTS (SELECT 1 FROM issues i WHERE i.uid=` + alias + `.issue_uid AND i.project_id<>` + alias + `.project_id)`
+}
+
 // FederationHeldCursorPrefix stores the push cursor a left project's binding
 // had acknowledged. Events above it were never acknowledged by the hub.
 const FederationHeldCursorPrefix = "federation_held_cursor."
