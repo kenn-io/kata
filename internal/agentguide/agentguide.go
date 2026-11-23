@@ -5,10 +5,11 @@ import "strings"
 
 // Contract is the marker-free agent workflow contract: the short core every
 // coding agent sees. Coordination detail lives in the quickstart fragments.
-const Contract = `Use kata for requested changes, not questions, explanations, or reviews that
-change nothing.
+const Contract = `This workspace tracks its work in kata. Use kata for the changes the user asks
+you to make here, not for questions, explanations, or reviews that change
+nothing.
 
-Before a change, search for an existing issue:
+Before starting a change, look for an existing issue:
 
     kata search "<one or two distinctive words>" --agent
 
@@ -16,7 +17,7 @@ Search matches every word. Use an open issue that covers the work, or create one
 
     kata create "<title>" --body "<what and why>" --idempotency-key <key> --agent
 
-Use --priority instead of p0 through p4 or labels beginning with priority:.
+Labels p0 through p4 and labels starting with priority: are rejected; use --priority.
 
 If create reports a look-alike, use that issue unless the work truly differs
 (--force-new). Link related but different work with --related <ref>, or

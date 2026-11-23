@@ -30,14 +30,17 @@ func TestAddLabel_PriorityLabelRejected(t *testing.T) {
 	assert.Contains(t, string(body), "kata edit kata#"+issue.ShortID+" --priority N")
 }
 
-func TestAddLabel_ExistingPriorityLabelIsNoop(t *testing.T) {
+func TestAddLabel_ExistingPriorityLabelRejected(t *testing.T) {
 	env := testenv.New(t)
 	pid, id := setupOneIssue(t, env)
 	_, _, err := env.DB.AddLabelAndEvent(t.Context(), id, db.LabelEventParams{EventType: "issue.labeled", Label: "p2", Actor: "tester"})
 	require.NoError(t, err)
 	resp, body := envDoRaw(t, env, http.MethodPost, issuePath(pid, id, "labels"), map[string]string{"actor": "tester", "label": "p2"}, nil)
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-	assert.Contains(t, string(body), `"changed":false`)
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode, string(body))
+	assert.Contains(t, string(body), "--priority N")
+	labels, err := env.DB.LabelsForIssue(t.Context(), id)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"p2"}, labels)
 }
 
 func TestAddLabel_PriorityLabelMissingIssue(t *testing.T) {

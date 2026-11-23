@@ -97,7 +97,7 @@ func TestRecurrenceRemoveExistingPriorityLabel(t *testing.T) {
 	resp := doPatch(t, env, url, `{"actor":"tester","template":{"labels":["area:ui","p2"]}}`, `"rev-1"`)
 	raw := readClose(t, resp)
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode, string(raw))
-	assert.Contains(t, string(raw), "remove the label and set the template priority")
+	assert.Contains(t, string(raw), "remove the priority label from the template's labels and set the template priority")
 	resp = doPatch(t, env, url, `{"actor":"tester","template":{"labels":["area:ui"]}}`, `"rev-1"`)
 	raw = readClose(t, resp)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))

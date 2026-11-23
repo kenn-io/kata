@@ -31,11 +31,18 @@ type recurrenceRow struct {
 
 func TestScheduleRepeatPriorityLabelRecovery(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
-	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: pid, Title: "Review", Author: "tester", Labels: []string{"p2"}})
+	priority := int64(2)
+	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: pid, Title: "Review", Author: "tester", Priority: &priority, Labels: []string{"p2", "routine"}})
 	require.NoError(t, err)
-	_, stderr, err := runCLIWithErr(t, env, dir, "schedule", issue.ShortID, "2026-11-02", "--repeat", "FREQ=WEEKLY", "--timezone", "UTC")
-	require.Error(t, err)
-	assert.Contains(t, stderr, "remove the label and set the template priority")
+	runCLI(t, env, dir, "schedule", issue.ShortID, "2026-11-02", "--repeat", "FREQ=WEEKLY", "--timezone", "UTC")
+	recs := listRecurrencesViaHTTP(t, env, pid)
+	require.Len(t, recs, 1)
+	assert.Equal(t, []string{"routine"}, recs[0].TemplateLabels)
+	require.NotNil(t, recs[0].TemplatePriority)
+	assert.Equal(t, priority, *recs[0].TemplatePriority)
+	labels, err := env.DB.LabelsForIssue(t.Context(), issue.ID)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"p2", "routine"}, labels)
 }
 
 func listRecurrencesViaHTTP(t *testing.T, env *testenv.Env, pid int64) []recurrenceRow {

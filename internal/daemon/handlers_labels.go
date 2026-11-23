@@ -49,16 +49,6 @@ func addLabelHandler(cfg ServerConfig) func(context.Context, *api.AddLabelReques
 			return nil, err
 		}
 		if db.IsPriorityLabel(in.Body.Label) {
-			existing, err := cfg.DB.LabelByEndpoints(ctx, issue.ID, in.Body.Label)
-			if err == nil {
-				out := &api.AddLabelResponse{}
-				out.Body.Issue = issue
-				out.Body.Label = existing
-				return out, nil
-			}
-			if !errors.Is(err, db.ErrNotFound) {
-				return nil, internalAPIError(err)
-			}
 			project, err := activeProjectByID(ctx, cfg.DB, issue.ProjectID)
 			if err != nil {
 				return nil, err
