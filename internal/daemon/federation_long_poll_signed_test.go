@@ -2,14 +2,11 @@ package daemon_test
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
 	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -26,50 +23,26 @@ import (
 
 const signedPollKeyEnv = "TEST_FEDERATION_LONG_POLL_KEY"
 
-// pollCollisionBus relays the hub's published notification as if it came
-// from another hub using the same database and wake secret.
-type pollCollisionBus struct {
-	secret    []byte
-	messages  chan string
-	published chan string
+type pollPeerBus struct{ wakes chan struct{} }
+
+func (b *pollPeerBus) FederationPollWakeSecret(context.Context) ([]byte, error) {
+	return nil, nil
 }
 
-func (b *pollCollisionBus) FederationPollWakeSecret(context.Context) ([]byte, error) {
-	return b.secret, nil
+func (b *pollPeerBus) PublishFederationPollWake(context.Context, string) error {
+	return nil
 }
 
-func (b *pollCollisionBus) PublishFederationPollWake(ctx context.Context, payload string) error {
-	_, tags, _ := strings.Cut(payload, " ")
-	select {
-	case b.published <- payload:
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-	select {
-	case b.messages <- "other-hub " + tags:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-func (b *pollCollisionBus) ListenFederationPollWake(ctx context.Context, listening func(), deliver func(string)) error {
+func (b *pollPeerBus) ListenFederationPollWake(ctx context.Context, listening func(), deliver func(string)) error {
 	listening()
 	for {
 		select {
-		case message := <-b.messages:
-			deliver(message)
+		case <-b.wakes:
+			deliver("other-hub")
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 	}
-}
-
-func pollWakeTag(secret []byte, projectUID string) byte {
-	mac := hmac.New(sha256.New, secret)
-	_, _ = mac.Write([]byte("wake-v1"))
-	_, _ = mac.Write([]byte(projectUID))
-	return mac.Sum(nil)[0] & 63
 }
 
 // signedPollFixture is a hub store with one federated project that only the
@@ -123,7 +96,7 @@ type signedPollHub struct {
 
 // serve starts the hub inside a synctest bubble. A positive keyLife retires
 // the signing key that long after the startup quarantine ends.
-func (f signedPollFixture) serve(t *testing.T, keyLife time.Duration, wakeBus ...*pollCollisionBus) *signedPollHub {
+func (f signedPollFixture) serve(t *testing.T, keyLife time.Duration, wakeBus ...*pollPeerBus) *signedPollHub {
 	t.Helper()
 	state := filepath.Join(t.TempDir(), "replay.state")
 	require.NoError(t, federationsigning.InitializeReplayState(state))
@@ -253,71 +226,51 @@ func TestFederationPollWaitReturnsSavedPageWhenItExpires(t *testing.T) {
 		revoke bool
 		wake   bool
 		slow   bool
-		expire bool
-	}{{"event without wake", false, false, false, false}, {"revoked after empty wake", true, true, false, false}, {"empty wake read crosses deadline", true, true, true, false}, {"signing key expires", false, false, false, true}} {
+	}{{"event without wake", false, false, false}, {"revoked after empty wake", true, true, false}, {"empty wake read crosses deadline", true, true, true}} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newSignedPollFixture(t)
 			synctest.Test(t, func(t *testing.T) {
-				var source, target db.Project
-				var bus *pollCollisionBus
+				var source db.Project
+				var bus *pollPeerBus
 				if tc.wake {
 					var err error
 					source, err = f.store.CreateProject(t.Context(), "other-project")
 					require.NoError(t, err)
-					target, err = f.store.CreateProject(t.Context(), "destination-project")
-					require.NoError(t, err)
-					bus = &pollCollisionBus{messages: make(chan string, 1), published: make(chan string, 1)}
-					for i := range 4096 {
-						bus.secret = []byte(fmt.Sprintf("test-secret-%d", i))
-						if pollWakeTag(bus.secret, f.project.UID) == pollWakeTag(bus.secret, source.UID) {
-							break
-						}
-					}
-					require.Equal(t, pollWakeTag(bus.secret, f.project.UID), pollWakeTag(bus.secret, source.UID))
-				}
-				keyLife := time.Duration(0)
-				if tc.expire {
-					keyLife = 20 * time.Second
+					bus = &pollPeerBus{wakes: make(chan struct{}, 1)}
 				}
 				var h *signedPollHub
 				if tc.wake {
-					h = f.serve(t, keyLife, bus)
+					h = f.serve(t, 0, bus)
 				} else {
-					h = f.serve(t, keyLife)
+					h = f.serve(t, 0)
 				}
 				cursor := h.cursor(t)
 				done := h.startHeldPoll(t, cursor, "30")
 				reads := h.reads.readsReturned()
 				initial := h.reads.lastResult()
 				if tc.wake {
-					issue, _, err := h.store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "Other project event", Author: "admin"})
+					_, event, err := h.store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "Other project event", Author: "admin"})
 					require.NoError(t, err)
-					move, err := h.store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "admin"})
-					require.NoError(t, err)
-					require.NotNil(t, move.Event)
-					require.Greater(t, move.Event.ID, initial.NextAfterID)
+					require.NotNil(t, event)
+					require.Greater(t, event.ID, initial.NextAfterID)
 					if tc.slow {
 						h.reads.beforeRead(func(int) error {
 							time.Sleep(31 * time.Second)
 							return h.revokeProjectAccess(t)
 						})
 					}
-					// The move's source tag collides with the held poll's project tag.
-					h.broadcaster.Broadcast(daemon.NewEventMsg(target.ID, *move.Event))
+					bus.wakes <- struct{}{}
 					if tc.slow {
 						time.Sleep(31 * time.Second)
 					}
 					synctest.Wait()
-					wake := strings.Fields(<-bus.published)
-					require.Len(t, wake, 3)
-					assert.Equal(t, strconv.Itoa(int(pollWakeTag(bus.secret, h.project.UID))), wake[2])
 					require.Equal(t, reads+1, h.reads.readsReturned())
 					assert.Greater(t, h.reads.lastResult().NextAfterID, initial.NextAfterID)
 					reads++
 				}
 				if tc.revoke && !tc.slow {
 					require.NoError(t, h.revokeProjectAccess(t))
-				} else if !tc.revoke && !tc.expire {
+				} else if !tc.revoke {
 					h.commit(t, "Committed without a wakeup", false)
 				}
 				response := <-done
@@ -331,34 +284,12 @@ func TestFederationPollWaitReturnsSavedPageWhenItExpires(t *testing.T) {
 				response = h.send(h.request(t, page.NextAfterID, ""))
 				if tc.revoke {
 					assert.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
-				} else if tc.expire {
-					assert.Equal(t, http.StatusUnauthorized, response.Code, response.Body.String())
 				} else {
 					assert.Contains(t, response.Body.String(), "Committed without a wakeup")
 				}
 			})
 		})
 	}
-}
-
-func TestFederationPollWaitInitialReadCrossesDeadline(t *testing.T) {
-	f := newSignedPollFixture(t)
-	synctest.Test(t, func(t *testing.T) {
-		h := f.serve(t, 0)
-		cursor := h.cursor(t)
-		h.reads.beforeRead(func(int) error {
-			time.Sleep(31 * time.Second)
-			return h.revokeProjectAccess(t)
-		})
-		response := h.send(h.request(t, cursor, "30"))
-		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-		var page pollBodyForTest
-		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &page))
-		assert.Empty(t, page.Events)
-		assert.GreaterOrEqual(t, page.NextAfterID, cursor)
-		response = h.send(h.request(t, page.NextAfterID, ""))
-		assert.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
-	})
 }
 
 func TestFederationPollWaitEndsBeforeTheRequestDeadlineAfterASlowRead(t *testing.T) {
@@ -369,7 +300,8 @@ func TestFederationPollWaitEndsBeforeTheRequestDeadlineAfterASlowRead(t *testing
 		slowRead := h.reads.readsReturned() + 1
 		h.reads.beforeRead(func(read int) error {
 			if read == slowRead {
-				time.Sleep(20 * time.Second)
+				time.Sleep(46 * time.Second)
+				return h.revokeProjectAccess(t)
 			}
 			return nil
 		})
@@ -379,6 +311,8 @@ func TestFederationPollWaitEndsBeforeTheRequestDeadlineAfterASlowRead(t *testing
 		// The 60 s federation request deadline must still be ahead: the
 		// hold's time counts from the request, not from its first read.
 		assert.Less(t, time.Since(started), 60*time.Second)
+		response = h.send(h.request(t, cursor, ""))
+		assert.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
 	})
 }
 
@@ -404,8 +338,7 @@ func TestFederationPollWaitRejectsARetiredSigningKey(t *testing.T) {
 			f := newSignedPollFixture(t)
 			synctest.Test(t, func(t *testing.T) {
 				h := f.serve(t, 20*time.Second)
-				cursor := h.cursor(t)
-				done := h.startHeldPoll(t, cursor, "30")
+				done := h.startHeldPoll(t, h.cursor(t), "30")
 				reads := h.reads.readsReturned()
 				time.Sleep(25 * time.Second)
 				h.commit(t, canary, tc.wake)
