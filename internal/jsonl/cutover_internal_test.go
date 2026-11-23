@@ -155,7 +155,7 @@ func TestAutoCutoverPreservesArtifactsWhenRestoreFails(t *testing.T) {
 }
 
 // In-place upgrades must match the fresh-store catalog without exporting.
-func TestAutoCutoverAddsIndexOnlyVersionsInPlace(t *testing.T) {
+func TestAutoCutoverAppliesSchemaUpgradesInPlace(t *testing.T) {
 	for _, version := range []int{41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 52, 53} {
 		t.Run(strconv.Itoa(version), func(t *testing.T) {
 			t.Setenv("KATA_HOME", t.TempDir())
