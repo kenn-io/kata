@@ -138,6 +138,7 @@ func convertEnvelopes(envs []Envelope, exportVersion int, localInstanceUID strin
 				if strings.HasPrefix(record.Key, db.FederationSpokeNamePrefix) ||
 					strings.HasPrefix(record.Key, db.FederationHeldCursorPrefix) ||
 					strings.HasPrefix(record.Key, db.FederationAcknowledgedEventPrefix) ||
+					strings.HasPrefix(record.Key, db.FederationLeaveFencePrefix) ||
 					record.Key == db.MetaKeyMCPEventsKeyCheck ||
 					strings.HasPrefix(record.Key, db.RootKeyTransitionMetadataPrefix) ||
 					strings.HasPrefix(record.Key, db.RelayResetMetadataPrefix) ||

@@ -584,8 +584,10 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 	if err := reconcileFederationBindingTransitionLinks(ctx, tx, previous, binding); err != nil {
 		return db.FederationBinding{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=? || (SELECT uid FROM projects WHERE id=?)`, db.FederationLeaveFencePrefix, b.ProjectID); err != nil {
-		return db.FederationBinding{}, err
+	if !db.PreserveFederationLeaveFenceOnStop(previous, b) {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=? || (SELECT uid FROM projects WHERE id=?)`, db.FederationLeaveFencePrefix, b.ProjectID); err != nil {
+			return db.FederationBinding{}, err
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=? || (SELECT uid FROM projects WHERE id=? AND deleted_at IS NULL)`, db.FederationRetainedProjectPrefix, b.ProjectID); err != nil {
 		return db.FederationBinding{}, err

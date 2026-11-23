@@ -121,39 +121,84 @@ func FederationQuarantineHasEarlierEvents(ctx context.Context, tx *sql.Tx, q Fed
 	return false, rows.Err()
 }
 
-// RetainFederationHeldCursor records the cursor before a leave deletes its binding.
+// FederationLeaveFenceExists reports whether departure was already prepared.
+func FederationLeaveFenceExists(ctx context.Context, tx *sql.Tx, projectID int64) (bool, error) {
+	var exists bool
+	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM meta WHERE key=$1 || (SELECT uid FROM projects WHERE id=$2))`, FederationLeaveFencePrefix, projectID).Scan(&exists)
+	return exists, err
+}
+
+// PrepareFederationLeaveFence saves the moves approved for retirement at leave.
+func PrepareFederationLeaveFence(ctx context.Context, tx *sql.Tx, projectID int64, origin string) error {
+	var projectUID string
+	if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=$1`, projectID).Scan(&projectUID); err != nil {
+		return err
+	}
+	moves, err := supersededFederationMoves(ctx, tx, projectUID, origin)
+	if err != nil {
+		return err
+	}
+	raw, err := json.Marshal(moves)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,$2) ON CONFLICT(key) DO NOTHING`, FederationLeaveFencePrefix+projectUID, string(raw))
+	return err
+}
+
+func supersededFederationMoves(ctx context.Context, tx *sql.Tx, projectUID, origin string) (map[string][]string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT p.uid,e.uid,e.payload FROM events e JOIN federation_bindings b ON b.project_id=e.project_id JOIN projects p ON p.id=e.project_id WHERE e.type='issue.moved' AND e.origin_instance_uid=$1 AND e.id>b.push_cursor_event_id AND b.role='spoke' AND b.relay_config IS NULL AND `+federationMoveSupersededSQL("e"), origin)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	moves := map[string][]string{}
+	for rows.Next() {
+		var destination, uid, payload string
+		if err := rows.Scan(&destination, &uid, &payload); err != nil {
+			return nil, err
+		}
+		if from, _ := StringValue(PayloadMap([]byte(payload))["from_project_uid"]); from == projectUID {
+			moves[destination] = append(moves[destination], uid)
+		}
+	}
+	return moves, rows.Err()
+}
+
+// RetainFederationHeldCursor records the cursor and retired moves before leave.
 func RetainFederationHeldCursor(ctx context.Context, tx *sql.Tx, projectID int64, projectUID, origin string) error {
 	_, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) SELECT $1,CAST(push_cursor_event_id AS TEXT) FROM federation_bindings WHERE project_id=$2 ON CONFLICT(key) DO UPDATE SET value=CASE WHEN CAST(meta.value AS BIGINT)>CAST(excluded.value AS BIGINT) THEN meta.value ELSE excluded.value END`, FederationHeldCursorPrefix+projectUID, projectID)
 	if err != nil {
 		return err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT e.project_id,e.uid,e.payload FROM events e JOIN federation_bindings b ON b.project_id=e.project_id WHERE e.type='issue.moved' AND e.origin_instance_uid=$1 AND e.id>b.push_cursor_event_id AND `+federationMoveSupersededSQL("e"), origin)
+	var raw string
+	err = tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=$1`, FederationLeaveFencePrefix+projectUID).Scan(&raw)
+	var moves map[string][]string
+	if errors.Is(err, sql.ErrNoRows) {
+		moves, err = supersededFederationMoves(ctx, tx, projectUID, origin)
+	} else if err == nil {
+		err = json.Unmarshal([]byte(raw), &moves)
+	}
 	if err != nil {
 		return err
 	}
-	byProject := map[int64][]string{}
-	for rows.Next() {
+	for destinationUID, uids := range moves {
 		var destination int64
-		var uid, payload string
-		if err := rows.Scan(&destination, &uid, &payload); err != nil {
-			_ = rows.Close()
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM projects WHERE uid=$1`, destinationUID).Scan(&destination); errors.Is(err, sql.ErrNoRows) {
+			continue
+		} else if err != nil {
 			return err
 		}
-		if from, _ := StringValue(PayloadMap([]byte(payload))["from_project_uid"]); from == projectUID {
-			byProject[destination] = append(byProject[destination], uid)
-		}
-	}
-	err = rows.Err()
-	_ = rows.Close()
-	if err != nil {
-		return err
-	}
-	for destination, uids := range byProject {
 		if err := RecordFederationAcknowledgedEvents(ctx, tx, destination, uids); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// PreserveFederationLeaveFenceOnStop keeps preparation when only transport stops.
+func PreserveFederationLeaveFenceOnStop(previous *FederationBinding, next FederationBinding) bool {
+	return previous != nil && previous.IsDirectSpoke() && next.IsDirectSpoke() && !next.Enabled && !next.PushEnabled && previous.HubURL == next.HubURL && previous.HubProjectID == next.HubProjectID && previous.HubProjectUID == next.HubProjectUID && previous.Actor == next.Actor && previous.AllowInsecure == next.AllowInsecure
 }
 
 // RestoreFederationPushCursor preserves offline edits when push resumes.

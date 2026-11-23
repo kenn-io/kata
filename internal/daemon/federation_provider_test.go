@@ -383,4 +383,12 @@ func TestFederationProviderLeaveFencesBeforeRelease(t *testing.T) {
 	_, err = daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, source.ID, "")
 	require.NoError(t, err)
 	require.True(t, store.fenced)
+	binding, err = env.DB.FederationBindingByProject(t.Context(), source.ID)
+	require.NoError(t, err)
+	require.False(t, binding.Enabled, "leave preparation keeps provider transport stopped")
+	_, err = daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, source.ID, "")
+	require.NoError(t, err)
+	binding, err = env.DB.FederationBindingByProject(t.Context(), source.ID)
+	require.NoError(t, err)
+	require.False(t, binding.Enabled, "retrying leave keeps provider transport stopped")
 }

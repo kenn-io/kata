@@ -44,13 +44,22 @@ func (d *Store) fenceRelayDisconnect(ctx context.Context, projectID int64, leavi
 		if err := db.CheckFederationMoveSourceLifecycle(ctx, tx, projectID, d.InstanceUID(), leaving); err != nil {
 			return err
 		}
-		if err := d.relayReset(tx).FenceDisconnect(ctx, projectID); err != nil {
-			return err
-		}
 		if leaving {
-			_, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) SELECT $1 || uid,'1' FROM projects WHERE id=$2 ON CONFLICT(key) DO UPDATE SET value='1'`, db.FederationLeaveFencePrefix, projectID)
+			fenced, err := db.FederationLeaveFenceExists(ctx, tx, projectID)
+			if err != nil {
+				return err
+			}
+			if fenced {
+				return d.relayReset(tx).ValidateLifecycle(ctx, projectID)
+			}
+			if err := db.PrepareFederationLeaveFence(ctx, tx, projectID, d.InstanceUID()); err != nil {
+				return err
+			}
+		}
+		if err := d.relayReset(tx).FenceDisconnect(ctx, projectID, leaving); err != nil {
 			return err
 		}
+
 		return nil
 	})
 }
@@ -165,10 +174,10 @@ func (b relayResetBackend) RejectExternalRootProject(ctx context.Context, projec
 	return rejectExternalRootFederationProject(ctx, b.tx, projectID)
 }
 
-func (b relayResetBackend) DisableRelayPush(ctx context.Context, projectID int64) error {
+func (b relayResetBackend) DisableRelayPush(ctx context.Context, projectID int64, enabled bool) error {
 	_, err := b.tx.ExecContext(ctx, `UPDATE federation_bindings
-SET enabled=1,push_enabled=0,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
-WHERE project_id=? AND role=? AND (enabled<>1 OR push_enabled<>0)`, projectID, string(db.FederationRoleSpoke))
+SET enabled=?,push_enabled=0,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+WHERE project_id=? AND role=? AND (enabled<>? OR push_enabled<>0)`, enabled, projectID, string(db.FederationRoleSpoke), enabled)
 	return err
 }
 

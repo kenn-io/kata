@@ -46,6 +46,10 @@ func TestFederationAcknowledgmentMetadataProjectExport(t *testing.T) {
 				_, err = store.ExecContext(ctx, query, key, "1")
 				require.NoError(t, err)
 				keys = append(keys, key)
+				fence := db.FederationLeaveFencePrefix + project.UID
+				_, err = store.ExecContext(ctx, query, fence, "{}")
+				require.NoError(t, err)
+				keys = append(keys, fence)
 			}
 			for _, cutover := range []bool{false, true} {
 				if cutover && backend == "postgres" {

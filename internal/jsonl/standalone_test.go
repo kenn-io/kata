@@ -59,6 +59,7 @@ func TestStandaloneCopyCanPinItsNewRootAuthority(t *testing.T) {
 		db.RelayResetMetadataPrefix + project.UID,
 		db.FederationHeldCursorPrefix + project.UID,
 		db.FederationAcknowledgedEventPrefix + project.UID + "." + created.UID,
+		db.FederationLeaveFencePrefix + project.UID,
 		db.AttributionUIResetMetadataPrefix + project.UID,
 		db.PendingCreationMetadataPrefix + project.UID + ".issue." + issue.UID,
 		db.RelayResetSupersededMetadataKey(project.UID, "00000000000000000000000016"),
@@ -90,7 +91,7 @@ func TestStandaloneCopyCanPinItsNewRootAuthority(t *testing.T) {
 		require.True(t, inputKinds[kind], "source export should contain %s", kind)
 	}
 	require.True(t, rootTransitionFound, "source export should contain a root-key transition")
-	for _, prefix := range []string{db.RelayResetMetadataPrefix, db.FederationHeldCursorPrefix, db.FederationAcknowledgedEventPrefix, db.AttributionUIResetMetadataPrefix, db.PendingCreationMetadataPrefix, db.RelayResetSupersededMetadataPrefix, db.ProjectStreamResetMetadataPrefix} {
+	for _, prefix := range []string{db.RelayResetMetadataPrefix, db.FederationHeldCursorPrefix, db.FederationAcknowledgedEventPrefix, db.FederationLeaveFencePrefix, db.AttributionUIResetMetadataPrefix, db.PendingCreationMetadataPrefix, db.RelayResetSupersededMetadataPrefix, db.ProjectStreamResetMetadataPrefix} {
 		found := false
 		for key := range inputMetaKeys {
 			found = found || strings.HasPrefix(key, prefix)
@@ -115,7 +116,7 @@ func TestStandaloneCopyCanPinItsNewRootAuthority(t *testing.T) {
 			var metadata db.MetaKV
 			require.NoError(t, json.Unmarshal(record.Data, &metadata))
 			for _, prefix := range []string{
-				db.RootKeyTransitionMetadataPrefix, db.RelayResetMetadataPrefix, db.FederationHeldCursorPrefix, db.FederationAcknowledgedEventPrefix,
+				db.RootKeyTransitionMetadataPrefix, db.RelayResetMetadataPrefix, db.FederationHeldCursorPrefix, db.FederationAcknowledgedEventPrefix, db.FederationLeaveFencePrefix,
 				db.AttributionUIResetMetadataPrefix, db.PendingCreationMetadataPrefix,
 				db.RelayResetSupersededMetadataPrefix, db.ProjectStreamResetMetadataPrefix,
 			} {

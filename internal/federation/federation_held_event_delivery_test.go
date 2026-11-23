@@ -3,6 +3,7 @@ package federation
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
@@ -202,6 +203,54 @@ func TestSyncFederationMultiPeerEditAfterDestinationReset(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, delivered, 1)
 			require.Equal(t, held.ContentHash, delivered[0].ContentHash)
+		})
+	}
+}
+
+func TestSyncAfterApprovedMoveReturnsBeforeLeave(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := t.Context()
+			hub, projects := newMoveDeliveryHub(t, "leave-source", "leave-target", "leave-away")
+			spoke, local, credentials := newHeldEventSpoke(t, backend, hub, projects)
+			t.Cleanup(func() { _ = spoke.Close() })
+			sync := func(index int) error {
+				binding, err := spoke.FederationBindingByProject(ctx, local[index].ID)
+				if err != nil {
+					return err
+				}
+				return SyncFederationOnce(ctx, spoke, binding, credentials[local[index].UID], credentials)
+			}
+			issue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "moved", Author: "worker"})
+			require.NoError(t, err)
+			for i := range local {
+				require.NoError(t, sync(i))
+			}
+			localIssue, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			localMove, err := spoke.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: localIssue.ID, FromProjectID: local[0].ID, ToProjectID: local[1].ID, IfMatchRev: localIssue.Revision, Actor: "worker"})
+			require.NoError(t, err)
+			// Give the hub move a later physical clock than the offline move.
+			if delay := time.Until(time.UnixMilli(localMove.Event.HLCPhysicalMS + 1)); delay > 0 {
+				time.Sleep(delay)
+			}
+			away, err := hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[2].ID, IfMatchRev: issue.Revision, Actor: "worker"})
+			require.NoError(t, err)
+			remote := db.RemoteEventFromStored(*away.Event)
+			_, err = spoke.InsertRemoteEvents(ctx, local[0].ID, []db.RemoteEvent{remote})
+			require.NoError(t, err)
+			require.NoError(t, spoke.MaterializeFederatedProject(ctx, local[0].ID))
+			require.NoError(t, spoke.(db.RelayDisconnectFenceStore).FenceFederationLeave(ctx, local[0].ID))
+			returned, err := hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[2].ID, ToProjectID: projects[1].ID, IfMatchRev: away.Issue.Revision, Actor: "worker"})
+			require.NoError(t, err)
+			remote = db.RemoteEventFromStored(*returned.Event)
+			_, err = spoke.InsertRemoteEvents(ctx, local[1].ID, []db.RemoteEvent{remote})
+			require.NoError(t, err)
+			require.NoError(t, spoke.MaterializeFederatedProject(ctx, local[1].ID))
+			_, err = spoke.LeaveFederationReplica(ctx, local[0].ID)
+			require.NoError(t, err)
+			delete(credentials, local[0].UID)
+			require.NoError(t, sync(1))
 		})
 	}
 }
