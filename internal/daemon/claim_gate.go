@@ -27,7 +27,7 @@ func requireFederatedIssueClaim(
 	return requireFederatedIssueClaimWithRefresh(ctx, cfg, issue, actor, true)
 }
 
-// Move previews check cached authority without remote refresh or cache writes.
+// Move previews check cached authority without updating the cache.
 func requireFederatedIssueClaimWithRefresh(
 	ctx context.Context,
 	cfg ServerConfig,
@@ -120,7 +120,7 @@ func checkFederatedIssueClaim(ctx context.Context, cfg ServerConfig, issue db.Is
 	}
 
 	if refresh && binding.Role == db.FederationRoleSpoke {
-		if err := refreshSpokeClaimStatusForGate(ctx, cfg, binding, issue, result); err != nil {
+		if err := refreshSpokeClaimStatusForGate(ctx, cfg, binding, issue, result, true); err != nil {
 			return err
 		}
 	}
@@ -166,6 +166,7 @@ func refreshSpokeClaimStatusForGate(
 	binding db.FederationBinding,
 	issue db.Issue,
 	result *claimRefreshResult,
+	updateCache bool,
 ) error {
 	remoteCtx, cancelRemote := context.WithTimeout(ctx, mutationClaimStatusRefreshTimeout)
 	defer cancelRemote()
@@ -197,6 +198,9 @@ func refreshSpokeClaimStatusForGate(
 	}
 	if result != nil {
 		*result = claimRefreshResult{binding: binding, known: true}
+	}
+	if !updateCache {
+		return nil
 	}
 	resp, err = remapCachedClaimStatus(ctx, cfg.DB, binding.ProjectID, issue.UID, resp)
 	if err != nil {

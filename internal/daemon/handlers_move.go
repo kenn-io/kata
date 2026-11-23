@@ -97,9 +97,6 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 				if err := requireFederatedIssueClaimWithResult(ctx, cfg, issue, actor, !in.Body.DryRun, &refresh); err != nil {
 					return nil, err
 				}
-				if in.Body.DryRun {
-					continue
-				}
 				binding, err := cfg.DB.FederationBindingByProject(ctx, issue.ProjectID)
 				if errors.Is(err, db.ErrNotFound) {
 					continue
@@ -113,6 +110,11 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 				retained, snapshot, pending, err := retainedIssueState(ctx, cfg.DB, binding, issue.UID)
 				if err != nil {
 					return nil, internalAPIError(err)
+				}
+				if retained && in.Body.DryRun {
+					if err := refreshSpokeClaimStatusForGate(ctx, cfg, binding, issue, &refresh, false); err != nil {
+						return nil, err
+					}
 				}
 				if err := retainedMoveError(retained, snapshot, pending, refresh); err != nil {
 					return nil, err

@@ -130,7 +130,7 @@ func TestRetainedIssueMoveChecksHubBeforeSnapshot(t *testing.T) {
 		wantSnapshots         int
 	}{
 		{name: "hub missing", status: http.StatusNotFound, wantStatus: http.StatusServiceUnavailable, wantSnapshots: 0},
-		{name: "hub known without recovery snapshot", status: http.StatusOK, wantStatus: http.StatusConflict, wantNoSnapshotMessage: true},
+		{name: "hub known without recovery snapshot after rejoin", status: http.StatusOK, rejoin: true, wantStatus: http.StatusConflict, wantNoSnapshotMessage: true},
 		{name: "hub known with accepted snapshot", status: http.StatusOK, existingSnapshot: true, acceptedSnapshot: true, wantStatus: http.StatusOK, wantSnapshots: 1},
 		{name: "hub known after second rejoin", status: http.StatusOK, existingSnapshot: true, acceptedSnapshot: true, rejoin: true, wantStatus: http.StatusOK, wantSnapshots: 1},
 		{name: "pending snapshot after second rejoin", status: http.StatusOK, existingSnapshot: true, rejoin: true, wantStatus: http.StatusServiceUnavailable, wantSnapshots: 1},
@@ -147,6 +147,8 @@ func TestRetainedIssueMoveChecksHubBeforeSnapshot(t *testing.T) {
 			target, err := env.DB.CreateProject(ctx, "target-project")
 			require.NoError(t, err)
 			issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "retained", Author: "old-actor"})
+			require.NoError(t, err)
+			_, _, err = env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "unpublished discussion"})
 			require.NoError(t, err)
 			hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				switch tc.status {
@@ -182,6 +184,21 @@ func TestRetainedIssueMoveChecksHubBeforeSnapshot(t *testing.T) {
 				require.NoError(t, err)
 				require.NoError(t, env.DB.AdvanceFederationPushCursor(ctx, source.ID, binding.PushCursorEventID))
 			}
+			now := time.Now().UTC().Add(-time.Minute)
+			principal := db.ClaimPrincipal{HolderInstanceUID: env.DB.InstanceUID(), Holder: "new-actor", ClientKind: "cli"}
+			require.NoError(t, env.DB.ApplyClaimStatus(ctx, source.ID, issue.UID, db.ClaimStatus{Held: true, Holder: principal, HubNow: now, Claim: &db.IssueClaim{ClaimUID: "01HZNQ7VFPK1XGD8R5MABCD4CB", IssueUID: issue.UID, HolderInstanceUID: principal.HolderInstanceUID, Holder: principal.Holder, ClientKind: principal.ClientKind, ClaimKind: "hard", AcquiredAt: now, UpdatedAt: now, Revision: 1}}))
+			claimBefore, err := env.DB.ClaimStatusReadOnly(ctx, source.ID, issue.UID, now)
+			require.NoError(t, err)
+			before, err := dbtest.CollectImportRecords(ctx, env.DB, db.ExportFilter{IncludeDeleted: true})
+			require.NoError(t, err)
+			preview, previewRaw := envDoRaw(t, env, http.MethodPost, issuePathRef(source.ID, issue.UID, "actions/move"), map[string]any{"actor": "new-actor", "to_project_uid": target.UID, "dry_run": true}, nil)
+			require.Equal(t, tc.wantStatus, preview.StatusCode, string(previewRaw))
+			after, err := dbtest.CollectImportRecords(ctx, env.DB, db.ExportFilter{IncludeDeleted: true})
+			require.NoError(t, err)
+			require.Equal(t, before, after, "preview must leave persisted state unchanged")
+			claimAfter, err := env.DB.ClaimStatusReadOnly(ctx, source.ID, issue.UID, now)
+			require.NoError(t, err)
+			require.Equal(t, claimBefore, claimAfter, "preview must leave the cached claim unchanged")
 			resp, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(source.ID, issue.UID, "actions/move"), map[string]any{"actor": "new-actor", "to_project_uid": target.UID}, map[string]string{"If-Match": fmt.Sprintf(`"rev-%d"`, issue.Revision)})
 			require.Equal(t, tc.wantStatus, resp.StatusCode, string(raw))
 			snapshots, err := env.DB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: source.ID, IssueUID: issue.UID, Types: []string{"issue.snapshot"}, Limit: 10})
@@ -192,6 +209,7 @@ func TestRetainedIssueMoveChecksHubBeforeSnapshot(t *testing.T) {
 				if tc.wantStatus == http.StatusConflict {
 					code = "federated_move_unsupported"
 				}
+				assertAPIError(t, preview.StatusCode, previewRaw, tc.wantStatus, code)
 				errorEnvelope := assertAPIError(t, resp.StatusCode, raw, tc.wantStatus, code)
 				if tc.wantNoSnapshotMessage {
 					require.Contains(t, errorEnvelope.Error.Message, "no accepted recovery snapshot")
