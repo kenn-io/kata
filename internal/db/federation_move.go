@@ -864,15 +864,15 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
 	if err := PreserveFederationProjectIdentityDependencies(ctx, tx, projectID); err != nil {
 		return fmt.Errorf("preserve former project identity dependencies: %w", err)
 	}
-	// Keep this spoke's edits that a left project never had acknowledged. They
-	// stay local.
+	// Keep unacknowledged moves for bound projects and edits from left projects.
 	//nolint:gosec // Only the fixed snapshot type list is joined; values are bound.
 	_, err = tx.ExecContext(ctx, `DELETE FROM events AS e WHERE e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)
- AND NOT (e.origin_instance_uid=$2
- AND e.type NOT IN ('issue.created','issue.moved',`+FederationSnapshotEventTypesSQL()+`)
+ AND NOT (e.origin_instance_uid=$2 AND (
+ (e.type='issue.moved' AND EXISTS (SELECT 1 FROM federation_bindings b WHERE b.project_id=e.project_id AND b.push_cursor_event_id<e.id))
+ OR (e.type NOT IN ('issue.created','issue.moved',`+FederationSnapshotEventTypesSQL()+`)
  AND NOT EXISTS (SELECT 1 FROM federation_bindings b WHERE b.project_id=e.project_id)
  AND EXISTS (SELECT 1 FROM projects p JOIN meta m ON m.key=$3||p.uid
- WHERE p.id=e.project_id AND CAST(m.value AS BIGINT)<e.id))`, projectID, originInstanceUID, FederationHeldCursorPrefix)
+ WHERE p.id=e.project_id AND CAST(m.value AS BIGINT)<e.id))))`, projectID, originInstanceUID, FederationHeldCursorPrefix)
 	return err
 }
 
