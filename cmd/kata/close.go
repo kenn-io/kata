@@ -50,8 +50,8 @@ Each successful CLI close prints a reminder that the close is a completion
 claim and that the message and evidence should be specific to the issue.
 
 If you have not completed and tested this work, or its PR is open and
-not merged, do not close it. Instead, leave it open, put what remains in
-work.attention_msg, and add the needs-review label.
+not merged, do not close it. Instead, leave it open, update work.attention
+and work.attention_msg with what remains, and add the needs-review label.
 
 The close message has a minimum length that depends on the reason:
     --done, --audit-no-change           at least 40 characters

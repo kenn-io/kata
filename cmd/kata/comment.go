@@ -148,11 +148,13 @@ EOF
 func newCommentEditCmd() *cobra.Command {
 	var src BodySources
 	cmd := &cobra.Command{
-		Use:     "edit <issue-ref> <comment-uid>",
-		Short:   "edit a comment body",
-		Long:    `Replace the body of one comment. Find its comment UID with kata show; use -m/--body, --body-file, or --body-stdin.`,
-		Example: `  kata comment edit abc4 <comment-uid> -m "corrected repro steps" --agent`,
-		Args:    cobra.ExactArgs(2),
+		Use:   "edit <issue-ref> <comment-uid>",
+		Short: "edit a comment body",
+		Long:  `Replace the body of one comment. Find its comment UID with kata show; use -m/--body, --body-file, or --body-stdin.`,
+		Example: `  kata comment edit abc4 <comment-uid> --body-stdin --agent <<'EOF'
+Corrected repro steps: run ` + "`make test`" + ` twice.
+EOF`,
+		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			src.BodySet = cmd.Flags().Changed("body")
 			src.FileSet = cmd.Flags().Changed("body-file")

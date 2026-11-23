@@ -979,8 +979,8 @@ Closing as you finish each issue leaves a better audit trail. See
 [Close throttle](../reference/configuration.md#close-throttle).
 
 If work is incomplete, including work whose PR is open and not merged, leave
-the issue open, put what remains in `work.attention_msg`, and add the
-`needs-review` label:
+the issue open, update `work.attention` and `work.attention_msg` with what
+remains, and add the `needs-review` label:
 
 ```sh
 kata label add abc4 needs-review --agent

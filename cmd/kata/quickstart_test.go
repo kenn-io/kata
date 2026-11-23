@@ -287,11 +287,22 @@ func TestGuidesSayCommentsCarryFindings(t *testing.T) {
 	resetFlags(t)
 	guides["comment help"] = string(executeRoot(t, newRootCmd(), "comment", "--help"))
 	for name, text := range guides {
-		assert.Contains(t, text, "work.attention_msg", name)
+		assert.Contains(t, text, "kata meta set <ref> work.attention_msg \"<what remains>\"", name)
+		assert.Contains(t, text, "leave the issue open, update work.attention and work.attention_msg", name)
+		assert.Contains(t, text, "kata label add <ref> needs-review", name)
 		assert.Contains(t, text, "kata comment edit", name)
 		assert.Contains(t, text, "not merged", name)
 		assertClosedBodyStdinHeredoc(t, name, text)
 	}
+	// The retry after a failed mutation comment, and the edit example, carry
+	// comment text, so they use the quoted heredoc too.
+	assert.Contains(t, guides["quickstart human"], "retry with a quoted heredoc:\n\nkata comment <ref> --body-stdin <<'EOF'\n")
+	assert.NotContains(t, guides["quickstart human"], "--body ...")
+	resetFlags(t)
+	editHelp := string(executeRoot(t, newRootCmd(), "comment", "edit", "--help"))
+	assert.Contains(t, editHelp, "kata comment edit abc4 <comment-uid> --body-stdin --agent <<'EOF'")
+	assert.NotContains(t, editHelp, "-m \"")
+	assertClosedBodyStdinHeredoc(t, "comment edit help", editHelp)
 	for _, args := range [][]string{{"--help"}, {"close", "--help"}, {"label", "add", "--help"}, {"claim", "--help"}} {
 		resetFlags(t)
 		guides[strings.Join(args, " ")] = string(executeRoot(t, newRootCmd(), args...))
@@ -303,19 +314,25 @@ func TestGuidesSayCommentsCarryFindings(t *testing.T) {
 }
 
 // A heredoc whose terminator is indented never ends, so the copied command
-// waits on stdin forever.
+// waits on stdin forever. Every example must close before the next one opens.
 func assertClosedBodyStdinHeredoc(t *testing.T, name, text string) {
 	t.Helper()
-	lines := strings.Split(text, "\n")
-	for i, line := range lines {
-		if !strings.Contains(line, "--body-stdin") || !strings.HasSuffix(line, "<<'EOF'") {
-			continue
-		}
-		for _, next := range lines[i+1:] {
-			if next == "EOF" {
-				return
+	open, found := false, 0
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, "--body-stdin") && strings.HasSuffix(line, "<<'EOF'") {
+			if open {
+				t.Errorf("%s: --body-stdin <<'EOF' example opened before the previous one closed", name)
 			}
+			open = true
+			found++
+		} else if open && line == "EOF" {
+			open = false
 		}
 	}
-	t.Errorf("%s: no --body-stdin <<'EOF' example closed by a flush-left EOF line", name)
+	if open {
+		t.Errorf("%s: --body-stdin <<'EOF' example never closed by a flush-left EOF line", name)
+	}
+	if found == 0 {
+		t.Errorf("%s: no --body-stdin <<'EOF' example", name)
+	}
 }

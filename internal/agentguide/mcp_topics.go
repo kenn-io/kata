@@ -119,10 +119,10 @@ Load kata.load_issue_lifecycle and refresh. done requires a substantive message
 of at least 40 characters and typed evidence. Use actual commit SHA, PR URL,
 executed test command, reviewed paths or an external completion account.
 ` + call("kata.close", `{"ref":"spoke-project#abc4","reason":"done","message":"Implemented the export retry and reviewed the completed changes.","evidence":[{"type":"reviewed-paths","paths":["export.go"]}]}`) + `
-Never close unfinished work. Load kata.load_issue_mutation and refresh, put
-what remains in work.attention_msg and set the needs-review label:
+Never close unfinished work. Load kata.load_issue_mutation and refresh, update
+work.attention and work.attention_msg and set the needs-review label:
 ` + call("kata.set_label", `{"ref":"spoke-project#abc4","label":"needs-review","present":true}`) + `
-Update both attention fields before handoff. Open children prevent parent close.
+Open children prevent parent close.
 duplicate/superseded require at least 20 message characters and exactly one
 matching duplicate-of/superseded-by evidence with issue_ref. wontfix requires
 60 message characters and no evidence. audit-no-change needs a 40-character

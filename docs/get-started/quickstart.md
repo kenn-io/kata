@@ -379,8 +379,9 @@ canonical managed briefing without mutating the workspace; see
 
 ## Close with evidence
 
-Closing asserts completion. If work is incomplete, leave the issue open, put
-what remains in `work.attention_msg`, and add the `needs-review` label:
+Closing asserts completion. If work is incomplete, leave the issue open, update
+`work.attention` and `work.attention_msg` with what remains, and add the
+`needs-review` label:
 
 ```sh
 kata label add abc4 needs-review

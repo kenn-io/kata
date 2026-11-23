@@ -4,8 +4,8 @@ package agentguide
 const MCPCommentRules = `Comment with kata.comment and a stable idempotency_key only for findings a
 later reader needs; keep live status in work.attention_msg. Correct your own
 comment with kata.edit_comment. A PR that is open and not merged is unfinished
-work: leave the issue open, put what remains in work.attention_msg and set the
-needs-review label.
+work: leave the issue open, update work.attention and work.attention_msg and
+set the needs-review label.
 `
 
 // MCPContract is the compact bootstrap for clients that have tools and a file

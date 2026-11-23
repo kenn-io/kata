@@ -42,9 +42,9 @@ run kata quickstart.
 // CommentRules says what a comment is for and how to pass its text. The
 // heredoc stays flush-left wherever it is embedded: an indented terminator
 // never ends stdin.
-const CommentRules = `Comment only with findings a later reader needs. Pass the text on stdin with
-a quoted heredoc so the shell leaves backticks and $ alone; typed replies such
-as --reply c:<id> take --body-stdin too:
+const CommentRules = `Comment only with findings a later reader needs. Pass the text through a
+quoted heredoc so the shell leaves backticks and $ alone; replies such as
+--reply c:<id> take --body-stdin too:
 
 ` + "```" + `sh
 kata comment <ref> --body-stdin --agent <<'EOF'
@@ -52,11 +52,14 @@ kata comment <ref> --body-stdin --agent <<'EOF'
 EOF
 ` + "```" + `
 
-Keep live status in work.attention_msg, not in comments. To correct your own
-comment, edit it with kata comment edit <ref> <comment-uid>. A PR that is open
-and not merged is unfinished work. If you stop before the work is done, leave
-the issue open, put what remains in work.attention_msg, and add the
-needs-review label with kata label add <ref> needs-review.
+Correct your own comment with kata comment edit <ref> <comment-uid>. Keep
+live status in work.attention_msg, not in comments:
+
+    kata meta set <ref> work.attention_msg "<what remains>"
+
+A PR that is open and not merged is unfinished. If you stop before the work is
+done, leave the issue open, update work.attention and work.attention_msg, and
+run kata label add <ref> needs-review.
 `
 
 // Quickstart is the full CLI agent briefing: every fragment, in order.
@@ -350,7 +353,11 @@ const fragMutationComments = `10. To leave context alongside a mutation, pass --
    close, reopen, edit, assign, unassign, or label add/rm. The
    mutation lands first; the comment is appended in a follow-up call.
    If the comment call fails, the error names the issue so you can
-   retry with kata comment <ref> --body ...
+   retry with a quoted heredoc:
+
+kata comment <ref> --body-stdin <<'EOF'
+<text>
+EOF
 
 `
 

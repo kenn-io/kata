@@ -66,8 +66,8 @@ issue-scoped credential on a daemon in token identity mode.
 
 Closing is a completion claim, and claims need evidence: real prose plus a
 commit, a test command, or typed evidence a reviewer can check later.
-Incomplete work gets a `needs-review` label and what remains in
-`work.attention_msg` instead of a close. `kata audit closes` replays close activity; `kata reopen` undoes what
+Incomplete work stays open, with `work.attention` and `work.attention_msg`
+updated and a `needs-review` label, instead of a close. `kata audit closes` replays close activity; `kata reopen` undoes what
 doesn't hold up.
 
 → [Close discipline](https://katatracker.com/docs/guide/concepts/#close-discipline)

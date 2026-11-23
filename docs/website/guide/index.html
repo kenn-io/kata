@@ -162,7 +162,7 @@
         <li class="guide-stop" id="close">
           <div class="guide-copy">
             <h2>Close only what you can prove.</h2>
-            <p>Closing is a completion claim, and claims need evidence: real prose plus a commit, a test command, or typed evidence a reviewer can check later. Incomplete work gets a <code>needs-review</code> label and what remains in <code>work.attention_msg</code> instead of a close.</p>
+            <p>Closing is a completion claim, and claims need evidence: real prose plus a commit, a test command, or typed evidence a reviewer can check later. Incomplete work stays open, with <code>work.attention</code> and <code>work.attention_msg</code> updated and a <code>needs-review</code> label, instead of a close.</p>
             <p>Close each issue as its work is verified, not in a batch at the end. The daemon refuses to close a parent over open children. <code>kata audit closes</code> lets a reviewer replay anything that looks lazy, and <code>kata reopen</code> undoes it.</p>
             <p><a href="/docs/guide/concepts/#close-discipline">Close discipline</a></p>
           </div>
