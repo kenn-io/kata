@@ -1812,7 +1812,7 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 		r.longPolls = nil
 	}()
 	// pending holds the spokes whose last turn stopped at its budget; the next
-	// pass serves only them until a tick or wake widens it to every spoke.
+	// pass serves only them until a tick or external wake widens it to every spoke.
 	var pending map[int64]bool
 	for {
 		if validateLease != nil {
@@ -1845,15 +1845,15 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 		pending = remaining
 		if len(pending) > 0 {
 			// A budgeted turn left deliveries pending. Serve those spokes again
-			// now instead of after an interval; a tick, wake, or held-poll
-			// answer that has already arrived widens the pass to every spoke.
+			// now instead of after an interval. A held-poll answer adds its
+			// spoke; a tick or external wake selects every spoke.
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-ticker.C:
 				pending = nil
 			case <-polls.changed:
-				pending = nil
+				pending = polls.takeChanged(pending)
 			case <-r.Wake:
 				pending = nil
 			default:
@@ -1865,6 +1865,7 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 			return ctx.Err()
 		case <-ticker.C:
 		case <-polls.changed:
+			pending = polls.takeChanged(nil)
 		case <-r.Wake:
 			timer := r.newDebounceTimer(debounce)
 			select {

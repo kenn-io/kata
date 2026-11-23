@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -612,4 +613,80 @@ func TestStoppedWatcherIsJoinedAtShutdown(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestHeldPollWakeRunsOnlyItsProject(t *testing.T) {
+	h := newHubSpokeHarness(t, false)
+	ctx := t.Context()
+	hubProject, err := h.hubDB.CreateProject(ctx, "other-hub-project")
+	require.NoError(t, err)
+	_, err = h.hubDB.EnableProjectFederation(ctx, hubProject.ID, "tester")
+	require.NoError(t, err)
+	enrollment, err := h.hubDB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{Token: "other-pull-token", SpokeInstanceUID: h.spokeDB.InstanceUID(), ProjectID: &hubProject.ID, Capabilities: "pull", Actor: "tester"}) //nolint:gosec // test-only bearer token
+	require.NoError(t, err)
+	other, err := h.spokeDB.CreateProjectWithUID(ctx, "other-spoke-project", hubProject.UID)
+	require.NoError(t, err)
+	_, err = h.spokeDB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: other.ID, Role: db.FederationRoleSpoke, HubURL: h.url, HubProjectID: hubProject.ID, HubProjectUID: hubProject.UID, Enabled: true})
+	require.NoError(t, err)
+	require.NoError(t, config.WriteFederationCredential(other.UID, config.FederationCredential{HubURL: h.url, HubProjectID: hubProject.ID, Token: enrollment.Token}))
+	turns := make(chan int64, 16)
+	h.startConfiguredRunner(t, &Runner{DB: h.spokeDB, Interval: time.Hour, OnSpokeResult: func(id int64, _ error) { turns <- id }})
+	//nolint:kennlint // sleeptest: both held polls must reach the hub over HTTP before the commit.
+	require.Eventually(t, func() bool { return h.pollsWithWait.Load() >= 2 }, 10*time.Second, 10*time.Millisecond)
+	for range 2 {
+		select {
+		case <-turns:
+		case <-time.After(10 * time.Second):
+			t.Fatal("initial sync did not finish")
+		}
+	}
+	var created any
+	h.post(t, "/api/v1/projects/"+strconv.FormatInt(hubProject.ID, 10)+"/issues", map[string]any{"actor": "tester", "title": "event in one project"}, &created)
+	select {
+	case id := <-turns:
+		require.Equal(t, other.ID, id, "an unrelated project ran after the wake")
+	case <-time.After(10 * time.Second):
+		t.Fatal("the changed project was not synced")
+	}
+	select {
+	case id := <-turns:
+		t.Fatalf("project %d ran after another project's wake", id)
+	case <-time.After(300 * time.Millisecond): //nolint:kennlint // sleeptest: observes extra turns after a real HTTP wake.
+	}
+}
+
+func TestHeldPollReportsFirstFailure(t *testing.T) {
+	h := newHubSpokeHarness(t, false)
+	var attempts atomic.Int64
+	h.bindThrough(t, func(w http.ResponseWriter, r *http.Request, hub http.Handler) {
+		if isHeldPoll(r) {
+			attempts.Add(1)
+			http.Redirect(w, r, "/redirected", http.StatusTemporaryRedirect)
+			return
+		}
+		hub.ServeHTTP(w, r)
+	})
+	notices := make(chan error, 8)
+	h.startConfiguredRunner(t, &Runner{DB: h.spokeDB, Interval: 100 * time.Millisecond, OnError: func(err error) { notices <- err }})
+	select {
+	case err := <-notices:
+		assert.Contains(t, err.Error(), "held federation poll")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the watcher did not report the failed held poll")
+	}
+	//nolint:kennlint // sleeptest: the watcher retries over HTTP after backing off.
+	require.Eventually(t, func() bool { return attempts.Load() >= 2 }, 5*time.Second, 10*time.Millisecond)
+	select {
+	case err := <-notices:
+		t.Fatalf("the watcher repeated its notice: %v", err)
+	default:
+	}
+}
+
+func TestHeldPollWakesKeepEveryProject(t *testing.T) {
+	polls := newHubLongPolls(t.Context(), nil, nil, clientpkg.Opts{}, time.Second, nil, nil, nil, time.Now)
+	polls.signal(1)
+	polls.signal(2)
+	<-polls.changed
+	require.Equal(t, map[int64]bool{1: true, 2: true, 3: true}, polls.takeChanged(map[int64]bool{3: true}))
 }

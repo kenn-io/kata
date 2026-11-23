@@ -59,8 +59,10 @@ type hubLongPolls struct {
 	// changed carries a wakeup to the runner when a held poll saw work.
 	changed chan struct{}
 
-	mu    sync.Mutex
-	polls map[int64]*hubLongPoll
+	mu       sync.Mutex
+	polls    map[int64]*hubLongPoll
+	woken    map[int64]bool
+	reported map[int64]bool
 	// watchers joins every watcher goroutine, including those retired by stop
 	// or reconcile, so shutdown returns only after each has exited.
 	watchers sync.WaitGroup
@@ -394,6 +396,8 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 		case err != nil:
 			if hubAskedToWait(err) {
 				p.retries.recordSchedule(projectID, identity, identity, true, err, p.interval, p.now(), &version, binding.UpdatedAt)
+			} else {
+				p.reportPollFailureOnce(projectID, err)
 			}
 			supported = 0
 			if !sleepContext(ctx, backoff) {
@@ -406,7 +410,7 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 			// it returned to the runner instead of waiting for the next tick.
 			supported = 0
 			if pollChanged(body, cursor) {
-				p.signal()
+				p.signal(projectID)
 			}
 			if !sleepContext(ctx, federationLongPollReprobe) {
 				return
@@ -418,7 +422,7 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 			// Take the pass signal before waking the runner, so a pass that
 			// ends before this goroutine looks again is not missed.
 			next := p.nextPass()
-			p.signal()
+			p.signal(projectID)
 			select {
 			case <-ctx.Done():
 				return
@@ -452,6 +456,19 @@ func (p *hubLongPolls) recordHeldAnswer(ctx context.Context, projectID int64, at
 	}
 }
 
+func (p *hubLongPolls) reportPollFailureOnce(projectID int64, err error) {
+	p.mu.Lock()
+	if p.reported == nil {
+		p.reported = make(map[int64]bool)
+	}
+	alreadyReported := p.reported[projectID]
+	p.reported[projectID] = true
+	p.mu.Unlock()
+	if !alreadyReported {
+		p.report(fmt.Errorf("held federation poll for project %d: %w", projectID, err))
+	}
+}
+
 func (p *hubLongPolls) report(err error) {
 	if p.notice != nil && p.ctx.Err() == nil {
 		p.notice(err)
@@ -463,11 +480,34 @@ func pollChanged(body api.PollEventsBody, cursor int64) bool {
 	return len(body.Events) > 0 || body.ResetRequired || body.NextAfterID != cursor
 }
 
-func (p *hubLongPolls) signal() {
+func (p *hubLongPolls) signal(projectID int64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.woken == nil {
+		p.woken = make(map[int64]bool)
+	}
+	p.woken[projectID] = true
 	select {
 	case p.changed <- struct{}{}:
 	default:
 	}
+}
+
+func (p *hubLongPolls) takeChanged(pending map[int64]bool) map[int64]bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	select {
+	case <-p.changed:
+	default:
+	}
+	if pending == nil {
+		pending = make(map[int64]bool, len(p.woken))
+	}
+	for id := range p.woken {
+		pending[id] = true
+	}
+	p.woken = nil
+	return pending
 }
 
 // pollTarget resolves the binding and stored credential the runner's pass
