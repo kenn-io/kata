@@ -335,8 +335,11 @@ func TestResolve_ByAliasInput_NotRegistered(t *testing.T) {
 }
 
 func TestResolve_NotInitializedHint(t *testing.T) {
-	for _, shape := range []string{"alias", "name", "path with config"} {
-		for _, state := range []string{"missing", "archived"} {
+	for _, shape := range []string{"alias", "name", "path with config", "path"} {
+		for _, state := range []string{"missing", "active", "archived"} {
+			if state == "active" && shape != "path" {
+				continue
+			}
 			t.Run(shape+"/"+state, func(t *testing.T) {
 				h := newServerWithGitWorkspace(t, "https://github.com/example/remote-project.git")
 				name := "remote-project"
