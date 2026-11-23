@@ -400,7 +400,11 @@ func pushDirectSpoke(
 							}
 							envelope := federationIngestEnvelope(snapshot)
 							envelope.EventID = sourceID
-							_, snapshotErr = client.IngestProjectEventsWithOptions(ctx, hubProjectID, []api.FederationIngestEventEnvelope{envelope}, IngestProjectEventsOptions{})
+							sourceTokens, snapshotErr = federationMoveSourceTokens(ctx, store, credentials, *binding, client.baseURL, []db.Event{snapshot}, opts)
+							if snapshotErr != nil {
+								return recordFederationSyncError(ctx, store, binding.ProjectID, snapshotErr)
+							}
+							_, snapshotErr = client.IngestProjectEventsWithOptions(ctx, hubProjectID, []api.FederationIngestEventEnvelope{envelope}, IngestProjectEventsOptions{MoveSourceTokens: sourceTokens})
 							if snapshotErr == nil {
 								snapshotsSent[issueUID] = true
 								continue

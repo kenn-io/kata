@@ -178,8 +178,32 @@ func TestRejoinRetainedHistory(t *testing.T) {
 	t.Run("restore retained task and edit", checkRestoredRetainedTaskEdit)
 	t.Run("incoming retained link", checkRejoinPublishesIncomingRetainedLink)
 	t.Run("cross project retained peer", checkRejoinPublishesCrossProjectRetainedPeer)
+	t.Run("retained task linked to known cross project peer", checkRejoinRetainedTaskLinkedToKnownCrossProjectPeer)
 	t.Run("recovery snapshots", checkRejoinRecoverySnapshots)
 	t.Run("move unpublished task", checkRejoinMoveRetained)
+}
+
+func checkRejoinRetainedTaskLinkedToKnownCrossProjectPeer(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "source-project", "peer-project")
+	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor", "new-actor")
+	peer, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[1].ID, Title: "known peer", Author: "new-actor"})
+	require.NoError(t, err)
+	require.NoError(t, spoke.sync(t, 1))
+	retained, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "retained task", Author: "old-actor"})
+	require.NoError(t, err)
+	_, _, err = spoke.env.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: retained.ID, ToIssueID: peer.ID, Type: "blocks", Author: "old-actor"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: retained.ID, Actor: "old-actor", FromUID: retained.UID, ToUID: peer.UID, FromShortID: retained.ShortID, ToShortID: peer.ShortID})
+	require.NoError(t, err)
+	rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
+	_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: retained.ID, Author: "new-actor", Body: "after rejoin"})
+	require.NoError(t, err)
+	require.NoError(t, spoke.sync(t, 0))
+	remote, err := hub.DB.IssueByUID(ctx, retained.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	links, err := hub.DB.LinksByIssue(ctx, remote.ID)
+	require.NoError(t, err)
+	require.Len(t, links, 1)
+	require.Equal(t, peer.UID, links[0].ToIssueUID)
 }
 
 func checkRestoredRetainedTaskEdit(t *testing.T) {
