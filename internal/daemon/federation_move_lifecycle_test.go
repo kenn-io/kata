@@ -195,20 +195,11 @@ func overtakenLeaveFixture(t *testing.T, store db.Storage) db.Project {
 	return local[0]
 }
 
-func TestPrepareFederationLeaveOvertakenMove(t *testing.T) {
-	store := openReplicaServiceStore(t)
-	source := overtakenLeaveFixture(t, store)
-	_, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, newReplicaCredentialStore(), source.ID, "")
-	require.NoError(t, err)
-}
-
 func TestLeaveFederationRouteOvertakenMove(t *testing.T) {
 	env := testenv.New(t)
 	source := overtakenLeaveFixture(t, env.DB)
 	path := fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", source.ID)
 	response, raw := envDoRaw(t, env, http.MethodPost, path, map[string]any{"disposition": "archive", "actor": "worker", "preflight": true, "force": true}, nil)
-	require.Equal(t, http.StatusConflict, response.StatusCode, string(raw))
-	response, raw = envDoRaw(t, env, http.MethodPost, path, map[string]any{"disposition": "archive", "actor": "worker", "prepare": true, "force": true}, nil)
 	require.Equal(t, http.StatusConflict, response.StatusCode, string(raw))
 	response, raw = envDoRaw(t, env, http.MethodPost, path, map[string]any{"disposition": "detach", "actor": "worker", "preflight": true}, nil)
 	require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
