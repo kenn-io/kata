@@ -13,6 +13,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/shellquote"
 )
 
 // activeProjectByID resolves a project by rowid for surface API handlers
@@ -795,7 +796,7 @@ func gitInitName(info config.AliasInfo) (string, error) {
 func projectNotInitialized(ctx context.Context, store db.Storage, message, name, initCommand string, data map[string]any) error {
 	hint := initCommand + " in this workspace"
 	if initCommand == "" {
-		hint = fmt.Sprintf(`run "kata projects create" with name set to %q`, name)
+		hint = "run kata projects create -- " + shellquote.Quote(name)
 	}
 	if name != "" {
 		project, err := store.ProjectByNameIncludingArchived(ctx, name)

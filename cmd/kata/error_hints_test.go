@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/shlex"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/testenv"
@@ -58,7 +59,7 @@ func TestErrorHintsExplicitProjectInGitWorkspace(t *testing.T) {
 
 	_, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "--project", "chosen-project", "create", "Example task")
 	require.Error(t, err)
-	assert.Contains(t, stderr, `run "kata projects create" with name set to "chosen-project"`)
+	assert.Contains(t, stderr, `run kata projects create -- chosen-project`)
 }
 
 func TestErrorHintsExplicitProjectInBoundWorkspace(t *testing.T) {
@@ -80,7 +81,7 @@ func TestErrorHintsExplicitProjectInBoundWorkspace(t *testing.T) {
 			_, stderr, err := executeRootCapture(t, ctx, "--workspace", dir, "--project", "target-project", "list")
 			require.Error(t, err)
 			if state == "missing" {
-				assert.Contains(t, stderr, `run "kata projects create" with name set to "target-project"`)
+				assert.Contains(t, stderr, `run kata projects create -- target-project`)
 				_, err = runCmdOutput(t, env, "--workspace", dir, "projects", "create", "target-project")
 			} else {
 				assert.Contains(t, stderr, fmt.Sprintf("hint: run \"kata projects restore %d\"\n", projectID))
@@ -88,6 +89,31 @@ func TestErrorHintsExplicitProjectInBoundWorkspace(t *testing.T) {
 			}
 			require.NoError(t, err)
 			_, err = runCmdOutput(t, env, "--workspace", dir, "--project", "target-project", "list")
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestErrorHintsCreateCommand(t *testing.T) {
+	for _, name := range []string{"target-project", "team's $project", "-flag"} {
+		t.Run(name, func(t *testing.T) {
+			setupKataEnv(t)
+			t.Setenv("KATA_SERVER", "")
+			env := testenv.New(t)
+			dir, _ := initLocalBoundWorkspace(t, env, "bound-project")
+			_, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "--project", name, "list")
+			require.Error(t, err)
+			_, hint, ok := strings.Cut(stderr, "\nhint: run ")
+			require.True(t, ok, stderr)
+			command, _, ok := strings.Cut(hint, "\n")
+			require.True(t, ok, stderr)
+			args, err := shlex.Split(command)
+			require.NoError(t, err)
+			require.NotEmpty(t, args)
+			require.Equal(t, "kata", args[0])
+			_, err = runCmdOutput(t, env, args[1:]...)
+			require.NoError(t, err)
+			_, err = env.DB.ProjectByName(t.Context(), name)
 			require.NoError(t, err)
 		})
 	}
