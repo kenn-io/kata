@@ -586,17 +586,28 @@ func FederationMoveHistoryProvesSnapshot(uid, sourceProjectUID string, history [
 	if json.Unmarshal([]byte(payload), &snapshot) != nil || !proof.authors[strings.TrimSpace(snapshot.Author)] {
 		return false
 	}
-	boundActor = strings.TrimSpace(boundActor)
+	return proof.provesSnapshotReferences(uid, snapshot, strings.TrimSpace(boundActor))
+}
+
+// provesSnapshotReferences mirrors the hub validator: comments and links by
+// someone other than the bound actor must already be accepted history.
+func (p *moveSnapshotProof) provesSnapshotReferences(uid string, snapshot IssueDocumentPayload, boundActor string) bool {
 	for _, comment := range snapshot.Comments {
 		value := moveSnapshotComment{
 			UID: comment.CommentUID, Author: comment.Author, Teammate: comment.Teammate,
 			Body: comment.Body, CreatedAt: comment.CreatedAt, EditedAt: comment.EditedAt,
 			ReplyToUID: comment.ReplyToUID, ReplyKind: comment.ReplyKind,
 		}.normalized()
-		if proof.comments[value] || (value.Author == boundActor && !proof.commentUIDs[value.UID]) {
+		if p.comments[value] || (value.Author == boundActor && !p.commentUIDs[value.UID]) {
 			continue
 		}
 		return false
+	}
+	for _, l := range snapshot.Links {
+		link := moveSnapshotLink{ToIssueUID: l.ToIssueUID, Type: l.Type, Incoming: l.Incoming, Author: l.Author}
+		if author := strings.TrimSpace(l.Author); author != "" && author != boundActor && !p.links[link.identity(uid, boundActor)] {
+			return false
+		}
 	}
 	return true
 }
