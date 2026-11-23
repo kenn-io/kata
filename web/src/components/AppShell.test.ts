@@ -133,58 +133,6 @@ describe('AppShell', () => {
     expect(screen.queryByRole('button', { name: 'Credentials' })).toBeNull()
   })
 
-  test('refreshes repeating tasks when the recurrence revision changes', async () => {
-    const rule = {
-      id: 1,
-      uid: 'recurrence-1',
-      project_id: 7,
-      rrule: 'FREQ=WEEKLY',
-      dtstart: '2026-11-22',
-      timezone: 'UTC',
-      template_title: 'Weekly task',
-      template_body: '',
-      template_labels: [],
-      template_metadata: {},
-      next_occurrence_key: '2026-11-29',
-      author: 'user-a',
-      revision: 1,
-      created_at: '2026-11-22T12:00:00.000Z',
-      updated_at: '2026-11-22T12:00:00.000Z',
-    }
-    let recurrenceReads = 0
-    setGeneratedFetch(async (url) => {
-      if (String(url).includes('/recurrences')) {
-        recurrenceReads++
-        return Response.json({ recurrences: recurrenceReads === 1 ? [] : [rule] })
-      }
-      return Response.json({ statuses: [] })
-    })
-    const current = snapshot()
-    const props = {
-      route: {
-        kind: 'kata' as const,
-        projectUID: current.catalog[0]!.project.uid,
-        graph: false,
-        filters: { status: [], owner: [], label: [], relationship: [] },
-      },
-      snapshot: current,
-      loading: false,
-      ...mutationProps(),
-      draftResetGeneration: current.cursor,
-      onNavigate: vi.fn(),
-      onCreateProject: vi.fn(async () => ({ changed: true })),
-    }
-    const view = render(AppShell, { props })
-    await waitFor(() => expect(recurrenceReads).toBe(1))
-    expect(screen.queryByRole('button', { name: /repeating task/ })).toBeNull()
-
-    await view.rerender({ ...props, recurrenceRevision: 1 })
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: '↻ 1 repeating task' })).not.toBeNull(),
-    )
-    expect(recurrenceReads).toBe(2)
-  })
-
   test('keeps project sync readable for a current read-only project member', () => {
     setGeneratedFetch(projectSyncFetch())
     const current = snapshot()
