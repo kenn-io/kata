@@ -52,7 +52,7 @@ func actionsConflict(a, b []string) bool {
 	for _, kind := range singleValued {
 		for _, x := range a {
 			for _, y := range b {
-				if strings.HasPrefix(x, kind) && strings.HasPrefix(y, kind) && x != y {
+				if strings.HasPrefix(x, kind) && strings.HasPrefix(y, kind) && strings.ToLower(x) != strings.ToLower(y) {
 					return true
 				}
 			}
@@ -67,6 +67,7 @@ func actionsConflict(a, b []string) bool {
 func mergeActions(a, b []string) []string {
 	var out []string
 	counts := map[string]int{}
+	seen := map[string]bool{}
 	for _, token := range slices.Concat(a, b) {
 		if token == "-" {
 			continue
@@ -75,7 +76,9 @@ func mergeActions(a, b []string) []string {
 			counts[name] += n
 			token = name
 		}
-		if !slices.Contains(out, token) {
+		key := strings.ToLower(token)
+		if !seen[key] {
+			seen[key] = true
 			out = append(out, token)
 		}
 	}

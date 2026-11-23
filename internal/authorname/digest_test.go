@@ -41,6 +41,8 @@ func TestGroupDigestIssueActions(t *testing.T) {
 	}{
 		{"compatible", []generated.DigestIssueActions{issue(1, "created", "commented", "labeled:a"), issue(1, "commented:2", "edited", "labeled:a", "labeled:b")}, []generated.DigestIssueActions{issue(1, "created", "commented:3", "edited", "labeled:a", "labeled:b")}},
 		{"same priority", []generated.DigestIssueActions{issue(1, "priority:1"), issue(1, "priority:1")}, []generated.DigestIssueActions{issue(1, "priority:1")}},
+		{"case insensitive duplicates", []generated.DigestIssueActions{issue(1, "labeled:Bug", "related:ABC"), issue(1, "labeled:bug", "related:abc")}, []generated.DigestIssueActions{issue(1, "labeled:Bug", "related:ABC")}},
+		{"case insensitive single values", []generated.DigestIssueActions{issue(1, "assigned:Alice", "closed:Done"), issue(1, "assigned:alice", "closed:done")}, []generated.DigestIssueActions{issue(1, "assigned:Alice", "closed:Done")}},
 		{"missing priority", []generated.DigestIssueActions{issue(1, "priority:1"), issue(1, "edited")}, []generated.DigestIssueActions{issue(1, "edited", "priority:1")}},
 		{"conflicting assignments", []generated.DigestIssueActions{issue(1, "assigned:alice"), issue(1, "assigned:bob")}, []generated.DigestIssueActions{issue(1, "assigned:alice"), issue(1, "assigned:bob")}},
 		{"conflicting priorities", []generated.DigestIssueActions{issue(1, "priority:1"), issue(1, "priority:2")}, []generated.DigestIssueActions{issue(1, "priority:1"), issue(1, "priority:2")}},
