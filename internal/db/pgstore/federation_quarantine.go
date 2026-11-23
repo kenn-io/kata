@@ -126,7 +126,15 @@ func (s *Store) SkipFederationQuarantine(
 		if quarantine.Direction != db.FederationQuarantineDirectionPush {
 			return fmt.Errorf("skip federation quarantine: unsupported direction %q", quarantine.Direction)
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE federation_bindings SET
+		earlier, err := db.FederationQuarantineHasEarlierEvents(ctx, tx, quarantine, s.InstanceUID())
+		if err != nil {
+			return err
+		}
+		if earlier {
+			if err := db.RecordFederationAcknowledgedEvents(ctx, tx, quarantine.ProjectID, quarantine.EventUIDs); err != nil {
+				return err
+			}
+		} else if _, err := tx.ExecContext(ctx, `UPDATE federation_bindings SET
 push_cursor_event_id=GREATEST(push_cursor_event_id,$1),
 last_sync_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
 updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')

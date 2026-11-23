@@ -101,6 +101,26 @@ func RemoveOrphanedFederationAcknowledgments(ctx context.Context, tx *sql.Tx) er
 	return err
 }
 
+// FederationQuarantineHasEarlierEvents finds outstanding events outside the skipped batch.
+func FederationQuarantineHasEarlierEvents(ctx context.Context, tx *sql.Tx, q FederationQuarantine, origin string) (bool, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT e.uid FROM events e JOIN federation_bindings b ON b.project_id=e.project_id
+ WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>b.push_cursor_event_id AND e.id<=$3 AND `+FederationUnresolvedEventSQL("e"), q.ProjectID, origin, q.LastEventID)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var uid string
+		if err := rows.Scan(&uid); err != nil {
+			return false, err
+		}
+		if !slices.Contains(q.EventUIDs, uid) {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
 // RetainFederationHeldCursor records the cursor before a leave deletes its binding.
 func RetainFederationHeldCursor(ctx context.Context, tx *sql.Tx, projectID int64, projectUID, origin string) error {
 	_, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) SELECT $1,CAST(push_cursor_event_id AS TEXT) FROM federation_bindings WHERE project_id=$2 ON CONFLICT(key) DO UPDATE SET value=CASE WHEN CAST(meta.value AS BIGINT)>CAST(excluded.value AS BIGINT) THEN meta.value ELSE excluded.value END`, FederationHeldCursorPrefix+projectUID, projectID)

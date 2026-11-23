@@ -335,12 +335,12 @@ func pushDirectSpoke(
 						single = false
 						continue
 					}
-					if refused != nil {
-						return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-					}
 					if isPoisonedFederationPushError(err) {
 						if qErr := recordFederationPushQuarantine(ctx, store, binding.ProjectID, batch, err); qErr != nil {
 							return recordFederationSyncError(ctx, store, binding.ProjectID, errors.Join(err, qErr))
+						}
+						if refused != nil {
+							err = errors.Join(refused, err)
 						}
 					}
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)

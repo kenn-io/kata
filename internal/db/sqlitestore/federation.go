@@ -366,7 +366,15 @@ func (d *Store) skipFederationQuarantine(ctx context.Context, p db.SkipFederatio
 	}
 	switch q.Direction {
 	case db.FederationQuarantineDirectionPush:
-		if _, err := tx.ExecContext(ctx, `
+		earlier, err := db.FederationQuarantineHasEarlierEvents(ctx, tx, q, d.InstanceUID())
+		if err != nil {
+			return db.FederationQuarantine{}, err
+		}
+		if earlier {
+			if err := db.RecordFederationAcknowledgedEvents(ctx, tx, q.ProjectID, q.EventUIDs); err != nil {
+				return db.FederationQuarantine{}, err
+			}
+		} else if _, err := tx.ExecContext(ctx, `
 			UPDATE federation_bindings
 			   SET push_cursor_event_id = CASE
 			         WHEN push_cursor_event_id < ? THEN ?
