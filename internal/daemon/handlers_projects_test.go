@@ -3,6 +3,7 @@ package daemon_test
 import (
 	"encoding/json"
 	"encoding/json/jsontext"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -322,7 +323,14 @@ func TestResolve_ByAliasInput_NotRegistered(t *testing.T) {
 	})
 	envelope := assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
 	assert.Equal(t, map[string]any{"alias": "github.com/wesm/never-seen"}, map[string]any(envelope.Error.Data), string(bs))
-	assert.Equal(t, `run "kata init": it attaches this repo to the active project "never-seen", or creates it if none exists; if that project is archived, restore it first`, envelope.Error.Hint)
+	assert.Equal(t, `run "kata init": it attaches this repo to the active project "never-seen", or creates it if none exists`, envelope.Error.Hint)
+
+	resp, bs = postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{"alias": map[string]any{"identity": "github.com/example/missing", "kind": "git"}})
+	envelope = assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
+	assert.Equal(t, `run "kata init": it attaches this repo to the active project "missing", or creates it if none exists`, envelope.Error.Hint)
+
+	resp, bs = postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{"alias": map[string]any{"identity": "github.com/example/", "kind": "git"}})
+	assertAPIError(t, resp.StatusCode, bs, http.StatusBadRequest, "validation")
 
 	resp, bs = postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{
 		"alias": map[string]any{
@@ -1333,8 +1341,22 @@ func TestRemoveProject_ArchivedNameRefusesReinit(t *testing.T) {
 		"alias": map[string]any{"identity": "github.com/wesm/proj-archive-reinit", "kind": "git"},
 	})
 	envelope := assertAPIError(t, resp3.StatusCode, bs3, http.StatusNotFound, "project_not_initialized")
-	assert.Contains(t, envelope.Error.Hint, `the active project "proj-archive-reinit"`)
-	assert.Contains(t, envelope.Error.Hint, `if that project is archived, restore it first`)
+	assert.Equal(t, fmt.Sprintf(`run "kata projects restore %d", then run "kata init" in this workspace`, initBody.Project.ID), envelope.Error.Hint)
+}
+
+func TestResolve_ArchivedProjectHintUsesID(t *testing.T) {
+	for _, name := range []string{"-project", "123"} {
+		t.Run(name, func(t *testing.T) {
+			ts, h := startDefaultTestServer(t)
+			project, err := h.db.CreateProject(t.Context(), name)
+			require.NoError(t, err)
+			_, _, err = h.db.RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: project.ID, Actor: "tester"})
+			require.NoError(t, err)
+			resp, bs := postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{"alias": map[string]any{"identity": "github.com/example/" + name, "kind": "git"}})
+			envelope := assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
+			assert.Equal(t, fmt.Sprintf(`run "kata projects restore %d", then run "kata init" in this workspace`, project.ID), envelope.Error.Hint)
+		})
+	}
 }
 
 // TestListProjects_WithStatsIncludesAggregates pins the new wire

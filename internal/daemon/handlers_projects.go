@@ -45,22 +45,29 @@ func activeProjectByID(ctx context.Context, store db.Storage, id int64) (db.Proj
 // the caller cannot read exists.
 func archivedProjectError(ctx context.Context, p db.Project) error {
 	plain := api.NewError(404, "project_not_found", "project not found", "", nil)
-	if authorizeProjectTarget(ctx, p.UID) != nil {
+	if !canSeeArchived(ctx, p) {
 		return plain
+	}
+	return api.NewError(404, "project_not_found", "project not found",
+		"project "+p.Name+" is archived; run 'kata projects restore "+p.Name+"' to bring it back", nil)
+}
+
+func canSeeArchived(ctx context.Context, p db.Project) bool {
+	if authorizeProjectTarget(ctx, p.UID) != nil {
+		return false
 	}
 	// An issue-scoped credential reads only its subtree, and issue routes
 	// resolve the project before they check containment, so the hint would
 	// confirm that an out-of-subtree issue exists.
 	if issueScopeFromContext(ctx) != nil {
-		return plain
+		return false
 	}
 	if hostAccessGoverns(ctx) {
 		if _, err := authorizeHostProjectScope(ctx, []int64{p.ID}, nil, false); err != nil {
-			return plain
+			return false
 		}
 	}
-	return api.NewError(404, "project_not_found", "project not found",
-		"project "+p.Name+" is archived; run 'kata projects restore "+p.Name+"' to bring it back", nil)
+	return true
 }
 
 // dbProjectToOut maps a db.Project (internal row) to the API-shape
@@ -737,8 +744,10 @@ func resolveByAliasInput(ctx context.Context, store db.Storage, in *api.AliasInp
 	if name == "" {
 		hint := `run "kata init" in this workspace`
 		if info.Kind == "git" {
-			name := config.PickName("", info.Identity)
-			hint = fmt.Sprintf(`run "kata init": it attaches this repo to the active project %q, or creates it if none exists; if that project is archived, restore it first`, name)
+			hint, err = unattachedGitHint(ctx, store, info.Identity)
+			if err != nil {
+				return nil, err
+			}
 		}
 		return nil, api.NewError(404, "project_not_initialized",
 			"alias "+info.Identity+" is not registered",
@@ -777,6 +786,21 @@ func resolveByAliasInput(ctx context.Context, store db.Storage, in *api.AliasInp
 		Project: dbProjectToOut(project),
 		Alias:   attached,
 	}, nil
+}
+
+func unattachedGitHint(ctx context.Context, store db.Storage, identity string) (string, error) {
+	name := config.PickName("", identity)
+	if err := config.ValidateProjectName(name); err != nil {
+		return "", api.NewError(400, "validation", err.Error(), "", nil)
+	}
+	project, err := store.ProjectByNameIncludingArchived(ctx, name)
+	if err != nil && !errors.Is(err, db.ErrNotFound) {
+		return "", internalAPIError(err)
+	}
+	if err == nil && project.DeletedAt != nil && canSeeArchived(ctx, project) {
+		return fmt.Sprintf(`run "kata projects restore %d", then run "kata init" in this workspace`, project.ID), nil
+	}
+	return fmt.Sprintf(`run "kata init": it attaches this repo to the active project %q, or creates it if none exists`, name), nil
 }
 
 func resolveByName(ctx context.Context, store db.Storage, name string) (*api.ProjectResolveBody, error) {
