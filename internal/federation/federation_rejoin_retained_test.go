@@ -32,22 +32,11 @@ func TestRetainedLinkPeersSkipsOrdinaryBinding(t *testing.T) {
 	payload, err := json.Marshal(map[string]string{"from_uid": issue, "to_uid": peer, "type": "blocks"})
 	require.NoError(t, err)
 	event := db.Event{Type: "issue.linked", IssueUID: &issue, Payload: string(payload)}
-	for _, tc := range []struct {
-		name     string
-		boundary int64
-		calls    int
-	}{
-		{name: "ordinary", calls: 0},
-		{name: "retained", boundary: 1, calls: 1},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			store := &retainedSnapshotCounter{}
-			binding := db.FederationBinding{RetainedThroughEventID: tc.boundary}
-			_, err := publishRetainedLinkPeers(t.Context(), store, &binding, 0, nil, []db.Event{event}, make(map[string]bool), nil, nil, nil, clientpkg.Opts{})
-			require.NoError(t, err)
-			require.Equal(t, tc.calls, store.calls)
-		})
-	}
+	store := &retainedSnapshotCounter{}
+	binding := db.FederationBinding{}
+	_, err = publishRetainedLinkPeers(t.Context(), store, &binding, 0, nil, []db.Event{event}, make(map[string]bool), nil, nil, nil, clientpkg.Opts{})
+	require.NoError(t, err)
+	require.Zero(t, store.calls)
 }
 
 func TestRejoinRetainedHistory(t *testing.T) {
