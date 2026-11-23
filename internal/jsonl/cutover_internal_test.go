@@ -154,10 +154,9 @@ func TestAutoCutoverPreservesArtifactsWhenRestoreFails(t *testing.T) {
 	require.ErrorIs(t, CheckCutoverSource(ctx, path), ErrCutoverInProgress)
 }
 
-// Index-only upgrades, and the one that adds the MCP Events table, must
-// match the fresh-store catalog without exporting.
+// In-place upgrades must match the fresh-store catalog without exporting.
 func TestAutoCutoverAddsIndexOnlyVersionsInPlace(t *testing.T) {
-	for _, version := range []int{41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 52} {
+	for _, version := range []int{41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 52, 53} {
 		t.Run(strconv.Itoa(version), func(t *testing.T) {
 			t.Setenv("KATA_HOME", t.TempDir())
 			path := indexOnlySource(t, version)
@@ -264,6 +263,7 @@ func indexOnlySource(t *testing.T, version int) string {
 		{49, []string{"idx_events_cron_run_uid"}, nil},
 		{50, nil, []string{"mcp_event_subscriptions"}},
 		{53, []string{"idx_events_project_moves"}, nil},
+		{54, nil, []string{"federation_held_cursors"}},
 	} {
 		if step.to > version {
 			for _, name := range step.indexes {
