@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -734,9 +735,13 @@ func resolveByAliasInput(ctx context.Context, store db.Storage, in *api.AliasInp
 	// project was registered without this alias.
 	name = strings.TrimSpace(name)
 	if name == "" {
+		hint := `run "kata init" in this workspace`
+		if info.Kind == "git" {
+			hint = fmt.Sprintf(`run "kata init": it attaches this repo to the project %q if one exists, and creates it otherwise`, config.PickName("", info.Identity))
+		}
 		return nil, api.NewError(404, "project_not_initialized",
 			"alias "+info.Identity+" is not registered",
-			`run "kata init" in this workspace`, map[string]any{"alias": info.Identity})
+			hint, map[string]any{"alias": info.Identity})
 	}
 	if err := config.ValidateProjectName(name); err != nil {
 		return nil, api.NewError(400, "validation", err.Error(), "", nil)

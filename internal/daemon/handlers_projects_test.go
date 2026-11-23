@@ -318,6 +318,7 @@ func TestResolve_ByAliasInput_NotRegistered(t *testing.T) {
 	})
 	envelope := assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
 	assert.Equal(t, map[string]any{"alias": "github.com/wesm/never-seen"}, map[string]any(envelope.Error.Data), string(bs))
+	assert.Equal(t, `run "kata init": it attaches this repo to the project "never-seen" if one exists, and creates it otherwise`, envelope.Error.Hint)
 
 	resp, bs = postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{
 		"alias": map[string]any{
