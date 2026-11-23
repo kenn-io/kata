@@ -9,7 +9,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
-	"go.kenn.io/kata/internal/agentguide"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -25,12 +24,15 @@ func newCommentCmd() *cobra.Command {
 		Long: `Append a comment. Body comes from -m/--body, --body-file, or --body-stdin.
 KATA_TEAMMATE (or --teammate) records which teammate wrote it.
 
-` + agentguide.CommentRules,
-		Example: `kata comment abc4 --body-stdin --agent <<'EOF'
-Safari 18 fires the callback twice; ` + "`retry()`" + ` runs on both.
-EOF
+Comment only with findings a later reader needs; keep live status in
+work.attention_msg. Correct your own comment with kata comment edit. An open,
+unmerged PR is unfinished: leave the issue open, update work.attention and
+work.attention_msg, and add the needs-review label.`,
+		Example: `  kata comment abc4 --body-stdin --agent <<-'EOF'
+	Safari 18 fires the callback twice; ` + "`retry()`" + ` runs on both.
+	EOF
 
-kata comment abc4 --body-file notes.md --agent`,
+  kata comment abc4 --body-file notes.md --agent`,
 		Args: cobra.ExactArgs(1),
 	}
 	cmd.Flags().StringVar(&reply, "reply", "", "reply to a comment reference")
@@ -152,9 +154,9 @@ func newCommentEditCmd() *cobra.Command {
 		Use:   "edit <issue-ref> <comment-uid>",
 		Short: "edit a comment body",
 		Long:  `Replace the body of one comment. Find its comment UID with kata show; use -m/--body, --body-file, or --body-stdin.`,
-		Example: `kata comment edit abc4 <comment-uid> --body-stdin --agent <<'EOF'
-Corrected repro steps: run ` + "`make test`" + ` twice.
-EOF`,
+		Example: `  kata comment edit abc4 <comment-uid> --body-stdin --agent <<-'EOF'
+	Corrected repro steps: run ` + "`make test`" + ` twice.
+	EOF`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			src.BodySet = cmd.Flags().Changed("body")

@@ -39,16 +39,16 @@ For subagents, inboxes, attention signals, scheduling, and relationship rules,
 run kata quickstart.
 `
 
-// CommentRules says what a comment is for and how to pass its text. The
-// heredoc stays flush-left wherever it is embedded: an indented terminator
-// never ends stdin.
+// CommentRules says what a comment is for and how to pass its text. Its
+// heredoc uses <<- so the tab-indented body and terminator stay copyable at
+// the indentation of the surrounding command blocks.
 const CommentRules = `Comment only with findings a later reader needs. Pass the text through a
 quoted heredoc so the shell leaves backticks and $ alone; replies such as
 --reply c:<id> take --body-stdin too:
 
-kata comment <ref> --body-stdin --agent <<'EOF'
-<finding>
-EOF
+    kata comment <ref> --body-stdin --agent <<-'EOF'
+	<finding>
+	EOF
 
 Correct your own comment with kata comment edit <ref> <comment-uid>. Keep
 live status in work.attention_msg, not in comments:
@@ -187,9 +187,9 @@ const fragSearchCreateUpdate = `3. Search before creating:
 
    kata show abc4 --agent
    kata show --project foo abc4 --agent
-   kata comment abc4 --body-stdin --agent <<'EOF'
-Found another reproduction path.
-EOF
+   kata comment abc4 --body-stdin --agent <<-'EOF'
+	Found another reproduction path.
+	EOF
    kata label add abc4 safari --agent
    kata edit abc4 --blocks d4ex --agent
 
@@ -197,9 +197,9 @@ EOF
    by kata show. --confirm and --refute take evidence in the body. Use
    --reply, --confirm, --refute, or --supersede the same way:
 
-   kata comment abc4 --confirm c:xbzxrq --body-stdin --agent <<'EOF'
-Reproduced with the documented retry steps.
-EOF
+   kata comment abc4 --confirm c:xbzxrq --body-stdin --agent <<-'EOF'
+	Reproduced with the documented retry steps.
+	EOF
 
 `
 
@@ -271,16 +271,16 @@ const fragTeammates = `9. Attribute swarm contributions and request attention wi
 
    export KATA_TEAMMATE=teammate-1
    export KATA_INBOX_USER=coordinator/teammate-1
-   kata comment abc4 --body-stdin <<'EOF'
-The retry path reuses the original export ID.
-EOF
+   kata comment abc4 --body-stdin <<-'EOF'
+	The retry path reuses the original export ID.
+	EOF
    kata create "Check retry behavior" --parent abc4 --idempotency-key retry-teammate-1
-   kata --teammate=teammate-2 comment abc4 --body-stdin <<'EOF'
-A retry after a timeout creates a second export.
-EOF
-   kata --teammate='' comment abc4 --body-stdin <<'EOF'
-Both retry findings trace to the missing export ID check.
-EOF
+   kata --teammate=teammate-2 comment abc4 --body-stdin <<-'EOF'
+	A retry after a timeout creates a second export.
+	EOF
+   kata --teammate='' comment abc4 --body-stdin <<-'EOF'
+	Both retry findings trace to the missing export ID check.
+	EOF
    kata notify abc4 --to coordinator --message "Please decide"
    kata notify abc4 --to coordinator/teammate-1 --message "Please check the update"
    kata inbox --for coordinator/teammate-1
@@ -353,9 +353,9 @@ const fragMutationComments = `10. To leave context alongside a mutation, pass --
    If the comment call fails, the error names the issue so you can
    retry with a quoted heredoc:
 
-kata comment <ref> --body-stdin <<'EOF'
-<text>
-EOF
+   kata comment <ref> --body-stdin <<-'EOF'
+	<text>
+	EOF
 
 `
 

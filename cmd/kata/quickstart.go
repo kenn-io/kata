@@ -34,8 +34,13 @@ Default to --agent for ordinary kata reads and mutations in agent logs.
 Use --json only when your script needs complete structured data.
 Launch each child with KATA_TEAMMATE=teammate-1 and KATA_INBOX_USER=coordinator/teammate-1.
 Comments store teammate; new issues store metadata.teammate while author remains accountable.
+
 ` + agentguide.CommentRules + `
-When a comment-sized task needs ownership or tracked completion, make it a child issue: kata create "fix retry handling" --parent <ref>, then kata claim <child>.
+When a comment-sized task needs ownership or tracked completion, make it a child issue:
+
+    kata create "fix retry handling" --parent <ref>
+    kata claim <child>
+
 KATA_INBOX_USER selects an inbox and does not set attribution; --teammate overrides the attribution default.
 Request actor or teammate attention: kata notify <ref> --to <actor>[/<teammate>] --message "<reason>".
 Read exact requests with kata inbox --for <actor>[/<teammate>]; clear after handling with kata notify <ref> --to <actor>[/<teammate>] --clear.

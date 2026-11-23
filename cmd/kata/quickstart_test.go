@@ -109,10 +109,10 @@ func TestQuickstartExplainsTeammateFlow(t *testing.T) {
 		"KATA_TEAMMATE=teammate-1",
 		"KATA_INBOX_USER=coordinator/teammate-1",
 		"metadata.teammate",
-		"kata comment abc4 --body-stdin <<'EOF'\nThe retry path reuses the original export ID.\nEOF\n",
+		"kata comment abc4 --body-stdin <<-'EOF'\n\tThe retry path reuses the original export ID.\n\tEOF\n",
 		"kata create \"Check retry behavior\" --parent abc4 --idempotency-key retry-teammate-1",
-		"kata --teammate=teammate-2 comment abc4 --body-stdin <<'EOF'\nA retry after a timeout creates a second export.\nEOF\n",
-		"kata --teammate='' comment abc4 --body-stdin <<'EOF'\nBoth retry findings trace to the missing export ID check.\nEOF\n",
+		"kata --teammate=teammate-2 comment abc4 --body-stdin <<-'EOF'\n\tA retry after a timeout creates a second export.\n\tEOF\n",
+		"kata --teammate='' comment abc4 --body-stdin <<-'EOF'\n\tBoth retry findings trace to the missing export ID check.\n\tEOF\n",
 		"kata notify abc4 --to coordinator --message \"Please decide\"",
 		"kata notify abc4 --to coordinator/teammate-1",
 		"kata inbox --for coordinator/teammate-1",
@@ -269,7 +269,7 @@ func TestQuickstartLocalProfileRecoveryGuidance(t *testing.T) {
 // Product contract (kata#5s85): every CLI guide says comments carry findings,
 // keeps live status in work.attention_msg, corrects a comment by editing it,
 // treats an open, unmerged PR as unfinished, and passes comment text through a
-// quoted heredoc whose flush-left terminator ends stdin.
+// quoted heredoc whose terminator ends stdin.
 func TestGuidesSayCommentsCarryFindings(t *testing.T) {
 	guides := map[string]string{}
 	for _, format := range []string{"human", "agent", "contract"} {
@@ -277,8 +277,6 @@ func TestGuidesSayCommentsCarryFindings(t *testing.T) {
 		out := executeRoot(t, newRootCmd(), "quickstart", "--format", format)
 		guides["quickstart "+format] = string(out)
 	}
-	resetFlags(t)
-	guides["comment help"] = string(executeRoot(t, newRootCmd(), "comment", "--help"))
 	for name, text := range guides {
 		assert.Contains(t, text, "kata meta set <ref> work.attention_msg \"<what remains>\"", name)
 		assert.Contains(t, text, "leave the issue open, update work.attention and work.attention_msg", name)
@@ -289,11 +287,20 @@ func TestGuidesSayCommentsCarryFindings(t *testing.T) {
 	}
 	// The retry after a failed mutation comment, and the edit example, carry
 	// comment text, so they use the quoted heredoc too.
-	assert.Contains(t, guides["quickstart human"], "retry with a quoted heredoc:\n\nkata comment <ref> --body-stdin <<'EOF'\n")
+	assert.Contains(t, guides["quickstart human"], "retry with a quoted heredoc:\n\n   kata comment <ref> --body-stdin <<-'EOF'\n")
 	assert.NotContains(t, guides["quickstart human"], "--body ...")
 	resetFlags(t)
+	commentHelp := string(executeRoot(t, newRootCmd(), "comment", "--help"))
+	assert.Contains(t, commentHelp, "findings a later reader needs")
+	assert.Contains(t, commentHelp, "work.attention_msg")
+	assert.Contains(t, commentHelp, "kata comment edit")
+	assert.Contains(t, commentHelp, "unmerged PR is unfinished")
+	assert.Contains(t, commentHelp, "needs-review")
+	assertClosedBodyStdinHeredoc(t, "comment help", commentHelp)
+	guides["comment help"] = commentHelp
+	resetFlags(t)
 	editHelp := string(executeRoot(t, newRootCmd(), "comment", "edit", "--help"))
-	assert.Contains(t, editHelp, "kata comment edit abc4 <comment-uid> --body-stdin --agent <<'EOF'")
+	assert.Contains(t, editHelp, "kata comment edit abc4 <comment-uid> --body-stdin --agent <<-'EOF'")
 	assert.NotContains(t, editHelp, "-m \"")
 	assertClosedBodyStdinHeredoc(t, "comment edit help", editHelp)
 	for _, args := range [][]string{{"--help"}, {"close", "--help"}, {"label", "add", "--help"}, {"claim", "--help"}} {
@@ -306,26 +313,25 @@ func TestGuidesSayCommentsCarryFindings(t *testing.T) {
 	}
 }
 
-// A heredoc whose terminator is indented never ends, so the copied command
-// waits on stdin forever. Every example must close before the next one opens.
+// The <<- operator strips tabs, but not spaces, from a heredoc terminator.
 func assertClosedBodyStdinHeredoc(t *testing.T, name, text string) {
 	t.Helper()
 	open, found := false, 0
 	for _, line := range strings.Split(text, "\n") {
-		if strings.Contains(line, "--body-stdin") && strings.HasSuffix(line, "<<'EOF'") {
+		if strings.Contains(line, "--body-stdin") && strings.HasSuffix(line, "<<-'EOF'") {
 			if open {
-				t.Errorf("%s: --body-stdin <<'EOF' example opened before the previous one closed", name)
+				t.Errorf("%s: heredoc opened before the previous one closed", name)
 			}
 			open = true
 			found++
-		} else if open && line == "EOF" {
+		} else if open && strings.TrimLeft(line, "\t") == "EOF" {
 			open = false
 		}
 	}
 	if open {
-		t.Errorf("%s: --body-stdin <<'EOF' example never closed by a flush-left EOF line", name)
+		t.Errorf("%s: heredoc never closed by an EOF line with only tabs before it", name)
 	}
 	if found == 0 {
-		t.Errorf("%s: no --body-stdin <<'EOF' example", name)
+		t.Errorf("%s: no --body-stdin <<-'EOF' example", name)
 	}
 }
