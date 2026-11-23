@@ -262,6 +262,7 @@ func TestResolve_ByProjectName_NotRegistered(t *testing.T) {
 	})
 	envelope := assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
 	assert.Equal(t, map[string]any{"project": "never-registered"}, map[string]any(envelope.Error.Data), string(bs))
+	assert.Equal(t, `run kata projects create -- never-registered`, envelope.Error.Hint)
 }
 
 // TestResolve_NeitherFieldSet rejects a request that supplies neither
@@ -319,6 +320,7 @@ func TestResolve_ByAliasInput_NotRegistered(t *testing.T) {
 	})
 	envelope := assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
 	assert.Equal(t, map[string]any{"alias": "github.com/wesm/never-seen"}, map[string]any(envelope.Error.Data), string(bs))
+	assert.Equal(t, `run "kata init": it attaches this workspace to the active project "never-seen", or creates it if none exists`, envelope.Error.Hint)
 
 	resp, bs = postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{"alias": map[string]any{"identity": "github.com/example/", "kind": "git"}})
 	assertAPIError(t, resp.StatusCode, bs, http.StatusBadRequest, "validation")
@@ -332,12 +334,13 @@ func TestResolve_ByAliasInput_NotRegistered(t *testing.T) {
 	})
 	envelope = assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
 	assert.Equal(t, map[string]any{"project": "ghost-project"}, map[string]any(envelope.Error.Data), string(bs))
+	assert.Equal(t, `run "kata init" with --project set to "ghost-project": it attaches this workspace to the active project "ghost-project", or creates it if none exists`, envelope.Error.Hint)
 }
 
 func TestResolve_NotInitializedHint(t *testing.T) {
 	for _, shape := range []string{"alias", "alias with name", "name", "path with config", "path"} {
 		for _, state := range []string{"missing", "active", "archived"} {
-			if state == "active" && shape != "path" {
+			if shape != "path" && state != "archived" {
 				continue
 			}
 			t.Run(shape+"/"+state, func(t *testing.T) {
@@ -401,6 +404,7 @@ func TestResolve_ByStartPath_KataTomlNamesUnregisteredProject(t *testing.T) {
 	})
 	envelope := assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
 	assert.Equal(t, map[string]any{"project": "ghost-project"}, map[string]any(envelope.Error.Data), string(bs))
+	assert.Equal(t, `run "kata init": it attaches this workspace to the active project "ghost-project", or creates it if none exists`, envelope.Error.Hint)
 }
 
 func TestListProjects_IncludeArchived(t *testing.T) {

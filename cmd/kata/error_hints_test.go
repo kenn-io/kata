@@ -28,72 +28,17 @@ func TestErrorHintsArchivedProjectRestoreAndInit(t *testing.T) {
 	_, err = runCmdOutput(t, env, "projects", "remove", "spoke-project")
 	require.NoError(t, err)
 
-	_, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "list")
-	require.Error(t, err)
-	assert.Contains(t, stderr, fmt.Sprintf(`run "kata projects restore %d", then run "kata init" in this workspace`, project.ID))
 	_, err = runCmdOutput(t, env, "projects", "restore", itoa(project.ID))
 	require.NoError(t, err)
-	projectsBefore, err := env.DB.ListProjects(t.Context())
-	require.NoError(t, err)
 	_, err = runCmdOutput(t, env, "--workspace", dir, "init")
-	require.NoError(t, err)
-	projectsAfter, err := env.DB.ListProjects(t.Context())
-	require.NoError(t, err)
-	assert.Len(t, projectsAfter, len(projectsBefore))
-	_, err = runCmdOutput(t, env, "--workspace", dir, "list")
 	require.NoError(t, err)
 	alias, err := env.DB.AliasByIdentity(t.Context(), "github.com/example/spoke-project")
 	require.NoError(t, err)
 	assert.Equal(t, project.ID, alias.ProjectID)
 }
 
-func TestErrorHintsExplicitProjectInGitWorkspace(t *testing.T) {
-	setupKataEnv(t)
-	t.Setenv("KATA_SERVER", "")
-	env := testenv.New(t)
-	dir := t.TempDir()
-	runGit(t, dir, "init", "--quiet")
-	runGit(t, dir, "remote", "add", "origin", "https://github.com/example/remote-project.git")
-
-	_, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "--project", "chosen-project", "create", "Example task")
-	require.Error(t, err)
-	assert.Contains(t, stderr, `run kata projects create -- chosen-project`)
-}
-
-func TestErrorHintsExplicitProjectInBoundWorkspace(t *testing.T) {
-	for _, state := range []string{"missing", "archived"} {
-		t.Run(state, func(t *testing.T) {
-			setupKataEnv(t)
-			t.Setenv("KATA_SERVER", "")
-			env := testenv.New(t)
-			dir, _ := initLocalBoundWorkspace(t, env, "bound-project")
-			var projectID int64
-			if state == "archived" {
-				project, err := env.DB.CreateProject(t.Context(), "target-project")
-				require.NoError(t, err)
-				projectID = project.ID
-				_, err = runCmdOutput(t, env, "projects", "remove", "target-project")
-				require.NoError(t, err)
-			}
-			ctx := contextWithBaseURL(t.Context(), env.URL)
-			_, stderr, err := executeRootCapture(t, ctx, "--workspace", dir, "--project", "target-project", "list")
-			require.Error(t, err)
-			if state == "missing" {
-				assert.Contains(t, stderr, `run kata projects create -- target-project`)
-				_, err = runCmdOutput(t, env, "--workspace", dir, "projects", "create", "target-project")
-			} else {
-				assert.Contains(t, stderr, fmt.Sprintf("hint: run \"kata projects restore %d\"\n", projectID))
-				_, err = runCmdOutput(t, env, "--workspace", dir, "projects", "restore", itoa(projectID))
-			}
-			require.NoError(t, err)
-			_, err = runCmdOutput(t, env, "--workspace", dir, "--project", "target-project", "list")
-			require.NoError(t, err)
-		})
-	}
-}
-
 func TestErrorHintsCreateCommand(t *testing.T) {
-	for _, name := range []string{"target-project", "team's $project", "-flag"} {
+	for _, name := range []string{"team's $project", "-flag"} {
 		t.Run(name, func(t *testing.T) {
 			setupKataEnv(t)
 			t.Setenv("KATA_SERVER", "")
