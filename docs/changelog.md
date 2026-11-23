@@ -18,6 +18,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 **Before upgrading**
 
+- Update scripts that use exit 4 to detect an unset metadata key.
+  `kata meta get <ref> <key> --json` now exits 0 for an unset key; check for
+  `value: null` after handling command errors.
 - Keep a [backup](operations/backup-restore.md) from before the upgrade. This
   release upgrades the database from schema 50 through 53, and older
   binaries cannot open the result.
