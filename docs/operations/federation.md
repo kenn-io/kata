@@ -929,8 +929,9 @@ the exact preferred recipe along with each retained artifact's digest and state.
 In the web UI, a project's sync summary shows pending delivery, the last
 successful sync, credential state, producer, and retained-artifact counts. It
 refreshes every 30 seconds while the tab is visible and when you return to the
-tab. To read the state right away, open the sync chip and click **Refresh**.
-This view requires current project access and does not require credential inventory or
+tab. To read the state right away, open the project sync chip and click
+**Refresh**. This view requires
+current project access and does not require credential inventory or
 administration. The summary clears when the session expires, the project leaves
 the visible catalog, or connection authority changes. It is available on the
 source daemon, including its local catalog entry. Remote workspaces do not
