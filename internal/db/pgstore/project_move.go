@@ -117,17 +117,6 @@ func (s *Store) moveIssueProjectTx(ctx context.Context, tx *sql.Tx, input db.Mov
 			output.NewRevision = current.Revision
 			return nil
 		}
-		var retainedHistory []db.FoldEvent
-		binding, err := scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id=$1`, source.ID))
-		if err != nil && !errors.Is(err, db.ErrNotFound) {
-			return err
-		}
-		if err == nil && binding.RetainedThroughEventID > 0 {
-			retainedHistory, err = federationFoldEventsScoped(ctx, tx, source.ID, nil, current.UID)
-			if err != nil {
-				return err
-			}
-		}
 		newShortID, err := s.resolveShortIDTx(ctx, tx, target.ID, current.UID, "")
 		if err != nil {
 			return fmt.Errorf("allocate short_id in target: %w", err)
@@ -184,15 +173,9 @@ SET project_id = $1 WHERE issue_id = $2`,
 			if err != nil {
 				return err
 			}
-			snapshot, err := federationIssueSnapshotPayload(ctx, tx, movedIssue, false)
+			snapshot, err := federationIssueSnapshotPayload(ctx, tx, movedIssue)
 			if err != nil {
 				return err
-			}
-			if retainedHistory != nil {
-				snapshot, err = db.FederationMoveSnapshotAuthors(snapshot, retainedHistory, current.UID, source.UID)
-				if err != nil {
-					return err
-				}
 			}
 			payloadFields["snapshot"] = jsontext.Value(snapshot)
 		}

@@ -2,53 +2,8 @@ package db
 
 import (
 	"encoding/json/v2"
-	"errors"
-	"math"
 	"time"
 )
-
-// FederationMoveSnapshotAuthors uses the source's effective snapshot when a
-// retained task moves, while leaving its local history and rows unchanged.
-func FederationMoveSnapshotAuthors(payload string, events []FoldEvent, issueUID, sourceUID string) (string, error) {
-	departure, err := json.Marshal(map[string]string{"from_project_uid": sourceUID})
-	if err != nil {
-		return "", err
-	}
-	events = append(events, FoldEvent{IssueUID: issueUID, Type: "issue.moved", HLCPhysicalMS: math.MaxInt64, Payload: departure})
-	events = FederationMoveBaselineEvents(events)
-	if len(events) == 0 {
-		return "", errors.New("federation move baseline omitted the departure")
-	}
-	events = events[:len(events)-1]
-	projection := FoldEvents(events)
-	var doc IssueDocumentPayload
-	if err := json.Unmarshal([]byte(payload), &doc); err != nil {
-		return "", err
-	}
-	if issue := projection.Issues[issueUID]; issue.Author != "" {
-		doc.Author = issue.Author
-	}
-	for i := range doc.Comments {
-		if comment, ok := projection.Comments[doc.Comments[i].CommentUID]; ok && comment.Author != "" {
-			doc.Comments[i].Author = comment.Author
-		}
-	}
-	for i := range doc.Links {
-		link := &doc.Links[i]
-		from, to := issueUID, link.ToIssueUID
-		if link.Incoming {
-			from, to = to, from
-		}
-		if link.Type == "related" && from > to {
-			from, to = to, from
-		}
-		if state, ok := projection.Links[FoldLinkKey{FromUID: from, ToUID: to, Type: link.Type}]; ok && state.Present && state.Author != "" {
-			link.Author = state.Author
-		}
-	}
-	encoded, err := json.Marshal(doc)
-	return string(encoded), err
-}
 
 // FederationMoveBaselineEvents assembles moved-issue replay from the effective
 // source enrollment baseline. Earlier initializers cannot restore an author

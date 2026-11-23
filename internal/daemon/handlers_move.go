@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -91,7 +90,6 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 		}
 		res, err := cfg.DB.MoveIssueProject(ctx, move)
 		if err == nil {
-			var snapshots []moveSnapshot
 			for _, issue := range res.Issues {
 				var refresh claimRefreshResult
 				if err := requireFederatedIssueClaimWithResult(ctx, cfg, issue, actor, !in.Body.DryRun, &refresh); err != nil {
@@ -114,24 +112,14 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 				if err != nil {
 					return nil, internalAPIError(err)
 				}
-				if pending {
-					snapshots = append(snapshots, moveSnapshot{projectID: issue.ProjectID, uid: issue.UID})
-					continue
+				if retained && (pending || !refresh.known) {
+					return nil, api.NewError(503, "federation_offline", "the hub is unreachable or the retained task is waiting to sync", "", nil)
 				}
-				if !retained || snapshot {
-					continue
-				}
-				if !refresh.known {
-					return nil, api.NewError(503, "federation_offline", "the hub is unavailable", "retry the move when the hub is reachable", nil)
-				}
-				if refresh.missing {
-					snapshots = append(snapshots, moveSnapshot{projectID: issue.ProjectID, uid: issue.UID})
+				if retained && (snapshot || refresh.missing) {
+					return nil, api.NewError(409, "federated_move_unsupported", "this retained task cannot be moved", "create an issue in the target project and link it to this task", nil)
 				}
 			}
 			if !in.Body.DryRun {
-				if err := retainMoveSnapshots(ctx, cfg, snapshots); err != nil {
-					return nil, err
-				}
 				move.DryRun = false
 				move.ExpectedIssueIDs = make([]int64, len(res.Issues))
 				for i, issue := range res.Issues {
@@ -158,60 +146,6 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 		}
 		return out, nil
 	}
-}
-
-type moveSnapshot struct {
-	projectID int64
-	uid       string
-}
-
-// retainMoveSnapshots records the moved tasks' retained snapshots and
-// publishes each one that commits, even when the later move fails.
-func retainMoveSnapshots(ctx context.Context, cfg ServerConfig, snapshots []moveSnapshot) error {
-	ctx = db.WithRecoveryEventPublisher(ctx, func(event db.Event) { cfg.Publish().Event(event.ProjectID, event) })
-	for _, snapshot := range snapshots {
-		if _, _, err := cfg.DB.RetainedIssueSnapshot(ctx, snapshot.projectID, snapshot.uid); err != nil {
-			return internalAPIError(err)
-		}
-		if err := syncMoveSnapshot(ctx, cfg, snapshot); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func syncMoveSnapshot(ctx context.Context, cfg ServerConfig, snapshot moveSnapshot) error {
-	offline := func() error {
-		return api.NewError(503, "federation_offline", "the retained task is waiting to sync", "retry the move after federation sync finishes", nil)
-	}
-	if cfg.FederationSyncOnce == nil {
-		return offline()
-	}
-	binding, err := cfg.DB.FederationBindingByProject(ctx, snapshot.projectID)
-	if err != nil {
-		return internalAPIError(err)
-	}
-	_, credential, err := claimForwardClient(ctx, cfg, binding)
-	if err != nil {
-		return err
-	}
-	syncCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	if err := cfg.FederationSyncOnce(syncCtx, binding, credential); err != nil {
-		return offline()
-	}
-	current, err := cfg.DB.FederationBindingByProject(ctx, snapshot.projectID)
-	if err != nil || !sameDocbankForwardRoute(current, binding) || current.Actor != binding.Actor {
-		return offline()
-	}
-	_, _, pending, err := retainedIssueState(ctx, cfg.DB, current, snapshot.uid)
-	if err != nil {
-		return internalAPIError(err)
-	}
-	if pending {
-		return offline()
-	}
-	return nil
 }
 
 // moveIssueAPIError maps a refused move. A descendant's refusal keeps its rule's

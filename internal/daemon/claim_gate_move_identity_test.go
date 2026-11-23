@@ -1,119 +1,20 @@
 package daemon_test
 
 import (
-	"context"
 	"encoding/json/v2"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/testenv"
 )
-
-type failCommittedMoveStore struct{ db.Storage }
-
-func (s failCommittedMoveStore) MoveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) (db.MoveIssueProjectOut, error) {
-	if !in.DryRun {
-		return db.MoveIssueProjectOut{}, errors.New("move failed")
-	}
-	return s.Storage.MoveIssueProject(ctx, in)
-}
-
-func acknowledgeMoveSnapshots(cfg *daemon.ServerConfig) {
-	cfg.FederationSyncOnce = func(ctx context.Context, binding db.FederationBinding, _ config.FederationCredential) error {
-		events, err := cfg.DB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: binding.ProjectID, Types: []string{"issue.snapshot"}, Limit: 100})
-		if err != nil || len(events) == 0 {
-			return err
-		}
-		return cfg.DB.AdvanceFederationPushCursor(ctx, binding.ProjectID, events[len(events)-1].ID)
-	}
-}
-
-func TestRetainedMoveSynchronizesNewSnapshot(t *testing.T) {
-	var syncs int
-	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
-		cfg.FederationSyncOnce = func(ctx context.Context, binding db.FederationBinding, _ config.FederationCredential) error {
-			syncs++
-			events, err := cfg.DB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: binding.ProjectID, Types: []string{"issue.snapshot"}, Limit: 10})
-			if err != nil || len(events) != 1 {
-				return fmt.Errorf("expected a snapshot before sync: %w", err)
-			}
-			return cfg.DB.AdvanceFederationPushCursor(ctx, binding.ProjectID, events[0].ID)
-		}
-	})
-	ctx := t.Context()
-	source, err := env.DB.CreateProject(ctx, "source-project")
-	require.NoError(t, err)
-	target, err := env.DB.CreateProject(ctx, "target-project")
-	require.NoError(t, err)
-	issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "retained", Author: "old-actor"})
-	require.NoError(t, err)
-	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"error":{"code":"issue_not_found","message":"not synchronized yet"}}`))
-	}))
-	t.Cleanup(hub.Close)
-	for _, project := range []db.Project{source, target} {
-		_, err := env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: project.ID == source.ID})
-		require.NoError(t, err)
-		require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: project.ID, Token: "claim-token", Actor: "new-actor", Capabilities: "claim,push"}))
-	}
-	resp, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(source.ID, issue.UID, "actions/move"), map[string]any{"actor": "new-actor", "to_project_uid": target.UID}, map[string]string{"If-Match": fmt.Sprintf(`"rev-%d"`, issue.Revision)})
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
-	require.Equal(t, 1, syncs)
-}
-
-func TestRetainedMovePublishesSnapshotOnFailure(t *testing.T) {
-	sink := &recordingSink{}
-	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
-		cfg.DB = failCommittedMoveStore{cfg.DB}
-		cfg.Hooks = sink
-		acknowledgeMoveSnapshots(cfg)
-	})
-	ctx := t.Context()
-	source, err := env.DB.CreateProject(ctx, "source-project")
-	require.NoError(t, err)
-	target, err := env.DB.CreateProject(ctx, "target-project")
-	require.NoError(t, err)
-	issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "retained", Author: "old-actor"})
-	require.NoError(t, err)
-	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"error":{"code":"issue_not_found","message":"not synchronized yet"}}`))
-	}))
-	t.Cleanup(hub.Close)
-	for _, project := range []db.Project{source, target} {
-		_, err := env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: project.ID == source.ID})
-		require.NoError(t, err)
-		require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: project.ID, Token: "claim-token", Actor: "new-actor", Capabilities: "claim,push"}))
-	}
-	sub := env.Broadcaster.Subscribe(daemon.SubFilter{})
-	defer sub.Unsub()
-	for range 2 {
-		resp, _ := envDoRaw(t, env, http.MethodPost, issuePathRef(source.ID, issue.UID, "actions/move"), map[string]any{"actor": "new-actor", "to_project_uid": target.UID}, map[string]string{"If-Match": fmt.Sprintf(`"rev-%d"`, issue.Revision)})
-		require.Equal(t, http.StatusInternalServerError, resp.StatusCode)
-	}
-	msg := receiveMsg(t, sub.Ch, time.Second, "retained snapshot")
-	require.NotNil(t, msg.Event)
-	require.Equal(t, "issue.snapshot", msg.Event.Type)
-	require.Equal(t, issue.UID, *msg.Event.IssueUID)
-	require.Equal(t, []db.Event{*msg.Event}, sink.snapshot())
-	select {
-	case extra := <-sub.Ch:
-		t.Fatalf("unexpected duplicate event: %+v", extra)
-	default:
-	}
-}
 
 func TestPendingMovedIssueClaimRefreshIgnoresHubShortIDCollision(t *testing.T) {
 	for _, operation := range []string{"mutation", "show"} {
@@ -252,20 +153,17 @@ func TestRetainedIssueMoveChecksHubBeforeSnapshot(t *testing.T) {
 		wantStatus       int
 		wantSnapshots    int
 	}{
-		{name: "hub missing", status: http.StatusNotFound, wantStatus: http.StatusOK, wantSnapshots: 1},
+		{name: "hub missing", status: http.StatusNotFound, wantStatus: http.StatusConflict, wantSnapshots: 0},
 		{name: "hub known", status: http.StatusOK, wantStatus: http.StatusOK},
+		{name: "hub known with accepted snapshot", status: http.StatusOK, existingSnapshot: true, acceptedSnapshot: true, wantStatus: http.StatusConflict, wantSnapshots: 1},
 		{name: "offline", status: http.StatusServiceUnavailable, wantStatus: http.StatusServiceUnavailable},
-		{name: "offline with accepted snapshot", status: http.StatusServiceUnavailable, existingSnapshot: true, acceptedSnapshot: true, wantStatus: http.StatusOK, wantSnapshots: 1},
+		{name: "offline with accepted snapshot", status: http.StatusServiceUnavailable, existingSnapshot: true, acceptedSnapshot: true, wantStatus: http.StatusServiceUnavailable, wantSnapshots: 1},
 		{name: "offline with pending snapshot", status: http.StatusServiceUnavailable, existingSnapshot: true, wantStatus: http.StatusServiceUnavailable, wantSnapshots: 1},
 		{name: "hub known with pending snapshot", status: http.StatusOK, existingSnapshot: true, wantStatus: http.StatusServiceUnavailable, wantSnapshots: 1},
 		{name: "offline without retained history", status: http.StatusServiceUnavailable, noBoundary: true, wantStatus: http.StatusOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			env := testenv.New(t, func(cfg *daemon.ServerConfig) {
-				if tc.status == http.StatusNotFound && !tc.existingSnapshot {
-					acknowledgeMoveSnapshots(cfg)
-				}
-			})
+			env := testenv.New(t)
 			ctx := t.Context()
 			source, err := env.DB.CreateProject(ctx, "source-project")
 			require.NoError(t, err)
@@ -304,80 +202,20 @@ func TestRetainedIssueMoveChecksHubBeforeSnapshot(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, snapshots, tc.wantSnapshots)
 			if tc.wantStatus != http.StatusOK {
-				assertAPIError(t, resp.StatusCode, raw, http.StatusServiceUnavailable, "federation_offline")
+				code := "federation_offline"
+				if tc.wantStatus == http.StatusConflict {
+					code = "federated_move_unsupported"
+				}
+				assertAPIError(t, resp.StatusCode, raw, tc.wantStatus, code)
 				stored, err := env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 				require.NoError(t, err)
 				require.Equal(t, source.ID, stored.ProjectID)
-				if tc.status == http.StatusOK && tc.existingSnapshot {
-					require.NoError(t, env.DB.AcknowledgeFederationPush(ctx, source.ID, snapshots[0].ID, []string{snapshots[0].UID}))
-					stored, err = env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-					require.NoError(t, err)
-					resp, raw = envDoRaw(t, env, http.MethodPost, issuePathRef(source.ID, issue.UID, "actions/move"), map[string]any{"actor": "new-actor", "to_project_uid": target.UID}, map[string]string{"If-Match": fmt.Sprintf(`"rev-%d"`, stored.Revision)})
-					require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
-					moves, err := env.DB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: target.ID, IssueUID: issue.UID, Types: []string{"issue.moved"}, Limit: 10})
-					require.NoError(t, err)
-					require.Len(t, moves, 1)
-					var payload struct {
-						Snapshot db.IssueDocumentPayload `json:"snapshot"`
-					}
-					require.NoError(t, json.Unmarshal([]byte(moves[0].Payload), &payload))
-					require.Equal(t, "old-actor", payload.Snapshot.Author)
-				}
+
 			} else {
 				moves, err := env.DB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: target.ID, IssueUID: issue.UID, Types: []string{"issue.moved"}, Limit: 10})
 				require.NoError(t, err)
 				require.Len(t, moves, 1)
 			}
 		})
-	}
-	for _, crossProject := range []bool{false, true} {
-		t.Run(fmt.Sprintf("subtree uses each hub result/cross_project=%t", crossProject), func(t *testing.T) {
-			checkRetainedSubtreeMoveUsesEachHubResult(t, crossProject)
-		})
-	}
-}
-
-func checkRetainedSubtreeMoveUsesEachHubResult(t *testing.T, crossProject bool) {
-	env := testenv.New(t, acknowledgeMoveSnapshots)
-	ctx := t.Context()
-	source, err := env.DB.CreateProject(ctx, "source-project")
-	require.NoError(t, err)
-	target, err := env.DB.CreateProject(ctx, "target-project")
-	require.NoError(t, err)
-	childProject := source
-	projects := []db.Project{source, target}
-	if crossProject {
-		childProject, err = env.DB.CreateProject(ctx, "child-project")
-		require.NoError(t, err)
-		projects = append(projects, childProject)
-	}
-	root, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "root", Author: "old-actor"})
-	require.NoError(t, err)
-	child, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: childProject.ID, Title: "child", Author: "old-actor", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
-	require.NoError(t, err)
-	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.Contains(r.URL.Path, child.UID) {
-			w.WriteHeader(http.StatusNotFound)
-			_, _ = w.Write([]byte(`{"error":{"code":"issue_not_found","message":"not synchronized yet"}}`))
-			return
-		}
-		_ = json.MarshalWrite(w, api.ClaimStatusBody{HubNow: time.Now().UTC()})
-	}))
-	t.Cleanup(hub.Close)
-	for _, project := range projects {
-		_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: project.ID != target.ID})
-		require.NoError(t, err)
-		require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: project.ID, Token: "claim-token", Actor: "new-actor", Capabilities: "claim,push"}))
-	}
-	response, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(source.ID, root.UID, "actions/move"), map[string]any{"actor": "new-actor", "to_project_uid": target.UID}, map[string]string{"If-Match": fmt.Sprintf(`"rev-%d"`, root.Revision)})
-	require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
-	for _, tc := range []struct {
-		projectID int64
-		uid       string
-		snapshots int
-	}{{source.ID, root.UID, 0}, {childProject.ID, child.UID, 1}} {
-		snapshots, err := env.DB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: tc.projectID, IssueUID: tc.uid, Types: []string{"issue.snapshot"}, Limit: 10})
-		require.NoError(t, err)
-		require.Len(t, snapshots, tc.snapshots)
 	}
 }

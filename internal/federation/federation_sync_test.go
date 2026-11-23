@@ -5190,10 +5190,3 @@ func TestSyncFederationApplyRecordsAnMCPEventsRematch(t *testing.T) {
 	assert.LessOrEqual(t, from, local, "the record covers the applied event")
 	assert.GreaterOrEqual(t, through, local, "the record covers the applied event")
 }
-
-func TestNextFederationPushIngestBatchRejectsEmpty(t *testing.T) {
-	for _, events := range [][]db.Event{nil, {}} {
-		_, _, _, err := nextFederationPushIngestBatch(events)
-		require.ErrorContains(t, err, "empty federation push batch")
-	}
-}

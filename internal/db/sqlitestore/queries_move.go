@@ -151,17 +151,6 @@ func (d *Store) moveIssueProjectTx(ctx context.Context, tx *sql.Tx, in db.MoveIs
 		out.NewRevision = curRev
 		return out, nil
 	}
-	var retainedHistory []db.FoldEvent
-	binding, err := federationBindingByProject(ctx, tx, in.FromProjectID)
-	if err != nil && !errors.Is(err, db.ErrNotFound) {
-		return out, err
-	}
-	if err == nil && binding.RetainedThroughEventID > 0 {
-		retainedHistory, err = federationFoldEventsForIssues(ctx, tx, in.FromProjectID, []string{issueUID})
-		if err != nil {
-			return out, err
-		}
-	}
 
 	newShortID, err := assignShortIDIn(ctx, tx,
 		[]int64{in.ToProjectID}, issueUID, shortid.MinLength,
@@ -236,15 +225,9 @@ func (d *Store) moveIssueProjectTx(ctx context.Context, tx *sql.Tx, in db.MoveIs
 		if err != nil {
 			return out, err
 		}
-		snapshot, err := d.federationIssueSnapshotPayload(ctx, tx, movedIssue, false)
+		snapshot, err := d.federationIssueSnapshotPayload(ctx, tx, movedIssue)
 		if err != nil {
 			return out, err
-		}
-		if retainedHistory != nil {
-			snapshot, err = db.FederationMoveSnapshotAuthors(snapshot, retainedHistory, issueUID, fromProjectUID)
-			if err != nil {
-				return out, err
-			}
 		}
 		payloadFields["snapshot"] = jsontext.Value(snapshot)
 	}

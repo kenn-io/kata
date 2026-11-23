@@ -1,14 +1,11 @@
 package federation
 
 import (
-	"context"
 	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
@@ -35,12 +32,7 @@ func newMoveDeliveryHub(t *testing.T, names ...string) (*testenv.Env, []db.Proje
 
 func newMoveDeliverySpoke(t *testing.T, hub *testenv.Env, projects []db.Project, actors ...string) moveDeliverySpoke {
 	t.Helper()
-	spoke := moveDeliverySpoke{projects: make([]db.Project, len(projects)), credentials: newMoveCredentialStore()}
-	spoke.env = testenv.New(t, func(cfg *daemon.ServerConfig) {
-		cfg.FederationSyncOnce = func(ctx context.Context, binding db.FederationBinding, cred config.FederationCredential) error {
-			return SyncFederationOnceWithPulledEvents(ctx, cfg.DB, binding, cred, clientpkg.Opts{}, cfg.Publish().Events, spoke.credentials)
-		}
-	})
+	spoke := moveDeliverySpoke{env: testenv.New(t), projects: make([]db.Project, len(projects)), credentials: newMoveCredentialStore()}
 	for i, project := range projects {
 		actor := "worker"
 		if actors != nil {
