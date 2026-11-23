@@ -90,6 +90,7 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 		}
 		res, err := cfg.DB.MoveIssueProject(ctx, move)
 		if err == nil {
+			moveProofs := make(map[int64]retainedMoveSnapshotProof)
 			for _, issue := range res.Issues {
 				var refresh claimRefreshResult
 				if err := requireFederatedIssueClaimWithResult(ctx, cfg, issue, actor, !in.Body.DryRun, &refresh); err != nil {
@@ -108,26 +109,34 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 				if !binding.Enabled || binding.Role != db.FederationRoleSpoke || !binding.PushEnabled {
 					continue
 				}
-				retained, snapshot, pending, err := retainedIssueState(ctx, cfg.DB, binding, issue.UID)
+				retained, _, pending, err := retainedIssueState(ctx, cfg.DB, binding, issue.UID)
 				if err != nil {
 					return nil, internalAPIError(err)
 				}
-				if retained && (pending || !refresh.known) {
+				if retained && (pending || !refresh.known || refresh.missing) {
 					return nil, api.NewError(503, "federation_offline", "the hub is unreachable or the retained task is waiting to sync", "", nil)
 				}
-				if retained && (snapshot || refresh.missing) {
-					return nil, retainedMoveUnsupported()
-				}
-				if binding.RetainedThroughEventID != 0 {
-					if err := retainedMoveDiscussion(ctx, cfg, binding, issue); err != nil {
+				if retained && binding.RetainedThroughEventID != 0 {
+					proof, err := retainedMoveDiscussion(ctx, cfg, binding, issue)
+					if err != nil {
 						if apiErr, ok := errors.AsType[*api.APIError](err); ok {
 							return nil, apiErr
 						}
 						return nil, internalAPIError(err)
 					}
+					moveProofs[issue.ID] = proof
 				}
 			}
 			if !in.Body.DryRun {
+				if len(moveProofs) != 0 {
+					move.PrepareSnapshot = func(issue db.Issue, payload string) (string, error) {
+						proof, ok := moveProofs[issue.ID]
+						if !ok {
+							return payload, nil
+						}
+						return proof.prepare(issue, payload)
+					}
+				}
 				move.DryRun = false
 				move.ExpectedIssueIDs = make([]int64, len(res.Issues))
 				for i, issue := range res.Issues {

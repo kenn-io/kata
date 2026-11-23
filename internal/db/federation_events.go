@@ -7,6 +7,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 
@@ -562,4 +563,40 @@ func directParentAssignments(event FoldEvent) ([]FoldLinkKey, error) {
 		return parents, nil
 	}
 	return nil, nil
+}
+
+// FederationMoveHistoryProvesSnapshot checks a move snapshot against history
+// the hub has already accepted. A new comment by the bound actor is safe only
+// when the hub has no accepted comment with that UID.
+func FederationMoveHistoryProvesSnapshot(uid, sourceProjectUID string, history []FoldEvent, payload, boundActor string) bool {
+	departure, err := json.Marshal(map[string]string{"from_project_uid": sourceProjectUID})
+	if err != nil {
+		return false
+	}
+	history = append(slices.Clone(history), FoldEvent{
+		IssueUID: uid, Type: "issue.moved", HLCPhysicalMS: math.MaxInt64, Payload: departure,
+	})
+	proof := &moveSnapshotProof{
+		authors: map[string]bool{}, commentUIDs: map[string]bool{},
+		comments: map[moveSnapshotComment]bool{}, identities: map[moveSnapshotComment]bool{},
+		links: map[moveSnapshotLinkIdentity]bool{},
+	}
+	proof.addHistory(uid, history, nil)
+	var snapshot IssueDocumentPayload
+	if json.Unmarshal([]byte(payload), &snapshot) != nil || !proof.authors[strings.TrimSpace(snapshot.Author)] {
+		return false
+	}
+	boundActor = strings.TrimSpace(boundActor)
+	for _, comment := range snapshot.Comments {
+		value := moveSnapshotComment{
+			UID: comment.CommentUID, Author: comment.Author, Teammate: comment.Teammate,
+			Body: comment.Body, CreatedAt: comment.CreatedAt, EditedAt: comment.EditedAt,
+			ReplyToUID: comment.ReplyToUID, ReplyKind: comment.ReplyKind,
+		}.normalized()
+		if proof.comments[value] || (value.Author == boundActor && !proof.commentUIDs[value.UID]) {
+			continue
+		}
+		return false
+	}
+	return true
 }

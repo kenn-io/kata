@@ -1,10 +1,13 @@
 package daemon_test
 
 import (
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -110,7 +113,7 @@ func TestRetainedIssueEditAfterPushQueueDrains(t *testing.T) {
 				env = testenv.New(t)
 				require.NoError(t, env.DB.ImportReplay(ctx, records, db.ImportOptions{NewInstance: true}))
 			}
-			require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: 42, Token: "claim-token", Actor: "new-actor", Capabilities: "claim"}))
+			require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: 42, Token: "claim-token", Actor: "new-actor", Capabilities: "claim,pull"}))
 			response, raw := envDoRaw(t, env, http.MethodPatch, issuePathRef(project.ID, issue.UID, ""), map[string]any{"actor": "new-actor", "title": "edited task"}, map[string]string{"If-Match": fmt.Sprintf(`"rev-%d"`, issue.Revision)})
 			require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
 		})
@@ -128,10 +131,10 @@ func TestRetainedIssueMoveChecksHubBeforeSnapshot(t *testing.T) {
 		wantStatus       int
 		wantSnapshots    int
 	}{
-		{name: "hub missing", status: http.StatusNotFound, wantStatus: http.StatusConflict, wantSnapshots: 0},
+		{name: "hub missing", status: http.StatusNotFound, wantStatus: http.StatusServiceUnavailable, wantSnapshots: 0},
 		{name: "hub known", status: http.StatusOK, wantStatus: http.StatusOK},
-		{name: "hub known with accepted snapshot", status: http.StatusOK, existingSnapshot: true, acceptedSnapshot: true, wantStatus: http.StatusConflict, wantSnapshots: 1},
-		{name: "hub known after second rejoin", status: http.StatusOK, existingSnapshot: true, acceptedSnapshot: true, rejoin: true, wantStatus: http.StatusConflict, wantSnapshots: 1},
+		{name: "hub known with accepted snapshot", status: http.StatusOK, existingSnapshot: true, acceptedSnapshot: true, wantStatus: http.StatusOK, wantSnapshots: 1},
+		{name: "hub known after second rejoin", status: http.StatusOK, existingSnapshot: true, acceptedSnapshot: true, rejoin: true, wantStatus: http.StatusOK, wantSnapshots: 1},
 		{name: "pending snapshot after second rejoin", status: http.StatusOK, existingSnapshot: true, rejoin: true, wantStatus: http.StatusServiceUnavailable, wantSnapshots: 1},
 		{name: "offline", status: http.StatusServiceUnavailable, wantStatus: http.StatusServiceUnavailable},
 		{name: "offline with accepted snapshot", status: http.StatusServiceUnavailable, existingSnapshot: true, acceptedSnapshot: true, wantStatus: http.StatusServiceUnavailable, wantSnapshots: 1},
@@ -145,9 +148,38 @@ func TestRetainedIssueMoveChecksHubBeforeSnapshot(t *testing.T) {
 			require.NoError(t, err)
 			target, err := env.DB.CreateProject(ctx, "target-project")
 			require.NoError(t, err)
-			issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "retained", Author: "old-actor"})
+			issue, created, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "retained", Author: "old-actor"})
 			require.NoError(t, err)
-			hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			toEnvelope := func(event db.Event) api.EventEnvelope {
+				issueUID := issue.UID
+				return api.EventEnvelope{
+					EventID: event.ID, EventUID: event.UID, OriginInstanceUID: event.OriginInstanceUID,
+					Type: event.Type, ProjectID: event.ProjectID, ProjectUID: event.ProjectUID,
+					ProjectName: event.ProjectName, IssueUID: &issueUID, Actor: event.Actor,
+					ContentHash: event.ContentHash, Payload: jsontext.Value(event.Payload), CreatedAt: event.CreatedAt,
+				}
+			}
+			history := []api.EventEnvelope{toEnvelope(created)}
+			hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/federation/events") {
+					afterID, err := strconv.ParseInt(r.URL.Query().Get("after_id"), 10, 64)
+					if err != nil {
+						http.Error(w, "invalid after_id", http.StatusBadRequest)
+						return
+					}
+					body := api.PollEventsBody{Events: []api.EventEnvelope{}, NextAfterID: afterID}
+					for _, event := range history {
+						if event.EventID > afterID && (r.URL.Query().Get("issue_uid") == "" || r.URL.Query().Get("issue_uid") == issue.UID) {
+							body.Events = append(body.Events, event)
+						}
+					}
+					if len(body.Events) > 0 {
+						body.NextAfterID = body.Events[len(body.Events)-1].EventID
+					}
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.MarshalWrite(w, body)
+					return
+				}
 				switch tc.status {
 				case http.StatusOK:
 					_ = json.MarshalWrite(w, api.ClaimStatusBody{HubNow: time.Now().UTC()})
@@ -163,13 +195,14 @@ func TestRetainedIssueMoveChecksHubBeforeSnapshot(t *testing.T) {
 			for _, project := range []db.Project{source, target} {
 				_, err := env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: project.ID == source.ID && !tc.noBoundary})
 				require.NoError(t, err)
-				require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: project.ID, Token: "claim-token", Actor: "new-actor", Capabilities: "claim,push"}))
+				require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: project.ID, Token: "claim-token", Actor: "new-actor", Capabilities: "claim,push,pull"}))
 			}
 			if tc.existingSnapshot {
 				snapshot, _, err := env.DB.RetainedIssueSnapshot(ctx, source.ID, issue.UID)
 				require.NoError(t, err)
 				if tc.acceptedSnapshot {
 					require.NoError(t, env.DB.AdvanceFederationPushCursor(ctx, source.ID, snapshot.ID))
+					history = append(history, toEnvelope(snapshot))
 				}
 			}
 			if tc.rejoin {

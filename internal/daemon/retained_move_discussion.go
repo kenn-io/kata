@@ -2,10 +2,12 @@ package daemon
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
+	"fmt"
 	"net/http"
-	"slices"
+	"strings"
 	"time"
 
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
@@ -14,76 +16,113 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
-// retainedMoveDiscussion refuses a move whose retained comments the hub has not accepted.
-func retainedMoveDiscussion(ctx context.Context, cfg ServerConfig, binding db.FederationBinding, issue db.Issue) error {
-	former, err := cfg.DB.FormerInstanceUIDs(ctx)
-	if err != nil {
-		return err
-	}
-	ctx = db.WithAuthorizedProjects(ctx, nil) // The handler already admitted this issue's current project.
-	var after int64
-	risk := map[string]bool{}
-	for {
-		events, err := cfg.DB.EventsAfter(ctx, db.EventsAfterParams{IssueUID: issue.UID, Types: []string{"issue.created", "issue.snapshot", "issue.moved", "issue.commented", "issue.comment_edited"}, AfterID: after, Limit: 1000})
+type retainedMoveSnapshotProof struct {
+	sourceProjectUID string
+	actor            string
+	history          []db.FoldEvent
+	canonicalize     bool
+}
+
+func (p retainedMoveSnapshotProof) prepare(issue db.Issue, payload string) (string, error) {
+	if p.canonicalize {
+		canonical, err := db.CanonicalizeFederationSnapshotAuthors(db.RemoteEvent{
+			Type: "issue.snapshot", Payload: jsontext.Value(payload),
+		}, p.actor)
 		if err != nil {
-			return err
+			return "", err
 		}
-		for _, event := range events {
-			if event.ID > binding.RetainedThroughEventID || (event.OriginInstanceUID != cfg.DB.InstanceUID() && !slices.Contains(former, event.OriginInstanceUID)) {
-				continue
-			}
-			payload := db.PayloadMap([]byte(event.Payload))
-			if event.Type == "issue.comment_edited" {
-				uid, _ := db.StringValue(payload["comment_uid"])
-				risk[uid] = true
-				continue
-			}
-			typ := event.Type
-			if typ == "issue.moved" {
-				typ, event.Payload = "issue.snapshot", string(payload["snapshot"])
-			}
-			projection := db.FoldEvents([]db.FoldEvent{{UID: event.UID, IssueUID: issue.UID, Type: typ, Actor: event.Actor, OriginInstanceUID: event.OriginInstanceUID, HLCPhysicalMS: event.HLCPhysicalMS, HLCCounter: event.HLCCounter, CreatedAt: event.CreatedAt.UTC().Format(time.RFC3339Nano), Payload: []byte(event.Payload)}})
-			for uid := range projection.Comments {
-				risk[uid] = true
-			}
-		}
-		if len(events) < 1000 {
-			break
-		}
-		after = events[len(events)-1].ID
+		payload = string(canonical.Payload)
 	}
-	comments, err := cfg.DB.CommentsByIssue(ctx, issue.ID)
+	if !db.FederationMoveHistoryProvesSnapshot(issue.UID, p.sourceProjectUID, p.history, payload, p.actor) {
+		return payload, db.ErrFederatedMoveUnsupported
+	}
+	return payload, nil
+}
+
+// retainedMoveDiscussion reads the hub's accepted issue history and verifies
+// the current task and comments before the move transaction starts.
+func retainedMoveDiscussion(ctx context.Context, cfg ServerConfig, binding db.FederationBinding, issue db.Issue) (retainedMoveSnapshotProof, error) {
+	payload, err := retainedMoveLocalSnapshot(ctx, cfg, issue)
 	if err != nil {
-		return err
+		return retainedMoveSnapshotProof{}, err
 	}
-	var needed []db.Comment
-	for _, comment := range comments {
-		if risk[comment.UID] && comment.Author != binding.Actor {
-			needed = append(needed, comment)
-		}
-	}
-	if len(needed) == 0 {
-		return nil
-	}
-	remote, cred, err := claimForwardClient(ctx, cfg, binding)
+	finish, err := beginClaimFederationTransport(ctx, cfg, binding.ProjectID)
 	if err != nil {
-		return err
+		return retainedMoveSnapshotProof{}, err
+	}
+	defer finish()
+	current, err := cfg.DB.FederationBindingByProject(ctx, binding.ProjectID)
+	if err != nil || !sameRetainedMoveBinding(binding, current) {
+		return retainedMoveSnapshotProof{}, retainedMoveUnavailable("the federation binding changed; retry the move")
+	}
+	remote, cred, err := claimForwardClient(ctx, cfg, current)
+	if err != nil {
+		return retainedMoveSnapshotProof{}, err
 	}
 	if !federationCapabilitiesContain(cred.Capabilities, "pull") {
-		return retainedMoveUnsupported()
+		return retainedMoveSnapshotProof{}, retainedMoveUnavailable("hub history access is unavailable; retry the move")
 	}
 	history, err := remote.issueHistory(ctx, cred.HubProjectID, issue.UID)
 	if err != nil {
-		var status *claimHubStatusError
-		if errors.As(err, &status) && status.StatusCode == http.StatusNotFound {
-			return retainedMoveUnsupported()
+		return retainedMoveSnapshotProof{}, retainedMoveUnavailable("hub history is unavailable; retry the move")
+	}
+	proof := retainedMoveSnapshotProof{
+		sourceProjectUID: binding.HubProjectUID, actor: binding.Actor, history: history,
+		canonicalize: retainedMoveHistoryHasRecoverySnapshot(history, binding.HubProjectUID, cfg.DB.InstanceUID(), binding.Actor),
+	}
+	if _, err := proof.prepare(issue, payload); err != nil {
+		return retainedMoveSnapshotProof{}, retainedMoveUnsupported()
+	}
+	return proof, nil
+}
+
+func retainedMoveHistoryHasRecoverySnapshot(history []db.FoldEvent, projectUID, originUID, actor string) bool {
+	for _, event := range history {
+		if event.Type != "issue.snapshot" || event.ProjectUID != projectUID || event.OriginInstanceUID != originUID || event.Actor != actor {
+			continue
 		}
-		return api.NewError(http.StatusServiceUnavailable, "federation_offline", "the hub is unreachable or its history is unavailable", "retry the move", nil)
+		var snapshot struct {
+			Author string `json:"author"`
+		}
+		if json.Unmarshal(event.Payload, &snapshot) == nil && strings.TrimSpace(snapshot.Author) == strings.TrimSpace(actor) {
+			return true
+		}
 	}
-	if !db.FederationMoveHistoryProvesComments(issue.UID, binding.HubProjectUID, history, needed) {
-		return retainedMoveUnsupported()
+	return false
+}
+
+func retainedMoveLocalSnapshot(ctx context.Context, cfg ServerConfig, issue db.Issue) (string, error) {
+	comments, err := cfg.DB.CommentsByIssue(ctx, issue.ID)
+	if err != nil {
+		return "", err
 	}
-	return nil
+	document := db.IssueDocumentPayload{UID: issue.UID, Author: issue.Author, Comments: make([]db.IssueDocumentComment, 0, len(comments))}
+	for _, comment := range comments {
+		value := db.IssueDocumentComment{
+			CommentUID: comment.UID, Author: comment.Author, Teammate: comment.Teammate,
+			Body: comment.Body, CreatedAt: comment.CreatedAt.UTC().Format(time.RFC3339Nano),
+			ReplyToUID: comment.ReplyToUID, ReplyKind: comment.ReplyKind,
+		}
+		if comment.EditedAt != nil {
+			value.EditedAt = comment.EditedAt.UTC().Format(time.RFC3339Nano)
+		}
+		document.Comments = append(document.Comments, value)
+	}
+	payload, err := json.Marshal(document)
+	if err != nil {
+		return "", err
+	}
+	return string(payload), nil
+}
+
+func sameRetainedMoveBinding(expected, current db.FederationBinding) bool {
+	return current.Enabled && current.PushEnabled && current.Role == expected.Role && current.RelayConfig == nil &&
+		current.HubURL == expected.HubURL && current.HubProjectID == expected.HubProjectID &&
+		current.HubProjectUID == expected.HubProjectUID && current.Actor == expected.Actor
+}
+
+func retainedMoveUnavailable(message string) error {
+	return api.NewError(http.StatusServiceUnavailable, "federation_offline", message, "retry the move", nil)
 }
 
 func retainedMoveUnsupported() error {
@@ -98,11 +137,9 @@ func (c *claimHubClient) issueHistory(ctx context.Context, projectID int64, issu
 	if err != nil {
 		return nil, err
 	}
-	var history []db.FoldEvent
-	var cursor int64
 	limit := int64(1000)
-	for {
-		query := &generated.PollFederationProjectEventsQuery{AfterID: &cursor, IssueUID: &issueUID, Limit: &limit}
+	poll := func(cursor int64, filter *string) (*generated.PollFederationProjectEventsResponse, error) {
+		query := &generated.PollFederationProjectEventsQuery{AfterID: &cursor, IssueUID: filter, Limit: &limit}
 		response, err := client.PollFederationProjectEventsWithResponse(ctx, &generated.PollFederationProjectEventsRequestOptions{PathParams: &generated.PollFederationProjectEventsPath{ProjectID: projectID}, Query: query}, func(_ context.Context, req *http.Request) error {
 			req.Header.Set(db.EventFeaturesHeader, db.SupportedEventFeatures)
 			return nil
@@ -110,11 +147,33 @@ func (c *claimHubClient) issueHistory(ctx context.Context, projectID int64, issu
 		if err != nil {
 			return nil, err
 		}
+		if response == nil || response.StatusCode != http.StatusOK || response.JSON200 == nil {
+			if response == nil {
+				return nil, errors.New("hub issue history response is missing")
+			}
+			return nil, fmt.Errorf("hub issue history returned HTTP %d", response.StatusCode)
+		}
 		if err := db.RequireEventFeatures(db.SupportedEventFeatures, response.HTTPResponse.Header.Get(db.RequiredEventFeaturesHeader)); err != nil {
 			return nil, err
 		}
-		var page api.PollEventsBody
-		if err := json.Unmarshal(response.Body, &page); err != nil {
+		return response.JSON200, nil
+	}
+	first, err := poll(0, nil)
+	if err != nil {
+		return nil, err
+	}
+	if first.ResetRequired {
+		return nil, errors.New("hub issue history requires reset")
+	}
+	through := first.NextAfterID
+	if through <= 0 {
+		return nil, errors.New("hub issue history has no high-water cursor")
+	}
+	var history []db.FoldEvent
+	var cursor int64
+	for cursor < through {
+		page, err := poll(cursor, &issueUID)
+		if err != nil {
 			return nil, err
 		}
 		if page.ResetRequired {
@@ -124,14 +183,21 @@ func (c *claimHubClient) issueHistory(ctx context.Context, projectID int64, issu
 			if db.EventIssueUID(event.IssueUID) != issueUID {
 				return nil, errors.New("hub returned another issue's history")
 			}
-			history = append(history, db.FoldEvent{UID: event.EventUID, OriginInstanceUID: event.OriginInstanceUID, ProjectUID: event.ProjectUID, IssueUID: issueUID, RelatedIssueUID: db.EventIssueUID(event.RelatedIssueUID), Type: event.Type, Actor: event.Actor, HLCPhysicalMS: event.HLCPhysicalMS, HLCCounter: event.HLCCounter, CreatedAt: event.CreatedAt.UTC().Format(time.RFC3339Nano), Payload: event.Payload})
+			if event.EventID > through {
+				continue
+			}
+			history = append(history, db.FoldEvent{UID: event.EventUID, OriginInstanceUID: event.OriginInstanceUID, ProjectUID: event.ProjectUID, IssueUID: issueUID, RelatedIssueUID: db.EventIssueUID(event.RelatedIssueUID), Type: event.Type, Actor: event.Actor, HLCPhysicalMS: event.HlcPhysicalMs, HLCCounter: event.HlcCounter, CreatedAt: event.CreatedAt.UTC().Format(time.RFC3339Nano), Payload: event.Payload})
 		}
-		if len(page.Events) == 0 {
-			return history, nil
+		if len(page.Events) == 0 || page.NextAfterID >= through {
+			break
 		}
 		if page.NextAfterID <= cursor {
 			return nil, errors.New("hub issue history cursor did not advance")
 		}
 		cursor = page.NextAfterID
 	}
+	if len(history) == 0 {
+		return nil, errors.New("hub returned no issue history")
+	}
+	return history, nil
 }

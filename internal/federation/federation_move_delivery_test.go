@@ -1,11 +1,13 @@
 package federation
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
@@ -32,7 +34,13 @@ func newMoveDeliveryHub(t *testing.T, names ...string) (*testenv.Env, []db.Proje
 
 func newMoveDeliverySpoke(t *testing.T, hub *testenv.Env, projects []db.Project, actors ...string) moveDeliverySpoke {
 	t.Helper()
-	spoke := moveDeliverySpoke{env: testenv.New(t), projects: make([]db.Project, len(projects)), credentials: newMoveCredentialStore()}
+	return newMoveDeliverySpokeWithOptions(t, hub, projects, nil, actors...)
+}
+
+func newMoveDeliverySpokeWithOptions(t *testing.T, hub *testenv.Env, projects []db.Project, options []testenv.Option, actors ...string) moveDeliverySpoke {
+	t.Helper()
+	options = append([]testenv.Option{func(cfg *daemon.ServerConfig) { cfg.FederationPushPending = DirectSpokePushPending(cfg.DB) }}, options...)
+	spoke := moveDeliverySpoke{env: testenv.New(t, options...), projects: make([]db.Project, len(projects)), credentials: newMoveCredentialStore()}
 	for i, project := range projects {
 		actor := "worker"
 		if actors != nil {
@@ -48,6 +56,31 @@ func newMoveDeliverySpoke(t *testing.T, hub *testenv.Env, projects []db.Project,
 		spoke.credentials[project.UID] = config.FederationCredential{HubURL: hub.URL, HubProjectID: project.ID, Token: grant.Token, Actor: actor}
 	}
 	return spoke
+}
+
+type moveSnapshotValidationSpy struct {
+	db.Storage
+	calls   int
+	issueID int64
+	payload string
+}
+
+func (s *moveSnapshotValidationSpy) MoveIssueProject(ctx context.Context, input db.MoveIssueProjectIn) (db.MoveIssueProjectOut, error) {
+	if input.PrepareSnapshot != nil {
+		prepare := input.PrepareSnapshot
+		input.PrepareSnapshot = func(issue db.Issue, payload string) (string, error) {
+			s.calls++
+			s.issueID = issue.ID
+			prepared, err := prepare(issue, payload)
+			if prepared != "" {
+				s.payload = prepared
+			} else {
+				s.payload = payload
+			}
+			return prepared, err
+		}
+	}
+	return s.Storage.MoveIssueProject(ctx, input)
 }
 
 func (s moveDeliverySpoke) sync(t *testing.T, index int) error {
