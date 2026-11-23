@@ -8,12 +8,59 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/shlex"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/testenv"
 )
 
 const projectInitHint = `run "kata init --project <name>" in the workspace root, or pass --project <name>`
+
+func TestErrorHintsArchivedProjectRestoreAndInit(t *testing.T) {
+	setupKataEnv(t)
+	t.Setenv("KATA_SERVER", "")
+	env := testenv.New(t)
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet")
+	runGit(t, dir, "remote", "add", "origin", "https://github.com/example/spoke-project.git")
+	project, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	_, err = runCmdOutput(t, env, "projects", "remove", "spoke-project")
+	require.NoError(t, err)
+
+	_, err = runCmdOutput(t, env, "projects", "restore", itoa(project.ID))
+	require.NoError(t, err)
+	_, err = runCmdOutput(t, env, "--workspace", dir, "init")
+	require.NoError(t, err)
+	alias, err := env.DB.AliasByIdentity(t.Context(), "github.com/example/spoke-project")
+	require.NoError(t, err)
+	assert.Equal(t, project.ID, alias.ProjectID)
+}
+
+func TestErrorHintsCreateCommand(t *testing.T) {
+	for _, name := range []string{"team's $project", "-flag"} {
+		t.Run(name, func(t *testing.T) {
+			setupKataEnv(t)
+			t.Setenv("KATA_SERVER", "")
+			env := testenv.New(t)
+			dir, _ := initLocalBoundWorkspace(t, env, "bound-project")
+			_, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "--project", name, "list")
+			require.Error(t, err)
+			_, hint, ok := strings.Cut(stderr, "\nhint: run ")
+			require.True(t, ok, stderr)
+			command, _, ok := strings.Cut(hint, "\n")
+			require.True(t, ok, stderr)
+			args, err := shlex.Split(command)
+			require.NoError(t, err)
+			require.NotEmpty(t, args)
+			require.Equal(t, "kata", args[0])
+			_, err = runCmdOutput(t, env, args[1:]...)
+			require.NoError(t, err)
+			_, err = env.DB.ProjectByName(t.Context(), name)
+			require.NoError(t, err)
+		})
+	}
+}
 
 func TestErrorHintsUnboundWorkspace(t *testing.T) {
 	setupKataEnv(t)

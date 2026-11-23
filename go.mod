@@ -24,6 +24,7 @@ require (
 	github.com/gofrs/flock v0.13.2
 	github.com/golang-jwt/jwt/v4 v4.5.2
 	github.com/google/jsonschema-go v0.4.3
+	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/jackc/pgx/v5 v5.12.0
 	github.com/klauspost/compress v1.20.4
 	github.com/mattn/go-runewidth v0.0.31
@@ -121,7 +122,6 @@ require (
 	github.com/goccy/go-json v0.12.0 // indirect
 	github.com/google/go-github/v88 v88.0.0 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
-	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/hashicorp/go-version v1.9.0 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
