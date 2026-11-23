@@ -291,7 +291,10 @@ type federationPollWakeSecretStore interface {
 }
 
 func loadFederationPollWakeSecret(ctx context.Context, bus db.FederationPollWakeBus, waits *federationPollWaits) {
-	if store, ok := bus.(federationPollWakeSecretStore); ok {
+	waits.remote.mu.Lock()
+	hasSecret := len(waits.remote.secret) > 0
+	waits.remote.mu.Unlock()
+	if store, ok := bus.(federationPollWakeSecretStore); ok && !hasSecret {
 		if secret, err := store.FederationPollWakeSecret(ctx); err == nil {
 			waits.remote.setSecret(secret)
 		}
@@ -345,6 +348,7 @@ func listenFederationPollWakes(ctx context.Context, bus db.FederationPollWakeBus
 		connected := false
 		err := bus.ListenFederationPollWake(ctx, func() {
 			connected = true
+			loadFederationPollWakeSecret(ctx, bus, waits)
 			// Notifications sent while no listener was connected are lost.
 			waits.remote.wake()
 		}, waits.receive)
