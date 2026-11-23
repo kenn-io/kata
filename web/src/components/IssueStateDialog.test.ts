@@ -75,6 +75,7 @@ describe('IssueStateDialog', () => {
       [blockedTask('issue-2', ['issue-1', 'issue-9']), blockedTask('issue-3', ['issue-1'])],
     )
     expect(within(dialog).getByText('Unblocks 1 open task.')).toBeTruthy()
+    expect(within(dialog).getByText('Comments and links stay.')).toBeTruthy()
   })
 
   it('uses shared Kit UI actions', async () => {

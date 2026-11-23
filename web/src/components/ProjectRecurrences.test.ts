@@ -138,7 +138,9 @@ it('retries a refused stop with the current revision', async () => {
     .mockResolvedValue({ status: 200, headers: new Headers(), data: { recurrences: [updated] } })
   const onDelete = vi
     .fn()
-    .mockRejectedValueOnce(new Error('Could not stop repeating.'))
+    .mockRejectedValueOnce(
+      new Error('revision_conflict: recurrence revision is 2. Your draft was preserved.'),
+    )
     .mockResolvedValueOnce(undefined)
   render(ProjectRecurrences, {
     props: { projectID: 1, actor: 'user-a', onCreate: vi.fn(), onPatch: vi.fn(), onDelete },
