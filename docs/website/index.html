@@ -89,7 +89,9 @@
 <span class="ok">OK</span> <span class="out">next issue=abc4 priority=1 title="fix login race"</span>
 <span class="ps1">$</span> <span class="cmd">kata claim abc4 --agent</span>
 <span class="ok">OK</span> <span class="out">claim abc4</span>
-<span class="ps1">$</span> <span class="cmd">kata comment abc4 --body "root cause: double submit in Safari callback"</span>
+<span class="ps1">$</span> <span class="cmd">kata comment abc4 --body-stdin &lt;&lt;'EOF'
+root cause: double submit in Safari callback
+EOF</span>
 <span class="ok">OK</span> <span class="out">comment abc4</span>
 <span class="ps1">$</span> <span class="cmd">kata close abc4 --done --message "Fixed the race; tests pass." --commit 4f2a91c</span>
 <span class="ok">OK</span> <span class="out">close abc4</span></code></pre>

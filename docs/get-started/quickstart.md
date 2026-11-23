@@ -266,8 +266,12 @@ kata create "fix login race" \
 
 kata list
 kata show abc4
-kata comment abc4 --body "Reproduced on macOS."
+kata comment abc4 --body-stdin <<'EOF'
+Reproduced on macOS.
+EOF
 ```
+
+Correct your own comment with `kata comment edit`.
 
 Priorities run from `0` to `4`; `0` is highest. Omitting `--priority` uses
 [`create.default_priority`](../reference/configuration.md#default-priority-for-issue-creation)
@@ -379,7 +383,7 @@ canonical managed briefing without mutating the workspace; see
 
 ## Close with evidence
 
-Closing asserts completion. If work is incomplete, leave the issue open, update
+Closing asserts completion. An open, unmerged PR is unfinished. If work is incomplete, leave the issue open, update
 `work.attention` and `work.attention_msg` with what remains, and add the
 `needs-review` label:
 

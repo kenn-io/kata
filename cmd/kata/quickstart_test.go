@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -31,6 +32,28 @@ func TestQuickstart_ExternalAgentOnboardingFormats(t *testing.T) {
 
 		})
 	}
+}
+
+func TestQuickstartCommentHeredocPreservesText(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash unavailable")
+	}
+	resetFlags(t)
+	output := string(executeRoot(t, newRootCmd(), "quickstart", "--format", "contract"))
+	start := strings.Index(output, "kata comment <ref> --body-stdin --agent <<-'EOF'\n")
+	require.NotEqual(t, -1, start)
+	example := output[start:]
+	end := strings.Index(example, "\n\tEOF\n")
+	require.NotEqual(t, -1, end)
+	example = example[:end+len("\n\tEOF\n")]
+	example = strings.Replace(example, "<ref>", "abc4", 1)
+	example = strings.Replace(example, "<finding>", "The `printf changed` result costs $HOME.", 1)
+	script := "kata() { cat; }\n" + example + "printf 'next command\\n'\n"
+	cmd := exec.CommandContext(t.Context(), bash, "-c", script) //nolint:gosec // The script contains a controlled example and fixture text.
+	got, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(got))
+	assert.Equal(t, "The `printf changed` result costs $HOME.\nnext command\n", string(got))
 }
 
 func TestQuickstart_HelpExplainsFormatsAndSessionSetup(t *testing.T) {
