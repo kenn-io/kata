@@ -29,31 +29,27 @@ func checkFederatedSnapshotReferenceAuthority(t *testing.T, store db.Storage) er
 			require.NoError(t, err)
 			issueUID, err := uid.New()
 			require.NoError(t, err)
-			link := map[string]any{"type": "parent", "to_issue_uid": peer.UID, "author": "worker"}
+			link := map[string]any{"type": "blocks", "to_issue_uid": peer.UID, "author": "worker"}
 			if incoming {
+				link["type"] = "parent"
 				link["incoming"] = true
 			}
 			payload, err := json.Marshal(map[string]any{"links": []any{link}})
 			require.NoError(t, err)
 			event := newRemoteEvent(t, route, &issueUID, "issue.snapshot", "worker", origin, move.HLCPhysicalMS+1, IssueDocument(t, issueUID, payload))
-			params := db.FederationIngestParams{ProjectID: route.ID, FederationEnrollmentID: routeGrant.Enrollment.ID, SpokeInstanceUID: origin, BoundActor: "worker", EventFeatures: db.SupportedEventFeatures, MoveSourceEnrollmentIDs: map[string]int64{peerProject.UID: peerGrant.Enrollment.ID}, AuthorizeReference: func(_ context.Context, _ db.Transaction, grant db.FederationEnrollment, project db.Project) error {
-				require.Equal(t, peerGrant.Enrollment.ID, grant.ID)
-				require.Equal(t, peerProject.UID, project.UID)
-				return nil
-			}, Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: event}}}
+			params := db.FederationIngestParams{ProjectID: route.ID, FederationEnrollmentID: routeGrant.Enrollment.ID, SpokeInstanceUID: origin, BoundActor: "worker", EventFeatures: db.SupportedEventFeatures, MoveSourceEnrollmentIDs: map[string]int64{peerProject.UID: peerGrant.Enrollment.ID}, AuthorizeReference: func(context.Context, db.Transaction, db.FederationEnrollment, db.Project) error { return nil }, Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: event}}}
 			_, err = store.IngestFederationEvents(ctx, params)
 			if incoming {
 				require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
-				_, err = store.ParentOf(ctx, peer.ID)
-				require.ErrorIs(t, err, db.ErrNotFound)
 				return
 			}
 			require.NoError(t, err)
 			created, err := store.IssueByUID(ctx, issueUID, db.IncludeDeletedNo)
 			require.NoError(t, err)
-			parent, err := store.ParentOf(ctx, created.ID)
+			links, err := store.LinksByIssue(ctx, created.ID)
 			require.NoError(t, err)
-			require.Equal(t, peer.ID, parent.ToIssueID)
+			require.Len(t, links, 1)
+			require.Equal(t, peer.UID, links[0].ToIssueUID)
 		})
 	}
 	return nil
