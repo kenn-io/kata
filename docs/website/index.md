@@ -8,12 +8,14 @@ tracker. At that speed the tracker joins the agent's inner loop.
 ```sh
 # the operating loop, at local speed
 kata next --unowned --agent      # OK next issue=abc4 priority=1 title="fix login race"
-kata claim abc4 --agent          # OK claim abc4
+kata claim abc4 --ttl 2h --agent # OK claim abc4
 kata comment abc4 --body-stdin <<-'EOF'
 	root cause: double submit in Safari callback
 	EOF
 kata close abc4 --done --message "Fixed the race; tests pass." --commit 4f2a91c
 ```
+
+Renew before expiry by claiming again with `--ttl`, without `--if-unowned`.
 
 Install:
 

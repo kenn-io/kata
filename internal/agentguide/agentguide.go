@@ -13,8 +13,7 @@ Before starting a change, look for an existing issue:
 
     kata search "<one or two distinctive words>" --agent
 
-Search returns issues that contain every word, so add words only to narrow the
-results. If an open issue covers the work, use it. Otherwise create one:
+Search matches every word. Use an open issue that covers the work, or create one:
 
     kata create "<title>" --body "<what and why>" --idempotency-key <key> --agent
 
@@ -22,8 +21,7 @@ If create reports a look-alike, use that issue unless the work truly differs
 (--force-new). Link related but different work with --related <ref>, or
 --parent <ref> when the new issue is part of a larger one.
 
-Claim the issue before you work on it: kata claim <ref>. When the user only
-asks you to record something, create the issue and stop there.
+` + ClaimRules + `When asked only to record something, create the issue and stop.
 
 ` + CommentRules + `
 Close the issue as soon as the work is verified. The message needs 40 or more
@@ -37,6 +35,15 @@ Never run kata delete or kata purge unless the user asks for that exact action.
 
 For subagents, inboxes, attention signals, scheduling, and relationship rules,
 run kata quickstart.
+`
+
+// ClaimRules says how to claim and renew. A timed claim lets Kata flag the
+// issue for a human when an agent stops without handing it off.
+const ClaimRules = `Claim before you work:
+
+    kata claim <ref> --if-unowned --ttl 2h --agent
+
+Renew before expiry by claiming again with --ttl, without --if-unowned.
 `
 
 // CommentRules says what a comment is for and how to pass its text. Its
@@ -211,8 +218,9 @@ const fragClaiming = `6. Find and claim available work (multi-agent environments
    # Inspect the filtered queue
    kata ready --unowned --label bug --no-label blocked --agent
 
-   # Claim it (fails if already assigned to another actor)
-   kata claim <ref>
+   # Claim it with a time limit (fails if already assigned to another actor).
+   # Renew before it expires by claiming again with --ttl, without --if-unowned.
+   kata claim <ref> --if-unowned --ttl 2h
 
    # Release ownership only if you still own it
    kata unassign <ref> --expect-owner <your-actor>
@@ -317,7 +325,7 @@ const fragTeammates = `9. Attribute swarm contributions and request attention wi
    child issue and claim it:
 
       kata create "fix retry handling" --parent <ref> --idempotency-key retry-child
-      kata claim <child>
+      kata claim <child> --if-unowned --ttl 2h
 
    Comments record findings; child issues track owned work.
 

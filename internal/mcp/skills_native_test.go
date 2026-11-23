@@ -178,3 +178,33 @@ func TestNativeGuidesSayCommentsCarryFindings(t *testing.T) {
 		}
 	}
 }
+
+// Product contract: MCP instructions and claim guides teach timed claims and renewal.
+func TestNativeGuidesSayClaimsHaveTTL(t *testing.T) {
+	session := connectTestServer(t)
+	listed, err := session.ListTools(t.Context(), nil)
+	require.NoError(t, err)
+	descriptions := map[string]string{}
+	for _, tool := range listed.Tools {
+		descriptions[tool.Name] = tool.Description
+	}
+	for _, text := range []string{session.InitializeResult().Instructions, descriptions["kata.claim"]} {
+		require.Contains(t, text, "ttl_seconds")
+		require.Contains(t, text, "without if_unowned")
+	}
+	for _, guide := range skillGuides {
+		md, ok := SkillMarkdown(guide.name)
+		require.True(t, ok, guide.name)
+		if guide.name == "workflow" || guide.name == "quickstart" || guide.name == "claiming" {
+			require.Contains(t, md, "ttl_seconds", guide.name)
+			require.Contains(t, md, "without if_unowned", guide.name)
+		}
+		if guide.name == "quickstart" || guide.name == "claiming" {
+			for _, example := range nativeExamples(t, guide.name) {
+				if example.Tool == "kata.claim" {
+					require.Contains(t, example.Arguments, "ttl_seconds", guide.name)
+				}
+			}
+		}
+	}
+}

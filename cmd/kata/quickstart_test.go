@@ -2,7 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -326,9 +329,21 @@ func TestGuidesSayCommentsCarryFindings(t *testing.T) {
 	assert.Contains(t, editHelp, "kata comment edit abc4 <comment-uid> --body-stdin --agent <<-'EOF'")
 	assert.NotContains(t, editHelp, "-m \"")
 	assertClosedBodyStdinHeredoc(t, "comment edit help", editHelp)
-	for _, args := range [][]string{{"--help"}, {"close", "--help"}, {"label", "add", "--help"}, {"claim", "--help"}} {
+	for _, args := range [][]string{{"--help"}, {"close", "--help"}, {"label", "add", "--help"}, {"claim", "--help"}, {"assign", "--help"}} {
 		resetFlags(t)
 		guides[strings.Join(args, " ")] = string(executeRoot(t, newRootCmd(), args...))
+	}
+	// The guides teach timed claims and renewal without --if-unowned.
+	for _, name := range []string{"quickstart human", "quickstart agent", "quickstart contract", "--help", "claim --help", "assign --help"} {
+		assertClaimsCarryTTL(t, name, guides[name])
+		if name != "assign --help" {
+			assert.Contains(t, guides[name], "without --if-unowned", name)
+		}
+	}
+	for _, path := range []string{"docs/get-started/quickstart.md", "docs/workflows/agents.md", "docs/operations/agent-orchestration.md"} {
+		raw, err := os.ReadFile(filepath.Join("..", "..", path)) //nolint:gosec // G304: paths are fixed documentation files.
+		require.NoError(t, err)
+		assertClaimsCarryTTL(t, path, string(raw))
 	}
 	assert.NotContains(t, guides["claim --help"], `--comment "starting on the Safari path"`)
 	for name, text := range guides {
@@ -357,5 +372,21 @@ func assertClosedBodyStdinHeredoc(t *testing.T, name, text string) {
 	}
 	if found == 0 {
 		t.Errorf("%s: no --body-stdin <<-'EOF' example", name)
+	}
+}
+
+var claimCommand = regexp.MustCompile("kata claim [<\\w][^\\n`<#\"]*")
+
+// assertClaimsCarryTTL checks that each matched claim command names --ttl.
+func assertClaimsCarryTTL(t *testing.T, name, text string) {
+	t.Helper()
+	matches := claimCommand.FindAllString(text, -1)
+	assert.NotEmpty(t, matches, name)
+	for _, match := range matches {
+		command := strings.TrimSpace(match)
+		if strings.HasSuffix(command, "[flags]") {
+			continue // the cobra usage line is a synopsis, not a command
+		}
+		assert.Contains(t, command, "--ttl", "%s: %q", name, command)
 	}
 }

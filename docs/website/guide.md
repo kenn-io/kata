@@ -30,8 +30,12 @@ instead of duplicating. Structure goes in as data: `--parent` for hierarchy,
 
 `kata next --unowned` applies shared priority rules and returns at most one
 candidate. `kata claim` takes ownership, and fails if someone got there first.
-Treat the failure as a signal: run `next` again and take different work. A
-claim costs about 20ms end to end, so agents check and re-check constantly.
+Treat the failure as a signal: run `next` again and take different work.
+
+Claim with `--ttl` and renew before expiry by claiming again, without
+`--if-unowned`.
+
+A claim costs about 20ms end to end, so agents check and re-check constantly.
 
 → [The claim flow](https://katatracker.com/docs/workflows/agents/#claim-work)
 

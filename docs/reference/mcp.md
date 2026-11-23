@@ -438,7 +438,11 @@ send it as `If-Match`. Create calls do not use a revision.
 `kata.create` supports `force_new`. `kata.claim` supports `force`,
 `if_unowned`, and an optional `ttl_seconds` from 60 through 86400. A timed
 claim renews when the same actor repeats it, and the result includes the
-assignment expiry and previous owner when present. `kata.edit` supports field,
+assignment expiry and previous owner when present. When a timed claim on an
+open issue expires while `work.attention` is `ok`, Kata sets it to
+`needs-human` with the message `claim expired without hand-off`. Renew before
+expiry by calling `kata.claim` again with `ttl_seconds`, without `if_unowned`.
+A new claim leaves the attention state and message unchanged. `kata.edit` supports field,
 owner, priority, relationship, scheduling, and generic metadata changes. An
 issue-field or relationship change and a metadata change must use separate
 `kata.edit` calls so one failed request cannot leave a partial edit.
