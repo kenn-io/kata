@@ -150,6 +150,11 @@ it('retries a refused stop with the current revision', async () => {
   await fireEvent.click(
     within(screen.getByRole('dialog')).getByRole('button', { name: 'Stop repeating' }),
   )
+  expect(
+    await within(screen.getByRole('dialog')).findByText(
+      /revision_conflict: recurrence revision is 2/,
+    ),
+  ).toBeTruthy()
   await waitFor(() =>
     expect(
       (

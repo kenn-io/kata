@@ -47,6 +47,7 @@
     recurrence: null,
   })
   let deletingRecurrence = $state(false)
+  let deleteError = $state('')
   let lastDraftFenceGeneration = $state<number | null>(null)
 
   $effect(() => {
@@ -83,6 +84,7 @@
 
   export function openDeleteRecurrence(recurrence: KataRecurrence): void {
     if (disabled || !onDelete) return
+    deleteError = ''
     recurrenceDelete = { open: true, recurrence }
   }
 
@@ -119,11 +121,12 @@
     const recurrence = recurrenceDelete.recurrence
     if (disabled || !onDelete || !recurrence || deletingRecurrence) return
     deletingRecurrence = true
+    deleteError = ''
     try {
       await onDelete(recurrence)
       recurrenceDelete = { open: false, recurrence: null }
-    } catch {
-      // The refreshed list keeps the dialog ready for another attempt.
+    } catch (error) {
+      deleteError = error instanceof Error ? error.message : 'Could not stop repeating.'
     } finally {
       deletingRecurrence = false
     }
@@ -152,6 +155,7 @@
   <RecurrenceDeleteDialog
     open={recurrenceDelete.open}
     recurrence={recurrenceDelete.recurrence}
+    error={deleteError}
     disabled={disabled || deletingRecurrence}
     onConfirm={() => {
       void confirmDeleteRecurrence()

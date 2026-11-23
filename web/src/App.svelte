@@ -1506,6 +1506,7 @@
         requestedRoute={route !== acceptedRoute ? route : undefined}
         onSearchEmpty={() => reportOutcome('search_empty')}
         snapshot={shellSnapshot!}
+        allProjectsSnapshot={authority.snapshot}
         selfActor={shellSnapshot!.capabilities.actor_policy === 'identity'
           ? shellSnapshot!.capabilities.account
           : requestActor}

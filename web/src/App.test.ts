@@ -3309,6 +3309,78 @@ describe('App', () => {
     )
   })
 
+  it('counts tasks unblocked in other projects when completing a task', async () => {
+    history.replaceState(
+      null,
+      '',
+      '/kata?scope=01J00000000000000000000002&issue=01J00000000000000000000001#direct=1',
+    )
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const base = snapshot()
+    const other = {
+      ...base.collection[0]!,
+      id: 2,
+      uid: '01J00000000000000000000004',
+      project_id: 8,
+      project_uid: '01J00000000000000000000003',
+      project_name: 'other-project',
+      short_id: 'b1',
+      qualified_id: 'other-project#b1',
+    }
+    const link = {
+      id: 1,
+      from_issue_id: 1,
+      from_issue_uid: base.collection[0]!.uid,
+      from_qualified_id: base.collection[0]!.qualified_id,
+      from_status: 'open',
+      to_issue_id: 2,
+      to_issue_uid: other.uid,
+      to_qualified_id: other.qualified_id,
+      to_status: 'open',
+      type: 'blocks',
+      author: 'user-a',
+      created_at: '2026-08-01T12:00:00Z',
+    }
+    const accepted = {
+      ...base,
+      catalog: [
+        ...base.catalog,
+        {
+          ...base.catalog[0]!,
+          project: {
+            ...base.catalog[0]!.project,
+            id: 8,
+            uid: other.project_uid,
+            name: other.project_name,
+          },
+        },
+      ],
+      collection: [...base.collection, other],
+      collection_links: [link],
+      selected: { ...availableSelection(base.collection[0]), links: [link] },
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = new URL(requestOf(input, init).url).pathname
+        if (path === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (path.endsWith('/recurrences')) return Response.json({ recurrences: [] })
+        if (path.endsWith('/references')) return Response.json({ statuses: [] })
+        return Response.json(accepted, { headers: { ETag: '"snapshot-1"' } })
+      }),
+    )
+    render(App)
+    await fireEvent.click(await screen.findByRole('button', { name: 'Complete…' }))
+    expect(
+      within(screen.getByRole('dialog', { name: 'Complete task' })).getByText(
+        'Unblocks 1 open task.',
+      ),
+    ).toBeTruthy()
+  })
+
   function recurrenceDeletionSetup() {
     history.replaceState(
       null,

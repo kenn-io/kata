@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button } from '@kenn-io/kit-ui'
+  import { Button, Notice } from '@kenn-io/kit-ui'
 
   import Modal from './Modal.svelte'
   import type { KataRecurrence } from '../lib/kata/types'
@@ -8,11 +8,12 @@
     open: boolean
     recurrence: KataRecurrence
     disabled?: boolean | undefined
+    error?: string | undefined
     onConfirm: () => void
     onCancel: () => void
   }
 
-  let { open, recurrence, disabled = false, onConfirm, onCancel }: Props = $props()
+  let { open, recurrence, disabled = false, error = '', onConfirm, onCancel }: Props = $props()
 
   function handleConfirm(): void {
     if (disabled) return
@@ -25,6 +26,7 @@
     Stop creating new occurrences of
     <strong>{recurrence.template_title}</strong>? Existing open issues are not affected.
   </p>
+  {#if error}<Notice tone="error">{error}</Notice>{/if}
   {#snippet footer()}
     <Button size="sm" label="Cancel" onclick={onCancel} />
     <Button

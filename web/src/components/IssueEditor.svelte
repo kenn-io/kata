@@ -61,6 +61,7 @@
     today?: string | undefined
     events?: readonly KataTaskEvent[] | undefined
     issueCatalog?: readonly KataTaskSummary[] | undefined
+    completionIssueCatalog?: readonly KataTaskSummary[] | undefined
     searchReferences?: ((query: string) => Promise<Reference[]>) | undefined
     linkFilters?: KataLinkFilters | undefined
     onLinkFiltersChange?: ((next: KataLinkFilters) => void) | undefined
@@ -112,6 +113,7 @@
     events = [],
     today = localDateString(new Date()),
     issueCatalog = [],
+    completionIssueCatalog = undefined,
     searchReferences = async () => [],
     linkFilters = createKataLinkFilters('all'),
     onLinkFiltersChange = () => {},
@@ -494,7 +496,7 @@
           {#key draftFenceGeneration}<IssueStateDialog
               bind:this={stateDialog}
               {issue}
-              {issueCatalog}
+              issueCatalog={completionIssueCatalog ?? issueCatalog}
               disabled={actionsDisabled || detailInert}
               {onCloseIssue}
               {onReopenIssue}

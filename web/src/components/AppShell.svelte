@@ -66,6 +66,7 @@
     route: AppRoute
     requestedRoute?: AppRoute | undefined
     snapshot: UISnapshot
+    allProjectsSnapshot?: UISnapshot | undefined
     selfActor?: string | undefined
     loading: boolean
     canMutate: boolean
@@ -144,6 +145,7 @@
     route: acceptedRoute,
     requestedRoute = undefined,
     snapshot,
+    allProjectsSnapshot = undefined,
     selfActor = undefined,
     loading,
     canMutate,
@@ -196,6 +198,11 @@
   }: Props = $props()
 
   let acceptedProjection = $derived(normalizeKataUISnapshot(snapshot))
+  let completionIssueCatalog = $derived(
+    allProjectsSnapshot && allProjectsSnapshot !== snapshot
+      ? normalizeKataUISnapshot(allProjectsSnapshot).issues
+      : acceptedProjection.issues,
+  )
   // A click on another task in the loaded list shows that task at once, from the
   // list's copy of it, while App loads the snapshot that carries its comments,
   // links, and history. Any other route change waits for its snapshot.
@@ -1000,6 +1007,7 @@
         {selfActor}
         events={[...projection.selected_history]}
         issueCatalog={projection.issues}
+        {completionIssueCatalog}
         {searchReferences}
         {linkFilters}
         onLinkFiltersChange={(next) => {
