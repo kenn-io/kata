@@ -116,7 +116,7 @@ test('captures stable Web UI documentation states from synthetic issues', async 
   await expect(page.getByRole('region', { name: 'Links' })).toContainText(
     /Document browser workflows|Verify example packages|Coordinate example announcement/,
   )
-  await expect(page.getByRole('region', { name: 'Properties' })).toContainText('Repeats')
+  await expect(page.getByLabel('Properties')).toContainText('Repeats')
   await capture(page, join(outputDir, 'issue-detail.png'), replacements)
 
   const unlink = await kata.request(
