@@ -82,7 +82,7 @@ func TestFederationPollAuthorizesBeforeAndAfterRead(t *testing.T) {
 	})
 	project := createFederatedHubProject(t, env, "hub-project")
 	created, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
-		Token:            "poll-token",
+		Token:            "poll-once-token",
 		SpokeInstanceUID: federationTestSpokeUID,
 		ProjectID:        &project.ID,
 		Capabilities:     "pull",

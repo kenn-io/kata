@@ -317,7 +317,7 @@ first read shortens it. Before each read a held poll makes after waiting, the
 hub runs the request's full federation authorization again without the
 per-request cache. For a signed request this also confirms that the signing
 key has not passed its `not_after` and still holds the secret the request was
-verified with. After a poll waits, the hub checks authorization once more before releasing the page.
+verified with. The hub checks authorization once more before releasing the page.
 Revocation therefore ends a held poll at its next wake or at its expiry. When
 the wait ends without a wake, the hub reads once more, so events whose wakeup
 was lost still arrive. The hub bounds held polls in total, per credential, and

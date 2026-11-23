@@ -347,8 +347,20 @@ func hubStatusErrors(err error) []*HubStatusError {
 // disabled and enabled again between two passes changes it too. The token is
 // hashed with the rest and never kept.
 func syncRetryIdentity(binding db.FederationBinding, credential config.FederationCredential) ([32]byte, error) {
-	material, err := json.Marshal([]any{
-		binding.Role, binding.Enabled, binding.HubURL, binding.HubProjectID, binding.HubProjectUID, binding.Actor,
+	material, err := json.Marshal(struct {
+		HubURL        string
+		HubProjectID  int64
+		HubProjectUID string
+		Actor         string
+		AllowInsecure bool
+		PushEnabled   bool
+		CreatedAt     time.Time
+		UpdatedAt     time.Time
+		LastSyncAt    *time.Time
+		RelayConfig   *db.RelayBindingConfig
+		Credential    config.FederationCredential
+	}{
+		binding.HubURL, binding.HubProjectID, binding.HubProjectUID, binding.Actor,
 		binding.AllowInsecure, binding.PushEnabled, binding.CreatedAt, binding.UpdatedAt, binding.LastSyncAt,
 		binding.RelayConfig, credential,
 	})
