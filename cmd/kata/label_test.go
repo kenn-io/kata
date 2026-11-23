@@ -19,7 +19,17 @@ func TestLabelAdd_PriorityLabelRejected(t *testing.T) {
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "a")
 	_, stderr, err := runCLIWithErr(t, env, dir, "label", "add", ref, "p2")
 	requireCLIError(t, err, ExitValidation)
-	assert.Contains(t, stderr, "kata edit "+ref+" --priority N")
+	assert.Contains(t, stderr, "#"+ref+" --priority N")
+}
+
+func TestLabelAdd_PriorityLabelQualifiedRef(t *testing.T) {
+	env, dir, _, _ := setupWorkspaceWithIssue(t, "local")
+	_, foreignID := initLocalBoundWorkspace(t, env, "spoke-project")
+	ref := createIssue(t, env, foreignID, "foreign")
+	qualified := "spoke-project#" + ref
+	_, stderr, err := runCLIWithErr(t, env, dir, "label", "add", qualified, "p2")
+	requireCLIError(t, err, ExitValidation)
+	assert.Contains(t, stderr, "kata edit "+qualified+" --priority N")
 }
 
 func TestLabelAdd_AgentOutput(t *testing.T) {

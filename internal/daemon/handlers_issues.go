@@ -181,8 +181,8 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		for _, label := range in.Body.Labels {
-			if err := rejectPriorityLabel(label, "kata create --priority N"); err != nil {
-				return nil, err
+			if isPriorityLabel(label) {
+				return nil, api.NewError(400, "validation", "use the priority field: kata create --priority N", "", nil)
 			}
 		}
 		if err := validateIssueTitle(in.Body.Title); err != nil {

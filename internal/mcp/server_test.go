@@ -928,7 +928,7 @@ func TestToolsRoundTripAgainstRealDaemon(t *testing.T) {
 		arguments map[string]any
 		fix       string
 	}{
-		{"kata.set_label", map[string]any{"ref": ref, "label": "priority:high", "present": true}, "kata edit " + ref + " --priority N"},
+		{"kata.set_label", map[string]any{"ref": ref, "label": "priority:high", "present": true}, "kata edit spoke-project#" + ref + " --priority N"},
 		{"kata.create", map[string]any{"title": "Priority label", "labels": []string{"p2"}, "idempotency_key": "priority-label"}, "kata create --priority N"},
 	} {
 		result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: tc.tool, Arguments: tc.arguments})
@@ -936,6 +936,14 @@ func TestToolsRoundTripAgainstRealDaemon(t *testing.T) {
 		require.True(t, result.IsError)
 		require.Contains(t, result.Content[0].(*sdkmcp.TextContent).Text, tc.fix)
 	}
+	wide := connectTestServerWithOptions(t, Options{Client: apiClient, Scope: NewAllScope(), Actor: "example-agent", Version: "test-version"})
+	foreignRef := foreignProject.Name + "#" + foreignIssue.ShortID
+	result, err := wide.CallTool(t.Context(), &sdkmcp.CallToolParams{
+		Name: "kata.set_label", Arguments: map[string]any{"ref": foreignRef, "label": "p2", "present": true},
+	})
+	require.NoError(t, err)
+	require.True(t, result.IsError)
+	require.Contains(t, result.Content[0].(*sdkmcp.TextContent).Text, "kata edit "+foreignRef+" --priority N")
 	escaped, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
 		Name: "kata.edit", Arguments: map[string]any{
 			"ref": ref, "add_related": []string{"spoke-project#" + strings.ToLower(foreignIssue.UID)},

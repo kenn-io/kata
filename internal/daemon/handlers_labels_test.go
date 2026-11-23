@@ -18,7 +18,7 @@ func TestAddLabel_PriorityLabelRejected(t *testing.T) {
 		t.Run(label, func(t *testing.T) {
 			resp, body := envDoRaw(t, env, http.MethodPost, issuePath(pid, n, "labels"), map[string]string{"actor": "tester", "label": label}, nil)
 			assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
-			assert.Contains(t, string(body), "kata edit "+issue.ShortID+" --priority N")
+			assert.Contains(t, string(body), "kata edit kata#"+issue.ShortID+" --priority N")
 		})
 	}
 	for _, label := range []string{"p5", "priority", "area:ui"} {

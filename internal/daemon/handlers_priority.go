@@ -11,11 +11,8 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-func rejectPriorityLabel(label, fix string) error {
-	if (len(label) == 2 && label[0] == 'p' && label[1] >= '0' && label[1] <= '4') || strings.HasPrefix(label, "priority:") {
-		return api.NewError(400, "validation", "use the priority field: "+fix, "", nil)
-	}
-	return nil
+func isPriorityLabel(label string) bool {
+	return (len(label) == 2 && label[0] == 'p' && label[1] >= '0' && label[1] <= '4') || strings.HasPrefix(label, "priority:")
 }
 
 func registerPriorityHandlers(humaAPI huma.API, cfg ServerConfig) {
