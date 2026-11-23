@@ -141,3 +141,48 @@ func nextPollWake(t *testing.T, ctx context.Context, wakes <-chan string) string
 		return ""
 	}
 }
+
+func TestFederationPollWakeSecretConcurrentBootstrapAndExport(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+	defer cancel()
+	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
+	t.Cleanup(cleanup)
+	store := openPollWakeStore(t, ctx, dsn, pgstore.DefaultSchema)
+	second := openPollWakeStore(t, ctx, dsn, pgstore.DefaultSchema)
+	const count = 16
+	results := make(chan []byte, count)
+	errs := make(chan error, count)
+	for i := range count {
+		go func() {
+			current := store
+			if i%2 == 1 {
+				current = second
+			}
+			secret, err := current.FederationPollWakeSecret(ctx)
+			results <- secret
+			errs <- err
+		}()
+	}
+	var first []byte
+	for range count {
+		require.NoError(t, <-errs)
+		secret := <-results
+		require.Len(t, secret, 32)
+		if first == nil {
+			first = secret
+		}
+		require.Equal(t, first, secret)
+	}
+	for meta, err := range store.ExportMeta(ctx) {
+		require.NoError(t, err)
+		require.NotEqual(t, "federation_poll_wake_secret", meta.Key)
+	}
+	require.NoError(t, store.ImportReplay(ctx, []db.ImportRecord{&db.MetaKV{Key: "federation_poll_wake_secret", Value: "imported"}}, db.ImportOptions{}))
+	restored, err := store.FederationPollWakeSecret(ctx)
+	require.NoError(t, err)
+	require.Len(t, restored, 32)
+	require.NotEqual(t, first, restored)
+	other, err := second.FederationPollWakeSecret(ctx)
+	require.NoError(t, err)
+	require.Equal(t, restored, other)
+}

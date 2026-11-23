@@ -3,7 +3,9 @@ package pgstore
 import (
 	"context"
 	"crypto/hkdf"
+	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"database/sql/driver"
 
 	"encoding/hex"
@@ -17,10 +19,11 @@ import (
 
 // PostgreSQL permits every connected role to listen and notify on any channel.
 // The instance UID and schema distinguish installations; they are not secrets.
-// The federation bridge sends only the publishing process's instance tag.
+// The federation bridge sends a process tag and keyed project buckets.
 // Connected roles can observe wake activity. Each receiving poll rechecks
 // authorization before reading its project.
 const (
+	pollWakeSecretKey   = "federation_poll_wake_secret"
 	pollWakeChannelInfo = "kata federation poll wake channel v1\x00"
 	// pollWakeChannelBytes keeps the hex channel name within PostgreSQL's
 	// 63-byte identifier limit.
@@ -46,6 +49,32 @@ func (s *Store) pollWakeChannel() (string, error) {
 		return "", fmt.Errorf("derive federation poll wake channel: %w", err)
 	}
 	return hex.EncodeToString(channel), nil
+}
+
+// FederationPollWakeSecret returns the shared wake tag key, creating it if absent.
+func (s *Store) FederationPollWakeSecret(ctx context.Context) ([]byte, error) {
+	var value string
+	err := s.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=$1`, pollWakeSecretKey).Scan(&value)
+	if errors.Is(err, sql.ErrNoRows) {
+		secret := make([]byte, 32)
+		if _, err := rand.Read(secret); err != nil {
+			return nil, err
+		}
+		err = s.withTx(ctx, sql.LevelReadCommitted, func(tx *sql.Tx) error {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,$2) ON CONFLICT(key) DO NOTHING`, pollWakeSecretKey, hex.EncodeToString(secret)); err != nil {
+				return err
+			}
+			return tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=$1`, pollWakeSecretKey).Scan(&value)
+		})
+	}
+	if err != nil {
+		return nil, err
+	}
+	secret, err := hex.DecodeString(value)
+	if err != nil || len(secret) != 32 {
+		return nil, errors.New("invalid federation poll wake secret")
+	}
+	return secret, nil
 }
 
 // PublishFederationPollWake notifies every hub process listening on this

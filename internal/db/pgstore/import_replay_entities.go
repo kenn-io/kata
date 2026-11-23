@@ -14,7 +14,7 @@ import (
 )
 
 func pgReplayMeta(ctx context.Context, tx *sql.Tx, meta *db.MetaKV, opts db.ImportOptions, targetUID string) error {
-	if meta.Key == "export_version" || meta.Key == "schema_version" {
+	if meta.Key == "export_version" || meta.Key == "schema_version" || meta.Key == pollWakeSecretKey {
 		return nil
 	}
 	if meta.Key == "instance_uid" && opts.NewInstance {

@@ -646,10 +646,11 @@ when it wakes or expires. When the wait ends, the hub reads once more, so an
 event whose wakeup was lost still arrives. Hubs that share a PostgreSQL
 database and schema wake each other's held polls with `LISTEN/NOTIFY` on a
 channel that other connected database roles can listen to or notify; a SQLite hub
-wakes them in process. A PostgreSQL wake carries only the publishing process's
-instance tag. Each receiving process wakes all its held polls, up to 256, and
-each poll reauthorizes and rereads its own project. Connected roles can observe
-wake activity but receive no project IDs or issue content. A listener also wakes
+wakes them in process. A PostgreSQL wake carries the publishing process's instance tag and up to two
+keyed 64-bucket project tags. Each receiving process wakes polls in those
+buckets, and each poll reauthorizes and rereads its own project. Connected
+roles can observe wake activity and co-occurring buckets on a move but receive
+no project IDs or issue content. A listener also wakes
 its held polls after reconnecting to cover notifications missed while disconnected.
 
 Sync runs in turns. One turn for a project pushes and pulls at most 8 batches

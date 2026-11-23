@@ -36,11 +36,16 @@ func newFederationReadProbe(store db.Storage) *federationReadProbe {
 // storage returns the probe as the hub's store. A store shared by several hub
 // processes must stay a wake bus, or the server never starts the bridge that
 // carries their wakeups.
+type pollWakeSecretBus interface {
+	db.FederationPollWakeBus
+	FederationPollWakeSecret(context.Context) ([]byte, error)
+}
+
 func (p *federationReadProbe) storage() db.Storage {
-	if bus, ok := p.Storage.(db.FederationPollWakeBus); ok {
+	if bus, ok := p.Storage.(pollWakeSecretBus); ok {
 		return struct {
 			*federationReadProbe
-			db.FederationPollWakeBus
+			pollWakeSecretBus
 		}{p, bus}
 	}
 	return p

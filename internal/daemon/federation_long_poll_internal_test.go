@@ -78,6 +78,8 @@ func (recordingPollWakeBus) ListenFederationPollWake(ctx context.Context, _ func
 func TestFederationPollRemoteWakeMatchesProjectAndMoveSource(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		writer, reader := newFederationPollWaits(16), newFederationPollWaits(16)
+		writer.remote.setSecret([]byte("test secret"))
+		reader.remote.setSecret([]byte("test secret"))
 		broadcaster := NewEventBroadcaster()
 		bus := recordingPollWakeBus{published: make(chan string, 1)}
 		ctx, cancel := context.WithCancel(t.Context())
@@ -95,7 +97,7 @@ func TestFederationPollRemoteWakeMatchesProjectAndMoveSource(t *testing.T) {
 			waiters = append(waiters, waiter)
 		}
 		synctest.Wait()
-		broadcaster.Broadcast(NewEventMsg(2, db.Event{Type: "issue.moved", Payload: `{"from_project_uid":"source"}`}))
+		broadcaster.Broadcast(NewEventMsg(2, db.Event{ProjectUID: "destination", Type: "issue.moved", Payload: `{"from_project_uid":"source"}`}))
 		synctest.Wait()
 		published := <-bus.published
 		reader.receive(published)
@@ -111,7 +113,7 @@ func TestFederationPollRemoteWakeMatchesProjectAndMoveSource(t *testing.T) {
 				}
 			}
 		}
-		broadcaster.Broadcast(NewEventMsg(3, db.Event{Type: "issue.updated"}))
+		broadcaster.Broadcast(NewEventMsg(3, db.Event{ProjectUID: "unrelated", Type: "issue.updated"}))
 		synctest.Wait()
 		reader.receive(<-bus.published)
 		for i, waiter := range waiters {
@@ -283,4 +285,47 @@ func TestFederationPollWaitCapsOversizedWaits(t *testing.T) {
 	wait, err := federationPollWait(t.Context(), api.OptionalInt{IsSet: true, Value: 9223372037})
 	require.NoError(t, err)
 	assert.Equal(t, federationPollWaitMax, wait)
+}
+
+func TestFederationPollWakeDoesNotExposeProjectIdentity(t *testing.T) {
+	waits := newFederationPollWaits(16)
+	payload := waits.messageFor(NewEventMsg(123456, db.Event{Type: "issue.moved", Payload: `{"from_project_uid":"source-project-uid"}`}))
+	assert.NotContains(t, payload, "123456")
+	assert.NotContains(t, payload, "source-project-uid")
+}
+
+func TestFederationPollMalformedWakeWakesAll(t *testing.T) {
+	waits := newFederationPollWaits(16)
+	woken, unsubscribe := waits.remote.subscribe(SubFilter{ProjectID: 1, ProjectUID: "project"})
+	defer unsubscribe()
+	waits.receive("other malformed")
+	select {
+	case <-woken:
+	default:
+		t.Fatal("malformed remote wake must wake all polls")
+	}
+}
+
+func TestFederationPollWakeTagsAndFallback(t *testing.T) {
+	writer, reader := newFederationPollWaits(16), newFederationPollWaits(16)
+	writer.remote.setSecret([]byte("first secret"))
+	msg := NewEventMsg(123456, db.Event{ProjectUID: "destination-project-uid", Type: "issue.moved", Payload: `{"from_project_uid":"source-project-uid"}`})
+	first := writer.messageFor(msg)
+	assert.NotContains(t, first, "123456")
+	assert.NotContains(t, first, "destination-project-uid")
+	assert.NotContains(t, first, "source-project-uid")
+	writer.remote.setSecret([]byte("another secret"))
+	assert.NotEqual(t, first, writer.messageFor(msg))
+	woken, unsubscribe := reader.remote.subscribe(SubFilter{ProjectID: 1, ProjectUID: "unrelated"})
+	defer unsubscribe()
+	for _, payload := range []string{first, "other", "other invalid", "other 64", ""} {
+		reader.receive(payload)
+		select {
+		case <-woken:
+		default:
+			t.Errorf("payload %q failed to wake a poll without a secret", payload)
+		}
+	}
+	writer.remote.setSecret(nil)
+	assert.Equal(t, writer.instance, writer.messageFor(msg))
 }

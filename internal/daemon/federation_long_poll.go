@@ -2,7 +2,9 @@ package daemon
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -184,6 +186,7 @@ type federationPollWakeBus struct {
 	mu     sync.Mutex
 	nextID int
 	subs   map[int]federationPollWakeSub
+	secret []byte
 }
 
 type federationPollWakeSub struct {
@@ -212,15 +215,31 @@ func (b *federationPollWakeBus) subscribe(filter SubFilter) (<-chan struct{}, fu
 
 // wake signals every held poll.
 func (b *federationPollWakeBus) wake() {
-	b.wakeMatching(StreamMsg{})
+	b.wakeTags(nil)
 }
 
-func (b *federationPollWakeBus) wakeMatching(msg StreamMsg) {
+func wakeTag(secret []byte, uid string) int {
+	mac := hmac.New(sha256.New, secret)
+	_, _ = mac.Write([]byte("wake-v1"))
+	_, _ = mac.Write([]byte(uid))
+	return int(mac.Sum(nil)[0] & 63)
+}
+
+func (b *federationPollWakeBus) setSecret(secret []byte) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.secret = secret
+}
+
+func (b *federationPollWakeBus) wakeTags(tags []int) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for _, sub := range b.subs {
-		if msg.ProjectID != 0 && !sub.filter.matches(msg) {
-			continue
+		if len(tags) > 0 && len(b.secret) > 0 && sub.filter.ProjectUID != "" {
+			tag := wakeTag(b.secret, sub.filter.ProjectUID)
+			if tag != tags[0] && (len(tags) < 2 || tag != tags[1]) {
+				continue
+			}
 		}
 		select {
 		case sub.ch <- struct{}{}:
@@ -229,35 +248,57 @@ func (b *federationPollWakeBus) wakeMatching(msg StreamMsg) {
 	}
 }
 
-// message is the payload that wakes every poll in the other processes.
 func (w *federationPollWaits) message() string {
 	return w.instance
 }
 
 func (w *federationPollWaits) messageFor(msg StreamMsg) string {
-	if msg.ProjectID == 0 {
+	w.remote.mu.Lock()
+	defer w.remote.mu.Unlock()
+	if len(w.remote.secret) == 0 || msg.Event == nil || msg.Event.ProjectUID == "" {
 		return w.message()
 	}
-	return strings.TrimSpace(w.instance + " " + strconv.FormatInt(msg.ProjectID, 10) + " " + msg.movedFromProjectUID)
+	payload := w.instance + " " + strconv.Itoa(wakeTag(w.remote.secret, msg.Event.ProjectUID))
+	if msg.movedFromProjectUID != "" {
+		payload += " " + strconv.Itoa(wakeTag(w.remote.secret, msg.movedFromProjectUID))
+	}
+	return payload
 }
 
 func (w *federationPollWaits) receive(payload string) {
 	fields := strings.Fields(payload)
-	if len(fields) == 0 || fields[0] == w.instance {
+	if len(fields) > 0 && fields[0] == w.instance {
 		return
 	}
-	msg := StreamMsg{Kind: StreamKindEvent}
-	if len(fields) > 1 {
-		id, err := strconv.ParseInt(fields[1], 10, 64)
-		if err != nil || id < 0 {
+	if len(fields) < 2 || len(fields) > 3 {
+		w.remote.wake()
+		return
+	}
+	tags := make([]int, 0, 2)
+	for _, field := range fields[1:] {
+		tag, err := strconv.Atoi(field)
+		if err != nil || tag < 0 || tag >= 64 {
+			w.remote.wake()
 			return
 		}
-		msg.ProjectID = id
+		tags = append(tags, tag)
 	}
-	if len(fields) > 2 {
-		msg.movedFromProjectUID = fields[2]
+	w.remote.wakeTags(tags)
+}
+
+type federationPollWakeSecretStore interface {
+	FederationPollWakeSecret(context.Context) ([]byte, error)
+}
+
+func loadFederationPollWakeSecret(ctx context.Context, bus db.FederationPollWakeBus, waits *federationPollWaits) {
+	waits.remote.mu.Lock()
+	hasSecret := len(waits.remote.secret) > 0
+	waits.remote.mu.Unlock()
+	if store, ok := bus.(federationPollWakeSecretStore); ok && !hasSecret {
+		if secret, err := store.FederationPollWakeSecret(ctx); err == nil {
+			waits.remote.setSecret(secret)
+		}
 	}
-	w.remote.wakeMatching(msg)
 }
 
 // runFederationPollWakeBridge publishes this process's committed events to the
@@ -268,6 +309,7 @@ func runFederationPollWakeBridge(ctx context.Context, bus db.FederationPollWakeB
 	// must not retry against it.
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
+	loadFederationPollWakeSecret(ctx, bus, waits)
 	var wg sync.WaitGroup
 	wg.Go(func() { defer stop(); publishFederationPollWakes(ctx, bus, broadcaster, waits, logger) })
 	wg.Go(func() { defer stop(); listenFederationPollWakes(ctx, bus, waits, logger) })
@@ -306,6 +348,7 @@ func listenFederationPollWakes(ctx context.Context, bus db.FederationPollWakeBus
 		connected := false
 		err := bus.ListenFederationPollWake(ctx, func() {
 			connected = true
+			loadFederationPollWakeSecret(ctx, bus, waits)
 			// Notifications sent while no listener was connected are lost.
 			waits.remote.wake()
 		}, waits.receive)
