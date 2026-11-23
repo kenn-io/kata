@@ -5,6 +5,7 @@ import (
 	"slices"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -320,4 +321,30 @@ func TestFederationProviderValidatesActorBeforeSavingReady(t *testing.T) {
 	assert.Equal(t, "Example User", ready.Credential.Actor)
 	assert.Equal(t, pending.Credential.Provider.RequestID, ready.Credential.Provider.RequestID)
 	assert.True(t, pending.Credential.Token == ready.Credential.Token)
+}
+
+func TestFederationProviderReleaseBlocksOvertakenMove(t *testing.T) {
+	catalog, mapping := providerMapping(t)
+	store := openReplicaServiceStore(t)
+	source := overtakenLeaveFixture(t, store)
+	credentials := config.DefaultFederationCredentialStore()
+	before := config.FederationCredential{
+		HubURL: catalog.URL, HubProjectName: mapping.HubProject, SpokeProjectName: source.Name,
+		ManagedByConfig: true, Token: "provider-credential", Actor: "worker",
+		Provider: &config.FederationProviderCredential{
+			RequestID: uuid.New(), Command: mapping.CredentialProvider, Intent: mapping.Intent,
+			SpokeInstanceUID: store.InstanceUID(), LocalProjectUID: source.UID, Status: federationprovider.StatusReady,
+		},
+	}
+	require.NoError(t, credentials.StoreFederationCredential(t.Context(), source.UID, before))
+	t.Setenv("KATA_TEST_PROVIDER_STATUS", "released")
+	_, err := daemon.ReleaseFederationProvider(t.Context(), store, credentials, source.ID)
+	require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush)
+	after, found, err := credentials.FindManagedFederationCredential(t.Context(), source.Name)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.True(t, before.Equal(after.Credential))
+	binding, err := store.FederationBindingByProject(t.Context(), source.ID)
+	require.NoError(t, err)
+	require.True(t, binding.PushEnabled)
 }
