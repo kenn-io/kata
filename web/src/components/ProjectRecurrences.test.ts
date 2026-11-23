@@ -118,8 +118,17 @@ it('refreshes the list after an edit conflict', async () => {
   await fireEvent.input(within(dialog).getByLabelText('Title'), { target: { value: 'My edit' } })
   await fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
   await waitFor(() => expect(listRecurrences).toHaveBeenCalledTimes(3))
+  await within(dialog).findByRole('alert')
   expect((within(dialog).getByLabelText('Title') as HTMLInputElement).value).toBe('My edit')
   expect(onPatch).toHaveBeenCalledTimes(1)
+  expect(
+    ((await screen.findByRole('button', { name: 'Save' })) as HTMLButtonElement).disabled,
+  ).toBe(true)
+  await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+  await fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+  expect(
+    (within(screen.getByRole('dialog')).getByLabelText('Title') as HTMLInputElement).value,
+  ).toBe('Their title')
 })
 
 it('retries a refused stop with the current revision', async () => {
@@ -139,7 +148,10 @@ it('retries a refused stop with the current revision', async () => {
   const onDelete = vi
     .fn()
     .mockRejectedValueOnce(
-      new Error('revision_conflict: recurrence revision is 2. Your draft was preserved.'),
+      Object.assign(
+        new Error('revision_conflict: recurrence revision is 2. Your draft was preserved.'),
+        { status: 412 },
+      ),
     )
     .mockResolvedValueOnce(undefined)
   render(ProjectRecurrences, {
@@ -152,7 +164,7 @@ it('retries a refused stop with the current revision', async () => {
   )
   expect(
     await within(screen.getByRole('dialog')).findByText(
-      /revision_conflict: recurrence revision is 2/,
+      'This rule changed elsewhere. Review the current rule before stopping it.',
     ),
   ).toBeTruthy()
   await waitFor(() =>

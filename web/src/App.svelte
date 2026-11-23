@@ -835,7 +835,12 @@
         return { ...result, data: result.status === 204 ? true : result.data }
       },
     )
-    if (!accepted) throw new Error(mutationMessage(mutationState) ?? 'Could not stop repeating.')
+    if (!accepted) {
+      if (mutationState.kind === 'revision-conflict') {
+        throw Object.assign(new Error(mutationState.detail), { status: 412 })
+      }
+      throw new Error(mutationMessage(mutationState) ?? 'Could not stop repeating.')
+    }
     recurrenceRevision++
   }
 

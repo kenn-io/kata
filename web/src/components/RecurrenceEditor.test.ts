@@ -770,5 +770,11 @@ describe('RecurrenceEditor — 412 conflict', () => {
     ).toBeTruthy()
     expect((screen.getByLabelText(/Title/i) as HTMLInputElement).value).toBe('My edit')
     expect(onPatch).toHaveBeenCalledWith(sample, expect.anything(), '"rev-1"')
+    const save = screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement
+    expect(save.disabled).toBe(true)
+    await fireEvent.input(screen.getByLabelText(/Title/i), { target: { value: 'My revised edit' } })
+    expect(save.disabled).toBe(true)
+    await fireEvent.click(save)
+    expect(onPatch).toHaveBeenCalledTimes(1)
   })
 })

@@ -280,6 +280,7 @@
 
   // --- Exposed instance API (used by RecurrenceEditorDialog) -----
   export function canSave(): boolean {
+    if (conflictBanner) return false
     if (title.trim().length === 0) return false
     if (mode_ === 'advanced' && parseRRule(advancedText).kind === 'invalid') return false
     if (mode_ === 'common' && !isCommonFormValid()) return false
@@ -288,6 +289,7 @@
     return true
   }
   export async function trySave(): Promise<void> {
+    if (!canSave()) return
     submitError = null
     if (mode_ === 'advanced' && parseRRule(advancedText).kind === 'invalid') return
     if (mode_ === 'common' && !isCommonFormValid()) return

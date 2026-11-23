@@ -3464,7 +3464,14 @@ describe('App', () => {
         await waitFor(() =>
           expect(screen.queryByRole('dialog', { name: 'Stop repeating' })).toBeNull(),
         )
-      else expect(dialog.isConnected).toBe(true)
+      else {
+        expect(dialog.isConnected).toBe(true)
+        expect(
+          await within(dialog).findByText(
+            'This rule changed elsewhere. Review the current rule before stopping it.',
+          ),
+        ).toBeTruthy()
+      }
     },
   )
 

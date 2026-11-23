@@ -126,7 +126,12 @@
       await onDelete(recurrence)
       recurrenceDelete = { open: false, recurrence: null }
     } catch (error) {
-      deleteError = error instanceof Error ? error.message : 'Could not stop repeating.'
+      deleteError =
+        error && typeof error === 'object' && 'status' in error && error.status === 412
+          ? 'This rule changed elsewhere. Review the current rule before stopping it.'
+          : error instanceof Error
+            ? error.message
+            : 'Could not stop repeating.'
     } finally {
       deletingRecurrence = false
     }
