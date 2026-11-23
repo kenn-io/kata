@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/svelte'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import RecurrenceEditor from './RecurrenceEditor.svelte'
 import RecurrenceEditorDialog from './RecurrenceEditorDialog.svelte'
@@ -6,8 +6,16 @@ import RecurrenceDeleteDialog from './RecurrenceDeleteDialog.svelte'
 import { ADVANCED_LAST_WEEKDAY } from '../lib/recurrence/__fixtures__/advancedRules'
 import { MONTH_LONG } from '../lib/recurrence/rrule'
 import type { KataRecurrence } from '../lib/kata/types'
+import { previewRecurrence } from '../lib/api/generated/default/default'
 
-afterEach(cleanup)
+vi.mock('../lib/api/generated/default/default', () => ({
+  previewRecurrence: vi.fn().mockRejectedValue(new Error('unavailable')),
+}))
+
+afterEach(() => {
+  cleanup()
+  vi.clearAllMocks()
+})
 
 const createMode = { kind: 'create', projectID: 1, initialIssueRef: 'abc4' } as const
 
@@ -32,6 +40,67 @@ const sample: KataRecurrence = {
   updated_at: '2026-05-15T12:00:00.000Z',
 }
 const editMode = { kind: 'edit' as const, recurrence: sample, etag: '"rev-1"' }
+
+test('previews create dates and aborts an obsolete request without blocking save', async () => {
+  vi.mocked(previewRecurrence)
+    .mockImplementationOnce(() => new Promise(() => {}))
+    .mockResolvedValueOnce({
+      status: 200,
+      headers: new Headers(),
+      data: { dates: ['2026-11-22', '2026-11-29'] },
+    })
+  render(RecurrenceEditorDialog, {
+    props: {
+      open: true,
+      mode: createMode,
+      actor: 'user-a',
+      onClose: vi.fn(),
+      onCreate: vi.fn(),
+      onPatch: vi.fn(),
+    },
+  })
+  await fireEvent.input(screen.getByLabelText('Title'), { target: { value: 'Draft' } })
+  await waitFor(() => expect(previewRecurrence).toHaveBeenCalledTimes(1))
+  const signal = vi.mocked(previewRecurrence).mock.calls[0]![2]!.signal as AbortSignal
+  await chooseDropdown('Frequency', 'Daily')
+  expect(signal.aborted).toBe(true)
+  expect(await screen.findByText(/This task becomes the first/)).toBeTruthy()
+  expect(screen.getByText(/^Then /)).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Save' })).not.toHaveProperty('disabled', true)
+})
+
+test('a failed preview leaves the summary and save available', async () => {
+  render(RecurrenceEditorDialog, {
+    props: {
+      open: true,
+      mode: createMode,
+      actor: 'user-a',
+      onClose: vi.fn(),
+      onCreate: vi.fn(),
+      onPatch: vi.fn(),
+    },
+  })
+  await fireEvent.input(screen.getByLabelText('Title'), { target: { value: 'Draft' } })
+  await waitFor(() => expect(previewRecurrence).toHaveBeenCalled())
+  expect(screen.getByTestId('recurrence-summary')).toBeTruthy()
+  expect(screen.queryByText(/^Then /)).toBeNull()
+  expect(screen.getByRole('button', { name: 'Save' })).not.toHaveProperty('disabled', true)
+})
+
+test('editing a rule does not request preview dates', async () => {
+  render(RecurrenceEditor, {
+    props: {
+      mode: editMode,
+      actor: 'user-a',
+      onCreate: vi.fn(),
+      onPatch: vi.fn(),
+      onSaved: vi.fn(),
+    },
+  })
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  expect(previewRecurrence).not.toHaveBeenCalled()
+  expect(screen.queryByText(/^Then /)).toBeNull()
+})
 
 async function chooseDropdown(title: string, option: string): Promise<void> {
   await fireEvent.click(screen.getByRole('combobox', { name: new RegExp(`^${title}:`) }))

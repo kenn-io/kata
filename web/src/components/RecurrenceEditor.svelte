@@ -7,6 +7,8 @@
     KataRecurrenceTemplateUpdateInput,
   } from '../lib/kata/types'
   import DatePicker from './DatePicker.svelte'
+  import { previewRecurrence } from '../lib/api/generated/default/default'
+  import { formatDay } from '../lib/kata/dates'
   import {
     WEEKDAYS,
     WEEKDAY_LABEL,
@@ -226,6 +228,35 @@
   let activeRrule = $derived(
     mode_ === 'advanced' ? advancedText : serializeRRule(currentCommonRule),
   )
+  let dates = $state<string[]>([])
+  $effect(() => {
+    const rule = activeRrule
+    const start = dtstart
+    const zone = resolvedTimezone()
+    const create = mode.kind === 'create' ? mode : null
+    const valid =
+      mode_ === 'advanced'
+        ? advancedParse.kind !== 'invalid'
+        : isCommonFormValid() && (freq !== 'WEEKLY' || byDay.length > 0)
+    dates = []
+    if (!create || !valid) return
+    const controller = new AbortController()
+    const timer = setTimeout(() => {
+      void previewRecurrence(
+        { projectId: create.projectID },
+        { rrule: rule, dtstart: start, timezone: zone },
+        { signal: controller.signal },
+      )
+        .then((result) => {
+          if (!controller.signal.aborted && result.status === 200) dates = result.data.dates
+        })
+        .catch(() => {})
+    }, 250)
+    return () => {
+      clearTimeout(timer)
+      controller.abort()
+    }
+  })
 
   // The compact summary mirrors whatever rule we'd submit right now —
   // Common form in Common mode, raw textarea in Advanced mode. We hide
@@ -595,7 +626,15 @@
   {/if}
 
   {#if currentSummary}
-    <div class="summary" data-testid="recurrence-summary">{currentSummary}</div>
+    <div class="summary">
+      <div data-testid="recurrence-summary">{currentSummary}</div>
+      {#if mode.kind === 'create' && dates.length}
+        <div>This task becomes the first, scheduled {formatDay(dates[0]!)}.</div>
+      {/if}
+      {#if mode.kind === 'create' && dates.length > 1}
+        <div>Then {dates.slice(1).map(formatDay).join(' · ')}</div>
+      {/if}
+    </div>
   {/if}
 
   {#if submitError}

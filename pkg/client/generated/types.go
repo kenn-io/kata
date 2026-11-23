@@ -6171,6 +6171,14 @@ func (r Recurrence) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(r))
 }
 
+type RecurrencePreviewResponseBody struct {
+	Dates []string `json:"dates" validate:"required"`
+}
+
+func (r RecurrencePreviewResponseBody) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
 type RecurrenceTemplateInput struct {
 	Body     *string        `json:"body,omitempty"`
 	Labels   []string       `json:"labels,omitempty"`

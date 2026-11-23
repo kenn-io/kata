@@ -107,6 +107,7 @@ func TestWebLocalSessionIsLimitedToSPAOperations(t *testing.T) {
 		{name: "proxied attachment link", method: http.MethodPost, path: "/api/v1/ui/proxy/api/v1/projects/7/issues/abc4/attachments/links", want: http.StatusNoContent},
 		{name: "issue edit", method: http.MethodPatch, path: "/api/v1/projects/7/issues/abc4", want: http.StatusNoContent},
 		{name: "recurrence list", method: http.MethodGet, path: "/api/v1/projects/7/recurrences", want: http.StatusNoContent},
+		{name: "recurrence preview", method: http.MethodGet, path: "/api/v1/projects/7/recurrence-preview", want: http.StatusNoContent},
 		{name: "recurrence detail", method: http.MethodGet, path: "/api/v1/projects/7/recurrences/01J00000000000000000000001", want: http.StatusForbidden},
 		{name: "recurrence deletion", method: http.MethodDelete, path: "/api/v1/projects/7/recurrences/01J00000000000000000000001", want: http.StatusNoContent},
 		{name: "federation", method: http.MethodPost, path: "/api/v1/federation/replicas", want: http.StatusForbidden},
@@ -160,6 +161,7 @@ func TestIssueScopedBrowserSessionUsesSameRouteAllowlist(t *testing.T) {
 		{name: "local embeddings status", method: http.MethodGet, path: "/api/v1/embeddings/local", want: http.StatusNoContent},
 		{name: "ordinary issue read", method: http.MethodGet, path: "/api/v1/projects/1/issues/abc4", want: http.StatusNoContent},
 		{name: "recurrence denied", method: http.MethodGet, path: "/api/v1/projects/1/recurrences", want: http.StatusForbidden},
+		{name: "recurrence preview denied", method: http.MethodGet, path: "/api/v1/projects/1/recurrence-preview", want: http.StatusForbidden},
 		{name: "project deletion denied", method: http.MethodDelete, path: "/api/v1/projects/2", want: http.StatusForbidden},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
