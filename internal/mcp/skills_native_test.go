@@ -179,7 +179,7 @@ func TestNativeGuidesSayCommentsCarryFindings(t *testing.T) {
 	}
 }
 
-// Product contract (kata#6ahr): MCP guidance tells agents to claim with
+// Product contract: MCP guidance tells agents to claim with
 // ttl_seconds and renew by claiming again, without if_unowned.
 func TestNativeGuidesSayClaimWithTTL(t *testing.T) {
 	session := connectTestServer(t)

@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Product contract (kata#6ahr): the README, docs, and website tell agents to
+// Product contract: the README, docs, and website tell agents to
 // claim with a time limit, and each website page's Markdown and HTML forms
 // show the same claim commands.
 func TestClaimDocsUseTTL(t *testing.T) {

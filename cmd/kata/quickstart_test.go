@@ -361,7 +361,7 @@ func assertClosedBodyStdinHeredoc(t *testing.T, name, text string) {
 	}
 }
 
-// Product contract (kata#6ahr): every CLI guide tells agents to claim with a
+// Product contract: every CLI guide tells agents to claim with a
 // time limit and renew it by claiming again with --ttl, without --if-unowned.
 func TestGuidesSayClaimWithTTL(t *testing.T) {
 	guides := map[string]string{}
