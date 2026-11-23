@@ -826,29 +826,33 @@ type claimHubClient struct {
 	transportErr error
 }
 
-func (c *claimHubClient) SearchShared(ctx context.Context, projectID int64, p hybridParams, limit int) ([]api.FederationSearchHit, bool, error) {
+func (c *claimHubClient) SearchShared(ctx context.Context, projectID int64, p hybridParams, limit int) (api.FederationSearchResponseBody, error) {
 	if c.transportErr != nil {
-		return nil, false, c.transportErr
+		return api.FederationSearchResponseBody{}, c.transportErr
 	}
 	client, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(claimHubDoer{client: c.client}))
 	if err != nil {
-		return nil, false, err
+		return api.FederationSearchResponseBody{}, err
 	}
 	count := int64(limit)
 	query := &generated.SearchFederationProjectQuery{Q: p.Query, Limit: &count, Label: p.Labels, ExcludeLabel: p.ExcludeLabels}
+	if p.Requested == "" || p.Requested == "auto" {
+		auto := true
+		query.Auto = &auto
+	}
 	if p.Status != "" {
 		status := generated.SearchFederationProjectQueryStatus(p.Status)
 		query.Status = &status
 	}
 	response, err := client.SearchFederationProjectWithResponse(ctx, &generated.SearchFederationProjectRequestOptions{PathParams: &generated.SearchFederationProjectPath{ProjectID: projectID}, Query: query})
 	if err != nil {
-		return nil, false, err
+		return api.FederationSearchResponseBody{}, err
 	}
 	var body api.FederationSearchResponse
 	if err := json.Unmarshal(response.Body, &body.Body); err != nil {
-		return nil, false, err
+		return api.FederationSearchResponseBody{}, err
 	}
-	return body.Body.Hits, body.Body.Bounded, nil
+	return body.Body, nil
 }
 
 type claimHubStatusError struct {

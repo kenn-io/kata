@@ -89,6 +89,7 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 		var res hybridResult
 		hash := ""
 		remoteURLs := map[string]string{}
+		var hubMode, hubDegradedReason string
 		if stable {
 			params := db.SearchFTSParams{ProjectID: in.ProjectID, Query: in.Query, Status: in.Status, IncludeDeleted: in.IncludeDeleted, Labels: in.Labels, ExcludeLabels: in.ExcludeLabels, IssueScope: issueScopeFromContext(ctx), StableOrder: true}
 			normalized := params
@@ -125,14 +126,15 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 					if err != nil {
 						return nil, false, wrapHubSearchError(err)
 					}
-					hits, bounded, err := client.SearchShared(ctx, cred.HubProjectID, p, fetch)
+					body, err := client.SearchShared(ctx, cred.HubProjectID, p, fetch)
 					if err != nil {
 						return nil, false, wrapHubSearchError(err)
 					}
-					for _, hit := range hits {
+					hubMode, hubDegradedReason = body.Mode, body.DegradedReason
+					for _, hit := range body.Hits {
 						remoteURLs[hit.Issue.UID] = hit.WebURL
 					}
-					return hits, bounded, nil
+					return body.Hits, body.Bounded, nil
 				}
 			}
 			res, err = hybridSearch(ctx, cfg.DB, cfg.VectorIndex, cfg.Embedder, params)
@@ -152,6 +154,12 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		if !direct {
 			markEmbeddingUnavailable(&res, cfg.EmbeddingUnavailableReason, mode)
+		}
+		if hubDegradedReason != "" {
+			res.Degraded, res.DegradedReason = true, hubDegradedReason
+		}
+		if hubMode == string(modeLexical) {
+			res.Mode = modeLexical
 		}
 		more := len(res.Hits) > limit
 		page := api.PageMetadata{Complete: !more, Truncated: more}

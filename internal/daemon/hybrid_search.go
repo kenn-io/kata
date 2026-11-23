@@ -252,7 +252,11 @@ func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 			} else {
 				issue.ShortID = issue.UID
 			}
-			candidates = append(candidates, db.SearchCandidate{Issue: issue, Score: hit.Score, MatchedIn: []string{"semantic"}})
+			matched := hit.MatchedIn
+			if matched == nil {
+				matched = []string{"semantic"}
+			}
+			candidates = append(candidates, db.SearchCandidate{Issue: issue, Score: hit.Score, MatchedIn: matched})
 			if len(candidates) == fetch {
 				break
 			}

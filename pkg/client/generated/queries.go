@@ -289,7 +289,10 @@ func (o OfferRelayDeliveriesQuery) Validate() error {
 }
 
 type SearchFederationProjectQuery struct {
-	Q            string                              `json:"q" validate:"required"`
+	Q string `json:"q" validate:"required"`
+
+	// Auto Fall back to keyword search when the hub cannot run semantic search. Absent means strict semantic.
+	Auto         *bool                               `json:"auto,omitempty"`
 	Limit        *int64                              `json:"limit,omitempty"`
 	Status       *SearchFederationProjectQueryStatus `json:"status,omitempty"`
 	Label        []string                            `json:"label,omitempty"`
