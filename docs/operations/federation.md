@@ -632,8 +632,9 @@ Held polls need a few things from the deployment:
   concurrent requests per instance, such as some managed platforms, holds more
   open requests than it did with interval polls.
 - A hub holds at most 32 polls per `GOMAXPROCS`, up to 256 total. Each spoke
-  credential can hold at most half the total limit, up to 32. Signed polls can
-  use at most half of the hub's federation control slots. Past a limit the hub
+  credential can hold at most half the total limit, up to 32, or 16 on a
+  one-CPU hub. Signed polls can use at most half of the hub's federation control
+  slots. Past a limit the hub
   answers at once and the spoke falls back to its interval. It asks for a held
   poll again after a growing delay, up to 16 intervals.
 - The spoke asks for a wait 15 seconds shorter than its request budget, so a
@@ -642,9 +643,10 @@ Held polls need a few things from the deployment:
 
 The hub checks the poll's full authorization again before each read after a
 wake and before returning events or a reset, including the signing key for
-signed polls. A revoked credential, removed membership, or retired signing key stops the poll
-when it wakes. When the wait expires, the hub returns the empty page
-already read; the next poll checks access and sees events whose wakeup was lost.
+signed polls. A credential revoked, membership removed, or signing key retired
+before a wake stops the poll. When the wait expires, the hub returns the
+initial empty page and its cursor; the next poll checks access and sees events
+whose wakeup was lost.
 Hubs that share a PostgreSQL
 database and schema wake each other's held polls with `LISTEN/NOTIFY` on a
 channel that other connected database roles can listen to or notify; a SQLite hub

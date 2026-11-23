@@ -41,7 +41,8 @@ type ProjectAccessDecision struct {
 }
 
 // releaseProjectAccess marks the request's page as already authorized, so the
-// response check does not authorize it again.
+// response check does not authorize it again. Only an already-authorized
+// empty page may bypass the response check.
 func releaseProjectAccess(ctx context.Context) {
 	if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil {
 		decision.released = true

@@ -25,6 +25,7 @@ type federationReadProbe struct {
 	mu       sync.Mutex
 	started  int
 	returned int
+	last     db.FederationReadResult
 	changed  chan struct{}
 	before   func(read int) error
 }
@@ -72,6 +73,7 @@ func (p *federationReadProbe) ReadFederation(ctx context.Context, params db.Fede
 	result, err := p.Storage.ReadFederation(ctx, params)
 	p.mu.Lock()
 	p.returned++
+	p.last = result
 	close(p.changed)
 	p.changed = make(chan struct{})
 	p.mu.Unlock()
@@ -82,6 +84,12 @@ func (p *federationReadProbe) readsReturned() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.returned
+}
+
+func (p *federationReadProbe) lastResult() db.FederationReadResult {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.last
 }
 
 // waitForReads blocks until n ReadFederation calls have returned.

@@ -416,6 +416,7 @@ func holdFederationPoll(
 	reauthorize func() (context.Context, error),
 	read func(context.Context) (db.FederationReadResult, error),
 ) (db.FederationReadResult, bool, error) {
+	initial := result
 	waited := false
 	for federationPollCaughtUp(result) && time.Now().Before(deadline) {
 		woke, err := waiter.wait(ctx, deadline)
@@ -423,6 +424,7 @@ func holdFederationPoll(
 			return result, waited, fmt.Errorf("held federation poll ended: %w", err)
 		}
 		if !woke {
+			result = initial
 			waited = false
 			break
 		}
@@ -432,6 +434,11 @@ func holdFederationPoll(
 		}
 		if result, err = read(readCtx); err != nil {
 			return result, waited, err
+		}
+		if federationPollCaughtUp(result) && !time.Now().Before(deadline) {
+			result = initial
+			waited = false
+			break
 		}
 		waited = true
 	}

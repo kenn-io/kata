@@ -195,7 +195,8 @@ func TestFederationPollWaitReturnsSavedPageWhenItExpires(t *testing.T) {
 		name   string
 		revoke bool
 		wake   bool
-	}{{"event without wake", false, false}, {"revoked access", true, false}, {"revoked after empty wake", true, true}} {
+		slow   bool
+	}{{"event without wake", false, false, false}, {"revoked access", true, false, false}, {"revoked after empty wake", true, true, false}, {"empty wake read crosses deadline", true, true, true}} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newSignedPollFixture(t)
 			synctest.Test(t, func(t *testing.T) {
@@ -203,15 +204,29 @@ func TestFederationPollWaitReturnsSavedPageWhenItExpires(t *testing.T) {
 				cursor := h.cursor(t)
 				done := h.startHeldPoll(t, cursor, "30")
 				reads := h.reads.readsReturned()
+				initial := h.reads.lastResult()
 				if tc.wake {
+					other, err := h.store.CreateProject(t.Context(), "other-project")
+					require.NoError(t, err)
+					_, _, err = h.store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: other.ID, Title: "Other project event", Author: "admin"})
+					require.NoError(t, err)
+					if tc.slow {
+						h.reads.beforeRead(func(int) error {
+							time.Sleep(31 * time.Second)
+							return h.revokeProjectAccess(t)
+						})
+					}
 					h.broadcaster.Broadcast(daemon.NewResetMsg(h.project.ID, 1))
+					if tc.slow {
+						time.Sleep(31 * time.Second)
+					}
 					synctest.Wait()
 					require.Equal(t, reads+1, h.reads.readsReturned())
 					reads++
 				}
-				if tc.revoke {
+				if tc.revoke && !tc.slow {
 					require.NoError(t, h.revokeProjectAccess(t))
-				} else {
+				} else if !tc.revoke {
 					h.commit(t, "Committed without a wakeup", false)
 				}
 				response := <-done
@@ -219,6 +234,7 @@ func TestFederationPollWaitReturnsSavedPageWhenItExpires(t *testing.T) {
 				var page pollBodyForTest
 				require.NoError(t, json.Unmarshal(response.Body.Bytes(), &page))
 				assert.Empty(t, page.Events)
+				assert.Equal(t, initial.NextAfterID, page.NextAfterID)
 				assert.Equal(t, reads, h.reads.readsReturned(), "the timeout must not read again")
 				// The next poll authorizes and reads from the returned cursor.
 				response = h.send(h.request(t, page.NextAfterID, ""))
@@ -243,7 +259,7 @@ func TestFederationPollWaitReauthorizesWhenWakeReadCrossesDeadline(t *testing.T)
 			time.Sleep(31 * time.Second)
 			return h.revokeProjectAccess(t)
 		})
-		h.broadcaster.Broadcast(daemon.NewResetMsg(h.project.ID, 1))
+		h.commit(t, "Committed before the slow read", true)
 		response := <-done
 		assert.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
 		assert.Equal(t, reads+2, h.reads.readsReturned())
