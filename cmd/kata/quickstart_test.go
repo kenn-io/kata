@@ -340,7 +340,7 @@ func TestGuidesSayCommentsCarryFindings(t *testing.T) {
 func assertClosedBodyStdinHeredoc(t *testing.T, name, text string) {
 	t.Helper()
 	open, found := false, 0
-	for _, line := range strings.Split(text, "\n") {
+	for line := range strings.SplitSeq(text, "\n") {
 		if strings.Contains(line, "--body-stdin") && strings.HasSuffix(line, "<<-'EOF'") {
 			if open {
 				t.Errorf("%s: heredoc opened before the previous one closed", name)
