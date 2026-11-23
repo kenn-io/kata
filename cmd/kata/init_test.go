@@ -247,6 +247,7 @@ func TestInit_ExplicitWorkspaceEnclosingWrites(t *testing.T) {
 		{name: "codex hooks", args: []string{"--with-codex-hooks"}},
 		{name: "agent hooks", args: []string{"--agent-hooks=codex"}},
 		{name: "legacy agent hooks", args: []string{"--with-agent-hooks=codex"}},
+		{name: "reassign", args: []string{"--replace", "--reassign"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()

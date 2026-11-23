@@ -168,7 +168,7 @@ func checkBindingLinks(workspace, dest string) error {
 }
 
 func enclosingInitIsNoOp(dest string, opts initOptions) bool {
-	if opts.WithAgents || opts.WithHooks || opts.WithCodexHooks || len(opts.WithAgentHooks) != 0 || len(opts.AgentHooks) != 0 {
+	if opts.Reassign || opts.WithAgents || opts.WithHooks || opts.WithCodexHooks || len(opts.WithAgentHooks) != 0 || len(opts.AgentHooks) != 0 {
 		return false
 	}
 	cfg, err := config.ReadProjectConfig(dest)
