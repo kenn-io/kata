@@ -519,8 +519,8 @@ func printMetaGet(cmd *cobra.Command, issue metaIssueWire, key string) error {
 			case outputJSON:
 				return printMetaValue(cmd, key, jsontext.Value("null"), issue, mode)
 			case outputAgent:
-				_, err := fmt.Fprintf(cmd.OutOrStdout(), "OK meta get %s count=0 revision=rev-%d\n", agentValue(issue.ShortID), issue.Revision)
-				return err
+				issue.Metadata = nil
+				return printMetaGet(cmd, issue, "")
 			}
 			return nil
 		}

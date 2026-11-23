@@ -169,6 +169,10 @@ func TestMetaGetEmptyAndMissingKey(t *testing.T) {
 			assert.Equal(t, kindNotFound, ce.Kind)
 		})
 	}
+
+	runCLI(t, env, dir, "meta", "set", ref, "work.branch", "feature/example")
+	out = runCLI(t, env, dir, "meta", "get", ref, "work.missing", "--agent")
+	assert.Equal(t, fmt.Sprintf("OK meta get %s count=0 revision=rev-2", ref), out)
 }
 
 func TestMetaReservedKeyRejectionSurfacesValidation(t *testing.T) {
