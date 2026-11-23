@@ -800,10 +800,12 @@
   /* The 48px header band, level with the list's header beside it; the title
      starts 8px under it. */
   .detail-heading {
+    box-sizing: border-box;
     display: flex;
     align-items: center;
     justify-content: space-between;
     min-height: 48px;
+    padding-top: 8px;
     gap: 12px;
     margin-bottom: 6px;
   }
