@@ -77,6 +77,10 @@ func TestActiveProjectByIDHintsRestoreOnlyForCallersWhoMayReadIt(t *testing.T) {
 		_, err = resolveByAliasInput(withProjectPolicy, store, &api.AliasInput{Identity: "github.com/example/retired-project", Kind: "git"}, name, false)
 		apiErr, ok := err.(*api.APIError)
 		require.True(t, ok, "got %v", err)
-		assert.Equal(t, `run "kata init" in this workspace`, apiErr.Hint)
+		hint := `run "kata init" in this workspace`
+		if name != "" {
+			hint = `run "kata init" with --project set to "retired-project" in this workspace`
+		}
+		assert.Equal(t, hint, apiErr.Hint)
 	}
 }

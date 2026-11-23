@@ -746,14 +746,14 @@ func resolveByAliasInput(ctx context.Context, store db.Storage, in *api.AliasInp
 		if err != nil {
 			return nil, err
 		}
-		return nil, projectNotInitialized(ctx, store, "alias "+info.Identity+" is not registered", initName, map[string]any{"alias": info.Identity})
+		return nil, projectNotInitialized(ctx, store, "alias "+info.Identity+" is not registered", initName, `run "kata init"`, map[string]any{"alias": info.Identity})
 	}
 	if err := config.ValidateProjectName(name); err != nil {
 		return nil, api.NewError(400, "validation", err.Error(), "", nil)
 	}
 	project, err := store.ProjectByName(ctx, name)
 	if errors.Is(err, db.ErrNotFound) {
-		return nil, projectNotInitialized(ctx, store, "project "+name+" is not registered", name, map[string]any{"project": name})
+		return nil, projectNotInitialized(ctx, store, "project "+name+" is not registered", name, fmt.Sprintf(`run "kata init" with --project set to %q`, name), map[string]any{"project": name})
 	}
 	if err != nil {
 		return nil, internalAPIError(err)
@@ -792,17 +792,17 @@ func gitInitName(info config.AliasInfo) (string, error) {
 	return name, nil
 }
 
-func projectNotInitialized(ctx context.Context, store db.Storage, message, name string, data map[string]any) error {
-	hint := `run "kata init" in this workspace`
+func projectNotInitialized(ctx context.Context, store db.Storage, message, name, initCommand string, data map[string]any) error {
+	hint := initCommand + " in this workspace"
 	if name != "" {
 		project, err := store.ProjectByNameIncludingArchived(ctx, name)
 		if err != nil && !errors.Is(err, db.ErrNotFound) {
 			return internalAPIError(err)
 		}
 		if err == nil && project.DeletedAt != nil && canSeeArchived(ctx, project) {
-			hint = fmt.Sprintf(`run "kata projects restore %d", then run "kata init" in this workspace`, project.ID)
+			hint = fmt.Sprintf(`run "kata projects restore %d", then %s in this workspace`, project.ID, initCommand)
 		} else if err != nil || project.DeletedAt == nil {
-			hint = fmt.Sprintf(`run "kata init": it attaches this workspace to the active project %q, or creates it if none exists`, name)
+			hint = fmt.Sprintf(`%s: it attaches this workspace to the active project %q, or creates it if none exists`, initCommand, name)
 		}
 	}
 	return api.NewError(404, "project_not_initialized", message, hint, data)
@@ -860,7 +860,7 @@ func resolveByKataToml(ctx context.Context, store db.Storage, disc config.Discov
 	}
 	project, err := store.ProjectByName(ctx, cfgFile.Project.Name)
 	if errors.Is(err, db.ErrNotFound) {
-		return nil, false, projectNotInitialized(ctx, store, "project "+cfgFile.Project.Name+" is bound by .kata.toml but not registered", cfgFile.Project.Name, map[string]any{"project": cfgFile.Project.Name})
+		return nil, false, projectNotInitialized(ctx, store, "project "+cfgFile.Project.Name+" is bound by .kata.toml but not registered", cfgFile.Project.Name, `run "kata init"`, map[string]any{"project": cfgFile.Project.Name})
 	}
 	if err != nil {
 		return nil, false, internalAPIError(err)
@@ -924,7 +924,7 @@ func resolveByAlias(ctx context.Context, store db.Storage, disc config.Discovere
 		if err != nil {
 			return nil, err
 		}
-		return nil, projectNotInitialized(ctx, store, "no kata project is attached to this workspace", name, nil)
+		return nil, projectNotInitialized(ctx, store, "no kata project is attached to this workspace", name, `run "kata init"`, nil)
 	}
 	if err != nil {
 		return nil, internalAPIError(err)
