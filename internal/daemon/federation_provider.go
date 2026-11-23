@@ -402,7 +402,7 @@ func ReleaseFederationProvider(
 	if err != nil {
 		return config.FederationManagedCredentialReservation{}, err
 	}
-	return releaseFederationProvider(ctx, store, managed, project, uuid.UUID{})
+	return releaseFederationProvider(ctx, store, managed, project, uuid.UUID{}, true)
 }
 
 // ReleaseRemovedFederationProvider resolves retained identity even when the
@@ -420,11 +420,11 @@ func ReleaseRemovedFederationProvider(ctx context.Context, store db.Storage, man
 	} else if err != nil {
 		return saved, project, errors.Join(ErrFederationProviderStorage, err)
 	}
-	closed, err := releaseFederationProvider(ctx, store, managed, project, saved.Credential.Provider.RequestID)
+	closed, err := releaseFederationProvider(ctx, store, managed, project, saved.Credential.Provider.RequestID, false)
 	return closed, project, err
 }
 
-func releaseFederationProvider(ctx context.Context, store db.Storage, managed config.FederationManagedCredentialStore, project db.Project, expectedRequest uuid.UUID) (config.FederationManagedCredentialReservation, error) {
+func releaseFederationProvider(ctx context.Context, store db.Storage, managed config.FederationManagedCredentialStore, project db.Project, expectedRequest uuid.UUID, detach bool) (config.FederationManagedCredentialReservation, error) {
 	previous, found, err := config.FindProjectManagedCredential(ctx, managed, project.UID, project.Name)
 	if err != nil {
 		return previous, err
@@ -432,7 +432,7 @@ func releaseFederationProvider(ctx context.Context, store db.Storage, managed co
 	if !found || previous.Credential.Provider == nil || (expectedRequest != (uuid.UUID{}) && previous.Credential.Provider.RequestID != expectedRequest) {
 		return previous, ErrFederationReplicaCredentialConflict
 	}
-	prepared, err := prepareFederationReplicaLeave(ctx, store, managed, project, "", false)
+	prepared, err := prepareFederationReplicaLeave(ctx, store, managed, project, "", detach)
 	if err != nil {
 		return previous, err
 	}

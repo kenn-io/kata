@@ -1,6 +1,8 @@
 package daemon_test
 
 import (
+	"fmt"
+	"net/http"
 	"os"
 	"slices"
 	"testing"
@@ -12,6 +14,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/pkg/federationprovider"
 )
 
@@ -323,7 +326,7 @@ func TestFederationProviderValidatesActorBeforeSavingReady(t *testing.T) {
 	assert.True(t, pending.Credential.Token == ready.Credential.Token)
 }
 
-func TestFederationProviderReleaseBlocksOvertakenMove(t *testing.T) {
+func TestFederationRemovedProviderReleaseBlocksOvertakenMove(t *testing.T) {
 	catalog, mapping := providerMapping(t)
 	store := openReplicaServiceStore(t)
 	source := overtakenLeaveFixture(t, store)
@@ -338,7 +341,7 @@ func TestFederationProviderReleaseBlocksOvertakenMove(t *testing.T) {
 	}
 	require.NoError(t, credentials.StoreFederationCredential(t.Context(), source.UID, before))
 	t.Setenv("KATA_TEST_PROVIDER_STATUS", "released")
-	_, err := daemon.ReleaseFederationProvider(t.Context(), store, credentials, source.ID)
+	_, _, err := daemon.ReleaseRemovedFederationProvider(t.Context(), store, credentials, config.FederationManagedCredentialReservation{ProjectUID: source.UID, Credential: before})
 	require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush)
 	after, found, err := credentials.FindManagedFederationCredential(t.Context(), source.Name)
 	require.NoError(t, err)
@@ -347,4 +350,31 @@ func TestFederationProviderReleaseBlocksOvertakenMove(t *testing.T) {
 	binding, err := store.FederationBindingByProject(t.Context(), source.ID)
 	require.NoError(t, err)
 	require.True(t, binding.PushEnabled)
+}
+
+func TestFederationProviderDetachOvertakenMove(t *testing.T) {
+	env := testenv.New(t)
+	catalog, mapping := providerMapping(t)
+	source := overtakenLeaveFixture(t, env.DB)
+	credentials := config.DefaultFederationCredentialStore()
+	credential := config.FederationCredential{
+		HubURL: catalog.URL, HubProjectName: mapping.HubProject, SpokeProjectName: source.Name,
+		ManagedByConfig: true, Token: "provider-credential", Actor: "worker",
+		Provider: &config.FederationProviderCredential{
+			RequestID: uuid.New(), Command: mapping.CredentialProvider, Intent: mapping.Intent,
+			SpokeInstanceUID: env.DB.InstanceUID(), LocalProjectUID: source.UID, Status: federationprovider.StatusReady,
+		},
+	}
+	require.NoError(t, credentials.StoreFederationCredential(t.Context(), source.UID, credential))
+	t.Setenv("KATA_TEST_PROVIDER_STATUS", "released")
+	path := fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", source.ID)
+	response, raw := envDoRaw(t, env, http.MethodPost, path, map[string]any{"disposition": "detach", "actor": "worker"}, nil)
+	require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
+	_, err := env.DB.FederationBindingByProject(t.Context(), source.ID)
+	require.ErrorIs(t, err, db.ErrNotFound)
+	closed, found, err := credentials.FindManagedFederationCredential(t.Context(), source.Name)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, federationprovider.StatusReleased, closed.Credential.Provider.Status)
+	require.Empty(t, closed.Credential.Token)
 }
