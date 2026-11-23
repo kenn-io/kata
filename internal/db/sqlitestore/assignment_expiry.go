@@ -111,6 +111,20 @@ func (d *Store) expireAssignments(ctx context.Context, p db.ExpireAssignmentsPar
 			return nil, err
 		}
 		events = append(events, event)
+		var status string
+		var metadata db.JSONBlob
+		if err := tx.QueryRowContext(ctx, `SELECT status, metadata FROM issues WHERE id = ?`, item.issueID).Scan(&status, &metadata); err != nil {
+			return nil, fmt.Errorf("read expired issue: %w", err)
+		}
+		if patch, ok := db.ExpiredAssignmentHandoffPatch(status, metadata); ok {
+			updated, err := d.patchIssueMetadataTx(ctx, tx, db.PatchIssueMetadataIn{IssueID: item.issueID, Actor: "system", Patch: patch})
+			if err != nil {
+				return nil, err
+			}
+			if updated.Changed {
+				events = append(events, updated.Event)
+			}
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit assignment expiry: %w", err)

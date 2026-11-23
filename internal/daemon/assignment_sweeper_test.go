@@ -1,6 +1,7 @@
 package daemon_test
 
 import (
+	"encoding/json/jsontext"
 	"testing"
 	"time"
 
@@ -11,6 +12,33 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
+
+func TestAssignmentSweeperPublishesExpiredAttentionHandoff(t *testing.T) {
+	ctx := t.Context()
+	env := testenv.New(t)
+	_, issue := createAssignmentSweepIssue(t, env, "handoff-project")
+	now := time.Date(2026, time.September, 17, 14, 0, 0, 0, time.UTC)
+	_, err := env.DB.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "worker", Patch: map[string]jsontext.Value{"work.attention": jsontext.Value(`"ok"`)}})
+	require.NoError(t, err)
+	_, err = env.DB.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: "worker", TTL: time.Minute, Now: now.Add(-2 * time.Minute)})
+	require.NoError(t, err)
+	sub := env.Broadcaster.Subscribe(daemon.SubFilter{})
+	defer sub.Unsub()
+	sweeper := daemon.NewAssignmentSweeper(env.DB, daemon.NewEventPublisher(env.Broadcaster, nil))
+	require.NoError(t, sweeper.RunOnce(ctx, now))
+	for _, eventType := range []string{"issue.assignment_expired", "issue.metadata_updated"} {
+		msg := receiveMsg(t, sub.Ch, time.Second, "expiry handoff broadcast")
+		require.NotNil(t, msg.Event)
+		assert.Equal(t, eventType, msg.Event.Type)
+	}
+	stored, err := env.DB.IssueByID(ctx, issue.ID)
+	require.NoError(t, err)
+	meta := db.PayloadMap(jsontext.Value(stored.Metadata))
+	assert.JSONEq(t, `"needs-human"`, string(meta["work.attention"]))
+	assert.JSONEq(t, `"claim expired without hand-off"`, string(meta["work.attention_msg"]))
+	require.NoError(t, sweeper.RunOnce(ctx, now))
+	assertNoReceive(t, sub.Ch, 100*time.Millisecond, "expiry handoff must not repeat") //nolint:kennlint // deadlinetest: bounded absence checks duplicate events
+}
 
 func TestAssignmentSweeperExpiresLocalAndHubAssignmentsButSkipsSpokes(t *testing.T) {
 	ctx := t.Context()

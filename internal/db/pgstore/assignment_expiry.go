@@ -103,6 +103,20 @@ func (s *Store) ExpireAssignments(ctx context.Context, p db.ExpireAssignmentsPar
 				return err
 			}
 			events = append(events, event)
+			var status string
+			var metadata db.JSONBlob
+			if err := tx.QueryRowContext(ctx, `SELECT status, metadata FROM issues WHERE id = $1`, item.issueID).Scan(&status, &metadata); err != nil {
+				return mapSQLError(err, nil)
+			}
+			if patch, ok := db.ExpiredAssignmentHandoffPatch(status, metadata); ok {
+				updated, err := s.patchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: item.issueID, Actor: "system", Patch: patch}, func(_ context.Context, run transactionFunc) error { return run(tx) })
+				if err != nil {
+					return err
+				}
+				if updated.Changed {
+					events = append(events, updated.Event)
+				}
+			}
 		}
 		return nil
 	})

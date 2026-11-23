@@ -1427,6 +1427,92 @@ func checkTimedAssignmentOwnerMutations(t *testing.T, store db.Storage) error {
 	return nil
 }
 
+func checkExpiredAssignmentAttentionHandoff(t *testing.T, store db.Storage) error {
+	t.Helper()
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "expiry-handoff-project")
+	require.NoError(t, err)
+	base := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name, attention string
+		flip, edit      bool
+	}{
+		{"ok", `"ok"`, true, false},
+		{"edited", `"ok"`, true, true},
+		{"stuck", `"stuck"`, false, false},
+		{"absent", "", false, false},
+		{"number", `1`, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: tc.name, Author: "worker"})
+			require.NoError(t, err)
+			if tc.attention != "" {
+				_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "worker", Patch: map[string]jsontext.Value{"work.attention": jsontext.Value(tc.attention)}})
+				require.NoError(t, err)
+			}
+			claim, err := store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: "worker", TTL: time.Minute, Now: base})
+			require.NoError(t, err)
+			revision := claim.Issue.Revision
+			if tc.edit {
+				title := "edited while claimed"
+				edited, _, _, err := store.EditIssue(ctx, db.EditIssueParams{IssueID: issue.ID, Title: &title, Actor: "operator"})
+				require.NoError(t, err)
+				revision = edited.Revision
+			}
+			events, err := store.ExpireAssignments(ctx, db.ExpireAssignmentsParams{ProjectID: project.ID, Now: base.Add(2 * time.Minute)})
+			require.NoError(t, err)
+			if tc.flip {
+				require.Len(t, events, 2)
+				assert.Equal(t, "issue.metadata_updated", events[1].Type)
+				assert.Equal(t, "system", events[1].Actor)
+				var payload struct {
+					Diff map[string]struct {
+						From jsontext.Value `json:"from"`
+						To   jsontext.Value `json:"to"`
+					} `json:"diff"`
+				}
+				require.NoError(t, json.Unmarshal([]byte(events[1].Payload), &payload))
+				assert.JSONEq(t, `"ok"`, string(payload.Diff["work.attention"].From))
+				assert.JSONEq(t, `"needs-human"`, string(payload.Diff["work.attention"].To))
+			} else {
+				require.Len(t, events, 1)
+			}
+			assert.Equal(t, "issue.assignment_expired", events[0].Type)
+			stored, err := store.IssueByID(ctx, issue.ID)
+			require.NoError(t, err)
+			assert.Nil(t, stored.Owner)
+			meta := db.PayloadMap(jsontext.Value(stored.Metadata))
+			if tc.flip {
+				assert.JSONEq(t, `"needs-human"`, string(meta["work.attention"]))
+				assert.JSONEq(t, `"claim expired without hand-off"`, string(meta["work.attention_msg"]))
+				assert.Equal(t, revision+2, stored.Revision)
+			} else if tc.attention != "" {
+				assert.JSONEq(t, tc.attention, string(meta["work.attention"]))
+			}
+			events, err = store.ExpireAssignments(ctx, db.ExpireAssignmentsParams{ProjectID: project.ID, Now: base.Add(2 * time.Minute)})
+			require.NoError(t, err)
+			assert.Empty(t, events)
+		})
+	}
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "reclaimed", Author: "worker"})
+	require.NoError(t, err)
+	_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "worker", Patch: map[string]jsontext.Value{"work.attention": jsontext.Value(`"ok"`)}})
+	require.NoError(t, err)
+	_, err = store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: "worker", TTL: time.Minute, Now: base})
+	require.NoError(t, err)
+	reclaimed, err := store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: "next-worker", TTL: time.Minute, Now: base.Add(2 * time.Minute)})
+	require.NoError(t, err)
+	assert.Equal(t, new("next-worker"), reclaimed.Issue.Owner)
+	assert.JSONEq(t, `"ok"`, string(db.PayloadMap(jsontext.Value(reclaimed.Issue.Metadata))["work.attention"]))
+	for _, event := range reclaimed.Events {
+		assert.NotEqual(t, "issue.metadata_updated", event.Type)
+	}
+	events, err := store.ExpireAssignments(ctx, db.ExpireAssignmentsParams{ProjectID: project.ID, Now: base.Add(2 * time.Minute)})
+	require.NoError(t, err)
+	assert.Empty(t, events)
+	return nil
+}
+
 func checkBoundedAssignmentExpiry(t *testing.T, store db.Storage) error {
 	t.Helper()
 	ctx := t.Context()
