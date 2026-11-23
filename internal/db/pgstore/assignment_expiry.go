@@ -40,9 +40,11 @@ func (s *Store) ExpireAssignments(ctx context.Context, p db.ExpireAssignmentsPar
 			issueUID  string
 			owner     string
 			expiresOn storedTime
+			status    string
+			metadata  db.JSONBlob
 		}
 		rows, err := tx.QueryContext(ctx, `
-			SELECT id, uid, owner, assignment_expires_on
+			SELECT id, uid, owner, assignment_expires_on, status, metadata
 			  FROM issues
 			 WHERE project_id = $1
 			   AND deleted_at IS NULL
@@ -58,7 +60,7 @@ func (s *Store) ExpireAssignments(ctx context.Context, p db.ExpireAssignmentsPar
 		var due []dueAssignment
 		for rows.Next() {
 			var item dueAssignment
-			if err := rows.Scan(&item.issueID, &item.issueUID, &item.owner, &item.expiresOn); err != nil {
+			if err := rows.Scan(&item.issueID, &item.issueUID, &item.owner, &item.expiresOn, &item.status, &item.metadata); err != nil {
 				_ = rows.Close()
 				return mapSQLError(err, nil)
 			}
@@ -103,12 +105,7 @@ func (s *Store) ExpireAssignments(ctx context.Context, p db.ExpireAssignmentsPar
 				return err
 			}
 			events = append(events, event)
-			var status string
-			var metadata db.JSONBlob
-			if err := tx.QueryRowContext(ctx, `SELECT status, metadata FROM issues WHERE id = $1`, item.issueID).Scan(&status, &metadata); err != nil {
-				return mapSQLError(err, nil)
-			}
-			if patch, ok := db.ExpiredAssignmentHandoffPatch(status, metadata); ok {
+			if patch, ok := db.ExpiredAssignmentHandoffPatch(item.status, item.metadata); ok {
 				updated, err := s.patchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: item.issueID, Actor: "system", Patch: patch}, func(_ context.Context, run transactionFunc) error { return run(tx) })
 				if err != nil {
 					return err

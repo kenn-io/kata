@@ -4,8 +4,8 @@ import "encoding/json/jsontext"
 
 // ExpiredAssignmentHandoffPatch marks abandoned work for human attention.
 func ExpiredAssignmentHandoffPatch(status string, metadata JSONBlob) (map[string]jsontext.Value, bool) {
-	attention, ok := StringValue(PayloadMap(jsontext.Value(metadata))["work.attention"])
-	if status != "open" || !ok || attention != "ok" {
+	attention, _ := StringValue(PayloadMap(jsontext.Value(metadata))["work.attention"])
+	if status != "open" || attention != "ok" {
 		return nil, false
 	}
 	return map[string]jsontext.Value{
