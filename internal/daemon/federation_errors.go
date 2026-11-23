@@ -8,6 +8,9 @@ import (
 )
 
 func federationReadOnlyError(err error) error {
+	if errors.Is(err, db.ErrRetainedDiscussionMove) {
+		return api.NewError(409, "federated_move_unsupported", "this retained task's discussion cannot be verified for a move", "create an issue in the target project and link it to this task", nil)
+	}
 	if errors.Is(err, db.ErrFederatedMoveUnsupported) {
 		return api.NewError(409, "federated_move_unsupported",
 			"cross-project moves involving a federated project are unsupported unless both projects use the same active hub",

@@ -350,6 +350,7 @@ var alreadyImplemented = map[string]bool{
 	"ReconcileDueNotification":             true, // due_notifications.go
 	"ReconcileLocalFederationEcho":         true, // federation_events.go
 	"RetainedIssueSnapshot":                true, // federation_retained_snapshot.go
+	"RetainedCommentEvent":                 true, // federation_retained_snapshot.go
 	"RecordIssueSyncError":                 true, // issue_sync.go
 	"RecordIssueSyncSuccess":               true, // issue_sync.go
 	"RecordExternalRootError":              true, // external_roots.go

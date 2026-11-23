@@ -1,6 +1,7 @@
 package federation
 
 import (
+	"context"
 	"testing"
 
 	"encoding/json/jsontext"
@@ -9,19 +10,157 @@ import (
 	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/testenv"
 )
 
 func TestRejoinRetainedHistory(t *testing.T) {
+	t.Run("cross project retained reply parent", func(t *testing.T) {
+		ctx := t.Context()
+		hub, projects := newMoveDeliveryHub(t, "reply-project", "parent-project")
+		spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor", "old-actor")
+		issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "reply task", Author: "old-actor"})
+		require.NoError(t, err)
+		parentIssue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[1].ID, Title: "parent task", Author: "old-actor"})
+		require.NoError(t, err)
+		require.NoError(t, spoke.sync(t, 0))
+		require.NoError(t, spoke.sync(t, 1))
+		parent, _, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: parentIssue.ID, Author: "old-actor", Body: "parent"})
+		require.NoError(t, err)
+		rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
+		parentSpoke := spoke
+		parentSpoke.projects = spoke.projects[1:]
+		rejoinWithActor(t, parentSpoke, hub.URL, projects[1], hub.DB, "push,pull")
+		_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "reply", ReplyToUID: parent.UID, ReplyKind: "reply"})
+		require.NoError(t, err)
+		require.NoError(t, spoke.sync(t, 0))
+		remote, err := hub.DB.IssueByUID(ctx, parentIssue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		comments, err := hub.DB.CommentsByIssue(ctx, remote.ID)
+		require.NoError(t, err)
+		require.Len(t, comments, 1)
+		require.Equal(t, parent.UID, comments[0].UID)
+	})
+	t.Run("new reply to retained parent", func(t *testing.T) {
+		ctx := t.Context()
+		hub, projects := newMoveDeliveryHub(t, "reply-project")
+		spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
+		issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "task", Author: "old-actor"})
+		require.NoError(t, err)
+		require.NoError(t, spoke.sync(t, 0))
+		grandparent, _, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "grandparent"})
+		require.NoError(t, err)
+		parent, _, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "parent", ReplyToUID: grandparent.UID, ReplyKind: "reply"})
+		require.NoError(t, err)
+		rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
+		_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "reply", ReplyToUID: parent.UID, ReplyKind: "reply"})
+		require.NoError(t, err)
+		require.NoError(t, spoke.sync(t, 0))
+		remote, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		comments, err := hub.DB.CommentsByIssue(ctx, remote.ID)
+		require.NoError(t, err)
+		require.Len(t, comments, 3)
+		require.Equal(t, grandparent.UID, comments[1].ReplyToUID)
+		require.Equal(t, parent.UID, comments[2].ReplyToUID)
+	})
+	t.Run("edited retained reply", func(t *testing.T) {
+		ctx := t.Context()
+		hub, projects := newMoveDeliveryHub(t, "reply-project")
+		spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
+		issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "task", Author: "old-actor"})
+		require.NoError(t, err)
+		parent, _, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "parent"})
+		require.NoError(t, err)
+		require.NoError(t, spoke.sync(t, 0))
+		reply, old, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "reply", ReplyToUID: parent.UID, ReplyKind: "reply"})
+		require.NoError(t, err)
+		rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
+		_, _, _, err = spoke.env.DB.EditComment(ctx, db.EditCommentParams{IssueID: issue.ID, CommentUID: reply.UID, Actor: "new-actor", Body: "edited reply"})
+		require.NoError(t, err)
+		require.NoError(t, spoke.sync(t, 0))
+		remote, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		comments, err := hub.DB.CommentsByIssue(ctx, remote.ID)
+		require.NoError(t, err)
+		require.Len(t, comments, 2)
+		found := false
+		for _, comment := range comments {
+			if comment.UID == parent.UID {
+				require.Equal(t, "old-actor", comment.Author)
+			}
+			if comment.UID == reply.UID {
+				found = true
+				require.Equal(t, "edited reply", comment.Body)
+				require.Equal(t, parent.UID, comment.ReplyToUID)
+				require.Equal(t, "reply", comment.ReplyKind)
+			}
+		}
+		require.True(t, found)
+		require.NoError(t, spoke.sync(t, 0))
+		retained, err := spoke.env.DB.EventsByUIDs(ctx, issue.ProjectID, []string{old.UID})
+		require.NoError(t, err)
+		require.Len(t, retained, 1)
+		require.Equal(t, old.ContentHash, retained[0].ContentHash)
+	})
 	t.Run("unknown issue", checkRejoinPublishesNewEventsAfterOldActor)
+	t.Run("cross project retained peer", checkRejoinPublishesCrossProjectRetainedPeer)
 	t.Run("known issue", checkRejoinDoesNotSnapshotKnownIssue)
+	t.Run("queued recovery for known issue", checkRejoinQueuedRecoveryForKnownIssue)
 	t.Run("wrong actor after rejoin", checkRejoinRejectsWrongActor)
 	t.Run("restore retained task and edit", checkRestoredRetainedTaskEdit)
 	t.Run("retained task linked to known cross project peer", checkRejoinRetainedTaskLinkedToKnownCrossProjectPeer)
 	t.Run("recovery snapshots", checkRejoinRecoverySnapshots)
 	t.Run("recover task moved before rejoining", checkRejoinTaskMovedBeforeEnrollment)
+}
+
+func checkRejoinPublishesCrossProjectRetainedPeer(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "source-project", "peer-project")
+	spoke := newMoveDeliverySpoke(t, hub, projects, "new-actor", "old-actor")
+	known, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "known", Author: "new-actor"})
+	require.NoError(t, err)
+	require.NoError(t, spoke.sync(t, 0))
+	peer, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[1].ID, Title: "peer", Author: "old-actor"})
+	require.NoError(t, err)
+	peerSpoke := spoke
+	peerSpoke.projects = spoke.projects[1:]
+	rejoinWithActor(t, peerSpoke, hub.URL, projects[1], hub.DB, "push,pull")
+	_, _, err = spoke.env.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: known.ID, ToIssueID: peer.ID, Type: "blocks", Author: "new-actor"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: known.ID, Actor: "new-actor", FromUID: known.UID, ToUID: peer.UID, FromShortID: known.ShortID, ToShortID: peer.ShortID})
+	require.NoError(t, err)
+	require.NoError(t, spoke.sync(t, 0))
+	remote, err := hub.DB.IssueByUID(ctx, known.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	links, err := hub.DB.LinksByIssue(ctx, remote.ID)
+	require.NoError(t, err)
+	require.Len(t, links, 1)
+	require.Equal(t, peer.UID, links[0].ToIssueUID)
+}
+
+func checkRejoinQueuedRecoveryForKnownIssue(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "rejoin-project")
+	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
+	issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "known", Author: "old-actor"})
+	require.NoError(t, err)
+	require.NoError(t, spoke.sync(t, 0))
+	rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
+	snapshot, _, err := spoke.env.DB.RetainedIssueSnapshot(ctx, spoke.projects[0].ID, issue.UID)
+	require.NoError(t, err)
+	_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "later work"})
+	require.NoError(t, err)
+	require.NoError(t, spoke.sync(t, 0))
+	remote, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "old-actor", remote.Author)
+	comments, err := hub.DB.CommentsByIssue(ctx, remote.ID)
+	require.NoError(t, err)
+	require.Len(t, comments, 1)
+	require.Equal(t, "later work", comments[0].Body)
+	_, err = spoke.env.DB.EventsByUIDs(ctx, spoke.projects[0].ID, []string{snapshot.UID})
+	require.ErrorIs(t, err, db.ErrNotFound)
 }
 
 func checkRejoinTaskMovedBeforeEnrollment(t *testing.T) {
@@ -58,9 +197,21 @@ func checkRejoinTaskMovedBeforeEnrollment(t *testing.T) {
 
 func checkRejoinRetainedTaskLinkedToKnownCrossProjectPeer(t *testing.T) {
 	ctx := t.Context()
-	hub, projects := newMoveDeliveryHub(t, "source-project", "peer-project")
-	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor", "new-actor")
-	peer, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[1].ID, Title: "known peer", Author: "new-actor"})
+	hub := testenv.New(t, func(cfg *daemon.ServerConfig) {
+		cfg.AuthorizeFederationReference = func(context.Context, db.Transaction, daemon.HostFederationAccessRequest, daemon.HostFederationAccessRequest) error {
+			return nil
+		}
+	})
+	var projects []db.Project
+	for _, name := range []string{"source-project", "peer-project"} {
+		project, err := hub.DB.CreateProject(ctx, name)
+		require.NoError(t, err)
+		_, err = hub.DB.EnableProjectFederation(ctx, project.ID, "worker")
+		require.NoError(t, err)
+		projects = append(projects, project)
+	}
+	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor", "peer-actor")
+	peer, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[1].ID, Title: "known peer", Author: "peer-actor"})
 	require.NoError(t, err)
 	require.NoError(t, spoke.sync(t, 1))
 	retained, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "retained task", Author: "old-actor"})
