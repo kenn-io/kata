@@ -132,7 +132,7 @@ func attnStart(d attnDaemon, kataRef string) {
 
 func attnStartPatch(lookup attnLookup) map[string]any {
 	patch := map[string]any{attentionKey: attnValueOK}
-	if lookup.attention == attnValueNeedsHuman && lookup.message == db.ExpiredAssignmentMessage {
+	if lookup.message == db.ExpiredAssignmentMessage {
 		patch[attentionMsgKey] = nil
 	}
 	return patch

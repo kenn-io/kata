@@ -57,9 +57,8 @@ func checkExpiredAssignmentFederationReplay(t *testing.T, hub db.Storage, backen
 	replayed, err = spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.Equal(t, claim.Issue.Owner, replayed.Owner)
-	hubMeta := db.PayloadMap(jsontext.Value(claim.Issue.Metadata))
 	metadata = db.PayloadMap(jsontext.Value(replayed.Metadata))
-	require.Equal(t, hubMeta["work.attention"], metadata["work.attention"])
-	require.Equal(t, hubMeta["work.attention_msg"], metadata["work.attention_msg"])
+	require.JSONEq(t, `"needs-human"`, string(metadata["work.attention"]))
+	require.JSONEq(t, `"claim expired without hand-off"`, string(metadata["work.attention_msg"]))
 	return nil
 }

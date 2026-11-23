@@ -345,10 +345,10 @@ func attnStartSession(d attnDaemon, kataRef, owner string) error {
 		default:
 			return errors.New("native attention start: issue lookup unavailable")
 		}
-		if lookup.session == owner {
+		patch := attnStartPatch(lookup)
+		if _, clearsMessage := patch[attentionMsgKey]; lookup.session == owner && !clearsMessage {
 			return nil
 		}
-		patch := attnStartPatch(lookup)
 		patch[attentionSessionKey] = owner
 		switch d.setMetaIfRevision(ref, patch, lookup.revision) {
 		case attnWriteApplied:

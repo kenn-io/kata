@@ -12,6 +12,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 )
 
 type fakeAttnDaemon struct {
@@ -98,6 +99,42 @@ func TestAttnStart_RetriesOnceAfterRevisionConflict(t *testing.T) {
 		{ref: "abc4", patch: map[string]any{attentionKey: attnValueOK, attentionSessionKey: nil}, revision: 13},
 		{ref: "abc4", patch: map[string]any{attentionKey: attnValueOK, attentionSessionKey: nil}, revision: 14},
 	}, d.conditionalWrites)
+}
+
+func TestAttentionStartPreservesChangedMessageOnRetry(t *testing.T) {
+	for _, native := range []bool{false, true} {
+		t.Run(map[bool]string{false: "legacy", true: "native"}[native], func(t *testing.T) {
+			d := &fakeAttnDaemon{
+				lookupSequence: []attnLookup{
+					{kind: lookupOpen, attention: attnValueNeedsHuman, message: db.ExpiredAssignmentMessage, session: "old", revision: 1},
+					{kind: lookupOpen, attention: attnValueNeedsHuman, message: "please review", session: "old", revision: 2},
+				},
+				conditionalResults: []attnWriteResult{attnWriteConflict},
+			}
+			if native {
+				require.NoError(t, attnStartSession(d, "abc4", "same"))
+			} else {
+				attnStart(d, "abc4")
+			}
+			require.Len(t, d.conditionalWrites, 2)
+			assert.Contains(t, d.conditionalWrites[0].patch, attentionMsgKey)
+			assert.Nil(t, d.conditionalWrites[0].patch[attentionMsgKey])
+			assert.NotContains(t, d.conditionalWrites[1].patch, attentionMsgKey)
+		})
+	}
+}
+
+func TestNativeAttentionStartClearsExpiryForSameSession(t *testing.T) {
+	for _, attention := range []string{attnValueNeedsHuman, attnValueOK} {
+		t.Run(attention, func(t *testing.T) {
+			d := &fakeAttnDaemon{lookups: map[string]attnLookup{
+				"abc4": {kind: lookupOpen, attention: attention, message: db.ExpiredAssignmentMessage, session: "same", revision: 1},
+			}}
+			require.NoError(t, attnStartSession(d, "abc4", "same"))
+			require.Len(t, d.conditionalWrites, 1)
+			assert.Equal(t, map[string]any{attentionKey: attnValueOK, attentionMsgKey: nil, attentionSessionKey: "same"}, d.conditionalWrites[0].patch)
+		})
+	}
 }
 
 func TestAttnEnd_AtomicallySetsHandoffForOpenOKIssue(t *testing.T) {

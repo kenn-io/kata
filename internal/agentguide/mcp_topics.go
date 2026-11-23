@@ -106,7 +106,7 @@ before claiming. Load kata.load_issue_mutation and refresh for claim.
 ` + call("kata.next", `{"project":"spoke-project","unowned":true}`) +
 			call("kata.claim", `{"ref":"spoke-project#abc4","if_unowned":true,"ttl_seconds":7200}`) + `
 A current owner conflict is not permission to force takeover. if_unowned is an
-atomic claim guard for the first claim. ttl_seconds runs from 60 to 86400.
+atomic claim guard. ttl_seconds may bound a claim from 60 to 86400 seconds.
 ` + MCPClaimRules + `Load kata.load_coordination and refresh to release only the expected owner.
 ` + call("kata.unassign", `{"ref":"spoke-project#abc4","expected_owner":"example-agent"}`) + `
 Maintain your own work.attention (ok, stuck, needs-human) and work.attention_msg.

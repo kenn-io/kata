@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -363,6 +365,7 @@ func assertClosedBodyStdinHeredoc(t *testing.T, name, text string) {
 
 // Product contract: every CLI guide tells agents to claim with a
 // time limit and renew it by claiming again with --ttl, without --if-unowned.
+// The docs Kata serves also claim with a time limit.
 func TestGuidesSayClaimWithTTL(t *testing.T) {
 	guides := map[string]string{"init block": agentsManagedBlock()}
 	for _, args := range [][]string{
@@ -378,6 +381,11 @@ func TestGuidesSayClaimWithTTL(t *testing.T) {
 		if name != "assign --help" {
 			assert.Contains(t, text, "without --if-unowned", name)
 		}
+	}
+	for _, path := range []string{"docs/get-started/quickstart.md", "docs/workflows/agents.md", "docs/operations/agent-orchestration.md"} {
+		raw, err := os.ReadFile(filepath.Join("..", "..", path))
+		require.NoError(t, err)
+		assertClaimsCarryTTL(t, path, string(raw))
 	}
 }
 

@@ -2375,6 +2375,7 @@ func (d *Store) claimOwner(ctx context.Context, p db.ClaimOwnerParams) (db.Claim
 	if issue.Owner != nil && *issue.Owner != p.Actor && !p.Force {
 		return db.ClaimResult{Issue: issue, CurrentOwner: issue.Owner}, db.ErrAlreadyAssigned
 	}
+
 	eventType := "issue.assigned"
 	payload := map[string]any{"owner": p.Actor, "updated_at": nowText}
 	if newExpiry != nil {

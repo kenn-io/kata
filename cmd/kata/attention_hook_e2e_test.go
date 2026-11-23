@@ -31,11 +31,17 @@ func runAttnHook(t *testing.T, env *testenv.Env, dir string, args ...string) err
 }
 
 func TestE2E_AttentionHook_StartClearsExpiredClaimMessage(t *testing.T) {
-	for _, native := range []bool{false, true} {
-		t.Run(map[bool]string{false: "legacy", true: "native"}[native], func(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		native, resume bool
+	}{{"legacy", false, false}, {"native", true, false}, {"native resume", true, true}} {
+		t.Run(tc.name, func(t *testing.T) {
 			env, dir, pid := setupCLIWorkspace(t)
 			ref := createIssue(t, env, pid, "expired work")
 			runCLI(t, env, dir, "meta", "set", ref, attentionKey, attnValueOK)
+			if tc.resume {
+				runCLI(t, env, dir, "meta", "set", ref, attentionSessionKey, "new-session")
+			}
 			runCLIAs(t, env, dir, "worker", "claim", ref, "--ttl", "1m")
 			_, err := env.DB.ExpireAssignments(t.Context(), db.ExpireAssignmentsParams{ProjectID: pid, Now: time.Now().Add(2 * time.Minute)})
 			require.NoError(t, err)
@@ -48,7 +54,7 @@ func TestE2E_AttentionHook_StartClearsExpiredClaimMessage(t *testing.T) {
 			cmd.SetContext(contextWithBaseURL(t.Context(), env.URL))
 			flags.Workspace = dir
 			d := &liveAttnDaemon{cmd: cmd}
-			if native {
+			if tc.native {
 				require.NoError(t, attnStartSession(d, ref, "new-session"))
 			} else {
 				attnStart(d, ref)

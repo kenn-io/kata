@@ -17,8 +17,9 @@ Search matches every word. Use an open issue that covers the work, or create one
 
     kata create "<title>" --body "<what and why>" --idempotency-key <key> --agent
 
-If create reports a look-alike, use it unless the work differs (--force-new).
-Link related work with --related <ref>, or a larger issue with --parent <ref>.
+If create reports a look-alike, use that issue unless the work truly differs
+(--force-new). Link related but different work with --related <ref>, or
+--parent <ref> when the new issue is part of a larger one.
 
 ` + ClaimRules + `When asked only to record something, create the issue and stop.
 
