@@ -1,5 +1,18 @@
 package agentguide
 
+// MCPCommentRules is CommentRules in tool terms.
+const MCPCommentRules = `Comment with kata.comment and a stable idempotency_key only for findings a
+later reader needs; keep live status in work.attention_msg. Correct your own
+comment with kata.edit_comment. A PR that is open and not merged is unfinished
+work: leave the issue open, update work.attention and work.attention_msg and
+set the needs-review label.
+`
+
+// MCPClaimRules is ClaimRules in tool terms.
+const MCPClaimRules = `Claim with kata.claim and ttl_seconds; renew before expiry using ttl_seconds,
+without if_unowned.
+`
+
 // MCPContract is the compact bootstrap for clients that have tools and a file
 // editor, but no shell. Richer guidance is fetched from kata.skills on demand.
 const MCPContract = `This workspace tracks real changes in Kata through the connected Kata MCP
@@ -17,16 +30,16 @@ otherwise kata.create with a stable idempotency_key. Link related work or a
 parent. A look-alike refusal means inspect/reuse the match; force_new is only
 for genuinely different work. Only create real work the user requested.
 
-Claim your issue with kata.claim. Keep your own work.attention and
-work.attention_msg current through kata.set_metadata; record progress with
-kata.comment and a stable idempotency_key. Stamp a dedicated work.branch once.
-Only write your own work.*; ignore it on closed issues. Do not take over a
-sibling's issue or metadata. If blocked, explain what is needed.
+` + MCPClaimRules + `Keep your own work.attention and work.attention_msg current through
+kata.set_metadata. Stamp a dedicated work.branch once. Only write your own
+work.*; ignore it on closed issues. Do not take over a sibling's issue or
+metadata. If blocked, explain what is needed.
+
+` + MCPCommentRules + `
 
 Close only verified work with kata.close: reason "done", a substantive message
 of at least 40 characters, and typed evidence. An open child prevents parent
-closure. Leave unfinished work open, explain what remains and mark needs-review.
-Before stopping, close completed work or update both attention fields.
+closure. Before stopping, close completed work or update both attention fields.
 Never call kata.delete or kata.purge without explicit user authorization for
 that exact action and issue. Use returned web_url values when linking issues.
 `

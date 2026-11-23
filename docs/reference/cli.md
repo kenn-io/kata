@@ -99,6 +99,9 @@ kata init [--replace | --reassign]
 `kata init` writes the secret-free `.kata.toml` binding for the current
 workspace. Pass `--project` to choose the project name explicitly instead of
 deriving it from the git remote.
+With `--workspace <dir>`, init refuses when the binding it would change lies
+outside `<dir>`: an enclosing folder's `.kata.toml`, or a `<dir>/.kata.toml`
+symlink to a file elsewhere.
 
 Pass `--with-agents` to add or refresh kata's marker-delimited guidance block
 where coding agents look for workspace instructions. Existing real `AGENTS.md`
@@ -769,8 +772,10 @@ output. `--thread COMMENT` follows the root and all its transitive replies
 across the project. It returns at most 50 comments and reports truncation;
 the root is retained when the limit or `--kind` filter applies. `--inbound`
 returns replies to your comments on this issue. Use `--inbound=AUTHOR` or
-`--inbound=AUTHOR/TEAMMATE` to select another participant. Thread and inbound
-selectors cannot be combined. `--kind` requires one of those selectors.
+`--inbound=AUTHOR/TEAMMATE` to select another participant. Use a comment's
+`author_filter` value from `--agent` output as `AUTHOR`; quote the value in a
+shell when it contains spaces. Thread and inbound selectors cannot be combined.
+`--kind` requires one of those selectors.
 `--since COMMENT` keeps comments strictly after that comment in creation-time,
 then UID order. All selectors and backlinks respect the caller's read scope.
 Backlink evidence retains the newest 50 replies per kind and marks incomplete
@@ -1222,7 +1227,12 @@ Repeating a temporary claim by the same actor renews its expiry. Repeating a
 permanent claim preserves an existing temporary expiry; omit `--ttl` when
 claiming an unassigned issue to create a permanent assignment. After a timed
 assignment expires, `ready` and `next` treat the issue as unassigned even
-before the cleanup worker records `issue.assignment_expired`.
+before the cleanup worker records `issue.assignment_expired`. When that worker
+expires the claim on an open issue whose `work.attention` is `ok`, it sets
+`work.attention` to `needs-human` and `work.attention_msg` to
+`claim expired without hand-off`. Renew a timed claim before it expires by
+claiming again with `--ttl`, without `--if-unowned`. A new claim leaves the
+attention state and message unchanged.
 
 Use `kata assign <ref> <owner>` to make an existing temporary assignment
 permanent. Closing an issue also removes the expiry and keeps its owner;
@@ -1305,10 +1315,13 @@ The command prints the issue's `scheduled_on` and `timezone` and the rule as it
 now stands. A change prints the recurrence's new rule, start, and zone too, and
 notes that the issue's own date and zone did not change, so its `timezone` can
 differ from the recurrence's. The recurrence template copies
-the issue's title, body, priority, and labels, never its owner or metadata. For
-an issue that already belongs to a recurrence, the same command changes its
-rule, start, and zone. If the recurrence changed after the CLI read it, nothing
-is written and the error reports the recurrence's current rule.
+the issue's title, body, priority, and labels, never its owner or metadata.
+The issue keeps its `work.attention` even when Kata no longer accepts that
+value. New occurrences of an older template omit an unsupported
+`work.attention`; the template keeps it. For an issue that already belongs to
+a recurrence, the same command changes its rule, start, and zone. If the
+recurrence changed after the CLI read it, nothing is written and the error
+reports the recurrence's current rule.
 
 The rule is sent as written. The daemon is the only validator, and its error is
 printed. The zone is `--timezone`, else, when changing, the recurrence's own
@@ -1358,7 +1371,8 @@ The command rejects an issue it reads as closed. Concurrent writes preserve
 other recipients' requests; the last write to the same recipient wins.
 Closure can still race with the write; either way, the request is hidden while
 the issue is closed. Messages must be nonblank and at most 1024 bytes.
-Requests do not change ownership or readiness.
+Requests do not change ownership or readiness. In `--agent` inbox output, pass
+`from_address` to `kata notify --to`.
 
 Use `--re <comment>` to ask the recipient to answer one visible comment. A
 typed reply clears the matching request and notifies the original requester on
@@ -1766,6 +1780,10 @@ kata audit closes [--actor NAME] [--reason done|wontfix|duplicate|superseded|aud
 
 `kata digest` groups recent activity by actor. `kata audit closes` is for
 reviewing close discipline and finding lazy or duplicate closes.
+
+In `--agent` output, pass an `actor_filter` from an audit row to `--actor`.
+Digest rows contain `actor_filters` as a JSON array encoded as an agent field;
+pass individual values to `--actor`. Quote values containing spaces in a shell.
 
 ## Projects
 

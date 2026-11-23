@@ -17,6 +17,7 @@ import (
 
 	"github.com/cenkalti/backoff/v7"
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/authorname"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -198,7 +199,7 @@ func printEventsHuman(cmd *cobra.Command, bs []byte) error {
 		}
 		if _, err := fmt.Fprintf(cmd.OutOrStdout(),
 			"%-6d  %-22s  proj=%-3d  %-8s  by %s  %s\n",
-			e.EventID, e.Type, e.ProjectID, issueStr, e.Actor, e.CreatedAt); err != nil {
+			e.EventID, e.Type, e.ProjectID, issueStr, authorname.Display(e.Actor), e.CreatedAt); err != nil {
 			return err
 		}
 	}
@@ -237,7 +238,7 @@ func printEventsAgent(cmd *cobra.Command, bs []byte) error {
 			agentRowField("type", e.Type),
 			agentOptionalRowField("project", &project),
 			agentOptionalRowField("issue", e.IssueShortID),
-			agentRowField("actor", e.Actor),
+			agentRowField("actor", authorname.Display(e.Actor)),
 		); err != nil {
 			return err
 		}
@@ -425,7 +426,7 @@ func (f *frameState) flushAgentEvent(out io.Writer) (streamResult, error) {
 		}
 	}
 	if e.Actor != "" {
-		if _, err := fmt.Fprintf(out, " actor=%s", agentValue(e.Actor)); err != nil {
+		if _, err := fmt.Fprintf(out, " actor=%s", agentValue(authorname.Display(e.Actor))); err != nil {
 			return streamResult{}, err
 		}
 	}

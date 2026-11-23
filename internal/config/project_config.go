@@ -117,18 +117,34 @@ func WriteProjectConfig(workspaceRoot, name string) error {
 	if err := ValidateProjectName(name); err != nil {
 		return err
 	}
-	body := fmt.Sprintf("version = 1\n\n[project]\nname = %q\n", name)
-	return os.WriteFile(filepath.Join(workspaceRoot, ProjectConfigFilename), []byte(projectConfigHeader+body), 0o644) //nolint:gosec // committed project file, world-readable by design
+	return os.WriteFile(filepath.Join(workspaceRoot, ProjectConfigFilename), projectConfigBytes(name), 0o644) //nolint:gosec // committed project file, world-readable by design
+}
+
+// ReplaceProjectConfig replaces the file at path without following a final link.
+func ReplaceProjectConfig(path, name string) error {
+	name = strings.TrimSpace(name)
+	if err := ValidateProjectName(name); err != nil {
+		return err
+	}
+	return atomicfile.WriteFile(path, projectConfigBytes(name), atomicfile.WithCreatePerm(0o644), atomicfile.WithPreserveMode())
+}
+
+func projectConfigBytes(name string) []byte {
+	return []byte(projectConfigHeader + fmt.Sprintf("version = 1\n\n[project]\nname = %q\n", name))
+}
+
+// HasProjectConfigHeader reports whether the guidance is already present.
+func HasProjectConfigHeader(data []byte) bool {
+	return strings.Contains(string(data), "kata quickstart --format contract")
 }
 
 // EnsureProjectConfigHeader prepends agent guidance while preserving existing contents.
-func EnsureProjectConfigHeader(workspaceRoot string) (bool, error) {
-	path := filepath.Join(workspaceRoot, ProjectConfigFilename)
+func EnsureProjectConfigHeader(path string) (bool, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // workspace-supplied path is the documented input
 	if err != nil {
 		return false, err
 	}
-	if strings.Contains(string(data), "kata quickstart --format contract") {
+	if HasProjectConfigHeader(data) {
 		return false, nil
 	}
 	body, hasBOM := strings.CutPrefix(string(data), "\ufeff")
@@ -136,7 +152,7 @@ func EnsureProjectConfigHeader(workspaceRoot string) (bool, error) {
 	if hasBOM {
 		header = "\ufeff" + header
 	}
-	if err := atomicfile.WriteFile(path, []byte(header+body), atomicfile.WithCreatePerm(0o644), atomicfile.WithPreserveMode(), atomicfile.WithFollowLink()); err != nil {
+	if err := atomicfile.WriteFile(path, []byte(header+body), atomicfile.WithCreatePerm(0o644), atomicfile.WithPreserveMode()); err != nil {
 		return false, err
 	}
 	return true, nil

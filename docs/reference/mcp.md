@@ -256,6 +256,9 @@ and optional `force` to bypass duplicate-reply rejection. The required
 `kata.show` accepts `thread`, `inbound`, `kind`, and `since` selectors and
 returns handles, reply lines, backlinks, and edit state. Thread results retain
 their root within the requested comment limit and report truncation.
+Use a comment's `author_filter` as the `inbound` author. A `kata.digest` actor's
+`actor_filters` contains the exact values to pass to its `actors` filter. Use a
+`kata.audit_closes` row's `actor_filter` as its `actor` filter.
 Endpoint identities and backlinks remain within the server's fixed startup
 project UID scope, including after project moves or renames. See the
 [CLI reference](cli.md#issue-lifecycle) for selector behavior, reply validation,
@@ -385,7 +388,8 @@ already-bound issues inside the startup project scope.
 
 `kata.inbox` lists open issues that carry a request for one recipient's
 attention, the same requests `kata inbox` shows, and never clears them. It
-reads up to `limit` issues and sets `truncated` when more carry requests.
+reads up to `limit` issues and sets `truncated` when more carry requests. Pass
+a request's `from_address` to `kata notify --to`.
 `kata.status` reports an issue's owner, hold, and lease along with the actor
 the server writes as. `kata.unassign` accepts `expected_owner` so a handoff
 clears ownership only while that actor still holds the issue.
@@ -434,7 +438,11 @@ send it as `If-Match`. Create calls do not use a revision.
 `kata.create` supports `force_new`. `kata.claim` supports `force`,
 `if_unowned`, and an optional `ttl_seconds` from 60 through 86400. A timed
 claim renews when the same actor repeats it, and the result includes the
-assignment expiry and previous owner when present. `kata.edit` supports field,
+assignment expiry and previous owner when present. When a timed claim on an
+open issue expires while `work.attention` is `ok`, Kata sets it to
+`needs-human` with the message `claim expired without hand-off`. Renew before
+expiry by calling `kata.claim` again with `ttl_seconds`, without `if_unowned`.
+A new claim leaves the attention state and message unchanged. `kata.edit` supports field,
 owner, priority, relationship, scheduling, and generic metadata changes. An
 issue-field or relationship change and a metadata change must use separate
 `kata.edit` calls so one failed request cannot leave a partial edit.
@@ -533,7 +541,7 @@ list the catalog, or pass a name:
 In Kata 0.23.0 and later, the names are `setup`, `quickstart`, `workflow`, `issues`,
 `claiming`, `closing`, `teammates`, `scheduling`, and `events`. Read `workflow`
 at session start and before your first write. `quickstart` walks through search,
-creation, ownership, progress and completion using native JSON tool calls.
+creation, ownership, findings and completion using native JSON tool calls.
 The guides describe the connected server's scope, section loaders, required
 idempotency keys and typed close evidence. They require no shell commands.
 The Markdown body is returned once as text content; structured content holds
