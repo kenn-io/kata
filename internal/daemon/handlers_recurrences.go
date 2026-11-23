@@ -103,6 +103,15 @@ func activeRecurrenceByUID(
 	return rec, nil
 }
 
+func validateRecurrencePriorityLabels(labels []string) error {
+	for _, label := range labels {
+		if isPriorityLabel(strings.TrimSpace(strings.ToLower(label))) {
+			return api.NewError(400, "validation", "use the recurrence template priority field", "", nil)
+		}
+	}
+	return nil
+}
+
 func createRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.CreateRecurrenceRequest) (*api.CreateRecurrenceResponse, error) {
 	return func(ctx context.Context, in *api.CreateRecurrenceRequest) (*api.CreateRecurrenceResponse, error) {
 		actor, err := attributedActor(ctx, in.Body.Actor)
@@ -110,6 +119,9 @@ func createRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.Create
 			return nil, err
 		}
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
+			return nil, err
+		}
+		if err := validateRecurrencePriorityLabels(in.Body.Template.Labels); err != nil {
 			return nil, err
 		}
 		if in.Body.Timezone == "Local" {
@@ -254,6 +266,11 @@ func patchRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.PatchRe
 			Timezone: in.Body.Timezone,
 		}
 		if in.Body.Template != nil {
+			if in.Body.Template.Labels != nil {
+				if err := validateRecurrencePriorityLabels(*in.Body.Template.Labels); err != nil {
+					return nil, err
+				}
+			}
 			update.TemplateTitle = in.Body.Template.Title
 			update.TemplateBody = in.Body.Template.Body
 			update.TemplateOwner = in.Body.Template.Owner

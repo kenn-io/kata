@@ -60,6 +60,31 @@ func TestPostRecurrence_HappyPath(t *testing.T) {
 	assert.Len(t, out.Recurrence.UID, 26)
 }
 
+func TestRecurrencePriorityLabels(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	p := seedProject(t, env, "example-project")
+	rec := seedRecurrence(t, env, p.ID, "FREQ=WEEKLY", "2026-05-15", "UTC", "old")
+	baseURL := fmt.Sprintf("%s/api/v1/projects/%d/recurrences", env.URL, p.ID)
+	for _, label := range []string{"p0", "p4", " Priority:High "} {
+		t.Run(label, func(t *testing.T) {
+			body := fmt.Sprintf(`{"actor":"tester","rrule":"FREQ=WEEKLY","dtstart":"2026-05-15","timezone":"UTC","template":{"title":"review","labels":[%q]}}`, label)
+			resp := doPost(t, env, baseURL, body)
+			raw := readClose(t, resp)
+			require.Equal(t, http.StatusBadRequest, resp.StatusCode, string(raw))
+			assert.Contains(t, string(raw), "priority field")
+
+			body = fmt.Sprintf(`{"actor":"tester","template":{"labels":[%q]}}`, label)
+			resp = doPatch(t, env, baseURL+"/"+rec.UID, body, `"rev-1"`)
+			raw = readClose(t, resp)
+			require.Equal(t, http.StatusBadRequest, resp.StatusCode, string(raw))
+			assert.Contains(t, string(raw), "priority field")
+		})
+	}
+	resp := doPatch(t, env, baseURL+"/"+rec.UID, `{"actor":"tester","template":{"labels":["area:ui"]}}`, `"rev-1"`)
+	raw := readClose(t, resp)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+}
+
 func TestPostRecurrence_AttachesInitialIssueAndAdvancesOnClose(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("tok"))
 	project := seedProject(t, env, "example-project")
