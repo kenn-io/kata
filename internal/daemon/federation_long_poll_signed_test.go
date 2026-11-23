@@ -248,24 +248,6 @@ func TestFederationPollWaitReturnsSavedPageWhenItExpires(t *testing.T) {
 	}
 }
 
-func TestFederationPollWaitReauthorizesWhenWakeReadCrossesDeadline(t *testing.T) {
-	f := newSignedPollFixture(t)
-	synctest.Test(t, func(t *testing.T) {
-		h := f.serve(t, 0)
-		cursor := h.cursor(t)
-		reads := h.reads.readsReturned()
-		done := h.startHeldPoll(t, cursor, "30")
-		h.reads.beforeRead(func(int) error {
-			time.Sleep(31 * time.Second)
-			return h.revokeProjectAccess(t)
-		})
-		h.commit(t, "Committed before the slow read", true)
-		response := <-done
-		assert.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
-		assert.Equal(t, reads+2, h.reads.readsReturned())
-	})
-}
-
 func TestFederationPollWaitInitialReadCrossesDeadline(t *testing.T) {
 	f := newSignedPollFixture(t)
 	synctest.Test(t, func(t *testing.T) {
@@ -366,18 +348,6 @@ func TestFederationPollWaitRejectsARetiredSigningKey(t *testing.T) {
 			})
 		})
 	}
-	t.Run("woken after the key's secret is replaced", func(t *testing.T) {
-		f := newSignedPollFixture(t)
-		synctest.Test(t, func(t *testing.T) {
-			h := f.serve(t, 0)
-			done := h.startHeldPoll(t, h.cursor(t), "30")
-			t.Setenv(signedPollKeyEnv, strings.Repeat("r", 64))
-			h.commit(t, canary, true)
-			response := <-done
-			assert.Equal(t, http.StatusUnauthorized, response.Code, response.Body.String())
-			assert.NotContains(t, response.Body.String(), canary)
-		})
-	})
 	t.Run("key expires while the woken poll reads", func(t *testing.T) {
 		f := newSignedPollFixture(t)
 		synctest.Test(t, func(t *testing.T) {

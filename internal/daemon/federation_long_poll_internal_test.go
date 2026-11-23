@@ -293,19 +293,7 @@ func TestFederationPollWaitAnswersAtOnceWhenCredentialWaitersAreFull(t *testing.
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, status)
 	assert.Less(t, elapsed, 5*time.Second, "a poll beyond the per-credential bound must answer like an ordinary poll")
-}
-
-func TestFederationPollWaitReleasesWaitersWhenClientsDisconnect(t *testing.T) {
-	ctx := t.Context()
-	hub := newInternalLongPollHub(t)
-	status, cursor, _, err := hub.poll(ctx, 0, "0")
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, status)
-
-	held, disconnect := context.WithCancel(ctx)
-	defer disconnect()
-	ended := hub.holdEveryCredentialSlot(held, t, cursor)
-	disconnect()
+	release()
 	ended()
 	//nolint:kennlint // sleeptest: disconnect cleanup runs in hub handlers reached over real HTTP.
 	require.Eventually(t, func() bool {
