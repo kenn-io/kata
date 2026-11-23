@@ -648,15 +648,15 @@ signed polls. A credential revoked, membership removed, or signing key retired
 before a wake stops the poll. When the wait expires, the hub returns the
 initial empty page and its cursor; the next poll checks access and sees events
 whose wakeup was lost.
-Hubs that share a PostgreSQL
-database and schema wake each other's held polls with `LISTEN/NOTIFY` on a
-channel that other connected database roles can listen to or notify; a SQLite hub
-wakes them in process. A PostgreSQL wake carries the publishing process's instance tag and up to two
-keyed 64-bucket project tags. Each receiving process wakes polls in those
-buckets, and each poll reauthorizes and rereads its own project. Roles without
-access to application tables can observe wake activity and co-occurring buckets
-on a move. Notifications omit project IDs and issue content. A listener also
-wakes its held polls after reconnecting to cover notifications missed while disconnected.
+Hubs that share a PostgreSQL database and schema wake each other's held polls
+with `LISTEN/NOTIFY` on a channel that other connected database roles can listen
+to or notify; a SQLite hub wakes them in process. A PostgreSQL wake carries the
+publishing process's instance tag and up to two keyed 64-bucket project tags.
+Each receiving process wakes polls in those buckets, and each poll reauthorizes
+and rereads its own project. Roles without access to application tables can
+observe wake activity and co-occurring buckets on a move. Notifications omit
+project IDs and issue content. A listener also wakes its held polls after
+reconnecting to cover notifications missed while disconnected.
 
 Sync runs in turns. One turn for a project pushes and pulls at most 8 batches
 per stream and direction (1000 deliveries per event or receipt batch, 32
