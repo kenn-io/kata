@@ -206,7 +206,8 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if reuse != nil {
 			return reuse, nil
 		}
-		if err := rejectPriorityLabels(in.Body.Labels, "kata create --priority N"); err != nil {
+		// A successful create from before this rule must remain retryable.
+		if err := rejectPriorityLabels(in.Body.Labels, "kata create --priority N or kata.create with priority"); err != nil {
 			return nil, err
 		}
 

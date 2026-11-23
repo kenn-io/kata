@@ -112,7 +112,7 @@ func createRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.Create
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
 		}
-		if err := rejectPriorityLabels(in.Body.Template.Labels, "remove the priority label from the template's labels and set the template priority"); err != nil {
+		if err := rejectPriorityLabels(in.Body.Template.Labels, "remove the priority label from the issue or template and set the template priority"); err != nil {
 			return nil, err
 		}
 		if in.Body.Timezone == "Local" {
@@ -258,7 +258,7 @@ func patchRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.PatchRe
 		}
 		if in.Body.Template != nil {
 			if in.Body.Template.Labels != nil {
-				if err := rejectPriorityLabels(*in.Body.Template.Labels, "remove the priority label from the template's labels and set the template priority"); err != nil {
+				if err := rejectPriorityLabels(*in.Body.Template.Labels, "remove the priority label from the issue or template and set the template priority"); err != nil {
 					return nil, err
 				}
 			}
