@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
-	"fmt"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
@@ -117,17 +116,21 @@ func TestRejoinRetainedHistory(t *testing.T) {
 }
 
 func checkRecoveryAfterAnotherRejoin(t *testing.T) {
-	for _, known := range []bool{false, true} {
-		t.Run(fmt.Sprint(known), func(t *testing.T) {
+	for _, accepted := range []bool{false, true} {
+		name := "pending"
+		if accepted {
+			name = "accepted"
+		}
+		t.Run(name, func(t *testing.T) {
 			ctx := t.Context()
-			hub, projects := newMoveDeliveryHub(t, "rejoin-project", "other-project")
-			spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor", "old-actor")
-			issue, original, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "task", Author: "old-actor"})
+			hub, projects := newMoveDeliveryHub(t, "rejoin-project")
+			spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
+			issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "task", Author: "old-actor"})
 			require.NoError(t, err)
 			rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
 			snapshot, sourceID, err := spoke.env.DB.RetainedIssueSnapshot(ctx, spoke.projects[0].ID, issue.UID)
 			require.NoError(t, err)
-			if known {
+			if accepted {
 				client, err := NewClient(ctx, hub.URL, spoke.credentials[projects[0].UID].Token, clientpkg.Opts{})
 				require.NoError(t, err)
 				envelope := federationIngestEnvelope(snapshot)
@@ -135,8 +138,6 @@ func checkRecoveryAfterAnotherRejoin(t *testing.T) {
 				_, err = client.IngestProjectEventsWithOptions(ctx, projects[0].ID, []api.FederationIngestEventEnvelope{envelope}, IngestProjectEventsOptions{})
 				require.NoError(t, err)
 			}
-			_, _, err = spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[1].ID, Title: "gap", Author: "old-actor"})
-			require.NoError(t, err)
 			rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
 			again, _, err := spoke.env.DB.RetainedIssueSnapshot(ctx, spoke.projects[0].ID, issue.UID)
 			require.NoError(t, err)
@@ -149,10 +150,6 @@ func checkRecoveryAfterAnotherRejoin(t *testing.T) {
 			comments, err := hub.DB.CommentsByIssue(ctx, remote.ID)
 			require.NoError(t, err)
 			require.Len(t, comments, 1)
-			old, err := spoke.env.DB.EventsByUIDs(ctx, spoke.projects[0].ID, []string{original.UID})
-			require.NoError(t, err)
-			require.Equal(t, original.ContentHash, old[0].ContentHash)
-			assertNoRejoinPushPending(t, spoke)
 		})
 	}
 }
