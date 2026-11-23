@@ -50,32 +50,39 @@ test('views, projects, filters, columns, hierarchy, and keyboard stay first-clas
     await heldSnapshot
     await request.fulfill({ response }).catch(() => {})
   })
-  await parentRow.press('ArrowDown')
-  await expect(page.getByRole('button', { name: /Example child task/ })).toBeFocused()
-  await snapshotRequested
+  try {
+    await parentRow.press('ArrowDown')
+    await expect(page.getByRole('button', { name: /Example child task/ })).toBeFocused()
+    await snapshotRequested
 
-  const search = page.getByRole('searchbox', { name: 'Search tasks' })
-  await search.focus()
-  const original = await search.elementHandle()
-  await page.keyboard.type('child')
-  releaseSnapshot()
-  await expect(page.getByRole('heading', { name: 'Example child task', exact: true })).toBeVisible()
-  await expect(search).toBeFocused()
-  expect(await search.evaluate((element, first) => element === first, original)).toBe(true)
-  await page.keyboard.type(' task')
-  await expect(search).toHaveValue('child task')
-  await expect.poll(() => new URL(page.url()).searchParams.get('issue')).toBe(child.uid)
-  await expect.poll(() => new URL(page.url()).searchParams.get('text')).toBe('child task')
-  await expect(page.getByRole('button', { name: /Example child task/ })).toBeVisible()
+    const search = page.getByRole('searchbox', { name: 'Search tasks' })
+    await search.focus()
+    const original = await search.elementHandle()
+    await page.keyboard.type('child')
+    releaseSnapshot()
+    await expect(
+      page.getByRole('heading', { name: 'Example child task', exact: true }),
+    ).toBeVisible()
+    await expect(search).toBeFocused()
+    expect(await search.evaluate((element, first) => element === first, original)).toBe(true)
+    await page.keyboard.type(' task')
+    await expect(search).toHaveValue('child task')
+    await expect.poll(() => new URL(page.url()).searchParams.get('issue')).toBe(child.uid)
+    await expect.poll(() => new URL(page.url()).searchParams.get('text')).toBe('child task')
+    await expect(page.getByRole('button', { name: /Example child task/ })).toBeVisible()
 
-  for (const view of ['Inbox', 'Today', 'Delegated', 'Scheduled']) {
-    await page.getByRole('button', { name: new RegExp(`^${view}( \\d+)?$`) }).click()
-    await expect(page.locator('[aria-label="Issues"]')).toBeVisible()
+    for (const view of ['Inbox', 'Today', 'Delegated', 'Scheduled']) {
+      await page.getByRole('button', { name: new RegExp(`^${view}( \\d+)?$`) }).click()
+      await expect(page.locator('[aria-label="Issues"]')).toBeVisible()
+    }
+    await expect(page).toHaveURL(/view=scheduled/)
+    await expect(page.getByRole('button', { name: 'Upcoming' })).toHaveCount(0)
+    await page.getByRole('button', { name: /^example-project \d+$/ }).click()
+    await expect(page).toHaveURL(`${kata.origin}/kata?scope=${kata.projectUID}`)
+  } finally {
+    // Failed assertions must also release the response before fixture cleanup waits for it.
+    releaseSnapshot()
   }
-  await expect(page).toHaveURL(/view=scheduled/)
-  await expect(page.getByRole('button', { name: 'Upcoming' })).toHaveCount(0)
-  await page.getByRole('button', { name: /^example-project \d+$/ }).click()
-  await expect(page).toHaveURL(`${kata.origin}/kata?scope=${kata.projectUID}`)
 })
 
 test('keeps a resized width and copies a short task ID from the hovered row', async ({

@@ -173,12 +173,12 @@ describe('IssueCollection', () => {
     )
 
     it('renders every row when End is pressed and focuses the last one', async () => {
-      // One row beyond two 150-row chunks distinguishes End from loading just the next chunk.
+      // Cross multiple 75-row chunks without making DOM construction dominate this keyboard test.
       const { container } = renderMany(301)
       const first = container.querySelector<HTMLElement>('button.row')!
       first.focus()
       await fireEvent.keyDown(first, { key: 'End' })
-      await waitFor(() => expect(visibleRows()).toHaveLength(301))
+      await waitFor(() => expect(container.querySelectorAll('button.row')).toHaveLength(301))
       await waitFor(() =>
         expect((document.activeElement as HTMLElement | null)?.dataset.uid).toBe('bulk-00300'),
       )
