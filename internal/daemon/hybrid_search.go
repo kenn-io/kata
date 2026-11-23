@@ -170,12 +170,8 @@ func hybridSearch(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 		res = hybridResult{Mode: modeSemantic, Hits: truncate(vector, probeLimit)}
 	default: // hybrid
 		if p.HubMode != nil && *p.HubMode == string(modeLexical) {
-			// A shared keyword match contributes once, using the local issue.
-			seen := make(map[string]bool, len(lexical))
-			for _, hit := range lexical {
-				seen[hit.Issue.UID] = true
-			}
-			vector = slices.DeleteFunc(vector, func(hit db.SearchCandidate) bool { return seen[hit.Issue.UID] })
+			res = hybridResult{Mode: modeLexical, Hits: mergeLexical(lexical, vector, probeLimit)}
+			break
 		}
 		hits, err := mergeRRF(lexical, vector, probeLimit)
 		if err != nil {
@@ -256,8 +252,12 @@ func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 			issue := hit.Issue
 			issue.ID, issue.ProjectID = 0, p.ProjectID
 			if found {
-				issue.ID = local.ID
-				issue.ShortID = local.ShortID
+				if p.HubMode != nil && *p.HubMode == string(modeLexical) {
+					issue = local
+				} else {
+					issue.ID = local.ID
+					issue.ShortID = local.ShortID
+				}
 			} else {
 				issue.ShortID = issue.UID
 			}

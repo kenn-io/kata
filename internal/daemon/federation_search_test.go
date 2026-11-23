@@ -457,12 +457,17 @@ func TestDirectSpokeSearchHubLexicalRanking(t *testing.T) {
 	hub, spoke, project, replica, _, token := createClaimForwardingPair(t, "pull")
 	remote, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "zebra remote", Author: "tester"})
 	require.NoError(t, err)
-	hits := []map[string]any{{"issue": remote, "score": 1, "matched_in": []string{"title"}}}
+	hits := []map[string]any{{"issue": remote, "score": 1e-12, "matched_in": []string{"title"}}}
 	for i := range 20 {
 		local, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: replica.ID, Title: fmt.Sprintf("zebra local %d", i), Author: "tester"})
 		require.NoError(t, err)
-		hits = append(hits, map[string]any{"issue": local, "score": 1, "matched_in": []string{"title"}})
+		hits = append(hits, map[string]any{"issue": local, "score": 1e-13, "matched_in": []string{"title"}})
 	}
+	localOnly, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: replica.ID, Title: "older local title", Author: "tester"})
+	require.NoError(t, err)
+	changed := localOnly
+	changed.Title = "zebra hub title"
+	hits = append(hits[:1], append([]map[string]any{{"issue": changed, "score": 5e-13, "matched_in": []string{"title"}}}, hits[1:]...)...)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		require.NoError(t, json.MarshalWrite(w, map[string]any{"hits": hits, "mode": "lexical", "degraded_reason": "keyword-only"}))
 	}))
@@ -471,7 +476,48 @@ func TestDirectSpokeSearchHubLexicalRanking(t *testing.T) {
 	require.NoError(t, config.WriteFederationCredential(replica.UID, config.FederationCredential{HubURL: server.URL, HubProjectID: project.ID, Token: token}))
 	resp, raw := envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=zebra", replica.ID))
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
-	require.Contains(t, string(raw), remote.UID)
+	var body struct {
+		Mode    string `json:"mode"`
+		Results []struct {
+			Issue db.Issue `json:"issue"`
+			Score float64  `json:"score"`
+		} `json:"results"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &body))
+	require.Equal(t, "lexical", body.Mode)
+	localHits, err := spoke.DB.SearchFTS(ctx, db.SearchFTSParams{ProjectID: replica.ID, Query: "zebra", Limit: 50})
+	require.NoError(t, err)
+	localScores := make(map[string]float64, len(localHits))
+	localRanks := make(map[string]int, len(localHits))
+	for rank, hit := range localHits {
+		localScores[hit.Issue.UID] = hit.Score
+		localRanks[hit.Issue.UID] = rank
+	}
+	hubRanks := make(map[string]int, len(hits))
+	for rank, hit := range hits {
+		hubRanks[hit["issue"].(db.Issue).UID] = rank
+	}
+	seen := make(map[string]bool)
+	for _, hit := range body.Results {
+		require.False(t, seen[hit.Issue.UID])
+		seen[hit.Issue.UID] = true
+		if hit.Issue.UID == remote.UID {
+			require.Equal(t, 1e-12, hit.Score)
+		} else if hit.Issue.UID == localOnly.UID {
+			require.Equal(t, localOnly.Title, hit.Issue.Title)
+			require.Equal(t, 5e-13, hit.Score)
+		} else {
+			_, ok := localScores[hit.Issue.UID]
+			require.True(t, ok)
+			if localRanks[hit.Issue.UID] <= hubRanks[hit.Issue.UID] {
+				require.Equal(t, localScores[hit.Issue.UID], hit.Score)
+			} else {
+				require.Equal(t, 1e-13, hit.Score)
+			}
+		}
+	}
+	require.True(t, seen[remote.UID])
+	require.True(t, seen[localOnly.UID])
 }
 
 func TestDirectSpokeSearchWaitsForHubFallback(t *testing.T) {

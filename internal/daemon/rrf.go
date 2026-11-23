@@ -100,3 +100,33 @@ func mergeRRF(lexical, vector []db.SearchCandidate, limit int) ([]db.SearchCandi
 	}
 	return out, nil
 }
+
+// mergeLexical orders each issue by its best rank and preserves that source's score.
+func mergeLexical(local, hub []db.SearchCandidate, limit int) []db.SearchCandidate {
+	localIssues := make(map[string]db.Issue, len(local))
+	for _, hit := range local {
+		localIssues[hit.Issue.UID] = hit.Issue
+	}
+	seen := make(map[string]bool, len(local)+len(hub))
+	var result []db.SearchCandidate
+	for rank := 0; rank < max(len(local), len(hub)); rank++ {
+		for _, leg := range [][]db.SearchCandidate{local, hub} {
+			if rank >= len(leg) {
+				continue
+			}
+			hit := leg[rank]
+			if seen[hit.Issue.UID] {
+				continue
+			}
+			seen[hit.Issue.UID] = true
+			if issue, ok := localIssues[hit.Issue.UID]; ok {
+				hit.Issue = issue
+			}
+			result = append(result, hit)
+			if limit > 0 && len(result) == limit {
+				return result
+			}
+		}
+	}
+	return result
+}
