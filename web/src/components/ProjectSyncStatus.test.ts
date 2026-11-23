@@ -59,6 +59,15 @@ describe('ProjectSyncStatus', () => {
     expect(screen.getByText('3 of 32 embeddings, limited')).not.toBeNull()
   })
 
+  it('says how long ago the last sync finished', async () => {
+    const result = await response().json()
+    result.statuses[0].last_successful_sync_at = new Date(Date.now() - 12 * 60_000).toISOString()
+    setGeneratedFetch(vi.fn().mockResolvedValueOnce(Response.json(result)))
+    render(ProjectSyncStatus, { props: { projectID: 7, projectUID } })
+    await openSync()
+    expect(screen.getByText('12m ago')).not.toBeNull()
+  })
+
   it.each(['local', 'disabled'])('hides the chip for a %s project', async (kind) => {
     const status =
       kind === 'local' ? [] : [{ project_id: 7, project_uid: projectUID, enabled: false }]

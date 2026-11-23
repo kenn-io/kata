@@ -80,6 +80,13 @@
     }
   })
 
+  // "12m" alone reads as a duration; say it is in the past.
+  function ago(iso: string): string {
+    const text = relativeTime(iso, new Date())
+    if (text === 'now') return 'Just now'
+    return /^\d+[mhd]$/.test(text) ? `${text} ago` : text
+  }
+
   // Stored values ("stored_unindexed", "active") read as words.
   function words(value: string): string {
     const text = value.replaceAll('_', ' ')
@@ -240,9 +247,9 @@
     >
       <Chip interactive uppercase={false} {tone} expanded={open} onclick={() => void toggle()}>
         {#if tone === 'danger'}
-          <CircleAlertIcon size={14} aria-hidden="true" />
+          <span class="chip-icon danger"><CircleAlertIcon size={14} aria-hidden="true" /></span>
         {:else if tone === 'warning'}
-          <TriangleAlertIcon size={14} aria-hidden="true" />
+          <span class="chip-icon warning"><TriangleAlertIcon size={14} aria-hidden="true" /></span>
         {/if}{chipLabel}
         {#snippet trailing()}<ChevronDownIcon size={14} aria-hidden="true" />{/snippet}
       </Chip>
@@ -264,7 +271,7 @@
           >
           <button
             type="button"
-            class="sync-refresh quiet-button"
+            class="sync-refresh"
             disabled={loading}
             onclick={() => refresh?.(true)}>Refresh</button
           >
@@ -302,8 +309,8 @@
                   />
                 </div>
               {:else}
+                <span class="shell">Bash/Zsh</span>
                 <div class="command">
-                  <span class="shell">Bash/Zsh</span>
                   <code>{bashCommand}</code>
                   <CopyButton
                     text={bashCommand}
@@ -311,8 +318,8 @@
                     copiedAriaLabel="Copied Bash/Zsh command"
                   />
                 </div>
+                <span class="shell">PowerShell</span>
                 <div class="command">
-                  <span class="shell">PowerShell</span>
                   <code>{powershellCommand}</code>
                   <CopyButton
                     text={powershellCommand}
@@ -326,52 +333,54 @@
               >
             </div>
           {/if}
-          <dl class="sync-facts">
-            {#if status.last_successful_sync_at}
-              <dt>Last sync</dt>
-              <dd>
-                <time
-                  datetime={status.last_successful_sync_at}
-                  title={new Date(status.last_successful_sync_at).toLocaleString()}
-                  >{relativeTime(status.last_successful_sync_at, new Date())}</time
-                >
-              </dd>
-            {/if}
-            {#if status.credential_status}
-              <dt>Credential</dt>
-              <dd>{words(status.credential_status)}</dd>
-            {/if}
-            {#if status.embedding}
-              <dt>Embeddings</dt>
-              <dd>{words(status.embedding.state)}</dd>
-              <dt>Producer</dt>
-              <dd>
-                {#if status.embedding.producer}
-                  <code>{status.embedding.producer.producer_instance_uid}</code>
-                {:else}
-                  None selected
-                {/if}
-              </dd>
-              {#if status.embedding.producer}
-                <dt>Model</dt>
+          {#if status.last_successful_sync_at || status.credential_status || status.embedding}
+            <dl class="sync-facts">
+              {#if status.last_successful_sync_at}
+                <dt>Last sync</dt>
                 <dd>
-                  {status.embedding.producer.recipe.model}, {status.embedding.producer.recipe
-                    .dimensions} dimensions
+                  <time
+                    datetime={status.last_successful_sync_at}
+                    title={new Date(status.last_successful_sync_at).toLocaleString()}
+                    >{ago(status.last_successful_sync_at)}</time
+                  >
                 </dd>
               {/if}
-              {#if artifactSummary}
-                <dt>Stored</dt>
-                <dd>{artifactSummary}</dd>
+              {#if status.credential_status}
+                <dt>Credential</dt>
+                <dd>{words(status.credential_status)}</dd>
               {/if}
-              <dt>Retained</dt>
-              <dd>
-                {status.embedding.artifacts.length} of {status.embedding.artifact_limit} embeddings{status
-                  .embedding.limited
-                  ? ', limited'
-                  : ''}
-              </dd>
-            {/if}
-          </dl>
+              {#if status.embedding}
+                <dt>Embeddings</dt>
+                <dd>{words(status.embedding.state)}</dd>
+                <dt>Producer</dt>
+                <dd>
+                  {#if status.embedding.producer}
+                    <code>{status.embedding.producer.producer_instance_uid}</code>
+                  {:else}
+                    None selected
+                  {/if}
+                </dd>
+                {#if status.embedding.producer}
+                  <dt>Model</dt>
+                  <dd>
+                    {status.embedding.producer.recipe.model}, {status.embedding.producer.recipe
+                      .dimensions} dimensions
+                  </dd>
+                {/if}
+                {#if artifactSummary}
+                  <dt>Stored</dt>
+                  <dd>{artifactSummary}</dd>
+                {/if}
+                <dt>Retained</dt>
+                <dd>
+                  {status.embedding.artifacts.length} of {status.embedding.artifact_limit} embeddings{status
+                    .embedding.limited
+                    ? ', limited'
+                    : ''}
+                </dd>
+              {/if}
+            </dl>
+          {/if}
         {/if}
       </div>
     {/if}
@@ -387,15 +396,29 @@
     display: inline-flex;
     min-width: 0;
   }
-  .chip-host :global(.kit-chip__label svg) {
-    margin-right: 4px;
+  /* The label reads as a sentence; on a failure only the icon carries the tone. */
+  .chip-host :global(.kit-chip) {
+    font-weight: var(--font-weight-medium);
+  }
+  .chip-host :global(.kit-chip--tone-danger),
+  .chip-host :global(.kit-chip--tone-warning) {
+    color: var(--text-primary);
+  }
+  .chip-icon {
+    margin-inline-end: var(--space-2);
+  }
+  .chip-icon.danger {
+    color: var(--accent-red);
+  }
+  .chip-icon.warning {
+    color: var(--accent-amber);
   }
   .sync-panel {
     position: fixed;
     z-index: var(--z-popover);
     display: flex;
     flex-direction: column;
-    gap: var(--space-4);
+    gap: var(--space-5);
     /* As wide as its longest line, from 360px up to 560px; a command longer
        than that scrolls sideways inside its own box. */
     width: max-content;
@@ -403,7 +426,7 @@
     max-width: min(560px, calc(100vw - var(--space-6)));
     max-height: calc(100vh - var(--space-6));
     overflow-y: auto;
-    padding: var(--space-5);
+    padding: var(--space-6);
     color: var(--text-secondary);
     font-size: var(--font-size-sm);
     overflow-wrap: anywhere;
@@ -413,28 +436,35 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--space-4);
-    min-height: var(--control-h-sm);
     color: var(--text-primary);
   }
   .sync-panel-title {
     display: inline-flex;
     align-items: center;
-    gap: var(--space-2);
+    gap: var(--space-3);
     font-weight: var(--font-weight-semibold);
   }
+  /* The same square mark the sidebar shows beside the project. */
   .project-mark {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex: none;
+    flex: 0 0 10px;
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
   }
+  /* A quiet text button whose label lines up with the panel's right edge. */
   .sync-refresh {
-    margin-right: calc(-1 * var(--space-4));
-    cursor: pointer;
-    color: var(--accent-blue);
+    margin: calc(-1 * var(--space-1)) calc(-1 * var(--space-3));
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+  }
+  .sync-refresh:hover:not(:disabled) {
+    background: var(--bg-surface-hover);
+    color: var(--text-primary);
   }
   .sync-refresh:disabled {
     cursor: default;
+    color: var(--text-muted);
   }
   .sync-panel span {
     min-width: 0;
@@ -451,8 +481,7 @@
   .sync-attention {
     display: flex;
     flex-direction: column;
-    gap: var(--space-2);
-    padding-top: var(--space-2);
+    gap: var(--space-3);
     min-width: 0;
     color: var(--text-primary);
   }
@@ -463,8 +492,10 @@
   .sync-facts {
     display: grid;
     grid-template-columns: max-content minmax(0, 1fr);
-    gap: var(--space-2) var(--space-5);
+    gap: var(--space-2) var(--space-6);
     margin: 0;
+    padding-top: var(--space-5);
+    border-top: 1px solid var(--border-default);
   }
   .sync-facts dt {
     color: var(--text-secondary);
@@ -484,12 +515,16 @@
     gap: var(--space-2);
     min-width: 0;
     padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
-    border-radius: var(--radius);
+    border-radius: var(--radius-md);
     background: var(--bg-inset);
   }
   .shell {
-    flex: 0 0 5.5rem;
-    color: var(--text-primary);
+    margin-bottom: calc(-1 * var(--space-1));
+    color: var(--text-secondary);
+    font-size: var(--font-size-xs);
+  }
+  .shell ~ .shell {
+    margin-top: var(--space-2);
   }
   code {
     flex: 1;
