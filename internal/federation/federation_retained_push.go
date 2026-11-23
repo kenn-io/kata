@@ -17,7 +17,6 @@ type retainedPush struct {
 	binding       *db.FederationBinding
 	hubProjectID  int64
 	client        *Client
-	onPulled      func(int64, []db.Event)
 	validateLease func(context.Context) error
 	credentials   config.FederationCredentialStore
 	opts          clientpkg.Opts
@@ -26,20 +25,8 @@ type retainedPush struct {
 	creation, recovery bool
 }
 
-// withRecoveryEventPublisher reports events that retained-history recovery
-// commits to the daemon's open clients.
-func withRecoveryEventPublisher(ctx context.Context, onPulled func(int64, []db.Event)) context.Context {
-	if onPulled == nil {
-		return ctx
-	}
-	return db.WithRecoveryEventPublisher(ctx, func(event db.Event) {
-		onPulled(event.ProjectID, []db.Event{event})
-	})
-}
-
-// nextBatch returns the next batch to push. It returns a nil batch once it has
-// consumed pending events itself: it skipped events the hub already holds from
-// a former actor, or it retired the rest of the pending run.
+// nextBatch returns the next batch to push. It returns a nil batch after
+// advancing past history from the former actor or an accepted recovery copy.
 func (r *retainedPush) nextBatch(ctx context.Context, pending *[]db.Event) ([]db.Event, string, int64, error) {
 	events := *pending
 	instanceUID := r.store.InstanceUID()
@@ -55,6 +42,9 @@ func (r *retainedPush) nextBatch(ctx context.Context, pending *[]db.Event) ([]db
 	if err != nil {
 		return nil, "", 0, err
 	}
+	if r.recovery && events[0].IssueUID != nil && r.sent[*events[0].IssueUID] {
+		return nil, "", 0, r.advance(ctx, pending, 1)
+	}
 	batch, baseline, baselineEnd := events[:1], "", int64(0)
 	if !r.recovery {
 		batch, baseline, baselineEnd, err = nextFederationPushIngestBatch(events[:end])
@@ -62,23 +52,7 @@ func (r *retainedPush) nextBatch(ctx context.Context, pending *[]db.Event) ([]db
 			return nil, "", 0, err
 		}
 	}
-	if len(batch) == 0 {
-		return nil, "", 0, errors.New("empty federation push batch")
-	}
-	retired, err := r.publishDependencies(ctx, batch)
-	if err != nil || retired {
-		*pending = []db.Event{}
-		return nil, "", 0, err
-	}
 	return batch, baseline, baselineEnd, nil
-}
-
-func (r *retainedPush) publishDependencies(ctx context.Context, batch []db.Event) (bool, error) {
-	retired, err := publishRetainedComments(ctx, r.store, r.binding, r.hubProjectID, r.client, batch, r.sent, r.onPulled, r.validateLease, r.credentials, r.opts)
-	if err != nil || retired {
-		return retired, err
-	}
-	return publishRetainedLinkPeers(ctx, r.store, r.binding, r.hubProjectID, r.client, batch, r.sent, r.onPulled, r.validateLease, r.credentials, r.opts)
 }
 
 // advance moves the push cursor past the first n pending events.
@@ -142,9 +116,6 @@ func (r *retainedPush) resolve(ctx context.Context, pending *[]db.Event, batch [
 	switch {
 	case r.creation && retainedInitializerAlreadyKnown(err, "issue.created", *first.IssueUID):
 		return true, r.advance(ctx, pending, 1)
-	case r.recovery && first.IssueUID != nil && retainedInitializerAlreadyKnown(err, "issue.snapshot", *first.IssueUID):
-		*pending = []db.Event{}
-		return true, r.acknowledge(ctx, first)
 	}
 	issueUID := retainedUnknownIssue(err)
 	if issueUID == "" || r.sent[issueUID] {
@@ -157,11 +128,6 @@ func (r *retainedPush) resolve(ctx context.Context, pending *[]db.Event, batch [
 	if err != nil {
 		return false, err
 	}
-	retired, err := r.publishDependencies(ctx, []db.Event{snapshot})
-	if err != nil || retired {
-		*pending = []db.Event{}
-		return retired, err
-	}
 	envelope := federationIngestEnvelope(snapshot)
 	envelope.EventID = sourceID
 	tokens, err := federationMoveSourceTokens(ctx, r.store, r.credentials, *r.binding, r.client.baseURL, []db.Event{snapshot}, r.opts)
@@ -173,22 +139,4 @@ func (r *retainedPush) resolve(ctx context.Context, pending *[]db.Event, batch [
 	}
 	r.sent[issueUID] = true
 	return true, nil
-}
-
-// acknowledge settles a snapshot the hub already holds without pushing it.
-func (r *retainedPush) acknowledge(ctx context.Context, event db.Event) error {
-	if err := validateFederationRunnerLease(ctx, r.validateLease); err != nil {
-		return err
-	}
-	ackCtx, resets := db.WithFederationMoveResetCapture(ctx)
-	if err := r.store.AcknowledgeFederationPush(ackCtx, r.binding.ProjectID, event.ID, []string{event.UID}); err != nil {
-		return err
-	}
-	if r.onPulled != nil {
-		for _, reset := range resets.Resets {
-			r.onPulled(reset.ProjectID, []db.Event{{ID: reset.EventID, ProjectID: reset.ProjectID, Type: db.ProjectScopeResetEventType}})
-		}
-	}
-	r.binding.PushCursorEventID = event.ID
-	return nil
 }

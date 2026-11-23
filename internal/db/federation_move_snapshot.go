@@ -7,8 +7,6 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"math"
-	"slices"
 	"strings"
 	"time"
 )
@@ -314,12 +312,6 @@ func (v *FederationMoveSnapshotValidator) proof(ctx context.Context, event Remot
 		return nil, err
 	}
 	history = append(history, moveSnapshotFoldEvent(event)) // Departure metadata selects the effective real source baseline.
-	proof.addHistory(uid, history, v.edits[uid])
-	v.proofs[uid] = proof
-	return proof, nil
-}
-
-func (p *moveSnapshotProof) addHistory(uid string, history, edits []FoldEvent) {
 	history = FederationMoveBaselineEvents(history)
 	for _, retained := range history {
 		switch retained.Type {
@@ -329,16 +321,16 @@ func (p *moveSnapshotProof) addHistory(uid string, history, edits []FoldEvent) {
 		}
 		projection := FoldEvents([]FoldEvent{retained})
 		if issue := projection.Issues[uid]; issue.Author != "" {
-			p.authors[strings.TrimSpace(issue.Author)] = true
+			proof.authors[strings.TrimSpace(issue.Author)] = true
 		}
 		for _, comment := range projection.Comments {
 			if comment.IssueUID == uid && comment.Author != "" {
-				p.addComment(moveSnapshotComment{UID: comment.UID, Author: comment.Author, Teammate: comment.Teammate, Body: comment.Body, CreatedAt: comment.CreatedAt, EditedAt: comment.EditedAt, ReplyToUID: comment.ReplyToUID, ReplyKind: comment.ReplyKind})
+				proof.addComment(moveSnapshotComment{UID: comment.UID, Author: comment.Author, Teammate: comment.Teammate, Body: comment.Body, CreatedAt: comment.CreatedAt, EditedAt: comment.EditedAt, ReplyToUID: comment.ReplyToUID, ReplyKind: comment.ReplyKind})
 			}
 		}
 		for key, state := range projection.Links {
 			if state.Present && (key.FromUID == uid || key.ToUID == uid) {
-				p.links[snapshotLinkIdentity(key, state.Author)] = true
+				proof.links[snapshotLinkIdentity(key, state.Author)] = true
 			}
 		}
 	}
@@ -361,22 +353,22 @@ func (p *moveSnapshotProof) addHistory(uid string, history, edits []FoldEvent) {
 			if comment.UID == "" || comment.Author == "" {
 				continue
 			}
-			if !p.commentUIDs[comment.UID] {
-				p.addComment(comment)
+			if !proof.commentUIDs[comment.UID] {
+				proof.addComment(comment)
 				continue
 			}
 			if comment.EditedAt == "" {
 				continue
 			}
-			for identity := range p.identities {
+			for identity := range proof.identities {
 				if identity.UID == comment.UID {
 					identity.Body, identity.EditedAt = comment.Body, comment.EditedAt
-					p.comments[identity] = true
+					proof.comments[identity] = true
 				}
 			}
 		}
 	}
-	for _, retained := range append(history, edits...) {
+	for _, retained := range append(history, v.edits[uid]...) {
 		if retained.Type != "issue.comment_edited" || retained.IssueUID != uid {
 			continue
 		}
@@ -384,33 +376,15 @@ func (p *moveSnapshotProof) addHistory(uid string, history, edits []FoldEvent) {
 		if version.IsZero() {
 			continue
 		}
-		for identity := range p.identities {
+		for identity := range proof.identities {
 			if identity.UID == commentUID {
 				identity.Body, identity.EditedAt = body, version.UTC().Format(time.RFC3339Nano)
-				p.comments[identity] = true
+				proof.comments[identity] = true
 			}
 		}
 	}
-}
-
-// FederationMoveHistoryProvesComments tests whether accepted history contains
-// each supplied comment version under its original identity.
-func FederationMoveHistoryProvesComments(uid, sourceProjectUID string, history []FoldEvent, comments []Comment) bool {
-	// Select the source baseline as the hub will when it receives the move.
-	departure, _ := json.Marshal(map[string]string{"from_project_uid": sourceProjectUID})
-	history = append(slices.Clone(history), FoldEvent{IssueUID: uid, Type: "issue.moved", HLCPhysicalMS: math.MaxInt64, Payload: departure})
-	proof := &moveSnapshotProof{authors: map[string]bool{}, commentUIDs: map[string]bool{}, comments: map[moveSnapshotComment]bool{}, identities: map[moveSnapshotComment]bool{}, links: map[moveSnapshotLinkIdentity]bool{}}
-	proof.addHistory(uid, history, nil)
-	for _, comment := range comments {
-		value := moveSnapshotComment{UID: comment.UID, Author: comment.Author, Teammate: comment.Teammate, Body: comment.Body, CreatedAt: comment.CreatedAt.UTC().Format(time.RFC3339Nano), ReplyToUID: comment.ReplyToUID, ReplyKind: comment.ReplyKind}
-		if comment.EditedAt != nil {
-			value.EditedAt = comment.EditedAt.UTC().Format(time.RFC3339Nano)
-		}
-		if !proof.comments[value.normalized()] {
-			return false
-		}
-	}
-	return true
+	v.proofs[uid] = proof
+	return proof, nil
 }
 
 func closeMoveSnapshotRows(rows *sql.Rows) error {

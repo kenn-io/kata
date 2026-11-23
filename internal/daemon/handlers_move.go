@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"maps"
@@ -90,7 +91,7 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 		}
 		res, err := cfg.DB.MoveIssueProject(ctx, move)
 		if err == nil {
-			moveProofs := make(map[int64]retainedMoveSnapshotProof)
+			moveSnapshotActors := make(map[int64]string)
 			for _, issue := range res.Issues {
 				var refresh claimRefreshResult
 				if err := requireFederatedIssueClaimWithResult(ctx, cfg, issue, actor, !in.Body.DryRun, &refresh); err != nil {
@@ -109,32 +110,31 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 				if !binding.Enabled || binding.Role != db.FederationRoleSpoke || !binding.PushEnabled {
 					continue
 				}
-				retained, _, pending, err := retainedIssueState(ctx, cfg.DB, binding, issue.UID)
+				retained, snapshot, pending, err := retainedIssueState(ctx, cfg.DB, binding, issue.UID)
 				if err != nil {
 					return nil, internalAPIError(err)
 				}
-				if retained && (pending || !refresh.known || refresh.missing) {
-					return nil, api.NewError(503, "federation_offline", "the hub is unreachable or the retained task is waiting to sync", "", nil)
+				if retained && (pending || !snapshot || !refresh.known || refresh.missing) {
+					return nil, api.NewError(503, "federation_offline", "the retained task's recovery snapshot has not reached the hub", "retry after federation sync completes", nil)
 				}
-				if retained && binding.RetainedThroughEventID != 0 {
-					proof, err := retainedMoveDiscussion(ctx, cfg, binding, issue)
-					if err != nil {
-						if apiErr, ok := errors.AsType[*api.APIError](err); ok {
-							return nil, apiErr
-						}
-						return nil, internalAPIError(err)
-					}
-					moveProofs[issue.ID] = proof
+				if retained {
+					moveSnapshotActors[issue.ID] = binding.Actor
 				}
 			}
 			if !in.Body.DryRun {
-				if len(moveProofs) != 0 {
+				if len(moveSnapshotActors) > 0 {
 					move.PrepareSnapshot = func(issue db.Issue, payload string) (string, error) {
-						proof, ok := moveProofs[issue.ID]
+						actor, ok := moveSnapshotActors[issue.ID]
 						if !ok {
 							return payload, nil
 						}
-						return proof.prepare(issue, payload)
+						canonical, err := db.CanonicalizeFederationSnapshotAuthors(db.RemoteEvent{
+							Type: "issue.snapshot", Payload: jsontext.Value(payload),
+						}, actor)
+						if err != nil {
+							return "", err
+						}
+						return string(canonical.Payload), nil
 					}
 				}
 				move.DryRun = false

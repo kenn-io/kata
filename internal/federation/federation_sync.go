@@ -261,9 +261,8 @@ func pushDirectSpoke(
 	credentials config.FederationCredentialStore,
 	opts clientpkg.Opts,
 ) error {
-	ctx = withRecoveryEventPublisher(ctx, onPulledEvents)
 	if binding.PushEnabled {
-		retained := &retainedPush{store: store, binding: binding, hubProjectID: hubProjectID, client: client, onPulled: onPulledEvents, validateLease: validateLease, credentials: credentials, opts: opts, sent: make(map[string]bool)}
+		retained := &retainedPush{store: store, binding: binding, hubProjectID: hubProjectID, client: client, validateLease: validateLease, credentials: credentials, opts: opts, sent: make(map[string]bool)}
 		for {
 			if err := retryPushQuarantine(ctx, store, binding); err != nil {
 				return err
@@ -322,11 +321,17 @@ func pushDirectSpoke(
 				if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 					return err
 				}
-				// The hub already held some of these issues and stored no
-				// snapshot for them. Those snapshots go, and the project is
-				// rebuilt, in the same transaction that moves the cursor.
+				// The hub can report adoption snapshots it already has; the
+				// transaction removes them and rebuilds the project while moving
+				// the cursor.
 				ackCtx, resets := db.WithFederationMoveResetCapture(ctx)
-				if err := store.AcknowledgeFederationPush(ackCtx, binding.ProjectID, ack.PushCursorEventID, ack.SupersededEventUIDs); err != nil {
+				superseded := ack.SupersededEventUIDs
+				if retained.recovery {
+					// Keep the accepted recovery snapshot as the local baseline for
+					// a later move, even when the hub represented it as a repeated copy.
+					superseded = nil
+				}
+				if err := store.AcknowledgeFederationPush(ackCtx, binding.ProjectID, ack.PushCursorEventID, superseded); err != nil {
 					// A push that waits for the hub's history is finished by the
 					// next pull and the push after it. The reason is recorded
 					// like any other, so a wait that does not end is visible in
@@ -367,182 +372,6 @@ func retryPushQuarantine(ctx context.Context, store db.Storage, binding *db.Fede
 		return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 	}
 	return nil
-}
-
-func publishRetainedComments(ctx context.Context, store db.Storage, binding *db.FederationBinding, hubProjectID int64, client *Client, batch []db.Event, sent map[string]bool, onPulledEvents func(int64, []db.Event), validateLease func(context.Context) error, credentials config.FederationCredentialStore, opts clientpkg.Opts) (bool, error) {
-	if binding.RetainedThroughEventID == 0 {
-		return false, nil
-	}
-	seen := make(map[string]bool)
-	var publish func(string) (bool, error)
-	publish = func(commentUID string) (bool, error) {
-		if commentUID == "" || seen[commentUID] {
-			return false, nil
-		}
-		seen[commentUID] = true
-		issues, err := store.CommentIssueIDsByUIDs(ctx, []string{commentUID})
-		if err != nil {
-			return false, err
-		}
-		issueID, ok := issues[commentUID]
-		if !ok {
-			return false, nil
-		}
-		issue, err := store.IssueByID(ctx, issueID)
-		if err != nil {
-			return false, err
-		}
-		if issue.ProjectID != binding.ProjectID {
-			return false, nil
-		}
-		comment, sourceID, err := store.RetainedCommentEvent(ctx, binding.ProjectID, issue.UID, commentUID)
-		if errors.Is(err, db.ErrNotFound) {
-			return false, nil
-		}
-		if err != nil {
-			return false, err
-		}
-		var payload struct {
-			ReplyToUID string `json:"reply_to_uid"`
-		}
-		if err := json.Unmarshal([]byte(comment.Payload), &payload); err != nil {
-			return false, err
-		}
-		retired, err := publish(payload.ReplyToUID)
-		if err != nil || retired {
-			return retired, err
-		}
-		retired, err = publishRetainedLinkPeers(ctx, store, binding, hubProjectID, client, []db.Event{comment}, sent, onPulledEvents, validateLease, credentials, opts)
-		if err != nil || retired {
-			return retired, err
-		}
-		envelope := federationIngestEnvelope(comment)
-		envelope.EventID = sourceID
-		tokens, err := federationMoveSourceTokens(ctx, store, credentials, *binding, client.baseURL, []db.Event{comment}, opts)
-		if err != nil {
-			return false, err
-		}
-		_, err = client.IngestProjectEventsWithOptions(ctx, hubProjectID, []api.FederationIngestEventEnvelope{envelope}, IngestProjectEventsOptions{MoveSourceTokens: tokens})
-		if err != nil && retainedUnknownIssue(err) != issue.UID {
-			return false, err
-		}
-		return false, nil
-	}
-	for _, event := range batch {
-		comments, err := retainedCommentReferences(event)
-		if err != nil {
-			return false, err
-		}
-		for _, commentUID := range comments {
-			retired, err := publish(commentUID)
-			if err != nil || retired {
-				return retired, err
-			}
-		}
-	}
-	return false, nil
-}
-
-func retainedCommentReferences(event db.Event) ([]string, error) {
-	switch event.Type {
-	case "issue.snapshot":
-		var document db.IssueDocumentPayload
-		if err := json.Unmarshal([]byte(event.Payload), &document); err != nil {
-			return nil, err
-		}
-		var references []string
-		for _, comment := range document.Comments {
-			references = append(references, comment.ReplyToUID)
-		}
-		return references, nil
-	case "issue.commented", "issue.comment_edited":
-		var payload struct {
-			CommentUID string `json:"comment_uid"`
-			ReplyToUID string `json:"reply_to_uid"`
-		}
-		if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
-			return nil, err
-		}
-		if event.Type == "issue.comment_edited" {
-			return []string{payload.CommentUID}, nil
-		}
-		return []string{payload.ReplyToUID}, nil
-	}
-	return nil, nil
-}
-
-func publishRetainedLinkPeers(ctx context.Context, store db.Storage, binding *db.FederationBinding, hubProjectID int64, client *Client, batch []db.Event, sent map[string]bool, onPulledEvents func(int64, []db.Event), validateLease func(context.Context) error, credentials config.FederationCredentialStore, opts clientpkg.Opts) (bool, error) {
-	if binding.RetainedThroughEventID == 0 {
-		return false, nil
-	}
-	for _, event := range batch {
-		fold := db.FoldEvent{Type: event.Type, UID: event.UID, Payload: jsontext.Value(event.Payload)}
-		if event.IssueUID != nil {
-			fold.IssueUID = *event.IssueUID
-		}
-		if event.RelatedIssueUID != nil {
-			fold.RelatedIssueUID = *event.RelatedIssueUID
-		}
-		peers, err := db.DirectLinkPeers(fold)
-		if err != nil {
-			return false, err
-		}
-		if peers == nil {
-			peers = make(map[string]bool)
-		}
-		if event.Type == "issue.commented" && event.RelatedIssueUID != nil {
-			peers[*event.RelatedIssueUID] = true
-		}
-		if event.Type == "issue.linked" && len(peers) == 0 {
-			_, _, err = db.StripCrossProjectLinkAdditions(fold, func(uid string) bool {
-				peers[uid] = true
-				return false
-			})
-			if err != nil {
-				return false, err
-			}
-		}
-		for peer := range peers {
-			if peer == "" || peer == fold.IssueUID || sent[peer] {
-				continue
-			}
-			snapshot, sourceID, err := store.RetainedIssueSnapshot(ctx, binding.ProjectID, peer)
-			if errors.Is(err, db.ErrNotFound) {
-				continue
-			}
-			if err != nil {
-				return false, err
-			}
-			envelope := federationIngestEnvelope(snapshot)
-			envelope.EventID = sourceID
-			sourceTokens, err := federationMoveSourceTokens(ctx, store, credentials, *binding, client.baseURL, []db.Event{snapshot}, opts)
-			if err != nil {
-				return false, err
-			}
-			_, err = client.IngestProjectEventsWithOptions(ctx, hubProjectID, []api.FederationIngestEventEnvelope{envelope}, IngestProjectEventsOptions{MoveSourceTokens: sourceTokens})
-			if err != nil {
-				if !retainedInitializerAlreadyKnown(err, "issue.snapshot", peer) {
-					return false, err
-				}
-				if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
-					return false, err
-				}
-				ackCtx, resets := db.WithFederationMoveResetCapture(ctx)
-				if err := store.AcknowledgeFederationPush(ackCtx, binding.ProjectID, binding.PushCursorEventID, []string{snapshot.UID}); err != nil {
-					return false, err
-				}
-				if onPulledEvents != nil {
-					for _, reset := range resets.Resets {
-						onPulledEvents(reset.ProjectID, []db.Event{{ID: reset.EventID, ProjectID: reset.ProjectID, Type: db.ProjectScopeResetEventType}})
-					}
-				}
-				sent[peer] = true
-				return true, nil
-			}
-			sent[peer] = true
-		}
-	}
-	return false, nil
 }
 
 func retainedInitializerAlreadyKnown(err error, eventType, issueUID string) bool {

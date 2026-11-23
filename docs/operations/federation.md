@@ -128,11 +128,15 @@ when the two projects are not both joined directly to the same hub, or when the
 move is one Kata refuses for an applied move, such as an issue in a recurrence
 or an import-mapping collision. Other projects keep syncing.
 
-Destination sync recovers retained source history even when its cursor has
-already passed those events. This preserves missed changes and comments without
-replacing newer edits. Once the move is received, leaving the source does not
-discard that recovered history; its original project identity and move history
-must remain for historical references to keep resolving.
+After rejoining, the spoke keeps older events from the previous actor and sends
+later writes under the new actor. If the hub has not seen a task, sync sends a
+current-actor snapshot before its later edits. A move of a retained task waits
+until the hub knows the task and the snapshot has passed the spoke's push cursor;
+otherwise the move returns `federation_offline` and leaves the task in place.
+The hub checks the moved snapshot against its accepted history. Old comments
+and their reply chains may remain incomplete, while later comments and edits
+can still reach the hub. Leaving the source does not discard the task's move
+history, which keeps historical references resolving.
 
 Leaving or archiving a former project preserves its identity for delayed events.
 Purging, merging, or adopting it under a different project UID is refused while
@@ -156,12 +160,10 @@ Moves between different hubs, mixed local/federated projects, and paused binding
 return `federated_move_unsupported`. Create an issue in the target project and link
 it to the original issue instead. Disabling sync retains the binding.
 
-A retained issue cannot move if the hub no longer has it or has accepted its
-recovery snapshot. Create an issue in the target project and link it to the
-original instead. If the hub is unreachable or a recovery snapshot is pending,
-the move returns `federation_offline`. After rejoining, links to unpublished
-retained issues in another project can remain absent on the hub. A move of a
-retained issue or its unpublished discussion can also stop destination sync.
+If the hub cannot confirm that a retained task's current-actor snapshot reached
+it, the move returns `federation_offline` before changing project ownership.
+Retry after federation sync completes. The move snapshot uses the current
+actor, and the hub validates it against the history it accepted.
 
 ## Connect a project through the daemon catalog
 

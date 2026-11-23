@@ -481,7 +481,6 @@ type Storage interface {
 	PendingFederationPushEvents(ctx context.Context, projectID int64, originInstanceUID string, afterID int64, limit int) ([]Event, error)
 	PendingFederationPushStats(ctx context.Context, projectID int64, originInstanceUID string, afterID int64) (int64, int64, error)
 	RetainedIssueSnapshot(ctx context.Context, projectID int64, issueUID string) (Event, int64, error)
-	RetainedCommentEvent(ctx context.Context, projectID int64, issueUID, commentUID string) (Event, int64, error)
 	AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error
 	// AcknowledgeFederationPush advances the push cursor. It also deletes this
 	// home's own adoption snapshots that the hub acknowledged without storing

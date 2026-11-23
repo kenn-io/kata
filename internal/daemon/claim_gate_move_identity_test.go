@@ -132,7 +132,7 @@ func TestRetainedIssueMoveChecksHubBeforeSnapshot(t *testing.T) {
 		wantSnapshots    int
 	}{
 		{name: "hub missing", status: http.StatusNotFound, wantStatus: http.StatusServiceUnavailable, wantSnapshots: 0},
-		{name: "hub known", status: http.StatusOK, wantStatus: http.StatusOK},
+		{name: "hub known without recovery snapshot", status: http.StatusOK, wantStatus: http.StatusServiceUnavailable},
 		{name: "hub known with accepted snapshot", status: http.StatusOK, existingSnapshot: true, acceptedSnapshot: true, wantStatus: http.StatusOK, wantSnapshots: 1},
 		{name: "hub known after second rejoin", status: http.StatusOK, existingSnapshot: true, acceptedSnapshot: true, rejoin: true, wantStatus: http.StatusOK, wantSnapshots: 1},
 		{name: "pending snapshot after second rejoin", status: http.StatusOK, existingSnapshot: true, rejoin: true, wantStatus: http.StatusServiceUnavailable, wantSnapshots: 1},

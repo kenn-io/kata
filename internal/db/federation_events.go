@@ -7,7 +7,6 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"math"
 	"slices"
 	"strings"
 
@@ -305,14 +304,18 @@ func stringPointersEqual(left, right *string) bool {
 // DirectLinkPeers returns explicit link endpoints eligible for
 // a supplemental direct-spoke proof. It never modifies the event payload.
 func DirectLinkPeers(event FoldEvent) (map[string]bool, error) {
-	if event.Type == "issue.snapshot" {
-		return snapshotLinkPeers(event.Payload)
-	}
 	if event.Type != "issue.unlinked" && !directLinkAdditionEligible(event) {
 		return nil, nil
 	}
 	var peers map[string]bool
-	add := func(uid string) { peers = addLinkPeer(peers, uid) }
+	add := func(uid string) {
+		if uid != "" {
+			if peers == nil {
+				peers = make(map[string]bool)
+			}
+			peers[uid] = true
+		}
+	}
 	_, _, err := StripCrossProjectLinkAdditions(event, func(uid string) bool {
 		add(uid)
 		return false
@@ -333,41 +336,6 @@ func DirectLinkPeers(event FoldEvent) (map[string]bool, error) {
 		}
 	}
 	return peers, err
-}
-
-func addLinkPeer(peers map[string]bool, uid string) map[string]bool {
-	if uid == "" {
-		return peers
-	}
-	if peers == nil {
-		peers = make(map[string]bool)
-	}
-	peers[uid] = true
-	return peers
-}
-
-// snapshotLinkPeers lists the issues a snapshot links to. A parent link whose
-// primary issue is the other end needs that issue's own authority, so incoming
-// parent links never count.
-func snapshotLinkPeers(payload []byte) (map[string]bool, error) {
-	var snapshot struct {
-		Links []IssueDocumentLink `json:"links"`
-	}
-	if err := json.Unmarshal(payload, &snapshot); err != nil {
-		return nil, err
-	}
-	peers, incoming := map[string]bool{}, map[string]bool{}
-	for _, link := range snapshot.Links {
-		if link.Type == "parent" && link.Incoming {
-			incoming[link.ToIssueUID] = true
-		} else if link.ToIssueUID != "" {
-			peers[link.ToIssueUID] = true
-		}
-	}
-	for uid := range incoming {
-		delete(peers, uid)
-	}
-	return peers, nil
 }
 
 // directLinkAdditionEligible requires a parent link's primary issue to be the
@@ -563,51 +531,4 @@ func directParentAssignments(event FoldEvent) ([]FoldLinkKey, error) {
 		return parents, nil
 	}
 	return nil, nil
-}
-
-// FederationMoveHistoryProvesSnapshot checks a move snapshot against history
-// the hub has already accepted. A new comment by the bound actor is safe only
-// when the hub has no accepted comment with that UID.
-func FederationMoveHistoryProvesSnapshot(uid, sourceProjectUID string, history []FoldEvent, payload, boundActor string) bool {
-	departure, err := json.Marshal(map[string]string{"from_project_uid": sourceProjectUID})
-	if err != nil {
-		return false
-	}
-	history = append(slices.Clone(history), FoldEvent{
-		IssueUID: uid, Type: "issue.moved", HLCPhysicalMS: math.MaxInt64, Payload: departure,
-	})
-	proof := &moveSnapshotProof{
-		authors: map[string]bool{}, commentUIDs: map[string]bool{},
-		comments: map[moveSnapshotComment]bool{}, identities: map[moveSnapshotComment]bool{},
-		links: map[moveSnapshotLinkIdentity]bool{},
-	}
-	proof.addHistory(uid, history, nil)
-	var snapshot IssueDocumentPayload
-	if json.Unmarshal([]byte(payload), &snapshot) != nil || !proof.authors[strings.TrimSpace(snapshot.Author)] {
-		return false
-	}
-	return proof.provesSnapshotReferences(uid, snapshot, strings.TrimSpace(boundActor))
-}
-
-// provesSnapshotReferences mirrors the hub validator: comments and links by
-// someone other than the bound actor must already be accepted history.
-func (p *moveSnapshotProof) provesSnapshotReferences(uid string, snapshot IssueDocumentPayload, boundActor string) bool {
-	for _, comment := range snapshot.Comments {
-		value := moveSnapshotComment{
-			UID: comment.CommentUID, Author: comment.Author, Teammate: comment.Teammate,
-			Body: comment.Body, CreatedAt: comment.CreatedAt, EditedAt: comment.EditedAt,
-			ReplyToUID: comment.ReplyToUID, ReplyKind: comment.ReplyKind,
-		}.normalized()
-		if p.comments[value] || (value.Author == boundActor && !p.commentUIDs[value.UID]) {
-			continue
-		}
-		return false
-	}
-	for _, l := range snapshot.Links {
-		link := moveSnapshotLink{ToIssueUID: l.ToIssueUID, Type: l.Type, Incoming: l.Incoming, Author: l.Author}
-		if author := strings.TrimSpace(l.Author); author != "" && author != boundActor && !p.links[link.identity(uid, boundActor)] {
-			return false
-		}
-	}
-	return true
 }

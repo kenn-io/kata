@@ -1,7 +1,6 @@
 package federation
 
 import (
-	"context"
 	"net/http"
 	"testing"
 
@@ -56,31 +55,6 @@ func newMoveDeliverySpokeWithOptions(t *testing.T, hub *testenv.Env, projects []
 		spoke.credentials[project.UID] = config.FederationCredential{HubURL: hub.URL, HubProjectID: project.ID, Token: grant.Token, Actor: actor}
 	}
 	return spoke
-}
-
-type moveSnapshotValidationSpy struct {
-	db.Storage
-	calls   int
-	issueID int64
-	payload string
-}
-
-func (s *moveSnapshotValidationSpy) MoveIssueProject(ctx context.Context, input db.MoveIssueProjectIn) (db.MoveIssueProjectOut, error) {
-	if input.PrepareSnapshot != nil {
-		prepare := input.PrepareSnapshot
-		input.PrepareSnapshot = func(issue db.Issue, payload string) (string, error) {
-			s.calls++
-			s.issueID = issue.ID
-			prepared, err := prepare(issue, payload)
-			if prepared != "" {
-				s.payload = prepared
-			} else {
-				s.payload = payload
-			}
-			return prepared, err
-		}
-	}
-	return s.Storage.MoveIssueProject(ctx, input)
 }
 
 func (s moveDeliverySpoke) sync(t *testing.T, index int) error {
