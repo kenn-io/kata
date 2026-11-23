@@ -31,6 +31,7 @@ func FoldEvents(events []FoldEvent) FoldProjection {
 	// move snapshot before replaying deltas, including deltas preceding the move.
 	// The snapshot is a baseline rather than a later content edit.
 	baselines := map[string]bool{}
+	seenCloses := map[string][]string{}
 	for _, e := range ordered {
 		if e.Type == "issue.created" || e.Type == "issue.snapshot" {
 			if e.IssueUID != "" {
@@ -55,6 +56,7 @@ func FoldEvents(events []FoldEvent) FoldProjection {
 				_ = json.Unmarshal(snapshot.Payload, &document)
 				if document.NeedsReviewContext != nil {
 					p.NeedsReviewContexts[uid] = *document.NeedsReviewContext
+					seenCloses[uid] = append([]string(nil), document.NeedsReviewContext.Closes...)
 				}
 				baselines[uid] = true
 			}
@@ -90,7 +92,7 @@ func FoldEvents(events []FoldEvent) FoldProjection {
 		key := FoldLabelKey{IssueUID: e.IssueUID, Label: "needs-review"}
 		if e.Type == "issue.labeled" {
 			if label, _ := stringValue(payload["label"]); label == key.Label {
-				context.Seen = stringSlice(payload["after_close_uids"])
+				seenCloses[e.IssueUID] = stringSlice(payload["after_close_uids"])
 			}
 		} else if e.Type == "issue.created" || e.Type == "issue.snapshot" || e.Type == RepeatedImportEventType {
 			if state := p.Labels[key]; state.Present && state.Clock == clockOf(e) {
@@ -98,9 +100,9 @@ func FoldEvents(events []FoldEvent) FoldProjection {
 					NeedsReviewContext *NeedsReviewContext `json:"needs_review_context"`
 				}
 				_ = json.Unmarshal(e.Payload, &document)
-				context.Seen = nil
+				seenCloses[e.IssueUID] = nil
 				if document.NeedsReviewContext != nil {
-					context.Seen = document.NeedsReviewContext.Seen
+					seenCloses[e.IssueUID] = append([]string(nil), document.NeedsReviewContext.Closes...)
 				}
 			}
 		}
@@ -108,12 +110,11 @@ func FoldEvents(events []FoldEvent) FoldProjection {
 	}
 	for uid, context := range p.NeedsReviewContexts {
 		context.Closes = sortedUnique(context.Closes)
-		context.Seen = sortedUnique(context.Seen)
 		p.NeedsReviewContexts[uid] = context
 		key := FoldLabelKey{IssueUID: uid, Label: "needs-review"}
 		state, exists := p.Labels[key]
 		for _, closeUID := range context.Closes {
-			if !slices.Contains(context.Seen, closeUID) {
+			if !slices.Contains(seenCloses[uid], closeUID) {
 				state.Present = false
 				break
 			}

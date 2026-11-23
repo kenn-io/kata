@@ -399,6 +399,19 @@ func (s *Store) IngestFederationEvents(
 			}
 			result.Accepted++
 		}
+		for _, input := range prepared {
+			if input.duplicate {
+				continue
+			}
+			repair, err := s.repairLegacyNeedsReviewTx(ctx, tx, params.ProjectID, input.event)
+			if err != nil {
+				return err
+			}
+			if repair != nil {
+				result.Events = append(result.Events, *repair)
+				result.InsertedEventUIDs = append(result.InsertedEventUIDs, repair.UID)
+			}
+		}
 		if result.Accepted > 0 {
 			// The generated claim audit events are never link-bearing, so the
 			// accepted batch alone decides whether the binding-group link fold

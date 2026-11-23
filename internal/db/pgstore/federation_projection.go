@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -279,13 +280,13 @@ func federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, issue db.Is
 	if err != nil {
 		return "", err
 	}
-	var closeContext *db.NeedsReviewContext
-	if len(context.Closes) > 0 || len(context.Seen) > 0 {
-		closeContext = &context
-	}
 	labels, err := federationIssueLabels(ctx, tx, issue.ID)
 	if err != nil {
 		return "", err
+	}
+	var closeContext *db.NeedsReviewContext
+	if len(context.Closes) > 0 || slices.Contains(labels, "needs-review") {
+		closeContext = &context
 	}
 	links, err := federationIssueLinks(ctx, tx, issue.ID)
 	if err != nil {

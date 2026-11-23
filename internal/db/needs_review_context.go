@@ -8,10 +8,9 @@ import (
 	"slices"
 )
 
-// NeedsReviewContext records closes and the closes observed by the label's writer.
+// NeedsReviewContext records closes carried by an issue snapshot.
 type NeedsReviewContext struct {
 	Closes []string `json:"closes"`
-	Seen   []string `json:"seen"`
 }
 
 func sortedUnique(values []string) []string {
@@ -23,10 +22,36 @@ func sortedUnique(values []string) []string {
 // NeedsReviewContextTx folds an issue's stored history to carry its close context
 // into a new label event or snapshot.
 func NeedsReviewContextTx(ctx context.Context, tx *sql.Tx, issueUID, placeholder string) (NeedsReviewContext, error) {
+	projection, err := needsReviewProjectionTx(ctx, tx, issueUID, placeholder)
+	if err != nil {
+		return NeedsReviewContext{}, err
+	}
+	return projection.NeedsReviewContexts[issueUID], nil
+}
+
+// NeedsReviewRepairTx reports whether an older peer's label was cleared by a close.
+func NeedsReviewRepairTx(ctx context.Context, tx *sql.Tx, event RemoteEvent, placeholder string) (bool, error) {
+	if event.Type != "issue.labeled" || event.IssueUID == nil {
+		return false, nil
+	}
+	payload := PayloadMap(event.Payload)
+	label, _ := StringValue(payload["label"])
+	if _, ok := payload["after_close_uids"]; label != "needs-review" || ok {
+		return false, nil
+	}
+	projection, err := needsReviewProjectionTx(ctx, tx, *event.IssueUID, placeholder)
+	if err != nil {
+		return false, err
+	}
+	state := projection.Labels[FoldLabelKey{IssueUID: *event.IssueUID, Label: label}]
+	return !state.Present && state.Clock.EventUID == event.EventUID, nil
+}
+
+func needsReviewProjectionTx(ctx context.Context, tx *sql.Tx, issueUID, placeholder string) (FoldProjection, error) {
 	query := `SELECT uid, origin_instance_uid, type, payload, hlc_physical_ms, hlc_counter FROM events WHERE issue_uid = ` + placeholder + ` AND type IN ('issue.created','issue.snapshot','issue.moved','issue.closed','issue.labeled','issue.unlabeled', '` + RepeatedImportEventType + `')`
 	rows, err := tx.QueryContext(ctx, query, issueUID)
 	if err != nil {
-		return NeedsReviewContext{}, fmt.Errorf("read needs-review history: %w", err)
+		return FoldProjection{}, fmt.Errorf("read needs-review history: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	var events []FoldEvent
@@ -34,13 +59,13 @@ func NeedsReviewContextTx(ctx context.Context, tx *sql.Tx, issueUID, placeholder
 		var e FoldEvent
 		var payload string
 		if err := rows.Scan(&e.UID, &e.OriginInstanceUID, &e.Type, &payload, &e.HLCPhysicalMS, &e.HLCCounter); err != nil {
-			return NeedsReviewContext{}, err
+			return FoldProjection{}, err
 		}
 		e.IssueUID, e.Payload = issueUID, jsontext.Value(payload)
 		events = append(events, e)
 	}
 	if err := rows.Err(); err != nil {
-		return NeedsReviewContext{}, err
+		return FoldProjection{}, err
 	}
-	return FoldEvents(events).NeedsReviewContexts[issueUID], nil
+	return FoldEvents(events), nil
 }

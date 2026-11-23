@@ -29,8 +29,10 @@ func checkCloseRemovesNeedsReview(t *testing.T, store db.Storage) error {
 	_, events, changed, err := store.CloseIssueWithEvents(ctx, issue.ID, "done", "closer", "", nil)
 	require.NoError(t, err)
 	require.True(t, changed)
-	require.Len(t, events, 1)
+	require.Len(t, events, 2)
 	require.Equal(t, "issue.closed", events[0].Type)
+	require.Equal(t, "issue.unlabeled", events[1].Type)
+	require.Equal(t, "closer", events[1].Actor)
 	present, err := store.HasLabel(ctx, issue.ID, "needs-review")
 	require.NoError(t, err)
 	require.False(t, present)
@@ -51,8 +53,9 @@ func checkCloseRemovesNeedsReview(t *testing.T, store db.Storage) error {
 	_, events, changed, err = store.CloseIssueWithEvents(ctx, issue.ID, "wontfix", "closer", "", nil)
 	require.NoError(t, err)
 	require.True(t, changed)
-	require.Len(t, events, 1)
+	require.Len(t, events, 2)
 	require.Equal(t, "issue.closed", events[0].Type)
+	require.Equal(t, "issue.unlabeled", events[1].Type)
 	_, _, _, err = store.ReopenIssue(ctx, issue.ID, "worker")
 	require.NoError(t, err)
 	_, labeled, err = store.AddLabelAndEvent(ctx, issue.ID, db.LabelEventParams{Label: "needs-review", EventType: "issue.labeled", Actor: "worker"})
@@ -71,7 +74,6 @@ func checkCloseRemovesNeedsReview(t *testing.T, store db.Storage) error {
 	}
 	require.NotNil(t, snapshot.NeedsReviewContext)
 	require.ElementsMatch(t, []string{firstClose, events[0].UID}, snapshot.NeedsReviewContext.Closes)
-	require.ElementsMatch(t, snapshot.NeedsReviewContext.Closes, snapshot.NeedsReviewContext.Seen)
 	return nil
 }
 
@@ -141,5 +143,52 @@ func checkCloseRemovesDelayedNeedsReview(t *testing.T, spoke db.Storage, backend
 	present, err = spoke.HasLabel(ctx, issue.ID, "needs-review")
 	require.NoError(t, err)
 	require.True(t, present)
+
+	// An older peer sends a label without close context on a clock ahead of the close.
+	legacy := remoteEventFromStored(relabeled)
+	legacy.EventUID = "00000000000000000000000002"
+	legacy.HLCPhysicalMS += 60000
+	legacy.Payload = []byte(`{"label":"needs-review"}`)
+	legacy.ContentHash = remoteEventHash(t, legacy)
+	_, err = spoke.InsertRemoteEvent(ctx, project.ID, legacy)
+	require.NoError(t, err)
+	require.NoError(t, spoke.MaterializeFederatedProject(ctx, project.ID))
+	assertLegacyFold := func(store db.Storage, projectID, issueID int64) {
+		t.Helper()
+		history, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: projectID, IssueUID: issue.UID, Limit: 100})
+		require.NoError(t, err)
+		var last db.Event
+		for _, event := range history {
+			if event.Type != "issue.labeled" && event.Type != "issue.unlabeled" {
+				continue
+			}
+			var payload map[string]any
+			require.NoError(t, json.Unmarshal([]byte(event.Payload), &payload))
+			if payload["label"] != "needs-review" {
+				continue
+			}
+			if event.HLCPhysicalMS > last.HLCPhysicalMS || (event.HLCPhysicalMS == last.HLCPhysicalMS && event.HLCCounter > last.HLCCounter) {
+				last = event
+			}
+		}
+		require.Equal(t, "issue.unlabeled", last.Type)
+		present, err := store.HasLabel(ctx, issueID, "needs-review")
+		require.NoError(t, err)
+		require.False(t, present)
+	}
+	assertLegacyFold(spoke, project.ID, issue.ID)
+	legacy.EventUID = "00000000000000000000000003"
+	legacy.OriginInstanceUID = spoke.InstanceUID()
+	legacy.Actor = "worker"
+	legacy.ContentHash = remoteEventHash(t, legacy)
+	_, err = hub.IngestFederationEvents(ctx, db.FederationIngestParams{
+		ProjectID: hubProject.ID, SpokeInstanceUID: spoke.InstanceUID(), BoundActor: "worker",
+		Events: []db.FederationIngestEvent{{SourceEventID: 999, Event: legacy}},
+	})
+	require.NoError(t, err)
+	assertLegacyFold(hub, hubProject.ID, hubIssue.ID)
+	_, _, _, err = spoke.ReopenIssue(ctx, issue.ID, "worker")
+	require.NoError(t, err)
+	assertLegacyFold(spoke, project.ID, issue.ID)
 	return nil
 }

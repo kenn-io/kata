@@ -38,12 +38,16 @@ func TestScopedEventsKeepInScopeCloseEvidenceTargets(t *testing.T) {
 	}
 	output, _ := events(0)
 	var kept any
+	var removals int
 	for _, event := range output.Events {
-		require.NotEqual(t, "issue.unlabeled", event.Type)
+		if event.Type == "issue.unlabeled" && event.IssueUID == issue.UID {
+			removals++
+		}
 		if event.Type == "issue.closed" && event.IssueUID == issue.UID {
 			kept = event.Payload.(map[string]any)["evidence"].([]any)[0].(map[string]any)["issue_ref"]
 		}
 	}
+	require.Equal(t, 1, removals)
 	require.Equal(t, original.UID, kept, "in-scope duplicate target must survive redaction")
 
 	hidden, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: excluded.ID, Title: "hidden original", Author: "worker"})

@@ -473,8 +473,12 @@ func (s *Store) closeIssueWithEvents(
 			}
 			events = append(events, generated...)
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM issue_labels WHERE issue_id = $1 AND label = 'needs-review'`, current.ID); err != nil {
-			return mapSQLError(err, nil)
+		unlabeled, err := s.detachLabelTx(ctx, tx, current, project, "issue.unlabeled", "needs-review", p.Actor, closedAt)
+		if err != nil && !errors.Is(err, db.ErrNotFound) {
+			return err
+		}
+		if err == nil {
+			events = append(events, unlabeled)
 		}
 
 		issue, err = scanIssue(ctx, tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = $1`, current.ID))
