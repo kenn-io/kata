@@ -279,7 +279,7 @@ jobs:
           bun-version: 1.4.4
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v10.3.2
+        uses: astral-sh/setup-uv@v10.3.3
 
       - name: Install frozen web dependencies
         run: make web-install
@@ -841,7 +841,7 @@ jobs:
           persist-credentials: false
 
       - name: Install mise tools
-        uses: jdx/mise-action@v5.2.4
+        uses: jdx/mise-action@v5.2.9
         with:
           # Rebuild older caches so they include mise's signed checksums.
           cache_key_prefix: mise-v2
@@ -947,7 +947,7 @@ jobs:
           persist-credentials: false
 
       - name: Install mise tools
-        uses: jdx/mise-action@v5.2.4
+        uses: jdx/mise-action@v5.2.9
         with:
           cache_key_prefix: mise-v2
           cache: true
