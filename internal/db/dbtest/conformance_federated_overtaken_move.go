@@ -242,7 +242,7 @@ func checkFederatedOvertakenMoveSourceLeave(t *testing.T, _ db.Storage, backend 
 	}
 	t.Run("later local move keeps its predecessor owed", func(t *testing.T) {
 		ctx := t.Context()
-		hub, spoke, remote, local := overtakenMoveSpoke(t, 4, "source", "middle", "final", "hub-target")
+		hub, spoke, remote, local := overtakenMoveSpoke(t, 3, "source", "middle", "final", "hub-target")
 		issue, creation, err := hub.CreateIssue(ctx, db.CreateIssueParams{ProjectID: remote[0].ID, Title: "chained", Author: "worker"})
 		require.NoError(t, err)
 		_, err = spoke.InsertRemoteEvents(ctx, local[0].ID, []db.RemoteEvent{portableNativeEvent(creation)})

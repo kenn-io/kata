@@ -342,7 +342,6 @@ func TestFederationRemovedProviderReleaseBlocksOvertakenMove(t *testing.T) {
 		},
 	}
 	require.NoError(t, credentials.StoreFederationCredential(t.Context(), source.UID, before))
-	t.Setenv("KATA_TEST_PROVIDER_STATUS", "released")
 	_, _, err = daemon.ReleaseRemovedFederationProvider(t.Context(), store, credentials, config.FederationManagedCredentialReservation{ProjectUID: source.UID, Credential: before})
 	require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush)
 	after, found, err := credentials.FindManagedFederationCredential(t.Context(), source.Name)
