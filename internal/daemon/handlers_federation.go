@@ -1010,14 +1010,17 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		waited := false
+		timedOut := false
 		if waiter != nil {
+			var waited bool
 			result, waited, err = holdFederationPoll(requestCtx, waiter, holdUntil, result, reauthorize, read)
 			if err != nil {
 				return nil, err
 			}
+			// The hold clears waited when returning its saved timeout page.
+			timedOut = !waited && federationPollCaughtUp(result)
 		}
-		if waited {
+		if !timedOut {
 			if _, err := reauthorize(); err != nil {
 				return nil, err
 			}
