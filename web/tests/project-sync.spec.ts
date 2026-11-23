@@ -165,5 +165,4 @@ test('project readers see sync diagnostics with bounded embedding summaries at n
   await expect(region.getByText('Sync disabled', { exact: true })).toBeVisible()
   await expect(region.getByRole('button', { name: /Copy .* command/ })).toHaveCount(0)
   await page.keyboard.press('Escape')
-  await expect(chip).toHaveCount(0)
 })

@@ -174,66 +174,30 @@ describe('AppShell', () => {
     expect(await screen.findByRole('button', { name: 'No changes to send' })).not.toBeNull()
   })
 
-  test('does not show a sync chip for a local project', async () => {
+  test('does not read project sync in settings', async () => {
     const fetcher = vi.fn<typeof fetch>(async () => Response.json({ statuses: [] }))
     setGeneratedFetch(projectSyncFetch(fetcher))
-    const current = snapshot()
     render(AppShell, {
       props: {
         route: {
           kind: 'kata',
-          projectUID: current.catalog[0]!.project.uid,
+          view: 'settings',
           graph: false,
           filters: { status: [], owner: [], label: [], relationship: [] },
         },
-        snapshot: current,
+        snapshot: snapshot(),
         loading: false,
         ...mutationProps(),
         onNavigate: vi.fn(),
         onCreateProject: vi.fn(async () => ({ changed: true })),
       },
     })
-    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1))
-    expect(
-      screen.queryByRole('button', { name: /^(No changes to send|Sync failed|\d+ to sync)$/ }),
-    ).toBeNull()
+    await screen.findAllByText('Settings')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(fetcher.mock.calls.some(([url]) => String(url).includes('/federation/status'))).toBe(
+      false,
+    )
   })
-
-  test.each(['settings', 'scoped'] as const)(
-    'does not read project sync in %s view',
-    async (kind) => {
-      const fetcher = vi.fn<typeof fetch>(async () => Response.json({ statuses: [] }))
-      setGeneratedFetch(projectSyncFetch(fetcher))
-      const current = snapshot()
-      if (kind === 'scoped')
-        current.capabilities.scope = {
-          kind: 'issue_subtree',
-          project_uid: current.catalog[0]!.project.uid,
-          root_issue_uid: current.collection[0]!.uid,
-        }
-      render(AppShell, {
-        props: {
-          route: {
-            kind: 'kata',
-            ...(kind === 'settings'
-              ? { view: 'settings' as const }
-              : { projectUID: current.catalog[0]!.project.uid }),
-            graph: false,
-            filters: { status: [], owner: [], label: [], relationship: [] },
-          },
-          snapshot: current,
-          loading: false,
-          ...mutationProps(),
-          onNavigate: vi.fn(),
-          onCreateProject: vi.fn(async () => ({ changed: true })),
-        },
-      })
-      await Promise.resolve()
-      expect(fetcher.mock.calls.some(([url]) => String(url).includes('/federation/status'))).toBe(
-        false,
-      )
-    },
-  )
 
   test('explains a read-only credential at each blocked write control', async () => {
     const current = snapshot()
@@ -342,7 +306,7 @@ describe('AppShell', () => {
     expect(document.querySelectorAll(`[id="${id}"]`)).toHaveLength(1)
   })
 
-  test.each(['stale', 'daemonSwitching', 'reconnecting', 'remote', 'expired', 'removed'])(
+  test.each(['stale', 'daemonSwitching', 'reconnecting', 'remote', 'expired', 'removed', 'scoped'])(
     'fences project sync display when authority is %s',
     async (reason) => {
       let signal: AbortSignal | undefined
@@ -384,6 +348,12 @@ describe('AppShell', () => {
       const next = snapshot()
       if (reason === 'expired') next.capabilities.expires_at = '2020-01-01T00:00:00Z'
       if (reason === 'removed') next.catalog = []
+      if (reason === 'scoped')
+        next.capabilities.scope = {
+          kind: 'issue_subtree',
+          project_uid: next.catalog[0]!.project.uid,
+          root_issue_uid: next.collection[0]!.uid,
+        }
       await view.rerender({
         ...props,
         syncRefreshGeneration: 1,

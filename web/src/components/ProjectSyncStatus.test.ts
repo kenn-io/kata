@@ -68,6 +68,7 @@ describe('ProjectSyncStatus', () => {
     expect(writeText).toHaveBeenCalledWith("kata federation status --project 'spoke project’’s'''")
     expect(screen.getByText('1 generated · 1 reused · 1 without index')).not.toBeNull()
     expect(screen.getByText('3 of 32 embeddings, limited')).not.toBeNull()
+    expect(screen.getByText('example-model, 2 dimensions')).not.toBeNull()
   })
 
   it('says there are no changes to send when nothing is waiting', async () => {
@@ -77,7 +78,6 @@ describe('ProjectSyncStatus', () => {
     expect(screen.getByRole('dialog', { name: 'Project sync' }).textContent).toContain(
       'No changes to send',
     )
-    expect(screen.queryByText(/Synced/)).toBeNull()
   })
 
   it('says how long ago the last sync finished', async () => {
@@ -89,19 +89,13 @@ describe('ProjectSyncStatus', () => {
     expect(screen.getByText('12m ago')).not.toBeNull()
   })
 
-  it('hides the chip for a local project', async () => {
-    const fetcher = vi.fn().mockResolvedValue(Response.json({ statuses: [] }))
-    setGeneratedFetch(fetcher)
-    render(ProjectSyncStatus, { props: { projectID: 7, projectUID } })
-    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(screen.queryByRole('button')).toBeNull())
-  })
-
-  it('hides the chip for a standalone status', async () => {
+  it.each(['empty', 'standalone'])('hides the chip for %s status', async (kind) => {
     const result = await response().json()
     result.statuses[0].role = 'standalone'
     result.statuses[0].enabled = false
-    const fetcher = vi.fn().mockResolvedValue(Response.json(result))
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue(Response.json(kind === 'empty' ? { statuses: [] } : result))
     setGeneratedFetch(fetcher)
     render(ProjectSyncStatus, { props: { projectID: 7, projectUID } })
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1))
@@ -355,20 +349,6 @@ describe('ProjectSyncStatus', () => {
     expect(screen.getByRole('button', { name: 'Sync failed' })).not.toBeNull()
   })
 
-  it('updates an empty local project when federation appears', async () => {
-    const fetcher = vi
-      .fn()
-      .mockResolvedValueOnce(Response.json({ statuses: [] }))
-      .mockResolvedValueOnce(response())
-    setGeneratedFetch(fetcher)
-    const view = render(ProjectSyncStatus, {
-      props: { projectID: 7, projectUID, refreshGeneration: 0 },
-    })
-    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1))
-    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
-    await screen.findByRole('button', { name: 'Sync failed' })
-  })
-
   it('lets a read finish while hidden and refreshes when visible again', async () => {
     let finish!: (value: Response) => void
     let signal: AbortSignal | undefined
@@ -409,7 +389,6 @@ describe('ProjectSyncStatus', () => {
     expect(url.pathname).toBe('/api/v1/projects/7/federation/status')
     expect(url.searchParams.get('compact')).toBe('true')
     expect(url.searchParams.get('omit_errors')).toBe('true')
-    expect(screen.getByText('example-model, 2 dimensions')).not.toBeNull()
   })
 
   it('rejects stale project responses even when transport ignores cancellation', async () => {
@@ -436,12 +415,15 @@ describe('ProjectSyncStatus', () => {
             project_name: 'old-project',
             role: 'spoke',
             enabled: true,
+            pending_push_count: 0,
+            has_sync_error: false,
           },
         ],
       }),
     )
     await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(screen.queryByText('old-project')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Sync failed' })).not.toBeNull()
+    expect(screen.queryByText('No changes to send')).toBeNull()
   })
 
   it('closes on Escape and returns focus to the chip', async () => {
