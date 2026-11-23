@@ -132,7 +132,7 @@ func TestRetainedIssueMoveChecksHubBeforeSnapshot(t *testing.T) {
 		wantSnapshots    int
 	}{
 		{name: "hub missing", status: http.StatusNotFound, wantStatus: http.StatusServiceUnavailable, wantSnapshots: 0},
-		{name: "hub known without recovery snapshot", status: http.StatusOK, wantStatus: http.StatusServiceUnavailable},
+		{name: "hub known without recovery snapshot", status: http.StatusOK, wantStatus: http.StatusConflict},
 		{name: "hub known with accepted snapshot", status: http.StatusOK, existingSnapshot: true, acceptedSnapshot: true, wantStatus: http.StatusOK, wantSnapshots: 1},
 		{name: "hub known after second rejoin", status: http.StatusOK, existingSnapshot: true, acceptedSnapshot: true, rejoin: true, wantStatus: http.StatusOK, wantSnapshots: 1},
 		{name: "pending snapshot after second rejoin", status: http.StatusOK, existingSnapshot: true, rejoin: true, wantStatus: http.StatusServiceUnavailable, wantSnapshots: 1},
@@ -224,7 +224,10 @@ func TestRetainedIssueMoveChecksHubBeforeSnapshot(t *testing.T) {
 				if tc.wantStatus == http.StatusConflict {
 					code = "federated_move_unsupported"
 				}
-				assertAPIError(t, resp.StatusCode, raw, tc.wantStatus, code)
+				errorEnvelope := assertAPIError(t, resp.StatusCode, raw, tc.wantStatus, code)
+				if tc.name == "hub known without recovery snapshot" {
+					require.Contains(t, errorEnvelope.Error.Message, "no accepted recovery snapshot")
+				}
 				stored, err := env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 				require.NoError(t, err)
 				require.Equal(t, source.ID, stored.ProjectID)

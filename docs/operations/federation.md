@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-20
+last_edited: 2026-11-23
 ---
 
 # Federation
@@ -131,8 +131,12 @@ or an import-mapping collision. Other projects keep syncing.
 After rejoining, the spoke keeps older events from the previous actor and sends
 later writes under the new actor. If the hub has not seen a task, sync sends a
 current-actor snapshot before its later edits. A move of a retained task waits
-until the hub knows the task and the snapshot has passed the spoke's push cursor;
-otherwise the move returns `federation_offline` and leaves the task in place.
+until the hub knows the task and the snapshot has passed the spoke's push cursor.
+If sync is still pending or the hub cannot be reached, the move returns
+`federation_offline`. Retry after federation sync completes. If the hub knows
+the task but has no accepted recovery snapshot, the move returns
+`federated_move_unsupported`. Create an issue in the target project and link it
+to the original issue. Both errors leave the task in place.
 The hub checks the moved snapshot against its accepted history. Old comments
 and their reply chains may remain incomplete, while later comments and edits
 can still reach the hub. Leaving the source does not discard the task's move
@@ -159,11 +163,6 @@ projects supplies these credentials automatically; no additional setup is needed
 Moves between different hubs, mixed local/federated projects, and paused bindings
 return `federated_move_unsupported`. Create an issue in the target project and link
 it to the original issue instead. Disabling sync retains the binding.
-
-If the hub cannot confirm that a retained task's current-actor snapshot reached
-it, the move returns `federation_offline` before changing project ownership.
-Retry after federation sync completes. The move snapshot uses the current
-actor, and the hub validates it against the history it accepted.
 
 ## Connect a project through the daemon catalog
 

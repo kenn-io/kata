@@ -114,8 +114,8 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 				if err != nil {
 					return nil, internalAPIError(err)
 				}
-				if retained && (pending || !snapshot || !refresh.known || refresh.missing) {
-					return nil, api.NewError(503, "federation_offline", "the retained task's recovery snapshot has not reached the hub", "retry after federation sync completes", nil)
+				if err := retainedMoveError(retained, snapshot, pending, refresh); err != nil {
+					return nil, err
 				}
 				if retained {
 					moveSnapshotActors[issue.ID] = binding.Actor
@@ -218,4 +218,16 @@ func moveIssueRuleAPIError(err error) *api.APIError {
 		return apiErr
 	}
 	return api.NewError(500, "internal", "internal error", "", nil)
+}
+
+// retainedMoveError refuses a retained task whose hub copy cannot gain a recovery snapshot.
+// Waiting on the hub, or on a pending snapshot, stays retryable.
+func retainedMoveError(retained, snapshot, pending bool, refresh claimRefreshResult) error {
+	switch {
+	case !retained || snapshot && !pending && refresh.known && !refresh.missing:
+		return nil
+	case !snapshot && !pending && refresh.known && !refresh.missing:
+		return retainedMoveNoSnapshotError()
+	}
+	return api.NewError(503, "federation_offline", "the retained task's recovery snapshot has not reached the hub", "retry after federation sync completes", nil)
 }

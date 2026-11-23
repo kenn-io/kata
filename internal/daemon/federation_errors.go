@@ -22,3 +22,11 @@ func federationReadOnlyError(err error) error {
 	}
 	return nil
 }
+
+// retainedMoveNoSnapshotError reports a retained task that the hub knows but holds no accepted
+// recovery snapshot for; unlike a sync delay, retrying the move cannot succeed.
+func retainedMoveNoSnapshotError() error {
+	return api.NewError(409, "federated_move_unsupported",
+		"the retained task cannot be moved because the hub has no accepted recovery snapshot for it",
+		"create the issue in the target project and link it to the original issue", nil)
+}
