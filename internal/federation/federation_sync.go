@@ -401,9 +401,6 @@ func pushDirectSpoke(
 		if refused != nil {
 			return recordFederationSyncError(ctx, store, binding.ProjectID, refused)
 		}
-		if err := store.RecordFederationAcceptedEvents(ctx, binding.ProjectID, nil); err != nil {
-			return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-		}
 		if err := store.RecordFederationSyncPushSuccess(ctx, binding.ProjectID, time.Now().UTC()); err != nil {
 			return err
 		}

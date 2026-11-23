@@ -93,14 +93,6 @@ func FoldFederationAcknowledgedEvents(ctx context.Context, tx *sql.Tx, projectID
 	return err
 }
 
-// RemoveOrphanedFederationAcknowledgments removes markers for deleted events.
-func RemoveOrphanedFederationAcknowledgments(ctx context.Context, tx *sql.Tx) error {
-	_, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE substr(key,1,length($1))=$1
- AND NOT EXISTS (SELECT 1 FROM events e JOIN projects p ON p.id=e.project_id
- WHERE meta.key=$1 || p.uid || '.' || e.uid)`, FederationAcknowledgedEventPrefix)
-	return err
-}
-
 // FederationQuarantineHasEarlierEvents finds outstanding events outside the skipped batch.
 func FederationQuarantineHasEarlierEvents(ctx context.Context, tx *sql.Tx, q FederationQuarantine, origin string) (bool, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT e.uid FROM events e JOIN federation_bindings b ON b.project_id=e.project_id
@@ -1063,5 +1055,5 @@ func ClearFederatedProjectEvents(ctx context.Context, tx *sql.Tx, projectID int6
  WHERE related_issue_id IN (SELECT id FROM issues WHERE project_id=$1)`, projectID); err != nil {
 		return err
 	}
-	return RemoveOrphanedFederationAcknowledgments(ctx, tx)
+	return nil
 }

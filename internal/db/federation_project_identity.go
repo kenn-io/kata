@@ -17,6 +17,14 @@ const FederationRetainedProjectPrefix = "federation_retained_project."
 // FederationLeaveFencePrefix records a prepared replica leave.
 const FederationLeaveFencePrefix = "federation_leave_fence."
 
+// IsFederationLocalMetaKey identifies federation state tied to this instance.
+func IsFederationLocalMetaKey(key string) bool {
+	return strings.HasPrefix(key, FederationSpokeNamePrefix) ||
+		strings.HasPrefix(key, FederationHeldCursorPrefix) ||
+		strings.HasPrefix(key, FederationAcknowledgedEventPrefix) ||
+		strings.HasPrefix(key, FederationLeaveFencePrefix)
+}
+
 // IsFederationRetainedProject reports whether the identity is a placeholder.
 func IsFederationRetainedProject(ctx context.Context, queryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row

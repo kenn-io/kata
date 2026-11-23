@@ -207,7 +207,12 @@ func (s *Store) AdvanceFederationPullCursor(ctx context.Context, projectID, next
 // from a snapshot it no longer holds.
 func (s *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string) error {
 	if len(supersededEventUIDs) == 0 {
-		return s.AdvanceFederationPushCursor(ctx, projectID, nextCursor)
+		return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+			if err := updateFederationCursor(ctx, tx, projectID, nextCursor, true); err != nil {
+				return err
+			}
+			return db.FoldFederationAcknowledgedEvents(ctx, tx, projectID, s.InstanceUID())
+		})
 	}
 	return s.materializeFederatedProjectAfter(ctx, projectID, func(ctx context.Context, tx *sql.Tx) error {
 		deleted, err := db.AcknowledgeSupersededFederationSnapshots(ctx, tx, projectID, s.instanceUID, supersededEventUIDs)
@@ -215,6 +220,9 @@ func (s *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCu
 			return err
 		}
 		if err := updateFederationCursor(ctx, tx, projectID, nextCursor, true); err != nil {
+			return err
+		}
+		if err := db.FoldFederationAcknowledgedEvents(ctx, tx, projectID, s.InstanceUID()); err != nil {
 			return err
 		}
 		if deleted == 0 {

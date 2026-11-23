@@ -140,7 +140,12 @@ func federationPushEventTypeCondition(column string) string {
 // from a snapshot it no longer holds.
 func (d *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string) error {
 	if len(supersededEventUIDs) == 0 {
-		return d.AdvanceFederationPushCursor(ctx, projectID, nextCursor)
+		return d.relayTx(ctx, func(tx *sql.Tx) error {
+			if err := advanceFederationPushCursor(ctx, tx, projectID, nextCursor); err != nil {
+				return err
+			}
+			return db.FoldFederationAcknowledgedEvents(ctx, tx, projectID, d.InstanceUID())
+		})
 	}
 	return d.materializeFederatedProjectAfter(ctx, projectID, func(ctx context.Context, tx *sql.Tx) error {
 		deleted, err := db.AcknowledgeSupersededFederationSnapshots(ctx, tx, projectID, d.instanceUID, supersededEventUIDs)
@@ -148,6 +153,9 @@ func (d *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCu
 			return err
 		}
 		if err := advanceFederationPushCursor(ctx, tx, projectID, nextCursor); err != nil {
+			return err
+		}
+		if err := db.FoldFederationAcknowledgedEvents(ctx, tx, projectID, d.InstanceUID()); err != nil {
 			return err
 		}
 		if deleted == 0 {
