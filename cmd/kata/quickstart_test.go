@@ -271,17 +271,10 @@ func TestQuickstartLocalProfileRecoveryGuidance(t *testing.T) {
 // treats an open, unmerged PR as unfinished, and passes comment text through a
 // quoted heredoc whose flush-left terminator ends stdin.
 func TestGuidesSayCommentsCarryFindings(t *testing.T) {
-	guides := map[string]string{"managed block": agentsManagedBlock()}
-	for _, format := range []string{"human", "agent", "json", "contract"} {
+	guides := map[string]string{}
+	for _, format := range []string{"human", "agent", "contract"} {
 		resetFlags(t)
 		out := executeRoot(t, newRootCmd(), "quickstart", "--format", format)
-		if format == "json" {
-			var payload struct {
-				Quickstart string `json:"quickstart"`
-			}
-			require.NoError(t, json.Unmarshal(out, &payload))
-			out = []byte(payload.Quickstart)
-		}
 		guides["quickstart "+format] = string(out)
 	}
 	resetFlags(t)

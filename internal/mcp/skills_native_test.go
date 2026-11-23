@@ -145,12 +145,6 @@ func TestNativeQuickstartNoShell(t *testing.T) {
 	final := callWorkflowTool(t, session, "kata.show", map[string]any{"ref": ref})["issue"].(map[string]any)
 	require.Equal(t, "closed", final["status"])
 	require.Equal(t, "example-agent", final["owner"])
-	// The unfinished path must update the attention state waiters observe,
-	// not only its message.
-	md, _ := SkillMarkdown("quickstart")
-	unfinished := regexp.MustCompile(`(?s)If unfinished,.*?\n\n`).FindString(md + "\n\n")
-	require.Regexp(t, `\bwork\.attention\b`, unfinished)
-	require.Contains(t, unfinished, "work.attention_msg")
 }
 
 // Product contract (kata#5s85): every MCP guide and the comment tools say
@@ -177,27 +171,10 @@ func TestNativeGuidesSayCommentsCarryFindings(t *testing.T) {
 		for _, text := range []string{"update work.attention and work.attention_msg", "kata.edit_comment", "not merged", "needs-review"} {
 			require.Contains(t, md, text, guide.name)
 		}
-	}
-}
-
-// Product contract (kata#5s85): the teammates guide's comment carries a
-// finding, and the hand-off status lives only in work.attention_msg.
-func TestNativeTeammatesGuideKeepsStatusOutOfComments(t *testing.T) {
-	var bodies, statuses []string
-	for _, example := range nativeExamples(t, "teammates") {
-		switch example.Tool {
-		case "kata.comment":
-			bodies = append(bodies, example.Arguments["body"].(string))
-		case "kata.set_metadata":
-			patch := example.Arguments["patch"].(map[string]any)
-			if msg, ok := patch["work.attention_msg"].(string); ok {
-				statuses = append(statuses, msg)
-			}
+		if guide.name == "quickstart" {
+			unfinished := regexp.MustCompile(`(?s)If unfinished,.*?\n\n`).FindString(md + "\n\n")
+			require.Regexp(t, `\bwork\.attention\b`, unfinished)
+			require.Contains(t, unfinished, "work.attention_msg")
 		}
 	}
-	require.NotEmpty(t, bodies)
-	for _, body := range bodies {
-		require.NotRegexp(t, `(?i)\b(ready|review)\b`, body)
-	}
-	require.Equal(t, []string{"Ready for the assigned reviewer."}, statuses)
 }

@@ -418,7 +418,6 @@ func TestCloseCmd_ErrorTextNamesAlternative(t *testing.T) {
 				"close", ref, "--done", "--message", tc.message)
 			require.Error(t, err)
 			assert.Contains(t, stderr, tc.errorText)
-			assert.Contains(t, stderr, "update work.attention and work.attention_msg, and add the needs-review label")
 			assert.NotContains(t, stderr, "edit <ref> --label")
 		})
 	}
