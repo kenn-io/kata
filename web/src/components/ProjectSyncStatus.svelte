@@ -45,7 +45,7 @@
     if (status?.has_sync_error) return 'danger'
     return 'neutral'
   })
-  let visible = $derived(open || error || !!(status && (status.enabled || status.has_sync_error)))
+  let visible = $derived(open || error || status !== undefined)
   let chipLabel = $derived.by(() => {
     if (error) return 'Sync status unavailable'
     if (!status) return 'Sync status unavailable'
@@ -65,7 +65,10 @@
       return pending > 0
         ? `Sync failed · ${pending} ${pending === 1 ? 'change' : 'changes'} waiting`
         : 'Sync failed'
-    if (!status.enabled) return 'Sync disabled'
+    if (!status.enabled)
+      return pending > 0
+        ? `Sync disabled · ${pending} ${pending === 1 ? 'change' : 'changes'} waiting`
+        : 'Sync disabled'
     if (pending > 0) return `${pending} ${pending === 1 ? 'change' : 'changes'} waiting to sync`
     return 'No changes to send'
   })

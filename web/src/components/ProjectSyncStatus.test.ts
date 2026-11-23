@@ -84,14 +84,32 @@ describe('ProjectSyncStatus', () => {
     expect(screen.getByText('12m ago')).not.toBeNull()
   })
 
-  it.each(['local', 'disabled'])('hides the chip for a %s project', async (kind) => {
-    const status =
-      kind === 'local' ? [] : [{ project_id: 7, project_uid: projectUID, enabled: false }]
-    const fetcher = vi.fn().mockResolvedValue(Response.json({ statuses: status }))
+  it('hides the chip for a local project', async () => {
+    const fetcher = vi.fn().mockResolvedValue(Response.json({ statuses: [] }))
     setGeneratedFetch(fetcher)
     render(ProjectSyncStatus, { props: { projectID: 7, projectUID } })
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(screen.queryByRole('button')).toBeNull())
+  })
+
+  it('shows a disabled binding and its waiting changes', async () => {
+    const result = await response(7, projectUID, 3, false).json()
+    result.statuses[0].enabled = false
+    setGeneratedFetch(vi.fn().mockResolvedValueOnce(Response.json(result)))
+    render(ProjectSyncStatus, { props: { projectID: 7, projectUID } })
+    await openSync(/^Sync disabled$/)
+    expect(screen.getByText('Sync disabled · 3 changes waiting')).not.toBeNull()
+  })
+
+  it('keeps waiting changes visible when an open panel refreshes to disabled', async () => {
+    const result = await response(7, projectUID, 3, false).json()
+    result.statuses[0].enabled = false
+    setGeneratedFetch(vi.fn().mockResolvedValueOnce(response()).mockResolvedValueOnce(Response.json(result)))
+    const view = render(ProjectSyncStatus, { props: { projectID: 7, projectUID, refreshGeneration: 0 } })
+    await openSync()
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
+    await screen.findByText('Sync disabled · 3 changes waiting')
+    expect(screen.getByRole('button', { name: 'Sync disabled' })).not.toBeNull()
   })
 
   it('shows a neutral waiting count and a single command when both shells match', async () => {
