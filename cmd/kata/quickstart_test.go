@@ -267,7 +267,7 @@ func TestQuickstartLocalProfileRecoveryGuidance(t *testing.T) {
 	}
 }
 
-// Product contract (kata#5s85): every CLI guide says comments carry findings,
+// Product contract: every CLI guide says comments carry findings,
 // keeps live status in work.attention_msg, corrects a comment by editing it,
 // treats an open, unmerged PR as unfinished, and passes comment text through a
 // quoted heredoc whose terminator ends stdin.

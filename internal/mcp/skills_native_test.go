@@ -147,7 +147,7 @@ func TestNativeQuickstartNoShell(t *testing.T) {
 	require.Equal(t, "example-agent", final["owner"])
 }
 
-// Product contract (kata#5s85): every MCP guide and the comment tools say
+// Product contract: every MCP guide and the comment tools say
 // comments carry findings, never progress.
 func TestNativeGuidesSayCommentsCarryFindings(t *testing.T) {
 	session := connectTestServer(t)
