@@ -950,7 +950,9 @@
               snapshotRecurrences={snapshot.selected?.state === 'available' &&
               snapshot.selected.issue?.project_id === selectedProject.id
                 ? snapshot.selected.recurrences
-                : undefined}
+                : !snapshot.selected && route.projectUID === selectedProject.uid
+                  ? snapshot.project_recurrences
+                  : undefined}
               refreshGeneration={snapshot.cursor}
               onCreate={onCreateRecurrence}
               onPatch={onPatchRecurrence}

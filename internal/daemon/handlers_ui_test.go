@@ -342,6 +342,27 @@ func TestUISnapshotETagRejectsShortRouteReference(t *testing.T) {
 
 var _ db.UIStore = (*countingUIStore)(nil)
 
+func TestUISnapshotProjectRecurrences(t *testing.T) {
+	projectUID := "01J00000000000000000000001"
+	store := &countingUIStore{cursor: 5, snapshotCursor: 5, snapshot: db.UISnapshotData{
+		Recurrences: []db.Recurrence{{UID: "01J00000000000000000000002", TemplateTitle: "Weekly task"}},
+	}}
+	ts := newUISnapshotServer(t, store, true)
+	global, _ := getUISnapshot(t, ts, url.Values{"view": {"all-open"}}, "")
+	require.Equal(t, http.StatusOK, global.StatusCode)
+	for range 2 {
+		resp, body := getUISnapshot(t, ts, url.Values{"view": {"all-open"}, "project_uid": {projectUID}}, "")
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+		var envelope struct {
+			ProjectRecurrences []db.Recurrence `json:"project_recurrences"`
+		}
+		require.NoError(t, json.Unmarshal(body, &envelope))
+		require.Len(t, envelope.ProjectRecurrences, 1)
+		require.Equal(t, "Weekly task", envelope.ProjectRecurrences[0].TemplateTitle)
+	}
+	require.Equal(t, 2, store.snapshotReads)
+}
+
 func TestUISnapshotSelectedContext(t *testing.T) {
 	selectedUID := "01J00000000000000000000000"
 	store := &countingUIStore{
@@ -517,7 +538,7 @@ func TestUISnapshotDerivesProjectAuthorityFromCachedGlobalCollection(t *testing.
 		"view": {"all-open"}, "project_uid": {firstProjectUID},
 	}, "")
 	require.Equal(t, http.StatusOK, project.StatusCode, string(body))
-	require.Equal(t, 2, store.snapshotReads)
+	require.Equal(t, 3, store.snapshotReads)
 
 	var envelope struct {
 		Collection      []db.UIIssue `json:"collection"`

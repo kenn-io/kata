@@ -7890,13 +7890,14 @@ type UISnapshotResponseBody struct {
 	Collection   []UIIssue      `json:"collection" validate:"required"`
 
 	// CollectionLinks Every link between two issues the principal can read (non-deleted issues in non-archived projects) that has at least one endpoint in collection, regardless of the collection's view, project_uid, status, owner, label, relationship, text, local_date, time_zone, or limit parameters. Count parent links whose to_issue_uid is a collection issue to get its children: from_status gives each child's status, and the open and total counts equal child_counts from GET /api/v1/issues for the same principal at the same cursor (an absent child_counts means zero).
-	CollectionLinks []UILink             `json:"collection_links" validate:"required"`
-	ContractVersion string               `json:"contract_version" validate:"required"`
-	Cursor          int64                `json:"cursor"`
-	Graph           *UIGraph             `json:"graph,omitempty"`
-	Origin          string               `json:"origin" validate:"required"`
-	OriginStable    bool                 `json:"origin_stable"`
-	Selected        *UISelectedAuthority `json:"selected,omitempty"`
+	CollectionLinks    []UILink             `json:"collection_links" validate:"required"`
+	ContractVersion    string               `json:"contract_version" validate:"required"`
+	Cursor             int64                `json:"cursor"`
+	Graph              *UIGraph             `json:"graph,omitempty"`
+	Origin             string               `json:"origin" validate:"required"`
+	OriginStable       bool                 `json:"origin_stable"`
+	ProjectRecurrences []Recurrence         `json:"project_recurrences,omitempty"`
+	Selected           *UISelectedAuthority `json:"selected,omitempty"`
 }
 
 func (u UISnapshotResponseBody) Validate() error {
@@ -7948,6 +7949,13 @@ func (u UISnapshotResponseBody) Validate() error {
 	}
 	if err := typesValidator.Var(u.Origin, "required"); err != nil {
 		errors = errors.Append("Origin", err)
+	}
+	for i, item := range u.ProjectRecurrences {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("ProjectRecurrences[%d]", i), err)
+			}
+		}
 	}
 	if u.Selected != nil {
 		if v, ok := any(u.Selected).(runtime.Validator); ok {

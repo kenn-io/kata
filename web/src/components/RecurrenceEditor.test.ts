@@ -145,7 +145,7 @@ describe('RecurrenceEditor — Common-mode rendering', () => {
       },
     })
     expect(screen.queryByText(/^Then /)).toBeNull()
-    expect(screen.queryByText(/Completing each one makes the next/)).toBeNull()
+    expect(screen.queryByText(/Marking each one Done makes the next/)).toBeNull()
     await fireEvent.click(screen.getByRole('button', { name: 'Tue' }))
     expect(screen.queryByText(/^Then /)).toBeNull()
     view.unmount()
@@ -181,7 +181,7 @@ describe('RecurrenceEditor — Common-mode rendering', () => {
       },
     })
     expect(await screen.findByText(/This task becomes the first/)).toBeTruthy()
-    expect(screen.getByText(/Completing each one makes the next/)).toBeTruthy()
+    expect(screen.getByText(/Marking each one Done makes the next/)).toBeTruthy()
   })
 
   test('aborts an outdated preview and keeps save available after failure', async () => {

@@ -913,7 +913,7 @@
         </div>
       {/if}
       {#if mode.kind === 'create' && dates.length > 1}<div>
-          Completing each one makes the next.
+          Marking each one Done makes the next.
         </div>{/if}
     </Card>
   {/if}

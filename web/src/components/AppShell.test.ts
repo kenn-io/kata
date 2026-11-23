@@ -12,12 +12,40 @@ import type { MutationContext, MutationResult } from '../lib/mutations/controlle
 import type { ShareableFilters } from '../lib/router'
 import type { UISnapshot } from '../lib/state/snapshot'
 import AppShell from './AppShell.svelte'
+import { recurrence } from '../lib/recurrence/__fixtures__/recurrence'
 
 describe('AppShell', () => {
   afterEach(() => {
     cleanup()
     vi.unstubAllGlobals()
     vi.useRealTimers()
+  })
+
+  test('uses project rules from the snapshot on open and refresh', async () => {
+    const fetch = vi.fn(async (_url: RequestInfo | URL) => Response.json({ statuses: [] }))
+    setGeneratedFetch(fetch)
+    const current = snapshot()
+    current.project_recurrences = [{ ...recurrence, template_title: 'Weekly task' }]
+    const view = render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          projectUID: current.catalog[0]!.project.uid,
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: current,
+        loading: false,
+        ...mutationProps(),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+    await fireEvent.click(await screen.findByRole('button', { name: /1 repeating task/ }))
+    expect(screen.getByText('Weekly task')).toBeTruthy()
+    await view.rerender({ snapshot: { ...current, cursor: 13, project_recurrences: [] } })
+    await waitFor(() => expect(screen.queryByRole('button', { name: /repeating task/ })).toBeNull())
+    expect(fetch.mock.calls.some(([url]) => String(url).includes('/recurrences'))).toBe(false)
   })
 
   test('advances Updated labels while the task snapshot stays unchanged', async () => {

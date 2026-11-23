@@ -7705,6 +7705,10 @@ components:
           type: string
         origin_stable:
           type: boolean
+        project_recurrences:
+          items:
+            $ref: "#/components/schemas/Recurrence"
+          type: array
         selected:
           $ref: "#/components/schemas/UISelectedAuthority"
       required:

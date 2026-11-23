@@ -179,7 +179,7 @@ func cloneUISnapshotEnrichment(data db.UISnapshotData) db.UISnapshotData {
 }
 
 func uiSnapshotHasEnrichment(intent normalizedUISnapshotIntent) bool {
-	return intent.SelectedIssueUID != "" || intent.IncludeGraph
+	return intent.SelectedIssueUID != "" || intent.IncludeGraph || intent.ProjectUID != ""
 }
 
 func cloneUISnapshotAuthority(data db.UISnapshotData) db.UISnapshotData {

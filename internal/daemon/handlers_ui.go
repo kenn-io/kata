@@ -932,6 +932,10 @@ func snapshotResponse(ctx context.Context, data db.UISnapshotData, intent normal
 	}
 	out.Body.Collection = nonNil(data.Issues)
 	out.Body.CollectionLinks = nonNil(data.CollectionLinks)
+	if intent.ProjectUID != "" && intent.SelectedIssueUID == "" && issueScopeFromPolicy(policy) == nil {
+		recurrences := nonNil(data.Recurrences)
+		out.Body.ProjectRecurrences = &recurrences
+	}
 	if intent.SelectedIssueUID != "" {
 		state := data.SelectedState
 		if state == "" {
