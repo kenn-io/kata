@@ -104,6 +104,19 @@ describe('ProjectSyncStatus', () => {
     await waitFor(() => expect(screen.queryByRole('button')).toBeNull())
   })
 
+  it('shows an unavailable status for an unknown role and recovers on refresh', async () => {
+    const result = await response().json()
+    result.statuses[0].role = 'unknown'
+    setGeneratedFetch(
+      vi.fn().mockResolvedValueOnce(Response.json(result)).mockResolvedValueOnce(response()),
+    )
+    render(ProjectSyncStatus, { props: { projectID: 7, projectUID } })
+    await openSync(/^Sync status unavailable$/)
+    expect(screen.getByText('Sync status unavailable. Refresh to try again.')).not.toBeNull()
+    await fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    await screen.findByText('Sync failed · 2 changes waiting')
+  })
+
   it.each(['empty', 'standalone'])('closes an open panel when refresh finds %s', async (kind) => {
     const result = await response().json()
     result.statuses[0].role = 'standalone'

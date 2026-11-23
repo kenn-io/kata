@@ -218,6 +218,8 @@
           (entry) => entry.project_id === id && entry.project_uid === uid,
         )
         if (result.data.statuses.length && !found) throw new Error()
+        if (found && found.role !== 'hub' && found.role !== 'spoke' && found.role !== 'standalone')
+          throw new Error()
         status = found?.role === 'hub' || found?.role === 'spoke' ? found : undefined
         if (!status) open = false
         error = false
