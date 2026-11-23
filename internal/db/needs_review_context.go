@@ -31,20 +31,31 @@ func NeedsReviewContextTx(ctx context.Context, tx *sql.Tx, issueUID, placeholder
 
 // NeedsReviewRepairTx reports whether an older peer's label was cleared by a close.
 func NeedsReviewRepairTx(ctx context.Context, tx *sql.Tx, event RemoteEvent, placeholder string) (bool, error) {
-	if event.Type != "issue.labeled" || event.IssueUID == nil {
+	if (event.Type != "issue.labeled" && event.Type != "issue.closed") || event.IssueUID == nil {
 		return false, nil
 	}
-	payload := PayloadMap(event.Payload)
-	label, _ := StringValue(payload["label"])
-	if _, ok := payload["after_close_uids"]; label != "needs-review" || ok {
-		return false, nil
+	if event.Type == "issue.labeled" {
+		payload := PayloadMap(event.Payload)
+		label, _ := StringValue(payload["label"])
+		if _, ok := payload["after_close_uids"]; label != "needs-review" || ok {
+			return false, nil
+		}
 	}
 	projection, err := needsReviewProjectionTx(ctx, tx, *event.IssueUID, placeholder)
 	if err != nil {
 		return false, err
 	}
-	state := projection.Labels[FoldLabelKey{IssueUID: *event.IssueUID, Label: label}]
-	return !state.Present && state.Clock.EventUID == event.EventUID, nil
+	state := projection.Labels[FoldLabelKey{IssueUID: *event.IssueUID, Label: "needs-review"}]
+	if state.Present || state.Clock.EventUID == "" || (event.Type == "issue.labeled" && state.Clock.EventUID != event.EventUID) {
+		return false, nil
+	}
+	var typ, raw string
+	if err := tx.QueryRowContext(ctx, `SELECT type, payload FROM events WHERE uid = `+placeholder, state.Clock.EventUID).Scan(&typ, &raw); err != nil {
+		return false, err
+	}
+	payload := PayloadMap(jsontext.Value(raw))
+	_, hasContext := payload["after_close_uids"]
+	return typ == "issue.labeled" && !hasContext, nil
 }
 
 func needsReviewProjectionTx(ctx context.Context, tx *sql.Tx, issueUID, placeholder string) (FoldProjection, error) {

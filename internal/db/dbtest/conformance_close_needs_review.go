@@ -153,9 +153,9 @@ func checkCloseRemovesDelayedNeedsReview(t *testing.T, spoke db.Storage, backend
 	_, err = spoke.InsertRemoteEvent(ctx, project.ID, legacy)
 	require.NoError(t, err)
 	require.NoError(t, spoke.MaterializeFederatedProject(ctx, project.ID))
-	assertLegacyFold := func(store db.Storage, projectID, issueID int64) {
+	assertLegacyFold := func(store db.Storage, projectID, issueID int64, issueUID string) {
 		t.Helper()
-		history, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: projectID, IssueUID: issue.UID, Limit: 100})
+		history, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: projectID, IssueUID: issueUID, Limit: 100})
 		require.NoError(t, err)
 		var last db.Event
 		for _, event := range history {
@@ -176,7 +176,7 @@ func checkCloseRemovesDelayedNeedsReview(t *testing.T, spoke db.Storage, backend
 		require.NoError(t, err)
 		require.False(t, present)
 	}
-	assertLegacyFold(spoke, project.ID, issue.ID)
+	assertLegacyFold(spoke, project.ID, issue.ID, issue.UID)
 	legacy.EventUID = "00000000000000000000000003"
 	legacy.OriginInstanceUID = spoke.InstanceUID()
 	legacy.Actor = "worker"
@@ -186,9 +186,36 @@ func checkCloseRemovesDelayedNeedsReview(t *testing.T, spoke db.Storage, backend
 		Events: []db.FederationIngestEvent{{SourceEventID: 999, Event: legacy}},
 	})
 	require.NoError(t, err)
-	assertLegacyFold(hub, hubProject.ID, hubIssue.ID)
+	assertLegacyFold(hub, hubProject.ID, hubIssue.ID, issue.UID)
 	_, _, _, err = spoke.ReopenIssue(ctx, issue.ID, "worker")
 	require.NoError(t, err)
-	assertLegacyFold(spoke, project.ID, issue.ID)
+	assertLegacyFold(spoke, project.ID, issue.ID, issue.UID)
+
+	// A close may arrive after the older peer's label, even if its clock is behind.
+	second, createdSecond, err := spoke.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Second issue", Author: "worker"})
+	require.NoError(t, err)
+	_, err = hub.IngestFederationEvents(ctx, db.FederationIngestParams{
+		ProjectID: hubProject.ID, SpokeInstanceUID: spoke.InstanceUID(), BoundActor: "worker",
+		Events: []db.FederationIngestEvent{{SourceEventID: createdSecond.ID, Event: remoteEventFromStored(createdSecond)}},
+	})
+	require.NoError(t, err)
+	legacy.EventUID = "00000000000000000000000004"
+	legacy.IssueUID = &second.UID
+	legacy.ContentHash = remoteEventHash(t, legacy)
+	_, err = hub.IngestFederationEvents(ctx, db.FederationIngestParams{
+		ProjectID: hubProject.ID, SpokeInstanceUID: spoke.InstanceUID(), BoundActor: "worker",
+		Events: []db.FederationIngestEvent{{SourceEventID: 1000, Event: legacy}},
+	})
+	require.NoError(t, err)
+	secondHub, err := hub.IssueByUID(ctx, second.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	_, secondClose, _, err := spoke.CloseIssueWithEvents(ctx, second.ID, "done", "worker", "", nil)
+	require.NoError(t, err)
+	_, err = hub.IngestFederationEvents(ctx, db.FederationIngestParams{
+		ProjectID: hubProject.ID, SpokeInstanceUID: spoke.InstanceUID(), BoundActor: "worker",
+		Events: []db.FederationIngestEvent{{SourceEventID: secondClose[0].ID, Event: remoteEventFromStored(secondClose[0])}},
+	})
+	require.NoError(t, err)
+	assertLegacyFold(hub, hubProject.ID, secondHub.ID, second.UID)
 	return nil
 }
