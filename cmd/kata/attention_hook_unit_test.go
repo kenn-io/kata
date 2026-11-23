@@ -50,7 +50,7 @@ func (f *fakeAttnDaemon) setMetaIfRevision(ref string, patch map[string]any, rev
 	return attnWriteApplied
 }
 
-func TestAttnStart_ConditionallySetsOnlyAttentionOKForOpenIssue(t *testing.T) {
+func TestAttnStart_ConditionallySetsAttentionOKForOpenIssue(t *testing.T) {
 	d := &fakeAttnDaemon{lookups: map[string]attnLookup{
 		"abc4": {kind: lookupOpen, attention: attnValueNeedsHuman, revision: 13},
 	}}
@@ -59,7 +59,7 @@ func TestAttnStart_ConditionallySetsOnlyAttentionOKForOpenIssue(t *testing.T) {
 
 	assert.Equal(t, []string{"abc4"}, d.lookupRefs)
 	assert.Equal(t, []conditionalMetaWrite{{
-		ref: "abc4", patch: map[string]any{attentionKey: attnValueOK}, revision: 13,
+		ref: "abc4", patch: map[string]any{attentionKey: attnValueOK, attentionSessionKey: nil}, revision: 13,
 	}}, d.conditionalWrites)
 }
 
@@ -95,8 +95,8 @@ func TestAttnStart_RetriesOnceAfterRevisionConflict(t *testing.T) {
 
 	assert.Equal(t, []string{"abc4", "abc4"}, d.lookupRefs)
 	assert.Equal(t, []conditionalMetaWrite{
-		{ref: "abc4", patch: map[string]any{attentionKey: attnValueOK}, revision: 13},
-		{ref: "abc4", patch: map[string]any{attentionKey: attnValueOK}, revision: 14},
+		{ref: "abc4", patch: map[string]any{attentionKey: attnValueOK, attentionSessionKey: nil}, revision: 13},
+		{ref: "abc4", patch: map[string]any{attentionKey: attnValueOK, attentionSessionKey: nil}, revision: 14},
 	}, d.conditionalWrites)
 }
 

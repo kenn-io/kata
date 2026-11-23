@@ -122,7 +122,9 @@ func attnStart(d attnDaemon, kataRef string) {
 		if lookup.kind != lookupOpen {
 			return
 		}
-		if d.setMetaIfRevision(ref, attnStartPatch(lookup), lookup.revision) != attnWriteConflict {
+		patch := attnStartPatch(lookup)
+		patch[attentionSessionKey] = nil
+		if d.setMetaIfRevision(ref, patch, lookup.revision) != attnWriteConflict {
 			return
 		}
 	}
