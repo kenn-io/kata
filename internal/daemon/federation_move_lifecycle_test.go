@@ -147,7 +147,7 @@ func TestPrepareFederationLeaveFencesConcurrentNativeMove(t *testing.T) {
 	}
 }
 
-func overtakenLeaveFixture(t *testing.T, store db.Storage) (db.Project, db.Event) {
+func overtakenLeaveFixture(t *testing.T, store db.Storage) db.Project {
 	t.Helper()
 	ctx := t.Context()
 	hub := openReplicaServiceStore(t)
@@ -175,7 +175,7 @@ func overtakenLeaveFixture(t *testing.T, store db.Storage) (db.Project, db.Event
 	require.NoError(t, store.MaterializeFederatedProject(ctx, local[0].ID))
 	localIssue, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
-	_, comment, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: localIssue.ID, Author: "worker", Body: "held comment"})
+	_, _, err = store.CreateComment(ctx, db.CreateCommentParams{IssueID: localIssue.ID, Author: "worker", Body: "held comment"})
 	require.NoError(t, err)
 	move, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: localIssue.ID, FromProjectID: local[0].ID, ToProjectID: local[1].ID, IfMatchRev: localIssue.Revision, Actor: "worker"})
 	require.NoError(t, err)
@@ -191,12 +191,12 @@ func overtakenLeaveFixture(t *testing.T, store db.Storage) (db.Project, db.Event
 	current, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.NotEqual(t, local[1].ID, current.ProjectID)
-	return local[0], comment
+	return local[0]
 }
 
 func TestLeaveFederationRouteOvertakenMove(t *testing.T) {
 	env := testenv.New(t)
-	source, _ := overtakenLeaveFixture(t, env.DB)
+	source := overtakenLeaveFixture(t, env.DB)
 	path := fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", source.ID)
 	response, raw := envDoRaw(t, env, http.MethodPost, path, map[string]any{"disposition": "archive", "actor": "worker", "preflight": true, "force": true}, nil)
 	require.Equal(t, http.StatusConflict, response.StatusCode, string(raw))

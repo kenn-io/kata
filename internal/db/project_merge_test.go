@@ -324,9 +324,8 @@ func TestPrepareProjectMergeRecordsRejectsEventRelatedIssueUIDMismatch(t *testin
 
 func TestPrepareProjectMergeRecordsDropsFederationState(t *testing.T) {
 	projectID := int64(2)
-	heldCursor := int64(10)
 	records := []ImportRecord{
-		&ProjectExport{ID: projectID, UID: "01H00000000000000000000000", Name: "spoke-project", HeldCursor: &heldCursor},
+		&ProjectExport{ID: projectID, UID: "01H00000000000000000000000", Name: "spoke-project"},
 		&FederationBindingExport{
 			ProjectID: projectID, Role: "spoke", Enabled: true, PushEnabled: true,
 			ReplayHorizonEventID: 40, PullCursorEventID: 50, PushCursorEventID: 60,
@@ -346,8 +345,6 @@ func TestPrepareProjectMergeRecordsDropsFederationState(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, prepared, 1)
 	assert.NotNil(t, recordPayloadAs[ProjectExport](t, prepared[0]))
-	assert.Nil(t, recordPayloadAs[ProjectExport](t, prepared[0]).HeldCursor)
-	assert.Equal(t, heldCursor, *recordPayloadAs[ProjectExport](t, records[0]).HeldCursor)
 	assert.True(t, recordPayloadAs[FederationBindingExport](t, records[1]).Enabled, "source binding must not be mutated")
 }
 

@@ -329,7 +329,7 @@ func TestFederationProviderValidatesActorBeforeSavingReady(t *testing.T) {
 func TestFederationProviderDetachOvertakenMove(t *testing.T) {
 	env := testenv.New(t)
 	_, mapping := providerMapping(t)
-	source, _ := overtakenLeaveFixture(t, env.DB)
+	source := overtakenLeaveFixture(t, env.DB)
 	binding, err := env.DB.FederationBindingByProject(t.Context(), source.ID)
 	require.NoError(t, err)
 	credentials := config.DefaultFederationCredentialStore()

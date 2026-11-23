@@ -5,12 +5,16 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/testenv"
 )
 
 // Schema 53 upgrades with an empty held cursor table.
 func TestFederationHeldCursorMigrationUpgradesVersion53(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires PostgreSQL")
+	}
 	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
@@ -28,7 +32,7 @@ func TestFederationHeldCursorMigrationUpgradesVersion53(t *testing.T) {
 	t.Cleanup(func() { _ = upgraded.Close() })
 	version, err := upgraded.SchemaVersion(ctx)
 	require.NoError(t, err)
-	require.Equal(t, 54, version)
+	require.Equal(t, db.CurrentSchemaVersion(), version)
 	var count int
 	require.NoError(t, admin.QueryRowContext(ctx, `SELECT count(*) FROM held_cursor_upgrade.federation_held_cursors`).Scan(&count))
 	require.Zero(t, count)
