@@ -98,7 +98,7 @@ message names it:
 | No `.kata.toml` and no git ancestor | none |
 
 ```json
-{"error":{"code":"project_not_initialized","message":"alias github.com/example/spoke-project is not registered","hint":"run \"kata init\" in this workspace","data":{"alias":"github.com/example/spoke-project"}}}
+{"error":{"code":"project_not_initialized","message":"alias github.com/example/spoke-project is not registered","hint":"run \"kata init\": it attaches this repo to the active project \"spoke-project\", or creates it if none exists; if that project is archived, restore it first","data":{"alias":"github.com/example/spoke-project"}}}
 ```
 
 The CLI keeps the hint in human, agent, and JSON errors. See

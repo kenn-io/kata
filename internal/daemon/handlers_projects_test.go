@@ -322,7 +322,7 @@ func TestResolve_ByAliasInput_NotRegistered(t *testing.T) {
 	})
 	envelope := assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
 	assert.Equal(t, map[string]any{"alias": "github.com/wesm/never-seen"}, map[string]any(envelope.Error.Data), string(bs))
-	assert.Equal(t, `run "kata init": it attaches this repo to the active project "never-seen", or creates it if none exists; if "never-seen" is archived, run "kata projects restore never-seen" first`, envelope.Error.Hint)
+	assert.Equal(t, `run "kata init": it attaches this repo to the active project "never-seen", or creates it if none exists; if that project is archived, restore it first`, envelope.Error.Hint)
 
 	resp, bs = postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{
 		"alias": map[string]any{
@@ -1328,12 +1328,13 @@ func TestRemoveProject_ArchivedNameRefusesReinit(t *testing.T) {
 	assert.Equal(t, http.StatusConflict, resp2.StatusCode, string(bs2))
 	assert.Contains(t, string(bs2), "project_archived")
 
-	// The resolve hint names the restore step init requires.
+	// The resolve hint says to restore the archived project before init.
 	resp3, bs3 := postJSON(t, h.ts.(*httptest.Server), "/api/v1/projects/resolve", map[string]any{
 		"alias": map[string]any{"identity": "github.com/wesm/proj-archive-reinit", "kind": "git"},
 	})
 	envelope := assertAPIError(t, resp3.StatusCode, bs3, http.StatusNotFound, "project_not_initialized")
-	assert.Contains(t, envelope.Error.Hint, `run "kata projects restore proj-archive-reinit" first`)
+	assert.Contains(t, envelope.Error.Hint, `the active project "proj-archive-reinit"`)
+	assert.Contains(t, envelope.Error.Hint, `if that project is archived, restore it first`)
 }
 
 // TestListProjects_WithStatsIncludesAggregates pins the new wire

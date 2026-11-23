@@ -738,7 +738,7 @@ func resolveByAliasInput(ctx context.Context, store db.Storage, in *api.AliasInp
 		hint := `run "kata init" in this workspace`
 		if info.Kind == "git" {
 			name := config.PickName("", info.Identity)
-			hint = fmt.Sprintf(`run "kata init": it attaches this repo to the active project %q, or creates it if none exists; if %q is archived, run "kata projects restore %s" first`, name, name, name)
+			hint = fmt.Sprintf(`run "kata init": it attaches this repo to the active project %q, or creates it if none exists; if that project is archived, restore it first`, name)
 		}
 		return nil, api.NewError(404, "project_not_initialized",
 			"alias "+info.Identity+" is not registered",
