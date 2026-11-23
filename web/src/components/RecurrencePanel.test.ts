@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/svelte'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import type { KataRecurrence } from '../lib/kata/types'
 import RecurrencePanel from './RecurrencePanel.svelte'
@@ -127,5 +127,28 @@ describe('RecurrencePanel', () => {
     })
     await fireEvent.click(screen.getByRole('button', { name: /Delete recurrence/i }))
     expect(onDelete).toHaveBeenCalledWith(base)
+  })
+
+  test('identifies each compact rule before its Edit and Stop actions', async () => {
+    const weekly = { ...base, uid: 'rec-weekly', template_title: 'Weekly report' }
+    const monthly = {
+      ...base,
+      id: 2,
+      uid: 'rec-monthly',
+      rrule: 'FREQ=MONTHLY',
+      template_title: 'Monthly audit',
+    }
+    const onEdit = vi.fn()
+    const onDelete = vi.fn()
+    const view = render(RecurrencePanel, {
+      props: { recurrences: [weekly, monthly], compact: true, onEdit, onDelete },
+    })
+    const monthlyRow = view.container.querySelectorAll('.compact-recurrence')[1] as HTMLElement
+
+    expect(within(monthlyRow).getByText('Monthly audit')).toBeTruthy()
+    await fireEvent.click(within(monthlyRow).getByRole('button', { name: 'Edit' }))
+    expect(onEdit).toHaveBeenCalledWith(monthly)
+    await fireEvent.click(within(monthlyRow).getByRole('button', { name: 'Stop' }))
+    expect(onDelete).toHaveBeenCalledWith(monthly)
   })
 })

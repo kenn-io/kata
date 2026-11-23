@@ -13,7 +13,6 @@ test('detail editing and close reasons round-trip through live Kata authority', 
   })
   await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
 
-  await page.getByRole('button', { name: 'Edit issue' }).click()
   const title = page
     .getByRole('region', { name: 'Task detail' })
     .getByRole('heading', { name: 'Editable example task' })
@@ -31,7 +30,7 @@ test('detail editing and close reasons round-trip through live Kata authority', 
     'Updated description',
   )
 
-  await page.getByRole('button', { name: 'Complete' }).click()
+  await page.getByRole('button', { name: 'Complete…' }).click()
   const dialog = page.getByRole('dialog', { name: 'Complete task' })
   await dialog
     .getByLabel('Completion note')
@@ -41,11 +40,11 @@ test('detail editing and close reasons round-trip through live Kata authority', 
   await expect(page.getByRole('button', { name: 'Reopen' })).toBeVisible()
 
   await page.getByRole('button', { name: 'Reopen' }).click()
-  await expect(page.getByRole('button', { name: 'Complete' })).toBeVisible()
-  await page.getByRole('button', { name: 'More actions' }).click()
-  await page.getByRole('menuitem', { name: 'Delete issue' }).click()
-  const deleteDialog = page.getByRole('dialog', { name: 'Delete issue' })
-  await deleteDialog.getByRole('button', { name: 'Delete' }).click()
+  await expect(page.getByRole('button', { name: 'Complete…' })).toBeVisible()
+  await page.getByRole('button', { name: 'Complete…' }).click()
+  const wontDo = page.getByRole('dialog', { name: 'Complete task' })
+  await wontDo.getByRole('radio', { name: /Won't do/ }).click()
+  await wontDo.getByRole('button', { name: 'Complete' }).click()
   await expect(page.getByRole('button', { name: 'Reopen' })).toBeVisible()
 })
 
@@ -61,19 +60,20 @@ test('comments, links, checklist, and history update without API fan-out', async
   })
   await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
 
-  await page.getByRole('button', { name: 'Edit issue' }).click()
+  await page.getByRole('button', { name: 'Add comment' }).click()
   await page.getByRole('textbox', { name: 'Comment' }).fill('A neutral collaboration note')
   await page.getByRole('button', { name: 'Add comment' }).click()
   await expect(page.getByText('A neutral collaboration note')).toBeVisible()
 
-  await page.getByRole('button', { name: 'More actions' }).click()
-  await page.getByRole('menuitem', { name: 'Add checklist' }).click()
+  await page.getByRole('button', { name: 'Add item' }).click()
   await page.getByRole('textbox', { name: 'New checklist item' }).fill('Verify example')
   await page.getByRole('textbox', { name: 'New checklist item' }).press('Enter')
   await expect(page.getByRole('checkbox', { name: 'Verify example' })).toBeVisible()
 
-  await page.getByRole('textbox', { name: 'Related issue' }).fill(peer.short_id)
-  await page.getByRole('button', { name: 'Link', exact: true }).click()
+  await page.getByRole('region', { name: 'Links' }).getByRole('button', { name: 'Add' }).click()
+  await page.getByRole('button', { name: 'Search tasks: Find task' }).click()
+  await page.getByRole('combobox', { name: 'Search tasks' }).fill(peer.short_id)
+  await page.getByRole('option', { name: /Related example task/ }).click()
   await expect(page.getByRole('region', { name: 'Links' })).toContainText(peer.short_id)
-  await expect(page.getByRole('heading', { name: 'Events' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'History' })).toBeVisible()
 })

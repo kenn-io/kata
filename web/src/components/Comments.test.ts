@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { UIIssueReference } from '../lib/api/generated'
@@ -16,7 +16,7 @@ describe('Comments', () => {
       target: { value: 'Too short' },
     })
     expect(
-      screen.getByText('Confirm and refute replies need at least 40 characters of evidence.'),
+      screen.getByText('Confirm and refute replies need at least 40 characters of evidence. 9/40'),
     ).toBeTruthy()
     expect(
       (screen.getByRole('button', { name: 'Add comment' }) as HTMLButtonElement).disabled,
@@ -104,11 +104,44 @@ describe('Comments', () => {
   })
 
   it('renders accepted comments newest first', async () => {
-    renderComments()
+    const task = issue()
+    task.comments[0]!.uid = 'comment-one'
+    task.comments[0]!.handle = 'c:abc123'
+    task.comments[0]!.teammate = 'worker-a'
+    task.comments[1]!.uid = 'comment-two'
+    task.comments[1]!.handle = 'c:def456'
+    renderComments({ issue: task, selfActor: 'user-a' })
 
     const comments = screen.getAllByRole('article')
     await waitFor(() => expect(comments[0]?.textContent).toContain('Newest comment'))
     expect(comments[1]?.textContent).toContain('First comment')
+    expect(comments[0]?.textContent).toContain('c:def456')
+    expect(comments[1]?.textContent).toContain('c:abc123')
+    expect(comments[1]?.textContent).toContain('You / worker-a')
+  })
+
+  it('keeps a reply draft on its target until the draft is cleared', async () => {
+    const task = issue()
+    task.comments[0]!.uid = 'comment-one'
+    task.comments[0]!.handle = 'c:first'
+    task.comments[1]!.uid = 'comment-two'
+    task.comments[1]!.handle = 'c:second'
+    renderComments({ issue: task })
+    const first = (await screen.findByText('First comment')).closest('article')!
+    const second = (await screen.findByText('Newest comment')).closest('article')!
+    await fireEvent.click(within(first).getByRole('button', { name: 'Reply' }))
+    await fireEvent.input(within(first).getByLabelText('Reply evidence'), {
+      target: { value: 'For first' },
+    })
+    expect(
+      (within(second).getByRole('button', { name: 'Reply' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+    expect((within(first).getByLabelText('Reply evidence') as HTMLTextAreaElement).value).toBe(
+      'For first',
+    )
+    await fireEvent.input(within(first).getByLabelText('Reply evidence'), { target: { value: '' } })
+    await fireEvent.click(within(second).getByRole('button', { name: 'Reply' }))
+    expect((within(second).getByLabelText('Reply evidence') as HTMLTextAreaElement).value).toBe('')
   })
 
   it('shows a federated author by name', () => {

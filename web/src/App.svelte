@@ -703,9 +703,11 @@
         ),
       )
     }
-    const body: { title?: string; body?: string } = {}
+    const body: { title?: string; body?: string; expected_content_revision?: number } = {}
     if (patch.title !== undefined) body.title = patch.title
     if (patch.body !== undefined) body.body = patch.body
+    if (patch.expected_content_revision !== undefined)
+      body.expected_content_revision = patch.expected_content_revision
     return runMutation({ draft: patch }, (context) =>
       editIssueRequest(
         { projectId: String(target.project_id), ref: target.ref },
@@ -977,15 +979,6 @@
         context.body({}, requestActor),
       ),
     )
-  }
-
-  function deleteIssue(): Promise<boolean> {
-    return closeIssue({
-      reason: 'wontfix',
-      message:
-        'Removed from active work through the web issue detail because this task is no longer intended to be completed.',
-      evidence: [],
-    })
   }
 
   async function runMutation(
@@ -1518,6 +1511,9 @@
         requestedRoute={route !== acceptedRoute ? route : undefined}
         onSearchEmpty={() => reportOutcome('search_empty')}
         snapshot={shellSnapshot!}
+        selfActor={shellSnapshot!.capabilities.actor_policy === 'identity'
+          ? shellSnapshot!.capabilities.account
+          : requestActor}
         loading={authority.loading}
         canMutate={authority.canMutate}
         {mutationPending}
@@ -1561,7 +1557,6 @@
         onRemoveLabel={removeLabel}
         onCloseIssue={closeIssue}
         onReopenIssue={reopenIssue}
-        onDeleteIssue={deleteIssue}
         onCreateRecurrence={createRecurrence}
         onPatchRecurrence={patchRecurrence}
         onDeleteRecurrence={deleteRecurrence}

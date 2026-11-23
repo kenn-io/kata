@@ -39,46 +39,52 @@ describe('IssueStateDialog', () => {
       props: { issue: makeIssue(), onCloseIssue: vi.fn(), onReopenIssue: vi.fn() },
     })
 
-    const trigger = screen.getByRole('button', { name: 'Complete' })
+    const trigger = screen.getByRole('button', { name: 'Complete…' })
     expect(trigger.classList).toContain('kit-button')
     await fireEvent.click(trigger)
 
     const dialog = screen.getByRole('dialog', { name: 'Complete task' })
+    await fireEvent.click(within(dialog).getByRole('radio', { name: /Won't do/ }))
+    expect(within(dialog).getByText(/optional; at least 60 characters if written/)).toBeTruthy()
     expect(within(dialog).getByRole('button', { name: 'Cancel' }).classList).toContain('kit-button')
     expect(within(dialog).getByRole('button', { name: 'Complete' }).classList).toContain(
       'kit-button',
     )
   })
 
-  it('submits a valid wont-do close request', async () => {
-    const onCloseIssue = vi.fn(async () => true)
-
-    render(IssueStateDialog, {
-      props: {
-        issue: makeIssue(),
-        onCloseIssue,
-        onReopenIssue: vi.fn(),
-      },
-    })
-
-    await fireEvent.click(screen.getAllByRole('button', { name: 'Complete' })[0]!)
-    const dialog = screen.getByRole('dialog', { name: 'Complete task' })
-
-    await fireEvent.click(within(dialog).getByRole('radio', { name: /Won't do/ }))
-    await fireEvent.input(within(dialog).getByLabelText(/Completion note/), {
-      target: {
-        value:
-          'This task is no longer aligned with the current example workflow and will not be pursued.',
-      },
-    })
-    await fireEvent.click(within(dialog).getByRole('button', { name: 'Complete' }))
-
-    expect(onCloseIssue).toHaveBeenCalledWith({
-      reason: 'wontfix',
+  it.each([
+    {
+      name: 'valid note',
+      note: 'This task is no longer aligned with the current example workflow and will not be pursued.',
       message:
         'This task is no longer aligned with the current example workflow and will not be pursued.',
-      evidence: [],
+      enabled: true,
+    },
+    {
+      name: 'blank note',
+      note: '',
+      message:
+        'Removed from active work through the web issue detail because this task is no longer intended to be completed.',
+      enabled: true,
+    },
+    { name: 'short note', note: 'Not needed', message: '', enabled: false },
+  ])("handles Won't do with a $name", async ({ note, message, enabled }) => {
+    const onCloseIssue = vi.fn(async () => true)
+    render(IssueStateDialog, {
+      props: { issue: makeIssue(), onCloseIssue, onReopenIssue: vi.fn() },
     })
+    await fireEvent.click(screen.getByRole('button', { name: 'Complete…' }))
+    const dialog = screen.getByRole('dialog', { name: 'Complete task' })
+    await fireEvent.click(within(dialog).getByRole('radio', { name: /Won't do/ }))
+    await fireEvent.input(within(dialog).getByLabelText(/Completion note/), {
+      target: { value: note },
+    })
+    const submit = within(dialog).getByRole('button', { name: 'Complete' })
+    expect(submit.hasAttribute('disabled')).toBe(!enabled)
+    await fireEvent.click(submit)
+    if (enabled)
+      expect(onCloseIssue).toHaveBeenCalledWith({ reason: 'wontfix', message, evidence: [] })
+    else expect(onCloseIssue).not.toHaveBeenCalled()
   })
 
   it('collects completion evidence before enabling a done close', async () => {
@@ -87,7 +93,7 @@ describe('IssueStateDialog', () => {
     render(IssueStateDialog, {
       props: { issue: makeIssue(), onCloseIssue, onReopenIssue: vi.fn() },
     })
-    await fireEvent.click(screen.getAllByRole('button', { name: 'Complete' })[0]!)
+    await fireEvent.click(screen.getByRole('button', { name: 'Complete…' }))
     const dialog = screen.getByRole('dialog', { name: 'Complete task' })
     const submit = within(dialog).getByRole('button', { name: 'Complete' })
     expect(submit.hasAttribute('disabled')).toBe(true)
@@ -115,7 +121,7 @@ describe('IssueStateDialog', () => {
     render(IssueStateDialog, {
       props: { issue: makeIssue(), onCloseIssue, onReopenIssue: vi.fn() },
     })
-    await fireEvent.click(screen.getAllByRole('button', { name: 'Complete' })[0]!)
+    await fireEvent.click(screen.getByRole('button', { name: 'Complete…' }))
     const dialog = screen.getByRole('dialog', { name: 'Complete task' })
     await fireEvent.change(within(dialog).getByLabelText('Evidence type'), {
       target: { value: 'external' },
@@ -141,7 +147,7 @@ describe('IssueStateDialog', () => {
     render(IssueStateDialog, {
       props: { issue: makeIssue(), onCloseIssue, onReopenIssue: vi.fn() },
     })
-    await fireEvent.click(screen.getAllByRole('button', { name: 'Complete' })[0]!)
+    await fireEvent.click(screen.getByRole('button', { name: 'Complete…' }))
     const dialog = screen.getByRole('dialog', { name: 'Complete task' })
     await fireEvent.click(within(dialog).getByRole('radio', { name: /Duplicate/ }))
     await fireEvent.input(within(dialog).getByLabelText('Target issue'), {

@@ -60,7 +60,7 @@ describe('App', () => {
       data,
     )
     render(App)
-    await screen.findByText('Example issue', { selector: 'h2' })
+    await screen.findByRole('heading', { name: 'Example issue' })
     expect(resolution!.searchParams.get('ref')).toBe('example-project#abc4')
     expect(resolution!.searchParams.has('project_id')).toBe(false)
     expect(requests).toHaveLength(1)
@@ -167,7 +167,7 @@ describe('App', () => {
     )
     render(App)
     await fireEvent.click(await screen.findByRole('button', { name: 'Retry' }))
-    await screen.findByText('Example issue', { selector: 'h2' })
+    await screen.findByRole('heading', { name: 'Example issue' })
     expect(resolutions).toHaveLength(2)
     expect(resolutions[0]!.searchParams.get('project')).toBe('example-project')
     expect(screen.getByRole('button', { name: /Other issue/ })).not.toBeNull()
@@ -191,7 +191,7 @@ describe('App', () => {
     finishResolution(shortLinkResolved())
     await screen.findByRole('button', { name: /Example issue/ })
     await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(screen.queryByRole('region', { name: 'Kata issue detail' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Task detail' })).toBeNull()
   })
 
   it('shows a clicked project from the loaded list and keeps it current', async () => {
@@ -733,7 +733,7 @@ describe('App', () => {
       )
       expect(uploadURL!.searchParams.get('name')).toBe('screen.png')
       expect(uploadInit?.body).toBe(file)
-      const edit = screen.getByRole('button', { name: 'Edit issue' }) as HTMLButtonElement
+      const edit = screen.getByRole('button', { name: 'Edit title' }) as HTMLButtonElement
       expect(edit.disabled).toBe(true)
       if (outcome === 'saved')
         finish(
@@ -3215,8 +3215,7 @@ describe('App', () => {
     vi.stubGlobal('fetch', fetcher)
 
     render(App)
-    await fireEvent.click(await screen.findByRole('button', { name: 'Edit issue' }))
-    await fireEvent.click(await screen.findByRole('button', { name: 'Delete recurrence' }))
+    await fireEvent.click(await screen.findByRole('button', { name: 'Stop' }))
     await fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
 
     await waitFor(() => {
@@ -3267,7 +3266,6 @@ describe('App', () => {
     )
 
     render(App)
-    await fireEvent.click(await screen.findByRole('button', { name: 'Edit issue' }))
     await fireEvent.click(await screen.findByRole('combobox', { name: /Assignment duration/ }))
     await fireEvent.click(screen.getByRole('option', { name: '1 hour' }))
 
@@ -3325,7 +3323,7 @@ describe('App', () => {
     )
 
     render(App)
-    await fireEvent.click(await screen.findByRole('button', { name: 'Edit issue' }))
+    await fireEvent.click(await screen.findByRole('button', { name: 'Add comment' }))
     const editor = await screen.findByRole('textbox', { name: 'Comment' })
     await fireEvent.input(editor, { target: { value: 'Retry-safe comment' } })
     await fireEvent.click(screen.getByRole('button', { name: 'Add comment' }))
@@ -3494,7 +3492,7 @@ describe('App', () => {
     )
 
     render(App)
-    await fireEvent.click(await screen.findByRole('button', { name: 'Edit issue' }))
+    await fireEvent.click(await screen.findByRole('button', { name: 'Add comment' }))
     const editor = await screen.findByRole('textbox', { name: 'Comment' })
     await fireEvent.input(editor, { target: { value: 'Keep this draft' } })
     await fireEvent.click(screen.getByRole('button', { name: 'Add comment' }))
@@ -4503,8 +4501,7 @@ describe('App', () => {
           }
           await fireEvent.click(screen.getByRole('button', { name: 'Capture' }))
         } else {
-          await fireEvent.click(await screen.findByRole('button', { name: 'Edit issue' }))
-          await fireEvent.click(await screen.findByRole('button', { name: 'Complete' }))
+          await fireEvent.click(await screen.findByRole('button', { name: 'Complete…' }))
           await fireEvent.input(screen.getByRole('textbox', { name: 'Evidence value' }), {
             target: { value: 'go test ./example' },
           })

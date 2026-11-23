@@ -1,13 +1,21 @@
 <script lang="ts">
-  import { Markdown, PageHeader, type TypeaheadOption } from '@kenn-io/kit-ui'
+  import { tick } from 'svelte'
+  import { Avatar, CopyButton, Markdown, Notice, type TypeaheadOption } from '@kenn-io/kit-ui'
+  import { CreationAttribution, IssueAttachments, projectIssueDetail } from '@kenn-io/kata-ui'
   import NetworkIcon from '@lucide/svelte/icons/network'
+  import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert'
+  import CircleAlertIcon from '@lucide/svelte/icons/circle-alert'
+  import CircleCheckIcon from '@lucide/svelte/icons/circle-check'
+  import CircleSlashIcon from '@lucide/svelte/icons/circle-slash'
   import PencilIcon from '@lucide/svelte/icons/pencil'
-  import {
-    formatRelativeTime as timeAgo,
-    formatTimestamp as localDateTimeLabel,
-  } from '@kenn-io/kit-ui/utils/time'
+  import { formatRelativeTime as timeAgo } from '@kenn-io/kit-ui/utils/time'
 
   import type { UIIssueReference } from '../lib/api/generated'
+  import { fetchAttachmentBlob } from '../lib/api/client'
+  import { deadlineDate, closedReasonLabel } from '../lib/kata/view'
+  import { formatDay, localDateString } from '../lib/kata/dates'
+  import { describeResolution } from '../lib/history/format'
+  import { closingAttachments } from '../lib/history/attachments'
   import { createKataLinkFilters, type KataLinkFilters } from '../lib/kata/linkFilters'
   import type {
     KataCreateRecurrenceInput,
@@ -25,6 +33,7 @@
   import Comments from './Comments.svelte'
   import IssueHistory from './IssueHistory.svelte'
   import IssueLinks from './IssueLinks.svelte'
+  import DetailSection from './DetailSection.svelte'
   import IssueStateDialog from './IssueStateDialog.svelte'
   import MoveIssueDialog from './MoveIssueDialog.svelte'
   import IssueProperties from './IssueProperties.svelte'
@@ -38,21 +47,18 @@
     uid: string
   }
 
-  interface WorkspaceAction {
-    label: string
-    busy?: boolean
-    disabled?: boolean
-    onClick?: () => void | Promise<void>
-  }
-
   interface Props {
     selectedCommentUID?: string | undefined
+    selfActor?: string | undefined
+    attachmentsEnabled?: boolean | undefined
+    onUploadAttachment?: ((uid: string, file: File) => Promise<void>) | undefined
     // True while the task shows the list's copy and its comments load.
     pending?: boolean | undefined
     navigationActive?: boolean | undefined
     returnComment?: { issueUID: string; commentUID: string } | undefined
     commentError?: string | undefined
     issue: KataTaskDetail
+    today?: string | undefined
     events?: readonly KataTaskEvent[] | undefined
     issueCatalog?: readonly KataTaskSummary[] | undefined
     searchReferences?: ((query: string) => Promise<Reference[]>) | undefined
@@ -83,7 +89,6 @@
     onRemoveLabel: (uid: string, label: string) => void | Promise<void>
     onCloseIssue: (request: KataTaskCloseRequest) => boolean | Promise<boolean>
     onReopenIssue: () => void | Promise<void>
-    onDeleteIssue: () => boolean | Promise<boolean>
     onSelectIssue?: ((target: IssueNavigationTarget) => void | Promise<void>) | undefined
     onCreateRecurrence?:
       | ((projectID: number, input: KataCreateRecurrenceInput) => Promise<void>)
@@ -93,16 +98,23 @@
       | undefined
     onDeleteRecurrence?: ((recurrence: KataRecurrence) => Promise<boolean>) | undefined
     onOpenGraph?: ((issue: KataTaskDetail['issue']) => void) | undefined
-    workspaceAction?: WorkspaceAction | undefined
+    graphOpen?: boolean | undefined
+    onCloseGraph?: (() => void) | undefined
+    statusRequest?: { uid: string; generation: number } | null | undefined
+    onStatusRequestConsumed?: (() => void) | undefined
   }
 
   let {
     issue,
+    selfActor = undefined,
+    attachmentsEnabled = false,
+    onUploadAttachment,
     selectedCommentUID,
     pending = false,
     navigationActive = true,
     commentError = undefined,
     events = [],
+    today = localDateString(new Date()),
     issueCatalog = [],
     searchReferences = async () => [],
     linkFilters = createKataLinkFilters('all'),
@@ -128,13 +140,15 @@
     onRemoveLabel,
     onCloseIssue,
     onReopenIssue,
-    onDeleteIssue,
     onSelectIssue = () => {},
     onCreateRecurrence = async () => {},
     onPatchRecurrence = async () => {},
     onDeleteRecurrence = async () => false,
     onOpenGraph = undefined,
-    workspaceAction = undefined,
+    graphOpen = false,
+    onCloseGraph = undefined,
+    statusRequest = null,
+    onStatusRequestConsumed = undefined,
   }: Props = $props()
 
   let editingTitle = $state(false)
@@ -143,14 +157,15 @@
   let savingBody = $state(false)
   let titleDraft = $state('')
   let bodyDraft = $state('')
+  let titleRevision = $state<number | undefined>()
+  let bodyRevision = $state<number | undefined>()
+  let titleConflict = $state(false)
+  let bodyConflict = $state(false)
+  let titleStart = $state('')
+  let titleBodyStart = $state('')
+  let bodyTitleStart = $state('')
+  let bodyStart = $state('')
   let titleInput: HTMLInputElement | null = $state(null)
-  let titleHeading: HTMLHeadingElement | undefined = $state()
-
-  // The heading holds the edit button, whose name is "Edit title"; name the
-  // heading by the task title so heading navigation still reads the title.
-  $effect(() => {
-    titleHeading?.setAttribute('aria-label', issue.issue.title)
-  })
   let bodyTextarea: HTMLTextAreaElement | null = $state(null)
   let cancelingTitle = $state(false)
   let lastIssueUID = $state<string | null>(null)
@@ -160,7 +175,9 @@
   let pendingTitleResetGeneration = $state<number | null>(null)
   let pendingBodyResetUID = $state<string | null>(null)
   let pendingBodyResetGeneration = $state<number | null>(null)
-  let checklistRevealed = $state(false)
+  let moveDialog: { open: () => Promise<void> } | null = $state(null)
+  let stateDialog: { activate: () => void } | null = $state(null)
+  let consumedStatusGeneration = 0
   let recurrenceDialogs: {
     openCreateRecurrence: () => void
     openEditRecurrence: (recurrence: KataRecurrence) => void
@@ -169,6 +186,22 @@
   } | null = $state(null)
 
   const detailInert = $derived(authorityBlocked ?? actionsDisabled)
+  const attachments = $derived(projectIssueDetail(issue).issue.attachments)
+  $effect(() => {
+    if (
+      !statusRequest ||
+      statusRequest.generation === consumedStatusGeneration ||
+      pending ||
+      detailInert ||
+      actionsDisabled ||
+      statusRequest.uid !== issue.issue.uid ||
+      !stateDialog
+    )
+      return
+    consumedStatusGeneration = statusRequest.generation
+    stateDialog.activate()
+    onStatusRequestConsumed?.()
+  })
   const canCreateRecurrence = $derived(
     issue.issue.status === 'open' && issue.issue.recurrence_id === undefined,
   )
@@ -186,7 +219,9 @@
     if (uid === lastIssueUID) return
     lastIssueUID = uid
     editingTitle = false
+    titleConflict = false
     editingBody = false
+    bodyConflict = false
     savingTitle = false
     savingBody = false
     cancelingTitle = false
@@ -194,7 +229,6 @@
     pendingTitleResetGeneration = null
     pendingBodyResetUID = null
     pendingBodyResetGeneration = null
-    checklistRevealed = false
   })
 
   $effect(() => {
@@ -207,7 +241,6 @@
     lastDraftFenceGeneration = nextGeneration
     resetTitleDraft()
     resetBodyDraft()
-    checklistRevealed = false
     recurrenceDialogs?.closeAll()
   })
 
@@ -239,23 +272,80 @@
   function resetBodyDraft(): void {
     editingBody = false
     bodyDraft = ''
+    bodyConflict = false
     pendingBodyResetUID = null
     pendingBodyResetGeneration = null
   }
 
-  function currentProjectName(): string {
-    const fromIssue = issue.issue.project_name.trim()
-    if (fromIssue) return fromIssue
-    const project =
-      projects.find((candidate) => candidate.uid === issue.issue.project_uid) ??
-      projects.find((candidate) => candidate.id === issue.issue.project_id)
-    return project?.name ?? issue.issue.project_uid
+  const blocker = $derived(issue.issue.open_blocked_by?.[0])
+  const blockerTitleFromCatalog = $derived(
+    issueCatalog.find((task) => task.uid === blocker?.uid)?.title,
+  )
+  let fetchedBlockerTitle = $state<{ uid: string; title: string }>()
+  $effect(() => {
+    const uid = blocker?.uid
+    const qualifiedID = blocker?.qualified_id
+    if (!uid || !qualifiedID || blockerTitleFromCatalog) {
+      if (fetchedBlockerTitle?.uid !== uid) fetchedBlockerTitle = undefined
+      return
+    }
+
+    let active = true
+    void searchReferences(qualifiedID)
+      .then((references) => {
+        if (!active) return
+        const match = references.find((reference) => reference.uid === uid)
+        if (match) fetchedBlockerTitle = { uid, title: match.title }
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  })
+  const blockerTitle = $derived(
+    blockerTitleFromCatalog ??
+      (fetchedBlockerTitle && fetchedBlockerTitle.uid === blocker?.uid
+        ? fetchedBlockerTitle.title
+        : ''),
+  )
+  const due = $derived(deadlineDate(issue.issue))
+  const lateDays = $derived(
+    due
+      ? Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${due}T00:00:00Z`)) / 86400000)
+      : 0,
+  )
+  const closeEvent = $derived(issue.effective_close_event)
+  function actorName(actor: string): string {
+    return actor === selfActor ? 'You' : actor
+  }
+  function closingProof(event: KataTaskEvent): string[] {
+    const evidence = event.payload?.evidence
+    if (!Array.isArray(evidence)) return []
+    return evidence.flatMap((item: unknown) => {
+      if (!item || typeof item !== 'object') return []
+      const value = item as Record<string, unknown>
+      const fields: Record<string, string> = {
+        test: 'command',
+        commit: 'sha',
+        pr: 'url',
+        external: 'account',
+      }
+      if (typeof value.type !== 'string') return []
+      if (value.type === 'reviewed-paths' && Array.isArray(value.paths))
+        return value.paths.filter((path): path is string => typeof path === 'string')
+      const field = fields[value.type]
+      return field && typeof value[field] === 'string' ? [value[field] as string] : []
+    })
   }
 
   function startEditingTitle(): void {
     if (actionsDisabled) return
     cancelingTitle = false
     titleDraft = issue.issue.title
+    titleStart = issue.issue.title
+    titleBodyStart = issue.issue.body
+    titleRevision = issue.issue.content_revision
+    titleConflict = false
     editingTitle = true
     queueMicrotask(() => {
       titleInput?.focus()
@@ -279,13 +369,28 @@
     const resetGeneration = draftResetGeneration
     savingTitle = true
     try {
-      if (await onEditIssue(mutationUID, { title: next })) {
+      const result = await onEditIssue(mutationUID, {
+        title: next,
+        ...(titleRevision === undefined ? {} : { expected_content_revision: titleRevision }),
+      })
+      if (result === true) {
         if (issue.issue.uid !== mutationUID) return
         if (draftResetGeneration !== resetGeneration) {
           resetTitleDraft()
         } else {
           pendingTitleResetUID = mutationUID
           pendingTitleResetGeneration = resetGeneration
+        }
+      } else {
+        await tick()
+        if (
+          issue.issue.uid === mutationUID &&
+          (issue.issue.content_revision !== titleRevision ||
+            issue.issue.title !== titleStart ||
+            issue.issue.body !== titleBodyStart)
+        ) {
+          titleConflict = true
+          titleRevision = issue.issue.content_revision
         }
       }
     } finally {
@@ -301,12 +406,17 @@
       event.preventDefault()
       cancelingTitle = true
       editingTitle = false
+      titleConflict = false
     }
   }
 
   function startEditingBody(): void {
     if (actionsDisabled) return
     bodyDraft = issue.issue.body
+    bodyStart = issue.issue.body
+    bodyTitleStart = issue.issue.title
+    bodyRevision = issue.issue.content_revision
+    bodyConflict = false
     editingBody = true
     queueMicrotask(() => bodyTextarea?.focus())
   }
@@ -322,13 +432,28 @@
     const resetGeneration = draftResetGeneration
     savingBody = true
     try {
-      if (await onEditIssue(mutationUID, { body: next })) {
+      const result = await onEditIssue(mutationUID, {
+        body: next,
+        ...(bodyRevision === undefined ? {} : { expected_content_revision: bodyRevision }),
+      })
+      if (result === true) {
         if (issue.issue.uid !== mutationUID) return
         if (draftResetGeneration !== resetGeneration) {
           resetBodyDraft()
         } else {
           pendingBodyResetUID = mutationUID
           pendingBodyResetGeneration = resetGeneration
+        }
+      } else {
+        await tick()
+        if (
+          issue.issue.uid === mutationUID &&
+          (issue.issue.content_revision !== bodyRevision ||
+            issue.issue.title !== bodyTitleStart ||
+            issue.issue.body !== bodyStart)
+        ) {
+          bodyConflict = true
+          bodyRevision = issue.issue.content_revision
         }
       }
     } finally {
@@ -353,158 +478,134 @@
   aria-busy={actionsDisabled || detailInert}
   inert={detailInert}
 >
-  <fieldset class="mutation-controls" disabled={actionsDisabled || detailInert}>
-    <div class="detail-heading">
-      <div class="detail-heading-main">
-        <PageHeader level={2} bind:titleElement={titleHeading}>
-          {#snippet before()}
-            <div class="detail-kicker">
-              <span class="crumb-project">{currentProjectName()}</span>
-              <span class="crumb-sep">/</span>
-              <span class="crumb-id">{issue.issue.short_id}</span>
-              <span class="kit-sr-only">{issue.issue.qualified_id}</span>
-            </div>
-          {/snippet}
-          {#snippet title()}
-            {#if editingTitle}
-              <input
-                class="title-edit"
-                aria-label="Edit title"
-                bind:this={titleInput}
-                bind:value={titleDraft}
-                disabled={savingTitle}
-                onkeydown={handleTitleKeydown}
-                onblur={() => {
-                  void commitTitle()
-                }}
-              />
-            {:else}
-              <button
-                type="button"
-                class="title-button"
-                aria-label="Edit title"
-                onclick={startEditingTitle}
-              >
-                <span>{issue.issue.title}</span>
-                <PencilIcon size={13} strokeWidth={1.8} />
-              </button>
-            {/if}
-          {/snippet}
-        </PageHeader>
-      </div>
-      <div class="detail-actions">
-        <time
-          class="detail-created-at"
-          datetime={issue.issue.created_at}
-          title={localDateTimeLabel(issue.issue.created_at)}
-        >
-          {timeAgo(issue.issue.created_at)}
-        </time>
-        {#if workspaceAction?.onClick}
-          <button
-            type="button"
-            class="workspace-action"
-            disabled={workspaceAction.disabled || workspaceAction.busy}
-            onclick={() => {
-              void workspaceAction.onClick?.()
-            }}
-          >
-            {workspaceAction.busy ? 'Working...' : workspaceAction.label}
-          </button>
-        {/if}
-        {#if onOpenGraph}
-          <button
-            type="button"
-            class="icon-detail-action"
-            aria-label="Open reachable graph"
-            title="Open reachable graph"
-            onclick={() => onOpenGraph?.(issue.issue)}
-          >
-            <NetworkIcon size={14} strokeWidth={1.9} aria-hidden="true" />
-          </button>
-        {/if}
-        {#key draftFenceGeneration}
-          <MoveIssueDialog
-            {issue}
-            {projects}
-            hasChecklist={(issue.issue.metadata.checklist ?? []).length > 0 || checklistRevealed}
-            hasRecurrence={!canCreateRecurrence}
-            {movePending}
-            allowMove={administrativeActionsAllowed}
-            allowRecurrence={administrativeActionsAllowed}
-            allowDelete={administrativeActionsAllowed}
-            {onMoveIssue}
-            onAddChecklist={() => {
-              checklistRevealed = true
-            }}
-            onCreateRecurrence={() => recurrenceDialogs?.openCreateRecurrence()}
-            {onDeleteIssue}
+  <fieldset class="mutation-controls">
+    <header class="detail-top">
+      <div class="detail-heading">
+        <div class="detail-kicker">
+          <span class="crumb-id">{issue.issue.short_id}</span>
+          <CopyButton
+            text={issue.issue.short_id}
+            ariaLabel={`Copy task ID ${issue.issue.short_id}`}
           />
-          <IssueStateDialog {issue} {onCloseIssue} {onReopenIssue} />
-        {/key}
+        </div>
+        <div class="detail-actions">
+          {#if onOpenGraph}
+            <button
+              type="button"
+              class="graph-toggle"
+              aria-label="Graph"
+              aria-pressed={graphOpen}
+              onclick={() => (graphOpen ? onCloseGraph?.() : onOpenGraph?.(issue.issue))}
+              ><NetworkIcon size={14} strokeWidth={1.9} aria-hidden="true" />Graph</button
+            >
+          {/if}
+          {#key draftFenceGeneration}<IssueStateDialog
+              bind:this={stateDialog}
+              {issue}
+              disabled={actionsDisabled || detailInert}
+              {onCloseIssue}
+              {onReopenIssue}
+            />{/key}
+        </div>
       </div>
-    </div>
-
-    <section class="detail-description" aria-label="Description">
-      <div class="section-header">
-        <h3>Description</h3>
-        {#if !editingBody}
+      <h2 aria-label={issue.issue.title}>
+        {#if editingTitle}
+          <input
+            class="title-edit"
+            aria-label="Edit title"
+            bind:this={titleInput}
+            bind:value={titleDraft}
+            disabled={savingTitle || actionsDisabled}
+            onkeydown={handleTitleKeydown}
+            onblur={() => {
+              if (!titleConflict) void commitTitle()
+            }}
+          />
+        {:else}
           <button
             type="button"
-            class="text-button"
-            aria-label="Edit description"
-            onclick={startEditingBody}
+            class="title-button"
+            aria-label="Edit title"
+            disabled={actionsDisabled || detailInert}
+            onclick={startEditingTitle}>{issue.issue.title}</button
           >
-            <PencilIcon size={13} strokeWidth={1.8} />
-            <span>Edit</span>
-          </button>
         {/if}
-      </div>
-      {#if editingBody}
-        <textarea
-          class="body-edit"
-          aria-label="Edit description"
-          rows="8"
-          bind:this={bodyTextarea}
-          bind:value={bodyDraft}
-          disabled={savingBody}
-          onkeydown={handleBodyKeydown}
-        ></textarea>
-        <div class="body-edit-actions">
-          <span>Cmd/Ctrl+Enter saves</span>
-          <div>
-            <button
-              type="button"
-              class="ghost-button"
-              disabled={savingBody}
-              onclick={() => {
-                editingBody = false
-              }}>Cancel</button
-            >
-            <button
-              type="button"
-              class="accent-button"
-              disabled={savingBody}
-              onclick={() => {
-                void commitBody()
-              }}
-            >
-              {savingBody ? 'Saving...' : 'Save'}
-            </button>
-          </div>
-        </div>
-      {:else if issue.issue.body}
-        <Markdown source={issue.issue.body} class="body-display" />
-      {:else}
-        <p class="detail-body-empty">No description.</p>
+      </h2>
+      {#if titleConflict}
+        <Notice tone="error" class="detail-conflict">
+          {#snippet icon()}<CircleAlertIcon size={14} aria-hidden="true" />{/snippet}
+          {issue.issue.title !== titleStart
+            ? `Someone renamed this to "${issue.issue.title}" while you were editing.`
+            : 'Someone changed this task while you were editing.'} Press Enter to save yours, or Esc to
+          keep theirs.
+        </Notice>
       {/if}
-    </section>
+      {#if issue.issue.status === 'closed'}
+        {@const reason = closeEvent?.payload?.reason ?? issue.issue.closed_reason ?? 'done'}
+        <p class="state-line">
+          <span class="state-icon" class:state-icon--done={reason === 'done'} aria-hidden="true"
+            >{#if reason === 'done'}<CircleCheckIcon size={14} />{:else}<CircleSlashIcon
+                size={14}
+              />{/if}</span
+          >{closeEvent
+            ? describeResolution(closeEvent)
+            : (closedReasonLabel(issue.issue.closed_reason) ?? 'Closed')}{#if closeEvent}
+            · {actorName(closeEvent.actor)}{/if}{#if issue.issue.closed_at}
+            · {formatDay(issue.issue.closed_at)}{/if}
+        </p>
+        {#if typeof closeEvent?.payload?.message === 'string'}<p class="state-detail">
+            {closeEvent.payload.message}
+          </p>{/if}
+        {#if closeEvent}{#each closingProof(closeEvent) as proof, index (index)}<p
+              class="state-detail state-detail--code"
+            >
+              {proof}
+            </p>{/each}{/if}
+        {#if closeEvent}{#each closingAttachments(closeEvent, issue.issue.metadata) as attachment, index (index)}<p
+              class="state-detail"
+            >
+              {#if attachment.href}<a href={attachment.href}>{attachment.label}</a
+                >{:else}{attachment.label}{/if}
+            </p>{/each}{/if}
+      {:else if blocker || (due && lateDays > 0)}
+        <p class="state-line">
+          {#if blocker}
+            <span class="state-icon state-icon--warning" aria-hidden="true"
+              ><TriangleAlertIcon size={14} /></span
+            >Blocked by <code>{blocker.short_id}</code>
+            {blockerTitle}{#if (issue.issue.open_blocked_by?.length ?? 0) > 1}, +{issue.issue
+                .open_blocked_by!.length - 1} more{/if}
+          {/if}
+          {#if due && lateDays > 0}
+            {#if blocker}<span class="state-separator" aria-hidden="true">·</span>{/if}
+            <span class="state-icon state-icon--danger" aria-hidden="true"
+              ><CircleAlertIcon size={14} /></span
+            >{`Due ${formatDay(due)}, ${lateDays} ${lateDays === 1 ? 'day' : 'days'} late`}
+          {/if}
+        </p>
+      {/if}
+      <p class="created-line">
+        Created {formatDay(issue.issue.created_at)} by
+        <span class="created-person"
+          ><Avatar name={issue.issue.author} size={16} decorative />{actorName(
+            issue.issue.author,
+          )}</span
+        >
+        · Updated {timeAgo(issue.issue.updated_at)}
+      </p>
+      <CreationAttribution creation={projectIssueDetail(issue).issue.creation} />
+    </header>
   </fieldset>
 
   <IssueProperties
     {issue}
     {ownerOptions}
-    {actionsDisabled}
+    actionsDisabled={actionsDisabled || detailInert}
+    {administrativeActionsAllowed}
+    onMove={() => void moveDialog?.open()}
+    onCreateRecurrence={() => recurrenceDialogs?.openCreateRecurrence()}
+    canCreateRecurrence={administrativeActionsAllowed && canCreateRecurrence}
+    repeats={administrativeActionsAllowed && visibleRecurrences.length ? repeats : undefined}
     {draftResetGeneration}
     {draftFenceGeneration}
     {onPatchMetadata}
@@ -516,61 +617,145 @@
     {onRemoveLabel}
   />
 
-  <fieldset class="mutation-controls" disabled={actionsDisabled || detailInert}>
+  <fieldset class="mutation-controls">
+    <DetailSection
+      title="Description"
+      empty={editingBody || issue.issue.body ? undefined : 'No description'}
+    >
+      {#snippet actions()}
+        {#if !editingBody}
+          <button
+            type="button"
+            class="text-button"
+            aria-label="Edit description"
+            disabled={actionsDisabled || detailInert}
+            onclick={startEditingBody}
+          >
+            <PencilIcon size={13} strokeWidth={1.8} aria-hidden="true" />
+            <span>Edit</span>
+          </button>
+        {/if}
+      {/snippet}
+      {#if editingBody}
+        {#if bodyConflict}
+          <Notice tone="error" class="detail-conflict">
+            {#snippet icon()}<CircleAlertIcon size={14} aria-hidden="true" />{/snippet}
+            Someone changed this task while you were editing. Save again to keep your description, or
+            cancel to keep the current version.
+          </Notice>
+        {/if}
+        <textarea
+          class="body-edit"
+          aria-label="Edit description"
+          rows="8"
+          bind:this={bodyTextarea}
+          bind:value={bodyDraft}
+          disabled={savingBody || actionsDisabled}
+          onkeydown={handleBodyKeydown}
+        ></textarea>
+        <div class="body-edit-actions">
+          <span>Cmd/Ctrl+Enter saves</span>
+          <div>
+            <button
+              type="button"
+              class="ghost-button"
+              disabled={savingBody || actionsDisabled}
+              onclick={() => {
+                editingBody = false
+                bodyConflict = false
+              }}>Cancel</button
+            >
+            <button
+              type="button"
+              class="accent-button"
+              disabled={savingBody || actionsDisabled}
+              onclick={() => {
+                void commitBody()
+              }}
+            >
+              {savingBody ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </div>
+      {:else}
+        <Markdown source={issue.issue.body} class="body-display" />
+      {/if}
+    </DetailSection>
+
     <Checklist
       {issue}
-      revealed={checklistRevealed}
       disabled={actionsDisabled}
       {draftResetGeneration}
       {draftFenceGeneration}
       {onPatchMetadata}
-      onReveal={() => {
-        checklistRevealed = true
-      }}
     />
-
-    {#if administrativeActionsAllowed && (visibleRecurrences.length > 0 || canCreateRecurrence)}
-      <section class="recurrence-section" aria-label="Recurrence">
-        <RecurrencePanel
-          recurrences={visibleRecurrences}
-          canCreate={canCreateRecurrence}
-          onCreate={() => recurrenceDialogs?.openCreateRecurrence()}
-          onEdit={(recurrence) => recurrenceDialogs?.openEditRecurrence(recurrence)}
-          onDelete={(recurrence) => recurrenceDialogs?.openDeleteRecurrence(recurrence)}
-        />
-      </section>
-    {/if}
   </fieldset>
 
   {#key issue.issue.uid}
     <IssueLinks
       {issue}
       {issueCatalog}
+      {searchReferences}
       {linkFilters}
       {onLinkFiltersChange}
-      {actionsDisabled}
-      {draftResetGeneration}
+      actionsDisabled={actionsDisabled || detailInert}
       {draftFenceGeneration}
       {onEditIssue}
       {onSelectIssue}
     />
-    <Comments
-      {selectedCommentUID}
-      {navigationActive}
-      {pending}
-      {issue}
-      {searchReferences}
-      {actionsDisabled}
-      {draftResetGeneration}
-      {draftFenceGeneration}
-      {onAddComment}
-      {commentError}
-      onOpenComment={(uid, commentUID, returnComment) =>
-        void onSelectIssue?.({ uid, commentUID, returnComment })}
-    />
-    <IssueHistory {events} metadata={issue.issue.metadata} attachmentLinks={false} {pending} />
+    <div>
+      <IssueAttachments
+        {attachments}
+        showEmpty
+        baseURL={`/api/v1/projects/${issue.issue.project_id}/issues/${issue.issue.uid}/attachments`}
+        issueRef={issue.issue.qualified_id}
+        fetchAttachment={fetchAttachmentBlob}
+        uploadAttachment={onUploadAttachment
+          ? (file) => onUploadAttachment!(issue.issue.uid, file)
+          : undefined}
+        {attachmentsEnabled}
+        actionsDisabled={actionsDisabled || detailInert}
+      />
+    </div>
+    <div>
+      <Comments
+        {selfActor}
+        {selectedCommentUID}
+        {navigationActive}
+        {pending}
+        {issue}
+        {searchReferences}
+        {actionsDisabled}
+        {draftResetGeneration}
+        {draftFenceGeneration}
+        {onAddComment}
+        {commentError}
+        onOpenComment={(uid, commentUID, returnComment) =>
+          void onSelectIssue?.({ uid, commentUID, returnComment })}
+      />
+    </div>
+    <IssueHistory {events} {selfActor} metadata={issue.issue.metadata} {pending} />
   {/key}
 </section>
+
+{#snippet repeats()}
+  <RecurrencePanel
+    compact
+    recurrences={visibleRecurrences}
+    readOnly={!administrativeActionsAllowed || actionsDisabled || detailInert}
+    onEdit={(recurrence) => recurrenceDialogs?.openEditRecurrence(recurrence)}
+    onDelete={(recurrence) => recurrenceDialogs?.openDeleteRecurrence(recurrence)}
+  />
+{/snippet}
+
+<MoveIssueDialog
+  bind:this={moveDialog}
+  {issue}
+  {projects}
+  {movePending}
+  allowMove={administrativeActionsAllowed && !actionsDisabled && !detailInert}
+  {onMoveIssue}
+/>
 
 <RecurrenceDialogs
   bind:this={recurrenceDialogs}
@@ -585,283 +770,244 @@
 />
 
 <style>
+  /* Sections stack 24px apart; the header block keeps its own tighter
+     rhythm. */
   .kata-detail {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
     flex: 1 1 auto;
     min-width: 0;
     min-height: 0;
     overflow: auto;
-    /* Reserve the scrollbar's width so actions do not shift when selecting a
-       longer issue makes the pane scroll. */
     scrollbar-gutter: stable;
-    background: var(--bg-primary);
-    padding: 18px 22px;
+    background: var(--bg-surface);
+    padding: 0 16px 32px;
     container-type: inline-size;
     container-name: kata-detail;
   }
-
   .mutation-controls {
     display: contents;
   }
-
-  .detail-heading {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: var(--space-5);
-    margin-bottom: 14px;
-  }
-
-  .detail-heading-main {
+  .detail-top {
+    display: grid;
+    gap: 2px;
     min-width: 0;
-    flex: 1;
   }
-
-  /* The title button and its edit field span the pane, so the heading fills
-     its row. */
-  .detail-heading-main :global(h2) {
-    flex: 1 1 auto;
+  .detail-top :global(.detail-conflict) {
+    margin: 2px 0 6px;
   }
-
-  .detail-kicker {
+  /* The 48px header band, level with the list's header beside it; the title
+     starts 8px under it. */
+  .detail-heading {
+    box-sizing: border-box;
     display: flex;
     align-items: center;
-    gap: 6px;
-    color: var(--text-muted);
-    font-size: var(--font-size-xs);
+    justify-content: space-between;
+    min-height: 48px;
+    padding-top: 8px;
+    gap: 12px;
+    margin-bottom: 6px;
+  }
+  .detail-kicker,
+  .detail-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .detail-kicker {
+    gap: 4px;
     min-width: 0;
   }
-
-  .crumb-project {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: var(--text-primary);
-    font-size: var(--font-size-xs);
-    font-weight: 600;
-  }
-
   .crumb-id {
-    flex: none;
     color: var(--text-secondary);
     font-family: var(--font-mono);
-    font-size: var(--font-size-xs);
-    font-weight: 650;
-    white-space: nowrap;
+    font-size: var(--font-size-md);
   }
-
-  .crumb-sep {
-    color: var(--text-muted);
-  }
-
-  .detail-actions {
-    flex: 0 0 auto;
+  /* A labelled secondary button, pressed while the graph shows. */
+  .graph-toggle {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding-top: 2px;
-  }
-
-  .detail-created-at {
-    color: var(--text-muted);
-    font-size: var(--font-size-xs);
-    white-space: nowrap;
-    padding: 6px 2px;
-  }
-
-  .workspace-action {
-    min-height: 30px;
+    gap: 4px;
+    height: 28px;
+    padding: 0 12px;
     border: 1px solid var(--border-default);
-    border-radius: 6px;
-    background: color-mix(in srgb, var(--accent-blue) 10%, transparent);
-    color: var(--accent-blue);
-    padding: 0 10px;
-    font-size: var(--font-size-xs);
-    font-weight: 650;
+    border-radius: var(--radius-md);
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    font: inherit;
+    font-size: var(--font-size-md);
     white-space: nowrap;
     cursor: pointer;
   }
-
-  .workspace-action:hover:not(:disabled) {
-    border-color: color-mix(in srgb, var(--accent-blue) 40%, transparent);
-    background: color-mix(in srgb, var(--accent-blue) 16%, transparent);
+  /* Header actions are 28px controls, Complete… included. */
+  .detail-actions :global(.kit-button) {
+    min-height: 28px;
+    padding: 0 12px;
+    font-size: var(--font-size-md);
+    font-weight: var(--font-weight-normal);
   }
-
-  .workspace-action:disabled {
-    cursor: default;
-    opacity: var(--opacity-disabled);
-  }
-
-  .icon-detail-action {
-    width: 30px;
-    height: 30px;
-    border: 1px solid var(--border-default);
-    border-radius: 6px;
-    background: var(--bg-primary);
-    color: var(--text-secondary);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    cursor: pointer;
-  }
-
-  .icon-detail-action:hover {
+  .graph-toggle:hover,
+  .graph-toggle[aria-pressed='true'] {
     background: var(--bg-surface-hover);
-    color: var(--accent-blue);
   }
-
+  h2 {
+    margin: 0 0 6px;
+    font-size: var(--font-size-xl);
+    font-weight: var(--font-weight-semibold);
+    line-height: 1.25;
+  }
+  /* The title edits in place: the button and its input share one box that
+     hangs its border and padding into the inset, so the text stays put and
+     clicking shows only the border and caret. */
+  .title-button,
+  .title-edit {
+    box-sizing: border-box;
+    display: block;
+    width: calc(100% + 18px);
+    margin: -3px -9px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    padding: 2px 8px;
+    font: inherit;
+    line-height: inherit;
+  }
   .title-button {
-    width: 100%;
-    border: 0;
     background: transparent;
     color: var(--text-primary);
-    display: inline-flex;
-    align-items: flex-start;
-    gap: 8px;
-    padding: 0;
-    font: inherit;
-    font-weight: inherit;
-    line-height: inherit;
     text-align: left;
     cursor: pointer;
   }
-
-  .title-button :global(svg) {
-    flex: 0 0 auto;
-    margin-top: 0.26em;
-    color: var(--text-muted);
-    opacity: 0;
+  .title-button:hover:not(:disabled) {
+    background: var(--bg-surface-hover);
   }
-
-  .title-button:hover :global(svg),
-  .title-button:focus-visible :global(svg) {
-    opacity: 1;
-  }
-
   .title-edit {
-    width: 100%;
-    margin: 0;
-    border: 1px solid var(--border-default);
-    border-radius: 6px;
+    border-color: var(--border-default);
     background: var(--bg-primary);
     color: var(--text-primary);
-    font: inherit;
-    font-size: var(--font-size-xl);
-    font-weight: 650;
-    line-height: 1.25;
-    padding: 6px 8px;
   }
-
-  .detail-description {
-    margin: 0 0 18px;
-  }
-
-  .section-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 8px;
-  }
-
-  .section-header h3 {
+  .state-line,
+  .state-detail,
+  .created-line {
     margin: 0;
-    color: var(--text-primary);
-    font-size: var(--font-size-md);
-    font-weight: var(--font-weight-semibold);
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+    line-height: 18px;
   }
-
-  .text-button {
-    min-height: 24px;
-    border: 0;
-    border-radius: 5px;
-    background: transparent;
+  .state-detail {
+    padding-left: 18px;
+    overflow-wrap: anywhere;
+  }
+  .state-detail--code,
+  .state-line code {
+    font-family: var(--font-mono);
+  }
+  /* Each state carries its mark: blocked an amber warning, overdue a red
+     alert, Done a green check, other resolutions a muted slashed circle. */
+  .state-icon {
+    display: inline-flex;
+    margin-inline-end: 4px;
+    vertical-align: -2px;
     color: var(--text-muted);
+  }
+  .state-icon--done {
+    color: var(--accent-green);
+  }
+  .state-icon--warning {
+    color: var(--accent-amber);
+  }
+  .state-icon--danger {
+    color: var(--accent-red);
+  }
+  .state-separator {
+    padding-inline: 6px;
+    color: var(--text-muted);
+  }
+  .created-person {
     display: inline-flex;
     align-items: center;
-    gap: var(--space-2);
-    padding: 2px 6px;
+    gap: 4px;
+    vertical-align: bottom;
+  }
+  .text-button {
+    border: 0;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-secondary);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 24px;
+    padding: 0 8px;
     font: inherit;
-    font-size: var(--font-size-xs);
+    font-size: var(--font-size-md);
     cursor: pointer;
   }
-
   .text-button:hover {
     background: var(--bg-surface-hover);
     color: var(--text-primary);
   }
-
-  .detail-body-empty {
-    margin: 0;
-    color: var(--text-muted);
-    font-size: var(--font-size-sm);
+  /* A heading inside the description reads below the section's own. */
+  .kata-detail :global(.body-display :is(h1, h2, h3, h4)) {
+    margin: 0 0 8px;
+    font-size: var(--font-size-lg);
+    font-weight: var(--font-weight-semibold);
   }
-
+  .kata-detail :global(.body-display) {
+    font-size: var(--font-size-md);
+  }
   .body-edit {
-    width: 100%;
+    box-sizing: border-box;
+    display: block;
+    width: calc(100% + 18px);
+    margin: -7px -9px 0;
     resize: vertical;
     border: 1px solid var(--border-default);
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     background: var(--bg-primary);
     color: var(--text-primary);
     font: inherit;
-    font-size: var(--font-size-sm);
-    line-height: 1.45;
-    padding: 8px 10px;
+    font-size: var(--font-size-md);
+    padding: 6px 8px;
   }
-
   .body-edit-actions {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
     margin-top: 8px;
-    color: var(--text-muted);
-    font-size: var(--font-size-xs);
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
   }
-
   .body-edit-actions div {
     display: inline-flex;
-    gap: 6px;
+    gap: 8px;
   }
-
+  /* Cancel is quiet; Save finishes the edit, so it is the primary. */
   .ghost-button,
   .accent-button {
-    min-height: 28px;
-    border-radius: 6px;
+    height: 28px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-secondary);
     font: inherit;
-    font-size: var(--font-size-sm);
-    padding: 4px 10px;
+    font-size: var(--font-size-md);
+    padding: 0 12px;
     cursor: pointer;
   }
-
-  .ghost-button {
-    border: 1px solid var(--border-default);
-    background: var(--bg-primary);
-    color: var(--text-secondary);
+  .ghost-button:hover:not(:disabled) {
+    background: var(--bg-surface-hover);
+    color: var(--text-primary);
   }
-
   .accent-button {
-    border: 1px solid var(--accent-blue);
+    border-color: var(--accent-blue);
     background: var(--accent-blue);
     color: var(--bg-surface);
   }
-
-  .ghost-button:disabled,
-  .accent-button:disabled {
-    cursor: default;
-    opacity: var(--opacity-disabled);
-  }
-
-  /* Stack the title above the action row once the pane is narrow. The actions
-     never shrink, so in a row the title absorbs the whole squeeze and wraps a
-     word at a time. Keyed to the pane rather than the viewport because the
-     detail pane is a resizable SplitLayout secondary and can be dragged narrow
-     while the window is still wide. */
-  @container kata-detail (max-width: 640px) {
+  @container kata-detail (max-width: 480px) {
     .detail-heading {
-      display: grid;
+      flex-wrap: wrap;
     }
   }
 </style>

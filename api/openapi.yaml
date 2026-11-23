@@ -7636,6 +7636,8 @@ components:
           items:
             $ref: "#/components/schemas/CommentOut"
           type: array
+        effective_close_event:
+          $ref: "#/components/schemas/Event"
         history:
           items:
             $ref: "#/components/schemas/Event"
@@ -7715,7 +7717,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.64.0
+  version: 0.65.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:

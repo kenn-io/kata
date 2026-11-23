@@ -63,3 +63,27 @@ export function relativeTime(iso: string | undefined, now = new Date()): string 
   if (then.getFullYear() === now.getFullYear()) return monthDay
   return `${monthDay} '${String(then.getFullYear()).slice(-2)}`
 }
+
+export function validISODate(input: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(input)
+  if (!match) return false
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  const date = new Date(Date.UTC(year, month - 1, day))
+  return (
+    date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+  )
+}
+
+export function formatDay(value: string): string {
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value)
+  if (dateOnly && !validISODate(value)) return value
+  const date = dateOnly ? new Date(`${value}T00:00:00`) : new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: date.getFullYear() === new Date().getFullYear() ? undefined : 'numeric',
+  })
+}

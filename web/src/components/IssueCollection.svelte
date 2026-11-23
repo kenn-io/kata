@@ -69,6 +69,7 @@
     navigationGeneration?: number
     revealRequest?: KataIssueRevealRequest | null
     onSelect: (issue: KataTaskSummary) => void
+    onStatusAction?: ((issue: KataTaskSummary) => void) | undefined
     onOpenGraph?: ((issue: KataTaskSummary) => void) | undefined
     /** Replaces the list, its controls, and the toolbar under the title. */
     empty?: Snippet | undefined
@@ -96,6 +97,7 @@
     navigationGeneration = 0,
     revealRequest = null,
     onSelect,
+    onStatusAction = undefined,
     onOpenGraph = undefined,
     empty = undefined,
   }: Props = $props()
@@ -1451,6 +1453,15 @@
         {#if issue.priority !== undefined}<span> · priority: {issue.priority}</span>{/if}
       </span>
     </button>
+    {#if onStatusAction}
+      <button
+        type="button"
+        class="status-action"
+        tabindex="-1"
+        aria-label={`${issue.status === 'closed' ? 'Reopen' : 'Complete'} ${issue.short_id}`}
+        onclick={() => onStatusAction?.(issue)}
+      ></button>
+    {/if}
     {#if !columnVisibility.id}
       <div class="id-hover">
         <span>{issue.short_id}</span>
@@ -1902,6 +1913,19 @@
     border-radius: 50%;
     opacity: 0.45;
     transition: opacity 0.12s;
+  }
+
+  .status-action {
+    position: absolute;
+    left: calc(var(--list-inset) + 20px + var(--task-depth) * 18px);
+    top: 11px;
+    width: 14px;
+    height: 14px;
+    border: 0;
+    border-radius: 50%;
+    padding: 0;
+    background: transparent;
+    cursor: pointer;
   }
 
   .row-frame:hover .status-mark,

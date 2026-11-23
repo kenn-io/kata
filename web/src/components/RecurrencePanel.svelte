@@ -9,6 +9,7 @@
     recurrences: readonly KataRecurrence[]
     canCreate?: boolean
     readOnly?: boolean
+    compact?: boolean
     onCreate?: () => void
     onEdit?: (rec: KataRecurrence) => void
     onDelete?: (rec: KataRecurrence) => void
@@ -18,6 +19,7 @@
     recurrences,
     canCreate = false,
     readOnly = false,
+    compact = false,
     onCreate = () => {},
     onEdit = () => {},
     onDelete = () => {},
@@ -31,72 +33,124 @@
 </script>
 
 {#snippet recurrenceContent(rec: KataRecurrence)}
-  <div class="recurrence-icon" aria-hidden="true">
-    {#if status(rec) === 'deleted'}<Trash2 size={15} />
-    {:else if status(rec) === 'done'}<CheckCircle2 size={15} />
-    {:else}<CalendarClock size={15} />{/if}
-  </div>
-  <div class="recurrence-main">
-    <div class="recurrence-title">{rec.template_title}</div>
-    <div class="recurrence-meta">
-      <span>{formatRRule(rec.rrule)}</span>
-      <span>Start {rec.dtstart}</span>
-      <span>{rec.timezone}</span>
-    </div>
-    <div class="recurrence-meta">
-      {#if status(rec) === 'deleted'}<span>Deleted</span>
-      {:else if rec.next_occurrence_key}<span>Next {rec.next_occurrence_key}</span>
-      {:else}<span>Done</span>{/if}
-      {#if rec.last_materialized_uid}<span>Last {rec.last_materialized_uid}</span>{/if}
-      {#if rec.template_labels.length > 0}<span>{rec.template_labels.join(' · ')}</span>{/if}
-    </div>
-  </div>
-{/snippet}
-
-<section class="recurrence-panel" aria-label="Recurrences">
-  <header class="head">
-    <h3>Recurring</h3>
-    {#if !readOnly}
-      <button
-        type="button"
-        class="add"
-        disabled={!canCreate}
-        onclick={onCreate}
-        aria-label="+ New recurrence">+ New</button
-      >
-    {/if}
-  </header>
-  {#if recurrences.length === 0}
-    <p class="empty">No recurring tasks</p>
+  {#if compact}
+    <span class="compact-title">{rec.template_title}</span>
+    <span>{formatRRule(rec.rrule)}</span>
   {:else}
-    <div class="recurrence-list">
-      {#each recurrences as rec (rec.uid)}
-        <div class="recurrence-row">
-          {#if readOnly}
-            <div class="row-main read-only">{@render recurrenceContent(rec)}</div>
-          {:else}
-            <button
-              type="button"
-              class="row-main"
-              aria-label={rec.template_title}
-              onclick={() => onEdit(rec)}
-            >
-              {@render recurrenceContent(rec)}
-            </button>
-            <button
-              type="button"
-              class="row-delete"
-              aria-label="Delete recurrence"
-              onclick={() => onDelete(rec)}><Trash2 size={14} /></button
-            >
-          {/if}
-        </div>
-      {/each}
+    <div class="recurrence-icon" aria-hidden="true">
+      {#if status(rec) === 'deleted'}<Trash2 size={15} />
+      {:else if status(rec) === 'done'}<CheckCircle2 size={15} />
+      {:else}<CalendarClock size={15} />{/if}
+    </div>
+    <div class="recurrence-main">
+      <div class="recurrence-title">{rec.template_title}</div>
+      <div class="recurrence-meta">
+        <span>{formatRRule(rec.rrule)}</span>
+        <span>Start {rec.dtstart}</span>
+        <span>{rec.timezone}</span>
+      </div>
+      <div class="recurrence-meta">
+        {#if status(rec) === 'deleted'}<span>Deleted</span>
+        {:else if rec.next_occurrence_key}<span>Next {rec.next_occurrence_key}</span>
+        {:else}<span>Done</span>{/if}
+        {#if rec.last_materialized_uid}<span>Last {rec.last_materialized_uid}</span>{/if}
+        {#if rec.template_labels.length > 0}<span>{rec.template_labels.join(' · ')}</span>{/if}
+      </div>
     </div>
   {/if}
-</section>
+{/snippet}
+
+{#if compact}
+  <div class="compact-recurrences">
+    {#each recurrences as rec (rec.uid)}
+      <div class="compact-recurrence">
+        {@render recurrenceContent(rec)}
+        {#if !readOnly}
+          <button type="button" class="compact-action" onclick={() => onEdit(rec)}>Edit</button>
+          <button type="button" class="compact-action" onclick={() => onDelete(rec)}>Stop</button>
+        {/if}
+      </div>
+    {/each}
+  </div>
+{:else}
+  <section class="recurrence-panel" aria-label="Recurrences">
+    <header class="head">
+      <h3>Recurring</h3>
+      {#if !readOnly}
+        <button
+          type="button"
+          class="add"
+          disabled={!canCreate}
+          onclick={onCreate}
+          aria-label="+ New recurrence">+ New</button
+        >
+      {/if}
+    </header>
+    {#if recurrences.length === 0}
+      <p class="empty">No recurring tasks</p>
+    {:else}
+      <div class="recurrence-list">
+        {#each recurrences as rec (rec.uid)}
+          <div class="recurrence-row">
+            {#if readOnly}
+              <div class="row-main read-only">{@render recurrenceContent(rec)}</div>
+            {:else}
+              <button
+                type="button"
+                class="row-main"
+                aria-label={rec.template_title}
+                onclick={() => onEdit(rec)}
+              >
+                {@render recurrenceContent(rec)}
+              </button>
+              <button
+                type="button"
+                class="row-delete"
+                aria-label="Delete recurrence"
+                onclick={() => onDelete(rec)}><Trash2 size={14} /></button
+              >
+            {/if}
+          </div>
+        {/each}
+      </div>
+    {/if}
+  </section>
+{/if}
 
 <style>
+  .compact-recurrences {
+    display: grid;
+    gap: 2px;
+  }
+  .compact-recurrence {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    min-height: 24px;
+  }
+  .compact-recurrence > span {
+    margin-right: 4px;
+  }
+  .compact-title {
+    color: var(--text-primary);
+    font-weight: var(--font-weight-medium);
+  }
+  /* Edit and Stop are quiet text actions beside the rule. */
+  .compact-action {
+    height: 24px;
+    border: 0;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    padding: 0 6px;
+    cursor: pointer;
+  }
+  .compact-action:hover {
+    background: var(--bg-surface-hover);
+    color: var(--text-primary);
+  }
   .recurrence-panel {
     display: grid;
     gap: var(--space-4);

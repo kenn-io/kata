@@ -7791,13 +7791,14 @@ func (u UIReferencesResponseBody) Validate() error {
 }
 
 type UISelectedAuthority struct {
-	Comments    []CommentOut `json:"comments" validate:"required"`
-	History     []Event      `json:"history" validate:"required"`
-	Issue       *UIIssue     `json:"issue,omitempty"`
-	Labels      []IssueLabel `json:"labels" validate:"required"`
-	Links       []UILink     `json:"links" validate:"required"`
-	Recurrences []Recurrence `json:"recurrences" validate:"required"`
-	State       string       `json:"state" validate:"required"`
+	Comments            []CommentOut `json:"comments" validate:"required"`
+	EffectiveCloseEvent *Event       `json:"effective_close_event,omitempty"`
+	History             []Event      `json:"history" validate:"required"`
+	Issue               *UIIssue     `json:"issue,omitempty"`
+	Labels              []IssueLabel `json:"labels" validate:"required"`
+	Links               []UILink     `json:"links" validate:"required"`
+	Recurrences         []Recurrence `json:"recurrences" validate:"required"`
+	State               string       `json:"state" validate:"required"`
 }
 
 func (u UISelectedAuthority) Validate() error {
@@ -7809,6 +7810,13 @@ func (u UISelectedAuthority) Validate() error {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append(fmt.Sprintf("Comments[%d]", i), err)
+			}
+		}
+	}
+	if u.EffectiveCloseEvent != nil {
+		if v, ok := any(u.EffectiveCloseEvent).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("EffectiveCloseEvent", err)
 			}
 		}
 	}

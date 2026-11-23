@@ -7,11 +7,12 @@
 
   interface Props {
     issue: KataTaskDetail
+    disabled?: boolean | undefined
     onCloseIssue: (request: KataTaskCloseRequest) => boolean | Promise<boolean>
     onReopenIssue: () => void | Promise<void>
   }
 
-  let { issue, onCloseIssue, onReopenIssue }: Props = $props()
+  let { issue, disabled = false, onCloseIssue, onReopenIssue }: Props = $props()
 
   type CloseReason = 'done' | 'wontfix' | 'duplicate' | 'superseded'
   type DoneEvidence = 'test' | 'commit' | 'pr' | 'reviewed-paths' | 'external'
@@ -30,6 +31,9 @@
     value: reason.value,
     label: `${reason.label}. ${reason.description}`,
   }))
+
+  const defaultWontDoMessage =
+    'Removed from active work through the web issue detail because this task is no longer intended to be completed.'
 
   function chooseCloseReason(value: string | undefined): void {
     if (
@@ -65,6 +69,7 @@
   })
 
   function openCompleteDialog(): void {
+    if (disabled || pending) return
     completeReason = 'done'
     completeMessage = ''
     evidenceType = 'test'
@@ -103,8 +108,15 @@
     return 40
   }
 
+  function messageHint(): string {
+    const minimum = `at least ${messageMinimum()} characters`
+    return completeReason === 'wontfix' ? `optional; ${minimum} if written` : minimum
+  }
+
   function canComplete(): boolean {
-    if (completeMessage.trim().length < messageMinimum()) return false
+    const length = completeMessage.trim().length
+    if (completeReason === 'wontfix') return length === 0 || length >= messageMinimum()
+    if (length < messageMinimum()) return false
     if (completeReason === 'done') return evidenceValue.trim().length > 0
     if (completeReason === 'duplicate' || completeReason === 'superseded') {
       return targetIssue.trim().length > 0
@@ -146,7 +158,7 @@
                 : { type: 'test', command: value }
       return { reason: completeReason, message, evidence: [evidence] }
     }
-    return { reason: completeReason, message, evidence: [] }
+    return { reason: completeReason, message: message || defaultWontDoMessage, evidence: [] }
   }
 
   async function reopenIssue(): Promise<void> {
@@ -157,6 +169,12 @@
     } finally {
       pending = false
     }
+  }
+
+  export function activate(): void {
+    if (disabled) return
+    if (issue.issue.status === 'closed') void reopenIssue()
+    else openCompleteDialog()
   }
 
   function handleCompleteKeydown(event: KeyboardEvent): void {
@@ -172,7 +190,7 @@
     class="detail-action"
     size="sm"
     label="Reopen"
-    disabled={pending}
+    disabled={pending || disabled}
     onclick={() => void reopenIssue()}
   >
     <RotateCcwIcon size={13} strokeWidth={1.9} />
@@ -183,8 +201,8 @@
     size="sm"
     tone="info"
     surface="solid"
-    label="Complete"
-    disabled={pending}
+    label="Complete…"
+    disabled={pending || disabled}
     onclick={openCompleteDialog}
   >
     <CheckIcon size={13} strokeWidth={1.9} />
@@ -246,7 +264,7 @@
     {/if}
 
     <label class="complete-message">
-      <span>Completion note <small>(at least {messageMinimum()} characters, markdown)</small></span>
+      <span>Completion note <small>({messageHint()}, markdown)</small></span>
       <textarea
         bind:this={completeMessageInput}
         rows="4"

@@ -1697,7 +1697,12 @@ describe('AppShell', () => {
     const selected = snapshot()
     selected.selected = {
       state: 'available',
-      issue: { ...selected.collection![0]!, body: 'Original body', revision: 3 },
+      issue: {
+        ...selected.collection![0]!,
+        body: 'Original body',
+        revision: 3,
+        content_revision: 7,
+      },
       comments: [],
       labels: [],
       links: [],
@@ -1722,7 +1727,6 @@ describe('AppShell', () => {
       },
     })
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Edit issue' }))
     expect(screen.getByRole('region', { name: 'Task detail' })).not.toBeNull()
     await fireEvent.click(screen.getByRole('button', { name: 'Edit title' }))
     await fireEvent.input(screen.getByLabelText('Edit title'), {
@@ -1732,6 +1736,7 @@ describe('AppShell', () => {
 
     expect(onEditIssue).toHaveBeenCalledWith('01J00000000000000000000001', {
       title: 'Updated example issue',
+      expected_content_revision: 7,
     })
   })
 
@@ -2269,11 +2274,28 @@ describe('AppShell', () => {
     ]
     scoped.selected = {
       state: 'available',
-      issue: { ...scoped.collection![0]!, body: 'Scoped body', revision: 3 },
+      issue: { ...scoped.collection![0]!, body: 'Scoped body', revision: 3, recurrence_id: 1 },
       comments: [],
       labels: [],
       links: [],
-      recurrences: [],
+      recurrences: [
+        {
+          id: 1,
+          uid: 'recurrence-1',
+          project_id: 7,
+          rrule: 'FREQ=WEEKLY',
+          dtstart: '2026-06-01',
+          timezone: 'UTC',
+          template_title: 'Weekly example',
+          template_body: '',
+          template_labels: [],
+          template_metadata: {},
+          author: 'user-a',
+          revision: 1,
+          created_at: '2026-06-01T12:00:00Z',
+          updated_at: '2026-06-01T12:00:00Z',
+        },
+      ],
       history: [],
     }
 
@@ -2304,18 +2326,16 @@ describe('AppShell', () => {
         })
         .getAttribute('aria-disabled'),
     ).toBe('true')
-    expect((screen.getByRole('button', { name: 'Edit issue' }) as HTMLButtonElement).disabled).toBe(
+    expect((screen.getByRole('button', { name: 'Edit title' }) as HTMLButtonElement).disabled).toBe(
       false,
     )
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Edit issue' }))
-    await fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
-
-    expect(screen.getByRole('menuitem', { name: 'Add checklist' })).not.toBeNull()
-    expect(screen.queryByRole('menuitem', { name: 'Move to another project' })).toBeNull()
-    expect(screen.queryByRole('menuitem', { name: 'Create recurrence...' })).toBeNull()
-    expect(screen.queryByRole('menuitem', { name: 'Delete issue' })).toBeNull()
-    expect(screen.queryByRole('region', { name: 'Recurrences' })).toBeNull()
+    expect(screen.getByRole('region', { name: 'Checklist' })).not.toBeNull()
+    expect(
+      within(screen.getByRole('region', { name: 'Task detail' })).getByText('example-project'),
+    ).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Project:/ })).toBeNull()
+    expect(screen.queryByText('Repeats')).toBeNull()
 
     await fireEvent.click(screen.getByRole('button', { name: 'New task' }))
     await fireEvent.input(screen.getByRole('textbox', { name: 'Quick capture' }), {
@@ -2351,7 +2371,6 @@ function mutationProps(overrides: Record<string, unknown> = {}) {
     onRemoveLabel: vi.fn(),
     onCloseIssue: vi.fn(async () => true),
     onReopenIssue: vi.fn(),
-    onDeleteIssue: vi.fn(async () => true),
     onCreateIssue: vi.fn(async () => {}),
     onDesignateInbox: vi.fn(async () => {}),
     onCreateRecurrence: vi.fn(async () => {}),
@@ -2455,7 +2474,7 @@ describe('AppShell task selection', () => {
   const secondUID = '01J00000000000000000000003'
 
   function shownTitle(): string | null {
-    return within(screen.getByRole('region', { name: 'Kata issue detail' })).getByRole('heading', {
+    return within(screen.getByRole('region', { name: 'Task detail' })).getByRole('heading', {
       level: 2,
     }).textContent
   }
@@ -2519,7 +2538,7 @@ describe('AppShell task selection', () => {
     expect(screen.queryByText('No comments.')).toBeNull()
     expect(screen.queryByText('No events')).toBeNull()
     expect(screen.getByRole('status', { name: 'Loading comments' })).not.toBeNull()
-    expect(screen.getByRole('button', { name: 'Edit issue' })).toHaveProperty('disabled', true)
+    expect(screen.getByRole('button', { name: 'Edit title' })).toHaveProperty('disabled', true)
 
     const arrived = twoTaskSnapshot()
     arrived.selected = {
@@ -2554,4 +2573,45 @@ describe('AppShell task selection', () => {
     expect(shownTitle()).toContain('Example issue')
     expect(await screen.findAllByText('First comment')).not.toHaveLength(0)
   })
+
+  test.each(['authority loss', 'arrival', 'another selection', 'different route'] as const)(
+    'handles a pending completion request after %s',
+    async (change) => {
+      const onNavigate = vi.fn()
+      const props = {
+        route: { ...listRoute, issueUID: firstUID },
+        snapshot: twoTaskSnapshot(),
+        loading: false,
+        ...mutationProps(),
+        onNavigate,
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      }
+      const { rerender } = render(AppShell, { props })
+      await fireEvent.click(screen.getByRole('button', { name: 'Complete a2' }))
+      await rerender({ loading: true, requestedRoute: onNavigate.mock.lastCall![0] })
+      if (change === 'authority loss') await rerender({ canMutate: false })
+      if (change === 'another selection') {
+        await fireEvent.click(screen.getByRole('button', { name: /Example issue/ }))
+        await rerender({ loading: false, requestedRoute: undefined })
+        expect(screen.queryByRole('dialog', { name: 'Complete task' })).toBeNull()
+      }
+      if (change === 'different route')
+        await rerender({ requestedRoute: { ...listRoute, issueUID: firstUID } })
+      const arrived = twoTaskSnapshot()
+      arrived.selected = {
+        ...arrived.selected!,
+        issue: { ...arrived.collection![1]!, body: 'Second body' },
+      }
+      await rerender({
+        route: { ...listRoute, issueUID: secondUID },
+        snapshot: arrived,
+        loading: false,
+        requestedRoute: undefined,
+        canMutate: true,
+      })
+      const dialog = screen.queryByRole('dialog', { name: 'Complete task' })
+      if (change === 'arrival') expect(dialog?.textContent).toContain('Second issue')
+      else expect(dialog).toBeNull()
+    },
+  )
 })

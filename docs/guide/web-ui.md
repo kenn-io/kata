@@ -104,30 +104,25 @@ side-by-side detail layouts.
 
 ## Manage an issue
 
-Select an issue to open its detail panel. The panel opens as a read-only view
-of the description, properties, checklist, links, comments, recurrence, and
-events, with Markdown rendered in the description and comments. Status,
-priority, owner, dates, and labels sit in the header beside the actions. Each
-event shows when it happened, and parent, child, and linked issue references
-open that issue. **Edit issue** switches the panel to the editor, which can
-update the title, description, schedule, due date, owner, priority, labels, and
-project, and **Done editing** returns to the read-only view. The editor also supports:
+Select an issue to open its detail panel. Select its title or a property to
+edit it. The description and comments render Markdown. Parent, child, and
+linked issue references open the referenced issue. The panel also supports:
 
 - starting or renewing a temporary assignment from the **Assignment** control;
-  both views show its absolute expiry;
+  the owner row shows its expiry;
 - adding, completing, and removing checklist items;
 - adding comments with issue-reference completion;
 - adding related links and navigating or filtering existing parent, child,
   blocking, blocked-by, and related links;
-- completing, reopening, moving, and deleting issues; and
-- creating, editing, or deleting the issue's recurrence.
+- completing, reopening, and moving issues; and
+- creating, editing, or stopping the issue's recurrence.
 
 When a close saved a
 [closing-session reference](../reference/configuration.md#closing-session-transcripts),
 the issue's events show `Session: <agent> <id>`, linked when a URL was saved. See the configuration reference for API and AgentsView compatibility.
 
 When the daemon has [Docbank configured](attachments.md#configure-the-daemon),
-the read view also lists the issue's attachments. **Attach files** uploads one
+the detail panel also lists the issue's attachments. **Attach files** uploads one
 or more files, **Preview** shows images, and **Play** plays videos in place. See
 [Issue attachments](attachments.md) for size limits and supported types.
 
