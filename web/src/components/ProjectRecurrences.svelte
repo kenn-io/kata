@@ -23,6 +23,7 @@
     ownerOptions?: TypeaheadOption[]
     disabled?: boolean
     draftFenceGeneration?: number
+    snapshotRecurrences?: readonly KataRecurrence[] | undefined
     refreshGeneration?: number
     onCreate: (projectID: number, input: KataCreateRecurrenceInput) => Promise<void>
     onPatch: (
@@ -38,6 +39,7 @@
     ownerOptions = [],
     disabled = false,
     draftFenceGeneration = 0,
+    snapshotRecurrences = undefined,
     refreshGeneration = 0,
     onCreate,
     onPatch,
@@ -58,7 +60,7 @@
   let generation = 0
   let lastProjectID: number | undefined
 
-  async function refresh(id: number): Promise<KataRecurrence[]> {
+  async function refresh(id: number): Promise<KataRecurrence[] | null> {
     const current = ++generation
     try {
       const result = await listRecurrences({ projectId: id })
@@ -72,7 +74,7 @@
       return loaded
     } catch {
       if (current === generation) readError = true
-      return []
+      return null
     }
   }
   $effect(() => {
@@ -84,7 +86,10 @@
       readError = false
       open = false
     }
-    void refresh(id)
+    if (snapshotRecurrences !== undefined) {
+      recurrences = [...snapshotRecurrences]
+      readError = false
+    } else void refresh(id)
     return () => {
       generation++
     }
@@ -131,13 +136,18 @@
   ): Promise<void> {
     try {
       await onPatch(recurrence, input, etag)
-      await refresh(projectID)
+      if (snapshotRecurrences === undefined) await refresh(projectID)
     } catch (error) {
-      const fresh = await refresh(projectID)
-      const replacement = fresh.find((item) => item.id === recurrence.id)
-      if (replacement && error instanceof Object && 'status' in error && error.status === 412) {
+      if (error instanceof Object && 'status' in error && error.status === 412) {
+        const server = (error as { response?: { recurrence?: KataRecurrence } }).response
+          ?.recurrence
+        if (server && server.revision !== recurrence.revision) throw error
+        const fresh = await refresh(projectID)
+        const replacement = fresh?.find((item) => item.id === recurrence.id)
         throw Object.assign(error, {
-          response: { recurrence: replacement, etag: `"rev-${replacement.revision}"` },
+          response: replacement
+            ? { recurrence: replacement, etag: `"rev-${replacement.revision}"` }
+            : undefined,
         })
       }
       throw error
@@ -147,7 +157,7 @@
     try {
       return await onDelete(recurrence)
     } finally {
-      await refresh(projectID)
+      if (snapshotRecurrences === undefined) await refresh(projectID)
     }
   }
 </script>

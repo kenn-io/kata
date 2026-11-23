@@ -14,6 +14,7 @@
     KataPatchRecurrenceInput,
     KataRecurrence,
     KataRecurrenceTemplateUpdateInput,
+    KataTaskDetail,
   } from '../lib/kata/types'
   import DatePicker from './DatePicker.svelte'
   import DialogPreview from './shared/DialogPreview.svelte'
@@ -34,7 +35,7 @@
   } from '../lib/recurrence/rrule'
 
   type Mode =
-    | { kind: 'create'; projectID: number; initialIssueRef: string }
+    | { kind: 'create'; projectID: number; initialIssueRef: string; issue: KataTaskDetail }
     | { kind: 'edit'; recurrence: KataRecurrence; etag: string }
 
   interface Props {
@@ -155,8 +156,16 @@
   applyEditPrefill()
   function applyEditPrefill(): void {
     const initialMode = mode
-    if (initialMode.kind !== 'edit') return
-    applyRecurrenceToForm(initialMode.recurrence)
+    if (initialMode.kind === 'edit') {
+      applyRecurrenceToForm(initialMode.recurrence)
+    } else {
+      const issue = initialMode.issue
+      title = issue.issue.title
+      body = issue.issue.body
+      owner = issue.issue.owner ?? ''
+      priority = issue.issue.priority ?? null
+      labelsText = issue.labels.map((label) => label.label).join(', ')
+    }
   }
 
   // applyRecurrenceToForm fully resets every form field from the
@@ -245,8 +254,26 @@
   let activeRrule = $derived(
     mode_ === 'advanced' ? advancedText : serializeRRule(currentCommonRule),
   )
+  let savedSchedule = $derived.by(() => {
+    if (!baselineRecurrence) return false
+    const parsed = parseRRule(baselineRecurrence.rrule)
+    return (
+      parsed.kind === 'common' &&
+      dtstart === baselineRecurrence.dtstart &&
+      resolvedTimezone() === baselineRecurrence.timezone &&
+      structurallyEqualCommon(parsed.rrule, currentCommonRule, dtstart)
+    )
+  })
   let dates = $derived(
-    mode_ === 'common' ? previewDates(activeRrule, dtstart, resolvedTimezone()) : [],
+    mode_ === 'common' &&
+      (mode.kind === 'create' || (savedSchedule && baselineRecurrence?.next_occurrence_key))
+      ? previewDates(
+          activeRrule,
+          dtstart,
+          resolvedTimezone(),
+          mode.kind === 'edit' ? baselineRecurrence?.next_occurrence_key : undefined,
+        )
+      : [],
   )
 
   // The compact summary mirrors whatever rule we'd submit right now —
@@ -376,12 +403,15 @@
       onSaved()
     } catch (e) {
       if (isConflict(e)) {
-        conflictBanner = 'Server version loaded; your unsaved edits were not applied.'
         const server = (e as { response?: { recurrence?: KataRecurrence; etag?: string } }).response
         if (server?.recurrence) {
+          conflictBanner = 'Server version loaded; your unsaved edits were not applied.'
           baselineRecurrence = server.recurrence
           baselineEtag = server.etag ?? baselineEtag
           applyRecurrenceToForm(server.recurrence)
+        } else {
+          conflictBanner =
+            'Could not load the latest version. Your draft is preserved; save again to retry.'
         }
       } else {
         submitError = extractValidationMessage(e)
@@ -870,8 +900,10 @@
       {#if mode.kind === 'create' && dates.length}<div>
           This task becomes the first, scheduled {formatDay(dates[0]!)}.
         </div>{/if}
-      {#if dates.length > 1}
-        <div>Then {dates.slice(1).map(formatDay).join(' · ')}</div>
+      {#if mode.kind === 'create' ? dates.length > 1 : dates.length > 0}
+        <div>
+          Then {(mode.kind === 'create' ? dates.slice(1) : dates).map(formatDay).join(' · ')}
+        </div>
       {/if}
       <div>Completing each one makes the next.</div>
     </DialogPreview>

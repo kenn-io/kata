@@ -5,11 +5,21 @@ import RecurrenceEditorDialog from './RecurrenceEditorDialog.svelte'
 import RecurrenceDeleteDialog from './RecurrenceDeleteDialog.svelte'
 import { ADVANCED_LAST_WEEKDAY } from '../lib/recurrence/__fixtures__/advancedRules'
 import { MONTH_LONG } from '../lib/recurrence/rrule'
-import type { KataRecurrence } from '../lib/kata/types'
+import type { KataRecurrence, KataTaskDetail } from '../lib/kata/types'
 
 afterEach(cleanup)
 
-const createMode = { kind: 'create', projectID: 1, initialIssueRef: 'abc4' } as const
+const createMode = {
+  kind: 'create',
+  projectID: 1,
+  initialIssueRef: 'abc4',
+  issue: {
+    issue: { title: '', body: '' },
+    labels: [],
+    comments: [],
+    links: [],
+  } as unknown as KataTaskDetail,
+} as const
 
 const sample: KataRecurrence = {
   id: 7,
@@ -51,6 +61,81 @@ function expectDropdown(title: string, value: string): void {
 }
 
 describe('RecurrenceEditor — Common-mode rendering', () => {
+  test('prefills and saves the selected task template', async () => {
+    const onCreate = vi.fn().mockResolvedValue(undefined)
+    const issue = {
+      issue: {
+        title: 'Selected weekly review',
+        body: 'Review details',
+        owner: 'user-a',
+        priority: 2,
+      },
+      labels: [{ label: 'routine' }],
+    } as KataTaskDetail
+    render(RecurrenceEditorDialog, {
+      props: {
+        open: true,
+        mode: { ...createMode, issue },
+        actor: 'user-a',
+        onClose: vi.fn(),
+        onCreate,
+        onPatch: vi.fn(),
+      },
+    })
+    expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe(
+      'Selected weekly review',
+    )
+    await fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(onCreate).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        template: expect.objectContaining({
+          title: 'Selected weekly review',
+          body: 'Review details',
+          owner: 'user-a',
+          priority: 2,
+          labels: ['routine'],
+        }),
+      }),
+    )
+  })
+
+  test('edit preview starts at the live cursor and omits exhausted rules', async () => {
+    const recurrence = {
+      ...sample,
+      rrule: 'FREQ=WEEKLY;BYDAY=MO',
+      dtstart: '2026-01-05',
+      next_occurrence_key: '2026-01-19',
+    }
+    const view = render(RecurrenceEditor, {
+      props: {
+        mode: { kind: 'edit', recurrence, etag: '"rev-1"' },
+        actor: 'user-a',
+        onCreate: vi.fn(),
+        onPatch: vi.fn(),
+        onSaved: vi.fn(),
+      },
+    })
+    expect(screen.getByText('Then Jan 19 · Jan 26 · Feb 2')).toBeTruthy()
+    await fireEvent.click(screen.getByRole('button', { name: 'Tue' }))
+    expect(screen.queryByText(/^Then /)).toBeNull()
+    view.unmount()
+    render(RecurrenceEditor, {
+      props: {
+        mode: {
+          kind: 'edit',
+          recurrence: { ...recurrence, next_occurrence_key: undefined },
+          etag: '"rev-1"',
+        },
+        actor: 'user-a',
+        onCreate: vi.fn(),
+        onPatch: vi.fn(),
+        onSaved: vi.fn(),
+      },
+    })
+    expect(screen.queryByText(/^Then /)).toBeNull()
+  })
+
   test('previews the first task and following dates', () => {
     render(RecurrenceEditor, {
       props: {
@@ -786,6 +871,26 @@ describe('RecurrenceEditor — edit diff', () => {
 })
 
 describe('RecurrenceEditor — 412 conflict', () => {
+  test('keeps the draft and offers another save when conflict reload fails', async () => {
+    const onPatch = vi.fn().mockRejectedValue({ status: 412 })
+    render(RecurrenceEditorDialog, {
+      props: {
+        open: true,
+        mode: editMode,
+        actor: 'user-a',
+        onClose: vi.fn(),
+        onCreate: vi.fn(),
+        onPatch,
+      },
+    })
+    await fireEvent.input(screen.getByLabelText('Title'), { target: { value: 'My draft' } })
+    await fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(screen.getByText(/Could not load the latest version/)).toBeTruthy()
+    expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('My draft')
+    await fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(onPatch).toHaveBeenCalledTimes(2)
+  })
+
   test('412 response repopulates form with server payload and shows the exact banner text', async () => {
     const updatedServer: KataRecurrence = {
       ...sample,

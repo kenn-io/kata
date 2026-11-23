@@ -144,3 +144,88 @@ it('keeps the loaded rules available after a failed refresh and retries', async 
   await fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
   await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
 })
+
+it('uses the selected task snapshot until it becomes unavailable', async () => {
+  vi.mocked(listRecurrences).mockResolvedValue({
+    status: 200,
+    headers: new Headers(),
+    data: { recurrences: [recurrence] },
+  })
+  const view = render(ProjectRecurrences, {
+    props: {
+      projectID: 1,
+      actor: 'user-a',
+      snapshotRecurrences: [recurrence],
+      onCreate: vi.fn(),
+      onPatch: vi.fn(),
+      onDelete: vi.fn(),
+    },
+  })
+  expect(await screen.findByRole('button', { name: /1 repeating task/ })).toBeTruthy()
+  expect(listRecurrences).not.toHaveBeenCalled()
+  await view.rerender({ snapshotRecurrences: undefined, projectID: 2 })
+  await waitFor(() => expect(listRecurrences).toHaveBeenCalledWith({ projectId: 2 }))
+})
+
+it('preserves the draft when a conflict reload fails despite a stale response', async () => {
+  vi.mocked(listRecurrences)
+    .mockResolvedValueOnce({
+      status: 200,
+      headers: new Headers(),
+      data: { recurrences: [recurrence] },
+    })
+    .mockResolvedValueOnce({
+      status: 503,
+      headers: new Headers(),
+      data: { error: { code: 'unavailable', message: 'Unavailable' } },
+    } as Awaited<ReturnType<typeof listRecurrences>>)
+  const error = Object.assign(new Error('conflict'), {
+    status: 412,
+    response: { recurrence, etag: '"rev-1"' },
+  })
+  render(ProjectRecurrences, {
+    props: {
+      projectID: 1,
+      actor: 'user-a',
+      onCreate: vi.fn(),
+      onPatch: vi.fn().mockRejectedValue(error),
+      onDelete: vi.fn(),
+    },
+  })
+  await fireEvent.click(await screen.findByRole('button', { name: /1 repeating task/ }))
+  await fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+  const dialog = screen.getByRole('dialog')
+  await fireEvent.input(within(dialog).getByLabelText('Title'), { target: { value: 'My draft' } })
+  await fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+  expect(await within(dialog).findByText(/Could not load the latest version/)).toBeTruthy()
+  expect((within(dialog).getByLabelText('Title') as HTMLInputElement).value).toBe('My draft')
+})
+
+it('uses the refreshed snapshot on conflict without listing again', async () => {
+  const updated = { ...recurrence, revision: 2, template_title: 'Server update' }
+  const conflict = Object.assign(new Error('conflict'), {
+    status: 412,
+    response: { recurrence: updated, etag: '"rev-2"' },
+  })
+  render(ProjectRecurrences, {
+    props: {
+      projectID: 1,
+      actor: 'user-a',
+      snapshotRecurrences: [recurrence],
+      onCreate: vi.fn(),
+      onPatch: vi.fn().mockRejectedValue(conflict),
+      onDelete: vi.fn(),
+    },
+  })
+  await fireEvent.click(await screen.findByRole('button', { name: /1 repeating task/ }))
+  await fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+  const dialog = screen.getByRole('dialog')
+  await fireEvent.input(within(dialog).getByLabelText('Title'), { target: { value: 'My draft' } })
+  await fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+  await waitFor(() =>
+    expect((within(dialog).getByLabelText('Title') as HTMLInputElement).value).toBe(
+      'Server update',
+    ),
+  )
+  expect(listRecurrences).not.toHaveBeenCalled()
+})

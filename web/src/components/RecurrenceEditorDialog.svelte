@@ -8,10 +8,11 @@
     KataCreateRecurrenceInput,
     KataPatchRecurrenceInput,
     KataRecurrence,
+    KataTaskDetail,
   } from '../lib/kata/types'
 
   type Mode =
-    | { kind: 'create'; projectID: number; initialIssueRef: string }
+    | { kind: 'create'; projectID: number; initialIssueRef: string; issue: KataTaskDetail }
     | { kind: 'edit'; recurrence: KataRecurrence; etag: string }
 
   interface Props {

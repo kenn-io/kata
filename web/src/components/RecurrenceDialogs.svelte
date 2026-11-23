@@ -138,6 +138,7 @@
           kind: 'create',
           projectID: selectedIssue.issue.project_id,
           initialIssueRef: selectedIssue.issue.short_id,
+          issue: selectedIssue,
         }
       : { kind: 'edit', recurrence: recurrenceDialog.recurrence!, etag: recurrenceDialog.etag }}
     {actor}

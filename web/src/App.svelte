@@ -812,9 +812,13 @@
     )
     if (accepted) return
     if (mutationState.kind === 'revision-conflict') {
-      const replacement = authority?.snapshot?.selected?.recurrences?.find(
-        (item) => item.uid === recurrence.uid,
-      )
+      const replacement =
+        authority?.stale === false &&
+        authority.snapshot?.selected?.issue?.project_id === recurrence.project_id
+          ? authority.snapshot.selected.recurrences.find(
+              (item) => item.uid === recurrence.uid && item.revision !== recurrence.revision,
+            )
+          : undefined
       throw Object.assign(new Error(mutationState.detail), {
         status: 412,
         code: mutationState.code,
