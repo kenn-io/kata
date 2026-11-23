@@ -710,7 +710,7 @@ type LabelsInput struct {
 // ShowInput selects one bound-project issue.
 type ShowInput struct {
 	Thread       string `json:"thread,omitempty" jsonschema:"Comment reference whose transitive replies to show; maximum 50 including root"`
-	Inbound      string `json:"inbound,omitempty" jsonschema:"Author or author/teammate whose comments receive replies on this issue"`
+	Inbound      string `json:"inbound,omitempty" jsonschema:"Use a comment author_filter, optionally followed by /teammate, to find replies to that author"`
 	Kind         string `json:"kind,omitempty" jsonschema:"Reply kind filter; requires thread or inbound"`
 	Since        string `json:"since,omitempty" jsonschema:"Comments strictly after this comment reference"`
 	Ref          string `json:"ref" jsonschema:"Bare short ID, qualified reference, or full issue UID"`
@@ -943,6 +943,7 @@ type CommentSummary struct {
 	Teammate           string            `json:"teammate,omitempty"`
 	UID                string            `json:"uid"`
 	Author             string            `json:"author"`
+	AuthorFilter       string            `json:"author_filter,omitempty" jsonschema:"Exact author for the inbound filter"`
 	Body               string            `json:"body"`
 	CreatedAt          string            `json:"created_at"`
 }

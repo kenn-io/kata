@@ -256,6 +256,9 @@ and optional `force` to bypass duplicate-reply rejection. The required
 `kata.show` accepts `thread`, `inbound`, `kind`, and `since` selectors and
 returns handles, reply lines, backlinks, and edit state. Thread results retain
 their root within the requested comment limit and report truncation.
+Use a comment's `author_filter` as the `inbound` author. A `kata.digest` actor's
+`actor_filters` contains the exact values to pass to its `actors` filter. Use a
+`kata.audit_closes` row's `actor_filter` as its `actor` filter.
 Endpoint identities and backlinks remain within the server's fixed startup
 project UID scope, including after project moves or renames. See the
 [CLI reference](cli.md#issue-lifecycle) for selector behavior, reply validation,
@@ -385,7 +388,8 @@ already-bound issues inside the startup project scope.
 
 `kata.inbox` lists open issues that carry a request for one recipient's
 attention, the same requests `kata inbox` shows, and never clears them. It
-reads up to `limit` issues and sets `truncated` when more carry requests.
+reads up to `limit` issues and sets `truncated` when more carry requests. Pass
+a request's `from_address` to `kata notify --to`.
 `kata.status` reports an issue's owner, hold, and lease along with the actor
 the server writes as. `kata.unassign` accepts `expected_owner` so a handoff
 clears ownership only while that actor still holds the issue.

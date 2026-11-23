@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"go.kenn.io/kata/internal/authorname"
 	"go.kenn.io/kata/internal/jsonutil"
 	"go.kenn.io/kata/internal/uid"
 	kataclient "go.kenn.io/kata/pkg/client"
@@ -73,7 +74,38 @@ func cronResult[T any](value *T, err error) (*sdkmcp.CallToolResult, T, error) {
 		var zero T
 		return nil, zero, err
 	}
+	switch response := any(value).(type) {
+	case *generated.CronJobResponseBody:
+		response.Job.Author = authorname.Display(response.Job.Author)
+		displayCronEvents(response.Events)
+	case *generated.ListCronJobsResponseBody:
+		for i := range response.Jobs {
+			response.Jobs[i].Author = authorname.Display(response.Jobs[i].Author)
+		}
+	case *generated.CronWorkflowResponseBody:
+		response.Workflow.Author = authorname.Display(response.Workflow.Author)
+		displayCronEvents(response.Events)
+	case *generated.ListCronWorkflowsResponseBody:
+		for i := range response.Workflows {
+			response.Workflows[i].Author = authorname.Display(response.Workflows[i].Author)
+		}
+	case *generated.CronRunResponseBody:
+		response.Run.Actor = authorname.Display(response.Run.Actor)
+	case *generated.CronRunsResponseBody:
+		for i := range response.Runs {
+			response.Runs[i].Actor = authorname.Display(response.Runs[i].Actor)
+		}
+	case *generated.ObserveCronRunResponseBody:
+		response.Run.Actor = authorname.Display(response.Run.Actor)
+		displayCronEvents(response.Events)
+	}
 	return successResult(), *value, nil
+}
+
+func displayCronEvents(events []generated.Event) {
+	for i := range events {
+		events[i].Actor = authorname.Display(events[i].Actor)
+	}
 }
 func cronUID(value string) (string, error) {
 	value = strings.ToUpper(strings.TrimSpace(value))

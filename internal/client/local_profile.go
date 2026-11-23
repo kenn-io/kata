@@ -284,5 +284,5 @@ func waitForSupervisedProfile(ctx context.Context, resolved ResolvedDaemon, prof
 }
 
 func profileCutoverLocked(profile config.LocalProfileConfig) func(context.Context) bool {
-	return func(context.Context) bool { return sqliteCutoverLockedForDSN(profile.DSN) }
+	return func(context.Context) bool { return SQLiteCutoverLockedForDSN(profile.DSN) }
 }
