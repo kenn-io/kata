@@ -69,6 +69,7 @@ describe('RecurrenceEditor — Common-mode rendering', () => {
         body: 'Review details',
         owner: 'user-a',
         priority: 2,
+        metadata: { area: 'work', custom: 'value' },
       },
       labels: [{ label: 'routine' }],
     } as KataTaskDetail
@@ -85,6 +86,10 @@ describe('RecurrenceEditor — Common-mode rendering', () => {
     expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe(
       'Selected weekly review',
     )
+    await fireEvent.click(screen.getByText('More options'))
+    expect((screen.getByLabelText('Metadata for each task') as HTMLTextAreaElement).value).toBe(
+      '{\n  "area": "work",\n  "custom": "value"\n}',
+    )
     await fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     expect(onCreate).toHaveBeenCalledWith(
       1,
@@ -95,6 +100,7 @@ describe('RecurrenceEditor — Common-mode rendering', () => {
           owner: 'user-a',
           priority: 2,
           labels: ['routine'],
+          metadata: { area: 'work', custom: 'value' },
         }),
       }),
     )

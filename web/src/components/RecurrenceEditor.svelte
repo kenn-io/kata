@@ -165,6 +165,8 @@
       owner = issue.issue.owner ?? ''
       priority = issue.issue.priority ?? null
       labelsText = issue.labels.map((label) => label.label).join(', ')
+      const metadata = issue.issue.metadata ?? {}
+      metadataText = Object.keys(metadata).length > 0 ? JSON.stringify(metadata, null, 2) : ''
     }
   }
 
