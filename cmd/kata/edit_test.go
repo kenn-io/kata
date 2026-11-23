@@ -41,7 +41,7 @@ func TestEditBodySources(t *testing.T) {
 		runCLI(t, env, dir, "edit", issue, "--body", "old")
 		_, _, err := executeRootCaptureWithInput(ctx, t, "", "--workspace", dir, "edit", issue, "--body-stdin")
 		require.ErrorContains(t, err, `--body ""`)
-		requireCLIError(t, err, ExitValidation)
+		_ = requireCLIError(t, err, ExitValidation)
 		assert.Equal(t, "old", fetchIssueViaHTTP(t, env, pid, issue).Issue.Body)
 	})
 	t.Run("clear", func(t *testing.T) {
