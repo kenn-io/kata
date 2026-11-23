@@ -500,7 +500,11 @@ func publishRetainedComments(ctx context.Context, store db.Storage, binding *db.
 		}
 		envelope := federationIngestEnvelope(comment)
 		envelope.EventID = sourceID
-		_, err = client.IngestProjectEventsWithOptions(ctx, hubProjectID, []api.FederationIngestEventEnvelope{envelope}, IngestProjectEventsOptions{})
+		tokens, err := federationMoveSourceTokens(ctx, store, credentials, *binding, client.baseURL, []db.Event{comment}, opts)
+		if err != nil {
+			return false, err
+		}
+		_, err = client.IngestProjectEventsWithOptions(ctx, hubProjectID, []api.FederationIngestEventEnvelope{envelope}, IngestProjectEventsOptions{MoveSourceTokens: tokens})
 		if err != nil && retainedUnknownIssue(err) != *edit.IssueUID {
 			return false, err
 		}

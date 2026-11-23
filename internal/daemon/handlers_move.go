@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -109,9 +110,13 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 				if !binding.Enabled || binding.Role != db.FederationRoleSpoke || !binding.PushEnabled {
 					continue
 				}
-				retained, snapshot, err := retainedIssueState(ctx, cfg.DB, binding, issue.UID)
+				retained, snapshot, pending, err := retainedIssueState(ctx, cfg.DB, binding, issue.UID)
 				if err != nil {
 					return nil, internalAPIError(err)
+				}
+				if pending {
+					snapshots = append(snapshots, moveSnapshot{projectID: issue.ProjectID, uid: issue.UID})
+					continue
 				}
 				if !retained || snapshot {
 					continue
@@ -168,6 +173,43 @@ func retainMoveSnapshots(ctx context.Context, cfg ServerConfig, snapshots []move
 		if _, _, err := cfg.DB.RetainedIssueSnapshot(ctx, snapshot.projectID, snapshot.uid); err != nil {
 			return internalAPIError(err)
 		}
+		if err := syncMoveSnapshot(ctx, cfg, snapshot); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func syncMoveSnapshot(ctx context.Context, cfg ServerConfig, snapshot moveSnapshot) error {
+	offline := func() error {
+		return api.NewError(503, "federation_offline", "the retained task is waiting to sync", "retry the move after federation sync finishes", nil)
+	}
+	if cfg.FederationSyncOnce == nil {
+		return offline()
+	}
+	binding, err := cfg.DB.FederationBindingByProject(ctx, snapshot.projectID)
+	if err != nil {
+		return internalAPIError(err)
+	}
+	_, credential, err := claimForwardClient(ctx, cfg, binding)
+	if err != nil {
+		return err
+	}
+	syncCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	if err := cfg.FederationSyncOnce(syncCtx, binding, credential); err != nil {
+		return offline()
+	}
+	current, err := cfg.DB.FederationBindingByProject(ctx, snapshot.projectID)
+	if err != nil || !sameDocbankForwardRoute(current, binding) || current.Actor != binding.Actor {
+		return offline()
+	}
+	_, _, pending, err := retainedIssueState(ctx, cfg.DB, current, snapshot.uid)
+	if err != nil {
+		return internalAPIError(err)
+	}
+	if pending {
+		return offline()
 	}
 	return nil
 }

@@ -249,7 +249,7 @@ func pendingPushMayMaterializeIssue(
 	binding db.FederationBinding,
 	issueUID string,
 ) (bool, error) {
-	retained, _, err := retainedIssueState(ctx, store, binding, issueUID)
+	retained, _, _, err := retainedIssueState(ctx, store, binding, issueUID)
 	if err != nil || retained {
 		return retained, err
 	}
@@ -275,20 +275,20 @@ func pendingPushMayMaterializeIssue(
 	}
 }
 
-func retainedIssueState(ctx context.Context, store db.Storage, binding db.FederationBinding, issueUID string) (bool, bool, error) {
+func retainedIssueState(ctx context.Context, store db.Storage, binding db.FederationBinding, issueUID string) (bool, bool, bool, error) {
 	if binding.RetainedThroughEventID == 0 {
-		return false, false, nil
+		return false, false, false, nil
 	}
 	former, err := store.FormerInstanceUIDs(ctx)
 	if err != nil {
-		return false, false, err
+		return false, false, false, err
 	}
 	var afterID int64
-	retained, snapshot := false, false
+	retained, snapshot, pending := false, false, false
 	for {
-		events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: binding.ProjectID, IssueUID: issueUID, Types: []string{"issue.created", "issue.snapshot"}, AfterID: afterID, Limit: 1000})
+		events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: binding.ProjectID, IssueUID: issueUID, Types: []string{"issue.created", "issue.snapshot", "issue.moved"}, AfterID: afterID, Limit: 1000})
 		if err != nil {
-			return false, false, err
+			return false, false, false, err
 		}
 		for _, event := range events {
 			current := event.OriginInstanceUID == store.InstanceUID()
@@ -300,11 +300,12 @@ func retainedIssueState(ctx context.Context, store db.Storage, binding db.Federa
 				retained = true
 			}
 			if current && event.ID > binding.RetainedThroughEventID && event.Actor == binding.Actor && event.Type == "issue.snapshot" {
-				snapshot = true
+				snapshot = snapshot || event.ID <= binding.PushCursorEventID
+				pending = pending || event.ID > binding.PushCursorEventID
 			}
 		}
 		if len(events) < 1000 {
-			return retained, snapshot, nil
+			return retained, snapshot, pending, nil
 		}
 		afterID = events[len(events)-1].ID
 	}

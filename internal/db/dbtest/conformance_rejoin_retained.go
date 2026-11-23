@@ -10,6 +10,28 @@ import (
 )
 
 func checkRejoinRetainedHistory(t *testing.T, store db.Storage) error {
+	t.Run("recover task moved before enrollment", func(t *testing.T) {
+		ctx := t.Context()
+		source, err := store.CreateProject(ctx, "offline-move-source")
+		require.NoError(t, err)
+		target, err := store.CreateProject(ctx, "offline-move-target")
+		require.NoError(t, err)
+		issue, original, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "offline task", Author: "old-actor"})
+		require.NoError(t, err)
+		move, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "old-actor"})
+		require.NoError(t, err)
+		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: target.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: target.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: true})
+		require.NoError(t, err)
+		snapshot, sourceID, err := store.RetainedIssueSnapshot(ctx, target.ID, issue.UID)
+		require.NoError(t, err)
+		require.Equal(t, move.Event.ID, sourceID)
+		require.Equal(t, target.ID, snapshot.ProjectID)
+		require.Equal(t, "new-actor", snapshot.Actor)
+		old, err := store.EventsByUIDs(ctx, source.ID, []string{original.UID})
+		require.NoError(t, err)
+		require.Len(t, old, 1)
+		require.Equal(t, original.ContentHash, old[0].ContentHash)
+	})
 	t.Run("recover comment from retained snapshot", func(t *testing.T) {
 		ctx := t.Context()
 		project, err := store.CreateProject(ctx, "retained-comment-snapshot")
