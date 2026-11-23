@@ -100,20 +100,19 @@ name = "   "
 
 func TestWriteProjectConfig_WritesHeaderAndName(t *testing.T) {
 	for _, tc := range []struct {
-		name       string
-		write      func(workspaceRoot, name string) error
-		hardLinked bool
+		name  string
+		write func(workspaceRoot, name string) error
 	}{
-		{"write", config.WriteProjectConfig, false},
+		{"write", config.WriteProjectConfig},
 		{"replace hard-linked binding", func(dir, name string) error {
 			return config.ReplaceProjectConfig(filepath.Join(dir, ".kata.toml"), name)
-		}, true},
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			other := ""
 			original := []byte("version = 1\n\n[project]\nname = \"notes\"\n")
-			if tc.hardLinked {
+			if tc.name == "replace hard-linked binding" {
 				other = filepath.Join(setupKataProjectDir(t, string(original)), ".kata.toml")
 				if err := os.Link(other, filepath.Join(dir, ".kata.toml")); err != nil {
 					t.Skipf("hard links unavailable: %v", err)
