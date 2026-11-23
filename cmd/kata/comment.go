@@ -26,10 +26,11 @@ func newCommentCmd() *cobra.Command {
 KATA_TEAMMATE (or --teammate) records which teammate wrote it.
 
 ` + agentguide.CommentRules,
-		Example: `  kata comment abc4 --body-stdin --agent <<'EOF'
+		Example: `kata comment abc4 --body-stdin --agent <<'EOF'
 Safari 18 fires the callback twice; ` + "`retry()`" + ` runs on both.
 EOF
-  kata comment abc4 --body-file notes.md --agent`,
+
+kata comment abc4 --body-file notes.md --agent`,
 		Args: cobra.ExactArgs(1),
 	}
 	cmd.Flags().StringVar(&reply, "reply", "", "reply to a comment reference")
@@ -151,7 +152,7 @@ func newCommentEditCmd() *cobra.Command {
 		Use:   "edit <issue-ref> <comment-uid>",
 		Short: "edit a comment body",
 		Long:  `Replace the body of one comment. Find its comment UID with kata show; use -m/--body, --body-file, or --body-stdin.`,
-		Example: `  kata comment edit abc4 <comment-uid> --body-stdin --agent <<'EOF'
+		Example: `kata comment edit abc4 <comment-uid> --body-stdin --agent <<'EOF'
 Corrected repro steps: run ` + "`make test`" + ` twice.
 EOF`,
 		Args: cobra.ExactArgs(2),

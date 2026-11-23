@@ -46,11 +46,9 @@ const CommentRules = `Comment only with findings a later reader needs. Pass the 
 quoted heredoc so the shell leaves backticks and $ alone; replies such as
 --reply c:<id> take --body-stdin too:
 
-` + "```" + `sh
 kata comment <ref> --body-stdin --agent <<'EOF'
 <finding>
 EOF
-` + "```" + `
 
 Correct your own comment with kata comment edit <ref> <comment-uid>. Keep
 live status in work.attention_msg, not in comments:
