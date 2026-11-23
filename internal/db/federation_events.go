@@ -320,6 +320,26 @@ func DirectLinkPeers(event FoldEvent) (map[string]bool, error) {
 		add(uid)
 		return false
 	})
+	if err != nil {
+		return nil, err
+	}
+	if event.Type == "issue.snapshot" {
+		var payload struct {
+			Links []struct {
+				ToIssueUID string `json:"to_issue_uid"`
+				Type       string `json:"type"`
+				Incoming   bool   `json:"incoming"`
+			} `json:"links"`
+		}
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			return nil, err
+		}
+		for _, link := range payload.Links {
+			if link.Type == "parent" && link.Incoming {
+				delete(peers, link.ToIssueUID)
+			}
+		}
+	}
 	if event.Type == "issue.links_changed" || event.Type == "issue.unlinked" {
 		payload := PayloadMap(event.Payload)
 		if event.Type == "issue.links_changed" {
@@ -342,7 +362,7 @@ func DirectLinkPeers(event FoldEvent) (map[string]bool, error) {
 // child. A parent-primary event needs ordinary authority for the child.
 func directLinkAdditionEligible(event FoldEvent) bool {
 	switch event.Type {
-	case "issue.created", "issue.links_changed":
+	case "issue.created", "issue.snapshot", "issue.links_changed":
 		return true
 	case "issue.linked":
 	default:
