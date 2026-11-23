@@ -260,6 +260,7 @@ Name agents for explicit setup; use --local for project scope. If a user-level h
 			if err != nil {
 				return err
 			}
+			opts.Project = flags.Project
 			if err := checkExplicitWorkspaceBinding(startPath, &opts); err != nil {
 				return err
 			}

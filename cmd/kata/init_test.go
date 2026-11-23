@@ -234,6 +234,30 @@ func TestInit_ExplicitWorkspaceExistingBindingNoOp(t *testing.T) {
 	assert.Equal(t, ".kata.local.toml\n", string(got))
 }
 
+func TestInit_ExplicitWorkspaceReplaceEnclosingBinding(t *testing.T) {
+	root := t.TempDir()
+	runGit(t, root, "init", "--quiet")
+	sub := filepath.Join(root, "scratch")
+	require.NoError(t, os.Mkdir(sub, 0o755)) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, config.WriteProjectConfig(root, "notes"))
+	binding := filepath.Join(root, ".kata.toml")
+	original, err := os.ReadFile(binding) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	ignore := filepath.Join(root, ".gitignore")
+	require.NoError(t, os.WriteFile(ignore, []byte(".kata.local.toml\n"), 0o644)) //nolint:gosec // test fixture matches production .gitignore mode
+	daemon := newFakeDaemon(t)
+
+	err = executeInitSetup(t, daemon.srv.URL, "--workspace", sub, "--replace", "--project", "demo")
+	var ce *cliError
+	require.ErrorAs(t, err, &ce)
+	assert.Equal(t, "project_binding_conflict", ce.Code)
+	assert.Contains(t, ce.Message, binding)
+	assert.Nil(t, daemon.request())
+	got, err := os.ReadFile(binding) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	assert.Equal(t, original, got)
+}
+
 func TestInit_ExplicitWorkspaceEnclosingWrites(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
