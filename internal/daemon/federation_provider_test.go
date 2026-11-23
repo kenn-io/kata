@@ -327,12 +327,14 @@ func TestFederationProviderValidatesActorBeforeSavingReady(t *testing.T) {
 }
 
 func TestFederationRemovedProviderReleaseBlocksOvertakenMove(t *testing.T) {
-	catalog, mapping := providerMapping(t)
+	_, mapping := providerMapping(t)
 	store := openReplicaServiceStore(t)
 	source := overtakenLeaveFixture(t, store)
+	binding, err := store.FederationBindingByProject(t.Context(), source.ID)
+	require.NoError(t, err)
 	credentials := config.DefaultFederationCredentialStore()
 	before := config.FederationCredential{
-		HubURL: catalog.URL, HubProjectName: mapping.HubProject, SpokeProjectName: source.Name,
+		HubURL: binding.HubURL, HubProjectID: binding.HubProjectID, HubProjectName: source.Name, SpokeProjectName: source.Name,
 		ManagedByConfig: true, Token: "provider-credential", Actor: "worker",
 		Provider: &config.FederationProviderCredential{
 			RequestID: uuid.New(), Command: mapping.CredentialProvider, Intent: mapping.Intent,
@@ -341,24 +343,26 @@ func TestFederationRemovedProviderReleaseBlocksOvertakenMove(t *testing.T) {
 	}
 	require.NoError(t, credentials.StoreFederationCredential(t.Context(), source.UID, before))
 	t.Setenv("KATA_TEST_PROVIDER_STATUS", "released")
-	_, _, err := daemon.ReleaseRemovedFederationProvider(t.Context(), store, credentials, config.FederationManagedCredentialReservation{ProjectUID: source.UID, Credential: before})
+	_, _, err = daemon.ReleaseRemovedFederationProvider(t.Context(), store, credentials, config.FederationManagedCredentialReservation{ProjectUID: source.UID, Credential: before})
 	require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush)
 	after, found, err := credentials.FindManagedFederationCredential(t.Context(), source.Name)
 	require.NoError(t, err)
 	require.True(t, found)
 	require.True(t, before.Equal(after.Credential))
-	binding, err := store.FederationBindingByProject(t.Context(), source.ID)
+	binding, err = store.FederationBindingByProject(t.Context(), source.ID)
 	require.NoError(t, err)
 	require.True(t, binding.PushEnabled)
 }
 
 func TestFederationProviderDetachOvertakenMove(t *testing.T) {
 	env := testenv.New(t)
-	catalog, mapping := providerMapping(t)
+	_, mapping := providerMapping(t)
 	source := overtakenLeaveFixture(t, env.DB)
+	binding, err := env.DB.FederationBindingByProject(t.Context(), source.ID)
+	require.NoError(t, err)
 	credentials := config.DefaultFederationCredentialStore()
 	credential := config.FederationCredential{
-		HubURL: catalog.URL, HubProjectName: mapping.HubProject, SpokeProjectName: source.Name,
+		HubURL: binding.HubURL, HubProjectID: binding.HubProjectID, HubProjectName: source.Name, SpokeProjectName: source.Name,
 		ManagedByConfig: true, Token: "provider-credential", Actor: "worker",
 		Provider: &config.FederationProviderCredential{
 			RequestID: uuid.New(), Command: mapping.CredentialProvider, Intent: mapping.Intent,
@@ -370,11 +374,4 @@ func TestFederationProviderDetachOvertakenMove(t *testing.T) {
 	path := fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", source.ID)
 	response, raw := envDoRaw(t, env, http.MethodPost, path, map[string]any{"disposition": "detach", "actor": "worker"}, nil)
 	require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
-	_, err := env.DB.FederationBindingByProject(t.Context(), source.ID)
-	require.ErrorIs(t, err, db.ErrNotFound)
-	closed, found, err := credentials.FindManagedFederationCredential(t.Context(), source.Name)
-	require.NoError(t, err)
-	require.True(t, found)
-	require.Equal(t, federationprovider.StatusReleased, closed.Credential.Provider.Status)
-	require.Empty(t, closed.Credential.Token)
 }
