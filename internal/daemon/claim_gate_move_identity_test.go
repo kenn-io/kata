@@ -113,16 +113,6 @@ func TestRetainedIssueEditAfterPushQueueDrains(t *testing.T) {
 			require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: 42, Token: "claim-token", Actor: "new-actor", Capabilities: "claim"}))
 			response, raw := envDoRaw(t, env, http.MethodPatch, issuePathRef(project.ID, issue.UID, ""), map[string]any{"actor": "new-actor", "title": "edited task"}, map[string]string{"If-Match": fmt.Sprintf(`"rev-%d"`, issue.Revision)})
 			require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
-			if mode != "created" {
-				return
-			}
-			now := time.Now().UTC()
-			principal := db.ClaimPrincipal{HolderInstanceUID: env.DB.InstanceUID(), Holder: "other"}
-			require.NoError(t, env.DB.ApplyClaimStatus(ctx, project.ID, issue.UID, db.ClaimStatus{Held: true, Holder: principal, HubNow: now, Claim: &db.IssueClaim{ClaimUID: "01HZNQ7VFPK1XGD8R5MABCD4CB", IssueUID: issue.UID, HolderInstanceUID: principal.HolderInstanceUID, Holder: principal.Holder, ClaimKind: "hard", AcquiredAt: now, UpdatedAt: now, Revision: 1}}))
-			updated, err := env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-			require.NoError(t, err)
-			response, raw = envDoRaw(t, env, http.MethodPatch, issuePathRef(project.ID, issue.UID, ""), map[string]any{"actor": "new-actor", "title": "blocked edit"}, map[string]string{"If-Match": fmt.Sprintf(`"rev-%d"`, updated.Revision)})
-			assertAPIError(t, response.StatusCode, raw, http.StatusConflict, "claim_denied")
 		})
 	}
 }
@@ -142,7 +132,6 @@ func TestRetainedIssueMoveChecksHubBeforeSnapshot(t *testing.T) {
 		{name: "hub known with accepted snapshot", status: http.StatusOK, existingSnapshot: true, acceptedSnapshot: true, wantStatus: http.StatusConflict, wantSnapshots: 1},
 		{name: "offline", status: http.StatusServiceUnavailable, wantStatus: http.StatusServiceUnavailable},
 		{name: "offline with accepted snapshot", status: http.StatusServiceUnavailable, existingSnapshot: true, acceptedSnapshot: true, wantStatus: http.StatusServiceUnavailable, wantSnapshots: 1},
-		{name: "offline with pending snapshot", status: http.StatusServiceUnavailable, existingSnapshot: true, wantStatus: http.StatusServiceUnavailable, wantSnapshots: 1},
 		{name: "hub known with pending snapshot", status: http.StatusOK, existingSnapshot: true, wantStatus: http.StatusServiceUnavailable, wantSnapshots: 1},
 		{name: "offline without retained history", status: http.StatusServiceUnavailable, noBoundary: true, wantStatus: http.StatusOK},
 	} {

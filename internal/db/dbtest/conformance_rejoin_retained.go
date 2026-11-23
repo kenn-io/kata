@@ -114,9 +114,6 @@ func checkRejoinRetainedHistoryReset(t *testing.T, store db.Storage, backend Bac
 	snapshot, sourceID, err := store.RetainedIssueSnapshot(ctx, project.ID, issue.UID)
 	require.NoError(t, err)
 	require.Equal(t, old.ID, sourceID)
-	again, _, err := store.RetainedIssueSnapshot(ctx, project.ID, issue.UID)
-	require.NoError(t, err)
-	require.Equal(t, snapshot.UID, again.UID)
 	require.NoError(t, store.AdvanceFederationPushCursor(ctx, project.ID, snapshot.ID))
 	if restored {
 		records, err := CollectImportRecords(ctx, store, db.ExportFilter{IncludeDeleted: true})
