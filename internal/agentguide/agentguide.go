@@ -38,9 +38,9 @@ run kata quickstart.
 
 // ClaimRules says how to claim and renew. A timed claim lets Kata flag the
 // issue for a human when an agent stops without handing it off.
-const ClaimRules = `Claim the issue before you work on it, with a time limit:
+const ClaimRules = `Claim before you work:
 
-    kata claim <ref> --ttl 2h --agent
+    kata claim <ref> --if-unowned --ttl 2h --agent
 
 Renew before expiry by claiming again with --ttl, without --if-unowned.
 `
@@ -219,7 +219,7 @@ const fragClaiming = `6. Find and claim available work (multi-agent environments
 
    # Claim it with a time limit (fails if already assigned to another actor).
    # Renew before it expires by claiming again with --ttl, without --if-unowned.
-   kata claim <ref> --ttl 2h
+   kata claim <ref> --if-unowned --ttl 2h
 
    # Release ownership only if you still own it
    kata unassign <ref> --expect-owner <your-actor>
@@ -324,7 +324,7 @@ const fragTeammates = `9. Attribute swarm contributions and request attention wi
    child issue and claim it:
 
       kata create "fix retry handling" --parent <ref> --idempotency-key retry-child
-      kata claim <child> --ttl 2h
+      kata claim <child> --if-unowned --ttl 2h
 
    Comments record findings; child issues track owned work.
 
