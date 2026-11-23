@@ -234,11 +234,7 @@ func normalizeCommentMessageFlag(_ *pflag.FlagSet, name string) pflag.Normalized
 func resolveCommentBody(cmd *cobra.Command, src BodySources) (string, error) {
 	body, err := resolveBody(src, cmd.InOrStdin())
 	if err != nil {
-		code := ExitValidation
-		if strings.HasPrefix(err.Error(), "must pass exactly one of") {
-			code = ExitUsage
-		}
-		return "", &cliError{Message: err.Error(), Kind: kindForExit(code), ExitCode: code}
+		return "", err
 	}
 	if strings.TrimSpace(body) == "" {
 		return "", &cliError{Message: "comment body is required (--body, --body-file, --body-stdin)", Kind: kindValidation, ExitCode: ExitValidation}

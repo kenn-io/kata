@@ -3061,9 +3061,10 @@ func (f FederationRootKeyRepinResult) Validate() error {
 }
 
 type FederationSearchHit struct {
-	Issue  Issue   `json:"issue"`
-	Score  float64 `json:"score"`
-	WebURL *string `json:"web_url,omitempty"`
+	Issue     Issue    `json:"issue"`
+	MatchedIn []string `json:"matched_in,omitempty"`
+	Score     float64  `json:"score"`
+	WebURL    *string  `json:"web_url,omitempty"`
 }
 
 func (f FederationSearchHit) Validate() error {
@@ -3080,8 +3081,10 @@ func (f FederationSearchHit) Validate() error {
 }
 
 type FederationSearchResponseBody struct {
-	Bounded bool                  `json:"bounded"`
-	Hits    []FederationSearchHit `json:"hits" validate:"required"`
+	Bounded        bool                  `json:"bounded"`
+	DegradedReason *string               `json:"degraded_reason,omitempty"`
+	Hits           []FederationSearchHit `json:"hits" validate:"required"`
+	Mode           *string               `json:"mode,omitempty"`
 }
 
 func (f FederationSearchResponseBody) Validate() error {

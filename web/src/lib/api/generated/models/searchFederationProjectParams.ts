@@ -5,6 +5,10 @@ import type { SearchFederationProjectStatus } from './searchFederationProjectSta
 
 export type SearchFederationProjectParams = {
   q: string
+  /**
+   * Fall back to keyword search when the hub cannot run semantic search. Absent means strict semantic.
+   */
+  auto?: boolean
   limit?: number
   status?: SearchFederationProjectStatus
   label?: string[]
