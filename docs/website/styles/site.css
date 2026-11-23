@@ -392,6 +392,7 @@ h3 {
   overflow-x: auto;
   margin: 0;
   padding: 1rem 1.25rem 1.25rem;
+  font-variant-ligatures: none;
 }
 
 .term .ps1 {
