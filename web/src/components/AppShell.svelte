@@ -947,7 +947,7 @@
               actor={selfActor ?? 'kata-web'}
               disabled={!projectWideMutationAllowed || mutationPending}
               {draftFenceGeneration}
-              refreshKey={recurrenceRevision}
+              refreshKey={`${recurrenceRevision}:${draftResetGeneration}`}
               onCreate={onCreateRecurrence}
               onPatch={onPatchRecurrence}
               onDelete={onDeleteRecurrence}

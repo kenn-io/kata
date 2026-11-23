@@ -16,7 +16,7 @@
     actor: string
     disabled?: boolean
     draftFenceGeneration?: number
-    refreshKey?: number
+    refreshKey?: number | string
     onCreate: (projectID: number, input: KataCreateRecurrenceInput) => Promise<void>
     onPatch: (
       recurrence: KataRecurrence,

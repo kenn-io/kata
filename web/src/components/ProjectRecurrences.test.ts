@@ -204,3 +204,29 @@ it('retries a refused stop with the current revision', async () => {
   await waitFor(() => expect(onDelete).toHaveBeenLastCalledWith(updated))
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
 })
+
+it('rereads the rules when its refresh key changes', async () => {
+  vi.mocked(listRecurrences).mockResolvedValue({
+    status: 200,
+    headers: new Headers(),
+    data: { recurrences: [] },
+  })
+  const view = render(ProjectRecurrences, {
+    props: {
+      projectID: 1,
+      actor: 'user-a',
+      refreshKey: '0:1',
+      onCreate: vi.fn(),
+      onPatch: vi.fn(),
+      onDelete: vi.fn(),
+    } as never,
+  })
+  await waitFor(() => expect(listRecurrences).toHaveBeenCalledTimes(1))
+  vi.mocked(listRecurrences).mockResolvedValue({
+    status: 200,
+    headers: new Headers(),
+    data: { recurrences: [recurrence] },
+  })
+  await view.rerender({ refreshKey: '0:2' } as never)
+  expect(await screen.findByRole('button', { name: /1 repeating task/ })).toBeTruthy()
+})
