@@ -152,7 +152,7 @@
     {disabled}
     onClose={closeRecurrenceDialog}
     {onCreate}
-    onPatch={onPatch ?? (async () => {})}
+    onPatch={onPatch!}
   />
 {/if}
 
