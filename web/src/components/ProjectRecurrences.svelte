@@ -23,7 +23,7 @@
       input: KataPatchRecurrenceInput,
       etag: string,
     ) => Promise<void>
-    onDelete: (recurrence: KataRecurrence) => Promise<boolean>
+    onDelete: (recurrence: KataRecurrence) => Promise<void>
   }
   let {
     projectID,
@@ -114,13 +114,24 @@
       await onPatch(recurrence, input, etag)
     } catch (error) {
       await refresh(projectID)
+      // A conflict hands the editor the other writer's version to load.
+      const latest = recurrences.find((item) => item.uid === recurrence.uid)
+      if (isConflict(error) && latest && latest.revision !== recurrence.revision) {
+        throw Object.assign(error, { latest })
+      }
       throw error
     }
   }
-  async function stop(recurrence: KataRecurrence): Promise<boolean> {
-    const stopped = await onDelete(recurrence)
-    if (!stopped) await refresh(projectID)
-    return stopped
+  function isConflict(error: unknown): error is { status: 412 } {
+    return !!error && typeof error === 'object' && (error as { status?: unknown }).status === 412
+  }
+  async function stop(recurrence: KataRecurrence): Promise<void> {
+    try {
+      await onDelete(recurrence)
+    } catch (error) {
+      await refresh(projectID)
+      throw error
+    }
   }
 </script>
 

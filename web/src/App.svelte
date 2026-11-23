@@ -597,6 +597,17 @@
     )
   }
 
+  async function designateInbox(projectUID: string): Promise<void> {
+    const project = authority?.snapshot?.catalog?.find(
+      ({ project }) => project.uid === projectUID,
+    )?.project
+    if (!project) throw new Error('Project is not available.')
+    const accepted = await runMutation({ draft: projectUID }, (context) =>
+      patchInboxProject(project, context),
+    )
+    if (!accepted) throw new Error(mutationMessage(mutationState) ?? 'Could not change the Inbox.')
+  }
+
   async function createIssue(
     title: string,
     parent?: { projectID: number; projectUID: string; issueUID: string },
@@ -819,7 +830,7 @@
     throw new Error(mutationMessage(mutationState) ?? 'Could not update recurrence.')
   }
 
-  async function deleteRecurrence(recurrence: KataRecurrence): Promise<boolean> {
+  async function deleteRecurrence(recurrence: KataRecurrence): Promise<void> {
     const accepted = await runMutation(
       { draft: recurrence, revision: `"rev-${recurrence.revision}"` },
       async (context) => {
@@ -833,8 +844,14 @@
         return { ...result, data: result.status === 204 ? true : result.data }
       },
     )
-    if (accepted) recurrenceRevision++
-    return accepted
+    if (accepted) {
+      recurrenceRevision++
+      return
+    }
+    if (mutationState.kind === 'revision-conflict') {
+      throw new Error('This rule changed. Review it and try again.')
+    }
+    throw new Error(mutationMessage(mutationState) ?? 'Could not stop repeating.')
   }
 
   function recurrenceTemplate(
@@ -1534,6 +1551,7 @@
         ownerOptions={(references?.owners ?? []).map((owner) => ({ name: owner, label: owner }))}
         onNavigate={navigate}
         onCreateProject={createProject}
+        onDesignateInbox={designateInbox}
         onCreateIssue={createIssue}
         {searchReferences}
         onMoveIssue={moveIssue}

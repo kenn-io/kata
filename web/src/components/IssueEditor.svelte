@@ -55,7 +55,8 @@
     pending?: boolean | undefined
     navigationActive?: boolean | undefined
     returnComment?: { issueUID: string; commentUID: string } | undefined
-    commentError?: string | undefined
+    // The latest failed mutation's message, shown where it was attempted.
+    mutationError?: string | undefined
     issue: KataTaskDetail
     today?: string | undefined
     events?: readonly KataTaskEvent[] | undefined
@@ -107,7 +108,7 @@
     selectedCommentUID,
     pending = false,
     navigationActive = true,
-    commentError = undefined,
+    mutationError = undefined,
     events = [],
     today = localDateString(new Date()),
     issueCatalog = [],
@@ -493,6 +494,7 @@
           {#key draftFenceGeneration}<IssueStateDialog
               bind:this={stateDialog}
               {issue}
+              {issueCatalog}
               disabled={actionsDisabled || detailInert}
               {onCloseIssue}
               {onReopenIssue}
@@ -720,7 +722,7 @@
         {draftResetGeneration}
         {draftFenceGeneration}
         {onAddComment}
-        {commentError}
+        commentError={mutationError}
         onOpenComment={(uid, commentUID, returnComment) =>
           void onSelectIssue?.({ uid, commentUID, returnComment })}
       />
@@ -742,7 +744,7 @@
   {movePending}
   allowMove={administrativeActionsAllowed && !actionsDisabled && !detailInert}
   {onMoveIssue}
-  error={commentError}
+  error={mutationError}
 />
 
 <RecurrenceDialogs
@@ -753,8 +755,6 @@
   disabled={actionsDisabled || !administrativeActionsAllowed}
   {draftFenceGeneration}
   onCreate={onCreateRecurrence}
-  onPatch={async () => {}}
-  onDelete={async () => false}
 />
 
 <style>

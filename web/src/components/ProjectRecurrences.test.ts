@@ -29,32 +29,43 @@ afterEach(() => {
   vi.resetAllMocks()
 })
 
-it.each([200, 403])(
-  'hides the count when the list is empty or unavailable (%i)',
-  async (status) => {
-    vi.mocked(listRecurrences).mockResolvedValue({
-      status,
-      headers: new Headers(),
-      data:
-        status === 200
-          ? { recurrences: [] }
-          : { error: { code: 'forbidden', message: 'Forbidden' } },
-    } as Awaited<ReturnType<typeof listRecurrences>>)
-    render(ProjectRecurrences, {
-      props: {
-        projectID: 1,
-        actor: 'user-a',
-        onCreate: vi.fn(),
-        onPatch: vi.fn(),
-        onDelete: vi.fn(),
-      },
-    })
-    await waitFor(() => expect(listRecurrences).toHaveBeenCalled())
-    if (status === 403) expect(await screen.findByRole('alert')).toBeTruthy()
-    else await tick()
-    expect(screen.queryByRole('button', { name: /repeating task/ })).toBeNull()
-  },
-)
+function renderList(props: Partial<{ onPatch: unknown; onDelete: unknown }> = {}) {
+  return render(ProjectRecurrences, {
+    props: {
+      projectID: 1,
+      actor: 'user-a',
+      onCreate: vi.fn(),
+      onPatch: vi.fn(),
+      onDelete: vi.fn(),
+      ...props,
+    } as never,
+  })
+}
+
+it('hides the count when the project has no rules', async () => {
+  vi.mocked(listRecurrences).mockResolvedValue({
+    status: 200,
+    headers: new Headers(),
+    data: { recurrences: [] },
+  })
+  renderList()
+  await waitFor(() => expect(listRecurrences).toHaveBeenCalled())
+  await tick()
+  expect(screen.queryByRole('alert')).toBeNull()
+  expect(screen.queryByRole('button', { name: /repeating task/ })).toBeNull()
+})
+
+it('offers a retry instead of the count when the list is unavailable', async () => {
+  vi.mocked(listRecurrences).mockResolvedValue({
+    status: 403,
+    headers: new Headers(),
+    data: { error: { code: 'forbidden', message: 'Forbidden' } },
+  } as Awaited<ReturnType<typeof listRecurrences>>)
+  renderList()
+  const alert = await screen.findByRole('alert')
+  expect(within(alert).getByRole('button', { name: 'Retry' })).toBeTruthy()
+  expect(screen.queryByRole('button', { name: /repeating task/ })).toBeNull()
+})
 
 it('lists a project rule and opens its stop dialog', async () => {
   vi.mocked(listRecurrences).mockResolvedValue({
@@ -83,26 +94,34 @@ it('lists a project rule and opens its stop dialog', async () => {
   expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
 })
 
-it('refetches on open and after an edit conflict', async () => {
-  vi.mocked(listRecurrences).mockResolvedValue({
-    status: 200,
-    headers: new Headers(),
-    data: { recurrences: [recurrence] },
-  })
+it('hands the refreshed rule to the editor after an edit conflict', async () => {
+  const theirs = { ...recurrence, template_title: 'Their title', revision: 2 }
+  vi.mocked(listRecurrences)
+    .mockResolvedValueOnce({
+      status: 200,
+      headers: new Headers(),
+      data: { recurrences: [recurrence] },
+    })
+    .mockResolvedValueOnce({
+      status: 200,
+      headers: new Headers(),
+      data: { recurrences: [recurrence] },
+    })
+    .mockResolvedValue({ status: 200, headers: new Headers(), data: { recurrences: [theirs] } })
   const onPatch = vi.fn().mockRejectedValue({ status: 412 })
-  render(ProjectRecurrences, {
-    props: { projectID: 1, actor: 'user-a', onCreate: vi.fn(), onPatch, onDelete: vi.fn() },
-  })
+  renderList({ onPatch })
   await fireEvent.click(await screen.findByRole('button', { name: /1 repeating task/ }))
   await waitFor(() => expect(listRecurrences).toHaveBeenCalledTimes(2))
   await fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
   const dialog = screen.getByRole('dialog')
   await fireEvent.input(within(dialog).getByLabelText('Title'), { target: { value: 'My edit' } })
   await fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
-  await waitFor(() => expect(listRecurrences).toHaveBeenCalledTimes(3))
+  await fireEvent.click(await within(dialog).findByRole('button', { name: 'Load current version' }))
+  expect((within(dialog).getByLabelText('Title') as HTMLInputElement).value).toBe('Their title')
+  expect(onPatch).toHaveBeenCalledTimes(1)
 })
 
-it('refreshes a refused stop before retrying with the current revision', async () => {
+it('explains a refused stop in its dialog and retries with the current revision', async () => {
   const updated = { ...recurrence, revision: 2 }
   vi.mocked(listRecurrences)
     .mockResolvedValueOnce({
@@ -116,7 +135,10 @@ it('refreshes a refused stop before retrying with the current revision', async (
       data: { recurrences: [recurrence] },
     })
     .mockResolvedValue({ status: 200, headers: new Headers(), data: { recurrences: [updated] } })
-  const onDelete = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true)
+  const onDelete = vi
+    .fn()
+    .mockRejectedValueOnce(new Error('This rule changed. Review it and try again.'))
+    .mockResolvedValueOnce(undefined)
   render(ProjectRecurrences, {
     props: { projectID: 1, actor: 'user-a', onCreate: vi.fn(), onPatch: vi.fn(), onDelete },
   })
@@ -124,6 +146,9 @@ it('refreshes a refused stop before retrying with the current revision', async (
   await fireEvent.click(screen.getByRole('button', { name: 'Stop repeating…' }))
   await fireEvent.click(
     within(screen.getByRole('dialog')).getByRole('button', { name: 'Stop repeating' }),
+  )
+  expect((await within(screen.getByRole('dialog')).findByRole('alert')).textContent).toContain(
+    'This rule changed. Review it and try again.',
   )
   await waitFor(() =>
     expect(
@@ -138,4 +163,5 @@ it('refreshes a refused stop before retrying with the current revision', async (
     within(screen.getByRole('dialog')).getByRole('button', { name: 'Stop repeating' }),
   )
   await waitFor(() => expect(onDelete).toHaveBeenLastCalledWith(updated))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
 })

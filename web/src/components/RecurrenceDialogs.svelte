@@ -15,12 +15,15 @@
     disabled?: boolean | undefined
     draftFenceGeneration?: number | undefined
     onCreate: (projectID: number, input: KataCreateRecurrenceInput) => Promise<void>
-    onPatch: (
-      recurrence: KataRecurrence,
-      input: KataPatchRecurrenceInput,
-      etag: string,
-    ) => Promise<void>
-    onDelete: (recurrence: KataRecurrence) => Promise<boolean>
+    // Edit and stop are offered only where a caller passes these.
+    onPatch?:
+      | ((
+          recurrence: KataRecurrence,
+          input: KataPatchRecurrenceInput,
+          etag: string,
+        ) => Promise<void>)
+      | undefined
+    onDelete?: ((recurrence: KataRecurrence) => Promise<void>) | undefined
   }
 
   let {
@@ -44,6 +47,7 @@
     recurrence: null,
   })
   let deletingRecurrence = $state(false)
+  let deleteError = $state<string | null>(null)
   let lastDraftFenceGeneration = $state<number | null>(null)
 
   $effect(() => {
@@ -61,6 +65,7 @@
     recurrenceDialog = { open: false, mode: 'create', recurrence: null, etag: '' }
     recurrenceDelete = { open: false, recurrence: null }
     deletingRecurrence = false
+    deleteError = null
   })
 
   export function openCreateRecurrence(): void {
@@ -69,7 +74,7 @@
   }
 
   export function openEditRecurrence(recurrence: KataRecurrence): void {
-    if (disabled) return
+    if (disabled || !onPatch) return
     recurrenceDialog = {
       open: true,
       mode: 'edit',
@@ -79,7 +84,8 @@
   }
 
   export function openDeleteRecurrence(recurrence: KataRecurrence): void {
-    if (disabled) return
+    if (disabled || !onDelete) return
+    deleteError = null
     recurrenceDelete = { open: true, recurrence }
   }
 
@@ -109,18 +115,20 @@
 
   function closeDeleteRecurrence(): void {
     if (deletingRecurrence) return
+    deleteError = null
     recurrenceDelete = { open: false, recurrence: null }
   }
 
   async function confirmDeleteRecurrence(): Promise<void> {
     const recurrence = recurrenceDelete.recurrence
-    if (disabled || !recurrence || deletingRecurrence) return
+    if (disabled || !onDelete || !recurrence || deletingRecurrence) return
     deletingRecurrence = true
+    deleteError = null
     try {
-      const ok = await onDelete(recurrence)
-      if (ok) {
-        recurrenceDelete = { open: false, recurrence: null }
-      }
+      await onDelete(recurrence)
+      recurrenceDelete = { open: false, recurrence: null }
+    } catch (error) {
+      deleteError = error instanceof Error ? error.message : 'Could not stop repeating.'
     } finally {
       deletingRecurrence = false
     }
@@ -141,7 +149,7 @@
     {disabled}
     onClose={closeRecurrenceDialog}
     {onCreate}
-    {onPatch}
+    onPatch={onPatch ?? (async () => {})}
   />
 {/if}
 
@@ -149,6 +157,7 @@
   <RecurrenceDeleteDialog
     open={recurrenceDelete.open}
     recurrence={recurrenceDelete.recurrence}
+    error={deleteError}
     disabled={disabled || deletingRecurrence}
     onConfirm={() => {
       void confirmDeleteRecurrence()

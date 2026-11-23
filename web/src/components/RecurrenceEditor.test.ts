@@ -771,3 +771,47 @@ describe('RecurrenceEditor — 412 conflict', () => {
     expect((screen.getByLabelText(/Title/i) as HTMLInputElement).value).toBe('My edit')
   })
 })
+
+describe('RecurrenceEditor — 412 recovery', () => {
+  test('loads the other writer’s version and lists the edits to re-apply', async () => {
+    const latest: KataRecurrence = {
+      ...sample,
+      template_title: 'Their title',
+      template_body: 'Their body',
+      revision: 2,
+    }
+    const onPatch = vi
+      .fn()
+      .mockRejectedValueOnce({ status: 412, latest })
+      .mockResolvedValueOnce(undefined)
+    render(RecurrenceEditorDialog, {
+      props: {
+        open: true,
+        mode: editMode,
+        actor: 'user-a',
+        onClose: vi.fn(),
+        onCreate: vi.fn(),
+        onPatch,
+      },
+    })
+    await fireEvent.input(screen.getByLabelText(/Title/i), { target: { value: 'My edit' } })
+    await fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await fireEvent.click(await screen.findByRole('button', { name: 'Load current version' }))
+
+    expect(onPatch).toHaveBeenCalledTimes(1)
+    expect((screen.getByLabelText(/Title/i) as HTMLInputElement).value).toBe('Their title')
+    expect((screen.getByLabelText(/Body/i) as HTMLTextAreaElement).value).toBe('Their body')
+    const changes = screen.getByRole('list', { name: 'Your changes' })
+    expect(changes.textContent).toContain('Title: My edit')
+    expect(screen.queryByRole('alert')).toBeNull()
+
+    await fireEvent.input(screen.getByLabelText(/Title/i), { target: { value: 'My edit' } })
+    await fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(onPatch).toHaveBeenCalledTimes(2)
+    expect(onPatch.mock.calls[1]).toEqual([
+      latest,
+      { actor: 'user-a', template: { title: 'My edit' } },
+      '"rev-2"',
+    ])
+  })
+})

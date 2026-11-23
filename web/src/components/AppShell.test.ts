@@ -2403,7 +2403,7 @@ function mutationProps(overrides: Record<string, unknown> = {}) {
     onCreateIssue: vi.fn(async () => {}),
     onCreateRecurrence: vi.fn(async () => {}),
     onPatchRecurrence: vi.fn(async () => {}),
-    onDeleteRecurrence: vi.fn(async () => true),
+    onDeleteRecurrence: vi.fn(async () => {}),
     ...overrides,
   }
 }

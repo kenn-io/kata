@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { KataTaskDetail } from '../lib/kata/types'
+import type { KataTaskDetail, KataTaskSummary } from '../lib/kata/types'
 
 import IssueStateDialog from './IssueStateDialog.svelte'
 
@@ -34,22 +34,61 @@ describe('IssueStateDialog', () => {
     cleanup()
   })
 
-  it('shows what closing preserves and the open tasks it unblocks', async () => {
+  function blockedTask(uid: string, openBlockers: string[]): KataTaskSummary {
+    return {
+      ...makeIssue().issue,
+      uid,
+      open_blocked_by: openBlockers.map((blocker) => ({
+        uid: blocker,
+        short_id: blocker,
+        qualified_id: blocker,
+      })),
+    }
+  }
+
+  async function openCompletePreview(
+    blockedUIDs: string[],
+    issueCatalog: KataTaskSummary[] = [],
+  ): Promise<HTMLElement> {
     const issue = makeIssue()
-    issue.links.push({
-      id: 1,
-      project_id: 1,
-      type: 'blocks',
-      from: { uid: 'issue-1', short_id: 'I-1', qualified_id: 'INBOX-1', status: 'open' },
-      to: { uid: 'issue-2', short_id: 'I-2', qualified_id: 'INBOX-2', status: 'open' },
-      author: 'user-a',
-      created_at: '',
+    for (const [index, uid] of blockedUIDs.entries()) {
+      issue.links.push({
+        id: index + 1,
+        project_id: 1,
+        type: 'blocks',
+        from: { uid: 'issue-1', short_id: 'I-1', qualified_id: 'INBOX-1', status: 'open' },
+        to: { uid, short_id: uid, qualified_id: uid, status: 'open' },
+        author: 'user-a',
+        created_at: '',
+      })
+    }
+    render(IssueStateDialog, {
+      props: { issue, issueCatalog, onCloseIssue: vi.fn(), onReopenIssue: vi.fn() },
     })
-    render(IssueStateDialog, { props: { issue, onCloseIssue: vi.fn(), onReopenIssue: vi.fn() } })
     await fireEvent.click(screen.getByRole('button', { name: 'Complete…' }))
-    const dialog = screen.getByRole('dialog', { name: 'Complete task' })
+    return screen.getByRole('dialog', { name: 'Complete task' })
+  }
+
+  it('states only the blocking link when the blocked task is not loaded', async () => {
+    const dialog = await openCompletePreview(['issue-2'])
     expect(within(dialog).getByText('Comments and links stay.')).toBeTruthy()
-    expect(within(dialog).getByText('Unblocks 1 open tasks.')).toBeTruthy()
+    expect(within(dialog).getByText('Blocks 1 open task.')).toBeTruthy()
+    expect(within(dialog).queryByText(/Unblocks/)).toBeNull()
+  })
+
+  it('unblocks an open task whose only open blocker is this task', async () => {
+    const dialog = await openCompletePreview(['issue-2'], [blockedTask('issue-2', ['issue-1'])])
+    expect(within(dialog).getByText('Unblocks 1 open task.')).toBeTruthy()
+  })
+
+  it('does not say closing unblocks a task that has another open blocker', async () => {
+    const dialog = await openCompletePreview(
+      ['issue-2', 'issue-3', 'issue-4'],
+      [blockedTask('issue-2', ['issue-1', 'issue-9']), blockedTask('issue-3', ['issue-1'])],
+    )
+    expect(within(dialog).getByText('Unblocks 1 open task.')).toBeTruthy()
+    expect(within(dialog).getByText('1 open task stays blocked by other open tasks.')).toBeTruthy()
+    expect(within(dialog).getByText('Blocks 1 more open task.')).toBeTruthy()
   })
 
   it('uses shared Kit UI actions', async () => {

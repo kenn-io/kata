@@ -8,11 +8,12 @@
     open: boolean
     recurrence: KataRecurrence
     disabled?: boolean | undefined
+    error?: string | null | undefined
     onConfirm: () => void
     onCancel: () => void
   }
 
-  let { open, recurrence, disabled = false, onConfirm, onCancel }: Props = $props()
+  let { open, recurrence, disabled = false, error = null, onConfirm, onCancel }: Props = $props()
 
   function handleConfirm(): void {
     if (disabled) return
@@ -25,6 +26,7 @@
     Stop creating new occurrences of
     <strong>{recurrence.template_title}</strong>? Existing open issues are not affected.
   </p>
+  {#if error}<p class="error" role="alert">{error}</p>{/if}
   {#snippet footer()}
     <Button size="sm" label="Cancel" onclick={onCancel} />
     <Button
@@ -39,6 +41,10 @@
 </Modal>
 
 <style>
+  .error {
+    color: var(--accent-red);
+    font-size: var(--font-size-sm);
+  }
   .body {
     color: var(--text-primary);
     font-size: var(--font-size-md);
