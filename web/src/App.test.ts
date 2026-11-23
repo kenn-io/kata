@@ -3309,7 +3309,7 @@ describe('App', () => {
     )
   })
 
-  it('counts tasks unblocked in other projects when completing a task', async () => {
+  it('counts linked open tasks outside the filtered collection when completing a task', async () => {
     history.replaceState(
       null,
       '',
@@ -3358,8 +3358,6 @@ describe('App', () => {
           },
         },
       ],
-      collection: [...base.collection, other],
-      collection_links: [link],
       selected: { ...availableSelection(base.collection[0]), links: [link] },
     }
     vi.stubGlobal(
@@ -3376,7 +3374,7 @@ describe('App', () => {
     await fireEvent.click(await screen.findByRole('button', { name: 'Complete…' }))
     expect(
       within(screen.getByRole('dialog', { name: 'Complete task' })).getByText(
-        'Unblocks 1 open task.',
+        '1 open task loses this blocker.',
       ),
     ).toBeTruthy()
   })
