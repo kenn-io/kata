@@ -24,7 +24,7 @@ type fakeAttnDaemon struct {
 
 type conditionalMetaWrite struct {
 	ref      string
-	patch    map[string]any
+	patch    map[string]string
 	revision int64
 }
 
@@ -39,7 +39,7 @@ func (f *fakeAttnDaemon) lookup(ref string) attnLookup {
 	return attnLookup{kind: lookupGone}
 }
 
-func (f *fakeAttnDaemon) setMetaIfRevision(ref string, patch map[string]any, revision int64) attnWriteResult {
+func (f *fakeAttnDaemon) setMetaIfRevision(ref string, patch map[string]string, revision int64) attnWriteResult {
 	call := len(f.conditionalWrites)
 	f.conditionalWrites = append(f.conditionalWrites, conditionalMetaWrite{
 		ref: ref, patch: patch, revision: revision,
@@ -59,7 +59,7 @@ func TestAttnStart_ConditionallySetsOnlyAttentionOKForOpenIssue(t *testing.T) {
 
 	assert.Equal(t, []string{"abc4"}, d.lookupRefs)
 	assert.Equal(t, []conditionalMetaWrite{{
-		ref: "abc4", patch: map[string]any{attentionKey: attnValueOK}, revision: 13,
+		ref: "abc4", patch: map[string]string{attentionKey: attnValueOK}, revision: 13,
 	}}, d.conditionalWrites)
 }
 
@@ -95,8 +95,8 @@ func TestAttnStart_RetriesOnceAfterRevisionConflict(t *testing.T) {
 
 	assert.Equal(t, []string{"abc4", "abc4"}, d.lookupRefs)
 	assert.Equal(t, []conditionalMetaWrite{
-		{ref: "abc4", patch: map[string]any{attentionKey: attnValueOK}, revision: 13},
-		{ref: "abc4", patch: map[string]any{attentionKey: attnValueOK}, revision: 14},
+		{ref: "abc4", patch: map[string]string{attentionKey: attnValueOK}, revision: 13},
+		{ref: "abc4", patch: map[string]string{attentionKey: attnValueOK}, revision: 14},
 	}, d.conditionalWrites)
 }
 
@@ -110,7 +110,7 @@ func TestAttnEnd_AtomicallySetsHandoffForOpenOKIssue(t *testing.T) {
 	assert.Equal(t, []string{"abc4"}, d.lookupRefs)
 	require.Equal(t, []conditionalMetaWrite{{
 		ref: "abc4",
-		patch: map[string]any{
+		patch: map[string]string{
 			attentionKey:    attnValueNeedsHuman,
 			attentionMsgKey: attnHandoffMsg,
 		},
@@ -303,7 +303,7 @@ func TestLiveAttnDaemon_ConditionalSetSendsOnlyActorPatchAndIfMatch(t *testing.T
 	flags.Project = "example-project"
 	flags.As = "agent-a"
 	d := &liveAttnDaemon{cmd: cmd}
-	result := d.setMetaIfRevision("abc4", map[string]any{
+	result := d.setMetaIfRevision("abc4", map[string]string{
 		attentionKey:    attnValueNeedsHuman,
 		attentionMsgKey: attnHandoffMsg,
 	}, 17)

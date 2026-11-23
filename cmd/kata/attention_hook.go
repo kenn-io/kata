@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"go.kenn.io/kata/internal/db"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -87,14 +86,13 @@ const (
 type attnLookup struct {
 	kind      attnLookupKind
 	attention string
-	message   string
 	session   string
 	revision  int64
 }
 
 type attnDaemon interface {
 	lookup(ref string) attnLookup
-	setMetaIfRevision(ref string, patch map[string]any, revision int64) attnWriteResult
+	setMetaIfRevision(ref string, patch map[string]string, revision int64) attnWriteResult
 }
 
 type attnWriteResult uint8
@@ -110,8 +108,8 @@ func attentionRef(kataRef string) (string, bool) {
 	return ref, ref != "" && !strings.HasPrefix(ref, "-")
 }
 
-// attnStart establishes the launcher's active-session baseline if the open
-// lookup revision is still current.
+// attnStart establishes the launcher's active-session baseline. It mutates
+// only work.attention and only if the open lookup revision is still current.
 func attnStart(d attnDaemon, kataRef string) {
 	ref, ok := attentionRef(kataRef)
 	if !ok {
@@ -122,18 +120,10 @@ func attnStart(d attnDaemon, kataRef string) {
 		if lookup.kind != lookupOpen {
 			return
 		}
-		if d.setMetaIfRevision(ref, attnStartPatch(lookup), lookup.revision) != attnWriteConflict {
+		if d.setMetaIfRevision(ref, map[string]string{attentionKey: attnValueOK}, lookup.revision) != attnWriteConflict {
 			return
 		}
 	}
-}
-
-func attnStartPatch(lookup attnLookup) map[string]any {
-	patch := map[string]any{attentionKey: attnValueOK}
-	if lookup.attention == attnValueNeedsHuman && lookup.message == db.ExpiredAssignmentMessage {
-		patch[attentionMsgKey] = nil
-	}
-	return patch
 }
 
 // attnEnd escalates an issue only when the lookup snapshot is open and its
@@ -149,7 +139,7 @@ func attnEnd(d attnDaemon, kataRef string) {
 		if lookup.kind != lookupOpen || lookup.attention != attnValueOK {
 			return
 		}
-		if d.setMetaIfRevision(ref, map[string]any{
+		if d.setMetaIfRevision(ref, map[string]string{
 			attentionKey:    attnValueNeedsHuman,
 			attentionMsgKey: attnHandoffMsg,
 		}, lookup.revision) != attnWriteConflict {
@@ -203,13 +193,12 @@ func (l *liveAttnDaemon) lookup(ref string) attnLookup {
 	return attnLookup{
 		kind:      lookupOpen,
 		attention: decodeJSONString(response.Issue.Metadata[attentionKey]),
-		message:   decodeJSONString(response.Issue.Metadata[attentionMsgKey]),
 		session:   decodeJSONString(response.Issue.Metadata[attentionSessionKey]),
 		revision:  response.Issue.Revision,
 	}
 }
 
-func (l *liveAttnDaemon) setMetaIfRevision(ref string, patch map[string]any, revision int64) attnWriteResult {
+func (l *liveAttnDaemon) setMetaIfRevision(ref string, patch map[string]string, revision int64) attnWriteResult {
 	ctx, baseURL, pid, resolved, err := resolveIssueRefForCommand(l.cmd, ref)
 	if err != nil {
 		return attnWriteFailed

@@ -258,7 +258,7 @@ func TestNativeAttentionEndConflictRechecksSessionOwner(t *testing.T) {
 	}, conditionalResults: []attnWriteResult{attnWriteConflict}}
 	require.NoError(t, attnEndSession(d, "abc4", "old-owner"))
 	require.Len(t, d.conditionalWrites, 1)
-	require.Equal(t, map[string]any{attentionSessionKey: "ended:old-owner", attentionKey: "needs-human", attentionMsgKey: "session ended without hand-off"}, d.conditionalWrites[0].patch)
+	require.Equal(t, map[string]string{attentionSessionKey: "ended:old-owner", attentionKey: "needs-human", attentionMsgKey: "session ended without hand-off"}, d.conditionalWrites[0].patch)
 }
 
 func TestNativeAttentionSessionHelpersReportTransientFailures(t *testing.T) {

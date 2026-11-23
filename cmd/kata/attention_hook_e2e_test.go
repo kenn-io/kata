@@ -5,11 +5,9 @@ import (
 	"encoding/json/jsontext"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -28,38 +26,6 @@ func runAttnHook(t *testing.T, env *testenv.Env, dir string, args ...string) err
 	cmd.SetArgs(args)
 	cmd.SetContext(contextWithBaseURL(t.Context(), env.URL))
 	return cmd.Execute()
-}
-
-func TestE2E_AttentionHook_StartClearsExpiredClaimMessage(t *testing.T) {
-	for _, native := range []bool{false, true} {
-		t.Run(map[bool]string{false: "legacy", true: "native"}[native], func(t *testing.T) {
-			env, dir, pid := setupCLIWorkspace(t)
-			ref := createIssue(t, env, pid, "expired work")
-			runCLI(t, env, dir, "meta", "set", ref, attentionKey, attnValueOK)
-			runCLIAs(t, env, dir, "worker", "claim", ref, "--ttl", "1m")
-			_, err := env.DB.ExpireAssignments(t.Context(), db.ExpireAssignmentsParams{ProjectID: pid, Now: time.Now().Add(2 * time.Minute)})
-			require.NoError(t, err)
-			runCLIAs(t, env, dir, "next-worker", "claim", ref, "--ttl", "1m")
-			message, ok := attnMetaValue(t, env, pid, ref, attentionMsgKey)
-			require.True(t, ok)
-			assert.Equal(t, "claim expired without hand-off", message)
-			resetFlags(t)
-			cmd := newRootCmd()
-			cmd.SetContext(contextWithBaseURL(t.Context(), env.URL))
-			flags.Workspace = dir
-			d := &liveAttnDaemon{cmd: cmd}
-			if native {
-				require.NoError(t, attnStartSession(d, ref, "new-session"))
-			} else {
-				attnStart(d, ref)
-			}
-			value, ok := attnMetaValue(t, env, pid, ref, attentionKey)
-			require.True(t, ok)
-			assert.Equal(t, attnValueOK, value)
-			_, ok = attnMetaValue(t, env, pid, ref, attentionMsgKey)
-			assert.False(t, ok)
-		})
-	}
 }
 
 func attnMetaValue(t *testing.T, env *testenv.Env, pid int64, ref, key string) (string, bool) {
@@ -161,7 +127,7 @@ func TestE2E_AttentionHook_ConditionalEndRejectsConcurrentChange(t *testing.T) {
 	// A deliberate hand-off after lookup advances the revision. The stale
 	// If-Match must reject the hook patch and preserve the newer value.
 	runCLI(t, env, dir, "meta", "set", ref, attentionKey, "stuck")
-	result := d.setMetaIfRevision(ref, map[string]any{
+	result := d.setMetaIfRevision(ref, map[string]string{
 		attentionKey:    attnValueNeedsHuman,
 		attentionMsgKey: attnHandoffMsg,
 	}, lookup.revision)
