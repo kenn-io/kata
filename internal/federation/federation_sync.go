@@ -320,8 +320,17 @@ func pushDirectSpoke(
 					continue
 				}
 				recovery := false
+				retainedCreation := false
 				if binding.RetainedThroughEventID > 0 {
 					for i, event := range pending[:end] {
+						if event.Type == "issue.created" && event.IssueUID != nil && event.ID <= binding.RetainedThroughEventID && event.OriginInstanceUID == store.InstanceUID() && event.Actor == binding.Actor {
+							if i == 0 {
+								end, retainedCreation = 1, true
+							} else {
+								end = i
+							}
+							break
+						}
 						if event.Type != "issue.snapshot" || event.IssueUID == nil || event.ID <= binding.RetainedThroughEventID || event.OriginInstanceUID != store.InstanceUID() || event.Actor != binding.Actor {
 							continue
 						}
@@ -378,6 +387,17 @@ func pushDirectSpoke(
 						AdoptionBaselineEndEventID: adoptionBaselineEndEventID,
 					})
 				if err != nil {
+					if retainedCreation && retainedInitializerAlreadyKnown(err, "issue.created", *batch[0].IssueUID) {
+						if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+							return err
+						}
+						if err := store.AdvanceFederationPushCursor(ctx, binding.ProjectID, batch[0].ID); err != nil {
+							return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+						}
+						binding.PushCursorEventID = batch[0].ID
+						pending = pending[1:]
+						continue
+					}
 					if recovery && batch[0].IssueUID != nil && retainedSnapshotAlreadyKnown(err, *batch[0].IssueUID) {
 						if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 							return err
@@ -639,12 +659,16 @@ func publishRetainedLinkPeers(ctx context.Context, store db.Storage, binding *db
 }
 
 func retainedSnapshotAlreadyKnown(err error, issueUID string) bool {
+	return retainedInitializerAlreadyKnown(err, "issue.snapshot", issueUID)
+}
+
+func retainedInitializerAlreadyKnown(err error, eventType, issueUID string) bool {
 	status, ok := errors.AsType[*HubStatusError](err)
 	if !ok || status.StatusCode != http.StatusBadRequest {
 		return false
 	}
 	body, ok := federationQuarantineHubError(status.Body)
-	return ok && body.Code == "validation" && body.Message == "federation ingest validation: fresh issue.snapshot targets existing issue "+issueUID
+	return ok && body.Code == "validation" && body.Message == "federation ingest validation: fresh "+eventType+" targets existing issue "+issueUID
 }
 
 var retainedUnknownIssuePattern = regexp.MustCompile(`^federation ingest validation: [a-z._]+ references unknown issue ([0-9A-HJKMNP-TV-Z]{26})$`)

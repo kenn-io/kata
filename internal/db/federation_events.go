@@ -304,6 +304,26 @@ func stringPointersEqual(left, right *string) bool {
 // DirectLinkPeers returns explicit link endpoints eligible for
 // a supplemental direct-spoke proof. It never modifies the event payload.
 func DirectLinkPeers(event FoldEvent) (map[string]bool, error) {
+	if event.Type == "issue.snapshot" {
+		var payload struct {
+			Links []IssueDocumentLink `json:"links"`
+		}
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			return nil, err
+		}
+		peers, incoming := map[string]bool{}, map[string]bool{}
+		for _, link := range payload.Links {
+			if link.Type == "parent" && link.Incoming {
+				incoming[link.ToIssueUID] = true
+			} else if link.ToIssueUID != "" {
+				peers[link.ToIssueUID] = true
+			}
+		}
+		for uid := range incoming {
+			delete(peers, uid)
+		}
+		return peers, nil
+	}
 	if event.Type != "issue.unlinked" && !directLinkAdditionEligible(event) {
 		return nil, nil
 	}
