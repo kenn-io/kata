@@ -104,8 +104,12 @@ describe('ProjectSyncStatus', () => {
   it('keeps waiting changes visible when an open panel refreshes to disabled', async () => {
     const result = await response(7, projectUID, 3, false).json()
     result.statuses[0].enabled = false
-    setGeneratedFetch(vi.fn().mockResolvedValueOnce(response()).mockResolvedValueOnce(Response.json(result)))
-    const view = render(ProjectSyncStatus, { props: { projectID: 7, projectUID, refreshGeneration: 0 } })
+    setGeneratedFetch(
+      vi.fn().mockResolvedValueOnce(response()).mockResolvedValueOnce(Response.json(result)),
+    )
+    const view = render(ProjectSyncStatus, {
+      props: { projectID: 7, projectUID, refreshGeneration: 0 },
+    })
     await openSync()
     await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
     await screen.findByText('Sync disabled · 3 changes waiting')
