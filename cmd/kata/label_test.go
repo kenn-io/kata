@@ -32,6 +32,13 @@ func TestLabelAdd_PriorityLabelQualifiedRef(t *testing.T) {
 	assert.Contains(t, stderr, "kata edit "+qualified+" --priority N")
 }
 
+func TestCreate_PriorityLabelRejected(t *testing.T) {
+	env, dir, _ := setupCLIWorkspace(t)
+	_, stderr, err := runCLIWithErr(t, env, dir, "create", "priority label", "--label", "p2")
+	requireCLIError(t, err, ExitValidation)
+	assert.Contains(t, stderr, "kata create --priority N")
+}
+
 func TestLabelAdd_AgentOutput(t *testing.T) {
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "a")
 

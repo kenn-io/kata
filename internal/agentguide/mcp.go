@@ -29,6 +29,7 @@ its tools. Search with kata.search before creating: reuse matching open work,
 otherwise kata.create with a stable idempotency_key. Link related work or a
 parent. A look-alike refusal means inspect/reuse the match; force_new is only
 for genuinely different work. Only create real work the user requested.
+Use priority in kata.create or kata.edit; kata.create and kata.set_label reject p0 through p4 and priority: labels.
 
 ` + MCPClaimRules + `Keep your own work.attention and work.attention_msg current through
 kata.set_metadata. Stamp a dedicated work.branch once. Only write your own

@@ -26,6 +26,13 @@ func TestAddLabel_PriorityLabelRejected(t *testing.T) {
 	}
 }
 
+func TestAddLabel_PriorityLabelMissingIssue(t *testing.T) {
+	env := testenv.New(t)
+	pid, _ := setupOneIssue(t, env)
+	resp := envDoJSON(t, env, http.MethodPost, issuePathRef(pid, "zzzz", "labels"), map[string]string{"actor": "tester", "label": "p2"}, nil)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
 func TestAddLabel_HappyPath(t *testing.T) {
 	env := testenv.New(t)
 	pid, n := setupOneIssue(t, env)
