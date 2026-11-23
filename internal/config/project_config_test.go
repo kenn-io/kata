@@ -99,17 +99,41 @@ name = "   "
 }
 
 func TestWriteProjectConfig_WritesHeaderAndName(t *testing.T) {
-	dir := t.TempDir()
-	require.NoError(t, config.WriteProjectConfig(dir, "foo"))
-	bs, err := os.ReadFile(filepath.Join(dir, ".kata.toml")) //nolint:gosec // test fixture under TempDir
-	require.NoError(t, err)
-	assert.Contains(t, string(bs), `name = "foo"`)
-	assert.True(t, strings.HasPrefix(string(bs), "# This repository tracks its work in kata.\n# Coding agents: read `kata quickstart --format contract` before changing code here.\n"))
-	assert.NotContains(t, string(bs), "identity")
+	for _, tc := range []struct {
+		name       string
+		write      func(workspaceRoot, name string) error
+		hardLinked bool
+	}{
+		{"write", config.WriteProjectConfig, false},
+		{"replace hard-linked binding", config.ReplaceProjectConfig, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			other := ""
+			original := []byte("version = 1\n\n[project]\nname = \"notes\"\n")
+			if tc.hardLinked {
+				other = filepath.Join(setupKataProjectDir(t, string(original)), ".kata.toml")
+				if err := os.Link(other, filepath.Join(dir, ".kata.toml")); err != nil {
+					t.Skipf("hard links unavailable: %v", err)
+				}
+			}
+			require.NoError(t, tc.write(dir, "foo"))
+			bs, err := os.ReadFile(filepath.Join(dir, ".kata.toml")) //nolint:gosec // test fixture under TempDir
+			require.NoError(t, err)
+			assert.Contains(t, string(bs), `name = "foo"`)
+			assert.True(t, strings.HasPrefix(string(bs), "# This repository tracks its work in kata.\n# Coding agents: read `kata quickstart --format contract` before changing code here.\n"))
+			assert.NotContains(t, string(bs), "identity")
 
-	cfg, err := config.ReadProjectConfig(dir)
-	require.NoError(t, err)
-	assert.Equal(t, "foo", cfg.Project.Name)
+			cfg, err := config.ReadProjectConfig(dir)
+			require.NoError(t, err)
+			assert.Equal(t, "foo", cfg.Project.Name)
+			if other != "" {
+				got, err := os.ReadFile(other) //nolint:gosec // test fixture under TempDir
+				require.NoError(t, err)
+				assert.Equal(t, original, got)
+			}
+		})
+	}
 }
 
 func TestEnsureProjectConfigHeader(t *testing.T) {

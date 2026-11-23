@@ -215,37 +215,79 @@ func TestInit_ExplicitWorkspaceBinding(t *testing.T) {
 }
 
 func TestInit_ExplicitWorkspaceRootBinding(t *testing.T) {
-	root := t.TempDir()
-	runGit(t, root, "init", "--quiet")
-	binding := filepath.Join(root, ".kata.toml")
-	require.NoError(t, os.WriteFile(binding, []byte("version = 1\n\n[project]\nname = \"notes\"\n"), 0o644))
-	daemon := newFakeDaemon(t)
-	require.NoError(t, executeInitSetup(t, daemon.srv.URL, "--replace", "--workspace", root, "--project", "demo"))
-	got, err := os.ReadFile(binding)
-	require.NoError(t, err)
-	assert.Contains(t, string(got), "demo")
-	assert.Equal(t, "demo", daemon.request()["name"])
+	for _, tc := range []struct {
+		name       string
+		hardLinked bool
+	}{
+		{"root binding", false},
+		{"hard link to another folder", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base := t.TempDir()
+			workspace := filepath.Join(base, "my workspace")
+			require.NoError(t, os.Mkdir(workspace, 0o755))
+			runGit(t, workspace, "init", "--quiet")
+			binding := filepath.Join(workspace, ".kata.toml")
+			original := []byte("version = 1\n\n[project]\nname = \"notes\"\n")
+			otherBinding := ""
+			if tc.hardLinked {
+				other := filepath.Join(base, "other")
+				require.NoError(t, os.Mkdir(other, 0o755))
+				otherBinding = filepath.Join(other, ".kata.toml")
+				require.NoError(t, os.WriteFile(otherBinding, original, 0o644))
+				if err := os.Link(otherBinding, binding); err != nil {
+					t.Skipf("hard links unavailable: %v", err)
+				}
+			} else {
+				require.NoError(t, os.WriteFile(binding, original, 0o644))
+			}
+			daemon := newFakeDaemon(t)
+
+			require.NoError(t, executeInitSetup(t, daemon.srv.URL, "--replace", "--workspace", workspace, "--project", "demo"))
+			assert.Equal(t, "demo", daemon.request()["name"])
+			got, err := os.ReadFile(binding)
+			require.NoError(t, err)
+			assert.Contains(t, string(got), `name = "demo"`)
+			if otherBinding != "" {
+				got, err = os.ReadFile(otherBinding)
+				require.NoError(t, err)
+				assert.Equal(t, original, got)
+			}
+		})
+	}
 }
 
 func TestInit_ExplicitWorkspaceSymlinkBinding(t *testing.T) {
+	inWorkspace := func(_, workspace string) string { return filepath.Join(workspace, ".kata.toml") }
+	outsideFile := func(base, _ string) string { return filepath.Join(base, "shared files", "notes.toml") }
 	for _, tc := range []struct {
-		name   string
-		target func(base, repo string) string
+		name     string
+		link     func(repo, workspace string) string
+		target   func(base, repo string) string
+		dangling bool
+		noGit    bool
 	}{
-		{"ancestor binding", func(_, repo string) string { return filepath.Join(repo, ".kata.toml") }},
-		{"renamed outside file", func(base, _ string) string { return filepath.Join(base, "shared files", "notes.toml") }},
+		{name: "ancestor binding", link: inWorkspace, target: func(_, repo string) string { return filepath.Join(repo, ".kata.toml") }},
+		{name: "renamed outside file", link: inWorkspace, target: outsideFile},
+		{name: "dangling outside file", link: inWorkspace, target: outsideFile, dangling: true, noGit: true},
+		{name: "dangling ancestor link", link: func(repo, _ string) string { return filepath.Join(repo, ".kata.toml") },
+			target: func(_, repo string) string { return filepath.Join(repo, "shared files", "notes.toml") }, dangling: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			base := t.TempDir()
 			repo := filepath.Join(base, "my repo")
 			workspace := filepath.Join(repo, "scratch")
 			require.NoError(t, os.MkdirAll(workspace, 0o755))
-			runGit(t, repo, "init", "--quiet")
+			if !tc.noGit {
+				runGit(t, repo, "init", "--quiet")
+			}
 			target := tc.target(base, repo)
 			require.NoError(t, os.MkdirAll(filepath.Dir(target), 0o755))
 			original := []byte("version = 1\n\n[project]\nname = \"notes\"\n")
-			require.NoError(t, os.WriteFile(target, original, 0o644))
-			if err := os.Symlink(target, filepath.Join(workspace, ".kata.toml")); err != nil {
+			if !tc.dangling {
+				require.NoError(t, os.WriteFile(target, original, 0o644))
+			}
+			if err := os.Symlink(target, tc.link(repo, workspace)); err != nil {
 				t.Skipf("symlinks unavailable: %v", err)
 			}
 			daemon := newFakeDaemon(t)
@@ -254,84 +296,21 @@ func TestInit_ExplicitWorkspaceSymlinkBinding(t *testing.T) {
 			var ce *cliError
 			require.ErrorAs(t, err, &ce)
 			assert.Equal(t, "project_binding_conflict", ce.Code)
-			resolved, err := filepath.EvalSymlinks(target)
+			resolvedDir, err := filepath.EvalSymlinks(filepath.Dir(target))
 			require.NoError(t, err)
-			assert.Contains(t, ce.Message, fmt.Sprintf("%q", resolved))
+			assert.Contains(t, ce.Message, fmt.Sprintf("%q", filepath.Join(resolvedDir, filepath.Base(target))))
 			assert.Contains(t, ce.Hint, "Replace this workspace's .kata.toml symlink")
 			assert.Nil(t, daemon.request())
-			got, err := os.ReadFile(target)
-			require.NoError(t, err)
-			assert.Equal(t, original, got)
+			if tc.dangling {
+				assert.NoFileExists(t, target)
+			} else {
+				got, err := os.ReadFile(target)
+				require.NoError(t, err)
+				assert.Equal(t, original, got)
+			}
 			assert.NoFileExists(t, filepath.Join(filepath.Dir(target), ".gitignore"))
 		})
 	}
-}
-
-func TestInit_ExplicitWorkspaceDanglingSymlinkBinding(t *testing.T) {
-	base := t.TempDir()
-	workspace := filepath.Join(base, "scratch")
-	require.NoError(t, os.Mkdir(workspace, 0o755))
-	outside := filepath.Join(base, "shared files")
-	require.NoError(t, os.Mkdir(outside, 0o755))
-	target := filepath.Join(outside, "notes.toml")
-	if err := os.Symlink(target, filepath.Join(workspace, ".kata.toml")); err != nil {
-		t.Skipf("symlinks unavailable: %v", err)
-	}
-	daemon := newFakeDaemon(t)
-
-	err := executeInitSetup(t, daemon.srv.URL, "--replace", "--workspace", workspace, "--project", "demo")
-	var ce *cliError
-	if assert.ErrorAs(t, err, &ce) {
-		assert.Equal(t, "project_binding_conflict", ce.Code)
-	}
-	assert.Nil(t, daemon.request())
-	assert.NoFileExists(t, target)
-}
-
-func TestInit_ExplicitWorkspaceDanglingAncestorSymlinkBinding(t *testing.T) {
-	repo := t.TempDir()
-	runGit(t, repo, "init", "--quiet")
-	workspace := filepath.Join(repo, "scratch")
-	require.NoError(t, os.Mkdir(workspace, 0o755))
-	sibling := filepath.Join(repo, "shared files")
-	require.NoError(t, os.Mkdir(sibling, 0o755))
-	target := filepath.Join(sibling, "notes.toml")
-	if err := os.Symlink(target, filepath.Join(repo, ".kata.toml")); err != nil {
-		t.Skipf("symlinks unavailable: %v", err)
-	}
-	daemon := newFakeDaemon(t)
-
-	err := executeInitSetup(t, daemon.srv.URL, "--replace", "--workspace", workspace, "--project", "demo")
-	var ce *cliError
-	if assert.ErrorAs(t, err, &ce) {
-		assert.Equal(t, "project_binding_conflict", ce.Code)
-	}
-	assert.Nil(t, daemon.request())
-	assert.NoFileExists(t, target)
-}
-
-func TestInit_ExplicitWorkspaceHardLinkBinding(t *testing.T) {
-	base := t.TempDir()
-	other := filepath.Join(base, "other")
-	workspace := filepath.Join(base, "my workspace")
-	require.NoError(t, os.Mkdir(other, 0o755))
-	require.NoError(t, os.Mkdir(workspace, 0o755))
-	runGit(t, workspace, "init", "--quiet")
-	otherBinding := filepath.Join(other, ".kata.toml")
-	original := []byte("version = 1\n\n[project]\nname = \"notes\"\n")
-	require.NoError(t, os.WriteFile(otherBinding, original, 0o644))
-	if err := os.Link(otherBinding, filepath.Join(workspace, ".kata.toml")); err != nil {
-		t.Skipf("hard links unavailable: %v", err)
-	}
-	daemon := newFakeDaemon(t)
-
-	require.NoError(t, executeInitSetup(t, daemon.srv.URL, "--replace", "--workspace", workspace, "--project", "demo"))
-	got, err := os.ReadFile(otherBinding)
-	require.NoError(t, err)
-	assert.Equal(t, original, got)
-	got, err = os.ReadFile(filepath.Join(workspace, ".kata.toml"))
-	require.NoError(t, err)
-	assert.Contains(t, string(got), `name = "demo"`)
 }
 
 // TestInit_RemoteClient_SendsNameNotPath verifies the CLI derives
