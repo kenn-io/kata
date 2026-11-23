@@ -3094,6 +3094,78 @@ describe('App', () => {
     expect(recurrenceDaemons.at(-1)).toBe('example-remote')
   })
 
+  it("shows another client's repeating task after a live update reset", async () => {
+    history.replaceState(null, '', '/kata?scope=01J00000000000000000000002#direct=1')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const initial = snapshot()
+    initial.capabilities.updates = 'sse'
+    const updated = { ...initial, cursor: initial.cursor + 1 }
+    let stream: ReadableStreamDefaultController<Uint8Array> | undefined
+    let changed = false
+    let reads = 0
+    const snapshots: Request[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        const path = new URL(request.url).pathname
+        if (path === '/api/v1/events/stream')
+          return new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                stream = controller
+              },
+            }),
+            { headers: { 'Content-Type': 'text/event-stream' } },
+          )
+        if (path.endsWith('/recurrences')) {
+          reads++
+          return Response.json({
+            recurrences: changed
+              ? [
+                  {
+                    id: 1,
+                    uid: 'recurrence-1',
+                    project_id: 7,
+                    rrule: 'FREQ=WEEKLY',
+                    dtstart: '2026-11-22',
+                    timezone: 'UTC',
+                    template_title: 'Weekly task',
+                    revision: 1,
+                  },
+                ]
+              : [],
+          })
+        }
+        if (path.endsWith('/references')) return Response.json({ statuses: [] })
+        if (path === '/api/v1/ui/snapshot') snapshots.push(request)
+        return Response.json(changed ? updated : initial, {
+          headers: { ETag: changed ? '"snapshot-2"' : '"snapshot-1"' },
+        })
+      }),
+    )
+    render(App)
+    await waitFor(() => {
+      expect(stream).toBeDefined()
+      expect(reads).toBeGreaterThan(0)
+    })
+    expect(screen.queryByRole('button', { name: /repeating task/ })).toBeNull()
+    const previousReads = reads
+    const previousSnapshots = snapshots.length
+    changed = true
+    stream!.enqueue(
+      new TextEncoder().encode('event: sync.reset_required\ndata: {"reset_required":true}\n\n'),
+    )
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '↻ 1 repeating task' })).not.toBeNull(),
+    )
+    expect(reads).toBeGreaterThan(previousReads)
+    expect(snapshots[previousSnapshots]?.headers.has('If-None-Match')).toBe(false)
+  })
+
   it('refreshes project rules for recurrence events while a snapshot is pending', async () => {
     history.replaceState(null, '', '/kata?scope=01J00000000000000000000002#direct=1')
     sessionStorage.setItem(
