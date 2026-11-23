@@ -28,17 +28,17 @@ func checkRejoinRetainedHistory(t *testing.T, store db.Storage) error {
 		require.NoError(t, err)
 		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: true})
 		require.NoError(t, err)
-		copy, _, err := store.RetainedCommentEvent(ctx, project.ID, issue.UID, reply.UID)
+		recovered, _, err := store.RetainedCommentEvent(ctx, project.ID, issue.UID, reply.UID)
 		require.NoError(t, err)
 		var payload struct {
 			ReplyToUID string `json:"reply_to_uid"`
 			ReplyKind  string `json:"reply_kind"`
 		}
-		require.NoError(t, json.Unmarshal([]byte(copy.Payload), &payload))
+		require.NoError(t, json.Unmarshal([]byte(recovered.Payload), &payload))
 		require.Equal(t, parent.UID, payload.ReplyToUID)
 		require.Equal(t, "reply", payload.ReplyKind)
-		require.NotNil(t, copy.RelatedIssueUID)
-		require.Equal(t, peer.UID, *copy.RelatedIssueUID)
+		require.NotNil(t, recovered.RelatedIssueUID)
+		require.Equal(t, peer.UID, *recovered.RelatedIssueUID)
 	})
 	t.Run("recover retained comment", func(t *testing.T) {
 		ctx := t.Context()
@@ -54,24 +54,24 @@ func checkRejoinRetainedHistory(t *testing.T, store db.Storage) error {
 		require.NoError(t, err)
 		_, _, _, err = store.EditComment(ctx, db.EditCommentParams{IssueID: issue.ID, CommentUID: reply.UID, Actor: "new-actor", Body: "edited reply"})
 		require.NoError(t, err)
-		copy, sourceID, err := store.RetainedCommentEvent(ctx, project.ID, issue.UID, reply.UID)
+		recovered, sourceID, err := store.RetainedCommentEvent(ctx, project.ID, issue.UID, reply.UID)
 		require.NoError(t, err)
 		require.Equal(t, original.ID, sourceID)
-		require.Equal(t, "new-actor", copy.Actor)
+		require.Equal(t, "new-actor", recovered.Actor)
 		var payload struct {
 			Author     string `json:"author"`
 			Body       string `json:"body"`
 			ReplyToUID string `json:"reply_to_uid"`
 			ReplyKind  string `json:"reply_kind"`
 		}
-		require.NoError(t, json.Unmarshal([]byte(copy.Payload), &payload))
+		require.NoError(t, json.Unmarshal([]byte(recovered.Payload), &payload))
 		require.Equal(t, "new-actor", payload.Author)
 		require.Equal(t, "edited reply", payload.Body)
 		require.Equal(t, parent.UID, payload.ReplyToUID)
 		require.Equal(t, "reply", payload.ReplyKind)
 		again, _, err := store.RetainedCommentEvent(ctx, project.ID, issue.UID, reply.UID)
 		require.NoError(t, err)
-		require.Equal(t, copy.UID, again.UID)
+		require.Equal(t, recovered.UID, again.UID)
 		retained, err := store.EventsByUIDs(ctx, project.ID, []string{original.UID})
 		require.NoError(t, err)
 		require.Len(t, retained, 1)

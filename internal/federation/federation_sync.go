@@ -345,6 +345,9 @@ func pushDirectSpoke(
 				if err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
+				if len(batch) == 0 {
+					return recordFederationSyncError(ctx, store, binding.ProjectID, errors.New("empty federation push batch"))
+				}
 				retired, err := publishRetainedDependencies(ctx, store, binding, hubProjectID, client, batch, snapshotsSent, onPulledEvents, validateLease, credentials, opts)
 				if err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
@@ -363,7 +366,7 @@ func pushDirectSpoke(
 						AdoptionBaselineEndEventID: adoptionBaselineEndEventID,
 					})
 				if err != nil {
-					if recovery && retainedSnapshotAlreadyKnown(err, *batch[0].IssueUID) {
+					if recovery && batch[0].IssueUID != nil && retainedSnapshotAlreadyKnown(err, *batch[0].IssueUID) {
 						if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 							return err
 						}
@@ -1063,6 +1066,9 @@ func federationIngestEnvelopes(events []db.Event) []api.FederationIngestEventEnv
 }
 
 func nextFederationPushIngestBatch(events []db.Event) ([]db.Event, string, int64, error) {
+	if len(events) == 0 {
+		return nil, "", 0, errors.New("empty federation push batch")
+	}
 	if len(events) <= 1 {
 		if len(events) == 1 {
 			shape := federationPushAdoptionBaselineShape(events)
