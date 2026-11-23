@@ -59,17 +59,17 @@ func TestResolveBody(t *testing.T) {
 			name: "from file",
 			setup: func(t *testing.T) (BodySources, io.Reader) {
 				path := t.TempDir() + "/b.txt"
-				writeStringFile(t, path, "from file")
+				writeStringFile(t, path, "from `file`\n\n")
 				return BodySources{File: path, FileSet: true}, nil
 			},
-			want: "from file",
+			want: "from `file`",
 		},
 		{
 			name: "from stdin",
 			setup: func(*testing.T) (BodySources, io.Reader) {
-				return BodySources{Stdin: true}, bytes.NewBufferString("from stdin")
+				return BodySources{Stdin: true}, bytes.NewBufferString("from `stdin`\n\n")
 			},
-			want: "from stdin",
+			want: "from `stdin`",
 		},
 		{
 			name: "two sources is error",

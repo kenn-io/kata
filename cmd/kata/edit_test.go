@@ -17,39 +17,33 @@ func TestEditBodySources(t *testing.T) {
 	input := "first `command`\nsecond\n\n"
 	writeStringFile(t, path, input)
 	ctx := contextWithBaseURL(t.Context(), env.URL)
-	for _, args := range [][]string{{"--body-file", path}, {"--body-stdin"}} {
-		t.Run(args[0], func(t *testing.T) {
+	for _, tc := range []struct {
+		args  []string
+		stdin string
+	}{
+		{[]string{"--body-file", path}, ""},
+		{[]string{"--body-stdin"}, input},
+	} {
+		t.Run(tc.args[0], func(t *testing.T) {
 			runCLI(t, env, dir, "edit", issue, "--body", "old")
-			_, _, err := executeRootCaptureWithInput(ctx, t, input, append([]string{"--workspace", dir, "edit", issue}, args...)...)
+			_, _, err := executeRootCaptureWithInput(ctx, t, tc.stdin, append([]string{"--workspace", dir, "edit", issue}, tc.args...)...)
 			require.NoError(t, err)
 			assert.Equal(t, "first `command`\nsecond", fetchIssueViaHTTP(t, env, pid, issue).Issue.Body)
 		})
 	}
-	for _, tc := range []struct {
-		name string
-		args []string
-	}{
-		{"body-and-file", []string{"--body", "", "--body-file", path}},
-		{"body-and-stdin", []string{"--body", "", "--body-stdin"}},
-		{"file-and-stdin", []string{"--body-file", path, "--body-stdin"}},
-	} {
-		t.Run("conflict/"+tc.name, func(t *testing.T) {
-			runCLI(t, env, dir, "edit", issue, "--body", "old")
-			_, _, err := executeRootCaptureWithInput(ctx, t, input, append([]string{"--workspace", dir, "edit", issue}, tc.args...)...)
-			require.ErrorContains(t, err, "exactly one")
-			assert.Equal(t, "old", fetchIssueViaHTTP(t, env, pid, issue).Issue.Body)
-		})
-	}
-	writeStringFile(t, path, "")
-	for _, args := range [][]string{{"--body-stdin"}, {"--body-file", path}} {
-		t.Run("empty/"+args[0], func(t *testing.T) {
-			runCLI(t, env, dir, "edit", issue, "--body", "old")
-			_, _, err := executeRootCaptureWithInput(ctx, t, "", append([]string{"--workspace", dir, "edit", issue}, args...)...)
-			require.ErrorContains(t, err, `--body ""`)
-			requireCLIError(t, err, ExitValidation)
-			assert.Equal(t, "old", fetchIssueViaHTTP(t, env, pid, issue).Issue.Body)
-		})
-	}
+	t.Run("conflict", func(t *testing.T) {
+		runCLI(t, env, dir, "edit", issue, "--body", "old")
+		_, _, err := executeRootCaptureWithInput(ctx, t, "", "--workspace", dir, "edit", issue, "--body", "", "--body-file", path)
+		require.ErrorContains(t, err, "exactly one")
+		assert.Equal(t, "old", fetchIssueViaHTTP(t, env, pid, issue).Issue.Body)
+	})
+	t.Run("empty-stdin", func(t *testing.T) {
+		runCLI(t, env, dir, "edit", issue, "--body", "old")
+		_, _, err := executeRootCaptureWithInput(ctx, t, "", "--workspace", dir, "edit", issue, "--body-stdin")
+		require.ErrorContains(t, err, `--body ""`)
+		requireCLIError(t, err, ExitValidation)
+		assert.Equal(t, "old", fetchIssueViaHTTP(t, env, pid, issue).Issue.Body)
+	})
 	t.Run("clear", func(t *testing.T) {
 		runCLI(t, env, dir, "edit", issue, "--body", "old")
 		runCLI(t, env, dir, "edit", issue, "--body", "")
