@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -153,57 +154,61 @@ func TestAutoCutoverPreservesArtifactsWhenRestoreFails(t *testing.T) {
 	require.ErrorIs(t, CheckCutoverSource(ctx, path), ErrCutoverInProgress)
 }
 
-func TestAutoCutoverSchema53InPlace(t *testing.T) {
-	t.Setenv("KATA_HOME", t.TempDir())
-	path := oldSchemaSource(t)
-	fresh, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "fresh.db"))
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, fresh.Close()) })
-	var exported bool
-	err = autoCutover(t.Context(), path, cutoverOperations{
-		replaceFile: atomicfile.Replace,
-		exportSource: func(ctx context.Context, sourcePath, exportPath string) (int64, error) {
-			exported = true
-			return exportCutoverSource(ctx, sourcePath, exportPath)
-		},
-	})
-	require.NoError(t, err)
-	require.False(t, exported)
-	upgraded, err := sqlitestore.Open(t.Context(), path)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, upgraded.Close()) })
-	got, err := upgraded.SchemaVersion(t.Context())
-	require.NoError(t, err)
-	require.Equal(t, db.CurrentSchemaVersion(), got)
-	project, err := upgraded.ProjectByName(t.Context(), "cutover-project")
-	require.NoError(t, err)
-	binding, err := upgraded.FederationBindingByProject(t.Context(), project.ID)
-	require.NoError(t, err)
-	require.Zero(t, binding.RetainedThroughEventID)
-	require.Equal(t, "worker", binding.Actor)
-	catalog := func(store *sqlitestore.Store) [][4]sql.NullString {
-		rows, err := store.QueryContext(t.Context(), `SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY name`)
-		require.NoError(t, err)
-		defer func() { require.NoError(t, rows.Close()) }()
-		var entries [][4]sql.NullString
-		for rows.Next() {
-			var entry [4]sql.NullString
-			require.NoError(t, rows.Scan(&entry[0], &entry[1], &entry[2], &entry[3]))
-			if entry[1].String == "federation_bindings" {
-				entry[3].String = strings.Join(strings.Fields(entry[3].String), " ")
+func TestAutoCutoverInPlaceVersions(t *testing.T) {
+	for _, version := range []int{41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 52, 53} {
+		t.Run(strconv.Itoa(version), func(t *testing.T) {
+			t.Setenv("KATA_HOME", t.TempDir())
+			path := oldSchemaSource(t, version)
+			fresh, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "fresh.db"))
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, fresh.Close()) })
+			var exported bool
+			err = autoCutover(t.Context(), path, cutoverOperations{
+				replaceFile: atomicfile.Replace,
+				exportSource: func(ctx context.Context, sourcePath, exportPath string) (int64, error) {
+					exported = true
+					return exportCutoverSource(ctx, sourcePath, exportPath)
+				},
+			})
+			require.NoError(t, err)
+			require.False(t, exported)
+			upgraded, err := sqlitestore.Open(t.Context(), path)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, upgraded.Close()) })
+			got, err := upgraded.SchemaVersion(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, db.CurrentSchemaVersion(), got)
+			project, err := upgraded.ProjectByName(t.Context(), "cutover-project")
+			require.NoError(t, err)
+			binding, err := upgraded.FederationBindingByProject(t.Context(), project.ID)
+			require.NoError(t, err)
+			require.Zero(t, binding.RetainedThroughEventID)
+			require.Equal(t, "worker", binding.Actor)
+			catalog := func(store *sqlitestore.Store) [][4]sql.NullString {
+				rows, err := store.QueryContext(t.Context(), `SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY name`)
+				require.NoError(t, err)
+				defer func() { require.NoError(t, rows.Close()) }()
+				var entries [][4]sql.NullString
+				for rows.Next() {
+					var entry [4]sql.NullString
+					require.NoError(t, rows.Scan(&entry[0], &entry[1], &entry[2], &entry[3]))
+					if entry[1].String == "federation_bindings" {
+						entry[3].String = strings.Join(strings.Fields(entry[3].String), " ")
+					}
+					entries = append(entries, entry)
+				}
+				require.NoError(t, rows.Err())
+				return entries
 			}
-			entries = append(entries, entry)
-		}
-		require.NoError(t, rows.Err())
-		return entries
+			require.Equal(t, catalog(fresh), catalog(upgraded))
+		})
 	}
-	require.Equal(t, catalog(fresh), catalog(upgraded))
 }
 
 func TestAutoCutoverInPlaceFailureLeavesSourceRetryable(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	ctx := t.Context()
-	path := oldSchemaSource(t)
+	path := oldSchemaSource(t, 53)
 	source, err := sql.Open("sqlite", path)
 	require.NoError(t, err)
 	_, err = source.ExecContext(ctx, `ALTER TABLE federation_bindings ADD COLUMN retained_through_event_id INTEGER NOT NULL DEFAULT 0`)
@@ -213,7 +218,7 @@ func TestAutoCutoverInPlaceFailureLeavesSourceRetryable(t *testing.T) {
 	_, err = source.ExecContext(ctx, `UPDATE meta SET value='52' WHERE key='schema_version'`)
 	require.NoError(t, err)
 	require.NoError(t, source.Close())
-	require.Error(t, AutoCutover(ctx, path))
+	require.ErrorContains(t, AutoCutover(ctx, path), "add retained federation history boundary")
 	source, err = sql.Open("sqlite", path)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, source.Close()) })
@@ -229,7 +234,7 @@ func TestAutoCutoverInPlaceFailureLeavesSourceRetryable(t *testing.T) {
 	require.NoError(t, AutoCutover(ctx, path))
 }
 
-func oldSchemaSource(t *testing.T) string {
+func oldSchemaSource(t *testing.T, version int) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	source, err := sqlitestore.Open(t.Context(), path)
@@ -241,7 +246,46 @@ func oldSchemaSource(t *testing.T) string {
 	require.NoError(t, err)
 	_, err = source.ExecContext(t.Context(), `ALTER TABLE federation_bindings DROP COLUMN retained_through_event_id`)
 	require.NoError(t, err)
-	_, err = source.ExecContext(t.Context(), `UPDATE meta SET value='53' WHERE key='schema_version'`)
+	if version < 51 {
+		// Schema 51 replaced the released schema 43 index with a header-UID index.
+		var raw []byte
+		raw, err = os.ReadFile(filepath.Join("testdata", "schema_v49.sql"))
+		require.NoError(t, err)
+		_, ddl, found := strings.Cut(string(raw), "CREATE INDEX idx_events_resolved_issue_uid ")
+		require.True(t, found)
+		ddl, _, found = strings.Cut(ddl, ";")
+		require.True(t, found)
+		_, err = source.ExecContext(t.Context(), "DROP INDEX idx_events_issue_uid_id; CREATE INDEX idx_events_resolved_issue_uid "+ddl)
+		require.NoError(t, err)
+	}
+	for _, step := range []struct {
+		to      int
+		indexes []string
+		tables  []string
+	}{
+		{42, []string{"idx_issues_project_created", "idx_issues_created"}, nil},
+		{43, []string{"idx_events_resolved_issue_uid"}, nil},
+		{44, []string{"idx_events_reset_from"}, nil},
+		{45, []string{"idx_issues_uid_prefix", "idx_issues_project_uid_prefix"}, nil},
+		{46, []string{"idx_issues_project_ready_priority", "idx_issues_ready_priority"}, nil},
+		{47, []string{"idx_issues_ready_updated"}, nil},
+		{48, []string{"idx_events_moved_from_id"}, nil},
+		{49, []string{"idx_events_cron_run_uid"}, nil},
+		{50, nil, []string{"mcp_event_subscriptions"}},
+		{53, []string{"idx_events_project_moves"}, nil},
+	} {
+		if step.to > version {
+			for _, name := range step.indexes {
+				_, err = source.ExecContext(t.Context(), `DROP INDEX `+name)
+				require.NoError(t, err)
+			}
+			for _, name := range step.tables {
+				_, err = source.ExecContext(t.Context(), `DROP TABLE `+name)
+				require.NoError(t, err)
+			}
+		}
+	}
+	_, err = source.ExecContext(t.Context(), `UPDATE meta SET value=? WHERE key='schema_version'`, version)
 	require.NoError(t, err)
 	require.NoError(t, source.Close())
 	return path
