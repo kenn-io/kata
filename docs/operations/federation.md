@@ -2107,7 +2107,9 @@ leave before contacting the hub:
 
 - On a native spoke using local credentials, preparation refuses while another
   project still owes a locally authored move from this source. Sync that
-  destination project and retry.
+  destination project and retry. A detach leave can proceed when a newer hub
+  move supersedes the unsent move. Unacknowledged edits stay local until the
+  spoke rejoins the source and all referenced issues return to joined projects.
 - Otherwise, Kata atomically pauses writes on the leaving binding so a new move
   cannot race hub revocation.
 - For a config-managed reservation, preparation durably marks the reservation,
