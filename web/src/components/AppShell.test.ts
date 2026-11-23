@@ -1903,7 +1903,13 @@ describe('AppShell', () => {
       const input = screen.getByRole('textbox', { name: 'Quick capture' })
       await fireEvent.input(input, { target: { value: 'Example task' } })
       await fireEvent.keyDown(input, { key: 'Enter' })
-      await waitFor(() => expect(onCreateIssue).toHaveBeenCalledWith('Example task'))
+      await waitFor(() =>
+        expect(onCreateIssue).toHaveBeenCalledWith(
+          'Example task',
+          undefined,
+          '01J00000000000000000000002',
+        ),
+      )
       expect(onNavigate).not.toHaveBeenCalled()
     },
   )
@@ -1939,7 +1945,11 @@ describe('AppShell', () => {
       key: 'Enter',
     })
 
-    expect(onCreateIssue).toHaveBeenCalledWith('New example task')
+    expect(onCreateIssue).toHaveBeenCalledWith(
+      'New example task',
+      undefined,
+      '01J00000000000000000000002',
+    )
     await view.rerender({ mutationMessage: 'validation: Action refused' })
     await waitFor(() => expect(screen.getAllByText('validation: Action refused')).toHaveLength(1))
   })
@@ -2037,8 +2047,8 @@ describe('AppShell', () => {
     },
   )
 
-  test('designates an Inbox from New task before opening quick capture', async () => {
-    const onDesignateInbox = vi.fn(async () => {})
+  test('selects a project for a new task without designating an Inbox', async () => {
+    const onCreateIssue = vi.fn(async () => {})
     render(AppShell, {
       props: {
         route: {
@@ -2049,7 +2059,7 @@ describe('AppShell', () => {
         },
         snapshot: snapshot(),
         loading: false,
-        ...mutationProps({ onDesignateInbox }),
+        ...mutationProps({ onCreateIssue }),
         onNavigate: vi.fn(),
         onCreateProject: vi.fn(async () => ({ changed: true })),
       },
@@ -2060,8 +2070,17 @@ describe('AppShell', () => {
     await fireEvent.click(create)
     await fireEvent.click(screen.getByRole('combobox', { name: 'Project: Choose a project' }))
     await fireEvent.click(screen.getByRole('option', { name: snapshot().catalog[0]!.project.name }))
-    expect(onDesignateInbox).toHaveBeenCalledWith('01J00000000000000000000002')
-    expect(screen.getByRole('textbox', { name: 'Quick capture' })).not.toBeNull()
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Quick capture' }), {
+      target: { value: 'Draft task' },
+    })
+    await fireEvent.click(
+      within(screen.getByRole('dialog', { name: 'New task' })).getByRole('button', { name: 'Add' }),
+    )
+    expect(onCreateIssue).toHaveBeenCalledWith(
+      'Draft task',
+      undefined,
+      '01J00000000000000000000002',
+    )
   })
 
   test('renders daemon selection and recovery status inside stable workspace chrome', async () => {
@@ -2398,7 +2417,6 @@ function mutationProps(overrides: Record<string, unknown> = {}) {
     onCloseIssue: vi.fn(async () => true),
     onReopenIssue: vi.fn(),
     onCreateIssue: vi.fn(async () => {}),
-    onDesignateInbox: vi.fn(async () => {}),
     onCreateRecurrence: vi.fn(async () => {}),
     onPatchRecurrence: vi.fn(async () => {}),
     onDeleteRecurrence: vi.fn(async () => true),

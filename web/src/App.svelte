@@ -162,7 +162,9 @@
   let mutationPending = $state(false)
   let mutationState = $state<MutationState>({ kind: 'idle' })
   let draftFenceGeneration = $state(0)
-  let pendingCreate: { title: string; parentIssueUID?: string; key: string } | undefined
+  let pendingCreate:
+    | { title: string; parentIssueUID?: string; projectUID: string; key: string }
+    | undefined
   let pendingComment: { identity: string; key: string } | undefined
   let automaticSessionAttempted: 'loopback' | 'proxy' | undefined
   let advertisedAuthentication: 'loopback' | 'login' | 'proxy' | 'unavailable' | undefined
@@ -595,36 +597,27 @@
     )
   }
 
-  async function designateInbox(projectUID: string): Promise<void> {
-    const projects = authority?.snapshot?.catalog?.map(({ project }) => project) ?? []
-    const target = projects.find((project) => project.uid === projectUID)
-    if (!target) throw new Error('Inbox project is not available.')
-    if (target.metadata?.role === 'inbox') return
-
-    const accepted = await runMutation({ draft: projectUID }, (context) =>
-      patchInboxProject(target, context),
-    )
-    if (!accepted) {
-      throw new Error(mutationMessage(mutationState) ?? 'Could not designate the Inbox project.')
-    }
-  }
-
   async function createIssue(
     title: string,
     parent?: { projectID: number; projectUID: string; issueUID: string },
+    projectUID?: string,
   ): Promise<void> {
     const project = parent
       ? authority?.snapshot?.catalog?.find(({ project }) => project.id === parent.projectID)
           ?.project
-      : authority?.snapshot?.catalog?.find(({ project }) => project.metadata?.role === 'inbox')
-          ?.project
+      : authority?.snapshot?.catalog?.find(({ project }) =>
+          projectUID ? project.uid === projectUID : project.metadata?.role === 'inbox',
+        )?.project
     if (!project) throw new Error('Task project is not available.')
 
     const create =
-      pendingCreate?.title === title && pendingCreate.parentIssueUID === parent?.issueUID
+      pendingCreate?.title === title &&
+      pendingCreate.parentIssueUID === parent?.issueUID &&
+      pendingCreate.projectUID === project.uid
         ? pendingCreate
         : {
             title,
+            projectUID: project.uid,
             ...(parent ? { parentIssueUID: parent.issueUID } : {}),
             key: globalThis.crypto.randomUUID(),
           }
@@ -1543,7 +1536,6 @@
         ownerOptions={(references?.owners ?? []).map((owner) => ({ name: owner, label: owner }))}
         onNavigate={navigate}
         onCreateProject={createProject}
-        onDesignateInbox={designateInbox}
         onCreateIssue={createIssue}
         {searchReferences}
         onMoveIssue={moveIssue}

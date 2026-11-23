@@ -11,8 +11,7 @@
     projects?: { uid: string; name: string }[] | undefined
     inboxUID?: string | undefined
     onClose: () => void
-    onSubmit: (title: string) => void | Promise<void>
-    onChooseInbox?: ((uid: string) => Promise<void>) | undefined
+    onSubmit: (title: string, projectUID?: string) => void | Promise<void>
   }
 
   let {
@@ -23,7 +22,6 @@
     inboxUID = undefined,
     onClose,
     onSubmit,
-    onChooseInbox = undefined,
   }: Props = $props()
 
   let input = $state<HTMLInputElement>()
@@ -31,21 +29,7 @@
   let pending = $state(false)
   let error = $state<string | null>(null)
   let lastDraftFenceGeneration = $state<number | null>(null)
-  let chosenName = $state('')
-
-  async function chooseInbox(uid: string): Promise<void> {
-    if (!uid || !onChooseInbox) return
-    pending = true
-    error = null
-    try {
-      await onChooseInbox(uid)
-      chosenName = projects?.find((project) => project.uid === uid)?.name ?? ''
-    } catch (err) {
-      error = err instanceof Error ? err.message : 'Could not change project.'
-    } finally {
-      pending = false
-    }
-  }
+  let selectedProjectUID = $state<string | undefined>(undefined)
 
   $effect(() => {
     if (open && !disabled) input?.focus()
@@ -56,7 +40,9 @@
       title = ''
       pending = false
       error = null
-      chosenName = ''
+      selectedProjectUID = undefined
+    } else if (selectedProjectUID === undefined) {
+      selectedProjectUID = inboxUID ?? ''
     }
   })
 
@@ -70,15 +56,17 @@
     lastDraftFenceGeneration = nextGeneration
     title = ''
     pending = false
+    selectedProjectUID = inboxUID ?? ''
   })
 
   async function submit(): Promise<void> {
     const value = title.trim()
-    if (!value || pending || disabled || (projects && !inboxUID)) return
+    if (!value || pending || disabled || (projects && !selectedProjectUID)) return
     pending = true
     error = null
     try {
-      await onSubmit(value)
+      if (projects) await onSubmit(value, selectedProjectUID)
+      else await onSubmit(value)
       title = ''
       onClose()
     } catch (err) {
@@ -118,23 +106,20 @@
       />
     </label>
     {#if error}<p class="capture-error" role="alert">{error}</p>{/if}
-    {#if projects && onChooseInbox}
+    {#if projects}
       <div class="project-row">
         <span>Project</span>
         <SelectDropdown
           title="Project"
-          value={inboxUID ?? ''}
+          value={selectedProjectUID ?? ''}
           options={[
             { value: '', label: 'Choose a project', disabled: true },
             ...projects.map((project) => ({ value: project.uid, label: project.name })),
           ]}
-          onchange={(uid) => void chooseInbox(uid)}
+          onchange={(uid) => (selectedProjectUID = uid)}
           disabled={pending || disabled}
         />
       </div>
-      {#if chosenName}<p class="capture-destination">
-          New tasks go to {chosenName} from now on.
-        </p>{/if}
     {/if}
   </form>
   {#snippet footer()}
@@ -148,7 +133,7 @@
       disabled={disabled ||
         pending ||
         title.trim().length === 0 ||
-        (projects !== undefined && !inboxUID)}
+        (projects !== undefined && !selectedProjectUID)}
     >
       <PlusIcon size={12} strokeWidth={2} />
     </Button>
@@ -172,15 +157,6 @@
     color: var(--text-primary);
     font: inherit;
     font-size: var(--font-size-md);
-  }
-
-  .capture-destination {
-    display: flex;
-    align-items: baseline;
-    gap: 6px;
-    margin: 0;
-    color: var(--text-secondary);
-    font-size: var(--font-size-sm);
   }
 
   .capture-error {

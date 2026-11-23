@@ -3005,65 +3005,7 @@ describe('App', () => {
     },
   )
 
-  it('designates the capture Inbox from New task on a fresh catalog', async () => {
-    history.replaceState(null, '', '/kata#direct=1')
-    sessionStorage.setItem(
-      'kata.web.session.v1',
-      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
-    )
-    const accepted = snapshot()
-    const requests: Request[] = []
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const request =
-          input instanceof Request
-            ? input
-            : new Request(new URL(String(input), window.location.origin), init)
-        requests.push(request)
-        if (request.method === 'POST' && request.url.endsWith('/api/v1/projects/7/metadata')) {
-          accepted.catalog[0]!.project.metadata.role = 'inbox'
-          return new Response(
-            JSON.stringify({
-              changed: true,
-              project: accepted.catalog[0]!.project,
-            }),
-            { status: 200, headers: { 'Content-Type': 'application/json' } },
-          )
-        }
-        return new Response(JSON.stringify(accepted), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json', ETag: `"snapshot-${requests.length}"` },
-        })
-      }),
-    )
-
-    render(App)
-
-    expect(screen.queryByRole('button', { name: /^Inbox project:/ })).toBeNull()
-    await fireEvent.click(await screen.findByRole('button', { name: 'New task' }))
-    await fireEvent.click(
-      await screen.findByRole('combobox', { name: 'Project: Choose a project' }),
-    )
-    await fireEvent.click(screen.getByRole('option', { name: accepted.catalog[0]!.project.name }))
-
-    await waitFor(() => {
-      const mutation = requests.find(
-        (request) =>
-          request.method === 'POST' && request.url.endsWith('/api/v1/projects/7/metadata'),
-      )
-      expect(mutation).toBeDefined()
-      expect(
-        screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
-      ).toBeNull()
-    })
-    const mutation = requests.find(
-      (request) => request.method === 'POST' && request.url.endsWith('/api/v1/projects/7/metadata'),
-    )!
-    expect(await mutation.json()).toEqual({ actor: 'kata-web', patch: { role: 'inbox' } })
-  })
-
-  it('changes the Inbox project from New task through one designation request', async () => {
+  it('keeps the Inbox when a project selection is canceled and sends later tasks to their selected project', async () => {
     history.replaceState(null, '', '/kata#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
@@ -3083,7 +3025,7 @@ describe('App', () => {
       },
       stats: { Open: 0, Closed: 0, LastEventAt: '2026-08-01T12:00:00.000Z' },
     })
-    const patches: Array<{ projectID: number; body: unknown }> = []
+    const writes: string[] = []
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -3091,41 +3033,49 @@ describe('App', () => {
           input instanceof Request
             ? input
             : new Request(new URL(String(input), window.location.origin), init)
-        const match = request.url.match(/\/api\/v1\/projects\/(\d+)\/metadata$/)
-        if (request.method === 'POST' && match) {
-          const projectID = Number(match[1])
-          const body = await request.json()
-          patches.push({ projectID, body })
-          const project = accepted.catalog.find((entry) => entry.project.id === projectID)!.project
-          for (const entry of accepted.catalog) {
-            delete entry.project.metadata.role
-          }
-          project.metadata.role = 'inbox'
-          return new Response(JSON.stringify({ changed: true, project }), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          })
+        const path = new URL(request.url).pathname
+        if (request.method === 'POST' && path.startsWith('/api/v1/projects/')) {
+          writes.push(path)
+          if (path.endsWith('/issues'))
+            return Response.json({ issue: accepted.collection[0] }, { status: 201 })
+          if (path.endsWith('/metadata')) accepted.catalog[0]!.project.metadata.role = 'changed'
         }
-        return new Response(JSON.stringify(accepted), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json', ETag: `"snapshot-${patches.length}"` },
-        })
+        return Response.json(accepted, { headers: { ETag: '"snapshot-1"' } })
       }),
     )
-
     render(App)
-
     await fireEvent.click(await screen.findByRole('button', { name: 'New task' }))
+    await fireEvent.click(screen.getByRole('combobox', { name: 'Project: example-project' }))
+    await fireEvent.click(screen.getByRole('option', { name: 'example-workspace' }))
     await fireEvent.click(
-      screen.getByRole('combobox', { name: `Project: ${accepted.catalog[0]!.project.name}` }),
+      within(screen.getByRole('dialog', { name: 'New task' })).getByRole('button', {
+        name: 'Cancel',
+      }),
     )
-    await fireEvent.click(screen.getByRole('option', { name: accepted.catalog[1]!.project.name }))
-
-    await waitFor(() => expect(patches).toHaveLength(1))
-    expect(patches).toEqual([
-      { projectID: 8, body: { actor: 'kata-web', patch: { role: 'inbox' } } },
-    ])
-    expect(await screen.findByRole('textbox', { name: 'Quick capture' })).not.toBeNull()
+    expect(writes).toEqual([])
+    expect(accepted.catalog[0]!.project.metadata.role).toBe('inbox')
+    await fireEvent.click(screen.getByRole('button', { name: 'New task' }))
+    expect(screen.getByRole('combobox', { name: 'Project: example-project' })).toBeTruthy()
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Quick capture' }), {
+      target: { value: 'Inbox task' },
+    })
+    await fireEvent.click(
+      within(screen.getByRole('dialog', { name: 'New task' })).getByRole('button', { name: 'Add' }),
+    )
+    await waitFor(() => expect(writes).toContain('/api/v1/projects/7/issues'))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'New task' })).toBeNull())
+    await fireEvent.click(screen.getByRole('button', { name: 'New task' }))
+    await fireEvent.click(screen.getByRole('combobox', { name: 'Project: example-project' }))
+    await fireEvent.click(screen.getByRole('option', { name: 'example-workspace' }))
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Quick capture' }), {
+      target: { value: 'Other task' },
+    })
+    await fireEvent.click(
+      within(screen.getByRole('dialog', { name: 'New task' })).getByRole('button', { name: 'Add' }),
+    )
+    await waitFor(() => expect(writes).toContain('/api/v1/projects/8/issues'))
+    expect(writes).toEqual(['/api/v1/projects/7/issues', '/api/v1/projects/8/issues'])
+    expect(accepted.catalog[0]!.project.metadata.role).toBe('inbox')
   })
 
   it('loads, applies, and persists presentation preferences', async () => {

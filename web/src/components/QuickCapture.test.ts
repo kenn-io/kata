@@ -11,7 +11,6 @@ describe('QuickCapture', () => {
       props: {
         open: true,
         projects: [{ uid: 'a', name: 'Alpha' }],
-        onChooseInbox: vi.fn(),
         onClose: vi.fn(),
         onSubmit: vi.fn(),
       },
@@ -22,8 +21,8 @@ describe('QuickCapture', () => {
     expect((screen.getByRole('button', { name: 'Add' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it('chooses the Inbox project without losing the draft on refusal', async () => {
-    const onChooseInbox = vi.fn().mockRejectedValue(new Error('Cannot change project'))
+  it('selects a project for this task without changing the Inbox', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
     render(QuickCapture, {
       props: {
         open: true,
@@ -32,18 +31,17 @@ describe('QuickCapture', () => {
           { uid: 'b', name: 'Beta' },
         ],
         inboxUID: 'a',
-        onChooseInbox,
         onClose: vi.fn(),
-        onSubmit: vi.fn(),
+        onSubmit,
       },
     })
-    const input = screen.getByRole('textbox', { name: 'Quick capture' }) as HTMLInputElement
-    await fireEvent.input(input, { target: { value: 'Draft task' } })
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Quick capture' }), {
+      target: { value: 'Draft task' },
+    })
     await fireEvent.click(screen.getByRole('combobox', { name: 'Project: Alpha' }))
     await fireEvent.click(screen.getByRole('option', { name: 'Beta' }))
-    expect(onChooseInbox).toHaveBeenCalledWith('b')
-    expect((await screen.findByRole('alert')).textContent).toBe('Cannot change project')
-    expect(input.value).toBe('Draft task')
+    await fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    expect(onSubmit).toHaveBeenCalledWith('Draft task', 'b')
   })
 
   it('keeps the draft and shows the error when capture fails', async () => {

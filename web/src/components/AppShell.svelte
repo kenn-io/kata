@@ -101,8 +101,11 @@
     onSearchEmpty?: (() => void) | undefined
     onNavigate: (route: AppRoute) => void | Promise<void>
     onCreateProject: (name: string, designateInbox?: boolean) => Promise<KataTaskMutationResponse>
-    onDesignateInbox: (projectUID: string) => Promise<void>
-    onCreateIssue: (title: string, parent?: ChildParent) => void | Promise<void>
+    onCreateIssue: (
+      title: string,
+      parent?: ChildParent,
+      projectUID?: string,
+    ) => void | Promise<void>
     searchReferences: (query: string) => Promise<UIIssueReference[]>
     onMoveIssue: (toProjectUID: string) => boolean | Promise<boolean>
     onPatchMetadata: (uid: string, patch: Record<string, unknown>) => boolean | Promise<boolean>
@@ -170,7 +173,6 @@
     onSearchEmpty = undefined,
     onNavigate,
     onCreateProject,
-    onDesignateInbox,
     onCreateIssue,
     searchReferences,
     onMoveIssue,
@@ -546,8 +548,10 @@
     return result
   }
 
-  function submitCapture(title: string): void | Promise<void> {
-    return scopedAuthority && childParent ? onCreateIssue(title, childParent) : onCreateIssue(title)
+  function submitCapture(title: string, projectUID?: string): void | Promise<void> {
+    return scopedAuthority && childParent
+      ? onCreateIssue(title, childParent)
+      : onCreateIssue(title, undefined, projectUID)
   }
 
   function viewNameForRoute(current: AppRoute): KataTaskViewName {
@@ -1070,7 +1074,6 @@
     captureOpen = false
   }}
   onSubmit={submitCapture}
-  onChooseInbox={projectWideMutationAllowed ? onDesignateInbox : undefined}
 />
 
 <style>

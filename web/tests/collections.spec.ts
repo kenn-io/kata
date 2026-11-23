@@ -169,7 +169,7 @@ test('project creation and quick capture use the designated inbox project', asyn
   await expect(page.getByRole('button', { name: /Captured example task/ })).toBeVisible()
 })
 
-test('New task designates an Inbox before opening quick capture', async ({ page, kata }) => {
+test('New task chooses a project without designating an Inbox', async ({ page, kata }) => {
   const credentials = await kata.launch(page)
   const snapshot = (await kata.snapshot(page, credentials)) as {
     catalog: Array<{
@@ -196,6 +196,8 @@ test('New task designates an Inbox before opening quick capture', async ({ page,
   await page.getByRole('option', { name: 'example-project' }).click()
 
   await expect(page.getByRole('textbox', { name: 'Quick capture' })).toBeVisible()
+  const afterChoice = (await kata.snapshot(page, credentials)) as typeof snapshot
+  expect(afterChoice.catalog.some(({ project }) => project.metadata.role === 'inbox')).toBe(false)
   const restored = await kata.request(
     page,
     credentials,
@@ -204,4 +206,40 @@ test('New task designates an Inbox before opening quick capture', async ({ page,
     { actor: 'user-a', patch: { role: 'inbox' } },
   )
   expect(restored.ok()).toBe(true)
+})
+
+test('canceling a project choice preserves the Inbox for the next capture', async ({
+  page,
+  kata,
+}) => {
+  const credentials = await kata.launch(page)
+  const initial = (await kata.snapshot(page, credentials)) as {
+    catalog: Array<{
+      project: { id: number; uid: string; name: string; metadata: Record<string, unknown> }
+    }>
+  }
+  const inbox = initial.catalog.find(({ project }) => project.metadata.role === 'inbox')!.project
+  await page.getByRole('button', { name: 'New project' }).click()
+  await page.getByRole('textbox', { name: 'New project name' }).fill('alternative-workspace')
+  await page.getByRole('textbox', { name: 'New project name' }).press('Enter')
+  await expect(page.getByRole('button', { name: /^alternative-workspace\b/ })).toBeVisible()
+  await page.getByRole('button', { name: 'New task' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New task' })
+  await dialog.getByRole('combobox', { name: `Project: ${inbox.name}` }).click()
+  await page.getByRole('option', { name: 'alternative-workspace' }).click()
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+  const afterCancel = (await kata.snapshot(page, credentials)) as typeof initial
+  expect(
+    afterCancel.catalog.find(({ project }) => project.metadata.role === 'inbox')?.project.uid,
+  ).toBe(inbox.uid)
+  await page.getByRole('button', { name: 'New task' }).click()
+  await expect(dialog.getByRole('combobox', { name: `Project: ${inbox.name}` })).toBeVisible()
+  await dialog.getByRole('textbox', { name: 'Quick capture' }).fill('Inbox capture after cancel')
+  const created = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'POST' &&
+      new URL(response.url()).pathname.endsWith(`/api/v1/projects/${inbox.id}/issues`),
+  )
+  await dialog.getByRole('button', { name: 'Add' }).click()
+  expect((await created).ok()).toBe(true)
 })
