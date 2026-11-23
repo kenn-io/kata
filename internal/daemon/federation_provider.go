@@ -420,7 +420,7 @@ func ReleaseRemovedFederationProvider(ctx context.Context, store db.Storage, man
 	} else if err != nil {
 		return saved, project, errors.Join(ErrFederationProviderStorage, err)
 	}
-	closed, err := releaseFederationProvider(ctx, store, managed, project, saved.Credential.Provider.RequestID, false)
+	closed, err := releaseFederationProvider(ctx, store, managed, project, saved.Credential.Provider.RequestID, true)
 	return closed, project, err
 }
 
