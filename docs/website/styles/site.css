@@ -418,6 +418,13 @@ h3 {
   font-style: normal;
 }
 
+.term-note {
+  max-width: 46rem;
+  margin: 1rem 0 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
 /* --------------------------------------------------------- install row */
 
 .install-matrix {
