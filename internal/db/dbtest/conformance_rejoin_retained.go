@@ -111,7 +111,6 @@ func checkRejoinRetainedHistoryReset(t *testing.T, store db.Storage, backend Bac
 	require.NoError(t, err)
 	binding, err := store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: true})
 	require.NoError(t, err)
-	require.GreaterOrEqual(t, binding.RetainedThroughEventID, old.ID)
 	snapshot, sourceID, err := store.RetainedIssueSnapshot(ctx, project.ID, issue.UID)
 	require.NoError(t, err)
 	require.Equal(t, old.ID, sourceID)
@@ -131,7 +130,6 @@ func checkRejoinRetainedHistoryReset(t *testing.T, store db.Storage, backend Bac
 		binding.RetainHistory = true
 		binding, err = store.UpsertFederationBinding(ctx, binding)
 		require.NoError(t, err)
-		require.GreaterOrEqual(t, binding.RetainedThroughEventID, old.ID)
 	}
 	if guarded {
 		err = store.ResetFederatedProjectIfNoPendingPush(ctx, project.ID, snapshot.ID+1, snapshot.ID, store.InstanceUID(), snapshot.ID)

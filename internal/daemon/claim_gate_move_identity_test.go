@@ -80,14 +80,22 @@ func TestPendingMovedIssueClaimRefreshIgnoresHubShortIDCollision(t *testing.T) {
 }
 
 func TestRetainedIssueEditAfterPushQueueDrains(t *testing.T) {
-	for _, restored := range []bool{false, true} {
-		t.Run(fmt.Sprintf("restored=%t", restored), func(t *testing.T) {
+	for _, mode := range []string{"created", "restored", "moved"} {
+		t.Run(mode, func(t *testing.T) {
 			ctx := t.Context()
 			env := testenv.New(t)
 			project, err := env.DB.CreateProject(ctx, "retained-project")
 			require.NoError(t, err)
 			issue, created, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "older task", Author: "old-actor"})
 			require.NoError(t, err)
+			cursor := created.ID
+			if mode == "moved" {
+				target, err := env.DB.CreateProject(ctx, "target-project")
+				require.NoError(t, err)
+				moved, err := env.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: project.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "old-actor"})
+				require.NoError(t, err)
+				project, issue, cursor = target, moved.Issue, moved.Event.ID
+			}
 			hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusNotFound)
 				_, _ = w.Write([]byte(`{"error":{"code":"issue_not_found","message":"not synchronized yet"}}`))
@@ -95,8 +103,8 @@ func TestRetainedIssueEditAfterPushQueueDrains(t *testing.T) {
 			t.Cleanup(hub.Close)
 			_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: 42, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: true})
 			require.NoError(t, err)
-			require.NoError(t, env.DB.AdvanceFederationPushCursor(ctx, project.ID, created.ID))
-			if restored {
+			require.NoError(t, env.DB.AdvanceFederationPushCursor(ctx, project.ID, cursor))
+			if mode == "restored" {
 				records, err := dbtest.CollectImportRecords(ctx, env.DB, db.ExportFilter{IncludeDeleted: true})
 				require.NoError(t, err)
 				env = testenv.New(t)
@@ -105,7 +113,7 @@ func TestRetainedIssueEditAfterPushQueueDrains(t *testing.T) {
 			require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: 42, Token: "claim-token", Actor: "new-actor", Capabilities: "claim"}))
 			response, raw := envDoRaw(t, env, http.MethodPatch, issuePathRef(project.ID, issue.UID, ""), map[string]any{"actor": "new-actor", "title": "edited task"}, map[string]string{"If-Match": fmt.Sprintf(`"rev-%d"`, issue.Revision)})
 			require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
-			if restored {
+			if mode != "created" {
 				return
 			}
 			now := time.Now().UTC()
@@ -117,30 +125,6 @@ func TestRetainedIssueEditAfterPushQueueDrains(t *testing.T) {
 			assertAPIError(t, response.StatusCode, raw, http.StatusConflict, "claim_denied")
 		})
 	}
-}
-
-func TestRetainedMovedIssueEditAfterPushQueueDrains(t *testing.T) {
-	ctx := t.Context()
-	env := testenv.New(t)
-	source, err := env.DB.CreateProject(ctx, "offline-source")
-	require.NoError(t, err)
-	target, err := env.DB.CreateProject(ctx, "offline-target")
-	require.NoError(t, err)
-	issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "older task", Author: "old-actor"})
-	require.NoError(t, err)
-	moved, err := env.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "old-actor"})
-	require.NoError(t, err)
-	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"error":{"code":"issue_not_found","message":"not synchronized yet"}}`))
-	}))
-	t.Cleanup(hub.Close)
-	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: target.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: 42, HubProjectUID: target.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: true})
-	require.NoError(t, err)
-	require.NoError(t, env.DB.AdvanceFederationPushCursor(ctx, target.ID, moved.Event.ID))
-	require.NoError(t, config.WriteFederationCredential(target.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: 42, Token: "claim-token", Actor: "new-actor", Capabilities: "claim"}))
-	response, raw := envDoRaw(t, env, http.MethodPatch, issuePathRef(target.ID, issue.UID, ""), map[string]any{"actor": "new-actor", "title": "edited task"}, map[string]string{"If-Match": fmt.Sprintf(`"rev-%d"`, moved.NewRevision)})
-	require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
 }
 
 func TestRetainedIssueMoveChecksHubBeforeSnapshot(t *testing.T) {

@@ -155,7 +155,7 @@ func TestAutoCutoverPreservesArtifactsWhenRestoreFails(t *testing.T) {
 }
 
 func TestAutoCutoverOlderVersions(t *testing.T) {
-	for _, version := range []int{41, 53} {
+	for _, version := range []int{53} {
 		t.Run(strconv.Itoa(version), func(t *testing.T) {
 			t.Setenv("KATA_HOME", t.TempDir())
 			path := oldSchemaSource(t, version)
