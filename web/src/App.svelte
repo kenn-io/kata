@@ -309,10 +309,14 @@
     )
   }
 
+  let recurrenceRevision = $state(0)
   const invalidations = new InvalidationController((full) => refreshSnapshot(full))
   const stream = new EventStreamController({
     connect: (cursor, signal, onOpen) => openEventStream(browserFetch, cursor, signal, onOpen),
-    onFrame: (frame) => invalidations.frame(frame),
+    onFrame: (frame) => {
+      if (frame.event.startsWith('recurrence.')) recurrenceRevision++
+      invalidations.frame(frame)
+    },
     onAuthenticationRequired: requireAuthentication,
     onState: (state) => {
       const wasReconnecting = liveUpdatesReconnecting
@@ -765,8 +769,6 @@
     if (accepted) pendingComment = undefined
     return accepted
   }
-
-  let recurrenceRevision = $state(0)
 
   async function createRecurrence(
     projectID: number,

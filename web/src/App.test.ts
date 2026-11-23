@@ -3005,6 +3005,79 @@ describe('App', () => {
     },
   )
 
+  it('refreshes the project rules for recurrence events', async () => {
+    history.replaceState(null, '', '/kata?scope=01J00000000000000000000002#direct=1')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const live = snapshot()
+    live.capabilities.updates = 'sse'
+    let stream: ReadableStreamDefaultController<Uint8Array> | undefined
+    let reads = 0
+    let snapshotReads = 0
+    let ruleExists = false
+    let holdSnapshot = false
+    let releaseSnapshot: (() => void) | undefined
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        const path = new URL(request.url).pathname
+        if (path === '/api/v1/events/stream')
+          return new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                stream = controller
+              },
+            }),
+            { headers: { 'Content-Type': 'text/event-stream' } },
+          )
+        if (path.endsWith('/recurrences')) {
+          reads++
+          return Response.json({
+            recurrences: ruleExists
+              ? [{ uid: 'recurrence-1', template_title: 'Weekly task', rrule: 'FREQ=WEEKLY' }]
+              : [],
+          })
+        }
+        if (path === '/api/v1/ui/references') return Response.json({ statuses: [] })
+        if (path === '/api/v1/ui/snapshot') {
+          snapshotReads++
+          if (holdSnapshot) {
+            await new Promise<void>((resolve) => (releaseSnapshot = resolve))
+          }
+        }
+        return Response.json(live, { headers: { ETag: '"snapshot-1"' } })
+      }),
+    )
+    render(App)
+    await waitFor(() => {
+      expect(stream).toBeDefined()
+      expect(reads).toBeGreaterThan(0)
+      expect(snapshotReads).toBeGreaterThan(1)
+    })
+    holdSnapshot = true
+    expect(screen.queryByRole('button', { name: /repeating task/ })).toBeNull()
+    for (const event of [
+      'recurrence.created',
+      'recurrence.updated',
+      'recurrence.deleted',
+      'recurrence.materialized',
+      'recurrence.materialization_skipped',
+    ]) {
+      const previousReads = reads
+      ruleExists = true
+      stream!.enqueue(new TextEncoder().encode(`event: ${event}\ndata: {}\n\n`))
+      await waitFor(() => expect(reads).toBeGreaterThan(previousReads))
+      expect(await screen.findByRole('button', { name: '↻ 1 repeating task' })).not.toBeNull()
+      await waitFor(() => expect(releaseSnapshot).toBeDefined())
+      releaseSnapshot!()
+      releaseSnapshot = undefined
+      await tick()
+    }
+  })
+
   it('keeps the Inbox unchanged and creates in the chosen project', async () => {
     history.replaceState(null, '', '/kata#direct=1')
     sessionStorage.setItem(

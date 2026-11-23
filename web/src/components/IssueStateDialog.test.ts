@@ -75,7 +75,6 @@ describe('IssueStateDialog', () => {
     expect(within(dialog).queryByText(/Unblocks/)).toBeNull()
   })
 
-
   it('does not say closing unblocks a task that has another open blocker', async () => {
     const dialog = await openCompletePreview(
       ['issue-2', 'issue-3', 'issue-4'],
