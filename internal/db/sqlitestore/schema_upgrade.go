@@ -8,7 +8,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-// inPlaceUpgrades drop retired indexes, then add canonical tables and canonical
+// inPlaceUpgrades drop retired indexes, then add columns, canonical tables, and
 // indexes. A table is added only when it starts empty, so no existing row
 // needs converting. An index that a later step drops is no longer canonical,
 // so an upgrade that runs both steps never creates it.
@@ -30,6 +30,7 @@ var inPlaceUpgrades = []struct {
 	{50, 51, nil, []string{"idx_events_issue_uid_id"}, []string{"idx_events_resolved_issue_uid"}},
 	{51, 52, nil, nil, nil},
 	{52, 53, nil, []string{"idx_events_project_moves"}, nil},
+	{53, 54, nil, nil, nil},
 }
 
 // UpgradesInPlace reports whether in-place steps reach the current schema.
@@ -103,14 +104,8 @@ func UpgradeInPlace(ctx context.Context, path string) error {
 					return fmt.Errorf("drop index %s: %w", name, err)
 				}
 			}
-			for _, name := range step.Tables {
-				ddl, ok := tables[name]
-				if !ok {
-					return fmt.Errorf("canonical table %s is missing", name)
-				}
-				if _, err := tx.ExecContext(ctx, ddl); err != nil {
-					return fmt.Errorf("add table %s: %w", name, err)
-				}
+			if err := upgradeInPlaceTables(ctx, tx, step.From, step.Tables, tables); err != nil {
+				return err
 			}
 			for _, name := range step.Indexes {
 				if retired[name] {
@@ -131,6 +126,24 @@ func UpgradeInPlace(ctx context.Context, path string) error {
 		}
 		return tx.Commit()
 	})
+}
+
+func upgradeInPlaceTables(ctx context.Context, tx *sql.Tx, from int, names []string, tables map[string]string) error {
+	if from == 53 {
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE federation_bindings ADD COLUMN retained_through_event_id INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("add retained federation history boundary: %w", err)
+		}
+	}
+	for _, name := range names {
+		ddl, ok := tables[name]
+		if !ok {
+			return fmt.Errorf("canonical table %s is missing", name)
+		}
+		if _, err := tx.ExecContext(ctx, ddl); err != nil {
+			return fmt.Errorf("add table %s: %w", name, err)
+		}
+	}
+	return nil
 }
 
 // canonicalSQL reads the canonical schema's table and index DDL by name.

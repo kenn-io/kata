@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -152,7 +153,7 @@ func TestAutoCutoverPreservesArtifactsWhenRestoreFails(t *testing.T) {
 	require.ErrorIs(t, CheckCutoverSource(ctx, path), ErrCutoverInProgress)
 }
 
-func TestAutoCutoverOlderVersions(t *testing.T) {
+func TestAutoCutoverSchema53InPlace(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	path := oldSchemaSource(t)
 	fresh, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "fresh.db"))
@@ -167,7 +168,7 @@ func TestAutoCutoverOlderVersions(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	require.True(t, exported)
+	require.False(t, exported)
 	upgraded, err := sqlitestore.Open(t.Context(), path)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, upgraded.Close()) })
@@ -188,12 +189,44 @@ func TestAutoCutoverOlderVersions(t *testing.T) {
 		for rows.Next() {
 			var entry [4]sql.NullString
 			require.NoError(t, rows.Scan(&entry[0], &entry[1], &entry[2], &entry[3]))
+			if entry[1].String == "federation_bindings" {
+				entry[3].String = strings.Join(strings.Fields(entry[3].String), " ")
+			}
 			entries = append(entries, entry)
 		}
 		require.NoError(t, rows.Err())
 		return entries
 	}
 	require.Equal(t, catalog(fresh), catalog(upgraded))
+}
+
+func TestAutoCutoverInPlaceFailureLeavesSourceRetryable(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	ctx := t.Context()
+	path := oldSchemaSource(t)
+	source, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	_, err = source.ExecContext(ctx, `ALTER TABLE federation_bindings ADD COLUMN retained_through_event_id INTEGER NOT NULL DEFAULT 0`)
+	require.NoError(t, err)
+	_, err = source.ExecContext(ctx, `DROP INDEX idx_events_project_moves`)
+	require.NoError(t, err)
+	_, err = source.ExecContext(ctx, `UPDATE meta SET value='52' WHERE key='schema_version'`)
+	require.NoError(t, err)
+	require.NoError(t, source.Close())
+	require.Error(t, AutoCutover(ctx, path))
+	source, err = sql.Open("sqlite", path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, source.Close()) })
+	var version string
+	require.NoError(t, source.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='schema_version'`).Scan(&version))
+	require.Equal(t, "52", version)
+	var indexes int
+	require.NoError(t, source.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_events_project_moves'`).Scan(&indexes))
+	require.Zero(t, indexes)
+	_, err = source.ExecContext(ctx, `ALTER TABLE federation_bindings DROP COLUMN retained_through_event_id`)
+	require.NoError(t, err)
+	require.NoError(t, source.Close())
+	require.NoError(t, AutoCutover(ctx, path))
 }
 
 func oldSchemaSource(t *testing.T) string {

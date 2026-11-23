@@ -2150,7 +2150,7 @@ Kata publishes a snapshot of the task before the edit. On the hub, that task
 and its comments and links are attributed to the new enrollment's actor. The
 spoke keeps the original events and their actors in its history.
 
-Kata upgrades SQLite databases to schema 54 at startup. Older binaries cannot
+Kata upgrades SQLite databases at schema 41 or later to schema 54 in place at startup. Older binaries cannot
 open schema 54. To roll back, restore a backup made before the upgrade and use its matching
 binary. Stop the daemon before migrating PostgreSQL; the migration briefly locks
 the federation bindings table.
