@@ -90,7 +90,6 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 		}
 		res, err := cfg.DB.MoveIssueProject(ctx, move)
 		if err == nil {
-			move.ExpectedDiscussionEventIDs = make(map[int64]int64)
 			for _, issue := range res.Issues {
 				var refresh claimRefreshResult
 				if err := requireFederatedIssueClaimWithResult(ctx, cfg, issue, actor, !in.Body.DryRun, &refresh); err != nil {
@@ -117,17 +116,15 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 					return nil, api.NewError(503, "federation_offline", "the hub is unreachable or the retained task is waiting to sync", "", nil)
 				}
 				if retained && (snapshot || refresh.missing) {
-					return nil, api.NewError(409, "federated_move_unsupported", "this retained task cannot be moved", "create an issue in the target project and link it to this task", nil)
+					return nil, retainedMoveUnsupported()
 				}
 				if binding.RetainedThroughEventID != 0 {
-					watermark, err := retainedMoveDiscussion(ctx, cfg, binding, issue)
-					if err != nil {
+					if err := retainedMoveDiscussion(ctx, cfg, binding, issue); err != nil {
 						if apiErr, ok := errors.AsType[*api.APIError](err); ok {
 							return nil, apiErr
 						}
 						return nil, internalAPIError(err)
 					}
-					move.ExpectedDiscussionEventIDs[issue.ID] = watermark
 				}
 			}
 			if !in.Body.DryRun {

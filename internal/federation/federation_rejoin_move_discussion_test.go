@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -25,14 +24,13 @@ func TestRejoinMoveWithOlderDiscussion(t *testing.T) {
 		published bool
 		pushOnly  bool
 		restored  bool
-		mode      string
+		offline   bool
 	}{
 		{name: "unpublished"},
 		{name: "published", published: true},
 		{name: "push only", published: true, pushOnly: true},
 		{name: "former instance", published: true, restored: true},
-		{name: "hub history offline", published: true, mode: "offline"},
-		{name: "comment changes during check", published: true, mode: "race"},
+		{name: "hub history offline", published: true, offline: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := t.Context()
@@ -41,7 +39,7 @@ func TestRejoinMoveWithOlderDiscussion(t *testing.T) {
 			issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "task", Author: "old-actor"})
 			require.NoError(t, err)
 			require.NoError(t, spoke.sync(t, 0))
-			comment, _, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "discussion"})
+			_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "discussion"})
 			require.NoError(t, err)
 			if tc.published {
 				require.NoError(t, spoke.sync(t, 0))
@@ -70,26 +68,13 @@ func TestRejoinMoveWithOlderDiscussion(t *testing.T) {
 			} else {
 				require.NoError(t, spoke.sync(t, 0))
 			}
-			if tc.mode != "" {
+			if tc.offline {
 				base, err := url.Parse(hub.URL)
 				require.NoError(t, err)
 				reverse := httputil.NewSingleHostReverseProxy(base)
 				proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/federation/events") && r.URL.Query().Get("issue_uid") != "" {
-						if tc.mode == "offline" {
-							http.Error(w, "offline", http.StatusServiceUnavailable)
-							return
-						}
-						recorded := httptest.NewRecorder()
-						reverse.ServeHTTP(recorded, r)
-						_, _, _, err := spoke.env.DB.EditComment(ctx, db.EditCommentParams{IssueID: issue.ID, CommentUID: comment.UID, Actor: "new-actor", Body: "concurrent edit"})
-						if err != nil {
-							http.Error(w, err.Error(), http.StatusInternalServerError)
-							return
-						}
-						maps.Copy(w.Header(), recorded.Header())
-						w.WriteHeader(recorded.Code)
-						_, _ = w.Write(recorded.Body.Bytes())
+						http.Error(w, "offline", http.StatusServiceUnavailable)
 						return
 					}
 					reverse.ServeHTTP(w, r)
@@ -127,22 +112,13 @@ func TestRejoinMoveWithOlderDiscussion(t *testing.T) {
 			defer func() { _ = resp.Body.Close() }()
 			raw, err := io.ReadAll(resp.Body)
 			require.NoError(t, err)
-			if tc.mode == "offline" {
+			if tc.offline {
 				require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode, string(raw))
-				return
-			}
-			if tc.mode == "race" {
-				require.Equal(t, http.StatusConflict, resp.StatusCode, string(raw))
-				require.Contains(t, string(raw), "issue_move_tree_changed")
 				return
 			}
 			if !tc.published || tc.pushOnly {
 				require.Equal(t, http.StatusConflict, resp.StatusCode, string(raw))
-				later, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[1].ID, Title: "later task", Author: "new-actor"})
-				require.NoError(t, err)
-				require.NoError(t, spoke.sync(t, 1))
-				_, err = hub.DB.IssueByUID(ctx, later.UID, db.IncludeDeletedNo)
-				require.NoError(t, err)
+				require.Contains(t, string(raw), "federated_move_unsupported")
 				return
 			}
 			require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))

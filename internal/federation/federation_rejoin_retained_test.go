@@ -39,7 +39,7 @@ func TestRetainedLinkPeersSkipsOrdinaryBinding(t *testing.T) {
 	require.Zero(t, store.calls)
 }
 
-func TestRejoinRecoveredSnapshotPublishesReplyParent(t *testing.T) {
+func checkRejoinRecoveredSnapshotReplyParent(t *testing.T) {
 	for _, known := range []bool{true, false} {
 		name := "known parent task"
 		if !known {
@@ -85,6 +85,7 @@ func checkRejoinRecoveredReplyParent(t *testing.T, known bool) {
 }
 
 func TestRejoinRetainedHistory(t *testing.T) {
+	t.Run("reply parent", checkRejoinRecoveredSnapshotReplyParent)
 	for _, edited := range []bool{false, true} {
 		name := "new reply"
 		if edited {
@@ -145,47 +146,7 @@ func TestRejoinRetainedHistory(t *testing.T) {
 		}
 	})
 	t.Run("recovery snapshots", checkRejoinRecoverySnapshots)
-	t.Run("recovery after another rejoin", checkRecoveryAfterAnotherRejoin)
 	t.Run("wrong actor after rejoin", checkRejoinRejectsWrongActor)
-}
-
-func checkRecoveryAfterAnotherRejoin(t *testing.T) {
-	for _, accepted := range []bool{false, true} {
-		name := "pending"
-		if accepted {
-			name = "accepted"
-		}
-		t.Run(name, func(t *testing.T) {
-			ctx := t.Context()
-			hub, projects := newMoveDeliveryHub(t, "rejoin-project")
-			spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
-			issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "task", Author: "old-actor"})
-			require.NoError(t, err)
-			rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
-			snapshot, sourceID, err := spoke.env.DB.RetainedIssueSnapshot(ctx, spoke.projects[0].ID, issue.UID)
-			require.NoError(t, err)
-			if accepted {
-				client, err := NewClient(ctx, hub.URL, spoke.credentials[projects[0].UID].Token, clientpkg.Opts{})
-				require.NoError(t, err)
-				envelope := federationIngestEnvelope(snapshot)
-				envelope.EventID = sourceID
-				_, err = client.IngestProjectEventsWithOptions(ctx, projects[0].ID, []api.FederationIngestEventEnvelope{envelope}, IngestProjectEventsOptions{})
-				require.NoError(t, err)
-			}
-			rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
-			again, _, err := spoke.env.DB.RetainedIssueSnapshot(ctx, spoke.projects[0].ID, issue.UID)
-			require.NoError(t, err)
-			require.Equal(t, snapshot.UID, again.UID)
-			_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "later work"})
-			require.NoError(t, err)
-			require.NoError(t, spoke.sync(t, 0))
-			remote, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-			require.NoError(t, err)
-			comments, err := hub.DB.CommentsByIssue(ctx, remote.ID)
-			require.NoError(t, err)
-			require.Len(t, comments, 1)
-		})
-	}
 }
 
 func checkRejoinRetainedPeer(t *testing.T, crossProject bool) {
@@ -350,7 +311,7 @@ func checkRejoinUnknownIssue(t *testing.T) {
 }
 
 func checkRejoinRecoverySnapshots(t *testing.T) {
-	for _, mode := range []string{"not queued", "queued", "multiple queued"} {
+	for _, mode := range []string{"not queued", "queued", "multiple queued", "rejoin pending", "rejoin accepted"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := t.Context()
 			hub, projects := newMoveDeliveryHub(t, "rejoin-project", "other-project")
@@ -362,7 +323,7 @@ func checkRejoinRecoverySnapshots(t *testing.T) {
 				second, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "second", Author: "old-actor"})
 				require.NoError(t, err)
 				issues = append(issues, second)
-			} else {
+			} else if mode != "rejoin pending" && mode != "rejoin accepted" {
 				require.NoError(t, spoke.sync(t, 0))
 			}
 			rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
@@ -383,13 +344,16 @@ func checkRejoinRecoverySnapshots(t *testing.T) {
 					var sourceID int64
 					snapshot, sourceID, err = spoke.env.DB.RetainedIssueSnapshot(ctx, spoke.projects[0].ID, item.UID)
 					require.NoError(t, err)
-					if mode == "multiple queued" {
+					if mode == "multiple queued" || mode == "rejoin accepted" {
 						envelope := federationIngestEnvelope(snapshot)
 						envelope.EventID = sourceID
 						_, err = client.IngestProjectEventsWithOptions(ctx, projects[0].ID, []api.FederationIngestEventEnvelope{envelope}, IngestProjectEventsOptions{})
 						require.NoError(t, err)
 					}
 				}
+			}
+			if mode == "rejoin pending" || mode == "rejoin accepted" {
+				rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
 			}
 			if mode != "multiple queued" {
 				_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "later work"})

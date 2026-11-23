@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
@@ -15,23 +14,21 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
-// retainedMoveDiscussion reads the watermark before comment rows, so the move
-// transaction can reject changes made while the hub history is checked.
-func retainedMoveDiscussion(ctx context.Context, cfg ServerConfig, binding db.FederationBinding, issue db.Issue) (int64, error) {
+// retainedMoveDiscussion refuses a move whose retained comments the hub has not accepted.
+func retainedMoveDiscussion(ctx context.Context, cfg ServerConfig, binding db.FederationBinding, issue db.Issue) error {
 	former, err := cfg.DB.FormerInstanceUIDs(ctx)
 	if err != nil {
-		return 0, err
+		return err
 	}
 	ctx = db.WithAuthorizedProjects(ctx, nil) // The handler already admitted this issue's current project.
-	var after, watermark int64
+	var after int64
 	risk := map[string]bool{}
 	for {
 		events, err := cfg.DB.EventsAfter(ctx, db.EventsAfterParams{IssueUID: issue.UID, Types: []string{"issue.created", "issue.snapshot", "issue.moved", "issue.commented", "issue.comment_edited"}, AfterID: after, Limit: 1000})
 		if err != nil {
-			return 0, err
+			return err
 		}
 		for _, event := range events {
-			watermark = max(watermark, event.ID)
 			if event.ID > binding.RetainedThroughEventID || (event.OriginInstanceUID != cfg.DB.InstanceUID() && !slices.Contains(former, event.OriginInstanceUID)) {
 				continue
 			}
@@ -57,7 +54,7 @@ func retainedMoveDiscussion(ctx context.Context, cfg ServerConfig, binding db.Fe
 	}
 	comments, err := cfg.DB.CommentsByIssue(ctx, issue.ID)
 	if err != nil {
-		return 0, err
+		return err
 	}
 	var needed []db.Comment
 	for _, comment := range comments {
@@ -66,27 +63,27 @@ func retainedMoveDiscussion(ctx context.Context, cfg ServerConfig, binding db.Fe
 		}
 	}
 	if len(needed) == 0 {
-		return watermark, nil
+		return nil
 	}
 	remote, cred, err := claimForwardClient(ctx, cfg, binding)
 	if err != nil {
-		return 0, err
+		return err
 	}
-	if !slices.Contains(strings.Split(cred.Capabilities, ","), "pull") {
-		return 0, retainedMoveUnsupported()
+	if !federationCapabilitiesContain(cred.Capabilities, "pull") {
+		return retainedMoveUnsupported()
 	}
 	history, err := remote.issueHistory(ctx, cred.HubProjectID, issue.UID)
 	if err != nil {
 		var status *claimHubStatusError
 		if errors.As(err, &status) && status.StatusCode == http.StatusNotFound {
-			return 0, retainedMoveUnsupported()
+			return retainedMoveUnsupported()
 		}
-		return 0, api.NewError(http.StatusServiceUnavailable, "federation_offline", "the hub is unreachable or its history is unavailable", "retry the move", nil)
+		return api.NewError(http.StatusServiceUnavailable, "federation_offline", "the hub is unreachable or its history is unavailable", "retry the move", nil)
 	}
 	if !db.FederationMoveHistoryProvesComments(issue.UID, binding.HubProjectUID, history, needed) {
-		return 0, retainedMoveUnsupported()
+		return retainedMoveUnsupported()
 	}
-	return watermark, nil
+	return nil
 }
 
 func retainedMoveUnsupported() error {

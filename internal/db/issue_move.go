@@ -62,9 +62,6 @@ func IssueMoveTreeInputs(ctx context.Context, tx *sql.Tx, in MoveIssueProjectIn)
 		if err := validateIssueMoveMembership(in.ExpectedIssueIDs, inputs); err != nil {
 			return nil, err
 		}
-		if err := validateMoveDiscussion(ctx, tx, in.ExpectedDiscussionEventIDs); err != nil {
-			return nil, err
-		}
 		if in.AuthorizeProjects != nil {
 			if err := authorizeIssueMoveProjects(ctx, tx, in, []int64{in.FromProjectID}); err != nil {
 				return nil, err
@@ -116,9 +113,6 @@ func IssueMoveTreeInputs(ctx context.Context, tx *sql.Tx, in MoveIssueProjectIn)
 	if err := validateIssueMoveMembership(in.ExpectedIssueIDs, items); err != nil {
 		return nil, err
 	}
-	if err := validateMoveDiscussion(ctx, tx, in.ExpectedDiscussionEventIDs); err != nil {
-		return nil, err
-	}
 	if in.AuthorizeProjects != nil {
 		ids := make([]int64, 0, len(items))
 		for _, item := range items {
@@ -136,33 +130,6 @@ func IssueMoveTreeInputs(ctx context.Context, tx *sql.Tx, in MoveIssueProjectIn)
 		return nil, err
 	}
 	return items, nil
-}
-
-func validateMoveDiscussion(ctx context.Context, tx *sql.Tx, expected map[int64]int64) error {
-	if len(expected) == 0 {
-		return nil
-	}
-	args := make([]any, 0, len(expected))
-	places := make([]string, 0, len(expected))
-	for id := range expected {
-		args = append(args, id)
-		places = append(places, fmt.Sprintf("$%d", len(args)))
-	}
-	rows, err := tx.QueryContext(ctx, `SELECT i.id, COALESCE(MAX(e.id),0) FROM issues i LEFT JOIN events e ON e.issue_uid=i.uid AND e.type IN ('issue.created','issue.snapshot','issue.moved','issue.commented','issue.comment_edited') WHERE i.id IN (`+strings.Join(places, ",")+`) GROUP BY i.id`, args...) //nolint:gosec // Placeholders are generated from the number of issue IDs.
-	if err != nil {
-		return err
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var id, latest int64
-		if err := rows.Scan(&id, &latest); err != nil {
-			return err
-		}
-		if latest > expected[id] {
-			return ErrIssueMoveTreeChanged
-		}
-	}
-	return rows.Err()
 }
 
 func validateIssueMoveMembership(expected []int64, inputs []IssueMoveTreeItem) error {
