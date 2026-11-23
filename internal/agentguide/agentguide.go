@@ -5,11 +5,10 @@ import "strings"
 
 // Contract is the marker-free agent workflow contract: the short core every
 // coding agent sees. Coordination detail lives in the quickstart fragments.
-const Contract = `This workspace tracks its work in kata. Use kata for the changes the user asks
-you to make here, not for questions, explanations, or reviews that change
-nothing.
+const Contract = `Use kata for requested changes, not questions, explanations, or reviews that
+change nothing.
 
-Before starting a change, look for an existing issue:
+Before a change, search for an existing issue:
 
     kata search "<one or two distinctive words>" --agent
 
