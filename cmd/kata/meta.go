@@ -519,8 +519,7 @@ func printMetaGet(cmd *cobra.Command, issue metaIssueWire, key string) error {
 			case outputJSON:
 				return printMetaValue(cmd, key, jsontext.Value("null"), issue, mode)
 			case outputAgent:
-				issue.Metadata = nil
-				return printMetaGet(cmd, issue, "")
+				return printMetaAgentSummary(cmd, issue, 0)
 			}
 			return nil
 		}
@@ -539,8 +538,7 @@ func printMetaGet(cmd *cobra.Command, issue metaIssueWire, key string) error {
 		return err
 	}
 	if mode == outputAgent {
-		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "OK meta get %s count=%d revision=rev-%d\n",
-			agentValue(issue.ShortID), len(issue.Metadata), issue.Revision); err != nil {
+		if err := printMetaAgentSummary(cmd, issue, len(issue.Metadata)); err != nil {
 			return err
 		}
 		for _, k := range sortedMetaKeys(issue.Metadata) {
@@ -582,8 +580,7 @@ func printMetaValue(cmd *cobra.Command, key string, value jsontext.Value, issue 
 		return err
 	}
 	if mode == outputAgent {
-		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "OK meta get %s count=1 revision=rev-%d\n",
-			agentValue(issue.ShortID), issue.Revision); err != nil {
+		if err := printMetaAgentSummary(cmd, issue, 1); err != nil {
 			return err
 		}
 		return writeMetaAgentRow(cmd, key, compact)
@@ -594,6 +591,11 @@ func printMetaValue(cmd *cobra.Command, key string, value jsontext.Value, issue 
 		return err
 	}
 	_, err := fmt.Fprintln(cmd.OutOrStdout(), textsafe.Line(string(compact)))
+	return err
+}
+
+func printMetaAgentSummary(cmd *cobra.Command, issue metaIssueWire, count int) error {
+	_, err := fmt.Fprintf(cmd.OutOrStdout(), "OK meta get %s count=%d revision=rev-%d\n", agentValue(issue.ShortID), count, issue.Revision)
 	return err
 }
 
