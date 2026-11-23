@@ -407,7 +407,9 @@
   )
   let hasAnyExpandedRows = $derived(Object.values(expanded).some(Boolean))
 
-  const ROW_LIMIT_STEP = 150
+  // Keep the first paint small. Scrolling and keyboard navigation reveal more
+  // rows through the same batch limit, while counts still cover the full list.
+  const ROW_LIMIT_STEP = 75
   let listKey = $derived(JSON.stringify([currentView.name, resultsKey]))
   // showRows overrides this; a new list key recomputes it in the same render.
   let rowLimit = $derived.by(() => {
