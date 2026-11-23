@@ -835,14 +835,8 @@
         return { ...result, data: result.status === 204 ? true : result.data }
       },
     )
-    if (accepted) {
-      recurrenceRevision++
-      return
-    }
-    if (mutationState.kind === 'revision-conflict') {
-      throw new Error('This rule changed. Review it and try again.')
-    }
-    throw new Error(mutationMessage(mutationState) ?? 'Could not stop repeating.')
+    if (!accepted) throw new Error(mutationMessage(mutationState) ?? 'Could not stop repeating.')
+    recurrenceRevision++
   }
 
   function recurrenceTemplate(

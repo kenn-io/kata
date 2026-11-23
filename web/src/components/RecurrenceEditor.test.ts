@@ -750,7 +750,7 @@ describe('RecurrenceEditor — edit diff', () => {
 
 describe('RecurrenceEditor — 412 conflict', () => {
   test('keeps the draft when the rule changes', async () => {
-    const onPatch = vi.fn().mockRejectedValue({ status: 412 })
+    const onPatch = vi.fn().mockRejectedValue(Object.assign(new Error('Conflict'), { status: 412 }))
     render(RecurrenceEditorDialog, {
       props: {
         open: true,

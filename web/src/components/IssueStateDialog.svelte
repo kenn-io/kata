@@ -1,10 +1,9 @@
 <script lang="ts">
-  import { Button, RadioGroup } from '@kenn-io/kit-ui'
+  import { Button, Card, RadioGroup } from '@kenn-io/kit-ui'
   import CheckIcon from '@lucide/svelte/icons/check'
   import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw'
   import type { KataTaskCloseRequest, KataTaskDetail, KataTaskSummary } from '../lib/kata/types'
   import Modal from './Modal.svelte'
-  import { Card } from '@kenn-io/kit-ui'
 
   interface Props {
     issue: KataTaskDetail

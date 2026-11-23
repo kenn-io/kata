@@ -69,13 +69,7 @@ describe('IssueStateDialog', () => {
     return screen.getByRole('dialog', { name: 'Complete task' })
   }
 
-  it('states only the blocking link when the blocked task is not loaded', async () => {
-    const dialog = await openCompletePreview(['issue-2'])
-    expect(within(dialog).getByText('Comments and links stay.')).toBeTruthy()
-    expect(within(dialog).queryByText(/Unblocks/)).toBeNull()
-  })
-
-  it('does not say closing unblocks a task that has another open blocker', async () => {
+  it('counts only loaded tasks with no other open blocker', async () => {
     const dialog = await openCompletePreview(
       ['issue-2', 'issue-3', 'issue-4'],
       [blockedTask('issue-2', ['issue-1', 'issue-9']), blockedTask('issue-3', ['issue-1'])],

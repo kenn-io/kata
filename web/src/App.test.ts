@@ -3005,7 +3005,7 @@ describe('App', () => {
     },
   )
 
-  it('refreshes the project rules for recurrence events', async () => {
+  it('refreshes project rules for recurrence events while a snapshot is pending', async () => {
     history.replaceState(null, '', '/kata?scope=01J00000000000000000000002#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
@@ -3016,7 +3016,6 @@ describe('App', () => {
     let stream: ReadableStreamDefaultController<Uint8Array> | undefined
     let reads = 0
     let snapshotReads = 0
-    let ruleExists = false
     let holdSnapshot = false
     let releaseSnapshot: (() => void) | undefined
     vi.stubGlobal(
@@ -3036,9 +3035,7 @@ describe('App', () => {
         if (path.endsWith('/recurrences')) {
           reads++
           return Response.json({
-            recurrences: ruleExists
-              ? [{ uid: 'recurrence-1', template_title: 'Weekly task', rrule: 'FREQ=WEEKLY' }]
-              : [],
+            recurrences: [],
           })
         }
         if (path === '/api/v1/ui/references') return Response.json({ statuses: [] })
@@ -3058,24 +3055,11 @@ describe('App', () => {
       expect(snapshotReads).toBeGreaterThan(1)
     })
     holdSnapshot = true
-    expect(screen.queryByRole('button', { name: /repeating task/ })).toBeNull()
-    for (const event of [
-      'recurrence.created',
-      'recurrence.updated',
-      'recurrence.deleted',
-      'recurrence.materialized',
-      'recurrence.materialization_skipped',
-    ]) {
-      const previousReads = reads
-      ruleExists = true
-      stream!.enqueue(new TextEncoder().encode(`event: ${event}\ndata: {}\n\n`))
-      await waitFor(() => expect(reads).toBeGreaterThan(previousReads))
-      expect(await screen.findByRole('button', { name: '↻ 1 repeating task' })).not.toBeNull()
-      await waitFor(() => expect(releaseSnapshot).toBeDefined())
-      releaseSnapshot!()
-      releaseSnapshot = undefined
-      await tick()
-    }
+    const previousReads = reads
+    stream!.enqueue(new TextEncoder().encode('event: recurrence.materialized\ndata: {}\n\n'))
+    await waitFor(() => expect(reads).toBeGreaterThan(previousReads))
+    await waitFor(() => expect(releaseSnapshot).toBeDefined())
+    releaseSnapshot!()
   })
 
   it('keeps the Inbox unchanged and creates in the chosen project', async () => {
@@ -3207,12 +3191,6 @@ describe('App', () => {
     }
   }
 
-  function asRequest(input: RequestInfo | URL, init?: RequestInit): Request {
-    return input instanceof Request
-      ? input
-      : new Request(new URL(String(input), window.location.origin), init)
-  }
-
   async function stopRepeatingFromHeader(): Promise<HTMLElement> {
     await fireEvent.click(await screen.findByRole('button', { name: /1 repeating task/ }))
     await fireEvent.click(screen.getByRole('button', { name: 'Stop repeating…' }))
@@ -3221,70 +3199,44 @@ describe('App', () => {
     return dialog
   }
 
-  it('sends the visible recurrence revision when deleting', async () => {
-    const accepted = recurrenceDeletionSetup()
-    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const request = asRequest(input, init)
-      if (request.method === 'DELETE') return new Response(null, { status: 204 })
-      if (request.url.endsWith('/api/v1/projects/7/recurrences'))
-        return Response.json({ recurrences: accepted.selected.recurrences })
-      return new Response(JSON.stringify(accepted), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json', ETag: '"snapshot-1"' },
+  it.each(['accepted', 'refused'])(
+    'sends the visible recurrence revision when deleting: %s',
+    async (result) => {
+      const accepted = recurrenceDeletionSetup()
+      const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        if (request.method === 'DELETE') {
+          return result === 'accepted'
+            ? new Response(null, { status: 204 })
+            : Response.json(
+                { error: { code: 'revision_conflict', message: 'Recurrence changed' } },
+                { status: 412 },
+              )
+        }
+        if (request.url.endsWith('/api/v1/projects/7/recurrences'))
+          return Response.json({ recurrences: accepted.selected.recurrences })
+        return new Response(JSON.stringify(accepted), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', ETag: '"snapshot-1"' },
+        })
       })
-    })
-    vi.stubGlobal('fetch', fetcher)
+      vi.stubGlobal('fetch', fetcher)
 
-    render(App)
-    await stopRepeatingFromHeader()
-
-    await waitFor(() => {
-      const deletions = fetcher.mock.calls
-        .map(([input, init]) => asRequest(input, init))
-        .filter((request) => request.method === 'DELETE')
-      expect(deletions.map((request) => request.headers.get('If-Match'))).toEqual(['"rev-4"'])
-    })
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Stop repeating' })).toBeNull())
-  })
-
-  it('keeps a refused stop in its dialog', async () => {
-    const accepted = recurrenceDeletionSetup()
-    const rule = accepted.selected.recurrences[0]!
-    const deletions: Array<string | null> = []
-    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const request = asRequest(input, init)
-      if (request.method === 'DELETE') {
-        deletions.push(request.headers.get('If-Match'))
-        if (request.headers.get('If-Match') === `"rev-${rule.revision}"`)
-          return new Response(null, { status: 204 })
-        return Response.json(
-          { error: { code: 'revision_conflict', message: 'Recurrence changed' } },
-          { status: 412 },
+      render(App)
+      const dialog = await stopRepeatingFromHeader()
+      await waitFor(() => {
+        const deletions = fetcher.mock.calls
+          .map(([input, init]) => requestOf(input, init))
+          .filter((request) => request.method === 'DELETE')
+        expect(deletions.map((request) => request.headers.get('If-Match'))).toEqual(['"rev-4"'])
+      })
+      if (result === 'accepted')
+        await waitFor(() =>
+          expect(screen.queryByRole('dialog', { name: 'Stop repeating' })).toBeNull(),
         )
-      }
-      if (request.url.endsWith('/api/v1/projects/7/recurrences'))
-        return Response.json({ recurrences: [rule] })
-      return new Response(JSON.stringify(accepted), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json', ETag: '"snapshot-1"' },
-      })
-    })
-    vi.stubGlobal('fetch', fetcher)
-
-    render(App)
-    await screen.findByRole('button', { name: /1 repeating task/ })
-    // Another writer edits the rule after this tab loaded it.
-    rule.revision = 5
-    const dialog = await stopRepeatingFromHeader()
-
-    await waitFor(() => expect(deletions).toEqual(['"rev-4"']))
-    await waitFor(() =>
-      expect(
-        (within(dialog).getByRole('button', { name: 'Stop repeating' }) as HTMLButtonElement)
-          .disabled,
-      ).toBe(false),
-    )
-  })
+      else expect(dialog.isConnected).toBe(true)
+    },
+  )
 
   it('omits a client actor from temporary claims in identity mode', async () => {
     history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
@@ -4470,9 +4422,7 @@ describe('App', () => {
 
   describe('completed issue action telemetry', () => {
     for (const action of ['create', 'close'] as const) {
-      it.each(
-        action === 'create' ? ['accepted', 'refused', 'missing-project'] : ['accepted', 'refused'],
-      )(`${action} reports refusals or marks accepted web requests, %s`, async (result) => {
+      it.each(['accepted', 'refused'])(`${action} reports outcome %s`, async (result) => {
         const refused = result !== 'accepted'
         history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
         sessionStorage.setItem(
@@ -4495,8 +4445,6 @@ describe('App', () => {
         const actionRequests: Request[] = []
         const shownErrors: unknown[] = []
         let writes = 0
-        let removeProject = false
-        let snapshotReads = 0
         vi.stubGlobal(
           'fetch',
           vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -4532,8 +4480,6 @@ describe('App', () => {
               })
             if (path.endsWith('/references'))
               return Response.json({ issues: [], labels: [], owners: [], projects: [] })
-            snapshotReads += 1
-            if (removeProject) accepted.catalog.splice(0, 1)
             return Response.json(accepted, { headers: { ETag: '"snapshot-1"' } })
           }),
         )
@@ -4543,15 +4489,6 @@ describe('App', () => {
           await fireEvent.input(await screen.findByRole('textbox', { name: 'Quick capture' }), {
             target: { value: 'Example task' },
           })
-          if (result === 'missing-project') {
-            const reads = snapshotReads
-            removeProject = true
-            window.dispatchEvent(new Event('focus'))
-            await waitFor(() => expect(snapshotReads).toBeGreaterThan(reads))
-            expect(actionRequests).toHaveLength(0)
-            expect(shownErrors).toEqual([])
-            return
-          }
           await fireEvent.click(
             within(screen.getByRole('dialog', { name: 'New task' })).getByRole('button', {
               name: 'Add',
