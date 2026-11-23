@@ -1665,7 +1665,7 @@ func (d *Store) CloseIssue(
 // CloseIssueWithEvents is CloseIssue plus generated claim audit events that
 // callers must deliver after commit. The returned events are ordered by
 // insertion id, with issue.closed first and generated claim audit events
-// following it.
+// following it. A needs-review removal may be the final event.
 func (d *Store) CloseIssueWithEvents(
 	ctx context.Context,
 	issueID int64,
@@ -1830,6 +1830,14 @@ func (d *Store) closeIssueGuarded(
 		}
 		events = append(events, generated...)
 	}
+	unlabeled, err := d.detachLabelTx(ctx, tx, issue, projectName, "issue.unlabeled", "needs-review", p.Actor, closedAt)
+	if err != nil && !errors.Is(err, db.ErrNotFound) {
+		return db.Issue{}, nil, false, err
+	}
+	if err == nil {
+		events = append(events, unlabeled)
+	}
+
 	updated, err := issueByIDTx(ctx, tx, p.IssueID)
 	if err != nil {
 		return db.Issue{}, nil, false, err

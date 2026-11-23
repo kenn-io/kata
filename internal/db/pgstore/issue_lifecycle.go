@@ -333,6 +333,7 @@ func (s *Store) CloseIssue(
 }
 
 // CloseIssueWithEvents returns the ordered event envelope for a close.
+// A needs-review removal may be the final event.
 func (s *Store) CloseIssueWithEvents(
 	ctx context.Context,
 	issueID int64,
@@ -473,6 +474,14 @@ func (s *Store) closeIssueWithEvents(
 			}
 			events = append(events, generated...)
 		}
+		unlabeled, err := s.detachLabelTx(ctx, tx, current, project, "issue.unlabeled", "needs-review", p.Actor, closedAt)
+		if err != nil && !errors.Is(err, db.ErrNotFound) {
+			return err
+		}
+		if err == nil {
+			events = append(events, unlabeled)
+		}
+
 		issue, err = scanIssue(ctx, tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = $1`, current.ID))
 		return err
 	})

@@ -251,37 +251,8 @@ func (d *Store) removeLabelAndEvent(ctx context.Context, issueID int64, ev db.La
 		return db.Event{}, err
 	}
 
-	res, err := tx.ExecContext(ctx,
-		`DELETE FROM issue_labels WHERE issue_id = ? AND label = ?`,
-		issueID, ev.Label)
-	if err != nil {
-		return db.Event{}, fmt.Errorf("delete label: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return db.Event{}, fmt.Errorf("delete label rows affected: %w", err)
-	}
-	if n == 0 {
-		return db.Event{}, db.ErrNotFound
-	}
-
 	ts := nowTimestamp()
-	payload, err := json.Marshal(map[string]string{
-		"issue_uid":  issue.UID,
-		"label":      ev.Label,
-		"updated_at": ts,
-	})
-	if err != nil {
-		return db.Event{}, fmt.Errorf("marshal label payload: %w", err)
-	}
-	evt, err := d.insertEventTx(ctx, tx, eventInsert{
-		ProjectID:   issue.ProjectID,
-		ProjectName: projectName,
-		IssueID:     &issue.ID,
-		Type:        ev.EventType,
-		Actor:       ev.Actor,
-		Payload:     string(payload),
-	})
+	evt, err := d.detachLabelTx(ctx, tx, issue, projectName, ev.EventType, ev.Label, ev.Actor, ts)
 	if err != nil {
 		return db.Event{}, err
 	}
@@ -294,6 +265,44 @@ func (d *Store) removeLabelAndEvent(ctx context.Context, issueID int64, ev db.La
 	if err := tx.Commit(); err != nil {
 		return db.Event{}, fmt.Errorf("commit: %w", err)
 	}
+	return evt, nil
+}
+
+func (d *Store) detachLabelTx(ctx context.Context, tx *sql.Tx, issue db.Issue, projectName, eventType, label, actor, ts string) (db.Event, error) {
+	res, err := tx.ExecContext(ctx,
+		`DELETE FROM issue_labels WHERE issue_id = ? AND label = ?`,
+		issue.ID, label)
+	if err != nil {
+		return db.Event{}, fmt.Errorf("delete label: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return db.Event{}, fmt.Errorf("delete label rows affected: %w", err)
+	}
+	if n == 0 {
+		return db.Event{}, db.ErrNotFound
+	}
+
+	payload, err := json.Marshal(map[string]string{
+		"issue_uid":  issue.UID,
+		"label":      label,
+		"updated_at": ts,
+	})
+	if err != nil {
+		return db.Event{}, fmt.Errorf("marshal label payload: %w", err)
+	}
+	evt, err := d.insertEventTx(ctx, tx, eventInsert{
+		ProjectID:   issue.ProjectID,
+		ProjectName: projectName,
+		IssueID:     &issue.ID,
+		Type:        eventType,
+		Actor:       actor,
+		Payload:     string(payload),
+	})
+	if err != nil {
+		return db.Event{}, err
+	}
+
 	return evt, nil
 }
 
