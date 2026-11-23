@@ -1442,9 +1442,7 @@ func TestProjectAccessStreamRevocation(t *testing.T) {
 		t.Run(wakeup, func(t *testing.T) {
 			projectAccessBackends(t, func(t *testing.T, store db.Storage) {
 				f := newProjectAccessFixture(t, store)
-				// The store and server stay outside the bubble; the stream, its
-				// heartbeat ticker, and the request deadline use the fake clock.
-				synctest.Test(t, func(t *testing.T) {
+				run := func(t *testing.T) {
 					ctx, cancel := context.WithTimeout(t.Context(), 35*time.Second)
 					defer cancel()
 					req := httptest.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/api/v1/events/stream?project_id=%d", f.server.URL, f.private.ID), nil)
@@ -1492,7 +1490,13 @@ func TestProjectAccessStreamRevocation(t *testing.T) {
 					assert.Empty(t, string(raw), "no event, reset or heartbeat follows revocation")
 					assert.NoError(t, err)
 					assert.NoError(t, ctx.Err(), "revocation closes stream before the request deadline")
-				})
+				}
+				if _, ok := store.(*pgstore.Store); ok {
+					// PostgreSQL connections created in a bubble cannot be closed outside it.
+					run(t)
+				} else {
+					synctest.Test(t, run)
+				}
 			})
 		})
 	}
