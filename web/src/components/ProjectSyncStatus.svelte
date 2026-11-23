@@ -140,6 +140,7 @@
     if (!open) return
     await tick()
     position()
+    if (open) panel?.focus()
   }
 
   function resetView(): void {
@@ -263,6 +264,7 @@
         style={panelStyle}
         role="dialog"
         aria-label="Project sync"
+        tabindex="-1"
       >
         <header class="sync-panel-header">
           <strong class="sync-panel-title"

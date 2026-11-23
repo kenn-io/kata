@@ -368,6 +368,7 @@ describe('ProjectSyncStatus', () => {
     setGeneratedFetch(vi.fn().mockResolvedValueOnce(response()))
     render(ProjectSyncStatus, { props: { projectID: 7, projectUID } })
     await openSync()
+    expect(document.activeElement).toBe(screen.getByRole('dialog', { name: 'Project sync' }))
     await fireEvent.keyDown(document, { key: 'Escape' })
     expect(screen.queryByRole('dialog', { name: 'Project sync' })).toBeNull()
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Sync failed' }))
