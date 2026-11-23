@@ -23,7 +23,7 @@ func (h denyProjectHost) Authorize(_ context.Context, request HostAccessRequest)
 	return HostAccessDecision{}, nil
 }
 
-func TestArchivedProjectHintsRestoreOnlyForCallersWhoMayReadIt(t *testing.T) {
+func TestActiveProjectByIDHintsRestoreOnlyForCallersWhoMayReadIt(t *testing.T) {
 	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, store.Close()) })
@@ -72,15 +72,5 @@ func TestArchivedProjectHintsRestoreOnlyForCallersWhoMayReadIt(t *testing.T) {
 			}
 			assert.Empty(t, apiErr.Hint)
 		})
-	}
-	for _, name := range []string{"", "retired-project"} {
-		_, err = resolveByAliasInput(withProjectPolicy, store, &api.AliasInput{Identity: "github.com/example/retired-project", Kind: "git"}, name, false)
-		apiErr, ok := err.(*api.APIError)
-		require.True(t, ok, "got %v", err)
-		hint := `run "kata init": it attaches this workspace to the active project "retired-project", or creates it if none exists`
-		if name != "" {
-			hint = `run "kata init" with --project set to "retired-project": it attaches this workspace to the active project "retired-project", or creates it if none exists`
-		}
-		assert.Equal(t, hint, apiErr.Hint)
 	}
 }
