@@ -266,7 +266,6 @@ func pushDirectSpoke(
 		scanCursor := binding.PushCursorEventID
 		var refused error
 		singleEvents := false
-		blockedIssues := make(map[string]bool)
 		for {
 			if q, err := store.ActiveFederationQuarantine(ctx, binding.ProjectID, db.FederationQuarantineDirectionPush); err == nil {
 				quarantinedEvents, eventErr := store.EventsByUIDs(ctx, binding.ProjectID, q.EventUIDs)
@@ -311,9 +310,6 @@ func pushDirectSpoke(
 				break
 			}
 			pageEnd := pending[len(pending)-1].ID
-			pending = slices.DeleteFunc(pending, func(event db.Event) bool {
-				return event.IssueUID != nil && blockedIssues[*event.IssueUID] || event.RelatedIssueUID != nil && blockedIssues[*event.RelatedIssueUID]
-			})
 			for len(pending) > 0 {
 				batch, adoptionBaseline, adoptionBaselineEndEventID, err := nextFederationPushIngestBatch(pending, singleEvents)
 				if err != nil {
@@ -332,7 +328,6 @@ func pushDirectSpoke(
 				if err != nil {
 					if isFederationProjectNotEnrolledError(err) && adoptionBaseline == "" {
 						if uid := federationRefusedIssueUID(err); uid != "" && slices.ContainsFunc(batch, func(event db.Event) bool { return federationEventReferencesIssue(event, uid) }) {
-							blockedIssues[uid] = true
 							if refused == nil {
 								refused = err
 							}
@@ -412,11 +407,7 @@ func pushDirectSpoke(
 						onPulledEvents(reset.ProjectID, []db.Event{{ID: reset.EventID, ProjectID: reset.ProjectID, Type: db.ProjectScopeResetEventType}})
 					}
 				}
-				current, err := store.FederationBindingByProject(ctx, binding.ProjectID)
-				if err != nil {
-					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-				}
-				binding.PushCursorEventID = current.PushCursorEventID
+				binding.PushCursorEventID = ack.PushCursorEventID
 				pending = pendingFederationEventsAfterCursor(pending, ack.PushCursorEventID)
 			}
 			scanCursor = pageEnd

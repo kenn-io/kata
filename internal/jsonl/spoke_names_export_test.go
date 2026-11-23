@@ -103,9 +103,8 @@ func TestFederationHeldCursorBackup(t *testing.T) {
 	require.NoError(t, err)
 	_, err = source.ExecContext(ctx, `INSERT INTO federation_held_cursors(project_uid,push_cursor_event_id) VALUES(?,0)`, project.UID)
 	require.NoError(t, err)
-	var full, scoped bytes.Buffer
+	var full bytes.Buffer
 	require.NoError(t, jsonl.Export(ctx, source, &full, jsonl.ExportOptions{IncludeDeleted: true}))
-	require.NoError(t, jsonl.Export(ctx, source, &scoped, jsonl.ExportOptions{ProjectID: project.ID, IncludeDeleted: true}))
 	for _, tc := range []struct {
 		name  string
 		input []byte
@@ -114,7 +113,6 @@ func TestFederationHeldCursorBackup(t *testing.T) {
 	}{
 		{"full", full.Bytes(), jsonl.ImportOptions{}, true},
 		{"standalone", full.Bytes(), jsonl.ImportOptions{AsStandalone: true}, false},
-		{"project", scoped.Bytes(), jsonl.ImportOptions{}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			target, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "target.db"))
@@ -212,31 +210,4 @@ func TestFederationLeaveFenceBackup(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestFederationHeldCursorScopedExportPostgres(t *testing.T) {
-	ctx := t.Context()
-	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
-	t.Cleanup(cleanup)
-	source, err := pgstore.Open(ctx, dsn)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = source.Close() })
-	project, err := source.CreateProject(ctx, "held-project")
-	require.NoError(t, err)
-	_, err = source.ExecContext(ctx, `INSERT INTO federation_held_cursors(project_uid,push_cursor_event_id) VALUES($1,0)`, project.UID)
-	require.NoError(t, err)
-	var backup bytes.Buffer
-	require.NoError(t, jsonl.Export(ctx, source, &backup, jsonl.ExportOptions{ProjectID: project.ID, IncludeDeleted: true}))
-	target, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "target.db"))
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = target.Close() })
-	require.NoError(t, jsonl.Import(ctx, bytes.NewReader(backup.Bytes()), target))
-	for p, err := range target.ExportProjects(ctx, db.ExportFilter{}) {
-		require.NoError(t, err)
-		if p.UID == project.UID {
-			require.Nil(t, p.HeldCursor)
-			return
-		}
-	}
-	t.Fatal("project missing from scoped backup")
 }

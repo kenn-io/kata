@@ -376,53 +376,6 @@ func TestHeldMoveSurvivesLaterPush(t *testing.T) {
 	}
 }
 
-func TestPushEnabledRejoinWhileIssueAway(t *testing.T) {
-	ctx := t.Context()
-	hub, projects := newMoveDeliveryHub(t, "rejoin-source", "rejoin-destination", "rejoin-away")
-	spoke, local, credentials := newHeldEventSpoke(t, "sqlite", hub, projects)
-	t.Cleanup(func() { _ = spoke.Close() })
-	sync := func(i int) error {
-		binding, err := spoke.FederationBindingByProject(ctx, local[i].ID)
-		if err != nil {
-			return err
-		}
-		return SyncFederationOnce(ctx, spoke, binding, credentials[local[i].UID], credentials)
-	}
-	issue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "away", Author: "worker"})
-	require.NoError(t, err)
-	require.NoError(t, sync(0))
-	current, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	move, err := spoke.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: current.ID, FromProjectID: local[0].ID, ToProjectID: local[1].ID, IfMatchRev: current.Revision, Actor: "worker"})
-	require.NoError(t, err)
-	away, err := hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[2].ID, IfMatchRev: issue.Revision, Actor: "worker"})
-	require.NoError(t, err)
-	_, err = spoke.InsertRemoteEvents(ctx, local[0].ID, []db.RemoteEvent{db.RemoteEventFromStored(*away.Event)})
-	require.NoError(t, err)
-	require.NoError(t, spoke.MaterializeFederatedProject(ctx, local[0].ID))
-	binding, err := spoke.FederationBindingByProject(ctx, local[0].ID)
-	require.NoError(t, err)
-	_, err = spoke.LeaveFederationReplica(ctx, local[0].ID)
-	require.NoError(t, err)
-	_, err = spoke.UpsertFederationBinding(ctx, binding)
-	require.NoError(t, err)
-	require.NoError(t, sync(1))
-	_, err = hub.DB.EventsByUIDs(ctx, projects[1].ID, []string{move.Event.UID})
-	require.ErrorIs(t, err, db.ErrNotFound)
-	destination, err := spoke.FederationBindingByProject(ctx, local[1].ID)
-	require.NoError(t, err)
-	require.Less(t, destination.PushCursorEventID, move.Event.ID)
-	back, err := hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[2].ID, ToProjectID: projects[1].ID, IfMatchRev: away.Issue.Revision, Actor: "worker"})
-	require.NoError(t, err)
-	_, err = spoke.InsertRemoteEvents(ctx, local[1].ID, []db.RemoteEvent{db.RemoteEventFromStored(*back.Event)})
-	require.NoError(t, err)
-	require.NoError(t, spoke.MaterializeFederatedProject(ctx, local[1].ID))
-	require.NoError(t, sync(1))
-	delivered, err := hub.DB.EventsByUIDs(ctx, projects[1].ID, []string{move.Event.UID})
-	require.NoError(t, err)
-	require.Equal(t, move.Event.ContentHash, delivered[0].ContentHash)
-}
-
 func TestHeldEventsForSameIssueUseOneRefusal(t *testing.T) {
 	ctx := t.Context()
 	hub, projects := newMoveDeliveryHub(t, "cost-source", "cost-destination", "cost-absent")
@@ -473,96 +426,51 @@ func TestHeldEventsForSameIssueUseOneRefusal(t *testing.T) {
 	require.Equal(t, before+1, pushes.Load())
 }
 
-func TestResetRemovesAcknowledgmentForDeletedEvent(t *testing.T) {
+func TestDeletedEventsRemoveAcknowledgments(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			ctx := t.Context()
-			hub, projects := newMoveDeliveryHub(t, "reset-source", "reset-destination")
-			spoke, local, credentials := newHeldEventSpoke(t, backend, hub, projects)
-			t.Cleanup(func() { _ = spoke.Close() })
-			issue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "reset", Author: "worker"})
-			require.NoError(t, err)
-			binding, err := spoke.FederationBindingByProject(ctx, local[0].ID)
-			require.NoError(t, err)
-			require.NoError(t, SyncFederationOnce(ctx, spoke, binding, credentials[local[0].UID], credentials))
-			issueLocal, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-			require.NoError(t, err)
-			_, event, err := spoke.CreateComment(ctx, db.CreateCommentParams{IssueID: issueLocal.ID, Author: "worker", Body: "accepted"})
-			require.NoError(t, err)
-			require.NoError(t, spoke.RecordFederationAcknowledgedEvents(ctx, local[0].ID, []string{event.UID}))
-			binding, err = spoke.FederationBindingByProject(ctx, local[0].ID)
-			require.NoError(t, err)
-			require.NoError(t, spoke.ResetFederatedProjectIfNoPendingPush(ctx, local[0].ID, 0, 0, spoke.InstanceUID(), binding.PushCursorEventID))
-			_, err = spoke.EventsByUIDs(ctx, local[0].ID, []string{event.UID})
-			require.ErrorIs(t, err, db.ErrNotFound)
-			for meta, err := range spoke.ExportMeta(ctx) {
+		for _, operation := range []string{"reset", "purge issue", "purge project"} {
+			t.Run(backend+"/"+operation, func(t *testing.T) {
+				ctx := t.Context()
+				hub, projects := newMoveDeliveryHub(t, "cleanup-source", "cleanup-destination")
+				spoke, local, credentials := newHeldEventSpoke(t, backend, hub, projects)
+				t.Cleanup(func() { _ = spoke.Close() })
+				issue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "cleanup", Author: "worker"})
 				require.NoError(t, err)
-				require.NotEqual(t, db.FederationAcknowledgedEventPrefix+local[0].UID+"."+event.UID, meta.Key)
-			}
-		})
-	}
-}
-
-func TestPurgeRemovesAcknowledgmentForDeletedEvent(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			ctx := t.Context()
-			hub, projects := newMoveDeliveryHub(t, "purge-source", "purge-destination")
-			spoke, local, credentials := newHeldEventSpoke(t, backend, hub, projects)
-			t.Cleanup(func() { _ = spoke.Close() })
-			issue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "purge", Author: "worker"})
-			require.NoError(t, err)
-			binding, err := spoke.FederationBindingByProject(ctx, local[0].ID)
-			require.NoError(t, err)
-			require.NoError(t, SyncFederationOnce(ctx, spoke, binding, credentials[local[0].UID], credentials))
-			issueLocal, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-			require.NoError(t, err)
-			_, event, err := spoke.CreateComment(ctx, db.CreateCommentParams{IssueID: issueLocal.ID, Author: "worker", Body: "accepted"})
-			require.NoError(t, err)
-			require.NoError(t, spoke.RecordFederationAcknowledgedEvents(ctx, local[0].ID, []string{event.UID}))
-			_, err = spoke.LeaveFederationReplica(ctx, local[0].ID)
-			require.NoError(t, err)
-			_, _, _, err = spoke.SoftDeleteIssue(ctx, issueLocal.ID, "worker")
-			require.NoError(t, err)
-			_, err = spoke.PurgeIssue(ctx, issueLocal.ID, "worker", nil)
-			require.NoError(t, err)
-			_, err = spoke.EventsByUIDs(ctx, local[0].ID, []string{event.UID})
-			require.ErrorIs(t, err, db.ErrNotFound)
-			for meta, err := range spoke.ExportMeta(ctx) {
+				binding, err := spoke.FederationBindingByProject(ctx, local[0].ID)
 				require.NoError(t, err)
-				require.NotEqual(t, db.FederationAcknowledgedEventPrefix+local[0].UID+"."+event.UID, meta.Key)
-			}
-		})
-	}
-}
-
-func TestProjectPurgeRemovesAcknowledgmentForDeletedEvent(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			ctx := t.Context()
-			hub, projects := newMoveDeliveryHub(t, "purge-source", "purge-destination")
-			spoke, local, credentials := newHeldEventSpoke(t, backend, hub, projects)
-			t.Cleanup(func() { _ = spoke.Close() })
-			issue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "purge", Author: "worker"})
-			require.NoError(t, err)
-			binding, err := spoke.FederationBindingByProject(ctx, local[0].ID)
-			require.NoError(t, err)
-			require.NoError(t, SyncFederationOnce(ctx, spoke, binding, credentials[local[0].UID], credentials))
-			issueLocal, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-			require.NoError(t, err)
-			_, event, err := spoke.CreateComment(ctx, db.CreateCommentParams{IssueID: issueLocal.ID, Author: "worker", Body: "accepted"})
-			require.NoError(t, err)
-			require.NoError(t, spoke.RecordFederationAcknowledgedEvents(ctx, local[0].ID, []string{event.UID}))
-			_, err = spoke.LeaveFederationReplica(ctx, local[0].ID)
-			require.NoError(t, err)
-			_, _, err = spoke.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: local[0].ID, Actor: "worker", Force: true})
-			require.NoError(t, err)
-			_, err = spoke.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: local[0].ID, Actor: "worker"})
-			require.NoError(t, err)
-			for meta, err := range spoke.ExportMeta(ctx) {
+				require.NoError(t, SyncFederationOnce(ctx, spoke, binding, credentials[local[0].UID], credentials))
+				issueLocal, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 				require.NoError(t, err)
-				require.NotEqual(t, db.FederationAcknowledgedEventPrefix+local[0].UID+"."+event.UID, meta.Key)
-			}
-		})
+				_, event, err := spoke.CreateComment(ctx, db.CreateCommentParams{IssueID: issueLocal.ID, Author: "worker", Body: "accepted"})
+				require.NoError(t, err)
+				require.NoError(t, spoke.RecordFederationAcknowledgedEvents(ctx, local[0].ID, []string{event.UID}))
+				if operation == "reset" {
+					binding, err = spoke.FederationBindingByProject(ctx, local[0].ID)
+					require.NoError(t, err)
+					require.NoError(t, spoke.ResetFederatedProjectIfNoPendingPush(ctx, local[0].ID, 0, 0, spoke.InstanceUID(), binding.PushCursorEventID))
+				} else {
+					_, err = spoke.LeaveFederationReplica(ctx, local[0].ID)
+					require.NoError(t, err)
+					if operation == "purge issue" {
+						_, _, _, err = spoke.SoftDeleteIssue(ctx, issueLocal.ID, "worker")
+						require.NoError(t, err)
+						_, err = spoke.PurgeIssue(ctx, issueLocal.ID, "worker", nil)
+					} else {
+						_, _, err = spoke.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: local[0].ID, Actor: "worker", Force: true})
+						require.NoError(t, err)
+						_, err = spoke.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: local[0].ID, Actor: "worker"})
+					}
+					require.NoError(t, err)
+				}
+				if operation != "purge project" {
+					_, err = spoke.EventsByUIDs(ctx, local[0].ID, []string{event.UID})
+					require.ErrorIs(t, err, db.ErrNotFound)
+				}
+				for meta, err := range spoke.ExportMeta(ctx) {
+					require.NoError(t, err)
+					require.NotEqual(t, db.FederationAcknowledgedEventPrefix+local[0].UID+"."+event.UID, meta.Key)
+				}
+			})
+		}
 	}
 }

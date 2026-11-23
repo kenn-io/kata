@@ -126,14 +126,9 @@ func FoldFederationAcknowledgedEvents(ctx context.Context, tx *sql.Tx, projectID
 	return err
 }
 
-// FederationOwedEventSQL excludes moves superseded by a newer hub move.
-func FederationOwedEventSQL(alias string, postgres bool) string {
-	return FederationPushableEventSQL(alias, postgres)
-}
-
 // FederationResetOwedEventSQL excludes events retained for issues in another project.
 func FederationResetOwedEventSQL(alias string, postgres bool) string {
-	return FederationOwedEventSQL(alias, postgres) + ` AND NOT (` + FederationHeldEventSQL(alias) + `) AND NOT (` + FederationEventReferencesMovedIssueSQL(alias) + `)`
+	return FederationPushableEventSQL(alias, postgres) + ` AND NOT (` + FederationHeldEventSQL(alias) + `) AND NOT (` + FederationEventReferencesMovedIssueSQL(alias) + `)`
 }
 
 // FederationEventReferencesMovedIssueSQL matches either moved issue endpoint.
@@ -981,7 +976,7 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
  AND e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)
  AND e.id>b.push_cursor_event_id
  AND NOT (`+FederationHeldEventSQL("e")+`)
- AND `+FederationOwedEventSQL("e", postgres)+`)`, projectID, originInstanceUID).Scan(&pending); err != nil {
+ AND `+FederationPushableEventSQL("e", postgres)+`)`, projectID, originInstanceUID).Scan(&pending); err != nil {
 		return err
 	}
 	if pending {
