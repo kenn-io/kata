@@ -51,7 +51,9 @@
     if (!status) return 'Sync status unavailable'
     if (status.has_sync_error) return 'Sync failed'
     if (!status.enabled) return 'Sync disabled'
-    return status.pending_push_count > 0 ? `${status.pending_push_count} to sync` : 'Synced'
+    return status.pending_push_count > 0
+      ? `${status.pending_push_count} to sync`
+      : 'No changes to send'
   })
 
   // The panel opens on the state the chip names: a failure, with any changes
@@ -65,7 +67,7 @@
         : 'Sync failed'
     if (!status.enabled) return 'Sync disabled'
     if (pending > 0) return `${pending} ${pending === 1 ? 'change' : 'changes'} waiting to sync`
-    return 'Synced'
+    return 'No changes to send'
   })
 
   // Who this project syncs with, by the hub's host rather than a role.
@@ -298,7 +300,10 @@
                 ? `kata federation status --project '${powershellName}'`
                 : `kata federation status --project $(if ($PSVersionTable.PSVersion -lt [version]'7.3' -or $PSNativeCommandArgumentPassing -eq 'Legacy') { '${legacyName}' } else { '${powershellName}' })`}
             <div class="sync-attention">
-              <span>To see the error, run this on the server's machine:</span>
+              <span>Connect the Kata CLI to this daemon with your own credential, then run:</span>
+              <span class="sync-note"
+                >For a remote daemon, select it with its --daemon profile or KATA_SERVER.</span
+              >
               {#if bashCommand === powershellCommand}
                 <div class="command">
                   <code>{bashCommand}</code>

@@ -146,7 +146,7 @@ describe('AppShell', () => {
         onCreateProject: vi.fn(async () => ({ changed: true })),
       },
     })
-    const chip = await screen.findByRole('button', { name: 'Synced' })
+    const chip = await screen.findByRole('button', { name: 'No changes to send' })
     expect(chip.closest('header')).not.toBeNull()
     expect(screen.queryByRole('button', { name: 'Credentials' })).toBeNull()
   })
@@ -171,7 +171,7 @@ describe('AppShell', () => {
         onCreateProject: vi.fn(async () => ({ changed: true })),
       },
     })
-    expect(await screen.findByRole('button', { name: 'Synced' })).not.toBeNull()
+    expect(await screen.findByRole('button', { name: 'No changes to send' })).not.toBeNull()
   })
 
   test('does not show a sync chip for a local project', async () => {
@@ -194,7 +194,9 @@ describe('AppShell', () => {
       },
     })
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1))
-    expect(screen.queryByRole('button', { name: /^(Synced|Sync failed|\d+ to sync)$/ })).toBeNull()
+    expect(
+      screen.queryByRole('button', { name: /^(No changes to send|Sync failed|\d+ to sync)$/ }),
+    ).toBeNull()
   })
 
   test.each(['settings', 'scoped'] as const)(
@@ -376,7 +378,7 @@ describe('AppShell', () => {
         onCreateProject: vi.fn(async () => ({ changed: true })),
       }
       const view = render(AppShell, { props })
-      await screen.findByRole('button', { name: 'Synced' })
+      await screen.findByRole('button', { name: 'No changes to send' })
       await view.rerender({ ...props, syncRefreshGeneration: 1 })
       await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2))
       const next = snapshot()
@@ -404,7 +406,7 @@ describe('AppShell', () => {
               ]
             : [],
       })
-      expect(screen.queryByRole('button', { name: 'Synced' })).toBeNull()
+      expect(screen.queryByRole('button', { name: 'No changes to send' })).toBeNull()
       expect(signal?.aborted).toBe(true)
       expect(fetcher).toHaveBeenCalledTimes(2)
     },
@@ -427,10 +429,10 @@ describe('AppShell', () => {
       onCreateProject: vi.fn(async () => ({ changed: true })),
     }
     const view = render(AppShell, { props })
-    expect(await screen.findByRole('button', { name: 'Synced' })).not.toBeNull()
+    expect(await screen.findByRole('button', { name: 'No changes to send' })).not.toBeNull()
 
     await view.rerender({ ...props, loading: true })
-    expect(screen.getByRole('button', { name: 'Synced' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'No changes to send' })).not.toBeNull()
   })
 
   test('keeps a healthy connection hidden during refresh while preserving attention states', async () => {

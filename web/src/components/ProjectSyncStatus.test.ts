@@ -53,10 +53,26 @@ describe('ProjectSyncStatus', () => {
     await openSync()
     expect(screen.getByText('Sync failed · 2 changes waiting')).not.toBeNull()
     expect(screen.getByText('Syncs with daemon.example')).not.toBeNull()
+    expect(
+      screen.getByText('Connect the Kata CLI to this daemon with your own credential, then run:'),
+    ).not.toBeNull()
+    expect(
+      screen.getByText('For a remote daemon, select it with its --daemon profile or KATA_SERVER.'),
+    ).not.toBeNull()
     await fireEvent.click(screen.getByRole('button', { name: 'Copy PowerShell command' }))
     expect(writeText).toHaveBeenCalledWith("kata federation status --project 'spoke project’’s'''")
     expect(screen.getByText('1 generated · 1 reused · 1 without index')).not.toBeNull()
     expect(screen.getByText('3 of 32 embeddings, limited')).not.toBeNull()
+  })
+
+  it('says there are no changes to send when nothing is waiting', async () => {
+    setGeneratedFetch(vi.fn().mockResolvedValueOnce(response(7, projectUID, 0, false)))
+    render(ProjectSyncStatus, { props: { projectID: 7, projectUID } })
+    await openSync(/^No changes to send$/)
+    expect(screen.getByRole('dialog', { name: 'Project sync' }).textContent).toContain(
+      'No changes to send',
+    )
+    expect(screen.queryByText(/Synced/)).toBeNull()
   })
 
   it('says how long ago the last sync finished', async () => {
@@ -154,7 +170,7 @@ describe('ProjectSyncStatus', () => {
       await view.rerender({ projectID: 7, projectUID, refreshGeneration: 3 })
       await view.rerender({ projectID: 7, projectUID, refreshGeneration: 4 })
       finish(response())
-      await screen.findByRole('button', { name: 'Synced' })
+      await screen.findByRole('button', { name: 'No changes to send' })
       expect(fetcher).toHaveBeenCalledTimes(kind === 'initial' ? 2 : 3)
     },
   )
@@ -193,11 +209,11 @@ describe('ProjectSyncStatus', () => {
     await openSync()
     await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
     await fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
-    await screen.findByRole('button', { name: 'Synced' })
+    await screen.findByRole('button', { name: 'No changes to send' })
     expect(oldSignal?.aborted).toBe(true)
     resolveOld(response())
     await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(screen.getByRole('button', { name: 'Synced' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'No changes to send' })).not.toBeNull()
   })
 
   it('clears sensitive details when a denied response body stalls, then retries', async () => {
@@ -303,7 +319,7 @@ describe('ProjectSyncStatus', () => {
     hidden.mockReturnValue(true)
     expect(signal?.aborted).toBe(false)
     finish(response(7, projectUID, 0, false))
-    await screen.findByRole('button', { name: 'Synced' })
+    await screen.findByRole('button', { name: 'No changes to send' })
     expect(fetcher).toHaveBeenCalledTimes(2)
     hidden.mockReturnValue(false)
     await view.rerender({ projectID: 7, projectUID, refreshGeneration: 3 })

@@ -11,7 +11,7 @@ test('project readers see sync diagnostics with bounded embedding summaries at n
   const chip = page.getByRole('button', { name: 'Sync failed' })
   const region = page.getByRole('dialog', { name: 'Project sync' })
   await expect(
-    page.getByRole('button', { name: /^(Synced|Sync failed|\d+ to sync)$/ }),
+    page.getByRole('button', { name: /^(No changes to send|Sync failed|\d+ to sync)$/ }),
   ).toHaveCount(0)
   const statusPath = `/api/v1/projects/${kata.projectID}/federation/status`
   expect((await kata.request(page, local, 'GET', statusPath)).ok()).toBe(true)
@@ -73,7 +73,7 @@ test('project readers see sync diagnostics with bounded embedding summaries at n
   await region.getByRole('button', { name: 'Refresh' }).click()
   await expect(region.getByText('1 generated · 1 reused · 1 without index')).toBeVisible()
   await expect(
-    region.getByText("To see the error, run this on the server's machine:"),
+    region.getByText('Connect the Kata CLI to this daemon with your own credential, then run:'),
   ).toBeVisible()
   await page
     .context()
