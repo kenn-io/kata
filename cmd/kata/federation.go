@@ -19,6 +19,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/authorname"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
@@ -2344,7 +2345,7 @@ func printFederationStatus(cmd *cobra.Command, body api.FederationStatusBody) er
 			if _, err := fmt.Fprintf(out, "  recent violation: %s %s by %s on spoke %s at %s (%s)\n",
 				textsafe.Line(violation.ShortID),
 				textsafe.Line(violation.OffendingEventType),
-				textsafe.Line(violation.Actor),
+				textsafe.Line(authorname.Display(violation.Actor)),
 				textsafe.Line(violation.OffendingOriginInstanceUID),
 				violation.At.UTC().Format(time.RFC3339),
 				textsafe.Line(violation.Reason)); err != nil {
@@ -2531,7 +2532,7 @@ func printFederationStatusAgent(cmd *cobra.Command, body api.FederationStatusBod
 			if err := writeAgentKVRow(out,
 				agentRowField("violation_issue", violation.ShortID),
 				agentRowField("event", violation.OffendingEventType),
-				agentRowField("actor", violation.Actor),
+				agentRowField("actor", authorname.Display(violation.Actor)),
 				agentRowField("offending_instance", violation.OffendingOriginInstanceUID),
 				agentRowField("at", violation.At.UTC().Format(time.RFC3339)),
 				agentRowField("reason", violation.Reason),

@@ -769,8 +769,10 @@ output. `--thread COMMENT` follows the root and all its transitive replies
 across the project. It returns at most 50 comments and reports truncation;
 the root is retained when the limit or `--kind` filter applies. `--inbound`
 returns replies to your comments on this issue. Use `--inbound=AUTHOR` or
-`--inbound=AUTHOR/TEAMMATE` to select another participant. Thread and inbound
-selectors cannot be combined. `--kind` requires one of those selectors.
+`--inbound=AUTHOR/TEAMMATE` to select another participant. Use a comment's
+`author_filter` value from `--agent` output as `AUTHOR`; quote the value in a
+shell when it contains spaces. Thread and inbound selectors cannot be combined.
+`--kind` requires one of those selectors.
 `--since COMMENT` keeps comments strictly after that comment in creation-time,
 then UID order. All selectors and backlinks respect the caller's read scope.
 Backlink evidence retains the newest 50 replies per kind and marks incomplete
@@ -1358,7 +1360,8 @@ The command rejects an issue it reads as closed. Concurrent writes preserve
 other recipients' requests; the last write to the same recipient wins.
 Closure can still race with the write; either way, the request is hidden while
 the issue is closed. Messages must be nonblank and at most 1024 bytes.
-Requests do not change ownership or readiness.
+Requests do not change ownership or readiness. In `--agent` inbox output, pass
+`from_address` to `kata notify --to`.
 
 Use `--re <comment>` to ask the recipient to answer one visible comment. A
 typed reply clears the matching request and notifies the original requester on
@@ -1766,6 +1769,10 @@ kata audit closes [--actor NAME] [--reason done|wontfix|duplicate|superseded|aud
 
 `kata digest` groups recent activity by actor. `kata audit closes` is for
 reviewing close discipline and finding lazy or duplicate closes.
+
+In `--agent` output, pass an `actor_filter` from an audit row to `--actor`.
+Digest rows contain `actor_filters` as a JSON array encoded as an agent field;
+pass individual values to `--actor`. Quote values containing spaces in a shell.
 
 ## Projects
 

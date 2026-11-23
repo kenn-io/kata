@@ -395,6 +395,7 @@ func TestFederationQuarantineListEmptyAndShowMissing(t *testing.T) {
 
 func TestFederationStatusIncludesRecentClaimViolations(t *testing.T) {
 	env, _, pid, ref := setupFederatedHubIssue(t, "status violation")
+	actor := "Ana [member:11111111-1111-4111-8111-111111111111; enrollment:11111111-1111-4111-8111-111111111111]"
 	ctx := t.Context()
 	issue, err := env.DB.IssueByShortID(ctx, pid, ref, db.IncludeDeletedNo)
 	require.NoError(t, err)
@@ -410,7 +411,7 @@ func TestFederationStatusIncludesRecentClaimViolations(t *testing.T) {
 		Now:       time.Date(2026, 5, 24, 12, 0, 0, 0, time.UTC),
 	})
 	require.NoError(t, err)
-	ingestCLIClaimViolation(t, env, pid, issue, "bob", "issue.updated", 30)
+	ingestCLIClaimViolation(t, env, pid, issue, actor, "issue.updated", 30)
 
 	out := requireCmdOutput(t, env, "--json", "federation", "status")
 
@@ -437,14 +438,18 @@ func TestFederationStatusIncludesRecentClaimViolations(t *testing.T) {
 	assert.Equal(t, ref, status.RecentViolations[0].ShortID)
 	assert.Equal(t, "issue.updated", status.RecentViolations[0].OffendingEventType)
 	assert.Equal(t, cliViolationSpokeUID, status.RecentViolations[0].OffendingOriginInstanceUID)
-	assert.Equal(t, "bob", status.RecentViolations[0].Actor)
+	assert.Equal(t, actor, status.RecentViolations[0].Actor)
 	assert.Equal(t, "uncovered_work", status.RecentViolations[0].Reason)
 	assert.False(t, status.RecentViolations[0].At.IsZero())
 
 	text := requireCmdOutput(t, env, "federation", "status")
 	assert.Contains(t, text, "unresolved violations: 1")
 	assert.Contains(t, text, "recent violations: 1")
-	assert.Contains(t, text, ref+" issue.updated by bob on spoke "+cliViolationSpokeUID)
+	assert.Contains(t, text, ref+" issue.updated by Ana on spoke "+cliViolationSpokeUID)
+	assert.NotContains(t, text, "member:")
+	agent := requireCmdOutput(t, env, "--agent", "federation", "status")
+	assert.Contains(t, agent, "actor=Ana")
+	assert.NotContains(t, agent, "member:")
 }
 
 func TestFederationQuarantineSkipCLI(t *testing.T) {
