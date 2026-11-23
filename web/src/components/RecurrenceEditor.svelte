@@ -633,6 +633,7 @@
       {/if}
       {#if mode.kind === 'create' && dates.length > 1}
         <div>Then {dates.slice(1).map(formatDay).join(' · ')}</div>
+        <div>Complete each task to create the next, until the rule ends.</div>
       {/if}
     </div>
   {/if}

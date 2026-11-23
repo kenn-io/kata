@@ -66,7 +66,31 @@ test('previews create dates and aborts an obsolete request without blocking save
   expect(signal.aborted).toBe(true)
   expect(await screen.findByText(/This task becomes the first/)).toBeTruthy()
   expect(screen.getByText(/^Then /)).toBeTruthy()
+  expect(
+    screen.getByText('Complete each task to create the next, until the rule ends.'),
+  ).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Save' })).not.toHaveProperty('disabled', true)
+})
+
+test('omits the next-task sentence when there is only one date', async () => {
+  vi.mocked(previewRecurrence).mockResolvedValueOnce({
+    status: 200,
+    headers: new Headers(),
+    data: { dates: ['2026-11-22'] },
+  })
+  render(RecurrenceEditor, {
+    props: {
+      mode: createMode,
+      actor: 'user-a',
+      onCreate: vi.fn(),
+      onPatch: vi.fn(),
+      onSaved: vi.fn(),
+    },
+  })
+  expect(await screen.findByText(/This task becomes the first/)).toBeTruthy()
+  expect(
+    screen.queryByText('Complete each task to create the next, until the rule ends.'),
+  ).toBeNull()
 })
 
 test('a failed preview leaves the summary and save available', async () => {
