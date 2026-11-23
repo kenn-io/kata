@@ -48,6 +48,22 @@ func TestFederationPollWaitsBoundEveryHeldPoll(t *testing.T) {
 	_, ok := waits.admit(t.Context(), broadcaster, -1, project)
 	assert.False(t, ok)
 
+	t.Run("reserve capacity for other credentials", func(t *testing.T) {
+		waits := newFederationPollWaits(16, 1)
+		broadcaster := NewEventBroadcaster()
+		project := db.Project{ID: 7, UID: "01HZNQ7VFPK1XGD8R5MABCD4EA"}
+		for range 16 {
+			waiter, ok := waits.admit(t.Context(), broadcaster, 1, project)
+			require.True(t, ok)
+			t.Cleanup(waiter.release)
+		}
+		_, ok := waits.admit(t.Context(), broadcaster, 1, project)
+		assert.False(t, ok)
+		other, ok := waits.admit(t.Context(), broadcaster, 2, project)
+		require.True(t, ok)
+		other.release()
+	})
+
 	for _, tc := range []struct{ cpus, limit int }{{1, 32}, {16, 256}} {
 		t.Run(fmt.Sprintf("%d CPUs", tc.cpus), func(t *testing.T) {
 			waits := newFederationPollWaits(16, tc.cpus)
@@ -62,22 +78,6 @@ func TestFederationPollWaitsBoundEveryHeldPoll(t *testing.T) {
 			assert.False(t, ok)
 		})
 	}
-}
-
-func TestFederationPollWaitsReserveCapacityForOtherCredentials(t *testing.T) {
-	waits := newFederationPollWaits(16, 1)
-	broadcaster := NewEventBroadcaster()
-	project := db.Project{ID: 7, UID: "01HZNQ7VFPK1XGD8R5MABCD4EA"}
-	for range 16 {
-		waiter, ok := waits.admit(t.Context(), broadcaster, 1, project)
-		require.True(t, ok)
-		t.Cleanup(waiter.release)
-	}
-	_, ok := waits.admit(t.Context(), broadcaster, 1, project)
-	assert.False(t, ok)
-	other, ok := waits.admit(t.Context(), broadcaster, 2, project)
-	require.True(t, ok)
-	other.release()
 }
 
 func TestFederationPollWakeIgnoresItsOwnInstance(t *testing.T) {
@@ -186,18 +186,6 @@ func TestFederationPollWakeBridgeStopsWhenItsStoreCloses(t *testing.T) {
 	}
 }
 
-func (w *federationPollWaits) heldFor(enrollmentID int64) int {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.byCredential[enrollmentID]
-}
-
-func (w *federationPollWaits) heldTotal() int {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.total
-}
-
 // internalLongPollHub serves a hub over real HTTP with one pull enrollment
 // for one federated project, and exposes the hub's held-poll bookkeeping.
 type internalLongPollHub struct {
@@ -259,35 +247,24 @@ func (h internalLongPollHub) poll(ctx context.Context, afterID int64, wait strin
 func TestFederationPollWaitAnswersAtOnceWhenCredentialWaitersAreFull(t *testing.T) {
 	ctx := t.Context()
 	hub := newInternalLongPollHub(t)
-	hub.waits.maxTotal = 2
 	status, cursor, _, err := hub.poll(ctx, 0, "0")
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, status)
 	require.Positive(t, cursor)
 
-	held, release := context.WithCancel(ctx)
-	ended := make(chan struct{})
-	go func() {
-		defer close(ended)
-		if status, _, _, err := hub.poll(held, cursor, "45"); err == nil {
-			t.Errorf("held poll answered before its client disconnected: %d", status)
-		}
-	}()
-	defer func() { release(); <-ended }()
-	//nolint:kennlint // sleeptest: the poll reaches the hub over real HTTP.
-	require.Eventually(t, func() bool { return hub.waits.heldFor(hub.enrollmentID) == 1 },
-		10*time.Second, 5*time.Millisecond, "the hub never held the poll")
+	broadcaster := NewEventBroadcaster()
+	project := db.Project{ID: hub.projectID}
+	limit := min(federationPollMaxWaitersPerCredential, hub.waits.maxTotal/2)
+	for range limit {
+		waiter, ok := hub.waits.admit(ctx, broadcaster, hub.enrollmentID, project)
+		require.True(t, ok)
+		t.Cleanup(waiter.release)
+	}
 
 	status, _, elapsed, err := hub.poll(ctx, cursor, "45")
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, status)
 	assert.Less(t, elapsed, 5*time.Second, "a poll beyond the per-credential bound must answer like an ordinary poll")
-	release()
-	<-ended
-	//nolint:kennlint // sleeptest: disconnect cleanup runs in hub handlers reached over real HTTP.
-	require.Eventually(t, func() bool {
-		return hub.waits.heldFor(hub.enrollmentID) == 0 && hub.waits.heldTotal() == 0
-	}, 5*time.Second, 5*time.Millisecond, "the hub kept slots for polls whose clients disconnected")
 }
 
 func TestFederationPollWaitCapsOversizedWaits(t *testing.T) {

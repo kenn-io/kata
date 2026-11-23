@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestFederationPollOneCPUQuota(t *testing.T) {
+func TestFederationPollCPUsFromCgroup(t *testing.T) {
 	for _, tc := range []struct {
 		name, group, mount, files string
 		want                      int
