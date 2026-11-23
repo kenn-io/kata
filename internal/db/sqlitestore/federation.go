@@ -529,6 +529,16 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 	if err := db.CheckRelayBindingUpdate(previous, b); err != nil {
 		return db.FederationBinding{}, err
 	}
+	if b.PushEnabled && b.Enabled && b.RelayConfig == nil {
+		var prior int64
+		if previous != nil {
+			prior = previous.PushCursorEventID
+		}
+		b.PushCursorEventID, err = db.RestoreFederationPushCursor(ctx, tx, b.ProjectID, b.PushCursorEventID, prior)
+		if err != nil {
+			return db.FederationBinding{}, err
+		}
+	}
 	allowInsecure := 0
 	if b.AllowInsecure {
 		allowInsecure = 1
@@ -565,11 +575,6 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 	}
 	if err := reconcileFederationBindingTransitionLinks(ctx, tx, previous, binding); err != nil {
 		return db.FederationBinding{}, err
-	}
-	if binding.PushEnabled && binding.Enabled && binding.RelayConfig == nil {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=? || (SELECT uid FROM projects WHERE id=? AND deleted_at IS NULL)`, db.FederationHeldCursorPrefix, b.ProjectID); err != nil {
-			return db.FederationBinding{}, err
-		}
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=? || (SELECT uid FROM projects WHERE id=?)`, db.FederationLeaveFencePrefix, b.ProjectID); err != nil {
 		return db.FederationBinding{}, err

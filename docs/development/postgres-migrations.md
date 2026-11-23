@@ -531,3 +531,8 @@ credentials cannot migrate. SQLite stores at schema 41 or later upgrade
 Start the matching schema 53 binary after migration. Older binaries
 cannot open schema 53; rollback requires the pre-upgrade backup and matching
 older binary.
+
+## Schema 54: held federation cursors
+
+Schema 54 changes the recorded version without changing tables or indexes.
+The version prevents older binaries from deleting held federation edits during a reset.

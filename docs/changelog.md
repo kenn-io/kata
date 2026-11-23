@@ -23,8 +23,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
   `kata meta get <ref> <key> --json` now exits 0 for an unset key; check for
   `value: null` after handling command errors.
 - Keep a [backup](operations/backup-restore.md) from before the upgrade. This
-  release upgrades the database from schema 50 through 53, and older
+  release upgrades the database from schema 50 through 54, and older
   binaries cannot open the result.
+- Upgrade federation hubs before their spokes. A schema 54 spoke cannot push
+  to an older hub.
 - PostgreSQL: stop daemons and imports, then run
   `kata storage postgres migrate` with schema-owner credentials. The migration
   rebuilds an index on `events` and blocks event writes, converts existing
@@ -34,7 +36,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
   SQLite upgrades in place at startup. See the
   [schema 51 migration requirements](development/postgres-migrations.md#schema-51-issue-history-index-on-the-event-header),
   [schema 52 migration requirements](development/postgres-migrations.md#schema-52-shared-vector-catalog),
-  and [schema 53 migration requirements](development/postgres-migrations.md#schema-53-move-events-by-destination-project).
+  [schema 53 migration requirements](development/postgres-migrations.md#schema-53-move-events-by-destination-project),
+  and [schema 54 migration requirements](development/postgres-migrations.md#schema-54-held-federation-cursors).
 - Adoption: to repeat or resume an adoption push, run this release on the hub
   and the pushing spoke. Once a newer copy wins on the hub, every spoke and
   relay of that project must upgrade before it can pull again. See

@@ -53,6 +53,20 @@ func RetainFederationHeldCursor(ctx context.Context, tx *sql.Tx, projectID int64
 	return err
 }
 
+// RestoreFederationPushCursor preserves offline edits when push resumes.
+func RestoreFederationPushCursor(ctx context.Context, tx *sql.Tx, projectID, cursor, bindingCursor int64) (int64, error) {
+	var held int64
+	err := tx.QueryRowContext(ctx, `SELECT CAST(m.value AS BIGINT) FROM meta m JOIN projects p ON m.key=$1 || p.uid WHERE p.id=$2`, FederationHeldCursorPrefix, projectID).Scan(&held)
+	if errors.Is(err, sql.ErrNoRows) {
+		return cursor, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	_, err = tx.ExecContext(ctx, `DELETE FROM meta WHERE key=$1 || (SELECT uid FROM projects WHERE id=$2)`, FederationHeldCursorPrefix, projectID)
+	return max(held, bindingCursor), err
+}
+
 // CheckFederationMoveSourceLifecycle keeps a native source joined while a
 // destination still owes a locally authored move that needs its credential.
 func CheckFederationMoveSourceLifecycle(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string, leaving bool) error {

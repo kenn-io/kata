@@ -234,7 +234,10 @@ func (d *Store) enableFederationPush(ctx context.Context, projectID int64, curso
 	}
 	next := existing
 	next.PushEnabled = true
-	nextCursor := max(cursor, existing.PushCursorEventID)
+	nextCursor, err := db.RestoreFederationPushCursor(ctx, tx, projectID, max(cursor, existing.PushCursorEventID), existing.PushCursorEventID)
+	if err != nil {
+		return db.FederationBinding{}, err
+	}
 	res, err := tx.ExecContext(ctx, `
 		UPDATE federation_bindings
 		   SET push_enabled = 1,
@@ -251,9 +254,6 @@ func (d *Store) enableFederationPush(ctx context.Context, projectID int64, curso
 	}
 	if n == 0 {
 		return db.FederationBinding{}, db.ErrNotFound
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=? || (SELECT uid FROM projects WHERE id=?)`, db.FederationHeldCursorPrefix, projectID); err != nil {
-		return db.FederationBinding{}, err
 	}
 	binding, err := scanFederationBinding(tx.QueryRowContext(ctx,
 		federationBindingSelect+` WHERE project_id = ?`, projectID))
