@@ -1360,7 +1360,8 @@ The command rejects an issue it reads as closed. Concurrent writes preserve
 other recipients' requests; the last write to the same recipient wins.
 Closure can still race with the write; either way, the request is hidden while
 the issue is closed. Messages must be nonblank and at most 1024 bytes.
-Requests do not change ownership or readiness.
+Requests do not change ownership or readiness. In `--agent` inbox output, pass
+`from_address` to `kata notify --to`.
 
 Use `--re <comment>` to ask the recipient to answer one visible comment. A
 typed reply clears the matching request and notifies the original requester on

@@ -388,7 +388,8 @@ already-bound issues inside the startup project scope.
 
 `kata.inbox` lists open issues that carry a request for one recipient's
 attention, the same requests `kata inbox` shows, and never clears them. It
-reads up to `limit` issues and sets `truncated` when more carry requests.
+reads up to `limit` issues and sets `truncated` when more carry requests. Pass
+a request's `from_address` to `kata notify --to`.
 `kata.status` reports an issue's owner, hold, and lease along with the actor
 the server writes as. `kata.unassign` accepts `expected_owner` so a handoff
 clears ownership only while that actor still holds the issue.

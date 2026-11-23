@@ -196,12 +196,15 @@ func TestInboxFederatedSender(t *testing.T) {
 	value, err := json.Marshal(notificationValue{From: actor, Message: "Please review"})
 	require.NoError(t, err)
 	runCLI(t, env, dir, "meta", "set", ref, "notify.cmV2aWV3ZXI", string(value), "--json-value")
-	for _, mode := range [][]string{{}, {"--agent"}, {"--context"}} {
+	for _, mode := range [][]string{{}, {"--context"}} {
 		args := append([]string{"inbox", "--for", "reviewer"}, mode...)
 		out := runCLI(t, env, dir, args...)
 		assert.Contains(t, out, "Ana")
 		assert.NotContains(t, out, "member:")
 	}
+	agent := runCLI(t, env, dir, "inbox", "--for", "reviewer", "--agent")
+	assert.Contains(t, agent, agentValue(actor))
+	assert.Contains(t, agent, "from_address=")
 	out := runCLI(t, env, dir, "inbox", "--for", "reviewer", "--json")
 	assert.Contains(t, out, actor)
 }

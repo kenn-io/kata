@@ -254,6 +254,7 @@ func printInbox(cmd *cobra.Command, recipient string, requests []inboxRequest, a
 			return err
 		}
 		for _, request := range requests {
+			address := notification.Address(request.From, request.Teammate)
 			request = displayInboxRequest(request)
 			fields := []agentField{
 				agentRowField("issue", request.Ref),
@@ -261,7 +262,7 @@ func printInbox(cmd *cobra.Command, recipient string, requests []inboxRequest, a
 			if allProjects {
 				fields = append(fields, agentRowField("project", request.Project))
 			}
-			fields = append(fields, agentRowField("title", request.Title), agentRowField("from", request.From))
+			fields = append(fields, agentRowField("title", request.Title), agentRowField("from", request.From), agentRowField("from_address", address))
 			if request.Teammate != "" {
 				fields = append(fields, agentRowField("teammate", request.Teammate))
 			}

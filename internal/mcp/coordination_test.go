@@ -146,8 +146,10 @@ func TestInboxReadsAttentionRequestsAgainstDaemon(t *testing.T) {
 		messages[request["message"].(string)] = request
 		if request["message"] == "Second look" {
 			require.Equal(t, "example-agent", request["from"])
+			require.Equal(t, "example-agent/planner", request["from_address"])
 		} else {
 			require.Equal(t, "Ana", request["from"])
+			require.Equal(t, actor, request["from_address"])
 		}
 		require.NotEmpty(t, request["qualified_ref"])
 	}
