@@ -33,6 +33,7 @@ func newEditCmd() *cobra.Command {
 		Use:   "edit <issue-ref>",
 		Short: "edit issue title/body/owner/priority and relationships",
 		Long: `Change title, body, owner, or priority, and add or remove relationships.
+The new body comes from one of --body, --body-file, or --body-stdin.
 Relationships read from this issue's point of view:
   --blocks X      this issue must finish before X (gates X in kata ready)
   --blocked-by X  X must finish before this issue
@@ -42,7 +43,11 @@ Relationships read from this issue's point of view:
 idempotent. Labels use kata label; metadata uses kata meta.`,
 		Example: `  kata edit abc4 --blocked-by d4ex --agent
   kata edit abc4 --title "fix login race in Safari" --priority 1 --agent
-  kata edit abc4 --remove-blocks d4ex --related j7m2 --agent`,
+  kata edit abc4 --remove-blocks d4ex --related j7m2 --agent
+  kata edit abc4 --body-file body.md --agent
+  kata edit abc4 --body-stdin --agent <<-'EOF'
+	Safari 18 fires the callback twice.
+	EOF`,
 		Args: cobra.ExactArgs(1),
 	}
 	cmd.Flags().StringVar(&title, "title", "", "new title")

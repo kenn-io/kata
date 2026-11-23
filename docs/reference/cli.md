@@ -956,7 +956,7 @@ Edit:
 ```sh
 kata edit <issue-ref> \
   [--title TEXT] \
-  [--body TEXT] \
+  [--body TEXT | --body-file PATH | --body-stdin] \
   [--owner NAME] \
   [--priority 0..4 | --priority -] \
   [--parent <ref>] \
@@ -969,6 +969,9 @@ kata edit <issue-ref> \
   [--remove-related <ref>] \
   [--comment TEXT]
 ```
+
+`--body`, `--body-file`, and `--body-stdin` are mutually exclusive; pass at
+most one.
 
 Link flags (`--parent`, `--blocks`, `--blocked-by`, `--related`, and their
 `--remove-*` counterparts) accept a same-project `short_id`, a
