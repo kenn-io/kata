@@ -9,8 +9,8 @@ import (
 )
 
 // deleteProjectRelayMetadataTx removes every meta row keyed by the project
-// UID: relay reset state, root key transitions, pending creation intent and
-// the attribution stream cursor. Purge, merge, orphan cleanup and UID adoption
+// UID: relay reset state, root key transitions, pending creation intent, event
+// acknowledgments, and the attribution stream cursor. Purge, merge, orphan cleanup and UID adoption
 // all retire the UID, so none of these rows may outlive it.
 func deleteProjectRelayMetadataTx(ctx context.Context, tx *sql.Tx, projectUID string) error {
 	resetKey := db.RelayResetMetadataPrefix + projectUID
@@ -19,6 +19,7 @@ func deleteProjectRelayMetadataTx(ctx context.Context, tx *sql.Tx, projectUID st
 	pendingPrefix := db.PendingCreationMetadataPrefix + projectUID + "."
 	supersededPrefix := db.RelayResetSupersededMetadataPrefix + projectUID + "."
 	identityDependencyPrefix := db.FederationProjectIdentityDependencyPrefix + projectUID + "."
+	acknowledgmentPrefix := db.FederationAcknowledgedEventPrefix + projectUID + "."
 	_, err := tx.ExecContext(ctx, `DELETE FROM meta
 		WHERE key = $1
 		   OR key = $2
@@ -27,8 +28,9 @@ func deleteProjectRelayMetadataTx(ctx context.Context, tx *sql.Tx, projectUID st
 		   OR left(key, length($4)) = $4
 		   OR left(key, length($5)) = $5
 		   OR left(key, length($6)) = $6
-		   OR left(key, length($8)) = $8`,
-		resetKey, db.AttributionUIResetMetadataPrefix+projectUID, resetPrefix, transitionPrefix, pendingPrefix, supersededPrefix, db.ProjectStreamResetMetadataPrefix+projectUID, identityDependencyPrefix)
+		   OR left(key, length($8)) = $8
+		   OR left(key, length($9)) = $9`,
+		resetKey, db.AttributionUIResetMetadataPrefix+projectUID, resetPrefix, transitionPrefix, pendingPrefix, supersededPrefix, db.ProjectStreamResetMetadataPrefix+projectUID, identityDependencyPrefix, acknowledgmentPrefix)
 	return mapSQLError(err, nil)
 }
 

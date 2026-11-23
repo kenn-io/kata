@@ -200,15 +200,27 @@ func (s *Store) AdvanceFederationPullCursor(ctx context.Context, projectID, next
 // from a snapshot it no longer holds.
 func (s *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string) error {
 	if len(supersededEventUIDs) == 0 {
-		return s.AdvanceFederationPushCursor(ctx, projectID, nextCursor)
+		return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+			deferred, err := db.RecordFederationPushPastDeferred(ctx, tx, projectID, s.instanceUID, nextCursor, true)
+			if err != nil || deferred {
+				return err
+			}
+			return updateFederationCursor(ctx, tx, projectID, nextCursor, true)
+		})
 	}
 	return s.materializeFederatedProjectAfter(ctx, projectID, func(ctx context.Context, tx *sql.Tx) error {
 		deleted, err := db.AcknowledgeSupersededFederationSnapshots(ctx, tx, projectID, s.instanceUID, supersededEventUIDs)
 		if err != nil {
 			return err
 		}
-		if err := updateFederationCursor(ctx, tx, projectID, nextCursor, true); err != nil {
+		deferred, err := db.RecordFederationPushPastDeferred(ctx, tx, projectID, s.instanceUID, nextCursor, true)
+		if err != nil {
 			return err
+		}
+		if !deferred {
+			if err := updateFederationCursor(ctx, tx, projectID, nextCursor, true); err != nil {
+				return err
+			}
 		}
 		if deleted == 0 {
 			return nil
@@ -387,7 +399,7 @@ func pgFederationReplicaSettledTx(ctx context.Context, tx *sql.Tx, binding db.Fe
 	if binding.PushEnabled {
 		var pending bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM events e
-WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND `+db.FederationPushableEventSQL("e", true)+`)`,
+WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND `+db.FederationUnresolvedEventSQL("e")+`)`,
 			binding.ProjectID, originInstanceUID, binding.PushCursorEventID).Scan(&pending); err != nil {
 			return mapSQLError(err, nil)
 		}

@@ -49,7 +49,7 @@ func FederationPushableEventSQL(alias string, postgres bool) string {
 	if postgres {
 		from = `(` + alias + `.payload::jsonb->>'from_project_uid')`
 	}
-	return FederationUnresolvedEventSQL(alias) + ` AND (` + alias + `.type<>'issue.moved' OR NOT EXISTS (SELECT 1 FROM federation_held_cursors WHERE project_uid=` + from + `))`
+	return FederationUnresolvedEventSQL(alias) + ` AND (` + alias + `.type<>'issue.moved' OR (NOT EXISTS (SELECT 1 FROM federation_held_cursors WHERE project_uid=` + from + `) AND NOT ` + federationMoveSupersededSQL(alias) + `))`
 }
 
 // RecordFederationAcknowledgedEvents records events accepted or skipped past
@@ -63,6 +63,35 @@ func RecordFederationAcknowledgedEvents(ctx context.Context, tx *sql.Tx, project
 		}
 	}
 	return nil
+}
+
+// RemoveOrphanedFederationAcknowledgments removes markers whose event is gone.
+func RemoveOrphanedFederationAcknowledgments(ctx context.Context, exec interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}) error {
+	_, err := exec.ExecContext(ctx, `DELETE FROM meta WHERE substr(key,1,length($1))=$1
+ AND NOT EXISTS (SELECT 1 FROM events e JOIN projects p ON p.id=e.project_id
+ WHERE meta.key=$1 || p.uid || '.' || e.uid)`, FederationAcknowledgedEventPrefix)
+	return err
+}
+
+// RecordFederationPushPastDeferred keeps accepted events behind a deferred move.
+func RecordFederationPushPastDeferred(ctx context.Context, tx *sql.Tx, projectID int64, origin string, cursor int64, postgres bool) (bool, error) {
+	var deferred bool
+	//nolint:gosec // SQL fragments use fixed aliases and event types.
+	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events e JOIN federation_bindings b ON b.project_id=e.project_id
+ WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>b.push_cursor_event_id AND e.id<=$3 AND `+FederationUnresolvedEventSQL("e")+` AND NOT (`+FederationPushableEventSQL("e", postgres)+`))`, projectID, origin, cursor).Scan(&deferred)
+	if err != nil || !deferred {
+		return deferred, err
+	}
+	//nolint:gosec // SQL fragments use fixed aliases and event types.
+	_, err = tx.ExecContext(ctx, `INSERT INTO meta(key,value)
+ SELECT $1 || p.uid || '.' || e.uid,'1' FROM events e JOIN projects p ON p.id=e.project_id JOIN federation_bindings b ON b.project_id=e.project_id
+ WHERE e.project_id=$2 AND e.origin_instance_uid=$3 AND e.id>b.push_cursor_event_id AND e.id<=$4 AND `+FederationPushableEventSQL("e", postgres)+` ON CONFLICT(key) DO NOTHING`, FederationAcknowledgedEventPrefix, projectID, origin, cursor)
+	if err != nil {
+		return false, err
+	}
+	return true, FoldFederationAcknowledgedEvents(ctx, tx, projectID, origin)
 }
 
 // FederationQuarantineHasEarlierEvents finds events a skip must not advance past.
@@ -99,7 +128,7 @@ func FoldFederationAcknowledgedEvents(ctx context.Context, tx *sql.Tx, projectID
 
 // FederationOwedEventSQL excludes moves superseded by a newer hub move.
 func FederationOwedEventSQL(alias string, postgres bool) string {
-	return FederationPushableEventSQL(alias, postgres) + ` AND (` + alias + `.type<>'issue.moved' OR NOT ` + federationMoveSupersededSQL(alias) + `)`
+	return FederationPushableEventSQL(alias, postgres)
 }
 
 // FederationResetOwedEventSQL excludes events retained for issues in another project.
@@ -964,7 +993,7 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
 	// Keep this spoke's edits that a left project never had acknowledged.
 	//nolint:gosec // Only the fixed snapshot type list is joined; values are bound.
 	_, err = tx.ExecContext(ctx, `DELETE FROM events AS e WHERE e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)
- AND NOT (e.origin_instance_uid=$2 AND (`+FederationHeldEventSQL("e")+` OR (e.project_id=$1 AND e.id>(SELECT push_cursor_event_id FROM federation_bindings WHERE project_id=$1) AND `+FederationEventReferencesMovedIssueSQL("e")+`)))`, projectID, originInstanceUID)
+ AND NOT (e.origin_instance_uid=$2 AND (`+FederationHeldEventSQL("e")+` OR (EXISTS (SELECT 1 FROM federation_bindings b WHERE b.project_id=e.project_id AND e.id>b.push_cursor_event_id) AND `+FederationEventReferencesMovedIssueSQL("e")+`)))`, projectID, originInstanceUID)
 	return err
 }
 
@@ -989,7 +1018,9 @@ func ClearFederatedProjectEvents(ctx context.Context, tx *sql.Tx, projectID int6
  WHERE issue_id IN (SELECT id FROM issues WHERE project_id=$1)`, projectID); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `UPDATE events SET related_issue_id=NULL
- WHERE related_issue_id IN (SELECT id FROM issues WHERE project_id=$1)`, projectID)
-	return err
+	if _, err := tx.ExecContext(ctx, `UPDATE events SET related_issue_id=NULL
+ WHERE related_issue_id IN (SELECT id FROM issues WHERE project_id=$1)`, projectID); err != nil {
+		return err
+	}
+	return RemoveOrphanedFederationAcknowledgments(ctx, tx)
 }

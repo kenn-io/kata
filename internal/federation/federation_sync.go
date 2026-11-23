@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -265,6 +266,7 @@ func pushDirectSpoke(
 		scanCursor := binding.PushCursorEventID
 		var refused error
 		singleEvents := false
+		blockedIssues := make(map[string]bool)
 		for {
 			if q, err := store.ActiveFederationQuarantine(ctx, binding.ProjectID, db.FederationQuarantineDirectionPush); err == nil {
 				quarantinedEvents, eventErr := store.EventsByUIDs(ctx, binding.ProjectID, q.EventUIDs)
@@ -308,6 +310,10 @@ func pushDirectSpoke(
 				}
 				break
 			}
+			pageEnd := pending[len(pending)-1].ID
+			pending = slices.DeleteFunc(pending, func(event db.Event) bool {
+				return event.IssueUID != nil && blockedIssues[*event.IssueUID] || event.RelatedIssueUID != nil && blockedIssues[*event.RelatedIssueUID]
+			})
 			for len(pending) > 0 {
 				batch, adoptionBaseline, adoptionBaselineEndEventID, err := nextFederationPushIngestBatch(pending, singleEvents)
 				if err != nil {
@@ -325,6 +331,15 @@ func pushDirectSpoke(
 					})
 				if err != nil {
 					if isFederationProjectNotEnrolledError(err) && adoptionBaseline == "" {
+						if uid := federationRefusedIssueUID(err); uid != "" && slices.ContainsFunc(batch, func(event db.Event) bool { return federationEventReferencesIssue(event, uid) }) {
+							blockedIssues[uid] = true
+							if refused == nil {
+								refused = err
+							}
+							pending = slices.DeleteFunc(pending, func(event db.Event) bool { return federationEventReferencesIssue(event, uid) })
+							singleEvents = false
+							continue
+						}
 						if len(batch) > 1 {
 							singleEvents = true
 							continue
@@ -332,7 +347,6 @@ func pushDirectSpoke(
 						if refused == nil {
 							refused = err
 						}
-						scanCursor = batch[0].ID
 						pending = pending[1:]
 						singleEvents = false
 						continue
@@ -377,8 +391,7 @@ func pushDirectSpoke(
 							return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 						}
 					}
-					scanCursor = ack.PushCursorEventID
-					pending = pendingFederationEventsAfterCursor(pending, scanCursor)
+					pending = pendingFederationEventsAfterCursor(pending, ack.PushCursorEventID)
 					continue
 				}
 				// The hub already held some of these issues and stored no
@@ -399,10 +412,14 @@ func pushDirectSpoke(
 						onPulledEvents(reset.ProjectID, []db.Event{{ID: reset.EventID, ProjectID: reset.ProjectID, Type: db.ProjectScopeResetEventType}})
 					}
 				}
-				binding.PushCursorEventID = ack.PushCursorEventID
-				scanCursor = ack.PushCursorEventID
+				current, err := store.FederationBindingByProject(ctx, binding.ProjectID)
+				if err != nil {
+					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+				}
+				binding.PushCursorEventID = current.PushCursorEventID
 				pending = pendingFederationEventsAfterCursor(pending, ack.PushCursorEventID)
 			}
+			scanCursor = pageEnd
 		}
 		if refused != nil {
 			return recordFederationSyncError(ctx, store, binding.ProjectID, refused)
@@ -977,6 +994,28 @@ func isPoisonedFederationPushError(err error) bool {
 func isFederationProjectNotEnrolledError(err error) bool {
 	statusErr, ok := errors.AsType[*HubStatusError](err)
 	return ok && statusErr.StatusCode == http.StatusForbidden && federationHubErrorCode(statusErr.Body) == db.FederationProjectNotEnrolledCode
+}
+
+var refusedIssueMessage = regexp.MustCompile(`^issue ([0-9A-HJKMNP-TV-Z]{26}) now belongs to a project where this spoke has no push enrollment with the same actor$`)
+
+func federationEventReferencesIssue(event db.Event, uid string) bool {
+	return event.IssueUID != nil && *event.IssueUID == uid || event.RelatedIssueUID != nil && *event.RelatedIssueUID == uid
+}
+
+func federationRefusedIssueUID(err error) string {
+	statusErr, ok := errors.AsType[*HubStatusError](err)
+	if !ok {
+		return ""
+	}
+	var envelope api.ErrorEnvelope
+	if json.Unmarshal([]byte(statusErr.Body), &envelope) != nil {
+		return ""
+	}
+	match := refusedIssueMessage.FindStringSubmatch(envelope.Error.Message)
+	if len(match) != 2 {
+		return ""
+	}
+	return match[1]
 }
 
 func federationHubErrorCode(body string) string {

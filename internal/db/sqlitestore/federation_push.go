@@ -140,15 +140,27 @@ func federationPushEventTypeCondition(column string) string {
 // from a snapshot it no longer holds.
 func (d *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string) error {
 	if len(supersededEventUIDs) == 0 {
-		return d.AdvanceFederationPushCursor(ctx, projectID, nextCursor)
+		return d.relayTx(ctx, func(tx *sql.Tx) error {
+			deferred, err := db.RecordFederationPushPastDeferred(ctx, tx, projectID, d.instanceUID, nextCursor, false)
+			if err != nil || deferred {
+				return err
+			}
+			return advanceFederationPushCursor(ctx, tx, projectID, nextCursor)
+		})
 	}
 	return d.materializeFederatedProjectAfter(ctx, projectID, func(ctx context.Context, tx *sql.Tx) error {
 		deleted, err := db.AcknowledgeSupersededFederationSnapshots(ctx, tx, projectID, d.instanceUID, supersededEventUIDs)
 		if err != nil {
 			return err
 		}
-		if err := advanceFederationPushCursor(ctx, tx, projectID, nextCursor); err != nil {
+		deferred, err := db.RecordFederationPushPastDeferred(ctx, tx, projectID, d.instanceUID, nextCursor, false)
+		if err != nil {
 			return err
+		}
+		if !deferred {
+			if err := advanceFederationPushCursor(ctx, tx, projectID, nextCursor); err != nil {
+				return err
+			}
 		}
 		if deleted == 0 {
 			return nil
@@ -361,7 +373,7 @@ func federationReplicaSettledTx(ctx context.Context, tx *sql.Tx, binding db.Fede
 			   WHERE e.project_id = ?
 			     AND e.origin_instance_uid = ?
 			     AND e.id > ?
-			     AND `+db.FederationPushableEventSQL("e", false)+`)`,
+			     AND `+db.FederationUnresolvedEventSQL("e")+`)`,
 			binding.ProjectID, originInstanceUID, binding.PushCursorEventID).Scan(&pending); err != nil {
 			return fmt.Errorf("check pending federation push: %w", err)
 		}
