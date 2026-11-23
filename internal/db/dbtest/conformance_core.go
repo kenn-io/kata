@@ -1433,30 +1433,45 @@ func checkExpiredAssignmentAttentionHandoff(t *testing.T, store db.Storage) erro
 	project, err := store.CreateProject(ctx, "expiry-handoff-project")
 	require.NoError(t, err)
 	base := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
-	t.Run("same actor reclaims after expiry", func(t *testing.T) {
-		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "same actor", Author: "worker"})
-		require.NoError(t, err)
-		_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "worker", Patch: map[string]jsontext.Value{"work.attention": jsontext.Value(`"ok"`)}})
-		require.NoError(t, err)
-		_, err = store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: "worker", TTL: time.Minute, Now: base})
-		require.NoError(t, err)
-		expiryEvents, err := store.ExpireAssignments(ctx, db.ExpireAssignmentsParams{ProjectID: project.ID, Now: base.Add(2 * time.Minute)})
-		require.NoError(t, err)
-		require.Len(t, expiryEvents, 2)
-		before, err := store.IssueByID(ctx, issue.ID)
-		require.NoError(t, err)
-		claim, err := store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: "worker", TTL: time.Minute, Now: base.Add(2 * time.Minute)})
-		require.NoError(t, err)
-		meta := db.PayloadMap(jsontext.Value(claim.Issue.Metadata))
-		assert.JSONEq(t, `"ok"`, string(meta["work.attention"]))
-		assert.NotContains(t, meta, "work.attention_msg")
-		require.Len(t, claim.Events, 2)
-		assert.Equal(t, "issue.metadata_updated", claim.Events[0].Type)
-		assert.Equal(t, "worker", claim.Events[0].Actor)
-		assert.Equal(t, "issue.assigned", claim.Events[1].Type)
-		assert.Equal(t, claim.Events[1], *claim.Event)
-		assert.Equal(t, before.Revision+2, claim.Issue.Revision)
-	})
+	for _, tc := range []struct {
+		name, actor  string
+		startSession bool
+	}{
+		{"same actor reclaims after expiry", "worker", false},
+		{"new session claims after expiry", "next-worker", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: tc.name, Author: "worker"})
+			require.NoError(t, err)
+			_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "worker", Patch: map[string]jsontext.Value{"work.attention": jsontext.Value(`"ok"`)}})
+			require.NoError(t, err)
+			_, err = store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: "worker", TTL: time.Minute, Now: base})
+			require.NoError(t, err)
+			if tc.startSession {
+				_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: tc.actor, Patch: map[string]jsontext.Value{"work.attention": jsontext.Value(`"ok"`), "work.attention_session": jsontext.Value(`"new-session"`)}})
+				require.NoError(t, err)
+			}
+			expiryEvents, err := store.ExpireAssignments(ctx, db.ExpireAssignmentsParams{ProjectID: project.ID, Now: base.Add(2 * time.Minute)})
+			require.NoError(t, err)
+			require.Len(t, expiryEvents, 2)
+			before, err := store.IssueByID(ctx, issue.ID)
+			require.NoError(t, err)
+			claim, err := store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: tc.actor, TTL: time.Minute, Now: base.Add(2 * time.Minute)})
+			require.NoError(t, err)
+			meta := db.PayloadMap(jsontext.Value(claim.Issue.Metadata))
+			assert.JSONEq(t, `"ok"`, string(meta["work.attention"]))
+			assert.NotContains(t, meta, "work.attention_msg")
+			if tc.startSession {
+				assert.JSONEq(t, `"new-session"`, string(meta["work.attention_session"]))
+			}
+			require.Len(t, claim.Events, 2)
+			assert.Equal(t, "issue.metadata_updated", claim.Events[0].Type)
+			assert.Equal(t, tc.actor, claim.Events[0].Actor)
+			assert.Equal(t, "issue.assigned", claim.Events[1].Type)
+			assert.Equal(t, claim.Events[1], *claim.Event)
+			assert.Equal(t, before.Revision+2, claim.Issue.Revision)
+		})
+	}
 	for _, tc := range []struct{ name, attention, message string }{
 		{"deliberate attention", "needs-human", "please review"},
 		{"stuck", "stuck", "claim expired without hand-off"},
