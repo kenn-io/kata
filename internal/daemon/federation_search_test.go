@@ -554,7 +554,7 @@ func TestDirectSpokeSearchWaitsForHubFallback(t *testing.T) {
 	_, spoke, project, replica, issue, token := createClaimForwardingPair(t, "pull")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
-		case <-time.After(1200 * time.Millisecond):
+		case <-time.After(3200 * time.Millisecond):
 			require.NoError(t, json.MarshalWrite(w, map[string]any{"hits": []any{map[string]any{"issue": issue, "score": 1, "matched_in": []string{"title"}}}, "mode": "lexical", "degraded_reason": "keyword-only"}))
 		case <-r.Context().Done():
 		}
@@ -566,6 +566,27 @@ func TestDirectSpokeSearchWaitsForHubFallback(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 	require.Contains(t, string(raw), issue.UID)
 	require.Contains(t, string(raw), "keyword-only")
+}
+
+func TestDirectSpokeSearchRejectsUnknownHubMode(t *testing.T) {
+	hub, spoke, project, replica, _, token := createClaimForwardingPair(t, "pull")
+	remote, _, err := hub.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "unpulled claim", Author: "tester"})
+	require.NoError(t, err)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		require.NoError(t, json.MarshalWrite(w, map[string]any{"hits": []any{map[string]any{"issue": remote, "score": 1}}, "mode": "future"}))
+	}))
+	t.Cleanup(server.Close)
+	setClaimBindingHubURL(t, spoke, replica.ID, server.URL)
+	require.NoError(t, config.WriteFederationCredential(replica.UID, config.FederationCredential{HubURL: server.URL, HubProjectID: project.ID, Token: token}))
+	path := fmt.Sprintf("/api/v1/projects/%d/search?q=claim", replica.ID)
+	resp, raw := envGetRaw(t, spoke, path)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	require.Contains(t, string(raw), `"degraded":true`)
+	require.Contains(t, string(raw), "unsupported hub search mode")
+	require.NotContains(t, string(raw), remote.UID)
+	resp, raw = envGetRaw(t, spoke, path+"&mode=semantic")
+	require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode, string(raw))
+	require.Contains(t, string(raw), `"code":"hub_search_failed"`)
 }
 
 func TestDirectSpokeSearchOlderHubLabelsSemantic(t *testing.T) {

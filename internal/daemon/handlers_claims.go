@@ -852,6 +852,11 @@ func (c *claimHubClient) SearchShared(ctx context.Context, projectID int64, p hy
 	if err := json.Unmarshal(response.Body, &body.Body); err != nil {
 		return api.FederationSearchResponseBody{}, err
 	}
+	switch body.Body.Mode {
+	case "", string(modeLexical), string(modeSemantic), string(modeHybrid):
+	default:
+		return api.FederationSearchResponseBody{}, fmt.Errorf("unsupported hub search mode %q", body.Body.Mode)
+	}
 	return body.Body, nil
 }
 
