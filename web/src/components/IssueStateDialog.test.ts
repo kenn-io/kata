@@ -37,10 +37,13 @@ describe('IssueStateDialog', () => {
   it('shows what closing preserves and the open tasks it unblocks', async () => {
     const issue = makeIssue()
     issue.links.push({
-      id: 1, project_id: 1, type: 'blocks',
+      id: 1,
+      project_id: 1,
+      type: 'blocks',
       from: { uid: 'issue-1', short_id: 'I-1', qualified_id: 'INBOX-1', status: 'open' },
       to: { uid: 'issue-2', short_id: 'I-2', qualified_id: 'INBOX-2', status: 'open' },
-      author: 'user-a', created_at: '',
+      author: 'user-a',
+      created_at: '',
     })
     render(IssueStateDialog, { props: { issue, onCloseIssue: vi.fn(), onReopenIssue: vi.fn() } })
     await fireEvent.click(screen.getByRole('button', { name: 'Complete…' }))
