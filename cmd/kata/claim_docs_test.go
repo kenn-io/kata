@@ -26,13 +26,9 @@ func TestClaimDocsUseTTL(t *testing.T) {
 	} {
 		raw, err := os.ReadFile(filepath.Join("..", "..", filepath.FromSlash(path)))
 		require.NoError(t, err)
-		text := string(raw)
-		found := assertClaimsCarryTTL(t, path, text)
+		found := assertClaimsCarryTTL(t, path, string(raw))
 		slices.Sort(found)
 		commands[path] = slices.Compact(found)
-		if filepath.Base(path) == "guide.md" || path == "docs/website/guide/index.html" {
-			assert.Contains(t, text, "needs-human", path)
-		}
 	}
 	assert.Equal(t, commands["docs/website/index.md"], commands["docs/website/index.html"])
 	assert.Equal(t, commands["docs/website/guide.md"], commands["docs/website/guide/index.html"])

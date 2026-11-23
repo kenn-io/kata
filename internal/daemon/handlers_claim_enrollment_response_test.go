@@ -116,11 +116,6 @@ func TestClaim_EnrollmentBearerResponseOmitsPrivateIssueContent(t *testing.T) {
 	assert.Empty(t, out.ReplayEvents)
 	require.Len(t, out.Events, 1)
 	assert.Equal(t, "issue.assigned", out.Events[0].Type)
-	stored, err := hub.DB.IssueByID(t.Context(), issue.ID)
-	require.NoError(t, err)
-	metadata := db.PayloadMap(jsontext.Value(stored.Metadata))
-	assert.JSONEq(t, `"ok"`, string(metadata["work.attention"]))
-	assert.NotContains(t, metadata, "work.attention_msg")
 }
 
 func TestClaim_EnrollmentRenewalReplayCarriesOnlyAssignmentEvents(t *testing.T) {

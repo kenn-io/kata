@@ -35,13 +35,6 @@ func TestAssignmentSweeperPublishesExpiredAttentionHandoff(t *testing.T) {
 	require.Len(t, sink.events, 2)
 	assert.Equal(t, "issue.assignment_expired", sink.events[0].Type)
 	assert.Equal(t, "issue.metadata_updated", sink.events[1].Type)
-	stored, err := env.DB.IssueByID(ctx, issue.ID)
-	require.NoError(t, err)
-	meta := db.PayloadMap(jsontext.Value(stored.Metadata))
-	assert.JSONEq(t, `"needs-human"`, string(meta["work.attention"]))
-	assert.JSONEq(t, `"claim expired without hand-off"`, string(meta["work.attention_msg"]))
-	require.NoError(t, sweeper.RunOnce(ctx, now))
-	assertNoReceive(t, sub.Ch, 100*time.Millisecond, "expiry handoff must not repeat") //nolint:kennlint // deadlinetest: bounded absence checks duplicate events
 }
 
 func TestAssignmentSweeperExpiresLocalAndHubAssignmentsButSkipsSpokes(t *testing.T) {

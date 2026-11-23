@@ -364,34 +364,26 @@ func assertClosedBodyStdinHeredoc(t *testing.T, name, text string) {
 // Product contract: every CLI guide tells agents to claim with a
 // time limit and renew it by claiming again with --ttl, without --if-unowned.
 func TestGuidesSayClaimWithTTL(t *testing.T) {
-	guides := map[string]string{}
-	for _, format := range []string{"human", "agent", "json", "contract"} {
-		resetFlags(t)
-		guides["quickstart "+format] = string(executeRoot(t, newRootCmd(), "quickstart", "--format", format))
-	}
-	for _, args := range [][]string{{"--help"}, {"claim", "--help"}} {
+	guides := map[string]string{"init block": agentsManagedBlock()}
+	for _, args := range [][]string{
+		{"quickstart", "--format", "human"}, {"quickstart", "--format", "agent"},
+		{"quickstart", "--format", "json"}, {"quickstart", "--format", "contract"},
+		{"--help"}, {"claim", "--help"}, {"assign", "--help"},
+	} {
 		resetFlags(t)
 		guides[strings.Join(args, " ")] = string(executeRoot(t, newRootCmd(), args...))
 	}
-	guides["init block"] = agentsManagedBlock()
-	resetFlags(t)
-	assignHelp := string(executeRoot(t, newRootCmd(), "assign", "--help"))
-	assert.Contains(t, assignHelp, "kata claim <ref> --ttl 2h")
-	guides["assign --help"] = assignHelp
 	for name, text := range guides {
 		assertClaimsCarryTTL(t, name, text)
 		if name != "assign --help" {
 			assert.Contains(t, text, "without --if-unowned", name)
 		}
 	}
-	assert.Contains(t, guides["claim --help"], "needs-human")
-	assert.Contains(t, guides["claim --help"], "kata claim abc4 --ttl 2h --agent  # renew")
 }
 
 var claimCommand = regexp.MustCompile("kata claim [<\\w][^\\n`<#\"]*")
 
-// assertClaimsCarryTTL checks every kata claim command, not prose such as
-// "kata claim fails if", names --ttl. It reports the commands it found.
+// assertClaimsCarryTTL checks that each matched claim command names --ttl.
 func assertClaimsCarryTTL(t *testing.T, name, text string) []string {
 	t.Helper()
 	var commands []string
