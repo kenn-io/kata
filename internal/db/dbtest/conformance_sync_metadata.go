@@ -1,6 +1,8 @@
 package dbtest
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -259,6 +261,28 @@ func checkMetadataAndAtomicEdit(t *testing.T, store db.Storage) error {
 	}
 	assert.True(t, clearedIssue.Changed)
 	assert.JSONEq(t, `{"scheduled_on":"2026-07-20"}`, string(clearedIssue.Issue.Metadata))
+	executor := store.(interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	})
+	_, err = executor.ExecContext(ctx, `UPDATE issues SET metadata=$1 WHERE id=$2`,
+		`{"scheduled_on":"2026-07-20","work.attention":"on-fire"}`, fixture.Issue.ID)
+	require.NoError(t, err)
+	legacyIssue, err := store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
+		IssueID: fixture.Issue.ID, Actor: "metadata-editor",
+		Patch: map[string]jsontext.Value{"custom": jsontext.Value(`"yellow"`)},
+	})
+	if err != nil {
+		return fmt.Errorf("patch beside legacy attention: %w", err)
+	}
+	assert.JSONEq(t, `{"scheduled_on":"2026-07-20","work.attention":"on-fire","custom":"yellow"}`, string(legacyIssue.Issue.Metadata))
+	rewrittenIssue, err := store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
+		IssueID: fixture.Issue.ID, Actor: "metadata-editor",
+		Patch: map[string]jsontext.Value{"work.attention": jsontext.Value(`"ok"`)},
+	})
+	if err != nil {
+		return fmt.Errorf("rewrite legacy attention: %w", err)
+	}
+	assert.JSONEq(t, `{"scheduled_on":"2026-07-20","work.attention":"ok","custom":"yellow"}`, string(rewrittenIssue.Issue.Metadata))
 
 	patchedProject, err := store.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
 		ProjectID: fixture.Project.ID, IfMatchRev: new(fixture.Project.Revision), Actor: "metadata-editor",
@@ -526,7 +550,7 @@ func checkMetadataAndAtomicEdit(t *testing.T, store db.Storage) error {
 			rolledBackEvents++
 		}
 	}
-	assert.Equal(t, 2, metadataEvents)
+	assert.Equal(t, 4, metadataEvents)
 	assert.Zero(t, rolledBackEvents)
 
 	guarded, err := createFixtureIssue(ctx, store, fixture.Project.ID, "guarded metadata", "author", nil)
