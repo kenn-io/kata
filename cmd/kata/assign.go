@@ -17,7 +17,7 @@ func newAssignCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "assign <issue-ref> <owner>",
 		Short:   "set the owner of an issue",
-		Long:    `Set another actor as owner. To take an issue yourself, use kata claim.`,
+		Long:    `Set another actor as owner. To take an issue yourself, use kata claim <ref> --ttl 2h.`,
 		Example: `  kata assign abc4 alice --agent`,
 		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {

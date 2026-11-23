@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -65,6 +66,27 @@ func TestPartialBacklinkEvidenceIsVisibleInHumanAndAgentOutput(t *testing.T) {
 	var agent strings.Builder
 	require.NoError(t, printShowAgent(&agent, response, "example-project", "show"))
 	require.Contains(t, agent.String(), "backlinks_truncated=true")
+}
+
+func TestShowAgentAuthorFilterInbound(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	const actor = "Ana [member:11111111-1111-4111-8111-111111111111; enrollment:11111111-1111-4111-8111-111111111111]"
+	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: pid, Title: "Discussion", Author: "tester"})
+	require.NoError(t, err)
+	root, _, err := env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: issue.ID, Author: actor, Body: "Question"})
+	require.NoError(t, err)
+	_, _, err = env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: issue.ID, Author: "responder", Body: "Answer", ReplyToUID: root.UID, ReplyKind: "reply"})
+	require.NoError(t, err)
+	shown := runCLI(t, env, dir, "--agent", "show", issue.ShortID)
+	require.Contains(t, shown, "author=Ana")
+	require.Contains(t, shown, "author_filter="+strconv.Quote(actor))
+	_, value, found := strings.Cut(shown, "author_filter=")
+	require.True(t, found)
+	value, _, _ = strings.Cut(value, "\n")
+	filter, err := strconv.Unquote(value)
+	require.NoError(t, err)
+	inbound := runCLI(t, env, dir, "--agent", "show", issue.ShortID, "--inbound="+filter)
+	require.Contains(t, inbound, "Answer")
 }
 
 func TestCommentTypedReplyCLI(t *testing.T) {

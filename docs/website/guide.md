@@ -30,15 +30,19 @@ instead of duplicating. Structure goes in as data: `--parent` for hierarchy,
 
 `kata next --unowned` applies shared priority rules and returns at most one
 candidate. `kata claim` takes ownership, and fails if someone got there first.
-Treat the failure as a signal: run `next` again and take different work. A
-claim costs about 20ms end to end, so agents check and re-check constantly.
+Treat the failure as a signal: run `next` again and take different work.
+
+Claim with `--ttl` and renew before expiry by claiming again, without
+`--if-unowned`.
+
+A claim costs about 20ms end to end, so agents check and re-check constantly.
 
 → [The claim flow](https://katatracker.com/docs/workflows/agents/#claim-work)
 
 ## 04 / Write notes the next session can use
 
-Before a long pause, a context compaction, or a handoff, record the decision,
-the partial attempt, and what remains in a comment on the issue, where the
+Comment with findings a later reader needs. Before a long pause, a context
+compaction, or a handoff, put what remains in `work.attention_msg`, where the
 next actor will actually look. Planning state is native: `kata schedule` parks
 until a date, `kata deadline` presses without parking, `someday` shelves an
 idea without losing it.
@@ -66,8 +70,8 @@ issue-scoped credential on a daemon in token identity mode.
 
 Closing is a completion claim, and claims need evidence: real prose plus a
 commit, a test command, or typed evidence a reviewer can check later.
-Incomplete work gets a `needs-review` label and an honest comment instead of a
-close. `kata audit closes` replays close activity; `kata reopen` undoes what
+Incomplete work stays open, with `work.attention` and `work.attention_msg`
+updated and a `needs-review` label, instead of a close. `kata audit closes` replays close activity; `kata reopen` undoes what
 doesn't hold up.
 
 → [Close discipline](https://katatracker.com/docs/guide/concepts/#close-discipline)

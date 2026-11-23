@@ -20,6 +20,10 @@ func TestParseValuePreservesInboxCompatibility(t *testing.T) {
 			assert.Empty(t, value.Teammate)
 		}
 	}
+	value, ok := notification.ParseValue(map[string]any{"from": "sender", "message": "latest: reply c:a by sender", "kind": "reply", "re": "uid"})
+	require.True(t, ok)
+	assert.Equal(t, "reply", value.Kind)
+	assert.Equal(t, "uid", value.Re)
 	for _, value := range []any{nil, "string", map[string]any{"from": "sender", "message": " "}, map[string]any{"from": 42, "message": "work"}} {
 		_, ok := notification.ParseValue(value)
 		assert.False(t, ok)

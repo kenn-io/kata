@@ -1631,14 +1631,14 @@ describe('AppShell', () => {
       onCreateProject: vi.fn(async () => ({ changed: true })),
     }
     const { container, rerender } = render(AppShell, { props })
-    expect(container.querySelectorAll('button.row')).toHaveLength(150)
+    expect(container.querySelectorAll('button.row')).toHaveLength(75)
     await fireEvent.keyDown(container.querySelector('button.row')!, { key: 'End' })
     expect(container.querySelectorAll('button.row')).toHaveLength(400)
     await rerender({
       ...props,
       route: { ...props.route, filters: { ...props.route.filters, label: ['a', 'd'] } },
     })
-    expect(container.querySelectorAll('button.row')).toHaveLength(150)
+    expect(container.querySelectorAll('button.row')).toHaveLength(75)
   })
 
   test('renders the routed source graph and returns to the same selected list context', async () => {

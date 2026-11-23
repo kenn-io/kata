@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/authorname"
 )
 
 func newAuditClosesCmd() *cobra.Command {
@@ -123,7 +124,7 @@ func printAuditClosesTable(cmd *cobra.Command, bs []byte) error {
 			}
 		}
 		if _, err := fmt.Fprintf(w, "%-20s  %-12s  %-6s  %-7s  %-15s  %-15s  %s\n",
-			r.Time, r.Actor, r.Issue, parent, r.Reason,
+			r.Time, authorname.Display(r.Actor), r.Issue, parent, r.Reason,
 			strings.Join(r.EvidenceTypes, ","),
 			flagsCol); err != nil {
 			return err
@@ -146,7 +147,7 @@ func printAuditClosesAgent(cmd *cobra.Command, bs []byte) error {
 	for _, r := range resp.Rows {
 		fields := []agentField{
 			agentRowField("time", r.Time),
-			agentRowField("actor", r.Actor),
+			agentRowField("actor", authorname.Display(r.Actor)),
 			agentRowField("issue", r.Issue),
 		}
 		if r.Parent != "" {
@@ -156,6 +157,7 @@ func printAuditClosesAgent(cmd *cobra.Command, bs []byte) error {
 			agentRowField("reason", r.Reason),
 			agentRowListField("evidence", r.EvidenceTypes),
 			agentRowListField("flags", r.Flags),
+			agentRowField("actor_filter", r.Actor),
 		)
 		if err := writeAgentKVRow(out, fields...); err != nil {
 			return err

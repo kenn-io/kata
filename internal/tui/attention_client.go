@@ -74,6 +74,7 @@ func (c *Client) ListAttentionRequests(ctx context.Context, projectID *int64, re
 			skipped++
 			continue
 		}
+		value = notification.DisplayValue(value)
 		rows = append(rows, attentionRequest{
 			issue: row.Issue, from: value.From, teammate: value.Teammate, message: value.Message,
 			re: value.Re, kind: value.Kind, broadcast: value.Broadcast,

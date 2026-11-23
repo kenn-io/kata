@@ -705,14 +705,17 @@ func TestCronSearchClickGuards(t *testing.T) {
 }
 
 // A run of a deleted job or workflow names it in the detail the way the list
-// does, and still notes that the definition is gone.
-func TestCronRunDetailNamesDeletedDefinitions(t *testing.T) {
+// does, notes that the definition is gone, and displays the actor name.
+func TestCronRunDetailNamesDeletedDefinitionsAndDisplaysActor(t *testing.T) {
 	m := cronFixture(t)
 	p := m.cron.data
 	p.jobs, p.workflows = nil, nil
+	p.runs[0].Actor = "Ana [member:11111111-1111-4111-8111-111111111111; enrollment:11111111-1111-4111-8111-111111111111]"
 	m = sendRune(m, '3')
 	m = sendKey(m, tea.KeyEnter)
 	body := m.viewBody()
+	require.Contains(t, body, "Actor:      Ana")
+	require.NotContains(t, body, "member:")
 	require.Contains(t, body, "Job: Daily summary · no longer defined")
 	require.Contains(t, body, "Workflow: Summary flow · no longer defined")
 	require.NotContains(t, body, "01ARZ3NDEKTSV4RRFFQ69G5FAV")

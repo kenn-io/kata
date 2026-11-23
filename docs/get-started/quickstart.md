@@ -266,8 +266,12 @@ kata create "fix login race" \
 
 kata list
 kata show abc4
-kata comment abc4 --body "Reproduced on macOS."
+kata comment abc4 --body-stdin <<'EOF'
+Reproduced on macOS.
+EOF
 ```
+
+Correct your own comment with `kata comment edit`.
 
 Priorities run from `0` to `4`; `0` is highest. Omitting `--priority` uses
 [`create.default_priority`](../reference/configuration.md#default-priority-for-issue-creation)
@@ -338,14 +342,15 @@ kata ready --unowned
 kata ready --label backend --no-label blocked
 ```
 
-Use `kata claim` in multi-agent work:
+Use `kata claim` with a time limit in multi-agent work:
 
 ```sh
-kata claim abc4
+kata claim abc4 --ttl 2h
 ```
 
 The claim fails if another actor already owns the issue unless `--force` is
-used.
+used. Renew it before it expires by claiming again with `--ttl`, without
+`--if-unowned`.
 
 ## Set actor identity
 
@@ -379,10 +384,12 @@ canonical managed briefing without mutating the workspace; see
 
 ## Close with evidence
 
-Closing asserts completion. If work is incomplete, add context instead:
+Closing asserts completion. An open, unmerged PR is unfinished. If work is incomplete, leave the issue open, update
+`work.attention` and `work.attention_msg` with what remains, and add the
+`needs-review` label:
 
 ```sh
-kata label add abc4 needs-review --comment "Attempted the schema change; migration test still fails."
+kata label add abc4 needs-review
 ```
 
 When work is done, close with a reason, a substantive message, and evidence:

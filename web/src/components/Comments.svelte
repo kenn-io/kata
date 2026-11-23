@@ -3,7 +3,7 @@
   import { tick } from 'svelte'
   /* eslint-disable svelte/prefer-svelte-reactivity -- reference counts are a transient search-result lookup. */
   import { commentEvidenceLength, trimCommentEvidence } from '../lib/kata/commentEvidence'
-  import { CommentRelations, CreationAttribution, creationFor } from '@kenn-io/kata-ui'
+  import { CommentRelations, CreationAttribution, authorName, creationFor } from '@kenn-io/kata-ui'
   import {
     Avatar,
     Button,
@@ -365,6 +365,7 @@
     {:else if sortedComments.length > 0}
       <div class="comment-list" bind:this={listElement}>
         {#each sortedComments as comment (comment.id)}
+          {@const author = authorName(comment.author)}
           <article
             class="comment"
             class:selected={selectedCommentUID !== undefined && selectedCommentUID === comment.uid}
@@ -372,9 +373,15 @@
             tabindex="-1"
           >
             <div class="comment-meta">
-              <Avatar name={comment.author} decorative size={20} />
+              <Avatar
+                name={author}
+                initials={author.slice(0, 1).toUpperCase()}
+                tone="neutral"
+                decorative
+                size={20}
+              />
               <span class="author"
-                >{comment.author === selfActor ? 'You' : comment.author}{comment.teammate
+                >{comment.author === selfActor ? 'You' : author}{comment.teammate
                   ? ` / ${comment.teammate}`
                   : ''}</span
               >

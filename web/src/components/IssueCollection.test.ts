@@ -140,7 +140,7 @@ describe('IssueCollection', () => {
 
     it('renders a prefix of a long list and still reports the full count', () => {
       renderMany(1000, { scopedProjectName: null })
-      expect(visibleRows()).toHaveLength(150)
+      expect(visibleRows()).toHaveLength(75)
       expect(screen.getByText('1000 tasks')).toBeTruthy()
     })
 
@@ -154,18 +154,18 @@ describe('IssueCollection', () => {
           onSelect: vi.fn(),
         }
         const { rerender } = render(IssueCollection, { props })
-        const last = visibleRows()[149]!
+        const last = visibleRows()[74]!
         last.focus()
         await fireEvent.keyDown(last, { key })
-        await waitFor(() => expect(visibleRows()).toHaveLength(300))
-        await waitFor(() => expect(document.activeElement).toBe(visibleRows()[150]))
+        await waitFor(() => expect(visibleRows()).toHaveLength(150))
+        await waitFor(() => expect(document.activeElement).toBe(visibleRows()[75]))
 
         await rerender({ ...props, resultsKey: 'pinned', selectedIssueUID: 'bulk-00160' })
         expect(visibleRows()).toHaveLength(161)
         const pinned = visibleRows()[160]!
         pinned.focus()
         await fireEvent.keyDown(pinned, { key })
-        await waitFor(() => expect(visibleRows()).toHaveLength(311))
+        await waitFor(() => expect(visibleRows()).toHaveLength(236))
         await waitFor(() =>
           expect((document.activeElement as HTMLElement).dataset.uid).toBe('bulk-00161'),
         )
@@ -173,13 +173,14 @@ describe('IssueCollection', () => {
     )
 
     it('renders every row when End is pressed and focuses the last one', async () => {
-      const { container } = renderMany(1000)
+      // One row beyond two 150-row chunks distinguishes End from loading just the next chunk.
+      const { container } = renderMany(301)
       const first = container.querySelector<HTMLElement>('button.row')!
       first.focus()
       await fireEvent.keyDown(first, { key: 'End' })
-      await waitFor(() => expect(visibleRows()).toHaveLength(1000))
+      await waitFor(() => expect(visibleRows()).toHaveLength(301))
       await waitFor(() =>
-        expect((document.activeElement as HTMLElement | null)?.dataset.uid).toBe('bulk-00999'),
+        expect((document.activeElement as HTMLElement | null)?.dataset.uid).toBe('bulk-00300'),
       )
     })
 
@@ -194,23 +195,23 @@ describe('IssueCollection', () => {
           currentView: {
             ...viewWithIssues(issues),
             groups: [
-              { id: 'first', title: 'First group', issues: issues.slice(0, 200) },
-              { id: 'second', title: 'Second group', issues: issues.slice(200) },
+              { id: 'first', title: 'First group', issues: issues.slice(0, 100) },
+              { id: 'second', title: 'Second group', issues: issues.slice(100) },
             ],
           },
           onSelect: vi.fn(),
         },
       })
-      expect(visibleRows()).toHaveLength(150)
-      expect(container.querySelector('.group-count')?.textContent).toBe('200')
+      expect(visibleRows()).toHaveLength(75)
+      expect(container.querySelector('.group-count')?.textContent).toBe('100')
       expect(screen.queryByText('Second group')).toBeNull()
-      await fireEvent.keyDown(visibleRows()[149]!, { key: 'ArrowDown' })
-      expect(visibleRows()).toHaveLength(300)
+      await fireEvent.keyDown(visibleRows()[74]!, { key: 'ArrowDown' })
+      expect(visibleRows()).toHaveLength(150)
       expect(screen.getByText('Second group')).toBeTruthy()
       expect(
         Array.from(container.querySelectorAll('.group-count'), (node) => node.textContent),
-      ).toEqual(['200', '800'])
-      expect(visibleRows()[299]?.dataset.uid).toBe('bulk-00299')
+      ).toEqual(['100', '900'])
+      expect(visibleRows()[149]?.dataset.uid).toBe('bulk-00149')
     })
 
     it('grows once when the sentinel intersects and re-arms the observer', async () => {
@@ -239,7 +240,7 @@ describe('IssueCollection', () => {
       )
       try {
         renderMany(1000)
-        await waitFor(() => expect(visibleRows()).toHaveLength(300))
+        await waitFor(() => expect(visibleRows()).toHaveLength(150))
         expect(observations).toBe(2)
         expect(disconnect).toHaveBeenCalled()
       } finally {
@@ -247,8 +248,11 @@ describe('IssueCollection', () => {
       }
     })
 
-    it('keeps growth on selection and resets changed results in the first render', async () => {
-      const issues = manyTasks(400)
+    it('keeps growth on selection', async () => {
+      // Row limits and focus do not depend on optional metadata columns.
+      window.localStorage.setItem(KATA_TASK_COLUMNS_STORAGE_KEY, JSON.stringify([]))
+      // Keep one extra row beyond the selection so its position alone cannot preserve the count.
+      const issues = manyTasks(77)
       const props = {
         currentView: viewWithIssues(issues),
         issueCatalog: issues,
@@ -257,13 +261,29 @@ describe('IssueCollection', () => {
         resultsKey: 'all',
       }
       const { container, rerender } = render(IssueCollection, { props })
-      await fireEvent.keyDown(container.querySelectorAll('button.row')[149]!, { key: 'ArrowDown' })
-      await waitFor(() => expect(visibleRows()).toHaveLength(300))
-      await rerender({ ...props, navigationGeneration: 1, selectedIssueUID: 'bulk-00150' })
-      expect(visibleRows()).toHaveLength(300)
+      await fireEvent.keyDown(container.querySelectorAll('button.row')[74]!, { key: 'ArrowDown' })
+      await waitFor(() => expect(visibleRows()).toHaveLength(77))
+      await rerender({ ...props, navigationGeneration: 1, selectedIssueUID: 'bulk-00075' })
+      expect(visibleRows()).toHaveLength(77)
       expect(container.querySelector('button.row.selected')?.getAttribute('data-uid')).toBe(
-        'bulk-00150',
+        'bulk-00075',
       )
+    })
+
+    it('resets changed results in the first render', async () => {
+      // Row limits do not depend on optional metadata columns.
+      window.localStorage.setItem(KATA_TASK_COLUMNS_STORAGE_KEY, JSON.stringify([]))
+      // One row beyond the reset's 75-row cap detects a transient over-render.
+      const issues = manyTasks(276)
+      const props = {
+        currentView: viewWithIssues(issues),
+        issueCatalog: issues,
+        onSelect: vi.fn(),
+        resultsKey: 'all',
+      }
+      const { container, rerender } = render(IssueCollection, { props })
+      await fireEvent.keyDown(visibleRows()[74]!, { key: 'ArrowDown' })
+      expect(visibleRows()).toHaveLength(150)
 
       const addedRows: string[] = []
       const observer = new MutationObserver((records) => {
@@ -284,29 +304,40 @@ describe('IssueCollection', () => {
           resultsKey: 'search',
           currentView: viewWithIssues(issues.slice(200)),
         })
-        expect(visibleRows()).toHaveLength(150)
-        expect(visibleRows()[149]?.dataset.uid).toBe('bulk-00349')
-        expect(addedRows).toContain('bulk-00349')
-        expect(addedRows.every((uid) => Number(uid.slice(5)) < 350)).toBe(true)
+        expect(visibleRows()).toHaveLength(75)
+        expect(visibleRows()[74]?.dataset.uid).toBe('bulk-00274')
+        expect(addedRows).toContain('bulk-00274')
+        expect(addedRows.every((uid) => Number(uid.slice(5)) < 275)).toBe(true)
       } finally {
         observer.disconnect()
       }
 
       await fireEvent.keyDown(visibleRows()[0]!, { key: 'End' })
-      expect(visibleRows()).toHaveLength(200)
-      expect(document.activeElement).toBe(visibleRows()[199])
-      expect((document.activeElement as HTMLElement).dataset.uid).toBe('bulk-00399')
+      expect(visibleRows()).toHaveLength(76)
+      expect(document.activeElement).toBe(visibleRows()[75])
+      expect((document.activeElement as HTMLElement).dataset.uid).toBe('bulk-00275')
+    })
 
-      await rerender({
-        ...props,
-        currentView: viewWithIssues(issues.slice(200)),
-        resultsKey: 'same-results-new-key',
-      })
-      expect(visibleRows()).toHaveLength(150)
+    it('resets growth when the results key changes with the same tasks', async () => {
+      const issues = manyTasks(76)
+      const props = {
+        currentView: viewWithIssues(issues),
+        issueCatalog: issues,
+        onSelect: vi.fn(),
+        resultsKey: 'all',
+      }
+      const { rerender } = render(IssueCollection, { props })
+      await fireEvent.keyDown(visibleRows()[0]!, { key: 'End' })
+      expect(visibleRows()).toHaveLength(76)
+      expect(document.activeElement).toBe(visibleRows()[75])
+      expect((document.activeElement as HTMLElement).dataset.uid).toBe('bulk-00075')
+
+      await rerender({ ...props, resultsKey: 'same-results-new-key' })
+      expect(visibleRows()).toHaveLength(75)
     })
 
     it.each([
-      { target: 'row', index: 80, leadingCount: 80 },
+      { target: 'row', index: 40, leadingCount: 80 },
       { target: 'graph button', index: 5, leadingCount: 160 },
     ])(
       'retains $target focus when a refresh adds $leadingCount earlier roots',
@@ -344,9 +375,9 @@ describe('IssueCollection', () => {
 
         expect(document.activeElement).toBe(focused)
         if (target === 'row') {
-          expect(container.querySelector('button.row[data-uid="bulk-00080"]')).toBe(focused)
+          expect(container.querySelector('button.row[data-uid="bulk-00040"]')).toBe(focused)
           await fireEvent.keyDown(focused, { key: 'ArrowDown' })
-          expect((document.activeElement as HTMLElement).dataset.uid).toBe('bulk-00081')
+          expect((document.activeElement as HTMLElement).dataset.uid).toBe('bulk-00041')
         }
       },
     )
@@ -373,7 +404,7 @@ describe('IssueCollection', () => {
           onSelect: vi.fn(),
         },
       })
-      const focused = visibleRows()[80]!
+      const focused = visibleRows()[40]!
       focused.focus()
       expect(document.activeElement).toBe(focused)
       const leading = manyTasks(80).map((issue, index) => ({
@@ -385,10 +416,10 @@ describe('IssueCollection', () => {
       snapshots.set([...leading, ...issues])
       await tick()
 
-      expect(container.querySelector('button.row[data-uid="bulk-00080"]')).toBe(focused)
+      expect(container.querySelector('button.row[data-uid="bulk-00040"]')).toBe(focused)
       expect(document.activeElement).toBe(focused)
       await fireEvent.keyDown(focused, { key: 'ArrowDown' })
-      expect((document.activeElement as HTMLElement).dataset.uid).toBe('bulk-00081')
+      expect((document.activeElement as HTMLElement).dataset.uid).toBe('bulk-00041')
     })
 
     it('keeps a selected child and its scroll anchor when its root moves past the cap', async () => {
@@ -1429,7 +1460,7 @@ describe('IssueCollection', () => {
     },
   )
 
-  it('bounds identity reads as Logbook date groups increase', () => {
+  it('bounds identity reads as Logbook date groups increase', async () => {
     const issueCount = 128
     const readsByGroupCount: number[] = []
 
@@ -1468,6 +1499,7 @@ describe('IssueCollection', () => {
         },
       })
 
+      await fireEvent.keyDown(visibleRows()[0]!, { key: 'End' })
       expect(visibleRows()).toHaveLength(issueCount)
       readsByGroupCount.push(identityReads)
       unmount()

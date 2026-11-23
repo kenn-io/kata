@@ -515,3 +515,54 @@ it('keeps unresolved outgoing states and exposes an explicit return route', asyn
     ).toBe(true)
   }
 })
+
+it('shows federated authors by name in comments, replies, evidence, and creation source', async () => {
+  const id = '11111111-1111-4111-8111-111111111111'
+  const suffix = ` [member:${id}; enrollment:${id}]`
+  const wire = {
+    issue: {
+      uid: '01TASK',
+      title: 'Example issue',
+      status: 'open',
+      author: `Ana${suffix}`,
+      source_actor: `Ana${suffix}`,
+      verification: 'verified',
+      accountable_actor: `Ana${suffix}`,
+    },
+    comments: [
+      {
+        id: 1,
+        uid: 'original',
+        handle: 'c:aaaaaa',
+        author: `Bo${suffix}`,
+        teammate: 'worker',
+        source_actor: `Bo${suffix}`,
+        verification: 'pending',
+        body: 'Example comment',
+        created_at: '2026-08-01T12:00:00Z',
+        reply: { uid: 'target', issue_uid: 'other', kind: 'reply', handle: 'bbbb:111111', author: `Cy${suffix}` },
+        backlinks: [
+          {
+            uid: 'confirm',
+            issue_uid: 'other',
+            kind: 'confirm',
+            handle: 'bbbb:222222',
+            author: `Dee${suffix}`,
+            body: 'Reproduced',
+            created_at: '2026-08-01T12:01:00Z',
+          },
+        ],
+      },
+    ],
+  }
+  render(IssueDetail, { props: { detail: projectIssueDetail(wire) } })
+  expect(screen.getByText('Accountable: Ana')).toBeTruthy()
+  expect(screen.getByText('Source: Ana')).toBeTruthy()
+  expect(screen.getByText('Source: Bo / worker')).toBeTruthy()
+  expect(screen.getByText('Bo / worker')).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Replies to bbbb:111111 (Cy)' })).toBeTruthy()
+  await fireEvent.click(screen.getByRole('button', { name: 'Show 1 confirmation reply' }))
+  const evidence = screen.getByRole('region', { name: 'Confirmation replies' })
+  expect(within(evidence).getByText('Dee')).toBeTruthy()
+  expect(document.body.textContent).not.toContain('member:')
+})

@@ -1427,6 +1427,82 @@ func checkTimedAssignmentOwnerMutations(t *testing.T, store db.Storage) error {
 	return nil
 }
 
+func checkExpiredAssignmentAttentionHandoff(t *testing.T, store db.Storage) error {
+	t.Helper()
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "expiry-handoff-project")
+	require.NoError(t, err)
+	base := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
+	// claimed creates an issue at attention and claims it for worker until base+1m.
+	claimed := func(t *testing.T, title, attention string) (db.Issue, db.ClaimResult) {
+		t.Helper()
+		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: title, Author: "worker"})
+		require.NoError(t, err)
+		_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "worker", Patch: map[string]jsontext.Value{"work.attention": jsontext.Value(attention)}})
+		require.NoError(t, err)
+		claim, err := store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: "worker", TTL: time.Minute, Now: base})
+		require.NoError(t, err)
+		return issue, claim
+	}
+	t.Run("replacement before expiry", func(t *testing.T) {
+		issue, _ := claimed(t, "replacement before expiry", `"ok"`)
+		claim, err := store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: "next-worker", TTL: time.Hour, Force: true, Now: base.Add(30 * time.Second)})
+		require.NoError(t, err)
+		events, err := store.ExpireAssignments(ctx, db.ExpireAssignmentsParams{ProjectID: project.ID, Now: base.Add(2 * time.Minute)})
+		require.NoError(t, err)
+		assert.Empty(t, events)
+		stored, err := store.IssueByID(ctx, issue.ID)
+		require.NoError(t, err)
+		assert.Equal(t, claim.Issue.Owner, stored.Owner)
+		assert.JSONEq(t, `"ok"`, string(db.PayloadMap(jsontext.Value(stored.Metadata))["work.attention"]))
+	})
+	for _, tc := range []struct {
+		name, attention string
+		flip            bool
+	}{
+		{"ok", `"ok"`, true},
+		{"stuck", `"stuck"`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			issue, claim := claimed(t, tc.name, tc.attention)
+			events, err := store.ExpireAssignments(ctx, db.ExpireAssignmentsParams{ProjectID: project.ID, Now: base.Add(2 * time.Minute)})
+			require.NoError(t, err)
+			if tc.flip {
+				require.Len(t, events, 2)
+				assert.Equal(t, "issue.metadata_updated", events[1].Type)
+				assert.Equal(t, "system", events[1].Actor)
+			} else {
+				require.Len(t, events, 1)
+			}
+			assert.Equal(t, "issue.assignment_expired", events[0].Type)
+			stored, err := store.IssueByID(ctx, issue.ID)
+			require.NoError(t, err)
+			meta := db.PayloadMap(jsontext.Value(stored.Metadata))
+			if tc.flip {
+				assert.JSONEq(t, `"needs-human"`, string(meta["work.attention"]))
+				assert.JSONEq(t, `"claim expired without hand-off"`, string(meta["work.attention_msg"]))
+				assert.Equal(t, claim.Issue.Revision+2, stored.Revision)
+				replacement, err := store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: "next-worker", TTL: time.Minute, Now: base.Add(2 * time.Minute)})
+				require.NoError(t, err)
+				meta = db.PayloadMap(jsontext.Value(replacement.Issue.Metadata))
+				assert.JSONEq(t, `"needs-human"`, string(meta["work.attention"]))
+				assert.JSONEq(t, `"claim expired without hand-off"`, string(meta["work.attention_msg"]))
+			} else {
+				assert.JSONEq(t, tc.attention, string(meta["work.attention"]))
+			}
+		})
+	}
+	issue, _ := claimed(t, "reclaimed", `"ok"`)
+	reclaimed, err := store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: "next-worker", TTL: time.Minute, Now: base.Add(2 * time.Minute)})
+	require.NoError(t, err)
+	assert.Equal(t, new("next-worker"), reclaimed.Issue.Owner)
+	assert.JSONEq(t, `"ok"`, string(db.PayloadMap(jsontext.Value(reclaimed.Issue.Metadata))["work.attention"]))
+	for _, event := range reclaimed.Events {
+		assert.NotEqual(t, "issue.metadata_updated", event.Type)
+	}
+	return nil
+}
+
 func checkBoundedAssignmentExpiry(t *testing.T, store db.Storage) error {
 	t.Helper()
 	ctx := t.Context()
