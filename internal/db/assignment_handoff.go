@@ -2,7 +2,8 @@ package db
 
 import "encoding/json/jsontext"
 
-const expiredAssignmentMessage = "claim expired without hand-off"
+// ExpiredAssignmentMessage is the attention message set when a claim expires.
+const ExpiredAssignmentMessage = "claim expired without hand-off"
 
 // ExpiredAssignmentHandoffPatch marks abandoned work for human attention.
 func ExpiredAssignmentHandoffPatch(status string, metadata JSONBlob) (map[string]jsontext.Value, bool) {
@@ -12,6 +13,6 @@ func ExpiredAssignmentHandoffPatch(status string, metadata JSONBlob) (map[string
 	}
 	return map[string]jsontext.Value{
 		"work.attention":     jsontext.Value(`"needs-human"`),
-		"work.attention_msg": jsontext.Value(`"` + expiredAssignmentMessage + `"`),
+		"work.attention_msg": jsontext.Value(`"` + ExpiredAssignmentMessage + `"`),
 	}, true
 }

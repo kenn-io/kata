@@ -348,7 +348,9 @@ func attnStartSession(d attnDaemon, kataRef, owner string) error {
 		if lookup.session == owner {
 			return nil
 		}
-		switch d.setMetaIfRevision(ref, map[string]string{attentionKey: attnValueOK, attentionSessionKey: owner}, lookup.revision) {
+		patch := attnStartPatch(lookup)
+		patch[attentionSessionKey] = owner
+		switch d.setMetaIfRevision(ref, patch, lookup.revision) {
 		case attnWriteApplied:
 			return nil
 		case attnWriteFailed:
@@ -380,7 +382,7 @@ func attnEndSession(d attnDaemon, kataRef, owner string) error {
 		if lookup.session != owner {
 			return nil
 		}
-		patch := map[string]string{attentionSessionKey: "ended:" + owner}
+		patch := map[string]any{attentionSessionKey: "ended:" + owner}
 		if lookup.attention == attnValueOK {
 			patch[attentionKey] = attnValueNeedsHuman
 			patch[attentionMsgKey] = attnHandoffMsg
