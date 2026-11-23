@@ -83,10 +83,6 @@ func TestClaim_EnrollmentBearerResponseOmitsPrivateIssueContent(t *testing.T) {
 	hub := testenv.New(t)
 	hubProject := createPrivateContentHubProject(t, hub, "github.com/test/private-hub")
 	issue := createPrivateEnrollmentIssue(t, hub, hubProject.ID)
-	_, err := hub.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "system", Patch: map[string]jsontext.Value{
-		"work.attention": jsontext.Value(`"needs-human"`), "work.attention_msg": jsontext.Value(`"claim expired without hand-off"`),
-	}})
-	require.NoError(t, err)
 	spokeUID, err := katauid.New()
 	require.NoError(t, err)
 	enrollment := createClaimEnrollment(t, hub, hubProject.ID, spokeUID, "claim")

@@ -2375,16 +2375,6 @@ func (d *Store) claimOwner(ctx context.Context, p db.ClaimOwnerParams) (db.Claim
 	if issue.Owner != nil && *issue.Owner != p.Actor && !p.Force {
 		return db.ClaimResult{Issue: issue, CurrentOwner: issue.Owner}, db.ErrAlreadyAssigned
 	}
-	if issue.Owner == nil {
-		if patch, ok := db.ReclaimedAssignmentHandoffPatch(issue.Status, issue.Metadata); ok {
-			updated, err := d.patchIssueMetadataTx(ctx, tx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: p.Actor, Patch: patch})
-			if err != nil {
-				return db.ClaimResult{}, err
-			}
-			events = append(events, updated.Event)
-		}
-	}
-
 	eventType := "issue.assigned"
 	payload := map[string]any{"owner": p.Actor, "updated_at": nowText}
 	if newExpiry != nil {
