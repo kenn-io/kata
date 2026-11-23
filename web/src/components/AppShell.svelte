@@ -289,11 +289,11 @@
       (!activeDaemonID || activeConnection?.local === true),
   )
   let credentialAuditAvailable = $derived(snapshot.capabilities.token_audit_read === true)
-  // Settings opens on Search by meaning. A section this session can't use
+  // Settings opens on Appearance. A section this session can't use
   // shows Appearance instead, without reading anything it isn't allowed to.
   let settingsSection = $derived.by<SettingsSectionID>(() => {
     if (route.view === 'credentials') return credentialAuditAvailable ? 'credentials' : 'appearance'
-    const section = route.section ?? 'search'
+    const section = route.section ?? 'appearance'
     return section === 'access' && !accessAdministrationAvailable ? 'appearance' : section
   })
   let inboxProject = $derived(

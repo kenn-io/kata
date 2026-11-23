@@ -65,23 +65,13 @@ describe('CredentialAudit', () => {
 
     expect(rows[1]!.textContent).toContain('Expired')
     expect(rows[1]!.textContent).not.toContain('Last used')
+    expect(rows[1]!.textContent).toContain('Never used')
     expect(rows[2]!.textContent).toContain('Revoked')
     expect(screen.getByText('<script>alert(1)</script>')).not.toBeNull()
-    expect(screen.queryByText(/^ID /)).toBeNull()
+    expect(scoped).toContain('ID 7')
+    expect(rows[1]!.textContent).toContain('ID 8')
     expect(screen.queryByRole('group', { name: 'Credential filters' })).toBeNull()
     expect(screen.queryByRole('button', { name: /revoke/i })).toBeNull()
-  })
-
-  it('shows the ID only when two credentials share a name and owner', () => {
-    render(CredentialAudit, {
-      props: auditProps({
-        tokens: [...tokens, { ...tokens[0]!, id: 12, scope: undefined }],
-      }),
-    })
-
-    expect(screen.getByText('ID 7')).not.toBeNull()
-    expect(screen.getByText('ID 12')).not.toBeNull()
-    expect(screen.queryByText('ID 8')).toBeNull()
   })
 
   it('offers filters past eight credentials and says when none match', async () => {

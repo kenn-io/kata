@@ -57,16 +57,6 @@
       )
     })
   })
-  // The ID tells apart only credentials that would otherwise read the same.
-  let sharedKeys = $derived.by(() => {
-    const keys = tokens.map(identity)
-    return keys.filter((key, index) => keys.indexOf(key) !== index)
-  })
-
-  function identity(token: TokenOut): string {
-    return `${token.name ?? ''}\u0000${token.actor}`
-  }
-
   function ago(value: string): string {
     const label = relativeTime(value)
     if (label === 'now') return 'just now'
@@ -153,9 +143,7 @@
               {#if token.state !== 'live'}
                 <span class="state-badge">{token.state === 'expired' ? 'Expired' : 'Revoked'}</span>
               {/if}
-              {#if sharedKeys.includes(identity(token))}
-                <span class="credential-id">ID {token.id}</span>
-              {/if}
+              <span class="credential-id">ID {token.id}</span>
             </div>
             <div class="credential-meta">
               <span
@@ -169,6 +157,8 @@
                     >{ago(token.last_used_at)}</time
                   ></span
                 >
+              {:else}
+                <span>Never used</span>
               {/if}
               {#if token.expires_at && !token.revoked_at}
                 <span

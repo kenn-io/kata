@@ -54,7 +54,7 @@ test('Settings keeps status colors, spacing, and title alignment consistent', as
     { provider: 'built_in', download_bytes: 0, can_change: false },
   ]) {
     current = { ...off, ...patch }
-    await page.goto(`${kata.origin}/kata?view=settings`)
+    await page.goto(`${kata.origin}/kata?view=settings&section=search`)
     const title = page.getByRole('heading', { name: 'Search by meaning' })
     await expect(title).toBeVisible()
     if (!patch.indexing || (patch.indexing.total > 0 && !patch.indexing.failed)) {
