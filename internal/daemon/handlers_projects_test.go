@@ -370,9 +370,10 @@ func TestResolve_NotInitializedHint(t *testing.T) {
 					}
 				}
 				hint := fmt.Sprintf(`run "kata init": it attaches this workspace to the active project %q, or creates it if none exists`, name)
-				if shape == "name" {
+				switch shape {
+				case "name":
 					hint = fmt.Sprintf(`run kata projects create -- %s`, name)
-				} else if shape == "alias with name" {
+				case "alias with name":
 					hint = fmt.Sprintf(`run "kata init" with --project set to %q: it attaches this workspace to the active project %q, or creates it if none exists`, name, name)
 				}
 				if state != "missing" {
@@ -382,9 +383,10 @@ func TestResolve_NotInitializedHint(t *testing.T) {
 						_, _, err = h.db.RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: project.ID, Actor: "tester"})
 						require.NoError(t, err)
 						hint = fmt.Sprintf(`run "kata projects restore %d", then run "kata init" in this workspace`, project.ID)
-						if shape == "name" {
+						switch shape {
+						case "name":
 							hint = fmt.Sprintf(`run "kata projects restore %d"`, project.ID)
-						} else if shape == "alias with name" {
+						case "alias with name":
 							hint = fmt.Sprintf(`run "kata projects restore %d", then run "kata init" with --project set to %q in this workspace`, project.ID, name)
 						}
 					}
