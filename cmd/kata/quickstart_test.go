@@ -341,7 +341,7 @@ func TestGuidesSayCommentsCarryFindings(t *testing.T) {
 		}
 	}
 	for _, path := range []string{"docs/get-started/quickstart.md", "docs/workflows/agents.md", "docs/operations/agent-orchestration.md"} {
-		raw, err := os.ReadFile(filepath.Join("..", "..", path))
+		raw, err := os.ReadFile(filepath.Join("..", "..", path)) //nolint:gosec // G304: paths are fixed documentation files.
 		require.NoError(t, err)
 		assertClaimsCarryTTL(t, path, string(raw))
 	}
