@@ -705,6 +705,13 @@ func startFederationPull(ctx context.Context, store db.Storage, projectID int64)
 	if err := store.RecordFederationSyncPullStarted(ctx, projectID, startedAt); err != nil {
 		return false, time.Time{}, err
 	}
+	current, err := store.FederationSyncStatusByProject(ctx, projectID)
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	if current.LastPullStartedAt != nil {
+		startedAt = *current.LastPullStartedAt
+	}
 	return resumePull, startedAt, nil
 }
 
