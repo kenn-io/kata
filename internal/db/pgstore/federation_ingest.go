@@ -265,7 +265,7 @@ func (s *Store) IngestFederationEvents(
 			if repeated != nil {
 				// A newer copy becomes ordinary hub events, written after the
 				// batch's own events below.
-				current, err := federationIssueSnapshotPayload(ctx, tx, *repeated, false)
+				current, err := federationIssueSnapshotPayload(ctx, tx, *repeated)
 				if err != nil {
 					return err
 				}

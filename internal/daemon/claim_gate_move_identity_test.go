@@ -135,7 +135,6 @@ func TestRetainedIssueMoveChecksHubBeforeSnapshot(t *testing.T) {
 		name             string
 		status           int
 		existingSnapshot bool
-		retiredSnapshot  bool
 		noBoundary       bool
 		wantStatus       int
 		wantSnapshots    int
@@ -143,7 +142,6 @@ func TestRetainedIssueMoveChecksHubBeforeSnapshot(t *testing.T) {
 	}{
 		{name: "hub missing", status: http.StatusNotFound, wantStatus: http.StatusOK, wantSnapshots: 1, wantAuthor: "new-actor"},
 		{name: "hub known", status: http.StatusOK, wantStatus: http.StatusOK, wantAuthor: "old-actor"},
-		{name: "retired snapshot", status: http.StatusOK, retiredSnapshot: true, wantStatus: http.StatusOK, wantAuthor: "old-actor"},
 		{name: "offline", status: http.StatusServiceUnavailable, wantStatus: http.StatusServiceUnavailable},
 		{name: "offline with snapshot", status: http.StatusServiceUnavailable, existingSnapshot: true, wantStatus: http.StatusOK, wantSnapshots: 1, wantAuthor: "new-actor"},
 		{name: "offline without retained history", status: http.StatusServiceUnavailable, noBoundary: true, wantStatus: http.StatusOK, wantAuthor: "old-actor"},
@@ -175,12 +173,9 @@ func TestRetainedIssueMoveChecksHubBeforeSnapshot(t *testing.T) {
 				require.NoError(t, err)
 				require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: project.ID, Token: "claim-token", Actor: "new-actor", Capabilities: "claim,push"}))
 			}
-			if tc.existingSnapshot || tc.retiredSnapshot {
-				snapshot, _, err := env.DB.RetainedIssueSnapshot(ctx, source.ID, issue.UID)
+			if tc.existingSnapshot {
+				_, _, err := env.DB.RetainedIssueSnapshot(ctx, source.ID, issue.UID)
 				require.NoError(t, err)
-				if tc.retiredSnapshot {
-					require.NoError(t, env.DB.AcknowledgeFederationPush(ctx, source.ID, snapshot.ID, []string{snapshot.UID}))
-				}
 			}
 			resp, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(source.ID, issue.UID, "actions/move"), map[string]any{"actor": "new-actor", "to_project_uid": target.UID}, map[string]string{"If-Match": fmt.Sprintf(`"rev-%d"`, issue.Revision)})
 			require.Equal(t, tc.wantStatus, resp.StatusCode, string(raw))

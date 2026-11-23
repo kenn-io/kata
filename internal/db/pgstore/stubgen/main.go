@@ -334,7 +334,6 @@ var alreadyImplemented = map[string]bool{
 	"PatchRecurrence":                      true, // recurrences.go
 	"PendingFederationPushEvents":          true, // federation_events.go
 	"PendingFederationPushStats":           true, // federation_events.go
-	"RetainedCommentEvent":                 true, // federation_retained_snapshot.go
 	"ProjectByID":                          true, // projects.go
 	"ProjectByName":                        true, // projects.go
 	"ProjectByNameIncludingArchived":       true, // projects.go

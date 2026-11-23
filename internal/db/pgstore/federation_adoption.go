@@ -183,7 +183,7 @@ push_cursor_event_id,bound_actor,allow_insecure,enabled
 		}
 
 		for _, issue := range issues {
-			payload, err := federationIssueSnapshotPayload(ctx, tx, issue, false)
+			payload, err := federationIssueSnapshotPayload(ctx, tx, issue)
 			if err != nil {
 				return err
 			}
