@@ -1153,8 +1153,7 @@ kata close <ref> --done --message <text> \
   [--dry]
 ```
 
-`kata close` removes the issue's `needs-review` label and records that in its
-history; reopening does not restore it.
+`kata close` removes the issue's `needs-review` label; reopening does not restore it.
 
 You can repeat `--commit`, `--pr`, `--test`, `--reviewed`, or `--evidence` to
 record more than one item, for example when a fix landed in two pull requests.

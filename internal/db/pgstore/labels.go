@@ -58,11 +58,15 @@ func (s *Store) AddLabelAndEvent(
 			return mapSQLError(err, labelConstraintErrors)
 		}
 		updatedAt := nowStoredTimestamp()
-		payload, err := json.Marshal(map[string]string{
-			"issue_uid":  issue.UID,
-			"label":      params.Label,
-			"updated_at": updatedAt,
-		})
+		payloadFields := map[string]any{"issue_uid": issue.UID, "label": params.Label, "updated_at": updatedAt}
+		if params.Label == "needs-review" {
+			context, err := db.NeedsReviewContextTx(ctx, tx, issue.UID, "$1")
+			if err != nil {
+				return err
+			}
+			payloadFields["after_close_uids"] = context.Closes
+		}
+		payload, err := json.Marshal(payloadFields)
 		if err != nil {
 			return fmt.Errorf("marshal label payload: %w", err)
 		}
@@ -113,46 +117,37 @@ func (s *Store) RemoveLabelAndEvent(
 		if err != nil {
 			return err
 		}
-		updatedAt := nowStoredTimestamp()
-		event, err = s.detachLabelTx(ctx, tx, issue, project, params.EventType, params.Label, params.Actor, updatedAt, false)
+		result, err := tx.ExecContext(ctx,
+			`DELETE FROM issue_labels WHERE issue_id = $1 AND label = $2`, issue.ID, params.Label)
+		if err != nil {
+			return mapSQLError(err, nil)
+		}
+		count, err := result.RowsAffected()
 		if err != nil {
 			return err
 		}
-
+		if count == 0 {
+			return db.ErrNotFound
+		}
+		updatedAt := nowStoredTimestamp()
+		payload, err := json.Marshal(map[string]string{
+			"issue_uid":  issue.UID,
+			"label":      params.Label,
+			"updated_at": updatedAt,
+		})
+		if err != nil {
+			return fmt.Errorf("marshal label payload: %w", err)
+		}
+		event, err = s.insertEventTx(ctx, tx,
+			issueEventInput(issue, project, params.EventType, params.Actor, string(payload)))
+		if err != nil {
+			return err
+		}
 		_, err = tx.ExecContext(ctx,
 			`UPDATE issues SET updated_at = $1 WHERE id = $2`, updatedAt, issue.ID)
 		return mapSQLError(err, nil)
 	})
 	return event, err
-}
-
-func (s *Store) detachLabelTx(ctx context.Context, tx *sql.Tx, issue db.Issue, project db.Project, eventType, label, actor, updatedAt string, allowAbsent bool) (db.Event, error) {
-	result, err := tx.ExecContext(ctx,
-		`DELETE FROM issue_labels WHERE issue_id = $1 AND label = $2`, issue.ID, label)
-	if err != nil {
-		return db.Event{}, mapSQLError(err, nil)
-	}
-	count, err := result.RowsAffected()
-	if err != nil {
-		return db.Event{}, err
-	}
-	if count == 0 && !allowAbsent {
-		return db.Event{}, db.ErrNotFound
-	}
-	payload, err := json.Marshal(map[string]string{
-		"issue_uid":  issue.UID,
-		"label":      label,
-		"updated_at": updatedAt,
-	})
-	if err != nil {
-		return db.Event{}, fmt.Errorf("marshal label payload: %w", err)
-	}
-	event, err := s.insertEventTx(ctx, tx,
-		issueEventInput(issue, project, eventType, actor, string(payload)))
-	if err != nil {
-		return db.Event{}, err
-	}
-	return event, nil
 }
 
 // HasLabel reports whether one label is attached.

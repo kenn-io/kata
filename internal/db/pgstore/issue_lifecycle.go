@@ -333,7 +333,6 @@ func (s *Store) CloseIssue(
 }
 
 // CloseIssueWithEvents returns the ordered event envelope for a close.
-// The final event removes needs-review.
 func (s *Store) CloseIssueWithEvents(
 	ctx context.Context,
 	issueID int64,
@@ -474,12 +473,9 @@ func (s *Store) closeIssueWithEvents(
 			}
 			events = append(events, generated...)
 		}
-		// Record the removal even if this replica has not received the label yet.
-		unlabeled, err := s.detachLabelTx(ctx, tx, current, project, "issue.unlabeled", "needs-review", p.Actor, closedAt, true)
-		if err != nil {
-			return err
+		if _, err := tx.ExecContext(ctx, `DELETE FROM issue_labels WHERE issue_id = $1 AND label = 'needs-review'`, current.ID); err != nil {
+			return mapSQLError(err, nil)
 		}
-		events = append(events, unlabeled)
 
 		issue, err = scanIssue(ctx, tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = $1`, current.ID))
 		return err

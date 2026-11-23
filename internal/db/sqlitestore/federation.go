@@ -1714,6 +1714,14 @@ func federationIssuesForSnapshot(ctx context.Context, tx *sql.Tx, projectID int6
 }
 
 func (d *Store) federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, issue db.Issue) (string, error) {
+	context, err := db.NeedsReviewContextTx(ctx, tx, issue.UID, "?")
+	if err != nil {
+		return "", err
+	}
+	var closeContext *db.NeedsReviewContext
+	if len(context.Closes) > 0 || len(context.Seen) > 0 {
+		closeContext = &context
+	}
 	labels, err := federationIssueLabels(ctx, tx, issue.ID)
 	if err != nil {
 		return "", err
@@ -1748,6 +1756,7 @@ func (d *Store) federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, 
 		ClosedAt:            formatOptionalSQLiteTime(issue.ClosedAt),
 		DeletedAt:           formatOptionalSQLiteTime(issue.DeletedAt),
 		Metadata:            jsontext.Value(issue.Metadata),
+		NeedsReviewContext:  closeContext,
 		Labels:              labels,
 		Links:               links,
 		Comments:            comments,

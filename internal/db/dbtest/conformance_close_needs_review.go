@@ -3,7 +3,6 @@ package dbtest
 import (
 	"encoding/json/v2"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
@@ -16,21 +15,22 @@ func checkCloseRemovesNeedsReview(t *testing.T, store db.Storage) error {
 	issue, err := createFixtureIssue(ctx, store, project.ID, "Example issue", "worker", nil)
 	require.NoError(t, err)
 	for _, label := range []string{"needs-review", "bug"} {
-		_, _, err = store.AddLabelAndEvent(ctx, issue.ID, db.LabelEventParams{Label: label, EventType: "issue.labeled", Actor: "worker"})
+		_, labeled, err := store.AddLabelAndEvent(ctx, issue.ID, db.LabelEventParams{Label: label, EventType: "issue.labeled", Actor: "worker"})
 		require.NoError(t, err)
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal([]byte(labeled.Payload), &payload))
+		if label == "needs-review" {
+			require.Contains(t, payload, "after_close_uids")
+			require.Empty(t, payload["after_close_uids"])
+		} else {
+			require.NotContains(t, payload, "after_close_uids")
+		}
 	}
 	_, events, changed, err := store.CloseIssueWithEvents(ctx, issue.ID, "done", "closer", "", nil)
 	require.NoError(t, err)
 	require.True(t, changed)
-	require.Len(t, events, 2)
+	require.Len(t, events, 1)
 	require.Equal(t, "issue.closed", events[0].Type)
-	require.Equal(t, "issue.unlabeled", events[1].Type)
-	require.Equal(t, "closer", events[1].Actor)
-	var payload struct {
-		Label string `json:"label"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(events[1].Payload), &payload))
-	require.Equal(t, "needs-review", payload.Label)
 	present, err := store.HasLabel(ctx, issue.ID, "needs-review")
 	require.NoError(t, err)
 	require.False(t, present)
@@ -42,12 +42,36 @@ func checkCloseRemovesNeedsReview(t *testing.T, store db.Storage) error {
 	present, err = store.HasLabel(ctx, issue.ID, "needs-review")
 	require.NoError(t, err)
 	require.False(t, present)
+	_, labeled, err := store.AddLabelAndEvent(ctx, issue.ID, db.LabelEventParams{Label: "needs-review", EventType: "issue.labeled", Actor: "worker"})
+	require.NoError(t, err)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(labeled.Payload), &payload))
+	require.Equal(t, []any{events[0].UID}, payload["after_close_uids"])
+	firstClose := events[0].UID
 	_, events, changed, err = store.CloseIssueWithEvents(ctx, issue.ID, "wontfix", "closer", "", nil)
 	require.NoError(t, err)
 	require.True(t, changed)
-	require.Len(t, events, 2)
+	require.Len(t, events, 1)
 	require.Equal(t, "issue.closed", events[0].Type)
-	require.Equal(t, "issue.unlabeled", events[1].Type)
+	_, _, _, err = store.ReopenIssue(ctx, issue.ID, "worker")
+	require.NoError(t, err)
+	_, labeled, err = store.AddLabelAndEvent(ctx, issue.ID, db.LabelEventParams{Label: "needs-review", EventType: "issue.labeled", Actor: "worker"})
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal([]byte(labeled.Payload), &payload))
+	require.ElementsMatch(t, []any{firstClose, events[0].UID}, payload["after_close_uids"])
+	_, err = store.EnableProjectFederation(ctx, project.ID, "worker")
+	require.NoError(t, err)
+	history, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, Limit: 100})
+	require.NoError(t, err)
+	var snapshot db.IssueDocumentPayload
+	for _, event := range history {
+		if event.Type == "issue.snapshot" {
+			require.NoError(t, json.Unmarshal([]byte(event.Payload), &snapshot))
+		}
+	}
+	require.NotNil(t, snapshot.NeedsReviewContext)
+	require.ElementsMatch(t, []string{firstClose, events[0].UID}, snapshot.NeedsReviewContext.Closes)
+	require.ElementsMatch(t, snapshot.NeedsReviewContext.Closes, snapshot.NeedsReviewContext.Seen)
 	return nil
 }
 
@@ -72,20 +96,27 @@ func checkCloseRemovesDelayedNeedsReview(t *testing.T, spoke db.Storage, backend
 		Events: []db.FederationIngestEvent{{SourceEventID: created.ID, Event: remoteEventFromStored(created)}},
 	})
 	require.NoError(t, err)
+	// Advance only the hub's clock before it adds the label.
+	clockEvent := remoteEventFromStored(created)
+	clockEvent.EventUID = "00000000000000000000000001"
+	clockEvent.Type = "issue.updated"
+	clockEvent.Payload = []byte(`{}`)
+	clockEvent.HLCPhysicalMS += 60000
+	clockEvent.ContentHash = remoteEventHash(t, clockEvent)
+	_, err = hub.InsertRemoteEvent(ctx, hubProject.ID, clockEvent)
+	require.NoError(t, err)
 	hubIssue, err := hub.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	_, labeled, err := hub.AddLabelAndEvent(ctx, hubIssue.ID, db.LabelEventParams{Label: "needs-review", EventType: "issue.labeled", Actor: "reviewer"})
 	require.NoError(t, err)
-	// The label precedes the close in the federation clock, but arrives late.
-	//nolint:kennlint // sleeptest: separate the replicas' real millisecond clocks.
-	time.Sleep(time.Until(time.UnixMilli(labeled.HLCPhysicalMS + 1)))
 	_, events, changed, err := spoke.CloseIssueWithEvents(ctx, issue.ID, "done", "worker", "", nil)
 	require.NoError(t, err)
 	require.True(t, changed)
-	require.Len(t, events, 2)
+	require.Len(t, events, 1)
+	require.Greater(t, labeled.HLCPhysicalMS, events[0].HLCPhysicalMS)
 	_, err = hub.IngestFederationEvents(ctx, db.FederationIngestParams{
 		ProjectID: hubProject.ID, SpokeInstanceUID: spoke.InstanceUID(), BoundActor: "worker",
-		Events: []db.FederationIngestEvent{{SourceEventID: events[0].ID, Event: remoteEventFromStored(events[0])}, {SourceEventID: events[1].ID, Event: remoteEventFromStored(events[1])}},
+		Events: []db.FederationIngestEvent{{SourceEventID: events[0].ID, Event: remoteEventFromStored(events[0])}},
 	})
 	require.NoError(t, err)
 	present, err := hub.HasLabel(ctx, hubIssue.ID, "needs-review")
@@ -99,5 +130,16 @@ func checkCloseRemovesDelayedNeedsReview(t *testing.T, spoke db.Storage, backend
 	present, err = spoke.HasLabel(ctx, issue.ID, "needs-review")
 	require.NoError(t, err)
 	require.False(t, present)
+	_, relabeled, err := hub.AddLabelAndEvent(ctx, hubIssue.ID, db.LabelEventParams{Label: "needs-review", EventType: "issue.labeled", Actor: "reviewer"})
+	require.NoError(t, err)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(relabeled.Payload), &payload))
+	require.Equal(t, []any{events[0].UID}, payload["after_close_uids"])
+	_, err = spoke.InsertRemoteEvent(ctx, project.ID, remoteEventFromStored(relabeled))
+	require.NoError(t, err)
+	require.NoError(t, spoke.MaterializeFederatedProject(ctx, project.ID))
+	present, err = spoke.HasLabel(ctx, issue.ID, "needs-review")
+	require.NoError(t, err)
+	require.True(t, present)
 	return nil
 }

@@ -850,7 +850,7 @@ func checkIssueLifecycle(t *testing.T, store db.Storage) error {
 	}
 	assert.True(t, changed)
 	assert.Equal(t, "closed", closed.Status)
-	require.Len(t, closeEvents, 2)
+	require.Len(t, closeEvents, 1)
 	assert.Equal(t, "issue.closed", closeEvents[0].Type)
 	var closePayload struct {
 		ParentUID     *string `json:"parent_uid"`

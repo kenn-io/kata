@@ -16,12 +16,17 @@ func TestScopedEventsKeepInScopeCloseEvidenceTargets(t *testing.T) {
 	store, _, session, source, _, excluded, issue := mcpFixedScopeFixture(t)
 	original, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "in-scope original", Author: "worker"})
 	require.NoError(t, err)
+	_, _, err = store.AddLabelAndEvent(t.Context(), issue.ID, db.LabelEventParams{Label: "needs-review", EventType: "issue.labeled", Actor: "worker"})
+	require.NoError(t, err)
 	result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.close", Arguments: map[string]any{
 		"ref": source.Name + "#" + issue.ShortID, "reason": "duplicate", "message": "Same report as the in-scope original issue.",
 		"evidence": []any{map[string]any{"type": "duplicate-of", "issue_ref": source.Name + "#" + original.ShortID}},
 	}})
 	require.NoError(t, err)
 	require.False(t, result.IsError, string(mustJSON(t, result)))
+	present, err := store.HasLabel(t.Context(), issue.ID, "needs-review")
+	require.NoError(t, err)
+	require.False(t, present)
 	events := func(after int64) (EventsOutput, string) {
 		t.Helper()
 		result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.events", Arguments: map[string]any{"project": source.Name, "after": after, "limit": 100}})
@@ -34,6 +39,7 @@ func TestScopedEventsKeepInScopeCloseEvidenceTargets(t *testing.T) {
 	output, _ := events(0)
 	var kept any
 	for _, event := range output.Events {
+		require.NotEqual(t, "issue.unlabeled", event.Type)
 		if event.Type == "issue.closed" && event.IssueUID == issue.UID {
 			kept = event.Payload.(map[string]any)["evidence"].([]any)[0].(map[string]any)["issue_ref"]
 		}

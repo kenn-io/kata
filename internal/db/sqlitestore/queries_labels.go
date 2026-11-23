@@ -186,11 +186,15 @@ func (d *Store) addLabelAndEvent(ctx context.Context, issueID int64, ev db.Label
 	}
 
 	ts := nowTimestamp()
-	payload, err := json.Marshal(map[string]string{
-		"issue_uid":  issue.UID,
-		"label":      ev.Label,
-		"updated_at": ts,
-	})
+	payloadFields := map[string]any{"issue_uid": issue.UID, "label": ev.Label, "updated_at": ts}
+	if ev.Label == "needs-review" {
+		context, err := db.NeedsReviewContextTx(ctx, tx, issue.UID, "?")
+		if err != nil {
+			return db.IssueLabel{}, db.Event{}, err
+		}
+		payloadFields["after_close_uids"] = context.Closes
+	}
+	payload, err := json.Marshal(payloadFields)
 	if err != nil {
 		return db.IssueLabel{}, db.Event{}, fmt.Errorf("marshal label payload: %w", err)
 	}
@@ -251,8 +255,37 @@ func (d *Store) removeLabelAndEvent(ctx context.Context, issueID int64, ev db.La
 		return db.Event{}, err
 	}
 
+	res, err := tx.ExecContext(ctx,
+		`DELETE FROM issue_labels WHERE issue_id = ? AND label = ?`,
+		issueID, ev.Label)
+	if err != nil {
+		return db.Event{}, fmt.Errorf("delete label: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return db.Event{}, fmt.Errorf("delete label rows affected: %w", err)
+	}
+	if n == 0 {
+		return db.Event{}, db.ErrNotFound
+	}
+
 	ts := nowTimestamp()
-	evt, err := d.detachLabelTx(ctx, tx, issue, projectName, ev.EventType, ev.Label, ev.Actor, ts, false)
+	payload, err := json.Marshal(map[string]string{
+		"issue_uid":  issue.UID,
+		"label":      ev.Label,
+		"updated_at": ts,
+	})
+	if err != nil {
+		return db.Event{}, fmt.Errorf("marshal label payload: %w", err)
+	}
+	evt, err := d.insertEventTx(ctx, tx, eventInsert{
+		ProjectID:   issue.ProjectID,
+		ProjectName: projectName,
+		IssueID:     &issue.ID,
+		Type:        ev.EventType,
+		Actor:       ev.Actor,
+		Payload:     string(payload),
+	})
 	if err != nil {
 		return db.Event{}, err
 	}
@@ -265,44 +298,6 @@ func (d *Store) removeLabelAndEvent(ctx context.Context, issueID int64, ev db.La
 	if err := tx.Commit(); err != nil {
 		return db.Event{}, fmt.Errorf("commit: %w", err)
 	}
-	return evt, nil
-}
-
-func (d *Store) detachLabelTx(ctx context.Context, tx *sql.Tx, issue db.Issue, projectName, eventType, label, actor, ts string, allowAbsent bool) (db.Event, error) {
-	res, err := tx.ExecContext(ctx,
-		`DELETE FROM issue_labels WHERE issue_id = ? AND label = ?`,
-		issue.ID, label)
-	if err != nil {
-		return db.Event{}, fmt.Errorf("delete label: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return db.Event{}, fmt.Errorf("delete label rows affected: %w", err)
-	}
-	if n == 0 && !allowAbsent {
-		return db.Event{}, db.ErrNotFound
-	}
-
-	payload, err := json.Marshal(map[string]string{
-		"issue_uid":  issue.UID,
-		"label":      label,
-		"updated_at": ts,
-	})
-	if err != nil {
-		return db.Event{}, fmt.Errorf("marshal label payload: %w", err)
-	}
-	evt, err := d.insertEventTx(ctx, tx, eventInsert{
-		ProjectID:   issue.ProjectID,
-		ProjectName: projectName,
-		IssueID:     &issue.ID,
-		Type:        eventType,
-		Actor:       actor,
-		Payload:     string(payload),
-	})
-	if err != nil {
-		return db.Event{}, err
-	}
-
 	return evt, nil
 }
 

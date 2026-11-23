@@ -345,12 +345,12 @@ func TestClose_RecoversCommittedReceiptAndPublishesEventsOnce(t *testing.T) {
 	assert.False(t, firstOut.Body.Changed)
 	assert.True(t, firstOut.Body.Reused)
 	assert.Equal(t, []string{"issue_closed"}, reporter.events)
-	require.Len(t, store.committedEvents, 3)
-	assert.Equal(t, []string{"issue.closed", "claim.released", "issue.unlabeled"}, []string{
-		store.committedEvents[0].Type, store.committedEvents[1].Type, store.committedEvents[2].Type,
+	require.Len(t, store.committedEvents, 2)
+	assert.Equal(t, []string{"issue.closed", "claim.released"}, []string{
+		store.committedEvents[0].Type, store.committedEvents[1].Type,
 	})
 	assert.Equal(t, store.committedEvents, sink.snapshot())
-	assert.Equal(t, []int64{store.committedEvents[0].ID, store.committedEvents[1].ID, store.committedEvents[2].ID},
+	assert.Equal(t, []int64{store.committedEvents[0].ID, store.committedEvents[1].ID},
 		drainBroadcastIDs(t, subscription.Ch, 50*time.Millisecond))
 
 	second := postWithHeader(t, ts, path, headers, body)
@@ -391,10 +391,10 @@ func TestClose_LostResponsePublishesOnceWhenReceiptReadFails(t *testing.T) {
 
 	first := postWithHeader(t, ts, path, headers, body)
 	assertAPIError(t, first.status, first.body, http.StatusInternalServerError, "internal")
-	require.Len(t, store.committedEvents, 3)
+	require.Len(t, store.committedEvents, 2)
 	assert.Equal(t, store.committedEvents, sink.snapshot(),
 		"the committed batch is published even when the receipt response fails")
-	assert.Equal(t, []int64{store.committedEvents[0].ID, store.committedEvents[1].ID, store.committedEvents[2].ID},
+	assert.Equal(t, []int64{store.committedEvents[0].ID, store.committedEvents[1].ID},
 		drainBroadcastIDs(t, subscription.Ch, 50*time.Millisecond))
 
 	second := postWithHeader(t, ts, path, headers, body)

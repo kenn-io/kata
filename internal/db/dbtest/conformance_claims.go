@@ -308,9 +308,9 @@ func checkClaimLeaseLifecycle(t *testing.T, store db.Storage) error {
 		return err
 	}
 	assert.True(t, changed)
-	require.Len(t, closeEvents, 3)
-	assert.Equal(t, []string{"issue.closed", "claim.released", "issue.unlabeled"},
-		[]string{closeEvents[0].Type, closeEvents[1].Type, closeEvents[2].Type})
+	require.Len(t, closeEvents, 2)
+	assert.Equal(t, []string{"issue.closed", "claim.released"},
+		[]string{closeEvents[0].Type, closeEvents[1].Type})
 	claimStatus, err := store.ClaimStatusReadOnly(ctx, hubProject.ID, claimedIssue.UID, now.Add(22*time.Hour))
 	if err != nil {
 		return err
@@ -336,9 +336,9 @@ func checkClaimLeaseLifecycle(t *testing.T, store db.Storage) error {
 		return err
 	}
 	assert.True(t, changed)
-	require.Len(t, violationEvents, 4)
-	assert.Equal(t, []string{"issue.closed", "claim.violated", "claim.released", "issue.unlabeled"},
-		[]string{violationEvents[0].Type, violationEvents[1].Type, violationEvents[2].Type, violationEvents[3].Type})
+	require.Len(t, violationEvents, 3)
+	assert.Equal(t, []string{"issue.closed", "claim.violated", "claim.released"},
+		[]string{violationEvents[0].Type, violationEvents[1].Type, violationEvents[2].Type})
 	var violationPayload struct {
 		OffendingEventUID string `json:"offending_event_uid"`
 	}

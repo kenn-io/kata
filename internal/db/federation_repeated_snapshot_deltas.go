@@ -128,6 +128,7 @@ type repeatedImportPayload struct {
 	ClosedAt            *string                   `json:"closed_at"`
 	DeletedAt           *string                   `json:"deleted_at"`
 	Metadata            map[string]jsontext.Value `json:"metadata"`
+	NeedsReviewContext  *NeedsReviewContext       `json:"needs_review_context,omitempty"`
 	Labels              []string                  `json:"labels"`
 	Comments            []repeatedImportComment   `json:"comments"`
 	UpdatedAt           string                    `json:"updated_at"`
@@ -175,7 +176,7 @@ func RepeatedSnapshotDeltas(actor string, current, incoming jsontext.Value, look
 		Title: want.Title, Body: want.Body, Owner: want.Owner, AssignmentExpiresOn: want.AssignmentExpiresOn,
 		Priority: want.Priority, Status: want.Status, ClosedReason: want.ClosedReason, ClosedAt: want.ClosedAt,
 		DeletedAt: want.DeletedAt, Metadata: map[string]jsontext.Value{},
-		Labels: slices.Sorted(slices.Values(want.Labels)), Comments: []repeatedImportComment{}, UpdatedAt: want.UpdatedAt,
+		NeedsReviewContext: want.NeedsReviewContext, Labels: slices.Sorted(slices.Values(want.Labels)), Comments: []repeatedImportComment{}, UpdatedAt: want.UpdatedAt,
 	}
 	if restated.Labels == nil {
 		restated.Labels = []string{}
