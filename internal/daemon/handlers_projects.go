@@ -917,9 +917,16 @@ func resolveByAlias(ctx context.Context, store db.Storage, disc config.Discovere
 	}
 	alias, err := store.AliasByIdentity(ctx, info.Identity)
 	if errors.Is(err, db.ErrNotFound) {
+		hint := `run "kata init" in this workspace`
+		if info.Kind == "git" {
+			hint, err = unattachedGitHint(ctx, store, info.Identity)
+			if err != nil {
+				return nil, err
+			}
+		}
 		return nil, api.NewError(404, "project_not_initialized",
 			"no kata project is attached to this workspace",
-			`run "kata init" in this workspace`, nil)
+			hint, nil)
 	}
 	if err != nil {
 		return nil, internalAPIError(err)

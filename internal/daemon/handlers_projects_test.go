@@ -343,6 +343,27 @@ func TestResolve_ByAliasInput_NotRegistered(t *testing.T) {
 	assert.Equal(t, map[string]any{"project": "ghost-project"}, map[string]any(envelope.Error.Data), string(bs))
 }
 
+func TestResolve_ByStartPath_UnattachedGitHint(t *testing.T) {
+	for _, state := range []string{"missing", "active", "archived"} {
+		t.Run(state, func(t *testing.T) {
+			h := newServerWithGitWorkspace(t, "https://github.com/example/spoke-project.git")
+			hint := `run "kata init": it attaches this repo to the active project "spoke-project", or creates it if none exists`
+			if state != "missing" {
+				project, err := h.DB().CreateProject(t.Context(), "spoke-project")
+				require.NoError(t, err)
+				if state == "archived" {
+					_, _, err = h.DB().RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: project.ID, Actor: "tester"})
+					require.NoError(t, err)
+					hint = fmt.Sprintf(`run "kata projects restore %d", then run "kata init" in this workspace`, project.ID)
+				}
+			}
+			resp, bs := postJSON(t, h.ts.(*httptest.Server), "/api/v1/projects/resolve", map[string]any{"start_path": h.dir})
+			envelope := assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
+			assert.Equal(t, hint, envelope.Error.Hint)
+		})
+	}
+}
+
 // TestResolve_ByStartPath_KataTomlNamesUnregisteredProject reports the
 // bound project name in error.data when .kata.toml names a project the
 // daemon does not know.
