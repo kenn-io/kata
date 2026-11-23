@@ -323,11 +323,11 @@ func TestResolve_ByAliasInput_NotRegistered(t *testing.T) {
 	})
 	envelope := assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
 	assert.Equal(t, map[string]any{"alias": "github.com/wesm/never-seen"}, map[string]any(envelope.Error.Data), string(bs))
-	assert.Equal(t, `run "kata init": it attaches this repo to the active project "never-seen", or creates it if none exists`, envelope.Error.Hint)
+	assert.Equal(t, `run "kata init": it attaches this workspace to the active project "never-seen", or creates it if none exists`, envelope.Error.Hint)
 
 	resp, bs = postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{"alias": map[string]any{"identity": "github.com/example/missing", "kind": "git"}})
 	envelope = assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
-	assert.Equal(t, `run "kata init": it attaches this repo to the active project "missing", or creates it if none exists`, envelope.Error.Hint)
+	assert.Equal(t, `run "kata init": it attaches this workspace to the active project "missing", or creates it if none exists`, envelope.Error.Hint)
 
 	resp, bs = postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{"alias": map[string]any{"identity": "github.com/example/", "kind": "git"}})
 	assertAPIError(t, resp.StatusCode, bs, http.StatusBadRequest, "validation")
@@ -361,7 +361,7 @@ func TestResolve_NotInitializedHint(t *testing.T) {
 						testfix.WriteKataToml(t, h.dir, name)
 					}
 				}
-				hint := fmt.Sprintf(`run "kata init": it attaches this repo to the active project %q, or creates it if none exists`, name)
+				hint := fmt.Sprintf(`run "kata init": it attaches this workspace to the active project %q, or creates it if none exists`, name)
 				if state != "missing" {
 					project, err := h.DB().CreateProject(t.Context(), name)
 					require.NoError(t, err)
@@ -381,6 +381,15 @@ func TestResolve_NotInitializedHint(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestResolve_LocalWorkspaceHint(t *testing.T) {
+	ts := newTestServer(t)
+	dir := t.TempDir()
+	testfix.WriteKataToml(t, dir, "local-project")
+	resp, bs := postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{"start_path": dir})
+	envelope := assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
+	assert.Equal(t, `run "kata init": it attaches this workspace to the active project "local-project", or creates it if none exists`, envelope.Error.Hint)
 }
 
 // TestResolve_ByStartPath_KataTomlNamesUnregisteredProject reports the

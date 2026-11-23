@@ -801,8 +801,8 @@ func projectNotInitialized(ctx context.Context, store db.Storage, message, name 
 		}
 		if err == nil && project.DeletedAt != nil && canSeeArchived(ctx, project) {
 			hint = fmt.Sprintf(`run "kata projects restore %d", then run "kata init" in this workspace`, project.ID)
-		} else {
-			hint = fmt.Sprintf(`run "kata init": it attaches this repo to the active project %q, or creates it if none exists`, name)
+		} else if err != nil || project.DeletedAt == nil {
+			hint = fmt.Sprintf(`run "kata init": it attaches this workspace to the active project %q, or creates it if none exists`, name)
 		}
 	}
 	return api.NewError(404, "project_not_initialized", message, hint, data)
