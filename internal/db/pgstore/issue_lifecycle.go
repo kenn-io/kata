@@ -286,6 +286,15 @@ func (s *Store) ClaimOwner(ctx context.Context, p db.ClaimOwnerParams) (db.Claim
 			result.CurrentOwner = current.Owner
 			return db.ErrAlreadyAssigned
 		}
+		if current.Owner == nil {
+			if patch, ok := db.ReclaimedAssignmentHandoffPatch(current.Status, current.Metadata); ok {
+				updated, err := s.patchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: current.ID, Actor: p.Actor, Patch: patch}, func(_ context.Context, run transactionFunc) error { return run(tx) })
+				if err != nil {
+					return err
+				}
+				result.Events = append(result.Events, updated.Event)
+			}
+		}
 
 		eventType := "issue.assigned"
 		payload := map[string]any{"owner": p.Actor, "updated_at": updatedAt}

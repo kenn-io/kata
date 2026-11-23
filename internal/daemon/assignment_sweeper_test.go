@@ -24,13 +24,17 @@ func TestAssignmentSweeperPublishesExpiredAttentionHandoff(t *testing.T) {
 	require.NoError(t, err)
 	sub := env.Broadcaster.Subscribe(daemon.SubFilter{})
 	defer sub.Unsub()
-	sweeper := daemon.NewAssignmentSweeper(env.DB, daemon.NewEventPublisher(env.Broadcaster, nil))
+	sink := &publisherSink{}
+	sweeper := daemon.NewAssignmentSweeper(env.DB, daemon.NewEventPublisher(env.Broadcaster, sink))
 	require.NoError(t, sweeper.RunOnce(ctx, now))
 	for _, eventType := range []string{"issue.assignment_expired", "issue.metadata_updated"} {
 		msg := receiveMsg(t, sub.Ch, time.Second, "expiry handoff broadcast")
 		require.NotNil(t, msg.Event)
 		assert.Equal(t, eventType, msg.Event.Type)
 	}
+	require.Len(t, sink.events, 2)
+	assert.Equal(t, "issue.assignment_expired", sink.events[0].Type)
+	assert.Equal(t, "issue.metadata_updated", sink.events[1].Type)
 	stored, err := env.DB.IssueByID(ctx, issue.ID)
 	require.NoError(t, err)
 	meta := db.PayloadMap(jsontext.Value(stored.Metadata))

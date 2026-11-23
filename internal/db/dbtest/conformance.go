@@ -702,6 +702,7 @@ var storageScenarios = []scenario{
 		methods: []string{"ClaimOwner", "CreateIssue", "CreateProject", "EditIssue", "ExpireAssignments", "IssueByID", "PatchIssueMetadata"},
 		run:     checkExpiredAssignmentAttentionHandoff,
 	},
+	{name: "expired assignment federation replay", runWithBackend: checkExpiredAssignmentFederationReplay},
 	{
 		name:    "expected owner unassign",
 		methods: []string{"CreateIssue", "CreateProject", "UnassignOwner"},

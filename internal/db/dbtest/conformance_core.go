@@ -1433,6 +1433,75 @@ func checkExpiredAssignmentAttentionHandoff(t *testing.T, store db.Storage) erro
 	project, err := store.CreateProject(ctx, "expiry-handoff-project")
 	require.NoError(t, err)
 	base := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
+	t.Run("session claims after cleanup", func(t *testing.T) {
+		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "session restart", Author: "worker"})
+		require.NoError(t, err)
+		_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "worker", Patch: map[string]jsontext.Value{"work.attention": jsontext.Value(`"ok"`)}})
+		require.NoError(t, err)
+		_, err = store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: "worker", TTL: time.Minute, Now: base})
+		require.NoError(t, err)
+		_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "next-worker", Patch: map[string]jsontext.Value{"work.attention": jsontext.Value(`"ok"`), "work.attention_session": jsontext.Value(`"new-session"`)}})
+		require.NoError(t, err)
+		expiryEvents, err := store.ExpireAssignments(ctx, db.ExpireAssignmentsParams{ProjectID: project.ID, Now: base.Add(2 * time.Minute)})
+		require.NoError(t, err)
+		require.Len(t, expiryEvents, 2)
+		before, err := store.IssueByID(ctx, issue.ID)
+		require.NoError(t, err)
+		claim, err := store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: "next-worker", TTL: time.Minute, Now: base.Add(2 * time.Minute)})
+		require.NoError(t, err)
+		meta := db.PayloadMap(jsontext.Value(claim.Issue.Metadata))
+		assert.JSONEq(t, `"ok"`, string(meta["work.attention"]))
+		assert.NotContains(t, meta, "work.attention_msg")
+		require.Len(t, claim.Events, 2)
+		assert.Equal(t, "issue.metadata_updated", claim.Events[0].Type)
+		assert.Equal(t, "next-worker", claim.Events[0].Actor)
+		assert.Equal(t, "issue.assigned", claim.Events[1].Type)
+		assert.Equal(t, claim.Events[1], *claim.Event)
+		assert.Equal(t, before.Revision+2, claim.Issue.Revision)
+	})
+	for _, tc := range []struct {
+		name, actor, attention, message string
+	}{
+		{"same actor", "worker", "needs-human", "claim expired without hand-off"},
+		{"deliberate attention", "next-worker", "needs-human", "please review"},
+		{"stuck", "next-worker", "stuck", "claim expired without hand-off"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: tc.name, Author: "worker"})
+			require.NoError(t, err)
+			attention, message := tc.attention, tc.message
+			if tc.name == "same actor" {
+				attention, message = "ok", ""
+			}
+			patch := map[string]jsontext.Value{"work.attention": jsontext.Value(`"` + attention + `"`)}
+			if message != "" {
+				patch["work.attention_msg"] = jsontext.Value(`"` + message + `"`)
+			}
+			_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "worker", Patch: patch})
+			require.NoError(t, err)
+			if tc.name == "same actor" {
+				_, err = store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: "worker", TTL: time.Minute, Now: base})
+				require.NoError(t, err)
+				_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "worker", Patch: patch})
+				require.NoError(t, err)
+				_, err = store.ExpireAssignments(ctx, db.ExpireAssignmentsParams{ProjectID: project.ID, Now: base.Add(2 * time.Minute)})
+				require.NoError(t, err)
+			}
+			claim, err := store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: tc.actor, TTL: time.Minute, Now: base.Add(2 * time.Minute)})
+			require.NoError(t, err)
+			meta := db.PayloadMap(jsontext.Value(claim.Issue.Metadata))
+			if tc.name == "same actor" {
+				assert.JSONEq(t, `"ok"`, string(meta["work.attention"]))
+				assert.NotContains(t, meta, "work.attention_msg")
+				require.Len(t, claim.Events, 2)
+			} else {
+				assert.JSONEq(t, `"`+tc.attention+`"`, string(meta["work.attention"]))
+				assert.JSONEq(t, `"`+tc.message+`"`, string(meta["work.attention_msg"]))
+				require.Len(t, claim.Events, 1)
+			}
+			assert.Equal(t, "issue.assigned", claim.Events[len(claim.Events)-1].Type)
+		})
+	}
 	for _, tc := range []struct {
 		name, attention string
 		flip, edit      bool

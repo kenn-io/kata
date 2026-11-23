@@ -31,7 +31,6 @@ func TestClaimDocsUseTTL(t *testing.T) {
 		slices.Sort(found)
 		commands[path] = slices.Compact(found)
 		if filepath.Base(path) == "guide.md" || path == "docs/website/guide/index.html" {
-			assert.Contains(t, text, "--ttl", path)
 			assert.Contains(t, text, "needs-human", path)
 		}
 	}

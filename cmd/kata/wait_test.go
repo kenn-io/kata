@@ -19,6 +19,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -289,6 +291,29 @@ func TestWaitUntilNeedsHumanSurfacesMessage(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "needs-human")
 	assert.Contains(t, stdout, "blocked on database migration")
+}
+
+func TestWaitUntilNeedsHumanOnAssignmentExpiry(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ctx := t.Context()
+	issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: pid, Title: "claimed work", Author: "worker"})
+	require.NoError(t, err)
+	require.NoError(t, setAttentionHTTP(ctx, env, pid, issue.ShortID, "ok", ""))
+	now := time.Now().UTC()
+	_, err = env.DB.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: "worker", TTL: time.Minute, Now: now})
+	require.NoError(t, err)
+
+	errc := make(chan error, 1)
+	go func() {
+		time.Sleep(waitMutDelay)
+		sweeper := daemon.NewAssignmentSweeper(env.DB, daemon.NewEventPublisher(env.Broadcaster, nil))
+		errc <- sweeper.RunOnce(ctx, now.Add(2*time.Minute))
+	}()
+	stdout, _, err := runCLIWithErr(t, env, dir, "wait", issue.ShortID, "--until", "needs-human", "--poll-interval", waitFastPoll, "--timeout", waitSafetyNet)
+	require.NoError(t, <-errc)
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "needs-human")
+	assert.Contains(t, stdout, "claim expired without hand-off")
 }
 
 func TestWaitUntilAttentionFiresOnStuck(t *testing.T) {
