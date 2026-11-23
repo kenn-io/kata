@@ -557,10 +557,11 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 			bound_actor = excluded.bound_actor,
 			allow_insecure = excluded.allow_insecure,
 			enabled = excluded.enabled,
+			retained_through_event_id = CASE WHEN ? THEN excluded.retained_through_event_id ELSE federation_bindings.retained_through_event_id END,
 			updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
 		b.ProjectID, string(b.Role), b.HubURL, b.HubProjectID, b.HubProjectUID,
 		b.ReplayHorizonEventID, b.PullCursorEventID, pushEnabled, b.PushCursorEventID,
-		actor, allowInsecure, enabled, b.RetainedThroughEventID)
+		actor, allowInsecure, enabled, b.RetainedThroughEventID, b.RetainHistory)
 	if err != nil {
 		return db.FederationBinding{}, fmt.Errorf("upsert federation binding: %w", err)
 	}

@@ -163,11 +163,12 @@ replay_horizon_event_id=EXCLUDED.replay_horizon_event_id,
 pull_cursor_event_id=EXCLUDED.pull_cursor_event_id, push_enabled=EXCLUDED.push_enabled,
 push_cursor_event_id=EXCLUDED.push_cursor_event_id, bound_actor=EXCLUDED.bound_actor,
 allow_insecure=EXCLUDED.allow_insecure, enabled=EXCLUDED.enabled,
+retained_through_event_id=CASE WHEN $14 THEN EXCLUDED.retained_through_event_id ELSE federation_bindings.retained_through_event_id END,
 updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`,
 			input.ProjectID, string(input.Role), input.HubURL, input.HubProjectID,
 			input.HubProjectUID, input.ReplayHorizonEventID, input.PullCursorEventID,
 			storedBool(input.PushEnabled), input.PushCursorEventID, actor,
-			storedBool(input.AllowInsecure), storedBool(input.Enabled), input.RetainedThroughEventID)
+			storedBool(input.AllowInsecure), storedBool(input.Enabled), input.RetainedThroughEventID, input.RetainHistory)
 		if err != nil {
 			return mapSQLError(err, nil)
 		}

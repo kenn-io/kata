@@ -10,6 +10,23 @@ import (
 )
 
 func checkRejoinRetainedHistory(t *testing.T, store db.Storage) error {
+	t.Run("refresh boundary on upsert", func(t *testing.T) {
+		ctx := t.Context()
+		project, err := store.CreateProject(ctx, "refresh-retained-boundary")
+		require.NoError(t, err)
+		binding := db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "actor-b", Enabled: true, PushEnabled: true, RetainHistory: true}
+		_, err = store.UpsertFederationBinding(ctx, binding)
+		require.NoError(t, err)
+		_, event, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "new retained task", Author: "actor-a"})
+		require.NoError(t, err)
+		updated, err := store.UpsertFederationBinding(ctx, binding)
+		require.NoError(t, err)
+		require.Equal(t, event.ID, updated.RetainedThroughEventID)
+		binding.RetainHistory = false
+		updated, err = store.UpsertFederationBinding(ctx, binding)
+		require.NoError(t, err)
+		require.Equal(t, event.ID, updated.RetainedThroughEventID)
+	})
 	t.Run("return to earlier actor", func(t *testing.T) {
 		ctx := t.Context()
 		project, err := store.CreateProject(ctx, "return-to-actor")
