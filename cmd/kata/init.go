@@ -132,17 +132,12 @@ func kindForStatus(status int) errKind {
 	return kindInternal
 }
 
-func prepareWorkspaceBinding(workspace string, opts *initOptions) error {
-	opts.SkipLocalWrites = false
-	if flags.Workspace == "" {
-		return nil
-	}
-	return checkExplicitWorkspaceBinding(workspace, opts)
-}
-
 // checkExplicitWorkspaceBinding refuses an explicit --workspace whose binding
 // lives outside it and would be changed, or whose symlink resolves elsewhere.
 func checkExplicitWorkspaceBinding(workspace string, opts *initOptions) error {
+	if flags.Workspace == "" {
+		return nil
+	}
 	paths, err := config.DiscoverPaths(workspace)
 	if err != nil {
 		return nil
@@ -265,7 +260,7 @@ Name agents for explicit setup; use --local for project scope. If a user-level h
 			if err != nil {
 				return err
 			}
-			if err := prepareWorkspaceBinding(startPath, &opts); err != nil {
+			if err := checkExplicitWorkspaceBinding(startPath, &opts); err != nil {
 				return err
 			}
 			callOpts, err := prepareInitHookOptions(cmd.Context(), callInitOpts(opts))
@@ -423,7 +418,10 @@ func computeAliasInfo(ctx context.Context, disc config.DiscoveredPaths, startPat
 	return &info, nil
 }
 
-func nameInitBody(in localInit, opts callInitOpts) map[string]any {
+// runNameInit POSTs the derived name to the daemon, then
+// writes .kata.toml and .gitignore on the client's filesystem. The
+// daemon never sees the client's workspace path.
+func runNameInit(ctx context.Context, baseURL string, in localInit, opts callInitOpts) (string, error) {
 	reqBody := map[string]any{
 		"name": in.Choice.Name,
 	}
@@ -442,25 +440,7 @@ func nameInitBody(in localInit, opts callInitOpts) map[string]any {
 			"kind":     in.Alias.Kind,
 		}
 	}
-	return reqBody
-}
-
-func initBindingTarget(in localInit, dest string) (string, error) {
-	path := filepath.Join(dest, config.ProjectConfigFilename)
-	if flags.Workspace == "" {
-		return pathresolve.EvalSymlinksAllowMissing(path)
-	}
-	if _, err := bindingTarget(in.StartPath, filepath.Join(in.StartPath, config.ProjectConfigFilename)); err != nil {
-		return "", err
-	}
-	return bindingTarget(in.StartPath, path)
-}
-
-// runNameInit POSTs the derived name to the daemon, then
-// writes .kata.toml and .gitignore on the client's filesystem. The
-// daemon never sees the client's workspace path.
-func runNameInit(ctx context.Context, baseURL string, in localInit, opts callInitOpts) (string, error) {
-	bs, err := postProjects(ctx, baseURL, nameInitBody(in, opts))
+	bs, err := postProjects(ctx, baseURL, reqBody)
 	if err != nil {
 		return "", err
 	}
@@ -477,12 +457,14 @@ func runNameInit(ctx context.Context, baseURL string, in localInit, opts callIni
 
 	dest := config.WriteDestination(in.Disc, in.StartPath)
 	if opts.SkipLocalWrites {
-		if resp.Project.Name != in.Choice.Name {
-			return "", initBindingConflict("The daemon returned a different project.", "Retry with the intended project.")
-		}
 		return formatInitOutput(bs, resp.Project.Name, dest, resp.Created, resp.Created, nil, "")
 	}
-	bindingPath, err := initBindingTarget(in, dest)
+	bindingPath := filepath.Join(dest, config.ProjectConfigFilename)
+	if flags.Workspace != "" {
+		bindingPath, err = bindingTarget(in.StartPath, bindingPath)
+	} else {
+		bindingPath, err = pathresolve.EvalSymlinksAllowMissing(bindingPath)
+	}
 	if err != nil {
 		return "", err
 	}
