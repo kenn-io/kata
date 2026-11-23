@@ -41,6 +41,9 @@ func addLabelHandler(cfg ServerConfig) func(context.Context, *api.AddLabelReques
 		if err != nil {
 			return nil, err
 		}
+		if err := rejectPriorityLabel(in.Body.Label, "kata edit "+in.Ref+" --priority N"); err != nil {
+			return nil, err
+		}
 		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
 		if err != nil {
 			return nil, err

@@ -923,6 +923,19 @@ func TestToolsRoundTripAgainstRealDaemon(t *testing.T) {
 	createdIssue := created.StructuredContent.(map[string]any)["issue"].(map[string]any)
 	require.NotContains(t, createdIssue, "labels")
 	ref := createdIssue["ref"].(string)
+	for _, tc := range []struct {
+		tool      string
+		arguments map[string]any
+		fix       string
+	}{
+		{"kata.set_label", map[string]any{"ref": ref, "label": "priority:high", "present": true}, "kata edit " + ref + " --priority N"},
+		{"kata.create", map[string]any{"title": "Priority label", "labels": []string{"p2"}, "idempotency_key": "priority-label"}, "kata create --priority N"},
+	} {
+		result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: tc.tool, Arguments: tc.arguments})
+		require.NoError(t, err)
+		require.True(t, result.IsError)
+		require.Contains(t, result.Content[0].(*sdkmcp.TextContent).Text, tc.fix)
+	}
 	escaped, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
 		Name: "kata.edit", Arguments: map[string]any{
 			"ref": ref, "add_related": []string{"spoke-project#" + strings.ToLower(foreignIssue.UID)},

@@ -9,6 +9,23 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
+func TestAddLabel_PriorityLabelRejected(t *testing.T) {
+	env := testenv.New(t)
+	pid, n := setupOneIssue(t, env)
+	issue, err := env.DB.IssueByID(t.Context(), n)
+	require.NoError(t, err)
+	for _, label := range []string{"p0", "p1", "p2", "p3", "p4", "priority:high", "priority:"} {
+		t.Run(label, func(t *testing.T) {
+			resp, body := envDoRaw(t, env, http.MethodPost, issuePath(pid, n, "labels"), map[string]string{"actor": "tester", "label": label}, nil)
+			assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+			assert.Contains(t, string(body), "kata edit "+issue.ShortID+" --priority N")
+		})
+	}
+	for _, label := range []string{"p5", "priority", "area:ui"} {
+		postLabel(t, env, pid, n, label)
+	}
+}
+
 func TestAddLabel_HappyPath(t *testing.T) {
 	env := testenv.New(t)
 	pid, n := setupOneIssue(t, env)
@@ -79,7 +96,7 @@ func TestLabelsList_ReturnsCounts(t *testing.T) {
 	pid, a := setupOneIssue(t, env)
 	b := createIssueViaHTTP(t, env, pid, "b")
 	postLabel(t, env, pid, a, "bug")
-	postLabel(t, env, pid, a, "priority:high")
+	postLabel(t, env, pid, a, "area:ui")
 	postLabel(t, env, pid, b, "bug")
 
 	var out struct {
@@ -94,5 +111,5 @@ func TestLabelsList_ReturnsCounts(t *testing.T) {
 		got[c.Label] = c.Count
 	}
 	assert.Equal(t, int64(2), got["bug"])
-	assert.Equal(t, int64(1), got["priority:high"])
+	assert.Equal(t, int64(1), got["area:ui"])
 }

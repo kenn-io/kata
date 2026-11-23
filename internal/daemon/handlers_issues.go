@@ -180,6 +180,11 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := validateCreateMetadata(in.Body.Metadata); err != nil {
 			return nil, err
 		}
+		for _, label := range in.Body.Labels {
+			if err := rejectPriorityLabel(label, "kata create --priority N"); err != nil {
+				return nil, err
+			}
+		}
 		if err := validateIssueTitle(in.Body.Title); err != nil {
 			return nil, err
 		}

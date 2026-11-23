@@ -3,12 +3,20 @@ package daemon
 import (
 	"context"
 	"strconv"
+	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 )
+
+func rejectPriorityLabel(label, fix string) error {
+	if (len(label) == 2 && label[0] == 'p' && label[1] >= '0' && label[1] <= '4') || strings.HasPrefix(label, "priority:") {
+		return api.NewError(400, "validation", "use the priority field: "+fix, "", nil)
+	}
+	return nil
+}
 
 func registerPriorityHandlers(humaAPI huma.API, cfg ServerConfig) {
 	huma.Register(humaAPI, huma.Operation{
