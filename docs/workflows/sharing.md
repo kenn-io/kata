@@ -1,63 +1,59 @@
 # Sharing models
 
-kata has three sharing shapes. Pick the smallest one that fits the workflow.
+Kata offers three ways to share project state. Pick the smallest setup that fits
+how you work.
 
 ## Local shared project
 
-Use this when one person or one machine has multiple workspaces, worktrees, or
-agents.
-
-All workspaces commit the same `.kata.toml` project name and use the same local
-`KATA_HOME` database. The daemon remains local, and no network configuration is
-needed.
+Use a local shared project when one person or one machine has multiple
+workspaces, worktrees, or agents. Each workspace commits the same project name
+in `.kata.toml` and shares the local `KATA_HOME` database. The daemon stays
+local and requires no network configuration.
 
 ```sh
 kata init --project product
 ```
 
-This is the default shape for agent coordination on one workstation.
+This is the default setup for coordinating agents on a single workstation.
 
 ## Private-network remote daemon
 
-Reach for this when several trusted hosts should share one daemon and one
-database.
+Use a remote daemon when several trusted hosts need to share one daemon and one
+database. The daemon runs on the host that owns the SQLite database and listens
+on a private IP address, while clients connect by setting `KATA_SERVER` or
+`.kata.local.toml`.
 
-The daemon runs on the host that owns the SQLite database and listens on a
-private IP address. Clients set `KATA_SERVER` or `.kata.local.toml`.
-
-This model gives users one central copy of project state. It still assumes a
-trusted private network and a deliberately small auth model.
-
-Read [Remote daemon](../operations/remote-daemon.md) before exposing any TCP
-listener.
+This gives everyone a single central copy of project state, assuming a trusted
+private network and a deliberately small auth model. Before you expose any TCP
+listener, read [Remote daemon](../operations/remote-daemon.md).
 
 ## Federation
 
-Choose federation when each participant keeps a local daemon and database, but
-selected projects should converge through a hub.
+Choose federation when each participant keeps a local daemon and database, and
+you want selected projects to sync through a hub.
 
-Federation is opt-in per project. It favors local availability and offline
-queues over immediate single-copy reads. Reads use the local copy, so changes
-can be delayed while a connection is offline.
-Leases provide optional coordination; sync and recovery have explicit limits.
+You opt in per project, trading immediate single-copy reads for local
+availability and offline queues. Because reads come from your local copy,
+updates can lag while a connection is offline. Leases offer optional
+coordination, and both sync and recovery have explicit limits.
 
-For selected projects shared through a personal or intermediate hub, use the
-[project relay guide](../guide/project-relays.md). It covers
-connection, downstream devices and recovery. The
-[operator reference](../operations/federation.md) also covers direct-spoke
-enrollment with daemon-owner credentials. In identity mode, the owner uses the
-bootstrap token and names an existing hub account with `--actor`.
+To share selected projects through a personal or intermediate hub, follow the
+[project relay guide](../guide/project-relays.md), which covers connecting,
+downstream devices, and recovery. If you need direct-spoke enrollment with
+daemon-owner credentials, see the [operator reference](../operations/federation.md).
+In identity mode, the owner uses the bootstrap token and passes an existing hub
+account with `--actor`.
 
 ## Hosted mode
 
 Hosted mode is a deployment convention for PaaS platforms that inject `PORT`.
-It is still one daemon per database. It is useful for controlled deployments
-where the platform terminates TLS and provides process management.
+You still run one daemon per database. Hosted mode fits controlled deployments
+where the platform handles TLS termination and process management.
 
-Read [Hosted mode](../operations/hosted-mode.md) before deploying to Cloud Run,
-Render, Fly.io, Railway, App Engine, or similar platforms.
+Before deploying to Cloud Run, Render, Fly.io, Railway, App Engine, or similar
+platforms, read [Hosted mode](../operations/hosted-mode.md).
 
-## Choosing a model
+## Choose a model
 
 | Need | Use |
 | --- | --- |
@@ -68,6 +64,6 @@ Render, Fly.io, Railway, App Engine, or similar platforms.
 | PaaS process management with `$PORT` | Hosted mode |
 | Public multi-tenant SaaS authorization | Not implemented yet |
 
-The local daemon should not be casually exposed to a LAN or public interface.
-Use explicit listener configuration, bearer tokens, and trusted private network
-settings for any remote setup.
+Do not expose your local daemon casually on a LAN or public interface. For any
+remote setup, configure the listener explicitly and use bearer tokens along with
+trusted private-network settings.
