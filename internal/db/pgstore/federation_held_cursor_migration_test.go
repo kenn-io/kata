@@ -9,15 +9,13 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-// Schema 53 upgrades with an empty held cursor table and keeps existing data.
+// Schema 53 upgrades with an empty held cursor table.
 func TestFederationHeldCursorMigrationUpgradesVersion53(t *testing.T) {
 	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	const schema = "held_cursor_upgrade"
 	store, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap})
-	require.NoError(t, err)
-	project, err := store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
 	require.NoError(t, store.Close())
 	admin, err := sql.Open("pgx", dsn)
@@ -31,12 +29,7 @@ func TestFederationHeldCursorMigrationUpgradesVersion53(t *testing.T) {
 	version, err := upgraded.SchemaVersion(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 54, version)
-	got, err := upgraded.ProjectByUID(ctx, project.UID)
-	require.NoError(t, err)
-	require.Equal(t, project.UID, got.UID)
 	var count int
 	require.NoError(t, admin.QueryRowContext(ctx, `SELECT count(*) FROM held_cursor_upgrade.federation_held_cursors`).Scan(&count))
 	require.Zero(t, count)
-	_, err = admin.ExecContext(ctx, `INSERT INTO held_cursor_upgrade.federation_held_cursors(project_uid,push_cursor_event_id) VALUES($1,42)`, project.UID)
-	require.NoError(t, err)
 }

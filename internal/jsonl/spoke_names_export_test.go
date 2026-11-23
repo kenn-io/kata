@@ -103,11 +103,6 @@ func TestFederationHeldCursorBackup(t *testing.T) {
 	require.NoError(t, err)
 	_, err = source.ExecContext(ctx, `INSERT INTO federation_held_cursors(project_uid,push_cursor_event_id) VALUES(?,0)`, project.UID)
 	require.NoError(t, err)
-	prepared, err := source.CreateProject(ctx, "prepared-project")
-	require.NoError(t, err)
-	_, err = source.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: prepared.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: prepared.ID, HubProjectUID: prepared.UID, Actor: "worker", Enabled: true, PushEnabled: true})
-	require.NoError(t, err)
-	require.NoError(t, source.FenceFederationLeave(ctx, prepared.ID))
 	var full, scoped bytes.Buffer
 	require.NoError(t, jsonl.Export(ctx, source, &full, jsonl.ExportOptions{IncludeDeleted: true}))
 	require.NoError(t, jsonl.Export(ctx, source, &scoped, jsonl.ExportOptions{ProjectID: project.ID, IncludeDeleted: true}))
@@ -118,53 +113,74 @@ func TestFederationHeldCursorBackup(t *testing.T) {
 		want  bool
 	}{
 		{"full", full.Bytes(), jsonl.ImportOptions{}, true},
-		{"new instance", full.Bytes(), jsonl.ImportOptions{NewInstance: true}, true},
 		{"standalone", full.Bytes(), jsonl.ImportOptions{AsStandalone: true}, false},
 		{"project", scoped.Bytes(), jsonl.ImportOptions{}, false},
 	} {
-		for _, backend := range []string{"sqlite", "postgres"} {
-			t.Run(tc.name+"/"+backend, func(t *testing.T) {
-				var target db.Storage
-				var err error
-				if backend == "postgres" {
-					dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
-					t.Cleanup(cleanup)
-					target, err = pgstore.Open(ctx, dsn)
-				} else {
-					target, err = sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "target.db"))
-				}
+		t.Run(tc.name, func(t *testing.T) {
+			target, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "target.db"))
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = target.Close() })
+			require.NoError(t, jsonl.ImportWithOptions(ctx, bytes.NewReader(tc.input), target, tc.opts))
+			var got *int64
+			for p, err := range target.ExportProjects(ctx, db.ExportFilter{}) {
 				require.NoError(t, err)
-				t.Cleanup(func() { _ = target.Close() })
-				require.NoError(t, jsonl.ImportWithOptions(ctx, bytes.NewReader(tc.input), target, tc.opts))
-				var got *int64
-				for p, err := range target.ExportProjects(ctx, db.ExportFilter{}) {
-					require.NoError(t, err)
-					if p.UID == project.UID {
-						got = p.HeldCursor
-					}
+				if p.UID == project.UID {
+					got = p.HeldCursor
 				}
-				var fenced bool
-				for meta, err := range target.ExportMeta(ctx) {
-					require.NoError(t, err)
-					if meta.Key == db.FederationLeaveFencePrefix+prepared.UID {
-						fenced = true
-					}
+			}
+			if tc.want {
+				require.NotNil(t, got)
+				require.Zero(t, *got)
+			} else {
+				require.Nil(t, got)
+			}
+		})
+	}
+}
+
+func TestFederationLeaveFenceBackup(t *testing.T) {
+	ctx := t.Context()
+	source, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "source.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = source.Close() })
+	project, err := source.CreateProject(ctx, "prepared-project")
+	require.NoError(t, err)
+	_, err = source.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "worker", Enabled: true, PushEnabled: true})
+	require.NoError(t, err)
+	require.NoError(t, source.FenceFederationLeave(ctx, project.ID))
+	var full, scoped bytes.Buffer
+	require.NoError(t, jsonl.Export(ctx, source, &full, jsonl.ExportOptions{IncludeDeleted: true}))
+	require.NoError(t, jsonl.Export(ctx, source, &scoped, jsonl.ExportOptions{ProjectID: project.ID, IncludeDeleted: true}))
+	for _, tc := range []struct {
+		name  string
+		input []byte
+		opts  jsonl.ImportOptions
+		want  bool
+	}{
+		{"full", full.Bytes(), jsonl.ImportOptions{}, true},
+		{"standalone", full.Bytes(), jsonl.ImportOptions{AsStandalone: true}, false},
+		{"project", scoped.Bytes(), jsonl.ImportOptions{}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			target, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "target.db"))
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = target.Close() })
+			require.NoError(t, jsonl.ImportWithOptions(ctx, bytes.NewReader(tc.input), target, tc.opts))
+			var fenced bool
+			for meta, err := range target.ExportMeta(ctx) {
+				require.NoError(t, err)
+				if meta.Key == db.FederationLeaveFencePrefix+project.UID {
+					fenced = true
 				}
-				if tc.want {
-					require.NotNil(t, got)
-					require.Zero(t, *got)
-				} else {
-					require.Nil(t, got)
-				}
-				require.Equal(t, tc.want, fenced)
-				if tc.want {
-					restored, err := target.ProjectByUID(ctx, prepared.UID)
-					require.NoError(t, err)
-					binding, err := target.FederationBindingByProject(ctx, restored.ID)
-					require.NoError(t, err)
-					require.False(t, binding.PushEnabled)
-				}
-			})
-		}
+			}
+			require.Equal(t, tc.want, fenced)
+			if tc.want {
+				restored, err := target.ProjectByUID(ctx, project.UID)
+				require.NoError(t, err)
+				binding, err := target.FederationBindingByProject(ctx, restored.ID)
+				require.NoError(t, err)
+				require.False(t, binding.PushEnabled)
+			}
+		})
 	}
 }

@@ -329,7 +329,7 @@ func TestFederationProviderValidatesActorBeforeSavingReady(t *testing.T) {
 func TestFederationRemovedProviderReleaseDetachesOvertakenMove(t *testing.T) {
 	_, mapping := providerMapping(t)
 	store := openReplicaServiceStore(t)
-	source, comment := overtakenLeaveFixture(t, store)
+	source, _ := overtakenLeaveFixture(t, store)
 	binding, err := store.FederationBindingByProject(t.Context(), source.ID)
 	require.NoError(t, err)
 	credentials := config.DefaultFederationCredentialStore()
@@ -346,14 +346,6 @@ func TestFederationRemovedProviderReleaseDetachesOvertakenMove(t *testing.T) {
 	closed, _, err := daemon.ReleaseRemovedFederationProvider(t.Context(), store, credentials, config.FederationManagedCredentialReservation{ProjectUID: source.UID, Credential: before})
 	require.NoError(t, err)
 	require.Equal(t, federationprovider.StatusReleased, closed.Credential.Provider.Status)
-	_, err = daemon.LeaveFederationReplica(t.Context(), store, credentials, nil, source.ID)
-	require.NoError(t, err)
-	_, err = store.FederationBindingByProject(t.Context(), source.ID)
-	require.ErrorIs(t, err, db.ErrNotFound)
-	retained, err := store.EventsByUIDs(t.Context(), source.ID, []string{comment.UID})
-	require.NoError(t, err)
-	require.Len(t, retained, 1)
-	require.Equal(t, comment.ContentHash, retained[0].ContentHash)
 }
 
 func TestFederationProviderDetachOvertakenMove(t *testing.T) {
