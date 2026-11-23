@@ -205,7 +205,9 @@ kata meta get <ref> [key]
 ```
 
 Prints the whole metadata object, or one key when you pass `[key]`. It honors
-the global `--json` and `--agent` output modes.
+the global `--json` and `--agent` output modes. An unset key exits 0 with an
+empty human value, `count=0` in agent mode, and `value: null` in JSON, while a
+missing issue still returns not found.
 
 This command reads from the issue's project-local metadata projection. It
 returns only the short ID, metadata, and current revision, without fetching
