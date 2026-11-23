@@ -807,7 +807,7 @@ func TestProjectAccessEventReferenceResetsPollAndSSE(t *testing.T) {
 			t.Context(), f.visible.ID, "done", "member", "Visible closure", nil,
 		)
 		require.NoError(t, err)
-		require.Len(t, closeEvents, 1)
+		require.Len(t, closeEvents, 2)
 		require.Contains(t, closeEvents[0].Payload, hiddenParent.UID,
 			"the close event must exercise a hidden parent reference")
 

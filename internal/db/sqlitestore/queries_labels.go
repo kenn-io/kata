@@ -252,7 +252,7 @@ func (d *Store) removeLabelAndEvent(ctx context.Context, issueID int64, ev db.La
 	}
 
 	ts := nowTimestamp()
-	evt, err := d.detachLabelTx(ctx, tx, issue, projectName, ev.EventType, ev.Label, ev.Actor, ts)
+	evt, err := d.detachLabelTx(ctx, tx, issue, projectName, ev.EventType, ev.Label, ev.Actor, ts, false)
 	if err != nil {
 		return db.Event{}, err
 	}
@@ -268,7 +268,7 @@ func (d *Store) removeLabelAndEvent(ctx context.Context, issueID int64, ev db.La
 	return evt, nil
 }
 
-func (d *Store) detachLabelTx(ctx context.Context, tx *sql.Tx, issue db.Issue, projectName, eventType, label, actor, ts string) (db.Event, error) {
+func (d *Store) detachLabelTx(ctx context.Context, tx *sql.Tx, issue db.Issue, projectName, eventType, label, actor, ts string, allowAbsent bool) (db.Event, error) {
 	res, err := tx.ExecContext(ctx,
 		`DELETE FROM issue_labels WHERE issue_id = ? AND label = ?`,
 		issue.ID, label)
@@ -279,7 +279,7 @@ func (d *Store) detachLabelTx(ctx context.Context, tx *sql.Tx, issue db.Issue, p
 	if err != nil {
 		return db.Event{}, fmt.Errorf("delete label rows affected: %w", err)
 	}
-	if n == 0 {
+	if n == 0 && !allowAbsent {
 		return db.Event{}, db.ErrNotFound
 	}
 

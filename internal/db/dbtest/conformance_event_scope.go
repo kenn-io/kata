@@ -117,7 +117,7 @@ func RunEventReferenceProjectScope(t *testing.T, store db.Storage) {
 		ctx, closedWithHiddenParent.ID, "done", "member", "Completed task.", nil,
 	)
 	require.NoError(t, err)
-	require.Len(t, hiddenCloseEvents, 1)
+	require.Len(t, hiddenCloseEvents, 2)
 	assert.Contains(t, hiddenCloseEvents[0].Payload, hiddenPeer.UID,
 		"the issue.closed fixture must carry the close-time parent UID")
 	assert.Contains(t, hiddenCloseEvents[0].Payload, hiddenPeer.ShortID,
@@ -136,7 +136,7 @@ func RunEventReferenceProjectScope(t *testing.T, store db.Storage) {
 		ctx, closedWithVisibleParent.ID, "done", "member", "Completed task.", nil,
 	)
 	require.NoError(t, err)
-	require.Len(t, visibleCloseEvents, 1)
+	require.Len(t, visibleCloseEvents, 2)
 	closedWithHiddenUIDEvidence, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: visibleProject.ID, Title: "Close evidence with restricted UID", Author: "member",
 	})
@@ -144,7 +144,7 @@ func RunEventReferenceProjectScope(t *testing.T, store db.Storage) {
 	_, hiddenUIDEvidenceEvents, _, err := store.CloseIssueWithEvents(ctx, closedWithHiddenUIDEvidence.ID,
 		"done", "member", "Completed task.", []db.Evidence{{Type: "duplicate-of", IssueRef: hiddenPeer.UID}})
 	require.NoError(t, err)
-	require.Len(t, hiddenUIDEvidenceEvents, 1)
+	require.Len(t, hiddenUIDEvidenceEvents, 2)
 	closedWithHiddenShortIDEvidence, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: visibleProject.ID, Title: "Close evidence with restricted short ID", Author: "member",
 	})
@@ -152,7 +152,7 @@ func RunEventReferenceProjectScope(t *testing.T, store db.Storage) {
 	_, hiddenShortIDEvidenceEvents, _, err := store.CloseIssueWithEvents(ctx, closedWithHiddenShortIDEvidence.ID,
 		"done", "member", "Completed task.", []db.Evidence{{Type: "superseded-by", IssueRef: hiddenProject.Name + "#" + hiddenPeer.ShortID}})
 	require.NoError(t, err)
-	require.Len(t, hiddenShortIDEvidenceEvents, 1)
+	require.Len(t, hiddenShortIDEvidenceEvents, 2)
 	closedWithVisibleEvidence, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: visibleProject.ID, Title: "Close evidence with visible short ID", Author: "member",
 	})
@@ -160,7 +160,7 @@ func RunEventReferenceProjectScope(t *testing.T, store db.Storage) {
 	_, visibleEvidenceEvents, _, err := store.CloseIssueWithEvents(ctx, closedWithVisibleEvidence.ID,
 		"done", "member", "Completed task.", []db.Evidence{{Type: "duplicate-of", IssueRef: visiblePeer.ShortID}})
 	require.NoError(t, err)
-	require.Len(t, visibleEvidenceEvents, 1)
+	require.Len(t, visibleEvidenceEvents, 2)
 	closedWithVisibleUIDEvidence, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: visibleProject.ID, Title: "Close evidence with visible UID", Author: "member",
 	})
@@ -168,7 +168,7 @@ func RunEventReferenceProjectScope(t *testing.T, store db.Storage) {
 	_, visibleUIDEvidenceEvents, _, err := store.CloseIssueWithEvents(ctx, closedWithVisibleUIDEvidence.ID,
 		"done", "member", "Completed task.", []db.Evidence{{Type: "superseded-by", IssueRef: visiblePeer.UID}})
 	require.NoError(t, err)
-	require.Len(t, visibleUIDEvidenceEvents, 1)
+	require.Len(t, visibleUIDEvidenceEvents, 2)
 	hiddenReference := hiddenProject.Name + "#" + hiddenPeer.ShortID
 	throttledEvent, err := store.InsertCloseThrottledEvent(ctx, closedWithVisibleParent.ID, "member", db.CloseThrottledPayload{
 		Reason: db.CloseThrottleReasonSiblingBurst,

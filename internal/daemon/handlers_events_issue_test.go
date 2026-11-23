@@ -339,7 +339,7 @@ func TestPollProjectEventsIssuePulledClose(t *testing.T) {
 		_, closed, changed, err := store.CloseIssueWithEvents(t.Context(), issue.ID, "done", "member", "Closed before newer federated evidence.", nil)
 		require.NoError(t, err)
 		require.True(t, changed)
-		require.Len(t, closed, 1)
+		require.Len(t, closed, 2)
 		remote := db.RemoteEvent{
 			EventUID: fmt.Sprintf("%026d", 1), OriginInstanceUID: "7ZZZZZZZZZZZZZZZZZZZZZZZZZ",
 			ProjectUID: f.public.UID, ProjectName: f.public.Name, IssueUID: &issue.UID,
@@ -384,7 +384,7 @@ func TestPollProjectEventsIssueReturnsEffectiveCloseEvent(t *testing.T) {
 		_, closedEvents, changed, err := env.DB.CloseIssueWithEvents(t.Context(), issue.ID, "done", "tester", "Completed with a source close event.", nil)
 		require.NoError(t, err)
 		require.True(t, changed)
-		require.Len(t, closedEvents, 1)
+		require.Len(t, closedEvents, 2)
 
 		remoteUID := "00000000000000000000000001"
 		remoteOrigin := "7ZZZZZZZZZZZZZZZZZZZZZZZZZ"
@@ -423,7 +423,7 @@ func TestPollProjectEventsIssueReturnsEffectiveCloseEvent(t *testing.T) {
 		_, closedEvents, changed, err := env.DB.CloseIssueWithEvents(t.Context(), issue.ID, "done", "tester", "Completed with evidence.", nil)
 		require.NoError(t, err)
 		require.True(t, changed)
-		require.Len(t, closedEvents, 1)
+		require.Len(t, closedEvents, 2)
 		baseHLC := closedEvents[0].HLCPhysicalMS
 		origin := "7ZZZZZZZZZZZZZZZZZZZZZZZZZ"
 		createdAt := closedEvents[0].CreatedAt
@@ -459,7 +459,7 @@ func TestPollProjectEventsIssueReturnsEffectiveCloseEvent(t *testing.T) {
 		_, closedEvents, changed, err := env.DB.CloseIssueWithEvents(t.Context(), issue.ID, "done", "tester", "Closed before moving.", nil)
 		require.NoError(t, err)
 		require.True(t, changed)
-		require.Len(t, closedEvents, 1)
+		require.Len(t, closedEvents, 2)
 
 		current, err := env.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
 		require.NoError(t, err)
@@ -552,7 +552,7 @@ func TestPollProjectEventsIssueHidesEffectiveCloseWithPrivateReference(t *testin
 						}})
 					require.NoError(t, err)
 					require.True(t, changed)
-					require.Len(t, closeEvents, 1)
+					require.Len(t, closeEvents, 2)
 
 					path := fmt.Sprintf("%s?issue=%s&include_effective_close_event_uid=true", scopedProjectPath(f.public.ID, "events"), url.QueryEscape(visible.UID))
 					status, _, body := f.request(t, http.MethodGet, path, "nonmember", nil, nil)
@@ -582,7 +582,7 @@ func TestPollProjectEventsIssueOmitsCloseWhenEvidenceReferenceMovesBetweenAuthor
 			}})
 		require.NoError(t, err)
 		require.True(t, changed)
-		require.Len(t, closeEvents, 1)
+		require.Len(t, closeEvents, 2)
 
 		_, err = store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
 			IssueID: target.ID, FromProjectID: f.public.ID, ToProjectID: f.private.ID,
@@ -618,7 +618,7 @@ func TestPollProjectEventsIssueSurvivesUnrelatedPolicyChangeWithHiddenEndpoint(t
 		_, closed, _, err := store.CloseIssueWithEvents(t.Context(), f.visible.ID, "done", "member",
 			"Completed the visible task.", []db.Evidence{{Type: "commit", SHA: "0123456789abcdef0123456789abcdef01234567"}})
 		require.NoError(t, err)
-		require.Len(t, closed, 1)
+		require.Len(t, closed, 2)
 
 		f = projectAccessFixtureWithStorage(t, f, projectAccessReleaseStore{
 			Storage: store,
@@ -674,7 +674,7 @@ func TestPollProjectEventsIssueOmitsPrivatePeerEvents(t *testing.T) {
 		require.NoError(t, err)
 		_, events, _, err := store.CloseIssueWithEvents(t.Context(), f.visible.ID, "done", "member", "Completed visible task", nil)
 		require.NoError(t, err)
-		require.Len(t, events, 1)
+		require.Len(t, events, 2)
 		_, comment, err := store.CreateComment(t.Context(), db.CreateCommentParams{IssueID: f.visible.ID, Author: "member", Body: "Visible follow-up"})
 		require.NoError(t, err)
 		// History omits the event that names a private peer instead of
@@ -685,8 +685,9 @@ func TestPollProjectEventsIssueOmitsPrivatePeerEvents(t *testing.T) {
 		var page api.PollEventsBody
 		require.NoError(t, json.Unmarshal(body, &page))
 		require.False(t, page.ResetRequired)
-		require.Len(t, page.Events, 1, string(body))
-		require.Equal(t, comment.ID, page.Events[0].EventID)
+		require.Len(t, page.Events, 2, string(body))
+		require.Equal(t, events[1].ID, page.Events[0].EventID)
+		require.Equal(t, comment.ID, page.Events[1].EventID)
 		require.Equal(t, comment.ID, page.NextAfterID)
 		require.NotContains(t, string(body), f.issue.UID)
 	})

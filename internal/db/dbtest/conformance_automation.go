@@ -557,7 +557,7 @@ func checkRecurrences(t *testing.T, store db.Storage) error {
 	assert.True(t, changed)
 	assert.Equal(t, "closed", closedIssue.Status)
 	require.NotEmpty(t, closeEvents)
-	assert.Equal(t, []string{"issue.closed", "issue.created", "recurrence.materialized"},
+	assert.Equal(t, []string{"issue.closed", "issue.created", "recurrence.materialized", "issue.unlabeled"},
 		eventTypeNames(closeEvents))
 	issues, err := store.ListIssues(ctx, db.ListIssuesParams{ProjectID: project.ID})
 	if err != nil {

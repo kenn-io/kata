@@ -114,7 +114,7 @@ func (s *Store) RemoveLabelAndEvent(
 			return err
 		}
 		updatedAt := nowStoredTimestamp()
-		event, err = s.detachLabelTx(ctx, tx, issue, project, params.EventType, params.Label, params.Actor, updatedAt)
+		event, err = s.detachLabelTx(ctx, tx, issue, project, params.EventType, params.Label, params.Actor, updatedAt, false)
 		if err != nil {
 			return err
 		}
@@ -126,7 +126,7 @@ func (s *Store) RemoveLabelAndEvent(
 	return event, err
 }
 
-func (s *Store) detachLabelTx(ctx context.Context, tx *sql.Tx, issue db.Issue, project db.Project, eventType, label, actor, updatedAt string) (db.Event, error) {
+func (s *Store) detachLabelTx(ctx context.Context, tx *sql.Tx, issue db.Issue, project db.Project, eventType, label, actor, updatedAt string, allowAbsent bool) (db.Event, error) {
 	result, err := tx.ExecContext(ctx,
 		`DELETE FROM issue_labels WHERE issue_id = $1 AND label = $2`, issue.ID, label)
 	if err != nil {
@@ -136,7 +136,7 @@ func (s *Store) detachLabelTx(ctx context.Context, tx *sql.Tx, issue db.Issue, p
 	if err != nil {
 		return db.Event{}, err
 	}
-	if count == 0 {
+	if count == 0 && !allowAbsent {
 		return db.Event{}, db.ErrNotFound
 	}
 	payload, err := json.Marshal(map[string]string{
