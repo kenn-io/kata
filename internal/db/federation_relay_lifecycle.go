@@ -10,12 +10,14 @@ import (
 // commit. Call before external credential teardown; normal pause retains intent.
 type RelayLifecycleStore interface {
 	ValidateRelayLifecycle(context.Context, int64) error
+	ValidateFederationLeave(context.Context, int64) error
 }
 
 // RelayDisconnectFenceStore validates retained relay work and disables relay
 // writes in the same native transaction before upstream revocation.
 type RelayDisconnectFenceStore interface {
 	FenceRelayDisconnect(context.Context, int64) error
+	FenceFederationLeave(context.Context, int64) error
 }
 
 // RelayLocalDetacher detaches a relay replica without its upstream hub. It

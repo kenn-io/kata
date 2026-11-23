@@ -13,9 +13,23 @@ func (d *Store) ValidateRelayLifecycle(ctx context.Context, projectID int64) err
 	return d.relayTx(ctx, func(tx *sql.Tx) error { return d.validateRelayLifecycleTx(ctx, tx, projectID, false) })
 }
 
+// ValidateFederationLeave checks retained work before detaching a replica.
+func (d *Store) ValidateFederationLeave(ctx context.Context, projectID int64) error {
+	return d.relayTx(ctx, func(tx *sql.Tx) error { return d.validateRelayLifecycleTx(ctx, tx, projectID, true) })
+}
+
+// FenceFederationLeave fences a replica before its credentials are revoked.
+func (d *Store) FenceFederationLeave(ctx context.Context, projectID int64) error {
+	return d.fenceRelayDisconnect(ctx, projectID, true)
+}
+
 // FenceRelayDisconnect validates retained relay work and disables writes in
 // one transaction so a concurrent local mutation cannot slip between the two.
 func (d *Store) FenceRelayDisconnect(ctx context.Context, projectID int64) error {
+	return d.fenceRelayDisconnect(ctx, projectID, false)
+}
+
+func (d *Store) fenceRelayDisconnect(ctx context.Context, projectID int64, leaving bool) error {
 	// Match the local move lock order before applying a caller's policy fence;
 	// the pending-move check and durable write pause must be indivisible.
 	original := ctx
@@ -26,7 +40,7 @@ func (d *Store) FenceRelayDisconnect(ctx context.Context, projectID int64) error
 		return db.ApplyTransactionFence(original, tx)
 	})
 	return d.relayTx(ctx, func(tx *sql.Tx) error {
-		if err := db.CheckFederationMoveSourceLifecycle(ctx, tx, projectID, d.InstanceUID(), false); err != nil {
+		if err := db.CheckFederationMoveSourceLifecycle(ctx, tx, projectID, d.InstanceUID(), leaving); err != nil {
 			return err
 		}
 		return d.relayReset(tx).FenceDisconnect(ctx, projectID)

@@ -54,7 +54,7 @@ type rebindFailingLeaveFenceStore struct {
 	fenceRelease chan struct{}
 }
 
-func (s *rebindFailingLeaveFenceStore) FenceRelayDisconnect(
+func (s *rebindFailingLeaveFenceStore) FenceFederationLeave(
 	ctx context.Context,
 	_ int64,
 ) error {
@@ -67,12 +67,12 @@ func (s *rebindFailingLeaveFenceStore) FenceRelayDisconnect(
 	}
 }
 
-func (s *rebindLeaveValidationBarrierStore) ValidateRelayLifecycle(
+func (s *rebindLeaveValidationBarrierStore) ValidateFederationLeave(
 	ctx context.Context,
 	projectID int64,
 ) error {
 	validator := s.Storage.(db.RelayLifecycleStore)
-	if err := validator.ValidateRelayLifecycle(ctx, projectID); err != nil {
+	if err := validator.ValidateFederationLeave(ctx, projectID); err != nil {
 		return err
 	}
 	close(s.validated)
@@ -84,7 +84,19 @@ func (s *rebindLeaveValidationBarrierStore) ValidateRelayLifecycle(
 	}
 }
 
+func (s *rebindLeaveValidationBarrierStore) ValidateRelayLifecycle(ctx context.Context, projectID int64) error {
+	return s.Storage.(db.RelayLifecycleStore).ValidateRelayLifecycle(ctx, projectID)
+}
+
+func (s *rebindLeaveValidationBarrierStore) FenceFederationLeave(ctx context.Context, projectID int64) error {
+	return s.Storage.(db.RelayDisconnectFenceStore).FenceFederationLeave(ctx, projectID)
+}
+
 func (s *rebindLeaveValidationBarrierStore) FenceRelayDisconnect(ctx context.Context, projectID int64) error {
+	return s.Storage.(db.RelayDisconnectFenceStore).FenceRelayDisconnect(ctx, projectID)
+}
+
+func (s *rebindFailingLeaveFenceStore) FenceRelayDisconnect(ctx context.Context, projectID int64) error {
 	return s.Storage.(db.RelayDisconnectFenceStore).FenceRelayDisconnect(ctx, projectID)
 }
 

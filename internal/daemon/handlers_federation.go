@@ -775,7 +775,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, api.NewError(http.StatusConflict, "not_a_spoke", "federation binding is not a spoke", "", nil)
 			}
 			if lifecycle, ok := cfg.DB.(db.RelayLifecycleStore); ok {
-				if err := lifecycle.ValidateRelayLifecycle(ctx, in.ProjectID); err != nil {
+				if err := validateFederationLeaveDisposition(ctx, lifecycle, in.ProjectID, disposition == "detach"); err != nil {
 					return nil, federationRelayLeaveAPIError(ctx, cfg.DB, binding, err)
 				}
 			} else if binding.RelayConfig != nil {
@@ -832,13 +832,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 					findErr error
 				)
 				if in.Body.Prepare {
-					prepared, prepareErr := PrepareFederationReplicaLeave(
-						ctx,
-						cfg.DB,
-						cfg.federationCredentialStore(),
-						in.ProjectID,
-						preparationID,
-					)
+					prepared, prepareErr := prepareFederationReplicaLeave(ctx, cfg.DB, managed, project, preparationID, disposition == "detach")
 					match = prepared.ManagedReservation
 					found = prepared.ManagedReservationFound
 					findErr = prepareErr
@@ -1848,4 +1842,11 @@ func federationFeatureError(err error) error {
 		return api.NewError(http.StatusConflict, "unsupported_event_features", err.Error(), "Upgrade the peer to support the required event features listed in this error", nil)
 	}
 	return federationError(err)
+}
+
+func validateFederationLeaveDisposition(ctx context.Context, lifecycle db.RelayLifecycleStore, projectID int64, detach bool) error {
+	if detach {
+		return lifecycle.ValidateFederationLeave(ctx, projectID)
+	}
+	return lifecycle.ValidateRelayLifecycle(ctx, projectID)
 }

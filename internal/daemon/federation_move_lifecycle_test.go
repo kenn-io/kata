@@ -146,3 +146,76 @@ func TestPrepareFederationLeaveFencesConcurrentNativeMove(t *testing.T) {
 		})
 	}
 }
+
+func overtakenLeaveFixture(t *testing.T, store db.Storage) db.Project {
+	t.Helper()
+	ctx := t.Context()
+	hub := openReplicaServiceStore(t)
+	var remote []db.Project
+	var local []db.Project
+	for i, name := range []string{"overtaken-source", "overtaken-target", "overtaken-away"} {
+		project, err := hub.CreateProject(ctx, name)
+		require.NoError(t, err)
+		_, err = hub.EnableProjectFederation(ctx, project.ID, "worker")
+		require.NoError(t, err)
+		remote = append(remote, project)
+		if i == 2 {
+			continue
+		}
+		replica, err := store.CreateProjectWithUID(ctx, name, project.UID)
+		require.NoError(t, err)
+		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: replica.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "worker", Enabled: true, PushEnabled: true})
+		require.NoError(t, err)
+		local = append(local, replica)
+	}
+	portable := func(e db.Event) db.RemoteEvent {
+		return db.RemoteEvent{EventUID: e.UID, OriginInstanceUID: e.OriginInstanceUID, ProjectUID: e.ProjectUID, ProjectName: e.ProjectName, IssueUID: e.IssueUID, RelatedIssueUID: e.RelatedIssueUID, Type: e.Type, Actor: e.Actor, Payload: []byte(e.Payload), ContentHash: e.ContentHash, HLCPhysicalMS: e.HLCPhysicalMS, HLCCounter: e.HLCCounter, CreatedAt: e.CreatedAt}
+	}
+	issue, creation, err := hub.CreateIssue(ctx, db.CreateIssueParams{ProjectID: remote[0].ID, Title: "overtaken", Author: "worker"})
+	require.NoError(t, err)
+	_, err = store.InsertRemoteEvents(ctx, local[0].ID, []db.RemoteEvent{portable(creation)})
+	require.NoError(t, err)
+	require.NoError(t, store.MaterializeFederatedProject(ctx, local[0].ID))
+	localIssue, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	move, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: localIssue.ID, FromProjectID: local[0].ID, ToProjectID: local[1].ID, IfMatchRev: localIssue.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	away, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: remote[0].ID, ToProjectID: remote[2].ID, IfMatchRev: issue.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	event := portable(*away.Event)
+	event.HLCPhysicalMS, event.HLCCounter = move.Event.HLCPhysicalMS, move.Event.HLCCounter+1
+	event.ContentHash, err = db.RemoteEventContentHash(event)
+	require.NoError(t, err)
+	_, err = store.InsertRemoteEvents(ctx, local[0].ID, []db.RemoteEvent{event})
+	require.NoError(t, err)
+	require.NoError(t, store.MaterializeFederatedProject(ctx, local[0].ID))
+	current, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.NotEqual(t, local[1].ID, current.ProjectID)
+	return local[0]
+}
+
+func TestPrepareFederationLeaveOvertakenMove(t *testing.T) {
+	store := openReplicaServiceStore(t)
+	source := overtakenLeaveFixture(t, store)
+	_, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, newReplicaCredentialStore(), source.ID, "")
+	require.NoError(t, err)
+}
+
+func TestLeaveFederationRouteOvertakenMove(t *testing.T) {
+	env := testenv.New(t)
+	source := overtakenLeaveFixture(t, env.DB)
+	path := fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", source.ID)
+	response, raw := envDoRaw(t, env, http.MethodPost, path, map[string]any{"disposition": "archive", "actor": "worker", "preflight": true, "force": true}, nil)
+	require.Equal(t, http.StatusConflict, response.StatusCode, string(raw))
+	response, raw = envDoRaw(t, env, http.MethodPost, path, map[string]any{"disposition": "archive", "actor": "worker", "prepare": true, "force": true}, nil)
+	require.Equal(t, http.StatusConflict, response.StatusCode, string(raw))
+	response, raw = envDoRaw(t, env, http.MethodPost, path, map[string]any{"disposition": "detach", "actor": "worker", "preflight": true}, nil)
+	require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
+	response, raw = envDoRaw(t, env, http.MethodPost, path, map[string]any{"disposition": "detach", "actor": "worker", "prepare": true}, nil)
+	require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
+	response, raw = envDoRaw(t, env, http.MethodPost, path, map[string]any{"disposition": "detach", "actor": "worker"}, nil)
+	require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
+	_, err := env.DB.FederationBindingByProject(t.Context(), source.ID)
+	require.ErrorIs(t, err, db.ErrNotFound)
+}
