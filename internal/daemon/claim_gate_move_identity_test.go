@@ -236,19 +236,30 @@ func TestRetainedIssueMoveChecksHubBeforeSnapshot(t *testing.T) {
 			}
 		})
 	}
-	t.Run("subtree uses each hub result", checkRetainedSubtreeMoveUsesEachHubResult)
+	for _, crossProject := range []bool{false, true} {
+		t.Run(fmt.Sprintf("subtree uses each hub result/cross_project=%t", crossProject), func(t *testing.T) {
+			checkRetainedSubtreeMoveUsesEachHubResult(t, crossProject)
+		})
+	}
 }
 
-func checkRetainedSubtreeMoveUsesEachHubResult(t *testing.T) {
+func checkRetainedSubtreeMoveUsesEachHubResult(t *testing.T, crossProject bool) {
 	env := testenv.New(t)
 	ctx := t.Context()
 	source, err := env.DB.CreateProject(ctx, "source-project")
 	require.NoError(t, err)
 	target, err := env.DB.CreateProject(ctx, "target-project")
 	require.NoError(t, err)
+	childProject := source
+	projects := []db.Project{source, target}
+	if crossProject {
+		childProject, err = env.DB.CreateProject(ctx, "child-project")
+		require.NoError(t, err)
+		projects = append(projects, childProject)
+	}
 	root, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "root", Author: "old-actor"})
 	require.NoError(t, err)
-	child, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "child", Author: "old-actor", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
+	child, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: childProject.ID, Title: "child", Author: "old-actor", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
 	require.NoError(t, err)
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, child.UID) {
@@ -259,18 +270,19 @@ func checkRetainedSubtreeMoveUsesEachHubResult(t *testing.T) {
 		_ = json.MarshalWrite(w, api.ClaimStatusBody{HubNow: time.Now().UTC()})
 	}))
 	t.Cleanup(hub.Close)
-	for _, project := range []db.Project{source, target} {
-		_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: project.ID == source.ID})
+	for _, project := range projects {
+		_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: project.ID != target.ID})
 		require.NoError(t, err)
 		require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: project.ID, Token: "claim-token", Actor: "new-actor", Capabilities: "claim,push"}))
 	}
 	response, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(source.ID, root.UID, "actions/move"), map[string]any{"actor": "new-actor", "to_project_uid": target.UID}, map[string]string{"If-Match": fmt.Sprintf(`"rev-%d"`, root.Revision)})
 	require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
 	for _, tc := range []struct {
+		projectID int64
 		uid       string
 		snapshots int
-	}{{root.UID, 0}, {child.UID, 1}} {
-		snapshots, err := env.DB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: source.ID, IssueUID: tc.uid, Types: []string{"issue.snapshot"}, Limit: 10})
+	}{{source.ID, root.UID, 0}, {childProject.ID, child.UID, 1}} {
+		snapshots, err := env.DB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: tc.projectID, IssueUID: tc.uid, Types: []string{"issue.snapshot"}, Limit: 10})
 		require.NoError(t, err)
 		require.Len(t, snapshots, tc.snapshots)
 	}

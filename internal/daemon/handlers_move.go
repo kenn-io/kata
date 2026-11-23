@@ -90,7 +90,7 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 		}
 		res, err := cfg.DB.MoveIssueProject(ctx, move)
 		if err == nil {
-			var snapshots []string
+			var snapshots []moveSnapshot
 			for _, issue := range res.Issues {
 				var refresh claimRefreshResult
 				if err := requireFederatedIssueClaimWithResult(ctx, cfg, issue, actor, !in.Body.DryRun, &refresh); err != nil {
@@ -120,11 +120,11 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 					return nil, api.NewError(503, "federation_offline", "the hub is unavailable", "retry the move when the hub is reachable", nil)
 				}
 				if refresh.missing {
-					snapshots = append(snapshots, issue.UID)
+					snapshots = append(snapshots, moveSnapshot{projectID: issue.ProjectID, uid: issue.UID})
 				}
 			}
 			if !in.Body.DryRun {
-				if err := retainMoveSnapshots(ctx, cfg, iss.ProjectID, snapshots); err != nil {
+				if err := retainMoveSnapshots(ctx, cfg, snapshots); err != nil {
 					return nil, err
 				}
 				move.DryRun = false
@@ -155,12 +155,17 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 	}
 }
 
+type moveSnapshot struct {
+	projectID int64
+	uid       string
+}
+
 // retainMoveSnapshots records the moved tasks' retained snapshots and
 // publishes each one that commits, even when the later move fails.
-func retainMoveSnapshots(ctx context.Context, cfg ServerConfig, projectID int64, uids []string) error {
+func retainMoveSnapshots(ctx context.Context, cfg ServerConfig, snapshots []moveSnapshot) error {
 	ctx = db.WithRecoveryEventPublisher(ctx, func(event db.Event) { cfg.Publish().Event(event.ProjectID, event) })
-	for _, uid := range uids {
-		if _, _, err := cfg.DB.RetainedIssueSnapshot(ctx, projectID, uid); err != nil {
+	for _, snapshot := range snapshots {
+		if _, _, err := cfg.DB.RetainedIssueSnapshot(ctx, snapshot.projectID, snapshot.uid); err != nil {
 			return internalAPIError(err)
 		}
 	}
