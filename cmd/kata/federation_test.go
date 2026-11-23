@@ -3068,7 +3068,7 @@ func TestFederationJoinLeaveJoinRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, binding.PushEnabled, "rejoin must honor --push")
 	assert.Equal(t, int64(0), binding.PushCursorEventID,
-		"rejoin re-offers local-origin events from 0 for hub-side dedup")
+		"rejoin resets the push cursor to replay eligible local events")
 	creds, err := config.ReadFederationCredentials()
 	require.NoError(t, err)
 	assert.Equal(t, "rejoin-token", creds.Projects[project.UID].Token,
