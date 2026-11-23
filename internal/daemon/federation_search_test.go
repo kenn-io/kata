@@ -525,14 +525,15 @@ func TestDirectSpokeSearchHubLexicalRanking(t *testing.T) {
 	for _, hit := range body.Results {
 		require.False(t, seen[hit.Issue.UID])
 		seen[hit.Issue.UID] = true
-		if hit.Issue.UID == remote.UID {
+		switch hit.Issue.UID {
+		case remote.UID:
 			require.Equal(t, 1e-12, hit.Score)
-		} else if hit.Issue.UID == localOnly.UID {
+		case localOnly.UID:
 			require.Equal(t, changed.Title, hit.Issue.Title)
 			require.Equal(t, localOnly.ID, hit.Issue.ID)
 			require.Equal(t, localOnly.ShortID, hit.Issue.ShortID)
 			require.Equal(t, 5e-13, hit.Score)
-		} else {
+		default:
 			_, ok := localScores[hit.Issue.UID]
 			require.True(t, ok)
 			if localRanks[hit.Issue.UID] <= hubRanks[hit.Issue.UID] {
