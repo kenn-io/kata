@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button } from '@kenn-io/kit-ui'
+  import { Button, SelectDropdown } from '@kenn-io/kit-ui'
   import PlusIcon from '@lucide/svelte/icons/plus'
 
   import Modal from './Modal.svelte'
@@ -33,9 +33,7 @@
   let lastDraftFenceGeneration = $state<number | null>(null)
   let chosenName = $state('')
 
-  async function chooseInbox(event: Event): Promise<void> {
-    const select = event.currentTarget as HTMLSelectElement
-    const uid = select.value
+  async function chooseInbox(uid: string): Promise<void> {
     if (!uid || !onChooseInbox) return
     pending = true
     error = null
@@ -43,7 +41,6 @@
       await onChooseInbox(uid)
       chosenName = projects?.find((project) => project.uid === uid)?.name ?? ''
     } catch (err) {
-      select.value = inboxUID ?? ''
       error = err instanceof Error ? err.message : 'Could not change project.'
     } finally {
       pending = false
@@ -122,15 +119,19 @@
     </label>
     {#if error}<p class="capture-error" role="alert">{error}</p>{/if}
     {#if projects && onChooseInbox}
-      <label
-        >Project
-        <select value={inboxUID ?? ''} onchange={chooseInbox} disabled={pending || disabled}>
-          <option value="" disabled>Choose a project</option>
-          {#each projects as project (project.uid)}
-            <option value={project.uid}>{project.name}</option>
-          {/each}
-        </select>
-      </label>
+      <div class="project-row">
+        <span>Project</span>
+        <SelectDropdown
+          title="Project"
+          value={inboxUID ?? ''}
+          options={[
+            { value: '', label: 'Choose a project', disabled: true },
+            ...projects.map((project) => ({ value: project.uid, label: project.name })),
+          ]}
+          onchange={(uid) => void chooseInbox(uid)}
+          disabled={pending || disabled}
+        />
+      </div>
       {#if chosenName}<p class="capture-destination">
           New tasks go to {chosenName} from now on.
         </p>{/if}
@@ -191,24 +192,16 @@
     font-size: var(--font-size-sm);
   }
 
-  .capture label {
+  .capture label,
+  .project-row {
     display: grid;
     grid-template-columns: 96px 1fr;
     align-items: baseline;
   }
 
-  .capture select {
-    min-width: 0;
-    padding: 8px;
-    border: 1px solid var(--border-default);
-    border-radius: var(--radius-sm);
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    font: inherit;
-  }
-
   @media (max-width: 640px) {
-    .capture label {
+    .capture label,
+    .project-row {
       grid-template-columns: 1fr;
       gap: 6px;
     }

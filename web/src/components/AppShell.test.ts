@@ -103,7 +103,13 @@ describe('AppShell', () => {
   })
 
   test('offers project sync status from the current project without credential inventory authority', () => {
-    setGeneratedFetch(vi.fn(async () => Response.json({ statuses: [] })))
+    setGeneratedFetch(
+      vi.fn(async (url) =>
+        Response.json(
+          String(url).includes('/recurrences') ? { recurrences: [] } : { statuses: [] },
+        ),
+      ),
+    )
     const current = snapshot()
     render(AppShell, {
       props: {
@@ -125,7 +131,13 @@ describe('AppShell', () => {
   })
 
   test('keeps project sync readable for a current read-only project member', () => {
-    setGeneratedFetch(vi.fn(async () => Response.json({ statuses: [] })))
+    setGeneratedFetch(
+      vi.fn(async (url) =>
+        Response.json(
+          String(url).includes('/recurrences') ? { recurrences: [] } : { statuses: [] },
+        ),
+      ),
+    )
     const current = snapshot()
     current.capabilities.writable = false
     render(AppShell, {
@@ -258,7 +270,8 @@ describe('AppShell', () => {
     'fences project sync display when authority is %s',
     async (reason) => {
       let signal: AbortSignal | undefined
-      const fetcher = vi.fn<typeof fetch>(async (_url, init) => {
+      const fetcher = vi.fn<typeof fetch>(async (url, init) => {
+        if (String(url).includes('/recurrences')) return Response.json({ recurrences: [] })
         signal = init?.signal ?? undefined
         return Response.json({ statuses: [] })
       })
@@ -278,7 +291,11 @@ describe('AppShell', () => {
         onCreateProject: vi.fn(async () => ({ changed: true })),
       }
       const view = render(AppShell, { props })
-      await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1))
+      await waitFor(() =>
+        expect(
+          fetcher.mock.calls.filter(([url]) => !String(url).includes('/recurrences')),
+        ).toHaveLength(1),
+      )
       const next = snapshot()
       if (reason === 'expired') next.capabilities.expires_at = '2020-01-01T00:00:00Z'
       if (reason === 'removed') next.catalog = []
@@ -305,12 +322,20 @@ describe('AppShell', () => {
       })
       expect(screen.queryByRole('region', { name: 'Project sync' })).toBeNull()
       expect(signal?.aborted).toBe(true)
-      expect(fetcher).toHaveBeenCalledTimes(1)
+      expect(
+        fetcher.mock.calls.filter(([url]) => !String(url).includes('/recurrences')),
+      ).toHaveLength(1)
     },
   )
 
   test('keeps project sync in place while the snapshot reloads after navigation', async () => {
-    setGeneratedFetch(vi.fn(async () => Response.json({ statuses: [] })))
+    setGeneratedFetch(
+      vi.fn(async (url) =>
+        Response.json(
+          String(url).includes('/recurrences') ? { recurrences: [] } : { statuses: [] },
+        ),
+      ),
+    )
     const current = snapshot()
     const props = {
       route: {
@@ -2033,9 +2058,8 @@ describe('AppShell', () => {
     const create = screen.getByRole('button', { name: 'New task' })
     expect(create.getAttribute('aria-disabled')).toBeNull()
     await fireEvent.click(create)
-    await fireEvent.change(screen.getByLabelText('Project'), {
-      target: { value: '01J00000000000000000000002' },
-    })
+    await fireEvent.click(screen.getByRole('combobox', { name: 'Project: Choose a project' }))
+    await fireEvent.click(screen.getByRole('option', { name: snapshot().catalog[0]!.project.name }))
     expect(onDesignateInbox).toHaveBeenCalledWith('01J00000000000000000000002')
     expect(screen.getByRole('textbox', { name: 'Quick capture' })).not.toBeNull()
   })

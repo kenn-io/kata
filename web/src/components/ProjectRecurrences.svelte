@@ -22,6 +22,7 @@
     actor: string
     ownerOptions?: TypeaheadOption[]
     disabled?: boolean
+    draftFenceGeneration?: number
     refreshGeneration?: number
     onCreate: (projectID: number, input: KataCreateRecurrenceInput) => Promise<void>
     onPatch: (
@@ -36,6 +37,7 @@
     actor,
     ownerOptions = [],
     disabled = false,
+    draftFenceGeneration = 0,
     refreshGeneration = 0,
     onCreate,
     onPatch,
@@ -43,6 +45,7 @@
   }: Props = $props()
   let recurrences = $state<KataRecurrence[]>([])
   let open = $state(false)
+  let readError = $state(false)
   let root: HTMLDivElement | undefined = $state()
   let panel: HTMLDivElement | undefined = $state()
   let panelStyle = $state('')
@@ -59,11 +62,16 @@
     const current = ++generation
     try {
       const result = await listRecurrences({ projectId: id })
-      const loaded = result.status === 200 ? (result.data.recurrences as KataRecurrence[]) : []
-      if (current === generation) recurrences = loaded
+      if (result.status !== 200 || !Array.isArray(result.data.recurrences))
+        throw new Error('Could not load repeating tasks')
+      const loaded = result.data.recurrences as KataRecurrence[]
+      if (current === generation) {
+        recurrences = loaded
+        readError = false
+      }
       return loaded
     } catch {
-      if (current === generation) recurrences = []
+      if (current === generation) readError = true
       return []
     }
   }
@@ -73,6 +81,7 @@
     if (lastProjectID !== id) {
       lastProjectID = id
       recurrences = []
+      readError = false
       open = false
     }
     void refresh(id)
@@ -143,6 +152,12 @@
   }
 </script>
 
+{#if readError}
+  <span role="alert"
+    >Could not load repeating tasks. <button onclick={() => void refresh(projectID)}>Retry</button
+    ></span
+  >
+{/if}
 {#if recurrences.length}
   <div class="host" bind:this={root}>
     <Chip interactive expanded={open} onclick={() => void toggle()}
@@ -177,6 +192,7 @@
   {actor}
   {ownerOptions}
   {disabled}
+  {draftFenceGeneration}
   {onCreate}
   onPatch={patch}
   onDelete={remove}
@@ -192,6 +208,8 @@
     display: grid;
     gap: 12px;
     width: min(340px, calc(100vw - 24px));
+    max-height: calc(100vh - 24px);
+    overflow-y: auto;
     padding: 16px;
   }
   .row {

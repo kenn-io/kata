@@ -3,6 +3,24 @@ import { afterEach, expect, it, vi } from 'vitest'
 import ProjectRecurrences from './ProjectRecurrences.svelte'
 import { listRecurrences } from '../lib/api/generated/default/default'
 
+const recurrence = {
+  id: 1,
+  uid: 'r1',
+  project_id: 1,
+  rrule: 'FREQ=WEEKLY',
+  dtstart: '2026-11-22',
+  timezone: 'UTC',
+  template_title: 'Weekly task',
+  template_body: '',
+  template_labels: [],
+  template_metadata: {},
+  author: 'user-a',
+  revision: 1,
+  created_at: '',
+  updated_at: '',
+  next_occurrence_key: '2026-11-29',
+}
+
 vi.mock('../lib/api/generated/default/default', () => ({ listRecurrences: vi.fn() }))
 afterEach(() => {
   cleanup()
@@ -31,6 +49,7 @@ it.each([200, 403])(
     })
     await waitFor(() => expect(listRecurrences).toHaveBeenCalled())
     expect(screen.queryByRole('button', { name: /repeating task/ })).toBeNull()
+    if (status === 403) expect(await screen.findByRole('alert')).toBeTruthy()
   },
 )
 
@@ -39,28 +58,10 @@ it('lists a project rule and opens its stop dialog', async () => {
     status: 200,
     headers: new Headers(),
     data: {
-      recurrences: [
-        {
-          id: 1,
-          uid: 'r1',
-          project_id: 1,
-          rrule: 'FREQ=WEEKLY',
-          dtstart: '2026-11-22',
-          timezone: 'UTC',
-          template_title: 'Weekly task',
-          template_body: '',
-          template_labels: [],
-          template_metadata: {},
-          author: 'user-a',
-          revision: 1,
-          created_at: '',
-          updated_at: '',
-          next_occurrence_key: '2026-11-29',
-        },
-      ],
+      recurrences: [recurrence],
     },
   })
-  render(ProjectRecurrences, {
+  const view = render(ProjectRecurrences, {
     props: {
       projectID: 1,
       actor: 'user-a',
@@ -73,26 +74,13 @@ it('lists a project rule and opens its stop dialog', async () => {
   expect(screen.getByText('Weekly task')).toBeTruthy()
   await fireEvent.click(screen.getByRole('button', { name: /Stop repeating/ }))
   expect(screen.getByRole('dialog', { name: 'Stop repeating' })).toBeTruthy()
+  await view.rerender({ draftFenceGeneration: 1 })
+  expect(screen.queryByRole('dialog', { name: 'Stop repeating' })).toBeNull()
+  await view.rerender({ disabled: true })
+  expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
 })
 
 it('reloads the rule after an edit conflict', async () => {
-  const recurrence = {
-    id: 1,
-    uid: 'r1',
-    project_id: 1,
-    rrule: 'FREQ=WEEKLY',
-    dtstart: '2026-11-22',
-    timezone: 'UTC',
-    template_title: 'Weekly task',
-    template_body: '',
-    template_labels: [],
-    template_metadata: {},
-    author: 'user-a',
-    revision: 1,
-    created_at: '',
-    updated_at: '',
-    next_occurrence_key: '2026-11-29',
-  }
   vi.mocked(listRecurrences)
     .mockResolvedValueOnce({
       status: 200,
@@ -121,4 +109,38 @@ it('reloads the rule after an edit conflict', async () => {
   await waitFor(() =>
     expect((within(dialog).getByLabelText('Title') as HTMLInputElement).value).toBe('Updated task'),
   )
+})
+
+it('keeps the loaded rules available after a failed refresh and retries', async () => {
+  vi.mocked(listRecurrences)
+    .mockResolvedValueOnce({
+      status: 200,
+      headers: new Headers(),
+      data: { recurrences: [recurrence] },
+    })
+    .mockResolvedValueOnce({
+      status: 503,
+      headers: new Headers(),
+      data: { error: { code: 'unavailable', message: 'Unavailable' } },
+    } as Awaited<ReturnType<typeof listRecurrences>>)
+    .mockResolvedValueOnce({
+      status: 200,
+      headers: new Headers(),
+      data: { recurrences: [recurrence] },
+    })
+  const view = render(ProjectRecurrences, {
+    props: {
+      projectID: 1,
+      actor: 'user-a',
+      onCreate: vi.fn(),
+      onPatch: vi.fn(),
+      onDelete: vi.fn(),
+    },
+  })
+  await screen.findByRole('button', { name: /1 repeating task/ })
+  await view.rerender({ refreshGeneration: 1 })
+  expect(await screen.findByRole('alert')).toBeTruthy()
+  expect(screen.getByRole('button', { name: /1 repeating task/ })).toBeTruthy()
+  await fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+  await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
 })

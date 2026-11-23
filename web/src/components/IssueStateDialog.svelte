@@ -284,7 +284,8 @@
       <div>Comments, links, and attachments stay.</div>
       {#if blockedCount}
         <div>
-          {blockedCount} open {blockedCount === 1 ? 'task it blocks stops' : 'tasks it blocks stop'} waiting.
+          {blockedCount} open {blockedCount === 1 ? 'task' : 'tasks'} will no longer be blocked by this
+          task.
         </div>
       {/if}
       <div>Reopen from the Logbook.</div>

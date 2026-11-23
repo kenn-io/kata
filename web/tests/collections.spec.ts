@@ -191,8 +191,9 @@ test('New task designates an Inbox before opening quick capture', async ({ page,
   const create = page.getByRole('button', { name: 'New task' })
   await expect(create).toBeEnabled()
   await create.click()
-  await expect(page.getByRole('dialog', { name: 'Choose Inbox project' })).toBeVisible()
-  await page.getByRole('button', { name: 'Use example-project as Inbox' }).click()
+  await expect(page.getByRole('dialog', { name: 'New task' })).toBeVisible()
+  await page.getByRole('combobox', { name: 'Project: Choose a project' }).click()
+  await page.getByRole('option', { name: 'example-project' }).click()
 
   await expect(page.getByRole('textbox', { name: 'Quick capture' })).toBeVisible()
   const restored = await kata.request(

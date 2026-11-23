@@ -661,15 +661,17 @@ function formatTail(r: CommonRule): string {
   }
   return ` until ${r.end.date}`
 }
-export function previewDates(rrule: string, start: string): string[] {
+export function previewDates(rrule: string, start: string, timezone: string): string[] {
   try {
     const date = start.replaceAll('-', '')
-    const rule = new RRuleTemporal({ rruleString: `DTSTART:${date}T000000Z\nRRULE:${rrule}` })
+    const normalizedRule = rrule.replace(/UNTIL=(\d{8})(?=;|$)/, 'UNTIL=$1T000000Z')
+    const rule = new RRuleTemporal({
+      rruleString: `DTSTART;TZID=${timezone}:${date}T000000\nRRULE:${normalizedRule}`,
+    })
     return rule
       .all((_, index) => index < 4)
       .map((value) => value.toString().slice(0, 10))
-      .filter((value) => value > start)
-      .slice(0, 3)
+      .slice(0, 4)
   } catch {
     return []
   }

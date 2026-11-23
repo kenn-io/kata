@@ -245,6 +245,9 @@
   let activeRrule = $derived(
     mode_ === 'advanced' ? advancedText : serializeRRule(currentCommonRule),
   )
+  let dates = $derived(
+    mode_ === 'common' ? previewDates(activeRrule, dtstart, resolvedTimezone()) : [],
+  )
 
   // The compact summary mirrors whatever rule we'd submit right now —
   // Common form in Common mode, raw textarea in Advanced mode. We hide
@@ -864,11 +867,11 @@
   {#if currentSummary}
     <DialogPreview>
       <div data-testid="recurrence-summary">{currentSummary}</div>
-      {#if mode.kind === 'create'}<div>
-          This task becomes the first, scheduled {formatDay(dtstart)}.
+      {#if mode.kind === 'create' && dates.length}<div>
+          This task becomes the first, scheduled {formatDay(dates[0]!)}.
         </div>{/if}
-      {#if mode_ === 'common' && previewDates(activeRrule, dtstart).length}
-        <div>Then {previewDates(activeRrule, dtstart).map(formatDay).join(' · ')}</div>
+      {#if dates.length > 1}
+        <div>Then {dates.slice(1).map(formatDay).join(' · ')}</div>
       {/if}
       <div>Completing each one makes the next.</div>
     </DialogPreview>

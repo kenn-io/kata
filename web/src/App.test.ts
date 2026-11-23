@@ -3042,9 +3042,10 @@ describe('App', () => {
 
     expect(screen.queryByRole('button', { name: /^Inbox project:/ })).toBeNull()
     await fireEvent.click(await screen.findByRole('button', { name: 'New task' }))
-    await fireEvent.change(await screen.findByLabelText('Project'), {
-      target: { value: accepted.catalog[0]!.project.uid },
-    })
+    await fireEvent.click(
+      await screen.findByRole('combobox', { name: 'Project: Choose a project' }),
+    )
+    await fireEvent.click(screen.getByRole('option', { name: accepted.catalog[0]!.project.name }))
 
     await waitFor(() => {
       const mutation = requests.find(
@@ -3115,12 +3116,10 @@ describe('App', () => {
     render(App)
 
     await fireEvent.click(await screen.findByRole('button', { name: 'New task' }))
-    expect((screen.getByLabelText('Project') as HTMLSelectElement).value).toBe(
-      accepted.catalog[0]!.project.uid,
+    await fireEvent.click(
+      screen.getByRole('combobox', { name: `Project: ${accepted.catalog[0]!.project.name}` }),
     )
-    await fireEvent.change(screen.getByLabelText('Project'), {
-      target: { value: accepted.catalog[1]!.project.uid },
-    })
+    await fireEvent.click(screen.getByRole('option', { name: accepted.catalog[1]!.project.name }))
 
     await waitFor(() => expect(patches).toHaveLength(1))
     expect(patches).toEqual([
@@ -4505,32 +4504,38 @@ describe('App', () => {
             window.dispatchEvent(new Event('focus'))
             await waitFor(() => expect(snapshotReads).toBeGreaterThan(reads))
             await waitFor(() =>
-              expect(screen.getByRole('button', { name: 'Add' })).toHaveProperty('disabled', false),
+              expect(
+                within(screen.getByRole('dialog', { name: 'New task' })).getByRole('button', {
+                  name: 'Add',
+                }),
+              ).toHaveProperty('disabled', true),
             )
+            expect(actionRequests).toHaveLength(0)
+            expect(shownErrors).toEqual([])
+            return
           }
-          await fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+          await fireEvent.click(
+            within(screen.getByRole('dialog', { name: 'New task' })).getByRole('button', {
+              name: 'Add',
+            }),
+          )
         } else {
           await fireEvent.click(await screen.findByRole('button', { name: 'Complete…' }))
           await fireEvent.input(screen.getByRole('textbox', { name: 'Evidence value' }), {
             target: { value: 'go test ./example' },
           })
-          await fireEvent.input(screen.getByRole('textbox', { name: /Completion note/ }), {
+          await fireEvent.input(screen.getByRole('textbox', { name: /What was done/ }), {
             target: { value: 'Completed the requested work and checked the result.' },
           })
           const buttons = screen.getAllByRole('button', { name: 'Complete' })
           await fireEvent.click(buttons[buttons.length - 1]!)
         }
-        if (result === 'missing-project') {
-          expect((await screen.findByRole('alert')).textContent).toBe(
-            'Task project is not available.',
-          )
-          expect(shownErrors).toEqual([])
-          expect(actionRequests).toHaveLength(0)
-          return
-        }
         await waitFor(() => expect(writes).toBe(1))
         if (refused) {
-          expect(await screen.findAllByText('validation: Action refused')).toHaveLength(1)
+          const dialog = screen.getByRole('dialog', {
+            name: action === 'create' ? 'New task' : 'Complete task',
+          })
+          expect(await within(dialog).findAllByText('validation: Action refused')).toHaveLength(1)
           await waitFor(() =>
             expect(shownErrors).toEqual([
               {
@@ -4543,7 +4548,7 @@ describe('App', () => {
             ]),
           )
           await tick()
-          expect(screen.getAllByText('validation: Action refused')).toHaveLength(1)
+          expect(within(dialog).getAllByText('validation: Action refused')).toHaveLength(1)
         } else {
           await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
           expect(shownErrors).toEqual([])

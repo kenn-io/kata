@@ -39,7 +39,8 @@ describe('QuickCapture', () => {
     })
     const input = screen.getByRole('textbox', { name: 'Quick capture' }) as HTMLInputElement
     await fireEvent.input(input, { target: { value: 'Draft task' } })
-    await fireEvent.change(screen.getByLabelText('Project'), { target: { value: 'b' } })
+    await fireEvent.click(screen.getByRole('combobox', { name: 'Project: Alpha' }))
+    await fireEvent.click(screen.getByRole('option', { name: 'Beta' }))
     expect(onChooseInbox).toHaveBeenCalledWith('b')
     expect((await screen.findByRole('alert')).textContent).toBe('Cannot change project')
     expect(input.value).toBe('Draft task')

@@ -940,7 +940,8 @@
               projectID={selectedProject.id}
               actor={selfActor ?? 'kata-web'}
               {ownerOptions}
-              disabled={!projectWideMutationAllowed}
+              disabled={!projectWideMutationAllowed || mutationPending}
+              {draftFenceGeneration}
               refreshGeneration={snapshot.cursor}
               onCreate={onCreateRecurrence}
               onPatch={onPatchRecurrence}
