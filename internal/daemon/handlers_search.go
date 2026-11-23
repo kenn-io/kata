@@ -155,9 +155,6 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if hubDegradedReason != "" {
 			res.Degraded, res.DegradedReason = true, "hub search: "+hubDegradedReason
 		}
-		if hubMode == string(modeLexical) {
-			res.Mode = modeLexical
-		}
 		more := len(res.Hits) > limit
 		page := api.PageMetadata{Complete: !more, Truncated: more}
 		if !stable && (res.Mode != modeLexical || res.Degraded || len(res.Hits) >= 200) {
