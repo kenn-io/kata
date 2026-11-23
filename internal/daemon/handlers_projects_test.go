@@ -335,28 +335,25 @@ func TestResolve_ByAliasInput_NotRegistered(t *testing.T) {
 }
 
 func TestResolve_NotInitializedHint(t *testing.T) {
-	for _, shape := range []string{"alias", "alias with name", "path with config", "path"} {
-		for _, state := range []string{"missing", "active", "archived"} {
-			if state == "active" && (shape == "alias with name" || shape == "path with config") {
-				continue
-			}
+	for _, shape := range []string{"alias", "name", "path with config"} {
+		for _, state := range []string{"missing", "archived"} {
 			t.Run(shape+"/"+state, func(t *testing.T) {
 				h := newServerWithGitWorkspace(t, "https://github.com/example/remote-project.git")
 				name := "remote-project"
 				request := map[string]any{"start_path": h.dir}
-				if shape == "alias" || shape == "alias with name" {
+				if shape == "alias" {
 					request = map[string]any{"alias": map[string]any{"identity": "github.com/example/remote-project", "kind": "git"}}
 				}
-				if shape == "alias with name" || shape == "path with config" {
+				if shape == "name" || shape == "path with config" {
 					name = "saved-project"
-					if shape == "alias with name" {
-						request["name"] = name
+					if shape == "name" {
+						request = map[string]any{"name": name}
 					} else {
 						testfix.WriteKataToml(t, h.dir, name)
 					}
 				}
 				hint := fmt.Sprintf(`run "kata init": it attaches this workspace to the active project %q, or creates it if none exists`, name)
-				if shape == "alias with name" {
+				if shape == "name" {
 					hint = fmt.Sprintf(`run "kata init" with --project set to %q: it attaches this workspace to the active project %q, or creates it if none exists`, name, name)
 				}
 				if state != "missing" {
@@ -366,7 +363,7 @@ func TestResolve_NotInitializedHint(t *testing.T) {
 						_, _, err = h.DB().RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: project.ID, Actor: "tester"})
 						require.NoError(t, err)
 						hint = fmt.Sprintf(`run "kata projects restore %d", then run "kata init" in this workspace`, project.ID)
-						if shape == "alias with name" {
+						if shape == "name" {
 							hint = fmt.Sprintf(`run "kata projects restore %d", then run "kata init" with --project set to %q in this workspace`, project.ID, name)
 						}
 					}

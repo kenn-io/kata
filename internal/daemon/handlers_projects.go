@@ -818,9 +818,7 @@ func resolveByName(ctx context.Context, store db.Storage, name string) (*api.Pro
 	}
 	project, err := store.ProjectByName(ctx, name)
 	if errors.Is(err, db.ErrNotFound) {
-		return nil, api.NewError(404, "project_not_initialized",
-			"project "+name+" is not registered",
-			`run "kata init" in this workspace`, map[string]any{"project": name})
+		return nil, projectNotInitialized(ctx, store, "project "+name+" is not registered", name, fmt.Sprintf(`run "kata init" with --project set to %q`, name), map[string]any{"project": name})
 	}
 	if err != nil {
 		return nil, internalAPIError(err)
