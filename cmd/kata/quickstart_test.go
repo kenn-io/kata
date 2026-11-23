@@ -201,7 +201,7 @@ func TestQuickstart_ContractPrintsManagedWorkflowWithoutMarkers(t *testing.T) {
 	assert.Equal(t, agentContractText, out, "contract format prints the injected contract without markers or framing")
 	// Hooks inject this text into every session in a kata workspace. Keep it
 	// to the single-agent core; coordination detail belongs in kata quickstart.
-	assert.LessOrEqual(t, len(out), 2200, "keep the per-session contract compact")
+	assert.LessOrEqual(t, len(out), 2000, "keep the per-session contract compact")
 }
 
 // The contract is rendered into other projects' AGENTS.md files, so it must

@@ -98,7 +98,7 @@ func TestNativeGuideExamplesMatchCatalog(t *testing.T) {
 	}
 	md, _ := SkillMarkdown("workflow")
 	require.Contains(t, md, agentguide.MCPContract)
-	require.LessOrEqual(t, len(agentguide.MCPContract), 2100)
+	require.LessOrEqual(t, len(agentguide.MCPContract), 2000)
 }
 
 // An MCP-only client follows the published quickstart using fixture state.

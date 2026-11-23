@@ -15,6 +15,8 @@ kata comment abc4 --body-stdin <<-'EOF'
 kata close abc4 --done --message "Fixed the race; tests pass." --commit 4f2a91c
 ```
 
+Renew a claim by claiming again with `--ttl`, without `--if-unowned`.
+
 Install:
 
 - macOS: `brew install kata`

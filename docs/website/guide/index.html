@@ -110,7 +110,7 @@
         <li class="guide-stop" id="claim">
           <div class="guide-copy">
             <h2>Claim one issue. Loudly.</h2>
-            <p>In a multi-agent workspace, <code>kata next --unowned</code> applies the shared priority rules and returns at most one candidate. <code>kata claim</code> takes ownership, and fails if someone got there first. Treat the failure as a signal: run <code>next</code> again and take different work. Claim with a time limit, <code>kata claim abc4 --ttl 2h --agent</code>, and renew it by claiming again with <code>--ttl</code>; a claim that runs out while <code>work.attention</code> is <code>ok</code> turns to <code>needs-human</code>.</p>
+            <p>In a multi-agent workspace, <code>kata next --unowned</code> applies the shared priority rules and returns at most one candidate. <code>kata claim</code> takes ownership, and fails if someone got there first. Treat the failure as a signal: run <code>next</code> again and take different work. Claim with a time limit, <code>kata claim abc4 --ttl 2h --agent</code>, and renew it by claiming again with <code>--ttl</code>, without <code>--if-unowned</code>; a claim that runs out while <code>work.attention</code> is <code>ok</code> turns to <code>needs-human</code>.</p>
             <p>A claim costs about 20ms end to end, so agents check and re-check constantly. The ledger stays truthful because staying truthful is cheap.</p>
             <p><a href="/docs/workflows/agents/#claim-work">The claim flow</a></p>
           </div>
