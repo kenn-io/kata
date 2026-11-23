@@ -97,6 +97,9 @@ message names it:
 | A `start_path` in a git workspace whose alias is not registered | none |
 | No `.kata.toml` and no git ancestor | none |
 
+An unregistered Git alias whose derived project name is invalid returns HTTP
+400 with error code `validation`.
+
 ```json
 {"error":{"code":"project_not_initialized","message":"alias github.com/example/spoke-project is not registered","hint":"run \"kata init\": it attaches this workspace to the active project \"spoke-project\", or creates it if none exists","data":{"alias":"github.com/example/spoke-project"}}}
 ```
