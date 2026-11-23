@@ -705,7 +705,7 @@ func TestCronSearchClickGuards(t *testing.T) {
 }
 
 // A run of a deleted job or workflow names it in the detail the way the list
-// does, and still notes that the definition is gone.
+// does, notes that the definition is gone, and displays the actor name.
 func TestCronRunDetailNamesDeletedDefinitionsAndDisplaysActor(t *testing.T) {
 	m := cronFixture(t)
 	p := m.cron.data

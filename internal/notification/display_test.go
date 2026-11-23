@@ -10,8 +10,13 @@ func TestDisplayValue(t *testing.T) {
 	if got.From != "Ana" || got.Message != "latest: reply c:abc by Ana/worker" {
 		t.Fatalf("display: %+v", got)
 	}
-	plain := Value{From: actor, Message: "Please ask " + actor}
-	if got := DisplayValue(plain); got.Message != plain.Message {
-		t.Fatalf("message changed: %q", got.Message)
+	for _, plain := range []Value{
+		{From: actor, Re: "uid", Message: "latest:  by " + actor},
+		{From: actor, Kind: "reply", Message: "latest: reply by " + actor},
+		{From: actor, Kind: "reply", Re: "uid", Message: "other: reply by " + actor},
+	} {
+		if got := DisplayValue(plain); got.Message != plain.Message {
+			t.Fatalf("message changed: %q", got.Message)
+		}
 	}
 }

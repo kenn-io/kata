@@ -929,29 +929,23 @@ type LabelsOutput struct {
 
 // CommentSummary is a bounded comment representation.
 type CommentSummary struct {
-	AccountableActor   *string              `json:"accountable_actor,omitempty"`
-	SourceActor        *string              `json:"source_actor,omitempty"`
-	AuthorityUID       *string              `json:"authority_uid,omitempty"`
-	Verification       *string              `json:"verification,omitempty"`
-	Handle             string               `json:"handle,omitempty"`
-	Reply              *CommentLinkSummary  `json:"reply,omitempty"`
-	Backlinks          []CommentLinkSummary `json:"backlinks,omitempty"`
-	BacklinksTruncated bool                 `json:"backlinks_truncated,omitempty"`
-	EditedAt           string               `json:"edited_at,omitempty"`
-	IssueUID           string               `json:"issue_uid,omitempty"`
-	IssueShortID       string               `json:"issue_short_id,omitempty"`
-	Teammate           string               `json:"teammate,omitempty"`
-	UID                string               `json:"uid"`
-	Author             string               `json:"author"`
-	AuthorFilter       string               `json:"author_filter,omitempty" jsonschema:"Exact author for the inbound filter"`
-	Body               string               `json:"body"`
-	CreatedAt          string               `json:"created_at"`
-}
-
-// CommentLinkSummary includes the exact author accepted by the inbound filter.
-type CommentLinkSummary struct {
-	commentref.Link
-	AuthorFilter string `json:"author_filter,omitempty" jsonschema:"Exact author for the inbound filter"`
+	AccountableActor   *string           `json:"accountable_actor,omitempty"`
+	SourceActor        *string           `json:"source_actor,omitempty"`
+	AuthorityUID       *string           `json:"authority_uid,omitempty"`
+	Verification       *string           `json:"verification,omitempty"`
+	Handle             string            `json:"handle,omitempty"`
+	Reply              *commentref.Link  `json:"reply,omitempty"`
+	Backlinks          []commentref.Link `json:"backlinks,omitempty"`
+	BacklinksTruncated bool              `json:"backlinks_truncated,omitempty"`
+	EditedAt           string            `json:"edited_at,omitempty"`
+	IssueUID           string            `json:"issue_uid,omitempty"`
+	IssueShortID       string            `json:"issue_short_id,omitempty"`
+	Teammate           string            `json:"teammate,omitempty"`
+	UID                string            `json:"uid"`
+	Author             string            `json:"author"`
+	AuthorFilter       string            `json:"author_filter,omitempty" jsonschema:"Exact author for the inbound filter"`
+	Body               string            `json:"body"`
+	CreatedAt          string            `json:"created_at"`
 }
 
 // LinkSummary identifies a relationship endpoint.

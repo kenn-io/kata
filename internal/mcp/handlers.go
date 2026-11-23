@@ -406,12 +406,12 @@ func (h toolHandlers) show(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 				if summary.Reply.ProjectUID == "" {
 					// Preserve the source assertion's state, but an unknown target
 					// lineage cannot establish authority to expose its identity.
-					summary.Reply = &CommentLinkSummary{Kind: summary.Reply.Kind, Status: summary.Reply.Status}
+					summary.Reply = &commentref.Link{Kind: summary.Reply.Kind, Status: summary.Reply.Status}
 				} else {
 					summary.Reply = nil
 				}
 			}
-			backlinks := make([]CommentLinkSummary, 0, len(summary.Backlinks))
+			backlinks := make([]commentref.Link, 0, len(summary.Backlinks))
 			for _, link := range summary.Backlinks {
 				if allowedProjects[link.ProjectUID] {
 					backlinks = append(backlinks, link)
@@ -1769,7 +1769,7 @@ func commentReadSummary(c generated.CommentOut) CommentSummary {
 		CreatedAt:          formatTime(c.CreatedAt),
 		IssueUID:           commentValue(c.IssueUID),
 		IssueShortID:       commentValue(c.IssueShortID),
-		Backlinks:          []CommentLinkSummary{},
+		Backlinks:          []commentref.Link{},
 	}
 	if c.EditedAt != nil {
 		out.EditedAt = formatTime(*c.EditedAt)
@@ -1783,8 +1783,8 @@ func commentReadSummary(c generated.CommentOut) CommentSummary {
 	}
 	return out
 }
-func commentLinkSummary(r generated.CommentLink) CommentLinkSummary {
-	return CommentLinkSummary{AuthorFilter: commentValue(r.Author), Body: commentValue(r.Body), CreatedAt: commentValue(r.CreatedAt), EditedAt: r.EditedAt, UID: commentValue(r.UID), Handle: commentValue(r.Handle), Kind: r.Kind, Author: authorname.Display(commentValue(r.Author)), Teammate: commentValue(r.Teammate), IssueUID: commentValue(r.IssueUID), IssueShortID: commentValue(r.IssueShortID), ProjectUID: commentValue(r.ProjectUID), ProjectID: commentValue(r.ProjectID), Status: commentValue(r.Status), TargetEdited: commentValue(r.TargetEdited)}
+func commentLinkSummary(r generated.CommentLink) commentref.Link {
+	return commentref.Link{Body: commentValue(r.Body), CreatedAt: commentValue(r.CreatedAt), EditedAt: r.EditedAt, UID: commentValue(r.UID), Handle: commentValue(r.Handle), Kind: r.Kind, Author: authorname.Display(commentValue(r.Author)), Teammate: commentValue(r.Teammate), IssueUID: commentValue(r.IssueUID), IssueShortID: commentValue(r.IssueShortID), ProjectUID: commentValue(r.ProjectUID), ProjectID: commentValue(r.ProjectID), Status: commentValue(r.Status), TargetEdited: commentValue(r.TargetEdited)}
 }
 func commentValue[T any](v *T) T {
 	if v != nil {

@@ -66,15 +66,14 @@ func TestShowFederatedAuthorDisplay(t *testing.T) {
 				require.Contains(t, output.String(), "by Ana\n")
 				require.Contains(t, output.String(), "comment-one Bo: ")
 				require.NotContains(t, output.String(), "member:")
+				require.Contains(t, output.String(), "source=Ana")
+				require.Contains(t, output.String(), "Cy")
 			} else {
 				require.NoError(t, printShowAgent(&output, response, "example-project", "show"))
-				require.Contains(t, output.String(), "author_filter=\"Bo"+suffix+"\"")
 				require.Contains(t, output.String(), "author=Bo ")
 				require.Contains(t, output.String(), "author=Cy ")
 				require.Contains(t, output.String(), "source=Ana\"")
 			}
-			require.Contains(t, output.String(), "source=Ana")
-			require.Contains(t, output.String(), "Cy")
 		})
 	}
 }

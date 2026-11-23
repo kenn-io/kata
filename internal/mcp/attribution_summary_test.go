@@ -15,14 +15,20 @@ func TestMCPAttributionSummaries(t *testing.T) {
 	h := toolHandlers{}
 	for _, state := range []string{"verified", "pending", "legacy"} {
 		t.Run(state, func(t *testing.T) {
-			accountable, source, authority, teammate := "member", "origin-agent", "01J00000000000000000000005", "helper-agent"
+			const id = "11111111-1111-4111-8111-111111111111"
+			raw := "Ana [member:" + id + "; enrollment:" + id + "]"
+			accountable, source, authority, teammate := "Root [service-account:"+id+"; token:"+id+"]", "Bo [member:"+id+"; enrollment:"+id+"]", "01J00000000000000000000005", "helper-agent"
+			var verifiedAccountable *string
+			if state == "verified" {
+				verifiedAccountable = &accountable
+			}
 			project := ProjectIdentity{Name: "shared-project"}
 			summaries := map[string]any{
-				"mutation":     h.summaryFromIssue(project, generated.Issue{Author: "source-author", AccountableActor: &accountable, SourceActor: &source, AuthorityUID: &authority, Teammate: &teammate, Verification: new(generated.IssueVerification(state)), UpdatedAt: time.Now()}),
-				"project_list": h.summaryFromIssueOut(project, generated.IssueOut{Author: "source-author", AccountableActor: &accountable, SourceActor: &source, AuthorityUID: &authority, Teammate: &teammate, Verification: new(generated.IssueOutVerification(state)), UpdatedAt: time.Now()}),
-				"global_list":  summaryFromGlobalIssue(generated.ListGlobalIssueOut{Author: "source-author", AccountableActor: &accountable, SourceActor: &source, AuthorityUID: &authority, Teammate: &teammate, Verification: new(generated.ListGlobalIssueOutVerification(state)), UpdatedAt: time.Now()}),
-				"global_ready": summaryFromReadyGlobalIssue(generated.ReadyGlobalIssueOut{Author: "source-author", AccountableActor: &accountable, SourceActor: &source, AuthorityUID: &authority, Teammate: &teammate, Verification: new(generated.ReadyGlobalIssueOutVerification(state)), UpdatedAt: time.Now()}),
-				"comment":      commentSummary(generated.Comment{Author: "source-author", AccountableActor: &accountable, SourceActor: &source, AuthorityUID: &authority, Teammate: &teammate, Verification: new(generated.CommentVerification(state)), CreatedAt: time.Now()}),
+				"mutation":     h.summaryFromIssue(project, generated.Issue{Author: raw, AccountableActor: verifiedAccountable, SourceActor: &source, AuthorityUID: &authority, Teammate: &teammate, Verification: new(generated.IssueVerification(state)), UpdatedAt: time.Now()}),
+				"project_list": h.summaryFromIssueOut(project, generated.IssueOut{Author: raw, AccountableActor: verifiedAccountable, SourceActor: &source, AuthorityUID: &authority, Teammate: &teammate, Verification: new(generated.IssueOutVerification(state)), UpdatedAt: time.Now()}),
+				"global_list":  summaryFromGlobalIssue(generated.ListGlobalIssueOut{Author: raw, AccountableActor: verifiedAccountable, SourceActor: &source, AuthorityUID: &authority, Teammate: &teammate, Verification: new(generated.ListGlobalIssueOutVerification(state)), UpdatedAt: time.Now()}),
+				"global_ready": summaryFromReadyGlobalIssue(generated.ReadyGlobalIssueOut{Author: raw, AccountableActor: verifiedAccountable, SourceActor: &source, AuthorityUID: &authority, Teammate: &teammate, Verification: new(generated.ReadyGlobalIssueOutVerification(state)), UpdatedAt: time.Now()}),
+				"comment":      commentSummary(generated.Comment{Author: raw, AccountableActor: verifiedAccountable, SourceActor: &source, AuthorityUID: &authority, Teammate: &teammate, Verification: new(generated.CommentVerification(state)), CreatedAt: time.Now()}),
 			}
 			for name, summary := range summaries {
 				t.Run(name, func(t *testing.T) {
@@ -30,9 +36,13 @@ func TestMCPAttributionSummaries(t *testing.T) {
 					require.NoError(t, err)
 					var record map[string]any
 					require.NoError(t, json.Unmarshal(encoded, &record))
-					require.Equal(t, "member", record["accountable_actor"])
-					require.Equal(t, "origin-agent", record["source_actor"])
-					require.Equal(t, "source-author", record["author"])
+					if state == "verified" {
+						require.Equal(t, "Root", record["accountable_actor"])
+					} else {
+						require.NotContains(t, record, "accountable_actor")
+					}
+					require.Equal(t, "Bo", record["source_actor"])
+					require.Equal(t, "Ana", record["author"])
 					require.Equal(t, "helper-agent", record["teammate"])
 					require.Equal(t, "01J00000000000000000000005", record["authority_uid"])
 					require.Equal(t, state, record["verification"])
@@ -42,22 +52,14 @@ func TestMCPAttributionSummaries(t *testing.T) {
 	}
 }
 
-// Actor labels show the federated name; the raw connection identity stays in
-// stored records. Without a verified receipt the source actor is the author.
+// Comment links and events show federated names while stream payloads stay raw.
 func TestMCPFederatedAuthorDisplay(t *testing.T) {
-	h := toolHandlers{}
 	const id = "11111111-1111-4111-8111-111111111111"
 	raw := "Ana [member:" + id + "; enrollment:" + id + "]"
 	accountable := "Root [service-account:" + id + "; token:" + id + "]"
-	project := ProjectIdentity{Name: "shared-project"}
 	link := generated.CommentLink{Kind: "reply", Author: &raw}
 	summaries := map[string]any{
-		"mutation":     h.summaryFromIssue(project, generated.Issue{Author: raw, SourceActor: &raw, AccountableActor: &accountable}),
-		"project_list": h.summaryFromIssueOut(project, generated.IssueOut{Author: raw, SourceActor: &raw, AccountableActor: &accountable}),
-		"global_list":  summaryFromGlobalIssue(generated.ListGlobalIssueOut{Author: raw, SourceActor: &raw, AccountableActor: &accountable}),
-		"global_ready": summaryFromReadyGlobalIssue(generated.ReadyGlobalIssueOut{Author: raw, SourceActor: &raw, AccountableActor: &accountable}),
-		"comment":      commentSummary(generated.Comment{Author: raw, SourceActor: &raw, AccountableActor: &accountable}),
-		"comment_read": commentReadSummary(generated.CommentOut{Author: raw, SourceActor: &raw, AccountableActor: &accountable, Reply: &link}),
+		"comment_read": commentReadSummary(generated.CommentOut{Author: raw, SourceActor: &raw, AccountableActor: &accountable, Verification: new(generated.CommentOutVerification("verified")), Reply: &link}),
 		"event":        eventSummary(&generated.Event{UID: "01J00000000000000000000006", Type: "issue.created", Actor: raw}),
 	}
 	for name, summary := range summaries {

@@ -203,7 +203,7 @@ func TestInboxFederatedSender(t *testing.T) {
 		assert.NotContains(t, out, "member:")
 	}
 	agent := runCLI(t, env, dir, "inbox", "--for", "reviewer", "--agent")
-	assert.Contains(t, agent, agentValue(actor))
+	assert.Contains(t, agent, "from=Ana")
 	assert.Contains(t, agent, "from_address=")
 	out := runCLI(t, env, dir, "inbox", "--for", "reviewer", "--json")
 	assert.Contains(t, out, actor)

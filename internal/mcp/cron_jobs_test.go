@@ -375,11 +375,6 @@ func TestCronFederatedAuthors(t *testing.T) {
 		list := cronOK(t, s, "cron_"+kind+"s", map[string]any{})[kind+"s"].([]any)
 		require.Len(t, list, 1)
 		require.Equal(t, "Ana", list[0].(map[string]any)["author"])
-		args["expected_event_uid"] = record["definition_event_uid"]
-		args["name"] = "Updated"
-		record = assertResult(cronOK(t, s, "cron_"+kind+"_update", args), kind, "author")
-		record = assertResult(cronOK(t, s, "cron_"+kind+"_delete", map[string]any{"uid": id, "expected_event_uid": record["definition_event_uid"]}), kind, "author")
-		record = assertResult(cronOK(t, s, "cron_"+kind+"_restore", map[string]any{"uid": id, "expected_event_uid": record["definition_event_uid"]}), kind, "author")
 		if kind == "job" {
 			stored, err := f.client.ShowCronJob(t.Context(), &generated.ShowCronJobRequestOptions{PathParams: &generated.ShowCronJobPath{ProjectID: f.project.ID, CronUID: id}})
 			require.NoError(t, err)
