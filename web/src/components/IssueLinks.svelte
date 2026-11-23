@@ -238,22 +238,6 @@
   .link-group-count {
     font-weight: var(--font-weight-normal);
   }
-  .section-action {
-    height: 24px;
-    border: 0;
-    border-radius: var(--radius-md);
-    background: transparent;
-    color: var(--text-secondary);
-    font: inherit;
-    font-size: var(--font-size-md);
-    padding: 0 8px;
-    cursor: pointer;
-  }
-  .section-action:hover:not(:disabled),
-  .section-action[aria-expanded='true'] {
-    background: var(--bg-surface-hover);
-    color: var(--text-primary);
-  }
   /* A record row: its text starts at the pane inset and its highlight runs
      to the pane's edges. */
   .link-row {

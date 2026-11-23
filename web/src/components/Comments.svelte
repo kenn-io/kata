@@ -503,6 +503,10 @@
     padding-left: 28px;
   }
 
+  .comment > :global([aria-label='Creation attribution']) {
+    margin-left: 28px;
+  }
+
   .comment > :global(.comment-body) {
     margin-top: 2px;
   }

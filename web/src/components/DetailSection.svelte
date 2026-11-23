@@ -129,6 +129,24 @@
     margin-left: auto;
   }
 
+  .detail-section-actions :global(.section-action) {
+    height: 24px;
+    border: 0;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: var(--font-size-md);
+    padding: 0 8px;
+    cursor: pointer;
+  }
+
+  .detail-section-actions :global(.section-action:hover:not(:disabled)),
+  .detail-section-actions :global(.section-action[aria-expanded='true']) {
+    background: var(--bg-surface-hover);
+    color: var(--text-primary);
+  }
+
   .detail-section-body {
     min-width: 0;
   }

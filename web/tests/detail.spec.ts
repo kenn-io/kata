@@ -68,6 +68,19 @@ test('comments, links, checklist, and history update without API fan-out', async
     const heading = await section.locator('header').boundingBox()
     expect(bounds?.height).toBe(heading?.height)
   }
+  const checklistAction = page
+    .getByRole('region', { name: 'Checklist' })
+    .getByRole('button', { name: 'Add item' })
+  const linksAction = page
+    .getByRole('region', { name: 'Links' })
+    .getByRole('button', { name: 'Add' })
+  const actionStyle = (element: HTMLElement) => {
+    const style = getComputedStyle(element)
+    return [style.borderWidth, style.backgroundColor, style.color, style.fontSize, style.height]
+  }
+  expect(await checklistAction.evaluate(actionStyle)).toEqual(
+    await linksAction.evaluate(actionStyle),
+  )
   await page.getByRole('button', { name: 'Add comment' }).click()
   await page.getByRole('textbox', { name: 'Comment' }).fill('A neutral collaboration note')
   await page.getByRole('button', { name: 'Add comment' }).click()

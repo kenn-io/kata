@@ -20,6 +20,10 @@ test('creation attribution distinguishes legacy, pending and verified records at
   // This first state comes from the native daemon, without response overrides.
   await expect(detail.getByText('Creation: legacy')).toHaveCount(2)
   await expect(detail).not.toContainText('Accountable:')
+  const commentRow = detail.locator('.comment').filter({ hasText: 'Example attributed comment' })
+  const attributionBounds = await commentRow.getByLabel('Creation attribution').boundingBox()
+  const bodyBounds = await commentRow.getByText('Example attributed comment').boundingBox()
+  expect(attributionBounds?.x).toBe(bodyBounds?.x)
 
   // The remaining states exercise the browser's projection/rendering boundary.
   // Signed receipt verification is tested separately in the native backend suite.
