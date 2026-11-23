@@ -285,6 +285,8 @@ recipe.
 
 **When you work a kata-tracked issue:**
 
+- Claim with `kata claim <ref> --ttl 2h`. Renew before expiry by claiming
+  again with `--ttl`, without `--if-unowned`.
 - When you claim or start a kata issue, immediately mark it actively tracked:
   `kata meta set <ref> work.attention ok`. This makes in-flight work visible
   to coordinators and dashboards from the moment it is grabbed.

@@ -5,8 +5,9 @@ import "strings"
 
 // Contract is the marker-free agent workflow contract: the short core every
 // coding agent sees. Coordination detail lives in the quickstart fragments.
-const Contract = `Use kata to track changes the user requests, not questions, explanations, or
-reviews that change nothing.
+const Contract = `This workspace tracks its work in kata. Use kata for the changes the user asks
+you to make here, not for questions, explanations, or reviews that change
+nothing.
 
 Before starting a change, look for an existing issue:
 
@@ -22,8 +23,8 @@ Link related work with --related <ref>, or a larger issue with --parent <ref>.
 ` + ClaimRules + `When asked only to record something, create the issue and stop.
 
 ` + CommentRules + `
-Close the issue as soon as work is verified, with a message of 40+ characters
-and evidence:
+Close the issue as soon as the work is verified. The message needs 40 or more
+characters and the close needs evidence:
 
     kata close <ref> --done --message "<what changed and how you verified it>" --test "<command>" --agent
 
@@ -41,8 +42,7 @@ const ClaimRules = `Claim the issue before you work on it, with a time limit:
 
     kata claim <ref> --ttl 2h --agent
 
-Renew before expiry by claiming again with --ttl, without --if-unowned. Expiry
-while work.attention is ok sets it to needs-human; a later claim restores ok.
+Renew before expiry by claiming again with --ttl, without --if-unowned.
 `
 
 // CommentRules says what a comment is for and how to pass its text. Its

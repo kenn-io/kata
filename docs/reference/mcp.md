@@ -439,7 +439,7 @@ open issue expires while `work.attention` is `ok`, Kata sets it to
 `needs-human` with the message `claim expired without hand-off`. Renew before
 expiry by calling `kata.claim` again with `ttl_seconds`, without `if_unowned`.
 The next successful claim sets `work.attention` back to `ok` and clears that
-message; a `needs-human` or `stuck` set on purpose stays. `kata.edit` supports field,
+exact message; a `needs-human` or `stuck` set on purpose stays. `kata.edit` supports field,
 owner, priority, relationship, scheduling, and generic metadata changes. An
 issue-field or relationship change and a metadata change must use separate
 `kata.edit` calls so one failed request cannot leave a partial edit.

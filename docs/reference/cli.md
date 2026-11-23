@@ -1227,7 +1227,7 @@ expires the claim on an open issue whose `work.attention` is `ok`, it sets
 `work.attention` to `needs-human` and `work.attention_msg` to
 `claim expired without hand-off`. Renew a timed claim before it expires by
 claiming again with `--ttl`, without `--if-unowned`. The next successful claim
-sets `work.attention` back to `ok` and clears that message; a `needs-human` or
+sets `work.attention` back to `ok` and clears that exact message; a `needs-human` or
 `stuck` set on purpose stays.
 
 Use `kata assign <ref> <owner>` to make an existing temporary assignment

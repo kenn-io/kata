@@ -21,7 +21,7 @@ func ReclaimedAssignmentHandoffPatch(status string, metadata JSONBlob) (map[stri
 	values := PayloadMap(jsontext.Value(metadata))
 	attention, _ := StringValue(values["work.attention"])
 	message, _ := StringValue(values["work.attention_msg"])
-	if status != "open" || attention != "needs-human" || message != expiredAssignmentMessage {
+	if status != "open" || (attention != "needs-human" && attention != "ok") || message != expiredAssignmentMessage {
 		return nil, false
 	}
 	return map[string]jsontext.Value{

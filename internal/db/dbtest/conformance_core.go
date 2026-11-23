@@ -1434,11 +1434,12 @@ func checkExpiredAssignmentAttentionHandoff(t *testing.T, store db.Storage) erro
 	require.NoError(t, err)
 	base := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
 	for _, tc := range []struct {
-		name, actor  string
-		startSession bool
+		name, actor                      string
+		startSession, sessionAfterExpiry bool
 	}{
-		{"same actor reclaims after expiry", "worker", false},
-		{"new session claims after expiry", "next-worker", true},
+		{"same actor reclaims after expiry", "worker", false, false},
+		{"new session claims after expiry", "next-worker", true, false},
+		{"session starts after expiry", "next-worker", true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: tc.name, Author: "worker"})
@@ -1447,13 +1448,19 @@ func checkExpiredAssignmentAttentionHandoff(t *testing.T, store db.Storage) erro
 			require.NoError(t, err)
 			_, err = store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: "worker", TTL: time.Minute, Now: base})
 			require.NoError(t, err)
-			if tc.startSession {
+			startSession := func() {
 				_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: tc.actor, Patch: map[string]jsontext.Value{"work.attention": jsontext.Value(`"ok"`), "work.attention_session": jsontext.Value(`"new-session"`)}})
 				require.NoError(t, err)
+			}
+			if tc.startSession && !tc.sessionAfterExpiry {
+				startSession()
 			}
 			expiryEvents, err := store.ExpireAssignments(ctx, db.ExpireAssignmentsParams{ProjectID: project.ID, Now: base.Add(2 * time.Minute)})
 			require.NoError(t, err)
 			require.Len(t, expiryEvents, 2)
+			if tc.sessionAfterExpiry {
+				startSession()
+			}
 			before, err := store.IssueByID(ctx, issue.ID)
 			require.NoError(t, err)
 			claim, err := store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: tc.actor, TTL: time.Minute, Now: base.Add(2 * time.Minute)})
@@ -1474,6 +1481,7 @@ func checkExpiredAssignmentAttentionHandoff(t *testing.T, store db.Storage) erro
 	}
 	for _, tc := range []struct{ name, attention, message string }{
 		{"deliberate attention", "needs-human", "please review"},
+		{"active with unrelated message", "ok", "working"},
 		{"stuck", "stuck", "claim expired without hand-off"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

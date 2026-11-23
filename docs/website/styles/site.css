@@ -537,19 +537,9 @@ button.button:hover {
 .choice p code,
 .boundary p code,
 .guide-copy p code,
-.ledger span code,
-.hero .caption code {
+.ledger span code {
   font-size: 0.85em;
   color: var(--carbon);
-}
-
-.guide-copy p code,
-.hero .caption code {
-  white-space: nowrap;
-}
-
-.hero .caption {
-  max-width: 46rem;
 }
 
 .ledger {
