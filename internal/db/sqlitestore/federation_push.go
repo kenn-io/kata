@@ -11,6 +11,10 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
+func (d *Store) CountRetainedFederationEvents(ctx context.Context, binding db.FederationBinding) (int64, error) {
+	return db.CountRetainedFederationEvents(ctx, d, d.InstanceUID(), binding)
+}
+
 // PendingFederationPushEvents returns local-origin events that have not yet
 // been acknowledged by the hub for a push-enabled spoke binding.
 func (d *Store) PendingFederationPushEvents(

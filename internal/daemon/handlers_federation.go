@@ -1680,37 +1680,7 @@ func federationRetainedEventCount(ctx context.Context, store db.Storage, binding
 	if binding.Role != db.FederationRoleSpoke || binding.RetainedThroughEventID == 0 {
 		return 0, nil
 	}
-	former, err := store.FormerInstanceUIDs(ctx)
-	if err != nil {
-		return 0, err
-	}
-	var count int64
-	for _, origin := range append([]string{store.InstanceUID()}, former...) {
-		current := origin == store.InstanceUID()
-		var after int64
-		for {
-			events, err := store.PendingFederationPushEvents(ctx, binding.ProjectID, origin, after, 1000)
-			if err != nil {
-				return 0, err
-			}
-			if len(events) == 0 {
-				break
-			}
-			for _, event := range events {
-				if event.ID > binding.RetainedThroughEventID || (current && event.ID > binding.PushCursorEventID) {
-					break
-				}
-				if !current || event.Actor != binding.Actor {
-					count++
-				}
-			}
-			after = events[len(events)-1].ID
-			if after >= binding.RetainedThroughEventID || (current && after >= binding.PushCursorEventID) {
-				break
-			}
-		}
-	}
-	return count, nil
+	return store.CountRetainedFederationEvents(ctx, binding)
 }
 
 func federationQuarantineSummaries(quarantines []db.FederationQuarantine) []api.FederationQuarantineSummary {
