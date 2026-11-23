@@ -12,13 +12,11 @@ import (
 func TestAddLabel_PriorityLabelRejected(t *testing.T) {
 	env := testenv.New(t)
 	pid, n := setupOneIssue(t, env)
-	issue, err := env.DB.IssueByID(t.Context(), n)
-	require.NoError(t, err)
 	for _, label := range []string{"p0", "p1", "p2", "p3", "p4", "priority:high", "priority:"} {
 		t.Run(label, func(t *testing.T) {
 			resp, body := envDoRaw(t, env, http.MethodPost, issuePath(pid, n, "labels"), map[string]string{"actor": "tester", "label": label}, nil)
 			assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
-			assert.Contains(t, string(body), "kata edit kata#"+issue.ShortID+" --priority N")
+			assert.Contains(t, string(body), "kata edit <ref> --priority N")
 		})
 	}
 	for _, label := range []string{"p5", "priority", "area:ui"} {

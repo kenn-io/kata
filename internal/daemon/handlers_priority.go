@@ -3,12 +3,25 @@ package daemon
 import (
 	"context"
 	"strconv"
+	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 )
+
+const minPriority, maxPriority = 0, 4
+
+func rejectPriorityLabels(labels []string, useInstead string) error {
+	for _, label := range labels {
+		label = strings.ToLower(strings.TrimSpace(label))
+		if (len(label) == 2 && label[0] == 'p' && label[1] >= '0'+minPriority && label[1] <= '0'+maxPriority) || strings.HasPrefix(label, "priority:") {
+			return api.NewError(400, "validation", "use the priority field: "+useInstead, "", nil)
+		}
+	}
+	return nil
+}
 
 func registerPriorityHandlers(humaAPI huma.API, cfg ServerConfig) {
 	huma.Register(humaAPI, huma.Operation{
@@ -59,7 +72,7 @@ func validatePriorityRange(priority *int64) error {
 	if priority == nil {
 		return nil
 	}
-	if *priority < 0 || *priority > 4 {
+	if *priority < minPriority || *priority > maxPriority {
 		return api.NewError(400, "validation",
 			"priority must be between 0 and 4", "0 = highest, 4 = lowest", nil)
 	}

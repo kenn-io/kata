@@ -4,17 +4,12 @@ import (
 	"context"
 	"errors"
 	"sort"
-	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 )
-
-func isPriorityLabel(label string) bool {
-	return (len(label) == 2 && label[0] == 'p' && label[1] >= '0' && label[1] <= '4') || strings.HasPrefix(label, "priority:")
-}
 
 // registerLabelsHandlers installs POST/DELETE /labels and GET /labels (counts).
 // AddLabelAndEvent and RemoveLabelAndEvent wrap the label mutation, the matching
@@ -53,12 +48,8 @@ func addLabelHandler(cfg ServerConfig) func(context.Context, *api.AddLabelReques
 		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, issue, actor); err != nil {
 			return nil, err
 		}
-		if isPriorityLabel(in.Body.Label) {
-			project, err := activeProjectByID(ctx, cfg.DB, in.ProjectID)
-			if err != nil {
-				return nil, err
-			}
-			return nil, api.NewError(400, "validation", "use the priority field: kata edit "+project.Name+"#"+in.Ref+" --priority N", "", nil)
+		if err := rejectPriorityLabels([]string{in.Body.Label}, "kata edit <ref> --priority N"); err != nil {
+			return nil, err
 		}
 
 		ev := db.LabelEventParams{

@@ -206,10 +206,8 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if reuse != nil {
 			return reuse, nil
 		}
-		for _, label := range in.Body.Labels {
-			if isPriorityLabel(label) {
-				return nil, api.NewError(400, "validation", "use the priority field: kata create --priority N", "", nil)
-			}
+		if err := rejectPriorityLabels(in.Body.Labels, "kata create --priority N"); err != nil {
+			return nil, err
 		}
 
 		// Fresh create (no reuse): now run the state-dependent link-target
