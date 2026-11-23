@@ -1404,6 +1404,20 @@ describe('AppShell', () => {
       expect(screen.queryByRole('button', { name: 'Credentials' })).toBeNull()
     })
 
+    test.each([credentialsRoute(), settingsRoute('access')])(
+      'opens the Appearance address when its fallback is selected',
+      async (route) => {
+        const { onNavigate } = renderSettings(route, {
+          token_audit_read: false,
+          access_admin: false,
+        })
+
+        await fireEvent.click(screen.getByRole('button', { name: 'Appearance' }))
+
+        expect(onNavigate).toHaveBeenCalledWith(settingsRoute('appearance'))
+      },
+    )
+
     test('lands on Appearance for Teams and visibility without access administration', () => {
       renderSettings(settingsRoute('access'), { token_audit_read: true, access_admin: false })
       expect(screen.getByRole('heading', { name: 'Appearance' })).not.toBeNull()
