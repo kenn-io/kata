@@ -23,7 +23,7 @@ func (h denyProjectHost) Authorize(_ context.Context, request HostAccessRequest)
 	return HostAccessDecision{}, nil
 }
 
-func TestActiveProjectByIDHintsRestoreOnlyForCallersWhoMayReadIt(t *testing.T) {
+func TestArchivedProjectHintsRestoreOnlyForCallersWhoMayReadIt(t *testing.T) {
 	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, store.Close()) })
