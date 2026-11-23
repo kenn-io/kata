@@ -20,6 +20,7 @@ import (
 // in a read-only snapshot and compare the event stamp under the writer lock.
 // Both paths fall back to preparation under the lock after retry attempts.
 type federationMaterialization struct {
+	instanceUID      string
 	fullReplay       bool
 	fullHistory      bool
 	linksAffected    bool
@@ -56,7 +57,7 @@ type federationMaterialization struct {
 // placeholders while preserving support for pushes larger than a poll page.
 const federationIngestIssueScopeLimit = 500
 
-func prepareFederationMaterializationTx(ctx context.Context, tx *sql.Tx, projectID int64, prepared []preparedFederationIngestEvent) (federationMaterialization, error) {
+func prepareFederationMaterializationTx(ctx context.Context, tx *sql.Tx, projectID int64, prepared []preparedFederationIngestEvent, instanceUID string) (federationMaterialization, error) {
 	var scope []string
 	for _, input := range prepared {
 		if input.Duplicate {
@@ -83,13 +84,13 @@ func prepareFederationMaterializationTx(ctx context.Context, tx *sql.Tx, project
 			break
 		}
 	}
-	return foldFederationMaterialization(ctx, tx, projectID, prepared, false, scope, false)
+	return foldFederationMaterialization(ctx, tx, projectID, prepared, false, scope, false, instanceUID)
 }
 
 // alreadyStored selects pull preparation: the page is in the log already.
 // Cron-only pages fold cron history. Other pages reconcile the supplied issue
 // scope (nil is full); a scoped page with cron events adds complete cron history.
-func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID int64, prepared []preparedFederationIngestEvent, alreadyStored bool, issueScope []string, deferRows bool) (federationMaterialization, error) {
+func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID int64, prepared []preparedFederationIngestEvent, alreadyStored bool, issueScope []string, deferRows bool, instanceUID string) (federationMaterialization, error) {
 	var fresh []db.FoldEvent
 	var accepted []string
 	linksAffected := false
@@ -126,7 +127,7 @@ func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID in
 		}
 		return prepareCronFederationMaterialization(ctx, tx, projectID, binding, fresh, alreadyStored)
 	}
-	events, err := federationFoldEventsForIssues(ctx, tx, projectID, issueScope)
+	events, err := federationFoldEventsForIssues(ctx, tx, projectID, issueScope, instanceUID)
 	if err != nil {
 		return federationMaterialization{}, err
 	}
@@ -158,7 +159,7 @@ func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID in
 			return federationMaterialization{}, err
 		}
 	}
-	m := federationMaterialization{binding: binding, projection: db.FoldEvents(events)}
+	m := federationMaterialization{binding: binding, projection: db.FoldEvents(events), instanceUID: instanceUID}
 	for uid := range m.projection.Issues {
 		m.foldedIssueUIDs = append(m.foldedIssueUIDs, uid)
 	}
@@ -245,7 +246,7 @@ func (m *federationMaterialization) foldLinks(ctx context.Context, tx *sql.Tx, f
 	}
 	var events []db.FoldEvent
 	for _, id := range m.linkProjects {
-		history, err := federationFoldEventsOfTypes(ctx, tx, id, db.FederationLinkAffectingEventTypes())
+		history, err := federationFoldEventsOfTypes(ctx, tx, id, db.FederationLinkAffectingEventTypes(), m.instanceUID)
 		if err != nil {
 			return err
 		}

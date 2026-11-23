@@ -40,7 +40,7 @@ func (d *Store) MaterializeFederatedEvents(ctx context.Context, projectID int64,
 		if !locked {
 			mode = pullPrepareDetectFull
 		}
-		materialization, err := preparePulledFederationMaterialization(ctx, tx, projectID, eventUIDs, mode)
+		materialization, err := preparePulledFederationMaterialization(ctx, tx, projectID, eventUIDs, mode, d.instanceUID)
 		if err != nil {
 			return err
 		}
@@ -88,7 +88,7 @@ const (
 	pullPrepareFullSnapshot
 )
 
-func preparePulledFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID int64, eventUIDs []string, mode pullPrepareMode) (federationMaterialization, error) {
+func preparePulledFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID int64, eventUIDs []string, mode pullPrepareMode, instanceUID string) (federationMaterialization, error) {
 	events, err := eventsByUIDs(ctx, tx, projectID, eventUIDs)
 	if err != nil {
 		return federationMaterialization{}, err
@@ -123,7 +123,7 @@ func preparePulledFederationMaterialization(ctx context.Context, tx *sql.Tx, pro
 	if mode == pullPrepareDetectFull && full {
 		return federationMaterialization{fullHistory: true}, nil
 	}
-	return foldFederationMaterialization(ctx, tx, projectID, prepared, true, scope, mode == pullPrepareFullSnapshot)
+	return foldFederationMaterialization(ctx, tx, projectID, prepared, true, scope, mode == pullPrepareFullSnapshot, instanceUID)
 }
 
 var errStaleFederationPreparation = errors.New("stale federation preparation")
@@ -134,7 +134,7 @@ func (d *Store) prepareFullPull(ctx context.Context, projectID int64, eventUIDs 
 		return federationMaterialization{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	return preparePulledFederationMaterialization(ctx, tx, projectID, eventUIDs, pullPrepareFullSnapshot)
+	return preparePulledFederationMaterialization(ctx, tx, projectID, eventUIDs, pullPrepareFullSnapshot, d.instanceUID)
 }
 
 func (d *Store) applyFullPull(ctx context.Context, projectID int64, eventUIDs []string, m federationMaterialization) error {

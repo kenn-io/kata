@@ -38,7 +38,7 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 	result := preparedFederationRebuild{moved: map[string]db.FederatedMoveDecision{}}
 	moveOwners := map[string]string{}
 	prepare := func(id int64) ([]int64, error) {
-		events, err := federationFoldEvents(ctx, tx, id)
+		events, err := federationFoldEvents(ctx, tx, id, d.instanceUID)
 		if err != nil {
 			return nil, err
 		}
@@ -52,7 +52,7 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 			// Only the rebuilt project's own pull relocates snapshot issues.
 			planCtx = db.WithMovedProjectPass(ctx)
 		}
-		events, projection, moveEvents, decisions, destinations, err := planFederatedMaterialization(planCtx, tx, id, events)
+		events, projection, moveEvents, decisions, destinations, err := planFederatedMaterialization(planCtx, tx, id, events, d.instanceUID)
 		if err != nil {
 			return nil, err
 		}
@@ -92,7 +92,7 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 		if err != nil {
 			return preparedFederationRebuild{}, err
 		}
-		m := federationMaterialization{binding: binding, linksUnderWriter: true}
+		m := federationMaterialization{binding: binding, linksUnderWriter: true, instanceUID: d.instanceUID}
 		if err := m.prepareFullHistory(ctx, tx, p.id, p.events, true); err != nil {
 			return preparedFederationRebuild{}, err
 		}

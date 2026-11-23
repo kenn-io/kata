@@ -563,7 +563,7 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 	if err != nil {
 		return db.FederationBinding{}, err
 	}
-	if err := reconcileFederationBindingTransitionLinks(ctx, tx, previous, binding); err != nil {
+	if err := reconcileFederationBindingTransitionLinks(ctx, tx, previous, binding, d.instanceUID); err != nil {
 		return db.FederationBinding{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key IN (? || (SELECT uid FROM projects WHERE id = ? AND deleted_at IS NULL), ? || (SELECT uid FROM projects WHERE id = ? AND deleted_at IS NULL))`, db.FederationRetainedProjectPrefix, b.ProjectID, db.FederationHeldCursorPrefix, b.ProjectID); err != nil {
@@ -665,7 +665,7 @@ func (d *Store) leaveFederationReplica(ctx context.Context, projectID int64, dis
 	if err := clearProjectClaimStateTx(ctx, tx, projectID); err != nil {
 		return db.LeaveFederationResult{}, err
 	}
-	if err := reconcileFederationBindingTransitionLinks(ctx, tx, &binding, db.FederationBinding{}); err != nil {
+	if err := reconcileFederationBindingTransitionLinks(ctx, tx, &binding, db.FederationBinding{}, d.instanceUID); err != nil {
 		return db.LeaveFederationResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -998,7 +998,7 @@ func (d *Store) enableProjectFederationTx(
 			if err != nil {
 				return db.FederationBinding{}, err
 			}
-			if err := reconcileFederatedLinkGroup(ctx, tx, groupProjectIDs, groupProjectIDs, 0, nil); err != nil {
+			if err := reconcileFederatedLinkGroup(ctx, tx, groupProjectIDs, groupProjectIDs, 0, nil, d.instanceUID); err != nil {
 				return db.FederationBinding{}, err
 			}
 		}
@@ -1028,7 +1028,7 @@ func (d *Store) enableProjectFederationTx(
 	if err != nil {
 		return db.FederationBinding{}, err
 	}
-	if err := reconcileFederationBindingTransitionLinks(ctx, tx, nil, binding); err != nil {
+	if err := reconcileFederationBindingTransitionLinks(ctx, tx, nil, binding, d.instanceUID); err != nil {
 		return db.FederationBinding{}, err
 	}
 	return binding, nil
@@ -1285,7 +1285,7 @@ func (d *Store) materializeFederatedProjectTx(
 		return err
 	}
 
-	events, err := federationFoldEvents(ctx, tx, projectID)
+	events, err := federationFoldEvents(ctx, tx, projectID, d.instanceUID)
 	if err != nil {
 		return err
 	}
@@ -1294,7 +1294,7 @@ func (d *Store) materializeFederatedProjectTx(
 			return err
 		}
 	}
-	_, projection, moved, decisions, destinations, err := planFederatedMaterialization(ctx, tx, projectID, events)
+	_, projection, moved, decisions, destinations, err := planFederatedMaterialization(ctx, tx, projectID, events, d.instanceUID)
 	if err != nil {
 		return err
 	}
@@ -1338,7 +1338,7 @@ func (d *Store) materializeFederatedProjectTx(
 		return err
 	}
 	if reconcileLinks {
-		if err := reconcileFederatedLinks(ctx, tx, binding, projectID, issueIDs); err != nil {
+		if err := reconcileFederatedLinks(ctx, tx, binding, projectID, issueIDs, d.instanceUID); err != nil {
 			return err
 		}
 	}
@@ -1352,7 +1352,7 @@ func (d *Store) materializeFederatedProjectTx(
 // A snapshot relocation brings the holding project's history for the issue
 // into the fold, so the issue keeps its spoke-local discussion. It returns the
 // events it folded.
-func planFederatedMaterialization(ctx context.Context, tx *sql.Tx, projectID int64, events []db.FoldEvent) ([]db.FoldEvent, db.FoldProjection, db.FederatedMoveIndex, []db.FederatedMoveDecision, []int64, error) {
+func planFederatedMaterialization(ctx context.Context, tx *sql.Tx, projectID int64, events []db.FoldEvent, instanceUID string) ([]db.FoldEvent, db.FoldProjection, db.FederatedMoveIndex, []db.FederatedMoveDecision, []int64, error) {
 	projection := db.FoldEvents(events)
 	moved := db.IndexFederatedMoveEvents(events)
 	decisions, destinations, err := db.PlanFederatedMovedIssues(ctx, tx, moved, projection, projectID)
@@ -1360,7 +1360,7 @@ func planFederatedMaterialization(ctx context.Context, tx *sql.Tx, projectID int
 		return nil, db.FoldProjection{}, db.FederatedMoveIndex{}, nil, nil, err
 	}
 	events, added, err := db.AppendFederatedRelocationHistory(events, decisions, func(sourceID int64, uids []string) ([]db.FoldEvent, error) {
-		return federationFoldEventsForIssues(ctx, tx, sourceID, uids)
+		return federationFoldEventsForIssues(ctx, tx, sourceID, uids, instanceUID)
 	})
 	if err != nil || !added {
 		return events, projection, moved, decisions, destinations, err
@@ -1859,8 +1859,8 @@ func federationIssueRecurrenceUID(ctx context.Context, tx *sql.Tx, recurrenceID 
 	return uid, nil
 }
 
-func federationFoldEvents(ctx context.Context, tx *sql.Tx, projectID int64) ([]db.FoldEvent, error) {
-	return federationFoldEventsOfTypes(ctx, tx, projectID, nil)
+func federationFoldEvents(ctx context.Context, tx *sql.Tx, projectID int64, instanceUID string) ([]db.FoldEvent, error) {
+	return federationFoldEventsOfTypes(ctx, tx, projectID, nil, instanceUID)
 }
 
 // federationFoldEventsOfTypes lists a project's fold events in event order,
@@ -1872,21 +1872,26 @@ func federationFoldEventsOfTypes(
 	tx *sql.Tx,
 	projectID int64,
 	eventTypes []string,
+	instanceUID string,
 ) ([]db.FoldEvent, error) {
-	return federationFoldEventsScoped(ctx, tx, projectID, eventTypes, nil)
+	return federationFoldEventsScoped(ctx, tx, projectID, eventTypes, nil, instanceUID)
 }
 
-func federationFoldEventsForIssues(ctx context.Context, tx *sql.Tx, projectID int64, issueScope []string) ([]db.FoldEvent, error) {
-	return federationFoldEventsScoped(ctx, tx, projectID, nil, issueScope)
+func federationFoldEventsForIssues(ctx context.Context, tx *sql.Tx, projectID int64, issueScope []string, instanceUID string) ([]db.FoldEvent, error) {
+	return federationFoldEventsScoped(ctx, tx, projectID, nil, issueScope, instanceUID)
 }
 
-func federationFoldEventsScoped(ctx context.Context, tx *sql.Tx, projectID int64, eventTypes, issueScope []string) ([]db.FoldEvent, error) {
+func federationFoldEventsScoped(ctx context.Context, tx *sql.Tx, projectID int64, eventTypes, issueScope []string, instanceUID string) ([]db.FoldEvent, error) {
 	query, args := federationFoldEventsQuery(projectID, eventTypes, issueScope)
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list federated events: %w", err)
 	}
-	return scanFederationFoldEvents(rows)
+	events, err := scanFederationFoldEvents(rows)
+	if err != nil {
+		return nil, err
+	}
+	return db.DropUnbasedLocalMoves(events, instanceUID), nil
 }
 
 // federationFoldEventsQuery builds the fold query. Other projects' events join
@@ -2493,12 +2498,13 @@ func reconcileFederatedLinks(
 	binding db.FederationBinding,
 	currentProjectID int64,
 	currentIssueIDs map[string]int64,
+	instanceUID string,
 ) error {
 	projectIDs, err := federationBindingGroupProjectIDs(ctx, tx, binding)
 	if err != nil {
 		return err
 	}
-	return reconcileFederatedLinkGroup(ctx, tx, projectIDs, projectIDs, currentProjectID, currentIssueIDs)
+	return reconcileFederatedLinkGroup(ctx, tx, projectIDs, projectIDs, currentProjectID, currentIssueIDs, instanceUID)
 }
 
 func reconcileFederatedLinkGroup(
@@ -2508,8 +2514,9 @@ func reconcileFederatedLinkGroup(
 	ownedProjectIDs []int64,
 	currentProjectID int64,
 	currentIssueIDs map[string]int64,
+	instanceUID string,
 ) error {
-	projection, err := federationGroupFoldProjection(ctx, tx, desiredProjectIDs)
+	projection, err := federationGroupFoldProjection(ctx, tx, desiredProjectIDs, instanceUID)
 	if err != nil {
 		return err
 	}
@@ -2650,6 +2657,7 @@ func reconcileFederationBindingTransitionLinks(
 	tx *sql.Tx,
 	previous *db.FederationBinding,
 	current db.FederationBinding,
+	instanceUID string,
 ) error {
 	if previous != nil && previous.Enabled {
 		remainingProjectIDs, err := federationBindingGroupProjectIDs(ctx, tx, *previous)
@@ -2657,7 +2665,7 @@ func reconcileFederationBindingTransitionLinks(
 			return err
 		}
 		if err := reconcileFederatedLinkGroup(
-			ctx, tx, remainingProjectIDs, remainingProjectIDs, 0, nil,
+			ctx, tx, remainingProjectIDs, remainingProjectIDs, 0, nil, instanceUID,
 		); err != nil {
 			return err
 		}
@@ -2683,7 +2691,7 @@ func reconcileFederationBindingTransitionLinks(
 	if err := removeIncompatibleFederatedBoundaryLinks(ctx, tx, current.ProjectID, currentProjectIDs); err != nil {
 		return err
 	}
-	return reconcileFederatedLinkGroup(ctx, tx, currentProjectIDs, currentProjectIDs, 0, nil)
+	return reconcileFederatedLinkGroup(ctx, tx, currentProjectIDs, currentProjectIDs, 0, nil, instanceUID)
 }
 
 func removeFederatedBoundaryLinksBetweenProjectAndGroup(
@@ -2847,6 +2855,7 @@ func federationGroupFoldProjection(
 	ctx context.Context,
 	tx *sql.Tx,
 	projectIDs []int64,
+	instanceUID string,
 ) (db.FoldProjection, error) {
 	// Only Links is read from this projection, so the fold is restricted to the
 	// events that can affect it. Everything else in the group's history stays
@@ -2855,7 +2864,7 @@ func federationGroupFoldProjection(
 	linkEventTypes := db.FederationLinkAffectingEventTypes()
 	var events []db.FoldEvent
 	for _, projectID := range projectIDs {
-		projectEvents, err := federationFoldEventsOfTypes(ctx, tx, projectID, linkEventTypes)
+		projectEvents, err := federationFoldEventsOfTypes(ctx, tx, projectID, linkEventTypes, instanceUID)
 		if err != nil {
 			return db.FoldProjection{}, err
 		}
@@ -3286,7 +3295,7 @@ func (d *Store) adoptProjectIntoFederation(
 	if err != nil {
 		return db.AdoptProjectIntoFederationResult{}, err
 	}
-	if err := reconcileFederationBindingTransitionLinks(ctx, tx, nil, binding); err != nil {
+	if err := reconcileFederationBindingTransitionLinks(ctx, tx, nil, binding, d.instanceUID); err != nil {
 		return db.AdoptProjectIntoFederationResult{}, err
 	}
 	project, err = scanProject(tx.QueryRowContext(ctx,

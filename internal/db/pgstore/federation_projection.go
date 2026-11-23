@@ -53,7 +53,7 @@ func (s *Store) enableProjectFederationTx(
 			if err != nil {
 				return db.FederationBinding{}, err
 			}
-			m := newFederatedLinkGroupMaterialization(projectIDs, 0)
+			m := newFederatedLinkGroupMaterialization(projectIDs, 0, s.instanceUID)
 			if err := reconcileFederatedLinkGroup(ctx, tx, m, nil); err != nil {
 				return db.FederationBinding{}, err
 			}
@@ -80,7 +80,7 @@ replay_horizon_event_id,pull_cursor_event_id,enabled
 	if err != nil {
 		return db.FederationBinding{}, err
 	}
-	if err := reconcileFederationBindingTransitionLinks(ctx, tx, nil, binding); err != nil {
+	if err := reconcileFederationBindingTransitionLinks(ctx, tx, nil, binding, s.instanceUID); err != nil {
 		return db.FederationBinding{}, err
 	}
 	return binding, nil
@@ -194,7 +194,7 @@ func (s *Store) leaveFederationReplica(ctx context.Context, projectID int64, dis
 			}
 		}
 		if err := reconcileFederationBindingTransitionLinks(
-			ctx, tx, &binding, db.FederationBinding{},
+			ctx, tx, &binding, db.FederationBinding{}, s.instanceUID,
 		); err != nil {
 			return err
 		}
@@ -456,6 +456,7 @@ func (s *Store) materializeFederatedProjectAfter(ctx context.Context, projectID 
 // retain the existing link-affecting event filter because links are their sole
 // consumer.
 type federatedMaterialization struct {
+	instanceUID     string
 	projectID       int64
 	binding         db.FederationBinding
 	groupProjectIDs []int64
@@ -475,7 +476,7 @@ func (m *federatedMaterialization) foldEvents(
 	if m.observeFold != nil {
 		m.observeFold(projectID)
 	}
-	events, err := federationFoldEvents(ctx, tx, projectID)
+	events, err := federationFoldEvents(ctx, tx, projectID, m.instanceUID)
 	if err != nil {
 		return nil, err
 	}
@@ -505,6 +506,7 @@ func (s *Store) materializeFederatedProjectTx(
 	}
 	m := &federatedMaterialization{
 		projectID:   projectID,
+		instanceUID: s.instanceUID,
 		binding:     binding,
 		events:      map[int64][]db.FoldEvent{},
 		observeFold: s.federationFoldObserver,
@@ -527,7 +529,7 @@ func (s *Store) materializeFederatedProjectTx(
 		return err
 	}
 	folded, added, err := db.AppendFederatedRelocationHistory(events, decisions, func(sourceID int64, _ []string) ([]db.FoldEvent, error) {
-		return federationFoldEvents(ctx, tx, sourceID)
+		return federationFoldEvents(ctx, tx, sourceID, s.instanceUID)
 	})
 	if err != nil {
 		return err

@@ -220,7 +220,7 @@ push_cursor_event_id,bound_actor,allow_insecure,enabled
 		if err != nil {
 			return err
 		}
-		if err := reconcileFederationBindingTransitionLinks(ctx, tx, nil, binding); err != nil {
+		if err := reconcileFederationBindingTransitionLinks(ctx, tx, nil, binding, s.instanceUID); err != nil {
 			return err
 		}
 		project, err = scanProject(tx.QueryRowContext(ctx,

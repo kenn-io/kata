@@ -337,7 +337,7 @@ func (d *Store) ingestFederationEventsOnce(
 		return db.FederationIngestResult{}, err
 	}
 
-	materialization, err := prepareFederationMaterializationTx(ctx, tx, p.ProjectID, prepared)
+	materialization, err := prepareFederationMaterializationTx(ctx, tx, p.ProjectID, prepared, d.instanceUID)
 	if err != nil {
 		return db.FederationIngestResult{}, err
 	}

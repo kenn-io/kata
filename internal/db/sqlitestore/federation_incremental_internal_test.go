@@ -128,7 +128,7 @@ func TestFederationPreparationExcludesUntouchedRows(t *testing.T) {
 	tx, err := d.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback() }()
-	m, err := prepareFederationMaterializationTx(ctx, tx, p.ID, []preparedFederationIngestEvent{{Event: ev}})
+	m, err := prepareFederationMaterializationTx(ctx, tx, p.ID, []preparedFederationIngestEvent{{Event: ev}}, d.instanceUID)
 	require.NoError(t, err)
 	require.Len(t, m.projection.Issues, 1, "apply must visit changed issues only")
 	require.Contains(t, m.projection.Issues, issue.UID)
@@ -188,7 +188,7 @@ func TestFederationPreparationExcludesUntouchedLinks(t *testing.T) {
 	tx, err := d.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback() }()
-	m, err := prepareFederationMaterializationTx(ctx, tx, p.ID, []preparedFederationIngestEvent{{Event: ev}})
+	m, err := prepareFederationMaterializationTx(ctx, tx, p.ID, []preparedFederationIngestEvent{{Event: ev}}, d.instanceUID)
 	require.NoError(t, err)
 	require.Empty(t, m.links.Links, "apply must visit changed links only")
 }
@@ -256,7 +256,7 @@ func federationProjectionRows(t testing.TB, d *Store, projectID int64) [][][]any
 	require.NoError(t, err)
 	ids, err := federationBindingGroupProjectIDs(ctx, tx, binding)
 	require.NoError(t, err)
-	links, err := federationGroupFoldProjection(ctx, tx, ids)
+	links, err := federationGroupFoldProjection(ctx, tx, ids, d.instanceUID)
 	require.NoError(t, err)
 	require.NoError(t, tx.Rollback())
 	queries := []string{
