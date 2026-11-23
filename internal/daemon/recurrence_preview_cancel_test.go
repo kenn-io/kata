@@ -3,7 +3,6 @@ package daemon
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
@@ -16,14 +15,26 @@ func (previewProjectStorage) ProjectByID(context.Context, int64) (db.Project, er
 	return db.Project{ID: 1}, nil
 }
 
+type cancelDuringPreview struct {
+	context.Context
+	cancel context.CancelFunc
+	checks int
+}
+
+func (c *cancelDuringPreview) Err() error {
+	c.checks++
+	// Allow the scheduler to enter its occurrence loop before canceling.
+	if c.checks == 8 {
+		c.cancel()
+	}
+	return c.Context.Err()
+}
+
 func TestRecurrencePreviewStopsWhenCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
-	timer := time.AfterFunc(10*time.Millisecond, cancel)
-	defer timer.Stop()
 	defer cancel()
+	previewCtx := &cancelDuringPreview{Context: ctx, cancel: cancel}
 	in := &api.RecurrencePreviewRequest{ProjectID: 1, RRule: "FREQ=SECONDLY", DTStart: "2026-01-01", Timezone: "UTC"}
-	started := time.Now()
-	_, err := previewRecurrenceHandler(ServerConfig{DB: previewProjectStorage{}})(ctx, in)
+	_, err := previewRecurrenceHandler(ServerConfig{DB: previewProjectStorage{}})(previewCtx, in)
 	require.ErrorIs(t, err, context.Canceled)
-	require.Less(t, time.Since(started), 500*time.Millisecond)
 }
