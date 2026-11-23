@@ -1745,6 +1745,28 @@ func TestCreateIssue_PriorityLabelRejected(t *testing.T) {
 	assert.Empty(t, list.Issues)
 }
 
+func TestCreateIssue_PriorityLabelIdempotentRetry(t *testing.T) {
+	env := testenv.New(t)
+	pid := initLocalWorkspace(t, env, "kata")
+	labels := []string{"p2"}
+	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: pid, Title: "priority label", Author: "tester", Labels: labels,
+		IdempotencyKey: "retry-key", IdempotencyFingerprint: db.Fingerprint("priority label", "", nil, labels, nil, nil, nil),
+	})
+	require.NoError(t, err)
+	resp, body := envDoRaw(t, env, http.MethodPost, projectPath(pid)+"/issues", map[string]any{
+		"actor": "tester", "title": "priority label", "labels": labels,
+	}, map[string]string{"Idempotency-Key": "retry-key"})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	var out struct {
+		Issue  db.Issue `json:"issue"`
+		Reused bool     `json:"reused"`
+	}
+	require.NoError(t, json.Unmarshal(body, &out))
+	assert.Equal(t, issue.UID, out.Issue.UID)
+	assert.True(t, out.Reused)
+}
+
 // TestCreateIssue_InitialSelfLinkIs400 verifies that an initial link whose
 // to_number equals the issue being created (which lands as #1 in a fresh
 // project) surfaces as a 400 validation error, not a 500. The DB layer

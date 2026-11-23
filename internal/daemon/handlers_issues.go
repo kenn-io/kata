@@ -180,11 +180,6 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := validateCreateMetadata(in.Body.Metadata); err != nil {
 			return nil, err
 		}
-		for _, label := range in.Body.Labels {
-			if isPriorityLabel(label) {
-				return nil, api.NewError(400, "validation", "use the priority field: kata create --priority N", "", nil)
-			}
-		}
 		if err := validateIssueTitle(in.Body.Title); err != nil {
 			return nil, err
 		}
@@ -210,6 +205,11 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		if reuse != nil {
 			return reuse, nil
+		}
+		for _, label := range in.Body.Labels {
+			if isPriorityLabel(label) {
+				return nil, api.NewError(400, "validation", "use the priority field: kata create --priority N", "", nil)
+			}
 		}
 
 		// Fresh create (no reuse): now run the state-dependent link-target
