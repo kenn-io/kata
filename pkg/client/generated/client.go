@@ -575,6 +575,9 @@ type ClientInterface interface {
 	ReadyIssues(ctx context.Context, options *ReadyIssuesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ReadyIssuesResponse, error)
 	ReadyIssuesWithResponse(ctx context.Context, options *ReadyIssuesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ReadyIssuesResp, error)
 
+	PreviewRecurrence(ctx context.Context, options *PreviewRecurrenceRequestOptions, reqEditors ...runtime.RequestEditorFn) (*PreviewRecurrenceResponse, error)
+	PreviewRecurrenceWithResponse(ctx context.Context, options *PreviewRecurrenceRequestOptions, reqEditors ...runtime.RequestEditorFn) (*PreviewRecurrenceResp, error)
+
 	ListRecurrences(ctx context.Context, options *ListRecurrencesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ListRecurrencesResponse, error)
 	ListRecurrencesWithResponse(ctx context.Context, options *ListRecurrencesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ListRecurrencesResp, error)
 
@@ -9427,6 +9430,75 @@ func (c *Client) ReadyIssues(ctx context.Context, options *ReadyIssuesRequestOpt
 	}
 
 	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/ready")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) PreviewRecurrence(ctx context.Context, options *PreviewRecurrenceRequestOptions, reqEditors ...runtime.RequestEditorFn) (*PreviewRecurrenceResponse, error) {
+	var err error
+
+	queryEncoding := map[string]runtime.QueryEncoding{
+		"dtstart":  {Style: "form", Explode: &[]bool{false}[0]},
+		"rrule":    {Style: "form", Explode: &[]bool{false}[0]},
+		"timezone": {Style: "form", Explode: &[]bool{false}[0]},
+	}
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/recurrence-preview",
+		Method:        "GET",
+		Options:       options,
+		QueryEncoding: queryEncoding,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*PreviewRecurrenceResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(PreviewRecurrenceErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "PreviewRecurrenceErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(PreviewRecurrenceResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "PreviewRecurrenceResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/recurrence-preview")
 	if err != nil {
 		return nil, fmt.Errorf("error executing request: %w", err)
 	}

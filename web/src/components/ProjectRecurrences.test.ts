@@ -199,7 +199,12 @@ it('preserves the draft when a conflict reload fails despite a stale response', 
   expect((within(dialog).getByLabelText('Title') as HTMLInputElement).value).toBe('My draft')
 })
 
-it('uses the refreshed snapshot on conflict without listing again', async () => {
+it('reloads the rule after a conflict even with a snapshot', async () => {
+  vi.mocked(listRecurrences).mockResolvedValueOnce({
+    status: 200,
+    headers: new Headers(),
+    data: { recurrences: [{ ...recurrence, revision: 2, template_title: 'Server update' }] },
+  })
   const updated = { ...recurrence, revision: 2, template_title: 'Server update' }
   const conflict = Object.assign(new Error('conflict'), {
     status: 412,
@@ -225,7 +230,7 @@ it('uses the refreshed snapshot on conflict without listing again', async () => 
       'Server update',
     ),
   )
-  expect(listRecurrences).not.toHaveBeenCalled()
+  expect(listRecurrences).toHaveBeenCalledTimes(1)
 })
 
 it('explains a rejected stop action and retries with the refreshed rule', async () => {
@@ -249,7 +254,9 @@ it('explains a rejected stop action and retries with the refreshed rule', async 
   await fireEvent.click(screen.getByRole('button', { name: 'Stop repeating…' }))
   const dialog = screen.getByRole('dialog', { name: 'Stop repeating' })
   await fireEvent.click(within(dialog).getByRole('button', { name: 'Stop repeating' }))
-  expect(within(dialog).getByRole('alert').textContent).toContain('Rule changed on the server.')
+  expect((await within(dialog).findByRole('alert')).textContent).toContain(
+    'Rule changed on the server.',
+  )
   await view.rerender({ snapshotRecurrences: [{ ...recurrence, revision: 2 }] })
   await fireEvent.click(within(dialog).getByRole('button', { name: 'Stop repeating' }))
   expect(onDelete).toHaveBeenLastCalledWith(expect.objectContaining({ revision: 2 }))
@@ -292,3 +299,42 @@ it.each(['edit', 'stop'])(
     await waitFor(() => expect(listRecurrences).toHaveBeenCalledTimes(2))
   },
 )
+
+it('retries a failed stop reload before sending a new revision', async () => {
+  const unavailable = {
+    status: 503,
+    headers: new Headers(),
+    data: { error: { code: 'unavailable', message: 'Unavailable' } },
+  } as Awaited<ReturnType<typeof listRecurrences>>
+  vi.mocked(listRecurrences)
+    .mockResolvedValueOnce({
+      status: 200,
+      headers: new Headers(),
+      data: { recurrences: [recurrence] },
+    })
+    .mockResolvedValueOnce(unavailable)
+    .mockResolvedValueOnce(unavailable)
+    .mockResolvedValueOnce({
+      status: 200,
+      headers: new Headers(),
+      data: { recurrences: [{ ...recurrence, revision: 2 }] },
+    })
+  const onDelete = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true)
+  render(ProjectRecurrences, {
+    props: { projectID: 1, actor: 'user-a', onCreate: vi.fn(), onPatch: vi.fn(), onDelete },
+  })
+  await fireEvent.click(await screen.findByRole('button', { name: /1 repeating task/ }))
+  await fireEvent.click(screen.getByRole('button', { name: 'Stop repeating…' }))
+  const dialog = screen.getByRole('dialog', { name: 'Stop repeating' })
+  await fireEvent.click(within(dialog).getByRole('button', { name: 'Stop repeating' }))
+  expect((await within(dialog).findByRole('alert')).textContent).toContain(
+    'Could not load repeating tasks',
+  )
+  await fireEvent.click(within(dialog).getByRole('button', { name: 'Retry' }))
+  await waitFor(() => expect(listRecurrences).toHaveBeenCalledTimes(3))
+  expect(onDelete).toHaveBeenCalledTimes(1)
+  await fireEvent.click(within(dialog).getByRole('button', { name: 'Stop repeating' }))
+  await waitFor(() =>
+    expect(onDelete).toHaveBeenLastCalledWith(expect.objectContaining({ revision: 2 })),
+  )
+})

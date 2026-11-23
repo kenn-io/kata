@@ -17,6 +17,7 @@
     disabled?: boolean | undefined
     draftFenceGeneration?: number | undefined
     mutationMessage?: string | undefined
+    reloadFailed?: boolean | undefined
     onCreate: (projectID: number, input: KataCreateRecurrenceInput) => Promise<void>
     onPatch: (
       recurrence: KataRecurrence,
@@ -34,6 +35,7 @@
     disabled = false,
     draftFenceGeneration = 0,
     mutationMessage = undefined,
+    reloadFailed = false,
     onCreate,
     onPatch,
     onDelete,
@@ -98,6 +100,13 @@
   // A delete conflict (412) reloads the recurrence list; without reconciling,
   // the open delete dialog would retry with the stale revision forever.
   export function reconcileRecurrences(recurrences: readonly KataRecurrence[]): void {
+    if (
+      recurrenceDialog.open &&
+      recurrenceDialog.mode === 'edit' &&
+      !recurrences.some((item) => item.uid === recurrenceDialog.recurrence?.uid)
+    ) {
+      recurrenceDialog = { open: false, mode: 'create', recurrence: null, etag: '' }
+    }
     const target = recurrenceDelete.recurrence
     if (!recurrenceDelete.open || !target) return
     const fresh = recurrences.find((item) => item.uid === target.uid)
@@ -162,7 +171,12 @@
     open={recurrenceDelete.open}
     recurrence={recurrenceDelete.recurrence}
     disabled={disabled || deletingRecurrence}
-    error={deleteRefused ? (mutationMessage ?? 'Could not stop repeating. Try again.') : undefined}
+    retry={deleteRefused && reloadFailed}
+    error={deleteRefused
+      ? reloadFailed
+        ? 'Could not load repeating tasks. Try again.'
+        : (mutationMessage ?? 'Could not stop repeating. Try again.')
+      : undefined}
     onConfirm={() => {
       void confirmDeleteRecurrence()
     }}

@@ -12,10 +12,16 @@ import (
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/recurrence"
 )
 
-// registerRecurrencesHandlers installs the five recurrence CRUD routes.
+// registerRecurrencesHandlers installs recurrence routes.
 func registerRecurrencesHandlers(humaAPI huma.API, cfg ServerConfig) {
+	huma.Register(humaAPI, huma.Operation{
+		OperationID: "previewRecurrence", Method: "GET",
+		Path: "/api/v1/projects/{project_id}/recurrence-preview",
+	}, previewRecurrenceHandler(cfg))
+
 	huma.Register(humaAPI, huma.Operation{
 		OperationID:   "createRecurrence",
 		Method:        "POST",
@@ -188,6 +194,34 @@ func createRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.Create
 		cfg.Publish().Events(in.ProjectID, events)
 		out := &api.CreateRecurrenceResponse{}
 		out.Body.Recurrence = rec
+		return out, nil
+	}
+}
+
+func previewRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.RecurrencePreviewRequest) (*api.RecurrencePreviewResponse, error) {
+	return func(ctx context.Context, in *api.RecurrencePreviewRequest) (*api.RecurrencePreviewResponse, error) {
+		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
+			return nil, err
+		}
+		if in.Timezone == "Local" {
+			return nil, api.NewError(400, "validation", "timezone: Local depends on the daemon host; use an IANA time zone such as America/New_York or UTC", "", nil)
+		}
+		next, err := db.ValidateRecurrenceCore(in.RRule, in.DTStart, in.Timezone)
+		if err != nil {
+			return nil, api.NewError(400, "validation", err.Error(), "", nil)
+		}
+		out := &api.RecurrencePreviewResponse{}
+		out.Body.Dates = []string{}
+		for next != nil && len(out.Body.Dates) < 4 {
+			out.Body.Dates = append(out.Body.Dates, *next)
+			if len(out.Body.Dates) == 4 {
+				break
+			}
+			next, err = recurrence.Walk(in.RRule, in.DTStart, in.Timezone, *next)
+			if err != nil {
+				return nil, api.NewError(400, "validation", err.Error(), "", nil)
+			}
+		}
 		return out, nil
 	}
 }

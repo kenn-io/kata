@@ -2,7 +2,7 @@
   /* eslint-disable svelte/prefer-svelte-reactivity */
   import { Button, SearchInput } from '@kenn-io/kit-ui'
   import Modal from './Modal.svelte'
-  import DialogPreview from './shared/DialogPreview.svelte'
+  import { Card } from '@kenn-io/kit-ui'
   import { tick } from 'svelte'
   import type { KataProjectSummary, KataTaskDetail } from '../lib/kata/types'
   import { markColor } from '../lib/marks'
@@ -190,7 +190,7 @@
       {/each}
     </div>
     {#if refused && error}<p class="move-error" role="alert">{error}</p>{/if}
-    <DialogPreview>
+    <Card padding="none" class="dialog-preview">
       <div>The task gets a new ID.</div>
       {#if issue.issue.child_counts?.total}
         <div>
@@ -200,7 +200,7 @@
         </div>
       {/if}
       <div>Links, comments, and history come along.</div>
-    </DialogPreview>
+    </Card>
   </div>
   {#snippet footer()}
     <Button

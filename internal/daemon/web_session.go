@@ -508,6 +508,8 @@ func webLocalSPARequestAllowed(r *http.Request) bool {
 		return len(parts) == 3 && parts[2] == "status" && r.Method == http.MethodGet
 	case "metadata":
 		return len(parts) == 2 && r.Method == http.MethodPost
+	case "recurrence-preview":
+		return len(parts) == 2 && r.Method == http.MethodGet
 	case "recurrences":
 		return (len(parts) == 2 && (r.Method == http.MethodGet || r.Method == http.MethodPost)) ||
 			(len(parts) == 3 && (r.Method == http.MethodPatch || r.Method == http.MethodDelete))

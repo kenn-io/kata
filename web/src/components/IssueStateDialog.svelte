@@ -4,7 +4,7 @@
   import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw'
   import type { KataTaskCloseRequest, KataTaskDetail } from '../lib/kata/types'
   import Modal from './Modal.svelte'
-  import DialogPreview from './shared/DialogPreview.svelte'
+  import { Card } from '@kenn-io/kit-ui'
 
   interface Props {
     issue: KataTaskDetail
@@ -280,16 +280,17 @@
       {/if}
     </label>
     {#if refused && error}<p class="complete-error" role="alert">{error}</p>{/if}
-    <DialogPreview>
-      <div>Comments, links, and attachments stay.</div>
+    <Card padding="none" class="dialog-preview">
+      <div>Its comments, links, and attachments stay.</div>
       {#if blockedCount}
         <div>
-          {blockedCount} open {blockedCount === 1 ? 'task' : 'tasks'} will no longer be blocked by this
-          task.
+          {blockedCount} open {blockedCount === 1 ? 'task' : 'tasks'} it blocks {blockedCount === 1
+            ? 'loses'
+            : 'lose'} this blocker.
         </div>
       {/if}
       <div>Reopen from the Logbook.</div>
-    </DialogPreview>
+    </Card>
   </div>
 
   {#snippet footer()}

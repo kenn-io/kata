@@ -56,9 +56,7 @@ describe('IssueStateDialog', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Complete…' }))
     const dialog = screen.getByRole('dialog', { name: 'Complete task' })
     expect(within(dialog).getByText(/comments, links, and attachments stay/i)).toBeTruthy()
-    expect(
-      within(dialog).getByText('1 open task will no longer be blocked by this task.'),
-    ).toBeTruthy()
+    expect(within(dialog).getByText('1 open task it blocks loses this blocker.')).toBeTruthy()
     await fireEvent.click(within(dialog).getByRole('radio', { name: "Won't do" }))
     await fireEvent.click(within(dialog).getByRole('button', { name: 'Complete' }))
     expect(within(dialog).getByText('Open children remain')).toBeTruthy()

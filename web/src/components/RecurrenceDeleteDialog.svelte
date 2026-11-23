@@ -2,7 +2,7 @@
   import { Button } from '@kenn-io/kit-ui'
 
   import Modal from './Modal.svelte'
-  import DialogPreview from './shared/DialogPreview.svelte'
+  import { Card } from '@kenn-io/kit-ui'
   import type { KataRecurrence } from '../lib/kata/types'
 
   interface Props {
@@ -10,6 +10,7 @@
     recurrence: KataRecurrence
     disabled?: boolean | undefined
     error?: string | undefined
+    retry?: boolean | undefined
     onConfirm: () => void
     onCancel: () => void
   }
@@ -19,6 +20,7 @@
     recurrence,
     disabled = false,
     error = undefined,
+    retry = false,
     onConfirm,
     onCancel,
   }: Props = $props()
@@ -34,14 +36,16 @@
     <strong>{recurrence.template_title}</strong>
   </p>
   {#if error}<p class="error" role="alert">{error}</p>{/if}
-  <DialogPreview>Tasks it already made stay as they are, open or done.</DialogPreview>
+  <Card padding="none" class="dialog-preview"
+    >Tasks it already made stay as they are, open or done.</Card
+  >
   {#snippet footer()}
     <Button size="sm" label="Cancel" onclick={onCancel} />
     <Button
       size="sm"
       tone="danger"
       surface="solid"
-      label="Stop repeating"
+      label={retry ? 'Retry' : 'Stop repeating'}
       {disabled}
       onclick={handleConfirm}
     />

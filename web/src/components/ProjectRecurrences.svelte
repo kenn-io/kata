@@ -60,7 +60,7 @@
       }
     | undefined = $state()
   let generation = 0
-  let lastProjectID: number | undefined
+  let reloadNeeded = false
 
   async function refresh(id: number): Promise<KataRecurrence[] | null> {
     const current = ++generation
@@ -82,12 +82,6 @@
   $effect(() => {
     const id = projectID
     void refreshGeneration
-    if (lastProjectID !== id) {
-      lastProjectID = id
-      recurrences = []
-      readError = false
-      open = false
-    }
     if (snapshotRecurrences !== undefined) {
       recurrences = [...snapshotRecurrences]
       readError = false
@@ -139,11 +133,8 @@
     try {
       await onPatch(recurrence, input, etag)
     } catch (error) {
+      const fresh = await refresh(projectID)
       if (error instanceof Object && 'status' in error && error.status === 412) {
-        const server = (error as { response?: { recurrence?: KataRecurrence } }).response
-          ?.recurrence
-        if (server && server.revision !== recurrence.revision) throw error
-        const fresh = await refresh(projectID)
         const replacement = fresh?.find((item) => item.id === recurrence.id)
         throw Object.assign(error, {
           response: replacement
@@ -153,6 +144,27 @@
       }
       throw error
     }
+  }
+  async function stop(recurrence: KataRecurrence): Promise<boolean> {
+    if (reloadNeeded) {
+      const fresh = await refresh(projectID)
+      if (!fresh) return false
+      reloadNeeded = false
+      const replacement = fresh.find((item) => item.uid === recurrence.uid)
+      if (!replacement) return true
+      recurrence = replacement
+    }
+    let stopped = false
+    try {
+      stopped = await onDelete(recurrence)
+    } catch {
+      /* reload after any refusal */
+    }
+    if (!stopped) {
+      reloadNeeded = true
+      if (await refresh(projectID)) reloadNeeded = false
+    }
+    return stopped
   }
 </script>
 
@@ -200,7 +212,8 @@
   {draftFenceGeneration}
   {onCreate}
   onPatch={patch}
-  {onDelete}
+  onDelete={stop}
+  reloadFailed={readError}
 />
 
 <style>

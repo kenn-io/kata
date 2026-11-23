@@ -1,5 +1,3 @@
-import { RRuleTemporal } from 'rrule-temporal'
-
 // Parse/serialize RRULE strings into a Common/Advanced/Invalid tri-state.
 // The classification rule of thumb:
 //   Invalid  = Kata (rrule-go) would reject the string
@@ -660,30 +658,4 @@ function formatTail(r: CommonRule): string {
     return `, ${r.end.count} ${noun}`
   }
   return ` until ${r.end.date}`
-}
-export function previewDates(
-  rrule: string,
-  start: string,
-  timezone: string,
-  cursor?: string,
-): string[] {
-  try {
-    const date = start.replaceAll('-', '')
-    const normalizedRule = rrule.replace(/UNTIL=(\d{8})(?=;|$)/, 'UNTIL=$1T000000Z')
-    const rule = new RRuleTemporal({
-      rruleString: `DTSTART;TZID=${timezone}:${date}T000000\nRRULE:${normalizedRule}`,
-    })
-    if (!cursor)
-      return rule.all((_, index) => index < 4).map((value) => value.toString().slice(0, 10))
-    const anchor = { timeZoneId: timezone, toString: () => `${cursor}T00:00:00[${timezone}]` }
-    const dates: string[] = []
-    let next = rule.next(anchor, true)
-    while (next && dates.length < 3) {
-      dates.push(next.toString().slice(0, 10))
-      next = rule.next(next)
-    }
-    return dates
-  } catch {
-    return []
-  }
 }

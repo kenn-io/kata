@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/svelte'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import RecurrenceEditor from './RecurrenceEditor.svelte'
 import RecurrenceEditorDialog from './RecurrenceEditorDialog.svelte'
@@ -6,9 +6,17 @@ import RecurrenceDeleteDialog from './RecurrenceDeleteDialog.svelte'
 import { ADVANCED_LAST_WEEKDAY } from '../lib/recurrence/__fixtures__/advancedRules'
 import { MONTH_LONG } from '../lib/recurrence/rrule'
 import { recurrence as sample } from '../lib/recurrence/__fixtures__/recurrence'
+import { previewRecurrence } from '../lib/api/generated/default/default'
 import type { KataRecurrence, KataTaskDetail } from '../lib/kata/types'
 
-afterEach(cleanup)
+vi.mock('../lib/api/generated/default/default', () => ({
+  previewRecurrence: vi.fn().mockRejectedValue(new Error('unavailable')),
+}))
+
+afterEach(() => {
+  cleanup()
+  vi.clearAllMocks()
+})
 
 const createMode = {
   kind: 'create',
@@ -75,9 +83,7 @@ describe('RecurrenceEditor — Common-mode rendering', () => {
       'Selected weekly review',
     )
     await fireEvent.click(screen.getByText('More options'))
-    expect((screen.getByLabelText('Metadata for each task') as HTMLTextAreaElement).value).toBe(
-      '{\n  "area": "work",\n  "custom": "value"\n}',
-    )
+    expect((screen.getByLabelText('Metadata for each task') as HTMLTextAreaElement).value).toBe('')
     await fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     expect(issue.issue.metadata['cron.occurrence']).toEqual({ version: 1 })
     expect(issue.issue.metadata['cron.progress.job']).toEqual({ version: 1 })
@@ -90,7 +96,7 @@ describe('RecurrenceEditor — Common-mode rendering', () => {
           owner: 'user-a',
           priority: 2,
           labels: ['routine'],
-          metadata: { area: 'work', custom: 'value' },
+          metadata: undefined,
         }),
       }),
     )
@@ -122,7 +128,7 @@ describe('RecurrenceEditor — Common-mode rendering', () => {
     expect(screen.queryByLabelText('occurrences')).toBeNull()
   })
 
-  test('edit preview starts at the live cursor and omits exhausted rules', async () => {
+  test('edit preview shows only the summary', async () => {
     const recurrence = {
       ...sample,
       rrule: 'FREQ=WEEKLY;BYDAY=MO',
@@ -138,7 +144,8 @@ describe('RecurrenceEditor — Common-mode rendering', () => {
         onSaved: vi.fn(),
       },
     })
-    expect(screen.getByText('Then Jan 19 · Jan 26 · Feb 2')).toBeTruthy()
+    expect(screen.queryByText(/^Then /)).toBeNull()
+    expect(screen.queryByText(/Completing each one makes the next/)).toBeNull()
     await fireEvent.click(screen.getByRole('button', { name: 'Tue' }))
     expect(screen.queryByText(/^Then /)).toBeNull()
     view.unmount()
@@ -158,7 +165,12 @@ describe('RecurrenceEditor — Common-mode rendering', () => {
     expect(screen.queryByText(/^Then /)).toBeNull()
   })
 
-  test('previews the first task and following dates', () => {
+  test('previews the first task and following dates', async () => {
+    vi.mocked(previewRecurrence).mockResolvedValueOnce({
+      status: 200,
+      headers: new Headers(),
+      data: { dates: ['2026-11-22', '2026-11-29'] },
+    })
     render(RecurrenceEditor, {
       props: {
         mode: createMode,
@@ -168,8 +180,34 @@ describe('RecurrenceEditor — Common-mode rendering', () => {
         onSaved: vi.fn(),
       },
     })
-    expect(screen.getByText(/This task becomes the first/)).toBeTruthy()
+    expect(await screen.findByText(/This task becomes the first/)).toBeTruthy()
     expect(screen.getByText(/Completing each one makes the next/)).toBeTruthy()
+  })
+
+  test('aborts an outdated preview and keeps save available after failure', async () => {
+    vi.mocked(previewRecurrence)
+      .mockImplementationOnce(() => new Promise(() => {}))
+      .mockRejectedValueOnce(new Error('unavailable'))
+    render(RecurrenceEditorDialog, {
+      props: {
+        open: true,
+        mode: {
+          ...createMode,
+          issue: { ...createMode.issue, issue: { ...createMode.issue.issue, title: 'Draft' } },
+        },
+        actor: 'user-a',
+        onClose: vi.fn(),
+        onCreate: vi.fn(),
+        onPatch: vi.fn(),
+      },
+    })
+    await waitFor(() => expect(previewRecurrence).toHaveBeenCalled())
+    const signal = vi.mocked(previewRecurrence).mock.calls.at(-1)![2]!.signal as AbortSignal
+    await fireEvent.click(screen.getByRole('button', { name: 'Mon' }))
+    expect(signal.aborted).toBe(true)
+    await waitFor(() => expect(previewRecurrence).toHaveBeenCalledTimes(2))
+    expect(screen.getByRole('button', { name: 'Save' })).not.toHaveProperty('disabled', true)
+    expect(screen.queryByText(/^Then /)).toBeNull()
   })
 
   test('keeps advanced fields under More options', async () => {

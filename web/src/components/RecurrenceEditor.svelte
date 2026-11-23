@@ -1,5 +1,6 @@
 <script lang="ts">
   import {
+    Card,
     Checkbox,
     Disclosure,
     NumberInput,
@@ -17,7 +18,7 @@
     KataTaskDetail,
   } from '../lib/kata/types'
   import DatePicker from './DatePicker.svelte'
-  import DialogPreview from './shared/DialogPreview.svelte'
+  import { previewRecurrence } from '../lib/api/generated/default/default'
   import { formatDay } from '../lib/kata/dates'
   import {
     WEEKDAYS,
@@ -27,7 +28,6 @@
     serializeRRule,
     formatRRule,
     parseRRule,
-    previewDates,
     type Weekday,
     type Ordinal,
     type CommonRule,
@@ -167,12 +167,6 @@
       owner = issue.issue.owner ?? ''
       priority = issue.issue.priority ?? null
       labelsText = issue.labels.map((label) => label.label).join(', ')
-      const metadata = Object.fromEntries(
-        Object.entries(issue.issue.metadata ?? {}).filter(
-          ([key]) => key !== 'cron.occurrence' && !key.startsWith('cron.progress.'),
-        ),
-      )
-      metadataText = Object.keys(metadata).length > 0 ? JSON.stringify(metadata, null, 2) : ''
     }
   }
 
@@ -262,27 +256,35 @@
   let activeRrule = $derived(
     mode_ === 'advanced' ? advancedText : serializeRRule(currentCommonRule),
   )
-  let savedSchedule = $derived.by(() => {
-    if (!baselineRecurrence) return false
-    const parsed = parseRRule(baselineRecurrence.rrule)
-    return (
-      parsed.kind === 'common' &&
-      dtstart === baselineRecurrence.dtstart &&
-      resolvedTimezone() === baselineRecurrence.timezone &&
-      structurallyEqualCommon(parsed.rrule, currentCommonRule, dtstart)
-    )
+  let dates = $state<string[]>([])
+  $effect(() => {
+    const rule = activeRrule
+    const start = dtstart
+    const zone = resolvedTimezone()
+    const create = mode.kind === 'create' ? mode : null
+    const valid =
+      mode_ === 'advanced'
+        ? advancedParse.kind !== 'invalid'
+        : isCommonFormValid() && (freq !== 'WEEKLY' || byDay.length > 0)
+    dates = []
+    if (!create || !valid) return
+    const controller = new AbortController()
+    const timer = setTimeout(() => {
+      void previewRecurrence(
+        { projectId: create.projectID },
+        { rrule: rule, dtstart: start, timezone: zone },
+        { signal: controller.signal },
+      )
+        .then((result) => {
+          if (!controller.signal.aborted && result.status === 200) dates = result.data.dates
+        })
+        .catch(() => {})
+    }, 250)
+    return () => {
+      clearTimeout(timer)
+      controller.abort()
+    }
   })
-  let dates = $derived(
-    mode_ === 'common' &&
-      (mode.kind === 'create' || (savedSchedule && baselineRecurrence?.next_occurrence_key))
-      ? previewDates(
-          activeRrule,
-          dtstart,
-          resolvedTimezone(),
-          mode.kind === 'edit' ? baselineRecurrence?.next_occurrence_key : undefined,
-        )
-      : [],
-  )
 
   // The compact summary mirrors whatever rule we'd submit right now —
   // Common form in Common mode, raw textarea in Advanced mode. We hide
@@ -900,18 +902,20 @@
     {/if}
   </Disclosure>
   {#if currentSummary}
-    <DialogPreview>
+    <Card padding="none" class="dialog-preview">
       <div data-testid="recurrence-summary">{currentSummary}</div>
       {#if mode.kind === 'create' && dates.length}<div>
           This task becomes the first, scheduled {formatDay(dates[0]!)}.
         </div>{/if}
-      {#if mode.kind === 'create' ? dates.length > 1 : dates.length > 0}
+      {#if mode.kind === 'create' && dates.length > 1}
         <div>
-          Then {(mode.kind === 'create' ? dates.slice(1) : dates).map(formatDay).join(' · ')}
+          Then {dates.slice(1).map(formatDay).join(' · ')}
         </div>
       {/if}
-      <div>Completing each one makes the next.</div>
-    </DialogPreview>
+      {#if mode.kind === 'create' && dates.length > 1}<div>
+          Completing each one makes the next.
+        </div>{/if}
+    </Card>
   {/if}
 </div>
 
