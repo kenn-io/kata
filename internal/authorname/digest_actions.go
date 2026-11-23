@@ -52,7 +52,7 @@ func actionsConflict(a, b []string) bool {
 	for _, kind := range singleValued {
 		for _, x := range a {
 			for _, y := range b {
-				if strings.HasPrefix(x, kind) && strings.HasPrefix(y, kind) && strings.ToLower(x) != strings.ToLower(y) {
+				if strings.HasPrefix(x, kind) && strings.HasPrefix(y, kind) && !strings.EqualFold(x, y) {
 					return true
 				}
 			}
