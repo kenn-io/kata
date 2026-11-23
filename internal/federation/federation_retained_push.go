@@ -69,7 +69,7 @@ func (r *retainedPush) nextBatch(ctx context.Context, pending *[]db.Event) ([]db
 		retired, err = publishRetainedLinkPeers(ctx, r.store, r.binding, r.hubProjectID, r.client, batch, r.sent, r.onPulled, r.validateLease, r.credentials, r.opts)
 	}
 	if err != nil || retired {
-		*pending = nil
+		*pending = []db.Event{}
 		return nil, "", 0, err
 	}
 	return batch, baseline, baselineEnd, nil
@@ -137,7 +137,7 @@ func (r *retainedPush) resolve(ctx context.Context, pending *[]db.Event, batch [
 	case r.creation && retainedInitializerAlreadyKnown(err, "issue.created", *first.IssueUID):
 		return true, r.advance(ctx, pending, 1)
 	case r.recovery && first.IssueUID != nil && retainedInitializerAlreadyKnown(err, "issue.snapshot", *first.IssueUID):
-		*pending = nil
+		*pending = []db.Event{}
 		return true, r.acknowledge(ctx, first)
 	}
 	issueUID := retainedUnknownIssue(err)
@@ -153,7 +153,7 @@ func (r *retainedPush) resolve(ctx context.Context, pending *[]db.Event, batch [
 	}
 	retired, err := publishRetainedLinkPeers(ctx, r.store, r.binding, r.hubProjectID, r.client, []db.Event{snapshot}, r.sent, r.onPulled, r.validateLease, r.credentials, r.opts)
 	if err != nil || retired {
-		*pending = nil
+		*pending = []db.Event{}
 		return retired, err
 	}
 	envelope := federationIngestEnvelope(snapshot)
