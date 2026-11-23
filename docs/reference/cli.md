@@ -101,7 +101,7 @@ workspace. Pass `--project` to choose the project name explicitly instead of
 deriving it from the git remote.
 With `--workspace <dir>`, init refuses when the binding it would change lies
 outside `<dir>`: an enclosing folder's `.kata.toml`, or a `<dir>/.kata.toml`
-symlink to a file elsewhere. A folder with no binding yet initializes as before.
+symlink to a file elsewhere.
 
 Pass `--with-agents` to add or refresh kata's marker-delimited guidance block
 where coding agents look for workspace instructions. Existing real `AGENTS.md`
