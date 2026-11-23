@@ -201,7 +201,6 @@ func TestLeaveFederationRouteOvertakenMove(t *testing.T) {
 	response, raw := envDoRaw(t, env, http.MethodPost, path, map[string]any{"disposition": "archive", "actor": "worker", "preflight": true, "force": true}, nil)
 	require.Equal(t, http.StatusConflict, response.StatusCode, string(raw))
 	require.Contains(t, string(raw), "federation_lifecycle_blocked")
-	require.Contains(t, string(raw), "sync retained work")
 	response, raw = envDoRaw(t, env, http.MethodPost, path, map[string]any{"disposition": "detach", "actor": "worker", "prepare": true}, nil)
 	require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
 }

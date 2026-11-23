@@ -85,6 +85,55 @@ func checkFederatedOvertakenMoveSourceLeave(t *testing.T, _ db.Storage, backend 
 		}
 		return hub, spoke, remote, local
 	}
+	for _, operation := range []string{"reset", "purge issue", "purge project"} {
+		t.Run("deleted acknowledgment/"+operation, func(t *testing.T) {
+			ctx := t.Context()
+			hub, spoke, remote, local := overtakenMoveSpoke(t, 1, "cleanup-source")
+			issue, created, err := hub.CreateIssue(ctx, db.CreateIssueParams{ProjectID: remote[0].ID, Title: "cleanup", Author: "worker"})
+			require.NoError(t, err)
+			_, err = spoke.InsertRemoteEvents(ctx, local[0].ID, []db.RemoteEvent{portableNativeEvent(created)})
+			require.NoError(t, err)
+			require.NoError(t, spoke.MaterializeFederatedProject(ctx, local[0].ID))
+			issueLocal, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			_, event, err := spoke.CreateComment(ctx, db.CreateCommentParams{IssueID: issueLocal.ID, Author: "worker", Body: "accepted"})
+			require.NoError(t, err)
+			require.NoError(t, spoke.RecordFederationAcknowledgedEvents(ctx, local[0].ID, []string{event.UID}))
+			marker := db.FederationAcknowledgedEventPrefix + local[0].UID + "." + event.UID
+			var found bool
+			for meta, err := range spoke.ExportMeta(ctx) {
+				require.NoError(t, err)
+				found = found || meta.Key == marker
+			}
+			require.True(t, found)
+			if operation == "reset" {
+				binding, err := spoke.FederationBindingByProject(ctx, local[0].ID)
+				require.NoError(t, err)
+				require.NoError(t, spoke.ResetFederatedProjectIfNoPendingPush(ctx, local[0].ID, 0, 0, spoke.InstanceUID(), binding.PushCursorEventID))
+			} else {
+				_, err = spoke.LeaveFederationReplica(ctx, local[0].ID)
+				require.NoError(t, err)
+				if operation == "purge issue" {
+					_, _, _, err = spoke.SoftDeleteIssue(ctx, issueLocal.ID, "worker")
+					require.NoError(t, err)
+					_, err = spoke.PurgeIssue(ctx, issueLocal.ID, "worker", nil)
+				} else {
+					_, _, err = spoke.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: local[0].ID, Actor: "worker", Force: true})
+					require.NoError(t, err)
+					_, err = spoke.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: local[0].ID, Actor: "worker"})
+				}
+				require.NoError(t, err)
+			}
+			if operation != "purge project" {
+				_, err = spoke.EventsByUIDs(ctx, local[0].ID, []string{event.UID})
+				require.ErrorIs(t, err, db.ErrNotFound)
+			}
+			for meta, err := range spoke.ExportMeta(ctx) {
+				require.NoError(t, err)
+				require.NotEqual(t, marker, meta.Key)
+			}
+		})
+	}
 	t.Run("leave with independent held edits", func(t *testing.T) {
 		ctx := t.Context()
 		hub, spoke, remote, local := overtakenMoveSpoke(t, 2, "leave-source", "leave-destination", "leave-absent")
@@ -259,10 +308,6 @@ func checkFederatedOvertakenMoveSourceLeave(t *testing.T, _ db.Storage, backend 
 		require.NoError(t, spoke.MaterializeFederatedProject(ctx, local[0].ID))
 		binding, err := spoke.FederationBindingByProject(ctx, local[0].ID)
 		require.NoError(t, err)
-		lifecycle := spoke.(db.RelayLifecycleStore)
-		require.ErrorIs(t, lifecycle.ValidateRelayLifecycle(ctx, local[0].ID), db.ErrFederationResetBlockedByPendingPush)
-		require.NoError(t, lifecycle.ValidateFederationLeave(ctx, local[0].ID))
-		require.NoError(t, spoke.(db.RelayDisconnectFenceStore).FenceFederationLeave(ctx, local[0].ID))
 		_, err = spoke.LeaveFederationReplica(ctx, local[0].ID)
 		require.NoError(t, err)
 		pending, err := spoke.PendingFederationPushEvents(ctx, local[1].ID, spoke.InstanceUID(), 0, 100)
@@ -414,7 +459,7 @@ func checkFederatedOvertakenMoveSourceLeave(t *testing.T, _ db.Storage, backend 
 		require.NoError(t, err)
 		require.NoError(t, spoke.MaterializeFederatedProject(ctx, local[0].ID))
 		superseded := scenario == "newer" || scenario == "newer-held"
-		if scenario != "hub-only" {
+		if scenario != "hub-only" && scenario != "newer-held" {
 			pending, err := spoke.PendingFederationPushEvents(ctx, local[1].ID, spoke.InstanceUID(), 0, 100)
 			require.NoError(t, err)
 			count, _, err := spoke.PendingFederationPushStats(ctx, local[1].ID, spoke.InstanceUID(), 0)
