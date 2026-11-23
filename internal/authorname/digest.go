@@ -29,25 +29,8 @@ func GroupDigest(actors []generated.DigestActorEntry) []generated.DigestActorEnt
 			groups = append(groups, generated.DigestActorEntry{Actor: name})
 		}
 		group := &groups[i]
-		group.Issues = append(group.Issues, actor.Issues...)
-		a, b := &group.Totals, actor.Totals
-		a.Assigned += b.Assigned
-		a.Closed += b.Closed
-		a.Commented += b.Commented
-		a.Created += b.Created
-		a.Deleted += b.Deleted
-		a.Edited += b.Edited
-		a.Labeled += b.Labeled
-		a.Linked += b.Linked
-		a.Other += b.Other
-		a.PriorityCleared += b.PriorityCleared
-		a.PrioritySet += b.PrioritySet
-		a.Reopened += b.Reopened
-		a.Restored += b.Restored
-		a.Unassigned += b.Unassigned
-		a.Unblocked += b.Unblocked
-		a.Unlabeled += b.Unlabeled
-		a.Unlinked += b.Unlinked
+		group.Issues = mergeIssues(group.Issues, actor.Issues)
+		addTotals(&group.Totals, actor.Totals)
 	}
 	for i := range groups {
 		issues := groups[i].Issues
