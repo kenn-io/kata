@@ -124,10 +124,8 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 				}
 			}
 			if !in.Body.DryRun {
-				for _, uid := range snapshots {
-					if _, _, err := cfg.DB.RetainedIssueSnapshot(ctx, iss.ProjectID, uid); err != nil {
-						return nil, internalAPIError(err)
-					}
+				if err := retainMoveSnapshots(ctx, cfg, iss.ProjectID, snapshots); err != nil {
+					return nil, err
 				}
 				move.DryRun = false
 				move.ExpectedIssueIDs = make([]int64, len(res.Issues))
@@ -155,6 +153,18 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 		}
 		return out, nil
 	}
+}
+
+// retainMoveSnapshots records the moved tasks' retained snapshots and
+// publishes each one that commits, even when the later move fails.
+func retainMoveSnapshots(ctx context.Context, cfg ServerConfig, projectID int64, uids []string) error {
+	ctx = db.WithRecoveryEventPublisher(ctx, func(event db.Event) { cfg.Publish().Event(event.ProjectID, event) })
+	for _, uid := range uids {
+		if _, _, err := cfg.DB.RetainedIssueSnapshot(ctx, projectID, uid); err != nil {
+			return internalAPIError(err)
+		}
+	}
+	return nil
 }
 
 // moveIssueAPIError maps a refused move. A descendant's refusal keeps its rule's

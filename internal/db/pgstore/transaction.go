@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+
+	"go.kenn.io/kata/internal/db"
 )
 
 type transactionFunc func(*sql.Tx) error
@@ -67,4 +69,18 @@ func (s *Store) reserveIdentityValue(
 		return 0, fmt.Errorf("reserve identity value for %s.%s: %w", table, column, err)
 	}
 	return value, nil
+}
+
+// withSerializableEventTx publishes the event operation returns as newly
+// inserted, once its transaction has committed.
+func (s *Store) withSerializableEventTx(ctx context.Context, operation func(*sql.Tx) (*db.Event, error)) error {
+	var inserted *db.Event
+	err := s.withSerializableTx(ctx, func(tx *sql.Tx) (err error) {
+		inserted, err = operation(tx)
+		return err
+	})
+	if err == nil && inserted != nil {
+		db.PublishRecoveryEvent(ctx, *inserted)
+	}
+	return err
 }

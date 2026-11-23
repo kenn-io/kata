@@ -55,10 +55,7 @@ func (d *Store) RetainedIssueSnapshot(ctx context.Context, projectID int64, issu
 		if err != nil {
 			return db.Event{}, err
 		}
-		if err := tx.Commit(); err != nil {
-			return db.Event{}, err
-		}
-		return event, nil
+		return event, db.CommitRecoveryEvent(ctx, tx, event)
 	})
 	return event, creationID, err
 }
@@ -117,10 +114,7 @@ func (d *Store) RetainedCommentEvent(ctx context.Context, projectID int64, issue
 		if err != nil {
 			return db.Event{}, err
 		}
-		if err := tx.Commit(); err != nil {
-			return db.Event{}, err
-		}
-		return created, nil
+		return created, db.CommitRecoveryEvent(ctx, tx, created)
 	})
 	return event, sourceID, err
 }

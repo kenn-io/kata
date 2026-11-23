@@ -1,7 +1,9 @@
 package daemon_test
 
 import (
+	"context"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -12,10 +14,61 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/testenv"
 )
+
+type failCommittedMoveStore struct{ db.Storage }
+
+func (s failCommittedMoveStore) MoveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) (db.MoveIssueProjectOut, error) {
+	if !in.DryRun {
+		return db.MoveIssueProjectOut{}, errors.New("move failed")
+	}
+	return s.Storage.MoveIssueProject(ctx, in)
+}
+
+func TestRetainedMovePublishesSnapshotOnFailure(t *testing.T) {
+	sink := &recordingSink{}
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+		cfg.DB = failCommittedMoveStore{cfg.DB}
+		cfg.Hooks = sink
+	})
+	ctx := t.Context()
+	source, err := env.DB.CreateProject(ctx, "source-project")
+	require.NoError(t, err)
+	target, err := env.DB.CreateProject(ctx, "target-project")
+	require.NoError(t, err)
+	issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "retained", Author: "old-actor"})
+	require.NoError(t, err)
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":{"code":"issue_not_found","message":"not synchronized yet"}}`))
+	}))
+	t.Cleanup(hub.Close)
+	for _, project := range []db.Project{source, target} {
+		_, err := env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: project.ID == source.ID})
+		require.NoError(t, err)
+		require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: project.ID, Token: "claim-token", Actor: "new-actor", Capabilities: "claim,push"}))
+	}
+	sub := env.Broadcaster.Subscribe(daemon.SubFilter{})
+	defer sub.Unsub()
+	for range 2 {
+		resp, _ := envDoRaw(t, env, http.MethodPost, issuePathRef(source.ID, issue.UID, "actions/move"), map[string]any{"actor": "new-actor", "to_project_uid": target.UID}, map[string]string{"If-Match": fmt.Sprintf(`"rev-%d"`, issue.Revision)})
+		require.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	}
+	msg := receiveMsg(t, sub.Ch, time.Second, "retained snapshot")
+	require.NotNil(t, msg.Event)
+	require.Equal(t, "issue.snapshot", msg.Event.Type)
+	require.Equal(t, issue.UID, *msg.Event.IssueUID)
+	require.Equal(t, []db.Event{*msg.Event}, sink.snapshot())
+	select {
+	case extra := <-sub.Ch:
+		t.Fatalf("unexpected duplicate event: %+v", extra)
+	default:
+	}
+}
 
 func TestPendingMovedIssueClaimRefreshIgnoresHubShortIDCollision(t *testing.T) {
 	for _, operation := range []string{"mutation", "show"} {

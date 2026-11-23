@@ -54,8 +54,11 @@ func checkRejoinRetainedHistory(t *testing.T, store db.Storage) error {
 		require.NoError(t, err)
 		_, _, _, err = store.EditComment(ctx, db.EditCommentParams{IssueID: issue.ID, CommentUID: reply.UID, Actor: "new-actor", Body: "edited reply"})
 		require.NoError(t, err)
+		var published []db.Event
+		ctx = db.WithRecoveryEventPublisher(ctx, func(event db.Event) { published = append(published, event) })
 		recovered, sourceID, err := store.RetainedCommentEvent(ctx, project.ID, issue.UID, reply.UID)
 		require.NoError(t, err)
+		require.Equal(t, []db.Event{recovered}, published)
 		require.Equal(t, original.ID, sourceID)
 		require.Equal(t, "new-actor", recovered.Actor)
 		var payload struct {
@@ -72,6 +75,7 @@ func checkRejoinRetainedHistory(t *testing.T, store db.Storage) error {
 		again, _, err := store.RetainedCommentEvent(ctx, project.ID, issue.UID, reply.UID)
 		require.NoError(t, err)
 		require.Equal(t, recovered.UID, again.UID)
+		require.Equal(t, []db.Event{recovered}, published)
 		retained, err := store.EventsByUIDs(ctx, project.ID, []string{original.UID})
 		require.NoError(t, err)
 		require.Len(t, retained, 1)
@@ -108,8 +112,14 @@ func checkRejoinRetainedHistory(t *testing.T, store db.Storage) error {
 		require.NoError(t, err)
 		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: true})
 		require.NoError(t, err)
+		var published []db.Event
+		ctx = db.WithRecoveryEventPublisher(ctx, func(event db.Event) { published = append(published, event) })
 		snapshot, _, err := store.RetainedIssueSnapshot(ctx, project.ID, first.UID)
 		require.NoError(t, err)
+		require.Equal(t, []db.Event{snapshot}, published)
+		_, _, err = store.RetainedIssueSnapshot(ctx, project.ID, first.UID)
+		require.NoError(t, err)
+		require.Equal(t, []db.Event{snapshot}, published)
 		var payload db.IssueDocumentPayload
 		require.NoError(t, json.Unmarshal([]byte(snapshot.Payload), &payload))
 		require.Len(t, payload.Links, 1)

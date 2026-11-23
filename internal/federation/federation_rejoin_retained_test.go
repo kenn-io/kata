@@ -38,7 +38,28 @@ func TestRejoinRetainedHistory(t *testing.T) {
 		rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
 		_, _, _, err = spoke.env.DB.EditComment(ctx, db.EditCommentParams{IssueID: issue.ID, CommentUID: reply.UID, Actor: "new-actor", Body: "edited"})
 		require.NoError(t, err)
-		require.NoError(t, spoke.sync(t, 0))
+		binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
+		require.NoError(t, err)
+		creds := spoke.credentials[spoke.projects[0].UID]
+		client, err := NewClient(ctx, creds.HubURL, creds.Token, clientpkg.Opts{})
+		require.NoError(t, err)
+		var published []db.Event
+		onEvents := func(_ int64, events []db.Event) { published = append(published, events...) }
+		require.NoError(t, pushDirectSpoke(ctx, spoke.env.DB, &binding, creds.HubProjectID, client, onEvents, nil, spoke.credentials, clientpkg.Opts{}))
+		require.Len(t, published, 2)
+		require.Equal(t, "issue.commented", published[0].Type)
+		require.Equal(t, issue.UID, *published[0].IssueUID)
+		require.Equal(t, "issue.snapshot", published[1].Type)
+		require.Equal(t, peer.UID, *published[1].IssueUID)
+		commentUID := published[0].UID
+		require.NoError(t, pushDirectSpoke(ctx, spoke.env.DB, &binding, creds.HubProjectID, client, onEvents, nil, spoke.credentials, clientpkg.Opts{}))
+		var copies int
+		for _, event := range published {
+			if event.UID == commentUID {
+				copies++
+			}
+		}
+		require.Equal(t, 1, copies)
 		remote, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 		require.NoError(t, err)
 		comments, err := hub.DB.CommentsByIssue(ctx, remote.ID)
@@ -452,6 +473,60 @@ func checkRejoinPublishesRetainedLinkPeer(t *testing.T) {
 	_, err = hub.DB.IssueByUID(ctx, later.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	assertNoRejoinPushPending(t, spoke)
+}
+
+type recoveryFailTransport struct {
+	base http.RoundTripper
+	fail func() bool
+}
+
+func (t recoveryFailTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if t.fail() {
+		return nil, fmt.Errorf("hub unavailable")
+	}
+	return t.base.RoundTrip(req)
+}
+
+func TestRetainedPeerSnapshotPublishedBeforeRetry(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "published-recovery")
+	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
+	known, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "known", Author: "old-actor"})
+	require.NoError(t, err)
+	require.NoError(t, spoke.sync(t, 0))
+	peer, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "retained", Author: "old-actor"})
+	require.NoError(t, err)
+	rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push")
+	_, _, err = spoke.env.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: known.ID, ToIssueID: peer.ID, Type: "blocks", Author: "new-actor"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: known.ID, Actor: "new-actor", FromUID: known.UID, ToUID: peer.UID, FromShortID: known.ShortID, ToShortID: peer.ShortID})
+	require.NoError(t, err)
+	binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
+	require.NoError(t, err)
+	creds := spoke.credentials[spoke.projects[0].UID]
+	client, err := NewClient(ctx, creds.HubURL, creds.Token, clientpkg.Opts{})
+	require.NoError(t, err)
+	var published []db.Event
+	onEvents := func(_ int64, events []db.Event) { published = append(published, events...) }
+	fail := true
+	transport := client.client.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+	client.client.Transport = recoveryFailTransport{base: transport, fail: func() bool { return fail && len(published) > 0 }}
+	err = pushDirectSpoke(ctx, spoke.env.DB, &binding, creds.HubProjectID, client, onEvents, nil, spoke.credentials, clientpkg.Opts{})
+	require.ErrorContains(t, err, "hub unavailable")
+	require.Len(t, published, 1)
+	require.Equal(t, "issue.snapshot", published[0].Type)
+	require.Equal(t, peer.UID, *published[0].IssueUID)
+	peerSnapshotUID := published[0].UID
+	fail = false
+	require.NoError(t, pushDirectSpoke(ctx, spoke.env.DB, &binding, creds.HubProjectID, client, onEvents, nil, spoke.credentials, clientpkg.Opts{}))
+	var peerSnapshots int
+	for _, event := range published {
+		if event.UID == peerSnapshotUID {
+			peerSnapshots++
+		}
+	}
+	require.Equal(t, 1, peerSnapshots)
 }
 
 func pushRejoin(t *testing.T, spoke moveDeliverySpoke) error {

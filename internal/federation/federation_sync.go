@@ -261,6 +261,25 @@ func pushDirectSpoke(
 	credentials config.FederationCredentialStore,
 	opts clientpkg.Opts,
 ) error {
+	ctx = db.WithRecoveryEventPublisher(ctx, func(event db.Event) {
+		if onPulledEvents != nil {
+			onPulledEvents(event.ProjectID, []db.Event{event})
+		}
+	})
+	return pushDirectSpokeWithPublisher(ctx, store, binding, hubProjectID, client, onPulledEvents, validateLease, credentials, opts)
+}
+
+func pushDirectSpokeWithPublisher(
+	ctx context.Context,
+	store db.Storage,
+	binding *db.FederationBinding,
+	hubProjectID int64,
+	client *Client,
+	onPulledEvents func(projectID int64, events []db.Event),
+	validateLease func(context.Context) error,
+	credentials config.FederationCredentialStore,
+	opts clientpkg.Opts,
+) error {
 	if binding.PushEnabled {
 		snapshotsSent := make(map[string]bool)
 		for {
