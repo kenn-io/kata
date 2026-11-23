@@ -173,3 +173,25 @@ func TestNativeGuidesSayCommentsCarryFindings(t *testing.T) {
 		}
 	}
 }
+
+// Product contract (kata#5s85): the teammates guide's comment carries a
+// finding, and the hand-off status lives only in work.attention_msg.
+func TestNativeTeammatesGuideKeepsStatusOutOfComments(t *testing.T) {
+	var bodies, statuses []string
+	for _, example := range nativeExamples(t, "teammates") {
+		switch example.Tool {
+		case "kata.comment":
+			bodies = append(bodies, example.Arguments["body"].(string))
+		case "kata.set_metadata":
+			patch := example.Arguments["patch"].(map[string]any)
+			if msg, ok := patch["work.attention_msg"].(string); ok {
+				statuses = append(statuses, msg)
+			}
+		}
+	}
+	require.NotEmpty(t, bodies)
+	for _, body := range bodies {
+		require.NotRegexp(t, `(?i)\b(ready|review)\b`, body)
+	}
+	require.Equal(t, []string{"Ready for the assigned reviewer."}, statuses)
+}

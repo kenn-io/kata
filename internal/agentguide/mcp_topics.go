@@ -136,7 +136,7 @@ The actor comes from server startup. A startup teammate is the default; create
 and comment accept teammate overrides when agents share a connection. Empty
 teammate suppresses the default. Keep the actor and assign distinct teammates.
 Load kata.load_issue_mutation and refresh for attributed comments and attention.
-` + call("kata.comment", `{"ref":"spoke-project#abc4","teammate":"worker-1","body":"The export fixture is ready for review.","idempotency_key":"worker-1-ready-1"}`) +
+` + call("kata.comment", `{"ref":"spoke-project#abc4","teammate":"worker-1","body":"The export fixture omits the retry case, so it cannot catch a duplicate export.","idempotency_key":"worker-1-finding-1"}`) +
 			call("kata.set_metadata", `{"ref":"spoke-project#abc4","patch":{"work.attention":"needs-human","work.attention_msg":"Ready for the assigned reviewer."}}`) + `
 Only write your own work.* keys. Delegated issues may have a parent and branch
 metadata; use real blocking relationships only for prerequisites.

@@ -466,10 +466,16 @@ who contributed each comment. A teammate can also create a tracked child issue:
 ```sh
 export KATA_TEAMMATE=teammate-1
 export KATA_INBOX_USER=coordinator/teammate-1
-kata comment abc4 --body "Checked the retry path"
+kata comment abc4 --body-stdin <<'EOF'
+The retry path reuses the original export ID.
+EOF
 kata create "Check retry behavior" --parent abc4 --idempotency-key retry-teammate-1
-kata --teammate=teammate-2 comment abc4 --body "Independent review"
-kata --teammate='' comment abc4 --body "Coordinator summary"
+kata --teammate=teammate-2 comment abc4 --body-stdin <<'EOF'
+A retry after a timeout creates a second export.
+EOF
+kata --teammate='' comment abc4 --body-stdin <<'EOF'
+Both retry findings trace to the missing export ID check.
+EOF
 ```
 
 Comments store the optional teammate separately from their accountable
@@ -574,10 +580,18 @@ Choose the kind explicitly:
 | `--supersede <cref>` | Replaces the target; the target is outdated | Explain the replacement |
 
 ```sh
-kata comment abc4 --reply c:xbzxrq -m "This builds on the finding."
-kata comment abc4 --confirm c:xbzxrq -m "Reproduced the result with the documented retry steps."
-kata comment abc4 --refute d4ex:xbzxrq -m "The retry still fails when the connection drops twice."
-kata comment abc4 --supersede c:xbzxrq -m "The updated finding replaces this one."
+kata comment abc4 --reply c:xbzxrq --body-stdin <<'EOF'
+This builds on the finding.
+EOF
+kata comment abc4 --confirm c:xbzxrq --body-stdin <<'EOF'
+Reproduced the result with the documented retry steps.
+EOF
+kata comment abc4 --refute d4ex:xbzxrq --body-stdin <<'EOF'
+The retry still fails when the connection drops twice.
+EOF
+kata comment abc4 --supersede c:xbzxrq --body-stdin <<'EOF'
+The updated finding replaces this one.
+EOF
 ```
 
 Kinds are assertions by the attributed actor, not facts Kata verifies. Teammate
@@ -816,7 +830,9 @@ Prefer updating existing issues over opening duplicates:
 
 ```sh
 kata show abc4 --agent
-kata comment abc4 --body "Found another reproduction path." --agent
+kata comment abc4 --body-stdin --agent <<'EOF'
+Found another reproduction path.
+EOF
 kata label add abc4 safari --agent
 kata edit abc4 --blocks d4ex --agent
 ```

@@ -109,10 +109,10 @@ func TestQuickstartExplainsTeammateFlow(t *testing.T) {
 		"KATA_TEAMMATE=teammate-1",
 		"KATA_INBOX_USER=coordinator/teammate-1",
 		"metadata.teammate",
-		"kata comment abc4 --body \"Checked the retry path\"",
+		"kata comment abc4 --body-stdin <<'EOF'\nThe retry path reuses the original export ID.\nEOF\n",
 		"kata create \"Check retry behavior\" --parent abc4 --idempotency-key retry-teammate-1",
-		"kata --teammate=teammate-2 comment abc4 --body \"Independent review\"",
-		"kata --teammate='' comment abc4 --body \"Coordinator summary\"",
+		"kata --teammate=teammate-2 comment abc4 --body-stdin <<'EOF'\nA retry after a timeout creates a second export.\nEOF\n",
+		"kata --teammate='' comment abc4 --body-stdin <<'EOF'\nBoth retry findings trace to the missing export ID check.\nEOF\n",
 		"kata notify abc4 --to coordinator --message \"Please decide\"",
 		"kata notify abc4 --to coordinator/teammate-1",
 		"kata inbox --for coordinator/teammate-1",
@@ -120,6 +120,7 @@ func TestQuickstartExplainsTeammateFlow(t *testing.T) {
 	} {
 		require.Contains(t, out, text)
 	}
+	require.NotContains(t, out, "comment abc4 --body \"")
 }
 
 func TestQuickstart_IncludesScheduleDeadlineAndSomedayCommands(t *testing.T) {

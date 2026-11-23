@@ -186,7 +186,9 @@ const fragSearchCreateUpdate = `3. Search before creating:
 
    kata show abc4 --agent
    kata show --project foo abc4 --agent
-   kata comment abc4 --body "Found another reproduction path." --agent
+   kata comment abc4 --body-stdin --agent <<'EOF'
+Found another reproduction path.
+EOF
    kata label add abc4 safari --agent
    kata edit abc4 --blocks d4ex --agent
 
@@ -268,10 +270,16 @@ const fragTeammates = `9. Attribute swarm contributions and request attention wi
 
    export KATA_TEAMMATE=teammate-1
    export KATA_INBOX_USER=coordinator/teammate-1
-   kata comment abc4 --body "Checked the retry path"
+   kata comment abc4 --body-stdin <<'EOF'
+The retry path reuses the original export ID.
+EOF
    kata create "Check retry behavior" --parent abc4 --idempotency-key retry-teammate-1
-   kata --teammate=teammate-2 comment abc4 --body "Independent review"
-   kata --teammate='' comment abc4 --body "Coordinator summary"
+   kata --teammate=teammate-2 comment abc4 --body-stdin <<'EOF'
+A retry after a timeout creates a second export.
+EOF
+   kata --teammate='' comment abc4 --body-stdin <<'EOF'
+Both retry findings trace to the missing export ID check.
+EOF
    kata notify abc4 --to coordinator --message "Please decide"
    kata notify abc4 --to coordinator/teammate-1 --message "Please check the update"
    kata inbox --for coordinator/teammate-1
