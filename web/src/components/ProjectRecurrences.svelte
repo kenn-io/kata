@@ -49,22 +49,18 @@
     | undefined = $state()
   let generation = 0
 
-  async function refresh(id: number): Promise<KataRecurrence[] | null> {
+  async function refresh(id: number): Promise<void> {
     const current = ++generation
     try {
       const result = await listRecurrences({ projectId: id })
       if (result.status !== 200 || !Array.isArray(result.data.recurrences))
         throw new Error('Could not load repeating tasks')
-      const loaded = result.data.recurrences as KataRecurrence[]
       if (current === generation) {
-        recurrences = loaded
+        recurrences = result.data.recurrences as KataRecurrence[]
         readError = false
-        return loaded
       }
-      return null
     } catch {
       if (current === generation) readError = true
-      return null
     }
   }
   $effect(() => {
@@ -78,7 +74,7 @@
   $effect(() => {
     if (!open) return
     const trigger = root?.querySelector('button') ?? null
-    return [
+    const cleanups = [
       dismissable({
         owners: () => [root, panel],
         dismiss: () => {
@@ -87,10 +83,8 @@
         escapeFocus: () => trigger,
       }),
       autoReposition(() => [panel], position),
-    ].reduce((a, b) => () => {
-      a()
-      b()
-    })
+    ]
+    return () => cleanups.forEach((cleanup) => cleanup())
   })
   function position(): void {
     const trigger = root?.querySelector('button')
@@ -124,12 +118,7 @@
     }
   }
   async function stop(recurrence: KataRecurrence): Promise<boolean> {
-    let stopped = false
-    try {
-      stopped = await onDelete(recurrence)
-    } catch {
-      // Refresh after a refusal.
-    }
+    const stopped = await onDelete(recurrence)
     if (!stopped) await refresh(projectID)
     return stopped
   }

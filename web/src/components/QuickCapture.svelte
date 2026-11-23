@@ -62,7 +62,6 @@
     lastDraftFenceGeneration = nextGeneration
     title = ''
     pending = false
-    selectedProjectUID = undefined
   })
 
   async function submit(): Promise<void> {

@@ -280,7 +280,7 @@
         disabled={pending}
       ></textarea>
     </label>
-    <Card padding="none" class="dialog-preview">
+    <Card level="inset" padding="sm">
       <div>Comments and links stay.</div>
       {#if blockedCount}<div>Unblocks {blockedCount} open tasks.</div>{/if}
     </Card>

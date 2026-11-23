@@ -155,7 +155,7 @@ test('credential controls stay in place when clearing a search makes the page sc
   )
 })
 
-test('move picker names stay in place when clearing its search makes the list scroll', async ({
+test('move picker counts stay in place when clearing its search makes the list scroll', async ({
   page,
   kata,
 }) => {
@@ -177,7 +177,7 @@ test('move picker names stay in place when clearing its search makes the list sc
 
   await expectNoShiftWhenScrollbarAppears(
     options,
-    options.getByRole('button', { name: /example-extra-39/ }).locator('.move-project-name'),
+    options.getByRole('button', { name: /example-extra-39/ }).locator('.move-project-count'),
     async () => {
       await search.fill('')
       await expect(filler).toBeVisible()

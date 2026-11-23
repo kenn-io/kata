@@ -178,6 +178,7 @@
           {#if destinationContext(project)}
             <span class="move-project-context">{destinationContext(project)}</span>
           {/if}
+          <span class="move-project-count">{project.open_count}</span>
         </button>
       {:else}
         <p role="status">No matching projects</p>
@@ -245,10 +246,20 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
   .move-project-context {
     grid-column: 1;
     color: var(--text-muted);
     font-size: var(--font-size-xs);
+  }
+
+  .move-project-count {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: center;
+    color: var(--text-muted);
+    font-size: var(--font-size-xs);
+    font-variant-numeric: tabular-nums;
   }
 
   .move-options p {

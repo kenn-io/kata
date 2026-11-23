@@ -121,8 +121,6 @@
       if (ok) {
         recurrenceDelete = { open: false, recurrence: null }
       }
-    } catch {
-      // Keep the dialog open for retry.
     } finally {
       deletingRecurrence = false
     }
