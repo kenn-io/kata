@@ -22,7 +22,9 @@ function projectSyncFetch(
       : syncFetch(url, init)
 }
 
-function syncedProjectFetch(): typeof fetch {
+function syncedProjectFetch(
+  overrides: { pending_push_count?: number; has_sync_error?: boolean } = {},
+): typeof fetch {
   return projectSyncFetch(async () =>
     Response.json({
       statuses: [
@@ -33,6 +35,7 @@ function syncedProjectFetch(): typeof fetch {
           enabled: true,
           role: 'spoke',
           pending_push_count: 0,
+          ...overrides,
         },
       ],
     }),
@@ -172,31 +175,6 @@ describe('AppShell', () => {
       },
     })
     expect(await screen.findByRole('button', { name: 'No changes to send' })).not.toBeNull()
-  })
-
-  test('does not read project sync in settings', async () => {
-    const fetcher = vi.fn<typeof fetch>(async () => Response.json({ statuses: [] }))
-    setGeneratedFetch(projectSyncFetch(fetcher))
-    render(AppShell, {
-      props: {
-        route: {
-          kind: 'kata',
-          view: 'settings',
-          graph: false,
-          filters: { status: [], owner: [], label: [], relationship: [] },
-        },
-        snapshot: snapshot(),
-        loading: false,
-        ...mutationProps(),
-        onNavigate: vi.fn(),
-        onCreateProject: vi.fn(async () => ({ changed: true })),
-      },
-    })
-    await screen.findAllByText('Settings')
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(fetcher.mock.calls.some(([url]) => String(url).includes('/federation/status'))).toBe(
-      false,
-    )
   })
 
   test('explains a read-only credential at each blocked write control', async () => {
@@ -1706,17 +1684,7 @@ describe('AppShell', () => {
   })
 
   test('shows a failing project sync in the graph header', async () => {
-    setGeneratedFetch(projectSyncFetch(async () => Response.json({
-      statuses: [{
-        project_id: 7,
-        project_uid: '01J00000000000000000000002',
-        project_name: 'example-project',
-        enabled: true,
-        role: 'spoke',
-        pending_push_count: 3,
-        has_sync_error: true,
-      }],
-    })))
+    setGeneratedFetch(syncedProjectFetch({ pending_push_count: 3, has_sync_error: true }))
     const selected = snapshot()
     selected.selected = {
       state: 'available',

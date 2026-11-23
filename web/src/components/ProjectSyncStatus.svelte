@@ -43,6 +43,7 @@
   let tone = $derived.by<'danger' | 'warning' | 'neutral'>(() => {
     if (error) return 'warning'
     if (status?.has_sync_error) return 'danger'
+    if (status && status.pending_push_count > 0) return 'warning'
     return 'neutral'
   })
   let visible = $derived(error || status !== undefined)
@@ -133,7 +134,6 @@
   }
 
   function resetView(): void {
-    open = false
     status = undefined
     loading = true
     error = false
@@ -236,19 +236,14 @@
 
 {#if visible}
   <div class="project-sync" aria-busy={reading} bind:this={trigger}>
-    <span
-      class="chip-host"
-      {@attach (host) => host.querySelector('button')?.setAttribute('aria-haspopup', 'dialog')}
-    >
-      <Chip interactive uppercase={false} {tone} expanded={open} onclick={() => void toggle()}>
-        {#if tone === 'danger'}
-          <span class="chip-icon danger"><CircleAlertIcon size={14} aria-hidden="true" /></span>
-        {:else if tone === 'warning'}
-          <span class="chip-icon warning"><TriangleAlertIcon size={14} aria-hidden="true" /></span>
-        {/if}{chipLabel}
-        {#snippet trailing()}<ChevronDownIcon size={14} aria-hidden="true" />{/snippet}
-      </Chip>
-    </span>
+    <Chip interactive uppercase={false} {tone} expanded={open} onclick={() => void toggle()}>
+      {#if tone === 'danger'}
+        <span class="chip-icon"><CircleAlertIcon size={14} aria-hidden="true" /></span>
+      {:else if tone === 'warning'}
+        <span class="chip-icon"><TriangleAlertIcon size={14} aria-hidden="true" /></span>
+      {/if}{chipLabel}
+      {#snippet trailing()}<ChevronDownIcon size={14} aria-hidden="true" />{/snippet}
+    </Chip>
     {#if open}
       <div
         bind:this={panel}
@@ -389,26 +384,8 @@
     display: inline-flex;
     min-width: 0;
   }
-  .chip-host {
-    display: inline-flex;
-    min-width: 0;
-  }
-  /* The label reads as a sentence; on a failure only the icon carries the tone. */
-  .chip-host :global(.kit-chip) {
-    font-weight: var(--font-weight-medium);
-  }
-  .chip-host :global(.kit-chip--tone-danger),
-  .chip-host :global(.kit-chip--tone-warning) {
-    color: var(--text-primary);
-  }
   .chip-icon {
     margin-inline-end: var(--space-2);
-  }
-  .chip-icon.danger {
-    color: var(--accent-red);
-  }
-  .chip-icon.warning {
-    color: var(--accent-amber);
   }
   .sync-panel {
     position: fixed;
@@ -463,9 +440,6 @@
     cursor: default;
     color: var(--text-muted);
   }
-  .sync-panel span {
-    min-width: 0;
-  }
   .sync-state {
     display: flex;
     flex-direction: column;
@@ -501,9 +475,6 @@
     margin: 0;
     min-width: 0;
     color: var(--text-primary);
-  }
-  .sync-facts code {
-    font-size: var(--font-size-xs);
   }
   /* The command sits in an inset box and scrolls sideways inside it. */
   .command {

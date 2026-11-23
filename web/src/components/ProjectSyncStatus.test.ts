@@ -162,14 +162,14 @@ describe('ProjectSyncStatus', () => {
     expect(screen.getByRole('button', { name: 'Sync disabled' })).not.toBeNull()
   })
 
-  it('shows a neutral waiting count and a single command when both shells match', async () => {
+  it('shows a warning waiting count and a single command when both shells match', async () => {
     const result = await response().json()
     result.statuses[0].project_name = 'spoke-project'
     result.statuses[0].has_sync_error = false
     setGeneratedFetch(vi.fn().mockResolvedValueOnce(Response.json(result)))
     const view = render(ProjectSyncStatus, { props: { projectID: 7, projectUID } })
     const button = await screen.findByRole('button', { name: '2 to sync' })
-    expect(button.className).toContain('kit-chip--tone-neutral')
+    expect(button.className).toContain('kit-chip--tone-warning')
     result.statuses[0].has_sync_error = true
     setGeneratedFetch(vi.fn().mockResolvedValueOnce(Response.json(result)))
     await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
