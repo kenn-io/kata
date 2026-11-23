@@ -233,6 +233,18 @@ func (s *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCu
 	})
 }
 
+func (s *Store) RecordFederationAcknowledgedEvents(ctx context.Context, projectID int64, uids []string) error {
+	return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		return db.RecordFederationAcknowledgedEvents(ctx, tx, projectID, uids)
+	})
+}
+
+func (s *Store) FoldFederationAcknowledgedEvents(ctx context.Context, projectID int64, origin string) error {
+	return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		return db.FoldFederationAcknowledgedEvents(ctx, tx, projectID, origin)
+	})
+}
+
 // AdvanceFederationPushCursor advances the acknowledged local event id monotonically.
 func (s *Store) AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error {
 	return s.updateFederationCursor(ctx, projectID, nextCursor, true)

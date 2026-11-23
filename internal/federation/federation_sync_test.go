@@ -3033,7 +3033,7 @@ func TestNextFederationPushIngestBatchRejectsOversizedAdoptionSnapshotBaseline(t
 				`","author":"historical-author","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`),
 	}
 
-	_, _, _, err := nextFederationPushIngestBatch(events)
+	_, _, _, err := nextFederationPushIngestBatch(events, false)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "adoption snapshot baseline")
@@ -3047,7 +3047,7 @@ func TestNextFederationPushIngestBatchMarksSingleSnapshotBaselineComplete(t *tes
 			`{"uid":"`+issueUID+`","short_id":"`+shortIDForSyncTest(issueUID)+`","title":"terminal","body":"","author":"historical-author","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`),
 	}
 
-	batch, adoptionBaseline, adoptionBaselineEndEventID, err := nextFederationPushIngestBatch(events)
+	batch, adoptionBaseline, adoptionBaselineEndEventID, err := nextFederationPushIngestBatch(events, false)
 
 	require.NoError(t, err)
 	require.Len(t, batch, 1)

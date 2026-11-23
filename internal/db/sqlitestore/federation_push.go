@@ -173,6 +173,34 @@ func (d *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCu
 	})
 }
 
+func (d *Store) RecordFederationAcknowledgedEvents(ctx context.Context, projectID int64, uids []string) error {
+	return d.RetryTransient(ctx, func() error {
+		tx, err := d.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback() }()
+		if err := db.RecordFederationAcknowledgedEvents(ctx, tx, projectID, uids); err != nil {
+			return err
+		}
+		return tx.Commit()
+	})
+}
+
+func (d *Store) FoldFederationAcknowledgedEvents(ctx context.Context, projectID int64, origin string) error {
+	return d.RetryTransient(ctx, func() error {
+		tx, err := d.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback() }()
+		if err := db.FoldFederationAcknowledgedEvents(ctx, tx, projectID, origin); err != nil {
+			return err
+		}
+		return tx.Commit()
+	})
+}
+
 // AdvanceFederationPushCursor records the highest local events.id accepted by
 // the hub for a spoke binding.
 func (d *Store) AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error {

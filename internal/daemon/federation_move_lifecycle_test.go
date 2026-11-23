@@ -168,12 +168,9 @@ func overtakenLeaveFixture(t *testing.T, store db.Storage) (db.Project, db.Event
 		require.NoError(t, err)
 		local = append(local, replica)
 	}
-	portable := func(e db.Event) db.RemoteEvent {
-		return db.RemoteEvent{EventUID: e.UID, OriginInstanceUID: e.OriginInstanceUID, ProjectUID: e.ProjectUID, ProjectName: e.ProjectName, IssueUID: e.IssueUID, RelatedIssueUID: e.RelatedIssueUID, Type: e.Type, Actor: e.Actor, Payload: []byte(e.Payload), ContentHash: e.ContentHash, HLCPhysicalMS: e.HLCPhysicalMS, HLCCounter: e.HLCCounter, CreatedAt: e.CreatedAt}
-	}
 	issue, creation, err := hub.CreateIssue(ctx, db.CreateIssueParams{ProjectID: remote[0].ID, Title: "overtaken", Author: "worker"})
 	require.NoError(t, err)
-	_, err = store.InsertRemoteEvents(ctx, local[0].ID, []db.RemoteEvent{portable(creation)})
+	_, err = store.InsertRemoteEvents(ctx, local[0].ID, []db.RemoteEvent{db.RemoteEventFromStored(creation)})
 	require.NoError(t, err)
 	require.NoError(t, store.MaterializeFederatedProject(ctx, local[0].ID))
 	localIssue, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
@@ -184,7 +181,7 @@ func overtakenLeaveFixture(t *testing.T, store db.Storage) (db.Project, db.Event
 	require.NoError(t, err)
 	away, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: remote[0].ID, ToProjectID: remote[2].ID, IfMatchRev: issue.Revision, Actor: "worker"})
 	require.NoError(t, err)
-	event := portable(*away.Event)
+	event := db.RemoteEventFromStored(*away.Event)
 	event.HLCPhysicalMS, event.HLCCounter = move.Event.HLCPhysicalMS, move.Event.HLCCounter+1
 	event.ContentHash, err = db.RemoteEventContentHash(event)
 	require.NoError(t, err)

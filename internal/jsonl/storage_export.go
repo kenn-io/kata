@@ -86,6 +86,9 @@ func Export(ctx context.Context, store db.Storage, w io.Writer, opts ExportOptio
 		if opts.ProjectID > 0 && strings.HasPrefix(record.Key, db.RootKeyTransitionMetadataPrefix) && !strings.HasPrefix(record.Key, db.RootKeyTransitionMetadataPrefix+selectedProjectUID+".") {
 			continue
 		}
+		if opts.ProjectID > 0 && strings.HasPrefix(record.Key, db.FederationAcknowledgedEventPrefix) && !strings.HasPrefix(record.Key, db.FederationAcknowledgedEventPrefix+selectedProjectUID+".") {
+			continue
+		}
 
 		if err := writeRecord(enc, KindMeta, record); err != nil {
 			return err

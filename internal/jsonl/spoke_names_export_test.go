@@ -138,6 +138,74 @@ func TestFederationHeldCursorBackup(t *testing.T) {
 	}
 }
 
+func TestFederationHeldCursorBackupPostgres(t *testing.T) {
+	ctx := t.Context()
+	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
+	t.Cleanup(cleanup)
+	source, err := pgstore.Open(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = source.Close() })
+	project, err := source.CreateProject(ctx, "held-project")
+	require.NoError(t, err)
+	_, err = source.ExecContext(ctx, `INSERT INTO federation_held_cursors(project_uid,push_cursor_event_id) VALUES($1,0)`, project.UID)
+	require.NoError(t, err)
+	var backup bytes.Buffer
+	require.NoError(t, jsonl.Export(ctx, source, &backup, jsonl.ExportOptions{IncludeDeleted: true}))
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			var target db.Storage
+			if backend == "postgres" {
+				targetDSN, targetCleanup := pgstoretest.NewDatabase(t, ctx)
+				t.Cleanup(targetCleanup)
+				target, err = pgstore.Open(ctx, targetDSN)
+			} else {
+				target, err = sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "target.db"))
+			}
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = target.Close() })
+			require.NoError(t, jsonl.ImportWithOptions(ctx, bytes.NewReader(backup.Bytes()), target, jsonl.ImportOptions{}))
+			for p, err := range target.ExportProjects(ctx, db.ExportFilter{}) {
+				require.NoError(t, err)
+				if p.UID == project.UID {
+					require.NotNil(t, p.HeldCursor)
+					require.Zero(t, *p.HeldCursor)
+					return
+				}
+			}
+			t.Fatal("held project missing after restore")
+		})
+	}
+}
+
+func TestFederationAcknowledgmentProjectExport(t *testing.T) {
+	ctx := t.Context()
+	source, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "source.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = source.Close() })
+	selected, err := source.CreateProject(ctx, "selected-project")
+	require.NoError(t, err)
+	other, err := source.CreateProject(ctx, "other-project")
+	require.NoError(t, err)
+	for _, project := range []db.Project{selected, other} {
+		_, err := source.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES(?, '1')`, db.FederationAcknowledgedEventPrefix+project.UID+".event")
+		require.NoError(t, err)
+	}
+	var backup bytes.Buffer
+	require.NoError(t, jsonl.Export(ctx, source, &backup, jsonl.ExportOptions{ProjectID: selected.ID, IncludeDeleted: true}))
+	target, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "target.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = target.Close() })
+	require.NoError(t, jsonl.ImportWithOptions(ctx, bytes.NewReader(backup.Bytes()), target, jsonl.ImportOptions{}))
+	var found []string
+	for meta, err := range target.ExportMeta(ctx) {
+		require.NoError(t, err)
+		if strings.HasPrefix(meta.Key, db.FederationAcknowledgedEventPrefix) {
+			found = append(found, meta.Key)
+		}
+	}
+	require.Equal(t, []string{db.FederationAcknowledgedEventPrefix + selected.UID + ".event"}, found)
+}
+
 func TestFederationLeaveFenceBackup(t *testing.T) {
 	ctx := t.Context()
 	source, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "source.db"))

@@ -296,15 +296,20 @@ func pushDirectSpoke(
 				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 			}
 			if len(pending) == 0 {
+				if refused == nil {
+					if err := store.FoldFederationAcknowledgedEvents(ctx, binding.ProjectID, store.InstanceUID()); err != nil {
+						return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+					}
+					current, err := store.FederationBindingByProject(ctx, binding.ProjectID)
+					if err != nil {
+						return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+					}
+					binding.PushCursorEventID = current.PushCursorEventID
+				}
 				break
 			}
 			for len(pending) > 0 {
-				candidates := pending
-				shape := federationPushAdoptionBaselineShape(pending)
-				if singleEvents && !(shape.valid && shape.hasSnapshot) {
-					candidates = pending[:1]
-				}
-				batch, adoptionBaseline, adoptionBaselineEndEventID, err := nextFederationPushIngestBatch(candidates)
+				batch, adoptionBaseline, adoptionBaselineEndEventID, err := nextFederationPushIngestBatch(pending, singleEvents)
 				if err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
@@ -327,9 +332,13 @@ func pushDirectSpoke(
 						if refused == nil {
 							refused = err
 						}
-						singleEvents = true
 						scanCursor = batch[0].ID
 						pending = pending[1:]
+						singleEvents = false
+						continue
+					}
+					if refused != nil && len(batch) > 1 && adoptionBaseline == "" && isPoisonedFederationPushError(err) {
+						singleEvents = true
 						continue
 					}
 					if isPoisonedFederationPushError(err) {
@@ -355,8 +364,19 @@ func pushDirectSpoke(
 					return err
 				}
 				if refused != nil {
-					// Keep the durable cursor before the refused event. The hub
-					// deduplicates these later events when the scan retries.
+					// Keep the cursor before the refusal and remember later
+					// acknowledgments so the next sync does not resend them.
+					if adoptionBaseline == "" && len(ack.SupersededEventUIDs) == 0 {
+						var uids []string
+						for _, event := range batch {
+							if event.ID <= ack.PushCursorEventID {
+								uids = append(uids, event.UID)
+							}
+						}
+						if err := store.RecordFederationAcknowledgedEvents(ctx, binding.ProjectID, uids); err != nil {
+							return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+						}
+					}
 					scanCursor = ack.PushCursorEventID
 					pending = pendingFederationEventsAfterCursor(pending, scanCursor)
 					continue
@@ -807,10 +827,14 @@ func federationIngestEnvelopes(events []db.Event) []api.FederationIngestEventEnv
 	return out
 }
 
-func nextFederationPushIngestBatch(events []db.Event) ([]db.Event, string, int64, error) {
+func nextFederationPushIngestBatch(events []db.Event, single bool) ([]db.Event, string, int64, error) {
+	shape := federationPushAdoptionBaselineShape(events)
+	if single && len(events) > 0 && !(shape.valid && shape.hasSnapshot) {
+		events = events[:1]
+		shape = federationPushBaselineShape{valid: true, hasSnapshot: db.IsFederationSnapshotEvent(events[0].Type)}
+	}
 	if len(events) <= 1 {
 		if len(events) == 1 {
-			shape := federationPushAdoptionBaselineShape(events)
 			if shape.valid && shape.hasSnapshot {
 				return nextFederationPushAdoptionBaselineIngestBatch(events)
 			}
@@ -821,7 +845,6 @@ func nextFederationPushIngestBatch(events []db.Event) ([]db.Event, string, int64
 		}
 		return events, "", 0, nil
 	}
-	shape := federationPushAdoptionBaselineShape(events)
 	if shape.valid && shape.hasSnapshot {
 		return nextFederationPushAdoptionBaselineIngestBatch(events)
 	}
