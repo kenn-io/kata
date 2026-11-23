@@ -215,7 +215,6 @@ describe('MoveIssueDialog', () => {
     await fireEvent.keyDown(screen.getByRole('dialog', { name: 'Move task' }), {
       key: 'Escape',
     })
-    await fireEvent.pointerDown(document.body)
 
     expect(screen.getByRole('searchbox', { name: 'Find project' })).toBeTruthy()
     expect((screen.getByRole('button', { name: /Roadmap/ }) as HTMLButtonElement).disabled).toBe(

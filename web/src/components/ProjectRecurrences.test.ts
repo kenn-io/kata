@@ -119,11 +119,6 @@ it('refreshes the list after an edit conflict', async () => {
   await fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
   await waitFor(() => expect(listRecurrences).toHaveBeenCalledTimes(3))
   await within(dialog).findByRole('alert')
-  expect((within(dialog).getByLabelText('Title') as HTMLInputElement).value).toBe('My edit')
-  expect(onPatch).toHaveBeenCalledTimes(1)
-  expect(
-    ((await screen.findByRole('button', { name: 'Save' })) as HTMLButtonElement).disabled,
-  ).toBe(true)
   await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
   await fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
   expect(

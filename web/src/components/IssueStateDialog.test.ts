@@ -54,18 +54,16 @@ describe('IssueStateDialog', () => {
     return screen.getByRole('dialog', { name: 'Complete task' })
   }
 
-  it('counts open tasks losing this blocker even outside the filtered collection', async () => {
-    const dialog = await openCompletePreview(['issue-2', 'issue-3', 'issue-4'])
+  it('counts open tasks losing this blocker', async () => {
+    let dialog = await openCompletePreview(['issue-2', 'issue-3', 'issue-4'])
     expect(within(dialog).getByText('3 open tasks lose this blocker.')).toBeTruthy()
     expect(within(dialog).getByText('Comments and links stay.')).toBeTruthy()
-  })
 
-  it('uses singular wording for one open task', async () => {
-    const dialog = await openCompletePreview(['issue-2'])
+    cleanup()
+    dialog = await openCompletePreview(['issue-2'])
     expect(within(dialog).getByText('1 open task loses this blocker.')).toBeTruthy()
-  })
 
-  it('excludes closed tasks and incoming blocker links', async () => {
+    cleanup()
     const issue = makeIssue()
     const selected = {
       uid: 'issue-1',

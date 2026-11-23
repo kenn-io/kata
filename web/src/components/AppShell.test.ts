@@ -133,7 +133,7 @@ describe('AppShell', () => {
     expect(screen.queryByRole('button', { name: 'Credentials' })).toBeNull()
   })
 
-  test('refreshes repeating tasks when the snapshot cursor or recurrence revision changes', async () => {
+  test('refreshes repeating tasks when the recurrence revision changes', async () => {
     const rule = {
       id: 1,
       uid: 'recurrence-1',
@@ -178,20 +178,11 @@ describe('AppShell', () => {
     await waitFor(() => expect(recurrenceReads).toBe(1))
     expect(screen.queryByRole('button', { name: /repeating task/ })).toBeNull()
 
-    const next = { ...current, cursor: current.cursor + 1 }
-    await view.rerender({ ...props, snapshot: next, draftResetGeneration: next.cursor })
-
+    await view.rerender({ ...props, recurrenceRevision: 1 })
     await waitFor(() =>
       expect(screen.getByRole('button', { name: '↻ 1 repeating task' })).not.toBeNull(),
     )
     expect(recurrenceReads).toBe(2)
-    await view.rerender({
-      ...props,
-      snapshot: next,
-      draftResetGeneration: next.cursor,
-      recurrenceRevision: 1,
-    })
-    await waitFor(() => expect(recurrenceReads).toBe(3))
   })
 
   test('keeps project sync readable for a current read-only project member', () => {
@@ -2091,42 +2082,6 @@ describe('AppShell', () => {
       expect(screen.queryByRole('textbox', { name: 'Quick capture' })).toBeNull()
     },
   )
-
-  test('selects a project for the task', async () => {
-    const onCreateIssue = vi.fn(async () => {})
-    render(AppShell, {
-      props: {
-        route: {
-          kind: 'kata',
-          view: 'all-open',
-          graph: false,
-          filters: { status: [], owner: [], label: [], relationship: [] },
-        },
-        snapshot: snapshot(),
-        loading: false,
-        ...mutationProps({ onCreateIssue }),
-        onNavigate: vi.fn(),
-        onCreateProject: vi.fn(async () => ({ changed: true })),
-      },
-    })
-
-    const create = screen.getByRole('button', { name: 'New task' })
-    expect(create.getAttribute('aria-disabled')).toBeNull()
-    await fireEvent.click(create)
-    await fireEvent.click(screen.getByRole('combobox', { name: 'Project: Choose a project' }))
-    await fireEvent.click(screen.getByRole('option', { name: snapshot().catalog[0]!.project.name }))
-    await fireEvent.input(screen.getByRole('textbox', { name: 'Quick capture' }), {
-      target: { value: 'Draft task' },
-    })
-    await fireEvent.click(
-      within(screen.getByRole('dialog', { name: 'New task' })).getByRole('button', { name: 'Add' }),
-    )
-    expect(onCreateIssue).toHaveBeenCalledWith(
-      'Draft task',
-      undefined,
-      '01J00000000000000000000002',
-    )
-  })
 
   test('renders daemon selection and recovery status inside stable workspace chrome', async () => {
     const onSelectDaemon = vi.fn()

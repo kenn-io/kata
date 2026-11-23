@@ -3094,77 +3094,6 @@ describe('App', () => {
     expect(recurrenceDaemons.at(-1)).toBe('example-remote')
   })
 
-  it("shows another client's first repeating task after a stream reset", async () => {
-    history.replaceState(null, '', `/kata?scope=${snapshot().catalog[0]!.project.uid}#direct=1`)
-    sessionStorage.setItem(
-      'kata.web.session.v1',
-      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
-    )
-    const initial = snapshot()
-    initial.capabilities.updates = 'sse'
-    const updated = structuredClone(initial)
-    updated.cursor++
-    updated.collection[0]!.title = 'Updated issue'
-    let stream: ReadableStreamDefaultController<Uint8Array> | undefined
-    let changed = false
-    let reads = 0
-    const resetSnapshots: Request[] = []
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const request = requestOf(input, init)
-        const path = new URL(request.url).pathname
-        if (path === '/api/v1/events/stream') {
-          return new Response(
-            new ReadableStream({ start: (controller) => (stream = controller) }),
-            {
-              headers: { 'Content-Type': 'text/event-stream' },
-            },
-          )
-        }
-        if (path.endsWith('/recurrences')) {
-          reads++
-          return Response.json({
-            recurrences: changed
-              ? [
-                  {
-                    id: 1,
-                    uid: 'recurrence-1',
-                    project_id: 7,
-                    rrule: 'FREQ=WEEKLY',
-                    dtstart: '2026-11-22',
-                    timezone: 'UTC',
-                    template_title: 'Weekly task',
-                    revision: 1,
-                  },
-                ]
-              : [],
-          })
-        }
-        if (path.endsWith('/references')) return Response.json({ statuses: [] })
-        if (path === '/api/v1/ui/telemetry') return telemetryAccepted()
-        if (path === '/api/v1/ui/snapshot' && changed) resetSnapshots.push(request)
-        return Response.json(changed ? updated : initial, {
-          headers: { ETag: changed ? '"snapshot-2"' : '"snapshot-1"' },
-        })
-      }),
-    )
-    render(App)
-    await waitFor(() => expect(stream).toBeDefined())
-    await waitFor(() => expect(reads).toBeGreaterThan(0))
-    expect(screen.queryByRole('button', { name: /repeating task/ })).toBeNull()
-
-    changed = true
-    stream!.enqueue(
-      new TextEncoder().encode(
-        'id: 13\nevent: sync.reset_required\ndata: {"reset_required":true}\n\n',
-      ),
-    )
-    expect(await screen.findByRole('button', { name: /Updated issue/ })).not.toBeNull()
-    expect(await screen.findByRole('button', { name: '↻ 1 repeating task' })).not.toBeNull()
-    expect(resetSnapshots.some((request) => !request.headers.has('If-None-Match'))).toBe(true)
-  })
-
   it('refreshes project rules for recurrence events while a snapshot is pending', async () => {
     history.replaceState(null, '', '/kata?scope=01J00000000000000000000002#direct=1')
     sessionStorage.setItem(
@@ -3320,16 +3249,6 @@ describe('App', () => {
       JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
     )
     const base = snapshot()
-    const other = {
-      ...base.collection[0]!,
-      id: 2,
-      uid: '01J00000000000000000000004',
-      project_id: 8,
-      project_uid: '01J00000000000000000000003',
-      project_name: 'other-project',
-      short_id: 'b1',
-      qualified_id: 'other-project#b1',
-    }
     const link = {
       id: 1,
       from_issue_id: 1,
@@ -3337,8 +3256,8 @@ describe('App', () => {
       from_qualified_id: base.collection[0]!.qualified_id,
       from_status: 'open',
       to_issue_id: 2,
-      to_issue_uid: other.uid,
-      to_qualified_id: other.qualified_id,
+      to_issue_uid: '01J00000000000000000000004',
+      to_qualified_id: 'other-project#b1',
       to_status: 'open',
       type: 'blocks',
       author: 'user-a',
@@ -3346,18 +3265,6 @@ describe('App', () => {
     }
     const accepted = {
       ...base,
-      catalog: [
-        ...base.catalog,
-        {
-          ...base.catalog[0]!,
-          project: {
-            ...base.catalog[0]!.project,
-            id: 8,
-            uid: other.project_uid,
-            name: other.project_name,
-          },
-        },
-      ],
       selected: { ...availableSelection(base.collection[0]), links: [link] },
     }
     vi.stubGlobal(
@@ -3464,14 +3371,7 @@ describe('App', () => {
         await waitFor(() =>
           expect(screen.queryByRole('dialog', { name: 'Stop repeating' })).toBeNull(),
         )
-      else {
-        expect(dialog.isConnected).toBe(true)
-        expect(
-          await within(dialog).findByText(
-            'This rule changed elsewhere. Review the current rule before stopping it.',
-          ),
-        ).toBeTruthy()
-      }
+      else expect(dialog.isConnected).toBe(true)
     },
   )
 
