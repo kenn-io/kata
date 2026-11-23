@@ -274,3 +274,43 @@ func TestOpenURICharactersUseExactPath(t *testing.T) {
 		})
 	}
 }
+
+func TestSchema54RequiresUpgradeFrom53(t *testing.T) {
+	ctx := t.Context()
+	path := filepath.Join(t.TempDir(), "kata.db")
+	d, err := sqlitestore.Open(ctx, path)
+	require.NoError(t, err)
+	require.Equal(t, 54, db.CurrentSchemaVersion())
+	_, err = d.ExecContext(ctx, `INSERT INTO federation_held_cursors(project_uid, push_cursor_event_id) VALUES('example-project', 42)`)
+	require.NoError(t, err)
+	_, err = d.ExecContext(ctx, `UPDATE meta SET value='53' WHERE key='schema_version'`)
+	require.NoError(t, err)
+	require.NoError(t, d.Close())
+	d, err = sqlitestore.Open(ctx, path)
+	require.Nil(t, d)
+	require.ErrorIs(t, err, sqlitestore.ErrSchemaCutoverRequired)
+}
+
+func TestSchema54UpgradePreservesExistingData(t *testing.T) {
+	ctx := t.Context()
+	path := filepath.Join(t.TempDir(), "kata.db")
+	d, err := sqlitestore.Open(ctx, path)
+	require.NoError(t, err)
+	project, err := d.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	_, err = d.ExecContext(ctx, `DROP TABLE federation_held_cursors`)
+	require.NoError(t, err)
+	_, err = d.ExecContext(ctx, `UPDATE meta SET value='53' WHERE key='schema_version'`)
+	require.NoError(t, err)
+	require.NoError(t, d.Close())
+	require.True(t, sqlitestore.UpgradesInPlace(53))
+	require.NoError(t, sqlitestore.UpgradeInPlace(ctx, path))
+	d, err = sqlitestore.Open(ctx, path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = d.Close() })
+	got, err := d.ProjectByUID(ctx, project.UID)
+	require.NoError(t, err)
+	require.Equal(t, project.UID, got.UID)
+	_, err = d.ExecContext(ctx, `INSERT INTO federation_held_cursors(project_uid,push_cursor_event_id) VALUES(?,42)`, project.UID)
+	require.NoError(t, err)
+}

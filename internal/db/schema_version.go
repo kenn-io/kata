@@ -6,7 +6,7 @@ package db
 // mismatch surfaces either ErrSchemaCutoverRequired (for older sources, so
 // storeopen can apply additive upgrades in place or run JSONL cutover under
 // the cutover lock) or a newer-than-binary error.
-const currentSchemaVersion = 53
+const currentSchemaVersion = 54
 
 // CurrentSchemaVersion returns the schema version expected by this binary.
 // Backends and the cutover path read this to align freshly created databases

@@ -14,6 +14,9 @@ const FederationProjectIdentityDependencyPrefix = "federation_identity_dependenc
 // until they are both restored and bound to their hub.
 const FederationRetainedProjectPrefix = "federation_retained_project."
 
+// FederationLeaveFencePrefix records a prepared replica leave.
+const FederationLeaveFencePrefix = "federation_leave_fence."
+
 // IsFederationRetainedProject reports whether the identity is a placeholder.
 func IsFederationRetainedProject(ctx context.Context, queryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
@@ -23,10 +26,13 @@ func IsFederationRetainedProject(ctx context.Context, queryer interface {
 	return found, err
 }
 
-// ClearFederationRetainedProject retires placeholder ownership on deletion.
+// ClearFederationRetainedProject retires placeholder ownership and the held cursor on deletion.
 func ClearFederationRetainedProject(ctx context.Context, tx interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }, uid string) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM federation_held_cursors WHERE project_uid=$1`, uid); err != nil {
+		return err
+	}
 	_, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=$1`, FederationRetainedProjectPrefix+uid)
 	return err
 }

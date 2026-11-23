@@ -489,6 +489,11 @@ CREATE TABLE federation_bindings (
 CREATE INDEX idx_federation_bindings_role_enabled
   ON federation_bindings(role, enabled);
 
+CREATE TABLE federation_held_cursors (
+  project_uid TEXT PRIMARY KEY,
+  push_cursor_event_id BIGINT NOT NULL
+);
+
 CREATE TABLE federation_sync_status (
   project_id              BIGINT PRIMARY KEY REFERENCES projects(id),
   last_pull_started_at    TEXT,

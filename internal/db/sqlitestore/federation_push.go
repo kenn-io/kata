@@ -234,7 +234,10 @@ func (d *Store) enableFederationPush(ctx context.Context, projectID int64, curso
 	}
 	next := existing
 	next.PushEnabled = true
-	nextCursor := max(cursor, existing.PushCursorEventID)
+	nextCursor, err := db.ResumeFederationHeldCursor(ctx, tx, projectID, cursor, existing.PushCursorEventID)
+	if err != nil {
+		return db.FederationBinding{}, err
+	}
 	res, err := tx.ExecContext(ctx, `
 		UPDATE federation_bindings
 		   SET push_enabled = 1,
@@ -526,7 +529,7 @@ func (d *Store) resetFederatedProjectIfNoPendingPush(
 	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID, d.instanceUID, false); err != nil {
 		return err
 	}
-	if err := db.ClearFederatedProjectEvents(ctx, tx, projectID); err != nil {
+	if err := db.ClearFederatedProjectEvents(ctx, tx, projectID, d.instanceUID); err != nil {
 		return fmt.Errorf("clear federated events: %w", err)
 	}
 	if err := clearFederatedProjection(ctx, tx, projectID); err != nil {

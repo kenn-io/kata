@@ -2245,6 +2245,9 @@ has and absorbs any edits made while the project was standalone. Rejoin with
 the same actor the enrollment is bound to. Events authored as a different actor
 are rejected by the hub and quarantined.
 
+A prepared leave can finish after a later pull. A read-only rejoin keeps held
+offline edits until push is enabled.
+
 If you run `join` naming a *different* project while a local project still
 holds the hub project's UID, Kata refuses the join with
 `federation_rejoin_name_mismatch` and names the holder. Rerun the join with

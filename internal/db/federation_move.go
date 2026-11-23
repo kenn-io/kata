@@ -41,7 +41,7 @@ func FederationPushableEventSQL(alias string, postgres bool) string {
 	if postgres {
 		from = `(` + alias + `.payload::jsonb->>'from_project_uid')`
 	}
-	return alias + `.type IN (` + FederationPushEventTypesSQL() + `) AND (` + alias + `.type<>'issue.moved' OR EXISTS (SELECT 1 FROM federation_bindings fb JOIN projects fp ON fp.id=fb.project_id WHERE fp.uid=` + from + ` AND fb.push_enabled=1))`
+	return alias + `.type IN (` + FederationPushEventTypesSQL() + `) AND (` + alias + `.type<>'issue.moved' OR NOT EXISTS (SELECT 1 FROM federation_held_cursors WHERE project_uid=` + from + `))`
 }
 
 // FederationOwedEventSQL excludes moves superseded by a newer hub move.
@@ -51,7 +51,40 @@ func FederationOwedEventSQL(alias string, postgres bool) string {
 
 // FederationResetOwedEventSQL excludes events retained for issues in another project.
 func FederationResetOwedEventSQL(alias string, postgres bool) string {
-	return FederationOwedEventSQL(alias, postgres) + ` AND NOT EXISTS (SELECT 1 FROM issues i WHERE i.uid=` + alias + `.issue_uid AND i.project_id<>` + alias + `.project_id)`
+	return FederationOwedEventSQL(alias, postgres) + ` AND NOT (` + FederationHeldEventSQL(alias) + `) AND NOT EXISTS (SELECT 1 FROM issues i WHERE i.uid=` + alias + `.issue_uid AND i.project_id<>` + alias + `.project_id)`
+}
+
+// RetainFederationHeldCursor records the binding's acknowledged cursor before
+// a leave deletes the binding, so resets of other projects keep the edits
+// the hub never acknowledged.
+func RetainFederationHeldCursor(ctx context.Context, tx *sql.Tx, projectID int64, projectUID string) error {
+	_, err := tx.ExecContext(ctx, `INSERT INTO federation_held_cursors(project_uid,push_cursor_event_id)
+ SELECT $1,push_cursor_event_id FROM federation_bindings WHERE project_id=$2
+ ON CONFLICT(project_uid) DO UPDATE SET push_cursor_event_id=CASE WHEN federation_held_cursors.push_cursor_event_id>excluded.push_cursor_event_id THEN federation_held_cursors.push_cursor_event_id ELSE excluded.push_cursor_event_id END`, projectUID, projectID)
+	return err
+}
+
+// ResumeFederationHeldCursor restores a held position when push is enabled.
+func ResumeFederationHeldCursor(ctx context.Context, tx *sql.Tx, projectID, cursor, bindingCursor int64) (int64, error) {
+	var held int64
+	err := tx.QueryRowContext(ctx, `SELECT h.push_cursor_event_id FROM federation_held_cursors h JOIN projects p ON p.uid=h.project_uid WHERE p.id=$1`, projectID).Scan(&held)
+	if errors.Is(err, sql.ErrNoRows) {
+		return max(cursor, bindingCursor), nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	_, err = tx.ExecContext(ctx, `DELETE FROM federation_held_cursors WHERE project_uid=(SELECT uid FROM projects WHERE id=$1)`, projectID)
+	return max(held, bindingCursor), err
+}
+
+// RestoreFederationHeldCursor restores the position carried by a full backup.
+func RestoreFederationHeldCursor(ctx context.Context, tx *sql.Tx, project *ProjectExport) error {
+	if project.HeldCursor == nil {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO federation_held_cursors(project_uid,push_cursor_event_id) VALUES($1,$2)`, project.UID, *project.HeldCursor)
+	return err
 }
 
 // CheckFederationMoveSourceLifecycle keeps a native source joined while a
@@ -67,9 +100,18 @@ func CheckFederationMoveSourceLifecycle(ctx context.Context, tx *sql.Tx, project
 	if err != nil {
 		return err
 	}
+	if leaving {
+		var fenced bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM meta WHERE key=$1)`, FederationLeaveFencePrefix+sourceUID).Scan(&fenced); err != nil {
+			return err
+		}
+		if fenced {
+			return nil
+		}
+	}
 	// A paused destination retains its owed move and may resume. Its durable
 	// acknowledgment cursor, rather than its current push flag, releases source
-	// authority for teardown.
+	// authority for teardown. Leaving retains a held cursor for superseded moves.
 	supersededFilter := ""
 	if leaving {
 		supersededFilter = " AND NOT " + federationMoveSupersededSQL("e")
@@ -838,12 +880,15 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
 	}
 	// A destination reset must not discard offline work awaiting its former
 	// source stream's acknowledgement, even when the destination is read-only.
+	// Leaving retires a source binding and its cursor; its retained acknowledged
+	// history must not become pending again against an invented zero cursor.
 	var pending bool
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events e
  JOIN federation_bindings b ON b.project_id=e.project_id
  WHERE e.project_id<>$1 AND e.origin_instance_uid=$2
  AND e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)
  AND e.id>b.push_cursor_event_id
+ AND NOT (`+FederationHeldEventSQL("e")+`)
  AND `+FederationOwedEventSQL("e", postgres)+`)`, projectID, originInstanceUID).Scan(&pending); err != nil {
 		return err
 	}
@@ -853,15 +898,26 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
 	if err := PreserveFederationProjectIdentityDependencies(ctx, tx, projectID); err != nil {
 		return fmt.Errorf("preserve former project identity dependencies: %w", err)
 	}
-	_, err = tx.ExecContext(ctx, `DELETE FROM events AS e WHERE e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)`, projectID)
+	// Keep this spoke's edits that a left project never had acknowledged.
+	//nolint:gosec // Only the fixed snapshot type list is joined; values are bound.
+	_, err = tx.ExecContext(ctx, `DELETE FROM events AS e WHERE e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)
+ AND NOT (e.origin_instance_uid=$2 AND `+FederationHeldEventSQL("e")+`)`, projectID, originInstanceUID)
 	return err
+}
+
+// FederationHeldEventSQL selects local edits beyond a departed source's cursor.
+func FederationHeldEventSQL(alias string) string {
+	return alias + `.type NOT IN ('issue.created','issue.moved',` + FederationSnapshotEventTypesSQL() + `)
+ AND EXISTS (SELECT 1 FROM projects p JOIN federation_held_cursors h ON h.project_uid=p.uid
+ WHERE p.id=` + alias + `.project_id AND h.push_cursor_event_id<` + alias + `.id)`
 }
 
 // ClearFederatedProjectEvents retains source envelopes still contributing to
 // issues now owned elsewhere. A source reset cannot rewind those destinations.
-func ClearFederatedProjectEvents(ctx context.Context, tx *sql.Tx, projectID int64) error {
+func ClearFederatedProjectEvents(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM events AS e WHERE e.project_id=$1
- AND NOT EXISTS(SELECT 1 FROM issues i WHERE i.uid=e.issue_uid AND i.project_id<>$1)`, projectID); err != nil {
+ AND NOT EXISTS(SELECT 1 FROM issues i WHERE i.uid=e.issue_uid AND i.project_id<>$1)
+ AND NOT (e.origin_instance_uid=$2 AND `+FederationHeldEventSQL("e")+`)`, projectID, originInstanceUID); err != nil {
 		return err
 	}
 	// Retained envelopes may still refer numerically to a peer being reset.

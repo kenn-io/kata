@@ -304,7 +304,13 @@ func validateImportRecord(record ImportRecord) error {
 		}
 		return nil
 	case *ProjectExport:
-		return requireImportPayload(rec, ImportKindProject)
+		if err := requireImportPayload(rec, ImportKindProject); err != nil {
+			return err
+		}
+		if rec.HeldCursor != nil && *rec.HeldCursor < 0 {
+			return errors.New("negative held federation cursor")
+		}
+		return nil
 	case *RelayOutboxExport, *RelayInboxExport, *RelayCursorExport:
 		return ValidateRelayDeliveryRecord(record)
 	case *RootKeyPin:

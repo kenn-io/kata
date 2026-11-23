@@ -566,6 +566,14 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 	if err := reconcileFederationBindingTransitionLinks(ctx, tx, previous, binding); err != nil {
 		return db.FederationBinding{}, err
 	}
+	if binding.PushEnabled && binding.Enabled && binding.RelayConfig == nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM federation_held_cursors WHERE project_uid=(SELECT uid FROM projects WHERE id=? AND deleted_at IS NULL)`, b.ProjectID); err != nil {
+			return db.FederationBinding{}, err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=? || (SELECT uid FROM projects WHERE id=?)`, db.FederationLeaveFencePrefix, b.ProjectID); err != nil {
+		return db.FederationBinding{}, err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=? || (SELECT uid FROM projects WHERE id=? AND deleted_at IS NULL)`, db.FederationRetainedProjectPrefix, b.ProjectID); err != nil {
 		return db.FederationBinding{}, err
 	}
@@ -639,11 +647,7 @@ func (d *Store) leaveFederationReplica(ctx context.Context, projectID int64, dis
 	if discardRelay {
 		err = d.discardRelayHopStateTx(ctx, tx, projectID, binding.RelayConfig)
 	} else {
-		if binding.PushEnabled {
-			err = d.validateRelayLifecycleTx(ctx, tx, projectID, true)
-		} else {
-			err = d.relayReset(tx).ValidateLifecycle(ctx, projectID)
-		}
+		err = d.validateRelayLifecycleTx(ctx, tx, projectID, true)
 		if err == nil && binding.RelayConfig != nil {
 			err = deleteRelayBindingStateTx(ctx, tx, binding.RelayConfig.BindingUID)
 		}
@@ -653,6 +657,12 @@ func (d *Store) leaveFederationReplica(ctx context.Context, projectID int64, dis
 	}
 	if err := db.ClearFederationProjectIdentityDependencies(ctx, tx, uid); err != nil {
 		return db.LeaveFederationResult{}, fmt.Errorf("clear former project identity dependencies: %w", err)
+	}
+	if err := db.RetainFederationHeldCursor(ctx, tx, projectID, uid); err != nil {
+		return db.LeaveFederationResult{}, fmt.Errorf("retain held federation cursor: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=?`, db.FederationLeaveFencePrefix+uid); err != nil {
+		return db.LeaveFederationResult{}, err
 	}
 	for _, stmt := range []string{
 		`DELETE FROM federation_quarantine WHERE project_id = ?`,
@@ -1453,7 +1463,7 @@ func (d *Store) resetFederatedProject(ctx context.Context, projectID, replayHori
 	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID, d.instanceUID, false); err != nil {
 		return err
 	}
-	if err := db.ClearFederatedProjectEvents(ctx, tx, projectID); err != nil {
+	if err := db.ClearFederatedProjectEvents(ctx, tx, projectID, d.instanceUID); err != nil {
 		return fmt.Errorf("clear federated events: %w", err)
 	}
 	if err := clearFederatedProjection(ctx, tx, projectID); err != nil {

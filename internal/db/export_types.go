@@ -511,13 +511,14 @@ func (*EventExport) ImportKind() string { return ImportKindEvent }
 
 // ProjectExport is one project row in export shape.
 type ProjectExport struct {
-	ID        int64          `json:"id"`
-	UID       string         `json:"uid"`
-	Name      string         `json:"name"`
-	CreatedAt string         `json:"created_at"`
-	DeletedAt *string        `json:"deleted_at,omitempty"`
-	Metadata  jsontext.Value `json:"metadata"`
-	Revision  int64          `json:"revision"`
+	ID         int64          `json:"id"`
+	UID        string         `json:"uid"`
+	Name       string         `json:"name"`
+	CreatedAt  string         `json:"created_at"`
+	DeletedAt  *string        `json:"deleted_at,omitempty"`
+	Metadata   jsontext.Value `json:"metadata"`
+	Revision   int64          `json:"revision"`
+	HeldCursor *int64         `json:"held_cursor,omitempty"`
 }
 
 // ImportKind reports the NDJSON kind this payload replays as.

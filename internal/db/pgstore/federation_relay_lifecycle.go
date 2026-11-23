@@ -43,7 +43,14 @@ func (d *Store) fenceRelayDisconnect(ctx context.Context, projectID int64, leavi
 		if err := db.CheckFederationMoveSourceLifecycle(ctx, tx, projectID, d.InstanceUID(), leaving); err != nil {
 			return err
 		}
-		return d.relayReset(tx).FenceDisconnect(ctx, projectID)
+		if err := d.relayReset(tx).FenceDisconnect(ctx, projectID); err != nil {
+			return err
+		}
+		if leaving {
+			_, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) SELECT $1 || uid,'1' FROM projects WHERE id=$2 ON CONFLICT(key) DO UPDATE SET value='1'`, db.FederationLeaveFencePrefix, projectID)
+			return err
+		}
+		return nil
 	})
 }
 

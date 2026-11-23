@@ -609,6 +609,9 @@ func importMeta(ctx context.Context, tx *sql.Tx, m *db.MetaKV, opts db.ImportOpt
 }
 
 func importProject(ctx context.Context, tx *sql.Tx, p *db.ProjectExport) error {
+	if err := db.RestoreFederationHeldCursor(ctx, tx, p); err != nil {
+		return wrapImportErr(db.ImportKindProject, err)
+	}
 	// Envelopes are untrusted input: hold imported names to the same rule
 	// the daemon's create/rename handlers enforce, or a crafted export
 	// could land a project name with control characters that every CLI/TUI

@@ -30,6 +30,7 @@ var inPlaceUpgrades = []struct {
 	{50, 51, nil, []string{"idx_events_issue_uid_id"}, []string{"idx_events_resolved_issue_uid"}},
 	{51, 52, nil, nil, nil},
 	{52, 53, nil, []string{"idx_events_project_moves"}, nil},
+	{53, 54, []string{"federation_held_cursors"}, nil, nil},
 }
 
 // UpgradesInPlace reports whether in-place steps reach the current schema.
