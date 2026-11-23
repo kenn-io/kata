@@ -114,7 +114,7 @@ never cleared to a terminal state, so the issue does not silently go quiet:
 
 ```sh
 # runs when the agent session stops or goes idle
-current=$(kata meta get "$KATA_REF" work.attention --json | jq -r '.value | select(. != null)')
+current=$(kata meta get "$KATA_REF" work.attention --json | jq -r '.value')
 if [ "$current" = "ok" ]; then
   kata meta set "$KATA_REF" work.attention needs-human
   kata meta set "$KATA_REF" work.attention_msg "session ended without hand-off"

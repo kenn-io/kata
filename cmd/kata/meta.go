@@ -105,7 +105,7 @@ func newMetaGetCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "get <ref> [key]",
 		Short:   "get issue metadata",
-		Long:    `Read one metadata key, or omit the key to read all metadata. See kata meta --help for the keys agents use.`,
+		Long:    `Read one metadata key, or omit the key to read all metadata. An unset key succeeds with an empty answer; a missing issue still fails as not found. See kata meta --help for the keys agents use.`,
 		Example: `  kata meta get abc4 work.attention --agent`,
 		Args:    cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
