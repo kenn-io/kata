@@ -5,7 +5,6 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
@@ -27,7 +26,7 @@ func requireFederatedIssueClaim(
 	return requireFederatedIssueClaimWithRefresh(ctx, cfg, issue, actor, true)
 }
 
-// Move previews check cached authority without updating the cache.
+// Move previews check cached authority without remote refresh or cache writes.
 func requireFederatedIssueClaimWithRefresh(
 	ctx context.Context,
 	cfg ServerConfig,
@@ -120,7 +119,7 @@ func checkFederatedIssueClaim(ctx context.Context, cfg ServerConfig, issue db.Is
 	}
 
 	if refresh && binding.Role == db.FederationRoleSpoke {
-		if err := refreshSpokeClaimStatusForGate(ctx, cfg, binding, issue, result, true); err != nil {
+		if err := refreshSpokeClaimStatusForGate(ctx, cfg, binding, issue, result); err != nil {
 			return err
 		}
 	}
@@ -166,7 +165,6 @@ func refreshSpokeClaimStatusForGate(
 	binding db.FederationBinding,
 	issue db.Issue,
 	result *claimRefreshResult,
-	updateCache bool,
 ) error {
 	remoteCtx, cancelRemote := context.WithTimeout(ctx, mutationClaimStatusRefreshTimeout)
 	defer cancelRemote()
@@ -198,9 +196,6 @@ func refreshSpokeClaimStatusForGate(
 	}
 	if result != nil {
 		*result = claimRefreshResult{binding: binding, known: true}
-	}
-	if !updateCache {
-		return nil
 	}
 	resp, err = remapCachedClaimStatus(ctx, cfg.DB, binding.ProjectID, issue.UID, resp)
 	if err != nil {
@@ -253,10 +248,6 @@ func pendingPushMayMaterializeIssue(
 	binding db.FederationBinding,
 	issueUID string,
 ) (bool, error) {
-	retained, _, _, err := retainedIssueState(ctx, store, binding, issueUID)
-	if err != nil || retained {
-		return retained, err
-	}
 	afterID := binding.PushCursorEventID
 	for {
 		events, err := store.PendingFederationPushEvents(ctx, binding.ProjectID, store.InstanceUID(), afterID, 1000)
@@ -276,49 +267,6 @@ func pendingPushMayMaterializeIssue(
 			return false, nil
 		}
 		afterID = nextAfterID
-	}
-}
-
-func retainedIssueState(ctx context.Context, store db.Storage, binding db.FederationBinding, issueUID string) (bool, bool, bool, error) {
-	if binding.RetainedThroughEventID == 0 {
-		return false, false, false, nil
-	}
-	issue, err := store.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
-	if err != nil {
-		return false, false, false, err
-	}
-	if issue.ProjectID != binding.ProjectID {
-		return false, false, false, db.ErrNotFound
-	}
-	former, err := store.FormerInstanceUIDs(ctx)
-	if err != nil {
-		return false, false, false, err
-	}
-	var afterID int64
-	retained, snapshot, pending := false, false, false
-	for {
-		events, err := store.EventsAfter(db.WithAuthorizedProjects(ctx, nil), db.EventsAfterParams{ProjectID: binding.ProjectID, IssueUID: issueUID, Types: []string{"issue.created", "issue.snapshot", "issue.moved"}, AfterID: afterID, Limit: 1000})
-		if err != nil {
-			return false, false, false, err
-		}
-		for _, event := range events {
-			current := event.OriginInstanceUID == store.InstanceUID()
-			formerOrigin := slices.Contains(former, event.OriginInstanceUID)
-			if !current && !formerOrigin {
-				continue
-			}
-			if event.ID <= binding.RetainedThroughEventID && (formerOrigin || event.Actor != binding.Actor) {
-				retained = true
-			}
-			if current && retained && event.Type == "issue.snapshot" {
-				snapshot = snapshot || event.ID <= binding.PushCursorEventID
-				pending = pending || event.ID > binding.PushCursorEventID
-			}
-		}
-		if len(events) < 1000 {
-			return retained, snapshot, pending, nil
-		}
-		afterID = events[len(events)-1].ID
 	}
 }
 

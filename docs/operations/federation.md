@@ -143,20 +143,6 @@ replacing newer edits. Once the destination receives the move, leaving the
 source does not discard that recovered history. Its original project identity
 and move history must remain for historical references to keep resolving.
 
-After rejoining, the spoke keeps older events from the previous actor and sends
-later writes under the new actor. If the hub has not seen a task, sync sends a
-current-actor snapshot before its later edits. A move of a retained task waits
-until the hub knows the task and the snapshot has passed the spoke's push cursor.
-If sync is still pending or the hub cannot be reached, the move returns
-`federation_offline`. Retry after federation sync completes. If the hub knows
-the task but has no accepted recovery snapshot, the move returns
-`federated_move_unsupported`. Create an issue in the target project and link it
-to the original issue. Both errors leave the task in place.
-The hub checks the moved snapshot against its accepted history. Old comments
-and their reply chains may remain incomplete, while later comments and edits
-can still reach the hub. Leaving the source does not discard the task's move
-history, which keeps historical references resolving.
-
 Leaving or archiving a former project preserves its identity for delayed
 events. Kata refuses to purge, merge, or adopt it under a different project UID
 while another joined project's retained move history still needs that identity.
@@ -2250,13 +2236,7 @@ Rejoin also recovers from a join that created the local project and failed
 before saving its binding. Repeat the join for the same local name and hub
 project identity to bind that existing project.
 
-Pull restarts from the hub's replay horizon, and already-applied events
-deduplicate by event UID. A push-enabled rejoin publishes new events using the
-new enrollment. Events from an earlier actor stay on the spoke, including
-through a hub reset. When a new edit refers to a task the hub has never seen,
-Kata publishes a snapshot of the task before the edit. On the hub, that task
-and its comments and links are attributed to the new enrollment's actor. The
-spoke keeps the original events and their actors in its history.
+Pull restarts from the hub's replay horizon, and already-applied events deduplicate by event UID. A push-enabled rejoin keeps events from an earlier actor on the spoke and publishes later events under the new enrollment. Edits to tasks the hub never received stay local after rejoin; later independent writes continue to sync.
 
 Kata upgrades SQLite databases at schema 41 or later to schema 54 in place at startup. Older binaries cannot
 open schema 54. To roll back, restore a backup made before the upgrade and use its matching

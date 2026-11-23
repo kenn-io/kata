@@ -229,12 +229,6 @@ func (d *Store) moveIssueProjectTx(ctx context.Context, tx *sql.Tx, in db.MoveIs
 		if err != nil {
 			return out, err
 		}
-		if in.PrepareSnapshot != nil {
-			snapshot, err = in.PrepareSnapshot(movedIssue, snapshot)
-			if err != nil {
-				return out, err
-			}
-		}
 		payloadFields["snapshot"] = jsontext.Value(snapshot)
 	}
 	payload, err := json.Marshal(payloadFields)

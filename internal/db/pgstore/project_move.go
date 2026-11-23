@@ -177,12 +177,6 @@ SET project_id = $1 WHERE issue_id = $2`,
 			if err != nil {
 				return err
 			}
-			if input.PrepareSnapshot != nil {
-				snapshot, err = input.PrepareSnapshot(movedIssue, snapshot)
-				if err != nil {
-					return err
-				}
-			}
 			payloadFields["snapshot"] = jsontext.Value(snapshot)
 		}
 		payload, err := json.Marshal(payloadFields)

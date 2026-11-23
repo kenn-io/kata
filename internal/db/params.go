@@ -560,9 +560,6 @@ type ProjectMergeResult struct {
 type MoveIssueProjectIn struct {
 	// AuthorizeProjects checks source project UIDs resolved inside the transaction.
 	AuthorizeProjects func([]string) error
-	// PrepareSnapshot rewrites a generated federated move snapshot before the
-	// transaction records it. It must not perform external I/O.
-	PrepareSnapshot func(Issue, string) (string, error)
 	// ExpectedIssueIDs fences externally validated subtree membership.
 	ExpectedIssueIDs []int64
 	// DryRun validates inside the move transaction, then rolls back without moving.

@@ -90,6 +90,11 @@ Kata writes errors to stderr in your selected output mode.
 CLI panics exit with code 1 as internal errors, while daemon and background task
 panics keep diagnostic traces.
 
+When a Git remote isn't attached, the hint names the project that `kata init`
+will attach or create. If that project is archived and visible to you, the hint
+gives its restore command. With an explicit `--project`, the hint gives a create
+or restore command for that project.
+
 When you pass `--json`, a `project_not_initialized` error names the alias or
 project Kata looked up in `error.data`. For details, see
 [HTTP API errors](http-api.md#errors).
@@ -2051,8 +2056,7 @@ needing a workspace or a running daemon. It prints a single JSON object:
   "go": "go1.27.0",
   "os": "linux",
   "arch": "amd64",
-  "agent_format": 1,
-  "rejoin_existing_replica": true
+  "agent_format": 1
 }
 ```
 
@@ -2067,8 +2071,6 @@ agent-readable text contract. Use `kata_api_version` to select the JSON schema
 and ignore additional fields you do not recognize. Plain `kata version` keeps
 its human-readable output, and `kata --version` is an equivalent spelling of the
 same command that accepts the same output-mode flags.
-
-`rejoin_existing_replica` indicates that this build can publish new events after rejoining the same project.
 
 `kata update --check` checks Kata's GitHub release feed without installing. Its
 JSON result includes `distribution` and `package_release_may_lag`, plus an

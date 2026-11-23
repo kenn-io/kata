@@ -9,24 +9,6 @@ import (
 )
 
 func checkRejoinRetainedHistory(t *testing.T, store db.Storage) error {
-	t.Run("reuse retained snapshot", func(t *testing.T) {
-		ctx := t.Context()
-		project, err := store.CreateProject(ctx, "retained-snapshot")
-		require.NoError(t, err)
-		issue, created, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "task", Author: "old-actor"})
-		require.NoError(t, err)
-		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: true})
-		require.NoError(t, err)
-		snapshot, sourceID, err := store.RetainedIssueSnapshot(ctx, project.ID, issue.UID)
-		require.NoError(t, err)
-		require.Equal(t, created.ID, sourceID)
-		reused, _, err := store.RetainedIssueSnapshot(ctx, project.ID, issue.UID)
-		require.NoError(t, err)
-		require.Equal(t, snapshot.UID, reused.UID)
-		old, err := store.EventsByUIDs(ctx, project.ID, []string{created.UID})
-		require.NoError(t, err)
-		require.Equal(t, created.ContentHash, old[0].ContentHash)
-	})
 	t.Run("recover task moved before enrollment", func(t *testing.T) {
 		ctx := t.Context()
 		source, err := store.CreateProject(ctx, "offline-move-source")
@@ -48,10 +30,6 @@ func checkRejoinRetainedHistory(t *testing.T, store db.Storage) error {
 		require.NoError(t, err)
 		require.Len(t, comments, 1)
 		require.Equal(t, "offline discussion", comments[0].Body)
-		snapshot, sourceID, err := store.RetainedIssueSnapshot(ctx, target.ID, issue.UID)
-		require.NoError(t, err)
-		require.Equal(t, move.Event.ID, sourceID)
-		require.Equal(t, target.ID, snapshot.ProjectID)
 	})
 	t.Run("refresh boundary on upsert", func(t *testing.T) {
 		ctx := t.Context()
@@ -92,10 +70,7 @@ func checkRejoinRetainedHistoryReset(t *testing.T, store db.Storage, backend Bac
 	require.NoError(t, err)
 	binding, err := store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: true})
 	require.NoError(t, err)
-	snapshot, sourceID, err := store.RetainedIssueSnapshot(ctx, project.ID, issue.UID)
-	require.NoError(t, err)
-	require.Equal(t, old.ID, sourceID)
-	require.NoError(t, store.AdvanceFederationPushCursor(ctx, project.ID, snapshot.ID))
+	require.NoError(t, store.AdvanceFederationPushCursor(ctx, project.ID, otherEvent.ID))
 	if restored {
 		records, err := CollectImportRecords(ctx, store, db.ExportFilter{IncludeDeleted: true})
 		require.NoError(t, err)
@@ -110,9 +85,9 @@ func checkRejoinRetainedHistoryReset(t *testing.T, store db.Storage, backend Bac
 		require.NoError(t, err)
 	}
 	if guarded {
-		err = store.ResetFederatedProjectIfNoPendingPush(ctx, project.ID, snapshot.ID+1, snapshot.ID, store.InstanceUID(), snapshot.ID)
+		err = store.ResetFederatedProjectIfNoPendingPush(ctx, project.ID, otherEvent.ID+1, otherEvent.ID, store.InstanceUID(), otherEvent.ID)
 	} else {
-		err = store.ResetFederatedProject(ctx, project.ID, snapshot.ID+1, snapshot.ID)
+		err = store.ResetFederatedProject(ctx, project.ID, otherEvent.ID+1, otherEvent.ID)
 	}
 	require.NoError(t, err)
 	events, err := store.EventsByUIDs(ctx, project.ID, []string{old.UID})

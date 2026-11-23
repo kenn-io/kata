@@ -262,7 +262,7 @@ func pushDirectSpoke(
 	opts clientpkg.Opts,
 ) error {
 	if binding.PushEnabled {
-		retained := &retainedPush{store: store, binding: binding, hubProjectID: hubProjectID, client: client, validateLease: validateLease, credentials: credentials, opts: opts, sent: make(map[string]bool)}
+		retained := &retainedPush{store: store, binding: binding, validateLease: validateLease}
 		for {
 			if err := retryPushQuarantine(ctx, store, binding); err != nil {
 				return err
@@ -325,13 +325,7 @@ func pushDirectSpoke(
 				// transaction removes them and rebuilds the project while moving
 				// the cursor.
 				ackCtx, resets := db.WithFederationMoveResetCapture(ctx)
-				superseded := ack.SupersededEventUIDs
-				if retained.recovery {
-					// Keep the accepted recovery snapshot as the local baseline for
-					// a later move, even when the hub represented it as a repeated copy.
-					superseded = nil
-				}
-				if err := store.AcknowledgeFederationPush(ackCtx, binding.ProjectID, ack.PushCursorEventID, superseded); err != nil {
+				if err := store.AcknowledgeFederationPush(ackCtx, binding.ProjectID, ack.PushCursorEventID, ack.SupersededEventUIDs); err != nil {
 					// A push that waits for the hub's history is finished by the
 					// next pull and the push after it. The reason is recorded
 					// like any other, so a wait that does not end is visible in
@@ -372,15 +366,6 @@ func retryPushQuarantine(ctx context.Context, store db.Storage, binding *db.Fede
 		return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 	}
 	return nil
-}
-
-func retainedInitializerAlreadyKnown(err error, eventType, issueUID string) bool {
-	status, ok := errors.AsType[*HubStatusError](err)
-	if !ok || status.StatusCode != http.StatusBadRequest {
-		return false
-	}
-	body, ok := federationQuarantineHubError(status.Body)
-	return ok && body.Code == "validation" && body.Message == "federation ingest validation: fresh "+eventType+" targets existing issue "+issueUID
 }
 
 var retainedUnknownIssuePattern = regexp.MustCompile(`^federation ingest validation: [a-z._]+ references unknown issue ([0-9A-HJKMNP-TV-Z]{26})$`)

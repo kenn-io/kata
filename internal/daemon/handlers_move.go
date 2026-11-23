@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"maps"
@@ -91,54 +90,12 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 		}
 		res, err := cfg.DB.MoveIssueProject(ctx, move)
 		if err == nil {
-			moveSnapshotActors := make(map[int64]string)
 			for _, issue := range res.Issues {
-				var refresh claimRefreshResult
-				if err := requireFederatedIssueClaimWithResult(ctx, cfg, issue, actor, !in.Body.DryRun, &refresh); err != nil {
+				if err := requireFederatedIssueClaimWithRefresh(ctx, cfg, issue, actor, !in.Body.DryRun); err != nil {
 					return nil, err
-				}
-				binding, err := cfg.DB.FederationBindingByProject(ctx, issue.ProjectID)
-				if errors.Is(err, db.ErrNotFound) {
-					continue
-				}
-				if err != nil {
-					return nil, internalAPIError(err)
-				}
-				if !binding.Enabled || binding.Role != db.FederationRoleSpoke || !binding.PushEnabled {
-					continue
-				}
-				retained, snapshot, pending, err := retainedIssueState(ctx, cfg.DB, binding, issue.UID)
-				if err != nil {
-					return nil, internalAPIError(err)
-				}
-				if retained && in.Body.DryRun {
-					if err := refreshSpokeClaimStatusForGate(ctx, cfg, binding, issue, &refresh, false); err != nil {
-						return nil, err
-					}
-				}
-				if err := retainedMoveError(retained, snapshot, pending, refresh); err != nil {
-					return nil, err
-				}
-				if retained {
-					moveSnapshotActors[issue.ID] = binding.Actor
 				}
 			}
 			if !in.Body.DryRun {
-				if len(moveSnapshotActors) > 0 {
-					move.PrepareSnapshot = func(issue db.Issue, payload string) (string, error) {
-						actor, ok := moveSnapshotActors[issue.ID]
-						if !ok {
-							return payload, nil
-						}
-						canonical, err := db.CanonicalizeFederationSnapshotAuthors(db.RemoteEvent{
-							Type: "issue.snapshot", Payload: jsontext.Value(payload),
-						}, actor)
-						if err != nil {
-							return "", err
-						}
-						return string(canonical.Payload), nil
-					}
-				}
 				move.DryRun = false
 				move.ExpectedIssueIDs = make([]int64, len(res.Issues))
 				for i, issue := range res.Issues {
@@ -220,16 +177,4 @@ func moveIssueRuleAPIError(err error) *api.APIError {
 		return apiErr
 	}
 	return api.NewError(500, "internal", "internal error", "", nil)
-}
-
-// retainedMoveError refuses a retained task whose hub copy cannot gain a recovery snapshot.
-// Waiting on the hub, or on a pending snapshot, stays retryable.
-func retainedMoveError(retained, snapshot, pending bool, refresh claimRefreshResult) error {
-	switch {
-	case !retained || snapshot && !pending && refresh.known && !refresh.missing:
-		return nil
-	case !snapshot && !pending && refresh.known && !refresh.missing:
-		return retainedMoveNoSnapshotError()
-	}
-	return api.NewError(503, "federation_offline", "the retained task's recovery snapshot has not reached the hub", "retry after federation sync completes", nil)
 }

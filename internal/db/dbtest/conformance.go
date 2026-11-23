@@ -55,9 +55,9 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
-	{name: "rejoin retained history", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "CommentsByIssue", "UpsertFederationBinding", "RetainedIssueSnapshot", "MoveIssueProject", "ResetFederatedProject", "EventsByUIDs", "IssueByUID"}, run: checkRejoinRetainedHistory},
+	{name: "rejoin retained history", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "CommentsByIssue", "UpsertFederationBinding", "MoveIssueProject", "ResetFederatedProject", "EventsByUIDs", "IssueByUID"}, run: checkRejoinRetainedHistory},
 	{name: "former instance identities", methods: []string{"ImportReplay", "FormerInstanceUIDs", "ExportMeta", "ExportEvents"}, runWithBackend: checkFormerInstanceIdentities},
-	{name: "restored retained history", methods: []string{"ImportReplay", "ResetFederatedProject", "ResetFederatedProjectIfNoPendingPush", "RetainedIssueSnapshot", "FormerInstanceUIDs"}, runWithBackend: checkRestoredRetainedHistory},
+	{name: "restored retained history", methods: []string{"ImportReplay", "ResetFederatedProject", "ResetFederatedProjectIfNoPendingPush", "FormerInstanceUIDs"}, runWithBackend: checkRestoredRetainedHistory},
 	{name: "attachment close evidence", methods: []string{"CloseIssueGuarded", "PatchIssueMetadata", "EventsByUIDs"}, run: checkAttachmentCloseEvidence},
 	{name: "search tokenizer words", methods: []string{"CreateProject", "CreateIssue", "SearchFTS", "SearchFTSAny"}, runWithBackend: checkSearchTokenizerWords},
 	{name: "setup finished delivery", methods: []string{"PrepareSetupFinished", "CompleteSetupFinished", "SystemProject", "CloseIssue", "SoftDeleteIssue", "RemoveProject"}, runWithBackend: checkSetupFinishedDelivery},
@@ -369,7 +369,6 @@ var storageScenarios = []scenario{
 	{name: "moved ordinary issue adoption", methods: []string{"CreateProject", "CreateIssue", "MoveIssueProject", "AdoptProjectIntoFederation", "IssueByUID", "PendingFederationPushEvents"}, run: checkMovedOrdinaryIssueAdoption},
 	{name: "federated cron run issue authority", methods: []string{"IngestFederationEvents", "MoveIssueProject", "ObserveCronRun"}, run: checkFederatedCronRunIssueAuthority},
 	{name: "federated reference batch authority", methods: []string{"IngestFederationEvents"}, run: checkFederatedReferenceBatchAuthority},
-	{name: "federated snapshot reference authority", methods: []string{"IngestFederationEvents"}, run: checkFederatedSnapshotReferenceAuthority},
 	{name: "federated parent without reference controller", methods: []string{"IngestFederationEvents"}, run: checkFederatedParentWithoutReferenceController},
 	{name: "federated fresh current project authority", methods: []string{"IngestFederationEvents", "MoveIssueProject"}, run: checkFederatedFreshCurrentProjectAuthority},
 	{name: "federated move reset after acknowledged source leave", methods: []string{"CreateIssue", "MoveIssueProject", "AdvanceFederationPushCursor", "LeaveFederationReplica", "ResetFederatedProject", "ResetFederatedProjectIfNoPendingPush"}, run: checkFederatedMoveResetAfterAcknowledgedSourceLeave},

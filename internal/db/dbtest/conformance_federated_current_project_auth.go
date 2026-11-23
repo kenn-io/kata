@@ -13,48 +13,6 @@ import (
 	"go.kenn.io/kata/internal/uid"
 )
 
-func checkFederatedSnapshotReferenceAuthority(t *testing.T, store db.Storage) error {
-	for _, incoming := range []bool{false, true} {
-		name := "outgoing"
-		if incoming {
-			name = "incoming parent"
-		}
-		t.Run(name, func(t *testing.T) {
-			ctx := t.Context()
-			peerProject, route, peer, move := federatedRehomeFixture(t, store, "snapshot-reference-"+name)
-			origin := move.OriginInstanceUID
-			routeGrant, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{ProjectID: &route.ID, SpokeInstanceUID: origin, Capabilities: "push", Actor: "worker"})
-			require.NoError(t, err)
-			peerGrant, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{ProjectID: &peerProject.ID, SpokeInstanceUID: origin, Capabilities: "push", Actor: "peer-member"})
-			require.NoError(t, err)
-			issueUID, err := uid.New()
-			require.NoError(t, err)
-			link := map[string]any{"type": "blocks", "to_issue_uid": peer.UID, "author": "worker"}
-			if incoming {
-				link["type"] = "parent"
-				link["incoming"] = true
-			}
-			payload, err := json.Marshal(map[string]any{"links": []any{link}})
-			require.NoError(t, err)
-			event := newRemoteEvent(t, route, &issueUID, "issue.snapshot", "worker", origin, move.HLCPhysicalMS+1, IssueDocument(t, issueUID, payload))
-			params := db.FederationIngestParams{ProjectID: route.ID, FederationEnrollmentID: routeGrant.Enrollment.ID, SpokeInstanceUID: origin, BoundActor: "worker", EventFeatures: db.SupportedEventFeatures, MoveSourceEnrollmentIDs: map[string]int64{peerProject.UID: peerGrant.Enrollment.ID}, AuthorizeReference: func(context.Context, db.Transaction, db.FederationEnrollment, db.Project) error { return nil }, Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: event}}}
-			_, err = store.IngestFederationEvents(ctx, params)
-			if incoming {
-				require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
-				return
-			}
-			require.NoError(t, err)
-			created, err := store.IssueByUID(ctx, issueUID, db.IncludeDeletedNo)
-			require.NoError(t, err)
-			links, err := store.LinksByIssue(ctx, created.ID)
-			require.NoError(t, err)
-			require.Len(t, links, 1)
-			require.Equal(t, peer.UID, links[0].ToIssueUID)
-		})
-	}
-	return nil
-}
-
 func checkFederatedParentWithoutReferenceController(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
 	route, err := store.CreateProject(ctx, "ordinary-route")
