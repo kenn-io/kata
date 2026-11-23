@@ -343,24 +343,43 @@ func TestResolve_ByAliasInput_NotRegistered(t *testing.T) {
 	assert.Equal(t, map[string]any{"project": "ghost-project"}, map[string]any(envelope.Error.Data), string(bs))
 }
 
-func TestResolve_ByStartPath_UnattachedGitHint(t *testing.T) {
-	for _, state := range []string{"missing", "active", "archived"} {
-		t.Run(state, func(t *testing.T) {
-			h := newServerWithGitWorkspace(t, "https://github.com/example/spoke-project.git")
-			hint := `run "kata init": it attaches this repo to the active project "spoke-project", or creates it if none exists`
-			if state != "missing" {
-				project, err := h.DB().CreateProject(t.Context(), "spoke-project")
-				require.NoError(t, err)
-				if state == "archived" {
-					_, _, err = h.DB().RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: project.ID, Actor: "tester"})
-					require.NoError(t, err)
-					hint = fmt.Sprintf(`run "kata projects restore %d", then run "kata init" in this workspace`, project.ID)
+func TestResolve_NotInitializedHint(t *testing.T) {
+	for _, shape := range []string{"alias", "alias with name", "path with config", "path"} {
+		for _, state := range []string{"missing", "active", "archived"} {
+			t.Run(shape+"/"+state, func(t *testing.T) {
+				h := newServerWithGitWorkspace(t, "https://github.com/example/remote-project.git")
+				name := "remote-project"
+				request := map[string]any{"start_path": h.dir}
+				if shape == "alias" || shape == "alias with name" {
+					request = map[string]any{"alias": map[string]any{"identity": "github.com/example/remote-project", "kind": "git"}}
 				}
-			}
-			resp, bs := postJSON(t, h.ts.(*httptest.Server), "/api/v1/projects/resolve", map[string]any{"start_path": h.dir})
-			envelope := assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
-			assert.Equal(t, hint, envelope.Error.Hint)
-		})
+				if shape == "alias with name" || shape == "path with config" {
+					name = "saved-project"
+					if shape == "alias with name" {
+						request["name"] = name
+					} else {
+						testfix.WriteKataToml(t, h.dir, name)
+					}
+				}
+				hint := fmt.Sprintf(`run "kata init": it attaches this repo to the active project %q, or creates it if none exists`, name)
+				if state != "missing" {
+					project, err := h.DB().CreateProject(t.Context(), name)
+					require.NoError(t, err)
+					if state == "archived" {
+						_, _, err = h.DB().RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: project.ID, Actor: "tester"})
+						require.NoError(t, err)
+						hint = fmt.Sprintf(`run "kata projects restore %d", then run "kata init" in this workspace`, project.ID)
+					}
+				}
+				resp, bs := postJSON(t, h.ts.(*httptest.Server), "/api/v1/projects/resolve", request)
+				if state == "active" && (shape == "alias with name" || shape == "path with config") {
+					require.Equal(t, http.StatusOK, resp.StatusCode, string(bs))
+					return
+				}
+				envelope := assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
+				assert.Equal(t, hint, envelope.Error.Hint)
+			})
+		}
 	}
 }
 

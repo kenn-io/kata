@@ -10,7 +10,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -20,21 +19,28 @@ func TestErrorHintsArchivedProjectRestoreAndInit(t *testing.T) {
 	setupKataEnv(t)
 	t.Setenv("KATA_SERVER", "")
 	env := testenv.New(t)
-	project, err := env.DB.CreateProject(t.Context(), "spoke-project")
-	require.NoError(t, err)
-	_, _, err = env.DB.RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: project.ID, Actor: "tester"})
-	require.NoError(t, err)
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
 	runGit(t, dir, "remote", "add", "origin", "https://github.com/example/spoke-project.git")
+	_, err := runCmdOutput(t, env, "--workspace", dir, "init")
+	require.NoError(t, err)
+	project, err := env.DB.ProjectByName(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	_, err = runCmdOutput(t, env, "projects", "remove", "spoke-project")
+	require.NoError(t, err)
 
 	_, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "list")
 	require.Error(t, err)
 	assert.Contains(t, stderr, fmt.Sprintf(`run "kata projects restore %d", then run "kata init" in this workspace`, project.ID))
 	_, err = runCmdOutput(t, env, "projects", "restore", itoa(project.ID))
 	require.NoError(t, err)
+	projectsBefore, err := env.DB.ListProjects(t.Context())
+	require.NoError(t, err)
 	_, err = runCmdOutput(t, env, "--workspace", dir, "init")
 	require.NoError(t, err)
+	projectsAfter, err := env.DB.ListProjects(t.Context())
+	require.NoError(t, err)
+	assert.Len(t, projectsAfter, len(projectsBefore))
 	_, err = runCmdOutput(t, env, "--workspace", dir, "list")
 	require.NoError(t, err)
 	alias, err := env.DB.AliasByIdentity(t.Context(), "github.com/example/spoke-project")
