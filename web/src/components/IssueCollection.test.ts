@@ -247,8 +247,11 @@ describe('IssueCollection', () => {
       }
     })
 
-    it('keeps growth on selection and resets changed results in the first render', async () => {
-      const issues = manyTasks(400)
+    it('keeps growth on selection', async () => {
+      // Row limits and focus do not depend on optional metadata columns.
+      window.localStorage.setItem(KATA_TASK_COLUMNS_STORAGE_KEY, JSON.stringify([]))
+      // Keep one extra row beyond the selection so its position alone cannot preserve the count.
+      const issues = manyTasks(77)
       const props = {
         currentView: viewWithIssues(issues),
         issueCatalog: issues,
@@ -258,12 +261,28 @@ describe('IssueCollection', () => {
       }
       const { container, rerender } = render(IssueCollection, { props })
       await fireEvent.keyDown(container.querySelectorAll('button.row')[74]!, { key: 'ArrowDown' })
-      await waitFor(() => expect(visibleRows()).toHaveLength(150))
+      await waitFor(() => expect(visibleRows()).toHaveLength(77))
       await rerender({ ...props, navigationGeneration: 1, selectedIssueUID: 'bulk-00075' })
-      expect(visibleRows()).toHaveLength(150)
+      expect(visibleRows()).toHaveLength(77)
       expect(container.querySelector('button.row.selected')?.getAttribute('data-uid')).toBe(
         'bulk-00075',
       )
+    })
+
+    it('resets changed results in the first render', async () => {
+      // Row limits do not depend on optional metadata columns.
+      window.localStorage.setItem(KATA_TASK_COLUMNS_STORAGE_KEY, JSON.stringify([]))
+      // One row beyond the reset's 75-row cap detects a transient over-render.
+      const issues = manyTasks(276)
+      const props = {
+        currentView: viewWithIssues(issues),
+        issueCatalog: issues,
+        onSelect: vi.fn(),
+        resultsKey: 'all',
+      }
+      const { container, rerender } = render(IssueCollection, { props })
+      await fireEvent.keyDown(visibleRows()[74]!, { key: 'ArrowDown' })
+      expect(visibleRows()).toHaveLength(150)
 
       const addedRows: string[] = []
       const observer = new MutationObserver((records) => {
@@ -293,15 +312,26 @@ describe('IssueCollection', () => {
       }
 
       await fireEvent.keyDown(visibleRows()[0]!, { key: 'End' })
-      expect(visibleRows()).toHaveLength(200)
-      expect(document.activeElement).toBe(visibleRows()[199])
-      expect((document.activeElement as HTMLElement).dataset.uid).toBe('bulk-00399')
+      expect(visibleRows()).toHaveLength(76)
+      expect(document.activeElement).toBe(visibleRows()[75])
+      expect((document.activeElement as HTMLElement).dataset.uid).toBe('bulk-00275')
+    })
 
-      await rerender({
-        ...props,
-        currentView: viewWithIssues(issues.slice(200)),
-        resultsKey: 'same-results-new-key',
-      })
+    it('resets growth when the results key changes with the same tasks', async () => {
+      const issues = manyTasks(76)
+      const props = {
+        currentView: viewWithIssues(issues),
+        issueCatalog: issues,
+        onSelect: vi.fn(),
+        resultsKey: 'all',
+      }
+      const { rerender } = render(IssueCollection, { props })
+      await fireEvent.keyDown(visibleRows()[0]!, { key: 'End' })
+      expect(visibleRows()).toHaveLength(76)
+      expect(document.activeElement).toBe(visibleRows()[75])
+      expect((document.activeElement as HTMLElement).dataset.uid).toBe('bulk-00075')
+
+      await rerender({ ...props, resultsKey: 'same-results-new-key' })
       expect(visibleRows()).toHaveLength(75)
     })
 
