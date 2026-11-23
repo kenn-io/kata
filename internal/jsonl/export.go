@@ -298,9 +298,6 @@ func exportMeta(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportO
 		if opts.ProjectID != 0 && strings.HasPrefix(rec.Key, db.RootKeyTransitionMetadataPrefix) && (selectedProjectUID == "" || !strings.HasPrefix(rec.Key, db.RootKeyTransitionMetadataPrefix+selectedProjectUID+".")) {
 			continue
 		}
-		if opts.ProjectID != 0 && strings.HasPrefix(rec.Key, db.FederationAcknowledgedEventPrefix) && (selectedProjectUID == "" || !strings.HasPrefix(rec.Key, db.FederationAcknowledgedEventPrefix+selectedProjectUID+".")) {
-			continue
-		}
 
 		if err := writeRecord(enc, KindMeta, rec); err != nil {
 			return err

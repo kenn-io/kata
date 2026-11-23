@@ -91,7 +91,7 @@ func TestSyncFederationReturnedEditWhileAnotherHeld(t *testing.T) {
 			}
 			secondLocal, err := spoke.IssueByUID(ctx, issues[1].UID, db.IncludeDeletedNo)
 			require.NoError(t, err)
-			for i := 0; i < 99; i++ {
+			for range 99 {
 				_, _, err := spoke.CreateComment(ctx, db.CreateCommentParams{IssueID: secondLocal.ID, Author: "worker", Body: "later"})
 				require.NoError(t, err)
 			}

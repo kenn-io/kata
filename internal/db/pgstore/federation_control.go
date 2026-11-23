@@ -233,12 +233,14 @@ func (s *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCu
 	})
 }
 
+// RecordFederationAcknowledgedEvents records out-of-order acknowledgments.
 func (s *Store) RecordFederationAcknowledgedEvents(ctx context.Context, projectID int64, uids []string) error {
 	return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		return db.RecordFederationAcknowledgedEvents(ctx, tx, projectID, uids)
 	})
 }
 
+// FoldFederationAcknowledgedEvents moves contiguous acknowledgments into the cursor.
 func (s *Store) FoldFederationAcknowledgedEvents(ctx context.Context, projectID int64, origin string) error {
 	return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		return db.FoldFederationAcknowledgedEvents(ctx, tx, projectID, origin)

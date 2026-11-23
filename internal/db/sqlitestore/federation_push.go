@@ -173,31 +173,17 @@ func (d *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCu
 	})
 }
 
+// RecordFederationAcknowledgedEvents records out-of-order acknowledgments.
 func (d *Store) RecordFederationAcknowledgedEvents(ctx context.Context, projectID int64, uids []string) error {
-	return d.RetryTransient(ctx, func() error {
-		tx, err := d.BeginTx(ctx, nil)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = tx.Rollback() }()
-		if err := db.RecordFederationAcknowledgedEvents(ctx, tx, projectID, uids); err != nil {
-			return err
-		}
-		return tx.Commit()
+	return d.relayTx(ctx, func(tx *sql.Tx) error {
+		return db.RecordFederationAcknowledgedEvents(ctx, tx, projectID, uids)
 	})
 }
 
+// FoldFederationAcknowledgedEvents moves contiguous acknowledgments into the cursor.
 func (d *Store) FoldFederationAcknowledgedEvents(ctx context.Context, projectID int64, origin string) error {
-	return d.RetryTransient(ctx, func() error {
-		tx, err := d.BeginTx(ctx, nil)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = tx.Rollback() }()
-		if err := db.FoldFederationAcknowledgedEvents(ctx, tx, projectID, origin); err != nil {
-			return err
-		}
-		return tx.Commit()
+	return d.relayTx(ctx, func(tx *sql.Tx) error {
+		return db.FoldFederationAcknowledgedEvents(ctx, tx, projectID, origin)
 	})
 }
 

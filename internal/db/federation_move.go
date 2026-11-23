@@ -35,6 +35,7 @@ func federationMoveSupersededSQL(alias string) string {
  ORDER BY latest.id DESC LIMIT 1))`
 }
 
+// FederationAcknowledgedEventPrefix identifies out-of-order acknowledgments.
 const FederationAcknowledgedEventPrefix = "federation_acknowledged_event."
 
 // FederationUnresolvedEventSQL includes deferred events that still need delivery.
@@ -106,6 +107,7 @@ func FederationResetOwedEventSQL(alias string, postgres bool) string {
 	return FederationOwedEventSQL(alias, postgres) + ` AND NOT (` + FederationHeldEventSQL(alias) + `) AND NOT (` + FederationEventReferencesMovedIssueSQL(alias) + `)`
 }
 
+// FederationEventReferencesMovedIssueSQL matches either moved issue endpoint.
 func FederationEventReferencesMovedIssueSQL(alias string) string {
 	return `EXISTS (SELECT 1 FROM issues i WHERE i.uid IN (` + alias + `.issue_uid,` + alias + `.related_issue_uid) AND i.project_id<>` + alias + `.project_id)`
 }
@@ -168,48 +170,28 @@ func CheckFederationMoveSourceLifecycle(ctx context.Context, tx *sql.Tx, project
 	// A paused destination retains its owed move and may resume. Its durable
 	// acknowledgment cursor, rather than its current push flag, releases source
 	// authority for teardown. Leaving retains a held cursor for superseded moves.
-	supersededFilter := ""
 	hasSupersededMove := false
-	if leaving {
-		supersededFilter = " AND NOT " + federationMoveSupersededSQL("e")
-		rows, err := tx.QueryContext(ctx, `SELECT e.payload FROM events e JOIN federation_bindings b ON b.project_id=e.project_id
- WHERE e.type='issue.moved' AND e.origin_instance_uid=$1 AND b.role='spoke' AND b.relay_config IS NULL AND e.id>b.push_cursor_event_id AND `+federationMoveSupersededSQL("e"), originInstanceUID)
-		if err != nil {
-			return err
-		}
-		for rows.Next() {
-			var payload string
-			if err := rows.Scan(&payload); err != nil {
-				_ = rows.Close()
-				return err
-			}
-			if uid, _ := StringValue(PayloadMap([]byte(payload))["from_project_uid"]); uid == sourceUID {
-				hasSupersededMove = true
-			}
-		}
-		if err := rows.Err(); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		if err := rows.Close(); err != nil {
-			return err
-		}
-	}
-	rows, err := tx.QueryContext(ctx, `SELECT e.payload FROM events e
+	//nolint:gosec // The SQL fragment uses a fixed alias.
+	rows, err := tx.QueryContext(ctx, `SELECT e.payload, `+federationMoveSupersededSQL("e")+` FROM events e
  JOIN federation_bindings b ON b.project_id=e.project_id
  WHERE e.type='issue.moved' AND e.origin_instance_uid=$1
  AND b.role='spoke' AND b.relay_config IS NULL
- AND e.id>b.push_cursor_event_id`+supersededFilter, originInstanceUID)
+ AND e.id>b.push_cursor_event_id`, originInstanceUID)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var payload string
-		if err := rows.Scan(&payload); err != nil {
+		var superseded bool
+		if err := rows.Scan(&payload, &superseded); err != nil {
 			return err
 		}
 		if fromUID, _ := StringValue(PayloadMap([]byte(payload))["from_project_uid"]); fromUID == sourceUID {
+			if leaving && superseded {
+				hasSupersededMove = true
+				continue
+			}
 			return fmt.Errorf("%w: sync pending issue moves in destination projects, then retry source leave or archive", ErrFederationResetBlockedByPendingPush)
 		}
 	}

@@ -829,7 +829,7 @@ func federationIngestEnvelopes(events []db.Event) []api.FederationIngestEventEnv
 
 func nextFederationPushIngestBatch(events []db.Event, single bool) ([]db.Event, string, int64, error) {
 	shape := federationPushAdoptionBaselineShape(events)
-	if single && len(events) > 0 && !(shape.valid && shape.hasSnapshot) {
+	if single && len(events) > 0 && (!shape.valid || !shape.hasSnapshot) {
 		events = events[:1]
 		shape = federationPushBaselineShape{valid: true, hasSnapshot: db.IsFederationSnapshotEvent(events[0].Type)}
 	}

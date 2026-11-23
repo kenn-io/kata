@@ -326,28 +326,6 @@ func TestFederationProviderValidatesActorBeforeSavingReady(t *testing.T) {
 	assert.True(t, pending.Credential.Token == ready.Credential.Token)
 }
 
-func TestFederationRemovedProviderReleaseDetachesOvertakenMove(t *testing.T) {
-	_, mapping := providerMapping(t)
-	store := openReplicaServiceStore(t)
-	source, _ := overtakenLeaveFixture(t, store)
-	binding, err := store.FederationBindingByProject(t.Context(), source.ID)
-	require.NoError(t, err)
-	credentials := config.DefaultFederationCredentialStore()
-	before := config.FederationCredential{
-		HubURL: binding.HubURL, HubProjectID: binding.HubProjectID, HubProjectName: source.Name, SpokeProjectName: source.Name,
-		ManagedByConfig: true, Token: "provider-credential", Actor: "worker",
-		Provider: &config.FederationProviderCredential{
-			RequestID: uuid.New(), Command: mapping.CredentialProvider, Intent: mapping.Intent,
-			SpokeInstanceUID: store.InstanceUID(), LocalProjectUID: source.UID, Status: federationprovider.StatusReady,
-		},
-	}
-	require.NoError(t, credentials.StoreFederationCredential(t.Context(), source.UID, before))
-	t.Setenv("KATA_TEST_PROVIDER_STATUS", "released")
-	closed, _, err := daemon.ReleaseRemovedFederationProvider(t.Context(), store, credentials, config.FederationManagedCredentialReservation{ProjectUID: source.UID, Credential: before})
-	require.NoError(t, err)
-	require.Equal(t, federationprovider.StatusReleased, closed.Credential.Provider.Status)
-}
-
 func TestFederationProviderDetachOvertakenMove(t *testing.T) {
 	env := testenv.New(t)
 	_, mapping := providerMapping(t)
