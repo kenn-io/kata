@@ -180,7 +180,7 @@ func (s *Store) ExportMeta(ctx context.Context) iter.Seq2[db.MetaKV, error] {
 // ExportProjects streams projects ordered by identity, optionally scoped to one project.
 func (s *Store) ExportProjects(ctx context.Context, filter db.ExportFilter) iter.Seq2[db.ProjectExport, error] {
 	query, args := pgProjectFilter(
-		`SELECT id, uid, name, created_at, deleted_at, metadata, revision, (SELECT push_cursor_event_id FROM federation_held_cursors WHERE project_uid=projects.uid) FROM projects`,
+		`SELECT id, uid, name, created_at, deleted_at, metadata, revision FROM projects`,
 		"id", filter,
 	)
 	query += ` ORDER BY id ASC`
@@ -189,16 +189,13 @@ func (s *Store) ExportProjects(ctx context.Context, filter db.ExportFilter) iter
 			var record db.ProjectExport
 			var metadata string
 			if err := rows.Scan(&record.ID, &record.UID, &record.Name, &record.CreatedAt,
-				&record.DeletedAt, &metadata, &record.Revision, &record.HeldCursor); err != nil {
+				&record.DeletedAt, &metadata, &record.Revision); err != nil {
 				return db.ProjectExport{}, pgExportScanError("project", err)
 			}
 			if !jsontext.Value([]byte(metadata)).IsValid() {
 				return db.ProjectExport{}, pgInvalidJSONError("project", record.ID, "metadata")
 			}
 			record.Metadata = jsontext.Value(metadata)
-			if filter.ProjectID != nil {
-				record.HeldCursor = nil
-			}
 			return record, nil
 		})
 }

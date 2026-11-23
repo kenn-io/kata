@@ -30,9 +30,6 @@ ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`, meta.Key, meta.Value)
 }
 
 func pgReplayProject(ctx context.Context, tx *sql.Tx, project *db.ProjectExport) error {
-	if err := db.RestoreFederationHeldCursor(ctx, tx, project); err != nil {
-		return pgReplayError(db.ImportKindProject, err)
-	}
 	if err := config.ValidateProjectName(project.Name); err != nil {
 		return pgReplayError(db.ImportKindProject,
 			fmt.Errorf("project %d name %q: %w", project.ID, project.Name, err))

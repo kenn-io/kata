@@ -895,7 +895,7 @@ func (d *Store) ExportEvents(ctx context.Context, f db.ExportFilter) iter.Seq2[d
 // projects are always included; ExportFilter.IncludeDeleted does not apply.
 func (d *Store) ExportProjects(ctx context.Context, f db.ExportFilter) iter.Seq2[db.ProjectExport, error] {
 	query := `SELECT id, uid, name, CAST(created_at AS TEXT),
-	                 CAST(deleted_at AS TEXT), metadata, revision, (SELECT push_cursor_event_id FROM federation_held_cursors WHERE project_uid=projects.uid) FROM projects`
+	                 CAST(deleted_at AS TEXT), metadata, revision FROM projects`
 	query, args := withProjectIDFilter(query, f, "id")
 	query += ` ORDER BY id ASC`
 	return streamRows(ctx, d.readQ, "projects", query, args,
@@ -903,16 +903,13 @@ func (d *Store) ExportProjects(ctx context.Context, f db.ExportFilter) iter.Seq2
 			var rec db.ProjectExport
 			var metadata string
 			if err := rows.Scan(&rec.ID, &rec.UID, &rec.Name, &rec.CreatedAt, &rec.DeletedAt,
-				&metadata, &rec.Revision, &rec.HeldCursor); err != nil {
+				&metadata, &rec.Revision); err != nil {
 				return db.ProjectExport{}, scanError("project", err)
 			}
 			if !jsontext.Value([]byte(metadata)).IsValid() {
 				return db.ProjectExport{}, invalidJSONErr("project", rec.ID, "metadata")
 			}
 			rec.Metadata = jsontext.Value(metadata)
-			if f.ProjectID != nil {
-				rec.HeldCursor = nil
-			}
 			return rec, nil
 		})
 }

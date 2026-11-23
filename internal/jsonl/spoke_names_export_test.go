@@ -36,16 +36,6 @@ func TestSpokeNamesProjectExport(t *testing.T) {
 		_, err = source.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{ProjectID: &project.ID, SpokeInstanceUID: []string{"01HZNQ7VFPK1XGD8R5MABCD4EA", "01HZNQ7VFPK1XGD8R5MABCD4EB"}[i], SpokeName: []string{"laptop", "build-box"}[i], Capabilities: "pull", Actor: "member"})
 		require.NoError(t, err)
 	}
-	var markerKeys []string
-	for _, project := range []db.Project{selected, other} {
-		_, event, err := source.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "export", Author: "worker"})
-		require.NoError(t, err)
-		require.NoError(t, source.RecordFederationAcknowledgedEvents(t.Context(), project.ID, []string{event.UID}))
-		markerKeys = append(markerKeys, db.FederationAcknowledgedEventPrefix+project.UID+"."+event.UID)
-	}
-	_, err = source.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: selected.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: selected.ID, HubProjectUID: selected.UID, Actor: "worker", Enabled: true, PushEnabled: true})
-	require.NoError(t, err)
-	require.NoError(t, source.FenceFederationLeave(t.Context(), selected.ID))
 	for _, legacy := range []bool{false, true} {
 		mode := "current"
 		if legacy {
@@ -97,70 +87,9 @@ func TestSpokeNamesProjectExport(t *testing.T) {
 						names, err := target.ListFederationSpokeNames(t.Context())
 						require.NoError(t, err)
 						require.Empty(t, names)
-						if !legacy && !merge {
-							var markers []string
-							for meta, err := range target.ExportMeta(t.Context()) {
-								require.NoError(t, err)
-								if strings.HasPrefix(meta.Key, db.FederationAcknowledgedEventPrefix) {
-									markers = append(markers, meta.Key)
-								}
-								require.NotEqual(t, db.FederationLeaveFencePrefix+selected.UID, meta.Key)
-							}
-							require.Equal(t, []string{markerKeys[0]}, markers)
-						}
 					})
 				}
 			}
 		})
 	}
-	var full bytes.Buffer
-	require.NoError(t, jsonl.Export(t.Context(), source, &full, jsonl.ExportOptions{IncludeDeleted: true}))
-	for _, standalone := range []bool{false, true} {
-		name := "full"
-		if standalone {
-			name = "standalone"
-		}
-		t.Run(name, func(t *testing.T) {
-			target, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "target.db"))
-			require.NoError(t, err)
-			t.Cleanup(func() { _ = target.Close() })
-			require.NoError(t, jsonl.ImportWithOptions(t.Context(), bytes.NewReader(full.Bytes()), target, jsonl.ImportOptions{AsStandalone: standalone}))
-			var fenced bool
-			for meta, err := range target.ExportMeta(t.Context()) {
-				require.NoError(t, err)
-				if meta.Key == db.FederationLeaveFencePrefix+selected.UID {
-					fenced = true
-				}
-			}
-			require.Equal(t, !standalone, fenced)
-		})
-	}
-}
-
-func TestFederationHeldCursorBackup(t *testing.T) {
-	ctx := t.Context()
-	source, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "source.db"))
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = source.Close() })
-	project, err := source.CreateProject(ctx, "held-project")
-	require.NoError(t, err)
-	_, err = source.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "worker", Enabled: true, PushEnabled: true})
-	require.NoError(t, err)
-	_, err = source.LeaveFederationReplica(ctx, project.ID)
-	require.NoError(t, err)
-	var full bytes.Buffer
-	require.NoError(t, jsonl.Export(ctx, source, &full, jsonl.ExportOptions{IncludeDeleted: true}))
-	target, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "target.db"))
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = target.Close() })
-	require.NoError(t, jsonl.ImportWithOptions(ctx, bytes.NewReader(full.Bytes()), target, jsonl.ImportOptions{AsStandalone: true}))
-	found := false
-	for p, err := range target.ExportProjects(ctx, db.ExportFilter{}) {
-		require.NoError(t, err)
-		if p.UID == project.UID {
-			require.Nil(t, p.HeldCursor)
-			found = true
-		}
-	}
-	require.True(t, found)
 }

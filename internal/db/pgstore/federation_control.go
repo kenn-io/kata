@@ -175,7 +175,7 @@ updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`,
 			return err
 		}
 		if output.PushEnabled && output.Enabled && output.RelayConfig == nil {
-			if _, err = tx.ExecContext(ctx, `DELETE FROM federation_held_cursors WHERE project_uid=(SELECT uid FROM projects WHERE id=$1 AND deleted_at IS NULL)`, input.ProjectID); err != nil {
+			if _, err = tx.ExecContext(ctx, `DELETE FROM meta WHERE key=$2 || (SELECT uid FROM projects WHERE id=$1 AND deleted_at IS NULL)`, input.ProjectID, db.FederationHeldCursorPrefix); err != nil {
 				return err
 			}
 		}
@@ -200,27 +200,15 @@ func (s *Store) AdvanceFederationPullCursor(ctx context.Context, projectID, next
 // from a snapshot it no longer holds.
 func (s *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string) error {
 	if len(supersededEventUIDs) == 0 {
-		return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
-			deferred, err := db.RecordFederationPushPastDeferred(ctx, tx, projectID, s.instanceUID, nextCursor, true)
-			if err != nil || deferred {
-				return err
-			}
-			return updateFederationCursor(ctx, tx, projectID, nextCursor, true)
-		})
+		return s.AdvanceFederationPushCursor(ctx, projectID, nextCursor)
 	}
 	return s.materializeFederatedProjectAfter(ctx, projectID, func(ctx context.Context, tx *sql.Tx) error {
 		deleted, err := db.AcknowledgeSupersededFederationSnapshots(ctx, tx, projectID, s.instanceUID, supersededEventUIDs)
 		if err != nil {
 			return err
 		}
-		deferred, err := db.RecordFederationPushPastDeferred(ctx, tx, projectID, s.instanceUID, nextCursor, true)
-		if err != nil {
+		if err := updateFederationCursor(ctx, tx, projectID, nextCursor, true); err != nil {
 			return err
-		}
-		if !deferred {
-			if err := updateFederationCursor(ctx, tx, projectID, nextCursor, true); err != nil {
-				return err
-			}
 		}
 		if deleted == 0 {
 			return nil
@@ -242,20 +230,6 @@ func (s *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCu
 		// Open stream clients learn of the reset from the caller after commit,
 		// and from the stored cursor on their next heartbeat.
 		return db.RecordFederationProjectUIReset(ctx, tx, db.Project{ID: projectID, UID: projectUID, Name: projectName}, reset.ID)
-	})
-}
-
-// RecordFederationAcknowledgedEvents records out-of-order acknowledgments.
-func (s *Store) RecordFederationAcknowledgedEvents(ctx context.Context, projectID int64, uids []string) error {
-	return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
-		return db.RecordFederationAcknowledgedEvents(ctx, tx, projectID, uids)
-	})
-}
-
-// FoldFederationAcknowledgedEvents moves contiguous acknowledgments into the cursor.
-func (s *Store) FoldFederationAcknowledgedEvents(ctx context.Context, projectID int64, origin string) error {
-	return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
-		return db.FoldFederationAcknowledgedEvents(ctx, tx, projectID, origin)
 	})
 }
 
@@ -313,14 +287,13 @@ func (s *Store) EnableFederationPush(ctx context.Context, projectID int64, curso
 		}
 		next := binding
 		next.PushEnabled = true
-		cursor, err = db.ResumeFederationHeldCursor(ctx, tx, projectID, cursor, binding.PushCursorEventID)
-		if err != nil {
-			return err
-		}
 		if _, err := tx.ExecContext(ctx, `UPDATE federation_bindings SET push_enabled=1,
 push_cursor_event_id=GREATEST(push_cursor_event_id,$1),
 updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
 WHERE project_id=$2`, cursor, projectID); err != nil {
+			return mapSQLError(err, nil)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=$1 || (SELECT uid FROM projects WHERE id=$2)`, db.FederationHeldCursorPrefix, projectID); err != nil {
 			return mapSQLError(err, nil)
 		}
 		output, err = scanFederationBinding(tx.QueryRowContext(ctx,
@@ -399,7 +372,7 @@ func pgFederationReplicaSettledTx(ctx context.Context, tx *sql.Tx, binding db.Fe
 	if binding.PushEnabled {
 		var pending bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM events e
-WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND `+db.FederationUnresolvedEventSQL("e")+`)`,
+WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND `+pgFederationPushEventTypeCondition("e.type")+`)`,
 			binding.ProjectID, originInstanceUID, binding.PushCursorEventID).Scan(&pending); err != nil {
 			return mapSQLError(err, nil)
 		}

@@ -13,8 +13,8 @@ type contextExecer interface {
 }
 
 // deleteProjectRelayMetadata removes every meta row keyed by the project UID:
-// relay reset state, root key transitions, pending creation intent, event
-// acknowledgments, and the attribution stream cursor. Purge, merge, orphan cleanup and UID adoption
+// relay reset state, root key transitions, pending creation intent and the
+// attribution stream cursor. Purge, merge, orphan cleanup and UID adoption
 // all retire the UID, so none of these rows may outlive it.
 func deleteProjectRelayMetadata(ctx context.Context, execer contextExecer, projectUID string) error {
 	resetKey := db.RelayResetMetadataPrefix + projectUID
@@ -23,7 +23,6 @@ func deleteProjectRelayMetadata(ctx context.Context, execer contextExecer, proje
 	pendingPrefix := db.PendingCreationMetadataPrefix + projectUID + "."
 	supersededPrefix := db.RelayResetSupersededMetadataPrefix + projectUID + "."
 	identityDependencyPrefix := db.FederationProjectIdentityDependencyPrefix + projectUID + "."
-	acknowledgmentPrefix := db.FederationAcknowledgedEventPrefix + projectUID + "."
 	_, err := execer.ExecContext(ctx, `DELETE FROM meta
 		WHERE key = ?
 		   OR key = ?
@@ -32,12 +31,10 @@ func deleteProjectRelayMetadata(ctx context.Context, execer contextExecer, proje
 		   OR substr(key, 1, length(?)) = ?
 		   OR substr(key, 1, length(?)) = ?
 		   OR substr(key, 1, length(?)) = ?
-		   OR substr(key, 1, length(?)) = ?
 		   OR substr(key, 1, length(?)) = ?`,
 		resetKey, db.AttributionUIResetMetadataPrefix+projectUID, db.ProjectStreamResetMetadataPrefix+projectUID,
 		resetPrefix, resetPrefix, transitionPrefix, transitionPrefix, pendingPrefix, pendingPrefix,
-		supersededPrefix, supersededPrefix, identityDependencyPrefix, identityDependencyPrefix,
-		acknowledgmentPrefix, acknowledgmentPrefix)
+		supersededPrefix, supersededPrefix, identityDependencyPrefix, identityDependencyPrefix)
 	return err
 }
 

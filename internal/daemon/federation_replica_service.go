@@ -422,6 +422,15 @@ func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, manage
 				if err := stopProviderFederationTransport(ctx, store, project.ID); err != nil {
 					return fail(err)
 				}
+				if detach {
+					fencer, ok := store.(db.RelayDisconnectFenceStore)
+					if !ok {
+						return fail(fmt.Errorf("federation leave fence is unavailable"))
+					}
+					if err := fencer.FenceFederationLeave(ctx, project.ID); err != nil {
+						return fail(err)
+					}
+				}
 			}
 			return PrepareFederationReplicaLeaveResult{
 				ManagedReservation:      match,

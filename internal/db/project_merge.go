@@ -179,7 +179,6 @@ func PrepareProjectMergeRecords(
 			}
 		case *ProjectExport:
 			payload.ID = offsets.TargetProjectID
-			payload.HeldCursor = nil
 		case *AliasExport:
 			if err = requireMergeProjectID(payload.ProjectID, projectID, payload.ImportKind()); err == nil {
 				payload.ID, err = addMergeOffset(payload.ID, offsets.Alias, payload.ImportKind())

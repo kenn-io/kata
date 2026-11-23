@@ -366,15 +366,7 @@ func (d *Store) skipFederationQuarantine(ctx context.Context, p db.SkipFederatio
 	}
 	switch q.Direction {
 	case db.FederationQuarantineDirectionPush:
-		earlier, err := db.FederationQuarantineHasEarlierEvents(ctx, tx, q, d.InstanceUID())
-		if err != nil {
-			return db.FederationQuarantine{}, err
-		}
-		if earlier {
-			if err := db.RecordFederationAcknowledgedEvents(ctx, tx, q.ProjectID, q.EventUIDs); err != nil {
-				return db.FederationQuarantine{}, err
-			}
-		} else if _, err := tx.ExecContext(ctx, `
+		if _, err := tx.ExecContext(ctx, `
 			UPDATE federation_bindings
 			   SET push_cursor_event_id = CASE
 			         WHEN push_cursor_event_id < ? THEN ?
@@ -575,7 +567,7 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 		return db.FederationBinding{}, err
 	}
 	if binding.PushEnabled && binding.Enabled && binding.RelayConfig == nil {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM federation_held_cursors WHERE project_uid=(SELECT uid FROM projects WHERE id=? AND deleted_at IS NULL)`, b.ProjectID); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=? || (SELECT uid FROM projects WHERE id=? AND deleted_at IS NULL)`, db.FederationHeldCursorPrefix, b.ProjectID); err != nil {
 			return db.FederationBinding{}, err
 		}
 	}
@@ -1468,7 +1460,7 @@ func (d *Store) resetFederatedProject(ctx context.Context, projectID, replayHori
 	if err := rejectLegacyFederationResetTx(ctx, tx, projectID); err != nil {
 		return err
 	}
-	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID, d.instanceUID, false); err != nil {
+	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID, d.instanceUID); err != nil {
 		return err
 	}
 	if err := db.ClearFederatedProjectEvents(ctx, tx, projectID, d.instanceUID); err != nil {
