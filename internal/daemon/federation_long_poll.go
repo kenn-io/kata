@@ -417,35 +417,26 @@ func holdFederationPoll(
 	read func(context.Context) (db.FederationReadResult, error),
 ) (db.FederationReadResult, bool, error) {
 	initial := result
-	waited := false
 	for federationPollCaughtUp(result) && time.Now().Before(deadline) {
 		woke, err := waiter.wait(ctx, deadline)
 		if err != nil {
-			return result, waited, fmt.Errorf("held federation poll ended: %w", err)
+			return result, false, fmt.Errorf("held federation poll ended: %w", err)
 		}
 		if !woke {
-			result = initial
-			waited = false
 			break
 		}
 		readCtx, err := reauthorize()
 		if err != nil {
-			return result, waited, err
+			return result, false, err
 		}
 		if result, err = read(readCtx); err != nil {
-			return result, waited, err
+			return result, false, err
 		}
-		if federationPollCaughtUp(result) && !time.Now().Before(deadline) {
-			result = initial
-			waited = false
-			break
-		}
-		waited = true
 	}
-	if !waited && federationPollCaughtUp(result) {
-		releaseProjectAccess(ctx)
+	if federationPollCaughtUp(result) {
+		return initial, true, nil
 	}
-	return result, waited, nil
+	return result, false, nil
 }
 
 // heldFederationPollAllowed reports whether the hub can authorize a held poll

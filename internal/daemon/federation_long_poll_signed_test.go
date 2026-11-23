@@ -309,6 +309,23 @@ func TestFederationPollWaitEndsBeforeTheRequestDeadlineAfterASlowRead(t *testing
 
 func TestFederationPollWaitRejectsARetiredSigningKey(t *testing.T) {
 	const canary = "committed-after-the-key-retired"
+	t.Run("key expires while an empty poll waits", func(t *testing.T) {
+		f := newSignedPollFixture(t)
+		synctest.Test(t, func(t *testing.T) {
+			h := f.serve(t, 20*time.Second)
+			cursor := h.cursor(t)
+			done := h.startHeldPoll(t, cursor, "30")
+			initial := h.reads.lastResult()
+			response := <-done
+			assert.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			var page pollBodyForTest
+			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &page))
+			assert.Empty(t, page.Events)
+			assert.Equal(t, initial.NextAfterID, page.NextAfterID)
+			response = h.send(h.request(t, page.NextAfterID, "0"))
+			assert.Equal(t, http.StatusUnauthorized, response.Code, response.Body.String())
+		})
+	})
 	t.Run("key expires while an immediate poll reads", func(t *testing.T) {
 		f := newSignedPollFixture(t)
 		synctest.Test(t, func(t *testing.T) {
