@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"io"
 	"net/http"
 	"os"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -36,6 +38,8 @@ func TestResolveBody(t *testing.T) {
 		setup   func(t *testing.T) (BodySources, io.Reader)
 		want    string
 		wantErr string
+		kind    errKind
+		code    int
 	}{
 		{
 			name: "flag wins",
@@ -55,17 +59,17 @@ func TestResolveBody(t *testing.T) {
 			name: "from file",
 			setup: func(t *testing.T) (BodySources, io.Reader) {
 				path := t.TempDir() + "/b.txt"
-				writeStringFile(t, path, "from file")
+				writeStringFile(t, path, "from `file`\n\n")
 				return BodySources{File: path, FileSet: true}, nil
 			},
-			want: "from file",
+			want: "from `file`",
 		},
 		{
 			name: "from stdin",
 			setup: func(*testing.T) (BodySources, io.Reader) {
-				return BodySources{Stdin: true}, bytes.NewBufferString("from stdin")
+				return BodySources{Stdin: true}, bytes.NewBufferString("from `stdin`\n\n")
 			},
-			want: "from stdin",
+			want: "from `stdin`",
 		},
 		{
 			name: "two sources is error",
@@ -73,6 +77,7 @@ func TestResolveBody(t *testing.T) {
 				return BodySources{Body: "x", BodySet: true, Stdin: true}, nil
 			},
 			wantErr: "exactly one",
+			kind:    kindUsage, code: ExitUsage,
 		},
 		{
 			// An explicit `--body ""` together with `--body-stdin` is still a
@@ -83,6 +88,23 @@ func TestResolveBody(t *testing.T) {
 				return BodySources{Body: "", BodySet: true, Stdin: true}, nil
 			},
 			wantErr: "exactly one",
+			kind:    kindUsage, code: ExitUsage,
+		},
+		{
+			name: "file read failure",
+			setup: func(t *testing.T) (BodySources, io.Reader) {
+				return BodySources{File: t.TempDir() + "/missing", FileSet: true}, nil
+			},
+			wantErr: "read ",
+			kind:    kindValidation, code: ExitValidation,
+		},
+		{
+			name: "stdin read failure",
+			setup: func(*testing.T) (BodySources, io.Reader) {
+				return BodySources{Stdin: true}, iotest.ErrReader(errors.New("failed"))
+			},
+			wantErr: "read stdin: failed",
+			kind:    kindValidation, code: ExitValidation,
 		},
 	}
 	for _, tc := range cases {
@@ -92,6 +114,8 @@ func TestResolveBody(t *testing.T) {
 			if tc.wantErr != "" {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tc.wantErr)
+				ce := requireCLIError(t, err, tc.code)
+				assert.Equal(t, tc.kind, ce.Kind)
 				return
 			}
 			require.NoError(t, err)

@@ -3001,6 +3001,10 @@ components:
       properties:
         issue:
           $ref: "#/components/schemas/Issue"
+        matched_in:
+          items:
+            type: string
+          type: array
         score:
           format: double
           type: number
@@ -3015,10 +3019,14 @@ components:
       properties:
         bounded:
           type: boolean
+        degraded_reason:
+          type: string
         hits:
           items:
             $ref: "#/components/schemas/FederationSearchHit"
           type: array
+        mode:
+          type: string
       required:
         - hits
         - bounded
@@ -10512,6 +10520,13 @@ paths:
           required: true
           schema:
             type: string
+        - description: Fall back to keyword search when the hub cannot run semantic search. Absent means strict semantic.
+          explode: false
+          in: query
+          name: auto
+          schema:
+            description: Fall back to keyword search when the hub cannot run semantic search. Absent means strict semantic.
+            type: boolean
         - explode: false
           in: query
           name: limit
