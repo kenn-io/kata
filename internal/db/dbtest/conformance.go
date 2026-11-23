@@ -699,7 +699,7 @@ var storageScenarios = []scenario{
 	},
 	{
 		name:    "expired assignment attention handoff",
-		methods: []string{"ClaimOwner", "CreateIssue", "CreateProject", "EditIssue", "ExpireAssignments", "IssueByID", "PatchIssueMetadata"},
+		methods: []string{"ClaimOwner", "CreateIssue", "CreateProject", "ExpireAssignments", "IssueByID", "PatchIssueMetadata"},
 		run:     checkExpiredAssignmentAttentionHandoff,
 	},
 	{name: "expired assignment federation replay", runWithBackend: checkExpiredAssignmentFederationReplay},

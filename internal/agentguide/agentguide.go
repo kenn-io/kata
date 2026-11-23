@@ -219,8 +219,6 @@ const fragClaiming = `6. Find and claim available work (multi-agent environments
 
    # Claim it with a time limit (fails if already assigned to another actor).
    # Renew before it expires by claiming again with --ttl, without --if-unowned.
-   # Expiry while work.attention is ok sets it to needs-human; the next
-   # successful claim restores ok. A needs-human or stuck set on purpose stays.
    kata claim <ref> --ttl 2h
 
    # Release ownership only if you still own it

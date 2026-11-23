@@ -148,7 +148,8 @@ func TestNativeQuickstartNoShell(t *testing.T) {
 }
 
 // Product contract: every MCP guide and the comment tools say
-// comments carry findings, never progress.
+// comments carry findings, never progress. The instructions, claim tool, and
+// claim guides teach ttl_seconds and renewal without if_unowned.
 func TestNativeGuidesSayCommentsCarryFindings(t *testing.T) {
 	session := connectTestServer(t)
 	listed, err := session.ListTools(t.Context(), nil)
@@ -164,6 +165,10 @@ func TestNativeGuidesSayCommentsCarryFindings(t *testing.T) {
 	for _, name := range []string{"kata.comment", "kata.edit_comment", "kata.close"} {
 		require.NotRegexp(t, `\bprogress\b`, descriptions[name], name)
 	}
+	for _, text := range []string{session.InitializeResult().Instructions, descriptions["kata.claim"]} {
+		require.Contains(t, text, "ttl_seconds")
+		require.Contains(t, text, "without if_unowned")
+	}
 	for _, guide := range skillGuides {
 		md, ok := SkillMarkdown(guide.name)
 		require.True(t, ok, guide.name)
@@ -171,40 +176,21 @@ func TestNativeGuidesSayCommentsCarryFindings(t *testing.T) {
 		for _, text := range []string{"update work.attention and work.attention_msg", "kata.edit_comment", "not merged", "needs-review"} {
 			require.Contains(t, md, text, guide.name)
 		}
+		if guide.name == "workflow" || guide.name == "quickstart" || guide.name == "claiming" {
+			require.Contains(t, md, "ttl_seconds", guide.name)
+			require.Contains(t, md, "without if_unowned", guide.name)
+		}
+		if guide.name == "quickstart" || guide.name == "claiming" {
+			for _, example := range nativeExamples(t, guide.name) {
+				if example.Tool == "kata.claim" {
+					require.Contains(t, example.Arguments, "ttl_seconds", guide.name)
+				}
+			}
+		}
 		if guide.name == "quickstart" {
 			unfinished := regexp.MustCompile(`(?s)If unfinished,.*?\n\n`).FindString(md + "\n\n")
 			require.Regexp(t, `\bwork\.attention\b`, unfinished)
 			require.Contains(t, unfinished, "work.attention_msg")
-		}
-	}
-}
-
-// Product contract: MCP guidance tells agents to claim with
-// ttl_seconds and renew by claiming again, without if_unowned.
-func TestNativeGuidesSayClaimWithTTL(t *testing.T) {
-	session := connectTestServer(t)
-	listed, err := session.ListTools(t.Context(), nil)
-	require.NoError(t, err)
-	texts := map[string]string{"instructions": session.InitializeResult().Instructions}
-	for _, tool := range listed.Tools {
-		if tool.Name == "kata.claim" {
-			texts["kata.claim"] = tool.Description
-		}
-	}
-	for _, name := range []string{"workflow", "quickstart", "claiming"} {
-		md, ok := SkillMarkdown(name)
-		require.True(t, ok, name)
-		texts[name] = md
-	}
-	for name, text := range texts {
-		require.Contains(t, text, "ttl_seconds", name)
-		require.Contains(t, text, "without if_unowned", name)
-	}
-	for _, name := range []string{"quickstart", "claiming"} {
-		for _, example := range nativeExamples(t, name) {
-			if example.Tool == "kata.claim" {
-				require.Contains(t, example.Arguments, "ttl_seconds", name)
-			}
 		}
 	}
 }

@@ -222,7 +222,7 @@ func registerIssueDiscoveryTools(server *sdkmcp.Server, handlers toolHandlers) {
 func registerIssueMutationTools(server *sdkmcp.Server, handlers toolHandlers) {
 	additive := toolHints(false, false, false)
 	mutating := toolHints(false, true, false)
-	addTool(server, "kata.claim", "Claim issue", "Claim an issue for the bound actor. Without force the call fails when another owner already holds it; force replaces that owner. Pass ttl_seconds to expire the claim, and renew it before expiry by claiming again with ttl_seconds, without if_unowned. A claim that expires while work.attention is ok sets work.attention to needs-human; the next successful claim restores ok, while a needs-human or stuck set on purpose stays.", mutating, handlers.claim)
+	addTool(server, "kata.claim", "Claim issue", "Claim an issue for the bound actor. Without force the call fails when another owner already holds it; force replaces that owner. Pass ttl_seconds to expire the claim, and renew it before expiry by claiming again with ttl_seconds, without if_unowned.", mutating, handlers.claim)
 	addTool(server, "kata.comment", "Add comment", "Append a finding a later reader needs using a required idempotency key. Keep live status in work.attention_msg.", additive, handlers.comment)
 	addTool(server, "kata.create", "Create issue", "Create project work after searching for duplicates. A stable idempotency key is required.", additive, handlers.create)
 	addTool(server, "kata.edit", "Edit issue", "Edit issue fields, ownership, priority, and relationship deltas atomically.", mutating, handlers.edit)

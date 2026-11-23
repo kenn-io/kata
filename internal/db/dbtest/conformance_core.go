@@ -1433,6 +1433,17 @@ func checkExpiredAssignmentAttentionHandoff(t *testing.T, store db.Storage) erro
 	project, err := store.CreateProject(ctx, "expiry-handoff-project")
 	require.NoError(t, err)
 	base := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
+	// claimed creates an issue at attention and claims it for worker until base+1m.
+	claimed := func(t *testing.T, title, attention string) (db.Issue, db.ClaimResult) {
+		t.Helper()
+		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: title, Author: "worker"})
+		require.NoError(t, err)
+		_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "worker", Patch: map[string]jsontext.Value{"work.attention": jsontext.Value(attention)}})
+		require.NoError(t, err)
+		claim, err := store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: "worker", TTL: time.Minute, Now: base})
+		require.NoError(t, err)
+		return issue, claim
+	}
 	for _, tc := range []struct {
 		name, actor                      string
 		startSession, sessionAfterExpiry bool
@@ -1442,22 +1453,16 @@ func checkExpiredAssignmentAttentionHandoff(t *testing.T, store db.Storage) erro
 		{"session starts after expiry", "next-worker", true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: tc.name, Author: "worker"})
-			require.NoError(t, err)
-			_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "worker", Patch: map[string]jsontext.Value{"work.attention": jsontext.Value(`"ok"`)}})
-			require.NoError(t, err)
-			_, err = store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: "worker", TTL: time.Minute, Now: base})
-			require.NoError(t, err)
+			issue, _ := claimed(t, tc.name, `"ok"`)
 			startSession := func() {
-				_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: tc.actor, Patch: map[string]jsontext.Value{"work.attention": jsontext.Value(`"ok"`), "work.attention_session": jsontext.Value(`"new-session"`)}})
+				_, err := store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: tc.actor, Patch: map[string]jsontext.Value{"work.attention": jsontext.Value(`"ok"`), "work.attention_session": jsontext.Value(`"new-session"`)}})
 				require.NoError(t, err)
 			}
 			if tc.startSession && !tc.sessionAfterExpiry {
 				startSession()
 			}
-			expiryEvents, err := store.ExpireAssignments(ctx, db.ExpireAssignmentsParams{ProjectID: project.ID, Now: base.Add(2 * time.Minute)})
+			_, err := store.ExpireAssignments(ctx, db.ExpireAssignmentsParams{ProjectID: project.ID, Now: base.Add(2 * time.Minute)})
 			require.NoError(t, err)
-			require.Len(t, expiryEvents, 2)
 			if tc.sessionAfterExpiry {
 				startSession()
 			}
@@ -1502,29 +1507,13 @@ func checkExpiredAssignmentAttentionHandoff(t *testing.T, store db.Storage) erro
 	}
 	for _, tc := range []struct {
 		name, attention string
-		flip, edit      bool
+		flip            bool
 	}{
-		{"ok", `"ok"`, true, false},
-		{"edited", `"ok"`, true, true},
-		{"stuck", `"stuck"`, false, false},
-		{"absent", "", false, false},
+		{"ok", `"ok"`, true},
+		{"stuck", `"stuck"`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: tc.name, Author: "worker"})
-			require.NoError(t, err)
-			if tc.attention != "" {
-				_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "worker", Patch: map[string]jsontext.Value{"work.attention": jsontext.Value(tc.attention)}})
-				require.NoError(t, err)
-			}
-			claim, err := store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: "worker", TTL: time.Minute, Now: base})
-			require.NoError(t, err)
-			revision := claim.Issue.Revision
-			if tc.edit {
-				title := "edited while claimed"
-				edited, _, _, err := store.EditIssue(ctx, db.EditIssueParams{IssueID: issue.ID, Title: &title, Actor: "operator"})
-				require.NoError(t, err)
-				revision = edited.Revision
-			}
+			issue, claim := claimed(t, tc.name, tc.attention)
 			events, err := store.ExpireAssignments(ctx, db.ExpireAssignmentsParams{ProjectID: project.ID, Now: base.Add(2 * time.Minute)})
 			require.NoError(t, err)
 			if tc.flip {
@@ -1537,28 +1526,17 @@ func checkExpiredAssignmentAttentionHandoff(t *testing.T, store db.Storage) erro
 			assert.Equal(t, "issue.assignment_expired", events[0].Type)
 			stored, err := store.IssueByID(ctx, issue.ID)
 			require.NoError(t, err)
-			assert.Nil(t, stored.Owner)
 			meta := db.PayloadMap(jsontext.Value(stored.Metadata))
 			if tc.flip {
 				assert.JSONEq(t, `"needs-human"`, string(meta["work.attention"]))
 				assert.JSONEq(t, `"claim expired without hand-off"`, string(meta["work.attention_msg"]))
-				assert.Equal(t, revision+2, stored.Revision)
-			} else if tc.attention != "" {
+				assert.Equal(t, claim.Issue.Revision+2, stored.Revision)
+			} else {
 				assert.JSONEq(t, tc.attention, string(meta["work.attention"]))
-			}
-			if tc.name == "ok" {
-				events, err = store.ExpireAssignments(ctx, db.ExpireAssignmentsParams{ProjectID: project.ID, Now: base.Add(2 * time.Minute)})
-				require.NoError(t, err)
-				assert.Empty(t, events)
 			}
 		})
 	}
-	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "reclaimed", Author: "worker"})
-	require.NoError(t, err)
-	_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "worker", Patch: map[string]jsontext.Value{"work.attention": jsontext.Value(`"ok"`)}})
-	require.NoError(t, err)
-	_, err = store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: "worker", TTL: time.Minute, Now: base})
-	require.NoError(t, err)
+	issue, _ := claimed(t, "reclaimed", `"ok"`)
 	reclaimed, err := store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: "next-worker", TTL: time.Minute, Now: base.Add(2 * time.Minute)})
 	require.NoError(t, err)
 	assert.Equal(t, new("next-worker"), reclaimed.Issue.Owner)

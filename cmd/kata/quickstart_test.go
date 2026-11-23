@@ -384,17 +384,15 @@ func TestGuidesSayClaimWithTTL(t *testing.T) {
 var claimCommand = regexp.MustCompile("kata claim [<\\w][^\\n`<#\"]*")
 
 // assertClaimsCarryTTL checks that each matched claim command names --ttl.
-func assertClaimsCarryTTL(t *testing.T, name, text string) []string {
+func assertClaimsCarryTTL(t *testing.T, name, text string) {
 	t.Helper()
-	var commands []string
-	for _, match := range claimCommand.FindAllString(text, -1) {
+	matches := claimCommand.FindAllString(text, -1)
+	assert.NotEmpty(t, matches, name)
+	for _, match := range matches {
 		command := strings.TrimSpace(match)
 		if strings.HasSuffix(command, "[flags]") {
 			continue // the cobra usage line is a synopsis, not a command
 		}
 		assert.Contains(t, command, "--ttl", "%s: %q", name, command)
-		commands = append(commands, command)
 	}
-	assert.NotEmpty(t, commands, name)
-	return commands
 }
