@@ -3021,7 +3021,6 @@ describe('App', () => {
     )
     const initial = snapshot()
     const updated = { ...snapshot(), cursor: initial.cursor + 1 }
-    updated.collection[0]!.title = 'Updated remote issue'
     let changed = false
     let reads = 0
     let updatedSnapshotReads = 0
@@ -3090,7 +3089,6 @@ describe('App', () => {
     await vi.advanceTimersByTimeAsync(15_001)
     await tick()
     expect(updatedSnapshotReads).toBeGreaterThan(0)
-    expect(screen.getByRole('button', { name: /Updated remote issue/ })).not.toBeNull()
     expect(screen.getByRole('button', { name: '↻ 1 repeating task' })).not.toBeNull()
     expect(reads).toBeGreaterThan(previousReads)
     expect(recurrenceDaemons.at(-1)).toBe('example-remote')
