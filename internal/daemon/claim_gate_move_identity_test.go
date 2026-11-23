@@ -148,7 +148,7 @@ func TestRetainedIssueMoveChecksHubBeforeSnapshot(t *testing.T) {
 			require.NoError(t, err)
 			issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "retained", Author: "old-actor"})
 			require.NoError(t, err)
-			hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				switch tc.status {
 				case http.StatusOK:
 					_ = json.MarshalWrite(w, api.ClaimStatusBody{HubNow: time.Now().UTC()})

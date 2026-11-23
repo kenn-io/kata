@@ -27,18 +27,17 @@ func TestLegacyBindingKeepsNewWrongActorQuarantined(t *testing.T) {
 			spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
 			binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
 			require.NoError(t, err)
-			time.Sleep(time.Until(binding.CreatedAt.Add(time.Millisecond)))
 			_, bad, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "wrong actor", Author: "old-actor"})
 			require.NoError(t, err)
-			require.True(t, bad.CreatedAt.After(binding.CreatedAt))
-			if timing != "after rejoin" {
-				createdAt := bad.CreatedAt
-				if timing == "before rejoin" {
-					createdAt = createdAt.Add(time.Millisecond)
-				}
-				_, err = spoke.env.DB.ExecContext(ctx, `UPDATE federation_bindings SET created_at = ? WHERE project_id = ?`, createdAt.UTC().Format(time.RFC3339Nano), binding.ProjectID)
-				require.NoError(t, err)
+			createdAt := bad.CreatedAt
+			switch timing {
+			case "before rejoin":
+				createdAt = createdAt.Add(time.Millisecond)
+			case "after rejoin":
+				createdAt = createdAt.Add(-time.Millisecond)
 			}
+			_, err = spoke.env.DB.ExecContext(ctx, `UPDATE federation_bindings SET created_at = ? WHERE project_id = ?`, createdAt.UTC().Format(time.RFC3339Nano), binding.ProjectID)
+			require.NoError(t, err)
 			binding.Actor = "new-actor"
 			_, err = spoke.env.DB.UpsertFederationBinding(ctx, binding)
 			require.NoError(t, err)
