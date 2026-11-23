@@ -342,14 +342,15 @@ kata ready --unowned
 kata ready --label backend --no-label blocked
 ```
 
-Use `kata claim` in multi-agent work:
+Use `kata claim` with a time limit in multi-agent work:
 
 ```sh
-kata claim abc4
+kata claim abc4 --ttl 2h
 ```
 
 The claim fails if another actor already owns the issue unless `--force` is
-used.
+used. Renew it while you work by claiming again with `--ttl`, without
+`--if-unowned`.
 
 ## Set actor identity
 

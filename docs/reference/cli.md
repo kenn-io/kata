@@ -1222,7 +1222,10 @@ Repeating a temporary claim by the same actor renews its expiry. Repeating a
 permanent claim preserves an existing temporary expiry; omit `--ttl` when
 claiming an unassigned issue to create a permanent assignment. After a timed
 assignment expires, `ready` and `next` treat the issue as unassigned even
-before the cleanup worker records `issue.assignment_expired`.
+before the cleanup worker records `issue.assignment_expired`. When that worker
+expires the claim on an open issue whose `work.attention` is `ok`, it sets
+`work.attention` to `needs-human` and `work.attention_msg` to
+`claim expired without hand-off`.
 
 Use `kata assign <ref> <owner>` to make an existing temporary assignment
 permanent. Closing an issue also removes the expiry and keeps its owner;

@@ -732,7 +732,8 @@ and handles idle runtimes.
 
 When a response needs ownership, a separate branch, or tracked completion,
 a comment-sized task becomes a child issue. Create it with `--parent <ref>`
-and an idempotency key, then have its worker `kata claim` the child. Comments
+and an idempotency key, then have its worker claim the child with
+`kata claim <child> --ttl 2h`. Comments
 record findings and replies; child issues record accountable work. Parent links
 group that work without gating readiness.
 
@@ -851,7 +852,9 @@ kata claim abc4 --if-unowned --ttl 30m --agent
 actor. This lets workers sharing an identity compete for unassigned work. On a
 conflict, run `next` again. A timed assignment becomes eligible for `next`
 again at its expiry. Repeat the claim without `--if-unowned` before then to
-renew it.
+renew it. If the claim expires while `work.attention` is `ok`, Kata sets
+`work.attention` to `needs-human` with `work.attention_msg` set to
+`claim expired without hand-off`.
 
 Check the effective identity, issue status, revision, owner, and lease before
 continuing or handing off work:

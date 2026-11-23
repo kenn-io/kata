@@ -66,9 +66,8 @@ key and arguments. A look-alike refusal means inspect/reuse the returned match;
 force_new is only for genuinely different work. Capture the returned issue ref
 and web_url. Replace spoke-project#abc4 below with that actual qualified ref.
 ` + call("kata.create", `{"project":"spoke-project","title":"Complete example task","body":"Make the requested change and review the result.","idempotency_key":"example-task-create-1"}`) +
-			call("kata.claim", `{"ref":"spoke-project#abc4","if_unowned":true}`) +
-			call("kata.set_metadata", `{"ref":"spoke-project#abc4","patch":{"work.attention":"ok","work.attention_msg":"Implementing the requested change."}}`) + `
-Do the requested work. Record findings useful to the next reader with a new
+			call("kata.claim", `{"ref":"spoke-project#abc4","if_unowned":true,"ttl_seconds":7200}`) +
+			call("kata.set_metadata", `{"ref":"spoke-project#abc4","patch":{"work.attention":"ok","work.attention_msg":"Implementing the requested change."}}`) + "\n" + MCPClaimRules + `Do the requested work. Record findings useful to the next reader with a new
 stable comment key; keep your own attention fields current. Read delegated
 work.* without writing it. Stamp work.branch once when using a dedicated branch.
 ` + call("kata.comment", `{"ref":"spoke-project#abc4","body":"The requested change also affects the settings page; review it there.","idempotency_key":"example-task-finding-1"}`) +
@@ -105,10 +104,10 @@ Use returned web_url values for links rather than constructing URLs.
 Load kata.load_issue_discovery and refresh for next/ready/show. Inspect an issue
 before claiming. Load kata.load_issue_mutation and refresh for claim.
 ` + call("kata.next", `{"project":"spoke-project","unowned":true}`) +
-			call("kata.claim", `{"ref":"spoke-project#abc4","if_unowned":true}`) + `
+			call("kata.claim", `{"ref":"spoke-project#abc4","if_unowned":true,"ttl_seconds":7200}`) + `
 A current owner conflict is not permission to force takeover. if_unowned is an
-atomic claim guard. ttl_seconds may bound a claim from 60 to 86400 seconds.
-Load kata.load_coordination and refresh to release only the expected owner.
+atomic claim guard for the first claim. ttl_seconds runs from 60 to 86400.
+` + MCPClaimRules + `Load kata.load_coordination and refresh to release only the expected owner.
 ` + call("kata.unassign", `{"ref":"spoke-project#abc4","expected_owner":"example-agent"}`) + `
 Maintain your own work.attention (ok, stuck, needs-human) and work.attention_msg.
 Read sibling work.* without writing it; ignore work.* on closed issues.

@@ -8,6 +8,12 @@ work: leave the issue open, update work.attention and work.attention_msg and
 set the needs-review label.
 `
 
+// MCPClaimRules is ClaimRules in tool terms.
+const MCPClaimRules = `Claim with kata.claim and ttl_seconds. Renew by calling it again with
+ttl_seconds, without if_unowned. If it runs out while work.attention is ok,
+Kata sets it to needs-human.
+`
+
 // MCPContract is the compact bootstrap for clients that have tools and a file
 // editor, but no shell. Richer guidance is fetched from kata.skills on demand.
 const MCPContract = `This workspace tracks real changes in Kata through the connected Kata MCP
@@ -25,10 +31,10 @@ otherwise kata.create with a stable idempotency_key. Link related work or a
 parent. A look-alike refusal means inspect/reuse the match; force_new is only
 for genuinely different work. Only create real work the user requested.
 
-Claim your issue with kata.claim. Keep your own work.attention and
-work.attention_msg current through kata.set_metadata. Stamp a dedicated
-work.branch once. Only write your own work.*; ignore it on closed issues. Do
-not take over a sibling's issue or metadata. If blocked, explain what is needed.
+` + MCPClaimRules + `Keep your own work.attention and work.attention_msg current through
+kata.set_metadata. Stamp a dedicated work.branch once. Only write your own
+work.*; ignore it on closed issues. Do not take over a sibling's issue or
+metadata. If blocked, explain what is needed.
 
 ` + MCPCommentRules + `
 

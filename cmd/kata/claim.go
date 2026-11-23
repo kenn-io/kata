@@ -24,9 +24,12 @@ func newClaimCmd() *cobra.Command {
 the client-selected actor when present. Use kata status <ref> to check the
 effective actor and current owner; kata whoami shows only the client-selected actor.
 Refuses when another actor owns it unless --force.
---ttl releases the claim after 1m-24h.
+--ttl releases the claim after 1m-24h. Renew it while you work by claiming
+again with --ttl, without --if-unowned. If a timed claim runs out while the
+issue's attention is ok, Kata marks it needs-human.
 kata assign sets a different owner; kata unassign --expect-owner releases.`,
-		Example: `  kata claim abc4 --agent
+		Example: `  kata claim abc4 --ttl 2h --agent
+  kata claim abc4 --ttl 2h --agent  # renew
   kata claim abc4 --if-unowned --ttl 2h --agent`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

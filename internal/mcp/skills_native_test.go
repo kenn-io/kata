@@ -98,7 +98,7 @@ func TestNativeGuideExamplesMatchCatalog(t *testing.T) {
 	}
 	md, _ := SkillMarkdown("workflow")
 	require.Contains(t, md, agentguide.MCPContract)
-	require.LessOrEqual(t, len(agentguide.MCPContract), 2000)
+	require.LessOrEqual(t, len(agentguide.MCPContract), 2100)
 }
 
 // An MCP-only client follows the published quickstart using fixture state.
@@ -175,6 +175,36 @@ func TestNativeGuidesSayCommentsCarryFindings(t *testing.T) {
 			unfinished := regexp.MustCompile(`(?s)If unfinished,.*?\n\n`).FindString(md + "\n\n")
 			require.Regexp(t, `\bwork\.attention\b`, unfinished)
 			require.Contains(t, unfinished, "work.attention_msg")
+		}
+	}
+}
+
+// Product contract (kata#6ahr): MCP guidance tells agents to claim with
+// ttl_seconds and renew by claiming again, without if_unowned.
+func TestNativeGuidesSayClaimWithTTL(t *testing.T) {
+	session := connectTestServer(t)
+	listed, err := session.ListTools(t.Context(), nil)
+	require.NoError(t, err)
+	texts := map[string]string{"instructions": session.InitializeResult().Instructions}
+	for _, tool := range listed.Tools {
+		if tool.Name == "kata.claim" {
+			texts["kata.claim"] = tool.Description
+		}
+	}
+	for _, name := range []string{"workflow", "quickstart", "claiming"} {
+		md, ok := SkillMarkdown(name)
+		require.True(t, ok, name)
+		texts[name] = md
+	}
+	for name, text := range texts {
+		require.Contains(t, text, "ttl_seconds", name)
+		require.Contains(t, text, "without if_unowned", name)
+	}
+	for _, name := range []string{"quickstart", "claiming"} {
+		for _, example := range nativeExamples(t, name) {
+			if example.Tool == "kata.claim" {
+				require.Contains(t, example.Arguments, "ttl_seconds", name)
+			}
 		}
 	}
 }

@@ -87,7 +87,7 @@
           <figcaption class="term-title"><span>the operating loop</span><span>local daemon · no network</span></figcaption>
           <pre><code><span class="ps1">$</span> <span class="cmd">kata next --unowned --agent</span>
 <span class="ok">OK</span> <span class="out">next issue=abc4 priority=1 title="fix login race"</span>
-<span class="ps1">$</span> <span class="cmd">kata claim abc4 --agent</span>
+<span class="ps1">$</span> <span class="cmd">kata claim abc4 --ttl 2h --agent</span>
 <span class="ok">OK</span> <span class="out">claim abc4</span>
 <span class="ps1">$</span> <span class="cmd">kata comment abc4 --body-stdin &lt;&lt;-'EOF'
 	root cause: double submit in Safari callback

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"os/exec"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -200,7 +201,7 @@ func TestQuickstart_ContractPrintsManagedWorkflowWithoutMarkers(t *testing.T) {
 	assert.Equal(t, agentContractText, out, "contract format prints the injected contract without markers or framing")
 	// Hooks inject this text into every session in a kata workspace. Keep it
 	// to the single-agent core; coordination detail belongs in kata quickstart.
-	assert.LessOrEqual(t, len(out), 2000, "keep the per-session contract compact")
+	assert.LessOrEqual(t, len(out), 2200, "keep the per-session contract compact")
 }
 
 // The contract is rendered into other projects' AGENTS.md files, so it must
@@ -358,4 +359,50 @@ func assertClosedBodyStdinHeredoc(t *testing.T, name, text string) {
 	if found == 0 {
 		t.Errorf("%s: no --body-stdin <<-'EOF' example", name)
 	}
+}
+
+// Product contract (kata#6ahr): every CLI guide tells agents to claim with a
+// time limit and renew it by claiming again with --ttl, without --if-unowned.
+func TestGuidesSayClaimWithTTL(t *testing.T) {
+	guides := map[string]string{}
+	for _, format := range []string{"human", "agent", "json", "contract"} {
+		resetFlags(t)
+		guides["quickstart "+format] = string(executeRoot(t, newRootCmd(), "quickstart", "--format", format))
+	}
+	for _, args := range [][]string{{"--help"}, {"claim", "--help"}} {
+		resetFlags(t)
+		guides[strings.Join(args, " ")] = string(executeRoot(t, newRootCmd(), args...))
+	}
+	guides["init block"] = agentsManagedBlock()
+	resetFlags(t)
+	assignHelp := string(executeRoot(t, newRootCmd(), "assign", "--help"))
+	assert.Contains(t, assignHelp, "kata claim <ref> --ttl 2h")
+	guides["assign --help"] = assignHelp
+	for name, text := range guides {
+		assertClaimsCarryTTL(t, name, text)
+		if name != "assign --help" {
+			assert.Contains(t, text, "without --if-unowned", name)
+		}
+	}
+	assert.Contains(t, guides["claim --help"], "needs-human")
+	assert.Contains(t, guides["claim --help"], "kata claim abc4 --ttl 2h --agent  # renew")
+}
+
+var claimCommand = regexp.MustCompile("kata claim [<\\w][^\\n`<#\"]*")
+
+// assertClaimsCarryTTL checks every kata claim command, not prose such as
+// "kata claim fails if", names --ttl. It reports the commands it found.
+func assertClaimsCarryTTL(t *testing.T, name, text string) []string {
+	t.Helper()
+	var commands []string
+	for _, match := range claimCommand.FindAllString(text, -1) {
+		command := strings.TrimSpace(match)
+		if strings.HasSuffix(command, "[flags]") {
+			continue // the cobra usage line is a synopsis, not a command
+		}
+		assert.Contains(t, command, "--ttl", "%s: %q", name, command)
+		commands = append(commands, command)
+	}
+	assert.NotEmpty(t, commands, name)
+	return commands
 }
