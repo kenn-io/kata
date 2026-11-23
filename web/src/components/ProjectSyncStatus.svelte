@@ -121,7 +121,7 @@
         },
         escapeFocus: () => trigger?.querySelector('button'),
       }),
-      autoReposition(() => [panel], position),
+      autoReposition(() => [panel, trigger?.closest('.kit-page-header__trailing')], position),
     ]
     return () => cleanups.forEach((cleanup) => cleanup())
   })
@@ -341,7 +341,7 @@
                 </div>
               {/if}
               <span class="sync-note"
-                >Needs a Kata CLI newer than 0.23.0 unless you own this server.</span
+                >Project readers need daemon API 0.49.0 or later.</span
               >
             </div>
           {/if}

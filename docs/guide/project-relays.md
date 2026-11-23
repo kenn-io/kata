@@ -153,13 +153,13 @@ kata federation bridge status --project shared-replica --json
 kata federation status --json
 ```
 
-Bridge status reads locally recorded state; `connected` is not a fresh hub
-health check. Inspect sync timestamps and pending work before treating the
-replicas as caught up. Use `--agent` for concise agent output, or `--json` when
-a script needs the full diagnostics. The web project's sync summary refreshes
-its recorded state every 30 seconds while the tab is visible and when you return.
-To read it now, open the project's sync chip in the project header and use
-**Refresh** in its panel.
+Bridge status reads locally recorded state, and a `connected` status is not a
+fresh hub health check. Inspect sync timestamps and pending work before you
+treat the replicas as caught up. Use `--agent` for concise agent output, or
+`--json` when a script needs the full diagnostics. In the web UI, the project's
+sync summary refreshes its recorded state every 30 seconds while the tab is
+visible and when you return to it. Open the sync chip in the project header and
+click **Refresh** in its panel to read it now.
 
 To bind a workspace to the replica after connecting, run
 `kata init --project shared-replica` in that workspace. In identity mode, use

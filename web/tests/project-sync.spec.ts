@@ -2,6 +2,48 @@ import { spawnSync } from 'node:child_process'
 
 import { expect, test, type BrowserCredentials } from './fixtures'
 
+test('keeps the sync panel aligned when the task count grows', async ({
+  page,
+  diagnosticKata: kata,
+}) => {
+  await kata.prepareSyncDiagnostic()
+  const credentials = await kata.launch(page, `/kata?scope=${kata.projectUID}`)
+  const login = await page.request.post(`${kata.origin}/api/v1/ui/session/login`, {
+    headers: { Origin: kata.origin },
+    data: { token: 'example-local-token', return_path: '/kata' },
+  })
+  const owner = (await login.json()) as BrowserCredentials
+  expect(
+    (
+      await kata.request(
+        page,
+        owner,
+        'POST',
+        `/api/v1/projects/${kata.projectID}/federation/enable`,
+        { actor: 'example-owner' },
+      )
+    ).ok(),
+  ).toBe(true)
+  kata.recordSyncDiagnosticError()
+  for (let i = 0; i < 9; i++) await kata.seedIssue(page, credentials, { title: `Task ${i}` })
+  await page.reload()
+  const chip = page.getByRole('button', { name: 'Sync failed' })
+  const panel = page.getByRole('dialog', { name: 'Project sync' })
+  await expect(page.getByText('9 tasks', { exact: true })).toBeVisible()
+  await chip.click()
+  const before = await chip.boundingBox()
+  await kata.seedIssue(page, credentials, { title: 'Task 9' })
+  await expect(page.getByText('10 tasks', { exact: true })).toBeVisible()
+  await expect
+    .poll(async () => {
+      const button = await chip.boundingBox()
+      const dialog = await panel.boundingBox()
+      return button && dialog ? Math.abs(button.x - dialog.x) : Infinity
+    })
+    .toBeLessThan(1)
+  expect((await chip.boundingBox())?.x).not.toBe(before?.x)
+})
+
 test('project readers see sync diagnostics with bounded embedding summaries at narrow widths', async ({
   page,
   diagnosticKata: kata,

@@ -125,7 +125,7 @@ select **Stop repeating**. Tasks the rule already created stay in the project.
 For a synced project, open the sync chip in the project header to see waiting
 changes, sync details, and a command for diagnosing a failed sync.
 
-When a close saved a
+When a close saves a
 [closing-session reference](../reference/configuration.md#closing-session-transcripts),
 the issue's events show `Session: <agent> <id>`, linked when a URL was saved.
 See the configuration reference for API and AgentsView compatibility.
