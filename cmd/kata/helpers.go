@@ -59,7 +59,7 @@ func resolveBody(b BodySources, stdin io.Reader) (string, error) {
 		count++
 	}
 	if count > 1 {
-		return "", errors.New("must pass exactly one of --body, --body-file, --body-stdin")
+		return "", &cliError{Message: "must pass exactly one of --body, --body-file, --body-stdin", Kind: kindUsage, ExitCode: ExitUsage}
 	}
 	switch {
 	case b.BodySet:
@@ -68,7 +68,7 @@ func resolveBody(b BodySources, stdin io.Reader) (string, error) {
 		//nolint:gosec // user-supplied path is the whole point of --body-file
 		bs, err := os.ReadFile(b.File)
 		if err != nil {
-			return "", fmt.Errorf("read %s: %w", b.File, err)
+			return "", &cliError{Message: fmt.Sprintf("read %s: %v", b.File, err), Kind: kindValidation, ExitCode: ExitValidation}
 		}
 		return strings.TrimRight(string(bs), "\n"), nil
 	case b.Stdin:
@@ -77,7 +77,7 @@ func resolveBody(b BodySources, stdin io.Reader) (string, error) {
 		}
 		var buf bytes.Buffer
 		if _, err := io.Copy(&buf, stdin); err != nil {
-			return "", fmt.Errorf("read stdin: %w", err)
+			return "", &cliError{Message: fmt.Sprintf("read stdin: %v", err), Kind: kindValidation, ExitCode: ExitValidation}
 		}
 		return strings.TrimRight(buf.String(), "\n"), nil
 	default:
