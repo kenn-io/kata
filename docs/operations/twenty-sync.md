@@ -1,27 +1,31 @@
 ---
 title: Twenty sync
 description: Mirror Twenty workspace tasks into native Kata issues with self-hosted support and optional two-way status sync.
-last_edited: 2026-10-08
+last_edited: 2026-11-20
 ---
 
 # Twenty sync
 
-Twenty sync mirrors the built-in tasks in one Twenty workspace into one Kata
-project. The daemon polls every five minutes by default. Imports remain native
-issues: local comments, evidence, relationships, and edits use ordinary Kata
-commands. Status is incoming-only until you enable `--status-sync=two-way`.
+Twenty sync mirrors the built-in tasks from one Twenty workspace into one Kata
+project. By default, the daemon polls every five minutes. Imported tasks become
+native Kata issues, and you can add comments, evidence, relationships, and edits
+with ordinary Kata commands. Status updates flow only from Twenty into Kata
+until you enable `--status-sync=two-way`.
 
 ## Credentials and instances
 
-Create an API key in the source Twenty workspace. It must read workspace and
-object metadata and built-in task records. Two-way mode also requires permission
-to update task status. Supply the key to the daemon process, for example through
-its service environment as `KATA_TWENTY_TOKEN`. Client workstations need no Twenty
-key. The key value is never stored in project configuration or sync bindings.
+1. Create an API key in the source Twenty workspace. The key needs permission to
+   read workspace metadata, object metadata, and built-in task records. If you
+   plan to use two-way mode, also grant permission to update task status.
+2. Provide the key to the daemon process, for example by setting
+   `KATA_TWENTY_TOKEN` in its service environment. Client workstations do not
+   need a Twenty key, and Kata never stores the key value in project
+   configuration or sync bindings.
 
-Cloud defaults are `https://api.twenty.com` for API calls and
-`https://app.twenty.com` for attribution links. For a self-hosted instance, put
-this in the daemon's `<KATA_HOME>/config.toml` and restart the daemon:
+For Twenty Cloud, Kata defaults to `https://api.twenty.com` for API requests and
+`https://app.twenty.com` for attribution links. For a self-hosted Twenty
+instance, add this section to the daemon's `<KATA_HOME>/config.toml` and restart
+the daemon:
 
 ```toml
 [twenty_sync]
@@ -30,13 +34,16 @@ web_origin = "https://twenty.example"
 token_env = "EXAMPLE_TWENTY_TOKEN"
 ```
 
-A self-hosted API origin is also the default web origin when `web_origin` is
-omitted. Origins must be root HTTPS origins; HTTP is accepted only for literal
-loopback IPs. Paths, credentials, queries, and fragments are rejected. Every API
-request uses the configured API origin and a credential captured for that run;
-redirects are rejected. Binding requests cannot supply keys or change origins.
+If you omit `web_origin`, Kata uses the self-hosted `api_origin` as the web
+origin too. Both origins must be root HTTPS origins, with HTTP allowed only for
+literal loopback IPs. Kata rejects paths, credentials, queries, and fragments in
+origin values. Every API request uses the configured API origin and a credential
+captured for that run, and Kata rejects redirects. Binding requests cannot
+supply keys or change origins.
 
 ## Enable and operate
+
+Run these commands to enable, inspect, or pause Twenty sync:
 
 ```sh
 kata sync twenty enable
@@ -47,17 +54,19 @@ kata --json sync twenty status
 kata sync twenty disable
 ```
 
-Enable discovers the workspace UUID from the API key and validates the task
-schema before saving. Global `--workspace` and `--project` select the native
-Kata workspace/project. There is no source workspace flag: the authenticated
-Twenty workspace is the source. A binding's API origin and workspace UUID are
-immutable. Rotating the key to another workspace fails before import or status
-writes, even when both workspaces use the same origin.
+When you run `enable`, Kata discovers the workspace UUID from the API key and
+validates the task schema before saving the binding. Use the global
+`--workspace` and `--project` flags to select the native Kata workspace and
+project. There is no source workspace flag; the authenticated Twenty workspace
+is the source. Once saved, a binding's API origin and workspace UUID cannot
+change. If you rotate the key to a different workspace, sync fails before any
+import or status write, even if both workspaces share the same origin.
 
-One external issue-sync binding owns each native project. Twenty, Plane,
-Notion, and GitHub bindings cannot replace each other, including after disable.
-Use another Kata project for another source. Federation spokes receive imports
-through their hub; enable Twenty on the hub.
+Each native Kata project can have only one external issue-sync binding. Twenty,
+Plane, Notion, and GitHub bindings cannot replace each other, even after you
+disable one. To sync another source, use another Kata project. If you use
+federation spokes, they receive imports from their hub, and you enable Twenty
+sync on the hub.
 
 | Enable option | Behavior |
 | --- | --- |
@@ -69,28 +78,30 @@ through their hub; enable Twenty on the hub.
 | `--open-status` | API option value selected for reopen writes; initially `TODO`. Must be classified open. |
 | `--open-statuses` | Comma-separated API option values classified open; initially `TODO,IN_PROGRESS`. |
 
-Re-enable preserves omitted options. Dates mean midnight UTC, timestamp offsets
-normalize to UTC, and fractional seconds are rejected. Custom statuses use API
-option values rather than display labels:
+Re-enabling keeps any options you omit. Date values mean midnight UTC, timestamp
+offsets normalize to UTC, and Kata rejects fractional seconds. For custom
+statuses, pass the API option values rather than their display labels:
 
 ```sh
 kata sync twenty enable --status-sync=two-way \
   --closed-status COMPLETE --open-status READY --open-statuses READY,ACTIVE
 ```
 
-Every live status option must have an unambiguous classification. The closed
-value cannot also be open, and open values must be distinct and nonempty. Null
-status maps to open. Unknown values fail the run rather than guessing a closure.
-Two-way enable requires both write targets in the live schema. One-way mode may
-retain removed targets as long as every current option remains classified.
+Every live status option in Twenty must have an unambiguous classification. The
+closed value cannot also appear as an open value, and open values must be
+distinct and nonempty. A null status maps to open. If Kata sees an unknown
+status value, it fails the run instead of guessing whether the task is closed.
+Enabling two-way mode requires both write targets to exist in the live schema.
+In one-way mode, a binding may keep removed targets as long as every current
+option stays classified.
 
-Changes to `closed_status`, `open_statuses`, cutoff, or title presentation reset
-the content cursor. Changing only interval, status direction, or `open_status`
-preserves it. The cursor records successful run starts for diagnostics. Each run
-traverses the complete collection and skips tasks updated at or before the
-cutoff before checking their content, so an older task with unsupported rich
-text cannot block newer imports. Pagination is eventual polling rather than an
-atomic Twenty snapshot.
+Changing `closed_status`, `open_statuses`, the cutoff, or title presentation
+resets the content cursor. Changing only the interval, status direction, or
+`open_status` keeps the cursor intact. The cursor records successful run starts
+for diagnostics. Each run reads the entire collection and skips tasks updated at
+or before the cutoff before inspecting their content, so an older task with
+unsupported rich text cannot block newer imports. Pagination uses eventual
+polling rather than an atomic Twenty snapshot.
 
 ## Mapping and local edits
 
@@ -104,73 +115,86 @@ atomic Twenty snapshot.
 | `createdBy.workspaceMemberId` | Author `twenty:<UUID>`, or `twenty-unknown` when absent. |
 | Source timestamps | UTC timestamps normalized to persisted milliseconds. |
 
-External member identities are not mapped automatically to local users. Title,
-body, and owner update only when source timestamps are strictly newer than the
-native issue. Equal or older imports preserve local scalar edits. Imported
-priority is unset, so a newer content import clears local priority. Title-prefix
-changes refresh source-owned titles at the same source version while preserving
-local title edits. The source label can refresh independently; local labels stay
-intact. Ordinary external-root ownership protections also apply.
+Kata does not map external member identities to local users automatically.
+Title, body, and owner update only when Twenty's timestamps are strictly newer
+than the native issue, and equal or older imports keep your local scalar edits.
+Imported priority is unset, so a newer content import clears any local priority.
+Changing the title prefix refreshes source-owned titles at the same source
+version while keeping local title edits. The source label can refresh on its
+own, and local labels stay intact. Ordinary external-root ownership protections
+also apply.
 
-Two-way status observations are independent of content timestamps and cutoff,
-so they preserve local title/body/owner/priority edits. One-way status arrives
-with content imports. Same-state observations preserve native closure evidence.
-Deleted or unavailable tasks stay local; absence never closes or deletes an
-imported issue. Dates, comments, relationships, attachments, other objects, and
-outbound fields other than status are outside this integration.
+Two-way status observations do not depend on content timestamps or the cutoff,
+so they keep your local title, body, owner, and priority edits. In one-way mode,
+status arrives with content imports. Same-state observations keep native closure
+evidence. Deleted or unavailable tasks remain in Kata, and absence never closes
+or deletes an imported issue. Dates, comments, relationships, attachments, other
+objects, and outbound fields other than status are outside this integration.
 
-The task object must expose active `title` TEXT, `bodyV2` RICH_TEXT, and `status`
-SELECT fields. Legacy body-only schemas are unsupported. A null body is empty;
-nonempty blocknote content without Markdown on a task after the cutoff fails
-content preparation instead of silently dropping it. Status-only reads can still
-deliver pending changes when content conversion fails.
+Your Twenty task object must expose active `title` TEXT, `bodyV2` RICH_TEXT, and
+`status` SELECT fields. Legacy body-only schemas are not supported. A null body
+imports as empty, while nonempty blocknote content without Markdown on a task
+after the cutoff fails content preparation instead of dropping the content
+silently. Status-only reads can still deliver pending changes when content
+conversion fails.
 
 ## Two-way status and recovery
 
-Only explicit Kata close/reopen events accepted while two-way is configured
-queue writes. Initial opt-in produces no bulk outbound changes. A close selects
-`closed_status`; reopen selects `open_status`. An already matching open substate,
-such as `IN_PROGRESS`, is preserved. Pending local intent wins until a fresh
-readback verifies delivery for that exact event. Writes change only task status.
+Only explicit Kata close and reopen events accepted while two-way mode is active
+queue outbound writes. Opting into two-way mode does not send bulk changes for
+existing issues. A close writes `closed_status`, and a reopen writes
+`open_status`. If the task is already in a matching open substate, such as
+`IN_PROGRESS`, Kata leaves it there. Pending local intent wins until a fresh
+readback verifies delivery for that exact event. Outbound writes change only
+task status.
 
-PATCH is attempted once and never blindly retried. A lost reply or failed
-readback retains pending intent; a later scan checks the current state before
-writing again. Missing/deleted tasks, mismatched workspace identity, unsupported
-metadata, or removed targets block delivery and retain intent. Status shows the
-mode, pending count, and sanitized error; `once` reports incoming status updates
-separately from content import counts.
+Kata attempts each `PATCH` once and never retries it blindly. If a reply is lost
+or readback fails, Kata keeps the pending intent, and a later scan checks the
+current state before writing again. Missing or deleted tasks, a mismatched
+workspace identity, unsupported metadata, or removed targets block delivery and
+keep the pending intent. Run `kata sync twenty status` to see the mode, pending
+count, and sanitized error. `kata sync twenty once` reports incoming status
+updates separately from content import counts.
 
-Disable pauses polling and delivery while retaining mappings and pending intent.
-Returning to one-way cancels pending writes, including when a retained target has
-been removed. JSONL restore clears private observations and pending intent and
-leaves polling disabled until explicit re-enable.
+Disabling pauses polling and delivery while keeping mappings and pending intent.
+Switching back to one-way mode cancels pending writes, even when a retained
+target has been removed. A JSONL restore clears private observations and pending
+intent and leaves polling disabled until you explicitly re-enable it.
 
 ## Progress and bounds
 
-Live phases are `workspace`, `schema`, `tasks`, `content`, `importing`, and
-`finalizing`. A zero total means unknown. Manual and scheduled runs share durable claims, pacing,
-progress, and committed-event delivery. A second run conflicts while one is
-active. Disable/re-enable fences the earlier binding snapshot; the existing
-claim remains until the worker retires or the 30-minute stale-claim horizon
-allows recovery.
+Live sync phases are `workspace`, `schema`, `tasks`, `content`, `importing`, and
+`finalizing`. A total of zero means the count is unknown. Manual and scheduled
+runs share durable claims, pacing, progress, and committed-event delivery, and a
+second run conflicts while one is active. Disabling or re-enabling fences the
+earlier binding snapshot, while the existing claim remains until the worker
+retires or the 30-minute stale-claim horizon allows recovery.
 
-Runs have a 20-minute deadline, requests a 30-second timeout, and enable
-validation a two-minute deadline. All bindings share at most one request per
-second per daemon. Each run checks workspace identity and loads task metadata
-once, so a status read then costs one request and a status write three: read,
-PATCH, and verified readback. Read requests allow four attempts for HTTP
-429/server errors; `Retry-After` cooldowns are capped at 20 minutes. Bindings
-run serially, so a slow workspace delays others.
+Each run has a 20-minute deadline, each request has a 30-second timeout, and
+enable validation has a two-minute deadline. All bindings on a daemon share a
+limit of at most one request per second. Each run checks workspace identity and
+loads task metadata once, so a status read then costs one request and a status
+write costs three requests: read, `PATCH`, and verified readback. Read requests
+allow four attempts for HTTP 429 and server errors, and `Retry-After` cooldowns
+are capped at 20 minutes. Bindings run serially, so a slow workspace delays
+others.
 
-Limits are 10,000 tasks/metadata records, 1,000 pages per collection, 8 MiB per
-response, 128 MiB raw responses per collection, 1 MiB task Markdown, and 64 MiB
-serialized import items. These are failure guards rather than supported-size
-promises. Incomplete fields, duplicate identities, repeated/missing cursors, and
-exceeded bounds fail preparation before any content import. Metadata object and
-field collections paginate separately.
+Each sync run enforces these limits as failure guards rather than supported-size
+promises: 10,000 tasks or metadata records, 1,000 pages per collection, 8 MiB per
+response, 128 MiB of raw responses per collection, 1 MiB of Markdown per task,
+and 64 MiB of serialized import items. Incomplete fields, duplicate identities,
+repeated or missing cursors, and exceeded bounds fail preparation before any
+content import starts. Metadata object and field collections paginate
+separately.
 
-For credential errors, check the selected environment variable in the daemon's
-service environment. For mapping errors, inspect API option values and re-enable
-with a complete classification. For instance compatibility errors, check the
-required metadata and core task fields above. Failed runs retain native issues,
-pending intent, and the last successful cursor for the next attempt.
+When troubleshooting a failed run, start with the error category:
+
+- **Credential errors.** Check the selected environment variable in the daemon's
+  service environment.
+- **Mapping errors.** Inspect your API option values in Twenty and re-enable
+  with a complete classification.
+- **Instance compatibility errors.** Verify the required metadata and core task
+  fields listed above.
+
+Failed runs keep your native issues, pending intent, and the last successful
+cursor for the next attempt.

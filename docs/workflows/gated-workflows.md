@@ -1,31 +1,33 @@
 ---
 title: Gated workflows
 description: "Coordinate agent steps and human approval with issue dependencies."
-last_edited: 2026-11-01
+last_edited: 2026-11-20
 ---
 
 # Gated workflows
 
-Use a parent issue for one run and child issues for its stages. Connect the
-stages with `--blocked-by`, then have automated workers take unowned ready
-stages. A person owns the approval stage and closes it after reviewing the output.
+You can model a gated workflow with a parent issue for the run and child issues
+for each stage. Link the stages in order with `--blocked-by`, then have
+automated workers pick up unowned ready stages. A person owns the approval stage
+and closes it after reviewing the output.
 
-This is a team convention built from ordinary issues, so Kata does not enforce
-the gate:
+Because this is a team convention built from ordinary issues, Kata does not
+enforce the gate itself:
 
-- Dependencies filter the ready queue. They do not prevent anyone from
+- Dependencies filter the ready queue, but they do not stop anyone from
   claiming, editing, or closing a blocked issue.
-- Ownership records who should approve. It does not restrict approval to a human.
+- Ownership records who should approve a stage, without restricting approval to
+  a human.
 - Any closed blocker releases the next stage, including `wontfix` and
-  `superseded` closes. If approval is refused, park or cancel downstream work
-  before closing the gate.
+  `superseded` closes. If a reviewer rejects the output, park or cancel
+  downstream work before closing the gate.
 
 ## Create a three-stage run
 
-Run these commands in the intended [workspace and project](../guide/workspaces-projects.md).
-The example uses `jq` to capture issue refs. Choose a new run key for each run;
-retry the same create request with its original key if a response is lost.
-Creation keys are retained for seven days.
+Run these commands in the [workspace and project](../guide/workspaces-projects.md)
+you want to use. The example uses `jq` to capture issue refs. Pick a new run key
+for each run; if a response is lost, retry the same create request with its
+original key. Kata retains creation keys for seven days.
 
 ```sh
 run=$(kata create 'Review run' --idempotency-key run-1 --json | jq -r .issue.short_id)
@@ -35,34 +37,35 @@ publish=$(kata create 'Publish summary' --parent "$run" --blocked-by "$approval"
 kata ready --label stage --agent
 ```
 
-The `ready --label stage` commands here inspect all ready stages with that label,
-including the reviewer-owned approval. Output from a disposable project (your refs
-will differ):
+The `ready --label stage` commands on this page inspect all ready stages with
+that label, including the reviewer-owned approval. Here is sample output from a
+disposable project (your refs differ):
 
 ```text
 OK ready count=1
 - issue=bvpb title="Draft brief" labels=stage
 ```
 
-`--parent` groups the stages; it does not order them. `--blocked-by` orders
-them; `kata edit "$draft" --blocks "$approval"` expresses the same dependency.
-The `stage` label keeps the parent out of this queue. In a shared project,
-use a label unique to the run to keep other runs out too. Future schedules and
-`someday` also exclude issues from readiness; a deadline does not.
+`--parent` groups the stages together without ordering them, while
+`--blocked-by` sets the sequence (you can express the same dependency with
+`kata edit "$draft" --blocks "$approval"`). The `stage` label keeps the parent
+issue out of this queue; in a shared project, add a label unique to the run to
+keep other runs' issues out of the queue too. Future schedules and `someday`
+also keep issues out of the ready queue, while deadlines do not.
 
-Automated workers select only unowned stages, leaving the assigned approval
-with the reviewer:
+Automated workers pull only unowned stages, which leaves the assigned approval
+stage for the reviewer:
 
 ```sh
 kata ready --unowned --label stage --agent
 ```
 
-Follow [Claim work](agents.md#claim-work) when taking a stage.
+When claiming a stage, follow [Claim work](agents.md#claim-work).
 
 ## Work, review, then continue
 
-1. The first worker writes and checks the brief, then closes its stage with
-   evidence. Here the output is a small text file:
+1. Have the first worker write and check the brief, then close its stage with
+   evidence. In this example, the output is a small text file:
 
    ```sh
    printf 'Brief: publish a summary of the reviewed example.\n' > brief.txt
@@ -77,11 +80,11 @@ Follow [Claim work](agents.md#claim-work) when taking a stage.
    - issue=5ybd owner=reviewer title="Approve brief" labels=stage
    ```
 
-2. Ask the reviewer to read `brief.txt`. Leave the approval issue open while
-   waiting, and do not attach an execute job to this stage. Assignment records
-   responsibility; workers must honor the agreed human gate themselves.
+2. Ask the reviewer to read `brief.txt`. Leave the approval issue open while you
+   wait, and do not attach an execute job to it. Assignment records who is
+   responsible, and workers must honor the agreed human gate themselves.
 
-   Record why the stage is waiting and send the request to the reviewer's inbox:
+   Record why the stage is waiting and send a request to the reviewer's inbox:
 
    ```sh
    kata meta set "$approval" work.attention needs-human
@@ -89,14 +92,15 @@ Follow [Claim work](agents.md#claim-work) when taking a stage.
    kata notify "$approval" --to reviewer --message 'Please review brief.txt before publication.'
    ```
 
-   A worker that needs the approval can block until the reviewer closes it:
+   If a worker needs the approval before continuing, it can wait until the
+   reviewer closes the issue:
 
    ```sh
    kata wait "$approval" --until closed --timeout 30m
    ```
 
-   After approving, the reviewer closes the approval issue using their
-   configured identity:
+   Once the reviewer approves the brief, they close the approval issue under
+   their configured identity:
 
    ```sh
    kata close "$approval" --done \
@@ -110,7 +114,7 @@ Follow [Claim work](agents.md#claim-work) when taking a stage.
    - issue=vg9q title="Publish summary" labels=stage
    ```
 
-3. The next worker writes and checks the summary, then closes its stage:
+3. Have the next worker write and check the summary, then close its stage:
 
    ```sh
    printf 'Summary: the reviewed example is ready to share.\n' > summary.txt
@@ -125,12 +129,13 @@ Follow [Claim work](agents.md#claim-work) when taking a stage.
    ```
 
 A `--done` close requires a message of at least 40 characters and typed evidence:
-`commit:`, `pr:`, `test:`, `reviewed-paths:`, or `external:`. Shortcuts include
-`--commit`, `--pr`, `--test`, and `--reviewed`. Kata validates evidence structure;
-it does not run the recorded test or verify the artifact's contents. Record
-what you actually checked. See [closing issues](../reference/cli.md#issue-lifecycle).
+`commit:`, `pr:`, `test:`, `reviewed-paths:`, `external:`, or `attachment:`. You
+can use shortcuts like `--commit`, `--pr`, `--test`, and `--reviewed`. Kata
+checks the structure of your evidence, but it does not run the recorded test or
+inspect the artifact's contents, so record what you actually verified. See
+[closing issues](../reference/cli.md#issue-lifecycle).
 
-After all children close, finish the run parent:
+Once all child stages are closed, close the parent run issue:
 
 ```sh
 kata close "$run" --done \
@@ -138,40 +143,42 @@ kata close "$run" --done \
   --reviewed brief.txt --reviewed summary.txt --agent
 ```
 
-Kata refuses to close a parent with open children. Close an unused branch with
-`--wontfix` and a rationale of at least 60 characters, or `--superseded-by <ref>`
-and a message of at least 20 characters. These closures also release dependents;
-park them first with `kata meta set <ref> someday true --json-value` if needed.
+Kata refuses to close a parent issue while any child is still open. To close an
+unused branch, use `--wontfix` with a rationale of at least 60 characters, or
+`--superseded-by <ref>` with a message of at least 20 characters. Because those
+closures also release dependent stages, park downstream issues first with
+`kata meta set <ref> someday true --json-value` if needed.
 
 ## Attention and reminders
 
-`work.attention` values do not change readiness. Use `needs-human` for a
-stage waiting on a person and `stuck` for stalled work. After handling a
-request, clear it with `kata notify <ref> --to reviewer --clear` and set
-`work.attention` back to `ok`.
+Setting `work.attention` does not change whether an issue is ready. Use
+`needs-human` when a stage is waiting on a person, and `stuck` when work stalls.
+After you handle a request, clear it with
+`kata notify <ref> --to reviewer --clear` and set `work.attention` back to `ok`.
 
-To watch several stages for a new attention request, use
-`kata wait <ref>... --until attention --any`. It returns for any nonempty
-value other than `ok`, or when an issue closes, so pass only open stages that
-do not already need attention.
+To watch several stages for a new attention request, run
+`kata wait <ref>... --until attention --any`. It returns as soon as any watched
+issue has a nonempty value other than `ok` or closes, so pass only open stages
+that do not already need attention.
 
-Optionally use `kata deadline "$approval" <date-or-time>` for a reminder.
-Reached deadlines use `notify.*` to request the current owner's attention,
-or the author's when unowned, and wait behind an existing request. See
-[planning dates](../reference/cli.md#issue-metadata).
+You can also set a reminder with `kata deadline "$approval" <date-or-time>`.
+When a deadline is reached, Kata uses `notify.*` to request the current owner's
+attention (or the author's if the issue is unowned), waiting behind any existing
+request. See [planning dates](../reference/cli.md#issue-metadata).
 
 ## Repeat or automate a run
 
-Kata does not instantiate a graph of stage issues from a template. The author
-or a first step creates each run's issues and links. Native recurring jobs
-create one child per occurrence, rather than this whole graph.
+Kata does not generate a graph of stage issues from a template. Either you or an
+initial setup step creates each run's issues and links. Native recurring jobs
+create one child issue per occurrence rather than a full stage graph.
 
-For automation, use an adapter that runs execute jobs against an existing issue
-(issue policy `existing`), and make its workers honor the ready queue. Shared
-`kata cron workflow` definitions describe command or prompt steps, rather than
-this issue graph. See the [Cron reference](../reference/cron.md) for the
+To automate stages, use an adapter that runs execute jobs against an existing
+issue (issue policy `existing`) and have its workers honor the ready queue.
+Shared `kata cron workflow` definitions describe command or prompt steps rather
+than this issue graph. See the [Cron reference](../reference/cron.md) for the
 adapter contract.
 
-Keep run-level decisions in parent comments and stage details in each child's
-comments (`kata show <ref>`). `kata events` provides project activity; the
-parent does not automatically collect its children's history.
+Put run-level decisions in comments on the parent issue and stage details in
+each child's comments (`kata show <ref>`). You can inspect project activity with
+`kata events`; the parent issue does not automatically roll up its children's
+history.

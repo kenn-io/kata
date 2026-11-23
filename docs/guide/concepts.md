@@ -1,20 +1,20 @@
 ---
 title: Concepts
 description: Learn Kata's core model for projects, issues, relationships, workspaces, and output modes.
-last_edited: 2026-11-08
+last_edited: 2026-11-20
 ---
 
 # Concepts
 
-This page defines kata's core model. The terms are deliberately few; the goal
-is that an agent can learn the system quickly and a human can audit it later.
+Kata keeps its core terms deliberately few so an agent can learn the system
+quickly and you can audit the system later.
 
 ## Project
 
 A project is the namespace for issues, links, labels, comments, and events.
 Most issue commands resolve a project before they run.
 
-A workspace normally points at exactly one project through `.kata.toml`:
+A workspace normally points to one project through `.kata.toml`:
 
 ```toml
 # This repository tracks its work in kata.
@@ -30,61 +30,61 @@ the same project name and the same kata database.
 
 ## Workspace
 
-A workspace is the filesystem directory from which a command resolves project
-context. By default it is the current directory. Use `--workspace <path>` when
-running from elsewhere:
+A workspace is the filesystem directory where a command resolves its project
+context. By default, that is your current directory. To run a command from
+another directory, pass `--workspace <path>`:
 
 ```sh
 kata --workspace ~/code/product list
 ```
 
 The workspace binding is not the database. It is only a small pointer that
-allows CLI and TUI commands to find the right project.
+lets CLI and TUI commands find the right project.
 
 ## Issue identity
 
-Every issue has a stable ULID `uid`. kata derives the visible `short_id` from
+Every issue has a stable ULID `uid`. Kata derives the visible `short_id` from
 the lowercased suffix of that ULID and extends it if needed to avoid collisions
 inside the project.
 
-You can refer to an issue by:
+You can refer to an issue in three ways:
 
-- bare short ID: `abc4`;
-- qualified short ID: `kata#abc4`;
-- full 26-character ULID.
+- bare short ID: `abc4`
+- qualified short ID: `kata#abc4`
+- full 26-character ULID
 
 Legacy numeric refs such as `#12` and `12` no longer resolve.
 
 Qualified short IDs are useful in cross-project notes, commit messages, and
-human discussion. Inside a workspace bound to one project, the bare short ID is
-usually enough.
+discussion with teammates. Inside a workspace bound to one project, the bare
+short ID is usually enough.
 
 ## Issue state
 
-An issue contains:
+An issue holds:
 
-- title and optional body;
-- status: open or closed;
-- close reason and close evidence when closed;
-- labels;
-- owner;
-- priority from `0` to `4`, where `0` is highest;
-- comments;
-- relationships to other issues;
-- event history.
+- a title and optional body
+- a status (`open` or `closed`)
+- a close reason and close evidence when closed
+- labels
+- an owner
+- a priority from `0` to `4`, where `0` is highest
+- comments
+- relationships to other issues
+- event history
 
-Soft-deleted issues remain recoverable with `kata restore`. Purged issues are
-irreversibly removed except for tombstones needed to preserve external refs.
+You can recover soft-deleted issues with `kata restore`. Purged issues are
+irreversibly removed, except for tombstones needed to preserve external refs.
 
 ## Relationships
 
-Relationships are normalized links between issues in the same daemon database;
-links may span projects. Relationship flags accept `short_id` (same project),
-`project#short_id`, or a full ULID; foreign refs are forwarded to the daemon,
-which resolves them in the named project. Adding a link whose target is in an
-archived project is rejected; unarchive the project to add links to it.
-For a cross-project link, if either project syncs to a hub, both must sync to
-the same hub.
+Relationships are normalized links between issues in the same daemon database,
+and links can span projects. Relationship flags accept `short_id` (same
+project), `project#short_id`, or a full ULID. The CLI forwards foreign refs to
+the daemon, which resolves them in the named project. Kata rejects any new link
+whose target is in an archived project, so unarchive the project before adding
+links to it. For a cross-project link, if either project syncs to a hub, both
+must sync to the same hub.
 
 | Relationship | Cardinality | Meaning |
 | --- | --- | --- |
@@ -93,8 +93,8 @@ the same hub.
 | `blocked_by` | Repeatable | The target must finish before this issue can proceed. |
 | `related` | Repeatable | Context only; no scheduling implication. |
 
-The relationship flags are framed from the issue you are creating or editing.
-For example:
+Relationship flags are framed from the issue you are creating or editing. For
+example:
 
 ```sh
 kata edit child --parent parent
@@ -107,33 +107,33 @@ waiting on open predecessors.
 
 ## Actor
 
-Each mutation records an actor string. Local actor precedence is:
+Every mutation records an actor string. Local actor precedence is:
 
 ```text
 --as > $KATA_AUTHOR > $USER > git config user.name > anonymous
 ```
 
 In shared-daemon identity mode, DB-backed API tokens can make actor attribution
-server-derived. In that mode the daemon ignores request-body actor strings for
+server-derived. In that mode, the daemon ignores request-body actor strings for
 mutations and derives the actor from the token.
 
 ## Events
 
 The daemon records durable events for state changes. Events support:
 
-- TUI refreshes;
-- `kata events` polling;
-- `kata events --tail` live streams;
-- hooks;
-- audit tools;
-- federation replication.
+- TUI refreshes
+- `kata events` polling
+- `kata events --tail` live streams
+- hooks
+- audit tools
+- federation replication
 
-Use `kata events --agent` for compact logs and `kata events --json` when a
+Use `kata events --agent` for compact logs, and `kata events --json` when a
 consumer expects newline-delimited JSON or a full response envelope.
 
 ## Output modes
 
-kata supports three general output modes:
+Kata supports three general output modes:
 
 | Mode | Use |
 | --- | --- |
@@ -141,7 +141,7 @@ kata supports three general output modes:
 | Agent | Concise, line-oriented text for agent transcripts. |
 | JSON | Complete machine-readable response for scripts. |
 
-Use `--agent`, `--json`, or `--format human|agent|json`.
+Select a mode with `--agent`, `--json`, or `--format human|agent|json`.
 
 `kata quickstart` and its `agent-instructions` alias also accept the
 command-scoped `--format contract` mode. It prints the canonical managed agent
@@ -150,24 +150,24 @@ briefing for dynamic harness injection; see
 
 ## Close discipline
 
-Closing an issue asserts completion. kata deliberately makes that stronger than
-adding a comment.
+Closing an issue asserts that the work is complete, and Kata deliberately makes that
+stronger than adding a comment.
 
-Close with:
+When you close an issue, provide:
 
-- a reason;
-- a substantive message;
-- typed evidence such as commit SHA, test command, PR URL, reviewed path,
+- a reason
+- a substantive message
+- typed evidence, such as a commit SHA, test command, PR URL, reviewed path,
   external account for work finished outside any repository, or no-change
-  audit note.
+  audit note
 
 If the work is not complete, keep the issue open and add a comment explaining
-what was attempted and what remains.
+what you tried and what remains.
 
 ## Destructive operations
 
-`kata delete` is reversible. `kata purge` is not.
+`kata delete` is reversible, while `kata purge` is not.
 
-Both require exact confirmation strings. Agents should never run either command
-unless the user explicitly asks for that exact destructive operation and issue
-ref.
+Both commands require exact confirmation strings. Agents should never run
+either command unless the user explicitly asks for that exact destructive
+operation and issue ref.

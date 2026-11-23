@@ -38,14 +38,14 @@ describe('describeKataEvent', () => {
     expect(descriptor.icon).toBeDefined()
   })
 
-  test('issue.closed includes the reason from payload', () => {
-    const descriptor = describeKataEvent(makeEvent('issue.closed', { reason: 'wontfix' }))
-    expect(descriptor.label).toBe('closed (wontfix)')
+  test.each([
+    [{ reason: 'wontfix' }, "closed as Won't do"],
+    [undefined, 'closed as Done'],
+    [{ reason: 'duplicate', evidence: [{ issue_ref: 'ap44' }] }, 'closed as Duplicate of ap44'],
+  ])('issue.closed with %j reads as %s', (payload, label) => {
+    const descriptor = describeKataEvent(makeEvent('issue.closed', payload))
+    expect(descriptor.label).toBe(label)
     expect(descriptor.tone).toBe('positive')
-  })
-
-  test('issue.closed defaults to done when reason missing', () => {
-    expect(describeKataEvent(makeEvent('issue.closed')).label).toBe('closed (done)')
   })
 
   test('issue.labeled formats the label value', () => {

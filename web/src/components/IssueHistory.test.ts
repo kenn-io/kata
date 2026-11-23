@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/svelte'
+import { cleanup, fireEvent, render, screen } from '@testing-library/svelte'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import type { KataTaskEvent } from '../lib/kata/types'
@@ -18,13 +18,19 @@ function event(uid: string, created_at: string): KataTaskEvent {
   }
 }
 
+async function renderHistory(options: Parameters<typeof render<typeof IssueHistory>>[1]) {
+  const result = render(IssueHistory, options)
+  await fireEvent.click(screen.getByRole('button', { name: 'Show history' }))
+  return result
+}
+
 afterEach(cleanup)
 
 describe('IssueHistory', () => {
   it.each([
     ['pi', '00000000-0000-4000-8000-000000000001'],
     ['opencode', 'ses_0123456789AbCd'],
-  ])('shows the closing session and its optional AgentsView link: %s', (agent, id) => {
+  ])('shows the closing session and its optional AgentsView link: %s', async (agent, id) => {
     const closed = {
       ...event('close-a', '2026-08-01T12:00:00Z'),
       type: 'issue.closed',
@@ -36,7 +42,7 @@ describe('IssueHistory', () => {
         },
       },
     }
-    render(IssueHistory, { props: { events: [closed] } })
+    await renderHistory({ props: { events: [closed] } })
     const link = screen.getByRole('link', {
       name: `Session: ${agent} ${id}`,
     })
@@ -50,8 +56,8 @@ describe('IssueHistory', () => {
     'https://user:secret@agentsview.example',
     'https://agentsview.example?token=secret',
     'https://agentsview.example/#secret',
-  ])('keeps provenance readable without an unsafe link: %s', (url) => {
-    render(IssueHistory, {
+  ])('keeps provenance readable without an unsafe link: %s', async (url) => {
+    await renderHistory({
       props: {
         events: [
           {
@@ -87,8 +93,8 @@ describe('IssueHistory', () => {
       session_id: '00000000-0000-4000-8000-000000000001',
       url: 'https://agentsview.example/sessions/pi/00000000-0000-4000-8000-000000000001',
     },
-  ])('omits malformed session coordinates: %s', (transcript) => {
-    render(IssueHistory, {
+  ])('omits malformed session coordinates: %s', async (transcript) => {
+    await renderHistory({
       props: {
         events: [
           {
@@ -103,8 +109,8 @@ describe('IssueHistory', () => {
     expect(screen.queryByRole('link')).toBeNull()
   })
 
-  it('shows when each event happened beside its description', () => {
-    const { container } = render(IssueHistory, {
+  it('shows when each event happened beside its description', async () => {
+    const { container } = await renderHistory({
       props: { events: [event('event-a', '2026-08-01T12:00:00Z')] },
     })
 
@@ -116,8 +122,8 @@ describe('IssueHistory', () => {
     expect(container.querySelectorAll('time')).toHaveLength(1)
   })
 
-  it('omits the time for an event without a readable timestamp', () => {
-    const { container } = render(IssueHistory, {
+  it('omits the time for an event without a readable timestamp', async () => {
+    const { container } = await renderHistory({
       props: { events: [event('event-b', 'not-a-date')] },
     })
 
@@ -148,8 +154,8 @@ function attachmentEvent(snapshot: unknown = frozenAttachment): KataTaskEvent {
     },
   }
 }
-it('links frozen attachment evidence to the matching panel entry', () => {
-  render(IssueHistory, {
+it('links frozen attachment evidence to the matching panel entry', async () => {
+  await renderHistory({
     props: {
       events: [attachmentEvent()],
       metadata: { [`attachment.${attachmentID}`]: frozenAttachment },
@@ -162,8 +168,8 @@ it('links frozen attachment evidence to the matching panel entry', () => {
 })
 it.each(['removed', 'changed'])(
   'retains the frozen descriptor when the reference is %s',
-  (state) => {
-    render(IssueHistory, {
+  async (state) => {
+    await renderHistory({
       props: {
         events: [attachmentEvent()],
         metadata:
@@ -182,16 +188,16 @@ it.each(['removed', 'changed'])(
     expect(screen.queryByRole('link')).toBeNull()
   },
 )
-it('renders legacy id-only evidence from current metadata', () => {
+it('renders legacy id-only evidence from current metadata', async () => {
   const closed = attachmentEvent()
   closed.payload = { evidence: [{ type: 'attachment', attachment_id: attachmentID }] }
-  render(IssueHistory, {
+  await renderHistory({
     props: { events: [closed], metadata: { [`attachment.${attachmentID}`]: frozenAttachment } },
   })
   expect(screen.getByRole('link', { name: /report.pdf/ })).toBeTruthy()
 })
-it('does not retarget malformed historical descriptors', () => {
-  render(IssueHistory, {
+it('does not retarget malformed historical descriptors', async () => {
+  await renderHistory({
     props: {
       events: [attachmentEvent({ name: 'bad', docbank_version: frozenAttachment.docbank_version })],
       metadata: { [`attachment.${attachmentID}`]: frozenAttachment },

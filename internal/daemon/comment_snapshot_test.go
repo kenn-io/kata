@@ -27,11 +27,11 @@ func TestSnapshotCommentAnnotationsUseCapturedGraph(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, response.Body.Selected.Comments[0].Reply.TargetEdited)
 	cache := newUISnapshotEnrichmentCache()
-	cache.put("entry", data, nil)
-	first, _, ok := cache.get("entry")
+	cache.put("entry", data, nil, nil)
+	first, _, _, ok := cache.get("entry")
 	require.True(t, ok)
 	first.CommentGraph.Comments[0].Comment.Body = "Changed after read"
-	second, _, ok := cache.get("entry")
+	second, _, _, ok := cache.get("entry")
 	require.True(t, ok)
 	require.Equal(t, "Captured finding", second.CommentGraph.Comments[0].Comment.Body)
 }

@@ -51,6 +51,7 @@
 
   interface Props {
     toolbar?: Snippet | undefined
+    headerAccessory?: Snippet | undefined
     currentView: KataCurrentView
     now: number
     resultsKey?: string
@@ -69,6 +70,7 @@
     navigationGeneration?: number
     revealRequest?: KataIssueRevealRequest | null
     onSelect: (issue: KataTaskSummary) => void
+    onStatusAction?: ((issue: KataTaskSummary) => void) | undefined
     onOpenGraph?: ((issue: KataTaskSummary) => void) | undefined
     /** Replaces the list, its controls, and the toolbar under the title. */
     empty?: Snippet | undefined
@@ -78,6 +80,7 @@
 
   let {
     toolbar = undefined,
+    headerAccessory = undefined,
     currentView,
     now,
     resultsKey = '',
@@ -96,6 +99,7 @@
     navigationGeneration = 0,
     revealRequest = null,
     onSelect,
+    onStatusAction = undefined,
     onOpenGraph = undefined,
     empty = undefined,
   }: Props = $props()
@@ -407,7 +411,9 @@
   )
   let hasAnyExpandedRows = $derived(Object.values(expanded).some(Boolean))
 
-  const ROW_LIMIT_STEP = 150
+  // Keep the first paint small. Scrolling and keyboard navigation reveal more
+  // rows through the same batch limit, while counts still cover the full list.
+  const ROW_LIMIT_STEP = 75
   let listKey = $derived(JSON.stringify([currentView.name, resultsKey]))
   // showRows overrides this; a new list key recomputes it in the same render.
   let rowLimit = $derived.by(() => {
@@ -1125,6 +1131,7 @@
           <span class="count"
             >{totalFilteredIssues()} {totalFilteredIssues() === 1 ? 'task' : 'tasks'}</span
           >
+          {@render headerAccessory?.()}
         {/snippet}
         {#snippet actions()}
           {#if hasExpandableVisibleRows || hasAnyExpandedRows}
@@ -1449,6 +1456,15 @@
         {#if issue.priority !== undefined}<span> · priority: {issue.priority}</span>{/if}
       </span>
     </button>
+    {#if onStatusAction}
+      <button
+        type="button"
+        class="status-action"
+        tabindex="-1"
+        aria-label={`${issue.status === 'closed' ? 'Reopen' : 'Complete'} ${issue.short_id}`}
+        onclick={() => onStatusAction?.(issue)}
+      ></button>
+    {/if}
     {#if !columnVisibility.id}
       <div class="id-hover">
         <span>{issue.short_id}</span>
@@ -1900,6 +1916,19 @@
     border-radius: 50%;
     opacity: 0.45;
     transition: opacity 0.12s;
+  }
+
+  .status-action {
+    position: absolute;
+    left: calc(var(--list-inset) + 20px + var(--task-depth) * 18px);
+    top: 11px;
+    width: 14px;
+    height: 14px;
+    border: 0;
+    border-radius: 50%;
+    padding: 0;
+    background: transparent;
+    cursor: pointer;
   }
 
   .row-frame:hover .status-mark,

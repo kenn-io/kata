@@ -9,6 +9,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Reject `work.attention` values other than `ok`, `needs-human`, and `stuck`.
 - Diagnose reports when SQLite storage is busy with an upgrade or import.
 - Refuse cross-project links when a project has an active relay enrollment without a binding.
 - Open qualified short issue IDs and project-scoped short IDs in browser links.

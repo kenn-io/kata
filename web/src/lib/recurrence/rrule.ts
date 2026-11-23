@@ -588,8 +588,7 @@ function formatOrdinal(ordinal: Ordinal): string {
   return ordinal === -1 ? 'last' : ORDINAL[ordinal]!
 }
 
-// formatRRule produces the user-facing one-line summary shown in
-// RecurrencePanel and the editor's compact preview. See spec §2.7.
+// formatRRule produces the one-line summary used in the project header list and task views.
 export function formatRRule(input: string): string {
   const parsed = parseRRule(input)
   if (parsed.kind === 'invalid') return 'Invalid recurrence'

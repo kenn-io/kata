@@ -10,6 +10,7 @@ import type { UILink } from './uILink.ts'
 
 export interface UISelectedAuthority {
   comments: CommentOut[]
+  effective_close_event?: Event
   history: Event[]
   issue?: UIIssue
   labels: IssueLabel[]

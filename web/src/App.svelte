@@ -162,7 +162,9 @@
   let mutationPending = $state(false)
   let mutationState = $state<MutationState>({ kind: 'idle' })
   let draftFenceGeneration = $state(0)
-  let pendingCreate: { title: string; parentIssueUID?: string; key: string } | undefined
+  let pendingCreate:
+    | { title: string; parentIssueUID?: string; projectUID: string; key: string }
+    | undefined
   let pendingComment: { identity: string; key: string } | undefined
   let automaticSessionAttempted: 'loopback' | 'proxy' | undefined
   let advertisedAuthentication: 'loopback' | 'login' | 'proxy' | 'unavailable' | undefined
@@ -307,10 +309,14 @@
     )
   }
 
+  let recurrenceRevision = $state(0)
   const invalidations = new InvalidationController((full) => refreshSnapshot(full))
   const stream = new EventStreamController({
     connect: (cursor, signal, onOpen) => openEventStream(browserFetch, cursor, signal, onOpen),
-    onFrame: (frame) => invalidations.frame(frame),
+    onFrame: (frame) => {
+      if (frame.event.startsWith('recurrence.')) recurrenceRevision++
+      invalidations.frame(frame)
+    },
     onAuthenticationRequired: requireAuthentication,
     onState: (state) => {
       const wasReconnecting = liveUpdatesReconnecting
@@ -595,36 +601,27 @@
     )
   }
 
-  async function designateInbox(projectUID: string): Promise<void> {
-    const projects = authority?.snapshot?.catalog?.map(({ project }) => project) ?? []
-    const target = projects.find((project) => project.uid === projectUID)
-    if (!target) throw new Error('Inbox project is not available.')
-    if (target.metadata?.role === 'inbox') return
-
-    const accepted = await runMutation({ draft: projectUID }, (context) =>
-      patchInboxProject(target, context),
-    )
-    if (!accepted) {
-      throw new Error(mutationMessage(mutationState) ?? 'Could not designate the Inbox project.')
-    }
-  }
-
   async function createIssue(
     title: string,
     parent?: { projectID: number; projectUID: string; issueUID: string },
+    projectUID?: string,
   ): Promise<void> {
     const project = parent
       ? authority?.snapshot?.catalog?.find(({ project }) => project.id === parent.projectID)
           ?.project
-      : authority?.snapshot?.catalog?.find(({ project }) => project.metadata?.role === 'inbox')
-          ?.project
+      : authority?.snapshot?.catalog?.find(({ project }) =>
+          projectUID ? project.uid === projectUID : project.metadata?.role === 'inbox',
+        )?.project
     if (!project) throw new Error('Task project is not available.')
 
     const create =
-      pendingCreate?.title === title && pendingCreate.parentIssueUID === parent?.issueUID
+      pendingCreate?.title === title &&
+      pendingCreate.parentIssueUID === parent?.issueUID &&
+      pendingCreate.projectUID === project.uid
         ? pendingCreate
         : {
             title,
+            projectUID: project.uid,
             ...(parent ? { parentIssueUID: parent.issueUID } : {}),
             key: globalThis.crypto.randomUUID(),
           }
@@ -703,9 +700,11 @@
         ),
       )
     }
-    const body: { title?: string; body?: string } = {}
+    const body: { title?: string; body?: string; expected_content_revision?: number } = {}
     if (patch.title !== undefined) body.title = patch.title
     if (patch.body !== undefined) body.body = patch.body
+    if (patch.expected_content_revision !== undefined)
+      body.expected_content_revision = patch.expected_content_revision
     return runMutation({ draft: patch }, (context) =>
       editIssueRequest(
         { projectId: String(target.project_id), ref: target.ref },
@@ -789,15 +788,14 @@
       ),
     )
     if (!accepted) throw new Error(mutationMessage(mutationState) ?? 'Could not create recurrence.')
+    recurrenceRevision++
   }
 
   async function patchRecurrence(
-    id: number,
+    recurrence: KataRecurrence,
     input: KataPatchRecurrenceInput,
     etag: string,
   ): Promise<void> {
-    const recurrence = authority?.snapshot?.selected?.recurrences?.find((item) => item.id === id)
-    if (!recurrence) throw new Error(`Recurrence is not loaded: id=${id}`)
     const body: PatchRecurrenceRequestBody = {}
     if (input.rrule !== undefined) body.rrule = input.rrule
     if (input.dtstart !== undefined) body.dtstart = input.dtstart
@@ -810,24 +808,21 @@
         { headers: context.headers },
       ),
     )
-    if (accepted) return
+    if (accepted) {
+      recurrenceRevision++
+      return
+    }
     if (mutationState.kind === 'revision-conflict') {
-      const replacement = authority?.snapshot?.selected?.recurrences?.find(
-        (item) => item.uid === recurrence.uid,
-      )
       throw Object.assign(new Error(mutationState.detail), {
         status: 412,
         code: mutationState.code,
-        ...(replacement
-          ? { response: { recurrence: replacement, etag: `"rev-${replacement.revision}"` } }
-          : {}),
       })
     }
     throw new Error(mutationMessage(mutationState) ?? 'Could not update recurrence.')
   }
 
-  async function deleteRecurrence(recurrence: KataRecurrence): Promise<boolean> {
-    return runMutation(
+  async function deleteRecurrence(recurrence: KataRecurrence): Promise<void> {
+    const accepted = await runMutation(
       { draft: recurrence, revision: `"rev-${recurrence.revision}"` },
       async (context) => {
         const result = await deleteRecurrenceRequest(
@@ -840,6 +835,13 @@
         return { ...result, data: result.status === 204 ? true : result.data }
       },
     )
+    if (!accepted) {
+      if (mutationState.kind === 'revision-conflict') {
+        throw Object.assign(new Error(mutationState.detail), { status: 412 })
+      }
+      throw new Error(mutationMessage(mutationState) ?? 'Could not stop repeating.')
+    }
+    recurrenceRevision++
   }
 
   function recurrenceTemplate(
@@ -977,15 +979,6 @@
         context.body({}, requestActor),
       ),
     )
-  }
-
-  function deleteIssue(): Promise<boolean> {
-    return closeIssue({
-      reason: 'wontfix',
-      message:
-        'Removed from active work through the web issue detail because this task is no longer intended to be completed.',
-      evidence: [],
-    })
   }
 
   async function runMutation(
@@ -1518,6 +1511,9 @@
         requestedRoute={route !== acceptedRoute ? route : undefined}
         onSearchEmpty={() => reportOutcome('search_empty')}
         snapshot={shellSnapshot!}
+        selfActor={shellSnapshot!.capabilities.actor_policy === 'identity'
+          ? shellSnapshot!.capabilities.account
+          : requestActor}
         loading={authority.loading}
         canMutate={authority.canMutate}
         {mutationPending}
@@ -1545,7 +1541,6 @@
         ownerOptions={(references?.owners ?? []).map((owner) => ({ name: owner, label: owner }))}
         onNavigate={navigate}
         onCreateProject={createProject}
-        onDesignateInbox={designateInbox}
         onCreateIssue={createIssue}
         {searchReferences}
         onMoveIssue={moveIssue}
@@ -1561,7 +1556,7 @@
         onRemoveLabel={removeLabel}
         onCloseIssue={closeIssue}
         onReopenIssue={reopenIssue}
-        onDeleteIssue={deleteIssue}
+        {recurrenceRevision}
         onCreateRecurrence={createRecurrence}
         onPatchRecurrence={patchRecurrence}
         onDeleteRecurrence={deleteRecurrence}
