@@ -31,7 +31,7 @@ func TestErrorHintsArchivedProjectRestoreAndInit(t *testing.T) {
 
 	_, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "list")
 	require.Error(t, err)
-	assert.Contains(t, stderr, fmt.Sprintf(`run "kata projects restore %d", then run "kata init" with --project set to "spoke-project" in this workspace`, project.ID))
+	assert.Contains(t, stderr, fmt.Sprintf(`run "kata projects restore %d"`, project.ID))
 	_, err = runCmdOutput(t, env, "projects", "restore", itoa(project.ID))
 	require.NoError(t, err)
 	projectsBefore, err := env.DB.ListProjects(t.Context())
@@ -58,7 +58,39 @@ func TestErrorHintsExplicitProjectInGitWorkspace(t *testing.T) {
 
 	_, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "--project", "chosen-project", "create", "Example task")
 	require.Error(t, err)
-	assert.Contains(t, stderr, `run "kata init" with --project set to "chosen-project": it attaches this workspace to the active project "chosen-project", or creates it if none exists`)
+	assert.Contains(t, stderr, `run "kata projects create" with name set to "chosen-project"`)
+}
+
+func TestErrorHintsExplicitProjectInBoundWorkspace(t *testing.T) {
+	for _, state := range []string{"missing", "archived"} {
+		t.Run(state, func(t *testing.T) {
+			setupKataEnv(t)
+			t.Setenv("KATA_SERVER", "")
+			env := testenv.New(t)
+			dir, _ := initLocalBoundWorkspace(t, env, "bound-project")
+			var projectID int64
+			if state == "archived" {
+				project, err := env.DB.CreateProject(t.Context(), "target-project")
+				require.NoError(t, err)
+				projectID = project.ID
+				_, err = runCmdOutput(t, env, "projects", "remove", "target-project")
+				require.NoError(t, err)
+			}
+			ctx := contextWithBaseURL(t.Context(), env.URL)
+			_, stderr, err := executeRootCapture(t, ctx, "--workspace", dir, "--project", "target-project", "list")
+			require.Error(t, err)
+			if state == "missing" {
+				assert.Contains(t, stderr, `run "kata projects create" with name set to "target-project"`)
+				_, err = runCmdOutput(t, env, "--workspace", dir, "projects", "create", "target-project")
+			} else {
+				assert.Contains(t, stderr, fmt.Sprintf("hint: run \"kata projects restore %d\"\n", projectID))
+				_, err = runCmdOutput(t, env, "--workspace", dir, "projects", "restore", itoa(projectID))
+			}
+			require.NoError(t, err)
+			_, err = runCmdOutput(t, env, "--workspace", dir, "--project", "target-project", "list")
+			require.NoError(t, err)
+		})
+	}
 }
 
 func TestErrorHintsUnboundWorkspace(t *testing.T) {

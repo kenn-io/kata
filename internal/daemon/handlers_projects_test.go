@@ -357,7 +357,7 @@ func TestResolve_NotInitializedHint(t *testing.T) {
 				}
 				hint := fmt.Sprintf(`run "kata init": it attaches this workspace to the active project %q, or creates it if none exists`, name)
 				if shape == "name" {
-					hint = fmt.Sprintf(`run "kata init" with --project set to %q: it attaches this workspace to the active project %q, or creates it if none exists`, name, name)
+					hint = fmt.Sprintf(`run "kata projects create" with name set to %q`, name)
 				}
 				if state != "missing" {
 					project, err := h.DB().CreateProject(t.Context(), name)
@@ -367,7 +367,7 @@ func TestResolve_NotInitializedHint(t *testing.T) {
 						require.NoError(t, err)
 						hint = fmt.Sprintf(`run "kata projects restore %d", then run "kata init" in this workspace`, project.ID)
 						if shape == "name" {
-							hint = fmt.Sprintf(`run "kata projects restore %d", then run "kata init" with --project set to %q in this workspace`, project.ID, name)
+							hint = fmt.Sprintf(`run "kata projects restore %d"`, project.ID)
 						}
 					}
 				}

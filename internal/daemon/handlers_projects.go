@@ -794,14 +794,20 @@ func gitInitName(info config.AliasInfo) (string, error) {
 
 func projectNotInitialized(ctx context.Context, store db.Storage, message, name, initCommand string, data map[string]any) error {
 	hint := initCommand + " in this workspace"
+	if initCommand == "" {
+		hint = fmt.Sprintf(`run "kata projects create" with name set to %q`, name)
+	}
 	if name != "" {
 		project, err := store.ProjectByNameIncludingArchived(ctx, name)
 		if err != nil && !errors.Is(err, db.ErrNotFound) {
 			return internalAPIError(err)
 		}
 		if err == nil && project.DeletedAt != nil && canSeeArchived(ctx, project) {
-			hint = fmt.Sprintf(`run "kata projects restore %d", then %s in this workspace`, project.ID, initCommand)
-		} else {
+			hint = fmt.Sprintf(`run "kata projects restore %d"`, project.ID)
+			if initCommand != "" {
+				hint += fmt.Sprintf(`, then %s in this workspace`, initCommand)
+			}
+		} else if initCommand != "" {
 			hint = fmt.Sprintf(`%s: it attaches this workspace to the active project %q, or creates it if none exists`, initCommand, name)
 		}
 	}
@@ -818,7 +824,7 @@ func resolveByName(ctx context.Context, store db.Storage, name string) (*api.Pro
 	}
 	project, err := store.ProjectByName(ctx, name)
 	if errors.Is(err, db.ErrNotFound) {
-		return nil, projectNotInitialized(ctx, store, "project "+name+" is not registered", name, fmt.Sprintf(`run "kata init" with --project set to %q`, name), map[string]any{"project": name})
+		return nil, projectNotInitialized(ctx, store, "project "+name+" is not registered", name, "", map[string]any{"project": name})
 	}
 	if err != nil {
 		return nil, internalAPIError(err)
