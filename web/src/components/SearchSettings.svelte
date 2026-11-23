@@ -1,9 +1,9 @@
 <script lang="ts">
-  import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left'
-  import { PageHeader, SearchByMeaningRow, type SearchByMeaningState } from '@kenn-io/kit-ui'
-  import { untrack, type Snippet } from 'svelte'
+  import { SearchByMeaningRow, SettingsSection, type SearchByMeaningState } from '@kenn-io/kit-ui'
+  import { untrack } from 'svelte'
 
   import { orvalFetch } from '../lib/api/client'
+  import SettingsAlert from './SettingsAlert.svelte'
   import {
     getLocalEmbeddings,
     getRestartLocalEmbeddingsUrl,
@@ -13,9 +13,7 @@
   } from '../lib/api/generated'
 
   interface Props {
-    children?: Snippet | undefined
     canAdministerDaemon: boolean
-    onback: () => void
     /**
      * Sends Turn on to the daemon serving this page, bypassing the daemon
      * switcher's proxy, which refuses it, with the same sign-in path as reads.
@@ -27,9 +25,7 @@
   }
 
   let {
-    children,
     canAdministerDaemon,
-    onback,
     postFetch,
     remoteHost = undefined,
     originStable = false,
@@ -38,15 +34,20 @@
   const pollMs = 2000
   const restartWaitMs = 120_000
   const reopenGuidance =
-    'After restart, run kata ui to reopen. If this daemon uses a custom home, set KATA_HOME to it first.'
+    'After restart, run kata ui to reopen. If this server uses a custom home, set KATA_HOME to it first.'
   const recoveryGuidance = 'Run kata daemon status, then reopen kata ui.'
   // Ollama shows its status only; switching to the built-in server comes later.
-  const labels = { keepsIndex: '' }
+  // The section already says Search by meaning, so the row names its status.
+  const labels = { name: 'Status', keepsIndex: '', indexing: 'Preparing {done} of {total} {items}' }
   // Count-free indexing and a saved setting waiting on a restart use the
   // row's one state with no progress bar, so they say only that it's turning on.
   const turningOn: SearchByMeaningState = { kind: 'downloaded' }
-  const turningOnLabels = { off: 'Turning on', downloaded: 'Keyword search works meanwhile' }
-  const requestFailure = "Couldn't confirm Turn on with the daemon."
+  const turningOnLabels = {
+    name: 'Status',
+    off: 'Turning on',
+    downloaded: 'Keyword search works meanwhile',
+  }
+  const requestFailure = "Couldn't turn on search by meaning. Try again."
 
   let status = $state<LocalEmbeddingsStatus>()
   let loading = $state(true)
@@ -70,17 +71,18 @@
   let row = $derived(turning ? turningOn : base)
   let count = $derived(row?.kind === 'indexing' ? row.total : 0)
   let restartLabels = $derived({
-    off: restartPending || status?.restart_in_progress ? 'Restarting...' : 'Turning on',
-    turnOn: 'Restart daemon',
+    name: 'Status',
+    off: restartPending || status?.restart_in_progress ? 'Restarting…' : 'Turning on',
+    turnOn: 'Restart server…',
     downloaded: status?.restart_in_progress
       ? ''
       : remoteHost
-        ? `Restart the daemon on ${remoteHost} to finish.`
+        ? `Restart the server on ${remoteHost} to finish.`
         : (status?.can_restart && canAdministerDaemon) || restartPending
           ? originStable
             ? ''
             : reopenGuidance
-          : 'Restart the daemon to finish: run kata daemon restart. If this daemon uses a custom home, set KATA_HOME to it first.',
+          : 'Restart the server to finish: run kata daemon restart. If this server uses a custom home, set KATA_HOME to it first.',
   })
   let failure = $derived(
     requestError ??
@@ -186,7 +188,7 @@
         ? `Couldn't reconnect. Run kata daemon status on ${remoteHost}.`
         : originStable
           ? `Couldn't reconnect. ${recoveryGuidance}`
-          : 'Run kata daemon status.'
+          : "Couldn't reconnect. Run kata daemon status."
     }
     loading = false
     poll()
@@ -203,7 +205,7 @@
     const reopen = originStable ? '' : `\n\n${reopenGuidance}`
     if (
       !confirm(
-        `Restart this daemon? All projects and clients on it will disconnect briefly.\n\nIf a service manager runs this daemon, restart it there instead.${reopen}`,
+        `Restart this server? Everyone using it disconnects briefly.\n\nIf a service manager runs this server, restart it there instead.${reopen}`,
       )
     )
       return
@@ -263,92 +265,41 @@
   }
 </script>
 
-<section class="search-settings" aria-label="Settings">
-  <div class="settings-content">
-    <PageHeader level={2} title="Settings">
-      {#snippet before()}
-        <button type="button" class="back-button" aria-label="Back to issues" onclick={onback}>
-          <ArrowLeftIcon size={14} strokeWidth={1.8} aria-hidden="true" />
-          <span>Issues</span>
-        </button>
-      {/snippet}
-    </PageHeader>
-    {#if children}
-      <section class="settings-scope" aria-labelledby="browser-settings-scope">
-        <h3 id="browser-settings-scope" class="settings-scope-title">This browser</h3>
-        {@render children()}
-      </section>
+<div class="search-settings">
+  <SettingsSection title="Search by meaning">
+    {#if row}
+      <div class="search-row" class:turning-on={turning}>
+        <!-- Disables Turn on while its request is in flight. -->
+        <fieldset class="row-actions" disabled={posting}>
+          <SearchByMeaningRow
+            state={row}
+            itemNoun={count === 1 ? 'task' : 'tasks'}
+            labels={restarting ? restartLabels : countFree ? turningOnLabels : labels}
+            {readonly}
+            onturnon={restarting ? restartDaemon : turnOn}
+            onusebuiltin={() => {}}
+          />
+        </fieldset>
+        {#if failure}
+          <SettingsAlert>{failure}</SettingsAlert>
+        {/if}
+        {#if indexingFailed}
+          <SettingsAlert tone="warning">
+            Couldn't prepare some tasks. Kata keeps trying; run <code>kata health --json</code> for details.
+          </SettingsAlert>
+        {/if}
+      </div>
+    {:else if loading}
+      <p class="settings-note" role="status">Loading…</p>
+    {:else}
+      <SettingsAlert>Couldn't load search by meaning.</SettingsAlert>
     {/if}
-    <section class="settings-scope" aria-labelledby="server-settings-scope">
-      <h3 id="server-settings-scope" class="settings-scope-title">This server</h3>
-      <p class="settings-scope-description">For this daemon and every project on it.</p>
-      {#if row}
-        <div class="search-row" class:turning-on={turning}>
-          <!-- Disables Turn on while its request is in flight. -->
-          <fieldset class="row-actions" disabled={posting}>
-            <SearchByMeaningRow
-              state={row}
-              itemNoun={count === 1 ? 'issue' : 'issues'}
-              labels={restarting ? restartLabels : countFree ? turningOnLabels : labels}
-              {readonly}
-              onturnon={restarting ? restartDaemon : turnOn}
-              onusebuiltin={() => {}}
-            />
-          </fieldset>
-          {#if failure}
-            <p class="settings-note" role="alert">{failure}</p>
-          {/if}
-          {#if indexingFailed}
-            <p class="settings-note" role="alert">
-              Indexing hit an error and will retry. Run <code>kata health --json</code> for details.
-            </p>
-          {/if}
-        </div>
-      {:else if loading}
-        <p class="settings-note" role="status">Loading…</p>
-      {:else}
-        <p class="settings-note" role="status">
-          Search by meaning status is unavailable for this daemon.
-        </p>
-      {/if}
-    </section>
-  </div>
-</section>
+  </SettingsSection>
+</div>
 
 <style>
   .search-settings {
-    width: 100%;
     min-width: 0;
-    min-height: 0;
-    overflow: auto;
-    padding: var(--space-5);
-    background: var(--bg-primary);
-  }
-
-  .settings-content {
-    display: grid;
-    gap: var(--space-5);
-    max-width: 880px;
-  }
-
-  .settings-scope {
-    display: grid;
-    gap: var(--space-2);
-  }
-
-  .settings-scope-title {
-    margin: 0;
-    color: var(--text-secondary);
-    font-size: var(--font-size-xs);
-    font-weight: var(--font-weight-semibold);
-    letter-spacing: var(--letter-spacing-label);
-    text-transform: uppercase;
-  }
-
-  .settings-scope-description {
-    margin: 0;
-    color: var(--text-secondary);
-    font-size: var(--font-size-sm);
   }
 
   /* Matches the row's own line gap, so a failure reads as part of the row. */
@@ -387,31 +338,11 @@
     border: 0;
   }
 
-  .back-button {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-2);
-    padding: 0;
-    border: 0;
-    background: none;
-    color: inherit;
-    font: inherit;
-    cursor: pointer;
-  }
-
-  .back-button:hover {
-    color: var(--text-primary);
-  }
-
   .settings-note {
     margin: 0;
-    color: var(--text-muted);
+    color: var(--text-secondary);
     font-size: var(--font-size-xs);
     line-height: 1.45;
-  }
-
-  .settings-note[role='alert'] {
-    color: var(--accent-red);
   }
 
   /* An error sits apart from the details above it, but no farther below a
@@ -421,13 +352,7 @@
       :global(.kit-search-by-meaning__progress),
       :global(.kit-search-by-meaning__line)
     )
-    + [role='alert'] {
+    + :global(.settings-alert) {
     margin-top: var(--space-2);
-  }
-
-  @media (max-width: 760px) {
-    .search-settings {
-      padding: var(--space-4);
-    }
   }
 </style>

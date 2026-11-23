@@ -142,12 +142,12 @@ test('credential controls stay in place when clearing a search makes the page sc
   await page.goto(`${kata.origin}/kata?view=credentials`)
   const search = page.getByRole('searchbox', { name: 'Search credentials' })
   await search.fill('example-name-59')
-  const filler = page.getByRole('cell', { name: 'example-token-0', exact: true })
+  const filler = page.getByText('example-name-0', { exact: true })
   await expect(filler).toBeHidden()
 
   await expectNoShiftWhenScrollbarAppears(
-    page.locator('.credential-scene'),
-    page.getByRole('button', { name: 'Refresh' }),
+    page.locator('.kit-settings__scroll'),
+    page.getByRole('button', { name: 'Refresh credentials' }),
     async () => {
       await search.fill('')
       await expect(filler).toBeVisible()

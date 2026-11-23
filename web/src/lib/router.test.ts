@@ -94,7 +94,9 @@ describe('canonical Kata routes', () => {
   it.each(['appearance', 'search', 'access'])(
     'preserves the %s settings section address',
     (section) => {
-      const route = parseRoute(new URL(`https://daemon.example/kata?view=settings&section=${section}`))
+      const route = parseRoute(
+        new URL(`https://daemon.example/kata?view=settings&section=${section}`),
+      )
       expect(route).toMatchObject({ kind: 'kata', view: 'settings', section })
       expect(serializeRoute(route)).toBe(`/kata?view=settings&section=${section}`)
     },

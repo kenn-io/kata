@@ -76,6 +76,14 @@ The sidebar lists **Inbox**, **Today**, **Scheduled**, **Delegated**, **All open
 - **Projects.** Project entries scope the collection to one project, and
   projects without an `area` appear under **Projects**. Select **New project**
   to create a daemon project without changing any workspace files.
+- **Settings** opens one view with a list of sections. Under **This browser**,
+  **Appearance** sets the theme. Under **This server**, **Search by meaning**
+  shows whether it is on and turns it on, **Credentials** lists the server's
+  credentials, and **Teams and visibility** manages teams and which teams see
+  each project. Settings opens on **Search by meaning**. Credentials and Teams
+  and visibility appear only for sessions allowed to use them; a section you
+  can't use opens Appearance instead. Each section has its own address, so you
+  can bookmark it.
 
 Search and **Status** sit above each collection. The **Filter** menu holds
 Project, Relationship, Owner, and Label; active filters appear as chips you can
@@ -247,15 +255,18 @@ load the administrator credential inventory.
 
 ## Audit provisioned credentials
 
-An administrator session can open **Credentials** to inspect the daemon's
-read-only credential ledger. The screen keeps live, expired, and revoked rows,
-shows their actor, name, issue-subtree scope, and lifecycle timestamps, and
-lets you filter rows without sending credential metadata to browser storage.
-Last observed use is best-effort rather than a request-by-request access log.
-The screen never receives a bearer value, token hash, or provisioned token-file
-path.
+An administrator session can open **Settings** > **Credentials** to inspect
+the daemon's read-only credential ledger. The view keeps live, expired, and
+revoked credentials. Each row shows the credential's name, actor, and ID, the
+ID that `kata tokens revoke <id>` takes. It also shows when the credential was
+created and last used, when it expires or was revoked, and the issue subtree it
+is scoped to, if any. Expired and revoked credentials carry a badge. With more
+than eight credentials, you can filter by state, scope, and actor or name
+without sending credential metadata to browser storage. Last use is
+best-effort rather than a request-by-request access log. The view never
+receives a bearer value, token hash, or provisioned token-file path.
 
-The navigation entry appears only when the daemon advertises
+The **Credentials** section appears only when the daemon advertises
 `token_audit_read`. That capability is deliberately separate from ordinary issue write
 access: a bootstrap or static administrator can audit credentials even when its
 browser session cannot mutate issues, while a normal local-web, identity-token,

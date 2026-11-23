@@ -1,15 +1,17 @@
 <script lang="ts">
-  import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left'
   import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw'
   import {
-    PageHeader,
+    Avatar,
+    Button,
     SearchInput,
     SelectDropdown,
-    Table,
+    SettingsSection,
     type SelectDropdownOption,
   } from '@kenn-io/kit-ui'
 
   import type { TokenOut } from '../lib/api/generated'
+  import { relativeTime, shortDate } from '../lib/kata/dates'
+  import SettingsAlert from './SettingsAlert.svelte'
 
   type StateFilter = 'all' | TokenOut['state']
   type ScopeFilter = 'all' | 'scoped' | 'unscoped'
@@ -19,26 +21,29 @@
     loading: boolean
     error?: string | undefined
     onRefresh: () => void | Promise<void>
-    onBack: () => void | Promise<void>
   }
 
-  let { tokens, loading, error = undefined, onRefresh, onBack }: Props = $props()
+  let { tokens, loading, error = undefined, onRefresh }: Props = $props()
 
+  // A short list reads at a glance; filters show only once it gets long.
+  const filterThreshold = 8
   const stateOptions: SelectDropdownOption[] = [
-    { value: 'all', label: 'All' },
+    { value: 'all', label: 'Any state' },
     { value: 'live', label: 'Live' },
     { value: 'expired', label: 'Expired' },
     { value: 'revoked', label: 'Revoked' },
   ]
   const scopeOptions: SelectDropdownOption[] = [
-    { value: 'all', label: 'All' },
-    { value: 'scoped', label: 'Scoped' },
-    { value: 'unscoped', label: 'Unscoped' },
+    { value: 'all', label: 'Any access' },
+    { value: 'unscoped', label: 'Full access' },
+    { value: 'scoped', label: 'One issue subtree' },
   ]
 
   let stateFilter = $state<StateFilter>('all')
   let scopeFilter = $state<ScopeFilter>('all')
   let search = $state('')
+  let filtering = $derived(stateFilter !== 'all' || scopeFilter !== 'all' || search.trim() !== '')
+  let showFilters = $derived(tokens.length > filterThreshold || filtering)
   let visibleTokens = $derived.by(() => {
     const query = search.trim().toLocaleLowerCase()
     return tokens.filter((token) => {
@@ -52,396 +57,264 @@
       )
     })
   })
+  // The ID tells apart only credentials that would otherwise read the same.
+  let sharedKeys = $derived.by(() => {
+    const keys = tokens.map(identity)
+    return keys.filter((key, index) => keys.indexOf(key) !== index)
+  })
 
-  function timestamp(value: string | null | undefined): string {
-    if (!value) return '—'
+  function identity(token: TokenOut): string {
+    return `${token.name ?? ''}\u0000${token.actor}`
+  }
+
+  function ago(value: string): string {
+    const label = relativeTime(value)
+    if (label === 'now') return 'just now'
+    return /^\d+[mhd]$/.test(label) ? `${label} ago` : label
+  }
+
+  function exact(value: string): string {
     const parsed = new Date(value)
     if (Number.isNaN(parsed.getTime())) return value
-    return new Intl.DateTimeFormat(undefined, {
-      dateStyle: 'medium',
-      timeStyle: 'short',
-    }).format(parsed)
+    return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(
+      parsed,
+    )
   }
 </script>
 
-<section class="credential-audit" aria-label="Credentials">
-  <PageHeader
-    level={2}
-    title="Credentials"
-    description="Redacted credential inventory for this daemon."
-  >
-    {#snippet before()}
-      <button type="button" class="back-button" aria-label="Back to issues" onclick={onBack}>
-        <ArrowLeftIcon size={14} strokeWidth={1.8} aria-hidden="true" />
-        <span>Issues</span>
-      </button>
-    {/snippet}
-    {#snippet actions()}
-      <button
-        type="button"
-        class="refresh-button"
-        aria-label="Refresh credentials"
-        disabled={loading}
-        onclick={onRefresh}
-      >
-        <RefreshCwIcon size={14} strokeWidth={1.8} aria-hidden="true" />
-        <span>Refresh</span>
-      </button>
-    {/snippet}
-  </PageHeader>
-
-  <div class="filters" role="group" aria-label="Credential filters">
-    <div class="filter-field">
-      <span aria-hidden="true">State</span>
-      <SelectDropdown
-        title="Credential state"
-        value={stateFilter}
-        options={stateOptions}
-        onchange={(value) => {
-          stateFilter = value as StateFilter
-        }}
-      />
-    </div>
-    <div class="filter-field">
-      <span aria-hidden="true">Scope</span>
-      <SelectDropdown
-        title="Credential scope"
-        value={scopeFilter}
-        options={scopeOptions}
-        onchange={(value) => {
-          scopeFilter = value as ScopeFilter
-        }}
-      />
-    </div>
-    <div class="search-filter">
-      <span>Actor or name</span>
-      <SearchInput
-        value={search}
+<div class="credential-audit">
+  <SettingsSection title="Credentials">
+    <div class="title-action">
+      <Button
         size="sm"
-        block
-        ariaLabel="Search credentials"
-        placeholder="Search actor or name"
-        oninput={(value) => {
-          search = value
-        }}
-      />
+        ariaLabel="Refresh credentials"
+        disabled={loading}
+        onclick={() => void onRefresh()}
+      >
+        <RefreshCwIcon size={14} aria-hidden="true" />
+        <span>Refresh</span>
+      </Button>
     </div>
-  </div>
 
-  {#if error}
-    <p class="audit-message error" role="alert">{error}</p>
-  {:else if loading && tokens.length === 0}
-    <p class="audit-message" role="status">Refreshing credentials…</p>
-  {:else if visibleTokens.length === 0}
-    <p class="audit-message" role="status">
-      {tokens.length === 0
-        ? 'No credentials are retained by this daemon.'
-        : 'No credentials match these filters.'}
-    </p>
-  {:else}
-    {#if loading}
-      <p class="refresh-status" role="status">Refreshing credentials…</p>
+    {#if showFilters && !error}
+      <div class="filters" role="group" aria-label="Credential filters">
+        <SelectDropdown
+          title="Credential state"
+          value={stateFilter}
+          options={stateOptions}
+          onchange={(value) => {
+            stateFilter = value as StateFilter
+          }}
+        />
+        <SelectDropdown
+          title="Credential scope"
+          value={scopeFilter}
+          options={scopeOptions}
+          onchange={(value) => {
+            scopeFilter = value as ScopeFilter
+          }}
+        />
+        <SearchInput
+          value={search}
+          size="sm"
+          block
+          ariaLabel="Search credentials"
+          placeholder="Actor or name"
+          oninput={(value) => {
+            search = value
+          }}
+        />
+      </div>
     {/if}
-    <div class="table-scroll">
-      <Table bare unsorted class="credential-table">
-        <thead>
-          <tr>
-            <th scope="col">ID</th>
-            <th scope="col">Name</th>
-            <th scope="col">Actor</th>
-            <th scope="col">State</th>
-            <th scope="col">Scope</th>
-            <th scope="col">Created</th>
-            <th scope="col">Expires</th>
-            <th scope="col">Last observed use</th>
-            <th scope="col">Revoked</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each visibleTokens as token (token.id)}
-            <tr>
-              <td data-label="ID" class="credential-id">{token.id}</td>
-              <td data-label="Name">{token.name ?? '—'}</td>
-              <td data-label="Actor">{token.actor}</td>
-              <td data-label="State">
-                <span class="state-badge" class:live={token.state === 'live'}>{token.state}</span>
-              </td>
-              <td data-label="Scope">
-                {#if token.scope}
-                  <div class="scope-value">
-                    <span>issue subtree</span>
-                    <span class="uid">{token.scope.project_uid}</span>
-                    <span class="uid">{token.scope.root_issue_uid}</span>
-                  </div>
-                {:else}
-                  <span>unscoped</span>
-                {/if}
-              </td>
-              <td data-label="Created">
-                <time datetime={token.created_at}>{timestamp(token.created_at)}</time>
-              </td>
-              <td data-label="Expires">
-                {#if token.expires_at}
-                  <time datetime={token.expires_at}>{timestamp(token.expires_at)}</time>
-                {:else}
-                  <span>—</span>
-                {/if}
-              </td>
-              <td data-label="Last observed use">
-                {#if token.last_used_at}
-                  <time datetime={token.last_used_at}>{timestamp(token.last_used_at)}</time>
-                {:else}
-                  <span>—</span>
-                {/if}
-              </td>
-              <td data-label="Revoked">
-                {#if token.revoked_at}
-                  <time datetime={token.revoked_at}>{timestamp(token.revoked_at)}</time>
-                {:else}
-                  <span>—</span>
-                {/if}
-              </td>
-            </tr>
-          {/each}
-        </tbody>
-      </Table>
-    </div>
-  {/if}
-</section>
+
+    {#if error}
+      <SettingsAlert>{error}</SettingsAlert>
+    {:else if loading && tokens.length === 0}
+      <p class="audit-message" role="status">Loading credentials…</p>
+    {:else if tokens.length === 0}
+      <p class="audit-message" role="status">This server has no credentials.</p>
+    {:else if visibleTokens.length === 0}
+      <p class="audit-message" role="status">No matching credentials</p>
+    {:else}
+      {#if loading}
+        <p class="audit-message" role="status">Refreshing credentials…</p>
+      {/if}
+      <ul class="credential-list" aria-label="Credentials">
+        {#each visibleTokens as token (token.id)}
+          <li class="credential">
+            <div class="credential-line">
+              <strong class="credential-name" class:unnamed={!token.name}
+                >{token.name ?? 'Unnamed'}</strong
+              >
+              <span class="credential-actor">
+                <Avatar name={token.actor} decorative size={16} />
+                <span>{token.actor}</span>
+              </span>
+              {#if token.state !== 'live'}
+                <span class="state-badge">{token.state === 'expired' ? 'Expired' : 'Revoked'}</span>
+              {/if}
+              {#if sharedKeys.includes(identity(token))}
+                <span class="credential-id">ID {token.id}</span>
+              {/if}
+            </div>
+            <div class="credential-meta">
+              <span
+                >Created <time datetime={token.created_at} title={exact(token.created_at)}
+                  >{ago(token.created_at)}</time
+                ></span
+              >
+              {#if token.last_used_at}
+                <span
+                  >Last used <time datetime={token.last_used_at} title={exact(token.last_used_at)}
+                    >{ago(token.last_used_at)}</time
+                  ></span
+                >
+              {/if}
+              {#if token.expires_at && !token.revoked_at}
+                <span
+                  >{token.state === 'expired' ? 'Expired' : 'Expires'}
+                  <time datetime={token.expires_at} title={exact(token.expires_at)}
+                    >{shortDate(token.expires_at)}</time
+                  ></span
+                >
+              {/if}
+              {#if token.revoked_at}
+                <span
+                  >Revoked <time datetime={token.revoked_at} title={exact(token.revoked_at)}
+                    >{ago(token.revoked_at)}</time
+                  ></span
+                >
+              {/if}
+            </div>
+            {#if token.scope}
+              <div class="credential-meta credential-scope">
+                <span>Scoped to issue subtree</span>
+                <span class="uid" title="Project">{token.scope.project_uid}</span>
+                <span class="uid" title="Root issue">{token.scope.root_issue_uid}</span>
+              </div>
+            {/if}
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  </SettingsSection>
+</div>
 
 <style>
   .credential-audit {
-    width: 100%;
     min-width: 0;
-    min-height: 0;
-    overflow: auto;
-    padding: var(--space-5);
-    background: var(--bg-primary);
   }
 
-  .refresh-button {
+  /* Refresh sits at the right end of the section's title row. */
+  .title-action {
+    position: absolute;
+    top: 0;
+    right: 0;
     display: flex;
     align-items: center;
+    height: var(--layout-header-h);
   }
 
-  .refresh-status {
-    color: var(--text-muted);
-    font-size: var(--font-size-sm);
-  }
-
-  .refresh-button {
-    border: 1px solid var(--border-default);
-    border-radius: var(--radius-sm);
-    background: var(--bg-surface);
-  }
-
-  .back-button {
-    display: inline-flex;
-    align-items: center;
+  .title-action :global(.kit-button) {
     gap: var(--space-2);
-    padding: 0;
-    border: 0;
-    background: none;
-    color: inherit;
-    font: inherit;
-    cursor: pointer;
-  }
-
-  .back-button:hover {
-    color: var(--text-primary);
-  }
-
-  .refresh-button {
-    gap: var(--space-2);
-    padding: 5px 10px;
-    white-space: nowrap;
-  }
-
-  .refresh-button:hover:not(:disabled) {
-    background: var(--bg-surface-hover);
-  }
-
-  .refresh-button:disabled {
-    cursor: wait;
-    opacity: var(--opacity-disabled);
   }
 
   .filters {
     display: grid;
-    grid-template-columns: minmax(110px, 160px) minmax(110px, 160px) minmax(180px, 1fr);
-    gap: var(--space-3);
-    margin: var(--space-4) 0;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: var(--space-4);
   }
 
-  .filter-field :global(.kit-select-dropdown) {
+  .filters :global(.kit-select-dropdown) {
     width: 100%;
-  }
-
-  .filter-field,
-  .search-filter {
-    display: grid;
-    gap: 4px;
-    color: var(--text-muted);
-    font-size: var(--font-size-xs);
-    font-weight: 600;
   }
 
   .audit-message {
-    margin-top: var(--space-6);
-    color: var(--text-muted);
-    text-align: center;
-  }
-
-  .audit-message.error {
-    color: var(--accent-red);
-  }
-
-  .refresh-status {
-    margin-bottom: var(--space-2);
-  }
-
-  .table-scroll {
-    overflow-x: auto;
-    border: 1px solid var(--border-default);
-    border-radius: var(--radius-sm);
-    background: var(--bg-surface);
-  }
-
-  .table-scroll :global(.credential-table) {
-    width: 100%;
-    min-width: 1060px;
-    border-collapse: collapse;
+    margin: 0;
+    color: var(--text-secondary);
     font-size: var(--font-size-sm);
   }
 
-  th,
-  td {
-    padding: var(--space-3);
-    border-bottom: 1px solid var(--border-default);
-    text-align: left;
-    vertical-align: top;
+  .credential-list {
+    display: grid;
+    gap: var(--space-5);
+    margin: 0;
+    padding: 0;
+    list-style: none;
   }
 
-  th {
-    color: var(--text-muted);
-    font-size: var(--font-size-xs);
-    font-weight: 650;
-    white-space: nowrap;
+  .credential {
+    display: grid;
+    gap: var(--space-1);
+    min-width: 0;
   }
 
-  tbody tr:last-child td {
-    border-bottom: 0;
+  .credential-line,
+  .credential-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: var(--space-3);
+    row-gap: var(--space-1);
+    min-width: 0;
+  }
+
+  .credential-name {
+    color: var(--text-primary);
+    font-weight: var(--font-weight-semibold);
+    overflow-wrap: anywhere;
+  }
+
+  .credential-name.unnamed {
+    color: var(--text-secondary);
+    font-weight: 400;
+  }
+
+  .credential-actor {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+    color: var(--text-secondary);
+    overflow-wrap: anywhere;
+  }
+
+  .credential-meta {
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+  }
+
+  /* Dots between the times, so the line reads "Created … · Last used …". */
+  .credential-meta:not(.credential-scope) > span + span::before {
+    margin-right: var(--space-3);
+    content: '·';
   }
 
   .credential-id,
   .uid {
-    font-family: var(--font-mono, ui-monospace, monospace);
-  }
-
-  .scope-value {
-    display: grid;
-    gap: 2px;
-  }
-
-  .uid {
-    max-width: 28ch;
-    overflow-wrap: anywhere;
     color: var(--text-muted);
+    font-family: var(--font-mono);
     font-size: var(--font-size-xs);
+    overflow-wrap: anywhere;
   }
 
   .state-badge {
-    display: inline-block;
-    border-radius: 999px;
+    padding: 0 6px;
+    border-radius: var(--radius-sm);
     background: color-mix(in srgb, var(--accent-red) 12%, transparent);
     color: var(--accent-red);
-    padding: 1px 7px;
     font-size: var(--font-size-xs);
-    font-weight: 650;
-  }
-
-  .state-badge.live {
-    background: color-mix(in srgb, var(--accent-green) 14%, transparent);
-    color: var(--accent-green);
+    font-weight: var(--font-weight-semibold);
+    line-height: 18px;
   }
 
   @media (max-width: 760px) {
-    .credential-audit {
-      padding: var(--space-4);
-    }
-
     .filters {
       grid-template-columns: 1fr 1fr;
     }
 
-    .search-filter {
+    .filters :global(.kit-search-input) {
       grid-column: 1 / -1;
-    }
-
-    .table-scroll {
-      overflow: visible;
-      border: 0;
-      background: transparent;
-    }
-
-    .table-scroll :global(.credential-table),
-    thead,
-    tbody,
-    tr,
-    th,
-    td {
-      display: block;
-      min-width: 0;
-    }
-
-    thead {
-      display: none;
-    }
-
-    tbody {
-      display: grid;
-      gap: var(--space-3);
-    }
-
-    tr {
-      border: 1px solid var(--border-default);
-      border-radius: var(--radius-sm);
-      background: var(--bg-surface);
-      padding: var(--space-3);
-    }
-
-    td {
-      display: grid;
-      grid-template-columns: minmax(108px, 0.42fr) minmax(0, 1fr);
-      gap: var(--space-3);
-      padding: 5px 0;
-      border: 0;
-      overflow-wrap: anywhere;
-    }
-
-    td::before {
-      content: attr(data-label);
-      color: var(--text-muted);
-      font-size: var(--font-size-xs);
-      font-weight: 650;
-    }
-  }
-
-  @media (max-width: 640px) {
-    .refresh-button span {
-      display: none;
-    }
-
-    .filters {
-      grid-template-columns: 1fr;
-    }
-
-    .search-filter {
-      grid-column: auto;
-    }
-
-    td {
-      grid-template-columns: 96px minmax(0, 1fr);
     }
   }
 </style>

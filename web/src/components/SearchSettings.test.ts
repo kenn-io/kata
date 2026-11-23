@@ -24,7 +24,7 @@ function renderSettings(
   } = {},
 ) {
   return render(SearchSettings, {
-    props: { canAdministerDaemon: true, onback: vi.fn(), postFetch: fetch, ...props },
+    props: { canAdministerDaemon: true, postFetch: fetch, ...props },
   })
 }
 
@@ -63,8 +63,8 @@ describe('SearchSettings', () => {
       )
       const { container } = renderSettings({ canAdministerDaemon, remoteHost })
       await settle()
-      expect(screen.getByText('Restarting...')).not.toBeNull()
-      expect(container.textContent).not.toContain('Restart the daemon')
+      expect(screen.getByText('Restarting…')).not.toBeNull()
+      expect(container.textContent).not.toContain('Restart the server')
     },
   )
 
@@ -89,12 +89,12 @@ describe('SearchSettings', () => {
     vi.stubGlobal('confirm', confirm)
     renderSettings({ postFetch })
     await settle()
-    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Restart server…' }))
     expect(postFetch).not.toHaveBeenCalled()
-    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Restart server…' }))
     expect(postFetch).toHaveBeenCalledOnce()
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('service manager'))
-    expect(screen.getByText('Restarting...')).not.toBeNull()
+    expect(screen.getByText('Restarting…')).not.toBeNull()
     await vi.advanceTimersByTimeAsync(4000)
     expect(screen.getByText('On', { exact: true })).not.toBeNull()
   })
@@ -123,10 +123,10 @@ describe('SearchSettings', () => {
       )
       renderSettings({ postFetch })
       await settle()
-      await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+      await fireEvent.click(screen.getByRole('button', { name: 'Restart server…' }))
       await vi.advanceTimersByTimeAsync(4000)
       expect(screen.queryByRole('alert')).toBeNull()
-      expect(screen.queryByRole('button', { name: 'Restart daemon' })).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Restart server…' })).toBeNull()
       expect(postFetch).toHaveBeenCalledOnce()
       current = status({ provider: 'built_in', can_change: false })
       await vi.advanceTimersByTimeAsync(2000)
@@ -171,30 +171,30 @@ describe('SearchSettings', () => {
       )
       renderSettings({ postFetch })
       await settle()
-      await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+      await fireEvent.click(screen.getByRole('button', { name: 'Restart server…' }))
       if (mode === 'in progress')
         current = { ...waiting, can_restart: false, restart_in_progress: true }
       if (mode === 'disconnected') {
         await vi.advanceTimersByTimeAsync(2000)
       } else {
         await vi.advanceTimersByTimeAsync(9999)
-        expect(screen.queryByRole('button', { name: 'Restart daemon' })).toBeNull()
+        expect(screen.queryByRole('button', { name: 'Restart server…' })).toBeNull()
         await vi.advanceTimersByTimeAsync(2001)
       }
       if (mode === 'in progress') {
         await vi.advanceTimersByTimeAsync(120_000)
         expect(screen.queryByRole('alert')).toBeNull()
-        expect(screen.queryByRole('button', { name: 'Restart daemon' })).toBeNull()
+        expect(screen.queryByRole('button', { name: 'Restart server…' })).toBeNull()
         const count = read.mock.calls.length
         current = status({ provider: 'built_in', can_change: false })
         await vi.advanceTimersByTimeAsync(2000)
         expect(read.mock.calls.length).toBeGreaterThan(count)
         expect(screen.getByText('On', { exact: true })).not.toBeNull()
       } else {
-        expect(screen.getByRole('button', { name: 'Restart daemon' })).not.toBeNull()
+        expect(screen.getByRole('button', { name: 'Restart server…' })).not.toBeNull()
         expect(screen.getByRole('alert').textContent).toContain("Couldn't confirm restart")
         if (mode === 'disconnected') {
-          await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+          await fireEvent.click(screen.getByRole('button', { name: 'Restart server…' }))
           expect(postFetch).toHaveBeenCalledTimes(2)
         }
       }
@@ -233,19 +233,19 @@ describe('SearchSettings', () => {
     )
     renderSettings({ postFetch })
     await settle()
-    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Restart server…' }))
     await vi.advanceTimersByTimeAsync(2000)
     resolvePost(new Response(null, { status: 202 }))
     await settle()
     resolveRead(Response.json(waiting))
     await settle()
     expect(screen.queryByRole('alert')).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Restart daemon' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Restart server…' })).toBeNull()
   })
 
   test.each([
     [true, undefined, true, "Couldn't reconnect. Run kata daemon status, then reopen kata ui."],
-    [false, undefined, false, 'Run kata daemon status.'],
+    [false, undefined, false, "Couldn't reconnect. Run kata daemon status."],
     [
       false,
       'daemon.example',
@@ -285,11 +285,11 @@ describe('SearchSettings', () => {
       renderSettings({ canAdministerDaemon, remoteHost, originStable })
       await settle()
       await vi.advanceTimersByTimeAsync(120_000)
-      expect(screen.getByRole('alert').textContent).toBe(message)
+      expect(screen.getByRole('alert').textContent?.trim()).toBe(message)
       const count = read.mock.calls.length
       recovery = 'progress'
       await vi.advanceTimersByTimeAsync(2000)
-      expect(screen.getByText('Restarting...')).not.toBeNull()
+      expect(screen.getByText('Restarting…')).not.toBeNull()
       expect(screen.queryByRole('alert')).toBeNull()
       recovery = 'on'
       await vi.advanceTimersByTimeAsync(2000)
@@ -349,9 +349,9 @@ describe('SearchSettings', () => {
     )
     renderSettings({ postFetch: vi.fn(async () => new Response(null, { status: 403 })) })
     await settle()
-    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Restart server…' }))
     expect(screen.getByRole('alert').textContent).toContain("Couldn't restart")
-    expect(screen.getByRole('button', { name: 'Restart daemon' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Restart server…' })).not.toBeNull()
   })
 
   test('permits retry after helper failure', async () => {
@@ -376,10 +376,10 @@ describe('SearchSettings', () => {
     const postFetch = vi.fn<typeof fetch>(async () => new Response(null, { status: 202 }))
     renderSettings({ postFetch, originStable: true })
     await settle()
-    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Restart server…' }))
     await vi.advanceTimersByTimeAsync(2000)
     expect(screen.getByRole('alert').textContent).toContain('Restart failed')
-    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Restart server…' }))
     expect(postFetch).toHaveBeenCalledTimes(2)
   })
 
@@ -435,7 +435,7 @@ describe('SearchSettings', () => {
         ),
       )
       render(SearchSettings, {
-        props: { canAdministerDaemon: true, onback: vi.fn(), postFetch: fetch, remoteHost },
+        props: { canAdministerDaemon: true, postFetch: fetch, remoteHost },
       })
       await settle()
       expect(
@@ -490,7 +490,7 @@ describe('SearchSettings', () => {
         ),
       )
       render(SearchSettings, {
-        props: { canAdministerDaemon: true, onback: vi.fn(), postFetch, remoteHost },
+        props: { canAdministerDaemon: true, postFetch, remoteHost },
       })
       await settle()
       await fireEvent.click(screen.getByRole('button', { name: 'Turn on' }))
@@ -499,11 +499,11 @@ describe('SearchSettings', () => {
       expect(
         screen.getByText(
           remoteHost
-            ? `Restart the daemon on ${remoteHost} to finish.`
-            : 'Restart the daemon to finish: run kata daemon restart. If this daemon uses a custom home, set KATA_HOME to it first.',
+            ? `Restart the server on ${remoteHost} to finish.`
+            : 'Restart the server to finish: run kata daemon restart. If this server uses a custom home, set KATA_HOME to it first.',
         ),
       ).not.toBeNull()
-      expect(screen.queryByRole('button', { name: 'Restart daemon' })).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Restart server…' })).toBeNull()
     },
   )
 

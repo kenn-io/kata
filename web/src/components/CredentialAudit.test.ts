@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/svelte'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { TokenOut } from '../lib/api/generated'
@@ -44,38 +44,63 @@ const tokens: TokenOut[] = [
 describe('CredentialAudit', () => {
   afterEach(cleanup)
 
-  it('shows redacted server-classified metadata without an observation line', () => {
-    const { container } = render(CredentialAudit, {
-      props: auditProps(),
-    })
-
-    expect(screen.getByRole('heading', { name: 'Credentials' })).not.toBeNull()
-    expect(screen.queryByText('Observed by server')).toBeNull()
-    expect(container.querySelector('select')).toBeNull()
-    expect(screen.getByRole('columnheader', { name: 'Last observed use' })).not.toBeNull()
-    expect(screen.getByText('Build worker')).not.toBeNull()
-    expect(screen.getByText('issue subtree')).not.toBeNull()
-    expect(screen.getByText('01J00000000000000000000001')).not.toBeNull()
-    expect(screen.getAllByText('live').length).toBeGreaterThan(0)
-
-    expect(screen.getByText('<script>alert(1)</script>')).not.toBeNull()
-    expect(screen.queryByRole('button', { name: /revoke/i })).toBeNull()
-    expect(screen.queryByRole('textbox', { name: /token/i })).toBeNull()
-  })
-
-  it('combines lifecycle, scope, and actor-or-name search filters', async () => {
+  it('reads each credential as one compact row', () => {
     render(CredentialAudit, { props: auditProps() })
 
-    expect(screen.getByRole('group', { name: 'Credential filters' })).not.toBeNull()
+    expect(screen.getByRole('heading', { name: 'Credentials' })).not.toBeNull()
+    expect(screen.queryByRole('table')).toBeNull()
+    const rows = within(screen.getByRole('list', { name: 'Credentials' })).getAllByRole('listitem')
+    expect(rows).toHaveLength(3)
 
-    await fireEvent.click(screen.getByRole('combobox', { name: 'Credential state: All' }))
+    const scoped = rows[0]!.textContent ?? ''
+    expect(scoped).toContain('Build worker')
+    expect(scoped).toContain('agent-a')
+    expect(scoped).toContain('Created')
+    expect(scoped).toContain('Last used')
+    expect(scoped).toContain('Expires')
+    expect(scoped).toContain('Scoped to issue subtree')
+    expect(scoped).toContain('01J00000000000000000000002')
+    expect(scoped).toContain('01J00000000000000000000001')
+    expect(scoped).not.toContain('Revoked')
+
+    expect(rows[1]!.textContent).toContain('Expired')
+    expect(rows[1]!.textContent).not.toContain('Last used')
+    expect(rows[2]!.textContent).toContain('Revoked')
+    expect(screen.getByText('<script>alert(1)</script>')).not.toBeNull()
+    expect(screen.queryByText(/^ID /)).toBeNull()
+    expect(screen.queryByRole('group', { name: 'Credential filters' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /revoke/i })).toBeNull()
+  })
+
+  it('shows the ID only when two credentials share a name and owner', () => {
+    render(CredentialAudit, {
+      props: auditProps({
+        tokens: [...tokens, { ...tokens[0]!, id: 12, scope: undefined }],
+      }),
+    })
+
+    expect(screen.getByText('ID 7')).not.toBeNull()
+    expect(screen.getByText('ID 12')).not.toBeNull()
+    expect(screen.queryByText('ID 8')).toBeNull()
+  })
+
+  it('offers filters past eight credentials and says when none match', async () => {
+    const many = Array.from({ length: 9 }, (_, index) => ({
+      ...tokens[1]!,
+      id: 100 + index,
+      name: `Worker ${index}`,
+    }))
+    render(CredentialAudit, { props: auditProps({ tokens: [...tokens, ...many] }) })
+
+    expect(screen.getByRole('group', { name: 'Credential filters' })).not.toBeNull()
+    await fireEvent.click(screen.getByRole('combobox', { name: 'Credential state: Any state' }))
     await fireEvent.click(screen.getByRole('option', { name: 'Live' }))
     expect(screen.getByText('Build worker')).not.toBeNull()
-    expect(screen.queryByText('admin-user')).toBeNull()
+    expect(screen.queryByText('Worker 0')).toBeNull()
 
-    await fireEvent.click(screen.getByRole('combobox', { name: 'Credential scope: All' }))
-    await fireEvent.click(screen.getByRole('option', { name: 'Unscoped' }))
-    expect(screen.getByText('No credentials match these filters.')).not.toBeNull()
+    await fireEvent.click(screen.getByRole('combobox', { name: 'Credential scope: Any access' }))
+    await fireEvent.click(screen.getByRole('option', { name: 'Full access' }))
+    expect(screen.getByText('No matching credentials')).not.toBeNull()
 
     await fireEvent.click(screen.getByRole('combobox', { name: 'Credential state: Live' }))
     await fireEvent.click(screen.getByRole('option', { name: 'Revoked' }))
@@ -86,15 +111,12 @@ describe('CredentialAudit', () => {
     expect(screen.queryByText('Build worker')).toBeNull()
   })
 
-  it('provides explicit refresh and return actions with loading and unavailable states', async () => {
+  it('refreshes, and shows loading, empty, and error states', async () => {
     const onRefresh = vi.fn()
-    const onBack = vi.fn()
-    const view = render(CredentialAudit, { props: auditProps({ onRefresh, onBack }) })
+    const view = render(CredentialAudit, { props: auditProps({ onRefresh }) })
 
     await fireEvent.click(screen.getByRole('button', { name: 'Refresh credentials' }))
-    await fireEvent.click(screen.getByRole('button', { name: 'Back to issues' }))
     expect(onRefresh).toHaveBeenCalledOnce()
-    expect(onBack).toHaveBeenCalledOnce()
 
     await view.rerender({ loading: true })
     expect(
@@ -102,12 +124,14 @@ describe('CredentialAudit', () => {
     ).toBe(true)
     expect(screen.getByRole('status').textContent).toContain('Refreshing credentials')
 
-    await view.rerender({
-      loading: false,
-      error: 'Credential inventory is unavailable.',
-      tokens: [],
-    })
-    expect(screen.getByRole('alert').textContent).toContain('Credential inventory is unavailable.')
+    await view.rerender({ loading: true, tokens: [] })
+    expect(screen.getByRole('status').textContent).toContain('Loading credentials')
+
+    await view.rerender({ loading: false, tokens: [] })
+    expect(screen.getByRole('status').textContent).toContain('This server has no credentials.')
+
+    await view.rerender({ error: "Couldn't load credentials." })
+    expect(screen.getByRole('alert').textContent?.trim()).toBe("Couldn't load credentials.")
   })
 })
 
@@ -116,7 +140,6 @@ function auditProps(overrides: Record<string, unknown> = {}) {
     tokens,
     loading: false,
     onRefresh: vi.fn(),
-    onBack: vi.fn(),
     ...overrides,
   }
 }

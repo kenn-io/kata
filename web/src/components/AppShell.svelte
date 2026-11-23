@@ -6,10 +6,8 @@
     EmptyState,
     MEDIA,
     IconButton,
-    PageHeader,
     Tooltip,
     TopBar,
-    SegmentedControl,
     type TypeaheadOption,
   } from '@kenn-io/kit-ui'
   import LayoutPanelLeftIcon from '@lucide/svelte/icons/layout-panel-left'
@@ -19,7 +17,7 @@
 
   import type { TokenOut, UIIssueReference } from '../lib/api/generated'
   import type { WebDaemonInfo } from '../lib/daemons/client'
-  import type { KataRoute, ShareableFilters, SystemView } from '../lib/router'
+  import type { KataRoute, SettingsSection, ShareableFilters, SystemView } from '../lib/router'
   import {
     deriveKataAreas,
     defaultKataTaskSearchFilters,
@@ -55,6 +53,7 @@
   import QuickCapture from './QuickCapture.svelte'
   import ProjectRecurrences from './ProjectRecurrences.svelte'
   import SearchSettings from './SearchSettings.svelte'
+  import SettingsView, { type SettingsSectionID } from './SettingsView.svelte'
   import Sidebar from './Sidebar.svelte'
   import SplitLayout from './SplitLayout.svelte'
 
@@ -97,7 +96,6 @@
         ) => Promise<boolean>)
       | undefined
     onRefreshCredentials?: (() => void | Promise<void>) | undefined
-    onBackFromCredentials?: (() => void | Promise<void>) | undefined
     onSearchEmpty?: (() => void) | undefined
     onNavigate: (route: AppRoute) => void | Promise<void>
     onCreateProject: (name: string, designateInbox?: boolean) => Promise<KataTaskMutationResponse>
@@ -170,7 +168,6 @@
     onOpenDaemon = () => {},
     onAccessMutation = undefined,
     onRefreshCredentials = () => {},
-    onBackFromCredentials = () => {},
     onSearchEmpty = undefined,
     onNavigate,
     onCreateProject,
@@ -276,9 +273,7 @@
   const mediumScreen = new MediaQuery(MEDIA.medium)
   let linkFilters = $state(createKataLinkFilters('all'))
   let navigationGeneration = $state(0)
-  let credentialRoute = $derived(route.view === 'credentials')
-  let settingsRoute = $derived(route.view === 'settings')
-  let daemonRoute = $derived(credentialRoute || settingsRoute)
+  let daemonRoute = $derived(route.view === 'credentials' || route.view === 'settings')
   let settingsHost = $derived.by(() => {
     const remote = activeConnection && !activeConnection.local ? activeConnection.url : undefined
     const host = remote ? new URL(remote).hostname : globalThis.location?.hostname
@@ -293,6 +288,14 @@
       !daemonSwitching &&
       (!activeDaemonID || activeConnection?.local === true),
   )
+  let credentialAuditAvailable = $derived(snapshot.capabilities.token_audit_read === true)
+  // Settings opens on Search by meaning. A section this session can't use
+  // shows Appearance instead, without reading anything it isn't allowed to.
+  let settingsSection = $derived.by<SettingsSectionID>(() => {
+    if (route.view === 'credentials') return credentialAuditAvailable ? 'credentials' : 'appearance'
+    const section = route.section ?? 'search'
+    return section === 'access' && !accessAdministrationAvailable ? 'appearance' : section
+  })
   let inboxProject = $derived(
     projection.projects.find((project) => project.metadata.role === 'inbox'),
   )
@@ -422,21 +425,24 @@
     })
   }
 
-  function openCredentials(): void {
-    closeNavigation()
-    navigate({
-      kind: 'kata',
-      view: 'credentials',
-      graph: false,
-      filters: emptyShareableFilters(),
-    })
-  }
-
   function openSettings(): void {
     closeNavigation()
     navigate({
       kind: 'kata',
       view: 'settings',
+      graph: false,
+      filters: emptyShareableFilters(),
+    })
+  }
+
+  // Credentials keeps its own address; every other section is a Settings one.
+  function openSettingsSection(section: SettingsSectionID): void {
+    if (section === settingsSection) return
+    navigate({
+      kind: 'kata',
+      ...(section === 'credentials'
+        ? { view: 'credentials' as const }
+        : { view: 'settings' as const, section: section as SettingsSection }),
       graph: false,
       filters: emptyShareableFilters(),
     })
@@ -726,14 +732,11 @@
     {projectCreationBlockedReason}
     bind:creationIntent
     {draftFenceGeneration}
-    credentialAuditAvailable={snapshot.capabilities.token_audit_read === true}
-    credentialAuditActive={credentialRoute}
-    settingsActive={settingsRoute}
+    settingsActive={daemonRoute}
     onOpenSettings={openSettings}
     onOpenView={openView}
     onOpenProject={openProject}
     onCreateProject={createProject}
-    onOpenCredentials={openCredentials}
   >
     {#snippet header()}
       <div class="header-server">
@@ -793,9 +796,7 @@
             mobileNavigationOpen = true
           }}><MenuIcon size={18} /></IconButton
         >
-        <strong
-          >{settingsRoute ? 'Settings' : credentialRoute ? 'Credentials' : scopeLabel()}</strong
-        >
+        <strong>{daemonRoute ? 'Settings' : scopeLabel()}</strong>
       {/snippet}
       {#snippet right()}
         {#if mediumScreen.current}
@@ -823,60 +824,49 @@
     </div>
 
     <div class="kata-main">
-      {#if mutationMessage && !captureOpen && (!credentialRoute || !accessAdministrationAvailable || !onAccessMutation)}
+      {#if mutationMessage && !captureOpen && (settingsSection !== 'access' || !daemonRoute || !accessAdministrationAvailable || !onAccessMutation)}
         <p class="mutation-message" role="alert">{mutationMessage}</p>
       {/if}
-      {#if credentialRoute}
-        <div class="credential-scene">
-          <CredentialAudit
-            tokens={credentialTokens}
-            loading={credentialLoading}
-            error={snapshot.capabilities.token_audit_read
-              ? credentialError
-              : 'Credential inventory is unavailable for this session.'}
-            onRefresh={onRefreshCredentials}
-            onBack={onBackFromCredentials}
-          />
-          {#if accessAdministrationAvailable}
-            <section class="access-administration" aria-label="Teams and visibility">
-              <PageHeader level={2} title="Teams and visibility" />
-              {#if onAccessMutation}
-                {#key `${activeDaemonID ?? 'direct'}:${draftFenceGeneration}`}
-                  <AccessManagement
-                    projects={snapshot.catalog}
-                    pending={mutationPending || loading || !accessAdministrationAvailable}
-                    message={captureOpen ? undefined : mutationMessage}
-                    onMutation={onAccessMutation}
-                  />
-                {/key}
-              {/if}
-            </section>
-          {/if}
-        </div>
-      {:else if settingsRoute}
-        {#key activeDaemonID ?? 'direct'}
-          <SearchSettings
-            postFetch={searchSettingsPostFetch}
-            {canAdministerDaemon}
-            originStable={snapshot.origin_stable}
-            onback={onBackFromCredentials}
-            remoteHost={settingsHost}
-          >
-            <div class="appearance">
-              <span>Theme</span><SegmentedControl
-                ariaLabel="Theme"
-                options={[
-                  { value: 'system', label: 'System' },
-                  { value: 'light', label: 'Light' },
-                  { value: 'dark', label: 'Dark' },
-                ]}
-                value={preferences.theme}
-                onchange={(theme) =>
-                  onPreferencesChange({ ...preferences, theme: theme as Preferences['theme'] })}
+      {#if daemonRoute}
+        <SettingsView
+          active={settingsSection}
+          theme={preferences.theme}
+          onThemeChange={(theme) => onPreferencesChange({ ...preferences, theme })}
+          credentialsAvailable={credentialAuditAvailable}
+          accessAvailable={accessAdministrationAvailable}
+          onSelect={openSettingsSection}
+        >
+          {#snippet search()}
+            {#key activeDaemonID ?? 'direct'}
+              <SearchSettings
+                postFetch={searchSettingsPostFetch}
+                {canAdministerDaemon}
+                originStable={snapshot.origin_stable}
+                remoteHost={settingsHost}
               />
-            </div>
-          </SearchSettings>
-        {/key}
+            {/key}
+          {/snippet}
+          {#snippet credentials()}
+            <CredentialAudit
+              tokens={credentialTokens}
+              loading={credentialLoading}
+              error={credentialError}
+              onRefresh={onRefreshCredentials}
+            />
+          {/snippet}
+          {#snippet access()}
+            {#if onAccessMutation}
+              {#key `${activeDaemonID ?? 'direct'}:${draftFenceGeneration}`}
+                <AccessManagement
+                  projects={snapshot.catalog}
+                  pending={mutationPending || loading || !accessAdministrationAvailable}
+                  message={captureOpen ? undefined : mutationMessage}
+                  onMutation={onAccessMutation}
+                />
+              {/key}
+            {/if}
+          {/snippet}
+        </SettingsView>
       {:else}
         <SplitLayout
           orientation={preferences.splitDirection}
@@ -1119,14 +1109,6 @@
     font-size: var(--font-size-sm);
   }
 
-  .appearance {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    padding: 16px 0;
-  }
-
   .daemon-fallback-status {
     color: var(--text-muted);
     font-size: var(--font-size-xs);
@@ -1211,23 +1193,6 @@
     display: flex;
     position: relative;
     overflow: hidden;
-  }
-
-  .credential-scene {
-    min-width: 0;
-    flex: 1;
-    overflow: auto;
-    /* Reserve the scrollbar's width so controls do not shift when a search
-       changes whether the credential table overflows. */
-    scrollbar-gutter: stable;
-  }
-
-  .access-administration {
-    display: grid;
-    gap: var(--space-4);
-    padding: var(--space-5);
-    background: var(--bg-primary);
-    border-top: 1px solid var(--border-default);
   }
 
   .list-column {
