@@ -335,7 +335,7 @@ func TestResolve_ByAliasInput_NotRegistered(t *testing.T) {
 }
 
 func TestResolve_NotInitializedHint(t *testing.T) {
-	for _, shape := range []string{"alias", "name", "path with config", "path"} {
+	for _, shape := range []string{"alias", "alias with name", "name", "path with config", "path"} {
 		for _, state := range []string{"missing", "active", "archived"} {
 			if state == "active" && shape != "path" {
 				continue
@@ -344,8 +344,12 @@ func TestResolve_NotInitializedHint(t *testing.T) {
 				h := newServerWithGitWorkspace(t, "https://github.com/example/remote-project.git")
 				name := "remote-project"
 				request := map[string]any{"start_path": h.dir}
-				if shape == "alias" {
+				if shape == "alias" || shape == "alias with name" {
 					request = map[string]any{"alias": map[string]any{"identity": "github.com/example/remote-project", "kind": "git"}}
+					if shape == "alias with name" {
+						name = "saved-project"
+						request["name"] = name
+					}
 				}
 				if shape == "name" || shape == "path with config" {
 					name = "saved-project"
@@ -358,6 +362,8 @@ func TestResolve_NotInitializedHint(t *testing.T) {
 				hint := fmt.Sprintf(`run "kata init": it attaches this workspace to the active project %q, or creates it if none exists`, name)
 				if shape == "name" {
 					hint = fmt.Sprintf(`run "kata projects create" with name set to %q`, name)
+				} else if shape == "alias with name" {
+					hint = fmt.Sprintf(`run "kata init" with --project set to %q: it attaches this workspace to the active project %q, or creates it if none exists`, name, name)
 				}
 				if state != "missing" {
 					project, err := h.DB().CreateProject(t.Context(), name)
@@ -368,6 +374,8 @@ func TestResolve_NotInitializedHint(t *testing.T) {
 						hint = fmt.Sprintf(`run "kata projects restore %d", then run "kata init" in this workspace`, project.ID)
 						if shape == "name" {
 							hint = fmt.Sprintf(`run "kata projects restore %d"`, project.ID)
+						} else if shape == "alias with name" {
+							hint = fmt.Sprintf(`run "kata projects restore %d", then run "kata init" with --project set to %q in this workspace`, project.ID, name)
 						}
 					}
 				}
