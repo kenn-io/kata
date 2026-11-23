@@ -515,11 +515,14 @@ func printMetaGet(cmd *cobra.Command, issue metaIssueWire, key string) error {
 	if key != "" {
 		value, ok := issue.Metadata[key]
 		if !ok {
-			return &cliError{
-				Message:  fmt.Sprintf("metadata key not found: %s", key),
-				Kind:     kindNotFound,
-				ExitCode: ExitNotFound,
+			switch mode {
+			case outputJSON:
+				return printMetaValue(cmd, key, jsontext.Value("null"), issue, mode)
+			case outputAgent:
+				_, err := fmt.Fprintf(cmd.OutOrStdout(), "OK meta get %s count=0 revision=rev-%d\n", agentValue(issue.ShortID), issue.Revision)
+				return err
 			}
+			return nil
 		}
 		return printMetaValue(cmd, key, value, issue, mode)
 	}

@@ -146,10 +146,29 @@ func TestMetaGetEmptyAndMissingKey(t *testing.T) {
 	out := runCLI(t, env, dir, "meta", "get", ref)
 	assert.Contains(t, out, "no metadata")
 
-	_, stderr, err := runCLIWithErr(t, env, dir, "meta", "get", ref, "work.missing")
-	ce := requireCLIError(t, err, ExitNotFound)
-	assert.Equal(t, kindNotFound, ce.Kind)
-	assert.Contains(t, stderr, "metadata key not found")
+	for _, mode := range []string{"human", "agent", "json"} {
+		t.Run(mode, func(t *testing.T) {
+			args := []string{"meta", "get", ref, "work.missing"}
+			if mode != "human" {
+				args = append(args, "--"+mode)
+			}
+			stdout, stderr, err := runCLIWithErr(t, env, dir, args...)
+			require.NoError(t, err, stderr)
+			switch mode {
+			case "human":
+				assert.Empty(t, stdout)
+			case "agent":
+				assert.Equal(t, fmt.Sprintf("OK meta get %s count=0 revision=rev-1\n", ref), stdout)
+			case "json":
+				assert.JSONEq(t, fmt.Sprintf(`{"kata_api_version":1,"ref":%q,"revision":1,"key":"work.missing","value":null}`, ref), stdout)
+			}
+
+			args[2] = "zzzz"
+			_, _, err = runCLIWithErr(t, env, dir, args...)
+			ce := requireCLIError(t, err, ExitNotFound)
+			assert.Equal(t, kindNotFound, ce.Kind)
+		})
+	}
 }
 
 func TestMetaReservedKeyRejectionSurfacesValidation(t *testing.T) {
