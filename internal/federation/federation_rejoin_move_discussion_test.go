@@ -2,6 +2,7 @@ package federation
 
 import (
 	"bytes"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/dbtest"
@@ -118,7 +120,9 @@ func TestRejoinMoveWithOlderDiscussion(t *testing.T) {
 			}
 			if !tc.published || tc.pushOnly {
 				require.Equal(t, http.StatusConflict, resp.StatusCode, string(raw))
-				require.Contains(t, string(raw), "federated_move_unsupported")
+				var envelope api.ErrorEnvelope
+				require.NoError(t, json.Unmarshal(raw, &envelope))
+				require.Equal(t, "federated_move_unsupported", envelope.Error.Code)
 				return
 			}
 			require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))

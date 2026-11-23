@@ -502,17 +502,6 @@ func publishRetainedLinkPeers(ctx context.Context, store db.Storage, binding *db
 		if peers == nil {
 			peers = make(map[string]bool)
 		}
-		if event.Type == "issue.snapshot" {
-			var payload db.IssueDocumentPayload
-			if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
-				return false, err
-			}
-			for _, link := range payload.Links {
-				if !link.Incoming {
-					peers[link.ToIssueUID] = true
-				}
-			}
-		}
 		if event.Type == "issue.commented" && event.RelatedIssueUID != nil {
 			peers[*event.RelatedIssueUID] = true
 		}
