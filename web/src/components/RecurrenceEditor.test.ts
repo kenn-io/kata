@@ -78,7 +78,7 @@ describe('RecurrenceEditor — Common-mode rendering', () => {
         onSaved: vi.fn(),
       },
     })
-    expectDropdown('Frequency', 'Weekly')
+    expectDropdown('Frequency', 'week')
     const interval = screen.getByLabelText(/Every/i) as HTMLInputElement
     expect(interval.value).toBe('1')
     // Exactly one weekday chip is pre-selected (matches dtstart's weekday)
@@ -98,7 +98,7 @@ describe('RecurrenceEditor — Common-mode rendering', () => {
         onSaved: vi.fn(),
       },
     })
-    await chooseDropdown('Frequency', 'Monthly')
+    await chooseDropdown('Frequency', 'month')
     expect(screen.getByLabelText(/On day/i)).toBeTruthy()
     expect(screen.getByLabelText(/On the/i)).toBeTruthy()
   })
@@ -113,7 +113,7 @@ describe('RecurrenceEditor — Common-mode rendering', () => {
         onSaved: vi.fn(),
       },
     })
-    await chooseDropdown('Frequency', 'Yearly')
+    await chooseDropdown('Frequency', 'year')
     expectDropdown('Month', MONTH_LONG[new Date().getMonth()]!)
   })
 
@@ -134,11 +134,11 @@ describe('RecurrenceEditor — Common-mode rendering', () => {
         onSaved: vi.fn(),
       },
     })
-    await chooseDropdown('Frequency', 'Monthly')
+    await chooseDropdown('Frequency', 'month')
     const lastDay = screen.getByLabelText(/Last day of month/i) as HTMLInputElement
     await fireEvent.click(lastDay)
     expect(lastDay.checked).toBe(true)
-    await chooseDropdown('Frequency', 'Yearly')
+    await chooseDropdown('Frequency', 'year')
     // Click the "On day" radio for yearly mode so the day input becomes
     // the user-active control (the editor leaves yearlyDayMode at
     // "none" by default).
@@ -226,7 +226,7 @@ describe('RecurrenceEditor — Template block + summary', () => {
     })
     const summary = screen.getByTestId('recurrence-summary')
     expect(summary.textContent ?? '').toMatch(/^Weekly on /)
-    await chooseDropdown('Frequency', 'Daily')
+    await chooseDropdown('Frequency', 'day')
     expect(summary.textContent).toBe('Daily')
   })
 
@@ -297,7 +297,7 @@ describe('RecurrenceEditor — mode toggle', () => {
     const textarea = screen.getByLabelText(/RRULE/i) as HTMLTextAreaElement
     await fireEvent.input(textarea, { target: { value: 'FREQ=DAILY;INTERVAL=2' } })
     await fireEvent.click(screen.getByRole('button', { name: /Use Common mode/i }))
-    expectDropdown('Frequency', 'Daily')
+    expectDropdown('Frequency', 'day')
     expect((screen.getByLabelText(/Every/i) as HTMLInputElement).value).toBe('2')
   })
 
@@ -484,7 +484,7 @@ describe('RecurrenceEditor — edit mode prefill', () => {
         onPatch: vi.fn(),
       },
     })
-    expectDropdown('Frequency', 'Weekly')
+    expectDropdown('Frequency', 'week')
     expect((screen.getByLabelText(/Title/i) as HTMLInputElement).value).toBe('Weekly review')
   })
 

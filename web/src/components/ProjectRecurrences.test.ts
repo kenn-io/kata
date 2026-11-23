@@ -150,7 +150,12 @@ it('refreshes the list after an edit conflict', async () => {
 })
 
 it('retries a refused stop with the current revision', async () => {
-  const updated = { ...recurrence, template_title: 'Changed rule', revision: 2 }
+  const updated = {
+    ...recurrence,
+    template_title: 'Changed rule',
+    rrule: 'FREQ=DAILY',
+    revision: 2,
+  }
   vi.mocked(listRecurrences)
     .mockResolvedValueOnce({
       status: 200,
@@ -185,21 +190,17 @@ it('retries a refused stop with the current revision', async () => {
       'This rule changed elsewhere. Review the current rule before stopping it.',
     ),
   ).toBeTruthy()
-  await waitFor(() =>
-    expect(
-      (
-        within(screen.getByRole('dialog')).getByRole('button', {
-          name: 'Stop repeating',
-        }) as HTMLButtonElement
-      ).disabled,
-    ).toBe(true),
-  )
-  await fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
-  await fireEvent.click(screen.getByRole('button', { name: 'Stop repeating…' }))
-  expect(within(screen.getByRole('dialog')).getByText('Changed rule')).toBeTruthy()
-  await fireEvent.click(
-    within(screen.getByRole('dialog')).getByRole('button', { name: 'Stop repeating' }),
-  )
+  const dialog = screen.getByRole('dialog')
+  const stop = within(dialog).getByRole('button', { name: 'Stop repeating' }) as HTMLButtonElement
+  await waitFor(() => expect(within(dialog).getByText('Changed rule')).toBeTruthy())
+  expect(within(dialog).getByText(/Daily · Next/)).toBeTruthy()
+  expect(stop.disabled).toBe(true)
+  await fireEvent.click(stop)
+  expect(onDelete).toHaveBeenCalledTimes(1)
+  await fireEvent.click(within(dialog).getByRole('button', { name: 'Review updated rule' }))
+  expect(within(dialog).queryByRole('button', { name: 'Review updated rule' })).toBeNull()
+  expect(stop.disabled).toBe(false)
+  await fireEvent.click(stop)
   await waitFor(() => expect(onDelete).toHaveBeenLastCalledWith(updated))
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
 })

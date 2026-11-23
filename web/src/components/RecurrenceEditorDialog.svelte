@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Button } from '@kenn-io/kit-ui'
+  import type { ComponentProps } from 'svelte'
 
   import Modal from './Modal.svelte'
   import RecurrenceEditor from './RecurrenceEditor.svelte'
@@ -9,9 +10,7 @@
     KataRecurrence,
   } from '../lib/kata/types'
 
-  type Mode =
-    | { kind: 'create'; projectID: number; initialIssueRef: string }
-    | { kind: 'edit'; recurrence: KataRecurrence; etag: string }
+  type Mode = ComponentProps<typeof RecurrenceEditor>['mode']
 
   interface Props {
     open: boolean
@@ -46,7 +45,7 @@
 
 <Modal
   {open}
-  title={mode.kind === 'create' ? 'New recurrence' : 'Edit recurrence'}
+  title={mode.kind === 'create' ? 'Repeat' : 'Edit recurrence'}
   onClose={busy ? () => {} : onClose}
   width={560}
 >

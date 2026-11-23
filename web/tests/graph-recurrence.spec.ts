@@ -29,7 +29,7 @@ test('creates, edits, and stops a repeating task from the project header', async
   const issue = await kata.seedIssue(page, credentials, { title: 'Recurring example task' })
   await page.goto(`${kata.origin}/kata?view=all-open&scope=${kata.projectUID}&issue=${issue.uid}`)
   await page.getByRole('button', { name: 'Repeats…' }).click()
-  const create = page.getByRole('dialog', { name: 'New recurrence' })
+  const create = page.getByRole('dialog', { name: 'Repeat' })
   await create.getByLabel('Title', { exact: true }).fill('Weekly example review')
   await create.getByRole('button', { name: 'Save' }).click()
   const chip = page.getByRole('button', { name: /1 repeating task/ })

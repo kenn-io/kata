@@ -148,6 +148,9 @@
                 ? `Next ${formatDay(recurrence.next_occurrence_key)}`
                 : 'Ended'}</span
             >
+            {#if recurrence.last_materialized_uid}<span
+                >Latest task <code>{recurrence.last_materialized_uid}</code></span
+              >{/if}
             {#if !disabled}<div>
                 <button onclick={() => dialogs?.openEditRecurrence(recurrence)}>Edit</button>
                 <button onclick={() => dialogs?.openDeleteRecurrence(recurrence)}
@@ -193,6 +196,9 @@
   .row span {
     color: var(--text-muted);
     font-size: var(--font-size-xs);
+  }
+  .row code {
+    overflow-wrap: anywhere;
   }
   .row button {
     color: var(--accent-blue);

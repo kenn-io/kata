@@ -409,8 +409,12 @@ describe('IssueDetail', () => {
     renderDetail({ issue: makeIssue({ owner: 'user-a', priority: 2 }), selectedRecurrences: [] })
     await fireEvent.click(screen.getByRole('button', { name: 'Repeats…' }))
     const dialog = screen.getByRole('dialog')
-    expect((within(dialog).getByLabelText('Title') as HTMLInputElement).value).toBe('Ship the thing')
-    expect((within(dialog).getByLabelText('Body') as HTMLTextAreaElement).value).toBe('Initial body')
+    expect((within(dialog).getByLabelText('Title') as HTMLInputElement).value).toBe(
+      'Ship the thing',
+    )
+    expect((within(dialog).getByLabelText('Body') as HTMLTextAreaElement).value).toBe(
+      'Initial body',
+    )
     expect((within(dialog).getByLabelText('Owner') as HTMLInputElement).value).toBe('user-a')
     expect(within(dialog).getByRole('combobox', { name: 'Priority: P2' })).toBeTruthy()
     expect((within(dialog).getByLabelText('Labels') as HTMLInputElement).value).toBe('review')
