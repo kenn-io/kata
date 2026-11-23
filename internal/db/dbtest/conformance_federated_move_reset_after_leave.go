@@ -28,9 +28,7 @@ func checkFederatedMoveResetAfterAcknowledgedSourceLeave(t *testing.T, store db.
 			issue, creation, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "acknowledged move", Author: "worker"})
 			require.NoError(t, err)
 			require.Equal(t, store.InstanceUID(), creation.OriginInstanceUID)
-			_, comment, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "acknowledged comment"})
-			require.NoError(t, err)
-			require.NoError(t, store.AdvanceFederationPushCursor(ctx, source.ID, comment.ID))
+			require.NoError(t, store.AdvanceFederationPushCursor(ctx, source.ID, creation.ID))
 			moved, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
 				IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "worker",
 			})
@@ -45,8 +43,6 @@ func checkFederatedMoveResetAfterAcknowledgedSourceLeave(t *testing.T, store db.
 			}
 			require.NoError(t, err, "retired source history was acknowledged before leaving")
 			_, err = store.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
-			require.ErrorIs(t, err, db.ErrNotFound)
-			_, err = store.EventsByUIDs(ctx, source.ID, []string{comment.UID})
 			require.ErrorIs(t, err, db.ErrNotFound)
 		})
 	}

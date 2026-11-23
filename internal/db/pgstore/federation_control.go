@@ -174,9 +174,6 @@ updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`,
 		if err := reconcileFederationBindingTransitionLinks(ctx, tx, previous, output); err != nil {
 			return err
 		}
-		if _, err = tx.ExecContext(ctx, `DELETE FROM federation_held_cursors WHERE project_uid=(SELECT uid FROM projects WHERE id=$1 AND deleted_at IS NULL)`, input.ProjectID); err != nil {
-			return err
-		}
 		_, err = tx.ExecContext(ctx, `DELETE FROM meta WHERE key=$1 || (SELECT uid FROM projects WHERE id=$2 AND deleted_at IS NULL)`, db.FederationRetainedProjectPrefix, input.ProjectID)
 		return err
 	})

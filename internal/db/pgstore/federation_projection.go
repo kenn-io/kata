@@ -168,7 +168,11 @@ func (s *Store) leaveFederationReplica(ctx context.Context, projectID int64, dis
 		if discardRelay {
 			err = s.discardRelayHopStateTx(ctx, tx, projectID, binding.RelayConfig)
 		} else {
-			err = s.validateRelayLifecycleTx(ctx, tx, projectID, true)
+			if binding.PushEnabled {
+				err = s.validateRelayLifecycleTx(ctx, tx, projectID, true)
+			} else {
+				err = s.relayReset(tx).ValidateLifecycle(ctx, projectID)
+			}
 			if err == nil && binding.RelayConfig != nil {
 				err = deleteRelayBindingStateTx(ctx, tx, binding.RelayConfig.BindingUID)
 			}
@@ -177,9 +181,6 @@ func (s *Store) leaveFederationReplica(ctx context.Context, projectID int64, dis
 			return err
 		}
 		if err := db.ClearFederationProjectIdentityDependencies(ctx, tx, project.UID); err != nil {
-			return mapSQLError(err, nil)
-		}
-		if err := db.RetainFederationHeldCursor(ctx, tx, projectID, project.UID); err != nil {
 			return mapSQLError(err, nil)
 		}
 		for _, query := range []string{

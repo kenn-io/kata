@@ -566,9 +566,6 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 	if err := reconcileFederationBindingTransitionLinks(ctx, tx, previous, binding); err != nil {
 		return db.FederationBinding{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM federation_held_cursors WHERE project_uid=(SELECT uid FROM projects WHERE id=? AND deleted_at IS NULL)`, b.ProjectID); err != nil {
-		return db.FederationBinding{}, err
-	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=? || (SELECT uid FROM projects WHERE id=? AND deleted_at IS NULL)`, db.FederationRetainedProjectPrefix, b.ProjectID); err != nil {
 		return db.FederationBinding{}, err
 	}
@@ -642,7 +639,11 @@ func (d *Store) leaveFederationReplica(ctx context.Context, projectID int64, dis
 	if discardRelay {
 		err = d.discardRelayHopStateTx(ctx, tx, projectID, binding.RelayConfig)
 	} else {
-		err = d.validateRelayLifecycleTx(ctx, tx, projectID, true)
+		if binding.PushEnabled {
+			err = d.validateRelayLifecycleTx(ctx, tx, projectID, true)
+		} else {
+			err = d.relayReset(tx).ValidateLifecycle(ctx, projectID)
+		}
 		if err == nil && binding.RelayConfig != nil {
 			err = deleteRelayBindingStateTx(ctx, tx, binding.RelayConfig.BindingUID)
 		}
@@ -652,9 +653,6 @@ func (d *Store) leaveFederationReplica(ctx context.Context, projectID int64, dis
 	}
 	if err := db.ClearFederationProjectIdentityDependencies(ctx, tx, uid); err != nil {
 		return db.LeaveFederationResult{}, fmt.Errorf("clear former project identity dependencies: %w", err)
-	}
-	if err := db.RetainFederationHeldCursor(ctx, tx, projectID, uid); err != nil {
-		return db.LeaveFederationResult{}, fmt.Errorf("retain held federation cursor: %w", err)
 	}
 	for _, stmt := range []string{
 		`DELETE FROM federation_quarantine WHERE project_id = ?`,

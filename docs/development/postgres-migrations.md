@@ -531,21 +531,3 @@ credentials cannot migrate. SQLite stores at schema 41 or later upgrade
 Start the matching schema 53 binary after migration. Older binaries
 cannot open schema 53; rollback requires the pre-upgrade backup and matching
 older binary.
-
-## Schema 54: held federation cursors
-
-The 53→54 migration adds `federation_held_cursors`, which starts empty and stores
-acknowledged push cursors for projects that leave federation. Kata uses these
-cursors to retain unsent edits through a reset. Existing project data stays
-unchanged.
-
-Stop serving daemons and imports, back up the database, and run
-`kata storage postgres migrate` with schema-owner credentials. Reapply runtime
-role grants for the new table as described in
-[PostgreSQL operations](../operations/postgres.md). The table has no sequences.
-Validation-only credentials cannot migrate. SQLite adds the empty table in
-place during its normal upgrade.
-
-Start the matching schema 54 binary after migration. Older binaries cannot open
-schema 54. Rollback requires the pre-upgrade backup and matching older binary;
-there is no down migration.
