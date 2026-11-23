@@ -9,7 +9,6 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"sync"
 	"testing"
 	"time"
@@ -810,36 +809,6 @@ func TestPatchRecurrenceLocalFutureRevisionInterleaving(t *testing.T) {
 			assert.Equal(t, int64(2), after.Revision)
 			assert.Equal(t, want.rec, after)
 			assert.Equal(t, want.cursor, recurrenceWriteCursor(t, env))
-		})
-	}
-}
-func TestRecurrencePreview(t *testing.T) {
-	env := testenv.New(t, testenv.WithAuthToken("tok"))
-	p := seedProject(t, env, "preview")
-	for _, tc := range []struct {
-		name, rule, start, timezone string
-		dates                       []string
-		status                      int
-	}{
-		{"weekday", "FREQ=WEEKLY;BYDAY=MO", "2026-11-22", "UTC", []string{"2026-11-23", "2026-11-30", "2026-12-07", "2026-12-14"}, 200},
-		{"cairo", "FREQ=MONTHLY;BYMONTHDAY=-1", "2027-03-12", "Africa/Cairo", []string{"2027-03-31", "2027-04-30", "2027-05-31", "2027-06-30"}, 200},
-		{"los angeles until", "FREQ=DAILY;UNTIL=20260517T070000Z", "2026-05-15", "America/Los_Angeles", []string{"2026-05-15", "2026-05-16", "2026-05-17"}, 200},
-		{"count", "FREQ=DAILY;COUNT=2", "2026-11-22", "UTC", []string{"2026-11-22", "2026-11-23"}, 200},
-		{"invalid", "FREQ=BAD", "2026-11-22", "UTC", nil, 400},
-		{"local", "FREQ=DAILY", "2026-11-22", "Local", nil, 400},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			q := url.Values{"rrule": {tc.rule}, "dtstart": {tc.start}, "timezone": {tc.timezone}}
-			resp := doGet(t, env, fmt.Sprintf("%s/api/v1/projects/%d/recurrence-preview?%s", env.URL, p.ID, q.Encode()))
-			defer func() { _ = resp.Body.Close() }()
-			require.Equal(t, tc.status, resp.StatusCode)
-			if tc.status == 200 {
-				var body struct {
-					Dates []string `json:"dates"`
-				}
-				require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
-				assert.Equal(t, tc.dates, body.Dates)
-			}
 		})
 	}
 }

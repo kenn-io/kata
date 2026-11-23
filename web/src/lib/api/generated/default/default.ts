@@ -220,8 +220,6 @@ import type {
   PollFederationProjectEventsPathParameters,
   PollProjectEventsParams,
   PollProjectEventsPathParameters,
-  PreviewRecurrenceParams,
-  PreviewRecurrencePathParameters,
   PriorityRequestBody,
   ProjectAccessResponseBody,
   ProjectFederationBody,
@@ -251,7 +249,6 @@ import type {
   ReconcileExternalRootBridgePathParameters,
   ReconcileExternalRootByKeyPathParameters,
   ReconcileExternalRootByKeyRequestBody,
-  RecurrencePreviewResponseBody,
   RelayAcceptance,
   RelayAckRequestBody,
   RelayAckResponseBody,
@@ -6685,57 +6682,6 @@ export const readyIssues = async (
   options?: Parameters<typeof orvalFetch>[1],
 ): Promise<readyIssuesResponse> => {
   return orvalFetch<readyIssuesResponse>(getReadyIssuesUrl({ projectId }, params), {
-    ...options,
-    method: 'GET',
-  })
-}
-
-export type previewRecurrenceResponse200 = {
-  data: RecurrencePreviewResponseBody
-  status: 200
-}
-
-export type previewRecurrenceResponseDefault = {
-  data: ErrorEnvelope
-  status: Exclude<HTTPStatusCodes, 200>
-}
-
-export type previewRecurrenceResponseSuccess = previewRecurrenceResponse200 & {
-  headers: Headers
-}
-export type previewRecurrenceResponseError = previewRecurrenceResponseDefault & {
-  headers: Headers
-}
-
-export type previewRecurrenceResponse =
-  | previewRecurrenceResponseSuccess
-  | previewRecurrenceResponseError
-
-export const getPreviewRecurrenceUrl = (
-  { projectId }: PreviewRecurrencePathParameters,
-  params: PreviewRecurrenceParams,
-) => {
-  const normalizedParams = new URLSearchParams()
-
-  Object.entries(params || {}).forEach(([key, value]) => {
-    if (value !== undefined) {
-      normalizedParams.append(key, value === null ? 'null' : String(value))
-    }
-  })
-
-  const stringifiedParams = normalizedParams.toString()
-
-  return stringifiedParams.length > 0
-    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/recurrence-preview?${stringifiedParams}`
-    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/recurrence-preview`
-}
-
-export const previewRecurrence = async (
-  { projectId }: PreviewRecurrencePathParameters,
-  params: PreviewRecurrenceParams,
-  options?: Parameters<typeof orvalFetch>[1],
-): Promise<previewRecurrenceResponse> => {
-  return orvalFetch<previewRecurrenceResponse>(getPreviewRecurrenceUrl({ projectId }, params), {
     ...options,
     method: 'GET',
   })

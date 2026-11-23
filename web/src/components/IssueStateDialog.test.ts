@@ -72,14 +72,9 @@ describe('IssueStateDialog', () => {
   it('states only the blocking link when the blocked task is not loaded', async () => {
     const dialog = await openCompletePreview(['issue-2'])
     expect(within(dialog).getByText('Comments and links stay.')).toBeTruthy()
-    expect(within(dialog).getByText('Blocks 1 open task.')).toBeTruthy()
     expect(within(dialog).queryByText(/Unblocks/)).toBeNull()
   })
 
-  it('unblocks an open task whose only open blocker is this task', async () => {
-    const dialog = await openCompletePreview(['issue-2'], [blockedTask('issue-2', ['issue-1'])])
-    expect(within(dialog).getByText('Unblocks 1 open task.')).toBeTruthy()
-  })
 
   it('does not say closing unblocks a task that has another open blocker', async () => {
     const dialog = await openCompletePreview(
@@ -87,8 +82,6 @@ describe('IssueStateDialog', () => {
       [blockedTask('issue-2', ['issue-1', 'issue-9']), blockedTask('issue-3', ['issue-1'])],
     )
     expect(within(dialog).getByText('Unblocks 1 open task.')).toBeTruthy()
-    expect(within(dialog).getByText('1 open task stays blocked by other open tasks.')).toBeTruthy()
-    expect(within(dialog).getByText('Blocks 1 more open task.')).toBeTruthy()
   })
 
   it('uses shared Kit UI actions', async () => {

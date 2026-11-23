@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte'
+import { cleanup, fireEvent, render, screen } from '@testing-library/svelte'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import RecurrenceEditor from './RecurrenceEditor.svelte'
 import RecurrenceEditorDialog from './RecurrenceEditorDialog.svelte'
@@ -6,16 +6,8 @@ import RecurrenceDeleteDialog from './RecurrenceDeleteDialog.svelte'
 import { ADVANCED_LAST_WEEKDAY } from '../lib/recurrence/__fixtures__/advancedRules'
 import { MONTH_LONG } from '../lib/recurrence/rrule'
 import type { KataRecurrence } from '../lib/kata/types'
-import { previewRecurrence } from '../lib/api/generated/default/default'
 
-vi.mock('../lib/api/generated/default/default', () => ({
-  previewRecurrence: vi.fn().mockRejectedValue(new Error('unavailable')),
-}))
-
-afterEach(() => {
-  cleanup()
-  vi.clearAllMocks()
-})
+afterEach(cleanup)
 
 const createMode = { kind: 'create', projectID: 1, initialIssueRef: 'abc4' } as const
 
@@ -40,91 +32,6 @@ const sample: KataRecurrence = {
   updated_at: '2026-05-15T12:00:00.000Z',
 }
 const editMode = { kind: 'edit' as const, recurrence: sample, etag: '"rev-1"' }
-
-test('previews create dates and aborts an obsolete request without blocking save', async () => {
-  vi.mocked(previewRecurrence)
-    .mockImplementationOnce(() => new Promise(() => {}))
-    .mockResolvedValueOnce({
-      status: 200,
-      headers: new Headers(),
-      data: { dates: ['2026-11-22', '2026-11-29'] },
-    })
-  render(RecurrenceEditorDialog, {
-    props: {
-      open: true,
-      mode: createMode,
-      actor: 'user-a',
-      onClose: vi.fn(),
-      onCreate: vi.fn(),
-      onPatch: vi.fn(),
-    },
-  })
-  await fireEvent.input(screen.getByLabelText('Title'), { target: { value: 'Draft' } })
-  await waitFor(() => expect(previewRecurrence).toHaveBeenCalledTimes(1))
-  const signal = vi.mocked(previewRecurrence).mock.calls[0]![2]!.signal as AbortSignal
-  await chooseDropdown('Frequency', 'Daily')
-  expect(signal.aborted).toBe(true)
-  expect(await screen.findByText(/This task becomes the first/)).toBeTruthy()
-  expect(screen.getByText(/^Then /)).toBeTruthy()
-  expect(
-    screen.getByText('Complete each task to create the next, until the rule ends.'),
-  ).toBeTruthy()
-  expect(screen.getByRole('button', { name: 'Save' })).not.toHaveProperty('disabled', true)
-})
-
-test('omits the next-task sentence when there is only one date', async () => {
-  vi.mocked(previewRecurrence).mockResolvedValueOnce({
-    status: 200,
-    headers: new Headers(),
-    data: { dates: ['2026-11-22'] },
-  })
-  render(RecurrenceEditor, {
-    props: {
-      mode: createMode,
-      actor: 'user-a',
-      onCreate: vi.fn(),
-      onPatch: vi.fn(),
-      onSaved: vi.fn(),
-    },
-  })
-  expect(await screen.findByText(/This task becomes the first/)).toBeTruthy()
-  expect(
-    screen.queryByText('Complete each task to create the next, until the rule ends.'),
-  ).toBeNull()
-})
-
-test('a failed preview leaves the summary and save available', async () => {
-  render(RecurrenceEditorDialog, {
-    props: {
-      open: true,
-      mode: createMode,
-      actor: 'user-a',
-      onClose: vi.fn(),
-      onCreate: vi.fn(),
-      onPatch: vi.fn(),
-    },
-  })
-  await fireEvent.input(screen.getByLabelText('Title'), { target: { value: 'Draft' } })
-  await waitFor(() => expect(previewRecurrence).toHaveBeenCalled())
-  expect(screen.getByTestId('recurrence-summary')).toBeTruthy()
-  expect(screen.queryByText(/^Then /)).toBeNull()
-  expect(screen.getByRole('button', { name: 'Save' })).not.toHaveProperty('disabled', true)
-})
-
-test('editing a rule does not request preview dates', async () => {
-  render(RecurrenceEditor, {
-    props: {
-      mode: editMode,
-      actor: 'user-a',
-      onCreate: vi.fn(),
-      onPatch: vi.fn(),
-      onSaved: vi.fn(),
-    },
-  })
-  await new Promise((resolve) => setTimeout(resolve, 300))
-  expect(previewRecurrence).not.toHaveBeenCalled()
-  expect(screen.queryByText(/^Then /)).toBeNull()
-})
 
 async function chooseDropdown(title: string, option: string): Promise<void> {
   await fireEvent.click(screen.getByRole('combobox', { name: new RegExp(`^${title}:`) }))
@@ -842,7 +749,7 @@ describe('RecurrenceEditor — edit diff', () => {
 })
 
 describe('RecurrenceEditor — 412 conflict', () => {
-  test('keeps the draft and tells the user to reopen the rule', async () => {
+  test('keeps the draft when the rule changes', async () => {
     const onPatch = vi.fn().mockRejectedValue({ status: 412 })
     render(RecurrenceEditorDialog, {
       props: {
@@ -862,49 +769,6 @@ describe('RecurrenceEditor — 412 conflict', () => {
       ),
     ).toBeTruthy()
     expect((screen.getByLabelText(/Title/i) as HTMLInputElement).value).toBe('My edit')
-  })
-})
-
-describe('RecurrenceEditor — 412 recovery', () => {
-  test('loads the other writer’s version and lists the edits to re-apply', async () => {
-    const latest: KataRecurrence = {
-      ...sample,
-      template_title: 'Their title',
-      template_body: 'Their body',
-      revision: 2,
-    }
-    const onPatch = vi
-      .fn()
-      .mockRejectedValueOnce({ status: 412, latest })
-      .mockResolvedValueOnce(undefined)
-    render(RecurrenceEditorDialog, {
-      props: {
-        open: true,
-        mode: editMode,
-        actor: 'user-a',
-        onClose: vi.fn(),
-        onCreate: vi.fn(),
-        onPatch,
-      },
-    })
-    await fireEvent.input(screen.getByLabelText(/Title/i), { target: { value: 'My edit' } })
-    await fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-    await fireEvent.click(await screen.findByRole('button', { name: 'Load current version' }))
-
-    expect(onPatch).toHaveBeenCalledTimes(1)
-    expect((screen.getByLabelText(/Title/i) as HTMLInputElement).value).toBe('Their title')
-    expect((screen.getByLabelText(/Body/i) as HTMLTextAreaElement).value).toBe('Their body')
-    const changes = screen.getByRole('list', { name: 'Your changes' })
-    expect(changes.textContent).toContain('Title: My edit')
-    expect(screen.queryByRole('alert')).toBeNull()
-
-    await fireEvent.input(screen.getByLabelText(/Title/i), { target: { value: 'My edit' } })
-    await fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-    expect(onPatch).toHaveBeenCalledTimes(2)
-    expect(onPatch.mock.calls[1]).toEqual([
-      latest,
-      { actor: 'user-a', template: { title: 'My edit' } },
-      '"rev-2"',
-    ])
+    expect(onPatch).toHaveBeenCalledWith(sample, expect.anything(), '"rev-1"')
   })
 })

@@ -478,16 +478,6 @@ func (r ReadyIssuesQuery) Validate() error {
 	return errors
 }
 
-type PreviewRecurrenceQuery struct {
-	Rrule    string `json:"rrule" validate:"required"`
-	Dtstart  string `json:"dtstart" validate:"required"`
-	Timezone string `json:"timezone" validate:"required"`
-}
-
-func (p PreviewRecurrenceQuery) Validate() error {
-	return runtime.ConvertValidatorError(typesValidator.Struct(p))
-}
-
 type DeleteRecurrenceQuery struct {
 	Actor *string `json:"actor,omitempty"`
 }

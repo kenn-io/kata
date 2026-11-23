@@ -120,8 +120,6 @@ Omit the field for an unconditional edit. A new issue starts at `content_revisio
 
 ## Recurrence timezones
 
-`GET /api/v1/projects/{project_id}/recurrence-preview` accepts `rrule`, `dtstart`, and `timezone` query parameters and returns up to four scheduled dates in `dates`. It validates the same schedule as creation and does not save a rule.
-
 Use an IANA time zone such as `America/New_York` or `UTC` when creating a
 recurrence with `POST /api/v1/projects/{project_id}/recurrences`:
 
@@ -337,7 +335,6 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
-| `0.66.0` | Previews up to four dates for a proposed recurrence without saving it. |
 | `0.64.0` | Routes shared-project attachments to their Docbank origin. Attachment references can include `origin`; the UI attachment capability is enabled when the daemon has a local Docbank or any enabled spoke binding. A disabled spoke rejects uploads and links with `503 federation_offline`, even when it has a local vault. Federation peers advertise `docbank_origin_v1` before receiving origin references. |
 | `0.63.0` | Browser issue reference resolution accepts a project name or UID and qualified references without a project ID. |
 | `0.62.0` | Federation peers advertise `relay_cross_links_v1` in `X-Kata-Event-Features`. A common root can link issues across projects with a shared relay audience. Relays check access to each referenced project they can resolve before releasing events or checkpoints, and pause for older peers with `409 unsupported_event_features` at crossing links or links with unresolved endpoints. An unresolved endpoint may belong to another project. |

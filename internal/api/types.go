@@ -1647,21 +1647,6 @@ type CreateRecurrenceResponse struct {
 	}
 }
 
-// RecurrencePreviewRequest describes a proposed schedule.
-type RecurrencePreviewRequest struct {
-	ProjectID int64  `path:"project_id"`
-	RRule     string `query:"rrule" required:"true"`
-	DTStart   string `query:"dtstart" required:"true"`
-	Timezone  string `query:"timezone" required:"true"`
-}
-
-// RecurrencePreviewResponse contains the first scheduled dates.
-type RecurrencePreviewResponse struct {
-	Body struct {
-		Dates []string `json:"dates"`
-	}
-}
-
 // ListRecurrencesRequest is GET /api/v1/projects/{project_id}/recurrences.
 type ListRecurrencesRequest struct {
 	ProjectID int64 `path:"project_id" required:"true"`

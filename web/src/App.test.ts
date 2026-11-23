@@ -3038,22 +3038,12 @@ describe('App', () => {
           writes.push(path)
           if (path.endsWith('/issues'))
             return Response.json({ issue: accepted.collection[0] }, { status: 201 })
-          if (path.endsWith('/metadata')) accepted.catalog[0]!.project.metadata.role = 'changed'
         }
         return Response.json(accepted, { headers: { ETag: '"snapshot-1"' } })
       }),
     )
     render(App)
     await fireEvent.click(await screen.findByRole('button', { name: 'New task' }))
-    await fireEvent.click(screen.getByRole('combobox', { name: 'Project: example-project' }))
-    await fireEvent.click(screen.getByRole('option', { name: 'example-workspace' }))
-    await fireEvent.click(
-      within(screen.getByRole('dialog', { name: 'New task' })).getByRole('button', {
-        name: 'Cancel',
-      }),
-    )
-    expect(writes).toEqual([])
-    await fireEvent.click(screen.getByRole('button', { name: 'New task' }))
     await fireEvent.click(screen.getByRole('combobox', { name: 'Project: example-project' }))
     await fireEvent.click(screen.getByRole('option', { name: 'example-workspace' }))
     await fireEvent.input(screen.getByRole('textbox', { name: 'Quick capture' }), {
@@ -3063,71 +3053,6 @@ describe('App', () => {
       within(screen.getByRole('dialog', { name: 'New task' })).getByRole('button', { name: 'Add' }),
     )
     await waitFor(() => expect(writes).toEqual(['/api/v1/projects/8/issues']))
-    expect(accepted.catalog[0]!.project.metadata.role).toBe('inbox')
-  })
-
-  it('makes an existing project the Inbox from its header after confirmation', async () => {
-    history.replaceState(null, '', '/kata?scope=01J00000000000000000000008#direct=1')
-    sessionStorage.setItem(
-      'kata.web.session.v1',
-      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
-    )
-    const accepted = snapshot()
-    accepted.catalog[0]!.project.metadata.role = 'inbox'
-    accepted.catalog.push({
-      project: {
-        active: true,
-        id: 8,
-        uid: '01J00000000000000000000008',
-        name: 'example-workspace',
-        metadata: { area: 'Work' },
-        revision: 3,
-        created_at: '2026-08-01T09:00:00.000Z',
-      },
-      stats: { Open: 0, Closed: 0, LastEventAt: '2026-08-01T12:00:00.000Z' },
-    })
-    const writes: Array<{ path: string; ifMatch: string | null; body: unknown }> = []
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const request =
-          input instanceof Request
-            ? input
-            : new Request(new URL(String(input), window.location.origin), init)
-        const path = new URL(request.url).pathname
-        if (request.method === 'POST' && path.startsWith('/api/v1/projects/')) {
-          writes.push({
-            path,
-            ifMatch: request.headers.get('If-Match'),
-            body: await request.json(),
-          })
-          delete accepted.catalog[0]!.project.metadata.role
-          accepted.catalog[1]!.project.metadata.role = 'inbox'
-          return Response.json({ changed: true, project: accepted.catalog[1]!.project })
-        }
-        if (path.endsWith('/recurrences')) return Response.json({ recurrences: [] })
-        return Response.json(accepted, { headers: { ETag: `"snapshot-${writes.length}"` } })
-      }),
-    )
-    render(App)
-    await fireEvent.click(await screen.findByRole('button', { name: 'Make Inbox…' }))
-    let dialog = screen.getByRole('dialog', { name: 'Make Inbox' })
-    expect(dialog.textContent).toContain('example-project')
-    await fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
-    expect(writes).toEqual([])
-
-    await fireEvent.click(screen.getByRole('button', { name: 'Make Inbox…' }))
-    dialog = screen.getByRole('dialog', { name: 'Make Inbox' })
-    await fireEvent.click(within(dialog).getByRole('button', { name: 'Make Inbox' }))
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Make Inbox' })).toBeNull())
-    expect(writes).toEqual([
-      {
-        path: '/api/v1/projects/8/metadata',
-        ifMatch: '"rev-3"',
-        body: { actor: 'kata-web', patch: { role: 'inbox' } },
-      },
-    ])
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Make Inbox…' })).toBeNull())
   })
 
   it('loads, applies, and persists presentation preferences', async () => {
@@ -3249,7 +3174,7 @@ describe('App', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Stop repeating' })).toBeNull())
   })
 
-  it('keeps a refused stop in its dialog and retries with the refreshed revision', async () => {
+  it('keeps a refused stop in its dialog', async () => {
     const accepted = recurrenceDeletionSetup()
     const rule = accepted.selected.recurrences[0]!
     const deletions: Array<string | null> = []
@@ -3279,15 +3204,13 @@ describe('App', () => {
     rule.revision = 5
     const dialog = await stopRepeatingFromHeader()
 
-    expect((await within(dialog).findByRole('alert')).textContent).toBe(
-      'This rule changed. Review it and try again.',
+    await waitFor(() => expect(deletions).toEqual(['"rev-4"']))
+    await waitFor(() =>
+      expect(
+        (within(dialog).getByRole('button', { name: 'Stop repeating' }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false),
     )
-    expect(deletions).toEqual(['"rev-4"'])
-
-    await fireEvent.click(within(dialog).getByRole('button', { name: 'Stop repeating' }))
-
-    await waitFor(() => expect(deletions).toEqual(['"rev-4"', '"rev-5"']))
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Stop repeating' })).toBeNull())
   })
 
   it('omits a client actor from temporary claims in identity mode', async () => {
@@ -4552,13 +4475,6 @@ describe('App', () => {
             removeProject = true
             window.dispatchEvent(new Event('focus'))
             await waitFor(() => expect(snapshotReads).toBeGreaterThan(reads))
-            await waitFor(() =>
-              expect(
-                within(screen.getByRole('dialog', { name: 'New task' })).getByRole('button', {
-                  name: 'Add',
-                }),
-              ).toHaveProperty('disabled', true),
-            )
             expect(actionRequests).toHaveLength(0)
             expect(shownErrors).toEqual([])
             return

@@ -133,7 +133,7 @@ describe('AppShell', () => {
     expect(screen.queryByRole('button', { name: 'Credentials' })).toBeNull()
   })
 
-  test('refreshes repeating tasks when the project snapshot cursor advances', async () => {
+  test('refreshes repeating tasks when the recurrence revision changes', async () => {
     const rule = {
       id: 1,
       uid: 'recurrence-1',
@@ -177,7 +177,7 @@ describe('AppShell', () => {
     await waitFor(() => expect(recurrenceReads).toBe(1))
     expect(screen.queryByRole('button', { name: /repeating task/ })).toBeNull()
 
-    await view.rerender({ ...props, snapshot: { ...current, cursor: current.cursor + 1 } })
+    await view.rerender({ ...props, recurrenceRevision: 1 })
 
     await waitFor(() =>
       expect(screen.getByRole('button', { name: '↻ 1 repeating task' })).not.toBeNull(),

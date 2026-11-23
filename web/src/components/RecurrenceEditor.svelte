@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button, Checkbox, NumberInput, RadioGroup, SelectDropdown } from '@kenn-io/kit-ui'
+  import { Checkbox, NumberInput, RadioGroup, SelectDropdown } from '@kenn-io/kit-ui'
   import type {
     KataCreateRecurrenceInput,
     KataPatchRecurrenceInput,
@@ -7,8 +7,6 @@
     KataRecurrenceTemplateUpdateInput,
   } from '../lib/kata/types'
   import DatePicker from './DatePicker.svelte'
-  import { previewRecurrence } from '../lib/api/generated/default/default'
-  import { formatDay } from '../lib/kata/dates'
   import {
     WEEKDAYS,
     WEEKDAY_LABEL,
@@ -122,14 +120,8 @@
   // --- Submit state ----------------------------------------------
   let submitError: string | null = $state(null)
   let conflictBanner: string | null = $state(null)
-  // On a 412 the list hands over the other writer's version; loading it
-  // swaps the form and baseline and keeps the refused edits as a list.
-  let conflictLatest: KataRecurrence | null = $state(null)
-  let refusedPatch: KataPatchRecurrenceInput | null = $state(null)
-  let yourChanges: string[] = $state([])
 
   // --- Baseline tracking (edit mode) ----------------------------
-  // Capture the revision the user opened so a conflict keeps their draft.
   let baselineRecurrence: KataRecurrence | null = $state(initialBaselineRecurrence())
   let baselineEtag: string | null = $state(initialBaselineEtag())
 
@@ -228,35 +220,6 @@
   let activeRrule = $derived(
     mode_ === 'advanced' ? advancedText : serializeRRule(currentCommonRule),
   )
-  let dates = $state<string[]>([])
-  $effect(() => {
-    const rule = activeRrule
-    const start = dtstart
-    const zone = resolvedTimezone()
-    const create = mode.kind === 'create' ? mode : null
-    const valid =
-      mode_ === 'advanced'
-        ? advancedParse.kind !== 'invalid'
-        : isCommonFormValid() && (freq !== 'WEEKLY' || byDay.length > 0)
-    dates = []
-    if (!create || !valid) return
-    const controller = new AbortController()
-    const timer = setTimeout(() => {
-      void previewRecurrence(
-        { projectId: create.projectID },
-        { rrule: rule, dtstart: start, timezone: zone },
-        { signal: controller.signal },
-      )
-        .then((result) => {
-          if (!controller.signal.aborted && result.status === 200) dates = result.data.dates
-        })
-        .catch(() => {})
-    }, 250)
-    return () => {
-      clearTimeout(timer)
-      controller.abort()
-    }
-  })
 
   // The compact summary mirrors whatever rule we'd submit right now —
   // Common form in Common mode, raw textarea in Advanced mode. We hide
@@ -385,11 +348,8 @@
       onSaved()
     } catch (e) {
       if (isConflict(e)) {
-        conflictLatest = (e as { latest?: KataRecurrence }).latest ?? null
-        refusedPatch = patch
-        conflictBanner = conflictLatest
-          ? 'This rule changed elsewhere. Your draft is kept. Load the current version to see what changed.'
-          : 'This rule changed elsewhere. Your draft is kept. Copy it, close, and reopen the rule to see the current version.'
+        conflictBanner =
+          'This rule changed elsewhere. Your draft is kept. Copy it, close, and reopen the rule to see the current version.'
       } else {
         submitError = extractValidationMessage(e)
       }
@@ -450,34 +410,6 @@
       out.dayInMonth = r.dayInMonth
     }
     if (r.end && r.end.kind !== 'never') out.end = r.end
-    return out
-  }
-
-  function loadCurrentVersion(): void {
-    if (!conflictLatest) return
-    yourChanges = refusedPatch ? describePatch(refusedPatch) : []
-    baselineRecurrence = conflictLatest
-    baselineEtag = `"rev-${conflictLatest.revision}"`
-    applyRecurrenceToForm(conflictLatest)
-    conflictLatest = null
-    refusedPatch = null
-    conflictBanner = null
-  }
-
-  function describePatch(patch: KataPatchRecurrenceInput): string[] {
-    const out: string[] = []
-    const t = patch.template
-    const none = '(none)'
-    if (t?.title !== undefined) out.push(`Title: ${t.title}`)
-    if (t?.body !== undefined) out.push(`Body: ${t.body || none}`)
-    if (t?.owner !== undefined || t?.clearOwner) out.push(`Owner: ${t.owner ?? none}`)
-    if (t?.priority !== undefined || t?.clearPriority)
-      out.push(`Priority: ${t.priority === undefined ? none : `P${t.priority}`}`)
-    if (t?.labels !== undefined) out.push(`Labels: ${t.labels.join(', ') || none}`)
-    if (t?.metadata !== undefined) out.push(`Metadata: ${JSON.stringify(t.metadata)}`)
-    if (patch.rrule !== undefined) out.push(`Schedule: ${formatRRule(patch.rrule)}`)
-    if (patch.dtstart !== undefined) out.push(`Start date: ${patch.dtstart}`)
-    if (patch.timezone !== undefined) out.push(`Timezone: ${patch.timezone}`)
     return out
   }
 
@@ -609,33 +541,11 @@
 
 <div class="editor">
   {#if conflictBanner}
-    <div class="conflict" role="alert">
-      {conflictBanner}
-      {#if conflictLatest}
-        <Button size="sm" label="Load current version" onclick={loadCurrentVersion} />
-      {/if}
-    </div>
-  {/if}
-  {#if yourChanges.length}
-    <div class="your-changes">
-      <span>Current version loaded. Re-apply any of your changes, then save:</span>
-      <ul aria-label="Your changes">
-        {#each yourChanges as change (change)}<li>{change}</li>{/each}
-      </ul>
-    </div>
+    <div class="conflict" role="alert">{conflictBanner}</div>
   {/if}
 
   {#if currentSummary}
-    <div class="summary">
-      <div data-testid="recurrence-summary">{currentSummary}</div>
-      {#if mode.kind === 'create' && dates.length}
-        <div>This task becomes the first, scheduled {formatDay(dates[0]!)}.</div>
-      {/if}
-      {#if mode.kind === 'create' && dates.length > 1}
-        <div>Then {dates.slice(1).map(formatDay).join(' · ')}</div>
-        <div>Complete each task to create the next, until the rule ends.</div>
-      {/if}
-    </div>
+    <div class="summary" data-testid="recurrence-summary">{currentSummary}</div>
   {/if}
 
   {#if submitError}
@@ -986,20 +896,7 @@
     color: var(--accent-red);
     font-size: var(--font-size-sm);
   }
-  .your-changes {
-    display: grid;
-    gap: 4px;
-    color: var(--text-muted);
-    font-size: var(--font-size-sm);
-  }
-  .your-changes ul {
-    margin: 0;
-    padding-left: 18px;
-  }
   .conflict {
-    display: grid;
-    justify-items: start;
-    gap: 6px;
     padding: 8px 10px;
     border-radius: var(--radius-sm);
     background: color-mix(in srgb, var(--accent-red) 12%, transparent);

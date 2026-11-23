@@ -60,17 +60,18 @@
   // Closing frees a blocked task only when this task is its last open
   // blocker; tasks the snapshot doesn't hold get only the link stated.
   const blockedPreview = $derived.by(() => {
-    const preview = { unblocks: 0, stillBlocked: 0, unknown: 0 }
+    let unblocks = 0
     for (const link of issue.links) {
       if (link.type !== 'blocks' || link.from.uid !== issue.issue.uid) continue
       if (link.to.status !== 'open') continue
       const blocked = issueCatalog.find((task) => task.uid === link.to.uid)
-      if (!blocked?.open_blocked_by) preview.unknown += 1
-      else if (blocked.open_blocked_by.some((blocker) => blocker.uid !== issue.issue.uid))
-        preview.stillBlocked += 1
-      else preview.unblocks += 1
+      if (
+        blocked?.open_blocked_by &&
+        !blocked.open_blocked_by.some((blocker) => blocker.uid !== issue.issue.uid)
+      )
+        unblocks += 1
     }
-    return preview
+    return unblocks
   })
 
   function openTasks(count: number): string {
@@ -296,16 +297,7 @@
     </label>
     <Card level="inset" padding="sm">
       <div>Comments and links stay.</div>
-      {#if blockedPreview.unblocks}<div>Unblocks {openTasks(blockedPreview.unblocks)}.</div>{/if}
-      {#if blockedPreview.stillBlocked}<div>
-          {openTasks(blockedPreview.stillBlocked)}
-          {blockedPreview.stillBlocked === 1 ? 'stays' : 'stay'} blocked by other open tasks.
-        </div>{/if}
-      {#if blockedPreview.unknown}<div>
-          Blocks {blockedPreview.unknown}
-          {blockedPreview.unblocks || blockedPreview.stillBlocked ? 'more ' : ''}open
-          {blockedPreview.unknown === 1 ? 'task' : 'tasks'}.
-        </div>{/if}
+      {#if blockedPreview}<div>Unblocks {openTasks(blockedPreview)}.</div>{/if}
     </Card>
   </div>
 

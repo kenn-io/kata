@@ -597,17 +597,6 @@
     )
   }
 
-  async function designateInbox(projectUID: string): Promise<void> {
-    const project = authority?.snapshot?.catalog?.find(
-      ({ project }) => project.uid === projectUID,
-    )?.project
-    if (!project) throw new Error('Project is not available.')
-    const accepted = await runMutation({ draft: projectUID }, (context) =>
-      patchInboxProject(project, context),
-    )
-    if (!accepted) throw new Error(mutationMessage(mutationState) ?? 'Could not change the Inbox.')
-  }
-
   async function createIssue(
     title: string,
     parent?: { projectID: number; projectUID: string; issueUID: string },
@@ -1551,7 +1540,6 @@
         ownerOptions={(references?.owners ?? []).map((owner) => ({ name: owner, label: owner }))}
         onNavigate={navigate}
         onCreateProject={createProject}
-        onDesignateInbox={designateInbox}
         onCreateIssue={createIssue}
         {searchReferences}
         onMoveIssue={moveIssue}

@@ -94,7 +94,7 @@ it('lists a project rule and opens its stop dialog', async () => {
   expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
 })
 
-it('hands the refreshed rule to the editor after an edit conflict', async () => {
+it('keeps the draft after an edit conflict', async () => {
   const theirs = { ...recurrence, template_title: 'Their title', revision: 2 }
   vi.mocked(listRecurrences)
     .mockResolvedValueOnce({
@@ -116,12 +116,12 @@ it('hands the refreshed rule to the editor after an edit conflict', async () => 
   const dialog = screen.getByRole('dialog')
   await fireEvent.input(within(dialog).getByLabelText('Title'), { target: { value: 'My edit' } })
   await fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
-  await fireEvent.click(await within(dialog).findByRole('button', { name: 'Load current version' }))
-  expect((within(dialog).getByLabelText('Title') as HTMLInputElement).value).toBe('Their title')
+  await within(dialog).findByText(/Your draft is kept/)
+  expect((within(dialog).getByLabelText('Title') as HTMLInputElement).value).toBe('My edit')
   expect(onPatch).toHaveBeenCalledTimes(1)
 })
 
-it('explains a refused stop in its dialog and retries with the current revision', async () => {
+it('retries a refused stop with the current revision', async () => {
   const updated = { ...recurrence, revision: 2 }
   vi.mocked(listRecurrences)
     .mockResolvedValueOnce({
@@ -146,9 +146,6 @@ it('explains a refused stop in its dialog and retries with the current revision'
   await fireEvent.click(screen.getByRole('button', { name: 'Stop repeating…' }))
   await fireEvent.click(
     within(screen.getByRole('dialog')).getByRole('button', { name: 'Stop repeating' }),
-  )
-  expect((await within(screen.getByRole('dialog')).findByRole('alert')).textContent).toContain(
-    'This rule changed. Review it and try again.',
   )
   await waitFor(() =>
     expect(

@@ -114,16 +114,8 @@
       await onPatch(recurrence, input, etag)
     } catch (error) {
       await refresh(projectID)
-      // A conflict hands the editor the other writer's version to load.
-      const latest = recurrences.find((item) => item.uid === recurrence.uid)
-      if (isConflict(error) && latest && latest.revision !== recurrence.revision) {
-        throw Object.assign(error, { latest })
-      }
       throw error
     }
-  }
-  function isConflict(error: unknown): error is { status: 412 } {
-    return !!error && typeof error === 'object' && (error as { status?: unknown }).status === 412
   }
   async function stop(recurrence: KataRecurrence): Promise<void> {
     try {

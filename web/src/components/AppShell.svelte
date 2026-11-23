@@ -54,7 +54,6 @@
   import KataDaemonSwitcher from './KataDaemonSwitcher.svelte'
   import QuickCapture from './QuickCapture.svelte'
   import ProjectRecurrences from './ProjectRecurrences.svelte'
-  import MakeInbox from './MakeInbox.svelte'
   import SearchSettings from './SearchSettings.svelte'
   import Sidebar from './Sidebar.svelte'
   import SplitLayout from './SplitLayout.svelte'
@@ -102,7 +101,6 @@
     onSearchEmpty?: (() => void) | undefined
     onNavigate: (route: AppRoute) => void | Promise<void>
     onCreateProject: (name: string, designateInbox?: boolean) => Promise<KataTaskMutationResponse>
-    onDesignateInbox?: ((projectUID: string) => Promise<void>) | undefined
     onCreateIssue: (
       title: string,
       parent?: ChildParent,
@@ -176,7 +174,6 @@
     onSearchEmpty = undefined,
     onNavigate,
     onCreateProject,
-    onDesignateInbox,
     onCreateIssue,
     searchReferences,
     onMoveIssue,
@@ -943,16 +940,6 @@
         />
       {/snippet}
       {#snippet projectRecurrences()}
-        {#if selectedProject && onDesignateInbox && projectWideMutationAllowed && selectedProject.uid !== inboxProject?.uid}
-          {@const project = selectedProject}
-          {@const designate = onDesignateInbox}
-          <MakeInbox
-            projectName={project.name}
-            inboxName={inboxProject?.name}
-            disabled={mutationPending}
-            onConfirm={() => designate(project.uid)}
-          />
-        {/if}
         {#if selectedProject && !scopedAuthority}
           {#key selectedProject.uid}
             <ProjectRecurrences

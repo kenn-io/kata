@@ -9,7 +9,7 @@ func registerTaskOperationPolicies(policies map[string]HostOperationPolicy) {
 	registerHostOperations(policies, HostOperationPolicy{
 		Kind: hostOperationTaskRead, Capability: hostCapabilityRead,
 	}, "attachmentContent", "listAllIssues", "listIssues", "showIssue", "issuePlanningDates", "showIssueByUID", "getIssueMetadata", "reachableIssueGraph",
-		"listLabels", "previewRecurrence", "listRecurrences", "showRecurrence", "readyIssues", "readyIssuesGlobal",
+		"listLabels", "listRecurrences", "showRecurrence", "readyIssues", "readyIssuesGlobal",
 		"searchIssues", "pollEvents", "pollProjectEvents", "auditCloses", "digestGlobal",
 		"digestProject", "getIssueLeaseStatus", "readUISnapshot", "readUIReferences",
 		"resolveUIIssueReference", "readUILaunchTarget")
