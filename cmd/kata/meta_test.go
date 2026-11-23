@@ -162,13 +162,12 @@ func TestMetaGetEmptyAndMissingKey(t *testing.T) {
 			case "json":
 				assert.JSONEq(t, fmt.Sprintf(`{"kata_api_version":1,"ref":%q,"revision":1,"key":"work.missing","value":null}`, ref), stdout)
 			}
-
-			args[2] = "zzzz"
-			_, _, err = runCLIWithErr(t, env, dir, args...)
-			ce := requireCLIError(t, err, ExitNotFound)
-			assert.Equal(t, kindNotFound, ce.Kind)
 		})
 	}
+
+	_, _, err := runCLIWithErr(t, env, dir, "meta", "get", "zzzz", "work.missing")
+	ce := requireCLIError(t, err, ExitNotFound)
+	assert.Equal(t, kindNotFound, ce.Kind)
 }
 
 func TestMetaReservedKeyRejectionSurfacesValidation(t *testing.T) {
