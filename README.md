@@ -114,7 +114,7 @@ attention signals, and scheduling.
 2. For a change, search with `kata search "<one or two words>" --agent`.
 3. If an open issue covers the work, claim it with `kata claim <ref>`. Otherwise, create one with `kata create "<title>" --idempotency-key <key> --agent`. Claim it if you'll work on it; leave it open if you're only recording it.
 4. Do the work and comment on findings a later reader needs.
-5. If the work is verified complete, close it with `kata close <ref> --done --message "<what and how verified>" --test <cmd>`. Otherwise, use `kata label add <ref> needs-review --comment "<what remains>"`.
+5. If the work is verified complete, close it with `kata close <ref> --done --message "<what and how verified>" --test <cmd>`. Otherwise, leave it open, update `work.attention` and `work.attention_msg` with what remains, and add the `needs-review` label.
 
 ## Quickstart
 
@@ -141,7 +141,9 @@ kata close abc4 --done \
 Reply to a specific comment, then read the thread it belongs to:
 
 ```sh
-kata comment abc4 --reply c:xbzxrq -m "This builds on the finding."
+kata comment abc4 --reply c:xbzxrq --body-stdin <<'EOF'
+This builds on the finding.
+EOF
 kata show abc4 --thread c:xbzxrq
 ```
 

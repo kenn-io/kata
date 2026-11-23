@@ -537,7 +537,7 @@ list the catalog, or pass a name:
 In Kata 0.23.0 and later, the names are `setup`, `quickstart`, `workflow`, `issues`,
 `claiming`, `closing`, `teammates`, `scheduling`, and `events`. Read `workflow`
 at session start and before your first write. `quickstart` walks through search,
-creation, ownership, progress and completion using native JSON tool calls.
+creation, ownership, findings and completion using native JSON tool calls.
 The guides describe the connected server's scope, section loaders, required
 idempotency keys and typed close evidence. They require no shell commands.
 The Markdown body is returned once as text content; structured content holds

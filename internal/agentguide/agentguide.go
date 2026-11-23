@@ -25,24 +25,39 @@ If create reports a look-alike, use that issue unless the work truly differs
 Claim the issue before you work on it: kata claim <ref>. When the user only
 asks you to record something, create the issue and stop there.
 
-Comment when you learn something a later reader needs:
-
-    kata comment <ref> -m "<finding>" --agent
-
+` + CommentRules + `
 Close the issue as soon as the work is verified. The message needs 40 or more
 characters and the close needs evidence:
 
     kata close <ref> --done --message "<what changed and how you verified it>" --test "<command>" --agent
 
 Use --commit <sha> or --pr <url> instead of --test when that is the evidence.
-If you stop before the work is done, leave the issue open and say what remains:
-
-    kata label add <ref> needs-review --comment "<what remains>"
 
 Never run kata delete or kata purge unless the user asks for that exact action.
 
 For subagents, inboxes, attention signals, scheduling, and relationship rules,
 run kata quickstart.
+`
+
+// CommentRules says what a comment is for and how to pass its text. Its
+// heredoc uses <<- so the tab-indented body and terminator stay copyable at
+// the indentation of the surrounding command blocks.
+const CommentRules = `Comment only with findings a later reader needs. Pass the text through a
+quoted heredoc so the shell leaves backticks and $ alone; replies such as
+--reply c:<id> take --body-stdin too:
+
+    kata comment <ref> --body-stdin --agent <<-'EOF'
+	<finding>
+	EOF
+
+Correct your own comment with kata comment edit <ref> <comment-uid>. Keep
+live status in work.attention_msg, not in comments:
+
+    kata meta set <ref> work.attention_msg "<what remains>"
+
+A PR that is open and not merged is unfinished. If you stop before the work is
+done, leave the issue open, update work.attention and work.attention_msg, and
+run kata label add <ref> needs-review.
 `
 
 // Quickstart is the full CLI agent briefing: every fragment, in order.
@@ -63,6 +78,7 @@ type Fragment struct{ ID, Text string }
 var Fragments = []Fragment{
 	{"intro", fragIntro},
 	{"closing", fragClosing},
+	{"comments", CommentRules + "\n"},
 	{"output-flags", fragOutputFlags},
 	{"real-work", fragRealWork},
 	{"search-create-update", fragSearchCreateUpdate},
@@ -96,9 +112,7 @@ Use kata as the shared issue ledger for this workspace.
 `
 
 const fragClosing = `2. Closing an issue asserts that the work is complete. If the work is
-   not done, DO NOT close. Instead:
-
-      kata label add <ref> needs-review --comment "<what remains>"
+   not done, DO NOT close; hand it off as the comment rules below say.
 
    When done, use a message of 40+ characters and typed --evidence:
 
@@ -173,17 +187,19 @@ const fragSearchCreateUpdate = `3. Search before creating:
 
    kata show abc4 --agent
    kata show --project foo abc4 --agent
-   kata comment abc4 --body "Found another reproduction path." --agent
+   kata comment abc4 --body-stdin --agent <<-'EOF'
+	Found another reproduction path.
+	EOF
    kata label add abc4 safari --agent
    kata edit abc4 --blocks d4ex --agent
 
    Answer a specific comment with a typed reply, using the handle shown
-   by kata show. --confirm and --refute take evidence in the body:
+   by kata show. --confirm and --refute take evidence in the body. Use
+   --reply, --confirm, --refute, or --supersede the same way:
 
-   kata comment abc4 --reply c:xbzxrq -m "This builds on the finding." --agent
-   kata comment abc4 --confirm c:xbzxrq -m "Reproduced with the documented retry steps." --agent
-   kata comment abc4 --refute c:xbzxrq -m "Still fails when the connection drops twice." --agent
-   kata comment abc4 --supersede c:xbzxrq -m "The updated finding replaces this one." --agent
+   kata comment abc4 --confirm c:xbzxrq --body-stdin --agent <<-'EOF'
+	Reproduced with the documented retry steps.
+	EOF
 
 `
 
@@ -255,10 +271,16 @@ const fragTeammates = `9. Attribute swarm contributions and request attention wi
 
    export KATA_TEAMMATE=teammate-1
    export KATA_INBOX_USER=coordinator/teammate-1
-   kata comment abc4 --body "Checked the retry path"
+   kata comment abc4 --body-stdin <<-'EOF'
+	The retry path reuses the original export ID.
+	EOF
    kata create "Check retry behavior" --parent abc4 --idempotency-key retry-teammate-1
-   kata --teammate=teammate-2 comment abc4 --body "Independent review"
-   kata --teammate='' comment abc4 --body "Coordinator summary"
+   kata --teammate=teammate-2 comment abc4 --body-stdin <<-'EOF'
+	A retry after a timeout creates a second export.
+	EOF
+   kata --teammate='' comment abc4 --body-stdin <<-'EOF'
+	Both retry findings trace to the missing export ID check.
+	EOF
    kata notify abc4 --to coordinator --message "Please decide"
    kata notify abc4 --to coordinator/teammate-1 --message "Please check the update"
    kata inbox --for coordinator/teammate-1
@@ -329,7 +351,11 @@ const fragMutationComments = `10. To leave context alongside a mutation, pass --
    close, reopen, edit, assign, unassign, or label add/rm. The
    mutation lands first; the comment is appended in a follow-up call.
    If the comment call fails, the error names the issue so you can
-   retry with kata comment <ref> --body ...
+   retry with a quoted heredoc:
+
+   kata comment <ref> --body-stdin <<-'EOF'
+	<text>
+	EOF
 
 `
 

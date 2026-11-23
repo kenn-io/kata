@@ -120,7 +120,7 @@ Agent workflow (add --agent to each command):
   kata create "<title>" --body "<context>" --idempotency-key <stable-key> --agent
   kata claim <ref> --agent                              # 2. take ownership
   kata close <ref> --done -m "<what changed and how it was verified>" --test "<command>" --agent   # or --commit <sha>
-  kata label add <ref> needs-review --comment "<what remains>" --agent   # not done
+  kata label add <ref> needs-review --agent   # not done; leave it open
 Full agent contract: kata quickstart --format contract
 
 Refs: abc4 (short id in the bound project), project#abc4 (any project), or the

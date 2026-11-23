@@ -34,15 +34,18 @@ Default to --agent for ordinary kata reads and mutations in agent logs.
 Use --json only when your script needs complete structured data.
 Launch each child with KATA_TEAMMATE=teammate-1 and KATA_INBOX_USER=coordinator/teammate-1.
 Comments store teammate; new issues store metadata.teammate while author remains accountable.
-Record progress: kata comment <ref> -m "<what changed>".
-Respond to a comment: kata comment <ref> --reply|--confirm|--refute|--supersede c:<id> -m "<evidence>".
-When a comment-sized task needs ownership or tracked completion, make it a child issue: kata create "fix retry handling" --parent <ref>, then kata claim <child>.
+
+` + agentguide.CommentRules + `
+When a comment-sized task needs ownership or tracked completion, make it a child issue:
+
+    kata create "fix retry handling" --parent <ref>
+    kata claim <child>
+
 KATA_INBOX_USER selects an inbox and does not set attribution; --teammate overrides the attribution default.
 Request actor or teammate attention: kata notify <ref> --to <actor>[/<teammate>] --message "<reason>".
 Read exact requests with kata inbox --for <actor>[/<teammate>]; clear after handling with kata notify <ref> --to <actor>[/<teammate>] --clear.
 Use kata inbox --for <actor>[/<teammate>] --all for the selected daemon's active projects; refs are qualified.
 An external harness polls idle inboxes and wakes the exact mapped runtime; quickstart does not install that integration.
-If work is incomplete, use kata label add <ref> needs-review --comment "<what remains>".
 Close verified work: kata close <ref> --done --message "<scope and verification, 40+ characters>" --evidence commit:<sha> | pr:<url> | test:<cmd> | reviewed-paths:<path>.
 Evidence shortcuts: --commit, --pr, --test, --reviewed.
 Retire duplicate or superseded work with --duplicate-of <ref> or --superseded-by <ref> (20+ characters); dropped work with --wontfix (60+ characters).

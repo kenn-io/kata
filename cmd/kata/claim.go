@@ -27,7 +27,7 @@ Refuses when another actor owns it unless --force.
 --ttl releases the claim after 1m-24h.
 kata assign sets a different owner; kata unassign --expect-owner releases.`,
 		Example: `  kata claim abc4 --agent
-  kata claim abc4 --if-unowned --ttl 2h --comment "starting on the Safari path" --agent`,
+  kata claim abc4 --if-unowned --ttl 2h --agent`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ttlSeconds, err := assignmentTTLSeconds(cmd, ttl)
