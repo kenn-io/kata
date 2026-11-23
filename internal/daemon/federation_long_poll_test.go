@@ -303,29 +303,20 @@ func TestFederationPollWaitAnswersAtOnceWhenEventsArePending(t *testing.T) {
 }
 
 func TestFederationPollWaitReauthorizesAfterWake(t *testing.T) {
-	for _, tc := range []struct {
-		name, wait string
-		wake       bool
-	}{{"wake", "30", true}} {
-		t.Run(tc.name, func(t *testing.T) {
-			f := newLongPollFixture(t)
-			cursor := f.cursor(t)
-			done := f.startHeldPoll(t, cursor, tc.wait)
-			reads := f.reads.readsReturned()
-			require.NoError(t, f.env.DB.RevokeFederationEnrollment(t.Context(), f.enrollment.Enrollment.ID))
-			if tc.wake {
-				createIssueAs(t, f.env, f.project.ID, "tester", "Committed after revocation")
-			}
-			var result longPollResult
-			select {
-			case result = <-done:
-			case <-time.After(10 * time.Second):
-				t.Fatal("held poll did not return")
-			}
-			require.NoError(t, result.err)
-			assert.Equal(t, http.StatusForbidden, result.status, "%s", result.raw)
-			assert.NotContains(t, string(result.raw), "Committed after revocation")
-			assert.Equal(t, reads, f.reads.readsReturned())
-		})
+	f := newLongPollFixture(t)
+	cursor := f.cursor(t)
+	done := f.startHeldPoll(t, cursor, "30")
+	reads := f.reads.readsReturned()
+	require.NoError(t, f.env.DB.RevokeFederationEnrollment(t.Context(), f.enrollment.Enrollment.ID))
+	createIssueAs(t, f.env, f.project.ID, "tester", "Committed after revocation")
+	var result longPollResult
+	select {
+	case result = <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("held poll did not return")
 	}
+	require.NoError(t, result.err)
+	assert.Equal(t, http.StatusForbidden, result.status, "%s", result.raw)
+	assert.NotContains(t, string(result.raw), "Committed after revocation")
+	assert.Equal(t, reads, f.reads.readsReturned())
 }

@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -257,44 +256,34 @@ func (h internalLongPollHub) poll(ctx context.Context, afterID int64, wait strin
 	return response.StatusCode, page.NextAfterID, time.Since(started), nil
 }
 
-// holdEveryCredentialSlot parks as many held polls as one credential may hold
-// and returns once the hub holds all of them. Canceling ctx disconnects them;
-// the returned function waits for those polls to end.
-func (h internalLongPollHub) holdEveryCredentialSlot(ctx context.Context, t *testing.T, cursor int64) func() {
-	t.Helper()
-	limit := min(federationPollMaxWaitersPerCredential, h.waits.maxTotal/2)
-	var polls sync.WaitGroup
-	for range limit {
-		polls.Go(func() {
-			if status, _, _, err := h.poll(ctx, cursor, "45"); err == nil {
-				t.Errorf("held poll answered before its client disconnected: %d", status)
-			}
-		})
-	}
-	//nolint:kennlint // sleeptest: the polls reach the hub over real HTTP; the waiter count is the signal.
-	require.Eventually(t, func() bool { return h.waits.heldFor(h.enrollmentID) == limit },
-		10*time.Second, 5*time.Millisecond, "the hub never held every poll")
-	return polls.Wait
-}
-
 func TestFederationPollWaitAnswersAtOnceWhenCredentialWaitersAreFull(t *testing.T) {
 	ctx := t.Context()
 	hub := newInternalLongPollHub(t)
+	hub.waits.maxTotal = 2
 	status, cursor, _, err := hub.poll(ctx, 0, "0")
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, status)
 	require.Positive(t, cursor)
 
 	held, release := context.WithCancel(ctx)
-	ended := hub.holdEveryCredentialSlot(held, t, cursor)
-	defer func() { release(); ended() }()
+	ended := make(chan struct{})
+	go func() {
+		defer close(ended)
+		if status, _, _, err := hub.poll(held, cursor, "45"); err == nil {
+			t.Errorf("held poll answered before its client disconnected: %d", status)
+		}
+	}()
+	defer func() { release(); <-ended }()
+	//nolint:kennlint // sleeptest: the poll reaches the hub over real HTTP.
+	require.Eventually(t, func() bool { return hub.waits.heldFor(hub.enrollmentID) == 1 },
+		10*time.Second, 5*time.Millisecond, "the hub never held the poll")
 
 	status, _, elapsed, err := hub.poll(ctx, cursor, "45")
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, status)
 	assert.Less(t, elapsed, 5*time.Second, "a poll beyond the per-credential bound must answer like an ordinary poll")
 	release()
-	ended()
+	<-ended
 	//nolint:kennlint // sleeptest: disconnect cleanup runs in hub handlers reached over real HTTP.
 	require.Eventually(t, func() bool {
 		return hub.waits.heldFor(hub.enrollmentID) == 0 && hub.waits.heldTotal() == 0

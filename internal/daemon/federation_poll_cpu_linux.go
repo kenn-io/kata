@@ -20,6 +20,10 @@ func federationPollCPUs() int {
 	if err != nil {
 		return cpus
 	}
+	return federationPollCPUsFromCgroup(cpus, groups, mounts)
+}
+
+func federationPollCPUsFromCgroup(cpus int, groups, mounts []byte) int {
 	for group := range strings.SplitSeq(string(groups), "\n") {
 		parts := strings.SplitN(group, ":", 3)
 		if len(parts) != 3 {
