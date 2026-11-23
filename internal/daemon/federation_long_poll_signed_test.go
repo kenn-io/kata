@@ -191,15 +191,25 @@ func TestFederationPollRechecksAuthorizationAfterItsRead(t *testing.T) {
 }
 
 func TestFederationPollWaitReturnsSavedPageWhenItExpires(t *testing.T) {
-	for _, revoke := range []bool{false, true} {
-		t.Run(fmt.Sprintf("revoke=%t", revoke), func(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		revoke bool
+		wake   bool
+	}{{"event without wake", false, false}, {"revoked access", true, false}, {"revoked after empty wake", true, true}} {
+		t.Run(tc.name, func(t *testing.T) {
 			f := newSignedPollFixture(t)
 			synctest.Test(t, func(t *testing.T) {
 				h := f.serve(t, 0)
 				cursor := h.cursor(t)
 				done := h.startHeldPoll(t, cursor, "30")
 				reads := h.reads.readsReturned()
-				if revoke {
+				if tc.wake {
+					h.broadcaster.Broadcast(daemon.NewResetMsg(h.project.ID, 1))
+					synctest.Wait()
+					require.Equal(t, reads+1, h.reads.readsReturned())
+					reads++
+				}
+				if tc.revoke {
 					require.NoError(t, h.revokeProjectAccess(t))
 				} else {
 					h.commit(t, "Committed without a wakeup", false)
@@ -212,7 +222,7 @@ func TestFederationPollWaitReturnsSavedPageWhenItExpires(t *testing.T) {
 				assert.Equal(t, reads, h.reads.readsReturned(), "the timeout must not read again")
 				// The next poll authorizes and reads from the returned cursor.
 				response = h.send(h.request(t, page.NextAfterID, ""))
-				if revoke {
+				if tc.revoke {
 					assert.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
 				} else {
 					assert.Contains(t, response.Body.String(), "Committed without a wakeup")

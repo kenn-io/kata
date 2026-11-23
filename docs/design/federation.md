@@ -317,9 +317,10 @@ first read shortens it. Before each read a held poll makes after waiting, the
 hub runs the request's full federation authorization again without the
 per-request cache. For a signed request this also confirms that the signing
 key has not passed its `not_after` and still holds the secret the request was
-verified with. After a poll wakes, the hub checks authorization once more before releasing the page.
-Revocation therefore ends a held poll at its next wake. When the wait ends
-without a wake, the hub returns the empty page already read; the next poll
+verified with. After a poll wakes and reads events or a reset, the hub checks
+authorization once more before releasing the page.
+Revocation therefore ends a held poll at its next wake. When the wait expires,
+the hub returns the empty page already read; the next poll
 checks authorization and reads again. The hub holds at most 32 polls per
 `GOMAXPROCS`, up to 256 total, and at most half that limit per credential, up
 to 32. It also bounds signed requests holding a control slot; past a bound it

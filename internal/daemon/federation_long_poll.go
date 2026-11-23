@@ -423,6 +423,7 @@ func holdFederationPoll(
 			return result, waited, fmt.Errorf("held federation poll ended: %w", err)
 		}
 		if !woke {
+			waited = false
 			break
 		}
 		readCtx, err := reauthorize()
