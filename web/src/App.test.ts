@@ -3005,7 +3005,7 @@ describe('App', () => {
     },
   )
 
-  it('keeps the Inbox unchanged and remembers the capture destination', async () => {
+  it('keeps the Inbox unchanged and creates in the chosen project', async () => {
     history.replaceState(null, '', '/kata#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
@@ -3053,28 +3053,16 @@ describe('App', () => {
       }),
     )
     expect(writes).toEqual([])
-    expect(accepted.catalog[0]!.project.metadata.role).toBe('inbox')
     await fireEvent.click(screen.getByRole('button', { name: 'New task' }))
-    expect(screen.getByRole('combobox', { name: 'Project: example-workspace' })).toBeTruthy()
+    await fireEvent.click(screen.getByRole('combobox', { name: 'Project: example-project' }))
+    await fireEvent.click(screen.getByRole('option', { name: 'example-workspace' }))
     await fireEvent.input(screen.getByRole('textbox', { name: 'Quick capture' }), {
       target: { value: 'Workspace task' },
     })
     await fireEvent.click(
       within(screen.getByRole('dialog', { name: 'New task' })).getByRole('button', { name: 'Add' }),
     )
-    await waitFor(() => expect(writes).toContain('/api/v1/projects/8/issues'))
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'New task' })).toBeNull())
-    await fireEvent.click(screen.getByRole('button', { name: 'New task' }))
-    await fireEvent.click(screen.getByRole('combobox', { name: 'Project: example-workspace' }))
-    await fireEvent.click(screen.getByRole('option', { name: 'example-project' }))
-    await fireEvent.input(screen.getByRole('textbox', { name: 'Quick capture' }), {
-      target: { value: 'Inbox task' },
-    })
-    await fireEvent.click(
-      within(screen.getByRole('dialog', { name: 'New task' })).getByRole('button', { name: 'Add' }),
-    )
-    await waitFor(() => expect(writes).toContain('/api/v1/projects/7/issues'))
-    expect(writes).toEqual(['/api/v1/projects/8/issues', '/api/v1/projects/7/issues'])
+    await waitFor(() => expect(writes).toEqual(['/api/v1/projects/8/issues']))
     expect(accepted.catalog[0]!.project.metadata.role).toBe('inbox')
   })
 

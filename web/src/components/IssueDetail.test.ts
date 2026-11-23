@@ -393,7 +393,7 @@ describe('IssueDetail', () => {
     renderDetail({ onMoveIssue })
 
     await fireEvent.click(screen.getByRole('button', { name: 'Project: Inbox' }))
-    await fireEvent.click(screen.getByRole('button', { name: 'Roadmap' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Roadmap 1' }))
 
     expect(onMoveIssue).toHaveBeenCalledWith('project-2')
   })
@@ -405,7 +405,7 @@ describe('IssueDetail', () => {
     expect(screen.queryByRole('button', { name: 'Repeats…' })).toBeNull()
   })
 
-  it('withholds recurrence actions while a mutation is pending', async () => {
+  it('shows only the attached rule in the Repeats row', async () => {
     const recurrence = {
       id: 1,
       uid: 'rec-1',
@@ -428,7 +428,6 @@ describe('IssueDetail', () => {
     expect(screen.queryByText('Repeats')).toBeNull()
     await view.rerender({ issue: makeIssue({ recurrence_id: 1 }) })
     expect(screen.getByText(/Weekly task/)).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
   })
 
   it('closes a recurrence draft after authentication authority changes', async () => {

@@ -87,7 +87,7 @@ describe('MoveIssueDialog', () => {
   })
 
   it('names the task', async () => {
-    renderMenu({ issue: makeIssue('open', { child_counts: { open: 1, total: 2 } }) })
+    renderMenu({ issue: makeIssue('open') })
     await openMovePicker()
     const dialog = screen.getByRole('dialog', { name: 'Move task' })
     expect(within(dialog).getByText('Ship the thing')).toBeTruthy()
@@ -103,9 +103,9 @@ describe('MoveIssueDialog', () => {
     )
     expect(
       destinations.slice(0, 2).map((button) => button.textContent?.replaceAll(/\s/g, '')),
-    ).toEqual(['Roadmap', 'Sharedproject-shared-home'])
-    expect(screen.getByRole('button', { name: /Shared.*project-shared-home-2/ })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Shared.*Work/ })).toBeTruthy()
+    ).toEqual(['Roadmap5', 'Sharedproject-shared-home4'])
+    expect(screen.getByRole('button', { name: /Shared.*project-shared-home-2.*1/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Shared.*Work.*2/ })).toBeTruthy()
     expect(screen.queryByText('Inbox')).toBeNull()
   })
 

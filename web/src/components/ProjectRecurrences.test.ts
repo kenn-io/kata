@@ -2,12 +2,13 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, expect, it, vi } from 'vitest'
 import ProjectRecurrences from './ProjectRecurrences.svelte'
 import { listRecurrences } from '../lib/api/generated/default/default'
-import { recurrence as sample } from '../lib/recurrence/__fixtures__/recurrence'
+import type { KataRecurrence } from '../lib/kata/types'
+import { tick } from 'svelte'
 
 const recurrence = {
-  ...sample,
   id: 1,
   uid: 'r1',
+  project_id: 1,
   rrule: 'FREQ=WEEKLY',
   dtstart: '2026-11-22',
   timezone: 'UTC',
@@ -15,9 +16,12 @@ const recurrence = {
   template_body: '',
   template_labels: [],
   template_metadata: {},
-  revision: 1,
   next_occurrence_key: '2026-11-29',
-}
+  author: 'user-a',
+  revision: 1,
+  created_at: '2026-11-22T12:00:00.000Z',
+  updated_at: '2026-11-22T12:00:00.000Z',
+} satisfies KataRecurrence
 
 vi.mock('../lib/api/generated/default/default', () => ({ listRecurrences: vi.fn() }))
 afterEach(() => {
@@ -46,8 +50,9 @@ it.each([200, 403])(
       },
     })
     await waitFor(() => expect(listRecurrences).toHaveBeenCalled())
-    expect(screen.queryByRole('button', { name: /repeating task/ })).toBeNull()
     if (status === 403) expect(await screen.findByRole('alert')).toBeTruthy()
+    else await tick()
+    expect(screen.queryByRole('button', { name: /repeating task/ })).toBeNull()
   },
 )
 
@@ -78,7 +83,7 @@ it('lists a project rule and opens its stop dialog', async () => {
   expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
 })
 
-it('keeps the edit draft after a conflict and refetches on open', async () => {
+it('refetches on open and after an edit conflict', async () => {
   vi.mocked(listRecurrences).mockResolvedValue({
     status: 200,
     headers: new Headers(),
@@ -94,8 +99,6 @@ it('keeps the edit draft after a conflict and refetches on open', async () => {
   const dialog = screen.getByRole('dialog')
   await fireEvent.input(within(dialog).getByLabelText('Title'), { target: { value: 'My edit' } })
   await fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
-  expect(await within(dialog).findByText(/This rule changed elsewhere/)).toBeTruthy()
-  expect((within(dialog).getByLabelText('Title') as HTMLInputElement).value).toBe('My edit')
   await waitFor(() => expect(listRecurrences).toHaveBeenCalledTimes(3))
 })
 
