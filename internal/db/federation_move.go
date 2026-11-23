@@ -89,8 +89,7 @@ func FoldFederationAcknowledgedEvents(ctx context.Context, tx *sql.Tx, projectID
 			return err
 		}
 	}
-	_, err = tx.ExecContext(ctx, `DELETE FROM meta WHERE key IN (SELECT $1 || p.uid || '.' || e.uid FROM events e JOIN projects p ON p.id=e.project_id JOIN federation_bindings b ON b.project_id=e.project_id WHERE e.project_id=$2 AND e.origin_instance_uid=$3 AND e.id<=b.push_cursor_event_id)`, FederationAcknowledgedEventPrefix, projectID, origin)
-	return err
+	return nil
 }
 
 // FederationQuarantineHasEarlierEvents finds outstanding events outside the skipped batch.
@@ -1051,9 +1050,7 @@ func ClearFederatedProjectEvents(ctx context.Context, tx *sql.Tx, projectID int6
  WHERE issue_id IN (SELECT id FROM issues WHERE project_id=$1)`, projectID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE events SET related_issue_id=NULL
- WHERE related_issue_id IN (SELECT id FROM issues WHERE project_id=$1)`, projectID); err != nil {
-		return err
-	}
-	return nil
+	_, err := tx.ExecContext(ctx, `UPDATE events SET related_issue_id=NULL
+ WHERE related_issue_id IN (SELECT id FROM issues WHERE project_id=$1)`, projectID)
+	return err
 }

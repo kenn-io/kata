@@ -55,11 +55,7 @@ func (d *Store) fenceRelayDisconnect(ctx context.Context, projectID int64, leavi
 				return err
 			}
 		}
-		if err := d.relayReset(tx).FenceDisconnect(ctx, projectID, leaving); err != nil {
-			return err
-		}
-
-		return nil
+		return d.relayReset(tx).FenceDisconnect(ctx, projectID, leaving)
 	})
 }
 

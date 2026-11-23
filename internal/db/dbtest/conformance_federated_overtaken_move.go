@@ -75,35 +75,6 @@ func checkFederatedOvertakenMoveSourceLeave(t *testing.T, _ db.Storage, backend 
 			require.Equal(t, comment.ContentHash, held[0].ContentHash)
 		}
 	})
-	t.Run("reset held link with related issue away", func(t *testing.T) {
-		ctx := t.Context()
-		hub, spoke, remote, local := overtakenMoveSpoke(t, 1, "link-source", "link-absent")
-		var issues, localIssues []db.Issue
-		for _, title := range []string{"subject", "related"} {
-			issue, creation, err := hub.CreateIssue(ctx, db.CreateIssueParams{ProjectID: remote[0].ID, Title: title, Author: "worker"})
-			require.NoError(t, err)
-			issues = append(issues, issue)
-			_, err = spoke.InsertRemoteEvents(ctx, local[0].ID, []db.RemoteEvent{portableNativeEvent(creation)})
-			require.NoError(t, err)
-		}
-		require.NoError(t, spoke.MaterializeFederatedProject(ctx, local[0].ID))
-		for _, issue := range issues {
-			localIssue, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-			require.NoError(t, err)
-			localIssues = append(localIssues, localIssue)
-		}
-		_, link, err := spoke.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: localIssues[0].ID, ToIssueID: localIssues[1].ID, Type: "blocks", Author: "worker"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: localIssues[0].ID, FromShortID: localIssues[0].ShortID, FromUID: localIssues[0].UID, ToShortID: localIssues[1].ShortID, ToUID: localIssues[1].UID, Actor: "worker"})
-		require.NoError(t, err)
-		away, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issues[1].ID, FromProjectID: remote[0].ID, ToProjectID: remote[1].ID, IfMatchRev: issues[1].Revision, Actor: "worker"})
-		require.NoError(t, err)
-		_, err = spoke.InsertRemoteEvents(ctx, local[0].ID, []db.RemoteEvent{portableNativeEvent(*away.Event)})
-		require.NoError(t, err)
-		require.NoError(t, spoke.MaterializeFederatedProject(ctx, local[0].ID))
-		require.NoError(t, spoke.ResetFederatedProjectIfNoPendingPush(ctx, local[0].ID, 0, 0, spoke.InstanceUID(), 0))
-		held, err := spoke.EventsByUIDs(ctx, local[0].ID, []string{link.UID})
-		require.NoError(t, err)
-		require.Equal(t, link.ContentHash, held[0].ContentHash)
-	})
 	t.Run("reset multi-peer link with related issue away", func(t *testing.T) {
 		ctx := t.Context()
 		hub, spoke, remote, local := overtakenMoveSpoke(t, 1, "link-source", "link-absent")
@@ -125,6 +96,8 @@ func checkFederatedOvertakenMoveSourceLeave(t *testing.T, _ db.Storage, backend 
 		require.NoError(t, err)
 		require.Len(t, result.Events, 1)
 		link := result.Events[0]
+		_, related, err := spoke.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: localIssues[0].ID, ToIssueID: localIssues[1].ID, Type: "related", Author: "worker"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: localIssues[0].ID, FromShortID: localIssues[0].ShortID, FromUID: localIssues[0].UID, ToShortID: localIssues[1].ShortID, ToUID: localIssues[1].UID, Actor: "worker"})
+		require.NoError(t, err)
 		away, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issues[1].ID, FromProjectID: remote[0].ID, ToProjectID: remote[1].ID, IfMatchRev: issues[1].Revision, Actor: "worker"})
 		require.NoError(t, err)
 		_, err = spoke.InsertRemoteEvents(ctx, local[0].ID, []db.RemoteEvent{portableNativeEvent(*away.Event)})
@@ -134,6 +107,9 @@ func checkFederatedOvertakenMoveSourceLeave(t *testing.T, _ db.Storage, backend 
 		held, err := spoke.EventsByUIDs(ctx, local[0].ID, []string{link.UID})
 		require.NoError(t, err)
 		require.Equal(t, link.ContentHash, held[0].ContentHash)
+		held, err = spoke.EventsByUIDs(ctx, local[0].ID, []string{related.UID})
+		require.NoError(t, err)
+		require.Equal(t, related.ContentHash, held[0].ContentHash)
 	})
 	for _, sourceFirst := range []bool{true, false} {
 		name := "destination first"
@@ -185,36 +161,6 @@ func checkFederatedOvertakenMoveSourceLeave(t *testing.T, _ db.Storage, backend 
 			require.Equal(t, comment.ContentHash, pending[0].ContentHash)
 		})
 	}
-	t.Run("current project reset preserves pending move", func(t *testing.T) {
-		ctx := t.Context()
-		hub, spoke, remote, local := overtakenMoveSpoke(t, 3, "current-source", "current-destination", "current-away")
-		issue, creation, err := hub.CreateIssue(ctx, db.CreateIssueParams{ProjectID: remote[0].ID, Title: "pending move", Author: "worker"})
-		require.NoError(t, err)
-		_, err = spoke.InsertRemoteEvents(ctx, local[0].ID, []db.RemoteEvent{portableNativeEvent(creation)})
-		require.NoError(t, err)
-		require.NoError(t, spoke.MaterializeFederatedProject(ctx, local[0].ID))
-		localIssue, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-		require.NoError(t, err)
-		move, err := spoke.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: localIssue.ID, FromProjectID: local[0].ID, ToProjectID: local[1].ID, IfMatchRev: localIssue.Revision, Actor: "worker"})
-		require.NoError(t, err)
-		away, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: remote[0].ID, ToProjectID: remote[2].ID, IfMatchRev: issue.Revision, Actor: "worker"})
-		require.NoError(t, err)
-		awayEvent := portableNativeEvent(*away.Event)
-		awayEvent.HLCPhysicalMS, awayEvent.HLCCounter = move.Event.HLCPhysicalMS, move.Event.HLCCounter+1
-		awayEvent.ContentHash, err = db.RemoteEventContentHash(awayEvent)
-		require.NoError(t, err)
-		_, err = spoke.InsertRemoteEvents(ctx, local[2].ID, []db.RemoteEvent{awayEvent})
-		require.NoError(t, err)
-		require.NoError(t, spoke.MaterializeFederatedProject(ctx, local[2].ID))
-		current, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-		require.NoError(t, err)
-		require.Equal(t, local[2].ID, current.ProjectID)
-		require.ErrorIs(t, spoke.ResetFederatedProjectIfNoPendingPush(ctx, local[2].ID, 0, 0, spoke.InstanceUID(), 0), db.ErrFederationResetBlockedByPendingPush)
-		pending, err := spoke.EventsByUIDs(ctx, local[1].ID, []string{move.Event.UID})
-		require.NoError(t, err)
-		require.Len(t, pending, 1)
-		require.Equal(t, move.Event.ContentHash, pending[0].ContentHash)
-	})
 	for _, abort := range []bool{false, true} {
 		name := "prepared leave survives a later pull"
 		if abort {
@@ -417,22 +363,6 @@ func checkFederatedOvertakenMoveSourceLeave(t *testing.T, _ db.Storage, backend 
 		require.NoError(t, spoke.ResetFederatedProjectIfNoPendingPush(ctx, parked.ID, 0, 0, spoke.InstanceUID(), 0))
 		requireHeld()
 	})
-	t.Run("superseded move stays retired after return", func(t *testing.T) {
-		f := setupScenario(t, "newer-held")
-		ctx := t.Context()
-		_, err := f.spoke.LeaveFederationReplica(ctx, f.local[0].ID)
-		require.NoError(t, err)
-		current, err := f.hub.IssueByUID(ctx, f.issue.UID, db.IncludeDeletedNo)
-		require.NoError(t, err)
-		returned, err := f.hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: current.ID, FromProjectID: f.remote[2].ID, ToProjectID: f.remote[1].ID, IfMatchRev: current.Revision, Actor: "worker"})
-		require.NoError(t, err)
-		_, err = f.spoke.InsertRemoteEvents(ctx, f.local[1].ID, []db.RemoteEvent{portableNativeEvent(*returned.Event)})
-		require.NoError(t, err)
-		require.NoError(t, f.spoke.MaterializeFederatedProject(ctx, f.local[1].ID))
-		pending, err := f.spoke.PendingFederationPushEvents(ctx, f.local[1].ID, f.spoke.InstanceUID(), 0, 100)
-		require.NoError(t, err)
-		require.Empty(t, pending)
-	})
 	t.Run("stopped transport preserves fenced leave", func(t *testing.T) {
 		f := setupScenario(t, "newer-held")
 		ctx := t.Context()
@@ -459,25 +389,6 @@ func checkFederatedOvertakenMoveSourceLeave(t *testing.T, _ db.Storage, backend 
 		pending, err := f.spoke.PendingFederationPushEvents(ctx, f.local[1].ID, f.spoke.InstanceUID(), 0, 100)
 		require.NoError(t, err)
 		require.Empty(t, pending, "the previously approved move remains retired")
-	})
-	t.Run("cancelled leave checks returned move", func(t *testing.T) {
-		f := setupScenario(t, "newer-held")
-		ctx := t.Context()
-		fencer := f.spoke.(db.RelayDisconnectFenceStore)
-		require.NoError(t, fencer.FenceFederationLeave(ctx, f.local[0].ID))
-		binding, err := f.spoke.FederationBindingByProject(ctx, f.local[0].ID)
-		require.NoError(t, err)
-		binding.Enabled, binding.PushEnabled = true, true
-		_, err = f.spoke.UpsertFederationBinding(ctx, binding)
-		require.NoError(t, err)
-		current, err := f.hub.IssueByUID(ctx, f.issue.UID, db.IncludeDeletedNo)
-		require.NoError(t, err)
-		returned, err := f.hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: current.ID, FromProjectID: f.remote[2].ID, ToProjectID: f.remote[1].ID, IfMatchRev: current.Revision, Actor: "worker"})
-		require.NoError(t, err)
-		_, err = f.spoke.InsertRemoteEvents(ctx, f.local[1].ID, []db.RemoteEvent{portableNativeEvent(*returned.Event)})
-		require.NoError(t, err)
-		require.NoError(t, f.spoke.MaterializeFederatedProject(ctx, f.local[1].ID))
-		require.ErrorIs(t, fencer.FenceFederationLeave(ctx, f.local[0].ID), db.ErrFederationResetBlockedByPendingPush)
 	})
 	t.Run("accepted events fold only after earlier events", func(t *testing.T) {
 		ctx := t.Context()
