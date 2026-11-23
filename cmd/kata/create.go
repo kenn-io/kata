@@ -145,11 +145,7 @@ stays unset.
 		projectName := project.name
 		body, err := resolveBody(src, cmd.InOrStdin())
 		if err != nil {
-			code := ExitValidation
-			if strings.HasPrefix(err.Error(), "must pass exactly one of") {
-				code = ExitUsage
-			}
-			return &cliError{Message: err.Error(), Kind: kindForExit(code), ExitCode: code}
+			return err
 		}
 		actor, _ := resolveActor(ctx, flags.As, nil)
 
