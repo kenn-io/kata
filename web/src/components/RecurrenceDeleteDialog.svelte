@@ -83,6 +83,8 @@
   }
   .rule.changed {
     border-left: 2px solid var(--accent-blue);
+    border-start-start-radius: 0;
+    border-end-start-radius: 0;
     padding-left: 8px;
   }
   .review {
