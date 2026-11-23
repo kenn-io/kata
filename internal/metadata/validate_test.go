@@ -22,7 +22,7 @@ func TestValidateAttention(t *testing.T) {
 		require.ErrorIs(t, err, ErrInvalidValue)
 		assert.Equal(t, "invalid value: work.attention must be one of ok, needs-human, stuck", err.Error())
 	}
-	for _, raw := range []string{`"working"`, `null`, ``} {
+	for _, raw := range []string{`null`, ``} {
 		err := ValidateCreateValue(IssueRegistry, "work.attention", jsontext.Value(raw))
 		require.ErrorIs(t, err, ErrInvalidValue)
 		assert.Contains(t, err.Error(), "ok, needs-human, stuck")

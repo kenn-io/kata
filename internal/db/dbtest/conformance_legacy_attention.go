@@ -43,12 +43,5 @@ func checkLegacyAttentionRecurrence(t *testing.T, store db.Storage) error {
 	attached, err := store.IssueByID(ctx, issue.ID)
 	require.NoError(t, err)
 	require.JSONEq(t, `{"work.attention":"working","kind":"weekly","scheduled_on":"2026-11-23","timezone":"UTC"}`, string(attached.Metadata))
-	_, err = q.ExecContext(ctx, `UPDATE recurrences SET template_metadata=$1 WHERE id=$2`, `{"work.attention":"working","someday":"yes"}`, rec.ID)
-	require.NoError(t, err)
-	current, err := store.GetRecurrenceByID(ctx, rec.ID)
-	require.NoError(t, err)
-	title = "Invalid"
-	_, err = store.PatchRecurrence(ctx, db.PatchRecurrenceIn{RecurrenceID: rec.ID, IfMatchRev: current.Revision, Actor: "scheduler", Update: db.RecurrenceUpdate{TemplateTitle: &title}})
-	require.ErrorIs(t, err, db.ErrInvalidRecurrence)
 	return nil
 }

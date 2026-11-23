@@ -190,10 +190,13 @@ func TestPatchIssueMetadata_InvalidKeyValueRejected(t *testing.T) {
 }
 
 // TestPatchIssueMetadata_UnknownKeyAccepted: keys outside the reserved set
-// are accepted opaquely and persist into the metadata blob.
+// are accepted opaquely and persist into the metadata blob. Validation covers
+// only patched keys, so a saved legacy value survives until it is rewritten.
 func TestPatchIssueMetadata_UnknownKeyAccepted(t *testing.T) {
 	t.Parallel()
 	d, ctx, _, iss := setupTestIssue(t)
+	_, err := d.ExecContext(ctx, `UPDATE issues SET metadata='{"work.attention":"on-fire"}' WHERE id=?`, iss.ID)
+	require.NoError(t, err)
 
 	res, err := d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 		IssueID: iss.ID, IfMatchRev: new(iss.Revision), Actor: "tester",
@@ -203,7 +206,14 @@ func TestPatchIssueMetadata_UnknownKeyAccepted(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.True(t, res.Changed)
-	assert.Contains(t, string(res.Issue.Metadata), `"definitely_not_a_key":"yellow"`)
+	assert.JSONEq(t, `{"work.attention":"on-fire","definitely_not_a_key":"yellow"}`, string(res.Issue.Metadata))
+
+	res, err = d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
+		IssueID: iss.ID, IfMatchRev: new(res.NewRevision), Actor: "tester",
+		Patch: map[string]jsontext.Value{"work.attention": jsontext.Value(`"ok"`)},
+	})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"work.attention":"ok","definitely_not_a_key":"yellow"}`, string(res.Issue.Metadata))
 }
 
 func TestPatchProjectMetadata_HappyPath(t *testing.T) {

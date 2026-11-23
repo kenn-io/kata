@@ -217,18 +217,15 @@ func TestSchedulingMetadataAcceptsCivilTimeFormatsAndSomeday(t *testing.T) {
 		require.NoError(t, err, scheduledOn)
 		require.Equal(t, true, metadata["someday"])
 	}
+	_, err := createMetadata(CreateInput{Metadata: map[string]any{"work.attention": "working"}})
+	require.ErrorIs(t, err, metadata.ErrInvalidValue)
+	require.Contains(t, err.Error(), "ok, needs-human, stuck")
 
 	patch, err := editMetadata(EditInput{Metadata: map[string]any{"someday": nil}, ClearScheduledOn: true})
 	require.NoError(t, err)
 	require.Contains(t, patch, "someday")
 	require.Nil(t, patch["someday"])
 	require.Nil(t, patch["scheduled_on"])
-}
-
-func TestCreateMetadataNullAttentionNamesValues(t *testing.T) {
-	_, err := createMetadata(CreateInput{Metadata: map[string]any{"work.attention": nil}})
-	require.ErrorIs(t, err, metadata.ErrInvalidValue)
-	require.Contains(t, err.Error(), "ok, needs-human, stuck")
 }
 
 func TestEditSchedulingRejectsSetClearAndMetadataCollisions(t *testing.T) {
