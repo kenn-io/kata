@@ -59,7 +59,11 @@ describe('ProjectSyncStatus', () => {
     expect(
       screen.getByText('For a remote daemon, select it with its --daemon profile or KATA_SERVER.'),
     ).not.toBeNull()
-    expect(screen.getByText('Project readers need daemon API 0.49.0 or later.')).not.toBeNull()
+    expect(
+      screen.getByText(
+        'Project readers need daemon API 0.49.0 or later; owners can use older daemons.',
+      ),
+    ).not.toBeNull()
     await fireEvent.click(screen.getByRole('button', { name: 'Copy PowerShell command' }))
     expect(writeText).toHaveBeenCalledWith("kata federation status --project 'spoke project’’s'''")
     expect(screen.getByText('1 generated · 1 reused · 1 without index')).not.toBeNull()

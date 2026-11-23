@@ -37,7 +37,7 @@
 
   let open = $state(false)
   // The chip's host: placement measures it, and Escape focuses its button.
-  let trigger = $state<HTMLSpanElement>()
+  let trigger = $state<HTMLDivElement>()
   let panel = $state<HTMLDivElement>()
   let panelStyle = $state('')
   let tone = $derived.by<'danger' | 'warning' | 'neutral'>(() => {
@@ -121,7 +121,7 @@
         },
         escapeFocus: () => trigger?.querySelector('button'),
       }),
-      autoReposition(() => [panel, trigger?.closest('.kit-page-header__trailing')], position),
+      autoReposition(() => [panel, trigger?.parentElement], position),
     ]
     return () => cleanups.forEach((cleanup) => cleanup())
   })
@@ -249,10 +249,9 @@
 </script>
 
 {#if visible}
-  <div class="project-sync" aria-busy={reading}>
+  <div class="project-sync" aria-busy={reading} bind:this={trigger}>
     <span
       class="chip-host"
-      bind:this={trigger}
       {@attach (host) => host.querySelector('button')?.setAttribute('aria-haspopup', 'dialog')}
     >
       <Chip interactive uppercase={false} {tone} expanded={open} onclick={() => void toggle()}>
@@ -341,7 +340,7 @@
                 </div>
               {/if}
               <span class="sync-note"
-                >Project readers need daemon API 0.49.0 or later.</span
+                >Project readers need daemon API 0.49.0 or later; owners can use older daemons.</span
               >
             </div>
           {/if}
