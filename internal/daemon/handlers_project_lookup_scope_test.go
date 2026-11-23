@@ -108,3 +108,34 @@ func TestReviewScopedLookupDoesNotRevealOtherProjectNames(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, status, string(body))
 	require.Contains(t, string(body), "project_not_initialized")
 }
+
+func TestResolveHiddenArchivedMatchesMissing(t *testing.T) {
+	env := testenv.New(t)
+	f := newProjectAccessFixture(t, env.DB)
+	requests := []map[string]any{
+		{"alias": map[string]any{"identity": "github.com/example/target-project", "kind": "git"}},
+		{"name": "target-project"},
+	}
+	var missingBodies [][]byte
+	for _, request := range requests {
+		missing, _, body := f.request(t, http.MethodPost, "/api/v1/projects/resolve", "nonmember", request, nil)
+		require.Equal(t, http.StatusNotFound, missing, string(body))
+		missingBodies = append(missingBodies, body)
+	}
+
+	project, err := env.DB.CreateProject(t.Context(), "target-project")
+	require.NoError(t, err)
+	_, _, err = env.DB.SetProjectAccessPolicy(t.Context(), db.ProjectAccessPolicy{ProjectUID: project.UID, Visibility: "teams", TeamUIDs: []string{f.team.UID}}, "admin")
+	require.NoError(t, err)
+	_, _, err = env.DB.RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: project.ID, Actor: "admin", Force: true})
+	require.NoError(t, err)
+
+	for i, request := range requests {
+		denied, _, deniedBody := f.request(t, http.MethodPost, "/api/v1/projects/resolve", "nonmember", request, nil)
+		require.Equal(t, http.StatusNotFound, denied, string(deniedBody))
+		require.JSONEq(t, string(missingBodies[i]), string(deniedBody))
+		owner, _, ownerBody := f.request(t, http.MethodPost, "/api/v1/projects/resolve", "admin", request, nil)
+		require.Equal(t, http.StatusNotFound, owner, string(ownerBody))
+		require.Contains(t, string(ownerBody), fmt.Sprintf("kata projects restore %d", project.ID))
+	}
+}

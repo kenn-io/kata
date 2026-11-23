@@ -240,7 +240,9 @@ Merge automation reads `work.branch` to know what to integrate, verifies the
 work, and closes the tracking issue with typed evidence:
 
 ```sh
-branch=$(kata meta get abc4 work.branch --json | jq -r '.value')   # "agent/widget-export"
+meta=$(kata meta get abc4 work.branch --json) || exit
+branch=$(printf '%s\n' "$meta" | jq -r '.value | select(. != null)')   # "agent/widget-export"
+[ -n "$branch" ] || { echo "abc4 has no work.branch" >&2; exit 1; }
 # ... merge and verify the branch ...
 kata close abc4 --done \
   --message "Merged widget export; export round-trips and unit tests pass." \
