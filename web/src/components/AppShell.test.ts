@@ -1335,7 +1335,7 @@ describe('AppShell', () => {
     )
     render(AppShell, {
       props: {
-        route: settingsRoute('search'),
+        route: settingsRoute(),
         snapshot: snapshot(),
         loading: false,
         daemons: [
@@ -1391,12 +1391,12 @@ describe('AppShell', () => {
       return { onNavigate }
     }
 
-    test('opens on Appearance', () => {
+    test('opens on Search by meaning', () => {
       renderSettings(settingsRoute())
-      expect(screen.getByRole('heading', { name: 'Appearance' })).not.toBeNull()
-      expect(screen.getByRole('button', { name: 'Appearance' }).getAttribute('aria-current')).toBe(
-        'true',
-      )
+      expect(screen.getByRole('heading', { name: 'Search by meaning' })).not.toBeNull()
+      expect(
+        screen.getByRole('button', { name: 'Search by meaning' }).getAttribute('aria-current'),
+      ).toBe('true')
     })
 
     test('lands on Appearance for Credentials without credential audit', () => {
