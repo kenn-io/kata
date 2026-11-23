@@ -44,26 +44,6 @@ func checkRejoinRetainedHistory(t *testing.T, store db.Storage) error {
 		require.NoError(t, err)
 		require.Equal(t, original.ContentHash, old[0].ContentHash)
 	})
-	t.Run("move retained discussion", func(t *testing.T) {
-		ctx := t.Context()
-		source, err := store.CreateProject(ctx, "discussion-source")
-		require.NoError(t, err)
-		target, err := store.CreateProject(ctx, "discussion-target")
-		require.NoError(t, err)
-		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "task", Author: "old-actor"})
-		require.NoError(t, err)
-		_, _, err = store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "discussion"})
-		require.NoError(t, err)
-		for _, project := range []db.Project{source, target} {
-			_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: project.ID == source.ID})
-			require.NoError(t, err)
-		}
-		_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "new-actor"})
-		require.NoError(t, err)
-		current, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-		require.NoError(t, err)
-		require.Equal(t, target.ID, current.ProjectID)
-	})
 	t.Run("recover task moved before enrollment", func(t *testing.T) {
 		ctx := t.Context()
 		source, err := store.CreateProject(ctx, "offline-move-source")

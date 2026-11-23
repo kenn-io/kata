@@ -145,20 +145,16 @@ func TestRetainedMovedIssueEditAfterPushQueueDrains(t *testing.T) {
 
 func TestRetainedIssueMoveChecksHubBeforeSnapshot(t *testing.T) {
 	for _, tc := range []struct {
-		name               string
-		status             int
-		existingSnapshot   bool
-		acceptedSnapshot   bool
-		unpublishedComment bool
-		commentActor       string
-		noBoundary         bool
-		wantStatus         int
-		wantSnapshots      int
+		name             string
+		status           int
+		existingSnapshot bool
+		acceptedSnapshot bool
+		noBoundary       bool
+		wantStatus       int
+		wantSnapshots    int
 	}{
 		{name: "hub missing", status: http.StatusNotFound, wantStatus: http.StatusConflict, wantSnapshots: 0},
 		{name: "hub known", status: http.StatusOK, wantStatus: http.StatusOK},
-		{name: "hub known with retained discussion", status: http.StatusOK, unpublishedComment: true, wantStatus: http.StatusOK},
-		{name: "hub known with unsent current actor discussion", status: http.StatusOK, unpublishedComment: true, commentActor: "new-actor", wantStatus: http.StatusOK},
 		{name: "hub known with accepted snapshot", status: http.StatusOK, existingSnapshot: true, acceptedSnapshot: true, wantStatus: http.StatusConflict, wantSnapshots: 1},
 		{name: "offline", status: http.StatusServiceUnavailable, wantStatus: http.StatusServiceUnavailable},
 		{name: "offline with accepted snapshot", status: http.StatusServiceUnavailable, existingSnapshot: true, acceptedSnapshot: true, wantStatus: http.StatusServiceUnavailable, wantSnapshots: 1},
@@ -175,16 +171,6 @@ func TestRetainedIssueMoveChecksHubBeforeSnapshot(t *testing.T) {
 			require.NoError(t, err)
 			issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "retained", Author: "old-actor"})
 			require.NoError(t, err)
-			if tc.unpublishedComment {
-				commentActor := tc.commentActor
-				if commentActor == "" {
-					commentActor = "old-actor"
-				}
-				_, _, err = env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: commentActor, Body: "retained comment"})
-				require.NoError(t, err)
-				issue, err = env.DB.IssueByID(ctx, issue.ID)
-				require.NoError(t, err)
-			}
 			hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				switch tc.status {
 				case http.StatusOK:

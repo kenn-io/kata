@@ -554,6 +554,9 @@ func publishRetainedComments(ctx context.Context, store db.Storage, binding *db.
 }
 
 func publishRetainedLinkPeers(ctx context.Context, store db.Storage, binding *db.FederationBinding, hubProjectID int64, client *Client, batch []db.Event, sent map[string]bool, onPulledEvents func(int64, []db.Event), validateLease func(context.Context) error, credentials config.FederationCredentialStore, opts clientpkg.Opts) (bool, error) {
+	if binding.RetainedThroughEventID == 0 {
+		return false, nil
+	}
 	for _, event := range batch {
 		fold := db.FoldEvent{Type: event.Type, UID: event.UID, Payload: jsontext.Value(event.Payload)}
 		if event.IssueUID != nil {
@@ -596,16 +599,6 @@ func publishRetainedLinkPeers(ctx context.Context, store db.Storage, binding *db
 			if peer == "" || peer == fold.IssueUID || sent[peer] {
 				continue
 			}
-			issue, err := store.IssueByUID(ctx, peer, db.IncludeDeletedYes)
-			if errors.Is(err, db.ErrNotFound) {
-				continue
-			}
-			if err != nil {
-				return false, err
-			}
-			if issue.ProjectID != binding.ProjectID {
-				continue
-			}
 			snapshot, sourceID, err := store.RetainedIssueSnapshot(ctx, binding.ProjectID, peer)
 			if errors.Is(err, db.ErrNotFound) {
 				continue
@@ -624,9 +617,6 @@ func publishRetainedLinkPeers(ctx context.Context, store db.Storage, binding *db
 				if !retainedSnapshotAlreadyKnown(err, peer) {
 					return false, err
 				}
-				if err := federationFailpoint("before_retained_snapshot_retire"); err != nil {
-					return false, err
-				}
 				if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 					return false, err
 				}
@@ -641,8 +631,6 @@ func publishRetainedLinkPeers(ctx context.Context, store db.Storage, binding *db
 				}
 				sent[peer] = true
 				return true, nil
-			} else if err := federationFailpoint("after_retained_snapshot_publish"); err != nil {
-				return false, err
 			}
 			sent[peer] = true
 		}
