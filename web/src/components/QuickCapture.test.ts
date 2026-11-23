@@ -6,13 +6,52 @@ import QuickCapture from './QuickCapture.svelte'
 describe('QuickCapture', () => {
   afterEach(cleanup)
 
+  it('selects a project and falls back to the Inbox', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const view = render(QuickCapture, {
+      props: {
+        open: true,
+        projects: [
+          { uid: 'a', name: 'Alpha' },
+          { uid: 'b', name: 'Beta' },
+        ],
+        onClose: vi.fn(),
+        onSubmit,
+      },
+    })
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Quick capture' }), {
+      target: { value: 'Draft task' },
+    })
+    expect((screen.getByRole('button', { name: 'Add' }) as HTMLButtonElement).disabled).toBe(true)
+    await view.rerender({ inboxUID: 'a' })
+    await fireEvent.click(screen.getByRole('combobox', { name: 'Project: Alpha' }))
+    await fireEvent.click(screen.getByRole('option', { name: 'Beta' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    expect(onSubmit).toHaveBeenCalledWith('Draft task', 'b')
+    await view.rerender({ open: false })
+    await view.rerender({ open: true })
+    expect(screen.getByRole('combobox', { name: 'Project: Alpha' })).toBeTruthy()
+    await view.rerender({ inboxUID: 'b' })
+    expect(screen.getByRole('combobox', { name: 'Project: Beta' })).toBeTruthy()
+    await view.rerender({ inboxUID: 'a' })
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Quick capture' }), {
+      target: { value: 'Draft task' },
+    })
+    await fireEvent.click(screen.getByRole('combobox', { name: 'Project: Alpha' }))
+    await fireEvent.click(screen.getByRole('option', { name: 'Beta' }))
+    await view.rerender({ projects: [{ uid: 'a', name: 'Alpha' }] })
+    expect(screen.getByRole('combobox', { name: 'Project: Alpha' })).toBeTruthy()
+    await fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    expect(onSubmit).toHaveBeenLastCalledWith('Draft task', 'a')
+  })
+
   it('keeps the draft and shows the error when capture fails', async () => {
     const onClose = vi.fn()
     const onSubmit = vi.fn().mockRejectedValue(new Error('Server unavailable'))
     render(QuickCapture, { props: { open: true, onClose, onSubmit } })
     const input = screen.getByRole('textbox', { name: 'Quick capture' }) as HTMLInputElement
     await fireEvent.input(input, { target: { value: 'Draft task' } })
-    await fireEvent.click(screen.getByRole('button', { name: 'Capture' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Add' }))
 
     expect((await screen.findByRole('alert')).textContent).toBe('Server unavailable')
     expect(input.value).toBe('Draft task')
@@ -30,7 +69,7 @@ describe('QuickCapture', () => {
     })
 
     expect(screen.getByRole('button', { name: 'Cancel' }).classList).toContain('kit-button')
-    expect(screen.getByRole('button', { name: 'Capture' }).classList).toContain('kit-button')
+    expect(screen.getByRole('button', { name: 'Add' }).classList).toContain('kit-button')
   })
 
   it('focuses the task title when an opening refresh finishes', async () => {

@@ -51,6 +51,7 @@
 
   interface Props {
     toolbar?: Snippet | undefined
+    headerAccessory?: Snippet | undefined
     currentView: KataCurrentView
     now: number
     resultsKey?: string
@@ -79,6 +80,7 @@
 
   let {
     toolbar = undefined,
+    headerAccessory = undefined,
     currentView,
     now,
     resultsKey = '',
@@ -1129,6 +1131,7 @@
           <span class="count"
             >{totalFilteredIssues()} {totalFilteredIssues() === 1 ? 'task' : 'tasks'}</span
           >
+          {@render headerAccessory?.()}
         {/snippet}
         {#snippet actions()}
           {#if hasExpandableVisibleRows || hasAnyExpandedRows}

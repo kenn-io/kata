@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button, RadioGroup } from '@kenn-io/kit-ui'
+  import { Button, Card, RadioGroup } from '@kenn-io/kit-ui'
   import CheckIcon from '@lucide/svelte/icons/check'
   import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw'
   import type { KataTaskCloseRequest, KataTaskDetail } from '../lib/kata/types'
@@ -55,6 +55,16 @@
   let pending = $state(false)
   let completeMessageInput: HTMLTextAreaElement | null = $state(null)
   let trackedUID = $state<string | null>(null)
+  const blockedPreview = $derived(
+    issue.links.filter(
+      (link) =>
+        link.type === 'blocks' && link.from.uid === issue.issue.uid && link.to.status === 'open',
+    ).length,
+  )
+
+  function openTasks(count: number): string {
+    return `${count} open ${count === 1 ? 'task' : 'tasks'}`
+  }
 
   $effect(() => {
     if (issue.issue.uid === trackedUID) return
@@ -273,6 +283,13 @@
         disabled={pending}
       ></textarea>
     </label>
+    <Card level="inset" padding="sm">
+      <div>Comments and links stay.</div>
+      {#if blockedPreview}<div>
+          {openTasks(blockedPreview)}
+          {blockedPreview === 1 ? 'loses' : 'lose'} this blocker.
+        </div>{/if}
+    </Card>
   </div>
 
   {#snippet footer()}

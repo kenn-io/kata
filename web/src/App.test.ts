@@ -1,6 +1,6 @@
 // @vitest-environment-options { "url": "http://127.0.0.2/kata" }
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
 import { tick } from 'svelte'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -3005,64 +3005,161 @@ describe('App', () => {
     },
   )
 
-  it('designates the capture Inbox from New task on a fresh catalog', async () => {
-    history.replaceState(null, '', '/kata#direct=1')
+  it("shows another client's first repeating task after a remote poll", async () => {
+    vi.useFakeTimers()
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    localStorage.setItem(
+      'kata.web.workspace-state.v1',
+      JSON.stringify({
+        version: 1,
+        daemons: { 'example-remote': `/kata?scope=${snapshot().catalog[0]!.project.uid}` },
+      }),
+    )
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
     )
-    const accepted = snapshot()
-    const requests: Request[] = []
+    const initial = snapshot()
+    const updated = { ...snapshot(), cursor: initial.cursor + 1 }
+    let changed = false
+    let reads = 0
+    let updatedSnapshotReads = 0
+    const recurrenceDaemons: Array<string | null> = []
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const request =
-          input instanceof Request
-            ? input
-            : new Request(new URL(String(input), window.location.origin), init)
-        requests.push(request)
-        if (request.method === 'POST' && request.url.endsWith('/api/v1/projects/7/metadata')) {
-          accepted.catalog[0]!.project.metadata.role = 'inbox'
-          return new Response(
-            JSON.stringify({
-              changed: true,
-              project: accepted.catalog[0]!.project,
-            }),
-            { status: 200, headers: { 'Content-Type': 'application/json' } },
-          )
+        const request = requestOf(input, init)
+        const path = new URL(request.url).pathname
+        if (path.endsWith('/recurrences')) {
+          reads++
+          recurrenceDaemons.push(request.headers.get('X-Kata-Web-Daemon'))
+          return Response.json({
+            recurrences: changed
+              ? [
+                  {
+                    id: 1,
+                    uid: 'recurrence-1',
+                    project_id: 7,
+                    rrule: 'FREQ=WEEKLY',
+                    dtstart: '2026-11-22',
+                    timezone: 'UTC',
+                    template_title: 'Weekly task',
+                    template_body: '',
+                    template_labels: [],
+                    template_metadata: {},
+                    next_occurrence_key: '2026-11-29',
+                    author: 'user-a',
+                    revision: 1,
+                    created_at: '2026-11-22T12:00:00.000Z',
+                    updated_at: '2026-11-22T12:00:00.000Z',
+                  },
+                ]
+              : [],
+            fetched_at: '2026-11-22T12:00:00.000Z',
+          })
         }
-        return new Response(JSON.stringify(accepted), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json', ETag: `"snapshot-${requests.length}"` },
+        if (path.endsWith('/references')) return Response.json({ statuses: [] })
+        if (path === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (path === '/api/v1/ui/daemons')
+          return Response.json({
+            daemons: [
+              ...daemonRoster().daemons,
+              {
+                id: 'example-remote',
+                url: 'https://daemon.example',
+                default: false,
+                auth: 'token',
+                health: 'connected',
+              },
+            ],
+          })
+        if (
+          path.endsWith('/api/v1/ui/snapshot') &&
+          changed &&
+          request.headers.get('X-Kata-Web-Daemon') === 'example-remote'
+        )
+          updatedSnapshotReads++
+        return Response.json(changed ? updated : initial, {
+          headers: { ETag: changed ? '"snapshot-2"' : '"snapshot-1"' },
         })
       }),
     )
-
     render(App)
+    await vi.advanceTimersByTimeAsync(0)
+    await fireEvent.click(screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }))
+    await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(reads).toBeGreaterThan(0)
+    expect(screen.queryByRole('button', { name: /repeating task/ })).toBeNull()
 
-    expect(screen.queryByRole('button', { name: /^Inbox project:/ })).toBeNull()
-    await fireEvent.click(await screen.findByRole('button', { name: 'New task' }))
-    await fireEvent.click(
-      await screen.findByRole('button', { name: 'Use example-project as Inbox' }),
-    )
-
-    await waitFor(() => {
-      const mutation = requests.find(
-        (request) =>
-          request.method === 'POST' && request.url.endsWith('/api/v1/projects/7/metadata'),
-      )
-      expect(mutation).toBeDefined()
-      expect(
-        screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
-      ).toBeNull()
-    })
-    const mutation = requests.find(
-      (request) => request.method === 'POST' && request.url.endsWith('/api/v1/projects/7/metadata'),
-    )!
-    expect(await mutation.json()).toEqual({ actor: 'kata-web', patch: { role: 'inbox' } })
+    const previousReads = reads
+    changed = true
+    await vi.advanceTimersByTimeAsync(15_001)
+    await tick()
+    expect(updatedSnapshotReads).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: '↻ 1 repeating task' })).not.toBeNull()
+    expect(reads).toBeGreaterThan(previousReads)
+    expect(recurrenceDaemons.at(-1)).toBe('example-remote')
   })
 
-  it('changes the Inbox project from New task through one designation request', async () => {
+  it('refreshes project rules for recurrence events while a snapshot is pending', async () => {
+    history.replaceState(null, '', '/kata?scope=01J00000000000000000000002#direct=1')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const live = snapshot()
+    live.capabilities.updates = 'sse'
+    let stream: ReadableStreamDefaultController<Uint8Array> | undefined
+    let reads = 0
+    let snapshotReads = 0
+    let holdSnapshot = false
+    let releaseSnapshot: (() => void) | undefined
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        const path = new URL(request.url).pathname
+        if (path === '/api/v1/events/stream')
+          return new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                stream = controller
+              },
+            }),
+            { headers: { 'Content-Type': 'text/event-stream' } },
+          )
+        if (path.endsWith('/recurrences')) {
+          reads++
+          return Response.json({
+            recurrences: [],
+          })
+        }
+        if (path === '/api/v1/ui/references') return Response.json({ statuses: [] })
+        if (path === '/api/v1/ui/snapshot') {
+          snapshotReads++
+          if (holdSnapshot) {
+            await new Promise<void>((resolve) => (releaseSnapshot = resolve))
+          }
+        }
+        return Response.json(live, { headers: { ETag: '"snapshot-1"' } })
+      }),
+    )
+    render(App)
+    await waitFor(() => {
+      expect(stream).toBeDefined()
+      expect(reads).toBeGreaterThan(0)
+      expect(snapshotReads).toBeGreaterThan(1)
+    })
+    holdSnapshot = true
+    const previousReads = reads
+    stream!.enqueue(new TextEncoder().encode('event: recurrence.materialized\ndata: {}\n\n'))
+    await waitFor(() => expect(reads).toBeGreaterThan(previousReads))
+    await waitFor(() => expect(releaseSnapshot).toBeDefined())
+    releaseSnapshot!()
+  })
+
+  it('keeps the Inbox unchanged and creates in the chosen project', async () => {
     history.replaceState(null, '', '/kata#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
@@ -3082,7 +3179,7 @@ describe('App', () => {
       },
       stats: { Open: 0, Closed: 0, LastEventAt: '2026-08-01T12:00:00.000Z' },
     })
-    const patches: Array<{ projectID: number; body: unknown }> = []
+    const writes: string[] = []
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -3090,42 +3187,26 @@ describe('App', () => {
           input instanceof Request
             ? input
             : new Request(new URL(String(input), window.location.origin), init)
-        const match = request.url.match(/\/api\/v1\/projects\/(\d+)\/metadata$/)
-        if (request.method === 'POST' && match) {
-          const projectID = Number(match[1])
-          const body = await request.json()
-          patches.push({ projectID, body })
-          const project = accepted.catalog.find((entry) => entry.project.id === projectID)!.project
-          for (const entry of accepted.catalog) {
-            delete entry.project.metadata.role
-          }
-          project.metadata.role = 'inbox'
-          return new Response(JSON.stringify({ changed: true, project }), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          })
+        const path = new URL(request.url).pathname
+        if (request.method === 'POST' && path.startsWith('/api/v1/projects/')) {
+          writes.push(path)
+          if (path.endsWith('/issues'))
+            return Response.json({ issue: accepted.collection[0] }, { status: 201 })
         }
-        return new Response(JSON.stringify(accepted), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json', ETag: `"snapshot-${patches.length}"` },
-        })
+        return Response.json(accepted, { headers: { ETag: '"snapshot-1"' } })
       }),
     )
-
     render(App)
-
     await fireEvent.click(await screen.findByRole('button', { name: 'New task' }))
-    expect(screen.getByText('Captured in').textContent).toContain('example-project')
-    await fireEvent.click(screen.getByRole('button', { name: 'Change Inbox project' }))
+    await fireEvent.click(screen.getByRole('combobox', { name: 'Project: example-project' }))
+    await fireEvent.click(screen.getByRole('option', { name: 'example-workspace' }))
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Quick capture' }), {
+      target: { value: 'Workspace task' },
+    })
     await fireEvent.click(
-      await screen.findByRole('button', { name: 'Use example-workspace as Inbox' }),
+      within(screen.getByRole('dialog', { name: 'New task' })).getByRole('button', { name: 'Add' }),
     )
-
-    await waitFor(() => expect(patches).toHaveLength(1))
-    expect(patches).toEqual([
-      { projectID: 8, body: { actor: 'kata-web', patch: { role: 'inbox' } } },
-    ])
-    expect(await screen.findByRole('textbox', { name: 'Quick capture' })).not.toBeNull()
+    await waitFor(() => expect(writes).toEqual(['/api/v1/projects/8/issues']))
   })
 
   it('loads, applies, and persists presentation preferences', async () => {
@@ -3165,14 +3246,66 @@ describe('App', () => {
     )
   })
 
-  it('sends the visible recurrence revision when deleting', async () => {
-    history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
+  it('counts linked open tasks outside the filtered collection when completing a task', async () => {
+    history.replaceState(
+      null,
+      '',
+      '/kata?scope=01J00000000000000000000002&issue=01J00000000000000000000001#direct=1',
+    )
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
     )
     const base = snapshot()
+    const link = {
+      id: 1,
+      from_issue_id: 1,
+      from_issue_uid: base.collection[0]!.uid,
+      from_qualified_id: base.collection[0]!.qualified_id,
+      from_status: 'open',
+      to_issue_id: 2,
+      to_issue_uid: '01J00000000000000000000004',
+      to_qualified_id: 'other-project#b1',
+      to_status: 'open',
+      type: 'blocks',
+      author: 'user-a',
+      created_at: '2026-08-01T12:00:00Z',
+    }
     const accepted = {
+      ...base,
+      selected: { ...availableSelection(base.collection[0]), links: [link] },
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = new URL(requestOf(input, init).url).pathname
+        if (path === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (path.endsWith('/recurrences')) return Response.json({ recurrences: [] })
+        if (path.endsWith('/references')) return Response.json({ statuses: [] })
+        return Response.json(accepted, { headers: { ETag: '"snapshot-1"' } })
+      }),
+    )
+    render(App)
+    await fireEvent.click(await screen.findByRole('button', { name: 'Complete…' }))
+    expect(
+      within(screen.getByRole('dialog', { name: 'Complete task' })).getByText(
+        '1 open task loses this blocker.',
+      ),
+    ).toBeTruthy()
+  })
+
+  function recurrenceDeletionSetup() {
+    history.replaceState(
+      null,
+      '',
+      '/kata?scope=01J00000000000000000000002&issue=01J00000000000000000000001#direct=1',
+    )
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const base = snapshot()
+    return {
       ...base,
       selected: {
         state: 'available',
@@ -3201,34 +3334,54 @@ describe('App', () => {
         history: [],
       },
     }
-    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const request =
-        input instanceof Request
-          ? input
-          : new Request(new URL(String(input), window.location.origin), init)
-      if (request.method === 'DELETE') return new Response(null, { status: 204 })
-      return new Response(JSON.stringify(accepted), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json', ETag: '"snapshot-1"' },
+  }
+
+  async function stopRepeatingFromHeader(): Promise<HTMLElement> {
+    await fireEvent.click(await screen.findByRole('button', { name: /1 repeating task/ }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Stop repeating…' }))
+    const dialog = screen.getByRole('dialog', { name: 'Stop repeating' })
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Stop repeating' }))
+    return dialog
+  }
+
+  it.each(['accepted', 'refused'])(
+    'sends the visible recurrence revision when deleting: %s',
+    async (result) => {
+      const accepted = recurrenceDeletionSetup()
+      const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        if (request.method === 'DELETE') {
+          return result === 'accepted'
+            ? new Response(null, { status: 204 })
+            : Response.json(
+                { error: { code: 'revision_conflict', message: 'Recurrence changed' } },
+                { status: 412 },
+              )
+        }
+        if (request.url.endsWith('/api/v1/projects/7/recurrences'))
+          return Response.json({ recurrences: accepted.selected.recurrences })
+        return new Response(JSON.stringify(accepted), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', ETag: '"snapshot-1"' },
+        })
       })
-    })
-    vi.stubGlobal('fetch', fetcher)
+      vi.stubGlobal('fetch', fetcher)
 
-    render(App)
-    await fireEvent.click(await screen.findByRole('button', { name: 'Stop' }))
-    await fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
-
-    await waitFor(() => {
-      const deletion = fetcher.mock.calls
-        .map(([input, init]) =>
-          input instanceof Request
-            ? input
-            : new Request(new URL(String(input), window.location.origin), init),
+      render(App)
+      const dialog = await stopRepeatingFromHeader()
+      await waitFor(() => {
+        const deletions = fetcher.mock.calls
+          .map(([input, init]) => requestOf(input, init))
+          .filter((request) => request.method === 'DELETE')
+        expect(deletions.map((request) => request.headers.get('If-Match'))).toEqual(['"rev-4"'])
+      })
+      if (result === 'accepted')
+        await waitFor(() =>
+          expect(screen.queryByRole('dialog', { name: 'Stop repeating' })).toBeNull(),
         )
-        .find((request) => request.method === 'DELETE')
-      expect(deletion?.headers.get('If-Match')).toBe('"rev-4"')
-    })
-  })
+      else expect(dialog.isConnected).toBe(true)
+    },
+  )
 
   it('omits a client actor from temporary claims in identity mode', async () => {
     history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
@@ -4414,9 +4567,7 @@ describe('App', () => {
 
   describe('completed issue action telemetry', () => {
     for (const action of ['create', 'close'] as const) {
-      it.each(
-        action === 'create' ? ['accepted', 'refused', 'missing-project'] : ['accepted', 'refused'],
-      )(`${action} reports refusals or marks accepted web requests, %s`, async (result) => {
+      it.each(['accepted', 'refused'])(`${action} reports outcome %s`, async (result) => {
         const refused = result !== 'accepted'
         history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
         sessionStorage.setItem(
@@ -4439,8 +4590,6 @@ describe('App', () => {
         const actionRequests: Request[] = []
         const shownErrors: unknown[] = []
         let writes = 0
-        let removeProject = false
-        let snapshotReads = 0
         vi.stubGlobal(
           'fetch',
           vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -4476,8 +4625,6 @@ describe('App', () => {
               })
             if (path.endsWith('/references'))
               return Response.json({ issues: [], labels: [], owners: [], projects: [] })
-            snapshotReads += 1
-            if (removeProject) delete accepted.catalog[0]!.project.metadata.role
             return Response.json(accepted, { headers: { ETag: '"snapshot-1"' } })
           }),
         )
@@ -4487,19 +4634,11 @@ describe('App', () => {
           await fireEvent.input(await screen.findByRole('textbox', { name: 'Quick capture' }), {
             target: { value: 'Example task' },
           })
-          if (result === 'missing-project') {
-            const reads = snapshotReads
-            removeProject = true
-            window.dispatchEvent(new Event('focus'))
-            await waitFor(() => expect(snapshotReads).toBeGreaterThan(reads))
-            await waitFor(() =>
-              expect(screen.getByRole('button', { name: 'Capture' })).toHaveProperty(
-                'disabled',
-                false,
-              ),
-            )
-          }
-          await fireEvent.click(screen.getByRole('button', { name: 'Capture' }))
+          await fireEvent.click(
+            within(screen.getByRole('dialog', { name: 'New task' })).getByRole('button', {
+              name: 'Add',
+            }),
+          )
         } else {
           await fireEvent.click(await screen.findByRole('button', { name: 'Complete…' }))
           await fireEvent.input(screen.getByRole('textbox', { name: 'Evidence value' }), {
@@ -4510,14 +4649,6 @@ describe('App', () => {
           })
           const buttons = screen.getAllByRole('button', { name: 'Complete' })
           await fireEvent.click(buttons[buttons.length - 1]!)
-        }
-        if (result === 'missing-project') {
-          expect((await screen.findByRole('alert')).textContent).toBe(
-            'Task project is not available.',
-          )
-          expect(shownErrors).toEqual([])
-          expect(actionRequests).toHaveLength(0)
-          return
         }
         await waitFor(() => expect(writes).toBe(1))
         if (refused) {

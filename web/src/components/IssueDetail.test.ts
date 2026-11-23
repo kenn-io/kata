@@ -405,7 +405,23 @@ describe('IssueDetail', () => {
     expect(screen.queryByRole('button', { name: 'Repeats…' })).toBeNull()
   })
 
-  it('withholds recurrence actions while a mutation is pending', async () => {
+  it('prefills a repeating task from the selected task', async () => {
+    renderDetail({ issue: makeIssue({ owner: 'user-a', priority: 2 }), selectedRecurrences: [] })
+    await fireEvent.click(screen.getByRole('button', { name: 'Repeats…' }))
+    const dialog = screen.getByRole('dialog')
+    expect((within(dialog).getByLabelText('Title') as HTMLInputElement).value).toBe(
+      'Ship the thing',
+    )
+    expect((within(dialog).getByLabelText('Body') as HTMLTextAreaElement).value).toBe(
+      'Initial body',
+    )
+    expect((within(dialog).getByLabelText('Owner') as HTMLInputElement).value).toBe('user-a')
+    expect(within(dialog).getByRole('combobox', { name: 'Priority: P2' })).toBeTruthy()
+    expect((within(dialog).getByLabelText('Labels') as HTMLInputElement).value).toBe('review')
+    expect((within(dialog).getByLabelText('Metadata') as HTMLTextAreaElement).value).toBe('')
+  })
+
+  it('shows only the attached rule in the Repeats row', async () => {
     const recurrence = {
       id: 1,
       uid: 'rec-1',
@@ -425,9 +441,9 @@ describe('IssueDetail', () => {
       updated_at: '2026-05-15T12:00:00Z',
     }
     const view = renderDetail({ selectedRecurrences: [recurrence] })
-    expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy()
-    await view.rerender({ actionsDisabled: true, authorityBlocked: false })
-    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
+    expect(screen.queryByText('Repeats')).toBeNull()
+    await view.rerender({ issue: makeIssue({ recurrence_id: 1 }) })
+    expect(screen.getByText(/Weekly task/)).toBeTruthy()
   })
 
   it('closes a recurrence draft after authentication authority changes', async () => {

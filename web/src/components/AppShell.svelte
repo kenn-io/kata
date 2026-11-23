@@ -51,9 +51,9 @@
   import IssueDetail from './IssueDetail.svelte'
   import IssueFilters from './IssueFilters.svelte'
   import IssueGraph from './IssueGraph.svelte'
-  import InboxProjectChooser from './InboxProjectChooser.svelte'
   import KataDaemonSwitcher from './KataDaemonSwitcher.svelte'
   import QuickCapture from './QuickCapture.svelte'
+  import ProjectRecurrences from './ProjectRecurrences.svelte'
   import SearchSettings from './SearchSettings.svelte'
   import Sidebar from './Sidebar.svelte'
   import SplitLayout from './SplitLayout.svelte'
@@ -101,8 +101,11 @@
     onSearchEmpty?: (() => void) | undefined
     onNavigate: (route: AppRoute) => void | Promise<void>
     onCreateProject: (name: string, designateInbox?: boolean) => Promise<KataTaskMutationResponse>
-    onDesignateInbox: (projectUID: string) => Promise<void>
-    onCreateIssue: (title: string, parent?: ChildParent) => void | Promise<void>
+    onCreateIssue: (
+      title: string,
+      parent?: ChildParent,
+      projectUID?: string,
+    ) => void | Promise<void>
     searchReferences: (query: string) => Promise<UIIssueReference[]>
     onMoveIssue: (toProjectUID: string) => boolean | Promise<boolean>
     onPatchMetadata: (uid: string, patch: Record<string, unknown>) => boolean | Promise<boolean>
@@ -123,16 +126,17 @@
     onRemoveLabel: (uid: string, label: string) => void | Promise<void>
     onCloseIssue: (request: KataTaskCloseRequest) => boolean | Promise<boolean>
     onReopenIssue: () => void | Promise<void>
+    recurrenceRevision?: number
     onCreateRecurrence: (
       projectID: number,
       input: import('../lib/kata/types').KataCreateRecurrenceInput,
     ) => Promise<void>
     onPatchRecurrence: (
-      id: number,
+      recurrence: import('../lib/kata/types').KataRecurrence,
       input: import('../lib/kata/types').KataPatchRecurrenceInput,
       etag: string,
     ) => Promise<void>
-    onDeleteRecurrence: (recurrence: import('../lib/kata/types').KataRecurrence) => Promise<boolean>
+    onDeleteRecurrence: (recurrence: import('../lib/kata/types').KataRecurrence) => Promise<void>
   }
 
   let {
@@ -170,7 +174,6 @@
     onSearchEmpty = undefined,
     onNavigate,
     onCreateProject,
-    onDesignateInbox,
     onCreateIssue,
     searchReferences,
     onMoveIssue,
@@ -186,6 +189,7 @@
     onRemoveLabel,
     onCloseIssue,
     onReopenIssue,
+    recurrenceRevision = 0,
     onCreateRecurrence,
     onPatchRecurrence,
     onDeleteRecurrence,
@@ -266,7 +270,6 @@
   )
 
   let captureOpen = $state(false)
-  let inboxChooserOpen = $state(false)
   let mobileNavigationOpen = $state(false)
   let detailBeside = $state(false)
   let creationIntent = $state<'project' | 'task' | null>(null)
@@ -297,7 +300,6 @@
   let inboxProject = $derived(
     projection.projects.find((project) => project.metadata.role === 'inbox'),
   )
-  let hasInbox = $derived(inboxProject !== undefined)
   let viewName = $derived(viewNameForRoute(route))
   let searchFilters = $derived(searchFiltersForRoute(route, viewName))
   let filterRoute = $derived(
@@ -529,8 +531,7 @@
       beginProjectCreation('task')
       return
     }
-    if (hasInbox) captureOpen = true
-    else inboxChooserOpen = true
+    captureOpen = true
   }
 
   function beginProjectCreation(intent: 'project' | 'task' = 'project'): void {
@@ -549,14 +550,10 @@
     return result
   }
 
-  async function chooseInbox(projectUID: string): Promise<void> {
-    await onDesignateInbox(projectUID)
-    inboxChooserOpen = false
-    captureOpen = true
-  }
-
-  function submitCapture(title: string): void | Promise<void> {
-    return scopedAuthority && childParent ? onCreateIssue(title, childParent) : onCreateIssue(title)
+  function submitCapture(title: string, projectUID?: string): void | Promise<void> {
+    return scopedAuthority && childParent
+      ? onCreateIssue(title, childParent)
+      : onCreateIssue(title, undefined, projectUID)
   }
 
   function viewNameForRoute(current: AppRoute): KataTaskViewName {
@@ -942,8 +939,25 @@
           onSubmitSearch={submitSearch}
         />
       {/snippet}
+      {#snippet projectRecurrences()}
+        {#if selectedProject && !scopedAuthority}
+          {#key selectedProject.uid}
+            <ProjectRecurrences
+              projectID={selectedProject.id}
+              actor={selfActor ?? 'kata-web'}
+              disabled={!projectWideMutationAllowed || mutationPending}
+              {draftFenceGeneration}
+              refreshKey={`${recurrenceRevision}:${draftResetGeneration}`}
+              onCreate={onCreateRecurrence}
+              onPatch={onPatchRecurrence}
+              onDelete={onDeleteRecurrence}
+            />
+          {/key}
+        {/if}
+      {/snippet}
       <IssueCollection
         toolbar={filtersToolbar}
+        headerAccessory={projectRecurrences}
         now={connectionNow}
         resultsKey={JSON.stringify([route.projectUID ?? null, route.filters])}
         {navigationGeneration}
@@ -1012,7 +1026,7 @@
         {onMoveIssue}
         {onPatchMetadata}
         {onAddComment}
-        commentError={captureOpen ? undefined : mutationMessage}
+        mutationError={captureOpen ? undefined : mutationMessage}
         {selectedCommentUID}
         {returnComment}
         {onEditIssue}
@@ -1031,8 +1045,6 @@
         }}
         onOpenGraph={(issue) => openGraph(issue.uid)}
         {onCreateRecurrence}
-        {onPatchRecurrence}
-        {onDeleteRecurrence}
       />
     {:else}
       <section class="detail-unavailable" role="status" aria-label="Selected issue status">
@@ -1048,26 +1060,14 @@
   open={captureOpen}
   disabled={newTaskBlockedReason !== undefined}
   {draftFenceGeneration}
-  inboxName={scopedAuthority ? undefined : inboxProject?.name}
+  projects={projectWideMutationAllowed
+    ? projection.projects.map((project) => ({ uid: project.uid, name: project.name }))
+    : undefined}
+  inboxUID={inboxProject?.uid}
   onClose={() => {
     captureOpen = false
   }}
   onSubmit={submitCapture}
-  onChangeInbox={projectWideMutationAllowed
-    ? () => {
-        captureOpen = false
-        inboxChooserOpen = true
-      }
-    : undefined}
-/>
-
-<InboxProjectChooser
-  open={inboxChooserOpen}
-  projects={projection.projects.map((project) => ({ uid: project.uid, name: project.name }))}
-  onClose={() => {
-    inboxChooserOpen = false
-  }}
-  onSelect={chooseInbox}
 />
 
 <style>

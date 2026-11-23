@@ -21,37 +21,31 @@ test('reachable graph preserves relationship context and returns to detail', asy
   await expect(page).toHaveURL(`${kata.origin}/kata?issue=${source.uid}`)
 })
 
-test('recurrence authority is shown and can be deleted from issue detail', async ({
+test('creates, edits, and stops a repeating task from the project header', async ({
   page,
   kata,
 }) => {
   const credentials = await kata.launch(page)
   const issue = await kata.seedIssue(page, credentials, { title: 'Recurring example task' })
-  const response = await kata.request(
-    page,
-    credentials,
-    'POST',
-    `/api/v1/projects/${kata.projectID}/recurrences`,
-    {
-      actor: 'user-a',
-      rrule: 'FREQ=WEEKLY;COUNT=2',
-      dtstart: '2026-08-03',
-      timezone: 'America/Chicago',
-      template: {
-        title: 'Weekly example review',
-        body: 'Review the neutral example.',
-        labels: ['routine'],
-        metadata: {},
-      },
-    },
-  )
-  expect(response.status()).toBe(201)
-  await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
-  await expect(page.getByText('Repeats', { exact: true })).toBeVisible()
-  await page.getByRole('button', { name: 'Stop', exact: true }).click()
+  await page.goto(`${kata.origin}/kata?view=all-open&scope=${kata.projectUID}&issue=${issue.uid}`)
+  await page.getByRole('button', { name: 'Repeats…' }).click()
+  const create = page.getByRole('dialog', { name: 'Repeat' })
+  await create.getByLabel('Title', { exact: true }).fill('Weekly example review')
+  await create.getByRole('button', { name: 'Save' }).click()
+  const chip = page.getByRole('button', { name: /1 repeating task/ })
+  await expect(chip).toBeVisible()
+  await chip.click()
+  await page.getByRole('button', { name: 'Edit', exact: true }).click()
+  const edit = page.getByRole('dialog', { name: 'Edit recurrence' })
+  await edit.getByLabel('Title', { exact: true }).fill('Updated weekly review')
+  await edit.getByRole('button', { name: 'Save' }).click()
+  await expect(edit).toBeHidden()
+  await chip.click()
+  await expect(page.getByText('Updated weekly review', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Stop repeating…' }).click()
   await page
-    .getByRole('dialog', { name: 'Delete recurrence' })
-    .getByRole('button', { name: 'Delete' })
+    .getByRole('dialog', { name: 'Stop repeating' })
+    .getByRole('button', { name: 'Stop repeating' })
     .click()
-  await expect(page.getByText('Repeats', { exact: true })).toHaveCount(0)
+  await expect(chip).toHaveCount(0)
 })

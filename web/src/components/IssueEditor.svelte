@@ -19,7 +19,6 @@
   import { createKataLinkFilters, type KataLinkFilters } from '../lib/kata/linkFilters'
   import type {
     KataCreateRecurrenceInput,
-    KataPatchRecurrenceInput,
     KataProjectSummary,
     KataRecurrence,
     KataTaskDetail,
@@ -38,7 +37,7 @@
   import MoveIssueDialog from './MoveIssueDialog.svelte'
   import IssueProperties from './IssueProperties.svelte'
   import RecurrenceDialogs from './RecurrenceDialogs.svelte'
-  import RecurrencePanel from './RecurrencePanel.svelte'
+  import { formatRRule } from '../lib/recurrence/rrule'
 
   type Reference = UIIssueReference
   interface IssueNavigationTarget {
@@ -56,7 +55,8 @@
     pending?: boolean | undefined
     navigationActive?: boolean | undefined
     returnComment?: { issueUID: string; commentUID: string } | undefined
-    commentError?: string | undefined
+    // The latest failed mutation's message, shown where it was attempted.
+    mutationError?: string | undefined
     issue: KataTaskDetail
     today?: string | undefined
     events?: readonly KataTaskEvent[] | undefined
@@ -93,10 +93,6 @@
     onCreateRecurrence?:
       | ((projectID: number, input: KataCreateRecurrenceInput) => Promise<void>)
       | undefined
-    onPatchRecurrence?:
-      | ((id: number, input: KataPatchRecurrenceInput, etag: string) => Promise<void>)
-      | undefined
-    onDeleteRecurrence?: ((recurrence: KataRecurrence) => Promise<boolean>) | undefined
     onOpenGraph?: ((issue: KataTaskDetail['issue']) => void) | undefined
     graphOpen?: boolean | undefined
     onCloseGraph?: (() => void) | undefined
@@ -112,7 +108,7 @@
     selectedCommentUID,
     pending = false,
     navigationActive = true,
-    commentError = undefined,
+    mutationError = undefined,
     events = [],
     today = localDateString(new Date()),
     issueCatalog = [],
@@ -142,8 +138,6 @@
     onReopenIssue,
     onSelectIssue = () => {},
     onCreateRecurrence = async () => {},
-    onPatchRecurrence = async () => {},
-    onDeleteRecurrence = async () => false,
     onOpenGraph = undefined,
     graphOpen = false,
     onCloseGraph = undefined,
@@ -180,8 +174,6 @@
   let consumedStatusGeneration = 0
   let recurrenceDialogs: {
     openCreateRecurrence: () => void
-    openEditRecurrence: (recurrence: KataRecurrence) => void
-    openDeleteRecurrence: (recurrence: KataRecurrence) => void
     closeAll: () => void
   } | null = $state(null)
 
@@ -211,7 +203,7 @@
       const attached = selectedRecurrences.find((recurrence) => recurrence.id === attachedID)
       return attached ? [attached] : []
     }
-    return selectedRecurrences
+    return []
   })
 
   $effect(() => {
@@ -729,7 +721,7 @@
         {draftResetGeneration}
         {draftFenceGeneration}
         {onAddComment}
-        {commentError}
+        commentError={mutationError}
         onOpenComment={(uid, commentUID, returnComment) =>
           void onSelectIssue?.({ uid, commentUID, returnComment })}
       />
@@ -739,13 +731,9 @@
 </section>
 
 {#snippet repeats()}
-  <RecurrencePanel
-    compact
-    recurrences={visibleRecurrences}
-    readOnly={!administrativeActionsAllowed || actionsDisabled || detailInert}
-    onEdit={(recurrence) => recurrenceDialogs?.openEditRecurrence(recurrence)}
-    onDelete={(recurrence) => recurrenceDialogs?.openDeleteRecurrence(recurrence)}
-  />
+  {#each visibleRecurrences as recurrence (recurrence.uid)}
+    <span>{recurrence.template_title} · {formatRRule(recurrence.rrule)}</span>
+  {/each}
 {/snippet}
 
 <MoveIssueDialog
@@ -755,6 +743,7 @@
   {movePending}
   allowMove={administrativeActionsAllowed && !actionsDisabled && !detailInert}
   {onMoveIssue}
+  error={mutationError}
 />
 
 <RecurrenceDialogs
@@ -765,8 +754,6 @@
   disabled={actionsDisabled || !administrativeActionsAllowed}
   {draftFenceGeneration}
   onCreate={onCreateRecurrence}
-  onPatch={onPatchRecurrence}
-  onDelete={onDeleteRecurrence}
 />
 
 <style>

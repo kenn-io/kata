@@ -13,6 +13,15 @@ import type { ShareableFilters } from '../lib/router'
 import type { UISnapshot } from '../lib/state/snapshot'
 import AppShell from './AppShell.svelte'
 
+function projectSyncFetch(
+  syncFetch: typeof fetch = async () => Response.json({ statuses: [] }),
+): typeof fetch {
+  return (url, init) =>
+    String(url).includes('/recurrences')
+      ? Promise.resolve(Response.json({ recurrences: [] }))
+      : syncFetch(url, init)
+}
+
 describe('AppShell', () => {
   afterEach(() => {
     cleanup()
@@ -103,7 +112,7 @@ describe('AppShell', () => {
   })
 
   test('offers project sync status from the current project without credential inventory authority', () => {
-    setGeneratedFetch(vi.fn(async () => Response.json({ statuses: [] })))
+    setGeneratedFetch(projectSyncFetch())
     const current = snapshot()
     render(AppShell, {
       props: {
@@ -125,7 +134,7 @@ describe('AppShell', () => {
   })
 
   test('keeps project sync readable for a current read-only project member', () => {
-    setGeneratedFetch(vi.fn(async () => Response.json({ statuses: [] })))
+    setGeneratedFetch(projectSyncFetch())
     const current = snapshot()
     current.capabilities.writable = false
     render(AppShell, {
@@ -262,7 +271,7 @@ describe('AppShell', () => {
         signal = init?.signal ?? undefined
         return Response.json({ statuses: [] })
       })
-      setGeneratedFetch(fetcher)
+      setGeneratedFetch(projectSyncFetch(fetcher))
       const current = snapshot()
       const props = {
         route: {
@@ -310,7 +319,7 @@ describe('AppShell', () => {
   )
 
   test('keeps project sync in place while the snapshot reloads after navigation', async () => {
-    setGeneratedFetch(vi.fn(async () => Response.json({ statuses: [] })))
+    setGeneratedFetch(projectSyncFetch())
     const current = snapshot()
     const props = {
       route: {
@@ -1878,7 +1887,13 @@ describe('AppShell', () => {
       const input = screen.getByRole('textbox', { name: 'Quick capture' })
       await fireEvent.input(input, { target: { value: 'Example task' } })
       await fireEvent.keyDown(input, { key: 'Enter' })
-      await waitFor(() => expect(onCreateIssue).toHaveBeenCalledWith('Example task'))
+      await waitFor(() =>
+        expect(onCreateIssue).toHaveBeenCalledWith(
+          'Example task',
+          undefined,
+          '01J00000000000000000000002',
+        ),
+      )
       expect(onNavigate).not.toHaveBeenCalled()
     },
   )
@@ -1914,7 +1929,11 @@ describe('AppShell', () => {
       key: 'Enter',
     })
 
-    expect(onCreateIssue).toHaveBeenCalledWith('New example task')
+    expect(onCreateIssue).toHaveBeenCalledWith(
+      'New example task',
+      undefined,
+      '01J00000000000000000000002',
+    )
     await view.rerender({ mutationMessage: 'validation: Action refused' })
     await waitFor(() => expect(screen.getAllByText('validation: Action refused')).toHaveLength(1))
   })
@@ -2011,32 +2030,6 @@ describe('AppShell', () => {
       expect(screen.queryByRole('textbox', { name: 'Quick capture' })).toBeNull()
     },
   )
-
-  test('designates an Inbox from New task before opening quick capture', async () => {
-    const onDesignateInbox = vi.fn(async () => {})
-    render(AppShell, {
-      props: {
-        route: {
-          kind: 'kata',
-          view: 'all-open',
-          graph: false,
-          filters: { status: [], owner: [], label: [], relationship: [] },
-        },
-        snapshot: snapshot(),
-        loading: false,
-        ...mutationProps({ onDesignateInbox }),
-        onNavigate: vi.fn(),
-        onCreateProject: vi.fn(async () => ({ changed: true })),
-      },
-    })
-
-    const create = screen.getByRole('button', { name: 'New task' })
-    expect(create.getAttribute('aria-disabled')).toBeNull()
-    await fireEvent.click(create)
-    await fireEvent.click(screen.getByRole('button', { name: /Use example-project as Inbox/ }))
-    expect(onDesignateInbox).toHaveBeenCalledWith('01J00000000000000000000002')
-    expect(screen.getByRole('textbox', { name: 'Quick capture' })).not.toBeNull()
-  })
 
   test('renders daemon selection and recovery status inside stable workspace chrome', async () => {
     const onSelectDaemon = vi.fn()
@@ -2372,10 +2365,9 @@ function mutationProps(overrides: Record<string, unknown> = {}) {
     onCloseIssue: vi.fn(async () => true),
     onReopenIssue: vi.fn(),
     onCreateIssue: vi.fn(async () => {}),
-    onDesignateInbox: vi.fn(async () => {}),
     onCreateRecurrence: vi.fn(async () => {}),
     onPatchRecurrence: vi.fn(async () => {}),
-    onDeleteRecurrence: vi.fn(async () => true),
+    onDeleteRecurrence: vi.fn(async () => {}),
     ...overrides,
   }
 }

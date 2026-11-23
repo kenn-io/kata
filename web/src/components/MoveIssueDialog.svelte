@@ -1,6 +1,7 @@
 <script lang="ts">
   /* eslint-disable svelte/prefer-svelte-reactivity */
-  import { autoReposition, floatingPopoverStyle, SearchInput } from '@kenn-io/kit-ui'
+  import { Button, SearchInput } from '@kenn-io/kit-ui'
+  import Modal from './Modal.svelte'
   import { tick } from 'svelte'
   import type { KataProjectSummary, KataTaskDetail } from '../lib/kata/types'
 
@@ -9,18 +10,24 @@
     projects: KataProjectSummary[]
     movePending?: boolean | undefined
     allowMove?: boolean | undefined
+    error?: string | undefined
     onMoveIssue: (toProjectUID: string) => boolean | Promise<boolean>
   }
 
-  let { issue, projects, movePending = false, allowMove = true, onMoveIssue }: Props = $props()
+  let {
+    issue,
+    projects,
+    movePending = false,
+    allowMove = true,
+    error = undefined,
+    onMoveIssue,
+  }: Props = $props()
 
   let menuOpen = $state(false)
-  let menuRoot: HTMLDivElement | null = $state(null)
   let trigger: HTMLElement | null = null
-  let panel = $state<HTMLDivElement>()
-  let panelStyle = $state('')
   let moveSearchInput = $state() as HTMLInputElement
   let moveQuery = $state('')
+  let refused = $state(false)
   let pendingMoves = $state.raw(
     new Map<string, { operation: number; project: KataProjectSummary }>(),
   )
@@ -89,36 +96,6 @@
     moveQuery = ''
   })
 
-  $effect(() => {
-    if (!menuOpen) return
-    function onPointerDown(event: PointerEvent): void {
-      if (!menuRoot || movePending || activeMoveOperation !== null) return
-      if (event.target instanceof Node && menuRoot.contains(event.target)) return
-      closeMenu()
-    }
-    window.addEventListener('pointerdown', onPointerDown, true)
-    return () => {
-      window.removeEventListener('pointerdown', onPointerDown, true)
-    }
-  })
-
-  $effect(() => {
-    if (!menuOpen) return
-    return autoReposition(() => [panel], position)
-  })
-
-  function position(): void {
-    if (!trigger || !panel) return
-    panelStyle = floatingPopoverStyle({
-      trigger: trigger.getBoundingClientRect(),
-      viewportWidth: window.innerWidth,
-      viewportHeight: window.innerHeight,
-      popoverWidth: panel.offsetWidth,
-      popoverHeight: panel.offsetHeight,
-      align: 'start',
-    })
-  }
-
   function projectArea(project: KataProjectSummary): string {
     return typeof project.metadata.area === 'string' ? project.metadata.area.trim() : ''
   }
@@ -144,15 +121,9 @@
     trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null
     menuOpen = true
     moveQuery = ''
+    refused = false
     await tick()
-    position()
     moveSearchInput?.focus()
-  }
-
-  function handleMoveKeydown(event: KeyboardEvent): void {
-    if (event.key !== 'Escape' || movePending || activeMoveOperation !== null) return
-    event.preventDefault()
-    closeMenu(false, true)
   }
 
   async function moveIssue(project: KataProjectSummary): Promise<void> {
@@ -171,6 +142,7 @@
         return
       }
       if (moved !== false) closeMenu(true)
+      else refused = true
     } finally {
       if (pendingMoves.get(sourceIssueUID)?.operation === operation) {
         const nextPendingMoves = new Map(pendingMoves)
@@ -181,63 +153,62 @@
   }
 </script>
 
-<div class="overflow-host" bind:this={menuRoot} role="presentation">
-  {#if menuOpen}
-    <div
-      class="move-picker kit-popover-card"
-      bind:this={panel}
-      style={panelStyle}
-      role="dialog"
-      aria-label="Move to another project"
-      tabindex="-1"
-      onkeydown={handleMoveKeydown}
-    >
-      <SearchInput
-        bind:value={moveQuery}
-        bind:inputEl={moveSearchInput}
-        block
-        ariaLabel="Find project"
-        placeholder="Search projects"
-      />
-      <div class="move-options" aria-label="Project destinations">
-        {#each displayedProjects as project (project.uid)}
-          <button
-            type="button"
-            disabled={movePending || activeMoveOperation !== null}
-            aria-busy={movingProjectUID === project.uid}
-            onclick={() => void moveIssue(project)}
-          >
-            <span class="move-project-name">{project.name}</span>
-            {#if destinationContext(project)}
-              <span class="move-project-context">{destinationContext(project)}</span>
-            {/if}
-            <span class="move-project-count">{project.open_count}</span>
-          </button>
-        {:else}
-          <p role="status">No matching projects</p>
-        {/each}
-      </div>
+<Modal open={menuOpen} title="Move task" onClose={() => closeMenu(false, true)} width={560}>
+  <div class="move-picker">
+    <div>
+      <strong>{issue.issue.title}</strong>
+      <div class="task-id">{issue.issue.qualified_id}</div>
     </div>
-  {/if}
-</div>
+    <SearchInput
+      bind:value={moveQuery}
+      bind:inputEl={moveSearchInput}
+      block
+      ariaLabel="Find project"
+      placeholder="Search projects"
+    />
+    <div class="move-options" aria-label="Project destinations">
+      {#each displayedProjects as project (project.uid)}
+        <button
+          type="button"
+          disabled={movePending || activeMoveOperation !== null}
+          aria-busy={movingProjectUID === project.uid}
+          onclick={() => void moveIssue(project)}
+        >
+          <span class="move-project-name">{project.name}</span>
+          {#if destinationContext(project)}
+            <span class="move-project-context">{destinationContext(project)}</span>
+          {/if}
+          <span class="move-project-count">{project.open_count}</span>
+        </button>
+      {:else}
+        <p role="status">No matching projects</p>
+      {/each}
+    </div>
+    {#if refused && error}<p class="move-error" role="alert">{error}</p>{/if}
+  </div>
+  {#snippet footer()}
+    <Button
+      size="sm"
+      label="Cancel"
+      disabled={movePending || activeMoveOperation !== null}
+      onclick={() => closeMenu(false, true)}
+    />
+  {/snippet}
+</Modal>
 
 <style>
-  .overflow-host {
-    position: relative;
-    display: inline-flex;
-  }
-
-  .move-picker {
-    position: fixed;
-    z-index: 35;
-    margin: 0;
-  }
-
   .move-picker {
     display: grid;
-    gap: var(--space-3);
-    width: min(320px, calc(100vw - 24px));
-    padding: var(--space-4);
+    gap: var(--space-4);
+  }
+  .move-error {
+    color: var(--accent-red);
+    margin: 0;
+  }
+  .task-id {
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-xs);
   }
 
   .move-options {

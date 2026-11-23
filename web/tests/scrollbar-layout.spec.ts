@@ -165,7 +165,7 @@ test('move picker counts stay in place when clearing its search makes the list s
   await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
   await page.getByRole('button', { name: 'Project: example-project', exact: true }).click()
   const search = page.getByRole('searchbox', { name: 'Find project' })
-  const picker = page.getByRole('dialog', { name: 'Move to another project' })
+  const picker = page.getByRole('dialog', { name: 'Move task' })
   await expect(picker).toBeVisible()
   const bounds = await picker.boundingBox()
   expect(bounds).not.toBeNull()

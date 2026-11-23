@@ -86,6 +86,14 @@ describe('MoveIssueDialog', () => {
     cleanup()
   })
 
+  it('names the task', async () => {
+    renderMenu({ issue: makeIssue('open') })
+    await openMovePicker()
+    const dialog = screen.getByRole('dialog', { name: 'Move task' })
+    expect(within(dialog).getByText('Ship the thing')).toBeTruthy()
+    expect(within(dialog).getByText('INBOX-1')).toBeTruthy()
+  })
+
   it('shows sorted eligible destinations with unambiguous duplicate context', async () => {
     renderMenu({ projects: [...projects].reverse() })
     await openMovePicker()
@@ -164,7 +172,7 @@ describe('MoveIssueDialog', () => {
     await view.rerender({ issue: makeIssue('open', { uid: 'issue-2' }) })
     await view.rerender({ issue: makeIssue() })
     await openMovePicker()
-    expect(screen.queryByRole('dialog', { name: 'Move to another project' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'Move task' })).toBeNull()
 
     finishMove(false)
     await pendingMove
@@ -173,7 +181,7 @@ describe('MoveIssueDialog', () => {
     })
     await openMovePicker()
     expect(screen.queryByRole('button', { name: /Roadmap 2027/ })).toBeNull()
-    expect(screen.getByRole('dialog', { name: 'Move to another project' })).toBeTruthy()
+    expect(screen.getByRole('dialog', { name: 'Move task' })).toBeTruthy()
     await fireEvent.click(screen.getByRole('button', { name: /Shared.*Work/ }))
     expect(onMoveIssue).toHaveBeenLastCalledWith('project-shared-work')
     expect(onMoveIssue).toHaveBeenCalledTimes(2)
@@ -188,10 +196,10 @@ describe('MoveIssueDialog', () => {
     await fireEvent.keyDown(search, { key: 'Escape' })
 
     expect((search as HTMLInputElement).value).toBe('')
-    expect(screen.getByRole('dialog', { name: 'Move to another project' })).toBeTruthy()
+    expect(screen.getByRole('dialog', { name: 'Move task' })).toBeTruthy()
 
     await fireEvent.keyDown(search, { key: 'Escape' })
-    expect(screen.queryByRole('dialog', { name: 'Move to another project' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'Move task' })).toBeNull()
   })
 
   it('does not dismiss while a move is pending', async () => {
@@ -204,10 +212,9 @@ describe('MoveIssueDialog', () => {
 
     await openMovePicker()
     await fireEvent.click(screen.getByRole('button', { name: /Roadmap/ }))
-    await fireEvent.keyDown(screen.getByRole('dialog', { name: 'Move to another project' }), {
+    await fireEvent.keyDown(screen.getByRole('dialog', { name: 'Move task' }), {
       key: 'Escape',
     })
-    await fireEvent.pointerDown(document.body)
 
     expect(screen.getByRole('searchbox', { name: 'Find project' })).toBeTruthy()
     expect((screen.getByRole('button', { name: /Roadmap/ }) as HTMLButtonElement).disabled).toBe(

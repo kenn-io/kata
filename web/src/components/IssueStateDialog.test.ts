@@ -34,6 +34,80 @@ describe('IssueStateDialog', () => {
     cleanup()
   })
 
+  async function openCompletePreview(blockedUIDs: string[]): Promise<HTMLElement> {
+    const issue = makeIssue()
+    for (const [index, uid] of blockedUIDs.entries()) {
+      issue.links.push({
+        id: index + 1,
+        project_id: 1,
+        type: 'blocks',
+        from: { uid: 'issue-1', short_id: 'I-1', qualified_id: 'INBOX-1', status: 'open' },
+        to: { uid, short_id: uid, qualified_id: uid, status: 'open' },
+        author: 'user-a',
+        created_at: '',
+      })
+    }
+    render(IssueStateDialog, {
+      props: { issue, onCloseIssue: vi.fn(), onReopenIssue: vi.fn() },
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Complete…' }))
+    return screen.getByRole('dialog', { name: 'Complete task' })
+  }
+
+  it('counts open tasks losing this blocker', async () => {
+    let dialog = await openCompletePreview(['issue-2', 'issue-3', 'issue-4'])
+    expect(within(dialog).getByText('3 open tasks lose this blocker.')).toBeTruthy()
+    expect(within(dialog).getByText('Comments and links stay.')).toBeTruthy()
+
+    cleanup()
+    dialog = await openCompletePreview(['issue-2'])
+    expect(within(dialog).getByText('1 open task loses this blocker.')).toBeTruthy()
+
+    cleanup()
+    const issue = makeIssue()
+    const selected = {
+      uid: 'issue-1',
+      short_id: 'I-1',
+      qualified_id: 'INBOX-1',
+      status: 'open' as const,
+    }
+    const open = {
+      uid: 'issue-2',
+      short_id: 'I-2',
+      qualified_id: 'INBOX-2',
+      status: 'open' as const,
+    }
+    const closed = {
+      uid: 'issue-3',
+      short_id: 'I-3',
+      qualified_id: 'INBOX-3',
+      status: 'closed' as const,
+    }
+    issue.links = [
+      {
+        id: 1,
+        project_id: 1,
+        type: 'blocks',
+        from: selected,
+        to: closed,
+        author: 'user-a',
+        created_at: '',
+      },
+      {
+        id: 2,
+        project_id: 1,
+        type: 'blocks',
+        from: open,
+        to: selected,
+        author: 'user-a',
+        created_at: '',
+      },
+    ]
+    render(IssueStateDialog, { props: { issue, onCloseIssue: vi.fn(), onReopenIssue: vi.fn() } })
+    await fireEvent.click(screen.getByRole('button', { name: 'Complete…' }))
+    expect(within(screen.getByRole('dialog')).queryByText(/this blocker/)).toBeNull()
+  })
+
   it('uses shared Kit UI actions', async () => {
     render(IssueStateDialog, {
       props: { issue: makeIssue(), onCloseIssue: vi.fn(), onReopenIssue: vi.fn() },
