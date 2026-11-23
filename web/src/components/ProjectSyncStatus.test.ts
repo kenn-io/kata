@@ -11,7 +11,7 @@ function response(projectID = 7, uid = projectUID, pending = 2, failed = true): 
         project_id: projectID,
         project_uid: uid,
         project_name: "spoke project’s'",
-        role: 'replica',
+        role: 'spoke',
         enabled: true,
         hub_url: 'https://daemon.example',
         pending_push_count: pending,
@@ -90,6 +90,40 @@ describe('ProjectSyncStatus', () => {
     render(ProjectSyncStatus, { props: { projectID: 7, projectUID } })
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(screen.queryByRole('button')).toBeNull())
+  })
+
+  it('hides the chip for a standalone status', async () => {
+    const result = await response().json()
+    result.statuses[0].role = 'standalone'
+    result.statuses[0].enabled = false
+    const fetcher = vi.fn().mockResolvedValue(Response.json(result))
+    setGeneratedFetch(fetcher)
+    render(ProjectSyncStatus, { props: { projectID: 7, projectUID } })
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await waitFor(() => expect(screen.queryByRole('button')).toBeNull())
+  })
+
+  it.each(['empty', 'standalone'])('closes an open panel when refresh finds %s', async (kind) => {
+    const result = await response().json()
+    result.statuses[0].role = 'standalone'
+    result.statuses[0].enabled = false
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(response())
+      .mockResolvedValueOnce(Response.json(kind === 'empty' ? { statuses: [] } : result))
+      .mockResolvedValueOnce(response())
+    setGeneratedFetch(fetcher)
+    const view = render(ProjectSyncStatus, {
+      props: { projectID: 7, projectUID, refreshGeneration: 0 },
+    })
+    await openSync()
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
+    await waitFor(() => expect(screen.queryByRole('button')).toBeNull())
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 2 })
+    await screen.findByRole('button', { name: 'Sync failed' })
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 
   it('shows a disabled binding and its waiting changes', async () => {
@@ -378,12 +412,18 @@ describe('ProjectSyncStatus', () => {
     resolveOld(
       Response.json({
         statuses: [
-          { project_id: 7, project_uid: projectUID, role: 'stale-private-project', enabled: true },
+          {
+            project_id: 7,
+            project_uid: projectUID,
+            project_name: 'old-project',
+            role: 'spoke',
+            enabled: true,
+          },
         ],
       }),
     )
     await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(screen.queryByText('stale-private-project')).toBeNull()
+    expect(screen.queryByText('old-project')).toBeNull()
   })
 
   it('closes on Escape and returns focus to the chip', async () => {

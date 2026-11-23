@@ -45,7 +45,7 @@
     if (status?.has_sync_error) return 'danger'
     return 'neutral'
   })
-  let visible = $derived(open || error || status !== undefined)
+  let visible = $derived(error || status !== undefined)
   let chipLabel = $derived.by(() => {
     if (error) return 'Sync status unavailable'
     if (!status) return 'Sync status unavailable'
@@ -206,6 +206,7 @@
             onResponse: (raw) => {
               if (raw.status >= 400 && raw.status < 500 && !abort.signal.aborted && !disposed) {
                 status = undefined
+                error = true
                 loading = true
               }
             },
@@ -217,7 +218,8 @@
           (entry) => entry.project_id === id && entry.project_uid === uid,
         )
         if (result.data.statuses.length && !found) throw new Error()
-        status = found
+        status = found?.role === 'hub' || found?.role === 'spoke' ? found : undefined
+        if (!status) open = false
         error = false
       } catch {
         if (!abort.signal.aborted && !disposed) {
@@ -287,9 +289,7 @@
           <span role="status">Loading sync status…</span>
         {:else if error}
           <span role="status">Sync status unavailable. Refresh to try again.</span>
-        {:else if !status}
-          <span>Not synced with a hub</span>
-        {:else}
+        {:else if status}
           <div class="sync-state">
             <strong role="status">{stateLine}</strong>
             {#if status.enabled}
