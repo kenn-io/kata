@@ -304,13 +304,17 @@ func TestResolve_ByAliasInput_PathFree(t *testing.T) {
 	assert.Contains(t, string(bs), `"name":"kata"`)
 }
 
-// TestResolve_ByAliasInput_NotRegistered returns 404 when neither
-// the alias nor a name match. The daemon must not derive a project
-// name from the alias and create-by-convention — resolve is strict.
+// TestResolve_ByAliasInput_NotRegistered returns 404 for an unknown alias,
+// even when a project with the remote's name exists.
 func TestResolve_ByAliasInput_NotRegistered(t *testing.T) {
 	ts := newTestServer(t)
+	resp, bs := postJSON(t, ts, "/api/v1/projects", map[string]any{
+		"actor": "user-a",
+		"name":  "never-seen",
+	})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(bs))
 
-	resp, bs := postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{
+	resp, bs = postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{
 		"alias": map[string]any{
 			"identity": "github.com/wesm/never-seen",
 			"kind":     "git",
