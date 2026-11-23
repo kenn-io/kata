@@ -1,0 +1,1 @@
+Retain acknowledged federation push cursors after leave.

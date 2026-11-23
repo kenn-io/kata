@@ -41,7 +41,7 @@ func FederationPushableEventSQL(alias string, postgres bool) string {
 	if postgres {
 		from = `(` + alias + `.payload::jsonb->>'from_project_uid')`
 	}
-	return alias + `.type IN (` + FederationPushEventTypesSQL() + `) AND (` + alias + `.type<>'issue.moved' OR NOT EXISTS (SELECT 1 FROM meta WHERE key='` + FederationHeldCursorPrefix + `' || ` + from + `))`
+	return alias + `.type IN (` + FederationPushEventTypesSQL() + `) AND (` + alias + `.type<>'issue.moved' OR NOT EXISTS (SELECT 1 FROM federation_held_cursors WHERE project_uid=` + from + `))`
 }
 
 // FederationOwedEventSQL excludes moves superseded by a newer hub move.
@@ -54,17 +54,13 @@ func FederationResetOwedEventSQL(alias string, postgres bool) string {
 	return FederationOwedEventSQL(alias, postgres) + ` AND NOT EXISTS (SELECT 1 FROM issues i WHERE i.uid=` + alias + `.issue_uid AND i.project_id<>` + alias + `.project_id)`
 }
 
-// FederationHeldCursorPrefix stores the push cursor a left project's binding
-// had acknowledged. Events above it were never acknowledged by the hub.
-const FederationHeldCursorPrefix = "federation_held_cursor."
-
 // RetainFederationHeldCursor records the binding's acknowledged cursor before
 // a leave deletes the binding, so resets of other projects keep the edits
 // the hub never acknowledged.
 func RetainFederationHeldCursor(ctx context.Context, tx *sql.Tx, projectID int64, projectUID string) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value)
- SELECT $1,CAST(push_cursor_event_id AS TEXT) FROM federation_bindings WHERE project_id=$2
- ON CONFLICT(key) DO UPDATE SET value=excluded.value`, FederationHeldCursorPrefix+projectUID, projectID)
+	_, err := tx.ExecContext(ctx, `INSERT INTO federation_held_cursors(project_uid,push_cursor_event_id)
+ SELECT $1,push_cursor_event_id FROM federation_bindings WHERE project_id=$2
+ ON CONFLICT(project_uid) DO UPDATE SET push_cursor_event_id=excluded.push_cursor_event_id`, projectUID, projectID)
 	return err
 }
 
@@ -875,8 +871,8 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
  AND NOT (e.origin_instance_uid=$2
  AND e.type NOT IN ('issue.created','issue.moved',`+FederationSnapshotEventTypesSQL()+`)
  AND NOT EXISTS (SELECT 1 FROM federation_bindings b WHERE b.project_id=e.project_id)
- AND EXISTS (SELECT 1 FROM projects p JOIN meta m ON m.key=$3||p.uid
- WHERE p.id=e.project_id AND CAST(m.value AS BIGINT)<e.id))`, projectID, originInstanceUID, FederationHeldCursorPrefix)
+ AND EXISTS (SELECT 1 FROM projects p JOIN federation_held_cursors h ON h.project_uid=p.uid
+ WHERE p.id=e.project_id AND h.push_cursor_event_id<e.id))`, projectID, originInstanceUID)
 	return err
 }
 

@@ -206,6 +206,9 @@ place. See the
 The schema 52→53 migration adds an index of move events by destination project;
 see the [schema 53 migration requirements](../development/postgres-migrations.md#schema-53-move-events-by-destination-project).
 
+The schema 53→54 migration adds the held federation cursor table; see the
+[schema 54 migration requirements](../development/postgres-migrations.md#schema-54-held-federation-cursors).
+
 Once the schema is prepared, grant the runtime role DML access and set default
 privileges for objects that future migrations create:
 
