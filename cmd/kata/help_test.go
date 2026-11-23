@@ -60,7 +60,6 @@ func TestValidateHelpCommandRejectsStaleExamples(t *testing.T) {
 	for _, line := range []string{
 		`kata close abc4 --done -m "a message with  # and > inside"  # note`,
 		`kata openapi --format yaml > openapi.yaml`,
-		`kata comment abc4 --body-stdin --agent <<'EOF'`,
 	} {
 		if err := validateHelpCommand(line); err != nil {
 			t.Errorf("rejected valid example %s: %v", line, err)

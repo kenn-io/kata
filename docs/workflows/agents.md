@@ -901,9 +901,8 @@ owner's assignment.
 
 ## Keep durable notes
 
-Comment with findings a later reader needs, such as a confirmed cause or a
-decision and its reason. Pass the text on stdin with a quoted heredoc so the
-shell leaves backticks and `$` alone:
+Comment with findings a later reader needs. Pass the text on stdin with a
+quoted heredoc so the shell leaves backticks and `$` alone:
 
 ```sh
 kata comment abc4 --body-stdin --agent <<'EOF'
@@ -911,11 +910,8 @@ Safari 18 fires the callback twice, so `retry()` runs on both.
 EOF
 ```
 
-Typed replies such as `--reply c:<id>` take `--body-stdin` the same way.
-
 Keep live status in `work.attention_msg`, not in comments. To correct your own
-comment, edit it with `kata comment edit abc4 <comment-uid>`; `kata show`
-lists comment UIDs.
+comment, edit it with `kata comment edit abc4 <comment-uid>`.
 
 ## Use relationships deliberately
 
