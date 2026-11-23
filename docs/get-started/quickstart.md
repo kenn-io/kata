@@ -349,8 +349,10 @@ kata claim abc4 --ttl 2h
 ```
 
 The claim fails if another actor already owns the issue unless `--force` is
-used. Renew it while you work by claiming again with `--ttl`, without
-`--if-unowned`.
+used. Renew it before it expires by claiming again with `--ttl`, without
+`--if-unowned`. If the claim expires while `work.attention` is `ok`, Kata sets
+`work.attention` to `needs-human`. If you reclaim after that and continue
+working, set `work.attention` back to `ok`.
 
 ## Set actor identity
 

@@ -139,7 +139,7 @@ func New(options Options) (*sdkmcp.Server, error) {
 			Source: mcpicon.Source, MIMEType: "image/png", Sizes: []string{"256x256"},
 		}},
 	}, &sdkmcp.ServerOptions{
-		Instructions: "Use returned web_url values when linking to issues. Use Kata to search before creating work, claim actionable issues with ttl_seconds and renew by claiming again without if_unowned, comment with findings, and close only with evidence. All tools are fixed to " + scopeDescription + " and actor " + options.Actor + `. Call kata.skills with {"name":"workflow"} before your first write; call it with no arguments to list the other guides.`,
+		Instructions: "Use returned web_url values when linking to issues. Use Kata to search before creating work, claim actionable issues with ttl_seconds and renew before expiry by claiming again without if_unowned, comment with findings, and close only with evidence. All tools are fixed to " + scopeDescription + " and actor " + options.Actor + `. Call kata.skills with {"name":"workflow"} before your first write; call it with no arguments to list the other guides.`,
 		Capabilities: &sdkmcp.ServerCapabilities{
 			Tools: &sdkmcp.ToolCapabilities{ListChanged: true},
 		},
@@ -222,7 +222,7 @@ func registerIssueDiscoveryTools(server *sdkmcp.Server, handlers toolHandlers) {
 func registerIssueMutationTools(server *sdkmcp.Server, handlers toolHandlers) {
 	additive := toolHints(false, false, false)
 	mutating := toolHints(false, true, false)
-	addTool(server, "kata.claim", "Claim issue", "Claim an issue for the bound actor. Without force the call fails when another owner already holds it; force replaces that owner. Pass ttl_seconds to expire the claim, and renew it by claiming again with ttl_seconds, without if_unowned. A claim that expires while work.attention is ok becomes needs-human.", mutating, handlers.claim)
+	addTool(server, "kata.claim", "Claim issue", "Claim an issue for the bound actor. Without force the call fails when another owner already holds it; force replaces that owner. Pass ttl_seconds to expire the claim, and renew it before expiry by claiming again with ttl_seconds, without if_unowned. A claim that expires while work.attention is ok sets work.attention to needs-human; after reclaiming to continue, set work.attention back to ok.", mutating, handlers.claim)
 	addTool(server, "kata.comment", "Add comment", "Append a finding a later reader needs using a required idempotency key. Keep live status in work.attention_msg.", additive, handlers.comment)
 	addTool(server, "kata.create", "Create issue", "Create project work after searching for duplicates. A stable idempotency key is required.", additive, handlers.create)
 	addTool(server, "kata.edit", "Edit issue", "Edit issue fields, ownership, priority, and relationship deltas atomically.", mutating, handlers.edit)

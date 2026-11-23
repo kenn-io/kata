@@ -15,7 +15,7 @@ kata comment abc4 --body-stdin <<-'EOF'
 kata close abc4 --done --message "Fixed the race; tests pass." --commit 4f2a91c
 ```
 
-Renew a claim by claiming again with `--ttl`, without `--if-unowned`.
+Renew a claim before it expires by claiming again with `--ttl`, without `--if-unowned`. An expired claim turns `ok` attention to `needs-human`; reclaim and set it back to `ok` to keep working.
 
 Install:
 

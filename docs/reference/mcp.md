@@ -436,7 +436,10 @@ send it as `If-Match`. Create calls do not use a revision.
 claim renews when the same actor repeats it, and the result includes the
 assignment expiry and previous owner when present. When a timed claim on an
 open issue expires while `work.attention` is `ok`, Kata sets it to
-`needs-human` with the message `claim expired without hand-off`. `kata.edit` supports field,
+`needs-human` with the message `claim expired without hand-off`. Renew before
+expiry by calling `kata.claim` again with `ttl_seconds`, without `if_unowned`.
+An agent that reclaims after expiry and continues working should set
+`work.attention` back to `ok` with `kata.set_metadata`. `kata.edit` supports field,
 owner, priority, relationship, scheduling, and generic metadata changes. An
 issue-field or relationship change and a metadata change must use separate
 `kata.edit` calls so one failed request cannot leave a partial edit.

@@ -24,9 +24,10 @@ func newClaimCmd() *cobra.Command {
 the client-selected actor when present. Use kata status <ref> to check the
 effective actor and current owner; kata whoami shows only the client-selected actor.
 Refuses when another actor owns it unless --force.
---ttl releases the claim after 1m-24h. Renew it while you work by claiming
-again with --ttl, without --if-unowned. If a timed claim runs out while the
-issue's attention is ok, Kata marks it needs-human.
+--ttl releases the claim after 1m-24h. Renew it before it expires by claiming
+again with --ttl, without --if-unowned. If a timed claim expires while the
+issue's attention is ok, Kata sets it to needs-human; if you reclaim after that
+and continue working, set the attention back to ok.
 kata assign sets a different owner; kata unassign --expect-owner releases.`,
 		Example: `  kata claim abc4 --ttl 2h --agent
   kata claim abc4 --ttl 2h --agent  # renew

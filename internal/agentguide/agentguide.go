@@ -41,8 +41,9 @@ const ClaimRules = `Claim the issue before you work on it, with a time limit:
 
     kata claim <ref> --ttl 2h --agent
 
-Renew it by claiming again with --ttl, without --if-unowned. If it runs out
-while work.attention is ok, Kata sets it to needs-human.
+Renew before expiry by claiming again with --ttl, without --if-unowned. Expiry
+while work.attention is ok sets it to needs-human; if you reclaim to continue,
+set work.attention back to ok.
 `
 
 // CommentRules says what a comment is for and how to pass its text. Its
@@ -218,7 +219,9 @@ const fragClaiming = `6. Find and claim available work (multi-agent environments
    kata ready --unowned --label bug --no-label blocked --agent
 
    # Claim it with a time limit (fails if already assigned to another actor).
-   # Renew it while you work by claiming again with --ttl, without --if-unowned.
+   # Renew before it expires by claiming again with --ttl, without --if-unowned.
+   # Expiry while work.attention is ok sets it to needs-human; if you reclaim
+   # to continue, set work.attention back to ok.
    kata claim <ref> --ttl 2h
 
    # Release ownership only if you still own it
