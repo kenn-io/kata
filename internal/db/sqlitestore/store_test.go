@@ -72,7 +72,7 @@ func TestOpen_IsIdempotentAfterBootstrap(t *testing.T) {
 	assert.Equal(t, uid1, d2.InstanceUID())
 }
 
-func TestHeldFederationCursorSchemaUpgrade(t *testing.T) {
+func TestFederationCursorFenceMigrationUpgradesVersion53(t *testing.T) {
 	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	d, err := sqlitestore.Open(ctx, path)
@@ -86,7 +86,7 @@ func TestHeldFederationCursorSchemaUpgrade(t *testing.T) {
 	t.Cleanup(func() { _ = d.Close() })
 	version, err := d.SchemaVersion(ctx)
 	require.NoError(t, err)
-	require.Equal(t, 54, version)
+	require.Equal(t, db.CurrentSchemaVersion(), version)
 }
 
 func TestOpen_RejectsVersionZeroExistingTables(t *testing.T) {

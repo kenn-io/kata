@@ -43,131 +43,126 @@ func newHeldEventSpoke(t *testing.T, backend string, hub *testenv.Env, projects 
 	return spoke, localProjects, credentials
 }
 
-func TestSyncFederationReturnedEditWhileAnotherHeld(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			ctx := t.Context()
-			hub, projects := newMoveDeliveryHub(t, "held-source", "held-destination", "held-absent")
-			spoke, localProjects, credentials := newHeldEventSpoke(t, backend, hub, projects)
-			t.Cleanup(func() { _ = spoke.Close() })
-			sync := func(index int) error {
-				binding, err := spoke.FederationBindingByProject(ctx, localProjects[index].ID)
-				if err != nil {
-					return err
+func TestSyncFederationHeldEditsAfterDestinationReset(t *testing.T) {
+	t.Run("comments", func(t *testing.T) {
+		for _, backend := range []string{"sqlite", "postgres"} {
+			t.Run(backend, func(t *testing.T) {
+				ctx := t.Context()
+				hub, projects := newMoveDeliveryHub(t, "held-source", "held-destination", "held-absent")
+				spoke, localProjects, credentials := newHeldEventSpoke(t, backend, hub, projects)
+				t.Cleanup(func() { _ = spoke.Close() })
+				sync := func(index int) error {
+					binding, err := spoke.FederationBindingByProject(ctx, localProjects[index].ID)
+					if err != nil {
+						return err
+					}
+					return SyncFederationOnce(ctx, spoke, binding, credentials[localProjects[index].UID], credentials)
 				}
-				return SyncFederationOnce(ctx, spoke, binding, credentials[localProjects[index].UID], credentials)
-			}
-			var issues []db.Issue
-			for _, title := range []string{"first", "second"} {
-				issue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: title, Author: "worker"})
-				require.NoError(t, err)
-				issues = append(issues, issue)
-			}
-			for i := range localProjects {
-				require.NoError(t, sync(i))
-			}
-			var comments []db.Event
-			var away []db.MoveIssueProjectOut
-			for _, issue := range issues {
-				local, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-				require.NoError(t, err)
-				_, comment, err := spoke.CreateComment(ctx, db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: issue.Title})
-				require.NoError(t, err)
-				comments = append(comments, comment)
-				move, err := hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[2].ID, IfMatchRev: issue.Revision, Actor: "worker"})
-				require.NoError(t, err)
-				away = append(away, move)
-			}
-			_, err := hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issues[1].ID, FromProjectID: projects[2].ID, ToProjectID: projects[1].ID, IfMatchRev: away[1].Issue.Revision, Actor: "worker"})
-			require.NoError(t, err)
-			require.NoError(t, sync(1))
-			require.ErrorContains(t, sync(0), "federation_project_not_enrolled")
-			retained, err := spoke.EventsByUIDs(ctx, localProjects[0].ID, []string{comments[0].UID})
-			require.NoError(t, err)
-			require.Equal(t, comments[0].ContentHash, retained[0].ContentHash)
-			delivered, err := hub.DB.EventsByUIDs(ctx, projects[0].ID, []string{comments[1].UID})
-			require.NoError(t, err)
-			require.Equal(t, comments[1].ContentHash, delivered[0].ContentHash)
-			destination, err := spoke.FederationBindingByProject(ctx, localProjects[1].ID)
-			require.NoError(t, err)
-			require.NoError(t, spoke.ResetFederatedProjectIfNoPendingPush(ctx, localProjects[1].ID, 0, 0, spoke.InstanceUID(), destination.PushCursorEventID))
-			require.NoError(t, sync(1))
-			require.ErrorContains(t, sync(0), "federation_project_not_enrolled")
-			hubComments, err := hub.DB.CommentsByIssue(ctx, issues[1].ID)
-			require.NoError(t, err)
-			require.Len(t, hubComments, 1)
-			_, err = hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issues[0].ID, FromProjectID: projects[2].ID, ToProjectID: projects[1].ID, IfMatchRev: away[0].Issue.Revision, Actor: "worker"})
-			require.NoError(t, err)
-			require.NoError(t, sync(1))
-			require.NoError(t, sync(0))
-			delivered, err = hub.DB.EventsByUIDs(ctx, projects[0].ID, []string{comments[0].UID})
-			require.NoError(t, err)
-			require.Equal(t, comments[0].ContentHash, delivered[0].ContentHash)
-		})
-	}
-}
-
-func TestSyncFederationMultiPeerEditAfterDestinationReset(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			ctx := t.Context()
-			hub, projects := newMoveDeliveryHub(t, "link-source", "link-destination", "link-absent")
-			spoke, localProjects, credentials := newHeldEventSpoke(t, backend, hub, projects)
-			t.Cleanup(func() { _ = spoke.Close() })
-			sync := func(index int) error {
-				binding, err := spoke.FederationBindingByProject(ctx, localProjects[index].ID)
-				if err != nil {
-					return err
+				var issues []db.Issue
+				for _, title := range []string{"first", "second"} {
+					issue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: title, Author: "worker"})
+					require.NoError(t, err)
+					issues = append(issues, issue)
 				}
-				return SyncFederationOnce(ctx, spoke, binding, credentials[localProjects[index].UID], credentials)
-			}
-			var issues []db.Issue
-			for _, title := range []string{"subject", "first peer", "second peer"} {
-				issue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: title, Author: "worker"})
+				for i := range localProjects {
+					require.NoError(t, sync(i))
+				}
+				var comments []db.Event
+				var away []db.MoveIssueProjectOut
+				for _, issue := range issues {
+					local, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+					require.NoError(t, err)
+					_, comment, err := spoke.CreateComment(ctx, db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: issue.Title})
+					require.NoError(t, err)
+					comments = append(comments, comment)
+					move, err := hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[2].ID, IfMatchRev: issue.Revision, Actor: "worker"})
+					require.NoError(t, err)
+					away = append(away, move)
+				}
+				_, err := hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issues[1].ID, FromProjectID: projects[2].ID, ToProjectID: projects[1].ID, IfMatchRev: away[1].Issue.Revision, Actor: "worker"})
 				require.NoError(t, err)
-				issues = append(issues, issue)
-			}
-			for i := range localProjects {
-				require.NoError(t, sync(i))
-			}
-			var localIssues []db.Issue
-			for _, issue := range issues {
-				local, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+				require.NoError(t, sync(1))
+				require.ErrorContains(t, sync(0), "federation_project_not_enrolled")
+				delivered, err := hub.DB.EventsByUIDs(ctx, projects[0].ID, []string{comments[1].UID})
 				require.NoError(t, err)
-				localIssues = append(localIssues, local)
-			}
-			edit, err := spoke.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: localIssues[0].ID, Actor: "worker", AddBlocks: []int64{localIssues[1].ID, localIssues[2].ID}})
-			require.NoError(t, err)
-			require.Len(t, edit.Events, 1)
-			held := edit.Events[0]
-			var away []db.MoveIssueProjectOut
-			for _, issue := range issues[1:] {
-				move, err := hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[2].ID, IfMatchRev: issue.Revision, Actor: "worker"})
+				require.Equal(t, comments[1].ContentHash, delivered[0].ContentHash)
+				destination, err := spoke.FederationBindingByProject(ctx, localProjects[1].ID)
 				require.NoError(t, err)
-				away = append(away, move)
-			}
-			require.ErrorContains(t, sync(0), "federation_project_not_enrolled")
-			_, err = hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issues[1].ID, FromProjectID: projects[2].ID, ToProjectID: projects[1].ID, IfMatchRev: away[0].Issue.Revision, Actor: "worker"})
-			require.NoError(t, err)
-			require.NoError(t, sync(1))
-			require.ErrorContains(t, sync(0), "federation_project_not_enrolled")
-			binding, err := spoke.FederationBindingByProject(ctx, localProjects[1].ID)
-			require.NoError(t, err)
-			require.NoError(t, spoke.ResetFederatedProjectIfNoPendingPush(ctx, localProjects[1].ID, 0, 0, spoke.InstanceUID(), binding.PushCursorEventID))
-			retained, err := spoke.EventsByUIDs(ctx, localProjects[0].ID, []string{held.UID})
-			require.NoError(t, err)
-			require.Equal(t, held.ContentHash, retained[0].ContentHash)
-			require.NoError(t, sync(1))
-			_, err = hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issues[2].ID, FromProjectID: projects[2].ID, ToProjectID: projects[1].ID, IfMatchRev: away[1].Issue.Revision, Actor: "worker"})
-			require.NoError(t, err)
-			require.NoError(t, sync(1))
-			require.NoError(t, sync(0))
-			delivered, err := hub.DB.EventsByUIDs(ctx, projects[0].ID, []string{held.UID})
-			require.NoError(t, err)
-			require.Len(t, delivered, 1)
-			require.Equal(t, held.ContentHash, delivered[0].ContentHash)
-		})
-	}
+				require.NoError(t, spoke.ResetFederatedProjectIfNoPendingPush(ctx, localProjects[1].ID, 0, 0, spoke.InstanceUID(), destination.PushCursorEventID))
+				require.NoError(t, sync(1))
+				require.ErrorContains(t, sync(0), "federation_project_not_enrolled")
+				hubComments, err := hub.DB.CommentsByIssue(ctx, issues[1].ID)
+				require.NoError(t, err)
+				require.Len(t, hubComments, 1)
+				_, err = hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issues[0].ID, FromProjectID: projects[2].ID, ToProjectID: projects[1].ID, IfMatchRev: away[0].Issue.Revision, Actor: "worker"})
+				require.NoError(t, err)
+				require.NoError(t, sync(1))
+				require.NoError(t, sync(0))
+				delivered, err = hub.DB.EventsByUIDs(ctx, projects[0].ID, []string{comments[0].UID})
+				require.NoError(t, err)
+				require.Equal(t, comments[0].ContentHash, delivered[0].ContentHash)
+			})
+		}
+	})
+	t.Run("links", func(t *testing.T) {
+		for _, backend := range []string{"sqlite", "postgres"} {
+			t.Run(backend, func(t *testing.T) {
+				ctx := t.Context()
+				hub, projects := newMoveDeliveryHub(t, "link-source", "link-destination", "link-absent")
+				spoke, localProjects, credentials := newHeldEventSpoke(t, backend, hub, projects)
+				t.Cleanup(func() { _ = spoke.Close() })
+				sync := func(index int) error {
+					binding, err := spoke.FederationBindingByProject(ctx, localProjects[index].ID)
+					if err != nil {
+						return err
+					}
+					return SyncFederationOnce(ctx, spoke, binding, credentials[localProjects[index].UID], credentials)
+				}
+				var issues []db.Issue
+				for _, title := range []string{"subject", "first peer", "second peer"} {
+					issue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: title, Author: "worker"})
+					require.NoError(t, err)
+					issues = append(issues, issue)
+				}
+				for i := range localProjects {
+					require.NoError(t, sync(i))
+				}
+				var localIssues []db.Issue
+				for _, issue := range issues {
+					local, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+					require.NoError(t, err)
+					localIssues = append(localIssues, local)
+				}
+				edit, err := spoke.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: localIssues[0].ID, Actor: "worker", AddBlocks: []int64{localIssues[1].ID, localIssues[2].ID}})
+				require.NoError(t, err)
+				require.Len(t, edit.Events, 1)
+				held := edit.Events[0]
+				var away []db.MoveIssueProjectOut
+				for _, issue := range issues[1:] {
+					move, err := hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[2].ID, IfMatchRev: issue.Revision, Actor: "worker"})
+					require.NoError(t, err)
+					away = append(away, move)
+				}
+				require.ErrorContains(t, sync(0), "federation_project_not_enrolled")
+				_, err = hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issues[1].ID, FromProjectID: projects[2].ID, ToProjectID: projects[1].ID, IfMatchRev: away[0].Issue.Revision, Actor: "worker"})
+				require.NoError(t, err)
+				require.NoError(t, sync(1))
+				require.ErrorContains(t, sync(0), "federation_project_not_enrolled")
+				binding, err := spoke.FederationBindingByProject(ctx, localProjects[1].ID)
+				require.NoError(t, err)
+				require.NoError(t, spoke.ResetFederatedProjectIfNoPendingPush(ctx, localProjects[1].ID, 0, 0, spoke.InstanceUID(), binding.PushCursorEventID))
+				require.NoError(t, sync(1))
+				_, err = hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issues[2].ID, FromProjectID: projects[2].ID, ToProjectID: projects[1].ID, IfMatchRev: away[1].Issue.Revision, Actor: "worker"})
+				require.NoError(t, err)
+				require.NoError(t, sync(1))
+				require.NoError(t, sync(0))
+				delivered, err := hub.DB.EventsByUIDs(ctx, projects[0].ID, []string{held.UID})
+				require.NoError(t, err)
+				require.Len(t, delivered, 1)
+				require.Equal(t, held.ContentHash, delivered[0].ContentHash)
+			})
+		}
+	})
 }
 
 func TestSyncAfterApprovedMoveReturnsBeforeLeave(t *testing.T) {

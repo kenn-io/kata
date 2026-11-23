@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/testenv"
 )
@@ -27,5 +28,5 @@ func TestFederationCursorFenceMigrationUpgradesVersion53(t *testing.T) {
 	t.Cleanup(func() { _ = upgraded.Close() })
 	version, err := upgraded.SchemaVersion(ctx)
 	require.NoError(t, err)
-	require.Equal(t, 54, version)
+	require.Equal(t, db.CurrentSchemaVersion(), version)
 }
