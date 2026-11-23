@@ -251,7 +251,7 @@ func TestInit_ExplicitWorkspaceReplaceEnclosingBinding(t *testing.T) {
 	var ce *cliError
 	require.ErrorAs(t, err, &ce)
 	assert.Equal(t, "project_binding_conflict", ce.Code)
-	assert.Contains(t, ce.Message, binding)
+	assert.Contains(t, ce.Message, fmt.Sprintf("%q", binding))
 	assert.Nil(t, daemon.request())
 	got, err := os.ReadFile(binding) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, err)
