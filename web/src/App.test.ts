@@ -3005,7 +3005,7 @@ describe('App', () => {
     },
   )
 
-  it('shows another client’s first repeating task after a remote poll', async () => {
+  it("shows another client's first repeating task after a remote poll", async () => {
     vi.useFakeTimers()
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
     localStorage.setItem(
@@ -3096,7 +3096,7 @@ describe('App', () => {
     expect(recurrenceDaemons.at(-1)).toBe('example-remote')
   })
 
-  it('shows another client’s first repeating task after a stream reset', async () => {
+  it("shows another client's first repeating task after a stream reset", async () => {
     history.replaceState(null, '', `/kata?scope=${snapshot().catalog[0]!.project.uid}#direct=1`)
     sessionStorage.setItem(
       'kata.web.session.v1',
