@@ -802,15 +802,6 @@
       {/snippet}
     </TopBar>
   </div>
-  {#if selectedProject && !daemonRoute && !stale && !daemonSwitching && !reconnecting && !credentialExpired && !daemonError && !scopedAuthority && (!activeDaemonID || activeConnection?.local === true)}
-    {#key `${activeDaemonID ?? 'direct'}:${draftFenceGeneration}:${selectedProject.uid}`}
-      <ProjectSyncStatus
-        projectID={selectedProject.id}
-        projectUID={selectedProject.uid}
-        refreshGeneration={syncRefreshGeneration}
-      />
-    {/key}
-  {/if}
   <div class="kata-layout" aria-busy={loading}>
     <div class="desktop-navigation">
       {@render navigationSidebar()}
@@ -940,6 +931,15 @@
         />
       {/snippet}
       {#snippet projectRecurrences()}
+        {#if selectedProject && !daemonRoute && !stale && !daemonSwitching && !reconnecting && !credentialExpired && !daemonError && !scopedAuthority && (!activeDaemonID || activeConnection?.local === true)}
+          {#key `${activeDaemonID ?? 'direct'}:${draftFenceGeneration}:${selectedProject.uid}`}
+            <ProjectSyncStatus
+              projectID={selectedProject.id}
+              projectUID={selectedProject.uid}
+              refreshGeneration={syncRefreshGeneration}
+            />
+          {/key}
+        {/if}
         {#if selectedProject && !scopedAuthority}
           {#key selectedProject.uid}
             <ProjectRecurrences

@@ -22,6 +22,23 @@ function projectSyncFetch(
       : syncFetch(url, init)
 }
 
+function syncedProjectFetch(): typeof fetch {
+  return projectSyncFetch(async () =>
+    Response.json({
+      statuses: [
+        {
+          project_id: 7,
+          project_uid: '01J00000000000000000000002',
+          project_name: 'example-project',
+          enabled: true,
+          role: 'replica',
+          pending_push_count: 0,
+        },
+      ],
+    }),
+  )
+}
+
 describe('AppShell', () => {
   afterEach(() => {
     cleanup()
@@ -111,8 +128,8 @@ describe('AppShell', () => {
     expect(summary.textContent).not.toContain('never-display')
   })
 
-  test('offers project sync status from the current project without credential inventory authority', () => {
-    setGeneratedFetch(projectSyncFetch())
+  test('offers project sync status in the project header without credential inventory authority', async () => {
+    setGeneratedFetch(syncedProjectFetch())
     const current = snapshot()
     render(AppShell, {
       props: {
@@ -129,12 +146,13 @@ describe('AppShell', () => {
         onCreateProject: vi.fn(async () => ({ changed: true })),
       },
     })
-    expect(screen.getByRole('region', { name: 'Project sync' })).not.toBeNull()
+    const chip = await screen.findByRole('button', { name: 'Synced' })
+    expect(chip.closest('header')).not.toBeNull()
     expect(screen.queryByRole('button', { name: 'Credentials' })).toBeNull()
   })
 
-  test('keeps project sync readable for a current read-only project member', () => {
-    setGeneratedFetch(projectSyncFetch())
+  test('keeps project sync readable for a current read-only project member', async () => {
+    setGeneratedFetch(syncedProjectFetch())
     const current = snapshot()
     current.capabilities.writable = false
     render(AppShell, {
@@ -153,8 +171,67 @@ describe('AppShell', () => {
         onCreateProject: vi.fn(async () => ({ changed: true })),
       },
     })
-    expect(screen.getByRole('region', { name: 'Project sync' })).not.toBeNull()
+    expect(await screen.findByRole('button', { name: 'Synced' })).not.toBeNull()
   })
+
+  test('does not show a sync chip for a local project', async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json({ statuses: [] }))
+    setGeneratedFetch(projectSyncFetch(fetcher))
+    const current = snapshot()
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          projectUID: current.catalog[0]!.project.uid,
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: current,
+        loading: false,
+        ...mutationProps(),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole('button', { name: /^(Synced|Sync failed|\d+ to sync)$/ })).toBeNull()
+  })
+
+  test.each(['settings', 'scoped'] as const)(
+    'does not read project sync in %s view',
+    async (kind) => {
+      const fetcher = vi.fn<typeof fetch>(async () => Response.json({ statuses: [] }))
+      setGeneratedFetch(projectSyncFetch(fetcher))
+      const current = snapshot()
+      if (kind === 'scoped')
+        current.capabilities.scope = {
+          kind: 'issue_subtree',
+          project_uid: current.catalog[0]!.project.uid,
+          root_issue_uid: current.collection[0]!.uid,
+        }
+      render(AppShell, {
+        props: {
+          route: {
+            kind: 'kata',
+            ...(kind === 'settings'
+              ? { view: 'settings' as const }
+              : { projectUID: current.catalog[0]!.project.uid }),
+            graph: false,
+            filters: { status: [], owner: [], label: [], relationship: [] },
+          },
+          snapshot: current,
+          loading: false,
+          ...mutationProps(),
+          onNavigate: vi.fn(),
+          onCreateProject: vi.fn(async () => ({ changed: true })),
+        },
+      })
+      await Promise.resolve()
+      expect(fetcher.mock.calls.some(([url]) => String(url).includes('/federation/status'))).toBe(
+        false,
+      )
+    },
+  )
 
   test('explains a read-only credential at each blocked write control', async () => {
     const current = snapshot()
@@ -269,7 +346,19 @@ describe('AppShell', () => {
       let signal: AbortSignal | undefined
       const fetcher = vi.fn<typeof fetch>(async (_url, init) => {
         signal = init?.signal ?? undefined
-        return Response.json({ statuses: [] })
+        if (fetcher.mock.calls.length > 1) return new Promise<Response>(() => {})
+        return Response.json({
+          statuses: [
+            {
+              project_id: 7,
+              project_uid: '01J00000000000000000000002',
+              project_name: 'example-project',
+              role: 'replica',
+              enabled: true,
+              pending_push_count: 0,
+            },
+          ],
+        })
       })
       setGeneratedFetch(projectSyncFetch(fetcher))
       const current = snapshot()
@@ -287,12 +376,15 @@ describe('AppShell', () => {
         onCreateProject: vi.fn(async () => ({ changed: true })),
       }
       const view = render(AppShell, { props })
-      await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1))
+      await screen.findByRole('button', { name: 'Synced' })
+      await view.rerender({ ...props, syncRefreshGeneration: 1 })
+      await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2))
       const next = snapshot()
       if (reason === 'expired') next.capabilities.expires_at = '2020-01-01T00:00:00Z'
       if (reason === 'removed') next.catalog = []
       await view.rerender({
         ...props,
+        syncRefreshGeneration: 1,
         snapshot: next,
         stale: reason === 'stale',
         daemonSwitching: reason === 'daemonSwitching',
@@ -312,14 +404,14 @@ describe('AppShell', () => {
               ]
             : [],
       })
-      expect(screen.queryByRole('region', { name: 'Project sync' })).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Synced' })).toBeNull()
       expect(signal?.aborted).toBe(true)
-      expect(fetcher).toHaveBeenCalledTimes(1)
+      expect(fetcher).toHaveBeenCalledTimes(2)
     },
   )
 
   test('keeps project sync in place while the snapshot reloads after navigation', async () => {
-    setGeneratedFetch(projectSyncFetch())
+    setGeneratedFetch(syncedProjectFetch())
     const current = snapshot()
     const props = {
       route: {
@@ -335,10 +427,10 @@ describe('AppShell', () => {
       onCreateProject: vi.fn(async () => ({ changed: true })),
     }
     const view = render(AppShell, { props })
-    expect(screen.getByRole('region', { name: 'Project sync' })).not.toBeNull()
+    expect(await screen.findByRole('button', { name: 'Synced' })).not.toBeNull()
 
     await view.rerender({ ...props, loading: true })
-    expect(screen.getByRole('region', { name: 'Project sync' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Synced' })).not.toBeNull()
   })
 
   test('keeps a healthy connection hidden during refresh while preserving attention states', async () => {

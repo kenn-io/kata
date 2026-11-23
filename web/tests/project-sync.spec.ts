@@ -2,14 +2,17 @@ import { spawnSync } from 'node:child_process'
 
 import { expect, test, type BrowserCredentials } from './fixtures'
 
-test('local project readers see native sync status with bounded embedding summaries at narrow widths', async ({
+test('project readers see sync diagnostics with bounded embedding summaries at narrow widths', async ({
   page,
   diagnosticKata: kata,
 }, testInfo) => {
   await kata.prepareSyncDiagnostic()
   const local = await kata.launch(page, `/kata?scope=${kata.projectUID}`)
-  const region = page.getByRole('region', { name: 'Project sync' })
-  await expect(region.getByText('Local project')).toBeVisible()
+  const chip = page.getByRole('button', { name: 'Sync failed' })
+  const region = page.getByRole('dialog', { name: 'Project sync' })
+  await expect(
+    page.getByRole('button', { name: /^(Synced|Sync failed|\d+ to sync)$/ }),
+  ).toHaveCount(0)
   const statusPath = `/api/v1/projects/${kata.projectID}/federation/status`
   expect((await kata.request(page, local, 'GET', statusPath)).ok()).toBe(true)
   expect((await kata.request(page, local, 'GET', '/api/v1/federation/status')).status()).toBe(403)
@@ -42,13 +45,13 @@ test('local project readers see native sync status with bounded embedding summar
   const statusRead = page.waitForResponse(
     (response) => new URL(response.url()).pathname === statusPath,
   )
-  await region.getByRole('button', { name: 'Refresh sync' }).click()
+  await page.reload()
   const browserBody = await (await statusRead).text()
   expect(browserBody).not.toContain('example sync failure')
   expect(browserBody).not.toContain('example held-back batch failure')
-  await expect(region.getByText('Sync needs attention')).toBeVisible()
-  await expect(region.getByText('Sync disabled', { exact: true })).toBeVisible()
-  await expect(region.getByText('Embeddings: unconfigured')).toBeVisible()
+  await chip.click()
+  await expect(region.getByText('Sync failed', { exact: true })).toBeVisible()
+  await expect(region.getByText('Unconfigured')).toBeVisible()
 
   // This response fixture covers browser rendering; native artifact reuse,
   // paid-call counts and PG authorization are proved in their backend suites.
@@ -67,9 +70,11 @@ test('local project readers see native sync status with bounded embedding summar
     }
     await route.fulfill({ response, json: data })
   })
-  await region.getByRole('button', { name: 'Refresh sync' }).click()
-  await expect(region.getByText('Reused: 1')).toBeVisible()
-  await expect(region.getByText('Run in a CLI connected to this daemon.')).toBeVisible()
+  await region.getByRole('button', { name: 'Refresh' }).click()
+  await expect(region.getByText('1 generated · 1 reused · 1 without index')).toBeVisible()
+  await expect(
+    region.getByText("To see the error, run this on the server's machine:"),
+  ).toBeVisible()
   await page
     .context()
     .grantPermissions(['clipboard-read', 'clipboard-write'], { origin: kata.origin })
@@ -84,7 +89,7 @@ test('local project readers see native sync status with bounded embedding summar
         if (probe.error) throw probe.error
         expect(probe.status).toBe(0)
       }
-      await region.getByRole('button', { name: `Copy ${label} sync status command` }).click()
+      await region.getByRole('button', { name: `Copy ${label} command` }).click()
       const command = await page.evaluate(() => navigator.clipboard.readText())
       const diagnostic = kata.runSyncDiagnostic(shell, command)
       expect(diagnostic).toContain('example sync failure')
@@ -96,7 +101,7 @@ test('local project readers see native sync status with bounded embedding summar
   }
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 1000 })
-    await expect(region.getByText('Retained without index: 1')).toBeVisible()
+    await expect(region.getByText('1 generated · 1 reused · 1 without index')).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
       width,
     )
@@ -111,11 +116,12 @@ test('local project readers see native sync status with bounded embedding summar
   const clearedRead = page.waitForResponse(
     (response) => new URL(response.url()).pathname === statusPath,
   )
-  await region.getByRole('button', { name: 'Refresh sync' }).click()
+  await region.getByRole('button', { name: 'Refresh' }).click()
   // The attention block also disappears while the read is pending, so wait for
   // the read and the status it renders.
   expect((await clearedRead).ok()).toBe(true)
   await expect(region.getByText('Sync disabled', { exact: true })).toBeVisible()
-  await expect(region.getByText('Sync needs attention')).toHaveCount(0)
-  await expect(region.getByRole('button', { name: /Copy .* sync status command/ })).toHaveCount(0)
+  await expect(region.getByRole('button', { name: /Copy .* command/ })).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await expect(chip).toHaveCount(0)
 })
