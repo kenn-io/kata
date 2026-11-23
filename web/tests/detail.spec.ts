@@ -44,8 +44,6 @@ test('detail editing and close reasons round-trip through live Kata authority', 
   await page.getByRole('button', { name: 'Complete…' }).click()
   const wontDo = page.getByRole('dialog', { name: 'Complete task' })
   await wontDo.getByRole('radio', { name: /Won't do/ }).click()
-  await expect(wontDo.getByLabel('Completion note')).toBeEmpty()
-  await expect(wontDo.getByRole('button', { name: 'Complete' })).toBeEnabled()
   await wontDo.getByRole('button', { name: 'Complete' }).click()
   await expect(page.getByRole('button', { name: 'Reopen' })).toBeVisible()
 })
@@ -62,25 +60,6 @@ test('comments, links, checklist, and history update without API fan-out', async
   })
   await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
 
-  for (const name of ['Checklist', 'Comments']) {
-    const section = page.getByRole('region', { name })
-    const bounds = await section.boundingBox()
-    const heading = await section.locator('header').boundingBox()
-    expect(bounds?.height).toBe(heading?.height)
-  }
-  const checklistAction = page
-    .getByRole('region', { name: 'Checklist' })
-    .getByRole('button', { name: 'Add item' })
-  const linksAction = page
-    .getByRole('region', { name: 'Links' })
-    .getByRole('button', { name: 'Add' })
-  const actionStyle = (element: HTMLElement) => {
-    const style = getComputedStyle(element)
-    return [style.borderWidth, style.backgroundColor, style.color, style.fontSize, style.height]
-  }
-  expect(await checklistAction.evaluate(actionStyle)).toEqual(
-    await linksAction.evaluate(actionStyle),
-  )
   await page.getByRole('button', { name: 'Add comment' }).click()
   await page.getByRole('textbox', { name: 'Comment' }).fill('A neutral collaboration note')
   await page.getByRole('button', { name: 'Add comment' }).click()

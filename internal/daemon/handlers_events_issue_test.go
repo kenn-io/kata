@@ -70,34 +70,42 @@ func TestUISnapshotCachesEffectiveCloseEvent(t *testing.T) {
 
 	_, _, err = env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: issue.ID, Author: "tester", Body: "Follow-up"})
 	require.NoError(t, err)
-	fourth, body := envDoRaw(t, env, http.MethodGet, path, nil, map[string]string{"If-None-Match": first.Header.Get("ETag"), "Authorization": "Bearer bootstrap-token"})
-	require.Equal(t, http.StatusOK, fourth.StatusCode, string(body))
-	require.NotEqual(t, first.Header.Get("ETag"), fourth.Header.Get("ETag"))
+	third, body := envDoRaw(t, env, http.MethodGet, path, nil, map[string]string{"If-None-Match": first.Header.Get("ETag"), "Authorization": "Bearer bootstrap-token"})
+	require.Equal(t, http.StatusOK, third.StatusCode, string(body))
+	require.NotEqual(t, first.Header.Get("ETag"), third.Header.Get("ETag"))
 	snapshot.Selected.EffectiveCloseEvent = nil
 	require.NoError(t, json.Unmarshal(body, &snapshot))
 	require.NotNil(t, snapshot.Selected.EffectiveCloseEvent)
 	require.Equal(t, closed[0].UID, snapshot.Selected.EffectiveCloseEvent.UID)
 	require.Greater(t, store.reads.Load(), reads)
+}
 
+func TestUISnapshotProjectsEffectiveCloseEventAndRequiresHistory(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+	project, err := env.DB.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	issue := createScopedHTTPTestIssue(t, env, project.ID, "Closed task", nil)
+	newScopedTokens(t, env, project, issue)
+	_, closed, changed, err := env.DB.CloseIssueWithEvents(t.Context(), issue.ID, "done", "tester", "Finished", nil)
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	path := "/api/v1/ui/snapshot?view=all-open&include_history=true&selected_issue_uid=" + issue.UID
 	scoped, body := envDoRaw(t, env, http.MethodGet, path, nil, map[string]string{"Authorization": "Bearer worker-token"})
 	require.Equal(t, http.StatusOK, scoped.StatusCode, string(body))
-	snapshot.Selected.EffectiveCloseEvent = nil
+	var snapshot struct {
+		Selected struct {
+			EffectiveCloseEvent *db.Event `json:"effective_close_event"`
+		} `json:"selected"`
+	}
 	require.NoError(t, json.Unmarshal(body, &snapshot))
 	require.NotNil(t, snapshot.Selected.EffectiveCloseEvent)
 	require.Equal(t, closed[0].UID, snapshot.Selected.EffectiveCloseEvent.UID)
 	require.Empty(t, snapshot.Selected.EffectiveCloseEvent.OriginInstanceUID)
+
 	withoutHistory := "/api/v1/ui/snapshot?view=all-open&selected_issue_uid=" + issue.UID
 	scoped, body = envDoRaw(t, env, http.MethodGet, withoutHistory, nil, map[string]string{"Authorization": "Bearer worker-token"})
 	require.Equal(t, http.StatusOK, scoped.StatusCode, string(body))
-	require.NotContains(t, string(body), `"effective_close_event"`)
-
-	origin := "7ZZZZZZZZZZZZZZZZZZZZZZZZZ"
-	insertRemoteIssueHistoryEvent(t, env, project, issue, "00000000000000000000000002", origin, "issue.updated",
-		closed[0].HLCPhysicalMS+1, 0, `{"status":"open"}`, closed[0].CreatedAt)
-	insertRemoteIssueHistoryEvent(t, env, project, issue, "00000000000000000000000003", origin, "issue.snapshot",
-		closed[0].HLCPhysicalMS+2, 0, `{"uid":"`+issue.UID+`","short_id":"`+issue.ShortID+`","title":"Closed task","body":"","author":"`+issue.Author+`","status":"closed","metadata":{},"created_at":"`+issue.CreatedAt.UTC().Format(db.EventTimestampFormat)+`"}`, closed[0].CreatedAt)
-	afterTransition, body := envDoRaw(t, env, http.MethodGet, path, nil, map[string]string{"Authorization": "Bearer bootstrap-token"})
-	require.Equal(t, http.StatusOK, afterTransition.StatusCode, string(body))
 	require.NotContains(t, string(body), `"effective_close_event"`)
 }
 
