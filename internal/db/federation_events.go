@@ -305,37 +305,13 @@ func stringPointersEqual(left, right *string) bool {
 // a supplemental direct-spoke proof. It never modifies the event payload.
 func DirectLinkPeers(event FoldEvent) (map[string]bool, error) {
 	if event.Type == "issue.snapshot" {
-		var payload struct {
-			Links []IssueDocumentLink `json:"links"`
-		}
-		if err := json.Unmarshal(event.Payload, &payload); err != nil {
-			return nil, err
-		}
-		peers, incoming := map[string]bool{}, map[string]bool{}
-		for _, link := range payload.Links {
-			if link.Type == "parent" && link.Incoming {
-				incoming[link.ToIssueUID] = true
-			} else if link.ToIssueUID != "" {
-				peers[link.ToIssueUID] = true
-			}
-		}
-		for uid := range incoming {
-			delete(peers, uid)
-		}
-		return peers, nil
+		return snapshotLinkPeers(event.Payload)
 	}
 	if event.Type != "issue.unlinked" && !directLinkAdditionEligible(event) {
 		return nil, nil
 	}
 	var peers map[string]bool
-	add := func(uid string) {
-		if uid != "" {
-			if peers == nil {
-				peers = make(map[string]bool)
-			}
-			peers[uid] = true
-		}
-	}
+	add := func(uid string) { peers = addLinkPeer(peers, uid) }
 	_, _, err := StripCrossProjectLinkAdditions(event, func(uid string) bool {
 		add(uid)
 		return false
@@ -356,6 +332,41 @@ func DirectLinkPeers(event FoldEvent) (map[string]bool, error) {
 		}
 	}
 	return peers, err
+}
+
+func addLinkPeer(peers map[string]bool, uid string) map[string]bool {
+	if uid == "" {
+		return peers
+	}
+	if peers == nil {
+		peers = make(map[string]bool)
+	}
+	peers[uid] = true
+	return peers
+}
+
+// snapshotLinkPeers lists the issues a snapshot links to. A parent link whose
+// primary issue is the other end needs that issue's own authority, so incoming
+// parent links never count.
+func snapshotLinkPeers(payload []byte) (map[string]bool, error) {
+	var snapshot struct {
+		Links []IssueDocumentLink `json:"links"`
+	}
+	if err := json.Unmarshal(payload, &snapshot); err != nil {
+		return nil, err
+	}
+	peers, incoming := map[string]bool{}, map[string]bool{}
+	for _, link := range snapshot.Links {
+		if link.Type == "parent" && link.Incoming {
+			incoming[link.ToIssueUID] = true
+		} else if link.ToIssueUID != "" {
+			peers[link.ToIssueUID] = true
+		}
+	}
+	for uid := range incoming {
+		delete(peers, uid)
+	}
+	return peers, nil
 }
 
 // directLinkAdditionEligible requires a parent link's primary issue to be the

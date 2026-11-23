@@ -261,37 +261,12 @@ func pushDirectSpoke(
 	credentials config.FederationCredentialStore,
 	opts clientpkg.Opts,
 ) error {
-	ctx = db.WithRecoveryEventPublisher(ctx, func(event db.Event) {
-		if onPulledEvents != nil {
-			onPulledEvents(event.ProjectID, []db.Event{event})
-		}
-	})
+	ctx = withRecoveryEventPublisher(ctx, onPulledEvents)
 	if binding.PushEnabled {
-		snapshotsSent := make(map[string]bool)
+		retained := newRetainedPush(store, binding, hubProjectID, client, onPulledEvents, validateLease, credentials, opts)
 		for {
-			if q, err := store.ActiveFederationQuarantine(ctx, binding.ProjectID, db.FederationQuarantineDirectionPush); err == nil {
-				quarantinedEvents, eventErr := store.EventsByUIDs(ctx, binding.ProjectID, q.EventUIDs)
-				if eventErr != nil {
-					if errors.Is(eventErr, db.ErrNotFound) {
-						return recordFederationSyncError(ctx, store, binding.ProjectID, ErrFederationPushQuarantined)
-					}
-					return recordFederationSyncError(ctx, store, binding.ProjectID, eventErr)
-				}
-				if retry, reason := autoRetryFederationQuarantine(q, quarantinedEvents); retry {
-					if _, err := store.RetryFederationQuarantine(ctx, db.RetryFederationQuarantineParams{
-						ID:        q.ID,
-						ProjectID: binding.ProjectID,
-						Actor:     binding.Actor,
-						Reason:    reason,
-						Now:       time.Now().UTC(),
-					}); err != nil {
-						return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-					}
-				} else {
-					return recordFederationSyncError(ctx, store, binding.ProjectID, ErrFederationPushQuarantined)
-				}
-			} else if err != nil && !errors.Is(err, db.ErrNotFound) {
-				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+			if err := retryPushQuarantine(ctx, store, binding); err != nil {
+				return err
 			}
 			pending, err := store.PendingFederationPushEvents(
 				ctx, binding.ProjectID, store.InstanceUID(), binding.PushCursorEventID, federationPollLimit)
@@ -302,79 +277,12 @@ func pushDirectSpoke(
 				break
 			}
 			for len(pending) > 0 {
-				retained := retainedFederationEvent(pending[0], *binding, store.InstanceUID())
-				end := 1
-				for end < len(pending) && retainedFederationEvent(pending[end], *binding, store.InstanceUID()) == retained {
-					end++
+				batch, adoptionBaseline, adoptionBaselineEndEventID, err := retained.nextBatch(ctx, &pending)
+				if err != nil {
+					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
-				if retained {
-					if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
-						return err
-					}
-					cursor := pending[end-1].ID
-					if err := store.AdvanceFederationPushCursor(ctx, binding.ProjectID, cursor); err != nil {
-						return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-					}
-					binding.PushCursorEventID = cursor
-					pending = pending[end:]
+				if batch == nil {
 					continue
-				}
-				recovery := false
-				retainedCreation := false
-				if binding.RetainedThroughEventID > 0 {
-					for i, event := range pending[:end] {
-						if event.Type == "issue.created" && event.IssueUID != nil && event.ID <= binding.RetainedThroughEventID && event.OriginInstanceUID == store.InstanceUID() && event.Actor == binding.Actor {
-							if i == 0 {
-								end, retainedCreation = 1, true
-							} else {
-								end = i
-							}
-							break
-						}
-						if event.Type != "issue.snapshot" || event.IssueUID == nil || event.ID <= binding.RetainedThroughEventID || event.OriginInstanceUID != store.InstanceUID() || event.Actor != binding.Actor {
-							continue
-						}
-						snapshot, _, err := store.RetainedIssueSnapshot(ctx, binding.ProjectID, *event.IssueUID)
-						if err != nil && !errors.Is(err, db.ErrNotFound) {
-							return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-						}
-						if err == nil && snapshot.UID == event.UID {
-							if i == 0 {
-								end, recovery = 1, true
-							} else {
-								end = i
-							}
-							break
-						}
-					}
-				}
-				var batch []db.Event
-				var adoptionBaseline string
-				var adoptionBaselineEndEventID int64
-				if recovery {
-					batch = pending[:1]
-				} else {
-					batch, adoptionBaseline, adoptionBaselineEndEventID, err = nextFederationPushIngestBatch(pending[:end])
-				}
-				if err != nil {
-					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-				}
-				if len(batch) == 0 {
-					return recordFederationSyncError(ctx, store, binding.ProjectID, errors.New("empty federation push batch"))
-				}
-				retired, err := publishRetainedComments(ctx, store, binding, hubProjectID, client, batch, snapshotsSent, onPulledEvents, validateLease, credentials, opts)
-				if err != nil {
-					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-				}
-				if retired {
-					break
-				}
-				retired, err = publishRetainedLinkPeers(ctx, store, binding, hubProjectID, client, batch, snapshotsSent, onPulledEvents, validateLease, credentials, opts)
-				if err != nil {
-					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-				}
-				if retired {
-					break
 				}
 				sourceTokens, err := federationMoveSourceTokens(ctx, store, credentials, *binding, client.baseURL, batch, opts)
 				if err != nil {
@@ -387,58 +295,10 @@ func pushDirectSpoke(
 						AdoptionBaselineEndEventID: adoptionBaselineEndEventID,
 					})
 				if err != nil {
-					if retainedCreation && retainedInitializerAlreadyKnown(err, "issue.created", *batch[0].IssueUID) {
-						if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
-							return err
-						}
-						if err := store.AdvanceFederationPushCursor(ctx, binding.ProjectID, batch[0].ID); err != nil {
-							return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-						}
-						binding.PushCursorEventID = batch[0].ID
-						pending = pending[1:]
+					if handled, resolveErr := retained.resolve(ctx, &pending, batch, err); resolveErr != nil {
+						return recordFederationSyncError(ctx, store, binding.ProjectID, resolveErr)
+					} else if handled {
 						continue
-					}
-					if recovery && batch[0].IssueUID != nil && retainedSnapshotAlreadyKnown(err, *batch[0].IssueUID) {
-						if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
-							return err
-						}
-						ackCtx, resets := db.WithFederationMoveResetCapture(ctx)
-						if err := store.AcknowledgeFederationPush(ackCtx, binding.ProjectID, batch[0].ID, []string{batch[0].UID}); err != nil {
-							return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-						}
-						if onPulledEvents != nil {
-							for _, reset := range resets.Resets {
-								onPulledEvents(reset.ProjectID, []db.Event{{ID: reset.EventID, ProjectID: reset.ProjectID, Type: db.ProjectScopeResetEventType}})
-							}
-						}
-						binding.PushCursorEventID = batch[0].ID
-						break
-					}
-					if issueUID := retainedUnknownIssue(err); issueUID != "" && !snapshotsSent[issueUID] {
-						snapshot, sourceID, snapshotErr := store.RetainedIssueSnapshot(ctx, binding.ProjectID, issueUID)
-						if snapshotErr == nil {
-							retired, peerErr := publishRetainedLinkPeers(ctx, store, binding, hubProjectID, client, []db.Event{snapshot}, snapshotsSent, onPulledEvents, validateLease, credentials, opts)
-							if peerErr != nil {
-								return recordFederationSyncError(ctx, store, binding.ProjectID, peerErr)
-							}
-							if retired {
-								break
-							}
-							envelope := federationIngestEnvelope(snapshot)
-							envelope.EventID = sourceID
-							sourceTokens, snapshotErr = federationMoveSourceTokens(ctx, store, credentials, *binding, client.baseURL, []db.Event{snapshot}, opts)
-							if snapshotErr != nil {
-								return recordFederationSyncError(ctx, store, binding.ProjectID, snapshotErr)
-							}
-							_, snapshotErr = client.IngestProjectEventsWithOptions(ctx, hubProjectID, []api.FederationIngestEventEnvelope{envelope}, IngestProjectEventsOptions{MoveSourceTokens: sourceTokens})
-							if snapshotErr == nil {
-								snapshotsSent[issueUID] = true
-								continue
-							}
-						}
-						if !errors.Is(snapshotErr, db.ErrNotFound) {
-							return recordFederationSyncError(ctx, store, binding.ProjectID, snapshotErr)
-						}
 					}
 					if isPoisonedFederationPushError(err) {
 						if qErr := recordFederationPushQuarantine(ctx, store, binding.ProjectID, batch, err); qErr != nil {
@@ -487,6 +347,36 @@ func pushDirectSpoke(
 		if err := store.RecordFederationSyncPushSuccess(ctx, binding.ProjectID, time.Now().UTC()); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// retryPushQuarantine retries an active push quarantine when its events allow
+// it, and otherwise reports that the push stays quarantined.
+func retryPushQuarantine(ctx context.Context, store db.Storage, binding *db.FederationBinding) error {
+	if q, err := store.ActiveFederationQuarantine(ctx, binding.ProjectID, db.FederationQuarantineDirectionPush); err == nil {
+		quarantinedEvents, eventErr := store.EventsByUIDs(ctx, binding.ProjectID, q.EventUIDs)
+		if eventErr != nil {
+			if errors.Is(eventErr, db.ErrNotFound) {
+				return recordFederationSyncError(ctx, store, binding.ProjectID, ErrFederationPushQuarantined)
+			}
+			return recordFederationSyncError(ctx, store, binding.ProjectID, eventErr)
+		}
+		if retry, reason := autoRetryFederationQuarantine(q, quarantinedEvents); retry {
+			if _, err := store.RetryFederationQuarantine(ctx, db.RetryFederationQuarantineParams{
+				ID:        q.ID,
+				ProjectID: binding.ProjectID,
+				Actor:     binding.Actor,
+				Reason:    reason,
+				Now:       time.Now().UTC(),
+			}); err != nil {
+				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+			}
+		} else {
+			return recordFederationSyncError(ctx, store, binding.ProjectID, ErrFederationPushQuarantined)
+		}
+	} else if err != nil && !errors.Is(err, db.ErrNotFound) {
+		return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 	}
 	return nil
 }
