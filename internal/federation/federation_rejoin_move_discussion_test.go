@@ -48,6 +48,19 @@ func TestFederationMoveHistoryProvesSnapshotPreservesAcceptedCommentIdentity(t *
 	require.False(t, db.FederationMoveHistoryProvesSnapshot("issue", "hub-project", history, string(payload), "new-actor"))
 }
 
+func TestFederationMoveHistoryRejectsUnprovenForeignLinkAttribution(t *testing.T) {
+	history := []db.FoldEvent{
+		{UID: "created-event", ProjectUID: "hub-project", IssueUID: "issue", Type: "issue.created", Actor: "old-actor", Payload: jsontext.Value(`{"uid":"issue","author":"old-actor","title":"task","body":"","status":"open","metadata":{},"created_at":"2026-01-01T00:00:00Z"}`)},
+	}
+	snapshot := db.IssueDocumentPayload{
+		UID: "issue", Author: "old-actor",
+		Links: []db.IssueDocumentLink{{Type: "related", ToIssueUID: "peer-issue", Author: "old-actor"}},
+	}
+	payload, err := json.Marshal(snapshot)
+	require.NoError(t, err)
+	require.False(t, db.FederationMoveHistoryProvesSnapshot("issue", "hub-project", history, string(payload), "new-actor"))
+}
+
 func TestRejoinMoveWithOlderDiscussion(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
