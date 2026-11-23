@@ -115,12 +115,9 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 				EmbeddingProjectAllowed: cfg.EmbeddingProjectAllowed,
 			}
 			if direct {
+				params.HubMode = &hubMode
 				params.Hub = func(ctx context.Context, p hybridParams, fetch int) ([]api.FederationSearchHit, bool, error) {
-					timeout := 5 * time.Second
-					if p.Requested == "" || p.Requested == "auto" {
-						timeout = time.Second
-					}
-					ctx, cancel := context.WithTimeout(ctx, timeout)
+					ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 					defer cancel()
 					client, cred, err := claimForwardClient(ctx, cfg, binding)
 					if err != nil {

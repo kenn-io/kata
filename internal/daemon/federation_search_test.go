@@ -398,11 +398,11 @@ func TestDirectSpokeSearchReportsUnavailableHub(t *testing.T) {
 		HubURL: hub.URL, HubProjectID: hubProject.ID, Token: token, Actor: "tester", Capabilities: "pull",
 	}))
 	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case <-time.After(3200 * time.Millisecond):
-			_, _ = w.Write([]byte(`{"hits":[],"bounded":false}`))
-		case <-r.Context().Done():
+		if r.URL.Query().Get("auto") == "true" {
+			<-r.Context().Done()
+			return
 		}
+		_, _ = w.Write([]byte(`{"hits":[],"bounded":false}`))
 	}))
 	t.Cleanup(slow.Close)
 	setClaimBindingHubURL(t, spoke, replica.ID, slow.URL)
@@ -450,6 +450,46 @@ func TestDirectSpokeSearchReportsUnavailableHub(t *testing.T) {
 	require.Contains(t, string(body), `"mode":"lexical"`)
 	require.Contains(t, string(body), `"degraded":true`)
 	require.Contains(t, string(body), "claim target")
+}
+
+func TestDirectSpokeSearchHubLexicalRanking(t *testing.T) {
+	ctx := t.Context()
+	hub, spoke, project, replica, _, token := createClaimForwardingPair(t, "pull")
+	remote, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "zebra remote", Author: "tester"})
+	require.NoError(t, err)
+	hits := []map[string]any{{"issue": remote, "score": 1, "matched_in": []string{"title"}}}
+	for i := range 20 {
+		local, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: replica.ID, Title: fmt.Sprintf("zebra local %d", i), Author: "tester"})
+		require.NoError(t, err)
+		hits = append(hits, map[string]any{"issue": local, "score": 1, "matched_in": []string{"title"}})
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		require.NoError(t, json.MarshalWrite(w, map[string]any{"hits": hits, "mode": "lexical", "degraded_reason": "keyword-only"}))
+	}))
+	t.Cleanup(server.Close)
+	setClaimBindingHubURL(t, spoke, replica.ID, server.URL)
+	require.NoError(t, config.WriteFederationCredential(replica.UID, config.FederationCredential{HubURL: server.URL, HubProjectID: project.ID, Token: token}))
+	resp, raw := envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=zebra", replica.ID))
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	require.Contains(t, string(raw), remote.UID)
+}
+
+func TestDirectSpokeSearchWaitsForHubFallback(t *testing.T) {
+	_, spoke, project, replica, issue, token := createClaimForwardingPair(t, "pull")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-time.After(1200 * time.Millisecond):
+			require.NoError(t, json.MarshalWrite(w, map[string]any{"hits": []any{map[string]any{"issue": issue, "score": 1, "matched_in": []string{"title"}}}, "mode": "lexical", "degraded_reason": "keyword-only"}))
+		case <-r.Context().Done():
+		}
+	}))
+	t.Cleanup(server.Close)
+	setClaimBindingHubURL(t, spoke, replica.ID, server.URL)
+	require.NoError(t, config.WriteFederationCredential(replica.UID, config.FederationCredential{HubURL: server.URL, HubProjectID: project.ID, Token: token}))
+	resp, raw := envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=concept", replica.ID))
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	require.Contains(t, string(raw), issue.UID)
+	require.Contains(t, string(raw), "keyword-only")
 }
 
 func TestDirectSpokeSearchOlderHubLabelsSemantic(t *testing.T) {

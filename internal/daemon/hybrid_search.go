@@ -27,6 +27,7 @@ type hybridParams struct {
 	AllowedIssueIDs []int64
 	IssueScope      *db.APITokenScope
 	Hub             func(context.Context, hybridParams, int) ([]api.FederationSearchHit, bool, error)
+	HubMode         *string // populated by Hub before it returns
 	// EmbeddingProjectAllowed gates query embedding for the searched project.
 	EmbeddingProjectAllowed func(context.Context, string) (bool, error)
 }
@@ -168,6 +169,14 @@ func hybridSearch(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 	case modeSemantic:
 		res = hybridResult{Mode: modeSemantic, Hits: truncate(vector, probeLimit)}
 	default: // hybrid
+		if p.HubMode != nil && *p.HubMode == string(modeLexical) {
+			// A shared keyword match contributes once, using the local issue.
+			seen := make(map[string]bool, len(lexical))
+			for _, hit := range lexical {
+				seen[hit.Issue.UID] = true
+			}
+			vector = slices.DeleteFunc(vector, func(hit db.SearchCandidate) bool { return seen[hit.Issue.UID] })
+		}
 		hits, err := mergeRRF(lexical, vector, probeLimit)
 		if err != nil {
 			return hybridResult{}, err
