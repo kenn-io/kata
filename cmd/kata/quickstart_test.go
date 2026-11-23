@@ -34,28 +34,6 @@ func TestQuickstart_ExternalAgentOnboardingFormats(t *testing.T) {
 	}
 }
 
-func TestQuickstartCommentHeredocPreservesText(t *testing.T) {
-	bash, err := exec.LookPath("bash")
-	if err != nil {
-		t.Skip("bash unavailable")
-	}
-	resetFlags(t)
-	output := string(executeRoot(t, newRootCmd(), "quickstart", "--format", "contract"))
-	start := strings.Index(output, "kata comment <ref> --body-stdin --agent <<-'EOF'\n")
-	require.NotEqual(t, -1, start)
-	example := output[start:]
-	end := strings.Index(example, "\n\tEOF\n")
-	require.NotEqual(t, -1, end)
-	example = example[:end+len("\n\tEOF\n")]
-	example = strings.Replace(example, "<ref>", "abc4", 1)
-	example = strings.Replace(example, "<finding>", "The `printf changed` result costs $HOME.", 1)
-	script := "kata() { cat; }\n" + example + "printf 'next command\\n'\n"
-	cmd := exec.CommandContext(t.Context(), bash, "-c", script) //nolint:gosec // The script contains a controlled example and fixture text.
-	got, err := cmd.CombinedOutput()
-	require.NoError(t, err, string(got))
-	assert.Equal(t, "The `printf changed` result costs $HOME.\nnext command\n", string(got))
-}
-
 func TestQuickstart_HelpExplainsFormatsAndSessionSetup(t *testing.T) {
 	for _, args := range [][]string{
 		{"quickstart", "--help"},
@@ -306,8 +284,30 @@ func TestGuidesSayCommentsCarryFindings(t *testing.T) {
 		assert.Contains(t, text, "kata label add <ref> needs-review", name)
 		assert.Contains(t, text, "kata comment edit", name)
 		assert.Contains(t, text, "not merged", name)
-		assertClosedBodyStdinHeredoc(t, name, text)
+		if name != "quickstart contract" {
+			assertClosedBodyStdinHeredoc(t, name, text)
+		}
 	}
+	t.Run("contract heredoc", func(t *testing.T) {
+		bash, err := exec.LookPath("bash")
+		if err != nil {
+			t.Skip("bash unavailable")
+		}
+		output := guides["quickstart contract"]
+		start := strings.Index(output, "kata comment <ref> --body-stdin --agent <<-'EOF'\n")
+		require.NotEqual(t, -1, start)
+		example := output[start:]
+		end := strings.Index(example, "\n\tEOF\n")
+		require.NotEqual(t, -1, end)
+		example = example[:end+len("\n\tEOF\n")]
+		example = strings.Replace(example, "<ref>", "abc4", 1)
+		example = strings.Replace(example, "<finding>", "The `printf changed` result costs $HOME.", 1)
+		script := "kata() { cat; }\n" + example + "printf 'next command\\n'\n"
+		cmd := exec.CommandContext(t.Context(), bash, "-c", script) //nolint:gosec // The script contains a controlled example and fixture text.
+		got, err := cmd.CombinedOutput()
+		require.NoError(t, err, string(got))
+		assert.Equal(t, "The `printf changed` result costs $HOME.\nnext command\n", string(got))
+	})
 	// The retry after a failed mutation comment, and the edit example, carry
 	// comment text, so they use the quoted heredoc too.
 	assert.Contains(t, guides["quickstart human"], "retry with a quoted heredoc:\n\n   kata comment <ref> --body-stdin <<-'EOF'\n")
@@ -330,6 +330,7 @@ func TestGuidesSayCommentsCarryFindings(t *testing.T) {
 		resetFlags(t)
 		guides[strings.Join(args, " ")] = string(executeRoot(t, newRootCmd(), args...))
 	}
+	assert.NotContains(t, guides["claim --help"], `--comment "starting on the Safari path"`)
 	for name, text := range guides {
 		assert.NotRegexp(t, `\bprogress\b`, text, name)
 		assert.NotContains(t, text, "needs-review --comment", name)
