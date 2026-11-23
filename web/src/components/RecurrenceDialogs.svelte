@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { TypeaheadOption } from '@kenn-io/kit-ui'
   import RecurrenceDeleteDialog from './RecurrenceDeleteDialog.svelte'
   import RecurrenceEditorDialog from './RecurrenceEditorDialog.svelte'
   import type {
@@ -12,10 +13,15 @@
     selectedIssue: KataTaskDetail | null
     recurrences: readonly KataRecurrence[]
     actor: string
+    ownerOptions?: TypeaheadOption[] | undefined
     disabled?: boolean | undefined
     draftFenceGeneration?: number | undefined
     onCreate: (projectID: number, input: KataCreateRecurrenceInput) => Promise<void>
-    onPatch: (id: number, input: KataPatchRecurrenceInput, etag: string) => Promise<void>
+    onPatch: (
+      recurrence: KataRecurrence,
+      input: KataPatchRecurrenceInput,
+      etag: string,
+    ) => Promise<void>
     onDelete: (recurrence: KataRecurrence) => Promise<boolean>
   }
 
@@ -23,6 +29,7 @@
     selectedIssue,
     recurrences,
     actor,
+    ownerOptions = [],
     disabled = false,
     draftFenceGeneration = 0,
     onCreate,
@@ -123,17 +130,18 @@
   }
 </script>
 
-{#if selectedIssue && recurrenceDialog.open}
+{#if recurrenceDialog.open && (selectedIssue || recurrenceDialog.mode === 'edit')}
   <RecurrenceEditorDialog
     open={recurrenceDialog.open}
-    mode={recurrenceDialog.mode === 'create'
+    mode={recurrenceDialog.mode === 'create' && selectedIssue
       ? {
           kind: 'create',
           projectID: selectedIssue.issue.project_id,
           initialIssueRef: selectedIssue.issue.short_id,
         }
-      : { kind: 'edit', recurrence: recurrenceDialog.recurrence, etag: recurrenceDialog.etag }}
+      : { kind: 'edit', recurrence: recurrenceDialog.recurrence!, etag: recurrenceDialog.etag }}
     {actor}
+    {ownerOptions}
     {disabled}
     onClose={closeRecurrenceDialog}
     {onCreate}

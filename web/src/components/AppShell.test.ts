@@ -2033,7 +2033,9 @@ describe('AppShell', () => {
     const create = screen.getByRole('button', { name: 'New task' })
     expect(create.getAttribute('aria-disabled')).toBeNull()
     await fireEvent.click(create)
-    await fireEvent.click(screen.getByRole('button', { name: /Use example-project as Inbox/ }))
+    await fireEvent.change(screen.getByLabelText('Project'), {
+      target: { value: '01J00000000000000000000002' },
+    })
     expect(onDesignateInbox).toHaveBeenCalledWith('01J00000000000000000000002')
     expect(screen.getByRole('textbox', { name: 'Quick capture' })).not.toBeNull()
   })

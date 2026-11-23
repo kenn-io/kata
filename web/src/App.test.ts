@@ -1,6 +1,6 @@
 // @vitest-environment-options { "url": "http://127.0.0.2/kata" }
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
 import { tick } from 'svelte'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -3042,9 +3042,9 @@ describe('App', () => {
 
     expect(screen.queryByRole('button', { name: /^Inbox project:/ })).toBeNull()
     await fireEvent.click(await screen.findByRole('button', { name: 'New task' }))
-    await fireEvent.click(
-      await screen.findByRole('button', { name: 'Use example-project as Inbox' }),
-    )
+    await fireEvent.change(await screen.findByLabelText('Project'), {
+      target: { value: accepted.catalog[0]!.project.uid },
+    })
 
     await waitFor(() => {
       const mutation = requests.find(
@@ -3115,11 +3115,12 @@ describe('App', () => {
     render(App)
 
     await fireEvent.click(await screen.findByRole('button', { name: 'New task' }))
-    expect(screen.getByText('Captured in').textContent).toContain('example-project')
-    await fireEvent.click(screen.getByRole('button', { name: 'Change Inbox project' }))
-    await fireEvent.click(
-      await screen.findByRole('button', { name: 'Use example-workspace as Inbox' }),
+    expect((screen.getByLabelText('Project') as HTMLSelectElement).value).toBe(
+      accepted.catalog[0]!.project.uid,
     )
+    await fireEvent.change(screen.getByLabelText('Project'), {
+      target: { value: accepted.catalog[1]!.project.uid },
+    })
 
     await waitFor(() => expect(patches).toHaveLength(1))
     expect(patches).toEqual([
@@ -3166,7 +3167,11 @@ describe('App', () => {
   })
 
   it('sends the visible recurrence revision when deleting', async () => {
-    history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
+    history.replaceState(
+      null,
+      '',
+      '/kata?scope=01J00000000000000000000002&issue=01J00000000000000000000001#direct=1',
+    )
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
@@ -3207,6 +3212,8 @@ describe('App', () => {
           ? input
           : new Request(new URL(String(input), window.location.origin), init)
       if (request.method === 'DELETE') return new Response(null, { status: 204 })
+      if (request.url.endsWith('/api/v1/projects/7/recurrences'))
+        return Response.json({ recurrences: accepted.selected.recurrences })
       return new Response(JSON.stringify(accepted), {
         status: 200,
         headers: { 'Content-Type': 'application/json', ETag: '"snapshot-1"' },
@@ -3215,8 +3222,13 @@ describe('App', () => {
     vi.stubGlobal('fetch', fetcher)
 
     render(App)
-    await fireEvent.click(await screen.findByRole('button', { name: 'Stop' }))
-    await fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    await fireEvent.click(await screen.findByRole('button', { name: /1 repeating task/ }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Stop repeating…' }))
+    await fireEvent.click(
+      within(screen.getByRole('dialog', { name: 'Stop repeating' })).getByRole('button', {
+        name: 'Stop repeating',
+      }),
+    )
 
     await waitFor(() => {
       const deletion = fetcher.mock.calls
@@ -4493,13 +4505,10 @@ describe('App', () => {
             window.dispatchEvent(new Event('focus'))
             await waitFor(() => expect(snapshotReads).toBeGreaterThan(reads))
             await waitFor(() =>
-              expect(screen.getByRole('button', { name: 'Capture' })).toHaveProperty(
-                'disabled',
-                false,
-              ),
+              expect(screen.getByRole('button', { name: 'Add' })).toHaveProperty('disabled', false),
             )
           }
-          await fireEvent.click(screen.getByRole('button', { name: 'Capture' }))
+          await fireEvent.click(screen.getByRole('button', { name: 'Add' }))
         } else {
           await fireEvent.click(await screen.findByRole('button', { name: 'Complete…' }))
           await fireEvent.input(screen.getByRole('textbox', { name: 'Evidence value' }), {

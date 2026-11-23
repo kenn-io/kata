@@ -38,7 +38,7 @@
   import MoveIssueDialog from './MoveIssueDialog.svelte'
   import IssueProperties from './IssueProperties.svelte'
   import RecurrenceDialogs from './RecurrenceDialogs.svelte'
-  import RecurrencePanel from './RecurrencePanel.svelte'
+  import { formatRRule } from '../lib/recurrence/rrule'
 
   type Reference = UIIssueReference
   interface IssueNavigationTarget {
@@ -94,7 +94,11 @@
       | ((projectID: number, input: KataCreateRecurrenceInput) => Promise<void>)
       | undefined
     onPatchRecurrence?:
-      | ((id: number, input: KataPatchRecurrenceInput, etag: string) => Promise<void>)
+      | ((
+          recurrence: KataRecurrence,
+          input: KataPatchRecurrenceInput,
+          etag: string,
+        ) => Promise<void>)
       | undefined
     onDeleteRecurrence?: ((recurrence: KataRecurrence) => Promise<boolean>) | undefined
     onOpenGraph?: ((issue: KataTaskDetail['issue']) => void) | undefined
@@ -211,7 +215,7 @@
       const attached = selectedRecurrences.find((recurrence) => recurrence.id === attachedID)
       return attached ? [attached] : []
     }
-    return selectedRecurrences
+    return []
   })
 
   $effect(() => {
@@ -502,6 +506,7 @@
           {#key draftFenceGeneration}<IssueStateDialog
               bind:this={stateDialog}
               {issue}
+              error={commentError}
               disabled={actionsDisabled || detailInert}
               {onCloseIssue}
               {onReopenIssue}
@@ -739,13 +744,9 @@
 </section>
 
 {#snippet repeats()}
-  <RecurrencePanel
-    compact
-    recurrences={visibleRecurrences}
-    readOnly={!administrativeActionsAllowed || actionsDisabled || detailInert}
-    onEdit={(recurrence) => recurrenceDialogs?.openEditRecurrence(recurrence)}
-    onDelete={(recurrence) => recurrenceDialogs?.openDeleteRecurrence(recurrence)}
-  />
+  {#each visibleRecurrences as recurrence (recurrence.uid)}
+    <span>{recurrence.template_title} · {formatRRule(recurrence.rrule)}</span>
+  {/each}
 {/snippet}
 
 <MoveIssueDialog
@@ -755,11 +756,13 @@
   {movePending}
   allowMove={administrativeActionsAllowed && !actionsDisabled && !detailInert}
   {onMoveIssue}
+  error={commentError}
 />
 
 <RecurrenceDialogs
   bind:this={recurrenceDialogs}
   selectedIssue={issue}
+  {ownerOptions}
   recurrences={selectedRecurrences}
   actor=""
   disabled={actionsDisabled || !administrativeActionsAllowed}

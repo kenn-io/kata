@@ -1,5 +1,14 @@
 <script lang="ts">
-  import { Checkbox, NumberInput, RadioGroup, SelectDropdown } from '@kenn-io/kit-ui'
+  import {
+    Checkbox,
+    Disclosure,
+    NumberInput,
+    RadioGroup,
+    SelectDropdown,
+    SegmentedControl,
+    Typeahead,
+    type TypeaheadOption,
+  } from '@kenn-io/kit-ui'
   import type {
     KataCreateRecurrenceInput,
     KataPatchRecurrenceInput,
@@ -7,6 +16,8 @@
     KataRecurrenceTemplateUpdateInput,
   } from '../lib/kata/types'
   import DatePicker from './DatePicker.svelte'
+  import DialogPreview from './shared/DialogPreview.svelte'
+  import { formatDay } from '../lib/kata/dates'
   import {
     WEEKDAYS,
     WEEKDAY_LABEL,
@@ -15,6 +26,7 @@
     serializeRRule,
     formatRRule,
     parseRRule,
+    previewDates,
     type Weekday,
     type Ordinal,
     type CommonRule,
@@ -28,12 +40,17 @@
   interface Props {
     mode: Mode
     actor: string
+    ownerOptions?: TypeaheadOption[]
     onCreate: (projectID: number, input: KataCreateRecurrenceInput) => Promise<void>
-    onPatch: (id: number, input: KataPatchRecurrenceInput, etag: string) => Promise<void>
+    onPatch: (
+      recurrence: KataRecurrence,
+      input: KataPatchRecurrenceInput,
+      etag: string,
+    ) => Promise<void>
     onSaved: () => void
   }
 
-  let { mode, actor, onCreate, onPatch, onSaved }: Props = $props()
+  let { mode, actor, ownerOptions = [], onCreate, onPatch, onSaved }: Props = $props()
 
   // --- Schedule state (Common mode) -------------------------------
   // Compute defaults from the initial dtstart once. Subsequent state
@@ -111,6 +128,7 @@
   // edit-mode prefill block (below) can set it before any $derived
   // reads it.
   let mode_ = $state<'common' | 'advanced'>('common')
+  let moreOpen = $state(false)
   let advancedText: string = $state('')
 
   // --- Submit state ----------------------------------------------
@@ -161,6 +179,7 @@
     if (parsed.kind !== 'common') {
       advancedText = rec.rrule
       mode_ = 'advanced'
+      moreOpen = true
       return
     }
     applyCommonRuleToForm(parsed.rrule, rec.rrule)
@@ -350,7 +369,7 @@
     if (Object.keys(patch).length === 1) return
 
     try {
-      await onPatch(rec.id, patch, baselineEtag)
+      await onPatch(rec, patch, baselineEtag)
       onSaved()
     } catch (e) {
       if (isConflict(e)) {
@@ -555,35 +574,19 @@
     <div class="conflict" role="alert">{conflictBanner}</div>
   {/if}
 
-  {#if currentSummary}
-    <div class="summary" data-testid="recurrence-summary">{currentSummary}</div>
-  {/if}
-
   {#if submitError}
     <div class="submit-error" role="alert">{submitError}</div>
   {/if}
 
   <fieldset class="schedule">
-    <legend>Schedule</legend>
-
-    <div class="mode-toggle" role="group" aria-label="Editor mode">
-      <button
-        type="button"
-        class="toggle"
-        aria-pressed={mode_ === 'common'}
-        onclick={() => mode_ === 'advanced' && toCommonOrStay()}>Common</button
-      >
-      <button
-        type="button"
-        class="toggle"
-        aria-pressed={mode_ === 'advanced'}
-        onclick={() => mode_ === 'common' && toAdvanced()}>Advanced</button
-      >
-    </div>
-
     {#if mode_ === 'common'}
-      <label class="row">
-        <span>Frequency</span>
+      <div class="row">
+        <span>Repeats every</span>
+        <NumberInput
+          min={1}
+          bind:value={interval}
+          ariaLabel={`Every ${interval ?? ''} ${intervalLabel}`}
+        />
         <SelectDropdown
           title="Frequency"
           value={freq}
@@ -592,20 +595,11 @@
             freq = value as CommonRule['freq']
           }}
         />
-      </label>
-
-      <label class="row">
-        <span>Every</span>
-        <NumberInput
-          min={1}
-          bind:value={interval}
-          ariaLabel={`Every ${interval ?? ''} ${intervalLabel}`}
-        />
-        <span class="suffix">{intervalLabel}</span>
-      </label>
+      </div>
 
       {#if freq === 'WEEKLY'}
         <div class="row chips" role="group" aria-label="Weekdays">
+          <span>On</span>
           {#each WEEKDAYS as d (d)}
             <button
               type="button"
@@ -728,10 +722,21 @@
         </div>
       {/if}
 
+      <label class="row">
+        <span>Starts</span>
+        <DatePicker
+          ariaLabel="Start date"
+          value={dtstart}
+          onchange={(value) => {
+            dtstart = value
+          }}
+        />
+      </label>
+
       <div class="row end">
-        <RadioGroup
-          legend="End condition"
-          name="end"
+        <span>Ends</span>
+        <SegmentedControl
+          ariaLabel="End condition"
           value={endMode}
           onchange={(value) => {
             if (value === 'never' || value === 'until' || value === 'count') endMode = value
@@ -760,66 +765,39 @@
           <span>occurrences</span>
         </div>
       </div>
-    {/if}
-
-    {#if mode_ === 'advanced'}
-      <label class="row advanced">
-        <span>RRULE</span>
-        <textarea bind:value={advancedText} rows="3" aria-invalid={advancedParse.kind === 'invalid'}
-        ></textarea>
+    {:else}
+      <label class="row">
+        <span>Starts</span>
+        <DatePicker
+          ariaLabel="Start date"
+          value={dtstart}
+          onchange={(value) => {
+            dtstart = value
+          }}
+        />
       </label>
-      <div class="row feedback" data-testid="rrule-feedback">
-        {#if advancedParse.kind === 'invalid'}
-          <span class="error">Invalid: {advancedParse.error}</span>
-        {:else if advancedParse.kind === 'advanced'}
-          <span class="hint"
-            >Advanced{advancedParse.reason ? ` — ${advancedParse.reason}` : ''}</span
-          >
-        {:else}
-          <span class="ok">Common: {formatRRule(advancedText)}</span>
-          <button type="button" class="link" onclick={toCommonOrStay}>Use Common mode</button>
-        {/if}
-      </div>
     {/if}
-
-    <label class="row">
-      <span>Start date</span>
-      <DatePicker
-        ariaLabel="Start date"
-        value={dtstart}
-        onchange={(value) => {
-          dtstart = value
-        }}
-      />
-    </label>
-
-    <label class="row">
-      <span>Timezone</span>
-      <SelectDropdown
-        title="Timezone"
-        value={timezone}
-        options={timezoneOptions}
-        onchange={(value) => {
-          timezone = value
-        }}
-      />
-    </label>
   </fieldset>
 
   <fieldset class="template">
-    <legend>Template</legend>
     <label class="row">
       <span>Title</span>
       <input type="text" bind:value={title} required />
     </label>
-    <label class="row">
-      <span>Body</span>
-      <textarea bind:value={body} rows="3"></textarea>
-    </label>
-    <label class="row">
-      <span>Owner</span>
-      <input type="text" bind:value={owner} placeholder="username or empty" />
-    </label>
+    <div class="row">
+      <span>Owner</span><Typeahead
+        title="Owner"
+        options={ownerOptions}
+        value={owner}
+        fallbackLabel="Choose owner"
+        placeholder="Find owner"
+        allowCustom
+        allowClear
+        onselect={(value) => {
+          owner = value
+        }}
+      />
+    </div>
     <label class="row">
       <span>Priority</span>
       <SelectDropdown
@@ -835,11 +813,66 @@
       <span>Labels</span>
       <input type="text" bind:value={labelsText} placeholder="comma-separated" />
     </label>
+  </fieldset>
+  <Disclosure title="More options" variant="plain" bind:open={moreOpen}>
     <label class="row">
-      <span>Metadata</span>
+      <span>Description</span>
+      <textarea bind:value={body} rows="3"></textarea>
+    </label>
+    <label class="row">
+      <span>Timezone</span>
+      <SelectDropdown
+        title="Timezone"
+        value={timezone}
+        options={timezoneOptions}
+        onchange={(value) => {
+          timezone = value
+        }}
+      />
+    </label>
+    <label class="row">
+      <span>Metadata for each task</span>
       <textarea bind:value={metadataText} rows="3" placeholder="JSON object (optional)"></textarea>
     </label>
-  </fieldset>
+    {#if mode_ === 'common'}
+      <button type="button" class="link" onclick={toAdvanced}>Write as rule</button>
+    {/if}
+    {#if mode_ === 'advanced'}
+      <label class="row advanced">
+        <span>Rule</span>
+        <textarea
+          aria-label="RRULE"
+          bind:value={advancedText}
+          rows="3"
+          aria-invalid={advancedParse.kind === 'invalid'}
+        ></textarea>
+      </label>
+      <div class="row feedback" data-testid="rrule-feedback">
+        {#if advancedParse.kind === 'invalid'}
+          <span class="error">Invalid: {advancedParse.error}</span>
+        {:else if advancedParse.kind === 'advanced'}
+          <span class="hint"
+            >Advanced{advancedParse.reason ? ` — ${advancedParse.reason}` : ''}</span
+          >
+        {:else}
+          <span class="ok">Common: {formatRRule(advancedText)}</span>
+          <button type="button" class="link" onclick={toCommonOrStay}>Use the simple form</button>
+        {/if}
+      </div>
+    {/if}
+  </Disclosure>
+  {#if currentSummary}
+    <DialogPreview>
+      <div data-testid="recurrence-summary">{currentSummary}</div>
+      {#if mode.kind === 'create'}<div>
+          This task becomes the first, scheduled {formatDay(dtstart)}.
+        </div>{/if}
+      {#if mode_ === 'common' && previewDates(activeRrule, dtstart).length}
+        <div>Then {previewDates(activeRrule, dtstart).map(formatDay).join(' · ')}</div>
+      {/if}
+      <div>Completing each one makes the next.</div>
+    </DialogPreview>
+  {/if}
 </div>
 
 <style>
@@ -850,14 +883,8 @@
   .schedule {
     display: grid;
     gap: var(--space-4);
-    border: 1px solid var(--border-default);
-    border-radius: var(--radius-md);
-    padding: 12px;
-  }
-  legend {
-    font-size: var(--font-size-sm);
-    color: var(--text-secondary);
-    padding: 0 6px;
+    border: 0;
+    padding: 0;
   }
   .row {
     display: flex;
@@ -866,9 +893,15 @@
     flex-wrap: wrap;
   }
   .row > span:first-child {
-    min-width: 90px;
+    min-width: 96px;
     color: var(--text-secondary);
     font-size: var(--font-size-sm);
+  }
+
+  @media (max-width: 640px) {
+    .row > span:first-child {
+      flex-basis: 100%;
+    }
   }
   .chips {
     gap: 4px;
@@ -887,18 +920,10 @@
     border-color: transparent;
   }
   .monthly,
-  .yearly-day,
-  .end {
+  .yearly-day {
     flex-direction: column;
     align-items: flex-start;
     gap: 6px;
-  }
-  .summary {
-    padding: 8px 10px;
-    border-radius: var(--radius-sm);
-    background: var(--bg-surface);
-    color: var(--text-primary);
-    font-size: var(--font-size-sm);
   }
   .submit-error {
     padding: 8px 10px;
@@ -918,36 +943,8 @@
   .template {
     display: grid;
     gap: var(--space-4);
-    border: 1px solid var(--border-default);
-    border-radius: var(--radius-md);
-    padding: 12px;
-  }
-  .mode-toggle {
-    display: inline-flex;
-    gap: 0;
-    align-self: flex-start;
-  }
-  .toggle {
-    padding: 4px 10px;
-    border: 1px solid var(--border-default);
-    background: var(--bg-surface);
-    color: var(--text-primary);
-    font-size: var(--font-size-sm);
-    cursor: pointer;
-  }
-  .toggle:first-child {
-    border-top-left-radius: var(--radius-sm);
-    border-bottom-left-radius: var(--radius-sm);
-  }
-  .toggle:last-child {
-    border-top-right-radius: var(--radius-sm);
-    border-bottom-right-radius: var(--radius-sm);
-    border-left: none;
-  }
-  .toggle[aria-pressed='true'] {
-    background: var(--accent-blue);
-    color: var(--bg-surface);
-    border-color: transparent;
+    border: 0;
+    padding: 0;
   }
   .advanced textarea {
     flex: 1;

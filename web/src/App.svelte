@@ -794,12 +794,10 @@
   }
 
   async function patchRecurrence(
-    id: number,
+    recurrence: KataRecurrence,
     input: KataPatchRecurrenceInput,
     etag: string,
   ): Promise<void> {
-    const recurrence = authority?.snapshot?.selected?.recurrences?.find((item) => item.id === id)
-    if (!recurrence) throw new Error(`Recurrence is not loaded: id=${id}`)
     const body: PatchRecurrenceRequestBody = {}
     if (input.rrule !== undefined) body.rrule = input.rrule
     if (input.dtstart !== undefined) body.dtstart = input.dtstart

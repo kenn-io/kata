@@ -51,9 +51,9 @@
   import IssueDetail from './IssueDetail.svelte'
   import IssueFilters from './IssueFilters.svelte'
   import IssueGraph from './IssueGraph.svelte'
-  import InboxProjectChooser from './InboxProjectChooser.svelte'
   import KataDaemonSwitcher from './KataDaemonSwitcher.svelte'
   import QuickCapture from './QuickCapture.svelte'
+  import ProjectRecurrences from './ProjectRecurrences.svelte'
   import SearchSettings from './SearchSettings.svelte'
   import Sidebar from './Sidebar.svelte'
   import SplitLayout from './SplitLayout.svelte'
@@ -128,7 +128,7 @@
       input: import('../lib/kata/types').KataCreateRecurrenceInput,
     ) => Promise<void>
     onPatchRecurrence: (
-      id: number,
+      recurrence: import('../lib/kata/types').KataRecurrence,
       input: import('../lib/kata/types').KataPatchRecurrenceInput,
       etag: string,
     ) => Promise<void>
@@ -266,7 +266,6 @@
   )
 
   let captureOpen = $state(false)
-  let inboxChooserOpen = $state(false)
   let mobileNavigationOpen = $state(false)
   let detailBeside = $state(false)
   let creationIntent = $state<'project' | 'task' | null>(null)
@@ -297,7 +296,6 @@
   let inboxProject = $derived(
     projection.projects.find((project) => project.metadata.role === 'inbox'),
   )
-  let hasInbox = $derived(inboxProject !== undefined)
   let viewName = $derived(viewNameForRoute(route))
   let searchFilters = $derived(searchFiltersForRoute(route, viewName))
   let filterRoute = $derived(
@@ -529,8 +527,7 @@
       beginProjectCreation('task')
       return
     }
-    if (hasInbox) captureOpen = true
-    else inboxChooserOpen = true
+    captureOpen = true
   }
 
   function beginProjectCreation(intent: 'project' | 'task' = 'project'): void {
@@ -547,12 +544,6 @@
       captureOpen = true
     }
     return result
-  }
-
-  async function chooseInbox(projectUID: string): Promise<void> {
-    await onDesignateInbox(projectUID)
-    inboxChooserOpen = false
-    captureOpen = true
   }
 
   function submitCapture(title: string): void | Promise<void> {
@@ -942,8 +933,25 @@
           onSubmitSearch={submitSearch}
         />
       {/snippet}
+      {#snippet projectRecurrences()}
+        {#if selectedProject && !scopedAuthority}
+          {#key selectedProject.uid}
+            <ProjectRecurrences
+              projectID={selectedProject.id}
+              actor={selfActor ?? 'kata-web'}
+              {ownerOptions}
+              disabled={!projectWideMutationAllowed}
+              refreshGeneration={snapshot.cursor}
+              onCreate={onCreateRecurrence}
+              onPatch={onPatchRecurrence}
+              onDelete={onDeleteRecurrence}
+            />
+          {/key}
+        {/if}
+      {/snippet}
       <IssueCollection
         toolbar={filtersToolbar}
+        headerAccessory={projectRecurrences}
         now={connectionNow}
         resultsKey={JSON.stringify([route.projectUID ?? null, route.filters])}
         {navigationGeneration}
@@ -1048,26 +1056,15 @@
   open={captureOpen}
   disabled={newTaskBlockedReason !== undefined}
   {draftFenceGeneration}
-  inboxName={scopedAuthority ? undefined : inboxProject?.name}
+  projects={projectWideMutationAllowed
+    ? projection.projects.map((project) => ({ uid: project.uid, name: project.name }))
+    : undefined}
+  inboxUID={inboxProject?.uid}
   onClose={() => {
     captureOpen = false
   }}
   onSubmit={submitCapture}
-  onChangeInbox={projectWideMutationAllowed
-    ? () => {
-        captureOpen = false
-        inboxChooserOpen = true
-      }
-    : undefined}
-/>
-
-<InboxProjectChooser
-  open={inboxChooserOpen}
-  projects={projection.projects.map((project) => ({ uid: project.uid, name: project.name }))}
-  onClose={() => {
-    inboxChooserOpen = false
-  }}
-  onSelect={chooseInbox}
+  onChooseInbox={projectWideMutationAllowed ? onDesignateInbox : undefined}
 />
 
 <style>

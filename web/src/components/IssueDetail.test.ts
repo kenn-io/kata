@@ -393,7 +393,7 @@ describe('IssueDetail', () => {
     renderDetail({ onMoveIssue })
 
     await fireEvent.click(screen.getByRole('button', { name: 'Project: Inbox' }))
-    await fireEvent.click(screen.getByRole('button', { name: 'Roadmap 1' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Roadmap 1 open' }))
 
     expect(onMoveIssue).toHaveBeenCalledWith('project-2')
   })
@@ -425,8 +425,9 @@ describe('IssueDetail', () => {
       updated_at: '2026-05-15T12:00:00Z',
     }
     const view = renderDetail({ selectedRecurrences: [recurrence] })
-    expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy()
-    await view.rerender({ actionsDisabled: true, authorityBlocked: false })
+    expect(screen.queryByText('Repeats')).toBeNull()
+    await view.rerender({ issue: makeIssue({ recurrence_id: 1 }) })
+    expect(screen.getByText(/Weekly task/)).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
   })
 

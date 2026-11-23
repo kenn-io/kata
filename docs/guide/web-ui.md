@@ -58,9 +58,9 @@ The sidebar lists **Inbox**, **Today**, **Scheduled**, **Delegated**, **All open
   from the column headers. New tasks are captured in the designated
   [Inbox project](../reference/metadata.md#project-inbox-designation). With no
   projects, **New task** asks you to create one, makes it Inbox, and opens task
-  capture. With existing projects and no Inbox, it asks you to choose one.
-  To switch it later, select
-  **Change** in the **New task** dialog. This is separate from `kata inbox`,
+  capture. With existing projects and no Inbox, choose a project in the
+  **New task** dialog. Change that selection to choose where future tasks go.
+  This is separate from `kata inbox`,
   which reads
   [attention requests](../reference/cli.md#teammate-requests) for an actor or
   teammate.
@@ -115,7 +115,10 @@ linked issue references open the referenced issue. The panel also supports:
 - adding related links and navigating or filtering existing parent, child,
   blocking, blocked-by, and related links;
 - completing, reopening, and moving issues; and
-- creating, editing, or stopping the issue's recurrence.
+- making an issue repeat. A repeated task shows its rule in **Repeats**.
+
+The project header lists its repeating tasks. Open the count to edit a rule or
+select **Stop repeating**. Tasks the rule already created stay in the project.
 
 When a close saved a
 [closing-session reference](../reference/configuration.md#closing-session-transcripts),

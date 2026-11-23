@@ -2,6 +2,7 @@
   import { Button } from '@kenn-io/kit-ui'
 
   import Modal from './Modal.svelte'
+  import DialogPreview from './shared/DialogPreview.svelte'
   import type { KataRecurrence } from '../lib/kata/types'
 
   interface Props {
@@ -20,18 +21,18 @@
   }
 </script>
 
-<Modal {open} title="Delete recurrence" onClose={onCancel} width={420}>
+<Modal {open} title="Stop repeating" onClose={onCancel} width={440}>
   <p class="body">
-    Stop creating new occurrences of
-    <strong>{recurrence.template_title}</strong>? Existing open issues are not affected.
+    <strong>{recurrence.template_title}</strong>
   </p>
+  <DialogPreview>Tasks it already made stay as they are, open or done.</DialogPreview>
   {#snippet footer()}
     <Button size="sm" label="Cancel" onclick={onCancel} />
     <Button
       size="sm"
       tone="danger"
       surface="solid"
-      label="Delete"
+      label="Stop repeating"
       {disabled}
       onclick={handleConfirm}
     />

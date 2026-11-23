@@ -51,6 +51,35 @@ function expectDropdown(title: string, value: string): void {
 }
 
 describe('RecurrenceEditor — Common-mode rendering', () => {
+  test('previews the first task and following dates', () => {
+    render(RecurrenceEditor, {
+      props: {
+        mode: createMode,
+        actor: 'user-a',
+        onCreate: vi.fn(),
+        onPatch: vi.fn(),
+        onSaved: vi.fn(),
+      },
+    })
+    expect(screen.getByText(/This task becomes the first/)).toBeTruthy()
+    expect(screen.getByText(/Completing each one makes the next/)).toBeTruthy()
+  })
+
+  test('keeps advanced fields under More options', async () => {
+    render(RecurrenceEditor, {
+      props: {
+        mode: createMode,
+        actor: 'user-a',
+        onCreate: vi.fn(),
+        onPatch: vi.fn(),
+        onSaved: vi.fn(),
+      },
+    })
+    expect(screen.getByText('More options').closest('details')?.open).toBe(false)
+    await fireEvent.click(screen.getByText('More options'))
+    expect(screen.getByRole('textbox', { name: 'Description' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Write as rule' })).toBeTruthy()
+  })
   test('create mode renders frequency, interval, end, dtstart, timezone', () => {
     render(RecurrenceEditor, {
       props: {
@@ -168,7 +197,7 @@ describe('RecurrenceEditor — Common-mode rendering', () => {
         onSaved: vi.fn(),
       },
     })
-    await fireEvent.click(screen.getByLabelText(/After/i))
+    await fireEvent.click(screen.getByRole('radio', { name: 'After' }))
     expect(screen.getByLabelText(/occurrences/i)).toBeTruthy()
   })
 })
@@ -185,11 +214,11 @@ describe('RecurrenceEditor — delete', () => {
       },
     })
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Stop repeating' }))
     expect(onConfirm).toHaveBeenCalledOnce()
 
     await view.rerender({ disabled: true })
-    const deleteButton = screen.getByRole('button', { name: 'Delete' }) as HTMLButtonElement
+    const deleteButton = screen.getByRole('button', { name: 'Stop repeating' }) as HTMLButtonElement
     expect(deleteButton.disabled).toBe(true)
   })
 })
@@ -207,7 +236,7 @@ describe('RecurrenceEditor — Template block + summary', () => {
     })
     expect(screen.getByLabelText(/Title/i)).toBeTruthy()
     expect((screen.getByLabelText(/Title/i) as HTMLInputElement).required).toBe(true)
-    expect(screen.getByLabelText(/Body/i)).toBeTruthy()
+    expect(screen.getByLabelText(/Description/i)).toBeTruthy()
     expect(screen.getByLabelText(/Owner/i)).toBeTruthy()
     expect(screen.getByLabelText(/Priority/i)).toBeTruthy()
     expect(screen.getByLabelText(/Labels/i)).toBeTruthy()
@@ -240,7 +269,8 @@ describe('RecurrenceEditor — Template block + summary', () => {
         onSaved: vi.fn(),
       },
     })
-    await fireEvent.click(screen.getByRole('button', { name: /Advanced/i }))
+    await fireEvent.click(screen.getByText('More options'))
+    await fireEvent.click(screen.getByRole('button', { name: 'Write as rule' }))
     const textarea = screen.getByLabelText(/RRULE/i) as HTMLTextAreaElement
     await fireEvent.input(textarea, { target: { value: 'FREQ=DAILY;INTERVAL=2' } })
     const summary = screen.getByTestId('recurrence-summary')
@@ -257,7 +287,8 @@ describe('RecurrenceEditor — Template block + summary', () => {
         onSaved: vi.fn(),
       },
     })
-    await fireEvent.click(screen.getByRole('button', { name: /Advanced/i }))
+    await fireEvent.click(screen.getByText('More options'))
+    await fireEvent.click(screen.getByRole('button', { name: 'Write as rule' }))
     const textarea = screen.getByLabelText(/RRULE/i) as HTMLTextAreaElement
     await fireEvent.input(textarea, { target: { value: 'FREQ=FORTNIGHTLY' } })
     // The empty styled block was rendering as a visible blank stripe
@@ -278,7 +309,8 @@ describe('RecurrenceEditor — mode toggle', () => {
         onSaved: vi.fn(),
       },
     })
-    await fireEvent.click(screen.getByRole('button', { name: /Advanced/i }))
+    await fireEvent.click(screen.getByText('More options'))
+    await fireEvent.click(screen.getByRole('button', { name: 'Write as rule' }))
     const textarea = screen.getByLabelText(/RRULE/i) as HTMLTextAreaElement
     expect(textarea.value).toMatch(/^FREQ=WEEKLY;INTERVAL=1;BYDAY=/)
   })
@@ -293,10 +325,11 @@ describe('RecurrenceEditor — mode toggle', () => {
         onSaved: vi.fn(),
       },
     })
-    await fireEvent.click(screen.getByRole('button', { name: /Advanced/i }))
+    await fireEvent.click(screen.getByText('More options'))
+    await fireEvent.click(screen.getByRole('button', { name: 'Write as rule' }))
     const textarea = screen.getByLabelText(/RRULE/i) as HTMLTextAreaElement
     await fireEvent.input(textarea, { target: { value: 'FREQ=DAILY;INTERVAL=2' } })
-    await fireEvent.click(screen.getByRole('button', { name: /Use Common mode/i }))
+    await fireEvent.click(screen.getByRole('button', { name: /Use the simple form/i }))
     expectDropdown('Frequency', 'Daily')
     expect((screen.getByLabelText(/Every/i) as HTMLInputElement).value).toBe('2')
   })
@@ -311,10 +344,11 @@ describe('RecurrenceEditor — mode toggle', () => {
         onSaved: vi.fn(),
       },
     })
-    await fireEvent.click(screen.getByRole('button', { name: /Advanced/i }))
+    await fireEvent.click(screen.getByText('More options'))
+    await fireEvent.click(screen.getByRole('button', { name: 'Write as rule' }))
     const textarea = screen.getByLabelText(/RRULE/i) as HTMLTextAreaElement
     await fireEvent.input(textarea, { target: { value: ADVANCED_LAST_WEEKDAY } })
-    expect(screen.queryByRole('button', { name: /Use Common mode/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Use the simple form/i })).toBeNull()
     expect(screen.getByTestId('rrule-feedback').textContent ?? '').toMatch(/Advanced/)
   })
 
@@ -328,7 +362,8 @@ describe('RecurrenceEditor — mode toggle', () => {
         onSaved: vi.fn(),
       },
     })
-    await fireEvent.click(screen.getByRole('button', { name: /Advanced/i }))
+    await fireEvent.click(screen.getByText('More options'))
+    await fireEvent.click(screen.getByRole('button', { name: 'Write as rule' }))
     const textarea = screen.getByLabelText(/RRULE/i) as HTMLTextAreaElement
     await fireEvent.input(textarea, { target: { value: 'FREQ=FORTNIGHTLY' } })
     expect(screen.getByTestId('rrule-feedback').textContent ?? '').toMatch(/unknown FREQ value/i)
@@ -385,7 +420,8 @@ describe('RecurrenceEditor (via dialog) — submit create', () => {
         onPatch: vi.fn(),
       },
     })
-    await fireEvent.click(screen.getByRole('button', { name: /Advanced/i }))
+    await fireEvent.click(screen.getByText('More options'))
+    await fireEvent.click(screen.getByRole('button', { name: 'Write as rule' }))
     const textarea = screen.getByLabelText(/RRULE/i) as HTMLTextAreaElement
     await fireEvent.input(textarea, { target: { value: 'FREQ=FORTNIGHTLY' } })
     const save = screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement
@@ -584,7 +620,8 @@ describe('RecurrenceEditor — edit diff', () => {
         onPatch,
       },
     })
-    await fireEvent.input(screen.getByLabelText(/Owner/i), { target: { value: '' } })
+    await fireEvent.click(screen.getByRole('button', { name: /Find owner/ }))
+    await fireEvent.mouseDown(screen.getByText('None'))
     await chooseDropdown('Priority', '(none)')
     await fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
