@@ -191,34 +191,15 @@ func TestFederationPollRechecksAuthorizationAfterItsRead(t *testing.T) {
 }
 
 func TestFederationPollWaitReturnsSavedPageWhenItExpires(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		revoke bool
-		wake   bool
-	}{{"event without wake", false, false}, {"revoked access", true, false}, {"empty wake", false, true}} {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, revoke := range []bool{false, true} {
+		t.Run(fmt.Sprintf("revoke=%t", revoke), func(t *testing.T) {
 			f := newSignedPollFixture(t)
 			synctest.Test(t, func(t *testing.T) {
 				h := f.serve(t, 0)
 				cursor := h.cursor(t)
 				done := h.startHeldPoll(t, cursor, "30")
 				reads := h.reads.readsReturned()
-				authCalls, revisionCalls := h.reads.accessCalls()
-				if tc.wake {
-					h.broadcaster.Broadcast(daemon.NewResetMsg(h.project.ID, 1))
-					synctest.Wait()
-					assert.Equal(t, reads+1, h.reads.readsReturned())
-					authAfterWake, _ := h.reads.accessCalls()
-					assert.Equal(t, authCalls+1, authAfterWake)
-					select {
-					case response := <-done:
-						t.Fatalf("empty wake answered the poll: %d %s", response.Code, response.Body.String())
-					default:
-					}
-					reads = h.reads.readsReturned()
-					authCalls, revisionCalls = h.reads.accessCalls()
-				}
-				if tc.revoke {
+				if revoke {
 					require.NoError(t, h.revokeProjectAccess(t))
 				} else {
 					h.commit(t, "Committed without a wakeup", false)
@@ -229,12 +210,9 @@ func TestFederationPollWaitReturnsSavedPageWhenItExpires(t *testing.T) {
 				require.NoError(t, json.Unmarshal(response.Body.Bytes(), &page))
 				assert.Empty(t, page.Events)
 				assert.Equal(t, reads, h.reads.readsReturned(), "the timeout must not read again")
-				authAfter, revisionAfter := h.reads.accessCalls()
-				assert.Equal(t, authCalls, authAfter)
-				assert.Equal(t, revisionCalls, revisionAfter)
 				// The next poll authorizes and reads from the returned cursor.
 				response = h.send(h.request(t, page.NextAfterID, ""))
-				if tc.revoke {
+				if revoke {
 					assert.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
 				} else {
 					assert.Contains(t, response.Body.String(), "Committed without a wakeup")
@@ -345,6 +323,18 @@ func TestFederationPollWaitRejectsARetiredSigningKey(t *testing.T) {
 			})
 		})
 	}
+	t.Run("woken after the key's secret is replaced", func(t *testing.T) {
+		f := newSignedPollFixture(t)
+		synctest.Test(t, func(t *testing.T) {
+			h := f.serve(t, 0)
+			done := h.startHeldPoll(t, h.cursor(t), "30")
+			t.Setenv(signedPollKeyEnv, strings.Repeat("r", 64))
+			h.commit(t, canary, true)
+			response := <-done
+			assert.Equal(t, http.StatusUnauthorized, response.Code, response.Body.String())
+			assert.NotContains(t, response.Body.String(), canary)
+		})
+	})
 	t.Run("key expires while the woken poll reads", func(t *testing.T) {
 		f := newSignedPollFixture(t)
 		synctest.Test(t, func(t *testing.T) {

@@ -404,8 +404,8 @@ func startFederationPollBridge(cfg ServerConfig) func() {
 // holdFederationPoll waits on a caught-up page until the project may have new
 // events or the wait ends. After a wake it authorizes the request again from
 // scratch and reads again, so revocation during the wait still applies. When
-// the wait ends it reports timedOut and returns the page already read; the
-// spoke's next poll authorizes and reads from the same cursor. The hold ends at
+// the wait ends it returns the page already read; the spoke's next poll
+// authorizes and reads from the same cursor. The hold ends at
 // deadline, fixed before the poll's first read, so a slow first read shortens
 // the hold.
 func holdFederationPoll(
@@ -415,26 +415,29 @@ func holdFederationPoll(
 	result db.FederationReadResult,
 	reauthorize func() (context.Context, error),
 	read func(context.Context) (db.FederationReadResult, error),
-) (db.FederationReadResult, bool, bool, error) {
+) (db.FederationReadResult, bool, error) {
 	waited := false
 	for federationPollCaughtUp(result) && time.Now().Before(deadline) {
-		waited = true
 		woke, err := waiter.wait(ctx, deadline)
 		if err != nil {
-			return result, waited, false, fmt.Errorf("held federation poll ended: %w", err)
+			return result, waited, fmt.Errorf("held federation poll ended: %w", err)
 		}
 		if !woke {
-			return result, waited, true, nil
+			break
 		}
 		readCtx, err := reauthorize()
 		if err != nil {
-			return result, waited, false, err
+			return result, waited, err
 		}
 		if result, err = read(readCtx); err != nil {
-			return result, waited, false, err
+			return result, waited, err
 		}
+		waited = true
 	}
-	return result, waited, !waited && federationPollCaughtUp(result), nil
+	if !waited && federationPollCaughtUp(result) {
+		releaseProjectAccess(ctx)
+	}
+	return result, waited, nil
 }
 
 // heldFederationPollAllowed reports whether the hub can authorize a held poll
