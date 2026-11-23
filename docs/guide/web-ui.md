@@ -58,7 +58,9 @@ The sidebar lists **Inbox**, **Today**, **Scheduled**, **Delegated**, **All open
   from the column headers. Choose a project in the **New task** dialog; each
   task uses the choice you make there. The designated
   [Inbox project](../reference/metadata.md#project-inbox-designation) is the
-  initial choice. With no projects, **New task** asks you to create one, makes
+  initial choice. To change it, open the project and choose **Make Inbox…** in
+  its header, then confirm. Existing tasks stay in their projects, including
+  those in the previous Inbox project. With no projects, **New task** asks you to create one, makes
   it Inbox, and opens task capture.
   This is separate from `kata inbox`,
   which reads

@@ -3167,7 +3167,7 @@ describe('App', () => {
     )
   })
 
-  it('sends the visible recurrence revision when deleting', async () => {
+  function recurrenceDeletionSetup() {
     history.replaceState(
       null,
       '',
@@ -3178,7 +3178,7 @@ describe('App', () => {
       JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
     )
     const base = snapshot()
-    const accepted = {
+    return {
       ...base,
       selected: {
         state: 'available',
@@ -3207,11 +3207,26 @@ describe('App', () => {
         history: [],
       },
     }
+  }
+
+  function asRequest(input: RequestInfo | URL, init?: RequestInit): Request {
+    return input instanceof Request
+      ? input
+      : new Request(new URL(String(input), window.location.origin), init)
+  }
+
+  async function stopRepeatingFromHeader(): Promise<HTMLElement> {
+    await fireEvent.click(await screen.findByRole('button', { name: /1 repeating task/ }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Stop repeating…' }))
+    const dialog = screen.getByRole('dialog', { name: 'Stop repeating' })
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Stop repeating' }))
+    return dialog
+  }
+
+  it('sends the visible recurrence revision when deleting', async () => {
+    const accepted = recurrenceDeletionSetup()
     const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const request =
-        input instanceof Request
-          ? input
-          : new Request(new URL(String(input), window.location.origin), init)
+      const request = asRequest(input, init)
       if (request.method === 'DELETE') return new Response(null, { status: 204 })
       if (request.url.endsWith('/api/v1/projects/7/recurrences'))
         return Response.json({ recurrences: accepted.selected.recurrences })
@@ -3223,24 +3238,56 @@ describe('App', () => {
     vi.stubGlobal('fetch', fetcher)
 
     render(App)
-    await fireEvent.click(await screen.findByRole('button', { name: /1 repeating task/ }))
-    await fireEvent.click(screen.getByRole('button', { name: 'Stop repeating…' }))
-    await fireEvent.click(
-      within(screen.getByRole('dialog', { name: 'Stop repeating' })).getByRole('button', {
-        name: 'Stop repeating',
-      }),
-    )
+    await stopRepeatingFromHeader()
 
     await waitFor(() => {
-      const deletion = fetcher.mock.calls
-        .map(([input, init]) =>
-          input instanceof Request
-            ? input
-            : new Request(new URL(String(input), window.location.origin), init),
-        )
-        .find((request) => request.method === 'DELETE')
-      expect(deletion?.headers.get('If-Match')).toBe('"rev-4"')
+      const deletions = fetcher.mock.calls
+        .map(([input, init]) => asRequest(input, init))
+        .filter((request) => request.method === 'DELETE')
+      expect(deletions.map((request) => request.headers.get('If-Match'))).toEqual(['"rev-4"'])
     })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Stop repeating' })).toBeNull())
+  })
+
+  it('keeps a refused stop in its dialog and retries with the refreshed revision', async () => {
+    const accepted = recurrenceDeletionSetup()
+    const rule = accepted.selected.recurrences[0]!
+    const deletions: Array<string | null> = []
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = asRequest(input, init)
+      if (request.method === 'DELETE') {
+        deletions.push(request.headers.get('If-Match'))
+        if (request.headers.get('If-Match') === `"rev-${rule.revision}"`)
+          return new Response(null, { status: 204 })
+        return Response.json(
+          { error: { code: 'revision_conflict', message: 'Recurrence changed' } },
+          { status: 412 },
+        )
+      }
+      if (request.url.endsWith('/api/v1/projects/7/recurrences'))
+        return Response.json({ recurrences: [rule] })
+      return new Response(JSON.stringify(accepted), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', ETag: '"snapshot-1"' },
+      })
+    })
+    vi.stubGlobal('fetch', fetcher)
+
+    render(App)
+    await screen.findByRole('button', { name: /1 repeating task/ })
+    // Another writer edits the rule after this tab loaded it.
+    rule.revision = 5
+    const dialog = await stopRepeatingFromHeader()
+
+    expect((await within(dialog).findByRole('alert')).textContent).toBe(
+      'This rule changed. Review it and try again.',
+    )
+    expect(deletions).toEqual(['"rev-4"'])
+
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Stop repeating' }))
+
+    await waitFor(() => expect(deletions).toEqual(['"rev-4"', '"rev-5"']))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Stop repeating' })).toBeNull())
   })
 
   it('omits a client actor from temporary claims in identity mode', async () => {
