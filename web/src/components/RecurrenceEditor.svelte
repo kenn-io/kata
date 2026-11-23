@@ -74,12 +74,14 @@
   let endDate: string = $state(INITIAL_DTSTART)
   let endCount = $state<number | null>(10)
 
-  const frequencyOptions = [
-    { value: 'DAILY', label: 'Daily' },
-    { value: 'WEEKLY', label: 'Weekly' },
-    { value: 'MONTHLY', label: 'Monthly' },
-    { value: 'YEARLY', label: 'Yearly' },
-  ]
+  let frequencyOptions = $derived(
+    [
+      { value: 'DAILY', label: 'day' },
+      { value: 'WEEKLY', label: 'week' },
+      { value: 'MONTHLY', label: 'month' },
+      { value: 'YEARLY', label: 'year' },
+    ].map((option) => ({ ...option, label: option.label + (interval === 1 ? '' : 's') })),
+  )
   const ordinalOptions = [
     { value: '1', label: '1st' },
     { value: '2', label: '2nd' },
@@ -165,7 +167,11 @@
       owner = issue.issue.owner ?? ''
       priority = issue.issue.priority ?? null
       labelsText = issue.labels.map((label) => label.label).join(', ')
-      const metadata = issue.issue.metadata ?? {}
+      const metadata = Object.fromEntries(
+        Object.entries(issue.issue.metadata ?? {}).filter(
+          ([key]) => key !== 'cron.occurrence' && !key.startsWith('cron.progress.'),
+        ),
+      )
       metadataText = Object.keys(metadata).length > 0 ? JSON.stringify(metadata, null, 2) : ''
     }
   }
@@ -613,6 +619,10 @@
     <div class="submit-error" role="alert">{submitError}</div>
   {/if}
 
+  <label class="row">
+    <span>Title</span>
+    <input type="text" bind:value={title} data-autofocus required />
+  </label>
   <fieldset class="schedule">
     {#if mode_ === 'common'}
       <div class="row">
@@ -782,23 +792,20 @@
             { value: 'count', label: 'After' },
           ]}
         />
-        <DatePicker
-          ariaLabel="End date"
-          value={endDate}
-          disabled={endMode !== 'until'}
-          onchange={(value) => {
-            endDate = value
-          }}
-        />
-        <div class="row">
-          <NumberInput
-            ariaLabel="occurrences"
-            min={1}
-            bind:value={endCount}
-            disabled={endMode !== 'count'}
+        {#if endMode === 'until'}
+          <DatePicker
+            ariaLabel="End date"
+            value={endDate}
+            onchange={(value) => {
+              endDate = value
+            }}
           />
-          <span>occurrences</span>
-        </div>
+        {:else if endMode === 'count'}
+          <div class="row">
+            <NumberInput ariaLabel="occurrences" min={1} bind:value={endCount} />
+            <span>occurrences</span>
+          </div>
+        {/if}
       </div>
     {:else}
       <label class="row">
@@ -815,10 +822,6 @@
   </fieldset>
 
   <fieldset class="template">
-    <label class="row">
-      <span>Title</span>
-      <input type="text" bind:value={title} required />
-    </label>
     <div class="row">
       <span>Owner</span><Typeahead
         title="Owner"

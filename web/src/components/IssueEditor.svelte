@@ -767,6 +767,7 @@
   actor=""
   disabled={actionsDisabled || !administrativeActionsAllowed}
   {draftFenceGeneration}
+  mutationMessage={commentError}
   onCreate={onCreateRecurrence}
   onPatch={onPatchRecurrence}
   onDelete={onDeleteRecurrence}

@@ -5,6 +5,7 @@ import RecurrenceEditorDialog from './RecurrenceEditorDialog.svelte'
 import RecurrenceDeleteDialog from './RecurrenceDeleteDialog.svelte'
 import { ADVANCED_LAST_WEEKDAY } from '../lib/recurrence/__fixtures__/advancedRules'
 import { MONTH_LONG } from '../lib/recurrence/rrule'
+import { recurrence as sample } from '../lib/recurrence/__fixtures__/recurrence'
 import type { KataRecurrence, KataTaskDetail } from '../lib/kata/types'
 
 afterEach(cleanup)
@@ -21,26 +22,6 @@ const createMode = {
   } as unknown as KataTaskDetail,
 } as const
 
-const sample: KataRecurrence = {
-  id: 7,
-  uid: 'rec-uid',
-  project_id: 1,
-  rrule: 'FREQ=WEEKLY;INTERVAL=1;BYDAY=MO',
-  dtstart: '2026-05-20',
-  timezone: 'America/Chicago',
-  template_title: 'Weekly review',
-  template_body: 'Body',
-  template_owner: 'user-a',
-  template_priority: 2,
-  template_labels: ['routine'],
-  template_metadata: { k: 'v' },
-  next_occurrence_key: '2026-05-27',
-  last_materialized_uid: undefined,
-  author: 'user-a',
-  revision: 1,
-  created_at: '2026-05-15T12:00:00.000Z',
-  updated_at: '2026-05-15T12:00:00.000Z',
-}
 const editMode = { kind: 'edit' as const, recurrence: sample, etag: '"rev-1"' }
 
 async function chooseDropdown(title: string, option: string): Promise<void> {
@@ -69,10 +50,17 @@ describe('RecurrenceEditor — Common-mode rendering', () => {
         body: 'Review details',
         owner: 'user-a',
         priority: 2,
-        metadata: { area: 'work', custom: 'value' },
+        metadata: {
+          area: 'work',
+          custom: 'value',
+          'cron.occurrence': { version: 1 },
+          'cron.progress.job': { version: 1 },
+        },
       },
       labels: [{ label: 'routine' }],
-    } as KataTaskDetail
+      comments: [],
+      links: [],
+    } as unknown as KataTaskDetail
     render(RecurrenceEditorDialog, {
       props: {
         open: true,
@@ -91,6 +79,8 @@ describe('RecurrenceEditor — Common-mode rendering', () => {
       '{\n  "area": "work",\n  "custom": "value"\n}',
     )
     await fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(issue.issue.metadata['cron.occurrence']).toEqual({ version: 1 })
+    expect(issue.issue.metadata['cron.progress.job']).toEqual({ version: 1 })
     expect(onCreate).toHaveBeenCalledWith(
       1,
       expect.objectContaining({
@@ -104,6 +94,32 @@ describe('RecurrenceEditor — Common-mode rendering', () => {
         }),
       }),
     )
+  })
+
+  test('focuses the title first and shows only the chosen end field', async () => {
+    render(RecurrenceEditorDialog, {
+      props: {
+        open: true,
+        mode: createMode,
+        actor: 'user-a',
+        onClose: vi.fn(),
+        onCreate: vi.fn(),
+        onPatch: vi.fn(),
+      },
+    })
+    const title = screen.getByLabelText('Title')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(document.activeElement).toBe(title)
+    expect(
+      title.compareDocumentPosition(screen.getByLabelText(/Every/)) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(screen.getByRole('combobox', { name: 'Frequency: week' })).toBeTruthy()
+    expect(screen.queryByLabelText(/^End date:/)).toBeNull()
+    expect(screen.queryByLabelText('occurrences')).toBeNull()
+    await fireEvent.click(screen.getByRole('radio', { name: 'On date' }))
+    expect(screen.getByLabelText(/^End date:/)).toBeTruthy()
+    expect(screen.queryByLabelText('occurrences')).toBeNull()
   })
 
   test('edit preview starts at the live cursor and omits exhausted rules', async () => {
@@ -198,7 +214,7 @@ describe('RecurrenceEditor — Common-mode rendering', () => {
         onSaved: vi.fn(),
       },
     })
-    expectDropdown('Frequency', 'Weekly')
+    expectDropdown('Frequency', 'week')
     const interval = screen.getByLabelText(/Every/i) as HTMLInputElement
     expect(interval.value).toBe('1')
     // Exactly one weekday chip is pre-selected (matches dtstart's weekday)
@@ -218,7 +234,7 @@ describe('RecurrenceEditor — Common-mode rendering', () => {
         onSaved: vi.fn(),
       },
     })
-    await chooseDropdown('Frequency', 'Monthly')
+    await chooseDropdown('Frequency', 'month')
     expect(screen.getByLabelText(/On day/i)).toBeTruthy()
     expect(screen.getByLabelText(/On the/i)).toBeTruthy()
   })
@@ -233,7 +249,7 @@ describe('RecurrenceEditor — Common-mode rendering', () => {
         onSaved: vi.fn(),
       },
     })
-    await chooseDropdown('Frequency', 'Yearly')
+    await chooseDropdown('Frequency', 'year')
     expectDropdown('Month', MONTH_LONG[new Date().getMonth()]!)
   })
 
@@ -254,11 +270,11 @@ describe('RecurrenceEditor — Common-mode rendering', () => {
         onSaved: vi.fn(),
       },
     })
-    await chooseDropdown('Frequency', 'Monthly')
+    await chooseDropdown('Frequency', 'month')
     const lastDay = screen.getByLabelText(/Last day of month/i) as HTMLInputElement
     await fireEvent.click(lastDay)
     expect(lastDay.checked).toBe(true)
-    await chooseDropdown('Frequency', 'Yearly')
+    await chooseDropdown('Frequency', 'year')
     // Click the "On day" radio for yearly mode so the day input becomes
     // the user-active control (the editor leaves yearlyDayMode at
     // "none" by default).
@@ -346,7 +362,7 @@ describe('RecurrenceEditor — Template block + summary', () => {
     })
     const summary = screen.getByTestId('recurrence-summary')
     expect(summary.textContent ?? '').toMatch(/^Weekly on /)
-    await chooseDropdown('Frequency', 'Daily')
+    await chooseDropdown('Frequency', 'day')
     expect(summary.textContent).toBe('Daily')
   })
 
@@ -421,7 +437,7 @@ describe('RecurrenceEditor — mode toggle', () => {
     const textarea = screen.getByLabelText(/RRULE/i) as HTMLTextAreaElement
     await fireEvent.input(textarea, { target: { value: 'FREQ=DAILY;INTERVAL=2' } })
     await fireEvent.click(screen.getByRole('button', { name: /Use the simple form/i }))
-    expectDropdown('Frequency', 'Daily')
+    expectDropdown('Frequency', 'days')
     expect((screen.getByLabelText(/Every/i) as HTMLInputElement).value).toBe('2')
   })
 
@@ -611,7 +627,7 @@ describe('RecurrenceEditor — edit mode prefill', () => {
         onPatch: vi.fn(),
       },
     })
-    expectDropdown('Frequency', 'Weekly')
+    expectDropdown('Frequency', 'week')
     expect((screen.getByLabelText(/Title/i) as HTMLInputElement).value).toBe('Weekly review')
   })
 
@@ -953,7 +969,7 @@ describe('RecurrenceEditor — 412 conflict', () => {
     await fireEvent.input(screen.getByLabelText(/Title/i), { target: { value: 'My edit' } })
     await fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     // After 412 reload: form shows server's DAILY with interval 3.
-    expectDropdown('Frequency', 'Daily')
+    expectDropdown('Frequency', 'days')
     expect((screen.getByLabelText(/Every/i) as HTMLInputElement).value).toBe('3')
   })
 

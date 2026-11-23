@@ -2,11 +2,12 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, expect, it, vi } from 'vitest'
 import ProjectRecurrences from './ProjectRecurrences.svelte'
 import { listRecurrences } from '../lib/api/generated/default/default'
+import { recurrence as sample } from '../lib/recurrence/__fixtures__/recurrence'
 
 const recurrence = {
+  ...sample,
   id: 1,
   uid: 'r1',
-  project_id: 1,
   rrule: 'FREQ=WEEKLY',
   dtstart: '2026-11-22',
   timezone: 'UTC',
@@ -14,10 +15,7 @@ const recurrence = {
   template_body: '',
   template_labels: [],
   template_metadata: {},
-  author: 'user-a',
   revision: 1,
-  created_at: '',
-  updated_at: '',
   next_occurrence_key: '2026-11-29',
 }
 
@@ -229,3 +227,68 @@ it('uses the refreshed snapshot on conflict without listing again', async () => 
   )
   expect(listRecurrences).not.toHaveBeenCalled()
 })
+
+it('explains a rejected stop action and retries with the refreshed rule', async () => {
+  vi.mocked(listRecurrences).mockResolvedValue({
+    status: 200,
+    headers: new Headers(),
+    data: { recurrences: [recurrence] },
+  })
+  const onDelete = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true)
+  const view = render(ProjectRecurrences, {
+    props: {
+      projectID: 1,
+      actor: 'user-a',
+      onCreate: vi.fn(),
+      onPatch: vi.fn(),
+      onDelete,
+      mutationMessage: 'Rule changed on the server.',
+    },
+  })
+  await fireEvent.click(await screen.findByRole('button', { name: /1 repeating task/ }))
+  await fireEvent.click(screen.getByRole('button', { name: 'Stop repeating…' }))
+  const dialog = screen.getByRole('dialog', { name: 'Stop repeating' })
+  await fireEvent.click(within(dialog).getByRole('button', { name: 'Stop repeating' }))
+  expect(within(dialog).getByRole('alert').textContent).toContain('Rule changed on the server.')
+  await view.rerender({ snapshotRecurrences: [{ ...recurrence, revision: 2 }] })
+  await fireEvent.click(within(dialog).getByRole('button', { name: 'Stop repeating' }))
+  expect(onDelete).toHaveBeenLastCalledWith(expect.objectContaining({ revision: 2 }))
+})
+
+it.each(['edit', 'stop'])(
+  'lists rules once per accepted snapshot revision after %s',
+  async (action) => {
+    vi.mocked(listRecurrences).mockResolvedValue({
+      status: 200,
+      headers: new Headers(),
+      data: { recurrences: [recurrence] },
+    })
+    const onPatch = vi.fn(async () => {
+      await view.rerender({ refreshGeneration: 1 })
+    })
+    const onDelete = vi.fn(async () => {
+      await view.rerender({ refreshGeneration: 1 })
+      return true
+    })
+    const view = render(ProjectRecurrences, {
+      props: { projectID: 1, actor: 'user-a', onCreate: vi.fn(), onPatch, onDelete },
+    })
+    await fireEvent.click(await screen.findByRole('button', { name: /1 repeating task/ }))
+    if (action === 'edit') {
+      await fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+      const dialog = screen.getByRole('dialog', { name: 'Edit repeat' })
+      await fireEvent.input(within(dialog).getByLabelText('Title'), {
+        target: { value: 'Changed' },
+      })
+      await fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    } else {
+      await fireEvent.click(screen.getByRole('button', { name: 'Stop repeating…' }))
+      await fireEvent.click(
+        within(screen.getByRole('dialog', { name: 'Stop repeating' })).getByRole('button', {
+          name: 'Stop repeating',
+        }),
+      )
+    }
+    await waitFor(() => expect(listRecurrences).toHaveBeenCalledTimes(2))
+  },
+)

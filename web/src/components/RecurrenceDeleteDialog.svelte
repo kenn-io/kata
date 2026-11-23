@@ -9,11 +9,19 @@
     open: boolean
     recurrence: KataRecurrence
     disabled?: boolean | undefined
+    error?: string | undefined
     onConfirm: () => void
     onCancel: () => void
   }
 
-  let { open, recurrence, disabled = false, onConfirm, onCancel }: Props = $props()
+  let {
+    open,
+    recurrence,
+    disabled = false,
+    error = undefined,
+    onConfirm,
+    onCancel,
+  }: Props = $props()
 
   function handleConfirm(): void {
     if (disabled) return
@@ -25,6 +33,7 @@
   <p class="body">
     <strong>{recurrence.template_title}</strong>
   </p>
+  {#if error}<p class="error" role="alert">{error}</p>{/if}
   <DialogPreview>Tasks it already made stay as they are, open or done.</DialogPreview>
   {#snippet footer()}
     <Button size="sm" label="Cancel" onclick={onCancel} />
@@ -40,6 +49,9 @@
 </Modal>
 
 <style>
+  .error {
+    color: var(--accent-red);
+  }
   .body {
     color: var(--text-primary);
     font-size: var(--font-size-md);

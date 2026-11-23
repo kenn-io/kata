@@ -22,6 +22,7 @@
     actor: string
     ownerOptions?: TypeaheadOption[]
     disabled?: boolean
+    mutationMessage?: string | undefined
     draftFenceGeneration?: number
     snapshotRecurrences?: readonly KataRecurrence[] | undefined
     refreshGeneration?: number
@@ -38,6 +39,7 @@
     actor,
     ownerOptions = [],
     disabled = false,
+    mutationMessage = undefined,
     draftFenceGeneration = 0,
     snapshotRecurrences = undefined,
     refreshGeneration = 0,
@@ -136,7 +138,6 @@
   ): Promise<void> {
     try {
       await onPatch(recurrence, input, etag)
-      if (snapshotRecurrences === undefined) await refresh(projectID)
     } catch (error) {
       if (error instanceof Object && 'status' in error && error.status === 412) {
         const server = (error as { response?: { recurrence?: KataRecurrence } }).response
@@ -151,13 +152,6 @@
         })
       }
       throw error
-    }
-  }
-  async function remove(recurrence: KataRecurrence): Promise<boolean> {
-    try {
-      return await onDelete(recurrence)
-    } finally {
-      if (snapshotRecurrences === undefined) await refresh(projectID)
     }
   }
 </script>
@@ -202,10 +196,11 @@
   {actor}
   {ownerOptions}
   {disabled}
+  {mutationMessage}
   {draftFenceGeneration}
   {onCreate}
   onPatch={patch}
-  onDelete={remove}
+  {onDelete}
 />
 
 <style>

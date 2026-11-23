@@ -16,6 +16,7 @@
     ownerOptions?: TypeaheadOption[] | undefined
     disabled?: boolean | undefined
     draftFenceGeneration?: number | undefined
+    mutationMessage?: string | undefined
     onCreate: (projectID: number, input: KataCreateRecurrenceInput) => Promise<void>
     onPatch: (
       recurrence: KataRecurrence,
@@ -32,6 +33,7 @@
     ownerOptions = [],
     disabled = false,
     draftFenceGeneration = 0,
+    mutationMessage = undefined,
     onCreate,
     onPatch,
     onDelete,
@@ -47,6 +49,7 @@
     recurrence: null,
   })
   let deletingRecurrence = $state(false)
+  let deleteRefused = $state(false)
   let lastDraftFenceGeneration = $state<number | null>(null)
 
   $effect(() => {
@@ -83,6 +86,7 @@
 
   export function openDeleteRecurrence(recurrence: KataRecurrence): void {
     if (disabled) return
+    deleteRefused = false
     recurrenceDelete = { open: true, recurrence }
   }
 
@@ -119,11 +123,14 @@
     const recurrence = recurrenceDelete.recurrence
     if (disabled || !recurrence || deletingRecurrence) return
     deletingRecurrence = true
+    deleteRefused = false
     try {
       const ok = await onDelete(recurrence)
       if (ok) {
         recurrenceDelete = { open: false, recurrence: null }
-      }
+      } else deleteRefused = true
+    } catch {
+      deleteRefused = true
     } finally {
       deletingRecurrence = false
     }
@@ -154,7 +161,8 @@
   <RecurrenceDeleteDialog
     open={recurrenceDelete.open}
     recurrence={recurrenceDelete.recurrence}
-    {disabled}
+    disabled={disabled || deletingRecurrence}
+    error={deleteRefused ? (mutationMessage ?? 'Could not stop repeating. Try again.') : undefined}
     onConfirm={() => {
       void confirmDeleteRecurrence()
     }}

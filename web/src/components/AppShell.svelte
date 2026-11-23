@@ -942,6 +942,7 @@
               {ownerOptions}
               disabled={!projectWideMutationAllowed || mutationPending}
               {draftFenceGeneration}
+              {mutationMessage}
               snapshotRecurrences={snapshot.selected?.state === 'available' &&
               snapshot.selected.issue?.project_id === selectedProject.id
                 ? snapshot.selected.recurrences
