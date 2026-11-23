@@ -16,7 +16,7 @@ import (
 type heldAnswerBeforeStart struct{ db.Storage }
 
 func (s heldAnswerBeforeStart) RecordFederationSyncPullStarted(ctx context.Context, projectID int64, at time.Time) error {
-	if err := s.Storage.RecordFederationHeldPullSuccess(ctx, projectID, at.Add(time.Second)); err != nil {
+	if err := s.RecordFederationHeldPullSuccess(ctx, projectID, at.Add(time.Second)); err != nil {
 		return err
 	}
 	return s.Storage.RecordFederationSyncPullStarted(ctx, projectID, at)
@@ -52,7 +52,7 @@ func (s leaveAfterStart) RecordFederationSyncPullStarted(ctx context.Context, pr
 	if err := s.Storage.RecordFederationSyncPullStarted(ctx, projectID, at); err != nil {
 		return err
 	}
-	_, err := s.Storage.LeaveFederationReplica(ctx, projectID)
+	_, err := s.LeaveFederationReplica(ctx, projectID)
 	return err
 }
 
