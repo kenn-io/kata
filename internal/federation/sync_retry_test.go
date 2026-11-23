@@ -288,4 +288,6 @@ func TestHeldRetrySurvivesEarlierSyncSuccess(t *testing.T) {
 	retries.recordSchedule(1, [32]byte{}, [32]byte{}, false, nil, time.Second, at.Add(time.Second), &started, time.Time{})
 	binding.UpdatedAt, binding.LastSyncAt = at, &at
 	require.True(t, retries.blockedFor(t.Context(), 1, binding, credential, at.Add(time.Second), retries.version(1)))
+	binding.UpdatedAt, binding.LastSyncAt = at.Add(2*time.Second), nil
+	require.False(t, retries.blockedFor(t.Context(), 1, binding, credential, at.Add(2*time.Second), retries.version(1)), "a changed binding must retry at once")
 }

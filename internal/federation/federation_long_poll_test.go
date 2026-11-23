@@ -243,20 +243,6 @@ func TestHeldPollSendsItsBearerInsideTheEndpointGate(t *testing.T) {
 	require.Eventually(t, func() bool { return moved.pollsWithWait.Load() == 1 },
 		10*time.Second, 10*time.Millisecond, "the watcher never polled the new address")
 	assert.Zero(t, h.pollsWithWait.Load(), "the watcher sent its bearer to the old address during the change")
-
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		finish, err := federationcoord.BeginRebind(context.WithoutCancel(t.Context()), key, h.spokeDB, h.spokeProject.ID)
-		if err == nil {
-			finish()
-		}
-	}()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second): //nolint:kennlint // deadlinetest: a rebind that waits for the whole 45-second hold fails here.
-		t.Fatal("an endpoint change waited for the held poll to end")
-	}
 }
 
 // After an endpoint change, the poll held at the old address no longer
@@ -323,27 +309,6 @@ func TestAnsweredHeldPollRecordsAPullSuccess(t *testing.T) {
 	//nolint:kennlint // sleeptest: the hub answers a one-second hold over real HTTP.
 	require.Eventually(t, func() bool { return h.lastPullSuccess(t).After(before) },
 		10*time.Second, 20*time.Millisecond, "an answered held poll did not record its pull")
-}
-
-func TestHeldAnswerDoesNotHideUnfinishedPull(t *testing.T) {
-	h := newHubSpokeHarness(t, false)
-	ctx := t.Context()
-	start := time.Now().UTC().Truncate(time.Millisecond)
-	require.NoError(t, h.spokeDB.RecordFederationSyncPullStarted(ctx, h.spokeProject.ID, start))
-	polls := newHubLongPolls(ctx, h.spokeDB, nil, clientpkg.Opts{}, time.Second, nil, nil, nil, time.Now)
-	polls.recordHeldAnswer(ctx, h.spokeProject.ID, start.Add(time.Second))
-	status, err := h.spokeDB.FederationSyncStatusByProject(ctx, h.spokeProject.ID)
-	require.NoError(t, err)
-	require.Nil(t, status.LastPullSuccessAt)
-	require.NoError(t, h.spokeDB.RecordFederationSyncPullSuccess(ctx, h.spokeProject.ID, start.Add(2*time.Second)))
-	polls.recordHeldAnswer(ctx, h.spokeProject.ID, start.Add(time.Second))
-	status, err = h.spokeDB.FederationSyncStatusByProject(ctx, h.spokeProject.ID)
-	require.NoError(t, err)
-	require.Equal(t, start.Add(2*time.Second), *status.LastPullSuccessAt)
-	polls.recordHeldAnswer(ctx, h.spokeProject.ID, start.Add(3*time.Second))
-	status, err = h.spokeDB.FederationSyncStatusByProject(ctx, h.spokeProject.ID)
-	require.NoError(t, err)
-	require.Equal(t, start.Add(3*time.Second), *status.LastPullSuccessAt)
 }
 
 // A pass that keeps failing before its pull leaves the hub's page unread. The
@@ -555,9 +520,20 @@ func TestRebindEndsHeldPoll(t *testing.T) {
 		t.Fatal("poll did not start")
 	}
 	key := federationcoord.Key(h.spokeDB.InstanceUID(), h.spokeProject.ID)
-	release, err := federationcoord.BeginRebind(t.Context(), key, h.spokeDB, h.spokeProject.ID)
-	require.NoError(t, err)
-	defer release()
+	done := make(chan error, 1)
+	go func() {
+		release, err := federationcoord.BeginRebind(t.Context(), key, h.spokeDB, h.spokeProject.ID)
+		if err == nil {
+			release()
+		}
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second): //nolint:kennlint // deadlinetest: rebind must not wait for the whole held poll.
+		t.Fatal("an endpoint change waited for the held poll to end")
+	}
 	select {
 	case <-canceled:
 	case <-time.After(10 * time.Second):

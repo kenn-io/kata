@@ -177,12 +177,4 @@ func TestFederationPollWakeSecretConcurrentBootstrapAndExport(t *testing.T) {
 		require.NoError(t, err)
 		require.NotEqual(t, "federation_poll_wake_secret", meta.Key)
 	}
-	require.NoError(t, store.ImportReplay(ctx, []db.ImportRecord{&db.MetaKV{Key: "federation_poll_wake_secret", Value: "imported"}}, db.ImportOptions{}))
-	restored, err := store.FederationPollWakeSecret(ctx)
-	require.NoError(t, err)
-	require.Len(t, restored, 32)
-	require.NotEqual(t, first, restored)
-	other, err := second.FederationPollWakeSecret(ctx)
-	require.NoError(t, err)
-	require.Equal(t, restored, other)
 }

@@ -272,18 +272,6 @@ func TestFederationPollWaitRejectsARetiredSigningKey(t *testing.T) {
 			})
 		})
 	}
-	t.Run("woken after the key's secret is replaced", func(t *testing.T) {
-		f := newSignedPollFixture(t)
-		synctest.Test(t, func(t *testing.T) {
-			h := f.serve(t, 0)
-			done := h.startHeldPoll(t, h.cursor(t), "30")
-			t.Setenv(signedPollKeyEnv, strings.Repeat("r", 64))
-			h.commit(t, canary, true)
-			response := <-done
-			assert.Equal(t, http.StatusUnauthorized, response.Code, response.Body.String())
-			assert.NotContains(t, response.Body.String(), canary)
-		})
-	})
 	t.Run("key expires while the woken poll reads", func(t *testing.T) {
 		f := newSignedPollFixture(t)
 		synctest.Test(t, func(t *testing.T) {

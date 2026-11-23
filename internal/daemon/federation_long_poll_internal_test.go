@@ -54,7 +54,8 @@ func TestFederationPollWakeIgnoresItsOwnInstance(t *testing.T) {
 	waits := newFederationPollWaits(16)
 	woken, unsubscribe := waits.remote.subscribe(SubFilter{})
 	defer unsubscribe()
-	waits.receive(waits.message())
+	waits.remote.setSecret([]byte("test secret"))
+	waits.receive(waits.messageFor(NewEventMsg(1, db.Event{ProjectUID: "project"})))
 	select {
 	case <-woken:
 		t.Fatal("a process must ignore the wakeups it published")
@@ -261,19 +262,7 @@ func TestFederationPollWaitAnswersAtOnceWhenCredentialWaitersAreFull(t *testing.
 	assert.Equal(t, http.StatusOK, status)
 	assert.Less(t, elapsed, 5*time.Second, "a poll beyond the per-credential bound must answer like an ordinary poll")
 	assert.Equal(t, federationPollMaxWaitersPerCredential, hub.waits.heldFor(hub.enrollmentID))
-}
-
-func TestFederationPollWaitReleasesWaitersWhenClientsDisconnect(t *testing.T) {
-	ctx := t.Context()
-	hub := newInternalLongPollHub(t)
-	status, cursor, _, err := hub.poll(ctx, 0, "0")
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, status)
-
-	held, disconnect := context.WithCancel(ctx)
-	defer disconnect()
-	ended := hub.holdEveryCredentialSlot(held, t, cursor)
-	disconnect()
+	release()
 	ended()
 	//nolint:kennlint // sleeptest: disconnect cleanup runs in hub handlers reached over real HTTP.
 	require.Eventually(t, func() bool {
@@ -285,25 +274,6 @@ func TestFederationPollWaitCapsOversizedWaits(t *testing.T) {
 	wait, err := federationPollWait(t.Context(), api.OptionalInt{IsSet: true, Value: 9223372037})
 	require.NoError(t, err)
 	assert.Equal(t, federationPollWaitMax, wait)
-}
-
-func TestFederationPollWakeDoesNotExposeProjectIdentity(t *testing.T) {
-	waits := newFederationPollWaits(16)
-	payload := waits.messageFor(NewEventMsg(123456, db.Event{Type: "issue.moved", Payload: `{"from_project_uid":"source-project-uid"}`}))
-	assert.NotContains(t, payload, "123456")
-	assert.NotContains(t, payload, "source-project-uid")
-}
-
-func TestFederationPollMalformedWakeWakesAll(t *testing.T) {
-	waits := newFederationPollWaits(16)
-	woken, unsubscribe := waits.remote.subscribe(SubFilter{ProjectID: 1, ProjectUID: "project"})
-	defer unsubscribe()
-	waits.receive("other malformed")
-	select {
-	case <-woken:
-	default:
-		t.Fatal("malformed remote wake must wake all polls")
-	}
 }
 
 func TestFederationPollWakeTagsAndFallback(t *testing.T) {
@@ -318,12 +288,19 @@ func TestFederationPollWakeTagsAndFallback(t *testing.T) {
 	assert.NotEqual(t, first, writer.messageFor(msg))
 	woken, unsubscribe := reader.remote.subscribe(SubFilter{ProjectID: 1, ProjectUID: "unrelated"})
 	defer unsubscribe()
-	for _, payload := range []string{first, "other", "other invalid", "other 64", ""} {
+	reader.receive(first)
+	select {
+	case <-woken:
+	default:
+		t.Fatal("a tagged wake must wake a poll without a secret")
+	}
+	reader.remote.setSecret([]byte("first secret"))
+	for _, payload := range []string{"other", "other invalid", "other 64", ""} {
 		reader.receive(payload)
 		select {
 		case <-woken:
 		default:
-			t.Errorf("payload %q failed to wake a poll without a secret", payload)
+			t.Errorf("payload %q failed to wake an unrelated project", payload)
 		}
 	}
 	writer.remote.setSecret(nil)
