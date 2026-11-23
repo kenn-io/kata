@@ -33,6 +33,73 @@ func checkFederatedOvertakenMoveSourceLeave(t *testing.T, _ db.Storage, backend 
 		}
 		return hub, spoke, remote, local
 	}
+	for _, sourceFirst := range []bool{true, false} {
+		name := "destination first"
+		if sourceFirst {
+			name = "source first"
+		}
+		t.Run("held edit survives both resets/"+name, func(t *testing.T) {
+			ctx := t.Context()
+			hub, spoke, remote, local := overtakenMoveSpoke(t, 2, "reset-source", "reset-destination", "reset-absent")
+			for _, project := range remote {
+				for range 3 {
+					_, _, err := hub.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "unrelated issue", Author: "worker"})
+					require.NoError(t, err)
+				}
+			}
+			issue, creation, err := hub.CreateIssue(ctx, db.CreateIssueParams{ProjectID: remote[0].ID, Title: "held edit", Author: "worker"})
+			require.NoError(t, err)
+			_, err = spoke.InsertRemoteEvents(ctx, local[0].ID, []db.RemoteEvent{portableNativeEvent(creation)})
+			require.NoError(t, err)
+			require.NoError(t, spoke.MaterializeFederatedProject(ctx, local[0].ID))
+			localIssue, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			_, comment, err := spoke.CreateComment(ctx, db.CreateCommentParams{IssueID: localIssue.ID, Author: "worker", Body: "held comment"})
+			require.NoError(t, err)
+			away, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: remote[0].ID, ToProjectID: remote[2].ID, IfMatchRev: issue.Revision, Actor: "worker"})
+			require.NoError(t, err)
+			_, err = spoke.InsertRemoteEvents(ctx, local[0].ID, []db.RemoteEvent{portableNativeEvent(*away.Event)})
+			require.NoError(t, err)
+			require.NoError(t, spoke.MaterializeFederatedProject(ctx, local[0].ID))
+			back, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: remote[2].ID, ToProjectID: remote[1].ID, IfMatchRev: away.Issue.Revision, Actor: "worker"})
+			require.NoError(t, err)
+			resetSource := func() { require.NoError(t, spoke.ResetFederatedProject(ctx, local[0].ID, 0, 0)) }
+			resetDestination := func() {
+				require.NoError(t, spoke.ResetFederatedProjectIfNoPendingPush(ctx, local[1].ID, 0, 0, spoke.InstanceUID(), 0))
+			}
+			if sourceFirst {
+				resetSource()
+				resetDestination()
+			} else {
+				resetDestination()
+				resetSource()
+			}
+			_, err = spoke.InsertRemoteEvents(ctx, local[1].ID, []db.RemoteEvent{portableNativeEvent(creation), portableNativeEvent(*away.Event), portableNativeEvent(*back.Event)})
+			require.NoError(t, err)
+			require.NoError(t, spoke.MaterializeFederatedProject(ctx, local[1].ID))
+			replayed, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			require.Equal(t, local[1].ID, replayed.ProjectID)
+			pending, err := spoke.PendingFederationPushEvents(ctx, local[0].ID, spoke.InstanceUID(), 0, 100)
+			require.NoError(t, err)
+			require.Len(t, pending, 1)
+			require.Equal(t, comment.UID, pending[0].UID)
+			require.Equal(t, comment.ContentHash, pending[0].ContentHash)
+			_, err = hub.IngestFederationEvents(ctx, db.FederationIngestParams{ProjectID: remote[0].ID, SpokeInstanceUID: spoke.InstanceUID(), BoundActor: "worker", EventFeatures: db.SupportedEventFeatures, Events: []db.FederationIngestEvent{{SourceEventID: pending[0].ID, Event: portableNativeEvent(pending[0])}}})
+			require.NoError(t, err)
+			settled, err := hub.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			require.Equal(t, remote[1].ID, settled.ProjectID)
+			comments, err := hub.CommentsByIssue(ctx, settled.ID)
+			require.NoError(t, err)
+			require.Len(t, comments, 1)
+			require.Equal(t, "held comment", comments[0].Body)
+			events, err := hub.EventsByUIDs(ctx, remote[0].ID, []string{comment.UID})
+			require.NoError(t, err)
+			require.Len(t, events, 1)
+			require.Equal(t, comment.ContentHash, events[0].ContentHash)
+		})
+	}
 	t.Run("held cursor lifecycle/rejoin", func(t *testing.T) {
 		ctx := t.Context()
 		hub, spoke, remote, local := overtakenMoveSpoke(t, 2, "cursor-source", "cursor-destination", "cursor-absent")
