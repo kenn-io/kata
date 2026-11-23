@@ -206,8 +206,11 @@ func previewRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.Recur
 		if in.Timezone == "Local" {
 			return nil, api.NewError(400, "validation", "timezone: Local depends on the daemon host; use an IANA time zone such as America/New_York or UTC", "", nil)
 		}
-		next, err := db.ValidateRecurrenceCore(in.RRule, in.DTStart, in.Timezone)
+		next, err := db.ValidateRecurrenceCoreContext(ctx, in.RRule, in.DTStart, in.Timezone)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			return nil, api.NewError(400, "validation", err.Error(), "", nil)
 		}
 		out := &api.RecurrencePreviewResponse{}
@@ -217,10 +220,16 @@ func previewRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.Recur
 			if len(out.Body.Dates) == 4 {
 				break
 			}
-			next, err = recurrence.Walk(in.RRule, in.DTStart, in.Timezone, *next)
+			next, err = recurrence.WalkContext(ctx, in.RRule, in.DTStart, in.Timezone, *next)
 			if err != nil {
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
 				return nil, api.NewError(400, "validation", err.Error(), "", nil)
 			}
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
 		return out, nil
 	}

@@ -338,3 +338,38 @@ it('retries a failed stop reload before sending a new revision', async () => {
     expect(onDelete).toHaveBeenLastCalledWith(expect.objectContaining({ revision: 2 })),
   )
 })
+
+it('uses the newer snapshot when it supersedes a conflict reload', async () => {
+  let finish!: (result: Awaited<ReturnType<typeof listRecurrences>>) => void
+  vi.mocked(listRecurrences).mockImplementationOnce(
+    () => new Promise((resolve) => (finish = resolve)),
+  )
+  const onPatch = vi.fn().mockRejectedValue({ status: 412 })
+  const view = render(ProjectRecurrences, {
+    props: {
+      projectID: 1,
+      actor: 'user-a',
+      snapshotRecurrences: [recurrence],
+      onCreate: vi.fn(),
+      onPatch,
+      onDelete: vi.fn(),
+    },
+  })
+  await fireEvent.click(await screen.findByRole('button', { name: /1 repeating task/ }))
+  await fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+  const dialog = screen.getByRole('dialog', { name: 'Edit repeat' })
+  await fireEvent.input(within(dialog).getByLabelText('Title'), { target: { value: 'Draft' } })
+  await fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(listRecurrences).toHaveBeenCalledTimes(1))
+  await view.rerender({
+    snapshotRecurrences: [{ ...recurrence, revision: 3, template_title: 'Newest' }],
+  })
+  finish({
+    status: 200,
+    headers: new Headers(),
+    data: { recurrences: [{ ...recurrence, revision: 2, template_title: 'Older' }] },
+  })
+  await waitFor(() =>
+    expect((within(dialog).getByLabelText('Title') as HTMLInputElement).value).toBe('Newest'),
+  )
+})

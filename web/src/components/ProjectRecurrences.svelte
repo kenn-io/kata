@@ -60,6 +60,7 @@
       }
     | undefined = $state()
   let generation = 0
+  let acceptedGeneration = 0
   let reloadNeeded = false
 
   async function refresh(id: number): Promise<KataRecurrence[] | null> {
@@ -72,8 +73,10 @@
       if (current === generation) {
         recurrences = loaded
         readError = false
+        acceptedGeneration = current
+        return loaded
       }
-      return loaded
+      return acceptedGeneration > current ? recurrences : null
     } catch {
       if (current === generation) readError = true
       return null
@@ -84,6 +87,7 @@
     void refreshGeneration
     if (snapshotRecurrences !== undefined) {
       recurrences = [...snapshotRecurrences]
+      acceptedGeneration = generation
       readError = false
     } else void refresh(id)
     return () => {
