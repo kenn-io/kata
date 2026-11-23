@@ -39,6 +39,51 @@ func TestRetainedLinkPeersSkipsOrdinaryBinding(t *testing.T) {
 	require.Zero(t, store.calls)
 }
 
+func TestRejoinRecoveredSnapshotPublishesReplyParent(t *testing.T) {
+	for _, known := range []bool{true, false} {
+		name := "known parent task"
+		if !known {
+			name = "unpublished parent task"
+		}
+		t.Run(name, func(t *testing.T) { checkRejoinRecoveredReplyParent(t, known) })
+	}
+}
+
+func checkRejoinRecoveredReplyParent(t *testing.T, known bool) {
+	t.Helper()
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "reply-project")
+	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
+	parentIssue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "parent task", Author: "old-actor"})
+	require.NoError(t, err)
+	if known {
+		require.NoError(t, spoke.sync(t, 0))
+	}
+	issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "reply task", Author: "old-actor"})
+	require.NoError(t, err)
+	parent, _, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: parentIssue.ID, Author: "old-actor", Body: "parent"})
+	require.NoError(t, err)
+	reply, _, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "reply", ReplyToUID: parent.UID, ReplyKind: "reply"})
+	require.NoError(t, err)
+	rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
+	_, err = spoke.env.DB.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "new-actor", Patch: map[string]jsontext.Value{"area": jsontext.Value(`"api"`)}})
+	require.NoError(t, err)
+	require.NoError(t, spoke.sync(t, 0))
+	remoteParent, err := hub.DB.IssueByUID(ctx, parentIssue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	parents, err := hub.DB.CommentsByIssue(ctx, remoteParent.ID)
+	require.NoError(t, err)
+	require.Len(t, parents, 1)
+	require.Equal(t, parent.UID, parents[0].UID)
+	remoteReply, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	replies, err := hub.DB.CommentsByIssue(ctx, remoteReply.ID)
+	require.NoError(t, err)
+	require.Len(t, replies, 1)
+	require.Equal(t, reply.UID, replies[0].UID)
+	require.Equal(t, parent.UID, replies[0].ReplyToUID)
+}
+
 func TestRejoinRetainedHistory(t *testing.T) {
 	for _, edited := range []bool{false, true} {
 		name := "new reply"

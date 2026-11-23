@@ -441,26 +441,46 @@ func publishRetainedComments(ctx context.Context, store db.Storage, binding *db.
 		return false, nil
 	}
 	for _, event := range batch {
-		if event.Type != "issue.comment_edited" && event.Type != "issue.commented" {
-			continue
+		comments, err := retainedCommentReferences(event)
+		if err != nil {
+			return false, err
 		}
+		for _, commentUID := range comments {
+			retired, err := publish(commentUID)
+			if err != nil || retired {
+				return retired, err
+			}
+		}
+	}
+	return false, nil
+}
+
+func retainedCommentReferences(event db.Event) ([]string, error) {
+	switch event.Type {
+	case "issue.snapshot":
+		var document db.IssueDocumentPayload
+		if err := json.Unmarshal([]byte(event.Payload), &document); err != nil {
+			return nil, err
+		}
+		var references []string
+		for _, comment := range document.Comments {
+			references = append(references, comment.ReplyToUID)
+		}
+		return references, nil
+	case "issue.commented", "issue.comment_edited":
 		var payload struct {
 			CommentUID string `json:"comment_uid"`
 			ReplyToUID string `json:"reply_to_uid"`
 		}
 		if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
-			return false, err
+			return nil, err
 		}
-		commentUID := payload.ReplyToUID
 		if event.Type == "issue.comment_edited" {
-			commentUID = payload.CommentUID
+			return []string{payload.CommentUID}, nil
 		}
-		retired, err := publish(commentUID)
-		if err != nil || retired {
-			return retired, err
-		}
+		return []string{payload.ReplyToUID}, nil
 	}
-	return false, nil
+	return nil, nil
 }
 
 func publishRetainedLinkPeers(ctx context.Context, store db.Storage, binding *db.FederationBinding, hubProjectID int64, client *Client, batch []db.Event, sent map[string]bool, onPulledEvents func(int64, []db.Event), validateLease func(context.Context) error, credentials config.FederationCredentialStore, opts clientpkg.Opts) (bool, error) {

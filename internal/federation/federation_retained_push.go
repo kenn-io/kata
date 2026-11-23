@@ -65,15 +65,20 @@ func (r *retainedPush) nextBatch(ctx context.Context, pending *[]db.Event) ([]db
 	if len(batch) == 0 {
 		return nil, "", 0, errors.New("empty federation push batch")
 	}
-	retired, err := publishRetainedComments(ctx, r.store, r.binding, r.hubProjectID, r.client, batch, r.sent, r.onPulled, r.validateLease, r.credentials, r.opts)
-	if err == nil && !retired {
-		retired, err = publishRetainedLinkPeers(ctx, r.store, r.binding, r.hubProjectID, r.client, batch, r.sent, r.onPulled, r.validateLease, r.credentials, r.opts)
-	}
+	retired, err := r.publishDependencies(ctx, batch)
 	if err != nil || retired {
 		*pending = []db.Event{}
 		return nil, "", 0, err
 	}
 	return batch, baseline, baselineEnd, nil
+}
+
+func (r *retainedPush) publishDependencies(ctx context.Context, batch []db.Event) (bool, error) {
+	retired, err := publishRetainedComments(ctx, r.store, r.binding, r.hubProjectID, r.client, batch, r.sent, r.onPulled, r.validateLease, r.credentials, r.opts)
+	if err != nil || retired {
+		return retired, err
+	}
+	return publishRetainedLinkPeers(ctx, r.store, r.binding, r.hubProjectID, r.client, batch, r.sent, r.onPulled, r.validateLease, r.credentials, r.opts)
 }
 
 // advance moves the push cursor past the first n pending events.
@@ -152,7 +157,7 @@ func (r *retainedPush) resolve(ctx context.Context, pending *[]db.Event, batch [
 	if err != nil {
 		return false, err
 	}
-	retired, err := publishRetainedLinkPeers(ctx, r.store, r.binding, r.hubProjectID, r.client, []db.Event{snapshot}, r.sent, r.onPulled, r.validateLease, r.credentials, r.opts)
+	retired, err := r.publishDependencies(ctx, []db.Event{snapshot})
 	if err != nil || retired {
 		*pending = []db.Event{}
 		return retired, err
