@@ -179,7 +179,7 @@ func (s *Store) leaveFederationReplica(ctx context.Context, projectID int64, dis
 		if err := db.ClearFederationProjectIdentityDependencies(ctx, tx, project.UID); err != nil {
 			return mapSQLError(err, nil)
 		}
-		if err := db.RetainFederationHeldCursor(ctx, tx, projectID, project.UID); err != nil {
+		if err := db.RetainFederationHeldCursor(ctx, tx, projectID, project.UID, s.InstanceUID()); err != nil {
 			return mapSQLError(err, nil)
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=$1`, db.FederationLeaveFencePrefix+project.UID); err != nil {

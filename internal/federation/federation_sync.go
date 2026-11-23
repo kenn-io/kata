@@ -332,7 +332,7 @@ func pushDirectSpoke(
 							refused = err
 						}
 						pending = pending[1:]
-						single = true
+						single = false
 						continue
 					}
 					if refused != nil {
@@ -361,8 +361,16 @@ func pushDirectSpoke(
 					return err
 				}
 				if refused != nil {
-					// Retry these accepted events on the next pass until the earlier
-					// refusal clears and the contiguous cursor can advance.
+					uids := make([]string, 0, len(batch))
+					for _, event := range batch {
+						if event.ID <= ack.PushCursorEventID {
+							uids = append(uids, event.UID)
+						}
+					}
+					if err := store.RecordFederationAcceptedEvents(ctx, binding.ProjectID, uids); err != nil {
+						return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+					}
+					single = false
 					pending = pendingFederationEventsAfterCursor(pending, ack.PushCursorEventID)
 					continue
 				}
@@ -385,12 +393,16 @@ func pushDirectSpoke(
 					}
 				}
 				binding.PushCursorEventID = ack.PushCursorEventID
+				single = false
 				pending = pendingFederationEventsAfterCursor(pending, ack.PushCursorEventID)
 			}
 			scanCursor = pageEnd
 		}
 		if refused != nil {
 			return recordFederationSyncError(ctx, store, binding.ProjectID, refused)
+		}
+		if err := store.RecordFederationAcceptedEvents(ctx, binding.ProjectID, nil); err != nil {
+			return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 		}
 		if err := store.RecordFederationSyncPushSuccess(ctx, binding.ProjectID, time.Now().UTC()); err != nil {
 			return err

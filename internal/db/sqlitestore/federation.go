@@ -663,7 +663,7 @@ func (d *Store) leaveFederationReplica(ctx context.Context, projectID int64, dis
 	if err := db.ClearFederationProjectIdentityDependencies(ctx, tx, uid); err != nil {
 		return db.LeaveFederationResult{}, fmt.Errorf("clear former project identity dependencies: %w", err)
 	}
-	if err := db.RetainFederationHeldCursor(ctx, tx, projectID, uid); err != nil {
+	if err := db.RetainFederationHeldCursor(ctx, tx, projectID, uid, d.InstanceUID()); err != nil {
 		return db.LeaveFederationResult{}, fmt.Errorf("retain held federation cursor: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=?`, db.FederationLeaveFencePrefix+uid); err != nil {
@@ -1465,10 +1465,10 @@ func (d *Store) resetFederatedProject(ctx context.Context, projectID, replayHori
 	if err := rejectLegacyFederationResetTx(ctx, tx, projectID); err != nil {
 		return err
 	}
-	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID, d.instanceUID); err != nil {
+	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID, d.instanceUID, false); err != nil {
 		return err
 	}
-	if err := db.ClearFederatedProjectEvents(ctx, tx, projectID, d.instanceUID); err != nil {
+	if err := db.ClearFederatedProjectEvents(ctx, tx, projectID, d.instanceUID, false); err != nil {
 		return fmt.Errorf("clear federated events: %w", err)
 	}
 	if err := clearFederatedProjection(ctx, tx, projectID); err != nil {

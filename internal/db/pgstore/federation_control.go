@@ -238,6 +238,15 @@ func (s *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCu
 	})
 }
 
+func (s *Store) RecordFederationAcceptedEvents(ctx context.Context, projectID int64, uids []string) error {
+	return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		if err := db.RecordFederationAcknowledgedEvents(ctx, tx, projectID, uids); err != nil {
+			return err
+		}
+		return db.FoldFederationAcknowledgedEvents(ctx, tx, projectID, s.InstanceUID())
+	})
+}
+
 // AdvanceFederationPushCursor advances the acknowledged local event id monotonically.
 func (s *Store) AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error {
 	return s.updateFederationCursor(ctx, projectID, nextCursor, true)
@@ -378,7 +387,7 @@ func pgFederationReplicaSettledTx(ctx context.Context, tx *sql.Tx, binding db.Fe
 	if binding.PushEnabled {
 		var pending bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM events e
-WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND `+pgFederationPushEventTypeCondition("e.type")+`)`,
+WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND `+db.FederationUnresolvedEventSQL("e")+`)`,
 			binding.ProjectID, originInstanceUID, binding.PushCursorEventID).Scan(&pending); err != nil {
 			return mapSQLError(err, nil)
 		}
