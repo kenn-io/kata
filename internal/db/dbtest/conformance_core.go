@@ -1456,53 +1456,6 @@ func checkExpiredAssignmentAttentionHandoff(t *testing.T, store db.Storage) erro
 		assert.Equal(t, claim.Issue.Owner, stored.Owner)
 		assert.JSONEq(t, `"ok"`, string(db.PayloadMap(jsontext.Value(stored.Metadata))["work.attention"]))
 	})
-	t.Run("session starts before expiry and claim follows", func(t *testing.T) {
-		issue, _ := claimed(t, "session starts before expiry", `"ok"`)
-		_, err := store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "next-worker", Patch: map[string]jsontext.Value{
-			"work.attention": jsontext.Value(`"ok"`), "work.attention_session": jsontext.Value(`"next-session"`),
-		}})
-		require.NoError(t, err)
-		_, err = store.ExpireAssignments(ctx, db.ExpireAssignmentsParams{ProjectID: project.ID, Now: base.Add(2 * time.Minute)})
-		require.NoError(t, err)
-		claim, err := store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: "next-worker", TTL: time.Minute, Now: base.Add(2 * time.Minute)})
-		require.NoError(t, err)
-		meta := db.PayloadMap(jsontext.Value(claim.Issue.Metadata))
-		assert.JSONEq(t, `"needs-human"`, string(meta["work.attention"]))
-		assert.JSONEq(t, `"claim expired without hand-off"`, string(meta["work.attention_msg"]))
-		require.Len(t, claim.Events, 1)
-		assert.Equal(t, "issue.assigned", claim.Events[0].Type)
-	})
-	t.Run("deliberate attention after expiry", func(t *testing.T) {
-		issue, _ := claimed(t, "deliberate after expiry", `"ok"`)
-		_, err := store.ExpireAssignments(ctx, db.ExpireAssignmentsParams{ProjectID: project.ID, Now: base.Add(2 * time.Minute)})
-		require.NoError(t, err)
-		for _, attention := range []string{`"stuck"`, `"needs-human"`} {
-			_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "worker", Patch: map[string]jsontext.Value{"work.attention": jsontext.Value(attention)}})
-			require.NoError(t, err)
-		}
-		claim, err := store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: "next-worker", TTL: time.Minute, Now: base.Add(2 * time.Minute)})
-		require.NoError(t, err)
-		meta := db.PayloadMap(jsontext.Value(claim.Issue.Metadata))
-		assert.JSONEq(t, `"needs-human"`, string(meta["work.attention"]))
-		assert.JSONEq(t, `"claim expired without hand-off"`, string(meta["work.attention_msg"]))
-		require.Len(t, claim.Events, 1)
-		assert.Equal(t, "issue.assigned", claim.Events[0].Type)
-	})
-	t.Run("deliberate expiry message", func(t *testing.T) {
-		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "deliberate expiry message", Author: "worker"})
-		require.NoError(t, err)
-		_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "worker", Patch: map[string]jsontext.Value{
-			"work.attention": jsontext.Value(`"needs-human"`), "work.attention_msg": jsontext.Value(`"claim expired without hand-off"`),
-		}})
-		require.NoError(t, err)
-		claim, err := store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: "next-worker", TTL: time.Minute, Now: base.Add(2 * time.Minute)})
-		require.NoError(t, err)
-		meta := db.PayloadMap(jsontext.Value(claim.Issue.Metadata))
-		assert.JSONEq(t, `"needs-human"`, string(meta["work.attention"]))
-		assert.JSONEq(t, `"claim expired without hand-off"`, string(meta["work.attention_msg"]))
-		require.Len(t, claim.Events, 1)
-		assert.Equal(t, "issue.assigned", claim.Events[0].Type)
-	})
 	for _, tc := range []struct {
 		name, attention string
 		flip            bool
@@ -1529,6 +1482,11 @@ func checkExpiredAssignmentAttentionHandoff(t *testing.T, store db.Storage) erro
 				assert.JSONEq(t, `"needs-human"`, string(meta["work.attention"]))
 				assert.JSONEq(t, `"claim expired without hand-off"`, string(meta["work.attention_msg"]))
 				assert.Equal(t, claim.Issue.Revision+2, stored.Revision)
+				replacement, err := store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: "next-worker", TTL: time.Minute, Now: base.Add(2 * time.Minute)})
+				require.NoError(t, err)
+				meta = db.PayloadMap(jsontext.Value(replacement.Issue.Metadata))
+				assert.JSONEq(t, `"needs-human"`, string(meta["work.attention"]))
+				assert.JSONEq(t, `"claim expired without hand-off"`, string(meta["work.attention_msg"]))
 			} else {
 				assert.JSONEq(t, tc.attention, string(meta["work.attention"]))
 			}

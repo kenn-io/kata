@@ -329,9 +329,21 @@ func TestGuidesSayCommentsCarryFindings(t *testing.T) {
 	assert.Contains(t, editHelp, "kata comment edit abc4 <comment-uid> --body-stdin --agent <<-'EOF'")
 	assert.NotContains(t, editHelp, "-m \"")
 	assertClosedBodyStdinHeredoc(t, "comment edit help", editHelp)
-	for _, args := range [][]string{{"--help"}, {"close", "--help"}, {"label", "add", "--help"}, {"claim", "--help"}} {
+	for _, args := range [][]string{{"--help"}, {"close", "--help"}, {"label", "add", "--help"}, {"claim", "--help"}, {"assign", "--help"}} {
 		resetFlags(t)
 		guides[strings.Join(args, " ")] = string(executeRoot(t, newRootCmd(), args...))
+	}
+	// The guides teach timed claims and renewal without --if-unowned.
+	for _, name := range []string{"quickstart human", "quickstart agent", "quickstart contract", "--help", "claim --help", "assign --help"} {
+		assertClaimsCarryTTL(t, name, guides[name])
+		if name != "assign --help" {
+			assert.Contains(t, guides[name], "without --if-unowned", name)
+		}
+	}
+	for _, path := range []string{"docs/get-started/quickstart.md", "docs/workflows/agents.md", "docs/operations/agent-orchestration.md"} {
+		raw, err := os.ReadFile(filepath.Join("..", "..", path))
+		require.NoError(t, err)
+		assertClaimsCarryTTL(t, path, string(raw))
 	}
 	assert.NotContains(t, guides["claim --help"], `--comment "starting on the Safari path"`)
 	for name, text := range guides {
@@ -360,32 +372,6 @@ func assertClosedBodyStdinHeredoc(t *testing.T, name, text string) {
 	}
 	if found == 0 {
 		t.Errorf("%s: no --body-stdin <<-'EOF' example", name)
-	}
-}
-
-// Product contract: every CLI guide tells agents to claim with a
-// time limit and renew it by claiming again with --ttl, without --if-unowned.
-// The docs Kata serves also claim with a time limit.
-func TestGuidesSayClaimWithTTL(t *testing.T) {
-	guides := map[string]string{"init block": agentsManagedBlock()}
-	for _, args := range [][]string{
-		{"quickstart", "--format", "human"}, {"quickstart", "--format", "agent"},
-		{"quickstart", "--format", "contract"},
-		{"--help"}, {"claim", "--help"}, {"assign", "--help"},
-	} {
-		resetFlags(t)
-		guides[strings.Join(args, " ")] = string(executeRoot(t, newRootCmd(), args...))
-	}
-	for name, text := range guides {
-		assertClaimsCarryTTL(t, name, text)
-		if name != "assign --help" {
-			assert.Contains(t, text, "without --if-unowned", name)
-		}
-	}
-	for _, path := range []string{"docs/get-started/quickstart.md", "docs/workflows/agents.md", "docs/operations/agent-orchestration.md"} {
-		raw, err := os.ReadFile(filepath.Join("..", "..", path))
-		require.NoError(t, err)
-		assertClaimsCarryTTL(t, path, string(raw))
 	}
 }
 

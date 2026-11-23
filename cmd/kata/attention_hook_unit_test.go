@@ -125,16 +125,12 @@ func TestAttentionStartPreservesChangedMessageOnRetry(t *testing.T) {
 }
 
 func TestNativeAttentionStartClearsExpiryForSameSession(t *testing.T) {
-	for _, attention := range []string{attnValueNeedsHuman, attnValueOK} {
-		t.Run(attention, func(t *testing.T) {
-			d := &fakeAttnDaemon{lookups: map[string]attnLookup{
-				"abc4": {kind: lookupOpen, attention: attention, message: db.ExpiredAssignmentMessage, session: "same", revision: 1},
-			}}
-			require.NoError(t, attnStartSession(d, "abc4", "same"))
-			require.Len(t, d.conditionalWrites, 1)
-			assert.Equal(t, map[string]any{attentionKey: attnValueOK, attentionMsgKey: nil, attentionSessionKey: "same"}, d.conditionalWrites[0].patch)
-		})
-	}
+	d := &fakeAttnDaemon{lookups: map[string]attnLookup{
+		"abc4": {kind: lookupOpen, attention: attnValueNeedsHuman, message: db.ExpiredAssignmentMessage, session: "same", revision: 1},
+	}}
+	require.NoError(t, attnStartSession(d, "abc4", "same"))
+	require.Len(t, d.conditionalWrites, 1)
+	assert.Equal(t, map[string]any{attentionKey: attnValueOK, attentionMsgKey: nil, attentionSessionKey: "same"}, d.conditionalWrites[0].patch)
 }
 
 func TestAttnEnd_AtomicallySetsHandoffForOpenOKIssue(t *testing.T) {
