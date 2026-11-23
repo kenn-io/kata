@@ -14,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/commentref"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/textsafe"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -28,9 +29,9 @@ func newMetaCmd() *cobra.Command {
   work.attention_msg  one-line reason shown with work.attention
   work.branch         git branch doing the work
   someday             true (with --json-value) parks the issue without a date
-By convention, agents write only their own work.* keys and never on closed
-issues; Kata does not enforce this. Planning dates use kata schedule and
-kata deadline.`,
+Kata accepts only the listed work.attention values. By convention, agents
+write only their own work.* keys and never on closed issues. Planning dates
+use kata schedule and kata deadline.`,
 	}
 	cmd.AddCommand(newMetaSetCmd(), newMetaUnsetCmd(), newMetaGetCmd())
 	return cmd
@@ -52,7 +53,7 @@ See kata meta --help for the keys agents use.`,
   kata meta set abc4 someday true --json-value --agent`,
 		Args: cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			value, err := parseMetaSetValue(args[2], jsonValue)
+			value, err := parseMetaSetValue(args[1], args[2], jsonValue)
 			if err != nil {
 				return err
 			}
@@ -182,9 +183,12 @@ type metaGetKeyJSON struct {
 	Value    jsontext.Value `json:"value"`
 }
 
-func parseMetaSetValue(raw string, asJSON bool) (jsontext.Value, error) {
-	return parseMetaValue(raw, asJSON,
-		"null is not allowed with --json-value; use `kata meta unset` to clear a key")
+func parseMetaSetValue(key, raw string, asJSON bool) (jsontext.Value, error) {
+	message := "null is not allowed with --json-value; use `kata meta unset` to clear a key"
+	if metadata.IssueRegistry[key].Type == metadata.TypeAttention {
+		message = metadata.AttentionValuesMessage + "; " + message
+	}
+	return parseMetaValue(raw, asJSON, message)
 }
 
 func parseMetaGuardValue(raw string, asJSON bool) (jsontext.Value, error) {

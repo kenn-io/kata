@@ -65,6 +65,23 @@ func TestMetaSetStoresJSONStringAndGetReturnsValue(t *testing.T) {
 	assert.Equal(t, "needs-human", getOut)
 }
 
+func TestMetaAttentionValues(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createIssue(t, env, pid, "attention issue")
+	_, stderr, err := runCLIWithErr(t, env, dir, "meta", "set", ref, "work.attention", "working")
+	_ = requireCLIError(t, err, ExitValidation)
+	assert.Contains(t, stderr, "ok, needs-human, stuck")
+	issue := fetchMetaIssueViaHTTP(t, env, pid, ref)
+	assert.JSONEq(t, `{}`, string(issue.Issue.Metadata))
+
+	_, stderr, err = runCLIWithErr(t, env, dir, "create", "invalid attention", "--meta", "work.attention=working")
+	_ = requireCLIError(t, err, ExitValidation)
+	assert.Contains(t, stderr, "ok, needs-human, stuck")
+	issues, err := env.DB.ListIssues(t.Context(), db.ListIssuesParams{ProjectID: pid})
+	require.NoError(t, err)
+	assert.Len(t, issues, 1)
+}
+
 func TestMetaSetJSONValueObjectRoundTrips(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "metadata object issue")
@@ -100,6 +117,11 @@ func TestMetaSetJSONValueRejectsNullWithUnsetHint(t *testing.T) {
 	_, stderr, err := runCLIWithErr(t, env, dir, "meta", "set", "--json-value", ref, "work.state", `null`)
 	ce := requireCLIError(t, err, ExitValidation)
 	assert.Equal(t, kindValidation, ce.Kind)
+	assert.Contains(t, stderr, "use `kata meta unset`")
+
+	_, stderr, err = runCLIWithErr(t, env, dir, "meta", "set", "--json-value", ref, "work.attention", `null`)
+	_ = requireCLIError(t, err, ExitValidation)
+	assert.Contains(t, stderr, "ok, needs-human, stuck")
 	assert.Contains(t, stderr, "use `kata meta unset`")
 }
 

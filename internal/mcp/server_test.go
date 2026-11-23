@@ -957,6 +957,13 @@ func TestToolsRoundTripAgainstRealDaemon(t *testing.T) {
 	require.NotContains(t, shownIssue, "blocked")
 
 	revision := shownIssue["revision"]
+	invalid, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
+		Name: "kata.set_metadata", Arguments: map[string]any{
+			"ref": ref, "patch": map[string]any{"work.attention": "working"}, "revision": revision,
+		},
+	})
+	require.NoError(t, err)
+	require.True(t, invalid.IsError)
 	patched, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
 		Name: "kata.set_metadata", Arguments: map[string]any{
 			"ref": ref, "patch": map[string]any{"work.attention": "ok"}, "revision": revision,
@@ -967,7 +974,7 @@ func TestToolsRoundTripAgainstRealDaemon(t *testing.T) {
 
 	conflict, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
 		Name: "kata.set_metadata", Arguments: map[string]any{
-			"ref": ref, "patch": map[string]any{"work.attention": "stale"}, "revision": revision,
+			"ref": ref, "patch": map[string]any{"work.attention": "stuck"}, "revision": revision,
 		},
 	})
 	require.NoError(t, err)
