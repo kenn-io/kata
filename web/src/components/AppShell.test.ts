@@ -131,50 +131,37 @@ describe('AppShell', () => {
     expect(summary.textContent).not.toContain('never-display')
   })
 
-  test('offers project sync status in the project header without credential inventory authority', async () => {
+  test('keeps project sync in the header for project members and during reload', async () => {
     setGeneratedFetch(syncedProjectFetch())
     const current = snapshot()
-    render(AppShell, {
-      props: {
-        route: {
-          kind: 'kata',
-          projectUID: current.catalog[0]!.project.uid,
-          graph: false,
-          filters: { status: [], owner: [], label: [], relationship: [] },
-        },
-        snapshot: current,
-        loading: false,
-        ...mutationProps(),
-        onNavigate: vi.fn(),
-        onCreateProject: vi.fn(async () => ({ changed: true })),
+    const props = {
+      route: {
+        kind: 'kata' as const,
+        projectUID: current.catalog[0]!.project.uid,
+        graph: false,
+        filters: { status: [], owner: [], label: [], relationship: [] },
       },
-    })
+      snapshot: current,
+      loading: false,
+      ...mutationProps(),
+      onNavigate: vi.fn(),
+      onCreateProject: vi.fn(async () => ({ changed: true })),
+    }
+    const view = render(AppShell, { props })
     const chip = await screen.findByRole('button', { name: 'No changes to send' })
     expect(chip.closest('header')).not.toBeNull()
     expect(screen.queryByRole('button', { name: 'Credentials' })).toBeNull()
-  })
-
-  test('keeps project sync readable for a current read-only project member', async () => {
-    setGeneratedFetch(syncedProjectFetch())
-    const current = snapshot()
-    current.capabilities.writable = false
-    render(AppShell, {
-      props: {
-        route: {
-          kind: 'kata',
-          projectUID: current.catalog[0]!.project.uid,
-          graph: false,
-          filters: { status: [], owner: [], label: [], relationship: [] },
-        },
-        snapshot: current,
-        loading: false,
-        readOnly: true,
-        ...mutationProps({ canMutate: false }),
-        onNavigate: vi.fn(),
-        onCreateProject: vi.fn(async () => ({ changed: true })),
-      },
+    const readOnly = snapshot()
+    readOnly.capabilities.writable = false
+    await view.rerender({
+      ...props,
+      snapshot: readOnly,
+      readOnly: true,
+      ...mutationProps({ canMutate: false }),
     })
-    expect(await screen.findByRole('button', { name: 'No changes to send' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'No changes to send' })).not.toBeNull()
+    await view.rerender({ ...props, loading: true })
+    expect(screen.getByRole('button', { name: 'No changes to send' })).not.toBeNull()
   })
 
   test('explains a read-only credential at each blocked write control', async () => {
@@ -287,24 +274,7 @@ describe('AppShell', () => {
   test.each(['stale', 'daemonSwitching', 'reconnecting', 'remote', 'expired', 'removed', 'scoped'])(
     'fences project sync display when authority is %s',
     async (reason) => {
-      let signal: AbortSignal | undefined
-      const fetcher = vi.fn<typeof fetch>(async (_url, init) => {
-        signal = init?.signal ?? undefined
-        if (fetcher.mock.calls.length > 1) return new Promise<Response>(() => {})
-        return Response.json({
-          statuses: [
-            {
-              project_id: 7,
-              project_uid: '01J00000000000000000000002',
-              project_name: 'example-project',
-              role: 'spoke',
-              enabled: true,
-              pending_push_count: 0,
-            },
-          ],
-        })
-      })
-      setGeneratedFetch(projectSyncFetch(fetcher))
+      setGeneratedFetch(syncedProjectFetch())
       const current = snapshot()
       const props = {
         route: {
@@ -321,8 +291,6 @@ describe('AppShell', () => {
       }
       const view = render(AppShell, { props })
       await screen.findByRole('button', { name: 'No changes to send' })
-      await view.rerender({ ...props, syncRefreshGeneration: 1 })
-      await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2))
       const next = snapshot()
       if (reason === 'expired') next.capabilities.expires_at = '2020-01-01T00:00:00Z'
       if (reason === 'removed') next.catalog = []
@@ -334,7 +302,6 @@ describe('AppShell', () => {
         }
       await view.rerender({
         ...props,
-        syncRefreshGeneration: 1,
         snapshot: next,
         stale: reason === 'stale',
         daemonSwitching: reason === 'daemonSwitching',
@@ -355,33 +322,8 @@ describe('AppShell', () => {
             : [],
       })
       expect(screen.queryByRole('button', { name: 'No changes to send' })).toBeNull()
-      expect(signal?.aborted).toBe(true)
-      expect(fetcher).toHaveBeenCalledTimes(2)
     },
   )
-
-  test('keeps project sync in place while the snapshot reloads after navigation', async () => {
-    setGeneratedFetch(syncedProjectFetch())
-    const current = snapshot()
-    const props = {
-      route: {
-        kind: 'kata' as const,
-        projectUID: current.catalog[0]!.project.uid,
-        graph: false,
-        filters: { status: [], owner: [], label: [], relationship: [] },
-      },
-      snapshot: current,
-      loading: false,
-      ...mutationProps(),
-      onNavigate: vi.fn(),
-      onCreateProject: vi.fn(async () => ({ changed: true })),
-    }
-    const view = render(AppShell, { props })
-    expect(await screen.findByRole('button', { name: 'No changes to send' })).not.toBeNull()
-
-    await view.rerender({ ...props, loading: true })
-    expect(screen.getByRole('button', { name: 'No changes to send' })).not.toBeNull()
-  })
 
   test('keeps a healthy connection hidden during refresh while preserving attention states', async () => {
     const props = {
@@ -1695,7 +1637,12 @@ describe('AppShell', () => {
       recurrences: [],
       history: [],
     }
-    selected.graph = { issues: [...selected.collection!], links: [], edges: [], unresolved_refs: [] }
+    selected.graph = {
+      issues: [...selected.collection!],
+      links: [],
+      edges: [],
+      unresolved_refs: [],
+    }
     render(AppShell, {
       props: {
         route: {

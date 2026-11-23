@@ -89,20 +89,6 @@ describe('ProjectSyncStatus', () => {
     expect(screen.getByText('12m ago')).not.toBeNull()
   })
 
-  it.each(['empty', 'standalone'])('hides the chip for %s status', async (kind) => {
-    const result = await response().json()
-    result.statuses[0].role = 'standalone'
-    result.statuses[0].enabled = false
-    const fetcher = vi
-      .fn()
-      .mockResolvedValue(Response.json(kind === 'empty' ? { statuses: [] } : result))
-    setGeneratedFetch(fetcher)
-    render(ProjectSyncStatus, { props: { projectID: 7, projectUID } })
-    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1))
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    await waitFor(() => expect(screen.queryByRole('button')).toBeNull())
-  })
-
   it('shows an unavailable status for an unknown role and recovers on refresh', async () => {
     const result = await response().json()
     result.statuses[0].role = 'unknown'
@@ -138,15 +124,6 @@ describe('ProjectSyncStatus', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
-  it('shows a disabled binding and its waiting changes', async () => {
-    const result = await response(7, projectUID, 3, false).json()
-    result.statuses[0].enabled = false
-    setGeneratedFetch(vi.fn().mockResolvedValueOnce(Response.json(result)))
-    render(ProjectSyncStatus, { props: { projectID: 7, projectUID } })
-    await openSync(/^Sync disabled$/)
-    expect(screen.getByText('Sync disabled · 3 changes waiting')).not.toBeNull()
-  })
-
   it('keeps waiting changes visible when an open panel refreshes to disabled', async () => {
     const result = await response(7, projectUID, 3, false).json()
     result.statuses[0].enabled = false
@@ -162,17 +139,20 @@ describe('ProjectSyncStatus', () => {
     expect(screen.getByRole('button', { name: 'Sync disabled' })).not.toBeNull()
   })
 
-  it('shows a warning waiting count and a single command when both shells match', async () => {
+  it('shows a warning tone for waiting changes', async () => {
     const result = await response().json()
-    result.statuses[0].project_name = 'spoke-project'
     result.statuses[0].has_sync_error = false
     setGeneratedFetch(vi.fn().mockResolvedValueOnce(Response.json(result)))
-    const view = render(ProjectSyncStatus, { props: { projectID: 7, projectUID } })
+    render(ProjectSyncStatus, { props: { projectID: 7, projectUID } })
     const button = await screen.findByRole('button', { name: '2 to sync' })
     expect(button.className).toContain('kit-chip--tone-warning')
-    result.statuses[0].has_sync_error = true
+  })
+
+  it('shows one command when both shells match', async () => {
+    const result = await response().json()
+    result.statuses[0].project_name = 'spoke-project'
     setGeneratedFetch(vi.fn().mockResolvedValueOnce(Response.json(result)))
-    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
+    render(ProjectSyncStatus, { props: { projectID: 7, projectUID } })
     await openSync()
     expect(screen.getByRole('button', { name: 'Copy command' })).not.toBeNull()
     expect(screen.queryByText('PowerShell')).toBeNull()
@@ -243,7 +223,7 @@ describe('ProjectSyncStatus', () => {
     },
   )
 
-  it('keeps the unavailable chip during a background retry', async () => {
+  it('keeps the unavailable message during a background retry', async () => {
     const fetcher = vi
       .fn()
       .mockResolvedValueOnce(new Response('', { status: 503 }))

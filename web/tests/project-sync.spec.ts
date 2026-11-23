@@ -1,6 +1,25 @@
 import { spawnSync } from 'node:child_process'
+import type { Page } from '@playwright/test'
 
-import { expect, test, type BrowserCredentials } from './fixtures'
+import { expect, test, type BrowserCredentials, type KataFixture } from './fixtures'
+
+async function enableSync(page: Page, kata: KataFixture, actor: string): Promise<void> {
+  const login = await page.request.post(`${kata.origin}/api/v1/ui/session/login`, {
+    headers: { Origin: kata.origin },
+    data: { token: 'example-local-token', return_path: '/kata' },
+  })
+  expect(login.ok()).toBe(true)
+  const owner = (await login.json()) as BrowserCredentials
+  const enabled = await kata.request(
+    page,
+    owner,
+    'POST',
+    `/api/v1/projects/${kata.projectID}/federation/enable`,
+    { actor },
+  )
+  expect(enabled.ok()).toBe(true)
+  kata.recordSyncDiagnosticError()
+}
 
 test('keeps the sync panel aligned when the task count grows', async ({
   page,
@@ -8,23 +27,7 @@ test('keeps the sync panel aligned when the task count grows', async ({
 }) => {
   await kata.prepareSyncDiagnostic()
   const credentials = await kata.launch(page, `/kata?scope=${kata.projectUID}`)
-  const login = await page.request.post(`${kata.origin}/api/v1/ui/session/login`, {
-    headers: { Origin: kata.origin },
-    data: { token: 'example-local-token', return_path: '/kata' },
-  })
-  const owner = (await login.json()) as BrowserCredentials
-  expect(
-    (
-      await kata.request(
-        page,
-        owner,
-        'POST',
-        `/api/v1/projects/${kata.projectID}/federation/enable`,
-        { actor: 'example-owner' },
-      )
-    ).ok(),
-  ).toBe(true)
-  kata.recordSyncDiagnosticError()
+  await enableSync(page, kata, 'example-owner')
   for (let i = 0; i < 9; i++) await kata.seedIssue(page, credentials, { title: `Task ${i}` })
   await page.reload()
   const chip = page.getByRole('button', { name: 'Sync failed' })
@@ -49,14 +52,20 @@ test('project readers see sync diagnostics with bounded embedding summaries at n
   diagnosticKata: kata,
 }, testInfo) => {
   await kata.prepareSyncDiagnostic()
+  const statusPath = `/api/v1/projects/${kata.projectID}/federation/status`
+  const initialStatus = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === statusPath,
+  )
   const local = await kata.launch(page, `/kata?scope=${kata.projectUID}`)
   const chip = page.getByRole('button', { name: 'Sync failed' })
   const region = page.getByRole('dialog', { name: 'Project sync' })
-  await expect(
-    page.getByRole('button', { name: /^(No changes to send|Sync failed|\d+ to sync)$/ }),
-  ).toHaveCount(0)
-  const statusPath = `/api/v1/projects/${kata.projectID}/federation/status`
+  expect((await initialStatus).ok()).toBe(true)
   expect((await kata.request(page, local, 'GET', statusPath)).ok()).toBe(true)
+  await expect(
+    page.getByRole('button', {
+      name: /^(No changes to send|Sync failed|Sync disabled|Sync status unavailable|\d+ to sync)$/,
+    }),
+  ).toHaveCount(0)
   expect((await kata.request(page, local, 'GET', '/api/v1/federation/status')).status()).toBe(403)
   expect(
     (
@@ -69,21 +78,7 @@ test('project readers see sync diagnostics with bounded embedding summaries at n
       )
     ).status(),
   ).toBe(403)
-  const login = await page.request.post(`${kata.origin}/api/v1/ui/session/login`, {
-    headers: { Origin: kata.origin },
-    data: { token: 'example-local-token', return_path: '/kata' },
-  })
-  expect(login.ok()).toBe(true)
-  const owner = (await login.json()) as BrowserCredentials
-  const enabled = await kata.request(
-    page,
-    owner,
-    'POST',
-    `/api/v1/projects/${kata.projectID}/federation/enable`,
-    { actor: 'example-owner' },
-  )
-  expect(enabled.ok()).toBe(true)
-  kata.recordSyncDiagnosticError()
+  await enableSync(page, kata, 'example-owner')
   const statusRead = page.waitForResponse(
     (response) => new URL(response.url()).pathname === statusPath,
   )
