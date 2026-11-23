@@ -50,3 +50,39 @@ func TestShowCreationAttributionLabelsRemainData(t *testing.T) {
 	require.Contains(t, value, "attribution=verified")
 	require.Equal(t, "", showCreationAttribution(db.AttributionView{}, "author"), "older daemons without a projection must not acquire a verified label")
 }
+
+// Federated authors carry a connection suffix in storage; show prints the name.
+func TestShowFederatedAuthorDisplay(t *testing.T) {
+	const id = "11111111-1111-4111-8111-111111111111"
+	const suffix = " [member:" + id + "; enrollment:" + id + "]"
+	for _, mode := range []string{"human", "agent"} {
+		t.Run(mode, func(t *testing.T) {
+			wire := []byte(`{"issue":{"short_id":"abc1","title":"Example issue","status":"open","author":"Ana` + suffix + `","source_actor":"Ana` + suffix + `","verification":"pending"},"comments":[{"uid":"comment-one","author":"Bo` + suffix + `","source_actor":"Bo` + suffix + `","verification":"pending","body":"Example comment","reply":{"kind":"reply","uid":"comment-zero","handle":"c1","author":"Cy` + suffix + `"}}]}`)
+			var response showResponseForCLI
+			require.NoError(t, json.Unmarshal(wire, &response))
+			var output bytes.Buffer
+			if mode == "human" {
+				require.NoError(t, printShowHuman(&output, response, "example-project", nil))
+				require.Contains(t, output.String(), "by Ana\n")
+				require.Contains(t, output.String(), "comment-one Bo: ")
+				require.NotContains(t, output.String(), "member:")
+			} else {
+				require.NoError(t, printShowAgent(&output, response, "example-project", "show"))
+				require.Contains(t, output.String(), "author_filter=\"Bo"+suffix+"\"")
+				require.Contains(t, output.String(), "author=Bo ")
+				require.Contains(t, output.String(), "author=Cy ")
+				require.Contains(t, output.String(), "source=Ana\"")
+			}
+			require.Contains(t, output.String(), "source=Ana")
+			require.Contains(t, output.String(), "Cy")
+		})
+	}
+}
+
+// A verified accountable actor can carry the federated suffix; labels show the name.
+func TestShowFederatedAccountableDisplay(t *testing.T) {
+	const id = "11111111-1111-4111-8111-111111111111"
+	view := db.AttributionView{Verification: "verified", SourceActor: "worker-agent",
+		AccountableActor: "Ana [member:" + id + "; enrollment:" + id + "]"}
+	require.Equal(t, "attribution=verified source=worker-agent accountable=Ana", showCreationAttribution(view, "author"))
+}

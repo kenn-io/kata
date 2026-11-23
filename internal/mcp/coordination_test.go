@@ -116,8 +116,9 @@ func TestAssignStatusAndUnassignRoundTripAgainstDaemon(t *testing.T) {
 func TestInboxReadsAttentionRequestsAgainstDaemon(t *testing.T) {
 	session, _ := newCoordinationSession(t)
 	key := notification.MetadataKey("reviewer-agent")
+	actor := "Ana [member:11111111-1111-4111-8111-111111111111; enrollment:11111111-1111-4111-8111-111111111111]"
 	requests := []map[string]any{
-		{"from": "example-agent", "message": "Please review the plan"},
+		{"from": actor, "message": "latest: reply c:abc by " + actor, "kind": "reply", "re": "abc"},
 		{"from": "example-agent", "teammate": "planner", "message": "Second look"},
 		{"from": "", "message": "Malformed request"},
 	}
@@ -126,6 +127,10 @@ func TestInboxReadsAttentionRequestsAgainstDaemon(t *testing.T) {
 			"title": "Attention issue " + string(rune('a'+i)), "idempotency_key": "attention-" + string(rune('a'+i)),
 		})
 		ref := created["issue"].(map[string]any)["ref"].(string)
+		if i == 0 {
+			comment := callAdministrationTool(t, session, "kata.comment", map[string]any{"ref": ref, "body": "Reply", "idempotency_key": "attention-comment"})
+			value["re"] = comment["comment"].(map[string]any)["uid"].(string)
+		}
 		callAdministrationTool(t, session, "kata.set_metadata", map[string]any{"ref": ref, "patch": map[string]any{key: value}})
 	}
 	callAdministrationTool(t, session, "kata.create", map[string]any{"title": "Quiet issue", "idempotency_key": "quiet"})
@@ -139,11 +144,16 @@ func TestInboxReadsAttentionRequestsAgainstDaemon(t *testing.T) {
 	for _, item := range listed {
 		request := item.(map[string]any)
 		messages[request["message"].(string)] = request
-		require.Equal(t, "example-agent", request["from"])
+		if request["message"] == "Second look" {
+			require.Equal(t, "example-agent", request["from"])
+		} else {
+			require.Equal(t, "Ana", request["from"])
+		}
 		require.NotEmpty(t, request["qualified_ref"])
 	}
 	require.Equal(t, "planner", messages["Second look"]["teammate"])
-	require.NotContains(t, messages["Please review the plan"], "teammate")
+	require.NotContains(t, messages["latest: reply c:abc by Ana"], "teammate")
+	require.Contains(t, messages, "latest: reply c:abc by Ana")
 
 	limited := callAdministrationTool(t, session, "kata.inbox", map[string]any{"for": "reviewer-agent", "limit": 1})
 	require.Equal(t, true, limited["truncated"])

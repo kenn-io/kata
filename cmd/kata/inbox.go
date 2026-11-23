@@ -234,6 +234,12 @@ func loadInbox(cmd *cobra.Command, recipient string, allProjects bool) ([]inboxR
 	return requests, nil
 }
 
+func displayInboxRequest(request inboxRequest) inboxRequest {
+	value := notification.DisplayValue(notification.Value{From: request.From, Teammate: request.Teammate, Message: request.Message, Re: request.Re, Kind: request.Kind})
+	request.From, request.Message = value.From, value.Message
+	return request
+}
+
 func printInbox(cmd *cobra.Command, recipient string, requests []inboxRequest, allProjects bool) error {
 	if currentOutputMode() == outputJSON {
 		return emitJSON(cmd.OutOrStdout(), inboxOutput{Recipient: recipient, AllProjects: allProjects, Requests: requests})
@@ -248,6 +254,7 @@ func printInbox(cmd *cobra.Command, recipient string, requests []inboxRequest, a
 			return err
 		}
 		for _, request := range requests {
+			request = displayInboxRequest(request)
 			fields := []agentField{
 				agentRowField("issue", request.Ref),
 			}
@@ -283,6 +290,7 @@ func printInbox(cmd *cobra.Command, recipient string, requests []inboxRequest, a
 		return err
 	}
 	for _, request := range requests {
+		request = displayInboxRequest(request)
 		from := request.From
 		if request.Teammate != "" {
 			from += " / " + request.Teammate
@@ -312,6 +320,7 @@ func renderInboxContext(recipient string, requests []inboxRequest, allProjects b
 	lines := make([]string, len(requests))
 	truncated := false
 	for i, request := range requests {
+		request = displayInboxRequest(request)
 		ref, cutRef := truncateInboxField(textsafe.Line(request.Ref), inboxContextRefLimit)
 		title, cutTitle := truncateInboxField(textsafe.Line(request.Title), inboxContextTitleLimit)
 		from, cutFrom := truncateInboxField(textsafe.Line(request.From), inboxContextFromLimit)

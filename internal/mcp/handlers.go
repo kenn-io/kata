@@ -16,6 +16,7 @@ import (
 	"golang.org/x/mod/semver"
 	"golang.org/x/sync/errgroup"
 
+	"go.kenn.io/kata/internal/authorname"
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/searchhint"
@@ -405,12 +406,12 @@ func (h toolHandlers) show(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 				if summary.Reply.ProjectUID == "" {
 					// Preserve the source assertion's state, but an unknown target
 					// lineage cannot establish authority to expose its identity.
-					summary.Reply = &commentref.Link{Kind: summary.Reply.Kind, Status: summary.Reply.Status}
+					summary.Reply = &CommentLinkSummary{Kind: summary.Reply.Kind, Status: summary.Reply.Status}
 				} else {
 					summary.Reply = nil
 				}
 			}
-			backlinks := make([]commentref.Link, 0, len(summary.Backlinks))
+			backlinks := make([]CommentLinkSummary, 0, len(summary.Backlinks))
 			for _, link := range summary.Backlinks {
 				if allowedProjects[link.ProjectUID] {
 					backlinks = append(backlinks, link)
@@ -468,7 +469,7 @@ func (h toolHandlers) show(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 			IssueSummary: summary,
 			Labels:       labels,
 			Body:         response.Issue.Body,
-			Author:       response.Issue.Author,
+			Author:       authorname.Display(response.Issue.Author),
 			Metadata:     metadata,
 			Links:        links,
 			Comments:     commentSummaries,
@@ -1272,9 +1273,9 @@ func projectIDSet(projects []ProjectIdentity) map[int64]struct{} {
 
 func (h toolHandlers) summaryFromIssue(project ProjectIdentity, issue generated.Issue) IssueSummary {
 	return IssueSummary{
-		Author:              issue.Author,
-		AccountableActor:    issue.AccountableActor,
-		SourceActor:         issue.SourceActor,
+		Author:              authorname.Display(issue.Author),
+		AccountableActor:    displayActor(issue.AccountableActor),
+		SourceActor:         displayActor(issue.SourceActor),
 		AuthorityUID:        issue.AuthorityUID,
 		Teammate:            issue.Teammate,
 		Verification:        (*string)(issue.Verification),
@@ -1306,9 +1307,9 @@ func (h toolHandlers) summaryFromIssueOut(project ProjectIdentity, issue generat
 	return IssueSummary{
 		oversized:           issue.Oversized != nil && *issue.Oversized,
 		projectUID:          projectUID,
-		Author:              issue.Author,
-		AccountableActor:    issue.AccountableActor,
-		SourceActor:         issue.SourceActor,
+		Author:              authorname.Display(issue.Author),
+		AccountableActor:    displayActor(issue.AccountableActor),
+		SourceActor:         displayActor(issue.SourceActor),
 		AuthorityUID:        issue.AuthorityUID,
 		Teammate:            issue.Teammate,
 		Verification:        (*string)(issue.Verification),
@@ -1342,9 +1343,9 @@ func summaryFromGlobalIssue(issue generated.ListGlobalIssueOut) IssueSummary {
 	return IssueSummary{
 		oversized:        issue.Oversized != nil && *issue.Oversized,
 		projectUID:       projectUID,
-		Author:           issue.Author,
-		AccountableActor: issue.AccountableActor,
-		SourceActor:      issue.SourceActor,
+		Author:           authorname.Display(issue.Author),
+		AccountableActor: displayActor(issue.AccountableActor),
+		SourceActor:      displayActor(issue.SourceActor),
 		AuthorityUID:     issue.AuthorityUID,
 		Teammate:         issue.Teammate,
 		Verification:     (*string)(issue.Verification),
@@ -1362,9 +1363,9 @@ func summaryFromGlobalIssue(issue generated.ListGlobalIssueOut) IssueSummary {
 
 func summaryFromReadyGlobalIssue(issue generated.ReadyGlobalIssueOut) IssueSummary {
 	return IssueSummary{
-		Author:           issue.Author,
-		AccountableActor: issue.AccountableActor,
-		SourceActor:      issue.SourceActor,
+		Author:           authorname.Display(issue.Author),
+		AccountableActor: displayActor(issue.AccountableActor),
+		SourceActor:      displayActor(issue.SourceActor),
 		AuthorityUID:     issue.AuthorityUID,
 		Teammate:         issue.Teammate,
 		Verification:     (*string)(issue.Verification),
@@ -1402,7 +1403,16 @@ func eventSummary(event *generated.Event) *EventSummary {
 	if event == nil || event.UID == "" {
 		return nil
 	}
-	return &EventSummary{UID: event.UID, Type: event.Type, Actor: event.Actor}
+	return &EventSummary{UID: event.UID, Type: event.Type, Actor: authorname.Display(event.Actor)}
+}
+
+// displayActor formats an optional actor label without changing the record it
+// came from.
+func displayActor(actor *string) *string {
+	if actor == nil {
+		return nil
+	}
+	return new(authorname.Display(*actor))
 }
 
 func commentSummary(comment generated.Comment) CommentSummary {
@@ -1411,13 +1421,14 @@ func commentSummary(comment generated.Comment) CommentSummary {
 		handle = *comment.Teammate
 	}
 	return CommentSummary{
-		AccountableActor: comment.AccountableActor,
-		SourceActor:      comment.SourceActor,
+		AccountableActor: displayActor(comment.AccountableActor),
+		SourceActor:      displayActor(comment.SourceActor),
 		AuthorityUID:     comment.AuthorityUID,
 		Verification:     (*string)(comment.Verification),
 		Teammate:         handle,
 		UID:              comment.UID,
-		Author:           comment.Author,
+		Author:           authorname.Display(comment.Author),
+		AuthorFilter:     comment.Author,
 		Body:             comment.Body,
 		CreatedAt:        formatTime(comment.CreatedAt),
 	}
@@ -1744,20 +1755,21 @@ func (h toolHandlers) requireCommentLinksAPI(ctx context.Context) error {
 
 func commentReadSummary(c generated.CommentOut) CommentSummary {
 	out := CommentSummary{
-		AccountableActor:   c.AccountableActor,
-		SourceActor:        c.SourceActor,
+		AccountableActor:   displayActor(c.AccountableActor),
+		SourceActor:        displayActor(c.SourceActor),
 		AuthorityUID:       c.AuthorityUID,
 		Verification:       (*string)(c.Verification),
 		BacklinksTruncated: commentValue(c.BacklinksTruncated),
 		UID:                c.UID,
 		Handle:             commentValue(c.Handle),
-		Author:             c.Author,
+		Author:             authorname.Display(c.Author),
+		AuthorFilter:       c.Author,
 		Teammate:           commentValue(c.Teammate),
 		Body:               c.Body,
 		CreatedAt:          formatTime(c.CreatedAt),
 		IssueUID:           commentValue(c.IssueUID),
 		IssueShortID:       commentValue(c.IssueShortID),
-		Backlinks:          []commentref.Link{},
+		Backlinks:          []CommentLinkSummary{},
 	}
 	if c.EditedAt != nil {
 		out.EditedAt = formatTime(*c.EditedAt)
@@ -1771,8 +1783,8 @@ func commentReadSummary(c generated.CommentOut) CommentSummary {
 	}
 	return out
 }
-func commentLinkSummary(r generated.CommentLink) commentref.Link {
-	return commentref.Link{Body: commentValue(r.Body), CreatedAt: commentValue(r.CreatedAt), EditedAt: r.EditedAt, UID: commentValue(r.UID), Handle: commentValue(r.Handle), Kind: r.Kind, Author: commentValue(r.Author), Teammate: commentValue(r.Teammate), IssueUID: commentValue(r.IssueUID), IssueShortID: commentValue(r.IssueShortID), ProjectUID: commentValue(r.ProjectUID), ProjectID: commentValue(r.ProjectID), Status: commentValue(r.Status), TargetEdited: commentValue(r.TargetEdited)}
+func commentLinkSummary(r generated.CommentLink) CommentLinkSummary {
+	return CommentLinkSummary{AuthorFilter: commentValue(r.Author), Body: commentValue(r.Body), CreatedAt: commentValue(r.CreatedAt), EditedAt: r.EditedAt, UID: commentValue(r.UID), Handle: commentValue(r.Handle), Kind: r.Kind, Author: authorname.Display(commentValue(r.Author)), Teammate: commentValue(r.Teammate), IssueUID: commentValue(r.IssueUID), IssueShortID: commentValue(r.IssueShortID), ProjectUID: commentValue(r.ProjectUID), ProjectID: commentValue(r.ProjectID), Status: commentValue(r.Status), TargetEdited: commentValue(r.TargetEdited)}
 }
 func commentValue[T any](v *T) T {
 	if v != nil {

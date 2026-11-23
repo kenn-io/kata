@@ -41,3 +41,49 @@ func TestMCPAttributionSummaries(t *testing.T) {
 		})
 	}
 }
+
+// Actor labels show the federated name; the raw connection identity stays in
+// stored records. Without a verified receipt the source actor is the author.
+func TestMCPFederatedAuthorDisplay(t *testing.T) {
+	h := toolHandlers{}
+	const id = "11111111-1111-4111-8111-111111111111"
+	raw := "Ana [member:" + id + "; enrollment:" + id + "]"
+	accountable := "Root [service-account:" + id + "; token:" + id + "]"
+	project := ProjectIdentity{Name: "shared-project"}
+	link := generated.CommentLink{Kind: "reply", Author: &raw}
+	summaries := map[string]any{
+		"mutation":     h.summaryFromIssue(project, generated.Issue{Author: raw, SourceActor: &raw, AccountableActor: &accountable}),
+		"project_list": h.summaryFromIssueOut(project, generated.IssueOut{Author: raw, SourceActor: &raw, AccountableActor: &accountable}),
+		"global_list":  summaryFromGlobalIssue(generated.ListGlobalIssueOut{Author: raw, SourceActor: &raw, AccountableActor: &accountable}),
+		"global_ready": summaryFromReadyGlobalIssue(generated.ReadyGlobalIssueOut{Author: raw, SourceActor: &raw, AccountableActor: &accountable}),
+		"comment":      commentSummary(generated.Comment{Author: raw, SourceActor: &raw, AccountableActor: &accountable}),
+		"comment_read": commentReadSummary(generated.CommentOut{Author: raw, SourceActor: &raw, AccountableActor: &accountable, Reply: &link}),
+		"event":        eventSummary(&generated.Event{UID: "01J00000000000000000000006", Type: "issue.created", Actor: raw}),
+	}
+	for name, summary := range summaries {
+		t.Run(name, func(t *testing.T) {
+			encoded, err := json.Marshal(summary)
+			require.NoError(t, err)
+			var record map[string]any
+			require.NoError(t, json.Unmarshal(encoded, &record))
+			if name == "event" {
+				require.Equal(t, "Ana", record["actor"])
+				return
+			}
+			require.Equal(t, "Ana", record["author"])
+			require.Equal(t, "Ana", record["source_actor"])
+			require.Equal(t, "Root", record["accountable_actor"])
+			if reply, ok := record["reply"].(map[string]any); ok {
+				require.Equal(t, "Ana", reply["author"])
+			}
+		})
+	}
+	t.Run("stream_event", func(t *testing.T) {
+		payload := []byte(`{"author":"` + raw + `"}`)
+		envelope := generated.EventEnvelope{Actor: raw, Payload: payload}
+		event := streamEvent(envelope)
+		require.Equal(t, "Ana", event.Actor)
+		require.Equal(t, map[string]any{"author": raw}, event.Payload)
+		require.JSONEq(t, `{"author":"`+raw+`"}`, string(envelope.Payload))
+	})
+}

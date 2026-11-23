@@ -111,6 +111,26 @@ describe('Comments', () => {
     expect(comments[1]?.textContent).toContain('First comment')
   })
 
+  it('shows a federated author by name', () => {
+    const id = '11111111-1111-4111-8111-111111111111'
+    const detail = issue()
+    detail.comments = [
+      {
+        id: 3,
+        issue_id: 1,
+        author: `Ana [member:${id}; enrollment:${id}]`,
+        teammate: 'worker',
+        body: 'Federated comment',
+        created_at: '2026-08-01T13:00:00Z',
+      },
+    ]
+    renderComments({ issue: detail })
+
+    const comment = screen.getByRole('article')
+    expect(comment.querySelector('.author')?.textContent).toBe('Ana / worker')
+    expect(comment.textContent).not.toContain('member:')
+  })
+
   it('offers force only for the draft that received a duplicate refusal', async () => {
     const onAddComment = vi.fn(async () => false)
     const initialReply = { replyTo: 'target-one', kind: 'reply' as const, force: false }

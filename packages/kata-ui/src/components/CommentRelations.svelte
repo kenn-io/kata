@@ -2,6 +2,7 @@
   import { Button, Markdown } from '@kenn-io/kit-ui'
   import { formatTimestamp } from '@kenn-io/kit-ui/utils/time'
   import type { KataCommentLink, KataReplyKind } from '../types.js'
+  import { authorName } from '../authorName.js'
 
   interface Props {
     links: KataCommentLink[]
@@ -78,7 +79,7 @@
                 onclick={() => onOpen?.(link)}
               />
               {#if link.author}<strong
-                  >{link.author}{link.teammate ? ` / ${link.teammate}` : ''}</strong
+                  >{authorName(link.author)}{link.teammate ? ` / ${link.teammate}` : ''}</strong
                 >{/if}
               {#if link.created_at}<time datetime={link.created_at}
                   >{formatTimestamp(link.created_at)}</time

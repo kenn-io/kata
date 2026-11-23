@@ -17,6 +17,7 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"golang.org/x/mod/semver"
 
+	"go.kenn.io/kata/internal/authorname"
 	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/internal/uid"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -145,7 +146,7 @@ type AuditClosesInput struct {
 	Project    string `json:"project,omitempty"`
 	Since      string `json:"since,omitempty"`
 	Until      string `json:"until,omitempty"`
-	Actor      string `json:"actor,omitempty"`
+	Actor      string `json:"actor,omitempty" jsonschema:"Exact actor_filter from a close audit row"`
 	Parent     string `json:"parent,omitempty"`
 	Reason     string `json:"reason,omitempty"`
 	NoEvidence bool   `json:"no_evidence,omitzero"`
@@ -153,12 +154,18 @@ type AuditClosesInput struct {
 	Cursor     string `json:"cursor,omitempty" jsonschema:"Opaque pagination cursor from the previous result's next_cursor; keep the other filters identical and omit for the first page"`
 }
 
+// AuditClose includes the exact actor accepted by the audit filter.
+type AuditClose struct {
+	generated.AuditCloseRow
+	ActorFilter string `json:"actor_filter" jsonschema:"Exact actor for the audit actor filter"`
+}
+
 // AuditClosesOutput contains close audit records for one project.
 type AuditClosesOutput struct {
-	Project    ProjectIdentity           `json:"project"`
-	Rows       []generated.AuditCloseRow `json:"rows"`
-	Truncated  bool                      `json:"truncated,omitzero"`
-	NextCursor *string                   `json:"next_cursor,omitempty"`
+	Project    ProjectIdentity `json:"project"`
+	Rows       []AuditClose    `json:"rows"`
+	Truncated  bool            `json:"truncated,omitzero"`
+	NextCursor *string         `json:"next_cursor,omitempty"`
 }
 
 // DigestInput defines an activity digest window.
@@ -166,13 +173,29 @@ type DigestInput struct {
 	Project string   `json:"project,omitempty"`
 	Since   string   `json:"since"`
 	Until   string   `json:"until,omitempty"`
-	Actors  []string `json:"actors,omitempty"`
+	Actors  []string `json:"actors,omitempty" jsonschema:"Exact actor_filters from a digest actor"`
+}
+
+// DigestActor includes the exact actor values accepted by the digest filter.
+type DigestActor struct {
+	generated.DigestActorEntry
+	ActorFilters []string `json:"actor_filters" jsonschema:"Exact actors for the digest actors filter"`
+}
+
+// DigestData contains a digest with filterable actor groups.
+type DigestData struct {
+	Actors     []DigestActor          `json:"actors"`
+	EventCount int64                  `json:"event_count"`
+	ProjectID  int64                  `json:"project_id"`
+	Since      time.Time              `json:"since"`
+	Totals     generated.DigestTotals `json:"totals"`
+	Until      time.Time              `json:"until"`
 }
 
 // ProjectDigest associates one digest with its project scope.
 type ProjectDigest struct {
-	Project *ProjectIdentity             `json:"project,omitempty"`
-	Digest  generated.DigestResponseBody `json:"digest"`
+	Project *ProjectIdentity `json:"project,omitempty"`
+	Digest  DigestData       `json:"digest"`
 }
 
 // DigestOutput contains one or more scoped digests.
@@ -693,7 +716,12 @@ func (h toolHandlers) auditCloses(ctx context.Context, _ *sdkmcp.CallToolRequest
 	if err != nil {
 		return nil, AuditClosesOutput{}, err
 	}
-	output.Rows = rows
+	output.Rows = make([]AuditClose, 0, len(rows))
+	for _, row := range rows {
+		actor := row.Actor
+		row.Actor = authorname.Display(actor)
+		output.Rows = append(output.Rows, AuditClose{AuditCloseRow: row, ActorFilter: actor})
+	}
 	return successResult(), output, nil
 }
 
@@ -881,8 +909,14 @@ func (h toolHandlers) digest(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 		if h.options.Scope.Mode() != ScopeAll {
 			h.redactDigestLinkActions(response)
 		}
+		filters := authorname.DigestFilters(response.Actors)
+		grouped := authorname.GroupDigest(response.Actors)
+		actors := make([]DigestActor, 0, len(grouped))
+		for _, actor := range grouped {
+			actors = append(actors, DigestActor{DigestActorEntry: actor, ActorFilters: filters[actor.Actor]})
+		}
 		projectCopy := project
-		out = append(out, ProjectDigest{Project: &projectCopy, Digest: *response})
+		out = append(out, ProjectDigest{Project: &projectCopy, Digest: DigestData{Actors: actors, EventCount: response.EventCount, ProjectID: response.ProjectID, Since: response.Since, Totals: response.Totals, Until: response.Until}})
 	}
 	return successResult(), DigestOutput{Digests: out}, nil
 }
@@ -1155,7 +1189,7 @@ func readEventStream(ctx context.Context, reader io.Reader, after, limit int64) 
 }
 
 func streamEvent(event generated.EventEnvelope) StreamEvent {
-	output := StreamEvent{EventID: event.EventID, EventUID: event.EventUID, Type: event.Type, Actor: event.Actor, CreatedAt: formatTime(event.CreatedAt), ProjectID: event.ProjectID, ProjectUID: event.ProjectUID, ProjectName: event.ProjectName}
+	output := StreamEvent{EventID: event.EventID, EventUID: event.EventUID, Type: event.Type, Actor: authorname.Display(event.Actor), CreatedAt: formatTime(event.CreatedAt), ProjectID: event.ProjectID, ProjectUID: event.ProjectUID, ProjectName: event.ProjectName}
 	if event.IssueUID != nil {
 		output.IssueUID = *event.IssueUID
 	}

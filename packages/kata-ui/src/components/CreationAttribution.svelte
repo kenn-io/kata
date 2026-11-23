@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { KataCreationAttributionModel } from '../types.js'
+  import { authorName } from '../authorName.js'
 
   let { creation }: { creation?: KataCreationAttributionModel | undefined } = $props()
 </script>
@@ -8,10 +9,10 @@
   <div class="creation" aria-label="Creation attribution">
     <span>Creation: {creation.verification}</span>
     {#if creation.verification === 'verified' && creation.accountableActor}
-      <span>Accountable: {creation.accountableActor}</span>
+      <span>Accountable: {authorName(creation.accountableActor)}</span>
     {/if}
     {#if creation.sourceActor}
-      <span>Source: {creation.sourceActor}{creation.teammate ? ` / ${creation.teammate}` : ''}</span
+      <span>Source: {authorName(creation.sourceActor)}{creation.teammate ? ` / ${creation.teammate}` : ''}</span
       >
     {/if}
   </div>

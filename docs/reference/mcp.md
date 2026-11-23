@@ -256,6 +256,9 @@ and optional `force` to bypass duplicate-reply rejection. The required
 `kata.show` accepts `thread`, `inbound`, `kind`, and `since` selectors and
 returns handles, reply lines, backlinks, and edit state. Thread results retain
 their root within the requested comment limit and report truncation.
+Use a comment's `author_filter` as the `inbound` author. A `kata.digest` actor's
+`actor_filters` contains the exact values to pass to its `actors` filter. Use a
+`kata.audit_closes` row's `actor_filter` as its `actor` filter.
 Endpoint identities and backlinks remain within the server's fixed startup
 project UID scope, including after project moves or renames. See the
 [CLI reference](cli.md#issue-lifecycle) for selector behavior, reply validation,

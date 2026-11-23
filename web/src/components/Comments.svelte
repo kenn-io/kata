@@ -2,7 +2,7 @@
   import { tick } from 'svelte'
   /* eslint-disable svelte/prefer-svelte-reactivity -- reference counts are a transient search-result lookup. */
   import { commentEvidenceLength, trimCommentEvidence } from '../lib/kata/commentEvidence'
-  import { CommentRelations } from '@kenn-io/kata-ui'
+  import { CommentRelations, authorName } from '@kenn-io/kata-ui'
   import { Avatar, Button, Markdown, MentionTextarea, type MentionOption } from '@kenn-io/kit-ui'
   import {
     formatRelativeTime as timeAgo,
@@ -323,6 +323,7 @@
     {:else}
       <div class="comment-list" bind:this={listElement}>
         {#each sortedComments as comment (comment.id)}
+          {@const author = authorName(comment.author)}
           <article
             class="comment"
             class:selected={selectedCommentUID !== undefined && selectedCommentUID === comment.uid}
@@ -335,16 +336,14 @@
                   >(edited)</span
                 >{/if}
               <Avatar
-                name={comment.author}
-                initials={comment.author.slice(0, 1).toUpperCase()}
+                name={author}
+                initials={author.slice(0, 1).toUpperCase()}
                 tone="neutral"
                 decorative
                 size={20}
               />
               <span class="author"
-                >{comment.teammate
-                  ? `${comment.author} / ${comment.teammate}`
-                  : comment.author}</span
+                >{comment.teammate ? `${author} / ${comment.teammate}` : author}</span
               >
               <time datetime={comment.created_at} title={localDateTimeLabel(comment.created_at)}>
                 {timeAgo(comment.created_at)}

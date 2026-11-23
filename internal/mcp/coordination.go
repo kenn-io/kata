@@ -165,6 +165,7 @@ func (h toolHandlers) inbox(ctx context.Context, request *sdkmcp.CallToolRequest
 		if !valid {
 			continue
 		}
+		value = notification.DisplayValue(value)
 		output.Requests = append(output.Requests, InboxRequest{
 			IssueUID: issue.UID, ProjectUID: issue.projectUID, Ref: issue.Ref, QualifiedRef: issue.QualifiedRef, WebURL: issue.WebURL, Title: issue.Title,
 			From: value.From, Teammate: value.Teammate, Message: value.Message,
