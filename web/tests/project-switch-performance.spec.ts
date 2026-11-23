@@ -67,6 +67,14 @@ for (const { daemon, roundTripMilliseconds } of daemons) {
         budgetMilliseconds,
       )
     }
+
+    // Reaching the end must still reveal and focus tasks beyond the first batches.
+    const rows = page.locator('button.row[data-uid]')
+    await rows.first().focus()
+    await page.keyboard.press('End')
+    await expect.poll(() => rows.count()).toBeGreaterThan(150)
+    await expect(rows.last()).toBeFocused()
+    await expect(rows.last()).toBeInViewport()
   })
 }
 
