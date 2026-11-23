@@ -631,7 +631,8 @@ Held polls need a few things from the deployment:
 - Each idle binding keeps one request open at its hub. A host that limits
   concurrent requests per instance, such as some managed platforms, holds more
   open requests than it did with interval polls.
-- A hub holds at most 32 polls per `GOMAXPROCS`, up to 256 total. Each spoke
+- A hub holds at most 32 polls per available CPU, accounting for `GOMAXPROCS`
+  and Linux CPU quotas, up to 256 total. Each spoke
   credential can hold at most half the total limit, up to 32, or 16 on a
   one-CPU hub. Signed polls can use at most half of the hub's federation control
   slots. Past a limit the hub

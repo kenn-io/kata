@@ -322,7 +322,7 @@ func TestFederationPollWaitCapsOversizedWaits(t *testing.T) {
 }
 
 func TestFederationPollWakeTagsAndFallback(t *testing.T) {
-	writer, reader := newFederationPollWaits(16), newFederationPollWaits(16)
+	writer, reader := newFederationPollWaits(16, 8), newFederationPollWaits(16, 8)
 	writer.remote.setSecret([]byte("first secret"))
 	msg := NewEventMsg(123456, db.Event{ProjectUID: "destination-project-uid", Type: "issue.moved", Payload: `{"from_project_uid":"source-project-uid"}`})
 	first := writer.messageFor(msg)

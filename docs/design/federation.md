@@ -322,7 +322,8 @@ authorization once more before releasing the page.
 Revocation before a wake ends the held poll at that wake. When the wait expires,
 the hub returns the initial empty page and its cursor; the next poll
 checks authorization and reads again. The hub holds at most 32 polls per
-`GOMAXPROCS`, up to 256 total, and at most half that limit per credential, up
+available CPU, accounting for `GOMAXPROCS` and Linux CPU quotas, up to 256 total,
+and at most half that limit per credential, up
 to 32. On a one-CPU hub, each credential can hold at most 16 polls. It also
 bounds signed requests holding a control slot; past a bound it answers at once.
 
