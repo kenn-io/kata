@@ -48,6 +48,19 @@ func TestErrorHintsArchivedProjectRestoreAndInit(t *testing.T) {
 	assert.Equal(t, project.ID, alias.ProjectID)
 }
 
+func TestErrorHintsExplicitProjectInGitWorkspace(t *testing.T) {
+	setupKataEnv(t)
+	t.Setenv("KATA_SERVER", "")
+	env := testenv.New(t)
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet")
+	runGit(t, dir, "remote", "add", "origin", "https://github.com/example/remote-project.git")
+
+	_, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "--project", "chosen-project", "create", "Example task")
+	require.Error(t, err)
+	assert.Contains(t, stderr, `run "kata init" with --project set to "chosen-project": it attaches this workspace to the active project "chosen-project", or creates it if none exists`)
+}
+
 func TestErrorHintsUnboundWorkspace(t *testing.T) {
 	setupKataEnv(t)
 	t.Setenv("KATA_SERVER", "")
