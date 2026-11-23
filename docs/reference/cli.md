@@ -1321,7 +1321,11 @@ By default, `kata meta set` stores the value as a JSON string; pass
 `--if-match <rev>` (accepting `7` or `rev-7`) to fail with HTTP 412 on conflict;
 `kata meta unset` takes the same guard and clears a key with a null merge-patch.
 `kata meta get` prints the whole metadata object or one key and honors the
-global `--json` and `--agent` flags.
+global `--json` and `--agent` flags. Asking for a key the issue does not have
+succeeds with exit 0: the
+human form prints nothing, `--agent` prints
+`OK meta get <ref> count=0 revision=rev-<n>`, and `--json` returns the key with
+`"value": null`. An issue ref that does not resolve still fails as not found.
 
 `kata schedule` sets the reserved `scheduled_on` value, and `kata deadline` sets
 `deadline_on`. To clear either value, pass `-`. A date or time can be
