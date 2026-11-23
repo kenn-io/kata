@@ -14,6 +14,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Refuse cross-project links when a project has an active relay enrollment without a binding.
 - Open qualified short issue IDs and project-scoped short IDs in browser links.
 - A federation hub's work to answer a quiet project's poll now grows only with what the hub wrote since the previous poll. An empty poll moves the spoke's cursor to the newest event the hub checked.
+- `kata meta get` on an unset key exits 0 with an empty human value, `count=0` in agent mode, and `value: null` in JSON.
 
 **Before upgrading**
 

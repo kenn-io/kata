@@ -208,6 +208,9 @@ Prints the whole metadata object, or one key when you pass `[key]`. It honors
 the global `--json` and `--agent` output modes. An unset key exits 0 with an
 empty human value, `count=0` in agent mode, and `value: null` in JSON, while a
 missing issue still returns not found.
+The agent summary line omits the requested key, and a misspelled key looks the
+same as an unset one in human and agent output. Use `--json` to see which key
+was read.
 
 This command reads from the issue's project-local metadata projection. It
 returns only the short ID, metadata, and current revision, without fetching
