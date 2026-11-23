@@ -95,6 +95,29 @@ it('lists a rule, opens its stop dialog, and responds to authority changes', asy
   expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
 })
 
+it("shows each rule's latest materialized task", async () => {
+  vi.mocked(listRecurrences).mockResolvedValue({
+    status: 200,
+    headers: new Headers(),
+    data: {
+      recurrences: [
+        { ...recurrence, last_materialized_uid: 'issue-1' },
+        {
+          ...recurrence,
+          id: 2,
+          uid: 'r2',
+          template_title: 'Monthly task',
+          last_materialized_uid: 'issue-2',
+        },
+      ],
+    },
+  })
+  renderList()
+  await fireEvent.click(await screen.findByRole('button', { name: /2 repeating tasks/ }))
+  expect(screen.getByText('Weekly task').parentElement?.textContent).toContain('issue-1')
+  expect(screen.getByText('Monthly task').parentElement?.textContent).toContain('issue-2')
+})
+
 it('refreshes the list after an edit conflict', async () => {
   const theirs = { ...recurrence, template_title: 'Their title', revision: 2 }
   vi.mocked(listRecurrences)
@@ -127,7 +150,7 @@ it('refreshes the list after an edit conflict', async () => {
 })
 
 it('retries a refused stop with the current revision', async () => {
-  const updated = { ...recurrence, revision: 2 }
+  const updated = { ...recurrence, template_title: 'Changed rule', revision: 2 }
   vi.mocked(listRecurrences)
     .mockResolvedValueOnce({
       status: 200,
@@ -169,8 +192,11 @@ it('retries a refused stop with the current revision', async () => {
           name: 'Stop repeating',
         }) as HTMLButtonElement
       ).disabled,
-    ).toBe(false),
+    ).toBe(true),
   )
+  await fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
+  await fireEvent.click(screen.getByRole('button', { name: 'Stop repeating…' }))
+  expect(within(screen.getByRole('dialog')).getByText('Changed rule')).toBeTruthy()
   await fireEvent.click(
     within(screen.getByRole('dialog')).getByRole('button', { name: 'Stop repeating' }),
   )
