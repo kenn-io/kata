@@ -362,19 +362,7 @@ func retryPushQuarantine(ctx context.Context, store db.Storage, binding *db.Fede
 			}
 			return recordFederationSyncError(ctx, store, binding.ProjectID, eventErr)
 		}
-		if retry, reason := autoRetryFederationQuarantine(q, quarantinedEvents); retry {
-			if _, err := store.RetryFederationQuarantine(ctx, db.RetryFederationQuarantineParams{
-				ID:        q.ID,
-				ProjectID: binding.ProjectID,
-				Actor:     binding.Actor,
-				Reason:    reason,
-				Now:       time.Now().UTC(),
-			}); err != nil {
-				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-			}
-		} else {
-			return recordFederationSyncError(ctx, store, binding.ProjectID, ErrFederationPushQuarantined)
-		}
+		return retryPushQuarantinedEvents(ctx, store, binding, q, quarantinedEvents)
 	} else if err != nil && !errors.Is(err, db.ErrNotFound) {
 		return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 	}

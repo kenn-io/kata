@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
@@ -37,6 +38,71 @@ func TestRetainedLinkPeersSkipsOrdinaryBinding(t *testing.T) {
 	_, err = publishRetainedLinkPeers(t.Context(), store, &binding, 0, nil, []db.Event{event}, make(map[string]bool), nil, nil, nil, clientpkg.Opts{})
 	require.NoError(t, err)
 	require.Zero(t, store.calls)
+}
+
+func TestAlreadyRejoinedBeforeUpgrade(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "rejoin-project")
+	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
+	_, old, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "old task", Author: "old-actor"})
+	require.NoError(t, err)
+	// Bindings and events have millisecond precision; keep the cutoff unambiguous.
+	time.Sleep(time.Until(old.CreatedAt.Add(time.Millisecond)))
+	_, err = spoke.env.DB.LeaveFederationReplica(ctx, spoke.projects[0].ID)
+	require.NoError(t, err)
+	grant, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: spoke.env.DB.InstanceUID(), ProjectID: &projects[0].ID, Capabilities: "push,pull", Actor: "new-actor"})
+	require.NoError(t, err)
+	_, err = spoke.env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: spoke.projects[0].ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: projects[0].ID, HubProjectUID: projects[0].UID, Actor: "new-actor", Enabled: true, PushEnabled: true})
+	require.NoError(t, err)
+	spoke.credentials[projects[0].UID] = config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[0].ID, Token: grant.Token, Actor: "new-actor"}
+	require.ErrorContains(t, spoke.sync(t, 0), "does not match bound actor")
+	_, err = spoke.env.DB.ActiveFederationQuarantine(ctx, spoke.projects[0].ID, db.FederationQuarantineDirectionPush)
+	require.NoError(t, err)
+	later, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "later task", Author: "new-actor"})
+	require.NoError(t, err)
+	require.NoError(t, spoke.sync(t, 0))
+	_, err = hub.DB.IssueByUID(ctx, later.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	retained, err := spoke.env.DB.EventsByUIDs(ctx, spoke.projects[0].ID, []string{old.UID})
+	require.NoError(t, err)
+	require.Equal(t, old.ContentHash, retained[0].ContentHash)
+}
+
+func TestLegacyBindingKeepsNewWrongActorQuarantined(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		equal bool
+	}{{"after rejoin", false}, {"at rejoin", true}} {
+		t.Run(tc.name, func(t *testing.T) { checkLegacyBindingKeepsWrongActorQuarantined(t, tc.equal) })
+	}
+}
+
+func checkLegacyBindingKeepsWrongActorQuarantined(t *testing.T, equal bool) {
+	t.Helper()
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "rejoin-project")
+	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
+	binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
+	require.NoError(t, err)
+	time.Sleep(time.Until(binding.CreatedAt.Add(time.Millisecond)))
+	_, bad, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "wrong actor", Author: "old-actor"})
+	require.NoError(t, err)
+	require.True(t, bad.CreatedAt.After(binding.CreatedAt))
+	if equal {
+		_, err = spoke.env.DB.ExecContext(ctx, `UPDATE federation_bindings SET created_at = ? WHERE project_id = ?`, bad.CreatedAt.UTC().Format(time.RFC3339Nano), binding.ProjectID)
+		require.NoError(t, err)
+	}
+	binding.Actor = "new-actor"
+	_, err = spoke.env.DB.UpsertFederationBinding(ctx, binding)
+	require.NoError(t, err)
+	grant, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: spoke.env.DB.InstanceUID(), ProjectID: &projects[0].ID, Capabilities: "push,pull", Actor: "new-actor"})
+	require.NoError(t, err)
+	spoke.credentials[projects[0].UID] = config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[0].ID, Token: grant.Token, Actor: "new-actor"}
+	require.ErrorContains(t, spoke.sync(t, 0), "does not match bound actor")
+	require.ErrorIs(t, spoke.sync(t, 0), ErrFederationPushQuarantined)
+	binding, err = spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
+	require.NoError(t, err)
+	require.Zero(t, binding.RetainedThroughEventID)
 }
 
 func checkRejoinRecoveredSnapshotReplyParent(t *testing.T) {
