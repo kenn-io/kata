@@ -11,7 +11,7 @@ set the needs-review label.
 // MCPClaimRules is ClaimRules in tool terms.
 const MCPClaimRules = `Claim with kata.claim and ttl_seconds; renew before expiry by claiming again
 with ttl_seconds, without if_unowned. Expiry while work.attention is ok sets it
-to needs-human; if you reclaim to continue, set work.attention back to ok.
+to needs-human; a later claim restores ok.
 `
 
 // MCPContract is the compact bootstrap for clients that have tools and a file

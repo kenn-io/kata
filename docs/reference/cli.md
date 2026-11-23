@@ -1226,8 +1226,9 @@ before the cleanup worker records `issue.assignment_expired`. When that worker
 expires the claim on an open issue whose `work.attention` is `ok`, it sets
 `work.attention` to `needs-human` and `work.attention_msg` to
 `claim expired without hand-off`. Renew a timed claim before it expires by
-claiming again with `--ttl`, without `--if-unowned`. An agent that reclaims
-after expiry and continues working should set `work.attention` back to `ok`.
+claiming again with `--ttl`, without `--if-unowned`. The next successful claim
+sets `work.attention` back to `ok` and clears that message; a `needs-human` or
+`stuck` set on purpose stays.
 
 Use `kata assign <ref> <owner>` to make an existing temporary assignment
 permanent. Closing an issue also removes the expiry and keeps its owner;

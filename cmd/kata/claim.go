@@ -26,12 +26,11 @@ effective actor and current owner; kata whoami shows only the client-selected ac
 Refuses when another actor owns it unless --force.
 --ttl releases the claim after 1m-24h. Renew it before it expires by claiming
 again with --ttl, without --if-unowned. If a timed claim expires while the
-issue's attention is ok, Kata sets it to needs-human; if you reclaim after that
-and continue working, set the attention back to ok.
+issue's attention is ok, Kata sets it to needs-human; the next successful claim
+sets it back to ok. A needs-human or stuck set on purpose stays.
 kata assign sets a different owner; kata unassign --expect-owner releases.`,
-		Example: `  kata claim abc4 --ttl 2h --agent
-  kata claim abc4 --ttl 2h --agent  # renew
-  kata claim abc4 --if-unowned --ttl 2h --agent`,
+		Example: `  kata claim abc4 --if-unowned --ttl 2h --agent  # take unowned work
+  kata claim abc4 --ttl 2h --agent  # renew before expiry`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ttlSeconds, err := assignmentTTLSeconds(cmd, ttl)

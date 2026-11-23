@@ -854,8 +854,9 @@ conflict, run `next` again. A timed assignment becomes eligible for `next`
 again at its expiry. Repeat the claim with `--ttl` and without `--if-unowned`
 before then to renew it. If the claim expires while `work.attention` is `ok`,
 Kata sets `work.attention` to `needs-human` with `work.attention_msg` set to
-`claim expired without hand-off`. If you reclaim after that and continue
-working, set `work.attention` back to `ok`.
+`claim expired without hand-off`. The next successful claim sets
+`work.attention` back to `ok` and clears that message; a `needs-human` or
+`stuck` set on purpose stays.
 
 Check the effective identity, issue status, revision, owner, and lease before
 continuing or handing off work:
