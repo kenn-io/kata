@@ -103,6 +103,13 @@ idempotent. Labels use kata label; metadata uses kata meta.`,
 			if err != nil {
 				return err
 			}
+			if body == "" && !src.BodySet {
+				return &cliError{
+					Message:  `body from --body-file or --body-stdin is empty; to clear the body pass --body ""`,
+					Kind:     kindValidation,
+					ExitCode: ExitValidation,
+				}
+			}
 			payload["body"] = body
 		}
 		if cmd.Flags().Changed("owner") {

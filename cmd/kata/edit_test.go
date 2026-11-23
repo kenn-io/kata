@@ -28,8 +28,14 @@ func TestEditBodySources(t *testing.T) {
 		require.ErrorContains(t, err, "exactly one")
 		assert.Equal(t, "first `command`\nsecond", fetchIssueViaHTTP(t, env, pid, issue).Issue.Body)
 	}
-	_, _, err := executeRootCaptureWithInput(ctx, t, "", "--workspace", dir, "edit", issue, "--body-stdin")
-	require.NoError(t, err)
+	writeStringFile(t, path, "")
+	for _, args := range [][]string{{"--body-stdin"}, {"--body-file", path}} {
+		_, _, err := executeRootCaptureWithInput(ctx, t, "", append([]string{"--workspace", dir, "edit", issue}, args...)...)
+		require.ErrorContains(t, err, `--body ""`)
+		requireCLIError(t, err, ExitValidation)
+		assert.Equal(t, "first `command`\nsecond", fetchIssueViaHTTP(t, env, pid, issue).Issue.Body)
+	}
+	runCLI(t, env, dir, "edit", issue, "--body", "")
 	assert.Empty(t, fetchIssueViaHTTP(t, env, pid, issue).Issue.Body)
 }
 

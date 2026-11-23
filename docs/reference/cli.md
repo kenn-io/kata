@@ -971,7 +971,7 @@ kata edit <issue-ref> \
 ```
 
 `--body`, `--body-file`, and `--body-stdin` are mutually exclusive; pass at
-most one.
+most one. An empty file or stdin is rejected; pass `--body ""` to clear the body.
 
 Link flags (`--parent`, `--blocks`, `--blocked-by`, `--related`, and their
 `--remove-*` counterparts) accept a same-project `short_id`, a
