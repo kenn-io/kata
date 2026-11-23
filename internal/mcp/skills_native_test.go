@@ -145,6 +145,12 @@ func TestNativeQuickstartNoShell(t *testing.T) {
 	final := callWorkflowTool(t, session, "kata.show", map[string]any{"ref": ref})["issue"].(map[string]any)
 	require.Equal(t, "closed", final["status"])
 	require.Equal(t, "example-agent", final["owner"])
+	// The unfinished path must update the attention state waiters observe,
+	// not only its message.
+	md, _ := SkillMarkdown("quickstart")
+	unfinished := regexp.MustCompile(`(?s)If unfinished,.*?\n\n`).FindString(md + "\n\n")
+	require.Regexp(t, `\bwork\.attention\b`, unfinished)
+	require.Contains(t, unfinished, "work.attention_msg")
 }
 
 // Product contract (kata#5s85): every MCP guide and the comment tools say

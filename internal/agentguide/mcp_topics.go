@@ -78,9 +78,9 @@ Close only after verification, with a message of at least 40 characters and
 typed evidence describing actual completed work. The example's external account
 must be replaced with your own evidence. Open children prevent parent closure.
 ` + call("kata.close", `{"ref":"spoke-project#abc4","reason":"done","message":"Completed the example task and reviewed the resulting changes.","evidence":[{"type":"external","account":"Checked the fixture issue and its comment through the MCP client."}]}`) + `
-If unfinished, leave it open, put what remains in work.attention_msg and set
-needs-review with kata.set_label. Never delete or purge without
-the user's explicit authorization for that exact action and issue.
+If unfinished, leave it open, update work.attention, put what remains in
+work.attention_msg and set needs-review with kata.set_label. Never delete or
+purge without the user's explicit authorization for that exact action and issue.
 `, true
 	case "issues":
 		return "# Find, create and update issues\n\n" + scope + `
