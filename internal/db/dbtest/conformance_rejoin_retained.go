@@ -59,10 +59,10 @@ func checkRejoinRetainedHistory(t *testing.T, store db.Storage) error {
 			require.NoError(t, err)
 		}
 		_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "new-actor"})
-		require.ErrorIs(t, err, db.ErrFederatedMoveUnsupported)
+		require.NoError(t, err)
 		current, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 		require.NoError(t, err)
-		require.Equal(t, source.ID, current.ProjectID)
+		require.Equal(t, target.ID, current.ProjectID)
 	})
 	t.Run("recover task moved before enrollment", func(t *testing.T) {
 		ctx := t.Context()

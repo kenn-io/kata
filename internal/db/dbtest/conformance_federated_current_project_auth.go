@@ -247,29 +247,7 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 	linkedSnapshot := newRemoteEvent(t, route, &linkedUID, "issue.snapshot", "worker", origin, at+2, marshalIssueDocument(t, linkedDocument))
 	params.Events = []db.FederationIngestEvent{{SourceEventID: 3, Event: linkedSnapshot}}
 	_, err = store.IngestFederationEvents(ctx, params)
-	require.NoError(t, err)
-	linkedIssue, err := store.IssueByUID(ctx, linkedUID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	links, err := store.LinksByIssue(ctx, linkedIssue.ID)
-	require.NoError(t, err)
-	require.Len(t, links, 1)
-	require.Equal(t, peerChild.UID, links[0].ToIssueUID)
-
-	for _, links := range [][]map[string]any{
-		{{"to_issue_uid": peerChild.UID, "type": "parent", "incoming": true}},
-		{{"to_issue_uid": peerChild.UID, "type": "parent", "incoming": true}, {"to_issue_uid": peerChild.UID, "type": "blocks"}},
-	} {
-		snapshotUID, err := uid.New()
-		require.NoError(t, err)
-		document := issueDocumentFields(snapshotUID, "worker")
-		document["links"] = links
-		snapshot := newRemoteEvent(t, route, &snapshotUID, "issue.snapshot", "worker", origin, at+2, marshalIssueDocument(t, document))
-		params.Events = []db.FederationIngestEvent{{SourceEventID: 3, Event: snapshot}}
-		_, err = store.IngestFederationEvents(ctx, params)
-		require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
-		_, err = store.ParentOf(ctx, peerChild.ID)
-		require.ErrorIs(t, err, db.ErrNotFound)
-	}
+	require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
 
 	// A parent URL can remove the same cross-project edge from its other end.
 	_, _, err = store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: peerChild.ID, ToIssueID: directChild.ID, Type: "parent", Author: "worker"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: peerChild.ID, FromUID: peerChild.UID, FromShortID: peerChild.ShortID, ToUID: directChild.UID, ToShortID: directChild.ShortID, Actor: "worker"})

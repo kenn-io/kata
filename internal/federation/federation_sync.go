@@ -476,8 +476,8 @@ func publishRetainedComments(ctx context.Context, store db.Storage, binding *db.
 		return false, nil
 	}
 	seen := make(map[string]bool)
-	var publish func(string, *db.FederationBinding, *Client, int64, db.Event) (bool, error)
-	publish = func(commentUID string, current *db.FederationBinding, currentClient *Client, currentHubID int64, carrier db.Event) (bool, error) {
+	var publish func(string) (bool, error)
+	publish = func(commentUID string) (bool, error) {
 		if commentUID == "" || seen[commentUID] {
 			return false, nil
 		}
@@ -494,35 +494,10 @@ func publishRetainedComments(ctx context.Context, store db.Storage, binding *db.
 		if err != nil {
 			return false, err
 		}
-		if issue.ProjectID != current.ProjectID {
-			tokens, err := federationMoveSourceTokens(ctx, store, credentials, *current, currentClient.baseURL, []db.Event{carrier}, opts)
-			if err != nil {
-				return false, err
-			}
-			other, err := store.FederationBindingByProject(ctx, issue.ProjectID)
-			if err != nil {
-				return false, err
-			}
-			if tokens[other.HubProjectUID] == "" {
-				return false, db.ErrFederationMoveSourceUnauthorized
-			}
-			credential, found, err := credentials.FederationCredential(ctx, other.HubProjectUID)
-			if err != nil {
-				return false, err
-			}
-			if !found {
-				return false, db.ErrFederationMoveSourceUnauthorized
-			}
-			credential = config.FederationTransportCredential(other.HubURL, other.HubProjectID, other.AllowInsecure, credential)
-			peerOpts := opts
-			peerOpts.AllowInsecure = false
-			currentClient, err = NewClient(ctx, credential.HubURL, credential.Token, clientOptsForCredential(peerOpts, credential))
-			if err != nil {
-				return false, err
-			}
-			current, currentHubID = &other, other.HubProjectID
+		if issue.ProjectID != binding.ProjectID {
+			return false, nil
 		}
-		comment, sourceID, err := store.RetainedCommentEvent(ctx, current.ProjectID, issue.UID, commentUID)
+		comment, sourceID, err := store.RetainedCommentEvent(ctx, binding.ProjectID, issue.UID, commentUID)
 		if errors.Is(err, db.ErrNotFound) {
 			return false, nil
 		}
@@ -535,21 +510,21 @@ func publishRetainedComments(ctx context.Context, store db.Storage, binding *db.
 		if err := json.Unmarshal([]byte(comment.Payload), &payload); err != nil {
 			return false, err
 		}
-		retired, err := publish(payload.ReplyToUID, current, currentClient, currentHubID, comment)
+		retired, err := publish(payload.ReplyToUID)
 		if err != nil || retired {
 			return retired, err
 		}
-		retired, err = publishRetainedLinkPeers(ctx, store, current, currentHubID, currentClient, []db.Event{comment}, sent, onPulledEvents, validateLease, credentials, opts)
+		retired, err = publishRetainedLinkPeers(ctx, store, binding, hubProjectID, client, []db.Event{comment}, sent, onPulledEvents, validateLease, credentials, opts)
 		if err != nil || retired {
 			return retired, err
 		}
 		envelope := federationIngestEnvelope(comment)
 		envelope.EventID = sourceID
-		tokens, err := federationMoveSourceTokens(ctx, store, credentials, *current, currentClient.baseURL, []db.Event{comment}, opts)
+		tokens, err := federationMoveSourceTokens(ctx, store, credentials, *binding, client.baseURL, []db.Event{comment}, opts)
 		if err != nil {
 			return false, err
 		}
-		_, err = currentClient.IngestProjectEventsWithOptions(ctx, currentHubID, []api.FederationIngestEventEnvelope{envelope}, IngestProjectEventsOptions{MoveSourceTokens: tokens})
+		_, err = client.IngestProjectEventsWithOptions(ctx, hubProjectID, []api.FederationIngestEventEnvelope{envelope}, IngestProjectEventsOptions{MoveSourceTokens: tokens})
 		if err != nil && retainedUnknownIssue(err) != issue.UID {
 			return false, err
 		}
@@ -570,7 +545,7 @@ func publishRetainedComments(ctx context.Context, store db.Storage, binding *db.
 		if event.Type == "issue.comment_edited" {
 			commentUID = payload.CommentUID
 		}
-		retired, err := publish(commentUID, binding, client, hubProjectID, event)
+		retired, err := publish(commentUID)
 		if err != nil || retired {
 			return retired, err
 		}
@@ -594,10 +569,21 @@ func publishRetainedLinkPeers(ctx context.Context, store db.Storage, binding *db
 		if peers == nil {
 			peers = make(map[string]bool)
 		}
+		if event.Type == "issue.snapshot" {
+			var payload db.IssueDocumentPayload
+			if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
+				return false, err
+			}
+			for _, link := range payload.Links {
+				if !link.Incoming {
+					peers[link.ToIssueUID] = true
+				}
+			}
+		}
 		if event.Type == "issue.commented" && event.RelatedIssueUID != nil {
 			peers[*event.RelatedIssueUID] = true
 		}
-		if event.Type == "issue.snapshot" || (event.Type == "issue.linked" && len(peers) == 0) {
+		if event.Type == "issue.linked" && len(peers) == 0 {
 			_, _, err = db.StripCrossProjectLinkAdditions(fold, func(uid string) bool {
 				peers[uid] = true
 				return false
@@ -610,7 +596,6 @@ func publishRetainedLinkPeers(ctx context.Context, store db.Storage, binding *db
 			if peer == "" || peer == fold.IssueUID || sent[peer] {
 				continue
 			}
-			peerBinding, peerClient, peerHubID := binding, client, hubProjectID
 			issue, err := store.IssueByUID(ctx, peer, db.IncludeDeletedYes)
 			if errors.Is(err, db.ErrNotFound) {
 				continue
@@ -619,37 +604,9 @@ func publishRetainedLinkPeers(ctx context.Context, store db.Storage, binding *db
 				return false, err
 			}
 			if issue.ProjectID != binding.ProjectID {
-				tokens, err := federationMoveSourceTokens(ctx, store, credentials, *binding, client.baseURL, batch, opts)
-				if err != nil {
-					return false, err
-				}
-				other, err := store.FederationBindingByProject(ctx, issue.ProjectID)
-				if errors.Is(err, db.ErrNotFound) {
-					continue
-				}
-				if err != nil {
-					return false, err
-				}
-				if tokens[other.HubProjectUID] == "" {
-					continue
-				}
-				credential, found, err := credentials.FederationCredential(ctx, other.HubProjectUID)
-				if err != nil {
-					return false, err
-				}
-				if !found {
-					continue
-				}
-				credential = config.FederationTransportCredential(other.HubURL, other.HubProjectID, other.AllowInsecure, credential)
-				peerOpts := opts
-				peerOpts.AllowInsecure = false
-				peerClient, err = NewClient(ctx, credential.HubURL, credential.Token, clientOptsForCredential(peerOpts, credential))
-				if err != nil {
-					return false, err
-				}
-				peerBinding, peerHubID = &other, other.HubProjectID
+				continue
 			}
-			snapshot, sourceID, err := store.RetainedIssueSnapshot(ctx, peerBinding.ProjectID, peer)
+			snapshot, sourceID, err := store.RetainedIssueSnapshot(ctx, binding.ProjectID, peer)
 			if errors.Is(err, db.ErrNotFound) {
 				continue
 			}
@@ -658,11 +615,11 @@ func publishRetainedLinkPeers(ctx context.Context, store db.Storage, binding *db
 			}
 			envelope := federationIngestEnvelope(snapshot)
 			envelope.EventID = sourceID
-			sourceTokens, err := federationMoveSourceTokens(ctx, store, credentials, *peerBinding, peerClient.baseURL, []db.Event{snapshot}, opts)
+			sourceTokens, err := federationMoveSourceTokens(ctx, store, credentials, *binding, client.baseURL, []db.Event{snapshot}, opts)
 			if err != nil {
 				return false, err
 			}
-			_, err = peerClient.IngestProjectEventsWithOptions(ctx, peerHubID, []api.FederationIngestEventEnvelope{envelope}, IngestProjectEventsOptions{MoveSourceTokens: sourceTokens})
+			_, err = client.IngestProjectEventsWithOptions(ctx, hubProjectID, []api.FederationIngestEventEnvelope{envelope}, IngestProjectEventsOptions{MoveSourceTokens: sourceTokens})
 			if err != nil {
 				if !retainedSnapshotAlreadyKnown(err, peer) {
 					return false, err
@@ -674,7 +631,7 @@ func publishRetainedLinkPeers(ctx context.Context, store db.Storage, binding *db
 					return false, err
 				}
 				ackCtx, resets := db.WithFederationMoveResetCapture(ctx)
-				if err := store.AcknowledgeFederationPush(ackCtx, peerBinding.ProjectID, peerBinding.PushCursorEventID, []string{snapshot.UID}); err != nil {
+				if err := store.AcknowledgeFederationPush(ackCtx, binding.ProjectID, binding.PushCursorEventID, []string{snapshot.UID}); err != nil {
 					return false, err
 				}
 				if onPulledEvents != nil {

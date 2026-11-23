@@ -157,8 +157,8 @@ func TestRetainedIssueMoveChecksHubBeforeSnapshot(t *testing.T) {
 	}{
 		{name: "hub missing", status: http.StatusNotFound, wantStatus: http.StatusConflict, wantSnapshots: 0},
 		{name: "hub known", status: http.StatusOK, wantStatus: http.StatusOK},
-		{name: "hub known with retained discussion", status: http.StatusOK, unpublishedComment: true, wantStatus: http.StatusConflict},
-		{name: "hub known with unsent current actor discussion", status: http.StatusOK, unpublishedComment: true, commentActor: "new-actor", wantStatus: http.StatusConflict},
+		{name: "hub known with retained discussion", status: http.StatusOK, unpublishedComment: true, wantStatus: http.StatusOK},
+		{name: "hub known with unsent current actor discussion", status: http.StatusOK, unpublishedComment: true, commentActor: "new-actor", wantStatus: http.StatusOK},
 		{name: "hub known with accepted snapshot", status: http.StatusOK, existingSnapshot: true, acceptedSnapshot: true, wantStatus: http.StatusConflict, wantSnapshots: 1},
 		{name: "offline", status: http.StatusServiceUnavailable, wantStatus: http.StatusServiceUnavailable},
 		{name: "offline with accepted snapshot", status: http.StatusServiceUnavailable, existingSnapshot: true, acceptedSnapshot: true, wantStatus: http.StatusServiceUnavailable, wantSnapshots: 1},

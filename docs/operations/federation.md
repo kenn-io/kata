@@ -156,11 +156,12 @@ Moves between different hubs, mixed local/federated projects, and paused binding
 return `federated_move_unsupported`. Create an issue in the target project and link
 it to the original issue instead. Disabling sync retains the binding.
 
-A retained issue cannot move if the hub no longer has it, has accepted its
-recovery snapshot, or the issue has comments. Create an
-issue in the target project and link it to the original instead. If the hub is
-unreachable or a recovery snapshot is pending, the move returns
-`federation_offline`.
+A retained issue cannot move if the hub no longer has it or has accepted its
+recovery snapshot. Create an issue in the target project and link it to the
+original instead. If the hub is unreachable or a recovery snapshot is pending,
+the move returns `federation_offline`. After rejoining, links to unpublished
+retained issues in another project can remain absent on the hub. A move of a
+retained issue or its unpublished discussion can also stop destination sync.
 
 ## Connect a project through the daemon catalog
 

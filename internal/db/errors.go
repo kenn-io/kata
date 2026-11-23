@@ -247,7 +247,6 @@ var (
 	// ErrFederatedMoveUnsupported is returned when a move involves any federated
 	// project. Cross-project federated move semantics need a separate design.
 	ErrFederatedMoveUnsupported = errors.New("federated project move unsupported")
-	ErrRetainedDiscussionMove   = fmt.Errorf("retained discussion cannot be verified: %w", ErrFederatedMoveUnsupported)
 
 	// ErrFederationMoveSourceUnauthorized reports missing or invalid source credential proof.
 	ErrFederationMoveSourceUnauthorized = errors.New("federated move source authority missing")

@@ -79,11 +79,6 @@ func (s *Store) moveIssueProjectTx(ctx context.Context, tx *sql.Tx, input db.Mov
 		if current.RecurrenceID != nil {
 			return &db.RecurrencePinnedError{}
 		}
-		if !input.DryRun {
-			if err := db.CheckRetainedDiscussionMove(ctx, tx, input.FromProjectID, current.ID, current.UID, s.InstanceUID()); err != nil {
-				return err
-			}
-		}
 		if err := db.CheckNativeRecurringParentMove(ctx, tx, true, input.FromProjectID, current.UID); err != nil {
 			return err
 		}
