@@ -62,13 +62,6 @@ func SetStatementTimeoutForTest(t testing.TB, timeout string) {
 // federation fold runs for projectID, so cost tests can EXPLAIN it.
 var FederationFoldEventsQueryForTest = federationFoldEventsQuery
 
-// FederationPollWakeChannelForTest returns the LISTEN channel that store's
-// federation poll wake bus uses, so tests can listen as an outside role would.
-func FederationPollWakeChannelForTest(store *Store) (string, error) {
-	channel, err := store.pollWakeChannel()
-	return channel, err
-}
-
 // CountStatementsForTest wraps the connections of stores opened after this
 // call, so they count statements run under a sqlcount.Counter context.
 func CountStatementsForTest() func() {

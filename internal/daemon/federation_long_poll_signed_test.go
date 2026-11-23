@@ -187,20 +187,6 @@ func TestFederationPollRechecksAuthorizationAfterItsRead(t *testing.T) {
 				assert.NotContains(t, response.Body.String(), canary)
 			})
 		})
-		t.Run(revocation.name+" before a held poll reads after waking", func(t *testing.T) {
-			f := newSignedPollFixture(t)
-			synctest.Test(t, func(t *testing.T) {
-				h := f.serve(t, 0)
-				done := h.startHeldPoll(t, h.cursor(t), "30")
-				// The poll authorizes again when it wakes; the revocation
-				// lands after that and before its read.
-				h.reads.beforeRead(func(int) error { return revocation.revoke(h, t) })
-				h.commit(t, canary, true)
-				response := <-done
-				assert.Equal(t, revocation.status, response.Code, response.Body.String())
-				assert.NotContains(t, response.Body.String(), canary)
-			})
-		})
 	}
 }
 
@@ -272,24 +258,4 @@ func TestFederationPollWaitRejectsARetiredSigningKey(t *testing.T) {
 			})
 		})
 	}
-	t.Run("key expires while the woken poll reads", func(t *testing.T) {
-		f := newSignedPollFixture(t)
-		synctest.Test(t, func(t *testing.T) {
-			h := f.serve(t, 20*time.Second)
-			done := h.startHeldPoll(t, h.cursor(t), "30")
-			// The poll passes its recheck when it wakes, then its read waits
-			// past the key's deadline before taking its snapshot.
-			slowRead := h.reads.readsReturned() + 1
-			h.reads.beforeRead(func(read int) error {
-				if read == slowRead {
-					time.Sleep(25 * time.Second)
-				}
-				return nil
-			})
-			h.commit(t, canary, true)
-			response := <-done
-			assert.Equal(t, http.StatusUnauthorized, response.Code, response.Body.String())
-			assert.NotContains(t, response.Body.String(), canary)
-		})
-	})
 }

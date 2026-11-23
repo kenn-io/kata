@@ -322,9 +322,3 @@ func TestFederationPollWaitReauthorizesAfterWake(t *testing.T) {
 		})
 	}
 }
-
-func TestFederationPollWaitRejectsANegativeWait(t *testing.T) {
-	f := newLongPollFixture(t)
-	result := f.poll(t, 0, "-1")
-	assert.Equal(t, http.StatusBadRequest, result.status, "%s", result.raw)
-}

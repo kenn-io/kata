@@ -308,6 +308,16 @@ func checkFederationControlLifecycle(t *testing.T, store db.Storage) error {
 	}
 	require.NotNil(t, pullStatus.LastPullSuccessAt)
 	assert.Equal(t, pullSuccess, *pullStatus.LastPullSuccessAt)
+	heldAt := pullSuccess.Add(time.Second)
+	if err := store.RecordFederationHeldPullSuccess(ctx, spoke.ID, heldAt); err != nil {
+		return err
+	}
+	pullStatus, err = store.FederationSyncStatusByProject(ctx, spoke.ID)
+	if err != nil {
+		return err
+	}
+	require.NotNil(t, pullStatus.LastPullSuccessAt)
+	assert.Equal(t, heldAt, *pullStatus.LastPullSuccessAt)
 	if err := store.RecordFederationSyncPushStarted(ctx, spoke.ID, pushStarted); err != nil {
 		return err
 	}

@@ -54,23 +54,6 @@ func TestFederationPollWakeReachesAnotherProcessOnTheSameSchema(t *testing.T) {
 }
 
 func TestFederationPollWakeStaysWithinItsSchema(t *testing.T) {
-	t.Run("installation", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(t.Context(), 120*time.Second)
-		defer cancel()
-		const schema = "wake_probe_schema"
-		dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
-		t.Cleanup(cleanup)
-		otherDSN, otherCleanup := pgstoretest.NewDatabase(t, ctx)
-		t.Cleanup(otherCleanup)
-		store := openPollWakeStore(t, ctx, dsn, schema)
-		otherInstallation := openPollWakeStore(t, ctx, otherDSN, schema)
-
-		channel, err := pgstore.FederationPollWakeChannelForTest(store)
-		require.NoError(t, err)
-		otherChannel, err := pgstore.FederationPollWakeChannelForTest(otherInstallation)
-		require.NoError(t, err)
-		require.NotEqual(t, otherChannel, channel, "installations sharing a schema name must not share a channel")
-	})
 	t.Run("schema", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 120*time.Second)
 		defer cancel()

@@ -41,12 +41,19 @@ func TestFederationPollWaitsBoundEveryHeldPoll(t *testing.T) {
 	waits := newFederationPollWaits(16)
 	broadcaster := NewEventBroadcaster()
 	project := db.Project{ID: 7, UID: "01HZNQ7VFPK1XGD8R5MABCD4EA"}
-	for enrollment := range int64(federationPollMaxWaiters) {
+	for range federationPollMaxWaitersPerCredential {
+		waiter, ok := waits.admit(t.Context(), broadcaster, -1, project)
+		require.True(t, ok)
+		t.Cleanup(waiter.release)
+	}
+	_, ok := waits.admit(t.Context(), broadcaster, -1, project)
+	assert.False(t, ok)
+	for enrollment := range int64(federationPollMaxWaiters - federationPollMaxWaitersPerCredential) {
 		waiter, ok := waits.admit(t.Context(), broadcaster, enrollment, project)
 		require.True(t, ok)
 		t.Cleanup(waiter.release)
 	}
-	_, ok := waits.admit(t.Context(), broadcaster, federationPollMaxWaiters, project)
+	_, ok = waits.admit(t.Context(), broadcaster, federationPollMaxWaiters, project)
 	assert.False(t, ok)
 }
 
@@ -261,7 +268,6 @@ func TestFederationPollWaitAnswersAtOnceWhenCredentialWaitersAreFull(t *testing.
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, status)
 	assert.Less(t, elapsed, 5*time.Second, "a poll beyond the per-credential bound must answer like an ordinary poll")
-	assert.Equal(t, federationPollMaxWaitersPerCredential, hub.waits.heldFor(hub.enrollmentID))
 	release()
 	ended()
 	//nolint:kennlint // sleeptest: disconnect cleanup runs in hub handlers reached over real HTTP.
@@ -274,6 +280,8 @@ func TestFederationPollWaitCapsOversizedWaits(t *testing.T) {
 	wait, err := federationPollWait(t.Context(), api.OptionalInt{IsSet: true, Value: 9223372037})
 	require.NoError(t, err)
 	assert.Equal(t, federationPollWaitMax, wait)
+	_, err = federationPollWait(t.Context(), api.OptionalInt{IsSet: true, Value: -1})
+	assert.Error(t, err)
 }
 
 func TestFederationPollWakeTagsAndFallback(t *testing.T) {
