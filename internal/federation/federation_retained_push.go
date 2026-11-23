@@ -29,10 +29,11 @@ type retainedPush struct {
 // withRecoveryEventPublisher reports events that retained-history recovery
 // commits to the daemon's open clients.
 func withRecoveryEventPublisher(ctx context.Context, onPulled func(int64, []db.Event)) context.Context {
+	if onPulled == nil {
+		return ctx
+	}
 	return db.WithRecoveryEventPublisher(ctx, func(event db.Event) {
-		if onPulled != nil {
-			onPulled(event.ProjectID, []db.Event{event})
-		}
+		onPulled(event.ProjectID, []db.Event{event})
 	})
 }
 
@@ -102,7 +103,7 @@ func (r *retainedPush) plan(ctx context.Context, events []db.Event) (int, error)
 		if r.ownIssueEvent(event, "issue.created") && event.ID <= through {
 			return alone(i, &r.creation), nil
 		}
-		if !r.ownIssueEvent(event, "issue.snapshot") || event.ID <= through {
+		if !r.ownIssueEvent(event, "issue.snapshot") {
 			continue
 		}
 		snapshot, _, err := r.store.RetainedIssueSnapshot(ctx, r.binding.ProjectID, *event.IssueUID)

@@ -2,6 +2,7 @@ package daemon_test
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -139,6 +140,35 @@ func TestCronSpokeForwardLifecycle(t *testing.T) {
 	delivered, err := hub.DB.DispatchRecurringCron(t.Context(), db.DispatchRecurringCronIn{ProjectID: hp.ID, JobUID: current.UID, ExpectedEventUID: current.DefinitionEventUID, Now: time.Now().Add(3 * time.Hour)})
 	require.NoError(t, err)
 	require.NotEmpty(t, delivered.Events)
+}
+
+func TestCronSpokeForwardPublishesRecoveryEvents(t *testing.T) {
+	broadcaster := daemon.NewEventBroadcaster()
+	sink := &recordingSink{}
+	f := newCronForwardFixture(t, func(f *cronForwardFixture, cfg *daemon.ServerConfig) {
+		cfg.Broadcaster, cfg.Hooks = broadcaster, sink
+		binding, err := f.spoke.DB.FederationBindingByProject(t.Context(), f.sp.ID)
+		require.NoError(t, err)
+		_, err = f.spoke.DB.LeaveFederationReplica(t.Context(), f.sp.ID)
+		require.NoError(t, err)
+		issue, _, err := f.spoke.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: f.sp.ID, Title: "retained task", Author: "old-actor"})
+		require.NoError(t, err)
+		binding.RetainHistory = true
+		_, err = f.spoke.DB.UpsertFederationBinding(t.Context(), binding)
+		require.NoError(t, err)
+		_, err = f.spoke.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "tester", Patch: map[string]jsontext.Value{"area": jsontext.Value(`"api"`)}})
+		require.NoError(t, err)
+	})
+	sub := broadcaster.Subscribe(daemon.SubFilter{ProjectID: f.sp.ID})
+	defer sub.Unsub()
+	response, raw := f.put(t, cronHTTPUID(t), "")
+	require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
+	msg := receiveMsg(t, sub.Ch, time.Second, "recovery snapshot")
+	require.NotNil(t, msg.Event)
+	require.Equal(t, "issue.snapshot", msg.Event.Type)
+	events := sink.snapshot()
+	require.Len(t, events, 1)
+	require.Equal(t, msg.Event.UID, events[0].UID)
 }
 
 func forwardingTestConfig(cfg daemon.ServerConfig) daemon.ServerConfig {

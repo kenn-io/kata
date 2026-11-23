@@ -98,6 +98,7 @@ func forwardCronJob(ctx context.Context, cfg ServerConfig, projectID int64, uid,
 	if !meta.NativeCronWrites {
 		return nil, true, api.NewError(409, "federated_read_only", "owning hub does not support native cron writes", "Upgrade the hub, or run the command against it with --daemon <hub-name>.", nil)
 	}
+	ctx = db.WithRecoveryEventPublisher(ctx, func(event db.Event) { cfg.Publish().Event(event.ProjectID, event) })
 	if err := cfg.FederationPushPending(ctx, binding, cred); err != nil {
 		return nil, true, cronForwardUnavailable("pending federation push failed; no cron write was sent")
 	}
