@@ -2,18 +2,17 @@
   import { Button, Card, RadioGroup } from '@kenn-io/kit-ui'
   import CheckIcon from '@lucide/svelte/icons/check'
   import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw'
-  import type { KataTaskCloseRequest, KataTaskDetail, KataTaskSummary } from '../lib/kata/types'
+  import type { KataTaskCloseRequest, KataTaskDetail } from '../lib/kata/types'
   import Modal from './Modal.svelte'
 
   interface Props {
     issue: KataTaskDetail
-    issueCatalog?: readonly KataTaskSummary[] | undefined
     disabled?: boolean | undefined
     onCloseIssue: (request: KataTaskCloseRequest) => boolean | Promise<boolean>
     onReopenIssue: () => void | Promise<void>
   }
 
-  let { issue, issueCatalog = [], disabled = false, onCloseIssue, onReopenIssue }: Props = $props()
+  let { issue, disabled = false, onCloseIssue, onReopenIssue }: Props = $props()
 
   type CloseReason = 'done' | 'wontfix' | 'duplicate' | 'superseded'
   type DoneEvidence = 'test' | 'commit' | 'pr' | 'reviewed-paths' | 'external'
@@ -56,22 +55,12 @@
   let pending = $state(false)
   let completeMessageInput: HTMLTextAreaElement | null = $state(null)
   let trackedUID = $state<string | null>(null)
-  // Closing frees a blocked task only when this task is its last open
-  // blocker; tasks the snapshot doesn't hold get only the link stated.
-  const blockedPreview = $derived.by(() => {
-    let unblocks = 0
-    for (const link of issue.links) {
-      if (link.type !== 'blocks' || link.from.uid !== issue.issue.uid) continue
-      if (link.to.status !== 'open') continue
-      const blocked = issueCatalog.find((task) => task.uid === link.to.uid)
-      if (
-        blocked?.open_blocked_by &&
-        !blocked.open_blocked_by.some((blocker) => blocker.uid !== issue.issue.uid)
-      )
-        unblocks += 1
-    }
-    return unblocks
-  })
+  const blockedPreview = $derived(
+    issue.links.filter(
+      (link) =>
+        link.type === 'blocks' && link.from.uid === issue.issue.uid && link.to.status === 'open',
+    ).length,
+  )
 
   function openTasks(count: number): string {
     return `${count} open ${count === 1 ? 'task' : 'tasks'}`
@@ -296,7 +285,10 @@
     </label>
     <Card level="inset" padding="sm">
       <div>Comments and links stay.</div>
-      {#if blockedPreview}<div>Unblocks {openTasks(blockedPreview)}.</div>{/if}
+      {#if blockedPreview}<div>
+          {openTasks(blockedPreview)}
+          {blockedPreview === 1 ? 'loses' : 'lose'} this blocker.
+        </div>{/if}
     </Card>
   </div>
 

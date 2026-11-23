@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { KataTaskDetail, KataTaskSummary } from '../lib/kata/types'
+import type { KataTaskDetail } from '../lib/kata/types'
 
 import IssueStateDialog from './IssueStateDialog.svelte'
 
@@ -34,22 +34,7 @@ describe('IssueStateDialog', () => {
     cleanup()
   })
 
-  function blockedTask(uid: string, openBlockers: string[]): KataTaskSummary {
-    return {
-      ...makeIssue().issue,
-      uid,
-      open_blocked_by: openBlockers.map((blocker) => ({
-        uid: blocker,
-        short_id: blocker,
-        qualified_id: blocker,
-      })),
-    }
-  }
-
-  async function openCompletePreview(
-    blockedUIDs: string[],
-    issueCatalog: KataTaskSummary[] = [],
-  ): Promise<HTMLElement> {
+  async function openCompletePreview(blockedUIDs: string[]): Promise<HTMLElement> {
     const issue = makeIssue()
     for (const [index, uid] of blockedUIDs.entries()) {
       issue.links.push({
@@ -63,19 +48,66 @@ describe('IssueStateDialog', () => {
       })
     }
     render(IssueStateDialog, {
-      props: { issue, issueCatalog, onCloseIssue: vi.fn(), onReopenIssue: vi.fn() },
+      props: { issue, onCloseIssue: vi.fn(), onReopenIssue: vi.fn() },
     })
     await fireEvent.click(screen.getByRole('button', { name: 'Complete…' }))
     return screen.getByRole('dialog', { name: 'Complete task' })
   }
 
-  it('counts only loaded tasks with no other open blocker', async () => {
-    const dialog = await openCompletePreview(
-      ['issue-2', 'issue-3', 'issue-4'],
-      [blockedTask('issue-2', ['issue-1', 'issue-9']), blockedTask('issue-3', ['issue-1'])],
-    )
-    expect(within(dialog).getByText('Unblocks 1 open task.')).toBeTruthy()
+  it('counts open tasks losing this blocker even outside the filtered collection', async () => {
+    const dialog = await openCompletePreview(['issue-2', 'issue-3', 'issue-4'])
+    expect(within(dialog).getByText('3 open tasks lose this blocker.')).toBeTruthy()
     expect(within(dialog).getByText('Comments and links stay.')).toBeTruthy()
+  })
+
+  it('uses singular wording for one open task', async () => {
+    const dialog = await openCompletePreview(['issue-2'])
+    expect(within(dialog).getByText('1 open task loses this blocker.')).toBeTruthy()
+  })
+
+  it('excludes closed tasks and incoming blocker links', async () => {
+    const issue = makeIssue()
+    const selected = {
+      uid: 'issue-1',
+      short_id: 'I-1',
+      qualified_id: 'INBOX-1',
+      status: 'open' as const,
+    }
+    const open = {
+      uid: 'issue-2',
+      short_id: 'I-2',
+      qualified_id: 'INBOX-2',
+      status: 'open' as const,
+    }
+    const closed = {
+      uid: 'issue-3',
+      short_id: 'I-3',
+      qualified_id: 'INBOX-3',
+      status: 'closed' as const,
+    }
+    issue.links = [
+      {
+        id: 1,
+        project_id: 1,
+        type: 'blocks',
+        from: selected,
+        to: closed,
+        author: 'user-a',
+        created_at: '',
+      },
+      {
+        id: 2,
+        project_id: 1,
+        type: 'blocks',
+        from: open,
+        to: selected,
+        author: 'user-a',
+        created_at: '',
+      },
+    ]
+    render(IssueStateDialog, { props: { issue, onCloseIssue: vi.fn(), onReopenIssue: vi.fn() } })
+    await fireEvent.click(screen.getByRole('button', { name: 'Complete…' }))
+    expect(within(screen.getByRole('dialog')).queryByText(/this blocker/)).toBeNull()
   })
 
   it('uses shared Kit UI actions', async () => {
