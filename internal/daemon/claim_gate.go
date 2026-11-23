@@ -279,6 +279,13 @@ func retainedIssueState(ctx context.Context, store db.Storage, binding db.Federa
 	if binding.RetainedThroughEventID == 0 {
 		return false, false, false, nil
 	}
+	issue, err := store.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
+	if err != nil {
+		return false, false, false, err
+	}
+	if issue.ProjectID != binding.ProjectID {
+		return false, false, false, db.ErrNotFound
+	}
 	former, err := store.FormerInstanceUIDs(ctx)
 	if err != nil {
 		return false, false, false, err
@@ -286,7 +293,7 @@ func retainedIssueState(ctx context.Context, store db.Storage, binding db.Federa
 	var afterID int64
 	retained, snapshot, pending := false, false, false
 	for {
-		events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: binding.ProjectID, IssueUID: issueUID, Types: []string{"issue.created", "issue.snapshot", "issue.moved"}, AfterID: afterID, Limit: 1000})
+		events, err := store.EventsAfter(db.WithAuthorizedProjects(ctx, nil), db.EventsAfterParams{ProjectID: binding.ProjectID, IssueUID: issueUID, Types: []string{"issue.created", "issue.snapshot", "issue.moved"}, AfterID: afterID, Limit: 1000})
 		if err != nil {
 			return false, false, false, err
 		}
@@ -299,7 +306,7 @@ func retainedIssueState(ctx context.Context, store db.Storage, binding db.Federa
 			if event.ID <= binding.RetainedThroughEventID && (formerOrigin || event.Actor != binding.Actor) {
 				retained = true
 			}
-			if current && event.ID > binding.RetainedThroughEventID && event.Actor == binding.Actor && event.Type == "issue.snapshot" {
+			if current && retained && event.Type == "issue.snapshot" {
 				snapshot = snapshot || event.ID <= binding.PushCursorEventID
 				pending = pending || event.ID > binding.PushCursorEventID
 			}

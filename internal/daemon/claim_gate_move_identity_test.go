@@ -123,6 +123,7 @@ func TestRetainedIssueMoveChecksHubBeforeSnapshot(t *testing.T) {
 		status           int
 		existingSnapshot bool
 		acceptedSnapshot bool
+		rejoin           bool
 		noBoundary       bool
 		wantStatus       int
 		wantSnapshots    int
@@ -130,6 +131,8 @@ func TestRetainedIssueMoveChecksHubBeforeSnapshot(t *testing.T) {
 		{name: "hub missing", status: http.StatusNotFound, wantStatus: http.StatusConflict, wantSnapshots: 0},
 		{name: "hub known", status: http.StatusOK, wantStatus: http.StatusOK},
 		{name: "hub known with accepted snapshot", status: http.StatusOK, existingSnapshot: true, acceptedSnapshot: true, wantStatus: http.StatusConflict, wantSnapshots: 1},
+		{name: "hub known after second rejoin", status: http.StatusOK, existingSnapshot: true, acceptedSnapshot: true, rejoin: true, wantStatus: http.StatusConflict, wantSnapshots: 1},
+		{name: "pending snapshot after second rejoin", status: http.StatusOK, existingSnapshot: true, rejoin: true, wantStatus: http.StatusServiceUnavailable, wantSnapshots: 1},
 		{name: "offline", status: http.StatusServiceUnavailable, wantStatus: http.StatusServiceUnavailable},
 		{name: "offline with accepted snapshot", status: http.StatusServiceUnavailable, existingSnapshot: true, acceptedSnapshot: true, wantStatus: http.StatusServiceUnavailable, wantSnapshots: 1},
 		{name: "hub known with pending snapshot", status: http.StatusOK, existingSnapshot: true, wantStatus: http.StatusServiceUnavailable, wantSnapshots: 1},
@@ -168,6 +171,15 @@ func TestRetainedIssueMoveChecksHubBeforeSnapshot(t *testing.T) {
 				if tc.acceptedSnapshot {
 					require.NoError(t, env.DB.AdvanceFederationPushCursor(ctx, source.ID, snapshot.ID))
 				}
+			}
+			if tc.rejoin {
+				binding, err := env.DB.FederationBindingByProject(ctx, source.ID)
+				require.NoError(t, err)
+				_, err = env.DB.LeaveFederationReplica(ctx, source.ID)
+				require.NoError(t, err)
+				_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: source.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: source.ID, HubProjectUID: source.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: true})
+				require.NoError(t, err)
+				require.NoError(t, env.DB.AdvanceFederationPushCursor(ctx, source.ID, binding.PushCursorEventID))
 			}
 			resp, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(source.ID, issue.UID, "actions/move"), map[string]any{"actor": "new-actor", "to_project_uid": target.UID}, map[string]string{"If-Match": fmt.Sprintf(`"rev-%d"`, issue.Revision)})
 			require.Equal(t, tc.wantStatus, resp.StatusCode, string(raw))
