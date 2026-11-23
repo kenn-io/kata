@@ -344,9 +344,18 @@ func TestResolve_NotInitializedHint(t *testing.T) {
 				continue
 			}
 			t.Run(shape+"/"+state, func(t *testing.T) {
-				h := newServerWithGitWorkspace(t, "https://github.com/example/remote-project.git")
+				ts, h := startDefaultTestServer(t)
 				name := "remote-project"
-				request := map[string]any{"start_path": h.dir}
+				request := map[string]any{}
+				if shape == "path" || shape == "path with config" {
+					dir := t.TempDir()
+					testfix.RunGit(t, dir, "init", "--quiet")
+					testfix.RunGit(t, dir, "remote", "add", "origin", "https://github.com/example/remote-project.git")
+					request["start_path"] = dir
+					if shape == "path with config" {
+						testfix.WriteKataToml(t, dir, "saved-project")
+					}
+				}
 				if shape == "alias" || shape == "alias with name" {
 					request = map[string]any{"alias": map[string]any{"identity": "github.com/example/remote-project", "kind": "git"}}
 					if shape == "alias with name" {
@@ -358,8 +367,6 @@ func TestResolve_NotInitializedHint(t *testing.T) {
 					name = "saved-project"
 					if shape == "name" {
 						request = map[string]any{"name": name}
-					} else {
-						testfix.WriteKataToml(t, h.dir, name)
 					}
 				}
 				hint := fmt.Sprintf(`run "kata init": it attaches this workspace to the active project %q, or creates it if none exists`, name)
@@ -369,10 +376,10 @@ func TestResolve_NotInitializedHint(t *testing.T) {
 					hint = fmt.Sprintf(`run "kata init" with --project set to %q: it attaches this workspace to the active project %q, or creates it if none exists`, name, name)
 				}
 				if state != "missing" {
-					project, err := h.DB().CreateProject(t.Context(), name)
+					project, err := h.db.CreateProject(t.Context(), name)
 					require.NoError(t, err)
 					if state == "archived" {
-						_, _, err = h.DB().RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: project.ID, Actor: "tester"})
+						_, _, err = h.db.RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: project.ID, Actor: "tester"})
 						require.NoError(t, err)
 						hint = fmt.Sprintf(`run "kata projects restore %d", then run "kata init" in this workspace`, project.ID)
 						if shape == "name" {
@@ -382,7 +389,7 @@ func TestResolve_NotInitializedHint(t *testing.T) {
 						}
 					}
 				}
-				resp, bs := postJSON(t, h.ts.(*httptest.Server), "/api/v1/projects/resolve", request)
+				resp, bs := postJSON(t, ts, "/api/v1/projects/resolve", request)
 				envelope := assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
 				assert.Equal(t, hint, envelope.Error.Hint)
 			})
