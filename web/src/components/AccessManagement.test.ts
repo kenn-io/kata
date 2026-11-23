@@ -132,7 +132,10 @@ describe('AccessManagement', () => {
       props: {
         projects,
         pending: false,
-        onMutation: async (_draft, mutate) => {
+        onMutation: async (
+          _draft: unknown,
+          mutate: (context: MutationContext) => Promise<unknown>,
+        ) => {
           await mutate({ headers: {} } as MutationContext)
           return false
         },

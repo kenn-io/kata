@@ -160,7 +160,7 @@
               {:else}
                 <span>Never used</span>
               {/if}
-              {#if token.expires_at && !token.revoked_at}
+              {#if token.expires_at}
                 <span
                   >{token.state === 'expired' ? 'Expired' : 'Expires'}
                   <time datetime={token.expires_at} title={exact(token.expires_at)}

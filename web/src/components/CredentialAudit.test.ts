@@ -74,6 +74,15 @@ describe('CredentialAudit', () => {
     expect(screen.queryByRole('button', { name: /revoke/i })).toBeNull()
   })
 
+  it('shows both expiry and revocation dates for a revoked credential', () => {
+    const revoked = { ...tokens[2]!, expires_at: '2026-09-10T10:00:00Z' }
+    render(CredentialAudit, { props: auditProps({ tokens: [revoked] }) })
+
+    const row = screen.getByRole('listitem')
+    expect(row.querySelector('time[datetime="2026-09-10T10:00:00Z"]')).not.toBeNull()
+    expect(row.querySelector('time[datetime="2026-08-03T10:00:00Z"]')).not.toBeNull()
+  })
+
   it('offers filters past eight credentials and says when none match', async () => {
     const many = Array.from({ length: 9 }, (_, index) => ({
       ...tokens[1]!,
