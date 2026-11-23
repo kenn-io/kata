@@ -245,6 +245,51 @@ describe('kata task view builder', () => {
     ])
   })
 
+  test('groups Delegated work by displayed author across connections', () => {
+    const member = '11111111-1111-4111-8111-111111111111'
+    const otherMember = '22222222-2222-4222-8222-222222222222'
+    const laptop = `Ana [member:${member}; enrollment:44444444-4444-4444-8444-444444444444]`
+    const desktop = `Ana [member:${member}; enrollment:55555555-5555-4555-8555-555555555555]`
+    const namesake = `Ana [member:${otherMember}; enrollment:66666666-6666-4666-8666-666666666666]`
+    const delegated = (uid: string, title: string, author: string) => ({
+      ...issue(uid, title, 'project-health', { teammate: 'reviewer-7' }),
+      author,
+    })
+    const view = buildKataTaskView({
+      view: 'delegated',
+      issues: [
+        delegated('issue-1', 'Laptop task', laptop),
+        delegated('issue-2', 'Desktop task', desktop),
+        delegated('issue-3', 'Namesake task', namesake),
+        delegated('issue-6', 'Direct task', 'Ana'),
+      ],
+      projects,
+      today,
+      fetched_at: fetchedAt,
+    })
+
+    expect(
+      view.groups.map((group) => [
+        group.id,
+        group.title,
+        group.handoff,
+        group.issues.map((item) => [item.title, item.author]),
+      ]),
+    ).toEqual([
+      [
+        `Ana/reviewer-7`,
+        'reviewer-7 for Ana',
+        { teammate: 'reviewer-7', author: 'Ana' },
+        [
+          ['Desktop task', desktop],
+          ['Direct task', 'Ana'],
+          ['Laptop task', laptop],
+          ['Namesake task', namesake],
+        ],
+      ],
+    ])
+  })
+
   test('uses the server-projected browser date for timed schedules', () => {
     const previousBrowserDay = {
       ...issue('issue-1', 'Previous browser day', 'project-health', {

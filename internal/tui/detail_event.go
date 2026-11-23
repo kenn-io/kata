@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/mattn/go-runewidth"
+	"go.kenn.io/kata/internal/authorname"
 	"go.kenn.io/kata/internal/metadata"
 )
 
@@ -241,7 +242,7 @@ func eventChunkLines(e EventLogEntry, width int, isCursor bool, current map[stri
 	// agent-authored payload fields — sanitize both.
 	head := fmt.Sprintf("[%s] %s %s — %s",
 		e.Type, fmtTime(e.CreatedAt),
-		sanitizeForDisplay(e.Actor),
+		sanitizeForDisplay(authorname.Display(e.Actor)),
 		sanitizeForDisplay(eventDescription(e)))
 	lines := []string{applyActivityCursor(head, isCursor)}
 	if e.Type == "issue.closed" {

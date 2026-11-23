@@ -116,8 +116,9 @@ func TestAssignStatusAndUnassignRoundTripAgainstDaemon(t *testing.T) {
 func TestInboxReadsAttentionRequestsAgainstDaemon(t *testing.T) {
 	session, _ := newCoordinationSession(t)
 	key := notification.MetadataKey("reviewer-agent")
+	actor := "Ana [member:11111111-1111-4111-8111-111111111111; enrollment:11111111-1111-4111-8111-111111111111]"
 	requests := []map[string]any{
-		{"from": "example-agent", "message": "Please review the plan"},
+		{"from": actor, "message": "Please review"},
 		{"from": "example-agent", "teammate": "planner", "message": "Second look"},
 		{"from": "", "message": "Malformed request"},
 	}
@@ -139,11 +140,18 @@ func TestInboxReadsAttentionRequestsAgainstDaemon(t *testing.T) {
 	for _, item := range listed {
 		request := item.(map[string]any)
 		messages[request["message"].(string)] = request
-		require.Equal(t, "example-agent", request["from"])
+		if request["message"] == "Second look" {
+			require.Equal(t, "example-agent", request["from"])
+			require.Equal(t, "example-agent/planner", request["from_address"])
+		} else {
+			require.Equal(t, "Ana", request["from"])
+			require.Equal(t, actor, request["from_address"])
+		}
 		require.NotEmpty(t, request["qualified_ref"])
 	}
 	require.Equal(t, "planner", messages["Second look"]["teammate"])
-	require.NotContains(t, messages["Please review the plan"], "teammate")
+	require.NotContains(t, messages["Please review"], "teammate")
+	require.Contains(t, messages, "Please review")
 
 	limited := callAdministrationTool(t, session, "kata.inbox", map[string]any{"for": "reviewer-agent", "limit": 1})
 	require.Equal(t, true, limited["truncated"])

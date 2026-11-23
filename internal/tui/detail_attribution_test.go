@@ -8,6 +8,7 @@ import (
 	"github.com/mattn/go-runewidth"
 	"github.com/stretchr/testify/require"
 
+	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
 )
 
@@ -80,4 +81,49 @@ func TestCreationAttributionDoesNotInventProofAndSanitizesLabels(t *testing.T) {
 	require.NotContains(t, text, "unverified-account")
 	require.NotContains(t, text, "\x1b")
 	require.NotContains(t, text, "\t")
+}
+
+// Federated authors carry a connection suffix in storage; the detail pane
+// shows the name while the stored author stays raw.
+func TestDetailFederatedAuthorDisplay(t *testing.T) {
+	const id = "11111111-1111-4111-8111-111111111111"
+	const suffix = " [member:" + id + "; enrollment:" + id + "]"
+	issue := Issue{ShortID: "abc1", Title: "Example issue", Status: "open", Author: "Ana" + suffix,
+		Verification: "pending", SourceActor: "Ana" + suffix}
+	model := detailModel{issue: &issue}
+	text := stripANSI(strings.Join(model.documentHeader(200, viewChrome{}), "\n"))
+	require.Contains(t, text, "authored by Ana")
+	require.Contains(t, text, "source: Ana")
+	require.NotContains(t, text, "member:")
+
+	comment := CommentEntry{Author: "Bo" + suffix, Teammate: "worker", Body: "Example comment",
+		Verification: "pending", SourceActor: "Bo" + suffix,
+		Reply: &commentref.Link{Kind: "reply", Handle: "c1", Author: "Cy" + suffix}}
+	text = stripANSI(strings.Join(commentChunks([]CommentEntry{comment}, 200, 0, tabState{})[0].lines, "\n"))
+	require.Contains(t, text, "Bo / worker")
+	require.Contains(t, text, "by Cy")
+	require.NotContains(t, text, "member:")
+
+	require.Equal(t, "c1  Cy  ", commentEvidenceHeader(commentref.Link{Handle: "c1", Author: "Cy" + suffix})[:8])
+	link := LinkEntry{Type: "blocks", Author: "Dee" + suffix}
+	text = stripANSI(strings.Join(linkChunks([]LinkEntry{link}, 200, 0, tabState{})[0].lines, "\n"))
+	require.Contains(t, text, "by Dee @")
+}
+
+// Verified accountable actors and event actors can carry the federated suffix;
+// their labels show the name.
+func TestDetailFederatedAccountableAndEventActorDisplay(t *testing.T) {
+	const id = "11111111-1111-4111-8111-111111111111"
+	const actor = "Ana [member:" + id + "; enrollment:" + id + "]"
+	text := strings.Join(creationAttributionLines(db.AttributionView{
+		Verification: "verified", AccountableActor: actor, SourceActor: "worker-agent",
+	}, "", "", 200), "\n")
+	require.Contains(t, text, "accountable: Ana")
+	require.NotContains(t, text, "member:")
+
+	lines := eventChunkLines(EventLogEntry{Type: "issue.commented", Actor: actor,
+		Payload: map[string]any{"comment_id": float64(7)}}, 0, false, nil)
+	require.Len(t, lines, 1)
+	require.Contains(t, lines[0], " Ana — added comment")
+	require.NotContains(t, lines[0], "member:")
 }

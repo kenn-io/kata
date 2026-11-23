@@ -701,6 +701,12 @@ var storageScenarios = []scenario{
 		run:     checkBoundedAssignmentExpiry,
 	},
 	{
+		name:    "expired assignment attention handoff",
+		methods: []string{"ClaimOwner", "CreateIssue", "CreateProject", "ExpireAssignments", "IssueByID", "PatchIssueMetadata"},
+		run:     checkExpiredAssignmentAttentionHandoff,
+	},
+	{name: "expired assignment federation replay", runWithBackend: checkExpiredAssignmentFederationReplay},
+	{
 		name:    "expected owner unassign",
 		methods: []string{"CreateIssue", "CreateProject", "UnassignOwner"},
 		run:     checkExpectedOwnerUnassign,

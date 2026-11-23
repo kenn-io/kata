@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"go.kenn.io/kata/internal/authorname"
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/metadata"
 
@@ -64,7 +65,7 @@ func commentChunks(cs []CommentEntry, width, cursor int, ts tabState) []entryChu
 			}
 			line := "  ↳ " + commentOutgoingLabel(r.Kind) + " " + label
 			if r.Author != "" {
-				line += " by " + r.Author
+				line += " by " + authorname.Display(r.Author)
 				if r.Teammate != "" {
 					line += " / " + r.Teammate
 				}
@@ -145,7 +146,7 @@ func linkChunks(ls []LinkEntry, width, cursor int, ts tabState) []entryChunk {
 	for i, l := range ls {
 		line := fmt.Sprintf("[%s] → #%s ← #%s  by %s @ %s",
 			l.Type, l.To.ShortID, l.From.ShortID,
-			sanitizeForDisplay(l.Author), fmtTime(l.CreatedAt))
+			sanitizeForDisplay(authorname.Display(l.Author)), fmtTime(l.CreatedAt))
 		chunks = append(chunks, entryChunk{lines: []string{
 			applyActivityCursor(line, i == cursor),
 		}})
@@ -245,10 +246,11 @@ func commentAuthorWidth(cs []CommentEntry, availableWidth int) int {
 	return min(width, max(1, availableWidth-16))
 }
 func commentAttribution(c CommentEntry) string {
+	author := authorname.Display(c.Author)
 	if c.Teammate == "" {
-		return c.Author
+		return author
 	}
-	return c.Author + " / " + c.Teammate
+	return author + " / " + c.Teammate
 }
 
 // applyActivityCursor prefixes activity rows with a text cursor marker
@@ -466,7 +468,7 @@ func indentLines(lines []string, depth int) []string {
 }
 
 func commentEvidenceHeader(link commentref.Link) string {
-	actor := link.Author
+	actor := authorname.Display(link.Author)
 	if link.Teammate != "" {
 		actor += " / " + link.Teammate
 	}
