@@ -73,4 +73,86 @@ describe('AccessManagement', () => {
     await waitFor(() => expect(writes).toHaveLength(1))
     expect(writes[0]).toEqual({ visibility: 'teams', team_uids: ['team-one'], revision: 4 })
   })
+
+  it('keeps read errors independent when other reads succeed', async () => {
+    setGeneratedFetch(async (input) => {
+      const path = new URL(String(input)).pathname
+      if (path === '/api/v1/teams')
+        return Response.json({ teams: [{ uid: 'team-one', name: 'example-team', revision: 1 }] })
+      if (path === '/api/v1/teams/team-one') return new Response(null, { status: 500 })
+      if (path === '/api/v1/projects/7/access') return new Response(null, { status: 500 })
+      throw new Error(`Unexpected request: ${path}`)
+    })
+    renderAccess()
+    await screen.findByText("Couldn't load project visibility.")
+    await fireEvent.click(await screen.findByText('example-team'))
+    await screen.findByText("Couldn't load team members.")
+    expect(screen.getByText("Couldn't load project visibility.")).not.toBeNull()
+    await fireEvent.click(screen.getByRole('button', { name: 'Refresh teams' }))
+    await waitFor(() => expect(screen.getByText("Couldn't load team members.")).not.toBeNull())
+    expect(screen.getByText("Couldn't load project visibility.")).not.toBeNull()
+  })
+
+  it('rejects whitespace-only team and member names with browser validation', async () => {
+    setGeneratedFetch(async (input) => {
+      const path = new URL(String(input)).pathname
+      if (path === '/api/v1/teams/team-one') return Response.json({ members: [] })
+      if (path === '/api/v1/teams')
+        return Response.json({ teams: [{ uid: 'team-one', name: 'example-team', revision: 1 }] })
+      return Response.json({ policy: { revision: 4, visibility: 'all', team_uids: [] } })
+    })
+    renderAccess()
+    await fireEvent.click(await screen.findByText('example-team'))
+    await fireEvent.click(await screen.findByRole('button', { name: 'Add member' }))
+    const member = screen.getByLabelText('Member account') as HTMLInputElement
+    await fireEvent.input(member, { target: { value: '   ' } })
+    expect(member.checkValidity()).toBe(false)
+    await fireEvent.click(screen.getByRole('button', { name: 'New team' }))
+    const team = screen.getByLabelText('New team name') as HTMLInputElement
+    await fireEvent.input(team, { target: { value: '   ' } })
+    expect(team.checkValidity()).toBe(false)
+  })
+
+  it('keeps visibility disabled when the policy reload after a failed write fails', async () => {
+    let reads = 0
+    let finishReload!: (response: Response) => void
+    setGeneratedFetch(async (input, init) => {
+      const path = new URL(String(input)).pathname
+      if (path === '/api/v1/teams')
+        return Response.json({ teams: [{ uid: 'team-one', name: 'example-team', revision: 1 }] })
+      if (init?.method === 'PUT') return new Response(null, { status: 409 })
+      if (path === '/api/v1/projects/7/access') {
+        if (++reads === 1)
+          return Response.json({ policy: { revision: 4, visibility: 'all', team_uids: [] } })
+        return new Promise<Response>((resolve) => (finishReload = resolve))
+      }
+      throw new Error(`Unexpected request: ${path}`)
+    })
+    render(AccessManagement, {
+      props: {
+        projects,
+        pending: false,
+        onMutation: async (_draft, mutate) => {
+          await mutate({ headers: {} } as MutationContext)
+          return false
+        },
+      },
+    })
+    const visibility = await screen.findByRole('combobox', { name: 'Visibility: Everyone' })
+    await waitFor(() => expect((visibility as HTMLButtonElement).disabled).toBe(false))
+    await fireEvent.click(visibility)
+    await fireEvent.click(screen.getByRole('option', { name: 'Selected teams' }))
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'example-team' }))
+    await waitFor(() => expect(reads).toBe(2))
+    expect(
+      (screen.getByRole('combobox', { name: 'Visibility: Selected teams' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true)
+    finishReload(new Response(null, { status: 500 }))
+    await screen.findByText("Couldn't load project visibility.")
+    expect(
+      (screen.getByRole('combobox', { name: 'Visibility: Selected teams' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true)
+  })
 })

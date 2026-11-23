@@ -1065,7 +1065,7 @@ describe('AppShell', () => {
     expect(screen.queryByLabelText('New team name')).toBeNull()
   })
 
-  test('retains a visibility draft after a revision conflict instead of silently overwriting it', async () => {
+  test('restores the saved visibility after a revision conflict', async () => {
     const writes: unknown[] = []
     setGeneratedFetch(async (input, init) => {
       if (init?.method === 'PUT') {
@@ -1082,10 +1082,8 @@ describe('AppShell', () => {
     await chooseVisibility('Selected teams')
     await fireEvent.click(screen.getByRole('checkbox', { name: 'Example team' }))
     await waitFor(() => expect(writes).toHaveLength(1))
-    expect(visibilitySelect().textContent).toContain('Selected teams')
-    expect(
-      (screen.getByRole('checkbox', { name: 'Example team' }) as HTMLInputElement).checked,
-    ).toBe(true)
+    await waitFor(() => expect(visibilitySelect().textContent).toContain('Everyone'))
+    expect(screen.queryByRole('checkbox', { name: 'Example team' })).toBeNull()
     expect(writes[0]).toEqual({ visibility: 'teams', team_uids: ['team-one'], revision: 4 })
   })
 

@@ -40,7 +40,9 @@
   let name = $state('')
   let naming = $state(false)
   let loading = $state(true)
-  let error = $state<string>()
+  let teamsError = $state<string>()
+  let membersError = $state<string>()
+  let policyError = $state<string>()
   let busy = $state(false)
   let teamUID = $state('')
   let members = $state<string[]>([])
@@ -98,10 +100,10 @@
       if (response.status !== 200) throw new Error()
       teams = response.data.teams
       if (!teams.some((team) => team.uid === teamUID)) teamUID = ''
-      error = undefined
+      teamsError = undefined
     } catch {
       if (!abort.signal.aborted && !lifetime.signal.aborted)
-        error = "Couldn't load teams. Refresh to try again."
+        teamsError = "Couldn't load teams. Refresh to try again."
     } finally {
       if (!abort.signal.aborted && !lifetime.signal.aborted) loading = false
     }
@@ -123,6 +125,7 @@
     teamAbort?.abort()
     const abort = (teamAbort = new AbortController())
     members = []
+    membersError = undefined
     teamLoading = !!uid
     if (!uid || lifetime.signal.aborted) return
     try {
@@ -130,9 +133,10 @@
       if (abort.signal.aborted || lifetime.signal.aborted) return
       if (response.status !== 200) throw new Error()
       members = response.data.members
-      error = undefined
+      membersError = undefined
     } catch {
-      if (!abort.signal.aborted && !lifetime.signal.aborted) error = "Couldn't load team members."
+      if (!abort.signal.aborted && !lifetime.signal.aborted)
+        membersError = "Couldn't load team members."
     } finally {
       if (!abort.signal.aborted && !lifetime.signal.aborted) teamLoading = false
     }
@@ -142,6 +146,7 @@
     policyAbort?.abort()
     const abort = (policyAbort = new AbortController())
     policy = undefined
+    policyError = undefined
     selectedTeams = []
     policyLoading = !!id
     if (!id || lifetime.signal.aborted) return
@@ -152,10 +157,10 @@
       policy = response.data.policy
       visibility = policy.visibility === 'teams' ? 'teams' : 'all'
       selectedTeams = [...policy.team_uids]
-      error = undefined
+      policyError = undefined
     } catch {
       if (!abort.signal.aborted && !lifetime.signal.aborted)
-        error = "Couldn't load project visibility."
+        policyError = "Couldn't load project visibility."
     } finally {
       if (!abort.signal.aborted && !lifetime.signal.aborted) policyLoading = false
     }
@@ -241,16 +246,13 @@
       team_uids: nextVisibility === 'teams' ? [...nextTeams] : [],
       revision: policy.revision,
     }
-    if (
-      await mutate(draft, (context) =>
-        setProjectAccess({ projectId: Number(id) }, draft, {
-          headers: context.headers,
-          signal: lifetime.signal,
-        }),
-      )
-    ) {
-      if (projectID === id) await loadPolicy(id)
-    }
+    await mutate(draft, (context) =>
+      setProjectAccess({ projectId: Number(id) }, draft, {
+        headers: context.headers,
+        signal: lifetime.signal,
+      }),
+    )
+    if (projectID === id && !lifetime.signal.aborted) await loadPolicy(id)
   }
 
   function memberCount(count: number): string {
@@ -259,7 +261,7 @@
 </script>
 
 <div class="access-management">
-  {#if message || error}<SettingsAlert>{message ?? error}</SettingsAlert>{/if}
+  {#if message}<SettingsAlert>{message}</SettingsAlert>{/if}
 
   <SettingsSection title="Teams">
     <div class="title-action">
@@ -274,6 +276,7 @@
       </Button>
     </div>
 
+    {#if teamsError}<SettingsAlert>{teamsError}</SettingsAlert>{/if}
     {#if loading && teams.length === 0}
       <p class="note" role="status">Loading teams…</p>
     {:else if teams.length === 0}
@@ -293,7 +296,7 @@
             >
               {#snippet summary()}
                 <span class="team-name">{team.name}</span>
-                {#if open && !teamLoading}
+                {#if open && !teamLoading && !membersError}
                   <span class="team-count">{memberCount(members.length)}</span>
                 {/if}
               {/snippet}
@@ -301,6 +304,8 @@
                 <!-- Only the open team's members are loaded. -->
               {:else if teamLoading}
                 <p class="note" role="status">Loading members…</p>
+              {:else if membersError}
+                <SettingsAlert>{membersError}</SettingsAlert>
               {:else}
                 <ul class="members" aria-label="Team members">
                   {#each members as account (account)}
@@ -333,6 +338,7 @@
                       placeholder="Account"
                       autofocus
                       required
+                      pattern=".*\S.*"
                       disabled={disabled || loading}
                       onkeydown={(event) => {
                         if (event.key === 'Escape') {
@@ -386,6 +392,7 @@
           placeholder="Team name"
           autofocus
           required
+          pattern=".*\S.*"
           {disabled}
           onkeydown={(event) => {
             if (event.key === 'Escape') {
@@ -409,6 +416,7 @@
   </SettingsSection>
 
   <SettingsSection title="Project visibility" description="Server owners see every project.">
+    {#if policyError}<SettingsAlert>{policyError}</SettingsAlert>{/if}
     {#if projectOptions.length === 0}
       <p class="note">No projects yet.</p>
     {:else}
