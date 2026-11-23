@@ -26,10 +26,6 @@ type retainedPush struct {
 	creation, recovery bool
 }
 
-func newRetainedPush(store db.Storage, binding *db.FederationBinding, hubProjectID int64, client *Client, onPulled func(int64, []db.Event), validateLease func(context.Context) error, credentials config.FederationCredentialStore, opts clientpkg.Opts) *retainedPush {
-	return &retainedPush{store: store, binding: binding, hubProjectID: hubProjectID, client: client, onPulled: onPulled, validateLease: validateLease, credentials: credentials, opts: opts, sent: make(map[string]bool)}
-}
-
 // withRecoveryEventPublisher reports events that retained-history recovery
 // commits to the daemon's open clients.
 func withRecoveryEventPublisher(ctx context.Context, onPulled func(int64, []db.Event)) context.Context {
@@ -140,7 +136,7 @@ func (r *retainedPush) resolve(ctx context.Context, pending *[]db.Event, batch [
 	switch {
 	case r.creation && retainedInitializerAlreadyKnown(err, "issue.created", *first.IssueUID):
 		return true, r.advance(ctx, pending, 1)
-	case r.recovery && first.IssueUID != nil && retainedSnapshotAlreadyKnown(err, *first.IssueUID):
+	case r.recovery && first.IssueUID != nil && retainedInitializerAlreadyKnown(err, "issue.snapshot", *first.IssueUID):
 		*pending = nil
 		return true, r.acknowledge(ctx, first)
 	}

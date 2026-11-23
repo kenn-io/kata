@@ -263,7 +263,7 @@ func pushDirectSpoke(
 ) error {
 	ctx = withRecoveryEventPublisher(ctx, onPulledEvents)
 	if binding.PushEnabled {
-		retained := newRetainedPush(store, binding, hubProjectID, client, onPulledEvents, validateLease, credentials, opts)
+		retained := &retainedPush{store: store, binding: binding, hubProjectID: hubProjectID, client: client, onPulled: onPulledEvents, validateLease: validateLease, credentials: credentials, opts: opts, sent: make(map[string]bool)}
 		for {
 			if err := retryPushQuarantine(ctx, store, binding); err != nil {
 				return err
@@ -524,7 +524,7 @@ func publishRetainedLinkPeers(ctx context.Context, store db.Storage, binding *db
 			}
 			_, err = client.IngestProjectEventsWithOptions(ctx, hubProjectID, []api.FederationIngestEventEnvelope{envelope}, IngestProjectEventsOptions{MoveSourceTokens: sourceTokens})
 			if err != nil {
-				if !retainedSnapshotAlreadyKnown(err, peer) {
+				if !retainedInitializerAlreadyKnown(err, "issue.snapshot", peer) {
 					return false, err
 				}
 				if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
@@ -546,10 +546,6 @@ func publishRetainedLinkPeers(ctx context.Context, store db.Storage, binding *db
 		}
 	}
 	return false, nil
-}
-
-func retainedSnapshotAlreadyKnown(err error, issueUID string) bool {
-	return retainedInitializerAlreadyKnown(err, "issue.snapshot", issueUID)
 }
 
 func retainedInitializerAlreadyKnown(err error, eventType, issueUID string) bool {
