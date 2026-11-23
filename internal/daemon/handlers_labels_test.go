@@ -6,22 +6,38 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
 
 func TestAddLabel_PriorityLabelRejected(t *testing.T) {
 	env := testenv.New(t)
 	pid, n := setupOneIssue(t, env)
+	issue, err := env.DB.IssueByID(t.Context(), n)
+	require.NoError(t, err)
 	for _, label := range []string{"p0", "p1", "p2", "p3", "p4", "priority:high", "priority:"} {
 		t.Run(label, func(t *testing.T) {
 			resp, body := envDoRaw(t, env, http.MethodPost, issuePath(pid, n, "labels"), map[string]string{"actor": "tester", "label": label}, nil)
 			assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
-			assert.Contains(t, string(body), "kata edit <ref> --priority N")
+			assert.Contains(t, string(body), "kata edit kata#"+issue.ShortID+" --priority N")
 		})
 	}
 	for _, label := range []string{"p5", "priority", "area:ui"} {
 		postLabel(t, env, pid, n, label)
 	}
+	resp, body := envDoRaw(t, env, http.MethodPost, issuePathRef(pid, issue.UID, "labels"), map[string]string{"actor": "tester", "label": "p2"}, nil)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	assert.Contains(t, string(body), "kata edit kata#"+issue.ShortID+" --priority N")
+}
+
+func TestAddLabel_ExistingPriorityLabelIsNoop(t *testing.T) {
+	env := testenv.New(t)
+	pid, id := setupOneIssue(t, env)
+	_, _, err := env.DB.AddLabelAndEvent(t.Context(), id, db.LabelEventParams{EventType: "issue.labeled", Label: "p2", Actor: "tester"})
+	require.NoError(t, err)
+	resp, body := envDoRaw(t, env, http.MethodPost, issuePath(pid, id, "labels"), map[string]string{"actor": "tester", "label": "p2"}, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	assert.Contains(t, string(body), `"changed":false`)
 }
 
 func TestAddLabel_PriorityLabelMissingIssue(t *testing.T) {

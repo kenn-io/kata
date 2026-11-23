@@ -85,6 +85,24 @@ func TestRecurrencePriorityLabels(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 }
 
+func TestRecurrenceRemoveExistingPriorityLabel(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	p := seedProject(t, env, "example-project")
+	rec, _, err := env.DB.CreateRecurrence(t.Context(), db.CreateRecurrenceIn{
+		ProjectID: p.ID, Actor: "tester", Rule: "FREQ=WEEKLY", DTStart: "2026-05-15", Timezone: "UTC",
+		Template: db.RecurrenceTemplate{Title: "review", Labels: []string{"p2"}},
+	})
+	require.NoError(t, err)
+	url := fmt.Sprintf("%s/api/v1/projects/%d/recurrences/%s", env.URL, p.ID, rec.UID)
+	resp := doPatch(t, env, url, `{"actor":"tester","template":{"labels":["area:ui","p2"]}}`, `"rev-1"`)
+	raw := readClose(t, resp)
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode, string(raw))
+	assert.Contains(t, string(raw), "remove the label and set the template priority")
+	resp = doPatch(t, env, url, `{"actor":"tester","template":{"labels":["area:ui"]}}`, `"rev-1"`)
+	raw = readClose(t, resp)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+}
+
 func TestPostRecurrence_AttachesInitialIssueAndAdvancesOnClose(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("tok"))
 	project := seedProject(t, env, "example-project")

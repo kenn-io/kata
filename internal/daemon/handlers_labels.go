@@ -48,8 +48,22 @@ func addLabelHandler(cfg ServerConfig) func(context.Context, *api.AddLabelReques
 		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, issue, actor); err != nil {
 			return nil, err
 		}
-		if err := rejectPriorityLabels([]string{in.Body.Label}, "kata edit <ref> --priority N"); err != nil {
-			return nil, err
+		if db.IsPriorityLabel(in.Body.Label) {
+			existing, err := cfg.DB.LabelByEndpoints(ctx, issue.ID, in.Body.Label)
+			if err == nil {
+				out := &api.AddLabelResponse{}
+				out.Body.Issue = issue
+				out.Body.Label = existing
+				return out, nil
+			}
+			if !errors.Is(err, db.ErrNotFound) {
+				return nil, internalAPIError(err)
+			}
+			project, err := activeProjectByID(ctx, cfg.DB, issue.ProjectID)
+			if err != nil {
+				return nil, err
+			}
+			return nil, api.NewError(400, "validation", "use the priority field: kata edit "+qualifiedID(project.Name, issue.ShortID)+" --priority N", "", nil)
 		}
 
 		ev := db.LabelEventParams{

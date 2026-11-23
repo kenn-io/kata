@@ -928,7 +928,7 @@ func TestToolsRoundTripAgainstRealDaemon(t *testing.T) {
 		arguments map[string]any
 		fix       string
 	}{
-		{"kata.set_label", map[string]any{"ref": ref, "label": "priority:high", "present": true}, "kata edit <ref> --priority N"},
+		{"kata.set_label", map[string]any{"ref": ref, "label": "priority:high", "present": true}, "kata edit spoke-project#" + ref + " --priority N"},
 		{"kata.create", map[string]any{"title": "Priority label", "labels": []string{"p2"}, "idempotency_key": "priority-label"}, "kata create --priority N"},
 	} {
 		result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: tc.tool, Arguments: tc.arguments})

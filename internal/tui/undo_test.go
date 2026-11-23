@@ -277,6 +277,22 @@ func TestUndoClientNoopHasNoEntry(t *testing.T) {
 	require.Empty(t, resp.undo.boundary)
 }
 
+func TestUndoClientPriorityLabelRemovalBoundary(t *testing.T) {
+	before := Issue{UID: "01JZ0000000000000000000001", ProjectID: 7, Status: "open", Labels: []string{"p2"}}
+	after := before
+	after.Labels = nil
+	f := &undoTestAPI{issue: before, writeResp: &MutationResp{Issue: &after, Changed: true}}
+	c := newConnectedUndoClient(t, f)
+	resp, err := c.RemoveLabel(t.Context(), 7, "abc4", "p2", "bob")
+	require.NoError(t, err)
+	require.Nil(t, resp.undo.entry)
+	require.Equal(t, "removing a priority label cannot be undone", resp.undo.boundary)
+	m := Model{api: c, undoHistory: undoHistory{entries: []undoEntry{{kind: "close"}}}}
+	m = m.recordUndoAttempt(mutationDoneMsg{resp: resp})
+	require.Empty(t, m.undoHistory.entries)
+	require.Equal(t, resp.undo.boundary, m.undoHistory.boundary)
+}
+
 func TestUndoClientRecordsEvidenceClose(t *testing.T) {
 	f := &undoTestAPI{issue: Issue{UID: "01JZ0000000000000000000001", Status: "open"},
 		closeResp: &MutationResp{Issue: &Issue{Status: "closed", Revision: 2}, Changed: true}}
