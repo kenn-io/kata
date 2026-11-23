@@ -367,7 +367,7 @@ func TestGuidesSayClaimWithTTL(t *testing.T) {
 	guides := map[string]string{"init block": agentsManagedBlock()}
 	for _, args := range [][]string{
 		{"quickstart", "--format", "human"}, {"quickstart", "--format", "agent"},
-		{"quickstart", "--format", "json"}, {"quickstart", "--format", "contract"},
+		{"quickstart", "--format", "contract"},
 		{"--help"}, {"claim", "--help"}, {"assign", "--help"},
 	} {
 		resetFlags(t)

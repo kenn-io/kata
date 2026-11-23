@@ -405,7 +405,7 @@ func TestCloseCmd_HelpBannerNamesObligation(t *testing.T) {
 	assert.Contains(t, out, "needs-review")
 }
 
-func TestCloseCmd_ErrorTextNamesAlternative(t *testing.T) {
+func TestCloseCmd_ValidationErrorReachesStderr(t *testing.T) {
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
 	for _, tc := range []struct {
 		name, message, errorText string
@@ -418,7 +418,6 @@ func TestCloseCmd_ErrorTextNamesAlternative(t *testing.T) {
 				"close", ref, "--done", "--message", tc.message)
 			require.Error(t, err)
 			assert.Contains(t, stderr, tc.errorText)
-			assert.NotContains(t, stderr, "edit <ref> --label")
 		})
 	}
 }

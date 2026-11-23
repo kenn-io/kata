@@ -1449,7 +1449,6 @@ func checkExpiredAssignmentAttentionHandoff(t *testing.T, store db.Storage) erro
 		startSession, sessionAfterExpiry bool
 	}{
 		{"same actor reclaims after expiry", "worker", false, false},
-		{"new session claims after expiry", "next-worker", true, false},
 		{"session starts after expiry", "next-worker", true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

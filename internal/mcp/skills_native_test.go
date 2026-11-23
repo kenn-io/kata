@@ -150,7 +150,7 @@ func TestNativeQuickstartNoShell(t *testing.T) {
 // Product contract: every MCP guide and the comment tools say
 // comments carry findings, never progress. The instructions, claim tool, and
 // claim guides teach ttl_seconds and renewal without if_unowned.
-func TestNativeGuidesSayCommentsCarryFindings(t *testing.T) {
+func TestNativeGuidesSayCommentsCarryFindingsAndClaimsHaveTTL(t *testing.T) {
 	session := connectTestServer(t)
 	listed, err := session.ListTools(t.Context(), nil)
 	require.NoError(t, err)

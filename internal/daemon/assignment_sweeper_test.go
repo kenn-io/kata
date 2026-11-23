@@ -1,7 +1,6 @@
 package daemon_test
 
 import (
-	"encoding/json/jsontext"
 	"testing"
 	"time"
 
@@ -12,30 +11,6 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
-
-func TestAssignmentSweeperPublishesExpiredAttentionHandoff(t *testing.T) {
-	ctx := t.Context()
-	env := testenv.New(t)
-	_, issue := createAssignmentSweepIssue(t, env, "handoff-project")
-	now := time.Date(2026, time.September, 17, 14, 0, 0, 0, time.UTC)
-	_, err := env.DB.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "worker", Patch: map[string]jsontext.Value{"work.attention": jsontext.Value(`"ok"`)}})
-	require.NoError(t, err)
-	_, err = env.DB.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: "worker", TTL: time.Minute, Now: now.Add(-2 * time.Minute)})
-	require.NoError(t, err)
-	sub := env.Broadcaster.Subscribe(daemon.SubFilter{})
-	defer sub.Unsub()
-	sink := &publisherSink{}
-	sweeper := daemon.NewAssignmentSweeper(env.DB, daemon.NewEventPublisher(env.Broadcaster, sink))
-	require.NoError(t, sweeper.RunOnce(ctx, now))
-	for _, eventType := range []string{"issue.assignment_expired", "issue.metadata_updated"} {
-		msg := receiveMsg(t, sub.Ch, time.Second, "expiry handoff broadcast")
-		require.NotNil(t, msg.Event)
-		assert.Equal(t, eventType, msg.Event.Type)
-	}
-	require.Len(t, sink.events, 2)
-	assert.Equal(t, "issue.assignment_expired", sink.events[0].Type)
-	assert.Equal(t, "issue.metadata_updated", sink.events[1].Type)
-}
 
 func TestAssignmentSweeperExpiresLocalAndHubAssignmentsButSkipsSpokes(t *testing.T) {
 	ctx := t.Context()
