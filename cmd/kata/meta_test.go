@@ -69,13 +69,13 @@ func TestMetaAttentionValues(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "attention issue")
 	_, stderr, err := runCLIWithErr(t, env, dir, "meta", "set", ref, "work.attention", "working")
-	requireCLIError(t, err, ExitValidation)
+	_ = requireCLIError(t, err, ExitValidation)
 	assert.Contains(t, stderr, "ok, needs-human, stuck")
 	issue := fetchMetaIssueViaHTTP(t, env, pid, ref)
 	assert.JSONEq(t, `{}`, string(issue.Issue.Metadata))
 
 	_, stderr, err = runCLIWithErr(t, env, dir, "create", "invalid attention", "--meta", "work.attention=working")
-	requireCLIError(t, err, ExitValidation)
+	_ = requireCLIError(t, err, ExitValidation)
 	assert.Contains(t, stderr, "ok, needs-human, stuck")
 	issues, err := env.DB.ListIssues(t.Context(), db.ListIssuesParams{ProjectID: pid})
 	require.NoError(t, err)
@@ -120,7 +120,7 @@ func TestMetaSetJSONValueRejectsNullWithUnsetHint(t *testing.T) {
 	assert.Contains(t, stderr, "use `kata meta unset`")
 
 	_, stderr, err = runCLIWithErr(t, env, dir, "meta", "set", "--json-value", ref, "work.attention", `null`)
-	requireCLIError(t, err, ExitValidation)
+	_ = requireCLIError(t, err, ExitValidation)
 	assert.Contains(t, stderr, "ok, needs-human, stuck")
 	assert.Contains(t, stderr, "use `kata meta unset`")
 }
