@@ -28,18 +28,53 @@ func TestGroupDigest(t *testing.T) {
 	})
 }
 
-func TestGroupDigestPreservesConflictingIssueActions(t *testing.T) {
+func TestGroupDigestIssueActions(t *testing.T) {
 	const id = "11111111-1111-4111-8111-111111111111"
-	actors := []generated.DigestActorEntry{
-		{Actor: "Ana", Totals: generated.DigestTotals{Commented: 1}, Issues: []generated.DigestIssueActions{{ProjectID: 1, IssueUID: "a", Actions: []string{"priority:1", "assigned:alice", "closed:done"}}}},
-		{Actor: "Ana [member:" + id + "; enrollment:" + id + "]", Totals: generated.DigestTotals{Commented: 2}, Issues: []generated.DigestIssueActions{{ProjectID: 1, IssueUID: "a", Actions: []string{"priority:2", "assigned:bob", "closed:duplicate"}}}},
+	issue := func(project int64, actions ...string) generated.DigestIssueActions {
+		return generated.DigestIssueActions{ProjectID: project, IssueUID: "a", Actions: actions}
 	}
-	groups := GroupDigest(actors)
-	if len(groups) != 1 || groups[0].Actor != "Ana" || groups[0].Totals.Commented != 3 {
-		t.Fatalf("group: %+v", groups)
+	tests := []struct {
+		name        string
+		input, want []generated.DigestIssueActions
+	}{
+		{"compatible", []generated.DigestIssueActions{issue(1, "created", "commented", "labeled:a"), issue(1, "commented:2", "labeled:a", "labeled:b", "edited")}, []generated.DigestIssueActions{issue(1, "created", "commented:3", "edited", "labeled:a", "labeled:b")}},
+		{"same priority", []generated.DigestIssueActions{issue(1, "priority:1"), issue(1, "priority:1")}, []generated.DigestIssueActions{issue(1, "priority:1")}},
+		{"missing priority", []generated.DigestIssueActions{issue(1, "priority:1"), issue(1, "edited")}, []generated.DigestIssueActions{issue(1, "edited", "priority:1")}},
+		{"conflicting assignments", []generated.DigestIssueActions{issue(1, "assigned:alice"), issue(1, "assigned:bob")}, []generated.DigestIssueActions{issue(1, "assigned:alice"), issue(1, "assigned:bob")}},
+		{"conflicting priorities", []generated.DigestIssueActions{issue(1, "priority:1"), issue(1, "priority:2")}, []generated.DigestIssueActions{issue(1, "priority:1"), issue(1, "priority:2")}},
+		{"conflicting close reasons", []generated.DigestIssueActions{issue(1, "closed:done"), issue(1, "closed:duplicate")}, []generated.DigestIssueActions{issue(1, "closed:done"), issue(1, "closed:duplicate")}},
+		{"assignment and unassignment", []generated.DigestIssueActions{issue(1, "assigned:alice"), issue(1, "unassigned")}, []generated.DigestIssueActions{issue(1, "assigned:alice", "unassigned")}},
+		{"priority and clear", []generated.DigestIssueActions{issue(1, "priority:1"), issue(1, "priority_cleared")}, []generated.DigestIssueActions{issue(1, "priority:1", "priority_cleared")}},
+		{"close and reopen", []generated.DigestIssueActions{issue(1, "closed:done"), issue(1, "reopened")}, []generated.DigestIssueActions{issue(1, "reopened", "closed:done")}},
+		{"placeholder and action", []generated.DigestIssueActions{issue(1, "-"), issue(1, "edited")}, []generated.DigestIssueActions{issue(1, "edited")}},
+		{"placeholders", []generated.DigestIssueActions{issue(1, "-"), issue(1, "-")}, []generated.DigestIssueActions{issue(1, "-")}},
+		{"placeholder and conflicts", []generated.DigestIssueActions{issue(1, "priority:1"), issue(1, "priority:2"), issue(1, "-", "priority:1", "edited")}, []generated.DigestIssueActions{issue(1, "edited", "priority:1"), issue(1, "priority:2")}},
+		{"greedy placement", []generated.DigestIssueActions{issue(1, "priority:1"), issue(1, "priority:2"), issue(1, "priority:1", "edited")}, []generated.DigestIssueActions{issue(1, "edited", "priority:1"), issue(1, "priority:2")}},
+		{"different projects", []generated.DigestIssueActions{issue(1, "created"), issue(2, "edited")}, []generated.DigestIssueActions{issue(1, "created"), issue(2, "edited")}},
+		{"other counts", []generated.DigestIssueActions{issue(1, "other:2"), issue(1, "other:3")}, []generated.DigestIssueActions{issue(1, "other:5")}},
+		{"empty actions", []generated.DigestIssueActions{issue(1), issue(1)}, []generated.DigestIssueActions{issue(1)}},
 	}
-	issues := groups[0].Issues
-	if len(issues) != 2 || !slices.Equal(issues[0].Actions, actors[0].Issues[0].Actions) || !slices.Equal(issues[1].Actions, actors[1].Issues[0].Actions) {
-		t.Fatalf("issue actions: %+v", issues)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actors := make([]generated.DigestActorEntry, len(tt.input))
+			for i, row := range tt.input {
+				actors[i] = generated.DigestActorEntry{Actor: "Ana [member:" + id + "; enrollment:" + id + "]", Totals: generated.DigestTotals{Commented: 1}, Issues: []generated.DigestIssueActions{row}}
+			}
+			for range 2 {
+				groups := GroupDigest(actors)
+				if len(groups) != 1 || groups[0].Actor != "Ana" || groups[0].Totals.Commented != int64(len(tt.input)) {
+					t.Fatalf("group: %+v", groups)
+				}
+				got := groups[0].Issues
+				if len(got) != len(tt.want) {
+					t.Fatalf("issues: got %+v, want %+v", got, tt.want)
+				}
+				for i := range got {
+					if got[i].ProjectID != tt.want[i].ProjectID || got[i].IssueUID != tt.want[i].IssueUID || !slices.Equal(got[i].Actions, tt.want[i].Actions) {
+						t.Errorf("issue %d: got %+v, want %+v", i, got[i], tt.want[i])
+					}
+				}
+			}
+		})
 	}
 }
