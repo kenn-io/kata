@@ -79,28 +79,6 @@ func checkRejoinRetainedHistory(t *testing.T, store db.Storage) error {
 		_, _, err = store.RetainedCommentEvent(ctx, project.ID, issue.UID, "01AAAAAAAAAAAAAAAAAAAAAAAA")
 		require.ErrorIs(t, err, db.ErrNotFound)
 	})
-	t.Run("count retained events", func(t *testing.T) {
-		ctx := t.Context()
-		project, err := store.CreateProject(ctx, "count-retained-events")
-		require.NoError(t, err)
-		_, old, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "old", Author: "old-actor"})
-		require.NoError(t, err)
-		_, same, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "same", Author: "new-actor"})
-		require.NoError(t, err)
-		_, later, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "later", Author: "old-actor"})
-		require.NoError(t, err)
-		binding, err := store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: true})
-		require.NoError(t, err)
-		binding.PushCursorEventID = same.ID
-		count, err := store.CountRetainedFederationEvents(ctx, binding)
-		require.NoError(t, err)
-		require.Equal(t, int64(1), count)
-		binding.PushCursorEventID = later.ID
-		binding.RetainedThroughEventID = old.ID
-		count, err = store.CountRetainedFederationEvents(ctx, binding)
-		require.NoError(t, err)
-		require.Equal(t, int64(1), count)
-	})
 	t.Run("refresh boundary on upsert", func(t *testing.T) {
 		ctx := t.Context()
 		project, err := store.CreateProject(ctx, "refresh-retained-boundary")

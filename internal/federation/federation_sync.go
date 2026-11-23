@@ -515,12 +515,14 @@ func publishRetainedLinkPeers(ctx context.Context, store db.Storage, binding *db
 		if event.Type == "issue.commented" && event.RelatedIssueUID != nil {
 			peers[*event.RelatedIssueUID] = true
 		}
-		_, _, err = db.StripCrossProjectLinkAdditions(fold, func(uid string) bool {
-			peers[uid] = true
-			return false
-		})
-		if err != nil {
-			return false, err
+		if event.Type == "issue.snapshot" || (event.Type == "issue.linked" && len(peers) == 0) {
+			_, _, err = db.StripCrossProjectLinkAdditions(fold, func(uid string) bool {
+				peers[uid] = true
+				return false
+			})
+			if err != nil {
+				return false, err
+			}
 		}
 		for peer := range peers {
 			if peer == "" || peer == fold.IssueUID || sent[peer] {

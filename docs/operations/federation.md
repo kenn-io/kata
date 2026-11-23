@@ -994,10 +994,6 @@ root receipt. An immediate-hop acknowledgement does not clear that count.
 Compaction preserves pending intent in the relay outbox; a compacted source
 has no local event ID to report in the pending high-water field.
 
-After a direct spoke rejoins or is restored as a new instance, status also
-counts retained events that the current instance won't push. The count can
-include events the hub received earlier.
-
 Fresh local issues and comments on a negotiated replica expose
 `verification: pending` until their signed root receipt arrives, including
 while offline or paused. They retain their source actor and teammate without

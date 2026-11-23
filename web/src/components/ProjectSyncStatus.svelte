@@ -132,9 +132,6 @@
   {:else}
     <span>{status.enabled ? status.role : 'Sync disabled'}</span>
     <span>Pending: {status.pending_push_count}</span>
-    {#if status.retained_event_count > 0}
-      <span>Retained events: {status.retained_event_count}</span>
-    {/if}
     {#if status.last_successful_sync_at}
       <span
         >Last sync: <time datetime={status.last_successful_sync_at}

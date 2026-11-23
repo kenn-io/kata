@@ -480,7 +480,6 @@ type Storage interface {
 	// federation: push + ingest
 	PendingFederationPushEvents(ctx context.Context, projectID int64, originInstanceUID string, afterID int64, limit int) ([]Event, error)
 	PendingFederationPushStats(ctx context.Context, projectID int64, originInstanceUID string, afterID int64) (int64, int64, error)
-	CountRetainedFederationEvents(ctx context.Context, binding FederationBinding) (int64, error)
 	RetainedIssueSnapshot(ctx context.Context, projectID int64, issueUID string) (Event, int64, error)
 	RetainedCommentEvent(ctx context.Context, projectID int64, issueUID, commentUID string) (Event, int64, error)
 	AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error

@@ -14,7 +14,6 @@ function response(projectID = 7, uid = projectUID, pending = 2): Response {
         role: 'replica',
         enabled: true,
         pending_push_count: pending,
-        retained_event_count: 3,
         last_successful_sync_at: '2026-10-01T12:00:00Z',
         credential_status: 'live',
         has_sync_error: true,
@@ -39,13 +38,6 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 describe('ProjectSyncStatus', () => {
-  it('shows retained events alongside pending pushes', async () => {
-    setGeneratedFetch(vi.fn().mockResolvedValueOnce(response()))
-    render(ProjectSyncStatus, { props: { projectID: 7, projectUID } })
-    await screen.findByText('Pending: 2')
-    expect(screen.getByText('Retained events: 3')).toBeTruthy()
-  })
-
   it('copies a quoted status command', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })

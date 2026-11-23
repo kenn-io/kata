@@ -139,7 +139,6 @@ var alreadyImplemented = map[string]bool{
 	"AuthorizeFederationToken":             true, // federation_control.go
 	"ClearFederationSyncError":             true, // federation_control.go
 	"CountActiveFederationEnrollments":     true, // federation_control.go
-	"CountRetainedFederationEvents":        true, // federation_events.go
 	"CreateFederationEnrollment":           true, // federation_control.go
 	"CreateProjectFederationEnrollment":    true, // federation_control.go
 	"RotateFederationEnrollment":           true, // federation_control.go

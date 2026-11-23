@@ -23,7 +23,6 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/testenv"
@@ -1357,64 +1356,6 @@ func TestFederationStatusNoBindingsIsEmpty(t *testing.T) {
 	var scoped federationStatusBodyForTest
 	envGetJSON(t, env, projectPath(project.ID)+"/federation/status", &scoped)
 	assert.Empty(t, scoped.Statuses)
-}
-
-func TestFederationStatusRestoredRetainedEvents(t *testing.T) {
-	ctx := t.Context()
-	source := testenv.New(t)
-	project, err := source.DB.CreateProject(ctx, "restored-status")
-	require.NoError(t, err)
-	_, first, err := source.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "first", Author: "old-actor"})
-	require.NoError(t, err)
-	_, second, err := source.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "second", Author: "old-actor"})
-	require.NoError(t, err)
-	_, err = source.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: true})
-	require.NoError(t, err)
-	require.Greater(t, second.ID, first.ID)
-	require.NoError(t, source.DB.AdvanceFederationPushCursor(ctx, project.ID, second.ID))
-	records, err := dbtest.CollectImportRecords(ctx, source.DB, db.ExportFilter{IncludeDeleted: true})
-	require.NoError(t, err)
-	env := testenv.New(t)
-	require.NoError(t, env.DB.ImportReplay(ctx, records, db.ImportOptions{NewInstance: true}))
-	var body api.FederationStatusBody
-	envGetJSON(t, env, "/api/v1/federation/status", &body)
-	require.Len(t, body.Statuses, 1)
-	require.Zero(t, body.Statuses[0].PendingPushCount)
-	require.Equal(t, int64(2), body.Statuses[0].RetainedEventCount)
-	binding, err := env.DB.FederationBindingByProject(ctx, project.ID)
-	require.NoError(t, err)
-	binding.Actor = "old-actor"
-	_, err = env.DB.UpsertFederationBinding(ctx, binding)
-	require.NoError(t, err)
-	envGetJSON(t, env, "/api/v1/federation/status", &body)
-	require.Equal(t, int64(2), body.Statuses[0].RetainedEventCount)
-}
-
-func TestFederationStatusRetainedEvents(t *testing.T) {
-	env := testenv.New(t)
-	ctx := t.Context()
-	project, err := env.DB.CreateProject(ctx, "retained-status")
-	require.NoError(t, err)
-	_, event, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "old task", Author: "old-actor"})
-	require.NoError(t, err)
-	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: true})
-	require.NoError(t, err)
-	require.NoError(t, env.DB.AdvanceFederationPushCursor(ctx, project.ID, event.ID))
-	var body struct {
-		Statuses []struct {
-			Pending  int64 `json:"pending_push_count"`
-			Retained int64 `json:"retained_event_count"`
-		} `json:"statuses"`
-	}
-	envGetJSON(t, env, "/api/v1/federation/status", &body)
-	require.Len(t, body.Statuses, 1)
-	require.Zero(t, body.Statuses[0].Pending)
-	require.Equal(t, int64(1), body.Statuses[0].Retained)
-	_, _, err = env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "new task", Author: "new-actor"})
-	require.NoError(t, err)
-	envGetJSON(t, env, "/api/v1/federation/status", &body)
-	require.Equal(t, int64(1), body.Statuses[0].Pending)
-	require.Equal(t, int64(1), body.Statuses[0].Retained)
 }
 
 func TestFederationStatusSpokeIncludesCursorsQueuesAndLastSync(t *testing.T) {

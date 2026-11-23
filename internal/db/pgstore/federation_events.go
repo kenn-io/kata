@@ -14,10 +14,6 @@ import (
 
 var federationPushEventTypeList = "(" + db.FederationPushEventTypesSQL() + ")"
 
-func (s *Store) CountRetainedFederationEvents(ctx context.Context, binding db.FederationBinding) (int64, error) {
-	return db.CountRetainedFederationEvents(ctx, s, s.InstanceUID(), binding)
-}
-
 func pgFederationPushEventTypeCondition(column string) string {
 	return column + ` IN ` + federationPushEventTypeList
 }

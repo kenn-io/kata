@@ -305,7 +305,6 @@ func TestFederationStatusTextOutputIncludesOperatorFields(t *testing.T) {
 		"pull cursor: 12",
 		"push cursor: 0",
 		"pending push: 1",
-		"retained events: 0",
 		"last successful sync: 2026-05-23T12:05:00Z",
 		"last error: 2026-05-23T12:07:00Z hub offline",
 		"live leases: 0",
