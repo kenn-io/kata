@@ -252,12 +252,8 @@ func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 			issue := hit.Issue
 			issue.ID, issue.ProjectID = 0, p.ProjectID
 			if found {
-				if p.HubMode != nil && *p.HubMode == string(modeLexical) {
-					issue = local
-				} else {
-					issue.ID = local.ID
-					issue.ShortID = local.ShortID
-				}
+				issue.ID = local.ID
+				issue.ShortID = local.ShortID
 			} else {
 				issue.ShortID = issue.UID
 			}

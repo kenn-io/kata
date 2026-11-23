@@ -461,7 +461,11 @@ func TestDirectSpokeSearchHubLexicalRanking(t *testing.T) {
 	for i := range 20 {
 		local, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: replica.ID, Title: fmt.Sprintf("zebra local %d", i), Author: "tester"})
 		require.NoError(t, err)
+		local.Title = fmt.Sprintf("zebra hub %d", i)
 		hits = append(hits, map[string]any{"issue": local, "score": 1e-13, "matched_in": []string{"title"}})
+	}
+	for i, j := 1, len(hits)-1; i < j; i, j = i+1, j-1 {
+		hits[i], hits[j] = hits[j], hits[i]
 	}
 	localOnly, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: replica.ID, Title: "older local title", Author: "tester"})
 	require.NoError(t, err)
@@ -489,35 +493,47 @@ func TestDirectSpokeSearchHubLexicalRanking(t *testing.T) {
 	require.NoError(t, err)
 	localScores := make(map[string]float64, len(localHits))
 	localRanks := make(map[string]int, len(localHits))
+	localTitles := make(map[string]string, len(localHits))
 	for rank, hit := range localHits {
 		localScores[hit.Issue.UID] = hit.Score
 		localRanks[hit.Issue.UID] = rank
+		localTitles[hit.Issue.UID] = hit.Issue.Title
 	}
 	hubRanks := make(map[string]int, len(hits))
+	hubTitles := make(map[string]string, len(hits))
 	for rank, hit := range hits {
-		hubRanks[hit["issue"].(db.Issue).UID] = rank
+		issue := hit["issue"].(db.Issue)
+		hubRanks[issue.UID] = rank
+		hubTitles[issue.UID] = issue.Title
 	}
 	seen := make(map[string]bool)
+	hubWinner := false
 	for _, hit := range body.Results {
 		require.False(t, seen[hit.Issue.UID])
 		seen[hit.Issue.UID] = true
 		if hit.Issue.UID == remote.UID {
 			require.Equal(t, 1e-12, hit.Score)
 		} else if hit.Issue.UID == localOnly.UID {
-			require.Equal(t, localOnly.Title, hit.Issue.Title)
+			require.Equal(t, changed.Title, hit.Issue.Title)
+			require.Equal(t, localOnly.ID, hit.Issue.ID)
+			require.Equal(t, localOnly.ShortID, hit.Issue.ShortID)
 			require.Equal(t, 5e-13, hit.Score)
 		} else {
 			_, ok := localScores[hit.Issue.UID]
 			require.True(t, ok)
 			if localRanks[hit.Issue.UID] <= hubRanks[hit.Issue.UID] {
 				require.Equal(t, localScores[hit.Issue.UID], hit.Score)
+				require.Equal(t, localTitles[hit.Issue.UID], hit.Issue.Title)
 			} else {
+				hubWinner = true
 				require.Equal(t, 1e-13, hit.Score)
+				require.Equal(t, hubTitles[hit.Issue.UID], hit.Issue.Title)
 			}
 		}
 	}
 	require.True(t, seen[remote.UID])
 	require.True(t, seen[localOnly.UID])
+	require.True(t, hubWinner)
 }
 
 func TestDirectSpokeSearchWaitsForHubFallback(t *testing.T) {
