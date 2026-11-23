@@ -175,11 +175,11 @@ func enclosingInitIsNoOp(dest string, opts initOptions) bool {
 	if err != nil || (strings.TrimSpace(opts.Project) != "" && strings.TrimSpace(opts.Project) != cfg.Project.Name) {
 		return false
 	}
-	data, err := os.ReadFile(filepath.Join(dest, config.ProjectConfigFilename))
+	data, err := os.ReadFile(filepath.Join(dest, config.ProjectConfigFilename)) //nolint:gosec // dest is the discovered binding directory
 	if err != nil || !config.HasProjectConfigHeader(data) {
 		return false
 	}
-	data, err = os.ReadFile(filepath.Join(dest, ".gitignore"))
+	data, err = os.ReadFile(filepath.Join(dest, ".gitignore")) //nolint:gosec // dest is the discovered binding directory
 	return err == nil && hasGitignoreEntry(data, ".kata.local.toml")
 }
 

@@ -208,13 +208,13 @@ func TestProjectConfigWritersRefuseSymlink(t *testing.T) {
 			dir := t.TempDir()
 			target := filepath.Join(dir, "other.toml")
 			original := []byte("version = 1\n[project]\nname = \"notes\"\n")
-			require.NoError(t, os.WriteFile(target, original, 0o644))
+			require.NoError(t, os.WriteFile(target, original, 0o644)) //nolint:gosec // test fixture matches production binding mode
 			link := filepath.Join(dir, ".kata.toml")
 			if err := os.Symlink(target, link); err != nil {
 				t.Skipf("symlinks unavailable: %v", err)
 			}
 			require.Error(t, write.fn(link))
-			got, err := os.ReadFile(target)
+			got, err := os.ReadFile(target) //nolint:gosec // test fixture under TempDir
 			require.NoError(t, err)
 			assert.Equal(t, original, got)
 		})

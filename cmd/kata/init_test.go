@@ -183,13 +183,13 @@ func (f *fakeDaemon) request() map[string]any {
 
 func TestInit_ExplicitWorkspaceBinding(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "my notes")
-	require.NoError(t, os.Mkdir(root, 0o755))
+	require.NoError(t, os.Mkdir(root, 0o755)) //nolint:gosec // test fixture under TempDir
 	runGit(t, root, "init", "--quiet")
 	sub := filepath.Join(root, "scratch")
-	require.NoError(t, os.Mkdir(sub, 0o755))
+	require.NoError(t, os.Mkdir(sub, 0o755)) //nolint:gosec // test fixture under TempDir
 	binding := filepath.Join(root, ".kata.toml")
 	original := []byte("version = 1\n\n[project]\nname = \"notes\"\n")
-	require.NoError(t, os.WriteFile(binding, original, 0o644))
+	require.NoError(t, os.WriteFile(binding, original, 0o644)) //nolint:gosec // test fixture matches production binding mode
 	daemon := newFakeDaemon(t)
 
 	err := executeInitSetup(t, daemon.srv.URL, "--project", "demo", "--workspace", sub)
@@ -200,7 +200,7 @@ func TestInit_ExplicitWorkspaceBinding(t *testing.T) {
 	assert.Contains(t, ce.Message, fmt.Sprintf("%q", binding))
 	assert.Contains(t, ce.Hint, "set --workspace to its folder")
 	assert.Nil(t, daemon.request())
-	got, err := os.ReadFile(binding)
+	got, err := os.ReadFile(binding) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, err)
 	assert.Equal(t, original, got)
 	for _, path := range []string{filepath.Join(sub, ".kata.toml"), filepath.Join(root, ".gitignore"), filepath.Join(root, "AGENTS.md"), filepath.Join(sub, "AGENTS.md")} {
@@ -212,24 +212,24 @@ func TestInit_ExplicitWorkspaceExistingBindingNoOp(t *testing.T) {
 	root := t.TempDir()
 	runGit(t, root, "init", "--quiet")
 	sub := filepath.Join(root, "scratch")
-	require.NoError(t, os.Mkdir(sub, 0o755))
+	require.NoError(t, os.Mkdir(sub, 0o755)) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, config.WriteProjectConfig(root, "notes"))
 	binding := filepath.Join(root, ".kata.toml")
 	ignore := filepath.Join(root, ".gitignore")
-	require.NoError(t, os.WriteFile(ignore, []byte(".kata.local.toml\n"), 0o644))
+	require.NoError(t, os.WriteFile(ignore, []byte(".kata.local.toml\n"), 0o644)) //nolint:gosec // test fixture matches production .gitignore mode
 	daemon := newFakeDaemon(t)
 	changed := []byte("version = 1\n[project]\nname = \"notes\"\n")
 	daemon.onRequest = func() {
-		if err := os.WriteFile(binding, changed, 0o644); err != nil {
+		if err := os.WriteFile(binding, changed, 0o644); err != nil { //nolint:gosec // test fixture matches production binding mode
 			t.Error(err)
 		}
 	}
 	require.NoError(t, executeInitSetup(t, daemon.srv.URL, "--workspace", sub, "--project", "notes"))
 	assert.Equal(t, "notes", daemon.request()["name"])
-	got, err := os.ReadFile(binding)
+	got, err := os.ReadFile(binding) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, err)
 	assert.Equal(t, changed, got)
-	got, err = os.ReadFile(ignore)
+	got, err = os.ReadFile(ignore) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, err)
 	assert.Equal(t, ".kata.local.toml\n", string(got))
 }
@@ -252,13 +252,13 @@ func TestInit_ExplicitWorkspaceEnclosingWrites(t *testing.T) {
 			root := t.TempDir()
 			runGit(t, root, "init", "--quiet")
 			sub := filepath.Join(root, "scratch")
-			require.NoError(t, os.Mkdir(sub, 0o755))
+			require.NoError(t, os.Mkdir(sub, 0o755)) //nolint:gosec // test fixture under TempDir
 			require.NoError(t, config.WriteProjectConfig(root, "notes"))
 			if tc.missing == "header" {
-				require.NoError(t, os.WriteFile(filepath.Join(root, ".kata.toml"), []byte("version = 1\n[project]\nname = \"notes\"\n"), 0o644))
+				require.NoError(t, os.WriteFile(filepath.Join(root, ".kata.toml"), []byte("version = 1\n[project]\nname = \"notes\"\n"), 0o644)) //nolint:gosec // test fixture matches production binding mode
 			}
 			if tc.missing != "ignore" {
-				require.NoError(t, os.WriteFile(filepath.Join(root, ".gitignore"), []byte(".kata.local.toml\n"), 0o644))
+				require.NoError(t, os.WriteFile(filepath.Join(root, ".gitignore"), []byte(".kata.local.toml\n"), 0o644)) //nolint:gosec // test fixture matches production .gitignore mode
 			}
 			daemon := newFakeDaemon(t)
 			err := executeInitSetup(t, daemon.srv.URL, append([]string{"--workspace", sub, "--project", "notes"}, tc.args...)...)
@@ -272,16 +272,16 @@ func TestInit_ExplicitWorkspaceEnclosingWrites(t *testing.T) {
 
 func TestInit_ExplicitWorkspaceRootBinding(t *testing.T) {
 	workspace := filepath.Join(t.TempDir(), "my workspace")
-	require.NoError(t, os.Mkdir(workspace, 0o755))
+	require.NoError(t, os.Mkdir(workspace, 0o755)) //nolint:gosec // test fixture under TempDir
 	runGit(t, workspace, "init", "--quiet")
 	binding := filepath.Join(workspace, ".kata.toml")
 	original := []byte("version = 1\n\n[project]\nname = \"notes\"\n")
-	require.NoError(t, os.WriteFile(binding, original, 0o644))
+	require.NoError(t, os.WriteFile(binding, original, 0o644)) //nolint:gosec // test fixture matches production binding mode
 	daemon := newFakeDaemon(t)
 
 	require.NoError(t, executeInitSetup(t, daemon.srv.URL, "--replace", "--workspace", workspace, "--project", "demo"))
 	assert.Equal(t, "demo", daemon.request()["name"])
-	got, err := os.ReadFile(binding)
+	got, err := os.ReadFile(binding) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, err)
 	assert.Contains(t, string(got), `name = "demo"`)
 }
@@ -304,13 +304,13 @@ func TestInit_ExplicitWorkspaceSymlinkBinding(t *testing.T) {
 			base := t.TempDir()
 			repo := filepath.Join(base, "my repo")
 			workspace := filepath.Join(repo, "scratch")
-			require.NoError(t, os.MkdirAll(workspace, 0o755))
+			require.NoError(t, os.MkdirAll(workspace, 0o755)) //nolint:gosec // test fixture under TempDir
 			runGit(t, repo, "init", "--quiet")
 			target := tc.target(base, repo)
-			require.NoError(t, os.MkdirAll(filepath.Dir(target), 0o755))
+			require.NoError(t, os.MkdirAll(filepath.Dir(target), 0o755)) //nolint:gosec // test fixture under TempDir
 			original := []byte("version = 1\n\n[project]\nname = \"notes\"\n")
 			if !tc.dangling {
-				require.NoError(t, os.WriteFile(target, original, 0o644))
+				require.NoError(t, os.WriteFile(target, original, 0o644)) //nolint:gosec // test fixture matches production binding mode
 			}
 			if err := os.Symlink(target, tc.link(repo, workspace)); err != nil {
 				t.Skipf("symlinks unavailable: %v", err)
@@ -329,7 +329,7 @@ func TestInit_ExplicitWorkspaceSymlinkBinding(t *testing.T) {
 			if tc.dangling {
 				assert.NoFileExists(t, target)
 			} else {
-				got, err := os.ReadFile(target)
+				got, err := os.ReadFile(target) //nolint:gosec // test fixture under TempDir
 				require.NoError(t, err)
 				assert.Equal(t, original, got)
 			}
@@ -341,12 +341,12 @@ func TestInit_ExplicitWorkspaceSymlinkBinding(t *testing.T) {
 func TestInit_BindingChangedDuringDaemonRequest(t *testing.T) {
 	base := t.TempDir()
 	workspace := filepath.Join(base, "workspace")
-	require.NoError(t, os.Mkdir(workspace, 0o755))
+	require.NoError(t, os.Mkdir(workspace, 0o755)) //nolint:gosec // test fixture under TempDir
 	binding := filepath.Join(workspace, ".kata.toml")
 	original := []byte("version = 1\n\n[project]\nname = \"notes\"\n")
-	require.NoError(t, os.WriteFile(binding, original, 0o644))
+	require.NoError(t, os.WriteFile(binding, original, 0o644)) //nolint:gosec // test fixture matches production binding mode
 	target := filepath.Join(base, "other.toml")
-	require.NoError(t, os.WriteFile(target, original, 0o644))
+	require.NoError(t, os.WriteFile(target, original, 0o644)) //nolint:gosec // test fixture matches production binding mode
 	daemon := newFakeDaemon(t)
 	daemon.onRequest = func() {
 		if err := os.Remove(binding); err != nil {
@@ -361,7 +361,7 @@ func TestInit_BindingChangedDuringDaemonRequest(t *testing.T) {
 	var ce *cliError
 	require.ErrorAs(t, err, &ce)
 	assert.Equal(t, "project_binding_conflict", ce.Code)
-	got, err := os.ReadFile(target)
+	got, err := os.ReadFile(target) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, err)
 	assert.Equal(t, original, got)
 	assert.NoFileExists(t, filepath.Join(workspace, ".gitignore"))
@@ -370,14 +370,14 @@ func TestInit_BindingChangedDuringDaemonRequest(t *testing.T) {
 func TestInit_ExplicitWorkspaceLocalSymlink(t *testing.T) {
 	workspace := t.TempDir()
 	target := filepath.Join(workspace, "notes.toml")
-	require.NoError(t, os.WriteFile(target, []byte("version = 1\n[project]\nname = \"notes\"\n"), 0o644))
+	require.NoError(t, os.WriteFile(target, []byte("version = 1\n[project]\nname = \"notes\"\n"), 0o644)) //nolint:gosec // test fixture matches production binding mode
 	binding := filepath.Join(workspace, ".kata.toml")
 	if err := os.Symlink(target, binding); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 	daemon := newFakeDaemon(t)
 	require.NoError(t, executeInitSetup(t, daemon.srv.URL, "--workspace", workspace, "--replace", "--project", "demo"))
-	got, err := os.ReadFile(target)
+	got, err := os.ReadFile(target) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, err)
 	assert.Contains(t, string(got), `name = "demo"`)
 	info, err := os.Lstat(binding)
