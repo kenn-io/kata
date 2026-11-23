@@ -1705,6 +1705,49 @@ describe('AppShell', () => {
     expect(container.querySelectorAll('button.row')).toHaveLength(75)
   })
 
+  test('shows a failing project sync in the graph header', async () => {
+    setGeneratedFetch(projectSyncFetch(async () => Response.json({
+      statuses: [{
+        project_id: 7,
+        project_uid: '01J00000000000000000000002',
+        project_name: 'example-project',
+        enabled: true,
+        role: 'spoke',
+        pending_push_count: 3,
+        has_sync_error: true,
+      }],
+    })))
+    const selected = snapshot()
+    selected.selected = {
+      state: 'available',
+      issue: { ...selected.collection![0]!, body: 'Original body', revision: 3 },
+      comments: [],
+      labels: [],
+      links: [],
+      recurrences: [],
+      history: [],
+    }
+    selected.graph = { issues: [...selected.collection!], links: [], edges: [], unresolved_refs: [] }
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          projectUID: selected.catalog[0]!.project.uid,
+          issueUID: '01J00000000000000000000001',
+          graph: true,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: selected,
+        loading: false,
+        ...mutationProps(),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+    const chip = await screen.findByRole('button', { name: 'Sync failed' })
+    expect(chip.closest('header')).not.toBeNull()
+  })
+
   test('renders the routed source graph and returns to the same selected list context', async () => {
     vi.stubGlobal(
       'ResizeObserver',

@@ -930,13 +930,12 @@ In the web UI, a project's sync summary shows pending delivery, the last
 successful sync, credential state, producer, and retained-artifact counts. It
 refreshes every 30 seconds while the tab is visible and when you return to the
 tab. To read the state right away, open the project sync chip and click
-**Refresh**. This view requires
-current project access and does not require credential inventory or
-administration. The summary clears when the session expires, the project leaves
-the visible catalog, or connection authority changes. It is available on the
-source daemon, including its local catalog entry. Remote workspaces do not
-delegate federation reads through their target credentials. Retained-window
-counts describe stored artifacts, not provider requests or billing.
+**Refresh**. This view requires current project access and does not require
+credential inventory or administration. The summary clears when the session
+expires, the project leaves the visible catalog, or connection authority changes.
+It is available on the source daemon, including its local catalog entry. Remote
+workspaces do not delegate federation reads through their target credentials.
+Retained-window counts describe stored artifacts, not provider requests or billing.
 
 The browser status summary withholds diagnostic error text. When sync needs
 attention, copy the diagnostic command for Bash/Zsh or PowerShell and connect

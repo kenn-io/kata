@@ -899,12 +899,28 @@
   </IconButton>
 {/snippet}
 
+{#snippet projectSync()}
+  {#if selectedProject && !daemonRoute && !stale && !daemonSwitching && !reconnecting && !credentialExpired && !daemonError && !scopedAuthority && (!activeDaemonID || activeConnection?.local === true)}
+    {#key `${activeDaemonID ?? 'direct'}:${draftFenceGeneration}:${selectedProject.uid}`}
+      <ProjectSyncStatus
+        projectID={selectedProject.id}
+        projectUID={selectedProject.uid}
+        refreshGeneration={syncRefreshGeneration}
+      />
+    {/key}
+  {/if}
+{/snippet}
+
 {#snippet listPane()}
   <div class="list-column kata-list">
     {#if route.issueUID && route.graph}
       {#if projection.selected_graph && projection.selected_detail}
+        {#snippet graphActions()}
+          {@render projectSync()}
+          {@render paneDirection()}
+        {/snippet}
         <IssueGraph
-          headerActions={paneDirection}
+          headerActions={graphActions}
           graph={projection.selected_graph}
           sourceIssue={projection.selected_detail.issue}
           selectedUID={graphSelectedUID}
@@ -931,15 +947,7 @@
         />
       {/snippet}
       {#snippet projectRecurrences()}
-        {#if selectedProject && !daemonRoute && !stale && !daemonSwitching && !reconnecting && !credentialExpired && !daemonError && !scopedAuthority && (!activeDaemonID || activeConnection?.local === true)}
-          {#key `${activeDaemonID ?? 'direct'}:${draftFenceGeneration}:${selectedProject.uid}`}
-            <ProjectSyncStatus
-              projectID={selectedProject.id}
-              projectUID={selectedProject.uid}
-              refreshGeneration={syncRefreshGeneration}
-            />
-          {/key}
-        {/if}
+        {@render projectSync()}
         {#if selectedProject && !scopedAuthority}
           {#key selectedProject.uid}
             <ProjectRecurrences
