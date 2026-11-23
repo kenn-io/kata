@@ -345,7 +345,7 @@ func pushDirectSpoke(
 				if err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
-				retired, err := publishRetainedLinkPeers(ctx, store, binding, hubProjectID, client, batch, snapshotsSent, onPulledEvents, validateLease, credentials, opts)
+				retired, err := publishRetainedDependencies(ctx, store, binding, hubProjectID, client, batch, snapshotsSent, onPulledEvents, validateLease, credentials, opts)
 				if err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
@@ -453,6 +453,49 @@ func pushDirectSpoke(
 	return nil
 }
 
+func publishRetainedDependencies(ctx context.Context, store db.Storage, binding *db.FederationBinding, hubProjectID int64, client *Client, batch []db.Event, sent map[string]bool, onPulledEvents func(int64, []db.Event), validateLease func(context.Context) error, credentials config.FederationCredentialStore, opts clientpkg.Opts) (bool, error) {
+	retired, err := publishRetainedLinkPeers(ctx, store, binding, hubProjectID, client, batch, sent, onPulledEvents, validateLease, credentials, opts)
+	if err != nil || retired {
+		return retired, err
+	}
+	return publishRetainedComments(ctx, store, binding, hubProjectID, client, batch, sent, onPulledEvents, validateLease, credentials, opts)
+}
+
+func publishRetainedComments(ctx context.Context, store db.Storage, binding *db.FederationBinding, hubProjectID int64, client *Client, batch []db.Event, sent map[string]bool, onPulledEvents func(int64, []db.Event), validateLease func(context.Context) error, credentials config.FederationCredentialStore, opts clientpkg.Opts) (bool, error) {
+	if binding.RetainedThroughEventID == 0 {
+		return false, nil
+	}
+	for _, edit := range batch {
+		if edit.Type != "issue.comment_edited" || edit.IssueUID == nil {
+			continue
+		}
+		var payload struct {
+			CommentUID string `json:"comment_uid"`
+		}
+		if err := json.Unmarshal([]byte(edit.Payload), &payload); err != nil {
+			return false, err
+		}
+		comment, sourceID, err := store.RetainedCommentEvent(ctx, binding.ProjectID, *edit.IssueUID, payload.CommentUID)
+		if errors.Is(err, db.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		retired, err := publishRetainedLinkPeers(ctx, store, binding, hubProjectID, client, []db.Event{comment}, sent, onPulledEvents, validateLease, credentials, opts)
+		if err != nil || retired {
+			return retired, err
+		}
+		envelope := federationIngestEnvelope(comment)
+		envelope.EventID = sourceID
+		_, err = client.IngestProjectEventsWithOptions(ctx, hubProjectID, []api.FederationIngestEventEnvelope{envelope}, IngestProjectEventsOptions{})
+		if err != nil && retainedUnknownIssue(err) != *edit.IssueUID {
+			return false, err
+		}
+	}
+	return false, nil
+}
+
 func publishRetainedLinkPeers(ctx context.Context, store db.Storage, binding *db.FederationBinding, hubProjectID int64, client *Client, batch []db.Event, sent map[string]bool, onPulledEvents func(int64, []db.Event), validateLease func(context.Context) error, credentials config.FederationCredentialStore, opts clientpkg.Opts) (bool, error) {
 	for _, event := range batch {
 		fold := db.FoldEvent{Type: event.Type, UID: event.UID, Payload: jsontext.Value(event.Payload)}
@@ -468,6 +511,9 @@ func publishRetainedLinkPeers(ctx context.Context, store db.Storage, binding *db
 		}
 		if peers == nil {
 			peers = make(map[string]bool)
+		}
+		if event.Type == "issue.commented" && event.RelatedIssueUID != nil {
+			peers[*event.RelatedIssueUID] = true
 		}
 		_, _, err = db.StripCrossProjectLinkAdditions(fold, func(uid string) bool {
 			peers[uid] = true
