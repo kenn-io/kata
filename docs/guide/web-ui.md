@@ -83,7 +83,9 @@ The sidebar lists **Inbox**, **Today**, **Scheduled**, **Delegated**, **All open
   each project. Settings opens on **Search by meaning**. Credentials and Teams
   and visibility appear only for sessions allowed to use them; a section you
   can't use opens Appearance instead. Each section has its own address, so you
-  can bookmark it.
+  can bookmark it. Credentials uses `?view=credentials`; the other sections use
+  `?view=settings&section=…`. A project with no selected teams is visible only
+  to server owners.
 
 Search and **Status** sit above each collection. The **Filter** menu holds
 Project, Relationship, Owner, and Label; active filters appear as chips you can

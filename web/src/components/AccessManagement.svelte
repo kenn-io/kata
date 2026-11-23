@@ -231,7 +231,7 @@
   }
 
   // Visibility saves as it changes, against the revision it was loaded at.
-  // Selected teams with none picked waits for a pick instead of saving.
+  // A new selected-teams policy waits for a team pick before saving.
   async function savePolicy(
     nextVisibility: 'all' | 'teams',
     nextTeams: readonly string[],
@@ -239,7 +239,8 @@
     if (!policy || policyLoading) return
     visibility = nextVisibility
     selectedTeams = [...nextTeams]
-    if (nextVisibility === 'teams' && nextTeams.length === 0) return
+    if (nextVisibility === 'teams' && nextTeams.length === 0 && policy.visibility !== 'teams')
+      return
     const id = projectID
     const draft = {
       visibility: nextVisibility,
@@ -470,7 +471,11 @@
               <p class="note">Create a team above to pick it here.</p>
             {/each}
             {#if teams.length > 0 && selectedTeams.length === 0}
-              <p class="note">Pick a team to save.</p>
+              <p class="note">
+                {policy?.visibility === 'teams' && policy.team_uids.length === 0
+                  ? 'No teams have access. Server owners still do.'
+                  : 'Pick a team to save.'}
+              </p>
             {/if}
           </div>
         </fieldset>

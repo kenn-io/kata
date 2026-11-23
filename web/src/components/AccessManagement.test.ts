@@ -12,16 +12,21 @@ const projects = [
 
 function serve(policy: { visibility: string; team_uids: string[] }) {
   const writes: unknown[] = []
+  let revision = 4
   setGeneratedFetch(async (input, init) => {
     const path = new URL(String(input)).pathname
     if (init?.method === 'PUT' && path === '/api/v1/projects/7/access') {
-      writes.push(JSON.parse(String(init.body)))
-      return Response.json({ policy: { project_uid: 'project-uid', revision: 5, ...policy } })
+      const draft = JSON.parse(String(init.body))
+      writes.push(draft)
+      policy = { visibility: draft.visibility, team_uids: draft.team_uids }
+      return Response.json({
+        policy: { project_uid: 'project-uid', revision: ++revision, ...policy },
+      })
     }
     if (path === '/api/v1/teams')
       return Response.json({ teams: [{ uid: 'team-one', name: 'example-team', revision: 1 }] })
     if (path === '/api/v1/projects/7/access')
-      return Response.json({ policy: { project_uid: 'project-uid', revision: 4, ...policy } })
+      return Response.json({ policy: { project_uid: 'project-uid', revision, ...policy } })
     throw new Error(`Unexpected request: ${init?.method ?? 'GET'} ${path}`)
   })
   return writes
@@ -45,6 +50,19 @@ function renderAccess() {
 
 describe('AccessManagement', () => {
   afterEach(cleanup)
+
+  it('saves removal of the last selected team', async () => {
+    const writes = serve({ visibility: 'teams', team_uids: ['team-one'] })
+    renderAccess()
+
+    const team = await screen.findByRole('checkbox', { name: 'example-team' })
+    await waitFor(() => expect((team as HTMLInputElement).disabled).toBe(false))
+    await fireEvent.click(team)
+    await waitFor(() =>
+      expect(writes).toEqual([{ visibility: 'teams', team_uids: [], revision: 4 }]),
+    )
+    expect(await screen.findByText('No teams have access. Server owners still do.')).not.toBeNull()
+  })
 
   it('shows Teams and Project visibility as two sections', async () => {
     serve({ visibility: 'all', team_uids: [] })

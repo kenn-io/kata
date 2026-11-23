@@ -40,6 +40,25 @@ test('owner settings manage teams and persist project visibility', async ({
     })
     .toMatchObject({ visibility: 'teams', team_uids: [teamUID] })
 
+  await page.getByRole('checkbox', { name: 'Example team' }).uncheck()
+  await expect(page.getByText('No teams have access. Server owners still do.')).toBeVisible()
+  await expect
+    .poll(async () => {
+      const response = await kata.request(
+        page,
+        credentials,
+        'GET',
+        `/api/v1/projects/${kata.projectID}/access`,
+      )
+      return ((await response.json()) as { policy: unknown }).policy
+    })
+    .toMatchObject({ visibility: 'teams', team_uids: [] })
+  await page.reload()
+  await chooseProject(page, 'example-project')
+  await openTeam(page, 'Example team')
+  await expect(page.getByText('No teams have access. Server owners still do.')).toBeVisible()
+  await expect(page.getByRole('checkbox', { name: 'Example team' })).not.toBeChecked()
+
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 1000 })
     await expect(page.getByRole('heading', { name: 'Project visibility' })).toBeVisible()
