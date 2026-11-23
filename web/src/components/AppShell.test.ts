@@ -133,7 +133,7 @@ describe('AppShell', () => {
     expect(screen.queryByRole('button', { name: 'Credentials' })).toBeNull()
   })
 
-  test('refreshes repeating tasks when the recurrence revision changes', async () => {
+  test('refreshes repeating tasks when the snapshot cursor or recurrence revision changes', async () => {
     const rule = {
       id: 1,
       uid: 'recurrence-1',
@@ -170,6 +170,7 @@ describe('AppShell', () => {
       snapshot: current,
       loading: false,
       ...mutationProps(),
+      draftResetGeneration: current.cursor,
       onNavigate: vi.fn(),
       onCreateProject: vi.fn(async () => ({ changed: true })),
     }
@@ -177,12 +178,20 @@ describe('AppShell', () => {
     await waitFor(() => expect(recurrenceReads).toBe(1))
     expect(screen.queryByRole('button', { name: /repeating task/ })).toBeNull()
 
-    await view.rerender({ ...props, recurrenceRevision: 1 })
+    const next = { ...current, cursor: current.cursor + 1 }
+    await view.rerender({ ...props, snapshot: next, draftResetGeneration: next.cursor })
 
     await waitFor(() =>
       expect(screen.getByRole('button', { name: '↻ 1 repeating task' })).not.toBeNull(),
     )
     expect(recurrenceReads).toBe(2)
+    await view.rerender({
+      ...props,
+      snapshot: next,
+      draftResetGeneration: next.cursor,
+      recurrenceRevision: 1,
+    })
+    await waitFor(() => expect(recurrenceReads).toBe(3))
   })
 
   test('keeps project sync readable for a current read-only project member', () => {

@@ -3005,6 +3005,168 @@ describe('App', () => {
     },
   )
 
+  it('shows another client’s first repeating task after a remote poll', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    localStorage.setItem(
+      'kata.web.workspace-state.v1',
+      JSON.stringify({
+        version: 1,
+        daemons: { 'example-remote': `/kata?scope=${snapshot().catalog[0]!.project.uid}` },
+      }),
+    )
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const initial = snapshot()
+    const updated = { ...snapshot(), cursor: initial.cursor + 1 }
+    updated.collection[0]!.title = 'Updated remote issue'
+    let changed = false
+    let reads = 0
+    let updatedSnapshotReads = 0
+    const recurrenceDaemons: Array<string | null> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        const path = new URL(request.url).pathname
+        if (path.endsWith('/recurrences')) {
+          reads++
+          recurrenceDaemons.push(request.headers.get('X-Kata-Web-Daemon'))
+          return Response.json({
+            recurrences: changed
+              ? [
+                  {
+                    id: 1,
+                    uid: 'recurrence-1',
+                    project_id: 7,
+                    rrule: 'FREQ=WEEKLY',
+                    dtstart: '2026-11-22',
+                    timezone: 'UTC',
+                    template_title: 'Weekly task',
+                    revision: 1,
+                  },
+                ]
+              : [],
+          })
+        }
+        if (path.endsWith('/references')) return Response.json({ statuses: [] })
+        if (path === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (path === '/api/v1/ui/daemons')
+          return Response.json({
+            daemons: [
+              ...daemonRoster().daemons,
+              {
+                id: 'example-remote',
+                url: 'https://daemon.example',
+                default: false,
+                auth: 'token',
+                health: 'connected',
+              },
+            ],
+          })
+        if (
+          path.endsWith('/api/v1/ui/snapshot') &&
+          changed &&
+          request.headers.get('X-Kata-Web-Daemon') === 'example-remote'
+        )
+          updatedSnapshotReads++
+        return Response.json(changed ? updated : initial, {
+          headers: { ETag: changed ? '"snapshot-2"' : '"snapshot-1"' },
+        })
+      }),
+    )
+    render(App)
+    await vi.advanceTimersByTimeAsync(0)
+    await fireEvent.click(screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }))
+    await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(reads).toBeGreaterThan(0)
+    expect(screen.queryByRole('button', { name: /repeating task/ })).toBeNull()
+
+    const previousReads = reads
+    changed = true
+    await vi.advanceTimersByTimeAsync(15_001)
+    await tick()
+    expect(updatedSnapshotReads).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: /Updated remote issue/ })).not.toBeNull()
+    expect(screen.getByRole('button', { name: '↻ 1 repeating task' })).not.toBeNull()
+    expect(reads).toBeGreaterThan(previousReads)
+    expect(recurrenceDaemons.at(-1)).toBe('example-remote')
+  })
+
+  it('shows another client’s first repeating task after a stream reset', async () => {
+    history.replaceState(null, '', `/kata?scope=${snapshot().catalog[0]!.project.uid}#direct=1`)
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const initial = snapshot()
+    initial.capabilities.updates = 'sse'
+    const updated = structuredClone(initial)
+    updated.cursor++
+    updated.collection[0]!.title = 'Updated issue'
+    let stream: ReadableStreamDefaultController<Uint8Array> | undefined
+    let changed = false
+    let reads = 0
+    const resetSnapshots: Request[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        const path = new URL(request.url).pathname
+        if (path === '/api/v1/events/stream') {
+          return new Response(
+            new ReadableStream({ start: (controller) => (stream = controller) }),
+            {
+              headers: { 'Content-Type': 'text/event-stream' },
+            },
+          )
+        }
+        if (path.endsWith('/recurrences')) {
+          reads++
+          return Response.json({
+            recurrences: changed
+              ? [
+                  {
+                    id: 1,
+                    uid: 'recurrence-1',
+                    project_id: 7,
+                    rrule: 'FREQ=WEEKLY',
+                    dtstart: '2026-11-22',
+                    timezone: 'UTC',
+                    template_title: 'Weekly task',
+                    revision: 1,
+                  },
+                ]
+              : [],
+          })
+        }
+        if (path.endsWith('/references')) return Response.json({ statuses: [] })
+        if (path === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (path === '/api/v1/ui/snapshot' && changed) resetSnapshots.push(request)
+        return Response.json(changed ? updated : initial, {
+          headers: { ETag: changed ? '"snapshot-2"' : '"snapshot-1"' },
+        })
+      }),
+    )
+    render(App)
+    await waitFor(() => expect(stream).toBeDefined())
+    await waitFor(() => expect(reads).toBeGreaterThan(0))
+    expect(screen.queryByRole('button', { name: /repeating task/ })).toBeNull()
+
+    changed = true
+    stream!.enqueue(
+      new TextEncoder().encode(
+        'id: 13\nevent: sync.reset_required\ndata: {"reset_required":true}\n\n',
+      ),
+    )
+    expect(await screen.findByRole('button', { name: /Updated issue/ })).not.toBeNull()
+    expect(await screen.findByRole('button', { name: '↻ 1 repeating task' })).not.toBeNull()
+    expect(resetSnapshots.some((request) => !request.headers.has('If-None-Match'))).toBe(true)
+  })
+
   it('refreshes project rules for recurrence events while a snapshot is pending', async () => {
     history.replaceState(null, '', '/kata?scope=01J00000000000000000000002#direct=1')
     sessionStorage.setItem(
