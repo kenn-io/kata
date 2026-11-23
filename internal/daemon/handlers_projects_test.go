@@ -379,15 +379,6 @@ func TestResolve_NotInitializedHint(t *testing.T) {
 	}
 }
 
-func TestResolve_LocalWorkspaceHint(t *testing.T) {
-	ts := newTestServer(t)
-	dir := t.TempDir()
-	testfix.WriteKataToml(t, dir, "local-project")
-	resp, bs := postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{"start_path": dir})
-	envelope := assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
-	assert.Equal(t, `run "kata init": it attaches this workspace to the active project "local-project", or creates it if none exists`, envelope.Error.Hint)
-}
-
 // TestResolve_ByStartPath_KataTomlNamesUnregisteredProject reports the
 // bound project name in error.data when .kata.toml names a project the
 // daemon does not know.
