@@ -17,6 +17,8 @@ Search matches every word. Use an open issue that covers the work, or create one
 
     kata create "<title>" --body "<what and why>" --idempotency-key <key> --agent
 
+Use --priority instead of p0 through p4 or labels beginning with priority:.
+
 If create reports a look-alike, use that issue unless the work truly differs
 (--force-new). Link related but different work with --related <ref>, or
 --parent <ref> when the new issue is part of a larger one.
