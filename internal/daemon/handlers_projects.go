@@ -801,7 +801,7 @@ func projectNotInitialized(ctx context.Context, store db.Storage, message, name,
 		}
 		if err == nil && project.DeletedAt != nil && canSeeArchived(ctx, project) {
 			hint = fmt.Sprintf(`run "kata projects restore %d", then %s in this workspace`, project.ID, initCommand)
-		} else if err != nil || project.DeletedAt == nil {
+		} else {
 			hint = fmt.Sprintf(`%s: it attaches this workspace to the active project %q, or creates it if none exists`, initCommand, name)
 		}
 	}

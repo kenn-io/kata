@@ -77,9 +77,9 @@ func TestArchivedProjectHintsRestoreOnlyForCallersWhoMayReadIt(t *testing.T) {
 		_, err = resolveByAliasInput(withProjectPolicy, store, &api.AliasInput{Identity: "github.com/example/retired-project", Kind: "git"}, name, false)
 		apiErr, ok := err.(*api.APIError)
 		require.True(t, ok, "got %v", err)
-		hint := `run "kata init" in this workspace`
+		hint := `run "kata init": it attaches this workspace to the active project "retired-project", or creates it if none exists`
 		if name != "" {
-			hint = `run "kata init" with --project set to "retired-project" in this workspace`
+			hint = `run "kata init" with --project set to "retired-project": it attaches this workspace to the active project "retired-project", or creates it if none exists`
 		}
 		assert.Equal(t, hint, apiErr.Hint)
 	}
