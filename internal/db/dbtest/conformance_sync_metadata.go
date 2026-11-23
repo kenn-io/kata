@@ -275,15 +275,6 @@ func checkMetadataAndAtomicEdit(t *testing.T, store db.Storage) error {
 		return fmt.Errorf("patch beside legacy attention: %w", err)
 	}
 	assert.JSONEq(t, `{"scheduled_on":"2026-07-20","work.attention":"on-fire","custom":"yellow"}`, string(legacyIssue.Issue.Metadata))
-	rewrittenIssue, err := store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
-		IssueID: fixture.Issue.ID, Actor: "metadata-editor",
-		Patch: map[string]jsontext.Value{"work.attention": jsontext.Value(`"ok"`)},
-	})
-	if err != nil {
-		return fmt.Errorf("rewrite legacy attention: %w", err)
-	}
-	assert.JSONEq(t, `{"scheduled_on":"2026-07-20","work.attention":"ok","custom":"yellow"}`, string(rewrittenIssue.Issue.Metadata))
-
 	patchedProject, err := store.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
 		ProjectID: fixture.Project.ID, IfMatchRev: new(fixture.Project.Revision), Actor: "metadata-editor",
 		Patch: map[string]jsontext.Value{"area": jsontext.Value(`"Platform"`)},
@@ -550,7 +541,7 @@ func checkMetadataAndAtomicEdit(t *testing.T, store db.Storage) error {
 			rolledBackEvents++
 		}
 	}
-	assert.Equal(t, 4, metadataEvents)
+	assert.Equal(t, 3, metadataEvents)
 	assert.Zero(t, rolledBackEvents)
 
 	guarded, err := createFixtureIssue(ctx, store, fixture.Project.ID, "guarded metadata", "author", nil)

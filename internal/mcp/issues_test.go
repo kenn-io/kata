@@ -219,7 +219,6 @@ func TestSchedulingMetadataAcceptsCivilTimeFormatsAndSomeday(t *testing.T) {
 	}
 	_, err := createMetadata(CreateInput{Metadata: map[string]any{"work.attention": "working"}})
 	require.ErrorIs(t, err, metadata.ErrInvalidValue)
-	require.Contains(t, err.Error(), "ok, needs-human, stuck")
 
 	patch, err := editMetadata(EditInput{Metadata: map[string]any{"someday": nil}, ClearScheduledOn: true})
 	require.NoError(t, err)

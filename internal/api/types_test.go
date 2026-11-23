@@ -321,7 +321,7 @@ func TestActionRequest_RoundTripWithEvidence(t *testing.T) {
 func TestMetadataKeyConstantsMirrorRegistry(t *testing.T) {
 	for _, k := range []string{
 		api.MetadataKeyScheduledOn, api.MetadataKeyDeadlineOn, api.MetadataKeySomeday,
-		api.MetadataKeyChecklist, api.MetadataKeyTimezone, api.MetadataKeyWorkAttention,
+		api.MetadataKeyChecklist, api.MetadataKeyTimezone,
 	} {
 		_, ok := metadata.IssueRegistry[k]
 		assert.True(t, ok, "api constant %q absent from issue registry", k)

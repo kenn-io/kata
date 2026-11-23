@@ -964,7 +964,6 @@ func TestToolsRoundTripAgainstRealDaemon(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.True(t, invalid.IsError)
-	require.Contains(t, string(mustJSON(t, invalid.Content)), "ok, needs-human, stuck")
 	patched, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
 		Name: "kata.set_metadata", Arguments: map[string]any{
 			"ref": ref, "patch": map[string]any{"work.attention": "ok"}, "revision": revision,

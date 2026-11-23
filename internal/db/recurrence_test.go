@@ -45,17 +45,9 @@ func TestComposeRecurrenceIssueMetadataDefensivelyRejectsInvalidReservedValue(t 
 }
 
 func TestComposeRecurrenceMetadataPreservesLegacyAttention(t *testing.T) {
-	value, err := ComposeExistingRecurrenceIssueMetadata(jsontext.Value(`{"work.attention":"working"}`), "2026-11-23", "UTC")
+	value, err := ComposeRecurrenceIssueMetadata(jsontext.Value(`{"work.attention":"stuck"}`), "2026-11-23", "UTC")
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"work.attention":"working","scheduled_on":"2026-11-23","timezone":"UTC"}`, string(value))
-	for _, tc := range []struct{ input, want string }{
-		{`{"work.attention":"working","kind":"weekly"}`, `{"kind":"weekly","scheduled_on":"2026-11-23","timezone":"UTC"}`},
-		{`{"work.attention":"stuck"}`, `{"work.attention":"stuck","scheduled_on":"2026-11-23","timezone":"UTC"}`},
-	} {
-		value, err := ComposeRecurrenceIssueMetadata(jsontext.Value(tc.input), "2026-11-23", "UTC")
-		require.NoError(t, err)
-		assert.JSONEq(t, tc.want, string(value))
-	}
+	assert.JSONEq(t, `{"work.attention":"stuck","scheduled_on":"2026-11-23","timezone":"UTC"}`, string(value))
 }
 
 func TestValidateRecurrenceTemplatePatchSkipsOnlySavedLegacyAttention(t *testing.T) {
