@@ -47,18 +47,18 @@ func RecordFederationAcceptedRecoverySnapshots(ctx context.Context, tx *sql.Tx, 
 // It is a federated move refusal.
 var ErrRetainedSnapshotUnaccepted = errors.Join(ErrFederatedReadOnly, ErrFederatedMoveUnsupported, errors.New("retained recovery snapshot is not accepted by the hub"))
 
-// RetainedMoveSnapshot uses the accepted recovery snapshot's attribution in a
-// new move event, while the spoke keeps its original local history unchanged.
-// It refuses with ErrRetainedSnapshotUnaccepted while the hub has not
-// acknowledged that snapshot.
+// RetainedMoveSnapshot uses the earliest accepted recovery snapshot's
+// attribution in a new move event, while the spoke keeps its original local
+// history unchanged. It refuses with ErrRetainedSnapshotUnaccepted only when
+// the hub has acknowledged none of the issue's recovery snapshots.
 func RetainedMoveSnapshot(ctx context.Context, tx *sql.Tx, sourceProjectID int64, issueUID, instanceUID, payload string) (string, error) {
 	var recovered string
 	var acked bool
-	err := tx.QueryRowContext(ctx, `SELECT e.payload, EXISTS (SELECT 1 FROM meta WHERE key='`+FederationAcknowledgedEventPrefix+`' || p.uid || '.' || e.uid)
+	err := tx.QueryRowContext(ctx, `SELECT e.payload, EXISTS (SELECT 1 FROM meta WHERE key='`+FederationAcknowledgedEventPrefix+`' || p.uid || '.' || e.uid) AS acked
 FROM events e JOIN federation_bindings b ON b.project_id=e.project_id JOIN projects p ON p.id=e.project_id
 WHERE e.project_id=$1 AND e.issue_uid=$2 AND e.origin_instance_uid=$3 AND b.retained_through_event_id>0
 AND `+recoverySnapshotSQL("$3")+`
-ORDER BY e.id LIMIT 1`, sourceProjectID, issueUID, instanceUID).Scan(&recovered, &acked)
+ORDER BY acked DESC, e.id LIMIT 1`, sourceProjectID, issueUID, instanceUID).Scan(&recovered, &acked)
 	if errors.Is(err, sql.ErrNoRows) {
 		return payload, nil
 	}
