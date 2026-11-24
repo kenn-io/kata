@@ -553,7 +553,7 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 		if previous != nil {
 			prior = previous.PushCursorEventID
 		}
-		b.PushCursorEventID, err = db.RestoreFederationPushCursor(ctx, tx, b.ProjectID, b.PushCursorEventID, prior)
+		b.PushCursorEventID, err = db.RestoreFederationPushCursor(ctx, tx, b.ProjectID, b.PushCursorEventID, prior, d.InstanceUID(), b.Actor)
 		if err != nil {
 			return db.FederationBinding{}, err
 		}

@@ -66,9 +66,16 @@ const FederationHeldCursorPrefix = "federation_held_cursor."
 // FederationAcknowledgedEventPrefix identifies events accepted out of order.
 const FederationAcknowledgedEventPrefix = "federation_acknowledged_event."
 
-// FederationUnresolvedEventSQL excludes events already accepted or superseded on leave.
+// FederationLocalEventSQL identifies retained events and references to retained tasks.
+func FederationLocalEventSQL(alias string) string {
+	return `(EXISTS (SELECT 1 FROM meta m JOIN projects p ON p.id=` + alias + `.project_id WHERE m.key='` + FederationAcknowledgedEventPrefix + `' || p.uid || '.' || ` + alias + `.uid AND m.value='local')
+ OR EXISTS (SELECT 1 FROM events created JOIN projects p ON p.id=created.project_id JOIN meta m ON m.key='` + FederationAcknowledgedEventPrefix + `' || p.uid || '.' || created.uid AND m.value='local'
+ WHERE created.project_id=` + alias + `.project_id AND created.issue_uid IN (` + alias + `.issue_uid,` + alias + `.related_issue_uid) AND created.type IN ('issue.created','issue.snapshot')))`
+}
+
+// FederationUnresolvedEventSQL excludes events already accepted or retained locally.
 func FederationUnresolvedEventSQL(alias string) string {
-	return alias + `.type IN (` + FederationPushEventTypesSQL() + `) AND NOT EXISTS (SELECT 1 FROM meta WHERE key='` + FederationAcknowledgedEventPrefix + `' || (SELECT uid FROM projects WHERE id=` + alias + `.project_id) || '.' || ` + alias + `.uid)`
+	return alias + `.type IN (` + FederationPushEventTypesSQL() + `) AND NOT EXISTS (SELECT 1 FROM meta WHERE key='` + FederationAcknowledgedEventPrefix + `' || (SELECT uid FROM projects WHERE id=` + alias + `.project_id) || '.' || ` + alias + `.uid) AND NOT ` + FederationLocalEventSQL(alias)
 }
 
 // RecordFederationAcknowledgedEvents retains exact accepted event identities.
@@ -178,7 +185,7 @@ func PreserveFederationLeaveFenceOnStop(previous *FederationBinding, next Federa
 }
 
 // RestoreFederationPushCursor preserves offline edits when push resumes.
-func RestoreFederationPushCursor(ctx context.Context, tx *sql.Tx, projectID, cursor, bindingCursor int64) (int64, error) {
+func RestoreFederationPushCursor(ctx context.Context, tx *sql.Tx, projectID, cursor, bindingCursor int64, origin, actor string) (int64, error) {
 	var held int64
 	err := tx.QueryRowContext(ctx, `SELECT CAST(m.value AS BIGINT) FROM meta m JOIN projects p ON m.key=$1 || p.uid WHERE p.id=$2`, FederationHeldCursorPrefix, projectID).Scan(&held)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -187,8 +194,15 @@ func RestoreFederationPushCursor(ctx context.Context, tx *sql.Tx, projectID, cur
 	if err != nil {
 		return 0, err
 	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO meta(key,value)
+ SELECT $1 || p.uid || '.' || e.uid,'local' FROM events e JOIN projects p ON p.id=e.project_id
+ WHERE e.project_id=$2 AND e.origin_instance_uid=$3 AND e.id>$4 AND e.actor<>$5 AND e.type IN (`+FederationPushEventTypesSQL()+`)
+ ON CONFLICT(key) DO NOTHING`, FederationAcknowledgedEventPrefix, projectID, origin, max(held, bindingCursor), actor)
+	if err != nil {
+		return 0, err
+	}
 	_, err = tx.ExecContext(ctx, `DELETE FROM meta WHERE key=$1 || (SELECT uid FROM projects WHERE id=$2)`, FederationHeldCursorPrefix, projectID)
-	return max(held, bindingCursor, cursor), err
+	return max(held, bindingCursor), err
 }
 
 // CheckFederationMoveSourceLifecycle keeps a native source joined while a

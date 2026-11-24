@@ -242,7 +242,7 @@ func (d *Store) enableFederationPush(ctx context.Context, projectID int64, curso
 	}
 	next := existing
 	next.PushEnabled = true
-	nextCursor, err := db.RestoreFederationPushCursor(ctx, tx, projectID, max(cursor, existing.PushCursorEventID), existing.PushCursorEventID)
+	nextCursor, err := db.RestoreFederationPushCursor(ctx, tx, projectID, max(cursor, existing.PushCursorEventID), existing.PushCursorEventID, d.InstanceUID(), existing.Actor)
 	if err != nil {
 		return db.FederationBinding{}, err
 	}
@@ -497,8 +497,8 @@ func (d *Store) resetFederatedProjectIfNoPendingPush(
 		         FROM events e
 		        WHERE e.project_id = ?
 		          AND e.origin_instance_uid = ?
-		          AND e.id > ?
-		          AND `+db.FederationResetOwedEventSQL("e", false)+`
+		          AND ((e.id > ? AND `+db.FederationResetOwedEventSQL("e", false)+`)
+		               OR `+db.FederationLocalEventSQL("e")+`)
 		   )
 		   AND NOT EXISTS (
 		       SELECT 1

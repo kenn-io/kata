@@ -152,7 +152,7 @@ WHERE project_id=$1 AND active=1 LIMIT 1`, input.ProjectID).Scan(&externalRootBi
 			if previous != nil {
 				prior = previous.PushCursorEventID
 			}
-			input.PushCursorEventID, err = db.RestoreFederationPushCursor(ctx, tx, input.ProjectID, input.PushCursorEventID, prior)
+			input.PushCursorEventID, err = db.RestoreFederationPushCursor(ctx, tx, input.ProjectID, input.PushCursorEventID, prior, s.InstanceUID(), input.Actor)
 			if err != nil {
 				return err
 			}
@@ -302,7 +302,7 @@ func (s *Store) EnableFederationPush(ctx context.Context, projectID int64, curso
 		}
 		next := binding
 		next.PushEnabled = true
-		cursor, err = db.RestoreFederationPushCursor(ctx, tx, projectID, max(cursor, binding.PushCursorEventID), binding.PushCursorEventID)
+		cursor, err = db.RestoreFederationPushCursor(ctx, tx, projectID, max(cursor, binding.PushCursorEventID), binding.PushCursorEventID, s.InstanceUID(), binding.Actor)
 		if err != nil {
 			return err
 		}
