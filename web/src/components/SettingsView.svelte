@@ -35,13 +35,20 @@
     const list = tabList
     const tab = list?.querySelector<HTMLElement>(`[data-tab-id="${section}"]`)
     if (!list || !tab) return
-    const strip = list.getBoundingClientRect()
-    const bounds = tab.getBoundingClientRect()
-    const style = getComputedStyle(list)
-    const left = strip.left + (parseFloat(style.scrollPaddingLeft) || 0)
-    const right = strip.right - (parseFloat(style.scrollPaddingRight) || 0)
-    if (bounds.left < left) list.scrollLeft += bounds.left - left
-    else if (bounds.right > right) list.scrollLeft += bounds.right - right
+    function reveal() {
+      const strip = list!.getBoundingClientRect()
+      const bounds = tab!.getBoundingClientRect()
+      const style = getComputedStyle(list!)
+      const left = strip.left + (parseFloat(style.scrollPaddingLeft) || 0)
+      const right = strip.right - (parseFloat(style.scrollPaddingRight) || 0)
+      if (bounds.left < left) list!.scrollLeft += bounds.left - left
+      else if (bounds.right > right) list!.scrollLeft += bounds.right - right
+    }
+    reveal()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(reveal)
+    observer.observe(list)
+    return () => observer.disconnect()
   })
 
   let accessVisited = $state(false)
@@ -61,11 +68,10 @@
 <div class="settings-view">
   <Tabs
     {tabs}
-    value={active}
+    bind:value={() => active, (next) => onSelect(next as SettingsSectionID)}
     ariaLabel="Settings"
     activation="manual"
     bind:listElement={tabList}
-    onchange={(id) => onSelect(id as SettingsSectionID)}
     tabAttributes={(item, selected) => ({
       onclick: selected ? () => onSelect(item.id as SettingsSectionID) : undefined,
       onfocus: (event) =>

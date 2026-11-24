@@ -1244,6 +1244,29 @@ describe('AppShell', () => {
     expect(screen.queryByRole('tab', { name: 'Credentials' })).toBeNull()
   })
 
+  test('keeps the accepted Settings section when access becomes unavailable', async () => {
+    const authorized = snapshot()
+    authorized.capabilities.access_admin = true
+    const props = {
+      route: settingsRoute('appearance'),
+      snapshot: authorized,
+      loading: false,
+      ...mutationProps(),
+      onNavigate: vi.fn(),
+      onCreateProject: vi.fn(async () => ({ changed: true })),
+    }
+    const view = render(AppShell, { props })
+    await fireEvent.click(screen.getByRole('tab', { name: 'Teams and visibility' }))
+    expect(screen.getByRole('tab', { name: 'Appearance' }).getAttribute('aria-selected')).toBe(
+      'true',
+    )
+    await view.rerender({ ...props, stale: true })
+    expect(screen.getByRole('tab', { name: 'Appearance' }).getAttribute('aria-selected')).toBe(
+      'true',
+    )
+    expect(screen.getByRole('heading', { name: 'Appearance' })).not.toBeNull()
+  })
+
   test('keeps the last Settings section when another section is pending', async () => {
     const onNavigate = vi.fn()
     const props = {
