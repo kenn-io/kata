@@ -26,10 +26,9 @@ func FederationMoveSnapshotEvent(event RemoteEvent) RemoteEvent {
 // new move event, while the spoke keeps its original local history unchanged.
 func RetainedMoveSnapshot(ctx context.Context, tx *sql.Tx, sourceProjectID int64, issueUID, instanceUID, payload string) (string, error) {
 	var recovered string
-	err := tx.QueryRowContext(ctx, `SELECT e.payload FROM events e JOIN federation_bindings b ON b.project_id=e.project_id JOIN projects p ON p.id=e.project_id
+	err := tx.QueryRowContext(ctx, `SELECT e.payload FROM events e JOIN federation_bindings b ON b.project_id=e.project_id
 WHERE e.project_id=$1 AND e.issue_uid=$2 AND e.origin_instance_uid=$3 AND e.type='issue.snapshot'
-AND ((e.actor=b.bound_actor AND b.retained_through_event_id>0 AND e.id>b.retained_through_event_id AND e.id<=b.push_cursor_event_id)
- OR EXISTS (SELECT 1 FROM meta WHERE key='`+FederationAcknowledgedEventPrefix+`' || p.uid || '.' || e.uid))
+AND b.retained_through_event_id>0 AND e.id<=b.push_cursor_event_id
 AND EXISTS(SELECT 1 FROM events old WHERE old.project_id=e.project_id AND old.issue_uid=e.issue_uid
  AND old.id<e.id AND old.type IN ('issue.created','issue.snapshot','issue.moved')
  AND `+LocalInstanceOriginSQL("old.origin_instance_uid", "$3")+` AND (old.origin_instance_uid<>$3 OR old.actor<>e.actor))
