@@ -29,37 +29,42 @@ func NeedsReviewContextTx(ctx context.Context, tx *sql.Tx, issueUID, placeholder
 	return projection.NeedsReviewContexts[issueUID], nil
 }
 
-// NeedsReviewRepairTx reports whether an older peer's label was cleared by a close.
+// NeedsReviewRepairTx reports whether a close cleared an older peer's label.
 func NeedsReviewRepairTx(ctx context.Context, tx *sql.Tx, event RemoteEvent, placeholder string) (bool, error) {
-	if (event.Type != "issue.labeled" && event.Type != "issue.closed") || event.IssueUID == nil {
+	if event.IssueUID == nil || (event.Type != "issue.closed" && !isLegacyNeedsReviewAdd(event.Type, event.Payload)) {
 		return false, nil
 	}
-	if event.Type == "issue.labeled" {
-		payload := PayloadMap(event.Payload)
-		label, _ := StringValue(payload["label"])
-		if _, ok := payload["after_close_uids"]; label != "needs-review" || ok {
-			return false, nil
-		}
-	}
-	projection, err := needsReviewProjectionTx(ctx, tx, *event.IssueUID, placeholder)
+	return legacyNeedsReviewClearedTx(ctx, tx, *event.IssueUID, placeholder)
+}
+
+// legacyNeedsReviewClearedTx reports whether the fold dropped needs-review
+// because a close outranks a plain add that carries no close context.
+func legacyNeedsReviewClearedTx(ctx context.Context, tx *sql.Tx, issueUID, placeholder string) (bool, error) {
+	projection, err := needsReviewProjectionTx(ctx, tx, issueUID, placeholder)
 	if err != nil {
 		return false, err
 	}
-	state := projection.Labels[FoldLabelKey{IssueUID: *event.IssueUID, Label: "needs-review"}]
-	if state.Present || state.Clock.EventUID == "" || (event.Type == "issue.labeled" && state.Clock.EventUID != event.EventUID) {
+	state := projection.Labels[FoldLabelKey{IssueUID: issueUID, Label: "needs-review"}]
+	if state.Present || state.Clock.EventUID == "" {
 		return false, nil
 	}
 	var typ, raw string
 	if err := tx.QueryRowContext(ctx, `SELECT type, payload FROM events WHERE uid = `+placeholder, state.Clock.EventUID).Scan(&typ, &raw); err != nil {
 		return false, err
 	}
-	payload := PayloadMap(jsontext.Value(raw))
+	return isLegacyNeedsReviewAdd(typ, jsontext.Value(raw)), nil
+}
+
+// isLegacyNeedsReviewAdd reports whether an event adds needs-review without close context.
+func isLegacyNeedsReviewAdd(typ string, raw jsontext.Value) bool {
+	payload := PayloadMap(raw)
+	label, _ := StringValue(payload["label"])
 	_, hasContext := payload["after_close_uids"]
-	return typ == "issue.labeled" && !hasContext, nil
+	return typ == "issue.labeled" && label == "needs-review" && !hasContext
 }
 
 func needsReviewProjectionTx(ctx context.Context, tx *sql.Tx, issueUID, placeholder string) (FoldProjection, error) {
-	query := `SELECT uid, origin_instance_uid, type, payload, hlc_physical_ms, hlc_counter FROM events WHERE issue_uid = ` + placeholder + ` AND type IN ('issue.created','issue.snapshot','issue.moved','issue.closed','issue.labeled','issue.unlabeled', '` + RepeatedImportEventType + `')`
+	query := `SELECT uid, origin_instance_uid, type, payload, hlc_physical_ms, hlc_counter FROM events WHERE issue_uid = ` + placeholder + ` AND type IN ('issue.created','issue.snapshot','issue.moved','issue.closed','issue.reopened','issue.labeled','issue.unlabeled', '` + RepeatedImportEventType + `')`
 	rows, err := tx.QueryContext(ctx, query, issueUID)
 	if err != nil {
 		return FoldProjection{}, fmt.Errorf("read needs-review history: %w", err)

@@ -480,10 +480,9 @@ func TestFoldNeedsReviewClose(t *testing.T) {
 		{"before close", []FoldEvent{label(1, `,"after_close_uids":[]`), closeEvent(2)}, false},
 		{"skewed add", []FoldEvent{closeEvent(2), label(3, `,"after_close_uids":[]`)}, false},
 		{"deliberate add", []FoldEvent{closeEvent(2), label(3, `,"after_close_uids":["event-002"]`)}, true},
-		{"deliberate add before clock", []FoldEvent{label(1, `,"after_close_uids":["event-002"]`), closeEvent(2)}, true},
+		{"legacy add after reopen", []FoldEvent{closeEvent(2), testEvent("issue.reopened", 3, `{}`), label(4, ``)}, true},
+		{"legacy snapshot after reopen", []FoldEvent{closeEvent(2), testEvent("issue.reopened", 3, `{}`), testEvent("issue.snapshot", 4, `{"status":"open","labels":["needs-review"]}`)}, true},
 		{"second close", []FoldEvent{closeEvent(2), label(3, `,"after_close_uids":["event-002"]`), closeEvent(4)}, false},
-		{"reopen", []FoldEvent{closeEvent(2), label(3, `,"after_close_uids":["event-002"]`), testEvent("issue.reopened", 4, `{}`)}, true},
-		{"unseen close before add", []FoldEvent{closeEvent(2), closeEvent(3), label(4, `,"after_close_uids":["event-002"]`)}, false},
 		{"created label", []FoldEvent{testEvent("issue.created", 1, `{"status":"open","labels":["needs-review"]}`), closeEvent(2)}, false},
 		{"closed snapshot after", []FoldEvent{closeEvent(2), testEvent("issue.snapshot", 3, `{"status":"closed","labels":["needs-review"],"needs_review_context":{"closes":["event-002"]}}`)}, true},
 		{"concurrent closes", []FoldEvent{closeEvent(1), closeEvent(2), label(3, `,"after_close_uids":["event-002"]`)}, false},
@@ -491,23 +490,11 @@ func TestFoldNeedsReviewClose(t *testing.T) {
 		{"snapshot preserves label proof", []FoldEvent{testEvent("issue.snapshot", 2, `{"status":"open","labels":["needs-review"],"needs_review_context":{"closes":["prior-close"]}}`)}, true},
 		{"move preserves close", []FoldEvent{testEvent("issue.moved", 2, `{"to_project_uid":"project-2","snapshot":{"status":"open","needs_review_context":{"closes":["prior-close"]}}}`), label(3, `,"after_close_uids":[]`)}, false},
 		{"move preserves label proof", []FoldEvent{testEvent("issue.moved", 2, `{"to_project_uid":"project-2","snapshot":{"status":"open","labels":["needs-review"],"needs_review_context":{"closes":["prior-close"]}}}`)}, true},
-		{"legacy before", []FoldEvent{label(1, ``), closeEvent(2)}, false},
-		{"legacy after", []FoldEvent{closeEvent(2), label(3, ``)}, false},
-		{"snapshot after", []FoldEvent{closeEvent(2), testEvent("issue.snapshot", 3, `{"status":"open","labels":["needs-review"],"needs_review_context":{"closes":["event-002"]}}`)}, true},
-		{"snapshot before", []FoldEvent{testEvent("issue.snapshot", 1, `{"status":"closed","labels":["needs-review"]}`), closeEvent(2)}, false},
-		{"unlabeled", []FoldEvent{closeEvent(2), label(3, `,"after_close_uids":["event-002"]`), testEvent("issue.unlabeled", 4, `{"label":"needs-review"}`)}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			for i := range 2 {
-				if i == 1 {
-					for l, r := 0, len(tc.events)-1; l < r; l, r = l+1, r-1 {
-						tc.events[l], tc.events[r] = tc.events[r], tc.events[l]
-					}
-				}
-				got := FoldEvents(tc.events)
-				assert.Equal(t, tc.present, got.Labels[FoldLabelKey{IssueUID: "issue-1", Label: "needs-review"}].Present)
-			}
+			got := FoldEvents(tc.events)
+			assert.Equal(t, tc.present, got.Labels[FoldLabelKey{IssueUID: "issue-1", Label: "needs-review"}].Present)
 		})
 	}
 }

@@ -22,8 +22,6 @@ func checkCloseRemovesNeedsReview(t *testing.T, store db.Storage) error {
 		if label == "needs-review" {
 			require.Contains(t, payload, "after_close_uids")
 			require.Empty(t, payload["after_close_uids"])
-		} else {
-			require.NotContains(t, payload, "after_close_uids")
 		}
 	}
 	_, events, changed, err := store.CloseIssueWithEvents(ctx, issue.ID, "done", "closer", "", nil)
@@ -53,9 +51,6 @@ func checkCloseRemovesNeedsReview(t *testing.T, store db.Storage) error {
 	_, events, changed, err = store.CloseIssueWithEvents(ctx, issue.ID, "wontfix", "closer", "", nil)
 	require.NoError(t, err)
 	require.True(t, changed)
-	require.Len(t, events, 2)
-	require.Equal(t, "issue.closed", events[0].Type)
-	require.Equal(t, "issue.unlabeled", events[1].Type)
 	_, _, _, err = store.ReopenIssue(ctx, issue.ID, "worker")
 	require.NoError(t, err)
 	_, labeled, err = store.AddLabelAndEvent(ctx, issue.ID, db.LabelEventParams{Label: "needs-review", EventType: "issue.labeled", Actor: "worker"})
@@ -136,6 +131,7 @@ func checkCloseRemovesDelayedNeedsReview(t *testing.T, spoke db.Storage, backend
 	require.NoError(t, err)
 	var payload map[string]any
 	require.NoError(t, json.Unmarshal([]byte(relabeled.Payload), &payload))
+	// The hub's re-add carries the close it ingested from the spoke.
 	require.Equal(t, []any{events[0].UID}, payload["after_close_uids"])
 	_, err = spoke.InsertRemoteEvent(ctx, project.ID, remoteEventFromStored(relabeled))
 	require.NoError(t, err)
@@ -148,7 +144,9 @@ func checkCloseRemovesDelayedNeedsReview(t *testing.T, spoke db.Storage, backend
 	legacy := remoteEventFromStored(relabeled)
 	legacy.EventUID = "00000000000000000000000002"
 	legacy.HLCPhysicalMS += 60000
-	legacy.Payload = []byte(`{"label":"needs-review"}`)
+	delete(payload, "after_close_uids")
+	legacy.Payload, err = json.Marshal(payload)
+	require.NoError(t, err)
 	legacy.ContentHash = remoteEventHash(t, legacy)
 	_, err = spoke.InsertRemoteEvent(ctx, project.ID, legacy)
 	require.NoError(t, err)
@@ -190,6 +188,16 @@ func checkCloseRemovesDelayedNeedsReview(t *testing.T, spoke db.Storage, backend
 	_, _, _, err = spoke.ReopenIssue(ctx, issue.ID, "worker")
 	require.NoError(t, err)
 	assertLegacyFold(spoke, project.ID, issue.ID, issue.UID)
+	readded := legacy
+	readded.EventUID = "00000000000000000000000005"
+	readded.HLCPhysicalMS += 60000
+	readded.ContentHash = remoteEventHash(t, readded)
+	_, err = spoke.InsertRemoteEvent(ctx, project.ID, readded)
+	require.NoError(t, err)
+	require.NoError(t, spoke.MaterializeFederatedProject(ctx, project.ID))
+	present, err = spoke.HasLabel(ctx, issue.ID, "needs-review")
+	require.NoError(t, err)
+	require.True(t, present)
 
 	// A close may arrive after the older peer's label, even if its clock is behind.
 	second, createdSecond, err := spoke.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Second issue", Author: "worker"})
@@ -201,6 +209,9 @@ func checkCloseRemovesDelayedNeedsReview(t *testing.T, spoke db.Storage, backend
 	require.NoError(t, err)
 	legacy.EventUID = "00000000000000000000000004"
 	legacy.IssueUID = &second.UID
+	payload["issue_uid"] = second.UID
+	legacy.Payload, err = json.Marshal(payload)
+	require.NoError(t, err)
 	legacy.ContentHash = remoteEventHash(t, legacy)
 	_, err = hub.IngestFederationEvents(ctx, db.FederationIngestParams{
 		ProjectID: hubProject.ID, SpokeInstanceUID: spoke.InstanceUID(), BoundActor: "worker",

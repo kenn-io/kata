@@ -32,6 +32,7 @@ func FoldEvents(events []FoldEvent) FoldProjection {
 	// The snapshot is a baseline rather than a later content edit.
 	baselines := map[string]bool{}
 	seenCloses := map[string][]string{}
+	reopenedCloses := map[string][]string{}
 	for _, e := range ordered {
 		if e.Type == "issue.created" || e.Type == "issue.snapshot" {
 			if e.IssueUID != "" {
@@ -55,7 +56,6 @@ func FoldEvents(events []FoldEvent) FoldProjection {
 				var document IssueDocumentPayload
 				_ = json.Unmarshal(snapshot.Payload, &document)
 				if document.NeedsReviewContext != nil {
-					p.NeedsReviewContexts[uid] = *document.NeedsReviewContext
 					seenCloses[uid] = append([]string(nil), document.NeedsReviewContext.Closes...)
 				}
 				baselines[uid] = true
@@ -64,7 +64,7 @@ func FoldEvents(events []FoldEvent) FoldProjection {
 	}
 	for _, e := range ordered {
 		switch e.Type {
-		case "issue.closed", "issue.created", "issue.snapshot", RepeatedImportEventType, "issue.moved", "issue.labeled", "issue.unlabeled":
+		case "issue.closed", "issue.reopened", "issue.created", "issue.snapshot", RepeatedImportEventType, "issue.moved", "issue.labeled", "issue.unlabeled":
 		default:
 			p.apply(e)
 			continue
@@ -73,14 +73,17 @@ func FoldEvents(events []FoldEvent) FoldProjection {
 		payload := PayloadMap(e.Payload)
 		if e.Type == "issue.closed" {
 			context.Closes = append(context.Closes, e.UID)
+		} else if e.Type == "issue.reopened" {
+			// Treat an older re-add after reopening as having seen these closes.
+			reopenedCloses[e.IssueUID] = append([]string(nil), context.Closes...)
+		}
+		var document struct {
+			NeedsReviewContext *NeedsReviewContext `json:"needs_review_context"`
 		}
 		if e.Type == "issue.snapshot" || e.Type == "issue.created" || e.Type == RepeatedImportEventType || e.Type == "issue.moved" {
 			raw := e.Payload
 			if e.Type == "issue.moved" {
 				raw = payload["snapshot"]
-			}
-			var document struct {
-				NeedsReviewContext *NeedsReviewContext `json:"needs_review_context"`
 			}
 			_ = json.Unmarshal(raw, &document)
 			if document.NeedsReviewContext != nil {
@@ -92,21 +95,20 @@ func FoldEvents(events []FoldEvent) FoldProjection {
 		key := FoldLabelKey{IssueUID: e.IssueUID, Label: "needs-review"}
 		if e.Type == "issue.labeled" {
 			if label, _ := stringValue(payload["label"]); label == key.Label {
-				seenCloses[e.IssueUID] = stringSlice(payload["after_close_uids"])
+				if marker, ok := payload["after_close_uids"]; ok {
+					seenCloses[e.IssueUID] = stringSlice(marker)
+				} else {
+					seenCloses[e.IssueUID] = append([]string(nil), reopenedCloses[e.IssueUID]...)
+				}
 			}
 		} else if e.Type == "issue.created" || e.Type == "issue.snapshot" || e.Type == RepeatedImportEventType {
 			if state := p.Labels[key]; state.Present && state.Clock == clockOf(e) {
-				var document struct {
-					NeedsReviewContext *NeedsReviewContext `json:"needs_review_context"`
-				}
-				_ = json.Unmarshal(e.Payload, &document)
-				seenCloses[e.IssueUID] = nil
+				seenCloses[e.IssueUID] = append([]string(nil), reopenedCloses[e.IssueUID]...)
 				if document.NeedsReviewContext != nil {
 					seenCloses[e.IssueUID] = append([]string(nil), document.NeedsReviewContext.Closes...)
 				}
 			}
 		}
-		p.NeedsReviewContexts[e.IssueUID] = context
 	}
 	for uid, context := range p.NeedsReviewContexts {
 		context.Closes = sortedUnique(context.Closes)
