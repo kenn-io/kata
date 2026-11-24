@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-11-20
+last_edited: 2026-11-23
 ---
 
 # Quickstart
@@ -410,6 +410,9 @@ Closing asserts completion. An open, unmerged PR is unfinished. If work is incom
 ```sh
 kata label add abc4 needs-review
 ```
+
+Record an open issue's PR with `kata meta set abc4 work.pr_url <url>`. When
+the work is done, pass the PR as evidence with `--pr <url>`.
 
 When work is done, close the issue with a reason, a substantive message, and
 evidence:

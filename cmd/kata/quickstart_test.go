@@ -286,6 +286,8 @@ func TestGuidesSayCommentsCarryFindings(t *testing.T) {
 		assert.Contains(t, text, "leave the issue open, update work.attention and work.attention_msg", name)
 		assert.Contains(t, text, "kata label add <ref> needs-review", name)
 		assert.Contains(t, text, "kata comment edit", name)
+		assert.Contains(t, text, "kata meta set <ref> work.pr_url <url>", name)
+		assert.Contains(t, text, "--pr <url>", name)
 		assert.Contains(t, text, "not merged", name)
 		if name != "quickstart contract" {
 			assertClosedBodyStdinHeredoc(t, name, text)
@@ -329,10 +331,11 @@ func TestGuidesSayCommentsCarryFindings(t *testing.T) {
 	assert.Contains(t, editHelp, "kata comment edit abc4 <comment-uid> --body-stdin --agent <<-'EOF'")
 	assert.NotContains(t, editHelp, "-m \"")
 	assertClosedBodyStdinHeredoc(t, "comment edit help", editHelp)
-	for _, args := range [][]string{{"--help"}, {"close", "--help"}, {"label", "add", "--help"}, {"claim", "--help"}, {"assign", "--help"}} {
+	for _, args := range [][]string{{"--help"}, {"meta", "--help"}, {"close", "--help"}, {"label", "add", "--help"}, {"claim", "--help"}, {"assign", "--help"}} {
 		resetFlags(t)
 		guides[strings.Join(args, " ")] = string(executeRoot(t, newRootCmd(), args...))
 	}
+	assert.Contains(t, guides["meta --help"], "work.pr_url")
 	// The guides teach timed claims and renewal without --if-unowned.
 	for _, name := range []string{"quickstart human", "quickstart agent", "quickstart contract", "--help", "claim --help", "assign --help"} {
 		assertClaimsCarryTTL(t, name, guides[name])
@@ -344,6 +347,8 @@ func TestGuidesSayCommentsCarryFindings(t *testing.T) {
 		raw, err := os.ReadFile(filepath.Join("..", "..", path)) //nolint:gosec // G304: paths are fixed documentation files.
 		require.NoError(t, err)
 		assertClaimsCarryTTL(t, path, string(raw))
+		assert.Contains(t, string(raw), "work.pr_url", path)
+		assert.Contains(t, string(raw), "--pr <url>", path)
 	}
 	assert.NotContains(t, guides["claim --help"], `--comment "starting on the Safari path"`)
 	for name, text := range guides {

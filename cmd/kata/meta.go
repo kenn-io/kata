@@ -28,10 +28,12 @@ func newMetaCmd() *cobra.Command {
   work.attention      ok | needs-human | stuck  (agent's live signal)
   work.attention_msg  one-line reason shown with work.attention
   work.branch         git branch doing the work
+  work.pr_url         the issue's PR URL, still valid after close
   someday             true (with --json-value) parks the issue without a date
 Kata accepts only the listed work.attention values. By convention, agents
-write only their own work.* keys and never on closed issues. Planning dates
-use kata schedule and kata deadline.`,
+write only their own work.* keys and never on closed issues, and readers
+ignore work.* on closed issues except work.pr_url. Planning dates use
+kata schedule and kata deadline.`,
 	}
 	cmd.AddCommand(newMetaSetCmd(), newMetaUnsetCmd(), newMetaGetCmd())
 	return cmd

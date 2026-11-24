@@ -33,6 +33,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Apps that embed Kata can choose which projects send issue text to the
   embedding provider by setting `Config.EmbeddingProjectAllowed`. See
   [semantic search](development/embedding.md#semantic-search).
+- Open an issue’s PR from its web page when its URL is recorded in `work.pr_url`. Agent guides explain how to record the URL and attach PR evidence when closing work.
 - Reject `work.attention` values other than `ok`, `needs-human`, and `stuck`.
 - Diagnose reports when SQLite storage is busy with an upgrade or import.
 - Refuse cross-project links when a project has an active relay enrollment without a binding.

@@ -167,8 +167,11 @@ func TestNativeGuidesSayCommentsCarryFindings(t *testing.T) {
 	for _, guide := range skillGuides {
 		md, ok := SkillMarkdown(guide.name)
 		require.True(t, ok, guide.name)
+		if guide.name == "workflow" {
+			require.Contains(t, md, "except work.pr_url")
+		}
 		require.NotRegexp(t, `\bprogress\b`, md, guide.name)
-		for _, text := range []string{"update work.attention and work.attention_msg", "kata.edit_comment", "not merged", "needs-review"} {
+		for _, text := range []string{"update work.attention and work.attention_msg", "kata.edit_comment", "not merged", "needs-review", "work.pr_url", "pr evidence"} {
 			require.Contains(t, md, text, guide.name)
 		}
 		if guide.name == "quickstart" {

@@ -87,6 +87,19 @@ describe('IssueProperties', () => {
     cleanup()
   })
 
+  it('links the PR on a closed issue even when actions are disabled', () => {
+    const url = 'https://github.com/example/project/pull/123'
+    renderProperties({
+      issue: makeIssue({ status: 'closed', metadata: { 'work.pr_url': url } }),
+      actionsDisabled: true,
+    })
+    const link = screen.getByRole('link', { name: 'github.com/example/project/pull/123' })
+    expect(link.getAttribute('href')).toBe(url)
+    expect(link.getAttribute('title')).toBe(url)
+    expect(link.getAttribute('target')).toBe('_blank')
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer')
+  })
+
   it('shows the status and offers missing properties on a closed task', () => {
     const issue = makeIssue({ status: 'closed' })
     issue.labels = []

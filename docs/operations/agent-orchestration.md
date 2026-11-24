@@ -1,7 +1,7 @@
 ---
 title: Agent orchestration
 description: Coordinate agent work through Kata issues, attention metadata, branches, and fan-out/join workflows.
-last_edited: 2026-11-20
+last_edited: 2026-11-23
 ---
 
 # Agent orchestration
@@ -23,6 +23,7 @@ Coordination uses the `work.*` metadata convention documented in the
 [Metadata reference](../reference/metadata.md#orchestration-conventions-work-keys):
 
 - `work.branch`: the git branch doing the work.
+- `work.pr_url`: the issue's PR URL, still valid after close.
 - `work.attention`: `ok | needs-human | stuck`, the live signal about whether a
   human is wanted.
 - `work.attention_msg`: a one-line current-state message.
@@ -246,13 +247,14 @@ branch=$(printf '%s\n' "$meta" | jq -r '.value | select(. != null)')   # "agent/
 # ... merge and verify the branch ...
 kata close abc4 --done \
   --message "Merged widget export; export round-trips and unit tests pass." \
-  --commit <sha>
+  --pr <url>
 ```
 
 Closing an issue does not reset metadata, so a closed issue may still carry
 `work.attention=needs-human` from before the merge. That is expected. Consumers
 ignore `work.*` on closed issues, because the close itself is the terminal
-signal, not the attention value.
+signal, not the attention value. The exception is `work.pr_url`, which still
+links the issue's PR after close.
 
 ## Failure modes
 
@@ -303,6 +305,8 @@ recipe.
 - If the work happens on a dedicated branch, stamp it once:
   `kata meta set <ref> work.branch <branch>` (or bind at creation:
   `kata create ... --meta work.branch=<branch> --idempotency-key <key>`).
+- When you open a PR, record it with `kata meta set <ref> work.pr_url <url>`.
+  When closing completed work with a PR, attach it with `--pr <url>`.
 - Keep your live state truthful on the issue:
   `kata meta set <ref> work.attention stuck|needs-human|ok`, with a one-line
   `kata meta set <ref> work.attention_msg "<why>"`. Raise `stuck` when you
@@ -321,8 +325,8 @@ recipe.
   satisfaction. As coordinator you read `work.*`; you never write it on
   issues you delegated.
 
-**Always:** one writer per key; `work.*` on closed issues is meaningless, so
-never write it there and ignore it when reading.
+**Always:** one writer per key; never write `work.*` on closed issues, and
+ignore it when reading them, except `work.pr_url`, which still links the PR.
 ```
 
 Prompt instructions produce tendency, not contract, and an agent may still

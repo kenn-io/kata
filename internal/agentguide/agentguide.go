@@ -8,11 +8,11 @@ import "strings"
 const Contract = `Use kata for requested changes, not questions, explanations, or reviews that
 change nothing.
 
-Before starting a change, look for an existing issue:
+Before a change, search for an issue:
 
     kata search "<one or two distinctive words>" --agent
 
-Search matches every word. Reuse an open issue that covers the work, or create one:
+Search matches every word. Reuse an open issue, or create one:
 
     kata create "<title>" --body "<what and why>" --idempotency-key <key> --agent
 
@@ -24,11 +24,10 @@ Link related work with --related <ref>, or its parent with --parent <ref>.
 ` + ClaimRules + `When asked only to record something, create the issue and stop.
 
 ` + CommentRules + `
-Close the issue when verified with a message of 40+ characters and evidence:
+Close verified work with a message of 40+ characters and evidence.
+For work without a PR:
 
     kata close <ref> --done --message "<what changed and how you verified it>" --test "<command>" --agent
-
-Use --commit <sha> or --pr <url> instead of --test when that is the evidence.
 
 Never run kata delete or kata purge unless the user asks for that exact action.
 
@@ -57,13 +56,17 @@ quoted heredoc so the shell leaves backticks and $ alone; replies such as
 	EOF
 
 Correct your own comment with kata comment edit <ref> <comment-uid>. Keep
-live status in work.attention_msg, not in comments:
+live status in work.attention_msg and an open PR's URL in work.pr_url:
 
     kata meta set <ref> work.attention_msg "<what remains>"
+    kata meta set <ref> work.pr_url <url>
 
 A PR that is open and not merged is unfinished. If you stop before the work is
 done, leave the issue open, update work.attention and work.attention_msg, and
 run kata label add <ref> needs-review.
+
+Close a done issue that has a PR with --pr <url>; otherwise --commit <sha> or
+--test "<command>" is valid evidence.
 `
 
 // Quickstart is the full CLI agent briefing: every fragment, in order.
@@ -339,6 +342,7 @@ const fragCoordination = `   Coordinate tracked work through work.* metadata whe
    kata meta set <ref> work.attention needs-human  # wants input or review
    kata meta set <ref> work.attention_msg "<why>"
    kata meta set <ref> work.branch <branch>        # once, for branch work
+   kata meta set <ref> work.pr_url <url>           # the open PR
 
    Before stopping on watched work, close it or update both
    work.attention and work.attention_msg for the hand-off.
