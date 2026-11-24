@@ -12,7 +12,7 @@ test('owner settings manage teams and persist project visibility', async ({
   })
   expect(forbidden.status()).toBe(403)
 
-  const credentials = await loginOwner(page, kata.origin)
+  const credentials = await kata.loginOwner(page, '/kata?view=settings&section=access')
   await expect(page.getByRole('heading', { name: 'Teams', exact: true })).toBeVisible()
   await createTeam(page, 'Example team')
   await openTeam(page, 'Example team')
@@ -65,7 +65,7 @@ test('Teams and Project visibility share one content column and fit narrow scree
   kata,
 }, testInfo) => {
   await kata.launch(page)
-  await loginOwner(page, kata.origin)
+  await kata.loginOwner(page, '/kata?view=settings&section=access')
   const teams = page
     .locator('.kit-settings-section')
     .filter({ has: page.getByRole('heading', { name: 'Teams', exact: true }) })
@@ -99,7 +99,7 @@ test('identity bootstrap manages access without ordinary write authority', async
   await kata.launch(page)
   await kata.restartIdentity()
   try {
-    const credentials = await loginOwner(page, kata.origin)
+    const credentials = await kata.loginOwner(page, '/kata?view=settings&section=access')
     await expect(page.getByRole('heading', { name: 'Teams', exact: true })).toBeVisible()
     const snapshot = await kata.snapshot(page, credentials)
     expect(snapshot.capabilities).toMatchObject({ writable: false, access_admin: true })
@@ -193,22 +193,4 @@ async function chooseProject(page: Page, name: string): Promise<void> {
 async function chooseVisibility(page: Page, label: 'Everyone' | 'Selected teams'): Promise<void> {
   await page.getByRole('combobox', { name: /^Visibility:/ }).click()
   await page.getByRole('option', { name: label }).click()
-}
-
-async function loginOwner(page: Page, origin: string): Promise<BrowserCredentials> {
-  const returnPath = '/kata?view=settings&section=access'
-  const login = await page.request.post(`${origin}/api/v1/ui/session/login`, {
-    headers: { Origin: origin },
-    data: { token: 'example-local-token', return_path: returnPath },
-  })
-  expect(login.ok()).toBe(true)
-  const credentials = (await login.json()) as BrowserCredentials
-  await page.evaluate((value) => {
-    sessionStorage.setItem(
-      'kata.web.session.v1',
-      JSON.stringify({ session: value.session, csrf: value.csrf }),
-    )
-  }, credentials)
-  await page.goto(`${origin}${returnPath}`)
-  return credentials
 }

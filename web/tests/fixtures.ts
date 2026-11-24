@@ -36,6 +36,7 @@ export interface KataFixture {
   projectID: number
   projectUID: string
   launch(page: Page, route?: string): Promise<BrowserCredentials>
+  loginOwner(page: Page, route: string): Promise<BrowserCredentials>
   snapshot(
     page: Page,
     credentials: BrowserCredentials,
@@ -291,6 +292,22 @@ listen = "127.0.0.1:${port}"
       })
       if (!credentials?.session || !credentials.csrf)
         throw new Error('browser session was not stored')
+      return credentials
+    },
+    async loginOwner(page, route) {
+      const login = await page.request.post(`${origin}/api/v1/ui/session/login`, {
+        headers: { Origin: origin },
+        data: { token: 'example-local-token', return_path: route },
+      })
+      expect(login.ok()).toBe(true)
+      const credentials = (await login.json()) as BrowserCredentials
+      await page.evaluate((value) => {
+        sessionStorage.setItem(
+          'kata.web.session.v1',
+          JSON.stringify({ session: value.session, csrf: value.csrf }),
+        )
+      }, credentials)
+      await page.goto(`${origin}${route}`)
       return credentials
     },
     async snapshot(page, credentials, query = 'view=all-open') {
