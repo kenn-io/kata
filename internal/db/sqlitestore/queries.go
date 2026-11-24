@@ -1830,6 +1830,14 @@ func (d *Store) closeIssueGuarded(
 		}
 		events = append(events, generated...)
 	}
+	unlabeled, err := d.detachLabelTx(ctx, tx, issue, projectName, "issue.unlabeled", "needs-review", p.Actor, closedAt)
+	if err != nil && !errors.Is(err, db.ErrNotFound) {
+		return db.Issue{}, nil, false, err
+	}
+	if err == nil {
+		events = append(events, unlabeled)
+	}
+
 	updated, err := issueByIDTx(ctx, tx, p.IssueID)
 	if err != nil {
 		return db.Issue{}, nil, false, err

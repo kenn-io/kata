@@ -79,6 +79,7 @@ var storageScenarios = []scenario{
 	{name: "recurring backlog matches delivery", methods: []string{"CloseIssue", "ReopenIssue", "DispatchRecurringCron"}, run: checkRecurringBacklogMatchesDelivery},
 	{name: "recurring cron", methods: []string{"ListRecurringCronJobs", "DispatchRecurringCron"}, runWithBackend: checkRecurringCron},
 	{name: "close transcript", run: checkCloseTranscript},
+	{name: "close removes needs review", methods: []string{"CreateProject", "CreateIssue", "AddLabelAndEvent", "CloseIssueWithEvents", "HasLabel", "EventsAfter"}, run: checkCloseRemovesNeedsReview},
 	{name: "comment notifications", methods: []string{"CreateComment", "PatchIssueMetadata"}, run: checkCommentNotifications},
 	{name: "comment metadata multi issue", methods: []string{"CreateComment", "CreateIssue", "CreateProject", "EventsAfter", "IssueByID", "MaxEventID", "PatchIssueMetadata"}, run: checkCommentMetadataMultiIssue},
 	{name: "metadata patch transaction hook", methods: []string{"CreateIssue", "CreateProject", "EventsAfter", "PatchIssueMetadata"}, run: checkMetadataPatchTransactionHook},
