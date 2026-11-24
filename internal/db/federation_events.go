@@ -227,6 +227,9 @@ func RetainedSnapshotLocalLinks(ctx context.Context, tx *sql.Tx, issue Issue, pa
 	if err := json.Unmarshal([]byte(payload), &document); err != nil {
 		return "", err
 	}
+	if document == nil {
+		return "", fmt.Errorf("retained snapshot must be a JSON object")
+	}
 	raw := document["links"]
 	var links []IssueDocumentLink
 	if len(raw) > 0 {
