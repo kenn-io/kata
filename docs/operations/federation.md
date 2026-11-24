@@ -2289,7 +2289,7 @@ project identity to bind that existing project.
 
 Pull restarts from the hub's replay horizon, and already-applied events deduplicate by event UID. A push-enabled rejoin keeps events from an earlier actor on the spoke and publishes later events under the new enrollment. The spoke keeps the original events, their actors, and their hashes.
 
-When a later event links to a task retained under an earlier actor in the same project, the spoke publishes that task's snapshot before the link. A cross-project link to a retained task appears on the hub after that task's project publishes it. Older cross-project links inside retained history stay local.
+Untouched retained tasks remain local until a later write needs them. When a later event links to a task retained under an earlier actor in the same project, the spoke publishes that task's snapshot before the link. A cross-project link to a retained task appears on the hub after that task's project publishes it. Older cross-project links inside retained history stay local.
 
 A reply to a comment the hub never received stays invisible on the hub until the parent comment arrives.
 
