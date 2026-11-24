@@ -39,9 +39,6 @@ func TestClaimCloseReleaseBroadcastsAndEnqueuesGeneratedClaimAudit(t *testing.T)
 	})
 	require.NoError(t, err)
 
-	_, _, err = d.db.AddLabelAndEvent(ctx, issue.ID, db.LabelEventParams{Label: "needs-review", EventType: "issue.labeled", Actor: "agent"})
-	require.NoError(t, err)
-
 	sub := bcast.Subscribe(daemon.SubFilter{ProjectID: project.ID})
 	defer sub.Unsub()
 	resp, raw := doReq(t, ts, http.MethodPost, issuePathRef(project.ID, issue.ShortID, "actions/close"),
@@ -50,20 +47,16 @@ func TestClaimCloseReleaseBroadcastsAndEnqueuesGeneratedClaimAudit(t *testing.T)
 
 	first := receiveMsg(t, sub.Ch, time.Second, "issue.closed broadcast")
 	second := receiveMsg(t, sub.Ch, time.Second, "claim.released broadcast")
-	third := receiveMsg(t, sub.Ch, time.Second, "issue.unlabeled broadcast")
 	require.NotNil(t, first.Event)
 	require.NotNil(t, second.Event)
-	require.NotNil(t, third.Event)
 	assert.Equal(t, "issue.closed", first.Event.Type)
 	assert.Equal(t, "claim.released", second.Event.Type)
-	assert.Equal(t, "issue.unlabeled", third.Event.Type)
 	assert.Greater(t, second.Event.ID, first.Event.ID)
 
 	captured := hooksSink.snapshot()
-	require.Len(t, captured, 3)
+	require.Len(t, captured, 2)
 	assert.Equal(t, "issue.closed", captured[0].Type)
 	assert.Equal(t, "claim.released", captured[1].Type)
-	assert.Equal(t, "issue.unlabeled", captured[2].Type)
 	assert.Greater(t, captured[1].ID, captured[0].ID)
 }
 

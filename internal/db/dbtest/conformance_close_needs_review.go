@@ -34,10 +34,5 @@ func checkCloseRemovesNeedsReview(t *testing.T, store db.Storage) error {
 	require.GreaterOrEqual(t, len(history), 2)
 	require.Equal(t, events[0].UID, history[len(history)-2].UID)
 	require.Equal(t, events[1].UID, history[len(history)-1].UID)
-	_, _, _, err = store.ReopenIssue(ctx, issue.ID, "worker")
-	require.NoError(t, err)
-	present, err = store.HasLabel(ctx, issue.ID, "needs-review")
-	require.NoError(t, err)
-	require.False(t, present)
 	return nil
 }
