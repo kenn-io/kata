@@ -32,7 +32,7 @@ func TestCronEditNativeSpokeForwarding(t *testing.T) {
 	original, _, err := hub.DB.PutCronJob(t.Context(), db.PutCronJob{UID: id, ProjectID: project.ID, Name: "Inspection", Definition: definition, Actor: "tester"})
 	require.NoError(t, err)
 	spoke := testenv.New(t, func(cfg *daemon.ServerConfig) {
-		cfg.FederationPushPending = federation.DirectSpokePushPending(cfg.DB, cfg.Publish().Events)
+		cfg.FederationPushPending = federation.DirectSpokePushPending(cfg.DB, cfg.Publish().Events, config.DefaultFederationCredentialStore())
 		cfg.FederationHubClient = federation.CredentialHTTPClient
 	})
 	localProject, err := spoke.DB.CreateProjectWithUID(t.Context(), "spoke-project", project.UID)

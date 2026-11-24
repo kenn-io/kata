@@ -142,7 +142,7 @@ func TestCronSpokeForwardLifecycle(t *testing.T) {
 }
 
 func forwardingTestConfig(cfg daemon.ServerConfig) daemon.ServerConfig {
-	cfg.FederationPushPending = federation.DirectSpokePushPending(cfg.DB, cfg.Publish().Events)
+	cfg.FederationPushPending = federation.DirectSpokePushPending(cfg.DB, cfg.Publish().Events, config.DefaultFederationCredentialStore())
 	cfg.FederationHubClient = federation.CredentialHTTPClient
 	return cfg
 }
