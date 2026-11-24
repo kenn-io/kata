@@ -286,6 +286,14 @@ func (*ExternalFieldMappingExport) ImportKind() string { return ImportKindExtern
 // ImportKind reports the NDJSON kind this payload replays as.
 func (*ExternalFieldStateExport) ImportKind() string { return ImportKindExternalFieldState }
 
+// FederationRetainedEventExport identifies an event held after rejoin.
+type FederationRetainedEventExport struct {
+	EventUID  string `json:"event_uid"`
+	KeptLocal int    `json:"kept_local"`
+}
+
+func (*FederationRetainedEventExport) ImportKind() string { return ImportKindRetainedEvent }
+
 // FederationBindingExport is one federation_bindings row in export shape.
 type FederationBindingExport struct {
 	RelayConfig          *RelayBindingConfig `json:"relay_config,omitempty"`

@@ -195,6 +195,22 @@ updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`,
 	return output, err
 }
 
+func (s *Store) KeepFederationEventLocal(ctx context.Context, projectID, eventID int64) (bool, error) {
+	var kept bool
+	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		var err error
+		kept, err = db.KeepFederationEventLocalTx(ctx, tx, projectID, eventID)
+		return err
+	})
+	return kept, err
+}
+
+func (s *Store) RetainFederationDependents(ctx context.Context, projectID int64) error {
+	return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		return db.RetainFederationDependentsTx(ctx, tx, projectID, s.InstanceUID(), true)
+	})
+}
+
 // AdvanceFederationPullCursor records the highest consumed hub event id.
 func (s *Store) AdvanceFederationPullCursor(ctx context.Context, projectID, nextCursor int64) error {
 	return s.updateFederationCursor(ctx, projectID, nextCursor, false)
@@ -211,7 +227,7 @@ func (s *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCu
 			if err := updateFederationCursor(ctx, tx, projectID, nextCursor, true); err != nil {
 				return err
 			}
-			return db.FoldFederationAcknowledgedEvents(ctx, tx, projectID, s.InstanceUID(), true)
+			return db.FoldFederationAcknowledgedEvents(ctx, tx, projectID, s.InstanceUID())
 		})
 	}
 	return s.materializeFederatedProjectAfter(ctx, projectID, func(ctx context.Context, tx *sql.Tx) error {
@@ -222,7 +238,7 @@ func (s *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCu
 		if err := updateFederationCursor(ctx, tx, projectID, nextCursor, true); err != nil {
 			return err
 		}
-		if err := db.FoldFederationAcknowledgedEvents(ctx, tx, projectID, s.InstanceUID(), true); err != nil {
+		if err := db.FoldFederationAcknowledgedEvents(ctx, tx, projectID, s.InstanceUID()); err != nil {
 			return err
 		}
 		if deleted == 0 {
@@ -382,13 +398,13 @@ WHERE project_id=$1`, projectID); err != nil {
 func pgFederationReplicaSettledTx(ctx context.Context, tx *sql.Tx, binding db.FederationBinding, originInstanceUID string) error {
 	// A destination that still owes a move out of this project needs this
 	// project's current credential and actor to deliver it.
-	if err := db.CheckFederationMoveSourceLifecycle(ctx, tx, binding.ProjectID, originInstanceUID, false, true); err != nil {
+	if err := db.CheckFederationMoveSourceLifecycle(ctx, tx, binding.ProjectID, originInstanceUID, false); err != nil {
 		return err
 	}
 	if binding.PushEnabled {
 		var pending bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM events e
-WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND `+db.FederationUnresolvedEventSQL("e", true)+`)`,
+WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND `+db.FederationUnresolvedEventSQL("e")+`)`,
 			binding.ProjectID, originInstanceUID, binding.PushCursorEventID).Scan(&pending); err != nil {
 			return mapSQLError(err, nil)
 		}

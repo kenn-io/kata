@@ -288,7 +288,7 @@ func PrepareProjectMergeRecords(
 			} else if _, ok := importedExternalMappings[externalFieldStateMappingIdentity(payload)]; !ok {
 				err = fmt.Errorf("project merge external field state mapping is not part of the imported project envelope")
 			}
-		case *FederationBindingExport, *FederationSyncStatusExport,
+		case *FederationBindingExport, *FederationRetainedEventExport, *FederationSyncStatusExport,
 			*FederationQuarantineExport, *FederationEnrollmentExport:
 			// Federation cursors are split between local and remote event ID
 			// spaces, while enrollment token hashes are live credentials. Drop
@@ -496,6 +496,9 @@ func cloneImportRecord(rec ImportRecord) ImportRecord {
 		v.ConflictAt = cloneTimePtr(rec.ConflictAt)
 		return &v
 	case *FederationBindingExport:
+		v := *rec
+		return &v
+	case *FederationRetainedEventExport:
 		v := *rec
 		return &v
 	case *FederationSyncStatusExport:

@@ -262,6 +262,7 @@ func pushDirectSpoke(
 	opts clientpkg.Opts,
 ) error {
 	if binding.PushEnabled {
+	pushLoop:
 		for {
 			if q, err := store.ActiveFederationQuarantine(ctx, binding.ProjectID, db.FederationQuarantineDirectionPush); err == nil {
 				quarantinedEvents, eventErr := store.EventsByUIDs(ctx, binding.ProjectID, q.EventUIDs)
@@ -287,6 +288,9 @@ func pushDirectSpoke(
 			} else if err != nil && !errors.Is(err, db.ErrNotFound) {
 				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 			}
+			if err := store.RetainFederationDependents(ctx, binding.ProjectID); err != nil {
+				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+			}
 			pending, err := store.PendingFederationPushEvents(
 				ctx, binding.ProjectID, store.InstanceUID(), binding.PushCursorEventID, federationPollLimit)
 			if err != nil {
@@ -296,7 +300,20 @@ func pushDirectSpoke(
 				break
 			}
 			for len(pending) > 0 {
-				batch, adoptionBaseline, adoptionBaselineEndEventID, err := nextFederationPushIngestBatch(pending)
+				batchInput := pending
+				if !db.IsFederationSnapshotEvent(pending[0].Type) {
+					for i, event := range pending {
+						if event.Actor != binding.Actor {
+							if i == 0 {
+								batchInput = pending[:1]
+							} else {
+								batchInput = pending[:i]
+							}
+							break
+						}
+					}
+				}
+				batch, adoptionBaseline, adoptionBaselineEndEventID, err := nextFederationPushIngestBatch(batchInput)
 				if err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
@@ -311,6 +328,16 @@ func pushDirectSpoke(
 						AdoptionBaselineEndEventID: adoptionBaselineEndEventID,
 					})
 				if err != nil {
+					var statusErr *HubStatusError
+					if len(batch) == 1 && batch[0].Actor != binding.Actor && errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusBadRequest && federationHubErrorCode(statusErr.Body) == "validation" {
+						kept, keepErr := store.KeepFederationEventLocal(ctx, binding.ProjectID, batch[0].ID)
+						if keepErr != nil {
+							return recordFederationSyncError(ctx, store, binding.ProjectID, keepErr)
+						}
+						if kept {
+							continue pushLoop
+						}
+					}
 					if isPoisonedFederationPushError(err) {
 						if qErr := recordFederationPushQuarantine(ctx, store, binding.ProjectID, batch, err); qErr != nil {
 							return recordFederationSyncError(ctx, store, binding.ProjectID, errors.Join(err, qErr))

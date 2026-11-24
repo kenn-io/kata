@@ -48,6 +48,7 @@ const (
 	KindCronWorkflow         Kind = "cron_workflow"
 	KindCronRun              Kind = "cron_run"
 	KindEvent                Kind = "event"
+	KindRetainedEvent        Kind = "federation_retained_event"
 	KindPurgeLog             Kind = "purge_log"
 	KindProjectPurgeLog      Kind = "project_purge_log"
 	KindSQLiteSequence       Kind = "sqlite_sequence"
@@ -69,6 +70,7 @@ var kindOrder = map[Kind]int{
 	KindRelayOutbox: 34, KindRelayInbox: 35, KindRelayCursors: 36,
 	KindEmbeddingArtifact:    37,
 	KindMCPEventSubscription: 38,
+	KindRetainedEvent:        39,
 	KindMeta:                 0,
 	KindProject:              1,
 	KindProjectAlias:         2,

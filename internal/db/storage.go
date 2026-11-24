@@ -476,6 +476,7 @@ type Storage interface {
 	ExportExternalRootBindings(ctx context.Context, f ExportFilter) iter.Seq2[ExternalRootBindingExport, error]
 	ExportExternalFieldStates(ctx context.Context, f ExportFilter) iter.Seq2[ExternalFieldStateExport, error]
 	ExportFederationBindings(ctx context.Context, f ExportFilter) iter.Seq2[FederationBindingExport, error]
+	ExportFederationRetainedEvents(ctx context.Context, f ExportFilter) iter.Seq2[FederationRetainedEventExport, error]
 	ExportFederationSyncStatus(ctx context.Context, f ExportFilter) iter.Seq2[FederationSyncStatusExport, error]
 	ExportFederationQuarantine(ctx context.Context, f ExportFilter) iter.Seq2[FederationQuarantineExport, error]
 	ExportFederationEnrollments(ctx context.Context, f ExportFilter) iter.Seq2[FederationEnrollmentExport, error]
@@ -488,6 +489,8 @@ type Storage interface {
 
 	// federation: push + ingest
 	PendingFederationPushEvents(ctx context.Context, projectID int64, originInstanceUID string, afterID int64, limit int) ([]Event, error)
+	KeepFederationEventLocal(ctx context.Context, projectID, eventID int64) (bool, error)
+	RetainFederationDependents(ctx context.Context, projectID int64) error
 	PendingFederationPushStats(ctx context.Context, projectID int64, originInstanceUID string, afterID int64) (int64, int64, error)
 	AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error
 	// AcknowledgeFederationPush advances the push cursor. It also deletes this

@@ -340,6 +340,8 @@ func (s *Store) importReplayRecord(
 		return replayLinkInserted, pgReplayPendingClaim(ctx, tx, rec, opts)
 	case *db.EventExport:
 		return replayLinkInserted, pgReplayEvent(ctx, tx, rec, opts)
+	case *db.FederationRetainedEventExport:
+		return replayLinkInserted, db.ImportFederationRetainedEvent(ctx, tx, rec, opts.NewInstance)
 	case *db.PurgeLogExport:
 		return replayLinkInserted, pgReplayPurgeLog(ctx, tx, rec)
 	case *db.ProjectPurgeLogExport:

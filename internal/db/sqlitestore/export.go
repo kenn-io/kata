@@ -525,6 +525,17 @@ func (d *Store) ExportExternalFieldStates(ctx context.Context, f db.ExportFilter
 		})
 }
 
+// ExportFederationRetainedEvents streams rejoin decisions by event UID.
+func (d *Store) ExportFederationRetainedEvents(ctx context.Context, f db.ExportFilter) iter.Seq2[db.FederationRetainedEventExport, error] {
+	query, args := withProjectIDFilter(`SELECT e.uid,r.kept_local FROM federation_retained_events r JOIN events e ON e.id=r.event_id`, f, "e.project_id")
+	query += ` ORDER BY e.id`
+	return streamRows(ctx, d.readQ, "federation_retained_events", query, args, func(rows *sql.Rows) (db.FederationRetainedEventExport, error) {
+		var rec db.FederationRetainedEventExport
+		err := rows.Scan(&rec.EventUID, &rec.KeptLocal)
+		return rec, err
+	})
+}
+
 // ExportFederationBindings streams federation_bindings ordered by project_id,
 // scoped to f.ProjectID when set.
 func (d *Store) ExportFederationBindings(ctx context.Context, f db.ExportFilter) iter.Seq2[db.FederationBindingExport, error] {

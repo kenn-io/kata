@@ -2288,11 +2288,16 @@ before saving its binding. Repeat the join for the same local name and hub
 project identity to bind that existing project.
 
 On rejoin, pull restarts from the hub's replay horizon, and Kata deduplicates
-already-applied events by event UID. When push resumes, events authored by a
-different actor stay local. If one created a task, later edits, comments, and
-links to that task also stay local, even if the hub received the task but its
-acknowledgment was lost. Other pending events can reach the hub. A reset is
-blocked while this local history remains.
+already-applied events by event UID. When push resumes under a different actor,
+Kata offers each older event separately. Events the hub already has are
+acknowledged; events it rejects stay on this computer. Later changes to a
+local-only task, and replies to a local-only comment, also stay here. Links
+from shared tasks to local-only tasks reach the hub but remain unresolved there.
+The first push can take one request per older event. A hub reset preserves
+local-only events. Once kept local, an event stays local even if the original
+actor rejoins later.
+When a backup is restored with `--new-instance`, waiting events also stay
+local because the new instance cannot push events from the old identity.
 
 A read-only rejoin keeps held offline edits local until push is enabled.
 

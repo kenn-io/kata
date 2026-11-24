@@ -26,6 +26,9 @@ func (s *Store) ResetFederatedProject(
 		if err := clearFederatedProjectTx(ctx, tx, projectID, s.InstanceUID()); err != nil {
 			return err
 		}
+		if err := s.restoreRetainedFederationProjection(ctx, tx, projectID); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(ctx, `UPDATE federation_bindings SET
 replay_horizon_event_id=$1,pull_cursor_event_id=$2,
 updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
@@ -64,8 +67,8 @@ WHERE project_id=$1 AND skipped_at IS NULL ORDER BY id ASC LIMIT 1 FOR UPDATE`, 
 		}
 		var pending bool
 		err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events e
-WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND ((e.id>$3 AND `+
-			db.FederationResetOwedEventSQL("e", true)+`) OR `+db.FederationLocalEventSQL("e", true)+`))`, projectID, originInstanceUID, pushCursorEventID).
+WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND `+
+			db.FederationResetOwedEventSQL("e", true)+`)`, projectID, originInstanceUID, pushCursorEventID).
 			Scan(&pending)
 		if err != nil {
 			return mapSQLError(err, nil)
@@ -79,8 +82,19 @@ updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
 WHERE project_id=$3`, replayHorizonEventID, pullCursorEventID, projectID); err != nil {
 			return mapSQLError(err, nil)
 		}
-		return clearFederatedProjectTx(ctx, tx, projectID, s.InstanceUID())
+		if err := clearFederatedProjectTx(ctx, tx, projectID, s.InstanceUID()); err != nil {
+			return err
+		}
+		return s.restoreRetainedFederationProjection(ctx, tx, projectID)
 	})
+}
+
+func (s *Store) restoreRetainedFederationProjection(ctx context.Context, tx *sql.Tx, projectID int64) error {
+	kept, err := db.HasKeptFederationEvents(ctx, tx, projectID)
+	if err != nil || !kept {
+		return err
+	}
+	return s.materializeFederatedProjectTx(ctx, tx, projectID, true, nil, nil)
 }
 
 func rejectLegacyFederationResetTx(ctx context.Context, tx *sql.Tx, projectID int64) error {
