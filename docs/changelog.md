@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-22
+last_edited: 2026-11-24
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -9,6 +9,30 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Direct spokes now receive hub changes almost immediately through held polls
+  instead of waiting for the next sync interval. Each idle binding keeps one
+  request open at its hub, which matters for hosts that limit concurrent
+  requests. See [sync scheduling](operations/federation.md#sync-scheduling).
+- Link issues across projects that share an audience in a relay group. Relays
+  check the peer's current access to each referenced project before releasing
+  events or checkpoints.
+- Switch a credential-provider replica between `read_only` and `collaborate` in
+  place by editing `intent` and restarting the daemon. Downgrading to
+  `read_only` waits until the hub has accepted local changes and local claims
+  are released. See
+  [change replica intent](operations/federation.md#change-replica-intent).
+- Read an edited issue body from a file or stdin with
+  `kata edit <issue-ref> --body-file <path>` or `--body-stdin`. Empty input is
+  rejected instead of clearing the body; pass `--body ""` to clear it.
+- Redesigned the web UI: navigation, views, projects, and Settings now live in
+  the sidebar; the task list stays beside the open task; you can edit a task's
+  fields directly in the task view instead of switching editors; and task
+  dialogs and repeat rules are simpler, with a project picker in New task,
+  change previews in Complete, and repeat rules prefilled from the task and
+  listed in project headers.
+- Apps that embed Kata can choose which projects send issue text to the
+  embedding provider by setting `Config.EmbeddingProjectAllowed`. See
+  [semantic search](development/embedding.md#semantic-search).
 - Reject `work.attention` values other than `ok`, `needs-human`, and `stuck`.
 - Diagnose reports when SQLite storage is busy with an upgrade or import.
 - Refuse cross-project links when a project has an active relay enrollment without a binding.
@@ -19,6 +43,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 **Before upgrading**
 
+- Cross-project relay links: upgrade peers together before linking issues across
+  projects that share an audience. Until a peer upgrades, a relay stops it with
+  `409 unsupported_event_features` before sending such a link.
 - Update scripts that use exit 4 to detect an unset metadata key.
   `kata meta get <ref> <key> --json` now exits 0 for an unset key; check for
   `value: null` after handling command errors.

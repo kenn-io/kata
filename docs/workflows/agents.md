@@ -113,9 +113,8 @@ initialize a project, or configure embeddings.
 
 ## Contract in every session
 
-In unreleased builds, you can load Kata's contract in Claude Code and Codex
-sessions that start inside a Kata workspace on this machine. Setup selects
-whichever are installed:
+Load Kata's contract in Claude Code and Codex sessions that start inside a Kata
+workspace on this machine. Setup selects whichever are installed:
 
 ```sh
 kata agent setup
