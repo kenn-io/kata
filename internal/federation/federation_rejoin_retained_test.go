@@ -173,8 +173,8 @@ func TestRetainedTaskAfterRejoin(t *testing.T) {
 			require.NoError(t, config.DefaultFederationCredentialStore().StoreFederationCredential(ctx, projects[0].UID, spoke.credentials[projects[0].UID]))
 			issue, err = spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 			require.NoError(t, err)
-			move := func() (int, string) {
-				req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/move", spoke.env.URL, spoke.projects[0].ID, issue.ShortID), strings.NewReader(fmt.Sprintf(`{"actor":"new-actor","to_project_uid":%q}`, projects[1].UID)))
+			move := func(dryRun bool) (int, string) {
+				req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/move", spoke.env.URL, spoke.projects[0].ID, issue.ShortID), strings.NewReader(fmt.Sprintf(`{"actor":"new-actor","to_project_uid":%q,"dry_run":%t}`, projects[1].UID, dryRun)))
 				require.NoError(t, err)
 				req.Header.Set("Content-Type", "application/json")
 				req.Header.Set("If-Match", fmt.Sprintf(`"rev-%d"`, issue.Revision))
@@ -186,7 +186,14 @@ func TestRetainedTaskAfterRejoin(t *testing.T) {
 				return resp.StatusCode, string(body)
 			}
 			if mode == "unpublished-move" {
-				status, body := move()
+				before, err := spoke.env.DB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: spoke.projects[0].ID, Limit: 100})
+				require.NoError(t, err)
+				status, body := move(true)
+				require.Equal(t, http.StatusConflict, status, body)
+				after, err := spoke.env.DB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: spoke.projects[0].ID, Limit: 100})
+				require.NoError(t, err)
+				require.Equal(t, before, after)
+				status, body = move(false)
 				require.Equal(t, http.StatusConflict, status, body)
 				var response struct {
 					Error struct {
@@ -200,7 +207,7 @@ func TestRetainedTaskAfterRejoin(t *testing.T) {
 				require.Equal(t, spoke.projects[0].ID, current.ProjectID)
 				require.NoError(t, spoke.sync(t, 0))
 			}
-			status, body := move()
+			status, body := move(false)
 			require.Equal(t, http.StatusOK, status, body)
 			var later db.Issue
 			if mode == "unpublished-move" {

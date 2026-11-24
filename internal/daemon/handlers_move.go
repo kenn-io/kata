@@ -95,7 +95,7 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 				if err := requireFederatedIssueClaimWithResult(ctx, cfg, issue, actor, !in.Body.DryRun, &claim); err != nil {
 					return nil, err
 				}
-				if !in.Body.DryRun && (!claim.known || claim.missing) {
+				if !claim.known || claim.missing {
 					binding, err := cfg.DB.FederationBindingByProject(ctx, issue.ProjectID)
 					if err != nil && !errors.Is(err, db.ErrNotFound) {
 						return nil, internalAPIError(err)
@@ -107,8 +107,10 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 						}
 						if retained {
 							if claim.missing {
-								if _, _, err := cfg.DB.RetainedIssueSnapshot(ctx, issue.ProjectID, issue.UID); err != nil {
-									return nil, internalAPIError(err)
+								if !in.Body.DryRun {
+									if _, _, err := cfg.DB.RetainedIssueSnapshot(ctx, issue.ProjectID, issue.UID); err != nil {
+										return nil, internalAPIError(err)
+									}
 								}
 								return nil, api.NewError(409, "federation_sync_required", "sync the source project before moving this task", "sync the source project and retry", nil)
 							}
