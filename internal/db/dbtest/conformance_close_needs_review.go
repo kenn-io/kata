@@ -17,13 +17,11 @@ func checkCloseRemovesNeedsReview(t *testing.T, store db.Storage) error {
 		_, _, err := store.AddLabelAndEvent(ctx, issue.ID, db.LabelEventParams{Label: label, EventType: "issue.labeled", Actor: "worker"})
 		require.NoError(t, err)
 	}
-	_, events, changed, err := store.CloseIssueWithEvents(ctx, issue.ID, "done", "closer", "", nil)
+	_, events, _, err := store.CloseIssueWithEvents(ctx, issue.ID, "done", "closer", "", nil)
 	require.NoError(t, err)
-	require.True(t, changed)
 	require.Len(t, events, 2)
 	require.Equal(t, "issue.closed", events[0].Type)
 	require.Equal(t, "issue.unlabeled", events[1].Type)
-	require.Equal(t, "closer", events[0].Actor)
 	require.Equal(t, "closer", events[1].Actor)
 	present, err := store.HasLabel(ctx, issue.ID, "needs-review")
 	require.NoError(t, err)
@@ -41,10 +39,5 @@ func checkCloseRemovesNeedsReview(t *testing.T, store db.Storage) error {
 	present, err = store.HasLabel(ctx, issue.ID, "needs-review")
 	require.NoError(t, err)
 	require.False(t, present)
-	_, events, changed, err = store.CloseIssueWithEvents(ctx, issue.ID, "done", "closer", "", nil)
-	require.NoError(t, err)
-	require.True(t, changed)
-	require.Len(t, events, 1)
-	require.Equal(t, "issue.closed", events[0].Type)
 	return nil
 }

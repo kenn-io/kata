@@ -47,6 +47,7 @@ func TestClaimCloseReleaseBroadcastsAndEnqueuesGeneratedClaimAudit(t *testing.T)
 	resp, raw := doReq(t, ts, http.MethodPost, issuePathRef(project.ID, issue.ShortID, "actions/close"),
 		map[string]any{"actor": "agent", "source": "tui"}, nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+
 	first := receiveMsg(t, sub.Ch, time.Second, "issue.closed broadcast")
 	second := receiveMsg(t, sub.Ch, time.Second, "claim.released broadcast")
 	third := receiveMsg(t, sub.Ch, time.Second, "issue.unlabeled broadcast")

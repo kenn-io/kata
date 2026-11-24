@@ -118,7 +118,6 @@ func (s *Store) RemoveLabelAndEvent(
 		if err != nil {
 			return err
 		}
-
 		_, err = tx.ExecContext(ctx,
 			`UPDATE issues SET updated_at = $1 WHERE id = $2`, updatedAt, issue.ID)
 		return mapSQLError(err, nil)
@@ -147,12 +146,8 @@ func (s *Store) detachLabelTx(ctx context.Context, tx *sql.Tx, issue db.Issue, p
 	if err != nil {
 		return db.Event{}, fmt.Errorf("marshal label payload: %w", err)
 	}
-	event, err := s.insertEventTx(ctx, tx,
+	return s.insertEventTx(ctx, tx,
 		issueEventInput(issue, project, eventType, actor, string(payload)))
-	if err != nil {
-		return db.Event{}, err
-	}
-	return event, nil
 }
 
 // HasLabel reports whether one label is attached.
