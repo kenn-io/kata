@@ -34,6 +34,12 @@
     access,
   }: Props = $props()
 
+  let accessVisited = $state(false)
+  $effect(() => {
+    if (!accessAvailable) accessVisited = false
+    else if (active === 'access') accessVisited = true
+  })
+
   let categories = $derived<SettingsCategory[]>([
     { id: 'appearance', label: 'Appearance', group: 'This browser' },
     { id: 'search', label: 'Search by meaning', group: 'This server' },
@@ -72,8 +78,9 @@
         {@render search()}
       {:else if id === 'credentials'}
         {@render credentials()}
-      {:else if id === 'access'}
-        {@render access()}
+      {/if}
+      {#if accessVisited && accessAvailable}
+        <div hidden={id !== 'access'}>{@render access()}</div>
       {/if}
     {/snippet}
   </SettingsLayout>

@@ -1042,6 +1042,49 @@ describe('AppShell', () => {
     expect(screen.queryByLabelText('New team name')).toBeNull()
   })
 
+  test.each(['visibility', 'team name', 'member name'])(
+    'keeps the %s draft when switching Settings sections',
+    async (draft) => {
+      setGeneratedFetch(async (input) => {
+        const path = new URL(String(input)).pathname
+        if (path === '/api/v1/teams')
+          return Response.json({ teams: [{ uid: 'team-one', name: 'Example team', revision: 1 }] })
+        if (path === '/api/v1/teams/team-one') return Response.json({ members: [] })
+        return policyResponse('all', [], 4)
+      })
+      const props = accessProps(executeAccessMutation)
+      const view = render(AppShell, { props })
+      await screen.findByText('Example team')
+      await waitFor(() => expect(visibilitySelect().disabled).toBe(false))
+      if (draft === 'visibility') {
+        await chooseVisibility('Selected teams')
+      } else if (draft === 'team name') {
+        await fireEvent.click(screen.getByRole('button', { name: 'New team' }))
+        await fireEvent.input(screen.getByLabelText('New team name'), {
+          target: { value: 'Draft team' },
+        })
+      } else {
+        await openTeam('Example team')
+        await fireEvent.click(await screen.findByRole('button', { name: 'Add member' }))
+        await fireEvent.input(screen.getByLabelText('Member account'), {
+          target: { value: 'draft-member' },
+        })
+      }
+      await view.rerender({ ...props, route: settingsRoute('appearance') })
+      expect(screen.getByRole('heading', { name: 'Appearance' })).not.toBeNull()
+      await view.rerender({ ...props, route: settingsRoute('access') })
+      if (draft === 'visibility') {
+        expect(visibilitySelect().textContent).toContain('Selected teams')
+        expect(screen.getByText('Pick a team to save.')).not.toBeNull()
+      } else {
+        const label = draft === 'team name' ? 'New team name' : 'Member account'
+        expect((screen.getByLabelText(label) as HTMLInputElement).value).toBe(
+          draft === 'team name' ? 'Draft team' : 'draft-member',
+        )
+      }
+    },
+  )
+
   test('discards late member and policy reads after switching selections', async () => {
     let finishMembers!: (response: Response) => void
     let finishPolicy!: (response: Response) => void
