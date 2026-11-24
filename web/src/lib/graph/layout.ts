@@ -12,6 +12,9 @@ export interface KataGraphNodeData extends Record<string, unknown> {
   label: string
   title: string
   idLabel: string
+  // The project's name, for its mark; projectLabel names it in text only
+  // where the graph spans projects or two tasks share a short ID.
+  projectName: string
   projectLabel: string
   qualifiedLabel: string
   accessibleLabel: string
@@ -19,11 +22,9 @@ export interface KataGraphNodeData extends Record<string, unknown> {
   closedReason?: KataTaskSummary['closed_reason'] | undefined
   priorityLabel: string | null
   isSource: boolean
-  isSelected: boolean
   selectable: boolean
   isDepthContext: boolean
   onSelect?: ((uid: string) => void) | undefined
-  adjacentRelation: KataGraphAdjacentRelation
   layoutDirection: KataGraphLayoutDirection
 }
 
@@ -56,16 +57,18 @@ interface KataGraphEdgeData extends Record<string, unknown> {
 
 export interface BuildKataReachableGraphInput {
   sourceUID: string
-  selectedUID: string | null
   graph: KataReachableGraphResponse | null | undefined
   contextDepth?: KataGraphContextDepth | undefined
   layoutDirection?: KataGraphLayoutDirection | undefined
 }
 
+// A node fits its two text rows, and the gaps between nodes follow the
+// accepted graph: about a seventh of a node's width between layers and a
+// narrow gap between siblings.
 const KATA_GRAPH_NODE_WIDTH = 250
-const KATA_GRAPH_NODE_HEIGHT = 74
-const KATA_GRAPH_X_SPACING = 320
-const KATA_GRAPH_Y_SPACING = 108
+const KATA_GRAPH_NODE_HEIGHT = 62
+const KATA_GRAPH_X_SPACING = 285
+const KATA_GRAPH_Y_SPACING = 76
 
 function priorityLabel(priority: number | undefined): string | null {
   if (priority === undefined) return null
@@ -99,14 +102,12 @@ function missingRefsByUID(
 function nodeClass(
   task: KataTaskSummary | undefined,
   sourceUID: string,
-  selectedUID: string | null,
   isDepthContext: boolean,
 ): string {
   return [
     'kata-graph-node',
     task?.status === 'closed' ? 'kata-graph-node--closed' : 'kata-graph-node--open',
     task?.uid === sourceUID ? 'kata-graph-node--source' : '',
-    task?.uid === selectedUID ? 'kata-graph-node--selected' : '',
     task ? '' : 'kata-graph-node--uncached',
     isDepthContext ? 'kata-graph-node--depth-context' : '',
   ]
@@ -122,10 +123,7 @@ function graphNodeSortKey(id: string, task: KataTaskSummary | undefined): string
 function compareGraphNodeEntries(
   [leftID, leftTask]: [string, KataTaskSummary | undefined],
   [rightID, rightTask]: [string, KataTaskSummary | undefined],
-  sourceUID: string,
 ): number {
-  if (leftID === sourceUID) return -1
-  if (rightID === sourceUID) return 1
   return graphNodeSortKey(leftID, leftTask).localeCompare(
     graphNodeSortKey(rightID, rightTask),
     undefined,
@@ -136,10 +134,6 @@ function compareGraphNodeEntries(
   )
 }
 
-function edgeMarkerColor(kind: KataReachableGraphEdgeKind): string {
-  return kind === 'related' ? 'var(--kata-graph-edge-related)' : 'var(--kata-graph-edge-ambient)'
-}
-
 function makeEdge(edge: KataReachableGraphEdge): KataGraphEdge {
   return {
     id: `${edge.kind}:${edge.from_uid}:${edge.to_uid}`,
@@ -148,12 +142,19 @@ function makeEdge(edge: KataReachableGraphEdge): KataGraphEdge {
     type: 'smoothstep',
     class: `kata-graph-edge kata-graph-edge--${edge.kind}`,
     data: { kind: edge.kind, layout: edge.layout },
-    markerEnd: {
-      type: MarkerType.ArrowClosed,
-      color: edgeMarkerColor(edge.kind),
-      width: 18,
-      height: 18,
-    },
+    ...(edge.kind === 'blocks' || edge.kind === 'parent'
+      ? {
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            color:
+              edge.kind === 'blocks'
+                ? 'var(--kata-graph-edge-blocks)'
+                : 'var(--kata-graph-edge-ambient)',
+            width: 18,
+            height: 18,
+          },
+        }
+      : {}),
     ariaLabel: `${edge.kind} relationship from ${edge.from_uid} to ${edge.to_uid}`,
     interactionWidth: 12,
     selectable: false,
@@ -181,7 +182,6 @@ function nodeData(
   id: string,
   task: KataTaskSummary | undefined,
   sourceUID: string,
-  selectedUID: string | null,
   adjacentRelation: KataGraphAdjacentRelation,
   projectLabel: string,
   missingRef: KataGraphMissingRef | undefined,
@@ -194,16 +194,15 @@ function nodeData(
       label,
       title: label,
       idLabel: label,
+      projectName: '',
       projectLabel,
       qualifiedLabel: label,
       accessibleLabel: `Uncached linked task ${label}`,
       status: 'uncached',
       priorityLabel: null,
       isSource: false,
-      isSelected: false,
       selectable: false,
       isDepthContext,
-      adjacentRelation,
       layoutDirection,
     }
   }
@@ -212,11 +211,12 @@ function nodeData(
     label: task.title,
     title: task.title,
     idLabel: task.short_id,
+    projectName: task.project_name || task.project_uid,
     projectLabel,
     qualifiedLabel: task.qualified_id || task.short_id,
     accessibleLabel: [
       task.uid === sourceUID ? 'Source task' : 'Task',
-      task.uid === selectedUID ? 'selected' : '',
+      task.uid === sourceUID ? 'selected' : '',
       task.title,
       task.qualified_id || task.short_id,
       task.status === 'closed'
@@ -231,10 +231,8 @@ function nodeData(
     closedReason: task.closed_reason,
     priorityLabel: priorityLabel(task.priority),
     isSource: task.uid === sourceUID,
-    isSelected: task.uid === selectedUID,
     selectable: true,
     isDepthContext,
-    adjacentRelation,
     layoutDirection,
   }
 }
@@ -242,9 +240,8 @@ function nodeData(
 function selectedAdjacentRelation(
   edge: KataGraphEdge,
   nodeID: string,
-  selectedUID: string | null,
+  selectedUID: string,
 ): KataGraphAdjacentRelation {
-  if (!selectedUID) return null
   if (edge.source !== selectedUID && edge.target !== selectedUID) return null
   if (nodeID !== edge.source && nodeID !== edge.target) return null
   if (nodeID === selectedUID) return null
@@ -260,7 +257,7 @@ function selectedAdjacentRelation(
 
 function selectedAdjacentRelations(
   edges: readonly KataGraphEdge[],
-  selectedUID: string | null,
+  selectedUID: string,
 ): Map<string, KataGraphAdjacentRelation> {
   const relations = new Map<string, KataGraphAdjacentRelation>()
   for (const edge of edges) {
@@ -306,7 +303,6 @@ function layoutNode(
   task: KataTaskSummary | undefined,
   position: { x: number; y: number },
   sourceUID: string,
-  selectedUID: string | null,
   adjacentRelation: KataGraphAdjacentRelation,
   projectLabel: string,
   missingRef: KataGraphMissingRef | undefined,
@@ -323,14 +319,13 @@ function layoutNode(
       id,
       task,
       sourceUID,
-      selectedUID,
       adjacentRelation,
       projectLabel,
       missingRef,
       layoutDirection,
       isDepthContext,
     ),
-    class: nodeClass(task, sourceUID, selectedUID, isDepthContext),
+    class: nodeClass(task, sourceUID, isDepthContext),
     draggable: false,
     selectable: task !== undefined,
     sourcePosition,
@@ -513,28 +508,16 @@ function depthContextEdge(edge: KataGraphEdge): KataGraphEdge {
   } as KataGraphEdge
 }
 
-function selectedEdgeMarkerColor(kind: KataReachableGraphEdgeKind): string {
-  if (kind === 'blocks') return 'var(--kata-graph-edge-selected-blocks)'
-  if (kind === 'parent') return 'var(--kata-graph-edge-selected)'
-  if (kind === 'related') return 'var(--kata-graph-edge-related)'
-  return 'var(--kata-graph-edge-selected)'
-}
-
 function ambientActiveEdge(edge: KataGraphEdge): KataGraphEdge {
   const kind = edge.data?.kind
   if (!kind) return edge
   const className = typeof edge.class === 'string' ? edge.class : ''
-  const next: KataGraphEdge = {
+  return {
     ...edge,
     class: `${className} kata-graph-edge--ambient`.trim(),
     data: graphEdgeData(edge, kind, { isSelectedAdjacent: false }),
     zIndex: 1,
   }
-  if (!edge.markerEnd || typeof edge.markerEnd !== 'object') return next
-  return {
-    ...next,
-    markerEnd: { ...edge.markerEnd, color: 'var(--kata-graph-edge-ambient)' },
-  } as KataGraphEdge
 }
 
 function selectedActiveEdge(edge: KataGraphEdge): KataGraphEdge {
@@ -550,7 +533,13 @@ function selectedActiveEdge(edge: KataGraphEdge): KataGraphEdge {
   if (!edge.markerEnd || typeof edge.markerEnd !== 'object') return next
   return {
     ...next,
-    markerEnd: { ...edge.markerEnd, color: selectedEdgeMarkerColor(kind) },
+    markerEnd: {
+      ...edge.markerEnd,
+      color:
+        kind === 'blocks'
+          ? 'var(--kata-graph-edge-selected-blocks)'
+          : 'var(--kata-graph-edge-selected)',
+    },
   } as KataGraphEdge
 }
 
@@ -618,9 +607,7 @@ function nodeEntriesFromGraph(
     if (!nodeTasks.has(edge.source)) nodeTasks.set(edge.source, undefined)
     if (!nodeTasks.has(edge.target)) nodeTasks.set(edge.target, undefined)
   }
-  return [...nodeTasks.entries()].sort((left, right) =>
-    compareGraphNodeEntries(left, right, graph.source_uid),
-  )
+  return [...nodeTasks.entries()].sort(compareGraphNodeEntries)
 }
 
 export function buildKataReachableGraph(input: BuildKataReachableGraphInput): {
@@ -641,10 +628,8 @@ export function buildKataReachableGraph(input: BuildKataReachableGraphInput): {
     (edge) => visibleIDs.has(edge.source) && visibleIDs.has(edge.target),
   )
   const hasDepthContext = input.contextDepth !== undefined && input.contextDepth !== 'all'
-  const contextRootID =
-    input.selectedUID && visibleIDs.has(input.selectedUID) ? input.selectedUID : sourceUID
   const visibleContext = hasDepthContext
-    ? visibleContextIDs(contextRootID, visibleBaseEdges, maxContextDepth(input.contextDepth))
+    ? visibleContextIDs(sourceUID, visibleBaseEdges, maxContextDepth(input.contextDepth))
     : { nodeIDs: visibleIDs, edgeIDs: new Set(visibleBaseEdges.map((edge) => edge.id)) }
   const visibleEdges = visibleBaseEdges
     .map((edge) =>
@@ -653,7 +638,7 @@ export function buildKataReachableGraph(input: BuildKataReachableGraphInput): {
         !visibleContext.nodeIDs.has(edge.source) ||
         !visibleContext.nodeIDs.has(edge.target))
         ? depthContextEdge(edge)
-        : activeEdge(edge, input.selectedUID),
+        : activeEdge(edge, sourceUID),
     )
     .sort(compareGraphEdges)
   const layoutEdges = visibleBaseEdges
@@ -661,7 +646,7 @@ export function buildKataReachableGraph(input: BuildKataReachableGraphInput): {
     .sort(compareGraphEdges)
   const positions = graphPositions(visibleNodeEntries, layoutEdges, layoutDirection)
   const projectLabels = visibleProjectLabels(visibleNodeEntries)
-  const adjacentRelations = selectedAdjacentRelations(visibleEdges, input.selectedUID)
+  const adjacentRelations = selectedAdjacentRelations(visibleEdges, sourceUID)
   const missingRefs = missingRefsByUID(graph.unresolved_refs)
   const nodes = visibleNodeEntries.map(([id, task]) =>
     layoutNode(
@@ -669,7 +654,6 @@ export function buildKataReachableGraph(input: BuildKataReachableGraphInput): {
       task,
       positions.get(id) ?? { x: 0, y: 0 },
       sourceUID,
-      input.selectedUID,
       adjacentRelations.get(id) ?? null,
       task
         ? (projectLabels.get(id) ?? '')

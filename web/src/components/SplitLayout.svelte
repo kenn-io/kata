@@ -7,7 +7,9 @@
 
   interface Props {
     orientation: Orientation
-    primarySize: number
+    primarySize: number | null
+    defaultShare?: number | undefined
+    preserveSize?: boolean
     secondaryBeside?: boolean
     minPrimary?: number
     minSecondary?: number
@@ -21,6 +23,8 @@
   let {
     orientation,
     primarySize,
+    defaultShare,
+    preserveSize = false,
     secondaryBeside = $bindable(false),
     minPrimary = 200,
     minSecondary = 200,
@@ -78,14 +82,14 @@
   })
 
   $effect(() => {
-    if (!secondary || totalSize <= 0) return
+    if (preserveSize || !secondary || totalSize <= 0 || primarySize === null) return
     const clamped = clampSize(primarySize, totalSize)
     if (clamped !== primarySize) onResize(clamped)
   })
 
   function startResize(): void {
     if (!container) return
-    resizeStartSize = primarySize
+    resizeStartSize = appliedSize
     resizeTotalSize = axisSize(container.getBoundingClientRect())
   }
 
@@ -94,7 +98,8 @@
     onResize(clampSize(resizeStartSize + event.delta * multiplier, resizeTotalSize))
   }
 
-  const appliedSize = $derived(totalSize > 0 ? clampSize(primarySize, totalSize) : primarySize)
+  const desiredSize = $derived(primarySize ?? totalSize * (defaultShare ?? 0))
+  const appliedSize = $derived(totalSize > 0 ? clampSize(desiredSize, totalSize) : desiredSize)
   const valueMax = $derived(
     totalSize > 0 ? Math.max(minPrimary, totalSize - minSecondary) : minPrimary,
   )

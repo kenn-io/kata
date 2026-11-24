@@ -32,6 +32,7 @@ function graphNodeButtonWithText(text: string): HTMLButtonElement {
 
 describe('IssueGraph', () => {
   beforeEach(() => {
+    window.localStorage.removeItem('kata.graph.preferences.v1')
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
       writable: true,
@@ -59,47 +60,22 @@ describe('IssueGraph', () => {
     vi.restoreAllMocks()
   })
 
-  it('keeps the snapshot graph rooted while selecting another graph node', async () => {
-    const root = task({ uid: 'issue-root', short_id: 'root', title: 'Root issue' })
-    const child = task({ uid: 'issue-child', short_id: 'child', title: 'Child issue' })
-    const graph = {
-      ...graphResponse(root, [root, child]),
-      edges: [{ from_uid: root.uid, to_uid: child.uid, kind: 'parent' as const, layout: true }],
-    }
-    const onSelectIssue = vi.fn()
-    const view = render(IssueGraph, {
-      props: {
-        graph,
-        sourceIssue: root,
-        selectedUID: root.uid,
-        onBack: () => {},
-        onSelectIssue,
-      },
-    })
-
-    await fireEvent.click(graphNodeButtonWithText('Child issue'))
-    expect(onSelectIssue).toHaveBeenCalledWith(child.uid)
-
-    await view.rerender({
-      graph,
-      sourceIssue: root,
-      selectedUID: child.uid,
-      onBack: () => {},
-      onSelectIssue,
-    })
-
-    expect(screen.getAllByText('Root issue').length).toBeGreaterThan(0)
-    expect(screen.getByRole('button', { name: /Source task, Root issue/ })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /selected, Child issue/ })).toBeTruthy()
-  })
-
-  it('renders snapshot graph node titles and priority markers', () => {
+  it('renders task titles, status, priority, project marks, and IDs', () => {
     const root = task({ uid: 'issue-root', short_id: 'root', title: 'Root issue', priority: 0 })
+    const done = task({
+      uid: 'issue-done',
+      short_id: 'done',
+      title: 'Done issue',
+      status: 'closed',
+      closed_reason: 'done',
+    })
     render(IssueGraph, {
       props: {
-        graph: graphResponse(root, [root]),
+        graph: {
+          ...graphResponse(root, [root, done]),
+          edges: [{ from_uid: root.uid, to_uid: done.uid, kind: 'parent' as const, layout: true }],
+        },
         sourceIssue: root,
-        selectedUID: root.uid,
         onBack: () => {},
         onSelectIssue: () => {},
       },
@@ -113,6 +89,28 @@ describe('IssueGraph', () => {
         name: /Source task, selected, Root issue, example-project#root, open/,
       }),
     ).toBeTruthy()
+    const rootNode = graphNodeButtonWithText('Root issue')
+    expect(rootNode.querySelector('.status-mark--done')).toBeNull()
+    expect(rootNode.querySelector('.project-mark')).toBeTruthy()
+    expect(rootNode.querySelector('.node-id')?.textContent).toBe('root')
+    expect(graphNodeButtonWithText('Done issue').querySelector('.status-mark--done')).toBeTruthy()
+  })
+
+  it('keys the three line styles', () => {
+    const root = task({ uid: 'issue-root', short_id: 'root' })
+    render(IssueGraph, {
+      props: {
+        graph: graphResponse(root, [root]),
+        sourceIssue: root,
+        onBack: () => {},
+        onSelectIssue: () => {},
+      },
+    })
+
+    const key = screen.getByRole('group', { name: 'Line key' })
+    expect(
+      [...key.querySelectorAll('.graph-key-row')].map((row) => row.textContent?.trim()),
+    ).toEqual(['Blocks', 'Parent → child', 'Related'])
   })
 
   it('hides closed non-source issues regardless of closure reason', async () => {
@@ -131,16 +129,20 @@ describe('IssueGraph', () => {
           edges: [{ from_uid: root.uid, to_uid: closed.uid, kind: 'related', layout: false }],
         },
         sourceIssue: root,
-        selectedUID: root.uid,
         onBack: () => {},
         onSelectIssue: () => {},
       },
     })
 
     await waitFor(() => expect(screen.getAllByText('Closed issue').length).toBeGreaterThan(0))
-    await fireEvent.click(screen.getByRole('button', { name: /Graph filters/ }))
-    await fireEvent.click(screen.getByRole('button', { name: 'Hide done' }))
+    const trigger = screen.getByRole('button', { name: /Graph filters/ })
+    expect(trigger.textContent?.trim()).toBe('Graph filters')
+    await fireEvent.click(trigger)
+    await fireEvent.click(screen.getByRole('button', { name: 'Hide closed' }))
     await waitFor(() => expect(screen.queryAllByText('Closed issue')).toEqual([]))
+    await fireEvent.click(screen.getByRole('button', { name: 'Hide closed' }))
+    await waitFor(() => expect(screen.getAllByText('Closed issue').length).toBeGreaterThan(0))
+    expect(trigger.textContent?.trim()).toBe('Graph filters')
   })
 
   it('selects cached nodes and returns to the list', async () => {
@@ -151,7 +153,6 @@ describe('IssueGraph', () => {
       props: {
         graph: graphResponse(root, [root]),
         sourceIssue: root,
-        selectedUID: null,
         onBack,
         onSelectIssue,
       },

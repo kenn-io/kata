@@ -26,6 +26,7 @@ describe('AppShell', () => {
   afterEach(() => {
     cleanup()
     vi.unstubAllGlobals()
+    vi.restoreAllMocks()
     vi.useRealTimers()
   })
 
@@ -1668,10 +1669,17 @@ describe('AppShell', () => {
       recurrences: [],
       history: [],
     }
+    const child = {
+      ...selected.collection[0]!,
+      uid: '01J00000000000000000000003',
+      title: 'Child issue',
+    }
     selected.graph = {
-      issues: [...selected.collection!],
+      issues: [...selected.collection!, child],
       links: [],
-      edges: [],
+      edges: [
+        { from_uid: selected.collection[0]!.uid, to_uid: child.uid, kind: 'parent', layout: true },
+      ],
       unresolved_refs: [],
     }
     const onNavigate = vi.fn()
@@ -1693,6 +1701,13 @@ describe('AppShell', () => {
     })
 
     expect(screen.getByRole('region', { name: 'Reachable task graph' })).not.toBeNull()
+    await fireEvent.click(screen.getByRole('button', { name: /Child issue/ }))
+    expect(onNavigate).toHaveBeenCalledWith({
+      kind: 'kata',
+      issueUID: child.uid,
+      graph: true,
+      filters: { status: [], owner: ['user-a'], label: [], relationship: [] },
+    })
     await fireEvent.click(screen.getByRole('button', { name: 'Back to task list' }))
     expect(onNavigate).toHaveBeenCalledWith({
       kind: 'kata',
@@ -1700,6 +1715,87 @@ describe('AppShell', () => {
       graph: false,
       filters: { status: [], owner: ['user-a'], label: [], relationship: [] },
     })
+  })
+
+  test('keeps the list size after resizing a graph', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      width: 1200,
+      height: 900,
+      x: 0,
+      y: 0,
+      top: 0,
+      right: 1200,
+      bottom: 900,
+      left: 0,
+      toJSON: () => ({}),
+    })
+    const selected = snapshot()
+    selected.selected = {
+      state: 'available',
+      issue: { ...selected.collection![0]!, body: '', revision: 3 },
+      comments: [],
+      labels: [],
+      links: [],
+      recurrences: [],
+      history: [],
+    }
+    selected.graph = {
+      issues: [...selected.collection!],
+      links: [],
+      edges: [],
+      unresolved_refs: [],
+    }
+    const onPreferencesChange = vi.fn()
+    const view = render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          issueUID: '01J00000000000000000000001',
+          graph: true,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: selected,
+        loading: false,
+        preferences: {
+          theme: 'system',
+          columns: ['status', 'title'],
+          splitDirection: 'horizontal',
+          splitSize: 700,
+          collapsedGroups: [],
+        },
+        onPreferencesChange,
+        ...mutationProps(),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+    const handle = screen.getByRole('separator', { name: 'Resize Kata panes' })
+    await fireEvent.keyDown(handle, { key: 'ArrowLeft' })
+    expect(onPreferencesChange).not.toHaveBeenCalled()
+    const preferences = {
+      theme: 'system' as const,
+      columns: ['status', 'title'],
+      splitDirection: 'vertical' as const,
+      splitSize: 700,
+      collapsedGroups: [],
+    }
+    await view.rerender({ preferences })
+    await waitFor(() => expect(handle.getAttribute('aria-valuenow')).toBe('600'))
+    expect(handle.getAttribute('aria-orientation')).toBe('horizontal')
+    await view.rerender({ preferences: { ...preferences, splitDirection: 'horizontal' } })
+    await waitFor(() => expect(handle.getAttribute('aria-valuenow')).toBe('800'))
+    await fireEvent.keyDown(handle, { key: 'ArrowLeft' })
+    expect(handle.getAttribute('aria-valuenow')).toBe('784')
+    await view.rerender({
+      route: {
+        kind: 'kata',
+        issueUID: '01J00000000000000000000001',
+        graph: false,
+        filters: { status: [], owner: [], label: [], relationship: [] },
+      },
+    })
+    expect(handle.isConnected).toBe(true)
+    expect(handle.getAttribute('aria-valuenow')).toBe('700')
   })
 
   test('renders accepted selected authority and forwards detail edits', async () => {

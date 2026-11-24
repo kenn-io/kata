@@ -22,7 +22,6 @@ export interface KataGraphDebugEvent {
 
 export interface KataGraphDebugGraphSnapshot {
   sourceUID: string
-  selectedUID: string | null
   hideDone: boolean
   graphLoading?: boolean | undefined
   graphError?: string | null | undefined

@@ -23,7 +23,6 @@ describe('buildKataReachableGraph', () => {
     )
     const built = buildKataReachableGraph({
       sourceUID: 'root',
-      selectedUID: null,
       graph: graph({
         source_uid: 'root',
         nodes,
@@ -42,13 +41,12 @@ describe('buildKataReachableGraph', () => {
         .filter((node) => node.id === 'a' || node.id === 'z')
         .map((node) => [node.id, node.position]),
     ).toEqual([
-      ['a', { x: 640, y: -54 }],
-      ['z', { x: 640, y: 54 }],
+      ['a', { x: 570, y: -38 }],
+      ['z', { x: 570, y: 38 }],
     ])
 
     const wider = buildKataReachableGraph({
       sourceUID: 'root',
-      selectedUID: null,
       graph: graph({
         source_uid: 'root',
         nodes: ['root', 'a', 'b', 'c', 'd', 'e', 'f', 'x', 'y', 'z'].map((uid) =>
@@ -72,10 +70,10 @@ describe('buildKataReachableGraph', () => {
         .filter((node) => ['a', 'x', 'y', 'z'].includes(node.id))
         .map((node) => [node.id, node.position]),
     ).toEqual([
-      ['a', { x: 640, y: -162 }],
-      ['x', { x: 640, y: -54 }],
-      ['y', { x: 640, y: 54 }],
-      ['z', { x: 640, y: 162 }],
+      ['a', { x: 570, y: -114 }],
+      ['x', { x: 570, y: -38 }],
+      ['y', { x: 570, y: 38 }],
+      ['z', { x: 570, y: 114 }],
     ])
   })
 
@@ -83,7 +81,6 @@ describe('buildKataReachableGraph', () => {
     const timings = [1000, 8000].map((size) => {
       const input = {
         sourceUID: 'root',
-        selectedUID: 'root',
         contextDepth: '1' as const,
         graph: graph({
           source_uid: 'root',
@@ -117,7 +114,6 @@ describe('buildKataReachableGraph', () => {
     const child = task({ uid: 'issue-child', short_id: 'child', title: 'Child' })
     const built = buildKataReachableGraph({
       sourceUID: root.uid,
-      selectedUID: null,
       graph: graph({
         source_uid: root.uid,
         nodes: [root, child],
@@ -125,11 +121,41 @@ describe('buildKataReachableGraph', () => {
       }),
     })
 
-    expect(built.nodes.map((node) => node.id)).toEqual([root.uid, child.uid])
+    expect(built.nodes.map((node) => node.id)).toEqual(
+      expect.arrayContaining([root.uid, child.uid]),
+    )
+    expect(built.nodes).toHaveLength(2)
     expect(built.edges.map((edge) => [edge.source, edge.target, edge.data?.kind])).toEqual([
       [root.uid, child.uid, 'parent'],
     ])
     expect(built.layoutEdges.map((edge) => edge.id)).toEqual([`parent:${root.uid}:${child.uid}`])
+  })
+
+  it('adds arrowheads to blocks and parent lines but not related lines', () => {
+    const root = task({ uid: 'issue-root', short_id: 'root' })
+    const blocked = task({ uid: 'issue-blocked', short_id: 'blkd' })
+    const child = task({ uid: 'issue-child', short_id: 'chld' })
+    const related = task({ uid: 'issue-related', short_id: 'rltd' })
+    const built = buildKataReachableGraph({
+      sourceUID: root.uid,
+      graph: graph({
+        source_uid: root.uid,
+        nodes: [root, blocked, child, related],
+        edges: [
+          { from_uid: root.uid, to_uid: blocked.uid, kind: 'blocks', layout: true },
+          { from_uid: root.uid, to_uid: child.uid, kind: 'parent', layout: true },
+          { from_uid: root.uid, to_uid: related.uid, kind: 'related', layout: true },
+        ],
+      }),
+    })
+
+    expect(
+      Object.fromEntries(built.edges.map((edge) => [edge.id, Boolean(edge.markerEnd)])),
+    ).toEqual({
+      [`blocks:${root.uid}:${blocked.uid}`]: true,
+      [`parent:${root.uid}:${child.uid}`]: true,
+      [`related:${root.uid}:${related.uid}`]: false,
+    })
   })
 
   it('draws layout-pruned server edges but excludes them from layout edges', () => {
@@ -138,7 +164,6 @@ describe('buildKataReachableGraph', () => {
     const c = task({ uid: 'issue-c', short_id: 'c' })
     const built = buildKataReachableGraph({
       sourceUID: a.uid,
-      selectedUID: null,
       graph: graph({
         source_uid: a.uid,
         nodes: [a, b, c],
@@ -171,13 +196,11 @@ describe('buildKataReachableGraph', () => {
     })
     const allContext = buildKataReachableGraph({
       sourceUID: root.uid,
-      selectedUID: root.uid,
       graph: payload,
       contextDepth: 'all',
     })
     const oneEdgeContext = buildKataReachableGraph({
       sourceUID: root.uid,
-      selectedUID: root.uid,
       graph: payload,
       contextDepth: '1',
     })
@@ -195,10 +218,9 @@ describe('buildKataReachableGraph', () => {
     const blocked = task({ uid: 'issue-blocked', short_id: 'blocked' })
     const blocker = task({ uid: 'issue-blocker', short_id: 'blocker' })
     const built = buildKataReachableGraph({
-      sourceUID: parent.uid,
-      selectedUID: child.uid,
+      sourceUID: child.uid,
       graph: graph({
-        source_uid: parent.uid,
+        source_uid: child.uid,
         nodes: [parent, child, blocked, blocker],
         edges: [
           { from_uid: parent.uid, to_uid: child.uid, kind: 'parent', layout: true },
@@ -208,12 +230,14 @@ describe('buildKataReachableGraph', () => {
       }),
     })
 
-    expect(built.nodes.find((node) => node.id === parent.uid)?.data.adjacentRelation).toBe('parent')
-    expect(built.nodes.find((node) => node.id === blocked.uid)?.data.adjacentRelation).toBe(
-      'blocks',
+    expect(built.nodes.find((node) => node.id === parent.uid)?.data.accessibleLabel).toContain(
+      'adjacent parent',
     )
-    expect(built.nodes.find((node) => node.id === blocker.uid)?.data.adjacentRelation).toBe(
-      'blockedBy',
+    expect(built.nodes.find((node) => node.id === blocked.uid)?.data.accessibleLabel).toContain(
+      'adjacent blocks',
+    )
+    expect(built.nodes.find((node) => node.id === blocker.uid)?.data.accessibleLabel).toContain(
+      'adjacent blockedBy',
     )
   })
 
@@ -222,7 +246,6 @@ describe('buildKataReachableGraph', () => {
     const missingUID = 'issue-missing'
     const built = buildKataReachableGraph({
       sourceUID: root.uid,
-      selectedUID: root.uid,
       graph: graph({
         source_uid: root.uid,
         nodes: [root],
