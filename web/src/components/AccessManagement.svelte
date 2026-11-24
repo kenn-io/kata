@@ -55,6 +55,7 @@
   let visibility = $state<'all' | 'teams'>('all')
   let selectedTeams = $state<string[]>([])
   let policyLoading = $state(false)
+  let policyRetry = $state(false)
   const lifetime = new AbortController()
   let teamAbort: AbortController | undefined
   let policyAbort: AbortController | undefined
@@ -143,12 +144,15 @@
     }
   }
 
-  async function loadPolicy(id: string): Promise<void> {
+  async function loadPolicy(id: string, preserveDraft = false): Promise<void> {
     policyAbort?.abort()
     const abort = (policyAbort = new AbortController())
     policy = undefined
     policyError = undefined
-    selectedTeams = []
+    if (!preserveDraft) {
+      selectedTeams = []
+      policyRetry = false
+    }
     policyLoading = !!id
     if (!id || lifetime.signal.aborted) return
     try {
@@ -156,8 +160,10 @@
       if (abort.signal.aborted || lifetime.signal.aborted) return
       if (response.status !== 200) throw new Error()
       policy = response.data.policy
-      visibility = policy.visibility === 'teams' ? 'teams' : 'all'
-      selectedTeams = [...policy.team_uids]
+      if (!preserveDraft) {
+        visibility = policy.visibility === 'teams' ? 'teams' : 'all'
+        selectedTeams = [...policy.team_uids]
+      }
       policyError = undefined
     } catch {
       if (!abort.signal.aborted && !lifetime.signal.aborted)
@@ -236,11 +242,17 @@
   async function savePolicy(
     nextVisibility: 'all' | 'teams',
     nextTeams: readonly string[],
+    retry = false,
   ): Promise<void> {
     if (!policy || policyLoading) return
     visibility = nextVisibility
     selectedTeams = [...nextTeams]
-    if (nextVisibility === 'teams' && nextTeams.length === 0 && policy.visibility !== 'teams')
+    if (
+      nextVisibility === 'teams' &&
+      nextTeams.length === 0 &&
+      policy.visibility !== 'teams' &&
+      !retry
+    )
       return
     const id = projectID
     const draft = {
@@ -248,13 +260,16 @@
       team_uids: nextVisibility === 'teams' ? [...nextTeams] : [],
       revision: policy.revision,
     }
-    await mutate(draft, (context) =>
+    const saved = await mutate(draft, (context) =>
       setProjectAccess({ projectId: Number(id) }, draft, {
         headers: context.headers,
         signal: lifetime.signal,
       }),
     )
-    if (projectID === id && !lifetime.signal.aborted) await loadPolicy(id)
+    if (projectID === id && !lifetime.signal.aborted) {
+      policyRetry = !saved
+      await loadPolicy(id, !saved)
+    }
   }
 
   function memberCount(count: number): string {
@@ -492,6 +507,15 @@
             {/if}
           </div>
         </fieldset>
+      {/if}
+      {#if policyRetry}
+        <Button
+          size="sm"
+          disabled={policyDisabled}
+          onclick={() => void savePolicy(visibility, selectedTeams, true)}
+        >
+          Retry saving visibility
+        </Button>
       {/if}
     {/if}
   </SettingsSection>

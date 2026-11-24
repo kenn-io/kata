@@ -1065,16 +1065,18 @@ describe('AppShell', () => {
     expect(screen.queryByLabelText('New team name')).toBeNull()
   })
 
-  test('restores the saved visibility after a revision conflict', async () => {
+  test('preserves the visibility choice and refreshes its revision after a conflict', async () => {
     const writes: unknown[] = []
     setGeneratedFetch(async (input, init) => {
       if (init?.method === 'PUT') {
         writes.push(JSON.parse(String(init.body)))
-        return Response.json({ code: 'revision_conflict' }, { status: 409 })
+        return writes.length === 1
+          ? Response.json({ code: 'revision_conflict' }, { status: 409 })
+          : policyResponse('all', [], 6)
       }
       return isTeamsList(input)
         ? Response.json({ teams: [{ uid: 'team-one', name: 'Example team', revision: 1 }] })
-        : policyResponse('all', [], 4)
+        : policyResponse('all', [], writes.length ? 5 : 4)
     })
     render(AppShell, { props: accessProps(executeAccessMutation) })
     await screen.findByText('Example team')
@@ -1082,9 +1084,16 @@ describe('AppShell', () => {
     await chooseVisibility('Selected teams')
     await fireEvent.click(screen.getByRole('checkbox', { name: 'Example team' }))
     await waitFor(() => expect(writes).toHaveLength(1))
-    await waitFor(() => expect(visibilitySelect().textContent).toContain('Everyone'))
-    expect(screen.queryByRole('checkbox', { name: 'Example team' })).toBeNull()
+    await screen.findByRole('button', { name: 'Retry saving visibility' })
+    await waitFor(() => expect(visibilitySelect().disabled).toBe(false))
+    expect(visibilitySelect().textContent).toContain('Selected teams')
+    expect(
+      (screen.getByRole('checkbox', { name: 'Example team' }) as HTMLInputElement).checked,
+    ).toBe(true)
     expect(writes[0]).toEqual({ visibility: 'teams', team_uids: ['team-one'], revision: 4 })
+    await fireEvent.click(screen.getByRole('button', { name: 'Retry saving visibility' }))
+    await waitFor(() => expect(writes).toHaveLength(2))
+    expect(writes[1]).toEqual({ visibility: 'teams', team_uids: ['team-one'], revision: 5 })
   })
 
   test('discards late member and policy reads after switching selections', async () => {

@@ -70,7 +70,7 @@ describe('CredentialAudit', () => {
     expect(screen.getByText('<script>alert(1)</script>')).not.toBeNull()
     expect(scoped).toContain('ID 7')
     expect(rows[1]!.textContent).toContain('ID 8')
-    expect(screen.queryByRole('group', { name: 'Credential filters' })).toBeNull()
+    expect(screen.getByRole('group', { name: 'Credential filters' })).not.toBeNull()
     expect(screen.queryByRole('button', { name: /revoke/i })).toBeNull()
   })
 
@@ -83,19 +83,14 @@ describe('CredentialAudit', () => {
     expect(row.querySelector('time[datetime="2026-08-03T10:00:00Z"]')).not.toBeNull()
   })
 
-  it('offers filters past eight credentials and says when none match', async () => {
-    const many = Array.from({ length: 9 }, (_, index) => ({
-      ...tokens[1]!,
-      id: 100 + index,
-      name: `Worker ${index}`,
-    }))
-    render(CredentialAudit, { props: auditProps({ tokens: [...tokens, ...many] }) })
+  it('filters a short credential list and says when none match', async () => {
+    render(CredentialAudit, { props: auditProps() })
 
     expect(screen.getByRole('group', { name: 'Credential filters' })).not.toBeNull()
     await fireEvent.click(screen.getByRole('combobox', { name: 'Credential state: Any state' }))
     await fireEvent.click(screen.getByRole('option', { name: 'Live' }))
     expect(screen.getByText('Build worker')).not.toBeNull()
-    expect(screen.queryByText('Worker 0')).toBeNull()
+    expect(screen.queryByText('admin-user')).toBeNull()
 
     await fireEvent.click(screen.getByRole('combobox', { name: 'Credential scope: Any access' }))
     await fireEvent.click(screen.getByRole('option', { name: 'Full access' }))

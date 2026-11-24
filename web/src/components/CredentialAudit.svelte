@@ -26,8 +26,6 @@
 
   let { tokens, loading, error = undefined, onRefresh }: Props = $props()
 
-  // A short list reads at a glance; filters show only once it gets long.
-  const filterThreshold = 8
   const stateOptions: SelectDropdownOption[] = [
     { value: 'all', label: 'Any state' },
     { value: 'live', label: 'Live' },
@@ -43,8 +41,6 @@
   let stateFilter = $state<StateFilter>('all')
   let scopeFilter = $state<ScopeFilter>('all')
   let search = $state('')
-  let filtering = $derived(stateFilter !== 'all' || scopeFilter !== 'all' || search.trim() !== '')
-  let showFilters = $derived(tokens.length > filterThreshold || filtering)
   let visibleTokens = $derived.by(() => {
     const query = search.trim().toLocaleLowerCase()
     return tokens.filter((token) => {
@@ -89,7 +85,7 @@
       </Button>
     </div>
 
-    {#if showFilters && !error}
+    {#if !error}
       <div class="filters" role="group" aria-label="Credential filters">
         <SelectDropdown
           title="Credential state"
