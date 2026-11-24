@@ -2489,7 +2489,7 @@ describe('App', () => {
                 project_id: 7,
                 project_uid: '01J00000000000000000000002',
                 enabled: true,
-                role: 'replica',
+                role: 'spoke',
                 pending_push_count: pending,
               },
             ],
@@ -2511,16 +2511,16 @@ describe('App', () => {
     render(App)
     await vi.advanceTimersByTimeAsync(0)
     await tick()
-    expect(screen.getByText('Pending: 2')).not.toBeNull()
+    expect(screen.getByText('2 to sync')).not.toBeNull()
     pending = 0
     await vi.advanceTimersByTimeAsync(30_000)
     await tick()
-    expect(screen.getByText('Pending: 0')).not.toBeNull()
+    expect(screen.getByText('No changes to send')).not.toBeNull()
     pending = 3
     document.dispatchEvent(new Event('visibilitychange'))
     await vi.advanceTimersByTimeAsync(0)
     await tick()
-    expect(screen.getByText('Pending: 3')).not.toBeNull()
+    expect(screen.getByText('3 to sync')).not.toBeNull()
   })
 
   it('refreshes credential metadata periodically only while the page is visible', async () => {
