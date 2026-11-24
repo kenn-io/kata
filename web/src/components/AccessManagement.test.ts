@@ -41,8 +41,8 @@ function renderAccess() {
         _draft: unknown,
         mutate: (context: MutationContext) => Promise<unknown>,
       ) => {
-        await mutate({ headers: {} } as MutationContext)
-        return true
+        const result = (await mutate({ headers: {} } as MutationContext)) as { status: number }
+        return result.status < 300
       },
     },
   })
@@ -211,6 +211,122 @@ describe('AccessManagement', () => {
       }
     },
   )
+
+  it('retries an owner-only draft after a visibility conflict', async () => {
+    let reads = 0
+    const writes: unknown[] = []
+    setGeneratedFetch(async (input, init) => {
+      const path = new URL(String(input)).pathname
+      if (path === '/api/v1/teams')
+        return Response.json({ teams: [{ uid: 'team-one', name: 'example-team', revision: 1 }] })
+      if (init?.method === 'PUT') {
+        writes.push(JSON.parse(String(init.body)))
+        return writes.length === 1
+          ? Response.json({ code: 'revision_conflict' }, { status: 409 })
+          : Response.json({
+              policy: {
+                project_uid: 'project-uid',
+                revision: 6,
+                visibility: 'teams',
+                team_uids: [],
+              },
+            })
+      }
+      if (path === '/api/v1/projects/7/access') {
+        reads++
+        return Response.json({
+          policy: {
+            project_uid: 'project-uid',
+            revision: reads === 1 ? 4 : 5,
+            visibility: reads === 1 ? 'teams' : 'all',
+            team_uids: reads === 1 ? ['team-one'] : [],
+          },
+        })
+      }
+      throw new Error(`Unexpected request: ${init?.method ?? 'GET'} ${path}`)
+    })
+    renderAccess()
+
+    const team = (await screen.findByRole('checkbox', { name: 'example-team' })) as HTMLInputElement
+    await fireEvent.click(team)
+    await waitFor(() => expect(writes).toHaveLength(1))
+    expect(writes[0]).toEqual({ visibility: 'teams', team_uids: [], revision: 4 })
+
+    const retry = (await screen.findByRole('button', {
+      name: 'Retry saving visibility',
+    })) as HTMLButtonElement
+    await waitFor(() => expect(retry.disabled).toBe(false))
+    await fireEvent.click(retry)
+    await waitFor(() => expect(writes).toHaveLength(2))
+    expect(writes[1]).toEqual({ visibility: 'teams', team_uids: [], revision: 5 })
+  })
+
+  it('drops a deleted team from the retained visibility draft on refresh', async () => {
+    let teamReads = 0
+    let policyReads = 0
+    const writes: unknown[] = []
+    setGeneratedFetch(async (input, init) => {
+      const path = new URL(String(input)).pathname
+      if (path === '/api/v1/teams') {
+        teamReads++
+        return Response.json({
+          teams:
+            teamReads === 1
+              ? [
+                  { uid: 'team-one', name: 'example-team', revision: 1 },
+                  { uid: 'team-two', name: 'second-team', revision: 1 },
+                ]
+              : [{ uid: 'team-two', name: 'second-team', revision: 2 }],
+        })
+      }
+      if (init?.method === 'PUT') {
+        writes.push(JSON.parse(String(init.body)))
+        return writes.length === 1
+          ? Response.json({ code: 'revision_conflict' }, { status: 409 })
+          : Response.json({
+              policy: {
+                project_uid: 'project-uid',
+                revision: 7,
+                visibility: 'teams',
+                team_uids: ['team-two'],
+              },
+            })
+      }
+      if (path === '/api/v1/projects/7/access') {
+        policyReads++
+        return Response.json({
+          policy: {
+            project_uid: 'project-uid',
+            revision: policyReads,
+            visibility: 'teams',
+            team_uids: policyReads === 1 ? ['team-one'] : ['team-two'],
+          },
+        })
+      }
+      throw new Error(`Unexpected request: ${init?.method ?? 'GET'} ${path}`)
+    })
+    renderAccess()
+
+    const team = (await screen.findByRole('checkbox', { name: 'second-team' })) as HTMLInputElement
+    await fireEvent.click(team)
+    await waitFor(() => expect(writes).toHaveLength(1))
+    expect(writes[0]).toEqual({
+      visibility: 'teams',
+      team_uids: ['team-one', 'team-two'],
+      revision: 1,
+    })
+
+    await screen.findByRole('button', { name: 'Retry saving visibility' })
+    await fireEvent.click(screen.getByRole('button', { name: 'Refresh teams' }))
+    await waitFor(() => expect(screen.queryByRole('checkbox', { name: 'example-team' })).toBeNull())
+    expect(
+      (screen.getByRole('checkbox', { name: 'second-team' }) as HTMLInputElement).checked,
+    ).toBe(true)
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Retry saving visibility' }))
+    await waitFor(() => expect(writes).toHaveLength(2))
+    expect(writes[1]).toEqual({ visibility: 'teams', team_uids: ['team-two'], revision: 3 })
+  })
 
   it('creates teams and adds members using visible submit buttons', async () => {
     const requests: string[] = []

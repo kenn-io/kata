@@ -55,7 +55,7 @@
   let visibility = $state<'all' | 'teams'>('all')
   let selectedTeams = $state<string[]>([])
   let policyLoading = $state(false)
-  let policyRetry = $state(false)
+  let policyRetry = $state<{ visibility: 'all' | 'teams'; team_uids: string[] }>()
   const lifetime = new AbortController()
   let teamAbort: AbortController | undefined
   let policyAbort: AbortController | undefined
@@ -91,6 +91,13 @@
     void loadPolicy(id)
   })
 
+  // Deleted teams leave the open team and any retained visibility draft.
+  function dropMissingTeams(): void {
+    const exists = (uid: string) => teams.some((team) => team.uid === uid)
+    if (!exists(teamUID)) teamUID = ''
+    selectedTeams = selectedTeams.filter(exists)
+  }
+
   async function refresh(): Promise<void> {
     if (lifetime.signal.aborted) return
     listAbort?.abort()
@@ -101,7 +108,7 @@
       if (abort.signal.aborted || lifetime.signal.aborted) return
       if (response.status !== 200) throw new Error()
       teams = response.data.teams
-      if (!teams.some((team) => team.uid === teamUID)) teamUID = ''
+      dropMissingTeams()
       teamsError = undefined
     } catch {
       if (!abort.signal.aborted && !lifetime.signal.aborted)
@@ -119,7 +126,7 @@
     await Promise.all([
       refresh(),
       uid ? loadMembers(uid) : undefined,
-      id ? loadPolicy(id, policyRetry) : undefined,
+      id ? loadPolicy(id, !!policyRetry) : undefined,
     ])
   }
 
@@ -151,7 +158,7 @@
     policyError = undefined
     if (!preserveDraft) {
       selectedTeams = []
-      policyRetry = false
+      policyRetry = undefined
     }
     policyLoading = !!id
     if (!id || lifetime.signal.aborted) return
@@ -237,8 +244,13 @@
     }
   }
 
+  // A new selected-teams policy waits for a team pick, unless it retries a failed empty submit.
+  function waitsForTeam(next: 'all' | 'teams', nextTeams: readonly string[]): boolean {
+    const failedEmpty = policyRetry?.visibility === 'teams' && !policyRetry.team_uids.length
+    return next === 'teams' && !nextTeams.length && policy?.visibility !== 'teams' && !failedEmpty
+  }
+
   // Visibility saves as it changes, against the revision it was loaded at.
-  // A new selected-teams policy waits for a team pick before saving.
   async function savePolicy(
     nextVisibility: 'all' | 'teams',
     nextTeams: readonly string[],
@@ -246,8 +258,7 @@
     if (!policy || policyLoading) return
     visibility = nextVisibility
     selectedTeams = [...nextTeams]
-    if (nextVisibility === 'teams' && nextTeams.length === 0 && policy.visibility !== 'teams')
-      return
+    if (waitsForTeam(nextVisibility, nextTeams)) return
     const id = projectID
     const draft = {
       visibility: nextVisibility,
@@ -261,7 +272,7 @@
       }),
     )
     if (projectID === id && !lifetime.signal.aborted) {
-      policyRetry = !saved
+      policyRetry = saved ? undefined : draft
       await loadPolicy(id, !saved)
     }
   }
@@ -496,10 +507,7 @@
       {#if policyRetry}
         <Button
           size="sm"
-          disabled={policyDisabled ||
-            (visibility === 'teams' &&
-              selectedTeams.length === 0 &&
-              policy?.visibility !== 'teams')}
+          disabled={policyDisabled || waitsForTeam(visibility, selectedTeams)}
           onclick={() => void savePolicy(visibility, selectedTeams)}
         >
           Retry saving visibility
