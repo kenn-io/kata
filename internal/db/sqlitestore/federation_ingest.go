@@ -198,7 +198,7 @@ func (d *Store) ingestFederationEventsOnce(
 		// admitted and must not be rewritten or projected again; fresh intent
 		// still requires the current enrollment's actor.
 		if boundActor != "" && ev.Actor != boundActor {
-			return db.FederationIngestResult{}, fmt.Errorf("%w: event %s actor %q does not match bound actor",
+			return db.FederationIngestResult{}, fmt.Errorf("%w: "+db.FederationBoundActorMismatchFormat,
 				db.ErrFederationIngestValidation, ev.EventUID, ev.Actor)
 		}
 		var moveFrom, moveTo int64
@@ -1136,7 +1136,7 @@ func validateFederationProjectEvent(
 		"issue.external_comment_resolved", "issue.external_field_conflicted",
 		"issue.external_field_resolved":
 		if _, ok := knownIssueUIDs[issueUID]; !ok {
-			return fmt.Errorf("%w: %s references unknown issue %s", db.ErrFederationIngestValidation, ev.Type, issueUID)
+			return fmt.Errorf("%w: %s", db.ErrFederationIngestValidation, db.FederationIssueReferenceMessage(ev.Type, issueUID, false))
 		}
 	default:
 		return fmt.Errorf("%w: unsupported event type %s", db.ErrFederationIngestValidation, ev.Type)
@@ -1207,8 +1207,7 @@ func rejectFreshCreateSnapshotForKnownIssue(ctx context.Context, tx *sql.Tx, pro
 		return err
 	}
 	if _, ok := knownIssueUIDs[issueUID]; ok {
-		return fmt.Errorf("%w: fresh %s targets existing issue %s",
-			db.ErrFederationIngestValidation, ev.Type, issueUID)
+		return fmt.Errorf("%w: %s", db.ErrFederationIngestValidation, db.FederationIssueReferenceMessage(ev.Type, issueUID, true))
 	}
 	return nil
 }

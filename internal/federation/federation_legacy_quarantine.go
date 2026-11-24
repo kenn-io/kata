@@ -35,7 +35,7 @@ func retryRetainedQuarantine(ctx context.Context, store db.Storage, binding *db.
 	}
 	var rejected db.Event
 	for _, event := range events {
-		if event.OriginInstanceUID == store.InstanceUID() && event.Actor != binding.Actor && event.CreatedAt.Before(binding.CreatedAt) && strings.Contains(hubError.Message, fmt.Sprintf("event %s actor %q does not match bound actor", event.UID, event.Actor)) {
+		if event.OriginInstanceUID == store.InstanceUID() && event.Actor != binding.Actor && event.CreatedAt.Before(binding.CreatedAt) && strings.Contains(hubError.Message, fmt.Sprintf(db.FederationBoundActorMismatchFormat, event.UID, event.Actor)) {
 			rejected = event
 			break
 		}

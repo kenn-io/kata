@@ -380,10 +380,8 @@ func retainedInitializerAlreadyKnown(err error, eventType, issueUID string) bool
 		return false
 	}
 	body, ok := federationQuarantineHubError(status.Body)
-	return ok && body.Code == "validation" && body.Message == "federation ingest validation: fresh "+eventType+" targets existing issue "+issueUID
+	return ok && body.Code == "validation" && body.Message == db.ErrFederationIngestValidation.Error()+": "+db.FederationIssueReferenceMessage(eventType, issueUID, true)
 }
-
-var retainedUnknownIssuePattern = regexp.MustCompile(`^federation ingest validation: [a-z._]+ references unknown issue ([0-9A-HJKMNP-TV-Z]{26})$`)
 
 func retainedUnknownIssue(err error) string {
 	status, ok := errors.AsType[*HubStatusError](err)
@@ -394,10 +392,7 @@ func retainedUnknownIssue(err error) string {
 	if !ok || body.Code != "validation" {
 		return ""
 	}
-	if match := retainedUnknownIssuePattern.FindStringSubmatch(body.Message); match != nil {
-		return match[1]
-	}
-	return ""
+	return db.ParseFederationMissingIssueMessage(body.Message)
 }
 
 func retainedFederationEvent(event db.Event, binding db.FederationBinding, instanceUID string) bool {

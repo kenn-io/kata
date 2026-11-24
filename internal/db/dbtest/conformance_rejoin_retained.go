@@ -1,6 +1,7 @@
 package dbtest
 
 import (
+	"encoding/json/v2"
 	"fmt"
 	"testing"
 
@@ -31,6 +32,40 @@ func checkRejoinRetainedHistory(t *testing.T, store db.Storage) error {
 		reused, _, err := store.RetainedIssueSnapshot(ctx, project.ID, issue.UID)
 		require.NoError(t, err)
 		require.Equal(t, snapshot.UID, reused.UID)
+	})
+
+	t.Run("move after recovery snapshot", func(t *testing.T) {
+		ctx := t.Context()
+		source, err := store.CreateProject(ctx, "recovered-move-source")
+		require.NoError(t, err)
+		target, err := store.CreateProject(ctx, "recovered-move-target")
+		require.NoError(t, err)
+		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "task", Author: "old-actor"})
+		require.NoError(t, err)
+		_, _, err = store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "discussion"})
+		require.NoError(t, err)
+		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: source.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: source.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: true})
+		require.NoError(t, err)
+		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: target.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 2, HubProjectUID: target.UID, Actor: "new-actor", Enabled: true, PushEnabled: true})
+		require.NoError(t, err)
+		snapshot, _, err := store.RetainedIssueSnapshot(ctx, source.ID, issue.UID)
+		require.NoError(t, err)
+		require.NoError(t, store.AdvanceFederationPushCursor(ctx, source.ID, snapshot.ID))
+		issue, err = store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		moved, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "new-actor"})
+		require.NoError(t, err)
+		var envelope struct {
+			Snapshot db.IssueDocumentPayload `json:"snapshot"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(moved.Event.Payload), &envelope))
+		require.Equal(t, "new-actor", envelope.Snapshot.Author)
+		require.Len(t, envelope.Snapshot.Comments, 1)
+		require.Equal(t, "new-actor", envelope.Snapshot.Comments[0].Author)
+		require.Equal(t, "old-actor", moved.Issue.Author)
+		comments, err := store.CommentsByIssue(ctx, moved.Issue.ID)
+		require.NoError(t, err)
+		require.Equal(t, "old-actor", comments[0].Author)
 	})
 
 	t.Run("recover task moved before enrollment", func(t *testing.T) {

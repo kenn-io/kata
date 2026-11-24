@@ -283,6 +283,8 @@ func TestMoveRetainedTaskAfterHubAcceptsIt(t *testing.T) {
 			spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor", "new-actor")
 			issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "old task", Author: "old-actor"})
 			require.NoError(t, err)
+			_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "original comment"})
+			require.NoError(t, err)
 			if published {
 				require.NoError(t, spoke.sync(t, 0))
 			}

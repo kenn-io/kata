@@ -177,6 +177,10 @@ SET project_id = $1 WHERE issue_id = $2`,
 			if err != nil {
 				return err
 			}
+			snapshot, err = db.RetainedMoveSnapshot(ctx, tx, source.ID, current.UID, s.InstanceUID(), snapshot)
+			if err != nil {
+				return err
+			}
 			payloadFields["snapshot"] = jsontext.Value(snapshot)
 		}
 		payload, err := json.Marshal(payloadFields)

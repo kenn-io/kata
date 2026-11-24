@@ -91,10 +91,11 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 		res, err := cfg.DB.MoveIssueProject(ctx, move)
 		if err == nil {
 			for _, issue := range res.Issues {
-				if err := requireFederatedIssueClaimWithRefresh(ctx, cfg, issue, actor, !in.Body.DryRun); err != nil {
+				var claim claimRefreshResult
+				if err := requireFederatedIssueClaimWithResult(ctx, cfg, issue, actor, !in.Body.DryRun, &claim); err != nil {
 					return nil, err
 				}
-				if !in.Body.DryRun {
+				if !in.Body.DryRun && (!claim.known || claim.missing) {
 					binding, err := cfg.DB.FederationBindingByProject(ctx, issue.ProjectID)
 					if err != nil && !errors.Is(err, db.ErrNotFound) {
 						return nil, internalAPIError(err)
@@ -105,7 +106,7 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 							return nil, internalAPIError(err)
 						}
 						if retained {
-							return nil, api.NewError(409, "federation_retained_move_unsupported", "retained task history cannot be moved", "", nil)
+							return nil, api.NewError(409, "federation_sync_required", "sync the source project before moving this task", "sync the source project and retry", nil)
 						}
 					}
 				}

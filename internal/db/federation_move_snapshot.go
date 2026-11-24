@@ -7,6 +7,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -19,6 +20,57 @@ func FederationMoveSnapshotEvent(event RemoteEvent) RemoteEvent {
 		event.Payload = PayloadMap(event.Payload)["snapshot"]
 	}
 	return event
+}
+
+// RetainedMoveSnapshot uses the accepted recovery snapshot's attribution in a
+// new move event, while the spoke keeps its original local history unchanged.
+func RetainedMoveSnapshot(ctx context.Context, tx *sql.Tx, sourceProjectID int64, issueUID, instanceUID, payload string) (string, error) {
+	var recovered string
+	err := tx.QueryRowContext(ctx, `SELECT e.payload FROM events e JOIN federation_bindings b ON b.project_id=e.project_id
+WHERE e.project_id=$1 AND e.issue_uid=$2 AND e.origin_instance_uid=$3 AND e.type='issue.snapshot'
+AND e.actor=b.bound_actor AND b.retained_through_event_id>0 AND e.id>b.retained_through_event_id AND e.id<=b.push_cursor_event_id
+AND EXISTS(SELECT 1 FROM events old WHERE old.project_id=e.project_id AND old.issue_uid=e.issue_uid
+ AND old.id<=b.retained_through_event_id AND old.type IN ('issue.created','issue.snapshot','issue.moved')
+ AND `+LocalInstanceOriginSQL("old.origin_instance_uid", "$3")+` AND (old.origin_instance_uid<>$3 OR old.actor<>b.bound_actor))
+ORDER BY e.id LIMIT 1`, sourceProjectID, issueUID, instanceUID).Scan(&recovered)
+	if errors.Is(err, sql.ErrNoRows) {
+		return payload, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	var current, accepted IssueDocumentPayload
+	if err := json.Unmarshal([]byte(payload), &current); err != nil {
+		return "", err
+	}
+	if err := json.Unmarshal([]byte(recovered), &accepted); err != nil {
+		return "", err
+	}
+	current.Author = accepted.Author
+	authors := make(map[string]string, len(accepted.Comments))
+	for _, comment := range accepted.Comments {
+		authors[comment.CommentUID] = comment.Author
+	}
+	for i := range current.Comments {
+		if author, ok := authors[current.Comments[i].CommentUID]; ok {
+			current.Comments[i].Author = author
+		}
+	}
+	links := make(map[FoldLinkKey]string, len(accepted.Links))
+	for _, link := range accepted.Links {
+		links[snapshotLinkKey(issueUID, link)] = link.Author
+	}
+	for i := range current.Links {
+		if author, ok := links[snapshotLinkKey(issueUID, current.Links[i])]; ok {
+			current.Links[i].Author = author
+		}
+	}
+	current.Links = slices.DeleteFunc(current.Links, func(link IssueDocumentLink) bool {
+		_, accepted := links[snapshotLinkKey(issueUID, link)]
+		return !accepted && link.Author != "" && link.Author != current.Author
+	})
+	result, err := json.Marshal(current)
+	return string(result), err
 }
 
 type moveSnapshotComment struct {

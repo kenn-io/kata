@@ -15,6 +15,38 @@ import (
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
+const FederationBoundActorMismatchFormat = "event %s actor %q does not match bound actor"
+
+// FederationIssueReferenceMessage is shared by hubs and spokes so recovery
+// recognizes the validation message used by released peers.
+func FederationIssueReferenceMessage(eventType, issueUID string, existing bool) string {
+	if existing {
+		return fmt.Sprintf("fresh %s targets existing issue %s", eventType, issueUID)
+	}
+	return fmt.Sprintf("%s references unknown issue %s", eventType, issueUID)
+}
+
+func ParseFederationMissingIssueMessage(message string) string {
+	prefix := ErrFederationIngestValidation.Error() + ": "
+	message, ok := strings.CutPrefix(message, prefix)
+	if !ok {
+		return ""
+	}
+	eventType, issueUID, ok := strings.Cut(message, " references unknown issue ")
+	if !ok || eventType == "" || !katauid.Valid(issueUID) {
+		return ""
+	}
+	for _, c := range eventType {
+		if (c < 'a' || c > 'z') && c != '.' && c != '_' {
+			return ""
+		}
+	}
+	if message != FederationIssueReferenceMessage(eventType, issueUID, false) {
+		return ""
+	}
+	return issueUID
+}
+
 // EventTimestampFormat is the millisecond UTC representation covered by portable event hashes.
 const EventTimestampFormat = "2006-01-02T15:04:05.000Z"
 
