@@ -90,11 +90,6 @@ Kata writes errors to stderr in your selected output mode.
 CLI panics exit with code 1 as internal errors, while daemon and background task
 panics keep diagnostic traces.
 
-When a Git remote isn't attached, the hint names the project that `kata init`
-will attach or create. If that project is archived and visible to you, the hint
-gives its restore command. With an explicit `--project`, the hint gives a create
-or restore command for that project.
-
 When you pass `--json`, a `project_not_initialized` error names the alias or
 project Kata looked up in `error.data`. For details, see
 [HTTP API errors](http-api.md#errors).
