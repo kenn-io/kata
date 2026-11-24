@@ -133,6 +133,8 @@ func checkRejoinRetainedHistory(t *testing.T, store db.Storage, backend Backend)
 		ctx := t.Context()
 		source, err := store.CreateProject(ctx, "reset-recovered-source")
 		require.NoError(t, err)
+		target, err := store.CreateProject(ctx, "reset-recovered-target")
+		require.NoError(t, err)
 		issue, original, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "task", Author: "actor-a"})
 		require.NoError(t, err)
 		binding := db.FederationBinding{ProjectID: source.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: source.UID, Actor: "actor-b", Enabled: true, PushEnabled: true, RetainHistory: true}
@@ -145,6 +147,20 @@ func checkRejoinRetainedHistory(t *testing.T, store db.Storage, backend Backend)
 		events, err := store.EventsByUIDs(ctx, source.ID, []string{original.UID, snapshot.UID})
 		require.NoError(t, err)
 		require.Len(t, events, 2)
+		require.NoError(t, store.MaterializeFederatedProject(ctx, source.ID))
+		restored, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: target.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 2, HubProjectUID: target.UID, Actor: "actor-b", Enabled: true, PushEnabled: true})
+		require.NoError(t, err)
+		moved, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: restored.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: restored.Revision, Actor: "actor-b"})
+		require.NoError(t, err)
+		var payload struct {
+			Snapshot struct {
+				Author string `json:"author"`
+			} `json:"snapshot"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(moved.Event.Payload), &payload))
+		require.Equal(t, "actor-b", payload.Snapshot.Author)
 	})
 
 	t.Run("move accepted retained task", func(t *testing.T) {
