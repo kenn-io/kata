@@ -4801,6 +4801,9 @@ components:
           $ref: "#/components/schemas/Issue"
         original_event:
           $ref: "#/components/schemas/Event"
+        parent_ready:
+          $ref: "#/components/schemas/IssueRef"
+          description: Open parent with no open children after this close; set only by close.
         reused:
           type: boolean
       required:

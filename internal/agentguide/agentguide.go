@@ -147,7 +147,8 @@ const fragClosing = `2. Closing an issue asserts that the work is complete. If t
                       --evidence "no-change-audit:schema unchanged after review" \
                       --reviewed internal/db/schema.sql
 
-   The daemon refuses parent-close while open children remain. Reviewers
+   Closing the last open child hints at its open parent. The
+   daemon refuses parent-close while open children remain. Reviewers
    can replay activity with kata audit closes and undo a specific lazy
    close with kata reopen <ref>.
 

@@ -2076,6 +2076,37 @@ func TestProjectAccessCloseGuardConcealsPrivateChildren(t *testing.T) {
 	})
 }
 
+func TestProjectAccessCloseHintCountsPrivateChildren(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		last, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: f.public.ID, Title: "Last child", Author: "member"})
+		require.NoError(t, err)
+		_, err = store.CreateLink(t.Context(), db.CreateLinkParams{FromIssueID: last.ID, ToIssueID: f.visible.ID, Type: "parent", Author: "member"})
+		require.NoError(t, err)
+		path := fmt.Sprintf("/api/v1/projects/%d/issues/%s/actions/close", f.public.ID, last.ShortID)
+		body := map[string]any{"reason": "done", "message": "Completed the requested behavior with concrete review evidence.", "evidence": []map[string]string{{"type": "commit", "sha": "abcdef0123456789"}}, "retry_protocol": "close-v1"}
+		status, _, response := f.request(t, http.MethodPost, path, "nonmember", body, nil)
+		require.Equal(t, http.StatusOK, status, string(response))
+		assert.Contains(t, string(response), `"parent_ready"`)
+		assert.Contains(t, string(response), f.public.Name+"#"+f.visible.ShortID)
+	})
+}
+
+func TestProjectAccessCloseHintConcealsPrivateParent(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		_, err := store.CreateLink(t.Context(), db.CreateLinkParams{FromIssueID: f.visible.ID, ToIssueID: f.issue.ID, Type: "parent", Author: "member"})
+		require.NoError(t, err)
+		path := fmt.Sprintf("/api/v1/projects/%d/issues/%s/actions/close", f.public.ID, f.visible.ShortID)
+		body := map[string]any{"reason": "done", "message": "Completed the requested behavior with concrete review evidence.", "evidence": []map[string]string{{"type": "commit", "sha": "abcdef0123456789"}}}
+		status, _, response := f.request(t, http.MethodPost, path, "nonmember", body, nil)
+		require.Equal(t, http.StatusOK, status, string(response))
+		assert.NotContains(t, string(response), `"parent_ready"`)
+		assert.NotContains(t, string(response), f.issue.UID)
+		assert.NotContains(t, string(response), f.private.Name)
+	})
+}
+
 // R6 forbids related UID disclosure when a dangling endpoint has no admissible
 // project. Legacy owner graph diagnostics remain available.
 func TestProjectAccessUnresolvedGraphEndpointsRequireProject(t *testing.T) {

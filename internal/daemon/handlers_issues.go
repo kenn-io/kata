@@ -1202,7 +1202,11 @@ func loadParentRef(ctx context.Context, store db.Storage, issue db.Issue) (*api.
 	if err != nil {
 		return nil, err
 	}
-	parent, err := store.IssueByID(ctx, link.ToIssueID)
+	return loadParentByID(ctx, store, link.ToIssueID)
+}
+
+func loadParentByID(ctx context.Context, store db.Storage, id int64) (*api.IssueRef, error) {
+	parent, err := store.IssueByID(ctx, id)
 	if errors.Is(err, db.ErrNotFound) {
 		return nil, nil
 	}

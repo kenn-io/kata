@@ -546,6 +546,7 @@ type MutationResponse struct {
 		OriginalEvent *db.Event `json:"original_event,omitempty"`
 		Changed       bool      `json:"changed"`
 		Reused        bool      `json:"reused,omitzero"`
+		ParentReady   *IssueRef `json:"parent_ready,omitempty" doc:"Open parent with no open children after this close; set only by close."`
 	}
 }
 

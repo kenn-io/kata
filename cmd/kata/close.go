@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"maps"
 	"strings"
@@ -324,6 +325,7 @@ func runActionWithHeaders(
 		return err
 	}
 	var bs []byte
+	var parentRef string
 	switch action {
 	case "close":
 		var payload generated.CloseIssueBody
@@ -351,6 +353,9 @@ func runActionWithHeaders(
 			return err
 		}
 		bs = response.Body
+		if response.JSON200 != nil && response.JSON200.ParentReady != nil {
+			parentRef = response.JSON200.ParentReady.QualifiedID
+		}
 	case "reopen":
 		var payload generated.ReopenIssueBody
 		if err := json.Unmarshal(encoded, &payload); err != nil {
@@ -388,12 +393,31 @@ func runActionWithHeaders(
 		commentProjectID = response.Body.Issue.ProjectID
 		commentIssueRef = response.Body.Issue.UID
 	}
-	if err := postFollowupCommentWithKey(
+	commentErr := postFollowupCommentWithKey(
 		ctx, client, baseURL, commentProjectID, commentIssueRef, actor, comment, handle, commentKey,
-	); err != nil {
-		return err
+	)
+	if commentErr != nil && parentRef == "" {
+		return commentErr
 	}
-	return printMutationWithApplied(cmd, bs, nil, issue.ProjectName)
+	if parentRef != "" {
+		bs, err = reportHint(cmd, bs, parentReadyHint(parentRef))
+		if err != nil {
+			return errors.Join(commentErr, err)
+		}
+	}
+	if err := printMutationWithApplied(cmd, bs, nil, issue.ProjectName); err != nil {
+		return errors.Join(commentErr, err)
+	}
+	return commentErr
+}
+
+func parentReadyHint(ref string) cliHint {
+	quoted := shellQuote(ref)
+	if project, short, ok := strings.Cut(ref, "#"); ok && shellQuote(project) == project && shellQuote(short) == short {
+		quoted = ref
+	}
+	command := "kata close " + quoted + moveBatchRecoveryFlags() + " --done …"
+	return cliHint{Code: "parent_ready", Message: fmt.Sprintf("parent %s has no open children: close it with %s", ref, command)}
 }
 
 // findDuplicateEvidence returns the first duplicate "type:value" pair, or
