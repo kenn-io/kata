@@ -2293,7 +2293,7 @@ Untouched retained tasks remain local until a later write needs them. When a lat
 
 A reply to a comment the hub never received stays invisible on the hub until the parent comment arrives.
 
-Kata refuses to move a task whose creation, snapshot, or move was retained under an earlier actor or instance, with `federated_move_unsupported`. Create the task in the target project and link it to the original task.
+Kata refuses with `federated_move_unsupported` to move a task whose creation, snapshot, or earlier move is still retained under a former actor or instance, even when the hub already has the task. Create a task in the target project and link it to the original.
 
 Kata upgrades SQLite databases at schema 41 or later to schema 55 in place at startup. Older binaries cannot
 open schema 55. To roll back, restore a backup made before the upgrade and use its matching
