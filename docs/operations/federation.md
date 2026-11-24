@@ -2147,7 +2147,13 @@ leave before contacting the hub:
 
 - On a native spoke using local credentials, preparation refuses while another
   project still owes a locally authored move from this source. Sync that
-  destination project and retry.
+  destination project and retry. When a newer hub move supersedes the unsent
+  move, leave without `--delete` can proceed; `--delete` is refused with
+  `federation_lifecycle_blocked`. Unacknowledged edits stay local through resets
+  and full backups restored without `--as-standalone`. The spoke sends them
+  after it rejoins the source with push enabled and every referenced issue
+  returns to a joined project. A prepared leave finishes even if a later pull
+  moves an issue to another project.
 - Otherwise, Kata atomically pauses writes on the leaving binding so a new move
   cannot race hub revocation.
 - For a config-managed reservation, preparation durably marks the reservation,
@@ -2282,6 +2288,8 @@ local-origin events from the beginning; the hub deduplicates what it already
 has and absorbs any edits made while the project was standalone. Rejoin with
 the same actor the enrollment is bound to. Events authored as a different actor
 are rejected by the hub and quarantined.
+
+A read-only rejoin keeps held offline edits local until push is enabled.
 
 If you run `join` naming a *different* project while a local project still
 holds the hub project's UID, Kata refuses the join with

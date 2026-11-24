@@ -36,7 +36,7 @@ func (s *Store) RemoveProject(ctx context.Context, params db.RemoveProjectParams
 		if project.DeletedAt != nil {
 			return db.ErrProjectAlreadyArchived
 		}
-		if err := s.validateRelayLifecycleTx(ctx, tx, project.ID); err != nil {
+		if err := s.validateRelayLifecycleTx(ctx, tx, project.ID, false); err != nil {
 			return err
 		}
 		var openIssues, aliasCount int64

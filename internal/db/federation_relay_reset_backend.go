@@ -46,7 +46,7 @@ type RelayResetBackend interface {
 	// the project has an active external root binding.
 	RejectExternalRootProject(ctx context.Context, projectID int64) error
 	// DisableRelayPush enables the spoke binding and disables its pushes.
-	DisableRelayPush(ctx context.Context, projectID int64) error
+	DisableRelayPush(ctx context.Context, projectID int64, enabled bool) error
 	// ReconcileBindingTransitionLinks applies the binding transition's link
 	// reconciliation.
 	ReconcileBindingTransitionLinks(ctx context.Context, previous *FederationBinding, next FederationBinding) error
