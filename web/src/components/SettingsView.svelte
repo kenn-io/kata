@@ -29,28 +29,6 @@
     access,
   }: Props = $props()
 
-  let tabList: HTMLDivElement | undefined = $state()
-  $effect(() => {
-    const section = active
-    const list = tabList
-    const tab = list?.querySelector<HTMLElement>(`[data-tab-id="${section}"]`)
-    if (!list || !tab) return
-    function reveal() {
-      const strip = list!.getBoundingClientRect()
-      const bounds = tab!.getBoundingClientRect()
-      const style = getComputedStyle(list!)
-      const left = strip.left + (parseFloat(style.scrollPaddingLeft) || 0)
-      const right = strip.right - (parseFloat(style.scrollPaddingRight) || 0)
-      if (bounds.left < left) list!.scrollLeft += bounds.left - left
-      else if (bounds.right > right) list!.scrollLeft += bounds.right - right
-    }
-    reveal()
-    if (typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(reveal)
-    observer.observe(list)
-    return () => observer.disconnect()
-  })
-
   let accessVisited = $state(false)
   $effect(() => {
     if (!accessAvailable) accessVisited = false
@@ -63,9 +41,27 @@
     ...(credentialsAvailable ? [{ id: 'credentials', label: 'Credentials' }] : []),
     ...(accessAvailable ? [{ id: 'access', label: 'Teams and visibility' }] : []),
   ])
+
+  let tabList: HTMLDivElement | undefined = $state()
+  let overflowing = $state(false)
+  $effect(() => {
+    // Rerun when tabs are added or removed, since that changes the row's width.
+    void tabs
+    const list = tabList
+    const tab = list?.querySelector<HTMLElement>(`[data-tab-id="${active}"]`)
+    if (!list || !tab) return
+    function update() {
+      overflowing = list!.scrollWidth > list!.clientWidth
+      tab!.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    }
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(list)
+    return () => observer.disconnect()
+  })
 </script>
 
-<div class="settings-view">
+<div class="settings-view" class:overflowing>
   <Tabs
     {tabs}
     bind:value={() => active, (next) => onSelect(next as SettingsSectionID)}
@@ -229,6 +225,9 @@
       box-sizing: border-box;
       padding-inline: var(--layout-inset);
       scroll-padding-inline: var(--layout-inset);
+    }
+
+    .settings-view.overflowing :global(.kit-tabs__list) {
       mask-image: linear-gradient(
         to right,
         transparent,

@@ -207,18 +207,23 @@ test('Settings tabs scroll the focused tab into view on mobile', async ({ page, 
   await expect(last).toHaveAttribute('aria-selected', 'true')
 })
 
-test('Settings tabs fade at the edges when they overflow on mobile', async ({ page, kata }) => {
-  await page.setViewportSize({ width: 390, height: 800 })
+test('Settings tabs fade at the edges only when they overflow on mobile', async ({
+  page,
+  kata,
+}) => {
   await kata.launch(page)
   await kata.loginOwner(page, '/kata?view=settings&section=appearance')
   const tabs = page.getByRole('tablist', { name: 'Settings' })
   await expect(page.getByRole('tab', { name: 'Teams and visibility' })).toBeAttached()
-  const strip = await tabs.evaluate((list) => ({
-    overflows: list.scrollWidth > list.clientWidth,
-    mask: getComputedStyle(list).maskImage,
-  }))
-  expect(strip.overflows).toBe(true)
-  expect(strip.mask).toContain('linear-gradient')
+  const strip = () =>
+    tabs.evaluate((list) => ({
+      overflows: list.scrollWidth > list.clientWidth,
+      faded: getComputedStyle(list).maskImage.includes('linear-gradient'),
+    }))
+  await page.setViewportSize({ width: 600, height: 800 })
+  await expect.poll(strip).toEqual({ overflows: false, faded: false })
+  await page.setViewportSize({ width: 390, height: 800 })
+  await expect.poll(strip).toEqual({ overflows: true, faded: true })
 })
 
 test('Appearance changes the sidebar color', async ({ page, kata }) => {
