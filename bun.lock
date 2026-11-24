@@ -12,7 +12,7 @@
       "name": "@kenn-io/kata-ui",
       "version": "0.1.0",
       "dependencies": {
-        "@kenn-io/kit-ui": "github:kenn-io/kit-ui#v0.0.1",
+        "@kenn-io/kit-ui": "github:kenn-io/kit-ui#6cf4bd7242470636c0f1d69ec5241b966747ec87",
       },
       "devDependencies": {
         "@sveltejs/vite-plugin-svelte": "7.1.2",
@@ -35,7 +35,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@kenn-io/kata-ui": "workspace:*",
-        "@kenn-io/kit-ui": "github:kenn-io/kit-ui#v0.0.1",
+        "@kenn-io/kit-ui": "github:kenn-io/kit-ui#6cf4bd7242470636c0f1d69ec5241b966747ec87",
         "@lucide/svelte": "1.21.0",
         "@xyflow/svelte": "1.6.1",
         "elkjs": "0.11.1",
