@@ -1,6 +1,7 @@
 package federation
 
 import (
+	"context"
 	"encoding/json/v2"
 	"fmt"
 	"io"
@@ -11,7 +12,9 @@ import (
 	"github.com/stretchr/testify/require"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/testenv"
 )
 
 func rejoinWithActor(t *testing.T, spoke moveDeliverySpoke, hubURL string, hubProject db.Project, hubStore db.Storage, capabilities string) {
@@ -355,4 +358,28 @@ func TestRejoinPublishesRecoverySnapshot(t *testing.T) {
 		}
 	}
 	t.Fatal("recovery snapshot not found")
+}
+
+func TestPushPendingPublishesRecoverySnapshot(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "push-publication")
+	var push func(context.Context, db.FederationBinding, config.FederationCredential) error
+	spoke := newMoveDeliverySpokeWithOptions(t, hub, projects, []testenv.Option{func(cfg *daemon.ServerConfig) { push = cfg.FederationPushPending }}, "old-actor")
+	issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "old task", Author: "old-actor"})
+	require.NoError(t, err)
+	rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push")
+	_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "new comment"})
+	require.NoError(t, err)
+	binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
+	require.NoError(t, err)
+	sub := spoke.env.Broadcaster.Subscribe(daemon.SubFilter{ProjectID: spoke.projects[0].ID})
+	defer sub.Unsub()
+	require.NoError(t, push(ctx, binding, spoke.credentials[projects[0].UID]))
+	select {
+	case msg := <-sub.Ch:
+		require.NotNil(t, msg.Event)
+		require.Equal(t, "issue.snapshot", msg.Event.Type)
+	default:
+		t.Fatal("recovery snapshot was not published")
+	}
 }

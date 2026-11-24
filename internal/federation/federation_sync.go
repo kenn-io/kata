@@ -414,13 +414,13 @@ func CredentialHTTPClient(ctx context.Context, credential config.FederationCrede
 
 // DirectSpokePushPending returns the daemon hook that drains a direct spoke's
 // pending events to its hub with the stored credential.
-func DirectSpokePushPending(store db.Storage) func(context.Context, db.FederationBinding, config.FederationCredential) error {
+func DirectSpokePushPending(store db.Storage, onEvents func(int64, []db.Event)) func(context.Context, db.FederationBinding, config.FederationCredential) error {
 	return func(ctx context.Context, binding db.FederationBinding, credential config.FederationCredential) error {
 		client, err := NewClient(ctx, credential.HubURL, credential.Token, clientpkg.Opts{AllowInsecure: credential.AllowInsecure, FederationSigning: credential.Signing})
 		if err != nil {
 			return err
 		}
-		return PushDirectSpoke(ctx, store, binding, credential.HubProjectID, client)
+		return pushDirectSpoke(ctx, store, &binding, credential.HubProjectID, client, onEvents, nil, config.DefaultFederationCredentialStore(), clientpkg.Opts{})
 	}
 }
 

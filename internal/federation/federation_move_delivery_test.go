@@ -38,7 +38,9 @@ func newMoveDeliverySpoke(t *testing.T, hub *testenv.Env, projects []db.Project,
 
 func newMoveDeliverySpokeWithOptions(t *testing.T, hub *testenv.Env, projects []db.Project, options []testenv.Option, actors ...string) moveDeliverySpoke {
 	t.Helper()
-	options = append([]testenv.Option{func(cfg *daemon.ServerConfig) { cfg.FederationPushPending = DirectSpokePushPending(cfg.DB) }}, options...)
+	options = append([]testenv.Option{func(cfg *daemon.ServerConfig) {
+		cfg.FederationPushPending = DirectSpokePushPending(cfg.DB, cfg.Publish().Events)
+	}}, options...)
 	spoke := moveDeliverySpoke{env: testenv.New(t, options...), projects: make([]db.Project, len(projects)), credentials: newMoveCredentialStore()}
 	for i, project := range projects {
 		actor := "worker"
