@@ -1730,6 +1730,21 @@ func TestCreateIssue_InvalidLabelIs400(t *testing.T) {
 	assert.Equal(t, 400, resp.StatusCode)
 }
 
+func TestCreateIssue_PriorityLabelRejected(t *testing.T) {
+	env := testenv.New(t)
+	pid := initLocalWorkspace(t, env, "kata")
+	resp, body := envDoRaw(t, env, http.MethodPost, projectPath(pid)+"/issues", map[string]any{
+		"actor": "tester", "title": "priority label", "labels": []string{"p2"},
+	}, nil)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	assert.Contains(t, string(body), "kata create --priority N")
+	var list struct {
+		Issues []json.RawMessage `json:"issues"`
+	}
+	envGetJSON(t, env, projectPath(pid)+"/issues", &list)
+	assert.Empty(t, list.Issues)
+}
+
 func TestCreateIssue_PriorityLabelIdempotentRetry(t *testing.T) {
 	env := testenv.New(t)
 	pid := initLocalWorkspace(t, env, "kata")

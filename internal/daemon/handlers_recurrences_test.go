@@ -63,7 +63,11 @@ func TestPostRecurrence_HappyPath(t *testing.T) {
 func TestRecurrencePriorityLabels(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("tok"))
 	p := seedProject(t, env, "example-project")
-	rec := seedRecurrence(t, env, p.ID, "FREQ=WEEKLY", "2026-05-15", "UTC", "old")
+	rec, _, err := env.DB.CreateRecurrence(t.Context(), db.CreateRecurrenceIn{
+		ProjectID: p.ID, Actor: "tester", Rule: "FREQ=WEEKLY", DTStart: "2026-05-15", Timezone: "UTC",
+		Template: db.RecurrenceTemplate{Title: "old", Labels: []string{"p2"}},
+	})
+	require.NoError(t, err)
 	baseURL := fmt.Sprintf("%s/api/v1/projects/%d/recurrences", env.URL, p.ID)
 	for _, label := range []string{"p0", "priority:high"} {
 		t.Run(label, func(t *testing.T) {
@@ -80,25 +84,11 @@ func TestRecurrencePriorityLabels(t *testing.T) {
 			assert.Contains(t, string(raw), "priority field")
 		})
 	}
-	resp := doPatch(t, env, baseURL+"/"+rec.UID, `{"actor":"tester","template":{"labels":["area:ui"]}}`, `"rev-1"`)
-	raw := readClose(t, resp)
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
-}
-
-func TestRecurrenceRemoveExistingPriorityLabel(t *testing.T) {
-	env := testenv.New(t, testenv.WithAuthToken("tok"))
-	p := seedProject(t, env, "example-project")
-	rec, _, err := env.DB.CreateRecurrence(t.Context(), db.CreateRecurrenceIn{
-		ProjectID: p.ID, Actor: "tester", Rule: "FREQ=WEEKLY", DTStart: "2026-05-15", Timezone: "UTC",
-		Template: db.RecurrenceTemplate{Title: "review", Labels: []string{"p2"}},
-	})
-	require.NoError(t, err)
-	url := fmt.Sprintf("%s/api/v1/projects/%d/recurrences/%s", env.URL, p.ID, rec.UID)
-	resp := doPatch(t, env, url, `{"actor":"tester","template":{"labels":["area:ui","p2"]}}`, `"rev-1"`)
+	resp := doPatch(t, env, baseURL+"/"+rec.UID, `{"actor":"tester","template":{"labels":["area:ui","p2"]}}`, `"rev-1"`)
 	raw := readClose(t, resp)
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode, string(raw))
 	assert.Contains(t, string(raw), "remove the priority label from the issue or template and set the template priority")
-	resp = doPatch(t, env, url, `{"actor":"tester","template":{"labels":["area:ui"]}}`, `"rev-1"`)
+	resp = doPatch(t, env, baseURL+"/"+rec.UID, `{"actor":"tester","template":{"labels":["area:ui"]}}`, `"rev-1"`)
 	raw = readClose(t, resp)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 }

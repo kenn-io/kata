@@ -15,13 +15,6 @@ func TestLabelAdd_HappyPath(t *testing.T) {
 	assert.Contains(t, out, "needs-review")
 }
 
-func TestCreate_PriorityLabelRejected(t *testing.T) {
-	env, dir, _ := setupCLIWorkspace(t)
-	_, stderr, err := runCLIWithErr(t, env, dir, "create", "priority label", "--label", "p2")
-	requireCLIError(t, err, ExitValidation)
-	assert.Contains(t, stderr, "kata create --priority N")
-}
-
 func TestLabelAdd_AgentOutput(t *testing.T) {
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "a")
 

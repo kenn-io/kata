@@ -926,15 +926,14 @@ func TestToolsRoundTripAgainstRealDaemon(t *testing.T) {
 	for _, tc := range []struct {
 		tool      string
 		arguments map[string]any
-		fix       string
 	}{
-		{"kata.set_label", map[string]any{"ref": ref, "label": "priority:high", "present": true}, "priority"},
-		{"kata.create", map[string]any{"title": "Priority label", "labels": []string{"p2"}, "idempotency_key": "priority-label"}, "priority"},
+		{"kata.set_label", map[string]any{"ref": ref, "label": "priority:high", "present": true}},
+		{"kata.create", map[string]any{"title": "Priority label", "labels": []string{"p2"}, "idempotency_key": "priority-label"}},
 	} {
 		result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: tc.tool, Arguments: tc.arguments})
 		require.NoError(t, err)
 		require.True(t, result.IsError)
-		require.Contains(t, result.Content[0].(*sdkmcp.TextContent).Text, tc.fix)
+		require.Contains(t, result.Content[0].(*sdkmcp.TextContent).Text, "priority")
 	}
 	escaped, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
 		Name: "kata.edit", Arguments: map[string]any{
