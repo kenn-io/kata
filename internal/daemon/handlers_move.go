@@ -94,6 +94,21 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 				if err := requireFederatedIssueClaimWithRefresh(ctx, cfg, issue, actor, !in.Body.DryRun); err != nil {
 					return nil, err
 				}
+				if !in.Body.DryRun {
+					binding, err := cfg.DB.FederationBindingByProject(ctx, issue.ProjectID)
+					if err != nil && !errors.Is(err, db.ErrNotFound) {
+						return nil, internalAPIError(err)
+					}
+					if err == nil && binding.Enabled && binding.Role == db.FederationRoleSpoke && binding.RetainedThroughEventID > 0 {
+						retained, err := retainedIssueMayMaterialize(ctx, cfg.DB, binding, issue.UID)
+						if err != nil {
+							return nil, internalAPIError(err)
+						}
+						if retained {
+							return nil, api.NewError(409, "federation_retained_move_unsupported", "retained task history cannot be moved", "", nil)
+						}
+					}
+				}
 			}
 			if !in.Body.DryRun {
 				move.DryRun = false
