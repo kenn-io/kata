@@ -146,7 +146,7 @@ test('credential controls stay in place when clearing a search makes the page sc
   await expect(filler).toBeHidden()
 
   await expectNoShiftWhenScrollbarAppears(
-    page.locator('.kit-settings__scroll'),
+    page.locator('.settings-view > .kit-tabs'),
     page.getByRole('button', { name: 'Refresh credentials' }),
     async () => {
       await search.fill('')

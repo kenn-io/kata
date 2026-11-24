@@ -53,7 +53,7 @@ func ValidateImportBatch(params ImportBatchParams) error {
 			return fmt.Errorf("%w: priority must be between 0 and 4", ErrImportValidation)
 		}
 		for _, label := range item.Labels {
-			if !validImportLabel(label) {
+			if !ValidLabel(label) {
 				return fmt.Errorf("%w: invalid label %q", ErrImportValidation, label)
 			}
 		}
@@ -331,7 +331,9 @@ func validImportClosedReason(reason string) bool {
 	}
 }
 
-func validImportLabel(label string) bool {
+// ValidLabel reports whether label satisfies the stored label rule: charset
+// [a-z0-9._:-] and length 1..64.
+func ValidLabel(label string) bool {
 	if len(label) < 1 || len(label) > 64 {
 		return false
 	}

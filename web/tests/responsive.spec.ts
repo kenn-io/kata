@@ -97,6 +97,85 @@ test('resizing an open drawer restores desktop navigation and its project state'
   await expect(projects).toHaveAttribute('aria-expanded', 'false')
 })
 
+test('Settings tabs stay above the section at desktop and mobile widths', async ({
+  page,
+  kata,
+}) => {
+  await kata.launch(page, '/kata?view=settings&section=appearance')
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 800 })
+    const tabs = page.getByRole('tablist', { name: 'Settings' })
+    const heading = page.getByRole('heading', { name: 'Appearance' })
+    const tabsBounds = (await tabs.boundingBox())!
+    const headingBounds = (await heading.boundingBox())!
+    expect(tabsBounds.y + tabsBounds.height).toBeLessThanOrEqual(headingBounds.y)
+    if (width === 1440) {
+      const headerHeight = await tabs.evaluate((list) =>
+        parseFloat(getComputedStyle(list).getPropertyValue('--layout-header-h')),
+      )
+      expect(tabsBounds.height).toBeCloseTo(headerHeight, 0)
+      const selected = page.getByRole('tab', { name: 'Appearance' })
+      const indicatorBottom = await selected.evaluate(
+        (tab) =>
+          tab.getBoundingClientRect().bottom -
+          Number.parseFloat(getComputedStyle(tab, '::after').bottom),
+      )
+      expect(indicatorBottom).toBeCloseTo(tabsBounds.y + tabsBounds.height - 1, 0)
+    }
+    const labelBounds = (await tabs.locator('.kit-tabs__label').first().boundingBox())!
+    const underline = await page.getByRole('tab', { name: 'Appearance' }).evaluate((tab) => {
+      const bounds = tab.getBoundingClientRect()
+      const style = getComputedStyle(tab, '::after')
+      return {
+        left: bounds.left + parseFloat(style.left),
+        right: bounds.right - parseFloat(style.right),
+      }
+    })
+    expect(underline.left).toBeCloseTo(labelBounds.x, 0)
+    expect(underline.right).toBeCloseTo(labelBounds.x + labelBounds.width, 0)
+    if (width === 1440) {
+      expect(tabsBounds.x).toBeCloseTo(headingBounds.x, 0)
+      expect(tabsBounds.x + tabsBounds.width).toBeCloseTo(headingBounds.x + headingBounds.width, 0)
+    }
+    expect(labelBounds.x).toBeCloseTo(headingBounds.x, 0)
+  }
+})
+
+test('Settings tabs keep direct links and keyboard focus visible on mobile', async ({
+  page,
+  kata,
+}) => {
+  await page.setViewportSize({ width: 390, height: 800 })
+  await kata.launch(page)
+  await kata.loginOwner(page, '/kata?view=settings&section=access')
+  const tabs = page.getByRole('tablist', { name: 'Settings' })
+  const selected = page.getByRole('tab', { name: 'Teams and visibility' })
+  await expect(selected).toHaveAttribute('aria-selected', 'true')
+  const strip = (await tabs.boundingBox())!
+  const tab = (await selected.boundingBox())!
+  const view = (await page.locator('.settings-view').boundingBox())!
+  expect(strip.x).toBeCloseTo(view.x, 0)
+  expect(strip.x + strip.width).toBeCloseTo(view.x + view.width, 0)
+  expect(tab.x).toBeGreaterThanOrEqual(strip.x + 15)
+  expect(tab.x + tab.width).toBeLessThanOrEqual(strip.x + strip.width - 15)
+  const first = page.getByRole('tab', { name: 'Appearance' })
+  const last = page.getByRole('tab', { name: 'Teams and visibility' })
+  await first.click()
+  await expect(page).toHaveURL(/view=settings&section=appearance/)
+  await first.focus()
+  await page.keyboard.press('End')
+  await expect(last).toBeFocused()
+  await expect(page).toHaveURL(/view=settings&section=appearance/)
+  await expect(first).toHaveAttribute('aria-selected', 'true')
+  const focusedStrip = (await tabs.boundingBox())!
+  const focused = (await last.boundingBox())!
+  expect(focused.x).toBeGreaterThanOrEqual(focusedStrip.x)
+  expect(focused.x + focused.width).toBeLessThanOrEqual(focusedStrip.x + focusedStrip.width + 1)
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL(/view=settings&section=access/)
+  await expect(last).toHaveAttribute('aria-selected', 'true')
+})
+
 test('Appearance changes the sidebar color', async ({ page, kata }) => {
   await page.emulateMedia({ colorScheme: 'dark' })
   await kata.launch(page)
@@ -105,7 +184,7 @@ test('Appearance changes the sidebar color', async ({ page, kata }) => {
     page.locator('.kata-sidebar').evaluate((element) => getComputedStyle(element).backgroundColor)
   const darkColor = await sidebarColor()
   await page.getByRole('button', { name: 'Settings' }).click()
-  await page.getByRole('button', { name: /^Appearance/ }).click()
+  await page.getByRole('tab', { name: /^Appearance/ }).click()
   await page.getByRole('radio', { name: 'Light', exact: true }).click()
   await expect.poll(sidebarColor).not.toBe(darkColor)
 })

@@ -499,6 +499,10 @@ type ReachableIssueGraphResponse = ReachableGraphResponseBody
 
 type ReachableIssueGraphErrorResponse = ErrorEnvelope
 
+type UpdateLabelsResponse = UpdateLabelsResponseBody
+
+type UpdateLabelsErrorResponse = ErrorEnvelope
+
 type AddLabelResponse = AddLabelResponseBody
 
 type AddLabelErrorResponse = ErrorEnvelope
@@ -1748,6 +1752,19 @@ type ReachableIssueGraphResp struct {
 	StatusCode   int
 	JSON200      *ReachableIssueGraphResponse
 	JSONDefault  *ReachableIssueGraphErrorResponse
+}
+
+type UpdateLabelsResp200Headers struct {
+	XKataProjectName string `header:"X-Kata-Project-Name"`
+}
+
+type UpdateLabelsResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *UpdateLabelsResponse
+	Headers200   *UpdateLabelsResp200Headers
+	JSONDefault  *UpdateLabelsErrorResponse
 }
 
 type AddLabelResp200Headers struct {

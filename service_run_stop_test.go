@@ -3,6 +3,7 @@ package kata
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -153,6 +154,13 @@ func TestNamedWorkerResultAttributesOnlyRealFailures(t *testing.T) {
 	assert.NoError(t, worker.result(context.DeadlineExceeded, context.DeadlineExceeded))
 	assert.NoError(t, worker.result(errors.Join(sql.ErrTxDone, context.Canceled), context.Canceled))
 	require.ErrorIs(t, worker.result(sql.ErrTxDone, context.Canceled), sql.ErrTxDone)
+	assert.NoError(t, worker.result(errors.Join(
+		fmt.Errorf("store scheduled reached floor: %w", driver.ErrBadConn),
+		fmt.Errorf("list due notification issues: %w", context.Canceled),
+		context.Canceled,
+	), context.Canceled))
+	require.ErrorIs(t, worker.result(driver.ErrBadConn, context.Canceled), driver.ErrBadConn)
+	require.ErrorIs(t, worker.result(driver.ErrBadConn, nil), driver.ErrBadConn)
 
 	failure := errors.New("boom")
 	err := worker.result(failure, nil)
@@ -166,6 +174,10 @@ func TestNamedWorkerResultAttributesOnlyRealFailures(t *testing.T) {
 	rollbackErr := worker.result(errors.Join(sql.ErrTxDone, context.Canceled, failure), context.Canceled)
 	require.ErrorIs(t, rollbackErr, failure)
 	assert.ErrorContains(t, rollbackErr, "github-sync worker")
+
+	badConnErr := worker.result(errors.Join(driver.ErrBadConn, context.Canceled, failure), context.Canceled)
+	require.ErrorIs(t, badConnErr, failure)
+	assert.ErrorContains(t, badConnErr, "github-sync worker")
 }
 
 // TestFenceRecorderPreservesStopPriorityAcrossInternalUnwind pins the boundary
