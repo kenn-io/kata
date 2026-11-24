@@ -234,7 +234,12 @@
         #000 var(--layout-inset),
         #000 calc(100% - var(--layout-inset)),
         transparent
-      );
+      ),
+      linear-gradient(#000, #000);
+      /* The second layer keeps the bottom divider solid to both screen edges. */
+      mask-size: 100% 100%, 100% var(--border-width);
+      mask-position: top, bottom;
+      mask-repeat: no-repeat;
     }
 
     .settings-view > :global(.kit-tabs) {

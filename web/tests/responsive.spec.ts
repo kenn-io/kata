@@ -224,6 +224,25 @@ test('Settings tabs fade at the edges only when they overflow on mobile', async 
   await expect.poll(strip).toEqual({ overflows: false, faded: false })
   await page.setViewportSize({ width: 390, height: 800 })
   await expect.poll(strip).toEqual({ overflows: true, faded: true })
+
+  // The divider under the tabs stays solid to both screen edges while the labels fade.
+  const bottom = await tabs.evaluate((list) => list.getBoundingClientRect().bottom)
+  const shot = await page.screenshot({ clip: { x: 0, y: bottom - 2, width: 390, height: 4 } })
+  // Decode the capture on a blank page, outside the app's content security policy.
+  const blank = await page.context().newPage()
+  const dividerEdges = await blank.evaluate(async (png) => {
+    const image = await createImageBitmap(await (await fetch(`data:image/png;base64,${png}`)).blob())
+    const canvas = new OffscreenCanvas(image.width, image.height)
+    const context = canvas.getContext('2d')!
+    context.drawImage(image, 0, 0)
+    const pixel = (x: number, y: number) => context.getImageData(x, y, 1, 1).data.join()
+    const middle = Math.floor(image.width / 2)
+    const rows = Array.from({ length: image.height }, (_, y) => y)
+    const row = rows.find((y) => pixel(middle, y) !== pixel(middle, 0))!
+    return [pixel(0, row), pixel(image.width - 1, row)].map((edge) => edge === pixel(middle, row))
+  }, shot.toString('base64'))
+  await blank.close()
+  expect(dividerEdges).toEqual([true, true])
 })
 
 test('Appearance changes the sidebar color', async ({ page, kata }) => {
