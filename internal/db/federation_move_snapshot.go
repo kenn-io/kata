@@ -22,22 +22,50 @@ func FederationMoveSnapshotEvent(event RemoteEvent) RemoteEvent {
 	return event
 }
 
+// recoverySnapshotSQL matches a local snapshot that stands in for history an
+// earlier actor created, so it names the exact accepted recovery copy.
+func recoverySnapshotSQL(instance string) string {
+	return `e.type='issue.snapshot' AND EXISTS(SELECT 1 FROM events old WHERE old.project_id=e.project_id AND old.issue_uid=e.issue_uid
+ AND old.id<e.id AND old.type IN ('issue.created','issue.snapshot','issue.moved')
+ AND ` + LocalInstanceOriginSQL("old.origin_instance_uid", instance) + ` AND (old.origin_instance_uid<>` + instance + ` OR old.actor<>e.actor))`
+}
+
+// RecordFederationAcceptedRecoverySnapshots remembers which recovery snapshots
+// the hub acknowledged in a push that moves the cursor to through. The cursor
+// alone is no proof: it also advances over skipped former-actor events.
+func RecordFederationAcceptedRecoverySnapshots(ctx context.Context, tx *sql.Tx, projectID int64, instanceUID string, through int64) error {
+	_, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value)
+ SELECT '`+FederationAcknowledgedEventPrefix+`' || p.uid || '.' || e.uid,'1'
+ FROM events e JOIN projects p ON p.id=e.project_id JOIN federation_bindings b ON b.project_id=e.project_id
+ WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>b.push_cursor_event_id AND e.id<=$3 AND `+recoverySnapshotSQL("$2")+`
+ ON CONFLICT(key) DO NOTHING`, projectID, instanceUID, through)
+	return err
+}
+
+// ErrRetainedSnapshotUnaccepted means a recovery snapshot of the issue was never
+// acknowledged by the hub, so the hub does not hold the history it carries.
+var ErrRetainedSnapshotUnaccepted = errors.New("retained recovery snapshot is not accepted by the hub")
+
 // RetainedMoveSnapshot uses the accepted recovery snapshot's attribution in a
 // new move event, while the spoke keeps its original local history unchanged.
+// It refuses with ErrRetainedSnapshotUnaccepted while the hub has not
+// acknowledged that snapshot.
 func RetainedMoveSnapshot(ctx context.Context, tx *sql.Tx, sourceProjectID int64, issueUID, instanceUID, payload string) (string, error) {
 	var recovered string
-	err := tx.QueryRowContext(ctx, `SELECT e.payload FROM events e JOIN federation_bindings b ON b.project_id=e.project_id
-WHERE e.project_id=$1 AND e.issue_uid=$2 AND e.origin_instance_uid=$3 AND e.type='issue.snapshot'
-AND b.retained_through_event_id>0 AND e.id<=b.push_cursor_event_id
-AND EXISTS(SELECT 1 FROM events old WHERE old.project_id=e.project_id AND old.issue_uid=e.issue_uid
- AND old.id<e.id AND old.type IN ('issue.created','issue.snapshot','issue.moved')
- AND `+LocalInstanceOriginSQL("old.origin_instance_uid", "$3")+` AND (old.origin_instance_uid<>$3 OR old.actor<>e.actor))
-ORDER BY e.id LIMIT 1`, sourceProjectID, issueUID, instanceUID).Scan(&recovered)
+	var acked bool
+	err := tx.QueryRowContext(ctx, `SELECT e.payload, EXISTS (SELECT 1 FROM meta WHERE key='`+FederationAcknowledgedEventPrefix+`' || p.uid || '.' || e.uid)
+FROM events e JOIN federation_bindings b ON b.project_id=e.project_id JOIN projects p ON p.id=e.project_id
+WHERE e.project_id=$1 AND e.issue_uid=$2 AND e.origin_instance_uid=$3 AND b.retained_through_event_id>0
+AND `+recoverySnapshotSQL("$3")+`
+ORDER BY e.id LIMIT 1`, sourceProjectID, issueUID, instanceUID).Scan(&recovered, &acked)
 	if errors.Is(err, sql.ErrNoRows) {
 		return payload, nil
 	}
 	if err != nil {
 		return "", err
+	}
+	if !acked {
+		return "", ErrRetainedSnapshotUnaccepted
 	}
 	var current, accepted IssueDocumentPayload
 	if err := json.Unmarshal([]byte(payload), &current); err != nil {

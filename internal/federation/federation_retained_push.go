@@ -42,9 +42,6 @@ func (r *retainedPush) nextBatch(ctx context.Context, pending *[]db.Event) ([]db
 	if err != nil {
 		return nil, "", 0, err
 	}
-	if r.recovery && events[0].IssueUID != nil && r.sent[*events[0].IssueUID] {
-		return nil, "", 0, r.advance(ctx, pending, 1)
-	}
 	batch, baseline, baselineEnd := events[:1], "", int64(0)
 	if !r.recovery {
 		batch, baseline, baselineEnd, err = nextFederationPushIngestBatch(events[:end])

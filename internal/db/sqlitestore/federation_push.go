@@ -141,6 +141,9 @@ func federationPushEventTypeCondition(column string) string {
 func (d *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string) error {
 	if len(supersededEventUIDs) == 0 {
 		return d.relayTx(ctx, func(tx *sql.Tx) error {
+			if err := db.RecordFederationAcceptedRecoverySnapshots(ctx, tx, projectID, d.InstanceUID(), nextCursor); err != nil {
+				return err
+			}
 			if err := advanceFederationPushCursor(ctx, tx, projectID, nextCursor); err != nil {
 				return err
 			}
@@ -150,6 +153,9 @@ func (d *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCu
 	return d.materializeFederatedProjectAfter(ctx, projectID, func(ctx context.Context, tx *sql.Tx) error {
 		deleted, err := db.AcknowledgeSupersededFederationSnapshots(ctx, tx, projectID, d.instanceUID, supersededEventUIDs)
 		if err != nil {
+			return err
+		}
+		if err := db.RecordFederationAcceptedRecoverySnapshots(ctx, tx, projectID, d.InstanceUID(), nextCursor); err != nil {
 			return err
 		}
 		if err := advanceFederationPushCursor(ctx, tx, projectID, nextCursor); err != nil {
