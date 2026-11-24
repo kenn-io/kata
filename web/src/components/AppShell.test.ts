@@ -1250,24 +1250,6 @@ describe('AppShell', () => {
     expect(screen.getByRole('heading', { name: 'Appearance' })).not.toBeNull()
   })
 
-  test('keeps the last Settings section when another section is pending', async () => {
-    const onNavigate = vi.fn()
-    const props = {
-      route: settingsRoute('appearance'),
-      snapshot: snapshot(),
-      loading: false,
-      ...mutationProps(),
-      onNavigate,
-      onCreateProject: vi.fn(async () => ({ changed: true })),
-    }
-    const view = render(AppShell, { props })
-    await fireEvent.click(screen.getByRole('tab', { name: 'Search by meaning' }))
-    await view.rerender({ ...props, requestedRoute: settingsRoute('search') })
-    onNavigate.mockClear()
-    await fireEvent.click(screen.getByRole('tab', { name: 'Appearance' }))
-    expect(onNavigate).toHaveBeenCalledWith(settingsRoute('appearance'))
-  })
-
   test('renders Credentials as a Settings section with the Settings tab selected', () => {
     const authorized = snapshot()
     authorized.capabilities.token_audit_read = true

@@ -437,11 +437,11 @@
 
   // Credentials keeps its own address; every other section is a Settings one.
   function openSettingsSection(section: SettingsSectionID): void {
-    const current = requestedRoute ?? route
     if (
-      section === 'credentials'
-        ? current.view === 'credentials'
-        : current.view === 'settings' && (current.section ?? 'search') === section
+      section === settingsSection &&
+      (section === 'credentials'
+        ? route.view === 'credentials'
+        : route.view === 'settings' && (route.section ?? 'search') === section)
     )
       return
     navigate({
