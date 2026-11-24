@@ -202,3 +202,41 @@ func TestRunnerKeepsWakesWhenAPassFailsToListSpokes(t *testing.T) {
 	require.ErrorContains(t, <-failed, "database unavailable")
 	results.await(t, a.spoke.ID)
 }
+
+// afterListStore runs a hook once, right after a pass lists its bindings.
+type afterListStore struct {
+	db.Storage
+	once      sync.Once
+	afterList func()
+}
+
+func (s *afterListStore) ListFederationBindings(ctx context.Context) ([]db.FederationBinding, error) {
+	bindings, err := s.Storage.ListFederationBindings(ctx)
+	s.once.Do(s.afterList)
+	return bindings, err
+}
+
+// A wake for every spoke, such as a join, that arrives after a full pass has
+// listed its bindings still gets a pass of its own, because that pass may not
+// include the joined binding.
+func TestRunnerKeepsAWakeThatArrivesAfterAFullPassListsSpokes(t *testing.T) {
+	hub := testenv.New(t)
+	spoke := testenv.New(t)
+	t.Setenv("KATA_HOME", t.TempDir())
+	a := bindSpokeProjects(t, hub.DB, spoke.DB, hub.URL, 1)[0]
+
+	wake := NewWakeQueue()
+	store := &afterListStore{Storage: spoke.DB, afterList: wake.WakeAll}
+	results := newSpokeResults()
+	runner := &Runner{
+		DB:            store,
+		Interval:      time.Hour,
+		Wake:          wake,
+		Debounce:      time.Millisecond,
+		OnSpokeResult: results.record,
+		OnError:       func(err error) { t.Errorf("federation runner: %v", err) },
+	}
+	go func() { _ = runner.Run(t.Context()) }()
+	results.await(t, a.spoke.ID)
+	results.await(t, a.spoke.ID)
+}

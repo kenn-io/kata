@@ -1245,6 +1245,13 @@ func (r *Runner) runOnce(
 			return retry, true, nil, nil
 		}
 	}
+	// A pass that serves every spoke covers the wakes queued so far. Take them
+	// before listing bindings, so a wake that arrives during the listing, such
+	// as a join the listing missed, stays queued for another pass.
+	var woken bool
+	if len(only) == 0 {
+		woken, _ = r.Wake.take()
+	}
 	spokes, err := func() ([]activeSpokeBinding, error) {
 		if scan != nil {
 			defer scan.Release()
@@ -1270,13 +1277,12 @@ func (r *Runner) runOnce(
 		return active, nil
 	}()
 	if err != nil {
+		if woken {
+			// The pass reached no spoke, so its wakes are still owed. Queue
+			// them again so they retry after the debounce, not the interval.
+			r.Wake.WakeAll()
+		}
 		return nil, false, nil, err
-	}
-	if len(only) == 0 {
-		// This pass serves every spoke, which covers the wakes queued so far.
-		// Take them only now: a pass that fails before this point leaves them
-		// queued, so they retry after the debounce instead of the interval.
-		r.Wake.take()
 	}
 	active := make(map[int64]bool, len(spokes))
 	for _, spoke := range spokes {
