@@ -106,6 +106,11 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 							return nil, internalAPIError(err)
 						}
 						if retained {
+							if claim.missing {
+								if _, _, err := cfg.DB.RetainedIssueSnapshot(ctx, issue.ProjectID, issue.UID); err != nil {
+									return nil, internalAPIError(err)
+								}
+							}
 							return nil, api.NewError(409, "federation_sync_required", "sync the source project before moving this task", "sync the source project and retry", nil)
 						}
 					}
