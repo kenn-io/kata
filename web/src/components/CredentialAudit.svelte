@@ -4,15 +4,17 @@
   import {
     Avatar,
     Button,
+    Chip,
     Notice,
     SearchInput,
     SelectDropdown,
     SettingsSection,
     type SelectDropdownOption,
   } from '@kenn-io/kit-ui'
+  import { formatRelativeTime as ago } from '@kenn-io/kit-ui/utils/time'
 
   import type { TokenOut } from '../lib/api/generated'
-  import { relativeTime, shortDate } from '../lib/kata/dates'
+  import { shortDate } from '../lib/kata/dates'
 
   type StateFilter = 'all' | TokenOut['state']
   type ScopeFilter = 'all' | 'scoped' | 'unscoped'
@@ -54,12 +56,6 @@
       )
     })
   })
-  function ago(value: string): string {
-    const label = relativeTime(value)
-    if (label === 'now') return 'just now'
-    return /^\d+[mhd]$/.test(label) ? `${label} ago` : label
-  }
-
   function exact(value: string): string {
     const parsed = new Date(value)
     if (Number.isNaN(parsed.getTime())) return value
@@ -140,7 +136,9 @@
                 <span>{token.actor}</span>
               </span>
               {#if token.state !== 'live'}
-                <span class="state-badge">{token.state === 'expired' ? 'Expired' : 'Revoked'}</span>
+                <Chip size="xs" tone="danger" uppercase={false}
+                  >{token.state === 'expired' ? 'Expired' : 'Revoked'}</Chip
+                >
               {/if}
               <span class="credential-id">ID {token.id}</span>
             </div>
@@ -271,16 +269,6 @@
     font-family: var(--font-mono);
     font-size: var(--font-size-xs);
     overflow-wrap: anywhere;
-  }
-
-  .state-badge {
-    padding: 0 6px;
-    border-radius: var(--radius-sm);
-    background: color-mix(in srgb, var(--accent-red) 12%, transparent);
-    color: var(--accent-red);
-    font-size: var(--font-size-xs);
-    font-weight: var(--font-weight-semibold);
-    line-height: 18px;
   }
 
   @media (max-width: 760px) {

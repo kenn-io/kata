@@ -336,7 +336,6 @@
                       <Button
                         size="sm"
                         surface="soft"
-                        class="row-action"
                         ariaLabel={`Remove ${account}`}
                         disabled={disabled || loading}
                         onclick={() => void changeMember(account, false)}>Remove</Button
@@ -361,12 +360,6 @@
                       required
                       pattern=".*\S.*"
                       disabled={disabled || loading}
-                      onkeydown={(event) => {
-                        if (event.key === 'Escape') {
-                          member = ''
-                          addingMember = false
-                        }
-                      }}
                     />
                   </form>
                 {:else}
@@ -415,12 +408,6 @@
           required
           pattern=".*\S.*"
           {disabled}
-          onkeydown={(event) => {
-            if (event.key === 'Escape') {
-              name = ''
-              naming = false
-            }
-          }}
         />
       </form>
     {:else}
@@ -588,20 +575,9 @@
     overflow-wrap: anywhere;
   }
 
-  /* Remove shows on the row being pointed at or focused. */
-  .member :global(.row-action) {
-    opacity: 0;
-  }
-
-  .member:hover :global(.row-action),
-  .member:focus-within :global(.row-action) {
-    opacity: 1;
-  }
-
-  .text-action {
-    padding: 2px var(--space-3);
+  .text-action,
+  .add-row {
     border: 0;
-    border-radius: var(--radius-sm);
     background: none;
     color: var(--text-secondary);
     font: inherit;
@@ -609,12 +585,18 @@
     cursor: pointer;
   }
 
+  .text-action {
+    padding: 2px var(--space-3);
+    border-radius: var(--radius-sm);
+  }
+
   .text-action:hover:not(:disabled) {
     background: var(--bg-surface-hover);
     color: var(--text-primary);
   }
 
-  .text-action:disabled {
+  .text-action:disabled,
+  .add-row:disabled {
     cursor: wait;
     opacity: var(--opacity-disabled);
   }
@@ -626,21 +608,10 @@
     width: fit-content;
     min-height: 32px;
     padding: 0;
-    border: 0;
-    background: none;
-    color: var(--text-secondary);
-    font: inherit;
-    font-size: var(--font-size-md);
-    cursor: pointer;
   }
 
   .add-row:hover:not(:disabled) {
     color: var(--text-primary);
-  }
-
-  .add-row:disabled {
-    cursor: wait;
-    opacity: var(--opacity-disabled);
   }
 
   .inline-field input {

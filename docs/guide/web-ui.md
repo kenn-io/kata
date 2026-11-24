@@ -76,16 +76,10 @@ The sidebar lists **Inbox**, **Today**, **Scheduled**, **Delegated**, **All open
 - **Projects.** Project entries scope the collection to one project, and
   projects without an `area` appear under **Projects**. Select **New project**
   to create a daemon project without changing any workspace files.
-- **Settings** opens one view with a list of sections. Under **This browser**,
-  **Appearance** sets the theme. Under **This server**, **Search by meaning**
-  shows whether it is on and turns it on, **Credentials** lists the server's
-  credentials, and **Teams and visibility** manages teams and which teams see
-  each project. Settings opens on **Search by meaning**. Credentials and Teams
-  and visibility appear only for sessions allowed to use them; a section you
-  can't use opens Appearance instead. Each section has its own address, so you
-  can bookmark it. Credentials uses `?view=credentials`; the other sections use
-  `?view=settings&section=…`. A project with no selected teams is visible only
-  to server owners.
+- **Settings** contains Appearance, Search by meaning, Credentials, and Teams
+  and visibility. It opens on Search by meaning. Credentials uses
+  `?view=credentials`; the other sections use `?view=settings&section=…`.
+  A project with no selected teams is visible only to server owners.
 
 Search and **Status** sit above each collection. The **Filter** menu holds
 Project, Relationship, Owner, and Label; active filters appear as chips you can

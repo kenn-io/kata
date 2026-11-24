@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test'
-import { expect, test, type BrowserCredentials } from './fixtures'
+import { expect, test, type BrowserCredentials, type KataFixture } from './fixtures'
 
 // Exercise owner settings against the production daemon and its native store.
 test('owner settings manage teams and persist project visibility', async ({
@@ -29,29 +29,13 @@ test('owner settings manage teams and persist project visibility', async ({
   expect(teamUID).toBeTruthy()
   // Visibility saves on change; poll until the daemon holds the pick.
   await expect
-    .poll(async () => {
-      const response = await kata.request(
-        page,
-        credentials,
-        'GET',
-        `/api/v1/projects/${kata.projectID}/access`,
-      )
-      return ((await response.json()) as { policy: unknown }).policy
-    })
+    .poll(() => accessPolicy(page, credentials, kata))
     .toMatchObject({ visibility: 'teams', team_uids: [teamUID] })
 
   await page.getByRole('checkbox', { name: 'Example team' }).uncheck()
   await expect(page.getByText('No teams have access. Server owners still do.')).toBeVisible()
   await expect
-    .poll(async () => {
-      const response = await kata.request(
-        page,
-        credentials,
-        'GET',
-        `/api/v1/projects/${kata.projectID}/access`,
-      )
-      return ((await response.json()) as { policy: unknown }).policy
-    })
+    .poll(() => accessPolicy(page, credentials, kata))
     .toMatchObject({ visibility: 'teams', team_uids: [] })
   await page.reload()
   await chooseProject(page, 'example-project')
@@ -129,16 +113,8 @@ test('identity bootstrap manages access without ordinary write authority', async
     await chooseVisibility(page, 'Selected teams')
     await page.getByRole('checkbox', { name: 'Identity team' }).check()
     await expect
-      .poll(async () => {
-        const response = await kata.request(
-          page,
-          credentials,
-          'GET',
-          `/api/v1/projects/${kata.projectID}/access`,
-        )
-        return ((await response.json()) as { policy: { visibility: string } }).policy.visibility
-      })
-      .toBe('teams')
+      .poll(() => accessPolicy(page, credentials, kata))
+      .toMatchObject({ visibility: 'teams' })
     const denied = await kata.request(
       page,
       credentials,
@@ -167,6 +143,16 @@ test('identity bootstrap manages access without ordinary write authority', async
     await kata.restartIdentity(false)
   }
 })
+
+async function accessPolicy(page: Page, credentials: BrowserCredentials, kata: KataFixture) {
+  const response = await kata.request(
+    page,
+    credentials,
+    'GET',
+    `/api/v1/projects/${kata.projectID}/access`,
+  )
+  return ((await response.json()) as { policy: unknown }).policy
+}
 
 function teamRow(page: Page, name: string) {
   return page.locator('.team-name', { hasText: name })

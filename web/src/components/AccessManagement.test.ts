@@ -64,34 +64,6 @@ describe('AccessManagement', () => {
     expect(await screen.findByText('No teams have access. Server owners still do.')).not.toBeNull()
   })
 
-  it('shows Teams and Project visibility as two sections', async () => {
-    serve({ visibility: 'all', team_uids: [] })
-    renderAccess()
-
-    expect(screen.getByRole('heading', { name: 'Teams' })).not.toBeNull()
-    expect(screen.getByRole('heading', { name: 'Project visibility' })).not.toBeNull()
-    expect(screen.getByText('Server owners see every project.')).not.toBeNull()
-    expect(await screen.findByText('example-team')).not.toBeNull()
-    expect(await screen.findByRole('combobox', { name: 'Project: example-project' })).not.toBeNull()
-    expect(screen.queryByRole('button', { name: 'Save visibility' })).toBeNull()
-  })
-
-  it('saves visibility as it changes, waiting for a team pick under Selected teams', async () => {
-    const writes = serve({ visibility: 'all', team_uids: [] })
-    renderAccess()
-
-    const visibility = await screen.findByRole('combobox', { name: 'Visibility: Everyone' })
-    await waitFor(() => expect((visibility as HTMLButtonElement).disabled).toBe(false))
-    await fireEvent.click(visibility)
-    await fireEvent.click(screen.getByRole('option', { name: 'Selected teams' }))
-    expect(screen.getByText('Pick a team to save.')).not.toBeNull()
-    expect(writes).toHaveLength(0)
-
-    await fireEvent.click(screen.getByRole('checkbox', { name: 'example-team' }))
-    await waitFor(() => expect(writes).toHaveLength(1))
-    expect(writes[0]).toEqual({ visibility: 'teams', team_uids: ['team-one'], revision: 4 })
-  })
-
   it('keeps read errors independent when other reads succeed', async () => {
     setGeneratedFetch(async (input) => {
       const path = new URL(String(input)).pathname

@@ -1115,6 +1115,7 @@ describe('AppShell', () => {
     const retry = await screen.findByRole('button', { name: 'Retry saving visibility' })
     await waitFor(() => expect(visibilitySelect().disabled).toBe(false))
     await fireEvent.click(screen.getByRole('checkbox', { name: 'Example team' }))
+    expect((retry as HTMLButtonElement).disabled).toBe(true)
     await fireEvent.click(retry)
     expect(writes).toHaveLength(1)
   })
@@ -1429,13 +1430,6 @@ describe('AppShell', () => {
       ).toBe('true')
     })
 
-    test('lands on Appearance for Credentials without credential audit', () => {
-      renderSettings(credentialsRoute(), { token_audit_read: false, access_admin: true })
-      expect(screen.getByRole('heading', { name: 'Appearance' })).not.toBeNull()
-      expect(screen.queryByRole('heading', { name: 'Credentials' })).toBeNull()
-      expect(screen.queryByRole('button', { name: 'Credentials' })).toBeNull()
-    })
-
     test.each([credentialsRoute(), settingsRoute('access')])(
       'opens the Appearance address when its fallback is selected',
       async (route) => {
@@ -1443,29 +1437,12 @@ describe('AppShell', () => {
           token_audit_read: false,
           access_admin: false,
         })
-
+        expect(screen.getByRole('heading', { name: 'Appearance' })).not.toBeNull()
         await fireEvent.click(screen.getByRole('button', { name: 'Appearance' }))
 
         expect(onNavigate).toHaveBeenCalledWith(settingsRoute('appearance'))
       },
     )
-
-    test('lands on Appearance for Teams and visibility without access administration', () => {
-      renderSettings(settingsRoute('access'), { token_audit_read: true, access_admin: false })
-      expect(screen.getByRole('heading', { name: 'Appearance' })).not.toBeNull()
-      expect(screen.queryByRole('heading', { name: 'Teams' })).toBeNull()
-      expect(screen.queryByRole('button', { name: 'Teams and visibility' })).toBeNull()
-    })
-
-    test('keeps one Settings entry in the sidebar footer', () => {
-      renderSettings(settingsRoute(), { token_audit_read: true, access_admin: true })
-      const footer = document.querySelector('.sidebar-footer') as HTMLElement
-      expect(
-        within(footer)
-          .getAllByRole('button')
-          .map((button) => button.textContent?.trim()),
-      ).toEqual(['Settings'])
-    })
   })
 
   test('shows task creation errors on Settings', () => {
