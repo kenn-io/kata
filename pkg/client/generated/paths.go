@@ -666,6 +666,16 @@ func (r ReachableIssueGraphPath) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(r))
 }
 
+type UpdateLabelsPath struct {
+	// ProjectID Numeric project ID or name:<project name>; name: alone requires an alias
+	ProjectID string `json:"project_id" validate:"required"`
+	Ref       string `json:"ref" validate:"required"`
+}
+
+func (u UpdateLabelsPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(u))
+}
+
 type AddLabelPath struct {
 	// ProjectID Numeric project ID or name:<project name>; name: alone requires an alias
 	ProjectID string `json:"project_id" validate:"required"`

@@ -179,37 +179,13 @@ func (d *Store) addLabelAndEvent(ctx context.Context, issueID int64, ev db.Label
 		return db.IssueLabel{}, db.Event{}, err
 	}
 
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO issue_labels(issue_id, label, author) VALUES(?, ?, ?)`,
-		issueID, ev.Label, ev.Actor); err != nil {
-		return db.IssueLabel{}, db.Event{}, classifyLabelInsertError(err)
-	}
-
 	ts := nowTimestamp()
-	payload, err := json.Marshal(map[string]string{
-		"issue_uid":  issue.UID,
-		"label":      ev.Label,
-		"updated_at": ts,
-	})
-	if err != nil {
-		return db.IssueLabel{}, db.Event{}, fmt.Errorf("marshal label payload: %w", err)
-	}
-	evt, err := d.insertEventTx(ctx, tx, eventInsert{
-		ProjectID:   issue.ProjectID,
-		ProjectName: projectName,
-		IssueID:     &issue.ID,
-		Type:        ev.EventType,
-		Actor:       ev.Actor,
-		Payload:     string(payload),
-	})
+	evt, err := d.attachLabelTx(ctx, tx, issue, projectName, ev.EventType, ev.Label, ev.Actor, ts)
 	if err != nil {
 		return db.IssueLabel{}, db.Event{}, err
 	}
-
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE issues SET updated_at = ? WHERE id = ?`,
-		ts, issueID); err != nil {
-		return db.IssueLabel{}, db.Event{}, fmt.Errorf("touch issue: %w", err)
+	if err := touchIssueTx(ctx, tx, issueID, ts); err != nil {
+		return db.IssueLabel{}, db.Event{}, err
 	}
 
 	// Re-fetch the inserted row INSIDE the TX so a post-commit failure
@@ -256,11 +232,8 @@ func (d *Store) removeLabelAndEvent(ctx context.Context, issueID int64, ev db.La
 	if err != nil {
 		return db.Event{}, err
 	}
-
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE issues SET updated_at = ? WHERE id = ?`,
-		ts, issueID); err != nil {
-		return db.Event{}, fmt.Errorf("touch issue: %w", err)
+	if err := touchIssueTx(ctx, tx, issueID, ts); err != nil {
+		return db.Event{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return db.Event{}, fmt.Errorf("commit: %w", err)
@@ -268,6 +241,88 @@ func (d *Store) removeLabelAndEvent(ctx context.Context, issueID int64, ev db.La
 	return evt, nil
 }
 
+// ChangeLabelsAndEvents removes then adds labels on one issue in a single TX.
+// Removes of absent labels and adds of attached labels are skipped without an
+// event; any other failure (including an invalid label) rolls everything back.
+func (d *Store) ChangeLabelsAndEvents(ctx context.Context, issueID int64, p db.ChangeLabelsParams) ([]string, []db.Event, error) {
+	return retryWrite2(ctx, d, func() ([]string, []db.Event, error) {
+		return d.changeLabelsAndEvents(ctx, issueID, p)
+	})
+}
+
+func (d *Store) changeLabelsAndEvents(ctx context.Context, issueID int64, p db.ChangeLabelsParams) ([]string, []db.Event, error) {
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	issue, projectName, err := lookupIssueForEvent(ctx, tx, issueID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := ensureProjectWritableTx(ctx, tx, issue.ProjectID); err != nil {
+		return nil, nil, err
+	}
+	actor, err := d.effectiveLocalMutationActorTx(ctx, tx, issue.ProjectID, p.Actor)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	ts := nowTimestamp()
+	events := make([]db.Event, 0, len(p.Remove)+len(p.Add))
+	for _, label := range p.Remove {
+		evt, err := d.detachLabelTx(ctx, tx, issue, projectName, "issue.unlabeled", label, actor, ts)
+		if errors.Is(err, db.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		events = append(events, evt)
+	}
+	for _, label := range p.Add {
+		evt, err := d.attachLabelTx(ctx, tx, issue, projectName, "issue.labeled", label, actor, ts)
+		if errors.Is(err, db.ErrLabelExists) {
+			continue
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		events = append(events, evt)
+	}
+	if len(events) > 0 {
+		if err := touchIssueTx(ctx, tx, issueID, ts); err != nil {
+			return nil, nil, err
+		}
+	}
+
+	labels, err := federationIssueLabels(ctx, tx, issueID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if labels == nil {
+		labels = []string{}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, nil, fmt.Errorf("commit: %w", err)
+	}
+	return labels, events, nil
+}
+
+// attachLabelTx inserts the label row and its event. A duplicate returns
+// db.ErrLabelExists and an invalid label db.ErrLabelInvalid.
+func (d *Store) attachLabelTx(ctx context.Context, tx *sql.Tx, issue db.Issue, projectName, eventType, label, actor, ts string) (db.Event, error) {
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO issue_labels(issue_id, label, author) VALUES(?, ?, ?)`,
+		issue.ID, label, actor); err != nil {
+		return db.Event{}, classifyLabelInsertError(err)
+	}
+	return d.insertLabelEventTx(ctx, tx, issue, projectName, eventType, label, actor, ts)
+}
+
+// detachLabelTx deletes the label row and records its event. It returns
+// db.ErrNotFound when the label was not attached.
 func (d *Store) detachLabelTx(ctx context.Context, tx *sql.Tx, issue db.Issue, projectName, eventType, label, actor, ts string) (db.Event, error) {
 	res, err := tx.ExecContext(ctx,
 		`DELETE FROM issue_labels WHERE issue_id = ? AND label = ?`,
@@ -282,7 +337,10 @@ func (d *Store) detachLabelTx(ctx context.Context, tx *sql.Tx, issue db.Issue, p
 	if n == 0 {
 		return db.Event{}, db.ErrNotFound
 	}
+	return d.insertLabelEventTx(ctx, tx, issue, projectName, eventType, label, actor, ts)
+}
 
+func (d *Store) insertLabelEventTx(ctx context.Context, tx *sql.Tx, issue db.Issue, projectName, eventType, label, actor, ts string) (db.Event, error) {
 	payload, err := json.Marshal(map[string]string{
 		"issue_uid":  issue.UID,
 		"label":      label,
@@ -291,7 +349,7 @@ func (d *Store) detachLabelTx(ctx context.Context, tx *sql.Tx, issue db.Issue, p
 	if err != nil {
 		return db.Event{}, fmt.Errorf("marshal label payload: %w", err)
 	}
-	evt, err := d.insertEventTx(ctx, tx, eventInsert{
+	return d.insertEventTx(ctx, tx, eventInsert{
 		ProjectID:   issue.ProjectID,
 		ProjectName: projectName,
 		IssueID:     &issue.ID,
@@ -299,11 +357,14 @@ func (d *Store) detachLabelTx(ctx context.Context, tx *sql.Tx, issue db.Issue, p
 		Actor:       actor,
 		Payload:     string(payload),
 	})
-	if err != nil {
-		return db.Event{}, err
-	}
+}
 
-	return evt, nil
+func touchIssueTx(ctx context.Context, tx *sql.Tx, issueID int64, ts string) error {
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE issues SET updated_at = ? WHERE id = ?`, ts, issueID); err != nil {
+		return fmt.Errorf("touch issue: %w", err)
+	}
+	return nil
 }
 
 const labelSelect = `SELECT issue_id, label, author, created_at FROM issue_labels`

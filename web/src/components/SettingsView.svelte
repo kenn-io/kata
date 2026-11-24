@@ -1,10 +1,5 @@
 <script lang="ts">
-  import {
-    SettingsLayout,
-    SegmentedControl,
-    SettingsSection,
-    type SettingsCategory,
-  } from '@kenn-io/kit-ui'
+  import { SegmentedControl, SettingsSection, Tabs, type TabItem } from '@kenn-io/kit-ui'
   import type { Snippet } from 'svelte'
   import type { SettingsSection as RouteSettingsSection } from '../lib/router'
 
@@ -40,66 +35,129 @@
     else if (active === 'access') accessVisited = true
   })
 
-  let categories = $derived<SettingsCategory[]>([
-    { id: 'appearance', label: 'Appearance', group: 'This browser' },
-    { id: 'search', label: 'Search by meaning', group: 'This server' },
-    ...(credentialsAvailable
-      ? [{ id: 'credentials', label: 'Credentials', group: 'This server' }]
-      : []),
-    ...(accessAvailable
-      ? [{ id: 'access', label: 'Teams and visibility', group: 'This server' }]
-      : []),
+  let tabs = $derived<TabItem[]>([
+    { id: 'appearance', label: 'Appearance' },
+    { id: 'search', label: 'Search by meaning' },
+    ...(credentialsAvailable ? [{ id: 'credentials', label: 'Credentials' }] : []),
+    ...(accessAvailable ? [{ id: 'access', label: 'Teams and visibility' }] : []),
   ])
+
+  let tabList: HTMLDivElement | undefined = $state()
+  $effect(() => {
+    void tabs
+    tabList
+      ?.querySelector<HTMLElement>(`[data-tab-id="${active}"]`)
+      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  })
 </script>
 
 <div class="settings-view">
-  <SettingsLayout
-    {categories}
-    bind:active={() => active, (next) => onSelect(next as SettingsSectionID)}
+  <h2 class="settings-heading">Settings</h2>
+  <Tabs
+    {tabs}
+    bind:value={() => active, (next) => onSelect(next as SettingsSectionID)}
+    ariaLabel="Settings"
+    activation="manual"
+    bind:listElement={tabList}
+    tabAttributes={(item, selected) => ({
+      // Appearance can be selected as a fallback while the URL still names an unavailable section.
+      // Tabs skips selection callbacks for the selected tab, so clicking it must update the URL.
+      onclick: selected ? () => onSelect(item.id as SettingsSectionID) : undefined,
+      onfocus: (event) =>
+        event.currentTarget.scrollIntoView({ block: 'nearest', inline: 'nearest' }),
+    })}
   >
-    {#snippet panel(id)}
-      {#if id === 'appearance'}
-        <SettingsSection title="Appearance">
-          <div class="settings-row">
-            <span>Theme</span>
-            <SegmentedControl
-              ariaLabel="Theme"
-              value={theme}
-              options={[
-                { value: 'light', label: 'Light' },
-                { value: 'dark', label: 'Dark' },
-                { value: 'system', label: 'System' },
-              ]}
-              onchange={(value) => onThemeChange(value as 'light' | 'dark' | 'system')}
-            />
-          </div>
-        </SettingsSection>
-      {:else if id === 'search'}
-        {@render search()}
-      {:else if id === 'credentials'}
-        {@render credentials()}
-      {/if}
-      {#if accessVisited && accessAvailable}
-        <div hidden={id !== 'access'}>{@render access()}</div>
-      {/if}
+    {#snippet children(id)}
+      <div class="settings-content">
+        {#if id === 'appearance'}
+          <SettingsSection title="Appearance">
+            <div class="settings-row">
+              <span>Theme</span>
+              <SegmentedControl
+                ariaLabel="Theme"
+                value={theme}
+                options={[
+                  { value: 'light', label: 'Light' },
+                  { value: 'dark', label: 'Dark' },
+                  { value: 'system', label: 'System' },
+                ]}
+                onchange={(value) => onThemeChange(value as 'light' | 'dark' | 'system')}
+              />
+            </div>
+          </SettingsSection>
+        {:else if id === 'search'}
+          {@render search()}
+        {:else if id === 'credentials'}
+          {@render credentials()}
+        {/if}
+        {#if accessVisited && accessAvailable}
+          <div hidden={id !== 'access'}>{@render access()}</div>
+        {/if}
+      </div>
     {/snippet}
-  </SettingsLayout>
+  </Tabs>
 </div>
 
 <style>
   .settings-view {
     display: flex;
+    flex-direction: column;
     flex: 1 1 auto;
     min-width: 0;
     min-height: 0;
     overflow: hidden;
     background: var(--bg-surface);
-    --settings-row-h: 28px;
   }
 
-  .settings-view > :global(*) {
+  .settings-heading {
+    display: flex;
+    align-items: center;
+    flex: none;
+    width: min(720px, calc(100% - 2 * var(--layout-inset)));
+    height: var(--layout-header-h);
+    margin: 0 auto;
+    color: var(--text-primary);
+    font-size: var(--font-size-lg);
+    font-weight: 650;
+  }
+
+  .settings-view > :global(.kit-tabs) {
+    display: flex;
+    flex-direction: column;
     flex: 1 1 auto;
     min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-gutter: stable both-edges;
+  }
+
+  .settings-view :global(.kit-tabs__list) {
+    position: sticky;
+    z-index: 1;
+    top: 0;
+    flex: none;
+    width: min(720px, calc(100% - 2 * var(--layout-inset)));
+    margin: 0 auto;
+    background: var(--bg-surface);
+  }
+
+  .settings-view :global(.kit-tabs__tab:first-child) {
+    padding-left: 0;
+  }
+
+  .settings-view :global(.kit-tabs__tab:first-child::after) {
+    left: 0;
+    right: var(--space-4);
+  }
+
+  .settings-content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-7);
+    max-width: calc(720px + 2 * var(--layout-inset));
+    box-sizing: border-box;
+    margin: 0 auto;
+    padding: 0 var(--layout-inset) var(--space-8);
   }
 
   .settings-view :global(.settings-title-action) {
@@ -122,72 +180,6 @@
     justify-content: start;
     align-items: center;
     min-height: 40px;
-  }
-
-  /* Section list: a 240px column whose heading sits in the 48px header band.
-     Rows sit 8px from the column's edges; their own 8px padding puts the
-     labels on the 16px inset, under the heading. */
-  .settings-view :global(.kit-settings__sidebar) {
-    gap: 0;
-    box-sizing: border-box;
-    width: 240px;
-    padding: 0 var(--space-4) var(--space-4);
-  }
-
-  .settings-view :global(.kit-settings__title) {
-    display: flex;
-    flex: none;
-    align-items: center;
-    height: var(--layout-header-h);
-    padding: 0 var(--space-4);
-  }
-
-  .settings-view :global(.kit-settings__nav) {
-    gap: var(--space-1);
-  }
-
-  .settings-view :global(.kit-settings__group-title) {
-    display: flex;
-    align-items: center;
-    height: var(--settings-row-h);
-    padding: 0 var(--space-4);
-    font-size: var(--font-size-xs);
-  }
-
-  .settings-view :global(.kit-settings__group-title:not(:first-child)) {
-    margin-top: var(--space-4);
-  }
-
-  .settings-view :global(.kit-settings__nav-item) {
-    align-items: center;
-    height: var(--settings-row-h);
-    padding: 0 var(--space-4);
-    font-size: var(--font-size-md);
-    line-height: 16px;
-  }
-
-  /* The current section reads like the sidebar's current place: the hover
-     fill with primary text, never blue. */
-  .settings-view :global(.kit-settings__nav-item--active),
-  .settings-view :global(.kit-settings__nav-item--active:hover) {
-    background: var(--bg-surface-hover);
-    color: var(--text-primary);
-    font-weight: 400;
-  }
-
-  /* Content column: at most 720px of content, centered in the pane with its
-     header band. The gutter is reserved on both sides so the scrollbar
-     doesn't pull the column off center. The first section's title band
-     starts at the top, level with the section list's heading. */
-  .settings-view :global(.kit-settings__scroll) {
-    scrollbar-gutter: stable both-edges;
-  }
-
-  .settings-view :global(.kit-settings__panel) {
-    gap: var(--space-7);
-    max-width: calc(720px + 2 * var(--layout-inset));
-    margin: 0 auto;
-    padding: 0 var(--layout-inset) var(--space-8);
   }
 
   .settings-view :global(.kit-settings-section) {
@@ -222,31 +214,27 @@
     padding: var(--space-4) 0 0;
   }
 
-  /* Narrow: the slim bar already names the view, so the section list keeps
-     only its rows, wrapping under the bar instead of scrolling sideways. */
-  @media (max-width: 760px) {
-    .settings-view :global(.kit-settings__sidebar) {
-      width: 100%;
-      padding: var(--space-4);
-      overflow: visible;
+  @media (min-width: 761px) {
+    .settings-view :global(.kit-tabs__list) {
+      height: var(--layout-header-h);
+      box-sizing: border-box;
     }
+  }
 
-    .settings-view :global(.kit-settings__title),
-    .settings-view :global(.kit-settings__group-title) {
+  @media (max-width: 760px) {
+    .settings-heading {
       display: none;
     }
 
-    .settings-view :global(.kit-settings__nav) {
-      flex-wrap: wrap;
-      gap: var(--space-1);
+    .settings-view :global(.kit-tabs__list) {
+      width: 100%;
+      box-sizing: border-box;
+      padding-inline: var(--layout-inset);
+      scroll-padding-inline: var(--layout-inset);
     }
 
-    .settings-view :global(.kit-settings__scroll) {
-      scrollbar-gutter: stable;
-    }
-
-    .settings-view :global(.kit-settings__panel) {
-      max-width: none;
+    .settings-view > :global(.kit-tabs) {
+      scrollbar-gutter: auto;
     }
   }
 </style>

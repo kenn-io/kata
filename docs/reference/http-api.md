@@ -373,7 +373,8 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
-| `0.70.0` | Federation event watches hold one request for many projects; event polls advertise `X-Kata-Federation-Watch-Max`. |
+| `0.71.0` | Federation event watches hold one request for many projects; event polls advertise `X-Kata-Federation-Watch-Max`. |
+| `0.70.0` | Added `PATCH /api/v1/projects/{project_id}/issues/{ref}/labels`, which applies `add` and `remove` label lists in one transaction and answers with the issue's resulting `labels`. |
 | `0.69.0` | Close responses can include a `parent_ready` issue reference. |
 | `0.67.0` | Federation event polls accept `wait` and advertise `X-Kata-Federation-Poll-Wait-Max`. |
 | `0.66.0` | Federation search accepts `auto` and reports its effective mode, matched fields, and any fallback reason. |
@@ -754,6 +755,7 @@ These operations accept either a numeric project ID or a `name:` selector:
 | `PATCH` | `/api/v1/projects/name:example-project/issues/{ref}` |
 | `POST` | `/api/v1/projects/name:example-project/issues/{ref}/comments` |
 | `POST` | `/api/v1/projects/name:example-project/issues/{ref}/labels` |
+| `PATCH` | `/api/v1/projects/name:example-project/issues/{ref}/labels` |
 
 URL-encode the project selector as a single path segment. Numeric paths such as
 `/api/v1/projects/42/issues` remain valid, and the issue ref and mutation body
@@ -1181,6 +1183,35 @@ Editing a comment overwrites its current body while keeping the original
 author, UID, creation time, and thread position. This is the supported way to
 redact comment text before enrolling a project in federation; it does not purge
 data that has already crossed into another federated event log.
+
+## Label Endpoints
+
+`POST /api/v1/projects/{project_id}/issues/{ref}/labels` attaches one label and
+`DELETE /api/v1/projects/{project_id}/issues/{ref}/labels/{label}` detaches one.
+
+To change several labels at once, for example moving an issue from
+`ready-for-agent` to `ready-for-human`, send `PATCH
+/api/v1/projects/{project_id}/issues/{ref}/labels` with `add` and `remove`
+lists (API `0.70.0` or newer):
+
+```json
+{"actor": "reviewer", "add": ["ready-for-human"], "remove": ["ready-for-agent"]}
+```
+
+The daemon removes the `remove` labels, then attaches the `add` labels, in one
+transaction. Labels already attached or already absent are skipped without an
+event. The response carries `issue`, `labels` (the issue's labels after the
+change, sorted, read in the same transaction), `events` (`issue.unlabeled` then
+`issue.labeled`, empty when nothing changed), and `changed`.
+
+A request returns `400 validation` and changes nothing when both lists are
+empty, when a label in either list does not match `[a-z0-9._:-]` with length
+1..64 (a mistyped `remove` entry included), or when the same label appears in
+both lists. The PATCH route's project path accepts a `name:` selector.
+
+Labels `p0` through `p4` and labels beginning with `priority:` are reserved.
+Set issue priority through the priority field. You can remove a priority label
+already attached to the issue.
 
 ## Attachment Endpoints
 
