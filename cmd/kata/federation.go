@@ -1792,6 +1792,7 @@ func printFederationJoin(cmd *cobra.Command, bs []byte) error {
 			agentRowField("project", body.Project.Name),
 			agentRowField("project_id", strconv.FormatInt(body.Project.ID, 10)),
 			agentRowField("push_enabled", strconv.FormatBool(body.Binding.PushEnabled)),
+			agentRowField("retained_history_local", strconv.FormatBool(body.Binding.RetainedHistoryLocal)),
 			agentRowField("adopted", strconv.FormatBool(body.Adopted)),
 			agentRowField("adoption_snapshots", strconv.FormatInt(body.AdoptionSnapshotCount, 10)),
 		)
@@ -1803,10 +1804,16 @@ func printFederationJoin(cmd *cobra.Command, bs []byte) error {
 		_, err := fmt.Fprintf(cmd.OutOrStdout(),
 			"adopted existing project %s into federation\nqueued %d issue snapshots for hub push; pre-adoption local event history was removed\nfuture edits remain local-first; acquire leases only for exclusive coordination\n",
 			textsafe.Line(body.Project.Name), body.AdoptionSnapshotCount)
+		if err == nil && body.Binding.RetainedHistoryLocal {
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), "Events under earlier actor names stay local.")
+		}
 		return err
 	}
 	_, err := fmt.Fprintf(cmd.OutOrStdout(), "joined federation project %s (push-enabled: %t)\n",
 		textsafe.Line(body.Project.Name), body.Binding.PushEnabled)
+	if err == nil && body.Binding.RetainedHistoryLocal {
+		_, err = fmt.Fprintln(cmd.OutOrStdout(), "Events under earlier actor names stay local.")
+	}
 	return err
 }
 
@@ -2311,6 +2318,9 @@ func printFederationStatus(cmd *cobra.Command, body api.FederationStatusBody) er
 			fmt.Sprintf("unresolved violations: %d", status.UnresolvedViolationCount),
 			fmt.Sprintf("recent violations: %d", status.RecentViolationCount),
 		}
+		if status.RetainedHistoryLocal {
+			lines = append(lines, "Events under earlier actor names stay local.")
+		}
 		if status.ProviderStatus != "" {
 			provider := formatProviderStatus(status.ProviderStatus)
 			if federationprovider.Status(status.ProviderStatus) == federationprovider.StatusReleased && status.Role == "spoke" {
@@ -2481,6 +2491,7 @@ func printFederationStatusAgent(cmd *cobra.Command, body api.FederationStatusBod
 			agentRowField("access_expires", formatFederationStatusTime(status.CredentialExpiresAt)),
 			agentRowField("enabled", strconv.FormatBool(status.Enabled)),
 			agentRowField("push_enabled", strconv.FormatBool(status.PushEnabled)),
+			agentRowField("retained_history_local", strconv.FormatBool(status.RetainedHistoryLocal)),
 			agentRowField("pull_cursor", strconv.FormatInt(status.PullCursorEventID, 10)),
 			agentRowField("push_cursor", strconv.FormatInt(status.PushCursorEventID, 10)),
 			agentRowField("pending_push", strconv.FormatInt(status.PendingPushCount, 10)),

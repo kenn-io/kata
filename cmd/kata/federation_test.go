@@ -38,6 +38,7 @@ import (
 
 func TestFederationStatusJSONOutput(t *testing.T) {
 	env, project := setupFederationStatusCLIState(t)
+	retainFederationStatusHistory(t, env, project)
 
 	out := requireCmdOutput(t, env, "--json", "federation", "status")
 
@@ -49,6 +50,7 @@ func TestFederationStatusJSONOutput(t *testing.T) {
 			Role                     string  `json:"role"`
 			Enabled                  bool    `json:"enabled"`
 			PushEnabled              bool    `json:"push_enabled"`
+			RetainedHistoryLocal     bool    `json:"retained_history_local"`
 			PullCursorEventID        int64   `json:"pull_cursor_event_id"`
 			PushCursorEventID        int64   `json:"push_cursor_event_id"`
 			PendingPushCount         int64   `json:"pending_push_count"`
@@ -71,6 +73,7 @@ func TestFederationStatusJSONOutput(t *testing.T) {
 	assert.Equal(t, "spoke", status.Role)
 	assert.True(t, status.Enabled)
 	assert.True(t, status.PushEnabled)
+	assert.True(t, status.RetainedHistoryLocal)
 	assert.Equal(t, int64(12), status.PullCursorEventID)
 	assert.Equal(t, int64(0), status.PushCursorEventID)
 	assert.Equal(t, int64(1), status.PendingPushCount)
@@ -293,7 +296,8 @@ func TestFederationStatusProjectHostScope(t *testing.T) {
 }
 
 func TestFederationStatusTextOutputIncludesOperatorFields(t *testing.T) {
-	env, _ := setupFederationStatusCLIState(t)
+	env, project := setupFederationStatusCLIState(t)
+	retainFederationStatusHistory(t, env, project)
 
 	out := requireCmdOutput(t, env, "federation", "status")
 
@@ -302,6 +306,7 @@ func TestFederationStatusTextOutputIncludesOperatorFields(t *testing.T) {
 		"role: spoke",
 		"enabled: true",
 		"push-enabled: true",
+		"Events under earlier actor names stay local.",
 		"pull cursor: 12",
 		"push cursor: 0",
 		"pending push: 1",
@@ -317,6 +322,53 @@ func TestFederationStatusTextOutputIncludesOperatorFields(t *testing.T) {
 	} {
 		assert.Contains(t, out, want)
 	}
+}
+
+func TestFederationStatusRetainedHistoryInAgentAndJSONOutput(t *testing.T) {
+	env, project := setupFederationStatusCLIState(t)
+	retainFederationStatusHistory(t, env, project)
+
+	agent := requireCmdOutput(t, env, "--agent", "federation", "status")
+	assert.Contains(t, agent, "retained_history_local=true")
+
+	output := requireCmdOutput(t, env, "--json", "federation", "status")
+	var got struct {
+		Statuses []struct {
+			RetainedHistoryLocal bool `json:"retained_history_local"`
+		} `json:"statuses"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(output), &got))
+	require.Len(t, got.Statuses, 1)
+	assert.True(t, got.Statuses[0].RetainedHistoryLocal)
+}
+
+func TestPrintFederationJoinRetainedHistoryNotice(t *testing.T) {
+	resetFlags(t)
+	body, err := json.Marshal(api.CreateFederationReplicaResponseBody{
+		Project: api.ProjectOut{Name: "spoke-project"},
+		Binding: api.FederationBindingOut{PushEnabled: true, RetainedHistoryLocal: true},
+	})
+	require.NoError(t, err)
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	require.NoError(t, printFederationJoin(cmd, body))
+	assert.Contains(t, out.String(), "Events under earlier actor names stay local.")
+
+	flags.Mode = outputAgent
+	out.Reset()
+	require.NoError(t, printFederationJoin(cmd, body))
+	assert.Contains(t, out.String(), "retained_history_local=true")
+}
+
+func retainFederationStatusHistory(t *testing.T, env *testenv.Env, project db.Project) {
+	t.Helper()
+	binding, err := env.DB.FederationBindingByProject(t.Context(), project.ID)
+	require.NoError(t, err)
+	binding.Actor = "current-actor"
+	binding.RetainHistory = true
+	_, err = env.DB.UpsertFederationBinding(t.Context(), binding)
+	require.NoError(t, err)
 }
 
 func TestFederationQuarantineListHumanAndShow(t *testing.T) {

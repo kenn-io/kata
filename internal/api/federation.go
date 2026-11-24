@@ -161,6 +161,7 @@ type FederationProjectStatus struct {
 	Role                        string                        `json:"role"`
 	Enabled                     bool                          `json:"enabled"`
 	PushEnabled                 bool                          `json:"push_enabled"`
+	RetainedHistoryLocal        bool                          `json:"retained_history_local" doc:"True when this push-enabled direct spoke keeps events under earlier actor names on this device."`
 	BoundActor                  string                        `json:"bound_actor,omitempty"`
 	HubURL                      string                        `json:"hub_url,omitempty"`
 	HubProjectID                int64                         `json:"hub_project_id,omitempty,omitzero"`
@@ -693,6 +694,7 @@ type FederationBindingOut struct {
 	ReplayHorizonEventID int64      `json:"replay_horizon_event_id"`
 	PullCursorEventID    int64      `json:"pull_cursor_event_id"`
 	PushEnabled          bool       `json:"push_enabled"`
+	RetainedHistoryLocal bool       `json:"retained_history_local" doc:"True when this push-enabled direct spoke keeps events under earlier actor names on this device."`
 	PushCursorEventID    int64      `json:"push_cursor_event_id"`
 	Actor                string     `json:"actor,omitempty"`
 	Enabled              bool       `json:"enabled"`

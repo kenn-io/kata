@@ -368,6 +368,7 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
+| `0.68.0` | Federation join and status responses report when earlier-actor history stays local. |
 | `0.67.0` | Federation event polls accept `wait` and advertise `X-Kata-Federation-Poll-Wait-Max`. |
 | `0.66.0` | Federation search accepts `auto` and reports its effective mode, matched fields, and any fallback reason. |
 | `0.64.0` | Routes shared-project attachments to their Docbank origin. Attachment references can include `origin`; the UI attachment capability is enabled when the daemon has a local Docbank or any enabled spoke binding. A disabled spoke rejects uploads and links with `503 federation_offline`, even when it has a local vault. Federation peers advertise `docbank_origin_v1` before receiving origin references. |

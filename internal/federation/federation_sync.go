@@ -299,6 +299,11 @@ func pushDirectSpoke(
 			for len(pending) > 0 {
 				batch, adoptionBaseline, adoptionBaselineEndEventID, err := retained.nextBatch(ctx, &pending)
 				if err != nil {
+					if _, dependencyErr := errors.AsType[*retainedDependencyError](err); dependencyErr {
+						if quarantineErr := recordFederationPushQuarantine(ctx, store, binding.ProjectID, pending[:1], err); quarantineErr != nil {
+							return recordFederationSyncError(ctx, store, binding.ProjectID, errors.Join(err, quarantineErr))
+						}
+					}
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
 				if batch == nil {
@@ -372,12 +377,16 @@ func pushDirectSpoke(
 }
 
 func retainedInitializerAlreadyKnown(err error, eventType, issueUID string) bool {
+	want := db.ErrFederationIngestValidation.Error() + ": " + db.FederationIssueReferenceMessage(eventType, issueUID, true)
 	status, ok := errors.AsType[*HubStatusError](err)
-	if !ok || status.StatusCode != http.StatusBadRequest {
-		return false
+	if ok && status.StatusCode == http.StatusBadRequest {
+		body, found := federationQuarantineHubError(status.Body)
+		if found && body.Code == "validation" && body.Message == want {
+			return true
+		}
+		return strings.Contains(status.Body, want)
 	}
-	body, ok := federationQuarantineHubError(status.Body)
-	return ok && body.Code == "validation" && body.Message == db.ErrFederationIngestValidation.Error()+": "+db.FederationIssueReferenceMessage(eventType, issueUID, true)
+	return false
 }
 
 func retainedUnknownIssue(err error) string {

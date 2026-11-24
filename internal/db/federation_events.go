@@ -406,7 +406,7 @@ func DirectLinkPeers(event FoldEvent) (map[string]bool, error) {
 // child. A parent-primary event needs ordinary authority for the child.
 func directLinkAdditionEligible(event FoldEvent) bool {
 	switch event.Type {
-	case "issue.created", "issue.links_changed":
+	case "issue.created", "issue.snapshot", "issue.links_changed":
 		return true
 	case "issue.linked":
 	default:

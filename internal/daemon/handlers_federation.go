@@ -1391,6 +1391,7 @@ func federationBindingToOut(binding db.FederationBinding) api.FederationBindingO
 		PushCursorEventID:    binding.PushCursorEventID,
 		Actor:                binding.Actor,
 		Enabled:              binding.Enabled,
+		RetainedHistoryLocal: retainedHistoryLocal(binding),
 		CreatedAt:            binding.CreatedAt,
 		UpdatedAt:            binding.UpdatedAt,
 		LastSyncAt:           binding.LastSyncAt,
@@ -1673,17 +1674,18 @@ func federationProjectStatus(
 		credentialMetadata.HubProjectID == binding.HubProjectID &&
 		strings.TrimRight(credentialMetadata.HubURL, "/") == strings.TrimRight(binding.HubURL, "/")
 	return api.FederationProjectStatus{
-		ProjectID:     project.ID,
-		ProjectUID:    project.UID,
-		ProjectName:   project.Name,
-		Role:          string(binding.Role),
-		Enabled:       binding.Enabled,
-		PushEnabled:   binding.PushEnabled,
-		BoundActor:    binding.Actor,
-		HubURL:        binding.HubURL,
-		HubProjectID:  binding.HubProjectID,
-		HubProjectUID: binding.HubProjectUID,
-		Capabilities:  credentialMetadata.Capabilities,
+		ProjectID:            project.ID,
+		ProjectUID:           project.UID,
+		ProjectName:          project.Name,
+		Role:                 string(binding.Role),
+		Enabled:              binding.Enabled,
+		PushEnabled:          binding.PushEnabled,
+		RetainedHistoryLocal: retainedHistoryLocal(binding),
+		BoundActor:           binding.Actor,
+		HubURL:               binding.HubURL,
+		HubProjectID:         binding.HubProjectID,
+		HubProjectUID:        binding.HubProjectUID,
+		Capabilities:         credentialMetadata.Capabilities,
 		// Opt-ins union: the binding is the durable record (it survives a
 		// credential loss during leave recovery); the same-hub credential copy
 		// keeps bindings recorded before allow_insecure was persisted working.
@@ -1715,6 +1717,10 @@ func federationProjectStatus(
 		LastError:         syncStatus.LastError,
 		LastResetAt:       syncStatus.LastResetAt,
 	}, nil
+}
+
+func retainedHistoryLocal(binding db.FederationBinding) bool {
+	return binding.IsDirectSpoke() && binding.PushEnabled && binding.RetainedThroughEventID > 0
 }
 
 func federationQuarantineSummaries(quarantines []db.FederationQuarantine) []api.FederationQuarantineSummary {
