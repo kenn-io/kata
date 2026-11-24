@@ -138,7 +138,10 @@ test('Settings tabs stay above the section at desktop and mobile widths', async 
   }
 })
 
-test('selected tab is visible on a mobile direct link', async ({ page, kata }) => {
+test('Settings tabs keep direct links and keyboard focus visible on mobile', async ({
+  page,
+  kata,
+}) => {
   await page.setViewportSize({ width: 390, height: 800 })
   await kata.launch(page)
   await kata.loginOwner(page, '/kata?view=settings&section=access')
@@ -152,25 +155,19 @@ test('selected tab is visible on a mobile direct link', async ({ page, kata }) =
   expect(strip.x + strip.width).toBeCloseTo(view.x + view.width, 0)
   expect(tab.x).toBeGreaterThanOrEqual(strip.x + 15)
   expect(tab.x + tab.width).toBeLessThanOrEqual(strip.x + strip.width - 15)
-})
-
-test('Settings tabs scroll the focused tab into view on mobile', async ({ page, kata }) => {
-  await page.setViewportSize({ width: 390, height: 800 })
-  await kata.launch(page)
-  await kata.loginOwner(page, '/kata?view=settings&section=appearance')
-  const tabs = page.getByRole('tablist', { name: 'Settings' })
   const first = page.getByRole('tab', { name: 'Appearance' })
   const last = page.getByRole('tab', { name: 'Teams and visibility' })
-  await expect(last).toBeAttached()
+  await first.click()
+  await expect(page).toHaveURL(/view=settings&section=appearance/)
   await first.focus()
   await page.keyboard.press('End')
   await expect(last).toBeFocused()
   await expect(page).toHaveURL(/view=settings&section=appearance/)
   await expect(first).toHaveAttribute('aria-selected', 'true')
-  const strip = (await tabs.boundingBox())!
+  const focusedStrip = (await tabs.boundingBox())!
   const focused = (await last.boundingBox())!
-  expect(focused.x).toBeGreaterThanOrEqual(strip.x)
-  expect(focused.x + focused.width).toBeLessThanOrEqual(strip.x + strip.width + 1)
+  expect(focused.x).toBeGreaterThanOrEqual(focusedStrip.x)
+  expect(focused.x + focused.width).toBeLessThanOrEqual(focusedStrip.x + focusedStrip.width + 1)
   await page.keyboard.press('Enter')
   await expect(page).toHaveURL(/view=settings&section=access/)
   await expect(last).toHaveAttribute('aria-selected', 'true')

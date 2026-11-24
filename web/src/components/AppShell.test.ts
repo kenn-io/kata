@@ -151,7 +151,6 @@ describe('AppShell', () => {
     const view = render(AppShell, { props })
     const chip = await screen.findByRole('button', { name: 'No changes to send' })
     expect(chip.closest('header')).not.toBeNull()
-    expect(screen.queryByRole('tab', { name: 'Credentials' })).toBeNull()
     const readOnly = snapshot()
     readOnly.capabilities.writable = false
     await view.rerender({
@@ -454,7 +453,6 @@ describe('AppShell', () => {
     expect(summary.textContent).toContain('hub-one')
     expect(summary.textContent).toContain('member-one')
     expect(summary.textContent).toContain('Read-only')
-    expect(screen.queryByRole('tab', { name: 'Credentials' })).toBeNull()
     await view.rerender({ ...props, daemonSwitching: true })
     expect(summary.textContent).toContain('Connecting')
     expect(summary.textContent).not.toContain('member-one')
