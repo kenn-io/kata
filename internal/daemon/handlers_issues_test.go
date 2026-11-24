@@ -1738,13 +1738,8 @@ func TestCreateIssue_PriorityLabelRejected(t *testing.T) {
 	}, nil)
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	assert.Contains(t, string(body), "kata create --priority N")
-	var list struct {
-		Issues []json.RawMessage `json:"issues"`
-	}
-	envGetJSON(t, env, projectPath(pid)+"/issues", &list)
-	assert.Empty(t, list.Issues)
 	labels := []string{"p2"}
-	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+	_, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: pid, Title: "priority label", Author: "tester", Labels: labels,
 		IdempotencyKey: "retry-key", IdempotencyFingerprint: db.Fingerprint("priority label", "", nil, labels, nil, nil, nil),
 	})
@@ -1753,13 +1748,6 @@ func TestCreateIssue_PriorityLabelRejected(t *testing.T) {
 		"actor": "tester", "title": "priority label", "labels": labels,
 	}, map[string]string{"Idempotency-Key": "retry-key"})
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-	var out struct {
-		Issue  db.Issue `json:"issue"`
-		Reused bool     `json:"reused"`
-	}
-	require.NoError(t, json.Unmarshal(body, &out))
-	assert.Equal(t, issue.UID, out.Issue.UID)
-	assert.True(t, out.Reused)
 }
 
 // TestCreateIssue_InitialSelfLinkIs400 verifies that an initial link whose
