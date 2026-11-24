@@ -1,4 +1,3 @@
-import type { Page } from '@playwright/test'
 import { expect, test } from './fixtures'
 
 test.use({ trace: 'off' })
@@ -155,7 +154,7 @@ for (const [route, label] of [
   test(`selected tab is visible on a mobile direct link to ${route}`, async ({ page, kata }) => {
     await page.setViewportSize({ width: 390, height: 800 })
     await kata.launch(page)
-    await loginOwner(page, kata.origin, route)
+    await kata.loginOwner(page, route)
     const tabs = page.getByRole('tablist', { name: 'Settings' })
     const selected = page.getByRole('tab', { name: label })
     await expect(selected).toHaveAttribute('aria-selected', 'true')
@@ -189,7 +188,7 @@ for (const [route, label] of [
 test('Settings tabs scroll the focused tab into view on mobile', async ({ page, kata }) => {
   await page.setViewportSize({ width: 390, height: 800 })
   await kata.launch(page)
-  await loginOwner(page, kata.origin, '/kata?view=settings&section=appearance')
+  await kata.loginOwner(page, '/kata?view=settings&section=appearance')
   const tabs = page.getByRole('tablist', { name: 'Settings' })
   const first = page.getByRole('tab', { name: 'Appearance' })
   const last = page.getByRole('tab', { name: 'Teams and visibility' })
@@ -436,19 +435,3 @@ test('the task count sits beside the list title', async ({ page, kata }) => {
   expect(count.x).toBeGreaterThan(title.x + title.width)
   expect(count.x - (title.x + title.width)).toBeLessThan(40)
 })
-
-async function loginOwner(page: Page, origin: string, route: string): Promise<void> {
-  const login = await page.request.post(`${origin}/api/v1/ui/session/login`, {
-    headers: { Origin: origin },
-    data: { token: 'example-local-token', return_path: route },
-  })
-  expect(login.ok()).toBe(true)
-  const credentials = await login.json()
-  await page.evaluate((value) => {
-    sessionStorage.setItem(
-      'kata.web.session.v1',
-      JSON.stringify({ session: value.session, csrf: value.csrf }),
-    )
-  }, credentials)
-  await page.goto(`${origin}${route}`)
-}
