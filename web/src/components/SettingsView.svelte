@@ -94,8 +94,6 @@
     min-height: 0;
     overflow: hidden;
     background: var(--bg-surface);
-    /* Every select in a settings section takes this one width. */
-    --settings-select-w: var(--layout-settings-select-w);
     --settings-row-h: 28px;
   }
 
