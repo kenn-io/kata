@@ -105,6 +105,38 @@ func checkRejoinRetainedHistory(t *testing.T, store db.Storage) error {
 		require.Len(t, comments, 1)
 		require.Equal(t, "offline discussion", comments[0].Body)
 	})
+	t.Run("purge removes retained event markers", func(t *testing.T) {
+		ctx := t.Context()
+		var projects []db.Project
+		var events []db.Event
+		for _, name := range []string{"purged-retained", "remaining-retained"} {
+			project, err := store.CreateProject(ctx, name)
+			require.NoError(t, err)
+			_, event, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "task", Author: "old-actor"})
+			require.NoError(t, err)
+			_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: true})
+			require.NoError(t, err)
+			_, err = store.LeaveFederationReplica(ctx, project.ID)
+			require.NoError(t, err)
+			projects, events = append(projects, project), append(events, event)
+		}
+		markers := func() map[string]bool {
+			keys := make(map[string]bool)
+			for row, err := range store.ExportMeta(ctx) {
+				require.NoError(t, err)
+				keys[row.Key] = true
+			}
+			return keys
+		}
+		require.True(t, markers()[db.FederationRetainedEventPrefix+events[0].UID])
+		require.True(t, markers()[db.FederationRetainedEventPrefix+events[1].UID])
+		_, _, err := store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: projects[0].ID, Actor: "worker", Force: true})
+		require.NoError(t, err)
+		_, err = store.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: projects[0].ID, Actor: "worker"})
+		require.NoError(t, err)
+		require.False(t, markers()[db.FederationRetainedEventPrefix+events[0].UID])
+		require.True(t, markers()[db.FederationRetainedEventPrefix+events[1].UID])
+	})
 	t.Run("refresh boundary on upsert", func(t *testing.T) {
 		ctx := t.Context()
 		project, err := store.CreateProject(ctx, "refresh-retained-boundary")
