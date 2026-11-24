@@ -98,21 +98,26 @@
     flex-direction: column;
     height: 100%;
     min-width: 0;
+    overflow-y: auto;
+    scrollbar-gutter: stable both-edges;
   }
 
   .settings-view :global(.kit-tabs__list) {
+    position: sticky;
+    z-index: 1;
+    top: 0;
     flex: none;
-    width: min(100%, calc(720px + 2 * var(--layout-inset)));
-    box-sizing: border-box;
+    width: min(720px, calc(100% - 2 * var(--layout-inset)));
     margin: 0 auto;
-    padding: 0 var(--layout-inset);
+    background: var(--bg-surface);
+  }
+
+  .settings-view :global(.kit-tabs__tab:first-child) {
+    padding-left: 0;
   }
 
   .settings-view :global(.kit-tabs__panel) {
-    flex: 1 1 auto;
-    min-height: 0;
-    overflow-y: auto;
-    scrollbar-gutter: stable both-edges;
+    flex: 1 0 auto;
   }
 
   .settings-content {
@@ -180,7 +185,7 @@
   }
 
   @media (max-width: 760px) {
-    .settings-view :global(.kit-tabs__panel) {
+    .settings-view > :global(.kit-tabs) {
       scrollbar-gutter: stable;
     }
   }

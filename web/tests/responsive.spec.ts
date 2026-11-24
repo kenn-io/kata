@@ -109,6 +109,10 @@ test('Settings tabs stay above the section at desktop and mobile widths', async 
     const tabsBounds = (await tabs.boundingBox())!
     const headingBounds = (await heading.boundingBox())!
     expect(tabsBounds.y + tabsBounds.height).toBeLessThanOrEqual(headingBounds.y)
+    const labelBounds = (await tabs.locator('.kit-tabs__label').first().boundingBox())!
+    expect(tabsBounds.x).toBeCloseTo(headingBounds.x, 0)
+    expect(tabsBounds.x + tabsBounds.width).toBeCloseTo(headingBounds.x + headingBounds.width, 0)
+    expect(labelBounds.x).toBeCloseTo(headingBounds.x, 0)
     expect(await page.getByText('This browser').count()).toBe(0)
     expect(await page.getByText('This server', { exact: true }).count()).toBe(0)
   }
