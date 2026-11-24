@@ -1229,6 +1229,12 @@ kata close <ref> --done \
 External evidence is an attributable account, not independently verified proof,
 and it stays visible as `external` in `kata audit closes` evidence types.
 
+Closing the last open child of an open parent prints a hint on stderr naming
+the parent. An exact retry with the same `--idempotency-key` prints no hint.
+JSON output includes a `parent_ready` entry in `hints`; `--quiet` hides the
+stderr hint. Kata leaves the parent open. The web UI, TUI, and MCP do not
+display this hint.
+
 Other close reasons:
 
 ```sh

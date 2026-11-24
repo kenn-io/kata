@@ -26,7 +26,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		OperationID: "closeIssue",
 		Method:      "POST",
 		Path:        "/api/v1/projects/{project_id}/issues/{ref}/actions/close",
-	}, func(ctx context.Context, in *api.CloseActionRequest) (*api.MutationResponse, error) {
+	}, withParentReady(cfg, func(ctx context.Context, in *api.CloseActionRequest) (*api.MutationResponse, error) {
 		if (in.IdempotencyKey != "" || in.IfMatch != "") &&
 			in.Body.RetryProtocol != api.CloseRetryProtocol {
 			return nil, api.NewError(400, "retry_protocol_required",
@@ -318,7 +318,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out.Body.Event = evt
 		out.Body.Changed = changed
 		return out, nil
-	})
+	}))
 
 	huma.Register(humaAPI, huma.Operation{
 		OperationID: "reopenIssue",
@@ -368,6 +368,19 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out.Body.Changed = changed
 		return out, nil
 	})
+}
+
+func withParentReady(cfg ServerConfig, handler func(context.Context, *api.CloseActionRequest) (*api.MutationResponse, error)) func(context.Context, *api.CloseActionRequest) (*api.MutationResponse, error) {
+	return func(ctx context.Context, in *api.CloseActionRequest) (*api.MutationResponse, error) {
+		out, err := handler(ctx, in)
+		if err != nil || out == nil || !out.Body.Changed || out.Body.Event == nil || out.Body.Event.ReadyParentID == 0 {
+			return out, err
+		}
+		if parent, err := loadParentByID(ctx, cfg.DB, out.Body.Event.ReadyParentID); err == nil {
+			out.Body.ParentReady = parent
+		}
+		return out, nil
+	}
 }
 
 func tryCloseIdempotencyMatch(

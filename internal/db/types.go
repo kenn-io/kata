@@ -453,6 +453,7 @@ type Comment struct {
 // merge, federation merge) — UIDs remain canonical, short_ids are display
 // snapshots resolved on every read.
 type Event struct {
+	ReadyParentID       int64     `json:"-"` // Close-time advisory, never persisted or replicated.
 	OriginSpokeName     string    `json:"-"` // Hub-local response label; never persisted or replicated.
 	ID                  int64     `json:"id"`
 	UID                 string    `json:"uid"`

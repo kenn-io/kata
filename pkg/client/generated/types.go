@@ -5063,11 +5063,12 @@ func (m MoveIssueResponseBody) Validate() error {
 }
 
 type MutationResponseBody struct {
-	Changed       bool   `json:"changed"`
-	Event         Event  `json:"event"`
-	Issue         Issue  `json:"issue"`
-	OriginalEvent *Event `json:"original_event,omitempty"`
-	Reused        *bool  `json:"reused,omitempty"`
+	Changed       bool      `json:"changed"`
+	Event         Event     `json:"event"`
+	Issue         Issue     `json:"issue"`
+	OriginalEvent *Event    `json:"original_event,omitempty"`
+	ParentReady   *IssueRef `json:"parent_ready,omitempty"`
+	Reused        *bool     `json:"reused,omitempty"`
 }
 
 func (m MutationResponseBody) Validate() error {
@@ -5086,6 +5087,13 @@ func (m MutationResponseBody) Validate() error {
 		if v, ok := any(m.OriginalEvent).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("OriginalEvent", err)
+			}
+		}
+	}
+	if m.ParentReady != nil {
+		if v, ok := any(m.ParentReady).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("ParentReady", err)
 			}
 		}
 	}
