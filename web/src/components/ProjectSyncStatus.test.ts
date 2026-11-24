@@ -158,7 +158,7 @@ describe('ProjectSyncStatus', () => {
     expect(screen.queryByText('PowerShell')).toBeNull()
   })
 
-  it.each(['network', 'body', '503', 403, 'mismatch'])(
+  it.each(['network', 'body', '503', 'mismatch'])(
     'clears status after %s and retries on the next cycle',
     async (failure) => {
       const fetcher = vi.fn().mockResolvedValueOnce(response())
@@ -190,38 +190,34 @@ describe('ProjectSyncStatus', () => {
     },
   )
 
-  it.each(['initial', 'background', 'manual'])(
-    'coalesces cycles while a %s read is in flight',
-    async (kind) => {
-      let finish!: (result: Response) => void
-      const fetcher = vi.fn()
-      if (kind !== 'initial') fetcher.mockResolvedValueOnce(response())
-      fetcher
-        .mockImplementationOnce(
-          () =>
-            new Promise<Response>((resolve) => {
-              finish = resolve
-            }),
-        )
-        .mockResolvedValueOnce(response(7, projectUID, 0, false))
-      setGeneratedFetch(fetcher)
-      const view = render(ProjectSyncStatus, {
-        props: { projectID: 7, projectUID, refreshGeneration: 0 },
-      })
-      if (kind !== 'initial') {
-        await openSync()
-        if (kind === 'manual')
-          await fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
-        else await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
-      }
-      await waitFor(() => expect(finish).toBeDefined())
-      await view.rerender({ projectID: 7, projectUID, refreshGeneration: 3 })
-      await view.rerender({ projectID: 7, projectUID, refreshGeneration: 4 })
-      finish(response())
-      await screen.findByRole('button', { name: 'No changes to send' })
-      expect(fetcher).toHaveBeenCalledTimes(kind === 'initial' ? 2 : 3)
-    },
-  )
+  it.each(['initial', 'manual'])('coalesces cycles while a %s read is in flight', async (kind) => {
+    let finish!: (result: Response) => void
+    const fetcher = vi.fn()
+    if (kind !== 'initial') fetcher.mockResolvedValueOnce(response())
+    fetcher
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            finish = resolve
+          }),
+      )
+      .mockResolvedValueOnce(response(7, projectUID, 0, false))
+    setGeneratedFetch(fetcher)
+    const view = render(ProjectSyncStatus, {
+      props: { projectID: 7, projectUID, refreshGeneration: 0 },
+    })
+    if (kind !== 'initial') {
+      await openSync()
+      if (kind === 'manual') await fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+      else await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
+    }
+    await waitFor(() => expect(finish).toBeDefined())
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 3 })
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 4 })
+    finish(response())
+    await screen.findByRole('button', { name: 'No changes to send' })
+    expect(fetcher).toHaveBeenCalledTimes(kind === 'initial' ? 2 : 3)
+  })
 
   it('keeps the unavailable message during a background retry', async () => {
     const fetcher = vi

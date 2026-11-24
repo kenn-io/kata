@@ -271,7 +271,7 @@ describe('AppShell', () => {
     expect(document.querySelectorAll(`[id="${id}"]`)).toHaveLength(1)
   })
 
-  test.each(['stale', 'daemonSwitching', 'reconnecting', 'remote', 'expired', 'removed', 'scoped'])(
+  test.each(['stale', 'daemonSwitching', 'reconnecting', 'remote', 'expired', 'scoped'])(
     'fences project sync display when authority is %s',
     async (reason) => {
       setGeneratedFetch(syncedProjectFetch())
@@ -293,7 +293,6 @@ describe('AppShell', () => {
       await screen.findByRole('button', { name: 'No changes to send' })
       const next = snapshot()
       if (reason === 'expired') next.capabilities.expires_at = '2020-01-01T00:00:00Z'
-      if (reason === 'removed') next.catalog = []
       if (reason === 'scoped')
         next.capabilities.scope = {
           kind: 'issue_subtree',

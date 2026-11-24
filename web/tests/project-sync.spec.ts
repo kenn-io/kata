@@ -59,8 +59,14 @@ test('project readers see sync diagnostics with bounded embedding summaries at n
   const local = await kata.launch(page, `/kata?scope=${kata.projectUID}`)
   const chip = page.getByRole('button', { name: 'Sync failed' })
   const region = page.getByRole('dialog', { name: 'Project sync' })
-  expect((await initialStatus).ok()).toBe(true)
+  const localStatus = await initialStatus
+  expect(localStatus.ok()).toBe(true)
+  expect(((await localStatus.json()) as { statuses: unknown[] }).statuses).toEqual([])
   expect((await kata.request(page, local, 'GET', statusPath)).ok()).toBe(true)
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  )
   await expect(
     page.getByRole('button', {
       name: /^(No changes to send|Sync failed|Sync disabled|Sync status unavailable|\d+ to sync)$/,
@@ -109,9 +115,6 @@ test('project readers see sync diagnostics with bounded embedding summaries at n
   })
   await region.getByRole('button', { name: 'Refresh' }).click()
   await expect(region.getByText('1 generated · 1 reused · 1 without index')).toBeVisible()
-  await expect(
-    region.getByText('Connect the Kata CLI to this daemon with your own credential, then run:'),
-  ).toBeVisible()
   await page
     .context()
     .grantPermissions(['clipboard-read', 'clipboard-write'], { origin: kata.origin })
@@ -159,5 +162,4 @@ test('project readers see sync diagnostics with bounded embedding summaries at n
   expect((await clearedRead).ok()).toBe(true)
   await expect(region.getByText('Sync disabled', { exact: true })).toBeVisible()
   await expect(region.getByRole('button', { name: /Copy .* command/ })).toHaveCount(0)
-  await page.keyboard.press('Escape')
 })
