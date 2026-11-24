@@ -384,6 +384,20 @@ func DirectLinkPeers(event FoldEvent) (map[string]bool, error) {
 		add(uid)
 		return false
 	})
+	if err != nil {
+		return nil, err
+	}
+	if event.Type == "issue.created" || event.Type == "issue.snapshot" {
+		parents, err := directParentAssignments(event)
+		if err != nil {
+			return nil, err
+		}
+		for _, parent := range parents {
+			if parent.FromUID != event.IssueUID {
+				delete(peers, parent.FromUID)
+			}
+		}
+	}
 	if event.Type == "issue.links_changed" || event.Type == "issue.unlinked" {
 		payload := PayloadMap(event.Payload)
 		if event.Type == "issue.links_changed" {

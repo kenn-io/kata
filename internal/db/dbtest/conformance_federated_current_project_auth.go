@@ -240,6 +240,33 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 	_, err = store.EventsByUIDs(ctx, route.ID, []string{forged.EventUID})
 	require.ErrorIs(t, err, db.ErrNotFound)
 
+	// A recovery snapshot on the parent cannot assign a cross-project child
+	// using authority that only permits referencing that child.
+	snapshotUID, err := uid.New()
+	require.NoError(t, err)
+	snapshotPayload := IssueDocument(t, snapshotUID, jsontext.Value(`{"uid":"`+snapshotUID+`","title":"Recovered parent","body":"","author":"worker","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":[{"type":"related","to_issue_uid":"`+peerChild.UID+`","author":"worker"},{"type":"parent","to_issue_uid":"`+peerChild.UID+`","incoming":true,"author":"worker"}]}`))
+	snapshot := newRemoteEvent(t, route, &snapshotUID, "issue.snapshot", "worker", origin, at+2, snapshotPayload)
+	params.Events = []db.FederationIngestEvent{{SourceEventID: 3, Event: snapshot}}
+	_, err = store.IngestFederationEvents(ctx, params)
+	require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
+	_, err = store.ParentOf(ctx, peerChild.ID)
+	require.ErrorIs(t, err, db.ErrNotFound)
+	_, err = store.EventsByUIDs(ctx, route.ID, []string{snapshot.EventUID})
+	require.ErrorIs(t, err, db.ErrNotFound)
+
+	childSnapshotUID, err := uid.New()
+	require.NoError(t, err)
+	childSnapshotPayload := IssueDocument(t, childSnapshotUID, jsontext.Value(`{"uid":"`+childSnapshotUID+`","title":"Recovered child","body":"","author":"worker","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":[{"type":"parent","to_issue_uid":"`+peer.UID+`","author":"worker"}]}`))
+	childSnapshot := newRemoteEvent(t, route, &childSnapshotUID, "issue.snapshot", "worker", origin, at+2, childSnapshotPayload)
+	params.Events = []db.FederationIngestEvent{{SourceEventID: 3, Event: childSnapshot}}
+	_, err = store.IngestFederationEvents(ctx, params)
+	require.NoError(t, err)
+	recoveredChild, err := store.IssueByUID(ctx, childSnapshotUID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	parent, err = store.ParentOf(ctx, recoveredChild.ID)
+	require.NoError(t, err)
+	require.Equal(t, peer.ID, parent.ToIssueID)
+
 	// A parent URL can remove the same cross-project edge from its other end.
 	_, _, err = store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: peerChild.ID, ToIssueID: directChild.ID, Type: "parent", Author: "worker"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: peerChild.ID, FromUID: peerChild.UID, FromShortID: peerChild.ShortID, ToUID: directChild.UID, ToShortID: directChild.ShortID, Actor: "worker"})
 	require.NoError(t, err)
