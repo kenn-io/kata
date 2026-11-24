@@ -181,15 +181,6 @@ func (d *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCu
 	})
 }
 
-func (d *Store) RecordFederationAcceptedEvents(ctx context.Context, projectID int64, uids []string) error {
-	return d.relayTx(ctx, func(tx *sql.Tx) error {
-		if err := db.RecordFederationAcknowledgedEvents(ctx, tx, projectID, uids); err != nil {
-			return err
-		}
-		return db.FoldFederationAcknowledgedEvents(ctx, tx, projectID, d.InstanceUID())
-	})
-}
-
 // AdvanceFederationPushCursor records the highest local events.id accepted by
 // the hub for a spoke binding.
 func (d *Store) AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error {

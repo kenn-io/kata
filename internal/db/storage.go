@@ -487,7 +487,6 @@ type Storage interface {
 	// transaction. It changes nothing and returns ErrFederationPushAwaitsPull
 	// while the home has no other history of one of those issues.
 	AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string) error
-	RecordFederationAcceptedEvents(ctx context.Context, projectID int64, uids []string) error
 	EnableFederationPush(ctx context.Context, projectID int64, cursor int64) (FederationBinding, error)
 	// DisableFederationPushWhenSettled turns push off for a direct spoke
 	// binding in the same transaction that proves no local-origin event above

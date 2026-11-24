@@ -803,6 +803,9 @@ func (s *Store) ExportEvents(ctx context.Context, filter db.ExportFilter) iter.S
 	issueIDExpression := `events.issue_id`
 	relatedIDScrub := `(peer.id IS NULL AND (events.related_issue_id IS NOT NULL OR events.related_issue_uid IS NOT NULL))`
 	relatedUIDScrub := `(peer.id IS NULL AND (events.related_issue_id IS NOT NULL OR events.related_issue_uid IS NOT NULL) AND events.type NOT IN ('issue.commented', 'issue.links_changed'))`
+	if filter.ProjectID == nil {
+		relatedUIDScrub = `(peer.id IS NULL AND (events.related_issue_id IS NOT NULL OR events.related_issue_uid IS NOT NULL) AND events.type NOT IN ('issue.commented', 'issue.links_changed', 'issue.linked', 'issue.unlinked'))`
+	}
 	var args []any
 	if filter.ProjectID != nil {
 		issueIDExpression = `CASE WHEN subject_issue.id IS NOT NULL AND subject_issue.project_id <> $1 THEN NULL ELSE events.issue_id END`

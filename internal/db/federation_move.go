@@ -56,10 +56,14 @@ func FederationEventReferencesMovedIssueSQL(alias string, postgres bool) string 
  WHERE f.key IN (` + keys + `)`
 	}
 	return `(EXISTS (SELECT 1 FROM issues i WHERE i.uid IN (` + alias + `.issue_uid,` + alias + `.related_issue_uid) AND i.project_id<>` + alias + `.project_id)
+ OR (` + alias + `.type IN ('issue.linked','issue.unlinked') AND ` + alias + `.related_issue_uid IS NOT NULL AND NOT EXISTS (SELECT 1 FROM issues i WHERE i.uid=` + alias + `.related_issue_uid AND i.project_id=` + alias + `.project_id))
  OR EXISTS (SELECT 1 FROM (` + peers + `) peer WHERE peer.uid IS NOT NULL AND peer.uid<>'' AND NOT EXISTS (SELECT 1 FROM issues i WHERE i.uid=peer.uid AND i.project_id=` + alias + `.project_id)))`
 }
 
+// FederationHeldCursorPrefix identifies push cursors retained after a spoke leaves.
 const FederationHeldCursorPrefix = "federation_held_cursor."
+
+// FederationAcknowledgedEventPrefix identifies events accepted out of order.
 const FederationAcknowledgedEventPrefix = "federation_acknowledged_event."
 
 // FederationUnresolvedEventSQL excludes events already accepted or superseded on leave.
@@ -92,26 +96,6 @@ func FoldFederationAcknowledgedEvents(ctx context.Context, tx *sql.Tx, projectID
 	return nil
 }
 
-// FederationQuarantineHasEarlierEvents finds outstanding events outside the skipped batch.
-func FederationQuarantineHasEarlierEvents(ctx context.Context, tx *sql.Tx, q FederationQuarantine, origin string) (bool, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT e.uid FROM events e JOIN federation_bindings b ON b.project_id=e.project_id
- WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>b.push_cursor_event_id AND e.id<=$3 AND `+FederationUnresolvedEventSQL("e"), q.ProjectID, origin, q.LastEventID)
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var uid string
-		if err := rows.Scan(&uid); err != nil {
-			return false, err
-		}
-		if !slices.Contains(q.EventUIDs, uid) {
-			return true, nil
-		}
-	}
-	return false, rows.Err()
-}
-
 // FederationLeaveFenceExists reports whether departure was already prepared.
 func FederationLeaveFenceExists(ctx context.Context, tx *sql.Tx, projectID int64) (bool, error) {
 	var exists bool
@@ -138,6 +122,7 @@ func PrepareFederationLeaveFence(ctx context.Context, tx *sql.Tx, projectID int6
 }
 
 func supersededFederationMoves(ctx context.Context, tx *sql.Tx, projectUID, origin string) (map[string][]string, error) {
+	//nolint:gosec // G202: the SQL fragment uses a fixed alias; values are bound.
 	rows, err := tx.QueryContext(ctx, `SELECT p.uid,e.uid,e.payload FROM events e JOIN federation_bindings b ON b.project_id=e.project_id JOIN projects p ON p.id=e.project_id WHERE e.type='issue.moved' AND e.origin_instance_uid=$1 AND e.id>b.push_cursor_event_id AND b.role='spoke' AND b.relay_config IS NULL AND `+federationMoveSupersededSQL("e"), origin)
 	if err != nil {
 		return nil, err

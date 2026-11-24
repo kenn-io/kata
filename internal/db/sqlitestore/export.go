@@ -775,6 +775,9 @@ func (d *Store) ExportEvents(ctx context.Context, f db.ExportFilter) iter.Seq2[d
 	// references to a peer in an omitted project.
 	relatedIDScrub := `(peer.id IS NULL AND (events.related_issue_id IS NOT NULL OR events.related_issue_uid IS NOT NULL))`
 	relatedUIDScrub := `(peer.id IS NULL AND (events.related_issue_id IS NOT NULL OR events.related_issue_uid IS NOT NULL) AND events.type NOT IN ('issue.commented', 'issue.links_changed'))`
+	if f.ProjectID == nil {
+		relatedUIDScrub = `(peer.id IS NULL AND (events.related_issue_id IS NOT NULL OR events.related_issue_uid IS NOT NULL) AND events.type NOT IN ('issue.commented', 'issue.links_changed', 'issue.linked', 'issue.unlinked'))`
+	}
 	// SELECT-list args precede every WHERE-clause arg. Each expression binds
 	// its own project filter when the peer is in an omitted project.
 	var scrubArgs []any

@@ -262,9 +262,6 @@ func pushDirectSpoke(
 	opts clientpkg.Opts,
 ) error {
 	if binding.PushEnabled {
-		scanCursor := binding.PushCursorEventID
-		var refused error
-		single := false
 		for {
 			if q, err := store.ActiveFederationQuarantine(ctx, binding.ProjectID, db.FederationQuarantineDirectionPush); err == nil {
 				quarantinedEvents, eventErr := store.EventsByUIDs(ctx, binding.ProjectID, q.EventUIDs)
@@ -291,26 +288,17 @@ func pushDirectSpoke(
 				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 			}
 			pending, err := store.PendingFederationPushEvents(
-				ctx, binding.ProjectID, store.InstanceUID(), scanCursor, federationPollLimit)
+				ctx, binding.ProjectID, store.InstanceUID(), binding.PushCursorEventID, federationPollLimit)
 			if err != nil {
 				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 			}
 			if len(pending) == 0 {
 				break
 			}
-			pageEnd := pending[len(pending)-1].ID
 			for len(pending) > 0 {
-				candidates := pending
-				shape := federationPushAdoptionBaselineShape(pending)
-				if single && (!shape.valid || !shape.hasSnapshot) {
-					candidates = pending[:1]
-				}
-				batch, adoptionBaseline, adoptionBaselineEndEventID, err := nextFederationPushIngestBatch(candidates)
+				batch, adoptionBaseline, adoptionBaselineEndEventID, err := nextFederationPushIngestBatch(pending)
 				if err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-				}
-				if refused != nil && adoptionBaseline != "" {
-					return recordFederationSyncError(ctx, store, binding.ProjectID, refused)
 				}
 				sourceTokens, err := federationMoveSourceTokens(ctx, store, credentials, *binding, client.baseURL, batch, opts)
 				if err != nil {
@@ -323,24 +311,9 @@ func pushDirectSpoke(
 						AdoptionBaselineEndEventID: adoptionBaselineEndEventID,
 					})
 				if err != nil {
-					if isFederationProjectNotEnrolledError(err) && adoptionBaseline == "" {
-						if len(batch) > 1 {
-							single = true
-							continue
-						}
-						if refused == nil {
-							refused = err
-						}
-						pending = pending[1:]
-						single = false
-						continue
-					}
 					if isPoisonedFederationPushError(err) {
 						if qErr := recordFederationPushQuarantine(ctx, store, binding.ProjectID, batch, err); qErr != nil {
 							return recordFederationSyncError(ctx, store, binding.ProjectID, errors.Join(err, qErr))
-						}
-						if refused != nil {
-							err = errors.Join(refused, err)
 						}
 					}
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
@@ -359,20 +332,6 @@ func pushDirectSpoke(
 				}
 				if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 					return err
-				}
-				if refused != nil {
-					uids := make([]string, 0, len(batch))
-					for _, event := range batch {
-						if event.ID <= ack.PushCursorEventID {
-							uids = append(uids, event.UID)
-						}
-					}
-					if err := store.RecordFederationAcceptedEvents(ctx, binding.ProjectID, uids); err != nil {
-						return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-					}
-					single = false
-					pending = pendingFederationEventsAfterCursor(pending, ack.PushCursorEventID)
-					continue
 				}
 				// The hub already held some of these issues and stored no
 				// snapshot for them. Those snapshots go, and the project is
@@ -393,13 +352,8 @@ func pushDirectSpoke(
 					}
 				}
 				binding.PushCursorEventID = ack.PushCursorEventID
-				single = false
 				pending = pendingFederationEventsAfterCursor(pending, ack.PushCursorEventID)
 			}
-			scanCursor = pageEnd
-		}
-		if refused != nil {
-			return recordFederationSyncError(ctx, store, binding.ProjectID, refused)
 		}
 		if err := store.RecordFederationSyncPushSuccess(ctx, binding.ProjectID, time.Now().UTC()); err != nil {
 			return err

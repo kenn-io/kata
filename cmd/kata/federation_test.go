@@ -463,6 +463,9 @@ func TestFederationQuarantineSkipCLI(t *testing.T) {
 		"--reason", "operator accepted skip")
 
 	assert.Contains(t, out, fmt.Sprintf("quarantine #%d skipped", q.ID))
+	binding, err := env.DB.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, q.LastEventID, binding.PushCursorEventID)
 	_, err = env.DB.ActiveFederationQuarantine(ctx, project.ID, db.FederationQuarantineDirectionPush)
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
