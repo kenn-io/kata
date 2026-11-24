@@ -27,7 +27,7 @@ func (s *Store) RetainedIssueSnapshot(ctx context.Context, projectID int64, issu
 		if err != nil {
 			return err
 		}
-		result, err = scanEvent(tx.QueryRowContext(ctx, eventSelect+` WHERE e.project_id=$1 AND e.issue_uid=$2 AND e.origin_instance_uid=$3 AND e.id>$4 AND e.actor=$5 AND e.type='issue.snapshot' ORDER BY e.id LIMIT 1`, projectID, issueUID, s.InstanceUID(), creationID, binding.Actor))
+		result, err = scanEvent(tx.QueryRowContext(ctx, eventSelect+` WHERE e.project_id=$1 AND e.issue_uid=$2 AND e.origin_instance_uid=$3 AND e.id>$4 AND e.actor=$5 AND e.type='issue.snapshot' AND NOT EXISTS (SELECT 1 FROM events newer WHERE newer.project_id=e.project_id AND newer.issue_uid=e.issue_uid AND `+db.LocalInstanceOriginSQL("newer.origin_instance_uid", "$3")+` AND newer.id>e.id AND newer.id<=$6 AND (newer.origin_instance_uid<>$3 OR newer.actor<>$5)) ORDER BY e.id LIMIT 1`, projectID, issueUID, s.InstanceUID(), creationID, binding.Actor, binding.RetainedThroughEventID))
 		if err == nil {
 			return nil
 		}

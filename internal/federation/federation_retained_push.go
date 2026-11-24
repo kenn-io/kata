@@ -47,6 +47,18 @@ func (r *retainedPush) nextBatch(ctx context.Context, pending *[]db.Event) ([]db
 	if retained {
 		return nil, "", 0, r.advance(ctx, pending, end)
 	}
+	if r.ownIssueEvent(events[0], "issue.snapshot") && events[0].ID <= r.binding.RetainedThroughEventID {
+		snapshot, _, err := r.snapshot(ctx, *events[0].IssueUID)
+		if err != nil && !errors.Is(err, db.ErrNotFound) {
+			return nil, "", 0, err
+		}
+		if err == nil && snapshot.UID != events[0].UID {
+			if err := r.publishRetainedIssue(ctx, *events[0].IssueUID); err != nil {
+				return nil, "", 0, err
+			}
+			return nil, "", 0, r.advance(ctx, pending, 1)
+		}
+	}
 	end, err := r.plan(ctx, events[:end])
 	if err != nil {
 		return nil, "", 0, err
