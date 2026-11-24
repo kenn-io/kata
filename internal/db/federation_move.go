@@ -1018,7 +1018,7 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
 func FederationHeldEventSQL(alias string) string {
 	return alias + `.type NOT IN ('issue.created','issue.moved',` + FederationSnapshotEventTypesSQL() + `)
  AND EXISTS (SELECT 1 FROM projects p JOIN meta h ON h.key='` + FederationHeldCursorPrefix + `' || p.uid
- WHERE p.id=` + alias + `.project_id AND CAST(h.value AS BIGINT)<` + alias + `.id)`
+ WHERE p.id=` + alias + `.project_id AND CASE WHEN h.key='` + FederationHeldCursorPrefix + `' || p.uid THEN CAST(h.value AS BIGINT) END<` + alias + `.id)`
 }
 
 // ClearFederatedProjectEvents retains source envelopes still contributing to
