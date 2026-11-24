@@ -193,3 +193,90 @@ func TestRebindEndsAWatchThatCoversTheProject(t *testing.T) {
 		t.Fatal("the watch covering the project did not end")
 	}
 }
+
+// watchMaxWriter rewrites the watch size a hub advertises.
+type watchMaxWriter struct {
+	http.ResponseWriter
+	value string
+}
+
+func (w watchMaxWriter) WriteHeader(code int) {
+	if w.Header().Get(federationWatchMaxHeader) != "" {
+		w.Header().Set(federationWatchMaxHeader, w.value)
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+// A hub whose watch can name only the route project gives the spoke no shared
+// watch, so each project holds its own poll.
+func TestWatchOfOneProjectHoldsAPollPerProject(t *testing.T) {
+	h := newHubSpokeHarness(t, false)
+	h.watches.Store(true)
+	var watches, held atomic.Int64
+	frontURL := h.bindThrough(t, func(w http.ResponseWriter, r *http.Request, hub http.Handler) {
+		if isWatch(r) {
+			watches.Add(1)
+		}
+		if isHeldPoll(r) {
+			held.Add(1)
+		}
+		hub.ServeHTTP(watchMaxWriter{ResponseWriter: w, value: "1"}, r)
+	})
+	other, otherHub := h.addBinding(t, "other-hub-project", frontURL)
+	turns := make(chan int64, 16)
+	h.startConfiguredRunner(t, &Runner{DB: h.spokeDB, Interval: time.Hour, OnSpokeResult: func(id int64, _ error) { turns <- id }})
+	awaitTurns(t, turns, h.spokeProject.ID, other.ID)
+	//nolint:kennlint // sleeptest: the held polls reach the hub over real HTTP.
+	require.Eventually(t, func() bool { return held.Load() >= 2 }, 10*time.Second, 10*time.Millisecond,
+		"the spoke did not hold a poll per project at a hub that watches one project at a time")
+	assert.Zero(t, watches.Load(), "the spoke sent watches to a hub that watches one project at a time")
+
+	h.createIssueIn(t, otherHub.ID, "Committed at a one-project hub")
+	awaitTurns(t, turns, other.ID)
+}
+
+// A hub that refuses the watch's own route credential refuses only that
+// binding; the other bindings at the hub keep sharing a watch.
+func TestRefusedLeadCredentialKeepsTheOthersWatching(t *testing.T) {
+	h := newHubSpokeHarness(t, false)
+	h.watches.Store(true)
+	var watches, held atomic.Int64
+	frontURL := h.bindThrough(t, func(w http.ResponseWriter, r *http.Request, hub http.Handler) {
+		if isWatch(r) {
+			watches.Add(1)
+		}
+		if isHeldPoll(r) {
+			held.Add(1)
+		}
+		hub.ServeHTTP(w, r)
+	})
+	other, otherHub := h.addBinding(t, "other-hub-project", frontURL)
+	turns := make(chan int64, 16)
+	h.startConfiguredRunner(t, &Runner{DB: h.spokeDB, Interval: time.Hour, OnSpokeResult: func(id int64, _ error) { turns <- id }})
+	awaitTurns(t, turns, h.spokeProject.ID, other.ID)
+	//nolint:kennlint // sleeptest: the watch reaches the hub over real HTTP.
+	require.Eventually(t, func() bool { return watches.Load() > 0 }, 10*time.Second, 10*time.Millisecond, "the spoke never sent a watch")
+	//nolint:kennlint // sleeptest: lets both watchers settle into one watch over real HTTP.
+	time.Sleep(300 * time.Millisecond)
+
+	ctx := context.WithoutCancel(t.Context())
+	enrollments, err := h.hubDB.ListFederationEnrollments(ctx)
+	require.NoError(t, err)
+	for _, enrollment := range enrollments {
+		if enrollment.ProjectID != nil && *enrollment.ProjectID == h.hubProject.ID {
+			require.NoError(t, h.hubDB.RevokeFederationEnrollment(ctx, enrollment.ID))
+		}
+	}
+	sent := watches.Load()
+	h.createIssueIn(t, otherHub.ID, "Committed after the lead's credential was revoked")
+	awaitTurns(t, turns, other.ID)
+	//nolint:kennlint // sleeptest: the next watches reach the hub over real HTTP.
+	require.Eventually(t, func() bool { return watches.Load() >= sent+2 }, 10*time.Second, 10*time.Millisecond,
+		"the other binding did not watch after the lead's credential was refused")
+	//nolint:kennlint // sleeptest: held polls would reach the hub over real HTTP.
+	time.Sleep(300 * time.Millisecond)
+	assert.Zero(t, held.Load(), "one refused credential sent every binding at the hub to its own poll")
+
+	h.createIssueIn(t, otherHub.ID, "Committed beside a refused binding")
+	awaitTurns(t, turns, other.ID)
+}

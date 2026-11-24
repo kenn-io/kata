@@ -672,10 +672,11 @@ bindings at that hub address instead of one poll per binding. The watch sends
 each binding's own pull token, and the hub checks each project against its own
 token. When a project has work, the hub names it and the spoke pulls that
 project alone. A binding with a signing key keeps its own held poll. If the hub
-does not watch a project with its token, that binding holds its own poll. If a
-proxy in front of the hub refuses the watch route, the daemon log says so once
-and the spoke holds a poll per binding for an hour before it tries a watch
-again.
+does not watch a project with its token, that binding holds its own poll. If
+the hub refuses the credential that leads a watch, that binding backs off
+alone and the others keep watching. If a proxy in front of the hub refuses the
+watch route, the daemon log says so once and the spoke holds a poll per
+binding for an hour before it tries a watch again.
 
 Held polls need a few things from the deployment:
 
