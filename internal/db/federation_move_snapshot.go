@@ -44,7 +44,8 @@ func RecordFederationAcceptedRecoverySnapshots(ctx context.Context, tx *sql.Tx, 
 
 // ErrRetainedSnapshotUnaccepted means a recovery snapshot of the issue was never
 // acknowledged by the hub, so the hub does not hold the history it carries.
-var ErrRetainedSnapshotUnaccepted = errors.New("retained recovery snapshot is not accepted by the hub")
+// It is a federated move refusal.
+var ErrRetainedSnapshotUnaccepted = errors.Join(ErrFederatedReadOnly, ErrFederatedMoveUnsupported, errors.New("retained recovery snapshot is not accepted by the hub"))
 
 // RetainedMoveSnapshot uses the accepted recovery snapshot's attribution in a
 // new move event, while the spoke keeps its original local history unchanged.
