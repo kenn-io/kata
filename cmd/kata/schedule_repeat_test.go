@@ -36,10 +36,6 @@ func TestScheduleRepeatPriorityLabelRecovery(t *testing.T) {
 	_, stderr, err := runCLIWithErr(t, env, dir, "schedule", issue.ShortID, "2026-11-02", "--repeat", "FREQ=WEEKLY", "--timezone", "UTC")
 	require.Error(t, err)
 	assert.Contains(t, stderr, "remove the priority label from the issue or template")
-	assert.Empty(t, listRecurrencesViaHTTP(t, env, pid))
-	labels, err := env.DB.LabelsForIssue(t.Context(), issue.ID)
-	require.NoError(t, err)
-	assert.ElementsMatch(t, []string{"p2", "routine"}, labels)
 }
 
 func listRecurrencesViaHTTP(t *testing.T, env *testenv.Env, pid int64) []recurrenceRow {

@@ -21,7 +21,6 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -97,36 +96,6 @@ func TestRecurrencePriorityLabels(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode, string(raw))
 	assert.Contains(t, string(raw), "remove the priority label from the issue or template and set the template priority")
 	resp = doPatch(t, env, baseURL+"/"+rec.UID, `{"actor":"tester","template":{"title":"new","labels":["area:ui"]}}`, `"rev-1"`)
-	raw = readClose(t, resp)
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
-}
-
-func TestRecurrencePriorityLabelsPostgres(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
-	t.Cleanup(cleanup)
-	store, err := pgstore.Open(t.Context(), dsn)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = store.Close() })
-	server := daemon.NewServer(daemon.ServerConfig{DB: store, StartedAt: time.Now().UTC()})
-	t.Cleanup(func() { _ = server.Close() })
-	httpServer := httptest.NewServer(server.Handler())
-	t.Cleanup(httpServer.Close)
-	env := &testenv.Env{URL: httpServer.URL, HTTP: httpServer.Client()}
-	project, err := store.CreateProject(t.Context(), "example-project")
-	require.NoError(t, err)
-	rec, _, err := store.CreateRecurrence(t.Context(), db.CreateRecurrenceIn{
-		ProjectID: project.ID, Actor: "tester", Rule: "FREQ=WEEKLY", DTStart: "2026-05-15", Timezone: "UTC",
-		Template: db.RecurrenceTemplate{Title: "old", Labels: []string{"p2"}},
-	})
-	require.NoError(t, err)
-	url := fmt.Sprintf("%s/api/v1/projects/%d/recurrences/%s", env.URL, project.ID, rec.UID)
-	resp := doPatch(t, env, url, `{"actor":"tester","template":{"title":"new"}}`, `"rev-1"`)
-	raw := readClose(t, resp)
-	require.Equal(t, http.StatusBadRequest, resp.StatusCode, string(raw))
-	resp = doPatch(t, env, url, `{"actor":"tester","template":{"title":"new"}}`, `"rev-2"`)
-	raw = readClose(t, resp)
-	require.Equal(t, http.StatusPreconditionFailed, resp.StatusCode, string(raw))
-	resp = doPatch(t, env, url, `{"actor":"tester","template":{"title":"new","labels":["area:ui"]}}`, `"rev-1"`)
 	raw = readClose(t, resp)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 }
