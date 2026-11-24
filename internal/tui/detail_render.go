@@ -8,6 +8,8 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
+
+	"go.kenn.io/kata/internal/authorname"
 )
 
 // View renders the stacked detail view as a single scrolling document.
@@ -168,7 +170,7 @@ func renderDocumentByline(width int, iss Issue) string {
 func documentBylineParts(iss Issue, includeCreated, includeAuthor bool) []string {
 	parts := []string{}
 	if includeAuthor && iss.Author != "" {
-		parts = append(parts, "authored by "+sanitizeForDisplay(iss.Author))
+		parts = append(parts, "authored by "+sanitizeForDisplay(authorname.Display(iss.Author)))
 	}
 	if includeCreated && !iss.CreatedAt.IsZero() {
 		parts = append(parts, "created "+formatDocumentTime(iss.CreatedAt))

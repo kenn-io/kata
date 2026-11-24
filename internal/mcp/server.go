@@ -139,7 +139,7 @@ func New(options Options) (*sdkmcp.Server, error) {
 			Source: mcpicon.Source, MIMEType: "image/png", Sizes: []string{"256x256"},
 		}},
 	}, &sdkmcp.ServerOptions{
-		Instructions: "Use returned web_url values when linking to issues. Use Kata to search before creating work, claim actionable issues, record progress, and close only with evidence. All tools are fixed to " + scopeDescription + " and actor " + options.Actor + `. Call kata.skills with {"name":"workflow"} before your first write; call it with no arguments to list the other guides.`,
+		Instructions: "Use returned web_url values when linking to issues. Use Kata to search before creating work, claim actionable issues with ttl_seconds and renew before expiry by claiming again without if_unowned, comment with findings, and close only with evidence. All tools are fixed to " + scopeDescription + " and actor " + options.Actor + `. Call kata.skills with {"name":"workflow"} before your first write; call it with no arguments to list the other guides.`,
 		Capabilities: &sdkmcp.ServerCapabilities{
 			Tools: &sdkmcp.ToolCapabilities{ListChanged: true},
 		},
@@ -222,11 +222,11 @@ func registerIssueDiscoveryTools(server *sdkmcp.Server, handlers toolHandlers) {
 func registerIssueMutationTools(server *sdkmcp.Server, handlers toolHandlers) {
 	additive := toolHints(false, false, false)
 	mutating := toolHints(false, true, false)
-	addTool(server, "kata.claim", "Claim issue", "Claim an issue for the bound actor. Without force the call fails when another owner already holds it; force replaces that owner.", mutating, handlers.claim)
-	addTool(server, "kata.comment", "Add comment", "Append a progress or context comment using a required idempotency key.", additive, handlers.comment)
+	addTool(server, "kata.claim", "Claim issue", "Claim an issue for the bound actor. Without force the call fails when another owner already holds it; force replaces that owner. Pass ttl_seconds to expire the claim, and renew it before expiry by claiming again with ttl_seconds, without if_unowned.", mutating, handlers.claim)
+	addTool(server, "kata.comment", "Add comment", "Append a finding a later reader needs using a required idempotency key. Keep live status in work.attention_msg.", additive, handlers.comment)
 	addTool(server, "kata.create", "Create issue", "Create project work after searching for duplicates. A stable idempotency key is required.", additive, handlers.create)
 	addTool(server, "kata.edit", "Edit issue", "Edit issue fields, ownership, priority, and relationship deltas atomically.", mutating, handlers.edit)
-	addTool(server, "kata.edit_comment", "Edit comment", "Replace one comment body as the startup actor.", mutating, handlers.editComment)
+	addTool(server, "kata.edit_comment", "Edit comment", "Replace one comment body as the startup actor. Use it to correct your own comment.", mutating, handlers.editComment)
 	addTool(server, "kata.move", "Move issue", "Move an issue and its active descendants to another in-scope project while preserving UIDs and relationships. Pass single to move one issue or dry_run to preview.", mutating, handlers.move)
 	addTool(server, "kata.set_deadline", "Set deadline", "Set or clear an issue deadline. Dates and local date-times accept [IANA/Zone]; otherwise Kata uses the issue timezone, daemon timezone, or UTC when resolving it. UTC instants end in Z.", mutating, handlers.setDeadline)
 	addTool(server, "kata.set_label", "Set label presence", "Ensure that a label is present or absent on an issue.", mutating, handlers.setLabel)
@@ -239,7 +239,7 @@ func registerIssueLifecycleTools(server *sdkmcp.Server, handlers toolHandlers) {
 	additive := toolHints(false, false, false)
 	mutating := toolHints(false, true, false)
 	addTool(server, "kata.audit_closes", "Audit closes", "List close records with bounded project and time filters.", read, handlers.auditCloses)
-	addTool(server, "kata.close", "Close issue", "Close a completed issue with a reason, substantive message, and typed evidence.", mutating, handlers.close)
+	addTool(server, "kata.close", "Close issue", "Close a completed issue with a reason, substantive message, and typed evidence. Work whose PR is open and not merged is not complete.", mutating, handlers.close)
 	addTool(server, "kata.delete", "Delete issue", "Soft-delete an issue after exact confirmation.", mutating, handlers.deleteIssue)
 	addTool(server, "kata.purge", "Purge issue", "Irreversibly purge a soft-deleted issue after exact confirmation.", mutating, handlers.purgeIssue)
 	addTool(server, "kata.reopen", "Reopen issue", "Reopen a closed issue when new work is required.", mutating, handlers.reopen)
@@ -710,7 +710,7 @@ type LabelsInput struct {
 // ShowInput selects one bound-project issue.
 type ShowInput struct {
 	Thread       string `json:"thread,omitempty" jsonschema:"Comment reference whose transitive replies to show; maximum 50 including root"`
-	Inbound      string `json:"inbound,omitempty" jsonschema:"Author or author/teammate whose comments receive replies on this issue"`
+	Inbound      string `json:"inbound,omitempty" jsonschema:"Use a comment author_filter, optionally followed by /teammate, to find replies to that author"`
 	Kind         string `json:"kind,omitempty" jsonschema:"Reply kind filter; requires thread or inbound"`
 	Since        string `json:"since,omitempty" jsonschema:"Comments strictly after this comment reference"`
 	Ref          string `json:"ref" jsonschema:"Bare short ID, qualified reference, or full issue UID"`
@@ -943,6 +943,7 @@ type CommentSummary struct {
 	Teammate           string            `json:"teammate,omitempty"`
 	UID                string            `json:"uid"`
 	Author             string            `json:"author"`
+	AuthorFilter       string            `json:"author_filter,omitempty" jsonschema:"Exact author for the inbound filter"`
 	Body               string            `json:"body"`
 	CreatedAt          string            `json:"created_at"`
 }

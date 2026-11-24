@@ -1,7 +1,10 @@
 <script lang="ts">
+  import { untrack } from 'svelte'
   import CalendarIcon from '@lucide/svelte/icons/calendar'
   import XIcon from '@lucide/svelte/icons/x'
   import { Button, Calendar, IconButton, todayStr } from '@kenn-io/kit-ui'
+
+  import { formatDay, validISODate } from '../lib/kata/dates'
 
   interface Props {
     value: string
@@ -11,6 +14,7 @@
     disabled?: boolean
     clearable?: boolean
     clearLabel?: string
+    initiallyOpen?: boolean
     onEscape?: () => void
     class?: string
   }
@@ -23,17 +27,18 @@
     disabled = false,
     clearable = false,
     clearLabel,
+    initiallyOpen = false,
     onEscape,
     class: className = '',
   }: Props = $props()
 
-  let open = $state(false)
+  let open = $state(untrack(() => initiallyOpen))
   let rootEl = $state<HTMLDivElement>()
   let buttonEl = $state<HTMLButtonElement>()
   let calendarMonth = $derived(validISODate(value) ? value : todayStr())
 
   const popoverID = `date-picker-${Math.random().toString(36).slice(2)}`
-  const displayValue = $derived(value ? formatDate(value) : placeholder)
+  const displayValue = $derived(value ? formatDay(value) : placeholder)
   const selectedDate = $derived(validISODate(value) ? value : '')
 
   $effect(() => {
@@ -59,31 +64,6 @@
       document.removeEventListener('keydown', handleKeydown)
     }
   })
-
-  function validISODate(input: string): boolean {
-    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(input)
-    if (!match) return false
-    const year = Number(match[1])
-    const month = Number(match[2])
-    const day = Number(match[3])
-    const date = new Date(Date.UTC(year, month - 1, day))
-    return (
-      date.getUTCFullYear() === year &&
-      date.getUTCMonth() === month - 1 &&
-      date.getUTCDate() === day
-    )
-  }
-
-  function formatDate(input: string): string {
-    if (!validISODate(input)) return input
-    const [year, month, day] = input.split('-').map(Number)
-    const date = new Date(year!, month! - 1, day!)
-    return date.toLocaleDateString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      year: new Date().getFullYear() === date.getFullYear() ? undefined : 'numeric',
-    })
-  }
 
   function pick(date: string): void {
     onchange(date)

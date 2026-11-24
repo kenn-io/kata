@@ -42,6 +42,7 @@ type InboxRequest struct {
 	WebURL       *string `json:"web_url,omitempty"`
 	Title        string  `json:"title"`
 	From         string  `json:"from"`
+	FromAddress  string  `json:"from_address" jsonschema:"Exact sender address for notify --to"`
 	Teammate     string  `json:"teammate,omitempty"`
 	Message      string  `json:"message"`
 }
@@ -165,9 +166,11 @@ func (h toolHandlers) inbox(ctx context.Context, request *sdkmcp.CallToolRequest
 		if !valid {
 			continue
 		}
+		address := notification.Address(value.From, value.Teammate)
+		value = notification.DisplayValue(value)
 		output.Requests = append(output.Requests, InboxRequest{
 			IssueUID: issue.UID, ProjectUID: issue.projectUID, Ref: issue.Ref, QualifiedRef: issue.QualifiedRef, WebURL: issue.WebURL, Title: issue.Title,
-			From: value.From, Teammate: value.Teammate, Message: value.Message,
+			From: value.From, FromAddress: address, Teammate: value.Teammate, Message: value.Message,
 		})
 	}
 	return successResult(), output, nil

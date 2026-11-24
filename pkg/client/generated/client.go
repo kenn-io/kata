@@ -6088,6 +6088,7 @@ func (c *Client) SearchFederationProject(ctx context.Context, options *SearchFed
 	var err error
 
 	queryEncoding := map[string]runtime.QueryEncoding{
+		"auto":   {Style: "form", Explode: &[]bool{false}[0]},
 		"limit":  {Style: "form", Explode: &[]bool{false}[0]},
 		"q":      {Style: "form", Explode: &[]bool{false}[0]},
 		"status": {Style: "form", Explode: &[]bool{false}[0]},

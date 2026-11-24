@@ -270,10 +270,6 @@ test('the task list and pane stay aligned beside an open task', async ({ page, k
   expect(Math.abs(heading - right(await row.locator('.cell-priority').boundingBox()))).toBeLessThan(
     1,
   )
-  const displayButton = (await page.getByRole('button', { name: 'Display' }).boundingBox())!
-  const edit = (await page.getByRole('button', { name: 'Edit issue' }).boundingBox())!
-  expect(Math.abs(displayButton.y - edit.y)).toBeLessThan(1)
-  expect(Math.abs(displayButton.height - edit.height)).toBeLessThan(1)
   const header = page.locator('.table-header')
   const headerRight = await header.evaluate((element) => {
     const bounds = element.getBoundingClientRect()

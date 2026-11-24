@@ -72,16 +72,22 @@ const daemonStderr = new WeakMap<ChildProcess, string>()
 
 export const test = base.extend<{ kata: KataFixture; diagnosticKata: KataFixture }>({
   kata: [
-    async ({ browserName }, use) => {
+    async ({ browserName, page }, use) => {
       void browserName
       const running = await startProductionFixture()
       try {
         await use(running.fixture)
       } finally {
-        await running.stop()
+        try {
+          // Finish intercepted requests before their temporary daemon shuts down.
+          await page.unrouteAll({ behavior: 'wait' })
+        } finally {
+          await running.stop()
+        }
       }
     },
-    { scope: 'worker', timeout: 120_000 },
+    // Each test needs fresh tasks, projects, and daemon settings, even on the same worker.
+    { scope: 'test', timeout: 120_000 },
   ],
   diagnosticKata: async ({ browserName }, use) => {
     void browserName

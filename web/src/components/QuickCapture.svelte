@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button } from '@kenn-io/kit-ui'
+  import { Button, SelectDropdown } from '@kenn-io/kit-ui'
   import PlusIcon from '@lucide/svelte/icons/plus'
 
   import Modal from './Modal.svelte'
@@ -8,20 +8,20 @@
     open: boolean
     disabled?: boolean | undefined
     draftFenceGeneration?: number | undefined
-    inboxName?: string | undefined
+    projects?: { uid: string; name: string }[] | undefined
+    inboxUID?: string | undefined
     onClose: () => void
-    onSubmit: (title: string) => void | Promise<void>
-    onChangeInbox?: (() => void) | undefined
+    onSubmit: (title: string, projectUID?: string) => void | Promise<void>
   }
 
   let {
     open,
     disabled = false,
     draftFenceGeneration = 0,
-    inboxName = undefined,
+    projects = undefined,
+    inboxUID = undefined,
     onClose,
     onSubmit,
-    onChangeInbox = undefined,
   }: Props = $props()
 
   let input = $state<HTMLInputElement>()
@@ -29,6 +29,15 @@
   let pending = $state(false)
   let error = $state<string | null>(null)
   let lastDraftFenceGeneration = $state<number | null>(null)
+  let selectedProjectUID = $state<string | undefined>(undefined)
+  const effectiveProjectUID = $derived(
+    projects?.some((project) => project.uid === selectedProjectUID)
+      ? selectedProjectUID
+      : projects?.some((project) => project.uid === inboxUID)
+        ? inboxUID
+        : '',
+  )
+  const projectReady = $derived(!projects || !!effectiveProjectUID)
 
   $effect(() => {
     if (open && !disabled) input?.focus()
@@ -39,6 +48,7 @@
       title = ''
       pending = false
       error = null
+      selectedProjectUID = undefined
     }
   })
 
@@ -56,11 +66,12 @@
 
   async function submit(): Promise<void> {
     const value = title.trim()
-    if (!value || pending || disabled) return
+    if (!value || pending || disabled || !projectReady) return
     pending = true
     error = null
     try {
-      await onSubmit(value)
+      if (projects) await onSubmit(value, effectiveProjectUID)
+      else await onSubmit(value)
       title = ''
       onClose()
     } catch (err) {
@@ -78,7 +89,7 @@
   }
 </script>
 
-<Modal {open} title="New task" {onClose} width={440}>
+<Modal {open} title="New task" {onClose} width={560}>
   <form
     class="capture"
     onsubmit={(event) => {
@@ -86,30 +97,34 @@
       void submit()
     }}
   >
-    <input
-      bind:this={input}
-      class="capture-input"
-      type="text"
-      aria-label="Quick capture"
-      placeholder="Task title"
-      bind:value={title}
-      onkeydown={handleKeydown}
-      disabled={pending || disabled}
-    />
+    <label
+      >Title
+      <input
+        bind:this={input}
+        class="capture-input"
+        type="text"
+        aria-label="Quick capture"
+        placeholder="Task title"
+        bind:value={title}
+        onkeydown={handleKeydown}
+        disabled={pending || disabled}
+      />
+    </label>
     {#if error}<p class="capture-error" role="alert">{error}</p>{/if}
-    {#if inboxName}
-      <p class="capture-destination">
-        Captured in <strong>{inboxName}</strong>
-        {#if onChangeInbox}
-          <button
-            type="button"
-            class="change-inbox"
-            aria-label="Change Inbox project"
-            disabled={pending}
-            onclick={onChangeInbox}>Change</button
-          >
-        {/if}
-      </p>
+    {#if projects}
+      <div class="project-row">
+        <span>Project</span>
+        <SelectDropdown
+          title="Project"
+          value={effectiveProjectUID ?? ''}
+          options={[
+            { value: '', label: 'Choose a project', disabled: true },
+            ...projects.map((project) => ({ value: project.uid, label: project.name })),
+          ]}
+          onchange={(uid) => (selectedProjectUID = uid)}
+          disabled={pending || disabled}
+        />
+      </div>
     {/if}
   </form>
   {#snippet footer()}
@@ -118,9 +133,9 @@
       size="sm"
       tone="info"
       surface="solid"
-      label="Capture"
+      label="Add"
       onclick={() => void submit()}
-      disabled={disabled || pending || title.trim().length === 0}
+      disabled={disabled || pending || title.trim().length === 0 || !projectReady}
     >
       <PlusIcon size={12} strokeWidth={2} />
     </Button>
@@ -146,15 +161,6 @@
     font-size: var(--font-size-md);
   }
 
-  .capture-destination {
-    display: flex;
-    align-items: baseline;
-    gap: 6px;
-    margin: 0;
-    color: var(--text-secondary);
-    font-size: var(--font-size-sm);
-  }
-
   .capture-error {
     margin: 0;
     padding: 8px 10px;
@@ -164,18 +170,19 @@
     font-size: var(--font-size-sm);
   }
 
-  .change-inbox {
-    border: 0;
-    padding: 0;
-    background: none;
-    color: var(--accent-blue);
-    font: inherit;
-    cursor: pointer;
+  .capture label,
+  .project-row {
+    display: grid;
+    grid-template-columns: 96px 1fr;
+    align-items: baseline;
   }
 
-  .change-inbox:disabled {
-    cursor: default;
-    opacity: var(--opacity-disabled);
+  @media (max-width: 640px) {
+    .capture label,
+    .project-row {
+      grid-template-columns: 1fr;
+      gap: 6px;
+    }
   }
 
   .capture-input:focus {

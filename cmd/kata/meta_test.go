@@ -65,6 +65,23 @@ func TestMetaSetStoresJSONStringAndGetReturnsValue(t *testing.T) {
 	assert.Equal(t, "needs-human", getOut)
 }
 
+func TestMetaAttentionValues(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createIssue(t, env, pid, "attention issue")
+	_, stderr, err := runCLIWithErr(t, env, dir, "meta", "set", ref, "work.attention", "working")
+	_ = requireCLIError(t, err, ExitValidation)
+	assert.Contains(t, stderr, "ok, needs-human, stuck")
+	issue := fetchMetaIssueViaHTTP(t, env, pid, ref)
+	assert.JSONEq(t, `{}`, string(issue.Issue.Metadata))
+
+	_, stderr, err = runCLIWithErr(t, env, dir, "create", "invalid attention", "--meta", "work.attention=working")
+	_ = requireCLIError(t, err, ExitValidation)
+	assert.Contains(t, stderr, "ok, needs-human, stuck")
+	issues, err := env.DB.ListIssues(t.Context(), db.ListIssuesParams{ProjectID: pid})
+	require.NoError(t, err)
+	assert.Len(t, issues, 1)
+}
+
 func TestMetaSetJSONValueObjectRoundTrips(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "metadata object issue")
@@ -101,6 +118,11 @@ func TestMetaSetJSONValueRejectsNullWithUnsetHint(t *testing.T) {
 	ce := requireCLIError(t, err, ExitValidation)
 	assert.Equal(t, kindValidation, ce.Kind)
 	assert.Contains(t, stderr, "use `kata meta unset`")
+
+	_, stderr, err = runCLIWithErr(t, env, dir, "meta", "set", "--json-value", ref, "work.attention", `null`)
+	_ = requireCLIError(t, err, ExitValidation)
+	assert.Contains(t, stderr, "ok, needs-human, stuck")
+	assert.Contains(t, stderr, "use `kata meta unset`")
 }
 
 func TestMetaUnsetRemovesKey(t *testing.T) {
@@ -124,10 +146,28 @@ func TestMetaGetEmptyAndMissingKey(t *testing.T) {
 	out := runCLI(t, env, dir, "meta", "get", ref)
 	assert.Contains(t, out, "no metadata")
 
-	_, stderr, err := runCLIWithErr(t, env, dir, "meta", "get", ref, "work.missing")
+	for _, mode := range []string{"human", "agent", "json"} {
+		t.Run(mode, func(t *testing.T) {
+			args := []string{"meta", "get", ref, "work.missing"}
+			if mode != "human" {
+				args = append(args, "--"+mode)
+			}
+			stdout, stderr, err := runCLIWithErr(t, env, dir, args...)
+			require.NoError(t, err, stderr)
+			switch mode {
+			case "human":
+				assert.Empty(t, stdout)
+			case "agent":
+				assert.Equal(t, fmt.Sprintf("OK meta get %s count=0 revision=rev-1\n", ref), stdout)
+			case "json":
+				assert.JSONEq(t, fmt.Sprintf(`{"kata_api_version":1,"ref":%q,"revision":1,"key":"work.missing","value":null}`, ref), stdout)
+			}
+		})
+	}
+
+	_, _, err := runCLIWithErr(t, env, dir, "meta", "get", "zzzz", "work.missing")
 	ce := requireCLIError(t, err, ExitNotFound)
 	assert.Equal(t, kindNotFound, ce.Kind)
-	assert.Contains(t, stderr, "metadata key not found")
 }
 
 func TestMetaReservedKeyRejectionSurfacesValidation(t *testing.T) {

@@ -50,32 +50,39 @@ test('views, projects, filters, columns, hierarchy, and keyboard stay first-clas
     await heldSnapshot
     await request.fulfill({ response }).catch(() => {})
   })
-  await parentRow.press('ArrowDown')
-  await expect(page.getByRole('button', { name: /Example child task/ })).toBeFocused()
-  await snapshotRequested
+  try {
+    await parentRow.press('ArrowDown')
+    await expect(page.getByRole('button', { name: /Example child task/ })).toBeFocused()
+    await snapshotRequested
 
-  const search = page.getByRole('searchbox', { name: 'Search tasks' })
-  await search.focus()
-  const original = await search.elementHandle()
-  await page.keyboard.type('child')
-  releaseSnapshot()
-  await expect(page.getByRole('heading', { name: 'Example child task', exact: true })).toBeVisible()
-  await expect(search).toBeFocused()
-  expect(await search.evaluate((element, first) => element === first, original)).toBe(true)
-  await page.keyboard.type(' task')
-  await expect(search).toHaveValue('child task')
-  await expect.poll(() => new URL(page.url()).searchParams.get('issue')).toBe(child.uid)
-  await expect.poll(() => new URL(page.url()).searchParams.get('text')).toBe('child task')
-  await expect(page.getByRole('button', { name: /Example child task/ })).toBeVisible()
+    const search = page.getByRole('searchbox', { name: 'Search tasks' })
+    await search.focus()
+    const original = await search.elementHandle()
+    await page.keyboard.type('child')
+    releaseSnapshot()
+    await expect(
+      page.getByRole('heading', { name: 'Example child task', exact: true }),
+    ).toBeVisible()
+    await expect(search).toBeFocused()
+    expect(await search.evaluate((element, first) => element === first, original)).toBe(true)
+    await page.keyboard.type(' task')
+    await expect(search).toHaveValue('child task')
+    await expect.poll(() => new URL(page.url()).searchParams.get('issue')).toBe(child.uid)
+    await expect.poll(() => new URL(page.url()).searchParams.get('text')).toBe('child task')
+    await expect(page.getByRole('button', { name: /Example child task/ })).toBeVisible()
 
-  for (const view of ['Inbox', 'Today', 'Delegated', 'Scheduled']) {
-    await page.getByRole('button', { name: new RegExp(`^${view}( \\d+)?$`) }).click()
-    await expect(page.locator('[aria-label="Issues"]')).toBeVisible()
+    for (const view of ['Inbox', 'Today', 'Delegated', 'Scheduled']) {
+      await page.getByRole('button', { name: new RegExp(`^${view}( \\d+)?$`) }).click()
+      await expect(page.locator('[aria-label="Issues"]')).toBeVisible()
+    }
+    await expect(page).toHaveURL(/view=scheduled/)
+    await expect(page.getByRole('button', { name: 'Upcoming' })).toHaveCount(0)
+    await page.getByRole('button', { name: /^example-project \d+$/ }).click()
+    await expect(page).toHaveURL(`${kata.origin}/kata?scope=${kata.projectUID}`)
+  } finally {
+    // Failed assertions must also release the response before fixture cleanup waits for it.
+    releaseSnapshot()
   }
-  await expect(page).toHaveURL(/view=scheduled/)
-  await expect(page.getByRole('button', { name: 'Upcoming' })).toHaveCount(0)
-  await page.getByRole('button', { name: /^example-project \d+$/ }).click()
-  await expect(page).toHaveURL(`${kata.origin}/kata?scope=${kata.projectUID}`)
 })
 
 test('keeps a resized width and copies a short task ID from the hovered row', async ({
@@ -134,7 +141,9 @@ test('sorts Scheduled date groups by deadline and keeps the order on reload', as
     metadata: { scheduled_on: '2090-01-02', deadline_on: '2090-02-11' },
   })
   await page.goto(`${kata.origin}/kata?view=scheduled`)
-  const rows = page.locator('.issue-row')
+  const rows = page.locator('.issue-row').filter({
+    hasText: /A later deadline|Z earlier deadline|A later next deadline|Z earlier next deadline/,
+  })
   await expect
     .poll(() => rows.evaluateAll((items) => items.map((item) => item.getAttribute('data-uid'))))
     .toEqual([late.uid, early.uid, lateNext.uid, earlyNext.uid])
@@ -142,7 +151,7 @@ test('sorts Scheduled date groups by deadline and keeps the order on reload', as
   await expect
     .poll(() => rows.evaluateAll((items) => items.map((item) => item.getAttribute('data-uid'))))
     .toEqual([early.uid, late.uid, earlyNext.uid, lateNext.uid])
-  await expect(page.locator('.group-title')).toHaveCount(2)
+  await expect(page.locator('.group').filter({ has: rows })).toHaveCount(2)
   await page.reload()
   await expect(
     page.getByRole('button', { name: 'Sort by Date, currently ascending' }),
@@ -167,40 +176,4 @@ test('project creation and quick capture use the designated inbox project', asyn
   await page.getByRole('textbox', { name: 'Quick capture' }).fill('Captured example task')
   await page.getByRole('textbox', { name: 'Quick capture' }).press('Enter')
   await expect(page.getByRole('button', { name: /Captured example task/ })).toBeVisible()
-})
-
-test('New task designates an Inbox before opening quick capture', async ({ page, kata }) => {
-  const credentials = await kata.launch(page)
-  const snapshot = (await kata.snapshot(page, credentials)) as {
-    catalog: Array<{
-      project: { id: number; name: string; metadata: Record<string, unknown> }
-    }>
-  }
-  const inbox = snapshot.catalog.find(({ project }) => project.metadata.role === 'inbox')?.project
-  expect(inbox).toBeDefined()
-  const cleared = await kata.request(
-    page,
-    credentials,
-    'POST',
-    `/api/v1/projects/${inbox!.id}/metadata`,
-    { actor: 'user-a', patch: { role: null } },
-  )
-  expect(cleared.ok()).toBe(true)
-  await page.reload()
-
-  const create = page.getByRole('button', { name: 'New task' })
-  await expect(create).toBeEnabled()
-  await create.click()
-  await expect(page.getByRole('dialog', { name: 'Choose Inbox project' })).toBeVisible()
-  await page.getByRole('button', { name: 'Use example-project as Inbox' }).click()
-
-  await expect(page.getByRole('textbox', { name: 'Quick capture' })).toBeVisible()
-  const restored = await kata.request(
-    page,
-    credentials,
-    'POST',
-    `/api/v1/projects/${inbox!.id}/metadata`,
-    { actor: 'user-a', patch: { role: 'inbox' } },
-  )
-  expect(restored.ok()).toBe(true)
 })

@@ -99,17 +99,42 @@ name = "   "
 }
 
 func TestWriteProjectConfig_WritesHeaderAndName(t *testing.T) {
-	dir := t.TempDir()
-	require.NoError(t, config.WriteProjectConfig(dir, "foo"))
-	bs, err := os.ReadFile(filepath.Join(dir, ".kata.toml")) //nolint:gosec // test fixture under TempDir
-	require.NoError(t, err)
-	assert.Contains(t, string(bs), `name = "foo"`)
-	assert.True(t, strings.HasPrefix(string(bs), "# This repository tracks its work in kata.\n# Coding agents: read `kata quickstart --format contract` before changing code here.\n"))
-	assert.NotContains(t, string(bs), "identity")
+	for _, tc := range []struct {
+		name  string
+		write func(workspaceRoot, name string) error
+	}{
+		{"write", config.WriteProjectConfig},
+		{"replace hard-linked binding", func(dir, name string) error {
+			return config.ReplaceProjectConfig(filepath.Join(dir, ".kata.toml"), name)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			other := ""
+			original := []byte("version = 1\n\n[project]\nname = \"notes\"\n")
+			if tc.name == "replace hard-linked binding" {
+				other = filepath.Join(setupKataProjectDir(t, string(original)), ".kata.toml")
+				if err := os.Link(other, filepath.Join(dir, ".kata.toml")); err != nil {
+					t.Skipf("hard links unavailable: %v", err)
+				}
+			}
+			require.NoError(t, tc.write(dir, "foo"))
+			bs, err := os.ReadFile(filepath.Join(dir, ".kata.toml")) //nolint:gosec // test fixture under TempDir
+			require.NoError(t, err)
+			assert.Contains(t, string(bs), `name = "foo"`)
+			assert.True(t, strings.HasPrefix(string(bs), "# This repository tracks its work in kata.\n# Coding agents: read `kata quickstart --format contract` before changing code here.\n"))
+			assert.NotContains(t, string(bs), "identity")
 
-	cfg, err := config.ReadProjectConfig(dir)
-	require.NoError(t, err)
-	assert.Equal(t, "foo", cfg.Project.Name)
+			cfg, err := config.ReadProjectConfig(dir)
+			require.NoError(t, err)
+			assert.Equal(t, "foo", cfg.Project.Name)
+			if other != "" {
+				got, err := os.ReadFile(other) //nolint:gosec // test fixture under TempDir
+				require.NoError(t, err)
+				assert.Equal(t, original, got)
+			}
+		})
+	}
 }
 
 func TestEnsureProjectConfigHeader(t *testing.T) {
@@ -129,7 +154,7 @@ func TestEnsureProjectConfigHeader(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := setupKataProjectDir(t, tc.content)
-			changed, err := config.EnsureProjectConfigHeader(dir)
+			changed, err := config.EnsureProjectConfigHeader(filepath.Join(dir, ".kata.toml"))
 			require.NoError(t, err)
 			assert.Equal(t, tc.changed, changed)
 			content, err := os.ReadFile(filepath.Join(dir, ".kata.toml")) //nolint:gosec // test fixture under TempDir
@@ -141,7 +166,7 @@ func TestEnsureProjectConfigHeader(t *testing.T) {
 			if !tc.changed {
 				return
 			}
-			changed, err = config.EnsureProjectConfigHeader(dir)
+			changed, err = config.EnsureProjectConfigHeader(filepath.Join(dir, ".kata.toml"))
 			require.NoError(t, err)
 			assert.False(t, changed)
 			again, err := os.ReadFile(filepath.Join(dir, ".kata.toml")) //nolint:gosec // test fixture under TempDir
@@ -163,12 +188,37 @@ func TestEnsureProjectConfigHeader_WriteFailurePreservesBinding(t *testing.T) {
 	require.NoError(t, os.Chmod(dir, 0o555))       //nolint:gosec // read-only directory blocks the atomic rename
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) }) //nolint:gosec // restore so TempDir cleanup can remove it
 
-	changed, err := config.EnsureProjectConfigHeader(dir)
+	changed, err := config.EnsureProjectConfigHeader(filepath.Join(dir, ".kata.toml"))
 	require.Error(t, err)
 	assert.False(t, changed)
 	content, err := os.ReadFile(filepath.Join(dir, ".kata.toml")) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, err)
 	assert.Equal(t, body, string(content))
+}
+
+func TestProjectConfigWritersRefuseSymlink(t *testing.T) {
+	for _, write := range []struct {
+		name string
+		fn   func(string) error
+	}{
+		{"replace", func(path string) error { return config.ReplaceProjectConfig(path, "demo") }},
+		{"header", func(path string) error { _, err := config.EnsureProjectConfigHeader(path); return err }},
+	} {
+		t.Run(write.name, func(t *testing.T) {
+			dir := t.TempDir()
+			target := filepath.Join(dir, "other.toml")
+			original := []byte("version = 1\n[project]\nname = \"notes\"\n")
+			require.NoError(t, os.WriteFile(target, original, 0o644)) //nolint:gosec // test fixture matches production binding mode
+			link := filepath.Join(dir, ".kata.toml")
+			if err := os.Symlink(target, link); err != nil {
+				t.Skipf("symlinks unavailable: %v", err)
+			}
+			require.Error(t, write.fn(link))
+			got, err := os.ReadFile(target) //nolint:gosec // test fixture under TempDir
+			require.NoError(t, err)
+			assert.Equal(t, original, got)
+		})
+	}
 }
 
 func TestWriteProjectConfig_WritableFileInReadOnlyDirectory(t *testing.T) {

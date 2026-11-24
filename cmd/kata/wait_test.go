@@ -315,7 +315,8 @@ func TestWaitUntilAttentionFiresOnNovelLevel(t *testing.T) {
 	errc := make(chan error, 1)
 	go func() {
 		time.Sleep(waitMutDelay)
-		errc <- setAttentionHTTP(t.Context(), env, pid, ref, "on-fire", "")
+		_, err := env.DB.ExecContext(t.Context(), `UPDATE issues SET metadata='{"work.attention":"on-fire"}' WHERE short_id=?`, ref)
+		errc <- err
 	}()
 
 	stdout, _, err := runCLIWithErr(t, env, dir,
