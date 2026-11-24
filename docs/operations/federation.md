@@ -2289,11 +2289,11 @@ project identity to bind that existing project.
 
 Pull restarts from the hub's replay horizon, and already-applied events deduplicate by event UID. A push-enabled rejoin keeps events from an earlier actor on the spoke and publishes later events under the new enrollment. The spoke keeps the original events, their actors, and their hashes.
 
-When a later event links to a task retained under an earlier actor, the spoke publishes that task's snapshot before the link. For an endpoint in another local project, that project needs an enabled direct push binding and a credential for the same hub origin. A missing or incompatible credential leaves the link pending with an error naming the task. Older cross-project links inside retained history stay local.
+When a later event links to a task retained under an earlier actor in the same project, the spoke publishes that task's snapshot before the link. A cross-project link to a retained task appears on the hub after that task's project publishes it. Older cross-project links inside retained history stay local.
 
-A reply to a comment retained under an earlier actor needs a hub history read to confirm the parent and its reply ancestors. This check needs pull authority, even when the rejoin enables push only. If a parent is missing from the hub, Kata quarantines only the dependent event; earlier valid events can still sync. Restore read access and retry the quarantine, or skip it with the explicit quarantine command. Edits to retained comments also wait until the hub has their original comment creation. A task snapshot alone does not confirm that the hub accepted its comments.
+A reply to a comment the hub never received stays invisible on the hub until the parent comment arrives.
 
-When the hub has never received a task needed by a move, the spoke queues that task's snapshot and refuses the move with `federation_sync_required`. Background sync sends the snapshot; retry the move after the source project syncs. If the hub knows the task but has no accepted recovery snapshot from the prior actor, retrying cannot unblock the move. Kata refuses it with `federated_move_unsupported`; create the issue in the target project and link it to the original issue instead.
+Kata refuses to move a task whose creation, snapshot, or move was retained under an earlier actor or instance, with `federated_move_unsupported`. Create the task in the target project and link it to the original task.
 
 Kata upgrades SQLite databases at schema 41 or later to schema 55 in place at startup. Older binaries cannot
 open schema 55. To roll back, restore a backup made before the upgrade and use its matching

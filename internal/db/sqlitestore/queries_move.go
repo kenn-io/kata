@@ -142,10 +142,10 @@ func (d *Store) moveIssueProjectTx(ctx context.Context, tx *sql.Tx, in db.MoveIs
 		return out, &db.ProjectMergeImportMappingCollisionError{Mappings: mappingCollisions}
 	}
 
+	if err := db.RefuseRetainedIssueMove(ctx, tx, in.FromProjectID, issueUID, d.InstanceUID()); err != nil {
+		return out, err
+	}
 	if in.DryRun {
-		if _, err := db.RetainedMoveSnapshot(ctx, tx, in.FromProjectID, issueUID, d.InstanceUID(), "{}"); err != nil {
-			return out, err
-		}
 		issue, err := issueByIDTx(ctx, tx, in.IssueID)
 		if err != nil {
 			return out, err
@@ -229,10 +229,6 @@ func (d *Store) moveIssueProjectTx(ctx context.Context, tx *sql.Tx, in db.MoveIs
 			return out, err
 		}
 		snapshot, err := d.federationIssueSnapshotPayload(ctx, tx, movedIssue)
-		if err != nil {
-			return out, err
-		}
-		snapshot, err = db.RetainedMoveSnapshot(ctx, tx, in.FromProjectID, issueUID, d.InstanceUID(), snapshot)
 		if err != nil {
 			return out, err
 		}

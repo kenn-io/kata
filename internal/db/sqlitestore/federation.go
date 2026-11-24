@@ -687,9 +687,6 @@ func (d *Store) leaveFederationReplica(ctx context.Context, projectID int64, dis
 	if err != nil {
 		return db.LeaveFederationResult{}, err
 	}
-	if err := db.PreserveDetachedRetainedEvents(ctx, tx, projectID, binding.RetainedThroughEventID, d.instanceUID); err != nil {
-		return db.LeaveFederationResult{}, err
-	}
 	if err := db.ClearFederationProjectIdentityDependencies(ctx, tx, uid); err != nil {
 		return db.LeaveFederationResult{}, fmt.Errorf("clear former project identity dependencies: %w", err)
 	}

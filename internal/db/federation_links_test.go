@@ -68,16 +68,6 @@ func TestFederationEventAffectsLinks(t *testing.T) {
 	}
 }
 
-func TestDirectLinkPeersReadsRecoverySnapshots(t *testing.T) {
-	const peer = "01HZNQ7VFPK1XGD8R5MABCD4EC"
-	peers, err := db.DirectLinkPeers(db.FoldEvent{
-		Type:    "issue.snapshot",
-		Payload: jsontext.Value(`{"links":[{"to_issue_uid":"` + peer + `","type":"blocks"}]}`),
-	})
-	require.NoError(t, err)
-	assert.Equal(t, map[string]bool{peer: true}, peers)
-}
-
 // Link reconciliation reads only FoldProjection.Links, and the group fold is
 // restricted to FederationLinkAffectingEventTypes for cost. That restriction is
 // only sound if it cannot change Links, so assert the two folds agree over a

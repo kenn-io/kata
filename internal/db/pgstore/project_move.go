@@ -112,10 +112,10 @@ func (s *Store) moveIssueProjectTx(ctx context.Context, tx *sql.Tx, input db.Mov
 		if len(mappingCollisions) > 0 {
 			return &db.ProjectMergeImportMappingCollisionError{Mappings: mappingCollisions}
 		}
+		if err := db.RefuseRetainedIssueMove(ctx, tx, source.ID, current.UID, s.InstanceUID()); err != nil {
+			return err
+		}
 		if input.DryRun {
-			if _, err := db.RetainedMoveSnapshot(ctx, tx, source.ID, current.UID, s.InstanceUID(), "{}"); err != nil {
-				return err
-			}
 			output.Issue = current
 			output.NewRevision = current.Revision
 			return nil
@@ -177,10 +177,6 @@ SET project_id = $1 WHERE issue_id = $2`,
 				return err
 			}
 			snapshot, err := federationIssueSnapshotPayload(ctx, tx, movedIssue)
-			if err != nil {
-				return err
-			}
-			snapshot, err = db.RetainedMoveSnapshot(ctx, tx, source.ID, current.UID, s.InstanceUID(), snapshot)
 			if err != nil {
 				return err
 			}

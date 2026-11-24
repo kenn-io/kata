@@ -118,8 +118,8 @@ func checkFederatedIssueClaim(ctx context.Context, cfg ServerConfig, issue db.Is
 		principal = boundSpokeClaimPrincipal(binding, principal, cfg.DB.InstanceUID())
 	}
 
-	if (refresh || result != nil) && binding.Role == db.FederationRoleSpoke {
-		if err := refreshSpokeClaimStatusForGate(ctx, cfg, binding, issue, result, refresh); err != nil {
+	if refresh && binding.Role == db.FederationRoleSpoke {
+		if err := refreshSpokeClaimStatusForGate(ctx, cfg, binding, issue, result); err != nil {
 			return err
 		}
 	}
@@ -165,7 +165,6 @@ func refreshSpokeClaimStatusForGate(
 	binding db.FederationBinding,
 	issue db.Issue,
 	result *claimRefreshResult,
-	cache bool,
 ) error {
 	remoteCtx, cancelRemote := context.WithTimeout(ctx, mutationClaimStatusRefreshTimeout)
 	defer cancelRemote()
@@ -197,9 +196,6 @@ func refreshSpokeClaimStatusForGate(
 	}
 	if result != nil {
 		*result = claimRefreshResult{binding: binding, known: true}
-	}
-	if !cache {
-		return nil
 	}
 	resp, err = remapCachedClaimStatus(ctx, cfg.DB, binding.ProjectID, issue.UID, resp)
 	if err != nil {

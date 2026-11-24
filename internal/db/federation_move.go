@@ -935,24 +935,6 @@ func RestrictFoldProjectWhere(p *FoldProjection, projectUID string, keep func(st
 	}
 }
 
-// FederationRetainedEventPrefix identifies retained local events after leave.
-const FederationRetainedEventPrefix = "federation_retained_event."
-
-// PreserveDetachedRetainedEvents keeps the identity of local history after its
-// binding, which held the retained boundary, is removed.
-func PreserveDetachedRetainedEvents(ctx context.Context, tx *sql.Tx, projectID, through int64, instanceUID string) error {
-	if through == 0 {
-		return nil
-	}
-	// Event UIDs remain stable when project imports remap numeric event IDs.
-	//nolint:gosec // SQL expressions are constants and values are bound.
-	_, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value)
- SELECT '`+FederationRetainedEventPrefix+`' || e.uid,'1' FROM events e
- WHERE e.project_id=$1 AND e.id<=$2 AND `+LocalInstanceOriginSQL("e.origin_instance_uid", "$3")+`
- ON CONFLICT(key) DO NOTHING`, projectID, through, instanceUID)
-	return err
-}
-
 // ClearFederatedMovedIssueHistory removes every contributing stream for issues
 // being reset. Keeping a former source baseline would recreate a purged issue.
 func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string, postgres bool) error {
@@ -1025,18 +1007,10 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
 	if err := PreserveFederationProjectIdentityDependencies(ctx, tx, projectID); err != nil {
 		return fmt.Errorf("preserve former project identity dependencies: %w", err)
 	}
-	// A source reset retires markers unless another project owns the issue.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key IN (
- SELECT '`+FederationRetainedEventPrefix+`' || e.uid FROM events e
- WHERE e.project_id=$1 AND NOT EXISTS (
-  SELECT 1 FROM issues i WHERE i.uid=e.issue_uid AND i.project_id<>$1))`, projectID); err != nil {
-		return err
-	}
 	// Keep this spoke's edits that a left project never had acknowledged.
 	//nolint:gosec // SQL expressions are fixed and values are bound.
 	_, err = tx.ExecContext(ctx, `DELETE FROM events AS e WHERE e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)
  AND NOT EXISTS(SELECT 1 FROM federation_bindings b WHERE b.project_id IN (e.project_id, $1) AND `+LocalInstanceOriginSQL("e.origin_instance_uid", "$2")+` AND e.id<=b.retained_through_event_id)
- AND NOT EXISTS(SELECT 1 FROM meta WHERE key='`+FederationRetainedEventPrefix+`' || e.uid)
  AND NOT (e.origin_instance_uid=$2 AND e.type NOT IN ('issue.created','issue.moved',`+FederationSnapshotEventTypesSQL()+`) AND (`+FederationHeldEventSQL("e")+` OR (EXISTS (SELECT 1 FROM federation_bindings b WHERE b.project_id=e.project_id AND e.id>b.push_cursor_event_id) AND `+FederationEventReferencesMovedIssueSQL("e", postgres)+`)))`, projectID, originInstanceUID)
 	return err
 }

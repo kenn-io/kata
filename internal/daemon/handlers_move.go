@@ -91,36 +91,8 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 		res, err := cfg.DB.MoveIssueProject(ctx, move)
 		if err == nil {
 			for _, issue := range res.Issues {
-				var claim claimRefreshResult
-				if err := requireFederatedIssueClaimWithResult(ctx, cfg, issue, actor, !in.Body.DryRun, &claim); err != nil {
+				if err := requireFederatedIssueClaimWithRefresh(ctx, cfg, issue, actor, !in.Body.DryRun); err != nil {
 					return nil, err
-				}
-				if !claim.known || claim.missing {
-					binding, err := cfg.DB.FederationBindingByProject(ctx, issue.ProjectID)
-					if err != nil && !errors.Is(err, db.ErrNotFound) {
-						return nil, internalAPIError(err)
-					}
-					if err == nil && binding.Enabled && binding.Role == db.FederationRoleSpoke && binding.RetainedThroughEventID > 0 {
-						retained, err := retainedIssueMayMaterialize(ctx, cfg.DB, binding, issue.UID)
-						if err != nil {
-							return nil, internalAPIError(err)
-						}
-						if retained {
-							if claim.missing {
-								if !in.Body.DryRun {
-									event, _, created, err := cfg.DB.RetainedIssueSnapshot(ctx, issue.ProjectID, issue.UID)
-									if err != nil {
-										return nil, internalAPIError(err)
-									}
-									if created {
-										cfg.Publish().Events(issue.ProjectID, []db.Event{event})
-									}
-								}
-								return nil, api.NewError(409, "federation_sync_required", "sync the source project before moving this task", "sync the source project and retry", nil)
-							}
-							return nil, federationReadOnlyError(db.ErrRetainedSnapshotUnaccepted)
-						}
-					}
 				}
 			}
 			if !in.Body.DryRun {

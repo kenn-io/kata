@@ -176,9 +176,6 @@ func (s *Store) leaveFederationReplica(ctx context.Context, projectID int64, dis
 		if err != nil {
 			return err
 		}
-		if err := db.PreserveDetachedRetainedEvents(ctx, tx, projectID, binding.RetainedThroughEventID, s.InstanceUID()); err != nil {
-			return err
-		}
 		if err := db.ClearFederationProjectIdentityDependencies(ctx, tx, project.UID); err != nil {
 			return mapSQLError(err, nil)
 		}

@@ -58,62 +58,46 @@ func checkRejoinRetainedHistory(t *testing.T, store db.Storage, backend Backend)
 		require.Equal(t, snapshot.UID, reused.UID)
 	})
 
-	t.Run("move after later recovery snapshot accepted", func(t *testing.T) {
+	t.Run("retained task move refused", func(t *testing.T) {
 		ctx := t.Context()
-		source, err := store.CreateProject(ctx, "later-recovery-source")
+		source, err := store.CreateProject(ctx, "retained-move-source")
 		require.NoError(t, err)
-		target, err := store.CreateProject(ctx, "later-recovery-target")
+		target, err := store.CreateProject(ctx, "retained-move-target")
 		require.NoError(t, err)
 		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "task", Author: "actor-a"})
 		require.NoError(t, err)
-		_, _, err = store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "actor-a", Body: "discussion"})
+		sameActor, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "same actor", Author: "actor-b"})
 		require.NoError(t, err)
-		binding := db.FederationBinding{ProjectID: source.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: source.UID, Actor: "actor-b", Enabled: true, PushEnabled: true, RetainHistory: true}
-		_, err = store.UpsertFederationBinding(ctx, binding)
+		formerInstance, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "former instance", Author: "actor-b"})
 		require.NoError(t, err)
-		earlier, _, _, err := store.RetainedIssueSnapshot(ctx, source.ID, issue.UID)
+		records, err := CollectImportRecords(ctx, store, db.ExportFilter{IncludeDeleted: true})
+		require.NoError(t, err)
+		restored := backend.Open(t)
+		t.Cleanup(func() { require.NoError(t, restored.Close()) })
+		require.NoError(t, restored.ImportReplay(ctx, records, db.ImportOptions{NewInstance: true}))
+		_, err = restored.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: source.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: source.UID, Actor: "actor-b", Enabled: true, PushEnabled: true, RetainHistory: true})
+		require.NoError(t, err)
+		_, err = restored.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: target.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 2, HubProjectUID: target.UID, Actor: "actor-b", Enabled: true, PushEnabled: true})
+		require.NoError(t, err)
+		_, err = restored.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: formerInstance.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: formerInstance.Revision, Actor: "actor-b"})
+		require.ErrorIs(t, err, db.ErrFederatedMoveUnsupported)
+		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: source.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: source.UID, Actor: "actor-b", Enabled: true, PushEnabled: true, RetainHistory: true})
 		require.NoError(t, err)
 		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: target.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 2, HubProjectUID: target.UID, Actor: "actor-b", Enabled: true, PushEnabled: true})
 		require.NoError(t, err)
-		issue, err = store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-		require.NoError(t, err)
-		_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "actor-b", DryRun: true})
-		require.ErrorIs(t, err, db.ErrRetainedSnapshotUnaccepted)
+		for _, dryRun := range []bool{true, false} {
+			_, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "actor-b", DryRun: dryRun})
+			require.ErrorIs(t, err, db.ErrFederatedMoveUnsupported)
+		}
 		unchanged, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 		require.NoError(t, err)
-		require.Equal(t, issue, unchanged)
-		_, err = store.LeaveFederationReplica(ctx, source.ID)
+		require.Equal(t, source.ID, unchanged.ProjectID)
+		later, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "later", Author: "actor-b"})
 		require.NoError(t, err)
-		binding.Actor = "actor-c"
-		_, err = store.UpsertFederationBinding(ctx, binding)
-		require.NoError(t, err)
-		require.NoError(t, store.AdvanceFederationPushCursor(ctx, source.ID, earlier.ID))
-		accepted, _, _, err := store.RetainedIssueSnapshot(ctx, source.ID, issue.UID)
-		require.NoError(t, err)
-		require.Greater(t, accepted.ID, earlier.ID)
-		require.NoError(t, store.AcknowledgeFederationPush(ctx, source.ID, accepted.ID, nil))
-		_, err = store.LeaveFederationReplica(ctx, source.ID)
-		require.NoError(t, err)
-		binding.Actor = "actor-d"
-		_, err = store.UpsertFederationBinding(ctx, binding)
-		require.NoError(t, err)
-		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: target.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 2, HubProjectUID: target.UID, Actor: "actor-d", Enabled: true, PushEnabled: true})
-		require.NoError(t, err)
-		issue, err = store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-		require.NoError(t, err)
-		moved, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "actor-d"})
-		require.NoError(t, err)
-		var envelope struct {
-			Snapshot db.IssueDocumentPayload `json:"snapshot"`
+		for _, movable := range []db.Issue{sameActor, later} {
+			_, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: movable.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: movable.Revision, Actor: "actor-b"})
+			require.NoError(t, err)
 		}
-		require.NoError(t, json.Unmarshal([]byte(moved.Event.Payload), &envelope))
-		require.Equal(t, "actor-c", envelope.Snapshot.Author)
-		require.Len(t, envelope.Snapshot.Comments, 1)
-		require.Equal(t, "actor-c", envelope.Snapshot.Comments[0].Author)
-		require.Equal(t, "actor-a", moved.Issue.Author)
-		comments, err := store.CommentsByIssue(ctx, moved.Issue.ID)
-		require.NoError(t, err)
-		require.Equal(t, "actor-a", comments[0].Author)
 	})
 
 	t.Run("recover task moved before enrollment", func(t *testing.T) {
@@ -137,38 +121,6 @@ func checkRejoinRetainedHistory(t *testing.T, store db.Storage, backend Backend)
 		require.NoError(t, err)
 		require.Len(t, comments, 1)
 		require.Equal(t, "offline discussion", comments[0].Body)
-	})
-	t.Run("purge removes retained event markers", func(t *testing.T) {
-		ctx := t.Context()
-		var projects []db.Project
-		var events []db.Event
-		for _, name := range []string{"purged-retained", "remaining-retained"} {
-			project, err := store.CreateProject(ctx, name)
-			require.NoError(t, err)
-			_, event, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "task", Author: "old-actor"})
-			require.NoError(t, err)
-			_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: true})
-			require.NoError(t, err)
-			_, err = store.LeaveFederationReplica(ctx, project.ID)
-			require.NoError(t, err)
-			projects, events = append(projects, project), append(events, event)
-		}
-		markers := func() map[string]bool {
-			keys := make(map[string]bool)
-			for row, err := range store.ExportMeta(ctx) {
-				require.NoError(t, err)
-				keys[row.Key] = true
-			}
-			return keys
-		}
-		require.True(t, markers()[db.FederationRetainedEventPrefix+events[0].UID])
-		require.True(t, markers()[db.FederationRetainedEventPrefix+events[1].UID])
-		_, _, err := store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: projects[0].ID, Actor: "worker", Force: true})
-		require.NoError(t, err)
-		_, err = store.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: projects[0].ID, Actor: "worker"})
-		require.NoError(t, err)
-		require.False(t, markers()[db.FederationRetainedEventPrefix+events[0].UID])
-		require.True(t, markers()[db.FederationRetainedEventPrefix+events[1].UID])
 	})
 	t.Run("refresh boundary on upsert", func(t *testing.T) {
 		ctx := t.Context()

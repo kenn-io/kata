@@ -262,7 +262,7 @@ func pushDirectSpoke(
 	opts clientpkg.Opts,
 ) error {
 	if binding.PushEnabled {
-		retained := &retainedPush{store: store, binding: binding, hubProjectID: hubProjectID, client: client, validateLease: validateLease, credentials: credentials, opts: opts, onEvents: onPulledEvents, sent: make(map[string]bool)}
+		retained := &retainedPush{store: store, binding: binding, hubProjectID: hubProjectID, client: client, validateLease: validateLease, onEvents: onPulledEvents, sent: make(map[string]bool)}
 		for {
 			if q, err := store.ActiveFederationQuarantine(ctx, binding.ProjectID, db.FederationQuarantineDirectionPush); err == nil {
 				quarantinedEvents, eventErr := store.EventsByUIDs(ctx, binding.ProjectID, q.EventUIDs)
@@ -299,11 +299,6 @@ func pushDirectSpoke(
 			for len(pending) > 0 {
 				batch, adoptionBaseline, adoptionBaselineEndEventID, err := retained.nextBatch(ctx, &pending)
 				if err != nil {
-					if _, dependencyErr := errors.AsType[*retainedDependencyError](err); dependencyErr {
-						if quarantineErr := recordFederationPushQuarantine(ctx, store, binding.ProjectID, pending[:1], err); quarantineErr != nil {
-							return recordFederationSyncError(ctx, store, binding.ProjectID, errors.Join(err, quarantineErr))
-						}
-					}
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
 				if batch == nil {

@@ -141,9 +141,6 @@ func federationPushEventTypeCondition(column string) string {
 func (d *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string) error {
 	if len(supersededEventUIDs) == 0 {
 		return d.relayTx(ctx, func(tx *sql.Tx) error {
-			if err := db.RecordFederationAcceptedRecoverySnapshots(ctx, tx, projectID, d.InstanceUID(), nextCursor); err != nil {
-				return err
-			}
 			if err := advanceFederationPushCursor(ctx, tx, projectID, nextCursor); err != nil {
 				return err
 			}

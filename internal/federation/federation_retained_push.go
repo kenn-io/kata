@@ -3,31 +3,24 @@ package federation
 import (
 	"context"
 	"errors"
-	"fmt"
 	"maps"
 	"slices"
 
 	"go.kenn.io/kata/internal/api"
-	clientpkg "go.kenn.io/kata/internal/client"
-	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/httpurl"
 )
 
 // retainedPush carries the state that pushing a rejoined project's retained
 // history needs across the batches of one push run.
 type retainedPush struct {
-	store          db.Storage
-	binding        *db.FederationBinding
-	hubProjectID   int64
-	client         *Client
-	validateLease  func(context.Context) error
-	credentials    config.FederationCredentialStore
-	opts           clientpkg.Opts
-	onEvents       func(int64, []db.Event)
-	sent           map[string]bool
-	visiting       map[string]bool
-	commentHistory map[string]map[string]bool
+	store         db.Storage
+	binding       *db.FederationBinding
+	hubProjectID  int64
+	client        *Client
+	validateLease func(context.Context) error
+	onEvents      func(int64, []db.Event)
+	sent          map[string]bool
+	visiting      map[string]bool
 	// creation and recovery describe the batch nextBatch returned last.
 	creation, recovery bool
 }
@@ -72,13 +65,16 @@ func (r *retainedPush) nextBatch(ctx context.Context, pending *[]db.Event) ([]db
 }
 
 // prepareEventDependencies publishes retained link endpoints before their
-// relationship and checks replies whose parents may have been skipped at
-// rejoin.
+// relationship.
 func (r *retainedPush) prepareEventDependencies(ctx context.Context, event db.Event) error {
 	remote := db.FederationMoveSnapshotEvent(db.RemoteEvent{Type: event.Type, Payload: []byte(event.Payload)})
 	event.Type, event.Payload = remote.Type, string(remote.Payload)
 	if event.Type != "issue.unlinked" {
-		peers, err := db.DirectLinkPeers(db.FoldEvent{UID: event.UID, Type: event.Type, IssueUID: db.EventIssueUID(event.IssueUID), Payload: remote.Payload})
+		linkType := event.Type
+		if linkType == "issue.snapshot" {
+			linkType = "issue.created"
+		}
+		peers, err := db.DirectLinkPeers(db.FoldEvent{UID: event.UID, Type: linkType, IssueUID: db.EventIssueUID(event.IssueUID), Payload: remote.Payload})
 		if err != nil {
 			return err
 		}
@@ -92,7 +88,7 @@ func (r *retainedPush) prepareEventDependencies(ctx context.Context, event db.Ev
 			}
 		}
 	}
-	return r.prepareCommentDependencies(ctx, event)
+	return nil
 }
 
 func (r *retainedPush) publishRetainedIssue(ctx context.Context, issueUID string) error {
@@ -108,21 +104,11 @@ func (r *retainedPush) publishRetainedIssue(ctx context.Context, issueUID string
 	}
 	binding := *r.binding
 	if issue.ProjectID != binding.ProjectID {
-		binding, err = r.store.FederationBindingByProject(ctx, issue.ProjectID)
-		if errors.Is(err, db.ErrNotFound) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
+		return nil
 	}
 	retained, err := db.RetainedIssueEvent(ctx, r.store, binding, issue.ProjectID, issueUID,
 		[]string{"issue.created", "issue.snapshot", "issue.moved"}, nil)
 	if err != nil || !retained {
-		return err
-	}
-	client, hubProjectID, err := r.retainedEndpointClient(ctx, issueUID, binding)
-	if err != nil {
 		return err
 	}
 	if r.visiting == nil {
@@ -140,9 +126,7 @@ func (r *retainedPush) publishRetainedIssue(ctx context.Context, issueUID string
 	if created && r.onEvents != nil {
 		r.onEvents(binding.ProjectID, []db.Event{snapshot})
 	}
-	endpoint := *r
-	endpoint.binding, endpoint.client, endpoint.hubProjectID = &binding, client, hubProjectID
-	if err := endpoint.prepareEventDependencies(ctx, snapshot); err != nil {
+	if err := r.prepareEventDependencies(ctx, snapshot); err != nil {
 		return err
 	}
 	if err := validateFederationRunnerLease(ctx, r.validateLease); err != nil {
@@ -150,66 +134,12 @@ func (r *retainedPush) publishRetainedIssue(ctx context.Context, issueUID string
 	}
 	envelope := federationIngestEnvelope(snapshot)
 	envelope.EventID = sourceID
-	tokens, err := federationMoveSourceTokens(ctx, r.store, r.credentials, binding, client.baseURL, []db.Event{snapshot}, r.opts)
-	if err != nil {
-		return err
-	}
-	_, err = client.IngestProjectEventsWithOptions(ctx, hubProjectID, []api.FederationIngestEventEnvelope{envelope}, IngestProjectEventsOptions{MoveSourceTokens: tokens})
+	_, err = r.client.IngestProjectEventsWithOptions(ctx, r.hubProjectID, []api.FederationIngestEventEnvelope{envelope}, IngestProjectEventsOptions{})
 	if err != nil && !retainedInitializerAlreadyKnown(err, "issue.snapshot", issueUID) {
 		return err
 	}
 	r.sent[issueUID] = true
 	return nil
-}
-
-// retainedEndpointClient returns the hub client for a retained task's project.
-// Another local project must be pushing to the same hub with its own credential.
-func (r *retainedPush) retainedEndpointClient(ctx context.Context, issueUID string, binding db.FederationBinding) (*Client, int64, error) {
-	if binding.ProjectID == r.binding.ProjectID {
-		return r.client, r.hubProjectID, nil
-	}
-	problem := func(reason string) (*Client, int64, error) {
-		return nil, 0, fmt.Errorf("retained link endpoint %s: %s", issueUID, reason)
-	}
-	if !binding.IsDirectSpoke() || !binding.Enabled || !binding.PushEnabled {
-		return problem("its project has no enabled direct push binding")
-	}
-	destinationURL, err := httpurl.CanonicalHTTPBaseURL(r.client.baseURL)
-	if err != nil {
-		return problem("the current hub origin is invalid")
-	}
-	endpointURL, err := httpurl.CanonicalHTTPBaseURL(binding.HubURL)
-	if err != nil || endpointURL != destinationURL {
-		return problem("its project is bound to a different hub origin")
-	}
-	credential, found, err := r.credentials.FederationCredential(ctx, binding.HubProjectUID)
-	if err != nil {
-		return nil, 0, fmt.Errorf("retained link endpoint %s: read its hub credential: %w", issueUID, err)
-	}
-	if !found || credential.Token == "" || credential.LeavePending || credential.RelayEnrollmentPending {
-		return problem("its project has no active hub credential")
-	}
-	if credential.HubProjectID != 0 && credential.HubProjectID != binding.HubProjectID ||
-		credential.Actor != "" && credential.Actor != binding.Actor {
-		return problem("its hub credential does not match the project binding")
-	}
-	credentialURL := credential.HubURL
-	if credentialURL == "" {
-		credentialURL = binding.HubURL
-	}
-	credentialOrigin, err := httpurl.CanonicalHTTPBaseURL(credentialURL)
-	if err != nil || credentialOrigin != endpointURL {
-		return problem("its hub credential targets a different origin")
-	}
-	if credential.Capabilities != "" && !federationCredentialHasCapability(credential.Capabilities, "push") {
-		return problem("its hub credential has no push capability")
-	}
-	transportCredential := config.FederationTransportCredential(binding.HubURL, binding.HubProjectID, binding.AllowInsecure, credential)
-	client, err := NewClient(ctx, binding.HubURL, transportCredential.Token, clientOptsForCredential(r.opts, transportCredential))
-	if err != nil {
-		return nil, 0, fmt.Errorf("retained link endpoint %s: configure its hub credential: %w", issueUID, err)
-	}
-	return client, binding.HubProjectID, nil
 }
 
 // advance moves the push cursor past the first n pending events.

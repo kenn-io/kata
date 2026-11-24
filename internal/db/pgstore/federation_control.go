@@ -214,9 +214,6 @@ func (s *Store) AdvanceFederationPullCursor(ctx context.Context, projectID, next
 func (s *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string) error {
 	if len(supersededEventUIDs) == 0 {
 		return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
-			if err := db.RecordFederationAcceptedRecoverySnapshots(ctx, tx, projectID, s.InstanceUID(), nextCursor); err != nil {
-				return err
-			}
 			if err := updateFederationCursor(ctx, tx, projectID, nextCursor, true); err != nil {
 				return err
 			}
