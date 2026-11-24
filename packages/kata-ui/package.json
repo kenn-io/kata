@@ -19,6 +19,7 @@
   "files": [
     "README.md",
     "src/index.ts",
+    "src/authorName.ts",
     "src/types.ts",
     "src/compatibility.ts",
     "src/projectIssueDetail.ts",

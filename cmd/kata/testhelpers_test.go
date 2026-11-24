@@ -569,6 +569,7 @@ type IssueResponse struct {
 		ShortID  string  `json:"short_id"`
 		UID      string  `json:"uid"`
 		Title    string  `json:"title"`
+		Body     string  `json:"body"`
 		Owner    *string `json:"owner"`
 		Priority *int64  `json:"priority"`
 		Status   string  `json:"status"`

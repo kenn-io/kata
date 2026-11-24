@@ -4,6 +4,32 @@ import type { UISnapshot } from '../state/snapshot'
 import { normalizeKataUISnapshot } from './projection'
 
 describe('normalizeKataUISnapshot', () => {
+  test('projects the effective close independently of history', () => {
+    const wire = snapshot()
+    wire.selected!.history = []
+    wire.selected!.effective_close_event = {
+      id: 4,
+      uid: 'close-4',
+      origin_instance_uid: '',
+      project_id: 1,
+      project_uid: 'project-example',
+      project_name: 'example-project',
+      type: 'issue.closed',
+      actor: 'user-a',
+      payload: '{"reason":"done","message":"Finished"}',
+      hlc_counter: 0,
+      hlc_physical_ms: 1,
+      content_hash: '',
+      created_at: '2026-06-01T12:00:00Z',
+    }
+    const detail = normalizeKataUISnapshot(wire).selected_detail!
+    expect(detail.effective_close_event).toMatchObject({
+      event_uid: 'close-4',
+      actor: 'user-a',
+      payload: { message: 'Finished' },
+    })
+  })
+
   test.each([
     ['blocks hub', 4000, 16000],
     ['hub with back-link', 1000, 8000],
@@ -179,6 +205,13 @@ describe('normalizeKataUISnapshot', () => {
       expect(projection.selected_detail?.comments[0]).toMatchObject(attribution)
     },
   )
+
+  test('keeps the selected task content revision for guarded edits', () => {
+    const wire = snapshot()
+    wire.selected!.issue!.content_revision = 7
+
+    expect(normalizeKataUISnapshot(wire).selected_detail?.issue.content_revision).toBe(7)
+  })
 
   test('selects only open blockers for the collection column', () => {
     const wire = snapshot()

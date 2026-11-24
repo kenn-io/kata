@@ -18,6 +18,37 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
+func TestDigestActorFiltersRoundTripAndAuditActorDisplay(t *testing.T) {
+	f := newCronFixture(t)
+	const first = "Ana [member:11111111-1111-4111-8111-111111111111; enrollment:11111111-1111-4111-8111-111111111111]"
+	const second = "Ana [member:11111111-1111-4111-8111-111111111111; enrollment:22222222-2222-4222-8222-222222222222]"
+	for _, actor := range []string{first, second, "Ana", "Bob"} {
+		issue, _, err := f.store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: f.project.ID, Title: actor, Author: actor})
+		require.NoError(t, err)
+		if actor == first {
+			_, _, _, err = f.store.CloseIssue(t.Context(), issue.ID, "done", actor, "Completed", nil)
+			require.NoError(t, err)
+		}
+	}
+	audit := callWorkflowTool(t, f.session, "kata.audit_closes", map[string]any{"project": f.project.Name})["rows"].([]any)
+	require.Len(t, audit, 1)
+	require.Equal(t, "Ana", audit[0].(map[string]any)["actor"])
+	require.Equal(t, first, audit[0].(map[string]any)["actor_filter"])
+	args := map[string]any{"project": f.project.Name, "since": "2020-01-01T00:00:00Z"}
+	result := callAdministrationTool(t, f.session, "kata.digest", args)
+	digest := result["digests"].([]any)[0].(map[string]any)["digest"].(map[string]any)
+	actors := digest["actors"].([]any)
+	require.Len(t, actors, 2)
+	ana := actors[0].(map[string]any)
+	require.Equal(t, "Ana", ana["actor"])
+	filters := ana["actor_filters"].([]any)
+	require.ElementsMatch(t, []any{first, second, "Ana"}, filters)
+	args["actors"] = filters
+	filtered := callAdministrationTool(t, f.session, "kata.digest", args)["digests"].([]any)[0].(map[string]any)["digest"].(map[string]any)["actors"].([]any)
+	require.Len(t, filtered, 1)
+	require.Equal(t, ana, filtered[0])
+}
+
 func TestAdministrationToolsRoundTripAgainstDaemon(t *testing.T) {
 	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)

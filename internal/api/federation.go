@@ -13,6 +13,7 @@ type FederationSearchRequest struct {
 	ProjectID     int64    `path:"project_id"`
 	Authorization string   `header:"Authorization"`
 	Query         string   `query:"q" required:"true"`
+	Auto          bool     `query:"auto,omitempty" doc:"Fall back to keyword search when the hub cannot run semantic search. Absent means strict semantic."`
 	Limit         int      `query:"limit,omitempty"`
 	Status        string   `query:"status,omitempty" enum:"open,closed"`
 	Labels        []string `query:"label,explode"`
@@ -21,17 +22,23 @@ type FederationSearchRequest struct {
 
 // FederationSearchHit contains a ranked issue from a hub search.
 type FederationSearchHit struct {
-	Issue  db.Issue `json:"issue"`
-	Score  float64  `json:"score"`
-	WebURL string   `json:"web_url,omitempty"`
+	Issue     db.Issue `json:"issue"`
+	Score     float64  `json:"score"`
+	WebURL    string   `json:"web_url,omitempty"`
+	MatchedIn []string `json:"matched_in,omitempty"`
+}
+
+// FederationSearchResponseBody contains the hub's search results and mode.
+type FederationSearchResponseBody struct {
+	Hits           []FederationSearchHit `json:"hits"`
+	Bounded        bool                  `json:"bounded"`
+	Mode           string                `json:"mode,omitempty"`
+	DegradedReason string                `json:"degraded_reason,omitempty"`
 }
 
 // FederationSearchResponse contains the hub's ranked issues and search bound.
 type FederationSearchResponse struct {
-	Body struct {
-		Hits    []FederationSearchHit `json:"hits"`
-		Bounded bool                  `json:"bounded"`
-	}
+	Body FederationSearchResponseBody
 }
 
 // EnableProjectFederationRequest enables pull federation on one hub project.

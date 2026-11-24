@@ -87,6 +87,17 @@ describe('IssueProperties', () => {
     cleanup()
   })
 
+  it('shows the status and offers missing properties on a closed task', () => {
+    const issue = makeIssue({ status: 'closed' })
+    issue.labels = []
+    renderProperties({ issue })
+    expect(screen.getByText('Status')).toBeTruthy()
+    expect(screen.getByText('Closed')).toBeTruthy()
+    for (const name of ['Priority', 'Scheduled', 'Due', 'Labels']) {
+      expect(screen.getByRole('button', { name })).toBeTruthy()
+    }
+  })
+
   it('shows the projected day for a zoned schedule in the property pill', () => {
     renderProperties({
       issue: makeIssue({
@@ -117,7 +128,6 @@ describe('IssueProperties', () => {
     })
     await fireEvent.click(screen.getByRole('button', { name: 'Edit scheduled' }))
     expect(screen.getByRole('button', { name: /Scheduled:/ }).textContent).toContain('Sep 1')
-    await fireEvent.click(screen.getByRole('button', { name: /Scheduled:/ }))
     await fireEvent.click(screen.getByRole('gridcell', { name: /September 1, 2026/ }))
     expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', { scheduled_on: '2026-09-01' })
   })
@@ -148,34 +158,9 @@ describe('IssueProperties', () => {
     expect(onAddLabel).toHaveBeenCalledWith('issue-1', 'blocked')
     await view.rerender({ draftResetGeneration: 1 })
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Edit labels' }))
     await fireEvent.click(screen.getByRole('button', { name: 'Remove label review' }))
 
     expect(onRemoveLabel).toHaveBeenCalledWith('issue-1', 'review')
-  })
-
-  it('keeps labels passive until label editing is enabled', async () => {
-    const onRemoveLabel = vi.fn()
-    renderProperties({ onRemoveLabel })
-
-    const labels = screen.getByRole('list', { name: 'Labels' })
-    const labelText = within(labels).getByText('review')
-    expect(labelText.closest('button')).toBeNull()
-    expect(within(labels).queryByRole('button', { name: 'Remove label review' })).toBeNull()
-
-    await fireEvent.click(labelText)
-    expect(onRemoveLabel).not.toHaveBeenCalled()
-
-    await fireEvent.click(screen.getByRole('button', { name: 'Edit labels' }))
-    const removeButton = within(labels).getByRole('button', { name: 'Remove label review' })
-    expect(removeButton.classList.contains('kit-chip')).toBe(true)
-    expect(removeButton.classList.contains('kata-label-chip')).toBe(true)
-    expect(removeButton.textContent).toContain('review')
-    await fireEvent.click(removeButton)
-    expect(onRemoveLabel).toHaveBeenCalledWith('issue-1', 'review')
-
-    await fireEvent.click(screen.getByRole('button', { name: 'Done editing labels' }))
-    expect(within(labels).queryByRole('button', { name: 'Remove label review' })).toBeNull()
   })
 
   it('keeps the label draft visible when label creation fails', async () => {
@@ -202,36 +187,6 @@ describe('IssueProperties', () => {
     expect(screen.queryByLabelText('New label')).toBeNull()
   })
 
-  it('persists due date and priority changes', async () => {
-    const onPatchMetadata = vi.fn(async () => true)
-    const onSetPriority = vi.fn(async () => true)
-
-    render(IssueProperties, {
-      props: {
-        issue: makeIssue({ metadata: { deadline_on: '2026-06-05' } }),
-        ownerOptions: [],
-        onPatchMetadata,
-        onAssignOwner: vi.fn(async () => true),
-        onUnassignOwner: vi.fn(async () => true),
-        onSetPriority,
-        onAddLabel: vi.fn(async () => true),
-        onRemoveLabel: vi.fn(),
-      },
-    })
-
-    await fireEvent.click(screen.getByRole('button', { name: 'Edit due date' }))
-    await fireEvent.click(screen.getByRole('button', { name: /Due:/ }))
-    await fireEvent.click(screen.getByRole('gridcell', { name: /June 8, 2026/ }))
-
-    expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', { deadline_on: '2026-06-08' })
-
-    await fireEvent.click(screen.getByRole('button', { name: 'Edit priority' }))
-    await fireEvent.click(screen.getByRole('combobox', { name: /Priority/ }))
-    await fireEvent.click(screen.getByRole('option', { name: 'P1' }))
-
-    expect(onSetPriority).toHaveBeenCalledWith('issue-1', 1)
-  })
-
   it.each([
     ['deadline UTC instant', 'deadline_on', 'Edit due date', 'Due', '2026-09-01T00:30:00Z'],
     ['deadline local time', 'deadline_on', 'Edit due date', 'Due', '2026-09-01T09:00'],
@@ -255,17 +210,16 @@ describe('IssueProperties', () => {
       })
 
       await fireEvent.click(screen.getByRole('button', { name: edit }))
-      const trigger = screen.getByRole('button', { name: new RegExp(`${picker}: Aug 31`) })
-      await fireEvent.click(trigger)
+      expect(screen.getByRole('button', { name: new RegExp(`${picker}: Aug 31`) })).toBeTruthy()
       await fireEvent.click(screen.getByRole('gridcell', { name: /August 31, 2026/ }))
       expect(onPatchMetadata).not.toHaveBeenCalled()
     },
   )
 
   it.each([
-    ['scheduled', 'scheduled_on', 'Edit scheduled', 'Scheduled:'],
-    ['deadline', 'deadline_on', 'Edit due date', 'Due:'],
-  ])('keeps the zone when changing the day of a timed %s', async (_, key, edit, picker) => {
+    ['scheduled', 'scheduled_on', 'Edit scheduled'],
+    ['deadline', 'deadline_on', 'Edit due date'],
+  ])('keeps the zone when changing the day of a timed %s', async (_, key, edit) => {
     const onPatchMetadata = vi.fn(async () => true)
     renderProperties({
       issue: makeIssue({
@@ -275,7 +229,6 @@ describe('IssueProperties', () => {
       onPatchMetadata,
     })
     await fireEvent.click(screen.getByRole('button', { name: edit }))
-    await fireEvent.click(screen.getByRole('button', { name: new RegExp(picker) }))
     await fireEvent.click(screen.getByRole('gridcell', { name: /June 10, 2026/ }))
     expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', { [key]: '2026-06-10[Europe/Paris]' })
   })
@@ -285,7 +238,6 @@ describe('IssueProperties', () => {
     const view = renderProperties({ onPatchMetadata, draftResetGeneration: 0 })
 
     await fireEvent.click(screen.getByRole('button', { name: 'Edit scheduled' }))
-    await fireEvent.click(screen.getByRole('button', { name: /Scheduled:/ }))
     await fireEvent.click(screen.getByRole('gridcell', { name: /June 10, 2026/ }))
 
     expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', { scheduled_on: '2026-06-10' })
@@ -300,7 +252,6 @@ describe('IssueProperties', () => {
     expect(screen.queryByRole('button', { name: /Scheduled:/ })).toBeNull()
 
     await fireEvent.click(screen.getByRole('button', { name: 'Edit due date' }))
-    await fireEvent.click(screen.getByRole('button', { name: /Due:/ }))
     await fireEvent.click(screen.getByRole('gridcell', { name: /June 8, 2026/ }))
 
     expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', { deadline_on: '2026-06-08' })
@@ -313,6 +264,24 @@ describe('IssueProperties', () => {
       }),
     })
     expect(screen.queryByRole('button', { name: /Due:/ })).toBeNull()
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Priority' }))
+    await fireEvent.click(await screen.findByRole('menuitemradio', { name: 'P1' }))
+    expect(screen.getByRole('button', { name: 'Priority: P1' })).toBeTruthy()
+
+    await view.rerender({
+      draftResetGeneration: 3,
+      issue: makeIssue({ owner: 'user-a', priority: 3 }),
+    })
+    expect(screen.getByRole('button', { name: 'Priority: P3' })).toBeTruthy()
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Add label' }))
+    await fireEvent.input(screen.getByLabelText('New label'), { target: { value: 'urgent' } })
+    await fireEvent.keyDown(screen.getByLabelText('New label'), { key: 'Enter' })
+    expect((screen.getByLabelText('New label') as HTMLInputElement).value).toBe('urgent')
+
+    await view.rerender({ draftResetGeneration: 4 })
+    expect(screen.queryByLabelText('New label')).toBeNull()
   })
 
   it('clears date properties and closes date editors on Escape', async () => {
@@ -362,7 +331,6 @@ describe('IssueProperties', () => {
     })
 
     await fireEvent.click(screen.getByRole('button', { name: 'Edit scheduled' }))
-    await fireEvent.click(screen.getByRole('button', { name: /Scheduled:/ }))
     await fireEvent.click(screen.getByRole('gridcell', { name: /June 10, 2026/ }))
     expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', { scheduled_on: '2026-06-10' })
 
@@ -425,10 +393,8 @@ describe('IssueProperties', () => {
       onClaimAssignment,
     })
 
-    expect(screen.getByText('Assignment expires')).toBeTruthy()
-    expect(screen.getByText(/Jun 1.*1:00/)).toBeTruthy()
+    expect(screen.getByText(/until.*Jun 1/)).toBeTruthy()
 
-    expect(screen.getByRole('combobox', { name: /Renew assignment/ })).toBeTruthy()
     await fireEvent.click(screen.getByRole('combobox', { name: /Assignment duration/ }))
     await fireEvent.click(screen.getByRole('option', { name: '1 hour' }))
 
@@ -478,15 +444,12 @@ describe('IssueProperties', () => {
 
     await view.rerender({ actionsDisabled: false })
     await fireEvent.keyDown(screen.getByRole('button', { name: /Scheduled:/ }), { key: 'Escape' })
-    await fireEvent.click(screen.getByRole('button', { name: 'Edit priority' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Priority' }))
     await view.rerender({ actionsDisabled: true })
-    expect((screen.getByRole('combobox', { name: /Priority/ }) as HTMLButtonElement).disabled).toBe(
-      true,
-    )
+    expect(
+      (screen.getByRole('button', { name: /^Priority: / }) as HTMLButtonElement).disabled,
+    ).toBe(true)
 
-    await view.rerender({ actionsDisabled: false })
-    await fireEvent.click(screen.getByRole('button', { name: 'Edit labels' }))
-    await view.rerender({ actionsDisabled: true })
     const removeLabel = screen.getByRole('button', {
       name: 'Remove label review',
     }) as HTMLButtonElement
@@ -544,51 +507,16 @@ describe('IssueProperties', () => {
     expect((screen.getByRole('combobox', { name: 'Owner' }) as HTMLInputElement).value).toBe('')
   })
 
-  it('resets successful date, priority, and label drafts only after accepted replacement', async () => {
-    const view = renderProperties({ draftResetGeneration: 0 })
-
-    await fireEvent.click(screen.getByRole('button', { name: 'Edit scheduled' }))
-    await fireEvent.click(screen.getByRole('button', { name: /Scheduled:/ }))
-    await fireEvent.click(screen.getByRole('gridcell', { name: /June 10, 2026/ }))
-    expect(screen.getByRole('button', { name: /Scheduled: Jun 10/ })).toBeTruthy()
-
-    await view.rerender({
-      draftResetGeneration: 1,
-      issue: makeIssue({
-        owner: 'user-a',
-        metadata: { scheduled_on: '2026-06-10', deadline_on: '2026-06-05' },
-      }),
-    })
-    expect(screen.queryByRole('button', { name: /Scheduled:/ })).toBeNull()
-
-    await fireEvent.click(screen.getByRole('button', { name: 'Edit priority' }))
-    await fireEvent.click(screen.getByRole('combobox', { name: /Priority/ }))
-    await fireEvent.click(screen.getByRole('option', { name: 'P1' }))
-    expect(screen.getByRole('combobox', { name: /Priority: P1/ })).toBeTruthy()
-
-    await view.rerender({
-      draftResetGeneration: 2,
-      issue: makeIssue({ owner: 'user-a', priority: 1 }),
-    })
-    expect(screen.queryByRole('combobox', { name: /Priority/ })).toBeNull()
-
-    await fireEvent.click(screen.getByRole('button', { name: 'Add label' }))
-    await fireEvent.input(screen.getByLabelText('New label'), { target: { value: 'urgent' } })
-    await fireEvent.keyDown(screen.getByLabelText('New label'), { key: 'Enter' })
-    expect((screen.getByLabelText('New label') as HTMLInputElement).value).toBe('urgent')
-
-    await view.rerender({ draftResetGeneration: 3 })
-    expect(screen.queryByLabelText('New label')).toBeNull()
-  })
-
-  it('clears the priority through the detail property control', async () => {
+  it.each([
+    ['P1', 1],
+    ['No priority', null],
+  ])('sets priority to %s through the detail property control', async (label, priority) => {
     const onSetPriority = vi.fn(async () => true)
     renderProperties({ issue: makeIssue({ priority: 2 }), onSetPriority })
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Edit priority' }))
-    await fireEvent.click(screen.getByRole('combobox', { name: /Priority/ }))
-    await fireEvent.click(screen.getByRole('option', { name: 'No priority' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Priority: P2' }))
+    await fireEvent.click(await screen.findByRole('menuitemradio', { name: label }))
 
-    expect(onSetPriority).toHaveBeenCalledWith('issue-1', null)
+    expect(onSetPriority).toHaveBeenCalledWith('issue-1', priority)
   })
 })

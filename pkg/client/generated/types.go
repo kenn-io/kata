@@ -3061,9 +3061,10 @@ func (f FederationRootKeyRepinResult) Validate() error {
 }
 
 type FederationSearchHit struct {
-	Issue  Issue   `json:"issue"`
-	Score  float64 `json:"score"`
-	WebURL *string `json:"web_url,omitempty"`
+	Issue     Issue    `json:"issue"`
+	MatchedIn []string `json:"matched_in,omitempty"`
+	Score     float64  `json:"score"`
+	WebURL    *string  `json:"web_url,omitempty"`
 }
 
 func (f FederationSearchHit) Validate() error {
@@ -3080,8 +3081,10 @@ func (f FederationSearchHit) Validate() error {
 }
 
 type FederationSearchResponseBody struct {
-	Bounded bool                  `json:"bounded"`
-	Hits    []FederationSearchHit `json:"hits" validate:"required"`
+	Bounded        bool                  `json:"bounded"`
+	DegradedReason *string               `json:"degraded_reason,omitempty"`
+	Hits           []FederationSearchHit `json:"hits" validate:"required"`
+	Mode           *string               `json:"mode,omitempty"`
 }
 
 func (f FederationSearchResponseBody) Validate() error {
@@ -7791,13 +7794,14 @@ func (u UIReferencesResponseBody) Validate() error {
 }
 
 type UISelectedAuthority struct {
-	Comments    []CommentOut `json:"comments" validate:"required"`
-	History     []Event      `json:"history" validate:"required"`
-	Issue       *UIIssue     `json:"issue,omitempty"`
-	Labels      []IssueLabel `json:"labels" validate:"required"`
-	Links       []UILink     `json:"links" validate:"required"`
-	Recurrences []Recurrence `json:"recurrences" validate:"required"`
-	State       string       `json:"state" validate:"required"`
+	Comments            []CommentOut `json:"comments" validate:"required"`
+	EffectiveCloseEvent *Event       `json:"effective_close_event,omitempty"`
+	History             []Event      `json:"history" validate:"required"`
+	Issue               *UIIssue     `json:"issue,omitempty"`
+	Labels              []IssueLabel `json:"labels" validate:"required"`
+	Links               []UILink     `json:"links" validate:"required"`
+	Recurrences         []Recurrence `json:"recurrences" validate:"required"`
+	State               string       `json:"state" validate:"required"`
 }
 
 func (u UISelectedAuthority) Validate() error {
@@ -7809,6 +7813,13 @@ func (u UISelectedAuthority) Validate() error {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append(fmt.Sprintf("Comments[%d]", i), err)
+			}
+		}
+	}
+	if u.EffectiveCloseEvent != nil {
+		if v, ok := any(u.EffectiveCloseEvent).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("EffectiveCloseEvent", err)
 			}
 		}
 	}

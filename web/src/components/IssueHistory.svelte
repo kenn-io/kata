@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { KataTaskEvent } from '../lib/kata/types'
+  import DetailSection from './DetailSection.svelte'
   import { formatTimestamp } from '@kenn-io/kit-ui/utils/time'
 
   import { closingAttachments } from '../lib/history/attachments'
@@ -8,12 +9,19 @@
 
   interface Props {
     events: readonly KataTaskEvent[]
+    selfActor?: string | undefined
     metadata?: Record<string, unknown> | undefined
     attachmentLinks?: boolean | undefined
     pending?: boolean | undefined
   }
 
-  let { events, metadata = {}, attachmentLinks = true, pending = false }: Props = $props()
+  let {
+    events,
+    selfActor = undefined,
+    metadata = {},
+    attachmentLinks = true,
+    pending = false,
+  }: Props = $props()
 
   const fullTimestamp = new Intl.DateTimeFormat(undefined, {
     dateStyle: 'full',
@@ -64,14 +72,16 @@
   }
 </script>
 
-<section class="events" aria-labelledby="kata-events-title">
-  <h3 id="kata-events-title">Events</h3>
+<DetailSection
+  title="History"
+  count={pending ? undefined : events.length}
+  empty={!pending && events.length === 0 ? 'No events' : undefined}
+  folded={pending ? undefined : true}
+>
   {#if pending}
     <p role="status" aria-label="Loading events">Loading events…</p>
-  {:else if events.length === 0}
-    <p>No events</p>
   {:else}
-    <ul>
+    <ul class="events">
       {#each events as event (event.event_uid)}
         {@const descriptor = describeKataEvent(event)}
         {@const EventIcon = descriptor.icon}
@@ -81,7 +91,9 @@
           <span class="event-icon" aria-hidden="true">
             <EventIcon size={14} strokeWidth={1.8} />
           </span>
-          <span class="event-label">{descriptor.label}</span>
+          <span class="event-label"
+            >{event.actor === selfActor ? 'You' : event.actor} {descriptor.label}</span
+          >
           {#if time}
             <time class="event-time" datetime={event.created_at} title={time.full}
               >{time.short}</time
@@ -112,23 +124,16 @@
       {/each}
     </ul>
   {/if}
-</section>
+</DetailSection>
 
 <style>
-  .events h3 {
-    margin: 0 0 var(--space-4);
-    color: var(--text-primary);
-    font-size: var(--font-size-md);
-    font-weight: var(--font-weight-semibold);
-  }
-
-  .events p {
+  p {
     margin: 0;
-    color: var(--text-muted);
+    color: var(--text-secondary);
     font-size: var(--font-size-sm);
   }
 
-  .events ul {
+  .events {
     margin: 0;
     padding: 0;
     color: var(--text-secondary);

@@ -111,10 +111,13 @@ it('caps image previews at 20 MiB and shows the CLI hint above 100 MiB', () => {
       [id.slice(0, -1) + 'C']: { ...entry, name: 'large.png', size: 101 << 20 },
     },
     baseURL: '/attachments',
+    issueRef: 'example-project#abcd',
     fetchAttachment: vi.fn(),
   })
   expect(screen.queryByRole('button', { name: /Preview/ })).toBeNull()
-  expect(screen.getByText(/kata docbank attachments get/)).toBeTruthy()
+  expect(
+    screen.getByText(`kata docbank attachments get example-project#abcd ${id.slice(0, -1)}C`),
+  ).toBeTruthy()
 })
 it('shows an unavailable state while preserving name, type and size', async () => {
   render(IssueAttachments, {
@@ -128,7 +131,7 @@ it('shows an unavailable state while preserving name, type and size', async () =
   await fireEvent.click(screen.getByRole('button', { name: 'Preview screen.png' }))
   await waitFor(() => expect(screen.getByText('docbank_not_configured')).toBeTruthy())
   expect(screen.getByText('screen.png')).toBeTruthy()
-  expect(screen.getByText(/12 bytes/)).toBeTruthy()
+  expect(screen.getByText('12 B · PNG image')).toBeTruthy()
 })
 it('uploads the selected batch through a refresh and shows per-file progress and errors', async () => {
   let finish!: () => void
@@ -203,7 +206,7 @@ it('keeps file details without actions when Docbank is unavailable', () => {
     uploadAttachment: vi.fn(),
   })
   expect(screen.getByText('screen.png')).toBeTruthy()
-  expect(screen.getByText('image/png · 12 bytes')).toBeTruthy()
+  expect(screen.getByText('12 B · PNG image')).toBeTruthy()
   expect(screen.queryByRole('button')).toBeNull()
 })
 

@@ -5,6 +5,8 @@ import type { FederationSearchHit } from './federationSearchHit.ts'
 
 export interface FederationSearchResponseBody {
   bounded: boolean
+  degraded_reason?: string
   hits: FederationSearchHit[]
+  mode?: string
   [key: string]: unknown
 }

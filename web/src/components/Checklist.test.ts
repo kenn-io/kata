@@ -38,41 +38,24 @@ describe('Checklist', () => {
     cleanup()
   })
 
-  it('stays hidden until an empty checklist is revealed', async () => {
-    const { rerender } = render(Checklist, {
-      props: {
-        issue: makeIssue(),
-        revealed: false,
-        onPatchMetadata: vi.fn(async () => true),
-        onReveal: vi.fn(),
-      },
-    })
-
-    expect(screen.queryByRole('region', { name: 'Checklist' })).toBeNull()
-
-    await rerender({
-      issue: makeIssue(),
-      revealed: true,
-      onPatchMetadata: vi.fn(async () => true),
-      onReveal: vi.fn(),
-    })
-
-    expect(screen.getByRole('region', { name: 'Checklist' })).toBeTruthy()
+  it('reveals the add field when requested', async () => {
+    render(Checklist, { props: { issue: makeIssue(), onPatchMetadata: vi.fn(async () => true) } })
+    expect(screen.queryByRole('textbox', { name: 'New checklist item' })).toBeNull()
+    await fireEvent.click(screen.getByRole('button', { name: 'Add item' }))
+    expect(screen.getByRole('textbox', { name: 'New checklist item' })).toBeTruthy()
   })
 
   it('full-replaces checklist metadata for add, toggle, and remove', async () => {
     const onPatchMetadata = vi.fn(async () => true)
-    const onReveal = vi.fn()
 
     const { rerender } = render(Checklist, {
       props: {
         issue: makeIssue([{ id: 'item-1', text: 'Send', done: false }]),
-        revealed: false,
         onPatchMetadata,
-        onReveal,
       },
     })
 
+    await fireEvent.click(screen.getByRole('button', { name: 'Add item' }))
     await fireEvent.input(screen.getByLabelText('New checklist item'), {
       target: { value: 'Confirm' },
     })
@@ -91,10 +74,8 @@ describe('Checklist', () => {
         { id: 'item-1', text: 'Send', done: false },
         { id: 'item-2', text: 'Confirm', done: false },
       ]),
-      revealed: false,
       draftResetGeneration: 1,
       onPatchMetadata,
-      onReveal,
     })
     expect((screen.getByLabelText('New checklist item') as HTMLInputElement).value).toBe('')
     await fireEvent.click(screen.getByLabelText('Send'))
@@ -108,15 +89,35 @@ describe('Checklist', () => {
 
     await rerender({
       issue: makeIssue([{ id: 'item-1', text: 'Send', done: false }]),
-      revealed: false,
       onPatchMetadata,
-      onReveal,
     })
     await fireEvent.click(screen.getByRole('button', { name: 'Remove Send' }))
 
     expect(onPatchMetadata).toHaveBeenLastCalledWith('issue-1', { checklist: [] })
-    await waitFor(() => {
-      expect(onReveal).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a failed rename draft for retry', async () => {
+    const onPatchMetadata = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true)
+    render(Checklist, {
+      props: { issue: makeIssue([{ id: 'item-1', text: 'Send', done: false }]), onPatchMetadata },
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Rename Send' }))
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Rename checklist item' }), {
+      target: { value: 'Send report' },
+    })
+    await fireEvent.keyDown(screen.getByRole('textbox', { name: 'Rename checklist item' }), {
+      key: 'Enter',
+    })
+    await vi.waitFor(() => expect(onPatchMetadata).toHaveBeenCalledOnce())
+    expect(
+      (screen.getByRole('textbox', { name: 'Rename checklist item' }) as HTMLInputElement).value,
+    ).toBe('Send report')
+    await fireEvent.keyDown(screen.getByRole('textbox', { name: 'Rename checklist item' }), {
+      key: 'Enter',
+    })
+    expect(onPatchMetadata).toHaveBeenCalledTimes(2)
+    expect(onPatchMetadata).toHaveBeenLastCalledWith('issue-1', {
+      checklist: [{ id: 'item-1', text: 'Send report', done: false }],
     })
   })
 
@@ -124,20 +125,17 @@ describe('Checklist', () => {
     const { rerender } = render(Checklist, {
       props: {
         issue: makeIssue(),
-        revealed: true,
         onPatchMetadata: vi.fn(async () => true),
-        onReveal: vi.fn(),
       },
     })
 
+    await fireEvent.click(screen.getByRole('button', { name: 'Add item' }))
     await fireEvent.input(screen.getByLabelText('New checklist item'), {
       target: { value: 'Leaked draft' },
     })
     await rerender({
       issue: makeIssue([], { uid: 'issue-2', short_id: 'I-2', qualified_id: 'example-project#2' }),
-      revealed: true,
       onPatchMetadata: vi.fn(async () => true),
-      onReveal: vi.fn(),
     })
 
     expect((screen.getByLabelText('New checklist item') as HTMLInputElement).value).toBe('')
@@ -148,12 +146,11 @@ describe('Checklist', () => {
     render(Checklist, {
       props: {
         issue: makeIssue(),
-        revealed: true,
         onPatchMetadata,
-        onReveal: vi.fn(),
       },
     })
 
+    await fireEvent.click(screen.getByRole('button', { name: 'Add item' }))
     await fireEvent.input(screen.getByLabelText('New checklist item'), {
       target: { value: 'Keep this draft' },
     })
@@ -169,13 +166,12 @@ describe('Checklist', () => {
     const view = render(Checklist, {
       props: {
         issue: makeIssue(),
-        revealed: true,
         draftFenceGeneration: 0,
         onPatchMetadata: vi.fn(async () => true),
-        onReveal: vi.fn(),
       },
     })
 
+    await fireEvent.click(screen.getByRole('button', { name: 'Add item' }))
     await fireEvent.input(screen.getByLabelText('New checklist item'), {
       target: { value: 'Old authority item' },
     })
@@ -189,10 +185,8 @@ describe('Checklist', () => {
     render(Checklist, {
       props: {
         issue: makeIssue([{ id: 'item-1', text: 'Send', done: false }]),
-        revealed: false,
         disabled: true,
         onPatchMetadata,
-        onReveal: vi.fn(),
       },
     })
 
@@ -200,8 +194,9 @@ describe('Checklist', () => {
     expect(
       (screen.getByRole('button', { name: 'Remove Send' }) as HTMLButtonElement).disabled,
     ).toBe(true)
-    expect((screen.getByLabelText('New checklist item') as HTMLInputElement).disabled).toBe(true)
-    expect((screen.getByRole('button', { name: 'Add' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Add item' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    )
 
     await fireEvent.click(screen.getByLabelText('Send'))
     expect(onPatchMetadata).not.toHaveBeenCalled()

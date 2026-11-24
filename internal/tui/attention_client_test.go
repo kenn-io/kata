@@ -105,6 +105,24 @@ func TestAttentionClientNotificationContext(t *testing.T) {
 	}
 }
 
+func TestAttentionFederatedSender(t *testing.T) {
+	m, _ := attentionFixture(t)
+	actor := "Ana [member:11111111-1111-4111-8111-111111111111; enrollment:11111111-1111-4111-8111-111111111111]"
+	raw, err := json.Marshal(map[string]any{"from": actor, "message": "Please review"})
+	require.NoError(t, err)
+	m.api = newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		respondJSON(t, w, map[string]any{"issues": []any{map[string]any{"uid": "01ARZ3NDEKTSV4RRFFQ69G5FAA", "short_id": "5faa", "project_id": 7, "status": "open", "title": "Review", "metadata": map[string]any{notification.MetadataKey("alex"): jsontext.Value(raw)}}}})
+	})
+	m, cmd := m.transitionToAttention()
+	m = loadAttention(m, cmd)
+	require.NoError(t, m.attention.err)
+	require.Len(t, m.attention.rows, 1)
+	body := stripANSI(m.View().Content)
+	require.Contains(t, body, "Ana")
+	require.NotContains(t, body, "member:")
+	require.Equal(t, string(raw), string(m.attention.rows[0].raw))
+}
+
 func TestAttentionClientClear(t *testing.T) {
 	for _, version := range []string{"0.12.0", "", "bad", "0.13.0", "0.28.0", "failed"} {
 		t.Run(version, func(t *testing.T) {

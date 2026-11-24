@@ -1,22 +1,22 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-11-20
+last_edited: 2026-11-21
 ---
 
 # Configuration
 
-kata configuration is split between environment variables, committed workspace
-bindings, local per-machine overrides, and daemon config.
+Kata splits its configuration across environment variables, committed workspace
+bindings, local per-machine overrides, and daemon settings.
 
 ## Validation by command
 
-TUI preferences and connection, federation spoke authentication and
-`kata federation embedding-recipe`, and doctor's daemon lookup read only the
-configuration sections they use. They still reject bad values and unknown keys
-in the sections they read, including `[tui]`, `[search]`, and the daemon catalog.
-Other sections are checked only by `kata doctor`'s configuration check and
-`kata daemon start`, which validate the full configuration.
+Several commands read only the configuration sections they use: TUI preferences
+and connection, federation spoke authentication,
+`kata federation embedding-recipe`, and `kata doctor`'s daemon lookup. Those
+commands still reject bad values and unknown keys in the sections they read,
+including `[tui]`, `[search]`, and the daemon catalog. Only `kata doctor`'s
+configuration check and `kata daemon start` validate the full configuration.
 
 ## Closing-session transcripts
 
@@ -33,68 +33,73 @@ enabled = true
 agentsview_url = "https://archive.example"
 ```
 
-Project entries use the resolved issue's current project, including when an old
-reference points to an issue that moved. An absent entry uses the global
-settings. A present entry inherits `enabled` when omitted and uses its own
-`agentsview_url`. An empty, omitted, or invalid URL records only the session
-identifier. Set a project's `enabled` to `false` to omit its transcript.
-For keyed retries, the client still sends the candidate session identifier to
-the daemon; an opted-out close stores only its fingerprint, not the transcript.
-If the issue or project lookup fails, Kata warns and closes without provenance.
-An explicit process override of `true` or `auto` records the identifier in
-that case.
-If the issue moves after selection and before close, the close returns an
-`issue_moved` conflict. Resolve the issue and retry with the same key.
+Project entries match the resolved issue's current project, including when an
+old reference points to an issue that moved. When a project has no entry, Kata
+uses the global settings. When an entry is present, it inherits `enabled` if
+you omit it and uses its own `agentsview_url`. If the URL is empty, omitted, or
+invalid, Kata records only the session identifier. To omit a project's
+transcript, set its `enabled` key to `false`. For keyed retries, the client
+still sends the candidate session identifier to the daemon, and an opted-out
+close stores only its fingerprint rather than the transcript. If the issue or
+project lookup fails, Kata warns and closes without provenance, though an
+explicit process override of `true` or `auto` still records the identifier. If
+the issue moves between selection and close, the close returns an `issue_moved`
+conflict; resolve the issue and retry with the same key.
 
-Claude Code and Codex transcripts need HTTP API `0.26.0` or newer. Other
-agents need HTTP API `0.34.0` or newer.
-Project targets need HTTP API `0.52.0` or newer. With an older daemon, a
-project without an entry retains the global transcript settings. A configured
-project or failed project lookup closes without a transcript. A move between
-lookup and close on an older daemon can record the former project's global
-transcript in the destination project. A keyed retry after such a move can
-conflict if the destination has an entry.
+Claude Code and Codex transcripts need HTTP API `0.26.0` or newer, while other
+agents need HTTP API `0.34.0` or newer. Project targets need HTTP API `0.52.0`
+or newer. Against an older daemon, a project without an entry keeps the global
+transcript settings, while a configured project or a failed project lookup
+closes without a transcript. On an older daemon, a move between lookup and
+close can record the former project's global transcript in the destination
+project, and a keyed retry after that move can conflict if the destination has
+an entry.
 
-This is off by default and needs no daemon restart. With `enabled = true`,
-every close that finds no current session warns on stderr. Set
-`enabled = "auto"` to attach a transcript when a session is named and stay
-quiet when none is; a session that is named but invalid still warns.
-In the file, `enabled` takes `true`, `false` or `"auto"`. Only `kata close`
-checks it: any other value warns there and skips attachment, but never stops
-the daemon or other commands. A project entry's `enabled` takes the same
-values and overrides the global mode for that project; `"auto"` there records
-when a session is named. A close that names no session warns only when some
-target is `true`, since kata does not look up the issue's project when no
-session is named; with only `auto` and `false` targets it stays quiet.
+Transcript attachment is off by default and needs no daemon restart. When you
+set `enabled = true`, every close that finds no current session warns on stderr.
+Set `enabled = "auto"` to attach a transcript when a session is named and stay
+quiet when none is; a named session that is invalid still warns. In the config
+file, `enabled` accepts `true`, `false`, or `"auto"`. Only `kata close` checks
+it: any other value produces a warning and skips attachment without stopping
+the daemon or other commands. A project entry's `enabled` key takes the same
+values and overrides the global mode for that project, and `"auto"` records a
+transcript when a session is named. Because Kata does not look up the issue's
+project when no session is named, a close with no named session warns only when
+at least one target is `true`. When every target is `auto` or `false`, it stays
+quiet.
 
-Before attaching a transcript, `kata close` checks the daemon's API version. An older daemon
-causes a warning on stderr, and the close proceeds without the transcript.
-With attachment disabled, close requests remain unchanged.
+Before attaching a transcript, `kata close` checks the daemon's API version.
+With an older daemon, Kata warns on stderr and completes the close without the
+transcript. When attachment is disabled, close requests stay unchanged.
 
-To turn attachment on or off for one process without editing the file, set
-`KATA_CLOSE_TRANSCRIPT_ENABLED` to `true`, `false` or `auto`. `true`
-attaches transcripts even without a config file; `auto` does the same but
-stays quiet when no session is named; `agentsview_url` and
-`session_id_env` still come from the file. Either one also overrides project
-enablement. `false` attaches nothing, even when
-the file enables attachment, and ignores the file's other transcript settings,
-so a mistake there doesn't warn. Any other value warns on stderr,
-and the close proceeds without a transcript. Unset or empty leaves the file in
-charge. An agent integration can set it with `KATA_TRANSCRIPT_AGENT` and
-`KATA_TRANSCRIPT_SESSION_ID` to attach its own sessions without changing
-transcripts for other agents on the machine.
+To turn attachment on or off for a single process without editing the file, set
+`KATA_CLOSE_TRANSCRIPT_ENABLED` to `true`, `false`, or `auto`:
+
+- `true` attaches transcripts even without a config file, while `agentsview_url`
+  and `session_id_env` still come from the file.
+- `auto` behaves the same way, except it stays quiet when no session is named.
+- Both `true` and `auto` override project enablement.
+- `false` attaches nothing even when the file enables attachment, and ignores
+  the file's other transcript settings so a mistake there does not warn.
+- Any other value warns on stderr, and the close proceeds without a transcript.
+- Leaving the variable unset or empty lets the config file decide.
+
+An agent integration can combine `KATA_CLOSE_TRANSCRIPT_ENABLED` with
+`KATA_TRANSCRIPT_AGENT` and `KATA_TRANSCRIPT_SESSION_ID` to attach its own
+sessions without changing transcript behavior for other agents on the machine.
 
 When `kata close` supplies evidence, it attaches a separate `transcript` object
 to the same durable `issue.closed` event. Evidence and substantive-message
-requirements still apply: a chat identifier is provenance, not proof that work
-passed. No transcript body, local filename, token, or hook ownership hash is
-copied. The setting affects CLI closes, including remote-daemon calls; browser
-closes do not infer a session from the daemon's environment.
+requirements still apply. A chat identifier is provenance, not proof that work
+passed. Kata copies no transcript body, local filename, token, or hook
+ownership hash. This setting affects CLI closes, including remote-daemon calls.
+Browser closes do not infer a session from the daemon's environment.
 
 Kata always checks `CLAUDE_CODE_SESSION_ID` for `claude`, then
-`CODEX_THREAD_ID` and `CODEX_SESSION_ID` for `codex`, in that fixed order.
-The `session_id_env` table maps each additional agent name to one session
-variable. pi passes its session ID to shell commands as `PI_SESSION_ID`:
+`CODEX_THREAD_ID` and `CODEX_SESSION_ID` for `codex`, in that fixed order. Use
+the `session_id_env` table to map each additional agent name to one session
+variable. For example, pi passes its session ID to shell commands as
+`PI_SESSION_ID`:
 
 ```toml
 [close.transcript.session_id_env]
@@ -109,23 +114,24 @@ that variable to `omp` when you close issues from oh-my-pi:
 omp = "PI_SESSION_ID"
 ```
 
-One configuration can't map the variable to both agents: Kata would treat
-every pi or oh-my-pi session as ambiguous and skip attachment. If you use
-both, set `KATA_TRANSCRIPT_AGENT` and `KATA_TRANSCRIPT_SESSION_ID` as shown
-below.
+If one configuration maps `PI_SESSION_ID` to both `pi` and `omp`, Kata treats
+every pi or oh-my-pi session as ambiguous and skips attachment. If you use both
+agents, set `KATA_TRANSCRIPT_AGENT` and `KATA_TRANSCRIPT_SESSION_ID` instead,
+as shown below.
 
-The agent name must match the ID prefix AgentsView uses for the agent's sessions, such as `pi` or `omp`,
-for the link to open. Names must match `^[a-z0-9][a-z0-9-]*$` and contain
-at most 32 characters. Any other name makes `kata close` warn that the
-configuration is unavailable, naming the key, and skip attachment. Each nonempty variable supplies both its agent and
-session ID. Different agents are ambiguous even when their IDs match.
-Variables for the same agent must agree on the ID case-insensitively.
-Ambiguous context warns and skips attachment.
+For the link to open, the agent name must match the ID prefix AgentsView uses
+for that agent's sessions, such as `pi` or `omp`. Agent names must match
+`^[a-z0-9][a-z0-9-]*$` and contain at most 32 characters. If you configure any
+other name, `kata close` warns that the configuration is unavailable, names the
+key, and skips attachment. Each nonempty variable supplies both its agent and
+session ID. Different agents are ambiguous even when their IDs match, and
+variables for the same agent must agree on the ID case-insensitively. When
+context is ambiguous, Kata warns and skips attachment.
 
 Setting either `KATA_TRANSCRIPT_AGENT` or `KATA_TRANSCRIPT_SESSION_ID` skips
-variable discovery. Set both to supply an explicit agent and session ID.
-The agent accepts any name matching the token rules above. A missing or
-invalid agent or session ID warns and skips attachment.
+variable discovery. Set both to supply an explicit agent and session ID. The
+agent accepts any name matching the token rules above, and a missing or invalid
+agent or session ID causes Kata to warn and skip attachment.
 
 ```sh
 KATA_TRANSCRIPT_AGENT=pi \
@@ -135,51 +141,51 @@ kata close example-project#abc4 --done \
   --test "go test ./internal/example"
 ```
 
-Claude Code and Codex session IDs must be UUIDs. For other agents, the
-session ID must start with an ASCII letter or digit and contain only
-ASCII letters, digits, `.`, `_`, or `-`, up to 128 characters. Examples include
-UUIDs, Amp's `T-<UUID>`, and OpenCode's `ses_<alnum>`. Use the ID AgentsView
-uses after the agent prefix so the link can open.
-Agents whose AgentsView session IDs have more than one part can't be linked from a variable.
-Kata never scans recent chat files or reuses another issue's session. Missing, invalid, or ambiguous context warns on stderr
-and skips the attachment; the close can still succeed. An unconfigured
-AgentsView URL stores only the identifier. An invalid URL warns and stores
-only the identifier. URLs must be absolute HTTP(S), with no embedded
-credentials, query, or fragment.
+Claude Code and Codex session IDs must be UUIDs. For other agents, the session
+ID must start with an ASCII letter or digit and contain only ASCII letters,
+digits, `.`, `_`, or `-`, up to 128 characters. Examples include UUIDs, Amp's
+`T-<UUID>`, and OpenCode's `ses_<alnum>`. Use the ID that AgentsView uses after
+the agent prefix so the link can open. Agents whose AgentsView session IDs have
+more than one part cannot be linked from a variable. Kata never scans recent
+chat files or reuses another issue's session. When context is missing, invalid,
+or ambiguous, Kata warns on stderr and skips the attachment, and the close can
+still succeed. An unconfigured AgentsView URL stores only the identifier, while
+an invalid URL warns and stores only the identifier. URLs must be absolute
+HTTP(S) with no embedded credentials, query, or fragment.
 
 Claude Code links use `<agentsview_url>/sessions/<id>`. Every other agent,
 including Codex, uses `<agentsview_url>/sessions/<agent>/<id>`. These routes
 work with released AgentsView v0.46.1.
 
-Set `agentsview_url` only for an installation indexing those native IDs.
+Set `agentsview_url` only for an installation that indexes those native IDs.
 For namespaced imported archives with IDs such as `workstation~codex:<UUID>`,
 omit `agentsview_url` and use AgentsView's **Go to session** lookup with the
 saved session ID, or supply a verified exact URL through the
-[HTTP close API](http-api.md).
-If multiple archives contain that session ID, lookup reports ambiguity; use
-the archive's canonical ID or a verified locator. Kata doesn't infer an import
-namespace.
+[HTTP close API](http-api.md). If multiple archives contain that session ID,
+lookup reports ambiguity; use the archive's canonical ID or a verified locator.
+Kata does not infer an import namespace.
 
 Kata makes no AgentsView request during close. A generated URL is a locator,
-not an availability receipt: offline hosting, delayed indexing, authentication,
-or a session excluded from the archive can prevent it from opening. The
-identifier remains useful for lookup after indexing catches up. Retry the
-AgentsView lookup, not the close, when indexing lags.
+not an availability receipt. Offline hosting, delayed indexing, authentication,
+or a session excluded from the archive can prevent the link from opening, while
+the identifier remains useful for lookup once indexing catches up. When
+indexing lags, retry the AgentsView lookup rather than the close.
 
 An unkeyed close of an already closed issue adds no event and cannot replace
-its provenance. Reopen/reclose records a new session on a new close event and
-retains the old event. Keyed retries return their original event; keep the
-original session, evidence, actor, and other request fields unchanged. The
-AgentsView link is not part of retry identity, so changing `agentsview_url`
-does not break a retry. Adding or removing the transcript conflicts. A lookup
-failure or project move keeps the original receipt when the candidate session
-is unchanged. Retrying from another chat with different automatic
-context conflicts; set `KATA_TRANSCRIPT_SESSION_ID` to the original session ID and
-`KATA_TRANSCRIPT_AGENT` to the original agent. If the original close turned
-attachment on with `KATA_CLOSE_TRANSCRIPT_ENABLED`, set it again for the retry.
-`--dry` validates without writing an event or attaching persistent provenance.
+its provenance. Reopening and reclosing records a new session on a new close
+event and retains the old event. Keyed retries return their original event;
+keep the original session, evidence, actor, and other request fields unchanged.
+Because the AgentsView link is not part of retry identity, changing
+`agentsview_url` does not break a retry. Adding or removing the transcript
+conflicts, while a lookup failure or project move keeps the original receipt
+when the candidate session is unchanged. Retrying from another chat with
+different automatic context conflicts; set `KATA_TRANSCRIPT_SESSION_ID` to the
+original session ID and `KATA_TRANSCRIPT_AGENT` to the original agent. If the
+original close turned attachment on with `KATA_CLOSE_TRANSCRIPT_ENABLED`, set
+it again for the retry. Passing `--dry` validates without writing an event or
+attaching persistent provenance.
 
-Readers can open the session link in the web issue's **Events** history, or
+You can open the session link in the web issue's **Events** history, or
 retrieve provenance with the event API. For example, in a small project:
 
 ```sh
@@ -188,10 +194,10 @@ kata --project example-project events --after 0 --limit 100 --json |
       .payload.transcript'
 ```
 
-For a larger history, continue with `next_after_id` until the desired event is
-found. A saved close receipt also contains `event.payload`, encoded as a JSON
-string; on a keyed retry use `original_event.payload`. Both contain the same
-`transcript` object as the parsed event stream.
+For a larger history, continue with `next_after_id` until you find the event. A
+saved close receipt also contains `event.payload` encoded as a JSON string, and
+a keyed retry uses `original_event.payload`. Both contain the same `transcript`
+object as the parsed event stream.
 
 ## Environment variables
 
@@ -253,31 +259,31 @@ string; on a keyed retry use `original_event.payload`. Both contain the same
 
 ## Database selection
 
-kata resolves its database in this order:
+Kata resolves its database in this order:
 
 1. `KATA_DSN`
 2. `KATA_DB`
 3. `[storage].dsn` in `<KATA_HOME>/config.toml`
 4. `<KATA_HOME>/kata.db`
 
-Bare paths and `sqlite://` DSNs select SQLite. `postgres://` and
+Bare paths and `sqlite://` DSNs select SQLite, while `postgres://` and
 `postgresql://` DSNs select Postgres. A standalone Postgres open owns the
 dedicated `kata` schema, prepares it under an advisory lock, and never uses
-`public` for kata tables. `KATA_DB` stays ahead of `[storage].dsn` so existing
+`public` for Kata tables. `KATA_DB` stays ahead of `[storage].dsn` so existing
 shells and scripts keep using their explicit database path after the
 config-file key is introduced.
 
 ### SQLite writer waiting
 
-When several clients write through one daemon, local writers keep their place
-in a first-come, first-served queue until admitted or their request context ends.
-The queue has no separate five-second timer. Canceling a request removes its
-waiter without blocking writers behind it. Callers that need a total wait limit
-must supply a context deadline; the transient retry loop's elapsed-time budget
-does not interrupt an in-flight queue wait.
+When several clients write through one daemon, local writers wait in a
+first-come, first-served queue until the daemon admits them or their request
+context ends. The queue has no separate five-second timer, and canceling a
+request removes its waiter without blocking writers behind it. If a caller
+needs a total wait limit, supply a context deadline; the transient retry loop's
+elapsed-time budget does not interrupt an in-flight queue wait.
 
 A writer waiting for another process or database handle still uses SQLite's
-busy handler. Configure that wait in `<KATA_HOME>/config.toml`:
+busy handler. You can configure that wait in `<KATA_HOME>/config.toml`:
 
 ```toml
 [storage.sqlite]
@@ -285,9 +291,10 @@ busy_timeout = "5s"
 ```
 
 The default remains `5s`. Values must be whole milliseconds from `1ms` through
-`5m`; zero, negative, fractional-millisecond, and larger durations are rejected.
-`KATA_SQLITE_BUSY_TIMEOUT` overrides the file setting. Restart the daemon after
-changing it. This setting does not change PostgreSQL or the vector sidecar.
+`5m`; Kata rejects zero, negative, fractional-millisecond, and larger
+durations. `KATA_SQLITE_BUSY_TIMEOUT` overrides the file setting, and you need
+to restart the daemon after changing it. This setting does not change
+PostgreSQL or the vector sidecar.
 
 ### PostgreSQL connection policy
 
@@ -298,8 +305,8 @@ export KATA_DSN='postgres://kata:password@db.example/kata?sslmode=verify-full&ss
 kata daemon start
 ```
 
-Production deployments should prepare the schema with a privileged role and
-run the daemon with a separate DML-only role:
+In production, prepare the schema with a privileged role and run the daemon
+with a separate DML-only role:
 
 ```toml
 [storage]
@@ -314,28 +321,28 @@ schema_owner = "kata_schema_owner"
 ```
 
 `bootstrap` creates or advances the configured schema and therefore requires
-DDL authority. `validate` performs no DDL and requires both `schema_owner` and
-the exact schema version for the running binary. Environment values override
-the `[storage.postgres]` keys. See [PostgreSQL operations](../operations/postgres.md)
-for the split-role installation and upgrade ceremony.
+DDL authority. `validate` runs no DDL and requires both `schema_owner` and the
+exact schema version for the running binary. Environment variables override the
+`[storage.postgres]` keys. See [PostgreSQL operations](../operations/postgres.md)
+for the split-role installation and upgrade steps.
 
 Every non-loopback, non-Unix Postgres connection candidate must use TLS with
-server identity verification. This includes fallback hosts generated by the
-DSN. `sslmode=disable`, `allow`, `prefer`, `require`, and `verify-ca` do not meet
-that remote requirement by themselves. Use `sslmode=verify-full` with system
+server identity verification, including fallback hosts generated by the DSN.
+`sslmode=disable`, `allow`, `prefer`, `require`, and `verify-ca` do not satisfy
+that remote requirement on their own. Use `sslmode=verify-full` with system
 roots or an explicit CA. The `allow_insecure` setting and
-`KATA_POSTGRES_ALLOW_INSECURE=1` are deliberate lab-only exceptions; they apply
+`KATA_POSTGRES_ALLOW_INSECURE=1` are deliberate lab-only exceptions that apply
 to the whole Postgres connection configuration and can expose database
 credentials and all stored data to a network-positioned attacker.
 
-`KATA_DSN` and `[storage].dsn` are shape-validated before use. Unknown schemes
-are rejected, and common Postgres-only query parameters on a bare path or
-`sqlite://` DSN are treated as likely formatting mistakes. Validation is local:
-it does not dial Postgres or stat SQLite paths.
+Kata validates the shape of `KATA_DSN` and `[storage].dsn` before using them.
+It rejects unknown schemes and treats common Postgres-only query parameters on
+a bare path or `sqlite://` DSN as likely formatting mistakes. This validation
+is local and does not dial Postgres or stat SQLite paths.
 
 ## Workspace binding
 
-`.kata.toml` is committed with the project:
+Commit `.kata.toml` with your project:
 
 ```toml
 # This repository tracks its work in kata.
@@ -346,11 +353,12 @@ version = 1
 name = "product"
 ```
 
-It should stay secret-free.
+Keep this file free of secrets.
 
 ## Local override
 
-`.kata.local.toml` is gitignored. Use it for machine-specific daemon routing:
+Keep `.kata.local.toml` gitignored and use it for machine-specific daemon
+routing:
 
 ```toml
 version = 1
@@ -359,10 +367,10 @@ version = 1
 url = "http://100.64.0.5:7777"
 ```
 
-`KATA_SERVER` wins over the local file unless a command passes
+`KATA_SERVER` takes precedence over the local file unless a command passes
 `--daemon <name>`.
 
-Daemon target resolution order is:
+Kata resolves the daemon target in this order:
 
 1. `--daemon <name>`
 2. `KATA_SERVER`
@@ -370,8 +378,8 @@ Daemon target resolution order is:
 4. `active_daemon` in `<KATA_HOME>/config.toml`
 5. local daemon discovery or auto-start
 
-To pin an existing home on this machine, use `[server].daemon = "work"`
-instead of `url`, and register its identity in the client home's catalog:
+To pin an existing home on this machine, use `[server].daemon = "work"` instead
+of `url`, and register its identity in the client home's catalog:
 
 ```toml
 [[daemon]]
@@ -381,20 +389,20 @@ home = "/absolute/work-home"
 instance_uid = "01J00000000000000000000001"
 ```
 
-Use the existing home's observed UID, not the example UID. `home` and
-`instance_uid` are paired, local-only fields; `home` is absolute or starts with
-`~/`. A workspace `server.daemon` accepts only such a profile and cannot coexist
-with `server.url`. Profile startup reads the selected home's config and checks
-its existing database identity and schema before starting a process. Legacy
-`local = true` without `home` retains current-home behavior. See
-[Local daemon profiles](../operations/local-daemon-profiles.md) for registration,
-isolated credentials, PostgreSQL restrictions, and recovery.
+Use the existing home's observed UID rather than the example UID. `home` and
+`instance_uid` are paired, local-only fields, and `home` must be absolute or
+start with `~/`. A workspace `server.daemon` accepts only such a profile and
+cannot coexist with `server.url`. Profile startup reads the selected home's
+config and checks its existing database identity and schema before starting a
+process. Legacy `local = true` entries without `home` retain current-home
+behavior. See [Local daemon profiles](../operations/local-daemon-profiles.md)
+for registration, isolated credentials, PostgreSQL restrictions, and recovery.
 
-Committed `.kata.toml` files bind the project name only; do not put daemon
+Committed `.kata.toml` files bind the project name only. Do not put daemon
 routing or tokens there.
 
 A catalog entry's bearer credential uses `token` > `token_file` > `token_env`.
-Prefer `token_file` on a device to keep the token out of `config.toml`:
+On a device, prefer `token_file` to keep the token out of `config.toml`:
 
 ```toml
 [[daemon]]
@@ -403,20 +411,20 @@ url = "https://hub.example"
 token_file = "~/.config/kata/tokens/team-hub"
 ```
 
-The file must use an absolute or `~/` path, be a regular file owned by the
-user running Kata, and have no group or world permissions (`chmod 600`). On
-Windows it must be a private current-user file. The file must be at most
-64 KiB; its trimmed contents must be nonempty. Use `token_env` for containers or service
-managers that already inject secrets.
+The file must use an absolute or `~/` path, be a regular file owned by the user
+running Kata, and have no group or world permissions (`chmod 600`). On Windows,
+it must be a private current-user file. The file must be at most 64 KiB, and
+its trimmed contents must be nonempty. For containers or service managers that
+already inject secrets, use `token_env`.
 
-Loading or listing the catalog does not read its credentials. Selection,
+Loading or listing the catalog does not read its credentials, though selection,
 including `kata daemon locate`, may inspect a selected credential. Remote and
-plain local entries defer source errors until connection. A failed selected
-file or an unset or empty selected environment variable stops the connection
-without fallback.
-`KATA_AUTH_TOKEN` replaces a remote entry's credential, so its file or variable
-is not read then. Hub administration uses only the hub's catalog credential;
-the local daemon's global token never replaces it.
+plain local entries defer source errors until connection. If a selected file
+fails or a selected environment variable is unset or empty, the connection
+stops without fallback. `KATA_AUTH_TOKEN` replaces a remote entry's credential,
+so Kata does not read its file or variable in that case. Hub administration
+uses only the hub's catalog credential, and the local daemon's global token
+never replaces it.
 
 For trusted private-network hostnames that cannot be represented as literal
 non-public IP addresses, opt in per target:
@@ -431,18 +439,19 @@ allow_insecure = true
 
 ## Client display preferences
 
-`[display]` belongs to the client reading `<KATA_HOME>/config.toml`. It is not
-sent to a remote daemon and does not change daemon rendering or API responses.
+`[display]` belongs to the client reading `<KATA_HOME>/config.toml`. Kata does
+not send it to a remote daemon, and it does not change daemon rendering or API
+responses.
 
-`kata show --render` uses the built-in terminal Markdown renderer by default.
-To use an external stdin/stdout renderer instead:
+By default, `kata show --render` uses the built-in terminal Markdown renderer.
+To use an external stdin/stdout renderer instead, set `markdown_renderer`:
 
 ```toml
 [display]
 markdown_renderer = ["leaf"]
 ```
 
-The value is an argv array. kata passes it verbatim without a shell, appended
+The value is an argv array. Kata passes it verbatim without a shell, appended
 flags, width injection, or environment changes. For example:
 
 ```toml
@@ -450,33 +459,33 @@ flags, width injection, or environment changes. For example:
 markdown_renderer = ["glow", "-", "-s", "dark", "-w", "80"]
 ```
 
-kata starts the configured program once per non-empty Markdown field. Each
-invocation has a 10-second timeout. After it expires, kata spends up to 2
-seconds on platform-specific termination: Unix signals and then force-kills the
-renderer process group, while Windows waits through the grace period and then
-force-kills only the renderer process. kata then bounds any remaining process
-or captured-pipe wait by a separate 2-second interval. A timed-out call can
-therefore take about 14 seconds to return. Because the child's stdout is
-captured, users are responsible for renderer-specific color and width flags or
-inherited environment variables such as `CLICOLOR_FORCE`. After capture, kata
+Kata starts the configured program once per non-empty Markdown field, with a
+10-second timeout per invocation. When that timeout expires, Kata spends up to
+2 seconds on platform-specific termination: Unix signals and then force-kills
+the renderer process group, while Windows waits through the grace period and
+then force-kills only the renderer process. Kata then bounds any remaining
+process or captured-pipe wait by a separate 2-second interval, so a timed-out
+call can take about 14 seconds to return. Because Kata captures the child's
+stdout, you are responsible for renderer-specific color and width flags or
+inherited environment variables such as `CLICOLOR_FORCE`. After capture, Kata
 normalizes the output and ANSI-safely hard-wraps it to the terminal width for a
-description or the remaining field width for a comment. kata treats output
-with or without a final newline the same, while preserving internal blank
-lines. Renderer stderr is discarded because a program may echo the Markdown
-input there; run the configured argv directly to diagnose renderer-specific
+description or the remaining field width for a comment. Kata treats output with
+or without a final newline the same while preserving internal blank lines.
+Because a program may echo the Markdown input to stderr, Kata discards renderer
+stderr; run the configured argv directly to diagnose renderer-specific
 failures.
 
 The common daemon-config path recognizes `[display]` without decoding or
 semantically validating it, so unknown display keys and invalid display values
-do not break daemon startup. A TOML syntax error anywhere in `config.toml` still
-prevents common config parsing. kata validates this client section only when
-`show --render` is active on a terminal, so display-only semantic mistakes do
-not break plain output or redirected output.
+do not break daemon startup. A TOML syntax error anywhere in `config.toml`
+still prevents common config parsing. Kata validates this client section only
+when `show --render` is active on a terminal, so display-only semantic mistakes
+do not break plain output or redirected output.
 
 ## Default priority for issue creation
 
-Set a default for `kata create` in the invoking CLI client's
-`<KATA_HOME>/config.toml`:
+To set a default priority for `kata create`, add `[create]` to the invoking CLI
+client's `<KATA_HOME>/config.toml`:
 
 ```toml
 [create]
@@ -484,44 +493,45 @@ default_priority = 3
 ```
 
 Values are integers from `0` (highest) through `4` (lowest). An explicit
-`--priority` overrides the default, including `--priority 0`. Use
-`--priority none` to leave one creation unprioritized without changing the
-default. Remove or comment out `default_priority` to leave priority unset when
-the flag is omitted; TOML has no `null` value. With no setting, creation keeps its existing behavior.
+`--priority` overrides the default, including `--priority 0`. To leave one
+creation unprioritized without changing the default, pass `--priority none`. To
+leave priority unset when the flag is omitted, remove or comment out
+`default_priority`; TOML has no `null` value. Without this setting,
+creation keeps its existing behavior.
 
-The CLI reads this setting for each creation, so no daemon restart is needed.
-It uses the invoking client's config even when connecting to a remote or named
-daemon. This default applies only to `kata create`; it does not change API,
-MCP, TUI, or import behavior. When `--priority` is omitted, an invalid value or
-a misspelled key under `[create]` makes `kata create` fail before it contacts
-the daemon. An explicit valid priority skips these defaults.
+The CLI reads this setting for each creation, so you do not need to restart the
+daemon. It uses the invoking client's config even when connecting to a remote
+or named daemon. This default applies only to `kata create` and does not change
+API, MCP, TUI, or import behavior. When `--priority` is omitted, an invalid
+value or a misspelled key under `[create]` makes `kata create` fail before it
+contacts the daemon. Passing an explicit valid priority skips these defaults.
 
 The daemon ignores `[create]` values and keys, `kata doctor` checks them, and
 config readers still reject TOML syntax errors.
 
 Retries with the same idempotency key and effective fields reuse the issue.
-Retries compare the effective priority, so a retry whose effective priority
-changed, for example because the default changed between attempts, gets
-`idempotency_mismatch`; see [the CLI reference](cli.md).
+Because retries compare the effective priority, a retry whose effective
+priority changed, for example because the default changed between attempts,
+gets `idempotency_mismatch`; see [the CLI reference](cli.md).
 
 ## TUI preferences
 
-Configure the terminal UI in `<KATA_HOME>/config.toml`:
+You can configure the terminal UI in `<KATA_HOME>/config.toml`:
 
 ```toml
 [tui]
 confirm_quit = false
 ```
 
-With `confirm_quit = false`, pressing `q` quits immediately when no input or
+When `confirm_quit = false`, pressing `q` quits immediately when no input or
 dialog is open. Omit the setting or set it to `true` to keep the default quit
-confirmation. `Ctrl+C` remains an immediate quit shortcut in those views.
-This is a client preference; it does not change the daemon or other clients.
+confirmation. `Ctrl+C` remains an immediate quit shortcut in those views. This
+is a client preference and does not change the daemon or other clients.
 
 ## Daemon config
 
-`<KATA_HOME>/config.toml` can configure storage, listener, auth behavior, and
-named daemon targets:
+Use `<KATA_HOME>/config.toml` to configure storage, listeners, authentication,
+and named daemon targets:
 
 ```toml
 listen = "100.64.0.5:7777"
@@ -572,7 +582,8 @@ installation_id = 67890
 private_key_path = "/var/lib/kata/github-app.pem"
 ```
 
-The optional `[mcp]` section serves `/mcp` on the daemon's listener. It defaults to disabled. Restart after changes:
+The optional `[mcp]` section serves `/mcp` on the daemon's listener. It is
+disabled by default, and you need to restart the daemon after changing it:
 
 ```toml
 [mcp]
@@ -584,124 +595,134 @@ token_file = "/run/secrets/mcp-token"
 startup_sections = ["issue_discovery", "docs"] # optional; defaults to []
 ```
 
-Choose the project scope explicitly: list `projects`, or set `all_projects = true`
-for daemon-wide access. Setting neither, setting both, or an empty `projects`
-array stops daemon startup.
-Missing or archived configured projects disable `/mcp` (503, reason logged); REST
-and the web UI keep serving. Create or restore the project, then restart.
-`kata daemon status` reports the endpoint as `serving` or `unavailable`.
+Choose the project scope explicitly by listing `projects` or setting
+`all_projects = true` for daemon-wide access. Setting neither, setting both, or
+leaving `projects` empty stops daemon startup. If any listed project is missing
+or archived, `/mcp` is disabled with HTTP 503 and the reason is logged, while
+REST and the web UI keep serving; create or restore the project and restart the
+daemon. `kata daemon status` reports the endpoint as `serving` or
+`unavailable`.
 
 Outside identity mode, set `token_file` or `token_env` for the separate MCP
-bearer. The file wins; secrets resolve at startup.
+bearer. `token_file` takes precedence, and Kata resolves secrets at startup.
 Set `startup_sections` to existing section IDs to publish their typed tools in
-the first `tools/list` after every restart. An omitted or empty array preserves
-loader-only progressive loading. Loaders remain available in both modes.
-Unknown, duplicate, or unavailable sections disable `/mcp` (503, reason logged);
-REST and the web UI keep serving. Correct the setting and restart. See
-[Startup sections](mcp.md#startup-sections) for IDs and availability rules.
+the first `tools/list` after every restart. Omitting `startup_sections` or
+leaving it empty keeps loader-only progressive loading, and loaders remain
+available in both modes. Unknown, duplicate, or unavailable sections disable
+`/mcp` with HTTP 503 and log the reason while REST and the web UI keep serving;
+fix the setting and restart. See [Startup sections](mcp.md#startup-sections)
+for IDs and availability rules.
+
 In Kata 0.23.0 and later, identity mode (`[auth] require_token_identity = true`)
 uses each caller's identity bearer at `/mcp`. Remove `[mcp] token_file` and
-`token_env`; either setting stops startup in identity mode. The token determines
-the actor, so `[mcp] actor` is ignored. See
+`token_env` in this mode; either setting stops startup. Because the token
+determines the actor, Kata ignores `[mcp] actor`. See
 [Daemon mount with identity tokens](mcp.md#daemon-mount-with-identity-tokens)
 for authentication and session behavior. Kata 0.21.0 and 0.22.0 require
 `kata mcp serve --http` with a user token in this mode.
-Proxy actor mode (`[auth.proxy] trusted_actor_header`) requires `kata mcp serve --http` when the daemon's REST self-calls use a listener in `trusted_proxy_listeners`, because those calls carry no proxy actor header. The sidecar must reach the daemon through a REST listener outside `trusted_proxy_listeners` or through the proxy that sets the actor header.
-See [MCP transport](mcp.md#transport) for gateway setup and scope.
 
-Local startup policy is configured at the top level of `<KATA_HOME>/config.toml`:
+Proxy actor mode (`[auth.proxy] trusted_actor_header`) requires
+`kata mcp serve --http` when the daemon's REST self-calls use a listener in
+`trusted_proxy_listeners`, because those calls carry no proxy actor header. The
+sidecar must reach the daemon through a REST listener outside
+`trusted_proxy_listeners` or through the proxy that sets the actor header. See
+[MCP transport](mcp.md#transport) for gateway setup and scope.
+
+Configure local startup policy at the top level of `<KATA_HOME>/config.toml`:
 
 | Key | Default | Behavior |
 | --- | --- | --- |
 | `autostart` | `true` | `false` prevents implicit daemon starts and replacement. Commands wait up to 30 seconds (or their shorter deadline) for the service manager's daemon, then fail; if a SQLite migration is still running, the error says so, and you should let it finish rather than restart the daemon. Recovery retains its storage and project checks before waiting. Restart an incompatible daemon through its service manager. Explicit `kata daemon start` remains available. |
 
-Idle shutdown is intended for the default owner-local daemon rather than the
+Idle shutdown is meant for the default owner-local daemon rather than the
 shared-daemon configuration above. Its minimal configuration is:
 
 ```toml
 autostart_idle_timeout = "15m"
 ```
 
-The listener precedence is `--listen`, `KATA_LISTEN`, top-level `listen`,
-hosted-mode `PORT`, then the platform default. Environment overrides are trimmed;
-empty or whitespace-only values leave the corresponding config-file value unchanged.
-Plain `kata daemon start` starts the daemon in the background and returns after
-startup is confirmed; use `kata daemon start --foreground` for service-manager
-and hosted deployments. Auto-started daemons also read the config-file listener
-value.
-An empty `[storage].dsn` means "no storage override"; env vars or the default
-database path still apply.
+Listener precedence is `--listen`, `KATA_LISTEN`, top-level `listen`,
+hosted-mode `PORT`, and then the platform default. Kata trims environment
+overrides, and empty or whitespace-only values leave the config-file value
+unchanged. Plain `kata daemon start` starts the daemon in the background and
+returns once startup is confirmed; for service-manager and hosted deployments,
+use `kata daemon start --foreground`. Auto-started daemons also read the
+config-file listener value. An empty `[storage].dsn` means no storage override,
+and environment variables or the default database path still apply.
 
-Daemon bearer credentials use `[auth].token` > `[auth].token_file` >
-`[auth].token_env` (the name of a variable containing the token). A nonempty
-`KATA_AUTH_TOKEN` overrides the inline token. Token files follow the
-[key file rules](#credentials-and-batching): absolute or `~/` paths, regular
-files owned by the daemon user, no Unix group/world permissions, no inherited
-Windows permissions or access for other users, and at most 64 KiB. Whitespace and a
-trailing newline are trimmed. An unusable
-selected file or named environment variable fails loudly without falling back.
-For example, mount a `0600` secret file owned by the daemon user and set
+Daemon bearer credentials resolve in the order `[auth].token` >
+`[auth].token_file` > `[auth].token_env` (the name of a variable containing the
+token). A nonempty `KATA_AUTH_TOKEN` overrides the inline token. Token files
+follow the [key file rules](#credentials-and-batching): absolute or `~/` paths,
+regular files owned by the daemon user, no Unix group or world permissions, no
+inherited Windows permissions or access for other users, and at most 64 KiB.
+Kata trims whitespace and a trailing newline. An unusable selected file or
+named environment variable fails loudly without falling back. For example,
+mount a `0600` secret file owned by the daemon user and set
 `KATA_AUTH_TOKEN_FILE=/run/secrets/daemon-token`.
 
 `autostart_idle_timeout` lets an implicitly started, owner-local daemon exit
-after a period without client activity. It is off by default. The setting is
-ignored for explicit daemon starts and for daemons exposed through non-loopback
+after a period without client activity. It is off by default. Kata ignores this
+setting for explicit daemon starts and for daemons exposed through non-loopback
 listeners, a public web origin, trusted-proxy configuration, shared-listener
-host aliases, an enabled `[federation.ingress]` listener, or an enabled `[mcp]` endpoint. `kata daemon start` replaces a running idle-eligible auto-started
-daemon with an explicit one so it stays resident, and `kata daemon restart`
-retains the running daemon's idle policy. The daemon writes one
-`kata daemon: idle shutdown after ...` line to its log when it exits for this
-reason. Active requests and already-admitted finite background work
-receive a bounded drain before process exit, so exit can occur after the
+host aliases, an enabled `[federation.ingress]` listener, or an enabled `[mcp]`
+endpoint. Running `kata daemon start` replaces a running idle-eligible
+auto-started daemon with an explicit one so it stays resident, while
+`kata daemon restart` retains the running daemon's idle policy. When the daemon
+exits for idle shutdown, it writes one `kata daemon: idle shutdown after ...`
+line to its log. Active requests and already-admitted finite background work
+receive a bounded drain before process exit, so exit can happen after the
 configured interval. Ordinary health probes do not renew the timeout. A running
 `kata mcp serve` process discovers the effective timeout from `/health` and
 sends marked `GET /api/v1/ping` keepalives after applicable listener policy
-checks in both stdio and streamable-HTTP modes so the bridge remains usable for
-its full lifetime. Use an explicit daemon service when
-GitHub/Notion/Plane/Linear/Twenty/TickTick sync, federation, or timed-claim maintenance must remain continuously
-scheduled without a client present.
+checks in both stdio and streamable-HTTP modes, so the bridge remains usable
+for its full lifetime. If GitHub, Notion, Plane, Linear, Twenty, or TickTick
+sync, federation, or timed-claim maintenance must stay continuously scheduled
+without a client present, run an explicit daemon service.
 
 The optional top-level `timezone` supplies the default for date-only and local
 date-time schedules and deadlines without an explicit zone or issue timezone.
-Kata uses UTC when neither is set. UTC instants ending in `Z` do not use this setting.
+When neither is set, Kata uses UTC. UTC instants ending in `Z` do not use this
+setting.
 
 The web UI's daemon selector lists URL entries and home-less local entries.
 Home-bearing profiles are omitted and cannot alias the serving daemon. A plain
-`kata ui` opens a selected local profile directly; otherwise it starts or
-discovers the local browser gateway and initially selects `active_daemon`; changing the selection keeps configured tokens on the daemon
-side. Use `kata ui --daemon <name>` only when opening one named target directly
-is preferred. Identity-authenticated tabs can read remote gateway targets, but
-must open the target directly for writes because the gateway does not delegate
-browser identities. Request-actor tabs can write when the target advertises
-the same request-actor policy or its `[[daemon]]` token belongs to an account.
-An account-bound target records each write as the token's account, the same as
-`kata --daemon <name>`. The gateway rechecks that target's authenticated
-capabilities immediately before every mutation.
+`kata ui` opens a selected local profile directly. Otherwise, it starts or
+discovers the local browser gateway and initially selects `active_daemon`;
+changing the selection keeps configured tokens on the daemon side. Use
+`kata ui --daemon <name>` only when you prefer to open one named target
+directly. Identity-authenticated tabs can read remote gateway targets, but must
+open the target directly for writes because the gateway does not delegate
+browser identities. Request-actor tabs can write when the target advertises the
+same request-actor policy or its `[[daemon]]` token belongs to an account. An
+account-bound target records each write as the token's account, the same as
+`kata --daemon <name>`. Before every mutation, the gateway rechecks that
+target's authenticated capabilities.
 
 `[web].listen` selects the browser listener when the normal daemon transport
-cannot also serve HTTP. If omitted, Kata binds `127.0.0.1:0`, lets the operating
-system assign an available port, and publishes the resolved URL through
-`kata daemon status`. Configuring `[web].listen` with port `0` has the same
-behavior; set a nonzero port when a fixed browser origin is required. The
+cannot also serve HTTP. If you omit it, Kata binds `127.0.0.1:0`, lets the
+operating system assign an available port, and publishes the resolved URL
+through `kata daemon status`. Setting `[web].listen` with port `0` behaves the
+same way; set a nonzero port when you need a fixed browser origin. The
 top-level `listen` remains the daemon API listener and is shared with the
-browser when it is TCP (including Windows and hosted mode).
+browser when it is TCP, including on Windows and in hosted mode.
 
 On a direct-loopback origin, a fresh browser tab transparently receives a
-local-web session. A static daemon token does not disable this owner-local path.
-Kata disables it when the listener or public origin is non-loopback, a forwarding
-header is present, or identity or trusted-proxy authentication is configured.
-Authenticated browser requests still require both the HttpOnly cookie and
-tab-local session header.
-If the browser listener is itself named in
-`[auth.proxy].trusted_proxy_listeners`, the browser transparently exchanges the
-proxy-asserted actor for that tab-scoped session instead of showing token login.
+local-web session. A static daemon token does not disable this owner-local
+path. Kata disables it when the listener or public origin is non-loopback, a
+forwarding header is present, or identity or trusted-proxy authentication is
+configured. Authenticated browser requests still require both the HttpOnly
+cookie and the tab-local session header. If the browser listener is itself
+named in `[auth.proxy].trusted_proxy_listeners`, the browser transparently
+exchanges the proxy-asserted actor for that tab-scoped session instead of
+showing token login.
 
 `[web].public_origin` declares the exact HTTP or HTTPS origin visible to the
 browser when a same-origin TLS terminator or development proxy sits in front of
-Kata. It must contain only scheme and authority: no credentials, path, query,
-or fragment. Kata never derives this security boundary from forwarded request
-headers. The proxy must preserve streaming for `/api/v1/events/stream` and
-route the SPA, assets, session endpoints, and data API to the same daemon.
+Kata. It must contain only scheme and authority, with no credentials, path,
+query, or fragment. Kata never derives this security boundary from forwarded
+request headers. The proxy must preserve streaming for `/api/v1/events/stream`
+and route the SPA, assets, session endpoints, and data API to the same daemon.
 
 `[web].allowed_hosts` is an exact allowlist of additional HTTP `Host`
 authorities accepted by a shared TCP listener. Use it when a daemon bound to a
@@ -714,33 +735,35 @@ allowed_hosts = ["daemon.example:7777"]
 ```
 
 Entries contain only `host` or `host:port`, with no scheme, path, credentials,
-query, or fragment. `KATA_WEB_ALLOWED_HOSTS` supplies a comma-separated
-environment override for ephemeral deployments. Unlisted Host values are
-rejected before API or browser route handling, even when a request presents a
+query, or fragment. For ephemeral deployments, `KATA_WEB_ALLOWED_HOSTS`
+supplies a comma-separated environment override. Kata rejects unlisted `Host`
+values before API or browser route handling, even when a request presents a
 bearer header; this prevents credentials from turning DNS rebinding into an
 authority bypass.
 
 `[notion_sync].token_env` names the daemon environment variable containing its
-Notion read-content credential (default `KATA_NOTION_TOKEN`). Share each task
-database with the Notion internal connection. The credential is shared across
-Notion bindings, resolved once per run, and sent only to fixed
-`https://api.notion.com:443`; redirects are rejected. Supply it in the daemon's
-service environment, including for remote daemons, and restart after service
-environment/config changes. Tokens and environment-variable selectors never
-enter binding config or JSONL. Source/mapping IDs, interval, and cutoff are
-project binding settings managed by `kata sync notion enable`, not keys in
-`[notion_sync]`. See [Notion sync](../operations/notion-sync.md).
+Notion read-content credential, which defaults to `KATA_NOTION_TOKEN`. Share
+each task database with the Notion internal connection. The credential is
+shared across Notion bindings, resolved once per run, and sent only to fixed
+`https://api.notion.com:443`; Kata rejects redirects. Supply this variable in
+the daemon's service environment, including for remote daemons, and restart
+after service environment or config changes. Tokens and environment-variable
+selectors never enter binding config or JSONL. Source and mapping IDs,
+interval, and cutoff are project binding settings managed by
+`kata sync notion enable`, not keys in `[notion_sync]`. See
+[Notion sync](../operations/notion-sync.md).
 
-`[github_sync]` controls daemon-side GitHub credentials. The recommended shared
-daemon path is `[[github_sync.app]]`, matched exactly by normalized `(host,
-owner)`. The GitHub App needs only Metadata read and Issues read permissions.
-If no App matches a binding, kata reads the environment variable named by
-`[github_sync].token_env` (default `KATA_GITHUB_TOKEN`) only when the binding
-host matches `[github_sync].token_host` (default `github.com`). If no host-bound
-env token matches, kata falls back to `gh auth token --hostname <host>` for
-local/single-user deployments. GitHub Enterprise hosts still must be listed in
-`KATA_GITHUB_SYNC_ALLOWED_HOSTS`, and Enterprise env-token deployments should
-set both `token_env` and `token_host`.
+`[github_sync]` controls daemon-side GitHub credentials. For a shared daemon,
+the recommended path is `[[github_sync.app]]`, matched exactly by normalized
+`(host, owner)`. The GitHub App needs only Metadata read and Issues read
+permissions. If no App matches a binding, Kata reads the environment variable
+named by `[github_sync].token_env` (default `KATA_GITHUB_TOKEN`) only when the
+binding host matches `[github_sync].token_host` (default `github.com`). If no
+host-bound env token matches, Kata falls back to
+`gh auth token --hostname <host>` for local or single-user deployments. You
+still must list GitHub Enterprise hosts in `KATA_GITHUB_SYNC_ALLOWED_HOSTS`,
+and Enterprise env-token deployments should set both `token_env` and
+`token_host`.
 
 For a single-user private network where the private IP itself is the access
 boundary, omit `token` and use:
@@ -754,7 +777,7 @@ allow_unauthenticated_private_network_writes = true
 
 This permits writes and event streams without bearer auth, with client-supplied
 actor attribution. It requires a literal private-IP bind and cannot be combined
-with `token`, `require_token_identity`, or `--insecure-readonly`; token
+with `token`, `require_token_identity`, or `--insecure-readonly`. Token
 administration endpoints remain blocked.
 
 Postgres DSNs may carry credentials. Runtime redaction strips userinfo and
@@ -781,48 +804,53 @@ NOTES_TOKEN = "KATA_NOTES_TOKEN"
 workspace = "example-workspace"
 ```
 
-`id` is the lowercase instance name used by `kata connector` and
-`kata bridge --connector`; it must be unique. `command` is the absolute path of
-the connector executable and `args` its fixed arguments. `timeout_seconds`
-bounds each connector call (omit it for the default). `connector.env` maps
-child environment variable names to daemon environment variable names; only
-these variables reach the connector process, and their values are redacted from
-connector errors as secrets. `connector.settings` is non-secret JSON-compatible
-configuration passed to the connector on every call. The daemon validates this
-structure at startup and refuses to start on an invalid `[[connector]]` table,
-but it does not run the executable or read the mapped environment sources
-until a connector call needs them; connector health is observed through
-`kata connector status`. The bridge reconciliation workers always run, so
-durable bindings are still handled when their connector is removed from
-configuration.
+- `id` is the unique lowercase instance name used by `kata connector` and
+  `kata bridge --connector`.
+- `command` is the absolute path of the connector executable, and `args` sets
+  its fixed arguments.
+- `timeout_seconds` bounds each connector call; omit it for the default.
+- `connector.env` maps child environment variable names to daemon environment
+  variable names. Only these variables reach the connector process, and Kata
+  redacts their values from connector errors as secrets.
+- `connector.settings` is non-secret JSON-compatible configuration passed to
+  the connector on every call.
+
+The daemon validates this structure at startup and refuses to start if a
+`[[connector]]` table is invalid. It does not run the executable or read the
+mapped environment sources until a connector call needs them. Check connector
+health with `kata connector status`. Because bridge reconciliation workers
+always run, durable bindings are still handled when you remove their connector
+from configuration.
 
 ### Federation request signing and ingress
 
 `[federation.signing]` configures hub-controlled `required`, the fixed HTTPS
-`external_url` (including a prefix), `replay_state_file`, and `[[federation.signing.key]]`
-entries. Each entry binds `key_id`, `enrollment_id` and exactly one of `key_env`
-or `key_file`; an optional Unix `not_after` bounds retirement overlap.
+`external_url` (including a prefix), `replay_state_file`, and
+`[[federation.signing.key]]` entries. Each key entry binds `key_id`,
+`enrollment_id`, and exactly one of `key_env` or `key_file`; an optional Unix
+`not_after` bounds retirement overlap.
 
-`[federation.ingress]` enables an independent allowlisted listener with `enabled`
-and a literal private `listen` address. It requires signing configuration and
-valid signatures regardless of `required` on ordinary listeners. It defaults to
-disabled, or `127.0.0.1:0` when enabled without an address. See
+`[federation.ingress]` enables an independent allowlisted listener with
+`enabled` and a literal private `listen` address. It requires signing
+configuration and valid signatures regardless of `required` on ordinary
+listeners. It is disabled by default, and uses `127.0.0.1:0` when enabled
+without an address. See
 [Federation request signing](../operations/federation-signing.md) for key setup,
-replay initialization, topology, limits and recovery.
+replay initialization, topology, limits, and recovery.
 
 ### Declarative federation mappings
 
-A spoke daemon maps local projects to projects on remote daemon-catalog targets.
-Each mapping uses either catalog administration credentials or a local credential
-provider. It cannot mix them.
+A spoke daemon maps local projects to projects on remote daemon-catalog
+targets. Each mapping uses either catalog administration credentials or a local
+credential provider, and cannot mix them.
 
 #### Catalog administration credentials
 
 This form creates projects and enrolls or adopts direct-spoke replicas at
-startup. It requires the hub owner's administration credential outside identity
-mode. To connect with an ordinary account token, configure a catalog entry and use
-[`kata federation bridge connect`](../guide/project-relays.md); do not add a
-`[[federation.project]]` mapping for that bridge.
+startup. Outside identity mode, it requires the hub owner's administration
+credential. To connect with an ordinary account token, configure a catalog
+entry and use [`kata federation bridge connect`](../guide/project-relays.md);
+do not add a `[[federation.project]]` mapping for that bridge.
 
 ```toml
 [[daemon]]
@@ -837,42 +865,42 @@ hub_project = "hub-project"
 actor = "user-a"
 ```
 
-`hub` names a remote `[[daemon]]` entry; its URL, authentication, and
-`allow_insecure` policy are reused without falling back to the spoke daemon's
-global bearer token. Prefer `token_file` on a device, or `token_env` when the
-service environment already injects secrets, to keep the hub administration
-credential out of `config.toml`. A failed selected file or an unset or empty
-selected variable is a runtime authentication failure: the spoke stays
-available and retries without sending another credential.
+`hub` names a remote `[[daemon]]` entry. Kata reuses its URL, authentication,
+and `allow_insecure` policy without falling back to the spoke daemon's global
+bearer token. To keep the hub administration credential out of `config.toml`,
+prefer `token_file` on a device, or `token_env` when the service environment
+already injects secrets. A failed selected file or an unset or empty selected
+variable causes a runtime authentication failure: the spoke stays available and
+retries without sending another credential.
 
-Each mapping ensures the named hub project and a `pull,push,lease` enrollment,
-then creates the local `spoke_project` if it is missing or adopts the existing
-standalone project. Enrollment credentials are generated automatically and
-stored in the spoke's owner-only federation credential store. A generated
-credential is durably reserved once under the resolved hub project UID before
-enrollment. A database-backed account token is refused on this legacy
-enrollment path with `federation_enrollment_requires_relay`.
+Each mapping makes sure the named hub project and a `pull,push,lease`
+enrollment exist, then creates the local `spoke_project` if it is missing or
+adopts the existing standalone project. Kata generates enrollment credentials
+automatically and stores them in the spoke's owner-only federation credential
+store, durably reserving a generated credential once under the resolved hub
+project UID before enrollment. A database-backed account token is refused on
+this legacy enrollment path with `federation_enrollment_requires_relay`.
 Credential-file updates use a same-directory, failure-atomic replacement so a
 failed write cannot truncate the last readable credential set.
 
-If the named hub project is deleted and recreated, its UID changes. kata
-reports a conflict and does not silently enroll the replacement. The category
-is `configuration_conflict` before adoption and `binding_conflict` after the
-local project is bound.
-Run `kata federation leave <spoke-project>` to clear the old managed
-reservation, verify the mapping, and restart the daemon to enroll again.
+If the named hub project is deleted and recreated, its UID changes. Kata
+reports a conflict instead of silently enrolling the replacement:
+`configuration_conflict` before adoption and `binding_conflict` after the local
+project is bound. To recover, run `kata federation leave <spoke-project>` to
+clear the old managed reservation, verify the mapping, and restart the daemon
+to enroll again.
 
-Mappings are loaded once when the daemon starts. Restart the daemon after
-adding or changing one. Reconciliation runs asynchronously: hub outages,
-authentication failures, and runtime conflicts do not delay daemon readiness
-or make `/health` unhealthy. Each mapping retries independently with
-exponential backoff from one second to a five-minute cap.
+Kata loads mappings once when the daemon starts. Restart the daemon after adding
+or changing one. Reconciliation runs asynchronously: hub outages,
+authentication failures, and runtime conflicts do not delay daemon readiness or
+make `/health` unhealthy. Each mapping retries independently with exponential
+backoff from one second up to a five-minute cap.
 
 Changing a named catalog entry's URL does not silently rewrite existing spoke
-bindings. For a config-managed spoke, reconciliation reports
-`binding_conflict` and changes nothing during the catalog-edited-but-not-yet-
-rebound window, including after a restart. Resolve that expected migration
-state explicitly:
+bindings. For a config-managed spoke, reconciliation reports `binding_conflict`
+and changes nothing during the window after you edit the catalog and before you
+rebind, including after a restart. Resolve that expected migration state
+explicitly:
 
 ```sh
 kata federation rebind spoke-project --hub team-hub
@@ -880,17 +908,17 @@ kata federation rebind spoke-project --hub team-hub
 
 The selected spoke daemon resolves `team-hub` from its own startup config. It
 requires HTTPS, validates the existing enrollment against the same hub project
-ID and UID at the new endpoint, then updates the stored endpoint without
+ID and UID at the new endpoint, and then updates the stored endpoint without
 changing the enrollment token, capabilities, actor, project identity, or sync
-cursors. The catalog entry's administration `token`, `token_file` or
-`token_env` is not used for this validation. Restart first if the edited catalog has not yet been
-loaded by the daemon.
+cursors. This validation does not use the catalog entry's administration
+`token`, `token_file`, or `token_env`. If the daemon has not yet loaded the
+edited catalog, restart it first.
 
 Before changing either local endpoint record, rebind drains in-flight
 federation transport for that project and blocks new transport until the
 credential and binding agree. A queued sync then rereads the new endpoint.
 
-Removing a mapping and restarting stops managing it; it does not detach the
+Removing a mapping and restarting stops managing it, but does not detach the
 existing replica or revoke its hub enrollment. Teardown is always explicit:
 
 ```sh
@@ -898,26 +926,25 @@ kata federation leave spoke-project
 ```
 
 Explicit leave also removes exact config-managed credential reservations left
-by an interrupted startup reconciliation, including reservations created
-before local adoption completed. Conflicting or manual credentials are retained
-and reported as cleanup errors instead of being deleted. If leave removes a
+by an interrupted startup reconciliation, including reservations created before
+local adoption completed. Kata retains conflicting or manual credentials and
+reports them as cleanup errors instead of deleting them. If leave removes a
 reservation while hub enrollment or rotation is in flight, reconciliation
 compensates by revoking the completed enrollment rather than stranding it.
 Before contacting the hub, leave durably marks the reservation and drains any
 earlier reconciliation request. A completed enrollment ID remains recorded
 until local teardown finishes, so a retry or daemon restart can repeat the
-idempotent revoke. If a crash happens before that ID is recorded, reconciliation
-replays the reserved token to recover the exact enrollment and then revokes it.
-After leave completes, the mapping stays suppressed for the lifetime of that
-daemon process; restart when you deliberately want the configured mapping to
-enroll again.
+idempotent revoke. If a crash happens before that ID is recorded,
+reconciliation replays the reserved token to recover the exact enrollment and
+then revokes it. After leave completes, the mapping stays suppressed for the
+lifetime of that daemon process; restart when you deliberately want the
+configured mapping to enroll again.
 
 Structural mistakes still fail config loading, including missing fields, a hub
 that is not a remote catalog entry, duplicate `spoke_project` values, or two
 mappings that select the same canonical hub origin and hub project. `actor` is
-required and cannot be the reserved `bootstrap` identity, even when a
-DB-backed token identity will override the requested actor at reconciliation
-time.
+required and cannot be the reserved `bootstrap` identity, even when a DB-backed
+token identity overrides the requested actor at reconciliation time.
 
 #### Credential provider
 
@@ -946,16 +973,21 @@ credential_provider = ["access-helper", "credentials", "--profile", "work"]
 | `actor` | Must be absent; the provider supplies the approved actor. |
 | Catalog `token`, `token_file`, `token_env` | Must be absent for a provider mapping. |
 
-Provider mappings require HTTPS even if the catalog sets `allow_insecure`.
-The helper approves a credential for an exact HTTPS destination; the catalog's
-plaintext opt-in does not change that contract. Install the hub's CA in the
-daemon's trust store when using a private certificate authority.
+Provider mappings require HTTPS even if the catalog sets `allow_insecure`. The
+helper approves a credential for an exact HTTPS destination, and the catalog's
+plaintext opt-in does not change that contract. When you use a private
+certificate authority, install the hub's CA in the daemon's trust store.
 
-`read_only` permits pull only. `collaborate` permits pull and push; the hub may
-also grant task claiming. Both attach an empty project or rejoin a detached
-project matching the hub UID. Collaborative rejoin reoffers local-origin
-events; the hub deduplicates them, and new events must use the enrollment
-actor. `migrate` asks the hub to approve importing local tasks and authors.
+Each `intent` value controls what the hub grants:
+
+- `read_only` permits pull only.
+- `collaborate` permits pull and push; the hub may also grant task claiming.
+  Both `read_only` and `collaborate` attach an empty project or rejoin a
+  detached project matching the hub UID. Collaborative rejoin reoffers
+  local-origin events; the hub deduplicates them, and new events must use the
+  enrollment actor.
+- `migrate` asks the hub to approve importing local tasks and authors.
+
 The helper cannot silently downgrade write access or upgrade read-only access.
 
 An attached replica can switch between `read_only` and `collaborate`: edit
@@ -963,18 +995,20 @@ An attached replica can switch between `read_only` and `collaborate`: edit
 [Change replica intent](../operations/federation.md#change-replica-intent).
 Changing to or from `migrate` still requires leaving the hub first.
 
-Kata retains the request across restarts and failed exchanges. A helper that
-exits `2` reports `configuration_conflict` in reconciliation health; check its
-command and protocol version. Removing a provider mapping releases its saved
-request and detaches the replica on restart, unlike catalog-admin mappings.
-See [External credential providers](../operations/federation.md#external-credential-providers)
+Kata retains the request across restarts and failed exchanges. If a helper
+exits `2`, reconciliation health reports `configuration_conflict`; check its
+command and protocol version. Unlike catalog-admin mappings, removing a
+provider mapping releases its saved request and detaches the replica on
+restart. See
+[External credential providers](../operations/federation.md#external-credential-providers)
 for approval, status, and cleanup, and the
 [helper protocol](../development/embedding.md#federation-credential-providers)
 for the exact exchange.
 
 ## Token identity mode
 
-For a shared daemon where each user should have stable attribution:
+For a shared daemon where each user needs stable attribution, enable
+`require_token_identity`:
 
 ```toml
 [auth]
@@ -993,14 +1027,16 @@ kata tokens list
 kata tokens revoke 1
 ```
 
-Unscoped `tokens create` prints plaintext once. The daemon stores only a SHA-256 hash.
-Lost tokens must be revoked and recreated. Set `--expires-in 4h` to bound an
-ordinary token's lifetime; omitting it keeps the existing non-expiring lifetime.
+Unscoped `tokens create` prints the plaintext token once, and the daemon stores
+only a SHA-256 hash. If you lose a token, revoke it and create a new one. To
+bound an ordinary token's lifetime, pass `--expires-in 4h`; omitting it keeps
+the existing non-expiring lifetime.
 
 Kata refuses `tokens create` when a shared token is configured but
-`require_token_identity` is false. This prevents minting a credential that the
-daemon would immediately reject as a bearer token. A local no-auth daemon may
-still pre-provision unscoped tokens before it is restarted in identity mode.
+`require_token_identity` is false, preventing you from minting a credential
+that the daemon would immediately reject as a bearer token. A local no-auth
+daemon may still pre-provision unscoped tokens before you restart it in
+identity mode.
 
 Scoped creation always requires `require_token_identity = true`, even without
 a shared token. `allow_unauthenticated_private_network_writes` is incompatible
@@ -1008,8 +1044,8 @@ with identity mode and refuses token administration, so it cannot mint scoped
 credentials. See [token CLI usage](cli.md#remote-and-identity-tokens).
 
 In identity mode, the bootstrap/admin token can manage tokens and perform
-reads, but attributed writes require a DB-backed token. The daemon derives the
-actor from that token.
+reads, while attributed writes require a DB-backed token. The daemon derives
+the actor from that token.
 
 Connector administration is off for DB-backed tokens by default. To grant it,
 add this setting to the same `[auth]` table:
@@ -1029,19 +1065,19 @@ connectors.
 
 ## Close throttle
 
-kata refuses structurally dangerous close patterns. The parent-completeness
-guard always refuses closing an issue while it has open children. Normal CLI
-and API close paths also require close evidence and a substantive message.
+Kata refuses structurally dangerous close patterns. The parent-completeness
+guard always refuses closing an issue while it has open children, and normal
+CLI and API close paths also require close evidence and a substantive message.
 
-By default, kata does not throttle sibling close bursts. Operators who want
-stricter pacing can enable two additional guards daemon-wide:
+By default, Kata does not throttle sibling close bursts. If you want stricter
+pacing, you can enable two additional guards daemon-wide:
 
-- sibling-burst: closing more than three sibling issues within the configured
-  window is refused;
-- repeated-message: closing a second sibling with an identical `done` or
-  `audit-no-change` message within thirty minutes is refused.
+- **Sibling burst.** Kata refuses closing more than three sibling issues within
+  the configured window.
+- **Repeated message.** Kata refuses closing a second sibling with an identical
+  `done` or `audit-no-change` message within thirty minutes.
 
-Enable the optional throttles with:
+Enable these optional throttles in `<KATA_HOME>/config.toml`:
 
 ```toml
 [close.throttle]
@@ -1049,10 +1085,10 @@ enabled = true
 window = "60s"
 ```
 
-`enabled` defaults to `false`. `window` controls only the sibling-burst lookback
-and defaults to `"60s"`; use Go duration syntax such as `"30s"`, `"2m"`, or
-`"1h"`. When a sibling-burst close is refused, the error message reports the
-resolved window.
+`enabled` defaults to `false`. `window` controls only the sibling-burst
+lookback and defaults to `"60s"`; use Go duration syntax such as `"30s"`,
+`"2m"`, or `"1h"`. When Kata refuses a sibling-burst close, the error message
+reports the resolved window.
 
 Normal CLI and API close paths still run the parent-completeness refusal,
 message-substance checks, and evidence checks. The TUI close path skips the
@@ -1060,16 +1096,16 @@ message-substance and evidence checks only when the daemon accepts the request
 over an owner-local Unix socket or direct loopback TCP connection with no
 forwarding headers, because an interactive human confirms each close. Users of
 a forwarded or non-loopback TUI, including a TUI authenticated with an
-issue-scoped credential, get a completion form for the substantive message and
+issue-scoped credential, see a completion form for the substantive message and
 typed evidence required by the normal close contract. The TUI discovers that
-requirement from `/instance`; it does not trust its own `source=tui` marker to
+requirement from `/instance` and does not trust its own `source=tui` marker to
 widen authority. Structural guards still apply to every transport.
 
 ## MCP Events
 
-`[mcp_events]` turns on daemon-owned MCP Events. The daemon then stores
-webhook subscriptions and delivers signed inbox events to them while the
-daemon runs. `kata mcp serve` only forwards requests to it.
+`[mcp_events]` turns on daemon-owned MCP Events. While the daemon runs, it
+stores webhook subscriptions and delivers signed inbox events to them;
+`kata mcp serve` only forwards requests to the daemon.
 
 ```toml
 [mcp_events]
@@ -1086,33 +1122,34 @@ allow_no_expiry = true
 | `trusted_callbacks` | `[]` | Grants exact HTTPS origins static private addresses; see [Trusted private callbacks](#trusted-private-callbacks). |
 
 Subscribers choose their own lifetime. A request without one gets 24 hours
-capped by `max_ttl`, and a finite request is clamped to between 60 seconds and
+capped by `max_ttl`, and a finite request is clamped between 60 seconds and
 `max_ttl`. A request for no expiry is honored unless `allow_no_expiry = false`.
 Subscriptions created before you change the setting keep their lifetime until
 the subscriber next refreshes.
 
 The daemon seals subscription secrets with a 32-byte key in
-`<KATA_HOME>/runtime/<storage-id>/mcp-events.key`. It creates the file, readable
-only by its owner, the first time Events starts against a database that has no
-Events data. Daemons that share one PostgreSQL database must use the same key
-file.
+`<KATA_HOME>/runtime/<storage-id>/mcp-events.key`. The first time Events starts
+against a database with no Events data, the daemon creates this file readable
+only by its owner. Daemons that share one PostgreSQL database must use the same
+key file.
 
-Events failures never stop the daemon. If the key file is missing, unreadable
+Events failures never stop the daemon. If the key file is missing, unreadable,
 or different from the one the database was written under, Events stays
 disabled, the daemon logs why, and every other daemon function keeps working.
-The daemon never replaces a key that is missing or corrupt. The status route,
+The daemon never replaces a missing or corrupt key. The status route,
 `GET /api/v1/mcp-events/subscriptions`, reports `enabled: false` and a
 `reason`: `events_not_configured`, `events_key_unavailable`,
-`events_key_mismatch` or `events_start_failed`.
+`events_key_mismatch`, or `events_start_failed`.
 
-Programs that embed the Go `Service` set `Config.MCPEvents.Enabled` and
-supply `Config.MCPEvents.Key` instead. `Config.MCPEvents.MaxTTL` and
-`Config.MCPEvents.RefuseNoExpiry` match `max_ttl` and `allow_no_expiry = false`. Without a key provider, Events is
-disabled with `events_not_configured` and the other workers still run.
+Programs that embed the Go `Service` set `Config.MCPEvents.Enabled` and supply
+`Config.MCPEvents.Key` instead. `Config.MCPEvents.MaxTTL` and
+`Config.MCPEvents.RefuseNoExpiry` match `max_ttl` and `allow_no_expiry = false`.
+Without a key provider, Events stays disabled with `events_not_configured` and
+the other workers still run.
 
 ### Trusted private callbacks
 
-Operators can grant one exact HTTPS origin access to static private addresses:
+You can grant one exact HTTPS origin access to static private addresses:
 
 ```toml
 [[mcp_events.trusted_callbacks]]
@@ -1121,47 +1158,47 @@ addresses = ["100.64.0.1", "fd00::1"]
 ```
 
 Each entry needs at least one numeric address from RFC1918 IPv4
-(`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), CGNAT
-(`100.64.0.0/10`), or IPv6 ULA (`fc00::/7`). Loopback, link-local,
-unspecified, multicast, public, and other reserved addresses are
-not permitted. The metadata addresses `100.100.100.200`, `fd00:ec2::254`,
-and `fd20:ce::254` are also excluded. Do not use
-CIDRs, zones or hostnames in `addresses`.
+(`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), CGNAT (`100.64.0.0/10`), or
+IPv6 ULA (`fc00::/7`). Loopback, link-local, unspecified, multicast, public,
+and other reserved addresses are not permitted, and the metadata addresses
+`100.100.100.200`, `fd00:ec2::254`, and `fd20:ce::254` are also excluded. Do
+not put CIDRs, zones, or hostnames in `addresses`.
 
-An origin includes the scheme, hostname and optional port. The default
-HTTPS port `:443` equals an omitted port. Hostname case is ignored.
-Origins cannot contain credentials, wildcards, non-root paths, queries or
-fragments. Exact pinned `.internal`, `home.arpa`, and `.local` names are permitted;
-`localhost` remains forbidden.
-Duplicate origins or addresses within an entry disable Events. A private
-literal-IP origin must pin only that same IP.
+An origin includes the scheme, hostname, and optional port. The default HTTPS
+port `:443` equals an omitted port, and hostname case is ignored. Origins
+cannot contain credentials, wildcards, non-root paths, queries, or fragments.
+Exact pinned `.internal`, `home.arpa`, and `.local` names are permitted, while
+`localhost` remains forbidden. Duplicate origins or duplicate addresses within
+an entry disable Events. A private literal-IP origin must pin only that same
+IP.
 
 A matching callback always connects to its pins without DNS or a public
-fallback. Other callbacks remain public-only; every address in a DNS answer
-must be public before any connection is attempted. TLS still checks the
+fallback. Other callbacks remain public-only: every address in a DNS answer
+must be public before Kata attempts any connection. TLS still checks the
 original callback hostname and certificate using system roots. Install a
-trusted certificate chain on the receiver; literal-IP callbacks need a
-matching IP subject alternative name. Signing and receiver verification
-remain required. Subscribers cannot grant private access.
+trusted certificate chain on the receiver; literal-IP callbacks need a matching
+IP subject alternative name. Signing and receiver verification remain required,
+and subscribers cannot grant private access.
 
 Restart the daemon after changing these entries. Removing an entry withdraws
-its private access: subsequent delivery attempts and subscription refreshes
+its private access, and subsequent delivery attempts and subscription refreshes
 that resolve to private addresses fail with `destination_not_allowed`.
 Unsubscribe remains available. Cached public consent can still be refreshed
-during a DNS outage; delivery independently checks DNS when it connects.
-An invalid policy that parses successfully disables Events with `events_start_failed`
-while the daemon keeps serving other requests. Malformed configuration prevents
-the daemon from starting. The diagnostic identifies the zero-based entry index and
-`origin` or `addresses` field, plus the address index when applicable, without
-logging supplied origins or addresses. No environment variable grants callback trust.
+during a DNS outage; delivery independently checks DNS when it connects. An
+invalid policy that parses successfully disables Events with
+`events_start_failed` while the daemon keeps serving other requests, whereas
+malformed configuration prevents the daemon from starting. The diagnostic
+identifies the zero-based entry index and `origin` or `addresses` field, plus
+the address index when applicable, without logging supplied origins or
+addresses. No environment variable grants callback trust.
 
 ## Semantic search
 
-This section is the field reference; see the
+This section is the field reference. See the
 [Semantic search guide](../guide/semantic-search.md) for setup and behavior.
 
 Semantic search is opt-in. Run `kata daemon local-embeddings` to use a running
-Ollama in a home without embeddings configured, or download the shared
+Ollama in a home without embeddings configured, or to download the shared
 built-in server with your consent. Running it again switches a configured
 provider to the built-in server:
 
@@ -1171,20 +1208,21 @@ local = true
 ```
 
 `local` uses `nomic-embed-text` with 768 dimensions by default. It accepts
-`nomic-embed-text`, `nomic-embed-text:latest`, and `nomic-embed-text:v1.5`, and
-widths up to 768. Widths below 768 require `request_dimensions = true`. A
+`nomic-embed-text`, `nomic-embed-text:latest`, and `nomic-embed-text:v1.5`,
+with widths up to 768; widths below 768 require `request_dimensions = true`. A
 `base_url` from any source, including `KATA_SEARCH_EMBEDDINGS_BASE_URL`, takes
-precedence over `local = true`. API key settings are ignored only while the
-built-in server is selected. The setup command refuses while that environment
-variable is set and restores the config if a daemon refuses its restart.
-On SQLite, a recorded shared choice enables the built-in server when no provider
-is configured. PostgreSQL requires explicit setup. The daemon reuses installed
-files. On SQLite, a recorded shared choice allows it to download missing built-in
-files. Otherwise, run the setup command to approve the download.
-Older Kata releases reject the `local` key.
+precedence over `local = true`. Kata ignores API key settings only while the
+built-in server is selected. The setup command refuses to run while that
+environment variable is set and restores the config if a daemon refuses its
+restart. On SQLite, a recorded shared choice enables the built-in server when
+no provider is configured, while PostgreSQL requires explicit setup. The daemon
+reuses installed files. On SQLite, a recorded shared choice allows it to
+download missing built-in files; otherwise, run the setup command to approve
+the download. Older Kata releases reject the `local` key.
 
 With embeddings disabled, search matches words only. To use an external
-OpenAI-compatible provider, set `local = false` and configure its endpoint and model:
+OpenAI-compatible provider, set `local = false` and configure its endpoint and
+model:
 
 ```toml
 [search.embeddings]
@@ -1207,26 +1245,26 @@ model    = "nomic-embed-text"
 # trust_private_network = false # allow plaintext HTTP to literal non-public IPs
 ```
 
-For an external provider, `base_url` and `model` are both required; setting only
-one is a startup error rather than a silent disable. With no credential source
-configured, requests omit the `Authorization` header. Keyless local providers
-such as Ollama need only `base_url` and `model`.
+For an external provider, both `base_url` and `model` are required; setting
+only one causes a startup error rather than a silent disable. When no
+credential source is configured, requests omit the `Authorization` header, and
+keyless local providers such as Ollama need only `base_url` and `model`.
 
 The built-in server defaults to 8 inputs per request and a 300-second request
-timeout. Configured endpoints default to 64 inputs and 30 seconds. Set
-`batch_size` or `timeout_seconds` to override either default. Kata sends one
-embedding request at a time during indexing. If a multi-input request times
-out, Kata splits it into smaller requests. If a single input also times out,
-later fills use smaller batches until the daemon restarts.
+timeout, whereas configured endpoints default to 64 inputs and 30 seconds. Set
+`batch_size` or `timeout_seconds` to override either default. During indexing,
+Kata sends one embedding request at a time. If a multi-input request times out,
+Kata splits it into smaller requests. If a single input also times out, later
+fills use smaller batches until the daemon restarts.
 
 Affixes preserve every space and newline. Kata applies document affixes once
-around each prepared issue chunk and query affixes once around the search
-query text, which Kata sends as entered. With empty affixes and
+around each prepared issue chunk and query affixes once around the search query
+text, which Kata sends as entered. With empty affixes and
 `request_dimensions = false`, existing generation fingerprints stay unchanged
-and stored vectors are reused. Setting any affix or enabling dimension requests
-creates a separate generation. `dims` always validates response width;
-`request_dimensions` additionally sends that width as the request's
-`dimensions` field. Kata never slices vectors to fit.
+and Kata reuses stored vectors. Setting any affix or enabling dimension requests
+creates a separate generation. `dims` always validates response width, while
+`request_dimensions` also sends that width as the request's `dimensions` field.
+Kata never slices vectors to fit.
 
 ### Optional EmbeddingGemma 2 text endpoint
 
@@ -1244,16 +1282,16 @@ document_prefix = "title: none | text: "
 query_prefix = "task: search result | query: "
 ```
 
-The operator must bind that alias to `google/embeddinggemma-2` at the specified
-revision, tokenizer, pooling, precision and dimension policy. The alias and
-salt record that assertion; Kata does not verify the server's weights. Use
-mean pooling including prompts, L2 normalization, and bfloat16 or float32
+You must bind that alias to `google/embeddinggemma-2` at the specified
+revision, tokenizer, pooling, precision, and dimension policy. The alias and
+salt record that assertion; Kata does not verify the server's weights. Use mean
+pooling including prompts, L2 normalization, and bfloat16 or float32
 activations, rather than float16. Configure the server to accept literal client
 prompts without adding them again. Kata sends text only; this transport does
-not enable image, audio or video input.
+not enable image, audio, or video input.
 
-The model card recommends `title: {title}` when a title exists. Affixes are
-fixed text, so every chunk uses `title: none` and the issue title stays at the
+The model card recommends `title: {title}` when a title exists. Because affixes
+are fixed text, every chunk uses `title: none` and the issue title stays at the
 start of the first chunk's text.
 
 The server must enforce the shared 8192-token input window, including prompt
@@ -1263,134 +1301,135 @@ Character-based chunk limits also do not establish that token bound.
 
 Kata does not download weights or configure the serving runtime.
 
-For 512, 256 or 128 dimensions, set `dims` to that width and
+For 512, 256, or 128 dimensions, set `dims` to that width and set
 `request_dimensions = true` only if the server supports explicit truncation
 followed by L2 renormalization. Both queries and documents must use the same
-width. A server that returns the wrong width is rejected. Changing these
-settings requires restart and backfill before semantic search can resume.
+width, and Kata rejects a server that returns the wrong width. Changing these
+settings requires a restart and backfill before semantic search can resume.
 
 ### Credentials and batching
 
-Credential resolution uses `api_key` > `api_key_file` > `api_key_env`. The first
-selected source wins. If its file is missing, unreadable, or empty, or its
-environment variable is unset or empty, Kata makes no provider requests and
-keeps issues in the backlog. It reports the source problem without falling
+Credential resolution follows `api_key` > `api_key_file` > `api_key_env`, and
+the first selected source wins. If its file is missing, unreadable, or empty,
+or its environment variable is unset or empty, Kata makes no provider requests
+and keeps issues in the backlog. It reports the source problem without falling
 back to a lower-priority source.
 
 Key files must use an absolute path or start with `~/`, which expands to the
-daemon user's home directory (not `KATA_HOME`). Other relative paths are
+daemon user's home directory rather than `KATA_HOME`. Other relative paths are
 rejected. Symlinks are accepted, and there is no parent-directory ownership or
-permission policy. Kata validates the opened file: it must be regular and
-owned by the daemon's effective user. On Unix, group/world permissions are
+permission policy. Kata validates the opened file: it must be regular and owned
+by the daemon's effective user. On Unix, group and world permissions are
 rejected (`chmod 600`). On Windows, the file must not inherit permissions from
 its folder, and it may grant access only to the current user, SYSTEM, and
 Administrators. A file created in a user profile inherits its folder's
-permissions and is rejected even when they list only those accounts. To fix
-it, run this in PowerShell as the daemon user:
-`icacls <file> /inheritance:r /grant:r "${env:USERNAME}:R"`. Files larger than
-64 KiB are refused, and reads are bounded to enforce that limit.
-File contents are trimmed, including a trailing newline.
+permissions and is rejected even when they list only those accounts. To fix it,
+run this in PowerShell as the daemon user:
+`icacls <file> /inheritance:r /grant:r "${env:USERNAME}:R"`. Kata refuses files
+larger than 64 KiB and bounds reads to enforce that limit. File contents are
+trimmed, including a trailing newline.
 
 Kata resolves the selected credential once at startup and once per
-`kata daemon reload`. Reload wakes the embedding backlog; changes to provider
-settings, including `base_url` or `model`, require a restart. An environment key
-must be present in the daemon's environment, not just the shell running a later
-CLI command.
+`kata daemon reload`. Reloading wakes the embedding backlog, while changes to
+provider settings, including `base_url` or `model`, require a restart. An
+environment key must be present in the daemon's environment, not only in the
+shell running a later CLI command.
 
 Missing credentials and provider access failures appear in health and search.
 Health warns on stderr in human and agent formats while JSON stays clean.
-Default search labels its lexical fallback without an extra stderr warning;
-explicit semantic/hybrid searches return readable validation errors. See
+Default search labels its lexical fallback without an extra stderr warning, and
+explicit semantic or hybrid searches return readable validation errors. See
 [Missing or rejected credentials](../guide/semantic-search.md#missing-or-rejected-credentials)
 for status meanings and recovery.
 
-The embedding API key is attached only to requests whose origin matches
+Kata attaches the embedding API key only to requests whose origin matches
 `base_url`, following the same bearer-token trust ladder as daemon catalog
 tokens: HTTPS is always allowed, HTTP to loopback is allowed, and HTTP to other
 private IPs needs `trust_private_network = true`.
 
-Some providers cap the total input tokens across one embedding request as well
-as the number of inputs. Set `model_context_tokens` to the model's per-input
-context limit and `max_batch_tokens` to the provider's aggregate request limit
-when that applies. Kata passes both limits to kit, which conservatively treats
-every input as capable of filling the model context and reduces `batch_size` as
-needed. This avoids repeatable oversized-request errors from providers that
-truncate each input before enforcing their aggregate limit.
+Some providers cap the total input tokens across one embedding request in
+addition to the number of inputs. When that applies, set
+`model_context_tokens` to the model's per-input context limit and
+`max_batch_tokens` to the provider's aggregate request limit. Kata passes both
+limits to kit, which conservatively treats every input as capable of filling
+the model context and reduces `batch_size` as needed. This avoids repeatable
+oversized-request errors from providers that truncate each input before
+enforcing their aggregate limit.
 
-Both settings are optional and default to zero. Existing deployments therefore
-keep count-only batching. When either setting is used, both must be positive and
-`max_batch_tokens` must fit at least one `model_context_tokens` input; kit checks
-this during daemon startup before Kata processes documents.
+Both settings are optional and default to zero, so existing deployments keep
+count-only batching. When you use either setting, both must be positive and
+`max_batch_tokens` must fit at least one `model_context_tokens` input; kit
+checks this during daemon startup before Kata processes documents.
 
-Privacy: configuring an endpoint sends issue titles and bodies to it on every
-embed. That is the consent boundary: the operator who writes this section
+Configuring an endpoint sends issue titles and bodies to it on every embed.
+That is the privacy consent boundary: the operator who writes this section
 authorizes the data flow. For sensitive projects, prefer a local endpoint (for
 example Ollama on loopback) so issue text never leaves the host. Embeddings are
 local derived state and **do not federate**. Direct spokes use their hub to
-search shared projects and do not embed those projects locally. No vectors are
-sent to or pulled from federated hubs.
+search shared projects and do not embed those projects locally, and no vectors
+are sent to or pulled from federated hubs.
 
 ### Index freshness
 
-The daemon keeps the index fresh on its own: a background reconciler embeds new
-and edited issues within seconds, and `kata` reports its state under
+The daemon keeps the index fresh on its own with a background reconciler that
+embeds new and edited issues within seconds. `kata` reports its state under
 `embeddings` in the `/health` response (`configured`, `last_success_at`,
-`last_error_status`, `embedded`, `skipped`, and `backlog`). During a backfill it also
-reports `started_at` and `last_progress_at`, then adds a smoothed
+`last_error_status`, `embedded`, `skipped`, and `backlog`). During a backfill,
+it also reports `started_at` and `last_progress_at`, then adds a smoothed
 `rate_per_second` and `eta_seconds` after two positive progress samples. Search
-never blocks on embedding lag: an issue is findable lexically the instant it
-is created, and gains semantic recall once the reconciler catches up.
+never blocks on embedding lag: an issue is findable lexically the instant it is
+created and gains semantic recall once the reconciler catches up.
 
-Issue text is chunked before embedding rather than embedded as a single
+Kata chunks issue text before embedding rather than embedding a single
 truncated vector, so long issues get full semantic coverage instead of losing
 everything past a fixed length cutoff.
 
-With SQLite, embeddings live in a sidecar database the daemon creates next to
-the main database (`kata.vectors.db` for the default `kata.db`). With
+With SQLite, embeddings live in a sidecar database that the daemon creates next
+to the main database (`kata.vectors.db` for the default `kata.db`). With
 PostgreSQL, they live in `halfvec` tables in the selected Kata schema when the
-optional pgvector extension is installed. See
-[PostgreSQL operations](../operations/postgres.md) for extension and role
-requirements. Core PostgreSQL storage works without pgvector. Both forms are
-derived state and are rebuilt by re-embedding;
-portable JSONL exports do not include vectors.
+optional pgvector extension is installed; core PostgreSQL storage works without
+pgvector. See [PostgreSQL operations](../operations/postgres.md) for extension
+and role requirements. Both forms are derived state rebuilt by re-embedding,
+and portable JSONL exports do not include vectors.
 
-Upgrading to a kata version that changes embedding storage re-embeds every
-issue from scratch on the first daemon start after the upgrade. The rebuilt
-index starts serving immediately, so search returns partial semantic results
-while the backfill drains; the `embeddings` backlog in `/health` reports the
-remaining coverage. An ordinary reconciler backlog with an active index does
-not degrade search; fresh or edited issues simply lack semantic recall
-until they are embedded. Search degrades (labeled in `auto` mode, 503 for
-explicit `--hybrid`/`--semantic`) when the vector leg is unavailable or when
-bounded label filtering exhausts its candidate ceiling before filling the
-requested result limit. Unavailability includes the period before any index is
-activated (fresh vector storage before the first reconcile cycle) and embedding
-configuration changes while the replacement index is still backfilling.
+When you upgrade to a Kata version that changes embedding storage, Kata
+re-embeds every issue from scratch on the first daemon start after the upgrade.
+The rebuilt index starts serving immediately, so search returns partial
+semantic results while the backfill drains; the `embeddings` backlog in
+`/health` reports the remaining coverage. An ordinary reconciler backlog with
+an active index does not degrade search, though fresh or edited issues lack
+semantic recall until they are embedded. Search degrades (labeled in `auto`
+mode, 503 for explicit `--hybrid`/`--semantic`) when the vector leg is
+unavailable or when bounded label filtering exhausts its candidate ceiling
+before filling the requested result limit. Unavailability includes the period
+before any index is activated (fresh vector storage before the first reconcile
+cycle) and embedding configuration changes while the replacement index is still
+backfilling.
 
 Changing `model`, `dims`, `fingerprint_salt`, any literal affix, or
-`request_dimensions` builds a new index generation
-in the background and cuts over automatically once it finishes filling.
-During that backfill the vector leg is unavailable (queries embedded under
-the new configuration cannot be scored against the old generation's vectors), so
-`auto` searches degrade to labeled lexical results and explicit
-`--hybrid`/`--semantic` requests return 503 until the cutover.
+`request_dimensions` builds a new index generation in the background and cuts
+over automatically once it finishes filling. During that backfill, the vector
+leg is unavailable (queries embedded under the new configuration cannot be
+scored against the old generation's vectors), so `auto` searches degrade to
+labeled lexical results and explicit `--hybrid`/`--semantic` requests return
+503 until the cutover.
 
 <a id="telemetry"></a><a id="reporting-rules"></a>
 
 ## Usage reporting
 
-Kata can send general, anonymous usage telemetry. Usage telemetry is off
-unless you have opted in or set `TELEMETRY_ENABLED=1`. Any of these turns it
-off: `KATA_TELEMETRY_ENABLED=0`, `TELEMETRY_ENABLED=0`,
-`DO_NOT_TRACK`, or `CI`. Development builds never send it.
+Kata can send general, anonymous usage telemetry. Telemetry stays off unless
+you opt in or set `TELEMETRY_ENABLED=1`. Setting any of
+`KATA_TELEMETRY_ENABLED=0`, `TELEMETRY_ENABLED=0`, `DO_NOT_TRACK`, or `CI`
+turns it off. Development builds never send telemetry.
 Tagged `go install` builds report their release version but send no usage telemetry because they lack version control revision metadata.
 
 ## Federation credentials
 
 Federation enrollment tokens are separate from daemon API tokens. The hub
-stores only token hashes. A spoke stores the plaintext enrollment token in its
-local federation credentials file so it can call hub federation transport
-routes.
+stores only token hashes, while a spoke stores the plaintext enrollment token
+in its local federation credentials file so it can call hub federation
+transport routes.
 
 Do not put federation enrollment tokens in `.kata.toml`.
 
@@ -1401,53 +1440,56 @@ binds `0.0.0.0:$PORT`. Hosted mode still requires daemon API auth and explicit
 private-network trust. See [Hosted mode](../operations/hosted-mode.md).
 
 `[plane_sync]` sets daemon-owned `api_origin`, `web_origin`, and `token_env`.
-Cloud defaults are `https://api.plane.so`, `https://app.plane.so`, and
-`KATA_PLANE_TOKEN`. A self-hosted API origin also becomes the default web origin.
-Origins must be root HTTPS origins, or HTTP on literal loopback IPs. API keys
-are resolved once per run and sent only to the configured API origin through
-`X-API-Key`; redirects are rejected. Binding requests cannot choose origins or
-credentials. Workspace, project UUID, cutoff, interval, and title presentation
-are set with `kata sync plane enable`. See [Plane sync](../operations/plane-sync.md).
+The Plane Cloud defaults are `https://api.plane.so`, `https://app.plane.so`, and
+`KATA_PLANE_TOKEN`. A self-hosted API origin also becomes the default web
+origin. Origins must be root HTTPS origins or HTTP on literal loopback IPs.
+Kata resolves API keys once per run, sends them only to the configured API
+origin through `X-API-Key`, and rejects redirects. Binding requests cannot
+choose origins or credentials. Set workspace, project UUID, cutoff, interval,
+and title presentation with `kata sync plane enable`. See
+[Plane sync](../operations/plane-sync.md).
 
 ## Linear credentials
 
 `[linear_sync]` selects daemon-owned `token_env` (default `KATA_LINEAR_TOKEN`)
-and `auth_type` (`api-key` by default, or `oauth` for an operator-managed Bearer
-token). All requests use `https://api.linear.app/graphql`; redirects are rejected.
-Kata does not refresh OAuth tokens. Workspace/team UUIDs and an optional project
-restriction belong to `kata sync linear enable`. See
+and `auth_type` (`api-key` by default, or `oauth` for an operator-managed
+Bearer token). All requests go to `https://api.linear.app/graphql`, and Kata
+rejects redirects and does not refresh OAuth tokens. Configure workspace/team
+UUIDs and an optional project restriction with `kata sync linear enable`. See
 [Linear sync](../operations/linear-sync.md).
 
 ## Twenty credentials
 
-`[twenty_sync]` selects daemon-owned `api_origin`, `web_origin`, and `token_env`.
-Defaults are `https://api.twenty.com`, `https://app.twenty.com`, and
-`KATA_TWENTY_TOKEN`. Self-hosted HTTPS root origins and literal-loopback HTTP are
-supported; an omitted web origin follows a custom API origin. Keys are captured
-once per run and used as bearer credentials only at the configured API origin;
-redirects are rejected. Enable discovers the key's workspace UUID. Bindings
-cannot choose origins, keys, or another workspace. See [Twenty sync](../operations/twenty-sync.md).
+`[twenty_sync]` selects daemon-owned `api_origin`, `web_origin`, and
+`token_env`, defaulting to `https://api.twenty.com`, `https://app.twenty.com`,
+and `KATA_TWENTY_TOKEN`. Self-hosted HTTPS root origins and literal-loopback
+HTTP are supported, and an omitted web origin follows a custom API origin. Kata
+captures keys once per run, sends them as bearer credentials only to the
+configured API origin, and rejects redirects. Enabling the sync discovers the
+key's workspace UUID, and bindings cannot choose origins, keys, or another
+workspace. See [Twenty sync](../operations/twenty-sync.md).
 
 ## Todoist credentials
 
-`[todoist_sync]` selects daemon-owned `token_env` (default `KATA_TODOIST_TOKEN`).
-Requests use `https://api.todoist.com`; the only alternative `api_origin` is
-literal loopback HTTP for isolated fixture APIs. Tokens are captured once per
-run, redirects are rejected, and binding requests cannot select credentials or
-origins. Configure the selected project and history floor with
-`kata sync todoist enable`. See [Todoist sync](../operations/todoist-sync.md).
+`[todoist_sync]` selects daemon-owned `token_env` (default
+`KATA_TODOIST_TOKEN`). Requests go to `https://api.todoist.com`; the only
+alternative `api_origin` is literal loopback HTTP for isolated fixture APIs.
+Kata captures tokens once per run, rejects redirects, and does not let binding
+requests select credentials or origins. Configure the selected project and
+history floor with `kata sync todoist enable`. See
+[Todoist sync](../operations/todoist-sync.md).
 
 `[ticktick_sync]` selects the daemon-owned token environment variable through
-`token_env`, initially `KATA_TICKTICK_TOKEN`. The API origin is fixed to
-`https://api.ticktick.com`. Project scope and status direction are selected with
+`token_env`, which defaults to `KATA_TICKTICK_TOKEN`. The API origin is fixed
+to `https://api.ticktick.com`. Select project scope and status direction with
 `kata sync ticktick enable`. See [TickTick sync](../operations/ticktick-sync.md)
 for access tokens, field ownership, completion writeback, and recovery limits.
 
 ## Docbank attachments
 
-Kata 0.21.0 and later: `[docbank]` enables issue file uploads and reads through a
-Docbank, either separately hosted (`url`) or running on the same machine
-(`local`). `kata docbank setup` writes and checks this section. See
+In Kata 0.21.0 and later, `[docbank]` enables issue file uploads and reads
+through a Docbank, either separately hosted (`url`) or running on the same
+machine (`local`). `kata docbank setup` writes and checks this section. See
 [Issue attachments](../guide/attachments.md#configure-the-daemon) for setup and
 the shared-vault trust boundary. Shared projects use the root daemon's configuration; upgrade every daemon on the route. The configured folder is visible to enrolled project readers and metadata writers, and `/` exposes the entire vault.
 
@@ -1465,11 +1507,12 @@ A configured URL requires a key source. If the selected source cannot supply a
 key, Kata does not fall back to another source and sends nothing to Docbank;
 attachment requests fail with `docbank_key_unavailable` (see
 [attachment endpoints](http-api.md#attachment-endpoints)). `kata doctor`
-(`daemon.docbank`) shows the failing source, and asks Docbank once whether it
-answers and accepts the key. Keys are resolved on each request.
+(`daemon.docbank`) shows the failing source and asks Docbank once whether it
+answers and accepts the key. Kata resolves keys on each request.
 
-A `url` in the file or `KATA_DOCBANK_URL` wins over `local`. With `local`,
-`api_key`, `api_key_file`, and `api_key_env` are unused. `folder` still applies.
+A `url` in the file or `KATA_DOCBANK_URL` takes precedence over `local`. With
+`local`, `api_key`, `api_key_file`, and `api_key_env` are unused, while
+`folder` still applies.
 
 Over plain HTTP the API key and attachment contents travel unencrypted, so set
 `trust_private_network` only for a network you trust, such as a private

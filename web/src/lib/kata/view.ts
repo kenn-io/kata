@@ -1,3 +1,5 @@
+import { authorName } from '@kenn-io/kata-ui'
+
 import { localDateString } from './dates'
 import type {
   KataProjectSummary,
@@ -174,11 +176,11 @@ function buildDelegated(issues: KataTaskSummary[]): KataTaskGroup[] {
     ) {
       continue
     }
-    const attribution = `${issue.author}/${teammate}`
+    const attribution = `${authorName(issue.author)}/${teammate}`
     const group = groups.get(attribution) ?? {
       id: attribution,
-      title: `${teammate} for ${issue.author}`,
-      handoff: { teammate, author: issue.author },
+      title: `${teammate} for ${authorName(issue.author)}`,
+      handoff: { teammate, author: authorName(issue.author) },
       issues: [],
     }
     group.issues.push(issue)
