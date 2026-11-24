@@ -2936,7 +2936,7 @@ type FederationProjectStatus struct {
 	RelayCheckpointError *string `json:"relay_checkpoint_error,omitempty"`
 	ResetBlocker         *string `json:"reset_blocker,omitempty"`
 
-	// RetainedHistory The spoke retains local history from before rejoin. Some untouched tasks may remain local; newly recovered snapshots attribute content to the current actor on the hub.
+	// RetainedHistory The spoke retains local history from before rejoin. Some untouched tasks may remain local; newly recovered snapshots attribute tasks, comments, and same-project links to the current actor on the hub.
 	RetainedHistory          *bool                                  `json:"retained_history,omitempty"`
 	Role                     string                                 `json:"role" validate:"required"`
 	RootSigningKey           *FederationProjectStatusRootSigningKey `json:"root_signing_key,omitempty"`

@@ -29,6 +29,16 @@ func checkRejoinRetainedHistory(t *testing.T, store db.Storage, backend Backend)
 		require.Len(t, document.Links, 1)
 		require.Equal(t, blocker.UID, document.Links[0].ToIssueUID)
 		require.True(t, document.Links[0].Incoming)
+		var source struct {
+			Author string `json:"source_author"`
+			Links  []struct {
+				Author string `json:"source_author"`
+			} `json:"links"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(snapshot.Payload), &source))
+		require.Equal(t, "old-actor", source.Author)
+		require.Len(t, source.Links, 1)
+		require.Equal(t, "old-actor", source.Links[0].Author)
 	})
 	for _, restored := range []bool{false, true} {
 		for _, guarded := range []bool{false, true} {
@@ -56,6 +66,60 @@ func checkRejoinRetainedHistory(t *testing.T, store db.Storage, backend Backend)
 		require.NoError(t, err)
 		require.False(t, createdSnapshot)
 		require.Equal(t, snapshot.UID, reused.UID)
+	})
+
+	t.Run("move accepted retained task", func(t *testing.T) {
+		ctx := t.Context()
+		source, err := store.CreateProject(ctx, "accepted-move-source")
+		require.NoError(t, err)
+		target, err := store.CreateProject(ctx, "accepted-move-target")
+		require.NoError(t, err)
+		binding := db.FederationBinding{ProjectID: source.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: source.UID, Actor: "old-actor", Enabled: true, PushEnabled: true}
+		_, err = store.UpsertFederationBinding(ctx, binding)
+		require.NoError(t, err)
+		known, event, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "accepted task", Author: "old-actor"})
+		require.NoError(t, err)
+		require.NoError(t, store.AdvanceFederationPushCursor(ctx, source.ID, event.ID))
+		unknown, unknownEvent, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "local task", Author: "old-actor"})
+		require.NoError(t, err)
+		recovered, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "recovered task", Author: "old-actor"})
+		require.NoError(t, err)
+		_, err = store.LeaveFederationReplica(ctx, source.ID)
+		require.NoError(t, err)
+		binding.Actor, binding.RetainHistory = "new-actor", true
+		binding.HubProjectUID = target.UID
+		_, err = store.UpsertFederationBinding(ctx, binding)
+		require.NoError(t, err)
+		move := db.MoveIssueProjectIn{IssueID: known.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: known.Revision, Actor: "new-actor"}
+		_, err = store.MoveIssueProject(ctx, move)
+		require.ErrorIs(t, err, db.ErrFederatedMoveUnsupported, "another project on the same hub cannot consume this proof")
+		binding.HubProjectUID = source.UID
+		_, err = store.UpsertFederationBinding(ctx, binding)
+		require.NoError(t, err)
+		snapshot, _, _, err := store.RetainedIssueSnapshot(ctx, source.ID, recovered.UID)
+		require.NoError(t, err)
+		require.NoError(t, store.RecordFederationRecoveredIssue(ctx, binding, snapshot, true))
+		require.NoError(t, store.AdvanceFederationPushCursor(ctx, source.ID, unknownEvent.ID))
+		newKnown, newEvent, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "new accepted task", Author: "new-actor"})
+		require.NoError(t, err)
+		require.NoError(t, store.AcknowledgeFederationPush(ctx, source.ID, newEvent.ID, nil))
+		newUnknown, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "new local task", Author: "new-actor"})
+		require.NoError(t, err)
+		_, err = store.LeaveFederationReplica(ctx, source.ID)
+		require.NoError(t, err)
+		binding.Actor = "third-actor"
+		_, err = store.UpsertFederationBinding(ctx, binding)
+		require.NoError(t, err)
+		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: target.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 2, HubProjectUID: target.UID, Actor: "third-actor", Enabled: true, PushEnabled: true})
+		require.NoError(t, err)
+		for _, issue := range []db.Issue{unknown, newUnknown} {
+			_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "third-actor"})
+			require.ErrorIs(t, err, db.ErrFederatedMoveUnsupported)
+		}
+		for _, issue := range []db.Issue{known, newKnown, recovered} {
+			_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "third-actor"})
+			require.NoError(t, err)
+		}
 	})
 
 	t.Run("retained task move refused", func(t *testing.T) {

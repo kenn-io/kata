@@ -2804,7 +2804,7 @@ components:
         reset_blocker:
           type: string
         retained_history:
-          description: The spoke retains local history from before rejoin. Some untouched tasks may remain local; newly recovered snapshots attribute content to the current actor on the hub.
+          description: The spoke retains local history from before rejoin. Some untouched tasks may remain local; newly recovered snapshots attribute tasks, comments, and same-project links to the current actor on the hub.
           type: boolean
         role:
           type: string

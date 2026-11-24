@@ -147,6 +147,9 @@ func (r *retainedPush) publishRetainedIssue(ctx context.Context, issueUID string
 	if err != nil && !retainedInitializerAlreadyKnown(err, "issue.snapshot", issueUID) {
 		return err
 	}
+	if recordErr := r.store.RecordFederationRecoveredIssue(ctx, binding, snapshot, err == nil); recordErr != nil {
+		return recordErr
+	}
 	r.sent[issueUID] = true
 	return nil
 }
@@ -221,6 +224,9 @@ func (r *retainedPush) resolve(ctx context.Context, pending *[]db.Event, batch [
 	case r.creation && retainedInitializerAlreadyKnown(err, "issue.created", *first.IssueUID):
 		return true, r.advance(ctx, pending, 1)
 	case r.recovery && retainedInitializerAlreadyKnown(err, "issue.snapshot", *first.IssueUID):
+		if err := r.store.RecordFederationRecoveredIssue(ctx, *r.binding, first, false); err != nil {
+			return false, err
+		}
 		r.sent[*first.IssueUID] = true
 		return true, r.advance(ctx, pending, 1)
 	}

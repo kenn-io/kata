@@ -3,7 +3,6 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
-	"encoding/json/jsontext"
 	"errors"
 
 	"go.kenn.io/kata/internal/db"
@@ -53,7 +52,7 @@ func (d *Store) RetainedIssueSnapshot(ctx context.Context, projectID int64, issu
 		if err != nil {
 			return db.Event{}, err
 		}
-		canonical, err := db.CanonicalizeFederationSnapshotAuthors(db.RemoteEvent{Type: "issue.snapshot", Payload: jsontext.Value(payload)}, binding.Actor)
+		canonical, err := db.CanonicalizeRetainedSnapshotAuthors(payload, binding.Actor)
 		if err != nil {
 			return db.Event{}, err
 		}

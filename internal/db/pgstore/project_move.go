@@ -180,6 +180,10 @@ SET project_id = $1 WHERE issue_id = $2`,
 			if err != nil {
 				return err
 			}
+			snapshot, err = db.ApplyRecoveredMoveAuthors(ctx, tx, source.ID, current.UID, snapshot)
+			if err != nil {
+				return err
+			}
 			payloadFields["snapshot"] = jsontext.Value(snapshot)
 		}
 		payload, err := json.Marshal(payloadFields)

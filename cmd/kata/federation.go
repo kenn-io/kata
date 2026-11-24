@@ -2312,7 +2312,7 @@ func printFederationStatus(cmd *cobra.Command, body api.FederationStatusBody) er
 			fmt.Sprintf("recent violations: %d", status.RecentViolationCount),
 		}
 		if status.RetainedHistory {
-			lines = append(lines, "Untouched retained tasks may remain local", "Recovery snapshots attribute tasks, comments, and links to the current actor on the hub")
+			lines = append(lines, "Untouched retained tasks may remain local", "Recovery snapshots attribute tasks, comments, and same-project links to the current actor on the hub", "Spoke-reported source authors: kata events --json")
 		}
 		if status.ProviderStatus != "" {
 			provider := formatProviderStatus(status.ProviderStatus)

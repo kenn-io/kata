@@ -172,7 +172,7 @@ type FederationProjectStatus struct {
 	CredentialExpiresAt         *time.Time                    `json:"credential_expires_at,omitempty"`
 	PullCursorEventID           int64                         `json:"pull_cursor_event_id"`
 	PushCursorEventID           int64                         `json:"push_cursor_event_id"`
-	RetainedHistory             bool                          `json:"retained_history,omitempty" doc:"The spoke retains local history from before rejoin. Some untouched tasks may remain local; newly recovered snapshots attribute content to the current actor on the hub."`
+	RetainedHistory             bool                          `json:"retained_history,omitempty" doc:"The spoke retains local history from before rejoin. Some untouched tasks may remain local; newly recovered snapshots attribute tasks, comments, and same-project links to the current actor on the hub."`
 	PendingPushCount            int64                         `json:"pending_push_count"`
 	PendingPushHighWaterEventID int64                         `json:"pending_push_high_water_event_id"`
 	EnrollmentCount             int64                         `json:"enrollment_count"`

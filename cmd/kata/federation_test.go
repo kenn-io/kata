@@ -333,7 +333,8 @@ func TestFederationStatusShowsRetainedHistory(t *testing.T) {
 	require.NoError(t, env.DB.RecordFederationSyncPushSuccess(ctx, project.ID, time.Now()))
 	out := requireCmdOutput(t, env, "federation", "status", "--project", project.Name)
 	assert.Contains(t, out, "Untouched retained tasks may remain local")
-	assert.Contains(t, out, "Recovery snapshots attribute tasks, comments, and links to the current actor on the hub")
+	assert.Contains(t, out, "Recovery snapshots attribute tasks, comments, and same-project links to the current actor on the hub")
+	assert.Contains(t, out, "Spoke-reported source authors: kata events --json")
 	out = requireCmdOutput(t, env, "federation", "status", "--project", project.Name, "--format", "json")
 	assert.Contains(t, out, `"retained_history":true`)
 }

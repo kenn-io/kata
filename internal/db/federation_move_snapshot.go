@@ -57,7 +57,7 @@ func RetainedIssueEvent(ctx context.Context, store interface {
 // RefuseRetainedIssueMove keeps retained history local when a task is moved.
 func RefuseRetainedIssueMove(ctx context.Context, tx *sql.Tx, projectID int64, issueUID, instanceUID string) error {
 	var retained bool
-	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events e JOIN federation_bindings b ON b.project_id=e.project_id WHERE e.project_id=$1 AND e.issue_uid=$2 AND e.id<=b.retained_through_event_id AND e.type IN ('issue.created','issue.snapshot','issue.moved') AND `+LocalInstanceOriginSQL("e.origin_instance_uid", "$3")+` AND (e.origin_instance_uid<>$3 OR e.actor<>b.bound_actor))`, projectID, issueUID, instanceUID).Scan(&retained)
+	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events e JOIN federation_bindings b ON b.project_id=e.project_id WHERE e.project_id=$1 AND e.issue_uid=$2 AND e.id<=b.retained_through_event_id AND e.type IN ('issue.created','issue.snapshot','issue.moved') AND `+LocalInstanceOriginSQL("e.origin_instance_uid", "$3")+` AND (e.origin_instance_uid<>$3 OR e.actor<>b.bound_actor) AND NOT (e.origin_instance_uid=$3 AND EXISTS(SELECT 1 FROM projects p JOIN meta m ON m.key=$4 || p.uid || '.' || b.hub_project_uid || '.' || b.hub_url WHERE p.id=b.project_id AND e.id<=CAST(m.value AS BIGINT))) AND NOT EXISTS(SELECT 1 FROM projects p JOIN meta m ON m.key=$5 || p.uid || '.' || b.hub_project_uid || '.' || b.hub_url || '.' || e.issue_uid WHERE p.id=b.project_id))`, projectID, issueUID, instanceUID, FederationAcceptedCursorPrefix, FederationAcceptedIssuePrefix).Scan(&retained)
 	if err != nil {
 		return err
 	}
@@ -65,6 +65,70 @@ func RefuseRetainedIssueMove(ctx context.Context, tx *sql.Tx, projectID int64, i
 		return ErrFederatedMoveUnsupported
 	}
 	return nil
+}
+
+// ApplyRecoveredMoveAuthors uses the accepted recovery snapshot's authors for
+// identities it introduced on the hub, while keeping later local content.
+func ApplyRecoveredMoveAuthors(ctx context.Context, tx *sql.Tx, projectID int64, issueUID, payload string) (string, error) {
+	var accepted string
+	err := tx.QueryRowContext(ctx, `SELECT e.payload FROM federation_bindings b JOIN projects p ON p.id=b.project_id
+ JOIN meta m ON m.key=$1 || p.uid || '.' || b.hub_project_uid || '.' || b.hub_url || '.' || $2
+ JOIN events e ON e.uid=m.value AND e.project_id=b.project_id AND e.type='issue.snapshot'
+ WHERE b.project_id=$3`, FederationAcceptedIssuePrefix, issueUID, projectID).Scan(&accepted)
+	if errors.Is(err, sql.ErrNoRows) {
+		return payload, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	var current, previous map[string]jsontext.Value
+	if err := json.Unmarshal([]byte(payload), &current); err != nil {
+		return "", err
+	}
+	if err := json.Unmarshal([]byte(accepted), &previous); err != nil {
+		return "", err
+	}
+	copyAuthors := func(to, from map[string]jsontext.Value) {
+		for _, key := range []string{"author", "source_author"} {
+			if len(from[key]) > 0 {
+				to[key] = from[key]
+			}
+		}
+	}
+	copyAuthors(current, previous)
+	for _, field := range []string{"comments", "links"} {
+		if len(current[field]) == 0 || len(previous[field]) == 0 {
+			continue
+		}
+		var local, remote []map[string]jsontext.Value
+		if err := json.Unmarshal(current[field], &local); err != nil {
+			return "", err
+		}
+		if err := json.Unmarshal(previous[field], &remote); err != nil {
+			return "", err
+		}
+		key := func(entry map[string]jsontext.Value) string {
+			if field == "comments" {
+				return string(entry["comment_uid"])
+			}
+			return string(entry["type"]) + "/" + string(entry["to_issue_uid"]) + "/" + string(entry["incoming"])
+		}
+		authors := make(map[string]map[string]jsontext.Value, len(remote))
+		for _, entry := range remote {
+			authors[key(entry)] = entry
+		}
+		for _, entry := range local {
+			if from, ok := authors[key(entry)]; ok {
+				copyAuthors(entry, from)
+			}
+		}
+		current[field], err = json.Marshal(local)
+		if err != nil {
+			return "", err
+		}
+	}
+	result, err := json.Marshal(current)
+	return string(result), err
 }
 
 type moveSnapshotComment struct {

@@ -63,8 +63,40 @@ func FederationEventReferencesMovedIssueSQL(alias string, postgres bool) string 
 // FederationHeldCursorPrefix identifies push cursors retained after a spoke leaves.
 const FederationHeldCursorPrefix = "federation_held_cursor."
 
+// FederationAcceptedCursorPrefix records a hub-scoped cursor before retained events are skipped.
+const FederationAcceptedCursorPrefix = "federation_accepted_cursor."
+
+// FederationAcceptedIssuePrefix records tasks acknowledged by a particular hub project.
+const FederationAcceptedIssuePrefix = "federation_accepted_issue."
+
+// RecordFederationAcceptedIssues records tasks in the acknowledged batch before
+// its cursor advances. Retained events skipped locally never enter this range.
+func RecordFederationAcceptedIssues(ctx context.Context, tx *sql.Tx, projectID, nextCursor int64, origin string) error {
+	_, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value)
+ SELECT $1 || p.uid || '.' || b.hub_project_uid || '.' || b.hub_url || '.' || e.issue_uid,'1'
+ FROM events e JOIN projects p ON p.id=e.project_id JOIN federation_bindings b ON b.project_id=e.project_id
+ WHERE e.project_id=$2 AND e.origin_instance_uid=$3 AND e.actor=b.bound_actor AND e.id>b.push_cursor_event_id AND e.id<=$4
+ AND b.role='spoke' AND b.relay_config IS NULL AND b.retained_through_event_id>0
+ AND e.issue_uid IS NOT NULL AND e.type IN ('issue.created','issue.snapshot','issue.moved')
+ ON CONFLICT(key) DO NOTHING`, FederationAcceptedIssuePrefix, projectID, origin, nextCursor)
+	return err
+}
+
 // FederationAcknowledgedEventPrefix identifies events accepted out of order.
 const FederationAcknowledgedEventPrefix = "federation_acknowledged_event."
+
+// RecordFederationRecoveredIssue records the exact recovery snapshot the hub accepted.
+func RecordFederationRecoveredIssue(ctx context.Context, exec interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, binding FederationBinding, snapshot Event, stored bool) error {
+	_, err := exec.ExecContext(ctx, `INSERT INTO meta(key,value)
+ SELECT $1 || p.uid || '.' || b.hub_project_uid || '.' || b.hub_url || '.' || e.issue_uid,CASE WHEN $7 THEN e.uid ELSE '1' END
+ FROM events e JOIN projects p ON p.id=e.project_id JOIN federation_bindings b ON b.project_id=e.project_id
+ WHERE e.project_id=$2 AND e.uid=$3 AND e.type='issue.snapshot' AND e.issue_uid IS NOT NULL
+ AND b.role='spoke' AND b.relay_config IS NULL AND b.hub_url=$4 AND b.hub_project_uid=$5 AND b.bound_actor=$6
+ ON CONFLICT(key) DO UPDATE SET value=CASE WHEN excluded.value='1' THEN meta.value ELSE excluded.value END`, FederationAcceptedIssuePrefix, binding.ProjectID, snapshot.UID, binding.HubURL, binding.HubProjectUID, binding.Actor, stored)
+	return err
+}
 
 // FederationUnresolvedEventSQL excludes events already accepted or superseded on leave.
 func FederationUnresolvedEventSQL(alias string) string {
@@ -143,7 +175,17 @@ func supersededFederationMoves(ctx context.Context, tx *sql.Tx, projectUID, orig
 
 // RetainFederationHeldCursor records the cursor and retired moves before leave.
 func RetainFederationHeldCursor(ctx context.Context, tx *sql.Tx, projectID int64, projectUID, origin string) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) SELECT $1,CAST(push_cursor_event_id AS TEXT) FROM federation_bindings WHERE project_id=$2 ON CONFLICT(key) DO UPDATE SET value=CASE WHEN CAST(meta.value AS BIGINT)>CAST(excluded.value AS BIGINT) THEN meta.value ELSE excluded.value END`, FederationHeldCursorPrefix+projectUID, projectID)
+	// Only a cursor from before retained-history recovery proves a contiguous
+	// prefix reached this hub; later cursors may have skipped local events.
+	_, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value)
+ SELECT $1 || p.uid || '.' || b.hub_project_uid || '.' || b.hub_url,CAST(COALESCE((SELECT MIN(CASE WHEN q.first_event_id=0 THEN 0 ELSE q.first_event_id-1 END) FROM federation_quarantine q WHERE q.project_id=b.project_id AND q.direction='push' AND q.skipped_at IS NOT NULL AND q.first_event_id<=b.push_cursor_event_id),b.push_cursor_event_id) AS TEXT)
+ FROM federation_bindings b JOIN projects p ON p.id=b.project_id
+ WHERE b.project_id=$2 AND b.role='spoke' AND b.relay_config IS NULL AND b.retained_through_event_id=0
+ ON CONFLICT(key) DO UPDATE SET value=CASE WHEN CAST(meta.value AS BIGINT)>CAST(excluded.value AS BIGINT) THEN meta.value ELSE excluded.value END`, FederationAcceptedCursorPrefix, projectID)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO meta(key,value) SELECT $1,CAST(push_cursor_event_id AS TEXT) FROM federation_bindings WHERE project_id=$2 ON CONFLICT(key) DO UPDATE SET value=CASE WHEN CAST(meta.value AS BIGINT)>CAST(excluded.value AS BIGINT) THEN meta.value ELSE excluded.value END`, FederationHeldCursorPrefix+projectUID, projectID)
 	if err != nil {
 		return err
 	}
