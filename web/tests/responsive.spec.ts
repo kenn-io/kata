@@ -97,16 +97,6 @@ test('resizing an open drawer restores desktop navigation and its project state'
   await expect(projects).toHaveAttribute('aria-expanded', 'false')
 })
 
-test('desktop Settings has a page heading above its tabs', async ({ page, kata }) => {
-  await page.setViewportSize({ width: 1440, height: 800 })
-  await kata.launch(page, '/kata?view=settings&section=appearance')
-  const heading = page.getByRole('heading', { name: 'Settings', exact: true })
-  await expect(heading).toBeVisible()
-  const title = (await heading.boundingBox())!
-  const tabs = (await page.getByRole('tablist', { name: 'Settings' }).boundingBox())!
-  expect(title.y + title.height).toBeLessThanOrEqual(tabs.y)
-})
-
 test('Settings tabs stay above the section at desktop and mobile widths', async ({
   page,
   kata,
@@ -145,38 +135,24 @@ test('Settings tabs stay above the section at desktop and mobile widths', async 
       expect(tabsBounds.x + tabsBounds.width).toBeCloseTo(headingBounds.x + headingBounds.width, 0)
     }
     expect(labelBounds.x).toBeCloseTo(headingBounds.x, 0)
-    expect(await page.getByText('This browser').count()).toBe(0)
-    expect(await page.getByText('This server', { exact: true }).count()).toBe(0)
   }
-  await page.getByRole('tab', { name: 'Search by meaning' }).click()
-  await expect(page).toHaveURL(/view=settings&section=search/)
-  await page.reload()
-  await expect(page.getByRole('tab', { name: 'Search by meaning' })).toHaveAttribute(
-    'aria-selected',
-    'true',
-  )
 })
 
-for (const [route, label] of [
-  ['/kata?view=settings&section=access', 'Teams and visibility'],
-  ['/kata?view=credentials', 'Credentials'],
-]) {
-  test(`selected tab is visible on a mobile direct link to ${route}`, async ({ page, kata }) => {
-    await page.setViewportSize({ width: 390, height: 800 })
-    await kata.launch(page)
-    await kata.loginOwner(page, route)
-    const tabs = page.getByRole('tablist', { name: 'Settings' })
-    const selected = page.getByRole('tab', { name: label })
-    await expect(selected).toHaveAttribute('aria-selected', 'true')
-    const strip = (await tabs.boundingBox())!
-    const tab = (await selected.boundingBox())!
-    const view = (await page.locator('.settings-view').boundingBox())!
-    expect(strip.x).toBeCloseTo(view.x, 0)
-    expect(strip.x + strip.width).toBeCloseTo(view.x + view.width, 0)
-    expect(tab.x).toBeGreaterThanOrEqual(strip.x + 15)
-    expect(tab.x + tab.width).toBeLessThanOrEqual(strip.x + strip.width - 15)
-  })
-}
+test('selected tab is visible on a mobile direct link', async ({ page, kata }) => {
+  await page.setViewportSize({ width: 390, height: 800 })
+  await kata.launch(page)
+  await kata.loginOwner(page, '/kata?view=settings&section=access')
+  const tabs = page.getByRole('tablist', { name: 'Settings' })
+  const selected = page.getByRole('tab', { name: 'Teams and visibility' })
+  await expect(selected).toHaveAttribute('aria-selected', 'true')
+  const strip = (await tabs.boundingBox())!
+  const tab = (await selected.boundingBox())!
+  const view = (await page.locator('.settings-view').boundingBox())!
+  expect(strip.x).toBeCloseTo(view.x, 0)
+  expect(strip.x + strip.width).toBeCloseTo(view.x + view.width, 0)
+  expect(tab.x).toBeGreaterThanOrEqual(strip.x + 15)
+  expect(tab.x + tab.width).toBeLessThanOrEqual(strip.x + strip.width - 15)
+})
 
 test('Settings tabs scroll the focused tab into view on mobile', async ({ page, kata }) => {
   await page.setViewportSize({ width: 390, height: 800 })

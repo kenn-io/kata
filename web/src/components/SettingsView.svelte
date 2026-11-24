@@ -150,10 +150,6 @@
     right: var(--space-4);
   }
 
-  .settings-view :global(.kit-tabs__panel) {
-    flex: 1 0 auto;
-  }
-
   .settings-content {
     display: flex;
     flex-direction: column;

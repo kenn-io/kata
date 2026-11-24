@@ -1365,7 +1365,7 @@ describe('AppShell', () => {
       },
     })
 
-    expect(screen.getByRole('tablist', { name: 'Settings' })).not.toBeNull()
+    expect(screen.getByRole('heading', { name: 'Settings' })).not.toBeNull()
     expect(await screen.findByText(/kata\.example\.com/)).not.toBeNull()
     expect(screen.getByRole('heading', { name: 'Search by meaning' })).not.toBeNull()
     expect(
