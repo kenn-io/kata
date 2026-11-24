@@ -287,13 +287,17 @@ func TestRunnerWakePushesDependentMovesBeforeTheInterval(t *testing.T) {
 			name:   "each destination waits on a later source",
 			issues: [][]move{{{from: 1, to: 0}}, {{from: 2, to: 1}}},
 		},
+		{
+			name:   "a destination waits on a pushed source and a refused one",
+			issues: [][]move{{{from: 2, to: 0}}, {{from: 3, to: 1}, {from: 1, to: 0}}},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			hub := testenv.New(t)
 			spoke := testenv.New(t)
 			t.Setenv("KATA_HOME", t.TempDir())
-			bound := bindSpokeProjects(t, hub.DB, spoke.DB, hub.URL, 3)
+			bound := bindSpokeProjects(t, hub.DB, spoke.DB, hub.URL, 4)
 			ids := make([]int64, 0, len(bound))
 			for _, project := range bound {
 				ids = append(ids, project.spoke.ID)
@@ -341,6 +345,51 @@ func TestRunnerWakePushesDependentMovesBeforeTheInterval(t *testing.T) {
 				require.NoError(t, err, "the hub has the issue before the next interval")
 				assert.Equal(t, w.project, got.ProjectID, "the hub has the move before the next interval")
 			}
+		})
+	}
+}
+
+// Only the hub's refusal of a move push sends a turn back for a retry in the
+// same pass. A 404 from another request, or a hub that asked the spoke to
+// wait, leaves the turn to the retry schedule.
+func TestPendingMoveSourcesNeedsAMovePushRefusal(t *testing.T) {
+	hub := testenv.New(t)
+	spoke := testenv.New(t)
+	t.Setenv("KATA_HOME", t.TempDir())
+	bound := bindSpokeProjects(t, hub.DB, spoke.DB, hub.URL, 2)
+	destination, source := bound[0], bound[1]
+	ctx := t.Context()
+	issue, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.spoke.ID, Title: "moved before its first push", Author: "tester"})
+	require.NoError(t, err)
+	_, err = spoke.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: issue.ID, FromProjectID: source.spoke.ID, ToProjectID: destination.spoke.ID,
+		IfMatchRev: issue.Revision, Actor: "tester",
+	})
+	require.NoError(t, err)
+
+	pushRefused := &HubStatusError{Path: "/api/v1/projects/7/federation/events:ingest", StatusCode: 404}
+	claimMissing := &HubStatusError{Path: "/api/v1/projects/7/issues/abc4/actions/claim", StatusCode: 404}
+	cases := []struct {
+		name string
+		err  error
+		want map[string]bool
+	}{
+		{name: "push refused", err: pushRefused, want: map[string]bool{source.hub.UID: true}},
+		{name: "claim missing", err: claimMissing},
+		{
+			name: "claim missing and hub unavailable",
+			err:  errors.Join(claimMissing, &HubStatusError{Path: pushRefused.Path, StatusCode: 503}),
+		},
+		{
+			name: "push refused and claim unauthorized",
+			err:  errors.Join(&HubStatusError{Path: claimMissing.Path, StatusCode: 401}, pushRefused),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := pendingMoveSources(ctx, spoke.DB, destination.spoke.ID, tc.err)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }

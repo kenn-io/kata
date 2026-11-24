@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -1301,7 +1302,7 @@ func (r *Runner) runOnce(
 	// awaiting holds the turns the hub refused because a move they push
 	// arrived before the hub had the moved issue's creation from the source
 	// project. A source that pushes cleanly later in this pass delivers that
-	// creation, so the refused turn runs once more after the others.
+	// creation, so the refused turn runs again after the others.
 	var awaiting []*awaitingMoveSource
 	for _, spoke := range spokes {
 		started := retries.version(spoke.binding.ProjectID)
@@ -1337,16 +1338,18 @@ func (r *Runner) runOnce(
 		markSourcePushed(awaiting, spoke.binding.HubProjectUID)
 	}
 	// A retry that pushes cleanly is itself a source another refused turn may
-	// wait on, as in a chain of moves. Keep retrying until a round finds no
-	// turn whose source has pushed. Each turn retries at most once, so the
-	// loop ends.
+	// wait on, as in a chain of moves. A refused turn runs again each time one
+	// of its sources pushes cleanly after its last attempt, until a round
+	// retries nothing. A project pushes cleanly at most once per pass and
+	// every retry needs a new clean push, so the loop ends even when moves
+	// form a cycle.
 	for progress := true; progress; {
 		progress = false
 		for _, refused := range awaiting {
-			if refused.retried || !refused.sourcePushed {
+			if refused.err == nil || !refused.sourcePushed {
 				continue
 			}
-			refused.retried, progress = true, true
+			refused.sourcePushed, progress = false, true
 			turn := r.runSpokeTurn(ctx, refused.spoke, credentialStore, validateLease, retries, retries.version(refused.spoke.binding.ProjectID))
 			if turn.denied {
 				return turn.retry, true, remaining, errors.Join(append(errs, unresolvedMoveErrors(awaiting)...)...)
@@ -1356,6 +1359,11 @@ func (r *Runner) runOnce(
 			}
 			refused.err = turn.err
 			if turn.err != nil {
+				sources, err := pendingMoveSources(ctx, r.DB, refused.spoke.binding.ProjectID, turn.err)
+				if err != nil {
+					errs = append(errs, err)
+				}
+				refused.sources = sources
 				continue
 			}
 			if turn.remaining {
@@ -1462,6 +1470,16 @@ func endsFederationPass(err error) bool {
 	return errors.Is(err, context.Canceled) || errors.Is(err, errFederationRunnerLeaseInvalid)
 }
 
+// isMovePushRefusal reports whether the hub answered an event push with 404
+// Not Found. Other requests in a turn, such as claim retries, can return 404
+// for unrelated reasons.
+func isMovePushRefusal(hubErr *HubStatusError) bool {
+	return hubErr.StatusCode == http.StatusNotFound && strings.HasSuffix(hubErr.Path, federationIngestPathSuffix)
+}
+
+// federationIngestPathSuffix ends the hub route that ingests pushed events.
+const federationIngestPathSuffix = "/federation/events:ingest"
+
 // awaitingMoveSource is a spoke turn the hub refused until a move's source
 // project pushes the moved issue's creation.
 type awaitingMoveSource struct {
@@ -1470,9 +1488,10 @@ type awaitingMoveSource struct {
 	sources map[string]bool
 	// err is the latest error of the project's turns, nil once a retry
 	// pushes cleanly.
-	err          error
+	err error
+	// sourcePushed reports that a source pushed cleanly after the turn's
+	// latest attempt.
 	sourcePushed bool
-	retried      bool
 }
 
 // spokeTurn is the outcome of one spoke's sync turn. denied reports that the
@@ -1525,10 +1544,14 @@ func (r *Runner) runSpokeTurn(
 
 // pendingMoveSources returns the hub project UIDs that the project's pending
 // moves came from when the hub refused its push with 404 Not Found, the
-// answer for a move whose source creation has not arrived.
-func pendingMoveSources(ctx context.Context, store db.Storage, projectID int64, pushErr error) (map[string]bool, error) {
-	status, ok := errors.AsType[*HubStatusError](pushErr)
-	if !ok || status.StatusCode != http.StatusNotFound {
+// answer for a move whose source creation has not arrived. A turn the hub
+// also refused or asked to wait returns none, so its retry schedule decides
+// when it runs again.
+func pendingMoveSources(ctx context.Context, store db.Storage, projectID int64, turnErr error) (map[string]bool, error) {
+	if reason, _, _ := classifySyncRetry(turnErr); reason != "" {
+		return nil, nil
+	}
+	if !slices.ContainsFunc(hubStatusErrors(turnErr), isMovePushRefusal) {
 		return nil, nil
 	}
 	binding, err := store.FederationBindingByProject(ctx, projectID)
