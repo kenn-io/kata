@@ -24,20 +24,14 @@ func FederationIssueReferenceMessage(eventType, issueUID string, existing bool) 
 	return fmt.Sprintf("%s references unknown issue %s", eventType, issueUID)
 }
 
+// ParseFederationMissingIssueMessage returns the issue a hub's unknown-issue
+// validation message names, or "" for any other message.
 func ParseFederationMissingIssueMessage(message string) string {
-	prefix := ErrFederationIngestValidation.Error() + ": "
-	message, ok := strings.CutPrefix(message, prefix)
-	if !ok {
+	message, ok := strings.CutPrefix(message, ErrFederationIngestValidation.Error()+": ")
+	eventType, _, _ := strings.Cut(message, " ")
+	issueUID := message[strings.LastIndexByte(message, ' ')+1:]
+	if !ok || eventType == "" || !katauid.Valid(issueUID) || message != FederationIssueReferenceMessage(eventType, issueUID, false) {
 		return ""
-	}
-	eventType, issueUID, ok := strings.Cut(message, " references unknown issue ")
-	if !ok || eventType == "" || !katauid.Valid(issueUID) {
-		return ""
-	}
-	for _, c := range eventType {
-		if (c < 'a' || c > 'z') && c != '.' && c != '_' {
-			return ""
-		}
 	}
 	return issueUID
 }
