@@ -262,7 +262,6 @@ func pushDirectSpoke(
 	opts clientpkg.Opts,
 ) error {
 	if binding.PushEnabled {
-		retained := &retainedPush{store: store, binding: binding, hubProjectID: hubProjectID, client: client, validateLease: validateLease, onEvents: onPulledEvents, sent: make(map[string]bool)}
 		for {
 			if q, err := store.ActiveFederationQuarantine(ctx, binding.ProjectID, db.FederationQuarantineDirectionPush); err == nil {
 				quarantinedEvents, eventErr := store.EventsByUIDs(ctx, binding.ProjectID, q.EventUIDs)
@@ -297,12 +296,9 @@ func pushDirectSpoke(
 				break
 			}
 			for len(pending) > 0 {
-				batch, adoptionBaseline, adoptionBaselineEndEventID, err := retained.nextBatch(ctx, &pending)
+				batch, adoptionBaseline, adoptionBaselineEndEventID, err := nextFederationPushIngestBatch(pending)
 				if err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-				}
-				if batch == nil {
-					continue
 				}
 				sourceTokens, err := federationMoveSourceTokens(ctx, store, credentials, *binding, client.baseURL, batch, opts)
 				if err != nil {
@@ -315,11 +311,6 @@ func pushDirectSpoke(
 						AdoptionBaselineEndEventID: adoptionBaselineEndEventID,
 					})
 				if err != nil {
-					if handled, resolveErr := retained.resolve(ctx, &pending, batch, err); resolveErr != nil {
-						return recordFederationSyncError(ctx, store, binding.ProjectID, resolveErr)
-					} else if handled {
-						continue
-					}
 					if isPoisonedFederationPushError(err) {
 						if qErr := recordFederationPushQuarantine(ctx, store, binding.ProjectID, batch, err); qErr != nil {
 							return recordFederationSyncError(ctx, store, binding.ProjectID, errors.Join(err, qErr))
@@ -371,31 +362,6 @@ func pushDirectSpoke(
 	return nil
 }
 
-func retainedInitializerAlreadyKnown(err error, eventType, issueUID string) bool {
-	status, ok := errors.AsType[*HubStatusError](err)
-	if !ok || status.StatusCode != http.StatusBadRequest {
-		return false
-	}
-	body, ok := federationQuarantineHubError(status.Body)
-	return ok && body.Code == "validation" && body.Message == db.ErrFederationIngestValidation.Error()+": "+db.FederationIssueReferenceMessage(eventType, issueUID, true)
-}
-
-func retainedUnknownIssue(err error) string {
-	status, ok := errors.AsType[*HubStatusError](err)
-	if !ok || status.StatusCode != http.StatusBadRequest {
-		return ""
-	}
-	body, ok := federationQuarantineHubError(status.Body)
-	if !ok || body.Code != "validation" {
-		return ""
-	}
-	return db.ParseFederationMissingIssueMessage(body.Message)
-}
-
-func retainedFederationEvent(event db.Event, binding db.FederationBinding, instanceUID string) bool {
-	return event.OriginInstanceUID == instanceUID && event.ID <= binding.RetainedThroughEventID && event.Actor != binding.Actor
-}
-
 // PushDirectSpoke drains pending direct-spoke events without requiring pull authority.
 // The caller holds shared federation coordination for the complete operation.
 func PushDirectSpoke(ctx context.Context, store db.Storage, binding db.FederationBinding, hubProjectID int64, client *Client) error {
@@ -414,13 +380,13 @@ func CredentialHTTPClient(ctx context.Context, credential config.FederationCrede
 
 // DirectSpokePushPending returns the daemon hook that drains a direct spoke's
 // pending events to its hub with the stored credential.
-func DirectSpokePushPending(store db.Storage, onEvents func(int64, []db.Event), credentials config.FederationCredentialStore) func(context.Context, db.FederationBinding, config.FederationCredential) error {
+func DirectSpokePushPending(store db.Storage) func(context.Context, db.FederationBinding, config.FederationCredential) error {
 	return func(ctx context.Context, binding db.FederationBinding, credential config.FederationCredential) error {
 		client, err := NewClient(ctx, credential.HubURL, credential.Token, clientpkg.Opts{AllowInsecure: credential.AllowInsecure, FederationSigning: credential.Signing})
 		if err != nil {
 			return err
 		}
-		return pushDirectSpoke(ctx, store, &binding, credential.HubProjectID, client, onEvents, nil, credentials, clientpkg.Opts{})
+		return PushDirectSpoke(ctx, store, binding, credential.HubProjectID, client)
 	}
 }
 

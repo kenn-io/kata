@@ -10,11 +10,6 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-func TestRetainedSnapshotLocalLinksRejectsNull(t *testing.T) {
-	_, err := db.RetainedSnapshotLocalLinks(t.Context(), nil, db.Issue{}, `null`)
-	require.EqualError(t, err, "retained snapshot must be a JSON object")
-}
-
 // The event types here are the complete set handled by FoldProjection.apply.
 // Keeping this exhaustive means a new fold case cannot be added without a
 // deliberate decision about whether it affects link reconciliation.

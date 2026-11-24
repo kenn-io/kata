@@ -21,8 +21,6 @@ func TestFederationCursorFenceMigrationUpgradesVersion53(t *testing.T) {
 	admin, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = admin.Close() })
-	_, err = admin.ExecContext(ctx, `ALTER TABLE cursor_fence_upgrade.federation_bindings DROP COLUMN retained_through_event_id`)
-	require.NoError(t, err)
 	_, err = admin.ExecContext(ctx, `UPDATE cursor_fence_upgrade.meta SET value='53' WHERE key='schema_version'`)
 	require.NoError(t, err)
 	upgraded, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap})

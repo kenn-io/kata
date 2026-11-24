@@ -224,13 +224,6 @@ func isPendingSpokePushClaimStatusMiss(
 	if binding.Role != db.FederationRoleSpoke || !binding.PushEnabled {
 		return false, nil
 	}
-	retained, err := retainedIssueMayMaterialize(ctx, cfg.DB, binding, issue.UID)
-	if err != nil {
-		return false, internalAPIError(err)
-	}
-	if retained {
-		return true, nil
-	}
 	pending, err := pendingPushMayMaterializeIssue(ctx, cfg.DB, binding, issue.UID)
 	if err != nil {
 		return false, internalAPIError(err)
@@ -247,12 +240,6 @@ func hubStatusErrorCode(err *claimHubStatusError) string {
 		return ""
 	}
 	return strings.TrimSpace(env.Error.Code)
-}
-
-// retainedIssueMayMaterialize identifies an old local initializer without
-// creating a snapshot during claim checks or rejected moves.
-func retainedIssueMayMaterialize(ctx context.Context, store db.Storage, binding db.FederationBinding, issueUID string) (bool, error) {
-	return db.RetainedIssueEvent(ctx, store, binding, binding.ProjectID, issueUID, []string{"issue.created", "issue.snapshot", "issue.moved"}, nil)
 }
 
 func pendingPushMayMaterializeIssue(

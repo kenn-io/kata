@@ -2127,7 +2127,6 @@ func ensureReplicaBinding(
 	cursor := max(replayHorizon-1, 0)
 	pushEnabled := false
 	pushCursor := int64(0)
-	retainHistory := false
 	existing, err := store.FederationBindingByProject(ctx, project.ID)
 	if err == nil {
 		if details := replicaBindingConflictDetails(existing, p); len(details) > 0 {
@@ -2148,12 +2147,11 @@ func ensureReplicaBinding(
 		return partial,
 			fmt.Errorf("read federation replica binding: %w", err)
 	} else if !createdProject {
-		retainHistory = true
 		// An unbound local project holding the hub project UID is the normal
 		// post-leave state: leave removes the binding but the project keeps the
 		// shared identity. A join naming that project is a rejoin — rebind it.
-		// Pull restarts just below the replay horizon. Push starts at cursor 0,
-		// keeping earlier actors' events local and offering the rest to the hub.
+		// Pull restarts just below the replay horizon. Push re-offers local
+		// events after the last event authored by a different actor.
 		//
 		// Trust model: a spoke and the hubs it federates with trust each other
 		// (docs/design/federation.md "Tokens And Trust Boundaries" / "No
@@ -2174,6 +2172,22 @@ func ensureReplicaBinding(
 		}
 		if p.PushEnabled {
 			pushEnabled = true
+			var after int64
+			for {
+				events, err := store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), after, 1000)
+				if err != nil {
+					return partial, fmt.Errorf("read pending federation push events: %w", err)
+				}
+				if len(events) == 0 {
+					break
+				}
+				for _, event := range events {
+					if event.Actor != p.Credential.Actor {
+						pushCursor = event.ID
+					}
+				}
+				after = events[len(events)-1].ID
+			}
 		}
 	}
 
@@ -2187,7 +2201,6 @@ func ensureReplicaBinding(
 		PullCursorEventID:    cursor,
 		PushEnabled:          pushEnabled,
 		PushCursorEventID:    pushCursor,
-		RetainHistory:        retainHistory,
 		Actor:                p.Credential.Actor,
 		AllowInsecure:        p.Credential.AllowInsecure,
 		Enabled:              true,

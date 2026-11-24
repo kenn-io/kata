@@ -64,7 +64,6 @@ func TestVectorCatalogMigrationPreservesVectors(t *testing.T) {
 		CREATE TABLE issue_vector_chunks (gen_key TEXT NOT NULL REFERENCES issue_vector_generations(gen_key) ON DELETE CASCADE, issue_uid TEXT NOT NULL REFERENCES issue_vector_mirror(issue_uid) ON DELETE CASCADE, chunk_index INTEGER NOT NULL, embedding public.halfvec NOT NULL, PRIMARY KEY(gen_key, issue_uid, chunk_index));
 		CREATE INDEX idx_issue_vector_chunks_generation ON issue_vector_chunks(gen_key);
 		DROP INDEX idx_events_project_moves;
-		ALTER TABLE federation_bindings DROP COLUMN retained_through_event_id;
 		UPDATE meta SET value='51' WHERE key='schema_version'`)
 	require.NoError(t, err)
 	for i, issue := range issues {

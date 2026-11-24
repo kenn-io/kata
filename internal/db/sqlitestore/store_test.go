@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/uid"
 )
@@ -78,8 +77,6 @@ func TestFederationCursorFenceMigrationUpgradesVersion53(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kata.db")
 	d, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
-	_, err = d.ExecContext(ctx, `ALTER TABLE federation_bindings DROP COLUMN retained_through_event_id`)
-	require.NoError(t, err)
 	_, err = d.ExecContext(ctx, `UPDATE meta SET value='53' WHERE key='schema_version'`)
 	require.NoError(t, err)
 	require.NoError(t, d.Close())
@@ -90,24 +87,6 @@ func TestFederationCursorFenceMigrationUpgradesVersion53(t *testing.T) {
 	version, err := d.SchemaVersion(ctx)
 	require.NoError(t, err)
 	require.Equal(t, db.CurrentSchemaVersion(), version)
-}
-
-func TestFederationRetainedHistoryMigration(t *testing.T) {
-	ctx := t.Context()
-	path := filepath.Join(t.TempDir(), "kata.db")
-	d, err := sqlitestore.Open(ctx, path)
-	require.NoError(t, err)
-	verify := dbtest.SeedRetainedHistoryMigration(t, d)
-	_, err = d.ExecContext(ctx, `ALTER TABLE federation_bindings DROP COLUMN retained_through_event_id`)
-	require.NoError(t, err)
-	_, err = d.ExecContext(ctx, `UPDATE meta SET value='54' WHERE key='schema_version'`)
-	require.NoError(t, err)
-	require.NoError(t, d.Close())
-	require.NoError(t, sqlitestore.UpgradeInPlace(ctx, path))
-	d, err = sqlitestore.Open(ctx, path)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = d.Close() })
-	verify(d)
 }
 
 func TestOpen_RejectsVersionZeroExistingTables(t *testing.T) {

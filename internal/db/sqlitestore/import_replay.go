@@ -1182,13 +1182,13 @@ func importFederationBinding(ctx context.Context, tx *sql.Tx, b *db.FederationBi
 		   project_id, role, hub_url, hub_project_id, hub_project_uid,
 		   replay_horizon_event_id, pull_cursor_event_id, push_enabled,
 		   push_cursor_event_id, bound_actor, allow_insecure, enabled,
-		   created_at, updated_at, last_sync_at, relay_config, retained_through_event_id
+		   created_at, updated_at, last_sync_at, relay_config
 		 )
-		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		b.ProjectID, b.Role, b.HubURL, b.HubProjectID, b.HubProjectUID,
 		b.ReplayHorizonEventID, b.PullCursorEventID, pushEnabled,
 		b.PushCursorEventID, actor, allowInsecure, enabled,
-		b.CreatedAt, b.UpdatedAt, b.LastSyncAt, raw, b.RetainedThroughEventID)
+		b.CreatedAt, b.UpdatedAt, b.LastSyncAt, raw)
 	return wrapImportErr(db.ImportKindFederationBinding, err)
 }
 

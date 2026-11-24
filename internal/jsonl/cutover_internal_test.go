@@ -154,11 +154,13 @@ func TestAutoCutoverPreservesArtifactsWhenRestoreFails(t *testing.T) {
 	require.ErrorIs(t, CheckCutoverSource(ctx, path), ErrCutoverInProgress)
 }
 
-func TestAutoCutoverInPlaceVersions(t *testing.T) {
+// Index-only upgrades, and the one that adds the MCP Events table, must
+// match the fresh-store catalog without exporting.
+func TestAutoCutoverAddsIndexOnlyVersionsInPlace(t *testing.T) {
 	for _, version := range []int{41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 52} {
 		t.Run(strconv.Itoa(version), func(t *testing.T) {
 			t.Setenv("KATA_HOME", t.TempDir())
-			path := oldSchemaSource(t, version)
+			path := indexOnlySource(t, version)
 			fresh, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "fresh.db"))
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, fresh.Close()) })
@@ -186,64 +188,55 @@ func TestAutoCutoverInPlaceVersions(t *testing.T) {
 				for rows.Next() {
 					var entry [4]sql.NullString
 					require.NoError(t, rows.Scan(&entry[0], &entry[1], &entry[2], &entry[3]))
-					if entry[1].String == "federation_bindings" {
-						entry[3].String = strings.Join(strings.Fields(entry[3].String), " ")
-					}
 					entries = append(entries, entry)
 				}
 				require.NoError(t, rows.Err())
 				return entries
 			}
 			require.Equal(t, catalog(fresh), catalog(upgraded))
+			var resolved, issueUID int
+			require.NoError(t, upgraded.QueryRowContext(t.Context(), `SELECT count(*) FROM sqlite_master WHERE type='index' AND name='idx_events_resolved_issue_uid'`).Scan(&resolved))
+			require.NoError(t, upgraded.QueryRowContext(t.Context(), `SELECT count(*) FROM sqlite_master WHERE type='index' AND name='idx_events_issue_uid_id'`).Scan(&issueUID))
+			require.Zero(t, resolved, "schema 51 drops the payload-derived issue index")
+			require.Equal(t, 1, issueUID)
 		})
 	}
 }
 
 func TestAutoCutoverInPlaceFailureLeavesSourceRetryable(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := t.Context()
-	path := oldSchemaSource(t, 52)
-	source, err := sql.Open("sqlite", path)
+	path := indexOnlySource(t, 41)
+	raw, err := sql.Open("sqlite", path)
 	require.NoError(t, err)
-	_, err = source.ExecContext(ctx, `ALTER TABLE federation_bindings ADD COLUMN retained_through_event_id INTEGER NOT NULL DEFAULT 0`)
+	t.Cleanup(func() { require.NoError(t, raw.Close()) })
+	// Inject a conflicting index to fail the last step after earlier DDL ran.
+	_, err = raw.ExecContext(t.Context(), `CREATE INDEX idx_events_moved_from_id ON events(id)`)
 	require.NoError(t, err)
-	require.NoError(t, source.Close())
-	require.ErrorContains(t, autoCutover(ctx, path, cutoverOperations{replaceFile: atomicfile.Replace, exportSource: func(context.Context, string, string) (int64, error) {
-		t.Fatal("in-place upgrade must not export")
+	ops := cutoverOperations{exportSource: func(context.Context, string, string) (int64, error) {
+		t.Fatal("index-only upgrade exported the source")
 		return 0, nil
-	}}), "add retained federation history boundary")
-	source, err = sql.Open("sqlite", path)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, source.Close()) })
-	var version string
-	require.NoError(t, source.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='schema_version'`).Scan(&version))
-	require.Equal(t, "52", version)
-	var indexes int
-	require.NoError(t, source.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_events_project_moves'`).Scan(&indexes))
+	}, replaceFile: atomicfile.Replace}
+	require.ErrorContains(t, autoCutover(t.Context(), path, ops), "add index idx_events_moved_from_id")
+	var version, indexes int
+	require.NoError(t, raw.QueryRowContext(t.Context(), `SELECT value FROM meta WHERE key='schema_version'`).Scan(&version))
+	require.Equal(t, 41, version)
+	require.NoError(t, raw.QueryRowContext(t.Context(), `SELECT count(*) FROM sqlite_master WHERE name='idx_issues_project_created'`).Scan(&indexes))
 	require.Zero(t, indexes)
-	_, err = source.ExecContext(ctx, `ALTER TABLE federation_bindings DROP COLUMN retained_through_event_id`)
+	_, err = raw.ExecContext(t.Context(), `DROP INDEX idx_events_moved_from_id`)
 	require.NoError(t, err)
-	require.NoError(t, source.Close())
-	require.NoError(t, autoCutover(ctx, path, cutoverOperations{replaceFile: atomicfile.Replace, exportSource: func(context.Context, string, string) (int64, error) {
-		t.Fatal("in-place upgrade must not export")
-		return 0, nil
-	}}))
-	upgraded, err := sqlitestore.Open(ctx, path)
+	require.NoError(t, raw.Close())
+	require.NoError(t, autoCutover(t.Context(), path, ops))
+	version, err = sqlitestore.PeekSchemaVersion(t.Context(), path)
 	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, upgraded.Close()) })
-	got, err := upgraded.SchemaVersion(ctx)
-	require.NoError(t, err)
-	require.Equal(t, db.CurrentSchemaVersion(), got)
+	require.Equal(t, db.CurrentSchemaVersion(), version)
 }
 
-func oldSchemaSource(t *testing.T, version int) string {
+func indexOnlySource(t *testing.T, version int) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	source, err := sqlitestore.Open(t.Context(), path)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = source.DB.Close() })
-	_, err = source.ExecContext(t.Context(), `ALTER TABLE federation_bindings DROP COLUMN retained_through_event_id`)
-	require.NoError(t, err)
 	if version < 51 {
 		// Schema 51 replaced the released schema 43 index with a header-UID index.
 		var raw []byte

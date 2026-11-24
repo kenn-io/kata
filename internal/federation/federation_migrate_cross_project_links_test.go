@@ -62,10 +62,6 @@ func TestMigrateProjectsOneAtATimeKeepsCrossProjectLinks(t *testing.T) {
 		})
 		require.NoError(t, err)
 		credentials[hubProject.UID] = config.FederationCredential{HubURL: target.URL, HubProjectID: hubProject.ID, Token: grant.Token, Actor: "worker"}
-		if index == 1 {
-			push := DirectSpokePushPending(home.DB, nil, credentials)
-			require.NoError(t, push(ctx, adopted.Binding, credentials[hubProject.UID]))
-		}
 		require.NoError(t, SyncFederationOnce(ctx, home.DB, adopted.Binding, credentials[hubProject.UID], credentials))
 	}
 

@@ -143,9 +143,6 @@ type FederationBinding struct {
 	PushEnabled          bool
 	PushCursorEventID    int64
 	Actor                string
-	// RetainHistory asks the store to capture the local event boundary during rejoin.
-	RetainHistory          bool
-	RetainedThroughEventID int64
 	// AllowInsecure records the join-time plaintext-HTTP transport opt-in on
 	// the binding itself so leave can rebuild the hub client even when the
 	// credential file (the only other holder of the flag) is gone.

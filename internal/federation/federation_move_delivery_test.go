@@ -6,7 +6,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
@@ -33,15 +32,7 @@ func newMoveDeliveryHub(t *testing.T, names ...string) (*testenv.Env, []db.Proje
 
 func newMoveDeliverySpoke(t *testing.T, hub *testenv.Env, projects []db.Project, actors ...string) moveDeliverySpoke {
 	t.Helper()
-	return newMoveDeliverySpokeWithOptions(t, hub, projects, nil, actors...)
-}
-
-func newMoveDeliverySpokeWithOptions(t *testing.T, hub *testenv.Env, projects []db.Project, options []testenv.Option, actors ...string) moveDeliverySpoke {
-	t.Helper()
-	options = append([]testenv.Option{func(cfg *daemon.ServerConfig) {
-		cfg.FederationPushPending = DirectSpokePushPending(cfg.DB, cfg.Publish().Events, config.DefaultFederationCredentialStore())
-	}}, options...)
-	spoke := moveDeliverySpoke{env: testenv.New(t, options...), projects: make([]db.Project, len(projects)), credentials: newMoveCredentialStore()}
+	spoke := moveDeliverySpoke{env: testenv.New(t), projects: make([]db.Project, len(projects)), credentials: newMoveCredentialStore()}
 	for i, project := range projects {
 		actor := "worker"
 		if actors != nil {

@@ -351,7 +351,6 @@ var alreadyImplemented = map[string]bool{
 	"EnsureScheduledReachedFloor":          true, // due_notifications.go
 	"ReconcileDueNotification":             true, // due_notifications.go
 	"ReconcileLocalFederationEcho":         true, // federation_events.go
-	"RetainedIssueSnapshot":                true, // federation_retained_snapshot.go
 	"RecordIssueSyncError":                 true, // issue_sync.go
 	"RecordIssueSyncSuccess":               true, // issue_sync.go
 	"RecordExternalRootError":              true, // external_roots.go

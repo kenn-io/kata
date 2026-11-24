@@ -46,7 +46,6 @@ func writeVersion(out io.Writer, mode outputMode) error {
 			"arch":         runtime.GOARCH,
 			"agent_format": agentFormatVersion,
 		}
-		payload["rejoin_existing_replica"] = true
 		if err := emitJSON(&buf, payload); err != nil {
 			return err
 		}

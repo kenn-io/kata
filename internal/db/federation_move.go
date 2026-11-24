@@ -188,7 +188,7 @@ func RestoreFederationPushCursor(ctx context.Context, tx *sql.Tx, projectID, cur
 		return 0, err
 	}
 	_, err = tx.ExecContext(ctx, `DELETE FROM meta WHERE key=$1 || (SELECT uid FROM projects WHERE id=$2)`, FederationHeldCursorPrefix, projectID)
-	return max(held, bindingCursor), err
+	return max(held, bindingCursor, cursor), err
 }
 
 // CheckFederationMoveSourceLifecycle keeps a native source joined while a
@@ -1008,9 +1008,8 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
 		return fmt.Errorf("preserve former project identity dependencies: %w", err)
 	}
 	// Keep this spoke's edits that a left project never had acknowledged.
-	//nolint:gosec // SQL expressions are fixed and values are bound.
+	//nolint:gosec // Only the fixed snapshot type list is joined; values are bound.
 	_, err = tx.ExecContext(ctx, `DELETE FROM events AS e WHERE e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)
- AND NOT EXISTS(SELECT 1 FROM federation_bindings b WHERE b.project_id IN (e.project_id, $1) AND `+LocalInstanceOriginSQL("e.origin_instance_uid", "$2")+` AND e.id<=b.retained_through_event_id)
  AND NOT (e.origin_instance_uid=$2 AND e.type NOT IN ('issue.created','issue.moved',`+FederationSnapshotEventTypesSQL()+`) AND (`+FederationHeldEventSQL("e")+` OR (EXISTS (SELECT 1 FROM federation_bindings b WHERE b.project_id=e.project_id AND e.id>b.push_cursor_event_id) AND `+FederationEventReferencesMovedIssueSQL("e", postgres)+`)))`, projectID, originInstanceUID)
 	return err
 }
@@ -1026,9 +1025,8 @@ func FederationHeldEventSQL(alias string) string {
 // issues now owned elsewhere. A source reset cannot rewind those destinations.
 func ClearFederatedProjectEvents(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string, postgres bool) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM events AS e WHERE e.project_id=$1
- AND NOT (`+FederationEventReferencesMovedIssueSQL("e", postgres)+`)
- AND NOT (e.origin_instance_uid=$2 AND `+FederationHeldEventSQL("e")+`)
- AND NOT EXISTS(SELECT 1 FROM federation_bindings b WHERE b.project_id=e.project_id AND `+LocalInstanceOriginSQL("e.origin_instance_uid", "$2")+` AND e.id<=b.retained_through_event_id)`, projectID, originInstanceUID); err != nil {
+	 AND NOT (`+FederationEventReferencesMovedIssueSQL("e", postgres)+`)
+ AND NOT (e.origin_instance_uid=$2 AND `+FederationHeldEventSQL("e")+`)`, projectID, originInstanceUID); err != nil {
 		return err
 	}
 	// Retained envelopes may still refer numerically to a peer being reset.

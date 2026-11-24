@@ -548,11 +548,6 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 	if err := db.CheckRelayBindingUpdate(previous, b); err != nil {
 		return db.FederationBinding{}, err
 	}
-	if b.RetainHistory {
-		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),0) FROM events WHERE project_id=? AND `+db.LocalInstanceOriginSQL("origin_instance_uid", "?"), b.ProjectID, d.InstanceUID()).Scan(&b.RetainedThroughEventID); err != nil {
-			return db.FederationBinding{}, err
-		}
-	}
 	if b.PushEnabled && b.Enabled && b.RelayConfig == nil {
 		var prior int64
 		if previous != nil {
@@ -571,9 +566,9 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 		INSERT INTO federation_bindings(
 			project_id, role, hub_url, hub_project_id, hub_project_uid,
 			replay_horizon_event_id, pull_cursor_event_id, push_enabled,
-			push_cursor_event_id, bound_actor, allow_insecure, enabled, retained_through_event_id
+			push_cursor_event_id, bound_actor, allow_insecure, enabled
 		)
-		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(project_id) DO UPDATE SET
 			role = excluded.role,
 			hub_url = excluded.hub_url,
@@ -586,11 +581,10 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 			bound_actor = excluded.bound_actor,
 			allow_insecure = excluded.allow_insecure,
 			enabled = excluded.enabled,
-			retained_through_event_id = CASE WHEN ? THEN excluded.retained_through_event_id ELSE federation_bindings.retained_through_event_id END,
 			updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
 		b.ProjectID, string(b.Role), b.HubURL, b.HubProjectID, b.HubProjectUID,
 		b.ReplayHorizonEventID, b.PullCursorEventID, pushEnabled, b.PushCursorEventID,
-		actor, allowInsecure, enabled, b.RetainedThroughEventID, b.RetainHistory)
+		actor, allowInsecure, enabled)
 	if err != nil {
 		return db.FederationBinding{}, fmt.Errorf("upsert federation binding: %w", err)
 	}
@@ -1475,14 +1469,20 @@ func updateFederatedProjectMetadataTx(ctx context.Context, tx *sql.Tx, projectID
 	return nil
 }
 
-// ResetFederatedProject rewinds the pull boundary and rebuilds from retained history.
+// ResetFederatedProject clears a spoke project's pulled event/projection state
+// and rewinds its binding to the supplied hub horizon cursor.
 func (d *Store) ResetFederatedProject(ctx context.Context, projectID, replayHorizonEventID, pullCursorEventID int64) error {
-	return d.materializeFederatedProjectAfter(ctx, projectID, func(ctx context.Context, tx *sql.Tx) error {
-		return d.resetFederatedProject(ctx, tx, projectID, replayHorizonEventID, pullCursorEventID)
+	return d.RetryTransient(ctx, func() error {
+		return d.resetFederatedProject(ctx, projectID, replayHorizonEventID, pullCursorEventID)
 	})
 }
 
-func (d *Store) resetFederatedProject(ctx context.Context, tx *sql.Tx, projectID, replayHorizonEventID, pullCursorEventID int64) error {
+func (d *Store) resetFederatedProject(ctx context.Context, projectID, replayHorizonEventID, pullCursorEventID int64) error {
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin federated reset: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
 	if err := rejectLegacyFederationResetTx(ctx, tx, projectID); err != nil {
 		return err
 	}
@@ -1511,6 +1511,9 @@ func (d *Store) resetFederatedProject(ctx context.Context, tx *sql.Tx, projectID
 	}
 	if n == 0 {
 		return db.ErrNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit federated reset: %w", err)
 	}
 	return nil
 }
@@ -1586,7 +1589,7 @@ func ensureFederatedMoveAllowedTx(ctx context.Context, q sqlReader, projectIDs .
 
 const federationBindingSelect = `SELECT project_id, role, hub_url, hub_project_id, hub_project_uid,
        replay_horizon_event_id, pull_cursor_event_id, push_enabled, push_cursor_event_id,
-       bound_actor, allow_insecure, enabled, created_at, updated_at, last_sync_at, relay_config, retained_through_event_id
+       bound_actor, allow_insecure, enabled, created_at, updated_at, last_sync_at, relay_config
   FROM federation_bindings`
 
 func federationBindingByProject(ctx context.Context, q sqlReader, projectID int64) (db.FederationBinding, error) {
@@ -1606,7 +1609,7 @@ func scanFederationBinding(r rowScanner) (db.FederationBinding, error) {
 	)
 	err := r.Scan(&b.ProjectID, &role, &b.HubURL, &b.HubProjectID, &b.HubProjectUID,
 		&b.ReplayHorizonEventID, &b.PullCursorEventID, &pushEnabled,
-		&b.PushCursorEventID, &b.Actor, &allowInsecure, &enabled, &b.CreatedAt, &b.UpdatedAt, &lastSyncAt, &relayConfig, &b.RetainedThroughEventID)
+		&b.PushCursorEventID, &b.Actor, &allowInsecure, &enabled, &b.CreatedAt, &b.UpdatedAt, &lastSyncAt, &relayConfig)
 	if err == nil {
 		b.RelayConfig, err = db.DecodeRelayBindingConfig(relayConfig)
 		if err != nil {

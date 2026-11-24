@@ -580,7 +580,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 			return federation.SyncFederationPullOnlyOnceWithPulledEvents(ctx, store, binding, credential, clientpkg.Opts{}, publisher.Events, federationCredentials)
 		},
 		FederationCredentials:     federationCredentials,
-		FederationPushPending:     federation.DirectSpokePushPending(store, publisher.Events, federationCredentials),
+		FederationPushPending:     federation.DirectSpokePushPending(store),
 		FederationHubClient:       federation.CredentialHTTPClient,
 		FederationSyncRetry:       federationRetries.FederationSyncRetry,
 		DisableFederationRebind:   true,

@@ -8,7 +8,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-// inPlaceUpgrades drop retired indexes, then add columns, canonical tables, and
+// inPlaceUpgrades drop retired indexes, then add canonical tables and canonical
 // indexes. A table is added only when it starts empty, so no existing row
 // needs converting. An index that a later step drops is no longer canonical,
 // so an upgrade that runs both steps never creates it.
@@ -31,7 +31,6 @@ var inPlaceUpgrades = []struct {
 	{51, 52, nil, nil, nil},
 	{52, 53, nil, []string{"idx_events_project_moves"}, nil},
 	{53, 54, nil, nil, nil},
-	{54, 55, nil, nil, nil},
 }
 
 // UpgradesInPlace reports whether in-place steps reach the current schema.
@@ -103,24 +102,6 @@ func UpgradeInPlace(ctx context.Context, path string) error {
 				}
 				if _, err := tx.ExecContext(ctx, `DROP INDEX `+name); err != nil {
 					return fmt.Errorf("drop index %s: %w", name, err)
-				}
-			}
-			if step.From == 54 {
-				if _, err := tx.ExecContext(ctx, `ALTER TABLE federation_bindings ADD COLUMN retained_through_event_id INTEGER NOT NULL DEFAULT 0`); err != nil {
-					return fmt.Errorf("add retained federation history boundary: %w", err)
-				}
-				match := `SELECT 1 FROM federation_quarantine q JOIN events e ON e.project_id=q.project_id AND e.id BETWEEN q.first_event_id AND q.last_event_id
-					WHERE q.project_id=b.project_id AND q.direction='push' AND q.skipped_at IS NULL
-					AND e.actor<>b.bound_actor AND ` + db.LocalInstanceOriginSQL("e.origin_instance_uid", "(SELECT value FROM meta WHERE key='instance_uid')") + `
-					AND q.error LIKE '%event ' || e.uid || ' actor % does not match bound actor%'`
-				eligible := `b.role='spoke' AND b.relay_config IS NULL AND EXISTS (` + match + `)`
-				localOrigin := db.LocalInstanceOriginSQL("e.origin_instance_uid", "(SELECT value FROM meta WHERE key='instance_uid')")
-				// The SQL fragments use only fixed literals.
-				if _, err := tx.ExecContext(ctx, `UPDATE federation_bindings AS b SET retained_through_event_id=(SELECT COALESCE(MAX(id),0) FROM events e WHERE e.project_id=b.project_id AND `+localOrigin+`) WHERE b.role='spoke' AND b.relay_config IS NULL AND EXISTS (SELECT 1 FROM events e WHERE e.project_id=b.project_id AND e.actor<>b.bound_actor AND (e.type LIKE 'issue.%' OR e.type LIKE 'cron.%' OR e.type='project.metadata_updated') AND `+localOrigin+`)`); err != nil { // #nosec G202 -- fixed SQL fragments
-					return fmt.Errorf("backfill retained federation history: %w", err)
-				}
-				if _, err := tx.ExecContext(ctx, `UPDATE federation_quarantine SET skipped_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'), skipped_by='system', skip_reason='retry: retained history upgrade' WHERE direction='push' AND skipped_at IS NULL AND EXISTS (SELECT 1 FROM federation_bindings b WHERE b.project_id=federation_quarantine.project_id AND `+eligible+`)`); err != nil { // #nosec G202 -- fixed SQL fragments
-					return fmt.Errorf("retry retained federation history quarantine: %w", err)
 				}
 			}
 			for _, name := range step.Tables {

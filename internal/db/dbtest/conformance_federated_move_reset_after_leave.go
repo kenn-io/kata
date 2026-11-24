@@ -50,6 +50,5 @@ func checkFederatedMoveResetAfterAcknowledgedSourceLeave(t *testing.T, store db.
 			require.ErrorIs(t, err, db.ErrNotFound)
 		})
 	}
-
 	return nil
 }

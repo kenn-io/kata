@@ -15,27 +15,6 @@ import (
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
-// FederationIssueReferenceMessage is shared by hubs and spokes so recovery
-// recognizes the validation message used by released peers.
-func FederationIssueReferenceMessage(eventType, issueUID string, existing bool) string {
-	if existing {
-		return fmt.Sprintf("fresh %s targets existing issue %s", eventType, issueUID)
-	}
-	return fmt.Sprintf("%s references unknown issue %s", eventType, issueUID)
-}
-
-// ParseFederationMissingIssueMessage returns the issue a hub's unknown-issue
-// validation message names, or "" for any other message.
-func ParseFederationMissingIssueMessage(message string) string {
-	message, ok := strings.CutPrefix(message, ErrFederationIngestValidation.Error()+": ")
-	eventType, _, _ := strings.Cut(message, " ")
-	issueUID := message[strings.LastIndexByte(message, ' ')+1:]
-	if !ok || eventType == "" || !katauid.Valid(issueUID) || message != FederationIssueReferenceMessage(eventType, issueUID, false) {
-		return ""
-	}
-	return issueUID
-}
-
 // EventTimestampFormat is the millisecond UTC representation covered by portable event hashes.
 const EventTimestampFormat = "2006-01-02T15:04:05.000Z"
 
@@ -220,68 +199,6 @@ func validateFederationTeammate(raw jsontext.Value, eventUID, eventType string) 
 	return nil
 }
 
-// RetainedSnapshotLocalLinks omits cross-project links that cannot be sent as
-// part of recovery. Their original events and local projections stay intact.
-func RetainedSnapshotLocalLinks(ctx context.Context, tx *sql.Tx, issue Issue, payload string) (string, error) {
-	var document map[string]jsontext.Value
-	if err := json.Unmarshal([]byte(payload), &document); err != nil {
-		return "", err
-	}
-	if document == nil {
-		return "", fmt.Errorf("retained snapshot must be a JSON object")
-	}
-	raw := document["links"]
-	var links []IssueDocumentLink
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &links); err != nil {
-			return "", err
-		}
-	}
-	rows, err := tx.QueryContext(ctx, `SELECT l.type, peer.short_id, peer.uid, l.author, CAST(l.created_at AS TEXT) FROM links l JOIN issues peer ON peer.id=l.from_issue_id WHERE l.to_issue_id=$1 AND peer.project_id=$2`, issue.ID, issue.ProjectID)
-	if err != nil {
-		return "", err
-	}
-	for rows.Next() {
-		var link IssueDocumentLink
-		if err := rows.Scan(&link.Type, &link.ToShortID, &link.ToIssueUID, &link.Author, &link.CreatedAt); err != nil {
-			_ = rows.Close()
-			return "", err
-		}
-		link.Incoming = link.Type != "related"
-		links = append(links, link)
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return "", err
-	}
-	if err := rows.Close(); err != nil {
-		return "", err
-	}
-	rows, err = tx.QueryContext(ctx, `SELECT peer.uid FROM links l JOIN issues peer ON peer.id = CASE WHEN l.from_issue_id = $1 THEN l.to_issue_id ELSE l.from_issue_id END WHERE (l.from_issue_id = $1 OR l.to_issue_id = $1) AND peer.project_id = $2`, issue.ID, issue.ProjectID)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = rows.Close() }()
-	local := make(map[string]bool)
-	for rows.Next() {
-		var uid string
-		if err := rows.Scan(&uid); err != nil {
-			return "", err
-		}
-		local[uid] = true
-	}
-	if err := rows.Err(); err != nil {
-		return "", err
-	}
-	links = slices.DeleteFunc(links, func(link IssueDocumentLink) bool { return !local[link.ToIssueUID] })
-	document["links"], err = json.Marshal(links)
-	if err != nil {
-		return "", err
-	}
-	result, err := json.Marshal(document)
-	return string(result), err
-}
-
 // CanonicalizeFederationSnapshotAuthors rewrites an adoption snapshot's
 // embedded authors to its bound actor and recomputes the portable hash.
 func CanonicalizeFederationSnapshotAuthors(event RemoteEvent, boundActor string) (RemoteEvent, error) {
@@ -403,20 +320,6 @@ func DirectLinkPeers(event FoldEvent) (map[string]bool, error) {
 		add(uid)
 		return false
 	})
-	if err != nil {
-		return nil, err
-	}
-	if event.Type == "issue.created" || event.Type == "issue.snapshot" {
-		parents, err := directParentAssignments(event)
-		if err != nil {
-			return nil, err
-		}
-		for _, parent := range parents {
-			if parent.FromUID != event.IssueUID {
-				delete(peers, parent.FromUID)
-			}
-		}
-	}
 	if event.Type == "issue.links_changed" || event.Type == "issue.unlinked" {
 		payload := PayloadMap(event.Payload)
 		if event.Type == "issue.links_changed" {
@@ -439,7 +342,7 @@ func DirectLinkPeers(event FoldEvent) (map[string]bool, error) {
 // child. A parent-primary event needs ordinary authority for the child.
 func directLinkAdditionEligible(event FoldEvent) bool {
 	switch event.Type {
-	case "issue.created", "issue.snapshot", "issue.links_changed":
+	case "issue.created", "issue.links_changed":
 		return true
 	case "issue.linked":
 	default:

@@ -7,7 +7,6 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 )
@@ -20,51 +19,6 @@ func FederationMoveSnapshotEvent(event RemoteEvent) RemoteEvent {
 		event.Payload = PayloadMap(event.Payload)["snapshot"]
 	}
 	return event
-}
-
-// RetainedIssueEvent reports whether a task has an event of the given types
-// that rejoin left local: through the binding's boundary, from a former
-// instance or from this one under another actor. A nil match accepts any such
-// event. A zero projectID includes history from before the task moved.
-func RetainedIssueEvent(ctx context.Context, store interface {
-	InstanceUID() string
-	FormerInstanceUIDs(context.Context) ([]string, error)
-	EventsAfter(context.Context, EventsAfterParams) ([]Event, error)
-}, binding FederationBinding, projectID int64, issueUID string, types []string, match func(Event) bool) (bool, error) {
-	if binding.RetainedThroughEventID == 0 {
-		return false, nil
-	}
-	former, err := store.FormerInstanceUIDs(ctx)
-	if err != nil {
-		return false, err
-	}
-	params := EventsAfterParams{ProjectID: projectID, ThroughID: binding.RetainedThroughEventID, IssueUID: issueUID, Types: types, Limit: 1000}
-	for {
-		events, err := store.EventsAfter(ctx, params)
-		if err != nil || len(events) == 0 {
-			return false, err
-		}
-		for _, event := range events {
-			own := event.OriginInstanceUID == store.InstanceUID()
-			if (own && event.Actor != binding.Actor || !own && slices.Contains(former, event.OriginInstanceUID)) && (match == nil || match(event)) {
-				return true, nil
-			}
-		}
-		params.AfterID = events[len(events)-1].ID
-	}
-}
-
-// RefuseRetainedIssueMove keeps retained history local when a task is moved.
-func RefuseRetainedIssueMove(ctx context.Context, tx *sql.Tx, projectID int64, issueUID, instanceUID string) error {
-	var retained bool
-	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events e JOIN federation_bindings b ON b.project_id=e.project_id WHERE e.project_id=$1 AND e.issue_uid=$2 AND e.id<=b.retained_through_event_id AND e.type IN ('issue.created','issue.snapshot','issue.moved') AND `+LocalInstanceOriginSQL("e.origin_instance_uid", "$3")+` AND (e.origin_instance_uid<>$3 OR e.actor<>b.bound_actor))`, projectID, issueUID, instanceUID).Scan(&retained)
-	if err != nil {
-		return err
-	}
-	if retained {
-		return ErrFederatedMoveUnsupported
-	}
-	return nil
 }
 
 type moveSnapshotComment struct {

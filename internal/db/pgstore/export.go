@@ -631,7 +631,7 @@ func (s *Store) ExportFederationBindings(ctx context.Context, filter db.ExportFi
 	query, args := pgProjectFilter(`SELECT project_id, role, hub_url, hub_project_id,
        hub_project_uid, replay_horizon_event_id, pull_cursor_event_id, push_enabled,
        push_cursor_event_id, bound_actor, allow_insecure, enabled, created_at,
-       updated_at, last_sync_at, relay_config, retained_through_event_id FROM federation_bindings`, "project_id", filter)
+       updated_at, last_sync_at, relay_config FROM federation_bindings`, "project_id", filter)
 	query += ` ORDER BY project_id ASC`
 	return streamExportRows(ctx, s, "federation_bindings", query, args,
 		func(rows *sql.Rows) (db.FederationBindingExport, error) {
@@ -642,7 +642,7 @@ func (s *Store) ExportFederationBindings(ctx context.Context, filter db.ExportFi
 				&record.HubProjectID, &record.HubProjectUID, &record.ReplayHorizonEventID,
 				&record.PullCursorEventID, &pushEnabled, &record.PushCursorEventID,
 				&record.Actor, &allowInsecure, &enabled, &record.CreatedAt,
-				&record.UpdatedAt, &record.LastSyncAt, &relayConfig, &record.RetainedThroughEventID); err != nil {
+				&record.UpdatedAt, &record.LastSyncAt, &relayConfig); err != nil {
 				return db.FederationBindingExport{}, pgExportScanError("federation_binding", err)
 			}
 			var err error

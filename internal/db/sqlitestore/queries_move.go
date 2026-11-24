@@ -142,9 +142,6 @@ func (d *Store) moveIssueProjectTx(ctx context.Context, tx *sql.Tx, in db.MoveIs
 		return out, &db.ProjectMergeImportMappingCollisionError{Mappings: mappingCollisions}
 	}
 
-	if err := db.RefuseRetainedIssueMove(ctx, tx, in.FromProjectID, issueUID, d.InstanceUID()); err != nil {
-		return out, err
-	}
 	if in.DryRun {
 		issue, err := issueByIDTx(ctx, tx, in.IssueID)
 		if err != nil {

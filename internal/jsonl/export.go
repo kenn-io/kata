@@ -1392,8 +1392,6 @@ func exportFederationBindings(
 		CreatedAt            string                 `json:"created_at"`
 		UpdatedAt            string                 `json:"updated_at"`
 		LastSyncAt           *string                `json:"last_sync_at,omitempty"`
-		// RetainedThroughEventID is the last local event kept from an earlier enrollment.
-		RetainedThroughEventID int64 `json:"retained_through_event_id,omitempty"`
 	}
 	actorSelect := `''`
 	if sourceSchemaVersion >= 13 {
@@ -1407,15 +1405,11 @@ func exportFederationBindings(
 	if sourceSchemaVersion >= 33 && opts.ProjectID <= 0 {
 		relayConfigSelect = `relay_config`
 	}
-	retainedSelect := `0`
-	if sourceSchemaVersion >= 55 {
-		retainedSelect = `retained_through_event_id`
-	}
 	query := `SELECT project_id, role, hub_url, hub_project_id, hub_project_uid,
 	                 replay_horizon_event_id, pull_cursor_event_id, push_enabled,
 	                 push_cursor_event_id, ` + actorSelect + `, ` + allowInsecureSelect + `, enabled,
 	                 CAST(created_at AS TEXT), CAST(updated_at AS TEXT),
-	                 CAST(last_sync_at AS TEXT), ` + relayConfigSelect + `, ` + retainedSelect + `
+	                 CAST(last_sync_at AS TEXT), ` + relayConfigSelect + `
 	          FROM federation_bindings`
 	args := []any{}
 	if opts.ProjectID > 0 {
@@ -1434,7 +1428,7 @@ func exportFederationBindings(
 		err := rows.Scan(&rec.ProjectID, &rec.Role, &rec.HubURL, &rec.HubProjectID,
 			&rec.HubProjectUID, &rec.ReplayHorizonEventID, &rec.PullCursorEventID,
 			&pushEnabled, &rec.PushCursorEventID, &rec.Actor, &allowInsecure, &enabled,
-			&rec.CreatedAt, &rec.UpdatedAt, &rec.LastSyncAt, &relayConfig, &rec.RetainedThroughEventID)
+			&rec.CreatedAt, &rec.UpdatedAt, &rec.LastSyncAt, &relayConfig)
 		if err != nil {
 			return rec, err
 		}

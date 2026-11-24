@@ -593,7 +593,8 @@ func validateFederationProjectEvent(
 		"issue.external_comment_resolved", "issue.external_field_conflicted",
 		"issue.external_field_resolved":
 		if _, ok := knownIssueUIDs[issueUID]; !ok {
-			return fmt.Errorf("%w: %s", db.ErrFederationIngestValidation, db.FederationIssueReferenceMessage(event.Type, issueUID, false))
+			return fmt.Errorf("%w: %s references unknown issue %s",
+				db.ErrFederationIngestValidation, event.Type, issueUID)
 		}
 	default:
 		return fmt.Errorf("%w: unsupported event type %s", db.ErrFederationIngestValidation, event.Type)
@@ -670,7 +671,8 @@ func rejectFreshCreateSnapshotForKnownIssue(
 		return err
 	}
 	if _, ok := knownIssueUIDs[issueUID]; ok {
-		return fmt.Errorf("%w: %s", db.ErrFederationIngestValidation, db.FederationIssueReferenceMessage(event.Type, issueUID, true))
+		return fmt.Errorf("%w: fresh %s targets existing issue %s",
+			db.ErrFederationIngestValidation, event.Type, issueUID)
 	}
 	return nil
 }

@@ -15,12 +15,12 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-// restoreSchema52 removes the schema 53 index and schema 54 column.
-func restoreSchema52(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
+// dropSchema53ProjectMovesIndex returns a fresh schema's events indexes to
+// their schema 52 shape. Older fixtures reach it through
+// restoreSchema50EventIndex; it does nothing once the index is gone.
+func dropSchema53ProjectMovesIndex(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
 	t.Helper()
-	_, err := admin.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE %s.federation_bindings DROP COLUMN IF EXISTS retained_through_event_id`, schema)) // #nosec G201 -- schema is a fixed test identifier.
-	require.NoError(t, err)
-	_, err = admin.ExecContext(ctx, fmt.Sprintf(`DROP INDEX IF EXISTS %s.idx_events_project_moves`, schema)) // #nosec G201 -- schema is a fixed test identifier.
+	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP INDEX IF EXISTS %s.idx_events_project_moves`, schema)) // #nosec G201 -- schema is a fixed test identifier.
 	require.NoError(t, err)
 }
 
@@ -64,7 +64,7 @@ func TestEventProjectMovesIndexMigrationUpgradesVersion52(t *testing.T) {
 	admin, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = admin.Close() })
-	restoreSchema52(ctx, t, admin, schema)
+	dropSchema53ProjectMovesIndex(ctx, t, admin, schema)
 	_, err = admin.ExecContext(ctx, `UPDATE project_moves_index_upgrade.meta SET value='52' WHERE key='schema_version'`)
 	require.NoError(t, err)
 

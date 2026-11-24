@@ -304,8 +304,6 @@ type FederationBindingExport struct {
 	CreatedAt            string              `json:"created_at"`
 	UpdatedAt            string              `json:"updated_at"`
 	LastSyncAt           *string             `json:"last_sync_at,omitempty"`
-	// RetainedThroughEventID is the last local event kept from an earlier enrollment.
-	RetainedThroughEventID int64 `json:"retained_through_event_id,omitempty"`
 }
 
 // ImportKind reports the NDJSON kind this payload replays as.
