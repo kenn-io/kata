@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"slices"
 
 	"go.kenn.io/kata/internal/db"
 )
@@ -162,17 +163,17 @@ func (r *retainedPush) retainedIssueEvent(ctx context.Context, binding db.Federa
 	if binding.RetainedThroughEventID == 0 {
 		return false, nil
 	}
-	afterID := int64(0)
-	for {
-		events, err := r.store.EventsAfter(ctx, db.EventsAfterParams{
-			AfterID: afterID, ProjectID: projectID, ThroughID: binding.RetainedThroughEventID,
-			IssueUID: issueUID, Types: types, Limit: federationPollLimit,
-		})
+	former, err := r.store.FormerInstanceUIDs(ctx)
+	if err != nil {
+		return false, err
+	}
+	for afterID := int64(0); ; {
+		events, err := r.store.EventsAfter(ctx, db.EventsAfterParams{AfterID: afterID, ProjectID: projectID, ThroughID: binding.RetainedThroughEventID, IssueUID: issueUID, Types: types, Limit: federationPollLimit})
 		if err != nil {
 			return false, err
 		}
 		for _, event := range events {
-			if retainedFederationEvent(event, binding, r.store.InstanceUID()) && match(event) {
+			if (retainedFederationEvent(event, binding, r.store.InstanceUID()) || slices.Contains(former, event.OriginInstanceUID)) && match(event) {
 				return true, nil
 			}
 		}

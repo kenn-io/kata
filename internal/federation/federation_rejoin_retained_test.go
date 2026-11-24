@@ -388,6 +388,41 @@ func TestRejoinRetainedIssueAndLaterTaskPublish(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestRejoinPublishesEditAfterIndependentRestore(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "restore-project")
+	spoke := newMoveDeliverySpoke(t, hub, projects, "new-actor")
+	issue, original, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "retained task", Author: "new-actor"})
+	require.NoError(t, err)
+	former := "01HZNQ7VFPK1XGD8R5MABCD4EF"
+	hash, err := db.EventContentHash(db.EventHashInput{
+		UID: original.UID, OriginInstanceUID: former, ProjectUID: original.ProjectUID, ProjectName: original.ProjectName,
+		IssueUID: original.IssueUID, RelatedIssueUID: original.RelatedIssueUID, Type: original.Type, Actor: original.Actor,
+		HLCPhysicalMS: original.HLCPhysicalMS, HLCCounter: original.HLCCounter,
+		CreatedAt: original.CreatedAt.UTC().Format(db.EventTimestampFormat), Payload: jsontext.Value(original.Payload),
+	})
+	require.NoError(t, err)
+	_, err = spoke.env.DB.ExecContext(ctx, `UPDATE events SET origin_instance_uid = ?, content_hash = ? WHERE uid = ?`, former, hash, original.UID)
+	require.NoError(t, err)
+	_, err = spoke.env.DB.ExecContext(ctx, `INSERT INTO meta(key, value) VALUES(?, '1')`, db.FormerInstanceUIDMetaPrefix+former)
+	require.NoError(t, err)
+	rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
+	_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "new comment"})
+	require.NoError(t, err)
+	require.NoError(t, spoke.sync(t, 0))
+	remote, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	comments, err := hub.DB.CommentsByIssue(ctx, remote.ID)
+	require.NoError(t, err)
+	require.Len(t, comments, 1)
+	require.Equal(t, "new comment", comments[0].Body)
+	events, err := spoke.env.DB.EventsByUIDs(ctx, spoke.projects[0].ID, []string{original.UID})
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	require.Equal(t, hash, events[0].ContentHash)
+	require.Equal(t, former, events[0].OriginInstanceUID)
+}
+
 func TestRejoinedSpokeBatchesNewTasks(t *testing.T) {
 	ctx := t.Context()
 	hub, projects := newMoveDeliveryHub(t, "batch-project")
