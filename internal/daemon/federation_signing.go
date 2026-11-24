@@ -126,6 +126,9 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 		select {
 		case admission <- struct{}{}:
 			defer func() { <-admission }()
+			if admission == s.federationControlAdmission {
+				r = r.WithContext(withFederationControlAdmission(r.Context()))
+			}
 		default:
 			w.Header().Set("Retry-After", "1")
 			api.WriteEnvelope(w, http.StatusTooManyRequests, "admission_limited", "federation admission is full")
@@ -183,7 +186,8 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 				return
 			}
 			r = r.WithContext(ctx)
-			err = s.cfg.FederationSigning.Verify(r, authorization.principal.EnrollmentID)
+			var admission federationsigning.Admission
+			admission, err = s.cfg.FederationSigning.Verify(r, authorization.principal.EnrollmentID)
 			if err != nil {
 				// Warm-up is not a signature fault: tell the spoke to retry
 				// rather than to check its keys and clock.
@@ -214,6 +218,7 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 				body := r.Body
 				defer func() { _ = body.Close() }()
 			}
+			ctx = withFederationSigningAdmission(ctx, admission)
 			// Revocation during body upload must also stop reads. Mutations retain
 			// their native transaction fence through the cached authorization.
 			if !relayCleanup {
@@ -230,6 +235,35 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 		ctx = withFederationAuthorization(ctx, auth, route.projectID, strings.Join(route.capabilities, ","), operation, authorization)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+type federationSigningAdmissionContextKey struct{}
+
+// withFederationSigningAdmission records the key that verified the request's
+// signature, so a request held open can check that key again before it
+// releases data.
+func withFederationSigningAdmission(ctx context.Context, admission federationsigning.Admission) context.Context {
+	return context.WithValue(ctx, federationSigningAdmissionContextKey{}, admission)
+}
+
+// recheckFederationSigningKey fails when the key that verified a signed
+// request has since expired or had its secret replaced. Unsigned requests
+// pass.
+func recheckFederationSigningKey(ctx context.Context) error {
+	admission, signed := ctx.Value(federationSigningAdmissionContextKey{}).(federationsigning.Admission)
+	if !signed {
+		return nil
+	}
+	err := admission.Current()
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, signingpolicy.ErrKey):
+		return api.NewError(http.StatusServiceUnavailable, "signature_invalid", "federation signature rejected", "", nil)
+	default:
+		// Answer as verification answers a key that is already retired.
+		return api.NewError(http.StatusUnauthorized, "signature_invalid", "federation signature rejected", "", nil)
+	}
 }
 
 func evaluateRelaySelfRevocation(

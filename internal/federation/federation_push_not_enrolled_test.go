@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/db"
 )
 
@@ -27,7 +28,13 @@ func TestSyncFederationPullsAfterPushRefusedForUnjoinedProject(t *testing.T) {
 	later, laterEvent, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "later hub work", Author: "worker"})
 	require.NoError(t, err)
 
-	err = spoke.sync(t, 0)
+	bindingBefore, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
+	require.NoError(t, err)
+	credential := spoke.credentials[spoke.projects[0].UID]
+	client, err := NewClient(ctx, credential.HubURL, credential.Token, clientOptsWithDefault(clientpkg.Opts{}))
+	require.NoError(t, err)
+	polls := heldPollFixture(bindingBefore.ProjectID, bindingBefore.PullCursorEventID, client.heldPollTarget(credential.HubProjectID))
+	err = SyncFederationOnce(withHubLongPolls(ctx, polls), spoke.env.DB, bindingBefore, credential, spoke.credentials)
 	require.ErrorContains(t, err, "federation_project_not_enrolled", "the refusal stays visible")
 	require.ErrorContains(t, err, issue.UID)
 
@@ -39,4 +46,11 @@ func TestSyncFederationPullsAfterPushRefusedForUnjoinedProject(t *testing.T) {
 	parked, err := spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.NotEqual(t, spoke.projects[0].ID, parked.ProjectID, "the pulled move parks the issue outside the joined project")
+}
+
+func heldPollFixture(projectID, cursor int64, target string) *hubLongPolls {
+	poll := &hubLongPoll{cancel: func() {}, done: make(chan struct{})}
+	polls := &hubLongPolls{polls: map[int64]*hubLongPoll{projectID: poll}}
+	polls.setHeld(poll, cursor, target, func() {})
+	return polls
 }

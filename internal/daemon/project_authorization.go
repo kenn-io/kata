@@ -29,6 +29,7 @@ type ProjectAccessDecision struct {
 	store          db.Storage
 	owner          bool
 	fixedUIDs      []string
+	released       bool
 	// streamCursor is the last event id an event stream has processed, starting
 	// at the high-water mark read before admission. A project whose lifecycle
 	// event follows it is new to the stream and still has that event to deliver.
@@ -37,6 +38,15 @@ type ProjectAccessDecision struct {
 	// for alone; see hostAccessRule.URLProjectAuthority.
 	urlProjectID  int64
 	urlProjectUID string
+}
+
+// releaseProjectAccess marks the request's page as already authorized, so the
+// response check does not authorize it again. Only an already-authorized
+// empty page may bypass the response check.
+func releaseProjectAccess(ctx context.Context) {
+	if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil {
+		decision.released = true
+	}
 }
 
 // advanceProjectAccessStreamCursor records that the stream has delivered every
@@ -391,7 +401,7 @@ func withProjectAuthorization(store db.Storage, hosted, trustedCaller bool, tran
 }
 
 func (d *ProjectAccessDecision) revalidateRelease(ctx context.Context) error {
-	if d.owner && d.fixedUIDs == nil {
+	if d.released || (d.owner && d.fixedUIDs == nil) {
 		return nil
 	}
 	_, kept, changed, err := d.refresh(ctx)

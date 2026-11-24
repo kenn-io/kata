@@ -36,6 +36,11 @@ func attachmentRequest(t *testing.T, source signingpolicy.Source, data []byte) *
 	return r
 }
 
+func verifyAttachment(v *Verifier, r *http.Request, enrollmentID int64) error {
+	_, err := v.Verify(r, enrollmentID)
+	return err
+}
+
 // Contract: an admitted upload remains usable after the signature lifetime.
 func TestAttachmentTransferBinaryAndLateBody(t *testing.T) {
 	s := testSource(t)
@@ -45,7 +50,7 @@ func TestAttachmentTransferBinaryAndLateBody(t *testing.T) {
 	now := time.Now()
 	v.now = func() time.Time { return now }
 	r.Body = &advancingBody{Reader: strings.NewReader(string(data)), advance: func() { v.now = func() time.Time { return now.Add(5 * time.Minute) } }}
-	require.NoError(t, v.Verify(r, 7))
+	require.NoError(t, verifyAttachment(v, r, 7))
 }
 
 // Contract: authenticated transfers consume a durable nonce before body I/O;
@@ -90,7 +95,7 @@ func TestAttachmentTransferAdmissionBeforeBody(t *testing.T) {
 					t.Setenv(s.KeyEnv, strings.Repeat("b", 64))
 				}
 			}}
-			err := v.Verify(r, 7)
+			err := verifyAttachment(v, r, 7)
 			if mode == "success" {
 				require.NoError(t, err)
 			} else {
@@ -107,7 +112,7 @@ func TestAttachmentTransferAdmissionBeforeBody(t *testing.T) {
 			}
 			r = r.Clone(t.Context())
 			r.Body = io.NopCloser(strings.NewReader("binary"))
-			require.Error(t, v.Verify(r, 7), "consumed signature must not replay")
+			require.Error(t, verifyAttachment(v, r, 7), "consumed signature must not replay")
 		})
 	}
 }
@@ -126,7 +131,7 @@ func TestAttachmentTransferExternalMount(t *testing.T) {
 	r.URL.Path = uploadPath
 	r.URL.Scheme, r.URL.Host = "", ""
 	v := testVerifier(t, s.HubURL, s)
-	require.NoError(t, v.Verify(r, 7))
+	require.NoError(t, verifyAttachment(v, r, 7))
 	defer func() { _ = r.Body.Close() }()
 }
 
@@ -174,7 +179,7 @@ func TestAttachmentTransferRejectsMalformedDigestBeforeBody(t *testing.T) {
 	r.Header.Set("Signature-Input", input)
 	r.Header.Set("Signature", signature)
 	r.Body = &advancingBody{Reader: strings.NewReader("binary"), advance: func() { t.Fatal("invalid digest read body") }}
-	require.Error(t, v.Verify(r, 7))
+	require.Error(t, verifyAttachment(v, r, 7))
 	require.Empty(t, v.seen)
 }
 
@@ -191,7 +196,7 @@ func TestAttachmentTransferBinaryProperty(t *testing.T) {
 			} // materialization budget
 			r := attachmentRequest(t, s, data)
 			defer func() { _ = r.Body.Close() }()
-			if err := v.Verify(r, 7); err != nil {
+			if err := verifyAttachment(v, r, 7); err != nil {
 				ht.Fatalf("valid binary rejected: %v", err)
 			}
 			body, err := io.ReadAll(r.Body)
@@ -214,7 +219,7 @@ func TestAttachmentTransferBinaryProperty(t *testing.T) {
 			index := hegel.Draw(ht, hegel.Integers(0, len(data)-1))
 			data[index] ^= 1
 			r.Body = io.NopCloser(bytes.NewReader(data))
-			if err := v.Verify(r, 7); err == nil {
+			if err := verifyAttachment(v, r, 7); err == nil {
 				_ = r.Body.Close()
 				ht.Fatal("corrupt binary accepted")
 			}
@@ -246,7 +251,7 @@ func TestAttachmentTransferSpoolFailureCleanup(t *testing.T) {
 				started := make(chan struct{})
 				r.Body = &signingReadSignal{ReadCloser: reader, started: started}
 				done := make(chan error, 1)
-				go func() { done <- v.Verify(r, 7) }()
+				go func() { done <- verifyAttachment(v, r, 7) }()
 				<-started
 				cancel()
 				select {
@@ -270,7 +275,7 @@ func TestAttachmentTransferSpoolFailureCleanup(t *testing.T) {
 				require.Error(t, err)
 			}
 			if mode != "cancel" && mode != "transport" {
-				err := v.Verify(r, 7)
+				err := verifyAttachment(v, r, 7)
 				require.Error(t, err)
 				if mode == "overflow" {
 					var limitErr *http.MaxBytesError
@@ -324,7 +329,7 @@ func TestAttachmentTransferLargeBoundedBinary(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 				sent := r.Body
-				require.NoError(t, v.Verify(r, 7))
+				require.NoError(t, verifyAttachment(v, r, 7))
 				require.NoError(t, sent.Close())
 				n, err := io.Copy(io.Discard, r.Body)
 				require.NoError(t, err)
@@ -350,11 +355,11 @@ func TestAttachmentTransferRejectsInFlightReplayBeforeBody(t *testing.T) {
 	started := make(chan struct{})
 	r.Body = &signingReadSignal{ReadCloser: reader, started: started}
 	done := make(chan error, 1)
-	go func() { done <- v.Verify(r, 7) }()
+	go func() { done <- verifyAttachment(v, r, 7) }()
 	<-started
 	duplicate := r.Clone(t.Context())
 	duplicate.Body = &advancingBody{Reader: strings.NewReader("binary"), advance: func() { t.Error("replay read body") }}
-	require.Error(t, v.Verify(duplicate, 7))
+	require.Error(t, verifyAttachment(v, duplicate, 7))
 	_, err := writer.Write([]byte("binary"))
 	require.NoError(t, err)
 	require.NoError(t, writer.Close())
@@ -380,7 +385,7 @@ func TestAttachmentTransferAuthenticatesBeforeBody(t *testing.T) {
 			case "watermark failure":
 				v.statePath = filepath.Join(t.TempDir(), "missing", "state")
 			}
-			require.Error(t, v.Verify(r, enrollmentID))
+			require.Error(t, verifyAttachment(v, r, enrollmentID))
 			require.Empty(t, v.seen)
 		})
 	}
@@ -391,7 +396,7 @@ func TestAttachmentTransferRestartRetainsAdmissionBarrier(t *testing.T) {
 	v := testVerifier(t, "https://hub.example", s)
 	r := attachmentRequest(t, s, []byte("binary"))
 	r.Body = &advancingBody{Reader: strings.NewReader("tamper"), advance: func() {}}
-	require.Error(t, v.Verify(r, 7))
+	require.Error(t, verifyAttachment(v, r, 7))
 	require.NoError(t, v.Close())
 	restarted, err := NewVerifier("https://hub.example", []signingpolicy.Key{{Source: s, EnrollmentID: 7}}, v.statePath)
 	require.NoError(t, err)
@@ -399,7 +404,7 @@ func TestAttachmentTransferRestartRetainsAdmissionBarrier(t *testing.T) {
 	// Simulate an elapsed quarantine but a persisted future expiry barrier.
 	restarted.started = time.Now().Add(-Quarantine)
 	r.Body = &advancingBody{Reader: strings.NewReader("binary"), advance: func() { t.Fatal("restart replay read body") }}
-	require.ErrorIs(t, restarted.Verify(r, 7), ErrWarming)
+	require.ErrorIs(t, verifyAttachment(restarted, r, 7), ErrWarming)
 }
 
 func TestAttachmentTransferContentGETRetainsOrdinaryBodyCap(t *testing.T) {
@@ -411,7 +416,7 @@ func TestAttachmentTransferContentGETRetainsOrdinaryBodyCap(t *testing.T) {
 	require.NoError(t, Sign(r, s))
 	r.ContentLength = MaxBodyBytes + 1
 	r.Body = &advancingBody{Reader: strings.NewReader(""), advance: func() { t.Fatal("GET accepted upload body cap") }}
-	err = v.Verify(r, 7)
+	err = verifyAttachment(v, r, 7)
 	var limitErr *http.MaxBytesError
 	require.ErrorAs(t, err, &limitErr)
 	require.EqualValues(t, MaxBodyBytes, limitErr.Limit)

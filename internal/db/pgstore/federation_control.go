@@ -481,14 +481,31 @@ func (s *Store) FederationSyncStatusByProject(ctx context.Context, projectID int
 		federationSyncStatusSelect+` WHERE project_id=$1`, projectID))
 }
 
-// RecordFederationSyncPullStarted records the start of a pull attempt.
+// RecordFederationSyncPullStarted records the start after any held-poll success.
 func (s *Store) RecordFederationSyncPullStarted(ctx context.Context, projectID int64, at time.Time) error {
-	return s.upsertFederationSyncTime(ctx, projectID, "last_pull_started_at", at)
+	_, err := s.ExecContext(ctx, `INSERT INTO federation_sync_status(project_id,last_pull_started_at)
+SELECT $1,$2 WHERE EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=$1)
+ON CONFLICT(project_id) DO UPDATE SET last_pull_started_at=to_char(
+GREATEST(EXCLUDED.last_pull_started_at::timestamptz,
+COALESCE(federation_sync_status.last_pull_started_at::timestamptz + interval '1 millisecond', EXCLUDED.last_pull_started_at::timestamptz),
+COALESCE(federation_sync_status.last_pull_success_at::timestamptz + interval '1 millisecond', EXCLUDED.last_pull_started_at::timestamptz))
+AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`, projectID, storedTime(at))
+	return mapSQLError(err, nil)
 }
 
 // RecordFederationSyncPullSuccess records a successful pull.
 func (s *Store) RecordFederationSyncPullSuccess(ctx context.Context, projectID int64, at time.Time) error {
 	return s.upsertFederationSyncTime(ctx, projectID, "last_pull_success_at", at)
+}
+
+// RecordFederationHeldPullSuccess records an idle poll without hiding an unfinished pull.
+func (s *Store) RecordFederationHeldPullSuccess(ctx context.Context, projectID int64, at time.Time) error {
+	_, err := s.ExecContext(ctx, `INSERT INTO federation_sync_status(project_id,last_pull_success_at)
+SELECT $1,$2 WHERE EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=$1)
+ON CONFLICT(project_id) DO UPDATE SET last_pull_success_at=EXCLUDED.last_pull_success_at
+WHERE (federation_sync_status.last_pull_started_at IS NULL OR (federation_sync_status.last_pull_success_at IS NOT NULL AND federation_sync_status.last_pull_started_at <= federation_sync_status.last_pull_success_at))
+AND (federation_sync_status.last_pull_success_at IS NULL OR federation_sync_status.last_pull_success_at < EXCLUDED.last_pull_success_at)`, projectID, storedTime(at))
+	return mapSQLError(err, nil)
 }
 
 // RecordFederationSyncPushStarted records the start of a push attempt.

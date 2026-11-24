@@ -1015,7 +1015,7 @@ var storageScenarios = []scenario{
 			"FederationBindingByProject", "FederationEnrollmentTransactionFence",
 			"FederationSyncStatusByProject", "FindActiveFederationEnrollment", "ListFederationBindings",
 			"ListFederationEnrollments", "LinkByEndpoints", "PurgeIssue", "RecordFederationQuarantine", "RecordFederationSyncError",
-			"RecordFederationSyncPullStarted", "RecordFederationSyncPullSuccess",
+			"RecordFederationSyncPullStarted", "RecordFederationSyncPullSuccess", "RecordFederationHeldPullSuccess",
 			"RecordFederationSyncPushStarted", "RecordFederationSyncPushSuccess",
 			"RecordFederationSyncReset", "RetryFederationQuarantine", "RevokeFederationEnrollment",
 			"SkipFederationQuarantine", "UpsertFederationBinding",

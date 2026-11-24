@@ -413,6 +413,7 @@ type Storage interface {
 	FederationSyncStatusByProject(ctx context.Context, projectID int64) (FederationSyncStatus, error)
 	RecordFederationSyncPullStarted(ctx context.Context, projectID int64, at time.Time) error
 	RecordFederationSyncPullSuccess(ctx context.Context, projectID int64, at time.Time) error
+	RecordFederationHeldPullSuccess(ctx context.Context, projectID int64, at time.Time) error
 	RecordFederationSyncPushStarted(ctx context.Context, projectID int64, at time.Time) error
 	RecordFederationSyncPushSuccess(ctx context.Context, projectID int64, at time.Time) error
 	RecordFederationSyncReset(ctx context.Context, projectID int64, at time.Time) error
