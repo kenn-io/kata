@@ -1743,18 +1743,13 @@ func TestCreateIssue_PriorityLabelRejected(t *testing.T) {
 	}
 	envGetJSON(t, env, projectPath(pid)+"/issues", &list)
 	assert.Empty(t, list.Issues)
-}
-
-func TestCreateIssue_PriorityLabelIdempotentRetry(t *testing.T) {
-	env := testenv.New(t)
-	pid := initLocalWorkspace(t, env, "kata")
 	labels := []string{"p2"}
 	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: pid, Title: "priority label", Author: "tester", Labels: labels,
 		IdempotencyKey: "retry-key", IdempotencyFingerprint: db.Fingerprint("priority label", "", nil, labels, nil, nil, nil),
 	})
 	require.NoError(t, err)
-	resp, body := envDoRaw(t, env, http.MethodPost, projectPath(pid)+"/issues", map[string]any{
+	resp, body = envDoRaw(t, env, http.MethodPost, projectPath(pid)+"/issues", map[string]any{
 		"actor": "tester", "title": "priority label", "labels": labels,
 	}, map[string]string{"Idempotency-Key": "retry-key"})
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
