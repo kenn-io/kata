@@ -10,10 +10,12 @@ import (
 )
 
 // RetainedIssueSnapshot records or returns a snapshot for an older local task.
-func (s *Store) RetainedIssueSnapshot(ctx context.Context, projectID int64, issueUID string) (db.Event, int64, error) {
+func (s *Store) RetainedIssueSnapshot(ctx context.Context, projectID int64, issueUID string) (db.Event, int64, bool, error) {
 	var creationID int64
+	var created bool
 	var result db.Event
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		created = false
 		binding, err := scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id=$1 FOR UPDATE`, projectID))
 		if err != nil {
 			return err
@@ -56,7 +58,8 @@ func (s *Store) RetainedIssueSnapshot(ctx context.Context, projectID int64, issu
 			return err
 		}
 		result, err = s.insertEventTx(ctx, tx, eventInsert{ProjectID: projectID, ProjectUID: project.UID, ProjectName: project.Name, IssueID: &issue.ID, IssueUID: &issueUID, Type: "issue.snapshot", Actor: binding.Actor, Payload: string(canonical.Payload)})
+		created = err == nil
 		return err
 	})
-	return result, creationID, err
+	return result, creationID, created && err == nil, err
 }

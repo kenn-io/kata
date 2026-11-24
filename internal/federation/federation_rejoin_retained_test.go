@@ -254,7 +254,7 @@ func TestMoveRetainedTaskAfterSecondRejoin(t *testing.T) {
 			if tc.publishedSnapshot {
 				require.NoError(t, spoke.sync(t, 0))
 			} else {
-				snapshot, _, err = spoke.env.DB.RetainedIssueSnapshot(ctx, spoke.projects[0].ID, issue.UID)
+				snapshot, _, _, err = spoke.env.DB.RetainedIssueSnapshot(ctx, spoke.projects[0].ID, issue.UID)
 				require.NoError(t, err)
 			}
 			_, err = spoke.env.DB.LeaveFederationReplica(ctx, spoke.projects[0].ID)
@@ -322,4 +322,37 @@ func TestMoveRetainedTaskAfterSecondRejoin(t *testing.T) {
 			require.Equal(t, projects[1].ID, remote.ProjectID)
 		})
 	}
+}
+
+func TestRejoinPublishesRecoverySnapshot(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "recovery-publication")
+	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
+	issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "old task", Author: "old-actor"})
+	require.NoError(t, err)
+	rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
+	_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "new comment"})
+	require.NoError(t, err)
+	binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
+	require.NoError(t, err)
+	counts := map[string]int{}
+	publish := func(_ int64, events []db.Event) {
+		for _, event := range events {
+			if event.Type == "issue.snapshot" {
+				counts[event.UID]++
+			}
+		}
+	}
+	for range 2 {
+		require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, spoke.env.DB, binding, spoke.credentials[projects[0].UID], clientpkg.Opts{}, publish, spoke.credentials))
+	}
+	events, err := spoke.env.DB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: spoke.projects[0].ID, IssueUID: issue.UID, Limit: 100})
+	require.NoError(t, err)
+	for _, event := range events {
+		if event.Type == "issue.snapshot" && event.OriginInstanceUID == spoke.env.DB.InstanceUID() {
+			require.Equal(t, 1, counts[event.UID])
+			return
+		}
+	}
+	t.Fatal("recovery snapshot not found")
 }

@@ -20,6 +20,7 @@ type retainedPush struct {
 	validateLease func(context.Context) error
 	credentials   config.FederationCredentialStore
 	opts          clientpkg.Opts
+	onEvents      func(int64, []db.Event)
 	sent          map[string]bool
 	// creation and recovery describe the batch nextBatch returned last.
 	creation, recovery bool
@@ -82,7 +83,7 @@ func (r *retainedPush) plan(ctx context.Context, events []db.Event) (int, error)
 		if !r.ownIssueEvent(event, "issue.snapshot") {
 			continue
 		}
-		snapshot, _, err := r.store.RetainedIssueSnapshot(ctx, r.binding.ProjectID, *event.IssueUID)
+		snapshot, _, err := r.snapshot(ctx, *event.IssueUID)
 		if err != nil && !errors.Is(err, db.ErrNotFound) {
 			return 0, err
 		}
@@ -106,6 +107,14 @@ func (r *retainedPush) ownIssueEvent(event db.Event, eventType string) bool {
 	return event.Type == eventType && event.IssueUID != nil && event.OriginInstanceUID == r.store.InstanceUID() && event.Actor == r.binding.Actor
 }
 
+func (r *retainedPush) snapshot(ctx context.Context, issueUID string) (db.Event, int64, error) {
+	event, sourceID, created, err := r.store.RetainedIssueSnapshot(ctx, r.binding.ProjectID, issueUID)
+	if err == nil && created && r.onEvents != nil {
+		r.onEvents(r.binding.ProjectID, []db.Event{event})
+	}
+	return event, sourceID, err
+}
+
 // resolve repairs a hub rejection that retained history explains. It reports
 // whether pending changed and the caller should start over.
 func (r *retainedPush) resolve(ctx context.Context, pending *[]db.Event, batch []db.Event, err error) (bool, error) {
@@ -118,7 +127,7 @@ func (r *retainedPush) resolve(ctx context.Context, pending *[]db.Event, batch [
 	if issueUID == "" || r.sent[issueUID] {
 		return false, nil
 	}
-	snapshot, sourceID, err := r.store.RetainedIssueSnapshot(ctx, r.binding.ProjectID, issueUID)
+	snapshot, sourceID, err := r.snapshot(ctx, issueUID)
 	if errors.Is(err, db.ErrNotFound) {
 		return false, nil
 	}

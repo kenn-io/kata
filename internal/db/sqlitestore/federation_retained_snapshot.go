@@ -10,9 +10,11 @@ import (
 )
 
 // RetainedIssueSnapshot records or returns a snapshot for an older local task.
-func (d *Store) RetainedIssueSnapshot(ctx context.Context, projectID int64, issueUID string) (db.Event, int64, error) {
+func (d *Store) RetainedIssueSnapshot(ctx context.Context, projectID int64, issueUID string) (db.Event, int64, bool, error) {
 	var creationID int64
+	var created bool
 	event, err := retryWrite1(ctx, d, func() (db.Event, error) {
+		created = false
 		tx, err := d.BeginTx(ctx, nil)
 		if err != nil {
 			return db.Event{}, err
@@ -62,7 +64,8 @@ func (d *Store) RetainedIssueSnapshot(ctx context.Context, projectID int64, issu
 		if err := tx.Commit(); err != nil {
 			return db.Event{}, err
 		}
+		created = true
 		return event, nil
 	})
-	return event, creationID, err
+	return event, creationID, created, err
 }
