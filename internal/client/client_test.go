@@ -3,9 +3,11 @@ package client
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"runtime"
 	"sync/atomic"
@@ -19,7 +21,10 @@ func TestDiscoveryClosesUnixConnections(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix sockets are unsupported on Windows")
 	}
-	socket := filepath.Join(t.TempDir(), "daemon.sock")
+	dir, err := os.MkdirTemp("/tmp", "kata-sock-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, os.RemoveAll(dir)) })
+	socket := filepath.Join(dir, "daemon.sock")
 	listener, err := new(net.ListenConfig).Listen(t.Context(), "unix", socket)
 	require.NoError(t, err)
 	var open atomic.Int64
@@ -54,6 +59,22 @@ func TestDiscoveryClosesUnixConnections(t *testing.T) {
 			require.Eventually(t, func() bool { return open.Load() == 0 }, time.Second, 10*time.Millisecond)
 		})
 	}
+	t.Run("client idle timeout", func(t *testing.T) {
+		client := unixClient(socket, Opts{})
+		transport := client.Transport.(*http.Transport)
+		require.Positive(t, transport.IdleConnTimeout)
+		transport.IdleConnTimeout = 500 * time.Millisecond
+		t.Cleanup(client.CloseIdleConnections)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, UnixBase+"/api/v1/ping", nil)
+		require.NoError(t, err)
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+		_, err = io.Copy(io.Discard, resp.Body)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		require.EqualValues(t, 1, open.Load())
+		require.Eventually(t, func() bool { return open.Load() == 0 }, 3*time.Second, 10*time.Millisecond)
+	})
 }
 
 func TestLocalDaemonUnreachableReason(t *testing.T) {
