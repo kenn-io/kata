@@ -813,13 +813,6 @@ func (d *Store) insertRemoteEvents(ctx context.Context, projectID int64, events 
 			return nil, err
 		}
 	}
-	for i, ev := range events {
-		if inserted[i] {
-			if _, err := d.repairLegacyNeedsReviewTx(ctx, tx, projectID, ev); err != nil {
-				return nil, err
-			}
-		}
-	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit remote event insert: %w", err)
 	}
@@ -1721,17 +1714,9 @@ func federationIssuesForSnapshot(ctx context.Context, tx *sql.Tx, projectID int6
 }
 
 func (d *Store) federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, issue db.Issue) (string, error) {
-	context, err := db.NeedsReviewContextTx(ctx, tx, issue.UID, "?")
-	if err != nil {
-		return "", err
-	}
 	labels, err := federationIssueLabels(ctx, tx, issue.ID)
 	if err != nil {
 		return "", err
-	}
-	var closeContext *db.NeedsReviewContext
-	if len(context.Closes) > 0 || slices.Contains(labels, "needs-review") {
-		closeContext = &context
 	}
 	links, err := federationIssueLinks(ctx, tx, issue.ID)
 	if err != nil {
@@ -1763,7 +1748,6 @@ func (d *Store) federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, 
 		ClosedAt:            formatOptionalSQLiteTime(issue.ClosedAt),
 		DeletedAt:           formatOptionalSQLiteTime(issue.DeletedAt),
 		Metadata:            jsontext.Value(issue.Metadata),
-		NeedsReviewContext:  closeContext,
 		Labels:              labels,
 		Links:               links,
 		Comments:            comments,

@@ -186,15 +186,11 @@ func (d *Store) addLabelAndEvent(ctx context.Context, issueID int64, ev db.Label
 	}
 
 	ts := nowTimestamp()
-	payloadFields := map[string]any{"issue_uid": issue.UID, "label": ev.Label, "updated_at": ts}
-	if ev.Label == "needs-review" {
-		context, err := db.NeedsReviewContextTx(ctx, tx, issue.UID, "?")
-		if err != nil {
-			return db.IssueLabel{}, db.Event{}, err
-		}
-		payloadFields["after_close_uids"] = context.Closes
-	}
-	payload, err := json.Marshal(payloadFields)
+	payload, err := json.Marshal(map[string]string{
+		"issue_uid":  issue.UID,
+		"label":      ev.Label,
+		"updated_at": ts,
+	})
 	if err != nil {
 		return db.IssueLabel{}, db.Event{}, fmt.Errorf("marshal label payload: %w", err)
 	}

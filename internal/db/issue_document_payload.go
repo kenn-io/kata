@@ -27,7 +27,6 @@ type IssueDocumentPayload struct {
 	ClosedAt               *string                `json:"closed_at,omitempty"`
 	DeletedAt              *string                `json:"deleted_at,omitempty"`
 	Metadata               jsontext.Value         `json:"metadata"`
-	NeedsReviewContext     *NeedsReviewContext    `json:"needs_review_context,omitempty"`
 	Labels                 []string               `json:"labels,omitempty"`
 	Links                  []IssueDocumentLink    `json:"links,omitempty"`
 	Comments               []IssueDocumentComment `json:"comments,omitempty"`

@@ -58,15 +58,11 @@ func (s *Store) AddLabelAndEvent(
 			return mapSQLError(err, labelConstraintErrors)
 		}
 		updatedAt := nowStoredTimestamp()
-		payloadFields := map[string]any{"issue_uid": issue.UID, "label": params.Label, "updated_at": updatedAt}
-		if params.Label == "needs-review" {
-			context, err := db.NeedsReviewContextTx(ctx, tx, issue.UID, "$1")
-			if err != nil {
-				return err
-			}
-			payloadFields["after_close_uids"] = context.Closes
-		}
-		payload, err := json.Marshal(payloadFields)
+		payload, err := json.Marshal(map[string]string{
+			"issue_uid":  issue.UID,
+			"label":      params.Label,
+			"updated_at": updatedAt,
+		})
 		if err != nil {
 			return fmt.Errorf("marshal label payload: %w", err)
 		}

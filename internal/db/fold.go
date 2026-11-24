@@ -4,7 +4,6 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
-	"slices"
 	"sort"
 )
 
@@ -12,16 +11,15 @@ import (
 // replay projection.
 func FoldEvents(events []FoldEvent) FoldProjection {
 	p := FoldProjection{
-		CronRuns:            map[string]FoldCronRun{},
-		CronJobs:            map[string]FoldCronJob{},
-		CronWorkflows:       map[string]FoldCronWorkflow{},
-		Issues:              map[string]FoldIssue{},
-		Comments:            map[string]FoldComment{},
-		Labels:              map[FoldLabelKey]FoldElementState{},
-		Links:               map[FoldLinkKey]FoldElementState{},
-		IssueMetadata:       map[string]jsontext.Value{},
-		ProjectMetadata:     map[string]jsontext.Value{},
-		NeedsReviewContexts: map[string]NeedsReviewContext{},
+		CronRuns:        map[string]FoldCronRun{},
+		CronJobs:        map[string]FoldCronJob{},
+		CronWorkflows:   map[string]FoldCronWorkflow{},
+		Issues:          map[string]FoldIssue{},
+		Comments:        map[string]FoldComment{},
+		Labels:          map[FoldLabelKey]FoldElementState{},
+		Links:           map[FoldLinkKey]FoldElementState{},
+		IssueMetadata:   map[string]jsontext.Value{},
+		ProjectMetadata: map[string]jsontext.Value{},
 	}
 	ordered := append([]FoldEvent(nil), events...)
 	sort.SliceStable(ordered, func(i, j int) bool {
@@ -31,8 +29,6 @@ func FoldEvents(events []FoldEvent) FoldProjection {
 	// move snapshot before replaying deltas, including deltas preceding the move.
 	// The snapshot is a baseline rather than a later content edit.
 	baselines := map[string]bool{}
-	seenCloses := map[string][]string{}
-	reopenedCloses := map[string][]string{}
 	for _, e := range ordered {
 		if e.Type == "issue.created" || e.Type == "issue.snapshot" {
 			if e.IssueUID != "" {
@@ -53,77 +49,12 @@ func FoldEvents(events []FoldEvent) FoldProjection {
 				snapshot.ProjectUID, _ = stringValue(payload["to_project_uid"])
 				snapshot.HLCPhysicalMS, snapshot.HLCCounter = 0, 0
 				p.applyIssueCreated(snapshot)
-				var document IssueDocumentPayload
-				_ = json.Unmarshal(snapshot.Payload, &document)
-				if document.NeedsReviewContext != nil {
-					seenCloses[uid] = append([]string(nil), document.NeedsReviewContext.Closes...)
-				}
 				baselines[uid] = true
 			}
 		}
 	}
 	for _, e := range ordered {
-		switch e.Type {
-		case "issue.closed", "issue.reopened", "issue.created", "issue.snapshot", RepeatedImportEventType, "issue.moved", "issue.labeled", "issue.unlabeled":
-		default:
-			p.apply(e)
-			continue
-		}
-		context := p.NeedsReviewContexts[e.IssueUID]
-		payload := PayloadMap(e.Payload)
-		if e.Type == "issue.closed" {
-			context.Closes = append(context.Closes, e.UID)
-		} else if e.Type == "issue.reopened" {
-			// Treat an older re-add after reopening as having seen these closes.
-			reopenedCloses[e.IssueUID] = append([]string(nil), context.Closes...)
-		}
-		var document struct {
-			NeedsReviewContext *NeedsReviewContext `json:"needs_review_context"`
-		}
-		if e.Type == "issue.snapshot" || e.Type == "issue.created" || e.Type == RepeatedImportEventType || e.Type == "issue.moved" {
-			raw := e.Payload
-			if e.Type == "issue.moved" {
-				raw = payload["snapshot"]
-			}
-			_ = json.Unmarshal(raw, &document)
-			if document.NeedsReviewContext != nil {
-				context.Closes = append(context.Closes, document.NeedsReviewContext.Closes...)
-			}
-		}
-		p.NeedsReviewContexts[e.IssueUID] = context
 		p.apply(e)
-		key := FoldLabelKey{IssueUID: e.IssueUID, Label: "needs-review"}
-		if e.Type == "issue.labeled" {
-			if label, _ := stringValue(payload["label"]); label == key.Label {
-				if marker, ok := payload["after_close_uids"]; ok {
-					seenCloses[e.IssueUID] = stringSlice(marker)
-				} else {
-					seenCloses[e.IssueUID] = append([]string(nil), reopenedCloses[e.IssueUID]...)
-				}
-			}
-		} else if e.Type == "issue.created" || e.Type == "issue.snapshot" || e.Type == RepeatedImportEventType {
-			if state := p.Labels[key]; state.Present && state.Clock == clockOf(e) {
-				seenCloses[e.IssueUID] = append([]string(nil), reopenedCloses[e.IssueUID]...)
-				if document.NeedsReviewContext != nil {
-					seenCloses[e.IssueUID] = append([]string(nil), document.NeedsReviewContext.Closes...)
-				}
-			}
-		}
-	}
-	for uid, context := range p.NeedsReviewContexts {
-		context.Closes = sortedUnique(context.Closes)
-		p.NeedsReviewContexts[uid] = context
-		key := FoldLabelKey{IssueUID: uid, Label: "needs-review"}
-		state, exists := p.Labels[key]
-		for _, closeUID := range context.Closes {
-			if !slices.Contains(seenCloses[uid], closeUID) {
-				state.Present = false
-				break
-			}
-		}
-		if exists && !state.Present {
-			p.Labels[key] = state
-		}
 	}
 	return p
 }

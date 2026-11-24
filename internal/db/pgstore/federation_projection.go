@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"slices"
 	"strings"
 	"time"
 
@@ -276,17 +275,9 @@ func federationIssuesForSnapshot(ctx context.Context, tx *sql.Tx, projectID int6
 }
 
 func federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, issue db.Issue) (string, error) {
-	context, err := db.NeedsReviewContextTx(ctx, tx, issue.UID, "$1")
-	if err != nil {
-		return "", err
-	}
 	labels, err := federationIssueLabels(ctx, tx, issue.ID)
 	if err != nil {
 		return "", err
-	}
-	var closeContext *db.NeedsReviewContext
-	if len(context.Closes) > 0 || slices.Contains(labels, "needs-review") {
-		closeContext = &context
 	}
 	links, err := federationIssueLinks(ctx, tx, issue.ID)
 	if err != nil {
@@ -309,7 +300,7 @@ func federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, issue db.Is
 		Author: issue.Author, Owner: issue.Owner, AssignmentExpiresOn: optionalStoredTime(issue.AssignmentExpiresOn), Priority: issue.Priority, Status: issue.Status,
 		ClosedReason: issue.ClosedReason, ClosedAt: optionalStoredTime(issue.ClosedAt),
 		DeletedAt: optionalStoredTime(issue.DeletedAt), Metadata: jsontext.Value(issue.Metadata),
-		NeedsReviewContext: closeContext, Labels: labels, Links: links, Comments: comments,
+		Labels: labels, Links: links, Comments: comments,
 		CreatedAt: formatStoredTime(issue.CreatedAt), UpdatedAt: formatStoredTime(issue.UpdatedAt),
 		Revision: issue.Revision, RecurrenceUID: recurrenceUID, OccurrenceKey: occurrenceKey,
 	})

@@ -156,13 +156,6 @@ func (s *Store) InsertRemoteEvents(ctx context.Context, projectID int64, events 
 				return err
 			}
 		}
-		for i, remote := range events {
-			if inserted[i] {
-				if _, err := s.repairLegacyNeedsReviewTx(ctx, tx, projectID, remote); err != nil {
-					return err
-				}
-			}
-		}
 		return nil
 	})
 	if err != nil {

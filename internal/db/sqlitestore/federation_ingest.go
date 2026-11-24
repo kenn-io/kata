@@ -433,20 +433,6 @@ func (d *Store) ingestFederationEventsOnce(
 		}
 		result.Accepted++
 	}
-	for _, input := range prepared {
-		if input.Duplicate {
-			continue
-		}
-		repair, err := d.repairLegacyNeedsReviewTx(ctx, tx, p.ProjectID, input.Event)
-		if err != nil {
-			return db.FederationIngestResult{}, err
-		}
-		if repair != nil {
-			result.Events = append(result.Events, *repair)
-			result.InsertedEventUIDs = append(result.InsertedEventUIDs, repair.UID)
-			materialization.fullReplay = true
-		}
-	}
 	if result.Accepted > 0 {
 		var err error
 		// The hub's own events for a repeated snapshot are not part of the
