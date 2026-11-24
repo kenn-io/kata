@@ -73,6 +73,8 @@
     activation="manual"
     bind:listElement={tabList}
     tabAttributes={(item, selected) => ({
+      // Appearance can be selected as a fallback while the URL still names an unavailable section.
+      // Tabs skips selection callbacks for the selected tab, so clicking it must update the URL.
       onclick: selected ? () => onSelect(item.id as SettingsSectionID) : undefined,
       onfocus: (event) =>
         event.currentTarget.scrollIntoView({ block: 'nearest', inline: 'nearest' }),
