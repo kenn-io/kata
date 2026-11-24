@@ -1096,6 +1096,29 @@ describe('AppShell', () => {
     expect(writes[1]).toEqual({ visibility: 'teams', team_uids: ['team-one'], revision: 5 })
   })
 
+  test('does not retry an empty new teams policy after a failed save', async () => {
+    const writes: unknown[] = []
+    setGeneratedFetch(async (input, init) => {
+      if (init?.method === 'PUT') {
+        writes.push(JSON.parse(String(init.body)))
+        return Response.json({ code: 'revision_conflict' }, { status: 409 })
+      }
+      return isTeamsList(input)
+        ? Response.json({ teams: [{ uid: 'team-one', name: 'Example team', revision: 1 }] })
+        : policyResponse('all', [], 4)
+    })
+    render(AppShell, { props: accessProps(executeAccessMutation) })
+    await screen.findByText('Example team')
+    await waitFor(() => expect(visibilitySelect().disabled).toBe(false))
+    await chooseVisibility('Selected teams')
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'Example team' }))
+    const retry = await screen.findByRole('button', { name: 'Retry saving visibility' })
+    await waitFor(() => expect(visibilitySelect().disabled).toBe(false))
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'Example team' }))
+    await fireEvent.click(retry)
+    expect(writes).toHaveLength(1)
+  })
+
   test('discards late member and policy reads after switching selections', async () => {
     let finishMembers!: (response: Response) => void
     let finishPolicy!: (response: Response) => void

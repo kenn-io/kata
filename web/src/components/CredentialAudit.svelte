@@ -73,7 +73,7 @@
 
 <div class="credential-audit">
   <SettingsSection title="Credentials">
-    <div class="title-action">
+    <div class="settings-title-action">
       <Button
         size="sm"
         ariaLabel="Refresh credentials"
@@ -192,20 +192,6 @@
 <style>
   .credential-audit {
     min-width: 0;
-  }
-
-  /* Refresh sits at the right end of the section's title row. */
-  .title-action {
-    position: absolute;
-    top: 0;
-    right: 0;
-    display: flex;
-    align-items: center;
-    height: var(--layout-header-h);
-  }
-
-  .title-action :global(.kit-button) {
-    gap: var(--space-2);
   }
 
   .filters {

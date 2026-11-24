@@ -6,8 +6,9 @@
     type SettingsCategory,
   } from '@kenn-io/kit-ui'
   import type { Snippet } from 'svelte'
+  import type { SettingsSection as RouteSettingsSection } from '../lib/router'
 
-  export type SettingsSectionID = 'appearance' | 'search' | 'credentials' | 'access'
+  export type SettingsSectionID = RouteSettingsSection | 'credentials'
 
   interface Props {
     active: SettingsSectionID
@@ -94,6 +95,19 @@
   .settings-view > :global(*) {
     flex: 1 1 auto;
     min-width: 0;
+  }
+
+  .settings-view :global(.settings-title-action) {
+    position: absolute;
+    top: 0;
+    right: 0;
+    display: flex;
+    align-items: center;
+    height: var(--layout-header-h);
+  }
+
+  .settings-view :global(.settings-title-action .kit-button) {
+    gap: var(--space-2);
   }
 
   /* A settings row: a 160px label column with its control right after it. */

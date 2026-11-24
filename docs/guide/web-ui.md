@@ -263,8 +263,8 @@ revoked credentials. Each credential is one row. The row shows its name, ID,
 actor, state, and scope. Use the ID with `kata tokens revoke <id>`. The row
 also shows when the credential was created and last used, or **Never used** if
 it has no last-use time. It shows when the credential expires or was revoked,
-if either applies. Expired and revoked credentials carry a badge. With more
-than eight credentials, you can filter by state, scope, and actor or name.
+if either applies. Expired and revoked credentials carry a badge. You can
+filter by state, scope, and actor or name.
 Filtering never sends credential metadata to browser storage. Last use is
 best-effort. It is not a request-by-request access log. The view never
 receives a bearer value, token hash, or provisioned token-file path.

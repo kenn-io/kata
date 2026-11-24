@@ -242,17 +242,11 @@
   async function savePolicy(
     nextVisibility: 'all' | 'teams',
     nextTeams: readonly string[],
-    retry = false,
   ): Promise<void> {
     if (!policy || policyLoading) return
     visibility = nextVisibility
     selectedTeams = [...nextTeams]
-    if (
-      nextVisibility === 'teams' &&
-      nextTeams.length === 0 &&
-      policy.visibility !== 'teams' &&
-      !retry
-    )
+    if (nextVisibility === 'teams' && nextTeams.length === 0 && policy.visibility !== 'teams')
       return
     const id = projectID
     const draft = {
@@ -283,7 +277,7 @@
   {#if message}<Notice variant="inline" live tone="error" icon={errorIcon} {message} />{/if}
 
   <SettingsSection title="Teams">
-    <div class="title-action">
+    <div class="settings-title-action">
       <Button
         size="sm"
         ariaLabel="Refresh teams"
@@ -511,8 +505,11 @@
       {#if policyRetry}
         <Button
           size="sm"
-          disabled={policyDisabled}
-          onclick={() => void savePolicy(visibility, selectedTeams, true)}
+          disabled={policyDisabled ||
+            (visibility === 'teams' &&
+              selectedTeams.length === 0 &&
+              policy?.visibility !== 'teams')}
+          onclick={() => void savePolicy(visibility, selectedTeams)}
         >
           Retry saving visibility
         </Button>
@@ -526,20 +523,6 @@
     display: grid;
     gap: var(--space-7);
     min-width: 0;
-  }
-
-  /* Refresh sits at the right end of the section's title row. */
-  .title-action {
-    position: absolute;
-    top: 0;
-    right: 0;
-    display: flex;
-    align-items: center;
-    height: var(--layout-header-h);
-  }
-
-  .title-action :global(.kit-button) {
-    gap: var(--space-2);
   }
 
   .note {
