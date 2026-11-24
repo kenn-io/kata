@@ -20,6 +20,8 @@ func deleteProjectRelayMetadataTx(ctx context.Context, tx *sql.Tx, projectUID st
 	supersededPrefix := db.RelayResetSupersededMetadataPrefix + projectUID + "."
 	identityDependencyPrefix := db.FederationProjectIdentityDependencyPrefix + projectUID + "."
 	ackPrefix := db.FederationAcknowledgedEventPrefix + projectUID + "."
+	acceptedCursorPrefix := db.FederationAcceptedCursorPrefix + projectUID + "."
+	acceptedIssuePrefix := db.FederationAcceptedIssuePrefix + projectUID + "."
 	_, err := tx.ExecContext(ctx, `DELETE FROM meta
 		WHERE key = $1
 		   OR key = $2
@@ -29,8 +31,10 @@ func deleteProjectRelayMetadataTx(ctx context.Context, tx *sql.Tx, projectUID st
 		   OR left(key, length($5)) = $5
 		   OR left(key, length($6)) = $6
 		   OR left(key, length($8)) = $8
-		   OR left(key, length($9)) = $9`,
-		resetKey, db.AttributionUIResetMetadataPrefix+projectUID, resetPrefix, transitionPrefix, pendingPrefix, supersededPrefix, db.ProjectStreamResetMetadataPrefix+projectUID, identityDependencyPrefix, ackPrefix)
+		   OR left(key, length($9)) = $9
+		   OR left(key, length($10)) = $10
+		   OR left(key, length($11)) = $11`,
+		resetKey, db.AttributionUIResetMetadataPrefix+projectUID, resetPrefix, transitionPrefix, pendingPrefix, supersededPrefix, db.ProjectStreamResetMetadataPrefix+projectUID, identityDependencyPrefix, ackPrefix, acceptedCursorPrefix, acceptedIssuePrefix)
 	return mapSQLError(err, nil)
 }
 
