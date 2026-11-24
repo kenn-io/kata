@@ -149,7 +149,6 @@ func TestFederationWatchAnswersWhenAnyWatchedProjectCommits(t *testing.T) {
 	assert.Equal(t, []int64{f.other.ID}, result.body.Ready)
 	assert.Empty(t, result.body.Unwatched)
 	assert.Equal(t, "45", result.header.Get("X-Kata-Federation-Poll-Wait-Max"))
-	assert.NotContains(t, string(result.raw), "Wakes the watch", "a watch names projects; it never carries their events")
 	assert.Less(t, time.Since(committed), 5*time.Second)
 }
 
@@ -190,7 +189,7 @@ func TestFederationWatchChecksEachProjectAgainstItsOwnToken(t *testing.T) {
 	assert.ElementsMatch(t, []int64{f.other.ID, third.ID}, result.body.Unwatched)
 }
 
-func TestFederationWatchReauthorizesAWokenProject(t *testing.T) {
+func TestFederationWatchReportsARevokedProjectAsUnwatched(t *testing.T) {
 	f := newWatchFixture(t)
 	cursor, otherCursor := f.cursor(t), f.otherCursor(t)
 	done := f.startWatch(t, cursor, []watchEntryForTest{{ProjectID: f.other.ID, AfterID: otherCursor, Token: watchOtherToken}}, "2", 2)

@@ -181,7 +181,7 @@ func registerFederationWatch(humaAPI huma.API, cfg ServerConfig) {
 			projectID: in.ProjectID, afterID: in.Body.AfterID, authHeader: in.Authorization,
 			project: project, base: requestCtx, ctx: db.WithFederationEventStream(ctx),
 		}}
-		var unwatched []int64
+		unwatched := []int64{}
 		carriesTokens := federationWatchCarriesTokens(requestCtx, cfg)
 		for _, other := range in.Body.Projects {
 			if !carriesTokens {
@@ -272,9 +272,6 @@ func registerFederationWatch(humaAPI huma.API, cfg ServerConfig) {
 				return nil, err
 			}
 			body.Ready = append(body.Ready, entry.projectID)
-		}
-		if body.Unwatched == nil {
-			body.Unwatched = []int64{}
 		}
 		slices.Sort(body.Ready)
 		slices.Sort(body.Unwatched)

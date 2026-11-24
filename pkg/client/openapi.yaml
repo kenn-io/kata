@@ -3033,7 +3033,7 @@ components:
     FederationWatchEventsBody:
       properties:
         ready:
-          description: Projects with events or a reset after their cursor.
+          description: "Projects the spoke should poll now: they have events or a reset after their cursor, or their own poll will report why it cannot read them."
           items:
             format: int64
             type: integer

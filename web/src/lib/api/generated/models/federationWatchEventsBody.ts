@@ -3,7 +3,7 @@
  */
 
 export interface FederationWatchEventsBody {
-  /** Projects with events or a reset after their cursor. */
+  /** Projects the spoke should poll now: they have events or a reset after their cursor, or their own poll will report why it cannot read them. */
   ready: number[]
   /** Projects the hub did not watch because their token does not authorize pulls from them now, or because this request cannot carry supplemental tokens. Poll them individually. */
   unwatched: number[]

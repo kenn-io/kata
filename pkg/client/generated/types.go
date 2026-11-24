@@ -3184,7 +3184,7 @@ func (f FederationViolationSummary) Validate() error {
 }
 
 type FederationWatchEventsBody struct {
-	// Ready Projects with events or a reset after their cursor.
+	// Ready Projects the spoke should poll now: they have events or a reset after their cursor, or their own poll will report why it cannot read them.
 	Ready []int64 `json:"ready" validate:"required"`
 
 	// Unwatched Projects the hub did not watch because their token does not authorize pulls from them now, or because this request cannot carry supplemental tokens. Poll them individually.
