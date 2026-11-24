@@ -166,7 +166,7 @@ async function createTeam(page: Page, name: string): Promise<void> {
   await page.getByRole('button', { name: 'New team' }).click()
   const field = page.getByLabel('New team name')
   await field.fill(name)
-  await field.press('Enter')
+  await page.getByRole('button', { name: 'Create team' }).click()
   await expect(teamRow(page, name)).toHaveCount(1)
 }
 
@@ -179,7 +179,7 @@ async function addMember(page: Page, account: string): Promise<void> {
   await page.getByRole('button', { name: 'Add member' }).click()
   const field = page.getByLabel('Member account')
   await field.fill(account)
-  await field.press('Enter')
+  await page.getByRole('button', { name: 'Add member', exact: true }).click()
   await expect(page.getByRole('list', { name: 'Team members' }).first()).toContainText(account)
 }
 

@@ -116,7 +116,12 @@ describe('AccessManagement', () => {
       setGeneratedFetch(async (input, init) => {
         const path = new URL(String(input)).pathname
         if (path === '/api/v1/teams')
-          return Response.json({ teams: [{ uid: 'team-one', name: 'example-team', revision: 1 }] })
+          return Response.json({
+            teams: [
+              { uid: 'team-one', name: 'example-team', revision: 1 },
+              { uid: 'team-two', name: 'second-team', revision: 1 },
+            ],
+          })
         if (init?.method === 'PUT') {
           writes.push(JSON.parse(String(init.body)))
           return writes.length === 1
@@ -127,7 +132,7 @@ describe('AccessManagement', () => {
         }
         if (path === '/api/v1/projects/7/access') {
           reads++
-          if (reads > 1 && scenario === 'reload failure')
+          if (reads === 2 && scenario === 'reload failure')
             return new Promise<Response>((resolve) => (finishReload = resolve))
           return Response.json({
             policy: { revision: reads === 1 ? 4 : 5, visibility: 'all', team_uids: [] },
@@ -137,7 +142,10 @@ describe('AccessManagement', () => {
       })
       render(AccessManagement, {
         props: {
-          projects,
+          projects: [
+            ...projects,
+            { project: { id: 8, uid: 'project-two', name: 'second-project' } } as UIProject,
+          ],
           pending: false,
           onMutation: async (
             _draft: unknown,
@@ -175,6 +183,15 @@ describe('AccessManagement', () => {
             }) as HTMLButtonElement
           ).disabled,
         ).toBe(true)
+        await fireEvent.click(screen.getByRole('button', { name: 'Refresh teams' }))
+        const retry = await screen.findByRole('button', { name: 'Retry saving visibility' })
+        await waitFor(() => expect((retry as HTMLButtonElement).disabled).toBe(false))
+        expect(
+          (screen.getByRole('checkbox', { name: 'example-team' }) as HTMLInputElement).checked,
+        ).toBe(true)
+        await fireEvent.click(retry)
+        await waitFor(() => expect(writes).toHaveLength(2))
+        expect(writes[1]).toEqual({ visibility: 'teams', team_uids: ['team-one'], revision: 5 })
         return
       }
       const retry = (await screen.findByRole('button', {
@@ -194,4 +211,26 @@ describe('AccessManagement', () => {
       }
     },
   )
+
+  it('creates teams and adds members using visible submit buttons', async () => {
+    const requests: string[] = []
+    setGeneratedFetch(async (input, init) => {
+      const path = new URL(String(input)).pathname
+      if (init?.method === 'POST' || init?.method === 'PUT') requests.push(path)
+      if (path === '/api/v1/teams/team-one') return Response.json({ members: [] })
+      if (path === '/api/v1/teams')
+        return Response.json({ teams: [{ uid: 'team-one', name: 'example-team', revision: 1 }] })
+      return Response.json({ policy: { revision: 4, visibility: 'all', team_uids: [] } })
+    })
+    renderAccess()
+    await fireEvent.click(await screen.findByText('example-team'))
+    await fireEvent.click(await screen.findByRole('button', { name: 'Add member' }))
+    await fireEvent.input(screen.getByLabelText('Member account'), { target: { value: 'user-a' } })
+    await fireEvent.click(screen.getByRole('button', { name: 'Add member' }))
+    await waitFor(() => expect(requests).toContain('/api/v1/teams/team-one/members/user-a'))
+    await fireEvent.click(screen.getByRole('button', { name: 'New team' }))
+    await fireEvent.input(screen.getByLabelText('New team name'), { target: { value: 'new-team' } })
+    await fireEvent.click(screen.getByRole('button', { name: 'Create team' }))
+    await waitFor(() => expect(requests).toContain('/api/v1/teams'))
+  })
 })

@@ -119,7 +119,7 @@
     await Promise.all([
       refresh(),
       uid ? loadMembers(uid) : undefined,
-      id ? loadPolicy(id) : undefined,
+      id ? loadPolicy(id, policyRetry) : undefined,
     ])
   }
 
@@ -361,6 +361,9 @@
                       pattern=".*\S.*"
                       disabled={disabled || loading}
                     />
+                    <Button type="submit" size="sm" disabled={disabled || loading}
+                      >Add member</Button
+                    >
                   </form>
                 {:else}
                   <button
@@ -409,6 +412,7 @@
           pattern=".*\S.*"
           {disabled}
         />
+        <Button type="submit" size="sm" disabled={disabled || loading}>Create team</Button>
       </form>
     {:else}
       <button
@@ -612,6 +616,12 @@
 
   .add-row:hover:not(:disabled) {
     color: var(--text-primary);
+  }
+
+  .inline-field {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
   }
 
   .inline-field input {

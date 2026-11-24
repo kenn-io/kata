@@ -82,6 +82,21 @@ describe('CredentialAudit', () => {
     expect(row.querySelector('time[datetime="2026-08-03T10:00:00Z"]')).not.toBeNull()
   })
 
+  it('shows the local expiry date matching the tooltip', () => {
+    const expires = '2026-12-01T00:30:00Z'
+    render(CredentialAudit, {
+      props: auditProps({ tokens: [{ ...tokens[0]!, expires_at: expires }] }),
+    })
+    const time = document.querySelector(`time[datetime="${expires}"]`)!
+    expect(time.textContent).toBe(
+      new Intl.DateTimeFormat(undefined, {
+        month: 'short',
+        day: 'numeric',
+        year: new Date(expires).getFullYear() === new Date().getFullYear() ? undefined : 'numeric',
+      }).format(new Date(expires)),
+    )
+  })
+
   it('filters a short credential list and says when none match', async () => {
     render(CredentialAudit, { props: auditProps() })
 
