@@ -2212,6 +2212,38 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: 'Credentials' })).not.toBeNull()
   })
 
+  it.each(['false', 'absent'])(
+    'replaces a Credentials address when audit access is %s',
+    async (access) => {
+      history.replaceState(null, '', '/kata?view=credentials#direct=1')
+      sessionStorage.setItem(
+        'kata.web.session.v1',
+        JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+      )
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request =
+            input instanceof Request
+              ? input
+              : new Request(new URL(String(input), window.location.origin), init)
+          const path = new URL(request.url).pathname
+          if (path === '/api/v1/ui/snapshot') {
+            const body = snapshot()
+            if (access === 'absent') Reflect.deleteProperty(body.capabilities, 'token_audit_read')
+            return Response.json(body, { headers: { ETag: '"snapshot-1"' } })
+          }
+          if (path === '/api/v1/ui/references')
+            return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+          throw new Error(`Unexpected request: ${request.method} ${path}`)
+        }),
+      )
+      render(App)
+      await screen.findByRole('heading', { name: 'Appearance' })
+      await waitFor(() => expect(window.location.search).toBe('?view=settings&section=appearance'))
+    },
+  )
+
   it('aborts and fences a delayed credential response after leaving the route', async () => {
     history.replaceState(null, '', '/kata?view=credentials#direct=1')
     sessionStorage.setItem(

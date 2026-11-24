@@ -360,6 +360,26 @@
 
   $effect(() => {
     if (
+      route.kind === 'kata' &&
+      route.view === 'credentials' &&
+      authority?.snapshot &&
+      authority.snapshot.capabilities.token_audit_read !== true &&
+      !authority.loading &&
+      !authority.stale &&
+      !authority.authenticationRequired &&
+      !daemonSwitching &&
+      !daemonError
+    ) {
+      fenceCredentialAudit()
+      route = { ...route, view: 'settings', section: 'appearance' }
+      history.replaceState(null, '', serializeRoute(route))
+      if (activeDaemonID) saveDaemonRoute(activeDaemonID, serializeRoute(route))
+      loadRoute()
+    }
+  })
+
+  $effect(() => {
+    if (
       versionMismatch ||
       mode === 'loading' ||
       route.kind === 'route-error' ||
