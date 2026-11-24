@@ -145,7 +145,7 @@ describe('ProjectSyncStatus', () => {
     setGeneratedFetch(vi.fn().mockResolvedValueOnce(Response.json(result)))
     render(ProjectSyncStatus, { props: { projectID: 7, projectUID } })
     const button = await screen.findByRole('button', { name: '2 to sync' })
-    expect(button.className).toContain('kit-chip--tone-warning')
+    expect(button.querySelector('svg.lucide-triangle-alert')).not.toBeNull()
   })
 
   it('shows one command when both shells match', async () => {
