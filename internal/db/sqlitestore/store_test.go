@@ -72,6 +72,28 @@ func TestOpen_IsIdempotentAfterBootstrap(t *testing.T) {
 	assert.Equal(t, uid1, d2.InstanceUID())
 }
 
+func TestOpen_UpgradesRetainedHistoryFrom54(t *testing.T) {
+	ctx := t.Context()
+	path := filepath.Join(t.TempDir(), "kata.db")
+	d, err := sqlitestore.Open(ctx, path)
+	require.NoError(t, err)
+	project, err := d.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	_, err = d.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "worker", PushEnabled: true, Enabled: true})
+	require.NoError(t, err)
+	_, err = d.ExecContext(ctx, `ALTER TABLE federation_bindings DROP COLUMN retained_through_event_id`)
+	require.NoError(t, err)
+	_, err = d.ExecContext(ctx, `UPDATE meta SET value='54' WHERE key='schema_version'`)
+	require.NoError(t, err)
+	require.NoError(t, d.Close())
+	d, err = sqlitestore.Open(ctx, path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = d.Close() })
+	binding, err := d.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	require.Zero(t, binding.RetainedThroughEventID)
+}
+
 func TestOpen_RejectsVersionZeroExistingTables(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()

@@ -275,6 +275,70 @@ func TestRejoinRetainedIssueKeepsCrossProjectLinkLocal(t *testing.T) {
 	require.Len(t, events, 2)
 }
 
+func TestMoveRetainedTaskAfterHubAcceptsIt(t *testing.T) {
+	for _, published := range []bool{true, false} {
+		t.Run(fmt.Sprintf("previously-published-%t", published), func(t *testing.T) {
+			ctx := t.Context()
+			hub, projects := newMoveDeliveryHub(t, "source-project", "target-project")
+			spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor", "new-actor")
+			issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "old task", Author: "old-actor"})
+			require.NoError(t, err)
+			if published {
+				require.NoError(t, spoke.sync(t, 0))
+			}
+			rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull,claim")
+			require.NoError(t, config.DefaultFederationCredentialStore().StoreFederationCredential(ctx, projects[0].UID, spoke.credentials[projects[0].UID]))
+			if !published {
+				_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "edited"})
+				require.NoError(t, err)
+				require.NoError(t, spoke.sync(t, 0))
+			}
+			issue, err = spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/move", spoke.env.URL, spoke.projects[0].ID, issue.ShortID), strings.NewReader(fmt.Sprintf(`{"actor":"new-actor","to_project_uid":%q}`, projects[1].UID)))
+			require.NoError(t, err)
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("If-Match", fmt.Sprintf(`"rev-%d"`, issue.Revision))
+			resp, err := spoke.env.HTTP.Do(req)
+			require.NoError(t, err)
+			body, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			require.NoError(t, resp.Body.Close())
+			require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+			require.NoError(t, spoke.sync(t, 0))
+			require.NoError(t, spoke.sync(t, 1))
+			remote, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			require.Equal(t, projects[1].ID, remote.ProjectID)
+		})
+	}
+}
+
+func TestEditAfterRetainedCursorAdvanced(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "rejoin-project")
+	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
+	issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "old task", Author: "old-actor"})
+	require.NoError(t, err)
+	_, _, err = spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "other task", Author: "old-actor"})
+	require.NoError(t, err)
+	rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull,claim")
+	require.NoError(t, config.DefaultFederationCredentialStore().StoreFederationCredential(ctx, projects[0].UID, spoke.credentials[projects[0].UID]))
+	require.NoError(t, spoke.sync(t, 0))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, fmt.Sprintf("%s/api/v1/projects/%d/issues/%s", spoke.env.URL, spoke.projects[0].ID, issue.ShortID), strings.NewReader(`{"actor":"new-actor","title":"edited"}`))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := spoke.env.HTTP.Do(req)
+	require.NoError(t, err)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	require.NoError(t, spoke.sync(t, 0))
+	remote, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "edited", remote.Title)
+}
 func TestMoveUnpublishedRetainedTask(t *testing.T) {
 	ctx := t.Context()
 	hub, projects := newMoveDeliveryHub(t, "source-project", "target-project")
@@ -315,30 +379,4 @@ func TestMoveUnpublishedRetainedTask(t *testing.T) {
 	remote, err := hub.DB.IssueByUID(ctx, later.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.Equal(t, projects[1].ID, remote.ProjectID)
-}
-
-func TestEditAfterRetainedCursorAdvanced(t *testing.T) {
-	ctx := t.Context()
-	hub, projects := newMoveDeliveryHub(t, "rejoin-project")
-	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
-	issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "old task", Author: "old-actor"})
-	require.NoError(t, err)
-	_, _, err = spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "other task", Author: "old-actor"})
-	require.NoError(t, err)
-	rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull,claim")
-	require.NoError(t, config.DefaultFederationCredentialStore().StoreFederationCredential(ctx, projects[0].UID, spoke.credentials[projects[0].UID]))
-	require.NoError(t, spoke.sync(t, 0))
-	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, fmt.Sprintf("%s/api/v1/projects/%d/issues/%s", spoke.env.URL, spoke.projects[0].ID, issue.ShortID), strings.NewReader(`{"actor":"new-actor","title":"edited"}`))
-	require.NoError(t, err)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := spoke.env.HTTP.Do(req)
-	require.NoError(t, err)
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-	require.NoError(t, spoke.sync(t, 0))
-	remote, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	require.Equal(t, "edited", remote.Title)
 }

@@ -27,7 +27,7 @@ func TestFederationRetainedHistoryMigration(t *testing.T) {
 	t.Cleanup(func() { _ = admin.Close() })
 	_, err = admin.ExecContext(ctx, `ALTER TABLE retained_history_upgrade.federation_bindings DROP COLUMN retained_through_event_id`)
 	require.NoError(t, err)
-	_, err = admin.ExecContext(ctx, `UPDATE retained_history_upgrade.meta SET value='53' WHERE key='schema_version'`)
+	_, err = admin.ExecContext(ctx, `UPDATE retained_history_upgrade.meta SET value='54' WHERE key='schema_version'`)
 	require.NoError(t, err)
 	upgraded, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap})
 	require.NoError(t, err)
