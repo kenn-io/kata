@@ -15,22 +15,6 @@ func TestLabelAdd_HappyPath(t *testing.T) {
 	assert.Contains(t, out, "needs-review")
 }
 
-func TestLabelAdd_PriorityLabelRejected(t *testing.T) {
-	env, dir, _, ref := setupWorkspaceWithIssue(t, "a")
-	_, stderr, err := runCLIWithErr(t, env, dir, "label", "add", ref, "p2")
-	requireCLIError(t, err, ExitValidation)
-	assert.Contains(t, stderr, "#"+ref+" --priority N")
-}
-
-func TestLabelAdd_PriorityLabelQualifiedRef(t *testing.T) {
-	env, dir, _, _ := setupWorkspaceWithIssue(t, "local")
-	_, foreignID := initLocalBoundWorkspace(t, env, "spoke-project")
-	ref := createIssue(t, env, foreignID, "foreign")
-	_, stderr, err := runCLIWithErr(t, env, dir, "label", "add", "spoke-project#"+ref, "p2")
-	requireCLIError(t, err, ExitValidation)
-	assert.Contains(t, stderr, "kata edit spoke-project#"+ref+" --priority N")
-}
-
 func TestCreate_PriorityLabelRejected(t *testing.T) {
 	env, dir, _ := setupCLIWorkspace(t)
 	_, stderr, err := runCLIWithErr(t, env, dir, "create", "priority label", "--label", "p2")

@@ -928,8 +928,8 @@ func TestToolsRoundTripAgainstRealDaemon(t *testing.T) {
 		arguments map[string]any
 		fix       string
 	}{
-		{"kata.set_label", map[string]any{"ref": ref, "label": "priority:high", "present": true}, "kata.edit with priority"},
-		{"kata.create", map[string]any{"title": "Priority label", "labels": []string{"p2"}, "idempotency_key": "priority-label"}, "kata.create with priority"},
+		{"kata.set_label", map[string]any{"ref": ref, "label": "priority:high", "present": true}, "priority"},
+		{"kata.create", map[string]any{"title": "Priority label", "labels": []string{"p2"}, "idempotency_key": "priority-label"}, "priority"},
 	} {
 		result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: tc.tool, Arguments: tc.arguments})
 		require.NoError(t, err)

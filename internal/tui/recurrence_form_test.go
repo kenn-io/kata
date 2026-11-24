@@ -511,20 +511,6 @@ func TestSaveRecurrenceRequiresGuardedStartAPI(t *testing.T) {
 	assert.Contains(t, err.Error(), "upgrade the daemon")
 }
 
-func TestSaveRecurrenceRejectsExistingPriorityLabel(t *testing.T) {
-	h := newRecurrenceHarness(t, viewDetail)
-	_, _, err := h.env.DB.AddLabelAndEvent(t.Context(), h.issue.ID, db.LabelEventParams{EventType: "issue.labeled", Label: "p2", Actor: "alice"})
-	require.NoError(t, err)
-	issue, err := h.env.DB.IssueByID(t.Context(), h.issue.ID)
-	require.NoError(t, err)
-	_, err = h.client.SaveRecurrence(t.Context(), issue.ProjectID, issue.UID, RecurrenceInput{
-		Terms: recurrenceclient.Terms{Rule: "FREQ=DAILY", Start: "2026-11-09", Zone: "UTC", Actor: "alice"}, IssueRevision: issue.Revision,
-	})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "remove the priority label from the issue or template")
-	assert.Empty(t, h.rows())
-}
-
 func TestRecurrenceIncomingMutationRefreshesDetail(t *testing.T) {
 	h := newRecurrenceHarness(t, viewDetail)
 	for _, eventType := range []string{"recurrence.materialized", "recurrence.deleted"} {

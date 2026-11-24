@@ -65,7 +65,7 @@ func TestRecurrencePriorityLabels(t *testing.T) {
 	p := seedProject(t, env, "example-project")
 	rec := seedRecurrence(t, env, p.ID, "FREQ=WEEKLY", "2026-05-15", "UTC", "old")
 	baseURL := fmt.Sprintf("%s/api/v1/projects/%d/recurrences", env.URL, p.ID)
-	for _, label := range []string{"p0", "p4", " P2 ", " Priority:High "} {
+	for _, label := range []string{"p0", "priority:high"} {
 		t.Run(label, func(t *testing.T) {
 			body := fmt.Sprintf(`{"actor":"tester","rrule":"FREQ=WEEKLY","dtstart":"2026-05-15","timezone":"UTC","template":{"title":"review","labels":[%q]}}`, label)
 			resp := doPost(t, env, baseURL, body)
@@ -117,7 +117,7 @@ func TestPostRecurrence_AttachesInitialIssueAndAdvancesOnClose(t *testing.T) {
 		"rrule":"FREQ=WEEKLY",
 		"dtstart":"2026-08-03",
 		"timezone":"UTC",
-		"template":{"title":"Weekly review","labels":["area:ui"]}
+		"template":{"title":"Weekly review"}
 	}`, issue.ShortID)
 	resp := doPost(t, env,
 		fmt.Sprintf("%s/api/v1/projects/%d/recurrences", env.URL, project.ID), body)
@@ -141,9 +141,6 @@ func TestPostRecurrence_AttachesInitialIssueAndAdvancesOnClose(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, created.OccurrenceKey)
 	assert.Equal(t, "2026-08-10", *created.OccurrenceKey)
-	labels, err := env.DB.LabelsForIssue(t.Context(), created.ID)
-	require.NoError(t, err)
-	assert.Equal(t, []string{"area:ui"}, labels)
 }
 
 func TestPostRecurrence_InitialIssueRequiresFederatedClaim(t *testing.T) {

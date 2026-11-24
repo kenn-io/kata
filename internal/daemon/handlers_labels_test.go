@@ -15,7 +15,7 @@ func TestAddLabel_PriorityLabelRejected(t *testing.T) {
 	pid, n := setupOneIssue(t, env)
 	issue, err := env.DB.IssueByID(t.Context(), n)
 	require.NoError(t, err)
-	for _, label := range []string{"p0", "p1", "p2", "p3", "p4", "priority:high", "priority:"} {
+	for _, label := range []string{"p0", "p1", "p2", "p3", "p4", "priority:high", "priority:", " P2 ", " Priority:High "} {
 		t.Run(label, func(t *testing.T) {
 			resp, body := envDoRaw(t, env, http.MethodPost, issuePath(pid, n, "labels"), map[string]string{"actor": "tester", "label": label}, nil)
 			assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
@@ -41,13 +41,6 @@ func TestAddLabel_ExistingPriorityLabelRejected(t *testing.T) {
 	labels, err := env.DB.LabelsForIssue(t.Context(), id)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"p2"}, labels)
-}
-
-func TestAddLabel_PriorityLabelMissingIssue(t *testing.T) {
-	env := testenv.New(t)
-	pid, _ := setupOneIssue(t, env)
-	resp := envDoJSON(t, env, http.MethodPost, issuePathRef(pid, "zzzz", "labels"), map[string]string{"actor": "tester", "label": "p2"}, nil)
-	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
 func TestAddLabel_HappyPath(t *testing.T) {

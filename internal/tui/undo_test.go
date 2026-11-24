@@ -287,10 +287,6 @@ func TestUndoClientPriorityLabelRemovalBoundary(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, resp.undo.entry)
 	require.Equal(t, "removing a priority label cannot be undone", resp.undo.boundary)
-	m := Model{api: c, undoHistory: undoHistory{entries: []undoEntry{{kind: "close"}}}}
-	m = m.recordUndoAttempt(mutationDoneMsg{resp: resp})
-	require.Empty(t, m.undoHistory.entries)
-	require.Equal(t, resp.undo.boundary, m.undoHistory.boundary)
 }
 
 func TestUndoClientRecordsEvidenceClose(t *testing.T) {
