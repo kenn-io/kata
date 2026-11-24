@@ -1,8 +1,10 @@
 <script lang="ts">
+  import CircleAlertIcon from '@lucide/svelte/icons/circle-alert'
   import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw'
   import {
     Avatar,
     Button,
+    Notice,
     SearchInput,
     SelectDropdown,
     SettingsSection,
@@ -11,7 +13,6 @@
 
   import type { TokenOut } from '../lib/api/generated'
   import { relativeTime, shortDate } from '../lib/kata/dates'
-  import SettingsAlert from './SettingsAlert.svelte'
 
   type StateFilter = 'all' | TokenOut['state']
   type ScopeFilter = 'all' | 'scoped' | 'unscoped'
@@ -72,6 +73,8 @@
   }
 </script>
 
+{#snippet errorIcon()}<CircleAlertIcon />{/snippet}
+
 <div class="credential-audit">
   <SettingsSection title="Credentials">
     <div class="title-action">
@@ -118,7 +121,7 @@
     {/if}
 
     {#if error}
-      <SettingsAlert>{error}</SettingsAlert>
+      <Notice variant="inline" live tone="error" icon={errorIcon} message={error} />
     {:else if loading && tokens.length === 0}
       <p class="audit-message" role="status">Loading credentials…</p>
     {:else if tokens.length === 0}

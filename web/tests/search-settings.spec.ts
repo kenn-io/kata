@@ -61,7 +61,7 @@ test('Settings keeps status colors, spacing, and title alignment consistent', as
       const titleBox = (await title.boundingBox())!
       positions.push(titleBox.y)
       const secondary = page
-        .locator('.kit-search-by-meaning__line, [role="progressbar"], .search-row [role="alert"]')
+        .locator('.kit-search-by-meaning__line, [role="progressbar"], .search-row .kit-notice')
         .first()
       if (await secondary.count()) {
         // The row names its status under the section title; details sit
@@ -82,7 +82,7 @@ test('Settings keeps status colors, spacing, and title alignment consistent', as
       )
     }
     if (patch.job?.state === 'failed' || patch.indexing?.failed) {
-      const alert = page.getByRole('alert')
+      const alert = page.locator('.search-row .kit-notice')
       await expect(alert).toBeVisible()
       const colors = await alert.evaluate((element) => {
         const probe = document.createElement('span')

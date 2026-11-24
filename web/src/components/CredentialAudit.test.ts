@@ -130,7 +130,9 @@ describe('CredentialAudit', () => {
     expect(screen.getByRole('status').textContent).toContain('This server has no credentials.')
 
     await view.rerender({ error: "Couldn't load credentials." })
-    expect(screen.getByRole('alert').textContent?.trim()).toBe("Couldn't load credentials.")
+    const alert = screen.getByRole('alert')
+    expect(alert.dataset.tone).toBe('error')
+    expect(within(alert).getByText("Couldn't load credentials.")).not.toBeNull()
   })
 })
 

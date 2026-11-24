@@ -1,4 +1,5 @@
 <script lang="ts">
+  import CircleAlertIcon from '@lucide/svelte/icons/circle-alert'
   import PlusIcon from '@lucide/svelte/icons/plus'
   import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw'
   import {
@@ -6,6 +7,7 @@
     Button,
     Checkbox,
     Disclosure,
+    Notice,
     SelectDropdown,
     SettingsSection,
   } from '@kenn-io/kit-ui'
@@ -24,7 +26,6 @@
     type UIProject,
   } from '../lib/api/generated'
   import type { MutationContext, MutationResult } from '../lib/mutations/controller'
-  import SettingsAlert from './SettingsAlert.svelte'
 
   interface Props {
     projects: readonly UIProject[]
@@ -261,8 +262,10 @@
   }
 </script>
 
+{#snippet errorIcon()}<CircleAlertIcon />{/snippet}
+
 <div class="access-management">
-  {#if message}<SettingsAlert>{message}</SettingsAlert>{/if}
+  {#if message}<Notice variant="inline" live tone="error" icon={errorIcon} {message} />{/if}
 
   <SettingsSection title="Teams">
     <div class="title-action">
@@ -277,7 +280,9 @@
       </Button>
     </div>
 
-    {#if teamsError}<SettingsAlert>{teamsError}</SettingsAlert>{/if}
+    {#if teamsError}
+      <Notice variant="inline" live tone="error" icon={errorIcon} message={teamsError} />
+    {/if}
     {#if loading && teams.length === 0}
       <p class="note" role="status">Loading teams…</p>
     {:else if teams.length === 0}
@@ -306,7 +311,13 @@
               {:else if teamLoading}
                 <p class="note" role="status">Loading members…</p>
               {:else if membersError}
-                <SettingsAlert>{membersError}</SettingsAlert>
+                <Notice
+                  variant="inline"
+                  live
+                  tone="error"
+                  icon={errorIcon}
+                  message={membersError}
+                />
               {:else}
                 <ul class="members" aria-label="Team members">
                   {#each members as account (account)}
@@ -417,7 +428,9 @@
   </SettingsSection>
 
   <SettingsSection title="Project visibility" description="Server owners see every project.">
-    {#if policyError}<SettingsAlert>{policyError}</SettingsAlert>{/if}
+    {#if policyError}
+      <Notice variant="inline" live tone="error" icon={errorIcon} message={policyError} />
+    {/if}
     {#if projectOptions.length === 0}
       <p class="note">No projects yet.</p>
     {:else}

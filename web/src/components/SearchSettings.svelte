@@ -1,9 +1,15 @@
 <script lang="ts">
-  import { SearchByMeaningRow, SettingsSection, type SearchByMeaningState } from '@kenn-io/kit-ui'
+  import CircleAlertIcon from '@lucide/svelte/icons/circle-alert'
+  import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert'
+  import {
+    Notice,
+    SearchByMeaningRow,
+    SettingsSection,
+    type SearchByMeaningState,
+  } from '@kenn-io/kit-ui'
   import { untrack } from 'svelte'
 
   import { orvalFetch } from '../lib/api/client'
-  import SettingsAlert from './SettingsAlert.svelte'
   import {
     getLocalEmbeddings,
     getRestartLocalEmbeddingsUrl,
@@ -265,6 +271,10 @@
   }
 </script>
 
+{#snippet errorIcon()}<CircleAlertIcon />{/snippet}
+
+{#snippet warningIcon()}<TriangleAlertIcon />{/snippet}
+
 <div class="search-settings">
   <SettingsSection title="Search by meaning">
     {#if row}
@@ -281,18 +291,24 @@
           />
         </fieldset>
         {#if failure}
-          <SettingsAlert>{failure}</SettingsAlert>
+          <Notice variant="inline" live tone="error" icon={errorIcon} message={failure} />
         {/if}
         {#if indexingFailed}
-          <SettingsAlert tone="warning">
+          <Notice variant="inline" live tone="warning" icon={warningIcon}>
             Couldn't prepare some tasks. Kata keeps trying; run <code>kata health --json</code> for details.
-          </SettingsAlert>
+          </Notice>
         {/if}
       </div>
     {:else if loading}
       <p class="settings-note" role="status">Loading…</p>
     {:else}
-      <SettingsAlert>Couldn't load search by meaning.</SettingsAlert>
+      <Notice
+        variant="inline"
+        live
+        tone="error"
+        icon={errorIcon}
+        message="Couldn't load search by meaning."
+      />
     {/if}
   </SettingsSection>
 </div>
@@ -352,7 +368,7 @@
       :global(.kit-search-by-meaning__progress),
       :global(.kit-search-by-meaning__line)
     )
-    + :global(.settings-alert) {
+    + :global(.kit-notice) {
     margin-top: var(--space-2);
   }
 </style>

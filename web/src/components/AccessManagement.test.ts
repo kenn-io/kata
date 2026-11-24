@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { setGeneratedFetch } from '../lib/api/client'
@@ -105,7 +105,11 @@ describe('AccessManagement', () => {
     await screen.findByText("Couldn't load project visibility.")
     await fireEvent.click(await screen.findByText('example-team'))
     await screen.findByText("Couldn't load team members.")
-    expect(screen.getByText("Couldn't load project visibility.")).not.toBeNull()
+    expect(
+      screen
+        .getAllByRole('alert')
+        .map((alert) => within(alert).getByText(/^Couldn't load/).textContent),
+    ).toEqual(["Couldn't load team members.", "Couldn't load project visibility."])
     await fireEvent.click(screen.getByRole('button', { name: 'Refresh teams' }))
     await waitFor(() => expect(screen.getByText("Couldn't load team members.")).not.toBeNull())
     expect(screen.getByText("Couldn't load project visibility.")).not.toBeNull()

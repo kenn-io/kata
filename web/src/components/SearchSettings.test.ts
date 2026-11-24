@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/svelte'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 
 import { setGeneratedFetch } from '../lib/api/client'
@@ -285,7 +285,7 @@ describe('SearchSettings', () => {
       renderSettings({ canAdministerDaemon, remoteHost, originStable })
       await settle()
       await vi.advanceTimersByTimeAsync(120_000)
-      expect(screen.getByRole('alert').textContent?.trim()).toBe(message)
+      expect(within(screen.getByRole('alert')).getByText(message)).not.toBeNull()
       const count = read.mock.calls.length
       recovery = 'progress'
       await vi.advanceTimersByTimeAsync(2000)
@@ -414,6 +414,27 @@ describe('SearchSettings', () => {
     expect(screen.getByText('Turning on', { exact: true })).not.toBeNull()
     expect(screen.queryByText(/Indexing 0 of 0/)).toBeNull()
     expect(screen.queryByRole('progressbar')).toBeNull()
+  })
+
+  test('announces failed task preparation as a warning', async () => {
+    vi.useFakeTimers()
+    setGeneratedFetch(
+      vi.fn(async () =>
+        Response.json(
+          status({
+            can_change: false,
+            provider: 'built_in',
+            download_bytes: 0,
+            indexing: { done: 1, total: 2, failed: true },
+          }),
+        ),
+      ),
+    )
+    renderSettings({ canAdministerDaemon: false })
+    await settle()
+    expect(screen.queryByRole('alert')).toBeNull()
+    const warning = screen.getByText(/Couldn't prepare some tasks/).closest('[role="status"]')
+    expect((warning as HTMLElement | null)?.dataset.tone).toBe('warning')
   })
 
   test.each([undefined, 'daemon.example'])(
