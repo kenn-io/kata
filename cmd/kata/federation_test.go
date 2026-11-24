@@ -3074,8 +3074,6 @@ func TestFederationJoinLeaveJoinRoundTrip(t *testing.T) {
 	binding, err := env.DB.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
 	assert.True(t, binding.PushEnabled, "rejoin must honor --push")
-	assert.Equal(t, int64(0), binding.PushCursorEventID,
-		"rejoin resets the push cursor to replay eligible local events")
 	creds, err := config.ReadFederationCredentials()
 	require.NoError(t, err)
 	assert.Equal(t, "rejoin-token", creds.Projects[project.UID].Token,

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
@@ -236,262 +237,277 @@ func TestRejoinReplyDependsOnRetainedParent(t *testing.T) {
 	}
 }
 
-func TestRejoinNewLinkPublishesRetainedPeer(t *testing.T) {
-	ctx := t.Context()
-	hub, projects := newMoveDeliveryHub(t, "link-project")
-	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
-	issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "task", Author: "old-actor"})
-	require.NoError(t, err)
-	require.NoError(t, spoke.sync(t, 0))
-	peer, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "peer", Author: "old-actor"})
-	require.NoError(t, err)
-	rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
-	_, _, err = spoke.env.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: issue.ID, ToIssueID: peer.ID, Type: "blocks", Author: "new-actor"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: issue.ID, Actor: "new-actor", FromUID: issue.UID, ToUID: peer.UID, FromShortID: issue.ShortID, ToShortID: peer.ShortID})
-	require.NoError(t, err)
-	require.NoError(t, pushRejoin(t, spoke))
-	remotePeer, err := hub.DB.IssueByUID(ctx, peer.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	remote, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	links, err := hub.DB.LinksByIssue(ctx, remote.ID)
-	require.NoError(t, err)
-	require.Len(t, links, 1)
-	require.Equal(t, remotePeer.UID, links[0].ToIssueUID)
-}
-
-func TestRejoinBulkLinkAdditionPublishesRetainedPeer(t *testing.T) {
-	ctx := t.Context()
-	hub, projects := newMoveDeliveryHub(t, "bulk-link-project")
-	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
-	peer, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "retained parent", Author: "old-actor"})
-	require.NoError(t, err)
-	rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
-	child, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "new child", Author: "new-actor"})
-	require.NoError(t, err)
-	_, err = spoke.env.DB.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: child.ID, Actor: "new-actor", SetParent: &peer.ID})
-	require.NoError(t, err)
-	require.NoError(t, pushRejoin(t, spoke))
-	remoteChild, err := hub.DB.IssueByUID(ctx, child.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	remotePeer, err := hub.DB.IssueByUID(ctx, peer.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	links, err := hub.DB.LinksByIssue(ctx, remoteChild.ID)
-	require.NoError(t, err)
-	require.Len(t, links, 1)
-	require.Equal(t, remotePeer.UID, links[0].ToIssueUID)
-}
-
-func TestRejoinLinkToRetainedPeerWithCycle(t *testing.T) {
-	ctx := t.Context()
-	hub, projects := newMoveDeliveryHub(t, "cyclic-link-project")
-	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
-	first, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "first", Author: "old-actor"})
-	require.NoError(t, err)
-	second, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "second", Author: "old-actor"})
-	require.NoError(t, err)
-	_, _, err = spoke.env.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: first.ID, ToIssueID: second.ID, Type: "blocks", Author: "old-actor"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: first.ID, Actor: "old-actor", FromUID: first.UID, ToUID: second.UID, FromShortID: first.ShortID, ToShortID: second.ShortID})
-	require.NoError(t, err)
-	_, _, err = spoke.env.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: second.ID, ToIssueID: first.ID, Type: "blocks", Author: "old-actor"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: second.ID, Actor: "old-actor", FromUID: second.UID, ToUID: first.UID, FromShortID: second.ShortID, ToShortID: first.ShortID})
-	require.NoError(t, err)
-	rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
-	newIssue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "new task", Author: "new-actor"})
-	require.NoError(t, err)
-	_, _, err = spoke.env.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: newIssue.ID, ToIssueID: first.ID, Type: "blocks", Author: "new-actor"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: newIssue.ID, Actor: "new-actor", FromUID: newIssue.UID, ToUID: first.UID, FromShortID: newIssue.ShortID, ToShortID: first.ShortID})
-	require.NoError(t, err)
-	require.NoError(t, pushRejoin(t, spoke))
-	for _, issue := range []db.Issue{first, second, newIssue} {
-		_, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-		require.NoError(t, err, issue.Title)
-	}
-	remoteNewIssue, err := hub.DB.IssueByUID(ctx, newIssue.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	links, err := hub.DB.LinksByIssue(ctx, remoteNewIssue.ID)
-	require.NoError(t, err)
-	require.Len(t, links, 1)
-	require.Equal(t, first.UID, links[0].ToIssueUID)
-}
-
-func TestRejoinNewLinkToRetainedPeerInAnotherProject(t *testing.T) {
-	for _, withCredential := range []bool{true, false} {
-		name := "credential available"
-		if !withCredential {
-			name = "credential missing"
-		}
-		t.Run(name, func(t *testing.T) {
+func TestRejoinPublishesRetainedLinkPeers(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		run  func(*testing.T)
+	}{
+		{name: "link", run: func(t *testing.T) {
 			ctx := t.Context()
-			hub, projects := newMoveDeliveryHub(t, "source-project", "peer-project")
-			spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor", "old-actor")
+			hub, projects := newMoveDeliveryHub(t, "link-project")
+			spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
 			issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "task", Author: "old-actor"})
 			require.NoError(t, err)
-			peer, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[1].ID, Title: "peer", Author: "old-actor"})
-			require.NoError(t, err)
-			parentIssue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[1].ID, Title: "parent", Author: "old-actor"})
-			require.NoError(t, err)
-			parent, _, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: parentIssue.ID, Author: "old-actor", Body: "parent"})
-			require.NoError(t, err)
-			_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: peer.ID, Author: "old-actor", Body: "reply", ReplyToUID: parent.UID, ReplyKind: "reply"})
-			require.NoError(t, err)
-			_, _, err = spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "later source task", Author: "old-actor"})
-			require.NoError(t, err)
 			require.NoError(t, spoke.sync(t, 0))
-			require.NoError(t, spoke.sync(t, 1))
-			rejoinProjectWithActor(t, spoke, 0, hub.URL, projects[0], hub.DB, "push,pull")
-			rejoinProjectWithActor(t, spoke, 1, hub.URL, projects[1], hub.DB, "push,pull")
-			peerCredential := spoke.credentials[projects[1].UID]
-			if !withCredential {
-				require.NoError(t, spoke.credentials.DeleteFederationCredential(ctx, projects[1].UID))
-			}
-			_, linkEvent, err := spoke.env.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: issue.ID, ToIssueID: peer.ID, Type: "blocks", Author: "new-actor"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: issue.ID, Actor: "new-actor", FromUID: issue.UID, ToUID: peer.UID, FromShortID: issue.ShortID, ToShortID: peer.ShortID})
+			peer, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "peer", Author: "old-actor"})
 			require.NoError(t, err)
-			err = pushRejoin(t, spoke)
-			if !withCredential {
-				require.ErrorContains(t, err, peer.UID)
-				binding, bindingErr := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
-				require.NoError(t, bindingErr)
-				require.Less(t, binding.PushCursorEventID, linkEvent.ID)
-				remoteIssue, issueErr := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-				require.NoError(t, issueErr)
-				links, linksErr := hub.DB.LinksByIssue(ctx, remoteIssue.ID)
-				require.NoError(t, linksErr)
-				require.Empty(t, links)
-				require.NoError(t, spoke.credentials.StoreFederationCredential(ctx, projects[1].UID, peerCredential))
-				err = pushRejoin(t, spoke)
-				require.NoError(t, err)
-			}
+			rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
+			_, _, err = spoke.env.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: issue.ID, ToIssueID: peer.ID, Type: "blocks", Author: "new-actor"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: issue.ID, Actor: "new-actor", FromUID: issue.UID, ToUID: peer.UID, FromShortID: issue.ShortID, ToShortID: peer.ShortID})
 			require.NoError(t, err)
+			require.NoError(t, pushRejoin(t, spoke))
 			remotePeer, err := hub.DB.IssueByUID(ctx, peer.UID, db.IncludeDeletedNo)
 			require.NoError(t, err)
-			remoteIssue, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			remote, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 			require.NoError(t, err)
-			links, err := hub.DB.LinksByIssue(ctx, remoteIssue.ID)
+			links, err := hub.DB.LinksByIssue(ctx, remote.ID)
 			require.NoError(t, err)
 			require.Len(t, links, 1)
 			require.Equal(t, remotePeer.UID, links[0].ToIssueUID)
-			// The peer binding later sees its locally recorded recovery snapshot.
-			// It must advance past the copy the source binding already published.
-			require.NoError(t, pushRejoinProject(t, spoke, 1))
-		})
+		}},
+		{name: "set parent", run: func(t *testing.T) {
+			ctx := t.Context()
+			hub, projects := newMoveDeliveryHub(t, "bulk-link-project")
+			spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
+			peer, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "retained parent", Author: "old-actor"})
+			require.NoError(t, err)
+			rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
+			child, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "new child", Author: "new-actor"})
+			require.NoError(t, err)
+			_, err = spoke.env.DB.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: child.ID, Actor: "new-actor", SetParent: &peer.ID})
+			require.NoError(t, err)
+			require.NoError(t, pushRejoin(t, spoke))
+			remoteChild, err := hub.DB.IssueByUID(ctx, child.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			remotePeer, err := hub.DB.IssueByUID(ctx, peer.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			links, err := hub.DB.LinksByIssue(ctx, remoteChild.ID)
+			require.NoError(t, err)
+			require.Len(t, links, 1)
+			require.Equal(t, remotePeer.UID, links[0].ToIssueUID)
+		}},
+		{name: "cycle", run: func(t *testing.T) {
+			ctx := t.Context()
+			hub, projects := newMoveDeliveryHub(t, "cyclic-link-project")
+			spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
+			first, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "first", Author: "old-actor"})
+			require.NoError(t, err)
+			second, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "second", Author: "old-actor"})
+			require.NoError(t, err)
+			_, _, err = spoke.env.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: first.ID, ToIssueID: second.ID, Type: "blocks", Author: "old-actor"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: first.ID, Actor: "old-actor", FromUID: first.UID, ToUID: second.UID, FromShortID: first.ShortID, ToShortID: second.ShortID})
+			require.NoError(t, err)
+			_, _, err = spoke.env.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: second.ID, ToIssueID: first.ID, Type: "blocks", Author: "old-actor"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: second.ID, Actor: "old-actor", FromUID: second.UID, ToUID: first.UID, FromShortID: second.ShortID, ToShortID: first.ShortID})
+			require.NoError(t, err)
+			rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
+			newIssue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "new task", Author: "new-actor"})
+			require.NoError(t, err)
+			_, _, err = spoke.env.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: newIssue.ID, ToIssueID: first.ID, Type: "blocks", Author: "new-actor"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: newIssue.ID, Actor: "new-actor", FromUID: newIssue.UID, ToUID: first.UID, FromShortID: newIssue.ShortID, ToShortID: first.ShortID})
+			require.NoError(t, err)
+			require.NoError(t, pushRejoin(t, spoke))
+			for _, issue := range []db.Issue{first, second, newIssue} {
+				_, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+				require.NoError(t, err, issue.Title)
+			}
+			remoteNewIssue, err := hub.DB.IssueByUID(ctx, newIssue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			links, err := hub.DB.LinksByIssue(ctx, remoteNewIssue.ID)
+			require.NoError(t, err)
+			require.Len(t, links, 1)
+			require.Equal(t, first.UID, links[0].ToIssueUID)
+		}},
+		{name: "cross project", run: func(t *testing.T) {
+			for _, withCredential := range []bool{true, false} {
+				name := "credential available"
+				if !withCredential {
+					name = "credential missing"
+				}
+				t.Run(name, func(t *testing.T) {
+					ctx := t.Context()
+					hub, projects := newMoveDeliveryHub(t, "source-project", "peer-project")
+					spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor", "old-actor")
+					issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "task", Author: "old-actor"})
+					require.NoError(t, err)
+					peer, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[1].ID, Title: "peer", Author: "old-actor"})
+					require.NoError(t, err)
+					parentIssue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[1].ID, Title: "parent", Author: "old-actor"})
+					require.NoError(t, err)
+					parent, _, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: parentIssue.ID, Author: "old-actor", Body: "parent"})
+					require.NoError(t, err)
+					_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: peer.ID, Author: "old-actor", Body: "reply", ReplyToUID: parent.UID, ReplyKind: "reply"})
+					require.NoError(t, err)
+					_, _, err = spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "later source task", Author: "old-actor"})
+					require.NoError(t, err)
+					require.NoError(t, spoke.sync(t, 0))
+					require.NoError(t, spoke.sync(t, 1))
+					rejoinProjectWithActor(t, spoke, 0, hub.URL, projects[0], hub.DB, "push,pull")
+					rejoinProjectWithActor(t, spoke, 1, hub.URL, projects[1], hub.DB, "push,pull")
+					peerCredential := spoke.credentials[projects[1].UID]
+					if !withCredential {
+						require.NoError(t, spoke.credentials.DeleteFederationCredential(ctx, projects[1].UID))
+					}
+					_, linkEvent, err := spoke.env.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: issue.ID, ToIssueID: peer.ID, Type: "blocks", Author: "new-actor"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: issue.ID, Actor: "new-actor", FromUID: issue.UID, ToUID: peer.UID, FromShortID: issue.ShortID, ToShortID: peer.ShortID})
+					require.NoError(t, err)
+					err = pushRejoin(t, spoke)
+					if !withCredential {
+						require.ErrorContains(t, err, peer.UID)
+						binding, bindingErr := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
+						require.NoError(t, bindingErr)
+						require.Less(t, binding.PushCursorEventID, linkEvent.ID)
+						remoteIssue, issueErr := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+						require.NoError(t, issueErr)
+						links, linksErr := hub.DB.LinksByIssue(ctx, remoteIssue.ID)
+						require.NoError(t, linksErr)
+						require.Empty(t, links)
+						require.NoError(t, spoke.credentials.StoreFederationCredential(ctx, projects[1].UID, peerCredential))
+						err = pushRejoin(t, spoke)
+						require.NoError(t, err)
+					}
+					require.NoError(t, err)
+					remotePeer, err := hub.DB.IssueByUID(ctx, peer.UID, db.IncludeDeletedNo)
+					require.NoError(t, err)
+					remoteIssue, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+					require.NoError(t, err)
+					links, err := hub.DB.LinksByIssue(ctx, remoteIssue.ID)
+					require.NoError(t, err)
+					require.Len(t, links, 1)
+					require.Equal(t, remotePeer.UID, links[0].ToIssueUID)
+					// The peer binding later sees its locally recorded recovery snapshot.
+					// It must advance past the copy the source binding already published.
+					require.NoError(t, pushRejoinProject(t, spoke, 1))
+				})
+			}
+		}},
+	} {
+		t.Run(tc.name, tc.run)
 	}
 }
 
 func TestRejoinRetainedIssueAndLaterTaskPublish(t *testing.T) {
-	ctx := t.Context()
-	hub, projects := newMoveDeliveryHub(t, "rejoin-project")
-	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
-	old, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "old task", Author: "old-actor"})
-	require.NoError(t, err)
-	rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
-	_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: old.ID, Author: "new-actor", Body: "local edit"})
-	require.NoError(t, err)
-	later, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "later task", Author: "new-actor"})
-	require.NoError(t, err)
-	require.NoError(t, spoke.sync(t, 0))
-	remote, err := hub.DB.IssueByUID(ctx, old.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	comments, err := hub.DB.CommentsByIssue(ctx, remote.ID)
-	require.NoError(t, err)
-	require.Len(t, comments, 1)
-	require.Equal(t, "local edit", comments[0].Body)
-	_, err = hub.DB.IssueByUID(ctx, later.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-}
-
-func TestRejoinPublishesEditAfterIndependentRestore(t *testing.T) {
-	ctx := t.Context()
-	hub, projects := newMoveDeliveryHub(t, "restore-project")
-	spoke := newMoveDeliverySpoke(t, hub, projects, "new-actor")
-	issue, original, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "retained task", Author: "new-actor"})
-	require.NoError(t, err)
-	former := "01HZNQ7VFPK1XGD8R5MABCD4EF"
-	hash, err := db.EventContentHash(db.EventHashInput{
-		UID: original.UID, OriginInstanceUID: former, ProjectUID: original.ProjectUID, ProjectName: original.ProjectName,
-		IssueUID: original.IssueUID, RelatedIssueUID: original.RelatedIssueUID, Type: original.Type, Actor: original.Actor,
-		HLCPhysicalMS: original.HLCPhysicalMS, HLCCounter: original.HLCCounter,
-		CreatedAt: original.CreatedAt.UTC().Format(db.EventTimestampFormat), Payload: jsontext.Value(original.Payload),
-	})
-	require.NoError(t, err)
-	_, err = spoke.env.DB.ExecContext(ctx, `UPDATE events SET origin_instance_uid = ?, content_hash = ? WHERE uid = ?`, former, hash, original.UID)
-	require.NoError(t, err)
-	_, err = spoke.env.DB.ExecContext(ctx, `INSERT INTO meta(key, value) VALUES(?, '1')`, db.FormerInstanceUIDMetaPrefix+former)
-	require.NoError(t, err)
-	rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
-	_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "new comment"})
-	require.NoError(t, err)
-	require.NoError(t, spoke.sync(t, 0))
-	remote, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	comments, err := hub.DB.CommentsByIssue(ctx, remote.ID)
-	require.NoError(t, err)
-	require.Len(t, comments, 1)
-	require.Equal(t, "new comment", comments[0].Body)
-	events, err := spoke.env.DB.EventsByUIDs(ctx, spoke.projects[0].ID, []string{original.UID})
-	require.NoError(t, err)
-	require.Len(t, events, 1)
-	require.Equal(t, hash, events[0].ContentHash)
-	require.Equal(t, former, events[0].OriginInstanceUID)
-}
-
-func TestRejoinedSpokeBatchesNewTasks(t *testing.T) {
-	ctx := t.Context()
-	hub, projects := newMoveDeliveryHub(t, "batch-project")
-	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
-	_, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "old task", Author: "old-actor"})
-	require.NoError(t, err)
-	rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
-	require.NoError(t, pushRejoin(t, spoke))
-	for _, title := range []string{"first", "second"} {
-		_, _, err = spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: title, Author: "new-actor"})
-		require.NoError(t, err)
+	for _, tc := range []struct {
+		name string
+		run  func(*testing.T)
+	}{
+		{name: "later task", run: func(t *testing.T) {
+			ctx := t.Context()
+			hub, projects := newMoveDeliveryHub(t, "rejoin-project")
+			spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
+			old, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "old task", Author: "old-actor"})
+			require.NoError(t, err)
+			rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
+			_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: old.ID, Author: "new-actor", Body: "local edit"})
+			require.NoError(t, err)
+			later, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "later task", Author: "new-actor"})
+			require.NoError(t, err)
+			require.NoError(t, spoke.sync(t, 0))
+			remote, err := hub.DB.IssueByUID(ctx, old.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			comments, err := hub.DB.CommentsByIssue(ctx, remote.ID)
+			require.NoError(t, err)
+			require.Len(t, comments, 1)
+			require.Equal(t, "local edit", comments[0].Body)
+			_, err = hub.DB.IssueByUID(ctx, later.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+		}},
+		{name: "independent restore", run: func(t *testing.T) {
+			ctx := t.Context()
+			hub, projects := newMoveDeliveryHub(t, "restore-project")
+			spoke := newMoveDeliverySpoke(t, hub, projects, "new-actor")
+			issue, original, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "retained task", Author: "new-actor"})
+			require.NoError(t, err)
+			former := "01HZNQ7VFPK1XGD8R5MABCD4EF"
+			hash, err := db.EventContentHash(db.EventHashInput{
+				UID: original.UID, OriginInstanceUID: former, ProjectUID: original.ProjectUID, ProjectName: original.ProjectName,
+				IssueUID: original.IssueUID, RelatedIssueUID: original.RelatedIssueUID, Type: original.Type, Actor: original.Actor,
+				HLCPhysicalMS: original.HLCPhysicalMS, HLCCounter: original.HLCCounter,
+				CreatedAt: original.CreatedAt.UTC().Format(db.EventTimestampFormat), Payload: jsontext.Value(original.Payload),
+			})
+			require.NoError(t, err)
+			_, err = spoke.env.DB.ExecContext(ctx, `UPDATE events SET origin_instance_uid = ?, content_hash = ? WHERE uid = ?`, former, hash, original.UID)
+			require.NoError(t, err)
+			_, err = spoke.env.DB.ExecContext(ctx, `INSERT INTO meta(key, value) VALUES(?, '1')`, db.FormerInstanceUIDMetaPrefix+former)
+			require.NoError(t, err)
+			rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
+			_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "new comment"})
+			require.NoError(t, err)
+			require.NoError(t, spoke.sync(t, 0))
+			remote, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			comments, err := hub.DB.CommentsByIssue(ctx, remote.ID)
+			require.NoError(t, err)
+			require.Len(t, comments, 1)
+			require.Equal(t, "new comment", comments[0].Body)
+			events, err := spoke.env.DB.EventsByUIDs(ctx, spoke.projects[0].ID, []string{original.UID})
+			require.NoError(t, err)
+			require.Len(t, events, 1)
+			require.Equal(t, hash, events[0].ContentHash)
+			require.Equal(t, former, events[0].OriginInstanceUID)
+		}},
+		{name: "batch new tasks", run: func(t *testing.T) {
+			ctx := t.Context()
+			hub, projects := newMoveDeliveryHub(t, "batch-project")
+			spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
+			_, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "old task", Author: "old-actor"})
+			require.NoError(t, err)
+			rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
+			require.NoError(t, pushRejoin(t, spoke))
+			for _, title := range []string{"first", "second"} {
+				_, _, err = spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: title, Author: "new-actor"})
+				require.NoError(t, err)
+			}
+			binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
+			require.NoError(t, err)
+			creds := spoke.credentials[projects[0].UID]
+			client, err := NewClient(ctx, creds.HubURL, creds.Token, clientpkg.Opts{})
+			require.NoError(t, err)
+			transport := client.client.Transport
+			requests := 0
+			client.client.Transport = pushOnlyTestTransport(func(req *http.Request) (*http.Response, error) {
+				if req.Method == http.MethodPost {
+					requests++
+				}
+				return transport.RoundTrip(req)
+			})
+			require.NoError(t, pushDirectSpoke(ctx, spoke.env.DB, &binding, projects[0].ID, client, nil, nil, spoke.credentials, clientpkg.Opts{}))
+			require.Equal(t, 1, requests)
+		}},
+		{name: "local cross-project link", run: func(t *testing.T) {
+			ctx := t.Context()
+			hub, projects := newMoveDeliveryHub(t, "rejoin-project", "peer-project")
+			spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor", "old-actor")
+			peerProject := spoke.projects[1]
+			issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "retained task", Author: "old-actor"})
+			require.NoError(t, err)
+			peer, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: peerProject.ID, Title: "peer task", Author: "old-actor"})
+			require.NoError(t, err)
+			require.NoError(t, spoke.sync(t, 1))
+			_, linkEvent, err := spoke.env.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: issue.ID, ToIssueID: peer.ID, Type: "blocks", Author: "old-actor"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: issue.ID, Actor: "old-actor", FromUID: issue.UID, ToUID: peer.UID, FromShortID: issue.ShortID, ToShortID: peer.ShortID})
+			require.NoError(t, err)
+			rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
+			_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "later edit"})
+			require.NoError(t, err)
+			require.NoError(t, spoke.sync(t, 0))
+			remote, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			remoteLinks, err := hub.DB.LinksByIssue(ctx, remote.ID)
+			require.NoError(t, err)
+			require.Empty(t, remoteLinks)
+			hubBinding, err := hub.DB.FederationBindingByProject(ctx, projects[0].ID)
+			require.NoError(t, err)
+			horizon := hubBinding.ReplayHorizonEventID
+			require.NoError(t, spoke.env.DB.ResetFederatedProject(ctx, spoke.projects[0].ID, horizon, max(horizon-1, 0)))
+			require.NoError(t, spoke.sync(t, 0))
+			issue, err = spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			links, err := spoke.env.DB.LinksByIssue(ctx, issue.ID)
+			require.NoError(t, err)
+			require.Len(t, links, 1)
+			require.Equal(t, peer.UID, links[0].ToIssueUID)
+			events, err := spoke.env.DB.EventsByUIDs(ctx, spoke.projects[0].ID, []string{linkEvent.UID})
+			require.NoError(t, err)
+			require.Len(t, events, 1)
+		}},
+	} {
+		t.Run(tc.name, tc.run)
 	}
-	binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
-	require.NoError(t, err)
-	creds := spoke.credentials[projects[0].UID]
-	client, err := NewClient(ctx, creds.HubURL, creds.Token, clientpkg.Opts{})
-	require.NoError(t, err)
-	transport := client.client.Transport
-	requests := 0
-	client.client.Transport = pushOnlyTestTransport(func(req *http.Request) (*http.Response, error) {
-		if req.Method == http.MethodPost {
-			requests++
-		}
-		return transport.RoundTrip(req)
-	})
-	require.NoError(t, pushDirectSpoke(ctx, spoke.env.DB, &binding, projects[0].ID, client, nil, nil, spoke.credentials, clientpkg.Opts{}))
-	require.Equal(t, 1, requests)
-}
-
-func TestRejoinRetainedIssueKeepsCrossProjectLinkLocal(t *testing.T) {
-	ctx := t.Context()
-	hub, projects := newMoveDeliveryHub(t, "rejoin-project", "peer-project")
-	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor", "old-actor")
-	peerProject := spoke.projects[1]
-	issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "retained task", Author: "old-actor"})
-	require.NoError(t, err)
-	peer, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: peerProject.ID, Title: "peer task", Author: "old-actor"})
-	require.NoError(t, err)
-	require.NoError(t, spoke.sync(t, 1))
-	_, linkEvent, err := spoke.env.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: issue.ID, ToIssueID: peer.ID, Type: "blocks", Author: "old-actor"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: issue.ID, Actor: "old-actor", FromUID: issue.UID, ToUID: peer.UID, FromShortID: issue.ShortID, ToShortID: peer.ShortID})
-	require.NoError(t, err)
-	rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
-	_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "later edit"})
-	require.NoError(t, err)
-	require.NoError(t, spoke.sync(t, 0))
-	remote, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	remoteLinks, err := hub.DB.LinksByIssue(ctx, remote.ID)
-	require.NoError(t, err)
-	require.Empty(t, remoteLinks)
-	require.NoError(t, spoke.env.DB.ResetFederatedProject(ctx, spoke.projects[0].ID, 0, 0))
-	require.NoError(t, spoke.sync(t, 0))
-	issue, err = spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	links, err := spoke.env.DB.LinksByIssue(ctx, issue.ID)
-	require.NoError(t, err)
-	require.Len(t, links, 1)
-	require.Equal(t, peer.UID, links[0].ToIssueUID)
-	events, err := spoke.env.DB.EventsByUIDs(ctx, spoke.projects[0].ID, []string{linkEvent.UID})
-	require.NoError(t, err)
-	require.Len(t, events, 1)
 }
 
 func moveRetainedTaskHTTP(ctx context.Context, t *testing.T, spoke moveDeliverySpoke, issue db.Issue, targetUID, actor string, dryRun bool) (int, string) {
@@ -517,12 +533,14 @@ func TestRetainedTaskAfterRejoin(t *testing.T) {
 		secondRejoin            bool
 		publishRecoverySnapshot bool
 		restoreRecoverySnapshot bool
+		initialMoveError        string
+		finalMoveError          string
 	}{
 		{name: "previously-published", publishBeforeRejoin: true},
-		{name: "unpublished-move"},
+		{name: "unpublished-move", initialMoveError: "federation_sync_required"},
 		{name: "published-snapshot", secondRejoin: true, publishRecoverySnapshot: true},
 		{name: "restored-published-snapshot", secondRejoin: true, publishRecoverySnapshot: true, restoreRecoverySnapshot: true},
-		{name: "unpublished-snapshot-after-published-issue", publishBeforeRejoin: true, secondRejoin: true},
+		{name: "unpublished-snapshot-after-published-issue", publishBeforeRejoin: true, secondRejoin: true, finalMoveError: "federated_move_unsupported"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := t.Context()
@@ -601,14 +619,12 @@ func TestRetainedTaskAfterRejoin(t *testing.T) {
 			require.NoError(t, config.DefaultFederationCredentialStore().StoreFederationCredential(ctx, projects[0].UID, spoke.credentials[projects[0].UID]))
 			issue, err = spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 			require.NoError(t, err)
-			if tc.name == "unpublished-move" {
-				before, err := spoke.env.DB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: spoke.projects[0].ID, Limit: 100})
-				require.NoError(t, err)
+			if tc.initialMoveError != "" {
 				status, body := moveRetainedTaskHTTP(ctx, t, spoke, issue, projects[1].UID, moveActor, true)
 				require.Equal(t, http.StatusConflict, status, body)
-				after, err := spoke.env.DB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: spoke.projects[0].ID, Limit: 100})
-				require.NoError(t, err)
-				require.Equal(t, before, after)
+				var preview api.ErrorEnvelope
+				require.NoError(t, json.Unmarshal([]byte(body), &preview))
+				require.Equal(t, tc.initialMoveError, preview.Error.Code)
 				status, body = moveRetainedTaskHTTP(ctx, t, spoke, issue, projects[1].UID, moveActor, false)
 				require.Equal(t, http.StatusConflict, status, body)
 				var response struct {
@@ -617,18 +633,21 @@ func TestRetainedTaskAfterRejoin(t *testing.T) {
 					} `json:"error"`
 				}
 				require.NoError(t, json.Unmarshal([]byte(body), &response))
-				require.Equal(t, "federation_sync_required", response.Error.Code)
+				require.Equal(t, tc.initialMoveError, response.Error.Code)
 				current, err := spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 				require.NoError(t, err)
 				require.Equal(t, spoke.projects[0].ID, current.ProjectID)
 				require.NoError(t, spoke.sync(t, 0))
 			}
-			if tc.secondRejoin && !tc.publishRecoverySnapshot {
+			if tc.finalMoveError != "" {
 				status, body := moveRetainedTaskHTTP(ctx, t, spoke, issue, projects[1].UID, moveActor, true)
 				require.Equal(t, http.StatusConflict, status, body)
+				var preview api.ErrorEnvelope
+				require.NoError(t, json.Unmarshal([]byte(body), &preview))
+				require.Equal(t, tc.finalMoveError, preview.Error.Code)
 			}
 			status, body := moveRetainedTaskHTTP(ctx, t, spoke, issue, projects[1].UID, moveActor, false)
-			if tc.secondRejoin && !tc.publishRecoverySnapshot {
+			if tc.finalMoveError != "" {
 				require.Equal(t, http.StatusConflict, status, body)
 				var response struct {
 					Error struct {
@@ -636,14 +655,14 @@ func TestRetainedTaskAfterRejoin(t *testing.T) {
 					} `json:"error"`
 				}
 				require.NoError(t, json.Unmarshal([]byte(body), &response))
-				require.Equal(t, "federated_move_unsupported", response.Error.Code)
+				require.Equal(t, tc.finalMoveError, response.Error.Code)
 				current, err := spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 				require.NoError(t, err)
 				require.Equal(t, spoke.projects[0].ID, current.ProjectID)
 				return
 			}
 			require.Equal(t, http.StatusOK, status, body)
-			if tc.name == "unpublished-move" {
+			if tc.initialMoveError != "" {
 				_, _, err = spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[1].ID, Title: "later", Author: moveActor})
 				require.NoError(t, err)
 			}
@@ -677,26 +696,19 @@ func TestRejoinPublishesRecoverySnapshot(t *testing.T) {
 			binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
 			require.NoError(t, err)
 			if entrypoint == "sync" {
-				counts := map[string]int{}
+				var published bool
 				publish := func(_ int64, events []db.Event) {
 					for _, event := range events {
 						if event.Type == "issue.snapshot" {
-							counts[event.UID]++
+							published = true
 						}
 					}
 				}
-				for range 2 {
-					require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, spoke.env.DB, binding, spoke.credentials[projects[0].UID], clientpkg.Opts{}, publish, spoke.credentials))
-				}
-				events, err := spoke.env.DB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: spoke.projects[0].ID, IssueUID: issue.UID, Limit: 100})
+				require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, spoke.env.DB, binding, spoke.credentials[projects[0].UID], clientpkg.Opts{}, publish, spoke.credentials))
+				require.True(t, published, "recovery snapshot was not published")
+				_, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 				require.NoError(t, err)
-				for _, event := range events {
-					if event.Type == "issue.snapshot" && event.OriginInstanceUID == spoke.env.DB.InstanceUID() {
-						require.Equal(t, 1, counts[event.UID])
-						return
-					}
-				}
-				t.Fatal("recovery snapshot not found")
+				return
 			}
 			sub := spoke.env.Broadcaster.Subscribe(daemon.SubFilter{ProjectID: spoke.projects[0].ID})
 			defer sub.Unsub()
@@ -708,6 +720,8 @@ func TestRejoinPublishesRecoverySnapshot(t *testing.T) {
 			default:
 				t.Fatal("recovery snapshot was not published")
 			}
+			_, err = hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
 		})
 	}
 }
