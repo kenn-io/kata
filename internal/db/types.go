@@ -145,7 +145,6 @@ type FederationBinding struct {
 	Actor                string
 	// RetainHistory asks the store to capture the local event boundary during rejoin.
 	RetainHistory          bool
-	RetainHistoryThrough   *int64 // When set, persist this boundary instead of capturing the current maximum.
 	RetainedThroughEventID int64
 	// AllowInsecure records the join-time plaintext-HTTP transport opt-in on
 	// the binding itself so leave can rebuild the hub client even when the

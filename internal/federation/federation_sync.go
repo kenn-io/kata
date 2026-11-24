@@ -321,9 +321,9 @@ func pushDirectSpoke(
 				if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 					return err
 				}
-				// The hub can report adoption snapshots it already has; the
-				// transaction removes them and rebuilds the project while moving
-				// the cursor.
+				// The hub already held some of these issues and stored no
+				// snapshot for them. Those snapshots go, and the project is
+				// rebuilt, in the same transaction that moves the cursor.
 				ackCtx, resets := db.WithFederationMoveResetCapture(ctx)
 				superseded := ack.SupersededEventUIDs
 				if retained.recovery {
@@ -367,7 +367,19 @@ func retryPushQuarantine(ctx context.Context, store db.Storage, binding *db.Fede
 			}
 			return recordFederationSyncError(ctx, store, binding.ProjectID, eventErr)
 		}
-		return retryPushQuarantinedEvents(ctx, store, binding, q, quarantinedEvents)
+		if retry, reason := autoRetryFederationQuarantine(q, quarantinedEvents); retry {
+			if _, err := store.RetryFederationQuarantine(ctx, db.RetryFederationQuarantineParams{
+				ID:        q.ID,
+				ProjectID: binding.ProjectID,
+				Actor:     binding.Actor,
+				Reason:    reason,
+				Now:       time.Now().UTC(),
+			}); err != nil {
+				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+			}
+			return nil
+		}
+		return recordFederationSyncError(ctx, store, binding.ProjectID, ErrFederationPushQuarantined)
 	} else if err != nil && !errors.Is(err, db.ErrNotFound) {
 		return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 	}

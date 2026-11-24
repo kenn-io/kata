@@ -15,8 +15,6 @@ import (
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
-const FederationBoundActorMismatchFormat = "event %s actor %q does not match bound actor"
-
 // FederationIssueReferenceMessage is shared by hubs and spokes so recovery
 // recognizes the validation message used by released peers.
 func FederationIssueReferenceMessage(eventType, issueUID string, existing bool) string {
@@ -40,9 +38,6 @@ func ParseFederationMissingIssueMessage(message string) string {
 		if (c < 'a' || c > 'z') && c != '.' && c != '_' {
 			return ""
 		}
-	}
-	if message != FederationIssueReferenceMessage(eventType, issueUID, false) {
-		return ""
 	}
 	return issueUID
 }

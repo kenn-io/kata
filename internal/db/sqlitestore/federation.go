@@ -529,9 +529,7 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 	if err := db.CheckRelayBindingUpdate(previous, b); err != nil {
 		return db.FederationBinding{}, err
 	}
-	if b.RetainHistoryThrough != nil {
-		b.RetainedThroughEventID = *b.RetainHistoryThrough
-	} else if b.RetainHistory {
+	if b.RetainHistory {
 		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),0) FROM events WHERE project_id=? AND `+db.LocalInstanceOriginSQL("origin_instance_uid", "?"), b.ProjectID, d.InstanceUID()).Scan(&b.RetainedThroughEventID); err != nil {
 			return db.FederationBinding{}, err
 		}
@@ -573,7 +571,7 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 			updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
 		b.ProjectID, string(b.Role), b.HubURL, b.HubProjectID, b.HubProjectUID,
 		b.ReplayHorizonEventID, b.PullCursorEventID, pushEnabled, b.PushCursorEventID,
-		actor, allowInsecure, enabled, b.RetainedThroughEventID, b.RetainHistory || b.RetainHistoryThrough != nil)
+		actor, allowInsecure, enabled, b.RetainedThroughEventID, b.RetainHistory)
 	if err != nil {
 		return db.FederationBinding{}, fmt.Errorf("upsert federation binding: %w", err)
 	}

@@ -271,13 +271,12 @@ func retainedIssueMayMaterialize(ctx context.Context, store db.Storage, binding 
 				continue
 			}
 			if event.OriginInstanceUID != store.InstanceUID() && !formerLoaded {
-				for meta, err := range store.ExportMeta(ctx) {
-					if err != nil {
-						return false, err
-					}
-					if origin, ok := strings.CutPrefix(meta.Key, db.FormerInstanceUIDMetaPrefix); ok {
-						local[origin] = true
-					}
+				former, err := store.FormerInstanceUIDs(ctx)
+				if err != nil {
+					return false, err
+				}
+				for _, origin := range former {
+					local[origin] = true
 				}
 				formerLoaded = true
 			}

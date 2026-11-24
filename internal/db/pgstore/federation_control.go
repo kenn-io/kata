@@ -147,9 +147,7 @@ WHERE project_id=$1 AND active=1 LIMIT 1`, input.ProjectID).Scan(&externalRootBi
 		if err := db.CheckRelayBindingUpdate(previous, input); err != nil {
 			return err
 		}
-		if input.RetainHistoryThrough != nil {
-			input.RetainedThroughEventID = *input.RetainHistoryThrough
-		} else if input.RetainHistory {
+		if input.RetainHistory {
 			if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),0) FROM events WHERE project_id=$1 AND `+db.LocalInstanceOriginSQL("origin_instance_uid", "$2"), input.ProjectID, s.InstanceUID()).Scan(&input.RetainedThroughEventID); err != nil {
 				return err
 			}
@@ -180,7 +178,7 @@ updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`,
 			input.ProjectID, string(input.Role), input.HubURL, input.HubProjectID,
 			input.HubProjectUID, input.ReplayHorizonEventID, input.PullCursorEventID,
 			storedBool(input.PushEnabled), input.PushCursorEventID, actor,
-			storedBool(input.AllowInsecure), storedBool(input.Enabled), input.RetainedThroughEventID, input.RetainHistory || input.RetainHistoryThrough != nil)
+			storedBool(input.AllowInsecure), storedBool(input.Enabled), input.RetainedThroughEventID, input.RetainHistory)
 		if err != nil {
 			return mapSQLError(err, nil)
 		}

@@ -198,7 +198,7 @@ func (d *Store) ingestFederationEventsOnce(
 		// admitted and must not be rewritten or projected again; fresh intent
 		// still requires the current enrollment's actor.
 		if boundActor != "" && ev.Actor != boundActor {
-			return db.FederationIngestResult{}, fmt.Errorf("%w: "+db.FederationBoundActorMismatchFormat,
+			return db.FederationIngestResult{}, fmt.Errorf("%w: event %s actor %q does not match bound actor",
 				db.ErrFederationIngestValidation, ev.EventUID, ev.Actor)
 		}
 		var moveFrom, moveTo int64

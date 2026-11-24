@@ -105,11 +105,6 @@ func checkRejoinRetainedHistory(t *testing.T, store db.Storage) error {
 		_, later, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "later task", Author: "actor-b"})
 		require.NoError(t, err)
 		require.Greater(t, later.ID, event.ID)
-		binding.RetainHistoryThrough = &event.ID
-		updated, err = store.UpsertFederationBinding(ctx, binding)
-		require.NoError(t, err)
-		require.Equal(t, event.ID, updated.RetainedThroughEventID)
-		binding.RetainHistoryThrough = nil
 		binding.RetainHistory = false
 		updated, err = store.UpsertFederationBinding(ctx, binding)
 		require.NoError(t, err)
