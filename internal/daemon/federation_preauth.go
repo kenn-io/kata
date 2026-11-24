@@ -110,6 +110,7 @@ func federationBodyProjectID(method, path string) (int64, string, string, string
 		{federationIngestPathSuffix, "ingestFederationProjectEvents", "push"},
 		{"/federation/relay:accept", "acceptRelayDeliveries", "push"},
 		{"/federation/relay:ack", "ackRelayDeliveries", "pull"},
+		{"/federation/events:watch", "watchFederationProjectEvents", "pull"},
 	} {
 		idText, matched := strings.CutSuffix(rest, route.suffix)
 		if !matched || strings.Contains(idText, "/") {

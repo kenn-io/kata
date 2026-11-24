@@ -119,6 +119,8 @@ import type {
   FederationSearchResponseBody,
   FederationSpokeNameOut,
   FederationStatusBody,
+  FederationWatchEventsBody,
+  FederationWatchEventsRequestBody,
   ForceReleaseIssueLeasePathParameters,
   GetConnectorStatusPathParameters,
   GetCronCapabilitiesPathParameters,
@@ -335,6 +337,8 @@ import type {
   UnmapConnectorFieldPathParameters,
   UploadFederatedDocbankParams,
   UploadFederatedDocbankPathParameters,
+  WatchFederationProjectEventsParams,
+  WatchFederationProjectEventsPathParameters,
 } from '../models'
 
 import { orvalFetch } from '../../client.ts'
@@ -3851,6 +3855,73 @@ export const ingestFederationProjectEvents = async (
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
       body: JSON.stringify(federationIngestEventsRequestBody),
+    },
+  )
+}
+
+export type watchFederationProjectEventsResponse200 = {
+  data: FederationWatchEventsBody
+  status: 200
+}
+
+export type watchFederationProjectEventsResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type watchFederationProjectEventsResponseSuccess =
+  watchFederationProjectEventsResponse200 & {
+    headers: Headers
+  }
+export type watchFederationProjectEventsResponseError =
+  watchFederationProjectEventsResponseDefault & {
+    headers: Headers
+  }
+
+export type watchFederationProjectEventsResponse =
+  | watchFederationProjectEventsResponseSuccess
+  | watchFederationProjectEventsResponseError
+
+export const getWatchFederationProjectEventsUrl = (
+  { projectId }: WatchFederationProjectEventsPathParameters,
+  params?: WatchFederationProjectEventsParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/events:watch?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/events:watch`
+}
+
+export const watchFederationProjectEvents = async (
+  { projectId }: WatchFederationProjectEventsPathParameters,
+  federationWatchEventsRequestBody: FederationWatchEventsRequestBody,
+  params?: WatchFederationProjectEventsParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<watchFederationProjectEventsResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<watchFederationProjectEventsResponse>(
+    getWatchFederationProjectEventsUrl({ projectId }, params),
+    {
+      ...options,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+      body: JSON.stringify(federationWatchEventsRequestBody),
     },
   )
 }

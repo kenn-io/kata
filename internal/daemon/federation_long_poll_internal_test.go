@@ -82,12 +82,12 @@ func TestFederationPollWaitsBoundEveryHeldPoll(t *testing.T) {
 
 func TestFederationPollWakeIgnoresItsOwnInstance(t *testing.T) {
 	waits := newFederationPollWaits(16, 8)
-	woken, unsubscribe := waits.remote.subscribe(SubFilter{})
+	woken, unsubscribe := waits.remote.subscribe(nil)
 	defer unsubscribe()
 	waits.remote.setSecret([]byte("test secret"))
 	waits.receive(waits.messageFor(NewEventMsg(1, db.Event{ProjectUID: "project"})))
 	select {
-	case <-woken:
+	case <-woken.ch:
 		t.Fatal("a process must ignore the wakeups it published")
 	default:
 	}
@@ -134,7 +134,7 @@ func TestFederationPollRemoteWakeMatchesProjectAndMoveSource(t *testing.T) {
 		reader.receive(published)
 		for i, waiter := range waiters {
 			select {
-			case <-waiter.remote:
+			case <-waiter.remote.ch:
 				if i == 2 {
 					t.Error("unrelated project woke for a move")
 				}
@@ -149,7 +149,7 @@ func TestFederationPollRemoteWakeMatchesProjectAndMoveSource(t *testing.T) {
 		reader.receive(<-bus.published)
 		for i, waiter := range waiters {
 			select {
-			case <-waiter.remote:
+			case <-waiter.remote.ch:
 				if i != 2 {
 					t.Errorf("project %d woke for another project's event", i+1)
 				}
@@ -285,11 +285,11 @@ func TestFederationPollWakeTagsAndFallback(t *testing.T) {
 	assert.NotContains(t, first, "source-project-uid")
 	writer.remote.setSecret([]byte("another secret"))
 	assert.NotEqual(t, first, writer.messageFor(msg))
-	woken, unsubscribe := reader.remote.subscribe(SubFilter{ProjectID: 1, ProjectUID: "unrelated"})
+	woken, unsubscribe := reader.remote.subscribe(map[int64]string{1: "unrelated"})
 	defer unsubscribe()
 	reader.receive(first)
 	select {
-	case <-woken:
+	case <-woken.ch:
 	default:
 		t.Fatal("a tagged wake must wake a poll without a secret")
 	}
@@ -297,7 +297,7 @@ func TestFederationPollWakeTagsAndFallback(t *testing.T) {
 	for _, payload := range []string{"other", "other invalid", "other 64", ""} {
 		reader.receive(payload)
 		select {
-		case <-woken:
+		case <-woken.ch:
 		default:
 			t.Errorf("payload %q failed to wake an unrelated project", payload)
 		}
