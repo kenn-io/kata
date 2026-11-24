@@ -1525,7 +1525,8 @@
     border: 0;
     border-radius: var(--radius-sm);
     background: transparent;
-    color: var(--accent-blue);
+    /* The column's inset background needs a darker blue than the accent for 4.5:1. */
+    color: color-mix(in srgb, var(--accent-blue) 80%, var(--text-primary));
     font: inherit;
     font-size: var(--font-size-xs);
     cursor: pointer;
