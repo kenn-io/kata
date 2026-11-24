@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"slices"
 	"strconv"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -11,10 +12,8 @@ import (
 )
 
 func rejectPriorityLabels(labels []string, useInstead string) error {
-	for _, label := range labels {
-		if db.IsPriorityLabel(label) {
-			return api.NewError(400, "validation", "use the priority field: "+useInstead, "", nil)
-		}
+	if slices.ContainsFunc(labels, db.IsPriorityLabel) {
+		return api.NewError(400, "validation", "use the priority field: "+useInstead, "", nil)
 	}
 	return nil
 }

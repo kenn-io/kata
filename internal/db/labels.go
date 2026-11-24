@@ -2,7 +2,11 @@ package db
 
 import "strings"
 
-const MinPriority, MaxPriority = 0, 4
+// MinPriority is the highest priority value.
+const MinPriority = 0
+
+// MaxPriority is the lowest priority value.
+const MaxPriority = 4
 
 // IsPriorityLabel reports whether a label names a priority.
 func IsPriorityLabel(label string) bool {
