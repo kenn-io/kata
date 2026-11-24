@@ -37,11 +37,11 @@ func federationMoveSupersededSQL(alias string) string {
 
 // FederationResetOwedEventSQL excludes events retained for issues in another project.
 func FederationResetOwedEventSQL(alias string, postgres bool) string {
-	return FederationUnresolvedEventSQL(alias) + ` AND NOT (` + FederationHeldEventSQL(alias) + `) AND NOT (` + FederationEventReferencesMovedIssueSQL(alias, postgres) + `)`
+	return FederationUnresolvedEventSQL(alias, postgres) + ` AND NOT (` + FederationHeldEventSQL(alias) + `) AND NOT (` + FederationEventReferencesMovedIssueSQL(alias, postgres) + `)`
 }
 
-// FederationEventReferencesMovedIssueSQL includes every peer in link edits.
-func FederationEventReferencesMovedIssueSQL(alias string, postgres bool) string {
+// federationLinkPeersSQL extracts peer UIDs from bulk link edits.
+func federationLinkPeersSQL(alias string, postgres bool) string {
 	keys := "'parent_set_uid','parent_removed_uid','blocks_added_uids','blocks_removed_uids','blocked_by_added_uids','blocked_by_removed_uids','related_added_uids','related_removed_uids'"
 	var peers string
 	if postgres {
@@ -55,6 +55,12 @@ func FederationEventReferencesMovedIssueSQL(alias string, postgres bool) string 
  LEFT JOIN json_each(CASE WHEN f.type='array' THEN f.value ELSE '[]' END) item
  WHERE f.key IN (` + keys + `)`
 	}
+	return peers
+}
+
+// FederationEventReferencesMovedIssueSQL includes every peer in link edits.
+func FederationEventReferencesMovedIssueSQL(alias string, postgres bool) string {
+	peers := federationLinkPeersSQL(alias, postgres)
 	return `(EXISTS (SELECT 1 FROM issues i WHERE i.uid IN (` + alias + `.issue_uid,` + alias + `.related_issue_uid) AND i.project_id<>` + alias + `.project_id)
  OR (` + alias + `.type IN ('issue.linked','issue.unlinked') AND ` + alias + `.related_issue_uid IS NOT NULL AND NOT EXISTS (SELECT 1 FROM issues i WHERE i.uid=` + alias + `.related_issue_uid AND i.project_id=` + alias + `.project_id))
  OR EXISTS (SELECT 1 FROM (` + peers + `) peer WHERE peer.uid IS NOT NULL AND peer.uid<>'' AND NOT EXISTS (SELECT 1 FROM issues i WHERE i.uid=peer.uid AND i.project_id=` + alias + `.project_id)))`
@@ -67,15 +73,16 @@ const FederationHeldCursorPrefix = "federation_held_cursor."
 const FederationAcknowledgedEventPrefix = "federation_acknowledged_event."
 
 // FederationLocalEventSQL identifies retained events and references to retained tasks.
-func FederationLocalEventSQL(alias string) string {
+func FederationLocalEventSQL(alias string, postgres bool) string {
 	return `(EXISTS (SELECT 1 FROM meta m JOIN projects p ON p.id=` + alias + `.project_id WHERE m.key='` + FederationAcknowledgedEventPrefix + `' || p.uid || '.' || ` + alias + `.uid AND m.value='local')
  OR EXISTS (SELECT 1 FROM events created JOIN projects p ON p.id=created.project_id JOIN meta m ON m.key='` + FederationAcknowledgedEventPrefix + `' || p.uid || '.' || created.uid AND m.value='local'
- WHERE created.project_id=` + alias + `.project_id AND created.issue_uid IN (` + alias + `.issue_uid,` + alias + `.related_issue_uid) AND created.type IN ('issue.created','issue.snapshot')))`
+ WHERE created.project_id=` + alias + `.project_id AND created.issue_uid IN (` + alias + `.issue_uid,` + alias + `.related_issue_uid) AND created.type IN ('issue.created','issue.snapshot'))
+ OR EXISTS (SELECT 1 FROM (` + federationLinkPeersSQL(alias, postgres) + `) peer JOIN events created ON created.project_id=` + alias + `.project_id AND created.issue_uid=peer.uid AND created.type IN ('issue.created','issue.snapshot') JOIN projects p ON p.id=created.project_id JOIN meta m ON m.key='` + FederationAcknowledgedEventPrefix + `' || p.uid || '.' || created.uid AND m.value='local'))`
 }
 
 // FederationUnresolvedEventSQL excludes events already accepted or retained locally.
-func FederationUnresolvedEventSQL(alias string) string {
-	return alias + `.type IN (` + FederationPushEventTypesSQL() + `) AND NOT EXISTS (SELECT 1 FROM meta WHERE key='` + FederationAcknowledgedEventPrefix + `' || (SELECT uid FROM projects WHERE id=` + alias + `.project_id) || '.' || ` + alias + `.uid) AND NOT ` + FederationLocalEventSQL(alias)
+func FederationUnresolvedEventSQL(alias string, postgres bool) string {
+	return alias + `.type IN (` + FederationPushEventTypesSQL() + `) AND NOT EXISTS (SELECT 1 FROM meta WHERE key='` + FederationAcknowledgedEventPrefix + `' || (SELECT uid FROM projects WHERE id=` + alias + `.project_id) || '.' || ` + alias + `.uid) AND NOT ` + FederationLocalEventSQL(alias, postgres)
 }
 
 // RecordFederationAcknowledgedEvents retains exact accepted event identities.
@@ -89,9 +96,9 @@ func RecordFederationAcknowledgedEvents(ctx context.Context, tx *sql.Tx, project
 }
 
 // FoldFederationAcknowledgedEvents advances only through consecutive accepted events.
-func FoldFederationAcknowledgedEvents(ctx context.Context, tx *sql.Tx, projectID int64, origin string) error {
+func FoldFederationAcknowledgedEvents(ctx context.Context, tx *sql.Tx, projectID int64, origin string, postgres bool) error {
 	var cursor int64
-	err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(e.id),0) FROM events e JOIN projects p ON p.id=e.project_id JOIN federation_bindings b ON b.project_id=e.project_id JOIN meta m ON m.key=$1 || p.uid || '.' || e.uid WHERE e.project_id=$2 AND e.origin_instance_uid=$3 AND e.id>b.push_cursor_event_id AND NOT EXISTS (SELECT 1 FROM events prior WHERE prior.project_id=e.project_id AND prior.origin_instance_uid=$3 AND prior.id>b.push_cursor_event_id AND prior.id<e.id AND `+FederationUnresolvedEventSQL("prior")+`)`, FederationAcknowledgedEventPrefix, projectID, origin).Scan(&cursor)
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(e.id),0) FROM events e JOIN projects p ON p.id=e.project_id JOIN federation_bindings b ON b.project_id=e.project_id JOIN meta m ON m.key=$1 || p.uid || '.' || e.uid WHERE e.project_id=$2 AND e.origin_instance_uid=$3 AND e.id>b.push_cursor_event_id AND NOT EXISTS (SELECT 1 FROM events prior WHERE prior.project_id=e.project_id AND prior.origin_instance_uid=$3 AND prior.id>b.push_cursor_event_id AND prior.id<e.id AND `+FederationUnresolvedEventSQL("prior", postgres)+`)`, FederationAcknowledgedEventPrefix, projectID, origin).Scan(&cursor)
 	if err != nil {
 		return err
 	}
@@ -207,7 +214,7 @@ func RestoreFederationPushCursor(ctx context.Context, tx *sql.Tx, projectID, cur
 
 // CheckFederationMoveSourceLifecycle keeps a native source joined while a
 // destination still owes a locally authored move that needs its credential.
-func CheckFederationMoveSourceLifecycle(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string, leaving bool) error {
+func CheckFederationMoveSourceLifecycle(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string, leaving, postgres bool) error {
 	var sourceUID string
 	err := tx.QueryRowContext(ctx, `SELECT p.uid FROM projects p
  JOIN federation_bindings b ON b.project_id=p.id
@@ -236,7 +243,7 @@ func CheckFederationMoveSourceLifecycle(ctx context.Context, tx *sql.Tx, project
  JOIN federation_bindings b ON b.project_id=e.project_id
  WHERE e.type='issue.moved' AND e.origin_instance_uid=$1
  AND b.role='spoke' AND b.relay_config IS NULL
- AND e.id>b.push_cursor_event_id AND `+FederationUnresolvedEventSQL("e"), originInstanceUID)
+ AND e.id>b.push_cursor_event_id AND `+FederationUnresolvedEventSQL("e", postgres), originInstanceUID)
 	if err != nil {
 		return err
 	}
@@ -261,7 +268,7 @@ func CheckFederationMoveSourceLifecycle(ctx context.Context, tx *sql.Tx, project
 	if err := rows.Close(); err != nil {
 		return err
 	}
-	pending, err := federationMoveSourceHasPendingEvents(ctx, tx, projectID, originInstanceUID, hasSupersededMove)
+	pending, err := federationMoveSourceHasPendingEvents(ctx, tx, projectID, originInstanceUID, hasSupersededMove, postgres)
 	if err != nil {
 		return err
 	}
@@ -280,7 +287,7 @@ func federationMoveSourceHasPendingEvents(
 	tx *sql.Tx,
 	projectID int64,
 	originInstanceUID string,
-	leaving bool,
+	leaving, postgres bool,
 ) (bool, error) {
 	movedIssueEvents := `SELECT EXISTS(SELECT 1 FROM events e
  JOIN federation_bindings b ON b.project_id=e.project_id
@@ -289,7 +296,7 @@ func federationMoveSourceHasPendingEvents(
 	var pending bool
 	if !leaving {
 		if err := tx.QueryRowContext(ctx, movedIssueEvents+` AND e.id>b.push_cursor_event_id
- AND `+FederationUnresolvedEventSQL("e")+`)`,
+ AND `+FederationUnresolvedEventSQL("e", postgres)+`)`,
 			projectID, originInstanceUID).Scan(&pending); err != nil {
 			return false, err
 		}
@@ -1012,7 +1019,7 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
  AND e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)
  AND e.id>b.push_cursor_event_id
  AND NOT (`+FederationHeldEventSQL("e")+`)
- AND `+FederationUnresolvedEventSQL("e")+`)`, projectID, originInstanceUID).Scan(&pending); err != nil {
+ AND `+FederationUnresolvedEventSQL("e", postgres)+`)`, projectID, originInstanceUID).Scan(&pending); err != nil {
 		return err
 	}
 	if pending {

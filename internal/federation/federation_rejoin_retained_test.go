@@ -29,6 +29,8 @@ func testRejoinKeepsOldActorEventsLocal(t *testing.T, pushEnabled bool) {
 	require.NoError(t, err)
 	eligible, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "eligible task", Author: "new-actor"})
 	require.NoError(t, err)
+	peer, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "peer task", Author: "new-actor"})
+	require.NoError(t, err)
 	old, event, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "old task", Author: "old-actor"})
 	require.NoError(t, err)
 	grant, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: spoke.env.DB.InstanceUID(), ProjectID: &projects[0].ID, Capabilities: "pull,push", Actor: "new-actor"})
@@ -47,6 +49,8 @@ func testRejoinKeepsOldActorEventsLocal(t *testing.T, pushEnabled bool) {
 		require.NoError(t, err)
 	}
 	_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: old.ID, Author: "new-actor", Body: "local comment"})
+	require.NoError(t, err)
+	_, err = spoke.env.DB.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: eligible.ID, Actor: "new-actor", AddBlocks: []int64{old.ID, peer.ID}})
 	require.NoError(t, err)
 	later, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "later task", Author: "new-actor"})
 	require.NoError(t, err)
