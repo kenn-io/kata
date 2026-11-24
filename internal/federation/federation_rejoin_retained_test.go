@@ -1,6 +1,7 @@
 package federation
 
 import (
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -350,6 +351,13 @@ func TestMoveRetainedTaskAfterSecondRejoin(t *testing.T) {
 			require.NoError(t, resp.Body.Close())
 			if !tc.publishedSnapshot {
 				require.Equal(t, http.StatusConflict, resp.StatusCode, string(body))
+				var response struct {
+					Error struct {
+						Code string `json:"code"`
+					} `json:"error"`
+				}
+				require.NoError(t, json.Unmarshal(body, &response))
+				require.Equal(t, "federated_move_unsupported", response.Error.Code)
 				current, err := spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 				require.NoError(t, err)
 				require.Equal(t, spoke.projects[0].ID, current.ProjectID)
