@@ -110,6 +110,7 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 								if _, _, err := cfg.DB.RetainedIssueSnapshot(ctx, issue.ProjectID, issue.UID); err != nil {
 									return nil, internalAPIError(err)
 								}
+								return nil, api.NewError(409, "federation_sync_required", "sync the source project before moving this task", "sync the source project and retry", nil)
 							}
 							return nil, federationReadOnlyError(db.ErrRetainedSnapshotUnaccepted)
 						}
