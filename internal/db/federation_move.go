@@ -1053,6 +1053,7 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
 	//nolint:gosec // SQL expressions are fixed and values are bound.
 	_, err = tx.ExecContext(ctx, `DELETE FROM events AS e WHERE e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)
  AND NOT EXISTS(SELECT 1 FROM federation_bindings b WHERE b.project_id IN (e.project_id, $1) AND `+LocalInstanceOriginSQL("e.origin_instance_uid", "$2")+` AND e.id<=b.retained_through_event_id)
+ AND NOT EXISTS(SELECT 1 FROM federation_bindings b JOIN projects p ON p.id=b.project_id JOIN meta m ON m.key='`+FederationAcceptedIssuePrefix+`' || p.uid || '.' || b.hub_project_uid || '.' || b.hub_url || '.' || e.issue_uid AND m.value=e.uid WHERE b.project_id=e.project_id AND e.type='issue.snapshot')
  AND NOT (e.origin_instance_uid=$2 AND e.type NOT IN ('issue.created','issue.moved',`+FederationSnapshotEventTypesSQL()+`) AND (`+FederationHeldEventSQL("e")+` OR (EXISTS (SELECT 1 FROM federation_bindings b WHERE b.project_id=e.project_id AND e.id>b.push_cursor_event_id) AND `+FederationEventReferencesMovedIssueSQL("e", postgres)+`)))`, projectID, originInstanceUID)
 	return err
 }
@@ -1070,6 +1071,7 @@ func ClearFederatedProjectEvents(ctx context.Context, tx *sql.Tx, projectID int6
 	if _, err := tx.ExecContext(ctx, `DELETE FROM events AS e WHERE e.project_id=$1
  AND NOT (`+FederationEventReferencesMovedIssueSQL("e", postgres)+`)
  AND NOT (e.origin_instance_uid=$2 AND `+FederationHeldEventSQL("e")+`)
+ AND NOT EXISTS(SELECT 1 FROM federation_bindings b JOIN projects p ON p.id=b.project_id JOIN meta m ON m.key='`+FederationAcceptedIssuePrefix+`' || p.uid || '.' || b.hub_project_uid || '.' || b.hub_url || '.' || e.issue_uid AND m.value=e.uid WHERE b.project_id=e.project_id AND e.type='issue.snapshot')
  AND NOT EXISTS(SELECT 1 FROM federation_bindings b WHERE b.project_id=e.project_id AND `+LocalInstanceOriginSQL("e.origin_instance_uid", "$2")+` AND e.id<=b.retained_through_event_id)`, projectID, originInstanceUID); err != nil {
 		return err
 	}

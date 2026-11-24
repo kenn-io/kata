@@ -64,6 +64,20 @@ func RefuseRetainedIssueMove(ctx context.Context, tx *sql.Tx, projectID int64, i
 	if retained {
 		return ErrFederatedMoveUnsupported
 	}
+	// A recovery snapshot proves only the comment versions it contained.
+	// Later foreign edits must have reached the hub before a move can carry them.
+	err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events e JOIN federation_bindings b ON b.project_id=e.project_id JOIN projects p ON p.id=e.project_id
+ WHERE e.project_id=$1 AND e.issue_uid=$2 AND e.id<=b.retained_through_event_id AND e.type IN ('issue.commented','issue.comment_edited')
+ AND `+LocalInstanceOriginSQL("e.origin_instance_uid", "$3")+` AND e.actor<>b.bound_actor
+ AND e.id>COALESCE((SELECT s.id FROM meta m JOIN events s ON s.uid=m.value AND s.project_id=e.project_id WHERE m.key=$4 || p.uid || '.' || b.hub_project_uid || '.' || b.hub_url || '.' || e.issue_uid),0)
+ AND NOT EXISTS(SELECT 1 FROM meta m WHERE m.key=$5 || p.uid || '.' || e.uid)
+ AND NOT (e.origin_instance_uid=$3 AND EXISTS(SELECT 1 FROM meta m WHERE m.key=$6 || p.uid || '.' || b.hub_project_uid || '.' || b.hub_url AND e.id<=CAST(m.value AS BIGINT))))`, projectID, issueUID, instanceUID, FederationAcceptedIssuePrefix, FederationAcknowledgedEventPrefix, FederationAcceptedCursorPrefix).Scan(&retained)
+	if err != nil {
+		return err
+	}
+	if retained {
+		return ErrFederatedMoveUnsupported
+	}
 	return nil
 }
 
