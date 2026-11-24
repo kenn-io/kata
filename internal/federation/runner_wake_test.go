@@ -267,3 +267,80 @@ func TestRunnerWakePushesMoveIntoLowerIDProjectBeforeTheInterval(t *testing.T) {
 	require.NoError(t, err, "the hub has the issue before the next interval")
 	assert.Equal(t, destination.hub.ID, got.ProjectID, "the hub has the move before the next interval")
 }
+
+// Moves that depend on other moves reach the hub in the pass that follows
+// them. Projects are numbered in ID order, which is the order the runner
+// serves them in.
+func TestRunnerWakePushesDependentMovesBeforeTheInterval(t *testing.T) {
+	type move struct{ from, to int }
+	cases := []struct {
+		name string
+		// issues lists, per issue, the project it is created in and the moves
+		// made before the next push.
+		issues [][]move
+	}{
+		{
+			name:   "a chain of moves into lower IDs",
+			issues: [][]move{{{from: 2, to: 1}, {from: 1, to: 0}}},
+		},
+		{
+			name:   "each destination waits on a later source",
+			issues: [][]move{{{from: 1, to: 0}}, {{from: 2, to: 1}}},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hub := testenv.New(t)
+			spoke := testenv.New(t)
+			t.Setenv("KATA_HOME", t.TempDir())
+			bound := bindSpokeProjects(t, hub.DB, spoke.DB, hub.URL, 3)
+			ids := make([]int64, 0, len(bound))
+			for _, project := range bound {
+				ids = append(ids, project.spoke.ID)
+			}
+			require.IsIncreasing(t, ids)
+
+			wake := NewWakeQueue()
+			results := newSpokeResults()
+			runner, debounces := newWakeRunner(t, spoke, wake, results)
+			ctx := t.Context()
+			go func() { _ = runner.Run(ctx) }()
+			results.await(t, ids...)
+
+			type want struct {
+				uid     string
+				project int64
+			}
+			var wants []want
+			for _, moves := range tc.issues {
+				issue, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
+					ProjectID: bound[moves[0].from].spoke.ID, Title: "moved before its first push", Author: "tester",
+				})
+				require.NoError(t, err)
+				for _, step := range moves {
+					out, err := spoke.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+						IssueID: issue.ID, FromProjectID: bound[step.from].spoke.ID, ToProjectID: bound[step.to].spoke.ID,
+						IfMatchRev: issue.Revision, Actor: "tester",
+					})
+					require.NoError(t, err)
+					issue = out.Issue
+				}
+				wants = append(wants, want{uid: issue.UID, project: bound[moves[len(moves)-1].to].hub.ID})
+			}
+			// The daemon wakes every project for a move.
+			wake.WakeAll()
+			awaitDebounce(t, debounces).fire <- time.Now()
+			results.await(t, ids[0])
+			// The pass took its wakes before its first turn, so the runner
+			// debounces this one only after the pass ends.
+			wake.WakeAll()
+			awaitDebounce(t, debounces)
+
+			for _, w := range wants {
+				got, err := hub.DB.IssueByUID(ctx, w.uid, db.IncludeDeletedNo)
+				require.NoError(t, err, "the hub has the issue before the next interval")
+				assert.Equal(t, w.project, got.ProjectID, "the hub has the move before the next interval")
+			}
+		})
+	}
+}

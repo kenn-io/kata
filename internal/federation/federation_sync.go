@@ -1310,7 +1310,7 @@ func (r *Runner) runOnce(
 		}
 		turn := r.runSpokeTurn(ctx, spoke, credentialStore, validateLease, retries, started)
 		if turn.denied {
-			return turn.retry, true, remaining, errors.Join(append(errs, refusedMoveErrors(awaiting)...)...)
+			return turn.retry, true, remaining, errors.Join(append(errs, unresolvedMoveErrors(awaiting)...)...)
 		}
 		if endsFederationPass(turn.err) {
 			return nil, false, nil, turn.err
@@ -1334,29 +1334,38 @@ func (r *Runner) runOnce(
 			remaining = withProject(remaining, spoke.binding.ProjectID)
 			continue
 		}
+		markSourcePushed(awaiting, spoke.binding.HubProjectUID)
+	}
+	// A retry that pushes cleanly is itself a source another refused turn may
+	// wait on, as in a chain of moves. Keep retrying until a round finds no
+	// turn whose source has pushed. Each turn retries at most once, so the
+	// loop ends.
+	for progress := true; progress; {
+		progress = false
 		for _, refused := range awaiting {
-			refused.sourcePushed = refused.sourcePushed || refused.sources[spoke.binding.HubProjectUID]
+			if refused.retried || !refused.sourcePushed {
+				continue
+			}
+			refused.retried, progress = true, true
+			turn := r.runSpokeTurn(ctx, refused.spoke, credentialStore, validateLease, retries, retries.version(refused.spoke.binding.ProjectID))
+			if turn.denied {
+				return turn.retry, true, remaining, errors.Join(append(errs, unresolvedMoveErrors(awaiting)...)...)
+			}
+			if endsFederationPass(turn.err) {
+				return nil, false, nil, turn.err
+			}
+			refused.err = turn.err
+			if turn.err != nil {
+				continue
+			}
+			if turn.remaining {
+				remaining = withProject(remaining, refused.spoke.binding.ProjectID)
+				continue
+			}
+			markSourcePushed(awaiting, refused.spoke.binding.HubProjectUID)
 		}
 	}
-	for i, refused := range awaiting {
-		if !refused.sourcePushed {
-			errs = append(errs, refused.err)
-			continue
-		}
-		turn := r.runSpokeTurn(ctx, refused.spoke, credentialStore, validateLease, retries, retries.version(refused.spoke.binding.ProjectID))
-		if turn.denied {
-			return turn.retry, true, remaining, errors.Join(append(errs, refusedMoveErrors(awaiting[i:])...)...)
-		}
-		if endsFederationPass(turn.err) {
-			return nil, false, nil, turn.err
-		}
-		if turn.err != nil {
-			errs = append(errs, turn.err)
-		} else if turn.remaining {
-			remaining = withProject(remaining, refused.spoke.binding.ProjectID)
-		}
-	}
-	return nil, false, remaining, errors.Join(errs...)
+	return nil, false, remaining, errors.Join(append(errs, unresolvedMoveErrors(awaiting)...)...)
 }
 
 // retryBlocked reports whether a retry schedule holds the spoke back from this
@@ -1421,10 +1430,22 @@ func (r *Runner) retryIdentityAfterTurn(
 	return retryTurnIdentity{full: full, target: target}, err
 }
 
-func refusedMoveErrors(awaiting []*awaitingMoveSource) []error {
-	errs := make([]error, 0, len(awaiting))
+// markSourcePushed records that the project with this hub UID pushed cleanly,
+// so every refused turn waiting on it may run again.
+func markSourcePushed(awaiting []*awaitingMoveSource, hubProjectUID string) {
 	for _, refused := range awaiting {
-		errs = append(errs, refused.err)
+		refused.sourcePushed = refused.sourcePushed || refused.sources[hubProjectUID]
+	}
+}
+
+// unresolvedMoveErrors returns the errors of the refused turns that have not
+// pushed cleanly in this pass.
+func unresolvedMoveErrors(awaiting []*awaitingMoveSource) []error {
+	var errs []error
+	for _, refused := range awaiting {
+		if refused.err != nil {
+			errs = append(errs, refused.err)
+		}
 	}
 	return errs
 }
@@ -1446,9 +1467,12 @@ func endsFederationPass(err error) bool {
 type awaitingMoveSource struct {
 	spoke activeSpokeBinding
 	// sources holds the hub project UIDs the refused moves came from.
-	sources      map[string]bool
+	sources map[string]bool
+	// err is the latest error of the project's turns, nil once a retry
+	// pushes cleanly.
 	err          error
 	sourcePushed bool
+	retried      bool
 }
 
 // spokeTurn is the outcome of one spoke's sync turn. denied reports that the
