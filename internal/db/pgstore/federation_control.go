@@ -147,6 +147,16 @@ WHERE project_id=$1 AND active=1 LIMIT 1`, input.ProjectID).Scan(&externalRootBi
 		if err := db.CheckRelayBindingUpdate(previous, input); err != nil {
 			return err
 		}
+		if input.PushEnabled && input.Enabled && input.RelayConfig == nil {
+			var prior int64
+			if previous != nil {
+				prior = previous.PushCursorEventID
+			}
+			input.PushCursorEventID, err = db.RestoreFederationPushCursor(ctx, tx, input.ProjectID, input.PushCursorEventID, prior)
+			if err != nil {
+				return err
+			}
+		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO federation_bindings(
   project_id, role, hub_url, hub_project_id, hub_project_uid,
   replay_horizon_event_id, pull_cursor_event_id, push_enabled,
@@ -174,7 +184,12 @@ updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`,
 		if err := reconcileFederationBindingTransitionLinks(ctx, tx, previous, output); err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `DELETE FROM meta WHERE key = $1 || (SELECT uid FROM projects WHERE id = $2 AND deleted_at IS NULL)`, db.FederationRetainedProjectPrefix, input.ProjectID)
+		if !db.PreserveFederationLeaveFenceOnStop(previous, input) {
+			if _, err = tx.ExecContext(ctx, `DELETE FROM meta WHERE key=$1 || (SELECT uid FROM projects WHERE id=$2)`, db.FederationLeaveFencePrefix, input.ProjectID); err != nil {
+				return err
+			}
+		}
+		_, err = tx.ExecContext(ctx, `DELETE FROM meta WHERE key=$1 || (SELECT uid FROM projects WHERE id=$2 AND deleted_at IS NULL)`, db.FederationRetainedProjectPrefix, input.ProjectID)
 		return err
 	})
 	return output, err
@@ -192,7 +207,12 @@ func (s *Store) AdvanceFederationPullCursor(ctx context.Context, projectID, next
 // from a snapshot it no longer holds.
 func (s *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string) error {
 	if len(supersededEventUIDs) == 0 {
-		return s.AdvanceFederationPushCursor(ctx, projectID, nextCursor)
+		return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+			if err := updateFederationCursor(ctx, tx, projectID, nextCursor, true); err != nil {
+				return err
+			}
+			return db.FoldFederationAcknowledgedEvents(ctx, tx, projectID, s.InstanceUID())
+		})
 	}
 	return s.materializeFederatedProjectAfter(ctx, projectID, func(ctx context.Context, tx *sql.Tx) error {
 		deleted, err := db.AcknowledgeSupersededFederationSnapshots(ctx, tx, projectID, s.instanceUID, supersededEventUIDs)
@@ -200,6 +220,9 @@ func (s *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCu
 			return err
 		}
 		if err := updateFederationCursor(ctx, tx, projectID, nextCursor, true); err != nil {
+			return err
+		}
+		if err := db.FoldFederationAcknowledgedEvents(ctx, tx, projectID, s.InstanceUID()); err != nil {
 			return err
 		}
 		if deleted == 0 {
@@ -279,6 +302,10 @@ func (s *Store) EnableFederationPush(ctx context.Context, projectID int64, curso
 		}
 		next := binding
 		next.PushEnabled = true
+		cursor, err = db.RestoreFederationPushCursor(ctx, tx, projectID, max(cursor, binding.PushCursorEventID), binding.PushCursorEventID)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, `UPDATE federation_bindings SET push_enabled=1,
 push_cursor_event_id=GREATEST(push_cursor_event_id,$1),
 updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
@@ -355,13 +382,13 @@ WHERE project_id=$1`, projectID); err != nil {
 func pgFederationReplicaSettledTx(ctx context.Context, tx *sql.Tx, binding db.FederationBinding, originInstanceUID string) error {
 	// A destination that still owes a move out of this project needs this
 	// project's current credential and actor to deliver it.
-	if err := db.CheckFederationMoveSourceLifecycle(ctx, tx, binding.ProjectID, originInstanceUID); err != nil {
+	if err := db.CheckFederationMoveSourceLifecycle(ctx, tx, binding.ProjectID, originInstanceUID, false); err != nil {
 		return err
 	}
 	if binding.PushEnabled {
 		var pending bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM events
-WHERE project_id=$1 AND origin_instance_uid=$2 AND id>$3 AND `+pgFederationPushEventTypeCondition("type")+`)`,
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM events e
+WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND `+db.FederationUnresolvedEventSQL("e")+`)`,
 			binding.ProjectID, originInstanceUID, binding.PushCursorEventID).Scan(&pending); err != nil {
 			return mapSQLError(err, nil)
 		}
