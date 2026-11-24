@@ -950,6 +950,20 @@ func PreserveDetachedRetainedEvents(ctx context.Context, tx *sql.Tx, projectID, 
  SELECT '`+FederationRetainedEventPrefix+`' || e.uid,'1' FROM events e
  WHERE e.project_id=$1 AND e.id<=$2 AND `+LocalInstanceOriginSQL("e.origin_instance_uid", "$3")+`
  ON CONFLICT(key) DO NOTHING`, projectID, through, instanceUID)
+	if err != nil {
+		return err
+	}
+	// Only this actor's snapshots created during this enrollment were pushed
+	// before its cursor. The next enrollment can skip other actors' snapshots.
+	_, err = tx.ExecContext(ctx, `INSERT INTO meta(key,value)
+ SELECT '`+FederationAcknowledgedEventPrefix+`' || p.uid || '.' || e.uid,'1'
+ FROM events e JOIN projects p ON p.id=e.project_id JOIN federation_bindings b ON b.project_id=e.project_id
+ WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.type='issue.snapshot'
+ AND e.actor=b.bound_actor AND e.id>$3 AND e.id<=b.push_cursor_event_id
+ AND EXISTS (SELECT 1 FROM events old WHERE old.project_id=e.project_id AND old.issue_uid=e.issue_uid
+  AND old.id<=$3 AND old.type IN ('issue.created','issue.snapshot','issue.moved')
+  AND `+LocalInstanceOriginSQL("old.origin_instance_uid", "$2")+` AND (old.origin_instance_uid<>$2 OR old.actor<>b.bound_actor))
+ ON CONFLICT(key) DO NOTHING`, projectID, instanceUID, through)
 	return err
 }
 

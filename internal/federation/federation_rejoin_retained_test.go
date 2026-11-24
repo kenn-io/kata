@@ -279,3 +279,57 @@ func TestRetainedTaskAfterRejoin(t *testing.T) {
 		})
 	}
 }
+
+func TestMoveRetainedTaskAfterSecondRejoin(t *testing.T) {
+	for _, published := range []bool{true, false} {
+		t.Run(fmt.Sprintf("published-%t", published), func(t *testing.T) {
+			ctx := t.Context()
+			hub, projects := newMoveDeliveryHub(t, "source-project", "target-project")
+			spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor", "third-actor")
+			issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "retained task", Author: "old-actor"})
+			require.NoError(t, err)
+			rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull,claim")
+			_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "recovered"})
+			require.NoError(t, err)
+			if published {
+				require.NoError(t, spoke.sync(t, 0))
+			} else {
+				_, _, err = spoke.env.DB.RetainedIssueSnapshot(ctx, spoke.projects[0].ID, issue.UID)
+				require.NoError(t, err)
+			}
+			_, err = spoke.env.DB.LeaveFederationReplica(ctx, spoke.projects[0].ID)
+			require.NoError(t, err)
+			grant, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: spoke.env.DB.InstanceUID(), ProjectID: &projects[0].ID, Capabilities: "push,pull,claim", Actor: "third-actor"})
+			require.NoError(t, err)
+			_, err = spoke.env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: spoke.projects[0].ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: projects[0].ID, HubProjectUID: projects[0].UID, Enabled: true, PushEnabled: true, Actor: "third-actor", RetainHistory: true})
+			require.NoError(t, err)
+			spoke.credentials[projects[0].UID] = config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[0].ID, Token: grant.Token, Actor: "third-actor"}
+			require.NoError(t, spoke.sync(t, 0))
+			require.NoError(t, config.DefaultFederationCredentialStore().StoreFederationCredential(ctx, projects[0].UID, spoke.credentials[projects[0].UID]))
+			issue, err = spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/move", spoke.env.URL, spoke.projects[0].ID, issue.ShortID), strings.NewReader(fmt.Sprintf(`{"actor":"third-actor","to_project_uid":%q}`, projects[1].UID)))
+			require.NoError(t, err)
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("If-Match", fmt.Sprintf(`"rev-%d"`, issue.Revision))
+			resp, err := spoke.env.HTTP.Do(req)
+			require.NoError(t, err)
+			body, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			require.NoError(t, resp.Body.Close())
+			if !published {
+				require.Equal(t, http.StatusConflict, resp.StatusCode, string(body))
+				current, err := spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+				require.NoError(t, err)
+				require.Equal(t, spoke.projects[0].ID, current.ProjectID)
+				return
+			}
+			require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+			require.NoError(t, spoke.sync(t, 0))
+			require.NoError(t, spoke.sync(t, 1))
+			remote, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			require.Equal(t, projects[1].ID, remote.ProjectID)
+		})
+	}
+}
