@@ -2,6 +2,7 @@
   import { Handle, Position, type NodeProps } from '@xyflow/svelte'
 
   import type { KataGraphNode, KataGraphNodeData } from '../lib/graph/layout'
+  import { markColor } from '../lib/marks'
 
   let {
     id,
@@ -24,7 +25,7 @@
     return 'open'
   })
   let metaLabel = $derived(
-    data.projectLabel ? `${data.projectLabel} / ${data.idLabel}` : data.idLabel,
+    data.projectLabel ? `${data.projectLabel} ${data.idLabel}` : data.idLabel,
   )
 
   function activateFromKeyboard(event: KeyboardEvent): void {
@@ -46,28 +47,41 @@
     'graph-task-node',
     `graph-task-node--${tone}`,
     data.isSource ? 'graph-task-node--source' : '',
-    data.isSelected || selected ? 'graph-task-node--selected' : '',
+    data.isSource || selected ? 'graph-task-node--selected' : '',
     data.isDepthContext ? 'graph-task-node--depth-context' : '',
-    data.adjacentRelation ? 'graph-task-node--adjacent' : '',
-    data.adjacentRelation ? `graph-task-node--relation-${data.adjacentRelation}` : '',
   ]}
   aria-label={data.accessibleLabel}
   title={data.qualifiedLabel}
   aria-current={data.isSource ? 'true' : undefined}
-  aria-pressed={data.isSelected || selected}
+  aria-pressed={data.isSource || selected}
   disabled={!data.selectable}
   onclick={activateNode}
   onkeydown={activateFromKeyboard}
 >
-  <div class="node-title-row">
-    <strong title={data.title}>{data.title}</strong>
+  <span class="node-title-row">
+    <span
+      class={[
+        'status-mark',
+        tone === 'done' ? 'status-mark--done' : '',
+        tone === 'closed' ? 'status-mark--closed' : '',
+        tone === 'uncached' ? 'status-mark--uncached' : '',
+      ]}
+      aria-hidden="true"
+    ></span>
+    <span class="node-title" title={data.title}>{data.title}</span>
     {#if data.priorityLabel}
       <span class="priority-marker" data-priority={data.priorityLabel}>{data.priorityLabel}</span>
     {/if}
-  </div>
-  <div class="node-meta-row">
-    <span class="node-id" title={metaLabel}>{metaLabel}</span>
-  </div>
+  </span>
+  <span class="node-meta-row" title={metaLabel}>
+    {#if data.projectName}<span
+        class="project-mark"
+        style:background={markColor(data.projectName)}
+        aria-hidden="true"
+      ></span>{/if}
+    {#if data.projectLabel}<span class="node-project">{data.projectLabel}</span>{/if}
+    <span class="node-id">{data.idLabel}</span>
+  </span>
   <Handle
     class="graph-task-handle"
     type="target"
@@ -85,25 +99,30 @@
 </button>
 
 <style>
+  /* A list row as a card: the status circle, the title, and the priority
+     over the project's mark and the ID. The lines carry the relation, so the
+     card takes no colored edge. */
   .graph-task-node {
     width: 100%;
     height: 100%;
     display: flex;
     flex-direction: column;
     justify-content: center;
-    gap: var(--space-2);
+    gap: var(--space-1);
+    box-sizing: border-box;
     border: 1px solid var(--border-default);
-    /* The status stripe is a left inset. Square that edge so it stays straight. */
-    border-radius: 0 6px 6px 0;
-    background: var(--node-status-bg, var(--bg-surface));
+    border-radius: 6px;
+    background: var(--bg-surface);
     color: var(--text-primary);
-    padding: 9px 10px;
-    box-shadow:
-      inset 3px 0 0 var(--node-relation-accent, var(--node-status-accent, var(--border-default))),
-      var(--shadow-sm);
+    padding: 9px 12px;
+    box-shadow: var(--shadow-sm);
     text-align: left;
     font: inherit;
     cursor: pointer;
+  }
+
+  .graph-task-node:hover:not(:disabled) {
+    background: var(--bg-surface-hover);
   }
 
   .graph-task-node:disabled {
@@ -114,37 +133,28 @@
     border-color: var(--accent-blue);
   }
 
-  .graph-task-node--selected {
+  /* The task open beside the graph: a blue tint inside a blue ring. */
+  .graph-task-node--selected,
+  .graph-task-node--selected:hover:not(:disabled) {
     border-color: var(--accent-blue);
-    border-radius: 0 6px 6px 0;
-    background: color-mix(in srgb, var(--accent-blue) 8%, var(--node-status-bg, var(--bg-surface)));
+    background: color-mix(in srgb, var(--accent-blue) 14%, var(--bg-surface));
     box-shadow:
-      inset 3px 0 0 var(--node-relation-accent, var(--node-status-accent, var(--border-default))),
-      0 0 0 2px color-mix(in srgb, var(--accent-blue) 82%, transparent),
-      0 0 0 5px color-mix(in srgb, var(--accent-blue) 18%, transparent),
+      0 0 0 1px var(--accent-blue),
       var(--shadow-sm);
   }
 
-  .graph-task-node--open {
-    --node-status-accent: var(--border-default);
-    --node-status-bg: var(--bg-surface);
-  }
-
-  .graph-task-node--closed {
-    --node-status-accent: var(--text-secondary);
-    --node-status-bg: color-mix(in srgb, var(--text-secondary) 8%, var(--bg-primary));
+  .graph-task-node--closed .node-title,
+  .graph-task-node--done .node-title {
+    color: var(--text-secondary);
   }
 
   .graph-task-node--done {
-    --node-status-accent: var(--text-muted);
-    --node-status-bg: color-mix(in srgb, var(--text-muted) 10%, var(--bg-primary));
     opacity: 0.62;
   }
 
   .graph-task-node--uncached {
-    --node-status-accent: var(--border-default);
-    --node-status-bg: var(--bg-surface);
     border-style: dashed;
+    box-shadow: none;
     color: var(--text-muted);
   }
 
@@ -157,56 +167,73 @@
     opacity: 0.58;
   }
 
-  .graph-task-node--relation-blocks {
-    --node-relation-accent: var(--accent-blue);
-  }
-
-  .graph-task-node--relation-blockedBy {
-    --node-relation-accent: var(--accent-red);
-  }
-
-  .graph-task-node--relation-child {
-    --node-relation-accent: var(--accent-teal);
-  }
-
-  .graph-task-node--relation-parent {
-    --node-relation-accent: var(--accent-amber);
-  }
-
-  .graph-task-node--relation-related {
-    --node-relation-accent: var(--accent-purple);
-  }
-
   .node-title-row,
   .node-meta-row {
     min-width: 0;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 8px;
+    gap: var(--space-2);
   }
 
-  .node-title-row strong {
+  .node-title {
+    flex: 1;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: var(--font-size-sm);
-    font-weight: var(--font-weight-semibold);
+    font-size: var(--font-size-md);
+    line-height: 20px;
   }
 
+  /* The task list's status circle: hollow while open, filled once closed. */
+  .status-mark {
+    flex: 0 0 14px;
+    width: 14px;
+    height: 14px;
+    box-sizing: border-box;
+    border: 1.5px solid var(--text-muted);
+    border-radius: 50%;
+  }
+
+  .status-mark--done {
+    border-color: var(--accent-green);
+    background: var(--accent-green);
+  }
+
+  .status-mark--closed {
+    background: var(--text-muted);
+  }
+
+  .status-mark--uncached {
+    border-style: dashed;
+  }
+
+  /* The project's mark and the ID line up under the title, past the status
+     circle; a long project name cuts at its end and the ID never cuts. */
   .node-meta-row {
-    color: var(--text-muted);
-    font-family: var(--font-mono);
-    font-size: var(--font-size-xs);
-    justify-content: flex-start;
+    padding-left: calc(14px + var(--space-2));
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+    line-height: 16px;
+    white-space: nowrap;
+  }
+
+  .project-mark {
+    flex: 0 0 10px;
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+  }
+
+  .node-project {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .node-id {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    flex: 0 0 auto;
+    font-family: var(--font-mono);
   }
 
   .priority-marker {
@@ -215,7 +242,7 @@
     background: var(--bg-inset);
     color: var(--text-secondary);
     padding: 3px 5px;
-    font-size: var(--font-size-2xs);
+    font-size: var(--font-size-xs);
     font-weight: var(--font-weight-semibold);
     line-height: 1;
   }

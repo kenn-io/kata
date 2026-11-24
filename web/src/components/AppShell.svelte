@@ -293,10 +293,6 @@
       !daemonSwitching &&
       (!activeDaemonID || activeConnection?.local === true),
   )
-  let graphSelectedUID = $derived<string | null>(
-    route.issueUID && route.graph ? route.issueUID : null,
-  )
-
   let inboxProject = $derived(
     projection.projects.find((project) => project.metadata.role === 'inbox'),
   )
@@ -517,8 +513,18 @@
   }
 
   function resizeSplit(size: number): void {
-    onPreferencesChange({ ...preferences, splitSize: size })
+    if (route.graph) graphSize = size
+    else onPreferencesChange({ ...preferences, splitSize: size })
   }
+
+  let graphSize = $state<number | null>(null)
+  $effect(() => {
+    if (!route.graph) graphSize = null
+  })
+  $effect(() => {
+    void detailBeside
+    graphSize = null
+  })
 
   function beginNewTask(): void {
     if (newTaskBlockedReason) return
@@ -874,7 +880,9 @@
       {:else}
         <SplitLayout
           orientation={preferences.splitDirection}
-          primarySize={preferences.splitSize}
+          primarySize={route.graph ? graphSize : preferences.splitSize}
+          defaultShare={route.graph ? 2 / 3 : undefined}
+          preserveSize={route.graph}
           minPrimary={preferences.splitDirection === 'vertical' ? 220 : 320}
           minSecondary={preferences.splitDirection === 'vertical' ? 220 : 360}
           responsiveBreakpoint={700}
@@ -916,11 +924,10 @@
           headerActions={paneDirection}
           graph={projection.selected_graph}
           sourceIssue={projection.selected_detail.issue}
-          selectedUID={graphSelectedUID}
           layoutDirection={preferences.splitDirection === 'horizontal' ? 'LR' : 'TB'}
           onBack={closeGraph}
           onSelectIssue={(uid) => {
-            graphSelectedUID = uid
+            if (uid !== route.issueUID) openGraph(uid)
           }}
         />
       {:else}

@@ -171,10 +171,16 @@ change that Kata cannot make shows
 ## Explore relationships
 
 Open the graph action from an issue to see its reachable relationship graph.
-The selected issue stays anchored while the graph shows parents, children,
-blocking dependencies, and related issues. Use the graph filters to choose link
-types, direction, and traversal depth, and select a node to open its issue
-detail.
+The graph takes two thirds of the pane beside or above the issue, and refits
+whenever its pane changes size. Drag the divider to set the graph's size in
+pixels for this visit. A key in the corner
+shows each line: Blocks is an amber arrow, Parent → child is a solid arrow, and
+Related is dashed. Each node shows the issue's status, title, priority,
+project mark, and ID. Use the graph filters to choose the link limit,
+highlighting, layout, direction, and whether to hide closed tasks. The button
+names each setting you change from its default.
+Select a node to open its issue beside the graph. With a link limit set, the graph shows tasks within that many links of
+the new issue. A minimap appears only when the graph is larger than the view.
 
 ![Kata Web UI relationship graph generated from synthetic issues](/docs/assets/screenshots/web-ui/relationships.png)
 

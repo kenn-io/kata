@@ -132,7 +132,7 @@ test('captures stable Web UI documentation states from synthetic issues', async 
     document.documentElement.style.zoom = ''
   })
   await page.getByRole('button', { name: 'Display' }).click()
-  await page.getByRole('radio', { name: 'Below list' }).click()
+  await page.getByRole('radio', { name: 'Beside list' }).click()
   await page.keyboard.press('Escape')
   await page.goto(`${kata.origin}/kata?issue=${parent.uid}&graph=1`)
   const graph = page.getByRole('region', { name: 'Reachable task graph' })
