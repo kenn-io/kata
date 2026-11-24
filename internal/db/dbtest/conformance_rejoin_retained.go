@@ -77,6 +77,51 @@ func checkRejoinRetainedHistory(t *testing.T, store db.Storage) error {
 		require.Equal(t, "old-actor", comments[0].Author)
 	})
 
+	t.Run("move after later recovery snapshot accepted", func(t *testing.T) {
+		ctx := t.Context()
+		source, err := store.CreateProject(ctx, "later-recovery-source")
+		require.NoError(t, err)
+		target, err := store.CreateProject(ctx, "later-recovery-target")
+		require.NoError(t, err)
+		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "task", Author: "actor-a"})
+		require.NoError(t, err)
+		_, _, err = store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "actor-a", Body: "discussion"})
+		require.NoError(t, err)
+		binding := db.FederationBinding{ProjectID: source.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: source.UID, Actor: "actor-b", Enabled: true, PushEnabled: true, RetainHistory: true}
+		_, err = store.UpsertFederationBinding(ctx, binding)
+		require.NoError(t, err)
+		earlier, _, err := store.RetainedIssueSnapshot(ctx, source.ID, issue.UID)
+		require.NoError(t, err)
+		_, err = store.LeaveFederationReplica(ctx, source.ID)
+		require.NoError(t, err)
+		binding.Actor = "actor-c"
+		_, err = store.UpsertFederationBinding(ctx, binding)
+		require.NoError(t, err)
+		require.NoError(t, store.AdvanceFederationPushCursor(ctx, source.ID, earlier.ID))
+		accepted, _, err := store.RetainedIssueSnapshot(ctx, source.ID, issue.UID)
+		require.NoError(t, err)
+		require.Greater(t, accepted.ID, earlier.ID)
+		require.NoError(t, store.AcknowledgeFederationPush(ctx, source.ID, accepted.ID, nil))
+		_, err = store.LeaveFederationReplica(ctx, source.ID)
+		require.NoError(t, err)
+		binding.Actor = "actor-d"
+		_, err = store.UpsertFederationBinding(ctx, binding)
+		require.NoError(t, err)
+		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: target.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 2, HubProjectUID: target.UID, Actor: "actor-d", Enabled: true, PushEnabled: true})
+		require.NoError(t, err)
+		issue, err = store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		moved, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "actor-d"})
+		require.NoError(t, err)
+		var envelope struct {
+			Snapshot db.IssueDocumentPayload `json:"snapshot"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(moved.Event.Payload), &envelope))
+		require.Equal(t, "actor-c", envelope.Snapshot.Author)
+		require.Len(t, envelope.Snapshot.Comments, 1)
+		require.Equal(t, "actor-c", envelope.Snapshot.Comments[0].Author)
+	})
+
 	t.Run("recover task moved before enrollment", func(t *testing.T) {
 		ctx := t.Context()
 		source, err := store.CreateProject(ctx, "offline-move-source")
