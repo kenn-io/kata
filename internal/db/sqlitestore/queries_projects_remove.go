@@ -41,7 +41,7 @@ func (d *Store) removeProject(ctx context.Context, p db.RemoveProjectParams) (db
 		return db.Project{}, nil, db.ErrProjectAlreadyArchived
 	}
 
-	if err := d.validateRelayLifecycleTx(ctx, tx, project.ID); err != nil {
+	if err := d.validateRelayLifecycleTx(ctx, tx, project.ID, false); err != nil {
 		return db.Project{}, nil, err
 	}
 	openIssues, err := countOpenIssues(ctx, tx, project.ID)
@@ -169,6 +169,10 @@ func (d *Store) restoreProject(ctx context.Context, projectID int64, actor strin
 			return db.Project{}, nil, false, fmt.Errorf("commit restore project race noop: %w", err)
 		}
 		return updated, nil, false, nil
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key = ? AND EXISTS (SELECT 1 FROM federation_bindings WHERE project_id = ?)`, db.FederationRetainedProjectPrefix+project.UID, project.ID); err != nil {
+		return db.Project{}, nil, false, err
 	}
 
 	evt, err := d.insertEventTx(ctx, tx, eventInsert{

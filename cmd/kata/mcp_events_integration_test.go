@@ -142,6 +142,11 @@ func withRunningEventsDaemon(t *testing.T, receiver *signedReceiver) testenv.Opt
 // mcpRPC posts one 2026-07-28 request to the kata mcp serve endpoint.
 func mcpRPC(t *testing.T, endpoint, method string, params map[string]any) (int, map[string]any) {
 	t.Helper()
+	return mcpRPCWithBearer(t, endpoint, "test-mcp-token", method, params)
+}
+
+func mcpRPCWithBearer(t *testing.T, endpoint, bearer, method string, params map[string]any, mutate ...func(*http.Request)) (int, map[string]any) {
+	t.Helper()
 	params["_meta"] = map[string]any{
 		"io.modelcontextprotocol/protocolVersion":    currentMCPProtocolVersion,
 		"io.modelcontextprotocol/clientCapabilities": map[string]any{},
@@ -150,13 +155,16 @@ func mcpRPC(t *testing.T, endpoint, method string, params map[string]any) (int, 
 	require.NoError(t, err)
 	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, endpoint, bytes.NewReader(raw))
 	require.NoError(t, err)
-	request.Header.Set("Authorization", "Bearer test-mcp-token")
+	request.Header.Set("Authorization", "Bearer "+bearer)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json, text/event-stream")
 	request.Header.Set("Mcp-Protocol-Version", currentMCPProtocolVersion)
 	request.Header.Set("Mcp-Method", method)
 	if name, ok := params["name"].(string); ok {
 		request.Header.Set("Mcp-Name", name)
+	}
+	for _, change := range mutate {
+		change(request)
 	}
 	response, err := http.DefaultClient.Do(request)
 	require.NoError(t, err)

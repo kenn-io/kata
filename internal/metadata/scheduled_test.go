@@ -9,6 +9,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestScheduleDateCarriesItsTimezone(t *testing.T) {
+	raw := `{"scheduled_on":"2026-01-15T09:00[Europe/Paris]","deadline_on":"2026-01-15[Asia/Tokyo]","timezone":"America/New_York"}`
+	_, zone, instant, present, err := ScheduleFieldInstant(raw, "scheduled_on", "UTC")
+	require.NoError(t, err)
+	require.True(t, present)
+	assert.Equal(t, "Europe/Paris", zone)
+	assert.Equal(t, time.Date(2026, 1, 15, 8, 0, 0, 0, time.UTC), instant)
+
+	_, zone, instant, present, err = ScheduleFieldInstant(raw, "deadline_on", "UTC")
+	require.NoError(t, err)
+	require.True(t, present)
+	assert.Equal(t, "Asia/Tokyo", zone)
+	assert.Equal(t, time.Date(2026, 1, 14, 15, 0, 0, 0, time.UTC), instant)
+
+	_, present, due, err := ScheduleFieldDue(raw, "deadline_on", time.Date(2026, 1, 14, 18, 0, 0, 0, time.UTC), "UTC")
+	require.NoError(t, err)
+	require.True(t, present)
+	assert.True(t, due)
+}
+
 func TestScheduledOnDueDateUsesIssueTimezone(t *testing.T) {
 	now := time.Date(2026, 9, 1, 0, 30, 0, 0, time.UTC)
 

@@ -120,6 +120,8 @@ func statusTransport(t *testing.T, mutation func(*http.Request, map[string]any) 
 			return dataResponse(map[string]any{"issue": issue()}), nil
 		case strings.Contains(query, "KataLinearUpdate"):
 			return mutation(r, v)
+		case strings.Contains(query, "KataLinearComments"):
+			return dataResponse(map[string]any{"comments": map[string]any{"nodes": []any{}, "pageInfo": map[string]any{"hasNextPage": false}}}), nil
 		default:
 			t.Fatalf("unexpected query %s", query)
 			return nil, nil
@@ -238,6 +240,13 @@ func TestStatusTargetsRequireLiveSelectedTypes(t *testing.T) {
 	require.Equal(t, "closed", status)
 	require.Equal(t, "done", *reason)
 	require.Equal(t, at, *closed)
+	// A closure stamped just after the last update (issue created directly as Done) is clamped.
+	late := i.UpdatedAt.Add(52 * time.Millisecond)
+	i.CompletedAt = &late
+	status, _, closed, err = issueStatus(i, "completed")
+	require.NoError(t, err)
+	require.Equal(t, "closed", status)
+	require.Equal(t, i.UpdatedAt.UTC().Truncate(time.Millisecond), *closed)
 }
 
 // The verification read after a write reuses the workflow just loaded instead

@@ -172,7 +172,7 @@ func (m Model) handleCredentialsLoaded(msg credentialsLoadedMsg) (Model, tea.Cmd
 
 func (m Model) scheduleCredentialsRefresh(gen uint64) tea.Cmd {
 	connGen := m.connGen
-	return tea.Tick(credentialsRefreshInterval, func(time.Time) tea.Msg {
+	return tickAfter(credentialsRefreshInterval, func(time.Time) tea.Msg {
 		return credentialsRefreshTickMsg{connGen: connGen, gen: gen}
 	})
 }

@@ -84,6 +84,13 @@ func (d *Store) PendingRelayDeliveries(ctx context.Context, bindingUID, stream s
 		if err != nil {
 			return err
 		}
+		if stream == db.RelayStreamEvent {
+			events, err := db.RelayEventFeaturePrefix(ctx, relayResetBackend{tx: tx}, projectUID, output)
+			if err != nil {
+				return err
+			}
+			output, ids = output[:len(events)], ids[:len(events)]
+		}
 		for _, id := range ids {
 			if _, err := tx.ExecContext(ctx, `UPDATE federation_relay_outbox SET emitted=1 WHERE id=?`, id); err != nil {
 				return err
@@ -233,7 +240,7 @@ type artifactReoffer struct {
 // identity, while retries of the same retention reuse it.
 func (o artifactReoffer) sourceUIDFor(ctx context.Context, tx db.Transaction) (string, error) {
 	var generation string
-	err := tx.QueryRowContext(ctx, `SELECT uid FROM events WHERE project_id=? AND issue_uid=? AND type IN ('issue.created','issue.snapshot','issue.updated','issue.restored') ORDER BY id DESC LIMIT 1`, o.projectID, o.issueUID).Scan(&generation)
+	err := tx.QueryRowContext(ctx, `SELECT uid FROM events WHERE project_id=? AND issue_uid=? AND type IN ('issue.created','issue.snapshot','issue.updated','issue.restated','issue.restored') ORDER BY id DESC LIMIT 1`, o.projectID, o.issueUID).Scan(&generation)
 	if errors.Is(err, sql.ErrNoRows) {
 		return o.sourceUID, nil
 	}

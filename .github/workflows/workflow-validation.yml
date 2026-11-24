@@ -54,9 +54,20 @@ jobs:
           persist-credentials: false
 
       - uses: actions/setup-go@v7.0.0
+        id: setup-go
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
+
+      - name: Restore Linux Go cache
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: linux-go-${{ runner.os }}-${{ runner.arch }}-go-${{ steps.setup-go.outputs.go-version }}-${{ github.event.pull_request.base.sha }}
+          restore-keys: |
+            linux-go-${{ runner.os }}-${{ runner.arch }}-go-${{ steps.setup-go.outputs.go-version }}-
 
       - name: Set up Node
         uses: actions/setup-node@v7.1.0
@@ -68,7 +79,7 @@ jobs:
         with:
           bun-version: 1.4.4
 
-      - uses: kenn-io/kit/.github/actions/kit-retry@v0.47.3
+      - uses: kenn-io/kit/.github/actions/kit-retry@v0.58.1
 
       - name: Install frozen web dependencies
         run: kit-retry 3 5 make web-install

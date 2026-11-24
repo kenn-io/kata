@@ -1,19 +1,212 @@
 package daemon_test
 
 import (
+	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
+
+type countingEventStore struct {
+	db.Storage
+	reads atomic.Int64
+}
+
+func (s *countingEventStore) EventsAfter(ctx context.Context, params db.EventsAfterParams) ([]db.Event, error) {
+	s.reads.Add(1)
+	return s.Storage.EventsAfter(ctx, params)
+}
+
+func TestUISnapshotCachesEffectiveCloseEvent(t *testing.T) {
+	var store *countingEventStore
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity(), testenv.Option(func(cfg *daemon.ServerConfig) {
+		cfg.UIStore = cfg.DB.(db.UIStore)
+		store = &countingEventStore{Storage: cfg.DB}
+		cfg.DB = store
+	}))
+	project, err := env.DB.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	issue := createScopedHTTPTestIssue(t, env, project.ID, "Closed task", nil)
+	newScopedTokens(t, env, project, issue)
+	_, closed, changed, err := env.DB.CloseIssueWithEvents(t.Context(), issue.ID, "done", "tester", "Finished", nil)
+	require.NoError(t, err)
+	require.True(t, changed)
+	path := "/api/v1/ui/snapshot?view=all-open&include_history=true&selected_issue_uid=" + issue.UID
+	first, body := envDoRaw(t, env, http.MethodGet, path, nil, map[string]string{"Authorization": "Bearer bootstrap-token"})
+	require.Equal(t, http.StatusOK, first.StatusCode, string(body))
+	var snapshot struct {
+		Selected struct {
+			EffectiveCloseEvent *db.Event `json:"effective_close_event"`
+		} `json:"selected"`
+	}
+	require.NoError(t, json.Unmarshal(body, &snapshot))
+	require.NotNil(t, snapshot.Selected.EffectiveCloseEvent)
+	require.Equal(t, closed[0].UID, snapshot.Selected.EffectiveCloseEvent.UID)
+	require.NotEmpty(t, first.Header.Get("ETag"))
+	reads := store.reads.Load()
+	require.Positive(t, reads)
+
+	second, body := envDoRaw(t, env, http.MethodGet, path, nil, map[string]string{"Authorization": "Bearer bootstrap-token"})
+	require.Equal(t, http.StatusOK, second.StatusCode, string(body))
+	require.Equal(t, first.Header.Get("ETag"), second.Header.Get("ETag"))
+	snapshot.Selected.EffectiveCloseEvent = nil
+	require.NoError(t, json.Unmarshal(body, &snapshot))
+	require.NotNil(t, snapshot.Selected.EffectiveCloseEvent)
+	require.Equal(t, closed[0].UID, snapshot.Selected.EffectiveCloseEvent.UID)
+	require.Equal(t, reads, store.reads.Load())
+
+	_, _, err = env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: issue.ID, Author: "tester", Body: "Follow-up"})
+	require.NoError(t, err)
+	third, body := envDoRaw(t, env, http.MethodGet, path, nil, map[string]string{"If-None-Match": first.Header.Get("ETag"), "Authorization": "Bearer bootstrap-token"})
+	require.Equal(t, http.StatusOK, third.StatusCode, string(body))
+	require.NotEqual(t, first.Header.Get("ETag"), third.Header.Get("ETag"))
+	snapshot.Selected.EffectiveCloseEvent = nil
+	require.NoError(t, json.Unmarshal(body, &snapshot))
+	require.NotNil(t, snapshot.Selected.EffectiveCloseEvent)
+	require.Equal(t, closed[0].UID, snapshot.Selected.EffectiveCloseEvent.UID)
+	require.Greater(t, store.reads.Load(), reads)
+}
+
+func TestUISnapshotProjectsEffectiveCloseEventAndRequiresHistory(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+	project, err := env.DB.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	issue := createScopedHTTPTestIssue(t, env, project.ID, "Closed task", nil)
+	newScopedTokens(t, env, project, issue)
+	_, closed, changed, err := env.DB.CloseIssueWithEvents(t.Context(), issue.ID, "done", "tester", "Finished", nil)
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	path := "/api/v1/ui/snapshot?view=all-open&include_history=true&selected_issue_uid=" + issue.UID
+	scoped, body := envDoRaw(t, env, http.MethodGet, path, nil, map[string]string{"Authorization": "Bearer worker-token"})
+	require.Equal(t, http.StatusOK, scoped.StatusCode, string(body))
+	var snapshot struct {
+		Selected struct {
+			EffectiveCloseEvent *db.Event `json:"effective_close_event"`
+		} `json:"selected"`
+	}
+	require.NoError(t, json.Unmarshal(body, &snapshot))
+	require.NotNil(t, snapshot.Selected.EffectiveCloseEvent)
+	require.Equal(t, closed[0].UID, snapshot.Selected.EffectiveCloseEvent.UID)
+	require.Empty(t, snapshot.Selected.EffectiveCloseEvent.OriginInstanceUID)
+
+	withoutHistory := "/api/v1/ui/snapshot?view=all-open&selected_issue_uid=" + issue.UID
+	scoped, body = envDoRaw(t, env, http.MethodGet, withoutHistory, nil, map[string]string{"Authorization": "Bearer worker-token"})
+	require.Equal(t, http.StatusOK, scoped.StatusCode, string(body))
+	require.NotContains(t, string(body), `"effective_close_event"`)
+}
+
+type snapshotHookStore struct {
+	db.UIStore
+	afterRead func()
+}
+
+type delayedCursorStore struct {
+	*snapshotHookStore
+	delay    atomic.Bool
+	observed chan struct{}
+	release  chan struct{}
+}
+
+func (s *delayedCursorStore) UIEventCursor(ctx context.Context) (int64, error) {
+	cursor, err := s.UIStore.UIEventCursor(ctx)
+	if s.delay.CompareAndSwap(true, false) {
+		close(s.observed)
+		select {
+		case <-s.release:
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		}
+	}
+	return cursor, err
+}
+
+func (s *snapshotHookStore) ReadUISnapshot(ctx context.Context, query db.UISnapshotQuery) (db.UISnapshotData, error) {
+	data, err := s.UIStore.ReadUISnapshot(ctx, query)
+	if err == nil && s.afterRead != nil {
+		hook := s.afterRead
+		s.afterRead = nil
+		hook()
+	}
+	return data, err
+}
+
+func TestUISnapshotDoesNotReuseOmittedCloseAfterConcurrentCursorAdvance(t *testing.T) {
+	var store *delayedCursorStore
+	env := testenv.New(t, testenv.Option(func(cfg *daemon.ServerConfig) {
+		store = &delayedCursorStore{
+			snapshotHookStore: &snapshotHookStore{UIStore: cfg.DB.(db.UIStore)},
+			observed:          make(chan struct{}), release: make(chan struct{}),
+		}
+		cfg.UIStore = store
+	}))
+	project, err := env.DB.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	issue := createScopedHTTPTestIssue(t, env, project.ID, "Concurrent close", nil)
+	_, closed, changed, err := env.DB.CloseIssueWithEvents(t.Context(), issue.ID, "done", "tester", "Completed", nil)
+	require.NoError(t, err)
+	require.True(t, changed)
+	store.afterRead = func() {
+		insertRemoteIssueHistoryEvent(t, env, project, issue, "00000000000000000000000001", "7ZZZZZZZZZZZZZZZZZZZZZZZZZ", "issue.closed",
+			closed[0].HLCPhysicalMS+1, 0, `{"reason":"done"}`, closed[0].CreatedAt)
+	}
+	path := "/api/v1/ui/snapshot?view=all-open&include_history=true&selected_issue_uid=" + issue.UID
+	store.delay.Store(true)
+	released := false
+	defer func() {
+		if !released {
+			close(store.release)
+		}
+	}()
+	type response struct {
+		status int
+		body   []byte
+	}
+	result := make(chan response, 1)
+	go func() {
+		resp, body := envDoRaw(t, env, http.MethodGet, path, nil, map[string]string{"If-None-Match": `"old"`})
+		result <- response{resp.StatusCode, body}
+	}()
+	select {
+	case <-store.observed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cursor read did not start")
+	}
+	resp, body := envGetRaw(t, env, path)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	var snapshot struct {
+		Selected struct {
+			Issue db.UIIssue `json:"issue"`
+		} `json:"selected"`
+	}
+	require.NoError(t, json.Unmarshal(body, &snapshot))
+	require.Equal(t, issue.UID, snapshot.Selected.Issue.UID)
+	require.NotContains(t, string(body), `"effective_close_event"`)
+	close(store.release)
+	released = true
+	select {
+	case got := <-result:
+		require.Equal(t, http.StatusOK, got.status, string(got.body))
+		require.NoError(t, json.Unmarshal(got.body, &snapshot))
+		require.Equal(t, issue.UID, snapshot.Selected.Issue.UID)
+		require.Contains(t, string(got.body), `"effective_close_event"`)
+	case <-time.After(5 * time.Second):
+		t.Fatal("delayed request did not finish")
+	}
+}
 
 // The issue history contract filters before limit and acknowledges the resolved
 // subject even on the final empty page, so clients can reject older daemons.
@@ -129,56 +322,54 @@ func TestPollProjectEventsIssueScopedHistory(t *testing.T) {
 	require.NotContains(t, string(body), hidden.UID)
 }
 
-func TestPollProjectEventsIssuePayloadOnlyClose(t *testing.T) {
+// A close pulled from a hub is stored with its issue UID in the header and no
+// local issue row. Issue history must still return it and select it.
+func TestPollProjectEventsIssuePulledClose(t *testing.T) {
 	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
-		for index, identityField := range []string{"issue_uid", "uid"} {
-			t.Run(identityField, func(t *testing.T) {
-				f := newProjectAccessFixture(t, store, identityField)
-				issue := f.visible
-				expiresAt := time.Now().UTC().Add(time.Hour)
-				_, _, err := store.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
-					PlaintextToken: "history-token-" + identityField, Actor: "member", AdminActor: db.BootstrapActor,
-					Scope: &db.APITokenScope{
-						Kind: db.APITokenScopeIssueSubtree, ProjectUID: f.public.UID, RootIssueUID: issue.UID,
-					}, ExpiresAt: &expiresAt,
-				})
-				require.NoError(t, err)
-				_, closed, changed, err := store.CloseIssueWithEvents(t.Context(), issue.ID, "done", "member", "Closed before newer federated evidence.", nil)
-				require.NoError(t, err)
-				require.True(t, changed)
-				require.Len(t, closed, 1)
-				remote := db.RemoteEvent{
-					EventUID: fmt.Sprintf("%026d", index+1), OriginInstanceUID: "7ZZZZZZZZZZZZZZZZZZZZZZZZZ",
-					ProjectUID: f.public.UID, ProjectName: f.public.Name,
-					Type: "issue.closed", Actor: "member", HLCPhysicalMS: closed[0].HLCPhysicalMS + 1,
-					Payload:   jsontext.Value(fmt.Sprintf(`{"%s":%q,"reason":"done","evidence":[{"type":"commit","sha":"0123456789abcdef0123456789abcdef01234567"}]}`, identityField, issue.UID)),
-					CreatedAt: closed[0].CreatedAt,
-				}
-				remote.ContentHash, err = db.RemoteEventContentHash(remote)
-				require.NoError(t, err)
-				inserted, err := store.InsertRemoteEvent(t.Context(), f.public.ID, remote)
-				require.NoError(t, err)
-				require.True(t, inserted)
+		f := newProjectAccessFixture(t, store, "pulled")
+		issue := f.visible
+		expiresAt := time.Now().UTC().Add(time.Hour)
+		_, _, err := store.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
+			PlaintextToken: "history-token-pulled", Actor: "member", AdminActor: db.BootstrapActor,
+			Scope: &db.APITokenScope{
+				Kind: db.APITokenScopeIssueSubtree, ProjectUID: f.public.UID, RootIssueUID: issue.UID,
+			}, ExpiresAt: &expiresAt,
+		})
+		require.NoError(t, err)
+		_, closed, changed, err := store.CloseIssueWithEvents(t.Context(), issue.ID, "done", "member", "Closed before newer federated evidence.", nil)
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.Len(t, closed, 1)
+		remote := db.RemoteEvent{
+			EventUID: fmt.Sprintf("%026d", 1), OriginInstanceUID: "7ZZZZZZZZZZZZZZZZZZZZZZZZZ",
+			ProjectUID: f.public.UID, ProjectName: f.public.Name, IssueUID: &issue.UID,
+			Type: "issue.closed", Actor: "member", HLCPhysicalMS: closed[0].HLCPhysicalMS + 1,
+			Payload:   jsontext.Value(`{"reason":"done","evidence":[{"type":"commit","sha":"0123456789abcdef0123456789abcdef01234567"}]}`),
+			CreatedAt: closed[0].CreatedAt,
+		}
+		remote.ContentHash, err = db.RemoteEventContentHash(remote)
+		require.NoError(t, err)
+		inserted, err := store.InsertRemoteEvent(t.Context(), f.public.ID, remote)
+		require.NoError(t, err)
+		require.True(t, inserted)
 
-				path := fmt.Sprintf("%s?issue=%s&include_effective_close_event_uid=true", scopedProjectPath(f.public.ID, "events"), issue.UID)
-				for _, token := range []string{"member-" + identityField + "-test-token", "history-token-" + identityField} {
-					status, _, body := f.request(t, http.MethodGet, path, "", nil, map[string]string{"Authorization": "Bearer " + token})
-					require.Equal(t, http.StatusOK, status, string(body))
-					var page api.PollEventsBody
-					require.NoError(t, json.Unmarshal(body, &page))
-					require.Equal(t, remote.EventUID, page.EffectiveCloseEventUID, string(body))
-					var selected *api.EventEnvelope
-					for i := range page.Events {
-						if page.Events[i].EventUID == remote.EventUID {
-							selected = &page.Events[i]
-						}
-					}
-					require.NotNil(t, selected, "the selected close must be returned in issue history")
-					require.NotNil(t, selected.IssueUID)
-					require.Equal(t, issue.UID, *selected.IssueUID)
-					require.Contains(t, string(selected.Payload), "0123456789abcdef0123456789abcdef01234567")
+		path := fmt.Sprintf("%s?issue=%s&include_effective_close_event_uid=true", scopedProjectPath(f.public.ID, "events"), issue.UID)
+		for _, token := range []string{"member-pulled-test-token", "history-token-pulled"} {
+			status, _, body := f.request(t, http.MethodGet, path, "", nil, map[string]string{"Authorization": "Bearer " + token})
+			require.Equal(t, http.StatusOK, status, string(body))
+			var page api.PollEventsBody
+			require.NoError(t, json.Unmarshal(body, &page))
+			require.Equal(t, remote.EventUID, page.EffectiveCloseEventUID, string(body))
+			var selected *api.EventEnvelope
+			for i := range page.Events {
+				if page.Events[i].EventUID == remote.EventUID {
+					selected = &page.Events[i]
 				}
-			})
+			}
+			require.NotNil(t, selected, "the selected close must be returned in issue history")
+			require.NotNil(t, selected.IssueUID)
+			require.Equal(t, issue.UID, *selected.IssueUID)
+			require.Contains(t, string(selected.Payload), "0123456789abcdef0123456789abcdef01234567")
 		}
 	})
 }
@@ -239,7 +430,7 @@ func TestPollProjectEventsIssueReturnsEffectiveCloseEvent(t *testing.T) {
 		insertRemoteIssueHistoryEvent(t, env, project, issue, "00000000000000000000000002", origin, "issue.updated",
 			baseHLC+1, 0, `{"status":"open"}`, createdAt)
 		insertRemoteIssueHistoryEvent(t, env, project, issue, "00000000000000000000000003", origin, "issue.snapshot",
-			baseHLC+2, 0, `{"uid":"`+issue.UID+`","short_id":"`+issue.ShortID+`","title":"Provider status","status":"closed"}`, createdAt)
+			baseHLC+2, 0, `{"uid":"`+issue.UID+`","short_id":"`+issue.ShortID+`","title":"Provider status","body":"","author":"`+issue.Author+`","status":"closed","metadata":{},"created_at":"`+issue.CreatedAt.UTC().Format(db.EventTimestampFormat)+`"}`, createdAt)
 
 		path := fmt.Sprintf("%s?issue=%s&include_effective_close_event_uid=true", scopedProjectPath(project.ID, "events"), url.QueryEscape(issue.UID))
 		resp, body := envDoRaw(t, env, http.MethodGet, path, nil, map[string]string{"Authorization": "Bearer worker-token"})
@@ -304,6 +495,35 @@ func TestPollProjectEventsIssueReturnsEffectiveCloseEvent(t *testing.T) {
 		_, hasEffectiveClose := raw["effective_close_event_uid"]
 		require.False(t, hasEffectiveClose, string(body))
 		require.NotContains(t, string(body), hiddenCloseUID)
+	})
+}
+
+func TestUISnapshotReturnsCloseBeyondHistoryLimit(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		_, closed, changed, err := store.CloseIssueWithEvents(t.Context(), f.visible.ID, "done", "member", "Finished", nil)
+		require.NoError(t, err)
+		require.True(t, changed)
+		for range 501 {
+			_, _, err := store.CreateComment(t.Context(), db.CreateCommentParams{IssueID: f.visible.ID, Author: "member", Body: "follow-up"})
+			require.NoError(t, err)
+		}
+		path := "/api/v1/ui/snapshot?view=all-open&include_history=true&selected_issue_uid=" + f.visible.UID
+		status, _, body := f.request(t, http.MethodGet, path, "nonmember", nil, nil)
+		require.Equal(t, http.StatusOK, status, string(body))
+		var snapshot struct {
+			Selected struct {
+				EffectiveCloseEvent *db.Event  `json:"effective_close_event"`
+				History             []db.Event `json:"history"`
+			} `json:"selected"`
+		}
+		require.NoError(t, json.Unmarshal(body, &snapshot))
+		require.Len(t, snapshot.Selected.History, 500)
+		require.NotNil(t, snapshot.Selected.EffectiveCloseEvent)
+		require.Equal(t, closed[0].UID, snapshot.Selected.EffectiveCloseEvent.UID)
+		for _, event := range snapshot.Selected.History {
+			require.NotEqual(t, closed[0].UID, event.UID)
+		}
 	})
 }
 
@@ -495,4 +715,140 @@ func TestPollProjectEventsMovedIssueRespectsHistoricalProjectAccess(t *testing.T
 			require.Equal(t, tc.wantCreated, found, string(body))
 		}
 	})
+}
+
+// A soft-deleted issue's history is readable by callers the restore action
+// would accept, and stays a 404 for callers it would refuse.
+func TestPollProjectEventsIssueReadsSoftDeletedHistoryForRestoreCaller(t *testing.T) {
+	deletedHistory := func(t *testing.T, env *testenv.Env, project db.Project, ref, query string) (int, []byte) {
+		t.Helper()
+		resp, body := envGetRaw(t, env, scopedProjectPath(project.ID, "events")+"?issue="+url.QueryEscape(ref)+query)
+		return resp.StatusCode, body
+	}
+
+	t.Run("allowed caller reads history including the delete event", func(t *testing.T) {
+		env, project, issue := setupClaimGateIssue(t, false)
+		_, deleted, _, err := env.DB.SoftDeleteIssue(t.Context(), issue.ID, "tester")
+		require.NoError(t, err)
+
+		for _, ref := range []string{issue.ShortID, issue.UID, project.Name + "#" + issue.ShortID} {
+			status, body := deletedHistory(t, env, project, ref, "&actor=tester")
+			require.Equal(t, http.StatusOK, status, string(body))
+			var page api.PollEventsBody
+			require.NoError(t, json.Unmarshal(body, &page))
+			types := make([]string, 0, len(page.Events))
+			for _, event := range page.Events {
+				types = append(types, event.Type)
+			}
+			require.Equal(t, []string{"issue.created", "issue.soft_deleted"}, types)
+			require.Equal(t, deleted.ID, page.Events[1].EventID)
+			require.Equal(t, "tester", page.Events[1].Actor)
+		}
+	})
+
+	t.Run("claim holder naming itself reads history; other actors get 404", func(t *testing.T) {
+		env, project, issue := setupClaimGateIssue(t, true)
+		acquireClaimGateIssue(t, env, project, issue, "other")
+		_, _, _, err := env.DB.SoftDeleteIssue(t.Context(), issue.ID, "other")
+		require.NoError(t, err)
+
+		restore, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(project.ID, issue.ShortID, "actions/restore"),
+			map[string]string{"actor": "agent"}, nil)
+		assertAPIError(t, restore.StatusCode, raw, http.StatusConflict, "claim_denied")
+
+		status, body := deletedHistory(t, env, project, issue.ShortID, "&actor=other")
+		require.Equal(t, http.StatusOK, status, string(body))
+
+		for _, query := range []string{"&actor=agent", ""} {
+			status, body = deletedHistory(t, env, project, issue.ShortID, query)
+			assertAPIError(t, status, body, http.StatusNotFound, "issue_not_found")
+		}
+	})
+
+	t.Run("insecure-readonly anonymous caller gets 404", func(t *testing.T) {
+		env := testenv.New(t, testenv.WithInsecureReadonly())
+		project, issue, _ := setupClaimGateProject(t, env, false)
+		_, _, _, err := env.DB.SoftDeleteIssue(t.Context(), issue.ID, "tester")
+		require.NoError(t, err)
+
+		// Naming an actor keeps actor validation from refusing on its own, so
+		// only the read-only refusal can answer 404 here.
+		status, body := deletedHistory(t, env, project, issue.ShortID, "&actor=tester")
+		assertAPIError(t, status, body, http.StatusNotFound, "issue_not_found")
+	})
+}
+
+// allowAllHostAccess is a host controller that allows every operation.
+type allowAllHostAccess struct{}
+
+func (allowAllHostAccess) Authorize(context.Context, daemon.HostAccessRequest) (daemon.HostAccessDecision, error) {
+	return daemon.HostAccessDecision{
+		TransactionFence: func(context.Context, db.Transaction) error { return nil },
+	}, nil
+}
+
+// Under an embedded host access controller a soft-deleted issue's history is
+// exactly what main answers: issue_not_found, even when the controller allows
+// everything and even when the issue moved to a project that has since been
+// archived, whose own error would otherwise show the issue exists. An active issue's history still reads.
+func TestPollProjectEventsIssueDeletedHistoryIsNotFoundUnderHostAccess(t *testing.T) {
+	cases := []struct {
+		name          string
+		movedArchived bool
+	}{
+		{name: "controller allows everything"},
+		{name: "issue moved to an archived project", movedArchived: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dbh := openTestDB(t)
+			project, err := dbh.db.CreateProject(t.Context(), "host-history")
+			require.NoError(t, err)
+			target, err := dbh.db.CreateProject(t.Context(), "host-history-target")
+			require.NoError(t, err)
+			active, _, err := dbh.db.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "active", Author: "agent"})
+			require.NoError(t, err)
+			deleted, _, err := dbh.db.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "deleted", Author: "agent"})
+			require.NoError(t, err)
+			if tc.movedArchived {
+				_, err = dbh.db.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+					IssueID: deleted.ID, FromProjectID: project.ID, ToProjectID: target.ID,
+					IfMatchRev: deleted.Revision, Actor: "agent",
+				})
+				require.NoError(t, err)
+			}
+			_, _, _, err = dbh.db.SoftDeleteIssue(t.Context(), deleted.ID, "agent")
+			require.NoError(t, err)
+			if tc.movedArchived {
+				_, _, err = dbh.db.RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: target.ID, Actor: "agent", Force: true})
+				require.NoError(t, err)
+			}
+
+			server := daemon.NewServer(daemon.ServerConfig{DB: dbh.db, StartedAt: dbh.now, HostAccess: allowAllHostAccess{}})
+			t.Cleanup(func() { _ = server.Close() })
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				ctx := daemon.WithPrincipal(r.Context(), daemon.Principal{
+					Kind: daemon.PrincipalHost, Subject: "host-user", Actor: "agent",
+				})
+				server.Handler().ServeHTTP(w, r.WithContext(ctx))
+			}))
+			t.Cleanup(ts.Close)
+
+			get := func(ref string) (int, []byte) {
+				req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+scopedProjectPath(project.ID, "events")+"?issue="+url.QueryEscape(ref)+"&actor=agent", nil)
+				require.NoError(t, err)
+				resp, err := ts.Client().Do(req)
+				require.NoError(t, err)
+				defer func() { _ = resp.Body.Close() }()
+				body, err := io.ReadAll(resp.Body)
+				require.NoError(t, err)
+				return resp.StatusCode, body
+			}
+
+			status, body := get(active.ShortID)
+			require.Equal(t, http.StatusOK, status, string(body))
+			status, body = get(deleted.ShortID)
+			assertAPIError(t, status, body, http.StatusNotFound, "issue_not_found")
+		})
+	}
 }

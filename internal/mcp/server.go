@@ -53,7 +53,9 @@ type Options struct {
 	// server must not serve Events.
 	Events bool
 	// Admission is shared across servers of one process; nil creates its own.
-	Admission         *ToolAdmission
+	Admission *ToolAdmission
+	// LoadedSections shares selected section IDs across servers; nil keeps selections local.
+	LoadedSections    *LoadedSections
 	Client            *kataclient.Client
 	LongRunningClient *kataclient.Client
 	Scope             *Scope
@@ -137,7 +139,7 @@ func New(options Options) (*sdkmcp.Server, error) {
 			Source: mcpicon.Source, MIMEType: "image/png", Sizes: []string{"256x256"},
 		}},
 	}, &sdkmcp.ServerOptions{
-		Instructions: "Use returned web_url values when linking to issues. Use Kata to search before creating work, claim actionable issues, record progress, and close only with evidence. All tools are fixed to " + scopeDescription + " and actor " + options.Actor + `. Call kata.skills with {"name":"workflow"} before your first write; call it with no arguments to list the other guides.`,
+		Instructions: "Use returned web_url values when linking to issues. Use Kata to search before creating work, claim actionable issues with ttl_seconds and renew before expiry by claiming again without if_unowned, comment with findings, and close only with evidence. All tools are fixed to " + scopeDescription + " and actor " + options.Actor + `. Call kata.skills with {"name":"workflow"} before your first write; call it with no arguments to list the other guides.`,
 		Capabilities: &sdkmcp.ServerCapabilities{
 			Tools: &sdkmcp.ToolCapabilities{ListChanged: true},
 		},
@@ -220,16 +222,16 @@ func registerIssueDiscoveryTools(server *sdkmcp.Server, handlers toolHandlers) {
 func registerIssueMutationTools(server *sdkmcp.Server, handlers toolHandlers) {
 	additive := toolHints(false, false, false)
 	mutating := toolHints(false, true, false)
-	addTool(server, "kata.claim", "Claim issue", "Claim an issue for the bound actor. Without force the call fails when another owner already holds it; force replaces that owner.", mutating, handlers.claim)
-	addTool(server, "kata.comment", "Add comment", "Append a progress or context comment using a required idempotency key.", additive, handlers.comment)
+	addTool(server, "kata.claim", "Claim issue", "Claim an issue for the bound actor. Without force the call fails when another owner already holds it; force replaces that owner. Pass ttl_seconds to expire the claim, and renew it before expiry by claiming again with ttl_seconds, without if_unowned.", mutating, handlers.claim)
+	addTool(server, "kata.comment", "Add comment", "Append a finding a later reader needs using a required idempotency key. Keep live status in work.attention_msg.", additive, handlers.comment)
 	addTool(server, "kata.create", "Create issue", "Create project work after searching for duplicates. A stable idempotency key is required.", additive, handlers.create)
 	addTool(server, "kata.edit", "Edit issue", "Edit issue fields, ownership, priority, and relationship deltas atomically.", mutating, handlers.edit)
-	addTool(server, "kata.edit_comment", "Edit comment", "Replace one comment body as the startup actor.", mutating, handlers.editComment)
+	addTool(server, "kata.edit_comment", "Edit comment", "Replace one comment body as the startup actor. Use it to correct your own comment.", mutating, handlers.editComment)
 	addTool(server, "kata.move", "Move issue", "Move an issue and its active descendants to another in-scope project while preserving UIDs and relationships. Pass single to move one issue or dry_run to preview.", mutating, handlers.move)
-	addTool(server, "kata.set_deadline", "Set deadline", "Set or clear an issue deadline. Values accept a date, local date-time, or RFC 3339 UTC instant ending in Z.", mutating, handlers.setDeadline)
+	addTool(server, "kata.set_deadline", "Set deadline", "Set or clear an issue deadline. Dates and local date-times accept [IANA/Zone]; otherwise Kata uses the issue timezone, daemon timezone, or UTC when resolving it. UTC instants end in Z.", mutating, handlers.setDeadline)
 	addTool(server, "kata.set_label", "Set label presence", "Ensure that a label is present or absent on an issue.", mutating, handlers.setLabel)
 	addTool(server, "kata.set_metadata", "Patch metadata", "Patch issue metadata; JSON null removes a key. An optional revision makes the write conditional.", mutating, handlers.setMetadata)
-	addTool(server, "kata.set_schedule", "Set schedule", "Set or clear an issue schedule gate. Values accept a date, local date-time, or RFC 3339 UTC instant ending in Z.", mutating, handlers.setSchedule)
+	addTool(server, "kata.set_schedule", "Set schedule", "Set or clear an issue schedule gate. Dates and local date-times accept [IANA/Zone]; otherwise Kata uses the issue timezone, daemon timezone, or UTC when resolving it. UTC instants end in Z.", mutating, handlers.setSchedule)
 }
 
 func registerIssueLifecycleTools(server *sdkmcp.Server, handlers toolHandlers) {
@@ -237,7 +239,7 @@ func registerIssueLifecycleTools(server *sdkmcp.Server, handlers toolHandlers) {
 	additive := toolHints(false, false, false)
 	mutating := toolHints(false, true, false)
 	addTool(server, "kata.audit_closes", "Audit closes", "List close records with bounded project and time filters.", read, handlers.auditCloses)
-	addTool(server, "kata.close", "Close issue", "Close a completed issue with a reason, substantive message, and typed evidence.", mutating, handlers.close)
+	addTool(server, "kata.close", "Close issue", "Close a completed issue with a reason, substantive message, and typed evidence. Work whose PR is open and not merged is not complete.", mutating, handlers.close)
 	addTool(server, "kata.delete", "Delete issue", "Soft-delete an issue after exact confirmation.", mutating, handlers.deleteIssue)
 	addTool(server, "kata.purge", "Purge issue", "Irreversibly purge a soft-deleted issue after exact confirmation.", mutating, handlers.purgeIssue)
 	addTool(server, "kata.reopen", "Reopen issue", "Reopen a closed issue when new work is required.", mutating, handlers.reopen)
@@ -708,7 +710,7 @@ type LabelsInput struct {
 // ShowInput selects one bound-project issue.
 type ShowInput struct {
 	Thread       string `json:"thread,omitempty" jsonschema:"Comment reference whose transitive replies to show; maximum 50 including root"`
-	Inbound      string `json:"inbound,omitempty" jsonschema:"Author or author/teammate whose comments receive replies on this issue"`
+	Inbound      string `json:"inbound,omitempty" jsonschema:"Use a comment author_filter, optionally followed by /teammate, to find replies to that author"`
 	Kind         string `json:"kind,omitempty" jsonschema:"Reply kind filter; requires thread or inbound"`
 	Since        string `json:"since,omitempty" jsonschema:"Comments strictly after this comment reference"`
 	Ref          string `json:"ref" jsonschema:"Bare short ID, qualified reference, or full issue UID"`
@@ -725,8 +727,8 @@ type CreateInput struct {
 	Priority       *int64         `json:"priority,omitempty" jsonschema:"Priority from 0 through 4"`
 	Labels         []string       `json:"labels,omitempty" jsonschema:"Initial project labels"`
 	Metadata       map[string]any `json:"metadata,omitempty" jsonschema:"Initial issue metadata"`
-	ScheduledOn    string         `json:"scheduled_on,omitempty" jsonschema:"Schedule as YYYY-MM-DD, local YYYY-MM-DDTHH:MM[:SS], or an RFC 3339 UTC instant ending in Z"`
-	Timezone       string         `json:"timezone,omitempty" jsonschema:"IANA timezone for date-only and local scheduled_on values"`
+	ScheduledOn    string         `json:"scheduled_on,omitempty" jsonschema:"Schedule as YYYY-MM-DD or local YYYY-MM-DDTHH:MM[:SS] with optional [IANA/Zone], or an RFC 3339 UTC instant ending in Z"`
+	Timezone       string         `json:"timezone,omitempty" jsonschema:"IANA timezone for scheduled_on values without an explicit zone"`
 	ForceNew       bool           `json:"force_new,omitempty" jsonschema:"Create even when Kata finds a likely duplicate"`
 	Parent         string         `json:"parent,omitempty" jsonschema:"Parent issue reference"`
 	Blocks         []string       `json:"blocks,omitempty" jsonschema:"Issues this new issue blocks"`
@@ -745,8 +747,8 @@ type EditInput struct {
 	Priority         *int64         `json:"priority,omitempty" jsonschema:"Replacement priority from 0 through 4"`
 	ClearPriority    bool           `json:"clear_priority,omitempty" jsonschema:"Remove the current priority"`
 	Metadata         map[string]any `json:"metadata,omitempty" jsonschema:"Issue metadata merge patch; JSON null removes a key"`
-	ScheduledOn      *string        `json:"scheduled_on,omitempty" jsonschema:"Schedule as YYYY-MM-DD, local YYYY-MM-DDTHH:MM[:SS], or an RFC 3339 UTC instant ending in Z"`
-	Timezone         *string        `json:"timezone,omitempty" jsonschema:"IANA timezone for date-only and local scheduled_on values"`
+	ScheduledOn      *string        `json:"scheduled_on,omitempty" jsonschema:"Schedule as YYYY-MM-DD or local YYYY-MM-DDTHH:MM[:SS] with optional [IANA/Zone], or an RFC 3339 UTC instant ending in Z"`
+	Timezone         *string        `json:"timezone,omitempty" jsonschema:"IANA timezone for scheduled_on values without an explicit zone"`
 	ClearScheduledOn bool           `json:"clear_scheduled_on,omitempty" jsonschema:"Remove scheduled_on"`
 	ClearTimezone    bool           `json:"clear_timezone,omitempty" jsonschema:"Remove timezone"`
 	Parent           *string        `json:"parent,omitempty" jsonschema:"Replacement parent reference"`
@@ -788,7 +790,7 @@ type SetLabelInput struct {
 // SetDeadlineInput sets or clears the deadline_on metadata primitive.
 type SetDeadlineInput struct {
 	Ref           string  `json:"ref" jsonschema:"Issue reference in the bound project"`
-	Deadline      *string `json:"deadline,omitempty" jsonschema:"Deadline date, local date-time, or RFC 3339 UTC instant ending in Z"`
+	Deadline      *string `json:"deadline,omitempty" jsonschema:"Deadline date or local date-time with optional [IANA/Zone], or RFC 3339 UTC instant ending in Z"`
 	ClearDeadline bool    `json:"clear_deadline,omitempty" jsonschema:"Remove the current deadline"`
 	Revision      *int64  `json:"revision,omitempty" jsonschema:"Required current issue revision for a conditional write"`
 }
@@ -796,7 +798,7 @@ type SetDeadlineInput struct {
 // SetScheduleInput sets or clears the scheduled_on metadata primitive.
 type SetScheduleInput struct {
 	Ref           string  `json:"ref" jsonschema:"Issue reference in the bound project"`
-	Schedule      *string `json:"schedule,omitempty" jsonschema:"Schedule date, local date-time, or RFC 3339 UTC instant ending in Z"`
+	Schedule      *string `json:"schedule,omitempty" jsonschema:"Schedule date or local date-time with optional [IANA/Zone], or RFC 3339 UTC instant ending in Z"`
 	ClearSchedule bool    `json:"clear_schedule,omitempty" jsonschema:"Remove the current schedule gate"`
 	Revision      *int64  `json:"revision,omitempty" jsonschema:"Required current issue revision for a conditional write"`
 }
@@ -868,8 +870,8 @@ type IssueSummary struct {
 	UpdatedAt           string    `json:"updated_at"`
 	ScheduledOn         *string   `json:"scheduled_on,omitempty"`
 	Timezone            *string   `json:"timezone,omitempty"`
-	ScheduledOnDate     *string   `json:"scheduled_on_date,omitempty" jsonschema:"scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable or the daemon predates API 0.36.0"`
-	DeadlineOnDate      *string   `json:"deadline_on_date,omitempty" jsonschema:"deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable or the daemon predates API 0.36.0"`
+	ScheduledOnDate     *string   `json:"scheduled_on_date,omitempty" jsonschema:"scheduled_on as a YYYY-MM-DD calendar date; date-only values keep their written date; other values use their saved zone, then the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable or the daemon predates API 0.36.0"`
+	DeadlineOnDate      *string   `json:"deadline_on_date,omitempty" jsonschema:"deadline_on as a YYYY-MM-DD calendar date; date-only values keep their written date; other values use their saved zone, then the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable or the daemon predates API 0.36.0"`
 	updatedAt           time.Time
 	metadata            map[string]any
 	// oversized marks a compact row the daemon sent as identity only.
@@ -941,6 +943,7 @@ type CommentSummary struct {
 	Teammate           string            `json:"teammate,omitempty"`
 	UID                string            `json:"uid"`
 	Author             string            `json:"author"`
+	AuthorFilter       string            `json:"author_filter,omitempty" jsonschema:"Exact author for the inbound filter"`
 	Body               string            `json:"body"`
 	CreatedAt          string            `json:"created_at"`
 }

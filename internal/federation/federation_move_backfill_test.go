@@ -13,19 +13,22 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestFederationMoveBackfillAcceptsPayloadIssueIdentity(t *testing.T) {
+func TestFederationMoveBackfillReturnsTheMovedIssueHistory(t *testing.T) {
 	ctx := t.Context()
 	issueUID := "01ARZ3NDEKTSV4RRFFQ69AAA11"
 	sourceUID := "01ARZ3NDEKTSV4RRFFQ69AAA12"
 	targetUID := "01ARZ3NDEKTSV4RRFFQ69AAA13"
+	historyIssueUID := issueUID
 	history := api.EventEnvelope{
 		EventID: 8, EventUID: "01ARZ3NDEKTSV4RRFFQ69AAA14", OriginInstanceUID: "01ARZ3NDEKTSV4RRFFQ69AAA15",
 		Type: "issue.updated", ProjectID: 41, ProjectUID: sourceUID, ProjectName: "history-source",
-		Actor: "worker", ContentHash: "history-hash", Payload: jsontext.Value(`{"uid":"` + issueUID + `","title":"payload history"}`),
+		IssueUID: &historyIssueUID, Actor: "worker", ContentHash: "history-hash",
+		Payload:   jsontext.Value(`{"title":"earlier edit"}`),
 		CreatedAt: time.Unix(1, 0).UTC(),
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -62,8 +65,9 @@ func TestFederationMoveBackfillAcceptsPayloadIssueIdentity(t *testing.T) {
 	backfilled, err := backfillFederationMoveHistory(ctx, client, 42, page)
 	require.NoError(t, err)
 	require.Len(t, backfilled, 2)
-	require.Nil(t, backfilled[0].IssueUID, "backfill keeps the signed envelope unchanged")
-	require.Equal(t, issueUID, db.FederationEventIssueUID(backfilled[0].IssueUID, string(backfilled[0].Payload)))
+	require.Equal(t, history.EventUID, backfilled[0].EventUID, "earlier history precedes the move")
+	require.Equal(t, issueUID, db.EventIssueUID(backfilled[0].IssueUID))
+	require.JSONEq(t, `{"title":"earlier edit"}`, string(backfilled[0].Payload), "backfill keeps the signed payload unchanged")
 }
 
 func TestSyncFederationMoveBackfillsClaimAuditHistory(t *testing.T) {
@@ -541,4 +545,39 @@ func TestSyncFederationMoveSkipsHistoryBeforeNewHubBaseline(t *testing.T) {
 	got, err := newSpoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.Equal(t, newSpoke.projects[1].ID, got.ProjectID)
+}
+
+func TestSyncFederationMovedIssueLateEnrollment(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "late-source", "late-target")
+	issue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "late enrollment", Author: "worker"})
+	require.NoError(t, err)
+	spoke := newMoveDeliverySpoke(t, hub, projects[:1])
+	require.NoError(t, spoke.sync(t, 0))
+	before, err := spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	issue, err = hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	move, err := hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: issue.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	baseline, refreshed, err := hub.DB.RefreshProjectFederationBaseline(ctx, projects[1].ID, "worker")
+	require.NoError(t, err)
+	require.True(t, refreshed)
+	local, err := spoke.env.DB.CreateProjectWithUID(ctx, projects[1].Name, projects[1].UID)
+	require.NoError(t, err)
+	_, err = spoke.env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: local.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: projects[1].ID, HubProjectUID: projects[1].UID, ReplayHorizonEventID: baseline.ReplayHorizonEventID, PullCursorEventID: baseline.ReplayHorizonEventID - 1, Enabled: true, PushEnabled: true, Actor: "worker"})
+	require.NoError(t, err)
+	grant, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: spoke.env.DB.InstanceUID(), ProjectID: &projects[1].ID, Capabilities: "push,pull", Actor: "worker"})
+	require.NoError(t, err)
+	spoke.projects = append(spoke.projects, local)
+	spoke.credentials[local.UID] = config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[1].ID, Token: grant.Token, Actor: "worker"}
+	require.NoError(t, spoke.sync(t, 1), "late destination baseline must relocate the held source row")
+	retained, err := spoke.env.DB.EventsByUIDs(ctx, local.ID, []string{move.Event.UID})
+	require.ErrorIs(t, err, db.ErrNotFound, "destination recovery did not depend on receiving the move")
+	require.Empty(t, retained)
+	require.NoError(t, spoke.sync(t, 0), "the source keeps syncing after the relocation")
+	got, err := spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, before.ID, got.ID)
+	require.Equal(t, local.ID, got.ProjectID)
 }

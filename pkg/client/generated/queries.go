@@ -131,6 +131,15 @@ type ListProjectsQuery struct {
 	Include *string `json:"include,omitempty"`
 }
 
+type ReadProjectByNameQuery struct {
+	// Name project name
+	Name string `json:"name" validate:"required"`
+}
+
+func (r ReadProjectByNameQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
 type RemoveProjectQuery struct {
 	Actor string `json:"actor" validate:"required"`
 	Force *bool  `json:"force,omitempty"`
@@ -185,15 +194,55 @@ type PollProjectEventsQuery struct {
 
 	// IncludeEffectiveCloseEventUID Include the effective native close event UID in issue history when available.
 	IncludeEffectiveCloseEventUID *bool `json:"include_effective_close_event_uid,omitempty"`
+
+	// Actor Actor the caller acts as. A soft-deleted issue's history is readable when restore would accept this actor; an authenticated principal's own actor takes precedence. Used only with issue= on a soft-deleted issue; ignored otherwise.
+	Actor *string `json:"actor,omitempty"`
 }
 
 type GetProjectFederationQuery struct {
-	// RelayProtocolVersion Optionally check existing cross-project issue links for relay protocol 1 before enrollment. Returns 409 relay_cross_project_links when links must be removed.
+	// RelayProtocolVersion Check existing cross-project links before relay enrollment. Links within a shared group are allowed; other links return 409 relay_cross_project_links.
 	RelayProtocolVersion *int64 `json:"relay_protocol_version,omitempty" validate:"omitempty,gte=1,lte=1"`
 }
 
 func (g GetProjectFederationQuery) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(g))
+}
+
+type FederatedDocbankCapabilitiesQuery struct {
+	ProjectUID string  `json:"project_uid" validate:"required"`
+	Origin     *string `json:"origin,omitempty"`
+}
+
+func (f FederatedDocbankCapabilitiesQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(f))
+}
+
+type LinkFederatedDocbankQuery struct {
+	Origin     string `json:"origin" validate:"required"`
+	ProjectUID string `json:"project_uid" validate:"required"`
+}
+
+func (l LinkFederatedDocbankQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(l))
+}
+
+type UploadFederatedDocbankQuery struct {
+	Origin     string `json:"origin" validate:"required"`
+	ProjectUID string `json:"project_uid" validate:"required"`
+	Name       string `json:"name" validate:"required"`
+}
+
+func (u UploadFederatedDocbankQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(u))
+}
+
+type FederatedDocbankContentQuery struct {
+	ProjectUID string `json:"project_uid" validate:"required"`
+	Origin     string `json:"origin" validate:"required"`
+}
+
+func (f FederatedDocbankContentQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(f))
 }
 
 type PollFederationProjectEventsQuery struct {
@@ -202,6 +251,9 @@ type PollFederationProjectEventsQuery struct {
 	// IssueUID Read retained history only for an issue currently owned by this project, independently of the project cursor.
 	IssueUID *string `json:"issue_uid,omitempty"`
 	Limit    *int64  `json:"limit,omitempty"`
+
+	// Wait Seconds the hub may hold a caught-up project poll until an event commits. The hub caps it at the value in X-Kata-Federation-Poll-Wait-Max and answers at once when it cannot hold the request.
+	Wait *int64 `json:"wait,omitempty"`
 }
 
 type OfferRelayDeliveriesQuery struct {
@@ -237,6 +289,43 @@ func (o OfferRelayDeliveriesQuery) Validate() error {
 		return nil
 	}
 	return errors
+}
+
+type SearchFederationProjectQuery struct {
+	Q string `json:"q" validate:"required"`
+
+	// Auto Fall back to keyword search when the hub cannot run semantic search. Absent means strict semantic.
+	Auto         *bool                               `json:"auto,omitempty"`
+	Limit        *int64                              `json:"limit,omitempty"`
+	Status       *SearchFederationProjectQueryStatus `json:"status,omitempty"`
+	Label        []string                            `json:"label,omitempty"`
+	ExcludeLabel []string                            `json:"exclude_label,omitempty"`
+}
+
+func (s SearchFederationProjectQuery) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(s.Q, "required"); err != nil {
+		errors = errors.Append("Q", err)
+	}
+	if s.Status != nil {
+		if v, ok := any(s.Status).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Status", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type GetProjectFederationStatusQuery struct {
+	// Compact Omit relay checkpoint capacity measurement. Error details are unchanged unless omit_errors is also set.
+	Compact *bool `json:"compact,omitempty"`
+
+	// OmitErrors Remove error text from the status: the sync error, held-back batch errors, the embedding producer error, and the relay checkpoint error. State, timestamps, and counts remain, and has_sync_error reports whether a sync error was removed.
+	OmitErrors *bool `json:"omit_errors,omitempty"`
 }
 
 type ListIssuesQuery struct {
@@ -312,8 +401,9 @@ func (s ShowIssueQuery) Validate() error {
 }
 
 type AddAttachmentQuery struct {
-	Name  string  `json:"name" validate:"required"`
-	Actor *string `json:"actor,omitempty"`
+	Name          string  `json:"name" validate:"required"`
+	Actor         *string `json:"actor,omitempty"`
+	ReuseExisting *bool   `json:"reuse_existing,omitempty"`
 }
 
 func (a AddAttachmentQuery) Validate() error {
@@ -481,8 +571,9 @@ func (r ReadyIssuesGlobalQuery) Validate() error {
 }
 
 type ResolveUIIssueReferenceQuery struct {
-	ProjectID int64  `json:"project_id"`
-	Ref       string `json:"ref" validate:"required"`
+	ProjectID *int64  `json:"project_id,omitempty"`
+	Project   *string `json:"project,omitempty"`
+	Ref       string  `json:"ref" validate:"required"`
 }
 
 func (r ResolveUIIssueReferenceQuery) Validate() error {

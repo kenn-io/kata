@@ -689,29 +689,35 @@ func (d *Store) CheckClaimGate(ctx context.Context, p db.ClaimGateParams) error 
 	if err := validateClaimPrincipal(p.Principal); err != nil {
 		return err
 	}
-	tx, err := d.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := d.BeginTx(ctx, &sql.TxOptions{ReadOnly: !p.ApplyTransactionFence})
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	finish := func() error {
+		if p.ApplyTransactionFence {
+			return tx.Commit()
+		}
+		return nil
+	}
 	issue, err := resolveClaimGateIssueTx(ctx, tx, p.ProjectID, p.IssueRef)
 	if err != nil {
 		return err
 	}
 	live, err := liveClaimForIssueTx(ctx, tx, issue.UID)
 	if errors.Is(err, db.ErrNotFound) {
-		return nil
+		return finish()
 	}
 	if err != nil {
 		return err
 	}
 	if live.ClaimKind == "timed" && live.ExpiresAt != nil && !live.ExpiresAt.After(now) {
-		return nil
+		return finish()
 	}
 	if !sameClaimGateHolder(live, p.Principal) {
 		return db.ErrClaimDenied
 	}
-	return nil
+	return finish()
 }
 
 func resolveClaimGateIssueTx(ctx context.Context, tx claimStore, projectID int64, issueRef string) (db.Issue, error) {
@@ -722,7 +728,7 @@ func resolveClaimGateIssueTx(ctx context.Context, tx claimStore, projectID int64
 	const q = `
 		SELECT i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status,
 		       i.closed_reason, i.owner, i.assignment_expires_on, i.priority, i.author,
-		       i.metadata, i.revision,
+		       i.metadata, i.revision, i.content_revision,
 		       i.recurrence_id, i.occurrence_key,
 		       i.created_at, i.updated_at, i.closed_at, i.deleted_at
 		  FROM issues i
@@ -734,7 +740,7 @@ func resolveClaimGateIssueTx(ctx context.Context, tx claimStore, projectID int64
 		&issue.ID, &issue.UID, &issue.ProjectID, &issue.ProjectUID, &issue.ShortID,
 		&issue.Title, &issue.Body, &issue.Status, &issue.ClosedReason, &issue.Owner,
 		&issue.AssignmentExpiresOn, &issue.Priority, &issue.Author, &issue.Metadata,
-		&issue.Revision,
+		&issue.Revision, &issue.ContentRevision,
 		&issue.RecurrenceID, &issue.OccurrenceKey, &issue.CreatedAt, &issue.UpdatedAt,
 		&issue.ClosedAt, &issue.DeletedAt)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1250,32 +1256,10 @@ func federationIngestClaimAuditIssueUIDs(ev db.RemoteEvent) ([]federationIngestC
 		out = append(out, issue)
 	}
 	if claimWorkMutationRequiresClaim(ev.Type) && !attentionOnlyMetadataEvent(ev.Type, ev.Payload) {
-		issueUID := ""
-		if ev.IssueUID != nil {
-			issueUID = *ev.IssueUID
-		}
-		if issueUID == "" {
-			uid, err := payloadIssueUID(ev, payload)
-			if err != nil {
-				return nil, err
-			}
-			issueUID = uid
-		}
-		add(federationIngestClaimAuditIssue{UID: issueUID, RequireClaim: true})
+		add(federationIngestClaimAuditIssue{UID: db.EventIssueUID(ev.IssueUID), RequireClaim: true})
 	}
 	if ev.Type == "issue.snapshot" {
-		issueUID := ""
-		if ev.IssueUID != nil {
-			issueUID = *ev.IssueUID
-		}
-		if issueUID == "" {
-			uid, err := payloadIssueUID(ev, payload)
-			if err != nil {
-				return nil, err
-			}
-			issueUID = uid
-		}
-		add(federationIngestClaimAuditIssue{UID: issueUID, RequireClaim: true})
+		add(federationIngestClaimAuditIssue{UID: db.EventIssueUID(ev.IssueUID), RequireClaim: true})
 	}
 	if ev.Type == "issue.created" || ev.Type == "issue.snapshot" || claimWorkMutationRequiresPeerClaim(ev.Type) {
 		refs, err := payloadReferencedIssueUIDs(ev, payload)
@@ -1359,7 +1343,7 @@ func (d *Store) annotateClaimWorkMutationTx(
 
 func claimWorkMutationRequiresClaim(eventType string) bool {
 	switch eventType {
-	case "issue.moved", "issue.updated", "issue.assigned", "issue.unassigned", "issue.assignment_renewed",
+	case "issue.moved", "issue.updated", db.RepeatedImportEventType, "issue.assigned", "issue.unassigned", "issue.assignment_renewed",
 		"issue.assignment_expired",
 		"issue.priority_set", "issue.priority_cleared",
 		"issue.closed", "issue.reopened", "issue.soft_deleted", "issue.restored",
@@ -1659,7 +1643,7 @@ func (d *Store) UnresolvedClaimViolationsForProject(
 }
 
 const claimViolationSelect = `
-	SELECT e.id, e.uid, COALESCE(e.issue_uid, json_extract(e.payload, '$.issue_uid'), ''),
+	SELECT e.id, e.uid, COALESCE(e.issue_uid, ''),
 	       COALESCE(i.short_id, ''),
 	       COALESCE(json_extract(e.payload, '$.offending_event_uid'),
 	                json_extract(e.payload, '$.event_uid'), ''),
@@ -1768,7 +1752,7 @@ func resolveClaimIssueTx(ctx context.Context, tx claimStore, projectID int64, is
 	const q = `
 		SELECT i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status,
 		       i.closed_reason, i.owner, i.assignment_expires_on, i.priority, i.author,
-		       i.metadata, i.revision,
+		       i.metadata, i.revision, i.content_revision,
 		       i.recurrence_id, i.occurrence_key,
 		       i.created_at, i.updated_at, i.closed_at, i.deleted_at, p.name
 		  FROM issues i
@@ -1781,7 +1765,7 @@ func resolveClaimIssueTx(ctx context.Context, tx claimStore, projectID int64, is
 		&issue.ID, &issue.UID, &issue.ProjectID, &issue.ProjectUID, &issue.ShortID,
 		&issue.Title, &issue.Body, &issue.Status, &issue.ClosedReason, &issue.Owner,
 		&issue.AssignmentExpiresOn, &issue.Priority, &issue.Author, &issue.Metadata,
-		&issue.Revision,
+		&issue.Revision, &issue.ContentRevision,
 		&issue.RecurrenceID, &issue.OccurrenceKey, &issue.CreatedAt, &issue.UpdatedAt,
 		&issue.ClosedAt, &issue.DeletedAt, &projectName)
 	if errors.Is(err, sql.ErrNoRows) {

@@ -13,6 +13,7 @@
   import LaunchHint from './components/LaunchHint.svelte'
   import LoginView from './components/LoginView.svelte'
   import RouteError from './components/RouteError.svelte'
+  import StatusPage from './components/shared/StatusPage.svelte'
   import VersionMismatch from './components/VersionMismatch.svelte'
   import { createCredentialedFetch, setGeneratedFetch } from './lib/api/client'
   import {
@@ -36,6 +37,7 @@
     patchProjectMetadata,
     patchRecurrence as patchRecurrenceRequest,
     readUIReferences,
+    resolveUIIssueReference,
     removeLabel as removeLabelRequest,
     reopenIssue as reopenIssueRequest,
     setIssuePriority,
@@ -49,7 +51,12 @@
     type UIReferencesResponseBody,
     type TokenOut,
   } from './lib/api/generated'
-  import { createDaemonFetch, fetchWebDaemons, type WebDaemonInfo } from './lib/daemons/client'
+  import {
+    createDaemonFetch,
+    fetchWebDaemons,
+    rosterUnavailable,
+    type WebDaemonInfo,
+  } from './lib/daemons/client'
   import { loadDaemonRoute, saveDaemonRoute } from './lib/daemons/state'
   import {
     AuthenticationRequiredError,
@@ -85,9 +92,13 @@
     type MutationState,
   } from './lib/mutations/controller'
   import {
+    collectionIntentKey,
     createUISnapshotRequest,
+    projectUISnapshot,
+    selectsInSameList,
     SnapshotController,
     snapshotIntentForRoute,
+    snapshotRequestIntent,
     uiSnapshotIntentKey,
     type SnapshotState,
     type UISnapshot,
@@ -114,16 +125,49 @@
   const selectedAuthentication = selectAuthenticationMode(launch)
   const initialRoute = parseRoute(new URL(window.location.href))
   let route = $state(initialRoute)
+  let linkUpgradeRequired = false
   let acceptedRoute = $state<AppRoute | undefined>()
   let returnPath = $state(launch.returnPath)
   let mode = $state(initialMode(launch, initialRoute, selectedAuthentication))
   let authority = $state.raw<SnapshotState<UISnapshotIntent, UISnapshot> | undefined>()
-  const shellSnapshot = $derived(authority?.snapshot)
+  // The list route last shown from the snapshot already loaded, without a
+  // request of its own.
+  let listFromLoadedSnapshot = $state.raw<AppRoute | undefined>()
+  let shownSnapshot:
+    | { source: UISnapshot; projectUID: string | undefined; listOnly: boolean; value: UISnapshot }
+    | undefined
+  // The daemon sends every project's tasks; the shell shows the accepted route's
+  // share of them. The same inputs keep the same object, so an unchanged
+  // revalidation does not re-render the list.
+  const shellSnapshot = $derived.by(() => {
+    const source = authority?.snapshot
+    if (!source) return undefined
+    const projectUID = acceptedRoute?.projectUID
+    // A list shown from a task's snapshot leaves that task's detail behind.
+    const listOnly = acceptedRoute !== undefined && acceptedRoute === listFromLoadedSnapshot
+    if (
+      shownSnapshot?.source === source &&
+      shownSnapshot.projectUID === projectUID &&
+      shownSnapshot.listOnly === listOnly
+    ) {
+      return shownSnapshot.value
+    }
+    let value = projectUID ? projectUISnapshot(source, projectUID) : source
+    if (listOnly && (value.selected || value.graph)) {
+      value = { ...value }
+      delete value.selected
+      delete value.graph
+    }
+    shownSnapshot = { source, projectUID, listOnly, value }
+    return value
+  })
   let references = $state<UIReferencesResponseBody | undefined>()
   let mutationPending = $state(false)
   let mutationState = $state<MutationState>({ kind: 'idle' })
   let draftFenceGeneration = $state(0)
-  let pendingCreate: { title: string; parentIssueUID?: string; key: string } | undefined
+  let pendingCreate:
+    | { title: string; parentIssueUID?: string; projectUID: string; key: string }
+    | undefined
   let pendingComment: { identity: string; key: string } | undefined
   let automaticSessionAttempted: 'loopback' | 'proxy' | undefined
   let advertisedAuthentication: 'loopback' | 'login' | 'proxy' | 'unavailable' | undefined
@@ -134,7 +178,10 @@
   let liveUpdatesReconnecting = $state(false)
   let daemonInfos = $state<WebDaemonInfo[]>([])
   let activeDaemonID = $state<string | undefined>()
+  let explicitDaemonID = launchDaemonID
   let daemonRosterLoaded = false
+  let daemonRosterAbort: AbortController | undefined
+  let daemonRefreshAbort: AbortController | undefined
   let authenticationRecoveryPending = false
   let authenticationRecoveryCompletion: Promise<boolean> | undefined
   let daemonSwitching = $state(false)
@@ -142,6 +189,7 @@
   let referenceAbort: AbortController | undefined
   let referenceGeneration = 0
   let credentialTokens = $state<TokenOut[]>([])
+  let syncRefreshGeneration = $state(0)
   let credentialLoading = $state(false)
   let credentialError = $state<string | undefined>()
   let credentialAbort: AbortController | undefined
@@ -221,7 +269,11 @@
   $effect(() => {
     reportScreenViewed()
   })
-  const snapshots = new SnapshotController(createUISnapshotRequest(), uiSnapshotIntentKey)
+  const snapshots = new SnapshotController(
+    createUISnapshotRequest(),
+    uiSnapshotIntentKey,
+    selectsInSameList,
+  )
   const mutations = new MutationController({
     authority: () => ({
       canMutate: authority?.canMutate ?? false,
@@ -262,10 +314,14 @@
     )
   }
 
+  let recurrenceRevision = $state(0)
   const invalidations = new InvalidationController((full) => refreshSnapshot(full))
   const stream = new EventStreamController({
     connect: (cursor, signal, onOpen) => openEventStream(browserFetch, cursor, signal, onOpen),
-    onFrame: (frame) => invalidations.frame(frame),
+    onFrame: (frame) => {
+      if (frame.event.startsWith('recurrence.')) recurrenceRevision++
+      invalidations.frame(frame)
+    },
     onAuthenticationRequired: requireAuthentication,
     onState: (state) => {
       const wasReconnecting = liveUpdatesReconnecting
@@ -298,7 +354,8 @@
       state.snapshot &&
       !state.loading &&
       !state.authenticationRequired &&
-      route.kind !== 'route-error'
+      route.kind !== 'route-error' &&
+      (!route.link || route.issueUID !== undefined)
     ) {
       mode = 'ready'
     }
@@ -308,10 +365,24 @@
     setThemeMode(preferences.theme)
   })
 
+  $effect(() => {
+    if (
+      versionMismatch ||
+      mode === 'loading' ||
+      route.kind === 'route-error' ||
+      !authority?.snapshot
+    ) {
+      document.title = 'Kata'
+    }
+  })
+
   onMount(() => {
     const visibility = () => {
       scheduler.visibilityChanged(!document.hidden)
-      if (!document.hidden && !credentialLoading) void refreshCredentials()
+      if (!document.hidden) {
+        syncRefreshGeneration++
+        if (!credentialLoading) void refreshCredentials()
+      }
     }
     const focus = () => {
       scheduler.focused()
@@ -328,8 +399,8 @@
         mode = 'route-error'
         return
       }
-      mode = authority?.snapshot ? 'ready' : 'loading'
-      void startAuthority()
+      mode = authority?.snapshot && !next.link ? 'ready' : 'loading'
+      loadRoute()
     }
     document.addEventListener('visibilitychange', visibility)
     window.addEventListener('focus', focus)
@@ -337,7 +408,10 @@
     window.addEventListener('popstate', popstate)
     window.addEventListener('kata:versionMismatch', showVersionMismatch)
     const credentialRefreshTimer = window.setInterval(() => {
-      if (!document.hidden && !credentialLoading) void refreshCredentials()
+      if (!document.hidden) {
+        syncRefreshGeneration++
+        if (!credentialLoading) void refreshCredentials()
+      }
     }, 30_000)
     reportAppOpened()
     if (route.kind !== 'route-error' && launch.kind !== 'login') {
@@ -362,6 +436,8 @@
       stream.stop()
       invalidations.stop()
       snapshots.abort()
+      daemonRosterAbort?.abort()
+      daemonRefreshAbort?.abort()
       referenceGeneration += 1
       referenceAbort?.abort()
       fenceCredentialAudit()
@@ -382,6 +458,8 @@
   }
 
   function invalidateDaemonRoster(): void {
+    daemonRosterAbort?.abort()
+    daemonRefreshAbort?.abort()
     if (!directDaemonTarget) daemonRosterLoaded = false
   }
 
@@ -408,6 +486,16 @@
   }
 
   function navigate(next: AppRoute): void {
+    const current = route.kind === 'kata' ? route : undefined
+    if (
+      next.link &&
+      (!next.issueUID ||
+        next.issueUID !== current?.issueUID ||
+        next.projectUID !== current?.projectUID)
+    ) {
+      next = { ...next }
+      delete next.link
+    }
     const opensCredentials =
       route.kind !== 'route-error' && !isDaemonView(route.view) && isDaemonView(next.view)
     if (opensCredentials && route.kind !== 'route-error') {
@@ -436,7 +524,56 @@
     route = next
     if (activeDaemonID) saveDaemonRoute(activeDaemonID, serializeRoute(next))
     mode = authority?.snapshot ? 'ready' : 'loading'
-    void startAuthority()
+    loadRoute()
+  }
+
+  // Shows a list the accepted snapshot already holds, such as another project,
+  // in the same frame. Live updates keep that snapshot current; a polled daemon
+  // is asked again in the background. Any other route waits for its snapshot.
+  function loadRoute(): void {
+    // The $state proxy of the route, which refreshSnapshot accepts again after
+    // a revalidation. Accepting the same object keeps shellSnapshot, so an
+    // unchanged revalidation does not normalize and render the list again.
+    const next = route
+    if (next.kind === 'route-error') return
+    if (!showsFromAcceptedSnapshot(next)) {
+      void startAuthority()
+      return
+    }
+    acceptedRoute = next
+    listFromLoadedSnapshot = next
+    mode = 'ready'
+    if (authority?.snapshot?.capabilities.updates === 'poll') invalidations.refresh()
+  }
+
+  function showsFromAcceptedSnapshot(next: AppRoute): boolean {
+    const accepted = snapshots.state
+    return (
+      next.issueUID === undefined &&
+      !next.link &&
+      !isDaemonView(next.view) &&
+      accepted.snapshot !== undefined &&
+      accepted.intent !== undefined &&
+      !accepted.loading &&
+      !accepted.stale &&
+      !accepted.authenticationRequired &&
+      !daemonSwitching &&
+      daemonError === undefined &&
+      collectionIntentKey(accepted.intent) === collectionIntentKey(requestIntentForRoute(next))
+    )
+  }
+
+  // Reads the route afresh after an await; TypeScript would keep a narrowing
+  // of the route variable from before it.
+  function currentRoute(): KataRoute {
+    return route
+  }
+
+  function requestIntentForRoute(next: AppRoute): UISnapshotIntent {
+    const intent = snapshotRequestIntent(
+      snapshotIntentForRoute(next, undefined, undefined, { closedLimit: boardClosedLimit }),
+    )
+    return activeDaemonID ? { ...intent, daemonID: activeDaemonID } : intent
   }
 
   function returnFromCredentials(): void {
@@ -479,36 +616,27 @@
     )
   }
 
-  async function designateInbox(projectUID: string): Promise<void> {
-    const projects = authority?.snapshot?.catalog?.map(({ project }) => project) ?? []
-    const target = projects.find((project) => project.uid === projectUID)
-    if (!target) throw new Error('Inbox project is not available.')
-    if (target.metadata?.role === 'inbox') return
-
-    const accepted = await runMutation({ draft: projectUID }, (context) =>
-      patchInboxProject(target, context),
-    )
-    if (!accepted) {
-      throw new Error(mutationMessage(mutationState) ?? 'Could not designate the Inbox project.')
-    }
-  }
-
   async function createIssue(
     title: string,
     parent?: { projectID: number; projectUID: string; issueUID: string },
+    projectUID?: string,
   ): Promise<void> {
     const project = parent
       ? authority?.snapshot?.catalog?.find(({ project }) => project.id === parent.projectID)
           ?.project
-      : authority?.snapshot?.catalog?.find(({ project }) => project.metadata?.role === 'inbox')
-          ?.project
+      : authority?.snapshot?.catalog?.find(({ project }) =>
+          projectUID ? project.uid === projectUID : project.metadata?.role === 'inbox',
+        )?.project
     if (!project) throw new Error('Task project is not available.')
 
     const create =
-      pendingCreate?.title === title && pendingCreate.parentIssueUID === parent?.issueUID
+      pendingCreate?.title === title &&
+      pendingCreate.parentIssueUID === parent?.issueUID &&
+      pendingCreate.projectUID === project.uid
         ? pendingCreate
         : {
             title,
+            projectUID: project.uid,
             ...(parent ? { parentIssueUID: parent.issueUID } : {}),
             key: globalThis.crypto.randomUUID(),
           }
@@ -587,9 +715,11 @@
         ),
       )
     }
-    const body: { title?: string; body?: string } = {}
+    const body: { title?: string; body?: string; expected_content_revision?: number } = {}
     if (patch.title !== undefined) body.title = patch.title
     if (patch.body !== undefined) body.body = patch.body
+    if (patch.expected_content_revision !== undefined)
+      body.expected_content_revision = patch.expected_content_revision
     return runMutation({ draft: patch }, (context) =>
       editIssueRequest(
         { projectId: String(target.project_id), ref: target.ref },
@@ -673,15 +803,14 @@
       ),
     )
     if (!accepted) throw new Error(mutationMessage(mutationState) ?? 'Could not create recurrence.')
+    recurrenceRevision++
   }
 
   async function patchRecurrence(
-    id: number,
+    recurrence: KataRecurrence,
     input: KataPatchRecurrenceInput,
     etag: string,
   ): Promise<void> {
-    const recurrence = authority?.snapshot?.selected?.recurrences?.find((item) => item.id === id)
-    if (!recurrence) throw new Error(`Recurrence is not loaded: id=${id}`)
     const body: PatchRecurrenceRequestBody = {}
     if (input.rrule !== undefined) body.rrule = input.rrule
     if (input.dtstart !== undefined) body.dtstart = input.dtstart
@@ -694,24 +823,21 @@
         { headers: context.headers },
       ),
     )
-    if (accepted) return
+    if (accepted) {
+      recurrenceRevision++
+      return
+    }
     if (mutationState.kind === 'revision-conflict') {
-      const replacement = authority?.snapshot?.selected?.recurrences?.find(
-        (item) => item.uid === recurrence.uid,
-      )
       throw Object.assign(new Error(mutationState.detail), {
         status: 412,
         code: mutationState.code,
-        ...(replacement
-          ? { response: { recurrence: replacement, etag: `"rev-${replacement.revision}"` } }
-          : {}),
       })
     }
     throw new Error(mutationMessage(mutationState) ?? 'Could not update recurrence.')
   }
 
-  async function deleteRecurrence(recurrence: KataRecurrence): Promise<boolean> {
-    return runMutation(
+  async function deleteRecurrence(recurrence: KataRecurrence): Promise<void> {
+    const accepted = await runMutation(
       { draft: recurrence, revision: `"rev-${recurrence.revision}"` },
       async (context) => {
         const result = await deleteRecurrenceRequest(
@@ -724,6 +850,13 @@
         return { ...result, data: result.status === 204 ? true : result.data }
       },
     )
+    if (!accepted) {
+      if (mutationState.kind === 'revision-conflict') {
+        throw Object.assign(new Error(mutationState.detail), { status: 412 })
+      }
+      throw new Error(mutationMessage(mutationState) ?? 'Could not stop repeating.')
+    }
+    recurrenceRevision++
   }
 
   function recurrenceTemplate(
@@ -965,15 +1098,6 @@
     return JSON.stringify(value.filters)
   }
 
-  function deleteIssue(): Promise<boolean> {
-    return closeIssue({
-      reason: 'wontfix',
-      message:
-        'Removed from active work through the web issue detail because this task is no longer intended to be completed.',
-      evidence: [],
-    })
-  }
-
   async function runMutation(
     options: { draft?: unknown; revision?: string; createKey?: string; actionKind?: string },
     mutate: (context: MutationContext) => Promise<MutationResult>,
@@ -1020,7 +1144,7 @@
     if (state.kind === 'uncertain') {
       return 'The write result is uncertain. Kata refreshed current authority before retry.'
     }
-    if (state.kind === 'blocked') return 'This issue is read-only or its authority is stale.'
+    if (state.kind === 'blocked') return "Can't make changes. Refresh or check access."
     return undefined
   }
 
@@ -1119,6 +1243,10 @@
     return accepted
   }
 
+  function readDaemonRoster(signal: AbortSignal): Promise<WebDaemonInfo[]> {
+    return fetchWebDaemons(browserFetch, signal, explicitDaemonID)
+  }
+
   async function loadDaemonRoster(): Promise<boolean> {
     if (daemonRosterLoaded) return directDaemonTarget || activeDaemonID !== undefined
     if (directDaemonTarget) {
@@ -1128,8 +1256,11 @@
       return true
     }
     const retainedDaemonID = activeDaemonID
+    daemonRosterAbort?.abort()
+    const abort = (daemonRosterAbort = new AbortController())
     try {
-      const loadedDaemons = await fetchWebDaemons(browserFetch)
+      const loadedDaemons = await readDaemonRoster(abort.signal)
+      if (abort.signal.aborted || destroyed) return false
       const nextDaemonID =
         loadedDaemons.find(
           (daemon) => daemon.id === retainedDaemonID && daemon.health !== 'upgrade_required',
@@ -1166,6 +1297,7 @@
         }
       }
     } catch (error) {
+      if (abort.signal.aborted || destroyed) return false
       if (
         isAuthenticationRequiredError(error) &&
         error instanceof AuthenticationRequiredError &&
@@ -1180,16 +1312,34 @@
       references = undefined
       acceptedRoute = undefined
       mode = 'loading'
-      daemonError = 'Configured daemons are unavailable'
+      daemonError = rosterUnavailable
       return false
+    } finally {
+      if (daemonRosterAbort === abort) daemonRosterAbort = undefined
     }
     return true
+  }
+
+  async function refreshDaemonRoster(): Promise<void> {
+    if (directDaemonTarget) return
+    daemonRefreshAbort?.abort()
+    const abort = (daemonRefreshAbort = new AbortController())
+    try {
+      const loaded = await readDaemonRoster(abort.signal)
+      if (abort.signal.aborted || destroyed) return
+      daemonInfos = loaded
+    } catch {
+      // Keep the current roster when refresh fails.
+    } finally {
+      if (daemonRefreshAbort === abort) daemonRefreshAbort = undefined
+    }
   }
 
   async function switchDaemon(id: string): Promise<void> {
     if (daemonSwitching || authenticationRecoveryPending || id === activeDaemonID) return
     if (daemonInfos.find((daemon) => daemon.id === id)?.health === 'upgrade_required') return
     const sourceDaemon = activeDaemonID
+    const sourceExplicitDaemon = explicitDaemonID
     const sourceRoute = route.kind === 'route-error' ? acceptedRoute : route
     if (sourceDaemon && sourceRoute) saveDaemonRoute(sourceDaemon, serializeRoute(sourceRoute))
     const restoredPath = loadDaemonRoute(id) ?? `${routePath}?view=all-open`
@@ -1207,6 +1357,8 @@
     referenceAbort?.abort()
     references = undefined
     activeDaemonID = id
+    explicitDaemonID = id
+    linkUpgradeRequired = false
     route = restored
     acceptedRoute = undefined
     history.replaceState(null, '', serializeRoute(restored))
@@ -1229,9 +1381,15 @@
       return
     }
 
+    if ((linkUpgradeRequired || currentRoute().kind === 'route-error') && activeDaemonID === id) {
+      daemonSwitching = false
+      return
+    }
+
     daemonError = `Could not connect to ${id}`
     if (sourceDaemon && sourceRoute) {
       activeDaemonID = sourceDaemon
+      explicitDaemonID = sourceExplicitDaemon
       route = sourceRoute
       acceptedRoute = undefined
       history.replaceState(null, '', serializeRoute(sourceRoute))
@@ -1244,22 +1402,70 @@
 
   async function refreshSnapshot(full: boolean): Promise<boolean> {
     if (route.kind === 'route-error') return false
-    const requestedRoute = route
-    const baseIntent = snapshotIntentForRoute(requestedRoute, undefined, undefined, {
-      closedLimit: boardClosedLimit,
-    })
-    const intent = activeDaemonID ? { ...baseIntent, daemonID: activeDaemonID } : baseIntent
-    const accepted = await snapshots.load(intent, { full })
+    if (route.link && !route.issueUID) {
+      linkUpgradeRequired = false
+      const pending = route
+      const link = route.link
+      const daemonID = activeDaemonID
+      mode = 'loading'
+      try {
+        const result = await resolveUIIssueReference({
+          ref: link.issue,
+          ...(link.scope ? { project: link.scope } : {}),
+        })
+        if (destroyed || route !== pending || daemonID !== activeDaemonID) return false
+        if (result.status === 401) {
+          snapshots.markAuthenticationRequired()
+          requireAuthentication()
+          return false
+        }
+        if (result.status === 422) {
+          linkUpgradeRequired = true
+          snapshots.markFailure('Upgrade the selected daemon to open short issue links.')
+          return false
+        }
+        if (result.status === 404) {
+          route = {
+            kind: 'route-error',
+            path: window.location.pathname + window.location.search,
+            reason: 'issue_uid',
+            searchRef: link.issue,
+          }
+          mode = 'route-error'
+          return false
+        }
+        if (result.status !== 200) {
+          snapshots.markFailure()
+          return false
+        }
+        const resolved: AppRoute = { ...pending, issueUID: result.data.issue.uid }
+        if (result.data.scope_project_uid) resolved.projectUID = result.data.scope_project_uid
+        else delete resolved.projectUID
+        route = resolved
+      } catch {
+        if (!destroyed && route === pending && daemonID === activeDaemonID) snapshots.markFailure()
+        return false
+      }
+    }
+    const snapshotRoute = currentRoute()
+    if (snapshotRoute.kind === 'route-error') return false
+    const accepted = await snapshots.load(requestIntentForRoute(snapshotRoute), { full })
     if (snapshots.state.authenticationRequired) {
       requireAuthentication()
       return false
     }
+    // The route may have changed while this request ran. The snapshot serves
+    // the current route when that route requests the same snapshot, such as
+    // another project's list.
+    const current = currentRoute()
     if (
+      current.kind !== 'route-error' &&
       snapshots.state.snapshot &&
       snapshots.state.intent &&
-      uiSnapshotIntentKey(snapshots.state.intent) === uiSnapshotIntentKey(intent)
+      uiSnapshotIntentKey(snapshots.state.intent) ===
+        uiSnapshotIntentKey(requestIntentForRoute(current))
     ) {
-      acceptedRoute = requestedRoute
+      acceptedRoute = current
       return accepted
     }
     return false
@@ -1337,15 +1543,19 @@
   }
 </script>
 
-<main aria-labelledby="kata-heading" class="kata-app" class:ready={mode === 'ready'}>
-  <h1 id="kata-heading" class:kit-sr-only={mode === 'ready'}>Kata</h1>
+<main aria-label="Kata" class="kata-app" class:ready={mode === 'ready' && !versionMismatch}>
+  {#if mode === 'ready' && !versionMismatch}<h1 class="kit-sr-only">Kata</h1>{/if}
   {#if versionMismatch}
     <VersionMismatch />
   {:else if mode === 'loading'}
     {#if daemonError}
-      <section class="kata-authority-recovery" role="alert">
-        <span>{daemonError}</span>
-        <Button label="Retry daemon roster" onclick={() => void startAuthority()} />
+      <StatusPage alert tone="danger" title="Can't reach a server" description={daemonError}>
+        <Button
+          tone="info"
+          surface="solid"
+          label="Try again"
+          onclick={() => void startAuthority()}
+        />
         {#if daemonInfos.length > 0}
           <KataDaemonSwitcher
             daemons={daemonInfos}
@@ -1354,13 +1564,18 @@
             activeStatusTone="error"
             disabled={daemonSwitching}
             onSelect={(id) => void switchDaemon(id)}
+            onOpen={() => void refreshDaemonRoster()}
           />
         {/if}
-      </section>
+      </StatusPage>
     {:else if authority?.error && !authority.loading}
-      <section class="kata-authority-recovery" role="alert">
-        <span>{authority.error}</span>
-        <Button label="Retry Kata snapshot" onclick={() => void startAuthority()} />
+      <StatusPage
+        alert
+        tone="danger"
+        title="Kata couldn't load this workspace"
+        description={authority.error}
+      >
+        <Button tone="info" surface="solid" label="Retry" onclick={() => void startAuthority()} />
         {#if daemonInfos.length > 0}
           <KataDaemonSwitcher
             daemons={daemonInfos}
@@ -1369,21 +1584,32 @@
             activeStatusTone={daemonError ? 'error' : undefined}
             disabled={daemonSwitching}
             onSelect={(id) => void switchDaemon(id)}
+            onOpen={() => void refreshDaemonRoster()}
           />
         {/if}
-      </section>
+      </StatusPage>
     {:else}
-      <p role="status">Loading Kata…</p>
+      <div role="status"><h1 class="loading-heading">Loading…</h1></div>
     {/if}
   {:else if route.kind === 'route-error'}
-    <RouteError {route} onSearch={search} />
+    <RouteError
+      {route}
+      onSearch={search}
+      onOpenInbox={() =>
+        navigate({
+          kind: 'kata',
+          view: 'inbox',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [], text: '' },
+        })}
+    />
   {:else}
     {#if mode === 'launch'}
       <LaunchHint issueRef={undefined} />
     {:else if mode === 'login'}
       <LoginView {returnPath} onLogin={login} />
     {/if}
-    {#if !authority?.snapshot && daemonInfos.length > 0 && (mode === 'launch' || mode === 'login')}
+    {#if daemonInfos.length > 0 && (mode === 'launch' || mode === 'login')}
       <KataDaemonSwitcher
         daemons={daemonInfos}
         activeId={activeDaemonID}
@@ -1391,15 +1617,20 @@
         activeStatusTone={daemonError ? 'error' : undefined}
         disabled={daemonSwitching}
         onSelect={(id) => void switchDaemon(id)}
+        onOpen={() => void refreshDaemonRoster()}
       />
     {/if}
-    {#if authority?.snapshot && (mode === 'ready' || mode === 'launch' || mode === 'login')}
+    {#if authority?.snapshot && mode === 'ready'}
       <AppShell
+        {syncRefreshGeneration}
         {searchSettingsPostFetch}
         route={acceptedRoute ?? route}
         requestedRoute={route !== acceptedRoute ? route : undefined}
         onSearchEmpty={() => reportOutcome('search_empty')}
         snapshot={shellSnapshot!}
+        selfActor={shellSnapshot!.capabilities.actor_policy === 'identity'
+          ? shellSnapshot!.capabilities.account
+          : requestActor}
         loading={authority.loading}
         canMutate={authority.canMutate}
         {mutationPending}
@@ -1422,11 +1653,11 @@
         canAdministerDaemon={canAdministerDaemon()}
         onBackFromCredentials={returnFromCredentials}
         onSelectDaemon={(id) => void switchDaemon(id)}
+        onOpenDaemon={() => void refreshDaemonRoster()}
         onPreferencesChange={updatePreferences}
         ownerOptions={(references?.owners ?? []).map((owner) => ({ name: owner, label: owner }))}
         onNavigate={navigate}
         onCreateProject={createProject}
-        onDesignateInbox={designateInbox}
         onCreateIssue={createIssue}
         {searchReferences}
         onMoveIssue={moveIssue}
@@ -1442,7 +1673,7 @@
         onRemoveLabel={removeLabel}
         onCloseIssue={closeIssue}
         onReopenIssue={reopenIssue}
-        onDeleteIssue={deleteIssue}
+        {recurrenceRevision}
         onCreateRecurrence={createRecurrence}
         onPatchRecurrence={patchRecurrence}
         onDeleteRecurrence={deleteRecurrence}

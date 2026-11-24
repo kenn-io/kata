@@ -1381,6 +1381,50 @@ func (o *InitProjectRequestOptions) GetHeader() (map[string]string, error) {
 	return nil, nil
 }
 
+// ReadProjectByNameRequestOptions is the options needed to make a request to ReadProjectByName.
+type ReadProjectByNameRequestOptions struct {
+	Query *ReadProjectByNameQuery
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *ReadProjectByNameRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.Query != nil {
+		if v, ok := any(o.Query).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Query", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *ReadProjectByNameRequestOptions) GetPathParams() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetQuery returns the query params as a map.
+func (o *ReadProjectByNameRequestOptions) GetQuery() (map[string]any, error) {
+	return runtime.AsMap[any](o.Query)
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *ReadProjectByNameRequestOptions) GetBody() any {
+	return nil
+}
+
+// GetHeader returns the headers as a map.
+func (o *ReadProjectByNameRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
 // ResolveProjectRequestOptions is the options needed to make a request to ResolveProject.
 type ResolveProjectRequestOptions struct {
 	Body *ResolveProjectBody
@@ -2847,6 +2891,272 @@ func (o *GetProjectFederationRequestOptions) GetHeader() (map[string]string, err
 	return nil, nil
 }
 
+// FederatedDocbankCapabilitiesRequestOptions is the options needed to make a request to FederatedDocbankCapabilities.
+type FederatedDocbankCapabilitiesRequestOptions struct {
+	PathParams *FederatedDocbankCapabilitiesPath
+	Query      *FederatedDocbankCapabilitiesQuery
+	Header     *FederatedDocbankCapabilitiesHeaders
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *FederatedDocbankCapabilitiesRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Query != nil {
+		if v, ok := any(o.Query).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Query", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *FederatedDocbankCapabilitiesRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *FederatedDocbankCapabilitiesRequestOptions) GetQuery() (map[string]any, error) {
+	return runtime.AsMap[any](o.Query)
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *FederatedDocbankCapabilitiesRequestOptions) GetBody() any {
+	return nil
+}
+
+// GetHeader returns the headers as a map.
+func (o *FederatedDocbankCapabilitiesRequestOptions) GetHeader() (map[string]string, error) {
+	return runtime.AsMap[string](o.Header)
+}
+
+// LinkFederatedDocbankRequestOptions is the options needed to make a request to LinkFederatedDocbank.
+type LinkFederatedDocbankRequestOptions struct {
+	PathParams *LinkFederatedDocbankPath
+	Query      *LinkFederatedDocbankQuery
+	Body       *LinkFederatedDocbankBody
+	Header     *LinkFederatedDocbankHeaders
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *LinkFederatedDocbankRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Query != nil {
+		if v, ok := any(o.Query).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Query", err)
+			}
+		}
+	}
+
+	if o.Body != nil {
+		if v, ok := any(o.Body).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Body", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *LinkFederatedDocbankRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *LinkFederatedDocbankRequestOptions) GetQuery() (map[string]any, error) {
+	return runtime.AsMap[any](o.Query)
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *LinkFederatedDocbankRequestOptions) GetBody() any {
+	return o.Body
+}
+
+// GetHeader returns the headers as a map.
+func (o *LinkFederatedDocbankRequestOptions) GetHeader() (map[string]string, error) {
+	return runtime.AsMap[string](o.Header)
+}
+
+// UploadFederatedDocbankRequestOptions is the options needed to make a request to UploadFederatedDocbank.
+type UploadFederatedDocbankRequestOptions struct {
+	PathParams *UploadFederatedDocbankPath
+	Query      *UploadFederatedDocbankQuery
+	Body       *UploadFederatedDocbankBody
+	Header     *UploadFederatedDocbankHeaders
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *UploadFederatedDocbankRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Query != nil {
+		if v, ok := any(o.Query).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Query", err)
+			}
+		}
+	}
+
+	if o.Body != nil {
+		if v, ok := any(o.Body).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Body", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *UploadFederatedDocbankRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *UploadFederatedDocbankRequestOptions) GetQuery() (map[string]any, error) {
+	return runtime.AsMap[any](o.Query)
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *UploadFederatedDocbankRequestOptions) GetBody() any {
+	return o.Body
+}
+
+// GetHeader returns the headers as a map.
+func (o *UploadFederatedDocbankRequestOptions) GetHeader() (map[string]string, error) {
+	return runtime.AsMap[string](o.Header)
+}
+
+// FederatedDocbankContentRequestOptions is the options needed to make a request to FederatedDocbankContent.
+type FederatedDocbankContentRequestOptions struct {
+	PathParams *FederatedDocbankContentPath
+	Query      *FederatedDocbankContentQuery
+	Header     *FederatedDocbankContentHeaders
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *FederatedDocbankContentRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Query != nil {
+		if v, ok := any(o.Query).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Query", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *FederatedDocbankContentRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *FederatedDocbankContentRequestOptions) GetQuery() (map[string]any, error) {
+	return runtime.AsMap[any](o.Query)
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *FederatedDocbankContentRequestOptions) GetBody() any {
+	return nil
+}
+
+// GetHeader returns the headers as a map.
+func (o *FederatedDocbankContentRequestOptions) GetHeader() (map[string]string, error) {
+	return runtime.AsMap[string](o.Header)
+}
+
 // EnableProjectFederationRequestOptions is the options needed to make a request to EnableProjectFederation.
 type EnableProjectFederationRequestOptions struct {
 	PathParams *EnableProjectFederationPath
@@ -3502,9 +3812,72 @@ func (o *DisconnectRelayEnrollmentRequestOptions) GetHeader() (map[string]string
 	return runtime.AsMap[string](o.Header)
 }
 
+// SearchFederationProjectRequestOptions is the options needed to make a request to SearchFederationProject.
+type SearchFederationProjectRequestOptions struct {
+	PathParams *SearchFederationProjectPath
+	Query      *SearchFederationProjectQuery
+	Header     *SearchFederationProjectHeaders
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *SearchFederationProjectRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Query != nil {
+		if v, ok := any(o.Query).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Query", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *SearchFederationProjectRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *SearchFederationProjectRequestOptions) GetQuery() (map[string]any, error) {
+	return runtime.AsMap[any](o.Query)
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *SearchFederationProjectRequestOptions) GetBody() any {
+	return nil
+}
+
+// GetHeader returns the headers as a map.
+func (o *SearchFederationProjectRequestOptions) GetHeader() (map[string]string, error) {
+	return runtime.AsMap[string](o.Header)
+}
+
 // GetProjectFederationStatusRequestOptions is the options needed to make a request to GetProjectFederationStatus.
 type GetProjectFederationStatusRequestOptions struct {
 	PathParams *GetProjectFederationStatusPath
+	Query      *GetProjectFederationStatusQuery
 }
 
 // Validate validates all the fields in the options.
@@ -3516,6 +3889,14 @@ func (o *GetProjectFederationStatusRequestOptions) Validate() error {
 		if v, ok := any(o.PathParams).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Query != nil {
+		if v, ok := any(o.Query).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Query", err)
 			}
 		}
 	}
@@ -3533,7 +3914,7 @@ func (o *GetProjectFederationStatusRequestOptions) GetPathParams() (map[string]a
 
 // GetQuery returns the query params as a map.
 func (o *GetProjectFederationStatusRequestOptions) GetQuery() (map[string]any, error) {
-	return nil, nil
+	return runtime.AsMap[any](o.Query)
 }
 
 // GetBody returns the payload in any type that can be marshalled to JSON by the client.

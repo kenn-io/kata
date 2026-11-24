@@ -190,17 +190,10 @@ func normalizeBoundFederationImportActorTx(
 	tx *sql.Tx,
 	params db.ImportBatchParams,
 ) (db.ImportBatchParams, error) {
-	var actor string
-	err := tx.QueryRowContext(ctx, `SELECT bound_actor FROM federation_bindings
-WHERE project_id=$1 AND role=$2 AND enabled=1 AND push_enabled=1`,
-		params.ProjectID, string(db.FederationRoleSpoke)).Scan(&actor)
-	if errors.Is(err, sql.ErrNoRows) {
-		return params, nil
-	}
+	actor, err := effectiveLocalMutationActorTx(ctx, tx, params.ProjectID, "")
 	if err != nil {
-		return params, fmt.Errorf("lookup bound federation actor: %w", mapSQLError(err, nil))
+		return params, fmt.Errorf("lookup bound federation actor: %w", err)
 	}
-	actor = strings.TrimSpace(actor)
 	if actor == "" {
 		return params, nil
 	}
@@ -403,7 +396,7 @@ created_at,updated_at,closed_at,priority
 	if err != nil {
 		return db.Issue{}, db.Event{}, fmt.Errorf("insert imported issue: %w", mapSQLError(err, nil))
 	}
-	payload, err := json.Marshal(issueCreatedPayload{
+	payload, err := json.Marshal(db.IssueDocumentPayload{
 		UID: issueUID, ShortID: shortID, Title: item.Title, Body: item.Body,
 		Author: item.Author, Owner: db.NormalizeImportOwner(item.Owner), Priority: item.Priority,
 		Status: item.Status, ClosedReason: item.ClosedReason, ClosedAt: optionalStoredTime(item.ClosedAt),

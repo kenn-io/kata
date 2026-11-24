@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
@@ -98,7 +99,9 @@ func TemplateFromShow(showBody []byte) (Template, error) {
 	}
 	labels := make([]string, 0, len(shown.Labels))
 	for _, l := range shown.Labels {
-		labels = append(labels, l.Label)
+		if !db.IsPriorityLabel(l.Label) {
+			labels = append(labels, l.Label)
+		}
 	}
 	return Template{Title: shown.Issue.Title, Body: shown.Issue.Body, Priority: shown.Issue.Priority, Labels: labels}, nil
 }

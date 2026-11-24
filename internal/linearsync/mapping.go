@@ -62,13 +62,47 @@ func issueStatus(i Issue, typ string) (string, *string, *time.Time, error) {
 		source = i.CanceledAt
 	}
 	if source != nil {
-		if !validTime(*source) || source.After(i.UpdatedAt) {
+		if !validTime(*source) {
 			return "", nil, nil, fmt.Errorf("invalid Linear closure timestamp")
 		}
+		// Linear can stamp completedAt/canceledAt a few ms after updatedAt (issues created
+		// directly in a closed state); clamp instead of failing the whole import.
 		at = *source
+		if at.After(i.UpdatedAt) {
+			at = i.UpdatedAt
+		}
 	}
 	at = at.UTC().Truncate(time.Millisecond)
 	return "closed", &reason, &at, nil
+}
+
+func importComments(issueID string, comments []Comment) ([]db.ImportComment, error) {
+	out := make([]db.ImportComment, 0, len(comments))
+	for _, c := range comments {
+		id, err := CanonicalID(c.ID)
+		if err != nil {
+			return nil, err
+		}
+		if c.IssueID != issueID || !validTime(c.CreatedAt) {
+			return nil, fmt.Errorf("invalid Linear comment identity or timestamp")
+		}
+		if len(c.Body) > maxDescriptionBytes || !utf8.ValidString(c.Body) || strings.Contains(c.Body, "\x00") {
+			return nil, fmt.Errorf("invalid or oversized Linear comment")
+		}
+		author := "linear-unknown"
+		if c.AuthorID != "" {
+			if _, err := CanonicalID(c.AuthorID); err != nil {
+				return nil, err
+			}
+			author = "linear:" + c.AuthorID
+		}
+		body := c.Body
+		if strings.TrimSpace(body) == "" {
+			body = "(no content)"
+		}
+		out = append(out, db.ImportComment{ExternalID: "comment:" + id, Author: author, Body: body, CreatedAt: c.CreatedAt.UTC().Truncate(time.Millisecond)})
+	}
+	return out, nil
 }
 
 // BuildImportBatch validates all observations before exposing a complete batch.
@@ -140,6 +174,9 @@ func BuildImportBatch(source string, c Config, scope Scope, states []State, issu
 		}
 		if i.AssigneeID != "" {
 			item.Owner = new("linear:" + i.AssigneeID)
+		}
+		if item.Comments, err = importComments(id, i.Comments); err != nil {
+			return db.ImportBatchParams{}, err
 		}
 		item.Status, item.ClosedReason, item.ClosedAt, err = issueStatus(i, typ)
 		if err != nil {

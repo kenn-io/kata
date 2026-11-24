@@ -94,3 +94,39 @@ func TestTrySyncBackendBusy(t *testing.T) {
 	require.NoError(t, err)
 	release()
 }
+
+func TestRebindCancelsAndWaitsForHeldRequest(t *testing.T) {
+	key := t.Name()
+	finish, err := BeginSync(t.Context(), key, nil, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := BeginHeld(key, cancel)
+	finish()
+	acquired := make(chan func(), 1)
+	go func() {
+		release, err := BeginRebind(t.Context(), key, nil, 1)
+		if err == nil {
+			acquired <- release
+		}
+	}()
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("held request was not canceled")
+	}
+	select {
+	case release := <-acquired:
+		release()
+		t.Fatal("rebind returned before held request ended")
+	default:
+	}
+	done()
+	select {
+	case release := <-acquired:
+		release()
+	case <-time.After(time.Second):
+		t.Fatal("rebind did not finish")
+	}
+}

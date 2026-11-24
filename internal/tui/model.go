@@ -582,6 +582,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		next := m.handleFederationLoaded(fl)
 		return next, nil
 	}
+	if fs, ok := msg.(federationSpokesLoadedMsg); ok {
+		return m.handleFederationSpokesLoaded(fs), nil
+	}
+	if fn, ok := msg.(federationSpokeNamedMsg); ok {
+		return m.handleFederationSpokeNamed(fn), nil
+	}
 	if fhp, ok := msg.(federationHubProjectsLoadedMsg); ok {
 		next := m.handleFederationHubProjectsLoaded(fhp)
 		return next, nil
@@ -880,6 +886,12 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		}
 		return m, nil, true
 	case tea.PasteMsg:
+		if m.view == viewFederation && m.federation.mode == federationModeSpokeName && m.modal == modalNone {
+			if !m.federation.spokes.saving {
+				m.federation.spokes.name, _ = m.federation.spokes.name.Update(msg)
+			}
+			return m, nil, true
+		}
 		if m.view == viewCron && m.cron.filtering && m.modal == modalNone {
 			return m.cronFilter(m.cron.lists[m.cron.tab].query + msg.Content), nil, true
 		}
@@ -1100,7 +1112,7 @@ func (m Model) mutationForKey(msg tea.KeyPressMsg) (withinSubtree, mutation bool
 		// Issue-scoped credentials cannot delete or move, whatever else they
 		// may edit.
 		return false, true
-	case m.keymap.Close.matches(msg), m.keymap.Reopen.matches(msg), m.keymap.SetDates.matches(msg):
+	case m.keymap.Close.matches(msg), m.keymap.CloseWithEvidence.matches(msg), m.keymap.Reopen.matches(msg), m.keymap.SetDates.matches(msg):
 		return true, true
 	case !m.detailIsActive():
 		return false, false
@@ -1294,6 +1306,8 @@ func (m Model) openBodyEditForm() Model {
 		projectID:    m.detail.scopePID,
 		issueShortID: m.detail.issue.ShortID,
 		detailGen:    m.detail.gen,
+
+		contentRevision: m.detail.issue.ContentRevision,
 	}
 	m.nextFormGen++
 	form := newBodyEditForm(target, m.detail.issue.Body)
@@ -1878,6 +1892,9 @@ func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 	if mut.err != nil {
 		m.input.saving = false
 		m.input.err = mut.kind + " failed: " + mut.err.Error()
+		if m.input.kind == inputBodyEditForm && isRevisionConflict(mut.err) {
+			m.input.err = bodyEditConflictMessage
+		}
 		if m.input.kind == inputRecurrenceForm {
 			m.input.err = fmt.Sprintf(successTemplates[mut.kind].failure, mut.err.Error())
 			if isRevisionConflict(mut.err) {
@@ -2182,7 +2199,7 @@ func (m Model) commitFormInput(kind inputKind) (Model, tea.Cmd) {
 			m.input.target.forceReply = false
 		}
 		if (m.input.target.replyKind == "confirm" || m.input.target.replyKind == "refute") && utf8.RuneCountInString(strings.Join(strings.Fields(rawBuf), " ")) < 40 {
-			m.input.err = "confirm/refute need at least 40 evidence characters"
+			m.input.err = "Confirm and refute replies need at least 40 characters of evidence"
 			return m, nil
 		}
 		if m.input.target.idempotencyKey == "" || rawBuf != m.input.target.submittedBody || m.input.target.replyKind != m.input.target.submittedKind {
@@ -2374,16 +2391,21 @@ func dispatchFormAddComment(
 	}
 }
 
+// bodyEditConflictMessage is what the body editor shows when the daemon
+// refuses a save because the title or body changed after the editor opened.
+// The typed text stays in the form so it can be copied out.
+const bodyEditConflictMessage = "The title or body changed since you opened the editor; nothing was saved. Copy your text, press esc, and reopen to see the current body."
+
 // dispatchFormEditBody is the form-side EditBody dispatch. Same
 // shape as dispatchFormAddComment.
 func dispatchFormEditBody(
 	api detailAPI, target formTarget, body, actor string, formGen int64,
 ) tea.Cmd {
-	pid, ref := target.projectID, target.issueShortID
+	pid, ref, expected := target.projectID, target.issueShortID, target.contentRevision
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		resp, err := api.EditBody(ctx, pid, ref, body, actor)
+		resp, err := api.EditBody(ctx, pid, ref, body, actor, &expected)
 		return mutationDoneMsg{
 			origin: "form", kind: "form.body.edit", formGen: formGen,
 			resp: resp, err: err,
@@ -2920,7 +2942,7 @@ func (m *Model) maybeRefetchOpenDetail(msg eventReceivedMsg) tea.Cmd {
 	if msg.projectID != m.detail.scopePID && !commentMatch && !relationLifecycleMatch {
 		return nil
 	}
-	projectCommentArrival := msg.eventType == "issue.snapshot" || (m.issueScoped && msg.eventType == "issue.commented")
+	projectCommentArrival := msg.eventType == "issue.snapshot" || msg.eventType == "issue.restated" || (m.issueScoped && msg.eventType == "issue.commented")
 	// Refresh events for this recurrence, retrying when its read failed.
 	recurrenceChange := m.detail.issue.RecurrenceID != nil && strings.HasPrefix(msg.eventType, "recurrence.") &&
 		(m.detail.recurrenceErr != nil || (m.detail.recurrence != nil && msg.recurrenceUID == m.detail.recurrence.UID))
@@ -2969,7 +2991,7 @@ func (msg eventReceivedMsg) matchesIssue(ref, uid string) bool {
 
 func (msg eventReceivedMsg) matchesCommentInDetail(comments []CommentEntry) bool {
 	switch msg.eventType {
-	case "issue.commented", "issue.comment_edited", "issue.created", "issue.snapshot":
+	case "issue.commented", "issue.comment_edited", "issue.created", "issue.snapshot", "issue.restated":
 	default:
 		return false
 	}
@@ -3001,7 +3023,9 @@ func (msg eventReceivedMsg) matchesCommentUID(uid string) bool {
 
 func (msg eventReceivedMsg) matchesRelationLifecycleInDetail(comments []CommentEntry, detailProjectID int64) bool {
 	switch msg.eventType {
-	case "issue.restored", "project.restored":
+	case "issue.restored", "issue.restated", "project.restored":
+		// A whole copy can delete or restore its issue without carrying the
+		// comment this detail refers to.
 		// The restore may make an endpoint visible again after a prior detail
 		// refresh removed its backlink or stripped IssueUID from a removed
 		// reply projection, so no current endpoint can identify what was restored.
@@ -3202,24 +3226,29 @@ const toastResyncedTTL = 2 * time.Second
 // resynced toast because the user has to act on the hint, not just notice.
 const toastNoBindingTTL = 3 * time.Second
 
+// tickAfter builds every timer command in this package. Production uses
+// tea.Tick. Tests that run commands inline replace it so a timer does not
+// hold the test for its real duration.
+var tickAfter = tea.Tick
+
 // dayTick checks the wall clock within a minute of resuming from suspend.
 // A fixed interval also avoids constructing midnight inside a DST gap.
 func dayTick() tea.Cmd {
-	return tea.Tick(time.Minute, func(time.Time) tea.Msg { return dayTickMsg{} })
+	return tickAfter(time.Minute, func(time.Time) tea.Msg { return dayTickMsg{} })
 }
 
 // debouncedRefetch returns a tea.Cmd that emits refetchTickMsg after d.
 // The TEA loop receives the message, checks the cache, and dispatches
 // the actual list refetch via lm.refetchCmd.
 func debouncedRefetch(d time.Duration) tea.Cmd {
-	return tea.Tick(d, func(time.Time) tea.Msg { return refetchTickMsg{} })
+	return tickAfter(d, func(time.Time) tea.Msg { return refetchTickMsg{} })
 }
 
 // toastExpireCmd schedules a toastExpiredMsg at d. The Update branch
 // double-checks the wall clock before clearing the toast so a fresher
 // toast cannot be cut short by an earlier timer.
 func toastExpireCmd(d time.Duration) tea.Cmd {
-	return tea.Tick(d, func(time.Time) tea.Msg { return toastExpiredMsg{} })
+	return tickAfter(d, func(time.Time) tea.Msg { return toastExpiredMsg{} })
 }
 
 // canQuit reports whether a global keystroke (q, ?, R) should be
@@ -3227,6 +3256,9 @@ func toastExpireCmd(d time.Duration) tea.Cmd {
 // /forms) or a confirm modal (quit or draft discard) is open. Both
 // gates redirect global keys into the field instead of firing.
 func (m Model) canQuit() bool {
+	if m.view == viewFederation && m.federation.mode == federationModeSpokeName {
+		return false
+	}
 	if m.view == viewCron && (m.cron.filtering || m.cron.form != nil) {
 		return false
 	}
@@ -3645,7 +3677,7 @@ func (m Model) scheduleDetailFollow() (Model, tea.Cmd) {
 	m = m.markSearchSplitDetailOwned()
 	m.nextDetailFollowGen++
 	tickGen := m.nextDetailFollowGen
-	return m, tea.Tick(detailFollowDebounce, func(time.Time) tea.Msg {
+	return m, tickAfter(detailFollowDebounce, func(time.Time) tea.Msg {
 		return detailFollowTickMsg{gen: tickGen}
 	})
 }

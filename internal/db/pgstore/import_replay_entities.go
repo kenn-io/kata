@@ -13,12 +13,16 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-func pgReplayMeta(ctx context.Context, tx *sql.Tx, meta *db.MetaKV, opts db.ImportOptions) error {
+func pgReplayMeta(ctx context.Context, tx *sql.Tx, meta *db.MetaKV, opts db.ImportOptions, targetUID string) error {
 	if meta.Key == "export_version" || meta.Key == "schema_version" {
 		return nil
 	}
 	if meta.Key == "instance_uid" && opts.NewInstance {
-		return nil
+		if meta.Value == targetUID {
+			return nil
+		}
+		_, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,'') ON CONFLICT(key) DO NOTHING`, db.FormerInstanceUIDMetaPrefix+meta.Value)
+		return pgReplayError(db.ImportKindMeta, err)
 	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,$2)
 ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`, meta.Key, meta.Value)
@@ -214,7 +218,7 @@ func pgReplayLabel(ctx context.Context, tx *sql.Tx, label *db.IssueLabelExport) 
 	return pgReplayError(db.ImportKindIssueLabel, err)
 }
 
-func pgReplayLink(ctx context.Context, tx *sql.Tx, link *db.LinkExport) (replayLinkSkip, error) {
+func pgReplayLink(ctx context.Context, tx *sql.Tx, link *db.LinkExport, mergeProject bool) (replayLinkSkip, error) {
 	var present int
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM issues WHERE id=ANY($1::bigint[])`,
@@ -235,6 +239,38 @@ SELECT 1 FROM links WHERE type=$1 AND (
 	}
 	if duplicate {
 		return replayLinkDuplicate, nil
+	}
+	// A merge can link the imported project to one already in the target.
+	// It leaves out what an ordinary link write refuses: a relay cannot
+	// deliver a link between projects, and a parent link must not close a
+	// cycle with the links the target already holds. The rest of the project
+	// still merges. A full restore keeps the links it exported.
+	if mergeProject {
+		if link.Type == "parent" {
+			// A task has one parent. Snapshots taken before and after a
+			// reparent disagree, and the target keeps the parent it holds.
+			var hasParent bool
+			if err := tx.QueryRowContext(ctx,
+				`SELECT EXISTS(SELECT 1 FROM links WHERE type='parent' AND from_issue_id=$1)`,
+				link.FromIssueID).Scan(&hasParent); err != nil {
+				return replayLinkInserted, pgReplayError(db.ImportKindLink, err)
+			}
+			if hasParent {
+				return replayLinkSecondParent, nil
+			}
+			if err := assertNoParentCycleTx(ctx, tx, link.FromIssueID, link.ToIssueID); errors.Is(err, db.ErrParentCycle) {
+				return replayLinkParentCycle, nil
+			} else if err != nil {
+				return replayLinkInserted, fmt.Errorf("project merge parent link from issue %s to %s: %w", link.FromIssueUID, link.ToIssueUID, err)
+			}
+		}
+		// Historical links may predate connecting both projects to their hub.
+		var mismatch *db.LinkServerMismatchError
+		if err := ensureRelayLinkBoundaryTx(ctx, tx, link.FromIssueID, link.ToIssueID); errors.Is(err, db.ErrFederationCrossProjectBoundary) {
+			return replayLinkUndeliverable, nil
+		} else if err != nil && !errors.As(err, &mismatch) {
+			return replayLinkInserted, fmt.Errorf("project merge link between issues %s and %s: %w", link.FromIssueUID, link.ToIssueUID, err)
+		}
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO links(
 id,from_issue_id,from_issue_uid,to_issue_id,to_issue_uid,type,author,created_at

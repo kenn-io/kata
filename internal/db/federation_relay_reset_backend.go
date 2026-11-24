@@ -13,6 +13,8 @@ import (
 // forward supersedes, which downstream work blocks an install, or how a
 // checkpoint is translated per hop.
 type RelayResetBackend interface {
+	// AuthorizeRelayRelease checks the projects referenced by a checkpoint.
+	AuthorizeRelayRelease(ctx context.Context, projectUID string, events []RemoteEvent) error
 	// ProjectUID returns the UID of a project row.
 	ProjectUID(ctx context.Context, projectID int64) (string, error)
 	// RelayBinding loads the project's federation binding, or ErrNotFound.
@@ -44,7 +46,7 @@ type RelayResetBackend interface {
 	// the project has an active external root binding.
 	RejectExternalRootProject(ctx context.Context, projectID int64) error
 	// DisableRelayPush enables the spoke binding and disables its pushes.
-	DisableRelayPush(ctx context.Context, projectID int64) error
+	DisableRelayPush(ctx context.Context, projectID int64, enabled bool) error
 	// ReconcileBindingTransitionLinks applies the binding transition's link
 	// reconciliation.
 	ReconcileBindingTransitionLinks(ctx context.Context, previous *FederationBinding, next FederationBinding) error

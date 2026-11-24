@@ -13,6 +13,15 @@ import type { ShareableFilters } from '../lib/router'
 import type { UISnapshot } from '../lib/state/snapshot'
 import AppShell from './AppShell.svelte'
 
+function projectSyncFetch(
+  syncFetch: typeof fetch = async () => Response.json({ statuses: [] }),
+): typeof fetch {
+  return (url, init) =>
+    String(url).includes('/recurrences')
+      ? Promise.resolve(Response.json({ recurrences: [] }))
+      : syncFetch(url, init)
+}
+
 describe('AppShell', () => {
   afterEach(() => {
     cleanup()
@@ -430,7 +439,7 @@ describe('AppShell', () => {
   })
 
   test('offers project sync status from the current project without credential inventory authority', () => {
-    setGeneratedFetch(vi.fn(async () => Response.json({ statuses: [] })))
+    setGeneratedFetch(projectSyncFetch())
     const current = snapshot()
     render(AppShell, {
       props: {
@@ -452,7 +461,7 @@ describe('AppShell', () => {
   })
 
   test('keeps project sync readable for a current read-only project member', () => {
-    setGeneratedFetch(vi.fn(async () => Response.json({ statuses: [] })))
+    setGeneratedFetch(projectSyncFetch())
     const current = snapshot()
     current.capabilities.writable = false
     render(AppShell, {
@@ -534,14 +543,51 @@ describe('AppShell', () => {
     })
 
     const summary = screen.getByRole('status', { name: 'Active connection' })
-    expect(summary.textContent).toContain('Snapshot may be out of date. Changes are paused.')
-    const reason = 'Changes are paused while the snapshot may be out of date.'
+    expect(summary.textContent).toContain('Workspace data may be out of date. Editing is paused.')
+    const reason = 'Editing is paused while workspace data may be out of date.'
     expect(
       screen
         .getByRole('button', { name: 'New task', description: reason })
         .getAttribute('aria-disabled'),
     ).toBe('true')
     expect(screen.getByRole('button', { name: 'New project', description: reason })).not.toBeNull()
+  })
+
+  test('mobile New task controls share one blocked-reason description', async () => {
+    vi.stubGlobal('matchMedia', (media: string) => ({
+      matches: true,
+      media,
+      addEventListener() {},
+      removeEventListener() {},
+    }))
+    const current = snapshot()
+    current.capabilities.writable = false
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'all-open',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: current,
+        loading: false,
+        readOnly: true,
+        ...mutationProps({ canMutate: false }),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Open navigation' }))
+    const controls = screen.getAllByRole('button', {
+      name: 'New task',
+      description: 'This credential is read-only.',
+    })
+    expect(controls).toHaveLength(3)
+    const id = controls[0]!.getAttribute('aria-describedby')!
+    expect(controls.every((control) => control.getAttribute('aria-describedby') === id)).toBe(true)
+    expect(document.querySelectorAll(`[id="${id}"]`)).toHaveLength(1)
   })
 
   test.each(['stale', 'daemonSwitching', 'reconnecting', 'remote', 'expired', 'removed'])(
@@ -552,7 +598,7 @@ describe('AppShell', () => {
         signal = init?.signal ?? undefined
         return Response.json({ statuses: [] })
       })
-      setGeneratedFetch(fetcher)
+      setGeneratedFetch(projectSyncFetch(fetcher))
       const current = snapshot()
       const props = {
         route: {
@@ -600,7 +646,7 @@ describe('AppShell', () => {
   )
 
   test('keeps project sync in place while the snapshot reloads after navigation', async () => {
-    setGeneratedFetch(vi.fn(async () => Response.json({ statuses: [] })))
+    setGeneratedFetch(projectSyncFetch())
     const current = snapshot()
     const props = {
       route: {
@@ -664,39 +710,14 @@ describe('AppShell', () => {
     }
   })
 
-  test('keeps the healthy workspace toolbar free of a connection banner', () => {
-    const { container } = render(AppShell, {
-      props: {
-        route: {
-          kind: 'kata',
-          view: 'all-open',
-          graph: false,
-          filters: { status: [], owner: [], label: [], relationship: [] },
-        },
-        snapshot: snapshot(),
-        loading: false,
-        ...mutationProps(),
-        onNavigate: vi.fn(),
-        onCreateProject: vi.fn(async () => ({ changed: true })),
-      },
-    })
-
-    expect(screen.queryByRole('status', { name: 'Active connection' })).toBeNull()
-    const header = container.querySelector('header.kata-header')
-    expect(header).not.toBeNull()
-    expect(header?.classList.contains('kit-top-bar')).toBe(true)
-    expect(within(header as HTMLElement).getByRole('heading', { name: 'Kata' })).not.toBeNull()
-    expect(within(header as HTMLElement).getByRole('button', { name: 'New task' })).not.toBeNull()
-  })
-
   test.each([
     ['static_token', 'Shared daemon token'],
     ['bootstrap', 'Bootstrap token'],
     ['insecure_readonly', 'Anonymous (read-only)'],
     ['unauthenticated_private_network', 'Unauthenticated private network'],
     ['trusted_proxy_absent', 'Proxy without account'],
-    ['web_local', 'Local connection'],
-    ['none', 'Local connection'],
+    ['web_local', 'Local, no sign-in'],
+    ['none', 'Local, no sign-in'],
   ])('labels an actorless %s connection as %s', (authKind, label) => {
     const current = snapshot()
     Object.assign(current.capabilities, { auth_kind: authKind })
@@ -1073,7 +1094,8 @@ describe('AppShell', () => {
       graph: true,
     })
 
-    await fireEvent.click(screen.getByRole('button', { name: /Project scope: All projects/i }))
+    await fireEvent.click(screen.getByRole('button', { name: /^Filter$/ }))
+    await fireEvent.click(screen.getByRole('button', { name: /Project: All projects/i }))
     await fireEvent.mouseDown(screen.getByRole('option', { name: /example-project/ }))
     await waitFor(() =>
       expect(onNavigate).toHaveBeenLastCalledWith({
@@ -1084,7 +1106,7 @@ describe('AppShell', () => {
     )
   })
 
-  test('identity bootstrap administers access while ordinary issue writes remain disabled', async () => {
+  test('identity bootstrap administers access', async () => {
     setGeneratedFetch(async () => Response.json({ teams: [] }))
     const onAccessMutation = vi.fn(executeAccessMutation)
     const props = accessProps(onAccessMutation)
@@ -1099,7 +1121,6 @@ describe('AppShell', () => {
         (screen.getByRole('button', { name: 'Create team' }) as HTMLButtonElement).disabled,
       ).toBe(false),
     )
-    expect(screen.queryByRole('button', { name: 'New task' })).toBeNull()
   })
 
   test('offers team and visibility management in the authorized credential screen', () => {
@@ -1178,6 +1199,31 @@ describe('AppShell', () => {
     expect(calls.filter((call) => call.init?.method === 'GET').length).toBeGreaterThanOrEqual(2)
   })
 
+  test.each([false, true])('recovers a teams read failure, exhausted: %s', async (exhausted) => {
+    vi.useFakeTimers()
+    let reads = 0
+    setGeneratedFetch(async () => {
+      reads++
+      return reads <= (exhausted ? 4 : 1)
+        ? new Response('', { status: 503 })
+        : Response.json({ teams: [{ uid: 'team-one', name: 'Example team', revision: 1 }] })
+    })
+    render(AppShell, { props: accessProps(executeAccessMutation) })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(
+      (screen.getByRole('button', { name: 'Refresh teams' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+    await vi.advanceTimersByTimeAsync(exhausted ? 7000 : 1000)
+    if (exhausted) {
+      expect(screen.getByText('Unable to read teams. Refresh to try again.')).not.toBeNull()
+      await fireEvent.click(screen.getByRole('button', { name: 'Refresh teams' }))
+      await vi.advanceTimersByTimeAsync(0)
+    }
+    expect(screen.getByRole('option', { name: 'Example team' })).not.toBeNull()
+    expect(screen.queryByText('Unable to read teams. Refresh to try again.')).toBeNull()
+    expect(reads).toBe(exhausted ? 5 : 2)
+  })
+
   test('manages selected team membership and deletion through owner mutation authority', async () => {
     const writes: { path: string; method: string }[] = []
     let members = ['existing-member']
@@ -1217,6 +1263,49 @@ describe('AppShell', () => {
       { path: '/api/v1/teams/team-one/members/existing-member', method: 'DELETE' },
       { path: '/api/v1/teams/team-one', method: 'DELETE' },
     ])
+  })
+
+  test('disables team actions during refresh and removes a deleted team', async () => {
+    vi.useFakeTimers()
+    let deletes = 0
+    let refreshFailed = false
+    setGeneratedFetch(async (input, init) => {
+      const path = new URL(String(input)).pathname
+      if (init?.method === 'DELETE') {
+        deletes++
+        return Response.json({ changed: true })
+      }
+      if (path === '/api/v1/teams') {
+        if (deletes || refreshFailed) return new Response('', { status: 503 })
+        return Response.json({ teams: [{ uid: 'team-one', name: 'Example team', revision: 1 }] })
+      }
+      return Response.json({
+        team: { uid: 'team-one', name: 'Example team', revision: 1 },
+        members: ['user-a'],
+      })
+    })
+    vi.stubGlobal('confirm', () => true)
+    render(AppShell, { props: accessProps(executeAccessMutation) })
+    await vi.advanceTimersByTimeAsync(0)
+    await fireEvent.change(screen.getByLabelText('Team'), { target: { value: 'team-one' } })
+    await vi.advanceTimersByTimeAsync(0)
+    refreshFailed = true
+    await fireEvent.click(screen.getByRole('button', { name: 'Refresh teams' }))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(
+      (screen.getByRole('button', { name: 'Delete team' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+    expect(
+      (screen.getByRole('button', { name: 'Remove user-a' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+    refreshFailed = false
+    await vi.advanceTimersByTimeAsync(1000)
+    await fireEvent.click(screen.getByRole('button', { name: 'Delete team' }))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(deletes).toBe(1)
+    expect(screen.queryByRole('button', { name: 'Delete team' })).toBeNull()
+    await vi.advanceTimersByTimeAsync(7000)
+    expect(screen.queryByRole('option', { name: 'Example team' })).toBeNull()
   })
 
   test('reloads the selected project policy after deleting one of its teams', async () => {
@@ -1612,7 +1701,6 @@ describe('AppShell', () => {
     expect(screen.getByRole('heading', { name: 'Credentials' })).not.toBeNull()
     expect(screen.getByText('Worker')).not.toBeNull()
     expect(screen.queryByLabelText('Search tasks')).toBeNull()
-    expect(screen.queryByRole('button', { name: 'New task' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Credentials' }).classList).toContain('active')
     expect(screen.getByRole('button', { name: 'Today' }).classList).not.toContain('active')
 
@@ -1701,11 +1789,29 @@ describe('AppShell', () => {
 
     expect(screen.getByRole('heading', { name: 'Settings' })).not.toBeNull()
     expect(await screen.findByText(/kata\.example\.com/)).not.toBeNull()
-    expect(screen.queryByRole('button', { name: 'New task' })).toBeNull()
     expect(screen.queryByRole('button', { name: /layout/ })).toBeNull()
-
     await fireEvent.click(screen.getByRole('button', { name: 'Back to issues' }))
     expect(onBackFromCredentials).toHaveBeenCalledOnce()
+  })
+
+  test('shows task creation errors on Settings', () => {
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'settings',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: snapshot(),
+        loading: false,
+        ...mutationProps({ mutationMessage: 'validation: Action refused' }),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+
+    expect(screen.getByRole('alert').textContent).toBe('validation: Action refused')
   })
 
   test('drops held keyboard selection when sidebar navigation begins', async () => {
@@ -1779,6 +1885,7 @@ describe('AppShell', () => {
       status: 'open',
       metadata: {},
       revision: 1,
+      content_revision: 0,
       author: 'user-a',
       labels: [],
       created_at: '2026-08-01T09:00:00.000Z',
@@ -1790,6 +1897,7 @@ describe('AppShell', () => {
         route: {
           kind: 'kata',
           projectUID: '01J00000000000000000000002',
+          view: 'inbox',
           graph: false,
           filters: { status: [], owner: [], label: [], relationship: [] },
         },
@@ -1805,8 +1913,7 @@ describe('AppShell', () => {
     expect(screen.queryByRole('button', { name: /Other issue/ })).toBeNull()
   })
 
-  test('clears project scope when All projects is selected', async () => {
-    const onNavigate = vi.fn()
+  test('hides the Project filter in a dedicated project list', async () => {
     render(AppShell, {
       props: {
         route: {
@@ -1818,21 +1925,13 @@ describe('AppShell', () => {
         snapshot: snapshot(),
         loading: false,
         ...mutationProps(),
-        onNavigate,
+        onNavigate: vi.fn(),
         onCreateProject: vi.fn(async () => ({ changed: true })),
       },
     })
 
-    await fireEvent.click(screen.getByRole('button', { name: /Project scope: example-project/i }))
-    await fireEvent.mouseDown(screen.getByRole('option', { name: 'All projects' }))
-
-    await waitFor(() =>
-      expect(onNavigate).toHaveBeenCalledWith({
-        kind: 'kata',
-        graph: false,
-        filters: { status: [], owner: [], label: [], relationship: [] },
-      }),
-    )
+    await fireEvent.click(screen.getByRole('button', { name: 'Filter' }))
+    expect(screen.queryByRole('button', { name: /^Project:/ })).toBeNull()
   })
 
   test('resets grown rows when repeated label filters change', async () => {
@@ -1859,14 +1958,14 @@ describe('AppShell', () => {
       onCreateProject: vi.fn(async () => ({ changed: true })),
     }
     const { container, rerender } = render(AppShell, { props })
-    expect(container.querySelectorAll('button.row')).toHaveLength(150)
+    expect(container.querySelectorAll('button.row')).toHaveLength(75)
     await fireEvent.keyDown(container.querySelector('button.row')!, { key: 'End' })
     expect(container.querySelectorAll('button.row')).toHaveLength(400)
     await rerender({
       ...props,
       route: { ...props.route, filters: { ...props.route.filters, label: ['a', 'd'] } },
     })
-    expect(container.querySelectorAll('button.row')).toHaveLength(150)
+    expect(container.querySelectorAll('button.row')).toHaveLength(75)
   })
 
   test('renders the routed source graph and returns to the same selected list context', async () => {
@@ -1934,7 +2033,12 @@ describe('AppShell', () => {
     const selected = snapshot()
     selected.selected = {
       state: 'available',
-      issue: { ...selected.collection![0]!, body: 'Original body', revision: 3 },
+      issue: {
+        ...selected.collection![0]!,
+        body: 'Original body',
+        revision: 3,
+        content_revision: 7,
+      },
       comments: [],
       labels: [],
       links: [],
@@ -1959,7 +2063,6 @@ describe('AppShell', () => {
       },
     })
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Edit issue' }))
     expect(screen.getByRole('region', { name: 'Task detail' })).not.toBeNull()
     await fireEvent.click(screen.getByRole('button', { name: 'Edit title' }))
     await fireEvent.input(screen.getByLabelText('Edit title'), {
@@ -1969,6 +2072,7 @@ describe('AppShell', () => {
 
     expect(onEditIssue).toHaveBeenCalledWith('01J00000000000000000000001', {
       title: 'Updated example issue',
+      expected_content_revision: 7,
     })
   })
 
@@ -2003,7 +2107,7 @@ describe('AppShell', () => {
       history: [],
     }
     const onPreferencesChange = vi.fn()
-    render(AppShell, {
+    const view = render(AppShell, {
       props: {
         route: {
           kind: 'kata',
@@ -2030,31 +2134,112 @@ describe('AppShell', () => {
       },
     })
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Theme: System' }))
-    expect(onPreferencesChange).toHaveBeenCalledWith(
-      expect.objectContaining({ theme: 'light', splitDirection: 'horizontal' }),
-    )
-    onPreferencesChange.mockClear()
-
     expect(screen.getByRole('separator', { name: 'Resize Kata panes' })).not.toBeNull()
-    await fireEvent.click(screen.getByRole('button', { name: 'Switch to stacked layout' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Display' }))
+    await fireEvent.click(screen.getByRole('radio', { name: 'Below list' }))
     expect(onPreferencesChange).toHaveBeenCalledWith(
       expect.objectContaining({ splitDirection: 'vertical', splitSize: 420 }),
     )
+    await view.rerender({
+      route: {
+        kind: 'kata',
+        view: 'settings',
+        graph: false,
+        filters: { status: [], owner: [], label: [], relationship: [] },
+      },
+    })
+    await fireEvent.click(screen.getByRole('radio', { name: 'Light' }))
+    expect(onPreferencesChange).toHaveBeenCalledWith(expect.objectContaining({ theme: 'light' }))
   })
 
-  test('quick-captures a new task through the ported workspace action', async () => {
-    const onCreateIssue = vi.fn(async () => {})
+  test('closing navigation for task capture discards the project form', async () => {
+    vi.stubGlobal('matchMedia', (media: string) => ({
+      matches: true,
+      media,
+      addEventListener() {},
+      removeEventListener() {},
+    }))
+    const current = snapshot()
+    current.catalog![0]!.project.metadata = { role: 'inbox' }
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'all-open',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: current,
+        loading: false,
+        ...mutationProps(),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Open navigation' }))
+    let drawer = screen.getByRole('dialog', { name: 'Navigation' })
+    await fireEvent.click(within(drawer).getByRole('button', { name: 'New project' }))
+    expect(within(drawer).getByRole('textbox', { name: 'New project name' })).not.toBeNull()
+    await fireEvent.click(within(drawer).getByRole('button', { name: 'New task' }))
+    expect(screen.queryByRole('dialog', { name: 'Navigation' })).toBeNull()
+    await fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('dialog', { name: 'New task' })).toBeNull()
+    await fireEvent.click(screen.getByRole('button', { name: 'Open navigation' }))
+    drawer = screen.getByRole('dialog', { name: 'Navigation' })
+    expect(within(drawer).queryByRole('textbox', { name: 'New project name' })).toBeNull()
+  })
+
+  test.each(['settings', 'credentials'] as const)(
+    'creates a task from %s without navigating away',
+    async (view) => {
+      const current = snapshot()
+      current.catalog![0]!.project.metadata = { role: 'inbox' }
+      const onCreateIssue = vi.fn(async () => {})
+      const onNavigate = vi.fn()
+      render(AppShell, {
+        props: {
+          route: {
+            kind: 'kata',
+            view,
+            graph: false,
+            filters: { status: [], owner: [], label: [], relationship: [] },
+          },
+          snapshot: current,
+          loading: false,
+          ...mutationProps({ onCreateIssue }),
+          onNavigate,
+          onCreateProject: vi.fn(async () => ({ changed: true })),
+        },
+      })
+
+      await fireEvent.click(screen.getByRole('button', { name: 'New task' }))
+      const input = screen.getByRole('textbox', { name: 'Quick capture' })
+      await fireEvent.input(input, { target: { value: 'Example task' } })
+      await fireEvent.keyDown(input, { key: 'Enter' })
+      await waitFor(() =>
+        expect(onCreateIssue).toHaveBeenCalledWith(
+          'Example task',
+          undefined,
+          '01J00000000000000000000002',
+        ),
+      )
+      expect(onNavigate).not.toHaveBeenCalled()
+    },
+  )
+
+  test('shows a rejected capture error once on Settings', async () => {
+    const onCreateIssue = vi.fn().mockRejectedValue(new Error('validation: Action refused'))
     const accepted = snapshot()
     accepted.catalog![0]!.project.metadata = {
       ...(accepted.catalog![0]!.project.metadata ?? {}),
       role: 'inbox',
     }
-    const { container } = render(AppShell, {
+    const view = render(AppShell, {
       props: {
         route: {
           kind: 'kata',
-          view: 'inbox',
+          view: 'settings',
           graph: false,
           filters: { status: [], owner: [], label: [], relationship: [] },
         },
@@ -2066,15 +2251,21 @@ describe('AppShell', () => {
       },
     })
 
-    await fireEvent.click(within(container).getByRole('button', { name: 'New task' }))
-    await fireEvent.input(within(container).getByRole('textbox', { name: 'Quick capture' }), {
+    await fireEvent.click(screen.getByRole('button', { name: 'New task' }))
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Quick capture' }), {
       target: { value: 'New example task' },
     })
-    await fireEvent.keyDown(within(container).getByRole('textbox', { name: 'Quick capture' }), {
+    await fireEvent.keyDown(screen.getByRole('textbox', { name: 'Quick capture' }), {
       key: 'Enter',
     })
 
-    expect(onCreateIssue).toHaveBeenCalledWith('New example task')
+    expect(onCreateIssue).toHaveBeenCalledWith(
+      'New example task',
+      undefined,
+      '01J00000000000000000000002',
+    )
+    await view.rerender({ mutationMessage: 'validation: Action refused' })
+    await waitFor(() => expect(screen.getAllByText('validation: Action refused')).toHaveLength(1))
   })
 
   test('distinguishes empty projects from empty tasks and keeps refused capture closed', async () => {
@@ -2152,8 +2343,9 @@ describe('AppShell', () => {
           onCreateProject,
         },
       })
-      await fireEvent.click(screen.getByRole('button', { name: 'New task' }))
-      const drawer = screen.getByRole('dialog', { name: 'Kata navigation' })
+      const sidebar = document.querySelector<HTMLElement>('.desktop-navigation')!
+      await fireEvent.click(within(sidebar).getByRole('button', { name: 'New task' }))
+      const drawer = screen.getByRole('dialog', { name: 'Navigation' })
       const input = within(drawer).getByRole('textbox', { name: 'New project name' })
       await fireEvent.input(input, { target: { value: 'example-project' } })
       await fireEvent.keyDown(input, { key: 'Enter' })
@@ -2168,32 +2360,6 @@ describe('AppShell', () => {
       expect(screen.queryByRole('textbox', { name: 'Quick capture' })).toBeNull()
     },
   )
-
-  test('designates an Inbox from New task before opening quick capture', async () => {
-    const onDesignateInbox = vi.fn(async () => {})
-    render(AppShell, {
-      props: {
-        route: {
-          kind: 'kata',
-          view: 'all-open',
-          graph: false,
-          filters: { status: [], owner: [], label: [], relationship: [] },
-        },
-        snapshot: snapshot(),
-        loading: false,
-        ...mutationProps({ onDesignateInbox }),
-        onNavigate: vi.fn(),
-        onCreateProject: vi.fn(async () => ({ changed: true })),
-      },
-    })
-
-    const create = screen.getByRole('button', { name: 'New task' })
-    expect(create.getAttribute('aria-disabled')).toBeNull()
-    await fireEvent.click(create)
-    await fireEvent.click(screen.getByRole('button', { name: /Use example-project as Inbox/ }))
-    expect(onDesignateInbox).toHaveBeenCalledWith('01J00000000000000000000002')
-    expect(screen.getByRole('textbox', { name: 'Quick capture' })).not.toBeNull()
-  })
 
   test('renders daemon selection and recovery status inside stable workspace chrome', async () => {
     const onSelectDaemon = vi.fn()
@@ -2230,7 +2396,7 @@ describe('AppShell', () => {
       'Reconnecting…',
     )
     expect(screen.getByRole('status', { name: 'Active connection' }).textContent).toContain(
-      'Snapshot may be out of date. Changes are paused.',
+      'Workspace data may be out of date. Editing is paused.',
     )
   })
 
@@ -2273,10 +2439,97 @@ describe('AppShell', () => {
       within(screen.getByRole('region', { name: 'Issues' }))
         .getByRole('button', {
           name: 'New project',
-          description: 'Changes are paused while the snapshot may be out of date.',
+          description: 'Editing is paused while workspace data may be out of date.',
         })
         .getAttribute('aria-disabled'),
     ).toBe('true')
+  })
+
+  test('names the current issue, project, or view in the tab', async () => {
+    const current = snapshot()
+    const filters = { status: [], owner: [], label: [], relationship: [] }
+    const view = render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          issueUID: '01J00000000000000000000001',
+          graph: false,
+          filters,
+        },
+        snapshot: current,
+        loading: false,
+        ...mutationProps(),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+    await waitFor(() => expect(document.title).toBe('Issue · Kata'))
+    current.selected = {
+      state: 'available',
+      issue: current.collection![0]!,
+      comments: [],
+      labels: [],
+      links: [],
+      recurrences: [],
+      history: [],
+    }
+    await view.rerender({ snapshot: current })
+    await waitFor(() => expect(document.title).toBe('Example issue (example-project#a1) · Kata'))
+    await view.rerender({
+      route: { kind: 'kata', projectUID: '01J00000000000000000000002', graph: false, filters },
+    })
+    await waitFor(() => expect(document.title).toBe('example-project · Kata'))
+    await view.rerender({
+      route: {
+        kind: 'kata',
+        view: 'today',
+        projectUID: '01J00000000000000000000002',
+        graph: false,
+        filters,
+      },
+    })
+    await waitFor(() => expect(document.title).toBe('Today · example-project · Kata'))
+    await view.rerender({
+      route: {
+        kind: 'kata',
+        view: 'inbox',
+        projectUID: '01J00000000000000000000002',
+        graph: false,
+        filters,
+      },
+    })
+    await waitFor(() => expect(document.title).toBe('Inbox · example-project · Kata'))
+    await view.rerender({ route: { kind: 'kata', view: 'inbox', graph: false, filters } })
+    await waitFor(() => expect(document.title).toBe('Inbox · Kata'))
+    await view.rerender({ route: { kind: 'kata', view: 'all-open', graph: false, filters } })
+    await waitFor(() => expect(document.title).toBe('All open · Kata'))
+    await view.rerender({ route: { kind: 'kata', view: 'settings', graph: false, filters } })
+    await waitFor(() => expect(document.title).toBe('Settings · Kata'))
+    await view.rerender({ route: { kind: 'kata', view: 'credentials', graph: false, filters } })
+    await waitFor(() => expect(document.title).toBe('Credentials · Kata'))
+    const issueRoute = {
+      kind: 'kata' as const,
+      issueUID: '01J00000000000000000000003',
+      graph: false,
+      filters,
+    }
+    current.selected = {
+      state: 'missing',
+      comments: [],
+      labels: [],
+      links: [],
+      recurrences: [],
+      history: [],
+    }
+    await view.rerender({ route: issueRoute, snapshot: current })
+    await waitFor(() =>
+      expect(document.title).toBe('Issue unavailable 01J00000000000000000000003 · Kata'),
+    )
+    current.selected = { ...current.selected, state: 'archived' }
+    await view.rerender({ snapshot: current })
+    await waitFor(() =>
+      expect(document.title).toBe('Archived issue 01J00000000000000000000003 · Kata'),
+    )
   })
 
   test('keeps the canonical issue route while authority is missing or archived', async () => {
@@ -2344,11 +2597,28 @@ describe('AppShell', () => {
     ]
     scoped.selected = {
       state: 'available',
-      issue: { ...scoped.collection![0]!, body: 'Scoped body', revision: 3 },
+      issue: { ...scoped.collection![0]!, body: 'Scoped body', revision: 3, recurrence_id: 1 },
       comments: [],
       labels: [],
       links: [],
-      recurrences: [],
+      recurrences: [
+        {
+          id: 1,
+          uid: 'recurrence-1',
+          project_id: 7,
+          rrule: 'FREQ=WEEKLY',
+          dtstart: '2026-06-01',
+          timezone: 'UTC',
+          template_title: 'Weekly example',
+          template_body: '',
+          template_labels: [],
+          template_metadata: {},
+          author: 'user-a',
+          revision: 1,
+          created_at: '2026-06-01T12:00:00Z',
+          updated_at: '2026-06-01T12:00:00Z',
+        },
+      ],
       history: [],
     }
 
@@ -2379,18 +2649,16 @@ describe('AppShell', () => {
         })
         .getAttribute('aria-disabled'),
     ).toBe('true')
-    expect((screen.getByRole('button', { name: 'Edit issue' }) as HTMLButtonElement).disabled).toBe(
+    expect((screen.getByRole('button', { name: 'Edit title' }) as HTMLButtonElement).disabled).toBe(
       false,
     )
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Edit issue' }))
-    await fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
-
-    expect(screen.getByRole('menuitem', { name: 'Add checklist' })).not.toBeNull()
-    expect(screen.queryByRole('menuitem', { name: 'Move to another project' })).toBeNull()
-    expect(screen.queryByRole('menuitem', { name: 'Create recurrence...' })).toBeNull()
-    expect(screen.queryByRole('menuitem', { name: 'Delete issue' })).toBeNull()
-    expect(screen.queryByRole('region', { name: 'Recurrences' })).toBeNull()
+    expect(screen.getByRole('region', { name: 'Checklist' })).not.toBeNull()
+    expect(
+      within(screen.getByRole('region', { name: 'Task detail' })).getByText('example-project'),
+    ).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Project:/ })).toBeNull()
+    expect(screen.queryByText('Repeats')).toBeNull()
 
     await fireEvent.click(screen.getByRole('button', { name: 'New task' }))
     await fireEvent.input(screen.getByRole('textbox', { name: 'Quick capture' }), {
@@ -2426,12 +2694,10 @@ function mutationProps(overrides: Record<string, unknown> = {}) {
     onRemoveLabel: vi.fn(),
     onCloseIssue: vi.fn(async () => true),
     onReopenIssue: vi.fn(),
-    onDeleteIssue: vi.fn(async () => true),
     onCreateIssue: vi.fn(async () => {}),
-    onDesignateInbox: vi.fn(async () => {}),
     onCreateRecurrence: vi.fn(async () => {}),
     onPatchRecurrence: vi.fn(async () => {}),
-    onDeleteRecurrence: vi.fn(async () => true),
+    onDeleteRecurrence: vi.fn(async () => {}),
     ...overrides,
   }
 }
@@ -2471,6 +2737,7 @@ function snapshot(): UISnapshot {
         status: 'open',
         metadata: {},
         revision: 1,
+        content_revision: 0,
         author: 'user-a',
         labels: [],
         created_at: '2026-08-01T09:00:00.000Z',
@@ -2529,7 +2796,7 @@ describe('AppShell task selection', () => {
   const secondUID = '01J00000000000000000000003'
 
   function shownTitle(): string | null {
-    return within(screen.getByRole('region', { name: 'Kata issue detail' })).getByRole('heading', {
+    return within(screen.getByRole('region', { name: 'Task detail' })).getByRole('heading', {
       level: 2,
     }).textContent
   }
@@ -2593,7 +2860,7 @@ describe('AppShell task selection', () => {
     expect(screen.queryByText('No comments.')).toBeNull()
     expect(screen.queryByText('No events')).toBeNull()
     expect(screen.getByRole('status', { name: 'Loading comments' })).not.toBeNull()
-    expect(screen.getByRole('button', { name: 'Edit issue' })).toHaveProperty('disabled', true)
+    expect(screen.getByRole('button', { name: 'Edit title' })).toHaveProperty('disabled', true)
 
     const arrived = twoTaskSnapshot()
     arrived.selected = {
@@ -2628,4 +2895,45 @@ describe('AppShell task selection', () => {
     expect(shownTitle()).toContain('Example issue')
     expect(await screen.findAllByText('First comment')).not.toHaveLength(0)
   })
+
+  test.each(['authority loss', 'arrival', 'another selection', 'different route'] as const)(
+    'handles a pending completion request after %s',
+    async (change) => {
+      const onNavigate = vi.fn()
+      const props = {
+        route: { ...listRoute, issueUID: firstUID },
+        snapshot: twoTaskSnapshot(),
+        loading: false,
+        ...mutationProps(),
+        onNavigate,
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      }
+      const { rerender } = render(AppShell, { props })
+      await fireEvent.click(screen.getByRole('button', { name: 'Complete a2' }))
+      await rerender({ loading: true, requestedRoute: onNavigate.mock.lastCall![0] })
+      if (change === 'authority loss') await rerender({ canMutate: false })
+      if (change === 'another selection') {
+        await fireEvent.click(screen.getByRole('button', { name: /Example issue/ }))
+        await rerender({ loading: false, requestedRoute: undefined })
+        expect(screen.queryByRole('dialog', { name: 'Complete task' })).toBeNull()
+      }
+      if (change === 'different route')
+        await rerender({ requestedRoute: { ...listRoute, issueUID: firstUID } })
+      const arrived = twoTaskSnapshot()
+      arrived.selected = {
+        ...arrived.selected!,
+        issue: { ...arrived.collection![1]!, body: 'Second body' },
+      }
+      await rerender({
+        route: { ...listRoute, issueUID: secondUID },
+        snapshot: arrived,
+        loading: false,
+        requestedRoute: undefined,
+        canMutate: true,
+      })
+      const dialog = screen.queryByRole('dialog', { name: 'Complete task' })
+      if (change === 'arrival') expect(dialog?.textContent).toContain('Second issue')
+      else expect(dialog).toBeNull()
+    },
+  )
 })

@@ -1,18 +1,40 @@
 package daemon_test
 
 import (
+	"context"
+	"fmt"
+	"net/http"
 	"os"
 	"slices"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/pkg/federationprovider"
 )
+
+type providerLeaveStore struct {
+	db.Storage
+	fenced bool
+}
+
+func (s *providerLeaveStore) FenceFederationLeave(ctx context.Context, projectID int64) error {
+	if err := s.Storage.(db.RelayDisconnectFenceStore).FenceFederationLeave(ctx, projectID); err != nil {
+		return err
+	}
+	s.fenced = true
+	return nil
+}
+
+func (s *providerLeaveStore) FenceRelayDisconnect(ctx context.Context, projectID int64) error {
+	return s.Storage.(db.RelayDisconnectFenceStore).FenceRelayDisconnect(ctx, projectID)
+}
 
 func providerMapping(t *testing.T) (config.CatalogDaemonConfig, config.FederationProjectConfig) {
 	t.Helper()
@@ -116,6 +138,45 @@ func TestFederationProviderAttachesEmptyReplicaWithoutAdoption(t *testing.T) {
 	assert.Len(t, events, 1, "resuming must not create another catalog event")
 }
 
+func TestFederationProviderRejoinsDetachedProject(t *testing.T) {
+	for _, intent := range []federationprovider.Intent{"read_only", "collaborate"} {
+		t.Run(string(intent), func(t *testing.T) {
+			catalog, mapping := providerMapping(t)
+			mapping.Intent = intent
+			t.Setenv("KATA_TEST_PROVIDER_STATUS", "ready")
+			store := openReplicaServiceStore(t)
+			ctx := t.Context()
+			project, err := store.CreateProjectWithUID(ctx, mapping.SpokeProject, replicaHubProjectUID)
+			require.NoError(t, err)
+			issue, event, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "local task", Author: "Example User"})
+			require.NoError(t, err)
+			credentials := config.DefaultFederationCredentialStore()
+			ready, err := daemon.AuthorizeFederationProvider(ctx, store, credentials, catalog, mapping)
+			require.NoError(t, err)
+			result, err := daemon.EnsureFederationReplica(ctx, store, credentials, nil, daemon.EnsureFederationReplicaParams{
+				HubURL: catalog.URL, HubProjectID: 42, HubProjectUID: replicaHubProjectUID,
+				ProjectName: project.Name, ReplayHorizonEventID: 9, Credential: ready.Credential,
+				PushEnabled: intent == "collaborate", AttachEmpty: true,
+				ManagedReservation: &daemon.FederationReplicaManagedReservation{ProjectUID: ready.ProjectUID, Expected: ready.Credential},
+			})
+			require.NoError(t, err)
+			assert.Equal(t, project.ID, result.Project.ID)
+			binding, err := store.FederationBindingByProject(ctx, project.ID)
+			require.NoError(t, err)
+			assert.Equal(t, intent == "collaborate", binding.PushEnabled)
+			if intent == "collaborate" {
+				assert.Zero(t, binding.PushCursorEventID)
+			}
+			got, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			assert.Equal(t, project.ID, got.ProjectID)
+			events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, IssueUID: issue.UID, Limit: 10})
+			require.NoError(t, err)
+			assert.Contains(t, events, event)
+		})
+	}
+}
+
 func TestFederationProviderPersistsBeforeContactAndResumes(t *testing.T) {
 	catalog, mapping := providerMapping(t)
 	store := openReplicaServiceStore(t)
@@ -169,6 +230,10 @@ func TestFederationProviderPersistsBeforeContactAndResumes(t *testing.T) {
 	changed.HubProject = "another-project"
 	_, err = daemon.AuthorizeFederationProvider(t.Context(), store, credentials, catalog, changed)
 	require.ErrorIs(t, err, daemon.ErrFederationReplicaCredentialConflict)
+	changed = mapping
+	changed.Intent = "read_only"
+	_, err = daemon.AuthorizeFederationProvider(t.Context(), store, credentials, catalog, changed)
+	require.ErrorIs(t, err, daemon.ErrFederationReplicaCredentialConflict, "an unbound request has no replica to switch in place")
 	changed = mapping
 	changed.CredentialProvider = append(slices.Clone(mapping.CredentialProvider), "--different-profile")
 	_, err = daemon.AuthorizeFederationProvider(t.Context(), store, credentials, catalog, changed)
@@ -277,4 +342,40 @@ func TestFederationProviderValidatesActorBeforeSavingReady(t *testing.T) {
 	assert.Equal(t, "Example User", ready.Credential.Actor)
 	assert.Equal(t, pending.Credential.Provider.RequestID, ready.Credential.Provider.RequestID)
 	assert.True(t, pending.Credential.Token == ready.Credential.Token)
+}
+
+func TestFederationProviderOvertakenLeave(t *testing.T) {
+	setup := func(t *testing.T) (*testenv.Env, db.Project, config.FederationManagedCredentialStore) {
+		t.Helper()
+		env := testenv.New(t)
+		_, mapping := providerMapping(t)
+		source := overtakenLeaveFixture(t, env.DB)
+		binding, err := env.DB.FederationBindingByProject(t.Context(), source.ID)
+		require.NoError(t, err)
+		credentials := config.DefaultFederationCredentialStore()
+		credential := config.FederationCredential{
+			HubURL: binding.HubURL, HubProjectID: binding.HubProjectID, HubProjectName: source.Name, SpokeProjectName: source.Name,
+			ManagedByConfig: true, Token: "provider-credential", Actor: "worker",
+			Provider: &config.FederationProviderCredential{RequestID: uuid.New(), Command: mapping.CredentialProvider, Intent: mapping.Intent, SpokeInstanceUID: env.DB.InstanceUID(), LocalProjectUID: source.UID, Status: federationprovider.StatusReady},
+		}
+		require.NoError(t, credentials.StoreFederationCredential(t.Context(), source.UID, credential))
+		return env, source, credentials
+	}
+	t.Run("detach", func(t *testing.T) {
+		env, source, _ := setup(t)
+		t.Setenv("KATA_TEST_PROVIDER_STATUS", "released")
+		path := fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", source.ID)
+		response, raw := envDoRaw(t, env, http.MethodPost, path, map[string]any{"disposition": "detach", "actor": "worker"}, nil)
+		require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
+	})
+	t.Run("preparation stops transport", func(t *testing.T) {
+		env, source, credentials := setup(t)
+		store := &providerLeaveStore{Storage: env.DB}
+		_, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, source.ID, "")
+		require.NoError(t, err)
+		require.True(t, store.fenced)
+		binding, err := env.DB.FederationBindingByProject(t.Context(), source.ID)
+		require.NoError(t, err)
+		require.False(t, binding.Enabled, "leave preparation keeps provider transport stopped")
+	})
 }

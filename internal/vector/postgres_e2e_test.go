@@ -71,6 +71,13 @@ func TestPostgresPgvectorIndexesAndRanksSemanticIssue(t *testing.T) {
 
 	queryVectors, err := embedder.EncodeFunc()(ctx, []string{"database contention"})
 	require.NoError(t, err)
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	for _, limit := range []int{0, -1} {
+		emptyHits, err := idx.Query(canceled, key, queryVectors[0], limit)
+		require.NoError(t, err)
+		require.Empty(t, emptyHits)
+	}
 	hits, err := idx.Query(ctx, key, queryVectors[0], 2)
 	require.NoError(t, err)
 	rolledUp, err := kitvec.RollupByDocument(hits)
@@ -197,18 +204,7 @@ func countedEmbedder(t *testing.T, model string, calls *atomic.Int64) *embedding
 
 func mappedEmbedder(t *testing.T, vectorFor func(string) []float32) *embedding.Client {
 	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request struct {
-			Input []string `json:"input"`
-		}
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
-		data := make([]map[string]any, len(request.Input))
-		for i, input := range request.Input {
-			data[i] = map[string]any{"embedding": vectorFor(input)}
-		}
-		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"data": data}))
-	}))
-	t.Cleanup(server.Close)
+	server := testenv.NewEmbeddingServer(t, vectorFor)
 	client, err := embedding.New(embedding.Config{BaseURL: server.URL, Model: "pgvector-e2e", Dims: 2})
 	require.NoError(t, err)
 	return client

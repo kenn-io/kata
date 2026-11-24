@@ -16,7 +16,8 @@ const (
 )
 
 type uiSnapshotAuthorityCacheEntry struct {
-	data db.UISnapshotData
+	data       db.UISnapshotData
+	closeEvent *db.Event
 	// dependencies are the issues the snapshot's build registered as exposed,
 	// event payload references included. A cache hit registers them again
 	// instead of rediscovering them from the response fields.
@@ -49,21 +50,21 @@ func newUISnapshotCache(clone func(db.UISnapshotData) db.UISnapshotData) *uiSnap
 	}
 }
 
-func (c *uiSnapshotCache) get(key string) (db.UISnapshotData, []int64, bool) {
+func (c *uiSnapshotCache) get(key string) (db.UISnapshotData, *db.Event, []int64, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	entry, ok := c.entries[key]
 	if !ok {
-		return db.UISnapshotData{}, nil, false
+		return db.UISnapshotData{}, nil, nil, false
 	}
 	if !c.clock().Before(entry.expiresAt) {
 		delete(c.entries, key)
-		return db.UISnapshotData{}, nil, false
+		return db.UISnapshotData{}, nil, nil, false
 	}
-	return c.clone(entry.data), slices.Clone(entry.dependencies), true
+	return c.clone(entry.data), entry.closeEvent, slices.Clone(entry.dependencies), true
 }
 
-func (c *uiSnapshotCache) put(key string, data db.UISnapshotData, dependencies []int64) {
+func (c *uiSnapshotCache) put(key string, data db.UISnapshotData, closeEvent *db.Event, dependencies []int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.clock()
@@ -86,6 +87,7 @@ func (c *uiSnapshotCache) put(key string, data db.UISnapshotData, dependencies [
 	c.sequence++
 	c.entries[key] = uiSnapshotAuthorityCacheEntry{
 		data:         c.clone(data),
+		closeEvent:   closeEvent,
 		dependencies: slices.Clone(dependencies),
 		expiresAt:    now.Add(uiSnapshotAuthorityCacheTTL),
 		sequence:     c.sequence,

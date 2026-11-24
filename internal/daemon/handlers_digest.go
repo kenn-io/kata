@@ -242,7 +242,7 @@ func applyEvent(e db.Event, totals, grand *api.DigestTotals, acc *issueAccum) {
 		if acc != nil {
 			acc.CommentCount++
 		}
-	case "issue.updated":
+	case "issue.updated", db.RepeatedImportEventType:
 		bump(&totals.Edited, &grand.Edited)
 		if acc != nil {
 			acc.Edited = true

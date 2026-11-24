@@ -134,6 +134,76 @@ func TestWebDaemonRosterIsSanitizedAndReportsHealth(t *testing.T) {
 	assert.Zero(t, authCalls.Load(), "roster must not probe with an unavailable credential")
 }
 
+func TestWebDaemonRosterMappedHubs(t *testing.T) {
+	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(down.Close)
+
+	for _, tc := range []struct {
+		name, active, selected string
+		wantIDs, wantHealth    []string
+	}{
+		{"down hub", "", "", []string{"local"}, []string{"connected"}},
+		{"selected down hub", "", "hub", []string{"local", "hub"}, []string{"connected", "down"}},
+		{"active down hub", "hub", "", []string{"local", "hub"}, []string{"connected", "down"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := openTestDB(t)
+			server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, WebDaemons: []config.CatalogDaemonConfig{{Name: "local", Local: true}, {Name: "hub", URL: down.URL, AllowInsecure: true}}, WebSyncHubs: []string{"hub"}, ActiveWebDaemon: tc.active})
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/daemons", nil)
+			require.NoError(t, err)
+			if tc.selected != "" {
+				req.Header.Set("X-Kata-Web-Daemon", tc.selected)
+			}
+			response, err := http.DefaultClient.Do(req)
+			require.NoError(t, err)
+			defer func() { _ = response.Body.Close() }()
+			require.Equal(t, http.StatusOK, response.StatusCode)
+			var roster struct {
+				Daemons []struct {
+					ID      string `json:"id"`
+					Health  string `json:"health"`
+					Default bool   `json:"default"`
+				} `json:"daemons"`
+			}
+			require.NoError(t, json.NewDecoder(response.Body).Decode(&roster))
+			require.Len(t, roster.Daemons, len(tc.wantIDs))
+			for i, entry := range roster.Daemons {
+				assert.Equal(t, tc.wantIDs[i], entry.ID)
+				assert.Equal(t, tc.wantHealth[i], entry.Health)
+			}
+			if tc.active != "" {
+				assert.True(t, roster.Daemons[len(roster.Daemons)-1].Default)
+			}
+		})
+	}
+}
+
+func TestWebDaemonRosterCachesUnrelatedTargets(t *testing.T) {
+	var otherProbes atomic.Int64
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/instance", r.URL.Path)
+		assert.Empty(t, r.Header.Get("Authorization"))
+		otherProbes.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"web_ui_contract_version":%q}`, api.UISnapshotContractVersion)
+	}))
+	t.Cleanup(other.Close)
+	d := openTestDB(t)
+	server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, WebDaemons: []config.CatalogDaemonConfig{{Name: "other", URL: other.URL, AllowInsecure: true}}})
+	for range 2 {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/daemons", nil)
+		require.NoError(t, err)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		require.NoError(t, resp.Body.Close())
+	}
+	assert.EqualValues(t, 1, otherProbes.Load())
+}
+
 func TestWebDaemonRosterReportsTargetsWithoutWebUIContract(t *testing.T) {
 	legacy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -331,6 +401,7 @@ func TestWebDaemonProxyRestrictsDownstreamOperations(t *testing.T) {
 		{name: "project lookup", path: "/api/v1/projects/resolve", body: `{"name":"example-project"}`, want: http.StatusNoContent},
 		{name: "filesystem project", path: "/api/v1/projects", body: `{"start_path":" "}`, want: http.StatusForbidden},
 		{name: "local embeddings setup", path: "/api/v1/embeddings/local", body: `{}`, want: http.StatusForbidden},
+		{name: "local embeddings restart", path: "/api/v1/embeddings/local/restart", body: `{}`, want: http.StatusForbidden},
 		{name: "federation", path: "/api/v1/federation/replicas", body: `{}`, want: http.StatusForbidden},
 		{name: "purge", path: "/api/v1/projects/7/actions/purge", body: `{}`, want: http.StatusForbidden},
 	} {

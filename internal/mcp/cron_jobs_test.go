@@ -347,3 +347,53 @@ func TestCronReadonlyAndIssueScopedCredentials(t *testing.T) {
 	}
 	require.Empty(t, cronOK(t, f.session, "cron_jobs", map[string]any{})["jobs"])
 }
+
+func TestCronFederatedAuthors(t *testing.T) {
+	f := newCronFixture(t)
+	const actor = "Ana [member:11111111-1111-4111-8111-111111111111; enrollment:11111111-1111-4111-8111-111111111111]"
+	s := connectTestServerWithOptions(t, Options{Client: f.client, ProjectID: f.project.ID, ProjectName: f.project.Name, Actor: actor, Version: "test"})
+	assertResult := func(out map[string]any, key, field string) map[string]any {
+		t.Helper()
+		record := out[key].(map[string]any)
+		require.Equal(t, "Ana", record[field])
+		if events, ok := out["events"].([]any); ok {
+			for _, event := range events {
+				require.Equal(t, "Ana", event.(map[string]any)["actor"])
+			}
+		}
+		return record
+	}
+	for _, kind := range []string{"job", "workflow"} {
+		definition := cronDefinition()
+		if kind == "workflow" {
+			definition = cronWorkflowDefinition()
+		}
+		id := cronNewUID(t, s)
+		args := map[string]any{"uid": id, "name": "Fixture", "definition": definition}
+		record := assertResult(cronOK(t, s, "cron_"+kind+"_create", args), kind, "author")
+		assertResult(cronOK(t, s, "cron_"+kind, map[string]any{"uid": id}), kind, "author")
+		list := cronOK(t, s, "cron_"+kind+"s", map[string]any{})[kind+"s"].([]any)
+		require.Len(t, list, 1)
+		require.Equal(t, "Ana", list[0].(map[string]any)["author"])
+		if kind == "job" {
+			stored, err := f.client.ShowCronJob(t.Context(), &generated.ShowCronJobRequestOptions{PathParams: &generated.ShowCronJobPath{ProjectID: f.project.ID, CronUID: id}})
+			require.NoError(t, err)
+			require.Equal(t, actor, stored.Job.Author)
+			runID := cronNewUID(t, s)
+			observe := cronObservation(runID, record)
+			observe["definition_event_uid"] = record["definition_event_uid"]
+			assertResult(cronOK(t, s, "cron_run_observe", observe), "run", "actor")
+			assertResult(cronOK(t, s, "cron_run", map[string]any{"uid": runID}), "run", "actor")
+			runs := cronOK(t, s, "cron_runs", map[string]any{})["runs"].([]any)
+			require.Len(t, runs, 1)
+			require.Equal(t, "Ana", runs[0].(map[string]any)["actor"])
+			raw, err := f.store.CronRun(t.Context(), f.project.ID, runID)
+			require.NoError(t, err)
+			require.Equal(t, actor, raw.Actor)
+		} else {
+			stored, err := f.client.ShowCronWorkflow(t.Context(), &generated.ShowCronWorkflowRequestOptions{PathParams: &generated.ShowCronWorkflowPath{ProjectID: f.project.ID, CronUID: id}})
+			require.NoError(t, err)
+			require.Equal(t, actor, stored.Workflow.Author)
+		}
+	}
+}

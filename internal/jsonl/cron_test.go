@@ -47,7 +47,7 @@ func buildNativeCronJSONLFixture(t *testing.T) nativeJSONLFixture {
 		require.NoError(t, err)
 		result, err := source.ObserveCronRun(ctx, db.ObserveCronRun{ProjectID: project.ID, UID: runUID, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, OccurrenceKey: &occurrence, IssueUID: &issue.UID, Actor: "worker", Status: "running", Summary: cron.Summary{Version: 1, Message: "Review started", InputTokens: 123}})
 		require.NoError(t, err)
-		run := db.CronRunExport(result.Run)
+		run := db.CronRunExport(result.Run.CronRun)
 		runRecords = append(runRecords, &run)
 	}
 	var exported bytes.Buffer

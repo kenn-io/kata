@@ -16,6 +16,12 @@ import (
 // Project configuration selects who may generate; source actor labels and
 // artifact producer attribution never grant generation authority.
 func (r *Reconciler) projectGenerationAllowed(ctx context.Context, projectUID string, recipe embedding.ArtifactIdentity, syncArtifacts bool) (bool, error) {
+	if r.cfg.EmbeddingProjectAllowed != nil {
+		allowed, err := r.cfg.EmbeddingProjectAllowed(ctx, projectUID)
+		if err != nil || !allowed {
+			return false, err
+		}
+	}
 	project, err := r.store.ProjectByUID(ctx, projectUID)
 	if errors.Is(err, db.ErrNotFound) {
 		return false, nil
@@ -37,10 +43,9 @@ func (r *Reconciler) projectGenerationAllowed(ctx context.Context, projectUID st
 		return false, nil
 	}
 	if binding.Role == db.FederationRoleSpoke {
-		// Negotiated replicas require a live authenticated producer check.
-		// Legacy direct federation retains its existing local worker behavior.
+		// Direct spokes use their hub; negotiated replicas check the producer.
 		if binding.RelayConfig == nil {
-			return true, nil
+			return false, nil
 		}
 		if r.cfg.FederationProducerAllowed == nil {
 			return false, nil

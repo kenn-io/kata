@@ -118,7 +118,7 @@ func checkCommentReplyFederation(t *testing.T, store db.Storage) error {
 	const targetUID = "01BBBBBBBBBBBBBBBBBBBBBBBB"
 	const editedAt = "2026-10-07T12:00:00.123456789Z"
 	issueUIDValue := issueUID
-	snapshot := newRemoteEvent(t, p, &issueUIDValue, "issue.snapshot", "worker", "01DDDDDDDDDDDDDDDDDDDDDDDD", 1, jsontext.Value(`{"uid":"`+issueUID+`","title":"Task","author":"worker","status":"open","created_at":"2026-10-07T11:00:00Z","comments":[{"comment_uid":"`+commentUID+`","author":"worker","body":"Reply","created_at":"2026-10-07T11:00:00Z","reply_to_uid":"`+targetUID+`","reply_kind":"confirm","edited_at":"`+editedAt+`"}]}`))
+	snapshot := newRemoteEvent(t, p, &issueUIDValue, "issue.snapshot", "worker", "01DDDDDDDDDDDDDDDDDDDDDDDD", 1, IssueDocument(t, issueUID, jsontext.Value(`{"uid":"`+issueUID+`","title":"Task","author":"worker","status":"open","created_at":"2026-10-07T11:00:00Z","comments":[{"comment_uid":"`+commentUID+`","author":"worker","body":"Reply","created_at":"2026-10-07T11:00:00Z","reply_to_uid":"`+targetUID+`","reply_kind":"confirm","edited_at":"`+editedAt+`"}]}`)))
 	_, err = store.InsertRemoteEvent(ctx, p.ID, snapshot)
 	require.NoError(t, err)
 	require.NoError(t, store.MaterializeFederatedProject(ctx, p.ID))

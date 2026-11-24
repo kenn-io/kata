@@ -28,9 +28,11 @@ func (s *Store) ListDueNotificationIssueIDs(ctx context.Context, now time.Time) 
 		   AND NOT (COALESCE(fb.enabled, 0) = 1 AND fb.role = 'spoke')
 		   AND (
 			 (jsonb_typeof((i.metadata)::jsonb -> 'scheduled_on') = 'string'
-			  AND ((i.metadata)::jsonb ->> 'scheduled_on') COLLATE "C" <= $1)
+			  AND (CASE WHEN substr((i.metadata)::jsonb ->> 'scheduled_on', 11, 1) = 'T'
+			    THEN (i.metadata)::jsonb ->> 'scheduled_on' ELSE substr((i.metadata)::jsonb ->> 'scheduled_on', 1, 10) END) COLLATE "C" <= $1)
 			 OR (jsonb_typeof((i.metadata)::jsonb -> 'deadline_on') = 'string'
-			  AND ((i.metadata)::jsonb ->> 'deadline_on') COLLATE "C" <= $1)
+			  AND (CASE WHEN substr((i.metadata)::jsonb ->> 'deadline_on', 11, 1) = 'T'
+			    THEN (i.metadata)::jsonb ->> 'deadline_on' ELSE substr((i.metadata)::jsonb ->> 'deadline_on', 1, 10) END) COLLATE "C" <= $1)
 			 OR EXISTS (
 				 SELECT 1 FROM jsonb_each((i.metadata)::jsonb) AS entry(key, value)
 				  WHERE entry.key LIKE 'notify.%'
@@ -183,7 +185,7 @@ func issueMetadataHistoryTx(ctx context.Context, tx *sql.Tx, issueID int64, issu
 		SELECT uid, origin_instance_uid, type, payload, hlc_physical_ms, hlc_counter, created_at
 		  FROM events
 		 WHERE (issue_id = $1 OR (issue_id IS NULL AND issue_uid = $2))
-		   AND type IN ('issue.created', 'issue.snapshot', 'issue.metadata_updated', 'issue.scheduled_reached', 'recurrence.materialized')
+		   AND type IN ('issue.created', 'issue.snapshot', 'issue.restated', 'issue.metadata_updated', 'issue.scheduled_reached', 'recurrence.materialized')
 		 ORDER BY hlc_physical_ms, hlc_counter, origin_instance_uid, uid`, issueID, issueUID)
 	if err != nil {
 		return nil, fmt.Errorf("read due notification history: %w", mapSQLError(err, nil))

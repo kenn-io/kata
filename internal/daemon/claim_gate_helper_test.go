@@ -510,3 +510,40 @@ func assertClaimGateHelperAPIError(t *testing.T, err error, status int, code str
 	assert.Equal(t, status, apiErr.Status)
 	assert.Equal(t, code, apiErr.Code)
 }
+
+// A refusal of a soft-deleted issue's history read answers issue_not_found,
+// including federation refusals, so a caller restore would refuse cannot tell
+// the issue exists. A hub error forwarded with its status is a fault, not a
+// refusal, and keeps that status and code.
+func TestRequireDeletedHistoryAccessMapsRefusalsToNotFoundAndKeepsHubErrors(t *testing.T) {
+	tests := []struct {
+		name       string
+		hubStatus  int // zero: spoke with push disabled, no hub involved
+		wantStatus int
+		wantCode   string
+	}{
+		{name: "federated read only is refused", wantStatus: http.StatusNotFound, wantCode: "issue_not_found"},
+		{name: "hub rate limit keeps its status", hubStatus: http.StatusTooManyRequests, wantStatus: http.StatusTooManyRequests, wantCode: "hub_claim_failed"},
+		{name: "hub unauthorized reports a rejected hub credential", hubStatus: http.StatusUnauthorized, wantStatus: http.StatusBadGateway, wantCode: "hub_credential_rejected"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := t.Context()
+			store := openClaimGateHelperDB(t)
+			project, issue := createClaimGateHelperIssue(t, store)
+			if tt.hubStatus == 0 {
+				enableClaimGateHelperSpokeWithPush(t, store, project, "http://127.0.0.1:1", 99, false)
+			} else {
+				hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					api.WriteEnvelope(w, tt.hubStatus, "hub_rejected", "hub rejected claim status")
+				}))
+				t.Cleanup(hub.Close)
+				enableClaimGateHelperSpoke(t, store, project, hub.URL, 99)
+			}
+
+			err := requireDeletedHistoryAccess(ctx, ServerConfig{DB: store}, project.ID, issue, "agent")
+
+			assertClaimGateHelperAPIError(t, err, tt.wantStatus, tt.wantCode)
+		})
+	}
+}

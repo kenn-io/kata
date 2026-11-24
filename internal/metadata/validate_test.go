@@ -13,6 +13,22 @@ import (
 const goodULID1 = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 const goodULID2 = "01ARZ3NDEKTSV4RRFFQ69G5FAW"
 
+func TestValidateAttention(t *testing.T) {
+	for _, raw := range []string{`"ok"`, `"needs-human"`, `"stuck"`, `null`} {
+		assert.NoError(t, Validate(IssueRegistry, "work.attention", jsontext.Value(raw)))
+	}
+	for _, raw := range []string{`"working"`, `"\"needs-human\""`, `""`, `true`} {
+		err := Validate(IssueRegistry, "work.attention", jsontext.Value(raw))
+		require.ErrorIs(t, err, ErrInvalidValue)
+		assert.Equal(t, "invalid value: work.attention must be one of ok, needs-human, stuck", err.Error())
+	}
+	for _, raw := range []string{`null`, ``} {
+		err := ValidateCreateValue(IssueRegistry, "work.attention", jsontext.Value(raw))
+		require.ErrorIs(t, err, ErrInvalidValue)
+		assert.Contains(t, err.Error(), "ok, needs-human, stuck")
+	}
+}
+
 // TestValidateCreateValue_RejectsNullAndEmpty pins the create-time rule that a
 // null or empty value is a caller error (nothing to clear at creation), and
 // that the rejection wraps ErrInvalidValue so handlers map it to a 400.
@@ -42,6 +58,11 @@ func TestValidateScheduleValues(t *testing.T) {
 			assert.NoError(t, Validate(IssueRegistry, key, jsontext.Value(`"2026-05-20T15:30"`)))
 			assert.NoError(t, Validate(IssueRegistry, key, jsontext.Value(`"2026-05-20T15:30:45"`)))
 			assert.NoError(t, Validate(IssueRegistry, key, jsontext.Value(`"2026-05-20T22:30:00Z"`)))
+			assert.NoError(t, Validate(IssueRegistry, key, jsontext.Value(`"2026-05-20[Europe/Paris]"`)))
+			assert.NoError(t, Validate(IssueRegistry, key, jsontext.Value(`"2026-05-20T15:30[Asia/Tokyo]"`)))
+			assert.Error(t, Validate(IssueRegistry, key, jsontext.Value(`"2026-05-20[Local]"`)))
+			assert.Error(t, Validate(IssueRegistry, key, jsontext.Value(`"2026-05-20[Invalid/Zone]"`)))
+			assert.Error(t, Validate(IssueRegistry, key, jsontext.Value(`"2026-05-20T22:30:00Z[Europe/Paris]"`)))
 			assert.Error(t, Validate(IssueRegistry, key, jsontext.Value(`"2026-05-20T15:30:00-07:00"`)))
 			assert.Error(t, Validate(IssueRegistry, key, jsontext.Value(`"not-a-date"`)))
 			assert.Error(t, Validate(IssueRegistry, key, jsontext.Value(`"2026-13-01"`)))

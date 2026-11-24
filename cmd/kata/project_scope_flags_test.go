@@ -15,7 +15,7 @@ func TestCrossProjectCommandsUseAllFlag(t *testing.T) {
 			args := append(append([]string{}, command...), "--all", "--help")
 			out, err := runCmdOutput(t, nil, args...)
 			require.NoError(t, err)
-			assert.Contains(t, out, "--all ")
+			assert.Regexp(t, `--all[ [=]`, out)
 			assert.NotContains(t, out, "--all-projects")
 
 			args = append(append([]string{}, command...), "--all-projects", "--help")

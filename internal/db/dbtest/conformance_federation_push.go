@@ -26,7 +26,7 @@ func checkFederationPushSnapshotRuns(t *testing.T, store db.Storage) error {
 		"issue.updated", "issue.snapshot", "issue.snapshot", "project.restored", "issue.snapshot", "issue.snapshot",
 		"issue.updated", "issue.snapshot", "issue.snapshot", "issue.updated", "issue.snapshot", "issue.snapshot",
 	} {
-		payload := jsontext.Value(fmt.Sprintf(`{"uid":%q,"title":"work","author":"tester","status":"open"}`, issue.UID))
+		payload := IssueDocument(t, issue.UID, jsontext.Value(fmt.Sprintf(`{"uid":%q,"title":"work","author":"tester","status":"open"}`, issue.UID)))
 		event := newRemoteEvent(t, project, &issue.UID, typ, "tester", store.InstanceUID(), int64(100+i), payload)
 		inserted, err := store.InsertRemoteEvent(ctx, project.ID, event)
 		if err != nil {

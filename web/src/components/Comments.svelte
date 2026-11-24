@@ -1,9 +1,17 @@
 <script lang="ts">
+  import DetailSection from './DetailSection.svelte'
   import { tick } from 'svelte'
   /* eslint-disable svelte/prefer-svelte-reactivity -- reference counts are a transient search-result lookup. */
   import { commentEvidenceLength, trimCommentEvidence } from '../lib/kata/commentEvidence'
-  import { CommentRelations } from '@kenn-io/kata-ui'
-  import { Button, Markdown, MentionTextarea, type MentionOption } from '@kenn-io/kit-ui'
+  import { CommentRelations, CreationAttribution, authorName, creationFor } from '@kenn-io/kata-ui'
+  import {
+    Avatar,
+    Button,
+    Markdown,
+    MentionTextarea,
+    SegmentedControl,
+    type MentionOption,
+  } from '@kenn-io/kit-ui'
   import {
     formatRelativeTime as timeAgo,
     formatTimestamp as localDateTimeLabel,
@@ -17,6 +25,7 @@
   type Reference = UIIssueReference
 
   interface Props {
+    selfActor?: string | undefined
     selectedCommentUID?: string | undefined
     // True while the task shows the list's copy and its comments load.
     pending?: boolean | undefined
@@ -53,6 +62,7 @@
 
   let {
     issue,
+    selfActor = undefined,
     selectedCommentUID,
     pending = false,
     navigationActive = true,
@@ -99,8 +109,8 @@
   })
 
   let commentDraft = $state('')
-  const replyKindID = $props.id()
-  const replyKinds: KataReplyKind[] = ['reply', 'confirm', 'refute', 'supersede']
+  let addingComment = $state(false)
+  let composerElement = $state<HTMLFormElement>()
   let replyDraft = $state<KataCommentReplyIntent | undefined>()
   let lastInitialReply: KataCommentReplyIntent | undefined
   $effect(() => {
@@ -136,7 +146,12 @@
     ),
   )
   function beginReply(uid: string, kind: KataReplyKind): void {
-    if (actionsDisabled || issue.issue.status !== 'open') return
+    if (
+      actionsDisabled ||
+      issue.issue.status !== 'open' ||
+      (commentDraft && replyDraft?.replyTo !== uid)
+    )
+      return
     replyDraft = { replyTo: uid, kind, force: false }
   }
   function cancelReply(): void {
@@ -256,10 +271,11 @@
   }
 </script>
 
-<section class="comments" aria-labelledby="kata-comments-title">
-  <h3 id="kata-comments-title">Comments</h3>
+{#snippet composer()}
   <form
+    bind:this={composerElement}
     class="comment-composer"
+    class:comment-composer--active={Boolean(replyDraft) || commentDraft !== ''}
     onsubmit={(event) => {
       event.preventDefault()
       void submitComment()
@@ -267,27 +283,33 @@
   >
     {#if replyDraft}
       <div class="reply-target">
-        Reply to {issue.comments.find((c) => c.uid === replyDraft?.replyTo)?.handle ??
-          replyDraft.replyTo}
-        <label for={replyKindID}>Reply kind</label>
-        <select
-          id={replyKindID}
-          aria-label="Reply kind"
+        <SegmentedControl
+          ariaLabel="Reply kind"
+          value={replyDraft.kind}
           disabled={actionsDisabled}
-          bind:value={() => replyDraft?.kind ?? 'reply', updateReplyKind}
-          >{#each replyKinds as kind (kind)}<option value={kind}>{kind}</option>{/each}</select
-        >
+          options={[
+            { value: 'reply', label: 'Reply' },
+            { value: 'confirm', label: 'Confirm, with evidence' },
+            { value: 'refute', label: 'Refute, with evidence' },
+            { value: 'supersede', label: 'Supersede this comment' },
+          ]}
+          onchange={(kind) => updateReplyKind(kind as KataReplyKind)}
+        />
         <Button size="sm" label="Cancel reply" disabled={actionsDisabled} onclick={cancelReply} />
       </div>
-      {#if evidenceTooShort}<p>Confirm and refute need at least 40 characters of evidence.</p>{/if}
+      {#if evidenceTooShort}<p>
+          Confirm and refute replies need at least 40 characters of evidence. {commentEvidenceLength(
+            commentDraft,
+          )}/40
+        </p>{/if}
     {/if}
     <MentionTextarea
       ariaLabel={replyDraft ? 'Reply evidence' : 'Comment'}
-      rows={3}
+      rows={replyDraft || commentDraft ? 3 : 1}
       bind:value={() => commentDraft, updateCommentDraft}
       search={searchTaskReferences}
       emptyLabel="No matching tasks"
-      placeholder="Add a comment..."
+      placeholder={replyDraft ? 'Add your reply' : 'Add a comment'}
       disabled={actionsDisabled}
     />
     <Button
@@ -313,14 +335,37 @@
         }}
       />{/if}
   </form>
+{/snippet}
+
+<DetailSection
+  title="Comments"
+  count={!pending && issue.comments.length ? issue.comments.length : undefined}
+  hideBody={!pending &&
+    issue.comments.length === 0 &&
+    !addingComment &&
+    !replyDraft &&
+    !commentDraft}
+>
+  {#snippet actions()}
+    {#if !pending && issue.comments.length === 0 && !addingComment && !replyDraft && !commentDraft}
+      <Button
+        size="sm"
+        label="Add comment"
+        disabled={actionsDisabled}
+        onclick={() => {
+          addingComment = true
+          void tick().then(() => composerElement?.querySelector('textarea')?.focus())
+        }}
+      />
+    {/if}
+  {/snippet}
   {#if showList}
     {#if pending}
       <p role="status" aria-label="Loading comments">Loading comments…</p>
-    {:else if sortedComments.length === 0}
-      <p>No comments</p>
-    {:else}
+    {:else if sortedComments.length > 0}
       <div class="comment-list" bind:this={listElement}>
         {#each sortedComments as comment (comment.id)}
+          {@const author = authorName(comment.author)}
           <article
             class="comment"
             class:selected={selectedCommentUID !== undefined && selectedCommentUID === comment.uid}
@@ -328,20 +373,37 @@
             tabindex="-1"
           >
             <div class="comment-meta">
-              {#if comment.handle}<span>{comment.handle}</span>{/if}
-              {#if comment.edited_at}<span title={localDateTimeLabel(comment.edited_at)}
-                  >(edited)</span
-                >{/if}
-              <span class="avatar" aria-hidden="true">{comment.author.slice(0, 1)}</span>
+              <Avatar
+                name={author}
+                initials={author.slice(0, 1).toUpperCase()}
+                tone="neutral"
+                decorative
+                size={20}
+              />
               <span class="author"
-                >{comment.teammate
-                  ? `${comment.author} / ${comment.teammate}`
-                  : comment.author}</span
+                >{comment.author === selfActor ? 'You' : author}{comment.teammate
+                  ? ` / ${comment.teammate}`
+                  : ''}</span
               >
               <time datetime={comment.created_at} title={localDateTimeLabel(comment.created_at)}>
                 {timeAgo(comment.created_at)}
               </time>
+              {#if comment.handle}<span class="comment-handle">{comment.handle}</span>{/if}
+              {#if comment.edited_at}<span title={localDateTimeLabel(comment.edited_at)}
+                  >(edited)</span
+                >{/if}
+              {#if comment.uid && comment.handle}
+                <button
+                  type="button"
+                  class="comment-action"
+                  disabled={actionsDisabled ||
+                    issue.issue.status !== 'open' ||
+                    Boolean(commentDraft && replyDraft?.replyTo !== comment.uid)}
+                  onclick={() => beginReply(comment.uid!, 'reply')}>Reply</button
+                >
+              {/if}
             </div>
+            <CreationAttribution creation={creationFor(comment).creation} />
             {#if comment.reply}<div class="comment-links">
                 ↳ <Button
                   size="sm"
@@ -356,79 +418,44 @@
               partial={comment.backlinks_truncated ?? false}
               onOpen={onOpenComment ? (link) => openComment(link, comment.uid) : undefined}
             />
-            {#if comment.uid && comment.handle}<div class="comment-links">
-                {#each replyKinds as kind (kind)}<Button
-                    size="sm"
-                    label={kind[0]!.toUpperCase() + kind.slice(1)}
-                    disabled={actionsDisabled || issue.issue.status !== 'open'}
-                    onclick={() => beginReply(comment.uid!, kind)}
-                  />{/each}
-              </div>{/if}
+            {#if comment.uid && comment.handle && replyDraft?.replyTo === comment.uid}
+              <div class="reply-composer">{@render composer()}</div>
+            {/if}
           </article>
         {/each}
       </div>
     {/if}
   {/if}
-</section>
+  {#if !replyDraft || !issue.comments.some((comment) => comment.uid === replyDraft?.replyTo)}
+    {@render composer()}
+  {/if}
+</DetailSection>
 
 <style>
+  .comment-list {
+    display: grid;
+    gap: 4px;
+    margin-bottom: 8px;
+  }
+
+  /* A record row: the avatar starts at the pane inset and a selected
+     comment's highlight runs to the pane's edges. */
+  .comment {
+    margin-inline: -16px;
+    padding: 6px 16px;
+  }
+
   .comment.selected {
     background: var(--bg-inset);
-    outline: 1px solid var(--border-muted);
-  }
-  .reply-target,
-  .comment-links {
-    display: flex;
-    gap: var(--space-3);
-    flex-wrap: wrap;
-    align-items: center;
-  }
-  .comments h3 {
-    margin: 0 0 var(--space-4);
-    color: var(--text-primary);
-    font-size: var(--font-size-md);
-    font-weight: var(--font-weight-semibold);
-  }
-
-  .comment-composer {
-    display: grid;
-    gap: var(--space-4);
-    margin-bottom: var(--space-4);
-  }
-
-  .comment-composer :global(.comment-submit) {
-    justify-self: end;
-  }
-
-  .comment {
-    padding: var(--space-5) 0;
-  }
-
-  .comment + .comment {
-    border-top: 1px solid var(--border-muted);
   }
 
   .comment-meta {
     display: flex;
     align-items: center;
-    gap: var(--space-4);
-    margin-bottom: var(--space-3);
-    color: var(--text-muted);
-    font-size: var(--font-size-sm);
-  }
-
-  .avatar {
-    display: inline-grid;
-    flex: 0 0 auto;
-    place-items: center;
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    background: var(--bg-inset);
+    gap: 8px;
+    min-height: 24px;
     color: var(--text-secondary);
-    font-size: var(--font-size-2xs);
-    font-weight: var(--font-weight-semibold);
-    text-transform: uppercase;
+    font-size: var(--font-size-sm);
   }
 
   .author {
@@ -440,7 +467,92 @@
     white-space: nowrap;
   }
 
-  .comment > :global(.comment-body) {
+  .comment-handle {
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-xs);
+  }
+
+  /* Reply sits at the right inset and shows on hover and focus; a screen
+     that can't hover shows it always. */
+  .comment-action {
+    height: 24px;
+    margin-left: auto;
+    border: 0;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    padding: 0 8px;
+    cursor: pointer;
+    opacity: 0;
+  }
+
+  .comment:hover .comment-action,
+  .comment-action:focus-visible {
+    opacity: 1;
+  }
+
+  @media (hover: none) {
+    .comment-action {
+      opacity: 1;
+    }
+  }
+
+  .comment-action:hover:not(:disabled) {
+    background: var(--bg-surface-hover);
+    color: var(--text-primary);
+  }
+
+  .comment > :global(.comment-body),
+  .comment-links,
+  .reply-composer {
     padding-left: 28px;
+  }
+
+  .comment > :global([aria-label='Creation attribution']) {
+    margin-left: 28px;
+  }
+
+  .comment > :global(.comment-body) {
+    margin-top: 2px;
+  }
+
+  .reply-target,
+  .comment-links {
+    display: flex;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .reply-target {
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+  }
+
+  .reply-composer {
+    margin-top: 8px;
+  }
+
+  .comment-composer {
+    display: grid;
+    gap: 8px;
+  }
+
+  .comment-composer p {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+  }
+
+  .comment-composer :global(.comment-submit) {
+    justify-self: end;
+  }
+
+  /* An empty composer is one line; its actions appear once it has focus
+     or text. */
+  .comment-composer:not(.comment-composer--active):not(:focus-within) :global(.comment-submit) {
+    display: none;
   }
 </style>

@@ -105,6 +105,9 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 		if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE substr(key,1,?)=?`, len(db.FederationSpokeNamePrefix), db.FederationSpokeNamePrefix); err != nil {
 			return fmt.Errorf("clear target spoke names: %w", err)
 		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE substr(key,1,?)=?`, len(db.FormerInstanceUIDMetaPrefix), db.FormerInstanceUIDMetaPrefix); err != nil {
+			return fmt.Errorf("clear target former instance UIDs: %w", err)
+		}
 		// The key check travels with the subscription rows. A full restore
 		// replaces both, so the target's value must not outlive its rows. The
 		// scan position never travels: without it the restored daemon pings
@@ -121,7 +124,7 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 		}
 	}
 
-	var skippedMissingPeer, skippedDup, skippedMappings int
+	var skippedMissingPeer, skippedDup, skippedMappings, skippedUndeliverable, skippedCycles, skippedSecondParents int
 	skippedLinkIDs := make(map[int64]struct{})
 	for _, r := range db.OrderImportRecords(recs) {
 		skip, err := importRecord(ctx, tx, r, opts, skippedLinkIDs)
@@ -134,11 +137,38 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 			if link, ok := r.(*db.LinkExport); ok {
 				skippedLinkIDs[link.ID] = struct{}{}
 			}
+		case linkSkipUndeliverable, linkSkipParentCycle, linkSkipSecondParent:
+			switch skip {
+			case linkSkipUndeliverable:
+				skippedUndeliverable++
+			case linkSkipParentCycle:
+				skippedCycles++
+			default:
+				skippedSecondParents++
+			}
+			if link, ok := r.(*db.LinkExport); ok {
+				skippedLinkIDs[link.ID] = struct{}{}
+			}
 		case linkSkipDuplicate:
 			skippedDup++
 		case linkSkipMapping:
 			skippedMappings++
 		}
+	}
+	if skippedUndeliverable > 0 {
+		fmt.Fprintf(os.Stderr,
+			"note: skipped %d link record(s) between projects that a relay between hubs cannot deliver\n",
+			skippedUndeliverable)
+	}
+	if skippedCycles > 0 {
+		fmt.Fprintf(os.Stderr,
+			"note: skipped %d parent link record(s) that would close a cycle with links already in the target\n",
+			skippedCycles)
+	}
+	if skippedSecondParents > 0 {
+		fmt.Fprintf(os.Stderr,
+			"note: skipped %d parent link record(s) for task(s) that already have a parent in the target\n",
+			skippedSecondParents)
 	}
 	if skippedMissingPeer > 0 {
 		fmt.Fprintf(os.Stderr,
@@ -445,10 +475,13 @@ func validateFreshReplayTarget(
 type linkSkip int
 
 const (
-	linkSkipNone        linkSkip = iota // not skipped; record was inserted
-	linkSkipMissingPeer                 // peer issue absent from envelope/database
-	linkSkipDuplicate                   // edge already present (natural-key no-op)
-	linkSkipMapping                     // import_mapping references a skipped link
+	linkSkipNone          linkSkip = iota // not skipped; record was inserted
+	linkSkipMissingPeer                   // peer issue absent from envelope/database
+	linkSkipDuplicate                     // edge already present (natural-key no-op)
+	linkSkipMapping                       // import_mapping references a skipped link
+	linkSkipUndeliverable                 // merge link between projects that a relay cannot deliver
+	linkSkipParentCycle                   // merge parent link that would close a cycle in the target
+	linkSkipSecondParent                  // merge parent link for a task that already has a parent in the target
 )
 
 // importRecord applies one record. For link records importLink may signal a
@@ -516,7 +549,7 @@ func importRecord(ctx context.Context, tx *sql.Tx, r db.ImportRecord, opts db.Im
 	case *db.IssueLabelExport:
 		return linkSkipNone, importLabel(ctx, tx, rec)
 	case *db.LinkExport:
-		return importLink(ctx, tx, rec)
+		return importLink(ctx, tx, rec, opts.MergeProject)
 	case *db.ImportMappingExport:
 		return importMapping(ctx, tx, rec, skippedLinkIDs, opts.PreserveIssueSyncBindingEnabled && !opts.MergeProject)
 	case *db.ExternalFieldMappingExport:
@@ -565,7 +598,8 @@ func importMeta(ctx context.Context, tx *sql.Tx, m *db.MetaKV, opts db.ImportOpt
 	}
 	// --new-instance keeps the target's instance_uid (the value db.Open wrote).
 	if m.Key == "instance_uid" && opts.NewInstance {
-		return nil
+		_, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) SELECT ?,'' WHERE EXISTS (SELECT 1 FROM meta WHERE key='instance_uid' AND value<>?) ON CONFLICT(key) DO NOTHING`, db.FormerInstanceUIDMetaPrefix+m.Value, m.Value)
+		return wrapImportErr(db.ImportKindMeta, err)
 	}
 	_, err := tx.ExecContext(ctx,
 		`INSERT INTO meta(key, value) VALUES(?, ?)
@@ -770,7 +804,7 @@ func importLabel(ctx context.Context, tx *sql.Tx, l *db.IssueLabelExport) error 
 // the edge and the natural-key check below makes that re-delivery a no-op.
 // Both envelopes of one source DB agree on row ids, so equal natural key
 // implies equal id and the id-preserving INSERT can never collide.
-func importLink(ctx context.Context, tx *sql.Tx, lk *db.LinkExport) (linkSkip, error) {
+func importLink(ctx context.Context, tx *sql.Tx, lk *db.LinkExport, mergeProject bool) (linkSkip, error) {
 	var present int
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM issues WHERE id IN (?, ?)`,
@@ -792,6 +826,38 @@ func importLink(ctx context.Context, tx *sql.Tx, lk *db.LinkExport) (linkSkip, e
 	}
 	if dup > 0 {
 		return linkSkipDuplicate, nil
+	}
+	// A merge can link the imported project to one already in the target.
+	// It leaves out what an ordinary link write refuses: a relay cannot
+	// deliver a link between projects, and a parent link must not close a
+	// cycle with the links the target already holds. The rest of the project
+	// still merges. A full restore keeps the links it exported.
+	if mergeProject {
+		if lk.Type == "parent" {
+			// A task has one parent. Snapshots taken before and after a
+			// reparent disagree, and the target keeps the parent it holds.
+			var hasParent bool
+			if err := tx.QueryRowContext(ctx,
+				`SELECT EXISTS(SELECT 1 FROM links WHERE type = 'parent' AND from_issue_id = ?)`,
+				lk.FromIssueID).Scan(&hasParent); err != nil {
+				return linkSkipNone, wrapImportErr(db.ImportKindLink, err)
+			}
+			if hasParent {
+				return linkSkipSecondParent, nil
+			}
+			if err := assertNoParentCycleTx(ctx, tx, lk.FromIssueID, lk.ToIssueID); errors.Is(err, db.ErrParentCycle) {
+				return linkSkipParentCycle, nil
+			} else if err != nil {
+				return linkSkipNone, fmt.Errorf("project merge parent link from issue %s to %s: %w", lk.FromIssueUID, lk.ToIssueUID, err)
+			}
+		}
+		// Historical links may predate connecting both projects to their hub.
+		var mismatch *db.LinkServerMismatchError
+		if err := ensureRelayLinkBoundaryTx(ctx, tx, lk.FromIssueID, lk.ToIssueID); errors.Is(err, db.ErrFederationCrossProjectBoundary) {
+			return linkSkipUndeliverable, nil
+		} else if err != nil && !errors.As(err, &mismatch) {
+			return linkSkipNone, fmt.Errorf("project merge link between issues %s and %s: %w", lk.FromIssueUID, lk.ToIssueUID, err)
+		}
 	}
 	_, err := tx.ExecContext(ctx,
 		`INSERT INTO links(id, from_issue_id, from_issue_uid, to_issue_id, to_issue_uid, type, author, created_at)

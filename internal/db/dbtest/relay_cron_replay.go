@@ -62,7 +62,7 @@ func RunRelayIngestValidatesCronReplay(t *testing.T, store db.Storage) {
 
 	issueUID, err := uid.New()
 	require.NoError(t, err)
-	issue := newRemoteEvent(t, project, &issueUID, "issue.created", "source-assistant", downstream, 300, jsontext.Value(`{"uid":"`+issueUID+`","title":"Relayed task","author":"source-assistant","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`))
+	issue := newRemoteEvent(t, project, &issueUID, "issue.created", "source-assistant", downstream, 300, IssueDocument(t, issueUID, jsontext.Value(`{"uid":"`+issueUID+`","title":"Relayed task","author":"source-assistant","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)))
 	accepted, err := store.AcceptRelayDeliveries(ctx, binding, db.RelayBatch{Stream: db.RelayStreamEvent, Envelopes: []db.RelayEnvelope{seal(issue, 1)}})
 	require.NoError(t, err)
 	require.Equal(t, int64(1), accepted.Through)

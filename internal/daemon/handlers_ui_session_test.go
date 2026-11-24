@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,7 +17,136 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/docbank"
 )
+
+func TestBrowserAttachmentRequestsMapRemoteAuthenticationFailure(t *testing.T) {
+	store := openAuthTestDB(t)
+	project, err := store.CreateProject(t.Context(), "attachments")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "example", Author: "operator"})
+	require.NoError(t, err)
+	const origin = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+	_, err = store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "operator", Patch: map[string]jsontext.Value{"attachment.file": []byte(`{"name":"file.pdf","media_type":"application/pdf","size":7,"docbank_version":"6f1c2e8a-2222-4222-8222-222222222222","origin":"` + origin + `"}`)}})
+	require.NoError(t, err)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/capabilities") {
+			_, _ = fmt.Fprintf(w, `{"version":1,"project_uid":%q,"origin":%q}`, project.UID, origin)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/lease") {
+			_, _ = w.Write([]byte(`{"held":false}`))
+			return
+		}
+		if !strings.Contains(r.URL.Path, "/federation/docbank/") {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":{"code":"signature_invalid","message":"private remote detail"}}`))
+	}))
+	t.Cleanup(upstream.Close)
+	_, err = store.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: upstream.URL, HubProjectID: 1, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "operator", AllowInsecure: true})
+	require.NoError(t, err)
+	manager := newDeterministicSessionManager(t, "http://127.0.0.1:27123", "instance_a")
+	server := NewServer(ServerConfig{DB: store, WebSessions: manager, FederationCredentials: uiCapabilityCredentials{credential: config.FederationCredential{HubURL: upstream.URL, HubProjectID: 1, Token: "fixture", AllowInsecure: true}}})
+	t.Cleanup(func() { _ = server.Close() })
+	handler, err := server.HandlerFor(ListenerPolicy{Kind: ListenerBrowser, Origin: "http://127.0.0.1:27123", RequireBrowserSession: true, AllowLocalSession: true})
+	require.NoError(t, err)
+	issued, err := manager.IssueSession(Principal{Kind: PrincipalWebLocal}, "/kata")
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("http://127.0.0.1:27123/api/v1/projects/%d/issues/%s/attachments/file/content", project.ID, issue.UID), nil)
+	request.AddCookie(manager.Cookie(issued.Cookie))
+	request.Header.Set(webSessionHeader, issued.Session)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	require.Equal(t, http.StatusBadGateway, response.Code, response.Body.String())
+	require.Contains(t, response.Body.String(), "hub_credential_rejected")
+	endpoint := fmt.Sprintf("http://127.0.0.1:27123/api/v1/projects/%d/issues/%s/attachments", project.ID, issue.UID)
+	for _, tc := range []struct{ name, path, body, contentType string }{
+		{"upload", endpoint + "?name=file.pdf&actor=operator", "file bytes", "application/octet-stream"},
+		{"link", endpoint + "/links", `{"path":"/kata/file.pdf","actor":"operator"}`, "application/json"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, tc.path, strings.NewReader(tc.body))
+			request.AddCookie(manager.Cookie(issued.Cookie))
+			request.Header.Set(webSessionHeader, issued.Session)
+			request.Header.Set(webCSRFHeader, issued.CSRF)
+			request.Header.Set("Origin", "http://127.0.0.1:27123")
+			request.Header.Set("Content-Type", tc.contentType)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			require.Equal(t, http.StatusBadGateway, response.Code, response.Body.String())
+			require.Contains(t, response.Body.String(), "hub_credential_rejected")
+		})
+	}
+}
+
+func TestUIAttachmentCapabilityWithoutLocalVault(t *testing.T) {
+	store := openAuthTestDB(t)
+	project, err := store.CreateProject(t.Context(), "project")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "issue", Author: "operator"})
+	require.NoError(t, err)
+	cfg := ServerConfig{DB: store, UIStore: store}
+	capability := func(selected string) bool {
+		t.Helper()
+		server := NewServer(cfg)
+		defer func() { _ = server.Close() }()
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/ui/snapshot?view=all-open&selected_issue_uid="+selected, nil)
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, request)
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		var snapshot struct {
+			Capabilities struct {
+				Attachments bool `json:"attachments"`
+			} `json:"capabilities"`
+		}
+		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &snapshot))
+		return snapshot.Capabilities.Attachments
+	}
+	require.False(t, capability(issue.UID))
+	_, err = store.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleHub, HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true})
+	require.NoError(t, err)
+	require.False(t, capability(issue.UID))
+	_, err = store.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "operator"})
+	require.NoError(t, err)
+	require.True(t, capability(issue.UID))
+	standalone, err := store.CreateProject(t.Context(), "standalone")
+	require.NoError(t, err)
+	standaloneIssue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: standalone.ID, Title: "issue", Author: "operator"})
+	require.NoError(t, err)
+	require.True(t, capability(standaloneIssue.UID))
+	require.True(t, capability(""))
+	server := NewServer(cfg)
+	defer func() { _ = server.Close() }()
+	url := "/api/v1/ui/snapshot?view=all-open&selected_issue_uid=" + issue.UID
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	require.Equal(t, http.StatusOK, response.Code)
+	etag := response.Header().Get("ETag")
+	require.NotEmpty(t, etag)
+	_, err = store.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Enabled: false, PushEnabled: true, Actor: "operator"})
+	require.NoError(t, err)
+	request = httptest.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
+	request.Header.Set("If-None-Match", etag)
+	response = httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.NotContains(t, response.Body.String(), `"attachments":true`)
+	require.False(t, capability(issue.UID))
+	cfg.Docbank = docbank.NewClient("https://vault.example", func() (string, error) { return "fixture", nil })
+	require.True(t, capability(issue.UID))
+	_, err = store.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "operator"})
+	require.NoError(t, err)
+	require.True(t, capability(issue.UID))
+	_, err = store.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleHub, HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true})
+	require.NoError(t, err)
+	require.True(t, capability(issue.UID))
+}
 
 func TestIssueLocalUISession(t *testing.T) {
 	store := openAuthTestDB(t)
@@ -138,4 +270,35 @@ func TestWebLocalSessionRejectsPathBasedProjectInit(t *testing.T) {
 			assert.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
 		})
 	}
+}
+
+type uiCapabilityCredentials struct {
+	config.FederationCredentialStore
+	credential config.FederationCredential
+}
+
+func (c uiCapabilityCredentials) FederationCredential(context.Context, string) (config.FederationCredential, bool, error) {
+	return c.credential, true, nil
+}
+
+func TestUIAttachmentCapabilityBindingChangeInvalidatesSnapshot(t *testing.T) {
+	store := openAuthTestDB(t)
+	project, err := store.CreateProject(t.Context(), "project")
+	require.NoError(t, err)
+	server := NewServer(ServerConfig{DB: store, UIStore: store})
+	defer func() { _ = server.Close() }()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/ui/snapshot?view=all-open", nil)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	require.Equal(t, http.StatusOK, response.Code)
+	etag := response.Header().Get("ETag")
+	require.NotEmpty(t, etag)
+	_, err = store.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Enabled: true})
+	require.NoError(t, err)
+	request = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/ui/snapshot?view=all-open", nil)
+	request.Header.Set("If-None-Match", etag)
+	response = httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.Contains(t, response.Body.String(), `"attachments":true`)
 }

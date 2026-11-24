@@ -8,6 +8,39 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
+// FederationSearchRequest searches a shared project on its hub.
+type FederationSearchRequest struct {
+	ProjectID     int64    `path:"project_id"`
+	Authorization string   `header:"Authorization"`
+	Query         string   `query:"q" required:"true"`
+	Auto          bool     `query:"auto,omitempty" doc:"Fall back to keyword search when the hub cannot run semantic search. Absent means strict semantic."`
+	Limit         int      `query:"limit,omitempty"`
+	Status        string   `query:"status,omitempty" enum:"open,closed"`
+	Labels        []string `query:"label,explode"`
+	ExcludeLabels []string `query:"exclude_label,explode"`
+}
+
+// FederationSearchHit contains a ranked issue from a hub search.
+type FederationSearchHit struct {
+	Issue     db.Issue `json:"issue"`
+	Score     float64  `json:"score"`
+	WebURL    string   `json:"web_url,omitempty"`
+	MatchedIn []string `json:"matched_in,omitempty"`
+}
+
+// FederationSearchResponseBody contains the hub's search results and mode.
+type FederationSearchResponseBody struct {
+	Hits           []FederationSearchHit `json:"hits"`
+	Bounded        bool                  `json:"bounded"`
+	Mode           string                `json:"mode,omitempty"`
+	DegradedReason string                `json:"degraded_reason,omitempty"`
+}
+
+// FederationSearchResponse contains the hub's ranked issues and search bound.
+type FederationSearchResponse struct {
+	Body FederationSearchResponseBody
+}
+
 // EnableProjectFederationRequest enables pull federation on one hub project.
 type EnableProjectFederationRequest struct {
 	ProjectID int64 `path:"project_id"`
@@ -19,7 +52,7 @@ type EnableProjectFederationRequest struct {
 // ProjectFederationRequest reads federation metadata for one project.
 type ProjectFederationRequest struct {
 	ProjectID            int64 `path:"project_id"`
-	RelayProtocolVersion int   `query:"relay_protocol_version" minimum:"1" maximum:"1" doc:"Optionally check existing cross-project issue links for relay protocol 1 before enrollment. Returns 409 relay_cross_project_links when links must be removed."`
+	RelayProtocolVersion int   `query:"relay_protocol_version" minimum:"1" maximum:"1" doc:"Check existing cross-project links before relay enrollment. Links within a shared group are allowed; other links return 409 relay_cross_project_links."`
 }
 
 // RewriteAuthorIdentityRequest rewrites one exact author identity across a
@@ -45,7 +78,9 @@ type FederationStatusRequest struct {
 // ProjectFederationStatusRequest reads status for one locally bound
 // federation project through the normal local/admin daemon auth surface.
 type ProjectFederationStatusRequest struct {
-	ProjectID int64 `path:"project_id"`
+	ProjectID  int64 `path:"project_id"`
+	Compact    bool  `query:"compact,omitempty" doc:"Omit relay checkpoint capacity measurement. Error details are unchanged unless omit_errors is also set."`
+	OmitErrors bool  `query:"omit_errors,omitempty" doc:"Remove error text from the status: the sync error, held-back batch errors, the embedding producer error, and the relay checkpoint error. State, timestamps, and counts remain, and has_sync_error reports whether a sync error was removed."`
 }
 
 // SkipFederationQuarantineRequest skips one quarantined federation batch
@@ -91,7 +126,7 @@ type ProjectFederationBody struct {
 	ProjectName            string          `json:"project_name"`
 	ReplayHorizonEventID   int64           `json:"replay_horizon_event_id"`
 	BaselineThroughEventID int64           `json:"baseline_through_event_id"`
-	RelayLinksChecked      bool            `json:"relay_links_checked,omitempty" doc:"True when relay_protocol_version was requested and the project has no cross-project issue links. Older daemons omit it."`
+	RelayLinksChecked      bool            `json:"relay_links_checked,omitempty" doc:"True when relay_protocol_version was requested and all existing cross-project links are allowed within the shared group. Older daemons omit it."`
 }
 
 // ProjectFederationResponse wraps ProjectFederationBody.
@@ -160,7 +195,18 @@ type FederationProjectStatus struct {
 	LastPushSuccessAt           *time.Time                    `json:"last_push_success_at,omitempty"`
 	LastErrorAt                 *time.Time                    `json:"last_error_at,omitempty"`
 	LastError                   *string                       `json:"last_error,omitempty"`
+	HasSyncError                bool                          `json:"has_sync_error,omitempty" doc:"True when a sync error was recorded and omit_errors removed its text."`
 	LastResetAt                 *time.Time                    `json:"last_reset_at,omitempty"`
+	SyncRetry                   *FederationSyncRetry          `json:"sync_retry,omitempty" doc:"Present while this daemon's federation runner waits before it contacts the hub for this spoke binding again."`
+}
+
+// FederationSyncRetry is a spoke binding's automatic retry schedule after the
+// hub refused, throttled, or could not serve its last attempt.
+type FederationSyncRetry struct {
+	Reason        string    `json:"reason" enum:"refused,unavailable,relay_cross_project_links" doc:"refused: the hub rejected the credential (401 or 403); it waits up to 15 minutes between attempts, or longer when the hub also sent Retry-After, and retries at once when the credential or binding changes. unavailable: the hub throttled the request or was unavailable (429 or 503); it waits up to 5 minutes, or longer when the hub sent Retry-After. relay_cross_project_links: a relay hub refused the project's cross-project issue links."`
+	HTTPStatus    int       `json:"http_status" doc:"Hub response status of the last attempt."`
+	Failures      int       `json:"failures" doc:"Consecutive attempts that ended for this reason."`
+	NextAttemptAt time.Time `json:"next_attempt_at" doc:"Earliest time the runner contacts the hub again. The attempt happens on the runner's first pass at or after this time."`
 }
 
 // FederationQuarantineSummary is an unresolved poisoned federation batch shown
@@ -245,6 +291,7 @@ type RelayHandshake struct {
 
 // RelayOfferRequest selects an authenticated stream prefix or exact offered artifact misses.
 type RelayOfferRequest struct {
+	EventFeatures   string   `header:"X-Kata-Event-Features"`
 	ProjectID       int64    `path:"project_id"`
 	Authorization   string   `header:"Authorization"`
 	Stream          string   `query:"stream" enum:"events,receipts,artifacts"`
@@ -255,15 +302,24 @@ type RelayOfferRequest struct {
 
 // RelayResetRequest requests a checkpoint for the presented project transport grant.
 type RelayResetRequest struct {
+	EventFeatures string `header:"X-Kata-Event-Features"`
 	ProjectID     int64  `path:"project_id"`
 	Authorization string `header:"Authorization"`
 }
 
 // RelayResetResponse returns the retained signed checkpoint and its hop translation.
-type RelayResetResponse struct{ Body db.RelayResetCheckpoint }
+type RelayResetResponse struct {
+	EventFeatures         string `header:"X-Kata-Event-Features"`
+	RequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
+	Body                  db.RelayResetCheckpoint
+}
 
 // RelayOfferResponse returns the emitted prefix retained for retry.
-type RelayOfferResponse struct{ Body db.RelayBatch }
+type RelayOfferResponse struct {
+	EventFeatures         string `header:"X-Kata-Event-Features"`
+	RequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
+	Body                  db.RelayBatch
+}
 
 // RelayAcceptRequest submits an authenticated batch for durable prefix acceptance.
 type RelayAcceptRequest struct {
@@ -467,6 +523,17 @@ type FederationPollEventsRequest struct {
 	AfterID       int64       `query:"after_id,omitempty"`
 	IssueUID      string      `query:"issue_uid,omitempty" doc:"Read retained history only for an issue currently owned by this project, independently of the project cursor."`
 	Limit         OptionalInt `query:"limit,omitempty"`
+	Wait          OptionalInt `query:"wait,omitempty" doc:"Seconds the hub may hold a caught-up project poll until an event commits. The hub caps it at the value in X-Kata-Federation-Poll-Wait-Max and answers at once when it cannot hold the request."`
+}
+
+// FederationPollEventsResponse is a project event page. It advertises how long
+// the hub may hold a caught-up poll.
+type FederationPollEventsResponse struct {
+	IssueUID              string `header:"X-Kata-Events-Issue-UID" doc:"Resolved subject UID when the issue filter is applied, including empty pages."`
+	EventFeatures         string `header:"X-Kata-Event-Features"`
+	RequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
+	PollWaitMax           int    `header:"X-Kata-Federation-Poll-Wait-Max" doc:"Longest wait, in seconds, this hub accepts on a project event poll."`
+	Body                  PollEventsBody
 }
 
 // FederationIngestEventsRequest is the enrollment-authenticated push transport
@@ -525,6 +592,10 @@ type FederationIngestEventsBody struct {
 	Accepted          int   `json:"accepted"`
 	Duplicates        int   `json:"duplicates"`
 	PushCursorEventID int64 `json:"push_cursor_event_id"`
+	// SupersededEventUIDs lists pushed adoption snapshots the hub did not
+	// store because its project already holds the issue. The spoke deletes
+	// them and takes the hub's state on its next pull.
+	SupersededEventUIDs []string `json:"superseded_event_uids,omitempty"`
 }
 
 // FederationIngestEventsResponse wraps FederationIngestEventsBody.

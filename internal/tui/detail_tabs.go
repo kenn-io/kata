@@ -5,7 +5,9 @@ import (
 	"slices"
 	"strings"
 
+	"go.kenn.io/kata/internal/authorname"
 	"go.kenn.io/kata/internal/commentref"
+	"go.kenn.io/kata/internal/metadata"
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
@@ -18,6 +20,9 @@ type tabState struct {
 	commentLinkCursor int
 	loading           bool
 	err               error
+	// attachments is the issue's current attachment references by ID, nil
+	// while the issue is not loaded. The events tab compares closes with it.
+	attachments map[string]metadata.Attachment
 }
 
 // commentChunks builds the chunk slice for the comments tab. Each
@@ -60,7 +65,7 @@ func commentChunks(cs []CommentEntry, width, cursor int, ts tabState) []entryChu
 			}
 			line := "  ↳ " + commentOutgoingLabel(r.Kind) + " " + label
 			if r.Author != "" {
-				line += " by " + r.Author
+				line += " by " + authorname.Display(r.Author)
 				if r.Teammate != "" {
 					line += " / " + r.Teammate
 				}
@@ -119,7 +124,7 @@ func eventChunks(es []EventLogEntry, width, cursor int, ts tabState) []entryChun
 	}
 	chunks := make([]entryChunk, 0, len(es))
 	for i, e := range es {
-		chunks = append(chunks, entryChunk{lines: eventChunkLines(e, width, i == cursor)})
+		chunks = append(chunks, entryChunk{lines: eventChunkLines(e, width, i == cursor, ts.attachments)})
 	}
 	return chunks
 }
@@ -141,7 +146,7 @@ func linkChunks(ls []LinkEntry, width, cursor int, ts tabState) []entryChunk {
 	for i, l := range ls {
 		line := fmt.Sprintf("[%s] → #%s ← #%s  by %s @ %s",
 			l.Type, l.To.ShortID, l.From.ShortID,
-			sanitizeForDisplay(l.Author), fmtTime(l.CreatedAt))
+			sanitizeForDisplay(authorname.Display(l.Author)), fmtTime(l.CreatedAt))
 		chunks = append(chunks, entryChunk{lines: []string{
 			applyActivityCursor(line, i == cursor),
 		}})
@@ -241,10 +246,11 @@ func commentAuthorWidth(cs []CommentEntry, availableWidth int) int {
 	return min(width, max(1, availableWidth-16))
 }
 func commentAttribution(c CommentEntry) string {
+	author := authorname.Display(c.Author)
 	if c.Teammate == "" {
-		return c.Author
+		return author
 	}
-	return c.Author + " / " + c.Teammate
+	return author + " / " + c.Teammate
 }
 
 // applyActivityCursor prefixes activity rows with a text cursor marker
@@ -443,7 +449,7 @@ func commentEvidenceLines(c CommentEntry, width, cursor int) []string {
 		}
 		body := link.Body
 		if body == "" {
-			body = "Open reply to read its evidence"
+			body = "Open the reply to read its text"
 		}
 		for _, line := range renderMarkdownLines(body, max(width-4, 1)) {
 			lines = append(lines, "    "+line)
@@ -462,7 +468,7 @@ func indentLines(lines []string, depth int) []string {
 }
 
 func commentEvidenceHeader(link commentref.Link) string {
-	actor := link.Author
+	actor := authorname.Display(link.Author)
 	if link.Teammate != "" {
 		actor += " / " + link.Teammate
 	}

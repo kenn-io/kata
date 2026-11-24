@@ -54,13 +54,19 @@ type LocalProfileConfig struct {
 
 // ResolveLocalProfile reads only the selected home and derives its storage identity.
 func ResolveLocalProfile(entry CatalogDaemonConfig) (LocalProfileConfig, error) {
+	return ResolveLocalProfileForClient(entry, "")
+}
+
+// ResolveLocalProfileForClient uses the selected client credential for a
+// supervisor-owned profile without resolving the daemon's private token.
+func ResolveLocalProfileForClient(entry CatalogDaemonConfig, clientToken string) (LocalProfileConfig, error) {
 	if err := normalizeLocalProfileEntry(&entry); err != nil {
 		return LocalProfileConfig{}, err
 	}
 	if !entry.Local || entry.Home == "" {
 		return LocalProfileConfig{}, fmt.Errorf("daemon %q is not an explicit local profile", entry.Name)
 	}
-	cfg, err := ReadDaemonConfigForHome(entry.Home)
+	cfg, err := readDaemonConfig(filepath.Join(entry.Home, "config.toml"), false, clientToken != "")
 	if err != nil {
 		return LocalProfileConfig{}, err
 	}
@@ -194,7 +200,7 @@ func LocalProfileEnvironment(profile LocalProfileConfig, autostart bool) ([]stri
 	references = append(references, signingReferences...)
 	reserved := []string{
 		"KATA_LISTEN", "KATA_WEB_LISTEN", "KATA_WEB_PUBLIC_ORIGIN", "KATA_AUTH_TOKEN_FILE",
-		"KATA_DOCBANK_URL", "KATA_DOCBANK_API_KEY_FILE", "KATA_DOCBANK_FOLDER",
+		"KATA_DOCBANK_URL", "KATA_DOCBANK_API_KEY_FILE", "KATA_DOCBANK_FOLDER", "KATA_DOCBANK_TRUST_PRIVATE_NETWORK",
 		"KATA_MCP_ENABLED", "KATA_MCP_ACTOR", "KATA_MCP_PROJECTS", "KATA_MCP_ALL_PROJECTS", "KATA_MCP_STARTUP_SECTIONS", "KATA_MCP_TOKEN_FILE",
 		"KATA_SEARCH_EMBEDDINGS_BASE_URL", "KATA_SEARCH_EMBEDDINGS_MODEL", "KATA_SEARCH_EMBEDDINGS_DIMS", "KATA_SEARCH_EMBEDDINGS_API_KEY_FILE",
 		"KATA_SEARCH_EMBEDDINGS_DOCUMENT_PREFIX", "KATA_SEARCH_EMBEDDINGS_DOCUMENT_SUFFIX",

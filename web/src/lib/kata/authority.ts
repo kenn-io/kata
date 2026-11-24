@@ -36,13 +36,13 @@ function defaultStatusForView(view: KataTaskViewName): KataTaskSearchFilters['st
   return view === 'logbook' ? 'closed' : 'open'
 }
 
-function hasActiveFilters(view: KataTaskViewName, filters: KataTaskSearchFilters): boolean {
+function statusChangesViewMembership(
+  view: KataTaskViewName,
+  filters: KataTaskSearchFilters,
+): boolean {
   return (
-    filters.status !== defaultStatusForView(view) ||
-    filters.owner.trim() !== '' ||
-    filters.label.trim() !== '' ||
-    filters.query.trim() !== '' ||
-    (filters.relationships?.length ?? 0) > 0
+    filters.status !== defaultStatusForView(view) &&
+    !(filters.status === 'ready' && view !== 'logbook')
   )
 }
 
@@ -114,7 +114,7 @@ export function projectKataWorkspaceView(
     .filter((issue) => kataViewIncludesDates(options.view, issue, today))
     .filter((issue) => options.view !== 'attention' || hasAttention(issue, options.viewer))
     .map((issue) => ({ ...issue }))
-  if (hasActiveFilters(options.view, options.filters)) {
+  if (statusChangesViewMembership(options.view, options.filters)) {
     return {
       view: options.view,
       groups: issues.length > 0 ? [{ id: 'search-results', title: 'Results', issues }] : [],

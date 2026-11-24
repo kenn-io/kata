@@ -12,7 +12,9 @@ import (
 	"iter"
 	"net"
 	"net/http"
+	"net/url"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"time"
 
@@ -22,6 +24,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
+	"go.kenn.io/kata/internal/shellquote"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
@@ -69,22 +72,86 @@ type PingInfo struct {
 // recorded endpoint could not be reached.
 var ErrLocalDaemonUnreachable = errors.New("local daemon is unreachable")
 
-type localDaemonUnreachableError struct {
-	pid     int
-	address string
-	cause   error
+// LocalDaemonUnreachableError retains the failed process and its evidence paths.
+type LocalDaemonUnreachableError struct {
+	PID               int
+	Address           string
+	DataDir           string
+	WebOrigin         string
+	VerifiedProcess   bool
+	ManagedExternally bool
+	Profile           string
+	ProfileAutostart  bool
+	autoStarted       bool
+	cause             error
 }
 
-func (e *localDaemonUnreachableError) Error() string {
-	return fmt.Sprintf("daemon pid %d is running at %s but is unreachable: %v",
-		e.pid, e.address, e.cause)
+func (e *LocalDaemonUnreachableError) Error() string {
+	return strings.TrimSuffix(e.Summary()+". "+e.RecoveryAdvice(), ". ")
 }
 
-func (e *localDaemonUnreachableError) Unwrap() error {
+// Summary describes the selected process and probe failure.
+func (e *LocalDaemonUnreachableError) Summary() string {
+	return fmt.Sprintf("daemon pid %d is running at %s but is unreachable: %s", e.PID, e.Address, strings.Replace(e.reason(e.cause), `Get "`+UnixBase+`/`, `Get "/`, 1))
+}
+
+// Reason describes the probe failure and where to find its logs.
+func (e *LocalDaemonUnreachableError) Reason() string {
+	cause := e.cause
+	if op, ok := errors.AsType[*net.OpError](cause); ok {
+		cause = op.Err
+	} else if request, ok := errors.AsType[*url.Error](cause); ok {
+		cause = request.Err
+	}
+	return e.reason(cause)
+}
+
+func (e *LocalDaemonUnreachableError) reason(cause error) string {
+	return fmt.Sprintf("%v. Check for logs at %q if it exists", cause, filepath.Join(e.DataDir, "daemon.log"))
+}
+
+// RecoveryAdvice describes actions appropriate for the selected process.
+func (e *LocalDaemonUnreachableError) RecoveryAdvice() string {
+	message := e.profilingAdvice()
+	if e.ManagedExternally {
+		if e.VerifiedProcess && goruntime.GOOS != "windows" {
+			message += fmt.Sprintf("Wait during startup or migration. If the daemon is stuck, recheck the PID and endpoint before stopping it. Use kill -QUIT %d to dump goroutines to standard error and stop it. ", e.PID)
+		}
+		return message + "Restart it through its service manager if it has one, or with the original options and environment"
+	}
+	if !e.VerifiedProcess {
+		return message + "Inspect the selected process and its credentials; do not switch databases"
+	}
+	message += "Wait during startup or migration. If the daemon is stuck, recheck the PID and endpoint before stopping it. "
+	if goruntime.GOOS != "windows" {
+		message += fmt.Sprintf("Use kill -QUIT %d to dump goroutines to standard error and stop it. ", e.PID)
+	}
+	switch {
+	case e.Profile != "" && e.ProfileAutostart:
+		if goruntime.GOOS == "windows" {
+			return message + "Then run in PowerShell kata --daemon '" + strings.ReplaceAll(e.Profile, "'", "''") + "' daemon recover"
+		}
+		return message + "Then run kata --daemon " + shellquote.Quote(e.Profile) + " daemon recover"
+	case e.autoStarted:
+		return message + "Then rerun the original command or any command that autostarts the daemon. daemon status, daemon diagnose, and health only inspect"
+	default:
+		return message + "Then start it again the way you originally started it (same options and environment)"
+	}
+}
+
+func (e *LocalDaemonUnreachableError) profilingAdvice() string {
+	if e.WebOrigin != "" {
+		return "Try to save goroutine stacks from " + e.WebOrigin + "/debug/pprof/goroutine?debug=2 without a token. If authentication is required, send the token in an Authorization: Bearer header only to an independently verified endpoint, such as the owner-only Unix socket. "
+	}
+	return ""
+}
+
+func (e *LocalDaemonUnreachableError) Unwrap() error {
 	return e.cause
 }
 
-func (e *localDaemonUnreachableError) Is(target error) bool {
+// Is reports whether the probe failed.
+func (e *LocalDaemonUnreachableError) Is(target error) bool {
 	return target == ErrLocalDaemonUnreachable
 }
 
@@ -136,15 +203,14 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 			address := ep.ConfigAddress()
 			url, info, probeErr := probe(ctx, address)
 			if probeErr != nil {
-				if err := ctx.Err(); err != nil {
+				if err := ctx.Err(); errors.Is(err, context.Canceled) {
 					yield(liveDaemon{}, err)
 					return
 				}
-				if !yield(liveDaemon{}, &localDaemonUnreachableError{
-					pid:     r.PID,
-					address: address,
-					cause:   probeErr,
-				}) {
+				if !yield(liveDaemon{}, NewLocalDaemonUnreachable(dataDir, r, probeErr)) {
+					return
+				}
+				if ctx.Err() != nil {
 					return
 				}
 				continue
@@ -166,6 +232,23 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 				return
 			}
 		}
+	}
+}
+
+// NewLocalDaemonUnreachable retains the selected runtime and failed probe.
+func NewLocalDaemonUnreachable(dataDir string, r kitdaemon.RuntimeRecord, cause error) *LocalDaemonUnreachableError {
+	enabled, _, err := config.ReadAutostartEnabled()
+	origin := ""
+	if web, err := DiscoverWebRuntime(r); err == nil {
+		origin = web.Origin
+	}
+	return &LocalDaemonUnreachableError{
+		PID: r.PID, Address: r.Endpoint().ConfigAddress(), DataDir: dataDir,
+		WebOrigin:         origin,
+		VerifiedProcess:   daemonruntime.RuntimeProcessAlive(r),
+		ManagedExternally: err == nil && !enabled,
+		autoStarted:       r.Metadata[daemonruntime.RuntimeAutoStartKey] == "1",
+		cause:             cause,
 	}
 }
 

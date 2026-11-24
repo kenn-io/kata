@@ -146,3 +146,65 @@ func TestNativeQuickstartNoShell(t *testing.T) {
 	require.Equal(t, "closed", final["status"])
 	require.Equal(t, "example-agent", final["owner"])
 }
+
+// Product contract: every MCP guide and the comment tools say
+// comments carry findings, never progress.
+func TestNativeGuidesSayCommentsCarryFindings(t *testing.T) {
+	session := connectTestServer(t)
+	listed, err := session.ListTools(t.Context(), nil)
+	require.NoError(t, err)
+	descriptions := map[string]string{}
+	for _, tool := range listed.Tools {
+		descriptions[tool.Name] = tool.Description
+	}
+	require.NotRegexp(t, `\bprogress\b`, session.InitializeResult().Instructions)
+	require.Contains(t, descriptions["kata.comment"], "finding")
+	require.Contains(t, descriptions["kata.edit_comment"], "correct")
+	require.Contains(t, descriptions["kata.close"], "not merged")
+	for _, name := range []string{"kata.comment", "kata.edit_comment", "kata.close"} {
+		require.NotRegexp(t, `\bprogress\b`, descriptions[name], name)
+	}
+	for _, guide := range skillGuides {
+		md, ok := SkillMarkdown(guide.name)
+		require.True(t, ok, guide.name)
+		require.NotRegexp(t, `\bprogress\b`, md, guide.name)
+		for _, text := range []string{"update work.attention and work.attention_msg", "kata.edit_comment", "not merged", "needs-review"} {
+			require.Contains(t, md, text, guide.name)
+		}
+		if guide.name == "quickstart" {
+			unfinished := regexp.MustCompile(`(?s)If unfinished,.*?\n\n`).FindString(md + "\n\n")
+			require.Regexp(t, `\bwork\.attention\b`, unfinished)
+			require.Contains(t, unfinished, "work.attention_msg")
+		}
+	}
+}
+
+// Product contract: MCP instructions and claim guides teach timed claims and renewal.
+func TestNativeGuidesSayClaimsHaveTTL(t *testing.T) {
+	session := connectTestServer(t)
+	listed, err := session.ListTools(t.Context(), nil)
+	require.NoError(t, err)
+	descriptions := map[string]string{}
+	for _, tool := range listed.Tools {
+		descriptions[tool.Name] = tool.Description
+	}
+	for _, text := range []string{session.InitializeResult().Instructions, descriptions["kata.claim"]} {
+		require.Contains(t, text, "ttl_seconds")
+		require.Contains(t, text, "without if_unowned")
+	}
+	for _, guide := range skillGuides {
+		md, ok := SkillMarkdown(guide.name)
+		require.True(t, ok, guide.name)
+		if guide.name == "workflow" || guide.name == "quickstart" || guide.name == "claiming" {
+			require.Contains(t, md, "ttl_seconds", guide.name)
+			require.Contains(t, md, "without if_unowned", guide.name)
+		}
+		if guide.name == "quickstart" || guide.name == "claiming" {
+			for _, example := range nativeExamples(t, guide.name) {
+				if example.Tool == "kata.claim" {
+					require.Contains(t, example.Arguments, "ttl_seconds", guide.name)
+				}
+			}
+		}
+	}
+}

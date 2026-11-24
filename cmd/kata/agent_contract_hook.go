@@ -16,7 +16,7 @@ import (
 // newAgentContractHookCmd emits Codex's SessionStart envelope without requiring
 // a stdin payload. The canonical contract remains in agent_contract.go.
 func newAgentContractHookCmd() *cobra.Command {
-	var source string
+	var source, ownershipMarker string
 	cmd := &cobra.Command{
 		Use:   "agent-contract-hook",
 		Short: "Emit the agent contract as Codex SessionStart context",
@@ -29,6 +29,9 @@ func newAgentContractHookCmd() *cobra.Command {
 			"An empty file supplies an intentionally empty prompt. Stdin is ignored.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if cmd.Flags().Changed("ownership-marker") && !isAgentHookOwnershipArg(contractHook, "--ownership-marker", ownershipMarker) {
+				return agentHookUsage("invalid Kata hook ownership marker")
+			}
 			text, err := readAgentContractSource(source, cmd.Flags().Changed("source"))
 			if err != nil {
 				return err
@@ -45,6 +48,8 @@ func newAgentContractHookCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&source, "source", "", "local UTF-8 prompt file (missing file uses built-in contract)")
+	cmd.Flags().StringVar(&ownershipMarker, "ownership-marker", "", "")
+	_ = cmd.Flags().MarkHidden("ownership-marker")
 	return cmd
 }
 

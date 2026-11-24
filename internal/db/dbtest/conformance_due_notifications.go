@@ -89,8 +89,8 @@ func checkDueNotificationFederatedClear(t *testing.T, store db.Storage) error {
 	key := notification.MetadataKey("worker-a")
 	value := `{"from":"system","message":"Scheduled date reached: 2026-09-16"}`
 	created := newRemoteEvent(t, hub, &issueUID, "issue.created", "worker-a", spokeUID, 300,
-		jsontext.Value(`{"uid":"`+issueUID+`","title":"Scheduled work","author":"worker-a","status":"open",`+
-			`"metadata":{"scheduled_on":"2026-09-16","`+key+`":`+value+`},"created_at":"2026-09-16T00:00:00Z"}`))
+		IssueDocument(t, issueUID, jsontext.Value(`{"uid":"`+issueUID+`","title":"Scheduled work","author":"worker-a","status":"open",`+
+			`"metadata":{"scheduled_on":"2026-09-16","`+key+`":`+value+`},"created_at":"2026-09-16T00:00:00Z"}`)))
 	cleared := newRemoteEvent(t, hub, &issueUID, "issue.metadata_updated", "worker-a", spokeUID, 301,
 		jsontext.Value(`{"diff":{"`+key+`":{"from":`+value+`,"to":null}},"revision_new":2,"updated_at":"2026-09-16T01:00:00Z"}`))
 	_, err = store.IngestFederationEvents(ctx, db.FederationIngestParams{
@@ -436,22 +436,27 @@ func checkDueNotificationCandidates(t *testing.T, store db.Storage) error {
 	project, err := store.CreateProject(ctx, "candidate-project")
 	require.NoError(t, err)
 	now := time.Date(2026, 9, 16, 0, 0, 0, 0, time.UTC)
+	cutoff := time.Date(2026, 9, 16, 10, 0, 0, 0, time.UTC)
 	notificationKey := notification.MetadataKey("worker-a")
 	automatic, err := notification.MarshalSystem(notification.Scheduled, "2020-01-01")
 	require.NoError(t, err)
 	for _, test := range []struct {
 		name, raw       string
+		now             time.Time
 		listed, settled bool
 	}{
-		{"future date", `{"scheduled_on":"2099-01-01"}`, false, false},
-		{"future local time", `{"scheduled_on":"2099-01-01T09:00"}`, false, false},
-		{"future instant", `{"scheduled_on":"2099-01-01T09:00:00Z"}`, false, false},
-		{"future deadline", `{"deadline_on":"2099-01-01"}`, false, false},
-		{"36-hour date boundary", `{"scheduled_on":"2026-09-17","timezone":"Etc/GMT+12"}`, false, false},
-		{"manual notification", fmt.Sprintf(`{%q:{"from":"reviewer","message":"Please review"}}`, notificationKey), false, false},
-		{"due east of UTC", `{"scheduled_on":"2026-09-16T14:00","timezone":"Pacific/Kiritimati"}`, true, false},
-		{"stale automatic notification", fmt.Sprintf(`{"scheduled_on":"2099-01-01",%q:%s}`, notificationKey, automatic), true, false},
-		{"delivered overdue", `{"scheduled_on":"2020-01-01"}`, true, true},
+		{"future date", `{"scheduled_on":"2099-01-01"}`, now, false, false},
+		{"future local time", `{"scheduled_on":"2099-01-01T09:00"}`, now, false, false},
+		{"future instant", `{"scheduled_on":"2099-01-01T09:00:00Z"}`, now, false, false},
+		{"future deadline", `{"deadline_on":"2099-01-01"}`, now, false, false},
+		{"36-hour date boundary", `{"scheduled_on":"2026-09-17","timezone":"Etc/GMT+12"}`, now, false, false},
+		{"manual notification", fmt.Sprintf(`{%q:{"from":"reviewer","message":"Please review"}}`, notificationKey), now, false, false},
+		{"due east of UTC", `{"scheduled_on":"2026-09-16T14:00","timezone":"Pacific/Kiritimati"}`, now, true, false},
+		{"stale automatic notification", fmt.Sprintf(`{"scheduled_on":"2099-01-01",%q:%s}`, notificationKey, automatic), now, true, false},
+		{"delivered overdue", `{"scheduled_on":"2020-01-01"}`, now, true, true},
+		{"zoned date at cutoff", `{"scheduled_on":"2026-09-17[Pacific/Kiritimati]"}`, cutoff, true, false},
+		{"far future schedule at cutoff", `{"scheduled_on":"2026-09-17T23:00:00Z"}`, cutoff, false, false},
+		{"far future deadline at cutoff", `{"deadline_on":"2026-09-17T23:00:00Z"}`, cutoff, false, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var values map[string]jsontext.Value
@@ -461,13 +466,13 @@ func checkDueNotificationCandidates(t *testing.T, store db.Storage) error {
 			})
 			require.NoError(t, err)
 			floor := time.Time{}
-			in := db.ReconcileDueNotificationIn{IssueID: issue.ID, Now: now, DefaultTimezone: "UTC", ScheduledReachedFloor: &floor}
+			in := db.ReconcileDueNotificationIn{IssueID: issue.ID, Now: test.now, DefaultTimezone: "UTC", ScheduledReachedFloor: &floor}
 			if test.settled {
 				out, err := store.ReconcileDueNotification(ctx, in)
 				require.NoError(t, err)
 				require.True(t, out.Changed)
 			}
-			ids, err := store.ListDueNotificationIssueIDs(ctx, now)
+			ids, err := store.ListDueNotificationIssueIDs(ctx, test.now)
 			require.NoError(t, err)
 			if test.listed {
 				assert.Contains(t, ids, issue.ID)

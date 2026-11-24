@@ -79,6 +79,7 @@ func TestWebLocalSessionIsLimitedToSPAOperations(t *testing.T) {
 		{name: "daemon roster", method: http.MethodGet, path: "/api/v1/ui/daemons", want: http.StatusNoContent},
 		{name: "local embeddings status", method: http.MethodGet, path: "/api/v1/embeddings/local", want: http.StatusNoContent},
 		{name: "local embeddings setup", method: http.MethodPost, path: "/api/v1/embeddings/local", want: http.StatusNoContent},
+		{name: "local embeddings restart", method: http.MethodPost, path: "/api/v1/embeddings/local/restart", want: http.StatusNoContent},
 		{name: "project sync status", method: http.MethodGet, path: "/api/v1/projects/7/federation/status", want: http.StatusNoContent},
 		{name: "global sync status", method: http.MethodGet, path: "/api/v1/federation/status", want: http.StatusForbidden},
 		{name: "proxied project sync status", method: http.MethodGet, path: "/api/v1/ui/proxy/api/v1/projects/7/federation/status", want: http.StatusForbidden},
@@ -105,6 +106,8 @@ func TestWebLocalSessionIsLimitedToSPAOperations(t *testing.T) {
 		{name: "attachment link", method: http.MethodPost, path: "/api/v1/projects/7/issues/abc4/attachments/links", want: http.StatusNoContent},
 		{name: "proxied attachment link", method: http.MethodPost, path: "/api/v1/ui/proxy/api/v1/projects/7/issues/abc4/attachments/links", want: http.StatusNoContent},
 		{name: "issue edit", method: http.MethodPatch, path: "/api/v1/projects/7/issues/abc4", want: http.StatusNoContent},
+		{name: "recurrence list", method: http.MethodGet, path: "/api/v1/projects/7/recurrences", want: http.StatusNoContent},
+		{name: "recurrence detail", method: http.MethodGet, path: "/api/v1/projects/7/recurrences/01J00000000000000000000001", want: http.StatusForbidden},
 		{name: "recurrence deletion", method: http.MethodDelete, path: "/api/v1/projects/7/recurrences/01J00000000000000000000001", want: http.StatusNoContent},
 		{name: "federation", method: http.MethodPost, path: "/api/v1/federation/replicas", want: http.StatusForbidden},
 		{name: "project purge", method: http.MethodPost, path: "/api/v1/projects/7/actions/purge", want: http.StatusForbidden},
@@ -401,12 +404,12 @@ func TestEffectiveUIPolicyUsesBrowserSessionPrincipal(t *testing.T) {
 
 	bootstrap := effectiveUIPolicy(WithPrincipal(t.Context(), Principal{
 		Kind: PrincipalBootstrap,
-	}), cfg)
+	}), cfg, false)
 	assert.False(t, bootstrap.Capabilities.Writable)
 
 	local := effectiveUIPolicy(WithPrincipal(t.Context(), Principal{
 		Kind: PrincipalWebLocal,
-	}), cfg)
+	}), cfg, false)
 	assert.True(t, local.Capabilities.Writable)
 }
 

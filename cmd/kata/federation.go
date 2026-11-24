@@ -19,6 +19,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/authorname"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
@@ -246,7 +247,7 @@ func federationEnrollCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&spokeName, "spoke-name", "", "unique hub-local name for this spoke instance")
 	cmd.Flags().StringVar(&spokeInstance, "spoke-instance", "", "spoke instance UID from `kata federation identity`")
-	cmd.Flags().StringVar(&hubURL, "hub-url", "", "hub URL reachable by the spoke")
+	cmd.Flags().StringVar(&hubURL, "hub-url", "", "hub API URL for enrollment; signing hubs use external_url for join")
 	cmd.Flags().StringVar(&capabilities, "capabilities", "pull,push,lease", "comma-separated capabilities: pull,push,lease (claim is the API name for lease)")
 	cmd.Flags().StringVar(&token, "token", "", "explicit enrollment token (default: generated)")
 	cmd.Flags().StringVar(&hubTokenEnv, "hub-token-env", "", "environment variable containing the hub admin token (highest precedence)")
@@ -1348,43 +1349,47 @@ func federationStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			callResp, callErr := apiClient.GetFederationStatusWithResponse(a.ctx, &generated.GetFederationStatusRequestOptions{})
+			var callResp *generated.GetFederationStatusResp
+			var callErr error
+			var versionErr error
+			if flags.Project != "" {
+				err := requireDaemonAPIVersion(a.ctx, a.client, a.baseURL, apiVersionFederationProjectLookup, "project federation status")
+				if err != nil {
+					var cliErr *cliError
+					if errors.As(err, &cliErr) && cliErr.Code == "daemon_api_too_old" {
+						versionErr = err
+					} else {
+						return err
+					}
+				}
+				if versionErr == nil {
+					project, err := readFederationProjectByName(a, flags.Project)
+					if err != nil {
+						return err
+					}
+					resp, err := apiClient.GetProjectFederationStatusWithResponse(a.ctx, &generated.GetProjectFederationStatusRequestOptions{PathParams: &generated.GetProjectFederationStatusPath{ProjectID: project.ID}})
+					callErr = err
+					if resp != nil {
+						callResp = &generated.GetFederationStatusResp{HTTPResponse: resp.HTTPResponse, StatusCode: resp.StatusCode, Body: resp.Body}
+					}
+				}
+			}
+			// Remove the old-daemon branch and its dedicated tests when the CLI's
+			// documented minimum daemon API reaches 0.49.0.
+			if flags.Project == "" || versionErr != nil {
+				callResp, callErr = apiClient.GetFederationStatusWithResponse(a.ctx, &generated.GetFederationStatusRequestOptions{})
+			}
 			if err := externalCLITransportError(callResp, callErr); err != nil {
 				return err
 			}
 			if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
+				if versionErr != nil && (callResp.StatusCode == http.StatusForbidden || callResp.StatusCode == http.StatusNotFound) {
+					return versionErr
+				}
 				return err
 			}
 			if flags.Project != "" {
-				var response map[string]jsontext.Value
-				if err := json.Unmarshal(callResp.Body, &response); err != nil {
-					return err
-				}
-				var statuses []jsontext.Value
-				if err := json.Unmarshal(response["statuses"], &statuses); err != nil {
-					return err
-				}
-				filtered := make([]jsontext.Value, 0, 1)
-				for _, status := range statuses {
-					var project struct {
-						Name string `json:"project_name"`
-					}
-					if err := json.Unmarshal(status, &project); err != nil {
-						return err
-					}
-					if project.Name == flags.Project {
-						filtered = append(filtered, status)
-					}
-				}
-				if len(filtered) == 0 {
-					return &cliError{Message: fmt.Sprintf("no federation status for project %q", flags.Project), Kind: kindNotFound, ExitCode: ExitNotFound}
-				}
-				var err error
-				response["statuses"], err = json.Marshal(filtered)
-				if err != nil {
-					return err
-				}
-				callResp.Body, err = json.Marshal(response)
+				callResp.Body, err = filterFederationStatusProject(callResp.Body, flags.Project, versionErr != nil)
 				if err != nil {
 					return err
 				}
@@ -1404,6 +1409,38 @@ func federationStatusCmd() *cobra.Command {
 			return printFederationStatus(cmd, body)
 		},
 	}
+}
+
+func filterFederationStatusProject(body []byte, name string, filterByName bool) ([]byte, error) {
+	response := make(map[string]jsontext.Value)
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, err
+	}
+	var statuses []jsontext.Value
+	if err := json.Unmarshal(response["statuses"], &statuses); err != nil {
+		return nil, err
+	}
+	filtered := make([]jsontext.Value, 0, 1)
+	for _, status := range statuses {
+		var project struct {
+			Name string `json:"project_name"`
+		}
+		if err := json.Unmarshal(status, &project); err != nil {
+			return nil, err
+		}
+		if !filterByName || project.Name == name {
+			filtered = append(filtered, status)
+		}
+	}
+	if len(filtered) == 0 {
+		return nil, &cliError{Message: fmt.Sprintf("no federation status for project %q", name), Kind: kindNotFound, ExitCode: ExitNotFound}
+	}
+	var err error
+	response["statuses"], err = json.Marshal(filtered)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(response)
 }
 
 type federationJoinBundle struct {
@@ -1505,6 +1542,24 @@ func resolveFederationProjectByName(a daemonAPI, name string) (projectRef, error
 	return projectRef{ID: resp.Project.ID, Name: resp.Project.Name}, nil
 }
 
+func readFederationProjectByName(a daemonAPI, name string) (projectRef, error) {
+	apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+	if err != nil {
+		return projectRef{}, err
+	}
+	callResp, callErr := apiClient.ReadProjectByNameWithResponse(a.ctx, &generated.ReadProjectByNameRequestOptions{Query: &generated.ReadProjectByNameQuery{Name: name}})
+	if callResp == nil {
+		return projectRef{}, externalCLITransportError(callResp, callErr)
+	}
+	if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
+		return projectRef{}, err
+	}
+	if callResp.JSON200 == nil {
+		return projectRef{}, errors.New("missing project lookup response")
+	}
+	return projectRef{ID: callResp.JSON200.Project.ID, Name: callResp.JSON200.Project.Name}, nil
+}
+
 func ensureFederationProjectByName(
 	a daemonAPI, name, actor string,
 ) (projectRef, error) {
@@ -1577,7 +1632,13 @@ func printFederationEnrollment(
 	enrollment api.FederationEnrollmentOut,
 	bundle federationJoinBundle,
 ) error {
-	bundle.JoinCommand = federationJoinCommand(bundle)
+	if enrollment.Join != nil && enrollment.Join.JoinCommand != "" {
+		bundle.HubURL = enrollment.Join.HubURL
+		bundle.AllowInsecure = enrollment.Join.AllowInsecure
+		bundle.JoinCommand = joinCommandWithInvokedBinary(enrollment.Join.JoinCommand)
+	} else {
+		bundle.JoinCommand = federationJoinCommand(bundle)
+	}
 	enrollment.Join = nil // The CLI exposes its own join bundle with the invoked binary name.
 	if currentOutputMode() == outputJSON {
 		return emitJSON(cmd.OutOrStdout(), struct {
@@ -1795,10 +1856,14 @@ func federationJoinCommand(bundle federationJoinBundle) string {
 		BaselineThroughEventID: bundle.BaselineThroughEventID, Token: bundle.Token, Actor: bundle.Actor,
 		Capabilities: bundle.Capabilities, PushEnabled: bundle.PushEnabled,
 		AdoptExisting: bundle.AdoptExisting, AllowInsecure: bundle.AllowInsecure,
-	})
+	}, false)
 	if command == "" {
 		return ""
 	}
+	return joinCommandWithInvokedBinary(command)
+}
+
+func joinCommandWithInvokedBinary(command string) string {
 	return shellQuote(invokedKataCommand()) + strings.TrimPrefix(command, "kata")
 }
 
@@ -2268,6 +2333,9 @@ func printFederationStatus(cmd *cobra.Command, body api.FederationStatusBody) er
 		if status.CredentialExpiresAt != nil {
 			lines = append(lines, "access expires: "+formatFederationStatusTime(status.CredentialExpiresAt))
 		}
+		if status.SyncRetry != nil {
+			lines = append(lines, "sync retry: "+formatFederationSyncRetry(*status.SyncRetry, status.ProviderStatus != ""))
+		}
 		for _, line := range lines {
 			if _, err := fmt.Fprintf(out, "  %s\n", line); err != nil {
 				return err
@@ -2277,7 +2345,7 @@ func printFederationStatus(cmd *cobra.Command, body api.FederationStatusBody) er
 			if _, err := fmt.Fprintf(out, "  recent violation: %s %s by %s on spoke %s at %s (%s)\n",
 				textsafe.Line(violation.ShortID),
 				textsafe.Line(violation.OffendingEventType),
-				textsafe.Line(violation.Actor),
+				textsafe.Line(authorname.Display(violation.Actor)),
 				textsafe.Line(violation.OffendingOriginInstanceUID),
 				violation.At.UTC().Format(time.RFC3339),
 				textsafe.Line(violation.Reason)); err != nil {
@@ -2297,6 +2365,33 @@ func printFederationStatus(cmd *cobra.Command, body api.FederationStatusBody) er
 		}
 	}
 	return nil
+}
+
+// formatFederationSyncRetry describes a binding's retry schedule. A refused
+// manually joined spoke also learns how to retry at once; a provider-managed
+// spoke's provider line already says what to do.
+func formatFederationSyncRetry(retry api.FederationSyncRetry, providerManaged bool) string {
+	reason := textsafe.Line(retry.Reason)
+	switch retry.Reason {
+	case "refused":
+		reason = "hub refused the credential"
+	case "unavailable":
+		reason = "hub unavailable"
+	case "relay_cross_project_links":
+		reason = "relay hub refused cross-project links"
+	}
+	attempts := "attempts"
+	if retry.Failures == 1 {
+		attempts = "attempt"
+	}
+	line := fmt.Sprintf("%s (%d) on %d %s; next attempt %s",
+		reason, retry.HTTPStatus, retry.Failures, attempts, retry.NextAttemptAt.UTC().Format(time.RFC3339))
+	if retry.Reason == "refused" && !providerManaged {
+		// A new credential resets the schedule; a hub-side grant waits for
+		// the next attempt.
+		line += "; to retry now, enroll again on the hub and run the join command it prints"
+	}
+	return line
 }
 
 func formatProviderStatus(status string) string {
@@ -2374,6 +2469,11 @@ func printFederationStatusAgent(cmd *cobra.Command, body api.FederationStatusBod
 			checkpointCapacity = strconv.FormatInt(status.RelayCheckpointCapacity, 10)
 		}
 		checkpointError := status.RelayCheckpointError
+		var retryReason, retryStatus, retryFailures, retryNext string
+		if retry := status.SyncRetry; retry != nil {
+			retryReason, retryStatus, retryFailures = retry.Reason, strconv.Itoa(retry.HTTPStatus), strconv.Itoa(retry.Failures)
+			retryNext = retry.NextAttemptAt.UTC().Format(time.RFC3339)
+		}
 		if err := writeAgentKVRow(out,
 			agentRowField("project", status.ProjectName),
 			agentRowField("role", status.Role),
@@ -2391,6 +2491,10 @@ func printFederationStatusAgent(cmd *cobra.Command, body api.FederationStatusBod
 			agentRowField("enrollments", strconv.FormatInt(status.EnrollmentCount, 10)),
 			agentRowField("active_quarantine", strconv.FormatInt(status.ActiveQuarantineCount, 10)),
 			agentRowField("reset_blocker", formatFederationResetBlocker(status.ResetBlocker)),
+			agentOptionalRowField("sync_retry", &retryReason),
+			agentOptionalRowField("sync_retry_status", &retryStatus),
+			agentOptionalRowField("sync_retry_failures", &retryFailures),
+			agentOptionalRowField("sync_retry_next_attempt", &retryNext),
 			agentOptionalRowField("root_signing_key", &status.RootSigningKey),
 			agentOptionalRowField("relay_checkpoint_bytes", &checkpointBytes),
 			agentOptionalRowField("relay_checkpoint_capacity_bytes", &checkpointCapacity),
@@ -2428,7 +2532,7 @@ func printFederationStatusAgent(cmd *cobra.Command, body api.FederationStatusBod
 			if err := writeAgentKVRow(out,
 				agentRowField("violation_issue", violation.ShortID),
 				agentRowField("event", violation.OffendingEventType),
-				agentRowField("actor", violation.Actor),
+				agentRowField("actor", authorname.Display(violation.Actor)),
 				agentRowField("offending_instance", violation.OffendingOriginInstanceUID),
 				agentRowField("at", violation.At.UTC().Format(time.RFC3339)),
 				agentRowField("reason", violation.Reason),

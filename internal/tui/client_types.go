@@ -4,12 +4,14 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 )
 
@@ -50,6 +52,7 @@ type Issue struct {
 	Related             []LinkPeer    `json:"related,omitempty"`
 	Priority            *int64        `json:"priority,omitempty"`
 	Revision            int64         `json:"revision"`
+	ContentRevision     int64         `json:"content_revision"`
 	RecurrenceID        *int64        `json:"recurrence_id,omitempty"`
 	Metadata            issueMetadata `json:"metadata,omitzero"`
 	// Resolved YYYY-MM-DD planning dates from the daemon.
@@ -57,12 +60,76 @@ type Issue struct {
 	DeadlineOnDate  string `json:"deadline_on_date,omitempty"`
 }
 
-// issueMetadata keeps the two planning-date keys and the timezone of an
-// issue's metadata as the daemon stores them. Other keys are not read by the TUI.
+// issueMetadata keeps the two planning-date keys, the timezone, the work
+// attention pair and the attachment references of an issue's metadata as the
+// daemon stores them. Other keys are not read by the TUI.
 type issueMetadata struct {
-	ScheduledOn jsontext.Value `json:"scheduled_on,omitzero"`
-	DeadlineOn  jsontext.Value `json:"deadline_on,omitzero"`
-	Timezone    jsontext.Value `json:"timezone,omitzero"`
+	ScheduledOn      jsontext.Value `json:"scheduled_on,omitzero"`
+	DeadlineOn       jsontext.Value `json:"deadline_on,omitzero"`
+	Timezone         jsontext.Value `json:"timezone,omitzero"`
+	WorkAttention    jsontext.Value `json:"work.attention,omitzero"`
+	WorkAttentionMsg jsontext.Value `json:"work.attention_msg,omitzero"`
+	// Attachments holds the raw "attachment.<id>" members, keyed by the
+	// full key, and nothing else from the unknown members.
+	Attachments map[string]jsontext.Value `json:"-"`
+}
+
+// UnmarshalJSON keeps the known keys and only the attachment references
+// among the rest, so list rows do not carry every metadata key.
+func (m *issueMetadata) UnmarshalJSON(data []byte) error {
+	var members map[string]jsontext.Value
+	if err := json.Unmarshal(data, &members); err != nil {
+		return err
+	}
+	*m = issueMetadata{
+		ScheduledOn: members["scheduled_on"], DeadlineOn: members["deadline_on"], Timezone: members["timezone"],
+		WorkAttention: members["work.attention"], WorkAttentionMsg: members["work.attention_msg"],
+	}
+	for key, value := range members {
+		if strings.HasPrefix(key, metadata.AttachmentPrefix) {
+			if m.Attachments == nil {
+				m.Attachments = map[string]jsontext.Value{}
+			}
+			m.Attachments[key] = value
+		}
+	}
+	return nil
+}
+
+// closeAttachment is one valid attachment reference. id is the reference's
+// metadata key suffix, which the close action accepts as attachment_id.
+type closeAttachment struct {
+	id  string
+	ref metadata.Attachment
+}
+
+// label names the file as the CLI does, "report.pdf · 2048 bytes".
+func (a closeAttachment) label() string {
+	return fmt.Sprintf("%s · %d bytes", a.ref.Name, a.ref.Size)
+}
+
+// attachmentRefs maps the issue's valid attachment references by ID. Invalid
+// references are skipped, as the CLI does when it resolves attachment IDs.
+// The map is never nil, so an issue without references reads as "none".
+func (i Issue) attachmentRefs() map[string]metadata.Attachment {
+	out := map[string]metadata.Attachment{}
+	for key, raw := range i.Metadata.Attachments {
+		id := strings.TrimPrefix(key, metadata.AttachmentPrefix)
+		if ref, ok := metadata.Valid(raw); ok && id != "" {
+			out[id] = ref
+		}
+	}
+	return out
+}
+
+// attachments lists the valid references by ID.
+func (i Issue) attachments() []closeAttachment {
+	var out []closeAttachment
+	for id, ref := range i.attachmentRefs() {
+		out = append(out, closeAttachment{id: id, ref: ref})
+	}
+	slices.SortFunc(out, func(a, b closeAttachment) int { return strings.Compare(a.id, b.id) })
+	return out
 }
 
 // scheduledOn, deadlineOn and timezone are the raw stored values, "" when
@@ -70,6 +137,45 @@ type issueMetadata struct {
 func (i Issue) scheduledOn() string { return rawString(i.Metadata.ScheduledOn) }
 func (i Issue) deadlineOn() string  { return rawString(i.Metadata.DeadlineOn) }
 func (i Issue) timezone() string    { return rawString(i.Metadata.Timezone) }
+
+// The work.attention levels the TUI shows, in the issue list, the issue
+// detail and the Attention view. cmd/kata keeps its own copy in package main.
+const (
+	workAttentionOK         = "ok"
+	workAttentionStuck      = "stuck"
+	workAttentionNeedsHuman = "needs-human"
+)
+
+// knownWorkAttention returns level when it is one of the documented
+// work.attention levels and "" otherwise, so third-party values show nothing.
+func knownWorkAttention(level string) string {
+	switch level {
+	case workAttentionOK, workAttentionStuck, workAttentionNeedsHuman:
+		return level
+	default:
+		return ""
+	}
+}
+
+// workAttention returns the agent-set work.attention level and its message.
+// Closed and deleted issues, and values outside ok, stuck and needs-human,
+// report no level: work.* is meaningful only while an issue is open.
+func (i Issue) workAttention() (level, msg string) {
+	if i.Status == "closed" || i.DeletedAt != nil {
+		return "", ""
+	}
+	if level = knownWorkAttention(rawString(i.Metadata.WorkAttention)); level == "" {
+		return "", ""
+	}
+	return level, rawString(i.Metadata.WorkAttentionMsg)
+}
+
+// marksRowForAttention decides the list-row marker: only stuck and needs-human
+// get one; ok shows in the detail line alone.
+func (i Issue) marksRowForAttention() bool {
+	level, _ := i.workAttention()
+	return level == workAttentionStuck || level == workAttentionNeedsHuman
+}
 
 func rawString(v jsontext.Value) string {
 	var s string
@@ -305,6 +411,7 @@ type CreateFederationReplicaInput struct {
 // CreateFederationEnrollmentInput is the hub enrollment creation request body.
 type CreateFederationEnrollmentInput struct {
 	SpokeInstanceUID             string `json:"spoke_instance_uid"`
+	SpokeName                    string `json:"spoke_name,omitempty"`
 	ProjectID                    *int64 `json:"project_id"`
 	Capabilities                 string `json:"capabilities"`
 	Token                        string `json:"token,omitempty"`

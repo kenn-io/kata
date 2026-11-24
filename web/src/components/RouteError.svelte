@@ -1,19 +1,18 @@
 <script lang="ts">
   import { Button } from '@kenn-io/kit-ui'
-
   import type { KataRoute } from '../lib/router'
+  import StatusPage from './shared/StatusPage.svelte'
 
   interface Props {
     route: Extract<KataRoute, { kind: 'route-error' }>
     onSearch: (reference: string) => void
+    onOpenInbox: () => void
   }
 
-  let { route, onSearch }: Props = $props()
+  let { route, onSearch, onOpenInbox }: Props = $props()
 </script>
 
-<section aria-labelledby="route-error-heading">
-  <h2 id="route-error-heading">This Kata route is not valid</h2>
-  <p>The address was left unchanged so it can be corrected or searched.</p>
+<StatusPage title="Page not found" description={route.searchRef ? undefined : 'Check the address.'}>
   {#if route.searchRef}
     <Button
       tone="info"
@@ -21,5 +20,7 @@
       label={`Search for ${route.searchRef}`}
       onclick={() => onSearch(route.searchRef ?? '')}
     />
+  {:else}
+    <Button tone="info" surface="solid" label="Open Inbox" onclick={onOpenInbox} />
   {/if}
-</section>
+</StatusPage>

@@ -30,6 +30,7 @@ import (
 	"go.kenn.io/kata/internal/telemetry"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/tui"
+	"go.kenn.io/kata/internal/version"
 	kataclient "go.kenn.io/kata/pkg/client"
 )
 
@@ -62,23 +63,25 @@ func (c *cliUseTelemetry) recorded() []map[string]any {
 	return append([]map[string]any(nil), c.captured...)
 }
 
-func (c *cliUseTelemetry) waitForCapture(t *testing.T) {
-	t.Helper()
-	//nolint:kennlint // sleeptest: Real daemon delivery can finish after the command's exit wait.
-	require.Eventually(t, func() bool { return len(c.recorded()) > 0 }, 5*time.Second, time.Millisecond)
-}
-
 func waitCLIUseMarker(t *testing.T, prefix string) {
 	t.Helper()
 	target := cliUseTarget.Load()
 	require.NotNil(t, target)
 	marker := client.TelemetryDayMarkerPath(*target, prefix)
+	waitCLIUseMarkerPath(t, marker)
+}
+
+func waitCLIUseMarkerPath(t *testing.T, marker string) {
+	t.Helper()
 	day := cliUseNow().UTC().Format(time.DateOnly)
 	//nolint:kennlint // sleeptest: The daily marker signals that the real HTTP response was handled.
 	require.Eventually(t, func() bool { return client.ReadTelemetryDayMarker(marker) == day }, 5*time.Second, time.Millisecond)
 }
 
-// settledCLIUse waits for command-owned report workers before negative assertions.
+// settledCLIUse waits for command-owned report workers before assertions. Inside
+// the bubble a report's deadline runs on the bubble's clock, which stays still
+// while the request is on the network, so a loaded machine cannot expire the
+// short hook deadline before the daemon receives the event.
 func settledCLIUse(t *testing.T, run func(*testing.T)) {
 	t.Helper()
 	saved := http.DefaultTransport
@@ -93,6 +96,34 @@ func settledCLIUse(t *testing.T, run func(*testing.T)) {
 }
 
 var cliSurface = []map[string]any{{"surface": "cli"}}
+
+func TestCLIUseSkipsTaggedGoInstall(t *testing.T) {
+	oldVersion, oldCommit := version.Version, version.Commit
+	version.Version, version.Commit = "v0.23.0", "unknown"
+	t.Cleanup(func() { version.Version, version.Commit = oldVersion, oldCommit })
+	t.Setenv("TELEMETRY_ENABLED", "1")
+	t.Setenv("KATA_TELEMETRY_ENABLED", "")
+	t.Setenv(hooks.HookVersionEnv, "")
+	t.Setenv("KATA_HOME", t.TempDir())
+	stubIsTTY(t, true)
+	assert.False(t, reportsCLIUse(findCommand(t, "projects", "list")))
+	target := newCLIUseDaemon(t)
+	settledCLIUse(t, func(t *testing.T) {
+		cmd := findCommand(t, "agent-contract-hook")
+		cmd.SetContext(t.Context())
+		cliUseTarget.Store(&client.ResolvedDaemon{BaseURL: target.url})
+		t.Cleanup(func() { cliUseTarget.Store(nil) })
+		require.True(t, reportsAgentUse(cmd))
+		reportCLIUse(cmd)
+		synctest.Wait()
+		assert.Zero(t, target.posts.Load())
+		version.Commit = "1234567"
+		require.True(t, telemetry.Eligible())
+		reportCLIUse(cmd)
+		synctest.Wait()
+		target.waitForPosts(t, 1)
+	})
+}
 
 // newCLIUseEnv boots a daemon whose reporter is reporter, for a person at a
 // terminal with no hook marker inherited.
@@ -163,7 +194,6 @@ func TestCLIUseSkipsAgentCallers(t *testing.T) {
 				})
 				require.NotNil(t, cliUseTarget.Load(), "the command resolved a daemon")
 				if test.hook != "" {
-					capture.waitForCapture(t)
 					assert.Equal(t, []map[string]any{{"call_count_bucket": "1-10"}}, capture.recorded())
 				} else {
 					assert.Empty(t, capture.recorded())
@@ -204,10 +234,11 @@ func TestCLIUseSkipsAgentCallers(t *testing.T) {
 			}
 			t.Setenv("KATA_REF", createIssue(t, env, pid, "launcher-tracked work"))
 
-			require.NoError(t, runAttnHook(t, env, dir, args...))
+			settledCLIUse(t, func(t *testing.T) {
+				require.NoError(t, runAttnHook(t, env, dir, args...))
+			})
 
 			require.NotNil(t, cliUseTarget.Load(), "the hook resolved a daemon")
-			capture.waitForCapture(t)
 			assert.Equal(t, []map[string]any{{"call_count_bucket": "1-10"}}, capture.recorded())
 		})
 	}
@@ -529,6 +560,55 @@ func TestCLIUseBoundsExitWait(t *testing.T) {
 	}
 }
 
+func TestAgentUseExitWaitsForTheReportToBeWritten(t *testing.T) {
+	// A slow dial stands in for a busy machine where the report has not left
+	// the hook process when the exit wait ends.
+	for _, test := range []struct {
+		name        string
+		dial, after time.Duration
+		posts       int32
+	}{
+		{"dial ends after the exit wait", 70 * time.Millisecond, 70 * time.Millisecond, 1},
+		{"dial outlasts the report timeout", 300 * time.Millisecond, agentUseReportTimeout, 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("KATA_HOME", t.TempDir())
+			t.Setenv("KATA_AUTH_TOKEN", "")
+			t.Setenv(hooks.HookVersionEnv, "1")
+			stubIsTTY(t, true)
+			synctest.Test(t, func(t *testing.T) {
+				var posts atomic.Int32
+				release := make(chan struct{})
+				server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					posts.Add(1)
+					<-release
+					w.WriteHeader(http.StatusAccepted)
+				}))
+				transport, ok := server.Client().Transport.(*http.Transport)
+				require.True(t, ok)
+				transport = transport.Clone()
+				dial := transport.DialContext
+				transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+					time.Sleep(test.dial)
+					return dial(ctx, network, addr)
+				}
+				saved := http.DefaultTransport
+				http.DefaultTransport = transport
+				defer func() { http.DefaultTransport = saved }()
+				start := time.Now()
+				reportCLIUseTo(t, "http://127.0.0.1:7777")
+				assert.Equal(t, test.after, time.Since(start), "the hook waits for its report to be written, never for the reply")
+				synctest.Wait()
+				assert.Equal(t, test.posts, posts.Load())
+				close(release)
+				// Let the background report get its reply or reach its timeout.
+				time.Sleep(time.Second)
+				synctest.Wait()
+			})
+		})
+	}
+}
+
 func TestCLIUseSkipsOutputThatIsNotATerminal(t *testing.T) {
 	t.Setenv(hooks.HookVersionEnv, "")
 	stubIsTTY(t, false)
@@ -542,11 +622,13 @@ func TestAgentContractUsePreservesOutput(t *testing.T) {
 	require.NoError(t, err)
 	capture := &cliUseTelemetry{}
 	env := newCLIUseEnv(t, capture)
-	output, stderr, err := runCmdCapture(t, env, "agent-contract-hook")
+	var output, stderr string
+	settledCLIUse(t, func(t *testing.T) {
+		output, stderr, err = runCmdCapture(t, env, "agent-contract-hook")
+	})
 	require.NoError(t, err)
 	require.Equal(t, baseline, output)
 	require.Empty(t, stderr)
-	capture.waitForCapture(t)
 	require.Equal(t, []map[string]any{{"call_count_bucket": "1-10"}}, capture.recorded())
 }
 
@@ -609,6 +691,10 @@ func TestAgentUseFullDayProcess(t *testing.T) {
 			cmd.SetContext(context.WithValue(t.Context(), client.BaseURLKey{}, url))
 		}
 		reportCLIUse(cmd)
+		// Discovery does not store cliUseTarget. Wait for its daily receipt
+		// before this fixture process exits and kills the background worker.
+		marker := client.TelemetryDayMarkerPath(client.ResolvedDaemon{BaseURL: url}, "agent-full-")
+		waitCLIUseMarkerPath(t, marker)
 		return
 	}
 	reportCLIUseTo(t, url)
@@ -628,7 +714,7 @@ func TestDisabledTelemetrySharedAcrossTerminalCallers(t *testing.T) {
 					case "mcp":
 						c, err := kataclient.NewWithHTTPClient(target.url, http.DefaultClient)
 						require.NoError(t, err)
-						observe, stop := startMCPAgentUseReporter(t.Context(), c, client.ResolvedDaemon{BaseURL: target.url})
+						observe, stop := startMCPAgentUseReporter(t.Context(), c, client.ResolvedDaemon{BaseURL: target.url}, false)
 						observe()
 						synctest.Wait()
 						stop()
@@ -736,8 +822,6 @@ func TestOutcomesEmptySearchCLI(t *testing.T) {
 					recordCLIUseTarget(client.ResolvedDaemon{BaseURL: env.URL})
 					sendCLIEvent(cmd, cliOutcomeBody("app_opened", ""), false, "")
 				}
-				capture.waitForCapture(t)
-				synctest.Wait()
 			})
 			capture.mu.Lock()
 			defer capture.mu.Unlock()

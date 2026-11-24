@@ -24,6 +24,7 @@ var federationEventTypes = []federationEventType{
 	{name: "issue.moved", version: 30, feature: IssueMoveEventFeature},
 	{name: "issue.snapshot", version: 30, snapshot: true},
 	{name: "issue.updated", version: 30},
+	{name: RepeatedImportEventType, version: 30, feature: RepeatedAdoptionEventFeature},
 	{name: "issue.closed", version: 30},
 	{name: "issue.reopened", version: 30},
 	{name: "issue.soft_deleted", version: 30},
@@ -96,8 +97,20 @@ func FederationEventPayloadWireVersion(kind string, payload jsontext.Value) (int
 	if err != nil {
 		return 0, "", err
 	}
+	// Reference formats can widen an existing event type without changing its
+	// wire schema version. Senders must negotiate those payload features too.
+	required, err := PayloadRequiredFeatures(kind, string(payload))
+	if err != nil {
+		return 0, "", err
+	}
+	feature = MergeEventFeatures(feature, required)
 	if payloadCarriesCommentReply(kind, payload) {
 		version = max(version, commentReplyWireVersion)
+	}
+	if zoned, err := payloadZonedDateFeature(kind, string(payload)); err != nil {
+		return 0, "", err
+	} else if zoned != "" {
+		feature = MergeEventFeatures(feature, zoned)
 	}
 	return version, feature, nil
 }

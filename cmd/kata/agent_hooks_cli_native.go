@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -321,9 +320,7 @@ func newNativeAgentHooksMutationCmdWithTerminalCheck(remove bool, isTerminal fun
 			if warning != "" {
 				result.Warnings = append(result.Warnings, warning)
 			}
-			for _, change := range plan.Changes {
-				result.Changed = result.Changed || (change.Remove && change.OriginalExists) || (!change.Remove && (!change.OriginalExists || !bytes.Equal(change.Original, change.Content)))
-			}
+			result.Changed = nativeAgentHookPlanChanged(plan)
 			if remove {
 				result.State = "absent"
 				if result.Changed {

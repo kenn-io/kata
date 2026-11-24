@@ -203,6 +203,7 @@ type Attachment struct {
 	DocbankVersion uuid.UUID `json:"docbank_version" validate:"required"`
 	MediaType      string    `json:"media_type" validate:"required"`
 	Name           string    `json:"name" validate:"required"`
+	Origin         *string   `json:"origin,omitempty"`
 	Size           int64     `json:"size"`
 }
 
@@ -669,14 +670,15 @@ func (c ClaimViolationOut) Validate() error {
 }
 
 type CloseActionRequestBody struct {
-	Actor         *string                              `json:"actor,omitempty"`
-	DryRun        *bool                                `json:"dry_run,omitempty"`
-	Evidence      []Evidence                           `json:"evidence,omitempty"`
-	Message       *string                              `json:"message,omitempty"`
-	Reason        *CloseActionRequestBodyReason        `json:"reason,omitempty"`
-	RetryProtocol *CloseActionRequestBodyRetryProtocol `json:"retry_protocol,omitempty"`
-	Source        *CloseActionRequestBodySource        `json:"source,omitempty"`
-	Transcript    *Transcript                          `json:"transcript,omitempty"`
+	Actor               *string                              `json:"actor,omitempty"`
+	DryRun              *bool                                `json:"dry_run,omitempty"`
+	Evidence            []Evidence                           `json:"evidence,omitempty"`
+	Message             *string                              `json:"message,omitempty"`
+	Reason              *CloseActionRequestBodyReason        `json:"reason,omitempty"`
+	RetryProtocol       *CloseActionRequestBodyRetryProtocol `json:"retry_protocol,omitempty"`
+	Source              *CloseActionRequestBodySource        `json:"source,omitempty"`
+	Transcript          *Transcript                          `json:"transcript,omitempty"`
+	TranscriptSelection *TranscriptSelection                 `json:"transcript_selection,omitempty"`
 }
 
 func (c CloseActionRequestBody) Validate() error {
@@ -713,6 +715,13 @@ func (c CloseActionRequestBody) Validate() error {
 		if v, ok := any(c.Transcript).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Transcript", err)
+			}
+		}
+	}
+	if c.TranscriptSelection != nil {
+		if v, ok := any(c.TranscriptSelection).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("TranscriptSelection", err)
 			}
 		}
 	}
@@ -1513,7 +1522,9 @@ type CronRun struct {
 	EndedAt                    *time.Time      `json:"ended_at,omitempty"`
 	ExecutorLabel              *string         `json:"executor_label,omitempty"`
 	ID                         int64           `json:"id"`
+	IssueShortID               *string         `json:"issue_short_id,omitempty"`
 	IssueUID                   *string         `json:"issue_uid,omitempty"`
+	JobName                    *string         `json:"job_name,omitempty"`
 	JobUID                     *string         `json:"job_uid,omitempty"`
 	OccurrenceKey              *string         `json:"occurrence_key,omitempty"`
 	ProjectID                  int64           `json:"project_id"`
@@ -1525,6 +1536,7 @@ type CronRun struct {
 	UID                        string          `json:"uid" validate:"required"`
 	UpdatedAt                  time.Time       `json:"updated_at" validate:"required"`
 	WorkflowDefinitionEventUID *string         `json:"workflow_definition_event_uid,omitempty"`
+	WorkflowName               *string         `json:"workflow_name,omitempty"`
 	WorkflowUID                *string         `json:"workflow_uid,omitempty"`
 }
 
@@ -1933,6 +1945,27 @@ type DisconnectRelayResponseBody struct {
 	Revoked bool `json:"revoked"`
 }
 
+type DocbankDescriptor struct {
+	Attachment Attachment `json:"attachment"`
+	ProjectUID string     `json:"project_uid" validate:"required"`
+}
+
+func (d DocbankDescriptor) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(d.Attachment).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Attachment", err)
+		}
+	}
+	if err := typesValidator.Var(d.ProjectUID, "required"); err != nil {
+		errors = errors.Append("ProjectUID", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type DocbankHealth struct {
 	// Credential Docbank API key state, ok or missing; an advisory warning that does not change health.ok.
 	Credential string `json:"credential" validate:"required"`
@@ -1945,6 +1978,27 @@ type DocbankHealth struct {
 }
 
 func (d DocbankHealth) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(d))
+}
+
+type DocbankProbe struct {
+	// HTTPStatus Docbank's HTTP status when it answered with an error.
+	HTTPStatus *int64 `json:"http_status,omitempty"`
+
+	// KeyAccepted Whether Docbank accepted the daemon's key; false when it answered with an error status or was not reached.
+	KeyAccepted bool `json:"key_accepted"`
+
+	// Reachable Whether Docbank answered the request.
+	Reachable bool `json:"reachable"`
+}
+
+type DocbankServiceCapabilities struct {
+	Origin     string `json:"origin" validate:"required"`
+	ProjectUID string `json:"project_uid" validate:"required"`
+	Version    int64  `json:"version"`
+}
+
+func (d DocbankServiceCapabilities) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(d))
 }
 
@@ -1975,17 +2029,25 @@ func (e EditCommentRequestBody) Validate() error {
 }
 
 type EditIssueRequestBody struct {
-	Actor         *string     `json:"actor,omitempty"`
-	Body          *string     `json:"body,omitempty"`
-	ClearPriority *bool       `json:"clear_priority,omitempty"`
-	LinksDelta    *LinksDelta `json:"links_delta,omitempty"`
-	Owner         *string     `json:"owner,omitempty"`
-	SetPriority   *int64      `json:"set_priority,omitempty"`
-	Title         *string     `json:"title,omitempty"`
+	Actor         *string `json:"actor,omitempty"`
+	Body          *string `json:"body,omitempty"`
+	ClearPriority *bool   `json:"clear_priority,omitempty"`
+
+	// ExpectedContentRevision Current content_revision of the issue; a title or body edit since then returns 412 revision_conflict and writes nothing.
+	ExpectedContentRevision *int64      `json:"expected_content_revision,omitempty" validate:"omitempty,gte=0"`
+	LinksDelta              *LinksDelta `json:"links_delta,omitempty"`
+	Owner                   *string     `json:"owner,omitempty"`
+	SetPriority             *int64      `json:"set_priority,omitempty"`
+	Title                   *string     `json:"title,omitempty"`
 }
 
 func (e EditIssueRequestBody) Validate() error {
 	var errors runtime.ValidationErrors
+	if e.ExpectedContentRevision != nil {
+		if err := typesValidator.Var(e.ExpectedContentRevision, "omitempty,gte=0"); err != nil {
+			errors = errors.Append("ExpectedContentRevision", err)
+		}
+	}
 	if e.LinksDelta != nil {
 		if v, ok := any(e.LinksDelta).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -2773,9 +2835,10 @@ func (f FederationIngestEventEnvelope) Validate() error {
 }
 
 type FederationIngestEventsBody struct {
-	Accepted          int64 `json:"accepted"`
-	Duplicates        int64 `json:"duplicates"`
-	PushCursorEventID int64 `json:"push_cursor_event_id"`
+	Accepted            int64    `json:"accepted"`
+	Duplicates          int64    `json:"duplicates"`
+	PushCursorEventID   int64    `json:"push_cursor_event_id"`
+	SupersededEventUids []string `json:"superseded_event_uids,omitempty"`
 }
 
 type FederationIngestEventsRequestBody struct {
@@ -2824,41 +2887,44 @@ func (f FederationJoinInstructions) Validate() error {
 }
 
 type FederationProjectStatus struct {
-	ActiveQuarantineCount       int64                         `json:"active_quarantine_count"`
-	ActiveQuarantines           []FederationQuarantineSummary `json:"active_quarantines" validate:"required"`
-	AllowInsecure               *bool                         `json:"allow_insecure,omitempty"`
-	BoundActor                  *string                       `json:"bound_actor,omitempty"`
-	Capabilities                *string                       `json:"capabilities,omitempty"`
-	CredentialExpiresAt         *time.Time                    `json:"credential_expires_at,omitempty"`
-	CredentialStatus            *string                       `json:"credential_status,omitempty"`
-	Embedding                   *FederationEmbeddingStatus    `json:"embedding,omitempty"`
-	Enabled                     bool                          `json:"enabled"`
-	EnrollmentCount             int64                         `json:"enrollment_count"`
-	HubProjectID                *int64                        `json:"hub_project_id,omitempty"`
-	HubProjectUID               *string                       `json:"hub_project_uid,omitempty"`
-	HubURL                      *string                       `json:"hub_url,omitempty"`
-	LastError                   *string                       `json:"last_error,omitempty"`
-	LastErrorAt                 *time.Time                    `json:"last_error_at,omitempty"`
-	LastPullStartedAt           *time.Time                    `json:"last_pull_started_at,omitempty"`
-	LastPullSuccessAt           *time.Time                    `json:"last_pull_success_at,omitempty"`
-	LastPushStartedAt           *time.Time                    `json:"last_push_started_at,omitempty"`
-	LastPushSuccessAt           *time.Time                    `json:"last_push_success_at,omitempty"`
-	LastResetAt                 *time.Time                    `json:"last_reset_at,omitempty"`
-	LastSuccessfulSyncAt        *time.Time                    `json:"last_successful_sync_at,omitempty"`
-	LastSyncAt                  *time.Time                    `json:"last_sync_at,omitempty"`
-	LiveClaimCount              int64                         `json:"live_claim_count"`
-	PendingClaimCount           int64                         `json:"pending_claim_count"`
-	PendingPushCount            int64                         `json:"pending_push_count"`
-	PendingPushHighWaterEventID int64                         `json:"pending_push_high_water_event_id"`
-	ProjectID                   int64                         `json:"project_id"`
-	ProjectName                 string                        `json:"project_name" validate:"required"`
-	ProjectUID                  string                        `json:"project_uid" validate:"required"`
-	ProviderStatus              *string                       `json:"provider_status,omitempty"`
-	PullCursorEventID           int64                         `json:"pull_cursor_event_id"`
-	PushCursorEventID           int64                         `json:"push_cursor_event_id"`
-	PushEnabled                 bool                          `json:"push_enabled"`
-	RecentViolationCount        int64                         `json:"recent_violation_count"`
-	RecentViolations            []FederationViolationSummary  `json:"recent_violations" validate:"required"`
+	ActiveQuarantineCount int64                         `json:"active_quarantine_count"`
+	ActiveQuarantines     []FederationQuarantineSummary `json:"active_quarantines" validate:"required"`
+	AllowInsecure         *bool                         `json:"allow_insecure,omitempty"`
+	BoundActor            *string                       `json:"bound_actor,omitempty"`
+	Capabilities          *string                       `json:"capabilities,omitempty"`
+	CredentialExpiresAt   *time.Time                    `json:"credential_expires_at,omitempty"`
+	CredentialStatus      *string                       `json:"credential_status,omitempty"`
+	Embedding             *FederationEmbeddingStatus    `json:"embedding,omitempty"`
+	Enabled               bool                          `json:"enabled"`
+	EnrollmentCount       int64                         `json:"enrollment_count"`
+
+	// HasSyncError True when a sync error was recorded and omit_errors removed its text.
+	HasSyncError                *bool                        `json:"has_sync_error,omitempty"`
+	HubProjectID                *int64                       `json:"hub_project_id,omitempty"`
+	HubProjectUID               *string                      `json:"hub_project_uid,omitempty"`
+	HubURL                      *string                      `json:"hub_url,omitempty"`
+	LastError                   *string                      `json:"last_error,omitempty"`
+	LastErrorAt                 *time.Time                   `json:"last_error_at,omitempty"`
+	LastPullStartedAt           *time.Time                   `json:"last_pull_started_at,omitempty"`
+	LastPullSuccessAt           *time.Time                   `json:"last_pull_success_at,omitempty"`
+	LastPushStartedAt           *time.Time                   `json:"last_push_started_at,omitempty"`
+	LastPushSuccessAt           *time.Time                   `json:"last_push_success_at,omitempty"`
+	LastResetAt                 *time.Time                   `json:"last_reset_at,omitempty"`
+	LastSuccessfulSyncAt        *time.Time                   `json:"last_successful_sync_at,omitempty"`
+	LastSyncAt                  *time.Time                   `json:"last_sync_at,omitempty"`
+	LiveClaimCount              int64                        `json:"live_claim_count"`
+	PendingClaimCount           int64                        `json:"pending_claim_count"`
+	PendingPushCount            int64                        `json:"pending_push_count"`
+	PendingPushHighWaterEventID int64                        `json:"pending_push_high_water_event_id"`
+	ProjectID                   int64                        `json:"project_id"`
+	ProjectName                 string                       `json:"project_name" validate:"required"`
+	ProjectUID                  string                       `json:"project_uid" validate:"required"`
+	ProviderStatus              *string                      `json:"provider_status,omitempty"`
+	PullCursorEventID           int64                        `json:"pull_cursor_event_id"`
+	PushCursorEventID           int64                        `json:"push_cursor_event_id"`
+	PushEnabled                 bool                         `json:"push_enabled"`
+	RecentViolationCount        int64                        `json:"recent_violation_count"`
+	RecentViolations            []FederationViolationSummary `json:"recent_violations" validate:"required"`
 
 	// RelayCheckpointBytes Measured size in bytes of the signed relay reset checkpoint this root would build for the project now. Present only for hub projects rooted on this daemon.
 	RelayCheckpointBytes *int64 `json:"relay_checkpoint_bytes,omitempty"`
@@ -2871,6 +2937,7 @@ type FederationProjectStatus struct {
 	ResetBlocker             *string                                `json:"reset_blocker,omitempty"`
 	Role                     string                                 `json:"role" validate:"required"`
 	RootSigningKey           *FederationProjectStatusRootSigningKey `json:"root_signing_key,omitempty"`
+	SyncRetry                *FederationSyncRetry                   `json:"sync_retry,omitempty"`
 	UnresolvedViolationCount int64                                  `json:"unresolved_violation_count"`
 }
 
@@ -2916,6 +2983,13 @@ func (f FederationProjectStatus) Validate() error {
 		if v, ok := any(f.RootSigningKey).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("RootSigningKey", err)
+			}
+		}
+	}
+	if f.SyncRetry != nil {
+		if v, ok := any(f.SyncRetry).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("SyncRetry", err)
 			}
 		}
 	}
@@ -2986,6 +3060,51 @@ func (f FederationRootKeyRepinResult) Validate() error {
 	return errors
 }
 
+type FederationSearchHit struct {
+	Issue     Issue    `json:"issue"`
+	MatchedIn []string `json:"matched_in,omitempty"`
+	Score     float64  `json:"score"`
+	WebURL    *string  `json:"web_url,omitempty"`
+}
+
+func (f FederationSearchHit) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(f.Issue).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Issue", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type FederationSearchResponseBody struct {
+	Bounded        bool                  `json:"bounded"`
+	DegradedReason *string               `json:"degraded_reason,omitempty"`
+	Hits           []FederationSearchHit `json:"hits" validate:"required"`
+	Mode           *string               `json:"mode,omitempty"`
+}
+
+func (f FederationSearchResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(f.Hits, "required"); err != nil {
+		errors = errors.Append("Hits", err)
+	}
+	for i, item := range f.Hits {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Hits[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type FederationSpokeNameOut struct {
 	SpokeInstanceUID string  `json:"spoke_instance_uid" validate:"required"`
 	SpokeName        *string `json:"spoke_name,omitempty"`
@@ -3009,6 +3128,36 @@ func (f FederationStatusBody) Validate() error {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append(fmt.Sprintf("Statuses[%d]", i), err)
 			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type FederationSyncRetry struct {
+	// Failures Consecutive attempts that ended for this reason.
+	Failures int64 `json:"failures"`
+
+	// HTTPStatus Hub response status of the last attempt.
+	HTTPStatus int64 `json:"http_status"`
+
+	// NextAttemptAt Earliest time the runner contacts the hub again. The attempt happens on the runner's first pass at or after this time.
+	NextAttemptAt time.Time `json:"next_attempt_at" validate:"required"`
+
+	// Reason refused: the hub rejected the credential (401 or 403); it waits up to 15 minutes between attempts, or longer when the hub also sent Retry-After, and retries at once when the credential or binding changes. unavailable: the hub throttled the request or was unavailable (429 or 503); it waits up to 5 minutes, or longer when the hub sent Retry-After. relay_cross_project_links: a relay hub refused the project's cross-project issue links.
+	Reason FederationSyncRetryReason `json:"reason" validate:"required"`
+}
+
+func (f FederationSyncRetry) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(f.NextAttemptAt, "required"); err != nil {
+		errors = errors.Append("NextAttemptAt", err)
+	}
+	if v, ok := any(f.Reason).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Reason", err)
 		}
 	}
 	if len(errors) == 0 {
@@ -3482,6 +3631,7 @@ type Issue struct {
 	Body                string             `json:"body" validate:"required"`
 	ClosedAt            *time.Time         `json:"closed_at,omitempty"`
 	ClosedReason        *string            `json:"closed_reason,omitempty"`
+	ContentRevision     int64              `json:"content_revision"`
 	CreatedAt           time.Time          `json:"created_at" validate:"required"`
 	DeletedAt           *time.Time         `json:"deleted_at,omitempty"`
 	ID                  int64              `json:"id"`
@@ -3596,9 +3746,10 @@ type IssueOut struct {
 	ChildCounts         *ChildCounts `json:"child_counts,omitempty"`
 	ClosedAt            *time.Time   `json:"closed_at,omitempty"`
 	ClosedReason        *string      `json:"closed_reason,omitempty"`
+	ContentRevision     int64        `json:"content_revision"`
 	CreatedAt           time.Time    `json:"created_at" validate:"required"`
 
-	// DeadlineOnDate deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable.
+	// DeadlineOnDate deadline_on as a YYYY-MM-DD calendar date; date-only values keep their written date; other values use their saved zone, then the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable.
 	DeadlineOnDate *string        `json:"deadline_on_date,omitempty"`
 	DeletedAt      *time.Time     `json:"deleted_at,omitempty"`
 	ID             int64          `json:"id"`
@@ -3618,7 +3769,7 @@ type IssueOut struct {
 	Related      []LinkPeer `json:"related,omitempty"`
 	Revision     int64      `json:"revision"`
 
-	// ScheduledOnDate scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable.
+	// ScheduledOnDate scheduled_on as a YYYY-MM-DD calendar date; date-only values keep their written date; other values use their saved zone, then the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable.
 	ScheduledOnDate *string               `json:"scheduled_on_date,omitempty"`
 	ShortID         string                `json:"short_id" validate:"required"`
 	SourceActor     *string               `json:"source_actor,omitempty"`
@@ -4255,9 +4406,10 @@ type ListGlobalIssueOut struct {
 	ChildCounts         *ChildCounts `json:"child_counts,omitempty"`
 	ClosedAt            *time.Time   `json:"closed_at,omitempty"`
 	ClosedReason        *string      `json:"closed_reason,omitempty"`
+	ContentRevision     int64        `json:"content_revision"`
 	CreatedAt           time.Time    `json:"created_at" validate:"required"`
 
-	// DeadlineOnDate deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable.
+	// DeadlineOnDate deadline_on as a YYYY-MM-DD calendar date; date-only values keep their written date; other values use their saved zone, then the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable.
 	DeadlineOnDate *string        `json:"deadline_on_date,omitempty"`
 	DeletedAt      *time.Time     `json:"deleted_at,omitempty"`
 	ID             int64          `json:"id"`
@@ -4278,7 +4430,7 @@ type ListGlobalIssueOut struct {
 	Related      []LinkPeer `json:"related,omitempty"`
 	Revision     int64      `json:"revision"`
 
-	// ScheduledOnDate scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable.
+	// ScheduledOnDate scheduled_on as a YYYY-MM-DD calendar date; date-only values keep their written date; other values use their saved zone, then the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable.
 	ScheduledOnDate *string                         `json:"scheduled_on_date,omitempty"`
 	ShortID         string                          `json:"short_id" validate:"required"`
 	SourceActor     *string                         `json:"source_actor,omitempty"`
@@ -4510,12 +4662,14 @@ func (l LocalEmbeddingsJob) Validate() error {
 }
 
 type LocalEmbeddingsStatus struct {
-	CanChange       bool                          `json:"can_change"`
-	DownloadBytes   int64                         `json:"download_bytes"`
-	Indexing        *LocalEmbeddingsIndexing      `json:"indexing,omitempty"`
-	Job             *LocalEmbeddingsJob           `json:"job,omitempty"`
-	OllamaAvailable bool                          `json:"ollama_available"`
-	Provider        LocalEmbeddingsStatusProvider `json:"provider" validate:"required"`
+	CanChange         bool                          `json:"can_change"`
+	CanRestart        *bool                         `json:"can_restart,omitempty"`
+	DownloadBytes     int64                         `json:"download_bytes"`
+	Indexing          *LocalEmbeddingsIndexing      `json:"indexing,omitempty"`
+	Job               *LocalEmbeddingsJob           `json:"job,omitempty"`
+	OllamaAvailable   bool                          `json:"ollama_available"`
+	Provider          LocalEmbeddingsStatusProvider `json:"provider" validate:"required"`
+	RestartInProgress *bool                         `json:"restart_in_progress,omitempty"`
 }
 
 func (l LocalEmbeddingsStatus) Validate() error {
@@ -5341,7 +5495,7 @@ type ProjectFederationBody struct {
 	ProjectUID       string          `json:"project_uid" validate:"required"`
 	Relay            *RelayHandshake `json:"relay,omitempty"`
 
-	// RelayLinksChecked True when relay_protocol_version was requested and the project has no cross-project issue links. Older daemons omit it.
+	// RelayLinksChecked True when relay_protocol_version was requested and all existing cross-project links are allowed within the shared group. Older daemons omit it.
 	RelayLinksChecked    *bool `json:"relay_links_checked,omitempty"`
 	ReplayHorizonEventID int64 `json:"replay_horizon_event_id"`
 }
@@ -5625,6 +5779,7 @@ type ReachableGraphNode struct {
 	Body                string                          `json:"body" validate:"required"`
 	ClosedAt            *time.Time                      `json:"closed_at,omitempty"`
 	ClosedReason        *string                         `json:"closed_reason,omitempty"`
+	ContentRevision     int64                           `json:"content_revision"`
 	CreatedAt           time.Time                       `json:"created_at" validate:"required"`
 	DeletedAt           *time.Time                      `json:"deleted_at,omitempty"`
 	ID                  int64                           `json:"id"`
@@ -5785,9 +5940,10 @@ type ReadyGlobalIssueOut struct {
 	ChildCounts         *ChildCounts `json:"child_counts,omitempty"`
 	ClosedAt            *time.Time   `json:"closed_at,omitempty"`
 	ClosedReason        *string      `json:"closed_reason,omitempty"`
+	ContentRevision     int64        `json:"content_revision"`
 	CreatedAt           time.Time    `json:"created_at" validate:"required"`
 
-	// DeadlineOnDate deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable.
+	// DeadlineOnDate deadline_on as a YYYY-MM-DD calendar date; date-only values keep their written date; other values use their saved zone, then the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable.
 	DeadlineOnDate *string        `json:"deadline_on_date,omitempty"`
 	DeletedAt      *time.Time     `json:"deleted_at,omitempty"`
 	ID             int64          `json:"id"`
@@ -5808,7 +5964,7 @@ type ReadyGlobalIssueOut struct {
 	Related      []LinkPeer `json:"related,omitempty"`
 	Revision     int64      `json:"revision"`
 
-	// ScheduledOnDate scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable.
+	// ScheduledOnDate scheduled_on as a YYYY-MM-DD calendar date; date-only values keep their written date; other values use their saved zone, then the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable.
 	ScheduledOnDate *string                          `json:"scheduled_on_date,omitempty"`
 	ShortID         string                           `json:"short_id" validate:"required"`
 	SourceActor     *string                          `json:"source_actor,omitempty"`
@@ -6797,9 +6953,10 @@ type ShowIssueOut struct {
 	Body                string     `json:"body" validate:"required"`
 	ClosedAt            *time.Time `json:"closed_at,omitempty"`
 	ClosedReason        *string    `json:"closed_reason,omitempty"`
+	ContentRevision     int64      `json:"content_revision"`
 	CreatedAt           time.Time  `json:"created_at" validate:"required"`
 
-	// DeadlineOnDate deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable.
+	// DeadlineOnDate deadline_on as a YYYY-MM-DD calendar date; date-only values keep their written date; other values use their saved zone, then the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable.
 	DeadlineOnDate *string        `json:"deadline_on_date,omitempty"`
 	DeletedAt      *time.Time     `json:"deleted_at,omitempty"`
 	ID             int64          `json:"id"`
@@ -6813,7 +6970,7 @@ type ShowIssueOut struct {
 	RecurrenceID   *int64         `json:"recurrence_id,omitempty"`
 	Revision       int64          `json:"revision"`
 
-	// ScheduledOnDate scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable.
+	// ScheduledOnDate scheduled_on as a YYYY-MM-DD calendar date; date-only values keep their written date; other values use their saved zone, then the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable.
 	ScheduledOnDate *string                   `json:"scheduled_on_date,omitempty"`
 	ShortID         string                    `json:"short_id" validate:"required"`
 	SourceActor     *string                   `json:"source_actor,omitempty"`
@@ -7241,6 +7398,15 @@ func (t Transcript) Validate() error {
 	return errors
 }
 
+type TranscriptSelection struct {
+	ProjectID int64 `json:"project_id" validate:"gte=0"`
+	Record    bool  `json:"record"`
+}
+
+func (t TranscriptSelection) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(t))
+}
+
 type Trigger struct {
 	At              *string `json:"at,omitempty"`
 	Cron            *string `json:"cron,omitempty"`
@@ -7395,6 +7561,7 @@ type UIIssue struct {
 	ClosedAt            *time.Time           `json:"closed_at,omitempty"`
 	ClosedReason        *string              `json:"closed_reason,omitempty"`
 	CommentCount        *int64               `json:"comment_count,omitempty"`
+	ContentRevision     int64                `json:"content_revision"`
 	CreatedAt           time.Time            `json:"created_at" validate:"required"`
 	DeadlineOnDate      *string              `json:"deadline_on_date,omitempty"`
 	DeletedAt           *time.Time           `json:"deleted_at,omitempty"`
@@ -7484,7 +7651,8 @@ func (u UIIssueReference) Validate() error {
 }
 
 type UIIssueReferenceResponseBody struct {
-	Issue IssueStruct `json:"issue"`
+	Issue           IssueStruct `json:"issue"`
+	ScopeProjectUID *string     `json:"scope_project_uid,omitempty"`
 }
 
 func (u UIIssueReferenceResponseBody) Validate() error {
@@ -7627,13 +7795,14 @@ func (u UIReferencesResponseBody) Validate() error {
 }
 
 type UISelectedAuthority struct {
-	Comments    []CommentOut `json:"comments" validate:"required"`
-	History     []Event      `json:"history" validate:"required"`
-	Issue       *UIIssue     `json:"issue,omitempty"`
-	Labels      []IssueLabel `json:"labels" validate:"required"`
-	Links       []UILink     `json:"links" validate:"required"`
-	Recurrences []Recurrence `json:"recurrences" validate:"required"`
-	State       string       `json:"state" validate:"required"`
+	Comments            []CommentOut `json:"comments" validate:"required"`
+	EffectiveCloseEvent *Event       `json:"effective_close_event,omitempty"`
+	History             []Event      `json:"history" validate:"required"`
+	Issue               *UIIssue     `json:"issue,omitempty"`
+	Labels              []IssueLabel `json:"labels" validate:"required"`
+	Links               []UILink     `json:"links" validate:"required"`
+	Recurrences         []Recurrence `json:"recurrences" validate:"required"`
+	State               string       `json:"state" validate:"required"`
 }
 
 func (u UISelectedAuthority) Validate() error {
@@ -7645,6 +7814,13 @@ func (u UISelectedAuthority) Validate() error {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append(fmt.Sprintf("Comments[%d]", i), err)
+			}
+		}
+	}
+	if u.EffectiveCloseEvent != nil {
+		if v, ok := any(u.EffectiveCloseEvent).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("EffectiveCloseEvent", err)
 			}
 		}
 	}

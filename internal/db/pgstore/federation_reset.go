@@ -34,8 +34,8 @@ WHERE project_id=$3`, replayHorizonEventID, pullCursorEventID, projectID)
 	})
 }
 
-// ResetFederatedProjectIfNoPendingPush clears one replica only after every
-// supported local event is acknowledged and every quarantine is resolved.
+// ResetFederatedProjectIfNoPendingPush retains pending events for issues in
+// another project and refuses a reset that would delete other pending events.
 func (s *Store) ResetFederatedProjectIfNoPendingPush(
 	ctx context.Context,
 	projectID int64,
@@ -63,9 +63,9 @@ WHERE project_id=$1 AND skipped_at IS NULL ORDER BY id ASC LIMIT 1 FOR UPDATE`, 
 			return mapSQLError(err, nil)
 		}
 		var pending bool
-		err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events
-WHERE project_id=$1 AND origin_instance_uid=$2 AND id>$3 AND `+
-			pgFederationPushEventTypeCondition("type")+`)`, projectID, originInstanceUID, pushCursorEventID).
+		err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events e
+WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND `+
+			db.FederationResetOwedEventSQL("e", true)+`)`, projectID, originInstanceUID, pushCursorEventID).
 			Scan(&pending)
 		if err != nil {
 			return mapSQLError(err, nil)
@@ -122,7 +122,7 @@ func clearFederatedProjectTx(ctx context.Context, tx *sql.Tx, projectID int64, o
 	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID, originInstanceUID, true); err != nil {
 		return err
 	}
-	if err := db.ClearFederatedProjectEvents(ctx, tx, projectID, true); err != nil {
+	if err := db.ClearFederatedProjectEvents(ctx, tx, projectID, originInstanceUID, true); err != nil {
 		return mapSQLError(err, nil)
 	}
 	return clearFederatedProjectionTx(ctx, tx, projectID)

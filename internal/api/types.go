@@ -107,6 +107,19 @@ type DocbankHealth struct {
 	CredentialReason string `json:"credential_reason,omitempty" doc:"Why the key source cannot supply a key."`
 }
 
+// DocbankProbeResponse is the outcome of GET /api/v1/docbank/probe.
+type DocbankProbeResponse struct {
+	Body DocbankProbe
+}
+
+// DocbankProbe is the outcome of one authenticated read-only request the
+// daemon makes to Docbank.
+type DocbankProbe struct {
+	Reachable   bool `json:"reachable" doc:"Whether Docbank answered the request."`
+	KeyAccepted bool `json:"key_accepted" doc:"Whether Docbank accepted the daemon's key; false when it answered with an error status or was not reached."`
+	HTTPStatus  int  `json:"http_status,omitempty,omitzero" doc:"Docbank's HTTP status when it answered with an error."`
+}
+
 // EmbeddingsHealth is the semantic-search reconciler's operator-visible state
 // on the wire. It is present only when the daemon has embeddings configured;
 // an absent block means semantic search is disabled. It mirrors
@@ -336,6 +349,11 @@ type ResolveProjectRequest struct {
 		Alias     *AliasInput `json:"alias,omitempty" doc:"client-derived alias metadata; daemon resolves alias first, then falls back to name"`
 		StartPath string      `json:"start_path,omitempty" doc:"absolute path to resolve from (daemon-side filesystem); legacy local-only fallback"`
 	}
+}
+
+// ReadProjectByNameRequest selects an existing project by name.
+type ReadProjectByNameRequest struct {
+	Name string `query:"name" required:"true" doc:"project name"`
 }
 
 // ProjectResolveBody is the JSON body field of a successful resolve response.
@@ -628,8 +646,8 @@ type IssueOut struct {
 	Blocked bool `json:"blocked,omitempty,omitzero"`
 	// ScheduledOnDate and DeadlineOnDate are the issue's planning dates as
 	// calendar dates, resolved by the same rule as the browser snapshot.
-	ScheduledOnDate string `json:"scheduled_on_date,omitempty" doc:"scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable."`
-	DeadlineOnDate  string `json:"deadline_on_date,omitempty" doc:"deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable."`
+	ScheduledOnDate string `json:"scheduled_on_date,omitempty" doc:"scheduled_on as a YYYY-MM-DD calendar date; date-only values keep their written date; other values use their saved zone, then the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable."`
+	DeadlineOnDate  string `json:"deadline_on_date,omitempty" doc:"deadline_on as a YYYY-MM-DD calendar date; date-only values keep their written date; other values use their saved zone, then the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable."`
 	// Oversized marks a compact row too large to send whole. It then carries
 	// only the issue's identity and status.
 	Oversized bool `json:"oversized,omitempty,omitzero" doc:"Set on a compact row too large to send whole; the row then carries only the issue's identity and status."`
@@ -806,8 +824,8 @@ type ReachableGraphResponse struct {
 type ShowIssueOut struct {
 	db.Issue
 	Labels          []string `json:"labels"`
-	ScheduledOnDate string   `json:"scheduled_on_date,omitempty" doc:"scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable."`
-	DeadlineOnDate  string   `json:"deadline_on_date,omitempty" doc:"deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable."`
+	ScheduledOnDate string   `json:"scheduled_on_date,omitempty" doc:"scheduled_on as a YYYY-MM-DD calendar date; date-only values keep their written date; other values use their saved zone, then the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable."`
+	DeadlineOnDate  string   `json:"deadline_on_date,omitempty" doc:"deadline_on as a YYYY-MM-DD calendar date; date-only values keep their written date; other values use their saved zone, then the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable."`
 }
 
 // ShowIssueResponse is the per-issue read payload (Plan 2: + links, + labels).
@@ -881,6 +899,10 @@ type EditIssueRequest struct {
 		SetPriority   *int64      `json:"set_priority,omitempty"`
 		ClearPriority bool        `json:"clear_priority,omitempty,omitzero"`
 		LinksDelta    *LinksDelta `json:"links_delta,omitempty"`
+		// ExpectedContentRevision is the issue's content_revision the caller
+		// read before drafting the edit. A stale value answers 412
+		// revision_conflict and writes nothing; absent means unconditional.
+		ExpectedContentRevision *int64 `json:"expected_content_revision,omitempty" minimum:"0" doc:"Current content_revision of the issue; a title or body edit since then returns 412 revision_conflict and writes nothing."`
 	}
 }
 
@@ -1011,8 +1033,15 @@ type CloseActionRequest struct {
 // fields before they can ignore retry headers or provenance and mutate an issue.
 type CloseActionRequestBody struct {
 	ActionRequestBody
-	RetryProtocol string                 `json:"retry_protocol,omitempty" enum:"close-v1,"`
-	Transcript    *transcript.Transcript `json:"transcript,omitempty"`
+	RetryProtocol       string                 `json:"retry_protocol,omitempty" enum:"close-v1,"`
+	Transcript          *transcript.Transcript `json:"transcript,omitempty"`
+	TranscriptSelection *TranscriptSelection   `json:"transcript_selection,omitempty"`
+}
+
+// TranscriptSelection binds a candidate session to the chosen project policy.
+type TranscriptSelection struct {
+	ProjectID int64 `json:"project_id" minimum:"0"`
+	Record    bool  `json:"record" required:"true"`
 }
 
 // ActionRequestBody is the shared JSON body for close and reopen actions.
@@ -1803,8 +1832,7 @@ type MoveIssueResponse struct {
 	}
 }
 
-// Server-reserved issue metadata keys (mirrors internal/metadata.IssueRegistry).
-// Keys outside this set are accepted opaquely by the daemon.
+// Common server-reserved issue metadata keys (see internal/metadata.IssueRegistry).
 const (
 	MetadataKeyScheduledOn = "scheduled_on"
 	MetadataKeyDeadlineOn  = "deadline_on"
@@ -1821,12 +1849,14 @@ const (
 
 // LocalEmbeddingsStatus reports daemon-wide search setup and its current work.
 type LocalEmbeddingsStatus struct {
-	Provider        string                   `json:"provider" enum:"none,ollama,built_in,other"`
-	DownloadBytes   int64                    `json:"download_bytes"`
-	OllamaAvailable bool                     `json:"ollama_available"`
-	CanChange       bool                     `json:"can_change"`
-	Job             *LocalEmbeddingsJob      `json:"job,omitempty"`
-	Indexing        *LocalEmbeddingsIndexing `json:"indexing,omitempty"`
+	Provider          string                   `json:"provider" enum:"none,ollama,built_in,other"`
+	DownloadBytes     int64                    `json:"download_bytes"`
+	OllamaAvailable   bool                     `json:"ollama_available"`
+	CanChange         bool                     `json:"can_change"`
+	CanRestart        bool                     `json:"can_restart,omitempty"`
+	RestartInProgress bool                     `json:"restart_in_progress,omitempty"`
+	Job               *LocalEmbeddingsJob      `json:"job,omitempty"`
+	Indexing          *LocalEmbeddingsIndexing `json:"indexing,omitempty"`
 }
 
 // LocalEmbeddingsJob reports the current installation or restart.

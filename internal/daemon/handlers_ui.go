@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json/v2"
+	"errors"
 	"net/http"
 	"slices"
 	"sort"
@@ -16,6 +17,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/internal/uid"
 )
 
@@ -82,6 +84,7 @@ type normalizedUIReferencesIntent struct {
 }
 
 type uiPolicy struct {
+	AnyEnabledSpoke    bool               `json:"any_enabled_spoke"`
 	Capabilities       api.UICapabilities `json:"capabilities"`
 	Origin             string             `json:"origin"`
 	OriginStable       bool               `json:"origin_stable"`
@@ -105,15 +108,50 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Path:        "/api/v1/ui/issue-reference",
 		Summary:     "Resolve an active issue to its browser route identity",
 	}, func(ctx context.Context, in *api.UIIssueReferenceRequest) (*api.UIIssueReferenceResponse, error) {
-		ctx, err := authorizeHostProjectScope(ctx, []int64{in.ProjectID}, nil, false)
-		if err != nil {
-			return nil, err
+		projectID, scopeID, referenceProjectID := in.ProjectID, int64(0), int64(0)
+		ref := in.Ref
+		if projectID == 0 {
+			var err error
+			scopeID, err = uiReferenceProjects(ctx, cfg.DB, in.Project)
+			if err != nil {
+				return nil, hideMissingProject(ctx, err)
+			}
+			issue, err := resolveLinkTargetRef(ctx, cfg.DB, scopeID, ref, db.IncludeDeletedNo)
+			if err != nil {
+				return nil, hideMissingProject(ctx, err)
+			}
+			parsed, _ := shortid.Parse(ref)
+			if parsed.Project != "" {
+				project, err := cfg.DB.ProjectByNameIncludingArchived(ctx, parsed.Project)
+				if err != nil {
+					if errors.Is(err, db.ErrNotFound) {
+						return nil, hideMissingProject(ctx, api.NewError(http.StatusNotFound, "issue_not_found", "issue not found", "", nil))
+					}
+					return nil, internalAPIError(err)
+				}
+				referenceProjectID = project.ID
+			}
+			projectID, ref = issue.ProjectID, issue.UID
 		}
-		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
+		ctx, err := authorizeHostProjectScope(ctx, []int64{scopeID, referenceProjectID, projectID}, nil, false)
 		if err != nil {
 			return nil, err
 		}
 		out := &api.UIIssueReferenceResponse{}
+		if scopeID != 0 {
+			scope, err := activeProjectByID(ctx, cfg.DB, scopeID)
+			if err != nil {
+				return nil, hideMissingProject(ctx, err)
+			}
+			out.Body.ScopeProjectUID = scope.UID
+		}
+		issue, err := activeIssueByRef(ctx, cfg.DB, projectID, ref, db.IncludeDeletedNo)
+		if err != nil {
+			if in.ProjectID == 0 {
+				err = hideMissingProject(ctx, err)
+			}
+			return nil, err
+		}
 		out.Body.Issue.UID = issue.UID
 		out.Body.Issue.ProjectUID = issue.ProjectUID
 		return out, nil
@@ -148,7 +186,10 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err := normalizeIssueScopeForUISnapshot(ctx, &intent); err != nil {
 				return nil, err
 			}
-			policy := effectiveUIPolicy(ctx, cfg)
+			policy, err := loadUIPolicy(ctx, cfg)
+			if err != nil {
+				return nil, internalAPIError(err)
+			}
 			if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil {
 				policy.ProjectAccessActor = decision.Actor
 				policy.ProjectAccessEpoch = decision.PolicyRevision
@@ -185,7 +226,7 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			// request-local prevents a future cache-key cleanup from widening or
 			// narrowing one subtree with another principal's materialized data.
 			if scopedIssueIDs == nil {
-				cachedAuthority, authorityDependencies, authorityCached = authorityCache.get(authorityKey)
+				cachedAuthority, _, authorityDependencies, authorityCached = authorityCache.get(authorityKey)
 			}
 			// A limited global build holds the newest rows across every project,
 			// so only an unlimited one can stand in for a project's collection.
@@ -199,11 +240,11 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 				}
 				// The project view keeps the global build's dependencies: a
 				// superset only withholds more, never less.
-				if globalAuthority, dependencies, ok := authorityCache.get(globalKey); ok {
+				if globalAuthority, _, dependencies, ok := authorityCache.get(globalKey); ok {
 					cachedAuthority = projectUISnapshotAuthority(globalAuthority, intent.ProjectUID)
 					authorityDependencies = dependencies
 					authorityCached = true
-					authorityCache.put(authorityKey, cachedAuthority, authorityDependencies)
+					authorityCache.put(authorityKey, cachedAuthority, nil, authorityDependencies)
 				}
 			}
 			enrichmentKey, err := uiSnapshotKey(intent)
@@ -211,9 +252,10 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, internalAPIError(err)
 			}
 			cachedEnrichment := db.UISnapshotData{}
+			var cachedCloseEvent *db.Event
 			enrichmentCached := false
 			if scopedIssueIDs == nil {
-				cachedEnrichment, enrichmentDependencies, enrichmentCached = enrichmentCache.get(enrichmentKey)
+				cachedEnrichment, cachedCloseEvent, enrichmentDependencies, enrichmentCached = enrichmentCache.get(enrichmentKey)
 			}
 			cachedResponse := db.UISnapshotData{}
 			var cachedDependencies []int64
@@ -243,7 +285,11 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 						return nil, internalAPIError(err)
 					}
 					recordUISnapshotDependencies(ctx, cachedDependencies)
-					return snapshotResponse(ctx, cachedResponse, intent, policy, validator)
+					out, err := snapshotResponse(ctx, cachedResponse, intent, policy, validator)
+					if err == nil && out.Body.Selected != nil {
+						out.Body.Selected.EffectiveCloseEvent = cachedCloseEvent
+					}
+					return out, err
 				}
 			}
 			query := intent.storeQuery()
@@ -260,28 +306,39 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, internalAPIError(err)
 			}
-			dependencies := db.ExposedIssues(buildCtx)
-			if data.AuthorityReused {
+			authorityReused := data.AuthorityReused
+			if authorityReused {
 				mergeUISnapshotAuthority(&data, cachedAuthority)
-				dependencies = slices.Concat(dependencies, authorityDependencies)
 			}
 			if scopedIssueIDs != nil {
 				if err := filterScopedUISnapshot(ctx, cfg.DB, &data, scopedIssueIDs, intent.ScopeProjectUID); err != nil {
 					return nil, internalAPIError(err)
 				}
 			}
-			if scopedIssueIDs == nil && !data.AuthorityReused {
-				authorityCache.put(authorityKey, data, dependencies)
-			}
-			if scopedIssueIDs == nil && uiSnapshotHasEnrichment(intent) {
-				enrichmentCache.put(enrichmentKey, data, dependencies)
-			}
 			validator, err := makeUIETag(intent, data.Cursor, policy)
 			if err != nil {
 				return nil, internalAPIError(err)
 			}
+			out, err := snapshotResponseWithClose(buildCtx, cfg.DB, cfg.UIStore, data, intent, policy, validator)
+			if err != nil {
+				return nil, err
+			}
+			dependencies := db.ExposedIssues(buildCtx)
+			if authorityReused {
+				dependencies = slices.Concat(dependencies, authorityDependencies)
+			}
+			if scopedIssueIDs == nil && !data.AuthorityReused {
+				authorityCache.put(authorityKey, data, nil, dependencies)
+			}
+			if scopedIssueIDs == nil && uiSnapshotHasEnrichment(intent) && (out.Body.Selected == nil || data.SelectedIssue == nil || !intent.IncludeHistory || data.SelectedIssue.Status != "closed" || out.Body.Selected.EffectiveCloseEvent != nil) {
+				var closeEvent *db.Event
+				if out.Body.Selected != nil {
+					closeEvent = out.Body.Selected.EffectiveCloseEvent
+				}
+				enrichmentCache.put(enrichmentKey, data, closeEvent, dependencies)
+			}
 			recordUISnapshotDependencies(ctx, dependencies)
-			return snapshotResponse(ctx, data, intent, policy, validator)
+			return out, nil
 		})
 
 	referencesOperation := huma.Operation{
@@ -329,7 +386,10 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 				if err != nil {
 					return nil, err
 				}
-				policy := effectiveUIPolicy(ctx, cfg)
+				policy, err := loadUIPolicy(ctx, cfg)
+				if err != nil {
+					return nil, internalAPIError(err)
+				}
 				if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil {
 					policy.ProjectAccessActor = decision.Actor
 					policy.ProjectAccessEpoch = decision.PolicyRevision
@@ -348,7 +408,10 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, err
 			}
-			policy := effectiveUIPolicy(ctx, cfg)
+			policy, err := loadUIPolicy(ctx, cfg)
+			if err != nil {
+				return nil, internalAPIError(err)
+			}
 			if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil {
 				policy.ProjectAccessActor = decision.Actor
 				policy.ProjectAccessEpoch = decision.PolicyRevision
@@ -380,6 +443,30 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			return referencesResponse(data, policy, validator), nil
 		})
+}
+
+// uiReferenceProjects selects the view scope by exact name or UID, rejecting a
+// value that matches two projects.
+func uiReferenceProjects(ctx context.Context, store db.Storage, selector string) (int64, error) {
+	notFound := api.NewError(http.StatusNotFound, "issue_not_found", "issue not found", "", nil)
+	var scopeID int64
+	if selector != "" {
+		byName, nameErr := store.ProjectByName(ctx, selector)
+		byUID, uidErr := store.ProjectByUID(ctx, selector)
+		switch {
+		case nameErr != nil && !errors.Is(nameErr, db.ErrNotFound):
+			return 0, internalAPIError(nameErr)
+		case uidErr != nil && !errors.Is(uidErr, db.ErrNotFound):
+			return 0, internalAPIError(uidErr)
+		case nameErr == nil && (uidErr != nil || byUID.ID == byName.ID):
+			scopeID = byName.ID
+		case nameErr != nil && uidErr == nil:
+			scopeID = byUID.ID
+		default:
+			return 0, notFound
+		}
+	}
+	return scopeID, nil
 }
 
 func applyIssueScopeToUISnapshot(
@@ -736,11 +823,28 @@ func uiValidationError(field, message string, data map[string]any) error {
 	return api.NewError(http.StatusBadRequest, "validation", message, "", data)
 }
 
-func effectiveUIPolicy(ctx context.Context, cfg ServerConfig) uiPolicy {
-	policy := uiPolicy{Capabilities: api.UICapabilities{
-		Attachments: cfg.Docbank != nil,
-		Writable:    !cfg.InsecureReadonly, Updates: "sse", ActorPolicy: "request",
+func loadUIPolicy(ctx context.Context, cfg ServerConfig) (uiPolicy, error) {
+	anyEnabledSpoke := false
+	if cfg.DB != nil {
+		bindings, err := cfg.DB.ListFederationBindings(ctx)
+		if err != nil {
+			return uiPolicy{}, err
+		}
+		for _, binding := range bindings {
+			if binding.Role == db.FederationRoleSpoke && binding.Enabled {
+				anyEnabledSpoke = true
+				break
+			}
+		}
+	}
+	return effectiveUIPolicy(ctx, cfg, anyEnabledSpoke), nil
+}
+
+func effectiveUIPolicy(ctx context.Context, cfg ServerConfig, anyEnabledSpoke bool) uiPolicy {
+	policy := uiPolicy{AnyEnabledSpoke: anyEnabledSpoke, Capabilities: api.UICapabilities{
+		Writable: !cfg.InsecureReadonly, Updates: "sse", ActorPolicy: "request",
 	}}
+	policy.Capabilities.Attachments = cfg.Docbank != nil || anyEnabledSpoke
 	if cfg.WebSessions != nil {
 		principal, _ := PrincipalFromContext(ctx)
 		policy.Capabilities.Writable = cfg.WebSessions.CanWrite(principal)
@@ -796,6 +900,29 @@ func matchesStrongETag(header, current string) bool {
 		}
 	}
 	return false
+}
+
+func snapshotResponseWithClose(ctx context.Context, store db.Storage, uiStore db.UIStore, data db.UISnapshotData,
+	intent normalizedUISnapshotIntent, policy uiPolicy, validator string,
+) (*api.UISnapshotResponse, error) {
+	out, err := snapshotResponse(ctx, data, intent, policy, validator)
+	if err != nil || out.Body.Selected == nil || data.SelectedIssue == nil || !intent.IncludeHistory || data.SelectedIssue.Status != "closed" {
+		return out, err
+	}
+	event, err := effectiveIssueCloseEvent(ctx, store, data.SelectedIssue.Issue)
+	if err != nil {
+		return nil, internalAPIError(err)
+	}
+	cursor, err := uiStore.UIEventCursor(ctx)
+	if err != nil {
+		return nil, internalAPIError(err)
+	}
+	// The fold reads after the snapshot transaction. A newer cursor means it
+	// may describe a close that the captured snapshot does not contain.
+	if cursor == data.Cursor && event != nil {
+		out.Body.Selected.EffectiveCloseEvent = event
+	}
+	return out, nil
 }
 
 func snapshotResponse(ctx context.Context, data db.UISnapshotData, intent normalizedUISnapshotIntent,

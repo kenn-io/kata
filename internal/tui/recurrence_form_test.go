@@ -17,6 +17,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 	"go.kenn.io/kata/internal/testenv"
+	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 	"go.kenn.io/kit/tui/splitlayout"
 )
@@ -253,7 +254,7 @@ func TestRecurrenceUndoBodyEditIgnoresScheduleList(t *testing.T) {
 	})})
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
-	resp, err := h.client.EditBody(ctx, h.issue.ProjectID, h.issue.UID, "revised body", "alice")
+	resp, err := h.client.EditBody(ctx, h.issue.ProjectID, h.issue.UID, "revised body", "alice", nil)
 	require.NoError(t, err)
 	require.NotNil(t, resp.undo.entry)
 	resp.undo.complete()
@@ -537,19 +538,19 @@ func TestRecurrenceIncomingMutationRefreshesDetail(t *testing.T) {
 	require.Nil(t, h.m.detail.issue.RecurrenceID)
 	require.Nil(t, h.m.detail.recurrence)
 	require.NoError(t, h.m.detail.recurrenceErr)
-	refresh(decodeEventReceived(frame{data: []byte(`{"type":"recurrence.materialized","project_id":` + strconv.FormatInt(h.issue.ProjectID, 10) + `,"issue_uid":"` + h.issue.UID + `","payload":{"recurrence_uid":"` + current.UID + `","issue_uid":"` + h.issue.UID + `"}}`)}))
+	refresh(decodeEventReceived(kataclient.Event{Data: []byte(`{"type":"recurrence.materialized","project_id":` + strconv.FormatInt(h.issue.ProjectID, 10) + `,"issue_uid":"` + h.issue.UID + `","payload":{"recurrence_uid":"` + current.UID + `","issue_uid":"` + h.issue.UID + `"}}`)}))
 	require.NotNil(t, h.m.detail.recurrence)
 	assert.Equal(t, "FREQ=WEEKLY", h.m.detail.recurrence.RRule)
 	require.NoError(t, h.m.detail.recurrenceErr)
 	for _, eventType := range []string{"recurrence.updated", "recurrence.materialized", "recurrence.deleted"} {
-		event := decodeEventReceived(frame{data: []byte(`{"type":"` + eventType + `","project_id":` + strconv.FormatInt(h.issue.ProjectID, 10) + `,"payload":{"recurrence_uid":"another-recurrence"}}`)})
+		event := decodeEventReceived(kataclient.Event{Data: []byte(`{"type":"` + eventType + `","project_id":` + strconv.FormatInt(h.issue.ProjectID, 10) + `,"payload":{"recurrence_uid":"another-recurrence"}}`)})
 		require.Nil(t, h.m.maybeRefetchOpenDetail(event), "another recurrence leaves the displayed repeat available")
 	}
 	_, err := recurrenceclient.Change(t.Context(), h.api, h.issue.ProjectID, current,
 		recurrenceclient.Terms{Rule: "FREQ=MONTHLY", Start: "2026-11-09", Zone: "Europe/Paris", Actor: "bob"})
 	require.NoError(t, err)
 	current = h.rows()[0]
-	refresh(decodeEventReceived(frame{data: []byte(`{"type":"recurrence.updated","project_id":` + strconv.FormatInt(h.issue.ProjectID, 10) + `,"payload":{"recurrence_uid":"` + current.UID + `"}}`)}))
+	refresh(decodeEventReceived(kataclient.Event{Data: []byte(`{"type":"recurrence.updated","project_id":` + strconv.FormatInt(h.issue.ProjectID, 10) + `,"payload":{"recurrence_uid":"` + current.UID + `"}}`)}))
 	require.NotNil(t, h.m.detail.recurrence)
 	assert.Equal(t, "FREQ=MONTHLY", h.m.detail.recurrence.RRule)
 	require.NoError(t, h.m.detail.recurrenceErr)
@@ -557,15 +558,15 @@ func TestRecurrenceIncomingMutationRefreshesDetail(t *testing.T) {
 	// A failed recurrence read leaves its identity unknown, so retry on events.
 	h.m.detail.recurrence = nil
 	h.m.detail.recurrenceErr = errors.New("repeat read failed")
-	refresh(decodeEventReceived(frame{data: []byte(`{"type":"recurrence.updated","project_id":` + strconv.FormatInt(h.issue.ProjectID, 10) + `,"payload":{"recurrence_uid":"another-recurrence"}}`)}))
+	refresh(decodeEventReceived(kataclient.Event{Data: []byte(`{"type":"recurrence.updated","project_id":` + strconv.FormatInt(h.issue.ProjectID, 10) + `,"payload":{"recurrence_uid":"another-recurrence"}}`)}))
 	require.NotNil(t, h.m.detail.recurrence)
 	assert.Equal(t, "FREQ=MONTHLY", h.m.detail.recurrence.RRule)
 	require.NoError(t, h.m.detail.recurrenceErr)
 	require.NoError(t, recurrenceclient.Stop(t.Context(), h.api, h.issue.ProjectID, current, "bob"))
-	refresh(decodeEventReceived(frame{data: []byte(`{"type":"recurrence.deleted","project_id":` + strconv.FormatInt(h.issue.ProjectID, 10) + `,"payload":{"recurrence_uid":"` + current.UID + `"}}`)}))
+	refresh(decodeEventReceived(kataclient.Event{Data: []byte(`{"type":"recurrence.deleted","project_id":` + strconv.FormatInt(h.issue.ProjectID, 10) + `,"payload":{"recurrence_uid":"` + current.UID + `"}}`)}))
 	assert.Nil(t, h.m.detail.recurrence)
 	require.NoError(t, h.m.detail.recurrenceErr)
-	event := decodeEventReceived(frame{data: []byte(`{"type":"recurrence.materialized","project_id":` + strconv.FormatInt(h.issue.ProjectID, 10) + `,"payload":{"recurrence_uid":"another-recurrence"}}`)})
+	event := decodeEventReceived(kataclient.Event{Data: []byte(`{"type":"recurrence.materialized","project_id":` + strconv.FormatInt(h.issue.ProjectID, 10) + `,"payload":{"recurrence_uid":"another-recurrence"}}`)})
 	require.Nil(t, h.m.maybeRefetchOpenDetail(event), "another recurrence leaves a stopped issue's detail alone")
 }
 

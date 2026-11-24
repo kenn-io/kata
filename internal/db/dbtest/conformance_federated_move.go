@@ -32,7 +32,7 @@ func checkFederatedIssueMove(t *testing.T, hub db.Storage, backend Backend) erro
 		replacementUID := "01HZNQ7VFPK1XGD8R5MABXD4EX"
 		origin, err := uid.New()
 		require.NoError(t, err)
-		replacement := newRemoteEvent(t, source, &replacementUID, "issue.created", "worker", origin, time.Now().Add(time.Hour).UnixMilli(), jsontext.Value(`{"uid":"01HZNQ7VFPK1XGD8R5MABXD4EX","short_id":"d4ex","title":"replacement","author":"worker","status":"open"}`))
+		replacement := newRemoteEvent(t, source, &replacementUID, "issue.created", "worker", origin, time.Now().Add(time.Hour).UnixMilli(), IssueDocument(t, replacementUID, jsontext.Value(`{"uid":"01HZNQ7VFPK1XGD8R5MABXD4EX","short_id":"d4ex","title":"replacement","author":"worker","status":"open"}`)))
 		_, err = hub.IngestFederationEvents(ctx, db.FederationIngestParams{ProjectID: source.ID, SpokeInstanceUID: origin, BoundActor: "worker", EventFeatures: db.SupportedEventFeatures, Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: replacement}}})
 		require.NoError(t, err)
 		got, err := hub.IssueByUID(ctx, replacementUID, db.IncludeDeletedNo)
@@ -328,7 +328,7 @@ func checkFederatedIssueMove(t *testing.T, hub db.Storage, backend Backend) erro
 		require.NotErrorIs(t, err, db.ErrFederationIngestValidation)
 		creationRaw, err := json.Marshal(map[string]string{"uid": missing, "title": "pending creation", "author": "worker", "short_id": missingShort, "status": "open"})
 		require.NoError(t, err)
-		creation := newRemoteEvent(t, source, &missing, "issue.created", "worker", spoke.InstanceUID(), event.HLCPhysicalMS-1, jsontext.Value(creationRaw))
+		creation := newRemoteEvent(t, source, &missing, "issue.created", "worker", spoke.InstanceUID(), event.HLCPhysicalMS-1, IssueDocument(t, missing, creationRaw))
 		_, err = hub.IngestFederationEvents(ctx, db.FederationIngestParams{ProjectID: source.ID, SpokeInstanceUID: spoke.InstanceUID(), BoundActor: "worker", EventFeatures: db.SupportedEventFeatures, Events: []db.FederationIngestEvent{{SourceEventID: 10002, Event: creation}}})
 		require.NoError(t, err)
 		_, err = hub.IngestFederationEvents(ctx, db.FederationIngestParams{ProjectID: target.ID, SpokeInstanceUID: spoke.InstanceUID(), BoundActor: "worker", EventFeatures: db.SupportedEventFeatures, Events: []db.FederationIngestEvent{{SourceEventID: 10001, Event: event}}})
@@ -382,7 +382,7 @@ func checkSameHubMoveGates(t *testing.T, store db.Storage) error {
 func checkFederatedMoveGuards(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
 	t.Run("source lifecycle awaits destination move", func(t *testing.T) {
-		for _, operation := range []string{"leave", "archive", "prepare-fence"} {
+		for _, operation := range []string{"leave", "archive", "prepare-fence", "disable-push", "replace-actor"} {
 			t.Run(operation, func(t *testing.T) {
 				source, err := store.CreateProject(ctx, operation+"-lifecycle-source")
 				require.NoError(t, err)
@@ -405,6 +405,14 @@ func checkFederatedMoveGuards(t *testing.T, store db.Storage) error {
 				_, err = store.LeaveFederationReplica(ctx, unrelated.ID)
 				require.NoError(t, err, "unrelated pending moves must not block teardown")
 				teardown := func() error {
+					switch operation {
+					case "disable-push":
+						_, err := store.DisableFederationPushWhenSettled(ctx, source.ID, store.InstanceUID())
+						return err
+					case "replace-actor":
+						_, err := store.ReplaceFederationBoundActorWhenSettled(ctx, source.ID, store.InstanceUID(), "worker", "other-worker")
+						return err
+					}
 					if operation == "prepare-fence" {
 						return store.(db.RelayDisconnectFenceStore).FenceRelayDisconnect(ctx, source.ID)
 					}

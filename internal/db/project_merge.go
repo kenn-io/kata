@@ -42,8 +42,8 @@ type ProjectMergeOffsets struct {
 }
 
 // ExistingIssueLookup resolves an issue UID already present in the merge
-// target. It is used only for informational event references; merge never
-// creates relationship rows that involve an existing project.
+// target. It resolves informational event references and the far end of a
+// link between the imported project and a project already in the target.
 type ExistingIssueLookup func(uid string) (id int64, found bool, err error)
 
 // PrepareProjectMergeRecords validates a single-project snapshot, clones its
@@ -129,11 +129,23 @@ func PrepareProjectMergeRecords(
 		}
 		return id, nil
 	}
-	resolveLinkIssue := func(sourceID int64) (int64, error) {
-		if _, ok := importedIssues[sourceID]; !ok {
+	// A link's far end may belong to another project. It resolves by UID when
+	// that issue is already in the target, and a zero ID makes the replay skip
+	// the link when it is not. Projects merge one at a time, and each
+	// project's export carries the links that touch it, so the link is created
+	// when the later one merges.
+	resolveLinkIssue := func(sourceID int64, uid string) (int64, error) {
+		if _, ok := importedIssues[sourceID]; ok {
+			return addMergeOffset(sourceID, offsets.Issue, "link issue")
+		}
+		if uid == "" || lookupExistingIssue == nil {
 			return 0, nil
 		}
-		return addMergeOffset(sourceID, offsets.Issue, "link issue")
+		id, found, err := lookupExistingIssue(uid)
+		if err != nil || !found {
+			return 0, err
+		}
+		return id, nil
 	}
 	projectID := project.ID
 	out := make([]ImportRecord, 0, len(recs)-2)
@@ -230,10 +242,18 @@ func PrepareProjectMergeRecords(
 				payload.ID, err = addMergeOffset(payload.ID, offsets.Link, payload.ImportKind())
 			}
 			if err == nil {
-				payload.FromIssueID, err = resolveLinkIssue(payload.FromIssueID)
+				payload.FromIssueID, err = resolveLinkIssue(payload.FromIssueID, payload.FromIssueUID)
 			}
 			if err == nil {
-				payload.ToIssueID, err = resolveLinkIssue(payload.ToIssueID)
+				payload.ToIssueID, err = resolveLinkIssue(payload.ToIssueID, payload.ToIssueUID)
+			}
+			// A related link has no direction and is stored with the lower
+			// issue ID first. New local IDs can reverse that order, so swap
+			// both ends together. Directed links keep their direction.
+			if err == nil && payload.Type == "related" && payload.FromIssueID > 0 && payload.ToIssueID > 0 &&
+				payload.FromIssueID > payload.ToIssueID {
+				payload.FromIssueID, payload.ToIssueID = payload.ToIssueID, payload.FromIssueID
+				payload.FromIssueUID, payload.ToIssueUID = payload.ToIssueUID, payload.FromIssueUID
 			}
 		case *ImportMappingExport:
 			if err = requireMergeProjectID(payload.ProjectID, projectID, payload.ImportKind()); err == nil {

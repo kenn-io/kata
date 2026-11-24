@@ -7,6 +7,8 @@ import (
 	"slices"
 	"sync"
 	"time"
+
+	"go.kenn.io/kata/internal/db"
 )
 
 // undoAttempt travels on a mutation response, even when the write failed.
@@ -255,14 +257,19 @@ func (c *undoClient) RemoveLabel(ctx context.Context, projectID int64, ref, labe
 		return c.KataAPI.RemoveLabel(ctx, projectID, uid, label, actor)
 	})
 	if resp != nil && resp.undo != nil && resp.undo.entry != nil {
-		resp.undo.entry.label = label
+		if db.IsPriorityLabel(label) {
+			resp.undo.entry = nil
+			resp.undo.boundary = "removing a priority label cannot be undone"
+		} else {
+			resp.undo.entry.label = label
+		}
 	}
 	return resp, err
 }
 
-func (c *undoClient) EditBody(ctx context.Context, projectID int64, ref, body, actor string) (*MutationResp, error) {
+func (c *undoClient) EditBody(ctx context.Context, projectID int64, ref, body, actor string, expectedContentRevision *int64) (*MutationResp, error) {
 	return c.edit(ctx, projectID, ref, actor, "body.edit", func(uid string) (*MutationResp, error) {
-		return c.KataAPI.EditBody(ctx, projectID, uid, body, actor)
+		return c.KataAPI.EditBody(ctx, projectID, uid, body, actor, expectedContentRevision)
 	})
 }
 

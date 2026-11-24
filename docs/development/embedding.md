@@ -17,6 +17,34 @@ handling, and HTTP server shutdown. A `kata.Service` owns its storage handle and
 the federation, GitHub sync, timed-claim, due-notification, assignment-expiry,
 and optional MCP Events background workers associated with that handle.
 
+## Semantic search
+
+A Postgres-backed service can enable semantic and hybrid issue search with
+`Config.Embeddings`. Set `BaseURL` and `Model` for an embedding server, or set
+`Local` with `Model: "nomic-embed-text"` to use an already installed local
+model server. Kata does not install or download a model for the host. Call
+`Run` to build and update issue vectors. A host that runs its own workers can
+call `RunSemanticIndex` to run only the semantic index reconciler. Writes on
+another replica or from host-owned workers that write directly to storage can
+wait until the next sweep, which defaults to five minutes, plus indexing time
+before they appear in semantic search.
+A host worker fence stops the embedding worker when it rejects a transaction.
+Set `Config.EmbeddingProjectAllowed` to limit indexing and query embedding to
+host-approved project UIDs. Returning false excludes a project and removes its
+existing mirror and vectors on the next refresh. Returning an error aborts the
+attempt; the worker retries with backoff. Kata checks the callback again on
+later attempts. A nil callback allows every project. For excluded projects,
+explicit semantic and hybrid searches return unavailable, while auto search
+falls back to keyword search.
+Daemons sharing a PostgreSQL schema must return the same decision for each
+project because they share the mirror, vector index, and reconciler lease.
+The Postgres database needs the pgvector extension. Without it, lexical search
+remains available and semantic search reports the missing extension. After
+installing pgvector, have the schema owner open the service once with
+`PostgresSchemaBootstrap` to create the optional vector tables. Then restart
+the service with `PostgresSchemaValidate`. Validation-mode startup fails until
+the optional vector tables are bootstrapped.
+
 ## Browser host boundary
 
 The first-party browser application is an ordinary top-level, same-origin page;
@@ -112,10 +140,14 @@ func main() {
 `Run` does not open a listener. It blocks while federation, scheduled GitHub
 sync, timed-claim, due-notification, assignment-expiry, and (when enabled) MCP
 Events delivery workers are active, then returns when its context is canceled
-or `Close` begins, and it may return an error from any background worker. Treat
-any `Run` return as service termination: stop accepting HTTP traffic, cancel
-the shared context, and inspect the error after both the workers and server
-stop. Only one `Run` call may be active for a service. `Close` cancels active
+or `Close` begins, and it may return an error from any background worker.
+`RunSemanticIndex` runs only the embeddings worker. Treat any `Run` or
+`RunSemanticIndex` return as service termination: stop accepting HTTP traffic,
+cancel the shared context, and inspect the error after both the workers and
+server stop. Only one `Run` or `RunSemanticIndex` call may be active for a
+service. `RunSemanticIndex` requires the same worker transaction fence when
+`Access` is set. If embeddings are disabled or pgvector is missing, it
+waits without an indexer until cancellation or `Close`. `Close` cancels active
 work and requests, waits for them to stop, and closes the owned storage handle.
 It is safe to call more than once.
 
@@ -344,6 +376,26 @@ it succeeds; neither authorization layer replaces the other. The callback
 follows the same retry and transaction rules as the ordinary host-access fence
 described above.
 
+A direct spoke can use separate project actors for one principal when its
+host implements `FederationReferenceAccessController` on
+`Config.FederationAccess`. This applies to link additions in issue creation or
+composite edits, and to parent link additions, removals, or replacements.
+The spoke supplies the referenced project's push
+credential for the same hub URL, including its mount path. Kata calls
+`AuthorizeFederation` for that project with the mutation operation
+`authorizeFederationIssueReference`. After fencing both credentials, Kata calls
+`AuthorizeFederationReference` in the ingest transaction. The host must check
+that both enrollments belong to the same current principal through commit.
+Returning `ErrAccessDenied` rolls back the batch and leaves it pending on the
+spoke. Other errors report that authorization is unavailable. The route handles
+ingest admission once for the batch. The peer operation checks project access
+within that admission.
+
+Other link removals, moves, and a displaced parent known only to the hub require
+ordinary same-actor authority. Without that authority, the batch stays pending at
+its original cursor. Requests with an additional in-process principal also
+require matching project actors.
+
 ## Restricted embedding profile
 
 Use `EmbeddingProfileRestricted` when the mounting application owns project
@@ -394,6 +446,38 @@ while removing the project from ordinary active reads. It is idempotent and
 requires an actor for the retained event history. These methods are in-process
 application methods: they do not authenticate a network caller and should be
 invoked only after the host has authorized its own catalog lifecycle change.
+
+`PurgeArchivedProject` permanently deletes an archived project. Use it after
+replacing a project, so the old project's tasks no longer hold their UIDs on
+the hub and the same tasks can be imported into the replacement.
+
+```go
+result, err := service.PurgeArchivedProject(
+	ctx, "01HZNQ7VFPK1XGD8R5MABCD4EX", "Example Operator", "replaced",
+)
+```
+
+- The project must be archived first. An active project returns
+  `kata.ErrProjectNotArchived`.
+- The actor is required, because the purge log records who purged the
+  project. A blank actor returns `kata.ErrProjectPurgeActorRequired`.
+- A project that is a federation hub is accepted, unlike `kata projects purge`.
+  The purge retires the hub binding and deletes every enrollment scoped to the
+  project, active or revoked, in the same transaction. Those credentials stop
+  working at once. Hub-wide enrollments are unchanged.
+- A spoke still joined to the project is not notified. Its next sync fails, and
+  its operator runs `kata federation leave <project> --local-only`.
+- A replica of another hub's project returns `kata.ErrProjectFederationReplica`.
+  Leave that hub first.
+- `kata.ErrProjectPurgeBlocked` wraps a condition the operator must resolve
+  first: an active external root binding, or a joined project whose move
+  history still needs this project's identity.
+- The purge writes the same project and task purge log entries as
+  `kata projects purge`, and the result reports the log entry's UID with the
+  deleted task, event, and enrollment counts.
+- A purge cannot be undone. A second call returns `kata.ErrProjectNotFound`,
+  and `EnsureProject` may then create the same UID and name as a new, empty
+  project.
 
 ## Host-managed federation enrollments
 
@@ -496,13 +580,25 @@ approval when metadata retrieval or local attachment fails. The provider resolve
 the requested project key to those identifiers. That key need not equal Kata's
 internal project name, and a rename does not change the approved identity.
 
-- `read_only` and `collaborate` attach only an empty local project. Existing
-  tasks, recurring tasks, or project metadata require `migrate` approval.
+- `read_only` and `collaborate` attach an empty local project or rejoin a
+  detached project whose UID matches the approved hub project. A project with
+  a different UID and existing tasks, recurring tasks, or project metadata
+  requires `migrate` approval.
 - `migrate` uses the existing adoption path to import local data.
 - Push is enabled only when the approved credential permits it.
 - Attachment replaces old local catalog events when the project takes the
   hub identity. Their checksums name the old identity. One new local event
   updates browser readers without pushing empty metadata to the hub.
+- Changing `intent` between `read_only` and `collaborate` on an attached
+  replica keeps its binding and data. Kata releases the saved request, then
+  authorizes a new request UUID and candidate token with the new intent and
+  the original `spoke_instance_uid` and `local_project_uid`. The provider must
+  approve the same hub project. The new approval may name a different
+  `actor`; that actor replaces the replica's bound actor. Kata applies the
+  replacement only after the hub accepted every local change and no claim,
+  claim request, or running cron run belongs to the old actor, and retries
+  until then. Kata repeats an unconfirmed release, so a release of an already
+  released request must return `released`.
 - Normal leave stops transport and asks the saved provider to release the
   exact request. Unconfirmed cleanup remains pending rather than deleting its
   credential. Once confirmed, the secret is removed; a closed marker prevents
@@ -510,7 +606,8 @@ internal project name, and a rename does not change the approved identity.
 
 Kata's credential file can retain the provider operation beside its saved
 token. It stores the request UUID, executable arguments, intent, original local
-project and installation identifiers, and any accepted enrollment and expiry.
+project and installation identifiers, any accepted enrollment and expiry, and,
+after an intent change, the bound actor the new approval replaces.
 Moving a credential to the hub project UID preserves the original request.
 Updates and cleanup compare the whole saved operation by value, so rereading
 the file does not break a retry and stale cleanup cannot delete a newer request.
@@ -692,6 +789,9 @@ construction. Requests without a lifetime get 24 hours within that cap.
 `MaxTTL` grant instead, like `allow_no_expiry = false`. See
 [MCP Events configuration](../reference/configuration.md#mcp-events) for the
 operator settings.
+
+Embedded Events accepts only public callback addresses. The daemon's
+`trusted_callbacks` setting does not apply to an embedded `Service`.
 
 A subscription's owner for a host-authenticated caller is the exact bytes of
 `Principal.Subject`. Delivery asks the host `AccessController` again with the

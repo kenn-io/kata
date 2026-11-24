@@ -53,6 +53,7 @@ func cronFixture(t *testing.T) Model {
 	}}
 	p.runs = []generated.CronRun{{
 		UID: "01ARZ3NDEKTSV4RRFFQ69G5FAY", ProjectID: 7, JobUID: new("01ARZ3NDEKTSV4RRFFQ69G5FAV"), WorkflowUID: new("01ARZ3NDEKTSV4RRFFQ69G5FAW"),
+		JobName: new("Daily summary"), WorkflowName: new("Summary flow"),
 		DefinitionEventUID: new("01ARZ3NDEKTSV4RRFFQ69G5FB1"), WorkflowDefinitionEventUID: new("01ARZ3NDEKTSV4RRFFQ69G5FB3"),
 		Status: "succeeded", Actor: "worker", ExecutorLabel: new("executor-a"),
 		ID: 1, Revision: 1, UpdatedAt: snapshotFixedNow.Add(-time.Hour),
@@ -101,6 +102,34 @@ func TestCronLinkFollows(t *testing.T) {
 	}
 }
 
+// A run is named by the fields the daemon resolves, so a run whose job was
+// deleted still reads as its job and a deleted issue still shows its short ID.
+func TestCronRunNamesComeFromRunFields(t *testing.T) {
+	m := cronFixture(t)
+	p := m.cron.data
+	p.jobs = nil
+	p.workflows = nil
+	p.runs = slices.Clone(p.runs)
+	p.runs[0].IssueUID = new("01ARZ3NDEKTSV4RRFFQ69G5FAX")
+	p.runs[0].IssueShortID = new("a1b2")
+	m = sendRune(m, '3')
+	require.Contains(t, m.viewBody(), "Daily summary")
+	m = sendKey(m, tea.KeyEnter)
+	require.Contains(t, m.viewBody(), "#a1b2")
+
+	require.Equal(t, "workflow Summary flow", cronRunName(*p, generated.CronRun{WorkflowName: new("Summary flow")}))
+	require.Equal(t, "01ARZ3NDEKTSV4RRFFQ69G5FAV", cronRunName(*p, generated.CronRun{JobUID: new("01ARZ3NDEKTSV4RRFFQ69G5FAV")}))
+}
+
+// A daemon older than the run names sends none, so the job list still names
+// the job before the bare UID is shown.
+func TestCronRunNameFallsBackToJobList(t *testing.T) {
+	p := *cronFixture(t).cron.data
+	run := p.runs[0]
+	run.JobName, run.WorkflowName = nil, nil
+	require.Equal(t, "Daily summary", cronRunName(p, run))
+}
+
 func TestCronFreshness(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -116,6 +145,7 @@ func TestCronFreshness(t *testing.T) {
 		{"disappearing record", keyRune('r'), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			useInstantTicks(t)
 			m := cronFixture(t)
 			m.sseCh = nil
 			a := &cronReadTestAPI{KataAPI: &inboxTestAPI{}, data: *m.cron.data}
@@ -672,4 +702,21 @@ func TestCronSearchClickGuards(t *testing.T) {
 		m, _ = updateModel(m, mouseLeftClick(4, 2))
 		require.False(t, m.cron.filtering, state)
 	}
+}
+
+// A run of a deleted job or workflow names it in the detail the way the list
+// does, notes that the definition is gone, and displays the actor name.
+func TestCronRunDetailNamesDeletedDefinitionsAndDisplaysActor(t *testing.T) {
+	m := cronFixture(t)
+	p := m.cron.data
+	p.jobs, p.workflows = nil, nil
+	p.runs[0].Actor = "Ana [member:11111111-1111-4111-8111-111111111111; enrollment:11111111-1111-4111-8111-111111111111]"
+	m = sendRune(m, '3')
+	m = sendKey(m, tea.KeyEnter)
+	body := m.viewBody()
+	require.Contains(t, body, "Actor:      Ana")
+	require.NotContains(t, body, "member:")
+	require.Contains(t, body, "Job: Daily summary · no longer defined")
+	require.Contains(t, body, "Workflow: Summary flow · no longer defined")
+	require.NotContains(t, body, "01ARZ3NDEKTSV4RRFFQ69G5FAV")
 }

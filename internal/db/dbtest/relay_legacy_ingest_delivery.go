@@ -1,14 +1,45 @@
 package dbtest
 
 import (
+	"crypto/ed25519"
 	"encoding/json/jsontext"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/uid"
 )
+
+// RunRelayCrossProjectRemoval checks that relay ingest accepts a crossing parent removal.
+func RunRelayCrossProjectRemoval(t *testing.T, store db.Storage) {
+	ctx := t.Context()
+	fixture := newRelayLinkBoundaryFixture(t, store, "relay-cross-removal", true)
+	public := fixture.signer.PrivateKey.Public().(ed25519.PublicKey)
+	require.NoError(t, store.PinRootAuthority(ctx, db.RootKeyPin{ProjectUID: fixture.sibling.UID, AuthorityUID: store.InstanceUID(), KeyID: db.RootPublicKeyID(public), PublicKey: public}))
+	child, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.project.ID, Title: "Child", Author: "member"})
+	require.NoError(t, err)
+	peer, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.sibling.ID, Title: "Peer", Author: "member"})
+	require.NoError(t, err)
+	instance, err := uid.New()
+	require.NoError(t, err)
+	grant, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: fixture.project.ID, ParentTokenID: fixture.parentTokenID, SpokeInstanceUID: instance, ProtocolVersion: db.RelayProtocolVersion})
+	require.NoError(t, err)
+	_, _, err = store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: peer.ID, Type: "blocks", Author: "member"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: child.ID, Actor: "member", FromUID: child.UID, ToUID: peer.UID, FromShortID: child.ShortID, ToShortID: peer.ShortID})
+	require.NoError(t, err)
+	_, _, err = store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: peer.ID, Type: "parent", Author: "member"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: child.ID, Actor: "member", FromUID: child.UID, ToUID: peer.UID, FromShortID: child.ShortID, ToShortID: peer.ShortID})
+	require.NoError(t, err)
+	event := newRemoteEvent(t, fixture.project, &child.UID, "issue.links_changed", "member", instance, time.Now().UnixMilli()+10, jsontext.Value(`{"parent_removed_uid":"`+peer.UID+`"}`))
+	body, err := db.EncodeRelaySourceEvent(event)
+	require.NoError(t, err)
+	envelope, err := db.SealRelayEnvelope(db.RelayEnvelope{Version: db.RelayProtocolVersion, BindingUID: grant.Enrollment.RelayBindingUID, ProjectUID: fixture.project.UID, AuthorityUID: store.InstanceUID(), SenderInstanceUID: instance, ReceiverInstanceUID: store.InstanceUID(), Epoch: grant.Enrollment.RelayResetEpoch, Sequence: 1, Stream: db.RelayStreamEvent, Path: []string{instance}, SourceUID: event.EventUID, SourceHash: event.ContentHash, Body: body})
+	require.NoError(t, err)
+	_, err = store.AcceptRelayDeliveries(db.WithRootAttribution(ctx, fixture.signer, "relay-member"), grant.Enrollment.RelayBindingUID, db.RelayBatch{Stream: db.RelayStreamEvent, Envelopes: []db.RelayEnvelope{envelope}})
+	require.NoError(t, err)
+	require.Equal(t, []string{peer.UID}, linkTargetUIDs(t, store, child.ID))
+}
 
 // RunRelayOffersLegacyIngestedEvents covers a direct spoke's creation followed
 // by a root-local notification. The relay must receive the introduction first,
@@ -28,7 +59,7 @@ func RunRelayOffersLegacyIngestedEvents(t *testing.T, store db.Storage) {
 		require.NoError(t, err)
 		issueUID, err := uid.New()
 		require.NoError(t, err)
-		created := newRemoteEvent(t, fixture.project, &issueUID, "issue.created", "spoke", spoke, 700, jsontext.Value(`{"uid":"`+issueUID+`","title":"Pushed by a direct spoke","body":"","author":"spoke","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`))
+		created := newRemoteEvent(t, fixture.project, &issueUID, "issue.created", "spoke", spoke, 700, IssueDocument(t, issueUID, jsontext.Value(`{"uid":"`+issueUID+`","title":"Pushed by a direct spoke","body":"","author":"spoke","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)))
 		push := db.FederationIngestParams{
 			ProjectID: fixture.project.ID, SpokeInstanceUID: spoke, BoundActor: "spoke",
 			Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: created}},
@@ -73,8 +104,16 @@ func RunRelayOffersLegacyIngestedEvents(t *testing.T, store db.Storage) {
 
 // RunLegacyRelayAdmission separates fresh additions from retained delivery and cleanup.
 func RunLegacyRelayAdmission(t *testing.T, store db.Storage) {
+	// These cases share a store, and legacy parent lookup searches every project.
+	// Give each issue a distinct four-character suffix so a random collision
+	// cannot turn a cross-project parent into an ambiguous reference.
+	issueSequence := 0
+	nextIssueUID := func() string {
+		issueSequence++
+		return fmt.Sprintf("%026d", issueSequence)
+	}
 	for kind, modes := range map[string][]string{
-		"creation":           {"sibling", "same project", "relayed peer", "revoked", "missing", "retained"},
+		"creation":           {"sibling", "same project", "relayed peer", "unbound relayed peer", "revoked", "missing", "retained"},
 		"snapshot":           {"sibling", "missing"},
 		"single link":        {"sibling"},
 		"composite":          {"sibling"},
@@ -91,25 +130,25 @@ func RunLegacyRelayAdmission(t *testing.T, store db.Storage) {
 		for _, mode := range modes {
 			t.Run(kind+"/"+mode, func(t *testing.T) {
 				ctx := t.Context()
-				fixture := newRelayLinkBoundaryFixture(t, store, "legacy-"+kind+"-"+mode)
-				if mode == "relayed peer" {
+				fixture := newRelayLinkBoundaryFixture(t, store, "legacy-"+kind+"-"+mode, mode == "relayed peer" || mode == "unbound relayed peer")
+				if mode == "relayed peer" || mode == "unbound relayed peer" {
 					fixture.project, fixture.sibling = fixture.sibling, fixture.project
 				}
 				peerProject := fixture.sibling
 				if mode == "same project" {
 					peerProject = fixture.project
 				}
-				peer, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: peerProject.ID, Title: "Peer", Author: "member"})
+				peer, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: peerProject.ID, UID: nextIssueUID(), Title: "Peer", Author: "member"})
 				require.NoError(t, err)
 				if mode == "missing" {
 					peer.UID, err = uid.New()
 					require.NoError(t, err)
 					peer.ShortID = strings.ToLower(peer.UID)
 				}
-				primary, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.project.ID, Title: "Primary", Author: "member"})
+				primary, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.project.ID, UID: nextIssueUID(), Title: "Primary", Author: "member"})
 				require.NoError(t, err)
 				relayProject := fixture.project
-				if mode == "relayed peer" {
+				if mode == "relayed peer" || mode == "unbound relayed peer" {
 					relayProject = fixture.sibling
 				}
 				instance, err := uid.New()
@@ -119,17 +158,19 @@ func RunLegacyRelayAdmission(t *testing.T, store db.Storage) {
 				if mode == "revoked" || mode == "retained" {
 					require.NoError(t, store.RevokeFederationEnrollment(ctx, grant.Enrollment.ID))
 				}
+				if mode == "unbound relayed peer" {
+					deleteRelayBinding(t, store, relayProject.ID)
+				}
 				eventType := "issue.linked"
 				payload := `{"type":"related","from_uid":"` + primary.UID + `","to_uid":"` + peer.UID + `"}`
 				switch kind {
 				case "creation", "snapshot":
-					primary.UID, err = uid.New()
-					require.NoError(t, err)
+					primary.UID = nextIssueUID()
 					eventType = "issue.created"
 					if kind == "snapshot" {
 						eventType = "issue.snapshot"
 					}
-					payload = `{"uid":"` + primary.UID + `","title":"Legacy creation","body":"","author":"member","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":[{"type":"blocks","to_issue_uid":"` + peer.UID + `","author":"member"}]}`
+					payload = `{"uid":"` + primary.UID + `","short_id":"` + strings.ToLower(primary.UID[len(primary.UID)-4:]) + `","title":"Legacy creation","body":"","author":"member","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":[{"type":"blocks","to_issue_uid":"` + peer.UID + `","author":"member"}]}`
 				case "composite", "composite cleanup", "parent replacement":
 					eventType = "issue.links_changed"
 					removal, err := uid.New()
@@ -139,7 +180,7 @@ func RunLegacyRelayAdmission(t *testing.T, store db.Storage) {
 						payload = `{"related_removed_uids":["` + peer.UID + `"]}`
 					}
 					if kind == "parent replacement" {
-						replacement, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.project.ID, Title: "Replacement parent", Author: "member"})
+						replacement, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.project.ID, UID: nextIssueUID(), Title: "Replacement parent", Author: "member"})
 						require.NoError(t, err)
 						payload = `{"parent_removed_uid":"` + peer.UID + `","parent_set_uid":"` + replacement.UID + `"}`
 					}
@@ -171,9 +212,8 @@ func RunLegacyRelayAdmission(t *testing.T, store db.Storage) {
 				push := db.FederationIngestParams{ProjectID: fixture.project.ID, SpokeInstanceUID: spoke, Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: event}}}
 				var precedingUID string
 				if kind == "creation" && mode == "sibling" {
-					precedingUID, err = uid.New()
-					require.NoError(t, err)
-					valid := newRemoteEvent(t, fixture.project, &precedingUID, "issue.created", "member", spoke, 899, jsontext.Value(`{"uid":"`+precedingUID+`","title":"Earlier valid creation","author":"member","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`))
+					precedingUID = nextIssueUID()
+					valid := newRemoteEvent(t, fixture.project, &precedingUID, "issue.created", "member", spoke, 899, IssueDocument(t, precedingUID, jsontext.Value(`{"uid":"`+precedingUID+`","title":"Earlier valid creation","author":"member","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)))
 					push.Events = []db.FederationIngestEvent{{SourceEventID: 1, Event: valid}, {SourceEventID: 2, Event: event}}
 				}
 				authorizedProjects := []string{fixture.project.UID}
@@ -186,12 +226,16 @@ func RunLegacyRelayAdmission(t *testing.T, store db.Storage) {
 					require.ErrorIs(t, err, db.ErrFederationIngestValidation)
 					return
 				}
-				refuse := (mode == "sibling" || mode == "relayed peer") && kind != "unlink" && kind != "composite cleanup" && kind != "parent replacement"
+				refuse := (mode == "sibling" || mode == "relayed peer" || mode == "unbound relayed peer") && kind != "unlink" && kind != "composite cleanup" && kind != "parent replacement"
 				if refuse {
 					require.ErrorIs(t, err, db.ErrFederationIngestValidation)
 					require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary)
 					require.ErrorContains(t, err, event.EventUID)
 					require.NotContains(t, err.Error(), peer.UID)
+					if kind == "creation" || kind == "snapshot" {
+						_, lookupErr := store.IssueByUID(ctx, primary.UID, db.IncludeDeletedYes)
+						require.ErrorIs(t, lookupErr, db.ErrNotFound)
+					}
 					_, err = store.EventsByUIDs(ctx, fixture.project.ID, []string{event.EventUID})
 					require.ErrorIs(t, err, db.ErrNotFound)
 					if precedingUID != "" {

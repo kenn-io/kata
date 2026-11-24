@@ -301,20 +301,25 @@ func TestScenario_LayoutToggle_LFlipsAtSplitEligibleSize(t *testing.T) {
 	}
 }
 
-func TestScenario_ChildSortToggle_OFlipsBetweenTopologicalAndTemporal(t *testing.T) {
+func TestScenario_ChildSortToggle_OCyclesTopologicalTemporalPriority(t *testing.T) {
 	m := scenarioModel(t, 120, 30)
 	if m.list.childSort != childSortTopological {
 		t.Fatalf("default child sort = %v, want topological", m.list.childSort)
 	}
 
-	m = pressRune(t, m, 'o')
-	if m.list.childSort != childSortTemporal {
-		t.Fatalf("first o child sort = %v, want temporal", m.list.childSort)
-	}
-
-	m = pressRune(t, m, 'o')
-	if m.list.childSort != childSortTopological {
-		t.Fatalf("second o child sort = %v, want topological", m.list.childSort)
+	for _, want := range []struct {
+		mode   childSortMode
+		status string
+	}{
+		{childSortTemporal, "graph order: temporal"},
+		{childSortPriority, "graph order: priority"},
+		{childSortTopological, "graph order: topological"},
+	} {
+		m = pressRune(t, m, 'o')
+		if m.list.childSort != want.mode || m.list.status != want.status {
+			t.Fatalf("o: child sort = %v status = %q, want %v %q",
+				m.list.childSort, m.list.status, want.mode, want.status)
+		}
 	}
 }
 

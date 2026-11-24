@@ -1,12 +1,55 @@
 package main
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/testenv"
 )
+
+func TestEditBodySources(t *testing.T) {
+	env, dir := setupCLIEnv(t)
+	pid := resolvePIDViaHTTP(t, env.URL, dir)
+	issue := createIssue(t, env, pid, "subject")
+	path := filepath.Join(t.TempDir(), "body.md")
+	input := "first `command`\nsecond\n\n"
+	writeStringFile(t, path, input)
+	ctx := contextWithBaseURL(t.Context(), env.URL)
+	for _, tc := range []struct {
+		args  []string
+		stdin string
+	}{
+		{[]string{"--body-file", path}, ""},
+		{[]string{"--body-stdin"}, input},
+	} {
+		t.Run(tc.args[0], func(t *testing.T) {
+			runCLI(t, env, dir, "edit", issue, "--body", "old")
+			_, _, err := executeRootCaptureWithInput(ctx, t, tc.stdin, append([]string{"--workspace", dir, "edit", issue}, tc.args...)...)
+			require.NoError(t, err)
+			assert.Equal(t, "first `command`\nsecond", fetchIssueViaHTTP(t, env, pid, issue).Issue.Body)
+		})
+	}
+	t.Run("conflict", func(t *testing.T) {
+		runCLI(t, env, dir, "edit", issue, "--body", "old")
+		_, _, err := executeRootCaptureWithInput(ctx, t, "", "--workspace", dir, "edit", issue, "--body", "", "--body-file", path)
+		require.ErrorContains(t, err, "exactly one")
+		assert.Equal(t, "old", fetchIssueViaHTTP(t, env, pid, issue).Issue.Body)
+	})
+	t.Run("empty-stdin", func(t *testing.T) {
+		runCLI(t, env, dir, "edit", issue, "--body", "old")
+		_, _, err := executeRootCaptureWithInput(ctx, t, "", "--workspace", dir, "edit", issue, "--body-stdin")
+		require.ErrorContains(t, err, `--body ""`)
+		_ = requireCLIError(t, err, ExitValidation)
+		assert.Equal(t, "old", fetchIssueViaHTTP(t, env, pid, issue).Issue.Body)
+	})
+	t.Run("clear", func(t *testing.T) {
+		runCLI(t, env, dir, "edit", issue, "--body", "old")
+		runCLI(t, env, dir, "edit", issue, "--body", "")
+		assert.Empty(t, fetchIssueViaHTTP(t, env, pid, issue).Issue.Body)
+	})
+}
 
 // TestEdit_AddsAllFourLinkDirections covers the new add flags on `kata edit`.
 // One edit call attaches a parent, a blocks-out, a blocked-by, and a related

@@ -8,10 +8,10 @@ import {
 } from './preferences'
 
 describe('origin-local preferences', () => {
-  it('defaults to the source stacked layout and pixel sash size', () => {
+  it('defaults to the beside-list layout and pixel sash size', () => {
     expect(loadPreferences(new MapStorage())).toMatchObject({
-      splitDirection: 'vertical',
-      splitSize: 420,
+      splitDirection: 'horizontal',
+      splitSize: 480,
     })
   })
 

@@ -73,10 +73,9 @@ func TestFederationIngestAuthorizesOncePerRequest(t *testing.T) {
 		evaluated[0])
 }
 
-// TestFederationPollAuthorizesOncePerRequest is the control: the pull route has
-// no preauthorization middleware, so its single evaluation happens in the
-// handler and must not be fenced.
-func TestFederationPollAuthorizesOncePerRequest(t *testing.T) {
+// TestFederationPollAuthorizesBeforeAndAfterRead checks the handler's initial
+// authorization and its final reauthorization before returning the page.
+func TestFederationPollAuthorizesBeforeAndAfterRead(t *testing.T) {
 	access := &countingFederationAccess{}
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
 		cfg.HostFederationAccess = access
@@ -96,8 +95,8 @@ func TestFederationPollAuthorizesOncePerRequest(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode, "poll response: %s", raw)
 
 	evaluated := access.snapshot()
-	require.Len(t, evaluated, 1)
-	assert.Equal(t,
-		daemon.HostFederationOperation{ID: "pollFederationProjectEvents"},
-		evaluated[0])
+	assert.Equal(t, []daemon.HostFederationOperation{
+		{ID: "pollFederationProjectEvents"},
+		{ID: "pollFederationProjectEvents"},
+	}, evaluated)
 }

@@ -1,17 +1,19 @@
 <script lang="ts">
   import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left'
   import { PageHeader, SearchByMeaningRow, type SearchByMeaningState } from '@kenn-io/kit-ui'
-  import { untrack } from 'svelte'
+  import { untrack, type Snippet } from 'svelte'
 
   import { orvalFetch } from '../lib/api/client'
   import {
     getLocalEmbeddings,
+    getRestartLocalEmbeddingsUrl,
     getTurnOnLocalEmbeddingsUrl,
     type LocalEmbeddingsStatus,
     type turnOnLocalEmbeddingsResponse,
   } from '../lib/api/generated'
 
   interface Props {
+    children?: Snippet | undefined
     canAdministerDaemon: boolean
     onback: () => void
     /**
@@ -21,11 +23,23 @@
     postFetch: typeof fetch
     /** Host the built-in server downloads to, when the daemon isn't on this computer. */
     remoteHost?: string | undefined
+    originStable?: boolean
   }
 
-  let { canAdministerDaemon, onback, postFetch, remoteHost = undefined }: Props = $props()
+  let {
+    children,
+    canAdministerDaemon,
+    onback,
+    postFetch,
+    remoteHost = undefined,
+    originStable = false,
+  }: Props = $props()
 
   const pollMs = 2000
+  const restartWaitMs = 120_000
+  const reopenGuidance =
+    'After restart, run kata ui to reopen. If this daemon uses a custom home, set KATA_HOME to it first.'
+  const recoveryGuidance = 'Run kata daemon status, then reopen kata ui.'
   // Ollama shows its status only; switching to the built-in server comes later.
   const labels = { keepsIndex: '' }
   // Count-free indexing and a saved setting waiting on a restart use the
@@ -37,12 +51,14 @@
   let status = $state<LocalEmbeddingsStatus>()
   let loading = $state(true)
   let posting = $state(false)
+  let restartRequestPending = false
+  let restartDeadline = $state(0)
+  let restartPending = $derived(restartDeadline > 0)
   // Set when a Turn on request fails; a read showing a job clears it.
   let requestError = $state<string>()
   // Aborted when the page goes away.
   let page: AbortController | undefined
-  // Counts Turn on requests, so a read that started before the latest one
-  // can't land an Off it answered before the daemon accepted.
+  // Fences reads across setup requests and settled restart responses.
   let posts = 0
   let timer: ReturnType<typeof setTimeout> | undefined
 
@@ -54,17 +70,33 @@
   let row = $derived(turning ? turningOn : base)
   let count = $derived(row?.kind === 'indexing' ? row.total : 0)
   let restartLabels = $derived({
-    off: 'Turning on',
-    downloaded: remoteHost
-      ? `Restart the daemon on ${remoteHost} to finish.`
-      : 'Restart the daemon to finish: run kata daemon restart. If this daemon uses a custom home, set KATA_HOME to it first.',
+    off: restartPending || status?.restart_in_progress ? 'Restarting...' : 'Turning on',
+    turnOn: 'Restart daemon',
+    downloaded: status?.restart_in_progress
+      ? ''
+      : remoteHost
+        ? `Restart the daemon on ${remoteHost} to finish.`
+        : (status?.can_restart && canAdministerDaemon) || restartPending
+          ? originStable
+            ? ''
+            : reopenGuidance
+          : 'Restart the daemon to finish: run kata daemon restart. If this daemon uses a custom home, set KATA_HOME to it first.',
   })
-  let failure = $derived(requestError ?? (job?.state === 'failed' ? job.error : undefined))
+  let failure = $derived(
+    requestError ??
+      (!restartPending && (job?.state === 'failed' || job?.state === 'restart')
+        ? job.error
+        : undefined),
+  )
   // Indexing keeps polling while failed, so the note clears once a pass succeeds.
   let indexingFailed = $derived(status?.indexing?.failed === true)
 
-  // The borrowed state offers Turn on, so it never shows a button.
-  let readonly = $derived(turning || !(status?.can_change && canAdministerDaemon))
+  // The borrowed state offers an action only when restart is available.
+  let readonly = $derived(
+    restarting
+      ? !(status?.can_restart && canAdministerDaemon && !remoteHost && !restartPending)
+      : turning || !(status?.can_change && canAdministerDaemon),
+  )
 
   $effect(() => {
     const abort = new AbortController()
@@ -117,18 +149,44 @@
     clearTimeout(timer)
     if (!page || page.signal.aborted || posting) return
     const signal = page.signal
+    const readSignal = AbortSignal.any([signal, AbortSignal.timeout(pollMs * 5)])
     const post = posts
     let next: LocalEmbeddingsStatus | undefined
     try {
-      const response = await getLocalEmbeddings({ signal })
-      if (response.status === 200) next = response.data
+      const response = await getLocalEmbeddings({ signal: readSignal })
+      if (!readSignal.aborted && response.status === 200) next = response.data
     } catch {
-      // The next poll retries while setup is under way.
+      // Keep polling while setup is under way.
     }
     if (signal.aborted || post !== posts) return
     if (next) {
+      if (
+        (next.job?.error ?? next.restart_in_progress) ||
+        next.job?.state !== status?.job?.state ||
+        next.provider !== status?.provider ||
+        next.indexing
+      )
+        requestError = undefined
+      if (next.restart_in_progress) restartDeadline = Date.now() + restartWaitMs
+      if (
+        restartPending &&
+        (next.job?.state !== 'restart' ||
+          ((next.job?.error || next.can_restart) &&
+            (!restartRequestPending || status?.restart_in_progress)))
+      ) {
+        restartDeadline = 0
+        posts++
+        if (next.can_restart && !next.job?.error)
+          requestError = "Couldn't confirm restart. Try again or run kata daemon restart."
+      }
       status = next
-      if (next.job) requestError = undefined
+    }
+    if (restartPending && !next?.can_restart && Date.now() >= restartDeadline) {
+      requestError = remoteHost
+        ? `Couldn't reconnect. Run kata daemon status on ${remoteHost}.`
+        : originStable
+          ? `Couldn't reconnect. ${recoveryGuidance}`
+          : 'Run kata daemon status.'
     }
     loading = false
     poll()
@@ -136,8 +194,43 @@
 
   function poll(): void {
     clearTimeout(timer)
-    if (page?.signal.aborted || posting || !active(status)) return
+    if (page?.signal.aborted || posting || (!restartPending && !active(status))) return
     timer = setTimeout(() => void refresh(), pollMs)
+  }
+
+  async function restartDaemon(): Promise<void> {
+    if (posting || restartPending || remoteHost || !page) return
+    const reopen = originStable ? '' : `\n\n${reopenGuidance}`
+    if (
+      !confirm(
+        `Restart this daemon? All projects and clients on it will disconnect briefly.\n\nIf a service manager runs this daemon, restart it there instead.${reopen}`,
+      )
+    )
+      return
+    const signal = page.signal
+    restartDeadline = Date.now() + restartWaitMs
+    requestError = undefined
+    const post = ++posts
+    restartRequestPending = true
+    poll()
+    try {
+      const response = await postFetch(getRestartLocalEmbeddingsUrl(), {
+        method: 'POST',
+        signal: AbortSignal.any([signal, AbortSignal.timeout(pollMs * 5)]),
+      })
+      if (post === posts && !response.ok) {
+        restartDeadline = 0
+        requestError = "Couldn't restart the daemon. Try again or run kata daemon restart."
+      }
+    } catch {
+      // A lost response can mean the daemon is restarting.
+    } finally {
+      if (post === posts) {
+        restartRequestPending = false
+        posts++
+        if (!signal.aborted) poll()
+      }
+    }
   }
 
   async function turnOn(): Promise<void> {
@@ -172,7 +265,7 @@
 
 <section class="search-settings" aria-label="Settings">
   <div class="settings-content">
-    <PageHeader level={2} title="Settings" description="For this daemon and every project on it.">
+    <PageHeader level={2} title="Settings">
       {#snippet before()}
         <button type="button" class="back-button" aria-label="Back to issues" onclick={onback}>
           <ArrowLeftIcon size={14} strokeWidth={1.8} aria-hidden="true" />
@@ -180,35 +273,45 @@
         </button>
       {/snippet}
     </PageHeader>
-    {#if row}
-      <div class="search-row" class:turning-on={turning}>
-        <!-- Disables Turn on while its request is in flight. -->
-        <fieldset class="row-actions" disabled={posting}>
-          <SearchByMeaningRow
-            state={row}
-            itemNoun={count === 1 ? 'issue' : 'issues'}
-            labels={restarting ? restartLabels : countFree ? turningOnLabels : labels}
-            {readonly}
-            onturnon={turnOn}
-            onusebuiltin={() => {}}
-          />
-        </fieldset>
-        {#if failure}
-          <p class="settings-note" role="alert">{failure}</p>
-        {/if}
-        {#if indexingFailed}
-          <p class="settings-note" role="alert">
-            Indexing hit an error and will retry. Run <code>kata health --json</code> for details.
-          </p>
-        {/if}
-      </div>
-    {:else if loading}
-      <p class="settings-note" role="status">Loading…</p>
-    {:else}
-      <p class="settings-note" role="status">
-        Search by meaning status is unavailable for this daemon.
-      </p>
+    {#if children}
+      <section class="settings-scope" aria-labelledby="browser-settings-scope">
+        <h3 id="browser-settings-scope" class="settings-scope-title">This browser</h3>
+        {@render children()}
+      </section>
     {/if}
+    <section class="settings-scope" aria-labelledby="server-settings-scope">
+      <h3 id="server-settings-scope" class="settings-scope-title">This server</h3>
+      <p class="settings-scope-description">For this daemon and every project on it.</p>
+      {#if row}
+        <div class="search-row" class:turning-on={turning}>
+          <!-- Disables Turn on while its request is in flight. -->
+          <fieldset class="row-actions" disabled={posting}>
+            <SearchByMeaningRow
+              state={row}
+              itemNoun={count === 1 ? 'issue' : 'issues'}
+              labels={restarting ? restartLabels : countFree ? turningOnLabels : labels}
+              {readonly}
+              onturnon={restarting ? restartDaemon : turnOn}
+              onusebuiltin={() => {}}
+            />
+          </fieldset>
+          {#if failure}
+            <p class="settings-note" role="alert">{failure}</p>
+          {/if}
+          {#if indexingFailed}
+            <p class="settings-note" role="alert">
+              Indexing hit an error and will retry. Run <code>kata health --json</code> for details.
+            </p>
+          {/if}
+        </div>
+      {:else if loading}
+        <p class="settings-note" role="status">Loading…</p>
+      {:else}
+        <p class="settings-note" role="status">
+          Search by meaning status is unavailable for this daemon.
+        </p>
+      {/if}
+    </section>
   </div>
 </section>
 
@@ -226,6 +329,26 @@
     display: grid;
     gap: var(--space-5);
     max-width: 880px;
+  }
+
+  .settings-scope {
+    display: grid;
+    gap: var(--space-2);
+  }
+
+  .settings-scope-title {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-semibold);
+    letter-spacing: var(--letter-spacing-label);
+    text-transform: uppercase;
+  }
+
+  .settings-scope-description {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
   }
 
   /* Matches the row's own line gap, so a failure reads as part of the row. */

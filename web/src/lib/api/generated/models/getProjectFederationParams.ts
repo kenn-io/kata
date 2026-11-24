@@ -4,7 +4,7 @@
 
 export type GetProjectFederationParams = {
   /**
-   * Optionally check existing cross-project issue links for relay protocol 1 before enrollment. Returns 409 relay_cross_project_links when links must be removed.
+   * Check existing cross-project links before relay enrollment. Links within a shared group are allowed; other links return 409 relay_cross_project_links.
    * @minimum 1
    * @maximum 1
    */

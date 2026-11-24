@@ -1,0 +1,1 @@
+Adds `POST /api/v1/embeddings/local/restart` and the `can_restart` and `restart_in_progress` fields on the local embeddings status.

@@ -79,7 +79,7 @@ func checkHubAcceptsKnownRunActor(t *testing.T, hub db.Storage) error {
 		return err
 	}
 
-	update := started.Run
+	update := started.Run.CronRun
 	update.Status = "succeeded"
 	update.Revision = 2
 	update.UpdatedAt = started.Run.UpdatedAt.Add(time.Minute)
@@ -94,7 +94,7 @@ func checkHubAcceptsKnownRunActor(t *testing.T, hub db.Storage) error {
 	claimed.Revision = 3
 	require.ErrorIs(t, push(claimed, 2), db.ErrFederationIngestValidation, "a spoke cannot reattribute a run")
 
-	foreign := started.Run
+	foreign := started.Run.CronRun
 	foreign.UID, err = uid.New()
 	require.NoError(t, err)
 	require.ErrorIs(t, push(foreign, 3), db.ErrFederationIngestValidation, "a new run must carry the bound actor")

@@ -36,6 +36,14 @@ type DigestGlobalResponse = DigestResponseBody
 
 type DigestGlobalErrorResponse = ErrorEnvelope
 
+type ProbeDocbankResponse = DocbankProbe
+
+type ProbeDocbankErrorResponse = ErrorEnvelope
+
+type ProbeDocbankErrorResponseJSON = ErrorEnvelope
+
+type ProbeDocbankErrorResponseJSON503 = ErrorEnvelope
+
 type DoctorResponse = DoctorResponseBody
 
 type DoctorErrorResponse = ErrorEnvelope
@@ -55,6 +63,14 @@ type TurnOnLocalEmbeddingsErrorResponseJSON = ErrorEnvelope
 type TurnOnLocalEmbeddingsErrorResponseJSON409 = ErrorEnvelope
 
 type TurnOnLocalEmbeddingsErrorResponseJSON500 = ErrorEnvelope
+
+type RestartLocalEmbeddingsErrorResponse = ErrorEnvelope
+
+type RestartLocalEmbeddingsErrorResponseJSON = ErrorEnvelope
+
+type RestartLocalEmbeddingsErrorResponseJSON409 = ErrorEnvelope
+
+type RestartLocalEmbeddingsErrorResponseJSON500 = ErrorEnvelope
 
 type PollEventsResponse = PollEventsBody
 
@@ -166,6 +182,10 @@ type ListProjectsErrorResponse = ErrorEnvelope
 type InitProjectResponse = InitProjectResponseBody
 
 type InitProjectErrorResponse = ErrorEnvelope
+
+type ReadProjectByNameResponse = ProjectResolveBody
+
+type ReadProjectByNameErrorResponse = ErrorEnvelope
 
 type ResolveProjectResponse = ProjectResolveBody
 
@@ -279,6 +299,22 @@ type GetProjectFederationResponse = ProjectFederationBody
 
 type GetProjectFederationErrorResponse = ErrorEnvelope
 
+type FederatedDocbankCapabilitiesResponse = DocbankServiceCapabilities
+
+type FederatedDocbankCapabilitiesErrorResponse = ErrorEnvelope
+
+type LinkFederatedDocbankResponse = DocbankDescriptor
+
+type LinkFederatedDocbankErrorResponse = ErrorEnvelope
+
+type UploadFederatedDocbankResponse = DocbankDescriptor
+
+type UploadFederatedDocbankErrorResponse = ErrorEnvelope
+
+type FederatedDocbankContentResponse = []byte
+
+type FederatedDocbankContentErrorResponse = ErrorEnvelope
+
 type EnableProjectFederationResponse = ProjectFederationBody
 
 type EnableProjectFederationErrorResponse = ErrorEnvelope
@@ -322,6 +358,10 @@ type AckRelayDeliveriesErrorResponse = ErrorEnvelope
 type DisconnectRelayEnrollmentResponse = DisconnectRelayResponseBody
 
 type DisconnectRelayEnrollmentErrorResponse = ErrorEnvelope
+
+type SearchFederationProjectResponse = FederationSearchResponseBody
+
+type SearchFederationProjectErrorResponse = ErrorEnvelope
 
 type GetProjectFederationStatusResponse = FederationStatusBody
 
@@ -687,6 +727,16 @@ type DigestGlobalResp struct {
 	JSONDefault  *DigestGlobalErrorResponse
 }
 
+type ProbeDocbankResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ProbeDocbankResponse
+	JSON404      *ProbeDocbankErrorResponse
+	JSON500      *ProbeDocbankErrorResponseJSON
+	JSON503      *ProbeDocbankErrorResponseJSON503
+}
+
 type DoctorResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
@@ -713,6 +763,16 @@ type TurnOnLocalEmbeddingsResp struct {
 	JSON404      *TurnOnLocalEmbeddingsErrorResponseJSON
 	JSON409      *TurnOnLocalEmbeddingsErrorResponseJSON409
 	JSON500      *TurnOnLocalEmbeddingsErrorResponseJSON500
+}
+
+type RestartLocalEmbeddingsResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON403      *RestartLocalEmbeddingsErrorResponse
+	JSON404      *RestartLocalEmbeddingsErrorResponseJSON
+	JSON409      *RestartLocalEmbeddingsErrorResponseJSON409
+	JSON500      *RestartLocalEmbeddingsErrorResponseJSON500
 }
 
 type PollEventsResp200Headers struct {
@@ -942,6 +1002,14 @@ type InitProjectResp struct {
 	StatusCode   int
 	JSON200      *InitProjectResponse
 	JSONDefault  *InitProjectErrorResponse
+}
+
+type ReadProjectByNameResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ReadProjectByNameResponse
+	JSONDefault  *ReadProjectByNameErrorResponse
 }
 
 type ResolveProjectResp struct {
@@ -1186,6 +1254,37 @@ type GetProjectFederationResp struct {
 	JSONDefault  *GetProjectFederationErrorResponse
 }
 
+type FederatedDocbankCapabilitiesResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *FederatedDocbankCapabilitiesResponse
+	JSONDefault  *FederatedDocbankCapabilitiesErrorResponse
+}
+
+type LinkFederatedDocbankResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *LinkFederatedDocbankResponse
+	JSONDefault  *LinkFederatedDocbankErrorResponse
+}
+
+type UploadFederatedDocbankResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *UploadFederatedDocbankResponse
+	JSONDefault  *UploadFederatedDocbankErrorResponse
+}
+
+type FederatedDocbankContentResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSONDefault  *FederatedDocbankContentErrorResponse
+}
+
 type EnableProjectFederationResp200Headers struct {
 	XKataEventFeatures         string `header:"X-Kata-Event-Features"`
 	XKataRequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
@@ -1203,6 +1302,7 @@ type EnableProjectFederationResp struct {
 type PollFederationProjectEventsResp200Headers struct {
 	XKataEventFeatures         string `header:"X-Kata-Event-Features"`
 	XKataEventsIssueUID        string `header:"X-Kata-Events-Issue-UID"`
+	XKataFederationPollWaitMax string `header:"X-Kata-Federation-Poll-Wait-Max"`
 	XKataRequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
 }
 
@@ -1259,12 +1359,23 @@ type SkipFederationQuarantineResp struct {
 	JSONDefault  *SkipFederationQuarantineErrorResponse
 }
 
+type OfferRelayDeliveriesResp200Headers struct {
+	XKataEventFeatures         string `header:"X-Kata-Event-Features"`
+	XKataRequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
+}
+
 type OfferRelayDeliveriesResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
 	StatusCode   int
 	JSON200      *OfferRelayDeliveriesResponse
+	Headers200   *OfferRelayDeliveriesResp200Headers
 	JSONDefault  *OfferRelayDeliveriesErrorResponse
+}
+
+type GetRelayResetResp200Headers struct {
+	XKataEventFeatures         string `header:"X-Kata-Event-Features"`
+	XKataRequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
 }
 
 type GetRelayResetResp struct {
@@ -1272,6 +1383,7 @@ type GetRelayResetResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *GetRelayResetResponse
+	Headers200   *GetRelayResetResp200Headers
 	JSONDefault  *GetRelayResetErrorResponse
 }
 
@@ -1297,6 +1409,14 @@ type DisconnectRelayEnrollmentResp struct {
 	StatusCode   int
 	JSON200      *DisconnectRelayEnrollmentResponse
 	JSONDefault  *DisconnectRelayEnrollmentErrorResponse
+}
+
+type SearchFederationProjectResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *SearchFederationProjectResponse
+	JSONDefault  *SearchFederationProjectErrorResponse
 }
 
 type GetProjectFederationStatusResp struct {

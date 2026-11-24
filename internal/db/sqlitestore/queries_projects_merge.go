@@ -180,6 +180,9 @@ func (d *Store) mergeProjects(ctx context.Context, p db.MergeProjectsParams) (db
 	if err := deleteProjectRelayMetadata(ctx, tx, source.UID); err != nil {
 		return db.ProjectMergeResult{}, fmt.Errorf("delete source project relay metadata: %w", err)
 	}
+	if err := db.ClearFederationRetainedProject(ctx, tx, source.UID); err != nil {
+		return db.ProjectMergeResult{}, err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, source.ID); err != nil {
 		return db.ProjectMergeResult{}, fmt.Errorf("delete source project: %w", err)
 	}
@@ -385,7 +388,7 @@ func extendCollidingSourceShortIDs(
                           AND EXISTS(SELECT 1 FROM issues referenced WHERE referenced.uid=e.issue_uid)
                           AND EXISTS(SELECT 1 FROM events retained_move
                             WHERE retained_move.uid=json_extract(e.payload, '$.move_event_uid')
-                              AND retained_move.type='issue.moved' AND retained_move.issue_uid=e.issue_uid)))
+                              AND retained_move.type IN ('issue.moved','issue.snapshot') AND retained_move.issue_uid=e.issue_uid)))
                          AND json_extract(e.payload, '$.from_short_id')=s.short_id
                          AND e.issue_uid<>s.uid)
 		  )

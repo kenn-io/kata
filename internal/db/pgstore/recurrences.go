@@ -388,7 +388,7 @@ func (s *Store) PatchRecurrence(ctx context.Context, input db.PatchRecurrenceIn)
 			addDiff("template_metadata", jsontext.Value(current.TemplateMetadata), *value)
 			next.TemplateMetadata = db.JSONBlob(*value)
 		}
-		if err := db.ValidateRecurrenceTemplate(next.TemplateTitle, jsontext.Value(next.TemplateMetadata)); err != nil {
+		if err := db.ValidateRecurrenceTemplatePatch(next.TemplateTitle, jsontext.Value(current.TemplateMetadata), input.Update.TemplateMetadata); err != nil {
 			return err
 		}
 		if input.Update.Rule != nil || input.Update.DTStart != nil || input.Update.Timezone != nil {
@@ -638,7 +638,7 @@ next_occurrence_key=$1, last_materialized_uid=$2, revision=revision+1, updated_a
 	); err != nil {
 		return db.MaterializeNextOut{}, mapSQLError(err, nil)
 	}
-	createdPayload, err := json.Marshal(issueCreatedPayload{
+	createdPayload, err := json.Marshal(db.IssueDocumentPayload{
 		UID: issueUID, ShortID: shortID, Title: current.TemplateTitle, Body: current.TemplateBody,
 		Author: actor, Owner: current.TemplateOwner, Priority: current.TemplatePriority, Status: "open",
 		Metadata: issueMetadata, Labels: labels, CreatedAt: formatStoredTime(time.Time(createdAt)),

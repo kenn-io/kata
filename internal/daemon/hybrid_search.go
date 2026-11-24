@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/vector"
@@ -25,6 +26,10 @@ type hybridParams struct {
 	ExcludeLabels   []string
 	AllowedIssueIDs []int64
 	IssueScope      *db.APITokenScope
+	Hub             func(context.Context, hybridParams, int) ([]api.FederationSearchHit, bool, error)
+	HubMode         *string // populated by Hub before it returns
+	// EmbeddingProjectAllowed gates query embedding for the searched project.
+	EmbeddingProjectAllowed func(context.Context, string) (bool, error)
 }
 
 type hybridResult struct {
@@ -76,7 +81,7 @@ const knnDeepLimit = 1000
 func hybridSearch(ctx context.Context, store db.Storage, idx *vector.Index, emb *embedding.Client, p hybridParams) (hybridResult, error) {
 	// Credential failures must be explained even before an index is ready.
 	// Otherwise retain the existing absent-index lexical-only contract.
-	configured := emb != nil && (idx != nil || emb.CredentialHealth().Credential != "ok")
+	configured := p.Hub != nil || emb != nil && (idx != nil || emb.CredentialHealth().Credential != "ok")
 	mode, err := resolveMode(p.Requested, configured)
 	if err != nil {
 		return hybridResult{}, &modeError{status: 400, msg: err.Error()}
@@ -135,7 +140,15 @@ func hybridSearch(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 			if _, ok := errors.AsType[*embedding.CredentialError](vecErr); ok {
 				status = 400
 			}
-			return hybridResult{}, &modeError{status: status, msg: vecErr.Error()}
+			code := ""
+			if hubErr, ok := errors.AsType[*hubSearchError](vecErr); ok {
+				status = 503
+				code = "hub_search_failed"
+				if hubErr.unreachable {
+					code = "hub_unreachable"
+				}
+			}
+			return hybridResult{}, &modeError{status: status, msg: vecErr.Error(), code: code}
 		}
 		return hybridResult{
 			Mode: modeLexical, Degraded: true, DegradedReason: vecErr.Error(),
@@ -156,6 +169,10 @@ func hybridSearch(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 	case modeSemantic:
 		res = hybridResult{Mode: modeSemantic, Hits: truncate(vector, probeLimit)}
 	default: // hybrid
+		if p.HubMode != nil && *p.HubMode == string(modeLexical) {
+			res = hybridResult{Mode: modeLexical, Hits: mergeLexical(lexical, vector, probeLimit)}
+			break
+		}
 		hits, err := mergeRRF(lexical, vector, probeLimit)
 		if err != nil {
 			return hybridResult{}, err
@@ -205,6 +222,53 @@ func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 	// The vector index ranks only the searched project's chunks, so another
 	// project's closer chunks cannot starve this one out of the window.
 	ctx = db.WithAuthorizedProjects(ctx, []string{project.UID})
+	if p.EmbeddingProjectAllowed != nil {
+		allowed, err := p.EmbeddingProjectAllowed(ctx, project.UID)
+		if err != nil || !allowed {
+			return nil, false, errors.New("semantic search is unavailable for this project")
+		}
+	}
+	if p.Hub != nil {
+		hits, bounded, err := p.Hub(ctx, p, fetchCap)
+		if err != nil {
+			return nil, false, err
+		}
+		uids := make([]string, 0, len(hits))
+		for _, hit := range hits {
+			uids = append(uids, hit.Issue.UID)
+		}
+		localIssues, err := store.IssuesByUIDs(ctx, uids, db.IncludeDeletedYes)
+		if err != nil {
+			return nil, false, err
+		}
+		candidates := make([]db.SearchCandidate, 0, min(fetch, len(hits)))
+		deleted := false
+		for _, hit := range hits {
+			local, found := localIssues[hit.Issue.UID]
+			if found && local.DeletedAt != nil {
+				deleted = true
+				continue
+			}
+			issue := hit.Issue
+			issue.ID, issue.ProjectID = 0, p.ProjectID
+			if found {
+				issue.ID = local.ID
+				issue.ShortID = local.ShortID
+			} else {
+				issue.ShortID = issue.UID
+			}
+			matched := hit.MatchedIn
+			if matched == nil {
+				matched = []string{"semantic"}
+			}
+			candidates = append(candidates, db.SearchCandidate{Issue: issue, Score: hit.Score, MatchedIn: matched})
+			if len(candidates) == fetch {
+				break
+			}
+		}
+		bounded = bounded || (deleted && len(hits) == fetchCap && len(candidates) < p.retrievalLimit())
+		return candidates, bounded, nil
+	}
 	if err := emb.MissingCredentialError(); err != nil {
 		return nil, false, err
 	}
@@ -421,6 +485,7 @@ func truncate(c []db.SearchCandidate, limit int) []db.SearchCandidate {
 type modeError struct {
 	status int
 	msg    string
+	code   string
 }
 
 func (e *modeError) Error() string { return e.msg }

@@ -29,6 +29,38 @@ func stubDaemonExecutable(t *testing.T, resolve func() (string, error)) {
 	t.Cleanup(func() { resolveDaemonExecutable = original })
 }
 
+func TestSelectRestartGeneration(t *testing.T) {
+	first := kitdaemon.RuntimeRecord{PID: 9, StartedAt: time.Unix(1, 0)}
+	second := kitdaemon.RuntimeRecord{PID: 10, StartedAt: time.Unix(2, 0)}
+	got, err := selectRestartGeneration([]kitdaemon.RuntimeRecord{first, second}, restartGeneration(second))
+	require.NoError(t, err)
+	require.Equal(t, second, got)
+	reused := kitdaemon.RuntimeRecord{PID: 9, StartedAt: time.Unix(2, 0)}
+	_, err = selectRestartGeneration([]kitdaemon.RuntimeRecord{reused}, restartGeneration(first))
+	require.ErrorContains(t, err, "no longer running")
+}
+
+func TestRestartLockDeadline(t *testing.T) {
+	ordinary, cancelOrdinary := restartLockContext(t.Context(), "")
+	defer cancelOrdinary()
+	_, bounded := ordinary.Deadline()
+	require.False(t, bounded)
+	setupKataEnv(t)
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	release, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).AcquireStartLock(t.Context())
+	require.NoError(t, err)
+	defer release()
+	ctx, cancel := context.WithTimeout(t.Context(), 35*time.Second)
+	defer cancel()
+	cmd := daemonRestartCmd()
+	cmd.SetArgs([]string{"--generation", "123.456"})
+	started := time.Now()
+	err = cmd.ExecuteContext(ctx)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Less(t, time.Since(started), 34*time.Second)
+}
+
 func TestNewDaemonRestart_UnresolvableExecutableDisablesRestart(t *testing.T) {
 	stubDaemonExecutable(t, func() (string, error) { return "", errors.New("procfs unavailable") })
 	var stderr bytes.Buffer

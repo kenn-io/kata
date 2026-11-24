@@ -1,13 +1,14 @@
 <script lang="ts">
   import { tick } from 'svelte'
   import CommentRelations from './CommentRelations.svelte'
-  import { Button, Markdown } from '@kenn-io/kit-ui'
+  import { Avatar, Button, Markdown } from '@kenn-io/kit-ui'
   import {
     formatRelativeTime as timeAgo,
     formatTimestamp as localDateTimeLabel,
   } from '@kenn-io/kit-ui/utils/time'
 
   import CreationAttribution from './CreationAttribution.svelte'
+  import { authorName } from '../authorName.js'
   import type {
     KataIssueDetailModel,
     KataIssueDetailProps,
@@ -59,7 +60,7 @@
   })
   const kinds: KataReplyKind[] = ['reply', 'confirm', 'refute', 'supersede']
   function linkLabel(link: KataCommentLink): string {
-    return `${({ reply: 'Replies to', confirm: 'Confirms', refute: 'Refutes', supersede: 'Supersedes' } as Record<string, string>)[link.kind] ?? link.kind} ${link.handle ?? `(${link.status ?? 'unresolved'})`}${link.author ? ` (${link.author}${link.teammate ? ` / ${link.teammate}` : ''})` : ''}${link.status && link.handle ? ` (${link.status})` : ''}`
+    return `${({ reply: 'Replies to', confirm: 'Confirms', refute: 'Refutes', supersede: 'Supersedes' } as Record<string, string>)[link.kind] ?? link.kind} ${link.handle ?? `(${link.status ?? 'unresolved'})`}${link.author ? ` (${authorName(link.author)}${link.teammate ? ` / ${link.teammate}` : ''})` : ''}${link.status && link.handle ? ` (${link.status})` : ''}`
   }
   function open(link: KataCommentLink, sourceUID?: string): void {
     if (link.issue_uid && link.uid)
@@ -82,6 +83,7 @@
   {:else}
     <ol bind:this={listElement}>
       {#each comments as comment (comment.id)}
+        {@const author = authorName(comment.author)}
         <li
           id={comment.uid ? `comment-${comment.uid}` : undefined}
           class:selected={selectedCommentUID !== undefined && comment.uid === selectedCommentUID}
@@ -91,11 +93,11 @@
             {#if comment.handle}<span class="handle">{comment.handle}</span>{/if}
             {#if comment.editedAt}<span title={localDateTimeLabel(comment.editedAt)}>(edited)</span
               >{/if}
-            <span class="avatar" aria-hidden="true">{comment.author.slice(0, 1)}</span>
+            <Avatar name={author} initials={author.slice(0, 1).toUpperCase()} tone="neutral" decorative size={20} />
             <strong
               >{comment.teammate
-                ? `${comment.author} / ${comment.teammate}`
-                : comment.author}</strong
+                ? `${author} / ${comment.teammate}`
+                : author}</strong
             >
             <time datetime={comment.createdAt} title={localDateTimeLabel(comment.createdAt)}
               >{timeAgo(comment.createdAt)}</time
@@ -188,20 +190,6 @@
     gap: var(--space-4, 8px);
     margin-bottom: var(--space-3, 6px);
     font-size: var(--font-size-sm, 0.75rem);
-  }
-
-  .avatar {
-    display: inline-grid;
-    flex: 0 0 auto;
-    place-items: center;
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    background: var(--bg-inset, #ecedf2);
-    color: var(--text-secondary, #555b6e);
-    font-size: var(--font-size-2xs, 0.625rem);
-    font-weight: var(--font-weight-semibold, 600);
-    text-transform: uppercase;
   }
 
   strong {

@@ -55,10 +55,11 @@ func syncRelayBinding(ctx context.Context, store db.Storage, binding db.Federati
 	if err != nil {
 		return err
 	}
-	meta, err := client.ProjectFederation(ctx, remoteProjectID)
+	meta, features, err := client.projectFederationFeatures(ctx, remoteProjectID)
 	if err != nil {
 		return err
 	}
+	ctx = db.WithRelayPeerEventFeatures(ctx, features)
 	pin, err := store.RootAuthority(ctx, project.UID)
 	if err != nil {
 		return err
@@ -364,5 +365,5 @@ func hubSignatureRejection(status *HubStatusError) bool {
 	if json.Unmarshal([]byte(status.Body), &envelope) != nil {
 		return false
 	}
-	return envelope.Error.Code == "signature_invalid" || envelope.Error.Code == "signing_unavailable"
+	return envelope.Error.Code == "signature_invalid" || envelope.Error.Code == "signing_unavailable" || envelope.Error.Code == "hub_signing_required"
 }

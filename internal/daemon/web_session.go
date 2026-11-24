@@ -477,6 +477,8 @@ func webLocalSPARequestAllowed(r *http.Request) bool {
 	switch r.URL.Path {
 	case "/api/v1/embeddings/local":
 		return r.Method == http.MethodGet || r.Method == http.MethodPost
+	case "/api/v1/embeddings/local/restart":
+		return r.Method == http.MethodPost
 	case "/api/v1/ui/snapshot", "/api/v1/ui/references", "/api/v1/ui/issue-reference", "/api/v1/ui/daemons", pathEventsStreamPath:
 		return r.Method == http.MethodGet
 	case "/api/v1/ui/session":
@@ -507,7 +509,7 @@ func webLocalSPARequestAllowed(r *http.Request) bool {
 	case "metadata":
 		return len(parts) == 2 && r.Method == http.MethodPost
 	case "recurrences":
-		return (len(parts) == 2 && r.Method == http.MethodPost) ||
+		return (len(parts) == 2 && (r.Method == http.MethodGet || r.Method == http.MethodPost)) ||
 			(len(parts) == 3 && (r.Method == http.MethodPatch || r.Method == http.MethodDelete))
 	case "issues":
 		return webLocalIssueRequestAllowed(r, parts[2:])

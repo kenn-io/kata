@@ -5,13 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -117,6 +121,175 @@ func TestFederationStatusProjectFilter(t *testing.T) {
 		assert.Empty(t, out)
 		assert.Contains(t, err.Error(), "missing-project")
 	}
+	local, err := env.DB.CreateProject(t.Context(), "local-project")
+	require.NoError(t, err)
+	_, err = runCmdOutput(t, env, "federation", "status", "--project", local.Name)
+	_ = requireCLIError(t, err, ExitNotFound)
+	assert.Contains(t, err.Error(), "no federation status for project")
+}
+
+func TestFederationStatusProjectRenamedDuringLookup(t *testing.T) {
+	env, project := setupFederationStatusCLIState(t)
+	target, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == fmt.Sprintf("/api/v1/projects/%d/federation/status", project.ID) {
+			if _, err := env.DB.RenameProject(r.Context(), project.ID, "renamed-project"); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+		r.Host = target.Host
+		r.Header["X-Forwarded-For"] = nil
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	clientEnv := *env
+	clientEnv.URL = server.URL
+	out := requireCmdOutput(t, &clientEnv, "federation", "status", "--project", project.Name, "--format", "json")
+	var result struct {
+		Statuses []struct {
+			ProjectID   int64  `json:"project_id"`
+			ProjectName string `json:"project_name"`
+		} `json:"statuses"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &result))
+	require.Len(t, result.Statuses, 1)
+	assert.Equal(t, project.ID, result.Statuses[0].ProjectID)
+	assert.Equal(t, "renamed-project", result.Statuses[0].ProjectName)
+}
+
+func TestFederationStatusProjectMember(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("owner-token"), testenv.WithRequireTokenIdentity())
+	project, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	_, err = env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "http://127.0.0.1:7373", HubProjectID: 42, HubProjectUID: project.UID, Actor: "owner", Enabled: true})
+	require.NoError(t, err)
+	require.NoError(t, env.DB.RecordFederationSyncError(t.Context(), project.ID, errors.New("hub offline"), time.Now()))
+	team, _, err := env.DB.CreateTeam(t.Context(), "project-team", "owner")
+	require.NoError(t, err)
+	_, err = env.DB.SetTeamMembership(t.Context(), team.UID, "member", true, "owner")
+	require.NoError(t, err)
+	_, _, err = env.DB.SetProjectAccessPolicy(t.Context(), db.ProjectAccessPolicy{ProjectUID: project.UID, Visibility: "teams", TeamUIDs: []string{team.UID}}, "owner")
+	require.NoError(t, err)
+	_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{PlaintextToken: "member-token", Actor: "member", AdminActor: db.BootstrapActor})
+	require.NoError(t, err)
+	t.Setenv("KATA_AUTH_TOKEN", "member-token")
+	out := requireCmdOutput(t, env, "federation", "status", "--project", project.Name, "--format", "json")
+	assert.Contains(t, out, project.Name)
+	assert.Contains(t, out, "hub offline")
+}
+
+func TestFederationStatusProjectAnonymousReadonly(t *testing.T) {
+	env := testenv.New(t, testenv.WithInsecureReadonly())
+	project, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	_, err = env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "http://127.0.0.1:7373", HubProjectID: 42, HubProjectUID: project.UID, Actor: "owner", Enabled: true})
+	require.NoError(t, err)
+	require.NoError(t, env.DB.RecordFederationSyncError(t.Context(), project.ID, errors.New("hub offline"), time.Now()))
+	out := requireCmdOutput(t, env, "federation", "status", "--project", project.Name)
+	assert.Contains(t, out, project.Name)
+	assert.Contains(t, out, "hub offline")
+}
+
+func TestFederationStatusProjectOlderDaemon(t *testing.T) {
+	env, project := setupFederationStatusCLIState(t)
+	other, err := env.DB.CreateProject(t.Context(), "other-project")
+	require.NoError(t, err)
+	_, err = env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: other.ID, Role: db.FederationRoleHub, HubProjectUID: other.UID, Enabled: true})
+	require.NoError(t, err)
+	target, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/health" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.45.0"}`))
+			return
+		}
+		r.Host = target.Host
+		r.Header["X-Forwarded-For"] = nil
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	older := *env
+	older.URL = server.URL
+	out := requireCmdOutput(t, &older, "federation", "status", "--project", project.Name, "--format", "json")
+	assert.Contains(t, out, project.Name)
+	assert.NotContains(t, out, other.Name)
+}
+
+func TestFederationStatusProjectVersionRouting(t *testing.T) {
+	for _, tc := range []struct {
+		name, version string
+		status        int
+		global        bool
+	}{
+		{"older denied", "0.45.0", http.StatusForbidden, true},
+		{"older not found", "0.45.0", http.StatusNotFound, true},
+		{"current denied", "0.49.0", http.StatusForbidden, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var global, lookup atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v1/health":
+					_ = json.NewEncoder(w).Encode(map[string]string{"api_schema_version": tc.version})
+				case "/api/v1/federation/status":
+					global.Add(1)
+					w.WriteHeader(tc.status)
+				case "/api/v1/projects/resolve":
+					lookup.Add(1)
+					w.WriteHeader(tc.status)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(server.Close)
+			_, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL), "federation", "status", "--project", "spoke-project")
+			require.Error(t, err)
+			var ce *cliError
+			require.ErrorAs(t, err, &ce)
+			if tc.global {
+				assert.Equal(t, "daemon_api_too_old", ce.Code)
+				assert.Contains(t, ce.Message, "upgrade the daemon")
+			} else {
+				assert.Equal(t, tc.status, ce.HTTPStatus)
+			}
+			assert.Equal(t, !tc.global, lookup.Load() == 1)
+			assert.Equal(t, tc.global, global.Load() == 1)
+		})
+	}
+}
+
+type federationStatusHostAccess struct{}
+
+func (federationStatusHostAccess) Authorize(_ context.Context, request daemon.HostAccessRequest) (daemon.HostAccessDecision, error) {
+	if request.Operation.AllProjects {
+		return daemon.HostAccessDecision{}, daemon.ErrHostAccessDenied
+	}
+	return daemon.HostAccessDecision{}, nil
+}
+
+func TestFederationStatusProjectHostScope(t *testing.T) {
+	env := testenv.New(t)
+	project, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	_, err = env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "http://127.0.0.1:7373", HubProjectID: 42, HubProjectUID: project.UID, Actor: "owner", Enabled: true})
+	require.NoError(t, err)
+	require.NoError(t, env.DB.RecordFederationSyncError(t.Context(), project.ID, errors.New("hub offline"), time.Now()))
+	daemonServer := daemon.NewServer(daemon.ServerConfig{DB: env.DB, StartedAt: time.Now(), HostAccess: federationStatusHostAccess{}})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := daemon.WithPrincipal(r.Context(), daemon.Principal{Kind: daemon.PrincipalHost, Subject: "host-user", Actor: "worker"})
+		daemonServer.Handler().ServeHTTP(w, r.WithContext(ctx))
+	}))
+	t.Cleanup(server.Close)
+	host := *env
+	host.URL = server.URL
+	out := requireCmdOutput(t, &host, "federation", "status", "--project", project.Name)
+	assert.Contains(t, out, project.Name)
+	assert.Contains(t, out, "hub offline")
 }
 
 func TestFederationStatusTextOutputIncludesOperatorFields(t *testing.T) {
@@ -222,6 +395,7 @@ func TestFederationQuarantineListEmptyAndShowMissing(t *testing.T) {
 
 func TestFederationStatusIncludesRecentClaimViolations(t *testing.T) {
 	env, _, pid, ref := setupFederatedHubIssue(t, "status violation")
+	actor := "Ana [member:11111111-1111-4111-8111-111111111111; enrollment:11111111-1111-4111-8111-111111111111]"
 	ctx := t.Context()
 	issue, err := env.DB.IssueByShortID(ctx, pid, ref, db.IncludeDeletedNo)
 	require.NoError(t, err)
@@ -237,7 +411,7 @@ func TestFederationStatusIncludesRecentClaimViolations(t *testing.T) {
 		Now:       time.Date(2026, 5, 24, 12, 0, 0, 0, time.UTC),
 	})
 	require.NoError(t, err)
-	ingestCLIClaimViolation(t, env, pid, issue, "bob", "issue.updated", 30)
+	ingestCLIClaimViolation(t, env, pid, issue, actor, "issue.updated", 30)
 
 	out := requireCmdOutput(t, env, "--json", "federation", "status")
 
@@ -264,14 +438,18 @@ func TestFederationStatusIncludesRecentClaimViolations(t *testing.T) {
 	assert.Equal(t, ref, status.RecentViolations[0].ShortID)
 	assert.Equal(t, "issue.updated", status.RecentViolations[0].OffendingEventType)
 	assert.Equal(t, cliViolationSpokeUID, status.RecentViolations[0].OffendingOriginInstanceUID)
-	assert.Equal(t, "bob", status.RecentViolations[0].Actor)
+	assert.Equal(t, actor, status.RecentViolations[0].Actor)
 	assert.Equal(t, "uncovered_work", status.RecentViolations[0].Reason)
 	assert.False(t, status.RecentViolations[0].At.IsZero())
 
 	text := requireCmdOutput(t, env, "federation", "status")
 	assert.Contains(t, text, "unresolved violations: 1")
 	assert.Contains(t, text, "recent violations: 1")
-	assert.Contains(t, text, ref+" issue.updated by bob on spoke "+cliViolationSpokeUID)
+	assert.Contains(t, text, ref+" issue.updated by Ana on spoke "+cliViolationSpokeUID)
+	assert.NotContains(t, text, "member:")
+	agent := requireCmdOutput(t, env, "--agent", "federation", "status")
+	assert.Contains(t, agent, "actor=Ana")
+	assert.NotContains(t, agent, "member:")
 }
 
 func TestFederationQuarantineSkipCLI(t *testing.T) {
@@ -288,6 +466,8 @@ func TestFederationQuarantineSkipCLI(t *testing.T) {
 	binding, err := env.DB.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
 	assert.Equal(t, q.LastEventID, binding.PushCursorEventID)
+	_, err = env.DB.ActiveFederationQuarantine(ctx, project.ID, db.FederationQuarantineDirectionPush)
+	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
 func TestFederationQuarantineSkipCLIAgentMode(t *testing.T) {
@@ -3285,4 +3465,58 @@ func TestPrintFederationEnrollmentAgentKeepsRowsWhenJoinCommandMissing(t *testin
 	require.Contains(t, out.String(), "join command unavailable")
 	require.NotContains(t, out.String(), "issued-token")
 	require.NotContains(t, out.String(), "{")
+}
+
+func TestFederationEnrollCLISignedJoinBindsSpoke(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("shell command requires a POSIX shell")
+	}
+	binary := kataTestBinary(t, "signed-join")
+	t.Setenv("KATA_AUTH_TOKEN", "admin-token")
+	t.Setenv("TEST_HUB_TOKEN", "admin-token")
+	var hubServer *daemon.Server
+	external := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hubServer.Handler().ServeHTTP(w, r)
+	}))
+	base := "https://" + external.Listener.Addr().String()
+	const keyID = "spoke'$HOME"
+	verifier, key := testenv.FederationSigning(t, base, keyID)
+	hubDB := openKataTestDB(t, filepath.Join(t.TempDir(), "hub.db"))
+	t.Cleanup(func() { require.NoError(t, hubDB.Close()) })
+	hubServer = daemon.NewServer(daemon.ServerConfig{DB: hubDB, FederationSigningRequired: true, FederationSigning: verifier, Auth: config.AuthConfig{Token: "admin-token"}})
+	t.Cleanup(func() { require.NoError(t, hubServer.Close()) })
+	external.StartTLS()
+	t.Cleanup(external.Close)
+	admin := httptest.NewServer(hubServer.Handler())
+	t.Cleanup(admin.Close)
+	spoke := testenv.New(t, testenv.WithAuthToken("admin-token"))
+	hub := &testenv.Env{URL: admin.URL, DB: hubDB}
+	hubProject, err := hubDB.CreateProject(t.Context(), "hub-project")
+	require.NoError(t, err)
+	savedArgs := os.Args
+	os.Args = []string{binary}
+	t.Cleanup(func() { os.Args = savedArgs })
+	out := requireCmdOutput(t, hub, "--json", "--project", "hub-project", "federation", "enroll", "--spoke-instance", spoke.DB.InstanceUID(), "--hub-url", admin.URL, "--hub-token-env", "TEST_HUB_TOKEN", "--actor", "tester", "--capabilities", "pull", "--allow-insecure")
+	var body struct {
+		Join federationJoinBundle `json:"join"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &body))
+	assert.Equal(t, base, body.Join.HubURL)
+	assert.False(t, body.Join.AllowInsecure)
+	command := strings.ReplaceAll(body.Join.JoinCommand, "'<signing-key-id>'", shellQuote(keyID))
+	command = strings.ReplaceAll(command, "'<absolute-path-to-spoke-key>'", shellQuote(key))
+	certFile := filepath.Join(t.TempDir(), "hub-cert.pem")
+	require.NoError(t, os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: external.Certificate().Raw}), 0600))
+	t.Setenv("KATA_SERVER", spoke.URL)
+	t.Setenv("SSL_CERT_FILE", certFile)
+	t.Setenv("PATH", filepath.Dir(binary)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	output, err := exec.CommandContext(t.Context(), "sh", "-c", command).CombinedOutput() //nolint:gosec // Command and binary come from this test's enrollment and fixture.
+	require.NoError(t, err, "%s", output)
+	project, err := spoke.DB.ProjectByName(t.Context(), "hub-project")
+	require.NoError(t, err)
+	binding, err := spoke.DB.FederationBindingByProject(t.Context(), project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, base, binding.HubURL)
+	assert.Equal(t, hubProject.ID, binding.HubProjectID)
+	assert.Equal(t, hubProject.UID, binding.HubProjectUID)
 }

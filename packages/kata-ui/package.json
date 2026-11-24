@@ -19,6 +19,7 @@
   "files": [
     "README.md",
     "src/index.ts",
+    "src/authorName.ts",
     "src/types.ts",
     "src/compatibility.ts",
     "src/projectIssueDetail.ts",
@@ -33,7 +34,7 @@
     "check:usage": "kit-ui-check src && bun run scripts/check-kit-ui-usage.ts src"
   },
   "dependencies": {
-    "@kenn-io/kit-ui": "github:kenn-io/kit-ui#91a19e58add5696a7370ec2ace738a888d449ba6"
+    "@kenn-io/kit-ui": "github:kenn-io/kit-ui#f354f5f0540500a1ae09a8245dd7bcb75e64305d"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "7.1.2",

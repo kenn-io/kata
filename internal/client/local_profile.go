@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 	"github.com/oklog/ulid/v2"
@@ -97,6 +98,11 @@ func discoverLocalProfileWithVerifier(
 	var unreachable error
 	for candidate, err := range scan(ctx, resolved.LocalProfile.DataDir) {
 		if err != nil {
+			if e, ok := errors.AsType[*LocalDaemonUnreachableError](err); ok {
+				e.Profile = resolved.Name
+				e.ProfileAutostart = selection.Profile.Config.AutostartEnabled()
+				e.ManagedExternally = !e.ProfileAutostart
+			}
 			if errors.Is(err, ErrLocalDaemonUnreachable) {
 				unreachable = err
 				continue
@@ -105,6 +111,7 @@ func discoverLocalProfileWithVerifier(
 		}
 		resolved = resolved.WithRunning(runningDaemonForLive(candidate))
 		resolved.UnixSocket = candidate.UnixSocket
+		resolved.runtime = &candidate.Record
 		if verify != nil {
 			if err := verify(ctx, resolved); err != nil {
 				return resolved, false, err
@@ -149,6 +156,9 @@ func verifyLocalProfileInstance(ctx context.Context, resolved ResolvedDaemon) er
 
 func ensureLocalProfile(ctx context.Context, selection DaemonSelection) (ResolvedDaemon, error) {
 	profile := *selection.Profile
+	if !profile.Config.AutostartEnabled() {
+		return waitForSupervisedProfile(ctx, selection.Resolved, profile)
+	}
 	inspector, err := installedStorageInspector()
 	if err != nil {
 		return selection.Resolved, fmt.Errorf("%w: %w", ErrProfileStorageUnavailable, err)
@@ -229,7 +239,13 @@ func EnsureLocalProfileSelection(ctx context.Context, selection DaemonSelection)
 	if selection.Profile == nil || selection.Resolved.LocalProfile == nil {
 		return selection.Resolved, errors.New("selection is not a registered local profile")
 	}
-	return ensureLocalProfile(ctx, selection)
+	resolved, err := ensureLocalProfile(ctx, selection)
+	if e, ok := errors.AsType[*LocalDaemonUnreachableError](err); ok {
+		e.Profile = resolved.Name
+		e.ProfileAutostart = selection.Profile.Config.AutostartEnabled()
+		e.ManagedExternally = !e.ProfileAutostart
+	}
+	return resolved, err
 }
 
 // EnsureSameLocalProfile refreshes the original profile snapshot without reading
@@ -239,4 +255,34 @@ func EnsureSameLocalProfile(ctx context.Context, resolved ResolvedDaemon) (Resol
 		return resolved, errors.New("local profile snapshot is unavailable")
 	}
 	return EnsureLocalProfileSelection(ctx, DaemonSelection{Resolved: resolved, Profile: resolved.profileConfig})
+}
+
+func waitForSupervisedProfile(ctx context.Context, resolved ResolvedDaemon, profile config.LocalProfileConfig) (ResolvedDaemon, error) {
+	dir := resolved.LocalProfile.DataDir
+	scan := func(ctx context.Context) (ensureDiscovery, error) {
+		if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
+			return ensureDiscovery{}, nil
+		} else if err != nil {
+			return ensureDiscovery{}, err
+		}
+		if err := safefileio.ValidatePrivateDir(dir); err != nil {
+			return ensureDiscovery{}, &LocalProfileDirError{Err: err}
+		}
+		found, err := discoverForEnsure(ctx, dir)
+		if err != nil || found.Outcome == daemonScanNone {
+			return found, err
+		}
+		resolved = resolved.WithRunning(runningDaemonForLive(found.Daemon))
+		resolved.UnixSocket = found.Daemon.UnixSocket
+		if err := verifyLocalProfileInstance(ctx, resolved); err != nil {
+			return ensureDiscovery{}, err
+		}
+		return found, nil
+	}
+	_, err := waitForSupervisedDaemon(ctx, filepath.Join(profile.Home, "config.toml"), profileCutoverLocked(profile), scan)
+	return resolved, err
+}
+
+func profileCutoverLocked(profile config.LocalProfileConfig) func(context.Context) bool {
+	return func(context.Context) bool { return SQLiteCutoverLockedForDSN(profile.DSN) }
 }

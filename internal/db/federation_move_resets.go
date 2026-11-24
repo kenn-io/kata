@@ -47,9 +47,9 @@ func CommitFederationMoveResets(ctx context.Context, resets []FederationProjectR
 	}
 }
 
-// FederationMovedReference retains a receiver-local departing reference when
-// it differs from the signed move. The corresponding real move must remain in
-// the journal for this local reset control to resolve or reserve the reference.
+// FederationMovedReference retains a receiver-local departing reference.
+// The corresponding move or snapshot must remain in the journal for this local
+// reset control to resolve or reserve the reference.
 type FederationMovedReference struct {
 	IssueUID       string `json:"-"`
 	FromProjectUID string `json:"from_project_uid"`
@@ -61,7 +61,10 @@ func recordFederationMoveDisplacement(ctx context.Context, tx *sql.Tx, source Pr
 	payload := PayloadMap(winner.Payload)
 	from, _ := StringValue(payload["from_project_uid"])
 	to, _ := StringValue(payload["to_project_uid"])
-	atomic := to == targetUID && slices.Contains(accepted, winner.UID)
+	if winner.Type == "issue.snapshot" {
+		from = source.UID
+	}
+	atomic := winner.Type == "issue.moved" && to == targetUID && slices.Contains(accepted, winner.UID)
 	if atomic && reference != nil {
 		cursor, err := insertControl(source, reference)
 		if err != nil {
@@ -127,6 +130,12 @@ func recordFederationMoveDisplacement(ctx context.Context, tx *sql.Tx, source Pr
 		capture.add(FederationProjectReset{ProjectID: source.ID, EventID: cursor})
 	}
 	return nil
+}
+
+// RecordFederationProjectUIReset records a committed reset of one project for
+// open stream clients and hands it to the caller's capture for publication.
+func RecordFederationProjectUIReset(ctx context.Context, tx *sql.Tx, project Project, cursor int64) error {
+	return recordFederationMoveUIReset(ctx, tx, project, cursor)
 }
 
 func recordFederationMoveUIReset(ctx context.Context, tx *sql.Tx, project Project, cursor int64) error {

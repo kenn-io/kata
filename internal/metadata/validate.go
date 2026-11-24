@@ -27,6 +27,9 @@ var reULID = regexp.MustCompile(`^[0-9A-HJKMNP-TV-Z]{26}$`)
 // phrasing, no per-key prefix.
 func ValidateCreateValue(registry map[string]Entry, key string, raw jsontext.Value) error {
 	if len(raw) == 0 || string(raw) == "null" {
+		if registry[key].Type == TypeAttention {
+			return validateAttention(raw)
+		}
 		return fmt.Errorf("%w: null values are not allowed at creation", ErrInvalidValue)
 	}
 	return Validate(registry, key, raw)
@@ -60,9 +63,22 @@ func Validate(registry map[string]Entry, key string, raw jsontext.Value) error {
 		return validateTimezoneIANA(raw)
 	case TypeSchedule:
 		return validateSchedule(raw)
+	case TypeAttention:
+		return validateAttention(raw)
 	default:
 		return fmt.Errorf("no validator for type %d", entry.Type)
 	}
+}
+
+// AttentionValuesMessage names the accepted work.attention values.
+const AttentionValuesMessage = "work.attention must be one of ok, needs-human, stuck"
+
+func validateAttention(raw jsontext.Value) error {
+	var value string
+	if err := json.Unmarshal(raw, &value); err == nil && (value == "ok" || value == "needs-human" || value == "stuck") {
+		return nil
+	}
+	return fmt.Errorf("%w: %s", ErrInvalidValue, AttentionValuesMessage)
 }
 
 func validateSchedule(raw jsontext.Value) error {

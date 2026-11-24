@@ -343,7 +343,7 @@ func TestCronFederationBackendPairs(t *testing.T) {
 					require.NoError(t, err)
 					result, err := hub.ObserveCronRun(ctx, db.ObserveCronRun{ProjectID: project.ID, UID: runUID, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, WorkflowUID: &workflow.UID, WorkflowDefinitionEventUID: &workflow.DefinitionEventUID, OccurrenceKey: &occurrence, Actor: "worker", Status: "succeeded", Summary: cron.Summary{Version: 1, Message: "Reviewed", InputTokens: 123}})
 					require.NoError(t, err)
-					expectedRuns = append(expectedRuns, result.Run)
+					expectedRuns = append(expectedRuns, result.Run.CronRun)
 				}
 				binding, err := hub.EnableProjectFederation(ctx, project.ID, "worker")
 				require.NoError(t, err)
@@ -407,9 +407,24 @@ func TestCronFederationBackendPairs(t *testing.T) {
 }
 
 // Every required format must survive preflight, regardless of event order.
-func TestMixedMoveCronPublicationRequiresAllFeatures(t *testing.T) {
-	for _, first := range []string{"issue.moved", "cron.job.created"} {
-		t.Run(first, func(t *testing.T) {
+func TestPublicationRequiresEventFeatures(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		events []api.FederationIngestEventEnvelope
+	}{
+		{"move first", []api.FederationIngestEventEnvelope{
+			{EventID: 1, Type: "issue.moved", Payload: jsontext.Value(`{}`)},
+			{EventID: 2, Type: "cron.job.created", Payload: jsontext.Value(`{}`)},
+		}},
+		{"cron first", []api.FederationIngestEventEnvelope{
+			{EventID: 1, Type: "cron.job.created", Payload: jsontext.Value(`{}`)},
+			{EventID: 2, Type: "issue.moved", Payload: jsontext.Value(`{}`)},
+		}},
+		{"zoned date", []api.FederationIngestEventEnvelope{
+			{EventID: 1, Type: "issue.metadata_updated", Payload: jsontext.Value(`{"diff":{"scheduled_on":{"to":"2026-01-15[Europe/Paris]"}}}`)},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			posts := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
@@ -424,17 +439,9 @@ func TestMixedMoveCronPublicationRequiresAllFeatures(t *testing.T) {
 			t.Cleanup(server.Close)
 			client, err := federation.NewClient(t.Context(), server.URL, "token", clientpkg.Opts{})
 			require.NoError(t, err)
-			kinds := []string{"issue.moved", "cron.job.created"}
-			if first == "cron.job.created" {
-				kinds[0], kinds[1] = kinds[1], kinds[0]
-			}
-			events := []api.FederationIngestEventEnvelope{
-				{EventID: 1, Type: kinds[0], Payload: jsontext.Value(`{}`)},
-				{EventID: 2, Type: kinds[1], Payload: jsontext.Value(`{}`)},
-			}
-			_, err = client.IngestProjectEvents(t.Context(), 1, events)
+			_, err = client.IngestProjectEvents(t.Context(), 1, tc.events)
 			require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
-			require.Zero(t, posts, "a cron-only peer cannot receive a move in any batch order")
+			require.Zero(t, posts)
 		})
 	}
 }

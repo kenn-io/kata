@@ -31,6 +31,7 @@ export type KataRoute =
       view?: SystemView | DaemonView
       projectUID?: string
       issueUID?: string
+      link?: { scope?: string; issue: string }
       graph: boolean
       /** Column board instead of the list; an issue opens in a drawer. */
       board?: true
@@ -60,11 +61,26 @@ export function parseRoute(url: URL, routePath = applicationRoutePath()): KataRo
     return { kind: 'route-error', path: url.pathname + url.search, reason: 'view' }
   }
   const normalizedView = view && isSystemView(view) ? view : undefined
-  const projectUID = url.searchParams.get('scope')?.trim()
+  const scope = url.searchParams.get('scope') || undefined
+  const issue = url.searchParams.get('issue') || undefined
+  if (
+    issue &&
+    ((scope && !validUID(scope)) || !validUID(issue)) &&
+    (scope || issue.includes('#'))
+  ) {
+    return {
+      kind: 'kata',
+      ...(normalizedView ? { view: normalizedView } : {}),
+      link: { ...(scope ? { scope } : {}), issue },
+      graph: url.searchParams.get('graph') === '1',
+      filters,
+    }
+  }
+  const projectUID = scope?.trim()
   if (projectUID && !validUID(projectUID)) {
     return { kind: 'route-error', path: url.pathname + url.search, reason: 'project_uid' }
   }
-  const issueUID = url.searchParams.get('issue')?.trim()
+  const issueUID = issue?.trim()
   if (issueUID && !validUID(issueUID)) {
     const routeError: Extract<KataRoute, { kind: 'route-error' }> = {
       kind: 'route-error',
@@ -90,9 +106,11 @@ export function serializeRoute(route: KataRoute, routePath = applicationRoutePat
   if (route.kind === 'route-error') return route.path
   const query = new URLSearchParams()
   if (route.view) query.set('view', route.view)
-  if (route.projectUID) query.set('scope', route.projectUID)
-  if (route.issueUID) query.set('issue', route.issueUID)
-  if (route.graph && route.issueUID && !route.board) query.set('graph', '1')
+  const scope = route.link ? route.link.scope : route.projectUID
+  const issue = route.link ? route.link.issue : route.issueUID
+  if (scope) query.set('scope', scope)
+  if (issue) query.set('issue', issue)
+  if (route.graph && (route.link || route.issueUID) && !route.board) query.set('graph', '1')
   if (route.board) query.set('layout', 'board')
   for (const [name, values] of [
     ['label', route.filters.label],
@@ -131,7 +149,7 @@ function isSystemView(value: string | undefined): value is SystemView {
   return systemViews.includes(value as SystemView)
 }
 
-function validUID(value: string): boolean {
+export function validUID(value: string): boolean {
   return /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/.test(value)
 }
 

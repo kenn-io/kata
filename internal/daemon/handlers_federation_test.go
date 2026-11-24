@@ -2700,6 +2700,37 @@ func TestFederationIngestRejectsSnapshotHistoricalAuthorWithoutAdoptionIntent(t 
 	assertFederationEventCount(t, env.DB, "issue.snapshot", 0)
 }
 
+func TestFederationPullRequiresZonedDateFeature(t *testing.T) {
+	env := testenv.New(t)
+	ctx := t.Context()
+	project := createFederatedHubProject(t, env, "hub")
+	_, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "zoned schedule", Author: "tester",
+		Metadata: map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-09-02[Europe/Paris]"`)},
+	})
+	require.NoError(t, err)
+	created, err := env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+		SpokeInstanceUID: federationTestSpokeUID, ProjectID: &project.ID, Capabilities: "pull", Actor: "tester",
+	})
+	require.NoError(t, err)
+	headers := bearer(created.Token)
+	headers[db.EventFeaturesHeader] = db.IssueDateZoneEventFeature
+	path := projectPath(project.ID) + "/federation/events?after_id=0&limit=100"
+	first, firstRaw := envDoRaw(t, env, http.MethodGet, projectPath(project.ID)+"/federation/events?after_id=0&limit=1", nil, bearer(created.Token))
+	require.Equal(t, http.StatusOK, first.StatusCode, string(firstRaw))
+	assert.Empty(t, first.Header.Get(db.RequiredEventFeaturesHeader))
+	resp, raw := envDoRaw(t, env, http.MethodGet, path, nil, bearer(created.Token))
+	require.Equal(t, http.StatusConflict, resp.StatusCode, string(raw))
+	assert.Contains(t, string(raw), "unsupported_event_features")
+	assert.Contains(t, string(raw), db.IssueDateZoneEventFeature)
+	assert.NotContains(t, string(raw), "2026-09-02[Europe/Paris]")
+
+	resp, raw = envDoRaw(t, env, http.MethodGet, path, nil, headers)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	assert.Contains(t, resp.Header.Get(db.RequiredEventFeaturesHeader), db.IssueDateZoneEventFeature)
+	assert.Contains(t, string(raw), "2026-09-02[Europe/Paris]")
+}
+
 func TestFederationTransportPullMatchesProjectPollBody(t *testing.T) {
 	env := testenv.New(t)
 	ctx := t.Context()
@@ -4608,4 +4639,36 @@ func TestFederationIngestPublishesCommittedPeerEvents(t *testing.T) {
 	message := receiveMsg(t, sub.Ch, time.Second, "committed peer event")
 	require.Equal(t, peer.ID, message.ProjectID)
 	require.Equal(t, event.UID, message.Event.UID)
+}
+
+func TestFederationEnrollmentRequiredSigningJoinInstructions(t *testing.T) {
+	for _, tc := range []struct {
+		name, supplied, external, want   string
+		required, insecure, wantInsecure bool
+	}{
+		{"required without supplied hub URL", "", "https://daemon.example/federation", "https://daemon.example/federation", true, false, false},
+		{"required with supplied hub URL", "http://127.0.0.1:7777", "https://daemon.example/federation", "https://daemon.example/federation", true, true, false},
+		{"required ignores malformed hub URL", "://bad", "https://daemon.example/federation", "https://daemon.example/federation", true, true, false},
+		{"optional", "http://127.0.0.1:7777", "https://daemon.example/federation", "http://127.0.0.1:7777", false, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			verifier, _ := testenv.FederationSigning(t, tc.external, "key-a")
+			env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+				cfg.FederationSigningRequired = tc.required
+				cfg.FederationSigning = verifier
+			})
+			project := createFederatedHubProject(t, env, "hub-project")
+			resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments", map[string]any{
+				"spoke_instance_uid": federationTestSpokeUID, "project_id": project.ID, "capabilities": "pull", "token": "join-token", "actor": "tester", "hub_url": tc.supplied, "allow_insecure": tc.insecure,
+			}, nil)
+			require.Equal(t, http.StatusOK, resp.StatusCode, "%s", raw)
+			var out api.FederationEnrollmentOut
+			require.NoError(t, json.Unmarshal(raw, &out))
+			require.NotNil(t, out.Join)
+			assert.Equal(t, tc.want, out.Join.HubURL)
+			assert.Equal(t, tc.wantInsecure, out.Join.AllowInsecure)
+			assert.Equal(t, tc.required, strings.Contains(out.Join.JoinCommand, "--signing-key-id"))
+			assert.Equal(t, tc.wantInsecure, strings.Contains(out.Join.JoinCommand, "--allow-insecure"))
+		})
+	}
 }

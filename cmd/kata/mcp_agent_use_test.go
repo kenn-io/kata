@@ -27,7 +27,7 @@ import (
 
 func agentUseMCPSession(t *testing.T, apiClient *kataclient.Client) *sdkmcp.ClientSession {
 	t.Helper()
-	observe, stop := startMCPAgentUseReporter(t.Context(), apiClient, client.ResolvedDaemon{})
+	observe, stop := startMCPAgentUseReporter(t.Context(), apiClient, client.ResolvedDaemon{}, false)
 	t.Cleanup(stop)
 	server, err := mcpserver.New(mcpserver.Options{
 		Client: apiClient, ProjectID: 42, ProjectName: "spoke-project", Actor: "example-agent", Version: "test-version", ObserveToolCall: observe,
@@ -41,6 +41,16 @@ func agentUseMCPSession(t *testing.T, apiClient *kataclient.Client) *sdkmcp.Clie
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = session.Close() })
 	return session
+}
+
+func TestMCPAgentUseSkipsTaggedGoInstall(t *testing.T) {
+	oldVersion, oldCommit := version.Version, version.Commit
+	version.Version, version.Commit = "v0.23.0", "unknown"
+	t.Cleanup(func() { version.Version, version.Commit = oldVersion, oldCommit })
+	t.Setenv("TELEMETRY_ENABLED", "1")
+	observe, stop := startMCPAgentUseReporter(t.Context(), nil, client.ResolvedDaemon{}, false)
+	defer stop()
+	assert.Nil(t, observe)
 }
 
 func TestMCPCallsReportDailyAgentActivity(t *testing.T) {
@@ -115,7 +125,7 @@ func TestMCPStalledTelemetryPreservesTypedCallDeadline(t *testing.T) {
 }
 
 func TestMCPAgentReporterBoundsQueueAndJoinsOnShutdown(t *testing.T) {
-	for _, mode := range []string{"overflow", "shutdown", "timeout"} {
+	for _, mode := range []string{"overflow", "shutdown", "timeout", "drain"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Setenv("KATA_HOME", t.TempDir())
 			synctest.Test(t, func(t *testing.T) {
@@ -123,8 +133,11 @@ func TestMCPAgentReporterBoundsQueueAndJoinsOnShutdown(t *testing.T) {
 				started := make(chan struct{})
 				var calls atomic.Int64
 				httpClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-					if calls.Add(1) == 1 {
+					call := calls.Add(1)
+					if call == 1 {
 						close(started)
+					}
+					if call == 1 || mode == "drain" {
 						select {
 						case <-release:
 						case <-r.Context().Done():
@@ -135,7 +148,7 @@ func TestMCPAgentReporterBoundsQueueAndJoinsOnShutdown(t *testing.T) {
 				})}
 				c, err := kataclient.NewWithHTTPClient("http://daemon.example", httpClient)
 				require.NoError(t, err)
-				observe, stop := startMCPAgentUseReporter(t.Context(), c, client.ResolvedDaemon{BaseURL: "http://daemon.example"})
+				observe, stop := startMCPAgentUseReporter(t.Context(), c, client.ResolvedDaemon{BaseURL: "http://daemon.example"}, mode == "drain")
 				defer stop()
 				observe()
 				<-started
@@ -161,7 +174,11 @@ func TestMCPAgentReporterBoundsQueueAndJoinsOnShutdown(t *testing.T) {
 				}
 				start = time.Now()
 				stop()
-				require.Zero(t, time.Since(start), "shutdown cancels delivery and joins the worker")
+				if mode == "drain" {
+					require.Equal(t, time.Second, time.Since(start), "one deadline bounds the entire queued drain")
+				} else {
+					require.Zero(t, time.Since(start), "shutdown cancels delivery and joins the worker")
+				}
 				observe()
 				synctest.Wait()
 				if mode == "shutdown" {
@@ -192,7 +209,7 @@ func TestMCPAgentUseFullDay(t *testing.T) {
 				})}
 				c, err := kataclient.NewWithHTTPClient("http://daemon.example", httpClient)
 				require.NoError(t, err)
-				observe, stop := startMCPAgentUseReporter(t.Context(), c, client.ResolvedDaemon{BaseURL: "http://daemon.example"})
+				observe, stop := startMCPAgentUseReporter(t.Context(), c, client.ResolvedDaemon{BaseURL: "http://daemon.example"}, false)
 				defer stop()
 				for range 3 {
 					observe()
@@ -204,7 +221,7 @@ func TestMCPAgentUseFullDay(t *testing.T) {
 				}
 				require.Equal(t, want, calls.Load())
 				stop()
-				observe, stop = startMCPAgentUseReporter(t.Context(), c, client.ResolvedDaemon{BaseURL: "http://daemon.example"})
+				observe, stop = startMCPAgentUseReporter(t.Context(), c, client.ResolvedDaemon{BaseURL: "http://daemon.example"}, false)
 				defer stop()
 				observe()
 				synctest.Wait()
@@ -247,7 +264,7 @@ func TestMCPAgentUseSeesHookFullDayMarker(t *testing.T) {
 				setCLIUseClock(t, time.Date(2026, 10, 2, 23, 59, 0, 0, time.UTC))
 				c, err := kataclient.NewWithHTTPClient(server.URL, server.Client())
 				require.NoError(t, err)
-				observe, stop := startMCPAgentUseReporter(t.Context(), c, client.ResolvedDaemon{BaseURL: server.URL})
+				observe, stop := startMCPAgentUseReporter(t.Context(), c, client.ResolvedDaemon{BaseURL: server.URL}, false)
 				defer stop()
 				observe()
 				synctest.Wait()

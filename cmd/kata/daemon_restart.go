@@ -40,13 +40,15 @@ type daemonRestart struct {
 	reply      string
 	from       string
 	requested  atomic.Bool
+	helperPID  atomic.Int64
 }
 
 const (
 	// daemonRestartReplyEnv names the accepted request in the replacement's environment.
 	daemonRestartReplyEnv = "KATA_DAEMON_RESTART_REPLY"
 	// daemonRestartFromEnv names the daemon generation the replacement replaces.
-	daemonRestartFromEnv = "KATA_DAEMON_RESTART_FROM"
+	daemonRestartFromEnv   = "KATA_DAEMON_RESTART_FROM"
+	daemonRestartHelperEnv = "KATA_DAEMON_RESTART_HELPER"
 	// daemonReplacementCheckTimeout bounds the replacement's startup check,
 	// which can be slow the first time a newly installed binary runs.
 	daemonReplacementCheckTimeout = 30 * time.Second
@@ -139,7 +141,7 @@ func (r *daemonRestart) exec(ctx context.Context) error {
 	if r == nil || !r.requested.Load() {
 		return nil
 	}
-	env := append(os.Environ(), daemonRestartReplyEnv+"="+r.reply, daemonRestartFromEnv+"="+r.from)
+	env := append(os.Environ(), daemonRestartReplyEnv+"="+r.reply, daemonRestartFromEnv+"="+r.from, daemonRestartHelperEnv+"="+strconv.FormatInt(r.helperPID.Load(), 10))
 	started := func(pid int) {
 		writeRestartReply(r.dir, r.reply, restartReplacementPIDSuffix, []byte(strconv.Itoa(pid)))
 	}
@@ -283,6 +285,22 @@ func reportRestartFailure(reply string, err error) error {
 // across in-place restarts.
 func restartGeneration(rec kitdaemon.RuntimeRecord) string {
 	return fmt.Sprintf("%d.%d", rec.PID, rec.StartedAt.UnixNano())
+}
+
+func selectRestartGeneration(records []kitdaemon.RuntimeRecord, generation string) (kitdaemon.RuntimeRecord, error) {
+	for _, rec := range records {
+		if restartGeneration(rec) == generation {
+			return rec, nil
+		}
+	}
+	return kitdaemon.RuntimeRecord{}, errors.New("daemon generation is no longer running")
+}
+
+func restartLockContext(ctx context.Context, generation string) (context.Context, context.CancelFunc) {
+	if generation != "" {
+		return context.WithTimeout(ctx, 30*time.Second)
+	}
+	return context.WithCancel(ctx)
 }
 
 func restartRequestPath(dir string, rec kitdaemon.RuntimeRecord) string {

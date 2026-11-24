@@ -36,7 +36,7 @@ func (s *Store) RemoveProject(ctx context.Context, params db.RemoveProjectParams
 		if project.DeletedAt != nil {
 			return db.ErrProjectAlreadyArchived
 		}
-		if err := s.validateRelayLifecycleTx(ctx, tx, project.ID); err != nil {
+		if err := s.validateRelayLifecycleTx(ctx, tx, project.ID, false); err != nil {
 			return err
 		}
 		var openIssues, aliasCount int64
@@ -136,6 +136,9 @@ func (s *Store) restoreProject(
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE projects SET deleted_at = NULL WHERE id = $1`, project.ID); err != nil {
 			return mapSQLError(err, nil)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key = $1 AND EXISTS (SELECT 1 FROM federation_bindings WHERE project_id = $2)`, db.FederationRetainedProjectPrefix+project.UID, project.ID); err != nil {
+			return err
 		}
 		created, err := s.insertEventTx(ctx, tx, eventInsert{
 			ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name,
@@ -269,17 +272,28 @@ func (s *Store) PurgeProject(ctx context.Context, params db.PurgeProjectParams) 
 		}
 		var role string
 		err = tx.QueryRowContext(ctx, `SELECT role FROM federation_bindings WHERE project_id = $1`, project.ID).Scan(&role)
-		if err == nil {
+		retireHub := err == nil && params.RetireHubBinding && role == string(db.FederationRoleHub)
+		if err == nil && !retireHub {
 			return &db.ProjectFederatedError{Role: db.FederationRole(role)}
 		}
-		if !errors.Is(err, sql.ErrNoRows) {
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return mapSQLError(err, nil)
 		}
 		if err := db.CheckFederationProjectIdentityRetirement(ctx, tx, project); err != nil {
 			return err
 		}
+		if err := db.ClearFederationRetainedProject(ctx, tx, project.UID); err != nil {
+			return err
+		}
 		if err := rejectActiveExternalRootProjectPurge(ctx, tx, project.ID); err != nil {
 			return err
+		}
+		if retireHub {
+			// The project is archived, so no spoke can sync it. Its enrollments
+			// go with the project rows below.
+			if _, err := tx.ExecContext(ctx, `DELETE FROM federation_bindings WHERE project_id = $1`, project.ID); err != nil {
+				return mapSQLError(err, nil)
+			}
 		}
 
 		counts, err := countProjectPurgeTx(ctx, tx, project.ID)

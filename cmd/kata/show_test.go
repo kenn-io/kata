@@ -215,7 +215,7 @@ func TestShow_RendersLabelsAndLinksSections(t *testing.T) {
 	parent := createIssue(t, env, pid, "parent")
 	child := createIssue(t, env, pid, "child")
 	// Two labels so we exercise the comma-join.
-	for _, label := range []string{"bug", "priority:high"} {
+	for _, label := range []string{"bug", "area:ui"} {
 		runCLI(t, env, dir, "label", "add", child, label)
 	}
 	createLinkViaHTTP(t, env, pid, child, "parent", parent)
@@ -223,7 +223,7 @@ func TestShow_RendersLabelsAndLinksSections(t *testing.T) {
 	out := runCLI(t, env, dir, "show", child)
 	// Exact section headers and comma-joined label rendering.
 	assert.Contains(t, out, "--- labels ---")
-	assert.Contains(t, out, "bug, priority:high")
+	assert.Contains(t, out, "area:ui, bug")
 	// Links section: viewer (child) is on the "from" side of (from=child parent to=parent)
 	// so it reads "parent: <parent_short_id>" — its parent is the parent issue.
 	assert.Contains(t, out, "--- links ---")
@@ -256,7 +256,7 @@ func TestShow_AgentOutputRendersIssueBodyLabelsAndComments(t *testing.T) {
 	assert.Contains(t, out, "Labels: bug,safari\n")
 	assert.Contains(t, out, "Priority: 2\n")
 	assert.Contains(t, out, "Body:\n```text\nSafari can double-submit the callback.\n```\n")
-	assert.Regexp(t, regexp.MustCompile(`(?m)^- uid=[0-9A-HJKMNP-TV-Z]{26} author=tester handle=c:[0-9a-hjkmnp-tv-z]{6,26} issue_uid=[0-9A-HJKMNP-TV-Z]{26} issue_short_id=[0-9a-z]{4,26} creation="attribution=legacy source=tester" created_at=[^ \n]+$`), out)
+	assert.Regexp(t, regexp.MustCompile(`(?m)^- uid=[0-9A-HJKMNP-TV-Z]{26} author=tester handle=c:[0-9a-hjkmnp-tv-z]{6,26} issue_uid=[0-9A-HJKMNP-TV-Z]{26} issue_short_id=[0-9a-z]{4,26} creation="attribution=legacy source=tester" created_at=[^ \n]+ author_filter=tester$`), out)
 	assert.Contains(t, out, "\n```text\nReproduced on macOS.\n```")
 	assert.NotContains(t, out, "Owner:")
 }
@@ -444,6 +444,7 @@ func TestShow_JSONIncludesClaimFields(t *testing.T) {
 
 func TestShow_ClaimViolationsRenderForFederatedIssueAndJSONCount(t *testing.T) {
 	env, dir, pid, ref := setupFederatedHubIssue(t, "violated issue")
+	actor := "Ana [member:11111111-1111-4111-8111-111111111111; enrollment:11111111-1111-4111-8111-111111111111]"
 	ctx := t.Context()
 	issue, err := env.DB.IssueByShortID(ctx, pid, ref, db.IncludeDeletedNo)
 	require.NoError(t, err)
@@ -460,7 +461,7 @@ func TestShow_ClaimViolationsRenderForFederatedIssueAndJSONCount(t *testing.T) {
 	})
 	require.NoError(t, err)
 	for i := range int64(4) {
-		ingestCLIClaimViolation(t, env, pid, issue, "bob", "issue.updated", 20+i)
+		ingestCLIClaimViolation(t, env, pid, issue, actor, "issue.updated", 20+i)
 	}
 
 	out := runCLI(t, env, dir, "show", ref)
@@ -468,9 +469,10 @@ func TestShow_ClaimViolationsRenderForFederatedIssueAndJSONCount(t *testing.T) {
 	lines := claimViolationLines(out)
 	require.Len(t, lines, 3)
 	assert.Contains(t, lines[0], "lease violation: ")
-	assert.Contains(t, lines[0], " issue.updated by bob from instance "+cliViolationSpokeUID+" ")
+	assert.Contains(t, lines[0], " issue.updated by Ana from instance "+cliViolationSpokeUID+" ")
 	assert.Contains(t, lines[0], "(uncovered_work)")
 	assert.NotContains(t, out, "lease violations: 4")
+	assert.NotContains(t, out, "member:")
 
 	jsonOut := runCLI(t, env, dir, "--json", "show", ref)
 	var body struct {
@@ -487,7 +489,10 @@ func TestShow_ClaimViolationsRenderForFederatedIssueAndJSONCount(t *testing.T) {
 	require.Len(t, body.ClaimViolations, 3)
 	assert.Equal(t, "issue.updated", body.ClaimViolations[0].OffendingEventType)
 	assert.Equal(t, cliViolationSpokeUID, body.ClaimViolations[0].OffendingOriginInstanceID)
-	assert.Equal(t, "bob", body.ClaimViolations[0].Actor)
+	assert.Equal(t, actor, body.ClaimViolations[0].Actor)
+	agent := runCLI(t, env, dir, "--agent", "show", ref)
+	assert.Contains(t, agent, "actor=Ana")
+	assert.NotContains(t, agent, "member:")
 	assert.Equal(t, "uncovered_work", body.ClaimViolations[0].Reason)
 }
 

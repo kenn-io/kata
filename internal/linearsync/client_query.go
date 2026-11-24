@@ -5,7 +5,9 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+	"maps"
 	"math"
+	"slices"
 	"time"
 )
 
@@ -13,7 +15,10 @@ const scopeQuery = `query KataLinearScope($team: String!) { viewer { organizatio
 const projectQuery = `query KataLinearProject($project: String!, $team: ID!) { project(id: $project) { id name archivedAt trashed teams(first: 100, filter: { id: { eq: $team } }) { nodes { id } pageInfo { hasNextPage endCursor } } } }`
 const statesQuery = `query KataLinearStates($after: String, $filter: WorkflowStateFilter!) { workflowStates(first: 100, after: $after, filter: $filter) { nodes { id type position archivedAt team { id } } pageInfo { hasNextPage endCursor } } }`
 const issueFields = `id identifier title description url priority createdAt updatedAt archivedAt trashed completedAt canceledAt team { id } project { id } state { id } creator { id } assignee { id }`
-const issuesQuery = `query KataLinearIssues($after: String, $filter: IssueFilter!) { issues(first: 100, after: $after, filter: $filter) { nodes { ` + issueFields + ` } pageInfo { hasNextPage endCursor } } }`
+// Linear's top-level issues filter on a team ID can return issues from other
+// teams, so the read goes through the team's own issues connection.
+const issuesQuery = `query KataLinearIssues($team: String!, $after: String, $filter: IssueFilter!) { team(id: $team) { issues(first: 100, after: $after, filter: $filter) { nodes { ` + issueFields + ` } pageInfo { hasNextPage endCursor } } } }`
+const commentsQuery = `query KataLinearComments($after: String, $filter: CommentFilter!) { comments(first: 100, after: $after, filter: $filter) { nodes { id body createdAt user { id } issue { id } } pageInfo { hasNextPage endCursor } } }`
 
 type identity struct {
 	ID string `json:"id"`
@@ -74,7 +79,9 @@ func (s *clientSession) Scope(ctx context.Context, c Config) (Scope, error) {
 	}
 	return scope, nil
 }
-func readCollection(ctx context.Context, s *clientSession, query, key string, filter map[string]any) ([]jsontext.Value, error) {
+// readCollection pages through the connection at path in the response, adding
+// the cursor to vars on each request.
+func readCollection(ctx context.Context, s *clientSession, query string, vars map[string]any, path ...string) ([]jsontext.Value, error) {
 	var rows []jsontext.Value
 	cursor := ""
 	seen := map[string]bool{}
@@ -84,7 +91,9 @@ func readCollection(ctx context.Context, s *clientSession, query, key string, fi
 		if cursor != "" {
 			after = cursor
 		}
-		raw, err := s.query(ctx, query, map[string]any{"after": after, "filter": filter})
+		variables := maps.Clone(vars)
+		variables["after"] = after
+		raw, err := s.query(ctx, query, variables)
 		if err != nil {
 			return nil, err
 		}
@@ -92,9 +101,12 @@ func readCollection(ctx context.Context, s *clientSession, query, key string, fi
 		if size > 128<<20 {
 			return nil, fmt.Errorf("linear collection exceeds 128 MiB")
 		}
-		var data map[string]jsontext.Value
-		if json.Unmarshal(raw, &data) != nil {
-			return nil, fmt.Errorf("invalid Linear collection")
+		for _, key := range path {
+			var data map[string]jsontext.Value
+			if json.Unmarshal(raw, &data) != nil {
+				return nil, fmt.Errorf("invalid Linear collection")
+			}
+			raw = data[key]
 		}
 		var conn struct {
 			Nodes    *[]jsontext.Value `json:"nodes"`
@@ -103,7 +115,7 @@ func readCollection(ctx context.Context, s *clientSession, query, key string, fi
 				EndCursor   *string `json:"endCursor"`
 			} `json:"pageInfo"`
 		}
-		if json.Unmarshal(data[key], &conn) != nil || conn.Nodes == nil || conn.PageInfo == nil || conn.PageInfo.HasNextPage == nil {
+		if json.Unmarshal(raw, &conn) != nil || conn.Nodes == nil || conn.PageInfo == nil || conn.PageInfo.HasNextPage == nil {
 			return nil, fmt.Errorf("incomplete Linear pagination")
 		}
 		if len(rows)+len(*conn.Nodes) > maxItems {
@@ -128,7 +140,7 @@ func (s *clientSession) States(ctx context.Context, c Config) ([]State, error) {
 	if err := s.validate(c); err != nil {
 		return nil, err
 	}
-	rows, err := readCollection(ctx, s, statesQuery, "workflowStates", teamFilter(c))
+	rows, err := readCollection(ctx, s, statesQuery, map[string]any{"filter": teamFilter(c)}, "workflowStates")
 	if err != nil {
 		return nil, err
 	}
@@ -230,18 +242,73 @@ func decodeIssue(raw jsontext.Value, c Config, content bool) (Issue, error) {
 	}
 	return i, nil
 }
+// Comments reads every comment on the given issues. It filters by issue ID
+// because Linear's comment filter on an issue's team can return other teams'
+// comments.
+func (s *clientSession) Comments(ctx context.Context, c Config, issueIDs []string) ([]Comment, error) {
+	if err := s.validate(c); err != nil {
+		return nil, err
+	}
+	requested := map[string]bool{}
+	var rows []jsontext.Value
+	for chunk := range slices.Chunk(issueIDs, 100) {
+		for _, id := range chunk {
+			requested[id] = true
+		}
+		page, err := readCollection(ctx, s, commentsQuery, map[string]any{"filter": map[string]any{"issue": map[string]any{"id": map[string]any{"in": chunk}}}}, "comments")
+		if err != nil {
+			return nil, err
+		}
+		if len(rows)+len(page) > maxItems {
+			return nil, fmt.Errorf("linear collection exceeds 10000 comments")
+		}
+		rows = append(rows, page...)
+	}
+	comments := make([]Comment, 0, len(rows))
+	for _, raw := range rows {
+		var row struct {
+			ID        string    `json:"id"`
+			Body      *string   `json:"body"`
+			CreatedAt time.Time `json:"createdAt"`
+			User      *identity `json:"user"`
+			Issue     *identity `json:"issue"`
+		}
+		if json.Unmarshal(raw, &row) != nil || row.Body == nil || row.Issue == nil || !validTime(row.CreatedAt) {
+			return nil, fmt.Errorf("invalid Linear comment response")
+		}
+		comment := Comment{Body: *row.Body, CreatedAt: row.CreatedAt}
+		var err error
+		if comment.ID, err = CanonicalID(row.ID); err != nil {
+			return nil, err
+		}
+		if comment.IssueID, err = CanonicalID(row.Issue.ID); err != nil {
+			return nil, err
+		}
+		if !requested[comment.IssueID] {
+			return nil, fmt.Errorf("linear comment is outside selected scope")
+		}
+		if row.User != nil {
+			if comment.AuthorID, err = CanonicalID(row.User.ID); err != nil {
+				return nil, err
+			}
+		}
+		comments = append(comments, comment)
+	}
+	return comments, nil
+}
+
 func (s *clientSession) Issues(ctx context.Context, c Config) ([]Issue, error) {
 	if err := s.validate(c); err != nil {
 		return nil, err
 	}
-	filter := teamFilter(c)
+	filter := map[string]any{}
 	if c.ProjectID != "" {
 		filter["project"] = map[string]any{"id": map[string]any{"eq": c.ProjectID}}
 	}
 	if c.Since != "" {
 		filter["updatedAt"] = map[string]any{"gt": c.Since}
 	}
-	rows, err := readCollection(ctx, s, issuesQuery, "issues", filter)
+	rows, err := readCollection(ctx, s, issuesQuery, map[string]any{"team": c.TeamID, "filter": filter}, "team", "issues")
 	if err != nil {
 		return nil, err
 	}

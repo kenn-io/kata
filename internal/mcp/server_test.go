@@ -923,6 +923,18 @@ func TestToolsRoundTripAgainstRealDaemon(t *testing.T) {
 	createdIssue := created.StructuredContent.(map[string]any)["issue"].(map[string]any)
 	require.NotContains(t, createdIssue, "labels")
 	ref := createdIssue["ref"].(string)
+	for _, tc := range []struct {
+		tool      string
+		arguments map[string]any
+	}{
+		{"kata.set_label", map[string]any{"ref": ref, "label": "priority:high", "present": true}},
+		{"kata.create", map[string]any{"title": "Priority label", "labels": []string{"p2"}, "idempotency_key": "priority-label"}},
+	} {
+		result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: tc.tool, Arguments: tc.arguments})
+		require.NoError(t, err)
+		require.True(t, result.IsError)
+		require.Contains(t, result.Content[0].(*sdkmcp.TextContent).Text, "priority")
+	}
 	escaped, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
 		Name: "kata.edit", Arguments: map[string]any{
 			"ref": ref, "add_related": []string{"spoke-project#" + strings.ToLower(foreignIssue.UID)},
@@ -957,6 +969,13 @@ func TestToolsRoundTripAgainstRealDaemon(t *testing.T) {
 	require.NotContains(t, shownIssue, "blocked")
 
 	revision := shownIssue["revision"]
+	invalid, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
+		Name: "kata.set_metadata", Arguments: map[string]any{
+			"ref": ref, "patch": map[string]any{"work.attention": "working"}, "revision": revision,
+		},
+	})
+	require.NoError(t, err)
+	require.True(t, invalid.IsError)
 	patched, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
 		Name: "kata.set_metadata", Arguments: map[string]any{
 			"ref": ref, "patch": map[string]any{"work.attention": "ok"}, "revision": revision,
@@ -967,7 +986,7 @@ func TestToolsRoundTripAgainstRealDaemon(t *testing.T) {
 
 	conflict, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
 		Name: "kata.set_metadata", Arguments: map[string]any{
-			"ref": ref, "patch": map[string]any{"work.attention": "stale"}, "revision": revision,
+			"ref": ref, "patch": map[string]any{"work.attention": "stuck"}, "revision": revision,
 		},
 	})
 	require.NoError(t, err)

@@ -14,85 +14,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	kataclient "go.kenn.io/kata/pkg/client"
 )
-
-// TestSSEParser_KeepalivesAreSkipped: a leading ": keepalive\n\n" must
-// not produce a frame; the issue.created frame after it must.
-func TestSSEParser_KeepalivesAreSkipped(t *testing.T) {
-	in := ": keepalive\n\n" +
-		formatSSEFrame(1, "issue.created", `{"event_id":1,"type":"issue.created"}`)
-	frames := assertParse(t, in)
-	if len(frames) != 1 {
-		t.Fatalf("got %d frames, want 1", len(frames))
-	}
-	if frames[0].kind != frameEvent || frames[0].eventType != "issue.created" {
-		t.Fatalf("unexpected: %+v", frames[0])
-	}
-	if frames[0].id != 1 {
-		t.Fatalf("id = %d, want 1", frames[0].id)
-	}
-}
-
-// TestSSEParser_MultipleFrames: two consecutive event blocks both arrive.
-func TestSSEParser_MultipleFrames(t *testing.T) {
-	in := formatSSEFrame(1, "issue.created", `{"event_id":1}`) +
-		formatSSEFrame(2, "issue.commented", `{"event_id":2}`)
-	frames := assertParse(t, in)
-	if len(frames) != 2 {
-		t.Fatalf("got %d frames, want 2", len(frames))
-	}
-	if frames[0].id != 1 || frames[1].id != 2 {
-		t.Fatalf("ids = %d,%d, want 1,2", frames[0].id, frames[1].id)
-	}
-}
-
-// TestSSEParser_ResetRequired: a sync.reset_required frame is classified
-// as frameReset. The id: line carries the resume cursor (== reset_after_id
-// per api.EventReset's contract); the JSON payload's reset_after_id is
-// intentionally not lifted onto the frame.
-func TestSSEParser_ResetRequired(t *testing.T) {
-	in := formatSSEFrame(42, "sync.reset_required",
-		`{"event_id":42,"reset_after_id":42}`)
-	frames := assertParse(t, in)
-	if len(frames) != 1 {
-		t.Fatalf("got %d frames, want 1", len(frames))
-	}
-	if frames[0].kind != frameReset {
-		t.Fatalf("kind = %d, want frameReset", frames[0].kind)
-	}
-	if frames[0].id != 42 {
-		t.Fatalf("id = %d, want 42 (the resume cursor)", frames[0].id)
-	}
-}
-
-// TestSSEParser_MalformedFrameSkipped: a frame with no data: line is
-// dropped, the next well-formed frame still arrives. Regression for
-// "single bad frame wedges the consumer."
-func TestSSEParser_MalformedFrameSkipped(t *testing.T) {
-	// First frame intentionally omits the data: line — the malformedness
-	// is the subject of the test, so it cannot be built via formatSSEFrame.
-	in := "id: 1\nevent: issue.created\n\n" +
-		formatSSEFrame(2, "issue.commented", `{"event_id":2}`)
-	frames := assertParse(t, in)
-	if len(frames) != 1 {
-		t.Fatalf("got %d frames, want 1 (malformed dropped)", len(frames))
-	}
-	if frames[0].id != 2 {
-		t.Fatalf("id = %d, want 2 (the well-formed one)", frames[0].id)
-	}
-}
-
-// TestSSEParser_EOFNoTrailingFrame: an in-progress frame at EOF is
-// dropped (no blank-line terminator means no commit).
-func TestSSEParser_EOFNoTrailingFrame(t *testing.T) {
-	// No trailing blank line — the missing terminator is the subject of
-	// the test, so it cannot be built via formatSSEFrame.
-	in := "id: 1\nevent: issue.created\ndata: {\"event_id\":1}\n"
-	frames := assertParse(t, in)
-	if len(frames) != 0 {
-		t.Fatalf("got %d frames, want 0 (no terminator)", len(frames))
-	}
-}
 
 // TestSSEParser_DecodeEventReceived: a well-formed frame's payload is
 // decoded into eventReceivedMsg with type+projectID+issueNumber.
@@ -104,7 +27,7 @@ func TestSSEParser_DecodeEventReceived(t *testing.T) {
 		"issue_short_id":"42aa",
 		"issue_uid":"01JZ0000000000000000000001"
 	}`)
-	got := decodeEventReceived(frame{kind: frameEvent, data: body})
+	got := decodeEventReceived(kataclient.Event{Data: body})
 	if got.eventType != "issue.created" {
 		t.Fatalf("eventType = %q, want issue.created", got.eventType)
 	}
@@ -127,7 +50,7 @@ func TestSSEParser_DecodeEventReceived(t *testing.T) {
 // pointer).
 func TestSSEParser_DecodeEventReceived_MissingIssueShortID(t *testing.T) {
 	body := []byte(`{"type":"sync.reset_required","project_id":7}`)
-	got := decodeEventReceived(frame{kind: frameEvent, data: body})
+	got := decodeEventReceived(kataclient.Event{Data: body})
 	if got.issueShortID != "" {
 		t.Fatalf("issueShortID = %q, want empty (missing)", got.issueShortID)
 	}
@@ -147,7 +70,7 @@ func TestSSEParser_LinkPayloadType(t *testing.T) {
 			"to_uid":"01JZ0000000000000000000004"
 		}
 	}`)
-	got := decodeEventReceived(frame{kind: frameEvent, data: body})
+	got := decodeEventReceived(kataclient.Event{Data: body})
 	if got.eventType != "issue.linked" {
 		t.Fatalf("eventType = %q, want issue.linked", got.eventType)
 	}
@@ -173,7 +96,7 @@ func TestSSEParser_CommentEditedPayloadUID(t *testing.T) {
 		"issue_uid":"source-issue",
 		"payload":{"comment_uid":"edited-comment"}
 	}`)
-	got := decodeEventReceived(frame{kind: frameEvent, data: body})
+	got := decodeEventReceived(kataclient.Event{Data: body})
 	if got.commentUID != "edited-comment" {
 		t.Fatalf("commentUID = %q, want edited-comment", got.commentUID)
 	}
@@ -200,7 +123,7 @@ func TestSSEParser_LinkPayloadDecodesDaemonWireShape(t *testing.T) {
 			"to_uid":"01JZ0000000000000000000002"
 		}
 	}`)
-	got := decodeEventReceived(frame{kind: frameEvent, data: body})
+	got := decodeEventReceived(kataclient.Event{Data: body})
 	if got.link == nil {
 		t.Fatal("link payload was not decoded")
 	}
@@ -286,64 +209,62 @@ func TestSSE_NoConnectedStatusBeforeFirstFrame(t *testing.T) {
 }
 
 // TestSSE_ReconnectSendsLastEventID drives startSSE through one frame,
-// closes the response, and verifies the second connection request
+// ends the response, and verifies the second connection request
 // carries Last-Event-ID matching the last frame seen on the first.
+// Fake time and in-memory streams run the real reconnect backoff without
+// waiting for it.
 func TestSSE_ReconnectSendsLastEventID(t *testing.T) {
-	var connects atomic.Int32
-	var secondHeader atomic.Value
-	secondConnected := make(chan struct{})
-	srv := newSSEMockServer(t, func(w http.ResponseWriter, r *http.Request) {
-		n := connects.Add(1)
-		if n >= 2 {
-			secondHeader.Store(r.Header.Get("Last-Event-ID"))
-			if n == 2 {
-				close(secondConnected)
+	synctest.Test(t, func(t *testing.T) {
+		var connects int
+		secondHeader := make(chan string, 1)
+		hc := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			connects++
+			if connects == 1 {
+				// The body ends after one frame, which drops the connection.
+				frame := formatSSEFrame(5, "issue.created",
+					`{"type":"issue.created","project_id":7}`)
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(frame))}, nil
 			}
-			// Hold so the test has time to see the header.
-			<-r.Context().Done()
-			return
+			if connects == 2 {
+				secondHeader <- r.Header.Get("Last-Event-ID")
+			}
+			// Hold the stream open until the test cancels.
+			reader, writer := io.Pipe()
+			go func() {
+				<-r.Context().Done()
+				_ = writer.Close()
+			}()
+			return &http.Response{StatusCode: http.StatusOK, Body: reader}, nil
+		})}
+
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		ch := make(chan tea.Msg, 8)
+		done := make(chan struct{})
+		go func() {
+			startSSE(ctx, hc, "http://kata.invalid", nil, ch)
+			close(done)
+		}()
+
+		// Wait for the first event to arrive.
+		for {
+			if _, ok := drainOne(t, ch).(eventReceivedMsg); ok {
+				break
+			}
 		}
-		writeSSEFrame(t, w, 5, "issue.created",
-			`{"type":"issue.created","project_id":7}`)
-		// Close the connection by returning.
-	})
-
-	ctx, cancel := context.WithCancel(t.Context())
-	ch := make(chan tea.Msg, 8)
-	done := make(chan struct{})
-	go func() {
-		startSSE(ctx, srv.Client(), srv.URL, nil, ch)
-		close(done)
-	}()
-
-	// Wait for the first event to arrive.
-	deadline := time.After(2 * time.Second)
-	for {
+		// The second connect arrives after the reconnect backoff, which is
+		// 1s before jitter, and carries Last-Event-ID: 5.
 		select {
-		case <-deadline:
-			t.Fatal("never saw issue.created frame on first connect")
-		case msg := <-ch:
-			if _, ok := msg.(eventReceivedMsg); ok {
-				goto Reconnect
+		case <-time.After(4 * time.Second):
+			t.Fatal("second connect never arrived")
+		case hdr := <-secondHeader:
+			if hdr != "5" {
+				t.Fatalf("Last-Event-ID on reconnect = %q, want 5", hdr)
 			}
 		}
-	}
-Reconnect:
-	// Wait for the SSE goroutine to reconnect (second connect arrives
-	// after the 1s reconnect backoff). The test deadline must outlast
-	// that — we use 4s for slack.
-	select {
-	case <-time.After(4 * time.Second):
-		t.Fatal("second connect never arrived")
-	case <-secondConnected:
-	}
-	cancel()
-	<-done
-	// The second connect carries Last-Event-ID: 5.
-	hdr, _ := secondHeader.Load().(string)
-	if hdr != "5" {
-		t.Fatalf("Last-Event-ID on reconnect = %q, want 5", hdr)
-	}
+		cancel()
+		<-done
+	})
 }
 
 // A reconnect inside the grace period must suppress the reconnecting badge.
@@ -496,51 +417,58 @@ done:
 // TestSSE_GracePeriod_LongOutage_SurfacesBadge verifies that a sustained
 // outage (no productive reconnect within the grace window) does push
 // sseReconnecting to the channel, and that recovery pushes sseConnected.
-// The test shortens reconnectStatusGrace to keep the run fast.
+// Fake time and in-memory streams run the real grace period and reconnect
+// backoff without waiting for them.
 func TestSSE_GracePeriod_LongOutage_SurfacesBadge(t *testing.T) {
-	saved := reconnectStatusGrace
-	reconnectStatusGrace = 50 * time.Millisecond
-	t.Cleanup(func() { reconnectStatusGrace = saved })
+	synctest.Test(t, func(t *testing.T) {
+		var ready atomic.Bool
+		hc := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if !ready.Load() {
+				// An empty body ends the stream before any frame.
+				return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
+			}
+			reader, writer := io.Pipe()
+			go func() {
+				defer func() { _ = writer.Close() }()
+				_, _ = io.WriteString(writer, formatSSEFrame(1, "issue.created",
+					`{"type":"issue.created","project_id":7}`))
+				<-r.Context().Done()
+			}()
+			return &http.Response{StatusCode: http.StatusOK, Body: reader}, nil
+		})}
 
-	var ready atomic.Bool
-	srv := newSSEMockServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if !ready.Load() {
-			return // empty body, close — readSSEStream sees EOF
-		}
-		writeSSEFrame(t, w, 1, "issue.created",
-			`{"type":"issue.created","project_id":7}`)
-		<-r.Context().Done()
-	})
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		ch := make(chan tea.Msg, 16)
+		done := make(chan struct{})
+		go func() {
+			startSSE(ctx, hc, "http://kata.invalid", nil, ch)
+			close(done)
+		}()
 
-	ctx, cancel := context.WithCancel(t.Context())
-	ch := make(chan tea.Msg, 16)
-	done := make(chan struct{})
-	go func() {
-		startSSE(ctx, srv.Client(), srv.URL, nil, ch)
-		close(done)
-	}()
-	t.Cleanup(func() { cancel(); <-done })
-
-	waitForState := func(want sseConnState) {
-		t.Helper()
-		deadline := time.After(5 * time.Second)
-		for {
-			select {
-			case <-deadline:
-				t.Fatalf("did not observe sseStatusMsg{%v}", want)
-			case msg := <-ch:
-				if st, ok := msg.(sseStatusMsg); ok && st.state == want {
-					return
+		waitForState := func(want sseConnState) {
+			t.Helper()
+			deadline := time.After(5 * time.Second)
+			for {
+				select {
+				case <-deadline:
+					t.Fatalf("did not observe sseStatusMsg{%v}", want)
+				case msg := <-ch:
+					if st, ok := msg.(sseStatusMsg); ok && st.state == want {
+						return
+					}
 				}
 			}
 		}
-	}
-	// First the badge should surface (grace fires, no productive reconnect yet).
-	waitForState(sseReconnecting)
-	// Flip the server to ready; the next reconnect produces a frame and
-	// pushes sseConnected.
-	ready.Store(true)
-	waitForState(sseConnected)
+		// First the badge should surface (grace fires, no productive reconnect yet).
+		waitForState(sseReconnecting)
+		// Flip the transport to ready; the next reconnect produces a frame and
+		// pushes sseConnected.
+		ready.Store(true)
+		waitForState(sseConnected)
+		cancel()
+		<-done
+	})
 }
 
 // drainOne reads the next message off ch with a deadline so a stuck
@@ -556,29 +484,6 @@ func drainOne(t *testing.T, ch <-chan tea.Msg) tea.Msg {
 	return nil
 }
 
-// TestSSE_StreamRequest_AllProjectsOmitsQuery: nil projectID leaves the
-// URL clean.
-func TestSSE_StreamRequest_AllProjectsOmitsQuery(t *testing.T) {
-	var req *http.Request
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		req = r.Clone(r.Context())
-		w.Header().Set("Content-Type", "text/event-stream")
-	}))
-	defer server.Close()
-	var cursor int64
-	_, err := readSSEStream(t.Context(), server.Client(), server.URL, nil, 0, make(chan tea.Msg, 1), &cursor, nil)
-	if !errors.Is(err, errSSEEOF) {
-		t.Fatalf("stream: %v", err)
-	}
-	if strings.Contains(req.URL.RawQuery, "project_id") {
-		t.Fatalf("URL = %s, must not include project_id in all-projects mode",
-			req.URL.String())
-	}
-	if got := req.Header.Get("Last-Event-ID"); got != "" {
-		t.Fatalf("Last-Event-ID = %q on first connect, want empty", got)
-	}
-}
-
 // TestSSE_StreamRequest_SingleProjectAddsQuery: project scope adds the
 // query param; lastID > 0 sets Last-Event-ID.
 func TestSSE_StreamRequest_SingleProjectAddsQuery(t *testing.T) {
@@ -591,7 +496,7 @@ func TestSSE_StreamRequest_SingleProjectAddsQuery(t *testing.T) {
 	defer server.Close()
 	var cursor int64
 	_, err := readSSEStream(t.Context(), server.Client(), server.URL, &pid, 9, make(chan tea.Msg, 1), &cursor, nil)
-	if !errors.Is(err, errSSEEOF) {
+	if !errors.Is(err, kataclient.ErrEventStreamEnded) {
 		t.Fatalf("stream: %v", err)
 	}
 	if !strings.Contains(req.URL.RawQuery, "project_id=7") {
@@ -599,6 +504,40 @@ func TestSSE_StreamRequest_SingleProjectAddsQuery(t *testing.T) {
 	}
 	if got := req.Header.Get("Last-Event-ID"); got != "9" {
 		t.Fatalf("Last-Event-ID = %q, want 9", got)
+	}
+}
+
+// TestSSE_OversizedFrameRefetchesAndResumesAfterIt: a frame over the client's
+// size cap must not end the stream at the same cursor, or the daemon replays it
+// forever. The TUI treats it like sync.reset_required and keeps reading.
+func TestSSE_OversizedFrameRefetchesAndResumesAfterIt(t *testing.T) {
+	huge := strings.Repeat("x", 9<<20)
+	srv := newSSEMockServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		writeSSEFrame(t, w, 1, "issue.created", `{"type":"issue.created","project_id":7}`)
+		writeSSEFrame(t, w, 2, "issue.created", `{"type":"issue.created","body":"`+huge+`"}`)
+		writeSSEFrame(t, w, 3, "issue.created", `{"type":"issue.created","project_id":9}`)
+	})
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	ch := make(chan tea.Msg, 8)
+	var lastID int64
+	_, err := readSSEStream(ctx, srv.Client(), srv.URL, nil, 0, ch, &lastID, nil)
+	if !errors.Is(err, kataclient.ErrEventStreamEnded) {
+		t.Fatalf("stream: %v, want the stream to end normally", err)
+	}
+	if lastID != 3 {
+		t.Fatalf("lastID = %d, want 3 (resume after the frames read, not at the oversized one)", lastID)
+	}
+	_ = drainOne(t, ch) // sseConnected
+	if ev, ok := drainOne(t, ch).(eventReceivedMsg); !ok || ev.projectID != 7 {
+		t.Fatalf("first frame not forwarded: %+v", ev)
+	}
+	if msg := drainOne(t, ch); msg != (resetRequiredMsg{}) {
+		t.Fatalf("oversized frame = %T, want resetRequiredMsg", msg)
+	}
+	if ev, ok := drainOne(t, ch).(eventReceivedMsg); !ok || ev.projectID != 9 {
+		t.Fatalf("frame after the oversized one not forwarded: %+v", ev)
 	}
 }
 
@@ -632,15 +571,4 @@ func newSSEMockServer(t *testing.T, handler http.HandlerFunc) *httptest.Server {
 	}))
 	t.Cleanup(srv.Close)
 	return srv
-}
-
-// assertParse runs parseAllFrames against in and fails t on error,
-// returning only the frames the parser produced.
-func assertParse(t *testing.T, in string) []frame {
-	t.Helper()
-	frames, err := parseAllFrames(strings.NewReader(in))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return frames
 }

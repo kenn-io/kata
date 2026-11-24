@@ -73,6 +73,7 @@ export interface KataTaskSummary extends KataCreationAttributionWire {
   deadline_on_date?: string | undefined
   metadata: KataTaskMetadata
   revision: number
+  content_revision?: number | undefined
   owner?: string | undefined
   assignment_expires_on?: string | undefined
   author: string
@@ -100,6 +101,7 @@ export interface KataTaskGroup {
   id: string
   title: string
   issues: KataTaskSummary[]
+  handoff?: { teammate: string; author: string }
 }
 
 export interface KataTaskViewResponse {
@@ -200,6 +202,7 @@ export interface KataTaskDetail {
   comments: KataComment[]
   labels: KataTaskLabel[]
   links: KataTaskLink[]
+  effective_close_event?: KataTaskEvent | undefined
   parent?: KataTaskRef | undefined
   children?: KataTaskSummary[] | undefined
   // Accepted snapshot enrichment carries the workspace action atomically
@@ -316,6 +319,7 @@ export interface KataTaskCreateDraft {
 export interface KataTaskEditPatch {
   title?: string | undefined
   body?: string | undefined
+  expected_content_revision?: number | undefined
   links_delta?: KataTaskLinkDelta | undefined
 }
 

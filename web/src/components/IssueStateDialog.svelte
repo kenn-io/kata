@@ -7,15 +7,22 @@
 
   interface Props {
     issue: KataTaskDetail
+    disabled?: boolean | undefined
     onCloseIssue: (request: KataTaskCloseRequest) => boolean | Promise<boolean>
     onReopenIssue: () => void | Promise<void>
   }
 
-  let { issue, onCloseIssue, onReopenIssue }: Props = $props()
+  let { issue, disabled = false, onCloseIssue, onReopenIssue }: Props = $props()
 
   let completeOpen = $state(false)
   let pending = $state(false)
   let trackedUID = $state<string | null>(null)
+  const blockedPreview = $derived(
+    issue.links.filter(
+      (link) =>
+        link.type === 'blocks' && link.from.uid === issue.issue.uid && link.to.status === 'open',
+    ).length,
+  )
 
   $effect(() => {
     if (issue.issue.uid === trackedUID) return
@@ -24,10 +31,20 @@
     pending = false
   })
 
+  function openCompleteDialog(): void {
+    if (disabled || pending) return
+    completeOpen = true
+  }
+
   async function completeIssue(request: KataTaskCloseRequest): Promise<boolean> {
-    const ok = await onCloseIssue(request)
-    if (ok) completeOpen = false
-    return ok
+    pending = true
+    try {
+      const ok = await onCloseIssue(request)
+      if (ok) completeOpen = false
+      return ok
+    } finally {
+      pending = false
+    }
   }
 
   async function reopenIssue(): Promise<void> {
@@ -39,6 +56,12 @@
       pending = false
     }
   }
+
+  export function activate(): void {
+    if (disabled) return
+    if (issue.issue.status === 'closed') void reopenIssue()
+    else openCompleteDialog()
+  }
 </script>
 
 {#if issue.issue.status === 'closed'}
@@ -46,7 +69,7 @@
     class="detail-action"
     size="sm"
     label="Reopen"
-    disabled={pending}
+    disabled={pending || disabled}
     onclick={() => void reopenIssue()}
   >
     <RotateCcwIcon size={13} strokeWidth={1.9} />
@@ -57,11 +80,9 @@
     size="sm"
     tone="info"
     surface="solid"
-    label="Complete"
-    disabled={pending}
-    onclick={() => {
-      completeOpen = true
-    }}
+    label="Complete…"
+    disabled={pending || disabled}
+    onclick={openCompleteDialog}
   >
     <CheckIcon size={13} strokeWidth={1.9} />
   </Button>
@@ -71,6 +92,7 @@
   open={completeOpen}
   title={issue.issue.title}
   qualifiedId={issue.issue.qualified_id}
+  {blockedPreview}
   onComplete={completeIssue}
   onCancel={() => {
     completeOpen = false

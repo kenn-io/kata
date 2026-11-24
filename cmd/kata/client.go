@@ -135,11 +135,8 @@ func discoverDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) 
 		ProbeRemote:    flags.Daemon != "",
 	})
 	if err != nil || !found {
-		if resolved.LocalProfile != nil {
-			diagnosis, _, diagnoseErr := diagnoseDaemon(ctx, "")
-			if diagnoseErr != nil {
-				return resolved, diagnoseErr
-			}
+		if resolved.LocalProfile != nil && !errors.Is(err, client.ErrLocalDaemonUnreachable) {
+			diagnosis, _, _ := diagnoseDaemon(ctx, "")
 			return resolved, diagnosisError(diagnosis)
 		}
 		if err != nil {
@@ -187,9 +184,23 @@ func cliDaemonTargetError(err error) error {
 		}
 	}
 	if errors.Is(err, client.ErrRemoteUnavailable) ||
-		errors.Is(err, client.ErrLocalDaemonUnreachable) {
+		errors.Is(err, client.ErrLocalDaemonUnreachable) ||
+		errors.Is(err, client.ErrDaemonManagedExternally) {
+		message, hint, code := err.Error(), "", ""
+		if advised, ok := errors.AsType[interface {
+			error
+			Summary() string
+			RecoveryAdvice() string
+		}](err); ok {
+			message, hint = advised.Summary(), advised.RecoveryAdvice()
+			if !errors.Is(err, client.ErrDaemonManagedExternally) {
+				code = "local_unreachable"
+			}
+		}
 		return &cliError{
-			Message:  err.Error(),
+			Message:  message,
+			Hint:     hint,
+			Code:     code,
 			Kind:     kindDaemonUnavail,
 			ExitCode: ExitDaemonUnavail,
 		}
@@ -627,7 +638,8 @@ type resolvedIssueRef struct {
 	// ProjectName is the project the ref binds to: a qualified ref
 	// ("kata#abc4") overrides; a bare short_id / ULID inherits the
 	// workspace's project name.
-	ProjectName string
+	ProjectName      string
+	CurrentProjectID int64
 	// QualifiedID is "<project_name>#<short_id>" for the resolved issue.
 	// Populated by resolveIssueRefForCommandResolved (and its variants),
 	// empty otherwise.

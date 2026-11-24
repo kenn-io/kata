@@ -86,6 +86,9 @@ import type {
   DisconnectRelayEnrollmentPathParameters,
   DisconnectRelayRequestBody,
   DisconnectRelayResponseBody,
+  DocbankDescriptor,
+  DocbankProbe,
+  DocbankServiceCapabilities,
   DoctorResponseBody,
   EditCommentPathParameters,
   EditCommentRequestBody,
@@ -101,6 +104,10 @@ import type {
   ExternalRootActionRequestBody,
   ExternalRootBridgeOut,
   ExternalRootRunOut,
+  FederatedDocbankCapabilitiesParams,
+  FederatedDocbankCapabilitiesPathParameters,
+  FederatedDocbankContentParams,
+  FederatedDocbankContentPathParameters,
   FederationBridgeBody,
   FederationBridgeDisconnectResult,
   FederationBridgeStatusBody,
@@ -109,6 +116,7 @@ import type {
   FederationIngestEventsRequestBody,
   FederationQuarantineSummary,
   FederationRootKeyRepinResult,
+  FederationSearchResponseBody,
   FederationSpokeNameOut,
   FederationStatusBody,
   ForceReleaseIssueLeasePathParameters,
@@ -126,6 +134,7 @@ import type {
   GetProjectAccessPathParameters,
   GetProjectFederationParams,
   GetProjectFederationPathParameters,
+  GetProjectFederationStatusParams,
   GetProjectFederationStatusPathParameters,
   GetRelayResetPathParameters,
   HealthResponseBody,
@@ -146,6 +155,8 @@ import type {
   LeaveFederationReplicaResultBody,
   LinkAttachmentInput,
   LinkAttachmentPathParameters,
+  LinkFederatedDocbankParams,
+  LinkFederatedDocbankPathParameters,
   ListAllIssuesParams,
   ListAllIssuesResponseBody,
   ListConnectorFieldsPathParameters,
@@ -223,6 +234,7 @@ import type {
   ReachableGraphResponseBody,
   ReachableIssueGraphParams,
   ReachableIssueGraphPathParameters,
+  ReadProjectByNameParams,
   ReadUILaunchTargetParams,
   ReadUIReferencesParams,
   ReadUISnapshotParams,
@@ -285,6 +297,8 @@ import type {
   RunIssueSyncOncePathParameters,
   RunIssueSyncOnceRequestBody,
   RunIssueSyncOnceResponseBody,
+  SearchFederationProjectParams,
+  SearchFederationProjectPathParameters,
   SearchIssuesParams,
   SearchIssuesPathParameters,
   SearchResponseBody,
@@ -319,6 +333,8 @@ import type {
   UnbindExternalRootParams,
   UnbindExternalRootPathParameters,
   UnmapConnectorFieldPathParameters,
+  UploadFederatedDocbankParams,
+  UploadFederatedDocbankPathParameters,
 } from '../models'
 
 import { orvalFetch } from '../../client.ts'
@@ -705,6 +721,55 @@ export const digestGlobal = async (
   })
 }
 
+export type probeDocbankResponse200 = {
+  data: DocbankProbe
+  status: 200
+}
+
+export type probeDocbankResponse404 = {
+  data: ErrorEnvelope
+  status: 404
+}
+
+export type probeDocbankResponse500 = {
+  data: ErrorEnvelope
+  status: 500
+}
+
+export type probeDocbankResponse503 = {
+  data: ErrorEnvelope
+  status: 503
+}
+
+export type probeDocbankResponseSuccess = probeDocbankResponse200 & {
+  headers: Headers
+}
+export type probeDocbankResponseError = (
+  | probeDocbankResponse404
+  | probeDocbankResponse500
+  | probeDocbankResponse503
+) & {
+  headers: Headers
+}
+
+export type probeDocbankResponse = probeDocbankResponseSuccess | probeDocbankResponseError
+
+export const getProbeDocbankUrl = () => {
+  return `/api/v1/docbank/probe`
+}
+
+/**
+ * @summary Check that the daemon reaches Docbank and Docbank accepts its key
+ */
+export const probeDocbank = async (
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<probeDocbankResponse> => {
+  return orvalFetch<probeDocbankResponse>(getProbeDocbankUrl(), {
+    ...options,
+    method: 'GET',
+  })
+}
+
 export type doctorResponse200 = {
   data: DoctorResponseBody
   status: 200
@@ -828,6 +893,60 @@ export const turnOnLocalEmbeddings = async (
   options?: Parameters<typeof orvalFetch>[1],
 ): Promise<turnOnLocalEmbeddingsResponse> => {
   return orvalFetch<turnOnLocalEmbeddingsResponse>(getTurnOnLocalEmbeddingsUrl(), {
+    ...options,
+    method: 'POST',
+  })
+}
+
+export type restartLocalEmbeddingsResponse202 = {
+  data: void
+  status: 202
+}
+
+export type restartLocalEmbeddingsResponse403 = {
+  data: ErrorEnvelope
+  status: 403
+}
+
+export type restartLocalEmbeddingsResponse404 = {
+  data: ErrorEnvelope
+  status: 404
+}
+
+export type restartLocalEmbeddingsResponse409 = {
+  data: ErrorEnvelope
+  status: 409
+}
+
+export type restartLocalEmbeddingsResponse500 = {
+  data: ErrorEnvelope
+  status: 500
+}
+
+export type restartLocalEmbeddingsResponseSuccess = restartLocalEmbeddingsResponse202 & {
+  headers: Headers
+}
+export type restartLocalEmbeddingsResponseError = (
+  | restartLocalEmbeddingsResponse403
+  | restartLocalEmbeddingsResponse404
+  | restartLocalEmbeddingsResponse409
+  | restartLocalEmbeddingsResponse500
+) & {
+  headers: Headers
+}
+
+export type restartLocalEmbeddingsResponse =
+  | restartLocalEmbeddingsResponseSuccess
+  | restartLocalEmbeddingsResponseError
+
+export const getRestartLocalEmbeddingsUrl = () => {
+  return `/api/v1/embeddings/local/restart`
+}
+
+export const restartLocalEmbeddings = async (
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<restartLocalEmbeddingsResponse> => {
+  return orvalFetch<restartLocalEmbeddingsResponse>(getRestartLocalEmbeddingsUrl(), {
     ...options,
     method: 'POST',
   })
@@ -1081,7 +1200,7 @@ export const getCreateFederationEnrollmentUrl = () => {
 }
 
 /**
- * Creates a hub-side transport grant. Database account tokens must include relay configuration so the grant remains bound to the account credential; legacy grants require daemon-owner authorization. In identity mode, bootstrap credentials require actor to name an existing hub account with an unscoped API token, including expired or revoked tokens. The actor must be able to see a project-scoped grant's project. Direct grants remain valid after account tokens expire or are revoked. When the request includes a caller-supplied token, an exact retry returns the same active enrollment; reusing that token for different attributes or after enrollment revocation returns 409.
+ * Creates a hub-side transport grant. When signing is required, the join command uses the configured external URL and ignores hub_url. Database account tokens must include relay configuration so the grant remains bound to the account credential; legacy grants require daemon-owner authorization. In identity mode, bootstrap credentials require actor to name an existing hub account with an unscoped API token, including expired or revoked tokens. The actor must be able to see a project-scoped grant's project. Direct grants remain valid after account tokens expire or are revoked. When the request includes a caller-supplied token, an exact retry returns the same active enrollment; reusing that token for different attributes or after enrollment revocation returns 409.
  * @summary Create a federation enrollment
  */
 export const createFederationEnrollment = async (
@@ -2026,6 +2145,53 @@ export const initProject = async (
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(initProjectRequestBody),
+  })
+}
+
+export type readProjectByNameResponse200 = {
+  data: ProjectResolveBody
+  status: 200
+}
+
+export type readProjectByNameResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type readProjectByNameResponseSuccess = readProjectByNameResponse200 & {
+  headers: Headers
+}
+export type readProjectByNameResponseError = readProjectByNameResponseDefault & {
+  headers: Headers
+}
+
+export type readProjectByNameResponse =
+  | readProjectByNameResponseSuccess
+  | readProjectByNameResponseError
+
+export const getReadProjectByNameUrl = (params: ReadProjectByNameParams) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/resolve?${stringifiedParams}`
+    : `/api/v1/projects/resolve`
+}
+
+export const readProjectByName = async (
+  params: ReadProjectByNameParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<readProjectByNameResponse> => {
+  return orvalFetch<readProjectByNameResponse>(getReadProjectByNameUrl(params), {
+    ...options,
+    method: 'GET',
   })
 }
 
@@ -3293,6 +3459,246 @@ export const getProjectFederation = async (
   )
 }
 
+export type federatedDocbankCapabilitiesResponse200 = {
+  data: DocbankServiceCapabilities
+  status: 200
+}
+
+export type federatedDocbankCapabilitiesResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type federatedDocbankCapabilitiesResponseSuccess =
+  federatedDocbankCapabilitiesResponse200 & {
+    headers: Headers
+  }
+export type federatedDocbankCapabilitiesResponseError =
+  federatedDocbankCapabilitiesResponseDefault & {
+    headers: Headers
+  }
+
+export type federatedDocbankCapabilitiesResponse =
+  | federatedDocbankCapabilitiesResponseSuccess
+  | federatedDocbankCapabilitiesResponseError
+
+export const getFederatedDocbankCapabilitiesUrl = (
+  { projectId }: FederatedDocbankCapabilitiesPathParameters,
+  params: FederatedDocbankCapabilitiesParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/docbank/capabilities?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/docbank/capabilities`
+}
+
+export const federatedDocbankCapabilities = async (
+  { projectId }: FederatedDocbankCapabilitiesPathParameters,
+  params: FederatedDocbankCapabilitiesParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<federatedDocbankCapabilitiesResponse> => {
+  return orvalFetch<federatedDocbankCapabilitiesResponse>(
+    getFederatedDocbankCapabilitiesUrl({ projectId }, params),
+    {
+      ...options,
+      method: 'GET',
+    },
+  )
+}
+
+export type linkFederatedDocbankResponse200 = {
+  data: DocbankDescriptor
+  status: 200
+}
+
+export type linkFederatedDocbankResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type linkFederatedDocbankResponseSuccess = linkFederatedDocbankResponse200 & {
+  headers: Headers
+}
+export type linkFederatedDocbankResponseError = linkFederatedDocbankResponseDefault & {
+  headers: Headers
+}
+
+export type linkFederatedDocbankResponse =
+  | linkFederatedDocbankResponseSuccess
+  | linkFederatedDocbankResponseError
+
+export const getLinkFederatedDocbankUrl = (
+  { projectId, ref }: LinkFederatedDocbankPathParameters,
+  params: LinkFederatedDocbankParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/docbank/issues/${encodeURIComponent(String(ref))}/links?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/docbank/issues/${encodeURIComponent(String(ref))}/links`
+}
+
+export const linkFederatedDocbank = async (
+  { projectId, ref }: LinkFederatedDocbankPathParameters,
+  linkAttachmentInput: LinkAttachmentInput,
+  params: LinkFederatedDocbankParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<linkFederatedDocbankResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<linkFederatedDocbankResponse>(
+    getLinkFederatedDocbankUrl({ projectId, ref }, params),
+    {
+      ...options,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+      body: JSON.stringify(linkAttachmentInput),
+    },
+  )
+}
+
+export type uploadFederatedDocbankResponse200 = {
+  data: DocbankDescriptor
+  status: 200
+}
+
+export type uploadFederatedDocbankResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type uploadFederatedDocbankResponseSuccess = uploadFederatedDocbankResponse200 & {
+  headers: Headers
+}
+export type uploadFederatedDocbankResponseError = uploadFederatedDocbankResponseDefault & {
+  headers: Headers
+}
+
+export type uploadFederatedDocbankResponse =
+  | uploadFederatedDocbankResponseSuccess
+  | uploadFederatedDocbankResponseError
+
+export const getUploadFederatedDocbankUrl = (
+  { projectId, ref }: UploadFederatedDocbankPathParameters,
+  params: UploadFederatedDocbankParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/docbank/issues/${encodeURIComponent(String(ref))}/uploads?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/docbank/issues/${encodeURIComponent(String(ref))}/uploads`
+}
+
+export const uploadFederatedDocbank = async (
+  { projectId, ref }: UploadFederatedDocbankPathParameters,
+  uploadFederatedDocbankBody: Blob,
+  params: UploadFederatedDocbankParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<uploadFederatedDocbankResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<uploadFederatedDocbankResponse>(
+    getUploadFederatedDocbankUrl({ projectId, ref }, params),
+    {
+      ...options,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream', ...getHeaders(options?.headers) },
+      body: uploadFederatedDocbankBody,
+    },
+  )
+}
+
+export type federatedDocbankContentResponse200 = {
+  data: Blob
+  status: 200
+}
+
+export type federatedDocbankContentResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type federatedDocbankContentResponseSuccess = federatedDocbankContentResponse200 & {
+  headers: Headers
+}
+export type federatedDocbankContentResponseError = federatedDocbankContentResponseDefault & {
+  headers: Headers
+}
+
+export type federatedDocbankContentResponse =
+  | federatedDocbankContentResponseSuccess
+  | federatedDocbankContentResponseError
+
+export const getFederatedDocbankContentUrl = (
+  { projectId, versionId }: FederatedDocbankContentPathParameters,
+  params: FederatedDocbankContentParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/docbank/versions/${encodeURIComponent(String(versionId))}/content?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/docbank/versions/${encodeURIComponent(String(versionId))}/content`
+}
+
+export const federatedDocbankContent = async (
+  { projectId, versionId }: FederatedDocbankContentPathParameters,
+  params: FederatedDocbankContentParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<federatedDocbankContentResponse> => {
+  return orvalFetch<federatedDocbankContentResponse>(
+    getFederatedDocbankContentUrl({ projectId, versionId }, params),
+    {
+      ...options,
+      method: 'GET',
+    },
+  )
+}
+
 export type enableProjectFederationResponse200 = {
   data: ProjectFederationBody
   status: 200
@@ -3837,6 +4243,69 @@ export const disconnectRelayEnrollment = async (
   )
 }
 
+export type searchFederationProjectResponse200 = {
+  data: FederationSearchResponseBody
+  status: 200
+}
+
+export type searchFederationProjectResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type searchFederationProjectResponseSuccess = searchFederationProjectResponse200 & {
+  headers: Headers
+}
+export type searchFederationProjectResponseError = searchFederationProjectResponseDefault & {
+  headers: Headers
+}
+
+export type searchFederationProjectResponse =
+  | searchFederationProjectResponseSuccess
+  | searchFederationProjectResponseError
+
+export const getSearchFederationProjectUrl = (
+  { projectId }: SearchFederationProjectPathParameters,
+  params: SearchFederationProjectParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    const explodeParameters = ['label', 'exclude_label']
+
+    if (Array.isArray(value) && explodeParameters.includes(key)) {
+      value.forEach((v) => {
+        normalizedParams.append(key, v === null ? 'null' : String(v))
+      })
+      return
+    }
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/search?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/search`
+}
+
+export const searchFederationProject = async (
+  { projectId }: SearchFederationProjectPathParameters,
+  params: SearchFederationProjectParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<searchFederationProjectResponse> => {
+  return orvalFetch<searchFederationProjectResponse>(
+    getSearchFederationProjectUrl({ projectId }, params),
+    {
+      ...options,
+      method: 'GET',
+    },
+  )
+}
+
 export type getProjectFederationStatusResponse200 = {
   data: FederationStatusBody
   status: 200
@@ -3858,18 +4327,32 @@ export type getProjectFederationStatusResponse =
   | getProjectFederationStatusResponseSuccess
   | getProjectFederationStatusResponseError
 
-export const getGetProjectFederationStatusUrl = ({
-  projectId,
-}: GetProjectFederationStatusPathParameters) => {
-  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/status`
+export const getGetProjectFederationStatusUrl = (
+  { projectId }: GetProjectFederationStatusPathParameters,
+  params?: GetProjectFederationStatusParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/status?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/status`
 }
 
 export const getProjectFederationStatus = async (
   { projectId }: GetProjectFederationStatusPathParameters,
+  params?: GetProjectFederationStatusParams,
   options?: Parameters<typeof orvalFetch>[1],
 ): Promise<getProjectFederationStatusResponse> => {
   return orvalFetch<getProjectFederationStatusResponse>(
-    getGetProjectFederationStatusUrl({ projectId }),
+    getGetProjectFederationStatusUrl({ projectId }, params),
     {
       ...options,
       method: 'GET',

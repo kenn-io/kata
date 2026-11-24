@@ -29,10 +29,24 @@ type ProjectAccessDecision struct {
 	store          db.Storage
 	owner          bool
 	fixedUIDs      []string
+	released       bool
 	// streamCursor is the last event id an event stream has processed, starting
 	// at the high-water mark read before admission. A project whose lifecycle
 	// event follows it is new to the stream and still has that event to deliver.
 	streamCursor int64
+	// urlProjectID and urlProjectUID name the project a request was admitted
+	// for alone; see hostAccessRule.URLProjectAuthority.
+	urlProjectID  int64
+	urlProjectUID string
+}
+
+// releaseProjectAccess marks the request's page as already authorized, so the
+// response check does not authorize it again. Only an already-authorized
+// empty page may bypass the response check.
+func releaseProjectAccess(ctx context.Context) {
+	if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil {
+		decision.released = true
+	}
 }
 
 // advanceProjectAccessStreamCursor records that the stream has delivered every
@@ -67,6 +81,26 @@ func projectDiagnosticOwnerAuthority(ctx context.Context) bool {
 
 func projectAccessDenied() error {
 	return api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil)
+}
+
+// restrictedProjectLookup reports whether the caller sees only part of the
+// catalog: a mounted host, an issue-scoped credential, or a project policy or
+// scope header that narrows what the principal may select.
+func restrictedProjectLookup(ctx context.Context) bool {
+	if _, mounted := ctx.Value(hostAccessStateContextKey{}).(*hostAccessState); mounted || issueScopeFromContext(ctx) != nil {
+		return true
+	}
+	decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision)
+	return decision != nil && (!decision.owner || decision.fixedUIDs != nil)
+}
+
+// hideMissingProject gives a missing project the same response as a project
+// the caller cannot access, so a restricted lookup cannot reveal which names exist.
+func hideMissingProject(ctx context.Context, err error) error {
+	if apiErr, ok := errors.AsType[*api.APIError](err); ok && apiErr.Status == http.StatusNotFound && restrictedProjectLookup(ctx) {
+		return projectAccessDenied()
+	}
+	return err
 }
 
 func authorizeProjectTarget(ctx context.Context, projectUID string) error {
@@ -117,6 +151,54 @@ func accessibleProjectUIDs(ctx context.Context, store db.Storage, actor string) 
 	return uids, nil
 }
 
+// admitURLProject admits the request with the anonymous decision for the
+// project with projectID alone: that project when anonymous reads may select
+// it, otherwise none.
+func (d *ProjectAccessDecision) admitURLProject(ctx context.Context, projectID int64) error {
+	projectUID, accessible, err := d.store.AnonymousProjectAccess(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("reading anonymous project access: %w", err)
+	}
+	d.urlProjectID, d.urlProjectUID = projectID, projectUID
+	d.ProjectUIDs = []string{}
+	if accessible {
+		d.ProjectUIDs = []string{projectUID}
+	}
+	return nil
+}
+
+// selectableProjectUIDs returns the projects the decision's actor may select
+// under the current policy. A request admitted for its URL project alone, and
+// still holding no other project, rechecks only that project, even one that
+// did not exist at admission; its release then also holds exposed issues to
+// that project.
+func (d *ProjectAccessDecision) selectableProjectUIDs(ctx context.Context) ([]string, error) {
+	if d.urlProjectID == 0 || slices.ContainsFunc(d.ProjectUIDs, func(uid string) bool { return uid != d.urlProjectUID }) {
+		return accessibleProjectUIDs(ctx, d.store, d.Actor)
+	}
+	if d.Actor == "" {
+		projectUID, allowed, err := d.store.AnonymousProjectAccess(ctx, d.urlProjectID)
+		if err != nil {
+			return nil, fmt.Errorf("reading anonymous project access: %w", err)
+		}
+		if !allowed || (d.urlProjectUID != "" && projectUID != d.urlProjectUID) {
+			return []string{}, nil
+		}
+		return []string{projectUID}, nil
+	}
+	if d.urlProjectUID == "" {
+		return []string{}, nil
+	}
+	allowed, err := d.store.ProjectAccessibleToActor(ctx, d.Actor, d.urlProjectUID)
+	if err != nil {
+		return nil, fmt.Errorf("reading project access: %w", err)
+	}
+	if !allowed {
+		return []string{}, nil
+	}
+	return []string{d.urlProjectUID}, nil
+}
+
 // refresh re-reads the caller's projects after the policy revision moved. It
 // reports kept=false when the caller lost a project admitted for this request;
 // otherwise the decision adopts the current set and returns the projects it
@@ -143,7 +225,7 @@ func (d *ProjectAccessDecision) refreshProjects(ctx context.Context, rejectLoss 
 	}
 	accessible := slices.Clone(d.fixedUIDs)
 	if !d.owner {
-		accessible, err = accessibleProjectUIDs(ctx, d.store, d.Actor)
+		accessible, err = d.selectableProjectUIDs(ctx)
 		if err != nil {
 			return nil, false, true, err
 		}
@@ -225,12 +307,19 @@ func withProjectAuthorization(store db.Storage, hosted, trustedCaller bool, tran
 			return
 		}
 		decision.PolicyRevision = revision
-		if owner {
+		urlProjectID := transportRoutes.match(r).urlProjectID
+		switch {
+		case owner:
 			// Transport handlers resolve their credentials after dispatch, but an
 			// owner principal already present here must retain the same unrestricted
 			// project selection as every other route.
 			decision.ProjectUIDs = nil
-		} else {
+		case !authenticated && urlProjectID != 0:
+			// The handler authorizes its credential against this project and
+			// narrows the request to it, so until then only this project's
+			// anonymous decision applies.
+			err = decision.admitURLProject(r.Context(), urlProjectID)
+		default:
 			decision.ProjectUIDs, err = accessibleProjectUIDs(r.Context(), store, principal.Actor)
 		}
 		if err != nil {
@@ -312,7 +401,7 @@ func withProjectAuthorization(store db.Storage, hosted, trustedCaller bool, tran
 }
 
 func (d *ProjectAccessDecision) revalidateRelease(ctx context.Context) error {
-	if d.owner && d.fixedUIDs == nil {
+	if d.released || (d.owner && d.fixedUIDs == nil) {
 		return nil
 	}
 	_, kept, changed, err := d.refresh(ctx)

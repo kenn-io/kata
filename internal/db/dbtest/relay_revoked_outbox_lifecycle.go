@@ -133,7 +133,7 @@ func prepareRevokedRelayOutbox(t *testing.T, store db.Storage, suffix string) (d
 	issueUID, err := uid.New()
 	require.NoError(t, err)
 	source := newRemoteEvent(t, project, &issueUID, "issue.created", "source-assistant", rootUID, 300,
-		jsontext.Value(`{"uid":"`+issueUID+`","title":"Incoming source","author":"source-assistant","metadata":{}}`))
+		IssueDocument(t, issueUID, jsontext.Value(`{"uid":"`+issueUID+`","title":"Incoming source","author":"source-assistant","metadata":{}}`)))
 	body, err := db.EncodeRelaySourceEvent(source)
 	require.NoError(t, err)
 	envelope, err := db.SealRelayEnvelope(db.RelayEnvelope{

@@ -4,6 +4,7 @@
 import type { FederationEmbeddingStatus } from './federationEmbeddingStatus.ts'
 import type { FederationProjectStatusRootSigningKey } from './federationProjectStatusRootSigningKey.ts'
 import type { FederationQuarantineSummary } from './federationQuarantineSummary.ts'
+import type { FederationSyncRetry } from './federationSyncRetry.ts'
 import type { FederationViolationSummary } from './federationViolationSummary.ts'
 
 export interface FederationProjectStatus {
@@ -17,6 +18,8 @@ export interface FederationProjectStatus {
   embedding?: FederationEmbeddingStatus
   enabled: boolean
   enrollment_count: number
+  /** True when a sync error was recorded and omit_errors removed its text. */
+  has_sync_error?: boolean
   hub_project_id?: number
   hub_project_uid?: string
   hub_url?: string
@@ -51,6 +54,8 @@ export interface FederationProjectStatus {
   reset_blocker?: string
   role: string
   root_signing_key?: FederationProjectStatusRootSigningKey
+  /** Present while this daemon's federation runner waits before it contacts the hub for this spoke binding again. */
+  sync_retry?: FederationSyncRetry
   unresolved_violation_count: number
   [key: string]: unknown
 }

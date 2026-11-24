@@ -8,18 +8,18 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
-
-	"go.kenn.io/kit/telemetry/posthog"
 
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	mcpserver "go.kenn.io/kata/internal/mcp"
 	"go.kenn.io/kata/internal/storageadmin"
+	"go.kenn.io/kata/internal/telemetry"
 	"go.kenn.io/kata/internal/version"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -147,7 +147,7 @@ func newMCPServeCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("resolve MCP project scope: %w", err)
 			}
-			observe, stopReporting := startMCPAgentUseReporter(ctx, apiClient, resolved)
+			observe, stopReporting := startMCPAgentUseReporter(ctx, apiClient, resolved, false)
 			defer stopReporting()
 			// Events forwards to the daemon, which owns every subscription, and is
 			// served only on stdio and the 2026-07-28 HTTP path. The legacy-session
@@ -230,12 +230,15 @@ func newMCPAPIClients(ctx context.Context, resolved client.ResolvedDaemon, httpC
 	return apiClient, longRunningAPIClient, err
 }
 
-func startMCPAgentUseReporter(ctx context.Context, apiClient *kataclient.Client, target client.ResolvedDaemon) (func(), context.CancelFunc) {
-	if !posthog.Eligible("KATA", version.Version) {
+// drainOnStop lets modern request cleanup finish queued observations within one second.
+func startMCPAgentUseReporter(ctx context.Context, apiClient *kataclient.Client, target client.ResolvedDaemon, drainOnStop bool) (func(), context.CancelFunc) {
+	if !telemetry.Eligible() {
 		return nil, func() {}
 	}
 	reportCtx, cancel := context.WithCancel(ctx)
 	queue := make(chan struct{}, 128)
+	var queueMu sync.Mutex
+	queueStopped := false
 	marker := client.TelemetryDayMarkerPath(target, "agent-full-")
 	var gate client.TelemetryGate
 	done := make(chan struct{})
@@ -246,8 +249,8 @@ func startMCPAgentUseReporter(ctx context.Context, apiClient *kataclient.Client,
 			select {
 			case <-reportCtx.Done():
 				return
-			case <-queue:
-				if reportCtx.Err() != nil {
+			case _, ok := <-queue:
+				if !ok || reportCtx.Err() != nil {
 					return
 				}
 				day := cliUseNow().UTC().Format(time.DateOnly)
@@ -268,12 +271,35 @@ func startMCPAgentUseReporter(ctx context.Context, apiClient *kataclient.Client,
 		}
 	}()
 	observe := func() {
+		queueMu.Lock()
+		defer queueMu.Unlock()
+		if queueStopped {
+			return
+		}
 		select {
 		case queue <- struct{}{}:
 		default:
 		}
 	}
-	return observe, func() { cancel(); <-done }
+	return observe, func() {
+		queueMu.Lock()
+		if !queueStopped {
+			queueStopped = true
+			if drainOnStop {
+				close(queue)
+			} else {
+				cancel()
+			}
+		}
+		queueMu.Unlock()
+		if drainOnStop {
+			// One deadline bounds the entire queue, including an in-flight report.
+			timer := time.AfterFunc(time.Second, cancel)
+			defer timer.Stop()
+		}
+		<-done
+		cancel()
+	}
 }
 
 func startMCPIdleKeepalive(

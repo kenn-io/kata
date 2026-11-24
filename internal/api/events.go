@@ -84,6 +84,7 @@ type PollEventsRequest struct {
 	AfterID                       int64       `query:"after_id,omitempty"`
 	Limit                         OptionalInt `query:"limit,omitempty"`
 	IncludeEffectiveCloseEventUID bool        `query:"include_effective_close_event_uid,omitempty" doc:"Include the effective native close event UID in issue history when available."`
+	Actor                         string      `query:"actor,omitempty" doc:"Actor the caller acts as. A soft-deleted issue's history is readable when restore would accept this actor; an authenticated principal's own actor takes precedence. Used only with issue= on a soft-deleted issue; ignored otherwise."`
 }
 
 // PollEventsGlobalRequest is GET /api/v1/events (cross-project). Same semantics

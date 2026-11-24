@@ -2,6 +2,7 @@ package dbtest
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json/jsontext"
 	"testing"
 	"time"
@@ -860,6 +861,78 @@ func checkImportFederationActor(ctx context.Context, t *testing.T, store db.Stor
 	for _, event := range events {
 		assert.Equal(t, "bound-agent", event.Actor)
 	}
+	return nil
+}
+
+// checkImportRelayActor verifies that an import into a relayed project keeps
+// its actor and source authors, as the project's local writes do. Only a
+// direct push binding replaces them with its bound actor.
+func checkImportRelayActor(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "external-import-relayed")
+	if err != nil {
+		return err
+	}
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example",
+		HubProjectID: 42, HubProjectUID: project.UID, PushEnabled: true, Actor: "bound-agent", Enabled: true,
+	})
+	if err != nil {
+		return err
+	}
+	rootUID := "00000000000000000000000002"
+	public, _, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		return err
+	}
+	err = store.PinRootAuthority(ctx, db.RootKeyPin{
+		ProjectUID: project.UID, AuthorityUID: rootUID, KeyID: db.RootPublicKeyID(public), PublicKey: public,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = store.SetRelayBindingConfig(ctx, project.ID, db.RelayBindingConfig{
+		ProtocolVersion: db.RelayProtocolVersion, BindingUID: "00000000000000000000000005",
+		UpstreamInstanceUID: rootUID, AuthorityUID: rootUID, HubPath: []string{rootUID, store.InstanceUID()},
+		LocalActor: "relay-member", ResetEpoch: 1,
+	})
+	if err != nil {
+		return err
+	}
+	at := time.Date(2026, 7, 5, 10, 0, 0, 0, time.UTC)
+	_, events, err := store.ImportBatch(ctx, db.ImportBatchParams{
+		ProjectID: project.ID, Source: "tracker", Actor: "request-agent",
+		Items: []db.ImportItem{{
+			ExternalID: "relayed", Title: "Relayed import", Author: "source-author",
+			Status: "open", CreatedAt: at, UpdatedAt: at,
+			Comments: []db.ImportComment{{
+				ExternalID: "relayed-comment", Author: "source-commenter", Body: "note", CreatedAt: at,
+			}},
+		}},
+	})
+	if err != nil {
+		return err
+	}
+	require.NotEmpty(t, events)
+	for _, event := range events {
+		assert.Equal(t, "request-agent", event.Actor)
+	}
+	mapping, err := store.ImportMappingBySource(ctx, project.ID, "tracker", "issue", "relayed")
+	if err != nil {
+		return err
+	}
+	require.NotNil(t, mapping.IssueID)
+	issue, err := store.IssueByID(ctx, *mapping.IssueID)
+	if err != nil {
+		return err
+	}
+	assert.Equal(t, "source-author", issue.Author)
+	comments, err := store.CommentsByIssue(ctx, issue.ID)
+	if err != nil {
+		return err
+	}
+	require.Len(t, comments, 1)
+	assert.Equal(t, "source-commenter", comments[0].Author)
 	return nil
 }
 

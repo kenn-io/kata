@@ -111,6 +111,10 @@ func federationBindingGroupProjectIDs(
 	tx *sql.Tx,
 	current db.FederationBinding,
 ) ([]int64, error) {
+	return federationBindingGroupProjectIDsWithLock(ctx, tx, current, true)
+}
+
+func federationBindingGroupProjectIDsWithLock(ctx context.Context, tx *sql.Tx, current db.FederationBinding, lock bool) ([]int64, error) {
 	switch current.Role {
 	case db.FederationRoleHub:
 	case db.FederationRoleSpoke:
@@ -125,9 +129,11 @@ func federationBindingGroupProjectIDs(
 			return nil, err
 		}
 	}
-	rows, err := tx.QueryContext(ctx,
-		federationBindingSelect+` WHERE role=$1 AND enabled=1 ORDER BY project_id ASC FOR UPDATE`,
-		string(current.Role))
+	query := federationBindingSelect + ` WHERE role=$1 AND enabled=1 ORDER BY project_id ASC`
+	if lock {
+		query += ` FOR UPDATE`
+	}
+	rows, err := tx.QueryContext(ctx, query, string(current.Role))
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}
@@ -303,29 +309,7 @@ func federationFoldEventsOfTypes(
 	projectID int64,
 	eventTypes []string,
 ) ([]db.FoldEvent, error) {
-	// Only issue events use payload fields as issue identity. Other event
-	// payloads can reference an issue without becoming part of its history.
-	eventIssueUID := `CASE WHEN e.type LIKE 'issue.%' THEN COALESCE(NULLIF(e.issue_uid,''),e.payload::jsonb->>'issue_uid',e.payload::jsonb->>'uid') ELSE NULLIF(e.issue_uid,'') END`
-	historyIssueUID := `CASE WHEN h.type LIKE 'issue.%' THEN COALESCE(NULLIF(h.issue_uid,''),h.payload::jsonb->>'issue_uid',h.payload::jsonb->>'uid') ELSE NULLIF(h.issue_uid,'') END`
-	moveIssueUID := `COALESCE(NULLIF(m.issue_uid,''),m.payload::jsonb->>'issue_uid',m.payload::jsonb->>'uid')`
-	query := `SELECT e.uid,e.origin_instance_uid,p.uid,e.issue_uid,
-e.related_issue_uid,e.type,e.actor,e.payload,e.hlc_physical_ms,e.hlc_counter,e.created_at
-FROM events e JOIN projects p ON p.id=e.project_id WHERE (e.project_id=$1 OR (` + eventIssueUID + ` IN (
-   SELECT ` + historyIssueUID + ` FROM events h WHERE h.project_id=$1
-   UNION SELECT uid FROM issues WHERE project_id=$1)
- AND EXISTS(SELECT 1 FROM events m WHERE m.type='issue.moved' AND
-   ` + moveIssueUID + ` = ` + eventIssueUID + `)))`
-	args := []any{projectID}
-	if len(eventTypes) > 0 {
-		placeholders := make([]string, 0, len(eventTypes))
-		for i, eventType := range eventTypes {
-			placeholders = append(placeholders, fmt.Sprintf("$%d", i+2))
-			args = append(args, eventType)
-		}
-		//nolint:gosec // G202: generated $N placeholders only; values are bound separately.
-		query += " AND e.type IN (" + strings.Join(placeholders, ",") + ")"
-	}
-	query += " ORDER BY e.id ASC"
+	query, args := federationFoldEventsQuery(projectID, eventTypes)
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
@@ -352,6 +336,54 @@ FROM events e JOIN projects p ON p.id=e.project_id WHERE (e.project_id=$1 OR (` 
 		output = append(output, event)
 	}
 	return db.FederationMoveBaselineEvents(output), mapSQLError(rows.Err(), nil)
+}
+
+// federationFoldEventsQuery builds the fold query. PostgreSQL scans events once
+// and checks both subqueries as hashed subplans, with or without statistics;
+// TestFederationFoldEventsBudget guards that plan.
+//
+// A recorded snapshot relocation joins the issue's history in both of its
+// projects, as a retained move does. A project's snapshot stays out when, in fold
+// order, a relocation took the issue away from that project before it and no
+// accepted relocation brought the issue back in between: only that project's own
+// pull may accept it. An issue with a retained move already joins every project's
+// history through the moved clause, so this gate never applies to it.
+func federationFoldEventsQuery(projectID int64, eventTypes []string) (string, []any) {
+	query := `SELECT e.uid,e.origin_instance_uid,p.uid,e.issue_uid,
+e.related_issue_uid,e.type,e.actor,e.payload,e.hlc_physical_ms,e.hlc_counter,e.created_at
+FROM events e JOIN projects p ON p.id=e.project_id WHERE (e.project_id=$1 OR (e.issue_uid IN (
+   SELECT h.issue_uid FROM events h WHERE h.project_id=$1
+   UNION SELECT uid FROM issues WHERE project_id=$1)
+ AND (EXISTS(SELECT 1 FROM events m WHERE m.type='issue.moved' AND m.issue_uid = e.issue_uid)
+ OR ((e.issue_uid, e.project_id) IN (SELECT reset.issue_uid, m.project_id FROM events reset
+ JOIN events m ON m.uid = reset.payload::jsonb->>'move_event_uid' AND m.type='issue.snapshot'
+ WHERE reset.type='sync.reset_required' AND reset.issue_uid IS NOT NULL
+ UNION ALL SELECT reset.issue_uid, reset.project_id FROM events reset
+ JOIN events m ON m.uid = reset.payload::jsonb->>'move_event_uid' AND m.type='issue.snapshot'
+ WHERE reset.type='sync.reset_required' AND reset.issue_uid IS NOT NULL)
+ AND NOT (e.type='issue.snapshot' AND EXISTS(SELECT 1 FROM events reset
+ JOIN events m ON m.uid = reset.payload::jsonb->>'move_event_uid' AND m.type='issue.snapshot'
+ WHERE reset.type='sync.reset_required' AND reset.issue_uid=e.issue_uid AND reset.project_id=e.project_id
+ AND (e.hlc_physical_ms, e.hlc_counter, e.origin_instance_uid COLLATE "C", e.uid COLLATE "C")
+   > (m.hlc_physical_ms, m.hlc_counter, m.origin_instance_uid COLLATE "C", m.uid COLLATE "C")
+ AND NOT EXISTS(SELECT 1 FROM events back
+ JOIN events bm ON bm.uid = back.payload::jsonb->>'move_event_uid' AND bm.type='issue.snapshot'
+ WHERE back.type='sync.reset_required' AND back.issue_uid=e.issue_uid AND bm.project_id=e.project_id
+ AND (bm.hlc_physical_ms, bm.hlc_counter, bm.origin_instance_uid COLLATE "C", bm.uid COLLATE "C")
+   > (m.hlc_physical_ms, m.hlc_counter, m.origin_instance_uid COLLATE "C", m.uid COLLATE "C")
+ AND (bm.hlc_physical_ms, bm.hlc_counter, bm.origin_instance_uid COLLATE "C", bm.uid COLLATE "C")
+   <= (e.hlc_physical_ms, e.hlc_counter, e.origin_instance_uid COLLATE "C", e.uid COLLATE "C"))))))))`
+	args := []any{projectID}
+	if len(eventTypes) > 0 {
+		placeholders := make([]string, 0, len(eventTypes))
+		for i, eventType := range eventTypes {
+			placeholders = append(placeholders, fmt.Sprintf("$%d", i+2))
+			args = append(args, eventType)
+		}
+		//nolint:gosec // G202: generated $N placeholders only; values are bound separately.
+		query += " AND e.type IN (" + strings.Join(placeholders, ",") + ")"
+	}
+	return query + " ORDER BY e.id ASC", args
 }
 
 func federationGroupIssueIDs(

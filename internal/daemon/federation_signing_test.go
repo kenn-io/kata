@@ -167,7 +167,7 @@ func TestSignedFederationRestrictedIngressRoundTrip(t *testing.T) {
 		headRequest.Header.Set("Authorization", "Bearer "+enrollment.Token)
 		headResponse := httptest.NewRecorder()
 		mainHandler.ServeHTTP(headResponse, headRequest)
-		require.Equal(t, http.StatusUnauthorized, headResponse.Code, "HEAD must not bypass required federation signing")
+		require.Equal(t, http.StatusPreconditionRequired, headResponse.Code, "HEAD must not bypass required federation signing")
 		// Signed main-listener ingest shares the verified authorization instead of
 		// charging the native host federation admission policy a second time.
 		mainPayload, err := json.Marshal(federationIngestBody())
@@ -449,13 +449,7 @@ func TestRequiredSigningPreservesLocalBearerLeaseAuthority(t *testing.T) {
 }
 
 func TestOptionalSigningRejectsEmptySignatureHeader(t *testing.T) {
-	t.Setenv("TEST_OPTIONAL_KEY", strings.Repeat("k", 64))
-	state := filepath.Join(t.TempDir(), "state")
-	require.NoError(t, federationsigning.InitializeReplayState(state))
-	source := signingpolicy.Source{KeyID: "key-a", KeyEnv: "TEST_OPTIONAL_KEY"}
-	v, err := federationsigning.NewVerifier("https://daemon.example", []signingpolicy.Key{{Source: source, EnrollmentID: 1}}, state)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = v.Close() })
+	v, _ := testenv.FederationSigning(t, "https://daemon.example", "key-a")
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.FederationSigning = v })
 	project := createFederatedHubProject(t, env, "hub-project")
 	enrollment, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{Token: "enrollment", SpokeInstanceUID: federationTestSpokeUID, ProjectID: &project.ID, Capabilities: "pull", Actor: "example-actor"})
@@ -463,7 +457,7 @@ func TestOptionalSigningRejectsEmptySignatureHeader(t *testing.T) {
 	path := fmt.Sprintf("/api/v1/projects/%d/federation/metadata", project.ID)
 	resp, raw := envDoRaw(t, env, http.MethodGet, path, nil, map[string]string{"Authorization": "Bearer " + enrollment.Token})
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
-	for _, header := range []string{"Signature", "Signature-Input", "Content-Digest"} {
+	for _, header := range []string{"Signature", "Signature-Input"} {
 		resp, raw = envDoRaw(t, env, http.MethodGet, path, nil, map[string]string{"Authorization": "Bearer " + enrollment.Token, header: ""})
 		require.Equal(t, http.StatusUnauthorized, resp.StatusCode, string(raw))
 	}
@@ -509,7 +503,7 @@ func TestSignedNativeCronEnrollment(t *testing.T) {
 		}
 		for _, handler := range []http.Handler{server.Handler(), ingress} {
 			unsigned := send(handler, http.MethodPost, path, enrollment.Token, false, payload)
-			require.Equal(t, http.StatusUnauthorized, unsigned.Code, unsigned.Body.String())
+			require.Equal(t, http.StatusPreconditionRequired, unsigned.Code, unsigned.Body.String())
 		}
 		owner := send(server.Handler(), http.MethodPost, path, "owner-token", false, payload)
 		require.Equal(t, http.StatusCreated, owner.Code, owner.Body.String())

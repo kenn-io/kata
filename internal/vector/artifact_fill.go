@@ -17,21 +17,21 @@ import (
 // FillWithArtifacts uses the existing kit fill flow and local serialization.
 // Canonical artifacts are retained before backend-specific vector conversion.
 func (ix *Index) FillWithArtifacts(ctx context.Context, key string, source db.Storage, recipe embedding.ArtifactIdentity, enc kitvec.EncodeFunc, scanBatch int, batchOptions []kitvec.BatchOption, onDocument func(bool), eligibility ...func(context.Context, string) (bool, error)) (kitvec.FillStats, error) {
-	stats, _, err := ix.FillWithArtifactsDetailed(ctx, key, source, recipe, enc, scanBatch, batchOptions, onDocument, eligibility...)
+	stats, _, err := ix.FillWithArtifactsDetailed(ctx, key, source, recipe, enc, scanBatch, batchOptions, onDocument, nil, eligibility...)
 	return stats, err
 }
 
 // FillWithArtifactsDetailed reports documents still pending only because the
 // caller denied generation eligibility. They remain unstamped and retryable,
 // but do not block cutover once all eligible work is complete.
-func (ix *Index) FillWithArtifactsDetailed(ctx context.Context, key string, source db.Storage, recipe embedding.ArtifactIdentity, enc kitvec.EncodeFunc, scanBatch int, batchOptions []kitvec.BatchOption, onDocument func(bool), eligibility ...func(context.Context, string) (bool, error)) (kitvec.FillStats, int, error) {
+func (ix *Index) FillWithArtifactsDetailed(ctx context.Context, key string, source db.Storage, recipe embedding.ArtifactIdentity, enc kitvec.EncodeFunc, scanBatch int, batchOptions []kitvec.BatchOption, onDocument func(bool), allowed func(context.Context, string) (bool, error), eligibility ...func(context.Context, string) (bool, error)) (kitvec.FillStats, int, error) {
 	artifacts, ok := source.(db.EmbeddingArtifactStorage)
 	if !ok {
 		stats, err := ix.Fill(ctx, key, enc, scanBatch, batchOptions, onDocument)
 		return stats, 0, err
 	}
 	exporter, _ := source.(db.EmbeddingArtifactExporter)
-	backing := &artifactCaptureStore{Store: ix.flowStore, index: ix, source: source, artifacts: artifacts, exporter: exporter, recipe: recipe, generation: key, pending: map[string]artifactPending{}, ineligible: map[string]struct{}{}, stale: map[string]struct{}{}}
+	backing := &artifactCaptureStore{Store: ix.flowStore, index: ix, source: source, artifacts: artifacts, exporter: exporter, recipe: recipe, generation: key, pending: map[string]artifactPending{}, ineligible: map[string]struct{}{}, stale: map[string]struct{}{}, allowed: allowed}
 	if len(eligibility) > 0 {
 		backing.eligible = eligibility[0]
 	}
@@ -69,6 +69,7 @@ type artifactCaptureStore struct {
 	pageOrder   []string
 	prepared    map[string]preparedDocument
 	eligible    func(context.Context, string) (bool, error)
+	allowed     func(context.Context, string) (bool, error)
 	pageAllowed map[string]bool
 	pageChecked map[string]bool
 	deferred    map[string]bool
@@ -237,7 +238,17 @@ func (s *artifactCaptureStore) reuseArtifacts(ctx context.Context, key string, i
 		if received != comparison {
 			continue
 		}
-		imported, err := s.index.reuseArtifact(ctx, key, s.source, artifact, expected, scanned.Revision)
+		allowed := s.allowed
+		if allowed != nil {
+			allowed = func(ctx context.Context, projectUID string) (bool, error) {
+				permitted, err := s.allowed(ctx, projectUID)
+				if err == nil && !permitted {
+					s.deferred[artifact.IssueUID] = true
+				}
+				return permitted, err
+			}
+		}
+		imported, err := s.index.reuseArtifact(ctx, key, s.source, artifact, expected, scanned.Revision, allowed, false)
 		if err != nil {
 			return err
 		}

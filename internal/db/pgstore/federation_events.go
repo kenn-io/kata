@@ -31,7 +31,7 @@ func (s *Store) PendingFederationPushEvents(
 	}
 	output, err := s.queryPendingFederationPushEvents(ctx, eventSelect+`
 WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3
-  AND `+pgFederationPushEventTypeCondition("e.type")+`
+  AND `+db.FederationUnresolvedEventSQL("e")+`
 ORDER BY e.id ASC LIMIT $4`, projectID, originInstanceUID, afterID, limit)
 	if err != nil {
 		return nil, err
@@ -51,7 +51,7 @@ WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND e.type IN (`+
      WHERE barrier.project_id=$1
        AND barrier.origin_instance_uid=$2
        AND barrier.id>$4
-       AND `+pgFederationPushEventTypeCondition("barrier.type")+`
+       AND `+db.FederationUnresolvedEventSQL("barrier")+`
        AND barrier.type NOT IN (`+db.FederationSnapshotEventTypesSQL()+`)
   ), 9223372036854775807)
 ORDER BY e.id ASC`, projectID, originInstanceUID, output[len(output)-1].ID, runStartAfterID)
@@ -104,8 +104,8 @@ func (s *Store) PendingFederationPushStats(
 
 	var count int64
 	var highWater sql.NullInt64
-	err := s.QueryRowContext(ctx, `SELECT COUNT(*),MAX(id) FROM events
-WHERE project_id=$1 AND origin_instance_uid=$2 AND id>$3 AND `+pgFederationPushEventTypeCondition("type"),
+	err := s.QueryRowContext(ctx, `SELECT COUNT(*),MAX(e.id) FROM events e
+WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND `+db.FederationUnresolvedEventSQL("e"),
 		projectID, originInstanceUID, afterID).Scan(&count, &highWater)
 	if err != nil {
 		return 0, 0, mapSQLError(err, nil)
@@ -135,6 +135,9 @@ func (s *Store) InsertRemoteEvents(ctx context.Context, projectID int64, events 
 	for i, remote := range events {
 		payload, createdAt, err := db.ValidateRemoteEventContentHash(remote)
 		if err != nil {
+			return nil, err
+		}
+		if _, err := db.RemoteEventIssueUID(remote); err != nil {
 			return nil, err
 		}
 		if err := db.ValidateFederationEntries(remote.Type, remote.EventUID, payload); err != nil {

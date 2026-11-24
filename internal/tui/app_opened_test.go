@@ -25,6 +25,7 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/telemetry"
 	"go.kenn.io/kata/internal/testenv"
+	"go.kenn.io/kata/internal/version"
 )
 
 type recordingTelemetry struct {
@@ -57,6 +58,26 @@ func (r *recordingTelemetry) Capture(event string, properties map[string]any) er
 		close(r.finished)
 	}
 	return nil
+}
+
+func TestTaggedGoInstallDoesNotSendTUIUsage(t *testing.T) {
+	oldVersion, oldCommit := version.Version, version.Commit
+	version.Version, version.Commit = "v0.23.0", "unknown"
+	t.Cleanup(func() { version.Version, version.Commit = oldVersion, oldCommit })
+	t.Setenv("TELEMETRY_ENABLED", "1")
+	t.Setenv("KATA_HOME", t.TempDir())
+	var requests atomic.Int32
+	hc := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		requests.Add(1)
+		return &http.Response{StatusCode: http.StatusAccepted, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"status":"queued"}`)), Request: r}, nil
+	})}
+	c := NewClient("http://127.0.0.1:27123", hc)
+	require.NoError(t, c.ReportAppOpened(t.Context()))
+	assert.Nil(t, issueActionSurface(t.Context()))
+	assert.Zero(t, requests.Load())
+	version.Commit = "1234567"
+	require.NoError(t, c.ReportAppOpened(t.Context()))
+	assert.EqualValues(t, 1, requests.Load())
 }
 
 func TestReportAppOpenedReachesDaemonCapture(t *testing.T) {
@@ -595,7 +616,7 @@ func TestOutcomesShownFormErrors(t *testing.T) {
 			m.input = newNewIssueForm()
 			expected := "issue_created"
 			if kind == inputCloseForm {
-				m.input = newCloseForm(formTarget{issueUID: "01TEST-aaa1", issueShortID: "aaa1", projectID: 7, detailGen: 2, origin: "list"})
+				m.input = newCloseForm(formTarget{issueUID: "01TEST-aaa1", issueShortID: "aaa1", projectID: 7, detailGen: 2, origin: "list"}, nil)
 				expected = "issue_closed"
 			}
 			m, cmd := m.commitFormInput(kind)

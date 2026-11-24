@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/activity"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/vector"
@@ -37,6 +38,7 @@ type ReconcilerConfig struct {
 	// The final argument requests artifact synchronization before authorization.
 	// Later documents in the same fill need only fresh authority checks.
 	FederationProducerAllowed func(context.Context, string, embedding.ArtifactIdentity, activity.Admission, bool) (bool, error)
+	EmbeddingProjectAllowed   func(context.Context, string) (bool, error)
 }
 
 // ReconcilerHealth is the operator-visible state surfaced in /health.
@@ -93,6 +95,21 @@ type embeddingProgress struct {
 }
 
 const progressRateAlpha = 0.3
+
+// NewConfiguredEmbeddingReconciler shares the embedding producer policy across hosts.
+func NewConfiguredEmbeddingReconciler(store db.Storage, idx *vector.Index, emb *embedding.Client, cfg config.EmbeddingsConfig, publisher EventPublisher, admission activity.WaitableAdmission, credentials config.FederationCredentialStore, connected, authorized func(context.Context, db.Storage, config.FederationCredentialStore, string, embedding.ArtifactIdentity) (bool, error), allowed func(context.Context, string) (bool, error)) *Reconciler {
+	return NewReconciler(store, idx, emb, ReconcilerConfig{
+		BatchSize: cfg.BatchSize, BatchOptions: embedding.BatchOptions(cfg, emb.BatchSize()), DrainAdmission: admission,
+		OnProjectEvent: func(event db.Event, fork activity.Admission) { publisher.EventFrom(event.ProjectID, event, fork) },
+		FederationProducerAllowed: func(ctx context.Context, projectUID string, recipe embedding.ArtifactIdentity, _ activity.Admission, syncArtifacts bool) (bool, error) {
+			if syncArtifacts {
+				return connected(ctx, store, credentials, projectUID, recipe)
+			}
+			return authorized(ctx, store, credentials, projectUID, recipe)
+		},
+		EmbeddingProjectAllowed: allowed,
+	})
+}
 
 // NewReconciler constructs a reconciler. It does no I/O.
 func NewReconciler(store db.Storage, idx *vector.Index, emb embedder, cfg ReconcilerConfig) *Reconciler {
@@ -313,7 +330,7 @@ func requestRejected(apiErr *embedclient.APIError) bool {
 // documents are filled; documents withheld by shared-project policy do not
 // keep the old recipe active.
 func (r *Reconciler) reconcileOnce(ctx context.Context) error {
-	if _, err := r.idx.RefreshMirror(ctx, r.store); err != nil {
+	if _, err := r.idx.RefreshMirror(ctx, r.store, r.cfg.EmbeddingProjectAllowed); err != nil {
 		r.markError(err)
 		return err
 	}
@@ -342,7 +359,7 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) error {
 			return err
 		}
 		portableRecipe = &recipe
-		if _, err := r.idx.ReconcileArtifacts(ctx, key, r.store, recipe); err != nil {
+		if _, err := r.idx.ReconcileArtifacts(ctx, key, r.store, recipe, r.cfg.EmbeddingProjectAllowed); err != nil {
 			r.markError(err)
 			return err
 		}
@@ -362,7 +379,7 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) error {
 		// connection defers its remaining documents until the next fill, while
 		// successful connections still revalidate live authority per document.
 		checked := make(map[string]bool)
-		_, eligibilityDeferred, fillErr = r.idx.FillWithArtifactsDetailed(ctx, key, r.store, *portableRecipe, r.emb.EncodeFunc(), r.cfg.BatchSize, r.cfg.BatchOptions, r.markDocumentFilled, func(ctx context.Context, projectUID string) (bool, error) {
+		_, eligibilityDeferred, fillErr = r.idx.FillWithArtifactsDetailed(ctx, key, r.store, *portableRecipe, r.emb.EncodeFunc(), r.cfg.BatchSize, r.cfg.BatchOptions, r.markDocumentFilled, r.cfg.EmbeddingProjectAllowed, func(ctx context.Context, projectUID string) (bool, error) {
 			previous, exists := checked[projectUID]
 			if exists && !previous {
 				return false, nil

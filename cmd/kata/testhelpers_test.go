@@ -36,6 +36,8 @@ func setupKataEnv(t *testing.T) string {
 	tmp := t.TempDir()
 	t.Setenv("KATA_HOME", tmp)
 	t.Setenv("KATA_DB", filepath.Join(tmp, "kata.db"))
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
 	return tmp
 }
 
@@ -567,6 +569,7 @@ type IssueResponse struct {
 		ShortID  string  `json:"short_id"`
 		UID      string  `json:"uid"`
 		Title    string  `json:"title"`
+		Body     string  `json:"body"`
 		Owner    *string `json:"owner"`
 		Priority *int64  `json:"priority"`
 		Status   string  `json:"status"`

@@ -16,7 +16,7 @@ import (
 func newEditCmd() *cobra.Command {
 	var (
 		title    string
-		body     string
+		src      BodySources
 		owner    string
 		priority string
 
@@ -33,6 +33,7 @@ func newEditCmd() *cobra.Command {
 		Use:   "edit <issue-ref>",
 		Short: "edit issue title/body/owner/priority and relationships",
 		Long: `Change title, body, owner, or priority, and add or remove relationships.
+The new body comes from one of --body, --body-file, or --body-stdin.
 Relationships read from this issue's point of view:
   --blocks X      this issue must finish before X (gates X in kata ready)
   --blocked-by X  X must finish before this issue
@@ -42,11 +43,17 @@ Relationships read from this issue's point of view:
 idempotent. Labels use kata label; metadata uses kata meta.`,
 		Example: `  kata edit abc4 --blocked-by d4ex --agent
   kata edit abc4 --title "fix login race in Safari" --priority 1 --agent
-  kata edit abc4 --remove-blocks d4ex --related j7m2 --agent`,
+  kata edit abc4 --remove-blocks d4ex --related j7m2 --agent
+  kata edit abc4 --body-file body.md --agent
+  kata edit abc4 --body-stdin --agent <<-'EOF'
+	Safari 18 fires the callback twice.
+	EOF`,
 		Args: cobra.ExactArgs(1),
 	}
 	cmd.Flags().StringVar(&title, "title", "", "new title")
-	cmd.Flags().StringVar(&body, "body", "", "new body")
+	cmd.Flags().StringVar(&src.Body, "body", "", "new body")
+	cmd.Flags().StringVar(&src.File, "body-file", "", "read body from file")
+	cmd.Flags().BoolVar(&src.Stdin, "body-stdin", false, "read body from stdin")
 	cmd.Flags().StringVar(&owner, "owner", "", "new owner")
 	cmd.Flags().StringVar(&priority, "priority", "",
 		"new priority (0..4; 0 = highest). Pass '-' to clear.")
@@ -89,7 +96,20 @@ idempotent. Labels use kata label; metadata uses kata meta.`,
 			}
 			payload["title"] = title
 		}
-		if cmd.Flags().Changed("body") {
+		src.BodySet = cmd.Flags().Changed("body")
+		src.FileSet = cmd.Flags().Changed("body-file")
+		if src.BodySet || src.FileSet || src.Stdin {
+			body, err := resolveBody(src, cmd.InOrStdin())
+			if err != nil {
+				return err
+			}
+			if body == "" && !src.BodySet {
+				return &cliError{
+					Message:  `body from --body-file or --body-stdin is empty; to clear the body pass --body ""`,
+					Kind:     kindValidation,
+					ExitCode: ExitValidation,
+				}
+			}
 			payload["body"] = body
 		}
 		if cmd.Flags().Changed("owner") {
@@ -153,7 +173,7 @@ idempotent. Labels use kata label; metadata uses kata meta.`,
 		hasMutation := len(payload) > 0
 		if !hasMutation {
 			return &cliError{
-				Message: "pass at least one of --title, --body, --owner, --priority, " +
+				Message: "pass at least one of --title, --body, --body-file, --body-stdin, --owner, --priority, " +
 					"--parent, --blocks, --blocked-by, --related, " +
 					"--remove-parent, --remove-blocks, --remove-blocked-by, --remove-related",
 				Kind:     kindValidation,

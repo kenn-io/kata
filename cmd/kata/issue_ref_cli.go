@@ -5,6 +5,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	kataclient "go.kenn.io/kata/pkg/client"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/shortid"
 )
 
 // resolveIssueRefForCommand parses one positional issue-ref argument, resolves
@@ -64,6 +66,13 @@ func resolveIssueRefForCommandWithOptions(
 			ExitCode: ExitValidation,
 		}
 	}
+	project, numeric, err := resolveNumericRefProject(cmd, a, ref, includeArchivedProject)
+	if err != nil {
+		return nil, "", 0, resolvedIssueRef{}, err
+	}
+	if numeric {
+		return a.ctx, a.baseURL, project.ID, resolvedIssueRef{RefForAPI: parsed.RefForAPI, ProjectName: project.Name}, nil
+	}
 	pid, projectName, err := resolveProjectIDAndNameForRef(
 		a, start, parsed.ProjectName, includeArchivedProject,
 	)
@@ -74,6 +83,30 @@ func resolveIssueRefForCommandWithOptions(
 		RefForAPI:   parsed.RefForAPI,
 		ProjectName: projectName,
 	}, nil
+}
+
+// resolveNumericRefProject supports numeric project IDs for bare UIDs in show and comment.
+func resolveNumericRefProject(cmd *cobra.Command, a daemonAPI, ref string, includeArchived bool) (projectRef, bool, error) {
+	if cmd.Name() != "show" && cmd.Name() != "comment" && (cmd.Parent() == nil || cmd.Parent().Name() != "comment") {
+		return projectRef{}, false, nil
+	}
+	parsed, err := shortid.Parse(ref)
+	if err != nil || parsed.ULID == "" {
+		return projectRef{}, false, nil
+	}
+	selector := strings.TrimSpace(flags.Project)
+	if selector == "" {
+		return projectRef{}, false, nil
+	}
+	if _, err := strconv.ParseInt(selector, 10, 64); err != nil {
+		return projectRef{}, false, nil
+	}
+	if includeArchived {
+		project, err := resolveProjectSelectorIncludingArchived(a, selector)
+		return project, true, err
+	}
+	project, err := resolveProjectSelector(a, selector)
+	return project, true, err
 }
 
 // resolveProjectIDAndNameForRef resolves the project ID + canonical project
@@ -139,6 +172,7 @@ func hydrateRefWithQualified(ctx context.Context, baseURL string, pid int64, ref
 	if err := json.Unmarshal(bs, &out); err != nil {
 		return ref, err
 	}
+	ref.CurrentProjectID = out.Issue.ProjectID
 	// Former short IDs and ULIDs can resolve to an issue that moved out of
 	// the route's project. Confirmation must name its current project.
 	if out.Issue.ProjectID != 0 && out.Issue.ProjectID != pid {

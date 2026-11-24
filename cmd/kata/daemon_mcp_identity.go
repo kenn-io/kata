@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
@@ -20,11 +21,37 @@ import (
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
+type modernTokenState struct {
+	admission *mcpserver.ToolAdmission
+	sections  mcpserver.LoadedSections
+}
+
+type modernTokenStates struct {
+	tokens sync.Map
+}
+
+func (s *modernTokenStates) get(ctx context.Context, id string, expiration time.Time) *modernTokenState {
+	shared, loaded := s.tokens.LoadOrStore(id, &modernTokenState{admission: mcpserver.NewToolAdmission()})
+	state := shared.(*modernTokenState)
+	if !loaded && !expiration.IsZero() {
+		go func() {
+			timer := time.NewTimer(time.Until(expiration))
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+				s.tokens.CompareAndDelete(id, state)
+			case <-ctx.Done():
+			}
+		}()
+	}
+	return state
+}
+
 func newDaemonMCPIdentityHandler(ctx context.Context, store db.Storage, cfg config.MCPConfig, scope *mcpserver.Scope, endpoint kitdaemon.Endpoint, auth config.AuthConfig) (http.Handler, error) {
-	// Each session owns its clients and reporter; release returns them when the
-	// session ends. The daemon's Unix listener never times out idle
-	// connections, so a session that kept its pool would hold them forever.
-	newServer := func(reqCtx context.Context, bearer, actor string) (*sdkmcp.Server, func(), error) {
+	// Each legacy session or modern request owns its clients and reporter.
+	// The daemon's Unix listener never times out idle connections, so a
+	// session that kept its pool would hold them forever.
+	newServer := func(reqCtx context.Context, bearer, actor string, modern bool, admission *mcpserver.ToolAdmission, loaded *mcpserver.LoadedSections) (*sdkmcp.Server, func(), error) {
 		resolved := client.ResolvedDaemon{
 			Address: endpoint.Address, Network: endpoint.Network, BaseURL: endpoint.BaseURL(),
 			Token: bearer, TrustPrivateNetwork: auth.TrustPrivateNetwork, Direct: true,
@@ -49,8 +76,9 @@ func newDaemonMCPIdentityHandler(ctx context.Context, store db.Storage, cfg conf
 		if err != nil {
 			return nil, nil, err
 		}
-		// The reporter outlives the initialize request, so it uses the mount's context.
-		observe, stopReporting := startMCPAgentUseReporter(ctx, apiClient, resolved)
+		// Reporting outlives initialize and modern request cleanup, so it uses
+		// the mount context, which still cancels all reporting on shutdown.
+		observe, stopReporting := startMCPAgentUseReporter(ctx, apiClient, resolved, modern)
 		release := func() {
 			stopReporting()
 			httpClient.CloseIdleConnections()
@@ -60,7 +88,7 @@ func newDaemonMCPIdentityHandler(ctx context.Context, store db.Storage, cfg conf
 			Client: apiClient, LongRunningClient: longRunningClient,
 			Scope: scope, Actor: actor, Version: version.Version,
 			StartupSections: cfg.StartupSections,
-			ObserveToolCall: observe,
+			ObserveToolCall: observe, Events: modern, Admission: admission, LoadedSections: loaded,
 		})
 		if err != nil {
 			release()
@@ -70,19 +98,24 @@ func newDaemonMCPIdentityHandler(ctx context.Context, store db.Storage, cfg conf
 	}
 	// Validate startup sections now, retaining the mount's existing 503 behavior.
 	// This server is never served and has no credential or bootstrap authority.
-	_, release, err := newServer(ctx, "", "identity-token")
+	_, release, err := newServer(ctx, "", "identity-token", false, nil, nil)
 	if err != nil {
 		return nil, err
 	}
 	release()
 	type serverKey struct{}
-	stream := sdkmcp.NewStreamableHTTPHandler(func(r *http.Request) *sdkmcp.Server {
+	selectServer := func(r *http.Request) *sdkmcp.Server {
 		server, _ := r.Context().Value(serverKey{}).(*sdkmcp.Server)
 		return server
-	}, &sdkmcp.StreamableHTTPOptions{
-		SessionTimeout: 30 * time.Minute, PropagateRequestCancellation: true,
+	}
+	stream := mcpserver.NewHTTPHandler(selectServer, selectServer, mcpserver.HTTPOptions{
 		DisableLocalhostProtection: true, // daemon listener policy validates Host
 	})
+	// Modern requests share admission and section selections only within one
+	// verified credential. Legacy sessions retain their own limits and catalog.
+	// No credentials, clients, reporters or servers are cached.
+	var modernTokens modernTokenStates
+
 	verify := func(ctx context.Context, bearer string, _ *http.Request) (*sdkauth.TokenInfo, error) {
 		if auth.Token != "" && subtle.ConstantTimeCompare([]byte(bearer), []byte(auth.Token)) == 1 {
 			return nil, sdkauth.ErrInvalidToken
@@ -106,16 +139,29 @@ func newDaemonMCPIdentityHandler(ctx context.Context, store db.Storage, cfg conf
 		return info, nil
 	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Mcp-Session-Id") == "" {
+		modern := mcpserver.IsModernRequest(r)
+		if modern || r.Header.Get("Mcp-Session-Id") == "" {
 			info := sdkauth.TokenInfoFromContext(r.Context())
 			bearer := strings.Fields(r.Header.Get("Authorization"))[1] // verified by SDK middleware
-			server, release, err := newServer(r.Context(), bearer, info.Extra["actor"].(string))
+			var admission *mcpserver.ToolAdmission
+			var loaded *mcpserver.LoadedSections
+			if modern {
+				state := modernTokens.get(ctx, info.UserID, info.Expiration)
+				admission, loaded = state.admission, &state.sections
+			}
+			server, release, err := newServer(r.Context(), bearer, info.Extra["actor"].(string), modern, admission, loaded)
 			if err != nil {
 				http.Error(w, "MCP session unavailable", http.StatusServiceUnavailable)
 				return
 			}
+			if modern {
+				// Finish queued reports within their bound before closing request-owned clients.
+				defer func() { go release() }()
+			}
 			stream.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), serverKey{}, server)))
-			releaseWhenSessionsEnd(server, release)
+			if !modern {
+				releaseWhenSessionsEnd(server, release)
+			}
 			return
 		}
 		stream.ServeHTTP(w, r)

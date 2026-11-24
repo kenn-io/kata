@@ -57,9 +57,21 @@ func registerEventsHandlers(humaAPI huma.API, mux *http.ServeMux, cfg ServerConf
 			return nil, err
 		}
 		if in.Issue != "" {
-			issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Issue, db.IncludeDeletedNo)
+			// Under a host access controller deleted history stays hidden, so
+			// resolve exactly as before deleted history was readable: a deleted
+			// issue is simply not found, and no other error can reveal it.
+			include := db.IncludeDeletedYes
+			if hostAccessGoverns(ctx) {
+				include = db.IncludeDeletedNo
+			}
+			issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Issue, include)
 			if err != nil {
 				return nil, err
+			}
+			if issue.DeletedAt != nil {
+				if err := requireDeletedHistoryAccess(ctx, cfg, in.ProjectID, issue, in.Actor); err != nil {
+					return nil, err
+				}
 			}
 			return pollIssueHistory(ctx, cfg.DB, in.AfterID, in.Limit, issue, in.IncludeEffectiveCloseEventUID)
 		}
@@ -319,6 +331,10 @@ func hiddenEventRequiresScopedReset(
 			return true, nil
 		}
 		return hiddenIssueTouchesScope(ctx, store, event.IssueID, allowed)
+	case db.RepeatedImportEventType:
+		// A whole copy can close, reopen, or delete a hidden issue, which
+		// changes the readiness of a related issue in scope.
+		return hiddenIssueTouchesScope(ctx, store, event.IssueID, allowed)
 	case "issue.snapshot":
 		// Federation snapshots establish an issue baseline. Later relationship
 		// changes arrive as link events, so only a currently related hidden
@@ -484,12 +500,13 @@ func issueScopedEventInScope(event db.Event, allowed map[int64]struct{}, project
 
 func scopedEventPayload(event db.Event) (string, bool) {
 	allowedKeys := map[string]map[string]struct{}{
-		"issue.created":        keySet("title", "body", "owner", "priority", "labels", "metadata", "created_at"),
-		"issue.updated":        keySet("title", "body", "owner", "changes", "updated_at"),
-		"issue.commented":      keySet("comment_uid", "author", "teammate", "body", "created_at"),
-		"issue.comment_edited": keySet("comment_uid", "body", "edited_at"),
-		"issue.assigned":       keySet("owner", "assignment_expires_on", "updated_at"),
-		"issue.unassigned":     keySet("owner"),
+		"issue.created":            keySet("title", "body", "owner", "priority", "labels", "metadata", "created_at"),
+		"issue.updated":            keySet("title", "body", "owner", "changes", "updated_at"),
+		db.RepeatedImportEventType: keySet("title", "body", "owner", "updated_at"),
+		"issue.commented":          keySet("comment_uid", "author", "teammate", "body", "created_at"),
+		"issue.comment_edited":     keySet("comment_uid", "body", "edited_at"),
+		"issue.assigned":           keySet("owner", "assignment_expires_on", "updated_at"),
+		"issue.unassigned":         keySet("owner"),
 		"issue.assignment_renewed": keySet(
 			"owner", "old_assignment_expires_on", "assignment_expires_on", "updated_at",
 		),
@@ -1264,4 +1281,39 @@ func sseFrameBytes(id int64, eventType string, data []byte) []byte {
 	buf.Write(data)
 	buf.WriteString("\n\n")
 	return buf.Bytes()
+}
+
+// requireDeletedHistoryAccess lets a soft-deleted issue's history be read by
+// whoever the restore action would accept: the same attributed-actor and claim
+// checks restore runs, with requestActor standing in for restore's body actor.
+// An insecure-readonly caller is anonymous, and restore refuses it before any
+// handler runs, so it is refused here too. Under a host access controller the
+// caller never reaches this function: its restore decisions carry transaction
+// fences this read cannot honor, so the handler resolves with deleted issues
+// excluded and deleted history answers issue_not_found as it did before this
+// feature. Every refusal (an API error below 500 other than a hub
+// error) answers issue_not_found; 5xx, federation_offline and hub_claim_failed
+// keep their status.
+func requireDeletedHistoryAccess(ctx context.Context, cfg ServerConfig, projectID int64, issue db.Issue, requestActor string) error {
+	notFound := api.NewError(404, "issue_not_found", "issue not found", "", nil)
+	if insecureReadonlyRequest(ctx) {
+		return notFound
+	}
+	actor, err := attributedActor(ctx, requestActor)
+	if err != nil {
+		return notFound
+	}
+	err = requireFederatedIssueClaim(ctx, cfg, projectID, issue, actor)
+	return refuseDeletedHistory(err, notFound)
+}
+
+// refuseDeletedHistory maps an API error below 500 (other than a hub error) to
+// notFound and passes every other error, including nil, through.
+func refuseDeletedHistory(err, notFound error) error {
+	var apiErr *api.APIError
+	if errors.As(err, &apiErr) && apiErr.Status < http.StatusInternalServerError &&
+		apiErr.Code != "hub_claim_failed" {
+		return notFound
+	}
+	return err
 }

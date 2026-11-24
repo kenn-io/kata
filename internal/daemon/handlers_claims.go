@@ -804,6 +804,9 @@ func claimHubNow(claim *api.IssueClaimOut) time.Time {
 
 func claimForwardError(err error) error {
 	if statusErr, ok := errors.AsType[*claimHubStatusError](err); ok {
+		if statusErr.StatusCode == http.StatusUnauthorized {
+			return federationBridgeHubRejection(statusErr.StatusCode)
+		}
 		if statusErr.StatusCode == http.StatusServiceUnavailable && hubStatusErrorCode(statusErr) == "federation_offline" {
 			return api.NewError(http.StatusServiceUnavailable, "federation_offline", statusErr.Error(), "", nil)
 		}
@@ -821,6 +824,40 @@ type claimHubClient struct {
 	baseURL      string
 	client       *http.Client
 	transportErr error
+}
+
+func (c *claimHubClient) SearchShared(ctx context.Context, projectID int64, p hybridParams, limit int) (api.FederationSearchResponseBody, error) {
+	if c.transportErr != nil {
+		return api.FederationSearchResponseBody{}, c.transportErr
+	}
+	client, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(claimHubDoer{client: c.client}))
+	if err != nil {
+		return api.FederationSearchResponseBody{}, err
+	}
+	count := int64(limit)
+	query := &generated.SearchFederationProjectQuery{Q: p.Query, Limit: &count, Label: p.Labels, ExcludeLabel: p.ExcludeLabels}
+	if p.Requested == "" || p.Requested == "auto" {
+		auto := true
+		query.Auto = &auto
+	}
+	if p.Status != "" {
+		status := generated.SearchFederationProjectQueryStatus(p.Status)
+		query.Status = &status
+	}
+	response, err := client.SearchFederationProjectWithResponse(ctx, &generated.SearchFederationProjectRequestOptions{PathParams: &generated.SearchFederationProjectPath{ProjectID: projectID}, Query: query})
+	if err != nil {
+		return api.FederationSearchResponseBody{}, err
+	}
+	var body api.FederationSearchResponse
+	if err := json.Unmarshal(response.Body, &body.Body); err != nil {
+		return api.FederationSearchResponseBody{}, err
+	}
+	switch body.Body.Mode {
+	case "", string(modeLexical), string(modeSemantic), string(modeHybrid):
+	default:
+		return api.FederationSearchResponseBody{}, fmt.Errorf("unsupported hub search mode %q", body.Body.Mode)
+	}
+	return body.Body, nil
 }
 
 type claimHubStatusError struct {

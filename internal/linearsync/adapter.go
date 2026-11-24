@@ -133,10 +133,24 @@ func (a *Adapter) Prepare(ctx context.Context, b db.IssueSyncBinding, startedAt 
 		return prepared, err
 	}
 	eligible := make([]Issue, 0, len(items))
+	ids := make([]string, 0, len(items))
 	for _, i := range items {
 		if cutoff == nil || i.UpdatedAt.After(*cutoff) {
 			eligible = append(eligible, i)
+			ids = append(ids, i.ID)
 		}
+	}
+	issuesync.ReportProgress(ctx, "comments", 0, 0)
+	comments, err := s.Comments(ctx, c, ids)
+	if err != nil {
+		return prepared, err
+	}
+	byIssue := map[string][]Comment{}
+	for _, comment := range comments {
+		byIssue[comment.IssueID] = append(byIssue[comment.IssueID], comment)
+	}
+	for n := range eligible {
+		eligible[n].Comments = byIssue[eligible[n].ID]
 	}
 	batch, err := BuildImportBatch(b.SourceKey, c, scope, states, eligible)
 	if err != nil {

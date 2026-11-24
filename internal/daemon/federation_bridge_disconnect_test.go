@@ -59,6 +59,14 @@ func (s *bridgeDisconnectPartialSetupStore) ValidateRelayLifecycle(ctx context.C
 	return nil
 }
 
+func (s *bridgeDisconnectPartialSetupStore) ValidateFederationLeave(ctx context.Context, projectID int64) error {
+	return s.Storage.(db.RelayLifecycleStore).ValidateFederationLeave(ctx, projectID)
+}
+
+func (s *bridgeDisconnectPartialSetupStore) FenceFederationLeave(ctx context.Context, projectID int64) error {
+	return s.Storage.(db.RelayDisconnectFenceStore).FenceFederationLeave(ctx, projectID)
+}
+
 func (s *bridgeDisconnectPartialSetupStore) FenceRelayDisconnect(ctx context.Context, projectID int64) error {
 	fencer, ok := s.Storage.(db.RelayDisconnectFenceStore)
 	if !ok {

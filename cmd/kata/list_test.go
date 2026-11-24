@@ -559,7 +559,7 @@ func TestList_EmptyStatusHintRetryKeepsFilters(t *testing.T) {
 	runCLI(t, env, dir, "label", "add", hidden, "bug")
 	runCLI(t, env, dir, "label", "add", hidden, "ui")
 	runCLI(t, env, dir, "label", "add", hidden, "wont")
-	runCLI(t, env, dir, "meta", "set", hidden, "work.attention", "needs review")
+	runCLI(t, env, dir, "meta", "set", hidden, "work.branch", "needs review")
 	for _, title := range []string{"unrelated open", "unrelated closed"} {
 		ref := createIssue(t, env, pid, title)
 		runCLI(t, env, dir, "label", "add", ref, "bug")
@@ -573,7 +573,7 @@ func TestList_EmptyStatusHintRetryKeepsFilters(t *testing.T) {
 	ctx := contextWithBaseURL(t.Context(), env.URL)
 
 	out, stderr, err := executeRootCapture(t, ctx, "list", "--project", "kata", "--workspace", workspace, "--json", "--quiet", "--as", "example-agent",
-		"--status", "closed", "--label", "bug", "--label", "ui", "--no-label", `"wont,fix"`, "--meta", "work.attention=needs review", "--limit", "1")
+		"--status", "closed", "--label", "bug", "--label", "ui", "--no-label", `"wont,fix"`, "--meta", "work.branch=needs review", "--limit", "1")
 	require.NoError(t, err, stderr)
 	assert.Empty(t, stderr)
 	var got struct {
@@ -581,23 +581,28 @@ func TestList_EmptyStatusHintRetryKeepsFilters(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(out), &got))
 	require.Len(t, got.Hints, 1)
-	next := "kata list --status all --project kata --workspace '" + strings.ReplaceAll(workspace, "'", `'\''`) + "' --json --quiet --limit 1 --label bug --label ui --no-label '\"wont,fix\"' --meta 'work.attention=needs review'"
+	next := "kata list --status all --project kata --workspace '" + strings.ReplaceAll(workspace, "'", `'\''`) + "' --json --quiet --limit 1 --label bug --label ui --no-label '\"wont,fix\"' --meta 'work.branch=needs review'"
 	if runtime.GOOS == "windows" {
-		next = "& 'kata' 'list' '--status' 'all' '--project' 'kata' '--workspace' '" + strings.ReplaceAll(workspace, "'", "''") + "' '--json' '--quiet' '--limit' '1' '--label' 'bug' '--label' 'ui' '--no-label' '\"wont,fix\"' '--meta' 'work.attention=needs review'"
+		next = "& 'kata' 'list' '--status' 'all' '--project' 'kata' '--workspace' '" + strings.ReplaceAll(workspace, "'", "''") + "' '--json' '--quiet' '--limit' '1' '--label' 'bug' '--label' 'ui' '--no-label' '\"wont,fix\"' '--meta' 'work.branch=needs review'"
 	}
 	assert.Equal(t, cliHint{Code: "excluded_open", Message: "no closed issues match the filters; 1 open match; see " + next, Next: next}, got.Hints[0])
 
-	// The shell prints the arguments it would pass to kata, one per line.
-	shell := []string{"sh", "-c", `kata() { printf '%s\n' "$@"; }; ` + got.Hints[0].Next}
-	if runtime.GOOS == "windows" {
-		shell = []string{"pwsh", "-NoProfile", "-Command", "function kata { $args }; " + got.Hints[0].Next}
-	}
-	output, err := exec.CommandContext(t.Context(), shell[0], shell[1:]...).Output() //nolint:gosec // G204: the test runs the emitted retry.
-	require.NoError(t, err)
-	out, stderr, err = executeRootCapture(t, ctx, strings.Split(strings.TrimSpace(strings.ReplaceAll(string(output), "\r\n", "\n")), "\n")...)
+	out, stderr, err = executeRootCapture(t, ctx, retryShellArgs(t, got.Hints[0].Next)...)
 	require.NoError(t, err, stderr)
 	assert.Contains(t, out, "hidden match")
 	assert.NotContains(t, out, "unrelated")
+}
+
+func retryShellArgs(t *testing.T, command string) []string {
+	t.Helper()
+	// The shell prints the arguments it would pass to kata, one per line.
+	shell := []string{"sh", "-c", `kata() { printf '%s\n' "$@"; }; ` + command}
+	if runtime.GOOS == "windows" {
+		shell = []string{"pwsh", "-NoProfile", "-Command", "function kata { $args }; " + command}
+	}
+	output, err := exec.CommandContext(t.Context(), shell[0], shell[1:]...).Output() //nolint:gosec // G204: the test runs the emitted retry.
+	require.NoError(t, err)
+	return strings.Split(strings.TrimSpace(strings.ReplaceAll(string(output), "\r\n", "\n")), "\n")
 }
 
 // The count runs once, scoped to the listed project, only for an empty first

@@ -22,6 +22,10 @@ func renderFederation(m Model) string {
 	rows := federationSpokeStatuses(m.federation.statuses)
 	cursor := clampFederationCursor(m.federation.cursor, rows)
 	switch m.federation.mode {
+	case federationModeSpokes, federationModeSpokeDetail:
+		return renderFederationSpokes(m)
+	case federationModeSpokeName:
+		return renderFederationSpokeName(m)
 	case federationModeDetail:
 		return renderFederationDetail(m, rows, cursor)
 	case federationModeSelectLocalProject:
@@ -74,7 +78,7 @@ func renderFederation(m Model) string {
 	}
 	body = append(body, "")
 	body = append(body, renderAuxiliaryFooter(m,
-		"[↑/↓ k/j] move  [enter] detail  [esc] back  [r] refresh  [n] enroll  [x] leave  [b] browse hubs  [C] credentials  [?] help"))
+		"[↑/↓ k/j] move  [enter] detail  [esc] back  [r] refresh  [n] enroll  [x] leave  [s] hub spokes  [b] browse hubs  [C] credentials  [?] help"))
 	return strings.Join(body, "\n")
 }
 
@@ -190,6 +194,7 @@ func renderFederationPreview(m Model) string {
 		"hub auth: "+sanitizeForLine(federationAuthDisplay(draft.HubTarget, draft.HubInstance.Auth)),
 		"hub project: "+sanitizeForLine(federationHubProjectBehavior(draft)),
 		"requested actor: "+sanitizeForLine(emptyDash(draft.RequestedActor)),
+		"spoke name: "+sanitizeForLine(emptyDash(draft.SpokeName)),
 		"capabilities: "+sanitizeForLine(draft.DisplayCapabilities),
 		fmt.Sprintf("push enabled: %t", draft.PushEnabled),
 		fmt.Sprintf("allow_insecure: %t", draft.AllowInsecure),
@@ -221,7 +226,7 @@ func renderFederationPreview(m Model) string {
 		body = append(body, "", errorStyle.Render("Blocked: "+sanitizeForLine(draft.BlockedReason)))
 	}
 	body = appendFederationOpErr(body, m)
-	body = append(body, "", renderAuxiliaryFooter(m, "[enter] confirm  [esc] back"))
+	body = append(body, "", renderAuxiliaryFooter(m, "[enter] confirm  [N] spoke name  [esc] back"))
 	return strings.Join(body, "\n")
 }
 
@@ -235,7 +240,7 @@ func renderFederationAdoptConfirm(m Model) string {
 		fmt.Sprintf("federate local project %q INTO hub project %q?",
 			sanitizeForLine(emptyDash(draft.SpokeProjectName)),
 			sanitizeForLine(emptyDash(draft.HubProjectName))),
-		fmt.Sprintf("%q's issues will be adopted into the hub project and its local event history rewritten as snapshots",
+		fmt.Sprintf("%q's issues will be adopted into the hub project; its local event history will be replaced by a record of its current state",
 			sanitizeForLine(emptyDash(draft.SpokeProjectName))),
 		"",
 		fmt.Sprintf("type %q to confirm: %s",

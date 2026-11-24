@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/testenv"
@@ -103,6 +104,15 @@ func TestEvents_OneShotAgentResetRequired(t *testing.T) {
 	out := runCLI(t, env, dir, "--agent", "events", "--after", "0")
 
 	assert.Regexp(t, `^OK events reset_required=true reset_after_id=\d+\n?$`, out)
+}
+
+func TestEvents_OneShotHumanResetRequired(t *testing.T) {
+	env, dir := setupCLIEnv(t)
+	short := createIssueViaHTTP(t, env, dir, "doomed")
+	runCLI(t, env, dir, "purge", short, "--force", "--confirm", "PURGE kata#"+short)
+
+	out := runCLI(t, env, dir, "events", "--after", "0")
+	assert.Regexp(t, `^reset_required: reload your data, then resume with --after \d+\n?$`, out)
 }
 
 func TestEvents_OneShotAllProjectsHitsCrossProject(t *testing.T) {
@@ -364,4 +374,43 @@ func TestEvents_PayloadShape(t *testing.T) {
 	assert.True(t, hasShort, "issue_short_id missing from event row: %v", ev)
 	assert.True(t, hasUID, "issue_uid missing from event row: %v", ev)
 	assert.False(t, hasNumber, "issue_number still present in event row: %v", ev)
+}
+
+// Federated event actors carry a connection suffix; event labels show the name.
+func TestEventsFederatedActorDisplay(t *testing.T) {
+	const id = "11111111-1111-4111-8111-111111111111"
+	const actor = "Ana [member:" + id + "; enrollment:" + id + "]"
+	wire := []byte(`{"events":[{"event_id":7,"type":"issue.created","project_id":1,"project_name":"example-project","issue_short_id":"abc4","actor":"` + actor + `","created_at":"2026-01-02T03:04:05Z"}],"next_after_id":7}`)
+
+	t.Run("human", func(t *testing.T) {
+		var out bytes.Buffer
+		cmd := &cobra.Command{}
+		cmd.SetOut(&out)
+		require.NoError(t, printEventsHuman(cmd, wire))
+		assert.Contains(t, out.String(), "by Ana  2026-01-02T03:04:05Z")
+		assert.NotContains(t, out.String(), "member:")
+	})
+	t.Run("agent", func(t *testing.T) {
+		var out bytes.Buffer
+		cmd := &cobra.Command{}
+		cmd.SetOut(&out)
+		require.NoError(t, printEventsAgent(cmd, wire))
+		assert.Contains(t, out.String(), "- id=7 type=issue.created project=example-project issue=abc4 actor=Ana\n")
+	})
+	t.Run("stream", func(t *testing.T) {
+		input := "id: 7\nevent: issue.created\n" +
+			`data: {"event_id":7,"type":"issue.created","issue_short_id":"abc4","actor":"` + actor + `"}` + "\n\n"
+		var out bytes.Buffer
+		_, err := parseSSEStream(bufio.NewReader(strings.NewReader(input)), 0, &out, outputAgent)
+		require.NoError(t, err)
+		assert.Equal(t, "OK event id=7 type=issue.created issue=abc4 actor=Ana\n", out.String())
+	})
+	t.Run("stream_json_stays_raw", func(t *testing.T) {
+		input := "id: 7\nevent: issue.created\n" +
+			`data: {"event_id":7,"type":"issue.created","actor":"` + actor + `"}` + "\n\n"
+		var out bytes.Buffer
+		_, err := parseSSEStream(bufio.NewReader(strings.NewReader(input)), 0, &out, outputJSON)
+		require.NoError(t, err)
+		assert.Contains(t, out.String(), actor)
+	})
 }

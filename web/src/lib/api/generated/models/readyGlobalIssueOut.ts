@@ -18,8 +18,9 @@ export interface ReadyGlobalIssueOut {
   child_counts?: ChildCounts
   closed_at?: string
   closed_reason?: string
+  content_revision: number
   created_at: string
-  /** deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable. */
+  /** deadline_on as a YYYY-MM-DD calendar date; date-only values keep their written date; other values use their saved zone, then the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable. */
   deadline_on_date?: string
   deleted_at?: string
   id: number
@@ -38,7 +39,7 @@ export interface ReadyGlobalIssueOut {
   recurrence_id?: number
   related?: LinkPeer[]
   revision: number
-  /** scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable. */
+  /** scheduled_on as a YYYY-MM-DD calendar date; date-only values keep their written date; other values use their saved zone, then the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable. */
   scheduled_on_date?: string
   short_id: string
   source_actor?: string

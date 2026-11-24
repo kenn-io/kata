@@ -39,15 +39,16 @@ describe('IssueFilters', () => {
     await fireEvent.click(screen.getByRole('combobox', { name: 'Status: Open' }))
     await fireEvent.click(screen.getByRole('option', { name: 'All' }))
     await applyLatest()
+    await fireEvent.click(screen.getByRole('button', { name: 'Filter' }))
     await fireEvent.input(screen.getByLabelText('Owner'), { target: { value: 'user-a' } })
     await applyLatest()
     await fireEvent.input(screen.getByLabelText('Label'), { target: { value: 'health' } })
     await applyLatest()
-    await fireEvent.click(screen.getByRole('button', { name: /Project scope: All projects/i }))
-    const projectInput = screen.getByRole('combobox', { name: 'Project scope' })
+    await fireEvent.click(screen.getByRole('button', { name: 'Project: All projects' }))
+    const projectInput = screen.getByRole('combobox', { name: 'Project' })
     expect(document.activeElement).toBe(projectInput)
     await fireEvent.input(projectInput, { target: { value: 'exam' } })
-    await fireEvent.keyDown(projectInput, { key: 'Enter' })
+    await fireEvent.mouseDown(screen.getByRole('option', { name: /example-project/ }))
 
     await waitFor(() => expect(changes.length).toBeGreaterThanOrEqual(5))
     expect(changes[changes.length - 1]).toMatchObject({
@@ -73,6 +74,7 @@ describe('IssueFilters', () => {
     const onChange = vi.fn()
     render(IssueFilters, { props: { filters, projects, onChange } })
 
+    await fireEvent.click(screen.getByRole('button', { name: 'Filter' }))
     await fireEvent.click(screen.getByRole('combobox', { name: 'Relationship: Any' }))
     await fireEvent.click(screen.getByRole('option', { name: 'Blocked by' }))
 
@@ -80,6 +82,36 @@ describe('IssueFilters', () => {
       { ...filters, relationships: ['blocked_by'] },
       'relationships',
     )
+  })
+
+  test('removes only the project filter from its chip', async () => {
+    const onChange = vi.fn()
+    const scopedFilters = {
+      ...filters,
+      scope: { kind: 'project' as const, project_uid: 'project-example' },
+    }
+    render(IssueFilters, { props: { filters: scopedFilters, projects, onChange } })
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Clear Project filter' }))
+
+    expect(onChange).toHaveBeenCalledWith({ ...scopedFilters, scope: { kind: 'all' } }, 'scope')
+  })
+
+  test('hides Project in a project list and Status when requested', async () => {
+    render(IssueFilters, {
+      props: {
+        filters: { ...filters, scope: { kind: 'project', project_uid: 'project-example' } },
+        projects,
+        projectView: true,
+        showStatus: false,
+        onChange: vi.fn(),
+      },
+    })
+
+    expect(screen.queryByRole('combobox', { name: /^Status:/ })).toBeNull()
+    await fireEvent.click(screen.getByRole('button', { name: 'Filter' }))
+    expect(screen.queryByRole('button', { name: /^Project:/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Clear Project filter' })).toBeNull()
   })
 
   test('keeps fast filter edits when parent state has not rerendered yet', async () => {
@@ -97,10 +129,11 @@ describe('IssueFilters', () => {
     })
 
     await fireEvent.input(screen.getByLabelText('Search tasks'), { target: { value: 'rent' } })
-    await fireEvent.click(screen.getByRole('button', { name: /Project scope: All projects/i }))
-    const projectInput = screen.getByRole('combobox', { name: 'Project scope' })
+    await fireEvent.click(screen.getByRole('button', { name: 'Filter' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Project: All projects' }))
+    const projectInput = screen.getByRole('combobox', { name: 'Project' })
     await fireEvent.input(projectInput, { target: { value: 'exam' } })
-    await fireEvent.keyDown(projectInput, { key: 'Enter' })
+    await fireEvent.mouseDown(screen.getByRole('option', { name: /example-project/ }))
 
     await waitFor(() => expect(changes.length).toBeGreaterThanOrEqual(2))
     expect(changes[changes.length - 1]).toMatchObject({
@@ -116,6 +149,9 @@ describe('IssueFilters', () => {
   ] as const)('keeps a trailing space when the route acknowledges %s', async (name, field) => {
     const onChange = vi.fn()
     const { rerender } = render(IssueFilters, { props: { filters, projects, onChange } })
+    if (name !== 'Search tasks') {
+      await fireEvent.click(screen.getByRole('button', { name: 'Filter' }))
+    }
     const input = screen.getByLabelText(name) as HTMLInputElement
     await fireEvent.input(input, { target: { value: 'Alice ' } })
     await rerender({ filters: { ...filters, [field]: 'Alice', status: 'ready' } })

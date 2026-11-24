@@ -1,5 +1,6 @@
 import { AuthenticationRequiredError } from '../auth/session'
 import { responseTriggeredAuthenticationTransition } from '../api/client'
+import { retryTransientRead } from '../api/retry'
 
 export type WebDaemonHealth = 'connected' | 'auth_required' | 'down' | 'upgrade_required'
 
@@ -15,6 +16,7 @@ export interface WebDaemonInfo {
 
 const daemonHeader = 'X-Kata-Web-Daemon'
 const daemonProxyPrefix = '/api/v1/ui/proxy'
+export const rosterUnavailable = 'Check that Kata is running, then try again.'
 
 export function createDaemonFetch(
   readDaemon: () => string | undefined,
@@ -46,26 +48,37 @@ export function createDaemonFetch(
   }
 }
 
-export async function fetchWebDaemons(fetcher: typeof fetch = fetch): Promise<WebDaemonInfo[]> {
-  const response = await fetcher('/api/v1/ui/daemons', {
-    method: 'GET',
-    credentials: 'same-origin',
-    redirect: 'error',
-  })
+export async function fetchWebDaemons(
+  fetcher: typeof fetch,
+  signal: AbortSignal,
+  selected?: string,
+): Promise<WebDaemonInfo[]> {
+  const { response, body } = await retryTransientRead(
+    () =>
+      fetcher('/api/v1/ui/daemons', {
+        method: 'GET',
+        headers: selected ? { [daemonHeader]: selected } : {},
+        credentials: 'same-origin',
+        redirect: 'error',
+        signal,
+      }),
+    signal,
+    (response) => response.text(),
+  )
   if (response.status === 401) {
     throw new AuthenticationRequiredError(
-      'Configured daemons are unavailable',
+      rosterUnavailable,
       responseTriggeredAuthenticationTransition(response),
     )
   }
-  if (!response.ok) throw new Error('Configured daemons are unavailable')
-  const value = (await response.json()) as unknown
+  if (!response.ok) throw new Error(rosterUnavailable)
+  const value: unknown = JSON.parse(body as string)
   if (!isRecord(value) || !Array.isArray(value.daemons)) {
-    throw new Error('Configured daemons are unavailable')
+    throw new Error(rosterUnavailable)
   }
   const daemons = value.daemons.map(parseDaemon)
   if (daemons.length === 0 || daemons.filter((daemon) => daemon.default).length !== 1) {
-    throw new Error('Configured daemons are unavailable')
+    throw new Error(rosterUnavailable)
   }
   return daemons
 }
@@ -96,7 +109,7 @@ function proxyablePath(raw: string): boolean {
 }
 
 function parseDaemon(value: unknown): WebDaemonInfo {
-  if (!isRecord(value)) throw new Error('Configured daemons are unavailable')
+  if (!isRecord(value)) throw new Error(rosterUnavailable)
   const { id, url, default: isDefault, auth, health, hint, local } = value
   if (
     typeof id !== 'string' ||
@@ -111,7 +124,7 @@ function parseDaemon(value: unknown): WebDaemonInfo {
       health !== 'upgrade_required') ||
     (hint !== undefined && typeof hint !== 'string')
   ) {
-    throw new Error('Configured daemons are unavailable')
+    throw new Error(rosterUnavailable)
   }
   return {
     id,

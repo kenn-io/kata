@@ -24,7 +24,11 @@ import (
 )
 
 // Error exposes only the upstream status, keeping credentials and response details private.
-type Error struct{ Status int }
+type Error struct {
+	Status int
+	// Malformed marks a 2xx answer whose body did not decode.
+	Malformed bool
+}
 
 func (e *Error) Error() string { return "docbank: HTTP " + strconv.Itoa(e.Status) }
 
@@ -143,7 +147,7 @@ func (c *Client) json(ctx context.Context, method, endpoint string, in, out any)
 	defer func() { _ = resp.Body.Close() }()
 	// Docbank node and version responses can embed up to 8 MiB of source metadata.
 	if json.UnmarshalRead(io.LimitReader(resp.Body, 9<<20), out) != nil {
-		return &Error{}
+		return &Error{Malformed: true}
 	}
 	return nil
 }

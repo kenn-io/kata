@@ -49,6 +49,38 @@ it('loads image previews through the host fetch and revokes URLs on unmount', as
   result.unmount()
   expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview')
 })
+
+it('discards an open preview when only its origin changes', async () => {
+  const { rerender } = render(IssueAttachments, {
+    attachmentsEnabled: true,
+    attachments: { [id]: { ...entry, origin: 'spoke-one' } },
+    baseURL: '/attachments',
+    fetchAttachment: vi.fn(async () => new Blob(['image'])),
+  })
+  await fireEvent.click(screen.getByRole('button', { name: 'Preview screen.png' }))
+  await waitFor(() => expect(screen.getByAltText('screen.png')).toBeTruthy())
+  await rerender({ attachments: { [id]: { ...entry, origin: 'spoke-two' } } })
+  await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview'))
+  expect(screen.queryByAltText('screen.png')).toBeNull()
+})
+
+it('revokes previews when attachments become unavailable', async () => {
+  vi.mocked(URL.createObjectURL).mockReturnValueOnce('blob:new-origin')
+  const { rerender } = render(IssueAttachments, {
+    attachmentsEnabled: true,
+    attachments: { [id]: entry },
+    baseURL: '/attachments',
+    fetchAttachment: vi.fn(async () => new Blob(['image'], { type: 'image/png' })),
+  })
+  await fireEvent.click(screen.getByRole('button', { name: 'Preview screen.png' }))
+  await waitFor(() => expect(screen.getByAltText('screen.png').getAttribute('src')).toBe('blob:new-origin'))
+  await rerender({ attachmentsEnabled: false })
+  await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:new-origin'))
+  expect(screen.queryByAltText('screen.png')).toBeNull()
+  await rerender({ attachmentsEnabled: true })
+  expect(screen.getByRole('button', { name: 'Preview screen.png' })).toBeTruthy()
+})
+
 it.each([
   { action: 'Preview', name: 'screen.png', media_type: 'image/png' },
   { action: 'Play', name: 'clip.mp4', media_type: 'video/mp4' },
@@ -79,10 +111,13 @@ it('caps image previews at 20 MiB and shows the CLI hint above 100 MiB', () => {
       [id.slice(0, -1) + 'C']: { ...entry, name: 'large.png', size: 101 << 20 },
     },
     baseURL: '/attachments',
+    issueRef: 'example-project#abcd',
     fetchAttachment: vi.fn(),
   })
   expect(screen.queryByRole('button', { name: /Preview/ })).toBeNull()
-  expect(screen.getByText(/kata docbank attachments get/)).toBeTruthy()
+  expect(
+    screen.getByText(`kata docbank attachments get example-project#abcd ${id.slice(0, -1)}C`),
+  ).toBeTruthy()
 })
 it('shows an unavailable state while preserving name, type and size', async () => {
   render(IssueAttachments, {
@@ -96,7 +131,7 @@ it('shows an unavailable state while preserving name, type and size', async () =
   await fireEvent.click(screen.getByRole('button', { name: 'Preview screen.png' }))
   await waitFor(() => expect(screen.getByText('docbank_not_configured')).toBeTruthy())
   expect(screen.getByText('screen.png')).toBeTruthy()
-  expect(screen.getByText(/12 bytes/)).toBeTruthy()
+  expect(screen.getByText('12 B · PNG image')).toBeTruthy()
 })
 it('uploads the selected batch through a refresh and shows per-file progress and errors', async () => {
   let finish!: () => void
@@ -171,7 +206,7 @@ it('keeps file details without actions when Docbank is unavailable', () => {
     uploadAttachment: vi.fn(),
   })
   expect(screen.getByText('screen.png')).toBeTruthy()
-  expect(screen.getByText('image/png · 12 bytes')).toBeTruthy()
+  expect(screen.getByText('12 B · PNG image')).toBeTruthy()
   expect(screen.queryByRole('button')).toBeNull()
 })
 

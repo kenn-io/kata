@@ -41,7 +41,9 @@ type ImportOptions struct {
 	PreserveIssueSyncBindingEnabled bool
 
 	// MergeProject remaps a single project-scoped replay onto fresh numeric IDs
-	// and inserts it without clearing existing domain state.
+	// and inserts it without clearing existing domain state. It creates a link
+	// between an imported issue and an issue of another project that is
+	// already in the target.
 	MergeProject bool
 
 	// PreserveExternalRootBindingsEnabled keeps imported active external-root

@@ -310,18 +310,21 @@ func TestCloseCmd_EvidenceValueWithCommaIsPreserved(t *testing.T) {
 }
 
 func TestCloseCmd_DryRunDoesNotMutate(t *testing.T) {
-	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
+	env, dir, pid, ref := setupWorkspaceWithIssue(t, "test issue")
 	out := runCLI(t, env, dir,
 		"close", ref,
 		"--done",
 		"--message", "Fixed Safari callback double-submit and ran tests.",
 		"--commit", "abc1234",
+		"--comment", "finished",
 		"--dry")
 	assert.Contains(t, out, "dry-run")
 	assert.Contains(t, out, "[open]")
 
 	show := runCLI(t, env, dir, "show", ref, "--json")
 	assert.Contains(t, show, `"status":"open"`)
+	got := fetchIssueViaHTTPWithComments(t, env, pid, ref)
+	assert.Empty(t, got.Comments)
 }
 
 func TestCloseCmd_RejectsDryRunSpelling(t *testing.T) {
@@ -415,7 +418,6 @@ func TestCloseCmd_ErrorTextNamesAlternative(t *testing.T) {
 				"close", ref, "--done", "--message", tc.message)
 			require.Error(t, err)
 			assert.Contains(t, stderr, tc.errorText)
-			assert.Contains(t, stderr, `kata label add <ref> needs-review --comment "<what remains>"`)
 			assert.NotContains(t, stderr, "edit <ref> --label")
 		})
 	}

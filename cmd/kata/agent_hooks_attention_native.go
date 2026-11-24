@@ -25,7 +25,7 @@ const attentionSessionKey = "work.attention_session"
 // Installed adapters carry session ownership. The legacy bare hook remains a
 // separate stdin-ignoring compatibility entry point.
 func newNativeAgentAttentionCmd() *cobra.Command {
-	var session, ref, source string
+	var session, ref, source, ownershipMarker string
 	var hostPID int
 	cmd := &cobra.Command{
 		Use: "attention-native <harness> <start|end>", Short: "Track a native session's attention ownership", Hidden: true,
@@ -41,6 +41,9 @@ func newNativeAgentAttentionCmd() *cobra.Command {
 			}
 			if cmd.Flags().Changed("source") && source != legacyAttentionHookSource+args[1] {
 				return agentHookUsage("--source must be " + legacyAttentionHookSource + args[1])
+			}
+			if cmd.Flags().Changed("ownership-marker") && !isAgentHookOwnershipArg(agentHookKind(args[1]), "--ownership-marker", ownershipMarker) {
+				return agentHookUsage("invalid Kata hook ownership marker")
 			}
 			if cmd.Flags().Changed("session") && strings.TrimSpace(session) == "" {
 				return agentHookUsage("--session must not be empty")
@@ -108,6 +111,8 @@ func newNativeAgentAttentionCmd() *cobra.Command {
 	cmd.Flags().StringVar(&ref, "ref", "", "captured tracked issue reference (default KATA_REF)")
 	cmd.Flags().StringVar(&source, "source", "", "optional built-in hook ownership marker")
 	_ = cmd.Flags().MarkHidden("source")
+	cmd.Flags().StringVar(&ownershipMarker, "ownership-marker", "", "")
+	_ = cmd.Flags().MarkHidden("ownership-marker")
 	return cmd
 }
 
@@ -340,10 +345,12 @@ func attnStartSession(d attnDaemon, kataRef, owner string) error {
 		default:
 			return errors.New("native attention start: issue lookup unavailable")
 		}
-		if lookup.session == owner {
+		patch := attnStartPatch(lookup)
+		if _, clearsMessage := patch[attentionMsgKey]; lookup.session == owner && !clearsMessage {
 			return nil
 		}
-		switch d.setMetaIfRevision(ref, map[string]string{attentionKey: attnValueOK, attentionSessionKey: owner}, lookup.revision) {
+		patch[attentionSessionKey] = owner
+		switch d.setMetaIfRevision(ref, patch, lookup.revision) {
 		case attnWriteApplied:
 			return nil
 		case attnWriteFailed:
@@ -375,7 +382,7 @@ func attnEndSession(d attnDaemon, kataRef, owner string) error {
 		if lookup.session != owner {
 			return nil
 		}
-		patch := map[string]string{attentionSessionKey: "ended:" + owner}
+		patch := map[string]any{attentionSessionKey: "ended:" + owner}
 		if lookup.attention == attnValueOK {
 			patch[attentionKey] = attnValueNeedsHuman
 			patch[attentionMsgKey] = attnHandoffMsg

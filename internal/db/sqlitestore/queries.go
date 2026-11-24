@@ -175,6 +175,11 @@ func (d *Store) ProjectByUID(ctx context.Context, uid string) (db.Project, error
 	return hideSystemProject(scanProject(row))
 }
 
+// ProjectByUIDTx resolves a project on the caller's transaction.
+func (d *Store) ProjectByUIDTx(ctx context.Context, tx db.Transaction, uid string) (db.Project, error) {
+	return hideSystemProject(scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE uid = ?`, uid)))
+}
+
 // HardDeleteProject permanently removes a project row by id and returns the
 // reset cursor reserved for its deleted lifecycle events. It exists for the
 // init-race orphan-cleanup path (a freshly created project whose alias attach
@@ -187,6 +192,11 @@ func (d *Store) HardDeleteProject(ctx context.Context, id int64) (int64, error) 
 		return err
 	})
 	return resetID, err
+}
+
+// IsFederationRetainedProject reports whether a project is a retained placeholder.
+func (d *Store) IsFederationRetainedProject(ctx context.Context, uid string) (bool, error) {
+	return db.IsFederationRetainedProject(ctx, d, uid)
 }
 
 // RenameProject updates a project's canonical name without changing aliases or
@@ -702,7 +712,7 @@ func (d *Store) createIssueTx(ctx context.Context, tx *sql.Tx, p db.CreateIssueP
 		}
 	}
 
-	payload, err := buildIssueCreatedPayload(issueCreatedPayload{
+	payload, err := buildIssueCreatedPayload(db.IssueDocumentPayload{
 		UID:                    issueUID,
 		ShortID:                shortID,
 		Title:                  p.Title,
@@ -747,65 +757,17 @@ type createdLinkTarget struct {
 	ShortID string
 }
 
-type createdLinkOut struct {
-	Type       string `json:"type"`
-	ToShortID  string `json:"to_short_id,omitempty"`
-	ToIssueUID string `json:"to_issue_uid,omitempty"`
-	Incoming   bool   `json:"incoming,omitzero"`
-	Author     string `json:"author,omitempty"`
-	CreatedAt  string `json:"created_at,omitempty"`
-}
-
-type issueSnapshotComment struct {
-	ReplyToUID string `json:"reply_to_uid,omitempty"`
-	ReplyKind  string `json:"reply_kind,omitempty"`
-	EditedAt   string `json:"edited_at,omitempty"`
-	CommentUID string `json:"comment_uid"`
-	Author     string `json:"author"`
-	Teammate   string `json:"teammate,omitempty"`
-	Body       string `json:"body"`
-	CreatedAt  string `json:"created_at"`
-}
-
-type issueCreatedPayload struct {
-	UID                    string                 `json:"uid"`
-	ShortID                string                 `json:"short_id"`
-	Title                  string                 `json:"title"`
-	Body                   string                 `json:"body"`
-	Author                 string                 `json:"author"`
-	Owner                  *string                `json:"owner,omitempty"`
-	AssignmentExpiresOn    *string                `json:"assignment_expires_on,omitempty"`
-	Priority               *int64                 `json:"priority,omitempty"`
-	Status                 string                 `json:"status"`
-	ClosedReason           *string                `json:"closed_reason,omitempty"`
-	ClosedAt               *string                `json:"closed_at,omitempty"`
-	DeletedAt              *string                `json:"deleted_at,omitempty"`
-	Metadata               jsontext.Value         `json:"metadata"`
-	Labels                 []string               `json:"labels,omitempty"`
-	Links                  []createdLinkOut       `json:"links,omitempty"`
-	Comments               []issueSnapshotComment `json:"comments,omitempty"`
-	CreatedAt              string                 `json:"created_at"`
-	UpdatedAt              string                 `json:"updated_at,omitempty"`
-	Revision               int64                  `json:"revision,omitzero"`
-	IdempotencyKey         string                 `json:"idempotency_key,omitempty"`
-	IdempotencyFingerprint string                 `json:"idempotency_fingerprint,omitempty"`
-	RecurrenceUID          string                 `json:"recurrence_uid,omitempty"`
-	OccurrenceKey          string                 `json:"occurrence_key,omitempty"`
-	Source                 string                 `json:"source,omitempty"`
-	ExternalID             string                 `json:"external_id,omitempty"`
-}
-
-func createdLinkPayloads(links []db.InitialLink, targets []createdLinkTarget, author string) []createdLinkOut {
+func createdLinkPayloads(links []db.InitialLink, targets []createdLinkTarget, author string) []db.IssueDocumentLink {
 	if len(links) == 0 {
 		return nil
 	}
-	out := make([]createdLinkOut, 0, len(links))
+	out := make([]db.IssueDocumentLink, 0, len(links))
 	for i, l := range links {
 		var t createdLinkTarget
 		if i < len(targets) {
 			t = targets[i]
 		}
-		out = append(out, createdLinkOut{
+		out = append(out, db.IssueDocumentLink{
 			Type:       l.Type,
 			ToShortID:  t.ShortID,
 			ToIssueUID: t.UID,
@@ -816,7 +778,7 @@ func createdLinkPayloads(links []db.InitialLink, targets []createdLinkTarget, au
 	return out
 }
 
-func buildIssueCreatedPayload(p issueCreatedPayload) (string, error) {
+func buildIssueCreatedPayload(p db.IssueDocumentPayload) (string, error) {
 	if len(p.Metadata) == 0 {
 		p.Metadata = jsontext.Value(`{}`)
 	}
@@ -1868,6 +1830,14 @@ func (d *Store) closeIssueGuarded(
 		}
 		events = append(events, generated...)
 	}
+	unlabeled, err := d.detachLabelTx(ctx, tx, issue, projectName, "issue.unlabeled", "needs-review", p.Actor, closedAt)
+	if err != nil && !errors.Is(err, db.ErrNotFound) {
+		return db.Issue{}, nil, false, err
+	}
+	if err == nil {
+		events = append(events, unlabeled)
+	}
+
 	updated, err := issueByIDTx(ctx, tx, p.IssueID)
 	if err != nil {
 		return db.Issue{}, nil, false, err
@@ -2140,7 +2110,7 @@ func lookupIssueForEvent(ctx context.Context, tx *sql.Tx, issueID int64) (db.Iss
 	var i db.Issue
 	var projectName string
 	err := tx.QueryRowContext(ctx, q, issueID).
-		Scan(&i.ID, &i.UID, &i.ProjectID, &i.ProjectUID, &i.ShortID, &i.Title, &i.Body, &i.Status, &i.ClosedReason, &i.Owner, &i.AssignmentExpiresOn, &i.Priority, &i.Author, &i.Metadata, &i.Revision, &i.RecurrenceID, &i.OccurrenceKey, &i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &i.DeletedAt, &i.AttributionView, &projectName)
+		Scan(&i.ID, &i.UID, &i.ProjectID, &i.ProjectUID, &i.ShortID, &i.Title, &i.Body, &i.Status, &i.ClosedReason, &i.Owner, &i.AssignmentExpiresOn, &i.Priority, &i.Author, &i.Metadata, &i.Revision, &i.ContentRevision, &i.RecurrenceID, &i.OccurrenceKey, &i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &i.DeletedAt, &i.AttributionView, &projectName)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Issue{}, "", db.ErrNotFound
 	}
@@ -2159,7 +2129,7 @@ func lookupIssueForEvent(ctx context.Context, tx *sql.Tx, issueID int64) (db.Iss
 	return i, projectName, nil
 }
 
-const issueColumns = `i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status, i.closed_reason, i.owner, i.assignment_expires_on, i.priority, i.author, i.metadata, i.revision, i.recurrence_id, i.occurrence_key, i.created_at, i.updated_at, i.closed_at, i.deleted_at, ` + issueAttributionColumn
+const issueColumns = `i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status, i.closed_reason, i.owner, i.assignment_expires_on, i.priority, i.author, i.metadata, i.revision, i.content_revision, i.recurrence_id, i.occurrence_key, i.created_at, i.updated_at, i.closed_at, i.deleted_at, ` + issueAttributionColumn
 
 const issueSelect = `SELECT ` + issueColumns + ` FROM issues i JOIN projects p ON p.id = i.project_id`
 
@@ -2170,7 +2140,7 @@ const scheduledIssueSelect = `SELECT ` + issueColumns + `, schedule_recurrence.t
 
 func scanIssue(ctx context.Context, r rowScanner) (db.Issue, error) {
 	var i db.Issue
-	err := r.Scan(&i.ID, &i.UID, &i.ProjectID, &i.ProjectUID, &i.ShortID, &i.Title, &i.Body, &i.Status, &i.ClosedReason, &i.Owner, &i.AssignmentExpiresOn, &i.Priority, &i.Author, &i.Metadata, &i.Revision, &i.RecurrenceID, &i.OccurrenceKey, &i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &i.DeletedAt, &i.AttributionView)
+	err := r.Scan(&i.ID, &i.UID, &i.ProjectID, &i.ProjectUID, &i.ShortID, &i.Title, &i.Body, &i.Status, &i.ClosedReason, &i.Owner, &i.AssignmentExpiresOn, &i.Priority, &i.Author, &i.Metadata, &i.Revision, &i.ContentRevision, &i.RecurrenceID, &i.OccurrenceKey, &i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &i.DeletedAt, &i.AttributionView)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Issue{}, db.ErrNotFound
 	}
@@ -2186,7 +2156,7 @@ func scanIssue(ctx context.Context, r rowScanner) (db.Issue, error) {
 func scanScheduledIssue(ctx context.Context, r rowScanner) (db.Issue, string, error) {
 	var i db.Issue
 	var recurrenceTimezone sql.NullString
-	err := r.Scan(&i.ID, &i.UID, &i.ProjectID, &i.ProjectUID, &i.ShortID, &i.Title, &i.Body, &i.Status, &i.ClosedReason, &i.Owner, &i.AssignmentExpiresOn, &i.Priority, &i.Author, &i.Metadata, &i.Revision, &i.RecurrenceID, &i.OccurrenceKey, &i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &i.DeletedAt, &i.AttributionView, &recurrenceTimezone)
+	err := r.Scan(&i.ID, &i.UID, &i.ProjectID, &i.ProjectUID, &i.ShortID, &i.Title, &i.Body, &i.Status, &i.ClosedReason, &i.Owner, &i.AssignmentExpiresOn, &i.Priority, &i.Author, &i.Metadata, &i.Revision, &i.ContentRevision, &i.RecurrenceID, &i.OccurrenceKey, &i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &i.DeletedAt, &i.AttributionView, &recurrenceTimezone)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Issue{}, "", db.ErrNotFound
 	}
@@ -2644,7 +2614,7 @@ func (d *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
 			&r.ID, &r.UID, &r.ProjectID, &r.ProjectUID,
 			&r.ShortID, &r.Title, &r.Body, &r.Status,
 			&r.ClosedReason, &r.Owner, &r.AssignmentExpiresOn, &r.Priority, &r.Author,
-			&r.Metadata, &r.Revision, &r.RecurrenceID, &r.OccurrenceKey,
+			&r.Metadata, &r.Revision, &r.ContentRevision, &r.RecurrenceID, &r.OccurrenceKey,
 			&r.CreatedAt, &r.UpdatedAt, &r.ClosedAt, &r.DeletedAt, &r.AttributionView,
 			&r.ProjectName, &recurrenceTimezone,
 		); err != nil {

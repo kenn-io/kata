@@ -154,7 +154,7 @@ Adopting an existing project is a current-state cutover, not a history merge. It
 current issues, comments, labels and links through fresh snapshot events and replaces the
 pre-adoption event timeline. A direct-spoke enrollment's historical-author permission spans the
 entire initial baseline, including retries, and is consumed only after its terminal chunk
-commits. Negotiated relay adoption rejects cross-project links. Export the old timeline before
+commits. Negotiated relay adoption accepts links within the same group and root authority. Export the old timeline before
 adoption when it is needed for audit. The
 [adoption procedure](../operations/federation.md#adopting-an-existing-project) owns the commands
 and confirmation rules.
@@ -296,6 +296,37 @@ applies hub events in order, deduplicates by event UID and content hash, folds
 portable payloads into the local projection, and advances its pull cursor only
 after successful application.
 
+A poll that finds no events returns the newest hub event ID it checked as
+`next_after_id`, and the spoke advances to it. The hub read every event up to
+that ID, and event IDs follow commit order, so no later event can take a lower
+ID. A quiet project's next poll then reads only what the hub wrote since the
+previous one. When an issue later moves in, its earlier history may sit below
+the cursor; the spoke reads that history through the moved issue's own
+history route, whatever its cursor.
+
+An endpoint change ends held polls in the same daemon before the change completes.
+
+The event poll accepts an optional `wait` in seconds. When the cursor is caught
+up, the hub holds the request until an event commits in the project, including
+a move out of it, or until the wait ends, and then answers with the page as it
+would without a wait. Successful event-poll responses advertise the longest wait
+the hub accepts in `X-Kata-Federation-Poll-Wait-Max`, 45 seconds. A spoke holds
+polls only at hubs that send that header and keeps its interval pull
+otherwise. The wait counts from when the hub accepts the request, so a slow
+first read shortens it. Before each read a held poll makes after waiting, the
+hub runs the request's full federation authorization again without the
+per-request cache. For a signed request this also confirms that the signing
+key has not passed its `not_after` and still holds the secret the request was
+verified with. After a poll wakes and reads events or a reset, the hub checks
+authorization once more before releasing the page.
+Revocation before a wake ends the held poll at that wake. When the wait expires,
+the hub returns the initial empty page and its cursor; the next poll
+checks authorization and reads again. The hub bounds held polls in total, per
+credential, and for signed requests holding a control slot; past a bound it
+answers at once.
+
+Hub processes sharing a PostgreSQL database and schema relay commit wakeups to each other with `LISTEN/NOTIFY` on a dedicated connection. The channel derives from the instance UID and schema name, which distinguish installations but are not secrets. Any role connected to the database can derive it, listen for wakes, and send wakes. A wake carries the publishing process's instance tag and up to two keyed 64-bucket project tags. A receiving process wakes polls in those buckets, and each poll reauthorizes and rereads its own project. A role without access to application tables can observe wake activity and co-occurring buckets on a move. Notifications omit project IDs and issue content. Each process also wakes its held polls after its listener reconnects, because notifications sent while it was disconnected are lost.
+
 SQLite direct spokes prepare pulled issue histories and projection differences
 before taking the writer lock, then update only the touched issues and changed
 comments, labels and links. Ordinary local issue push echoes need no materialization.
@@ -360,7 +391,12 @@ quarantine on the spoke instead of retrying forever.
 
 ### Cross-Project Link Convergence
 
-Direct-spoke federation can carry cross-project links; negotiated relay projects reject them.
+Direct-spoke federation can carry cross-project links. The common root can author links
+between negotiated relay projects in the same binding group. Relays retain a root link
+while an endpoint is missing and project it after both endpoints arrive. A peer without
+`relay_cross_links_v1` receives `409 unsupported_event_features` before receiving a
+crossing event or checkpoint. The event stream pauses at the crossing until the peer is
+upgraded. Relays check current access to resolvable peer projects before release.
 For direct spokes, a missing link peer is not a permanent validation failure. The hub accepts
 the event, advances the push cursor, and keeps the edge absent until both endpoint issues are
 materialized inside one compatible federation group. Hub projects on one daemon form a group.

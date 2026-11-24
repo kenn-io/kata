@@ -49,9 +49,10 @@ stricter burst/prose throttling via
 Each successful CLI close prints a reminder that the close is a completion
 claim and that the message and evidence should be specific to the issue.
 
-If you have not completed and tested this work, do not close it.
-Instead, label and comment:
-    kata label add <ref> needs-review --comment "<what remains>"
+If you have not completed and tested this work, or its PR is open and
+not merged, do not close it. Instead, leave it open, update work.attention
+and work.attention_msg with what remains, and add the needs-review label.
+Closing removes the needs-review label.
 
 The close message has a minimum length that depends on the reason:
     --done, --audit-no-change           at least 40 characters
@@ -151,11 +152,6 @@ The close message has a minimum length that depends on the reason:
 				"message":  message,
 				"evidence": parsed,
 				"dry_run":  dryRun,
-			}
-			if len(parsed) > 0 {
-				if ref := closeTranscript(cmd); ref != nil {
-					extra["transcript"] = ref
-				}
 			}
 			// Route the dry-run banner to stderr only in human mode so
 			// machine-parseable output modes stay unprefixed.
@@ -303,14 +299,25 @@ func runActionWithHeaders(
 	if err != nil {
 		return err
 	}
-	if action == "close" && body["transcript"] != nil {
-		if err := dropUnsupportedTranscript(ctx, cmd, client, baseURL, body); err != nil {
-			return err
-		}
-	}
 	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 	if err != nil {
 		return err
+	}
+	if action == "close" {
+		unconfigured := false
+		if evidence, ok := body["evidence"].([]api.Evidence); ok && len(evidence) > 0 {
+			ref, selection, noEntry := prepareCloseTranscript(ctx, cmd, baseURL, pid, issue, headers["Idempotency-Key"] != "")
+			unconfigured = noEntry
+			if ref != nil {
+				body["transcript"] = ref
+				if selection != nil {
+					body["transcript_selection"] = selection
+				}
+			}
+		}
+		if err := dropUnrecordedTranscript(ctx, cmd, client, baseURL, body, unconfigured, headers["Idempotency-Key"] != ""); err != nil {
+			return err
+		}
 	}
 	encoded, err := json.Marshal(body)
 	if err != nil {
@@ -361,6 +368,9 @@ func runActionWithHeaders(
 		bs = response.Body
 	default:
 		return fmt.Errorf("unknown issue action %q", action)
+	}
+	if extra["dry_run"] == true {
+		return printMutationWithApplied(cmd, bs, nil, issue.ProjectName)
 	}
 	commentKey := ""
 	if key := headers["Idempotency-Key"]; key != "" {

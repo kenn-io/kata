@@ -30,6 +30,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/testfix"
 )
 
 const projectAccessCanary = "relay-private-canary"
@@ -40,7 +41,7 @@ func projectAccessBackends(t *testing.T, check func(*testing.T, db.Storage)) {
 		t.Run(backend, func(t *testing.T) {
 			var store db.Storage
 			if backend == "sqlite" {
-				s, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
+				s, err := testfix.OpenSQLite(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
 				require.NoError(t, err)
 				store = s
 			} else {
@@ -1441,9 +1442,7 @@ func TestProjectAccessStreamRevocation(t *testing.T) {
 		t.Run(wakeup, func(t *testing.T) {
 			projectAccessBackends(t, func(t *testing.T, store db.Storage) {
 				f := newProjectAccessFixture(t, store)
-				// The store and server stay outside the bubble; the stream, its
-				// heartbeat ticker, and the request deadline use the fake clock.
-				synctest.Test(t, func(t *testing.T) {
+				run := func(t *testing.T) {
 					ctx, cancel := context.WithTimeout(t.Context(), 35*time.Second)
 					defer cancel()
 					req := httptest.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/api/v1/events/stream?project_id=%d", f.server.URL, f.private.ID), nil)
@@ -1491,7 +1490,13 @@ func TestProjectAccessStreamRevocation(t *testing.T) {
 					assert.Empty(t, string(raw), "no event, reset or heartbeat follows revocation")
 					assert.NoError(t, err)
 					assert.NoError(t, ctx.Err(), "revocation closes stream before the request deadline")
-				})
+				}
+				if _, ok := store.(*pgstore.Store); ok {
+					// PostgreSQL connections created in a bubble cannot be closed outside it.
+					run(t)
+				} else {
+					synctest.Test(t, run)
+				}
 			})
 		})
 	}
@@ -1614,6 +1619,28 @@ func TestProjectAccessArchivedProjectNameDoesNotExposeExistence(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, status, string(body))
 		assert.NotContains(t, string(body), "deleted_at")
 		assert.NotContains(t, string(body), "project_archived")
+	})
+}
+
+// A project route names the restore command only to a caller who could read
+// the project while it was active; everyone else gets the plain not_found.
+func TestProjectAccessArchivedProjectHintFollowsReadAccess(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		_, _, err := store.RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: f.private.ID, Actor: "admin", Force: true})
+		require.NoError(t, err)
+		path := fmt.Sprintf("/api/v1/projects/%d", f.private.ID)
+
+		status, _, body := f.request(t, http.MethodGet, path, "member", nil, nil)
+		assert.Equal(t, http.StatusNotFound, status, string(body))
+		assert.Contains(t, string(body), `"code":"project_not_found"`)
+		assert.Contains(t, string(body), "kata projects restore "+f.private.Name)
+
+		status, _, body = f.request(t, http.MethodGet, path, "nonmember", nil, nil)
+		assert.Equal(t, http.StatusNotFound, status, string(body))
+		assert.Contains(t, string(body), `"code":"not_found"`)
+		assert.NotContains(t, string(body), "restore")
+		assert.NotContains(t, string(body), f.private.Name)
 	})
 }
 

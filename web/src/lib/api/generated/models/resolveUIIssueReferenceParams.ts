@@ -3,6 +3,7 @@
  */
 
 export type ResolveUIIssueReferenceParams = {
-  project_id: number
+  project_id?: number
+  project?: string
   ref: string
 }

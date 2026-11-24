@@ -10,6 +10,28 @@ import (
 )
 
 var projectGates sync.Map
+var heldRequests sync.Map
+
+type heldSet struct {
+	mu       sync.Mutex
+	requests map[chan struct{}]context.CancelFunc
+}
+
+// BeginHeld registers a request while its caller holds the sync gate.
+func BeginHeld(key string, cancel context.CancelFunc) func() {
+	value, _ := heldRequests.LoadOrStore(key, &heldSet{requests: make(map[chan struct{}]context.CancelFunc)})
+	held := value.(*heldSet)
+	done := make(chan struct{})
+	held.mu.Lock()
+	held.requests[done] = cancel
+	held.mu.Unlock()
+	return func() {
+		held.mu.Lock()
+		delete(held.requests, done)
+		close(done)
+		held.mu.Unlock()
+	}
+}
 
 // Key identifies one project in one durable daemon instance.
 func Key(instanceUID string, projectID int64) string {
@@ -77,6 +99,24 @@ func BeginRebind(
 ) (func(), error) {
 	gate := gateFor(key)
 	gate.Lock()
+	if value, ok := heldRequests.Load(key); ok {
+		held := value.(*heldSet)
+		held.mu.Lock()
+		pending := make([]chan struct{}, 0, len(held.requests))
+		for done, cancel := range held.requests {
+			cancel()
+			pending = append(pending, done)
+		}
+		held.mu.Unlock()
+		for _, done := range pending {
+			select {
+			case <-done:
+			case <-ctx.Done():
+				gate.Unlock()
+				return nil, ctx.Err()
+			}
+		}
+	}
 	backendRelease := func() {}
 	if locker, ok := backend.(interface {
 		AcquireFederationProjectExclusiveLock(context.Context, int64) (func(), error)

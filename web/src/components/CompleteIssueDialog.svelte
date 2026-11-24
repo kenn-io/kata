@@ -1,5 +1,8 @@
 <script lang="ts">
-  import { Button, RadioGroup } from '@kenn-io/kit-ui'
+  // The completion form shared by the issue detail and the board. Closing
+  // asserts the work is complete, so every close carries a reason, a note,
+  // and the evidence that reason needs.
+  import { Button, Card, RadioGroup } from '@kenn-io/kit-ui'
   import type { KataTaskCloseRequest } from '../lib/kata/types'
   import Modal from './Modal.svelte'
 
@@ -7,11 +10,13 @@
     open: boolean
     title: string
     qualifiedId: string
+    /** Open tasks this one blocks, which lose the blocker when it closes. */
+    blockedPreview?: number | undefined
     onComplete: (request: KataTaskCloseRequest) => boolean | Promise<boolean>
     onCancel: () => void
   }
 
-  let { open, title, qualifiedId, onComplete, onCancel }: Props = $props()
+  let { open, title, qualifiedId, blockedPreview = 0, onComplete, onCancel }: Props = $props()
 
   type CloseReason = 'done' | 'wontfix' | 'duplicate' | 'superseded'
   type DoneEvidence = 'test' | 'commit' | 'pr' | 'reviewed-paths' | 'external'
@@ -31,6 +36,9 @@
     label: `${reason.label}. ${reason.description}`,
   }))
 
+  const defaultWontDoMessage =
+    'Removed from active work through the web issue detail because this task is no longer intended to be completed.'
+
   function chooseCloseReason(value: string | undefined): void {
     if (
       value === 'done' ||
@@ -49,26 +57,27 @@
   let targetIssue = $state('')
   let pending = $state(false)
   let completeMessageInput: HTMLTextAreaElement | null = $state(null)
-  let wasOpen = false
 
-  // Each opening starts from an empty form and focuses the note.
+  function openTasks(count: number): string {
+    return `${count} open ${count === 1 ? 'task' : 'tasks'}`
+  }
+
+  // Each opening starts a fresh form with the note focused.
+  let wasOpen = false
   $effect(() => {
     if (open && !wasOpen) {
-      reset()
+      completeReason = 'done'
+      completeMessage = ''
+      evidenceType = 'test'
+      evidenceValue = ''
+      targetIssue = ''
+      pending = false
       queueMicrotask(() => completeMessageInput?.focus())
     }
     wasOpen = open
   })
 
-  function reset(): void {
-    completeReason = 'done'
-    completeMessage = ''
-    evidenceType = 'test'
-    evidenceValue = ''
-    targetIssue = ''
-  }
-
-  function cancel(): void {
+  function closeCompleteDialog(): void {
     if (pending) return
     onCancel()
   }
@@ -77,7 +86,7 @@
     if (pending || !canComplete()) return
     pending = true
     try {
-      if (await onComplete(closeRequest())) reset()
+      await onComplete(closeRequest())
     } finally {
       pending = false
     }
@@ -89,8 +98,15 @@
     return 40
   }
 
+  function messageHint(): string {
+    const minimum = `at least ${messageMinimum()} characters`
+    return completeReason === 'wontfix' ? `optional; ${minimum} if written` : minimum
+  }
+
   function canComplete(): boolean {
-    if (completeMessage.trim().length < messageMinimum()) return false
+    const length = completeMessage.trim().length
+    if (completeReason === 'wontfix') return length === 0 || length >= messageMinimum()
+    if (length < messageMinimum()) return false
     if (completeReason === 'done') return evidenceValue.trim().length > 0
     if (completeReason === 'duplicate' || completeReason === 'superseded') {
       return targetIssue.trim().length > 0
@@ -132,7 +148,7 @@
                 : { type: 'test', command: value }
       return { reason: completeReason, message, evidence: [evidence] }
     }
-    return { reason: completeReason, message, evidence: [] }
+    return { reason: completeReason, message: message || defaultWontDoMessage, evidence: [] }
   }
 
   function handleCompleteKeydown(event: KeyboardEvent): void {
@@ -143,7 +159,7 @@
   }
 </script>
 
-<Modal {open} title="Complete task" onClose={cancel} width={480}>
+<Modal {open} title="Complete task" onClose={closeCompleteDialog} width={480}>
   <div class="complete-dialog" onkeydown={handleCompleteKeydown} role="presentation">
     <div class="complete-context">
       <p class="complete-task-title">{title}</p>
@@ -198,7 +214,7 @@
     {/if}
 
     <label class="complete-message">
-      <span>Completion note <small>(at least {messageMinimum()} characters, markdown)</small></span>
+      <span>Completion note <small>({messageHint()}, markdown)</small></span>
       <textarea
         bind:this={completeMessageInput}
         rows="4"
@@ -207,10 +223,17 @@
         disabled={pending}
       ></textarea>
     </label>
+    <Card level="inset" padding="sm">
+      <div>Comments and links stay.</div>
+      {#if blockedPreview}<div>
+          {openTasks(blockedPreview)}
+          {blockedPreview === 1 ? 'loses' : 'lose'} this blocker.
+        </div>{/if}
+    </Card>
   </div>
 
   {#snippet footer()}
-    <Button size="sm" label="Cancel" onclick={cancel} disabled={pending} />
+    <Button size="sm" label="Cancel" onclick={closeCompleteDialog} disabled={pending} />
     <Button
       size="sm"
       tone="info"

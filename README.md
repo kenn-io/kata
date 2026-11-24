@@ -112,9 +112,9 @@ attention signals, and scheduling.
 
 1. For a question or review that doesn't change the workspace, answer without kata.
 2. For a change, search with `kata search "<one or two words>" --agent`.
-3. If an open issue covers the work, claim it with `kata claim <ref>`. Otherwise, create one with `kata create "<title>" --idempotency-key <key> --agent`. Claim it if you'll work on it; leave it open if you're only recording it.
+3. If an open issue covers the work, claim it with a time limit: `kata claim <ref> --ttl 2h --agent`. Otherwise, create one with `kata create "<title>" --idempotency-key <key> --agent`. Claim it if you'll work on it; leave it open if you're only recording it. Renew the claim before it expires by claiming again with `--ttl`, without `--if-unowned`.
 4. Do the work and comment on findings a later reader needs.
-5. If the work is verified complete, close it with `kata close <ref> --done --message "<what and how verified>" --test <cmd>`. Otherwise, use `kata label add <ref> needs-review --comment "<what remains>"`.
+5. If the work is verified complete, close it with `kata close <ref> --done --message "<what and how verified>" --test <cmd>`. Otherwise, leave it open, update `work.attention` and `work.attention_msg` with what remains, and add the `needs-review` label.
 
 ## Quickstart
 
@@ -141,7 +141,9 @@ kata close abc4 --done \
 Reply to a specific comment, then read the thread it belongs to:
 
 ```sh
-kata comment abc4 --reply c:xbzxrq -m "This builds on the finding."
+kata comment abc4 --reply c:xbzxrq --body-stdin <<'EOF'
+This builds on the finding.
+EOF
 kata show abc4 --thread c:xbzxrq
 ```
 
@@ -249,25 +251,28 @@ The [docs site](docs/) is the definitive reference:
 
 Run `kata quickstart` (alias `kata agent-instructions`) for the operating
 contract: search before creating, pass an idempotency key on create, prefer
-`--agent` output, claim work with `kata claim`, and close only when the work is
-verified. Close each verified issue promptly with valid evidence and a
-substantive message. [Agent workflows](docs/workflows/agents.md) is the same
+`--agent` output, claim work with a time limit (`kata claim <ref> --ttl 2h`) and
+renew it, and close only when the work is verified. Close each verified issue
+promptly with valid evidence and a substantive message. [Agent workflows](docs/workflows/agents.md) is the same
 contract in long form.
 
-On `main`, install the contract in every coding-agent session that starts
-inside a kata workspace on this machine:
+On `main`, install the contract for Claude Code and Codex sessions that start
+inside a kata workspace on this machine. Setup selects whichever are installed.
+
+Not in the latest release yet.
 
 ```sh
-kata agent-hook install
+kata agent setup
 ```
 
-For Codex, open Codex and run `/hooks` to trust the new hook. See
+For Codex, open Codex and run `/hooks` to trust the hooks.
+
+`kata agent-hook` requires Kata 0.19.0 or later. See
 [Contract in every session](docs/workflows/agents.md#contract-in-every-session)
 for all 18 targets, runtime requirements, attention capabilities and additional
 Codex homes. Contract and available attention hooks are enabled by default;
-use `--contract-only` to opt out of attention, or
-`kata init --agent-hooks=codex,pi` for project setup. These commands require
-Kata 0.19.0 or later.
+use `kata agent-hook install --contract-only` to opt out of attention, or
+`kata init --agent-hooks=codex,pi` for project setup.
 
 Print the shorter managed briefing without changing the repository:
 

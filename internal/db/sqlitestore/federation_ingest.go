@@ -7,6 +7,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"go.kenn.io/kata/internal/db"
@@ -123,9 +124,13 @@ func (d *Store) ingestFederationEventsOnce(
 	// Projection writes happen after validation; later moves can depend on
 	// fully validated creations earlier in this batch.
 	batchIssueProjects := map[string]int64{}
-	moveSnapshots := db.NewFederationMoveSnapshotValidator(tx, false)
+	moveSnapshots := db.NewFederationMoveSnapshotValidator(tx)
 	freshSnapshotSeen := false
 	boundActor := strings.TrimSpace(p.BoundActor)
+	var repeatedWinners []repeatedAdoptionSnapshot
+	repeatedSkipped := 0
+	repeatedLookups := db.RepeatedSnapshotSQLLookups(ctx, tx, p.Events)
+	repeatedSeen := map[string]bool{}
 	for _, in := range p.Events {
 		if in.SourceEventID <= 0 {
 			return db.FederationIngestResult{}, fmt.Errorf("%w: source event id must be positive", db.ErrFederationIngestValidation)
@@ -229,6 +234,32 @@ func (d *Store) ingestFederationEventsOnce(
 				}
 			}
 		}
+		// An adoption snapshot of an issue this project already holds is never
+		// stored. A copy that is not newer than the hub's is acknowledged and
+		// changes nothing; that includes the retry of a consumed baseline.
+		repeated, err := repeatedAdoptionSnapshotIssueTx(ctx, tx, p.ProjectID, ev, db.AllowsRepeatedIssueSnapshot(ev.Type,
+			adoptionSnapshotAuthorState.allowAuthorPreservation || adoptionSnapshotAuthorState.overrideSnapshotAuthors ||
+				adoptionSnapshotAuthorState.duplicateOnly, p.EventFeatures))
+		if err != nil {
+			return db.FederationIngestResult{}, err
+		}
+		if repeated != nil {
+			if repeatedSeen[repeated.UID] {
+				return db.FederationIngestResult{}, fmt.Errorf("%w: adoption baseline carries issue %s twice",
+					db.ErrFederationIngestValidation, repeated.UID)
+			}
+			repeatedSeen[repeated.UID] = true
+			result.SupersededEventUIDs = append(result.SupersededEventUIDs, ev.EventUID)
+		}
+		// A retry of a consumed adoption decided each copy the first time. The
+		// issue's updated_at can have moved since, so it is not asked again.
+		wins := repeated != nil && !adoptionSnapshotAuthorState.duplicateOnly && db.RepeatedSnapshotWins(ev.Payload, repeated.UpdatedAt)
+		if repeated != nil && !wins {
+			result.Duplicates++
+			repeatedSkipped++
+			freshSnapshotSeen = true
+			continue
+		}
 		if adoptionSnapshotAuthorState.duplicateOnly {
 			return db.FederationIngestResult{}, fmt.Errorf("%w: adoption baseline retry contains fresh event %s",
 				db.ErrFederationIngestValidation, ev.EventUID)
@@ -258,7 +289,23 @@ func (d *Store) ingestFederationEventsOnce(
 			return db.FederationIngestResult{}, fmt.Errorf("%w: non-snapshot event %s follows snapshot baseline in same batch",
 				db.ErrFederationIngestValidation, ev.EventUID)
 		}
-		if err := rejectFreshCreateSnapshotForKnownIssue(ev, knownIssueUIDs); err != nil {
+		if repeated != nil {
+			// A newer copy becomes ordinary hub events, written after the
+			// batch's own events below.
+			current, err := d.federationIssueSnapshotPayload(ctx, tx, *repeated)
+			if err != nil {
+				return db.FederationIngestResult{}, err
+			}
+			deltas, err := db.RepeatedSnapshotDeltas(ev.Actor, jsontext.Value(current), ev.Payload, repeatedLookups)
+			if err != nil {
+				return db.FederationIngestResult{}, err
+			}
+			repeatedWinners = append(repeatedWinners, repeatedAdoptionSnapshot{issue: *repeated, event: ev, deltas: deltas})
+			freshSnapshotSeen = true
+			seenBatch[ev.EventUID] = ev.ContentHash
+			continue
+		}
+		if err := rejectFreshCreateSnapshotForKnownIssue(ctx, tx, p.ProjectID, ev, knownIssueUIDs); err != nil {
 			return db.FederationIngestResult{}, err
 		}
 		if db.IsFederationSnapshotEvent(ev.Type) {
@@ -268,9 +315,7 @@ func (d *Store) ingestFederationEventsOnce(
 		rememberIngestIssueUIDs(ev, knownIssueUIDs)
 		switch ev.Type {
 		case "issue.created":
-			if issueUID, err := payloadIssueUID(ev, db.PayloadMap(ev.Payload)); err == nil {
-				batchIssueProjects[issueUID] = p.ProjectID
-			}
+			batchIssueProjects[db.EventIssueUID(ev.IssueUID)] = p.ProjectID
 		case "issue.moved":
 			batchIssueProjects[*ev.IssueUID] = moveTo
 		}
@@ -282,13 +327,13 @@ func (d *Store) ingestFederationEventsOnce(
 	}
 
 	cronValidator := db.NewCronReplayValidator(tx, false)
-	cronTargets := make([]db.RemoteEvent, 0, len(prepared))
+	freshEvents := make([]db.RemoteEvent, 0, len(prepared))
 	for _, input := range prepared {
 		if !input.Duplicate {
-			cronTargets = append(cronTargets, input.Event)
+			freshEvents = append(freshEvents, input.Event)
 		}
 	}
-	if err := cronValidator.PrepareEvents(ctx, p.ProjectID, cronTargets); err != nil {
+	if err := cronValidator.PrepareEvents(ctx, p.ProjectID, freshEvents); err != nil {
 		return db.FederationIngestResult{}, err
 	}
 
@@ -304,7 +349,12 @@ func (d *Store) ingestFederationEventsOnce(
 			return db.FederationIngestResult{}, err
 		}
 	}
-	if err := d.authorizeFederationCurrentIssuesTx(ctx, tx, p, prepared, moveSnapshots); err != nil {
+	// A repeated snapshot is not stored, but the links it adds still need the
+	// pushing spoke's authority over every project they touch.
+	for _, winner := range repeatedWinners {
+		freshEvents = append(freshEvents, winner.event)
+	}
+	if err := d.authorizeFederationCurrentIssuesTx(ctx, tx, p, freshEvents, moveSnapshots); err != nil {
 		return db.FederationIngestResult{}, db.FinishTransactionRollback(ctx, err, tx.Rollback())
 	}
 	for _, in := range prepared {
@@ -337,9 +387,57 @@ func (d *Store) ingestFederationEventsOnce(
 			result.InsertedEventUIDs = append(result.InsertedEventUIDs, auditEvent.UID)
 		}
 	}
+	for _, winner := range repeatedWinners {
+		clock, err := db.RepeatedImportClock(ctx, tx, winner.issue.UID, db.EventHLCTimestamp{PhysicalMS: winner.event.HLCPhysicalMS, Counter: winner.event.HLCCounter})
+		if err != nil {
+			return db.FederationIngestResult{}, err
+		}
+		for _, delta := range winner.deltas {
+			insert := eventInsert{
+				ProjectID: p.ProjectID, ProjectUID: projectUID, ProjectName: projectName,
+				IssueID: &winner.issue.ID, IssueUID: &winner.issue.UID,
+				Type: delta.Type, Actor: delta.Actor, Payload: string(delta.Payload),
+				// The copy takes the place of the snapshot it replaces, so changes
+				// the home made after that snapshot replay after the copy.
+				HLC: &clock,
+			}
+			if delta.RelatedIssueUID != "" {
+				insert.RelatedIssueUID = &delta.RelatedIssueUID
+				// A peer the same push creates has no row yet; its UID is enough.
+				if peer, err := eventIssueByUID(ctx, tx, delta.RelatedIssueUID); err == nil {
+					insert.RelatedIssueID = &peer.ID
+				} else if !errors.Is(err, db.ErrNotFound) {
+					return db.FederationIngestResult{}, err
+				}
+			}
+			event, err := d.insertEventTx(ctx, tx, insert)
+			if err != nil {
+				return db.FederationIngestResult{}, err
+			}
+			result.Events = append(result.Events, event)
+			result.InsertedEventUIDs = append(result.InsertedEventUIDs, event.UID)
+			// The change comes from the pushing spoke, so a claim another
+			// holder has on the issue is audited as for any pushed event.
+			auditEvents, err := d.annotateFederationIngestClaimWorkTx(ctx, tx, p.ProjectID, db.RemoteEvent{
+				EventUID: event.UID, OriginInstanceUID: p.SpokeInstanceUID, ProjectUID: projectUID, ProjectName: projectName,
+				IssueUID: insert.IssueUID, RelatedIssueUID: insert.RelatedIssueUID,
+				Type: delta.Type, Actor: winner.event.Actor, Payload: delta.Payload,
+			}, db.ClaimPrincipal{HolderInstanceUID: p.SpokeInstanceUID, Holder: p.BoundActor})
+			if err != nil {
+				return db.FederationIngestResult{}, err
+			}
+			result.Events = append(result.Events, auditEvents...)
+			for _, auditEvent := range auditEvents {
+				result.InsertedEventUIDs = append(result.InsertedEventUIDs, auditEvent.UID)
+			}
+		}
+		result.Accepted++
+	}
 	if result.Accepted > 0 {
 		var err error
-		if materialization.fullReplay {
+		// The hub's own events for a repeated snapshot are not part of the
+		// prepared batch, so they need the full replay.
+		if materialization.fullReplay || len(repeatedWinners) > 0 {
 			err = d.materializeFederatedProjectTx(ctx, tx, p.ProjectID, true, result.InsertedEventUIDs, cronValidator)
 		} else {
 			err = materialization.apply(ctx, tx, p.ProjectID, cronValidator)
@@ -347,6 +445,10 @@ func (d *Store) ingestFederationEventsOnce(
 		if err != nil {
 			return db.FederationIngestResult{}, err
 		}
+	}
+	// A chunk whose snapshots were all skipped still advances the adoption.
+	// The retry of a consumed baseline has nothing left to advance.
+	if result.Accepted > 0 || (repeatedSkipped > 0 && !adoptionSnapshotAuthorState.duplicateOnly) {
 		if !adoptionSnapshotAuthorState.shouldDeferMarker {
 			if err := consumeFederationAdoptionSnapshotAuthorMarker(ctx, tx,
 				p.ProjectID, p.FederationEnrollmentID, p.SpokeInstanceUID); err != nil {
@@ -685,8 +787,10 @@ func validateFederationIngestAdoptionBaselineBoundary(
 		 LIMIT 1`,
 		projectID, spokeInstanceUID).Scan(&hlcPhysicalMS, &hlcCounter)
 	if errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("%w: adoption baseline continuation has no recorded baseline boundary",
-			db.ErrFederationIngestValidation)
+		// Earlier chunks held only issues this project already had, so the
+		// hub stored none of their snapshots and has no boundary to compare
+		// with. The chunk must still be one baseline.
+		return db.ValidateAdoptionBaselineSingleClock(events)
 	}
 	if err != nil {
 		return fmt.Errorf("lookup adoption baseline boundary: %w", err)
@@ -1014,16 +1118,14 @@ func validateFederationProjectEvent(
 		}
 		return nil
 	}
-	issueUID, err := payloadIssueUID(ev, payload)
+	issueUID, err := db.RemoteEventIssueUID(ev)
 	if err != nil {
 		return err
 	}
 	switch ev.Type {
 	case "issue.created", "issue.snapshot":
-		if issueUID == "" {
-			return fmt.Errorf("%w: %s missing issue uid", db.ErrFederationIngestValidation, ev.Type)
-		}
-	case "issue.moved", "issue.updated", "issue.assigned", "issue.unassigned",
+		// A creation or snapshot may introduce its issue.
+	case "issue.moved", "issue.updated", db.RepeatedImportEventType, "issue.assigned", "issue.unassigned",
 		"issue.assignment_renewed", "issue.assignment_expired",
 		"issue.priority_set", "issue.priority_cleared",
 		"issue.closed", "issue.reopened", "issue.soft_deleted", "issue.restored",
@@ -1033,9 +1135,6 @@ func validateFederationProjectEvent(
 		"issue.external_root_resumed", "issue.external_root_unbound",
 		"issue.external_comment_resolved", "issue.external_field_conflicted",
 		"issue.external_field_resolved":
-		if issueUID == "" {
-			return fmt.Errorf("%w: %s missing issue uid", db.ErrFederationIngestValidation, ev.Type)
-		}
 		if _, ok := knownIssueUIDs[issueUID]; !ok {
 			return fmt.Errorf("%w: %s references unknown issue %s", db.ErrFederationIngestValidation, ev.Type, issueUID)
 		}
@@ -1064,14 +1163,47 @@ func validateFederationProjectEvent(
 	return nil
 }
 
-func rejectFreshCreateSnapshotForKnownIssue(ev db.RemoteEvent, knownIssueUIDs map[string]struct{}) error {
+type repeatedAdoptionSnapshot struct {
+	issue  db.Issue
+	event  db.RemoteEvent
+	deltas []db.RepeatedSnapshotDelta
+}
+
+// repeatedAdoptionSnapshotIssueTx returns the issue an adoption snapshot
+// repeats, or nil when the event is not one or the project does not hold the
+// issue yet. An issue held by another project is refused.
+func repeatedAdoptionSnapshotIssueTx(ctx context.Context, tx *sql.Tx, projectID int64, ev db.RemoteEvent, allowed bool) (*db.Issue, error) {
+	if !allowed {
+		return nil, nil
+	}
+	issueUID := db.EventIssueUID(ev.IssueUID)
+	if issueUID == "" {
+		return nil, nil
+	}
+	if err := db.CheckFederationFreshIssueHolder(ctx, tx, projectID, ev.Type, issueUID); err != nil {
+		return nil, err
+	}
+	issue, err := eventIssueByUID(ctx, tx, issueUID)
+	if errors.Is(err, db.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &issue, nil
+}
+
+// rejectFreshCreateSnapshotForKnownIssue keeps creation create-only. An
+// adoption snapshot of an issue this project already holds never reaches it;
+// see repeatedAdoptionSnapshotIssueTx.
+func rejectFreshCreateSnapshotForKnownIssue(ctx context.Context, tx *sql.Tx, projectID int64, ev db.RemoteEvent, knownIssueUIDs map[string]struct{}) error {
 	switch ev.Type {
 	case "issue.created", "issue.snapshot":
 	default:
 		return nil
 	}
-	issueUID, err := payloadIssueUID(ev, db.PayloadMap(ev.Payload))
-	if err != nil {
+	issueUID := db.EventIssueUID(ev.IssueUID)
+	if err := db.CheckFederationFreshIssueHolder(ctx, tx, projectID, ev.Type, issueUID); err != nil {
 		return err
 	}
 	if _, ok := knownIssueUIDs[issueUID]; ok {
@@ -1079,26 +1211,6 @@ func rejectFreshCreateSnapshotForKnownIssue(ev db.RemoteEvent, knownIssueUIDs ma
 			db.ErrFederationIngestValidation, ev.Type, issueUID)
 	}
 	return nil
-}
-
-func payloadIssueUID(ev db.RemoteEvent, payload map[string]jsontext.Value) (string, error) {
-	var payloadUID string
-	if uid, ok := db.StringValue(payload["issue_uid"]); ok {
-		payloadUID = uid
-	}
-	if uid, ok := db.StringValue(payload["uid"]); ok {
-		if payloadUID != "" && payloadUID != uid {
-			return "", fmt.Errorf("%w: payload issue uid disagreement", db.ErrFederationIngestValidation)
-		}
-		payloadUID = uid
-	}
-	if ev.IssueUID != nil {
-		if payloadUID != "" && payloadUID != *ev.IssueUID {
-			return "", fmt.Errorf("%w: envelope/payload issue uid disagreement", db.ErrFederationIngestValidation)
-		}
-		return *ev.IssueUID, nil
-	}
-	return payloadUID, nil
 }
 
 func payloadReferencedIssueUIDs(ev db.RemoteEvent, payload map[string]jsontext.Value) ([]string, error) {
@@ -1200,7 +1312,7 @@ func payloadDeferredLinkIssueUIDs(
 		if err := validateFederationLinkPeer(primaryIssueUID, peerUID); err != nil {
 			return nil, err
 		}
-		if err := validateFederationUnlinkStorageEndpoints(ev, payload, linkType, fromUID, toUID); err != nil {
+		if err := db.ValidateUnlinkStorageEndpoints(ev, payload, linkType, primaryIssueUID, fromUID, toUID); err != nil {
 			return nil, err
 		}
 		add(peerUID)
@@ -1270,45 +1382,6 @@ func payloadLinksChangedIssueUIDs(
 	return refs, nil
 }
 
-func validateFederationUnlinkStorageEndpoints(
-	ev db.RemoteEvent,
-	payload map[string]jsontext.Value,
-	linkType, fromUID, toUID string,
-) error {
-	if ev.Type != "issue.unlinked" {
-		return nil
-	}
-	rawFrom, fromPresent := payload["link_from_uid"]
-	rawTo, toPresent := payload["link_to_uid"]
-	if fromPresent != toPresent {
-		return fmt.Errorf("%w: issue.unlinked storage endpoints must be paired", db.ErrFederationIngestValidation)
-	}
-	if !fromPresent {
-		if linkType == "blocks" || linkType == "parent" {
-			return fmt.Errorf("%w: issue.unlinked missing directional storage endpoints",
-				db.ErrFederationIngestValidation)
-		}
-		return nil
-	}
-	linkFromUID, fromOK := db.StringValue(rawFrom)
-	linkToUID, toOK := db.StringValue(rawTo)
-	if !fromOK || !toOK {
-		return fmt.Errorf("%w: issue.unlinked storage endpoints must be strings",
-			db.ErrFederationIngestValidation)
-	}
-	if !katauid.Valid(linkFromUID) || !katauid.Valid(linkToUID) || linkFromUID == linkToUID {
-		return fmt.Errorf("%w: issue.unlinked has invalid storage endpoints",
-			db.ErrFederationIngestValidation)
-	}
-	matchesForward := linkFromUID == fromUID && linkToUID == toUID
-	matchesReverse := linkFromUID == toUID && linkToUID == fromUID
-	if !matchesForward && !matchesReverse {
-		return fmt.Errorf("%w: issue.unlinked storage endpoints disagree with payload endpoints",
-			db.ErrFederationIngestValidation)
-	}
-	return nil
-}
-
 func validateFederationLinkType(linkType string) error {
 	switch linkType {
 	case "parent", "blocks", "related":
@@ -1351,7 +1424,11 @@ type payloadLink struct {
 }
 
 func payloadLinks(ev db.RemoteEvent) ([]payloadLink, error) {
+	moved := ev.Type == "issue.moved"
 	ev = db.FederationMoveSnapshotEvent(ev)
+	if moved && len(ev.Payload) == 0 {
+		return nil, nil
+	}
 	var created struct {
 		Links []payloadLink `json:"links"`
 	}
@@ -1375,11 +1452,7 @@ func federationIngestKnownIssueUIDSet(ctx context.Context, tx *sql.Tx, projectID
 			ev.Payload = jsontext.Value(`{}`)
 		}
 		payload := db.PayloadMap(ev.Payload)
-		uid, err := payloadIssueUID(ev, payload)
-		if err != nil {
-			return nil, err
-		}
-		if uid != "" {
+		if uid := db.EventIssueUID(ev.IssueUID); uid != "" {
 			candidates[uid] = struct{}{}
 		}
 		refs, err := payloadReferencedIssueUIDs(ev, payload)
@@ -1459,8 +1532,7 @@ func materializedIssueUIDSet(ctx context.Context, tx *sql.Tx, projectID int64, s
 }
 
 func rememberIngestIssueUIDs(ev db.RemoteEvent, known map[string]struct{}) {
-	payload := db.PayloadMap(ev.Payload)
-	if uid, err := payloadIssueUID(ev, payload); err == nil && uid != "" {
+	if uid := db.EventIssueUID(ev.IssueUID); uid != "" {
 		switch ev.Type {
 		case "issue.created", "issue.snapshot":
 			known[uid] = struct{}{}
@@ -1489,7 +1561,7 @@ func (d *Store) authorizeFederationMoveTx(ctx context.Context, tx *sql.Tx, p db.
 		if err := d.FederationEnrollmentTransactionFence(admitted, to, "push")(ctx, tx); err != nil {
 			return err
 		}
-		if err := d.authorizeFederationAffectedProjectTx(ctx, tx, p, from, fromUID); err != nil {
+		if err := d.authorizeFederationAffectedProjectTx(ctx, tx, p, from, fromUID, false); err != nil {
 			return err
 		}
 	}
@@ -1502,14 +1574,16 @@ func (d *Store) authorizeFederationMoveTx(ctx context.Context, tx *sql.Tx, p db.
 // Fresh events retain their authored envelope, but authorization follows every
 // affected issue's current owner. Duplicates already passed this acceptance
 // boundary and must not acquire new authority merely to acknowledge a retry.
-func (d *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.Tx, p db.FederationIngestParams, events []preparedFederationIngestEvent, moveSnapshots *db.FederationMoveSnapshotValidator) error {
+func (d *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.Tx, p db.FederationIngestParams, events []db.RemoteEvent, moveSnapshots *db.FederationMoveSnapshotValidator) error {
+	// Report graph validation only after checking current project authority.
+	parentRemovals, err := db.DirectParentRemovals(ctx, tx, events, p.AuthorizeReference != nil)
 	staged := map[string]int64{}
-	checked := map[int64]bool{}
-	for _, input := range events {
-		if input.Duplicate {
-			continue
-		}
-		event := input.Event
+	type checkedProject struct {
+		id        int64
+		reference bool
+	}
+	checked := map[checkedProject]bool{}
+	for _, event := range events {
 		referenceEvent, err := moveSnapshots.UnprovenReferences(ctx, event)
 		if err != nil {
 			return err
@@ -1518,12 +1592,8 @@ func (d *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.
 		var refs []string
 		switch {
 		case strings.HasPrefix(event.Type, "issue."):
-			payload := db.PayloadMap(event.Payload)
 			var err error
-			primary, err = payloadIssueUID(event, payload)
-			if err != nil {
-				return err
-			}
+			primary = db.EventIssueUID(event.IssueUID)
 			refs, err = payloadReferencedIssueUIDs(referenceEvent, db.PayloadMap(referenceEvent.Payload))
 			if err != nil {
 				return err
@@ -1547,7 +1617,18 @@ func (d *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.
 			}
 			refs = append(refs, replyIssues...)
 		}
-		refs = append(refs, primary)
+		peers, err := db.DirectLinkPeers(db.FoldEvent{Type: event.Type, UID: event.EventUID, IssueUID: db.EventIssueUID(event.IssueUID), Payload: event.Payload})
+		if err != nil {
+			return err
+		}
+		explicitRefs := refs
+		if p.AuthorizeReference != nil {
+			for _, previous := range parentRemovals[event.EventUID] {
+				refs = append(refs, previous)
+				delete(peers, previous)
+			}
+		}
+		refs = append([]string{primary}, refs...)
 		for _, issueUID := range refs {
 			if issueUID == "" {
 				continue
@@ -1564,17 +1645,25 @@ func (d *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.
 				}
 				staged[issueUID] = current
 			}
-			if current == p.ProjectID || checked[current] {
+			reference := issueUID != primary && peers[issueUID]
+			key := checkedProject{current, reference}
+			if current == p.ProjectID || checked[key] {
 				continue
 			}
 			project, err := scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id=$1 AND deleted_at IS NULL`, current))
 			if err != nil {
 				return err
 			}
-			if err := d.authorizeFederationAffectedProjectTx(ctx, tx, p, current, project.UID); err != nil {
+			if err := d.authorizeFederationAffectedProjectTx(ctx, tx, p, current, project.UID, reference); err != nil {
+				if errors.Is(err, db.ErrFederationMoveSourceUnauthorized) {
+					if issueUID != primary && !slices.Contains(explicitRefs, issueUID) {
+						issueUID = ""
+					}
+					return &db.FederationProjectNotEnrolledError{IssueUID: issueUID, Err: err}
+				}
 				return err
 			}
-			checked[current] = true
+			checked[key] = true
 		}
 		switch event.Type {
 		case "issue.created", "issue.snapshot":
@@ -1589,19 +1678,23 @@ func (d *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.
 			staged[primary] = to
 		}
 	}
-	return nil
+	return err
 }
 
-// A supplemental project uses the route grant only when that grant covers it;
-// otherwise its exact bearer proof must belong to the same native spoke/actor.
-func (d *Store) authorizeFederationAffectedProjectTx(ctx context.Context, tx *sql.Tx, p db.FederationIngestParams, projectID int64, projectUID string) error {
+// A supplemental project uses the route grant only when that grant covers it.
+// An explicit peer link may use its own project actor when the host approves.
+func (d *Store) authorizeFederationAffectedProjectTx(ctx context.Context, tx *sql.Tx, p db.FederationIngestParams, projectID int64, projectUID string, reference bool) error {
+	var authorize func(context.Context, db.Transaction, db.FederationEnrollment, db.Project) error
+	var grant db.FederationEnrollment
+	actor := p.BoundActor
 	if p.FederationEnrollmentID == 0 {
 		if !db.ProjectAttributionVisible(ctx, projectUID) {
 			return db.ErrNotFound
 		}
 	} else {
 		grantID := p.FederationEnrollmentID
-		grant, err := federationEnrollmentByIDTx(ctx, tx, grantID)
+		var err error
+		grant, err = federationEnrollmentByIDTx(ctx, tx, grantID)
 		if err != nil {
 			return err
 		}
@@ -1618,7 +1711,15 @@ func (d *Store) authorizeFederationAffectedProjectTx(ctx context.Context, tx *sq
 				return err
 			}
 		}
-		if grant.SpokeInstanceUID != p.SpokeInstanceUID || grant.Actor != p.BoundActor || grant.RelayProtocolVersion != 0 {
+		authorize = p.AuthorizeMove
+		if grant.Actor != p.BoundActor {
+			if !reference || p.AuthorizeReference == nil || grant.ProjectID == nil || *grant.ProjectID != projectID || grant.ID == p.FederationEnrollmentID {
+				return db.ErrFederationMoveSourceUnauthorized
+			}
+			authorize = p.AuthorizeReference
+			actor = grant.Actor
+		}
+		if grant.SpokeInstanceUID != p.SpokeInstanceUID || grant.RelayProtocolVersion != 0 {
 			return db.ErrFederationMoveSourceUnauthorized
 		}
 		if err := d.FederationEnrollmentTransactionFence(grant, projectID, "push")(ctx, tx); err != nil {
@@ -1627,18 +1728,18 @@ func (d *Store) authorizeFederationAffectedProjectTx(ctx context.Context, tx *sq
 			}
 			return err
 		}
-		if p.AuthorizeMove != nil {
-			project, err := scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id=$1 AND deleted_at IS NULL`, projectID))
-			if err != nil {
-				return err
-			}
-			if err := p.AuthorizeMove(ctx, tx, grant, project); err != nil {
-				return err
-			}
+	}
+	if actor != "" {
+		if err := d.ProjectAccessTransactionFence(actor, []string{projectUID})(ctx, tx); err != nil {
+			return err
 		}
 	}
-	if p.BoundActor != "" {
-		return d.ProjectAccessTransactionFence(p.BoundActor, []string{projectUID})(ctx, tx)
+	if authorize != nil {
+		project, err := scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id=$1 AND deleted_at IS NULL`, projectID))
+		if err != nil {
+			return err
+		}
+		return authorize(ctx, tx, grant, project)
 	}
 	return nil
 }

@@ -26,6 +26,7 @@ import (
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/internal/docbank"
+	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/githubsync"
 	"go.kenn.io/kata/internal/hooks"
@@ -37,6 +38,8 @@ import (
 	"go.kenn.io/kata/internal/tickticksync"
 	"go.kenn.io/kata/internal/todoistsync"
 	"go.kenn.io/kata/internal/twentysync"
+	"go.kenn.io/kata/internal/vector"
+	"go.kenn.io/kit/embedlocal"
 )
 
 // PostgresSchemaMode controls how a PostgreSQL-backed service treats its
@@ -131,6 +134,9 @@ type GitHubAppConfig struct {
 	PrivateKeyPath string
 }
 
+// EmbeddingsConfig selects the embedding provider for semantic search. Its fields follow the standalone daemon's embedding configuration.
+type EmbeddingsConfig = config.EmbeddingsConfig
+
 // DocbankConfig selects the vault used by issue attachments.
 type DocbankConfig = config.DocbankConfig
 
@@ -195,6 +201,12 @@ type Config struct {
 	TodoistSync  TodoistSyncConfig
 	TickTickSync TickTickSyncConfig
 	Docbank      DocbankConfig
+	Embeddings   EmbeddingsConfig
+	// EmbeddingProjectAllowed controls which project UIDs may use the embedding
+	// provider. Nil allows all projects. Errors abort the current attempt.
+	// Daemons sharing a PostgreSQL schema must return the same decision for each
+	// project because they share the mirror, vector index, and reconciler lease.
+	EmbeddingProjectAllowed func(context.Context, string) (bool, error)
 	// WebHandler optionally serves public, data-free browser assets alongside
 	// the API. Non-API paths bypass Kata's bearer check. Nil keeps the service
 	// API-only. Import go.kenn.io/kata/webui to opt into the bundled application.
@@ -247,10 +259,12 @@ type serviceDeps struct {
 // Service is a mountable Kata HTTP application and its owned lifecycle.
 type Service struct {
 	store                  db.Storage
+	embeddingReconciler    *daemon.Reconciler
 	server                 *daemon.Server
 	broadcaster            *daemon.EventBroadcaster
 	publish                daemon.EventPublisher
 	federationWake         chan struct{}
+	federationRetries      *federation.SyncRetries
 	gitHubSyncWake         chan struct{}
 	gitHubSyncFetcher      githubsync.Fetcher
 	gitHubSyncProgress     *githubsync.ProgressTracker
@@ -310,6 +324,18 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 			return nil, fmt.Errorf("kata: default timezone %q is not a valid IANA timezone: %w", cfg.DefaultTimezone, err)
 		}
 	}
+	if err := config.ValidateEmbeddings(cfg.Embeddings); err != nil {
+		return nil, fmt.Errorf("kata: embeddings: %w", err)
+	}
+	if cfg.Embeddings.Enabled() {
+		backend, err := storeopen.BackendForDSN(cfg.DSN)
+		if err != nil {
+			return nil, fmt.Errorf("kata: open storage: %w", err)
+		}
+		if backend != storeopen.BackendPostgres {
+			return nil, errors.New("kata: embeddings require Postgres")
+		}
+	}
 	usesAccess := cfg.Access != nil
 	usesToken := strings.TrimSpace(cfg.Auth.Token) != ""
 	usesTrustedCaller := cfg.Auth.TrustCallerAuthentication
@@ -361,6 +387,23 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	}
 	federationCredentials := serviceCredentialStoreAdapter{store: publicFederationCredentials}
 
+	var embedder *embedding.Client
+	if cfg.Embeddings.Enabled() {
+		ec := embedding.ClientConfig(cfg.Embeddings)
+		if cfg.Embeddings.UsesLocal() {
+			ec.Endpoint = func(ctx context.Context) (string, error) {
+				return embedding.ResolveLocal(ctx, embedlocal.Endpoint, embedlocal.Install, nil)
+			}
+		}
+		embedder, err = embedding.New(ec)
+		if err != nil {
+			return nil, fmt.Errorf("kata: embedding client: %w", err)
+		}
+		if err := embedding.ValidateBatching(ctx, cfg.Embeddings, embedder); err != nil {
+			return nil, fmt.Errorf("kata: embedding batching: %w", err)
+		}
+	}
+
 	openCfg := storeopen.DefaultConfig()
 	pgCfg := cfg.Postgres
 	openCfg.Postgres = pgstore.ConfigFromValues(
@@ -374,6 +417,18 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		return nil, fmt.Errorf("kata: open storage: %w", err)
 	}
 
+	var index *vector.Index
+	var unavailable string
+	if cfg.Embeddings.Enabled() {
+		pg := store.(*pgstore.Store)
+		index, err = vector.OpenPostgres(ctx, pg.DB)
+		if errors.Is(err, vector.ErrPgvectorMissing) {
+			unavailable = err.Error()
+		} else if err != nil {
+			_ = store.Close()
+			return nil, fmt.Errorf("kata: embedding index: %w", err)
+		}
+	}
 	startedAt := cfg.StartedAt
 	if startedAt.IsZero() {
 		startedAt = time.Now().UTC()
@@ -387,6 +442,10 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	broadcaster := daemon.NewEventBroadcaster()
 	hookSink := hooks.NewNoop()
 	publisher := daemon.NewEventPublisher(broadcaster, hookSink)
+	var reconciler *daemon.Reconciler
+	if index != nil && embedder != nil {
+		reconciler = daemon.NewConfiguredEmbeddingReconciler(store, index, embedder, cfg.Embeddings, publisher, nil, federationCredentials, federation.EmbeddingProducerConnected, federation.EmbeddingProducerAuthorized, cfg.EmbeddingProjectAllowed)
+	}
 	federationWake := make(chan struct{}, 1)
 	wakeFederation := func() {
 		select {
@@ -502,8 +561,10 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 			controller: cfg.FederationAccess,
 		}
 	}
+	federationRetries := federation.NewSyncRetries()
 	serverConfig := daemon.ServerConfig{
-		DB:              store,
+		DB:       store,
+		Embedder: embedder, VectorIndex: index, EmbeddingUnavailableReason: unavailable,
 		Docbank:         docbankClient,
 		DocbankFolder:   docbankConfig.Folder,
 		WebHandler:      cfg.WebHandler,
@@ -511,13 +572,18 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		StartedAt:       startedAt,
 		Broadcaster:     broadcaster,
 		FederationWake:  wakeFederation,
+		FederationSyncOnce: func(ctx context.Context, binding db.FederationBinding, credential config.FederationCredential) error {
+			return federation.SyncFederationOnceWithPulledEvents(ctx, store, binding, credential, clientpkg.Opts{}, publisher.Events, federationCredentials)
+		},
 		FederationPullOnce: func(ctx context.Context, binding db.FederationBinding, credential config.FederationCredential) error {
 			return federation.SyncFederationPullOnlyOnceWithPulledEvents(ctx, store, binding, credential, clientpkg.Opts{}, publisher.Events, federationCredentials)
 		},
 		FederationCredentials:     federationCredentials,
 		FederationPushPending:     federation.DirectSpokePushPending(store),
 		FederationHubClient:       federation.CredentialHTTPClient,
+		FederationSyncRetry:       federationRetries.FederationSyncRetry,
 		DisableFederationRebind:   true,
+		EmbeddingProjectAllowed:   cfg.EmbeddingProjectAllowed,
 		GitHubSyncFetcher:         gitHubSyncFetcher,
 		GitHubSyncProgress:        gitHubSyncProgress,
 		GitHubSyncConfig:          gitHubSyncConfig,
@@ -554,6 +620,19 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		EmbeddingProfile:          daemon.EmbeddingProfile(cfg.Profile),
 		Logger:                    logger,
 	}
+	if controller, ok := cfg.FederationAccess.(FederationReferenceAccessController); ok {
+		serverConfig.AuthorizeFederationReference = func(ctx context.Context, tx db.Transaction, route, peer daemon.HostFederationAccessRequest) error {
+			err := controller.AuthorizeFederationReference(ctx, tx, publicFederationRequest(route), publicFederationRequest(peer))
+			if errors.Is(err, ErrAccessDenied) {
+				return errors.Join(daemon.ErrHostAccessDenied, err)
+			}
+			return err
+		}
+	}
+	if reconciler != nil {
+		serverConfig.ReconcilerHealth = reconciler.Health
+		serverConfig.EmbeddingWake = reconciler.RetryNow
+	}
 	mcpEventsService := newMCPEventsService(ctx, cfg.MCPEvents, serverConfig, broadcaster, deps.mcpEventsWebhook, logger)
 	serverConfig.MCPEvents = mcpEventsService
 	if cfg.MCPEvents.Enabled && mcpEventsService == nil {
@@ -563,10 +642,12 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 
 	return &Service{
 		store:                  store,
+		embeddingReconciler:    reconciler,
 		server:                 server,
 		broadcaster:            broadcaster,
 		publish:                publisher,
 		federationWake:         federationWake,
+		federationRetries:      federationRetries,
 		gitHubSyncWake:         gitHubSyncWake,
 		gitHubSyncFetcher:      gitHubSyncFetcher,
 		gitHubSyncProgress:     gitHubSyncProgress,
@@ -756,14 +837,7 @@ func (a hostFederationAccessControllerAdapter) AuthorizeFederation(
 	if a.controller == nil {
 		return daemon.HostFederationAccessDecision{}, nil
 	}
-	decision, err := a.controller.AuthorizeFederation(ctx, FederationAccessRequest{
-		Enrollment: publicFederationEnrollment(request.Enrollment, request.Project.UID),
-		Project:    publicProject(request.Project),
-		Capability: FederationCapability(request.Capability),
-		Operation: FederationOperation{
-			ID: request.Operation.ID, Mutation: request.Operation.Mutation,
-		},
-	})
+	decision, err := a.controller.AuthorizeFederation(ctx, publicFederationRequest(request))
 	if errors.Is(err, ErrAccessDenied) {
 		return daemon.HostFederationAccessDecision{}, daemon.ErrHostAccessDenied
 	}
@@ -784,6 +858,17 @@ func (a hostFederationAccessControllerAdapter) AuthorizeFederation(
 		}
 	}
 	return daemon.HostFederationAccessDecision{TransactionFence: transactionFence}, nil
+}
+
+func publicFederationRequest(request daemon.HostFederationAccessRequest) FederationAccessRequest {
+	return FederationAccessRequest{
+		Enrollment: publicFederationEnrollment(request.Enrollment, request.EnrollmentProjectUID),
+		Project:    publicProject(request.Project),
+		Capability: FederationCapability(request.Capability),
+		Operation: FederationOperation{
+			ID: request.Operation.ID, Mutation: request.Operation.Mutation,
+		},
+	}
 }
 
 func (a hostAccessControllerAdapter) Authorize(
@@ -844,8 +929,27 @@ func (a hostAccessControllerAdapter) Authorize(
 // due-notification, and assignment-expiry workers, and MCP Events delivery
 // when Config.MCPEvents can deliver, until ctx is canceled or
 // Close is called. Run does not start a listener and may be called only once
-// at a time.
+// at a time. To run only semantic indexing, use RunSemanticIndex.
 func (s *Service) Run(ctx context.Context) error {
+	return s.runWorkers(ctx, allWorkers)
+}
+
+// RunSemanticIndex runs only the reconciler configured by Config.Embeddings.
+// It shares Run's single-run rule and worker transaction fence requirement.
+// If embeddings are disabled or pgvector is missing, it waits until ctx is
+// canceled or Close is called. Its return follows the same contract as Run.
+func (s *Service) RunSemanticIndex(ctx context.Context) error {
+	return s.runWorkers(ctx, semanticIndexOnly)
+}
+
+type workerSelection bool
+
+const (
+	semanticIndexOnly workerSelection = false
+	allWorkers        workerSelection = true
+)
+
+func (s *Service) runWorkers(ctx context.Context, selection workerSelection) error {
 	if ctx == nil {
 		return errors.New("kata: run context is required")
 	}
@@ -900,6 +1004,9 @@ func (s *Service) Run(ctx context.Context) error {
 				}
 				if msg.Kind == daemon.StreamKindEvent {
 					signalWake(s.federationWake)
+					if s.embeddingReconciler != nil {
+						s.embeddingReconciler.Wake()
+					}
 				}
 			}
 		}
@@ -910,11 +1017,55 @@ func (s *Service) Run(ctx context.Context) error {
 		federationSub.Unsub()
 	}()
 
+	var workers []namedWorker
+	if selection == allWorkers {
+		workers = s.serviceWorkers()
+	}
+	if s.embeddingReconciler != nil {
+		workers = append(workers, namedWorker{name: "embeddings", run: s.embeddingReconciler.Run})
+	}
+	workerErrs := make(chan error, len(workers))
+	for _, worker := range workers {
+		go func() {
+			err := worker.run(runCtx)
+			workerErrs <- worker.result(err, runCtx.Err())
+		}()
+	}
+
+	var stop runStop
+	workerResults := make([]error, 0, len(workers))
+	select {
+	case <-runCtx.Done():
+		stop = runStop{reason: stopContextDone, err: runCtx.Err()}
+	case err := <-workerErrs:
+		stop = runStop{reason: stopWorkerExit, err: err}
+		workerResults = append(workerResults, err)
+	}
+	// Sampled here, next to the stop it qualifies: a Close that lands later
+	// must not retroactively change what an already-recorded error means.
+	callerStop := ctx.Err()
+	if callerStop == nil && s.isClosed() {
+		callerStop = context.Canceled
+	}
+	fence.beginUnwind()
+	for len(workerResults) < len(workers) {
+		workerResults = append(workerResults, <-workerErrs)
+	}
+	// A fence rejection cancels the run, so the select above sees it as
+	// stopContextDone. The recorder holds the real reason.
+	if fenceErr := fence.first(); fenceErr != nil {
+		stop = runStop{reason: stopFenceFailure, err: fenceErr}
+	}
+	return runResult(stop, workerResults, callerStop)
+}
+
+func (s *Service) serviceWorkers() []namedWorker {
 	runner := &federation.Runner{
 		DB:          s.store,
 		Credentials: s.federationCredentials,
 		Interval:    30 * time.Second,
 		Wake:        s.federationWake,
+		Retries:     s.federationRetries,
 		OnError: func(err error) {
 			s.logger.Error("kata federation worker", "err", err)
 		},
@@ -1036,39 +1187,7 @@ func (s *Service) Run(ctx context.Context) error {
 	if s.mcpEvents != nil && s.mcpEvents.Availability().Enabled {
 		workers = append(workers, namedWorker{name: "mcp-events", run: s.mcpEvents.Run})
 	}
-	workerErrs := make(chan error, len(workers))
-	for _, worker := range workers {
-		go func() {
-			err := worker.run(runCtx)
-			workerErrs <- worker.result(err, runCtx.Err())
-		}()
-	}
-
-	var stop runStop
-	workerResults := make([]error, 0, len(workers))
-	select {
-	case <-runCtx.Done():
-		stop = runStop{reason: stopContextDone, err: runCtx.Err()}
-	case err := <-workerErrs:
-		stop = runStop{reason: stopWorkerExit, err: err}
-		workerResults = append(workerResults, err)
-	}
-	// Sampled here, next to the stop it qualifies: a Close that lands later
-	// must not retroactively change what an already-recorded error means.
-	callerStop := ctx.Err()
-	if callerStop == nil && s.isClosed() {
-		callerStop = context.Canceled
-	}
-	fence.beginUnwind()
-	for len(workerResults) < len(workers) {
-		workerResults = append(workerResults, <-workerErrs)
-	}
-	// A fence rejection cancels the run, so the select above sees it as
-	// stopContextDone. The recorder holds the real reason.
-	if fenceErr := fence.first(); fenceErr != nil {
-		stop = runStop{reason: stopFenceFailure, err: fenceErr}
-	}
-	return runResult(stop, workerResults, callerStop)
+	return workers
 }
 
 // publishWorkerEvents fans a background worker's events out to both event

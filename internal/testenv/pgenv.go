@@ -100,7 +100,7 @@ func newPostgresContainer(
 
 // postgresServerDSN returns the explicit server DSN, or the shared container
 // for image, skipping the test when neither is available.
-func postgresServerDSN(ctx context.Context, t *testing.T, image, baseDSN string) string {
+func postgresServerDSN(ctx context.Context, t testing.TB, image, baseDSN string) string {
 	t.Helper()
 	if baseDSN != "" {
 		return baseDSN
@@ -144,7 +144,7 @@ func NewPostgresTemplate(prepare func(ctx context.Context, dsn string) error) *P
 // cleanup function that drops it. It skips like NewPostgresContainer.
 //
 //nolint:revive // t is the canonical first arg for testing helpers
-func (tmpl *PostgresTemplate) NewDatabase(t *testing.T, ctx context.Context) (string, func()) {
+func (tmpl *PostgresTemplate) NewDatabase(t testing.TB, ctx context.Context) (string, func()) {
 	t.Helper()
 	baseDSN := postgresServerDSN(ctx, t, "pgvector/pgvector:pg17", os.Getenv("KATA_TEST_POSTGRES_DSN"))
 	server := tmpl.on(ctx, baseDSN)
@@ -309,7 +309,7 @@ func skipAutomaticPostgresContainer(goos, autostart string) bool {
 //
 // A non-empty template names the database to clone; empty creates an empty
 // database.
-func newIsolatedPostgresDatabase(ctx context.Context, t *testing.T, baseDSN, template string) (string, func()) {
+func newIsolatedPostgresDatabase(ctx context.Context, t testing.TB, baseDSN, template string) (string, func()) {
 	t.Helper()
 	databaseName := fmt.Sprintf("kata_test_%d_%d", os.Getpid(), postgresDatabaseCounter.Add(1))
 	u, err := postgresDatabaseDSN(baseDSN, databaseName)

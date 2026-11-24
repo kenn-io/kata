@@ -43,7 +43,7 @@ func (d *Store) EventsAfter(ctx context.Context, p db.EventsAfterParams) ([]db.E
 		args = append(args, p.ThroughID)
 	}
 	if p.IssueUID != "" {
-		conds = append(conds, db.FederationReadIssueUIDExpr(false)+" = ?")
+		conds = append(conds, "e.issue_uid = ?")
 		args = append(args, p.IssueUID)
 	}
 	if len(p.Types) > 0 {

@@ -407,7 +407,7 @@ func (d federationBridgeDoer) Do(ctx context.Context, request *http.Request) (*h
 func federationBridgeHubRejection(status int) *api.APIError {
 	data := map[string]any{"hub_status": status}
 	switch {
-	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+	case status == http.StatusUnauthorized || status == http.StatusForbidden || status == http.StatusPreconditionRequired:
 		return api.NewError(http.StatusBadGateway, "hub_credential_rejected", "selected hub rejected the presented credential", "check the hub account, its project access and the hub's signing policy", data)
 	case status < 500:
 		status = http.StatusBadGateway

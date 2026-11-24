@@ -360,6 +360,11 @@ type EditIssueAtomicParams struct {
 	// identities inside the mutation transaction. Missing entries retain the
 	// legacy unrestricted behavior for non-scoped clients.
 	ExpectedLinkProjectUIDs map[int64]string
+
+	// ExpectedContentRevision, when non-nil, must equal the issue's current
+	// content_revision inside the mutation transaction or nothing is written
+	// and *ContentRevisionConflictError is returned. nil = unconditional.
+	ExpectedContentRevision *int64
 }
 
 // PeerIdentity is the stable identity of a link peer as captured inside
@@ -501,6 +506,11 @@ type PurgeProjectParams struct {
 	ProjectID int64
 	Actor     string
 	Reason    *string
+	// RetireHubBinding lets the purge remove an archived project that is a
+	// federation hub. The purge deletes the hub binding and every enrollment
+	// scoped to the project in the same transaction. A spoke replica is still
+	// refused: it must leave its hub first.
+	RetireHubBinding bool
 }
 
 // DetachAliasParams identifies a single alias to drop. ProjectID scopes the
@@ -855,6 +865,8 @@ type FederationIngestParams struct {
 	// MoveSourceEnrollmentIDs contains supplemental grants authenticated by transport.
 	// A matching spoke/actor enrollment alone does not prove token possession.
 	MoveSourceEnrollmentIDs map[string]int64
+	// AuthorizeReference checks a different actor only for explicit direct link additions.
+	AuthorizeReference func(context.Context, Transaction, FederationEnrollment, Project) error
 	// AuthorizeMove checks supplemental host authority for move sources and the
 	// current owners of fresh events, using a transactionally fenced native grant.
 	AuthorizeMove                    func(context.Context, Transaction, FederationEnrollment, Project) error
@@ -890,6 +902,10 @@ type FederationIngestResult struct {
 	Duplicates            int
 	PushCursorEventID     int64
 	InsertedEventUIDs     []string
+	// SupersededEventUIDs lists pushed adoption snapshots the hub did not
+	// store because its project already holds the issue. The pushing spoke
+	// deletes them and takes the hub's state.
+	SupersededEventUIDs []string
 }
 
 // CreateFederationEnrollmentParams carries the plaintext token at creation

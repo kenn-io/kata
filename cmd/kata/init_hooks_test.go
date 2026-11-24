@@ -45,26 +45,27 @@ func TestApplyClaudeHooks_MigratesExactLegacyHandlers(t *testing.T) {
 	changed, err := applyClaudeHooks(dir)
 	require.NoError(t, err)
 	assert.True(t, changed)
-	assert.Equal(t, map[string]any{
-		"hooks": map[string]any{
-			"SessionStart": []any{
-				map[string]any{
-					"matcher": "startup|resume|clear",
-					"hooks": []any{
-						map[string]any{"type": "command", "command": "notify-session"},
-					},
-				},
-				map[string]any{
-					"matcher": "startup|resume|clear",
-					"hooks":   []any{expectedHookHandler("start")},
-				},
-			},
-			"SessionEnd": []any{map[string]any{
-				"matcher": "logout|prompt_input_exit|bypass_permissions_disabled|other",
-				"hooks":   []any{expectedHookHandler("end")},
-			}},
-		},
-	}, readSettings(t, dir))
+	hooks := readSettings(t, dir)["hooks"].(map[string]any)
+	var starts []any
+	for _, raw := range hooks["SessionStart"].([]any) {
+		group := raw.(map[string]any)
+		assert.Equal(t, "startup|resume|clear", group["matcher"])
+		starts = append(starts, group["hooks"].([]any)...)
+	}
+	start := expectedHookHandler("start")
+	end := expectedHookHandler("end")
+	if runtime.GOOS == "windows" {
+		start["args"] = []any{"attention-hook", "start", "--source", "kata-agent-hook-start"}
+		end["args"] = []any{"attention-hook", "end", "--source", "kata-agent-hook-end"}
+	} else {
+		start["command"] = "kata attention-hook start --source kata-agent-hook-start"
+		end["command"] = "kata attention-hook end --source kata-agent-hook-end"
+	}
+	assert.Equal(t, []any{start, map[string]any{"type": "command", "command": "notify-session"}}, starts)
+	assert.Equal(t, []any{map[string]any{
+		"matcher": "logout|prompt_input_exit|bypass_permissions_disabled|other",
+		"hooks":   []any{end},
+	}}, hooks["SessionEnd"])
 }
 
 func TestApplyClaudeHooks_PreservesCommandsContainingOldMarker(t *testing.T) {

@@ -111,14 +111,17 @@ func ScheduleFieldInstant(raw, field, defaultTimezone string) (value, timezone s
 	if kind == scheduledOnInstant {
 		return value, "UTC", instant.UTC(), true, nil
 	}
-	location, err := loadScheduleLocation(values.Timezone, defaultTimezone)
+	wall, zone := SplitScheduleZone(value)
+	if zone == "" {
+		zone = values.Timezone
+	}
+	location, err := loadScheduleLocation(zone, defaultTimezone)
 	if err != nil {
 		return
 	}
 	timezone = location.String()
-	wall := value
 	if kind == scheduledOnDate {
-		wall, layout = value+"T00:00", localMinuteLayout
+		wall, layout = wall+"T00:00", localMinuteLayout
 	}
 	at, err = resolveLocalSchedule(wall, layout, location)
 	at = at.UTC()
@@ -131,6 +134,11 @@ func scheduleValueDue(value, issueTimezone string, now time.Time, defaultTimezon
 		return false, err
 	}
 	if kind == scheduledOnDate || kind == scheduledOnLocalTime {
+		var zone string
+		value, zone = SplitScheduleZone(value)
+		if zone != "" {
+			issueTimezone = zone
+		}
 		location, err := loadScheduleLocation(issueTimezone, defaultTimezone)
 		if err != nil {
 			return false, err
@@ -199,6 +207,10 @@ func CalendarDate(
 	kind, layout, instant, err := classifyScheduledOn(scheduleValue)
 	if err != nil {
 		return "", false, err
+	}
+	scheduleValue, zone := SplitScheduleZone(scheduleValue)
+	if zone != "" {
+		issueTimezone = zone
 	}
 	if kind == scheduledOnDate {
 		return scheduleValue, true, nil
@@ -347,6 +359,19 @@ func wallClock(instant time.Time, location *time.Location) time.Time {
 }
 
 func classifyScheduledOn(value string) (scheduledOnKind, string, time.Time, error) {
+	wall, zone := SplitScheduleZone(value)
+	if zone != "" {
+		if zone == "Local" {
+			return 0, "", time.Time{}, fmt.Errorf("schedule timezone Local is not portable; set timezone to a named zone")
+		}
+		if _, err := time.LoadLocation(zone); err != nil {
+			return 0, "", time.Time{}, fmt.Errorf("load schedule timezone %q: %w", zone, err)
+		}
+		if strings.HasSuffix(wall, "Z") {
+			return 0, "", time.Time{}, fmt.Errorf("UTC instant cannot have a schedule timezone")
+		}
+		value = wall
+	}
 	if _, err := time.Parse(time.DateOnly, value); err == nil {
 		return scheduledOnDate, time.DateOnly, time.Time{}, nil
 	}
@@ -364,4 +389,14 @@ func classifyScheduledOn(value string) (scheduledOnKind, string, time.Time, erro
 		"scheduled_on %q must match YYYY-MM-DD, local YYYY-MM-DDTHH:MM[:SS], or RFC 3339 UTC with Z",
 		value,
 	)
+}
+
+// SplitScheduleZone separates a trailing named zone from a schedule value.
+func SplitScheduleZone(value string) (string, string) {
+	if strings.HasSuffix(value, "]") {
+		if i := strings.LastIndexByte(value, '['); i >= 0 && i < len(value)-2 {
+			return value[:i], value[i+1 : len(value)-1]
+		}
+	}
+	return value, ""
 }

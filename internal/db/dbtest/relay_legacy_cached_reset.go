@@ -22,10 +22,8 @@ func RunRelayLegacyCachedResetPrivacy(t *testing.T, store db.Storage, writeMeta 
 	require.NoError(t, err)
 	unselected, err := store.CreateProject(ctx, "unselected-project")
 	require.NoError(t, err)
-	for _, p := range []db.Project{selected, unselected} {
-		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: p.ID, Role: db.FederationRoleHub, HubProjectID: p.ID, HubProjectUID: p.UID, Enabled: true})
-		require.NoError(t, err)
-	}
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: selected.ID, Role: db.FederationRoleHub, HubProjectID: selected.ID, HubProjectUID: selected.UID, Enabled: true})
+	require.NoError(t, err)
 	from, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: selected.ID, Author: "member", Title: "Selected link source"})
 	require.NoError(t, err)
 	private, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: unselected.ID, Author: "member", Title: "Private link endpoint"})

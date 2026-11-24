@@ -473,6 +473,14 @@ func (s *Store) closeIssueWithEvents(
 			}
 			events = append(events, generated...)
 		}
+		unlabeled, err := s.detachLabelTx(ctx, tx, current, project, "issue.unlabeled", "needs-review", p.Actor, closedAt)
+		if err != nil && !errors.Is(err, db.ErrNotFound) {
+			return err
+		}
+		if err == nil {
+			events = append(events, unlabeled)
+		}
+
 		issue, err = scanIssue(ctx, tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = $1`, current.ID))
 		return err
 	})

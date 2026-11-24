@@ -1,7 +1,9 @@
 package dbtest
 
 import (
+	"context"
 	"crypto/ed25519"
+	"database/sql"
 	"encoding/json/jsontext"
 	"sort"
 	"testing"
@@ -12,15 +14,15 @@ import (
 	"go.kenn.io/kata/internal/uid"
 )
 
-// relayLinkBoundaryFixture is a root hub project with a sibling hub project in
-// the same group, a pinned root key and a parent credential for relay grants.
+// relayLinkBoundaryFixture has a root hub project, a sibling, a pinned root key,
+// and a parent credential for relay grants.
 type relayLinkBoundaryFixture struct {
 	project, sibling db.Project
 	parentTokenID    int64
 	signer           db.RootAttributionSigner
 }
 
-func newRelayLinkBoundaryFixture(t *testing.T, store db.Storage, name string) relayLinkBoundaryFixture {
+func newRelayLinkBoundaryFixture(t *testing.T, store db.Storage, name string, shared ...bool) relayLinkBoundaryFixture {
 	t.Helper()
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, name)
@@ -28,7 +30,7 @@ func newRelayLinkBoundaryFixture(t *testing.T, store db.Storage, name string) re
 	sibling, err := store.CreateProject(ctx, name+"-sibling")
 	require.NoError(t, err)
 	for _, p := range []db.Project{project, sibling} {
-		_, err := store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: p.ID, Role: db.FederationRoleHub, HubProjectID: p.ID, HubProjectUID: p.UID, Enabled: true})
+		_, err := store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: p.ID, Role: db.FederationRoleHub, HubProjectID: p.ID, HubProjectUID: p.UID, Enabled: p.ID == project.ID || len(shared) > 0 && shared[0]})
 		require.NoError(t, err)
 	}
 	public, private, err := ed25519.GenerateKey(nil)
@@ -38,6 +40,16 @@ func newRelayLinkBoundaryFixture(t *testing.T, store db.Storage, name string) re
 	parent, _, err := store.CreateAPIToken(ctx, db.CreateAPITokenParams{PlaintextToken: name + "-parent-test-token", Actor: "relay-member", AdminActor: "admin"})
 	require.NoError(t, err)
 	return relayLinkBoundaryFixture{project: project, sibling: sibling, parentTokenID: parent.ID, signer: db.RootAttributionSigner{AuthorityUID: store.InstanceUID(), PrivateKey: private}}
+}
+
+// deleteRelayBinding constructs an active enrollment without its binding for conformance tests.
+func deleteRelayBinding(t *testing.T, store db.Storage, projectID int64) {
+	t.Helper()
+	q := store.(interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	})
+	_, err := q.ExecContext(t.Context(), `DELETE FROM federation_bindings WHERE project_id=$1`, projectID)
+	require.NoError(t, err)
 }
 
 func linkTargetUIDs(t *testing.T, store db.Storage, issueID int64) []string {
@@ -62,7 +74,7 @@ func linkTargetUIDs(t *testing.T, store db.Storage, issueID int64) []string {
 func RunRelayLinkBoundaryKeepsSameProjectEffects(t *testing.T, store db.Storage) {
 	t.Run("relay composite creation", func(t *testing.T) {
 		ctx := t.Context()
-		fixture := newRelayLinkBoundaryFixture(t, store, "relay-composite")
+		fixture := newRelayLinkBoundaryFixture(t, store, "relay-composite", true)
 		peerInstanceUID, err := uid.New()
 		require.NoError(t, err)
 		//nolint:gosec // This is a deterministic fixture credential, never an operational secret.
@@ -74,7 +86,7 @@ func RunRelayLinkBoundaryKeepsSameProjectEffects(t *testing.T, store db.Storage)
 		require.NoError(t, err)
 		foreignPeer, err := uid.New()
 		require.NoError(t, err)
-		event := newRemoteEvent(t, fixture.project, &createdUID, "issue.created", "relay-member", peerInstanceUID, 500, jsontext.Value(`{"uid":"`+createdUID+`","title":"Relayed composite","body":"","author":"relay-member","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":[{"type":"blocks","to_issue_uid":"`+localPeer+`","author":"relay-member"},{"type":"blocks","to_issue_uid":"`+foreignPeer+`","author":"relay-member"}]}`))
+		event := newRemoteEvent(t, fixture.project, &createdUID, "issue.created", "relay-member", peerInstanceUID, 500, IssueDocument(t, createdUID, jsontext.Value(`{"uid":"`+createdUID+`","title":"Relayed composite","body":"","author":"relay-member","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":[{"type":"blocks","to_issue_uid":"`+localPeer+`","author":"relay-member"},{"type":"blocks","to_issue_uid":"`+foreignPeer+`","author":"relay-member"}]}`)))
 		body, err := db.EncodeRelaySourceEvent(event)
 		require.NoError(t, err)
 		envelope, err := db.SealRelayEnvelope(db.RelayEnvelope{Version: db.RelayProtocolVersion, BindingUID: grant.Enrollment.RelayBindingUID, ProjectUID: fixture.project.UID, AuthorityUID: store.InstanceUID(), SenderInstanceUID: peerInstanceUID, ReceiverInstanceUID: store.InstanceUID(), Epoch: grant.Enrollment.RelayResetEpoch, Sequence: 1, Stream: db.RelayStreamEvent, Path: []string{peerInstanceUID}, SourceUID: event.EventUID, SourceHash: event.ContentHash, Body: body})
@@ -98,7 +110,7 @@ func RunRelayLinkBoundaryKeepsSameProjectEffects(t *testing.T, store db.Storage)
 	})
 	t.Run("legacy composite survives relay enrollment", func(t *testing.T) {
 		ctx := t.Context()
-		fixture := newRelayLinkBoundaryFixture(t, store, "legacy-composite")
+		fixture := newRelayLinkBoundaryFixture(t, store, "legacy-composite", true)
 		localPeer, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.project.ID, Title: "Local peer", Author: "member"})
 		require.NoError(t, err)
 		siblingPeer, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.sibling.ID, Title: "Sibling peer", Author: "member"})
@@ -107,7 +119,7 @@ func RunRelayLinkBoundaryKeepsSameProjectEffects(t *testing.T, store db.Storage)
 		require.NoError(t, err)
 		createdUID, err := uid.New()
 		require.NoError(t, err)
-		event := newRemoteEvent(t, fixture.project, &createdUID, "issue.created", "spoke", spokeInstanceUID, 600, jsontext.Value(`{"uid":"`+createdUID+`","title":"Legacy composite","body":"","author":"spoke","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":[{"type":"blocks","to_issue_uid":"`+localPeer.UID+`","author":"spoke"},{"type":"blocks","to_issue_uid":"`+siblingPeer.UID+`","author":"spoke"}]}`))
+		event := newRemoteEvent(t, fixture.project, &createdUID, "issue.created", "spoke", spokeInstanceUID, 600, IssueDocument(t, createdUID, jsontext.Value(`{"uid":"`+createdUID+`","title":"Legacy composite","body":"","author":"spoke","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":[{"type":"blocks","to_issue_uid":"`+localPeer.UID+`","author":"spoke"},{"type":"blocks","to_issue_uid":"`+siblingPeer.UID+`","author":"spoke"}]}`)))
 		_, err = store.IngestFederationEvents(ctx, db.FederationIngestParams{ProjectID: fixture.project.ID, SpokeInstanceUID: spokeInstanceUID, Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: event}}})
 		require.NoError(t, err)
 		created, err := store.IssueByUID(ctx, createdUID, db.IncludeDeletedYes)
@@ -153,14 +165,20 @@ func RunRelayLinkBoundaryFollowsActiveGrants(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	target, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.sibling.ID, Title: "Sibling issue", Author: "member"})
 	require.NoError(t, err)
+	// An unbound enrollment also exercises the active enrollment guard.
+	deleteRelayBinding(t, store, fixture.project.ID)
 	linkEvent := db.LinkEventParams{EventType: "issue.linked", EventIssueID: source.ID, FromShortID: source.ShortID, FromUID: source.UID, ToShortID: target.ShortID, ToUID: target.UID, Actor: "member"}
 	_, _, err = store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: source.ID, ToIssueID: target.ID, Type: "blocks", Author: "member"}, linkEvent)
 	require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary, "an active relay grant refuses a local cross-project link")
 
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: fixture.project.ID, Role: db.FederationRoleHub, HubProjectID: fixture.project.ID, HubProjectUID: fixture.project.UID, Enabled: true})
+	require.NoError(t, err)
 	require.NoError(t, store.RevokeFederationEnrollment(ctx, grant.Enrollment.ID))
 	_, _, err = store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: source.ID, ToIssueID: target.ID, Type: "blocks", Author: "member"}, linkEvent)
 	require.NoError(t, err, "revoking the last relay grant allows local cross-project links again")
 	require.Equal(t, []string{target.UID}, linkTargetUIDs(t, store, source.ID))
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: fixture.sibling.ID, Role: db.FederationRoleHub, HubProjectID: fixture.sibling.ID, HubProjectUID: fixture.sibling.UID, Enabled: true})
+	require.NoError(t, err)
 
 	spokeInstanceUID, err := uid.New()
 	require.NoError(t, err)
@@ -174,4 +192,71 @@ func RunRelayLinkBoundaryFollowsActiveGrants(t *testing.T, store db.Storage) {
 	require.Empty(t, linkTargetUIDs(t, store, source.ID), "a legacy peer's unlink of the allowed cross-project link is applied")
 	require.NoError(t, store.MaterializeFederatedProject(ctx, fixture.project.ID))
 	require.Empty(t, linkTargetUIDs(t, store, source.ID), "a later group materialization does not bring the removed link back")
+}
+
+// RunLinkServerBoundary checks link admission and transaction rollback across servers.
+func RunLinkServerBoundary(t *testing.T, store db.Storage) {
+	ctx := t.Context()
+	a, err := store.CreateProject(ctx, "server-a")
+	require.NoError(t, err)
+	b, err := store.CreateProject(ctx, "server-b")
+	require.NoError(t, err)
+	ai, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: a.ID, Title: "A", Author: "member"})
+	require.NoError(t, err)
+	bi, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: b.ID, Title: "B", Author: "member"})
+	require.NoError(t, err)
+	oldParent, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: a.ID, Title: "Old parent", Author: "member"})
+	require.NoError(t, err)
+	_, err = store.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: ai.ID, Actor: "member", SetParent: &oldParent.ID})
+	require.NoError(t, err)
+	bind := func(p db.Project, role db.FederationRole, hub, actor string) {
+		t.Helper()
+		_, err := store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: p.ID, Role: role, HubURL: hub, HubProjectID: p.ID, HubProjectUID: p.UID, Actor: actor, Enabled: true, PushEnabled: true})
+		require.NoError(t, err)
+	}
+	link := func(from, to db.Issue) error {
+		t.Helper()
+		_, _, err := store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: from.ID, ToIssueID: to.ID, Type: "blocks", Author: "member"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: from.ID, FromShortID: from.ShortID, FromUID: from.UID, ToShortID: to.ShortID, ToUID: to.UID, Actor: "member"})
+		return err
+	}
+	bind(a, db.FederationRoleSpoke, "https://hub.example/team-a", "alice")
+	before, err := store.EventsAfter(ctx, db.EventsAfterParams{Limit: 100})
+	require.NoError(t, err)
+	for _, pair := range [][2]db.Issue{{ai, bi}, {bi, ai}} {
+		err := link(pair[0], pair[1])
+		require.ErrorIs(t, err, db.ErrFederatedReadOnly)
+		require.EqualError(t, err, "can't link: connect project server-b to the same server as server-a first")
+	}
+	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: a.ID, Title: "Rejected", Author: "member", Links: []db.InitialLink{{Type: "parent", ToNumber: bi.ID}}})
+	require.ErrorIs(t, err, db.ErrFederatedReadOnly)
+	title := "Changed"
+	_, err = store.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: ai.ID, Actor: "member", Title: &title, SetParent: &bi.ID})
+	require.ErrorIs(t, err, db.ErrFederatedReadOnly)
+	unchanged, err := store.IssueByID(ctx, ai.ID)
+	require.NoError(t, err)
+	require.Equal(t, "A", unchanged.Title)
+	require.Equal(t, []string{oldParent.UID}, linkTargetUIDs(t, store, ai.ID))
+	after, err := store.EventsAfter(ctx, db.EventsAfterParams{Limit: 100})
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	bind(b, db.FederationRoleSpoke, "https://other.example", "bob")
+	require.ErrorIs(t, link(ai, bi), db.ErrFederatedReadOnly)
+	require.ErrorIs(t, link(bi, ai), db.ErrFederatedReadOnly)
+	bind(b, db.FederationRoleSpoke, "https://hub.example/team-b", "bob")
+	require.ErrorIs(t, link(ai, bi), db.ErrFederatedReadOnly)
+	bind(b, db.FederationRoleSpoke, "https://HUB.example:443/team-a/", "bob")
+	require.NoError(t, link(ai, bi))
+	require.NoError(t, link(bi, ai))
+
+	c, err := store.CreateProject(ctx, "server-c")
+	require.NoError(t, err)
+	d, err := store.CreateProject(ctx, "server-d")
+	require.NoError(t, err)
+	ci, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: c.ID, Title: "C", Author: "member"})
+	require.NoError(t, err)
+	di, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: d.ID, Title: "D", Author: "member"})
+	require.NoError(t, err)
+	require.NoError(t, link(ci, di))
+	bind(c, db.FederationRoleHub, "", "")
+	require.NoError(t, link(di, ci))
 }

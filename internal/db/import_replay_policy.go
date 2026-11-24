@@ -38,7 +38,10 @@ func ValidateImportReplay(records []ImportRecord, opts ImportOptions) error {
 		return err
 	}
 	if opts.NewInstance {
-		for _, record := range records {
+		for i, record := range records {
+			if meta, ok := record.(*MetaKV); ok && meta.Key == "instance_uid" && !uid.Valid(meta.Value) {
+				return fmt.Errorf("import record %d: invalid source instance UID", i)
+			}
 			binding, ok := record.(*FederationBindingExport)
 			if ok && binding.RelayConfig != nil {
 				return errors.New("--new-instance cannot restore negotiated relay configuration; use --as-standalone to detach the copy")
@@ -154,7 +157,7 @@ func validateReplayStatusIntent(records []ImportRecord) error {
 		event := events[*normalized.PendingEventUID]
 		if issue == nil || event == nil || issue.ProjectID != mapping.ProjectID || event.ProjectID != mapping.ProjectID ||
 			(event.IssueID != nil && *event.IssueID != issue.ID) ||
-			FederationEventIssueUID(event.IssueUID, string(event.Payload)) != issue.UID ||
+			EventIssueUID(event.IssueUID) != issue.UID ||
 			(event.Type != "issue.closed" && event.Type != "issue.reopened") {
 			return invalidIssueStatusState()
 		}
@@ -293,7 +296,13 @@ func validateImportRecord(record ImportRecord) error {
 		}
 		return embedding.ValidateArtifact(rec.EmbeddingArtifact, "", "")
 	case *MetaKV:
-		return requireImportPayload(rec, ImportKindMeta)
+		if err := requireImportPayload(rec, ImportKindMeta); err != nil {
+			return err
+		}
+		if value, ok := strings.CutPrefix(rec.Key, FormerInstanceUIDMetaPrefix); ok && !uid.Valid(value) {
+			return errors.New("invalid former instance UID")
+		}
+		return nil
 	case *ProjectExport:
 		return requireImportPayload(rec, ImportKindProject)
 	case *RelayOutboxExport, *RelayInboxExport, *RelayCursorExport:
@@ -502,6 +511,11 @@ func PrepareReplayEvent(
 	}
 	if event.HLCCounter < 0 {
 		return fmt.Errorf("event %d has negative hlc_counter", event.ID)
+	}
+	// Both backends fill a missing header from the event's local issue row
+	// before this check, so only an issue event that names no issue fails.
+	if strings.HasPrefix(event.Type, "issue.") && EventIssueUID(event.IssueUID) == "" {
+		return fmt.Errorf("event %d (%s) has no issue_uid", event.ID, event.Type)
 	}
 	if !recomputeHash && !ValidReplayContentHash(event.ContentHash) {
 		return fmt.Errorf("event %d invalid content_hash %q", event.ID, event.ContentHash)

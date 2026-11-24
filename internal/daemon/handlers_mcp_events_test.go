@@ -119,9 +119,17 @@ func withMCPEvents(t *testing.T) testenv.Option {
 	return func(cfg *daemon.ServerConfig) { cfg.MCPEvents = mcpEventsService(t, *cfg) }
 }
 
-// withRunningMCPEventsObserved runs the worker with the given webhook client.
-// A non-nil drains counts completed delivery cycles.
-func withRunningMCPEventsObserved(t *testing.T, webhook *mcpevents.WebhookClient, drains *atomic.Int64) testenv.Option {
+// mcpEventsClock is an Events service clock that runs at real speed and that
+// a test can move forward, so a worker interval elapses without waiting for it.
+type mcpEventsClock struct{ ahead atomic.Int64 }
+
+func (c *mcpEventsClock) Now() time.Time { return time.Now().Add(time.Duration(c.ahead.Load())) }
+
+func (c *mcpEventsClock) Advance(d time.Duration) { c.ahead.Add(int64(d)) }
+
+// withRunningMCPEventsObserved runs the worker with the given webhook client
+// and service clock. A non-nil drains counts completed delivery cycles.
+func withRunningMCPEventsObserved(t *testing.T, webhook *mcpevents.WebhookClient, clock *mcpEventsClock, drains *atomic.Int64) testenv.Option {
 	return func(cfg *daemon.ServerConfig) {
 		var drainHook func()
 		if drains != nil {
@@ -132,6 +140,7 @@ func withRunningMCPEventsObserved(t *testing.T, webhook *mcpevents.WebhookClient
 			Keys:         mcpevents.NewFileKeyProvider(filepath.Join(t.TempDir(), "mcp-events.key")),
 			Authority:    daemon.NewMCPEventsAuthority(*cfg),
 			Webhook:      webhook,
+			Now:          clock.Now,
 			PollInterval: 20 * time.Millisecond,
 			DrainHook:    drainHook,
 		})
@@ -556,7 +565,8 @@ func TestMCPEventsRoutesReportADisabledService(t *testing.T) {
 func TestRevokingATokenPromptlyEndsItsMCPEventsSubscriptions(t *testing.T) {
 	var recorder postRecorder
 	var drains atomic.Int64
-	f := newMCPEventsFixture(t, withRunningMCPEventsObserved(t, mcpEventsWebhookRecording(t, &recorder), &drains))
+	var clock mcpEventsClock
+	f := newMCPEventsFixture(t, withRunningMCPEventsObserved(t, mcpEventsWebhookRecording(t, &recorder), &clock, &drains))
 	args := map[string]any{"for": "example-user"}
 	status, raw := mcpEventsCall(t, f.env, "coordinator-token", http.MethodPost, "/api/v1/mcp-events/subscribe", subscribeBody(args, allProjects))
 	require.Equal(t, http.StatusOK, status, string(raw))
@@ -577,16 +587,19 @@ func TestRevokingATokenPromptlyEndsItsMCPEventsSubscriptions(t *testing.T) {
 
 	// Let the worker mark the idle subscription: its first run starts on the
 	// next cycle and its finish triggers another, so wait for three completed
-	// cycles. Revoking writes an audit event, which moves the archive head and
-	// makes the worker look again; no separate Recheck call is needed. The
-	// revocation is noticed whether or not the mark was set, so this only
-	// steers the test toward the idle path.
+	// cycles. The revocation is noticed whether or not the mark was set, so
+	// this only steers the test toward the idle path.
 	settled := drains.Load()
 	//nolint:kennlint // deadlinetest: Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
 	require.Eventually(t, func() bool { return drains.Load() >= settled+3 }, 10*time.Second, 5*time.Millisecond, "the worker completes delivery cycles")
 	status, raw = mcpEventsCall(t, f.env, "bootstrap-token", http.MethodPost, "/api/v1/tokens/"+strconv.FormatInt(revoked.ID, 10)+"/actions/revoke", nil)
 	require.Equal(t, http.StatusOK, status, string(raw))
 
+	// The worker checks the owner of an idle subscription once per authority
+	// recheck interval (5 s) and needs no separate Recheck call. Move the
+	// service clock past that interval instead of waiting for it. The
+	// one-minute sweep stays out of reach.
+	clock.Advance(5 * time.Second)
 	//nolint:kennlint // deadlinetest: Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
 	require.Eventually(t, func() bool {
 		rows, err := f.env.DB.ListMCPEventSubscriptions(t.Context(), principal.Key())

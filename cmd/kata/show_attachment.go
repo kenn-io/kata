@@ -73,7 +73,7 @@ func closeEvidenceForShow(ctx context.Context, hc *http.Client, base string, pid
 		}
 		for _, event := range page.Events {
 			switch event.Type {
-			case "issue.closed", "issue.reopened", "issue.updated", "issue.created", "issue.snapshot":
+			case "issue.closed", "issue.reopened", "issue.updated", db.RepeatedImportEventType, "issue.created", "issue.snapshot":
 				if event.IssueUID == nil || *event.IssueUID != ref {
 					return nil, errors.New("history includes another issue's events")
 				}
@@ -130,7 +130,8 @@ func printShowAttachmentEvidence(out io.Writer, b showResponseForCLI) error {
 				state := ""
 				if !live {
 					state = " (removed)"
-				} else if current.DocbankVersion != frozen.DocbankVersion {
+				} else if current.DocbankVersion != frozen.DocbankVersion ||
+					current.Origin != frozen.Origin {
 					state = " (changed)"
 				}
 				label = fmt.Sprintf("attachment %s: %s · %d bytes%s", e.AttachmentID, frozen.Name, frozen.Size, state)

@@ -20,13 +20,10 @@ func TestFederationPhase4OperationalRecovery(t *testing.T) {
 	fx := setupFederationClaimE2E(t, "phase4-operational")
 	issueA := waitForFederatedIssue(t, fx.spokeA.db, fx.hubIssue.UID, fx.spokeA.stderr)
 	_ = waitForFederatedIssue(t, fx.spokeB.db, fx.hubIssue.UID, fx.spokeB.stderr)
-	survivor, _, err := fx.hub.DB.CreateIssue(ctx, db.CreateIssueParams{
-		ProjectID: fx.hubProject.ID,
-		Title:     "survives purge reset",
-		Body:      "must remain after another issue is purged",
-		Author:    "agent",
-	})
-	require.NoError(t, err)
+	// Write through the hub daemon, as a real hub commit does, so held spoke
+	// polls wake on it.
+	survivor := createIssue(t, fx.hub.HTTP, fx.hub.URL+"/api/v1/projects/"+strconv.FormatInt(fx.hubProject.ID, 10)+"/issues",
+		map[string]any{"actor": "agent", "title": "survives purge reset", "body": "must remain after another issue is purged"})
 	waitForFederatedIssue(t, fx.spokeA.db, survivor.UID, fx.spokeA.stderr)
 	waitForFederatedIssue(t, fx.spokeB.db, survivor.UID, fx.spokeB.stderr)
 

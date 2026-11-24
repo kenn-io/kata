@@ -46,25 +46,15 @@ func TestReplayPendingStatusRequiresExactMappedMutation(t *testing.T) {
 	mapping := db.ImportMappingExport{ProjectID: 2, IssueID: &issueID, ObjectType: "issue", PendingEventUID: &pendingUID}
 	event := db.EventExport{UID: pendingUID, ProjectID: 2, IssueID: &issueID, IssueUID: &issueUID, Type: "issue.closed"}
 	require.NoError(t, db.ValidateImportRecords([]db.ImportRecord{issue, &mapping, &event}))
-	for _, name := range []string{"envelope without local ID", "payload issue_uid", "payload uid"} {
-		t.Run(name, func(t *testing.T) {
-			portable := event
-			portable.IssueID = nil
-			switch name {
-			case "payload issue_uid":
-				portable.IssueUID = nil
-				portable.Payload = []byte(`{"issue_uid":"01HZZZZZZZZZZZZZZZZZZZZZ11"}`)
-			case "payload uid":
-				portable.IssueUID = nil
-				portable.Payload = []byte(`{"uid":"01HZZZZZZZZZZZZZZZZZZZZZ11"}`)
-			}
-			for _, kind := range []string{"issue.closed", "issue.reopened"} {
-				portable.Type = kind
-				require.NoError(t, db.ValidateImportRecords([]db.ImportRecord{issue, &mapping, &portable}))
-			}
-		})
-	}
-	for _, name := range []string{"missing", "wrong issue", "wrong local ID", "wrong payload issue", "missing issue identity", "wrong project", "wrong mutation", "non-issue mapping"} {
+	t.Run("header without local ID", func(t *testing.T) {
+		portable := event
+		portable.IssueID = nil
+		for _, kind := range []string{"issue.closed", "issue.reopened"} {
+			portable.Type = kind
+			require.NoError(t, db.ValidateImportRecords([]db.ImportRecord{issue, &mapping, &portable}))
+		}
+	})
+	for _, name := range []string{"missing", "wrong issue", "wrong local ID", "payload-only issue identity", "missing issue identity", "wrong project", "wrong mutation", "non-issue mapping"} {
 		t.Run(name, func(t *testing.T) {
 			invalidEvent, invalidMapping := event, mapping
 			records := []db.ImportRecord{issue, &invalidMapping, &invalidEvent}
@@ -74,15 +64,12 @@ func TestReplayPendingStatusRequiresExactMappedMutation(t *testing.T) {
 			case "wrong issue":
 				other := "01HZZZZZZZZZZZZZZZZZZZZZ12"
 				invalidEvent.IssueUID = &other
-				invalidEvent.Payload = []byte(`{"issue_uid":"01HZZZZZZZZZZZZZZZZZZZZZ11"}`)
 			case "wrong local ID":
 				invalidEvent.IssueID = new(int64(99))
-				invalidEvent.IssueUID = nil
-				invalidEvent.Payload = []byte(`{"issue_uid":"01HZZZZZZZZZZZZZZZZZZZZZ11"}`)
-			case "wrong payload issue":
+			case "payload-only issue identity":
 				invalidEvent.IssueID = nil
 				invalidEvent.IssueUID = nil
-				invalidEvent.Payload = []byte(`{"issue_uid":"01HZZZZZZZZZZZZZZZZZZZZZ12"}`)
+				invalidEvent.Payload = []byte(`{"issue_uid":"01HZZZZZZZZZZZZZZZZZZZZZ11"}`)
 			case "missing issue identity":
 				invalidEvent.IssueUID = nil
 			case "wrong project":

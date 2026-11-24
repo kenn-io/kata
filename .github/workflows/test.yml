@@ -1,7 +1,8 @@
-name: Tests
+name: Tests (main and manual)
 
 on:
   workflow_call:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -85,7 +86,7 @@ jobs:
         with:
           bun-version: 1.4.4
 
-      - uses: kenn-io/kit/.github/actions/kit-retry@v0.47.3
+      - uses: kenn-io/kit/.github/actions/kit-retry@v0.58.1
 
       - name: Install frozen web dependencies
         run: kit-retry 3 5 make web-install
@@ -152,7 +153,7 @@ jobs:
         with:
           bun-version: 1.4.4
 
-      - uses: kenn-io/kit/.github/actions/kit-retry@v0.47.3
+      - uses: kenn-io/kit/.github/actions/kit-retry@v0.58.1
 
       - name: Install frozen web dependencies
         run: kit-retry 3 5 make web-install
@@ -311,7 +312,7 @@ jobs:
       # and the check's fetch does not ask for it. /index.html is the same page
       # with the same headers.
       - name: Check first paint
-        uses: kenn-io/actions/first-paint@6a8b4227ec7ce3c28c6b042b735781b1601211f4  # main
+        uses: kenn-io/actions/first-paint@a75fd176648b63e41d3db03d942ef101a69e0e50  # main
         with:
           dist: docs/site
           urls: http://127.0.0.1:7777/index.html
@@ -381,7 +382,7 @@ jobs:
         with:
           bun-version: 1.4.4
 
-      - uses: kenn-io/kit/.github/actions/kit-retry@v0.47.3
+      - uses: kenn-io/kit/.github/actions/kit-retry@v0.58.1
 
       - name: Install frozen web dependencies
         run: kit-retry 3 5 make web-install
@@ -432,6 +433,17 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+      - name: Build release targets
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.restore-go-cache.outputs.cache-hit != 'true'
+        run: |
+          make web-embed
+          # Mirror .goreleaser.yaml's kata targets and flags: CGO_ENABLED=0, -trimpath, and -buildvcs=false.
+          for os in linux darwin windows; do
+            for arch in amd64 arm64; do
+              CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -buildvcs=false -o /dev/null ./cmd/kata
+            done
+          done
+
       - name: Trim unused Linux Go cache entries
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.restore-go-cache.outputs.cache-hit != 'true'
         run: |
@@ -476,7 +488,7 @@ jobs:
         with:
           node-version: 26.12.1
 
-      - uses: kenn-io/kit/.github/actions/kit-retry@v0.47.3
+      - uses: kenn-io/kit/.github/actions/kit-retry@v0.58.1
 
       # Exercise the declared minimum native APIs without running package scripts.
       - name: Install published native APIs
@@ -514,7 +526,7 @@ jobs:
   api-breaking:
     needs: changes
     if: ${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group') && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'go') || contains(fromJSON(needs.changes.outputs.groups), 'embedded-docs')) }}
-    name: OpenAPI breaking changes
+    name: API and schema history
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -555,7 +567,7 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - uses: kenn-io/kit/.github/actions/kit-retry@v0.47.3
+      - uses: kenn-io/kit/.github/actions/kit-retry@v0.58.1
 
       - name: Fetch OpenAPI client generator
         run: kit-retry 3 5 go run -n github.com/doordash-oss/oapi-codegen-dd/v3/cmd/oapi-codegen@v3.76.5
@@ -620,7 +632,7 @@ jobs:
         with:
           bun-version: 1.4.4
 
-      - uses: kenn-io/kit/.github/actions/kit-retry@v0.47.3
+      - uses: kenn-io/kit/.github/actions/kit-retry@v0.58.1
 
       - name: Install frozen web dependencies
         run: kit-retry 3 5 make web-install
@@ -836,7 +848,7 @@ jobs:
           cache: true
           install: true
 
-      - uses: kenn-io/kit/.github/actions/kit-retry@v0.47.3
+      - uses: kenn-io/kit/.github/actions/kit-retry@v0.58.1
 
       - name: Locate Go caches
         run: |
@@ -854,6 +866,27 @@ jobs:
             ${{ env.GOMODCACHE }}
           key: golangci-lint-${{ runner.os }}-${{ hashFiles('.custom-gcl.yml', 'go.mod') }}-${{ github.sha }}
           restore-keys: golangci-lint-${{ runner.os }}-${{ hashFiles('.custom-gcl.yml', 'go.mod') }}-
+
+      # Each save starts from the previous one, so record what this run uses and save only that.
+      - name: Track lint cache use
+        if: &save-lint-cache github.event_name == 'push' && steps.restore-lint-cache.outputs.cache-hit != 'true'
+        run: |
+          lint_cache=.cache/golangci-lint
+          mkdir -p "$lint_cache" "$GOCACHE" "$GOMODCACHE/cache/download"
+          echo 'Restored lint cache sizes:'
+          du -sh "$lint_cache" "$GOCACHE" "$GOMODCACHE"
+          mv "$GOMODCACHE" "$RUNNER_TEMP/go-mod-cache"
+          mkdir -p "$GOMODCACHE/cache/download"
+          if [ -d "$RUNNER_TEMP/go-mod-cache/cache/download/sumdb" ]; then
+            cp -a "$RUNNER_TEMP/go-mod-cache/cache/download/sumdb" "$GOMODCACHE/cache/download/"
+          fi
+          printf 'GOPROXY=file://%s/go-mod-cache/cache/download|%s\n' "$RUNNER_TEMP" "$GOPROXY" >> "$GITHUB_ENV"
+          # Go and golangci-lint refresh entry mtimes at most hourly; age them so every use is recorded.
+          for cache in "$lint_cache" "$GOCACHE"; do
+            find "$cache" -mindepth 2 -maxdepth 2 -path "$cache/[0-9a-f][0-9a-f]/*" \( -name '*-a' -o -name '*-d' \) \
+              -exec touch -d '2 hours ago' -- {} +
+          done
+          touch "$RUNNER_TEMP/lint-cache-used-after"
 
       - name: Fetch Go checkers
         run: GOFLAGS="${GOFLAGS:+$GOFLAGS }-n" kit-retry 3 5 make lint-workflow-retries
@@ -877,8 +910,21 @@ jobs:
           GOOS: windows
         run: make vet
 
+      - name: Trim unused lint cache entries
+        if: *save-lint-cache
+        run: |
+          lint_cache=.cache/golangci-lint
+          echo 'Lint cache sizes before trimming:'
+          du -sh "$lint_cache" "$GOCACHE" "$GOMODCACHE"
+          for cache in "$lint_cache" "$GOCACHE"; do
+            find "$cache" -mindepth 2 -maxdepth 2 -path "$cache/[0-9a-f][0-9a-f]/*" \( -name '*-a' -o -name '*-d' \) \
+              ! -newer "$RUNNER_TEMP/lint-cache-used-after" -exec rm -rf -- {} +
+          done
+          echo 'Lint cache sizes after trimming:'
+          du -sh "$lint_cache" "$GOCACHE" "$GOMODCACHE"
+
       - name: Save lint caches
-        if: github.event_name == 'push' && steps.restore-lint-cache.outputs.cache-hit != 'true'
+        if: *save-lint-cache
         uses: actions/cache/save@v6.1.0
         with:
           path: |

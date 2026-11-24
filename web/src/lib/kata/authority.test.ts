@@ -5,7 +5,12 @@ import {
   deriveKataAreas,
   projectKataWorkspaceView,
 } from './authority'
-import type { KataProjectSummary, KataTaskSummary } from './types'
+import type {
+  KataProjectSummary,
+  KataTaskSearchFilters,
+  KataTaskSummary,
+  KataTaskViewName,
+} from './types'
 
 const projects: KataProjectSummary[] = [
   { id: 1, uid: 'project-work', name: 'example-project', metadata: {}, open_count: 2 },
@@ -66,16 +71,120 @@ describe('projectKataWorkspaceView', () => {
     expect(titles(view)).toEqual(['waiting'])
   })
 
-  test('keeps filtered Scheduled results to dated issues', () => {
+  const groupedFilterCases: [
+    string,
+    {
+      view: KataTaskViewName
+      filters: KataTaskSearchFilters
+      issues: KataTaskSummary[]
+      expected: [string, string[]][]
+    },
+  ][] = [
+    [
+      'Today search',
+      {
+        view: 'today',
+        filters: { ...defaultKataTaskSearchFilters('today'), query: 'alert' },
+        issues: [
+          issue('alert-late', { deadline_on: '2026-05-14' }),
+          issue('alert-today', { deadline_on: '2026-05-15' }),
+        ],
+        expected: [
+          ['overdue', ['alert-late']],
+          ['today', ['alert-today']],
+        ],
+      },
+    ],
+    [
+      'Delegated relationship',
+      {
+        view: 'delegated',
+        filters: {
+          ...defaultKataTaskSearchFilters('delegated'),
+          relationships: ['blocks'],
+        },
+        issues: [
+          {
+            ...issue('handoff', { teammate: 'reviewer-7' }),
+            blocks: [{ uid: 'blocked-task', short_id: 'blocked-task' }],
+          },
+        ],
+        expected: [['user-a/reviewer-7', ['handoff']]],
+      },
+    ],
+    [
+      'Scheduled ready status',
+      {
+        view: 'scheduled',
+        filters: { ...defaultKataTaskSearchFilters('scheduled'), status: 'ready' },
+        issues: [issue('ready', { scheduled_on: '2026-05-20' })],
+        expected: [['2026-05-20', ['ready']]],
+      },
+    ],
+    [
+      'Scheduled owner filter',
+      {
+        view: 'scheduled',
+        filters: { ...defaultKataTaskSearchFilters('scheduled'), owner: 'user-a' },
+        issues: [
+          {
+            ...issue('first-scheduled-task', { scheduled_on: '2026-05-20' }),
+            title: 'First scheduled task',
+            owner: 'user-a',
+          },
+          {
+            ...issue('second-scheduled-task', { deadline_on: '2026-05-21' }),
+            title: 'Second scheduled task',
+            owner: 'user-a',
+          },
+          {
+            ...issue('undated-scheduled-task'),
+            title: 'Undated scheduled task',
+            owner: 'user-a',
+          },
+        ],
+        expected: [
+          ['2026-05-20', ['First scheduled task']],
+          ['2026-05-21', ['Second scheduled task']],
+        ],
+      },
+    ],
+  ]
+
+  test.each(groupedFilterCases)('keeps groups for %s', (_name, options) => {
+    const { view: viewName, filters, issues, expected } = options
     const view = projectKataWorkspaceView({
-      view: 'scheduled',
-      filters: { ...defaultKataTaskSearchFilters('scheduled'), owner: 'user-a' },
+      view: viewName,
+      filters,
+      issues,
       snapshot: { projects, fetched_at: '2026-05-15T16:00:00.000Z' },
-      issues: [issue('dated', { deadline_on: '2026-05-20' }), issue('undated')],
       today: '2026-05-15',
     })
 
-    expect(titles(view)).toEqual(['dated'])
+    expect(view.groups.map((group) => [group.id, group.issues.map((item) => item.title)])).toEqual(
+      expected,
+    )
+  })
+
+  test.each([
+    ['closed', [{ ...issue('closed-task'), status: 'closed' as const }], ['closed-task']],
+    [
+      'all',
+      [issue('open-task'), { ...issue('closed-task'), status: 'closed' as const }],
+      ['open-task', 'closed-task'],
+    ],
+  ] as const)('keeps Results when Today expands to %s tasks', (status, issues, expected) => {
+    const view = projectKataWorkspaceView({
+      view: 'today',
+      filters: { ...defaultKataTaskSearchFilters('today'), status },
+      snapshot: { projects, fetched_at: '2026-05-15T16:00:00.000Z' },
+      issues,
+      today: '2026-05-15',
+    })
+
+    expect(
+      view.groups.map((group) => [group.title, group.issues.map((item) => item.title)]),
+    ).toEqual([['Results', expected]])
   })
 
   test('holds future start dates out of filtered Inbox results', () => {

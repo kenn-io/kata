@@ -63,6 +63,7 @@ var kataCommandGroups = map[string]string{
 	"agent-hook":          "coord",
 	"agent-contract-hook": "coord",
 	"cron":                "admin",
+	"agent":               "setup",
 	"init":                "setup",
 	"doctor":              "setup",
 	"health":              "setup",
@@ -114,11 +115,12 @@ KATA_SERVER selects a remote one) and act on the project bound to the
 current directory.
 
 Agent workflow (add --agent to each command):
+  kata agent setup                                      # connect Claude Code or Codex
   kata search "<one or two distinctive words>" --agent  # 1. reuse an existing issue first
   kata create "<title>" --body "<context>" --idempotency-key <stable-key> --agent
-  kata claim <ref> --agent                              # 2. take ownership
+  kata claim <ref> --ttl 2h --agent                     # 2. take ownership; renew the same way, without --if-unowned
   kata close <ref> --done -m "<what changed and how it was verified>" --test "<command>" --agent   # or --commit <sha>
-  kata label add <ref> needs-review --comment "<what remains>" --agent   # not done
+  kata label add <ref> needs-review --agent   # not done; leave it open
 Full agent contract: kata quickstart --format contract
 
 Refs: abc4 (short id in the bound project), project#abc4 (any project), or the

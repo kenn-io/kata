@@ -1,27 +1,30 @@
 ---
 title: Linear sync
 description: "Mirror one Linear team or project into Kata and optionally synchronize completion and reopen."
-last_edited: 2026-10-07
+last_edited: 2026-11-20
 ---
 
 # Linear sync
 
-Linear sync brings issues from one Linear team into one Kata project. You can
-restrict that team to one Linear project. Enable two-way status to close or
-reopen the same Linear issue from Kata. The daemon performs all provider calls.
+Linear sync mirrors issues from one Linear team into one Kata project, and you
+can narrow that team to a single Linear project. If you want to close or reopen
+those Linear issues from Kata, enable two-way status sync. The Kata daemon makes
+all API calls to Linear.
 
 ## Configure the daemon
 
-1. Create a personal API key in Linear's **Settings → Account → Security &
-   Access**. Select **Read**, and **Write** for two-way status. Restrict the key
-   to the chosen team. Admin, Create issues, and Create comments are unnecessary.
-   Workspace policy can require an administrator to permit API keys. See
-   [Linear's API permissions](https://linear.app/docs/api-and-webhooks).
-2. Set `KATA_LINEAR_TOKEN` in the environment that starts the Kata daemon.
-   Keep the credential out of workspace files and command-line arguments.
+1. In Linear, open **Settings → Account → Security & Access** and create a
+   personal API key. Select **Read**, and add **Write** if you plan to use
+   two-way status sync. Restrict the key to the team you want to sync. You do
+   not need Admin, Create issues, or Create comments. Depending on your
+   workspace policy, an administrator can be required to permit API keys. For
+   details, see [Linear's API permissions](https://linear.app/docs/api-and-webhooks).
+2. Set `KATA_LINEAR_TOKEN` in the environment that starts the Kata daemon. Keep
+   the credential out of workspace files and command-line arguments.
 3. Restart the daemon after changing its environment.
 
-To use a different credential selector, add this to `<KATA_HOME>/config.toml`:
+To read the token from a different environment variable, add this block to
+`<KATA_HOME>/config.toml`:
 
 ```toml
 [linear_sync]
@@ -29,19 +32,23 @@ token_env = "EXAMPLE_LINEAR_TOKEN"
 auth_type = "api-key"
 ```
 
-For an operator-managed OAuth access token, set `auth_type = "oauth"`. The
-daemon then uses Bearer authorization. OAuth needs `read` and, for two-way
-status, `write`. Kata does not acquire or refresh tokens. Replace expired tokens
-in the daemon environment; see [Linear OAuth](https://linear.app/developers/oauth-2-0-authentication).
-All credentials go only to `https://api.linear.app/graphql`; redirects are rejected.
+To use an operator-managed OAuth access token instead, set `auth_type = "oauth"`.
+The daemon then uses Bearer authorization. OAuth tokens need the `read` scope,
+plus `write` for two-way status sync. Kata does not acquire or refresh OAuth
+tokens; replace expired tokens in the daemon environment. See
+[Linear OAuth](https://linear.app/developers/oauth-2-0-authentication) for token
+management details. The daemon sends credentials only to
+`https://api.linear.app/graphql` and rejects redirects.
 
 ## Select the source
 
-Use Linear's command menu **Copy model UUID** for the organization/workspace,
-team, optional project, and optional workflow states. The public GraphQL API
-also exposes `viewer { organization { id } }` and `teams { nodes { id name } }`.
-Use UUIDs, rather than issue identifiers or URLs, for scope. See
-[Linear's API introduction](https://linear.app/developers/graphql).
+To choose which Linear team or project to sync, gather the UUIDs for your
+organization or workspace, team, optional project, and optional workflow states.
+You can copy them from Linear's command menu with **Copy model UUID**, or query
+`viewer { organization { id } }` and `teams { nodes { id name } }` from the
+public GraphQL API. Always pass UUIDs rather than issue identifiers or URLs. See
+[Linear's API introduction](https://linear.app/developers/graphql) for API
+usage.
 
 ```sh
 kata sync linear enable --linear-workspace UUID --linear-team UUID
@@ -54,23 +61,38 @@ kata --json sync linear status
 kata sync linear disable
 ```
 
-Specify `--linear-project` on the first enable if you want a project restriction.
-The source identity is immutable: re-enabling preserves omitted options and
-refuses a different workspace, team, or project. Adding or removing a project
-restriction also requires another Kata project. No command imports an entire
-workspace. A federation spoke must configure sync on its hub instead.
+If you want to limit sync to one Linear project, pass `--linear-project` the
+first time you enable the binding. Once set, the source identity cannot change.
+Re-enabling keeps any options you omit and refuses a different workspace, team,
+or project. To add or remove a project restriction, use a different Kata
+project. No command imports an entire Linear workspace, and if you use a
+federation spoke, configure Linear sync on its hub instead.
 
-New bindings poll every five minutes and default to one-way status. Use
-`--interval 10m` to change polling. `--since 2026-01-01` imports content updated
-after that UTC date; whole-second RFC3339 values are also accepted.
-`--since ""` clears the cutoff. Omitting it preserves the saved value.
+New bindings poll every five minutes and start in one-way status mode. You can
+adjust how they pull data with these options:
 
-Titles default to `[Linear EX-1] Example task`. Use `--title-prefix=false` to
-keep Linear's title and add the `linear` label. Imported bodies retain Markdown
-and include a Linear link. Private image assets remain hosted and authenticated
-by Linear; Kata does not copy them.
+- **Polling interval.** Pass `--interval 10m` to change how often the daemon
+  polls Linear.
+- **Content cutoff.** Pass `--since 2026-01-01` to import content updated after
+  that UTC date. Whole-second RFC3339 values also work. Pass `--since ""` to
+  clear the cutoff, or omit it to keep the saved value.
+- **Title format.** By default, imported titles look like
+  `[Linear EX-1] Example task`. Pass `--title-prefix=false` to keep Linear's
+  original title and add the `linear` label instead.
+
+Imported issue bodies keep their Markdown formatting and include a link back to
+Linear. Private image assets stay hosted and authenticated in Linear, and Kata
+does not copy them.
+
+Comments on imported issues arrive with their Linear author and creation time.
+Kata copies each comment once, and later edits or deletions in Linear do not
+update the Kata copy. If a comment has no Linear user as its author, such as an
+integration post, Kata records `linear-unknown` as the author.
 
 ## Synchronize completion and reopen
+
+Enable two-way status sync when you want closes and reopens in Kata to update
+the matching Linear issue, or switch back to one-way mode:
 
 ```sh
 kata sync linear enable --status-sync two-way
@@ -78,71 +100,80 @@ kata sync linear enable --status-sync two-way --closed-state UUID --open-state U
 kata sync linear enable --status-sync one-way
 ```
 
-Two-way delivery changes only `stateId`. A close selects a live **completed**
-state; a reopen selects a live **unstarted** state. Without overrides, Kata
-chooses the lowest workflow position, breaking ties by UUID. Overrides must
-belong to that type in the selected team. Empty `--closed-state ""` or
-`--open-state ""` restores the default. Already-matching open/closed status
-preserves Linear's substate.
+Two-way delivery updates only `stateId`. Closing an issue in Kata picks a live
+**completed** state in Linear, and reopening picks a live **unstarted** state.
+If you do not pass state overrides, Kata picks the state with the lowest
+workflow position and breaks ties by UUID. Any override you pass must belong to
+that state type in the selected team. Pass `--closed-state ""` or
+`--open-state ""` to go back to the default. If the Linear issue is already in a
+matching open or closed state, Kata leaves Linear's substate alone.
 
-Linear's triage, backlog, unstarted, and started types are open. Completed is
-closed with `done`; canceled and duplicate are closed with `wontfix`. This is
-binary status synchronization: in two-way mode, a completed-to-canceled transition
-preserves the reason and timestamp of an already-closed Kata issue. A newer
-one-way content import refreshes closure metadata from Linear. Linear creates
-separate UUIDs for recurring issue instances; each is imported independently.
-Kata leaves the recurrence schedule in Linear.
+Kata maps Linear's workflow state types to binary open and closed states.
+Triage, backlog, unstarted, and started states map to open. Completed maps to
+closed with reason `done`, while canceled and duplicate map to closed with
+reason `wontfix`. Status synchronization is binary. In two-way mode, a
+completed-to-canceled change in Linear keeps the existing close reason and
+timestamp on an already-closed Kata issue. In one-way mode, a newer content
+import refreshes the closure metadata from Linear. For recurring issues, Linear
+assigns a separate UUID to each instance, and Kata imports each one
+independently while leaving the recurrence schedule in Linear.
 
 | Data | Ownership |
 | --- | --- |
 | Title, Markdown body, priority, creator, assignee, identifier and link | Linear import |
+| Linear comments | Linear import, copied once |
 | Open/closed | Linear in one-way mode; shared in explicit two-way mode |
 | Native comments, evidence, metadata, other labels | Kata |
 | Due dates, cycles, provider labels, project assignment, recurrence | Remain in Linear; never written back |
 
-Native issues without a Linear mapping are never created remotely. Native
-comments and evidence are not uploaded. The newest pending Kata close/reopen
-wins delivery. Without pending intent, verified Linear status applies locally.
-Provider observations do not generate outbound echoes. Local content edits use
-the existing [import conflict rules](../reference/cli.md#backup-and-import).
+Kata never creates native issues in Linear when they have no Linear mapping, and
+it never uploads native comments or evidence. When you close or reopen an issue
+in Kata, the newest pending local change wins delivery. When there is no pending
+local change, verified Linear status applies locally. Status updates read from
+Linear do not trigger outbound echoes back to Linear. Local edits to imported
+content follow Kata's existing
+[import conflict rules](../reference/cli.md#backup-and-import).
 
 ## Recovery and limits
 
-Each run fetches a complete bounded collection before importing. Stable UUID
-mappings make repeated pulls idempotent. Failed pagination or partial GraphQL
-errors leave the content checkpoint unchanged; the next run restarts the read.
-Collections are limited to 10,000 issues/states, 1,000 pages, 8 MiB per response,
-128 MiB of collection responses, 1 MiB per description, and 64 MiB of mapped
-import data.
+Each sync run fetches a complete bounded collection before importing anything,
+and stable UUID mappings keep repeated pulls idempotent. If pagination fails or
+GraphQL returns partial errors, the content checkpoint stays where it is and the
+next run restarts the read. Each collection is capped at 10,000 issues or
+states, 1,000 pages, 8 MiB per response, 128 MiB of responses per collection,
+1 MiB per description, and 64 MiB of mapped import data.
 
-The shared client spaces requests by at least 1.5 seconds and honors
-`Retry-After` and the reset header of each exhausted rate-limit bucket. Reads retry rate limits and temporary server
-errors up to three times. Linear can report `RATELIMITED` on HTTP 400 as well as
-HTTP 429. Other applications using the same account share its quota. See
-[Linear rate limits](https://linear.app/developers/rate-limiting).
+The shared Linear client spaces requests by at least 1.5 seconds and honors both
+`Retry-After` and the reset header for each exhausted rate-limit bucket. Reads
+retry rate limits and temporary server errors up to three times. Keep in mind
+that Linear can return `RATELIMITED` on HTTP 400 as well as HTTP 429, and other
+applications using the same Linear account share your quota. See
+[Linear rate limits](https://linear.app/developers/rate-limiting) for details.
 
-Mutations are sent once, followed by a fresh verification read. An unproven
-mutation response retains pending intent and the run claim. After the
-30-minute stale-claim recovery horizon, a later run reads the current state
-before deciding whether to send again. Request timeouts are 30 seconds and a
-whole run has a 20-minute budget. Two-way sweeps handle at most 100 pending and
-100 other mappings per pass, so larger collections need multiple passes.
+Kata sends each mutation once and follows it with a fresh verification read. If
+the mutation response is unproven, Kata keeps the pending intent and the run
+claim. After the 30-minute stale-claim recovery horizon, a later run reads the
+current state in Linear before deciding whether to send the mutation again.
+Individual requests time out after 30 seconds, and an entire run has a 20-minute
+budget. Each two-way sweep handles at most 100 pending mappings and 100 other
+mappings per pass, so larger collections take multiple passes.
 
-To save quota, a two-way sweep uses the status from the previous run's content
-read when it is current. It reads the issue from Linear only when that run did
-not return the issue or the stored status is newer. A Linear-side close or reopen
-can therefore take one extra polling interval to reach Kata.
+To save quota, a two-way sweep reuses the status from the previous run's content
+read whenever it is current. It fetches the issue from Linear only when that run
+did not return the issue or the stored status is newer. A close or reopen made
+in Linear can therefore take one extra polling interval to show up in Kata.
 
-Two-way status work is independent of the content cutoff and can proceed when
-content reads fail. In one-way mode, status arrives through content imports and
-is subject to `--since`. Disable pauses polling and preserves mappings and
-pending intent. Re-enable resumes it.
+Two-way status sync runs independently of the content cutoff and can keep
+working even when content reads fail. In one-way mode, status updates arrive
+with content imports and follow `--since`. Disabling sync pauses polling while
+keeping your mappings and pending intent, and re-enabling resumes it.
 
-Archived, trashed, missing, or moved-out-of-scope issues retain their last imported Kata
-copy. Outbound updates are blocked until the source is available in the same
-scope. Kata never infers deletion, purges the local issue, restores a remote
-issue, or unarchives it. A trashed project also blocks its selected scope. See
-[Linear deletion and archives](https://linear.app/docs/delete-archive-issues).
-Authentication and permission failures retain pending
-intent; repair credentials or team access and retry. `status` shows scope,
-progress, pending status changes, and sanitized errors.
+If a Linear issue is archived, trashed, missing, or moved out of scope, Kata
+keeps its last imported local copy and blocks outbound updates until the issue
+is available in the same scope again. Kata never infers deletion, purges the
+local issue, restores a remote issue, or unarchives it. A trashed Linear project
+also blocks its selected scope. See
+[Linear deletion and archives](https://linear.app/docs/delete-archive-issues)
+for how Linear handles those states. Authentication and permission failures also keep pending intent. Fix your
+credentials or team access and retry. Run `kata sync linear status` to inspect
+scope, progress, pending status changes, and sanitized errors.

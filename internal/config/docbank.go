@@ -2,11 +2,12 @@ package config
 
 import (
 	"fmt"
-	"net"
 	"net/url"
 	"path"
 	"strings"
 	"unicode"
+
+	"go.kenn.io/kit/embedconfig"
 
 	"go.kenn.io/kata/internal/httpurl"
 )
@@ -21,6 +22,9 @@ type DocbankConfig struct {
 	APIKeyFile string `toml:"api_key_file"`
 	APIKeyEnv  string `toml:"api_key_env"`
 	Folder     string `toml:"folder"`
+	// TrustPrivateNetwork allows plain HTTP to a private address or a host name,
+	// such as a container name on a private network the operator trusts.
+	TrustPrivateNetwork bool `toml:"trust_private_network"`
 }
 
 // Enabled reports whether an operator configured a Docbank endpoint or selected the local one.
@@ -75,10 +79,10 @@ func normalizeDocbank(c *DocbankConfig) error {
 	if err != nil {
 		return fmt.Errorf("docbank.url is invalid")
 	}
-	if u.Scheme == "http" && u.Hostname() != "localhost" {
-		ip := net.ParseIP(u.Hostname())
-		if ip == nil || !ip.IsLoopback() {
-			return fmt.Errorf("docbank.url requires HTTPS except on loopback")
+	// kit's embedconfig.CanonicalEndpoint states the plaintext rule every kenn-io integration shares.
+	if u.Scheme == "http" {
+		if _, err := embedconfig.CanonicalEndpoint(base, c.TrustPrivateNetwork); err != nil {
+			return fmt.Errorf("docbank.url requires HTTPS except on loopback, or on a trusted private network with docbank.trust_private_network = true")
 		}
 	}
 	c.URL = base

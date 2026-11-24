@@ -85,14 +85,39 @@ func TestReconcileProviderProcess(_ *testing.T) {
 	if os.Getenv("KATA_TEST_PROVIDER_DECISION") == "exit-two" {
 		os.Exit(2)
 	}
+	if path := os.Getenv("KATA_TEST_PROVIDER_LOG"); path != "" {
+		logged := request
+		logged.CandidateToken = ""
+		line, err := json.Marshal(logged)
+		if err != nil {
+			os.Exit(1)
+		}
+		// #nosec G304 G703 -- the parent test supplies a log path inside its own t.TempDir.
+		file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		if err != nil {
+			os.Exit(1)
+		}
+		_, writeErr := file.Write(append(line, '\n'))
+		if errors.Join(writeErr, file.Close()) != nil {
+			os.Exit(1)
+		}
+	}
+	if request.Operation == "release" && os.Getenv("KATA_TEST_PROVIDER_RELEASE_DECISION") == "exit-two" {
+		// The provider may have released the request before failing, so
+		// Kata cannot tell whether the old approval still works.
+		os.Exit(2)
+	}
 	if request.Operation == "release" {
 		saved, err := config.ReadFederationCredentials()
 		if err != nil {
 			os.Exit(2)
 		}
+		// Leave fences the request first. An intent change keeps the saved
+		// request, unfenced, until this release is confirmed.
+		intentChange := os.Getenv("KATA_TEST_PROVIDER_INTENT_CHANGE") == "1"
 		found := false
 		for _, credential := range saved.Projects {
-			if credential.Provider != nil && credential.LeavePending && credential.Provider.RequestID == request.RequestID {
+			if credential.Provider != nil && (credential.LeavePending || intentChange) && credential.Provider.RequestID == request.RequestID {
 				found = true
 			}
 		}
@@ -106,7 +131,14 @@ func TestReconcileProviderProcess(_ *testing.T) {
 	}
 	if response.Status == "ready" {
 		response.HubURL, response.ProjectID, response.ProjectUID = request.HubURL, 42, hubProjectUID
+		if other := os.Getenv("KATA_TEST_PROVIDER_PROJECT_UID"); other != "" {
+			response.ProjectUID = other
+		}
 		response.EnrollmentID, response.Actor = 7, "Example User"
+		if os.Getenv("KATA_TEST_PROVIDER_INTENT_CHANGE") == "1" {
+			// Each approval names its own actor, as a provider may.
+			response.Actor = "Example User (approval " + request.RequestID.String() + ")"
+		}
 		response.Capabilities = "claim,pull,push"
 		if os.Getenv("KATA_TEST_PROVIDER_NO_CLAIM") == "1" {
 			response.Capabilities = "pull,push"
@@ -360,6 +392,7 @@ func TestReconcileProviderUsesApprovedMetadataWithoutCatalogAdministration(t *te
 			if tc.existingData {
 				local, err := store.ProjectByName(t.Context(), mapping.SpokeProject)
 				require.NoError(t, err)
+				require.NotEqual(t, hubProjectUID, local.UID)
 				_, _, err = store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: local.ID, Title: "Import this task", Author: "Original Author"})
 				require.NoError(t, err)
 			}
@@ -552,6 +585,55 @@ func TestReconcilerRetriesWaitingProviderDecisions(t *testing.T) {
 			require.True(t, found)
 			assert.Equal(t, saved.Credential.Provider.RequestID, retried.Credential.Provider.RequestID)
 			assert.True(t, saved.Credential.Token == retried.Credential.Token)
+		})
+	}
+}
+
+// A provider mapping joins a placeholder the operator restored and renamed to
+// the mapping's spoke project, keeping the issues parked in it.
+func TestReconcileProviderJoinsRestoredPlaceholder(t *testing.T) {
+	for _, intent := range []federationprovider.Intent{"collaborate", "migrate"} {
+		t.Run(string(intent), func(t *testing.T) {
+			t.Setenv("KATA_HOME", t.TempDir())
+			t.Setenv("KATA_TEST_RECONCILE_PROVIDER", "1")
+			t.Setenv("KATA_TEST_PROVIDER_DECISION", "ready")
+			store := openReconcileStore(t)
+			ctx := t.Context()
+			project, err := store.CreateProjectWithUID(ctx, "spoke-project", hubProjectUID)
+			require.NoError(t, err)
+			parked, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "parked", Author: "worker"})
+			require.NoError(t, err)
+			_, err = store.ExecContext(ctx, `INSERT INTO meta(key, value) VALUES(?, '1')`, db.FederationRetainedProjectPrefix+hubProjectUID)
+			require.NoError(t, err)
+			credentials := config.DefaultFederationCredentialStore()
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				assert.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+					"project_id": 42, "project_uid": hubProjectUID, "project_name": "hub-project",
+					"replay_horizon_event_id": 9, "baseline_through_event_id": 12,
+				}))
+			}))
+			t.Cleanup(server.Close)
+			previousTransport := http.DefaultTransport
+			http.DefaultTransport = server.Client().Transport
+			t.Cleanup(func() { http.DefaultTransport = previousTransport })
+			executable, err := os.Executable()
+			require.NoError(t, err)
+			catalog := config.CatalogDaemonConfig{Name: "team-hub", URL: server.URL + "/tasks"}
+			mapping := config.FederationProjectConfig{
+				Hub: catalog.Name, SpokeProject: "spoke-project", HubProject: "hub-project", Intent: intent,
+				CredentialProvider: []string{executable, "-test.run=^TestReconcileProviderProcess$"},
+			}
+
+			require.NoError(t, federation.ReconcileMapping(ctx, store, credentials, newFakeHub(), catalog, mapping, nil))
+
+			joined, err := store.ProjectByName(ctx, mapping.SpokeProject)
+			require.NoError(t, err)
+			assert.Equal(t, project.ID, joined.ID)
+			_, err = store.FederationBindingByProject(ctx, joined.ID)
+			require.NoError(t, err)
+			got, err := store.IssueByUID(ctx, parked.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			assert.Equal(t, joined.ID, got.ProjectID)
 		})
 	}
 }

@@ -39,11 +39,16 @@ func startMCPEvents(ctx context.Context, workers *daemonWorkerGroup, in mcpEvent
 		in.Log.Printf("MCP Events disabled: %v", err)
 		return nil, mcpevents.ReasonStartFailed
 	}
+	policy, err := mcpevents.CompileTrustedCallbacks(in.Config.MCPEvents.TrustedCallbacks)
+	if err != nil {
+		in.Log.Printf("MCP Events disabled: %v", err)
+		return nil, mcpevents.ReasonStartFailed
+	}
 	service, err := mcpevents.NewService(ctx, mcpevents.ServiceConfig{
 		Store:          in.Store,
 		Keys:           mcpevents.NewFileKeyProvider(in.KeyPath),
 		Authority:      in.Authority,
-		Webhook:        mcpevents.NewWebhookClient(),
+		Webhook:        mcpevents.NewWebhookClient(mcpevents.WebhookOptions{TrustedCallbacks: policy}),
 		MaxTTL:         maxTTL,
 		RefuseNoExpiry: !in.Config.MCPEvents.NoExpiryAllowed(),
 		Broadcaster:    in.Broadcaster,

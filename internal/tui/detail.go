@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/commentref"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 
 	tea "charm.land/bubbletea/v2"
@@ -72,7 +73,7 @@ type detailAPI interface {
 		ctx context.Context, projectID int64, ref string, body LinkBody, actor string,
 	) (*MutationResp, error)
 	EditBody(
-		ctx context.Context, projectID int64, ref, body, actor string,
+		ctx context.Context, projectID int64, ref, body, actor string, expectedContentRevision *int64,
 	) (*MutationResp, error)
 	AddComment(
 		ctx context.Context, projectID int64, ref, body, actor string,
@@ -939,7 +940,7 @@ func (dm detailModel) activeChunks(width int) []entryChunk {
 			tabState{loading: dm.commentsLoading, err: dm.commentsErr, commentLinkCursor: dm.commentLinkCursor})
 	case tabEvents:
 		return eventChunks(dm.events, width, dm.tabCursor,
-			tabState{loading: dm.eventsLoading, err: dm.eventsErr})
+			tabState{loading: dm.eventsLoading, err: dm.eventsErr, attachments: dm.currentAttachments()})
 	case tabLinks:
 		return linkChunks(dm.links, width, dm.tabCursor,
 			tabState{loading: dm.linksLoading, err: dm.linksErr})
@@ -980,4 +981,13 @@ func (dm detailModel) commentLinks() []commentref.Link {
 		}
 	}
 	return links
+}
+
+// currentAttachments is the open issue's attachment references by ID, nil
+// while the issue is not loaded.
+func (dm detailModel) currentAttachments() map[string]metadata.Attachment {
+	if dm.issue == nil {
+		return nil
+	}
+	return dm.issue.attachmentRefs()
 }

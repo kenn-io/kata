@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -820,6 +821,54 @@ func TestAwaitCommandOutcomeReapWaitIsBounded(t *testing.T) {
 	})
 }
 
+func TestAwaitConnectorOutputWaitsWhenDescendantExitsDuringGrace(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		drained := make(chan struct{})
+		var descendantAlive atomic.Bool
+		descendantAlive.Store(true)
+		done := make(chan struct{})
+		var held bool
+		var contextCause error
+		go func() {
+			defer close(done)
+			held, contextCause = awaitConnectorOutput(t.Context(), drained, descendantAlive.Load)
+		}()
+
+		synctest.Wait()
+		descendantAlive.Store(false)
+		time.Sleep(connectorProcessCleanupGrace)
+		synctest.Wait()
+		select {
+		case <-done:
+			t.Fatal("output wait ended before stdout reached end of file")
+		default:
+		}
+		close(drained)
+		<-done
+
+		assert.False(t, held)
+		assert.NoError(t, contextCause)
+	})
+}
+
+func TestAwaitConnectorOutputAcceptsOutputFinishedWhenGraceEnds(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		drained := make(chan struct{})
+		var checks atomic.Int32
+		alive := func() bool {
+			if checks.Add(1) == 2 {
+				close(drained)
+			}
+			return true
+		}
+
+		held, contextCause := awaitConnectorOutput(t.Context(), drained, alive)
+
+		assert.False(t, held)
+		assert.NoError(t, contextCause)
+	})
+}
+
 func TestConnectorContextErrorKeepsChildTimeoutAfterParentEnds(t *testing.T) {
 	parent, cancelParent := context.WithCancel(t.Context())
 	commandCtx, cancelCommand := context.WithTimeoutCause( //nolint:kennlint // deadlinetest: the deadline is the expected result; the test waits on commandCtx.Done for it
@@ -976,6 +1025,55 @@ func TestProcessClientWaitDelayCleansDescendantHoldingStdout(t *testing.T) {
 	descendant := observeProcessClientHelper(t, pid)
 	t.Cleanup(func() { killProcessClientHelper(pid) })
 	requireProcessClientHelperGone(t, descendant)
+}
+
+func TestProcessClientReportsProtocolViolationWhenDescendantHoldsStdout(t *testing.T) {
+	readyPath := filepath.Join(t.TempDir(), "ready")
+	t.Setenv("HELPER_MODE", "wrong-id-stdout-holder-and-exit")
+	t.Setenv("HELPER_SYNC", readyPath)
+	client := newHelperClient(t, config.ConnectorConfig{
+		ID: "notes", Command: helperBinary(t), Args: []string{"-test.run=^TestProcessClientHelper$"}, TimeoutSeconds: 5,
+		Env: map[string]string{"MODE": "HELPER_MODE", "SYNC": "HELPER_SYNC"},
+	})
+
+	_, err := client.Describe(t.Context())
+	require.ErrorIs(t, err, ErrProtocolFailure)
+	assert.NotErrorIs(t, err, ErrProcessFailure)
+	assert.EqualError(t, err, "external connector protocol failed")
+	pid := waitForProcessClientHelperPID(t, readyPath)
+	descendant := observeProcessClientHelper(t, pid)
+	t.Cleanup(func() { killProcessClientHelper(pid) })
+	requireProcessClientHelperGone(t, descendant)
+}
+
+func TestReceivedProtocolViolationOnlyTrustsCompleteResponses(t *testing.T) {
+	const wrongID = `{"protocol":"kata.connector.v1","id":"other","result":{"connector_id":"fake.connector"}}`
+	const valid = `{"protocol":"kata.connector.v1","id":"request-1","result":{"connector_id":"fake.connector","display_name":"Fake","protocol":"kata.connector.v1","capabilities":[],"account_identity":"account-1"}}`
+	for _, tt := range []struct {
+		name          string
+		output        string
+		exceeded      bool
+		wantViolation bool
+	}{
+		{name: "complete response with wrong ID", output: wrongID, wantViolation: true},
+		{name: "truncated response", output: wrongID[:40]},
+		{name: "complete valid response", output: valid + "\n"},
+		{name: "valid response followed by partial data", output: valid + `{"pro`, wantViolation: true},
+		{name: "output over the limit", output: wrongID[:40], exceeded: true, wantViolation: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			stdout := &cappedBuffer{limit: maxResponseBytes, exceeded: tt.exceeded}
+			_, err := stdout.Write([]byte(tt.output))
+			require.NoError(t, err)
+			var result protocol.Description
+			err = receivedProtocolViolation(stdout, "request-1", "describe", &result, nil)
+			if tt.wantViolation {
+				require.ErrorIs(t, err, ErrProtocolFailure)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
 }
 
 func TestProcessClientRejectsMissingEnvironmentSourceWithoutValue(t *testing.T) {
@@ -1285,15 +1383,16 @@ func serveProcessClientHelper() {
 		time.Sleep(time.Second)
 		return
 	}
-	if os.Getenv("MODE") == "spawn-stdout-holder" ||
-		os.Getenv("MODE") == "spawn-stdout-holder-and-exit" ||
-		os.Getenv("MODE") == "spawn-background-holder" {
+	if stdoutHolderModes[os.Getenv("MODE")] {
 		// This helper process entry point has no caller context.
 		child := exec.CommandContext(context.Background(), // #nosec G204,G702 -- the test starts its own fixed executable and helper arguments.
 			os.Args[0], "-test.run=^TestProcessClientStdoutHolderHelper$", "--", "--connector-stdout-holder",
 		)
-		if os.Getenv("MODE") == "spawn-stdout-holder" || os.Getenv("MODE") == "spawn-stdout-holder-and-exit" {
+		if os.Getenv("MODE") != "spawn-background-holder" {
 			child.Stdout = os.Stdout
+		}
+		if strings.Contains(os.Getenv("MODE"), "escaped-stdout-holder") {
+			escapeConnectorTree(child)
 		}
 		if err := child.Start(); err != nil {
 			os.Exit(8)
@@ -1352,7 +1451,7 @@ func serveProcessClientHelper() {
 	case "write-raw-result":
 		response.Result = jsontext.Value(os.Getenv("RESULT"))
 	case "write-empty-result":
-	case "wrong-id":
+	case "wrong-id", "wrong-id-stdout-holder-and-exit":
 		response.ID = "other"
 	case "unsupported-version":
 		response.Protocol = "unsupported.connector.protocol"
@@ -1431,7 +1530,7 @@ func serveProcessClientHelper() {
 			ObservedAt: time.Date(2026, 8, 22, 12, 0, 1, 0, time.UTC),
 		}
 		response.Result = mustJSON(root)
-	case "mismatched-root":
+	case "mismatched-root", "mismatched-root-escaped-stdout-holder-and-exit":
 		response.Result = mustJSON(protocol.Root{
 			Key: "other-root", IdentityKey: "account", Title: "Title", State: "open", Revision: "revision",
 			UpdatedAt:  time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC),
@@ -1555,6 +1654,18 @@ func observedEnvironment() []string {
 	return observed
 }
 
+// stdoutHolderModes start a long-running helper descendant before the
+// connector responds. Every mode except spawn-background-holder hands the
+// descendant the connector's stdout.
+var stdoutHolderModes = map[string]bool{
+	"spawn-stdout-holder":                            true,
+	"spawn-stdout-holder-and-exit":                   true,
+	"wrong-id-stdout-holder-and-exit":                true,
+	"spawn-background-holder":                        true,
+	"escaped-stdout-holder-and-exit":                 true,
+	"mismatched-root-escaped-stdout-holder-and-exit": true,
+}
+
 func expectedEnvironment(mode string) []string {
 	if mode == "structured-secret" || mode == "encoded-structured-secret" || mode == "solidus-escaped-environment-secret" || mode == "html-unescaped-json-token" || mode == "embedded-encoded-environment-secret" || mode == "unicode-solidus-json-tokens" {
 		return []string{"TOKEN", "MODE"}
@@ -1565,7 +1676,7 @@ func expectedEnvironment(mode string) []string {
 	if mode == "raw-result" || mode == "publication-result" || mode == "write-raw-result" {
 		return []string{"MODE", "RESULT"}
 	}
-	if mode == "spawn-stdout-holder" || mode == "spawn-stdout-holder-and-exit" || mode == "spawn-background-holder" || mode == "launch-marker" || mode == "conditional-fields-unsupported" || mode == "conditional-fields-supported" {
+	if stdoutHolderModes[mode] || mode == "launch-marker" || mode == "conditional-fields-unsupported" || mode == "conditional-fields-supported" {
 		return []string{"MODE", "SYNC"}
 	}
 	if mode != "" {

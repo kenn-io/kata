@@ -97,8 +97,6 @@ type reconcileSnapshot struct {
 	mappedComments           map[int64]bool
 	fieldMappings            []db.ExternalFieldMapping
 	fieldStates              []db.ExternalFieldState
-	fieldIssue               db.Issue
-	coordinatedTimezone      string
 	publishReady             bool
 }
 
@@ -497,8 +495,6 @@ func (r *Reconciler) applyFields(
 	for _, state := range snapshot.fieldStates {
 		states[state.MappingID] = state
 	}
-	snapshot.fieldIssue = snapshot.issue
-	snapshot.coordinatedTimezone = ""
 	for _, mapping := range active {
 		state, hasState := states[mapping.ID]
 		result, err = r.reconcileField(ctx, snapshot, listed.Fields, mapping, state, hasState, claimToken, result)
@@ -536,11 +532,7 @@ func (r *Reconciler) reconcileField(
 		return r.storeFieldConflict(ctx, snapshot, mapping, state, hasBaseline, kata, baseline, claimToken, result)
 	}
 
-	fieldIssue := snapshot.issue
-	if snapshot.coordinatedTimezone != "" {
-		fieldIssue = snapshot.fieldIssue
-	}
-	kata, err := readCanonicalKataField(codec, fieldIssue, mapping)
+	kata, err := readCanonicalKataField(codec, snapshot.issue, mapping)
 	if err != nil {
 		external := baseline
 		if current, readErr := readMappedExternalField(ctx, snapshot, mapping); readErr == nil {
@@ -574,18 +566,7 @@ func (r *Reconciler) reconcileField(
 	case MergeConflict:
 		return r.storeFieldConflict(ctx, snapshot, mapping, state, hasBaseline, kata, external, claimToken, result)
 	case MergeWriteKata:
-		coordinatedTimezone := snapshot.coordinatedTimezone
-		if coordinatedTimezone == "" {
-			coordinatedTimezone = r.coordinatedTimezoneForField(
-				ctx, snapshot, liveFields, mapping, decision, external,
-			)
-			if coordinatedTimezone != "" {
-				snapshot.coordinatedTimezone = coordinatedTimezone
-			}
-		}
-		patch, patchErr := kataPatchWithCoordinatedTimezone(
-			codec, snapshot.issue, decision.Baseline, coordinatedTimezone,
-		)
+		patch, patchErr := codec.KataPatch(snapshot.issue, decision.Baseline)
 		if patchErr != nil {
 			return r.storeFieldConflict(ctx, snapshot, mapping, state, hasBaseline, kata, external, claimToken, result)
 		}
@@ -650,69 +631,6 @@ func (r *Reconciler) reconcileField(
 		result.retainEvents(*event)
 	}
 	return result, nil
-}
-
-func (r *Reconciler) coordinatedTimezoneForField(
-	ctx context.Context,
-	snapshot *reconcileSnapshot,
-	liveFields []connector.FieldDescriptor,
-	mapping db.ExternalFieldMapping,
-	decision MergeDecision,
-	external connector.FieldValue,
-) string {
-	if decision.Action != MergeWriteKata || external.Kind != fieldKindLocalDateTime || external.Timezone == "" {
-		return ""
-	}
-	currentCodec, ok := r.fieldCodecs[mapping.KataField]
-	if !ok {
-		return ""
-	}
-	currentKata, err := readCanonicalKataField(currentCodec, snapshot.issue, mapping)
-	if err != nil || currentKata.Kind != fieldKindLocalDateTime || currentKata.Timezone == external.Timezone {
-		return ""
-	}
-	states := make(map[int64]db.ExternalFieldState, len(snapshot.fieldStates))
-	for _, state := range snapshot.fieldStates {
-		states[state.MappingID] = state
-	}
-	foundSibling := false
-	for _, sibling := range snapshot.fieldMappings {
-		if !sibling.Active || sibling.ID == mapping.ID {
-			continue
-		}
-		codec, ok := r.fieldCodecs[sibling.KataField]
-		if !ok {
-			return ""
-		}
-		siblingKata, err := readCanonicalKataField(codec, snapshot.issue, sibling)
-		if err != nil || siblingKata.Kind != fieldKindLocalDateTime || siblingKata.Timezone != currentKata.Timezone {
-			return ""
-		}
-		if _, err := validateLiveFieldDescriptor(codec, sibling, liveFields); err != nil {
-			return ""
-		}
-		siblingExternal, err := readMappedExternalField(ctx, snapshot, sibling)
-		if err != nil || siblingExternal.Kind != fieldKindLocalDateTime || siblingExternal.Timezone != external.Timezone {
-			return ""
-		}
-		state, ok := states[sibling.ID]
-		if !ok || state.Conflicted {
-			return ""
-		}
-		baseline, hasBaseline, err := decodeCanonicalStoredFieldValue(state.Baseline, sibling)
-		if err != nil || !hasBaseline {
-			return ""
-		}
-		siblingDecision := DecideFieldMerge(baseline, siblingKata, siblingExternal)
-		if siblingDecision.Action != MergeWriteKata && siblingDecision.Action != MergeAccept {
-			return ""
-		}
-		foundSibling = true
-	}
-	if !foundSibling {
-		return ""
-	}
-	return external.Timezone
 }
 
 func (r *Reconciler) storeFieldConflict(

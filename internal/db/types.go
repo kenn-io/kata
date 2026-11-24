@@ -153,6 +153,11 @@ type FederationBinding struct {
 	LastSyncAt    *time.Time
 }
 
+// IsDirectSpoke reports whether the binding is a spoke without a relay.
+func (b FederationBinding) IsDirectSpoke() bool {
+	return b.Role == FederationRoleSpoke && b.RelayConfig == nil
+}
+
 // RebindFederationBindingParams conditionally moves one spoke binding to a
 // replacement endpoint without changing its hub identity or sync state.
 type RebindFederationBindingParams struct {
@@ -353,10 +358,12 @@ type ClaimStatus struct {
 // ClaimGateParams checks whether a local mutation can proceed using the
 // cached authoritative claim state available to this database.
 type ClaimGateParams struct {
-	ProjectID int64
-	IssueRef  string
-	Principal ClaimPrincipal
-	Now       time.Time
+	// ApplyTransactionFence admits external effects even without a local mutation.
+	ApplyTransactionFence bool
+	ProjectID             int64
+	IssueRef              string
+	Principal             ClaimPrincipal
+	Now                   time.Time
 }
 
 // ProjectAlias mirrors a row in project_aliases.
@@ -397,6 +404,7 @@ type Issue struct {
 	Author              string     `json:"author"`
 	Metadata            JSONBlob   `json:"metadata"`
 	Revision            int64      `json:"revision"`
+	ContentRevision     int64      `json:"content_revision"`
 	RecurrenceID        *int64     `json:"recurrence_id,omitempty"`
 	OccurrenceKey       *string    `json:"occurrence_key,omitempty"`
 	CreatedAt           time.Time  `json:"created_at"`

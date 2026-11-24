@@ -1,4 +1,4 @@
-.PHONY: build install homebrew test test-short test-stress test-federation-docker lint vet clean fmt nilaway openapi api-generate api-check api-breaking tui tui-demo docs-install docs-build docs-serve docs-preview docs-check docs-deploy docs-screenshots docs-assets-branch kata-ui-check kata-ui-test kata-ui-pack-check web-install web-generate web-check web-audit web-test web-test-browser web-e2e web-build web-embed web-assets-check web-release-check web-dev
+.PHONY: build install homebrew test test-short test-stress test-federation-docker lint vet clean fmt nilaway openapi api-generate api-check api-breaking tui tui-demo docs-install docs-build docs-serve docs-preview docs-check docs-deploy docs-screenshots docs-assets-branch kata-ui-check kata-ui-test kata-ui-pack-check web-install web-generate web-check web-audit web-test web-test-unit web-test-browser web-e2e web-build web-embed web-assets-check web-release-check web-dev
 
 GOFLAGS_TEST := -shuffle=on
 FEDERATION_STRESS_TIMEOUT ?= 2m
@@ -58,7 +58,9 @@ api-check:
 # Fail when the committed OpenAPI contract introduces breaking changes for
 # existing clients relative to BASE_REF (default origin/main).
 api-breaking:
+	API_VERSION_BASE_REF="$(if $(BASE_REF),$(BASE_REF),origin/main)" go test ./internal/daemon -run '^TestAPIVersionBaseRecords$$' -count=1
 	bash scripts/openapi-breaking.sh $(BASE_REF)
+	SCHEMA_VERSION_BASE_REF=$(or $(BASE_REF),origin/main) go test ./internal/db/pgstore -run '^TestSchemaVersionContract$$'
 
 web-install:
 	cd web && bun install --frozen-lockfile
@@ -84,11 +86,14 @@ web-audit:
 web-test: kata-ui-test kata-ui-pack-check
 	cd web && bun run test
 
+web-test-unit:
+	cd web && bun run test $(WEB_TEST_ARGS)
+
 web-test-browser:
 	cd web && bun run test:e2e -- tests/dev-proxy.spec.ts $(if $(WEB_TEST_GREP),--grep "$(WEB_TEST_GREP)",)
 
 web-e2e:
-	cd web && bun run test:e2e
+	cd web && bun run test:e2e $(WEB_TEST_ARGS)
 
 web-e2e-firefox:
 	cd web && bun run test:e2e:firefox
@@ -138,8 +143,14 @@ docs-preview:
 docs-check:
 	bash scripts/check-docs.sh
 
+# With DOCS_SCREENSHOTS_OUTPUT set, build the complete docs-assets tree into
+# $(DOCS_SCREENSHOTS_OUTPUT)/assets using only Docker on the host.
 docs-screenshots:
+ifdef DOCS_SCREENSHOTS_OUTPUT
+	bash docs/screenshots/generate-in-docker.sh "$(DOCS_SCREENSHOTS_OUTPUT)"
+else
 	bash docs/screenshots/generate.sh
+endif
 
 docs-assets-branch:
 	bash docs/screenshots/update-assets-branch.sh

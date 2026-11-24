@@ -19,12 +19,8 @@
   import ListIcon from '@lucide/svelte/icons/list'
   import LayoutPanelLeftIcon from '@lucide/svelte/icons/layout-panel-left'
   import LayoutPanelTopIcon from '@lucide/svelte/icons/layout-panel-top'
-  import MonitorIcon from '@lucide/svelte/icons/monitor'
   import MenuIcon from '@lucide/svelte/icons/menu'
-  import MoonIcon from '@lucide/svelte/icons/moon'
   import PlusIcon from '@lucide/svelte/icons/plus'
-  import SettingsIcon from '@lucide/svelte/icons/settings'
-  import SunIcon from '@lucide/svelte/icons/sun'
 
   import type { TokenOut, UIIssueReference } from '../lib/api/generated'
   import type { WebDaemonInfo } from '../lib/daemons/client'
@@ -64,9 +60,9 @@
   import IssueDetail from './IssueDetail.svelte'
   import IssueFilters from './IssueFilters.svelte'
   import IssueGraph from './IssueGraph.svelte'
-  import InboxProjectChooser from './InboxProjectChooser.svelte'
   import KataDaemonSwitcher from './KataDaemonSwitcher.svelte'
   import QuickCapture from './QuickCapture.svelte'
+  import ProjectRecurrences from './ProjectRecurrences.svelte'
   import SearchSettings from './SearchSettings.svelte'
   import Sidebar from './Sidebar.svelte'
   import SplitLayout from './SplitLayout.svelte'
@@ -75,9 +71,11 @@
   type ChildParent = { projectID: number; projectUID: string; issueUID: string }
 
   interface Props {
+    syncRefreshGeneration?: number
     route: AppRoute
     requestedRoute?: AppRoute | undefined
     snapshot: UISnapshot
+    selfActor?: string | undefined
     loading: boolean
     canMutate: boolean
     mutationPending: boolean
@@ -100,6 +98,7 @@
     canAdministerDaemon?: boolean | undefined
     onPreferencesChange?: ((preferences: Preferences) => void) | undefined
     onSelectDaemon?: ((id: string) => void) | undefined
+    onOpenDaemon?: (() => void) | undefined
     onAccessMutation?:
       | ((
           draft: unknown,
@@ -111,8 +110,11 @@
     onSearchEmpty?: (() => void) | undefined
     onNavigate: (route: AppRoute) => void | Promise<void>
     onCreateProject: (name: string, designateInbox?: boolean) => Promise<KataTaskMutationResponse>
-    onDesignateInbox: (projectUID: string) => Promise<void>
-    onCreateIssue: (title: string, parent?: ChildParent) => void | Promise<void>
+    onCreateIssue: (
+      title: string,
+      parent?: ChildParent,
+      projectUID?: string,
+    ) => void | Promise<void>
     searchReferences: (query: string) => Promise<UIIssueReference[]>
     onMoveIssue: (toProjectUID: string) => boolean | Promise<boolean>
     onPatchMetadata: (uid: string, patch: Record<string, unknown>) => boolean | Promise<boolean>
@@ -133,17 +135,17 @@
     onRemoveLabel: (uid: string, label: string) => void | Promise<void>
     onCloseIssue: (request: KataTaskCloseRequest) => boolean | Promise<boolean>
     onReopenIssue: () => void | Promise<void>
-    onDeleteIssue: () => boolean | Promise<boolean>
+    recurrenceRevision?: number
     onCreateRecurrence: (
       projectID: number,
       input: import('../lib/kata/types').KataCreateRecurrenceInput,
     ) => Promise<void>
     onPatchRecurrence: (
-      id: number,
+      recurrence: import('../lib/kata/types').KataRecurrence,
       input: import('../lib/kata/types').KataPatchRecurrenceInput,
       etag: string,
     ) => Promise<void>
-    onDeleteRecurrence: (recurrence: import('../lib/kata/types').KataRecurrence) => Promise<boolean>
+    onDeleteRecurrence: (recurrence: import('../lib/kata/types').KataRecurrence) => Promise<void>
     onMoveBoardIssue?:
       | ((issue: KataTaskSummary, plan: BoardMovePlan) => Promise<boolean>)
       | undefined
@@ -161,9 +163,11 @@
   }
 
   let {
+    syncRefreshGeneration = 0,
     route: acceptedRoute,
     requestedRoute = undefined,
     snapshot,
+    selfActor = undefined,
     loading,
     canMutate,
     mutationPending,
@@ -186,13 +190,13 @@
     canAdministerDaemon = false,
     onPreferencesChange = () => {},
     onSelectDaemon = () => {},
+    onOpenDaemon = () => {},
     onAccessMutation = undefined,
     onRefreshCredentials = () => {},
     onBackFromCredentials = () => {},
     onSearchEmpty = undefined,
     onNavigate,
     onCreateProject,
-    onDesignateInbox,
     onCreateIssue,
     searchReferences,
     onMoveIssue,
@@ -208,7 +212,7 @@
     onRemoveLabel,
     onCloseIssue,
     onReopenIssue,
-    onDeleteIssue,
+    recurrenceRevision = 0,
     onCreateRecurrence,
     onPatchRecurrence,
     onDeleteRecurrence,
@@ -276,8 +280,8 @@
                   : 'Connected',
   )
   const actorlessConnectionLabels: Record<string, string> = {
-    none: 'Local connection',
-    web_local: 'Local connection',
+    none: 'Local, no sign-in',
+    web_local: 'Local, no sign-in',
     static_token: 'Shared daemon token',
     bootstrap: 'Bootstrap token',
     insecure_readonly: 'Anonymous (read-only)',
@@ -294,8 +298,8 @@
   )
 
   let captureOpen = $state(false)
-  let inboxChooserOpen = $state(false)
   let mobileNavigationOpen = $state(false)
+  let detailBeside = $state(false)
   let creationIntent = $state<'project' | 'task' | null>(null)
   const mediumScreen = new MediaQuery(MEDIA.medium)
   let linkFilters = $state(createKataLinkFilters('all'))
@@ -325,7 +329,6 @@
   let inboxProject = $derived(
     projection.projects.find((project) => project.metadata.role === 'inbox'),
   )
-  let hasInbox = $derived(inboxProject !== undefined)
   let viewName = $derived(viewNameForRoute(route))
   let searchFilters = $derived(searchFiltersForRoute(route, viewName))
   let filterRoute = $derived(
@@ -379,6 +382,7 @@
       ? projection.issues.filter((issue) => issue.project_uid === selectedProject!.uid)
       : projection.issues,
   )
+  let projectView = $derived(Boolean(route.projectUID && !route.view))
   let selectedCommentUID = $state<string | undefined>()
   let returnComment = $state<{ issueUID: string; commentUID: string } | undefined>()
   let selectedIssueUID = $derived(route.issueUID ?? null)
@@ -400,7 +404,7 @@
     canMutate
       ? undefined
       : stale
-        ? 'Changes are paused while the snapshot may be out of date.'
+        ? 'Editing is paused while workspace data may be out of date.'
         : readOnly || !snapshot.capabilities.writable
           ? 'This credential is read-only.'
           : 'Changes are paused while Kata connects.',
@@ -444,6 +448,10 @@
     creationIntent = null
   }
 
+  $effect(() => {
+    if (!mediumScreen.current) closeNavigation()
+  })
+
   function openView(name: KataTaskViewName): void {
     closeNavigation()
     navigate({
@@ -478,6 +486,7 @@
   }
 
   function openSettings(): void {
+    closeNavigation()
     navigate({
       kind: 'kata',
       view: 'settings',
@@ -516,12 +525,21 @@
   }
 
   function selectIssue(issueUID: string): void {
+    statusRequest = null
     navigate({
       ...withResolvedView(filterRoute),
       issueUID,
       graph: false,
     })
   }
+
+  let statusRequest = $state<{ uid: string; generation: number } | null>(null)
+  let statusRequestGeneration = 0
+
+  $effect(() => {
+    if (!canMutate || (requestedRoute && requestedRoute.issueUID !== statusRequest?.uid))
+      statusRequest = null
+  })
 
   function openGraph(issueUID: string): void {
     const next: AppRoute = {
@@ -565,18 +583,17 @@
     })
   }
 
+  function setSplitDirection(direction: 'horizontal' | 'vertical'): void {
+    onPreferencesChange({ ...preferences, splitDirection: direction })
+  }
+
   function resizeSplit(size: number): void {
     onPreferencesChange({ ...preferences, splitSize: size })
   }
 
-  function cycleTheme(): void {
-    const theme =
-      preferences.theme === 'system' ? 'light' : preferences.theme === 'light' ? 'dark' : 'system'
-    onPreferencesChange({ ...preferences, theme })
-  }
-
   function beginNewTask(): void {
     if (newTaskBlockedReason) return
+    closeNavigation()
     if (scopedAuthority) {
       captureOpen = true
       return
@@ -585,8 +602,7 @@
       beginProjectCreation('task')
       return
     }
-    if (hasInbox) captureOpen = true
-    else inboxChooserOpen = true
+    captureOpen = true
   }
 
   function beginProjectCreation(intent: 'project' | 'task' = 'project'): void {
@@ -605,18 +621,10 @@
     return result
   }
 
-  async function chooseInbox(projectUID: string): Promise<void> {
-    await onDesignateInbox(projectUID)
-    inboxChooserOpen = false
-    captureOpen = true
-  }
-
-  function submitCapture(title: string): void | Promise<void> {
-    return scopedAuthority && childParent ? onCreateIssue(title, childParent) : onCreateIssue(title)
-  }
-
-  function themeLabel(): string {
-    return preferences.theme[0]!.toUpperCase() + preferences.theme.slice(1)
+  function submitCapture(title: string, projectUID?: string): void | Promise<void> {
+    return scopedAuthority && childParent
+      ? onCreateIssue(title, childParent)
+      : onCreateIssue(title, undefined, projectUID)
   }
 
   function viewNameForRoute(current: AppRoute): KataTaskViewName {
@@ -697,6 +705,10 @@
 
   function scopeLabel(): string {
     if (selectedProject) return selectedProject.name
+    return viewLabel()
+  }
+
+  function viewLabel(): string {
     return (
       [
         { name: 'inbox', label: 'Inbox' },
@@ -704,26 +716,43 @@
         { name: 'delegated', label: 'Delegated' },
         { name: 'scheduled', label: 'Scheduled' },
         { name: 'attention', label: 'Needs attention' },
-        { name: 'all', label: 'All Open' },
+        { name: 'all', label: 'All open' },
         { name: 'logbook', label: 'Logbook' },
       ].find((view) => view.name === viewName)?.label ?? 'Kata'
     )
   }
+
+  function tabTitle(): string {
+    if (route.view === 'settings') return 'Settings'
+    if (route.view === 'credentials') return 'Credentials'
+    if (route.issueUID) {
+      if (projection.selected_state === 'archived') return `Archived issue ${route.issueUID}`
+      if (projection.selected_state === 'missing') return `Issue unavailable ${route.issueUID}`
+      const issue = projection.selected_detail?.issue
+      if (issue?.uid === route.issueUID) return `${issue.title} (${issue.qualified_id})`
+      return 'Issue'
+    }
+    if (selectedProject && viewName !== 'all') return `${viewLabel()} · ${selectedProject.name}`
+    return scopeLabel()
+  }
 </script>
+
+<svelte:head>
+  <title>{tabTitle()} · Kata</title>
+</svelte:head>
 
 {#snippet newTaskButton()}
   <!-- aria-disabled keeps the blocked button focusable so keyboard users reach its reason. -->
   <button
     type="button"
-    class="accent-button header-action"
-    aria-label="New task"
+    class="quiet-button header-action"
     aria-disabled={newTaskBlockedReason ? 'true' : undefined}
     aria-describedby={newTaskBlockedReason ? newTaskReasonID : undefined}
     title={newTaskBlockedReason ? undefined : 'New task'}
     onclick={beginNewTask}
   >
-    <PlusIcon size={13} strokeWidth={1.9} aria-hidden="true" />
-    <span class="header-action-label">New task</span>
+    <PlusIcon size={16} aria-hidden="true" />
+    <span class="kit-sr-only">New task</span>
   </button>
 {/snippet}
 
@@ -741,7 +770,7 @@
 {/snippet}
 
 {#snippet noProjects()}
-  <EmptyState title="No projects yet" description="Create a project, or run kata init in a repo.">
+  <EmptyState title="No projects yet" class="no-projects">
     {#if projectCreationBlockedReason}
       <Tooltip text={projectCreationBlockedReason}>
         {@render createProjectButton()}
@@ -750,6 +779,7 @@
     {:else}
       {@render createProjectButton()}
     {/if}
+    <p class="no-projects-hint">Or run <code>kata init</code> in a repository.</p>
   </EmptyState>
 {/snippet}
 
@@ -767,14 +797,49 @@
     {draftFenceGeneration}
     credentialAuditAvailable={snapshot.capabilities.token_audit_read === true}
     credentialAuditActive={credentialRoute}
+    settingsActive={settingsRoute}
+    onOpenSettings={openSettings}
     onOpenView={openView}
     onOpenProject={openProject}
     onCreateProject={createProject}
     onOpenCredentials={openCredentials}
-  />
+  >
+    {#snippet header()}
+      <div class="header-server">
+        {#if daemons.length > 0}
+          <KataDaemonSwitcher
+            {daemons}
+            account={connectionAccount}
+            credential={connectionStatus === 'Connected' ? undefined : connectionStatus}
+            activeId={activeDaemonID}
+            activeStatusLabel={daemonError ?? (reconnecting ? 'Reconnecting…' : undefined)}
+            activeStatusTone={daemonError ? 'error' : undefined}
+            disabled={daemonSwitching || mutationPending}
+            onSelect={onSelectDaemon}
+            onOpen={onOpenDaemon}
+          />
+        {:else}
+          <strong>Kata</strong>
+          {#if daemonError || reconnecting}<span class="daemon-fallback-status" role="status"
+              >{daemonError ?? 'Reconnecting…'}</span
+            >{/if}
+        {/if}
+      </div>
+      <div class="header-task">
+        {#if newTaskBlockedReason}
+          <Tooltip text={newTaskBlockedReason}>{@render newTaskButton()}</Tooltip>
+        {:else}
+          {@render newTaskButton()}
+        {/if}
+      </div>
+    {/snippet}
+  </Sidebar>
 {/snippet}
 
 <section class="kata-feature" aria-label="Kata workspace">
+  {#if newTaskBlockedReason}
+    <span id={newTaskReasonID} class="kit-sr-only">{newTaskBlockedReason}</span>
+  {/if}
   {#if connectionStatus !== 'Connected'}
     <div class="active-connection" role="status" aria-label="Active connection">
       <span
@@ -784,114 +849,41 @@
       <span>Account: <strong>{connectionAccount}</strong></span>
       <span>Credential: <strong>{connectionStatus}</strong></span>
       {#if stale}
-        <span>Snapshot may be out of date. Changes are paused.</span>
+        <span>Workspace data may be out of date. Editing is paused.</span>
       {/if}
     </div>
   {/if}
-  <TopBar class="kata-header" ariaLabel="Kata workspace">
-    {#snippet left()}
-      <h1 class="kata-brand">Kata</h1>
-      {#if daemons.length > 0}
-        <KataDaemonSwitcher
-          {daemons}
-          activeId={activeDaemonID}
-          activeStatusLabel={daemonError ?? (reconnecting ? 'Reconnecting…' : undefined)}
-          activeStatusTone={daemonError ? 'error' : undefined}
-          disabled={daemonSwitching || mutationPending}
-          onSelect={onSelectDaemon}
-        />
-      {:else if daemonError || reconnecting}
-        <span
-          class="daemon-fallback-status"
-          class:error={daemonError}
-          role="status"
-          aria-label="Kata daemon status"
+  <div class="mobile-navigation-trigger">
+    <TopBar ariaLabel="Kata workspace">
+      {#snippet left()}
+        <IconButton
+          ariaLabel="Open navigation"
+          onclick={() => {
+            mobileNavigationOpen = true
+          }}><MenuIcon size={18} /></IconButton
         >
-          {daemonError ?? 'Reconnecting…'}
-        </span>
-      {/if}
-    {/snippet}
-    {#snippet right()}
-      <div class="kata-header-actions">
-        <span class="mobile-navigation-trigger">
-          <IconButton
-            ariaLabel="Open navigation"
-            title="Open navigation"
-            onclick={() => {
-              mobileNavigationOpen = true
-            }}
-          >
-            <MenuIcon size={15} strokeWidth={1.8} aria-hidden="true" />
-          </IconButton>
-        </span>
-        <IconButton ariaLabel={`Theme: ${themeLabel()}`} title="Change theme" onclick={cycleTheme}>
-          {#if preferences.theme === 'light'}
-            <SunIcon size={15} strokeWidth={1.8} aria-hidden="true" />
-          {:else if preferences.theme === 'dark'}
-            <MoonIcon size={15} strokeWidth={1.8} aria-hidden="true" />
-          {:else}
-            <MonitorIcon size={15} strokeWidth={1.8} aria-hidden="true" />
-          {/if}
-        </IconButton>
-        {#if !daemonRoute}
-          <SegmentedControl
-            class="layout-toggle"
-            ariaLabel="Layout"
-            value={boardRoute ? 'board' : 'list'}
-            options={[
-              { value: 'list', label: 'List', title: 'List and detail' },
-              { value: 'board', label: 'Board', title: 'Columns of cards' },
-            ]}
-            onchange={setLayout}
-          >
-            {#snippet segment(option)}
-              <span class="layout-segment">
-                {#if option.value === 'board'}
-                  <KanbanIcon size={14} strokeWidth={1.8} aria-hidden="true" />
-                {:else}
-                  <ListIcon size={14} strokeWidth={1.8} aria-hidden="true" />
-                {/if}
-                <span class="layout-segment-label">{option.label}</span>
-              </span>
-            {/snippet}
-          </SegmentedControl>
-        {/if}
-        <IconButton ariaLabel="Settings" title="Settings" onclick={openSettings}>
-          <SettingsIcon size={15} strokeWidth={1.8} aria-hidden="true" />
-        </IconButton>
-        {#if !daemonRoute && !boardRoute}
-          <IconButton
-            ariaLabel={preferences.splitDirection === 'vertical'
-              ? 'Switch to side-by-side layout'
-              : 'Switch to stacked layout'}
-            title={preferences.splitDirection === 'vertical'
-              ? 'Side-by-side (list left, detail right)'
-              : 'Stacked (list top, detail bottom)'}
-            onclick={toggleSplitDirection}
-          >
-            {#if preferences.splitDirection === 'vertical'}
-              <LayoutPanelLeftIcon size={15} strokeWidth={1.8} aria-hidden="true" />
-            {:else}
-              <LayoutPanelTopIcon size={15} strokeWidth={1.8} aria-hidden="true" />
-            {/if}
-          </IconButton>
-        {/if}
-        {#if !daemonRoute}
+        <strong
+          >{settingsRoute ? 'Settings' : credentialRoute ? 'Credentials' : scopeLabel()}</strong
+        >
+      {/snippet}
+      {#snippet right()}
+        {#if mediumScreen.current}
           {#if newTaskBlockedReason}
-            <Tooltip text={newTaskBlockedReason} align="end">
-              {@render newTaskButton()}
-            </Tooltip>
-            <span id={newTaskReasonID} class="kit-sr-only">{newTaskBlockedReason}</span>
+            <Tooltip text={newTaskBlockedReason}>{@render newTaskButton()}</Tooltip>
           {:else}
             {@render newTaskButton()}
           {/if}
         {/if}
-      </div>
-    {/snippet}
-  </TopBar>
+      {/snippet}
+    </TopBar>
+  </div>
   {#if selectedProject && !daemonRoute && !stale && !daemonSwitching && !reconnecting && !credentialExpired && !daemonError && !scopedAuthority && (!activeDaemonID || activeConnection?.local === true)}
     {#key `${activeDaemonID ?? 'direct'}:${draftFenceGeneration}:${selectedProject.uid}`}
-      <ProjectSyncStatus projectID={selectedProject.id} projectUID={selectedProject.uid} />
+      <ProjectSyncStatus
+        projectID={selectedProject.id}
+        projectUID={selectedProject.uid}
+        refreshGeneration={syncRefreshGeneration}
+      />
     {/key}
   {/if}
   <div class="kata-layout" aria-busy={loading}>
@@ -900,6 +892,9 @@
     </div>
 
     <div class="kata-main">
+      {#if mutationMessage && !captureOpen && (!credentialRoute || !accessAdministrationAvailable || !onAccessMutation)}
+        <p class="mutation-message" role="alert">{mutationMessage}</p>
+      {/if}
       {#if credentialRoute}
         <div class="credential-scene">
           <CredentialAudit
@@ -919,7 +914,7 @@
                   <AccessManagement
                     projects={snapshot.catalog}
                     pending={mutationPending || loading || !accessAdministrationAvailable}
-                    message={mutationMessage}
+                    message={captureOpen ? undefined : mutationMessage}
                     onMutation={onAccessMutation}
                   />
                 {/key}
@@ -932,29 +927,40 @@
           <SearchSettings
             postFetch={searchSettingsPostFetch}
             {canAdministerDaemon}
+            originStable={snapshot.origin_stable}
             onback={onBackFromCredentials}
             remoteHost={settingsHost}
-          />
+          >
+            <div class="appearance">
+              <span>Theme</span><SegmentedControl
+                ariaLabel="Theme"
+                options={[
+                  { value: 'system', label: 'System' },
+                  { value: 'light', label: 'Light' },
+                  { value: 'dark', label: 'Dark' },
+                ]}
+                value={preferences.theme}
+                onchange={(theme) =>
+                  onPreferencesChange({ ...preferences, theme: theme as Preferences['theme'] })}
+              />
+            </div>
+          </SearchSettings>
         {/key}
+      {:else if boardRoute}
+        {@render boardPane()}
       {:else}
-        {#if mutationMessage}
-          <p class="mutation-message" role="alert">{mutationMessage}</p>
-        {/if}
-        {#if boardRoute}
-          {@render boardPane()}
-        {:else}
-          <SplitLayout
-            orientation={preferences.splitDirection}
-            primarySize={preferences.splitSize}
-            minPrimary={preferences.splitDirection === 'vertical' ? 220 : 320}
-            minSecondary={preferences.splitDirection === 'vertical' ? 220 : 360}
-            responsiveBreakpoint={700}
-            ariaLabel="Resize Kata panes"
-            onResize={resizeSplit}
-            primary={listPane}
-            secondary={route.issueUID ? detailPane : undefined}
-          />
-        {/if}
+        <SplitLayout
+          orientation={preferences.splitDirection}
+          primarySize={preferences.splitSize}
+          minPrimary={preferences.splitDirection === 'vertical' ? 220 : 320}
+          minSecondary={preferences.splitDirection === 'vertical' ? 220 : 360}
+          responsiveBreakpoint={700}
+          ariaLabel="Resize Kata panes"
+          onResize={resizeSplit}
+          bind:secondaryBeside={detailBeside}
+          primary={listPane}
+          secondary={route.issueUID ? detailPane : undefined}
+        />
       {/if}
     </div>
   </div>
@@ -974,20 +980,30 @@
 {/if}
 
 {#if mobileNavigationOpen}
-  <DetailDrawer
-    title="Kata navigation"
-    width="min(320px, calc(100vw - 40px))"
-    onclose={closeNavigation}
-  >
+  <DetailDrawer title="Navigation" width="min(320px, calc(100vw - 40px))" onclose={closeNavigation}>
     {@render navigationSidebar()}
   </DetailDrawer>
 {/if}
+
+{#snippet paneDirection()}
+  <IconButton
+    ariaLabel={preferences.splitDirection === 'vertical'
+      ? 'Switch to side-by-side layout'
+      : 'Switch to stacked layout'}
+    onclick={toggleSplitDirection}
+  >
+    {#if preferences.splitDirection === 'vertical'}<LayoutPanelLeftIcon
+        size={15}
+      />{:else}<LayoutPanelTopIcon size={15} />{/if}
+  </IconButton>
+{/snippet}
 
 {#snippet listPane()}
   <div class="list-column kata-list">
     {#if route.issueUID && route.graph}
       {#if projection.selected_graph && projection.selected_detail}
         <IssueGraph
+          headerActions={paneDirection}
           graph={projection.selected_graph}
           sourceIssue={projection.selected_detail.issue}
           selectedUID={graphSelectedUID}
@@ -1003,14 +1019,37 @@
         </section>
       {/if}
     {:else}
-      <IssueFilters
-        filters={inputFilters}
-        projects={projection.projects}
-        onChange={updateFilters}
-        onSubmitSearch={submitSearch}
-      />
+      {#snippet filtersToolbar()}
+        <IssueFilters
+          filters={inputFilters}
+          projects={projection.projects}
+          {projectView}
+          showStatus={currentView.view !== 'logbook'}
+          onChange={updateFilters}
+          onSubmitSearch={submitSearch}
+        />
+      {/snippet}
+      {#snippet projectRecurrences()}
+        {#if selectedProject && !scopedAuthority}
+          {#key selectedProject.uid}
+            <ProjectRecurrences
+              projectID={selectedProject.id}
+              actor={selfActor ?? 'kata-web'}
+              disabled={!projectWideMutationAllowed || mutationPending}
+              {draftFenceGeneration}
+              refreshKey={`${recurrenceRevision}:${draftResetGeneration}`}
+              onCreate={onCreateRecurrence}
+              onPatch={onPatchRecurrence}
+              onDelete={onDeleteRecurrence}
+            />
+          {/key}
+        {/if}
+      {/snippet}
       <IssueCollection
         {viewer}
+        toolbar={filtersToolbar}
+        headerAccessory={projectRecurrences}
+        {layoutControl}
         now={connectionNow}
         resultsKey={JSON.stringify([route.projectUID ?? null, route.filters])}
         {navigationGeneration}
@@ -1022,11 +1061,21 @@
         issueCatalog={projection.issues}
         scopeLabel={scopeLabel()}
         scopedProjectName={selectedProject?.name ?? null}
+        {projectView}
+        {detailBeside}
+        splitDirection={preferences.splitDirection}
+        onSplitDirectionChange={setSplitDirection}
         {selectedIssueUID}
         {loading}
         statusFilter={searchFilters.status}
         readyIssueUIDs={projection.member_issue_uid_set}
         onSelect={(issue) => selectIssue(issue.uid)}
+        onStatusAction={canMutate && !mutationPending
+          ? (issue) => {
+              selectIssue(issue.uid)
+              statusRequest = { uid: issue.uid, generation: ++statusRequestGeneration }
+            }
+          : undefined}
         onOpenGraph={(issue) => openGraph(issue.uid)}
         empty={!loading && projection.projects.length === 0 ? noProjects : undefined}
       />
@@ -1034,49 +1083,80 @@
   </div>
 {/snippet}
 
+{#snippet layoutControl()}
+  <SegmentedControl
+    class="layout-toggle"
+    ariaLabel="Layout"
+    value={boardRoute ? 'board' : 'list'}
+    options={[
+      { value: 'list', label: 'List', title: 'List and detail' },
+      { value: 'board', label: 'Board', title: 'Columns of cards' },
+    ]}
+    onchange={setLayout}
+  >
+    {#snippet segment(option)}
+      <span class="layout-segment">
+        {#if option.value === 'board'}
+          <KanbanIcon size={14} strokeWidth={1.8} aria-hidden="true" />
+        {:else}
+          <ListIcon size={14} strokeWidth={1.8} aria-hidden="true" />
+        {/if}
+        <span class="layout-segment-label">{option.label}</span>
+      </span>
+    {/snippet}
+  </SegmentedControl>
+{/snippet}
+
 {#snippet boardPane()}
   <div class="list-column board-pane">
-    <div class="board-toolbar">
-      <IssueFilters
-        filters={searchFilters}
-        projects={projection.projects}
-        onChange={updateFilters}
-        onSubmitSearch={submitSearch}
-      />
-      <SegmentedControl
-        class="density-toggle"
-        ariaLabel="Card density"
-        value={preferences.boardCompact ? 'compact' : 'comfortable'}
-        options={[
-          { value: 'comfortable', label: 'Comfortable cards', title: 'Comfortable cards' },
-          { value: 'compact', label: 'Compact cards', title: 'Compact cards: one line each' },
-        ]}
-        onchange={(value) =>
-          onPreferencesChange({ ...preferences, boardCompact: value === 'compact' })}
-      >
-        {#snippet segment(option)}
-          {#if option.value === 'compact'}
-            <Rows4Icon size={14} strokeWidth={1.8} aria-hidden="true" />
-          {:else}
-            <Rows2Icon size={14} strokeWidth={1.8} aria-hidden="true" />
-          {/if}
+    <!-- The same header as the list, so switching layouts keeps every control in place. -->
+    <div class="board-header">
+      <PageHeader level={2} title={scopeLabel()}>
+        {#snippet actions()}
+          <SegmentedControl
+            class="density-toggle"
+            ariaLabel="Card density"
+            value={preferences.boardCompact ? 'compact' : 'comfortable'}
+            options={[
+              { value: 'comfortable', label: 'Comfortable cards', title: 'Comfortable cards' },
+              { value: 'compact', label: 'Compact cards', title: 'Compact cards: one line each' },
+            ]}
+            onchange={(value) =>
+              onPreferencesChange({ ...preferences, boardCompact: value === 'compact' })}
+          >
+            {#snippet segment(option)}
+              {#if option.value === 'compact'}
+                <Rows4Icon size={14} strokeWidth={1.8} aria-hidden="true" />
+              {:else}
+                <Rows2Icon size={14} strokeWidth={1.8} aria-hidden="true" />
+              {/if}
+            {/snippet}
+          </SegmentedControl>
+          <IconButton
+            ariaLabel="Highlight changes by others"
+            ariaPressed={preferences.boardHighlightRemote}
+            title={preferences.boardHighlightRemote
+              ? 'Highlighting cards others move or add (click to turn off)'
+              : 'Not highlighting cards others move or add (click to turn on)'}
+            onclick={() =>
+              onPreferencesChange({
+                ...preferences,
+                boardHighlightRemote: !preferences.boardHighlightRemote,
+              })}
+          >
+            <SparklesIcon size={15} strokeWidth={1.8} aria-hidden="true" />
+          </IconButton>
+          {@render layoutControl()}
         {/snippet}
-      </SegmentedControl>
-      <IconButton
-        ariaLabel="Highlight changes by others"
-        ariaPressed={preferences.boardHighlightRemote}
-        title={preferences.boardHighlightRemote
-          ? 'Highlighting cards others move or add (click to turn off)'
-          : 'Not highlighting cards others move or add (click to turn on)'}
-        onclick={() =>
-          onPreferencesChange({
-            ...preferences,
-            boardHighlightRemote: !preferences.boardHighlightRemote,
-          })}
-      >
-        <SparklesIcon size={15} strokeWidth={1.8} aria-hidden="true" />
-      </IconButton>
+      </PageHeader>
     </div>
+    <IssueFilters
+      filters={inputFilters}
+      projects={projection.projects}
+      {projectView}
+      onChange={updateFilters}
+      onSubmitSearch={submitSearch}
+    />
     <IssueBoard
       issues={boardIssues}
       {selectedIssueUID}
@@ -1112,6 +1192,8 @@
     {#if projection.selected_state === 'available' && projection.selected_detail}
       <IssueDetail
         issue={projection.selected_detail}
+        {today}
+        {selfActor}
         events={[...projection.selected_history]}
         issueCatalog={projection.issues}
         {searchReferences}
@@ -1123,9 +1205,15 @@
         {ownerOptions}
         selectedRecurrences={[...projection.selected_recurrences]}
         actionsDisabled={!canMutate || mutationPending || projection.selected_pending === true}
-        authorityBlocked={!canMutate || projection.selected_pending === true}
+        authorityBlocked={stale || projection.selected_pending === true}
         pending={projection.selected_pending === true}
-        attachmentsEnabled={snapshot.capabilities.attachments ?? false}
+        {statusRequest}
+        onStatusRequestConsumed={() => {
+          statusRequest = null
+        }}
+        graphOpen={route.graph}
+        onCloseGraph={closeGraph}
+        attachmentsEnabled={Boolean(snapshot.capabilities.attachments)}
         {onUploadAttachment}
         administrativeActionsAllowed={!scopedAuthority}
         {draftResetGeneration}
@@ -1134,7 +1222,7 @@
         {onMoveIssue}
         {onPatchMetadata}
         {onAddComment}
-        commentError={mutationMessage}
+        mutationError={captureOpen ? undefined : mutationMessage}
         {selectedCommentUID}
         {returnComment}
         {onEditIssue}
@@ -1146,7 +1234,6 @@
         {onRemoveLabel}
         {onCloseIssue}
         {onReopenIssue}
-        {onDeleteIssue}
         onSelectIssue={(target) => {
           returnComment = target.returnComment
           selectedCommentUID = target.commentUID
@@ -1154,8 +1241,6 @@
         }}
         onOpenGraph={(issue) => openGraph(issue.uid)}
         {onCreateRecurrence}
-        {onPatchRecurrence}
-        {onDeleteRecurrence}
       />
     {:else}
       <section class="detail-unavailable" role="status" aria-label="Selected issue status">
@@ -1171,26 +1256,14 @@
   open={captureOpen}
   disabled={newTaskBlockedReason !== undefined}
   {draftFenceGeneration}
-  inboxName={scopedAuthority ? undefined : inboxProject?.name}
+  projects={projectWideMutationAllowed
+    ? projection.projects.map((project) => ({ uid: project.uid, name: project.name }))
+    : undefined}
+  inboxUID={inboxProject?.uid}
   onClose={() => {
     captureOpen = false
   }}
   onSubmit={submitCapture}
-  onChangeInbox={projectWideMutationAllowed
-    ? () => {
-        captureOpen = false
-        inboxChooserOpen = true
-      }
-    : undefined}
-/>
-
-<InboxProjectChooser
-  open={inboxChooserOpen}
-  projects={projection.projects.map((project) => ({ uid: project.uid, name: project.name }))}
-  onClose={() => {
-    inboxChooserOpen = false
-  }}
-  onSelect={chooseInbox}
 />
 
 <style>
@@ -1211,19 +1284,36 @@
     padding: 0.375rem 0.75rem;
     border-start-start-radius: 0;
     border-end-start-radius: 0;
-    border-inline-start: 0.25rem solid var(--accent-yellow);
-    background: var(--bg-connection);
-    color: var(--text-connection);
+    border-inline-start: 0.25rem solid var(--accent-amber);
+    background: color-mix(in srgb, var(--accent-amber) 15%, var(--bg-surface));
+    color: var(--text-primary);
     font-size: var(--font-size-xs);
     overflow-wrap: anywhere;
   }
 
-  .kata-brand {
+  :global(.no-projects .kit-empty-state__title) {
+    color: var(--text-secondary);
+    line-height: 1.5;
+  }
+
+  /* The kata init line sits under New project, not beside it. */
+  :global(.no-projects .kit-empty-state__actions) {
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-4);
+  }
+  .no-projects-hint {
     margin: 0;
-    font-size: var(--font-size-lg);
-    font-weight: 650;
-    line-height: 1.2;
-    white-space: nowrap;
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+  }
+
+  .appearance {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px 0;
   }
 
   .daemon-fallback-status {
@@ -1232,34 +1322,42 @@
     white-space: nowrap;
   }
 
-  .daemon-fallback-status.error {
-    color: var(--accent-red);
-  }
-
-  .kata-header-actions {
-    display: flex;
-    align-items: center;
-    gap: var(--space-4);
-    flex: 0 0 auto;
-  }
-
-  .header-action {
+  .quiet-button.header-action {
     display: inline-flex;
+    flex: 0 0 auto;
     align-items: center;
-    gap: var(--space-2);
-    white-space: nowrap;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+
+  .quiet-button.header-action:hover:not([aria-disabled='true']) {
+    background: var(--bg-surface-hover);
+    color: var(--text-primary);
+  }
+
+  .quiet-button[aria-disabled='true'] {
+    color: var(--text-muted);
+    cursor: not-allowed;
   }
 
   .accent-button {
     border: 1px solid var(--accent-blue);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     background: var(--accent-blue);
     color: var(--bg-surface);
-    min-height: 28px;
-    padding: 4px 10px;
+    height: 28px;
+    padding: 0 var(--space-5);
     font: inherit;
-    font-size: var(--font-size-sm);
+    font-size: var(--font-size-md);
     font-weight: 600;
+    line-height: 16px;
   }
 
   .accent-button:hover:not([aria-disabled='true']) {
@@ -1284,8 +1382,16 @@
     display: flex;
   }
 
+  /* The slim bar and the drawer's header take the sidebar header's 48px. */
   .mobile-navigation-trigger {
     display: none;
+    --header-height: var(--layout-header-h);
+  }
+
+  :global(.kit-detail-drawer:has(.kata-sidebar) > .kit-detail-drawer__header) {
+    box-sizing: border-box;
+    height: var(--layout-header-h);
+    padding-block: 0;
   }
 
   .kata-main {
@@ -1329,23 +1435,18 @@
     background: var(--bg-primary);
   }
 
-  .board-toolbar {
+  .board-header {
     display: flex;
     align-items: center;
-    gap: var(--space-3);
-    min-width: 0;
-    padding-inline-end: var(--space-4);
-    border-bottom: 1px solid var(--border-default);
+    flex-shrink: 0;
+    min-height: var(--layout-header-h);
+    padding: 16px 12px 8px;
     background: var(--bg-surface);
   }
 
-  .board-toolbar > :global(:first-child) {
-    min-width: 0;
+  .board-header > :global(.kit-page-header) {
     flex: 1;
-  }
-
-  .board-toolbar :global(.kata-search-panel) {
-    border-bottom: 0;
+    align-items: center;
   }
 
   .layout-segment {
@@ -1404,18 +1505,10 @@
     }
 
     .mobile-navigation-trigger {
-      display: inline-flex;
+      display: block;
     }
 
     .layout-segment-label {
-      display: none;
-    }
-  }
-
-  /* Phones: the header keeps every control by showing icons only; the
-     button's aria-label keeps its name. */
-  @media (max-width: 640px) {
-    .header-action-label {
       display: none;
     }
   }

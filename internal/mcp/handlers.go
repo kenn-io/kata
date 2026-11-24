@@ -16,6 +16,7 @@ import (
 	"golang.org/x/mod/semver"
 	"golang.org/x/sync/errgroup"
 
+	"go.kenn.io/kata/internal/authorname"
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/searchhint"
@@ -123,7 +124,7 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 				},
 			})
 			searches[index] = projectSearch{response: response, err: searchErr}
-			if searchErr != nil {
+			if searchErr != nil && !searchUnavailable(searchErr, input.Mode) {
 				return fmt.Errorf("search project %q: %w", projects[index].Name, searchErr)
 			}
 			return nil
@@ -139,9 +140,17 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 	ranked := make([]rankedHit, 0)
 	truncated := false
 	degraded := false
+	failed := 0
 	degradedReasons := make([]string, 0)
 	effectiveMode := ""
 	for index, search := range searches {
+		if search.err != nil {
+			failed++
+			degraded = true
+			envelope, _ := errors.AsType[generated.ErrorEnvelope](search.err)
+			degradedReasons = append(degradedReasons, projects[index].Name+": "+envelope.ErrorData.Message)
+			continue
+		}
 		response := search.response
 		switch {
 		case effectiveMode == "":
@@ -169,6 +178,9 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 		if response.DegradedReason != nil && *response.DegradedReason != "" {
 			degradedReasons = append(degradedReasons, projects[index].Name+": "+*response.DegradedReason)
 		}
+	}
+	if failed == len(searches) && failed > 0 {
+		return nil, SearchOutput{}, fmt.Errorf("search project %q: %w", projects[0].Name, searches[0].err)
 	}
 	// Scores from independent per-project searches are request-local
 	// (hybrid uses reciprocal-rank values and auto can fall back per
@@ -214,6 +226,20 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 			return nil
 		}(),
 	}, nil
+}
+
+func searchUnavailable(err error, mode string) bool {
+	envelope, ok := errors.AsType[generated.ErrorEnvelope](err)
+	if !ok {
+		return false
+	}
+	if isHTTPStatus(err, http.StatusServiceUnavailable) && envelope.Status == http.StatusServiceUnavailable {
+		switch envelope.ErrorData.Code {
+		case "unavailable", "hub_search_failed", "hub_unreachable":
+			return true
+		}
+	}
+	return (mode == "semantic" || mode == "hybrid") && isHTTPStatus(err, http.StatusBadRequest) && envelope.Status == http.StatusBadRequest && envelope.ErrorData.Code == "validation" && envelope.ErrorData.Message == fmt.Sprintf("mode %q is unavailable: embeddings are not configured", mode)
 }
 
 func (h toolHandlers) ready(ctx context.Context, _ *sdkmcp.CallToolRequest, input ReadyInput) (*sdkmcp.CallToolResult, IssueListOutput, error) {
@@ -443,7 +469,7 @@ func (h toolHandlers) show(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 			IssueSummary: summary,
 			Labels:       labels,
 			Body:         response.Issue.Body,
-			Author:       response.Issue.Author,
+			Author:       authorname.Display(response.Issue.Author),
 			Metadata:     metadata,
 			Links:        links,
 			Comments:     commentSummaries,
@@ -1247,9 +1273,9 @@ func projectIDSet(projects []ProjectIdentity) map[int64]struct{} {
 
 func (h toolHandlers) summaryFromIssue(project ProjectIdentity, issue generated.Issue) IssueSummary {
 	return IssueSummary{
-		Author:              issue.Author,
-		AccountableActor:    issue.AccountableActor,
-		SourceActor:         issue.SourceActor,
+		Author:              authorname.Display(issue.Author),
+		AccountableActor:    displayActor(issue.AccountableActor),
+		SourceActor:         displayActor(issue.SourceActor),
 		AuthorityUID:        issue.AuthorityUID,
 		Teammate:            issue.Teammate,
 		Verification:        (*string)(issue.Verification),
@@ -1281,9 +1307,9 @@ func (h toolHandlers) summaryFromIssueOut(project ProjectIdentity, issue generat
 	return IssueSummary{
 		oversized:           issue.Oversized != nil && *issue.Oversized,
 		projectUID:          projectUID,
-		Author:              issue.Author,
-		AccountableActor:    issue.AccountableActor,
-		SourceActor:         issue.SourceActor,
+		Author:              authorname.Display(issue.Author),
+		AccountableActor:    displayActor(issue.AccountableActor),
+		SourceActor:         displayActor(issue.SourceActor),
 		AuthorityUID:        issue.AuthorityUID,
 		Teammate:            issue.Teammate,
 		Verification:        (*string)(issue.Verification),
@@ -1317,9 +1343,9 @@ func summaryFromGlobalIssue(issue generated.ListGlobalIssueOut) IssueSummary {
 	return IssueSummary{
 		oversized:        issue.Oversized != nil && *issue.Oversized,
 		projectUID:       projectUID,
-		Author:           issue.Author,
-		AccountableActor: issue.AccountableActor,
-		SourceActor:      issue.SourceActor,
+		Author:           authorname.Display(issue.Author),
+		AccountableActor: displayActor(issue.AccountableActor),
+		SourceActor:      displayActor(issue.SourceActor),
 		AuthorityUID:     issue.AuthorityUID,
 		Teammate:         issue.Teammate,
 		Verification:     (*string)(issue.Verification),
@@ -1337,9 +1363,9 @@ func summaryFromGlobalIssue(issue generated.ListGlobalIssueOut) IssueSummary {
 
 func summaryFromReadyGlobalIssue(issue generated.ReadyGlobalIssueOut) IssueSummary {
 	return IssueSummary{
-		Author:           issue.Author,
-		AccountableActor: issue.AccountableActor,
-		SourceActor:      issue.SourceActor,
+		Author:           authorname.Display(issue.Author),
+		AccountableActor: displayActor(issue.AccountableActor),
+		SourceActor:      displayActor(issue.SourceActor),
 		AuthorityUID:     issue.AuthorityUID,
 		Teammate:         issue.Teammate,
 		Verification:     (*string)(issue.Verification),
@@ -1377,7 +1403,16 @@ func eventSummary(event *generated.Event) *EventSummary {
 	if event == nil || event.UID == "" {
 		return nil
 	}
-	return &EventSummary{UID: event.UID, Type: event.Type, Actor: event.Actor}
+	return &EventSummary{UID: event.UID, Type: event.Type, Actor: authorname.Display(event.Actor)}
+}
+
+// displayActor formats an optional actor label without changing the record it
+// came from.
+func displayActor(actor *string) *string {
+	if actor == nil {
+		return nil
+	}
+	return new(authorname.Display(*actor))
 }
 
 func commentSummary(comment generated.Comment) CommentSummary {
@@ -1386,13 +1421,14 @@ func commentSummary(comment generated.Comment) CommentSummary {
 		handle = *comment.Teammate
 	}
 	return CommentSummary{
-		AccountableActor: comment.AccountableActor,
-		SourceActor:      comment.SourceActor,
+		AccountableActor: displayActor(comment.AccountableActor),
+		SourceActor:      displayActor(comment.SourceActor),
 		AuthorityUID:     comment.AuthorityUID,
 		Verification:     (*string)(comment.Verification),
 		Teammate:         handle,
 		UID:              comment.UID,
-		Author:           comment.Author,
+		Author:           authorname.Display(comment.Author),
+		AuthorFilter:     comment.Author,
 		Body:             comment.Body,
 		CreatedAt:        formatTime(comment.CreatedAt),
 	}
@@ -1719,14 +1755,15 @@ func (h toolHandlers) requireCommentLinksAPI(ctx context.Context) error {
 
 func commentReadSummary(c generated.CommentOut) CommentSummary {
 	out := CommentSummary{
-		AccountableActor:   c.AccountableActor,
-		SourceActor:        c.SourceActor,
+		AccountableActor:   displayActor(c.AccountableActor),
+		SourceActor:        displayActor(c.SourceActor),
 		AuthorityUID:       c.AuthorityUID,
 		Verification:       (*string)(c.Verification),
 		BacklinksTruncated: commentValue(c.BacklinksTruncated),
 		UID:                c.UID,
 		Handle:             commentValue(c.Handle),
-		Author:             c.Author,
+		Author:             authorname.Display(c.Author),
+		AuthorFilter:       c.Author,
 		Teammate:           commentValue(c.Teammate),
 		Body:               c.Body,
 		CreatedAt:          formatTime(c.CreatedAt),
@@ -1747,7 +1784,7 @@ func commentReadSummary(c generated.CommentOut) CommentSummary {
 	return out
 }
 func commentLinkSummary(r generated.CommentLink) commentref.Link {
-	return commentref.Link{Body: commentValue(r.Body), CreatedAt: commentValue(r.CreatedAt), EditedAt: r.EditedAt, UID: commentValue(r.UID), Handle: commentValue(r.Handle), Kind: r.Kind, Author: commentValue(r.Author), Teammate: commentValue(r.Teammate), IssueUID: commentValue(r.IssueUID), IssueShortID: commentValue(r.IssueShortID), ProjectUID: commentValue(r.ProjectUID), ProjectID: commentValue(r.ProjectID), Status: commentValue(r.Status), TargetEdited: commentValue(r.TargetEdited)}
+	return commentref.Link{Body: commentValue(r.Body), CreatedAt: commentValue(r.CreatedAt), EditedAt: r.EditedAt, UID: commentValue(r.UID), Handle: commentValue(r.Handle), Kind: r.Kind, Author: authorname.Display(commentValue(r.Author)), Teammate: commentValue(r.Teammate), IssueUID: commentValue(r.IssueUID), IssueShortID: commentValue(r.IssueShortID), ProjectUID: commentValue(r.ProjectUID), ProjectID: commentValue(r.ProjectID), Status: commentValue(r.Status), TargetEdited: commentValue(r.TargetEdited)}
 }
 func commentValue[T any](v *T) T {
 	if v != nil {

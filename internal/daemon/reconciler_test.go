@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -186,6 +187,37 @@ func TestReconcileOnceEmbedsAndActivates(t *testing.T) {
 	if h := r.Health(); h.Backlog != 0 || h.LastSuccessAt == nil {
 		t.Fatalf("health = %+v", h)
 	}
+}
+
+type bindingTransitionStore struct {
+	*sqlitestore.Store
+	binding db.FederationBinding
+}
+
+func (s *bindingTransitionStore) ListIssueContent(ctx context.Context, afterID int64, limit int) ([]db.IssueContent, error) {
+	page, err := s.Store.ListIssueContent(ctx, afterID, limit)
+	if err != nil || len(page) == 0 {
+		return page, err
+	}
+	_, err = s.UpsertFederationBinding(ctx, s.binding)
+	return page, err
+}
+
+func TestDirectSpokeBindingDuringFillDoesNotEmbedShared(t *testing.T) {
+	ctx := t.Context()
+	store := newReconcilerTestStore(t)
+	project, err := store.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "shared search target", Author: "member"})
+	require.NoError(t, err)
+	emb := newReconcilerArtifactEmbedder(t, "example-model")
+	transition := &bindingTransitionStore{Store: store, binding: db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "member", Enabled: true, PushEnabled: true}}
+	r := NewReconciler(transition, openTestVectorIndex(t), emb, ReconcilerConfig{FederationProducerAllowed: func(context.Context, string, embedding.ArtifactIdentity, activity.Admission, bool) (bool, error) {
+		return true, nil
+	}})
+	require.NoError(t, r.reconcileOnce(ctx))
+	require.Empty(t, emb.inputs(), "direct spokes leave generation to their hub")
+	require.EqualValues(t, 1, r.Health().Backlog, "the mirrored issue remains pending")
 }
 
 // TestReconcileOnceColdStartActivatesBeforeFill pins the cold-start contract:
@@ -818,4 +850,42 @@ func TestRunDrainsAfterTransientFailureThenExitsOnCancel(t *testing.T) {
 		require.ErrorIs(t, err, context.Canceled)
 		assert.GreaterOrEqual(t, emb.callCount(), 2)
 	})
+}
+
+func TestReconcileDefersProjectAfterArtifactSyncUnavailable(t *testing.T) {
+	ctx := t.Context()
+	store := newReconcilerTestStore(t)
+	project, err := store.CreateProject(ctx, "shared-project")
+	require.NoError(t, err)
+	for range 2 {
+		_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "shared task", Author: "member"})
+		require.NoError(t, err)
+	}
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "member", Enabled: true, PushEnabled: true})
+	require.NoError(t, err)
+	upstream := "00000000000000000000000001"
+	public, _, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	require.NoError(t, store.PinRootAuthority(ctx, db.RootKeyPin{ProjectUID: project.UID, AuthorityUID: upstream, KeyID: db.RootPublicKeyID(public), PublicKey: public}))
+	_, err = store.SetRelayBindingConfig(ctx, project.ID, db.RelayBindingConfig{ProtocolVersion: db.RelayProtocolVersion, BindingUID: "00000000000000000000000002", UpstreamInstanceUID: upstream, AuthorityUID: upstream, HubPath: []string{upstream, store.InstanceUID()}, LocalActor: "member", ResetEpoch: 1})
+	require.NoError(t, err)
+	emb := newReconcilerArtifactEmbedder(t, "example-model")
+	unavailable := true
+	r := NewReconciler(store, openTestVectorIndex(t), emb, ReconcilerConfig{
+		BatchSize: 1,
+		FederationProducerAllowed: func(_ context.Context, uid string, _ embedding.ArtifactIdentity, _ activity.Admission, syncArtifacts bool) (bool, error) {
+			require.Equal(t, project.UID, uid)
+			if unavailable && syncArtifacts {
+				return false, db.ErrEmbeddingProducerUnavailable
+			}
+			return true, nil
+		},
+	})
+	require.NoError(t, r.reconcileOnce(ctx))
+	require.Empty(t, emb.inputs())
+	require.EqualValues(t, 2, r.Health().Backlog)
+	unavailable = false
+	require.NoError(t, r.reconcileOnce(ctx))
+	require.Len(t, emb.inputs(), 2)
+	require.Zero(t, r.Health().Backlog)
 }

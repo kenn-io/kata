@@ -206,6 +206,10 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if reuse != nil {
 			return reuse, nil
 		}
+		// A successful create from before this rule must remain retryable.
+		if err := rejectPriorityLabels(in.Body.Labels, "kata create --priority N or kata.create with priority"); err != nil {
+			return nil, err
+		}
 
 		// Fresh create (no reuse): now run the state-dependent link-target
 		// gates. A target in an archived project (link_target_archived) or a
@@ -609,6 +613,8 @@ func editIssueHandler(cfg ServerConfig) func(context.Context, *api.EditIssueRequ
 			Owner:         in.Body.Owner,
 			SetPriority:   in.Body.SetPriority,
 			ClearPriority: in.Body.ClearPriority,
+
+			ExpectedContentRevision: in.Body.ExpectedContentRevision,
 		}
 		if hasLinkChange {
 			if err := fillLinksDeltaParams(ctx, cfg.DB, in.ProjectID, in.Body.LinksDelta, &params); err != nil {
@@ -711,7 +717,12 @@ func linksDeltaRequestsAnyOp(d *api.LinksDelta) bool {
 func mapAtomicEditError(err error, issueShortID string, delta *api.LinksDelta) error {
 	var lt *db.LinkTargetNotFoundError
 	var archivedTarget *db.LinkTargetArchivedError
+	var contentConflict *db.ContentRevisionConflictError
 	switch {
+	case errors.As(err, &contentConflict):
+		return api.NewError(412, "revision_conflict",
+			fmt.Sprintf("issue content revision is %d", contentConflict.CurrentContentRevision),
+			"reload the issue and reapply the edit", nil)
 	case errors.As(err, &lt):
 		return api.NewError(404, "issue_not_found",
 			"link target not found", "", nil)

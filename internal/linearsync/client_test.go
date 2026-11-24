@@ -41,7 +41,7 @@ func TestClientOmitsTrashedIssues(t *testing.T) {
 	c := mockClient(t, func(*http.Request) (*http.Response, error) {
 		i := wireIssue()
 		i["trashed"] = true
-		return dataResponse(map[string]any{"issues": map[string]any{"nodes": []any{i}, "pageInfo": map[string]any{"hasNextPage": false}}}), nil
+		return dataResponse(map[string]any{"team": map[string]any{"issues": map[string]any{"nodes": []any{i}, "pageInfo": map[string]any{"hasNextPage": false}}}}), nil
 	})
 	items, err := sessionFor(t, c).Issues(t.Context(), testConfig())
 	require.NoError(t, err)
@@ -52,7 +52,7 @@ func TestClientRequiresSelectedTrashFlag(t *testing.T) {
 	c := mockClient(t, func(*http.Request) (*http.Response, error) {
 		i := wireIssue()
 		delete(i, "trashed")
-		return dataResponse(map[string]any{"issues": map[string]any{"nodes": []any{i}, "pageInfo": map[string]any{"hasNextPage": false}}}), nil
+		return dataResponse(map[string]any{"team": map[string]any{"issues": map[string]any{"nodes": []any{i}, "pageInfo": map[string]any{"hasNextPage": false}}}}), nil
 	})
 	_, err := sessionFor(t, c).Issues(t.Context(), testConfig())
 	require.Error(t, err, "an incomplete selected field cannot prove a source is live")
@@ -102,12 +102,14 @@ func TestClientScopesPaginationAndNullableFields(t *testing.T) {
 			return dataResponse(map[string]any{"viewer": map[string]any{"organization": map[string]any{"id": workspaceID}}, "team": map[string]any{"id": teamID, "name": "Example team", "archivedAt": nil, "organization": map[string]any{"id": workspaceID}}}), nil
 		}
 		require.Contains(t, query, "KataLinearIssues")
-		require.Equal(t, map[string]any{"team": map[string]any{"id": map[string]any{"eq": teamID}}}, v["filter"])
+		require.Equal(t, teamID, v["team"], "the team connection scopes the read")
+		require.Equal(t, map[string]any{}, v["filter"],
+			"Linear's issue filter on team ID can return other teams' issues")
 		if calls == 2 {
-			return dataResponse(map[string]any{"issues": map[string]any{"nodes": []any{wireIssue()}, "pageInfo": map[string]any{"hasNextPage": true, "endCursor": "next"}}}), nil
+			return dataResponse(map[string]any{"team": map[string]any{"issues": map[string]any{"nodes": []any{wireIssue()}, "pageInfo": map[string]any{"hasNextPage": true, "endCursor": "next"}}}}), nil
 		}
 		require.Equal(t, "next", v["after"])
-		return dataResponse(map[string]any{"issues": map[string]any{"nodes": []any{}, "pageInfo": map[string]any{"hasNextPage": false, "endCursor": nil}}}), nil
+		return dataResponse(map[string]any{"team": map[string]any{"issues": map[string]any{"nodes": []any{}, "pageInfo": map[string]any{"hasNextPage": false, "endCursor": nil}}}}), nil
 	})
 	s := sessionFor(t, c)
 	scope, err := s.Scope(t.Context(), testConfig())
@@ -120,8 +122,18 @@ func TestClientScopesPaginationAndNullableFields(t *testing.T) {
 	require.Empty(t, items[0].AssigneeID)
 	require.Equal(t, 3, calls)
 }
+func TestClientRefusesCommentsOnUnrequestedIssues(t *testing.T) {
+	c := mockClient(t, func(*http.Request) (*http.Response, error) {
+		return dataResponse(map[string]any{"comments": map[string]any{"nodes": []any{
+			map[string]any{"id": "77777777-7777-4777-8777-777777777777", "body": "Another team's note.", "createdAt": "2026-01-03T00:00:00Z", "user": nil, "issue": map[string]any{"id": projectID}},
+		}, "pageInfo": map[string]any{"hasNextPage": false}}}), nil
+	})
+	_, err := sessionFor(t, c).Comments(t.Context(), testConfig(), []string{issueID})
+	require.Error(t, err, "a comment on an issue outside the import is a scope leak")
+}
+
 func TestClientRejectsPartialErrorsAndScopeLeaks(t *testing.T) {
-	for _, body := range []string{`{"data":{"issues":{"nodes":[]}},"errors":[{"message":"example-key private body"}]}`, `{"data":{"issues":{"nodes":[],"pageInfo":{"hasNextPage":true,"endCursor":null}}}}`, `{"data":{"issues":{"nodes":null,"pageInfo":{"hasNextPage":false}}}}`} {
+	for _, body := range []string{`{"data":{"team":{"issues":{"nodes":[],"pageInfo":{"hasNextPage":false}}}},"errors":[{"message":"example-key private body"}]}`, `{"data":{"team":{"issues":{"nodes":[],"pageInfo":{"hasNextPage":true,"endCursor":null}}}}}`, `{"data":{"team":{"issues":{"nodes":null,"pageInfo":{"hasNextPage":false}}}}}`} {
 		c := mockClient(t, func(*http.Request) (*http.Response, error) { return response(200, body), nil })
 		_, err := sessionFor(t, c).Issues(t.Context(), testConfig())
 		require.Error(t, err)
@@ -132,7 +144,7 @@ func TestClientRejectsPartialErrorsAndScopeLeaks(t *testing.T) {
 		c := mockClient(t, func(*http.Request) (*http.Response, error) {
 			i := wireIssue()
 			edit(i)
-			return dataResponse(map[string]any{"issues": map[string]any{"nodes": []any{i}, "pageInfo": map[string]any{"hasNextPage": false}}}), nil
+			return dataResponse(map[string]any{"team": map[string]any{"issues": map[string]any{"nodes": []any{i}, "pageInfo": map[string]any{"hasNextPage": false}}}}), nil
 		})
 		_, err := sessionFor(t, c).Issues(t.Context(), testConfig())
 		require.Error(t, err)
@@ -159,7 +171,7 @@ func TestClientAuthenticationAndRetryPacing(t *testing.T) {
 				res.Header.Set("Retry-After", "5")
 				return res, nil
 			}
-			return dataResponse(map[string]any{"issues": map[string]any{"nodes": []any{}, "pageInfo": map[string]any{"hasNextPage": false}}}), nil
+			return dataResponse(map[string]any{"team": map[string]any{"issues": map[string]any{"nodes": []any{}, "pageInfo": map[string]any{"hasNextPage": false}}}}), nil
 		})})
 		s := sessionFor(t, c)
 		_, err := s.Issues(t.Context(), testConfig())
@@ -180,7 +192,7 @@ func TestClientDetectsCursorCycleAndDuplicateIDs(t *testing.T) {
 		calls := 0
 		c := mockClient(t, func(*http.Request) (*http.Response, error) {
 			calls++
-			return dataResponse(map[string]any{"issues": map[string]any{"nodes": []any{wireIssue()}, "pageInfo": map[string]any{"hasNextPage": cycle, "endCursor": "same"}}}), nil
+			return dataResponse(map[string]any{"team": map[string]any{"issues": map[string]any{"nodes": []any{wireIssue()}, "pageInfo": map[string]any{"hasNextPage": cycle, "endCursor": "same"}}}}), nil
 		})
 		_, err := sessionFor(t, c).Issues(t.Context(), testConfig())
 		if cycle {
@@ -191,7 +203,7 @@ func TestClientDetectsCursorCycleAndDuplicateIDs(t *testing.T) {
 		}
 	}
 	c := mockClient(t, func(*http.Request) (*http.Response, error) {
-		return dataResponse(map[string]any{"issues": map[string]any{"nodes": []any{wireIssue(), wireIssue()}, "pageInfo": map[string]any{"hasNextPage": false}}}), nil
+		return dataResponse(map[string]any{"team": map[string]any{"issues": map[string]any{"nodes": []any{wireIssue(), wireIssue()}, "pageInfo": map[string]any{"hasNextPage": false}}}}), nil
 	})
 	_, err := sessionFor(t, c).Issues(t.Context(), testConfig())
 	require.Error(t, err)
@@ -256,7 +268,7 @@ func TestClientRateLimitWaitsForExhaustedBucket(t *testing.T) {
 			res.Header.Set("X-RateLimit-Complexity-Reset", fmt.Sprint(now.Add(time.Hour).UnixMilli()))
 			return res, nil
 		}
-		return dataResponse(map[string]any{"issues": map[string]any{"nodes": []any{}, "pageInfo": map[string]any{"hasNextPage": false}}}), nil
+		return dataResponse(map[string]any{"team": map[string]any{"issues": map[string]any{"nodes": []any{}, "pageInfo": map[string]any{"hasNextPage": false}}}}), nil
 	})})
 	_, err := sessionFor(t, c).Issues(t.Context(), testConfig())
 	require.NoError(t, err)

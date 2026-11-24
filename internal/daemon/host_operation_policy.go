@@ -100,9 +100,9 @@ func withEmbeddingProfile(humaAPI huma.API, profile EmbeddingProfile) {
 func registerServiceOperationPolicies(policies map[string]HostOperationPolicy) {
 	registerHostOperations(policies, HostOperationPolicy{
 		Kind: hostOperationServiceRead, Capability: hostCapabilityRead,
-	}, "ping", "health", "instance", "openAPI", "getLocalEmbeddings")
+	}, "ping", "health", "probeDocbank", "instance", "openAPI", "getLocalEmbeddings")
 	registerHostOperations(policies, HostOperationPolicy{
 		Kind: hostOperationServiceMutation, Capability: hostCapabilityWrite,
 		Mutation: true, restricted: true,
-	}, "captureTelemetryEvent", "turnOnLocalEmbeddings")
+	}, "captureTelemetryEvent", "turnOnLocalEmbeddings", "restartLocalEmbeddings")
 }

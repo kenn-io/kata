@@ -47,6 +47,7 @@ import (
 // through). Hooks is optional and defaults to hooks.NewNoop() when nil so
 // mutation handlers can fan out events unconditionally.
 type ServerConfig struct {
+	EmbeddingProjectAllowed   func(context.Context, string) (bool, error)
 	FederationSigning         *federationsigning.Verifier
 	FederationSigningRequired bool
 	DB                        db.Storage
@@ -83,6 +84,8 @@ type ServerConfig struct {
 	// supplied binding and credential. It is used when a forwarded claim
 	// discovers that the issue has moved into another joined hub project.
 	FederationPullOnce func(context.Context, db.FederationBinding, config.FederationCredential) error
+	// FederationSyncOnce exchanges pending project events before an origin write.
+	FederationSyncOnce func(context.Context, db.FederationBinding, config.FederationCredential) error
 	// EmbeddingWake notifies the existing local worker after artifact commit.
 	EmbeddingWake                 func()
 	FederationCredentials         config.FederationCredentialStore
@@ -152,7 +155,9 @@ type ServerConfig struct {
 	// WebDaemons is the client daemon catalog exposed to the first-class web
 	// UI. Credentials remain server-side and are used only by the selected-
 	// daemon proxy. ActiveWebDaemon selects the initial catalog entry.
-	WebDaemons      []config.CatalogDaemonConfig
+	WebDaemons []config.CatalogDaemonConfig
+	// WebSyncHubs names mapped hubs without a browsing token.
+	WebSyncHubs     []string
 	ActiveWebDaemon string
 
 	// InsecureReadonly permits unauthenticated GETs on non-loopback TCP
@@ -165,6 +170,10 @@ type ServerConfig struct {
 	// per-test logger so output is observable and isolated.
 	Logger *slog.Logger
 
+	// federationPollWaits is owned by the server NewServer builds; it bounds
+	// and wakes held federation event polls.
+	federationPollWaits *federationPollWaits
+
 	// Embedder is the semantic-search embedding client. Nil means semantic
 	// search is disabled and the search handler falls back to lexical-only.
 	Embedder      *embedding.Client
@@ -173,7 +182,8 @@ type ServerConfig struct {
 
 	// VectorIndex is the semantic-search sidecar index. Nil means semantic and
 	// hybrid search are unavailable, exactly like a nil Embedder.
-	VectorIndex *vector.Index
+	VectorIndex                *vector.Index
+	EmbeddingUnavailableReason string
 
 	// ReconcilerHealth snapshots the embedding reconciler's operator-visible
 	// state for /health. Nil means semantic search is disabled, in which case
@@ -184,6 +194,10 @@ type ServerConfig struct {
 	// FederationConfigHealth snapshots declarative federation convergence for
 	// /health. Nil means no mappings are configured, so the block is omitted.
 	FederationConfigHealth func() api.FederationConfigHealth
+
+	// FederationSyncRetry reports a spoke binding's automatic retry schedule
+	// for federation status. Nil means this server has no federation runner.
+	FederationSyncRetry func(projectID int64) (api.FederationSyncRetry, bool)
 
 	// HostAccess enables in-process authentication and authorization supplied
 	// by a mounting application. It is nil for the standalone daemon.
@@ -196,7 +210,8 @@ type ServerConfig struct {
 
 	// HostFederationAccess optionally adds host-owned authorization after Kata
 	// authenticates a project-scoped federation enrollment.
-	HostFederationAccess HostFederationAccessController
+	HostFederationAccess         HostFederationAccessController
+	AuthorizeFederationReference func(context.Context, db.Transaction, HostFederationAccessRequest, HostFederationAccessRequest) error
 
 	// IdleAdmission admits ordinary HTTP requests as foreground daemon work.
 	// Nil disables idle lifecycle handling.
@@ -276,14 +291,17 @@ func NewDefaultGitHubSyncRunner(cfg GitHubSyncRunnerConfig) GitHubSyncRunner {
 
 // Server bundles the http handler and lifecycle.
 type Server struct {
-	federationIngestAdmission  chan struct{}
-	federationControlAdmission chan struct{}
-	cfg                        ServerConfig
-	baseHandler                http.Handler
-	handler                    http.Handler
-	api                        huma.API
-	authPolicy                 authPolicy
-	noProjectDataRoutes        noProjectDataRouteMatcher
+	federationIngestAdmission   chan struct{}
+	federationTransferAdmission chan struct{}
+	federationReadAdmission     chan struct{}
+	federationControlAdmission  chan struct{}
+	stopFederationPollBridge    func()
+	cfg                         ServerConfig
+	baseHandler                 http.Handler
+	handler                     http.Handler
+	api                         huma.API
+	authPolicy                  authPolicy
+	noProjectDataRoutes         noProjectDataRouteMatcher
 
 	shutdownTimeout time.Duration
 }
@@ -385,12 +403,17 @@ func NewServer(cfg ServerConfig) *Server {
 	withRootAttribution(humaAPI, cfg.RootSigning)
 	withExternalRootAdministration(humaAPI, cfg.Auth.AllowIdentityConnectorAdministration)
 
+	controlAdmission := make(chan struct{}, 16)
+	cfg.federationPollWaits = newFederationPollWaits(cap(controlAdmission), federationPollCPUs())
 	s := &Server{
 		cfg: cfg, api: humaAPI,
-		federationIngestAdmission:  make(chan struct{}, 2),
-		federationControlAdmission: make(chan struct{}, 16),
+		federationIngestAdmission:   make(chan struct{}, 2),
+		federationTransferAdmission: make(chan struct{}, 2),
+		federationReadAdmission:     make(chan struct{}, 16),
+		federationControlAdmission:  controlAdmission,
 	}
 	registerRoutes(humaAPI, mux, cfg)
+	s.stopFederationPollBridge = startFederationPollBridge(cfg)
 	if cfg.WebSessions != nil {
 		registerUISessionHandlers(mux, cfg.WebSessions)
 	}
@@ -484,6 +507,9 @@ func (s *Server) API() huma.API { return s.api }
 // Close releases signing replay ownership. Call it after HTTP handlers drain;
 // the database remains owned by the caller.
 func (s *Server) Close() error {
+	if s.stopFederationPollBridge != nil {
+		s.stopFederationPollBridge()
+	}
 	if s.cfg.FederationSigning != nil {
 		return s.cfg.FederationSigning.Close()
 	}

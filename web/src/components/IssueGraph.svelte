@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte'
   import ELK, { type ElkNode } from 'elkjs/lib/elk.bundled.js'
   import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left'
   import { FilterDropdown } from '@kenn-io/kit-ui'
@@ -52,6 +53,7 @@
   }
 
   interface Props {
+    headerActions?: Snippet | undefined
     graph: KataReachableGraphResponse
     sourceIssue: KataTaskSummary
     selectedUID: string | null
@@ -61,6 +63,7 @@
   }
 
   let {
+    headerActions,
     graph: snapshotGraph,
     sourceIssue,
     selectedUID,
@@ -565,6 +568,7 @@
       </div>
     </div>
     <div class="graph-control-row" aria-label="Graph controls">
+      {#if headerActions}{@render headerActions()}{/if}
       <div class="graph-filter-menu">
         <FilterDropdown
           label="Graph filters"
