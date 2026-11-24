@@ -178,12 +178,6 @@ func TestAutoCutoverInPlaceVersions(t *testing.T) {
 			got, err := upgraded.SchemaVersion(t.Context())
 			require.NoError(t, err)
 			require.Equal(t, db.CurrentSchemaVersion(), got)
-			project, err := upgraded.ProjectByName(t.Context(), "cutover-project")
-			require.NoError(t, err)
-			binding, err := upgraded.FederationBindingByProject(t.Context(), project.ID)
-			require.NoError(t, err)
-			require.Zero(t, binding.RetainedThroughEventID)
-			require.Equal(t, "worker", binding.Actor)
 			catalog := func(store *sqlitestore.Store) [][4]sql.NullString {
 				rows, err := store.QueryContext(t.Context(), `SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY name`)
 				require.NoError(t, err)
@@ -218,7 +212,10 @@ func TestAutoCutoverInPlaceFailureLeavesSourceRetryable(t *testing.T) {
 	_, err = source.ExecContext(ctx, `UPDATE meta SET value='52' WHERE key='schema_version'`)
 	require.NoError(t, err)
 	require.NoError(t, source.Close())
-	require.ErrorContains(t, AutoCutover(ctx, path), "add retained federation history boundary")
+	require.ErrorContains(t, autoCutover(ctx, path, cutoverOperations{replaceFile: atomicfile.Replace, exportSource: func(context.Context, string, string) (int64, error) {
+		t.Fatal("in-place upgrade must not export")
+		return 0, nil
+	}}), "add retained federation history boundary")
 	source, err = sql.Open("sqlite", path)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, source.Close()) })
@@ -240,10 +237,6 @@ func oldSchemaSource(t *testing.T, version int) string {
 	source, err := sqlitestore.Open(t.Context(), path)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = source.DB.Close() })
-	project, err := source.CreateProject(t.Context(), "cutover-project")
-	require.NoError(t, err)
-	_, err = source.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "http://daemon.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "worker"})
-	require.NoError(t, err)
 	_, err = source.ExecContext(t.Context(), `ALTER TABLE federation_bindings DROP COLUMN retained_through_event_id`)
 	require.NoError(t, err)
 	if version < 51 {

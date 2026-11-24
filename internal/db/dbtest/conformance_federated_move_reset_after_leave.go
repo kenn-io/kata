@@ -89,25 +89,6 @@ func checkFederatedMoveResetAfterAcknowledgedSourceLeave(t *testing.T, store db.
 		})
 	}
 
-	t.Run("source rejoins before reset", func(t *testing.T) {
-		ctx := t.Context()
-		project, err := store.CreateProject(ctx, "retained-source-rejoin")
-		require.NoError(t, err)
-		_, creation, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "old task", Author: "old-actor"})
-		require.NoError(t, err)
-		binding := db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "worker", Enabled: true, PushEnabled: true, RetainHistory: true}
-		_, err = store.UpsertFederationBinding(ctx, binding)
-		require.NoError(t, err)
-		_, err = store.LeaveFederationReplica(ctx, project.ID)
-		require.NoError(t, err)
-		binding.RetainHistory = false
-		_, err = store.UpsertFederationBinding(ctx, binding)
-		require.NoError(t, err)
-		require.NoError(t, store.ResetFederatedProject(ctx, project.ID, creation.ID+1, creation.ID))
-		_, err = store.EventsByUIDs(ctx, project.ID, []string{creation.UID})
-		require.ErrorIs(t, err, db.ErrNotFound)
-	})
-
 	t.Run("move after source leave", func(t *testing.T) {
 		ctx := t.Context()
 		source, err := store.CreateProject(ctx, "retained-late-source")

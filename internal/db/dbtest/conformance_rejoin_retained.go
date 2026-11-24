@@ -10,6 +10,11 @@ import (
 )
 
 func checkRejoinRetainedHistory(t *testing.T, store db.Storage) error {
+	for _, guarded := range []bool{false, true} {
+		t.Run(fmt.Sprintf("reset/guarded=%t", guarded), func(t *testing.T) {
+			checkRejoinRetainedHistoryReset(t, store, Backend{}, guarded, false)
+		})
+	}
 	t.Run("pending retained edit blocks reset", func(t *testing.T) {
 		ctx := t.Context()
 		project, err := store.CreateProject(ctx, "pending-retained-edit")

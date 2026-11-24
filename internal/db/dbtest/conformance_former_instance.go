@@ -57,16 +57,11 @@ func checkFormerInstanceIdentities(t *testing.T, source db.Storage, backend Back
 	return nil
 }
 
-func checkRestoredRetainedHistory(t *testing.T, _ db.Storage, backend Backend) error {
-	for _, restored := range []bool{false, true} {
-		for _, guarded := range []bool{false, true} {
-			t.Run(fmt.Sprintf("reset/restored=%t/guarded=%t", restored, guarded), func(t *testing.T) {
-				store := backend.Open(t)
-				t.Cleanup(func() { require.NoError(t, store.Close()) })
-				checkRejoinRetainedHistoryReset(t, store, backend, guarded, restored)
-			})
-		}
+func checkRestoredRetainedHistory(t *testing.T, store db.Storage, backend Backend) error {
+	for _, guarded := range []bool{false, true} {
+		t.Run(fmt.Sprintf("reset/guarded=%t", guarded), func(t *testing.T) {
+			checkRejoinRetainedHistoryReset(t, store, backend, guarded, true)
+		})
 	}
-
 	return nil
 }
