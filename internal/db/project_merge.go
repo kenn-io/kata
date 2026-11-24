@@ -4,6 +4,7 @@ import (
 	"encoding/json/jsontext"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 )
 
@@ -47,7 +48,7 @@ type ProjectMergeOffsets struct {
 type ExistingIssueLookup func(uid string) (id int64, found bool, err error)
 
 // PrepareProjectMergeRecords validates a single-project snapshot, clones its
-// records, remaps numeric IDs, and drops whole-database metadata/sequences.
+// records, remaps numeric IDs, and keeps retained-event markers for imported events.
 func PrepareProjectMergeRecords(
 	recs []ImportRecord,
 	offsets ProjectMergeOffsets,
@@ -58,6 +59,7 @@ func PrepareProjectMergeRecords(
 	}
 	var project *ProjectExport
 	importedIssues := make(map[int64]string)
+	importedEvents := make(map[string]struct{})
 	importedIssueUIDs := make(map[string]struct{})
 	importedRecurrencesByID := make(map[int64]string)
 	importedRecurrencesByUID := make(map[string]int64)
@@ -80,6 +82,8 @@ func PrepareProjectMergeRecords(
 			}
 			p := *rec
 			project = &p
+		case *EventExport:
+			importedEvents[rec.UID] = struct{}{}
 		case *IssueExport:
 			importedIssues[rec.ID] = rec.UID
 			importedIssueUIDs[rec.UID] = struct{}{}
@@ -151,7 +155,12 @@ func PrepareProjectMergeRecords(
 	out := make([]ImportRecord, 0, len(recs)-2)
 	var issueSequenceFloor, eventSequenceFloor int64
 	for _, rec := range recs {
-		if _, ok := rec.(*MetaKV); ok {
+		if meta, ok := rec.(*MetaKV); ok {
+			if eventUID, marked := strings.CutPrefix(meta.Key, FederationRetainedEventPrefix); marked {
+				if _, imported := importedEvents[eventUID]; imported {
+					out = append(out, cloneImportRecord(meta))
+				}
+			}
 			continue
 		}
 		// Callbacks must not follow partial data: subscriptions and the key

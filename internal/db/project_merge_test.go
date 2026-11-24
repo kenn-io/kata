@@ -503,3 +503,19 @@ func TestProjectMergeCommentReplyKeepsPortableTargetIdentity(t *testing.T) {
 	require.Equal(t, records[5].(*EventExport).Payload, event.Payload)
 	require.Equal(t, int64(1), records[3].(*CommentExport).ID)
 }
+
+func TestPrepareProjectMergeRecordsKeepsRetainedEventMarkers(t *testing.T) {
+	const eventUID = "01H00000000000000000000003"
+	records := []ImportRecord{
+		&ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"},
+		&EventExport{ID: 7, UID: eventUID, ProjectID: 2, ProjectName: "spoke-project", Type: "issue.linked", Actor: "worker", Payload: jsontext.Value(`{}`), ContentHash: "source-hash"},
+		&MetaKV{Key: "federation_retained_event." + eventUID, Value: "1"},
+		&MetaKV{Key: "federation_retained_event.01H00000000000000000000009", Value: "1"},
+		&MetaKV{Key: "unrelated", Value: "value"},
+	}
+	prepared, err := PrepareProjectMergeRecords(records, ProjectMergeOffsets{TargetProjectID: 20, Event: 300}, nil)
+	require.NoError(t, err)
+	require.Len(t, prepared, 3)
+	marker := recordPayloadAs[MetaKV](t, prepared[2])
+	require.Equal(t, "federation_retained_event."+eventUID, marker.Key)
+}
