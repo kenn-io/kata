@@ -9,11 +9,13 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-func checkRejoinRetainedHistory(t *testing.T, store db.Storage) error {
-	for _, guarded := range []bool{false, true} {
-		t.Run(fmt.Sprintf("reset/guarded=%t", guarded), func(t *testing.T) {
-			checkRejoinRetainedHistoryReset(t, store, Backend{}, guarded, false)
-		})
+func checkRejoinRetainedHistory(t *testing.T, store db.Storage, backend Backend) error {
+	for _, restored := range []bool{false, true} {
+		for _, guarded := range []bool{false, true} {
+			t.Run(fmt.Sprintf("reset/restored=%t/guarded=%t", restored, guarded), func(t *testing.T) {
+				checkRejoinRetainedHistoryReset(t, store, backend, guarded, restored)
+			})
+		}
 	}
 	t.Run("retained snapshot source and reuse", func(t *testing.T) {
 		ctx := t.Context()

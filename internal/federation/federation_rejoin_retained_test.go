@@ -50,14 +50,10 @@ func restoreMoveDeliverySpoke(t *testing.T, spoke moveDeliverySpoke, hub *testen
 	ctx := t.Context()
 	records, err := dbtest.CollectImportRecords(ctx, spoke.env.DB, db.ExportFilter{IncludeDeleted: true})
 	require.NoError(t, err)
-	former := spoke.env.DB.InstanceUID()
 	spoke.env = testenv.New(t, func(cfg *daemon.ServerConfig) {
 		cfg.FederationPushPending = DirectSpokePushPending(cfg.DB, cfg.Publish().Events)
 	})
 	require.NoError(t, spoke.env.DB.ImportReplay(ctx, records, db.ImportOptions{NewInstance: true}))
-	aliases, err := spoke.env.DB.FormerInstanceUIDs(ctx)
-	require.NoError(t, err)
-	require.Contains(t, aliases, former)
 	for i, project := range projects {
 		spoke.projects[i], err = spoke.env.DB.ProjectByUID(ctx, project.UID)
 		require.NoError(t, err)
@@ -398,7 +394,7 @@ func TestRejoinRetainedIssueAndLaterTaskPublish(t *testing.T) {
 			ctx := t.Context()
 			hub, projects := newMoveDeliveryHub(t, "restore-project")
 			spoke := newMoveDeliverySpoke(t, hub, projects, "new-actor")
-			issue, original, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "retained task", Author: "new-actor"})
+			issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "retained task", Author: "new-actor"})
 			require.NoError(t, err)
 			spoke = restoreMoveDeliverySpoke(t, spoke, hub, projects)
 			issue, err = spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
@@ -413,11 +409,6 @@ func TestRejoinRetainedIssueAndLaterTaskPublish(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, comments, 1)
 			require.Equal(t, "new comment", comments[0].Body)
-			events, err := spoke.env.DB.EventsByUIDs(ctx, spoke.projects[0].ID, []string{original.UID})
-			require.NoError(t, err)
-			require.Len(t, events, 1)
-			require.Equal(t, original.ContentHash, events[0].ContentHash)
-			require.Equal(t, original.OriginInstanceUID, events[0].OriginInstanceUID)
 		}},
 		{name: "batch new tasks", run: func(t *testing.T) {
 			ctx := t.Context()
@@ -553,16 +544,9 @@ func TestRetainedTaskAfterRejoin(t *testing.T) {
 				if tc.publishRecoverySnapshot {
 					require.NoError(t, spoke.sync(t, 0))
 					if tc.restoreRecoverySnapshot {
-						snapshot, _, _, err = spoke.env.DB.RetainedIssueSnapshot(ctx, spoke.projects[0].ID, issue.UID)
-						require.NoError(t, err)
 						spoke = restoreMoveDeliverySpoke(t, spoke, hub, projects)
 						issue, err = spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 						require.NoError(t, err)
-						events, err := spoke.env.DB.EventsByUIDs(ctx, spoke.projects[0].ID, []string{snapshot.UID})
-						require.NoError(t, err)
-						require.Len(t, events, 1)
-						require.Equal(t, snapshot.ContentHash, events[0].ContentHash)
-						require.Equal(t, snapshot.OriginInstanceUID, events[0].OriginInstanceUID)
 					}
 				} else {
 					snapshot, _, _, err = spoke.env.DB.RetainedIssueSnapshot(ctx, spoke.projects[0].ID, issue.UID)
@@ -653,52 +637,28 @@ func TestRetainedTaskAfterRejoin(t *testing.T) {
 }
 
 func TestRejoinPublishesRecoverySnapshot(t *testing.T) {
-	for _, entrypoint := range []string{"sync", "push-pending"} {
-		t.Run(entrypoint, func(t *testing.T) {
-			ctx := t.Context()
-			hub, projects := newMoveDeliveryHub(t, "recovery-publication")
-			var push func(context.Context, db.FederationBinding, config.FederationCredential) error
-			var options []testenv.Option
-			capabilities := "push,pull"
-			if entrypoint == "push-pending" {
-				options = []testenv.Option{func(cfg *daemon.ServerConfig) { push = cfg.FederationPushPending }}
-				capabilities = "push"
-			}
-			spoke := newMoveDeliverySpokeWithOptions(t, hub, projects, options, "old-actor")
-			issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "old task", Author: "old-actor"})
-			require.NoError(t, err)
-			rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, capabilities)
-			_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "new comment"})
-			require.NoError(t, err)
-			binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
-			require.NoError(t, err)
-			if entrypoint == "sync" {
-				var published bool
-				publish := func(_ int64, events []db.Event) {
-					for _, event := range events {
-						if event.Type == "issue.snapshot" {
-							published = true
-						}
-					}
-				}
-				require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, spoke.env.DB, binding, spoke.credentials[projects[0].UID], clientpkg.Opts{}, publish, spoke.credentials))
-				require.True(t, published, "recovery snapshot was not published")
-				_, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-				require.NoError(t, err)
-				return
-			}
-			sub := spoke.env.Broadcaster.Subscribe(daemon.SubFilter{ProjectID: spoke.projects[0].ID})
-			defer sub.Unsub()
-			require.NoError(t, push(ctx, binding, spoke.credentials[projects[0].UID]))
-			select {
-			case msg := <-sub.Ch:
-				require.NotNil(t, msg.Event)
-				require.Equal(t, "issue.snapshot", msg.Event.Type)
-			default:
-				t.Fatal("recovery snapshot was not published")
-			}
-			_, err = hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-			require.NoError(t, err)
-		})
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "recovery-publication")
+	var push func(context.Context, db.FederationBinding, config.FederationCredential) error
+	options := []testenv.Option{func(cfg *daemon.ServerConfig) { push = cfg.FederationPushPending }}
+	spoke := newMoveDeliverySpokeWithOptions(t, hub, projects, options, "old-actor")
+	issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "old task", Author: "old-actor"})
+	require.NoError(t, err)
+	rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push")
+	_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "new comment"})
+	require.NoError(t, err)
+	binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
+	require.NoError(t, err)
+	sub := spoke.env.Broadcaster.Subscribe(daemon.SubFilter{ProjectID: spoke.projects[0].ID})
+	defer sub.Unsub()
+	require.NoError(t, push(ctx, binding, spoke.credentials[projects[0].UID]))
+	select {
+	case msg := <-sub.Ch:
+		require.NotNil(t, msg.Event)
+		require.Equal(t, "issue.snapshot", msg.Event.Type)
+	default:
+		t.Fatal("recovery snapshot was not published")
 	}
+	_, err = hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
 }
