@@ -55,7 +55,7 @@ func checkRejoinRetainedHistory(t *testing.T, store db.Storage) error {
 		require.NoError(t, err)
 		snapshot, _, err := store.RetainedIssueSnapshot(ctx, source.ID, issue.UID)
 		require.NoError(t, err)
-		require.NoError(t, store.AdvanceFederationPushCursor(ctx, source.ID, snapshot.ID))
+		require.NoError(t, store.AcknowledgeFederationPush(ctx, source.ID, snapshot.ID, nil))
 		_, err = store.LeaveFederationReplica(ctx, source.ID)
 		require.NoError(t, err)
 		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: source.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: source.UID, Actor: "third-actor", Enabled: true, PushEnabled: true, RetainHistory: true})
