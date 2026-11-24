@@ -97,6 +97,30 @@ test('resizing an open drawer restores desktop navigation and its project state'
   await expect(projects).toHaveAttribute('aria-expanded', 'false')
 })
 
+test('Settings tabs stay above the section at desktop and mobile widths', async ({
+  page,
+  kata,
+}) => {
+  await kata.launch(page, '/kata?view=settings&section=appearance')
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 800 })
+    const tabs = page.getByRole('tablist', { name: 'Settings' })
+    const heading = page.getByRole('heading', { name: 'Appearance' })
+    const tabsBounds = (await tabs.boundingBox())!
+    const headingBounds = (await heading.boundingBox())!
+    expect(tabsBounds.y + tabsBounds.height).toBeLessThanOrEqual(headingBounds.y)
+    expect(await page.getByText('This browser').count()).toBe(0)
+    expect(await page.getByText('This server', { exact: true }).count()).toBe(0)
+  }
+  await page.getByRole('tab', { name: 'Search by meaning' }).click()
+  await expect(page).toHaveURL(/view=settings&section=search/)
+  await page.reload()
+  await expect(page.getByRole('tab', { name: 'Search by meaning' })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
+})
+
 test('Appearance changes the sidebar color', async ({ page, kata }) => {
   await page.emulateMedia({ colorScheme: 'dark' })
   await kata.launch(page)
@@ -105,7 +129,7 @@ test('Appearance changes the sidebar color', async ({ page, kata }) => {
     page.locator('.kata-sidebar').evaluate((element) => getComputedStyle(element).backgroundColor)
   const darkColor = await sidebarColor()
   await page.getByRole('button', { name: 'Settings' }).click()
-  await page.getByRole('button', { name: /^Appearance/ }).click()
+  await page.getByRole('tab', { name: /^Appearance/ }).click()
   await page.getByRole('radio', { name: 'Light', exact: true }).click()
   await expect.poll(sidebarColor).not.toBe(darkColor)
 })

@@ -131,7 +131,7 @@ describe('AppShell', () => {
       },
     })
     expect(screen.getByRole('region', { name: 'Project sync' })).not.toBeNull()
-    expect(screen.queryByRole('button', { name: 'Credentials' })).toBeNull()
+    expect(screen.queryByRole('tab', { name: 'Credentials' })).toBeNull()
   })
 
   test('keeps project sync readable for a current read-only project member', () => {
@@ -471,7 +471,7 @@ describe('AppShell', () => {
     expect(summary.textContent).toContain('hub-one')
     expect(summary.textContent).toContain('member-one')
     expect(summary.textContent).toContain('Read-only')
-    expect(screen.queryByRole('button', { name: 'Credentials' })).toBeNull()
+    expect(screen.queryByRole('tab', { name: 'Credentials' })).toBeNull()
     await view.rerender({ ...props, daemonSwitching: true })
     expect(summary.textContent).toContain('Connecting')
     expect(summary.textContent).not.toContain('member-one')
@@ -818,7 +818,7 @@ describe('AppShell', () => {
     })
     expect(screen.getByRole('heading', { name: 'Teams' })).not.toBeNull()
     expect(screen.getByRole('heading', { name: 'Project visibility' })).not.toBeNull()
-    expect(screen.getByRole('button', { name: 'Teams and visibility' })).not.toBeNull()
+    expect(screen.getByRole('tab', { name: 'Teams and visibility' })).not.toBeNull()
   })
 
   test('creates a team through the existing mutation authority and refreshes the list', async () => {
@@ -1211,7 +1211,7 @@ describe('AppShell', () => {
         },
       })
       expect(screen.queryByRole('heading', { name: 'Teams' })).toBeNull()
-      expect(screen.queryByRole('button', { name: 'Teams and visibility' })).toBeNull()
+      expect(screen.queryByRole('tab', { name: 'Teams and visibility' })).toBeNull()
     },
   )
 
@@ -1231,7 +1231,7 @@ describe('AppShell', () => {
       },
     })
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Credentials' }))
+    await fireEvent.click(screen.getByRole('tab', { name: 'Credentials' }))
     expect(onNavigate).toHaveBeenCalledWith({
       kind: 'kata',
       view: 'credentials',
@@ -1241,10 +1241,10 @@ describe('AppShell', () => {
 
     const unauthorized = snapshot()
     await view.rerender({ snapshot: unauthorized })
-    expect(screen.queryByRole('button', { name: 'Credentials' })).toBeNull()
+    expect(screen.queryByRole('tab', { name: 'Credentials' })).toBeNull()
   })
 
-  test('renders Credentials as a Settings section with the sidebar on Settings', () => {
+  test('renders Credentials as a Settings section with the Settings tab selected', () => {
     const authorized = snapshot()
     authorized.capabilities.token_audit_read = true
     authorized.capabilities.access_admin = true
@@ -1279,7 +1279,7 @@ describe('AppShell', () => {
     expect(screen.getByRole('heading', { name: 'Credentials' })).not.toBeNull()
     expect(screen.getByText('Worker')).not.toBeNull()
     expect(screen.queryByLabelText('Search tasks')).toBeNull()
-    expect(screen.getByRole('button', { name: 'Credentials' }).getAttribute('aria-current')).toBe(
+    expect(screen.getByRole('tab', { name: 'Credentials' }).getAttribute('aria-selected')).toBe(
       'true',
     )
     expect(screen.getByRole('button', { name: 'Settings' }).classList).toContain('active')
@@ -1359,11 +1359,11 @@ describe('AppShell', () => {
       },
     })
 
-    expect(screen.getByRole('heading', { name: 'Settings' })).not.toBeNull()
+    expect(screen.getByRole('tablist', { name: 'Settings' })).not.toBeNull()
     expect(await screen.findByText(/kata\.example\.com/)).not.toBeNull()
     expect(screen.getByRole('heading', { name: 'Search by meaning' })).not.toBeNull()
     expect(
-      screen.getByRole('button', { name: 'Search by meaning' }).getAttribute('aria-current'),
+      screen.getByRole('tab', { name: 'Search by meaning' }).getAttribute('aria-selected'),
     ).toBe('true')
     expect(screen.queryByRole('button', { name: /layout/ })).toBeNull()
   })
@@ -1399,7 +1399,7 @@ describe('AppShell', () => {
         access_admin: false,
       })
       expect(screen.getByRole('heading', { name: 'Appearance' })).not.toBeNull()
-      await fireEvent.click(screen.getByRole('button', { name: 'Appearance' }))
+      await fireEvent.click(screen.getByRole('tab', { name: 'Appearance' }))
 
       expect(onNavigate).toHaveBeenCalledWith(settingsRoute('appearance'))
     })

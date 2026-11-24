@@ -2199,7 +2199,7 @@ describe('App', () => {
     render(App)
     expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
     await fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
-    await fireEvent.click(await screen.findByRole('button', { name: 'Credentials' }))
+    await fireEvent.click(await screen.findByRole('tab', { name: 'Credentials' }))
 
     expect(await screen.findByText('Build worker')).not.toBeNull()
     expect(snapshotViews.length).toBeGreaterThan(0)
@@ -3269,7 +3269,7 @@ describe('App', () => {
 
     expect(document.documentElement.classList.contains('dark')).toBe(true)
     await fireEvent.click(await screen.findByRole('button', { name: 'Settings' }))
-    await fireEvent.click(await screen.findByRole('button', { name: 'Appearance' }))
+    await fireEvent.click(await screen.findByRole('tab', { name: 'Appearance' }))
     await fireEvent.click(await screen.findByRole('radio', { name: 'System' }))
     expect(JSON.parse(localStorage.getItem(preferencesStorageKey) ?? '{}')).toEqual(
       expect.objectContaining({ theme: 'system', splitDirection: 'horizontal', splitSize: 520 }),
@@ -3800,8 +3800,8 @@ describe('App', () => {
       expect(screen.queryByRole('status', { name: 'Active connection' })).toBeNull(),
     )
     await fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
-    expect(await screen.findByRole('button', { name: 'Credentials' })).not.toBeNull()
-    await fireEvent.click(await screen.findByRole('button', { name: 'Teams and visibility' }))
+    expect(await screen.findByRole('tab', { name: 'Credentials' })).not.toBeNull()
+    await fireEvent.click(await screen.findByRole('tab', { name: 'Teams and visibility' }))
     expect(await screen.findByRole('heading', { name: 'Teams' })).not.toBeNull()
   }, 15_000)
 
@@ -3854,7 +3854,7 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: 'Credentials' })).not.toBeNull()
     await waitFor(() => expect(snapshotRequests.length).toBeGreaterThanOrEqual(2))
     await waitFor(() => expect(streamRequests).toBeGreaterThanOrEqual(2))
-    expect(await screen.findByRole('button', { name: 'Teams and visibility' })).not.toBeNull()
+    expect(await screen.findByRole('tab', { name: 'Teams and visibility' })).not.toBeNull()
   })
 
   it('refreshes authority when the initial SSE connection opens', async () => {
