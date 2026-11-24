@@ -2,7 +2,6 @@ package federation
 
 import (
 	"context"
-	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
@@ -10,7 +9,6 @@ import (
 	"strconv"
 	"time"
 
-	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -185,6 +183,7 @@ type watchFlight struct {
 }
 
 type watchAnswer struct {
+	flight     *watchFlight
 	ready      map[int64]bool
 	unwatched  map[int64]bool
 	advertised hubPollAdvertisement
@@ -241,7 +240,7 @@ func (g *hubWatchGroup) run(ctx context.Context) {
 				close(member.left)
 			}
 			leaving = nil
-			g.deliver(flight, answer, members)
+			g.deliver(answer, members)
 			flight, answers = nil, nil
 			if len(members) > 0 {
 				arm()
@@ -284,6 +283,9 @@ func (g *hubWatchGroup) start(ctx context.Context, members map[*watchMember]bool
 			lead = member
 		}
 	}
+	if lead == nil {
+		return nil
+	}
 	flight := &watchFlight{lead: lead, members: map[*watchMember]bool{lead: true}, done: make(chan watchAnswer, 1)}
 	hubProjects := map[int64]bool{lead.hubProjectID: true}
 	var others []generated.FederationWatchProject
@@ -317,7 +319,7 @@ func (g *hubWatchGroup) start(ctx context.Context, members map[*watchMember]bool
 	g.polls.watchers.Go(func() {
 		defer cancel()
 		body, advertised, err := lead.client.watchProjectEvents(requestCtx, lead.hubProjectID, lead.cursor, others, wait)
-		answer := watchAnswer{advertised: advertised, err: err, ready: map[int64]bool{}, unwatched: map[int64]bool{}}
+		answer := watchAnswer{flight: flight, advertised: advertised, err: err, ready: map[int64]bool{}, unwatched: map[int64]bool{}}
 		for _, id := range body.Ready {
 			answer.ready[id] = true
 		}
@@ -330,7 +332,8 @@ func (g *hubWatchGroup) start(ctx context.Context, members map[*watchMember]bool
 }
 
 // deliver hands one answer to the members its watch carried.
-func (g *hubWatchGroup) deliver(flight *watchFlight, answer watchAnswer, members map[*watchMember]bool) {
+func (g *hubWatchGroup) deliver(answer watchAnswer, members map[*watchMember]bool) {
+	flight := answer.flight
 	if answer.err != nil && flight.reissued {
 		// The group ended this watch because its members changed; the
 		// remaining members are in the next one.
@@ -351,10 +354,11 @@ func (g *hubWatchGroup) deliver(flight *watchFlight, answer watchAnswer, members
 			return heldResult{advertised: answer.advertised.wait, elapsed: elapsed}
 		}
 	}
+	routeRefused, leadDenied := watchRefusal(answer.err)
 	switch {
 	case answer.err == nil:
 		g.polls.learnHub(g.baseURL, answer.advertised)
-	case hubDeniedRoute(answer.err):
+	case leadDenied:
 		// The hub refused the lead's own credential or project. That is the
 		// lead's failure alone; the others watch again without it.
 		result = func(member *watchMember) heldResult {
@@ -363,10 +367,10 @@ func (g *hubWatchGroup) deliver(flight *watchFlight, answer watchAnswer, members
 			}
 			return heldResult{again: true}
 		}
-	case watchRefused(answer.err):
+	case routeRefused:
 		g.polls.refuseWatches(g.baseURL)
-		g.polls.report(fmt.Errorf("federation hub %s refused a watch, so the spoke holds a poll per project for %s: %w",
-			g.baseURL, federationLongPollReprobe, answer.err))
+		g.polls.report(fmt.Errorf("federation hub %s refused the watch request, so the spoke holds one poll per project for the next hour; check that a proxy in front of the hub allows POST /api/v1/projects/{project_id}/federation/events:watch: %w",
+			g.baseURL, answer.err))
 		result = func(*watchMember) heldResult { return heldResult{again: true} }
 	}
 	for member := range flight.members {
@@ -378,45 +382,25 @@ func (g *hubWatchGroup) deliver(flight *watchFlight, answer watchAnswer, members
 	}
 }
 
-// watchRefused reports a refusal of the watch route itself, as from a proxy
-// that admits only the routes it knows. The hub's own refusals of the lead's
-// credential or project carry an error code; hubDeniedRoute matches those.
-func watchRefused(err error) bool {
+// watchRefusal reads a failed watch. routeRefused reports a refusal of the
+// watch route itself, as from a proxy that admits only the routes it knows:
+// any 405, or a 401, 403, or 404 without a Kata error code. leadDenied reports
+// the hub's own refusal of the lead's credential or project, which carries an
+// error code, as the lead's own poll would be refused.
+func watchRefusal(err error) (routeRefused, leadDenied bool) {
 	hubErr, ok := errors.AsType[*HubStatusError](err)
 	if !ok {
-		return false
+		return false, false
 	}
 	switch hubErr.StatusCode {
-	case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusMethodNotAllowed:
-		return hubErrorCode(hubErr) == ""
-	default:
-		return false
-	}
-}
-
-// hubDeniedRoute reports that the hub refused the lead's credential or
-// project, as it would refuse the lead's own poll.
-func hubDeniedRoute(err error) bool {
-	hubErr, ok := errors.AsType[*HubStatusError](err)
-	if !ok {
-		return false
-	}
-	switch hubErr.StatusCode {
+	case http.StatusMethodNotAllowed:
+		return true, false
 	case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
-		return hubErrorCode(hubErr) != ""
+		coded := federationHubErrorCode(hubErr.Body) != ""
+		return !coded, coded
 	default:
-		return false
+		return false, false
 	}
-}
-
-// hubErrorCode returns the error code in a Kata hub's error body, or "" for a
-// body that is not one, such as a proxy's.
-func hubErrorCode(status *HubStatusError) string {
-	var envelope api.ErrorEnvelope
-	if json.Unmarshal([]byte(status.Body), &envelope) != nil {
-		return ""
-	}
-	return envelope.Error.Code
 }
 
 // heldPollResult holds one binding's own poll, as a spoke does at a hub that

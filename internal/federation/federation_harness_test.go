@@ -56,14 +56,19 @@ type hubFront struct {
 	pollsWithoutWait atomic.Int64
 	// watchRequests counts project event watches that reached the hub.
 	watchRequests atomic.Int64
+	// held counts the polls with a wait and the watches open at the hub now;
+	// peakHeld is the most that were open at once.
+	heldMu   sync.Mutex
+	held     int
+	peakHeld int
 	// holdForever keeps a poll with a wait open until its client goes away, as
 	// a network interruption would.
 	holdForever atomic.Bool
 	// refuseHolds makes the hub answer a poll with a wait at once, as a hub at
 	// its held-poll bound does.
 	refuseHolds atomic.Bool
-	// holdSeconds, when set, replaces the wait a poll asks for and the
-	// maximum the hub advertises, as a hub with a shorter maximum would.
+	// holdSeconds, when set, replaces the wait a poll or watch asks for and
+	// the maximum the hub advertises, as a hub with a shorter maximum would.
 	holdSeconds atomic.Int64
 }
 
@@ -136,8 +141,24 @@ func (h *hubSpokeHarness) newFront(tb testing.TB) *hubFront {
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.requests.Add(1)
+		if isWatch(r) || isHeldPoll(r) {
+			f.heldMu.Lock()
+			f.held++
+			f.peakHeld = max(f.peakHeld, f.held)
+			f.heldMu.Unlock()
+			defer func() {
+				f.heldMu.Lock()
+				f.held--
+				f.heldMu.Unlock()
+			}()
+		}
 		if isWatch(r) {
 			f.watchRequests.Add(1)
+			if seconds := f.holdSeconds.Load(); seconds > 0 {
+				query := r.URL.Query()
+				query.Set("wait", strconv.FormatInt(seconds, 10))
+				r.URL.RawQuery = query.Encode()
+			}
 		}
 		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/federation/events") && r.URL.Query().Get("issue_uid") == "" {
 			query := r.URL.Query()

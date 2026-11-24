@@ -47,9 +47,18 @@ func TestFederationRunnerHoldsOneWatchForEveryProjectOnAHub(t *testing.T) {
 		"the spoke never sent a watch")
 	//nolint:kennlint // sleeptest: lets both watchers settle into one watch over real HTTP.
 	time.Sleep(300 * time.Millisecond)
+	h.resetPeakHeld()
+	//nolint:kennlint // sleeptest: observes the requests held open over real HTTP.
+	time.Sleep(300 * time.Millisecond)
+	assert.Equal(t, 1, h.peakHeldRequests(), "the spoke held more than one request for both projects")
 
 	h.createIssueIn(t, otherHub.ID, "Committed while the spoke watches")
-	awaitTurns(t, turns, other.ID)
+	select {
+	case id := <-turns:
+		require.Equal(t, other.ID, id, "an unrelated project ran after another project's commit")
+	case <-time.After(10 * time.Second):
+		t.Fatal("the changed project was not synced")
+	}
 	select {
 	case id := <-turns:
 		t.Fatalf("project %d ran after another project's commit", id)
@@ -114,15 +123,35 @@ func TestUnwatchedProjectHoldsItsOwnPoll(t *testing.T) {
 }
 
 // A hub that advertises watches behind a proxy that refuses the route still
-// gets one held poll per project.
+// gets one held poll per project. A 405 refuses the route whatever its body
+// says.
 func TestRefusedWatchFallsBackToHeldPolls(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{"bare 401", http.StatusUnauthorized, ""},
+		{"coded 405", http.StatusMethodNotAllowed, `{"error":{"code":"method_not_allowed","message":"method not allowed"}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			testRefusedWatchFallsBackToHeldPolls(t, tc.status, tc.body)
+		})
+	}
+}
+
+func testRefusedWatchFallsBackToHeldPolls(t *testing.T, status int, refusal string) {
 	h := newHubSpokeHarness(t, false)
 	h.watches.Store(true)
 	var watches, held atomic.Int64
 	frontURL := h.bindThrough(t, func(w http.ResponseWriter, r *http.Request, hub http.Handler) {
 		if isWatch(r) {
 			watches.Add(1)
-			w.WriteHeader(http.StatusUnauthorized)
+			if refusal != "" {
+				w.Header().Set("Content-Type", "application/json")
+			}
+			w.WriteHeader(status)
+			_, _ = io.WriteString(w, refusal)
 			return
 		}
 		if isHeldPoll(r) {

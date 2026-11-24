@@ -513,13 +513,7 @@ func TestHeldPollWakeRunsOnlyItsProject(t *testing.T) {
 	h.startConfiguredRunner(t, &Runner{DB: h.spokeDB, Interval: time.Hour, OnSpokeResult: func(id int64, _ error) { turns <- id }})
 	//nolint:kennlint // sleeptest: both held polls must reach the hub over HTTP before the commit.
 	require.Eventually(t, func() bool { return h.pollsWithWait.Load() >= 2 }, 10*time.Second, 10*time.Millisecond)
-	for range 2 {
-		select {
-		case <-turns:
-		case <-time.After(10 * time.Second):
-			t.Fatal("initial sync did not finish")
-		}
-	}
+	awaitTurns(t, turns, h.spokeProject.ID, other.ID)
 	h.createIssueIn(t, hubProject.ID, "event in one project")
 	select {
 	case id := <-turns:

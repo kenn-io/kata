@@ -95,7 +95,6 @@ func federationPollWait(ctx context.Context, requested api.OptionalInt) (time.Du
 type federationPollWaiter struct {
 	waits       *federationPollWaits
 	broadcaster *EventBroadcaster
-	filter      SubFilter
 	// projects maps each watched project's ID to its UID.
 	projects     map[int64]string
 	local        Subscription
@@ -129,11 +128,10 @@ func (w *federationPollWaits) admit(ctx context.Context, broadcaster *EventBroad
 	for _, project := range projects {
 		watched[project.ID] = project.UID
 	}
-	filter := SubFilter{Projects: watched}
 	remote, unsubRemote := w.remote.subscribe(watched)
 	return &federationPollWaiter{
-		waits: w, broadcaster: broadcaster, filter: filter, projects: watched,
-		local: broadcaster.Subscribe(filter), remote: remote, unsubRemote: unsubRemote,
+		waits: w, broadcaster: broadcaster, projects: watched,
+		local: broadcaster.Subscribe(SubFilter{Projects: watched}), remote: remote, unsubRemote: unsubRemote,
 		enrollmentID: enrollmentID, signed: signed,
 	}, true
 }
@@ -194,7 +192,7 @@ func (p *federationPollWaiter) receiveLocal(msg StreamMsg, open bool, woken map[
 	if !open {
 		// The broadcaster drops a subscriber whose buffer filled; the
 		// overflow itself means events committed, in any watched project.
-		p.local = p.broadcaster.Subscribe(p.filter)
+		p.local = p.broadcaster.Subscribe(SubFilter{Projects: p.projects})
 		for id := range p.projects {
 			woken[id] = true
 		}

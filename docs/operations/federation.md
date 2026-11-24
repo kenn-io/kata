@@ -673,17 +673,20 @@ each binding's own pull token, and the hub checks each project against its own
 token. When a project has work, the hub names it and the spoke pulls that
 project alone. A binding with a signing key keeps its own held poll. If the hub
 does not watch a project with its token, that binding holds its own poll. If
-the hub refuses the credential that leads a watch, that binding backs off
-alone and the others keep watching. If a proxy in front of the hub refuses the
-watch route, the daemon log says so once and the spoke holds a poll per
-binding for an hour before it tries a watch again.
+the hub refuses one binding's credential, for example after its enrollment is
+revoked, the daemon log names that project and only that binding backs off;
+the other bindings at the hub keep sharing a watch. If a proxy in front of the
+hub refuses the watch route, the daemon log reports it and the spoke holds one
+poll per binding for an hour before it tries a watch again, so the log repeats
+at most once an hour while the proxy keeps refusing.
 
 Held polls need a few things from the deployment:
 
 - Proxies between the spoke and hub must allow a request to stay idle for at
   least 45 seconds. Common 60-second idle timeouts are enough.
-- Each idle spoke keeps one request open at each hub that takes watches, and
-  one per binding at a hub that takes only held polls. A host that limits
+- Each idle spoke keeps one request open at each hub that takes watches, plus
+  one per binding with a signing key, and one per binding at a hub that takes
+  only held polls. A host that limits
   concurrent requests per instance, such as some managed platforms, holds more
   open requests than it did with interval polls.
 - A proxy in front of the hub must pass
