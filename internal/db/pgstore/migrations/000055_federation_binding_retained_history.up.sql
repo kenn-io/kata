@@ -7,10 +7,9 @@ SET retained_through_event_id = (
 )
 WHERE b.role='spoke' AND b.relay_config IS NULL
 AND EXISTS (
-  SELECT 1 FROM federation_quarantine q JOIN events e ON e.project_id=q.project_id AND e.id BETWEEN q.first_event_id AND q.last_event_id
-  WHERE q.project_id=b.project_id AND q.direction='push' AND q.skipped_at IS NULL
-  AND e.actor<>b.bound_actor AND (e.origin_instance_uid = (SELECT value FROM meta WHERE key='instance_uid') OR EXISTS (SELECT 1 FROM meta WHERE key='former_instance_uid.' || e.origin_instance_uid))
-  AND q.error LIKE '%event ' || e.uid || ' actor % does not match bound actor%'
+  SELECT 1 FROM events e WHERE e.project_id=b.project_id AND e.actor<>b.bound_actor
+  AND (e.type LIKE 'issue.%' OR e.type LIKE 'cron.%' OR e.type='project.metadata_updated')
+  AND (e.origin_instance_uid = (SELECT value FROM meta WHERE key='instance_uid') OR EXISTS (SELECT 1 FROM meta WHERE key='former_instance_uid.' || e.origin_instance_uid))
 );
 
 UPDATE federation_quarantine q

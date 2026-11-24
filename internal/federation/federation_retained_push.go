@@ -13,9 +13,11 @@ import (
 // retainedPush carries the state that pushing a rejoined project's retained
 // history needs across the batches of one push run.
 type retainedPush struct {
-	store         db.Storage
-	binding       *db.FederationBinding
-	hubProjectID  int64
+	store        db.Storage
+	binding      *db.FederationBinding
+	hubProjectID int64
+	// Retry a rejected batch one event at a time to avoid resending its tail.
+	retryThrough  int64
 	client        *Client
 	validateLease func(context.Context) error
 	onEvents      func(int64, []db.Event)
@@ -29,6 +31,13 @@ type retainedPush struct {
 // advancing past history from the former actor or an accepted recovery copy.
 func (r *retainedPush) nextBatch(ctx context.Context, pending *[]db.Event) ([]db.Event, string, int64, error) {
 	events := *pending
+	if r.retryThrough != 0 {
+		if events[0].ID <= r.retryThrough {
+			events = events[:1]
+		} else {
+			r.retryThrough = 0
+		}
+	}
 	instanceUID := r.store.InstanceUID()
 	retained := retainedFederationEvent(events[0], *r.binding, instanceUID)
 	end := 1
@@ -221,6 +230,9 @@ func (r *retainedPush) resolve(ctx context.Context, pending *[]db.Event, batch [
 	}
 	if err := r.publishRetainedIssue(ctx, issueUID); err != nil {
 		return false, err
+	}
+	if r.sent[issueUID] && r.retryThrough == 0 {
+		r.retryThrough = batch[len(batch)-1].ID
 	}
 	return r.sent[issueUID], nil
 }

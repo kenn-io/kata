@@ -114,10 +114,12 @@ func UpgradeInPlace(ctx context.Context, path string) error {
 					AND e.actor<>b.bound_actor AND ` + db.LocalInstanceOriginSQL("e.origin_instance_uid", "(SELECT value FROM meta WHERE key='instance_uid')") + `
 					AND q.error LIKE '%event ' || e.uid || ' actor % does not match bound actor%'`
 				eligible := `b.role='spoke' AND b.relay_config IS NULL AND EXISTS (` + match + `)`
-				if _, err := tx.ExecContext(ctx, `UPDATE federation_bindings AS b SET retained_through_event_id=(SELECT COALESCE(MAX(id),0) FROM events e WHERE e.project_id=b.project_id AND `+db.LocalInstanceOriginSQL("e.origin_instance_uid", "(SELECT value FROM meta WHERE key='instance_uid')")+`) WHERE `+eligible); err != nil {
+				localOrigin := db.LocalInstanceOriginSQL("e.origin_instance_uid", "(SELECT value FROM meta WHERE key='instance_uid')")
+				// The SQL fragments use only fixed literals.
+				if _, err := tx.ExecContext(ctx, `UPDATE federation_bindings AS b SET retained_through_event_id=(SELECT COALESCE(MAX(id),0) FROM events e WHERE e.project_id=b.project_id AND `+localOrigin+`) WHERE b.role='spoke' AND b.relay_config IS NULL AND EXISTS (SELECT 1 FROM events e WHERE e.project_id=b.project_id AND e.actor<>b.bound_actor AND (e.type LIKE 'issue.%' OR e.type LIKE 'cron.%' OR e.type='project.metadata_updated') AND `+localOrigin+`)`); err != nil { // #nosec G202 -- fixed SQL fragments
 					return fmt.Errorf("backfill retained federation history: %w", err)
 				}
-				if _, err := tx.ExecContext(ctx, `UPDATE federation_quarantine SET skipped_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'), skipped_by='system', skip_reason='retry: retained history upgrade' WHERE direction='push' AND skipped_at IS NULL AND EXISTS (SELECT 1 FROM federation_bindings b WHERE b.project_id=federation_quarantine.project_id AND `+eligible+`)`); err != nil {
+				if _, err := tx.ExecContext(ctx, `UPDATE federation_quarantine SET skipped_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'), skipped_by='system', skip_reason='retry: retained history upgrade' WHERE direction='push' AND skipped_at IS NULL AND EXISTS (SELECT 1 FROM federation_bindings b WHERE b.project_id=federation_quarantine.project_id AND `+eligible+`)`); err != nil { // #nosec G202 -- fixed SQL fragments
 					return fmt.Errorf("retry retained federation history quarantine: %w", err)
 				}
 			}

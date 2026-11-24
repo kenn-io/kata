@@ -5,6 +5,7 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -15,6 +16,7 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/dbtest"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -364,4 +366,89 @@ func TestRejoinPublishesRecoverySnapshot(t *testing.T) {
 	}
 	_, err = hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
+}
+
+func TestRejoinRetainedBatchRecoveryIsLinear(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "batch-recovery")
+	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
+	const count = 24
+	issues := make([]db.Issue, 0, count)
+	for range count {
+		issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "retained task", Author: "old-actor"})
+		require.NoError(t, err)
+		issues = append(issues, issue)
+	}
+	rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
+	for _, issue := range issues {
+		_, _, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "edit"})
+		require.NoError(t, err)
+	}
+	binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
+	require.NoError(t, err)
+	creds := spoke.credentials[projects[0].UID]
+	client, err := NewClient(ctx, creds.HubURL, creds.Token, clientpkg.Opts{})
+	require.NoError(t, err)
+	transport := client.client.Transport
+	submitted, rejected := 0, 0
+	client.client.Transport = pushOnlyTestTransport(func(req *http.Request) (*http.Response, error) {
+		if req.Method == http.MethodPost && strings.HasSuffix(req.URL.Path, "/federation/events:ingest") {
+			body, err := req.GetBody()
+			require.NoError(t, err)
+			var request api.FederationIngestEventsRequestBody
+			require.NoError(t, json.UnmarshalRead(body, &request))
+			require.NoError(t, body.Close())
+			submitted += len(request.Events)
+		}
+		resp, err := transport.RoundTrip(req)
+		if err == nil && resp.StatusCode == http.StatusBadRequest {
+			rejected++
+		}
+		return resp, err
+	})
+	require.NoError(t, pushDirectSpoke(ctx, spoke.env.DB, &binding, projects[0].ID, client, nil, nil, spoke.credentials, clientpkg.Opts{}))
+	require.Greater(t, rejected, 0)
+	require.LessOrEqual(t, submitted, 5*count)
+	for _, issue := range issues {
+		remote, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		comments, err := hub.DB.CommentsByIssue(ctx, remote.ID)
+		require.NoError(t, err)
+		require.Len(t, comments, 1)
+	}
+}
+
+func TestRejoinedSpokeUpgradePushesLaterTasks(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "upgrade-project")
+	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
+	_, old, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "old task", Author: "old-actor"})
+	require.NoError(t, err)
+	rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
+	var later []db.Issue
+	for range 2 {
+		issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "later task", Author: "new-actor"})
+		require.NoError(t, err)
+		later = append(later, issue)
+	}
+	_, err = spoke.env.DB.ExecContext(ctx, `ALTER TABLE federation_bindings DROP COLUMN retained_through_event_id`)
+	require.NoError(t, err)
+	_, err = spoke.env.DB.ExecContext(ctx, `UPDATE meta SET value='54' WHERE key='schema_version'`)
+	require.NoError(t, err)
+	require.NoError(t, spoke.env.DB.Close())
+	path := filepath.Join(spoke.env.Home, "kata.db")
+	require.NoError(t, sqlitestore.UpgradeInPlace(ctx, path))
+	spoke.env.DB, err = sqlitestore.Open(ctx, path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = spoke.env.DB.Close() })
+	require.NoError(t, pushRejoin(t, spoke))
+	for _, issue := range later {
+		_, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+	}
+	events, err := spoke.env.DB.EventsByUIDs(ctx, spoke.projects[0].ID, []string{old.UID})
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	require.Equal(t, old.Actor, events[0].Actor)
+	require.Equal(t, old.ContentHash, events[0].ContentHash)
 }

@@ -9,13 +9,16 @@ import (
 )
 
 type retainedMigrationCase struct {
-	projectID int64
-	event     db.Event
-	lastID    int64
-	direction db.FederationQuarantineDirection
-	retry     bool
+	projectID  int64
+	event      db.Event
+	lastID     int64
+	direction  db.FederationQuarantineDirection
+	retry      bool
+	boundary   bool
+	quarantine bool
 }
 
+// SeedRetainedHistoryMigration prepares schema 54 data and checks the upgraded state.
 func SeedRetainedHistoryMigration(t *testing.T, store db.Storage) func(db.Storage) {
 	t.Helper()
 	ctx := t.Context()
@@ -23,14 +26,16 @@ func SeedRetainedHistoryMigration(t *testing.T, store db.Storage) func(db.Storag
 	for _, tc := range []struct {
 		name, actor, failure string
 		disabled             bool
+		quarantine           bool
 		direction            db.FederationQuarantineDirection
 		retry                bool
 	}{
-		{"old-actor", "old-actor", "actor", false, db.FederationQuarantineDirectionPush, true},
-		{"disabled", "old-actor", "actor", true, db.FederationQuarantineDirectionPush, true},
-		{"same-actor", "new-actor", "actor", false, db.FederationQuarantineDirectionPush, false},
-		{"other-error", "old-actor", "other", false, db.FederationQuarantineDirectionPush, false},
-		{"pull-error", "old-actor", "actor", false, db.FederationQuarantineDirectionPull, false},
+		{"no-quarantine", "old-actor", "actor", false, false, db.FederationQuarantineDirectionPush, false},
+		{"old-actor", "old-actor", "actor", false, true, db.FederationQuarantineDirectionPush, true},
+		{"disabled", "old-actor", "actor", true, true, db.FederationQuarantineDirectionPush, true},
+		{"same-actor", "new-actor", "actor", false, true, db.FederationQuarantineDirectionPush, false},
+		{"other-error", "old-actor", "other", false, true, db.FederationQuarantineDirectionPush, false},
+		{"pull-error", "old-actor", "actor", false, true, db.FederationQuarantineDirectionPull, false},
 	} {
 		p, err := store.CreateProject(ctx, tc.name)
 		require.NoError(t, err)
@@ -44,9 +49,11 @@ func SeedRetainedHistoryMigration(t *testing.T, store db.Storage) func(db.Storag
 		if tc.failure == "actor" {
 			failure = fmt.Sprintf(`hub returned 400: {"error":{"message":"federation ingest validation: event %s actor \"%s\" does not match bound actor"}}`, event.UID, event.Actor)
 		}
-		_, err = store.RecordFederationQuarantine(ctx, db.RecordFederationQuarantineParams{ProjectID: p.ID, Direction: tc.direction, FirstEventID: event.ID, LastEventID: event.ID, EventUIDs: []string{event.UID}, Error: failure})
-		require.NoError(t, err)
-		cases = append(cases, retainedMigrationCase{p.ID, event, last.ID, tc.direction, tc.retry})
+		if tc.quarantine {
+			_, err = store.RecordFederationQuarantine(ctx, db.RecordFederationQuarantineParams{ProjectID: p.ID, Direction: tc.direction, FirstEventID: event.ID, LastEventID: event.ID, EventUIDs: []string{event.UID}, Error: failure})
+			require.NoError(t, err)
+		}
+		cases = append(cases, retainedMigrationCase{p.ID, event, last.ID, tc.direction, tc.retry, tc.actor != "new-actor", tc.quarantine})
 	}
 	return func(upgraded db.Storage) {
 		for _, tc := range cases {
@@ -54,12 +61,15 @@ func SeedRetainedHistoryMigration(t *testing.T, store db.Storage) func(db.Storag
 			require.NoError(t, err)
 			require.Zero(t, binding.PushCursorEventID)
 			q, err := upgraded.ActiveFederationQuarantine(ctx, tc.projectID, tc.direction)
-			if tc.retry {
+			if tc.retry || !tc.quarantine {
 				require.ErrorIs(t, err, db.ErrNotFound)
-				require.Equal(t, tc.lastID, binding.RetainedThroughEventID)
 			} else {
 				require.NoError(t, err)
 				require.NotZero(t, q.ID)
+			}
+			if tc.boundary {
+				require.Equal(t, tc.lastID, binding.RetainedThroughEventID)
+			} else {
 				require.Zero(t, binding.RetainedThroughEventID)
 			}
 			events, err := upgraded.EventsByUIDs(ctx, tc.projectID, []string{tc.event.UID})
