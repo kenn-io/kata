@@ -291,10 +291,11 @@ func TestMoveRetainedTaskAfterSecondRejoin(t *testing.T) {
 			rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull,claim")
 			_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "recovered"})
 			require.NoError(t, err)
+			var snapshot db.Event
 			if published {
 				require.NoError(t, spoke.sync(t, 0))
 			} else {
-				_, _, err = spoke.env.DB.RetainedIssueSnapshot(ctx, spoke.projects[0].ID, issue.UID)
+				snapshot, _, err = spoke.env.DB.RetainedIssueSnapshot(ctx, spoke.projects[0].ID, issue.UID)
 				require.NoError(t, err)
 			}
 			_, err = spoke.env.DB.LeaveFederationReplica(ctx, spoke.projects[0].ID)
@@ -304,7 +305,18 @@ func TestMoveRetainedTaskAfterSecondRejoin(t *testing.T) {
 			_, err = spoke.env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: spoke.projects[0].ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: projects[0].ID, HubProjectUID: projects[0].UID, Enabled: true, PushEnabled: true, Actor: "third-actor", RetainHistory: true})
 			require.NoError(t, err)
 			spoke.credentials[projects[0].UID] = config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[0].ID, Token: grant.Token, Actor: "third-actor"}
+			if !published {
+				_, _, err = spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "later task", Author: "third-actor"})
+				require.NoError(t, err)
+			}
 			require.NoError(t, spoke.sync(t, 0))
+			if !published {
+				binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
+				require.NoError(t, err)
+				require.Greater(t, binding.PushCursorEventID, snapshot.ID)
+				_, err = hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+				require.ErrorIs(t, err, db.ErrNotFound)
+			}
 			require.NoError(t, config.DefaultFederationCredentialStore().StoreFederationCredential(ctx, projects[0].UID, spoke.credentials[projects[0].UID]))
 			issue, err = spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 			require.NoError(t, err)
