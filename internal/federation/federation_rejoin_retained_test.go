@@ -325,6 +325,14 @@ func TestRejoinNewLinkToRetainedPeerInAnotherProject(t *testing.T) {
 			require.NoError(t, err)
 			peer, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[1].ID, Title: "peer", Author: "old-actor"})
 			require.NoError(t, err)
+			parentIssue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[1].ID, Title: "parent", Author: "old-actor"})
+			require.NoError(t, err)
+			parent, _, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: parentIssue.ID, Author: "old-actor", Body: "parent"})
+			require.NoError(t, err)
+			_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: peer.ID, Author: "old-actor", Body: "reply", ReplyToUID: parent.UID, ReplyKind: "reply"})
+			require.NoError(t, err)
+			_, _, err = spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "later source task", Author: "old-actor"})
+			require.NoError(t, err)
 			require.NoError(t, spoke.sync(t, 0))
 			require.NoError(t, spoke.sync(t, 1))
 			rejoinProjectWithActor(t, spoke, 0, hub.URL, projects[0], hub.DB, "push,pull")
@@ -508,10 +516,12 @@ func TestRetainedTaskAfterRejoin(t *testing.T) {
 		publishBeforeRejoin     bool
 		secondRejoin            bool
 		publishRecoverySnapshot bool
+		restoreRecoverySnapshot bool
 	}{
 		{name: "previously-published", publishBeforeRejoin: true},
 		{name: "unpublished-move"},
 		{name: "published-snapshot", secondRejoin: true, publishRecoverySnapshot: true},
+		{name: "restored-published-snapshot", secondRejoin: true, publishRecoverySnapshot: true, restoreRecoverySnapshot: true},
 		{name: "unpublished-snapshot-after-published-issue", publishBeforeRejoin: true, secondRejoin: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -546,6 +556,19 @@ func TestRetainedTaskAfterRejoin(t *testing.T) {
 				var snapshot db.Event
 				if tc.publishRecoverySnapshot {
 					require.NoError(t, spoke.sync(t, 0))
+					if tc.restoreRecoverySnapshot {
+						snapshot, _, _, err = spoke.env.DB.RetainedIssueSnapshot(ctx, spoke.projects[0].ID, issue.UID)
+						require.NoError(t, err)
+						former := "01HZNQ7VFPK1XGD8R5MABCD4EF"
+						hash, err := db.EventContentHash(db.EventHashInput{UID: snapshot.UID, OriginInstanceUID: former, ProjectUID: snapshot.ProjectUID, ProjectName: snapshot.ProjectName, IssueUID: snapshot.IssueUID, RelatedIssueUID: snapshot.RelatedIssueUID, Type: snapshot.Type, Actor: snapshot.Actor, HLCPhysicalMS: snapshot.HLCPhysicalMS, HLCCounter: snapshot.HLCCounter, CreatedAt: snapshot.CreatedAt.UTC().Format(db.EventTimestampFormat), Payload: jsontext.Value(snapshot.Payload)})
+						require.NoError(t, err)
+						_, err = spoke.env.DB.ExecContext(ctx, `UPDATE events SET origin_instance_uid = ?, content_hash = ? WHERE uid = ?`, former, hash, snapshot.UID)
+						require.NoError(t, err)
+						_, err = hub.DB.ExecContext(ctx, `UPDATE events SET origin_instance_uid = ?, content_hash = ? WHERE uid = ?`, former, hash, snapshot.UID)
+						require.NoError(t, err)
+						_, err = spoke.env.DB.ExecContext(ctx, `INSERT INTO meta(key, value) VALUES(?, '1')`, db.FormerInstanceUIDMetaPrefix+former)
+						require.NoError(t, err)
+					}
 				} else {
 					snapshot, _, _, err = spoke.env.DB.RetainedIssueSnapshot(ctx, spoke.projects[0].ID, issue.UID)
 					require.NoError(t, err)
@@ -599,6 +622,10 @@ func TestRetainedTaskAfterRejoin(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, spoke.projects[0].ID, current.ProjectID)
 				require.NoError(t, spoke.sync(t, 0))
+			}
+			if tc.secondRejoin && !tc.publishRecoverySnapshot {
+				status, body := moveRetainedTaskHTTP(ctx, t, spoke, issue, projects[1].UID, moveActor, true)
+				require.Equal(t, http.StatusConflict, status, body)
 			}
 			status, body := moveRetainedTaskHTTP(ctx, t, spoke, issue, projects[1].UID, moveActor, false)
 			if tc.secondRejoin && !tc.publishRecoverySnapshot {

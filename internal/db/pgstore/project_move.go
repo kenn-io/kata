@@ -113,6 +113,9 @@ func (s *Store) moveIssueProjectTx(ctx context.Context, tx *sql.Tx, input db.Mov
 			return &db.ProjectMergeImportMappingCollisionError{Mappings: mappingCollisions}
 		}
 		if input.DryRun {
+			if _, err := db.RetainedMoveSnapshot(ctx, tx, source.ID, current.UID, s.InstanceUID(), "{}"); err != nil {
+				return err
+			}
 			output.Issue = current
 			output.NewRevision = current.Revision
 			return nil

@@ -140,7 +140,9 @@ func (r *retainedPush) publishRetainedIssue(ctx context.Context, issueUID string
 	if created && r.onEvents != nil {
 		r.onEvents(binding.ProjectID, []db.Event{snapshot})
 	}
-	if err := r.prepareEventDependencies(ctx, snapshot); err != nil {
+	endpoint := *r
+	endpoint.binding, endpoint.client, endpoint.hubProjectID = &binding, client, hubProjectID
+	if err := endpoint.prepareEventDependencies(ctx, snapshot); err != nil {
 		return err
 	}
 	if err := validateFederationRunnerLease(ctx, r.validateLease); err != nil {
