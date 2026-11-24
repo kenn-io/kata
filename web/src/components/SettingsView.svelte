@@ -229,6 +229,13 @@
       box-sizing: border-box;
       padding-inline: var(--layout-inset);
       scroll-padding-inline: var(--layout-inset);
+      mask-image: linear-gradient(
+        to right,
+        transparent,
+        #000 var(--layout-inset),
+        #000 calc(100% - var(--layout-inset)),
+        transparent
+      );
     }
 
     .settings-view > :global(.kit-tabs) {
