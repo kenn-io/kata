@@ -273,15 +273,15 @@ func PrepareFederationReplicaLeave(
 			"read federation replica project before leave preparation: %w", err,
 		)
 	}
-	return prepareFederationReplicaLeave(ctx, store, managed, project, preparationID)
+	return prepareFederationReplicaLeave(ctx, store, managed, project, preparationID, true)
 }
 
-func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, managed config.FederationManagedCredentialStore, project db.Project, preparationID string) (PrepareFederationReplicaLeaveResult, error) {
+func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, managed config.FederationManagedCredentialStore, project db.Project, preparationID string, detach bool) (PrepareFederationReplicaLeaveResult, error) {
 	// Refuse known source credential dependencies before marking leave pending
 	// or allowing the caller to revoke that credential at the hub.
 	if project.ID > 0 {
 		if lifecycle, ok := store.(db.RelayLifecycleStore); ok {
-			if err := lifecycle.ValidateRelayLifecycle(ctx, project.ID); err != nil {
+			if err := validateFederationLeaveDisposition(ctx, lifecycle, project.ID, detach); err != nil {
 				return PrepareFederationReplicaLeaveResult{}, err
 			}
 		}
@@ -351,7 +351,7 @@ func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, manage
 				}
 				nativeLeaveRecorded = true
 			}
-			if err := fencer.FenceRelayDisconnect(ctx, project.ID); err != nil {
+			if err := fenceFederationLeaveDisposition(ctx, fencer, project.ID, detach); err != nil {
 				ensureFederationReplicaMu.Unlock()
 				if nativeLeaveRecorded && nativeLeaveAddedPreparation {
 					if restoreErr := rollbackFailedNativeLeavePreparation(
@@ -421,6 +421,15 @@ func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, manage
 			if found && match.Credential.Provider != nil && project.ID != 0 {
 				if err := stopProviderFederationTransport(ctx, store, project.ID); err != nil {
 					return fail(err)
+				}
+				if detach {
+					fencer, ok := store.(db.RelayDisconnectFenceStore)
+					if !ok {
+						return fail(fmt.Errorf("federation leave fence is unavailable"))
+					}
+					if err := fencer.FenceFederationLeave(ctx, project.ID); err != nil {
+						return fail(err)
+					}
 				}
 			}
 			return PrepareFederationReplicaLeaveResult{
@@ -2279,4 +2288,11 @@ func replicaBindingConflictDetails(
 
 func federationReplicaError(kind error, message, hint string) *FederationReplicaError {
 	return &FederationReplicaError{kind: kind, message: message, hint: hint}
+}
+
+func fenceFederationLeaveDisposition(ctx context.Context, fencer db.RelayDisconnectFenceStore, projectID int64, detach bool) error {
+	if detach {
+		return fencer.FenceFederationLeave(ctx, projectID)
+	}
+	return fencer.FenceRelayDisconnect(ctx, projectID)
 }

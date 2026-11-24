@@ -72,6 +72,25 @@ func TestOpen_IsIdempotentAfterBootstrap(t *testing.T) {
 	assert.Equal(t, uid1, d2.InstanceUID())
 }
 
+func TestFederationCursorFenceMigrationUpgradesVersion53(t *testing.T) {
+	ctx := t.Context()
+	path := filepath.Join(t.TempDir(), "kata.db")
+	d, err := sqlitestore.Open(ctx, path)
+	require.NoError(t, err)
+	_, err = d.ExecContext(ctx, `ALTER TABLE federation_bindings DROP COLUMN retained_through_event_id`)
+	require.NoError(t, err)
+	_, err = d.ExecContext(ctx, `UPDATE meta SET value='53' WHERE key='schema_version'`)
+	require.NoError(t, err)
+	require.NoError(t, d.Close())
+	require.NoError(t, sqlitestore.UpgradeInPlace(ctx, path))
+	d, err = sqlitestore.Open(ctx, path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = d.Close() })
+	version, err := d.SchemaVersion(ctx)
+	require.NoError(t, err)
+	require.Equal(t, db.CurrentSchemaVersion(), version)
+}
+
 func TestOpen_UpgradesRetainedHistoryFrom54(t *testing.T) {
 	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
@@ -86,6 +105,7 @@ func TestOpen_UpgradesRetainedHistoryFrom54(t *testing.T) {
 	_, err = d.ExecContext(ctx, `UPDATE meta SET value='54' WHERE key='schema_version'`)
 	require.NoError(t, err)
 	require.NoError(t, d.Close())
+	require.NoError(t, sqlitestore.UpgradeInPlace(ctx, path))
 	d, err = sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })

@@ -31,6 +31,7 @@ var inPlaceUpgrades = []struct {
 	{51, 52, nil, nil, nil},
 	{52, 53, nil, []string{"idx_events_project_moves"}, nil},
 	{53, 54, nil, nil, nil},
+	{54, 55, nil, nil, nil},
 }
 
 // UpgradesInPlace reports whether in-place steps reach the current schema.
@@ -129,7 +130,7 @@ func UpgradeInPlace(ctx context.Context, path string) error {
 }
 
 func upgradeInPlaceTables(ctx context.Context, tx *sql.Tx, from int, names []string, tables map[string]string) error {
-	if from == 53 {
+	if from == 54 {
 		if _, err := tx.ExecContext(ctx, `ALTER TABLE federation_bindings ADD COLUMN retained_through_event_id INTEGER NOT NULL DEFAULT 0`); err != nil {
 			return fmt.Errorf("add retained federation history boundary: %w", err)
 		}

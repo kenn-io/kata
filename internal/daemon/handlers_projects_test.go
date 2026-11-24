@@ -3,6 +3,7 @@ package daemon_test
 import (
 	"encoding/json"
 	"encoding/json/jsontext"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -261,6 +262,7 @@ func TestResolve_ByProjectName_NotRegistered(t *testing.T) {
 	})
 	envelope := assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
 	assert.Equal(t, map[string]any{"project": "never-registered"}, map[string]any(envelope.Error.Data), string(bs))
+	assert.Equal(t, `run kata projects create -- never-registered`, envelope.Error.Hint)
 }
 
 // TestResolve_NeitherFieldSet rejects a request that supplies neither
@@ -318,6 +320,10 @@ func TestResolve_ByAliasInput_NotRegistered(t *testing.T) {
 	})
 	envelope := assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
 	assert.Equal(t, map[string]any{"alias": "github.com/wesm/never-seen"}, map[string]any(envelope.Error.Data), string(bs))
+	assert.Equal(t, `run "kata init": it attaches this workspace to the active project "never-seen", or creates it if none exists`, envelope.Error.Hint)
+
+	resp, bs = postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{"alias": map[string]any{"identity": "github.com/example/", "kind": "git"}})
+	assertAPIError(t, resp.StatusCode, bs, http.StatusBadRequest, "validation")
 
 	resp, bs = postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{
 		"alias": map[string]any{
@@ -328,6 +334,69 @@ func TestResolve_ByAliasInput_NotRegistered(t *testing.T) {
 	})
 	envelope = assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
 	assert.Equal(t, map[string]any{"project": "ghost-project"}, map[string]any(envelope.Error.Data), string(bs))
+	assert.Equal(t, `run "kata init" with --project set to "ghost-project": it attaches this workspace to the active project "ghost-project", or creates it if none exists`, envelope.Error.Hint)
+}
+
+func TestResolve_NotInitializedHint(t *testing.T) {
+	for _, shape := range []string{"alias", "alias with name", "name", "path with config", "path"} {
+		for _, state := range []string{"missing", "active", "archived"} {
+			if shape != "path" && state != "archived" {
+				continue
+			}
+			t.Run(shape+"/"+state, func(t *testing.T) {
+				ts, h := startDefaultTestServer(t)
+				name := "remote-project"
+				request := map[string]any{}
+				if shape == "path" || shape == "path with config" {
+					dir := t.TempDir()
+					testfix.RunGit(t, dir, "init", "--quiet")
+					testfix.RunGit(t, dir, "remote", "add", "origin", "https://github.com/example/remote-project.git")
+					request["start_path"] = dir
+					if shape == "path with config" {
+						testfix.WriteKataToml(t, dir, "saved-project")
+					}
+				}
+				if shape == "alias" || shape == "alias with name" {
+					request = map[string]any{"alias": map[string]any{"identity": "github.com/example/remote-project", "kind": "git"}}
+					if shape == "alias with name" {
+						name = "saved-project"
+						request["name"] = name
+					}
+				}
+				if shape == "name" || shape == "path with config" {
+					name = "saved-project"
+					if shape == "name" {
+						request = map[string]any{"name": name}
+					}
+				}
+				hint := fmt.Sprintf(`run "kata init": it attaches this workspace to the active project %q, or creates it if none exists`, name)
+				switch shape {
+				case "name":
+					hint = fmt.Sprintf(`run kata projects create -- %s`, name)
+				case "alias with name":
+					hint = fmt.Sprintf(`run "kata init" with --project set to %q: it attaches this workspace to the active project %q, or creates it if none exists`, name, name)
+				}
+				if state != "missing" {
+					project, err := h.db.CreateProject(t.Context(), name)
+					require.NoError(t, err)
+					if state == "archived" {
+						_, _, err = h.db.RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: project.ID, Actor: "tester"})
+						require.NoError(t, err)
+						hint = fmt.Sprintf(`run "kata projects restore %d", then run "kata init" in this workspace`, project.ID)
+						switch shape {
+						case "name":
+							hint = fmt.Sprintf(`run "kata projects restore %d"`, project.ID)
+						case "alias with name":
+							hint = fmt.Sprintf(`run "kata projects restore %d", then run "kata init" with --project set to %q in this workspace`, project.ID, name)
+						}
+					}
+				}
+				resp, bs := postJSON(t, ts, "/api/v1/projects/resolve", request)
+				envelope := assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
+				assert.Equal(t, hint, envelope.Error.Hint)
+			})
+		}
+	}
 }
 
 // TestResolve_ByStartPath_KataTomlNamesUnregisteredProject reports the
@@ -344,6 +413,7 @@ func TestResolve_ByStartPath_KataTomlNamesUnregisteredProject(t *testing.T) {
 	})
 	envelope := assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
 	assert.Equal(t, map[string]any{"project": "ghost-project"}, map[string]any(envelope.Error.Data), string(bs))
+	assert.Equal(t, `run "kata init": it attaches this workspace to the active project "ghost-project", or creates it if none exists`, envelope.Error.Hint)
 }
 
 func TestListProjects_IncludeArchived(t *testing.T) {

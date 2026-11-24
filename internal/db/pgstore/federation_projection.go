@@ -168,7 +168,7 @@ func (s *Store) leaveFederationReplica(ctx context.Context, projectID int64, dis
 		if discardRelay {
 			err = s.discardRelayHopStateTx(ctx, tx, projectID, binding.RelayConfig)
 		} else {
-			err = s.validateRelayLifecycleTx(ctx, tx, projectID)
+			err = s.validateRelayLifecycleTx(ctx, tx, projectID, true)
 			if err == nil && binding.RelayConfig != nil {
 				err = deleteRelayBindingStateTx(ctx, tx, binding.RelayConfig.BindingUID)
 			}
@@ -181,6 +181,12 @@ func (s *Store) leaveFederationReplica(ctx context.Context, projectID int64, dis
 		}
 		if err := db.ClearFederationProjectIdentityDependencies(ctx, tx, project.UID); err != nil {
 			return mapSQLError(err, nil)
+		}
+		if err := db.RetainFederationHeldCursor(ctx, tx, projectID, project.UID, s.InstanceUID()); err != nil {
+			return mapSQLError(err, nil)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=$1`, db.FederationLeaveFencePrefix+project.UID); err != nil {
+			return err
 		}
 		for _, query := range []string{
 			`DELETE FROM federation_quarantine WHERE project_id=$1`,

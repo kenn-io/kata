@@ -280,7 +280,7 @@ func exportMeta(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportO
 		if err := rows.Scan(&rec.Key, &rec.Value); err != nil {
 			return fmt.Errorf("scan meta: %w", err)
 		}
-		if opts.ProjectID != 0 && (strings.HasPrefix(rec.Key, db.FederationSpokeNamePrefix) || strings.HasPrefix(rec.Key, db.AttributionUIResetMetadataPrefix) || strings.HasPrefix(rec.Key, db.ProjectStreamResetMetadataPrefix) || strings.HasPrefix(rec.Key, db.RelayResetMetadataPrefix) || strings.HasPrefix(rec.Key, db.RelayResetSupersededMetadataPrefix) || strings.HasPrefix(rec.Key, db.PendingCreationMetadataPrefix)) {
+		if opts.ProjectID != 0 && (db.IsFederationLocalMetaKey(rec.Key) || strings.HasPrefix(rec.Key, db.AttributionUIResetMetadataPrefix) || strings.HasPrefix(rec.Key, db.ProjectStreamResetMetadataPrefix) || strings.HasPrefix(rec.Key, db.RelayResetMetadataPrefix) || strings.HasPrefix(rec.Key, db.RelayResetSupersededMetadataPrefix) || strings.HasPrefix(rec.Key, db.PendingCreationMetadataPrefix)) {
 			continue
 		}
 		if opts.ProjectID != 0 && rec.Key == "project_access_revision" {
@@ -1408,7 +1408,7 @@ func exportFederationBindings(
 		relayConfigSelect = `relay_config`
 	}
 	retainedSelect := `0`
-	if sourceSchemaVersion >= 54 {
+	if sourceSchemaVersion >= 55 {
 		retainedSelect = `retained_through_event_id`
 	}
 	query := `SELECT project_id, role, hub_url, hub_project_id, hub_project_uid,
