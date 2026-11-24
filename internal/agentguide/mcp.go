@@ -19,8 +19,8 @@ without if_unowned.
 const MCPContract = `Track real changes through Kata MCP, not questions, explanations or no-change
 reviews.
 
-At session start call kata.skills {"name":"workflow"}; use
-kata.skills {"name":"quickstart"} for typed examples and topic guides.
+Start with kata.skills {"name":"workflow"}; use
+kata.skills {"name":"quickstart"} for examples and topic guides.
 The connection fixes actor and project scope; read its server instructions.
 Use project#ref for existing issues in multi-project scope. Supply project only
 where the schema allows it; never guess another connection's scope.
@@ -28,8 +28,8 @@ where the schema allows it; never guess another connection's scope.
 Call kata.load_* and refresh the tool list before using its tools.
 Search with kata.search before creating; reuse matching open work, or call
 kata.create with a stable idempotency_key. Link related work or a parent.
-Inspect/reuse look-alikes; force_new is for genuinely different work. Create
-only work the user requested.
+Inspect/reuse look-alikes; force_new is for different work.
+Create only requested work.
 Never add p0-p4 or priority: labels; set priority.
 
 ` + MCPClaimRules + `Keep your own work.attention and work.attention_msg current through

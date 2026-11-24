@@ -8,7 +8,7 @@ import "strings"
 const Contract = `Use kata for requested changes, not questions, explanations, or reviews that
 change nothing.
 
-Before a change, search for an existing issue:
+Before a change, search for an issue:
 
     kata search "<one or two distinctive words>" --agent
 
@@ -19,13 +19,12 @@ Search matches every word. Reuse an open issue, or create one:
 Labels p0 through p4 and labels starting with priority: are rejected; use --priority.
 
 If create reports a look-alike, reuse it unless the work differs (--force-new).
-Link related but different work with --related <ref>, or grouped work with
---parent <ref>.
+Link related work with --related <ref>, or its parent with --parent <ref>.
 
 ` + ClaimRules + `When asked only to record something, create the issue and stop.
 
 ` + CommentRules + `
-Close verified work with a message of 40 or more characters and evidence.
+Close verified work with a message of 40+ characters and evidence.
 For work without a PR:
 
     kata close <ref> --done --message "<what changed and how you verified it>" --test "<command>" --agent
