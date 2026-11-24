@@ -129,12 +129,7 @@ func (w *federationPollWaits) admit(ctx context.Context, broadcaster *EventBroad
 	for _, project := range projects {
 		watched[project.ID] = project.UID
 	}
-	// One project subscribes to its own events. A watch subscribes to every
-	// event and keeps those of its projects.
-	var filter SubFilter
-	if len(projects) == 1 {
-		filter = SubFilter{ProjectID: projects[0].ID, ProjectUID: projects[0].UID}
-	}
+	filter := SubFilter{Projects: watched}
 	remote, unsubRemote := w.remote.subscribe(watched)
 	return &federationPollWaiter{
 		waits: w, broadcaster: broadcaster, filter: filter, projects: watched,
@@ -177,18 +172,21 @@ func (p *federationPollWaiter) wait(ctx context.Context, deadline time.Time) (ma
 			p.waits.remote.drain(p.remote, woken)
 		}
 	}
-	for {
+	// Collect the wakes already queued, so one answer covers them. Later ones
+	// wait for the next call, so steady commits cannot hold the answer.
+	for range len(p.local.Ch) {
 		select {
 		case msg, open := <-p.local.Ch:
 			p.receiveLocal(msg, open, woken)
-			continue
-		case <-p.remote.ch:
-			p.waits.remote.drain(p.remote, woken)
-			continue
 		default:
 		}
-		return woken, nil
 	}
+	select {
+	case <-p.remote.ch:
+		p.waits.remote.drain(p.remote, woken)
+	default:
+	}
+	return woken, nil
 }
 
 // receiveLocal adds the watched projects a local message may concern.

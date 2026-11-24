@@ -1006,17 +1006,21 @@ project. Each other project in the body carries its own enrollment token:
 ```
 
 The hub checks each token against its own project, as it would check a poll
-by that token, and answers as soon as any named project has events or a reset
-after its cursor, or when the `wait` ends. The response names projects only;
-pull their events with the event poll:
+by that token. It answers as soon as any named project has events or a reset
+after its cursor, when no named project is left to watch, or when the `wait`
+ends. The response names projects only; pull their events with the event
+poll:
 
 ```json
 {"ready": [7], "unwatched": []}
 ```
 
-`unwatched` lists projects the hub did not watch: their token does not
-authorize pulls from them, or the request is signed. A signed request proves
-only the route credential's key, so it watches the route project alone. A list
+`ready` also names a project whose own poll would refuse the read, such as
+for event features the spoke lacks; that poll says why. `unwatched` lists
+projects the hub did not watch: their token does not authorize pulls from
+them, they are outside the request's `X-Kata-Project-Scope`, or the request is
+signed. A signed request proves only the route credential's key, so it
+watches the route project alone. A list
 with more than 255 other projects, a repeated project, the route project, a
 negative cursor, or a missing token returns `400 validation`. The response
 carries the same `X-Kata-Federation-Poll-Wait-Max` and

@@ -257,3 +257,47 @@ func TestSignedFederationWatchWatchesOnlyTheRouteProject(t *testing.T) {
 		assert.Equal(t, []int64{other.ID}, body.body.Unwatched)
 	})
 }
+
+// A watch admitted for a fixed project scope watches no project outside it,
+// even with a valid token for that project.
+func TestFederationWatchKeepsTheRequestProjectScope(t *testing.T) {
+	for _, scope := range []string{"route-only", "both-projects"} {
+		t.Run(scope, func(t *testing.T) {
+			f := newWatchFixture(t)
+			cursor := f.cursor(t)
+			createIssueAs(t, f.env, f.other.ID, "tester", "Pending in other")
+			headers := bearer("long-poll-token")
+			headers[requestProjectScopeHeader] = requestScopeValue(t, f.project.UID)
+			if scope == "both-projects" {
+				headers[requestProjectScopeHeader] = requestScopeValue(t, f.project.UID, f.other.UID)
+			}
+			body := map[string]any{"after_id": cursor, "projects": []watchEntryForTest{{ProjectID: f.other.ID, AfterID: 0, Token: watchOtherToken}}}
+			response, raw := envDoRaw(t, f.env, http.MethodPost, projectPath(f.project.ID)+"/federation/events:watch?wait=0", body, headers)
+			require.Equal(t, http.StatusOK, response.StatusCode, "%s", raw)
+			var out watchResultForTest
+			require.NoError(t, json.Unmarshal(raw, &out.body))
+			if scope == "route-only" {
+				assert.Empty(t, out.body.Ready, "a project outside the request scope was reported")
+				assert.Equal(t, []int64{f.other.ID}, out.body.Unwatched)
+				return
+			}
+			assert.Equal(t, []int64{f.other.ID}, out.body.Ready)
+			assert.Empty(t, out.body.Unwatched)
+		})
+	}
+}
+
+// A watch whose every project loses its credential during the wait answers at
+// once instead of holding a request that watches nothing.
+func TestFederationWatchAnswersWhenNoWatchedProjectRemains(t *testing.T) {
+	f := newLongPollFixture(t)
+	cursor := f.cursor(t)
+	w := watchFixture{longPollFixture: f}
+	done := w.startWatch(t, cursor, []watchEntryForTest{}, "20", 1)
+	require.NoError(t, f.env.DB.RevokeFederationEnrollment(t.Context(), f.enrollment.Enrollment.ID))
+	createIssueAs(t, f.env, f.project.ID, "tester", "Committed after revocation")
+	result := awaitWatch(t, done)
+	require.Equal(t, http.StatusOK, result.status, "%s", result.raw)
+	assert.Equal(t, []int64{f.project.ID}, result.body.Unwatched)
+	assert.Less(t, result.elapsed, 10*time.Second, "the hub held a watch with no project left to watch")
+}

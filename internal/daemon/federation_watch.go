@@ -67,6 +67,26 @@ func supplementalFederationWatchBase(ctx context.Context) context.Context {
 	return db.WithAuthorizedProjects(ctx, nil)
 }
 
+// outsideRequestScope reports whether a supplemental project lies outside the
+// fixed project scope the request was admitted with. The watch names such a
+// project as unwatched before any host admission for it, as other
+// supplemental credentials are refused. A missing project answers the same, so
+// the answer reveals nothing about which projects exist.
+func outsideRequestScope(ctx context.Context, store db.Storage, projectID int64) (bool, error) {
+	decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision)
+	if decision == nil || decision.fixedUIDs == nil {
+		return false, nil
+	}
+	project, err := store.ProjectByID(supplementalFederationWatchBase(ctx), projectID)
+	if errors.Is(err, db.ErrNotFound) {
+		return true, nil
+	}
+	if err != nil {
+		return false, internalAPIError(err)
+	}
+	return !slices.Contains(decision.fixedUIDs, project.UID), nil
+}
+
 // authorize checks the entry's bearer against its project from scratch, as a
 // project poll by that bearer would be checked.
 func (e *federationWatchEntry) authorize(cfg ServerConfig, operation HostFederationOperation) error {
@@ -188,6 +208,14 @@ func registerFederationWatch(humaAPI huma.API, cfg ServerConfig) {
 				unwatched = append(unwatched, other.ProjectID)
 				continue
 			}
+			outside, err := outsideRequestScope(requestCtx, cfg.DB, other.ProjectID)
+			if err != nil {
+				return nil, err
+			}
+			if outside {
+				unwatched = append(unwatched, other.ProjectID)
+				continue
+			}
 			entry := &federationWatchEntry{
 				projectID: other.ProjectID, afterID: other.AfterID, authHeader: authBearerPrefix + other.Token,
 				base: supplementalFederationWatchBase(requestCtx),
@@ -223,7 +251,7 @@ func registerFederationWatch(humaAPI huma.API, cfg ServerConfig) {
 				ready[entry.projectID] = true
 			}
 		}
-		for waiter != nil && len(ready) == 0 && time.Now().Before(holdUntil) {
+		for waiter != nil && len(ready) == 0 && len(entries) > 0 && time.Now().Before(holdUntil) {
 			woken, err := waiter.wait(requestCtx, holdUntil)
 			if err != nil {
 				return nil, fmt.Errorf("held federation watch ended: %w", err)

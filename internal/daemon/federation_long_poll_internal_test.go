@@ -305,3 +305,23 @@ func TestFederationPollWakeTagsAndFallback(t *testing.T) {
 	writer.remote.setSecret(nil)
 	assert.Equal(t, writer.instance, writer.messageFor(msg))
 }
+
+// A watch of several projects hears only its own projects' events, so a burst
+// in another project neither overflows it nor wakes every watched project.
+func TestFederationWatchWaiterIgnoresOtherProjects(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		waits := newFederationPollWaits(16, 8)
+		broadcaster := NewEventBroadcaster()
+		waiter, ok := waits.admit(t.Context(), broadcaster, 1,
+			db.Project{ID: 7, UID: "01HZNQ7VFPK1XGD8R5MABCD4EA"},
+			db.Project{ID: 8, UID: "01HZNQ7VFPK1XGD8R5MABCD4EB"})
+		require.True(t, ok)
+		defer waiter.release()
+		for range channelBuffer + 1 {
+			broadcaster.Broadcast(StreamMsg{Kind: StreamKindEvent, ProjectID: 9})
+		}
+		woken, err := waiter.wait(t.Context(), time.Now().Add(time.Second))
+		require.NoError(t, err)
+		assert.Empty(t, woken)
+	})
+}
