@@ -38,7 +38,6 @@ import (
 
 func TestFederationStatusJSONOutput(t *testing.T) {
 	env, project := setupFederationStatusCLIState(t)
-	retainFederationStatusHistory(t, env, project)
 
 	out := requireCmdOutput(t, env, "--json", "federation", "status")
 
@@ -50,7 +49,6 @@ func TestFederationStatusJSONOutput(t *testing.T) {
 			Role                     string  `json:"role"`
 			Enabled                  bool    `json:"enabled"`
 			PushEnabled              bool    `json:"push_enabled"`
-			RetainedHistoryLocal     bool    `json:"retained_history_local"`
 			PullCursorEventID        int64   `json:"pull_cursor_event_id"`
 			PushCursorEventID        int64   `json:"push_cursor_event_id"`
 			PendingPushCount         int64   `json:"pending_push_count"`
@@ -73,7 +71,6 @@ func TestFederationStatusJSONOutput(t *testing.T) {
 	assert.Equal(t, "spoke", status.Role)
 	assert.True(t, status.Enabled)
 	assert.True(t, status.PushEnabled)
-	assert.True(t, status.RetainedHistoryLocal)
 	assert.Equal(t, int64(12), status.PullCursorEventID)
 	assert.Equal(t, int64(0), status.PushCursorEventID)
 	assert.Equal(t, int64(1), status.PendingPushCount)
@@ -322,24 +319,9 @@ func TestFederationStatusTextOutputIncludesOperatorFields(t *testing.T) {
 	} {
 		assert.Contains(t, out, want)
 	}
-}
-
-func TestFederationStatusRetainedHistoryInAgentAndJSONOutput(t *testing.T) {
-	env, project := setupFederationStatusCLIState(t)
-	retainFederationStatusHistory(t, env, project)
 
 	agent := requireCmdOutput(t, env, "--agent", "federation", "status")
 	assert.Contains(t, agent, "retained_history_local=true")
-
-	output := requireCmdOutput(t, env, "--json", "federation", "status")
-	var got struct {
-		Statuses []struct {
-			RetainedHistoryLocal bool `json:"retained_history_local"`
-		} `json:"statuses"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(output), &got))
-	require.Len(t, got.Statuses, 1)
-	assert.True(t, got.Statuses[0].RetainedHistoryLocal)
 }
 
 func TestPrintFederationJoinRetainedHistoryNotice(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 
 	"go.kenn.io/kata/internal/api"
@@ -60,7 +61,6 @@ func (r *retainedPush) nextBatch(ctx context.Context, pending *[]db.Event) ([]db
 			if i == 0 {
 				return nil, "", 0, err
 			}
-			r.creation, r.recovery = false, false
 			prefix, prefixBaseline, prefixEnd, sizeErr := nextFederationPushIngestBatch(batch[:i])
 			if sizeErr != nil {
 				return nil, "", 0, sizeErr
@@ -76,42 +76,24 @@ func (r *retainedPush) nextBatch(ctx context.Context, pending *[]db.Event) ([]db
 // rejoin. Events in preceding belong to the same request and can satisfy a
 // reply when they create its parent comment.
 func (r *retainedPush) prepareEventDependencies(ctx context.Context, event db.Event, preceding []db.Event) error {
-	peers, err := retainedLinkAdditions(event)
-	if err != nil {
-		return err
-	}
-	for _, peerUID := range peers {
-		if err := r.publishRetainedIssue(ctx, peerUID); err != nil {
+	remote := db.FederationMoveSnapshotEvent(db.RemoteEvent{Type: event.Type, Payload: []byte(event.Payload)})
+	event.Type, event.Payload = remote.Type, string(remote.Payload)
+	if event.Type != "issue.unlinked" {
+		peers, err := db.DirectLinkPeers(db.FoldEvent{UID: event.UID, Type: event.Type, IssueUID: db.EventIssueUID(event.IssueUID), Payload: remote.Payload})
+		if err != nil {
 			return err
+		}
+		if event.Type == "issue.links_changed" {
+			removed, _ := db.StringValue(db.PayloadMap(remote.Payload)["parent_removed_uid"])
+			delete(peers, removed)
+		}
+		for _, peerUID := range slices.Sorted(maps.Keys(peers)) {
+			if err := r.publishRetainedIssue(ctx, peerUID); err != nil {
+				return err
+			}
 		}
 	}
 	return r.prepareCommentDependencies(ctx, event, preceding)
-}
-
-func retainedLinkAdditions(event db.Event) ([]string, error) {
-	if event.Type == "issue.moved" {
-		remote := db.FederationMoveSnapshotEvent(db.RemoteEvent{Type: event.Type, Payload: []byte(event.Payload)})
-		event.Type, event.Payload = remote.Type, string(remote.Payload)
-	} else if event.Type != "issue.linked" && event.Type != "issue.links_changed" &&
-		event.Type != "issue.created" && event.Type != "issue.snapshot" {
-		return nil, nil
-	}
-	fold := db.FoldEvent{UID: event.UID, Type: event.Type, IssueUID: db.EventIssueUID(event.IssueUID), Payload: []byte(event.Payload)}
-	peers, err := db.DirectLinkPeers(fold)
-	if err != nil {
-		return nil, err
-	}
-	if event.Type == "issue.links_changed" {
-		if removed, ok := db.StringValue(db.PayloadMap([]byte(event.Payload))["parent_removed_uid"]); ok {
-			delete(peers, removed)
-		}
-	}
-	result := make([]string, 0, len(peers))
-	for uid := range peers {
-		result = append(result, uid)
-	}
-	slices.Sort(result)
-	return result, nil
 }
 
 func (r *retainedPush) publishRetainedIssue(ctx context.Context, issueUID string) error {
@@ -126,7 +108,6 @@ func (r *retainedPush) publishRetainedIssue(ctx context.Context, issueUID string
 		return err
 	}
 	binding := *r.binding
-	client, hubProjectID := r.client, r.hubProjectID
 	if issue.ProjectID != binding.ProjectID {
 		binding, err = r.store.FederationBindingByProject(ctx, issue.ProjectID)
 		if errors.Is(err, db.ErrNotFound) {
@@ -136,15 +117,14 @@ func (r *retainedPush) publishRetainedIssue(ctx context.Context, issueUID string
 			return err
 		}
 	}
-	retained, err := r.hasRetainedIssue(ctx, issue, binding)
+	retained, err := r.retainedIssueEvent(ctx, binding, issue.ProjectID, issueUID,
+		[]string{"issue.created", "issue.snapshot", "issue.moved"}, func(db.Event) bool { return true })
 	if err != nil || !retained {
 		return err
 	}
-	if issue.ProjectID != r.binding.ProjectID {
-		client, hubProjectID, err = r.retainedEndpointClient(ctx, issueUID, binding)
-		if err != nil {
-			return err
-		}
+	client, hubProjectID, err := r.retainedEndpointClient(ctx, issueUID, binding)
+	if err != nil {
+		return err
 	}
 	if r.visiting == nil {
 		r.visiting = make(map[string]bool)
@@ -161,16 +141,7 @@ func (r *retainedPush) publishRetainedIssue(ctx context.Context, issueUID string
 	if created && r.onEvents != nil {
 		r.onEvents(binding.ProjectID, []db.Event{snapshot})
 	}
-	peers, err := retainedLinkAdditions(snapshot)
-	if err != nil {
-		return err
-	}
-	for _, peerUID := range peers {
-		if err := r.publishRetainedIssue(ctx, peerUID); err != nil {
-			return err
-		}
-	}
-	if err := r.prepareCommentDependencies(ctx, snapshot, nil); err != nil {
+	if err := r.prepareEventDependencies(ctx, snapshot, nil); err != nil {
 		return err
 	}
 	if err := validateFederationRunnerLease(ctx, r.validateLease); err != nil {
@@ -190,26 +161,12 @@ func (r *retainedPush) publishRetainedIssue(ctx context.Context, issueUID string
 	return nil
 }
 
-func (r *retainedPush) hasRetainedIssue(ctx context.Context, issue db.Issue, binding db.FederationBinding) (bool, error) {
-	if binding.RetainedThroughEventID == 0 {
-		return false, nil
-	}
-	events, err := r.store.EventsAfter(ctx, db.EventsAfterParams{
-		ProjectID: issue.ProjectID, ThroughID: binding.RetainedThroughEventID,
-		IssueUID: issue.UID, Types: []string{"issue.created", "issue.snapshot", "issue.moved"}, Limit: 1,
-	})
-	if err != nil {
-		return false, err
-	}
-	for _, event := range events {
-		if retainedFederationEvent(event, binding, r.store.InstanceUID()) {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
+// retainedEndpointClient returns the hub client for a retained task's project.
+// Another local project must be pushing to the same hub with its own credential.
 func (r *retainedPush) retainedEndpointClient(ctx context.Context, issueUID string, binding db.FederationBinding) (*Client, int64, error) {
+	if binding.ProjectID == r.binding.ProjectID {
+		return r.client, r.hubProjectID, nil
+	}
 	problem := func(reason string) (*Client, int64, error) {
 		return nil, 0, fmt.Errorf("retained link endpoint %s: %s", issueUID, reason)
 	}
@@ -331,25 +288,8 @@ func (r *retainedPush) resolve(ctx context.Context, pending *[]db.Event, batch [
 	if issueUID == "" || r.sent[issueUID] {
 		return false, nil
 	}
-	snapshot, sourceID, err := r.snapshot(ctx, issueUID)
-	if errors.Is(err, db.ErrNotFound) {
-		return false, nil
-	}
-	if err != nil {
+	if err := r.publishRetainedIssue(ctx, issueUID); err != nil {
 		return false, err
 	}
-	envelope := federationIngestEnvelope(snapshot)
-	envelope.EventID = sourceID
-	if err := r.prepareEventDependencies(ctx, snapshot, nil); err != nil {
-		return false, err
-	}
-	tokens, err := federationMoveSourceTokens(ctx, r.store, r.credentials, *r.binding, r.client.baseURL, []db.Event{snapshot}, r.opts)
-	if err != nil {
-		return false, err
-	}
-	if _, err = r.client.IngestProjectEventsWithOptions(ctx, r.hubProjectID, []api.FederationIngestEventEnvelope{envelope}, IngestProjectEventsOptions{MoveSourceTokens: tokens}); err != nil {
-		return false, err
-	}
-	r.sent[issueUID] = true
-	return true, nil
+	return r.sent[issueUID], nil
 }

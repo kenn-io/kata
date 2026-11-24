@@ -377,16 +377,12 @@ func pushDirectSpoke(
 }
 
 func retainedInitializerAlreadyKnown(err error, eventType, issueUID string) bool {
-	want := db.ErrFederationIngestValidation.Error() + ": " + db.FederationIssueReferenceMessage(eventType, issueUID, true)
 	status, ok := errors.AsType[*HubStatusError](err)
-	if ok && status.StatusCode == http.StatusBadRequest {
-		body, found := federationQuarantineHubError(status.Body)
-		if found && body.Code == "validation" && body.Message == want {
-			return true
-		}
-		return strings.Contains(status.Body, want)
+	if !ok || status.StatusCode != http.StatusBadRequest {
+		return false
 	}
-	return false
+	body, ok := federationQuarantineHubError(status.Body)
+	return ok && body.Code == "validation" && body.Message == db.ErrFederationIngestValidation.Error()+": "+db.FederationIssueReferenceMessage(eventType, issueUID, true)
 }
 
 func retainedUnknownIssue(err error) string {

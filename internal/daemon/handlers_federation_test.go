@@ -4200,6 +4200,7 @@ func TestCreateFederationReplicaRejoinsAfterLeave(t *testing.T) {
 	rebound, err := env.DB.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
 	assert.True(t, rebound.PushEnabled)
+	assert.True(t, out.Binding.RetainedHistoryLocal)
 	assert.Equal(t, int64(0), rebound.PushCursorEventID,
 		"rejoin starts publishing from the beginning of the local history")
 	assert.GreaterOrEqual(t, rebound.RetainedThroughEventID, retainedEvent.ID)

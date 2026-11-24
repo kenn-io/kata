@@ -1800,17 +1800,15 @@ func printFederationJoin(cmd *cobra.Command, bs []byte) error {
 	if flags.Quiet {
 		return nil
 	}
+	var err error
 	if body.Adopted {
-		_, err := fmt.Fprintf(cmd.OutOrStdout(),
+		_, err = fmt.Fprintf(cmd.OutOrStdout(),
 			"adopted existing project %s into federation\nqueued %d issue snapshots for hub push; pre-adoption local event history was removed\nfuture edits remain local-first; acquire leases only for exclusive coordination\n",
 			textsafe.Line(body.Project.Name), body.AdoptionSnapshotCount)
-		if err == nil && body.Binding.RetainedHistoryLocal {
-			_, err = fmt.Fprintln(cmd.OutOrStdout(), "Events under earlier actor names stay local.")
-		}
-		return err
+	} else {
+		_, err = fmt.Fprintf(cmd.OutOrStdout(), "joined federation project %s (push-enabled: %t)\n",
+			textsafe.Line(body.Project.Name), body.Binding.PushEnabled)
 	}
-	_, err := fmt.Fprintf(cmd.OutOrStdout(), "joined federation project %s (push-enabled: %t)\n",
-		textsafe.Line(body.Project.Name), body.Binding.PushEnabled)
 	if err == nil && body.Binding.RetainedHistoryLocal {
 		_, err = fmt.Fprintln(cmd.OutOrStdout(), "Events under earlier actor names stay local.")
 	}
