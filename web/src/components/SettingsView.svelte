@@ -43,25 +43,16 @@
   ])
 
   let tabList: HTMLDivElement | undefined = $state()
-  let overflowing = $state(false)
   $effect(() => {
-    // Rerun when tabs are added or removed, since that changes the row's width.
     void tabs
-    const list = tabList
-    const tab = list?.querySelector<HTMLElement>(`[data-tab-id="${active}"]`)
-    if (!list || !tab) return
-    function update() {
-      overflowing = list!.scrollWidth > list!.clientWidth
-      tab!.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-    }
-    update()
-    const observer = new ResizeObserver(update)
-    observer.observe(list)
-    return () => observer.disconnect()
+    tabList
+      ?.querySelector<HTMLElement>(`[data-tab-id="${active}"]`)
+      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   })
 </script>
 
-<div class="settings-view" class:overflowing>
+<div class="settings-view">
+  <h2 class="settings-heading">Settings</h2>
   <Tabs
     {tabs}
     bind:value={() => active, (next) => onSelect(next as SettingsSectionID)}
@@ -109,6 +100,8 @@
 
 <style>
   .settings-view {
+    display: flex;
+    flex-direction: column;
     flex: 1 1 auto;
     min-width: 0;
     min-height: 0;
@@ -116,11 +109,24 @@
     background: var(--bg-surface);
   }
 
+  .settings-heading {
+    display: flex;
+    align-items: center;
+    flex: none;
+    width: min(720px, calc(100% - 2 * var(--layout-inset)));
+    height: var(--layout-header-h);
+    margin: 0 auto;
+    color: var(--text-primary);
+    font-size: var(--font-size-lg);
+    font-weight: 650;
+  }
+
   .settings-view > :global(.kit-tabs) {
     display: flex;
     flex-direction: column;
-    height: 100%;
+    flex: 1 1 auto;
     min-width: 0;
+    min-height: 0;
     overflow-y: auto;
     scrollbar-gutter: stable both-edges;
   }
@@ -220,29 +226,15 @@
   }
 
   @media (max-width: 760px) {
+    .settings-heading {
+      display: none;
+    }
+
     .settings-view :global(.kit-tabs__list) {
       width: 100%;
       box-sizing: border-box;
       padding-inline: var(--layout-inset);
       scroll-padding-inline: var(--layout-inset);
-    }
-
-    .settings-view.overflowing :global(.kit-tabs__list) {
-      mask-image:
-        linear-gradient(
-          to right,
-          transparent,
-          #000 var(--layout-inset),
-          #000 calc(100% - var(--layout-inset)),
-          transparent
-        ),
-        linear-gradient(#000, #000);
-      /* The second layer keeps the bottom divider solid to both screen edges. */
-      mask-size:
-        100% 100%,
-        100% var(--border-width);
-      mask-position: top, bottom;
-      mask-repeat: no-repeat;
     }
 
     .settings-view > :global(.kit-tabs) {

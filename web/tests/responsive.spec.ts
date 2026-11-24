@@ -97,6 +97,16 @@ test('resizing an open drawer restores desktop navigation and its project state'
   await expect(projects).toHaveAttribute('aria-expanded', 'false')
 })
 
+test('desktop Settings has a page heading above its tabs', async ({ page, kata }) => {
+  await page.setViewportSize({ width: 1440, height: 800 })
+  await kata.launch(page, '/kata?view=settings&section=appearance')
+  const heading = page.getByRole('heading', { name: 'Settings', exact: true })
+  await expect(heading).toBeVisible()
+  const title = (await heading.boundingBox())!
+  const tabs = (await page.getByRole('tablist', { name: 'Settings' }).boundingBox())!
+  expect(title.y + title.height).toBeLessThanOrEqual(tabs.y)
+})
+
 test('Settings tabs stay above the section at desktop and mobile widths', async ({
   page,
   kata,
@@ -165,23 +175,6 @@ for (const [route, label] of [
     expect(strip.x + strip.width).toBeCloseTo(view.x + view.width, 0)
     expect(tab.x).toBeGreaterThanOrEqual(strip.x + 15)
     expect(tab.x + tab.width).toBeLessThanOrEqual(strip.x + strip.width - 15)
-    if (route.includes('section=access')) {
-      await page.setViewportSize({ width: 1280, height: 800 })
-      await page.evaluate(
-        () =>
-          new Promise<void>((resolve) =>
-            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-          ),
-      )
-      await page.setViewportSize({ width: 390, height: 800 })
-      await expect
-        .poll(async () => {
-          const resizedStrip = (await tabs.boundingBox())!
-          const resizedTab = (await selected.boundingBox())!
-          return resizedTab.x + resizedTab.width - (resizedStrip.x + resizedStrip.width)
-        })
-        .toBeLessThanOrEqual(1)
-    }
   })
 }
 
@@ -205,46 +198,6 @@ test('Settings tabs scroll the focused tab into view on mobile', async ({ page, 
   await page.keyboard.press('Enter')
   await expect(page).toHaveURL(/view=settings&section=access/)
   await expect(last).toHaveAttribute('aria-selected', 'true')
-})
-
-test('Settings tabs fade at the edges only when they overflow on mobile', async ({
-  page,
-  kata,
-}) => {
-  await kata.launch(page)
-  await kata.loginOwner(page, '/kata?view=settings&section=appearance')
-  const tabs = page.getByRole('tablist', { name: 'Settings' })
-  await expect(page.getByRole('tab', { name: 'Teams and visibility' })).toBeAttached()
-  const strip = () =>
-    tabs.evaluate((list) => ({
-      overflows: list.scrollWidth > list.clientWidth,
-      faded: getComputedStyle(list).maskImage.includes('linear-gradient'),
-    }))
-  await page.setViewportSize({ width: 600, height: 800 })
-  await expect.poll(strip).toEqual({ overflows: false, faded: false })
-  await page.setViewportSize({ width: 390, height: 800 })
-  await expect.poll(strip).toEqual({ overflows: true, faded: true })
-
-  // The divider under the tabs stays solid to both screen edges while the labels fade.
-  const bottom = await tabs.evaluate((list) => list.getBoundingClientRect().bottom)
-  const shot = await page.screenshot({ clip: { x: 0, y: bottom - 2, width: 390, height: 4 } })
-  // Decode the capture on a blank page, outside the app's content security policy.
-  const blank = await page.context().newPage()
-  const dividerEdges = await blank.evaluate(async (png) => {
-    const image = await createImageBitmap(
-      await (await fetch(`data:image/png;base64,${png}`)).blob(),
-    )
-    const canvas = new OffscreenCanvas(image.width, image.height)
-    const context = canvas.getContext('2d')!
-    context.drawImage(image, 0, 0)
-    const pixel = (x: number, y: number) => context.getImageData(x, y, 1, 1).data.join()
-    const middle = Math.floor(image.width / 2)
-    const rows = Array.from({ length: image.height }, (_, y) => y)
-    const row = rows.find((y) => pixel(middle, y) !== pixel(middle, 0))!
-    return [pixel(0, row), pixel(image.width - 1, row)].map((edge) => edge === pixel(middle, row))
-  }, shot.toString('base64'))
-  await blank.close()
-  expect(dividerEdges).toEqual([true, true])
 })
 
 test('Appearance changes the sidebar color', async ({ page, kata }) => {
