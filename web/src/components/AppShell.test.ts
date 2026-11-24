@@ -22,6 +22,26 @@ function projectSyncFetch(
       : syncFetch(url, init)
 }
 
+function syncedProjectFetch(
+  overrides: { pending_push_count?: number; has_sync_error?: boolean } = {},
+): typeof fetch {
+  return projectSyncFetch(async () =>
+    Response.json({
+      statuses: [
+        {
+          project_id: 7,
+          project_uid: '01J00000000000000000000002',
+          project_name: 'example-project',
+          enabled: true,
+          role: 'spoke',
+          pending_push_count: 0,
+          ...overrides,
+        },
+      ],
+    }),
+  )
+}
+
 describe('AppShell', () => {
   afterEach(() => {
     cleanup()
@@ -112,49 +132,37 @@ describe('AppShell', () => {
     expect(summary.textContent).not.toContain('never-display')
   })
 
-  test('offers project sync status from the current project without credential inventory authority', () => {
-    setGeneratedFetch(projectSyncFetch())
+  test('keeps project sync in the header for project members and during reload', async () => {
+    setGeneratedFetch(syncedProjectFetch())
     const current = snapshot()
-    render(AppShell, {
-      props: {
-        route: {
-          kind: 'kata',
-          projectUID: current.catalog[0]!.project.uid,
-          graph: false,
-          filters: { status: [], owner: [], label: [], relationship: [] },
-        },
-        snapshot: current,
-        loading: false,
-        ...mutationProps(),
-        onNavigate: vi.fn(),
-        onCreateProject: vi.fn(async () => ({ changed: true })),
+    const props = {
+      route: {
+        kind: 'kata' as const,
+        projectUID: current.catalog[0]!.project.uid,
+        graph: false,
+        filters: { status: [], owner: [], label: [], relationship: [] },
       },
-    })
-    expect(screen.getByRole('region', { name: 'Project sync' })).not.toBeNull()
+      snapshot: current,
+      loading: false,
+      ...mutationProps(),
+      onNavigate: vi.fn(),
+      onCreateProject: vi.fn(async () => ({ changed: true })),
+    }
+    const view = render(AppShell, { props })
+    const chip = await screen.findByRole('button', { name: 'No changes to send' })
+    expect(chip.closest('header')).not.toBeNull()
     expect(screen.queryByRole('tab', { name: 'Credentials' })).toBeNull()
-  })
-
-  test('keeps project sync readable for a current read-only project member', () => {
-    setGeneratedFetch(projectSyncFetch())
-    const current = snapshot()
-    current.capabilities.writable = false
-    render(AppShell, {
-      props: {
-        route: {
-          kind: 'kata',
-          projectUID: current.catalog[0]!.project.uid,
-          graph: false,
-          filters: { status: [], owner: [], label: [], relationship: [] },
-        },
-        snapshot: current,
-        loading: false,
-        readOnly: true,
-        ...mutationProps({ canMutate: false }),
-        onNavigate: vi.fn(),
-        onCreateProject: vi.fn(async () => ({ changed: true })),
-      },
+    const readOnly = snapshot()
+    readOnly.capabilities.writable = false
+    await view.rerender({
+      ...props,
+      snapshot: readOnly,
+      readOnly: true,
+      ...mutationProps({ canMutate: false }),
     })
-    expect(screen.getByRole('region', { name: 'Project sync' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'No changes to send' })).not.toBeNull()
+    await view.rerender({ ...props, loading: true })
+    expect(screen.getByRole('button', { name: 'No changes to send' })).not.toBeNull()
   })
 
   test('explains a read-only credential at each blocked write control', async () => {
@@ -264,15 +272,10 @@ describe('AppShell', () => {
     expect(document.querySelectorAll(`[id="${id}"]`)).toHaveLength(1)
   })
 
-  test.each(['stale', 'daemonSwitching', 'reconnecting', 'remote', 'expired', 'removed'])(
+  test.each(['stale', 'daemonSwitching', 'reconnecting', 'remote', 'expired', 'scoped'])(
     'fences project sync display when authority is %s',
     async (reason) => {
-      let signal: AbortSignal | undefined
-      const fetcher = vi.fn<typeof fetch>(async (_url, init) => {
-        signal = init?.signal ?? undefined
-        return Response.json({ statuses: [] })
-      })
-      setGeneratedFetch(projectSyncFetch(fetcher))
+      setGeneratedFetch(syncedProjectFetch())
       const current = snapshot()
       const props = {
         route: {
@@ -288,10 +291,15 @@ describe('AppShell', () => {
         onCreateProject: vi.fn(async () => ({ changed: true })),
       }
       const view = render(AppShell, { props })
-      await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1))
+      await screen.findByRole('button', { name: 'No changes to send' })
       const next = snapshot()
       if (reason === 'expired') next.capabilities.expires_at = '2020-01-01T00:00:00Z'
-      if (reason === 'removed') next.catalog = []
+      if (reason === 'scoped')
+        next.capabilities.scope = {
+          kind: 'issue_subtree',
+          project_uid: next.catalog[0]!.project.uid,
+          root_issue_uid: next.collection[0]!.uid,
+        }
       await view.rerender({
         ...props,
         snapshot: next,
@@ -313,34 +321,9 @@ describe('AppShell', () => {
               ]
             : [],
       })
-      expect(screen.queryByRole('region', { name: 'Project sync' })).toBeNull()
-      expect(signal?.aborted).toBe(true)
-      expect(fetcher).toHaveBeenCalledTimes(1)
+      expect(screen.queryByRole('button', { name: 'No changes to send' })).toBeNull()
     },
   )
-
-  test('keeps project sync in place while the snapshot reloads after navigation', async () => {
-    setGeneratedFetch(projectSyncFetch())
-    const current = snapshot()
-    const props = {
-      route: {
-        kind: 'kata' as const,
-        projectUID: current.catalog[0]!.project.uid,
-        graph: false,
-        filters: { status: [], owner: [], label: [], relationship: [] },
-      },
-      snapshot: current,
-      loading: false,
-      ...mutationProps(),
-      onNavigate: vi.fn(),
-      onCreateProject: vi.fn(async () => ({ changed: true })),
-    }
-    const view = render(AppShell, { props })
-    expect(screen.getByRole('region', { name: 'Project sync' })).not.toBeNull()
-
-    await view.rerender({ ...props, loading: true })
-    expect(screen.getByRole('region', { name: 'Project sync' })).not.toBeNull()
-  })
 
   test('keeps a healthy connection hidden during refresh while preserving attention states', async () => {
     const props = {
@@ -1618,6 +1601,44 @@ describe('AppShell', () => {
       route: { ...props.route, filters: { ...props.route.filters, label: ['a', 'd'] } },
     })
     expect(container.querySelectorAll('button.row')).toHaveLength(75)
+  })
+
+  test('shows a failing project sync in the graph header', async () => {
+    setGeneratedFetch(syncedProjectFetch({ pending_push_count: 3, has_sync_error: true }))
+    const selected = snapshot()
+    selected.selected = {
+      state: 'available',
+      issue: { ...selected.collection![0]!, body: 'Original body', revision: 3 },
+      comments: [],
+      labels: [],
+      links: [],
+      recurrences: [],
+      history: [],
+    }
+    selected.graph = {
+      issues: [...selected.collection!],
+      links: [],
+      edges: [],
+      unresolved_refs: [],
+    }
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          projectUID: selected.catalog[0]!.project.uid,
+          issueUID: '01J00000000000000000000001',
+          graph: true,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: selected,
+        loading: false,
+        ...mutationProps(),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+    const chip = await screen.findByRole('button', { name: 'Sync failed' })
+    expect(chip.closest('header')).not.toBeNull()
   })
 
   test('renders the routed source graph and returns to the same selected list context', async () => {
