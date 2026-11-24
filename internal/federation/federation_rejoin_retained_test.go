@@ -357,7 +357,11 @@ func TestMoveRetainedTaskAfterSecondRejoin(t *testing.T) {
 					} `json:"error"`
 				}
 				require.NoError(t, json.Unmarshal(body, &response))
-				require.Equal(t, "federated_move_unsupported", response.Error.Code)
+				if tc.publishedIssue {
+					require.Equal(t, "federated_move_unsupported", response.Error.Code)
+				} else {
+					require.Equal(t, "federation_sync_required", response.Error.Code)
+				}
 				current, err := spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 				require.NoError(t, err)
 				require.Equal(t, spoke.projects[0].ID, current.ProjectID)
