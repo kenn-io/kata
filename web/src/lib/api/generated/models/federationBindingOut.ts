@@ -15,8 +15,6 @@ export interface FederationBindingOut {
   push_cursor_event_id: number
   push_enabled: boolean
   replay_horizon_event_id: number
-  /** True when this push-enabled direct spoke keeps events under earlier actor names on this device. */
-  retained_history_local: boolean
   role: string
   updated_at: string
   [key: string]: unknown

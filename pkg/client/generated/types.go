@@ -2544,11 +2544,8 @@ type FederationBindingOut struct {
 	PushCursorEventID    int64      `json:"push_cursor_event_id"`
 	PushEnabled          bool       `json:"push_enabled"`
 	ReplayHorizonEventID int64      `json:"replay_horizon_event_id"`
-
-	// RetainedHistoryLocal True when this push-enabled direct spoke keeps events under earlier actor names on this device.
-	RetainedHistoryLocal bool      `json:"retained_history_local"`
-	Role                 string    `json:"role" validate:"required"`
-	UpdatedAt            time.Time `json:"updated_at" validate:"required"`
+	Role                 string     `json:"role" validate:"required"`
+	UpdatedAt            time.Time  `json:"updated_at" validate:"required"`
 }
 
 func (f FederationBindingOut) Validate() error {
@@ -2936,11 +2933,8 @@ type FederationProjectStatus struct {
 	RelayCheckpointCapacityBytes *int64 `json:"relay_checkpoint_capacity_bytes,omitempty"`
 
 	// RelayCheckpointError Why the relay checkpoint could not be measured for this status read. The size fields are omitted while it is set.
-	RelayCheckpointError *string `json:"relay_checkpoint_error,omitempty"`
-	ResetBlocker         *string `json:"reset_blocker,omitempty"`
-
-	// RetainedHistoryLocal True when this push-enabled direct spoke keeps events under earlier actor names on this device.
-	RetainedHistoryLocal     bool                                   `json:"retained_history_local"`
+	RelayCheckpointError     *string                                `json:"relay_checkpoint_error,omitempty"`
+	ResetBlocker             *string                                `json:"reset_blocker,omitempty"`
 	Role                     string                                 `json:"role" validate:"required"`
 	RootSigningKey           *FederationProjectStatusRootSigningKey `json:"root_signing_key,omitempty"`
 	SyncRetry                *FederationSyncRetry                   `json:"sync_retry,omitempty"`

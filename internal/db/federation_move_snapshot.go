@@ -30,6 +30,38 @@ func recoverySnapshotSQL(instance string) string {
  AND ` + LocalInstanceOriginSQL("old.origin_instance_uid", instance) + ` AND (old.origin_instance_uid<>` + instance + ` OR old.actor<>e.actor))`
 }
 
+// RetainedIssueEvent reports whether a task has an event of the given types
+// that rejoin left local: through the binding's boundary, from a former
+// instance or from this one under another actor. A nil match accepts any such
+// event. A zero projectID includes history from before the task moved.
+func RetainedIssueEvent(ctx context.Context, store interface {
+	InstanceUID() string
+	FormerInstanceUIDs(context.Context) ([]string, error)
+	EventsAfter(context.Context, EventsAfterParams) ([]Event, error)
+}, binding FederationBinding, projectID int64, issueUID string, types []string, match func(Event) bool) (bool, error) {
+	if binding.RetainedThroughEventID == 0 {
+		return false, nil
+	}
+	former, err := store.FormerInstanceUIDs(ctx)
+	if err != nil {
+		return false, err
+	}
+	params := EventsAfterParams{ProjectID: projectID, ThroughID: binding.RetainedThroughEventID, IssueUID: issueUID, Types: types, Limit: 1000}
+	for {
+		events, err := store.EventsAfter(ctx, params)
+		if err != nil || len(events) == 0 {
+			return false, err
+		}
+		for _, event := range events {
+			own := event.OriginInstanceUID == store.InstanceUID()
+			if (own && event.Actor != binding.Actor || !own && slices.Contains(former, event.OriginInstanceUID)) && (match == nil || match(event)) {
+				return true, nil
+			}
+		}
+		params.AfterID = events[len(events)-1].ID
+	}
+}
+
 // RecordFederationAcceptedRecoverySnapshots remembers which recovery snapshots
 // the hub acknowledged in a push that moves the cursor to through. The cursor
 // alone is no proof: it also advances over skipped former-actor events.

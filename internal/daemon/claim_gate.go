@@ -256,40 +256,7 @@ func hubStatusErrorCode(err *claimHubStatusError) string {
 // retainedIssueMayMaterialize identifies an old local initializer without
 // creating a snapshot during claim checks or rejected moves.
 func retainedIssueMayMaterialize(ctx context.Context, store db.Storage, binding db.FederationBinding, issueUID string) (bool, error) {
-	if binding.RetainedThroughEventID == 0 {
-		return false, nil
-	}
-	local := map[string]bool{store.InstanceUID(): true}
-	var formerLoaded bool
-	params := db.EventsAfterParams{ProjectID: binding.ProjectID, IssueUID: issueUID, ThroughID: binding.RetainedThroughEventID, Types: []string{"issue.created", "issue.snapshot", "issue.moved"}, Limit: 1000}
-	for {
-		events, err := store.EventsAfter(ctx, params)
-		if err != nil {
-			return false, err
-		}
-		if len(events) == 0 {
-			return false, nil
-		}
-		for _, event := range events {
-			if event.ProjectID != binding.ProjectID || (event.OriginInstanceUID == store.InstanceUID() && event.Actor == binding.Actor) {
-				continue
-			}
-			if event.OriginInstanceUID != store.InstanceUID() && !formerLoaded {
-				former, err := store.FormerInstanceUIDs(ctx)
-				if err != nil {
-					return false, err
-				}
-				for _, origin := range former {
-					local[origin] = true
-				}
-				formerLoaded = true
-			}
-			if local[event.OriginInstanceUID] {
-				return true, nil
-			}
-		}
-		params.AfterID = events[len(events)-1].ID
-	}
+	return db.RetainedIssueEvent(ctx, store, binding, binding.ProjectID, issueUID, []string{"issue.created", "issue.snapshot", "issue.moved"}, nil)
 }
 
 func pendingPushMayMaterializeIssue(

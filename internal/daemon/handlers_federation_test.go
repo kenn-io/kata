@@ -341,7 +341,6 @@ func TestFederationReplicaCreatesProjectAndBinding(t *testing.T) {
 	assert.Equal(t, int64(9), out.Binding.ReplayHorizonEventID)
 	assert.Equal(t, int64(8), out.Binding.PullCursorEventID)
 	assert.Equal(t, "manual-agent", out.Binding.Actor)
-	assert.False(t, out.Binding.RetainedHistoryLocal)
 
 	binding, err := env.DB.FederationBindingByProject(t.Context(), out.Project.ID)
 	require.NoError(t, err)
@@ -1490,25 +1489,6 @@ func TestFederationStatusSpokeIncludesBindingAndCredentialMetadata(t *testing.T)
 	assert.Equal(t, "claim,pull,push", status.Capabilities)
 	assert.True(t, status.AllowInsecure)
 	assert.Equal(t, "present", status.CredentialStatus)
-}
-
-func TestFederationStatusReportsRetainedHistoryLocal(t *testing.T) {
-	env := testenv.New(t)
-	project, err := env.DB.CreateProject(t.Context(), "spoke-project")
-	require.NoError(t, err)
-	_, _, err = env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "retained task", Author: "earlier-actor"})
-	require.NoError(t, err)
-	_, err = env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{
-		ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "http://hub.example",
-		HubProjectID: 42, HubProjectUID: project.UID, Enabled: true, PushEnabled: true,
-		Actor: "current-actor", RetainHistory: true,
-	})
-	require.NoError(t, err)
-
-	var got federationStatusBodyForTest
-	envGetJSON(t, env, "/api/v1/federation/status", &got)
-	require.Len(t, got.Statuses, 1)
-	assert.True(t, got.Statuses[0].RetainedHistoryLocal)
 }
 
 func TestFederationStatusCredentialMissingDoesNotLookSecure(t *testing.T) {
@@ -3343,7 +3323,6 @@ type federationStatusBodyForTest struct {
 		Role                        string `json:"role"`
 		Enabled                     bool   `json:"enabled"`
 		PushEnabled                 bool   `json:"push_enabled"`
-		RetainedHistoryLocal        bool   `json:"retained_history_local"`
 		BoundActor                  string `json:"bound_actor,omitempty"`
 		HubURL                      string `json:"hub_url,omitempty"`
 		HubProjectID                int64  `json:"hub_project_id,omitempty"`
@@ -4200,7 +4179,6 @@ func TestCreateFederationReplicaRejoinsAfterLeave(t *testing.T) {
 	rebound, err := env.DB.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
 	assert.True(t, rebound.PushEnabled)
-	assert.True(t, out.Binding.RetainedHistoryLocal)
 	assert.Equal(t, int64(0), rebound.PushCursorEventID,
 		"rejoin starts publishing from the beginning of the local history")
 	assert.GreaterOrEqual(t, rebound.RetainedThroughEventID, retainedEvent.ID)

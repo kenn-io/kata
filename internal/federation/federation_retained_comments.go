@@ -3,11 +3,9 @@ package federation
 import (
 	"context"
 	"encoding/json/v2"
-	"errors"
 	"fmt"
 	"maps"
 	"math"
-	"slices"
 
 	"go.kenn.io/kata/internal/db"
 )
@@ -143,7 +141,7 @@ func (r *retainedPush) retainedCommentChain(ctx context.Context, commentUID stri
 		if comment == nil {
 			break
 		}
-		wasRetained, err := r.retainedIssueEvent(ctx, *r.binding, 0, issue.UID,
+		wasRetained, err := db.RetainedIssueEvent(ctx, r.store, *r.binding, 0, issue.UID,
 			[]string{"issue.commented", "issue.created", "issue.snapshot", "issue.moved"},
 			func(event db.Event) bool { return createdComments(event.Type, []byte(event.Payload))[uid] })
 		if err != nil {
@@ -155,37 +153,6 @@ func (r *retainedPush) retainedCommentChain(ctx context.Context, commentUID stri
 		uid = comment.ReplyToUID
 	}
 	return retained, nil
-}
-
-// retainedIssueEvent reports whether a task has a matching event that rejoin
-// left local. A zero projectID includes history from before the task moved.
-func (r *retainedPush) retainedIssueEvent(ctx context.Context, binding db.FederationBinding, projectID int64, issueUID string, types []string, match func(db.Event) bool) (bool, error) {
-	if binding.RetainedThroughEventID == 0 {
-		return false, nil
-	}
-	former, err := r.store.FormerInstanceUIDs(ctx)
-	if err != nil {
-		return false, err
-	}
-	for afterID := int64(0); ; {
-		events, err := r.store.EventsAfter(ctx, db.EventsAfterParams{AfterID: afterID, ProjectID: projectID, ThroughID: binding.RetainedThroughEventID, IssueUID: issueUID, Types: types, Limit: federationPollLimit})
-		if err != nil {
-			return false, err
-		}
-		for _, event := range events {
-			if (retainedFederationEvent(event, binding, r.store.InstanceUID()) || slices.Contains(former, event.OriginInstanceUID)) && match(event) {
-				return true, nil
-			}
-		}
-		if len(events) < federationPollLimit {
-			return false, nil
-		}
-		next := events[len(events)-1].ID
-		if next <= afterID {
-			return false, errors.New("local retained history cursor did not advance")
-		}
-		afterID = next
-	}
 }
 
 // hubComments returns the comments the hub's history of a task creates, or

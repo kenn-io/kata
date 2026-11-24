@@ -116,8 +116,8 @@ func (r *retainedPush) publishRetainedIssue(ctx context.Context, issueUID string
 			return err
 		}
 	}
-	retained, err := r.retainedIssueEvent(ctx, binding, issue.ProjectID, issueUID,
-		[]string{"issue.created", "issue.snapshot", "issue.moved"}, func(db.Event) bool { return true })
+	retained, err := db.RetainedIssueEvent(ctx, r.store, binding, issue.ProjectID, issueUID,
+		[]string{"issue.created", "issue.snapshot", "issue.moved"}, nil)
 	if err != nil || !retained {
 		return err
 	}

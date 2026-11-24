@@ -52,8 +52,6 @@ export interface FederationProjectStatus {
   /** Why the relay checkpoint could not be measured for this status read. The size fields are omitted while it is set. */
   relay_checkpoint_error?: string
   reset_blocker?: string
-  /** True when this push-enabled direct spoke keeps events under earlier actor names on this device. */
-  retained_history_local: boolean
   role: string
   root_signing_key?: FederationProjectStatusRootSigningKey
   /** Present while this daemon's federation runner waits before it contacts the hub for this spoke binding again. */
