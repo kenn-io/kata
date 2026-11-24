@@ -228,7 +228,16 @@ func TestAutoCutoverInPlaceFailureLeavesSourceRetryable(t *testing.T) {
 	_, err = source.ExecContext(ctx, `ALTER TABLE federation_bindings DROP COLUMN retained_through_event_id`)
 	require.NoError(t, err)
 	require.NoError(t, source.Close())
-	require.NoError(t, AutoCutover(ctx, path))
+	require.NoError(t, autoCutover(ctx, path, cutoverOperations{replaceFile: atomicfile.Replace, exportSource: func(context.Context, string, string) (int64, error) {
+		t.Fatal("in-place upgrade must not export")
+		return 0, nil
+	}}))
+	upgraded, err := sqlitestore.Open(ctx, path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, upgraded.Close()) })
+	got, err := upgraded.SchemaVersion(ctx)
+	require.NoError(t, err)
+	require.Equal(t, db.CurrentSchemaVersion(), got)
 }
 
 func oldSchemaSource(t *testing.T, version int) string {
