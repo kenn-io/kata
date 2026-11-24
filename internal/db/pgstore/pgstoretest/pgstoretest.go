@@ -27,7 +27,7 @@ var standard = NewTemplate(pgstore.DefaultSchema)
 // an empty database, including its own instance identity.
 //
 //nolint:revive // t is the canonical first arg for testing helpers
-func NewDatabase(t *testing.T, ctx context.Context) (string, func()) {
+func NewDatabase(t testing.TB, ctx context.Context) (string, func()) {
 	t.Helper()
 	return standard.NewDatabase(t, ctx)
 }

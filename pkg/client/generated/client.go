@@ -5449,6 +5449,7 @@ func (c *Client) PollFederationProjectEvents(ctx context.Context, options *PollF
 		"after_id":  {Style: "form", Explode: &[]bool{false}[0]},
 		"issue_uid": {Style: "form", Explode: &[]bool{false}[0]},
 		"limit":     {Style: "form", Explode: &[]bool{false}[0]},
+		"wait":      {Style: "form", Explode: &[]bool{false}[0]},
 	}
 	reqParams := runtime.RequestOptionsParameters{
 		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/federation/events",

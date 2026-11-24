@@ -72,6 +72,6 @@ func TestNewDatabaseMatchesFreshInstallIDs(t *testing.T) {
 		return [2]int64{system.ID, project.ID}
 	}
 	fresh := ids(t, testenv.NewPostgresContainer)
-	clone := ids(t, pgstoretest.NewDatabase)
+	clone := ids(t, func(t *testing.T, ctx context.Context) (string, func()) { return pgstoretest.NewDatabase(t, ctx) })
 	require.Equal(t, fresh, clone)
 }

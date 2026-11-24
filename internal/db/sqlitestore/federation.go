@@ -136,14 +136,33 @@ func (d *Store) FederationSyncStatusByProject(ctx context.Context, projectID int
 		 WHERE project_id = ?`, projectID))
 }
 
-// RecordFederationSyncPullStarted records that a pull attempt began.
+// RecordFederationSyncPullStarted records the start after any held-poll success.
 func (d *Store) RecordFederationSyncPullStarted(ctx context.Context, projectID int64, at time.Time) error {
-	return d.upsertFederationSyncTime(ctx, projectID, "last_pull_started_at", at)
+	return d.RetryTransient(ctx, func() error {
+		_, err := d.ExecContext(ctx, `INSERT INTO federation_sync_status(project_id,last_pull_started_at)
+SELECT ?,? WHERE EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=?)
+ON CONFLICT(project_id) DO UPDATE SET last_pull_started_at=MAX(excluded.last_pull_started_at,
+COALESCE(strftime('%Y-%m-%dT%H:%M:%fZ',last_pull_started_at,'+0.001 seconds'),excluded.last_pull_started_at),
+COALESCE(strftime('%Y-%m-%dT%H:%M:%fZ',last_pull_success_at,'+0.001 seconds'),excluded.last_pull_started_at))`, projectID, at.UTC().Format(sqliteTimeFormat), projectID)
+		return err
+	})
 }
 
 // RecordFederationSyncPullSuccess records that a pull attempt completed.
 func (d *Store) RecordFederationSyncPullSuccess(ctx context.Context, projectID int64, at time.Time) error {
 	return d.upsertFederationSyncTime(ctx, projectID, "last_pull_success_at", at)
+}
+
+// RecordFederationHeldPullSuccess records an idle poll without hiding an unfinished pull.
+func (d *Store) RecordFederationHeldPullSuccess(ctx context.Context, projectID int64, at time.Time) error {
+	return d.RetryTransient(ctx, func() error {
+		_, err := d.ExecContext(ctx, `INSERT INTO federation_sync_status(project_id, last_pull_success_at)
+			SELECT ?, ? WHERE EXISTS (SELECT 1 FROM federation_bindings WHERE project_id = ?)
+			ON CONFLICT(project_id) DO UPDATE SET last_pull_success_at = excluded.last_pull_success_at
+			WHERE (last_pull_started_at IS NULL OR (last_pull_success_at IS NOT NULL AND last_pull_started_at <= last_pull_success_at))
+			AND (last_pull_success_at IS NULL OR last_pull_success_at < excluded.last_pull_success_at)`, projectID, at.UTC().Format(sqliteTimeFormat), projectID)
+		return err
+	})
 }
 
 // RecordFederationSyncPushStarted records that outbound federation work began.

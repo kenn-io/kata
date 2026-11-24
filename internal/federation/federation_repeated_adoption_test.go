@@ -233,3 +233,21 @@ func TestSyncFederationRepeatedAdoptionKeepsItsSnapshotUntilTheHubHistoryArrives
 	require.NotNil(t, status.LastErrorAt)
 	require.False(t, status.LastPushSuccessAt.Before(*status.LastErrorAt), "the finished push is recorded after the wait")
 }
+
+func TestSyncFederationPullsAwaitedHistoryWithHeldPoll(t *testing.T) {
+	ctx := t.Context()
+	hub := testenv.New(t)
+	hubProject := createFederatedHubForPush(t, hub)
+	seed, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: hubProject.ID, Title: "hub copy", Author: "worker"})
+	require.NoError(t, err)
+	home := newRepeatedAdoptionCopy(t, hub, hubProject, seed.UID, "older copy", "home comment", seed.UpdatedAt.Add(-time.Hour))
+	binding, err := home.env.DB.FederationBindingByProject(ctx, home.projectID)
+	require.NoError(t, err)
+	client, err := NewClient(ctx, home.creds.HubURL, home.creds.Token, clientOptsWithDefault(clientpkg.Opts{}))
+	require.NoError(t, err)
+	polls := heldPollFixture(binding.ProjectID, binding.PullCursorEventID, client.heldPollTarget(hubProject.ID))
+	require.NoError(t, SyncFederationOnce(withHubLongPolls(ctx, polls), home.env.DB, binding, home.creds))
+	after, err := home.env.DB.FederationBindingByProject(ctx, home.projectID)
+	require.NoError(t, err)
+	require.Greater(t, after.PullCursorEventID, binding.PullCursorEventID, "the turn must pull the history needed to acknowledge the push")
+}
