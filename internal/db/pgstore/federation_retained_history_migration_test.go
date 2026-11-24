@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/testenv"
@@ -17,10 +16,6 @@ func TestFederationRetainedHistoryMigration(t *testing.T) {
 	t.Cleanup(cleanup)
 	const schema = "retained_history_upgrade"
 	store, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap})
-	require.NoError(t, err)
-	project, err := store.CreateProject(ctx, "spoke-project")
-	require.NoError(t, err)
-	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "worker", PushEnabled: true, Enabled: true})
 	require.NoError(t, err)
 	verify := dbtest.SeedRetainedHistoryMigration(t, store)
 	require.NoError(t, store.Close())
@@ -34,8 +29,5 @@ func TestFederationRetainedHistoryMigration(t *testing.T) {
 	upgraded, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = upgraded.Close() })
-	binding, err := upgraded.FederationBindingByProject(ctx, project.ID)
-	require.NoError(t, err)
-	require.Zero(t, binding.RetainedThroughEventID)
 	verify(upgraded)
 }

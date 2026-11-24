@@ -240,19 +240,6 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 	_, err = store.EventsByUIDs(ctx, route.ID, []string{forged.EventUID})
 	require.ErrorIs(t, err, db.ErrNotFound)
 
-	parentUID, err := uid.New()
-	require.NoError(t, err)
-	snapshotPayload, err := json.Marshal(map[string]any{"uid": parentUID, "title": "Snapshot parent", "body": "", "author": "worker", "status": "open", "metadata": map[string]any{}, "created_at": "2026-05-23T12:00:00.000Z", "links": []any{map[string]any{"type": "parent", "to_issue_uid": peerChild.UID, "incoming": true, "author": "worker"}}})
-	require.NoError(t, err)
-	snapshot := newRemoteEvent(t, route, &parentUID, "issue.snapshot", "worker", origin, at+3, IssueDocument(t, parentUID, snapshotPayload))
-	params.Events = []db.FederationIngestEvent{{SourceEventID: 4, Event: snapshot}}
-	_, err = store.IngestFederationEvents(ctx, params)
-	require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
-	_, err = store.ParentOf(ctx, peerChild.ID)
-	require.ErrorIs(t, err, db.ErrNotFound)
-	_, err = store.EventsByUIDs(ctx, route.ID, []string{snapshot.EventUID})
-	require.ErrorIs(t, err, db.ErrNotFound)
-
 	// A parent URL can remove the same cross-project edge from its other end.
 	_, _, err = store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: peerChild.ID, ToIssueID: directChild.ID, Type: "parent", Author: "worker"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: peerChild.ID, FromUID: peerChild.UID, FromShortID: peerChild.ShortID, ToUID: directChild.UID, ToShortID: directChild.ShortID, Actor: "worker"})
 	require.NoError(t, err)

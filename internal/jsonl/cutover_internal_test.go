@@ -202,14 +202,10 @@ func TestAutoCutoverInPlaceVersions(t *testing.T) {
 func TestAutoCutoverInPlaceFailureLeavesSourceRetryable(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	ctx := t.Context()
-	path := oldSchemaSource(t, 53)
+	path := oldSchemaSource(t, 52)
 	source, err := sql.Open("sqlite", path)
 	require.NoError(t, err)
 	_, err = source.ExecContext(ctx, `ALTER TABLE federation_bindings ADD COLUMN retained_through_event_id INTEGER NOT NULL DEFAULT 0`)
-	require.NoError(t, err)
-	_, err = source.ExecContext(ctx, `DROP INDEX idx_events_project_moves`)
-	require.NoError(t, err)
-	_, err = source.ExecContext(ctx, `UPDATE meta SET value='52' WHERE key='schema_version'`)
 	require.NoError(t, err)
 	require.NoError(t, source.Close())
 	require.ErrorContains(t, autoCutover(ctx, path, cutoverOperations{replaceFile: atomicfile.Replace, exportSource: func(context.Context, string, string) (int64, error) {
