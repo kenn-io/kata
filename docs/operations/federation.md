@@ -2242,10 +2242,10 @@ Rejoin also recovers from a join that created the local project and failed
 before saving its binding. Repeat the join for the same local name and hub
 project identity to bind that existing project.
 
-Pull restarts from the hub's replay horizon, and already-applied events deduplicate by event UID. A push-enabled rejoin keeps events from an earlier actor on the spoke and publishes later events under the new enrollment. When the hub has never received a task, the spoke publishes a snapshot of the task, its comments, and its same-project links under the new actor before its later edits. Links to other projects stay on the spoke. Kata refuses to move a task with retained events from an earlier actor, with `federation_retained_move_unsupported`, because the hub may lack the history it needs to accept the move. The spoke keeps the original events and their actors.
+Pull restarts from the hub's replay horizon, and already-applied events deduplicate by event UID. A push-enabled rejoin keeps events from an earlier actor on the spoke and publishes later events under the new enrollment. When the hub has never received a task, the spoke publishes a snapshot of the task, its comments, and its same-project links under the new actor before its later edits. Links to other projects stay on the spoke. The spoke keeps the original events, their actors, and their hashes. If a move needs a retained task the hub has never received, Kata queues that task's snapshot and refuses the move with `federation_sync_required`. Background sync sends the snapshot; retry the move after the source project syncs.
 
-Kata upgrades SQLite databases at schema 41 or later to schema 54 in place at startup. Older binaries cannot
-open schema 54. To roll back, restore a backup made before the upgrade and use its matching
+Kata upgrades SQLite databases at schema 41 or later to schema 55 in place at startup. Older binaries cannot
+open schema 55. To roll back, restore a backup made before the upgrade and use its matching
 binary. Stop the daemon before migrating PostgreSQL; the migration briefly locks
 the federation bindings table.
 
