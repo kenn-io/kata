@@ -93,10 +93,8 @@ func federationPollWait(ctx context.Context, requested api.OptionalInt) (time.Du
 // federationPollWaiter is one admitted held poll. It watches one project for
 // a project poll, or several for a watch.
 type federationPollWaiter struct {
-	waits       *federationPollWaits
-	broadcaster *EventBroadcaster
-	// projects maps each watched project's ID to its UID.
-	projects     map[int64]string
+	waits        *federationPollWaits
+	broadcaster  *EventBroadcaster
 	local        Subscription
 	remote       *federationPollWakeSub
 	unsubRemote  func()
@@ -130,7 +128,7 @@ func (w *federationPollWaits) admit(ctx context.Context, broadcaster *EventBroad
 	}
 	remote, unsubRemote := w.remote.subscribe(watched)
 	return &federationPollWaiter{
-		waits: w, broadcaster: broadcaster, projects: watched,
+		waits: w, broadcaster: broadcaster,
 		local: broadcaster.Subscribe(SubFilter{Projects: watched}), remote: remote, unsubRemote: unsubRemote,
 		enrollmentID: enrollmentID, signed: signed,
 	}, true
@@ -192,15 +190,22 @@ func (p *federationPollWaiter) receiveLocal(msg StreamMsg, open bool, woken map[
 	if !open {
 		// The broadcaster drops a subscriber whose buffer filled; the
 		// overflow itself means events committed, in any watched project.
-		p.local = p.broadcaster.Subscribe(SubFilter{Projects: p.projects})
-		for id := range p.projects {
+		p.local = p.broadcaster.Subscribe(SubFilter{Projects: p.remote.projects})
+		for id := range p.remote.projects {
 			woken[id] = true
 		}
 		return
 	}
-	for id, uid := range p.projects {
-		if (SubFilter{ProjectID: id, ProjectUID: uid}).matches(msg) {
-			woken[id] = true
+	// The broadcaster delivers only messages for watched projects, so the
+	// message's project is watched unless a move departing one sent it.
+	if _, watched := p.remote.projects[msg.ProjectID]; watched {
+		woken[msg.ProjectID] = true
+	}
+	if msg.Kind == StreamKindEvent && msg.movedFromProjectUID != "" {
+		for id, uid := range p.remote.projects {
+			if uid == msg.movedFromProjectUID {
+				woken[id] = true
+			}
 		}
 	}
 }
@@ -224,7 +229,10 @@ type federationPollWakeBus struct {
 // guards pending.
 type federationPollWakeSub struct {
 	projects map[int64]string
-	ch       chan struct{}
+	// tags holds each project's keyed wake tag under the bus's current
+	// secret, or -1 when the tag is unknown and every wake applies.
+	tags map[int64]int
+	ch   chan struct{}
 	// pending holds the projects woken since the poll last drained them.
 	pending map[int64]bool
 }
@@ -234,10 +242,11 @@ func newFederationPollWakeBus() *federationPollWakeBus {
 }
 
 // subscribe registers a held poll for remote wakes of projects, a map of
-// project ID to UID. With no projects, every wake signals it.
+// project ID to UID.
 func (b *federationPollWakeBus) subscribe(projects map[int64]string) (*federationPollWakeSub, func()) {
 	sub := &federationPollWakeSub{projects: projects, ch: make(chan struct{}, 1), pending: map[int64]bool{}}
 	b.mu.Lock()
+	sub.tags = projectWakeTags(b.secret, projects)
 	id := b.nextID
 	b.nextID++
 	b.subs[id] = sub
@@ -271,10 +280,26 @@ func wakeTag(secret []byte, uid string) int {
 	return int(mac.Sum(nil)[0] & 63)
 }
 
+// projectWakeTags computes each project's wake tag once, so a remote wake
+// compares tags instead of hashing every watched project again.
+func projectWakeTags(secret []byte, projects map[int64]string) map[int64]int {
+	tags := make(map[int64]int, len(projects))
+	for id, uid := range projects {
+		tags[id] = -1
+		if len(secret) > 0 && uid != "" {
+			tags[id] = wakeTag(secret, uid)
+		}
+	}
+	return tags
+}
+
 func (b *federationPollWakeBus) setSecret(secret []byte) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.secret = secret
+	for _, sub := range b.subs {
+		sub.tags = projectWakeTags(secret, sub.projects)
+	}
 }
 
 // wakeTags wakes the projects whose keyed tag is among tags. Without tags or
@@ -283,13 +308,10 @@ func (b *federationPollWakeBus) wakeTags(tags []int) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for _, sub := range b.subs {
-		woke := len(sub.projects) == 0
-		for id, uid := range sub.projects {
-			if len(tags) > 0 && len(b.secret) > 0 && uid != "" {
-				tag := wakeTag(b.secret, uid)
-				if tag != tags[0] && (len(tags) < 2 || tag != tags[1]) {
-					continue
-				}
+		woke := false
+		for id, tag := range sub.tags {
+			if len(tags) > 0 && tag >= 0 && tag != tags[0] && (len(tags) < 2 || tag != tags[1]) {
+				continue
 			}
 			sub.pending[id] = true
 			woke = true
@@ -503,22 +525,23 @@ func heldFederationPollAllowed(ctx context.Context) bool {
 // reauthorizeFederationPoll repeats the poll's federation authorization
 // without the authorization cached for the request: the signing key,
 // credential, project membership and the host federation decision are all
-// checked again.
-func reauthorizeFederationPoll(ctx context.Context, cfg ServerConfig, authHeader string, projectID int64, operation HostFederationOperation) (context.Context, error) {
+// checked again. It returns the project it read under that authorization.
+func reauthorizeFederationPoll(ctx context.Context, cfg ServerConfig, authHeader string, projectID int64, operation HostFederationOperation) (context.Context, db.Project, error) {
 	if err := recheckFederationSigningKey(ctx); err != nil {
-		return ctx, err
+		return ctx, db.Project{}, err
 	}
 	authorization, err := evaluateFederationRequestForCapabilities(ctx, cfg, authHeader, projectID, []string{"pull"}, operation)
 	if err != nil {
-		return ctx, err
+		return ctx, db.Project{}, err
 	}
 	if err := rejectRelayCredentialOnLegacyEvents(authorization.principal); err != nil {
-		return ctx, err
+		return ctx, db.Project{}, err
 	}
 	ctx = withFederationProjectAuthority(ctx, authorization)
 	ctx = db.WithAdditionalTransactionFence(ctx, authorization.transactionFence)
-	if _, err := activeProjectByID(ctx, cfg.DB, projectID); err != nil {
-		return ctx, err
+	project, err := activeProjectByID(ctx, cfg.DB, projectID)
+	if err != nil {
+		return ctx, db.Project{}, err
 	}
-	return db.WithFederationEventStream(ctx), nil
+	return db.WithFederationEventStream(ctx), project, nil
 }

@@ -1010,7 +1010,8 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 		}
 		reauthorize := func() (context.Context, error) {
-			return reauthorizeFederationPoll(requestCtx, cfg, in.Authorization, in.ProjectID, operation)
+			readCtx, _, err := reauthorizeFederationPoll(requestCtx, cfg, in.Authorization, in.ProjectID, operation)
+			return readCtx, err
 		}
 		result, err := read(ctx)
 		if err != nil {

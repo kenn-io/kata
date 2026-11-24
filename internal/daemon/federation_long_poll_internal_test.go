@@ -82,7 +82,7 @@ func TestFederationPollWaitsBoundEveryHeldPoll(t *testing.T) {
 
 func TestFederationPollWakeIgnoresItsOwnInstance(t *testing.T) {
 	waits := newFederationPollWaits(16, 8)
-	woken, unsubscribe := waits.remote.subscribe(nil)
+	woken, unsubscribe := waits.remote.subscribe(map[int64]string{1: "project"})
 	defer unsubscribe()
 	waits.remote.setSecret([]byte("test secret"))
 	waits.receive(waits.messageFor(NewEventMsg(1, db.Event{ProjectUID: "project"})))

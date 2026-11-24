@@ -90,16 +90,11 @@ func outsideRequestScope(ctx context.Context, store db.Storage, projectID int64)
 // authorize checks the entry's bearer against its project from scratch, as a
 // project poll by that bearer would be checked.
 func (e *federationWatchEntry) authorize(cfg ServerConfig, operation HostFederationOperation) error {
-	ctx, err := reauthorizeFederationPoll(e.base, cfg, e.authHeader, e.projectID, operation)
+	ctx, project, err := reauthorizeFederationPoll(e.base, cfg, e.authHeader, e.projectID, operation)
 	if err != nil {
 		return err
 	}
-	if e.project.ID == 0 {
-		if e.project, err = activeProjectByID(ctx, cfg.DB, e.projectID); err != nil {
-			return err
-		}
-	}
-	e.ctx = ctx
+	e.ctx, e.project = ctx, project
 	return nil
 }
 
@@ -202,6 +197,24 @@ func registerFederationWatch(humaAPI huma.API, cfg ServerConfig) {
 			project: project, base: requestCtx, ctx: db.WithFederationEventStream(ctx),
 		}}
 		unwatched := []int64{}
+		// keep authorizes an entry again. A denial names its project
+		// unwatched and drops it; any other failure ends the request.
+		keep := func(entry *federationWatchEntry) (bool, error) {
+			err := entry.authorize(cfg, operation)
+			if err != nil && federationWatchDenied(err) {
+				unwatched = append(unwatched, entry.projectID)
+				return false, nil
+			}
+			return err == nil, err
+		}
+		ready := map[int64]bool{}
+		markReady := func(entry *federationWatchEntry) error {
+			found, err := entry.ready(cfg, in.EventFeatures)
+			if found {
+				ready[entry.projectID] = true
+			}
+			return err
+		}
 		carriesTokens := federationWatchCarriesTokens(requestCtx, cfg)
 		for _, other := range in.Body.Projects {
 			if !carriesTokens {
@@ -220,14 +233,11 @@ func registerFederationWatch(humaAPI huma.API, cfg ServerConfig) {
 				projectID: other.ProjectID, afterID: other.AfterID, authHeader: authBearerPrefix + other.Token,
 				base: supplementalFederationWatchBase(requestCtx),
 			}
-			if err := entry.authorize(cfg, operation); err != nil {
-				if federationWatchDenied(err) {
-					unwatched = append(unwatched, other.ProjectID)
-					continue
-				}
+			if kept, err := keep(entry); err != nil {
 				return nil, err
+			} else if kept {
+				entries = append(entries, entry)
 			}
-			entries = append(entries, entry)
 		}
 
 		var waiter *federationPollWaiter
@@ -241,14 +251,9 @@ func registerFederationWatch(humaAPI huma.API, cfg ServerConfig) {
 				defer waiter.release()
 			}
 		}
-		ready := map[int64]bool{}
 		for _, entry := range entries {
-			found, err := entry.ready(cfg, in.EventFeatures)
-			if err != nil {
+			if err := markReady(entry); err != nil {
 				return nil, err
-			}
-			if found {
-				ready[entry.projectID] = true
 			}
 		}
 		for waiter != nil && len(ready) == 0 && len(entries) > 0 && time.Now().Before(holdUntil) {
@@ -267,40 +272,32 @@ func registerFederationWatch(humaAPI huma.API, cfg ServerConfig) {
 					kept = append(kept, entry)
 					continue
 				}
-				if err := entry.authorize(cfg, operation); err != nil {
-					if federationWatchDenied(err) {
-						unwatched = append(unwatched, entry.projectID)
-						continue
-					}
+				if ok, err := keep(entry); err != nil {
 					return nil, err
+				} else if !ok {
+					continue
 				}
 				kept = append(kept, entry)
-				found, err := entry.ready(cfg, in.EventFeatures)
-				if err != nil {
+				if err := markReady(entry); err != nil {
 					return nil, err
-				}
-				if found {
-					ready[entry.projectID] = true
 				}
 			}
 			entries = kept
 		}
 		// Name a project as ready only while its own credential still
 		// authorizes pulls from it.
-		body := api.FederationWatchEventsBody{Ready: []int64{}, Unwatched: unwatched}
+		body := api.FederationWatchEventsBody{Ready: []int64{}}
 		for _, entry := range entries {
 			if !ready[entry.projectID] {
 				continue
 			}
-			if err := entry.authorize(cfg, operation); err != nil {
-				if federationWatchDenied(err) {
-					body.Unwatched = append(body.Unwatched, entry.projectID)
-					continue
-				}
+			if ok, err := keep(entry); err != nil {
 				return nil, err
+			} else if ok {
+				body.Ready = append(body.Ready, entry.projectID)
 			}
-			body.Ready = append(body.Ready, entry.projectID)
 		}
+		body.Unwatched = unwatched
 		slices.Sort(body.Ready)
 		slices.Sort(body.Unwatched)
 		// The body names only projects each credential authorized just

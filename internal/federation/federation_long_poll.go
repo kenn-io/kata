@@ -388,7 +388,11 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 			},
 		})
 		var held heldResult
-		if group := p.watchGroup(client, credential); group != nil && !solo {
+		var group *hubWatchGroup
+		if !solo {
+			group = p.watchGroup(client, credential)
+		}
+		if group != nil {
 			held = group.hold(requestCtx, &watchMember{
 				projectID: projectID, hubProjectID: credential.HubProjectID, cursor: cursor,
 				token: credential.Token, client: client, wait: wait, finishSync: finishSync,

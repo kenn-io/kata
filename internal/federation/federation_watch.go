@@ -31,7 +31,8 @@ type heldResult struct {
 	changed bool
 	// advertised is the longest wait the hub said it holds.
 	advertised time.Duration
-	// elapsed is how long the hub held the request that answered.
+	// elapsed is how long the hub held a request it answered with nothing
+	// new; the watcher reads it only then.
 	elapsed time.Duration
 	err     error
 	// unwatched reports that the hub would not watch the binding with its
@@ -183,6 +184,7 @@ type watchFlight struct {
 }
 
 type watchAnswer struct {
+	// flight is the watch that answered. It is never nil.
 	flight     *watchFlight
 	ready      map[int64]bool
 	unwatched  map[int64]bool
@@ -196,22 +198,18 @@ func (g *hubWatchGroup) run(ctx context.Context) {
 	var (
 		flight  *watchFlight
 		leaving []*watchMember
-		timer   *time.Timer
 		send    <-chan time.Time
-		answers <-chan watchAnswer
 	)
 	arm := func() {
 		if send == nil {
-			timer = time.NewTimer(federationWatchJoinDelay)
-			send = timer.C
+			send = time.After(federationWatchJoinDelay)
 		}
 	}
-	defer func() {
-		if timer != nil {
-			timer.Stop()
-		}
-	}()
 	for {
+		var answers <-chan watchAnswer
+		if flight != nil {
+			answers = flight.done
+		}
 		select {
 		case <-ctx.Done():
 			if flight != nil {
@@ -241,18 +239,16 @@ func (g *hubWatchGroup) run(ctx context.Context) {
 			}
 			leaving = nil
 			g.deliver(answer, members)
-			flight, answers = nil, nil
+			flight = nil
 			if len(members) > 0 {
 				arm()
 			}
 		case <-send:
-			send, timer = nil, nil
+			send = nil
 			if flight != nil || len(members) == 0 {
 				continue
 			}
-			if flight = g.start(ctx, members); flight != nil {
-				answers = flight.done
-			}
+			flight = g.start(ctx, members)
 		}
 	}
 }
@@ -343,9 +339,9 @@ func (g *hubWatchGroup) deliver(answer watchAnswer, members map[*watchMember]boo
 	result := func(member *watchMember) heldResult {
 		switch {
 		case answer.err != nil:
-			return heldResult{err: answer.err, elapsed: elapsed}
+			return heldResult{err: answer.err}
 		case answer.ready[member.hubProjectID]:
-			return heldResult{changed: true, advertised: answer.advertised.wait, elapsed: elapsed}
+			return heldResult{changed: true, advertised: answer.advertised.wait}
 		case answer.unwatched[member.hubProjectID]:
 			return heldResult{unwatched: true}
 		case len(answer.ready) > 0:
@@ -363,7 +359,7 @@ func (g *hubWatchGroup) deliver(answer watchAnswer, members map[*watchMember]boo
 		// lead's failure alone; the others watch again without it.
 		result = func(member *watchMember) heldResult {
 			if member == flight.lead {
-				return heldResult{err: answer.err, elapsed: elapsed}
+				return heldResult{err: answer.err}
 			}
 			return heldResult{again: true}
 		}
@@ -409,8 +405,11 @@ func (p *hubLongPolls) heldPollResult(ctx context.Context, client *Client, hubPr
 	started := time.Now()
 	body, advertised, err := client.pollProjectEvents(ctx, hubProjectID, "", cursor, 1, wait)
 	if err != nil {
-		return heldResult{err: err, elapsed: time.Since(started)}
+		return heldResult{err: err}
 	}
 	p.learnHub(client.baseURL, advertised)
-	return heldResult{changed: pollChanged(body, cursor), advertised: advertised.wait, elapsed: time.Since(started)}
+	if pollChanged(body, cursor) {
+		return heldResult{changed: true, advertised: advertised.wait}
+	}
+	return heldResult{advertised: advertised.wait, elapsed: time.Since(started)}
 }

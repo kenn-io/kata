@@ -304,7 +304,5 @@ func (h *hubSpokeHarness) spokeIssueCount(tb testing.TB) int {
 
 func (h *hubSpokeHarness) createHubIssue(tb testing.TB, title string) {
 	tb.Helper()
-	var out map[string]any
-	h.post(tb, "/api/v1/projects/"+strconv.FormatInt(h.hubProject.ID, 10)+"/issues",
-		map[string]any{"actor": "tester", "title": title}, &out)
+	h.createIssueIn(tb, h.hubProject.ID, title)
 }
