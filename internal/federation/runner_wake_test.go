@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -163,80 +162,70 @@ func TestRunnerKeepsEveryProjectWakeThatArrivesBeforeAPass(t *testing.T) {
 		"a wake for every spoke absorbs a later project wake")
 }
 
-// listFailingStore fails the next binding listing, the first read of a pass.
-type listFailingStore struct {
-	db.Storage
-	failNext atomic.Bool
-}
-
-func (s *listFailingStore) ListFederationBindings(ctx context.Context) ([]db.FederationBinding, error) {
-	if s.failNext.CompareAndSwap(true, false) {
-		return nil, errors.New("database unavailable")
-	}
-	return s.Storage.ListFederationBindings(ctx)
-}
-
-// A write waiting for a full pass still syncs soon when that pass fails
-// before it reaches any spoke, instead of waiting for the next interval.
-func TestRunnerKeepsWakesWhenAPassFailsToListSpokes(t *testing.T) {
-	hub := testenv.New(t)
-	spoke := testenv.New(t)
-	t.Setenv("KATA_HOME", t.TempDir())
-	a := bindSpokeProjects(t, hub.DB, spoke.DB, hub.URL, 1)[0]
-	store := &listFailingStore{Storage: spoke.DB}
-	store.failNext.Store(true)
-
-	wake := NewWakeQueue()
-	wake.WakeProject(a.spoke.ID)
-	results := newSpokeResults()
-	failed := make(chan error, 1)
-	runner := &Runner{
-		DB:            store,
-		Interval:      time.Hour,
-		Wake:          wake,
-		Debounce:      time.Millisecond,
-		OnSpokeResult: results.record,
-		OnError:       func(err error) { failed <- err },
-	}
-	go func() { _ = runner.Run(t.Context()) }()
-	require.ErrorContains(t, <-failed, "database unavailable")
-	results.await(t, a.spoke.ID)
-}
-
-// afterListStore runs a hook once, right after a pass lists its bindings.
-type afterListStore struct {
+// listHookStore runs afterList once, right after a pass lists its bindings,
+// and fails that listing when afterList returns an error.
+type listHookStore struct {
 	db.Storage
 	once      sync.Once
-	afterList func()
+	afterList func() error
 }
 
-func (s *afterListStore) ListFederationBindings(ctx context.Context) ([]db.FederationBinding, error) {
+func (s *listHookStore) ListFederationBindings(ctx context.Context) ([]db.FederationBinding, error) {
 	bindings, err := s.Storage.ListFederationBindings(ctx)
-	s.once.Do(s.afterList)
+	var hookErr error
+	s.once.Do(func() { hookErr = s.afterList() })
+	if hookErr != nil {
+		return nil, hookErr
+	}
 	return bindings, err
 }
 
-// A wake for every spoke, such as a join, that arrives after a full pass has
-// listed its bindings still gets a pass of its own, because that pass may not
-// include the joined binding.
-func TestRunnerKeepsAWakeThatArrivesAfterAFullPassListsSpokes(t *testing.T) {
-	hub := testenv.New(t)
-	spoke := testenv.New(t)
-	t.Setenv("KATA_HOME", t.TempDir())
-	a := bindSpokeProjects(t, hub.DB, spoke.DB, hub.URL, 1)[0]
+// A full pass that ends early or misses a wake does not leave a queued wake
+// waiting for the next interval.
+func TestRunnerKeepsWakesAFullPassDidNotServe(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		// afterList runs once, after the first pass lists its bindings.
+		afterList func(*WakeQueue) error
+		// turns is how many turns the project gets without an interval.
+		turns int
+	}{
+		{
+			// A write queued before the first pass still syncs soon when that
+			// pass fails before it reaches any spoke.
+			name:      "listing fails",
+			afterList: func(*WakeQueue) error { return errors.New("database unavailable") },
+			turns:     1,
+		},
+		{
+			// A wake for every spoke, such as a join, that arrives after the
+			// listing gets a pass of its own, because the listing may not
+			// include the joined binding.
+			name:      "wake arrives after listing",
+			afterList: func(wake *WakeQueue) error { wake.WakeAll(); return nil },
+			turns:     2,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hub := testenv.New(t)
+			spoke := testenv.New(t)
+			t.Setenv("KATA_HOME", t.TempDir())
+			a := bindSpokeProjects(t, hub.DB, spoke.DB, hub.URL, 1)[0]
 
-	wake := NewWakeQueue()
-	store := &afterListStore{Storage: spoke.DB, afterList: wake.WakeAll}
-	results := newSpokeResults()
-	runner := &Runner{
-		DB:            store,
-		Interval:      time.Hour,
-		Wake:          wake,
-		Debounce:      time.Millisecond,
-		OnSpokeResult: results.record,
-		OnError:       func(err error) { t.Errorf("federation runner: %v", err) },
+			wake := NewWakeQueue()
+			wake.WakeProject(a.spoke.ID)
+			results := newSpokeResults()
+			runner := &Runner{
+				DB:            &listHookStore{Storage: spoke.DB, afterList: func() error { return tc.afterList(wake) }},
+				Interval:      time.Hour,
+				Wake:          wake,
+				Debounce:      time.Millisecond,
+				OnSpokeResult: results.record,
+			}
+			go func() { _ = runner.Run(t.Context()) }()
+			for range tc.turns {
+				results.await(t, a.spoke.ID)
+			}
+		})
 	}
-	go func() { _ = runner.Run(t.Context()) }()
-	results.await(t, a.spoke.ID)
-	results.await(t, a.spoke.ID)
 }

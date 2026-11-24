@@ -111,45 +111,6 @@ func BenchmarkLocalWriteWakeToPass(b *testing.B) {
 	b.ReportMetric(float64(total)/float64(b.N), "hub-requests/write")
 }
 
-// BenchmarkSpokeWritingEveryTenSeconds runs a spoke with 50 bound projects
-// that writes once every 10 seconds, for one hour of scaled time per
-// iteration, with the default 30 second interval and 50 ms debounce, and
-// reports the HTTP requests the hub receives per hour. Run it with
-// -benchtime=1x; each iteration takes 3600/scale seconds.
-func BenchmarkSpokeWritingEveryTenSeconds(b *testing.B) {
-	const scale = 10
-	bench := newWakeBench(b)
-	bench.runner.Interval = 30 * time.Second / scale
-	bench.runner.Debounce = 50 * time.Millisecond / scale
-	ctx, cancel := context.WithCancel(b.Context())
-	defer cancel()
-	attachBenchWakes(ctx, bench.runner, bench.events, bench.spoke)
-	go func() { _ = bench.runner.Run(ctx) }()
-	bench.awaitInitialPass(b)
-
-	b.ResetTimer()
-	var total int
-	for range b.N {
-		bench.hub.reset()
-		writes := time.NewTicker(10 * time.Second / scale)
-		hour := time.NewTimer(time.Hour / scale)
-	simulate:
-		for {
-			select {
-			case <-writes.C:
-				bench.write(b, "periodic write")
-			case <-hour.C:
-				break simulate
-			}
-		}
-		writes.Stop()
-		requests, _ := bench.hub.counts()
-		total += requests
-	}
-	b.StopTimer()
-	b.ReportMetric(float64(total)/float64(b.N), "hub-requests/hour")
-}
-
 func clearSignal(signal chan struct{}) {
 	select {
 	case <-signal:
