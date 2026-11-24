@@ -10,6 +10,26 @@ import (
 )
 
 func checkRejoinRetainedHistory(t *testing.T, store db.Storage, backend Backend) error {
+	t.Run("snapshot includes incoming local links", func(t *testing.T) {
+		ctx := t.Context()
+		project, err := store.CreateProject(ctx, "incoming-link")
+		require.NoError(t, err)
+		blocker, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "blocker", Author: "old-actor"})
+		require.NoError(t, err)
+		blocked, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "blocked", Author: "old-actor"})
+		require.NoError(t, err)
+		_, _, err = store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: blocker.ID, ToIssueID: blocked.ID, Type: "blocks", Author: "old-actor"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: blocker.ID, Actor: "old-actor", FromUID: blocker.UID, ToUID: blocked.UID, FromShortID: blocker.ShortID, ToShortID: blocked.ShortID})
+		require.NoError(t, err)
+		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: true})
+		require.NoError(t, err)
+		snapshot, _, _, err := store.RetainedIssueSnapshot(ctx, project.ID, blocked.UID)
+		require.NoError(t, err)
+		var document db.IssueDocumentPayload
+		require.NoError(t, json.Unmarshal([]byte(snapshot.Payload), &document))
+		require.Len(t, document.Links, 1)
+		require.Equal(t, blocker.UID, document.Links[0].ToIssueUID)
+		require.True(t, document.Links[0].Incoming)
+	})
 	for _, restored := range []bool{false, true} {
 		for _, guarded := range []bool{false, true} {
 			t.Run(fmt.Sprintf("reset/restored=%t/guarded=%t", restored, guarded), func(t *testing.T) {

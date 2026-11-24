@@ -227,18 +227,34 @@ func RetainedSnapshotLocalLinks(ctx context.Context, tx *sql.Tx, issue Issue, pa
 	if err := json.Unmarshal([]byte(payload), &document); err != nil {
 		return "", err
 	}
-	raw, ok := document["links"]
-	if !ok {
-		return payload, nil
-	}
+	raw := document["links"]
 	var links []IssueDocumentLink
-	if err := json.Unmarshal(raw, &links); err != nil {
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &links); err != nil {
+			return "", err
+		}
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT l.type, peer.short_id, peer.uid, l.author, CAST(l.created_at AS TEXT) FROM links l JOIN issues peer ON peer.id=l.from_issue_id WHERE l.to_issue_id=$1 AND peer.project_id=$2`, issue.ID, issue.ProjectID)
+	if err != nil {
 		return "", err
 	}
-	if len(links) == 0 {
-		return payload, nil
+	for rows.Next() {
+		var link IssueDocumentLink
+		if err := rows.Scan(&link.Type, &link.ToShortID, &link.ToIssueUID, &link.Author, &link.CreatedAt); err != nil {
+			_ = rows.Close()
+			return "", err
+		}
+		link.Incoming = link.Type != "related"
+		links = append(links, link)
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT peer.uid FROM links l JOIN issues peer ON peer.id = CASE WHEN l.from_issue_id = $1 THEN l.to_issue_id ELSE l.from_issue_id END WHERE (l.from_issue_id = $1 OR l.to_issue_id = $1) AND peer.project_id = $2`, issue.ID, issue.ProjectID)
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return "", err
+	}
+	if err := rows.Close(); err != nil {
+		return "", err
+	}
+	rows, err = tx.QueryContext(ctx, `SELECT peer.uid FROM links l JOIN issues peer ON peer.id = CASE WHEN l.from_issue_id = $1 THEN l.to_issue_id ELSE l.from_issue_id END WHERE (l.from_issue_id = $1 OR l.to_issue_id = $1) AND peer.project_id = $2`, issue.ID, issue.ProjectID)
 	if err != nil {
 		return "", err
 	}

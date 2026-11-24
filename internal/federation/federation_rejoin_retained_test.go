@@ -225,6 +225,27 @@ func TestRejoinPublishesRetainedLinkPeers(t *testing.T) {
 		name string
 		run  func(*testing.T)
 	}{
+		{name: "edited blocked task", run: func(t *testing.T) {
+			ctx := t.Context()
+			hub, projects := newMoveDeliveryHub(t, "blocked-project")
+			spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
+			blocker, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "blocker", Author: "old-actor"})
+			require.NoError(t, err)
+			blocked, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "blocked", Author: "old-actor"})
+			require.NoError(t, err)
+			_, _, err = spoke.env.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: blocker.ID, ToIssueID: blocked.ID, Type: "blocks", Author: "old-actor"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: blocker.ID, Actor: "old-actor", FromUID: blocker.UID, ToUID: blocked.UID, FromShortID: blocker.ShortID, ToShortID: blocked.ShortID})
+			require.NoError(t, err)
+			rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
+			_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: blocked.ID, Author: "new-actor", Body: "update"})
+			require.NoError(t, err)
+			require.NoError(t, pushRejoin(t, spoke))
+			remoteBlocker, err := hub.DB.IssueByUID(ctx, blocker.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			links, err := hub.DB.LinksByIssue(ctx, remoteBlocker.ID)
+			require.NoError(t, err)
+			require.Len(t, links, 1)
+			require.Equal(t, blocked.UID, links[0].ToIssueUID)
+		}},
 		{name: "link", run: func(t *testing.T) {
 			ctx := t.Context()
 			hub, projects := newMoveDeliveryHub(t, "link-project")
