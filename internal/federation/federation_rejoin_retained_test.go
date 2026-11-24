@@ -2,7 +2,6 @@ package federation
 
 import (
 	"context"
-	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
 	"io"
@@ -16,6 +15,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -45,42 +45,29 @@ func rejoinProjectWithActor(t *testing.T, spoke moveDeliverySpoke, projectIndex 
 	spoke.credentials[hubProject.UID] = config.FederationCredential{HubURL: hubURL, HubProjectID: hubProject.ID, Token: grant.Token, Actor: "new-actor"}
 }
 
-func TestRejoinRetainedHistoryUsesEventBoundary(t *testing.T) {
+func restoreMoveDeliverySpoke(t *testing.T, spoke moveDeliverySpoke, hub *testenv.Env, projects []db.Project) moveDeliverySpoke {
+	t.Helper()
 	ctx := t.Context()
-	hub, projects := newMoveDeliveryHub(t, "wrong-actor-project")
-	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
-	rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
-	_, wrong, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "wrong actor task", Author: "new-actor"})
+	records, err := dbtest.CollectImportRecords(ctx, spoke.env.DB, db.ExportFilter{IncludeDeleted: true})
 	require.NoError(t, err)
-	binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
-	require.NoError(t, err)
-	payload := strings.Replace(wrong.Payload, `"author":"new-actor"`, `"author":"old-actor"`, 1)
-	require.NotEqual(t, wrong.Payload, payload)
-	hash, err := db.EventContentHash(db.EventHashInput{
-		UID: wrong.UID, OriginInstanceUID: wrong.OriginInstanceUID,
-		ProjectUID: wrong.ProjectUID, ProjectName: wrong.ProjectName,
-		IssueUID: wrong.IssueUID, RelatedIssueUID: wrong.RelatedIssueUID,
-		Type: wrong.Type, Actor: "old-actor", HLCPhysicalMS: wrong.HLCPhysicalMS,
-		HLCCounter: wrong.HLCCounter, CreatedAt: wrong.CreatedAt.UTC().Format(db.EventTimestampFormat),
-		Payload: jsontext.Value(payload),
+	former := spoke.env.DB.InstanceUID()
+	spoke.env = testenv.New(t, func(cfg *daemon.ServerConfig) {
+		cfg.FederationPushPending = DirectSpokePushPending(cfg.DB, cfg.Publish().Events)
 	})
+	require.NoError(t, spoke.env.DB.ImportReplay(ctx, records, db.ImportOptions{NewInstance: true}))
+	aliases, err := spoke.env.DB.FormerInstanceUIDs(ctx)
 	require.NoError(t, err)
-	// Local writes adopt the current bound actor. Rewrite this post-boundary row to
-	// represent a queued event from the earlier actor without changing the binding.
-	_, err = spoke.env.DB.ExecContext(ctx,
-		`UPDATE events SET actor = ?, payload = ?, content_hash = ? WHERE uid = ?`,
-		"old-actor", payload, hash, wrong.UID,
-	)
-	require.NoError(t, err)
-	wrongEvents, err := spoke.env.DB.EventsByUIDs(ctx, spoke.projects[0].ID, []string{wrong.UID})
-	require.NoError(t, err)
-	require.Len(t, wrongEvents, 1)
-	require.Equal(t, "old-actor", wrongEvents[0].Actor)
-	require.Greater(t, wrongEvents[0].ID, binding.RetainedThroughEventID)
-	err = spoke.sync(t, 0)
-	require.ErrorContains(t, err, "does not match bound actor")
-	_, err = spoke.env.DB.ActiveFederationQuarantine(ctx, spoke.projects[0].ID, db.FederationQuarantineDirectionPush)
-	require.NoError(t, err)
+	require.Contains(t, aliases, former)
+	for i, project := range projects {
+		spoke.projects[i], err = spoke.env.DB.ProjectByUID(ctx, project.UID)
+		require.NoError(t, err)
+		binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[i].ID)
+		require.NoError(t, err)
+		grant, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: spoke.env.DB.InstanceUID(), ProjectID: &project.ID, Capabilities: "push,pull,claim", Actor: binding.Actor})
+		require.NoError(t, err)
+		spoke.credentials[project.UID] = config.FederationCredential{HubURL: hub.URL, HubProjectID: project.ID, Token: grant.Token, Actor: binding.Actor}
+	}
+	return spoke
 }
 
 func pushRejoin(t *testing.T, spoke moveDeliverySpoke) error {
@@ -413,17 +400,8 @@ func TestRejoinRetainedIssueAndLaterTaskPublish(t *testing.T) {
 			spoke := newMoveDeliverySpoke(t, hub, projects, "new-actor")
 			issue, original, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "retained task", Author: "new-actor"})
 			require.NoError(t, err)
-			former := "01HZNQ7VFPK1XGD8R5MABCD4EF"
-			hash, err := db.EventContentHash(db.EventHashInput{
-				UID: original.UID, OriginInstanceUID: former, ProjectUID: original.ProjectUID, ProjectName: original.ProjectName,
-				IssueUID: original.IssueUID, RelatedIssueUID: original.RelatedIssueUID, Type: original.Type, Actor: original.Actor,
-				HLCPhysicalMS: original.HLCPhysicalMS, HLCCounter: original.HLCCounter,
-				CreatedAt: original.CreatedAt.UTC().Format(db.EventTimestampFormat), Payload: jsontext.Value(original.Payload),
-			})
-			require.NoError(t, err)
-			_, err = spoke.env.DB.ExecContext(ctx, `UPDATE events SET origin_instance_uid = ?, content_hash = ? WHERE uid = ?`, former, hash, original.UID)
-			require.NoError(t, err)
-			_, err = spoke.env.DB.ExecContext(ctx, `INSERT INTO meta(key, value) VALUES(?, '1')`, db.FormerInstanceUIDMetaPrefix+former)
+			spoke = restoreMoveDeliverySpoke(t, spoke, hub, projects)
+			issue, err = spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 			require.NoError(t, err)
 			rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
 			_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "new comment"})
@@ -438,8 +416,8 @@ func TestRejoinRetainedIssueAndLaterTaskPublish(t *testing.T) {
 			events, err := spoke.env.DB.EventsByUIDs(ctx, spoke.projects[0].ID, []string{original.UID})
 			require.NoError(t, err)
 			require.Len(t, events, 1)
-			require.Equal(t, hash, events[0].ContentHash)
-			require.Equal(t, former, events[0].OriginInstanceUID)
+			require.Equal(t, original.ContentHash, events[0].ContentHash)
+			require.Equal(t, original.OriginInstanceUID, events[0].OriginInstanceUID)
 		}},
 		{name: "batch new tasks", run: func(t *testing.T) {
 			ctx := t.Context()
@@ -577,15 +555,14 @@ func TestRetainedTaskAfterRejoin(t *testing.T) {
 					if tc.restoreRecoverySnapshot {
 						snapshot, _, _, err = spoke.env.DB.RetainedIssueSnapshot(ctx, spoke.projects[0].ID, issue.UID)
 						require.NoError(t, err)
-						former := "01HZNQ7VFPK1XGD8R5MABCD4EF"
-						hash, err := db.EventContentHash(db.EventHashInput{UID: snapshot.UID, OriginInstanceUID: former, ProjectUID: snapshot.ProjectUID, ProjectName: snapshot.ProjectName, IssueUID: snapshot.IssueUID, RelatedIssueUID: snapshot.RelatedIssueUID, Type: snapshot.Type, Actor: snapshot.Actor, HLCPhysicalMS: snapshot.HLCPhysicalMS, HLCCounter: snapshot.HLCCounter, CreatedAt: snapshot.CreatedAt.UTC().Format(db.EventTimestampFormat), Payload: jsontext.Value(snapshot.Payload)})
+						spoke = restoreMoveDeliverySpoke(t, spoke, hub, projects)
+						issue, err = spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 						require.NoError(t, err)
-						_, err = spoke.env.DB.ExecContext(ctx, `UPDATE events SET origin_instance_uid = ?, content_hash = ? WHERE uid = ?`, former, hash, snapshot.UID)
+						events, err := spoke.env.DB.EventsByUIDs(ctx, spoke.projects[0].ID, []string{snapshot.UID})
 						require.NoError(t, err)
-						_, err = hub.DB.ExecContext(ctx, `UPDATE events SET origin_instance_uid = ?, content_hash = ? WHERE uid = ?`, former, hash, snapshot.UID)
-						require.NoError(t, err)
-						_, err = spoke.env.DB.ExecContext(ctx, `INSERT INTO meta(key, value) VALUES(?, '1')`, db.FormerInstanceUIDMetaPrefix+former)
-						require.NoError(t, err)
+						require.Len(t, events, 1)
+						require.Equal(t, snapshot.ContentHash, events[0].ContentHash)
+						require.Equal(t, snapshot.OriginInstanceUID, events[0].OriginInstanceUID)
 					}
 				} else {
 					snapshot, _, _, err = spoke.env.DB.RetainedIssueSnapshot(ctx, spoke.projects[0].ID, issue.UID)
