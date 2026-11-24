@@ -267,11 +267,11 @@ this text in a harness-native response. To load it in every session, see
 
 ## Agent setup
 
-`kata agent setup [<harness>...]` installs user hooks for the agents you name.
-If you pass no names, it selects installed Claude Code and Codex. To check
-readiness without installing anything, add `--check`. When Codex hooks need
-review, open Codex and run `/hooks`. The command exits with code 1 when a
-selected agent needs attention.
+In unreleased builds, `kata agent setup [<harness>...]` installs user hooks for
+the agents you name. If you pass no names, it selects installed Claude Code and
+Codex. To check readiness without installing anything, add `--check`. When Codex
+hooks need review, open Codex and run `/hooks`. The command exits with code 1
+when a selected agent needs attention.
 
 ## Agent hook
 

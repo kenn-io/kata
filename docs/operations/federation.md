@@ -715,9 +715,9 @@ reset checkpoint; a later turn does.
 
 ### Refused and unavailable hubs
 
-The runner backs off a project whose hub keeps turning it away, so a spoke with
-many projects stops sending the hub a request for each one on every interval
-and every local write:
+On current `main` (unreleased), the runner backs off a project whose hub keeps
+turning it away, so a spoke with many projects stops sending the hub a request
+for each one on every interval and every local write:
 
 | Hub response | First wait | Longest wait | Retries at once when |
 | --- | --- | --- | --- |
@@ -2864,12 +2864,13 @@ A relay checkpoint can contain links between projects in the same group and
 root. An older peer receives `409 unsupported_event_features` naming
 `relay_cross_links_v1`; upgrade that peer and retry.
 
-Automatic retries wait at least the greater of one minute and the sync
-interval, doubling to a ceiling of the greater of five minutes and the
-interval. Other projects keep syncing. Local edits stay available locally and
-wait until the next due attempt to reach the hub. `kata federation status`
-shows the wait as `sync retry: relay hub refused cross-project links (409)`.
-Restarting the spoke daemon makes a fresh attempt right away.
+On current `main` (unreleased), automatic retries wait at least the greater of
+one minute and the sync interval, doubling to a ceiling of the greater of five
+minutes and the interval. Other projects keep syncing. Local edits stay
+available locally and wait until the next due attempt to reach the hub.
+`kata federation status` shows the wait as
+`sync retry: relay hub refused cross-project links (409)`. Restarting the spoke
+daemon makes a fresh attempt right away.
 
 ## Purge and reset
 
