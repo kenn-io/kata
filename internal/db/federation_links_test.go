@@ -12,7 +12,7 @@ import (
 
 func TestRetainedSnapshotLocalLinksRejectsNull(t *testing.T) {
 	_, err := db.RetainedSnapshotLocalLinks(t.Context(), nil, db.Issue{}, `null`)
-	require.Error(t, err)
+	require.EqualError(t, err, "retained snapshot must be a JSON object")
 }
 
 // The event types here are the complete set handled by FoldProjection.apply.
