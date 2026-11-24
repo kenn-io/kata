@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"maps"
 	"math"
-	"slices"
 
 	"go.kenn.io/kata/internal/db"
 )
@@ -27,7 +26,7 @@ func (e *retainedDependencyError) Error() string {
 
 // prepareCommentDependencies takes an event whose move snapshot is already
 // unwrapped.
-func (r *retainedPush) prepareCommentDependencies(ctx context.Context, event db.Event, preceding []db.Event) error {
+func (r *retainedPush) prepareCommentDependencies(ctx context.Context, event db.Event) error {
 	switch event.Type {
 	case "issue.commented", "issue.comment_edited":
 		key := "reply_to_uid"
@@ -35,7 +34,7 @@ func (r *retainedPush) prepareCommentDependencies(ctx context.Context, event db.
 			key = "comment_uid"
 		}
 		commentUID, _ := db.StringValue(db.PayloadMap([]byte(event.Payload))[key])
-		return r.confirmRetainedComment(ctx, commentUID, preceding)
+		return r.confirmRetainedComment(ctx, commentUID)
 	case "issue.created", "issue.snapshot":
 		var document db.IssueDocumentPayload
 		if err := json.Unmarshal([]byte(event.Payload), &document); err != nil {
@@ -46,7 +45,7 @@ func (r *retainedPush) prepareCommentDependencies(ctx context.Context, event db.
 			if comments[comment.ReplyToUID] {
 				continue
 			}
-			if err := r.confirmRetainedComment(ctx, comment.ReplyToUID, preceding); err != nil {
+			if err := r.confirmRetainedComment(ctx, comment.ReplyToUID); err != nil {
 				return err
 			}
 		}
@@ -83,12 +82,9 @@ func issueDocumentCreatedComments(comments []db.IssueDocumentComment) map[string
 }
 
 // confirmRetainedComment checks that the hub has a comment and its reply
-// ancestors when rejoin skipped their creation. A creation earlier in the same
-// request needs no check.
-func (r *retainedPush) confirmRetainedComment(ctx context.Context, commentUID string, preceding []db.Event) error {
-	if commentUID == "" || slices.ContainsFunc(preceding, func(event db.Event) bool {
-		return createdComments(event.Type, []byte(event.Payload))[commentUID]
-	}) {
+// ancestors when rejoin skipped their creation.
+func (r *retainedPush) confirmRetainedComment(ctx context.Context, commentUID string) error {
+	if commentUID == "" {
 		return nil
 	}
 	refs, err := r.retainedCommentChain(ctx, commentUID)

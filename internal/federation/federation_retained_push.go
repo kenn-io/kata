@@ -57,7 +57,7 @@ func (r *retainedPush) nextBatch(ctx context.Context, pending *[]db.Event) ([]db
 		}
 	}
 	for i, event := range batch {
-		if err := r.prepareEventDependencies(ctx, event, batch[:i]); err != nil {
+		if err := r.prepareEventDependencies(ctx, event); err != nil {
 			if i == 0 {
 				return nil, "", 0, err
 			}
@@ -73,9 +73,8 @@ func (r *retainedPush) nextBatch(ctx context.Context, pending *[]db.Event) ([]db
 
 // prepareEventDependencies publishes retained link endpoints before their
 // relationship and checks replies whose parents may have been skipped at
-// rejoin. Events in preceding belong to the same request and can satisfy a
-// reply when they create its parent comment.
-func (r *retainedPush) prepareEventDependencies(ctx context.Context, event db.Event, preceding []db.Event) error {
+// rejoin.
+func (r *retainedPush) prepareEventDependencies(ctx context.Context, event db.Event) error {
 	remote := db.FederationMoveSnapshotEvent(db.RemoteEvent{Type: event.Type, Payload: []byte(event.Payload)})
 	event.Type, event.Payload = remote.Type, string(remote.Payload)
 	if event.Type != "issue.unlinked" {
@@ -93,7 +92,7 @@ func (r *retainedPush) prepareEventDependencies(ctx context.Context, event db.Ev
 			}
 		}
 	}
-	return r.prepareCommentDependencies(ctx, event, preceding)
+	return r.prepareCommentDependencies(ctx, event)
 }
 
 func (r *retainedPush) publishRetainedIssue(ctx context.Context, issueUID string) error {
@@ -141,7 +140,7 @@ func (r *retainedPush) publishRetainedIssue(ctx context.Context, issueUID string
 	if created && r.onEvents != nil {
 		r.onEvents(binding.ProjectID, []db.Event{snapshot})
 	}
-	if err := r.prepareEventDependencies(ctx, snapshot, nil); err != nil {
+	if err := r.prepareEventDependencies(ctx, snapshot); err != nil {
 		return err
 	}
 	if err := validateFederationRunnerLease(ctx, r.validateLease); err != nil {
