@@ -9,6 +9,30 @@ import (
 )
 
 func checkRejoinRetainedHistory(t *testing.T, store db.Storage) error {
+	t.Run("pending retained edit blocks reset", func(t *testing.T) {
+		ctx := t.Context()
+		project, err := store.CreateProject(ctx, "pending-retained-edit")
+		require.NoError(t, err)
+		issue, created, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "task", Author: "old-actor"})
+		require.NoError(t, err)
+		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: true})
+		require.NoError(t, err)
+		require.NoError(t, store.AdvanceFederationPushCursor(ctx, project.ID, created.ID))
+		_, comment, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "pending edit"})
+		require.NoError(t, err)
+		err = store.ResetFederatedProjectIfNoPendingPush(ctx, project.ID, created.ID+1, created.ID, store.InstanceUID(), created.ID)
+		require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush)
+		events, err := store.EventsByUIDs(ctx, project.ID, []string{comment.UID})
+		require.NoError(t, err)
+		require.Equal(t, comment.ContentHash, events[0].ContentHash)
+		snapshot, sourceID, err := store.RetainedIssueSnapshot(ctx, project.ID, issue.UID)
+		require.NoError(t, err)
+		require.Equal(t, created.ID, sourceID)
+		reused, _, err := store.RetainedIssueSnapshot(ctx, project.ID, issue.UID)
+		require.NoError(t, err)
+		require.Equal(t, snapshot.UID, reused.UID)
+	})
+
 	t.Run("recover task moved before enrollment", func(t *testing.T) {
 		ctx := t.Context()
 		source, err := store.CreateProject(ctx, "offline-move-source")

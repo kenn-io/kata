@@ -1,6 +1,7 @@
 package federation
 
 import (
+	"net/http"
 	"testing"
 	"time"
 
@@ -8,6 +9,8 @@ import (
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/pgstore"
+	"go.kenn.io/kata/internal/testenv"
 )
 
 func TestLegacyBindingKeepsNewWrongActorQuarantined(t *testing.T) {
@@ -102,20 +105,116 @@ func pushRejoin(t *testing.T, spoke moveDeliverySpoke) error {
 	return pushDirectSpoke(ctx, spoke.env.DB, &binding, creds.HubProjectID, client, nil, nil, spoke.credentials, clientpkg.Opts{})
 }
 
-func TestRejoinUnknownIssueStaysLocalAndLaterTaskPublishes(t *testing.T) {
+func TestRejoinRetainedIssueAndLaterTaskPublish(t *testing.T) {
 	ctx := t.Context()
 	hub, projects := newMoveDeliveryHub(t, "rejoin-project")
 	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
-	old, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "old task", Author: "old-actor"})
+	old, original, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "old task", Author: "old-actor"})
 	require.NoError(t, err)
 	rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
-	_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: old.ID, Author: "new-actor", Body: "local edit"})
+	_, commentEvent, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: old.ID, Author: "new-actor", Body: "local edit"})
 	require.NoError(t, err)
 	later, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "later task", Author: "new-actor"})
 	require.NoError(t, err)
-	require.NoError(t, pushRejoin(t, spoke))
-	_, err = hub.DB.IssueByUID(ctx, old.UID, db.IncludeDeletedNo)
-	require.ErrorIs(t, err, db.ErrNotFound)
+	require.NoError(t, spoke.sync(t, 0))
+	remote, err := hub.DB.IssueByUID(ctx, old.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	comments, err := hub.DB.CommentsByIssue(ctx, remote.ID)
+	require.NoError(t, err)
+	require.Len(t, comments, 1)
+	require.Equal(t, "local edit", comments[0].Body)
+	events, err := spoke.env.DB.EventsByUIDs(ctx, spoke.projects[0].ID, []string{original.UID})
+	require.NoError(t, err)
+	require.Equal(t, original.ContentHash, events[0].ContentHash)
 	_, err = hub.DB.IssueByUID(ctx, later.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
+	require.NoError(t, spoke.env.DB.ResetFederatedProject(ctx, spoke.projects[0].ID, 0, 0))
+	require.NoError(t, spoke.sync(t, 0))
+	events, err = spoke.env.DB.EventsByUIDs(ctx, spoke.projects[0].ID, []string{original.UID, commentEvent.UID})
+	require.NoError(t, err)
+	require.Len(t, events, 2)
+	for _, event := range events {
+		if event.UID == original.UID {
+			require.Equal(t, original.ContentHash, event.ContentHash)
+		}
+	}
+}
+
+func TestRejoinedSpokeBatchesNewTasks(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "batch-project")
+	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
+	_, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "old task", Author: "old-actor"})
+	require.NoError(t, err)
+	rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
+	require.NoError(t, pushRejoin(t, spoke))
+	for _, title := range []string{"first", "second"} {
+		_, _, err = spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: title, Author: "new-actor"})
+		require.NoError(t, err)
+	}
+	binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
+	require.NoError(t, err)
+	creds := spoke.credentials[projects[0].UID]
+	client, err := NewClient(ctx, creds.HubURL, creds.Token, clientpkg.Opts{})
+	require.NoError(t, err)
+	transport := client.client.Transport
+	requests := 0
+	client.client.Transport = pushOnlyTestTransport(func(req *http.Request) (*http.Response, error) {
+		if req.Method == http.MethodPost {
+			requests++
+		}
+		return transport.RoundTrip(req)
+	})
+	require.NoError(t, pushDirectSpoke(ctx, spoke.env.DB, &binding, projects[0].ID, client, nil, nil, spoke.credentials, clientpkg.Opts{}))
+	require.Equal(t, 1, requests)
+}
+
+func TestPostgresRejoinRetainedIssueAndReset(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	ctx := t.Context()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+	store, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: "retained_rejoin", SchemaMode: pgstore.SchemaModeBootstrap})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	hub, projects := newMoveDeliveryHub(t, "rejoin-project")
+	project, err := store.CreateProjectWithUID(ctx, projects[0].Name, projects[0].UID)
+	require.NoError(t, err)
+	binding := db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: projects[0].ID, HubProjectUID: projects[0].UID, Actor: "old-actor", Enabled: true, PushEnabled: true}
+	_, err = store.UpsertFederationBinding(ctx, binding)
+	require.NoError(t, err)
+	issue, original, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "old task", Author: "old-actor"})
+	require.NoError(t, err)
+	_, err = store.LeaveFederationReplica(ctx, project.ID)
+	require.NoError(t, err)
+	binding.Actor, binding.RetainHistory = "new-actor", true
+	binding, err = store.UpsertFederationBinding(ctx, binding)
+	require.NoError(t, err)
+	grant, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: store.InstanceUID(), ProjectID: &projects[0].ID, Capabilities: "push,pull", Actor: "new-actor"})
+	require.NoError(t, err)
+	credentials := newMoveCredentialStore()
+	credentials[project.UID] = config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[0].ID, Token: grant.Token, Actor: "new-actor"}
+	_, comment, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "later edit"})
+	require.NoError(t, err)
+	require.NoError(t, SyncFederationOnce(ctx, store, binding, credentials[project.UID], credentials))
+	remote, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	comments, err := hub.DB.CommentsByIssue(ctx, remote.ID)
+	require.NoError(t, err)
+	require.Len(t, comments, 1)
+	require.Equal(t, "later edit", comments[0].Body)
+	require.NoError(t, store.ResetFederatedProject(ctx, project.ID, 0, 0))
+	binding, err = store.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	require.NoError(t, SyncFederationOnce(ctx, store, binding, credentials[project.UID], credentials))
+	events, err := store.EventsByUIDs(ctx, project.ID, []string{original.UID, comment.UID})
+	require.NoError(t, err)
+	require.Len(t, events, 2)
+	for _, event := range events {
+		if event.UID == original.UID {
+			require.Equal(t, original.ContentHash, event.ContentHash)
+		}
+	}
 }

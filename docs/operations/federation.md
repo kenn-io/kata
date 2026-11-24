@@ -2236,7 +2236,7 @@ Rejoin also recovers from a join that created the local project and failed
 before saving its binding. Repeat the join for the same local name and hub
 project identity to bind that existing project.
 
-Pull restarts from the hub's replay horizon, and already-applied events deduplicate by event UID. A push-enabled rejoin keeps events from an earlier actor on the spoke and publishes later events under the new enrollment. Edits to tasks the hub never received stay local after rejoin; later independent writes continue to sync.
+Pull restarts from the hub's replay horizon, and already-applied events deduplicate by event UID. A push-enabled rejoin keeps events from an earlier actor on the spoke and publishes later events under the new enrollment. When the hub has never received a task, the spoke publishes a snapshot under the new actor before its later edits. The hub attributes the snapshot's task, comments, and links to the new actor. The spoke keeps the original events and their actors.
 
 Kata upgrades SQLite databases at schema 41 or later to schema 54 in place at startup. Older binaries cannot
 open schema 54. To roll back, restore a backup made before the upgrade and use its matching
