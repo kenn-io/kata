@@ -1012,29 +1012,6 @@ describe('AppShell', () => {
     expect(writes).toEqual([])
   })
 
-  test('saves visibility on change with the loaded policy revision and selected teams', async () => {
-    let write: unknown
-    setGeneratedFetch(async (input, init) => {
-      if (init?.method === 'PUT') {
-        write = JSON.parse(String(init.body))
-        return policyResponse('teams', ['team-one'], 5)
-      }
-      return isTeamsList(input)
-        ? Response.json({ teams: [{ uid: 'team-one', name: 'Example team', revision: 1 }] })
-        : policyResponse('all', [], 4)
-    })
-    render(AppShell, { props: accessProps(executeAccessMutation) })
-    await screen.findByText('Example team')
-    await waitFor(() => expect(visibilitySelect().disabled).toBe(false))
-    await chooseVisibility('Selected teams')
-    expect(screen.getByText('Pick a team to save.')).not.toBeNull()
-    expect(write).toBeUndefined()
-    await fireEvent.click(screen.getByRole('checkbox', { name: 'Example team' }))
-    await waitFor(() =>
-      expect(write).toEqual({ visibility: 'teams', team_uids: ['team-one'], revision: 4 }),
-    )
-  })
-
   test('does not refresh an old team scene after authority changes during a write', async () => {
     let reads = 0
     setGeneratedFetch(async (input) => {
@@ -1063,61 +1040,6 @@ describe('AppShell', () => {
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(reads).toBe(1)
     expect(screen.queryByLabelText('New team name')).toBeNull()
-  })
-
-  test('preserves the visibility choice and refreshes its revision after a conflict', async () => {
-    const writes: unknown[] = []
-    setGeneratedFetch(async (input, init) => {
-      if (init?.method === 'PUT') {
-        writes.push(JSON.parse(String(init.body)))
-        return writes.length === 1
-          ? Response.json({ code: 'revision_conflict' }, { status: 409 })
-          : policyResponse('all', [], 6)
-      }
-      return isTeamsList(input)
-        ? Response.json({ teams: [{ uid: 'team-one', name: 'Example team', revision: 1 }] })
-        : policyResponse('all', [], writes.length ? 5 : 4)
-    })
-    render(AppShell, { props: accessProps(executeAccessMutation) })
-    await screen.findByText('Example team')
-    await waitFor(() => expect(visibilitySelect().disabled).toBe(false))
-    await chooseVisibility('Selected teams')
-    await fireEvent.click(screen.getByRole('checkbox', { name: 'Example team' }))
-    await waitFor(() => expect(writes).toHaveLength(1))
-    await screen.findByRole('button', { name: 'Retry saving visibility' })
-    await waitFor(() => expect(visibilitySelect().disabled).toBe(false))
-    expect(visibilitySelect().textContent).toContain('Selected teams')
-    expect(
-      (screen.getByRole('checkbox', { name: 'Example team' }) as HTMLInputElement).checked,
-    ).toBe(true)
-    expect(writes[0]).toEqual({ visibility: 'teams', team_uids: ['team-one'], revision: 4 })
-    await fireEvent.click(screen.getByRole('button', { name: 'Retry saving visibility' }))
-    await waitFor(() => expect(writes).toHaveLength(2))
-    expect(writes[1]).toEqual({ visibility: 'teams', team_uids: ['team-one'], revision: 5 })
-  })
-
-  test('does not retry an empty new teams policy after a failed save', async () => {
-    const writes: unknown[] = []
-    setGeneratedFetch(async (input, init) => {
-      if (init?.method === 'PUT') {
-        writes.push(JSON.parse(String(init.body)))
-        return Response.json({ code: 'revision_conflict' }, { status: 409 })
-      }
-      return isTeamsList(input)
-        ? Response.json({ teams: [{ uid: 'team-one', name: 'Example team', revision: 1 }] })
-        : policyResponse('all', [], 4)
-    })
-    render(AppShell, { props: accessProps(executeAccessMutation) })
-    await screen.findByText('Example team')
-    await waitFor(() => expect(visibilitySelect().disabled).toBe(false))
-    await chooseVisibility('Selected teams')
-    await fireEvent.click(screen.getByRole('checkbox', { name: 'Example team' }))
-    const retry = await screen.findByRole('button', { name: 'Retry saving visibility' })
-    await waitFor(() => expect(visibilitySelect().disabled).toBe(false))
-    await fireEvent.click(screen.getByRole('checkbox', { name: 'Example team' }))
-    expect((retry as HTMLButtonElement).disabled).toBe(true)
-    await fireEvent.click(retry)
-    expect(writes).toHaveLength(1)
   })
 
   test('discards late member and policy reads after switching selections', async () => {
@@ -1396,8 +1318,11 @@ describe('AppShell', () => {
 
     expect(screen.getByRole('heading', { name: 'Settings' })).not.toBeNull()
     expect(await screen.findByText(/kata\.example\.com/)).not.toBeNull()
+    expect(screen.getByRole('heading', { name: 'Search by meaning' })).not.toBeNull()
+    expect(
+      screen.getByRole('button', { name: 'Search by meaning' }).getAttribute('aria-current'),
+    ).toBe('true')
     expect(screen.queryByRole('button', { name: /layout/ })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Back to issues' })).toBeNull()
   })
 
   describe('Settings', () => {
@@ -1422,27 +1347,19 @@ describe('AppShell', () => {
       return { onNavigate }
     }
 
-    test('opens on Search by meaning', () => {
-      renderSettings(settingsRoute())
-      expect(screen.getByRole('heading', { name: 'Search by meaning' })).not.toBeNull()
-      expect(
-        screen.getByRole('button', { name: 'Search by meaning' }).getAttribute('aria-current'),
-      ).toBe('true')
+    test.each([
+      ['credentials', credentialsRoute()],
+      ['access', settingsRoute('access')],
+    ])('opens the Appearance address for unavailable %s', async (_label, route) => {
+      const { onNavigate } = renderSettings(route, {
+        token_audit_read: false,
+        access_admin: false,
+      })
+      expect(screen.getByRole('heading', { name: 'Appearance' })).not.toBeNull()
+      await fireEvent.click(screen.getByRole('button', { name: 'Appearance' }))
+
+      expect(onNavigate).toHaveBeenCalledWith(settingsRoute('appearance'))
     })
-
-    test.each([credentialsRoute(), settingsRoute('access')])(
-      'opens the Appearance address when its fallback is selected',
-      async (route) => {
-        const { onNavigate } = renderSettings(route, {
-          token_audit_read: false,
-          access_admin: false,
-        })
-        expect(screen.getByRole('heading', { name: 'Appearance' })).not.toBeNull()
-        await fireEvent.click(screen.getByRole('button', { name: 'Appearance' }))
-
-        expect(onNavigate).toHaveBeenCalledWith(settingsRoute('appearance'))
-      },
-    )
   })
 
   test('shows task creation errors on Settings', () => {

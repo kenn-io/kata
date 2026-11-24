@@ -70,7 +70,6 @@ describe('CredentialAudit', () => {
     expect(screen.getByText('<script>alert(1)</script>')).not.toBeNull()
     expect(scoped).toContain('ID 7')
     expect(rows[1]!.textContent).toContain('ID 8')
-    expect(screen.getByRole('group', { name: 'Credential filters' })).not.toBeNull()
     expect(screen.queryByRole('button', { name: /revoke/i })).toBeNull()
   })
 

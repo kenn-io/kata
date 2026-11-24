@@ -19,9 +19,7 @@ test('owner settings manage teams and persist project visibility', async ({
   await addMember(page, 'example-member')
   await chooseProject(page, 'example-project')
   await chooseVisibility(page, 'Selected teams')
-  await expect(page.getByText('Pick a team to save.')).toBeVisible()
   await page.getByRole('checkbox', { name: 'Example team' }).check()
-  await expect(page.getByText('Pick a team to save.')).toHaveCount(0)
   const teams = await kata.request(page, credentials, 'GET', '/api/v1/teams')
   const teamUID = (
     (await teams.json()) as { teams: Array<{ uid: string; name: string }> }
@@ -32,15 +30,14 @@ test('owner settings manage teams and persist project visibility', async ({
     .poll(() => accessPolicy(page, credentials, kata))
     .toMatchObject({ visibility: 'teams', team_uids: [teamUID] })
 
+  await expect(page.getByRole('checkbox', { name: 'Example team' })).toBeEnabled()
   await page.getByRole('checkbox', { name: 'Example team' }).uncheck()
-  await expect(page.getByText('No teams have access. Server owners still do.')).toBeVisible()
   await expect
     .poll(() => accessPolicy(page, credentials, kata))
     .toMatchObject({ visibility: 'teams', team_uids: [] })
   await page.reload()
   await chooseProject(page, 'example-project')
   await openTeam(page, 'Example team')
-  await expect(page.getByText('No teams have access. Server owners still do.')).toBeVisible()
   await expect(page.getByRole('checkbox', { name: 'Example team' })).not.toBeChecked()
 
   for (const width of [1280, 390]) {

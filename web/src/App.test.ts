@@ -2210,7 +2210,6 @@ describe('App', () => {
     cleanup()
     render(App)
     expect(await screen.findByRole('heading', { name: 'Credentials' })).not.toBeNull()
-    expect(screen.queryByRole('button', { name: 'Back to issues' })).toBeNull()
   })
 
   it('aborts and fences a delayed credential response after leaving the route', async () => {

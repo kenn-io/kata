@@ -130,7 +130,7 @@ test('credential controls stay in place when clearing a search makes the page sc
     route.fulfill({
       json: {
         tokens: Array.from({ length: 60 }, (_, index) => ({
-          id: `example-token-${index}`,
+          id: index,
           name: `example-name-${index}`,
           actor: 'user-a',
           state: 'live',

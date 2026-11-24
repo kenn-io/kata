@@ -107,49 +107,91 @@ describe('AccessManagement', () => {
     expect(team.checkValidity()).toBe(false)
   })
 
-  it('keeps visibility disabled when the policy reload after a failed write fails', async () => {
-    let reads = 0
-    let finishReload!: (response: Response) => void
-    setGeneratedFetch(async (input, init) => {
-      const path = new URL(String(input)).pathname
-      if (path === '/api/v1/teams')
-        return Response.json({ teams: [{ uid: 'team-one', name: 'example-team', revision: 1 }] })
-      if (init?.method === 'PUT') return new Response(null, { status: 409 })
-      if (path === '/api/v1/projects/7/access') {
-        if (++reads === 1)
-          return Response.json({ policy: { revision: 4, visibility: 'all', team_uids: [] } })
-        return new Promise<Response>((resolve) => (finishReload = resolve))
-      }
-      throw new Error(`Unexpected request: ${path}`)
-    })
-    render(AccessManagement, {
-      props: {
-        projects,
-        pending: false,
-        onMutation: async (
-          _draft: unknown,
-          mutate: (context: MutationContext) => Promise<unknown>,
-        ) => {
-          await mutate({ headers: {} } as MutationContext)
-          return false
+  it.each(['retry', 'empty draft', 'reload failure'])(
+    'handles a visibility conflict: %s',
+    async (scenario) => {
+      let reads = 0
+      const writes: unknown[] = []
+      let finishReload!: (response: Response) => void
+      setGeneratedFetch(async (input, init) => {
+        const path = new URL(String(input)).pathname
+        if (path === '/api/v1/teams')
+          return Response.json({ teams: [{ uid: 'team-one', name: 'example-team', revision: 1 }] })
+        if (init?.method === 'PUT') {
+          writes.push(JSON.parse(String(init.body)))
+          return writes.length === 1
+            ? Response.json({ code: 'revision_conflict' }, { status: 409 })
+            : Response.json({
+                policy: { revision: 6, visibility: 'teams', team_uids: ['team-one'] },
+              })
+        }
+        if (path === '/api/v1/projects/7/access') {
+          reads++
+          if (reads > 1 && scenario === 'reload failure')
+            return new Promise<Response>((resolve) => (finishReload = resolve))
+          return Response.json({
+            policy: { revision: reads === 1 ? 4 : 5, visibility: 'all', team_uids: [] },
+          })
+        }
+        throw new Error(`Unexpected request: ${path}`)
+      })
+      render(AccessManagement, {
+        props: {
+          projects,
+          pending: false,
+          onMutation: async (
+            _draft: unknown,
+            mutate: (context: MutationContext) => Promise<unknown>,
+          ) => {
+            const result = (await mutate({ headers: {} } as MutationContext)) as { status: number }
+            return result.status < 300
+          },
         },
-      },
-    })
-    const visibility = await screen.findByRole('combobox', { name: 'Visibility: Everyone' })
-    await waitFor(() => expect((visibility as HTMLButtonElement).disabled).toBe(false))
-    await fireEvent.click(visibility)
-    await fireEvent.click(screen.getByRole('option', { name: 'Selected teams' }))
-    await fireEvent.click(screen.getByRole('checkbox', { name: 'example-team' }))
-    await waitFor(() => expect(reads).toBe(2))
-    expect(
-      (screen.getByRole('combobox', { name: 'Visibility: Selected teams' }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(true)
-    finishReload(new Response(null, { status: 500 }))
-    await screen.findByText("Couldn't load project visibility.")
-    expect(
-      (screen.getByRole('combobox', { name: 'Visibility: Selected teams' }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(true)
-  })
+      })
+      const visibility = await screen.findByRole('combobox', { name: 'Visibility: Everyone' })
+      await waitFor(() => expect((visibility as HTMLButtonElement).disabled).toBe(false))
+      await fireEvent.click(visibility)
+      await fireEvent.click(screen.getByRole('option', { name: 'Selected teams' }))
+      expect(screen.getByText('Pick a team to save.')).not.toBeNull()
+      expect(writes).toHaveLength(0)
+      const team = screen.getByRole('checkbox', { name: 'example-team' }) as HTMLInputElement
+      await fireEvent.click(team)
+      await waitFor(() => expect(reads).toBe(2))
+      expect(writes[0]).toEqual({ visibility: 'teams', team_uids: ['team-one'], revision: 4 })
+      if (scenario === 'reload failure') {
+        expect(
+          (
+            screen.getByRole('combobox', {
+              name: 'Visibility: Selected teams',
+            }) as HTMLButtonElement
+          ).disabled,
+        ).toBe(true)
+        finishReload(new Response(null, { status: 500 }))
+        await screen.findByText("Couldn't load project visibility.")
+        expect(
+          (
+            screen.getByRole('combobox', {
+              name: 'Visibility: Selected teams',
+            }) as HTMLButtonElement
+          ).disabled,
+        ).toBe(true)
+        return
+      }
+      const retry = (await screen.findByRole('button', {
+        name: 'Retry saving visibility',
+      })) as HTMLButtonElement
+      await waitFor(() => expect(retry.disabled).toBe(false))
+      expect(team.checked).toBe(true)
+      if (scenario === 'empty draft') {
+        await fireEvent.click(team)
+        expect(retry.disabled).toBe(true)
+        await fireEvent.click(retry)
+        expect(writes).toHaveLength(1)
+      } else {
+        await fireEvent.click(retry)
+        await waitFor(() => expect(writes).toHaveLength(2))
+        expect(writes[1]).toEqual({ visibility: 'teams', team_uids: ['team-one'], revision: 5 })
+      }
+    },
+  )
 })
