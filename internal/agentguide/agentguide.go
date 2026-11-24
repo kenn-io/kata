@@ -5,27 +5,26 @@ import "strings"
 
 // Contract is the marker-free agent workflow contract: the short core every
 // coding agent sees. Coordination detail lives in the quickstart fragments.
-const Contract = `This workspace tracks its work in kata. Use kata for the changes the user asks
-you to make here, not for questions, explanations, or reviews that change
-nothing.
+const Contract = `Use kata for requested changes, not questions, explanations, or reviews that
+change nothing.
 
 Before starting a change, look for an existing issue:
 
     kata search "<one or two distinctive words>" --agent
 
-Search matches every word. Use an open issue that covers the work, or create one:
+Search matches every word. Reuse an open issue that covers the work, or create one:
 
     kata create "<title>" --body "<what and why>" --idempotency-key <key> --agent
 
-If create reports a look-alike, use that issue unless the work truly differs
-(--force-new). Link related but different work with --related <ref>, or
---parent <ref> when the new issue is part of a larger one.
+Labels p0 through p4 and labels starting with priority: are rejected; use --priority.
+
+If create reports a look-alike, reuse it unless the work differs (--force-new).
+Link related work with --related <ref>, or its parent with --parent <ref>.
 
 ` + ClaimRules + `When asked only to record something, create the issue and stop.
 
 ` + CommentRules + `
-Close the issue as soon as the work is verified. The message needs 40 or more
-characters and the close needs evidence:
+Close the issue when verified with a message of 40+ characters and evidence:
 
     kata close <ref> --done --message "<what changed and how you verified it>" --test "<command>" --agent
 

@@ -1260,6 +1260,8 @@ explicitly asks for that exact operation and ref.
 
 ## Labels, ownership, and claiming
 
+Labels `p0` through `p4` and labels beginning with `priority:` are reserved. Set priority with `kata edit <ref> --priority N` or `kata create --priority N`.
+
 ```sh
 kata label add <ref> <label> [--comment TEXT]
 kata label rm <ref> <label> [--comment TEXT]

@@ -206,6 +206,10 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if reuse != nil {
 			return reuse, nil
 		}
+		// A successful create from before this rule must remain retryable.
+		if err := rejectPriorityLabels(in.Body.Labels, "kata create --priority N or kata.create with priority"); err != nil {
+			return nil, err
+		}
 
 		// Fresh create (no reuse): now run the state-dependent link-target
 		// gates. A target in an archived project (link_target_archived) or a

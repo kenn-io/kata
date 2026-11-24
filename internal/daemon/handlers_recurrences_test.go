@@ -60,6 +60,37 @@ func TestPostRecurrence_HappyPath(t *testing.T) {
 	assert.Len(t, out.Recurrence.UID, 26)
 }
 
+func TestRecurrencePriorityLabels(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	p := seedProject(t, env, "example-project")
+	rec, _, err := env.DB.CreateRecurrence(t.Context(), db.CreateRecurrenceIn{
+		ProjectID: p.ID, Actor: "tester", Rule: "FREQ=WEEKLY", DTStart: "2026-05-15", Timezone: "UTC",
+		Template: db.RecurrenceTemplate{Title: "old", Labels: []string{"p2"}},
+	})
+	require.NoError(t, err)
+	baseURL := fmt.Sprintf("%s/api/v1/projects/%d/recurrences", env.URL, p.ID)
+	for _, label := range []string{"p0", " P2 ", " Priority:High "} {
+		resp := doPost(t, env, baseURL, fmt.Sprintf(`{"actor":"tester","rrule":"FREQ=WEEKLY","dtstart":"2026-05-15","timezone":"UTC","template":{"title":"review","labels":[%q]}}`, label))
+		raw := readClose(t, resp)
+		require.Equal(t, http.StatusBadRequest, resp.StatusCode, string(raw))
+		assert.Contains(t, string(raw), "priority field")
+	}
+	resp := doPatch(t, env, baseURL+"/"+rec.UID, `{"actor":"tester","template":{"title":"new"}}`, `"rev-1"`)
+	raw := readClose(t, resp)
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode, string(raw))
+	assert.Contains(t, string(raw), "priority field")
+	resp = doPatch(t, env, baseURL+"/"+rec.UID, `{"actor":"tester","template":{"title":"new"}}`, `"rev-2"`)
+	raw = readClose(t, resp)
+	require.Equal(t, http.StatusPreconditionFailed, resp.StatusCode, string(raw))
+	resp = doPatch(t, env, baseURL+"/"+rec.UID, `{"actor":"tester","template":{"labels":["area:ui","p2"]}}`, `"rev-1"`)
+	raw = readClose(t, resp)
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode, string(raw))
+	assert.Contains(t, string(raw), "remove the priority label from the issue or template and set the template priority")
+	resp = doPatch(t, env, baseURL+"/"+rec.UID, `{"actor":"tester","template":{"title":"new","labels":["area:ui"]}}`, `"rev-1"`)
+	raw = readClose(t, resp)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+}
+
 func TestPostRecurrence_AttachesInitialIssueAndAdvancesOnClose(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("tok"))
 	project := seedProject(t, env, "example-project")

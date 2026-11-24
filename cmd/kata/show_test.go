@@ -215,7 +215,7 @@ func TestShow_RendersLabelsAndLinksSections(t *testing.T) {
 	parent := createIssue(t, env, pid, "parent")
 	child := createIssue(t, env, pid, "child")
 	// Two labels so we exercise the comma-join.
-	for _, label := range []string{"bug", "priority:high"} {
+	for _, label := range []string{"bug", "area:ui"} {
 		runCLI(t, env, dir, "label", "add", child, label)
 	}
 	createLinkViaHTTP(t, env, pid, child, "parent", parent)
@@ -223,7 +223,7 @@ func TestShow_RendersLabelsAndLinksSections(t *testing.T) {
 	out := runCLI(t, env, dir, "show", child)
 	// Exact section headers and comma-joined label rendering.
 	assert.Contains(t, out, "--- labels ---")
-	assert.Contains(t, out, "bug, priority:high")
+	assert.Contains(t, out, "area:ui, bug")
 	// Links section: viewer (child) is on the "from" side of (from=child parent to=parent)
 	// so it reads "parent: <parent_short_id>" — its parent is the parent issue.
 	assert.Contains(t, out, "--- links ---")

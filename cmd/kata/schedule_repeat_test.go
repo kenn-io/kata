@@ -16,6 +16,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -26,6 +27,22 @@ type recurrenceRow struct {
 	TemplateOwner    *string  `json:"template_owner"`
 	TemplatePriority *int64   `json:"template_priority"`
 	TemplateLabels   []string `json:"template_labels"`
+}
+
+func TestScheduleRepeatPriorityLabelRecovery(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	priority := int64(2)
+	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: pid, Title: "Review", Author: "tester", Priority: &priority, Labels: []string{"p2", "routine"}})
+	require.NoError(t, err)
+	runCLI(t, env, dir, "schedule", issue.ShortID, "2026-11-02", "--repeat", "FREQ=WEEKLY", "--timezone", "UTC")
+	recs := listRecurrencesViaHTTP(t, env, pid)
+	require.Len(t, recs, 1)
+	assert.Equal(t, []string{"routine"}, recs[0].TemplateLabels)
+	require.NotNil(t, recs[0].TemplatePriority)
+	assert.Equal(t, priority, *recs[0].TemplatePriority)
+	labels, err := env.DB.LabelsForIssue(t.Context(), issue.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"p2", "routine"}, labels)
 }
 
 func listRecurrencesViaHTTP(t *testing.T, env *testenv.Env, pid int64) []recurrenceRow {

@@ -474,6 +474,8 @@ owner, priority, relationship, scheduling, and generic metadata changes. Keep
 issue-field or relationship changes separate from metadata changes in distinct
 `kata.edit` calls so one failed request cannot leave a partial edit.
 
+`kata.create` and `kata.set_label` reject labels `p0` through `p4` and labels beginning with `priority:`. Set the priority field with `kata.create` or `kata.edit`.
+
 ### Startup sections
 
 If a gateway needs typed tools in its first `tools/list`, configure the
