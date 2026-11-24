@@ -804,7 +804,9 @@ func (s *Store) ExportEvents(ctx context.Context, filter db.ExportFilter) iter.S
 	relatedIDScrub := `(peer.id IS NULL AND (events.related_issue_id IS NOT NULL OR events.related_issue_uid IS NOT NULL))`
 	relatedUIDScrub := `(peer.id IS NULL AND (events.related_issue_id IS NOT NULL OR events.related_issue_uid IS NOT NULL) AND events.type NOT IN ('issue.commented', 'issue.links_changed'))`
 	if filter.ProjectID == nil {
-		relatedUIDScrub = `(peer.id IS NULL AND (events.related_issue_id IS NOT NULL OR events.related_issue_uid IS NOT NULL) AND events.type NOT IN ('issue.commented', 'issue.links_changed', 'issue.linked', 'issue.unlinked'))`
+		relatedUIDScrub += ` AND NOT (events.type IN ('issue.linked','issue.unlinked')
+ AND events.origin_instance_uid=(SELECT value FROM meta WHERE key='instance_uid')
+ AND (` + db.FederationHeldEventSQL("events") + ` OR (EXISTS (SELECT 1 FROM federation_bindings b WHERE b.project_id=events.project_id AND events.id>b.push_cursor_event_id) AND ` + db.FederationEventReferencesMovedIssueSQL("events", true) + `)))`
 	}
 	var args []any
 	if filter.ProjectID != nil {
