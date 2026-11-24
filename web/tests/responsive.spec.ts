@@ -110,7 +110,10 @@ test('Settings tabs stay above the section at desktop and mobile widths', async 
     const headingBounds = (await heading.boundingBox())!
     expect(tabsBounds.y + tabsBounds.height).toBeLessThanOrEqual(headingBounds.y)
     if (width === 1440) {
-      expect(tabsBounds.height).toBe(48)
+      const headerHeight = await tabs.evaluate((list) =>
+        parseFloat(getComputedStyle(list).getPropertyValue('--layout-header-h')),
+      )
+      expect(tabsBounds.height).toBeCloseTo(headerHeight, 0)
       const selected = page.getByRole('tab', { name: 'Appearance' })
       const indicatorBottom = await selected.evaluate(
         (tab) =>
