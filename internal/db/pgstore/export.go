@@ -167,7 +167,7 @@ FROM project_purge_log`, "project_id", filter)
 
 // ExportMeta streams installation metadata ordered by key.
 func (s *Store) ExportMeta(ctx context.Context) iter.Seq2[db.MetaKV, error] {
-	return streamExportRows(ctx, s, "meta", `SELECT key, value FROM meta ORDER BY key ASC`, nil,
+	return streamExportRows(ctx, s, "meta", `SELECT key, value FROM meta WHERE key <> $1 ORDER BY key ASC`, []any{pollWakeSecretKey},
 		func(rows *sql.Rows) (db.MetaKV, error) {
 			var record db.MetaKV
 			if err := rows.Scan(&record.Key, &record.Value); err != nil {
@@ -803,6 +803,11 @@ func (s *Store) ExportEvents(ctx context.Context, filter db.ExportFilter) iter.S
 	issueIDExpression := `events.issue_id`
 	relatedIDScrub := `(peer.id IS NULL AND (events.related_issue_id IS NOT NULL OR events.related_issue_uid IS NOT NULL))`
 	relatedUIDScrub := `(peer.id IS NULL AND (events.related_issue_id IS NOT NULL OR events.related_issue_uid IS NOT NULL) AND events.type NOT IN ('issue.commented', 'issue.links_changed'))`
+	if filter.ProjectID == nil {
+		relatedUIDScrub += ` AND NOT (events.type IN ('issue.linked','issue.unlinked')
+ AND events.origin_instance_uid=(SELECT value FROM meta WHERE key='instance_uid')
+ AND (` + db.FederationHeldEventSQL("events") + ` OR (EXISTS (SELECT 1 FROM federation_bindings b WHERE b.project_id=events.project_id AND events.id>b.push_cursor_event_id) AND ` + db.FederationEventReferencesMovedIssueSQL("events", true) + `)))`
+	}
 	var args []any
 	if filter.ProjectID != nil {
 		issueIDExpression = `CASE WHEN subject_issue.id IS NOT NULL AND subject_issue.project_id <> $1 THEN NULL ELSE events.issue_id END`

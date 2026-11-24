@@ -656,6 +656,51 @@ The runner polls every 30 seconds by default. To change that interval, set
 `KATA_FEDERATION_PULL_INTERVAL_MS` on the daemon process. Shorter intervals
 increase wakeups and database traffic.
 
+A direct spoke also keeps one held poll open per binding when its hub supports
+held polls. The hub answers a held poll as soon as an event commits in that
+project, or after at most 45 seconds when nothing changes, so hub events reach
+the spoke without waiting for the interval. While a binding's poll is held,
+interval passes skip that binding's pull and still push and renew claims. The
+spoke records a pull in sync status when the hub answers the held poll, so a
+hub that stops answering stops advancing the binding's last pull time. A pass
+that fails for a binding ends that binding's held poll until a later pass
+succeeds. Relay bindings and hubs without held-poll support keep pulling on the
+interval.
+
+Held polls need a few things from the deployment:
+
+- Proxies between the spoke and hub must allow a request to stay idle for at
+  least 45 seconds. Common 60-second idle timeouts are enough.
+- Each idle binding keeps one request open at its hub. A host that limits
+  concurrent requests per instance, such as some managed platforms, holds more
+  open requests than it did with interval polls.
+- A hub holds at most 32 polls per available CPU, accounting for `GOMAXPROCS`
+  and Linux CPU quotas, up to 256 total. Each spoke
+  credential can hold at most half the total limit, up to 32, or 16 on a
+  one-CPU hub. Signed polls can use at most half of the hub's federation control
+  slots. Past a limit the hub
+  answers at once and the spoke falls back to its interval. It asks for a held
+  poll again after a growing delay, up to 16 intervals.
+- The spoke asks for a wait 15 seconds shorter than its request budget, so a
+  `KATA_HTTP_TIMEOUT` under 16 seconds turns held polls off. The daemon log
+  says so once for each binding.
+
+The hub checks the poll's full authorization again before each read after a
+wake and before returning events or a reset, including the signing key for
+signed polls. A credential revoked, membership removed, or signing key retired
+before a wake stops the poll. When the wait expires, the hub returns the
+initial empty page and its cursor; the next poll checks access and sees events
+whose wakeup was lost.
+Hubs that share a PostgreSQL database and schema wake each other's held polls
+with `LISTEN/NOTIFY` on a channel that other connected database roles can listen
+to or notify; a SQLite hub wakes them in process. A PostgreSQL wake carries the
+publishing process's instance tag and up to two keyed 64-bucket project tags.
+Each receiving process wakes polls in those buckets, and each poll reauthorizes
+and rereads its own project. Roles without access to application tables can
+observe wake activity and co-occurring buckets on a move. Notifications omit
+project IDs and issue content. A listener also wakes its held polls after
+reconnecting to cover notifications missed while disconnected.
+
 Sync runs in turns. In one turn for a project, the runner pushes and pulls at
 most 8 batches per stream and direction (1000 deliveries per event or receipt
 batch, 32 manifest offers per artifact batch) and then yields so it can serve
@@ -2107,7 +2152,13 @@ leave before contacting the hub:
 
 - On a native spoke using local credentials, preparation refuses while another
   project still owes a locally authored move from this source. Sync that
-  destination project and retry.
+  destination project and retry. When a newer hub move supersedes the unsent
+  move, leave without `--delete` can proceed; `--delete` is refused with
+  `federation_lifecycle_blocked`. Unacknowledged edits stay local through resets
+  and full backups restored without `--as-standalone`. The spoke sends them
+  after it rejoins the source with push enabled and every referenced issue
+  returns to a joined project. A prepared leave finishes even if a later pull
+  moves an issue to another project.
 - Otherwise, Kata atomically pauses writes on the leaving binding so a new move
   cannot race hub revocation.
 - For a config-managed reservation, preparation durably marks the reservation,
@@ -2242,6 +2293,8 @@ local-origin events from the beginning; the hub deduplicates what it already
 has and absorbs any edits made while the project was standalone. Rejoin with
 the same actor the enrollment is bound to. Events authored as a different actor
 are rejected by the hub and quarantined.
+
+A read-only rejoin keeps held offline edits local until push is enabled.
 
 If you run `join` naming a *different* project while a local project still
 holds the hub project's UID, Kata refuses the join with

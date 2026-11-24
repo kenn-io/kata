@@ -164,6 +164,7 @@ var alreadyImplemented = map[string]bool{
 	"RecordFederationSyncError":            true, // federation_control.go
 	"RecordFederationSyncPullStarted":      true, // federation_control.go
 	"RecordFederationSyncPullSuccess":      true, // federation_control.go
+	"RecordFederationHeldPullSuccess":      true, // federation_control.go
 	"RecordFederationSyncPushStarted":      true, // federation_control.go
 	"RecordFederationSyncPushSuccess":      true, // federation_control.go
 	"RecordFederationSyncReset":            true, // federation_control.go

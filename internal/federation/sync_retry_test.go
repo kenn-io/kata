@@ -275,3 +275,19 @@ func TestHubStatusErrorCarriesRetryAfter(t *testing.T) {
 	require.ErrorAs(t, err, &status)
 	require.Equal(t, 2*time.Minute, status.RetryAfter)
 }
+
+func TestHeldRetrySurvivesEarlierSyncSuccess(t *testing.T) {
+	retries := newSyncRetries(noJitter)
+	binding := db.FederationBinding{Role: db.FederationRoleSpoke, Enabled: true, HubURL: "https://hub.example", HubProjectID: 42}
+	credential := config.FederationCredential{HubURL: binding.HubURL, HubProjectID: 42, Token: "token"}
+	started := retries.version(1)
+	at := time.Now()
+	identity, err := heldRetryIdentity(binding, credential)
+	require.NoError(t, err)
+	retries.recordSchedule(1, identity, identity, true, &HubStatusError{StatusCode: http.StatusServiceUnavailable, RetryAfter: 2 * time.Minute}, time.Second, at, nil, binding.UpdatedAt)
+	retries.recordSchedule(1, [32]byte{}, [32]byte{}, false, nil, time.Second, at.Add(time.Second), &started, time.Time{})
+	binding.UpdatedAt, binding.LastSyncAt = at, &at
+	require.True(t, retries.blockedFor(t.Context(), 1, binding, credential, at.Add(time.Second), retries.version(1)))
+	binding.UpdatedAt, binding.LastSyncAt = at.Add(2*time.Second), nil
+	require.False(t, retries.blockedFor(t.Context(), 1, binding, credential, at.Add(2*time.Second), retries.version(1)), "a changed binding must retry at once")
+}

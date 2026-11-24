@@ -288,9 +288,36 @@ func checkFederationControlLifecycle(t *testing.T, store db.Storage) error {
 	if err := store.RecordFederationSyncPullStarted(ctx, spoke.ID, pullStarted); err != nil {
 		return err
 	}
+	if err := store.RecordFederationHeldPullSuccess(ctx, spoke.ID, pullSuccess); err != nil {
+		return err
+	}
+	pullStatus, err := store.FederationSyncStatusByProject(ctx, spoke.ID)
+	if err != nil {
+		return err
+	}
+	assert.Nil(t, pullStatus.LastPullSuccessAt)
 	if err := store.RecordFederationSyncPullSuccess(ctx, spoke.ID, pullSuccess); err != nil {
 		return err
 	}
+	if err := store.RecordFederationHeldPullSuccess(ctx, spoke.ID, pullStarted); err != nil {
+		return err
+	}
+	pullStatus, err = store.FederationSyncStatusByProject(ctx, spoke.ID)
+	if err != nil {
+		return err
+	}
+	require.NotNil(t, pullStatus.LastPullSuccessAt)
+	assert.Equal(t, pullSuccess, *pullStatus.LastPullSuccessAt)
+	heldAt := pullSuccess.Add(time.Second)
+	if err := store.RecordFederationHeldPullSuccess(ctx, spoke.ID, heldAt); err != nil {
+		return err
+	}
+	pullStatus, err = store.FederationSyncStatusByProject(ctx, spoke.ID)
+	if err != nil {
+		return err
+	}
+	require.NotNil(t, pullStatus.LastPullSuccessAt)
+	assert.Equal(t, heldAt, *pullStatus.LastPullSuccessAt)
 	if err := store.RecordFederationSyncPushStarted(ctx, spoke.ID, pushStarted); err != nil {
 		return err
 	}
