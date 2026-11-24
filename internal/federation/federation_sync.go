@@ -264,8 +264,29 @@ func pushDirectSpoke(
 	if binding.PushEnabled {
 		retained := &retainedPush{store: store, binding: binding, hubProjectID: hubProjectID, client: client, validateLease: validateLease, credentials: credentials, opts: opts, sent: make(map[string]bool)}
 		for {
-			if err := retryPushQuarantine(ctx, store, binding); err != nil {
-				return err
+			if q, err := store.ActiveFederationQuarantine(ctx, binding.ProjectID, db.FederationQuarantineDirectionPush); err == nil {
+				quarantinedEvents, eventErr := store.EventsByUIDs(ctx, binding.ProjectID, q.EventUIDs)
+				if eventErr != nil {
+					if errors.Is(eventErr, db.ErrNotFound) {
+						return recordFederationSyncError(ctx, store, binding.ProjectID, ErrFederationPushQuarantined)
+					}
+					return recordFederationSyncError(ctx, store, binding.ProjectID, eventErr)
+				}
+				if retry, reason := autoRetryFederationQuarantine(q, quarantinedEvents); retry {
+					if _, err := store.RetryFederationQuarantine(ctx, db.RetryFederationQuarantineParams{
+						ID:        q.ID,
+						ProjectID: binding.ProjectID,
+						Actor:     binding.Actor,
+						Reason:    reason,
+						Now:       time.Now().UTC(),
+					}); err != nil {
+						return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+					}
+				} else {
+					return recordFederationSyncError(ctx, store, binding.ProjectID, ErrFederationPushQuarantined)
+				}
+			} else if err != nil && !errors.Is(err, db.ErrNotFound) {
+				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 			}
 			pending, err := store.PendingFederationPushEvents(
 				ctx, binding.ProjectID, store.InstanceUID(), binding.PushCursorEventID, federationPollLimit)
@@ -325,13 +346,7 @@ func pushDirectSpoke(
 				// snapshot for them. Those snapshots go, and the project is
 				// rebuilt, in the same transaction that moves the cursor.
 				ackCtx, resets := db.WithFederationMoveResetCapture(ctx)
-				superseded := ack.SupersededEventUIDs
-				if retained.recovery {
-					// Keep the accepted recovery snapshot as the local baseline for
-					// a later move, even when the hub represented it as a repeated copy.
-					superseded = nil
-				}
-				if err := store.AcknowledgeFederationPush(ackCtx, binding.ProjectID, ack.PushCursorEventID, superseded); err != nil {
+				if err := store.AcknowledgeFederationPush(ackCtx, binding.ProjectID, ack.PushCursorEventID, ack.SupersededEventUIDs); err != nil {
 					// A push that waits for the hub's history is finished by the
 					// next pull and the push after it. The reason is recorded
 					// like any other, so a wait that does not end is visible in
@@ -352,36 +367,6 @@ func pushDirectSpoke(
 		if err := store.RecordFederationSyncPushSuccess(ctx, binding.ProjectID, time.Now().UTC()); err != nil {
 			return err
 		}
-	}
-	return nil
-}
-
-// retryPushQuarantine retries an active push quarantine when its events allow
-// it, and otherwise reports that the push stays quarantined.
-func retryPushQuarantine(ctx context.Context, store db.Storage, binding *db.FederationBinding) error {
-	if q, err := store.ActiveFederationQuarantine(ctx, binding.ProjectID, db.FederationQuarantineDirectionPush); err == nil {
-		quarantinedEvents, eventErr := store.EventsByUIDs(ctx, binding.ProjectID, q.EventUIDs)
-		if eventErr != nil {
-			if errors.Is(eventErr, db.ErrNotFound) {
-				return recordFederationSyncError(ctx, store, binding.ProjectID, ErrFederationPushQuarantined)
-			}
-			return recordFederationSyncError(ctx, store, binding.ProjectID, eventErr)
-		}
-		if retry, reason := autoRetryFederationQuarantine(q, quarantinedEvents); retry {
-			if _, err := store.RetryFederationQuarantine(ctx, db.RetryFederationQuarantineParams{
-				ID:        q.ID,
-				ProjectID: binding.ProjectID,
-				Actor:     binding.Actor,
-				Reason:    reason,
-				Now:       time.Now().UTC(),
-			}); err != nil {
-				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-			}
-			return nil
-		}
-		return recordFederationSyncError(ctx, store, binding.ProjectID, ErrFederationPushQuarantined)
-	} else if err != nil && !errors.Is(err, db.ErrNotFound) {
-		return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 	}
 	return nil
 }

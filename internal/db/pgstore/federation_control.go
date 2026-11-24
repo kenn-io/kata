@@ -228,9 +228,6 @@ func (s *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCu
 		if err != nil {
 			return err
 		}
-		if err := db.RecordFederationAcceptedRecoverySnapshots(ctx, tx, projectID, s.InstanceUID(), nextCursor); err != nil {
-			return err
-		}
 		if err := updateFederationCursor(ctx, tx, projectID, nextCursor, true); err != nil {
 			return err
 		}
