@@ -87,7 +87,7 @@ func parsePriorityQuery(raw, field string) (*int64, error) {
 		return nil, api.NewError(400, "validation",
 			field+" must be an integer 0..4", "", nil)
 	}
-	if n < 0 || n > 4 {
+	if n < db.MinPriority || n > db.MaxPriority {
 		return nil, api.NewError(400, "validation",
 			field+" must be between 0 and 4", "0 = highest, 4 = lowest", nil)
 	}

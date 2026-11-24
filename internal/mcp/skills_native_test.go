@@ -98,6 +98,7 @@ func TestNativeGuideExamplesMatchCatalog(t *testing.T) {
 	}
 	md, _ := SkillMarkdown("workflow")
 	require.Contains(t, md, agentguide.MCPContract)
+	require.Contains(t, agentguide.MCPContract, "Only create real work the user requested.")
 	require.LessOrEqual(t, len(agentguide.MCPContract), 2000)
 }
 

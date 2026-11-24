@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"strconv"
@@ -257,10 +258,17 @@ func patchRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.PatchRe
 			Timezone: in.Body.Timezone,
 		}
 		if in.Body.Template != nil {
+			if rev != rec.Revision {
+				return nil, api.NewError(412, "revision_conflict", fmt.Sprintf("recurrence revision is %d", rec.Revision), "", nil)
+			}
+			var labels []string
 			if in.Body.Template.Labels != nil {
-				if err := rejectPriorityLabels(*in.Body.Template.Labels, "remove the priority label from the issue or template and set the template priority"); err != nil {
-					return nil, err
-				}
+				labels = *in.Body.Template.Labels
+			} else if err := json.Unmarshal([]byte(rec.TemplateLabels), &labels); err != nil {
+				return nil, internalAPIError(err)
+			}
+			if err := rejectPriorityLabels(labels, "remove the priority label from the issue or template and set the template priority"); err != nil {
+				return nil, err
 			}
 			update.TemplateTitle = in.Body.Template.Title
 			update.TemplateBody = in.Body.Template.Body
