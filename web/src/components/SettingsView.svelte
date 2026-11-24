@@ -37,8 +37,11 @@
     if (!list || !tab) return
     const strip = list.getBoundingClientRect()
     const bounds = tab.getBoundingClientRect()
-    if (bounds.left < strip.left) list.scrollLeft += bounds.left - strip.left
-    else if (bounds.right > strip.right) list.scrollLeft += bounds.right - strip.right
+    const style = getComputedStyle(list)
+    const left = strip.left + (parseFloat(style.scrollPaddingLeft) || 0)
+    const right = strip.right - (parseFloat(style.scrollPaddingRight) || 0)
+    if (bounds.left < left) list.scrollLeft += bounds.left - left
+    else if (bounds.right > right) list.scrollLeft += bounds.right - right
   })
 
   let accessVisited = $state(false)
@@ -212,8 +215,15 @@
   }
 
   @media (max-width: 760px) {
+    .settings-view :global(.kit-tabs__list) {
+      width: 100%;
+      box-sizing: border-box;
+      padding-inline: var(--layout-inset);
+      scroll-padding-inline: var(--layout-inset);
+    }
+
     .settings-view > :global(.kit-tabs) {
-      scrollbar-gutter: stable;
+      scrollbar-gutter: auto;
     }
   }
 </style>

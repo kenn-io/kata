@@ -130,8 +130,10 @@ test('Settings tabs stay above the section at desktop and mobile widths', async 
     })
     expect(underline.left).toBeCloseTo(labelBounds.x, 0)
     expect(underline.right).toBeCloseTo(labelBounds.x + labelBounds.width, 0)
-    expect(tabsBounds.x).toBeCloseTo(headingBounds.x, 0)
-    expect(tabsBounds.x + tabsBounds.width).toBeCloseTo(headingBounds.x + headingBounds.width, 0)
+    if (width === 1440) {
+      expect(tabsBounds.x).toBeCloseTo(headingBounds.x, 0)
+      expect(tabsBounds.x + tabsBounds.width).toBeCloseTo(headingBounds.x + headingBounds.width, 0)
+    }
     expect(labelBounds.x).toBeCloseTo(headingBounds.x, 0)
     expect(await page.getByText('This browser').count()).toBe(0)
     expect(await page.getByText('This server', { exact: true }).count()).toBe(0)
@@ -170,8 +172,11 @@ for (const [route, label] of [
     await expect(selected).toHaveAttribute('aria-selected', 'true')
     const strip = (await tabs.boundingBox())!
     const tab = (await selected.boundingBox())!
-    expect(tab.x).toBeGreaterThanOrEqual(strip.x - 1)
-    expect(tab.x + tab.width).toBeLessThanOrEqual(strip.x + strip.width + 1)
+    const view = (await page.locator('.settings-view').boundingBox())!
+    expect(strip.x).toBeCloseTo(view.x, 0)
+    expect(strip.x + strip.width).toBeCloseTo(view.x + view.width, 0)
+    expect(tab.x).toBeGreaterThanOrEqual(strip.x + 15)
+    expect(tab.x + tab.width).toBeLessThanOrEqual(strip.x + strip.width - 15)
   })
 }
 
