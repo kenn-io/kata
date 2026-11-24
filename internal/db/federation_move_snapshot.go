@@ -34,6 +34,7 @@ func recoverySnapshotSQL(instance string) string {
 // the hub acknowledged in a push that moves the cursor to through. The cursor
 // alone is no proof: it also advances over skipped former-actor events.
 func RecordFederationAcceptedRecoverySnapshots(ctx context.Context, tx *sql.Tx, projectID int64, instanceUID string, through int64) error {
+	//nolint:gosec // G202: SQL fragments are fixed and values are bound.
 	_, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value)
  SELECT '`+FederationAcknowledgedEventPrefix+`' || p.uid || '.' || e.uid,'1'
  FROM events e JOIN projects p ON p.id=e.project_id JOIN federation_bindings b ON b.project_id=e.project_id
