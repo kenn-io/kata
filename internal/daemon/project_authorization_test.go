@@ -1731,7 +1731,7 @@ func TestProjectAccessRegisteredProjectOperations(t *testing.T) {
 					// Body-bearing federation routes authenticate enrollment before
 					// Huma dispatch or reading input. Other project routes retain 404.
 					switch op.OperationID {
-					case "ingestFederationProjectEvents", "acceptRelayDeliveries", "ackRelayDeliveries":
+					case "ingestFederationProjectEvents", "watchFederationProjectEvents", "acceptRelayDeliveries", "ackRelayDeliveries":
 						want = http.StatusForbidden
 					}
 					assert.Equal(t, want, status, string(body))

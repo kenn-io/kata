@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-23
+last_edited: 2026-11-24
 ---
 
 # HTTP API schema
@@ -373,6 +373,7 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
+| `0.70.0` | Federation event watches hold one request for many projects; event polls advertise `X-Kata-Federation-Watch-Max`. |
 | `0.69.0` | Close responses can include a `parent_ready` issue reference. |
 | `0.67.0` | Federation event polls accept `wait` and advertise `X-Kata-Federation-Poll-Wait-Max`. |
 | `0.66.0` | Federation search accepts `auto` and reports its effective mode, matched fields, and any fallback reason. |
@@ -992,7 +993,34 @@ authority and polls snapshots because the event stream remains protected.
 `GET /api/v1/projects/{project_id}/federation/events` accepts an optional
 `wait` in seconds. A caught-up poll may wait up to 45 seconds for new events;
 a zero or omitted wait answers at once. Successful responses advertise the
-maximum wait in seconds in `X-Kata-Federation-Poll-Wait-Max`.
+maximum wait in seconds in `X-Kata-Federation-Poll-Wait-Max`, and the most
+projects one watch can name in `X-Kata-Federation-Watch-Max`. A hub that
+requires signed federation requests advertises `0` watch projects.
+
+`POST /api/v1/projects/{project_id}/federation/events:watch` holds one request
+for the route project and up to 255 more. The bearer authorizes the route
+project. Each other project in the body carries its own enrollment token:
+
+```json
+{"after_id": 120, "projects": [{"project_id": 7, "after_id": 33, "token": "..."}]}
+```
+
+The hub checks each token against its own project, as it would check a poll
+by that token, and answers as soon as any named project has events or a reset
+after its cursor, or when the `wait` ends. The response names projects only;
+pull their events with the event poll:
+
+```json
+{"ready": [7], "unwatched": []}
+```
+
+`unwatched` lists projects the hub did not watch: their token does not
+authorize pulls from them, or the request is signed. A signed request proves
+only the route credential's key, so it watches the route project alone. A list
+with more than 255 other projects, a repeated project, the route project, a
+negative cursor, or a missing token returns `400 validation`. The response
+carries the same `X-Kata-Federation-Poll-Wait-Max` and
+`X-Kata-Federation-Watch-Max` headers as the event poll.
 
 `POST /api/v1/projects/{project_id}/federation/events:ingest` returns
 `400 validation` when a fresh event references a stored sibling-project issue

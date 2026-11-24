@@ -99,8 +99,7 @@ func (e *federationWatchEntry) ready(cfg ServerConfig, features string) (bool, e
 }
 
 func apiStatus(err error) int {
-	var apiErr *api.APIError
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[*api.APIError](err); ok {
 		return apiErr.Status
 	}
 	return 0
