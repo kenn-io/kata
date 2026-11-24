@@ -1693,6 +1693,7 @@ func federationProjectStatus(
 		CredentialExpiresAt:         credentialMetadata.ExpiresAt,
 		PullCursorEventID:           binding.PullCursorEventID,
 		PushCursorEventID:           binding.PushCursorEventID,
+		RetainedHistory:             binding.Role == db.FederationRoleSpoke && binding.RelayConfig == nil && binding.RetainedThroughEventID > 0,
 		PendingPushCount:            pendingPush,
 		PendingPushHighWaterEventID: pendingHighWater,
 		EnrollmentCount:             enrollments,

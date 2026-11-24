@@ -2311,6 +2311,9 @@ func printFederationStatus(cmd *cobra.Command, body api.FederationStatusBody) er
 			fmt.Sprintf("unresolved violations: %d", status.UnresolvedViolationCount),
 			fmt.Sprintf("recent violations: %d", status.RecentViolationCount),
 		}
+		if status.RetainedHistory {
+			lines = append(lines, "Untouched retained tasks may remain local", "Recovery snapshots attribute tasks, comments, and links to the current actor on the hub")
+		}
 		if status.ProviderStatus != "" {
 			provider := formatProviderStatus(status.ProviderStatus)
 			if federationprovider.Status(status.ProviderStatus) == federationprovider.StatusReleased && status.Role == "spoke" {
@@ -2484,6 +2487,7 @@ func printFederationStatusAgent(cmd *cobra.Command, body api.FederationStatusBod
 			agentRowField("pull_cursor", strconv.FormatInt(status.PullCursorEventID, 10)),
 			agentRowField("push_cursor", strconv.FormatInt(status.PushCursorEventID, 10)),
 			agentRowField("pending_push", strconv.FormatInt(status.PendingPushCount, 10)),
+			agentRowField("retained_history", strconv.FormatBool(status.RetainedHistory)),
 			agentRowField("last_sync", formatFederationStatusTime(status.LastSuccessfulSyncAt)),
 			agentRowField("last_error", formatFederationStatusError(status.LastErrorAt, status.LastError)),
 			agentRowField("live_leases", strconv.FormatInt(status.LiveClaimCount, 10)),
