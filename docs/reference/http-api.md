@@ -293,7 +293,7 @@ with a separate health probe. Whenever you send `Idempotency-Key` or `If-Match`,
 also send `retry_protocol: "close-v1"`. Current daemons require that marker, and
 older daemons reject the unknown field before the close can run.
 
-Starting in API `0.68.0`, a successful close can include
+Starting in API `0.69.0`, a successful close can include
 `parent_ready`, an issue reference for an open parent with no open children.
 The field is omitted for retries, dry runs, unchanged closes, inaccessible
 parents, and when the advisory lookup fails.
@@ -373,7 +373,7 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
-| `0.68.0` | Close responses can include a `parent_ready` issue reference. |
+| `0.69.0` | Close responses can include a `parent_ready` issue reference. |
 | `0.67.0` | Federation event polls accept `wait` and advertise `X-Kata-Federation-Poll-Wait-Max`. |
 | `0.66.0` | Federation search accepts `auto` and reports its effective mode, matched fields, and any fallback reason. |
 | `0.64.0` | Routes shared-project attachments to their Docbank origin. Attachment references can include `origin`; the UI attachment capability is enabled when the daemon has a local Docbank or any enabled spoke binding. A disabled spoke rejects uploads and links with `503 federation_offline`, even when it has a local vault. Federation peers advertise `docbank_origin_v1` before receiving origin references. |
