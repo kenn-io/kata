@@ -5,31 +5,29 @@ import "strings"
 
 // Contract is the marker-free agent workflow contract: the short core every
 // coding agent sees. Coordination detail lives in the quickstart fragments.
-const Contract = `This workspace tracks its work in kata. Use kata for the changes the user asks
-you to make here, not for questions, explanations, or reviews that change
-nothing.
+const Contract = `Use kata for requested changes, not questions, explanations, or reviews that
+change nothing.
 
-Before starting a change, look for an existing issue:
+Before a change, search for an issue:
 
     kata search "<one or two distinctive words>" --agent
 
-Search matches every word. Use an open issue that covers the work, or create one:
+Search matches every word. Reuse an open issue, or create one:
 
     kata create "<title>" --body "<what and why>" --idempotency-key <key> --agent
 
-If create reports a look-alike, use that issue unless the work truly differs
-(--force-new). Link related but different work with --related <ref>, or
---parent <ref> when the new issue is part of a larger one.
+Labels p0 through p4 and labels starting with priority: are rejected; use --priority.
+
+If create reports a look-alike, reuse it unless the work differs (--force-new).
+Link related work with --related <ref>, or its parent with --parent <ref>.
 
 ` + ClaimRules + `When asked only to record something, create the issue and stop.
 
 ` + CommentRules + `
-Close the issue as soon as the work is verified. The message needs 40 or more
-characters and the close needs evidence:
+Close verified work with a message of 40+ characters and evidence.
+For work without a PR:
 
     kata close <ref> --done --message "<what changed and how you verified it>" --test "<command>" --agent
-
-Use --commit <sha> or --pr <url> instead of --test when that is the evidence.
 
 Never run kata delete or kata purge unless the user asks for that exact action.
 
@@ -58,13 +56,17 @@ quoted heredoc so the shell leaves backticks and $ alone; replies such as
 	EOF
 
 Correct your own comment with kata comment edit <ref> <comment-uid>. Keep
-live status in work.attention_msg, not in comments:
+live status in work.attention_msg and an open PR's URL in work.pr_url:
 
     kata meta set <ref> work.attention_msg "<what remains>"
+    kata meta set <ref> work.pr_url <url>
 
 A PR that is open and not merged is unfinished. If you stop before the work is
 done, leave the issue open, update work.attention and work.attention_msg, and
 run kata label add <ref> needs-review.
+
+Close a done issue that has a PR with --pr <url>; otherwise --commit <sha> or
+--test "<command>" is valid evidence.
 `
 
 // Quickstart is the full CLI agent briefing: every fragment, in order.
@@ -148,7 +150,8 @@ const fragClosing = `2. Closing an issue asserts that the work is complete. If t
                       --evidence "no-change-audit:schema unchanged after review" \
                       --reviewed internal/db/schema.sql
 
-   The daemon refuses parent-close while open children remain. Reviewers
+   Closing the last open child hints at its open parent. The
+   daemon refuses parent-close while open children remain. Reviewers
    can replay activity with kata audit closes and undo a specific lazy
    close with kata reopen <ref>.
 
@@ -340,6 +343,7 @@ const fragCoordination = `   Coordinate tracked work through work.* metadata whe
    kata meta set <ref> work.attention needs-human  # wants input or review
    kata meta set <ref> work.attention_msg "<why>"
    kata meta set <ref> work.branch <branch>        # once, for branch work
+   kata meta set <ref> work.pr_url <url>           # the open PR
 
    Before stopping on watched work, close it or update both
    work.attention and work.attention_msg for the hand-off.

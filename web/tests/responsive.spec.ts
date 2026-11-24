@@ -105,6 +105,7 @@ test('Appearance changes the sidebar color', async ({ page, kata }) => {
     page.locator('.kata-sidebar').evaluate((element) => getComputedStyle(element).backgroundColor)
   const darkColor = await sidebarColor()
   await page.getByRole('button', { name: 'Settings' }).click()
+  await page.getByRole('button', { name: /^Appearance/ }).click()
   await page.getByRole('radio', { name: 'Light', exact: true }).click()
   await expect.poll(sidebarColor).not.toBe(darkColor)
 })

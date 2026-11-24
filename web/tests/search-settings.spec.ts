@@ -55,17 +55,20 @@ test('Settings keeps status colors, spacing, and title alignment consistent', as
   ]) {
     current = { ...off, ...patch }
     await page.goto(`${kata.origin}/kata?view=settings`)
-    const title = page.getByText('Search by meaning', { exact: true })
+    const title = page.getByRole('heading', { name: 'Search by meaning' })
     await expect(title).toBeVisible()
     if (!patch.indexing || (patch.indexing.total > 0 && !patch.indexing.failed)) {
       const titleBox = (await title.boundingBox())!
       positions.push(titleBox.y)
       const secondary = page
-        .locator('.kit-search-by-meaning__line, [role="progressbar"], .search-row [role="alert"]')
+        .locator('.kit-search-by-meaning__line, [role="progressbar"], .search-row .kit-notice')
         .first()
       if (await secondary.count()) {
+        // The row names its status under the section title; details sit
+        // the same distance below that name in every state.
+        const nameBox = (await page.locator('.kit-search-by-meaning__name').boundingBox())!
         const secondaryBox = (await secondary.boundingBox())!
-        gaps.push(secondaryBox.y - titleBox.y - titleBox.height)
+        gaps.push(secondaryBox.y - nameBox.y - nameBox.height)
       }
     }
     if (patch.indexing && !patch.indexing.failed) {
@@ -79,7 +82,7 @@ test('Settings keeps status colors, spacing, and title alignment consistent', as
       )
     }
     if (patch.job?.state === 'failed' || patch.indexing?.failed) {
-      const alert = page.getByRole('alert')
+      const alert = page.locator('.search-row .kit-notice')
       await expect(alert).toBeVisible()
       const colors = await alert.evaluate((element) => {
         const probe = document.createElement('span')
@@ -93,7 +96,7 @@ test('Settings keeps status colors, spacing, and title alignment consistent', as
       if (patch.indexing?.failed) {
         const progress = (await page.getByRole('progressbar').boundingBox())!
         const detail = (await page
-          .getByText('Indexing 1 of 2 issues · Keyword search works meanwhile', { exact: true })
+          .getByText('Preparing 1 of 2 tasks · Keyword search works meanwhile', { exact: true })
           .boundingBox())!
         const error = (await alert.boundingBox())!
         expect(error.y - detail.y - detail.height).toBeGreaterThan(

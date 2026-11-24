@@ -2,7 +2,6 @@
   import { Button, cleanupTheme, initTheme, setThemeMode } from '@kenn-io/kit-ui'
   import { startBrowserTelemetry } from '@kenn-io/kit-ui/utils/browser-telemetry'
   import { onMount } from 'svelte'
-  import { SvelteMap } from 'svelte/reactivity'
 
   import { commentRetryIdentity } from './lib/kata/commentRetry'
   import type { KataCommentReplyIntent } from './lib/kata/types'
@@ -189,7 +188,6 @@
   let credentialError = $state<string | undefined>()
   let credentialAbort: AbortController | undefined
   let credentialGeneration = 0
-  const credentialReturnRoutes = new SvelteMap<string, AppRoute>()
   let destroyed = false
   const observedFetch: typeof fetch = async (input, init) => {
     const response = await fetch(input, init)
@@ -362,6 +360,26 @@
 
   $effect(() => {
     if (
+      route.kind === 'kata' &&
+      route.view === 'credentials' &&
+      authority?.snapshot &&
+      authority.snapshot.capabilities.token_audit_read !== true &&
+      !authority.loading &&
+      !authority.stale &&
+      !authority.authenticationRequired &&
+      !daemonSwitching &&
+      !daemonError
+    ) {
+      fenceCredentialAudit()
+      route = { ...route, view: 'settings', section: 'appearance' }
+      history.replaceState(null, '', serializeRoute(route))
+      if (activeDaemonID) saveDaemonRoute(activeDaemonID, serializeRoute(route))
+      loadRoute()
+    }
+  })
+
+  $effect(() => {
+    if (
       versionMismatch ||
       mode === 'loading' ||
       route.kind === 'route-error' ||
@@ -491,11 +509,6 @@
       next = { ...next }
       delete next.link
     }
-    const opensCredentials =
-      route.kind !== 'route-error' && !isDaemonView(route.view) && isDaemonView(next.view)
-    if (opensCredentials && route.kind !== 'route-error') {
-      credentialReturnRoutes.set(credentialRouteKey(activeDaemonID), route)
-    }
     if (
       route.kind !== 'route-error' &&
       route.view === 'credentials' &&
@@ -503,11 +516,7 @@
     ) {
       fenceCredentialAudit()
     }
-    history.pushState(
-      opensCredentials ? { kataCredentialReturn: credentialRouteKey(activeDaemonID) } : null,
-      '',
-      serializeRoute(next),
-    )
+    history.pushState(null, '', serializeRoute(next))
     route = next
     if (activeDaemonID) saveDaemonRoute(activeDaemonID, serializeRoute(next))
     mode = authority?.snapshot ? 'ready' : 'loading'
@@ -559,22 +568,6 @@
   function requestIntentForRoute(next: AppRoute): UISnapshotIntent {
     const intent = snapshotRequestIntent(snapshotIntentForRoute(next))
     return activeDaemonID ? { ...intent, daemonID: activeDaemonID } : intent
-  }
-
-  function returnFromCredentials(): void {
-    const state = history.state as { kataCredentialReturn?: unknown } | null
-    if (state?.kataCredentialReturn === credentialRouteKey(activeDaemonID)) {
-      history.back()
-      return
-    }
-    navigate(
-      credentialReturnRoutes.get(credentialRouteKey(activeDaemonID)) ?? {
-        kind: 'kata',
-        view: 'all-open',
-        graph: false,
-        filters: { status: [], owner: [], label: [], relationship: [] },
-      },
-    )
   }
 
   async function createProject(name: string, makeInbox = false): Promise<{ changed: boolean }> {
@@ -1390,7 +1383,7 @@
         requireAuthentication()
       } else {
         credentialTokens = []
-        credentialError = 'Credential inventory is unavailable.'
+        credentialError = "Couldn't load credentials."
       }
     } catch {
       if (
@@ -1400,7 +1393,7 @@
         daemonID === activeDaemonID
       ) {
         credentialTokens = []
-        credentialError = 'Credential inventory is unavailable.'
+        credentialError = "Couldn't load credentials."
       }
     } finally {
       if (generation === credentialGeneration) credentialLoading = false
@@ -1419,10 +1412,6 @@
 
   function isDaemonView(view: AppRoute['view']): boolean {
     return view === 'credentials' || view === 'settings'
-  }
-
-  function credentialRouteKey(daemonID: string | undefined): string {
-    return daemonID ?? '__direct__'
   }
 </script>
 
@@ -1534,7 +1523,6 @@
         onAccessMutation={(draft, mutate) => runMutation({ draft }, mutate, accessMutations)}
         onRefreshCredentials={refreshCredentials}
         canAdministerDaemon={canAdministerDaemon()}
-        onBackFromCredentials={returnFromCredentials}
         onSelectDaemon={(id) => void switchDaemon(id)}
         onOpenDaemon={() => void refreshDaemonRoster()}
         onPreferencesChange={updatePreferences}

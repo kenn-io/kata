@@ -1161,6 +1161,8 @@ kata close <ref> --done --message <text> \
   [--dry]
 ```
 
+`kata close` removes the issue's `needs-review` label; reopening does not restore it.
+
 You can repeat `--commit`, `--pr`, `--test`, `--reviewed`, or `--evidence` to
 record more than one item, for example when a fix landed in two pull requests.
 
@@ -1227,6 +1229,12 @@ kata close <ref> --done \
 External evidence is an attributable account, not independently verified proof,
 and it stays visible as `external` in `kata audit closes` evidence types.
 
+Closing the last open child of an open parent prints a hint on stderr naming
+the parent. An exact retry with the same `--idempotency-key` prints no hint.
+JSON output includes a `parent_ready` entry in `hints`; `--quiet` hides the
+stderr hint. Kata leaves the parent open. The web UI, TUI, and MCP do not
+display this hint.
+
 Other close reasons:
 
 ```sh
@@ -1259,6 +1267,8 @@ confirmation string is the issue's qualified short ID, for example
 explicitly asks for that exact operation and ref.
 
 ## Labels, ownership, and claiming
+
+Labels `p0` through `p4` and labels beginning with `priority:` are reserved. Set priority with `kata edit <ref> --priority N` or `kata create --priority N`.
 
 ```sh
 kata label add <ref> <label> [--comment TEXT]

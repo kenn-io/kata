@@ -410,7 +410,7 @@ func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationRea
 	err = tx.QueryRowContext(ctx, `SELECT (SELECT MAX(cursor) FROM (
  SELECT MAX(purge_reset_after_event_id) AS cursor FROM purge_log WHERE project_id=$1 AND purge_reset_after_event_id>$2
  UNION ALL SELECT MAX(purge_reset_after_event_id) AS cursor FROM project_purge_log WHERE project_id=$1 AND purge_reset_after_event_id>$2
- UNION ALL SELECT CAST(value AS BIGINT) AS cursor FROM meta WHERE key=$3 AND CAST(value AS BIGINT)>$2) resets),
+ UNION ALL SELECT CASE WHEN key=$3 THEN CAST(value AS BIGINT) END AS cursor FROM meta WHERE key=$3 AND CASE WHEN key=$3 THEN CAST(value AS BIGINT) END>$2) resets),
  COALESCE((SELECT MAX(id) FROM events),0)`, project.ID, after, ProjectStreamResetMetadataPrefix+project.UID).Scan(&reset, &newest)
 	if err != nil {
 		return out, err

@@ -20,7 +20,7 @@
   import { formatDay } from '../lib/kata/dates'
   import { markColor } from '../lib/marks'
   import type { KataTaskDetail } from '../lib/kata/types'
-  import { deadlineDate, scheduledDate } from '../lib/kata/view'
+  import { deadlineDate, httpURL, scheduledDate } from '../lib/kata/view'
   import DatePicker from './DatePicker.svelte'
 
   interface Props {
@@ -220,6 +220,7 @@
   }
 
   const hasPriority = $derived(issue.issue.priority !== undefined && issue.issue.priority !== null)
+  const prURL = $derived(httpURL(issue.issue.metadata['work.pr_url']))
   const shownPriority = $derived(
     activeProperty === 'priority' ? priorityDraft : hasPriority ? String(issue.issue.priority) : '',
   )
@@ -595,6 +596,19 @@
     </dd>
   {/if}
 
+  {#if prURL}
+    <dt>PR</dt>
+    <dd>
+      <a
+        class="value-text pr-link"
+        href={prURL}
+        target="_blank"
+        rel="noopener noreferrer"
+        title={prURL}>{prURL.replace(/^https?:\/\//, '')}</a
+      >
+    </dd>
+  {/if}
+
   {#if issue.labels.length > 0 || addingLabel}
     <dt>Labels</dt>
     <dd>
@@ -688,6 +702,15 @@
     align-items: center;
     gap: 4px;
     min-height: 24px;
+  }
+  .pr-link {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    line-height: 24px;
+    color: var(--text-primary);
   }
   .value-note {
     color: var(--text-secondary);

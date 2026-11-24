@@ -19,6 +19,18 @@ interface BuildKataTaskViewOptions {
 
 type ProjectLookup = Map<string, KataProjectSummary>
 
+export function httpURL(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  try {
+    const url = new URL(value)
+    if ((url.protocol === 'http:' || url.protocol === 'https:') && !url.username && !url.password)
+      return url.href
+  } catch {
+    return undefined
+  }
+  return undefined
+}
+
 function issueDate(value: string | undefined): string | undefined {
   return value?.slice(0, 10)
 }

@@ -4801,6 +4801,9 @@ components:
           $ref: "#/components/schemas/Issue"
         original_event:
           $ref: "#/components/schemas/Event"
+        parent_ready:
+          $ref: "#/components/schemas/IssueRef"
+          description: Open parent with no open children after this close; set only by close.
         reused:
           type: boolean
       required:
@@ -7499,7 +7502,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.67.0
+  version: 0.69.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:

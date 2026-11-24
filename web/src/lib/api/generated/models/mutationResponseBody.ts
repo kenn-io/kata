@@ -3,12 +3,15 @@
  */
 import type { Event } from './event.ts'
 import type { Issue } from './issue.ts'
+import type { IssueRef } from './issueRef.ts'
 
 export interface MutationResponseBody {
   changed: boolean
   event: Event
   issue: Issue
   original_event?: Event
+  /** Open parent with no open children after this close; set only by close. */
+  parent_ready?: IssueRef
   reused?: boolean
   [key: string]: unknown
 }

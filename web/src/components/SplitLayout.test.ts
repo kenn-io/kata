@@ -113,4 +113,16 @@ describe('SplitLayout', () => {
     expect(screen.queryByRole('separator')).toBeNull()
     expect(onResize).not.toHaveBeenCalled()
   })
+
+  it('starts at the default share and reports a resize in pixels', async () => {
+    mockRect(1200, 600)
+    const onResize = vi.fn()
+    render(SplitLayoutTestHarness, { props: { primarySize: null, defaultShare: 2 / 3, onResize } })
+
+    const handle = screen.getByRole('separator', { name: 'Resize Kata panes' })
+    expect(handle.getAttribute('aria-valuenow')).toBe('800')
+    expect(onResize).not.toHaveBeenCalled()
+    await fireEvent.keyDown(handle, { key: 'ArrowRight' })
+    expect(onResize).toHaveBeenLastCalledWith(816)
+  })
 })

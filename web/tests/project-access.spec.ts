@@ -1,8 +1,8 @@
 import type { Page } from '@playwright/test'
-import { expect, test, type BrowserCredentials } from './fixtures'
+import { expect, test, type BrowserCredentials, type KataFixture } from './fixtures'
 
 // Exercise owner settings against the production daemon and its native store.
-test('owner credential settings manage teams and persist project visibility', async ({
+test('owner settings manage teams and persist project visibility', async ({
   page,
   kata,
 }, testInfo) => {
@@ -13,37 +13,36 @@ test('owner credential settings manage teams and persist project visibility', as
   expect(forbidden.status()).toBe(403)
 
   const credentials = await loginOwner(page, kata.origin)
-  await expect(page.getByRole('heading', { name: 'Teams and visibility' })).toBeVisible()
-  await page.getByLabel('New team name').fill('Example team')
-  await page.getByRole('button', { name: 'Create team' }).click()
-  const option = page.getByRole('option', { name: 'Example team' })
-  await expect(option).toHaveCount(1)
-  const teamUID = await option.getAttribute('value')
-  expect(teamUID).toBeTruthy()
-  await page.getByLabel('Team', { exact: true }).selectOption(teamUID!)
-  await page.getByLabel('Member account').fill('example-member')
-  await page.getByRole('button', { name: 'Add member' }).click()
-  await expect(page.getByRole('list', { name: 'Team members' })).toContainText('example-member')
-  await page.getByLabel('Project visibility').selectOption(String(kata.projectID))
-  await expect(page.getByLabel('Visibility', { exact: true })).toBeEnabled()
-  await page.getByLabel('Visibility', { exact: true }).selectOption('teams')
+  await expect(page.getByRole('heading', { name: 'Teams', exact: true })).toBeVisible()
+  await createTeam(page, 'Example team')
+  await openTeam(page, 'Example team')
+  await addMember(page, 'example-member')
+  await chooseProject(page, 'example-project')
+  await chooseVisibility(page, 'Selected teams')
   await page.getByRole('checkbox', { name: 'Example team' }).check()
-  await page.getByRole('button', { name: 'Save visibility' }).click()
-  await expect(page.getByRole('button', { name: 'Save visibility' })).toBeEnabled()
-  const access = await kata.request(
-    page,
-    credentials,
-    'GET',
-    `/api/v1/projects/${kata.projectID}/access`,
-  )
-  expect(access.ok()).toBe(true)
-  expect(await access.json()).toMatchObject({
-    policy: { visibility: 'teams', team_uids: [teamUID] },
-  })
+  const teams = await kata.request(page, credentials, 'GET', '/api/v1/teams')
+  const teamUID = (
+    (await teams.json()) as { teams: Array<{ uid: string; name: string }> }
+  ).teams.find((team) => team.name === 'Example team')?.uid
+  expect(teamUID).toBeTruthy()
+  // Visibility saves on change; poll until the daemon holds the pick.
+  await expect
+    .poll(() => accessPolicy(page, credentials, kata))
+    .toMatchObject({ visibility: 'teams', team_uids: [teamUID] })
+
+  await expect(page.getByRole('checkbox', { name: 'Example team' })).toBeEnabled()
+  await page.getByRole('checkbox', { name: 'Example team' }).uncheck()
+  await expect
+    .poll(() => accessPolicy(page, credentials, kata))
+    .toMatchObject({ visibility: 'teams', team_uids: [] })
+  await page.reload()
+  await chooseProject(page, 'example-project')
+  await openTeam(page, 'Example team')
+  await expect(page.getByRole('checkbox', { name: 'Example team' })).not.toBeChecked()
 
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 1000 })
-    await expect(page.getByRole('heading', { name: 'Teams and visibility' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Project visibility' })).toBeVisible()
     const layout = await page.evaluate(() => ({
       width: window.innerWidth,
       content: document.documentElement.scrollWidth,
@@ -55,30 +54,35 @@ test('owner credential settings manage teams and persist project visibility', as
     })
   }
   await page.getByRole('button', { name: 'Remove example-member' }).click()
-  await expect(page.getByRole('list', { name: 'Team members' })).not.toContainText('example-member')
+  await expect(teamMembers(page, 'Example team')).not.toContainText('example-member')
   page.once('dialog', (dialog) => void dialog.accept())
-  await page.getByRole('button', { name: 'Delete team' }).click()
-  await expect(page.getByRole('option', { name: 'Example team' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Delete Example team' }).click()
+  await expect(teamRow(page, 'Example team')).toHaveCount(0)
 })
 
-test('owner settings share the credential panel width and fit narrow screens', async ({
+test('Teams and Project visibility share one content column and fit narrow screens', async ({
   page,
   kata,
 }, testInfo) => {
   await kata.launch(page)
   await loginOwner(page, kata.origin)
-  const management = page.getByRole('region', { name: 'Teams and visibility' })
-  await expect(management).toBeVisible()
+  const teams = page
+    .locator('.kit-settings-section')
+    .filter({ has: page.getByRole('heading', { name: 'Teams', exact: true }) })
+  const visibility = page
+    .locator('.kit-settings-section')
+    .filter({ has: page.getByRole('heading', { name: 'Project visibility' }) })
+  await expect(teams).toBeVisible()
+  await expect(visibility).toBeVisible()
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 1000 })
-    const accessBox = await management.boundingBox()
-    const credentialBox = await page
-      .getByRole('region', { name: 'Credentials', exact: true })
-      .boundingBox()
-    expect(accessBox).not.toBeNull()
-    expect(credentialBox).not.toBeNull()
-    expect(accessBox!.x).toBeCloseTo(credentialBox!.x, 0)
-    expect(accessBox!.width).toBeGreaterThanOrEqual(credentialBox!.width - 2)
+    const teamsBox = await teams.boundingBox()
+    const visibilityBox = await visibility.boundingBox()
+    expect(teamsBox).not.toBeNull()
+    expect(visibilityBox).not.toBeNull()
+    expect(visibilityBox!.x).toBeCloseTo(teamsBox!.x, 0)
+    expect(visibilityBox!.width).toBeCloseTo(teamsBox!.width, 0)
+    expect(visibilityBox!.y).toBeGreaterThan(teamsBox!.y + teamsBox!.height - 1)
     const content = await page.evaluate(() => document.documentElement.scrollWidth)
     expect(content).toBeLessThanOrEqual(width)
     await page.screenshot({
@@ -96,24 +100,18 @@ test('identity bootstrap manages access without ordinary write authority', async
   await kata.restartIdentity()
   try {
     const credentials = await loginOwner(page, kata.origin)
-    await expect(page.getByRole('heading', { name: 'Teams and visibility' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Teams', exact: true })).toBeVisible()
     const snapshot = await kata.snapshot(page, credentials)
     expect(snapshot.capabilities).toMatchObject({ writable: false, access_admin: true })
-    await page.getByLabel('New team name').fill('Identity team')
-    await page.getByRole('button', { name: 'Create team' }).click()
-    const option = page.getByRole('option', { name: 'Identity team' })
-    await expect(option).toHaveCount(1)
-    const teamUID = await option.getAttribute('value')
-    await page.getByLabel('Team', { exact: true }).selectOption(teamUID!)
-    await page.getByLabel('Member account').fill('example-member')
-    await page.getByRole('button', { name: 'Add member' }).click()
-    await expect(page.getByRole('list', { name: 'Team members' })).toContainText('example-member')
-    await page.getByLabel('Project visibility').selectOption(String(kata.projectID))
-    await expect(page.getByLabel('Visibility', { exact: true })).toBeEnabled()
-    await page.getByLabel('Visibility', { exact: true }).selectOption('teams')
+    await createTeam(page, 'Identity team')
+    await openTeam(page, 'Identity team')
+    await addMember(page, 'example-member')
+    await chooseProject(page, 'example-project')
+    await chooseVisibility(page, 'Selected teams')
     await page.getByRole('checkbox', { name: 'Identity team' }).check()
-    await page.getByRole('button', { name: 'Save visibility' }).click()
-    await expect(page.getByRole('button', { name: 'Save visibility' })).toBeEnabled()
+    await expect
+      .poll(() => accessPolicy(page, credentials, kata))
+      .toMatchObject({ visibility: 'teams' })
     const denied = await kata.request(
       page,
       credentials,
@@ -124,7 +122,7 @@ test('identity bootstrap manages access without ordinary write authority', async
     expect(denied.status()).toBe(403)
     for (const width of [1280, 390]) {
       await page.setViewportSize({ width, height: 1000 })
-      await expect(page.getByRole('heading', { name: 'Teams and visibility' })).toBeVisible()
+      await expect(page.getByRole('heading', { name: 'Project visibility' })).toBeVisible()
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
         width,
       )
@@ -134,21 +132,74 @@ test('identity bootstrap manages access without ordinary write authority', async
       })
     }
     await page.getByRole('button', { name: 'Remove example-member' }).click()
-    await expect(page.getByRole('list', { name: 'Team members' })).not.toContainText(
-      'example-member',
-    )
+    await expect(teamMembers(page, 'Identity team')).not.toContainText('example-member')
     page.once('dialog', (dialog) => void dialog.accept())
-    await page.getByRole('button', { name: 'Delete team' }).click()
-    await expect(page.getByRole('option', { name: 'Identity team' })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Delete Identity team' }).click()
+    await expect(teamRow(page, 'Identity team')).toHaveCount(0)
   } finally {
     await kata.restartIdentity(false)
   }
 })
 
+async function accessPolicy(page: Page, credentials: BrowserCredentials, kata: KataFixture) {
+  const response = await kata.request(
+    page,
+    credentials,
+    'GET',
+    `/api/v1/projects/${kata.projectID}/access`,
+  )
+  return ((await response.json()) as { policy: unknown }).policy
+}
+
+function teamRow(page: Page, name: string) {
+  return page.locator('.team-name', { hasText: name })
+}
+
+function teamMembers(page: Page, name: string) {
+  return page
+    .locator('details')
+    .filter({ has: teamRow(page, name) })
+    .getByRole('list', { name: 'Team members' })
+}
+
+async function createTeam(page: Page, name: string): Promise<void> {
+  await page.getByRole('button', { name: 'New team' }).click()
+  const field = page.getByLabel('New team name')
+  await field.fill(name)
+  await page.getByRole('button', { name: 'Create team' }).click()
+  await expect(teamRow(page, name)).toHaveCount(1)
+}
+
+async function openTeam(page: Page, name: string): Promise<void> {
+  await teamRow(page, name).click()
+  await expect(page.getByRole('button', { name: `Delete ${name}` })).toBeVisible()
+}
+
+async function addMember(page: Page, account: string): Promise<void> {
+  await page.getByRole('button', { name: 'Add member' }).click()
+  const field = page.getByLabel('Member account')
+  await field.fill(account)
+  await page.getByRole('button', { name: 'Add member', exact: true }).click()
+  await expect(page.getByRole('list', { name: 'Team members' }).first()).toContainText(account)
+}
+
+async function chooseProject(page: Page, name: string): Promise<void> {
+  await page.getByRole('combobox', { name: /^Project:/ }).click()
+  await page.getByRole('option', { name, exact: true }).click()
+  await expect(page.getByRole('combobox', { name: `Project: ${name}` })).toBeVisible()
+  await expect(page.getByRole('combobox', { name: /^Visibility:/ })).toBeEnabled()
+}
+
+async function chooseVisibility(page: Page, label: 'Everyone' | 'Selected teams'): Promise<void> {
+  await page.getByRole('combobox', { name: /^Visibility:/ }).click()
+  await page.getByRole('option', { name: label }).click()
+}
+
 async function loginOwner(page: Page, origin: string): Promise<BrowserCredentials> {
+  const returnPath = '/kata?view=settings&section=access'
   const login = await page.request.post(`${origin}/api/v1/ui/session/login`, {
     headers: { Origin: origin },
-    data: { token: 'example-local-token', return_path: '/kata?view=credentials' },
+    data: { token: 'example-local-token', return_path: returnPath },
   })
   expect(login.ok()).toBe(true)
   const credentials = (await login.json()) as BrowserCredentials
@@ -158,6 +209,6 @@ async function loginOwner(page: Page, origin: string): Promise<BrowserCredential
       JSON.stringify({ session: value.session, csrf: value.csrf }),
     )
   }, credentials)
-  await page.goto(`${origin}/kata?view=credentials`)
+  await page.goto(`${origin}${returnPath}`)
   return credentials
 }

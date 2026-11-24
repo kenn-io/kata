@@ -1,7 +1,7 @@
 ---
 title: Gated workflows
 description: "Coordinate agent steps and human approval with issue dependencies."
-last_edited: 2026-11-20
+last_edited: 2026-11-23
 ---
 
 # Gated workflows
@@ -134,6 +134,8 @@ can use shortcuts like `--commit`, `--pr`, `--test`, and `--reviewed`. Kata
 checks the structure of your evidence, but it does not run the recorded test or
 inspect the artifact's contents, so record what you actually verified. See
 [closing issues](../reference/cli.md#issue-lifecycle).
+
+Record an open issue's PR in `work.pr_url` and attach it with `--pr <url>` when closing it as done.
 
 Once all child stages are closed, close the parent run issue:
 

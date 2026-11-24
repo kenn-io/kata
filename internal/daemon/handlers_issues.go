@@ -206,6 +206,10 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if reuse != nil {
 			return reuse, nil
 		}
+		// A successful create from before this rule must remain retryable.
+		if err := rejectPriorityLabels(in.Body.Labels, "kata create --priority N or kata.create with priority"); err != nil {
+			return nil, err
+		}
 
 		// Fresh create (no reuse): now run the state-dependent link-target
 		// gates. A target in an archived project (link_target_archived) or a
@@ -1198,7 +1202,11 @@ func loadParentRef(ctx context.Context, store db.Storage, issue db.Issue) (*api.
 	if err != nil {
 		return nil, err
 	}
-	parent, err := store.IssueByID(ctx, link.ToIssueID)
+	return loadParentByID(ctx, store, link.ToIssueID)
+}
+
+func loadParentByID(ctx context.Context, store db.Storage, id int64) (*api.IssueRef, error) {
+	parent, err := store.IssueByID(ctx, id)
 	if errors.Is(err, db.ErrNotFound) {
 		return nil, nil
 	}

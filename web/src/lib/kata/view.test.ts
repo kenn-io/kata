@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 
-import { buildKataTaskView } from './view'
+import { buildKataTaskView, httpURL } from './view'
 import type { KataProjectSummary, KataTaskSummary } from './types'
 
 const today = '2026-05-15'
@@ -56,6 +56,14 @@ function issue(
     closed_at,
   }
 }
+
+test.each([
+  ['javascript scheme', 'javascript:alert(1)'],
+  ['non-string value', 123],
+  ['credentials', 'https://user:pass@example.com/pull/1'],
+])('rejects a PR URL with %s', (_name, value) => {
+  expect(httpURL(value)).toBeUndefined()
+})
 
 describe('kata task view builder', () => {
   test('builds Today from due scheduled dates and overdue unscheduled deadlines', () => {

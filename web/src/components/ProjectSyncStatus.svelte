@@ -1,7 +1,18 @@
 <script lang="ts">
-  import { untrack } from 'svelte'
-  import { CopyButton } from '@kenn-io/kit-ui'
+  import { tick, untrack } from 'svelte'
+  import ChevronDownIcon from '@lucide/svelte/icons/chevron-down'
+  import CircleAlertIcon from '@lucide/svelte/icons/circle-alert'
+  import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert'
+  import {
+    Chip,
+    CopyButton,
+    autoReposition,
+    dismissable,
+    floatingPopoverStyle,
+  } from '@kenn-io/kit-ui'
+  import { formatRelativeTime } from '@kenn-io/kit-ui/utils/time'
   import { getProjectFederationStatus, type FederationProjectStatus } from '../lib/api/generated'
+  import { markColor } from '../lib/marks'
 
   interface Props {
     projectID: number
@@ -23,6 +34,104 @@
     }
     return result
   })
+
+  let open = $state(false)
+  // The chip's host: placement measures it, and Escape focuses its button.
+  let trigger = $state<HTMLDivElement>()
+  let panel = $state<HTMLDivElement>()
+  let panelStyle = $state('')
+  let tone = $derived.by<'danger' | 'warning' | 'neutral'>(() => {
+    if (error) return 'warning'
+    if (status?.has_sync_error) return 'danger'
+    if (status && status.pending_push_count > 0) return 'warning'
+    return 'neutral'
+  })
+  let visible = $derived(error || status !== undefined)
+  let chipLabel = $derived.by(() => {
+    if (error || !status) return 'Sync status unavailable'
+    if (status.has_sync_error) return 'Sync failed'
+    if (!status.enabled) return 'Sync disabled'
+    return status.pending_push_count > 0
+      ? `${status.pending_push_count} to sync`
+      : 'No changes to send'
+  })
+
+  // The panel opens on the state the chip names: a failure, with any changes
+  // still waiting, comes first; what to run about it comes under it.
+  let stateLine = $derived.by(() => {
+    if (!status) return ''
+    const pending = status.pending_push_count
+    if (status.has_sync_error)
+      return pending > 0
+        ? `Sync failed · ${pending} ${pending === 1 ? 'change' : 'changes'} waiting`
+        : 'Sync failed'
+    if (!status.enabled)
+      return pending > 0
+        ? `Sync disabled · ${pending} ${pending === 1 ? 'change' : 'changes'} waiting`
+        : 'Sync disabled'
+    if (pending > 0) return `${pending} ${pending === 1 ? 'change' : 'changes'} waiting to sync`
+    return 'No changes to send'
+  })
+
+  // Who this project syncs with, by the hub's host rather than a role.
+  let hubLine = $derived.by(() => {
+    if (!status) return ''
+    if (status.role === 'hub') return 'Other servers sync with this one'
+    if (!status.hub_url) return 'Syncs with a hub'
+    try {
+      return `Syncs with ${new URL(status.hub_url).host}`
+    } catch {
+      return 'Syncs with a hub'
+    }
+  })
+
+  // Only the counts that aren't zero, in one line.
+  let artifactSummary = $derived(
+    [
+      ['generated', 'generated'],
+      ['reused', 'reused'],
+      ['incompatible', 'incompatible'],
+      ['stored_unindexed', 'without index'],
+    ]
+      .filter(([state]) => (counts[state!] ?? 0) > 0)
+      .map(([state, label]) => `${counts[state!]} ${label}`)
+      .join(' · '),
+  )
+
+  $effect(() => {
+    if (!open) return
+    const cleanups = [
+      dismissable({
+        owners: () => [trigger, panel],
+        dismiss: () => {
+          open = false
+        },
+        escapeFocus: () => trigger?.querySelector('button'),
+      }),
+      autoReposition(() => [panel, trigger?.parentElement], position),
+    ]
+    return () => cleanups.forEach((cleanup) => cleanup())
+  })
+
+  function position(): void {
+    if (!trigger || !panel) return
+    panelStyle = floatingPopoverStyle({
+      trigger: trigger.getBoundingClientRect(),
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      popoverWidth: panel.offsetWidth,
+      popoverHeight: panel.offsetHeight,
+      align: 'start',
+    })
+  }
+
+  async function toggle(): Promise<void> {
+    open = !open
+    if (!open) return
+    await tick()
+    position()
+    if (open) panel?.focus()
+  }
 
   function resetView(): void {
     status = undefined
@@ -83,6 +192,7 @@
             onResponse: (raw) => {
               if (raw.status >= 400 && raw.status < 500 && !abort.signal.aborted && !disposed) {
                 status = undefined
+                error = true
                 loading = true
               }
             },
@@ -94,7 +204,10 @@
           (entry) => entry.project_id === id && entry.project_uid === uid,
         )
         if (result.data.statuses.length && !found) throw new Error()
-        status = found
+        if (found && found.role !== 'hub' && found.role !== 'spoke' && found.role !== 'standalone')
+          throw new Error()
+        status = found?.role === 'hub' || found?.role === 'spoke' ? found : undefined
+        if (!status) open = false
         error = false
       } catch {
         if (!abort.signal.aborted && !disposed) {
@@ -121,127 +234,275 @@
   })
 </script>
 
-<section class="project-sync" aria-label="Project sync" aria-busy={reading}>
-  <strong>Project sync</strong>
-  {#if loading}
-    <span role="status">Reading sync status…</span>
-  {:else if error}
-    <span role="status">Sync status unavailable. Refresh to retry.</span>
-  {:else if !status}
-    <span>Local project</span>
-  {:else}
-    <span>{status.enabled ? status.role : 'Sync disabled'}</span>
-    <span>Pending: {status.pending_push_count}</span>
-    {#if status.last_successful_sync_at}
-      <span
-        >Last sync: <time datetime={status.last_successful_sync_at}
-          >{status.last_successful_sync_at}</time
-        ></span
+{#if visible}
+  <div class="project-sync" aria-busy={reading} bind:this={trigger}>
+    <Chip interactive uppercase={false} {tone} expanded={open} onclick={() => void toggle()}>
+      {#if tone === 'danger'}
+        <span class="chip-icon"><CircleAlertIcon size={14} aria-hidden="true" /></span>
+      {:else if tone === 'warning'}
+        <span class="chip-icon"><TriangleAlertIcon size={14} aria-hidden="true" /></span>
+      {/if}{chipLabel}
+      {#snippet trailing()}<ChevronDownIcon size={14} aria-hidden="true" />{/snippet}
+    </Chip>
+    {#if open}
+      <div
+        bind:this={panel}
+        class="sync-panel kit-popover-card"
+        style={panelStyle}
+        role="dialog"
+        aria-label="Project sync"
+        tabindex="-1"
       >
-    {/if}
-    {#if status.has_sync_error}
-      {@const bashCommand = `kata federation status --project '${status.project_name.replaceAll("'", "'\\''")}'`}
-      {@const powershellName = status.project_name.replace(/['‘’‚‛]/g, '$&$&')}
-      {@const legacyName = powershellName.replace(/(\\*)"/g, '$1$1\\"')}
-      {@const powershellCommand =
-        legacyName === powershellName
-          ? `kata federation status --project '${powershellName}'`
-          : `kata federation status --project $(if ($PSVersionTable.PSVersion -lt [version]'7.3' -or $PSNativeCommandArgumentPassing -eq 'Legacy') { '${legacyName}' } else { '${powershellName}' })`}
-      <div class="sync-attention">
-        <span class="attention">Sync needs attention</span>
-        <span>Run in a CLI connected to this daemon.</span>
-        <span>Project readers: if the command fails, update your Kata CLI.</span>
-        <div class="command">
-          <span class="shell">Bash/Zsh</span>
-          <code>{bashCommand}</code>
-          <CopyButton
-            text={bashCommand}
-            ariaLabel="Copy Bash/Zsh sync status command"
-            copiedAriaLabel="Copied Bash/Zsh sync status command"
-          />
-        </div>
-        <div class="command">
-          <span class="shell">PowerShell</span>
-          <code>{powershellCommand}</code>
-          <CopyButton
-            text={powershellCommand}
-            ariaLabel="Copy PowerShell sync status command"
-            copiedAriaLabel="Copied PowerShell sync status command"
-          />
-        </div>
+        <header class="sync-panel-header">
+          <strong class="sync-panel-title"
+            >{#if status?.project_name}<span
+                class="project-mark"
+                style:background={markColor(status.project_name)}
+              ></span>{/if}Project sync</strong
+          >
+          <button
+            type="button"
+            class="sync-refresh"
+            disabled={loading}
+            onclick={() => refresh?.(true)}>Refresh</button
+          >
+        </header>
+        {#if loading}
+          <span role="status">Loading sync status…</span>
+        {:else if error}
+          <span role="status">Sync status unavailable. Refresh to try again.</span>
+        {:else if status}
+          <div class="sync-state">
+            <strong role="status">{stateLine}</strong>
+            {#if status.enabled}
+              <span>{hubLine}</span>
+            {/if}
+          </div>
+          {#if status.has_sync_error}
+            {@const bashCommand = `kata federation status --project '${status.project_name.replaceAll("'", "'\\''")}'`}
+            {@const powershellName = status.project_name.replace(/['‘’‚‛]/g, '$&$&')}
+            {@const legacyName = powershellName.replace(/(\\*)"/g, '$1$1\\"')}
+            {@const powershellCommand =
+              legacyName === powershellName
+                ? `kata federation status --project '${powershellName}'`
+                : `kata federation status --project $(if ($PSVersionTable.PSVersion -lt [version]'7.3' -or $PSNativeCommandArgumentPassing -eq 'Legacy') { '${legacyName}' } else { '${powershellName}' })`}
+            <div class="sync-attention">
+              <span>Connect the Kata CLI to this daemon with your own credential, then run:</span>
+              <span class="sync-note"
+                >For a remote daemon, select it with its --daemon profile or KATA_SERVER.</span
+              >
+              {#if bashCommand === powershellCommand}
+                <div class="command">
+                  <code>{bashCommand}</code>
+                  <CopyButton
+                    text={bashCommand}
+                    ariaLabel="Copy command"
+                    copiedAriaLabel="Copied command"
+                  />
+                </div>
+              {:else}
+                <span class="shell">Bash/Zsh</span>
+                <div class="command">
+                  <code>{bashCommand}</code>
+                  <CopyButton
+                    text={bashCommand}
+                    ariaLabel="Copy Bash/Zsh command"
+                    copiedAriaLabel="Copied Bash/Zsh command"
+                  />
+                </div>
+                <span class="shell">PowerShell</span>
+                <div class="command">
+                  <code>{powershellCommand}</code>
+                  <CopyButton
+                    text={powershellCommand}
+                    ariaLabel="Copy PowerShell command"
+                    copiedAriaLabel="Copied PowerShell command"
+                  />
+                </div>
+              {/if}
+              <span class="sync-note"
+                >Project readers need daemon API 0.49.0 or later; owners can use older daemons.</span
+              >
+            </div>
+          {/if}
+          {#if status.last_successful_sync_at || status.credential_status || status.embedding}
+            <dl class="sync-facts">
+              {#if status.last_successful_sync_at}
+                <dt>Last sync</dt>
+                <dd>
+                  <time
+                    datetime={status.last_successful_sync_at}
+                    title={new Date(status.last_successful_sync_at).toLocaleString()}
+                    >{formatRelativeTime(status.last_successful_sync_at)}</time
+                  >
+                </dd>
+              {/if}
+              {#if status.credential_status}
+                <dt>Credential</dt>
+                <dd>{status.credential_status}</dd>
+              {/if}
+              {#if status.embedding}
+                <dt>Embeddings</dt>
+                <dd>{status.embedding.state}</dd>
+                <dt>Producer</dt>
+                <dd>
+                  {#if status.embedding.producer}
+                    <code>{status.embedding.producer.producer_instance_uid}</code>
+                  {:else}
+                    None selected
+                  {/if}
+                </dd>
+                {#if status.embedding.producer}
+                  <dt>Model</dt>
+                  <dd>
+                    {status.embedding.producer.recipe.model}, {status.embedding.producer.recipe
+                      .dimensions} dimensions
+                  </dd>
+                {/if}
+                {#if artifactSummary}
+                  <dt>Stored</dt>
+                  <dd>{artifactSummary}</dd>
+                {/if}
+                <dt>Retained</dt>
+                <dd>
+                  {status.embedding.artifacts.length} of {status.embedding.artifact_limit} embeddings{status
+                    .embedding.limited
+                    ? ', limited'
+                    : ''}
+                </dd>
+              {/if}
+            </dl>
+          {/if}
+        {/if}
       </div>
     {/if}
-    {#if status.credential_status}<span>Credential: {status.credential_status}</span>{/if}
-    {#if status.embedding}
-      <span>Embeddings: {status.embedding.state}</span>
-      <span>Producer: {status.embedding.producer?.producer_instance_uid ?? 'None selected'}</span>
-      {#if status.embedding.producer}
-        <span
-          >Recipe: {status.embedding.producer.recipe.model} ({status.embedding.producer.recipe
-            .dimensions} dimensions)</span
-        >
-      {/if}
-      <span>Generated: {counts.generated ?? 0}</span>
-      <span>Reused: {counts.reused ?? 0}</span>
-      <span>Incompatible: {counts.incompatible ?? 0}</span>
-      <span>Retained without index: {counts.stored_unindexed ?? 0}</span>
-      <span
-        >Retained window: {status.embedding.artifacts.length}/{status.embedding
-          .artifact_limit}{status.embedding.limited ? ' (limited)' : ''}</span
-      >
-    {/if}
-  {/if}
-  <button type="button" disabled={loading} onclick={() => refresh?.(true)}>Refresh sync</button>
-</section>
+  </div>
+{/if}
 
 <style>
   .project-sync {
+    display: inline-flex;
+    min-width: 0;
+  }
+  .chip-icon {
+    margin-inline-end: var(--space-2);
+  }
+  .sync-panel {
+    position: fixed;
+    z-index: var(--z-popover);
     display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--space-2) var(--space-4);
-    padding: var(--space-3) var(--space-5);
-    border-bottom: 1px solid var(--border-primary);
+    flex-direction: column;
+    gap: var(--space-5);
+    /* As wide as its longest line, from 360px up to 560px; a command longer
+       than that scrolls sideways inside its own box. */
+    width: max-content;
+    min-width: min(360px, calc(100vw - var(--space-6)));
+    max-width: min(560px, calc(100vw - var(--space-6)));
+    max-height: calc(100vh - var(--space-6));
+    overflow-y: auto;
+    padding: var(--space-6);
     color: var(--text-secondary);
     font-size: var(--font-size-sm);
-    min-width: 0;
     overflow-wrap: anywhere;
   }
-  .project-sync span {
-    min-width: 0;
+  .sync-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    color: var(--text-primary);
+  }
+  .sync-panel-title {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-3);
+    font-weight: var(--font-weight-semibold);
+  }
+  /* The same square mark the sidebar shows beside the project. */
+  .project-mark {
+    flex: 0 0 10px;
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+  }
+  /* A quiet text button whose label lines up with the panel's right edge. */
+  .sync-refresh {
+    margin: calc(-1 * var(--space-1)) calc(-1 * var(--space-3));
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+  }
+  .sync-refresh:hover:not(:disabled) {
+    background: var(--bg-surface-hover);
+    color: var(--text-primary);
+  }
+  .sync-refresh:disabled {
+    cursor: default;
+    color: var(--text-muted);
+  }
+  .sync-state {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    color: var(--text-primary);
+  }
+  .sync-state strong {
+    font-weight: var(--font-weight-medium);
   }
   .sync-attention {
     display: flex;
-    flex-wrap: wrap;
-    flex-basis: 100%;
-    align-items: center;
-    gap: var(--space-2) var(--space-3);
+    flex-direction: column;
+    gap: var(--space-3);
     min-width: 0;
+    color: var(--text-primary);
   }
+  .sync-note {
+    color: var(--text-secondary);
+    font-size: var(--font-size-xs);
+  }
+  .sync-facts {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: var(--space-2) var(--space-6);
+    margin: 0;
+    padding-top: var(--space-5);
+    border-top: 1px solid var(--border-default);
+  }
+  .sync-facts dt {
+    color: var(--text-secondary);
+  }
+  .sync-facts dd {
+    margin: 0;
+    min-width: 0;
+    color: var(--text-primary);
+  }
+  /* The command sits in an inset box and scrolls sideways inside it. */
   .command {
     display: flex;
-    flex-basis: 100%;
     align-items: center;
     gap: var(--space-2);
     min-width: 0;
+    padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
+    border-radius: var(--radius-md);
+    background: var(--bg-inset);
   }
   .shell {
-    flex: 0 0 5.5rem;
-    color: var(--text-primary);
+    margin-bottom: calc(-1 * var(--space-1));
+    color: var(--text-secondary);
+    font-size: var(--font-size-xs);
+  }
+  .shell ~ .shell {
+    margin-top: var(--space-2);
   }
   code {
-    font-size: var(--font-size-sm);
+    flex: 1;
+    font-size: var(--font-size-xs);
     overflow-wrap: anywhere;
     min-width: 0;
   }
-  .attention {
-    border-radius: var(--radius-sm);
-    background: color-mix(in srgb, var(--accent-amber) 14%, transparent);
-    color: var(--accent-amber);
-    padding: var(--space-1) var(--space-2);
-    font-weight: var(--font-weight-semibold);
-  }
-  button {
-    color: var(--text-primary);
+  .command code {
+    overflow-x: auto;
+    overflow-wrap: normal;
+    white-space: pre;
   }
 </style>
