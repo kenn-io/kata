@@ -23,7 +23,9 @@ import (
 )
 
 // countingHub forwards requests to a hub daemon and counts them by the hub
-// project ID in the request path.
+// project ID in the request path. It skips held polls, the event polls with a
+// wait: each binding keeps one open whatever the runner does, so they do not
+// measure the requests a runner pass sends.
 type countingHub struct {
 	URL string
 
@@ -41,6 +43,10 @@ func newCountingHub(t testing.TB, hubURL string) *countingHub {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	counter := &countingHub{byProject: map[int64]int{}}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Has("wait") {
+			proxy.ServeHTTP(w, r)
+			return
+		}
 		counter.mu.Lock()
 		counter.total++
 		if match := hubProjectPath.FindStringSubmatch(r.URL.Path); match != nil {

@@ -38,7 +38,7 @@ type hubSpokeHarness struct {
 	pullToken    string
 	oldHub       bool
 	// wake wakes the runner startRunner started.
-	wake chan struct{}
+	wake *WakeQueue
 }
 
 // hubFront is one proxy address for the hub, so a test can move the spoke to
@@ -195,7 +195,7 @@ func (h *hubSpokeHarness) startRunner(tb testing.TB, interval time.Duration) fun
 // returned function stops it.
 func (h *hubSpokeHarness) startConfiguredRunner(tb testing.TB, runner *Runner) func() {
 	tb.Helper()
-	h.wake = make(chan struct{}, 1)
+	h.wake = NewWakeQueue()
 	runner.Wake = h.wake
 	ctx, cancel := context.WithCancel(context.WithoutCancel(tb.Context()))
 	done := make(chan error, 1)

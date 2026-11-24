@@ -122,11 +122,12 @@ func TestRunnerProjectWakeSyncsOnlyThatProject(t *testing.T) {
 	_, byProject := counter.counts()
 	assert.Positive(t, byProject[a.hub.ID])
 	assert.Zero(t, byProject[b.hub.ID], "a wake for one project does not contact the hub about another")
-	assert.Equal(t, []int64{a.spoke.ID}, results.since(start))
+	// The hub's held poll can answer the push and give the project another
+	// turn, so only the absence of the other project is fixed.
+	assert.NotContains(t, results.since(start), b.spoke.ID)
 
 	next.fire <- time.Now()
 	results.await(t, b.spoke.ID)
-	assert.Equal(t, []int64{a.spoke.ID, b.spoke.ID}, results.since(start))
 }
 
 func TestRunnerKeepsEveryProjectWakeThatArrivesBeforeAPass(t *testing.T) {

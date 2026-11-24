@@ -550,7 +550,7 @@ func TestRunnerDeliversHeldPollAnswersDuringARelayBacklog(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, relay.credentials.StoreFederationCredential(ctx, hubProject.UID, config.FederationCredential{HubURL: hubServer.URL, HubProjectID: hubProject.ID, Token: enrollment.Token}))
 
-	wake := make(chan struct{}, 1)
+	wake := federation.NewWakeQueue()
 	runner := &federation.Runner{DB: relay.store, Credentials: relay.credentials, Interval: time.Hour, Wake: wake, Debounce: time.Millisecond}
 	runCtx, cancel := context.WithCancel(ctx)
 	done := make(chan error, 1)
@@ -570,7 +570,7 @@ func TestRunnerDeliversHeldPollAnswersDuringARelayBacklog(t *testing.T) {
 		require.NoError(t, err)
 		return len(issues)
 	}
-	wake <- struct{}{}
+	wake.WakeAll()
 	//nolint:kennlint // sleeptest: The runner drives real HTTP relay hops; bounded polling observes the mirrored projection.
 	// Several budgeted turns have run, so the runner is past its full pass and
 	// serves only the backlog.
