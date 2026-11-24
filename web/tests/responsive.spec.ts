@@ -109,6 +109,16 @@ test('Settings tabs stay above the section at desktop and mobile widths', async 
     const tabsBounds = (await tabs.boundingBox())!
     const headingBounds = (await heading.boundingBox())!
     expect(tabsBounds.y + tabsBounds.height).toBeLessThanOrEqual(headingBounds.y)
+    if (width === 1440) {
+      expect(tabsBounds.height).toBe(48)
+      const selected = page.getByRole('tab', { name: 'Appearance' })
+      const indicatorBottom = await selected.evaluate(
+        (tab) =>
+          tab.getBoundingClientRect().bottom -
+          Number.parseFloat(getComputedStyle(tab, '::after').bottom),
+      )
+      expect(indicatorBottom).toBeCloseTo(tabsBounds.y + tabsBounds.height - 1, 0)
+    }
     const labelBounds = (await tabs.locator('.kit-tabs__label').first().boundingBox())!
     expect(tabsBounds.x).toBeCloseTo(headingBounds.x, 0)
     expect(tabsBounds.x + tabsBounds.width).toBeCloseTo(headingBounds.x + headingBounds.width, 0)
@@ -123,6 +133,35 @@ test('Settings tabs stay above the section at desktop and mobile widths', async 
     'aria-selected',
     'true',
   )
+})
+
+test('Settings tabs scroll the focused tab into view on mobile', async ({ page, kata }) => {
+  await page.setViewportSize({ width: 390, height: 800 })
+  await kata.launch(page)
+  const login = await page.request.post(`${kata.origin}/api/v1/ui/session/login`, {
+    headers: { Origin: kata.origin },
+    data: { token: 'example-local-token', return_path: '/kata?view=settings&section=appearance' },
+  })
+  expect(login.ok()).toBe(true)
+  const credentials = await login.json()
+  await page.evaluate((value) => {
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: value.session, csrf: value.csrf }),
+    )
+  }, credentials)
+  await page.goto(`${kata.origin}/kata?view=settings&section=appearance`)
+  const tabs = page.getByRole('tablist', { name: 'Settings' })
+  const first = page.getByRole('tab', { name: 'Appearance' })
+  const last = page.getByRole('tab', { name: 'Teams and visibility' })
+  await expect(last).toBeAttached()
+  await first.focus()
+  await page.keyboard.press('End')
+  await expect(last).toBeFocused()
+  const strip = (await tabs.boundingBox())!
+  const focused = (await last.boundingBox())!
+  expect(focused.x).toBeGreaterThanOrEqual(strip.x)
+  expect(focused.x + focused.width).toBeLessThanOrEqual(strip.x + strip.width + 1)
 })
 
 test('Appearance changes the sidebar color', async ({ page, kata }) => {

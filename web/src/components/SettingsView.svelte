@@ -51,6 +51,8 @@
     onchange={(id) => onSelect(id as SettingsSectionID)}
     tabAttributes={(item, selected) => ({
       onclick: selected ? () => onSelect(item.id as SettingsSectionID) : undefined,
+      onfocus: (event) =>
+        event.currentTarget.scrollIntoView({ block: 'nearest', inline: 'nearest' }),
     })}
   >
     {#snippet children(id)}
@@ -182,6 +184,13 @@
   .settings-view :global(.kit-settings-section__body) {
     gap: var(--space-4);
     padding: var(--space-4) 0 0;
+  }
+
+  @media (min-width: 761px) {
+    .settings-view :global(.kit-tabs__list) {
+      height: var(--layout-header-h);
+      box-sizing: border-box;
+    }
   }
 
   @media (max-width: 760px) {
