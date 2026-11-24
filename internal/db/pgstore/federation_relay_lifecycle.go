@@ -10,12 +10,26 @@ import (
 
 // ValidateRelayLifecycle checks retained federation work before lifecycle changes.
 func (d *Store) ValidateRelayLifecycle(ctx context.Context, projectID int64) error {
-	return d.relayTx(ctx, func(tx *sql.Tx) error { return d.validateRelayLifecycleTx(ctx, tx, projectID) })
+	return d.relayTx(ctx, func(tx *sql.Tx) error { return d.validateRelayLifecycleTx(ctx, tx, projectID, false) })
+}
+
+// ValidateFederationLeave checks retained work before detaching a replica.
+func (d *Store) ValidateFederationLeave(ctx context.Context, projectID int64) error {
+	return d.relayTx(ctx, func(tx *sql.Tx) error { return d.validateRelayLifecycleTx(ctx, tx, projectID, true) })
+}
+
+// FenceFederationLeave fences a replica before its credentials are revoked.
+func (d *Store) FenceFederationLeave(ctx context.Context, projectID int64) error {
+	return d.fenceRelayDisconnect(ctx, projectID, true)
 }
 
 // FenceRelayDisconnect validates retained relay work and disables writes in
 // one transaction so a concurrent local mutation cannot slip between the two.
 func (d *Store) FenceRelayDisconnect(ctx context.Context, projectID int64) error {
+	return d.fenceRelayDisconnect(ctx, projectID, false)
+}
+
+func (d *Store) fenceRelayDisconnect(ctx context.Context, projectID int64, leaving bool) error {
 	// Match the local move lock order before applying a caller's policy fence;
 	// the pending-move check and durable write pause must be indivisible.
 	original := ctx
@@ -26,15 +40,27 @@ func (d *Store) FenceRelayDisconnect(ctx context.Context, projectID int64) error
 		return db.ApplyTransactionFence(original, tx)
 	})
 	return d.relayTx(ctx, func(tx *sql.Tx) error {
-		if err := db.CheckFederationMoveSourceLifecycle(ctx, tx, projectID, d.InstanceUID()); err != nil {
+		if err := db.CheckFederationMoveSourceLifecycle(ctx, tx, projectID, d.InstanceUID(), leaving); err != nil {
 			return err
 		}
-		return d.relayReset(tx).FenceDisconnect(ctx, projectID)
+		if leaving {
+			fenced, err := db.FederationLeaveFenceExists(ctx, tx, projectID)
+			if err != nil {
+				return err
+			}
+			if fenced {
+				return d.relayReset(tx).ValidateLifecycle(ctx, projectID)
+			}
+			if err := db.PrepareFederationLeaveFence(ctx, tx, projectID, d.InstanceUID()); err != nil {
+				return err
+			}
+		}
+		return d.relayReset(tx).FenceDisconnect(ctx, projectID, leaving)
 	})
 }
 
-func (d *Store) validateRelayLifecycleTx(ctx context.Context, tx *sql.Tx, projectID int64) error {
-	if err := db.CheckFederationMoveSourceLifecycle(ctx, tx, projectID, d.InstanceUID()); err != nil {
+func (d *Store) validateRelayLifecycleTx(ctx context.Context, tx *sql.Tx, projectID int64, leaving bool) error {
+	if err := db.CheckFederationMoveSourceLifecycle(ctx, tx, projectID, d.InstanceUID(), leaving); err != nil {
 		return err
 	}
 	return d.relayReset(tx).ValidateLifecycle(ctx, projectID)
@@ -151,11 +177,11 @@ WHERE project_id=$1 AND active=1 LIMIT 1`, projectID).Scan(&bindingID)
 	return db.ErrExternalRootFederationConflict
 }
 
-func (b relayResetBackend) DisableRelayPush(ctx context.Context, projectID int64) error {
+func (b relayResetBackend) DisableRelayPush(ctx context.Context, projectID int64, enabled bool) error {
 	_, err := b.tx.ExecContext(ctx, `UPDATE federation_bindings
-SET enabled=1,push_enabled=0,
+SET enabled=$3,push_enabled=0,
     updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
-WHERE project_id=$1 AND role=$2 AND (enabled<>1 OR push_enabled<>0)`, projectID, string(db.FederationRoleSpoke))
+WHERE project_id=$1 AND role=$2 AND (enabled<>$3 OR push_enabled<>0)`, projectID, string(db.FederationRoleSpoke), storedBool(enabled))
 	if err != nil {
 		return mapSQLError(err, nil)
 	}

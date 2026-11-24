@@ -466,6 +466,8 @@ func TestFederationQuarantineSkipCLI(t *testing.T) {
 	binding, err := env.DB.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
 	assert.Equal(t, q.LastEventID, binding.PushCursorEventID)
+	_, err = env.DB.ActiveFederationQuarantine(ctx, project.ID, db.FederationQuarantineDirectionPush)
+	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
 func TestFederationQuarantineSkipCLIAgentMode(t *testing.T) {

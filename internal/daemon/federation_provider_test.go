@@ -1,18 +1,40 @@
 package daemon_test
 
 import (
+	"context"
+	"fmt"
+	"net/http"
 	"os"
 	"slices"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/pkg/federationprovider"
 )
+
+type providerLeaveStore struct {
+	db.Storage
+	fenced bool
+}
+
+func (s *providerLeaveStore) FenceFederationLeave(ctx context.Context, projectID int64) error {
+	if err := s.Storage.(db.RelayDisconnectFenceStore).FenceFederationLeave(ctx, projectID); err != nil {
+		return err
+	}
+	s.fenced = true
+	return nil
+}
+
+func (s *providerLeaveStore) FenceRelayDisconnect(ctx context.Context, projectID int64) error {
+	return s.Storage.(db.RelayDisconnectFenceStore).FenceRelayDisconnect(ctx, projectID)
+}
 
 func providerMapping(t *testing.T) (config.CatalogDaemonConfig, config.FederationProjectConfig) {
 	t.Helper()
@@ -320,4 +342,40 @@ func TestFederationProviderValidatesActorBeforeSavingReady(t *testing.T) {
 	assert.Equal(t, "Example User", ready.Credential.Actor)
 	assert.Equal(t, pending.Credential.Provider.RequestID, ready.Credential.Provider.RequestID)
 	assert.True(t, pending.Credential.Token == ready.Credential.Token)
+}
+
+func TestFederationProviderOvertakenLeave(t *testing.T) {
+	setup := func(t *testing.T) (*testenv.Env, db.Project, config.FederationManagedCredentialStore) {
+		t.Helper()
+		env := testenv.New(t)
+		_, mapping := providerMapping(t)
+		source := overtakenLeaveFixture(t, env.DB)
+		binding, err := env.DB.FederationBindingByProject(t.Context(), source.ID)
+		require.NoError(t, err)
+		credentials := config.DefaultFederationCredentialStore()
+		credential := config.FederationCredential{
+			HubURL: binding.HubURL, HubProjectID: binding.HubProjectID, HubProjectName: source.Name, SpokeProjectName: source.Name,
+			ManagedByConfig: true, Token: "provider-credential", Actor: "worker",
+			Provider: &config.FederationProviderCredential{RequestID: uuid.New(), Command: mapping.CredentialProvider, Intent: mapping.Intent, SpokeInstanceUID: env.DB.InstanceUID(), LocalProjectUID: source.UID, Status: federationprovider.StatusReady},
+		}
+		require.NoError(t, credentials.StoreFederationCredential(t.Context(), source.UID, credential))
+		return env, source, credentials
+	}
+	t.Run("detach", func(t *testing.T) {
+		env, source, _ := setup(t)
+		t.Setenv("KATA_TEST_PROVIDER_STATUS", "released")
+		path := fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", source.ID)
+		response, raw := envDoRaw(t, env, http.MethodPost, path, map[string]any{"disposition": "detach", "actor": "worker"}, nil)
+		require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
+	})
+	t.Run("preparation stops transport", func(t *testing.T) {
+		env, source, credentials := setup(t)
+		store := &providerLeaveStore{Storage: env.DB}
+		_, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, source.ID, "")
+		require.NoError(t, err)
+		require.True(t, store.fenced)
+		binding, err := env.DB.FederationBindingByProject(t.Context(), source.ID)
+		require.NoError(t, err)
+		require.False(t, binding.Enabled, "leave preparation keeps provider transport stopped")
+	})
 }

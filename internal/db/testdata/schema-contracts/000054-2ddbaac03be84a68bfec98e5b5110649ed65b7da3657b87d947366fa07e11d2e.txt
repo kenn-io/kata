@@ -1,0 +1,1 @@
+Protect held federation edits from older binaries.

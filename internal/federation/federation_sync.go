@@ -464,14 +464,6 @@ func syncDirectSpoke(
 			} else if err != nil && !errors.Is(err, db.ErrNotFound) {
 				return recordPullError(err)
 			}
-			pending, err := store.PendingFederationPushEvents(
-				ctx, binding.ProjectID, store.InstanceUID(), binding.PushCursorEventID, 1)
-			if err != nil {
-				return recordPullError(err)
-			}
-			if len(pending) > 0 {
-				return recordPullError(ErrFederationResetBlockedByPendingPush)
-			}
 		}
 		meta, err := client.ProjectFederation(ctx, hubProjectID)
 		if err != nil {
