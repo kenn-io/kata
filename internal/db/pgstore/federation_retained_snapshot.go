@@ -47,6 +47,10 @@ func (s *Store) RetainedIssueSnapshot(ctx context.Context, projectID int64, issu
 		if err != nil {
 			return err
 		}
+		payload, err = db.RetainedSnapshotLocalLinks(ctx, tx, issue, payload)
+		if err != nil {
+			return err
+		}
 		canonical, err := db.CanonicalizeFederationSnapshotAuthors(db.RemoteEvent{Type: "issue.snapshot", Payload: jsontext.Value(payload)}, binding.Actor)
 		if err != nil {
 			return err

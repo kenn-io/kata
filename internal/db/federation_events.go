@@ -199,6 +199,49 @@ func validateFederationTeammate(raw jsontext.Value, eventUID, eventType string) 
 	return nil
 }
 
+// RetainedSnapshotLocalLinks omits cross-project links that cannot be sent as
+// part of recovery. Their original events and local projections stay intact.
+func RetainedSnapshotLocalLinks(ctx context.Context, tx *sql.Tx, issue Issue, payload string) (string, error) {
+	var document map[string]jsontext.Value
+	if err := json.Unmarshal([]byte(payload), &document); err != nil {
+		return "", err
+	}
+	raw, ok := document["links"]
+	if !ok {
+		return payload, nil
+	}
+	var links []IssueDocumentLink
+	if err := json.Unmarshal(raw, &links); err != nil {
+		return "", err
+	}
+	if len(links) == 0 {
+		return payload, nil
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT peer.uid FROM links l JOIN issues peer ON peer.id = CASE WHEN l.from_issue_id = $1 THEN l.to_issue_id ELSE l.from_issue_id END WHERE (l.from_issue_id = $1 OR l.to_issue_id = $1) AND peer.project_id = $2`, issue.ID, issue.ProjectID)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = rows.Close() }()
+	local := make(map[string]bool)
+	for rows.Next() {
+		var uid string
+		if err := rows.Scan(&uid); err != nil {
+			return "", err
+		}
+		local[uid] = true
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	links = slices.DeleteFunc(links, func(link IssueDocumentLink) bool { return !local[link.ToIssueUID] })
+	document["links"], err = json.Marshal(links)
+	if err != nil {
+		return "", err
+	}
+	result, err := json.Marshal(document)
+	return string(result), err
+}
+
 // CanonicalizeFederationSnapshotAuthors rewrites an adoption snapshot's
 // embedded authors to its bound actor and recomputes the portable hash.
 func CanonicalizeFederationSnapshotAuthors(event RemoteEvent, boundActor string) (RemoteEvent, error) {
