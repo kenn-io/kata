@@ -231,7 +231,9 @@ test('Settings tabs fade at the edges only when they overflow on mobile', async 
   // Decode the capture on a blank page, outside the app's content security policy.
   const blank = await page.context().newPage()
   const dividerEdges = await blank.evaluate(async (png) => {
-    const image = await createImageBitmap(await (await fetch(`data:image/png;base64,${png}`)).blob())
+    const image = await createImageBitmap(
+      await (await fetch(`data:image/png;base64,${png}`)).blob(),
+    )
     const canvas = new OffscreenCanvas(image.width, image.height)
     const context = canvas.getContext('2d')!
     context.drawImage(image, 0, 0)
