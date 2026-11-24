@@ -29,6 +29,18 @@
     access,
   }: Props = $props()
 
+  let tabList: HTMLDivElement | undefined = $state()
+  $effect(() => {
+    const section = active
+    const list = tabList
+    const tab = list?.querySelector<HTMLElement>(`[data-tab-id="${section}"]`)
+    if (!list || !tab) return
+    const strip = list.getBoundingClientRect()
+    const bounds = tab.getBoundingClientRect()
+    if (bounds.left < strip.left) list.scrollLeft += bounds.left - strip.left
+    else if (bounds.right > strip.right) list.scrollLeft += bounds.right - strip.right
+  })
+
   let accessVisited = $state(false)
   $effect(() => {
     if (!accessAvailable) accessVisited = false
@@ -48,6 +60,7 @@
     {tabs}
     value={active}
     ariaLabel="Settings"
+    bind:listElement={tabList}
     onchange={(id) => onSelect(id as SettingsSectionID)}
     tabAttributes={(item, selected) => ({
       onclick: selected ? () => onSelect(item.id as SettingsSectionID) : undefined,

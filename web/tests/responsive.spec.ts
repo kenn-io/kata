@@ -145,6 +145,36 @@ test('Settings tabs stay above the section at desktop and mobile widths', async 
   )
 })
 
+for (const [route, label] of [
+  ['/kata?view=settings&section=access', 'Teams and visibility'],
+  ['/kata?view=credentials', 'Credentials'],
+]) {
+  test(`selected tab is visible on a mobile direct link to ${route}`, async ({ page, kata }) => {
+    await page.setViewportSize({ width: 390, height: 800 })
+    await kata.launch(page)
+    const login = await page.request.post(`${kata.origin}/api/v1/ui/session/login`, {
+      headers: { Origin: kata.origin },
+      data: { token: 'example-local-token', return_path: route },
+    })
+    expect(login.ok()).toBe(true)
+    const credentials = await login.json()
+    await page.evaluate((value) => {
+      sessionStorage.setItem(
+        'kata.web.session.v1',
+        JSON.stringify({ session: value.session, csrf: value.csrf }),
+      )
+    }, credentials)
+    await page.goto(`${kata.origin}${route}`)
+    const tabs = page.getByRole('tablist', { name: 'Settings' })
+    const selected = page.getByRole('tab', { name: label })
+    await expect(selected).toHaveAttribute('aria-selected', 'true')
+    const strip = (await tabs.boundingBox())!
+    const tab = (await selected.boundingBox())!
+    expect(tab.x).toBeGreaterThanOrEqual(strip.x - 1)
+    expect(tab.x + tab.width).toBeLessThanOrEqual(strip.x + strip.width + 1)
+  })
+}
+
 test('Settings tabs scroll the focused tab into view on mobile', async ({ page, kata }) => {
   await page.setViewportSize({ width: 390, height: 800 })
   await kata.launch(page)
