@@ -21,8 +21,6 @@ const FederationLeaveFencePrefix = "federation_leave_fence."
 func IsFederationLocalMetaKey(key string) bool {
 	return strings.HasPrefix(key, FederationSpokeNamePrefix) ||
 		strings.HasPrefix(key, FederationHeldCursorPrefix) ||
-		strings.HasPrefix(key, FederationAcceptedCursorPrefix) ||
-		strings.HasPrefix(key, FederationAcceptedIssuePrefix) ||
 		strings.HasPrefix(key, FederationAcknowledgedEventPrefix) ||
 		strings.HasPrefix(key, FederationLeaveFencePrefix)
 }
@@ -41,12 +39,6 @@ func ClearFederationRetainedProject(ctx context.Context, tx interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }, uid string) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=$1`, FederationHeldCursorPrefix+uid); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE substr(key,1,$1)=$2`, len(FederationAcceptedCursorPrefix+uid+"."), FederationAcceptedCursorPrefix+uid+"."); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE substr(key,1,$1)=$2`, len(FederationAcceptedIssuePrefix+uid+"."), FederationAcceptedIssuePrefix+uid+"."); err != nil {
 		return err
 	}
 	_, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=$1`, FederationRetainedProjectPrefix+uid)

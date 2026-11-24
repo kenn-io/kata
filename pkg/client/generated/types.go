@@ -2933,11 +2933,8 @@ type FederationProjectStatus struct {
 	RelayCheckpointCapacityBytes *int64 `json:"relay_checkpoint_capacity_bytes,omitempty"`
 
 	// RelayCheckpointError Why the relay checkpoint could not be measured for this status read. The size fields are omitted while it is set.
-	RelayCheckpointError *string `json:"relay_checkpoint_error,omitempty"`
-	ResetBlocker         *string `json:"reset_blocker,omitempty"`
-
-	// RetainedHistory The spoke retains local history from before rejoin. Some untouched tasks may remain local; newly recovered snapshots attribute tasks, comments, and same-project links to the current actor on the hub.
-	RetainedHistory          *bool                                  `json:"retained_history,omitempty"`
+	RelayCheckpointError     *string                                `json:"relay_checkpoint_error,omitempty"`
+	ResetBlocker             *string                                `json:"reset_blocker,omitempty"`
 	Role                     string                                 `json:"role" validate:"required"`
 	RootSigningKey           *FederationProjectStatusRootSigningKey `json:"root_signing_key,omitempty"`
 	SyncRetry                *FederationSyncRetry                   `json:"sync_retry,omitempty"`

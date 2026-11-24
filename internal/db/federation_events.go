@@ -279,40 +279,6 @@ func RetainedSnapshotLocalLinks(ctx context.Context, tx *sql.Tx, issue Issue, pa
 	return string(result), err
 }
 
-// CanonicalizeRetainedSnapshotAuthors keeps the spoke-reported source authors
-// in the snapshot while attributing the submitted content to the bound actor.
-func CanonicalizeRetainedSnapshotAuthors(payload string, boundActor string) (RemoteEvent, error) {
-	var document map[string]jsontext.Value
-	if err := json.Unmarshal([]byte(payload), &document); err != nil {
-		return RemoteEvent{}, err
-	}
-	document["source_author"] = document["author"]
-	for _, field := range []string{"comments", "links"} {
-		if len(document[field]) == 0 || string(document[field]) == "null" {
-			continue
-		}
-		var entries []map[string]jsontext.Value
-		if err := json.Unmarshal(document[field], &entries); err != nil {
-			return RemoteEvent{}, err
-		}
-		for _, entry := range entries {
-			if len(entry["author"]) != 0 {
-				entry["source_author"] = entry["author"]
-			}
-		}
-		var err error
-		document[field], err = json.Marshal(entries)
-		if err != nil {
-			return RemoteEvent{}, err
-		}
-	}
-	annotated, err := json.Marshal(document)
-	if err != nil {
-		return RemoteEvent{}, err
-	}
-	return CanonicalizeFederationSnapshotAuthors(RemoteEvent{Type: "issue.snapshot", Payload: annotated}, boundActor)
-}
-
 // CanonicalizeFederationSnapshotAuthors rewrites an adoption snapshot's
 // embedded authors to its bound actor and recomputes the portable hash.
 func CanonicalizeFederationSnapshotAuthors(event RemoteEvent, boundActor string) (RemoteEvent, error) {

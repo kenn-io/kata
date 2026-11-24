@@ -1,8 +1,6 @@
 package dbtest
 
 import (
-	"context"
-	"database/sql"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -11,30 +9,6 @@ import (
 )
 
 func checkFederatedFormerProjectIdentityAdoption(t *testing.T, store db.Storage) error {
-	t.Run("adoption retires accepted task evidence", func(t *testing.T) {
-		ctx := t.Context()
-		project, err := store.CreateProject(ctx, "adoption-accepted-evidence")
-		require.NoError(t, err)
-		sqlStore := store.(interface {
-			ExecContext(context.Context, string, ...any) (sql.Result, error)
-			QueryRowContext(context.Context, string, ...any) *sql.Row
-		})
-		for _, prefix := range []string{db.FederationAcceptedCursorPrefix, db.FederationAcceptedIssuePrefix} {
-			_, err = sqlStore.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,'1'),($2,'1')`, prefix+project.UID+".hub", prefix+"another-project.hub")
-			require.NoError(t, err)
-		}
-		newUID, err := uid.New()
-		require.NoError(t, err)
-		_, err = store.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: project.ID, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: newUID, Actor: "worker"})
-		require.NoError(t, err)
-		for _, prefix := range []string{db.FederationAcceptedCursorPrefix, db.FederationAcceptedIssuePrefix} {
-			var count int
-			require.NoError(t, sqlStore.QueryRowContext(ctx, `SELECT COUNT(*) FROM meta WHERE key=$1`, prefix+project.UID+".hub").Scan(&count))
-			require.Zero(t, count)
-			require.NoError(t, sqlStore.QueryRowContext(ctx, `SELECT COUNT(*) FROM meta WHERE key=$1`, prefix+"another-project.hub").Scan(&count))
-			require.Equal(t, 1, count)
-		}
-	})
 	t.Run("destination reset retains former UID", func(t *testing.T) {
 		ctx := t.Context()
 		source, target := resetFederatedRehomeAfterSourceLeave(t, store, "reset-adoption-identity")

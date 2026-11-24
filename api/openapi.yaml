@@ -2874,9 +2874,6 @@ components:
           type: string
         reset_blocker:
           type: string
-        retained_history:
-          description: The spoke retains local history from before rejoin. Some untouched tasks may remain local; newly recovered snapshots attribute tasks, comments, and same-project links to the current actor on the hub.
-          type: boolean
         role:
           type: string
         root_signing_key:
@@ -7728,7 +7725,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.70.0
+  version: 0.67.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:

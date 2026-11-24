@@ -55,7 +55,7 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
-	{name: "rejoin retained history", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "CommentsByIssue", "UpsertFederationBinding", "LeaveFederationReplica", "RetainedIssueSnapshot", "RecordFederationRecoveredIssue", "AdvanceFederationPushCursor", "AcknowledgeFederationPush", "MoveIssueProject", "ResetFederatedProject", "ResetFederatedProjectIfNoPendingPush", "MaterializeFederatedProject", "EventsByUIDs", "IssueByUID", "ImportReplay", "ExportMeta", "RemoveProject", "PurgeProject"}, runWithBackend: checkRejoinRetainedHistory},
+	{name: "rejoin retained history", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "CommentsByIssue", "UpsertFederationBinding", "LeaveFederationReplica", "RetainedIssueSnapshot", "AdvanceFederationPushCursor", "AcknowledgeFederationPush", "MoveIssueProject", "ResetFederatedProject", "ResetFederatedProjectIfNoPendingPush", "EventsByUIDs", "IssueByUID", "ImportReplay", "ExportMeta", "RemoveProject", "PurgeProject"}, runWithBackend: checkRejoinRetainedHistory},
 	{name: "former instance identities", methods: []string{"ImportReplay", "FormerInstanceUIDs", "ExportMeta", "ExportEvents"}, runWithBackend: checkFormerInstanceIdentities},
 	{name: "attachment close evidence", methods: []string{"CloseIssueGuarded", "PatchIssueMetadata", "EventsByUIDs"}, run: checkAttachmentCloseEvidence},
 	{name: "search tokenizer words", methods: []string{"CreateProject", "CreateIssue", "SearchFTS", "SearchFTSAny"}, runWithBackend: checkSearchTokenizerWords},

@@ -214,9 +214,6 @@ func (s *Store) AdvanceFederationPullCursor(ctx context.Context, projectID, next
 func (s *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string) error {
 	if len(supersededEventUIDs) == 0 {
 		return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
-			if err := db.RecordFederationAcceptedIssues(ctx, tx, projectID, nextCursor, s.InstanceUID()); err != nil {
-				return err
-			}
 			if err := updateFederationCursor(ctx, tx, projectID, nextCursor, true); err != nil {
 				return err
 			}
@@ -224,9 +221,6 @@ func (s *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCu
 		})
 	}
 	return s.materializeFederatedProjectAfter(ctx, projectID, func(ctx context.Context, tx *sql.Tx) error {
-		if err := db.RecordFederationAcceptedIssues(ctx, tx, projectID, nextCursor, s.InstanceUID()); err != nil {
-			return err
-		}
 		deleted, err := db.AcknowledgeSupersededFederationSnapshots(ctx, tx, projectID, s.instanceUID, supersededEventUIDs)
 		if err != nil {
 			return err
@@ -258,11 +252,6 @@ func (s *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCu
 		// and from the stored cursor on their next heartbeat.
 		return db.RecordFederationProjectUIReset(ctx, tx, db.Project{ID: projectID, UID: projectUID, Name: projectName}, reset.ID)
 	})
-}
-
-// RecordFederationRecoveredIssue records the snapshot accepted by the hub.
-func (s *Store) RecordFederationRecoveredIssue(ctx context.Context, binding db.FederationBinding, snapshot db.Event, stored bool) error {
-	return db.RecordFederationRecoveredIssue(ctx, s, binding, snapshot, stored)
 }
 
 // AdvanceFederationPushCursor advances the acknowledged local event id monotonically.

@@ -319,26 +319,6 @@ func TestFederationStatusTextOutputIncludesOperatorFields(t *testing.T) {
 	}
 }
 
-func TestFederationStatusShowsRetainedHistory(t *testing.T) {
-	resetFlags(t)
-	env := testenv.New(t)
-	ctx := t.Context()
-	project, err := env.DB.CreateProject(ctx, "spoke-project")
-	require.NoError(t, err)
-	_, event, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "local task", Author: "old-actor"})
-	require.NoError(t, err)
-	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true, RetainHistory: true})
-	require.NoError(t, err)
-	require.NoError(t, env.DB.AdvanceFederationPushCursor(ctx, project.ID, event.ID))
-	require.NoError(t, env.DB.RecordFederationSyncPushSuccess(ctx, project.ID, time.Now()))
-	out := requireCmdOutput(t, env, "federation", "status", "--project", project.Name)
-	assert.Contains(t, out, "Untouched retained tasks may remain local")
-	assert.Contains(t, out, "Recovery snapshots attribute tasks, comments, and same-project links to the current actor on the hub")
-	assert.Contains(t, out, "Spoke-reported source authors: kata events --json")
-	out = requireCmdOutput(t, env, "federation", "status", "--project", project.Name, "--format", "json")
-	assert.Contains(t, out, `"retained_history":true`)
-}
-
 func TestFederationQuarantineListHumanAndShow(t *testing.T) {
 	env, project := setupFederationStatusCLIState(t)
 	q, err := env.DB.ActiveFederationQuarantine(

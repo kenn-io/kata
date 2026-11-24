@@ -43,80 +43,21 @@ func TestRejoinRefusesRetainedTaskMove(t *testing.T) {
 	}
 }
 
-func TestRejoinMovesPreviouslySyncedRetainedTask(t *testing.T) {
-	ctx := t.Context()
-	hub, projects := newMoveDeliveryHub(t, "move-source", "move-target")
-	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor", "new-actor")
-	known, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "synced task", Author: "old-actor"})
-	require.NoError(t, err)
-	require.NoError(t, spoke.sync(t, 0))
-	unknown, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "local task", Author: "old-actor"})
-	require.NoError(t, err)
-	recovered, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "recovered task", Author: "old-actor"})
-	require.NoError(t, err)
-	rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull,claim")
-	// A second leave must not treat skipped local-only creations as accepted.
-	_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: recovered.ID, Author: "new-actor", Body: "recover"})
-	require.NoError(t, err)
-	require.NoError(t, pushRejoin(t, spoke))
-	newKnown, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "new synced task", Author: "new-actor"})
-	require.NoError(t, err)
-	require.NoError(t, pushRejoin(t, spoke))
-	newUnknown, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "new local task", Author: "new-actor"})
-	require.NoError(t, err)
-	rejoinProjectAs(t, spoke, 0, hub.URL, projects[0], hub.DB, "push,pull,claim", "third-actor")
-	rejoinProjectAs(t, spoke, 1, hub.URL, projects[1], hub.DB, "push,pull,claim", "third-actor")
-	for _, issue := range []db.Issue{unknown, newUnknown} {
-		_, err = spoke.env.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: spoke.projects[0].ID, ToProjectID: spoke.projects[1].ID, IfMatchRev: issue.Revision, Actor: "third-actor"})
-		require.ErrorIs(t, err, db.ErrFederatedMoveUnsupported)
-	}
-	for _, issue := range []db.Issue{known, newKnown, recovered} {
-		_, err = spoke.env.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: spoke.projects[0].ID, ToProjectID: spoke.projects[1].ID, IfMatchRev: issue.Revision, Actor: "third-actor"})
-		require.NoError(t, err)
-	}
-	require.NoError(t, spoke.sync(t, 1))
-	for _, issue := range []db.Issue{known, newKnown, recovered} {
-		remote, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-		require.NoError(t, err)
-		require.Equal(t, projects[1].ID, remote.ProjectID)
-	}
-}
-
-func TestRejoinDoesNotTreatSkippedPushAsAccepted(t *testing.T) {
-	ctx := t.Context()
-	hub, projects := newMoveDeliveryHub(t, "move-source", "move-target")
-	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor", "new-actor")
-	issue, event, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "skipped task", Author: "old-actor"})
-	require.NoError(t, err)
-	q, err := spoke.env.DB.RecordFederationQuarantine(ctx, db.RecordFederationQuarantineParams{ProjectID: spoke.projects[0].ID, Direction: db.FederationQuarantineDirectionPush, FirstEventID: event.ID, LastEventID: event.ID, EventUIDs: []string{event.UID}, Error: "rejected"})
-	require.NoError(t, err)
-	_, err = spoke.env.DB.SkipFederationQuarantine(ctx, db.SkipFederationQuarantineParams{ID: q.ID, ProjectID: spoke.projects[0].ID, Actor: "old-actor", Reason: "skip rejected event"})
-	require.NoError(t, err)
-	rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull,claim")
-	_, err = spoke.env.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: spoke.projects[0].ID, ToProjectID: spoke.projects[1].ID, IfMatchRev: issue.Revision, Actor: "new-actor"})
-	require.ErrorIs(t, err, db.ErrFederatedMoveUnsupported)
-}
-
 func rejoinWithActor(t *testing.T, spoke moveDeliverySpoke, hubURL string, hubProject db.Project, hubStore db.Storage, capabilities string) {
 	rejoinProjectWithActor(t, spoke, 0, hubURL, hubProject, hubStore, capabilities)
 }
 
 func rejoinProjectWithActor(t *testing.T, spoke moveDeliverySpoke, projectIndex int, hubURL string, hubProject db.Project, hubStore db.Storage, capabilities string) {
 	t.Helper()
-	rejoinProjectAs(t, spoke, projectIndex, hubURL, hubProject, hubStore, capabilities, "new-actor")
-}
-
-func rejoinProjectAs(t *testing.T, spoke moveDeliverySpoke, projectIndex int, hubURL string, hubProject db.Project, hubStore db.Storage, capabilities, actor string) {
-	t.Helper()
 	ctx := t.Context()
 	localProject := spoke.projects[projectIndex]
 	_, err := spoke.env.DB.LeaveFederationReplica(ctx, localProject.ID)
 	require.NoError(t, err)
-	grant, err := hubStore.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: spoke.env.DB.InstanceUID(), ProjectID: &hubProject.ID, Capabilities: capabilities, Actor: actor})
+	grant, err := hubStore.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: spoke.env.DB.InstanceUID(), ProjectID: &hubProject.ID, Capabilities: capabilities, Actor: "new-actor"})
 	require.NoError(t, err)
-	_, err = spoke.env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: localProject.ID, Role: db.FederationRoleSpoke, HubURL: hubURL, HubProjectID: hubProject.ID, HubProjectUID: hubProject.UID, Enabled: true, PushEnabled: true, Actor: actor, RetainHistory: true})
+	_, err = spoke.env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: localProject.ID, Role: db.FederationRoleSpoke, HubURL: hubURL, HubProjectID: hubProject.ID, HubProjectUID: hubProject.UID, Enabled: true, PushEnabled: true, Actor: "new-actor", RetainHistory: true})
 	require.NoError(t, err)
-	spoke.credentials[hubProject.UID] = config.FederationCredential{HubURL: hubURL, HubProjectID: hubProject.ID, Token: grant.Token, Actor: actor}
+	spoke.credentials[hubProject.UID] = config.FederationCredential{HubURL: hubURL, HubProjectID: hubProject.ID, Token: grant.Token, Actor: "new-actor"}
 }
 
 func restoreMoveDeliverySpoke(t *testing.T, spoke moveDeliverySpoke, hub *testenv.Env, projects []db.Project) moveDeliverySpoke {
@@ -398,73 +339,6 @@ func TestRejoinRetainedIssueAndLaterTaskPublish(t *testing.T) {
 	} {
 		t.Run(tc.name, tc.run)
 	}
-}
-
-func TestRejoinRecordsAlreadyKnownRecoveryTask(t *testing.T) {
-	ctx := t.Context()
-	hub, projects := newMoveDeliveryHub(t, "known-recovery")
-	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
-	issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "known task", Author: "old-actor"})
-	require.NoError(t, err)
-	require.NoError(t, spoke.sync(t, 0))
-	rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
-	binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
-	require.NoError(t, err)
-	creds := spoke.credentials[projects[0].UID]
-	client, err := NewClient(ctx, creds.HubURL, creds.Token, clientpkg.Opts{})
-	require.NoError(t, err)
-	r := retainedPush{store: spoke.env.DB, binding: &binding, hubProjectID: projects[0].ID, client: client, sent: make(map[string]bool)}
-	require.NoError(t, r.publishRetainedIssue(ctx, issue.UID))
-	key := db.FederationAcceptedIssuePrefix + spoke.projects[0].UID + "." + projects[0].UID + "." + hub.URL + "." + issue.UID
-	var value string
-	require.NoError(t, spoke.env.DB.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=?`, key).Scan(&value))
-	require.Equal(t, "1", value, "a known task does not prove the hub stored this snapshot")
-}
-
-func TestRejoinRecoverySnapshotReportsSourceAuthors(t *testing.T) {
-	ctx := t.Context()
-	hub, projects := newMoveDeliveryHub(t, "recovery-authors")
-	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
-	issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "task", Author: "old-actor"})
-	require.NoError(t, err)
-	peer, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "peer", Author: "old-actor"})
-	require.NoError(t, err)
-	_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "old comment"})
-	require.NoError(t, err)
-	_, _, err = spoke.env.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: issue.ID, ToIssueID: peer.ID, Type: "blocks", Author: "old-actor"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: issue.ID, Actor: "old-actor", FromUID: issue.UID, ToUID: peer.UID, FromShortID: issue.ShortID, ToShortID: peer.ShortID})
-	require.NoError(t, err)
-	rejoinWithActor(t, spoke, hub.URL, projects[0], hub.DB, "push,pull")
-	_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "new comment"})
-	require.NoError(t, err)
-	require.NoError(t, pushRejoin(t, spoke))
-	events, err := hub.DB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: projects[0].ID, IssueUID: issue.UID, Types: []string{"issue.snapshot"}, Limit: 100})
-	require.NoError(t, err)
-	require.Len(t, events, 1)
-	var snapshot struct {
-		SourceAuthor string `json:"source_author"`
-		Comments     []struct {
-			Author       string `json:"author"`
-			SourceAuthor string `json:"source_author"`
-			Body         string `json:"body"`
-		} `json:"comments"`
-		Links []struct {
-			Author       string `json:"author"`
-			SourceAuthor string `json:"source_author"`
-		} `json:"links"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(events[0].Payload), &snapshot))
-	require.Equal(t, "old-actor", snapshot.SourceAuthor)
-	require.Len(t, snapshot.Links, 1)
-	require.Equal(t, "old-actor", snapshot.Links[0].SourceAuthor)
-	require.Equal(t, "new-actor", snapshot.Links[0].Author)
-	for _, comment := range snapshot.Comments {
-		if comment.Body == "old comment" {
-			require.Equal(t, "old-actor", comment.SourceAuthor)
-			require.Equal(t, "new-actor", comment.Author)
-			return
-		}
-	}
-	t.Fatal("old comment missing from recovery snapshot")
 }
 
 func TestRejoinPublishesRecoverySnapshot(t *testing.T) {

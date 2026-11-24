@@ -3,6 +3,7 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
+	"encoding/json/jsontext"
 	"errors"
 
 	"go.kenn.io/kata/internal/db"
@@ -30,7 +31,7 @@ func (d *Store) RetainedIssueSnapshot(ctx context.Context, projectID int64, issu
 		if err != nil {
 			return db.Event{}, err
 		}
-		existing, err := scanEvent(tx.QueryRowContext(ctx, eventSelect+` WHERE e.project_id=?1 AND e.issue_uid=?2 AND e.origin_instance_uid=?3 AND e.id>?4 AND e.actor=?5 AND e.type='issue.snapshot' AND (EXISTS(SELECT 1 FROM projects p JOIN federation_bindings b ON b.project_id=p.id JOIN meta m ON m.key=?7 || p.uid || '.' || b.hub_project_uid || '.' || b.hub_url || '.' || e.issue_uid AND m.value=e.uid WHERE p.id=e.project_id) OR NOT EXISTS(SELECT 1 FROM events later WHERE later.project_id=e.project_id AND later.issue_uid=e.issue_uid AND later.id>e.id AND later.id<=?6)) ORDER BY e.id DESC LIMIT 1`, projectID, issueUID, d.InstanceUID(), creationID, binding.Actor, binding.RetainedThroughEventID, db.FederationAcceptedIssuePrefix))
+		existing, err := scanEvent(tx.QueryRowContext(ctx, eventSelect+` WHERE e.project_id=? AND e.issue_uid=? AND e.origin_instance_uid=? AND e.id>? AND e.actor=? AND e.type='issue.snapshot' ORDER BY e.id LIMIT 1`, projectID, issueUID, d.InstanceUID(), creationID, binding.Actor))
 		if err == nil {
 			return existing, nil
 		}
@@ -52,7 +53,7 @@ func (d *Store) RetainedIssueSnapshot(ctx context.Context, projectID int64, issu
 		if err != nil {
 			return db.Event{}, err
 		}
-		canonical, err := db.CanonicalizeRetainedSnapshotAuthors(payload, binding.Actor)
+		canonical, err := db.CanonicalizeFederationSnapshotAuthors(db.RemoteEvent{Type: "issue.snapshot", Payload: jsontext.Value(payload)}, binding.Actor)
 		if err != nil {
 			return db.Event{}, err
 		}
