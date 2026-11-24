@@ -118,6 +118,11 @@
     padding-left: 0;
   }
 
+  .settings-view :global(.kit-tabs__tab:first-child::after) {
+    left: 0;
+    right: var(--space-4);
+  }
+
   .settings-view :global(.kit-tabs__panel) {
     flex: 1 0 auto;
   }

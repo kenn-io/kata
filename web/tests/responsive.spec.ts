@@ -120,6 +120,16 @@ test('Settings tabs stay above the section at desktop and mobile widths', async 
       expect(indicatorBottom).toBeCloseTo(tabsBounds.y + tabsBounds.height - 1, 0)
     }
     const labelBounds = (await tabs.locator('.kit-tabs__label').first().boundingBox())!
+    const underline = await page.getByRole('tab', { name: 'Appearance' }).evaluate((tab) => {
+      const bounds = tab.getBoundingClientRect()
+      const style = getComputedStyle(tab, '::after')
+      return {
+        left: bounds.left + parseFloat(style.left),
+        right: bounds.right - parseFloat(style.right),
+      }
+    })
+    expect(underline.left).toBeCloseTo(labelBounds.x, 0)
+    expect(underline.right).toBeCloseTo(labelBounds.x + labelBounds.width, 0)
     expect(tabsBounds.x).toBeCloseTo(headingBounds.x, 0)
     expect(tabsBounds.x + tabsBounds.width).toBeCloseTo(headingBounds.x + headingBounds.width, 0)
     expect(labelBounds.x).toBeCloseTo(headingBounds.x, 0)
