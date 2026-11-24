@@ -63,6 +63,7 @@
     {tabs}
     value={active}
     ariaLabel="Settings"
+    activation="manual"
     bind:listElement={tabList}
     onchange={(id) => onSelect(id as SettingsSectionID)}
     tabAttributes={(item, selected) => ({

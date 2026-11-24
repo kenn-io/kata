@@ -203,10 +203,15 @@ test('Settings tabs scroll the focused tab into view on mobile', async ({ page, 
   await first.focus()
   await page.keyboard.press('End')
   await expect(last).toBeFocused()
+  await expect(page).toHaveURL(/view=settings&section=appearance/)
+  await expect(first).toHaveAttribute('aria-selected', 'true')
   const strip = (await tabs.boundingBox())!
   const focused = (await last.boundingBox())!
   expect(focused.x).toBeGreaterThanOrEqual(strip.x)
   expect(focused.x + focused.width).toBeLessThanOrEqual(strip.x + strip.width + 1)
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL(/view=settings&section=access/)
+  await expect(last).toHaveAttribute('aria-selected', 'true')
 })
 
 test('Appearance changes the sidebar color', async ({ page, kata }) => {
