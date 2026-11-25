@@ -563,8 +563,8 @@ func (g *hubWatchGroup) deliver(answer watchAnswer, members map[*watchMember]boo
 // watchRefusal reads a failed watch. routeRefused reports a refusal of the
 // watch route itself, as from a proxy that admits only the routes it knows:
 // any 405, or a 401, 403, or 404 without a Kata error code. leadDenied reports
-// the hub's own refusal of the lead's credential or project, which carries an
-// error code, as the lead's own poll would be refused.
+// the hub's own refusal of the lead's credential, signing key, or project,
+// which carries an error code, as the lead's own poll would be refused.
 func watchRefusal(err error) (routeRefused, leadDenied bool) {
 	hubErr, ok := errors.AsType[*HubStatusError](err)
 	if !ok {
@@ -576,6 +576,8 @@ func watchRefusal(err error) (routeRefused, leadDenied bool) {
 	case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
 		coded := federationHubErrorCode(hubErr.Body) != ""
 		return !coded, coded
+	case http.StatusServiceUnavailable:
+		return false, federationHubErrorCode(hubErr.Body) == "signature_invalid"
 	default:
 		return false, false
 	}

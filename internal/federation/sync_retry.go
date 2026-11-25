@@ -507,9 +507,12 @@ func hubAskedToWait(err error) bool {
 }
 
 // hubCapacityUnavailable reports whether err indicates hub-wide throttling or
-// unavailability suitable for a shared hub pull/watch cooldown. A 503 carrying
-// code "signature_invalid" signals a single enrollment's signing-key fault, so
-// only that binding backs off instead of pausing healthy siblings on the hub.
+// unavailability suitable for a shared hub pull/watch cooldown. The hub uses
+// 503 signature_invalid for both a single enrollment's signing-key fault
+// (signingpolicy.ErrKey) and a hub verifier state fault
+// (federationsigning.ErrState); because the wire code cannot distinguish them,
+// we keep 503 signature_invalid on per-binding exponential backoff so one
+// misconfigured enrollment cannot pause healthy siblings on the same hub.
 func hubCapacityUnavailable(err error) bool {
 	for _, hubErr := range hubStatusErrors(err) {
 		if hubErr.StatusCode == http.StatusTooManyRequests {

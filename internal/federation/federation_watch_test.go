@@ -461,8 +461,14 @@ func TestWatchThrottleDelaysIntervalAndWatchRetries(t *testing.T) {
 	h.watches.Store(true)
 	var throttle atomic.Bool
 	var watches, intervalPolls atomic.Int64
+	allowWatch := make(chan struct{})
 	frontURL := h.bindThrough(t, func(w http.ResponseWriter, r *http.Request, hub http.Handler) {
 		if isWatch(r) {
+			select {
+			case <-allowWatch:
+			case <-r.Context().Done():
+				return
+			}
 			watches.Add(1)
 			if throttle.Load() {
 				w.Header().Set("Retry-After", "120")
@@ -494,6 +500,7 @@ func TestWatchThrottleDelaysIntervalAndWatchRetries(t *testing.T) {
 	})
 	awaitTurns(t, turns, ids...)
 	throttle.Store(true)
+	close(allowWatch)
 	// Wait until the hub-wide cooldown is recorded from the throttled watch.
 	//nolint:kennlint // sleeptest: waits for the 429 response to be processed over real HTTP.
 	require.Eventually(t, func() bool {
@@ -661,7 +668,13 @@ func TestWatchPendingJoinDoesNotBypassRefusedPacing(t *testing.T) {
 	go func() { res2Ch <- group.hold(t.Context(), m2) }()
 	<-inFlight
 	go func() { res1AgainCh <- group.hold(t.Context(), m1) }()
-	res1Again := <-res1AgainCh
+	var res1Again heldResult
+	select {
+	case res1Again = <-res1AgainCh:
+	case <-time.After(2 * time.Second):
+		close(release)
+		t.Fatal("already-checked join blocked instead of returning pacing wait immediately")
+	}
 	close(release)
 	res2 := <-res2Ch
 
@@ -734,4 +747,49 @@ func TestWatchHeldThrottleBacksOffHeldWaitsAfterRecoveryProbe(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	require.Equal(t, []string{"45", "0"}, seenWaits)
+}
+
+// A 503 signature_invalid on the lead member of a multiplexed watch is treated
+// as leadDenied: only the lead gets the error while healthy siblings receive
+// again and continue watching without it.
+func TestWatchLeadSigningKeyFaultDoesNotPenalizeSiblings(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Header.Get("Authorization") == "Bearer bad-lead" {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":{"code":"signature_invalid","message":"federation signature rejected"}}`))
+			return
+		}
+		w.Header().Set("X-Kata-Federation-Poll-Wait-Max", "45")
+		w.Header().Set("X-Kata-Federation-Watch-Max", "256")
+		_, _ = w.Write([]byte(`{"ready":[],"unwatched":[]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	retries := newSyncRetries(noJitter)
+	polls := newHubLongPolls(t.Context(), nil, nil, client.Opts{AllowInsecure: true, Timeout: 30 * time.Second}, 30*time.Second, nil, nil, retries, time.Now)
+	t.Cleanup(polls.stopAll)
+	polls.learnHub(srv.URL, hubPollAdvertisement{wait: 45 * time.Second, watchMax: 256})
+
+	leadClient, err := NewClient(t.Context(), srv.URL, "bad-lead", client.Opts{AllowInsecure: true, Timeout: 30 * time.Second})
+	require.NoError(t, err)
+	siblingClient, err := NewClient(t.Context(), srv.URL, "good-sibling", client.Opts{AllowInsecure: true, Timeout: 30 * time.Second})
+	require.NoError(t, err)
+	group := polls.watchGroup(leadClient, config.FederationCredential{HubURL: srv.URL, Token: "bad-lead", AllowInsecure: true})
+	require.NotNil(t, group)
+
+	lead := &watchMember{projectID: 1, hubProjectID: 100, token: "bad-lead", client: leadClient, wait: 45 * time.Second, finishSync: func() {}}
+	sibling := &watchMember{projectID: 2, hubProjectID: 101, token: "good-sibling", client: siblingClient, wait: 45 * time.Second, finishSync: func() {}}
+
+	leadCh := make(chan heldResult, 1)
+	siblingCh := make(chan heldResult, 1)
+	go func() { leadCh <- group.hold(t.Context(), lead) }()
+	go func() { siblingCh <- group.hold(t.Context(), sibling) }()
+
+	leadRes := <-leadCh
+	siblingRes := <-siblingCh
+	require.Error(t, leadRes.err, "lead with 503 signature_invalid must receive its own error")
+	require.NoError(t, siblingRes.err, "healthy sibling must not be penalized by lead's 503 signature_invalid")
+	require.True(t, siblingRes.again, "healthy sibling should immediately rejoin without the failed lead")
+	require.False(t, retries.hubBlocked(srv.URL, time.Now()), "503 signature_invalid must not trigger hub-wide cooldown")
 }
