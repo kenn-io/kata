@@ -32,12 +32,6 @@ const batchPollRefusalHold = time.Hour
 // lock, still find one while the batch is in flight.
 const batchPollLockHeadroom = 5
 
-// federationLockCapacity is a store whose federation project locks each hold
-// one connection from a fixed pool, as PostgreSQL's do.
-type federationLockCapacity interface {
-	FederationLockCapacity() int
-}
-
 // batchPollResult is a project's answer from the pass's batched poll: an empty
 // page for an idle project, or the refusal its single-project poll returned.
 // Body and Err are what PollProjectEvents would have returned.
@@ -338,7 +332,9 @@ func (r *Runner) lockBatchMembers(ctx context.Context, key batchPollKey, candida
 		}
 	}
 	limit := len(candidates)
-	if pool, ok := r.DB.(federationLockCapacity); ok {
+	// PostgreSQL's federation project locks each hold one connection from a
+	// fixed pool.
+	if pool, ok := r.DB.(interface{ FederationLockCapacity() int }); ok {
 		limit = max(pool.FederationLockCapacity()-batchPollLockHeadroom, 1)
 	}
 	members = make([]batchPollMember, 0, len(candidates))
@@ -496,10 +492,9 @@ func (r *Runner) sendBatch(ctx context.Context, key batchPollKey, members []batc
 func batchPollRefusal(err error, hub string) (summary string, wholeHub, refused bool) {
 	if status, ok := errors.AsType[*HubStatusError](err); ok {
 		switch status.StatusCode {
-		case http.StatusForbidden:
-			return fmt.Sprintf("hub %s refused the batched federation poll with status %d", hub, status.StatusCode), false, true
-		case http.StatusNotFound, http.StatusMethodNotAllowed:
-			return fmt.Sprintf("hub %s refused the batched federation poll with status %d", hub, status.StatusCode), true, true
+		case http.StatusForbidden, http.StatusNotFound, http.StatusMethodNotAllowed:
+			return fmt.Sprintf("hub %s refused the batched federation poll with status %d", hub, status.StatusCode),
+				status.StatusCode != http.StatusForbidden, true
 		case http.StatusGatewayTimeout:
 			return fmt.Sprintf("the batched federation poll to hub %s timed out at a proxy (status %d)", hub, status.StatusCode), true, true
 		}

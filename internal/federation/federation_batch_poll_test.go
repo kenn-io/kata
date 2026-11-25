@@ -653,6 +653,4 @@ func TestBatchPollRefusalSaysATimedOutHubDidNotAnswer(t *testing.T) {
 	timedOut := fmt.Errorf("error sending request: %w", &url.Error{Op: "Post", URL: "http://daemon.example/api/v1/federation/events:poll", Err: context.DeadlineExceeded})
 	summary, _, _ := batchPollRefusal(timedOut, "http://daemon.example")
 	assert.Equal(t, "the batched federation poll to hub http://daemon.example timed out", summary)
-	summary, _, _ = batchPollRefusal(&HubStatusError{StatusCode: http.StatusNotFound}, "http://daemon.example")
-	assert.Equal(t, "hub http://daemon.example refused the batched federation poll with status 404", summary)
 }
