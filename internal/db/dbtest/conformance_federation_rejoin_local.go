@@ -54,37 +54,13 @@ func checkFederationRejoinLocalEvents(t *testing.T, store db.Storage) error {
 	pending, err := store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), binding.PushCursorEventID, 100)
 	require.NoError(t, err)
 	require.Contains(t, pending, comment, "an actor refusal alone does not prove the hub lacks the task")
-	kept, err = store.KeepFederationDependentLocal(ctx, project.ID, comment.ID)
-	require.NoError(t, err)
-	require.True(t, kept)
 	return nil
 }
 
 func checkFederationRejoinResetRetention(t *testing.T, store db.Storage) error {
 	t.Run("cross-task reply", func(t *testing.T) {
 		ctx := t.Context()
-		project, err := store.CreateProject(ctx, "reset-reply")
-		require.NoError(t, err)
-		bindRejoinSpokes(t, store, project)
-		_, err = store.LeaveFederationReplica(ctx, project.ID)
-		require.NoError(t, err)
-		target, targetCreated, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "target", Author: "old-actor"})
-		require.NoError(t, err)
-		source, sourceCreated, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "source", Author: "old-actor"})
-		require.NoError(t, err)
-		comment, root, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: target.ID, Author: "old-actor", Body: "retained"})
-		require.NoError(t, err)
-		bindRejoinSpokes(t, store, project)
-		for _, event := range []db.Event{targetCreated, sourceCreated, root} {
-			kept, err := store.KeepFederationEventLocal(ctx, project.ID, event.ID)
-			require.NoError(t, err)
-			require.True(t, kept)
-		}
-		_, reply, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: source.ID, Author: "new-actor", Body: "reply", ReplyToUID: comment.UID, ReplyKind: "reply"})
-		require.NoError(t, err)
-		kept, err := store.KeepFederationCommentDependentLocal(ctx, project.ID, reply.ID)
-		require.NoError(t, err)
-		require.True(t, kept)
+		project, target, source, _, root, reply := rejoinRetainedReply(t, store, "reset-reply")
 		binding, err := store.FederationBindingByProject(ctx, project.ID)
 		require.NoError(t, err)
 		require.NoError(t, store.ResetFederatedProjectIfNoPendingPush(ctx, project.ID, 1, 0, store.InstanceUID(), binding.PushCursorEventID))

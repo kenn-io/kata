@@ -63,37 +63,23 @@ func rejoinRetainedReply(t *testing.T, store db.Storage, name string) (db.Projec
 func checkFederationRejoinCommentReply(t *testing.T, store db.Storage) error {
 	t.Run("snapshot comments", func(t *testing.T) { checkRejoinSnapshotComments(t, store) })
 	ctx := t.Context()
-	project, err := store.CreateProject(ctx, "reply-project")
+	project, target, source, _, _, reply := rejoinRetainedReply(t, store, "reply-project")
+	comments, err := store.CommentsByIssue(ctx, target.ID)
 	require.NoError(t, err)
-	bindRejoinSpokes(t, store, project)
-	target := createHubIssue(t, store, project)
-	source := createHubIssue(t, store, project)
-	_, err = store.LeaveFederationReplica(ctx, project.ID)
-	require.NoError(t, err)
-	comment, root, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: target.ID, Author: "old-actor", Body: "local"})
-	require.NoError(t, err)
-	bindRejoinSpokes(t, store, project)
-	kept, err := store.KeepFederationEventLocal(ctx, project.ID, root.ID)
-	require.NoError(t, err)
-	require.True(t, kept)
-	_, reply, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: source.ID, Author: "new-actor", Body: "reply", ReplyToUID: comment.UID, ReplyKind: "reply"})
-	require.NoError(t, err)
+	require.Len(t, comments, 1)
 	_, unrelated, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: source.ID, Author: "new-actor", Body: "unrelated"})
 	require.NoError(t, err)
-	issueUID, commentUID, err := store.FederationCommentDependent(ctx, project.ID, unrelated.ID)
+	issueUID, unrelatedCommentUID, err := store.FederationCommentDependent(ctx, project.ID, unrelated.ID)
 	require.NoError(t, err)
 	require.Empty(t, issueUID)
-	require.Empty(t, commentUID)
-	issueUID, commentUID, err = store.FederationCommentDependent(ctx, project.ID, reply.ID)
+	require.Empty(t, unrelatedCommentUID)
+	issueUID, commentUID, err := store.FederationCommentDependent(ctx, project.ID, reply.ID)
 	require.NoError(t, err)
 	require.Equal(t, target.UID, issueUID)
-	require.Equal(t, comment.UID, commentUID)
-	kept, err = store.KeepFederationCommentDependentLocal(ctx, project.ID, unrelated.ID)
+	require.Equal(t, comments[0].UID, commentUID)
+	kept, err := store.KeepFederationCommentDependentLocal(ctx, project.ID, unrelated.ID)
 	require.NoError(t, err)
 	require.False(t, kept)
-	kept, err = store.KeepFederationCommentDependentLocal(ctx, project.ID, reply.ID)
-	require.NoError(t, err)
-	require.True(t, kept)
 	binding, err := store.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
 	pending, err := store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), binding.PushCursorEventID, 100)
@@ -137,31 +123,14 @@ func checkRejoinSnapshotComments(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	local, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "local"})
 	require.NoError(t, err)
-	adopted, err := store.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: project.ID, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "old-actor"})
-	require.NoError(t, err)
-	_, err = store.LeaveFederationReplica(ctx, project.ID)
-	require.NoError(t, err)
-	binding := adopted.Binding
-	binding.Actor = "new-actor"
-	_, err = store.UpsertFederationBinding(ctx, binding)
-	require.NoError(t, err)
+	_, binding := rejoinAdopt(t, store, project)
 	for _, event := range []db.RemoteEvent{remoteSnapshot, sharedEvent, stubEvent} {
 		inserted, err = store.InsertRemoteEvent(ctx, project.ID, event)
 		require.NoError(t, err)
 		require.True(t, inserted)
 	}
-	pending, err := store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), binding.PushCursorEventID, 100)
-	require.NoError(t, err)
-	var snapshot db.Event
-	for _, event := range pending {
-		if event.Type == "issue.snapshot" && event.IssueUID != nil && *event.IssueUID == issue.UID {
-			snapshot = event
-		}
-	}
-	require.NotEmpty(t, snapshot.UID)
-	kept, err := store.KeepFederationEventLocal(ctx, project.ID, snapshot.ID)
-	require.NoError(t, err)
-	require.True(t, kept)
+	keepRejoinSnapshots(t, store, project, binding, issue.UID)
+	var kept bool
 	for _, comment := range []struct{ name, uid string }{{"local", local.UID}, {"event", sharedUID}, {"snapshot", snapshotCommentUID}, {"stub", stubUID}} {
 		_, edit, changed, err := store.EditComment(ctx, db.EditCommentParams{IssueID: issue.ID, CommentUID: comment.uid, Actor: "new-actor", Body: "edited"})
 		require.NoError(t, err)
@@ -191,10 +160,14 @@ func checkRejoinMoveCrossProjectLink(t *testing.T, store db.Storage) {
 	peer := createHubIssue(t, store, peerProject)
 	binding, err := store.FederationBindingByProject(ctx, peerProject.ID)
 	require.NoError(t, err)
+	_, err = store.LeaveFederationReplica(ctx, peerProject.ID)
+	require.NoError(t, err)
 	binding.Actor = "old-actor"
 	_, err = store.UpsertFederationBinding(ctx, binding)
 	require.NoError(t, err)
 	_, event, err := store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: peer.ID, ToIssueID: issue.ID, Type: "blocks", Author: "old-actor"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: peer.ID, FromShortID: peer.ShortID, FromUID: peer.UID, ToShortID: issue.ShortID, ToUID: issue.UID, Actor: "old-actor"})
+	require.NoError(t, err)
+	_, err = store.LeaveFederationReplica(ctx, peerProject.ID)
 	require.NoError(t, err)
 	binding.Actor = "new-actor"
 	_, err = store.UpsertFederationBinding(ctx, binding)
@@ -344,35 +317,17 @@ func checkRejoinMoveSnapshotContent(t *testing.T, store db.Storage, content stri
 		_, _, err = store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: issue.ID, ToIssueID: peer.ID, Type: "blocks", Author: "old-actor"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: issue.ID, FromShortID: issue.ShortID, FromUID: issue.UID, ToShortID: peer.ShortID, ToUID: peer.UID, Actor: "old-actor"})
 	}
 	require.NoError(t, err)
-	adopted, err := store.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: project.ID, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "old-actor"})
-	require.NoError(t, err)
-	_, err = store.LeaveFederationReplica(ctx, project.ID)
-	require.NoError(t, err)
-	binding := adopted.Binding
-	binding.Actor = "new-actor"
-	_, err = store.UpsertFederationBinding(ctx, binding)
-	require.NoError(t, err)
+	adoptedProject, binding := rejoinAdopt(t, store, project)
 	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: target.ID, Role: db.FederationRoleSpoke, HubURL: binding.HubURL, HubProjectID: 2, HubProjectUID: target.UID, Actor: binding.Actor, Enabled: true, PushEnabled: true})
 	require.NoError(t, err)
-	pending, err := store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), binding.PushCursorEventID, 100)
-	require.NoError(t, err)
-	var snapshot db.Event
-	for _, event := range pending {
-		if event.Type == "issue.snapshot" && event.IssueUID != nil && *event.IssueUID == issue.UID {
-			snapshot = event
-		}
-	}
-	require.NotEmpty(t, snapshot.UID)
+	snapshot := keepRejoinSnapshots(t, store, project, binding, issue.UID)
 	if content == "comment" {
 		require.Contains(t, snapshot.Payload, "local discussion")
 	} else {
 		require.Contains(t, snapshot.Payload, peer.UID)
 	}
-	kept, err := store.KeepFederationEventLocal(ctx, project.ID, snapshot.ID)
-	require.NoError(t, err)
-	require.True(t, kept)
-	current := pullHubIssueUpdate(t, store, adopted.Project, issue)
-	requireRejoinMove(t, store, current, adopted.Project, target, db.ErrFederatedMoveUnsupported)
+	current := pullHubIssueUpdate(t, store, adoptedProject, issue)
+	requireRejoinMove(t, store, current, adoptedProject, target, db.ErrFederatedMoveUnsupported)
 }
 
 func checkRejoinMoveHistory(t *testing.T, store db.Storage) error {
@@ -517,11 +472,9 @@ func checkSupersededRetainedCommentEdit(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 }
 
-func reviewRejoinAdopt(t *testing.T, store db.Storage, project db.Project) (db.Project, db.FederationBinding) {
+func rejoinAdopt(t *testing.T, store db.Storage, project db.Project) (db.Project, db.FederationBinding) {
 	t.Helper()
 	ctx := t.Context()
-	_, err := store.LeaveFederationReplica(ctx, project.ID)
-	require.NoError(t, err)
 	adopted, err := store.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: project.ID, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "old-actor"})
 	require.NoError(t, err)
 	_, err = store.LeaveFederationReplica(ctx, project.ID)
@@ -533,20 +486,23 @@ func reviewRejoinAdopt(t *testing.T, store db.Storage, project db.Project) (db.P
 	return adopted.Project, b
 }
 
-func reviewKeepSnapshots(t *testing.T, store db.Storage, project db.Project, b db.FederationBinding, issueUID string) {
+func keepRejoinSnapshots(t *testing.T, store db.Storage, project db.Project, b db.FederationBinding, issueUID string) db.Event {
 	t.Helper()
 	pending, err := store.PendingFederationPushEvents(t.Context(), project.ID, store.InstanceUID(), b.PushCursorEventID, 100)
 	require.NoError(t, err)
 	n := 0
+	var snapshot db.Event
 	for _, e := range pending {
 		if e.Type == "issue.snapshot" && e.IssueUID != nil && *e.IssueUID == issueUID {
 			kept, err := store.KeepFederationEventLocal(t.Context(), project.ID, e.ID)
 			require.NoError(t, err)
 			require.True(t, kept)
 			n++
+			snapshot = e
 		}
 	}
 	require.NotZero(t, n)
+	return snapshot
 }
 
 // A combined edit can prove the hub accepted a retained link.
@@ -566,13 +522,15 @@ func checkAcceptedCombinedLink(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	require.True(t, ins)
 	require.NoError(t, store.MaterializeFederatedProject(ctx, project.ID))
-	p, b := reviewRejoinAdopt(t, store, project)
+	_, err = store.LeaveFederationReplica(ctx, project.ID)
+	require.NoError(t, err)
+	p, b := rejoinAdopt(t, store, project)
 	ins, err = store.InsertRemoteEvent(ctx, project.ID, ev)
 	require.NoError(t, err)
 	require.True(t, ins)
 	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: target.ID, Role: db.FederationRoleSpoke, HubURL: b.HubURL, HubProjectID: 2, HubProjectUID: target.UID, Actor: "new-actor", Enabled: true, PushEnabled: true})
 	require.NoError(t, err)
-	reviewKeepSnapshots(t, store, p, b, issue.UID)
+	keepRejoinSnapshots(t, store, p, b, issue.UID)
 	current := pullHubIssueUpdate(t, store, p, issue)
 	requireRejoinMove(t, store, current, p, target, nil)
 }
@@ -590,6 +548,8 @@ func checkAcceptedCrossProjectLink(t *testing.T, store db.Storage) {
 	peer := createHubIssue(t, store, peerProject)
 	binding, err := store.FederationBindingByProject(ctx, peerProject.ID)
 	require.NoError(t, err)
+	_, err = store.LeaveFederationReplica(ctx, peerProject.ID)
+	require.NoError(t, err)
 	binding.Actor = "old-actor"
 	_, err = store.UpsertFederationBinding(ctx, binding)
 	require.NoError(t, err)
@@ -602,6 +562,8 @@ func checkAcceptedCrossProjectLink(t *testing.T, store db.Storage) {
 	inserted, err := store.InsertRemoteEvent(ctx, peerProject.ID, event)
 	require.NoError(t, err)
 	require.True(t, inserted)
+	_, err = store.LeaveFederationReplica(ctx, peerProject.ID)
+	require.NoError(t, err)
 	binding.Actor = "new-actor"
 	_, err = store.UpsertFederationBinding(ctx, binding)
 	require.NoError(t, err)
@@ -632,17 +594,10 @@ func checkCrossProjectSnapshotLink(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	_, _, err = store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: peer.ID, ToIssueID: issue.ID, Type: "blocks", Author: "old-actor"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: peer.ID, FromShortID: peer.ShortID, FromUID: peer.UID, ToShortID: issue.ShortID, ToUID: issue.UID, Actor: "old-actor"})
 	require.NoError(t, err)
-	adopted, err := store.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: peerProject.ID, HubURL: "https://hub.example", HubProjectID: 2, HubProjectUID: peerProject.UID, Actor: "old-actor"})
-	require.NoError(t, err)
 	_, err = store.UpsertFederationBinding(ctx, binding)
 	require.NoError(t, err)
-	_, err = store.LeaveFederationReplica(ctx, peerProject.ID)
-	require.NoError(t, err)
-	peerBinding := adopted.Binding
-	peerBinding.Actor = "new-actor"
-	_, err = store.UpsertFederationBinding(ctx, peerBinding)
-	require.NoError(t, err)
-	reviewKeepSnapshots(t, store, peerProject, peerBinding, peer.UID)
+	_, peerBinding := rejoinAdopt(t, store, peerProject)
+	keepRejoinSnapshots(t, store, peerProject, peerBinding, peer.UID)
 	_, err = store.LinkByEndpoints(ctx, peer.ID, issue.ID, "blocks")
 	require.NoError(t, err)
 	current, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)

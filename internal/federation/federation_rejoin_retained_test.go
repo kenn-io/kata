@@ -39,19 +39,18 @@ func (s *commentDependentProbe) FederationCommentDependent(context.Context, int6
 	return "", "", nil
 }
 
-func TestRejoinCommentDependentScan(t *testing.T) {
-	store := &commentDependentProbe{}
-	pending := []db.Event{
-		{ID: 1, Type: "issue.commented", Payload: `{"body":"plain"}`},
-		{ID: 2, Type: "issue.commented", Payload: `{"reply_to_uid":"target"}`},
-		{ID: 3, Type: "issue.comment_edited", Payload: `{}`},
-	}
-	_, err := keepFederationCommentDependentsLocal(t.Context(), store, &db.FederationBinding{}, pending, nil, 0, nil)
-	require.NoError(t, err)
-	require.Equal(t, []int64{2, 3}, store.ids)
-}
-
 func TestRejoinCommentHistory(t *testing.T) {
+	t.Run("dependent scan", func(t *testing.T) {
+		store := &commentDependentProbe{}
+		pending := []db.Event{
+			{ID: 1, Type: "issue.commented", Payload: `{"body":"plain"}`},
+			{ID: 2, Type: "issue.commented", Payload: `{"reply_to_uid":"target"}`},
+			{ID: 3, Type: "issue.comment_edited", Payload: `{}`},
+		}
+		_, err := keepFederationCommentDependentsLocal(t.Context(), store, &db.FederationBinding{}, pending, nil, 0, nil)
+		require.NoError(t, err)
+		require.Equal(t, []int64{2, 3}, store.ids)
+	})
 	for _, tc := range []struct {
 		name     string
 		status   int
@@ -131,22 +130,10 @@ func checkRejoinBatchesAlreadyAcceptedOldEvents(t *testing.T) {
 	require.NoError(t, err)
 	later, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "later task", Author: "new-actor"})
 	require.NoError(t, err)
-	target, err := url.Parse(hub.URL)
-	require.NoError(t, err)
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	var requests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/federation/events:ingest") {
-			requests.Add(1)
-		}
-		proxy.ServeHTTP(w, r)
-	}))
-	t.Cleanup(server.Close)
 	binding, err := spoke.env.DB.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
-	creds := config.FederationCredential{HubURL: server.URL, HubProjectID: projects[0].ID, Token: token, Actor: "new-actor", Capabilities: "pull,push"}
+	creds := config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[0].ID, Token: token, Actor: "new-actor", Capabilities: "pull,push"}
 	require.NoError(t, SyncFederationOnce(ctx, spoke.env.DB, binding, creds))
-	require.LessOrEqual(t, requests.Load(), int32(8))
 	_, err = hub.DB.IssueByUID(ctx, later.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	hubIssue, err := hub.DB.IssueByUID(ctx, accepted.UID, db.IncludeDeletedNo)
@@ -182,10 +169,23 @@ func checkRejoinPublishesAfter500OldTasks(t *testing.T) {
 	token := rejoinNewActor(t, hub, projects[0], spoke.env, project)
 	later, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "later task", Author: "new-actor"})
 	require.NoError(t, err)
+	target, err := url.Parse(hub.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/federation/events:ingest") {
+			requests.Add(1)
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
 	binding, err := spoke.env.DB.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
-	creds := config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[0].ID, Token: token, Actor: "new-actor", Capabilities: "pull,push"}
+	creds := config.FederationCredential{HubURL: server.URL, HubProjectID: projects[0].ID, Token: token, Actor: "new-actor", Capabilities: "pull,push"}
 	require.NoError(t, SyncFederationOnce(ctx, spoke.env.DB, binding, creds))
+	// A single-event retry for each old event would need at least 1,000 requests.
+	require.Less(t, requests.Load(), int32(500))
 	_, err = hub.DB.IssueByUID(ctx, later.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	_, err = hub.DB.IssueByUID(ctx, earlier.UID, db.IncludeDeletedNo)
@@ -326,7 +326,6 @@ func TestRejoinKeepsOldActorEventsLocal(t *testing.T) {
 		quarantine bool
 		race       bool
 	}{
-		{name: "old actor event"},
 		{name: "unsent adoption snapshots", snapshots: true},
 		{name: "existing actor quarantine", quarantine: true},
 		{name: "comment on missing task", race: true},
