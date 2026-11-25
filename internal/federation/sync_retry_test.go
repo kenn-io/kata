@@ -298,31 +298,31 @@ func TestSyncRetryHubCooldownVersionFencesStaleClear(t *testing.T) {
 	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	// Healthy hub admits concurrent probes at version 0.
-	release0, allowed0, _, v0 := retries.acquireHubProbe(hubURL, at, time.Minute)
+	release0, allowed0, _, p0 := retries.acquireHubProbe(hubURL, at, time.Minute)
 	require.True(t, allowed0)
-	require.Equal(t, uint64(0), v0)
+	require.Equal(t, uint64(0), p0.version)
 	release0()
 
 	// A 429 starts a cooldown at version > 0; clearing with stale version 0 must not erase it.
-	retries.recordHubUnavailable(hubURL, v0, time.Minute, 30*time.Second, at)
-	retries.clearHubUnavailable(hubURL, v0)
+	retries.recordHubUnavailable(hubURL, p0.version, time.Minute, 30*time.Second, at)
+	retries.clearHubUnavailable(hubURL, p0)
 	require.True(t, retries.hubBlocked(hubURL, at.Add(30*time.Second)))
 
-	// Once cooldown expires, one recovery probe runs at v1; a newer 429 from v1 bumps to v2,
-	// so clearing with stale v1 cannot erase the newer cooldown.
-	release1, allowed1, _, v1 := retries.acquireHubProbe(hubURL, at.Add(time.Minute), time.Minute)
+	// Once cooldown expires, one recovery probe runs at p1; a late concurrent 429
+	// carrying a longer Retry-After bumps version so p1's success cannot erase the extended wait.
+	release1, allowed1, _, p1 := retries.acquireHubProbe(hubURL, at.Add(time.Minute), time.Minute)
 	require.True(t, allowed1)
-	require.NotZero(t, v1)
-	retries.recordHubUnavailable(hubURL, v1, 2*time.Minute, 30*time.Second, at.Add(time.Minute))
-	retries.clearHubUnavailable(hubURL, v1)
+	require.NotZero(t, p1.version)
+	retries.recordHubUnavailable(hubURL, 0, 2*time.Minute, 30*time.Second, at.Add(time.Minute))
+	retries.clearHubUnavailable(hubURL, p1)
 	release1()
-	require.True(t, retries.hubBlocked(hubURL, at.Add(2*time.Minute)), "stale version must not clear newer cooldown")
+	require.True(t, retries.hubBlocked(hubURL, at.Add(2*time.Minute)), "in-flight probe must not clear an extended Retry-After")
 
 	// Clearing with the matching recovery probe version lifts the cooldown.
-	release2, allowed2, _, v2 := retries.acquireHubProbe(hubURL, at.Add(3*time.Minute), time.Minute)
+	release2, allowed2, _, p2 := retries.acquireHubProbe(hubURL, at.Add(3*time.Minute), time.Minute)
 	require.True(t, allowed2)
-	require.Greater(t, v2, v1)
-	retries.clearHubUnavailable(hubURL, v2)
+	require.Greater(t, p2.version, p1.version)
+	retries.clearHubUnavailable(hubURL, p2)
 	release2()
 	require.False(t, retries.hubBlocked(hubURL, at.Add(3*time.Minute)))
 }
@@ -348,7 +348,7 @@ func TestSyncRetryHubProbeAdmitsSingleRecoveryCaller(t *testing.T) {
 
 	// After cooldown expires, only one recovery probe is admitted at a time.
 	after := at.Add(time.Minute)
-	releaseFirst, okFirst, _, vFirst := retries.acquireHubProbe(hubURL, after, time.Minute)
+	releaseFirst, okFirst, _, pFirst := retries.acquireHubProbe(hubURL, after, time.Minute)
 	require.True(t, okFirst)
 
 	_, okSecond, retryAtSecond, _ := retries.acquireHubProbe(hubURL, after, time.Minute)
@@ -362,24 +362,26 @@ func TestSyncRetryHubProbeAdmitsSingleRecoveryCaller(t *testing.T) {
 	_, okAfterLateThrottle, _, _ := retries.acquireHubProbe(hubURL, after, time.Minute)
 	require.False(t, okAfterLateThrottle, "late pre-cooldown throttle must preserve active probe reservation")
 
-	// If a probe stalls past its TTL, a successor probe is admitted and the
-	// stale probe's release cannot clear the successor's reservation.
+	// If a probe stalls past its TTL, a successor probe is admitted, and the
+	// expired probe can neither unlock nor clear the successor's reservation.
 	expiredAt := after.Add(time.Minute)
-	releaseSuccessor, okSuccessor, _, vSuccessor := retries.acquireHubProbe(hubURL, expiredAt, time.Minute)
+	releaseSuccessor, okSuccessor, _, pSuccessor := retries.acquireHubProbe(hubURL, expiredAt, time.Minute)
 	require.True(t, okSuccessor, "expired probe reservation must admit a successor")
-	require.Equal(t, vFirst, vSuccessor)
+	require.Equal(t, pFirst.version, pSuccessor.version)
+	require.NotEqual(t, pFirst.id, pSuccessor.id)
+	retries.clearHubUnavailable(hubURL, pFirst)
 	releaseFirst()
 	_, okConcurrentWithSuccessor, _, _ := retries.acquireHubProbe(hubURL, expiredAt.Add(time.Second), time.Minute)
-	require.False(t, okConcurrentWithSuccessor, "stale probe release must not unlock successor reservation")
+	require.False(t, okConcurrentWithSuccessor, "expired probe clear/release must not unlock successor reservation")
 
 	// Releasing the active probe allows the next caller to probe.
 	releaseSuccessor()
-	releaseRetry, okRetry, _, vRetry := retries.acquireHubProbe(hubURL, expiredAt.Add(time.Second), time.Minute)
+	releaseRetry, okRetry, _, pRetry := retries.acquireHubProbe(hubURL, expiredAt.Add(time.Second), time.Minute)
 	require.True(t, okRetry)
-	require.Equal(t, vFirst, vRetry)
+	require.Equal(t, pFirst.version, pRetry.version)
 
 	// Clearing after a clean recovery response restores concurrent admission.
-	retries.clearHubUnavailable(hubURL, vRetry)
+	retries.clearHubUnavailable(hubURL, pRetry)
 	releaseRetry()
 	r3, ok3, _, _ := retries.acquireHubProbe(hubURL, expiredAt.Add(time.Second), time.Minute)
 	r4, ok4, _, _ := retries.acquireHubProbe(hubURL, expiredAt.Add(time.Second), time.Minute)
@@ -406,9 +408,9 @@ func TestSyncRetryConcurrentFailuresDoNotCompoundHubDelay(t *testing.T) {
 
 	// Once cooldown expires, a failing recovery probe (matching version) doubles delay to 60s.
 	after := at.Add(45 * time.Second)
-	release, ok, _, version := retries.acquireHubProbe(hubURL, after, time.Minute)
+	release, ok, _, probe := retries.acquireHubProbe(hubURL, after, time.Minute)
 	require.True(t, ok)
-	probeWait := retries.recordHubUnavailable(hubURL, version, 0, 30*time.Second, after)
+	probeWait := retries.recordHubUnavailable(hubURL, probe.version, 0, 30*time.Second, after)
 	release()
 	require.Equal(t, time.Minute, probeWait)
 }

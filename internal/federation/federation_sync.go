@@ -438,7 +438,7 @@ func syncDirectSpoke(
 		}
 	}
 	hubPull := hubPullRetriesFromContext(ctx)
-	releaseProbe, allowed, _, hubVersion := hubPull.acquire(client.baseURL, opts.Timeout)
+	releaseProbe, allowed, _, hubProbe := hubPull.acquire(client.baseURL, opts.Timeout)
 	if !allowed {
 		hubPull.markSkipped()
 		return nil
@@ -448,7 +448,13 @@ func syncDirectSpoke(
 	if err != nil {
 		return err
 	}
+	pullVersion := hubProbe.version
 	recordPullError := func(pullErr error) error {
+		if hubAskedToWait(pullErr) {
+			_, _, retryAfter := classifySyncRetry(pullErr)
+			hubPull.recordUnavailable(client.baseURL, pullVersion, retryAfter)
+		}
+		releaseProbe()
 		at := time.Now().UTC()
 		if at.Before(pullStartedAt) {
 			at = pullStartedAt
@@ -460,16 +466,12 @@ func syncDirectSpoke(
 		return recordFederationSyncErrorAt(ctx, store, binding.ProjectID, pullErr, at)
 	}
 	body, advertised, err := client.pollProjectEvents(ctx, hubProjectID, "", binding.PullCursorEventID, federationPollLimit, 0)
-	if err == nil {
-		hubPull.clear(client.baseURL, hubVersion)
-	} else if hubAskedToWait(err) {
-		_, _, retryAfter := classifySyncRetry(err)
-		hubPull.recordUnavailable(client.baseURL, hubVersion, retryAfter)
-	}
-	releaseProbe()
 	if err != nil {
 		return recordPullError(err)
 	}
+	hubPull.clear(client.baseURL, hubProbe)
+	pullVersion = 0
+	releaseProbe()
 	// The pull tells the held-poll watchers whether this hub takes one
 	// watch for all of its bindings before any of them holds a poll there.
 	learnHubFromContext(ctx, client.baseURL, advertised)
@@ -1416,18 +1418,18 @@ func (c *hubPullRetryContext) currentNow() time.Time {
 	return time.Now()
 }
 
-func (c *hubPullRetryContext) acquire(hubURL string, timeout time.Duration) (func(), bool, time.Time, uint64) {
+func (c *hubPullRetryContext) acquire(hubURL string, timeout time.Duration) (func(), bool, time.Time, hubProbe) {
 	if c == nil || c.retries == nil {
-		return func() {}, true, time.Time{}, 0
+		return func() {}, true, time.Time{}, hubProbe{}
 	}
 	return c.retries.acquireHubProbe(hubURL, c.currentNow(), max(2*timeout, 30*time.Second))
 }
 
-func (c *hubPullRetryContext) clear(hubURL string, started uint64) {
+func (c *hubPullRetryContext) clear(hubURL string, probe hubProbe) {
 	if c == nil || c.retries == nil {
 		return
 	}
-	c.retries.clearHubUnavailable(hubURL, started)
+	c.retries.clearHubUnavailable(hubURL, probe)
 }
 
 func (c *hubPullRetryContext) recordUnavailable(hubURL string, started uint64, retryAfter time.Duration) {
@@ -1509,7 +1511,9 @@ func (r *Runner) runSpoke(
 		if identityErr != nil {
 			resultErr = errors.Join(resultErr, identityErr)
 		}
-		if r.OnSpokeResult != nil && (!remaining || resultErr != nil) && !errors.Is(resultErr, errFederationRunnerLeaseInvalid) {
+		pullCtx := hubPullRetriesFromContext(ctx)
+		pullSkipped := pullCtx != nil && pullCtx.pullSkipped.Load()
+		if r.OnSpokeResult != nil && (resultErr != nil || !pullSkipped) && (!remaining || resultErr != nil) && !errors.Is(resultErr, errFederationRunnerLeaseInvalid) {
 			r.OnSpokeResult(spoke.binding.ProjectID, resultErr)
 		}
 	}()

@@ -469,7 +469,7 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 			})
 		} else {
 			probeTTL := max(2*opts.Timeout, 30*time.Second)
-			releaseProbe, allowed, retryAt, hubVersion := p.retries.acquireHubProbe(credential.HubURL, p.now(), probeTTL)
+			releaseProbe, allowed, retryAt, probe := p.retries.acquireHubProbe(credential.HubURL, p.now(), probeTTL)
 			if !allowed {
 				finishSync()
 				doneHeld()
@@ -484,18 +484,18 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 			// idle hub clears the cooldown immediately instead of holding all
 			// other callers back for a full wait interval.
 			pollWait := wait
-			if hubVersion != 0 {
+			if probe.version != 0 {
 				pollWait = 0
 			}
 			held = p.heldPollResult(requestCtx, client, credential.HubProjectID, cursor, pollWait)
 			if held.err == nil {
-				p.retries.clearHubUnavailable(credential.HubURL, hubVersion)
-				if hubVersion != 0 && !held.changed && held.advertised > 0 {
+				p.retries.clearHubUnavailable(credential.HubURL, probe)
+				if probe.version != 0 && !held.changed && held.advertised > 0 {
 					held.again = true
 				}
 			} else if hubAskedToWait(held.err) && !errors.Is(requestCtx.Err(), context.Canceled) {
 				_, _, retryAfter := classifySyncRetry(held.err)
-				hubWait := p.retries.recordHubUnavailable(credential.HubURL, hubVersion, retryAfter, p.interval, p.now())
+				hubWait := p.retries.recordHubUnavailable(credential.HubURL, probe.version, retryAfter, p.interval, p.now())
 				held.sleep = max(p.jitteredDelay(backoff), hubWait)
 			}
 			releaseProbe()

@@ -66,6 +66,13 @@ type SyncRetries struct {
 // hold back other callers if its request stalls unexpectedly.
 const defaultHubProbeTTL = 3 * time.Minute
 
+// hubProbe identifies an acquired hub pull/watch probe so clearHubUnavailable
+// only clears a cooldown matching both its version and active probe owner.
+type hubProbe struct {
+	version uint64
+	id      uint64
+}
+
 // hubRetry holds a hub-wide pull/watch cooldown after a 429 or 503 capacity
 // refusal so one busy hub stops receiving a burst across every project bound to
 // it. probeID and probeUntil reserve a single recovery probe once nextAttemptAt
@@ -333,19 +340,27 @@ func (s *SyncRetries) recordHubUnavailable(hubURL string, started uint64, retryA
 	probeID, probeUntil := previous.probeID, previous.probeUntil
 	var version uint64
 	var delay time.Duration
-	if !ok || started == previous.version {
-		s.next++
-		version = s.next
+	escalate := !ok || started == previous.version
+	if escalate {
 		delay = nextRetryDelay(previous.delay, ok, interval, max(unavailableRetryMaxDelay, interval))
 	} else {
-		version = previous.version
 		delay = previous.delay
 	}
 	base := max(delay, min(retryAfter, maxHonoredRetryAfter))
 	wait := base + s.jitter(base/4)
 	nextAt := completed.Add(wait).UTC()
+	extended := ok && nextAt.After(previous.nextAttemptAt)
 	if ok && previous.nextAttemptAt.After(nextAt) {
 		nextAt = previous.nextAttemptAt
+	}
+	if escalate || extended {
+		// Bump version on any first/probe failure or whenever a late Retry-After
+		// extends nextAttemptAt, so an earlier in-flight probe cannot clear the
+		// extended wait.
+		s.next++
+		version = s.next
+	} else {
+		version = previous.version
 	}
 	s.hubs[key] = hubRetry{
 		version: version, delay: delay, nextAttemptAt: nextAt,
@@ -356,8 +371,9 @@ func (s *SyncRetries) recordHubUnavailable(hubURL string, started uint64, retryA
 
 // clearHubUnavailable ends a hub's capacity cooldown after an eligible
 // recovery request succeeds. An older in-flight request whose started version
-// predates a newer cooldown cannot erase it.
-func (s *SyncRetries) clearHubUnavailable(hubURL string, started uint64) {
+// predates a newer or extended cooldown, or an expired probe superseded by a
+// newer probe owner, cannot erase it.
+func (s *SyncRetries) clearHubUnavailable(hubURL string, probe hubProbe) {
 	if s == nil {
 		return
 	}
@@ -368,35 +384,35 @@ func (s *SyncRetries) clearHubUnavailable(hubURL string, started uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	state, ok := s.hubs[key]
-	if ok && state.version == started {
+	if ok && state.version == probe.version && (state.probeID == 0 || state.probeID == probe.id) {
 		delete(s.hubs, key)
 	}
 }
 
 // acquireHubProbe checks whether hubURL may be contacted for a pull or watch at
-// now. While a hub is healthy it admits every caller concurrently with version
-// 0. While its cooldown is active it denies callers until nextAttemptAt. Once
-// the cooldown expires it admits one recovery probe at a time (bounded by
+// now. While a hub is healthy it admits every caller concurrently with a zero
+// probe. While its cooldown is active it denies callers until nextAttemptAt.
+// Once the cooldown expires it admits one recovery probe at a time (bounded by
 // probeTTL) until that probe finishes or expires.
-func (s *SyncRetries) acquireHubProbe(hubURL string, now time.Time, probeTTL time.Duration) (release func(), allowed bool, retryAt time.Time, version uint64) {
+func (s *SyncRetries) acquireHubProbe(hubURL string, now time.Time, probeTTL time.Duration) (release func(), allowed bool, retryAt time.Time, probe hubProbe) {
 	if s == nil {
-		return func() {}, true, time.Time{}, 0
+		return func() {}, true, time.Time{}, hubProbe{}
 	}
 	key := retryHubKey(hubURL)
 	if key == "" {
-		return func() {}, true, time.Time{}, 0
+		return func() {}, true, time.Time{}, hubProbe{}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	state, ok := s.hubs[key]
 	if !ok {
-		return func() {}, true, time.Time{}, 0
+		return func() {}, true, time.Time{}, hubProbe{}
 	}
 	if now.Before(state.nextAttemptAt) {
-		return nil, false, state.nextAttemptAt, state.version
+		return nil, false, state.nextAttemptAt, hubProbe{version: state.version}
 	}
 	if state.probeID != 0 && now.Before(state.probeUntil) {
-		return nil, false, time.Time{}, state.version
+		return nil, false, time.Time{}, hubProbe{version: state.version}
 	}
 	if probeTTL <= 0 {
 		probeTTL = defaultHubProbeTTL
@@ -406,8 +422,8 @@ func (s *SyncRetries) acquireHubProbe(hubURL string, now time.Time, probeTTL tim
 	state.probeID = probeID
 	state.probeUntil = now.Add(probeTTL).UTC()
 	s.hubs[key] = state
-	probeVersion := state.version
-	return sync.OnceFunc(func() { s.releaseHubProbe(key, probeID) }), true, time.Time{}, probeVersion
+	acquired := hubProbe{version: state.version, id: probeID}
+	return sync.OnceFunc(func() { s.releaseHubProbe(key, probeID) }), true, time.Time{}, acquired
 }
 
 func (s *SyncRetries) releaseHubProbe(key string, probeID uint64) {

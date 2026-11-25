@@ -617,10 +617,58 @@ func TestThrottledHubSkippedPullAndMidPassRebind(t *testing.T) {
 		_, _, _, err = fleet.runner.runOnce(ctx, nil, map[int64]bool{fleet.projects[1].ID: true}, retries)
 		require.NoError(t, err)
 		require.Zero(t, fleet.requests.Load(), "quiet held project should make no HTTP request")
-		release, allowed, _, versionAfterSkip := retries.acquireHubProbe(binding1.HubURL, fleet.now, time.Minute)
+		release, allowed, _, probeAfterSkip := retries.acquireHubProbe(binding1.HubURL, fleet.now, time.Minute)
 		require.True(t, allowed)
-		require.NotZero(t, versionAfterSkip, "a skipped pull with no hub response must not clear hub cooldown")
+		require.NotZero(t, probeAfterSkip.version, "a skipped pull with no hub response must not clear hub cooldown")
 		release()
+	})
+
+	t.Run("throttled follow-up reset read pauses subsequent pulls and skips success telemetry", func(t *testing.T) {
+		ctx := t.Context()
+		fleet := newSpokeFleet(t, 3)
+		for _, project := range fleet.projects {
+			fleet.refuse.Delete(project.UID)
+		}
+		var pollHits, metaHits atomic.Int64
+		hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/federation/metadata") {
+				metaHits.Add(1)
+				w.Header().Set("Retry-After", "60")
+				w.WriteHeader(http.StatusTooManyRequests)
+				return
+			}
+			pollHits.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"events":[],"next_after_id":0,"reset_required":true}`))
+		}))
+		t.Cleanup(hub.Close)
+		for _, project := range fleet.projects {
+			b, err := fleet.store.FederationBindingByProject(ctx, project.ID)
+			require.NoError(t, err)
+			b.HubURL = hub.URL
+			b.PushEnabled = false
+			_, err = fleet.store.UpsertFederationBinding(ctx, b)
+			require.NoError(t, err)
+			c := fleet.credentials.credentials[project.UID]
+			c.HubURL = hub.URL
+			require.NoError(t, fleet.credentials.StoreFederationCredential(ctx, project.UID, c))
+		}
+
+		var okResults, errResults atomic.Int64
+		fleet.runner.OnSpokeResult = func(_ int64, err error) {
+			if err == nil {
+				okResults.Add(1)
+			} else {
+				errResults.Add(1)
+			}
+		}
+		retries := newSyncRetries(noJitter)
+		fleet.pass(ctx, retries)
+		require.Equal(t, int64(1), pollHits.Load(), "only the first project should poll before its reset read trips the hub cooldown")
+		require.Equal(t, int64(1), metaHits.Load(), "follow-up metadata read hit 429")
+		require.True(t, retries.hubBlocked(hub.URL, fleet.now.Add(10*time.Second)), "throttled reset read must trigger hub cooldown")
+		require.Equal(t, int64(1), errResults.Load())
+		require.Zero(t, okResults.Load(), "pulls skipped by hub cooldown must not report success telemetry")
 	})
 
 	t.Run("rebind mid-pass records cooldown against reloaded hub URL", func(t *testing.T) {

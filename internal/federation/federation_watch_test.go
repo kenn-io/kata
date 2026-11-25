@@ -600,3 +600,127 @@ func TestWatchPacingWaitReturnsImmediatelyToCaller(t *testing.T) {
 	require.True(t, second.again)
 	require.Equal(t, 30*time.Second, second.sleep)
 }
+
+// A member that was already checked in the current pacing window and rejoins
+// while another watch is in flight is drained with its remaining pacing wait
+// once that flight finishes, rather than starting a duplicate watch before its
+// pacing window expires; meanwhile an unchecked member is not starved.
+func TestWatchPendingJoinDoesNotBypassRefusedPacing(t *testing.T) {
+	var requests atomic.Int64
+	inFlight := make(chan struct{}, 1)
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		n := requests.Add(1)
+		if n == 2 {
+			inFlight <- struct{}{}
+			<-release
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Kata-Federation-Poll-Wait-Max", "45")
+		w.Header().Set("X-Kata-Federation-Watch-Max", "256")
+		_, _ = w.Write([]byte(`{"ready":[],"unwatched":[]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	polls := newHubLongPolls(t.Context(), nil, nil, client.Opts{AllowInsecure: true, Timeout: 30 * time.Second}, 30*time.Second, nil, nil, newSyncRetries(noJitter), func() time.Time { return now })
+	polls.jitter = noJitter
+	t.Cleanup(polls.stopAll)
+	polls.learnHub(srv.URL, hubPollAdvertisement{wait: 45 * time.Second, watchMax: 256})
+	c, err := NewClient(t.Context(), srv.URL, "token", client.Opts{AllowInsecure: true, Timeout: 30 * time.Second})
+	require.NoError(t, err)
+	group := polls.watchGroup(c, config.FederationCredential{HubURL: srv.URL, Token: "token", AllowInsecure: true})
+	require.NotNil(t, group)
+
+	m1 := &watchMember{projectID: 1, hubProjectID: 100, token: "token", client: c, wait: 45 * time.Second, finishSync: func() {}}
+	m2 := &watchMember{projectID: 2, hubProjectID: 101, token: "token", client: c, wait: 45 * time.Second, finishSync: func() {}}
+
+	// 1. m1 receives a refused-hold watch answer, setting its pacing window to now+30s.
+	res1 := group.hold(t.Context(), m1)
+	require.NoError(t, res1.err)
+	require.True(t, res1.quiet)
+
+	// 2. Unchecked member m2 is NOT starved — it starts watch #2 immediately.
+	//    While watch #2 is in flight, already-checked m1 rejoins; once watch #2
+	//    completes, m1 must be drained with its remaining 30s wait instead of
+	//    triggering watch #3.
+	res2Ch := make(chan heldResult, 1)
+	res1AgainCh := make(chan heldResult, 1)
+	go func() { res2Ch <- group.hold(t.Context(), m2) }()
+	<-inFlight
+	go func() { res1AgainCh <- group.hold(t.Context(), m1) }()
+	//nolint:kennlint // sleeptest: gives m1's join a moment to queue on g.joins before releasing m2.
+	time.Sleep(20 * time.Millisecond)
+	close(release)
+
+	res2 := <-res2Ch
+	res1Again := <-res1AgainCh
+	require.NoError(t, res2.err)
+	require.True(t, res2.quiet)
+	require.NoError(t, res1Again.err)
+	require.True(t, res1Again.again, "queued already-checked join must receive pacing sleep instead of bypassing nextPollAt")
+	require.Equal(t, 30*time.Second, res1Again.sleep)
+	assert.Equal(t, int64(2), requests.Load(), "queued already-checked join must not start a third watch inside the pacing window")
+}
+
+// When a held watch (wait > 0) receives 429 (such as a full held-poll pool),
+// the watch group backs off requesting held waits so the wait=0 recovery probe
+// keeps traffic multiplexed on wait=0 instead of immediately tripping the held
+// pool again.
+func TestWatchHeldThrottleBacksOffHeldWaitsAfterRecoveryProbe(t *testing.T) {
+	var seenWaits []string
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		wait := r.URL.Query().Get("wait")
+		mu.Lock()
+		seenWaits = append(seenWaits, wait)
+		mu.Unlock()
+		if wait != "" && wait != "0" {
+			w.Header().Set("Retry-After", "5")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Kata-Federation-Poll-Wait-Max", "45")
+		w.Header().Set("X-Kata-Federation-Watch-Max", "256")
+		_, _ = w.Write([]byte(`{"ready":[],"unwatched":[]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	var nowMu sync.Mutex
+	clock := func() time.Time {
+		nowMu.Lock()
+		defer nowMu.Unlock()
+		return now
+	}
+	retries := newSyncRetries(noJitter)
+	polls := newHubLongPolls(t.Context(), nil, nil, client.Opts{AllowInsecure: true, Timeout: 30 * time.Second}, 30*time.Second, nil, nil, retries, clock)
+	polls.jitter = noJitter
+	t.Cleanup(polls.stopAll)
+	polls.learnHub(srv.URL, hubPollAdvertisement{wait: 45 * time.Second, watchMax: 256})
+	c, err := NewClient(t.Context(), srv.URL, "token", client.Opts{AllowInsecure: true, Timeout: 30 * time.Second})
+	require.NoError(t, err)
+	group := polls.watchGroup(c, config.FederationCredential{HubURL: srv.URL, Token: "token", AllowInsecure: true})
+	require.NotNil(t, group)
+
+	member := &watchMember{projectID: 1, hubProjectID: 100, token: "token", client: c, wait: 45 * time.Second, finishSync: func() {}}
+	// 1. Initial held watch (wait=45) gets 429 from saturated held pool.
+	res1 := group.hold(t.Context(), member)
+	require.Error(t, res1.err)
+
+	// 2. Advance past hub cooldown (30s) but still inside holdBackoff (60s):
+	//    recovery probe runs with wait=0, succeeds, clears hub cooldown, and
+	//    stays quiet on wait=0 instead of immediately requesting wait=45 again.
+	nowMu.Lock()
+	now = now.Add(30 * time.Second)
+	nowMu.Unlock()
+	res2 := group.hold(t.Context(), member)
+	require.NoError(t, res2.err)
+	require.True(t, res2.quiet, "recovery probe while holdBackoff is active should stay on wait=0 quiet pacing")
+	require.False(t, retries.hubBlocked(srv.URL, clock()), "recovery probe must clear shared hub cooldown")
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Equal(t, []string{"45", "0"}, seenWaits)
+}

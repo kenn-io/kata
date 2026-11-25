@@ -157,6 +157,7 @@ type hubWatchGroup struct {
 	holdBackoff time.Duration
 	holdRetryAt time.Time
 	nextPollAt  time.Time
+	lastChecked map[int64]time.Time
 	errBackoff  time.Duration
 }
 
@@ -196,7 +197,7 @@ type watchFlight struct {
 	lead          *watchMember
 	members       map[*watchMember]bool
 	requestedWait time.Duration
-	hubVersion    uint64
+	probe         hubProbe
 	releaseProbe  func()
 	cancel        context.CancelFunc
 	started       time.Time
@@ -240,6 +241,30 @@ func (g *hubWatchGroup) run(ctx context.Context) {
 		sendTimer = time.NewTimer(delay)
 		send = sendTimer.C
 	}
+	memberPacedWait := func(member *watchMember, now time.Time) (time.Duration, bool) {
+		if g.holdRetryAt.IsZero() || !now.Before(g.holdRetryAt) {
+			return 0, false
+		}
+		until := g.lastChecked[member.projectID]
+		if now.Before(until) {
+			return until.Sub(now), true
+		}
+		return 0, false
+	}
+	drainPaced := func(now time.Time) bool {
+		for member := range members {
+			if wait, paced := memberPacedWait(member, now); paced {
+				delete(members, member)
+				member.result <- heldResult{again: true, sleep: wait}
+			}
+		}
+		if len(members) == 0 {
+			stopTimer()
+			pendingSince = time.Time{}
+			return true
+		}
+		return false
+	}
 	for {
 		var answers <-chan watchAnswer
 		if flight != nil {
@@ -257,17 +282,19 @@ func (g *hubWatchGroup) run(ctx context.Context) {
 			return
 		case member := <-g.joins:
 			now := g.polls.now()
-			if flight == nil && !g.holdRetryAt.IsZero() && now.Before(g.holdRetryAt) && now.Before(g.nextPollAt) {
-				// Return pacing waits to the watcher so it sleeps outside the
-				// project's endpoint gate and re-reads bindings/credentials
-				// before rejoining.
-				member.result <- heldResult{again: true, sleep: g.nextPollAt.Sub(now)}
+			if wait, paced := memberPacedWait(member, now); paced {
+				// Return pacing waits to an already-checked watcher so it
+				// sleeps outside the project's endpoint gate and re-reads
+				// bindings/credentials before rejoining. Unchecked members
+				// stay eligible so stragglers are never starved.
+				member.result <- heldResult{again: true, sleep: wait}
 				continue
 			}
 			members[member] = true
 			arm(now)
 		case member := <-g.leaves:
 			delete(members, member)
+			delete(g.lastChecked, member.projectID)
 			if flight != nil && flight.members[member] {
 				flight.reissued = true
 				flight.cancel()
@@ -288,10 +315,14 @@ func (g *hubWatchGroup) run(ctx context.Context) {
 			flight = nil
 			pendingSince = time.Time{}
 			if len(members) > 0 {
+				now := g.polls.now()
+				if drainPaced(now) {
+					continue
+				}
 				if reissued && send == nil {
 					flight = g.start(ctx, members)
 				} else if send == nil {
-					arm(g.polls.now())
+					arm(now)
 				}
 			}
 		case <-send:
@@ -305,6 +336,9 @@ func (g *hubWatchGroup) run(ctx context.Context) {
 					flight.reissued = true
 					flight.cancel()
 				}
+				continue
+			}
+			if drainPaced(g.polls.now()) {
 				continue
 			}
 			flight = g.start(ctx, members)
@@ -342,7 +376,7 @@ func (g *hubWatchGroup) start(ctx context.Context, members map[*watchMember]bool
 		return nil
 	}
 	probeTTL := max(2*g.polls.opts.Timeout, 30*time.Second)
-	releaseProbe, allowed, _, hubVersion := g.polls.retries.acquireHubProbe(g.baseURL, g.polls.now(), probeTTL)
+	releaseProbe, allowed, _, probe := g.polls.retries.acquireHubProbe(g.baseURL, g.polls.now(), probeTTL)
 	if !allowed {
 		for member := range members {
 			delete(members, member)
@@ -362,7 +396,7 @@ func (g *hubWatchGroup) start(ctx context.Context, members map[*watchMember]bool
 	}
 	flight := &watchFlight{
 		lead: lead, members: map[*watchMember]bool{lead: true},
-		hubVersion: hubVersion, releaseProbe: releaseProbe, done: make(chan watchAnswer, 1),
+		probe: probe, releaseProbe: releaseProbe, done: make(chan watchAnswer, 1),
 	}
 	hubProjects := map[int64]bool{lead.hubProjectID: true}
 	var others []generated.FederationWatchProject
@@ -382,7 +416,7 @@ func (g *hubWatchGroup) start(ctx context.Context, members map[*watchMember]bool
 		wait = min(wait, member.wait)
 	}
 	effectiveWait := wait
-	if hubVersion != 0 || (!g.holdRetryAt.IsZero() && g.polls.now().Before(g.holdRetryAt)) {
+	if probe.version != 0 || (!g.holdRetryAt.IsZero() && g.polls.now().Before(g.holdRetryAt)) {
 		effectiveWait = 0
 	}
 	flight.requestedWait = effectiveWait
@@ -430,7 +464,7 @@ func (g *hubWatchGroup) deliver(answer watchAnswer, members map[*watchMember]boo
 	switch {
 	case answer.err == nil:
 		g.errBackoff = 0
-		g.polls.retries.clearHubUnavailable(g.baseURL, flight.hubVersion)
+		g.polls.retries.clearHubUnavailable(g.baseURL, flight.probe)
 		g.polls.learnHub(g.baseURL, answer.advertised)
 		if answer.advertised.wait > 0 && answer.advertised.watchMax > 1 {
 			if flight.requestedWait > 0 {
@@ -451,8 +485,9 @@ func (g *hubWatchGroup) deliver(answer watchAnswer, members map[*watchMember]boo
 					g.holdBackoff = 0
 					g.holdRetryAt = time.Time{}
 					g.nextPollAt = time.Time{}
+					clear(g.lastChecked)
 				}
-			} else if flight.hubVersion != 0 && (g.holdRetryAt.IsZero() || !g.polls.now().Before(g.holdRetryAt)) {
+			} else if flight.probe.version != 0 && (g.holdRetryAt.IsZero() || !g.polls.now().Before(g.holdRetryAt)) {
 				// A wait=0 recovery probe succeeded after a hub cooldown;
 				// immediately resume holding watches.
 				recoveryProbeClean = true
@@ -460,6 +495,18 @@ func (g *hubWatchGroup) deliver(answer watchAnswer, members map[*watchMember]boo
 				now := g.polls.now()
 				quietSleep = g.polls.jitteredDelay(g.polls.interval)
 				g.nextPollAt = now.Add(quietSleep)
+			}
+			if quietSleep > 0 {
+				if g.lastChecked == nil {
+					g.lastChecked = map[int64]time.Time{}
+				}
+				for member := range flight.members {
+					if answer.ready[member.hubProjectID] || answer.unwatched[member.hubProjectID] {
+						delete(g.lastChecked, member.projectID)
+					} else {
+						g.lastChecked[member.projectID] = g.nextPollAt
+					}
+				}
 			}
 		}
 	case leadDenied:
@@ -477,9 +524,22 @@ func (g *hubWatchGroup) deliver(answer watchAnswer, members map[*watchMember]boo
 		}
 		errorSleep = g.polls.jitteredDelay(g.errBackoff)
 		if hubAskedToWait(answer.err) {
+			now := g.polls.now()
 			_, _, retryAfter := classifySyncRetry(answer.err)
-			hubWait := g.polls.retries.recordHubUnavailable(g.baseURL, flight.hubVersion, retryAfter, g.polls.interval, g.polls.now())
+			hubWait := g.polls.retries.recordHubUnavailable(g.baseURL, flight.probe.version, retryAfter, g.polls.interval, now)
 			errorSleep = max(errorSleep, hubWait)
+			if flight.requestedWait > 0 {
+				// Back off requesting held waits after a 429/503 on a held watch
+				// so a wait=0 recovery probe against a separate request pool
+				// stays multiplexed on wait=0 instead of immediately tripping
+				// the held-poll pool again.
+				if g.holdBackoff == 0 {
+					g.holdBackoff = 2 * g.polls.interval
+				} else {
+					g.holdBackoff = min(g.holdBackoff*2, 16*g.polls.interval)
+				}
+				g.holdRetryAt = now.Add(max(g.polls.jitteredDelay(g.holdBackoff), errorSleep))
+			}
 		}
 	}
 	result := func(member *watchMember) heldResult {
