@@ -542,6 +542,27 @@ func TestPendingFederationPushEvents(t *testing.T) {
 	assertSchemaObject(t, d, "idx_events_origin_project_id")
 }
 
+func TestPendingFederationPushSnapshotExtensionSkipsRetained(t *testing.T) {
+	t.Parallel()
+	d, ctx, p := setupTestProject(t)
+	var after int64
+	require.NoError(t, d.QueryRowContext(ctx, `SELECT MAX(id) FROM events`).Scan(&after))
+	uids := make([]string, 3)
+	for i := range uids {
+		var err error
+		uids[i], err = katauid.New()
+		require.NoError(t, err)
+		_, err = d.ExecContext(ctx, `INSERT INTO events(uid, origin_instance_uid, project_id, project_name, type, actor, payload, hlc_physical_ms, hlc_counter, content_hash) VALUES(?, ?, ?, ?, 'issue.snapshot', 'tester', '{}', ?, 0, ?)`, uids[i], d.InstanceUID(), p.ID, p.Name, i+1, strings.Repeat("a", 64))
+		require.NoError(t, err)
+	}
+	_, err := d.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES(?, 'local')`, db.FederationAcknowledgedEventPrefix+p.UID+"."+uids[1])
+	require.NoError(t, err)
+	got, err := d.PendingFederationPushEvents(ctx, p.ID, d.InstanceUID(), after, 1)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, []string{uids[0], uids[2]}, []string{got[0].UID, got[1].UID})
+}
+
 func TestAdvanceFederationPushCursor(t *testing.T) {
 	t.Parallel()
 	d, ctx, p := setupTestProject(t)

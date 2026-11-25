@@ -19,7 +19,7 @@ func TestClaimGatePendingMoveUsesCachedLease(t *testing.T) {
 	for _, competing := range []bool{false, true} {
 		t.Run(map[bool]string{false: "unclaimed", true: "competing lease"}[competing], func(t *testing.T) {
 			store := openClaimGateHelperDB(t)
-			source, issue := createClaimGateHelperIssue(t, store)
+			source, issue := createClaimGateHelperIssueAs(t, store, "agent")
 			target, err := store.CreateProject(t.Context(), "target-project")
 			require.NoError(t, err)
 			hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -48,7 +48,7 @@ func TestClaimGatePendingMoveUsesCachedLease(t *testing.T) {
 
 func TestFederatedMovedIssueLeaseForwardsCurrentBindingAndUID(t *testing.T) {
 	store := openClaimGateHelperDB(t)
-	source, issue := createClaimGateHelperIssue(t, store)
+	source, issue := createClaimGateHelperIssueAs(t, store, "agent")
 	target, err := store.CreateProject(t.Context(), "target-project")
 	require.NoError(t, err)
 	claimUID := newClaimGateHelperUID(t)
