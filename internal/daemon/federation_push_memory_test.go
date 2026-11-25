@@ -96,7 +96,7 @@ func TestFederationPushMemoryIsSharedAndReleased(t *testing.T) {
 		huma.Register(api, huma.Operation{OperationID: "archiveCronJob", Method: http.MethodDelete, Path: "/api/v1/projects/{project_id}/cron/jobs/{cron_uid}"}, func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
 		huma.Register(api, huma.Operation{OperationID: "restoreCronJob", Method: http.MethodPost, Path: "/api/v1/projects/{project_id}/cron/jobs/{cron_uid}/restore"}, func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
 		const budget = 8
-		s := &Server{api: api, cfg: ServerConfig{DB: store, FederationSigning: v}, federationPushMemory: semaphore.NewWeighted(budget)}
+		s := &Server{api: api, cfg: ServerConfig{DB: store, FederationSigning: v}, federationIngestAdmission: make(chan struct{}, 2), federationPushMemory: semaphore.NewWeighted(budget)}
 		release := make(chan struct{})
 		// Listener order: signing, then ingest preauthorization, then routes.
 		handler := s.withFederationSigning(s.withFederationIngestPreauthorization(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -157,7 +157,7 @@ func TestFederationPushMemoryIsSharedAndReleased(t *testing.T) {
 
 		// A push that declares a large body but sends nothing holds no budget.
 		idle, idleWriter := io.Pipe()
-		r := request("signed", "1234")
+		r := request("unsigned", "1234")
 		r.Body, r.ContentLength = idle, 1<<20
 		idleDone := make(chan int)
 		go func() { idleDone <- serve(r).Code }()

@@ -45,12 +45,14 @@ func TestFederationAttachmentSigningProfile(t *testing.T) {
 			api := huma.NewAPI(huma.DefaultConfig("fixture", "1"), humago.NewAdapter(http.NewServeMux(), ""))
 			path := strings.Replace(tc.path, "/projects/1/", "/projects/{project_id}/", 1)
 			huma.Register(api, huma.Operation{OperationID: tc.operation, Method: tc.method, Path: path}, func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
-			s := &Server{api: api, federationTransferAdmission: make(chan struct{}, 1), federationReadAdmission: make(chan struct{}, 1), federationPushMemory: semaphore.NewWeighted(1)}
-			// Fill the budgets a route must not use: links and capabilities
-			// skip the upload gate, and transfers skip push memory.
+			s := &Server{api: api, federationIngestAdmission: make(chan struct{}, 1), federationTransferAdmission: make(chan struct{}, 1), federationReadAdmission: make(chan struct{}, 1), federationPushMemory: semaphore.NewWeighted(1)}
+			// Fill the budgets a route must not use.
 			require.True(t, s.federationPushMemory.TryAcquire(1))
-			if !tc.bulk {
+			if tc.bulk {
+				s.federationIngestAdmission <- struct{}{}
+			} else {
 				s.federationTransferAdmission <- struct{}{}
+				s.federationReadAdmission <- struct{}{}
 			}
 			r := httptest.NewRequestWithContext(t.Context(), tc.method, "https://hub.example"+tc.path, http.NoBody)
 			r.ContentLength = tc.length
@@ -130,7 +132,7 @@ func testFederationAttachmentSigningMode(t *testing.T, mode string) {
 			path = fmt.Sprintf("/api/v1/projects/%d/federation/docbank/capabilities", project.ID)
 		}
 		huma.Register(api, huma.Operation{OperationID: operation, Method: method, Path: route}, func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
-		s := &Server{api: api, cfg: ServerConfig{DB: store, FederationSigning: v}, federationTransferAdmission: make(chan struct{}, 1), federationReadAdmission: make(chan struct{}, 1), federationPushMemory: semaphore.NewWeighted(1)}
+		s := &Server{api: api, cfg: ServerConfig{DB: store, FederationSigning: v}, federationIngestAdmission: make(chan struct{}, 1), federationTransferAdmission: make(chan struct{}, 1), federationReadAdmission: make(chan struct{}, 1), federationPushMemory: semaphore.NewWeighted(1)}
 		var body io.Reader = strings.NewReader("binary")
 		if mode == "push-only preflight" {
 			body = nil

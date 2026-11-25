@@ -253,6 +253,7 @@ not provide a shared replay service.
 | Replay capacity | 8,192 live nonces; full cache rejects new admissions |
 | Ingest body / signed relay envelope / other request body / header budget | 64 MiB / 128 MiB / 64 KiB / 16 KiB |
 | Push memory across daemon listeners | 256 MiB of push bodies |
+| Concurrent signed pushes | 2 |
 | Signed attachment uploads spooling at once | 2 |
 | Signed attachment reads at once | 16 |
 | Request duration | 60 seconds |
@@ -275,9 +276,10 @@ processing within that request budget; retries cannot make a consistently slower
 upload finish.
 
 Pushes reserve their body bytes as the hub reads them and release the reservation
-when their handler finishes. Metadata, polls, leases, and streamed attachments
-do not use this budget. Signed attachment uploads spool to temporary disk, and
-two may spool at once. If push memory, an attachment limit, or the replay cache is full,
+when their handler finishes. Two signed pushes may run at once. Metadata, polls,
+leases, and streamed attachments do not use this budget. Signed attachment
+uploads spool to temporary disk, and two may spool at once. If the signed push
+limit, push memory, an attachment limit, or the replay cache is full,
 the hub returns `429` with `Retry-After: 1`,
 and native sync retries create fresh signatures. During replay warm-up,
 including a clock-rollback fence, signed requests receive `503` with code

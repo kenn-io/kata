@@ -291,6 +291,7 @@ func NewDefaultGitHubSyncRunner(cfg GitHubSyncRunnerConfig) GitHubSyncRunner {
 
 // Server bundles the http handler and lifecycle.
 type Server struct {
+	federationIngestAdmission   chan struct{}
 	federationTransferAdmission chan struct{}
 	federationReadAdmission     chan struct{}
 	federationPushMemory        *semaphore.Weighted
@@ -405,6 +406,7 @@ func NewServer(cfg ServerConfig) *Server {
 	cfg.federationPollWaits = newFederationPollWaits(federationPollCPUs())
 	s := &Server{
 		cfg: cfg, api: humaAPI,
+		federationIngestAdmission:   make(chan struct{}, 2),
 		federationTransferAdmission: make(chan struct{}, 2),
 		federationReadAdmission:     make(chan struct{}, 16),
 		// Verification buffers push bodies; reserve the previous two-body budget.

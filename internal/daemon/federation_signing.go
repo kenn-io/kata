@@ -116,14 +116,18 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 		}
 		bodyLimit := int64(64 << 10)
 		attachmentTransfer := signingpolicy.Unambiguous(r.URL) && federationsigning.IsAttachmentTransfer(r.Method, r.URL.Path)
+		var admission chan struct{}
 		if push {
+			admission = s.federationIngestAdmission
 			bodyLimit = federationsigning.MaxBodyBytes
 		} else if attachmentTransfer {
-			admission := s.federationReadAdmission
+			admission = s.federationReadAdmission
 			if r.Method == http.MethodPost {
 				bodyLimit = federationsigning.AttachmentMaxBodyBytes
 				admission = s.federationTransferAdmission
 			}
+		}
+		if admission != nil {
 			select {
 			case admission <- struct{}{}:
 				defer func() { <-admission }()

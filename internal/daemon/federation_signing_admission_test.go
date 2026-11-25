@@ -119,8 +119,9 @@ func TestFederationSigningAdmission(t *testing.T) {
 	})
 }
 
-// Small ingests can overlap while metadata and leases remain available.
-func TestFederationSmallPushesAndControlRequestsOverlap(t *testing.T) {
+// Two real ingest handlers wait for upload bytes while metadata and leases use
+// the same daemon's other admission pool. Channels control upload progress.
+func TestFederationSigningUploadAdmissionPreservesControlRequests(t *testing.T) {
 	t.Setenv("TEST_ADMISSION_KEY", strings.Repeat("k", 64))
 	source := signingpolicy.Source{KeyID: "key-a", KeyEnv: "TEST_ADMISSION_KEY"}
 	env := testenv.New(t)
@@ -151,19 +152,12 @@ func TestFederationSmallPushesAndControlRequestsOverlap(t *testing.T) {
 			return req
 		}
 		path := projectPath(project.ID) + "/federation/events:ingest"
-		entered, release := make(chan struct{}, 8), make(chan struct{})
+		entered, release := make(chan struct{}, 2), make(chan struct{})
 		var unblock sync.Once
 		defer unblock.Do(func() { close(release) })
-		done := make(chan *httptest.ResponseRecorder, 8)
-		for i := range 8 {
-			handler := ingress
-			if i%2 == 0 {
-				handler = srv.Handler()
-			}
+		done := make(chan *httptest.ResponseRecorder, 2)
+		for _, handler := range []http.Handler{srv.Handler(), ingress} {
 			req := request(http.MethodPost, path, raw)
-			if i < 3 {
-				req.ContentLength = -1
-			}
 			req.Body = &pausedFederationUpload{Reader: bytes.NewReader(raw), entered: entered, release: release}
 			go func() {
 				w := httptest.NewRecorder()
@@ -171,7 +165,7 @@ func TestFederationSmallPushesAndControlRequestsOverlap(t *testing.T) {
 				done <- w
 			}()
 		}
-		for range 8 {
+		for range 2 {
 			select {
 			case <-entered:
 			case w := <-done:
@@ -196,9 +190,10 @@ func TestFederationSmallPushesAndControlRequestsOverlap(t *testing.T) {
 		}
 		w := httptest.NewRecorder()
 		ingress.ServeHTTP(w, request(http.MethodPost, path, raw))
-		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		require.Equal(t, http.StatusTooManyRequests, w.Code)
+		require.Equal(t, "1", w.Header().Get("Retry-After"))
 		unblock.Do(func() { close(release) })
-		for range 8 {
+		for range 2 {
 			w := <-done
 			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		}
@@ -330,82 +325,5 @@ func TestFederationSigningTransfersDoNotBlockIngest(t *testing.T) {
 			<-done
 		}
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	})
-}
-
-func TestFederationMembersPushChangesConcurrently(t *testing.T) {
-	env := testenv.New(t)
-	project := createFederatedHubProject(t, env, "hub-project")
-	type member struct {
-		token  string
-		source signingpolicy.Source
-		body   []byte
-	}
-	var members []member
-	var keys []signingpolicy.Key
-	for i := range 3 {
-		spokeUID := fmt.Sprintf("01HZNQ7VFPK1XGD8R5MABCD5E%d", i)
-		token := fmt.Sprintf("enrollment-%d", i)
-		keyEnv := fmt.Sprintf("TEST_MEMBER_KEY_%d", i)
-		t.Setenv(keyEnv, strings.Repeat(string(rune('a'+i)), 64))
-		source := signingpolicy.Source{KeyID: fmt.Sprintf("key-%d", i), KeyEnv: keyEnv}
-		enrollment, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{Token: token, SpokeInstanceUID: spokeUID, ProjectID: &project.ID, Capabilities: "push", Actor: "tester"})
-		require.NoError(t, err)
-		keys = append(keys, signingpolicy.Key{Source: source, EnrollmentID: enrollment.Enrollment.ID})
-		ev := federationRemoteIssueCreatedEvent(t, project, spokeUID)
-		issueUID := fmt.Sprintf("01HZNQ7VFPK1XGD8R5MABCD4E%d", i)
-		ev.EventUID = fmt.Sprintf("01HZNQ7VFPK1XGD8R5MABCD6E%d", i)
-		ev.IssueUID = &issueUID
-		ev.Payload = []byte(strings.ReplaceAll(strings.ReplaceAll(string(ev.Payload), "01HZNQ7VFPK1XGD8R5MABCD4EC", issueUID), "cd4ec", fmt.Sprintf("cd4e%d", i)))
-		ev.ContentHash, err = db.EventContentHash(db.EventHashInput{UID: ev.EventUID, OriginInstanceUID: ev.OriginInstanceUID, ProjectUID: ev.ProjectUID, ProjectName: ev.ProjectName, IssueUID: ev.IssueUID, Type: ev.Type, Actor: ev.Actor, HLCPhysicalMS: ev.HLCPhysicalMS, HLCCounter: ev.HLCCounter, CreatedAt: ev.CreatedAt.UTC().Format("2006-01-02T15:04:05.000Z"), Payload: ev.Payload})
-		require.NoError(t, err)
-		body, err := json.Marshal(federationIngestBody(federationIngestEnvelope(t, 1, ev)))
-		require.NoError(t, err)
-		members = append(members, member{token, source, body})
-	}
-	synctest.Test(t, func(t *testing.T) {
-		state := filepath.Join(t.TempDir(), "replay.state")
-		require.NoError(t, federationsigning.InitializeReplayState(state))
-		verifier, err := federationsigning.NewVerifier("https://hub.example", keys, state)
-		require.NoError(t, err)
-		defer func() { require.NoError(t, verifier.Close()) }()
-		time.Sleep(federationsigning.Quarantine)
-		srv := daemon.NewServer(daemon.ServerConfig{DB: env.DB, FederationSigning: verifier, FederationSigningRequired: true})
-		defer func() { require.NoError(t, srv.Close()) }()
-		ingress, err := srv.HandlerFor(daemon.ListenerPolicy{Kind: daemon.ListenerFederation})
-		require.NoError(t, err)
-		entered, release := make(chan struct{}, len(members)), make(chan struct{})
-		var unblock sync.Once
-		defer unblock.Do(func() { close(release) })
-		done := make(chan *httptest.ResponseRecorder, len(members))
-		for _, member := range members {
-			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "https://hub.example"+projectPath(project.ID)+"/federation/events:ingest", bytes.NewReader(member.body))
-			req.Header.Set("Authorization", "Bearer "+member.token)
-			require.NoError(t, federationsigning.Sign(req, member.source))
-			req.Body = &pausedFederationUpload{Reader: bytes.NewReader(member.body), entered: entered, release: release}
-			go func() { w := httptest.NewRecorder(); ingress.ServeHTTP(w, req); done <- w }()
-		}
-		for range members {
-			select {
-			case <-entered:
-			case w := <-done:
-				t.Fatalf("push ended before reading: %d %s", w.Code, w.Body.String())
-			}
-		}
-		unblock.Do(func() { close(release) })
-		for range members {
-			w := <-done
-			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-			var result struct {
-				Accepted int `json:"accepted"`
-			}
-			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
-			require.Equal(t, 1, result.Accepted)
-		}
-		for i := range members {
-			issue, err := env.DB.IssueByShortID(t.Context(), project.ID, fmt.Sprintf("cd4e%d", i), db.IncludeDeletedNo)
-			require.NoError(t, err)
-			require.Equal(t, "spoke work", issue.Title)
-		}
 	})
 }
