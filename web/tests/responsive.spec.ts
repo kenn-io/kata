@@ -428,3 +428,31 @@ test('the task count sits beside the list title', async ({ page, kata }) => {
   expect(count.x).toBeGreaterThan(title.x + title.width)
   expect(count.x - (title.x + title.width)).toBeLessThan(40)
 })
+
+test('the navigation sidebar resizes and collapses, and keeps both across reloads', async ({
+  page,
+  kata,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 800 })
+  await kata.launch(page)
+  const sidebar = page.locator('.kata-sidebar')
+  const handle = page.getByRole('separator', { name: 'Resize sidebar' })
+  const startWidth = (await sidebar.boundingBox())!.width
+
+  const grip = (await handle.boundingBox())!
+  await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(grip.x + grip.width / 2 + 120, grip.y + grip.height / 2, { steps: 5 })
+  await page.mouse.up()
+  await expect.poll(async () => (await sidebar.boundingBox())!.width).toBe(startWidth + 120)
+
+  await page.getByRole('button', { name: 'Collapse sidebar' }).click()
+  await expect(sidebar).toBeHidden()
+  await page.reload()
+  await expect(page.getByRole('button', { name: 'Expand sidebar' })).toBeVisible()
+  await expect(sidebar).toBeHidden()
+
+  await page.getByRole('button', { name: 'Expand sidebar' }).click()
+  await expect(page.getByRole('button', { name: 'Today' })).toBeVisible()
+  await expect.poll(async () => (await sidebar.boundingBox())!.width).toBe(startWidth + 120)
+})

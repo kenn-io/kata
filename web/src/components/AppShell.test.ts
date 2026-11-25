@@ -1741,6 +1741,8 @@ describe('AppShell', () => {
           splitDirection: 'horizontal',
           splitSize: 700,
           collapsedGroups: [],
+          sidebarWidth: 240,
+          sidebarCollapsed: false,
         },
         onPreferencesChange,
         ...mutationProps(),
@@ -1757,6 +1759,8 @@ describe('AppShell', () => {
       splitDirection: 'vertical' as const,
       splitSize: 700,
       collapsedGroups: [],
+      sidebarWidth: 240,
+      sidebarCollapsed: false,
     }
     await view.rerender({ preferences })
     await waitFor(() => expect(handle.getAttribute('aria-valuenow')).toBe('600'))
@@ -1871,6 +1875,8 @@ describe('AppShell', () => {
           splitDirection: 'horizontal',
           splitSize: 420,
           collapsedGroups: [],
+          sidebarWidth: 240,
+          sidebarCollapsed: false,
         },
         onPreferencesChange,
         ...mutationProps(),

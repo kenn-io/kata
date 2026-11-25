@@ -6,6 +6,9 @@
     EmptyState,
     MEDIA,
     IconButton,
+    SidebarToggle,
+    SplitResizeHandle,
+    type SplitResizeEvent,
     Tooltip,
     TopBar,
     type TypeaheadOption,
@@ -40,7 +43,12 @@
     snapshotIntentForRoute,
     type UISnapshot,
   } from '../lib/state/snapshot'
-  import { defaultPreferences, type Preferences } from '../lib/state/preferences'
+  import {
+    defaultPreferences,
+    maxSidebarWidth,
+    minSidebarWidth,
+    type Preferences,
+  } from '../lib/state/preferences'
   import AccessManagement from './AccessManagement.svelte'
   import type { MutationContext, MutationResult } from '../lib/mutations/controller'
   import CredentialAudit from './CredentialAudit.svelte'
@@ -524,6 +532,24 @@
     onPreferencesChange({ ...preferences, splitDirection: direction })
   }
 
+  // A drag shows its width at once and saves it when the pointer lets go.
+  let sidebarDragWidth = $state<number | null>(null)
+  let sidebarWidth = $derived(sidebarDragWidth ?? preferences.sidebarWidth)
+  let sidebarResizeStart = 0
+
+  function sidebarWidthAfter(event: SplitResizeEvent): number {
+    return Math.max(minSidebarWidth, Math.min(maxSidebarWidth, sidebarResizeStart + event.delta))
+  }
+
+  function finishSidebarResize(event: SplitResizeEvent): void {
+    onPreferencesChange({ ...preferences, sidebarWidth: sidebarWidthAfter(event) })
+    sidebarDragWidth = null
+  }
+
+  function setSidebarCollapsed(collapsed: boolean): void {
+    onPreferencesChange({ ...preferences, sidebarCollapsed: collapsed })
+  }
+
   function resizeSplit(size: number): void {
     if (route.graph) graphSize = size
     else onPreferencesChange({ ...preferences, splitSize: size })
@@ -726,7 +752,7 @@
   </EmptyState>
 {/snippet}
 
-{#snippet navigationSidebar()}
+{#snippet navigationSidebar(collapsible: boolean)}
   <Sidebar
     {areas}
     currentView={{
@@ -770,6 +796,9 @@
           <Tooltip text={newTaskBlockedReason}>{@render newTaskButton()}</Tooltip>
         {:else}
           {@render newTaskButton()}
+        {/if}
+        {#if collapsible}
+          <SidebarToggle state="expanded" onclick={() => setSidebarCollapsed(true)} />
         {/if}
       </div>
     {/snippet}
@@ -817,9 +846,35 @@
   </div>
   <div class="kata-layout" aria-busy={loading}>
     <div class="desktop-navigation">
-      {@render navigationSidebar()}
+      <!-- Hidden rather than unmounted, so collapsing keeps the sidebar's own state. -->
+      <div
+        class="navigation-pane"
+        hidden={preferences.sidebarCollapsed}
+        style:width={`${sidebarWidth}px`}
+      >
+        {@render navigationSidebar(true)}
+      </div>
+      {#if preferences.sidebarCollapsed}
+        <div class="navigation-strip">
+          <SidebarToggle
+            state="collapsed"
+            class="kit-sidebar-toggle--compact"
+            onclick={() => setSidebarCollapsed(false)}
+          />
+        </div>
+      {:else}
+        <SplitResizeHandle
+          ariaLabel="Resize sidebar"
+          orientation="horizontal"
+          ariaValueMin={minSidebarWidth}
+          ariaValueMax={maxSidebarWidth}
+          ariaValueNow={sidebarWidth}
+          onResizeStart={() => (sidebarResizeStart = sidebarWidth)}
+          onResize={(event) => (sidebarDragWidth = sidebarWidthAfter(event))}
+          onResizeEnd={finishSidebarResize}
+        />
+      {/if}
     </div>
-
     <div class="kata-main">
       {#if mutationMessage && !captureOpen && (settingsSection !== 'access' || !daemonRoute || !accessAdministrationAvailable || !onAccessMutation)}
         <p class="mutation-message" role="alert">{mutationMessage}</p>
@@ -886,7 +941,7 @@
 
 {#if mobileNavigationOpen}
   <DetailDrawer title="Navigation" width="min(320px, calc(100vw - 40px))" onclose={closeNavigation}>
-    {@render navigationSidebar()}
+    {@render navigationSidebar(false)}
   </DetailDrawer>
 {/if}
 
@@ -1179,14 +1234,38 @@
   .kata-layout {
     min-height: 0;
     flex: 1;
-    display: grid;
-    grid-template-columns: 240px minmax(0, 1fr);
+    display: flex;
   }
 
   .desktop-navigation {
+    flex: none;
+    min-height: 0;
+    display: flex;
+  }
+
+  .navigation-pane {
     min-width: 0;
     min-height: 0;
     display: flex;
+  }
+
+  .navigation-pane[hidden] {
+    display: none;
+  }
+
+  .navigation-strip {
+    width: 28px;
+    display: flex;
+    justify-content: center;
+    padding-top: var(--space-3);
+    border-right: 1px solid var(--border-muted);
+    background: var(--bg-primary);
+  }
+
+  .header-task {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
   }
 
   /* The slim bar and the drawer's header take the sidebar header's 48px. */
@@ -1202,6 +1281,7 @@
   }
 
   .kata-main {
+    flex: 1;
     min-width: 0;
     min-height: 0;
     display: flex;
@@ -1252,10 +1332,6 @@
   }
 
   @media (max-width: 760px) {
-    .kata-layout {
-      grid-template-columns: 1fr;
-    }
-
     .desktop-navigation {
       display: none;
     }
