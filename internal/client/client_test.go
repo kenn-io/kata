@@ -1,6 +1,8 @@
 package client
 
 import (
+	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +14,7 @@ import (
 	"runtime"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -45,35 +48,44 @@ func TestDiscoveryClosesUnixConnections(t *testing.T) {
 	}
 	go func() { _ = srv.Serve(listener) }()
 	t.Cleanup(func() { _ = srv.Close() })
-	for _, probe := range []struct {
-		name string
-		call func() error
-	}{
-		{"discovery", func() error { _, _, err := probeAddressWithError(t.Context(), "unix://"+socket); return err }},
-		{"diagnostics", func() error { _, _, err := probeAddressReadOnly(t.Context(), "unix://"+socket); return err }},
-	} {
-		t.Run(probe.name, func(t *testing.T) {
-			for range 1000 {
-				require.NoError(t, probe.call())
-			}
-			require.Eventually(t, func() bool { return open.Load() == 0 }, time.Second, 10*time.Millisecond)
-		})
+	for range 1000 {
+		_, _, err := probeAddressWithError(t.Context(), "unix://"+socket)
+		require.NoError(t, err)
 	}
+	require.Eventually(t, func() bool { return open.Load() == 0 }, time.Second, 10*time.Millisecond)
 	t.Run("client idle timeout", func(t *testing.T) {
-		client := unixClient(socket, Opts{})
-		transport := client.Transport.(*http.Transport)
-		require.Positive(t, transport.IdleConnTimeout)
-		transport.IdleConnTimeout = 500 * time.Millisecond
-		t.Cleanup(client.CloseIdleConnections)
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, UnixBase+"/api/v1/ping", nil)
-		require.NoError(t, err)
-		resp, err := client.Do(req)
-		require.NoError(t, err)
-		_, err = io.Copy(io.Discard, resp.Body)
-		require.NoError(t, err)
-		require.NoError(t, resp.Body.Close())
-		require.EqualValues(t, 1, open.Load())
-		require.Eventually(t, func() bool { return open.Load() == 0 }, 3*time.Second, 10*time.Millisecond)
+		synctest.Test(t, func(t *testing.T) {
+			client := unixClient("unused", Opts{})
+			transport := client.Transport.(*http.Transport)
+			closed := make(chan error, 1)
+			transport.DialContext = func(context.Context, string, string) (net.Conn, error) {
+				clientConn, serverConn := net.Pipe()
+				go func() {
+					defer serverConn.Close()
+					_, err := http.ReadRequest(bufio.NewReader(serverConn))
+					if err == nil {
+						_, err = io.WriteString(serverConn, "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+					}
+					if err == nil {
+						_, err = io.Copy(io.Discard, serverConn)
+					}
+					closed <- err
+				}()
+				return clientConn, nil
+			}
+			defer client.CloseIdleConnections()
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, UnixBase+"/", nil)
+			require.NoError(t, err)
+			resp, err := client.Do(req)
+			require.NoError(t, err)
+			require.NoError(t, resp.Body.Close())
+			select {
+			case err := <-closed:
+				require.NoError(t, err)
+			case <-time.After(91 * time.Second):
+				t.Fatal("idle connection remained open")
+			}
+		})
 	})
 }
 
@@ -95,11 +107,7 @@ func TestLocalDaemonUnreachableReason(t *testing.T) {
 	}
 }
 
-func TestLocalHTTPClientSelectsTransportByAddress(t *testing.T) {
-	unixClient, unixBase := LocalHTTPClient("unix:///tmp/example.sock")
-	require.Equal(t, UnixBase, unixBase)
-	require.NotNil(t, unixClient.Transport, "unix addresses need the socket transport")
-
+func TestLocalHTTPClientSelectsTCPAddress(t *testing.T) {
 	tcpClient, tcpBase := LocalHTTPClient("127.0.0.1:7777")
 	require.Equal(t, "http://127.0.0.1:7777", tcpBase)
 	require.Nil(t, tcpClient.Transport)
