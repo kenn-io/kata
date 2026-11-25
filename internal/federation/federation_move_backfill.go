@@ -48,7 +48,6 @@ func backfillFederationMoveHistory(ctx context.Context, client *Client, projectI
 }
 
 func (c *Client) issueHistoryThrough(ctx context.Context, projectID int64, uid string, through int64) ([]api.EventEnvelope, error) {
-
 	var events []api.EventEnvelope
 	var cursor int64
 	for {
