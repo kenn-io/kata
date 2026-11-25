@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -30,7 +29,7 @@ func TestDiscoveryClosesUnixConnections(t *testing.T) {
 	socket := filepath.Join(dir, "daemon.sock")
 	listener, err := new(net.ListenConfig).Listen(t.Context(), "unix", socket)
 	require.NoError(t, err)
-	var open atomic.Int64
+	closed := make(chan struct{}, 1000)
 	srv := &http.Server{
 		ReadHeaderTimeout: time.Second,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -38,11 +37,8 @@ func TestDiscoveryClosesUnixConnections(t *testing.T) {
 			_, _ = w.Write([]byte(`{"ok":true,"service":"kata","version":"test"}`))
 		}),
 		ConnState: func(_ net.Conn, state http.ConnState) {
-			switch state {
-			case http.StateNew:
-				open.Add(1)
-			case http.StateClosed, http.StateHijacked:
-				open.Add(-1)
+			if state == http.StateClosed {
+				closed <- struct{}{}
 			}
 		},
 	}
@@ -52,7 +48,15 @@ func TestDiscoveryClosesUnixConnections(t *testing.T) {
 		_, _, err := probeAddressWithError(t.Context(), "unix://"+socket)
 		require.NoError(t, err)
 	}
-	require.Eventually(t, func() bool { return open.Load() == 0 }, time.Second, 10*time.Millisecond)
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	for range 1000 {
+		select {
+		case <-closed:
+		case <-timer.C:
+			t.Fatal("discovery connections remained open")
+		}
+	}
 	t.Run("client idle timeout", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			client := unixClient("unused", Opts{})
@@ -61,7 +65,7 @@ func TestDiscoveryClosesUnixConnections(t *testing.T) {
 			transport.DialContext = func(context.Context, string, string) (net.Conn, error) {
 				clientConn, serverConn := net.Pipe()
 				go func() {
-					defer serverConn.Close()
+					defer func() { _ = serverConn.Close() }()
 					_, err := http.ReadRequest(bufio.NewReader(serverConn))
 					if err == nil {
 						_, err = io.WriteString(serverConn, "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
