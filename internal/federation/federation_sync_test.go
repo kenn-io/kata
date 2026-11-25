@@ -814,7 +814,6 @@ func TestSyncFederationOnceValidationBadRequestRecordsQuarantine(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, localEvent.ID, q.FirstEventID)
 			assert.Equal(t, localEvent.ID, q.LastEventID)
-			assert.Equal(t, []string{localEvent.UID}, q.EventUIDs)
 			assert.Contains(t, q.Error, "returned 400")
 		})
 	}

@@ -109,8 +109,6 @@ func checkFederationRejoinLocalEvents(t *testing.T, store db.Storage) error {
 		require.Equal(t, wantEvents[i].UID, event.UID)
 		require.Equal(t, wantEvents[i].ContentHash, event.ContentHash)
 	}
-	_, err = store.IssueByUID(ctx, old.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
 	currentOld, err = store.IssueByUID(ctx, old.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	for _, projectID := range []int64{project.ID, target.ID} {
