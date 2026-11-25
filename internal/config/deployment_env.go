@@ -5,11 +5,17 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"go.kenn.io/kit/embedconfig"
 )
 
 // applyDeploymentEnv overlays container settings before normal validation.
 // Empty values leave TOML settings intact, including empty Compose substitutions.
 func applyDeploymentEnv(cfg *DaemonConfig) error {
+	if value := strings.TrimSpace(os.Getenv("KATA_SEARCH_EMBEDDINGS_API")); value != "" {
+		cfg.Search.Embeddings.API = embedconfig.API(value)
+		cfg.Sources["search_embeddings_api"] = "KATA_SEARCH_EMBEDDINGS_API"
+	}
 	for name, field := range map[string]*string{
 		"KATA_DOCBANK_URL":                    &cfg.Docbank.URL,
 		"KATA_DOCBANK_API_KEY_FILE":           &cfg.Docbank.APIKeyFile,

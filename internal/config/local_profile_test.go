@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kit/embedconfig"
 )
 
 func TestDaemonConfigLocalProfile(t *testing.T) {
@@ -444,6 +445,25 @@ func TestLocalProfileEnvironmentTrustsConfiguredCertificateAuthority(t *testing.
 			require.NoError(t, err, "%s", output)
 		})
 	}
+}
+
+func TestLocalProfileEnvironmentVertexCredentials(t *testing.T) {
+	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "/example/credentials.json")
+	t.Setenv("GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES", "1")
+	profile := config.LocalProfileConfig{Home: t.TempDir(), Config: &config.DaemonConfig{}}
+	env, err := config.LocalProfileEnvironment(profile, true)
+	require.NoError(t, err)
+	require.NotContains(t, env, "GOOGLE_APPLICATION_CREDENTIALS=/example/credentials.json")
+	require.NotContains(t, env, "GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES=1")
+	profile.Config.Search.Embeddings.API = embedconfig.APIVertex
+	env, err = config.LocalProfileEnvironment(profile, true)
+	require.NoError(t, err)
+	require.Contains(t, env, "GOOGLE_APPLICATION_CREDENTIALS=/example/credentials.json")
+	require.Contains(t, env, "GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES=1")
+	t.Setenv("GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES", "true")
+	env, err = config.LocalProfileEnvironment(profile, true)
+	require.NoError(t, err)
+	require.NotContains(t, env, "GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES=true")
 }
 
 // Contract: a local-profile daemon receives the signing secrets named by its

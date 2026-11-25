@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/oklog/ulid/v2"
+	"go.kenn.io/kit/embedconfig"
 )
 
 func normalizeLocalProfileEntry(entry *CatalogDaemonConfig) error {
@@ -169,6 +170,14 @@ func LocalProfileEnvironment(profile LocalProfileConfig, autostart bool) ([]stri
 			values[key] = value
 		}
 	}
+	if profile.Config != nil && profile.Config.Search.Embeddings.API == embedconfig.APIVertex {
+		if value, ok := os.LookupEnv("GOOGLE_APPLICATION_CREDENTIALS"); ok {
+			values["GOOGLE_APPLICATION_CREDENTIALS"] = value
+		}
+		if os.Getenv("GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES") == "1" {
+			values["GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES"] = "1"
+		}
+	}
 	references := []string{profile.Catalog.TokenEnv}
 	if profile.Config != nil {
 		references = append(references,
@@ -202,7 +211,7 @@ func LocalProfileEnvironment(profile LocalProfileConfig, autostart bool) ([]stri
 		"KATA_LISTEN", "KATA_WEB_LISTEN", "KATA_WEB_PUBLIC_ORIGIN", "KATA_AUTH_TOKEN_FILE",
 		"KATA_DOCBANK_URL", "KATA_DOCBANK_API_KEY_FILE", "KATA_DOCBANK_FOLDER", "KATA_DOCBANK_TRUST_PRIVATE_NETWORK",
 		"KATA_MCP_ENABLED", "KATA_MCP_ACTOR", "KATA_MCP_PROJECTS", "KATA_MCP_ALL_PROJECTS", "KATA_MCP_STARTUP_SECTIONS", "KATA_MCP_TOKEN_FILE",
-		"KATA_SEARCH_EMBEDDINGS_BASE_URL", "KATA_SEARCH_EMBEDDINGS_MODEL", "KATA_SEARCH_EMBEDDINGS_DIMS", "KATA_SEARCH_EMBEDDINGS_API_KEY_FILE",
+		"KATA_SEARCH_EMBEDDINGS_API", "KATA_SEARCH_EMBEDDINGS_BASE_URL", "KATA_SEARCH_EMBEDDINGS_MODEL", "KATA_SEARCH_EMBEDDINGS_DIMS", "KATA_SEARCH_EMBEDDINGS_API_KEY_FILE",
 		"KATA_SEARCH_EMBEDDINGS_DOCUMENT_PREFIX", "KATA_SEARCH_EMBEDDINGS_DOCUMENT_SUFFIX",
 		"KATA_SEARCH_EMBEDDINGS_QUERY_PREFIX", "KATA_SEARCH_EMBEDDINGS_QUERY_SUFFIX",
 		"KATA_SEARCH_EMBEDDINGS_REQUEST_DIMENSIONS",

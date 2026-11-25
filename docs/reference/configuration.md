@@ -229,6 +229,7 @@ object as the parsed event stream.
 | `KATA_MCP_PROJECTS` | Overrides `[mcp].projects` with comma-separated project names. Names are trimmed and resolve at startup. Missing or archived listed projects disable `/mcp` (503, reason logged); REST and the web UI keep serving. Create or restore the project, then restart. |
 | `KATA_MCP_STARTUP_SECTIONS` | Overrides `[mcp].startup_sections` with comma-separated section IDs. IDs are trimmed; an empty value preserves TOML. Restart the daemon after changes. See [Startup sections](mcp.md#startup-sections). |
 | `KATA_MCP_TOKEN_FILE` | Overrides `[mcp].token_file`, the file containing the daemon MCP bearer token. |
+| `KATA_SEARCH_EMBEDDINGS_API` | Overrides `[search.embeddings].api`. |
 | `KATA_SEARCH_EMBEDDINGS_BASE_URL` | Overrides `[search.embeddings].base_url`. |
 | `KATA_SEARCH_EMBEDDINGS_MODEL` | Overrides `[search.embeddings].model`. |
 | `KATA_SEARCH_EMBEDDINGS_DIMS` | Overrides `[search.embeddings].dims`. Must be a non-negative integer; `0` keeps the default dimensionality. |
@@ -1226,6 +1227,7 @@ model:
 
 ```toml
 [search.embeddings]
+# api = "openai"              # openai (default) or vertex
 base_url = "http://localhost:11434/v1"  # any OpenAI-compatible /embeddings
 model    = "nomic-embed-text"
 # api_key = "..."               # only for providers that require a key
@@ -1249,6 +1251,25 @@ For an external provider, both `base_url` and `model` are required; setting
 only one causes a startup error rather than a silent disable. When no
 credential source is configured, requests omit the `Authorization` header, and
 keyless local providers such as Ollama need only `base_url` and `model`.
+
+To use Vertex AI, configure a publisher-models endpoint and Google Application
+Default Credentials. For local development, run `gcloud auth application-default login`;
+hosted services can use their attached service account. Do not set an API key
+or `request_dimensions`. For executable-sourced credentials, set
+`GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES=1`.
+
+```toml
+[search.embeddings]
+api = "vertex"
+base_url = "https://us-central1-aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/us-central1/publishers/google/models"
+model = "gemini-embedding-001"
+dims = 768
+```
+
+Changing the API creates a separate vector generation.
+Kata sends one input per request to `gemini-embedding-001` on Vertex.
+Credential failures appear in health and search; a later request retries after
+the credentials are repaired.
 
 The built-in server defaults to 8 inputs per request and a 300-second request
 timeout, whereas configured endpoints default to 64 inputs and 30 seconds. Set

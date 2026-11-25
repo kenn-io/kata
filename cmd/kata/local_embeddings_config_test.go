@@ -24,7 +24,7 @@ func clearLocalEmbeddingsEnv(t *testing.T) string {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	for _, key := range []string{"KATA_SEARCH_EMBEDDINGS_BASE_URL", "KATA_SEARCH_EMBEDDINGS_MODEL", "KATA_SEARCH_EMBEDDINGS_DIMS", "KATA_SEARCH_EMBEDDINGS_API_KEY_FILE", "KATA_SEARCH_EMBEDDINGS_DOCUMENT_PREFIX", "KATA_SEARCH_EMBEDDINGS_DOCUMENT_SUFFIX", "KATA_SEARCH_EMBEDDINGS_QUERY_PREFIX", "KATA_SEARCH_EMBEDDINGS_QUERY_SUFFIX", "KATA_SEARCH_EMBEDDINGS_REQUEST_DIMENSIONS"} {
+	for _, key := range []string{"KATA_SEARCH_EMBEDDINGS_API", "KATA_SEARCH_EMBEDDINGS_BASE_URL", "KATA_SEARCH_EMBEDDINGS_MODEL", "KATA_SEARCH_EMBEDDINGS_DIMS", "KATA_SEARCH_EMBEDDINGS_API_KEY_FILE", "KATA_SEARCH_EMBEDDINGS_DOCUMENT_PREFIX", "KATA_SEARCH_EMBEDDINGS_DOCUMENT_SUFFIX", "KATA_SEARCH_EMBEDDINGS_QUERY_PREFIX", "KATA_SEARCH_EMBEDDINGS_QUERY_SUFFIX", "KATA_SEARCH_EMBEDDINGS_REQUEST_DIMENSIONS"} {
 		t.Setenv(key, "")
 	}
 	return home
@@ -85,4 +85,16 @@ func TestLocalEmbeddingsTOMLLayouts(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLocalEmbeddingsRemovesVertexAPI(t *testing.T) {
+	input := []byte("[search.embeddings]\napi = 'vertex'\nbase_url = 'https://example.com/publishers/google/models'\nmodel = 'gemini-embedding-001'\n")
+	current, err := config.ParseSearchFile(input)
+	require.NoError(t, err)
+	output, err := localEmbeddingsConfig(input, current.Embeddings, "")
+	require.NoError(t, err)
+	result, err := config.ParseSearchFile(output)
+	require.NoError(t, err)
+	require.Empty(t, result.Embeddings.API)
+	require.True(t, result.Embeddings.Local)
 }

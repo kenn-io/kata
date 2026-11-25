@@ -2,10 +2,12 @@ package embedding
 
 import (
 	"fmt"
+	"net/http"
 	"time"
 
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kit/embedclient"
+	"go.kenn.io/kit/embedconfig"
 )
 
 // CredentialError is an operator-actionable embedding availability error.
@@ -88,13 +90,25 @@ func (c *Client) MissingCredentialError() error {
 	return nil
 }
 
-func (c *Client) requestCredential() (config.EmbeddingCredential, uint64, error) {
+func (c *Client) requestCredential() (config.EmbeddingCredential, uint64, *http.Client, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.credential.Reason != "" {
-		return c.credential, c.credentialRevision, &CredentialError{Reason: c.credential.Reason}
+		return c.credential, c.credentialRevision, nil, &CredentialError{Reason: c.credential.Reason}
 	}
-	return c.credential, c.credentialRevision, nil
+	client := c.http
+	if c.options.Deployment.API == embedconfig.APIVertex {
+		if c.google == nil {
+			var err error
+			c.google, err = embedclient.GoogleHTTPClient()
+			if err != nil {
+				failure := c.failCredentialLocked(c.credentialRevision, "missing", "Google credentials unavailable; configure application default credentials", 0, false)
+				return c.credential, c.credentialRevision, nil, failure
+			}
+		}
+		client = c.google
+	}
+	return c.credential, c.credentialRevision, client, nil
 }
 
 func (c *Client) rejectCredential(credential config.EmbeddingCredential, revision uint64, provider *embedclient.APIError) error {
@@ -102,20 +116,36 @@ func (c *Client) rejectCredential(credential config.EmbeddingCredential, revisio
 	reason := fmt.Sprintf("embedding provider rejected the API key (%d) from %s", provider.StatusCode, credential.Source)
 	if provider.StatusCode == 403 {
 		reason = "embedding provider denied access (403); check provider permissions and model access"
+	} else if c.options.Deployment.API == embedconfig.APIVertex {
+		reason = "embedding provider rejected Google credentials (401); check application default credentials"
 	} else if credential.Key == "" {
 		state = "missing"
 		reason = "embedding provider requires an API key (401); set api_key, api_key_file, or api_key_env"
 	}
-	e := &CredentialError{Reason: reason, Provider: provider}
+	e := c.failCredential(revision, state, reason, provider.StatusCode, c.options.Deployment.API == embedconfig.APIVertex && provider.StatusCode == http.StatusUnauthorized)
+	e.Provider = provider
+	return e
+}
+
+func (c *Client) failCredential(revision uint64, state, reason string, status int, discardGoogle bool) *CredentialError {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.failCredentialLocked(revision, state, reason, status, discardGoogle)
+}
+
+func (c *Client) failCredentialLocked(revision uint64, state, reason string, status int, discardGoogle bool) *CredentialError {
+	e := &CredentialError{Reason: reason}
 	if revision == c.credentialRevision {
+		if discardGoogle {
+			c.google = nil
+			c.credentialRevision++
+		}
 		now := time.Now().UTC()
 		c.credentialHealth.Credential = state
 		c.credentialHealth.CredentialReason = e.Reason
 		c.credentialHealth.LastError = e.Error()
 		c.credentialHealth.LastErrorAt = &now
-		c.credentialHealth.LastErrorStatus = provider.StatusCode
+		c.credentialHealth.LastErrorStatus = status
 	}
 	return e
 }
