@@ -33,7 +33,9 @@ guide's [sync explanation](../guide/project-relays.md#what-sync-means-for-your-w
 ## Hookless harnesses
 
 For consumer Muse, you can generate standing instructions, a Kata skill, and a
-recurring poll specification. This support requires Kata 0.19.0 or later.
+recurring poll specification. This support requires Kata 0.19.0 or later. The
+`workspace/custom-skills` default, `skill.yaml`, and `--skills-dir` arrive in
+the first release after 0.24.0.
 
 ```sh
 kata agent-hook instructions install muse --home /path/to/muse-home --actor example-agent --dry --json

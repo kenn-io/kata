@@ -875,3 +875,47 @@ func TestAgentInstructionsLeavesUnmanagedSkillYAML(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "name: kata\ntitle: Hand written\n", string(data))
 }
+
+// On a case-insensitive file system, another spelling of workspace/skills is
+// the legacy directory itself and must not be migrated onto itself.
+func TestAgentInstructionsLegacySpellingIsNotMigratedOntoItself(t *testing.T) {
+	resetFlags(t)
+	home := realTempHome(t)
+	_, poll := installLegacyBundle(t, home)
+	if _, err := os.Stat(filepath.Join(home, "workspace", "Skills")); err != nil {
+		t.Skip("case-sensitive file system")
+	}
+	runInstructions(t, "install", "muse", "--home", home, "--actor", "example-agent", "--skills-dir", "workspace/Skills")
+	data, err := os.ReadFile(poll) //nolint:gosec // G304: fixture under TempDir.
+	require.NoError(t, err)
+	require.Contains(t, string(data), "BEGIN KATA HOOKLESS MUSE")
+}
+
+// Resolving an absolute --skills-dir translates aliases above home only; a
+// symlink inside home is still refused, as it is for a relative directory.
+func TestAgentInstructionsAbsoluteSkillsDirRefusesSymlinkInsideHome(t *testing.T) {
+	resetFlags(t)
+	root := realTempHome(t)
+	physical := filepath.Join(root, "physical")
+	home := filepath.Join(physical, "muse-home")
+	require.NoError(t, os.MkdirAll(filepath.Join(home, "elsewhere"), 0o700))
+	alias := filepath.Join(root, "parent-alias")
+	if err := os.Symlink(physical, alias); err != nil {
+		t.Skip("symlinks unavailable")
+	}
+	require.NoError(t, os.Symlink(filepath.Join(home, "elsewhere"), filepath.Join(home, "workspace")))
+	out, _, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "instructions", "install", "muse", "--home", home, "--actor", "example-agent", "--skills-dir", filepath.Join(alias, "muse-home", "workspace", "custom-skills"))
+	require.Error(t, err)
+	require.Empty(t, out)
+	_, err = os.Stat(filepath.Join(home, "elsewhere", "custom-skills"))
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+// A regular file where the legacy directory would be holds no managed copy.
+func TestAgentInstructionsIgnoresLegacyPathThatIsAFile(t *testing.T) {
+	resetFlags(t)
+	home := realTempHome(t)
+	require.NoError(t, os.MkdirAll(filepath.Join(home, "workspace"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(home, "workspace", "skills"), []byte("not a directory\n"), 0o600))
+	require.Len(t, runInstructions(t, "install", "muse", "--home", home, "--actor", "example-agent").Artifacts, 4)
+}

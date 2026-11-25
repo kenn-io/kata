@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -248,20 +249,12 @@ func resolveInstructionHome(home string) (string, error) {
 }
 
 // localSkillsDir returns dir relative to home, refusing directories outside
-// it so every managed file stays under the home's path checks. Parent aliases
-// such as macOS's /var are resolved on both sides first.
+// it so every managed file stays under the home's path checks.
 func localSkillsDir(home, dir string) (string, error) {
 	rel := filepath.Clean(dir)
-	if filepath.IsAbs(dir) {
-		resolvedHome, err := resolveInstructionHome(home)
-		if err != nil {
-			return "", err
-		}
-		resolvedDir, err := resolveInstructionHome(rel)
-		if err != nil {
-			return "", err
-		}
-		if rel, err = filepath.Rel(resolvedHome, resolvedDir); err != nil {
+	if filepath.IsAbs(rel) {
+		var err error
+		if rel, err = homeRelative(home, rel); err != nil {
 			return "", err
 		}
 	}
@@ -269,6 +262,44 @@ func localSkillsDir(home, dir string) (string, error) {
 		return "", fmt.Errorf("skills directory outside home: %s", dir)
 	}
 	return rel, nil
+}
+
+// homeRelative returns dir relative to home. When dir reaches home through a
+// different parent alias, such as macOS's /var, it uses the shallowest
+// ancestor that is home and keeps the rest literal, so the path checks still
+// see any symlink below home.
+func homeRelative(home, dir string) (string, error) {
+	if rel, err := filepath.Rel(home, dir); err == nil && filepath.IsLocal(rel) {
+		return rel, nil
+	}
+	homeInfo, err := os.Stat(home)
+	if err != nil {
+		return "", err
+	}
+	var ancestors []string
+	for p := dir; ; p = filepath.Dir(p) {
+		ancestors = append(ancestors, p)
+		if filepath.Dir(p) == p {
+			break
+		}
+	}
+	for _, ancestor := range slices.Backward(ancestors) {
+		if info, err := os.Stat(ancestor); err == nil && os.SameFile(info, homeInfo) {
+			return filepath.Rel(ancestor, dir)
+		}
+	}
+	return "", fmt.Errorf("skills directory outside home: %s", dir)
+}
+
+// sameSkillsDir reports whether two skills directories under home are one,
+// including different spellings on a case-insensitive file system.
+func sameSkillsDir(home, a, b string) bool {
+	if filepath.Clean(a) == filepath.Clean(b) {
+		return true
+	}
+	infoA, errA := os.Stat(filepath.Join(home, a))
+	infoB, errB := os.Stat(filepath.Join(home, b))
+	return errA == nil && errB == nil && os.SameFile(infoA, infoB)
 }
 
 // planInstructionArtifacts plans the bundle under skillsDir, relative to home;
@@ -283,7 +314,7 @@ func planInstructionArtifacts(home, skillsDir, actor, verb string) ([]instructio
 	if skillsDir == "" {
 		skillsDir = museSkillsDir
 	}
-	migrate := filepath.Clean(skillsDir) != filepath.Clean(legacyMuseSkillsDir)
+	migrate := !sameSkillsDir(home, skillsDir, legacyMuseSkillsDir)
 	artifacts := museInstructionArtifacts(home, skillsDir, actor)
 	if migrate {
 		for _, a := range artifacts[1:] {
@@ -429,19 +460,29 @@ func managedBlockStart(content string, marker int, fence string, addedNewline bo
 
 var errUnsafeInstructionPath = errors.New("instruction path must use regular files and real directories")
 
+// checkInstructionPath walks from home to path, so a symlink or file where a
+// directory belongs is reported as unsafe before anything below it is read.
 func checkInstructionPath(path, home string) error {
+	var chain []string
 	for p := path; ; p = filepath.Dir(p) {
-		info, err := os.Lstat(p)
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		if err == nil && (info.Mode()&os.ModeSymlink != 0 || (p == path && !info.Mode().IsRegular()) || (p != path && !info.IsDir())) {
-			return fmt.Errorf("%w: %s", errUnsafeInstructionPath, p)
-		}
+		chain = append(chain, p)
 		if p == home || filepath.Dir(p) == p {
-			return nil
+			break
 		}
 	}
+	for _, p := range slices.Backward(chain) {
+		info, err := os.Lstat(p)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 || (p == path && !info.Mode().IsRegular()) || (p != path && !info.IsDir()) {
+			return fmt.Errorf("%w: %s", errUnsafeInstructionPath, p)
+		}
+	}
+	return nil
 }
 
 func applyInstructionArtifacts(artifacts []instructionArtifact) error {
