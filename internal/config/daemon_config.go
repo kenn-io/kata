@@ -14,6 +14,7 @@ import (
 	"go.kenn.io/kata/internal/httpurl"
 
 	"github.com/BurntSushi/toml"
+	"go.kenn.io/kit/embedconfig"
 )
 
 // DaemonConfig is the parsed contents of <KATA_HOME>/config.toml. The
@@ -149,6 +150,8 @@ type SearchConfig struct {
 // EmbeddingsConfig opts into semantic search with Local or a BaseURL and Model.
 // Credentials use inline > file > environment precedence.
 type EmbeddingsConfig struct {
+	// API selects the embedding protocol. Empty selects OpenAI-compatible.
+	API embedconfig.API `toml:"api"`
 	// Local uses the shared built-in Nomic embeddings server.
 	Local bool `toml:"local"`
 	// BaseURL is the OpenAI-compatible endpoint base, e.g.
@@ -867,6 +870,7 @@ func clearAuthCredential(auth *AuthConfig) {
 
 func trimSearchEmbeddings(cfg *DaemonConfig) {
 	e := &cfg.Search.Embeddings
+	e.API = embedconfig.API(strings.TrimSpace(string(e.API)))
 	e.BaseURL = strings.TrimSpace(e.BaseURL)
 	e.Model = strings.TrimSpace(e.Model)
 	if e.UsesLocal() && e.Model == "" {
@@ -976,8 +980,20 @@ func validateAuthProxy(p ProxyConfig) error {
 // is documented; multiple credential sources are allowed.
 // The numeric knobs are sizes/durations, so negatives are invalid.
 func ValidateEmbeddings(e EmbeddingsConfig) error {
+	if e.API != "" && e.API != embedconfig.APIOpenAI && e.API != embedconfig.APIVertex {
+		return errors.New("search.embeddings: api must be openai or vertex")
+	}
+	if e.API == embedconfig.APIVertex && (e.Local || e.APIKey != "" || e.APIKeyFile != "" || e.APIKeyEnv != "") {
+		return errors.New("search.embeddings: vertex cannot use local or an API key")
+	}
+	if e.API == embedconfig.APIVertex && e.RequestDimensions {
+		return errors.New("search.embeddings: vertex cannot use request_dimensions")
+	}
 	hasBase := strings.TrimSpace(e.BaseURL) != ""
 	hasModel := strings.TrimSpace(e.Model) != ""
+	if e.API == embedconfig.APIVertex && (!hasBase || !hasModel) {
+		return errors.New("search.embeddings: vertex requires base_url and model")
+	}
 	if e.UsesLocal() {
 		// Kit embedserver/handler.go defines the built-in model aliases and widths.
 		if !e.LocalRecipeCompatible() {

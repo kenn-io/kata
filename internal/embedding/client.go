@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"cloud.google.com/go/auth"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kit/embedclient"
 	"go.kenn.io/kit/embedconfig"
@@ -17,6 +18,7 @@ import (
 )
 
 type Config struct {
+	API                 embedconfig.API
 	Endpoint            func(context.Context) (string, error)
 	BaseURL             string
 	Model               string
@@ -39,6 +41,7 @@ type Client struct {
 	space              embedmodel.Descriptor
 	generation         kitvec.Generation
 	http               *http.Client
+	google             *http.Client
 	mu                 sync.Mutex
 	credential         config.EmbeddingCredential
 	credentialRevision uint64
@@ -70,10 +73,13 @@ func New(cfg Config) (*Client, error) {
 		baseURL = "http://127.0.0.1"
 	}
 	parts, err := (embedconfig.Embedder{
-		BaseURL: baseURL, Model: cfg.Model, Dims: dims, FingerprintSalt: cfg.Salt, BatchSize: batch, TrustPrivateNetwork: cfg.TrustPrivateNetwork,
+		API: cfg.API, BaseURL: baseURL, Model: cfg.Model, Dims: dims, FingerprintSalt: cfg.Salt, BatchSize: batch, TrustPrivateNetwork: cfg.TrustPrivateNetwork,
 	}).Parts()
 	if err != nil {
 		return nil, fmt.Errorf("embedding: configure client: %w", err)
+	}
+	if cfg.API == embedconfig.APIVertex && parts.Model.Name == "gemini-embedding-001" {
+		parts.Batch.Items = 1
 	}
 	parts.Model.RequestDimensions = cfg.RequestDimensions
 	parts.Roles.DocumentPrefix = cfg.DocumentPrefix
@@ -89,6 +95,9 @@ func New(cfg Config) (*Client, error) {
 		return nil, fmt.Errorf("embedding: configure client: %w", err)
 	}
 	params := map[string]string{"recipe": strconv.Itoa(RecipeVersion)}
+	if cfg.API == embedconfig.APIVertex {
+		params["api"] = "vertex"
+	}
 	if cfg.Salt != "" {
 		params["salt"] = cfg.Salt
 	}
@@ -155,7 +164,7 @@ func (c *Client) embed(ctx context.Context, role embedconfig.Role, texts []strin
 	if len(texts) == 0 {
 		return [][]float32{}, nil
 	}
-	credential, revision, err := c.requestCredential()
+	credential, revision, httpClient, err := c.requestCredential()
 	if err != nil {
 		return nil, err
 	}
@@ -180,13 +189,16 @@ func (c *Client) embed(ctx context.Context, role embedconfig.Role, texts []strin
 		}
 	}
 	options.APIKey = credential.Key
-	options.HTTP = c.http
+	options.HTTP = httpClient
 	provider, err := embedclient.New(options)
 	if err != nil {
 		return nil, err
 	}
 	vectors, err := provider.EmbedTexts(ctx, role, texts)
 	if err != nil {
+		if authErr, ok := errors.AsType[*auth.Error](err); ok && options.Deployment.API == embedconfig.APIVertex && !authErr.Temporary() {
+			return nil, c.failCredential(revision, "rejected", "Google credentials rejected; check application default credentials", 0, true)
+		}
 		// Start later built-in fills with single inputs after a timeout.
 		if transport, ok := errors.AsType[*embedclient.TransportError](err); c.endpoint != nil && ok && transport.Timeout() && ctx.Err() == nil {
 			c.mu.Lock()
