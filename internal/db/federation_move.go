@@ -243,12 +243,21 @@ func federationKeptSnapshotHistorySQL(postgres bool) string {
 	if postgres {
 		commentUID = `history.payload::jsonb->>'comment_uid'`
 	}
-	return `((history.type IN ('issue.commented','issue.comment_edited') AND history.issue_uid=$3 AND EXISTS (SELECT 1 FROM comments c JOIN issues i ON i.id=c.issue_id WHERE i.uid=$3 AND c.uid=` + commentUID + ` AND (history.type='issue.commented' OR ` + federationKeptCommentVersionSQL(postgres) + `))) OR (history.type IN ('issue.linked','issue.links_changed') AND EXISTS (SELECT 1 FROM links l WHERE (l.from_issue_uid=$3 OR l.to_issue_uid=$3) AND l.author=history.actor AND NOT ` + federationAcceptedMoveLinkSQL(postgres) + ` AND ` + federationLinkEventSQL("history", postgres) + `)) OR ` + federationKeptSnapshotContentSQL(postgres) + `)`
+	return `((history.type IN ('issue.commented','issue.comment_edited') AND history.issue_uid=$3 AND EXISTS (SELECT 1 FROM comments c JOIN issues i ON i.id=c.issue_id WHERE i.uid=$3 AND c.uid=` + commentUID + ` AND (history.type='issue.commented' OR ` + federationKeptCommentVersionSQL("history", postgres) + `))) OR (history.type IN ('issue.linked','issue.links_changed') AND EXISTS (SELECT 1 FROM links l WHERE (l.from_issue_uid=$3 OR l.to_issue_uid=$3) AND l.author=history.actor AND NOT ` + federationAcceptedMoveLinkSQL(postgres) + ` AND ` + federationLinkEventSQL("history", postgres) + `)) OR ` + federationKeptSnapshotContentSQL(postgres) + `)`
 }
 
 // federationAcceptedMoveLinkSQL finds a hub-known event proving this edge and author.
 func federationAcceptedMoveLinkSQL(postgres bool) string {
-	return `EXISTS (SELECT 1 FROM events proof LEFT JOIN federation_bindings proof_binding ON proof_binding.project_id=proof.project_id WHERE proof.issue_uid IN (l.from_issue_uid,l.to_issue_uid) AND proof.project_id IN ($1,history.project_id) AND proof.actor=l.author AND ` + federationLinkEventSQL("proof", postgres) + ` AND NOT ` + federationKeptLocalSQL("proof") + ` AND ((proof.origin_instance_uid=$4 AND (proof.id<=proof_binding.push_cursor_event_id OR NOT (` + FederationUnresolvedEventSQL("proof") + `))) OR (proof.origin_instance_uid<>$4 AND NOT EXISTS(SELECT 1 FROM meta former WHERE former.key=$5 || proof.origin_instance_uid))))`
+	items := `json_each(CASE WHEN json_type(proof.payload,'$.links')='array' THEN json_extract(proof.payload,'$.links') ELSE '[]' END) proof_item`
+	field := func(key string) string { return `json_extract(proof_item.value,'$.` + key + `')` }
+	incoming := `COALESCE(json_extract(proof_item.value,'$.incoming'),0)=1`
+	if postgres {
+		items = `jsonb_array_elements(CASE WHEN jsonb_typeof(proof.payload::jsonb->'links')='array' THEN proof.payload::jsonb->'links' ELSE '[]'::jsonb END) proof_item(value)`
+		field = func(key string) string { return `proof_item.value->>'` + key + `'` }
+		incoming = `COALESCE(proof_item.value->>'incoming','false')='true'`
+	}
+	snapshot := `(proof.type IN ('issue.created','issue.snapshot') AND EXISTS (SELECT 1 FROM ` + items + ` WHERE l.type=` + field("type") + ` AND l.author=COALESCE(NULLIF(` + field("author") + `,''),proof.actor) AND ((l.from_issue_uid=proof.issue_uid AND l.to_issue_uid=` + field("to_issue_uid") + ` AND (l.type='related' OR NOT (` + incoming + `))) OR (l.to_issue_uid=proof.issue_uid AND l.from_issue_uid=` + field("to_issue_uid") + ` AND (l.type='related' OR (` + incoming + `))))))`
+	return `EXISTS (SELECT 1 FROM events proof LEFT JOIN federation_bindings proof_binding ON proof_binding.project_id=proof.project_id WHERE proof.issue_uid IN (l.from_issue_uid,l.to_issue_uid) AND proof.project_id IN ($1,history.project_id) AND ((proof.actor=l.author AND ` + federationLinkEventSQL("proof", postgres) + `) OR ` + snapshot + `) AND NOT ` + federationKeptLocalSQL("proof") + ` AND ((proof.origin_instance_uid=$4 AND (proof.id<=proof_binding.push_cursor_event_id OR NOT (` + FederationUnresolvedEventSQL("proof") + `))) OR (proof.origin_instance_uid<>$4 AND NOT EXISTS(SELECT 1 FROM meta former WHERE former.key=$5 || proof.origin_instance_uid))))`
 }
 
 // federationLinkEventSQL matches link l to a link event's type, endpoints, and direction.
@@ -280,14 +289,29 @@ func federationKeptSnapshotContentSQL(postgres bool) string {
 		field = func(key string) string { return `item.value->>'` + key + `'` }
 		incoming = `COALESCE(item.value->>'incoming','false')='true'`
 	}
-	return `(history.type='issue.snapshot' AND ((history.issue_uid=$3 AND EXISTS (SELECT 1 FROM comments c JOIN issues i ON i.id=c.issue_id, ` + items("comments") + ` WHERE i.uid=$3 AND c.uid=` + field("comment_uid") + ` AND c.author=` + field("author") + `)) OR EXISTS (SELECT 1 FROM links l, ` + items("links") + ` WHERE (l.from_issue_uid=$3 OR l.to_issue_uid=$3) AND l.type=` + field("type") + ` AND l.author=COALESCE(NULLIF(` + field("author") + `,''),history.actor) AND NOT ` + federationAcceptedMoveLinkSQL(postgres) + ` AND ((l.from_issue_uid=history.issue_uid AND l.to_issue_uid=` + field("to_issue_uid") + ` AND (l.type='related' OR NOT (` + incoming + `))) OR (l.to_issue_uid=history.issue_uid AND l.from_issue_uid=` + field("to_issue_uid") + ` AND (l.type='related' OR (` + incoming + `)))))))`
+	return `(history.type='issue.snapshot' AND ((history.issue_uid=$3 AND EXISTS (SELECT 1 FROM comments c JOIN issues i ON i.id=c.issue_id, ` + items("comments") + ` WHERE i.uid=$3 AND c.uid=` + field("comment_uid") + ` AND c.author=` + field("author") + ` AND NOT ` + federationAcceptedMoveCommentSQL(postgres) + `)) OR EXISTS (SELECT 1 FROM links l, ` + items("links") + ` WHERE (l.from_issue_uid=$3 OR l.to_issue_uid=$3) AND l.type=` + field("type") + ` AND l.author=COALESCE(NULLIF(` + field("author") + `,''),history.actor) AND NOT ` + federationAcceptedMoveLinkSQL(postgres) + ` AND ((l.from_issue_uid=history.issue_uid AND l.to_issue_uid=` + field("to_issue_uid") + ` AND (l.type='related' OR NOT (` + incoming + `))) OR (l.to_issue_uid=history.issue_uid AND l.from_issue_uid=` + field("to_issue_uid") + ` AND (l.type='related' OR (` + incoming + `)))))))`
 }
 
-func federationKeptCommentVersionSQL(postgres bool) string {
+func federationAcceptedMoveCommentSQL(postgres bool) string {
+	field := func(key string) string { return `json_extract(proof.payload,'$.` + key + `')` }
+	items := `json_each(CASE WHEN json_type(proof.payload,'$.comments')='array' THEN json_extract(proof.payload,'$.comments') ELSE '[]' END) proof_item`
+	itemField := func(key string) string { return `json_extract(proof_item.value,'$.` + key + `')` }
 	if postgres {
-		return `c.body=history.payload::jsonb->>'body' AND c.edited_at::timestamptz=COALESCE(NULLIF(history.payload::jsonb->>'edited_at',''),history.created_at::text)::timestamptz`
+		field = func(key string) string { return `proof.payload::jsonb->>'` + key + `'` }
+		items = `jsonb_array_elements(CASE WHEN jsonb_typeof(proof.payload::jsonb->'comments')='array' THEN proof.payload::jsonb->'comments' ELSE '[]'::jsonb END) proof_item(value)`
+		itemField = func(key string) string { return `proof_item.value->>'` + key + `'` }
 	}
-	return `c.body=json_extract(history.payload,'$.body') AND julianday(c.edited_at)=julianday(COALESCE(NULLIF(json_extract(history.payload,'$.edited_at'),''),history.created_at))`
+	comment := `(proof.type='issue.commented' AND c.uid=` + field("comment_uid") + ` AND c.author=` + field("author") + ` AND c.body=` + field("body") + `)`
+	edit := `(proof.type='issue.comment_edited' AND c.uid=` + field("comment_uid") + ` AND ` + federationKeptCommentVersionSQL("proof", postgres) + `)`
+	snapshot := `(proof.type IN ('issue.created','issue.snapshot') AND EXISTS (SELECT 1 FROM ` + items + ` WHERE c.uid=` + itemField("comment_uid") + ` AND c.author=` + itemField("author") + ` AND c.body=` + itemField("body") + `))`
+	return `EXISTS (SELECT 1 FROM events proof WHERE proof.project_id=history.project_id AND proof.issue_uid=history.issue_uid AND (` + comment + ` OR ` + edit + ` OR ` + snapshot + `) AND NOT ` + federationKeptLocalSQL("proof") + ` AND ((proof.origin_instance_uid<>$4 AND NOT EXISTS (SELECT 1 FROM meta former WHERE former.key=$5 || proof.origin_instance_uid)) OR EXISTS (SELECT 1 FROM meta accepted WHERE accepted.key='` + FederationAcknowledgedEventPrefix + `' || (SELECT uid FROM projects WHERE id=proof.project_id) || '.' || proof.uid AND accepted.value='1')))`
+}
+
+func federationKeptCommentVersionSQL(alias string, postgres bool) string {
+	if postgres {
+		return `c.body=` + alias + `.payload::jsonb->>'body' AND c.edited_at::timestamptz=COALESCE(NULLIF(` + alias + `.payload::jsonb->>'edited_at',''),` + alias + `.created_at::text)::timestamptz`
+	}
+	return `c.body=json_extract(` + alias + `.payload,'$.body') AND julianday(c.edited_at)=julianday(COALESCE(NULLIF(json_extract(` + alias + `.payload,'$.edited_at'),''),` + alias + `.created_at))`
 }
 
 // KeepFederationEventLocalTx records the hub's refusal for an old-actor event.

@@ -25,6 +25,11 @@ func checkFederationRejoinMoveGate(t *testing.T, store db.Storage, backend Backe
 	t.Run("accepted recreated link", func(t *testing.T) { require.NoError(t, checkRejoinMoveAcceptedRecreatedLink(t, store)) })
 	t.Run("reversed related link", func(t *testing.T) { require.NoError(t, checkRejoinMoveRetainedReversedRelatedLink(t, store)) })
 	t.Run("snapshot content", func(t *testing.T) { require.NoError(t, checkRejoinMoveRetainedSnapshotContent(t, store)) })
+	t.Run("accepted snapshot content", func(t *testing.T) {
+		for _, content := range []string{"comment", "link"} {
+			t.Run(content, func(t *testing.T) { checkRejoinMoveAcceptedSnapshotContent(t, store, content) })
+		}
+	})
 	t.Run("cross-project retained link", func(t *testing.T) { checkRejoinMoveCrossProjectLink(t, store) })
 	t.Run("accepted combined link", func(t *testing.T) { checkAcceptedCombinedLink(t, store) })
 	t.Run("accepted cross-project link", func(t *testing.T) { checkAcceptedCrossProjectLink(t, store) })
@@ -32,6 +37,42 @@ func checkFederationRejoinMoveGate(t *testing.T, store db.Storage, backend Backe
 	t.Run("superseded comment edit", func(t *testing.T) { checkSupersededRetainedCommentEdit(t, store) })
 	t.Run("restore from export", func(t *testing.T) { require.NoError(t, checkRestoredRetainedIssueMove(t, store, backend)) })
 	return nil
+}
+
+func checkRejoinMoveAcceptedSnapshotContent(t *testing.T, store db.Storage, content string) {
+	t.Helper()
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "accepted-snapshot-source-"+content)
+	require.NoError(t, err)
+	target, err := store.CreateProject(ctx, "accepted-snapshot-target-"+content)
+	require.NoError(t, err)
+	bindRejoinSpokes(t, store, project)
+	issue := createHubIssue(t, store, project)
+	peer := createHubIssue(t, store, project)
+	origin, err := uid.New()
+	require.NoError(t, err)
+	commentUID, err := uid.New()
+	require.NoError(t, err)
+	contents := `"comments":[{"comment_uid":"` + commentUID + `","author":"hub-actor","body":"shared","created_at":"2026-05-23T12:00:00Z"}]`
+	if content == "link" {
+		contents = `"links":[{"type":"blocks","to_issue_uid":"` + peer.UID + `","author":"hub-actor"}]`
+	}
+	payload := IssueDocument(t, issue.UID, jsontext.Value(`{"uid":"`+issue.UID+`","title":"shared","author":"hub-actor","status":"open","metadata":{},`+contents+`}`))
+	remote := newRemoteEvent(t, project, &issue.UID, "issue.snapshot", "hub-actor", origin, 400, payload)
+	inserted, err := store.InsertRemoteEvent(ctx, project.ID, remote)
+	require.NoError(t, err)
+	require.True(t, inserted)
+	require.NoError(t, store.MaterializeFederatedProject(ctx, project.ID))
+	_, err = store.LeaveFederationReplica(ctx, project.ID)
+	require.NoError(t, err)
+	adopted, binding := rejoinAdopt(t, store, project)
+	inserted, err = store.InsertRemoteEvent(ctx, project.ID, remote)
+	require.NoError(t, err)
+	require.True(t, inserted)
+	bindRejoinSpokes(t, store, target)
+	keepRejoinSnapshots(t, store, project, binding, issue.UID)
+	current := pullHubIssueUpdate(t, store, adopted, issue)
+	requireRejoinMove(t, store, current, adopted, target, nil)
 }
 
 func rejoinRetainedReply(t *testing.T, store db.Storage, name string) (db.Project, db.Issue, db.Issue, db.Project, db.Event, db.Event) {
