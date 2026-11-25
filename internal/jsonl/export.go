@@ -235,22 +235,7 @@ func exportSnapshot(ctx context.Context, d exportQuerier, w io.Writer, opts Expo
 	// Schema 50 introduced the table; earlier sources have nothing to export.
 	// Subscriptions travel only in full exports and cutover.
 	if sourceSchemaVersion >= 50 && opts.ProjectID == 0 {
-		if err := streamExport(enc, KindMCPEventSubscription, db.ExportMCPEventSubscriptionsSQL(ctx, d.QueryContext, db.ExportFilter{IncludeDeleted: opts.IncludeDeleted})); err != nil {
-			return err
-		}
-	}
-	if sourceSchemaVersion >= 55 {
-		exporter, ok := d.(interface {
-			ExportFederationRetainedEvents(context.Context, db.ExportFilter) iter.Seq2[db.FederationRetainedEventExport, error]
-		})
-		if !ok {
-			return fmt.Errorf("cutover source cannot export retained federation events")
-		}
-		filter := db.ExportFilter{IncludeDeleted: opts.IncludeDeleted}
-		if opts.ProjectID > 0 {
-			filter.ProjectID = &opts.ProjectID
-		}
-		return streamExport(enc, KindRetainedEvent, exporter.ExportFederationRetainedEvents(ctx, filter))
+		return streamExport(enc, KindMCPEventSubscription, db.ExportMCPEventSubscriptionsSQL(ctx, d.QueryContext, db.ExportFilter{IncludeDeleted: opts.IncludeDeleted}))
 	}
 	return nil
 }

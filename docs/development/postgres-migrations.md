@@ -537,15 +537,8 @@ older binary.
 Schema 54 changes the recorded version without changing tables or indexes.
 The version prevents older binaries from deleting held federation edits during a reset.
 
-## Schema 55: retained federation events
+## Schema 55: local federation event fence
 
-The 54→55 migration adds `federation_retained_events`, which records events
-awaiting a hub's answer and events kept on the spoke after rejoin. The table
-starts empty. JSONL backups retain its entries with their events.
-
-Stop serving daemons and imports, back up the database, and run
-`kata storage postgres migrate` with schema-owner credentials. Refresh runtime
-table grants as described in [PostgreSQL operations](../operations/postgres.md),
-then start the matching binary. SQLite upgrades the empty table in place.
-Older binaries cannot open schema 55; rollback requires the pre-upgrade backup
-and matching older binary.
+Schema 55 changes only the recorded version. It prevents older binaries from
+deleting local-only federation events during a reset. Run `kata storage postgres migrate`
+with schema-owner credentials before starting the new binary. SQLite upgrades in place.

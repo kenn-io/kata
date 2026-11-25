@@ -127,7 +127,7 @@ func convertEnvelopes(envs []Envelope, exportVersion int, localInstanceUID strin
 		envs[i].Data = nil
 		if asStandalone {
 			switch record := rec.(type) {
-			case *db.FederationBindingExport, *db.FederationRetainedEventExport, *db.FederationSyncStatusExport,
+			case *db.FederationBindingExport, *db.FederationSyncStatusExport,
 				*db.FederationQuarantineExport, *db.FederationEnrollmentExport,
 				*db.IssueClaimExport, *db.PendingClaimRequestExport,
 				*db.RootKeyPin, *db.AttributionReceipt, *db.EntityProvenance,
@@ -447,12 +447,6 @@ func toImportRecord(env Envelope, exportVersion int, localInstanceUID string, pr
 			return nil, err
 		}
 		if err := normalizeFederationBindingTimes(&rec); err != nil {
-			return nil, err
-		}
-		return &rec, nil
-	case KindRetainedEvent:
-		var rec db.FederationRetainedEventExport
-		if err := decodeData(env, &rec); err != nil {
 			return nil, err
 		}
 		return &rec, nil

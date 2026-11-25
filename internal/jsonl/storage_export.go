@@ -193,11 +193,9 @@ func Export(ctx context.Context, store db.Storage, w io.Writer, opts ExportOptio
 		return err
 	}
 	if f.ProjectID == nil {
-		if err := streamExport(enc, KindMCPEventSubscription, store.ExportMCPEventSubscriptions(ctx, f)); err != nil {
-			return err
-		}
+		return streamExport(enc, KindMCPEventSubscription, store.ExportMCPEventSubscriptions(ctx, f))
 	}
-	return streamExport(enc, KindRetainedEvent, store.ExportFederationRetainedEvents(ctx, f))
+	return nil
 }
 
 // streamExport ranges seq and writes each row as a kind-tagged envelope to enc.

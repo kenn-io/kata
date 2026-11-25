@@ -489,12 +489,6 @@ func CollectImportRecords(
 			return nil, fmt.Errorf("export events for replay: %w", err)
 		}
 	}
-	for value, err := range store.ExportFederationRetainedEvents(ctx, filter) {
-		v := value
-		if err := appendRecord(&v, err); err != nil {
-			return nil, fmt.Errorf("export retained federation events for replay: %w", err)
-		}
-	}
 	for value, err := range store.ExportPurgeLog(ctx, filter) {
 		v := value
 		if err := appendRecord(&v, err); err != nil {

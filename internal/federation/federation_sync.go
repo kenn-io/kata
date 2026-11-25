@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -272,7 +273,7 @@ func pushDirectSpoke(
 					}
 					return recordFederationSyncError(ctx, store, binding.ProjectID, eventErr)
 				}
-				if retry, reason := autoRetryFederationQuarantine(q, quarantinedEvents); retry {
+				if retry, reason := autoRetryFederationQuarantine(q, quarantinedEvents, binding.Actor); retry {
 					if _, err := store.RetryFederationQuarantine(ctx, db.RetryFederationQuarantineParams{
 						ID:        q.ID,
 						ProjectID: binding.ProjectID,
@@ -1002,7 +1003,9 @@ var formerPeerReferenceQuarantine = regexp.MustCompile(
 	`^federation ingest validation: event ([0-9A-HJKMNP-TV-Z]{26}) references unknown issue ([0-9A-HJKMNP-TV-Z]{26})$`,
 )
 
-func autoRetryFederationQuarantine(q db.FederationQuarantine, events []db.Event) (bool, string) {
+var formerActorQuarantine = regexp.MustCompile(`^federation ingest validation: event ([0-9A-HJKMNP-TV-Z]{26}) actor (".*") does not match bound actor$`)
+
+func autoRetryFederationQuarantine(q db.FederationQuarantine, events []db.Event, actor string) (bool, string) {
 	if q.Direction != db.FederationQuarantineDirectionPush {
 		return false, ""
 	}
@@ -1012,6 +1015,16 @@ func autoRetryFederationQuarantine(q db.FederationQuarantine, events []db.Event)
 	hubError, ok := federationQuarantineHubError(q.Error)
 	if !ok || hubError.Code != "validation" {
 		return false, ""
+	}
+	if match := formerActorQuarantine.FindStringSubmatch(hubError.Message); len(match) == 3 {
+		oldActor, err := strconv.Unquote(match[2])
+		if err == nil {
+			for _, event := range events {
+				if event.UID == match[1] && event.Actor == oldActor && event.Actor != actor {
+					return true, "auto-retry after rejoin actor change"
+				}
+			}
+		}
 	}
 	match := formerPeerReferenceQuarantine.FindStringSubmatch(hubError.Message)
 	if len(match) != 3 {

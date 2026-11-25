@@ -392,14 +392,6 @@ func validateImportRecord(record ImportRecord) error {
 		return requireImportPayload(rec, ImportKindExternalFieldState)
 	case *FederationBindingExport:
 		return requireImportPayload(rec, ImportKindFederationBinding)
-	case *FederationRetainedEventExport:
-		if err := requireImportPayload(rec, ImportKindRetainedEvent); err != nil {
-			return err
-		}
-		if rec.EventUID == "" || (rec.KeptLocal != 0 && rec.KeptLocal != 1) {
-			return fmt.Errorf("invalid federation retained event")
-		}
-		return nil
 	case *FederationSyncStatusExport:
 		return requireImportPayload(rec, ImportKindFederationSyncStatus)
 	case *FederationQuarantineExport:
@@ -486,8 +478,6 @@ func importReplayRank(kind string) int {
 		return 8
 	case ImportKindEvent:
 		return 9
-	case ImportKindRetainedEvent:
-		return 10
 	case ImportKindPurgeLog, ImportKindProjectPurgeLog:
 		return 10
 	case ImportKindIssueEmbedding:

@@ -89,7 +89,6 @@ const (
 	ImportKindExternalRootBinding  = "external_root_binding"
 	ImportKindExternalFieldState   = "external_field_state"
 	ImportKindFederationBinding    = "federation_binding"
-	ImportKindRetainedEvent        = "federation_retained_event"
 	ImportKindFederationSyncStatus = "federation_sync_status"
 	ImportKindFederationQuarantine = "federation_quarantine"
 	ImportKindFederationEnrollment = "federation_enrollment"

@@ -476,7 +476,6 @@ type Storage interface {
 	ExportExternalRootBindings(ctx context.Context, f ExportFilter) iter.Seq2[ExternalRootBindingExport, error]
 	ExportExternalFieldStates(ctx context.Context, f ExportFilter) iter.Seq2[ExternalFieldStateExport, error]
 	ExportFederationBindings(ctx context.Context, f ExportFilter) iter.Seq2[FederationBindingExport, error]
-	ExportFederationRetainedEvents(ctx context.Context, f ExportFilter) iter.Seq2[FederationRetainedEventExport, error]
 	ExportFederationSyncStatus(ctx context.Context, f ExportFilter) iter.Seq2[FederationSyncStatusExport, error]
 	ExportFederationQuarantine(ctx context.Context, f ExportFilter) iter.Seq2[FederationQuarantineExport, error]
 	ExportFederationEnrollments(ctx context.Context, f ExportFilter) iter.Seq2[FederationEnrollmentExport, error]

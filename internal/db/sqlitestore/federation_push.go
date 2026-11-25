@@ -15,7 +15,7 @@ func (d *Store) KeepFederationEventLocal(ctx context.Context, projectID, eventID
 	var kept bool
 	err := d.relayTx(ctx, func(tx *sql.Tx) error {
 		var err error
-		kept, err = db.KeepFederationEventLocalTx(ctx, tx, projectID, eventID)
+		kept, err = db.KeepFederationEventLocalTx(ctx, tx, projectID, eventID, d.InstanceUID())
 		return err
 	})
 	return kept, err
@@ -258,7 +258,7 @@ func (d *Store) enableFederationPush(ctx context.Context, projectID int64, curso
 	}
 	next := existing
 	next.PushEnabled = true
-	nextCursor, err := db.RestoreFederationPushCursor(ctx, tx, projectID, max(cursor, existing.PushCursorEventID), existing.PushCursorEventID, d.InstanceUID(), existing.Actor)
+	nextCursor, err := db.RestoreFederationPushCursor(ctx, tx, projectID, max(cursor, existing.PushCursorEventID), existing.PushCursorEventID)
 	if err != nil {
 		return db.FederationBinding{}, err
 	}

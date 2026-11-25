@@ -1157,7 +1157,7 @@ func TestAutoRetryFederationQuarantineRequiresExactFormerPeerMessage(t *testing.
 			Direction: db.FederationQuarantineDirectionPush,
 			Error: "hub /api/v1/projects/42/federation/events:ingest returned 400: " +
 				string(body),
-		}, nil)
+		}, nil, "tester")
 
 		assert.False(t, retry)
 		assert.Empty(t, reason)

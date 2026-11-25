@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	canonicalColumnFingerprint     = "6e88e28397e50d5d710a1f71f3e2520bf5104c85fe9bdc5df95833ab7ea6e2af"
-	canonicalConstraintFingerprint = "d4bdd3e897cfe2430b1b8b5ed26f631d3626cd866268af4aa642918ba6d164db"
-	canonicalIndexFingerprint      = "1999b151fba4f6085e6ad07a2e3b5c1153f2cf59252fa04cf81aaa3169a5801d"
+	canonicalColumnFingerprint     = "2c573a26533e056618e458d7addc7836bf7d95e98b0ad258b6b7c2a50725186d"
+	canonicalConstraintFingerprint = "21a6429d8b06093928339598c69f71d48d65330c78e3274cbe8bcabc9fd5ed14"
+	canonicalIndexFingerprint      = "0042f73b77279fa84d7fcfa7fd7631adba1832b2b346afff50840ff6f0728050"
 	vectorColumnFingerprint        = "fee1ce70eef6dbbf6bb0bb4bc609d03ddbdedde3b7450b34968a146ff1a58502"
 	vectorConstraintFingerprint    = "f6b16cccad4298a1b9c6ee173c3795c08b2c1f9d92a6ede2f51da4ea53318bd7"
 	vectorIndexFingerprint         = "5c1dfd69d86bac3e4936fdf3ac3197ba3107684a2dff560649110c9b6df47f67"
@@ -34,7 +34,6 @@ var canonicalTableColumns = map[string]string{
 	"federation_relay_cursors":       "project_uid,binding_uid,stream,reset_epoch,offered_through,accepted_through,emitted_through,acknowledged_through",
 	"federation_root_keys":           "project_uid,authority_uid,key_id,public_key,active",
 	"federation_event_provenance":    "project_uid,event_uid,content_hash,reset_epoch,sequence,key_id,receipt",
-	"federation_retained_events":     "event_id,kept_local",
 	"federation_entity_provenance":   "project_uid,kind,entity_uid,event_uid",
 	"teams":                          "uid,name,revision",
 	"team_memberships":               "team_uid,actor",

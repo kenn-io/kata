@@ -576,8 +576,6 @@ func importRecord(ctx context.Context, tx *sql.Tx, r db.ImportRecord, opts db.Im
 		return linkSkipNone, importPendingClaimRequest(ctx, tx, rec, opts)
 	case *db.EventExport:
 		return linkSkipNone, importEvent(ctx, tx, rec, opts)
-	case *db.FederationRetainedEventExport:
-		return linkSkipNone, db.ImportFederationRetainedEvent(ctx, tx, rec, opts.NewInstance)
 	case *db.PurgeLogExport:
 		return linkSkipNone, importPurgeLog(ctx, tx, rec)
 	case *db.ProjectPurgeLogExport:

@@ -152,7 +152,7 @@ WHERE project_id=$1 AND active=1 LIMIT 1`, input.ProjectID).Scan(&externalRootBi
 			if previous != nil {
 				prior = previous.PushCursorEventID
 			}
-			input.PushCursorEventID, err = db.RestoreFederationPushCursor(ctx, tx, input.ProjectID, input.PushCursorEventID, prior, s.InstanceUID(), input.Actor)
+			input.PushCursorEventID, err = db.RestoreFederationPushCursor(ctx, tx, input.ProjectID, input.PushCursorEventID, prior)
 			if err != nil {
 				return err
 			}
@@ -199,7 +199,7 @@ func (s *Store) KeepFederationEventLocal(ctx context.Context, projectID, eventID
 	var kept bool
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		var err error
-		kept, err = db.KeepFederationEventLocalTx(ctx, tx, projectID, eventID)
+		kept, err = db.KeepFederationEventLocalTx(ctx, tx, projectID, eventID, s.InstanceUID())
 		return err
 	})
 	return kept, err
@@ -318,7 +318,7 @@ func (s *Store) EnableFederationPush(ctx context.Context, projectID int64, curso
 		}
 		next := binding
 		next.PushEnabled = true
-		cursor, err = db.RestoreFederationPushCursor(ctx, tx, projectID, max(cursor, binding.PushCursorEventID), binding.PushCursorEventID, s.InstanceUID(), binding.Actor)
+		cursor, err = db.RestoreFederationPushCursor(ctx, tx, projectID, max(cursor, binding.PushCursorEventID), binding.PushCursorEventID)
 		if err != nil {
 			return err
 		}

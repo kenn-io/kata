@@ -626,17 +626,6 @@ func (s *Store) ExportIssueSyncStatus(ctx context.Context, filter db.ExportFilte
 		})
 }
 
-// ExportFederationRetainedEvents streams rejoin decisions by event UID.
-func (s *Store) ExportFederationRetainedEvents(ctx context.Context, filter db.ExportFilter) iter.Seq2[db.FederationRetainedEventExport, error] {
-	query, args := pgProjectFilter(`SELECT e.uid,r.kept_local FROM federation_retained_events r JOIN events e ON e.id=r.event_id`, "e.project_id", filter)
-	query += ` ORDER BY e.id`
-	return streamExportRows(ctx, s, "federation_retained_events", query, args, func(rows *sql.Rows) (db.FederationRetainedEventExport, error) {
-		var rec db.FederationRetainedEventExport
-		err := rows.Scan(&rec.EventUID, &rec.KeptLocal)
-		return rec, err
-	})
-}
-
 // ExportFederationBindings streams federation bindings in project order.
 func (s *Store) ExportFederationBindings(ctx context.Context, filter db.ExportFilter) iter.Seq2[db.FederationBindingExport, error] {
 	query, args := pgProjectFilter(`SELECT project_id, role, hub_url, hub_project_id,

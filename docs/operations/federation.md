@@ -2296,8 +2296,7 @@ from shared tasks to local-only tasks reach the hub but remain unresolved there.
 The first push can take one request per older event. A hub reset preserves
 local-only events. Once kept local, an event stays local even if the original
 actor rejoins later.
-When a backup is restored with `--new-instance`, waiting events also stay
-local because the new instance cannot push events from the old identity.
+A push paused by an earlier version after rejoin resumes after upgrading.
 
 A read-only rejoin keeps held offline edits local until push is enabled.
 

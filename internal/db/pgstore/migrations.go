@@ -89,8 +89,8 @@ var eventProjectMovesIndexMigrationSQL string
 //go:embed migrations/000054_federation_cursor_fence.up.sql
 var federationCursorFenceMigrationSQL string
 
-//go:embed migrations/000055_federation_binding_retained_history.up.sql
-var federationRetainedEventsMigrationSQL string
+//go:embed migrations/000055_federation_local_event_fence.up.sql
+var federationLocalEventFenceMigrationSQL string
 
 // Migration is one immutable Postgres schema transition. Assets form an exact
 // version chain; callers applying them externally must stamp ToVersion only
@@ -157,7 +157,7 @@ var migrationAssets = []Migration{
 	{FromVersion: 51, ToVersion: 52, Name: "000052_kit_vector_catalog.up.sql", SQL: kitVectorCatalogMigrationSQL},
 	{FromVersion: 52, ToVersion: 53, Name: "000053_event_project_moves_index.up.sql", SQL: eventProjectMovesIndexMigrationSQL},
 	{FromVersion: 53, ToVersion: 54, Name: "000054_federation_cursor_fence.up.sql", SQL: federationCursorFenceMigrationSQL},
-	{FromVersion: 54, ToVersion: 55, Name: "000055_federation_binding_retained_history.up.sql", SQL: federationRetainedEventsMigrationSQL},
+	{FromVersion: 54, ToVersion: 55, Name: "000055_federation_local_event_fence.up.sql", SQL: federationLocalEventFenceMigrationSQL},
 }
 
 // Migrations returns forward migrations from previously released Postgres

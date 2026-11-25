@@ -66,9 +66,9 @@ const FederationHeldCursorPrefix = "federation_held_cursor."
 // FederationAcknowledgedEventPrefix identifies events accepted out of order.
 const FederationAcknowledgedEventPrefix = "federation_acknowledged_event."
 
-// FederationUnresolvedEventSQL excludes events already accepted or retained locally.
+// FederationUnresolvedEventSQL excludes events already accepted or superseded on leave.
 func FederationUnresolvedEventSQL(alias string) string {
-	return alias + `.type IN (` + FederationPushEventTypesSQL() + `) AND NOT EXISTS (SELECT 1 FROM meta WHERE key='` + FederationAcknowledgedEventPrefix + `' || (SELECT uid FROM projects WHERE id=` + alias + `.project_id) || '.' || ` + alias + `.uid) AND NOT EXISTS (SELECT 1 FROM federation_retained_events r WHERE r.event_id=` + alias + `.id AND r.kept_local=1)`
+	return alias + `.type IN (` + FederationPushEventTypesSQL() + `) AND NOT EXISTS (SELECT 1 FROM meta WHERE key='` + FederationAcknowledgedEventPrefix + `' || (SELECT uid FROM projects WHERE id=` + alias + `.project_id) || '.' || ` + alias + `.uid)`
 }
 
 // RecordFederationAcknowledgedEvents retains exact accepted event identities.
@@ -93,8 +93,7 @@ func FoldFederationAcknowledgedEvents(ctx context.Context, tx *sql.Tx, projectID
 			return err
 		}
 	}
-	_, err = tx.ExecContext(ctx, `DELETE FROM federation_retained_events WHERE kept_local=0 AND event_id IN (SELECT e.id FROM events e JOIN federation_bindings b ON b.project_id=e.project_id WHERE e.project_id=$1 AND e.id<=b.push_cursor_event_id)`, projectID)
-	return err
+	return nil
 }
 
 // FederationLeaveFenceExists reports whether departure was already prepared.
@@ -179,7 +178,7 @@ func PreserveFederationLeaveFenceOnStop(previous *FederationBinding, next Federa
 }
 
 // RestoreFederationPushCursor preserves offline edits when push resumes.
-func RestoreFederationPushCursor(ctx context.Context, tx *sql.Tx, projectID, cursor, bindingCursor int64, origin, actor string) (int64, error) {
+func RestoreFederationPushCursor(ctx context.Context, tx *sql.Tx, projectID, cursor, bindingCursor int64) (int64, error) {
 	var held int64
 	err := tx.QueryRowContext(ctx, `SELECT CAST(m.value AS BIGINT) FROM meta m JOIN projects p ON m.key=$1 || p.uid WHERE p.id=$2`, FederationHeldCursorPrefix, projectID).Scan(&held)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -188,20 +187,18 @@ func RestoreFederationPushCursor(ctx context.Context, tx *sql.Tx, projectID, cur
 	if err != nil {
 		return 0, err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO federation_retained_events(event_id,kept_local)
- SELECT e.id,0 FROM events e
- WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND e.actor<>$4 AND e.type IN (`+FederationPushEventTypesSQL()+`)
- ON CONFLICT(event_id) DO NOTHING`, projectID, origin, max(held, bindingCursor), actor)
-	if err != nil {
-		return 0, err
-	}
 	_, err = tx.ExecContext(ctx, `DELETE FROM meta WHERE key=$1 || (SELECT uid FROM projects WHERE id=$2)`, FederationHeldCursorPrefix, projectID)
 	return max(held, bindingCursor), err
 }
 
-// KeepFederationEventLocalTx records the hub's refusal for a rejoin candidate.
-func KeepFederationEventLocalTx(ctx context.Context, tx *sql.Tx, projectID, eventID int64) (bool, error) {
-	res, err := tx.ExecContext(ctx, `UPDATE federation_retained_events SET kept_local=1 WHERE event_id=$1 AND kept_local=0 AND EXISTS (SELECT 1 FROM events WHERE id=$1 AND project_id=$2)`, eventID, projectID)
+// federationKeptLocalSQL identifies events the hub refused after rejoin.
+func federationKeptLocalSQL(alias string) string {
+	return `EXISTS (SELECT 1 FROM meta WHERE key='` + FederationAcknowledgedEventPrefix + `' || (SELECT uid FROM projects WHERE id=` + alias + `.project_id) || '.' || ` + alias + `.uid AND value='local')`
+}
+
+// KeepFederationEventLocalTx records the hub's refusal for an old-actor event.
+func KeepFederationEventLocalTx(ctx context.Context, tx *sql.Tx, projectID, eventID int64, origin string) (bool, error) {
+	res, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) SELECT $1 || p.uid || '.' || e.uid,'local' FROM events e JOIN projects p ON p.id=e.project_id JOIN federation_bindings b ON b.project_id=e.project_id WHERE e.project_id=$2 AND e.id=$3 AND e.origin_instance_uid=$4 AND e.actor<>b.bound_actor AND e.type IN (`+FederationPushEventTypesSQL()+`) ON CONFLICT(key) DO NOTHING`, FederationAcknowledgedEventPrefix, projectID, eventID, origin)
 	if err != nil {
 		return false, err
 	}
@@ -209,38 +206,17 @@ func KeepFederationEventLocalTx(ctx context.Context, tx *sql.Tx, projectID, even
 	return n != 0, err
 }
 
-// ImportFederationRetainedEvent restores a decision after its event is imported.
-func ImportFederationRetainedEvent(ctx context.Context, tx *sql.Tx, rec *FederationRetainedEventExport, newInstance bool) error {
-	keptLocal := rec.KeptLocal
-	if newInstance {
-		// A new enrollment cannot offer events from the former instance.
-		keptLocal = 1
-	}
-	res, err := tx.ExecContext(ctx, `INSERT INTO federation_retained_events(event_id,kept_local) SELECT id,$1 FROM events WHERE uid=$2`, keptLocal, rec.EventUID)
-	if err != nil {
-		return err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n != 1 {
-		return fmt.Errorf("retained event %s is missing", rec.EventUID)
-	}
-	return nil
-}
-
 // HasKeptFederationEvents reports whether a reset must rebuild local history.
 func HasKeptFederationEvents(ctx context.Context, tx *sql.Tx, projectID int64) (bool, error) {
 	var exists bool
-	err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM events e JOIN federation_retained_events r ON r.event_id=e.id WHERE e.project_id=$1 AND r.kept_local=1)`, projectID).Scan(&exists)
+	err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM events e WHERE e.project_id=$1 AND `+federationKeptLocalSQL("e")+`)`, projectID).Scan(&exists)
 	return exists, err
 }
 
 // RetainFederationDependentsTx keeps events whose task or comment is local.
 func RetainFederationDependentsTx(ctx context.Context, tx *sql.Tx, projectID int64, origin string, postgres bool) error {
-	var anyLocal bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM events e JOIN federation_retained_events r ON r.event_id=e.id WHERE e.project_id=$1 AND r.kept_local=1)`, projectID).Scan(&anyLocal); err != nil || !anyLocal {
+	anyLocal, err := HasKeptFederationEvents(ctx, tx, projectID)
+	if err != nil || !anyLocal {
 		return err
 	}
 	field := func(alias, key string) string {
@@ -250,15 +226,12 @@ func RetainFederationDependentsTx(ctx context.Context, tx *sql.Tx, projectID int
 		return `json_extract(` + alias + `.payload,'$.` + key + `')`
 	}
 	for {
-		res, err := tx.ExecContext(ctx, `INSERT INTO federation_retained_events(event_id,kept_local)
- SELECT e.id,1 FROM events e JOIN federation_bindings b ON b.project_id=e.project_id
+		res, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value)
+ SELECT '`+FederationAcknowledgedEventPrefix+`' || p.uid || '.' || e.uid,'local' FROM events e JOIN projects p ON p.id=e.project_id JOIN federation_bindings b ON b.project_id=e.project_id
  WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>b.push_cursor_event_id
- AND NOT EXISTS (SELECT 1 FROM federation_retained_events own WHERE own.event_id=e.id AND own.kept_local=1)
- AND ((e.issue_uid IS NOT NULL AND EXISTS (SELECT 1 FROM events c JOIN federation_retained_events r ON r.event_id=c.id AND r.kept_local=1
- WHERE c.project_id=e.project_id AND c.issue_uid=e.issue_uid AND c.type IN ('issue.created','issue.snapshot')))
- OR ((`+field("e", "comment_uid")+` IS NOT NULL OR `+field("e", "reply_to_uid")+` IS NOT NULL) AND EXISTS (SELECT 1 FROM events c JOIN federation_retained_events r ON r.event_id=c.id AND r.kept_local=1
- WHERE c.project_id=e.project_id AND c.type='issue.commented' AND `+field("c", "comment_uid")+` IN (`+field("e", "comment_uid")+`,`+field("e", "reply_to_uid")+`))))
- ON CONFLICT(event_id) DO UPDATE SET kept_local=1`, projectID, origin)
+ AND ((e.issue_uid IS NOT NULL AND EXISTS (SELECT 1 FROM events c WHERE c.project_id=e.project_id AND c.issue_uid=e.issue_uid AND c.type IN ('issue.created','issue.snapshot') AND `+federationKeptLocalSQL("c")+`))
+ OR ((`+field("e", "comment_uid")+` IS NOT NULL OR `+field("e", "reply_to_uid")+` IS NOT NULL) AND EXISTS (SELECT 1 FROM events c WHERE c.project_id=e.project_id AND c.type='issue.commented' AND `+federationKeptLocalSQL("c")+` AND `+field("c", "comment_uid")+` IN (`+field("e", "comment_uid")+`,`+field("e", "reply_to_uid")+`))))
+ ON CONFLICT(key) DO NOTHING`, projectID, origin)
 		if err != nil {
 			return err
 		}
@@ -1088,7 +1061,7 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
 	// Keep this spoke's edits that a left project never had acknowledged.
 	//nolint:gosec // Only the fixed snapshot type list is joined; values are bound.
 	_, err = tx.ExecContext(ctx, `DELETE FROM events AS e WHERE e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)
- AND NOT EXISTS (SELECT 1 FROM federation_retained_events r WHERE r.event_id=e.id AND r.kept_local=1)
+ AND NOT (`+federationKeptLocalSQL("e")+`)
  AND NOT (e.origin_instance_uid=$2 AND e.type NOT IN ('issue.created','issue.moved',`+FederationSnapshotEventTypesSQL()+`) AND (`+FederationHeldEventSQL("e")+` OR (EXISTS (SELECT 1 FROM federation_bindings b WHERE b.project_id=e.project_id AND e.id>b.push_cursor_event_id) AND `+FederationEventReferencesMovedIssueSQL("e", postgres)+`)))`, projectID, originInstanceUID)
 	return err
 }
@@ -1104,7 +1077,7 @@ func FederationHeldEventSQL(alias string) string {
 // issues now owned elsewhere. A source reset cannot rewind those destinations.
 func ClearFederatedProjectEvents(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string, postgres bool) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM events AS e WHERE e.project_id=$1
-	 AND NOT EXISTS (SELECT 1 FROM federation_retained_events r WHERE r.event_id=e.id AND r.kept_local=1)
+	 AND NOT (`+federationKeptLocalSQL("e")+`)
 	 AND NOT (`+FederationEventReferencesMovedIssueSQL("e", postgres)+`)
  AND NOT (e.origin_instance_uid=$2 AND `+FederationHeldEventSQL("e")+`)`, projectID, originInstanceUID); err != nil {
 		return err
