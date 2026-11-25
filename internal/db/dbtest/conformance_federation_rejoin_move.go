@@ -99,6 +99,13 @@ func checkRejoinSnapshotComments(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	require.True(t, inserted)
 	require.NoError(t, store.MaterializeFederatedProject(ctx, project.ID))
+	restatedUID, err := uid.New()
+	require.NoError(t, err)
+	restated := newRemoteEvent(t, project, &issue.UID, db.RepeatedImportEventType, "hub-actor", origin, 403, IssueDocument(t, issue.UID, jsontext.Value(`{"uid":"`+issue.UID+`","title":"shared","author":"hub-actor","status":"open","metadata":{},"comments":[{"comment_uid":"`+restatedUID+`","author":"hub-actor","body":"restated","created_at":"2026-05-23T12:00:00Z"}]}`)))
+	inserted, err = store.InsertRemoteEvent(ctx, project.ID, restated)
+	require.NoError(t, err)
+	require.True(t, inserted)
+	require.NoError(t, store.MaterializeFederatedProject(ctx, project.ID))
 	sharedUID, err := uid.New()
 	require.NoError(t, err)
 	sharedEvent := newRemoteEvent(t, project, &issue.UID, "issue.commented", "hub-actor", origin, 401, jsontext.Value(`{"comment_uid":"`+sharedUID+`","author":"hub-actor","body":"shared","created_at":"2026-05-23T12:01:00Z"}`))
@@ -116,6 +123,9 @@ func checkRejoinSnapshotComments(t *testing.T, store db.Storage) {
 	acknowledged, acknowledgedEvent, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "acknowledged"})
 	require.NoError(t, err)
 	require.NoError(t, store.AdvanceFederationPushCursor(ctx, project.ID, acknowledgedEvent.ID))
+	laterRestated, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "restated later"})
+	require.NoError(t, err)
+	remoteRestatement := newRemoteEvent(t, project, &issue.UID, db.RepeatedImportEventType, "hub-actor", origin, 404, IssueDocument(t, issue.UID, jsontext.Value(`{"uid":"`+issue.UID+`","title":"shared","author":"hub-actor","status":"open","metadata":{},"comments":[{"comment_uid":"`+laterRestated.UID+`","author":"hub-actor","body":"restated later","created_at":"2026-05-23T12:00:00Z"}]}`)))
 	_, err = store.LeaveFederationReplica(ctx, project.ID)
 	require.NoError(t, err)
 	local, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "local"})
@@ -125,14 +135,14 @@ func checkRejoinSnapshotComments(t *testing.T, store db.Storage) {
 	_, err = store.LeaveFederationReplica(ctx, project.ID)
 	require.NoError(t, err)
 	_, binding := rejoinAdopt(t, store, project)
-	for _, event := range []db.RemoteEvent{remoteSnapshot, sharedEvent, stubEvent} {
+	for _, event := range []db.RemoteEvent{remoteSnapshot, sharedEvent, stubEvent, remoteRestatement} {
 		inserted, err = store.InsertRemoteEvent(ctx, project.ID, event)
 		require.NoError(t, err)
 		require.True(t, inserted)
 	}
 	keepRejoinSnapshots(t, store, project, binding, issue.UID)
 	var kept bool
-	for _, comment := range []struct{ name, uid string }{{"local", local.UID}, {"acknowledged", acknowledged.UID}, {"event", sharedUID}, {"snapshot", snapshotCommentUID}, {"stub", stubUID}} {
+	for _, comment := range []struct{ name, uid string }{{"local", local.UID}, {"acknowledged", acknowledged.UID}, {"event", sharedUID}, {"snapshot", snapshotCommentUID}, {"stub", stubUID}, {"adopted restatement", restatedUID}, {"restatement", laterRestated.UID}} {
 		_, edit, changed, err := store.EditComment(ctx, db.EditCommentParams{IssueID: issue.ID, CommentUID: comment.uid, Actor: "new-actor", Body: "edited"})
 		require.NoError(t, err)
 		require.True(t, changed)
