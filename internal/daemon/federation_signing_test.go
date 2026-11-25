@@ -402,9 +402,21 @@ func TestFederationIngressBoundsHeaders(t *testing.T) {
 	require.NoError(t, <-done)
 }
 
-func TestFederationIngressAcceptsConnections(t *testing.T) {
+// Sixteen members keep connections open to the private federation listener;
+// a seventeenth member's request still reaches its route.
+func TestFederationIngressServesMemberPastSixteenConnections(t *testing.T) {
+	t.Setenv("TEST_LISTENER_KEY", strings.Repeat("k", 64))
+	source := signingpolicy.Source{KeyID: "key-a", KeyEnv: "TEST_LISTENER_KEY"}
 	env := testenv.New(t)
-	srv := daemon.NewServer(daemon.ServerConfig{DB: env.DB})
+	project := createFederatedHubProject(t, env, "hub-project")
+	enrollment, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{Token: "enrollment", SpokeInstanceUID: federationTestSpokeUID, ProjectID: &project.ID, Capabilities: "pull", Actor: "tester"})
+	require.NoError(t, err)
+	state := filepath.Join(t.TempDir(), "replay.state")
+	require.NoError(t, federationsigning.InitializeReplayState(state))
+	verifier, err := federationsigning.NewVerifier("https://hub.example", []signingpolicy.Key{{Source: source, EnrollmentID: enrollment.Enrollment.ID}}, state)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = verifier.Close() })
+	srv := daemon.NewServer(daemon.ServerConfig{DB: env.DB, FederationSigning: verifier})
 	t.Cleanup(func() { _ = srv.Close() })
 	listener, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
@@ -428,11 +440,20 @@ func TestFederationIngressAcceptsConnections(t *testing.T) {
 	extra, err := (&net.Dialer{Timeout: time.Second}).DialContext(t.Context(), "tcp", listener.Addr().String())
 	require.NoError(t, err)
 	defer func() { _ = extra.Close() }()
-	require.NoError(t, extra.SetReadDeadline(time.Now().Add(500*time.Millisecond)))
-	_, err = fmt.Fprint(extra, "GET /unavailable HTTP/1.1\r\nHost: daemon.example\r\n\r\n")
+	started := time.Now()
+	_, err = fmt.Fprintf(extra, "GET %s/federation/metadata HTTP/1.1\r\nHost: hub.example\r\nAuthorization: Bearer %s\r\n\r\n", projectPath(project.ID), enrollment.Token)
 	require.NoError(t, err)
-	_, err = bufio.NewReader(extra).ReadByte()
-	require.NoError(t, err, "seventeenth connection receives a response")
+	resp, err := http.ReadResponse(bufio.NewReader(extra), nil)
+	require.NoError(t, err)
+	waited := time.Since(started)
+	defer func() { _ = resp.Body.Close() }()
+	var envelope api.ErrorEnvelope
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&envelope))
+	// The unsigned request reaches the member route, which asks for a signature.
+	require.Equal(t, http.StatusPreconditionRequired, resp.StatusCode)
+	require.Equal(t, "hub_signing_required", envelope.Error.Code)
+	t.Logf("seventeenth member request answered after %s", waited)
+	require.Less(t, waited, 5*time.Second, "seventeenth member waited for a connection slot")
 	for _, c := range connections {
 		_ = c.Close()
 	}

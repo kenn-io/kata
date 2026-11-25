@@ -139,7 +139,9 @@ error; a missing version at a reachable origin remains
 `attachment_content_missing`.
 
 Signed uploads use bounded temporary disk files for digest verification at
-each hop. The 256 MiB file limit remains. Transfer failures or a denied final
+each hop. The 256 MiB file limit remains. A hub spools at most two signed
+uploads at once, which bounds that temporary disk; a third receives `429` with
+`Retry-After: 1`, and native sync retries it. Transfer failures or a denied final
 metadata write can leave an unreferenced Docbank version; Docbank retention
 owns those bytes. A lost upload response can create another reference on retry.
 

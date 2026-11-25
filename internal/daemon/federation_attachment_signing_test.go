@@ -45,8 +45,13 @@ func TestFederationAttachmentSigningProfile(t *testing.T) {
 			api := huma.NewAPI(huma.DefaultConfig("fixture", "1"), humago.NewAdapter(http.NewServeMux(), ""))
 			path := strings.Replace(tc.path, "/projects/1/", "/projects/{project_id}/", 1)
 			huma.Register(api, huma.Operation{OperationID: tc.operation, Method: tc.method, Path: path}, func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
-			s := &Server{api: api, federationPushMemory: semaphore.NewWeighted(1)}
+			s := &Server{api: api, federationTransferAdmission: make(chan struct{}, 1), federationPushMemory: semaphore.NewWeighted(1)}
+			// Fill the budgets a route must not use: links and capabilities
+			// skip the upload gate, and transfers skip push memory.
 			require.True(t, s.federationPushMemory.TryAcquire(1))
+			if !tc.bulk {
+				s.federationTransferAdmission <- struct{}{}
+			}
 			r := httptest.NewRequestWithContext(t.Context(), tc.method, "https://hub.example"+tc.path, http.NoBody)
 			r.ContentLength = tc.length
 			w := &transferDeadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
@@ -125,7 +130,7 @@ func testFederationAttachmentSigningMode(t *testing.T, mode string) {
 			path = fmt.Sprintf("/api/v1/projects/%d/federation/docbank/capabilities", project.ID)
 		}
 		huma.Register(api, huma.Operation{OperationID: operation, Method: method, Path: route}, func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
-		s := &Server{api: api, cfg: ServerConfig{DB: store, FederationSigning: v}, federationPushMemory: semaphore.NewWeighted(1)}
+		s := &Server{api: api, cfg: ServerConfig{DB: store, FederationSigning: v}, federationTransferAdmission: make(chan struct{}, 1), federationPushMemory: semaphore.NewWeighted(1)}
 		var body io.Reader = strings.NewReader("binary")
 		if mode == "push-only preflight" {
 			body = nil
@@ -182,7 +187,8 @@ func (b *attachmentSigningRevocationBody) Read(p []byte) (int, error) {
 }
 func (*attachmentSigningRevocationBody) Close() error { return nil }
 
-func TestFederationAttachmentsAcceptConcurrentTransfers(t *testing.T) {
+// Temporary disk bounds uploads to two at once; reads and sync are not counted.
+func TestFederationAttachmentReadAndUploadAdmissionAreIndependent(t *testing.T) {
 	t.Setenv("TEST_TRANSFER_POOLS_KEY", strings.Repeat("k", 64))
 	source := signingpolicy.Source{KeyID: "key-a", KeyEnv: "TEST_TRANSFER_POOLS_KEY"}
 	store := openClaimGateHelperDB(t)
@@ -223,10 +229,10 @@ func TestFederationAttachmentsAcceptConcurrentTransfers(t *testing.T) {
 		}
 		for _, tc := range []struct {
 			name, blockedMethod, blockedPath, otherMethod, otherPath string
-			count                                                    int
+			count, nextStatus                                        int
 		}{
-			{"uploads do not block reads", http.MethodPost, upload, http.MethodGet, content, 3},
-			{"reads do not block uploads or control", http.MethodGet, content, http.MethodPost, upload, 17},
+			{"uploads do not block reads", http.MethodPost, upload, http.MethodGet, content, 2, http.StatusTooManyRequests},
+			{"reads do not block uploads or control", http.MethodGet, content, http.MethodPost, upload, 17, http.StatusNoContent},
 		} {
 			func() {
 				entered, release := make(chan struct{}, tc.count), make(chan struct{})
@@ -260,7 +266,10 @@ func TestFederationAttachmentsAcceptConcurrentTransfers(t *testing.T) {
 				}
 				full := httptest.NewRecorder()
 				handler.ServeHTTP(full, request(tc.blockedMethod, tc.blockedPath, false))
-				require.Equal(t, http.StatusNoContent, full.Code, "%s: %s", tc.name, full.Body.String())
+				require.Equal(t, tc.nextStatus, full.Code, "%s: %s", tc.name, full.Body.String())
+				if tc.nextStatus == http.StatusTooManyRequests {
+					require.Equal(t, "1", full.Header().Get("Retry-After"))
+				}
 				for _, other := range []struct{ method, path string }{{tc.otherMethod, tc.otherPath}, {http.MethodGet, control}, {http.MethodPost, prefix + "/events:ingest"}} {
 					w := httptest.NewRecorder()
 					handler.ServeHTTP(w, request(other.method, other.path, false))
@@ -269,50 +278,4 @@ func TestFederationAttachmentsAcceptConcurrentTransfers(t *testing.T) {
 			}()
 		}
 	})
-}
-
-func TestFederationUnsignedPushRespectsMemory(t *testing.T) {
-	store := openClaimGateHelperDB(t)
-	project, err := store.CreateProject(t.Context(), "hub-project")
-	require.NoError(t, err)
-	_, err = store.EnableProjectFederation(t.Context(), project.ID, "tester")
-	require.NoError(t, err)
-	enrollment, err := store.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{Token: "enrollment", SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EX", ProjectID: &project.ID, Capabilities: "push", Actor: "tester"})
-	require.NoError(t, err)
-	api := huma.NewAPI(huma.DefaultConfig("fixture", "1"), humago.NewAdapter(http.NewServeMux(), ""))
-	huma.Register(api, huma.Operation{OperationID: "ingestFederationProjectEvents", Method: http.MethodPost, Path: "/api/v1/projects/{project_id}/federation/events:ingest"}, func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
-	s := &Server{api: api, cfg: ServerConfig{DB: store}, federationPushMemory: semaphore.NewWeighted(4)}
-	handler := s.withFederationSigning(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, err := io.ReadAll(r.Body)
-		require.NoError(t, err)
-		w.WriteHeader(http.StatusNoContent)
-	}), false)
-	request := func(body string) *httptest.ResponseRecorder {
-		r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, fmt.Sprintf("https://hub.example/api/v1/projects/%d/federation/events:ingest", project.ID), strings.NewReader(body))
-		r.Header.Set("Authorization", "Bearer "+enrollment.Token)
-		w := httptest.NewRecorder()
-		handler.ServeHTTP(w, r)
-		return w
-	}
-	require.Equal(t, http.StatusTooManyRequests, request("12345").Code)
-	require.Equal(t, http.StatusNoContent, request("1234").Code)
-}
-
-func TestFederationLocalCronPushRespectsMemory(t *testing.T) {
-	api := huma.NewAPI(huma.DefaultConfig("fixture", "1"), humago.NewAdapter(http.NewServeMux(), ""))
-	huma.Register(api, huma.Operation{OperationID: "createCronJob", Method: http.MethodPost, Path: "/api/v1/projects/{project_id}/cron/jobs"}, func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
-	s := &Server{api: api, federationPushMemory: semaphore.NewWeighted(4)}
-	handler := s.withFederationSigning(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, err := io.ReadAll(r.Body)
-		require.NoError(t, err)
-		w.WriteHeader(http.StatusNoContent)
-	}), false)
-	request := func(body string) *httptest.ResponseRecorder {
-		r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "https://hub.example/api/v1/projects/1/cron/jobs", strings.NewReader(body))
-		w := httptest.NewRecorder()
-		handler.ServeHTTP(w, r)
-		return w
-	}
-	require.Equal(t, http.StatusTooManyRequests, request("12345").Code)
-	require.Equal(t, http.StatusNoContent, request("1234").Code)
 }

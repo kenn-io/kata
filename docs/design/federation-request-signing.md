@@ -43,8 +43,9 @@ through handler execution. Control requests have a 64 KiB body
 limit, while the native 64 MiB adoption limit remains available for ingests.
 Signed relay envelopes have a 128 MiB request budget so JSON and base64
 encoding fit around the 64 MiB raw relay batch limit. Bounded memory buffering
-avoids a second temporary-file lifecycle for incoming event bodies. Saturated
-pools return `429` with `Retry-After`.
+avoids a second temporary-file lifecycle for incoming event bodies. Two signed
+attachment uploads may spool to temporary disk at once. A full push budget or
+upload gate returns `429` with `Retry-After`.
 
 A durable maximum-admitted-expiry watermark complements the bounded nonce
 cache. Atomic publication fsyncs the file and directory before dispatch. One

@@ -99,25 +99,26 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 		push := route.operation == "ingestFederationProjectEvents" || route.operation == "acceptRelayDeliveries" || isCronJobWriteOperation(route.operation)
 		supplied := len(r.Header.Values("Signature")) != 0 || len(r.Header.Values("Signature-Input")) != 0
 		if !ingress && !supplied {
-			if !s.cfg.FederationSigningRequired && !push {
+			// Without required signing, unsigned requests are ordinary daemon
+			// operations, as are owner/identity lease and cron writes. Ingress never
+			// takes this local-authority path.
+			local := !s.cfg.FederationSigningRequired
+			if !local && (slices.Contains(route.capabilities, "claim") || isCronJobWriteOperation(route.operation)) {
+				_, ok := PrincipalFromContext(r.Context())
+				local = ok || validLocalBearer(s.cfg.Auth.Token, r.Header.Get("Authorization")) || !hasBearerHeader(r.Header.Get("Authorization"))
+			}
+			if local {
+				// Ingest preauthorization charges unsigned event pushes after it
+				// authorizes them; cron writes are already daemon-authorized here.
+				if isCronJobWriteOperation(route.operation) {
+					body, ok := s.bufferFederationPush(w, r)
+					if !ok {
+						return
+					}
+					defer body.release()
+				}
 				next.ServeHTTP(w, r)
 				return
-			}
-			// Owner/identity lease and cron writes remain ordinary daemon operations.
-			// Ingress never takes this local-authority path.
-			if slices.Contains(route.capabilities, "claim") || isCronJobWriteOperation(route.operation) {
-				if _, ok := PrincipalFromContext(r.Context()); ok || validLocalBearer(s.cfg.Auth.Token, r.Header.Get("Authorization")) || !hasBearerHeader(r.Header.Get("Authorization")) {
-					if push {
-						r.Body = http.MaxBytesReader(w, r.Body, federationsigning.MaxBodyBytes)
-						body, ok := s.bufferFederationPush(r.Context(), w, r)
-						if !ok {
-							return
-						}
-						defer body.release()
-					}
-					next.ServeHTTP(w, r)
-					return
-				}
 			}
 		}
 		bodyLimit := int64(64 << 10)
@@ -126,6 +127,15 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 			bodyLimit = federationsigning.MaxBodyBytes
 		} else if attachmentTransfer && r.Method == http.MethodPost {
 			bodyLimit = federationsigning.AttachmentMaxBodyBytes
+			// Uploads spool to temporary disk; two at once bounds that disk use.
+			select {
+			case s.federationTransferAdmission <- struct{}{}:
+				defer func() { <-s.federationTransferAdmission }()
+			default:
+				w.Header().Set("Retry-After", "1")
+				api.WriteEnvelope(w, http.StatusTooManyRequests, "admission_limited", "federation admission is full")
+				return
+			}
 		}
 		deadline := time.Now().Add(60 * time.Second)
 		if attachmentTransfer {
@@ -139,7 +149,6 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 			api.WriteEnvelope(w, http.StatusRequestEntityTooLarge, "body_too_large", "federation body is too large")
 			return
 		}
-
 		r.Body = http.MaxBytesReader(w, r.Body, bodyLimit)
 		headerSize := 0
 		for name, values := range r.Header {
@@ -170,19 +179,11 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 			return
 		}
 		if push {
-			if !ingress && !supplied && !s.cfg.FederationSigningRequired {
-				body, ok := s.bufferFederationPush(ctx, w, r)
-				if !ok {
-					return
-				}
-				defer body.release()
-			} else {
-				body := &federationPushBody{ReadCloser: r.Body, memory: s.federationPushMemory}
-				defer body.release()
-				r.Body = body
-			}
+			// Verification reads the body through this charge.
+			body := &federationPushBody{ReadCloser: r.Body, memory: s.federationPushMemory}
+			defer body.release()
+			r.Body = body
 		}
-
 		if ingress || supplied || s.cfg.FederationSigningRequired {
 			if s.cfg.FederationSigning == nil {
 				api.WriteEnvelope(w, http.StatusServiceUnavailable, "signing_unavailable", "federation signing unavailable")
@@ -249,8 +250,14 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 	})
 }
 
-func (s *Server) bufferFederationPush(_ context.Context, w http.ResponseWriter, r *http.Request) (*federationPushBody, bool) {
-	body := &federationPushBody{ReadCloser: r.Body, memory: s.federationPushMemory}
+// bufferFederationPush reads an authorized unsigned push body through the
+// shared push budget before the handler decodes it.
+func (s *Server) bufferFederationPush(w http.ResponseWriter, r *http.Request) (*federationPushBody, bool) {
+	if r.ContentLength > federationsigning.MaxBodyBytes {
+		api.WriteEnvelope(w, http.StatusRequestEntityTooLarge, "body_too_large", "federation body is too large")
+		return nil, false
+	}
+	body := &federationPushBody{ReadCloser: http.MaxBytesReader(w, r.Body, federationsigning.MaxBodyBytes), memory: s.federationPushMemory}
 	data, err := io.ReadAll(body)
 	if err != nil {
 		body.release()

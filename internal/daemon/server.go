@@ -291,14 +291,15 @@ func NewDefaultGitHubSyncRunner(cfg GitHubSyncRunnerConfig) GitHubSyncRunner {
 
 // Server bundles the http handler and lifecycle.
 type Server struct {
-	federationPushMemory     *semaphore.Weighted
-	stopFederationPollBridge func()
-	cfg                      ServerConfig
-	baseHandler              http.Handler
-	handler                  http.Handler
-	api                      huma.API
-	authPolicy               authPolicy
-	noProjectDataRoutes      noProjectDataRouteMatcher
+	federationTransferAdmission chan struct{}
+	federationPushMemory        *semaphore.Weighted
+	stopFederationPollBridge    func()
+	cfg                         ServerConfig
+	baseHandler                 http.Handler
+	handler                     http.Handler
+	api                         huma.API
+	authPolicy                  authPolicy
+	noProjectDataRoutes         noProjectDataRouteMatcher
 
 	shutdownTimeout time.Duration
 }
@@ -403,6 +404,7 @@ func NewServer(cfg ServerConfig) *Server {
 	cfg.federationPollWaits = newFederationPollWaits()
 	s := &Server{
 		cfg: cfg, api: humaAPI,
+		federationTransferAdmission: make(chan struct{}, 2),
 		// Verification buffers push bodies; reserve the previous two-body budget.
 		federationPushMemory: semaphore.NewWeighted(2 * federationsigning.MaxBodyBytes),
 	}
@@ -469,7 +471,7 @@ func (s *Server) HandlerFor(policy ListenerPolicy) (http.Handler, error) {
 	if base == nil {
 		base = s.handler
 	} else {
-		base = withFederationIngestPreauthorization(s.cfg, base)
+		base = s.withFederationIngestPreauthorization(base)
 		base = s.withFederationSigning(base, false)
 		// Signed uploads read their body during verification, so the
 		// foreground lease must already cover that work.

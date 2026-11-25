@@ -14,7 +14,8 @@ const federationIngestPathSuffix = "/federation/events:ingest"
 
 // withFederationIngestPreauthorization authenticates the large body-bearing
 // federation route before Huma can read or decode its request body.
-func withFederationIngestPreauthorization(cfg ServerConfig, next http.Handler) http.Handler {
+func (s *Server) withFederationIngestPreauthorization(next http.Handler) http.Handler {
+	cfg := s.cfg
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		projectID, operationID, capability, routePath, matched, valid := federationBodyProjectID(r.Method, r.URL.Path)
 		if !matched {
@@ -45,7 +46,16 @@ func withFederationIngestPreauthorization(cfg ServerConfig, next http.Handler) h
 		ctx = withFederationAuthorization(
 			ctx, authHeader, projectID, capability, operation, authorization,
 		)
-		next.ServeHTTP(w, r.WithContext(ctx))
+		r = r.WithContext(ctx)
+		// Verification already charged a signed body.
+		if capability == "push" && len(r.Header.Values("Signature")) == 0 {
+			body, ok := s.bufferFederationPush(w, r)
+			if !ok {
+				return
+			}
+			defer body.release()
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 
