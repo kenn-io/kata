@@ -176,6 +176,30 @@ test('Settings tabs keep direct links and keyboard focus visible on mobile', asy
   await expect(last).toHaveAttribute('aria-selected', 'true')
 })
 
+test('Settings selection updates keep keyboard focus in view', async ({ page, kata }) => {
+  await page.setViewportSize({ width: 390, height: 800 })
+  await kata.launch(page)
+  await kata.loginOwner(page, '/kata?view=settings&section=access')
+  const first = page.getByRole('tab', { name: 'Appearance' })
+  const last = page.getByRole('tab', { name: 'Teams and visibility' })
+  await expect(last).toHaveAttribute('aria-selected', 'true')
+
+  await first.evaluate((tab) => {
+    // Move focus before Svelte runs the effect for the new selection.
+    tab.click()
+    tab.focus()
+    tab.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }))
+  })
+  // Let the deferred selection effect finish before measuring the focused tab.
+  await page.evaluate(() => new Promise(requestAnimationFrame))
+  await expect(last).toBeFocused()
+  await expect(first).toHaveAttribute('aria-selected', 'true')
+  const strip = (await page.getByRole('tablist', { name: 'Settings' }).boundingBox())!
+  const focused = (await last.boundingBox())!
+  expect(focused.x).toBeGreaterThanOrEqual(strip.x)
+  expect(focused.x + focused.width).toBeLessThanOrEqual(strip.x + strip.width + 1)
+})
+
 test('Appearance changes the sidebar color', async ({ page, kata }) => {
   await page.emulateMedia({ colorScheme: 'dark' })
   await kata.launch(page)

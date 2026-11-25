@@ -45,9 +45,14 @@
   let tabList: HTMLDivElement | undefined = $state()
   $effect(() => {
     void tabs
-    tabList
-      ?.querySelector<HTMLElement>(`[data-tab-id="${active}"]`)
-      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    // Selection effects can run after arrow keys move focus to an unselected tab.
+    // Keep that focused tab visible while the user navigates the strip.
+    const selected = tabList?.querySelector<HTMLElement>(`[data-tab-id="${active}"]`)
+    const focused = tabList?.contains(document.activeElement)
+      ? document.activeElement?.closest<HTMLElement>('[data-tab-id]')
+      : undefined
+    const target = focused ?? selected
+    target?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   })
 </script>
 
