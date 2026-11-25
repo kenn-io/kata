@@ -15,7 +15,7 @@ func (d *Store) KeepFederationEventLocal(ctx context.Context, projectID, eventID
 	var kept bool
 	err := d.relayTx(ctx, func(tx *sql.Tx) error {
 		var err error
-		kept, err = db.KeepFederationEventLocalTx(ctx, tx, projectID, eventID, d.InstanceUID())
+		kept, err = db.KeepFederationEventLocalTx(ctx, tx, projectID, eventID, d.InstanceUID(), false)
 		return err
 	})
 	return kept, err

@@ -263,6 +263,8 @@ func pushDirectSpoke(
 	opts clientpkg.Opts,
 ) error {
 	if binding.PushEnabled {
+		dependentsRetained := false
+		retryBatchSize := 0
 	pushLoop:
 		for {
 			if q, err := store.ActiveFederationQuarantine(ctx, binding.ProjectID, db.FederationQuarantineDirectionPush); err == nil {
@@ -289,8 +291,11 @@ func pushDirectSpoke(
 			} else if err != nil && !errors.Is(err, db.ErrNotFound) {
 				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 			}
-			if err := store.RetainFederationDependents(ctx, binding.ProjectID); err != nil {
-				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+			if !dependentsRetained {
+				if err := store.RetainFederationDependents(ctx, binding.ProjectID); err != nil {
+					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+				}
+				dependentsRetained = true
 			}
 			pending, err := store.PendingFederationPushEvents(
 				ctx, binding.ProjectID, store.InstanceUID(), binding.PushCursorEventID, federationPollLimit)
@@ -302,15 +307,28 @@ func pushDirectSpoke(
 			}
 			for len(pending) > 0 {
 				batchInput := pending
-				for i, event := range pending {
-					if event.Actor != binding.Actor {
-						batchInput = pending[:max(i, 1)]
-						break
+				if retryBatchSize > 0 {
+					if pending[0].Actor != binding.Actor {
+						batchInput = pending[:min(retryBatchSize, len(pending))]
+					} else {
+						for i, event := range pending {
+							if event.Actor != binding.Actor {
+								batchInput = pending[:i]
+								break
+							}
+						}
 					}
 				}
 				batch, adoptionBaseline, adoptionBaselineEndEventID, err := nextFederationPushIngestBatch(batchInput)
 				if err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+				}
+				if len(batchInput) < len(pending) {
+					shape := federationPushAdoptionBaselineShape(pending)
+					if shape.valid && shape.hasSnapshot {
+						adoptionBaseline = api.FederationAdoptionBaselineOpen
+						adoptionBaselineEndEventID = pending[len(pending)-1].ID
+					}
 				}
 				sourceTokens, err := federationMoveSourceTokens(ctx, store, credentials, *binding, client.baseURL, batch, opts)
 				if err != nil {
@@ -324,13 +342,22 @@ func pushDirectSpoke(
 					})
 				if err != nil {
 					var statusErr *HubStatusError
-					if len(batch) == 1 && errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusBadRequest && isFormerActorRefusal(statusErr.Body, batch[0], binding.Actor) {
-						kept, keepErr := store.KeepFederationEventLocal(ctx, binding.ProjectID, batch[0].ID)
-						if keepErr != nil {
-							return recordFederationSyncError(ctx, store, binding.ProjectID, keepErr)
-						}
-						if kept {
-							continue pushLoop
+					if errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusBadRequest {
+						refused := formerActorRefusedEvent(statusErr.Body, batch, binding.Actor)
+						if refused != nil {
+							kept, keepErr := store.KeepFederationEventLocal(ctx, binding.ProjectID, refused.ID)
+							if keepErr != nil {
+								return recordFederationSyncError(ctx, store, binding.ProjectID, keepErr)
+							}
+							if kept {
+								retryBatchSize = 1
+								current, err := store.FederationBindingByProject(ctx, binding.ProjectID)
+								if err != nil {
+									return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+								}
+								binding.PushCursorEventID = current.PushCursorEventID
+								continue pushLoop
+							}
 						}
 					}
 					if isPoisonedFederationPushError(err) {
@@ -374,6 +401,9 @@ func pushDirectSpoke(
 					}
 				}
 				binding.PushCursorEventID = ack.PushCursorEventID
+				if retryBatchSize > 0 && batch[0].Actor != binding.Actor {
+					retryBatchSize = min(retryBatchSize*2, federationPollLimit)
+				}
 				pending = pendingFederationEventsAfterCursor(pending, ack.PushCursorEventID)
 			}
 		}
@@ -999,17 +1029,24 @@ var formerPeerReferenceQuarantine = regexp.MustCompile(
 
 var formerActorQuarantine = regexp.MustCompile(`^federation ingest validation: event ([0-9A-HJKMNP-TV-Z]{26}) actor (".*") does not match bound actor$`)
 
-func isFormerActorRefusal(raw string, event db.Event, actor string) bool {
+func formerActorRefusedEvent(raw string, events []db.Event, actor string) *db.Event {
 	hubError, ok := federationQuarantineHubError(raw)
-	if !ok || hubError.Code != "validation" || event.Actor == actor {
-		return false
+	if !ok || hubError.Code != "validation" {
+		return nil
 	}
 	match := formerActorQuarantine.FindStringSubmatch(hubError.Message)
-	if len(match) != 3 || match[1] != event.UID {
-		return false
+	if len(match) != 3 {
+		return nil
 	}
 	oldActor, err := strconv.Unquote(match[2])
-	return err == nil && oldActor == event.Actor
+	if err == nil && oldActor != actor {
+		for i := range events {
+			if events[i].UID == match[1] && events[i].Actor == oldActor {
+				return &events[i]
+			}
+		}
+	}
+	return nil
 }
 
 func autoRetryFederationQuarantine(q db.FederationQuarantine, events []db.Event, actor string) (bool, string) {
@@ -1023,10 +1060,8 @@ func autoRetryFederationQuarantine(q db.FederationQuarantine, events []db.Event,
 	if !ok || hubError.Code != "validation" {
 		return false, ""
 	}
-	for _, event := range events {
-		if isFormerActorRefusal(q.Error, event, actor) {
-			return true, "auto-retry after rejoin actor change"
-		}
+	if formerActorRefusedEvent(q.Error, events, actor) != nil {
+		return true, "auto-retry after rejoin actor change"
 	}
 	match := formerPeerReferenceQuarantine.FindStringSubmatch(hubError.Message)
 	if len(match) != 3 {

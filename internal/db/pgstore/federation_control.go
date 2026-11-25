@@ -199,7 +199,7 @@ func (s *Store) KeepFederationEventLocal(ctx context.Context, projectID, eventID
 	var kept bool
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		var err error
-		kept, err = db.KeepFederationEventLocalTx(ctx, tx, projectID, eventID, s.InstanceUID())
+		kept, err = db.KeepFederationEventLocalTx(ctx, tx, projectID, eventID, s.InstanceUID(), true)
 		return err
 	})
 	return kept, err

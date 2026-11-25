@@ -197,13 +197,25 @@ func federationKeptLocalSQL(alias string) string {
 }
 
 // KeepFederationEventLocalTx records the hub's refusal for an old-actor event.
-func KeepFederationEventLocalTx(ctx context.Context, tx *sql.Tx, projectID, eventID int64, origin string) (bool, error) {
+func KeepFederationEventLocalTx(ctx context.Context, tx *sql.Tx, projectID, eventID int64, origin string, postgres bool) (bool, error) {
 	res, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) SELECT $1 || p.uid || '.' || e.uid,'local' FROM events e JOIN projects p ON p.id=e.project_id JOIN federation_bindings b ON b.project_id=e.project_id WHERE e.project_id=$2 AND e.id=$3 AND e.origin_instance_uid=$4 AND e.actor<>b.bound_actor AND e.type IN (`+FederationPushEventTypesSQL()+`) ON CONFLICT(key) DO NOTHING`, FederationAcknowledgedEventPrefix, projectID, eventID, origin)
 	if err != nil {
 		return false, err
 	}
 	n, err := res.RowsAffected()
-	return n != 0, err
+	if err != nil || n == 0 {
+		return false, err
+	}
+	var issueUID sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT issue_uid FROM events WHERE id=$1`, eventID).Scan(&issueUID); err != nil {
+		return false, err
+	}
+	if issueUID.Valid && issueUID.String != "" {
+		if err := retainFederationIssueDependentsTx(ctx, tx, projectID, origin, issueUID.String, postgres); err != nil {
+			return false, err
+		}
+	}
+	return true, FoldFederationAcknowledgedEvents(ctx, tx, projectID, origin)
 }
 
 // HasKeptFederationEvents reports whether a reset must rebuild local history.
@@ -240,6 +252,30 @@ func RetainFederationDependentsTx(ctx context.Context, tx *sql.Tx, projectID int
 			return err
 		}
 	}
+}
+
+func retainFederationIssueDependentsTx(ctx context.Context, tx *sql.Tx, projectID int64, origin, issueUID string, postgres bool) error {
+	field := func(alias, key string) string {
+		if postgres {
+			return `(` + alias + `.payload::jsonb->>'` + key + `')`
+		}
+		return `json_extract(` + alias + `.payload,'$.` + key + `')`
+	}
+	localIssue := `EXISTS (SELECT 1 FROM events root WHERE root.project_id=$1 AND root.issue_uid=$3 AND root.type IN ('issue.created','issue.snapshot') AND ` + federationKeptLocalSQL("root") + `)`
+	_, err := tx.ExecContext(ctx, `WITH RECURSIVE retained_comments(uid) AS (
+ SELECT `+field("c", "comment_uid")+` FROM events c
+ WHERE c.project_id=$1 AND c.origin_instance_uid=$2 AND c.issue_uid=$3 AND c.type='issue.commented'
+ AND (`+federationKeptLocalSQL("c")+` OR `+localIssue+`)
+ UNION
+ SELECT `+field("c", "comment_uid")+` FROM events c JOIN retained_comments parent ON `+field("c", "reply_to_uid")+`=parent.uid
+ WHERE c.project_id=$1 AND c.origin_instance_uid=$2 AND c.type='issue.commented'
+ )
+ INSERT INTO meta(key,value)
+ SELECT '`+FederationAcknowledgedEventPrefix+`' || p.uid || '.' || e.uid,'local' FROM events e JOIN projects p ON p.id=e.project_id JOIN federation_bindings b ON b.project_id=e.project_id
+ WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>b.push_cursor_event_id
+ AND ((e.issue_uid=$3 AND `+localIssue+`) OR `+field("e", "comment_uid")+` IN (SELECT uid FROM retained_comments) OR `+field("e", "reply_to_uid")+` IN (SELECT uid FROM retained_comments))
+ ON CONFLICT(key) DO NOTHING`, projectID, origin, issueUID)
+	return err
 }
 
 // CheckFederationMoveSourceLifecycle keeps a native source joined while a
