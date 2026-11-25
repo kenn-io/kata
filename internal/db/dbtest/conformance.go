@@ -1053,7 +1053,7 @@ var storageScenarios = []scenario{
 		},
 		run: checkProjectFederationEnrollmentScope,
 	},
-	{name: "federation rejoin local events", run: checkFederationRejoinLocalEvents},
+	{name: "federation rejoin local events", run: checkFederationRejoinLocalEvents, methods: []string{"KeepFederationEventLocal", "RetainFederationDependents"}},
 	{
 		name:    "federation push snapshot runs",
 		methods: []string{"CreateProject", "CreateIssue", "InsertRemoteEvent", "PendingFederationPushEvents"},
