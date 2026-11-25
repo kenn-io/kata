@@ -64,9 +64,12 @@ type SyncRetries struct {
 
 // hubRetry holds a hub-wide cooldown after a 429 or 503 capacity refusal so
 // one busy hub stops receiving a burst across every project bound to it.
+// probing reserves a single recovery request once nextAttemptAt passes.
 type hubRetry struct {
+	version       uint64
 	delay         time.Duration
 	nextAttemptAt time.Time
+	probing       bool
 }
 
 type syncRetry struct {
@@ -315,6 +318,7 @@ func (s *SyncRetries) recordHubUnavailable(hubURL string, retryAfter, interval t
 		s.hubs = map[string]hubRetry{}
 	}
 	previous, ok := s.hubs[key]
+	s.next++
 	delay := nextRetryDelay(previous.delay, ok, interval, max(unavailableRetryMaxDelay, interval))
 	base := max(delay, min(retryAfter, maxHonoredRetryAfter))
 	wait := base + s.jitter(base/4)
@@ -322,12 +326,14 @@ func (s *SyncRetries) recordHubUnavailable(hubURL string, retryAfter, interval t
 	if ok && previous.nextAttemptAt.After(nextAt) {
 		nextAt = previous.nextAttemptAt
 	}
-	s.hubs[key] = hubRetry{delay: delay, nextAttemptAt: nextAt}
+	s.hubs[key] = hubRetry{version: s.next, delay: delay, nextAttemptAt: nextAt}
 	return max(nextAt.Sub(completed), 0)
 }
 
-// clearHubUnavailable ends a hub's capacity cooldown after a clean response.
-func (s *SyncRetries) clearHubUnavailable(hubURL string) {
+// clearHubUnavailable ends a hub's capacity cooldown after an eligible
+// recovery request succeeds. An older in-flight request whose started version
+// predates a newer cooldown cannot erase it.
+func (s *SyncRetries) clearHubUnavailable(hubURL string, started uint64) {
 	if s == nil {
 		return
 	}
@@ -337,7 +343,50 @@ func (s *SyncRetries) clearHubUnavailable(hubURL string) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.hubs, key)
+	state, ok := s.hubs[key]
+	if ok && state.version == started {
+		delete(s.hubs, key)
+	}
+}
+
+// acquireHubProbe checks whether hubURL may be contacted at now. While a hub
+// is healthy it admits every caller concurrently. While its cooldown is active
+// it denies callers until nextAttemptAt. Once the cooldown expires it admits
+// one recovery probe at a time until that probe succeeds, fails, or cancels.
+func (s *SyncRetries) acquireHubProbe(hubURL string, now time.Time) (release func(), allowed bool, retryAt time.Time, version uint64) {
+	if s == nil {
+		return func() {}, true, time.Time{}, 0
+	}
+	key := retryHubKey(hubURL)
+	if key == "" {
+		return func() {}, true, time.Time{}, 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state, ok := s.hubs[key]
+	if !ok {
+		return func() {}, true, time.Time{}, 0
+	}
+	if now.Before(state.nextAttemptAt) {
+		return nil, false, state.nextAttemptAt, state.version
+	}
+	if state.probing {
+		return nil, false, time.Time{}, state.version
+	}
+	state.probing = true
+	s.hubs[key] = state
+	probeVersion := state.version
+	return sync.OnceFunc(func() { s.releaseHubProbe(key, probeVersion) }), true, time.Time{}, probeVersion
+}
+
+func (s *SyncRetries) releaseHubProbe(key string, version uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state, ok := s.hubs[key]
+	if ok && state.version == version {
+		state.probing = false
+		s.hubs[key] = state
+	}
 }
 
 // hubBlockedUntil reports whether hubURL is in a capacity cooldown at now.
@@ -352,10 +401,16 @@ func (s *SyncRetries) hubBlockedUntil(hubURL string, now time.Time) (time.Time, 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	state, ok := s.hubs[key]
-	if !ok || !now.Before(state.nextAttemptAt) {
+	if !ok {
 		return time.Time{}, false
 	}
-	return state.nextAttemptAt, true
+	if now.Before(state.nextAttemptAt) {
+		return state.nextAttemptAt, true
+	}
+	if state.probing {
+		return time.Time{}, true
+	}
+	return time.Time{}, false
 }
 
 func (s *SyncRetries) hubBlocked(hubURL string, now time.Time) bool {

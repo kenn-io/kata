@@ -196,6 +196,8 @@ type watchFlight struct {
 	lead          *watchMember
 	members       map[*watchMember]bool
 	requestedWait time.Duration
+	hubVersion    uint64
+	releaseProbe  func()
 	cancel        context.CancelFunc
 	started       time.Time
 	done          chan watchAnswer
@@ -251,6 +253,9 @@ func (g *hubWatchGroup) run(ctx context.Context) {
 			if flight != nil {
 				flight.cancel()
 				<-flight.done
+				if flight.releaseProbe != nil {
+					flight.releaseProbe()
+				}
 			}
 			return
 		case member := <-g.joins:
@@ -272,6 +277,9 @@ func (g *hubWatchGroup) run(ctx context.Context) {
 			leaving = nil
 			reissued := answer.err != nil && answer.flight.reissued
 			g.deliver(answer, members)
+			if answer.flight.releaseProbe != nil {
+				answer.flight.releaseProbe()
+			}
 			flight = nil
 			if len(members) > 0 {
 				if reissued && send == nil {
@@ -321,7 +329,15 @@ func (g *hubWatchGroup) start(ctx context.Context, members map[*watchMember]bool
 		limit = support.advertised.watchMax
 	}
 	g.polls.mu.Unlock()
-	if !takes || g.polls.retries.hubBlocked(g.baseURL, g.polls.now()) {
+	if !takes {
+		for member := range members {
+			delete(members, member)
+			member.result <- heldResult{again: true}
+		}
+		return nil
+	}
+	releaseProbe, allowed, _, hubVersion := g.polls.retries.acquireHubProbe(g.baseURL, g.polls.now())
+	if !allowed {
 		for member := range members {
 			delete(members, member)
 			member.result <- heldResult{again: true}
@@ -335,9 +351,13 @@ func (g *hubWatchGroup) start(ctx context.Context, members map[*watchMember]bool
 		}
 	}
 	if lead == nil {
+		releaseProbe()
 		return nil
 	}
-	flight := &watchFlight{lead: lead, members: map[*watchMember]bool{lead: true}, done: make(chan watchAnswer, 1)}
+	flight := &watchFlight{
+		lead: lead, members: map[*watchMember]bool{lead: true},
+		hubVersion: hubVersion, releaseProbe: releaseProbe, done: make(chan watchAnswer, 1),
+	}
 	hubProjects := map[int64]bool{lead.hubProjectID: true}
 	var others []generated.FederationWatchProject
 	wait := lead.wait
@@ -402,7 +422,7 @@ func (g *hubWatchGroup) deliver(answer watchAnswer, members map[*watchMember]boo
 	switch {
 	case answer.err == nil:
 		g.errBackoff = 0
-		g.polls.retries.clearHubUnavailable(g.baseURL)
+		g.polls.retries.clearHubUnavailable(g.baseURL, flight.hubVersion)
 		g.polls.learnHub(g.baseURL, answer.advertised)
 		if answer.advertised.wait > 0 && answer.advertised.watchMax > 1 {
 			if flight.requestedWait > 0 {

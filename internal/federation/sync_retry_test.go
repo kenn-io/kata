@@ -291,3 +291,85 @@ func TestHeldRetrySurvivesEarlierSyncSuccess(t *testing.T) {
 	binding.UpdatedAt, binding.LastSyncAt = at.Add(2*time.Second), nil
 	require.False(t, retries.blockedFor(t.Context(), 1, binding, credential, at.Add(2*time.Second), retries.version(1)), "a changed binding must retry at once")
 }
+
+func TestSyncRetryHubCooldownVersionFencesStaleClear(t *testing.T) {
+	retries := newSyncRetries(noJitter)
+	hubURL := "https://hub.example"
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	// Healthy hub admits concurrent probes at version 0.
+	release0, allowed0, _, v0 := retries.acquireHubProbe(hubURL, at)
+	require.True(t, allowed0)
+	require.Equal(t, uint64(0), v0)
+	release0()
+
+	// A 429 starts a cooldown at version > 0; clearing with stale version 0 must not erase it.
+	retries.recordHubUnavailable(hubURL, time.Minute, 30*time.Second, at)
+	retries.clearHubUnavailable(hubURL, v0)
+	require.True(t, retries.hubBlocked(hubURL, at.Add(30*time.Second)))
+
+	// Once cooldown expires, one recovery probe runs at v1; a newer 429 bumps to v2,
+	// so the older v1 clear cannot erase the newer cooldown.
+	release1, allowed1, _, v1 := retries.acquireHubProbe(hubURL, at.Add(time.Minute))
+	require.True(t, allowed1)
+	require.NotZero(t, v1)
+	retries.recordHubUnavailable(hubURL, 2*time.Minute, 30*time.Second, at.Add(time.Minute))
+	retries.clearHubUnavailable(hubURL, v1)
+	release1()
+	require.True(t, retries.hubBlocked(hubURL, at.Add(2*time.Minute)), "stale version must not clear newer cooldown")
+
+	// Clearing with the matching recovery probe version lifts the cooldown.
+	release2, allowed2, _, v2 := retries.acquireHubProbe(hubURL, at.Add(3*time.Minute))
+	require.True(t, allowed2)
+	require.Greater(t, v2, v1)
+	retries.clearHubUnavailable(hubURL, v2)
+	release2()
+	require.False(t, retries.hubBlocked(hubURL, at.Add(3*time.Minute)))
+}
+
+func TestSyncRetryHubProbeAdmitsSingleRecoveryCaller(t *testing.T) {
+	retries := newSyncRetries(noJitter)
+	hubURL := "https://hub.example"
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	// While healthy, multiple callers are admitted concurrently.
+	r1, ok1, _, _ := retries.acquireHubProbe(hubURL, at)
+	r2, ok2, _, _ := retries.acquireHubProbe(hubURL, at)
+	require.True(t, ok1)
+	require.True(t, ok2)
+	r1()
+	r2()
+
+	// During cooldown, callers are denied with retryAt set.
+	retries.recordHubUnavailable(hubURL, time.Minute, 30*time.Second, at)
+	_, okDuring, retryAt, _ := retries.acquireHubProbe(hubURL, at.Add(10*time.Second))
+	require.False(t, okDuring)
+	require.Equal(t, at.Add(time.Minute), retryAt)
+
+	// After cooldown expires, only one recovery probe is admitted at a time.
+	after := at.Add(time.Minute)
+	releaseFirst, okFirst, _, vFirst := retries.acquireHubProbe(hubURL, after)
+	require.True(t, okFirst)
+
+	_, okSecond, retryAtSecond, _ := retries.acquireHubProbe(hubURL, after)
+	require.False(t, okSecond, "second concurrent recovery caller must wait for first probe")
+	require.True(t, retryAtSecond.IsZero())
+	_, blockedWhileProbing := retries.hubBlockedUntil(hubURL, after)
+	require.True(t, blockedWhileProbing)
+
+	// Releasing a failed/canceled probe allows the next caller to probe.
+	releaseFirst()
+	releaseRetry, okRetry, _, vRetry := retries.acquireHubProbe(hubURL, after)
+	require.True(t, okRetry)
+	require.Equal(t, vFirst, vRetry)
+
+	// Clearing after a clean recovery response restores concurrent admission.
+	retries.clearHubUnavailable(hubURL, vRetry)
+	releaseRetry()
+	r3, ok3, _, _ := retries.acquireHubProbe(hubURL, after)
+	r4, ok4, _, _ := retries.acquireHubProbe(hubURL, after)
+	require.True(t, ok3)
+	require.True(t, ok4)
+	r3()
+	r4()
+}

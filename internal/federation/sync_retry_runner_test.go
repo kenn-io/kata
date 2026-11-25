@@ -493,6 +493,100 @@ func TestThrottledHubSkipsRemainingBindingsOnSameHub(t *testing.T) {
 	require.Equal(t, int64(2), busyHits.Load(), "the hub should be probed once after its cooldown expires")
 }
 
+// A turn that skips HTTP polling because a held poll already covers the binding
+// does not clear a hub cooldown, and a binding rebound mid-pass records a 429
+// against its reloaded hub URL rather than the stale listing snapshot.
+func TestThrottledHubSkippedPullAndMidPassRebind(t *testing.T) {
+	t.Run("skipped pull does not clear hub cooldown", func(t *testing.T) {
+		ctx := t.Context()
+		fleet := newSpokeFleet(t, 2)
+		for _, project := range fleet.projects {
+			fleet.refuse.Delete(project.UID)
+		}
+		// Make project 1 pull-only so a quiet held poll makes its turn perform zero HTTP requests.
+		binding1, err := fleet.store.FederationBindingByProject(ctx, fleet.projects[1].ID)
+		require.NoError(t, err)
+		binding1.PushEnabled = false
+		_, err = fleet.store.UpsertFederationBinding(ctx, binding1)
+		require.NoError(t, err)
+
+		retries := newSyncRetries(noJitter)
+		retries.recordHubUnavailable(binding1.HubURL, time.Minute, 30*time.Second, fleet.now)
+
+		// Attach a long-poll entry marking project 1 quiet well past the cooldown.
+		polls := &hubLongPolls{
+			ctx:      ctx,
+			interval: 30 * time.Second,
+			now:      func() time.Time { return fleet.now },
+			polls:    map[int64]*hubLongPoll{},
+		}
+		cred1 := fleet.credentials.credentials[fleet.projects[1].UID]
+		client1, err := NewClient(ctx, cred1.HubURL, cred1.Token, clientOptsForCredential(fleet.runner.clientOpts(), cred1))
+		require.NoError(t, err)
+		polls.polls[fleet.projects[1].ID] = &hubLongPoll{
+			held:        -1,
+			quietCursor: 0,
+			quietTarget: client1.heldPollTarget(binding1.HubProjectID),
+			quietUntil:  fleet.now.Add(10 * time.Minute),
+		}
+		fleet.runner.longPolls = polls
+
+		// Advance past cooldown and run only project 1: it makes 0 hub requests,
+		// so it must NOT clear the hub cooldown (a subsequent probe check still sees it).
+		fleet.now = fleet.now.Add(time.Minute)
+		_, _, _, err = fleet.runner.runOnce(ctx, nil, map[int64]bool{fleet.projects[1].ID: true}, retries)
+		require.NoError(t, err)
+		require.Zero(t, fleet.requests.Load(), "quiet held project should make no HTTP request")
+		release, allowed, _, versionAfterSkip := retries.acquireHubProbe(binding1.HubURL, fleet.now)
+		require.True(t, allowed)
+		require.NotZero(t, versionAfterSkip, "a skipped pull with no hub response must not clear hub cooldown")
+		release()
+	})
+
+	t.Run("rebind mid-pass records cooldown against reloaded hub URL", func(t *testing.T) {
+		ctx := t.Context()
+		fleet := newSpokeFleet(t, 2)
+		for _, project := range fleet.projects {
+			fleet.refuse.Delete(project.UID)
+		}
+		var busyHits atomic.Int64
+		busyHub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			busyHits.Add(1)
+			w.Header().Set("Retry-After", "60")
+			w.WriteHeader(http.StatusTooManyRequests)
+		}))
+		t.Cleanup(busyHub.Close)
+
+		binding0, err := fleet.store.FederationBindingByProject(ctx, fleet.projects[0].ID)
+		require.NoError(t, err)
+		origHubURL := binding0.HubURL
+
+		// When project 0 finishes its turn on origHubURL, rebind project 1 to busyHub
+		// before runOnce reaches project 1 in the same pass.
+		rebound := false
+		fleet.runner.OnSpokeResult = func(projectID int64, _ error) {
+			if rebound || projectID != fleet.projects[0].ID {
+				return
+			}
+			rebound = true
+			b1, err := fleet.store.FederationBindingByProject(ctx, fleet.projects[1].ID)
+			require.NoError(t, err)
+			b1.HubURL = busyHub.URL
+			_, err = fleet.store.UpsertFederationBinding(ctx, b1)
+			require.NoError(t, err)
+			c1 := fleet.credentials.credentials[fleet.projects[1].UID]
+			c1.HubURL = busyHub.URL
+			require.NoError(t, fleet.credentials.StoreFederationCredential(ctx, fleet.projects[1].UID, c1))
+		}
+
+		retries := newSyncRetries(noJitter)
+		fleet.pass(ctx, retries)
+		require.Equal(t, int64(1), busyHits.Load(), "project 1 should contact its rebound hub")
+		require.True(t, retries.hubBlocked(busyHub.URL, fleet.now.Add(10*time.Second)), "429 must cool down the reloaded hub URL")
+		require.False(t, retries.hubBlocked(origHubURL, fleet.now.Add(10*time.Second)), "stale hub URL from pass start must remain unblocked")
+	})
+}
+
 // BenchmarkRunnerPass times one automatic runner pass over 50 bound projects.
 // In "refused" the hub refuses every credential and the pass runs while each
 // binding is already waiting on its schedule; "accepted" is the ordinary pass

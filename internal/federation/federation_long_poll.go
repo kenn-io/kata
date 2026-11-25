@@ -122,6 +122,13 @@ func (p *hubLongPolls) jitteredDelay(delay time.Duration) time.Duration {
 	return delay + p.jitter(delay/4)
 }
 
+func (p *hubLongPolls) hubCooldownSleep(until, now time.Time) time.Duration {
+	if !until.IsZero() {
+		return min(max(until.Sub(now), time.Millisecond), p.interval)
+	}
+	return min(p.jitteredDelay(max(p.interval/4, 50*time.Millisecond)), p.interval)
+}
+
 type hubLongPollsContextKey struct{}
 
 func withHubLongPolls(ctx context.Context, polls *hubLongPolls) context.Context {
@@ -367,8 +374,7 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 		if until, blocked := p.retries.hubBlockedUntil(binding.HubURL, now); blocked {
 			finishSync()
 			release()
-			wait := min(max(until.Sub(now), time.Millisecond), p.interval)
-			if !sleepContext(ctx, wait) {
+			if !sleepContext(ctx, p.hubCooldownSleep(until, now)) {
 				return
 			}
 			continue
@@ -452,7 +458,26 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 				token: credential.Token, client: client, wait: wait, finishSync: finishSync,
 			})
 		} else {
+			releaseProbe, allowed, retryAt, hubVersion := p.retries.acquireHubProbe(credential.HubURL, p.now())
+			if !allowed {
+				finishSync()
+				doneHeld()
+				p.clearHeld(poll)
+				cancelRequest()
+				if !sleepContext(ctx, p.hubCooldownSleep(retryAt, p.now())) {
+					return
+				}
+				continue
+			}
 			held = p.heldPollResult(requestCtx, client, credential.HubProjectID, cursor, wait)
+			if held.err == nil {
+				p.retries.clearHubUnavailable(credential.HubURL, hubVersion)
+			} else if hubAskedToWait(held.err) && !errors.Is(requestCtx.Err(), context.Canceled) {
+				_, _, retryAfter := classifySyncRetry(held.err)
+				hubWait := p.retries.recordHubUnavailable(credential.HubURL, retryAfter, p.interval, p.now())
+				held.sleep = max(p.jitteredDelay(backoff), hubWait)
+			}
+			releaseProbe()
 		}
 		finishSync()
 		doneHeld()
@@ -475,7 +500,7 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 					sleep = held.sleep
 				} else {
 					_, _, retryAfter := classifySyncRetry(err)
-					hubWait := p.retries.recordHubUnavailable(binding.HubURL, retryAfter, p.interval, p.now())
+					hubWait := p.retries.recordHubUnavailable(credential.HubURL, retryAfter, p.interval, p.now())
 					sleep = max(p.jitteredDelay(backoff), hubWait)
 				}
 			} else {

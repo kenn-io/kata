@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"go.kenn.io/kata/internal/federationsigning"
@@ -390,6 +391,21 @@ func (c *Client) AckRelayDeliveries(ctx context.Context, projectID, epoch int64,
 	return nil
 }
 
+type hubContactedContextKey struct{}
+
+// withHubContacted attaches a flag set when a federation HTTP request receives
+// a 2xx response from the hub, distinguishing live network recovery from passes
+// that skipped polling because a held poll or watch already covered them.
+func withHubContacted(ctx context.Context, contacted *atomic.Bool) context.Context {
+	return context.WithValue(ctx, hubContactedContextKey{}, contacted)
+}
+
+func markHubContacted(ctx context.Context) {
+	if contacted, ok := ctx.Value(hubContactedContextKey{}).(*atomic.Bool); ok && contacted != nil {
+		contacted.Store(true)
+	}
+}
+
 // Keep the replication error body bounded before the generated runtime reads it.
 type replicationDoer struct{ client *http.Client }
 
@@ -417,6 +433,7 @@ func (d replicationDoer) Do(ctx context.Context, req *http.Request) (*http.Respo
 		_ = resp.Body.Close()
 		return nil, err
 	}
+	markHubContacted(ctx)
 	return resp, nil
 }
 

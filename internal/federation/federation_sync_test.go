@@ -5066,7 +5066,7 @@ func TestSyncFederationMoveProofRejectsOtherOrigin(t *testing.T) {
 			binding, err := spoke.DB.FederationBindingByProject(ctx, replicas[1].ID)
 			require.NoError(t, err)
 			runner := Runner{DB: spoke.DB}
-			_, _, err = runner.runSpoke(ctx, activeSpokeBinding{project: replicas[1], binding: binding}, credentials, nil, nil)
+			_, _, _, err = runner.runSpoke(ctx, activeSpokeBinding{project: replicas[1], binding: binding}, credentials, nil, nil, nil)
 			require.Error(t, err, "a pending move must not cross an altered source credential origin")
 			var status *HubStatusError
 			require.False(t, errors.As(err, &status), "reject the target mismatch locally before sending source proof")
