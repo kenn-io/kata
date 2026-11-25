@@ -101,6 +101,21 @@ func checkFederationRejoinLocalEvents(t *testing.T, store db.Storage) error {
 	}
 	_, err = store.IssueByUID(ctx, old.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
+	currentOld, err = store.IssueByUID(ctx, old.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	for _, projectID := range []int64{project.ID, target.ID} {
+		paused, err := store.FederationBindingByProject(ctx, projectID)
+		require.NoError(t, err)
+		paused.PushEnabled = false
+		_, err = store.UpsertFederationBinding(ctx, paused)
+		require.NoError(t, err)
+		_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: currentOld.ID, FromProjectID: project.ID, ToProjectID: target.ID, IfMatchRev: currentOld.Revision, Actor: "new-actor", DryRun: true})
+		require.ErrorIs(t, err, db.ErrFederatedReadOnly)
+		require.NotErrorIs(t, err, db.ErrFederatedMoveUnsupported)
+		paused.PushEnabled = true
+		_, err = store.UpsertFederationBinding(ctx, paused)
+		require.NoError(t, err)
+	}
 	_, err = store.LeaveFederationReplica(ctx, project.ID)
 	require.NoError(t, err)
 	standalone, err := store.CreateProject(ctx, "standalone-target")

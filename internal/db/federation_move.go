@@ -211,7 +211,7 @@ func CheckFederationKeptIssueMove(ctx context.Context, q moveQuery, from, to int
 		return err
 	}
 	var blocked bool
-	err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings src JOIN federation_bindings dst ON dst.project_id=$2 WHERE src.project_id=$1 AND src.role='spoke' AND dst.role='spoke' AND src.enabled=1 AND dst.enabled=1 AND NOT EXISTS(SELECT 1 FROM events e WHERE e.project_id=$1 AND e.issue_uid=$3 AND e.origin_instance_uid<>$4))`, from, to, issueUID, origin).Scan(&blocked)
+	err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings src JOIN federation_bindings dst ON dst.project_id=$2 WHERE src.project_id=$1 AND src.role='spoke' AND dst.role='spoke' AND src.enabled=1 AND dst.enabled=1 AND src.push_enabled=1 AND dst.push_enabled=1 AND NOT EXISTS(SELECT 1 FROM events e WHERE e.project_id=$1 AND e.issue_uid=$3 AND e.origin_instance_uid<>$4))`, from, to, issueUID, origin).Scan(&blocked)
 	if err != nil {
 		return err
 	}
