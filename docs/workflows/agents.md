@@ -49,24 +49,24 @@ carrying the canonical hook contract. Pass `--dry` to inspect existing files and
 print the proposed contents without writing files or creating directories.
 
 Installation preserves bytes outside the marked blocks along with existing file
-modes, and reinstalling identical instructions leaves files untouched. Install and
-uninstall replace each file atomically. On Linux and macOS, if renaming over an
-existing file fails with a permission error, as it does for Muse's
+modes, and reinstalling identical instructions leaves files untouched. Install
+and uninstall replace each file atomically. On Linux and macOS, if renaming over
+an existing file fails with a permission error, as it does for Muse's
 runtime-managed `AGENTS.md`, they write that file in place instead, keeping its
 owner and mode. An in-place write is not atomic, so Muse could briefly read a
 partial file. If a later file fails, either command restores the earlier files.
 A file with other hard links, or a symlink, is never written in place; if one
 appears before the restore, the command fails and leaves that file updated for
-you to check. Keep each
-marker on its own line; LF or CRLF line endings and a missing final newline are
-accepted. Before writing anything, the installer stops with an error if it finds
-an existing unmarked skill or poll file, malformed markers, or a symlink at the
-home directory or inside its managed tree. Parent aliases such as macOS's `/var`
-are resolved before planning, and reported artifact paths use that resolved
-prefix. Uninstalling removes the managed blocks while keeping foreign text. It
-deletes the skill and poll files if they become empty, but keeps `AGENTS.md`
-even when empty. It does not remove directories, poll state, credentials, or any
-task created in Muse, so cancel that task in Muse first.
+you to check. Keep each marker on its own line; LF or CRLF line endings and a
+missing final newline are accepted. Before writing anything, the installer stops
+with an error if it finds an existing unmarked skill or poll file, malformed
+markers, or a symlink at the home directory or inside its managed tree. Parent
+aliases such as macOS's `/var` are resolved before planning, and reported
+artifact paths use that resolved prefix. Uninstalling removes the managed blocks
+while keeping foreign text. It deletes the skill and poll files if they become
+empty, but keeps `AGENTS.md` even when empty. It does not remove directories,
+poll state, credentials, or any task created in Muse, so cancel that task in
+Muse first.
 
 These files are instruction-following prompts, not enforcement. Muse must read
 its instructions and skill at the start of a conversation and before claiming
