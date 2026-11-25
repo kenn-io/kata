@@ -296,13 +296,13 @@ func KeepFederationDependentLocalTx(ctx context.Context, tx *sql.Tx, projectID, 
 	return keepFederationLocalTx(ctx, tx, projectID, eventID, origin, federationKeptDependentSQL(postgres))
 }
 
-// KeepFederationCommentEditLocalTx retains an edit whose original stayed local.
-func KeepFederationCommentEditLocalTx(ctx context.Context, tx *sql.Tx, projectID, eventID int64, origin string, postgres bool) (bool, error) {
-	match := `json_extract(root.payload,'$.comment_uid')=json_extract(e.payload,'$.comment_uid')`
+// KeepFederationCommentDependentLocalTx retains edits and replies to local comments.
+func KeepFederationCommentDependentLocalTx(ctx context.Context, tx *sql.Tx, projectID, eventID int64, origin string, postgres bool) (bool, error) {
+	match := `((e.type='issue.comment_edited' AND root.issue_uid=e.issue_uid AND json_extract(root.payload,'$.comment_uid')=json_extract(e.payload,'$.comment_uid')) OR (e.type='issue.commented' AND json_extract(root.payload,'$.comment_uid')=json_extract(e.payload,'$.reply_to_uid')))`
 	if postgres {
-		match = `root.payload::jsonb->>'comment_uid'=e.payload::jsonb->>'comment_uid'`
+		match = `((e.type='issue.comment_edited' AND root.issue_uid=e.issue_uid AND root.payload::jsonb->>'comment_uid'=e.payload::jsonb->>'comment_uid') OR (e.type='issue.commented' AND root.payload::jsonb->>'comment_uid'=e.payload::jsonb->>'reply_to_uid'))`
 	}
-	condition := `e.type='issue.comment_edited' AND EXISTS (SELECT 1 FROM events root WHERE root.project_id=e.project_id AND root.issue_uid=e.issue_uid AND root.type='issue.commented' AND ` + federationKeptLocalSQL("root") + ` AND ` + match + `)`
+	condition := `EXISTS (SELECT 1 FROM events root WHERE root.project_id=e.project_id AND root.type='issue.commented' AND ` + federationKeptLocalSQL("root") + ` AND ` + match + `)`
 	return keepFederationLocalTx(ctx, tx, projectID, eventID, origin, condition)
 }
 

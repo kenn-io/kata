@@ -1,6 +1,7 @@
 package federation
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +19,28 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
+
+type commentDependentProbe struct {
+	db.Storage
+	ids []int64
+}
+
+func (s *commentDependentProbe) KeepFederationCommentDependentLocal(_ context.Context, _, eventID int64) (bool, error) {
+	s.ids = append(s.ids, eventID)
+	return false, nil
+}
+
+func TestRejoinCommentDependentScan(t *testing.T) {
+	store := &commentDependentProbe{}
+	pending := []db.Event{
+		{ID: 1, Type: "issue.commented", Payload: `{"body":"plain"}`},
+		{ID: 2, Type: "issue.commented", Payload: `{"reply_to_uid":"target"}`},
+		{ID: 3, Type: "issue.comment_edited", Payload: `{}`},
+	}
+	_, err := keepFederationCommentDependentsLocal(t.Context(), store, &db.FederationBinding{}, pending)
+	require.NoError(t, err)
+	require.Equal(t, []int64{2, 3}, store.ids)
+}
 
 func checkRejoinBatchesAlreadyAcceptedOldEvents(t *testing.T) {
 	ctx := t.Context()
@@ -157,6 +180,40 @@ func checkRejoinContinuesAfterLocalWorkflowAndJob(t *testing.T) {
 }
 
 func TestRejoinKeepsOldActorEventsLocal(t *testing.T) {
+	t.Run("cross-task reply to retained comment", func(t *testing.T) {
+		ctx := t.Context()
+		hub, projects := newMoveDeliveryHub(t, "rejoin-project")
+		spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
+		project := spoke.projects[0]
+		target, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "target", Author: "old-actor"})
+		require.NoError(t, err)
+		source, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "source", Author: "old-actor"})
+		require.NoError(t, err)
+		require.NoError(t, spoke.sync(t, 0))
+		_, err = spoke.env.DB.LeaveFederationReplica(ctx, project.ID)
+		require.NoError(t, err)
+		comment, original, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: target.ID, Author: "old-actor", Body: "local"})
+		require.NoError(t, err)
+		token := rejoinNewActor(t, hub, projects[0], spoke.env, project)
+		_, reply, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: source.ID, Author: "new-actor", Body: "reply", ReplyToUID: comment.UID, ReplyKind: "reply"})
+		require.NoError(t, err)
+		later, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "later", Author: "new-actor"})
+		require.NoError(t, err)
+		binding, err := spoke.env.DB.FederationBindingByProject(ctx, project.ID)
+		require.NoError(t, err)
+		creds := config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[0].ID, Token: token, Actor: "new-actor", Capabilities: "pull,push"}
+		require.NoError(t, SyncFederationOnce(ctx, spoke.env.DB, binding, creds))
+		_, err = hub.DB.IssueByUID(ctx, later.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		hubSource, err := hub.DB.IssueByUID(ctx, source.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		comments, err := hub.DB.CommentsByIssue(ctx, hubSource.ID)
+		require.NoError(t, err)
+		require.Empty(t, comments)
+		events, err := spoke.env.DB.EventsByUIDs(ctx, project.ID, []string{original.UID, reply.UID})
+		require.NoError(t, err)
+		require.ElementsMatch(t, []db.Event{original, reply}, events)
+	})
 	t.Run("accepted duplicates", checkRejoinBatchesAlreadyAcceptedOldEvents)
 	t.Run("more than one page", checkRejoinPublishesAfter500OldTasks)
 	t.Run("workflow and job", checkRejoinContinuesAfterLocalWorkflowAndJob)

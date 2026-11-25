@@ -11,6 +11,14 @@ import (
 )
 
 func checkFederationRejoinMoveGate(t *testing.T, store db.Storage, backend Backend) error {
+	t.Run("cross-task reply", func(t *testing.T) {
+		project, target, source, destination, _, _ := rejoinRetainedReply(t, store, "move-reply")
+		for _, issue := range []db.Issue{target, source} {
+			current, err := store.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			requireRejoinMove(t, store, current, project, destination, db.ErrFederatedMoveUnsupported)
+		}
+	})
 	t.Run("retained history", func(t *testing.T) { require.NoError(t, checkRejoinMoveHistory(t, store)) })
 	t.Run("blocks link", func(t *testing.T) { checkRetainedLinkRemoval(t, store, false) })
 	t.Run("atomic blocks link", func(t *testing.T) { checkRetainedLinkRemoval(t, store, true) })
@@ -19,6 +27,66 @@ func checkFederationRejoinMoveGate(t *testing.T, store db.Storage, backend Backe
 	t.Run("snapshot content", func(t *testing.T) { require.NoError(t, checkRejoinMoveRetainedSnapshotContent(t, store)) })
 	t.Run("superseded comment edit", func(t *testing.T) { checkSupersededRetainedCommentEdit(t, store) })
 	t.Run("restore from export", func(t *testing.T) { require.NoError(t, checkRestoredRetainedIssueMove(t, store, backend)) })
+	return nil
+}
+
+func rejoinRetainedReply(t *testing.T, store db.Storage, name string) (db.Project, db.Issue, db.Issue, db.Project, db.Event, db.Event) {
+	t.Helper()
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, name+"-source")
+	require.NoError(t, err)
+	destination, err := store.CreateProject(ctx, name+"-destination")
+	require.NoError(t, err)
+	bindRejoinSpokes(t, store, project, destination)
+	target := createHubIssue(t, store, project)
+	source := createHubIssue(t, store, project)
+	_, err = store.LeaveFederationReplica(ctx, project.ID)
+	require.NoError(t, err)
+	comment, root, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: target.ID, Author: "old-actor", Body: "retained"})
+	require.NoError(t, err)
+	bindRejoinSpokes(t, store, project, destination)
+	kept, err := store.KeepFederationEventLocal(ctx, project.ID, root.ID)
+	require.NoError(t, err)
+	require.True(t, kept)
+	_, reply, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: source.ID, Author: "new-actor", Body: "reply", ReplyToUID: comment.UID, ReplyKind: "reply"})
+	require.NoError(t, err)
+	kept, err = store.KeepFederationCommentDependentLocal(ctx, project.ID, reply.ID)
+	require.NoError(t, err)
+	require.True(t, kept)
+	return project, target, source, destination, root, reply
+}
+
+func checkFederationRejoinCommentReply(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "reply-project")
+	require.NoError(t, err)
+	bindRejoinSpokes(t, store, project)
+	target := createHubIssue(t, store, project)
+	source := createHubIssue(t, store, project)
+	_, err = store.LeaveFederationReplica(ctx, project.ID)
+	require.NoError(t, err)
+	comment, root, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: target.ID, Author: "old-actor", Body: "local"})
+	require.NoError(t, err)
+	bindRejoinSpokes(t, store, project)
+	kept, err := store.KeepFederationEventLocal(ctx, project.ID, root.ID)
+	require.NoError(t, err)
+	require.True(t, kept)
+	_, reply, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: source.ID, Author: "new-actor", Body: "reply", ReplyToUID: comment.UID, ReplyKind: "reply"})
+	require.NoError(t, err)
+	_, unrelated, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: source.ID, Author: "new-actor", Body: "unrelated"})
+	require.NoError(t, err)
+	kept, err = store.KeepFederationCommentDependentLocal(ctx, project.ID, unrelated.ID)
+	require.NoError(t, err)
+	require.False(t, kept)
+	kept, err = store.KeepFederationCommentDependentLocal(ctx, project.ID, reply.ID)
+	require.NoError(t, err)
+	require.True(t, kept)
+	binding, err := store.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	pending, err := store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), binding.PushCursorEventID, 100)
+	require.NoError(t, err)
+	require.Contains(t, pending, unrelated)
+	require.NotContains(t, pending, reply)
 	return nil
 }
 

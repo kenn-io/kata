@@ -301,7 +301,7 @@ func pushDirectSpoke(
 			if len(pending) == 0 {
 				break
 			}
-			if kept, err := keepFederationCommentEditsLocal(ctx, store, binding, pending); err != nil {
+			if kept, err := keepFederationCommentDependentsLocal(ctx, store, binding, pending); err != nil {
 				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 			} else if kept {
 				continue pushLoop
@@ -904,14 +904,19 @@ func reloadFederationPushCursor(ctx context.Context, store db.Storage, binding *
 	return err
 }
 
-// keepFederationCommentEditsLocal keeps an edit local when the comment it
-// edits stayed local, since the hub would otherwise store an unattributed copy.
-func keepFederationCommentEditsLocal(ctx context.Context, store db.Storage, binding *db.FederationBinding, pending []db.Event) (bool, error) {
+// keepFederationCommentDependentsLocal keeps edits and replies to local comments local.
+func keepFederationCommentDependentsLocal(ctx context.Context, store db.Storage, binding *db.FederationBinding, pending []db.Event) (bool, error) {
 	for _, event := range pending {
-		if event.Type != "issue.comment_edited" {
+		if event.Type != "issue.comment_edited" && event.Type != "issue.commented" {
 			continue
 		}
-		kept, err := store.KeepFederationCommentEditLocal(ctx, binding.ProjectID, event.ID)
+		if event.Type == "issue.commented" {
+			target, _ := db.StringValue(db.PayloadMap([]byte(event.Payload))["reply_to_uid"])
+			if target == "" {
+				continue
+			}
+		}
+		kept, err := store.KeepFederationCommentDependentLocal(ctx, binding.ProjectID, event.ID)
 		if err != nil {
 			return false, err
 		}

@@ -148,7 +148,7 @@ var alreadyImplemented = map[string]bool{
 	"ExportFederationBindings":             true, // export.go
 	"KeepFederationEventLocal":             true, // federation_control.go
 	"KeepFederationDependentLocal":         true, // federation_control.go
-	"KeepFederationCommentEditLocal":       true, // federation_control.go
+	"KeepFederationCommentDependentLocal":  true, // federation_control.go
 	"FederationKeptIssue":                  true, // federation_control.go
 	"ExportFederationEnrollments":          true, // export.go
 	"ExportFederationQuarantine":           true, // export.go
