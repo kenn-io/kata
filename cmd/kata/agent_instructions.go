@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -345,8 +346,9 @@ func applyInstructionArtifacts(artifacts []instructionArtifact) error {
 }
 
 func applyInstructionArtifactsWithWriter(artifacts []instructionArtifact, write func(string, string, bool, os.FileMode) error) error {
-	// Check every preimage before mutating any file. Each file write is atomic;
-	// restore completed writes if a later artifact fails.
+	// Check every preimage before mutating any file. Each file write is atomic
+	// unless rename-over is refused; restore completed writes if a later
+	// artifact fails.
 	home := filepath.Dir(artifacts[0].Path)
 	for _, a := range artifacts {
 		if err := checkInstructionPath(a.Path, home); err != nil {
@@ -366,7 +368,7 @@ func applyInstructionArtifactsWithWriter(artifacts []instructionArtifact, write 
 		}
 		if err := write(a.Path, a.Content, a.retainEmpty, a.mode); err != nil {
 			rollbackEnd := i
-			if errors.Is(err, atomicfile.ErrPublished) {
+			if errors.Is(err, atomicfile.ErrPublished) || errors.Is(err, errWrittenInPlace) {
 				rollbackEnd++
 			}
 			for _, previous := range artifacts[:rollbackEnd] {
@@ -380,20 +382,70 @@ func applyInstructionArtifactsWithWriter(artifacts []instructionArtifact, write 
 	return nil
 }
 
+// errWrittenInPlace marks an in-place write that failed after truncating the
+// file. Like atomicfile.ErrPublished, it means the file needs restoring.
+var errWrittenInPlace = errors.New("instruction file partially written in place")
+
+var writeInstructionArtifact = newInstructionWriter(atomicReplaceInstruction)
+
+func atomicReplaceInstruction(path string, data []byte, mode os.FileMode) error {
+	return atomicfile.WriteFile(path, data, atomicfile.WithPerm(mode))
+}
+
 // keepEmpty writes an empty file instead of removing it. Rollback uses it to
 // restore an existing empty preimage; uninstall uses it to retain AGENTS.md.
-func writeInstructionArtifact(path, content string, keepEmpty bool, mode os.FileMode) error {
-	if content == "" && !keepEmpty {
-		err := os.Remove(path)
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
+func newInstructionWriter(replace func(string, []byte, os.FileMode) error) func(string, string, bool, os.FileMode) error {
+	return func(path, content string, keepEmpty bool, mode os.FileMode) error {
+		if content == "" && !keepEmpty {
+			err := os.Remove(path)
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
+			return err
 		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			return err
+		}
+		err := replace(path, []byte(content), mode)
+		if !renameOverRefused(path, err) {
+			return err
+		}
+		return writeInstructionInPlace(path, []byte(content))
+	}
+}
+
+// renameOverRefused reports a permission error from renaming over an existing
+// regular file. Runtime-managed files such as consumer Muse's AGENTS.md can be
+// written but not replaced (kenn-io/kata#1315). atomicfile has removed its
+// staging file by then and left the target untouched.
+func renameOverRefused(path string, err error) bool {
+	var linkErr *os.LinkError
+	if !errors.As(err, &linkErr) || linkErr.Op != "rename" || !errors.Is(err, fs.ErrPermission) {
+		return false
+	}
+	info, statErr := os.Lstat(path)
+	return statErr == nil && info.Mode().IsRegular()
+}
+
+// writeInstructionInPlace overwrites an existing file without replacing it, so
+// its inode, owner and mode stay. It is not atomic: a failure after truncation
+// wraps errWrittenInPlace so the caller restores the preimage.
+func writeInstructionInPlace(path string, data []byte) error {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0) //nolint:gosec // G304: path passed checkInstructionPath and renameOverRefused.
+	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
+	_, err = file.Write(data)
+	if err == nil {
+		err = file.Sync()
 	}
-	return atomicfile.WriteFile(path, []byte(content), atomicfile.WithPerm(mode))
+	if closeErr := file.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return fmt.Errorf("%w: %s: %w", errWrittenInPlace, path, err)
+	}
+	return nil
 }
 
 func printInstructionArtifacts(cmd *cobra.Command, verb string, dryRun bool, artifacts []instructionArtifact) error {

@@ -49,7 +49,10 @@ carrying the canonical hook contract. Pass `--dry` to inspect existing files and
 print the proposed contents without writing files or creating directories.
 
 Installation preserves bytes outside the marked blocks along with existing file
-modes, and reinstalling identical instructions leaves files untouched. Keep each
+modes, and reinstalling identical instructions leaves files untouched. Each file
+is replaced atomically. If the system refuses to replace an existing file, as
+Muse does for its runtime-managed `AGENTS.md`, the installer writes that file in
+place instead, and a later failure still restores it. Keep each
 marker on its own line; LF or CRLF line endings and a missing final newline are
 accepted. Before writing anything, the installer stops with an error if it finds
 an existing unmarked skill or poll file, malformed markers, or a symlink at the

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -516,4 +517,125 @@ func TestAgentInstructionsUninstallKeepsEmptyAgentsFile(t *testing.T) {
 	data, err := os.ReadFile(instructions) //nolint:gosec // G304: fixture under TempDir.
 	require.NoError(t, err)
 	require.Empty(t, data)
+}
+
+// refuseRenameOver makes the atomic replacement of files named base fail the
+// way a runtime-managed file does: rename(2) over it returns EPERM.
+func refuseRenameOver(base string) func(string, []byte, os.FileMode) error {
+	return func(path string, data []byte, mode os.FileMode) error {
+		if filepath.Base(path) == base {
+			return fmt.Errorf("atomicfile: commit %s: %w", path, &os.LinkError{Op: "rename", Old: path + ".tmp", New: path, Err: syscall.EPERM})
+		}
+		return atomicReplaceInstruction(path, data, mode)
+	}
+}
+
+// kenn-io/kata#1315: a runtime-managed AGENTS.md cannot be replaced by rename,
+// but can be written. Install must update it in place instead of aborting.
+func TestAgentInstructionsWritesInPlaceWhenRenameOverIsRefused(t *testing.T) {
+	home := t.TempDir()
+	instructions := filepath.Join(home, "AGENTS.md")
+	require.NoError(t, os.WriteFile(instructions, []byte("# Runtime managed\n"), 0o640)) //nolint:gosec // G306: exercise preservation of an existing fixture mode.
+	before, err := os.Stat(instructions)
+	require.NoError(t, err)
+	artifacts, err := planInstructionArtifacts(home, "example-agent", "install")
+	require.NoError(t, err)
+	require.NoError(t, applyInstructionArtifactsWithWriter(artifacts, newInstructionWriter(refuseRenameOver("AGENTS.md"))))
+	for _, a := range artifacts {
+		data, err := os.ReadFile(a.Path) //nolint:gosec // G304: artifact path under TempDir.
+		require.NoError(t, err)
+		require.Equal(t, a.Content, string(data))
+	}
+	after, err := os.Stat(instructions)
+	require.NoError(t, err)
+	require.True(t, os.SameFile(before, after), "AGENTS.md must be written in place")
+	if runtime.GOOS != "windows" {
+		require.Equal(t, os.FileMode(0o640), after.Mode().Perm())
+	}
+}
+
+// Rollback after a later failure must restore an in-place write through the
+// same fallback, leaving the runtime-managed file as it was.
+func TestAgentInstructionsRollbackRestoresInPlaceWrite(t *testing.T) {
+	home := t.TempDir()
+	instructions := filepath.Join(home, "AGENTS.md")
+	require.NoError(t, os.WriteFile(instructions, []byte("# Runtime managed\n"), 0o600))
+	before, err := os.Stat(instructions)
+	require.NoError(t, err)
+	artifacts, err := planInstructionArtifacts(home, "example-agent", "install")
+	require.NoError(t, err)
+	write := newInstructionWriter(refuseRenameOver("AGENTS.md"))
+	err = applyInstructionArtifactsWithWriter(artifacts, func(path, content string, keepEmpty bool, mode os.FileMode) error {
+		if strings.HasSuffix(path, "SKILL.md") && content != "" {
+			return errors.New("injected write failure")
+		}
+		return write(path, content, keepEmpty, mode)
+	})
+	require.ErrorContains(t, err, "injected write failure")
+	data, err := os.ReadFile(instructions) //nolint:gosec // G304: fixture under TempDir.
+	require.NoError(t, err)
+	require.Equal(t, "# Runtime managed\n", string(data))
+	after, err := os.Stat(instructions)
+	require.NoError(t, err)
+	require.True(t, os.SameFile(before, after))
+}
+
+// A write that started in place has already changed the file, so a failure
+// after that point must restore it with the files written before it.
+func TestAgentInstructionsInPlaceFailureRollsBack(t *testing.T) {
+	home := t.TempDir()
+	artifacts, err := planInstructionArtifacts(home, "example-agent", "install")
+	require.NoError(t, err)
+	failed := false
+	err = applyInstructionArtifactsWithWriter(artifacts, func(path, content string, keepEmpty bool, mode os.FileMode) error {
+		err := writeInstructionArtifact(path, content, keepEmpty, mode)
+		if !failed && strings.HasSuffix(path, "SKILL.md") && err == nil {
+			failed = true
+			return fmt.Errorf("injected partial in-place write: %w", errWrittenInPlace)
+		}
+		return err
+	})
+	require.Error(t, err)
+	for _, a := range artifacts {
+		_, err := os.Stat(a.Path)
+		require.ErrorIs(t, err, os.ErrNotExist)
+	}
+}
+
+// Only a refused rename over an existing file falls back. Other failures, and
+// new files, still abort the install with nothing written.
+func TestAgentInstructionsInPlaceFallbackIsNarrow(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		existed bool
+		err     error
+	}{
+		{"rename refused for a new file", false, syscall.EPERM},
+		{"other rename failure", true, syscall.EXDEV},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			instructions := filepath.Join(home, "AGENTS.md")
+			if tc.existed {
+				require.NoError(t, os.WriteFile(instructions, []byte("# Existing\n"), 0o600))
+			}
+			artifacts, err := planInstructionArtifacts(home, "example-agent", "install")
+			require.NoError(t, err)
+			replace := func(path string, data []byte, mode os.FileMode) error {
+				if filepath.Base(path) == "AGENTS.md" {
+					return &os.LinkError{Op: "rename", Old: path + ".tmp", New: path, Err: tc.err}
+				}
+				return atomicReplaceInstruction(path, data, mode)
+			}
+			err = applyInstructionArtifactsWithWriter(artifacts, newInstructionWriter(replace))
+			require.ErrorIs(t, err, tc.err)
+			data, readErr := os.ReadFile(instructions) //nolint:gosec // G304: fixture under TempDir.
+			if tc.existed {
+				require.NoError(t, readErr)
+				require.Equal(t, "# Existing\n", string(data))
+			} else {
+				require.ErrorIs(t, readErr, os.ErrNotExist)
+			}
+		})
+	}
 }
