@@ -400,7 +400,7 @@ func NewServer(cfg ServerConfig) *Server {
 	withRootAttribution(humaAPI, cfg.RootSigning)
 	withExternalRootAdministration(humaAPI, cfg.Auth.AllowIdentityConnectorAdministration)
 
-	cfg.federationPollWaits = newFederationPollWaits(federationPollCPUs())
+	cfg.federationPollWaits = newFederationPollWaits()
 	s := &Server{
 		cfg: cfg, api: humaAPI,
 		// Verification buffers push bodies; reserve the previous two-body budget.

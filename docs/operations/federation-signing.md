@@ -252,7 +252,7 @@ not provide a shared replay service.
 | Nonce | 24 random bytes, unpadded base64url |
 | Replay capacity | 8,192 live nonces; full cache rejects new admissions |
 | Ingest body / signed relay envelope / other request body / header budget | 64 MiB / 128 MiB / 64 KiB / 16 KiB |
-| Push memory across daemon listeners | 256 MiB of declared push bodies |
+| Push memory across daemon listeners | 256 MiB of push bodies |
 | Request duration | 60 seconds |
 
 The parser accepts only the fixed, canonical structured-field profile and
@@ -272,9 +272,9 @@ budget. A full 64 MiB snapshot still needs enough bandwidth to upload and finish
 processing within that request budget; retries cannot make a consistently slower
 upload finish.
 
-Pushes reserve their declared body size until their handler finishes. A push
-without a declared size reserves 128 MiB. Metadata, polls, leases, and streamed
-attachments do not use this budget. If push memory or the replay cache is full,
+Pushes reserve their body bytes as the hub reads them and release the reservation
+when their handler finishes. Metadata, polls, leases, and streamed attachments
+do not use this budget. If push memory or the replay cache is full,
 the hub returns `429` with `Retry-After: 1`,
 and native sync retries create fresh signatures. During replay warm-up,
 including a clock-rollback fence, signed requests receive `503` with code

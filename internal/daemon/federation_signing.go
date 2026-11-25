@@ -1,13 +1,17 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/sync/semaphore"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
@@ -92,9 +96,10 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 			http.NotFound(w, r)
 			return
 		}
+		push := route.operation == "ingestFederationProjectEvents" || route.operation == "acceptRelayDeliveries" || isCronJobWriteOperation(route.operation)
 		supplied := len(r.Header.Values("Signature")) != 0 || len(r.Header.Values("Signature-Input")) != 0
 		if !ingress && !supplied {
-			if !s.cfg.FederationSigningRequired {
+			if !s.cfg.FederationSigningRequired && !push {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -102,6 +107,14 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 			// Ingress never takes this local-authority path.
 			if slices.Contains(route.capabilities, "claim") || isCronJobWriteOperation(route.operation) {
 				if _, ok := PrincipalFromContext(r.Context()); ok || validLocalBearer(s.cfg.Auth.Token, r.Header.Get("Authorization")) || !hasBearerHeader(r.Header.Get("Authorization")) {
+					if push {
+						r.Body = http.MaxBytesReader(w, r.Body, federationsigning.MaxBodyBytes)
+						body, ok := s.bufferFederationPush(r.Context(), w, r)
+						if !ok {
+							return
+						}
+						defer body.release()
+					}
 					next.ServeHTTP(w, r)
 					return
 				}
@@ -109,7 +122,6 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 		}
 		bodyLimit := int64(64 << 10)
 		attachmentTransfer := signingpolicy.Unambiguous(r.URL) && federationsigning.IsAttachmentTransfer(r.Method, r.URL.Path)
-		push := route.operation == "ingestFederationProjectEvents" || route.operation == "acceptRelayDeliveries" || isCronJobWriteOperation(route.operation)
 		if push {
 			bodyLimit = federationsigning.MaxBodyBytes
 		} else if attachmentTransfer && r.Method == http.MethodPost {
@@ -126,18 +138,6 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 		if r.ContentLength > bodyLimit {
 			api.WriteEnvelope(w, http.StatusRequestEntityTooLarge, "body_too_large", "federation body is too large")
 			return
-		}
-		if push {
-			weight := r.ContentLength
-			if weight < 0 {
-				weight = bodyLimit
-			}
-			if !s.federationPushMemory.TryAcquire(weight) {
-				w.Header().Set("Retry-After", "1")
-				api.WriteEnvelope(w, http.StatusTooManyRequests, "admission_limited", "federation push memory is full")
-				return
-			}
-			defer s.federationPushMemory.Release(weight)
 		}
 
 		r.Body = http.MaxBytesReader(w, r.Body, bodyLimit)
@@ -169,6 +169,20 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 			api.WriteEnvelope(w, http.StatusForbidden, "auth_invalid", "project-scoped enrollment required")
 			return
 		}
+		if push {
+			if !ingress && !supplied && !s.cfg.FederationSigningRequired {
+				body, ok := s.bufferFederationPush(ctx, w, r)
+				if !ok {
+					return
+				}
+				defer body.release()
+			} else {
+				body := &federationPushBody{ReadCloser: r.Body, memory: s.federationPushMemory}
+				defer body.release()
+				r.Body = body
+			}
+		}
+
 		if ingress || supplied || s.cfg.FederationSigningRequired {
 			if s.cfg.FederationSigning == nil {
 				api.WriteEnvelope(w, http.StatusServiceUnavailable, "signing_unavailable", "federation signing unavailable")
@@ -183,6 +197,10 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 			var admission federationsigning.Admission
 			admission, err = s.cfg.FederationSigning.Verify(r, authorization.principal.EnrollmentID)
 			if err != nil {
+				if errors.Is(err, errFederationPushMemory) {
+					writeFederationPushMemoryFull(w)
+					return
+				}
 				// Warm-up is not a signature fault: tell the spoke to retry
 				// rather than to check its keys and clock.
 				if errors.Is(err, federationsigning.ErrWarming) {
@@ -229,6 +247,50 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 		ctx = withFederationAuthorization(ctx, auth, route.projectID, strings.Join(route.capabilities, ","), operation, authorization)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func (s *Server) bufferFederationPush(_ context.Context, w http.ResponseWriter, r *http.Request) (*federationPushBody, bool) {
+	body := &federationPushBody{ReadCloser: r.Body, memory: s.federationPushMemory}
+	data, err := io.ReadAll(body)
+	if err != nil {
+		body.release()
+		if errors.Is(err, errFederationPushMemory) {
+			writeFederationPushMemoryFull(w)
+		} else if _, tooLarge := errors.AsType[*http.MaxBytesError](err); tooLarge {
+			api.WriteEnvelope(w, http.StatusRequestEntityTooLarge, "body_too_large", "federation body is too large")
+		} else {
+			api.WriteEnvelope(w, http.StatusBadRequest, "body_invalid", "federation body could not be read")
+		}
+		return nil, false
+	}
+	r.Body = io.NopCloser(bytes.NewReader(data))
+	return body, true
+}
+
+var errFederationPushMemory = errors.New("federation push memory is full")
+
+type federationPushBody struct {
+	io.ReadCloser
+	memory *semaphore.Weighted
+	held   int64
+}
+
+func (b *federationPushBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if n > 0 {
+		if !b.memory.TryAcquire(int64(n)) {
+			return 0, errFederationPushMemory
+		}
+		b.held += int64(n)
+	}
+	return n, err
+}
+
+func (b *federationPushBody) release() { b.memory.Release(b.held) }
+
+func writeFederationPushMemoryFull(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "1")
+	api.WriteEnvelope(w, http.StatusTooManyRequests, "admission_limited", "federation push memory is full")
 }
 
 type federationSigningAdmissionContextKey struct{}

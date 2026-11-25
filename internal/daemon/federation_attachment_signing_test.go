@@ -182,7 +182,7 @@ func (b *attachmentSigningRevocationBody) Read(p []byte) (int, error) {
 }
 func (*attachmentSigningRevocationBody) Close() error { return nil }
 
-func TestFederationAttachmentReadAndUploadAdmissionAreIndependent(t *testing.T) {
+func TestFederationAttachmentsAcceptConcurrentTransfers(t *testing.T) {
 	t.Setenv("TEST_TRANSFER_POOLS_KEY", strings.Repeat("k", 64))
 	source := signingpolicy.Source{KeyID: "key-a", KeyEnv: "TEST_TRANSFER_POOLS_KEY"}
 	store := openClaimGateHelperDB(t)
@@ -225,8 +225,8 @@ func TestFederationAttachmentReadAndUploadAdmissionAreIndependent(t *testing.T) 
 			name, blockedMethod, blockedPath, otherMethod, otherPath string
 			count                                                    int
 		}{
-			{"uploads do not block reads", http.MethodPost, upload, http.MethodGet, content, 2},
-			{"reads do not block uploads or control", http.MethodGet, content, http.MethodPost, upload, 16},
+			{"uploads do not block reads", http.MethodPost, upload, http.MethodGet, content, 3},
+			{"reads do not block uploads or control", http.MethodGet, content, http.MethodPost, upload, 17},
 		} {
 			func() {
 				entered, release := make(chan struct{}, tc.count), make(chan struct{})
@@ -260,8 +260,7 @@ func TestFederationAttachmentReadAndUploadAdmissionAreIndependent(t *testing.T) 
 				}
 				full := httptest.NewRecorder()
 				handler.ServeHTTP(full, request(tc.blockedMethod, tc.blockedPath, false))
-				require.Equal(t, http.StatusTooManyRequests, full.Code, "%s: %s", tc.name, full.Body.String())
-				require.Equal(t, "1", full.Header().Get("Retry-After"))
+				require.Equal(t, http.StatusNoContent, full.Code, "%s: %s", tc.name, full.Body.String())
 				for _, other := range []struct{ method, path string }{{tc.otherMethod, tc.otherPath}, {http.MethodGet, control}, {http.MethodPost, prefix + "/events:ingest"}} {
 					w := httptest.NewRecorder()
 					handler.ServeHTTP(w, request(other.method, other.path, false))
@@ -272,30 +271,48 @@ func TestFederationAttachmentReadAndUploadAdmissionAreIndependent(t *testing.T) 
 	})
 }
 
-// Push admission reserves the declared body size, or the full limit when unknown.
-func TestFederationPushMemoryAdmission(t *testing.T) {
+func TestFederationUnsignedPushRespectsMemory(t *testing.T) {
+	store := openClaimGateHelperDB(t)
+	project, err := store.CreateProject(t.Context(), "hub-project")
+	require.NoError(t, err)
+	_, err = store.EnableProjectFederation(t.Context(), project.ID, "tester")
+	require.NoError(t, err)
+	enrollment, err := store.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{Token: "enrollment", SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EX", ProjectID: &project.ID, Capabilities: "push", Actor: "tester"})
+	require.NoError(t, err)
 	api := huma.NewAPI(huma.DefaultConfig("fixture", "1"), humago.NewAdapter(http.NewServeMux(), ""))
-	path := "/api/v1/projects/{project_id}/federation/events:ingest"
-	huma.Register(api, huma.Operation{OperationID: "ingestFederationProjectEvents", Method: http.MethodPost, Path: path}, func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
-	memory := semaphore.NewWeighted(2 * federationsigning.MaxBodyBytes)
-	s := &Server{api: api, federationPushMemory: memory}
-	handler := s.withFederationSigning(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("unauthorized handler called") }), true)
-	request := func(length int64) *httptest.ResponseRecorder {
-		r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "https://hub.example/api/v1/projects/1/federation/events:ingest", http.NoBody)
-		r.ContentLength = length
+	huma.Register(api, huma.Operation{OperationID: "ingestFederationProjectEvents", Method: http.MethodPost, Path: "/api/v1/projects/{project_id}/federation/events:ingest"}, func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
+	s := &Server{api: api, cfg: ServerConfig{DB: store}, federationPushMemory: semaphore.NewWeighted(4)}
+	handler := s.withFederationSigning(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		w.WriteHeader(http.StatusNoContent)
+	}), false)
+	request := func(body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, fmt.Sprintf("https://hub.example/api/v1/projects/%d/federation/events:ingest", project.ID), strings.NewReader(body))
+		r.Header.Set("Authorization", "Bearer "+enrollment.Token)
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, r)
 		return w
 	}
-	require.True(t, memory.TryAcquire(2*federationsigning.MaxBodyBytes-1024))
-	w := request(2048)
-	require.Equal(t, http.StatusTooManyRequests, w.Code)
-	require.Equal(t, "1", w.Header().Get("Retry-After"))
-	require.Equal(t, http.StatusRequestEntityTooLarge, request(federationsigning.MaxBodyBytes+1).Code)
-	require.Equal(t, http.StatusTooManyRequests, request(-1).Code)
-	memory.Release(2*federationsigning.MaxBodyBytes - 1024)
-	require.Equal(t, http.StatusUnauthorized, request(2048).Code)
-	require.Equal(t, http.StatusUnauthorized, request(-1).Code)
-	require.True(t, memory.TryAcquire(2*federationsigning.MaxBodyBytes))
-	memory.Release(2 * federationsigning.MaxBodyBytes)
+	require.Equal(t, http.StatusTooManyRequests, request("12345").Code)
+	require.Equal(t, http.StatusNoContent, request("1234").Code)
+}
+
+func TestFederationLocalCronPushRespectsMemory(t *testing.T) {
+	api := huma.NewAPI(huma.DefaultConfig("fixture", "1"), humago.NewAdapter(http.NewServeMux(), ""))
+	huma.Register(api, huma.Operation{OperationID: "createCronJob", Method: http.MethodPost, Path: "/api/v1/projects/{project_id}/cron/jobs"}, func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
+	s := &Server{api: api, federationPushMemory: semaphore.NewWeighted(4)}
+	handler := s.withFederationSigning(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		w.WriteHeader(http.StatusNoContent)
+	}), false)
+	request := func(body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "https://hub.example/api/v1/projects/1/cron/jobs", strings.NewReader(body))
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		return w
+	}
+	require.Equal(t, http.StatusTooManyRequests, request("12345").Code)
+	require.Equal(t, http.StatusNoContent, request("1234").Code)
 }

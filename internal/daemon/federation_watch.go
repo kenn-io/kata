@@ -246,10 +246,8 @@ func registerFederationWatch(humaAPI huma.API, cfg ServerConfig) {
 			for i, entry := range entries {
 				projects[i] = entry.project
 			}
-			var admitted bool
-			if waiter, admitted = cfg.federationPollWaits.admit(requestCtx, cfg.Broadcaster, principal.EnrollmentID, projects...); admitted {
-				defer waiter.release()
-			}
+			waiter = cfg.federationPollWaits.admit(cfg.Broadcaster, projects...)
+			defer waiter.release()
 		}
 		for _, entry := range entries {
 			if err := markReady(entry); err != nil {

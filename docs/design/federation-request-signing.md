@@ -38,8 +38,8 @@ remove disagreements among URL decoding, ServeMux and reverse proxies.
 Native enrollment auth precedes MAC verification and body decoding. MAC
 verification precedes bounded body hashing. Freshness, key validity and
 cancellation are checked again before atomic replay admission and after durable
-publication. Pushes reserve their declared body size from a shared 256 MiB
-budget through handler execution. Control requests have a 64 KiB body
+publication. Pushes reserve body bytes as they arrive from a shared 256 MiB budget
+through handler execution. Control requests have a 64 KiB body
 limit, while the native 64 MiB adoption limit remains available for ingests.
 Signed relay envelopes have a 128 MiB request budget so JSON and base64
 encoding fit around the 64 MiB raw relay batch limit. Bounded memory buffering

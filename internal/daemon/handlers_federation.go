@@ -1004,10 +1004,8 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		var waiter *federationPollWaiter
 		if wait > 0 && in.IssueUID == "" && heldFederationPollAllowed(requestCtx) {
-			var admitted bool
-			if waiter, admitted = cfg.federationPollWaits.admit(requestCtx, cfg.Broadcaster, principal.EnrollmentID, project); admitted {
-				defer waiter.release()
-			}
+			waiter = cfg.federationPollWaits.admit(cfg.Broadcaster, project)
+			defer waiter.release()
 		}
 		reauthorize := func() (context.Context, error) {
 			readCtx, _, err := reauthorizeFederationPoll(requestCtx, cfg, in.Authorization, in.ProjectID, operation)
