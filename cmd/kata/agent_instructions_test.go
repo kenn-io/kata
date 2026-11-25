@@ -608,17 +608,6 @@ func TestAgentInstructionsRollbackRestoresFileMarkedWrittenInPlace(t *testing.T)
 	}
 }
 
-// A write that fails after the in-place open has truncated the file must
-// report errWrittenInPlace. /dev/full accepts the open and fails every write.
-func TestWriteInstructionInPlaceMarksFailureAfterTruncation(t *testing.T) {
-	if _, err := os.Stat("/dev/full"); err != nil {
-		t.Skip("/dev/full unavailable")
-	}
-	err := writeInstructionInPlace("/dev/full", []byte("content"))
-	require.ErrorIs(t, err, errWrittenInPlace)
-	require.ErrorIs(t, err, syscall.ENOSPC)
-}
-
 // atomicfile never writes through a hard link, so neither does the fallback:
 // the other name may belong to a backup or another harness.
 func TestAgentInstructionsInPlaceFallbackRefusesHardLinks(t *testing.T) {
@@ -725,4 +714,53 @@ func TestAgentInstructionsInPlaceFallbackIsNarrow(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Rollback undoes the newest change first, so removing files the batch
+// created frees space before an earlier file is restored.
+func TestAgentInstructionsRollbackUndoesNewestFirst(t *testing.T) {
+	home := t.TempDir()
+	artifacts, err := planInstructionArtifacts(home, "example-agent", "install")
+	require.NoError(t, err)
+	var restored []string
+	failed := false
+	err = applyInstructionArtifactsWithWriter(artifacts, func(path, content string, keepEmpty bool, mode os.FileMode) error {
+		if failed {
+			restored = append(restored, filepath.Base(path))
+		}
+		if strings.HasSuffix(path, "POLL.md") && !failed {
+			failed = true
+			return errors.New("injected write failure")
+		}
+		return writeInstructionArtifact(path, content, keepEmpty, mode)
+	})
+	require.ErrorContains(t, err, "injected write failure")
+	require.Equal(t, []string{"SKILL.md", "AGENTS.md"}, restored)
+}
+
+// A hard link made after the first in-place write, for example by a backup,
+// must not be written through when rollback restores the file.
+func TestAgentInstructionsInPlaceRollbackRefusesNewHardLink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the in-place fallback is Unix-only")
+	}
+	home := t.TempDir()
+	instructions := filepath.Join(home, "AGENTS.md")
+	require.NoError(t, os.WriteFile(instructions, []byte("# Runtime managed\n"), 0o600))
+	backup := filepath.Join(t.TempDir(), "AGENTS-backup.md")
+	artifacts, err := planInstructionArtifacts(home, "example-agent", "install")
+	require.NoError(t, err)
+	write := newInstructionWriter(refuseRenameOver("AGENTS.md"))
+	err = applyInstructionArtifactsWithWriter(artifacts, func(path, content string, keepEmpty bool, mode os.FileMode) error {
+		if strings.HasSuffix(path, "SKILL.md") && content != "" {
+			require.NoError(t, os.Link(instructions, backup))
+			return errors.New("injected write failure")
+		}
+		return write(path, content, keepEmpty, mode)
+	})
+	require.ErrorContains(t, err, "injected write failure")
+	require.ErrorContains(t, err, "hard link")
+	data, err := os.ReadFile(backup) //nolint:gosec // G304: fixture under TempDir.
+	require.NoError(t, err)
+	require.Equal(t, artifacts[0].Content, string(data))
 }

@@ -347,8 +347,8 @@ func applyInstructionArtifacts(artifacts []instructionArtifact) error {
 
 func applyInstructionArtifactsWithWriter(artifacts []instructionArtifact, write func(string, string, bool, os.FileMode) error) error {
 	// Check every preimage before mutating any file. Each file write is atomic
-	// unless rename-over is refused; restore completed writes if a later
-	// artifact fails.
+	// unless rename-over is refused; if a later artifact fails, restore
+	// completed writes newest first, so removing created files frees space.
 	home := filepath.Dir(artifacts[0].Path)
 	for _, a := range artifacts {
 		if err := checkInstructionPath(a.Path, home); err != nil {
@@ -371,8 +371,8 @@ func applyInstructionArtifactsWithWriter(artifacts []instructionArtifact, write 
 			if errors.Is(err, atomicfile.ErrPublished) || errors.Is(err, errWrittenInPlace) {
 				rollbackEnd++
 			}
-			for _, previous := range artifacts[:rollbackEnd] {
-				if previous.Changed {
+			for j := rollbackEnd - 1; j >= 0; j-- {
+				if previous := artifacts[j]; previous.Changed {
 					err = errors.Join(err, write(previous.Path, previous.before, previous.exists, previous.mode))
 				}
 			}
@@ -429,28 +429,41 @@ func newInstructionWriter(replace func(string, []byte, os.FileMode) error) func(
 }
 
 // renameOverRefused reports a permission error from renaming over an existing
-// regular file with no other hard links. Runtime-managed files such as
-// consumer Muse's AGENTS.md can be written but not replaced
-// (kenn-io/kata#1315); atomicfile leaves the target untouched. Only Unix
-// reports this as a rename error, so the fallback is Unix-only.
+// regular file. Runtime-managed files such as consumer Muse's AGENTS.md can be
+// written but not replaced (kenn-io/kata#1315); atomicfile leaves the target
+// untouched. Only Unix reports this as a rename error, and only Unix reports
+// link counts, so the fallback is Unix-only.
 func renameOverRefused(path string, err error) bool {
 	var linkErr *os.LinkError
 	if !errors.As(err, &linkErr) || linkErr.Op != "rename" || !errors.Is(err, fs.ErrPermission) {
 		return false
 	}
 	info, statErr := os.Lstat(path)
-	return statErr == nil && info.Mode().IsRegular() && singleLinkFile(info)
+	return statErr == nil && info.Mode().IsRegular()
 }
 
 // writeInstructionInPlace overwrites an existing file without replacing it, so
-// its inode, owner and mode stay. It is not atomic: a failure after truncation
-// wraps errWrittenInPlace so the caller restores the preimage.
+// its inode, owner and mode stay. Like atomicfile, it never writes through a
+// hard link, whose other names may belong to a backup or another harness; it
+// checks the opened file before truncating it, so rollback rechecks too. It is
+// not atomic: a failure after truncation wraps errWrittenInPlace so the caller
+// restores the preimage.
 func writeInstructionInPlace(path string, data []byte) error {
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0) //nolint:gosec // G304: path passed checkInstructionPath and renameOverRefused.
+	file, err := os.OpenFile(path, os.O_WRONLY, 0) //nolint:gosec // G304: path passed checkInstructionPath and renameOverRefused.
 	if err != nil {
 		return err
 	}
-	_, err = file.Write(data)
+	info, err := file.Stat()
+	if err == nil && (!info.Mode().IsRegular() || !singleLinkFile(info)) {
+		err = fmt.Errorf("refusing to write %s in place: not a regular file without other hard links", path)
+	}
+	if err != nil {
+		return errors.Join(err, file.Close())
+	}
+	err = file.Truncate(0)
+	if err == nil {
+		_, err = file.Write(data)
+	}
 	if err == nil {
 		err = file.Sync()
 	}
