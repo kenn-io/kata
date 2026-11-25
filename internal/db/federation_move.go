@@ -66,6 +66,28 @@ const FederationHeldCursorPrefix = "federation_held_cursor."
 // FederationAcknowledgedEventPrefix identifies events accepted out of order.
 const FederationAcknowledgedEventPrefix = "federation_acknowledged_event."
 
+// FederationAcceptedCommentPrefix retains comment identity when adoption replaces history.
+const FederationAcceptedCommentPrefix = "federation_accepted_comment."
+
+// RetainFederationAdoptedComments saves proof before adoption deletes events.
+func RetainFederationAdoptedComments(ctx context.Context, tx *sql.Tx, projectID int64, projectUID, origin string, postgres bool) error {
+	commentUID := `json_extract(e.payload,'$.comment_uid')`
+	items := `json_each(CASE WHEN json_type(e.payload,'$.comments')='array' THEN json_extract(e.payload,'$.comments') ELSE '[]' END) item`
+	itemUID := `json_extract(item.value,'$.comment_uid')`
+	if postgres {
+		commentUID = `e.payload::jsonb->>'comment_uid'`
+		items = `jsonb_array_elements(CASE WHEN jsonb_typeof(e.payload::jsonb->'comments')='array' THEN e.payload::jsonb->'comments' ELSE '[]'::jsonb END) item(value)`
+		itemUID = `item.value->>'comment_uid'`
+	}
+	proof := `e.project_id=$2 AND NOT ` + federationKeptLocalSQL("e") + ` AND ((e.origin_instance_uid=$3 AND e.id<=COALESCE((SELECT CAST(value AS BIGINT) FROM meta WHERE key=$4),0)) OR (e.origin_instance_uid<>$3 AND NOT EXISTS (SELECT 1 FROM meta WHERE key=$5 || e.origin_instance_uid)) OR EXISTS (SELECT 1 FROM meta WHERE key=$6 || e.uid AND value='1'))`
+	//nolint:gosec // SQL fragments are fixed by the backend; all values are bound.
+	_, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) SELECT $1 || uid,'1' FROM (
+ SELECT `+commentUID+` AS uid FROM events e WHERE `+proof+` AND e.type IN ('issue.commented','issue.comment_edited')
+ UNION SELECT `+itemUID+` AS uid FROM events e CROSS JOIN `+items+` WHERE `+proof+` AND e.type IN ('issue.created','issue.snapshot')
+ ) comments WHERE uid IS NOT NULL AND uid<>'' ON CONFLICT(key) DO NOTHING`, FederationAcceptedCommentPrefix+projectUID+".", projectID, origin, FederationHeldCursorPrefix+projectUID, FormerInstanceUIDMetaPrefix, FederationAcknowledgedEventPrefix+projectUID+".")
+	return err
+}
+
 // FederationUnresolvedEventSQL excludes events already accepted or superseded on leave.
 func FederationUnresolvedEventSQL(alias string) string {
 	return alias + `.type IN (` + FederationPushEventTypesSQL() + `) AND NOT EXISTS (SELECT 1 FROM meta WHERE key='` + FederationAcknowledgedEventPrefix + `' || (SELECT uid FROM projects WHERE id=` + alias + `.project_id) || '.' || ` + alias + `.uid)`
@@ -367,7 +389,7 @@ func federationCommentDependentSQL(postgres bool) string {
 		proofUID = `proof.payload::jsonb->>'comment_uid'`
 		proofItems = `jsonb_array_elements(CASE WHEN jsonb_typeof(proof.payload::jsonb->'comments')='array' THEN proof.payload::jsonb->'comments' ELSE '[]'::jsonb END) item(value)`
 	}
-	accepted := `EXISTS (SELECT 1 FROM events proof WHERE proof.project_id=e.project_id AND ((proof.type IN ('issue.commented','issue.comment_edited') AND ` + proofUID + `=` + commentUID + `) OR (proof.type IN ('issue.created','issue.snapshot') AND EXISTS (SELECT 1 FROM ` + proofItems + ` WHERE ` + itemUID + `=` + commentUID + `))) AND NOT ` + federationKeptLocalSQL("proof") + ` AND ((proof.origin_instance_uid<>$4 AND NOT EXISTS (SELECT 1 FROM meta former WHERE former.key='` + FormerInstanceUIDMetaPrefix + `' || proof.origin_instance_uid)) OR EXISTS (SELECT 1 FROM meta accepted WHERE accepted.key='` + FederationAcknowledgedEventPrefix + `' || (SELECT uid FROM projects WHERE id=proof.project_id) || '.' || proof.uid AND accepted.value='1')))`
+	accepted := `(EXISTS (SELECT 1 FROM meta WHERE key='` + FederationAcceptedCommentPrefix + `' || (SELECT uid FROM projects WHERE id=e.project_id) || '.' || ` + commentUID + ` AND value='1') OR EXISTS (SELECT 1 FROM events proof WHERE proof.project_id=e.project_id AND ((proof.type IN ('issue.commented','issue.comment_edited') AND ` + proofUID + `=` + commentUID + `) OR (proof.type IN ('issue.created','issue.snapshot') AND EXISTS (SELECT 1 FROM ` + proofItems + ` WHERE ` + itemUID + `=` + commentUID + `))) AND NOT ` + federationKeptLocalSQL("proof") + ` AND ((proof.origin_instance_uid<>$4 AND NOT EXISTS (SELECT 1 FROM meta former WHERE former.key='` + FormerInstanceUIDMetaPrefix + `' || proof.origin_instance_uid)) OR EXISTS (SELECT 1 FROM meta accepted WHERE accepted.key='` + FederationAcknowledgedEventPrefix + `' || (SELECT uid FROM projects WHERE id=proof.project_id) || '.' || proof.uid AND accepted.value='1'))))`
 	condition := `EXISTS (SELECT 1 FROM events root WHERE root.project_id=e.project_id AND ` + federationKeptLocalSQL("root") + ` AND ((root.type='issue.commented' AND ` + match + `) OR (root.type IN ('issue.snapshot','issue.created') AND e.type IN ('issue.comment_edited','issue.commented') AND EXISTS (SELECT 1 FROM ` + items + ` WHERE ` + itemUID + `=` + commentUID + `) AND NOT ` + accepted + `)))`
 	return condition
 }
