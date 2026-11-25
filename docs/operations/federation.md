@@ -693,11 +693,14 @@ Held polls need a few things from the deployment:
 - A proxy in front of the hub must pass
   `POST /api/v1/projects/{project_id}/federation/events:watch` and its `wait`
   query, along with the event poll.
-- Held polls are bounded by the host's open-file limit and the request deadline.
-  A shared watch stays multiplexed, polling all of its projects with one
-  unwaited watch per jittered interval while retrying a held watch with growing
-  jittered delays up to 16 intervals. A solo binding records the quiet check
-  and falls back to its interval while retrying held polls on the same schedule.
+- A hub holds at most 32 polls per available CPU, accounting for `GOMAXPROCS`
+  and Linux CPU quotas, up to 256 total. Each spoke
+  credential can hold at most half the total limit, up to 32, or 16 on a
+  one-CPU hub. Past a limit the hub answers at once. A shared watch stays multiplexed,
+  polling all of its projects with one unwaited watch per jittered interval
+  while retrying a held watch with growing jittered delays up to 16 intervals;
+  a solo binding records the quiet check and falls back to its interval while
+  retrying held polls on the same jittered schedule.
 - The spoke asks for a wait 15 seconds shorter than its request budget, so a
   `KATA_HTTP_TIMEOUT` under 16 seconds turns held polls off. The daemon log
   says so once for each binding.

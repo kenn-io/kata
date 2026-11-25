@@ -402,7 +402,7 @@ func NewServer(cfg ServerConfig) *Server {
 	withRootAttribution(humaAPI, cfg.RootSigning)
 	withExternalRootAdministration(humaAPI, cfg.Auth.AllowIdentityConnectorAdministration)
 
-	cfg.federationPollWaits = newFederationPollWaits()
+	cfg.federationPollWaits = newFederationPollWaits(federationPollCPUs())
 	s := &Server{
 		cfg: cfg, api: humaAPI,
 		federationTransferAdmission: make(chan struct{}, 2),

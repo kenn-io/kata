@@ -320,39 +320,3 @@ func TestFederationPollWaitReauthorizesAfterWake(t *testing.T) {
 	assert.NotContains(t, string(result.raw), "Committed after revocation")
 	assert.Equal(t, reads, f.reads.readsReturned())
 }
-
-// Held polls and watches past the old per-enrollment (32) and process (256)
-// bounds stay held, and every one wakes on the next commit.
-func TestFederationHeldPollsAndWatchesPastOldBoundsWake(t *testing.T) {
-	f := newWatchFixture(t)
-	cursor := f.cursor(t)
-	var polls []<-chan longPollResult
-	for range 257 {
-		polls = append(polls, f.startHeldPoll(t, cursor, "30"))
-	}
-	var watches []<-chan watchResultForTest
-	for range 33 {
-		watches = append(watches, f.startWatch(t, cursor, []watchEntryForTest{}, "30", 1))
-	}
-	createIssueAs(t, f.env, f.project.ID, "tester", "Wakes every held poll")
-	for i, done := range polls {
-		select {
-		case result := <-done:
-			require.NoError(t, result.err)
-			require.Equal(t, http.StatusOK, result.status, "%s", result.raw)
-			require.NotEmpty(t, result.body.Events, "poll %d answered before the commit", i)
-		case <-time.After(10 * time.Second):
-			t.Fatalf("poll %d did not wake", i)
-		}
-	}
-	for i, done := range watches {
-		select {
-		case result := <-done:
-			require.NoError(t, result.err)
-			require.Equal(t, http.StatusOK, result.status, "%s", result.raw)
-			require.Equal(t, []int64{f.project.ID}, result.body.Ready, "watch %d answered before the commit", i)
-		case <-time.After(10 * time.Second):
-			t.Fatalf("watch %d did not wake", i)
-		}
-	}
-}

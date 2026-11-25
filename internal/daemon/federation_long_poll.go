@@ -26,20 +26,31 @@ const (
 	// federationPollWaitMargin leaves time to authorize and answer a held poll
 	// before its request deadline.
 	federationPollWaitMargin = 10 * time.Second
+	// A held poll keeps a connection, a goroutine and a broadcaster
+	// subscription. Polls beyond these bounds answer at once.
+	federationPollMaxWaiters              = 256
+	federationPollMaxWaitersPerCPU        = 32
+	federationPollMaxWaitersPerCredential = 32
 )
 
-// federationPollWaits wakes held polls when their
+// federationPollWaits bounds the polls a hub holds and wakes them when their
 // project commits an event in another process sharing the database.
 type federationPollWaits struct {
-	remote *federationPollWakeBus
+	mu           sync.Mutex
+	total        int
+	maxTotal     int
+	byCredential map[int64]int
+	remote       *federationPollWakeBus
 	// instance tags this process's notifications so it ignores its own.
 	instance string
 }
 
-func newFederationPollWaits() *federationPollWaits {
+func newFederationPollWaits(cpus int) *federationPollWaits {
 	return &federationPollWaits{
-		remote:   newFederationPollWakeBus(),
-		instance: rand.Text(),
+		byCredential: map[int64]int{},
+		maxTotal:     min(federationPollMaxWaiters, federationPollMaxWaitersPerCPU*cpus),
+		remote:       newFederationPollWakeBus(),
+		instance:     rand.Text(),
 	}
 }
 
@@ -63,15 +74,29 @@ func federationPollWait(ctx context.Context, requested api.OptionalInt) (time.Du
 // federationPollWaiter is one admitted held poll. It watches one project for
 // a project poll, or several for a watch.
 type federationPollWaiter struct {
-	waits       *federationPollWaits
-	broadcaster *EventBroadcaster
-	local       Subscription
-	remote      *federationPollWakeSub
-	unsubRemote func()
+	waits        *federationPollWaits
+	broadcaster  *EventBroadcaster
+	local        Subscription
+	remote       *federationPollWakeSub
+	unsubRemote  func()
+	enrollmentID int64
 }
 
-// admit subscribes before the caller's first read so a later event wakes the poll.
-func (w *federationPollWaits) admit(broadcaster *EventBroadcaster, projects ...db.Project) *federationPollWaiter {
+// admit reserves one held poll for projects, or reports false when a bound is
+// reached. A watch of several projects counts as one held poll: it holds one
+// connection, goroutine and subscription. The subscriptions start here,
+// before the caller's first read, so an event that commits after that read
+// still wakes the poll.
+func (w *federationPollWaits) admit(broadcaster *EventBroadcaster, enrollmentID int64, projects ...db.Project) (*federationPollWaiter, bool) {
+	w.mu.Lock()
+	if w.total >= w.maxTotal ||
+		w.byCredential[enrollmentID] >= min(federationPollMaxWaitersPerCredential, w.maxTotal/2) {
+		w.mu.Unlock()
+		return nil, false
+	}
+	w.total++
+	w.byCredential[enrollmentID]++
+	w.mu.Unlock()
 	watched := make(map[int64]string, len(projects))
 	for _, project := range projects {
 		watched[project.ID] = project.UID
@@ -80,12 +105,20 @@ func (w *federationPollWaits) admit(broadcaster *EventBroadcaster, projects ...d
 	return &federationPollWaiter{
 		waits: w, broadcaster: broadcaster,
 		local: broadcaster.Subscribe(SubFilter{Projects: watched}), remote: remote, unsubRemote: unsubRemote,
-	}
+		enrollmentID: enrollmentID,
+	}, true
 }
 
 func (p *federationPollWaiter) release() {
 	p.local.Unsub()
 	p.unsubRemote()
+	w := p.waits
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.total--
+	if w.byCredential[p.enrollmentID]--; w.byCredential[p.enrollmentID] <= 0 {
+		delete(w.byCredential, p.enrollmentID)
+	}
 }
 
 // wait blocks until a watched project may have a new event, the deadline

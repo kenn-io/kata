@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -19,18 +20,52 @@ import (
 	"go.kenn.io/kata/internal/db/sqlitestore"
 )
 
-func TestFederationPollWaitsAcceptManyHeldPolls(t *testing.T) {
-	waits := newFederationPollWaits()
+func TestFederationPollWaitsBoundEveryHeldPoll(t *testing.T) {
+	waits := newFederationPollWaits(8)
 	broadcaster := NewEventBroadcaster()
 	project := db.Project{ID: 7, UID: "01HZNQ7VFPK1XGD8R5MABCD4EA"}
-	for range 257 {
-		waiter := waits.admit(broadcaster, project)
+	for range federationPollMaxWaitersPerCredential {
+		waiter, ok := waits.admit(broadcaster, -1, project)
+		require.True(t, ok)
 		t.Cleanup(waiter.release)
+	}
+	_, ok := waits.admit(broadcaster, -1, project)
+	assert.False(t, ok)
+
+	t.Run("reserve capacity for other credentials", func(t *testing.T) {
+		waits := newFederationPollWaits(1)
+		broadcaster := NewEventBroadcaster()
+		project := db.Project{ID: 7, UID: "01HZNQ7VFPK1XGD8R5MABCD4EA"}
+		for range 16 {
+			waiter, ok := waits.admit(broadcaster, 1, project)
+			require.True(t, ok)
+			t.Cleanup(waiter.release)
+		}
+		_, ok := waits.admit(broadcaster, 1, project)
+		assert.False(t, ok)
+		other, ok := waits.admit(broadcaster, 2, project)
+		require.True(t, ok)
+		other.release()
+	})
+
+	for _, tc := range []struct{ cpus, limit int }{{1, 32}, {16, 256}} {
+		t.Run(fmt.Sprintf("%d CPUs", tc.cpus), func(t *testing.T) {
+			waits := newFederationPollWaits(tc.cpus)
+			broadcaster := NewEventBroadcaster()
+			project := db.Project{ID: 7, UID: "01HZNQ7VFPK1XGD8R5MABCD4EA"}
+			for enrollment := range int64(tc.limit) {
+				waiter, ok := waits.admit(broadcaster, enrollment, project)
+				require.True(t, ok)
+				t.Cleanup(waiter.release)
+			}
+			_, ok := waits.admit(broadcaster, int64(tc.limit), project)
+			assert.False(t, ok)
+		})
 	}
 }
 
 func TestFederationPollWakeIgnoresItsOwnInstance(t *testing.T) {
-	waits := newFederationPollWaits()
+	waits := newFederationPollWaits(8)
 	woken, unsubscribe := waits.remote.subscribe(map[int64]string{1: "project"})
 	defer unsubscribe()
 	waits.remote.setSecret([]byte("test secret"))
@@ -57,7 +92,7 @@ func (recordingPollWakeBus) ListenFederationPollWake(ctx context.Context, _ func
 
 func TestFederationPollRemoteWakeMatchesProjectAndMoveSource(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		writer, reader := newFederationPollWaits(), newFederationPollWaits()
+		writer, reader := newFederationPollWaits(8), newFederationPollWaits(8)
 		writer.remote.setSecret([]byte("test secret"))
 		reader.remote.setSecret([]byte("test secret"))
 		broadcaster := NewEventBroadcaster()
@@ -71,7 +106,8 @@ func TestFederationPollRemoteWakeMatchesProjectAndMoveSource(t *testing.T) {
 		defer func() { cancel(); <-done }()
 		var waiters []*federationPollWaiter
 		for i, uid := range []string{"source", "destination", "unrelated"} {
-			waiter := reader.admit(NewEventBroadcaster(), db.Project{ID: int64(i + 1), UID: uid})
+			waiter, ok := reader.admit(NewEventBroadcaster(), int64(i+1), db.Project{ID: int64(i + 1), UID: uid})
+			require.True(t, ok)
 			defer waiter.release()
 			waiters = append(waiters, waiter)
 		}
@@ -125,7 +161,7 @@ func TestFederationPollWakeBridgeStopsWhenItsStoreCloses(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		runFederationPollWakeBridge(t.Context(), closedPollWakeBus{}, NewEventBroadcaster(), newFederationPollWaits(), slog.New(slog.DiscardHandler))
+		runFederationPollWakeBridge(t.Context(), closedPollWakeBus{}, NewEventBroadcaster(), newFederationPollWaits(8), slog.New(slog.DiscardHandler))
 	}()
 	select {
 	case <-done:
@@ -135,15 +171,16 @@ func TestFederationPollWakeBridgeStopsWhenItsStoreCloses(t *testing.T) {
 }
 
 // internalLongPollHub serves a hub over real HTTP with one pull enrollment
-// for one federated project, and exposes the hub's held-poll bookkeeping.
+// per member for one federated project, and exposes the hub's held-poll
+// bookkeeping.
 type internalLongPollHub struct {
-	waits        *federationPollWaits
-	url          string
-	projectID    int64
-	enrollmentID int64
+	waits       *federationPollWaits
+	broadcaster *EventBroadcaster
+	url         string
+	projectID   int64
 }
 
-func newInternalLongPollHub(t *testing.T) internalLongPollHub {
+func newInternalLongPollHub(t *testing.T, members int) internalLongPollHub {
 	t.Helper()
 	ctx := t.Context()
 	store, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "hub.db"))
@@ -153,43 +190,141 @@ func newInternalLongPollHub(t *testing.T) internalLongPollHub {
 	require.NoError(t, err)
 	_, err = store.EnableProjectFederation(ctx, project.ID, "tester")
 	require.NoError(t, err)
-	enrollment, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
-		Token: "long-poll-token", SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EB",
-		ProjectID: &project.ID, Capabilities: "pull", Actor: "tester",
-	})
-	require.NoError(t, err)
+	for member := range members {
+		_, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+			Token: memberPollToken(member), SpokeInstanceUID: fmt.Sprintf("01HZNQ7VFPK1XGD8R5MABCD4E%c", 'B'+member),
+			ProjectID: &project.ID, Capabilities: "pull", Actor: "tester",
+		})
+		require.NoError(t, err)
+	}
 	hub := NewServer(ServerConfig{DB: store, StartedAt: time.Now().UTC()})
 	t.Cleanup(func() { _ = hub.Close() })
 	server := httptest.NewServer(hub.Handler())
 	t.Cleanup(server.Close)
 	return internalLongPollHub{
-		waits: hub.cfg.federationPollWaits, url: server.URL,
-		projectID: project.ID, enrollmentID: enrollment.Enrollment.ID,
+		waits: hub.cfg.federationPollWaits, broadcaster: hub.cfg.Broadcaster,
+		url: server.URL, projectID: project.ID,
 	}
+}
+
+func memberPollToken(member int) string {
+	return fmt.Sprintf("long-poll-token-%d", member)
+}
+
+type internalPollResult struct {
+	status  int
+	cursor  int64
+	elapsed time.Duration
+	err     error
 }
 
 // poll returns the response status, the page's next cursor and how long the
 // hub took to answer.
-func (h internalLongPollHub) poll(ctx context.Context, afterID int64, wait string) (int, int64, time.Duration, error) {
+func (h internalLongPollHub) poll(ctx context.Context, member int, afterID int64, wait string) internalPollResult {
 	url := fmt.Sprintf("%s/api/v1/projects/%d/federation/events?after_id=%d&wait=%s", h.url, h.projectID, afterID, wait)
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return 0, 0, 0, err
+		return internalPollResult{err: err}
 	}
-	request.Header.Set("Authorization", "Bearer long-poll-token")
+	request.Header.Set("Authorization", "Bearer "+memberPollToken(member))
 	started := time.Now()
 	response, err := http.DefaultClient.Do(request) //nolint:gosec // test-owned loopback hub
 	if err != nil {
-		return 0, 0, 0, err
+		return internalPollResult{err: err}
 	}
 	defer func() { _ = response.Body.Close() }()
 	var page struct {
 		NextAfterID int64 `json:"next_after_id"`
 	}
-	if err := json.NewDecoder(response.Body).Decode(&page); err != nil {
-		return response.StatusCode, 0, 0, err
+	err = json.NewDecoder(response.Body).Decode(&page)
+	return internalPollResult{status: response.StatusCode, cursor: page.NextAfterID, elapsed: time.Since(started), err: err}
+}
+
+func (h internalLongPollHub) subscriptions() int {
+	h.broadcaster.mu.Lock()
+	defer h.broadcaster.mu.Unlock()
+	return len(h.broadcaster.subs)
+}
+
+// hold starts n held polls for member and returns once the hub holds them.
+func (h internalLongPollHub) hold(t *testing.T, member, n int, afterID int64) []<-chan internalPollResult {
+	t.Helper()
+	want := h.subscriptions() + n
+	polls := make([]<-chan internalPollResult, n)
+	for i := range polls {
+		done := make(chan internalPollResult, 1)
+		go func() { done <- h.poll(t.Context(), member, afterID, "30") }()
+		polls[i] = done
 	}
-	return response.StatusCode, page.NextAfterID, time.Since(started), nil
+	//nolint:kennlint // sleeptest: real HTTP polls cannot run in a synctest bubble, and the hub signals nothing when it holds one
+	require.Eventually(t, func() bool { return h.subscriptions() == want }, 10*time.Second, 10*time.Millisecond, "member %d's polls were not all held", member)
+	return polls
+}
+
+// requireAnswersAtOnce sends one more held poll and requires an immediate
+// ordinary answer that holds no subscription.
+func (h internalLongPollHub) requireAnswersAtOnce(t *testing.T, member int, afterID int64) {
+	t.Helper()
+	held := h.subscriptions()
+	result := h.poll(t.Context(), member, afterID, "30")
+	require.NoError(t, result.err)
+	require.Equal(t, http.StatusOK, result.status)
+	assert.Equal(t, afterID, result.cursor)
+	assert.Less(t, result.elapsed, 5*time.Second, "a poll past the waiter bound must answer like an ordinary poll")
+	assert.Equal(t, held, h.subscriptions())
+}
+
+// requireWakeAfterCommit creates an issue through the hub and requires every
+// held poll to answer with the new event.
+func (h internalLongPollHub) requireWakeAfterCommit(t *testing.T, afterID int64, polls []<-chan internalPollResult) {
+	t.Helper()
+	body := strings.NewReader(`{"actor":"tester","title":"Wakes held polls"}`)
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, fmt.Sprintf("%s/api/v1/projects/%d/issues", h.url, h.projectID), body)
+	require.NoError(t, err)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request) //nolint:gosec // test-owned loopback hub
+	require.NoError(t, err)
+	require.NoError(t, response.Body.Close())
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	for i, done := range polls {
+		select {
+		case result := <-done:
+			require.NoError(t, result.err)
+			require.Equal(t, http.StatusOK, result.status)
+			require.Greater(t, result.cursor, afterID, "poll %d answered without the commit", i)
+		case <-time.After(10 * time.Second): //nolint:kennlint // deadlinetest: bounds a held poll that never wakes.
+			t.Fatalf("poll %d did not wake", i)
+		}
+	}
+}
+
+// Polls past a waiter bound answer at once, while admitted polls stay held,
+// wake on the next commit, and leave room for other members.
+func TestFederationPollAnswersExcessPollsAtOnce(t *testing.T) {
+	t.Run("per enrollment", func(t *testing.T) {
+		hub := newInternalLongPollHub(t, 2)
+		hub.waits.maxTotal = federationPollMaxWaiters
+		cursor := hub.poll(t.Context(), 0, 0, "0").cursor
+		require.Positive(t, cursor)
+		held := hub.hold(t, 0, federationPollMaxWaitersPerCredential, cursor)
+		hub.requireAnswersAtOnce(t, 0, cursor)
+		held = append(held, hub.hold(t, 1, 1, cursor)...)
+		hub.requireWakeAfterCommit(t, cursor, held)
+	})
+	t.Run("total and per CPU", func(t *testing.T) {
+		assert.Equal(t, federationPollMaxWaiters, newFederationPollWaits(16).maxTotal)
+		hub := newInternalLongPollHub(t, 3)
+		hub.waits.maxTotal = newFederationPollWaits(1).maxTotal
+		require.Equal(t, federationPollMaxWaitersPerCPU, hub.waits.maxTotal)
+		cursor := hub.poll(t.Context(), 0, 0, "0").cursor
+		require.Positive(t, cursor)
+		half := federationPollMaxWaitersPerCPU / 2
+		held := hub.hold(t, 0, half, cursor)
+		hub.requireAnswersAtOnce(t, 0, cursor)
+		held = append(held, hub.hold(t, 1, half, cursor)...)
+		hub.requireAnswersAtOnce(t, 2, cursor)
+		hub.requireWakeAfterCommit(t, cursor, held)
+	})
 }
 
 func TestFederationPollWaitCapsOversizedWaits(t *testing.T) {
@@ -201,7 +336,7 @@ func TestFederationPollWaitCapsOversizedWaits(t *testing.T) {
 }
 
 func TestFederationPollWakeTagsAndFallback(t *testing.T) {
-	writer, reader := newFederationPollWaits(), newFederationPollWaits()
+	writer, reader := newFederationPollWaits(8), newFederationPollWaits(8)
 	writer.remote.setSecret([]byte("first secret"))
 	msg := NewEventMsg(123456, db.Event{ProjectUID: "destination-project-uid", Type: "issue.moved", Payload: `{"from_project_uid":"source-project-uid"}`})
 	first := writer.messageFor(msg)
@@ -235,11 +370,12 @@ func TestFederationPollWakeTagsAndFallback(t *testing.T) {
 // in another project neither overflows it nor wakes every watched project.
 func TestFederationWatchWaiterIgnoresOtherProjects(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		waits := newFederationPollWaits()
+		waits := newFederationPollWaits(8)
 		broadcaster := NewEventBroadcaster()
-		waiter := waits.admit(broadcaster,
+		waiter, ok := waits.admit(broadcaster, 1,
 			db.Project{ID: 7, UID: "01HZNQ7VFPK1XGD8R5MABCD4EA"},
 			db.Project{ID: 8, UID: "01HZNQ7VFPK1XGD8R5MABCD4EB"})
+		require.True(t, ok)
 		defer waiter.release()
 		for range channelBuffer + 1 {
 			broadcaster.Broadcast(StreamMsg{Kind: StreamKindEvent, ProjectID: 9})
