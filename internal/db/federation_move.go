@@ -207,6 +207,13 @@ func FederationKeptIssue(ctx context.Context, q moveQuery, projectID int64, issu
 // CheckFederationKeptIssueMove blocks moves whose snapshot would carry task,
 // discussion, or link history the hub has not accepted.
 func CheckFederationKeptIssueMove(ctx context.Context, q moveQuery, from, to int64, issueUID, origin string, postgres bool) error {
+	var spokeMove bool
+	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings src JOIN federation_bindings dst ON dst.project_id=$2 WHERE src.project_id=$1 AND src.role='spoke' AND dst.role='spoke' AND src.enabled=1 AND dst.enabled=1 AND src.push_enabled=1 AND dst.push_enabled=1)`, from, to).Scan(&spokeMove); err != nil {
+		return err
+	}
+	if !spokeMove {
+		return nil
+	}
 	var blocked bool
 	if err := q.QueryRowContext(ctx, federationKeptIssueMoveSQL(postgres), from, to, issueUID, origin, FormerInstanceUIDMetaPrefix).Scan(&blocked); err != nil {
 		return err
