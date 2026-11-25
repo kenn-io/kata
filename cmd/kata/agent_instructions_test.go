@@ -699,3 +699,28 @@ func TestAgentInstructionsLegacyMigrationRollsBack(t *testing.T) {
 		require.ErrorIs(t, err, os.ErrNotExist)
 	}
 }
+
+// Kata never wrote through symlinks, so a symlinked legacy directory holds no
+// managed copy and must not block the default location.
+func TestAgentInstructionsIgnoresSymlinkedLegacySkills(t *testing.T) {
+	resetFlags(t)
+	home := realTempHome(t)
+	shared := filepath.Join(t.TempDir(), "shared-skills")
+	require.NoError(t, os.MkdirAll(filepath.Join(shared, "kata"), 0o700))
+	foreign := filepath.Join(shared, "kata", "SKILL.md")
+	require.NoError(t, os.WriteFile(foreign, []byte("Shared skill\n"), 0o600))
+	require.NoError(t, os.MkdirAll(filepath.Join(home, "workspace"), 0o700))
+	if err := os.Symlink(shared, filepath.Join(home, "workspace", "skills")); err != nil {
+		t.Skip("symlinks unavailable")
+	}
+	for _, verb := range []string{"status", "install", "uninstall"} {
+		args := []string{verb, "muse", "--home", home}
+		if verb == "install" {
+			args = append(args, "--actor", "example-agent")
+		}
+		require.Len(t, runInstructions(t, args...).Artifacts, 3, verb)
+	}
+	data, err := os.ReadFile(foreign) //nolint:gosec // G304: fixture under TempDir.
+	require.NoError(t, err)
+	require.Equal(t, "Shared skill\n", string(data))
+}

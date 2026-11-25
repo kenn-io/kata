@@ -255,6 +255,9 @@ func planInstructionArtifacts(home, skillsDir, actor, verb string) ([]instructio
 	for i := range artifacts {
 		a := &artifacts[i]
 		if err := checkInstructionPath(a.Path, home); err != nil {
+			if a.legacy {
+				continue // Kata never wrote through a link, so nothing is managed there.
+			}
 			return nil, err
 		}
 		var err error
