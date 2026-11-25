@@ -322,7 +322,7 @@ authorization once more before releasing the page.
 Revocation before a wake ends the held poll at that wake. When the wait expires,
 the hub returns the initial empty page and its cursor; the next poll
 checks authorization and reads again. The hub bounds held polls in total, per
-credential, and for signed requests holding a control slot; past a bound it
+credential; past a bound it
 answers at once.
 
 A spoke with several bindings at one hub holds one watch for all of them, so

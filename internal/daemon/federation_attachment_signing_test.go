@@ -21,6 +21,7 @@ import (
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/federationsigning"
 	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
+	"golang.org/x/sync/semaphore"
 )
 
 // These requests deliberately fail authorization after admission. That lets the
@@ -44,16 +45,8 @@ func TestFederationAttachmentSigningProfile(t *testing.T) {
 			api := huma.NewAPI(huma.DefaultConfig("fixture", "1"), humago.NewAdapter(http.NewServeMux(), ""))
 			path := strings.Replace(tc.path, "/projects/1/", "/projects/{project_id}/", 1)
 			huma.Register(api, huma.Operation{OperationID: tc.operation, Method: tc.method, Path: path}, func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
-			s := &Server{api: api, federationControlAdmission: make(chan struct{}, 1), federationIngestAdmission: make(chan struct{}, 1), federationTransferAdmission: make(chan struct{}, 1), federationReadAdmission: make(chan struct{}, 1)}
-			// Saturate the opposite pool: binary transfers must avoid control
-			// slots, while links/capabilities retain control admission.
-			if tc.bulk {
-				s.federationControlAdmission <- struct{}{}
-				s.federationIngestAdmission <- struct{}{}
-			} else {
-				s.federationTransferAdmission <- struct{}{}
-				s.federationReadAdmission <- struct{}{}
-			}
+			s := &Server{api: api, federationPushMemory: semaphore.NewWeighted(1)}
+			require.True(t, s.federationPushMemory.TryAcquire(1))
 			r := httptest.NewRequestWithContext(t.Context(), tc.method, "https://hub.example"+tc.path, http.NoBody)
 			r.ContentLength = tc.length
 			w := &transferDeadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
@@ -132,7 +125,7 @@ func testFederationAttachmentSigningMode(t *testing.T, mode string) {
 			path = fmt.Sprintf("/api/v1/projects/%d/federation/docbank/capabilities", project.ID)
 		}
 		huma.Register(api, huma.Operation{OperationID: operation, Method: method, Path: route}, func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
-		s := &Server{api: api, cfg: ServerConfig{DB: store, FederationSigning: v}, federationControlAdmission: make(chan struct{}, 1), federationIngestAdmission: make(chan struct{}, 1), federationTransferAdmission: make(chan struct{}, 1), federationReadAdmission: make(chan struct{}, 1)}
+		s := &Server{api: api, cfg: ServerConfig{DB: store, FederationSigning: v}, federationPushMemory: semaphore.NewWeighted(1)}
 		var body io.Reader = strings.NewReader("binary")
 		if mode == "push-only preflight" {
 			body = nil
@@ -277,4 +270,32 @@ func TestFederationAttachmentReadAndUploadAdmissionAreIndependent(t *testing.T) 
 			}()
 		}
 	})
+}
+
+// Push admission reserves the declared body size, or the full limit when unknown.
+func TestFederationPushMemoryAdmission(t *testing.T) {
+	api := huma.NewAPI(huma.DefaultConfig("fixture", "1"), humago.NewAdapter(http.NewServeMux(), ""))
+	path := "/api/v1/projects/{project_id}/federation/events:ingest"
+	huma.Register(api, huma.Operation{OperationID: "ingestFederationProjectEvents", Method: http.MethodPost, Path: path}, func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
+	memory := semaphore.NewWeighted(2 * federationsigning.MaxBodyBytes)
+	s := &Server{api: api, federationPushMemory: memory}
+	handler := s.withFederationSigning(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("unauthorized handler called") }), true)
+	request := func(length int64) *httptest.ResponseRecorder {
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "https://hub.example/api/v1/projects/1/federation/events:ingest", http.NoBody)
+		r.ContentLength = length
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		return w
+	}
+	require.True(t, memory.TryAcquire(2*federationsigning.MaxBodyBytes-1024))
+	w := request(2048)
+	require.Equal(t, http.StatusTooManyRequests, w.Code)
+	require.Equal(t, "1", w.Header().Get("Retry-After"))
+	require.Equal(t, http.StatusRequestEntityTooLarge, request(federationsigning.MaxBodyBytes+1).Code)
+	require.Equal(t, http.StatusTooManyRequests, request(-1).Code)
+	memory.Release(2*federationsigning.MaxBodyBytes - 1024)
+	require.Equal(t, http.StatusUnauthorized, request(2048).Code)
+	require.Equal(t, http.StatusUnauthorized, request(-1).Code)
+	require.True(t, memory.TryAcquire(2*federationsigning.MaxBodyBytes))
+	memory.Release(2 * federationsigning.MaxBodyBytes)
 }

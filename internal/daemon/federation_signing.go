@@ -107,33 +107,13 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 				}
 			}
 		}
-		// Bulk uploads retain their memory bound without occupying the slots
-		// used by metadata, event polls, and lease requests.
-		admission := s.federationControlAdmission
 		bodyLimit := int64(64 << 10)
 		attachmentTransfer := signingpolicy.Unambiguous(r.URL) && federationsigning.IsAttachmentTransfer(r.Method, r.URL.Path)
-		if route.operation == "ingestFederationProjectEvents" || route.operation == "acceptRelayDeliveries" || isCronJobWriteOperation(route.operation) {
-			admission = s.federationIngestAdmission
+		push := route.operation == "ingestFederationProjectEvents" || route.operation == "acceptRelayDeliveries" || isCronJobWriteOperation(route.operation)
+		if push {
 			bodyLimit = federationsigning.MaxBodyBytes
-		}
-		if attachmentTransfer {
-			if r.Method == http.MethodPost {
-				admission = s.federationTransferAdmission
-				bodyLimit = federationsigning.AttachmentMaxBodyBytes
-			} else {
-				admission = s.federationReadAdmission
-			}
-		}
-		select {
-		case admission <- struct{}{}:
-			defer func() { <-admission }()
-			if admission == s.federationControlAdmission {
-				r = r.WithContext(withFederationControlAdmission(r.Context()))
-			}
-		default:
-			w.Header().Set("Retry-After", "1")
-			api.WriteEnvelope(w, http.StatusTooManyRequests, "admission_limited", "federation admission is full")
-			return
+		} else if attachmentTransfer && r.Method == http.MethodPost {
+			bodyLimit = federationsigning.AttachmentMaxBodyBytes
 		}
 		deadline := time.Now().Add(60 * time.Second)
 		if attachmentTransfer {
@@ -147,6 +127,19 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 			api.WriteEnvelope(w, http.StatusRequestEntityTooLarge, "body_too_large", "federation body is too large")
 			return
 		}
+		if push {
+			weight := r.ContentLength
+			if weight < 0 {
+				weight = bodyLimit
+			}
+			if !s.federationPushMemory.TryAcquire(weight) {
+				w.Header().Set("Retry-After", "1")
+				api.WriteEnvelope(w, http.StatusTooManyRequests, "admission_limited", "federation push memory is full")
+				return
+			}
+			defer s.federationPushMemory.Release(weight)
+		}
+
 		r.Body = http.MaxBytesReader(w, r.Body, bodyLimit)
 		headerSize := 0
 		for name, values := range r.Header {

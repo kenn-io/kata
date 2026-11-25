@@ -252,8 +252,8 @@ not provide a shared replay service.
 | Nonce | 24 random bytes, unpadded base64url |
 | Replay capacity | 8,192 live nonces; full cache rejects new admissions |
 | Ingest body / signed relay envelope / other request body / header budget | 64 MiB / 128 MiB / 64 KiB / 16 KiB |
-| Concurrent admissions across daemon listeners | 2 ingests plus 16 metadata, poll and lease requests |
-| Ingress connections / request duration | 16 / 60 seconds |
+| Push memory across daemon listeners | 256 MiB of declared push bodies |
+| Request duration | 60 seconds |
 
 The parser accepts only the fixed, canonical structured-field profile and
 rejects extra signatures, extra parameters, duplicate covered headers, trailers,
@@ -272,10 +272,10 @@ budget. A full 64 MiB snapshot still needs enough bandwidth to upload and finish
 processing within that request budget; retries cannot make a consistently slower
 upload finish.
 
-Two ingests may run at once, preserving the native adoption snapshot limit.
-Metadata, event polls, and leases run in a separate pool so slow uploads do not
-block them, and both pools hold admission until the handler finishes. If either
-a pool or the replay cache is full, the hub returns `429` with `Retry-After: 1`,
+Pushes reserve their declared body size until their handler finishes. A push
+without a declared size reserves 128 MiB. Metadata, polls, leases, and streamed
+attachments do not use this budget. If push memory or the replay cache is full,
+the hub returns `429` with `Retry-After: 1`,
 and native sync retries create fresh signatures. During replay warm-up,
 including a clock-rollback fence, signed requests receive `503` with code
 `signing_warming` and `Retry-After: 5`. Failed authentication and unavailable

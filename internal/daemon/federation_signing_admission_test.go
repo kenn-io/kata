@@ -119,8 +119,7 @@ func TestFederationSigningAdmission(t *testing.T) {
 	})
 }
 
-// Two real ingest handlers wait for upload bytes while metadata and leases use
-// the same daemon's other admission pool. Channels control upload progress.
+// Small ingests can overlap while metadata and leases remain available.
 func TestFederationSigningUploadAdmissionPreservesControlRequests(t *testing.T) {
 	t.Setenv("TEST_ADMISSION_KEY", strings.Repeat("k", 64))
 	source := signingpolicy.Source{KeyID: "key-a", KeyEnv: "TEST_ADMISSION_KEY"}
@@ -152,11 +151,15 @@ func TestFederationSigningUploadAdmissionPreservesControlRequests(t *testing.T) 
 			return req
 		}
 		path := projectPath(project.ID) + "/federation/events:ingest"
-		entered, release := make(chan struct{}, 2), make(chan struct{})
+		entered, release := make(chan struct{}, 8), make(chan struct{})
 		var unblock sync.Once
 		defer unblock.Do(func() { close(release) })
-		done := make(chan *httptest.ResponseRecorder, 2)
-		for _, handler := range []http.Handler{srv.Handler(), ingress} {
+		done := make(chan *httptest.ResponseRecorder, 8)
+		for i := range 8 {
+			handler := ingress
+			if i%2 == 0 {
+				handler = srv.Handler()
+			}
 			req := request(http.MethodPost, path, raw)
 			req.Body = &pausedFederationUpload{Reader: bytes.NewReader(raw), entered: entered, release: release}
 			go func() {
@@ -165,7 +168,7 @@ func TestFederationSigningUploadAdmissionPreservesControlRequests(t *testing.T) 
 				done <- w
 			}()
 		}
-		for range 2 {
+		for range 8 {
 			select {
 			case <-entered:
 			case w := <-done:
@@ -190,10 +193,9 @@ func TestFederationSigningUploadAdmissionPreservesControlRequests(t *testing.T) 
 		}
 		w := httptest.NewRecorder()
 		ingress.ServeHTTP(w, request(http.MethodPost, path, raw))
-		require.Equal(t, http.StatusTooManyRequests, w.Code)
-		require.Equal(t, "1", w.Header().Get("Retry-After"))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		unblock.Do(func() { close(release) })
-		for range 2 {
+		for range 8 {
 			w := <-done
 			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		}

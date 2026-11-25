@@ -38,7 +38,7 @@ import (
 	"go.kenn.io/kata/internal/todoistsync"
 	"go.kenn.io/kata/internal/twentysync"
 	"go.kenn.io/kata/internal/vector"
-	"golang.org/x/net/netutil"
+	"golang.org/x/sync/semaphore"
 )
 
 // ServerConfig wires the daemon's runtime dependencies. DB and StartedAt are
@@ -291,17 +291,14 @@ func NewDefaultGitHubSyncRunner(cfg GitHubSyncRunnerConfig) GitHubSyncRunner {
 
 // Server bundles the http handler and lifecycle.
 type Server struct {
-	federationIngestAdmission   chan struct{}
-	federationTransferAdmission chan struct{}
-	federationReadAdmission     chan struct{}
-	federationControlAdmission  chan struct{}
-	stopFederationPollBridge    func()
-	cfg                         ServerConfig
-	baseHandler                 http.Handler
-	handler                     http.Handler
-	api                         huma.API
-	authPolicy                  authPolicy
-	noProjectDataRoutes         noProjectDataRouteMatcher
+	federationPushMemory     *semaphore.Weighted
+	stopFederationPollBridge func()
+	cfg                      ServerConfig
+	baseHandler              http.Handler
+	handler                  http.Handler
+	api                      huma.API
+	authPolicy               authPolicy
+	noProjectDataRoutes      noProjectDataRouteMatcher
 
 	shutdownTimeout time.Duration
 }
@@ -403,14 +400,11 @@ func NewServer(cfg ServerConfig) *Server {
 	withRootAttribution(humaAPI, cfg.RootSigning)
 	withExternalRootAdministration(humaAPI, cfg.Auth.AllowIdentityConnectorAdministration)
 
-	controlAdmission := make(chan struct{}, 16)
-	cfg.federationPollWaits = newFederationPollWaits(cap(controlAdmission), federationPollCPUs())
+	cfg.federationPollWaits = newFederationPollWaits(federationPollCPUs())
 	s := &Server{
 		cfg: cfg, api: humaAPI,
-		federationIngestAdmission:   make(chan struct{}, 2),
-		federationTransferAdmission: make(chan struct{}, 2),
-		federationReadAdmission:     make(chan struct{}, 16),
-		federationControlAdmission:  controlAdmission,
+		// Verification buffers push bodies; reserve the previous two-body budget.
+		federationPushMemory: semaphore.NewWeighted(2 * federationsigning.MaxBodyBytes),
 	}
 	registerRoutes(humaAPI, mux, cfg)
 	s.stopFederationPollBridge = startFederationPollBridge(cfg)
@@ -583,7 +577,6 @@ func (s *Server) serve(
 		httpSrv.ReadTimeout = 60 * time.Second
 		httpSrv.WriteTimeout = 60 * time.Second
 		httpSrv.IdleTimeout = 10 * time.Second
-		l = netutil.LimitListener(l, 16)
 	}
 	shutdownDone := make(chan error, 1)
 	go func() {
