@@ -538,7 +538,8 @@ func TestAgentInstructionsWritesInPlaceWhenRenameOverIsRefused(t *testing.T) {
 	}
 	home := t.TempDir()
 	instructions := filepath.Join(home, "AGENTS.md")
-	require.NoError(t, os.WriteFile(instructions, []byte("# Runtime managed\n"), 0o640)) //nolint:gosec // G306: exercise preservation of an existing fixture mode.
+	require.NoError(t, os.WriteFile(instructions, []byte("# Runtime managed\n"), 0o600))
+	require.NoError(t, os.Chmod(instructions, 0o640)) //nolint:gosec // G302: exercise preservation of an existing fixture mode, whatever the umask.
 	before, err := os.Stat(instructions)
 	require.NoError(t, err)
 	artifacts, err := planInstructionArtifacts(home, "example-agent", "install")
