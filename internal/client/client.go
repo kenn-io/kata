@@ -301,7 +301,9 @@ func probeAddressReadOnly(ctx context.Context, address string) (string, PingInfo
 // daemon runtime address: a `unix://` socket path or a plain host:port.
 func LocalHTTPClient(address string) (*http.Client, string) {
 	if path, ok := strings.CutPrefix(address, "unix://"); ok {
-		return &http.Client{Transport: UnixTransport(path), Timeout: 1 * time.Second}, UnixBase
+		transport := UnixTransport(path)
+		transport.DisableKeepAlives = true
+		return &http.Client{Transport: transport, Timeout: 1 * time.Second}, UnixBase
 	}
 	return &http.Client{Timeout: 1 * time.Second}, "http://" + address
 }
@@ -343,6 +345,7 @@ func Probe(ctx context.Context, client *http.Client, base string) (PingInfo, err
 // named Unix socket. Used by both the discovery probe and NewHTTPClient.
 func UnixTransport(path string) *http.Transport {
 	return &http.Transport{
+		IdleConnTimeout: 90 * time.Second,
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			return (&net.Dialer{}).DialContext(ctx, "unix", path)
 		},

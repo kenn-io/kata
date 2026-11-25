@@ -256,6 +256,11 @@ type PollFederationProjectEventsQuery struct {
 	Wait *int64 `json:"wait,omitempty"`
 }
 
+type WatchFederationProjectEventsQuery struct {
+	// Wait Seconds the hub may hold the watch while no named project has events after its cursor. The hub caps it at X-Kata-Federation-Poll-Wait-Max and answers at once when it cannot hold the request.
+	Wait *int64 `json:"wait,omitempty"`
+}
+
 type OfferRelayDeliveriesQuery struct {
 	Stream         *OfferRelayDeliveriesQueryStream `json:"stream,omitempty"`
 	Limit          *int64                           `json:"limit,omitempty" validate:"omitempty,gte=1,lte=1024"`

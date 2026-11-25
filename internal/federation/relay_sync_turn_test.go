@@ -539,7 +539,8 @@ func TestRunnerDeliversHeldPollAnswersDuringARelayBacklog(t *testing.T) {
 	var held atomic.Int64
 	hubHandler := hub.Handler()
 	hubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/federation/events") && r.URL.Query().Has("wait") {
+		// The spoke holds a poll, or a watch where the hub takes watches.
+		if r.URL.Query().Has("wait") && (strings.HasSuffix(r.URL.Path, "/federation/events") || strings.HasSuffix(r.URL.Path, "/federation/events:watch")) {
 			held.Add(1)
 		}
 		hubHandler.ServeHTTP(w, r)

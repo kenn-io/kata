@@ -24,6 +24,7 @@ var signingCapabilities = map[string][]string{
 	"restoreCronJob":                {"push"},
 	"getFederationProjectMetadata":  {"pull", "push"},
 	"pollFederationProjectEvents":   {"pull"},
+	"watchFederationProjectEvents":  {"pull"},
 	"searchFederationProject":       {"pull"},
 	"ingestFederationProjectEvents": {"push"},
 	"disconnectRelayEnrollment":     {"push"},
