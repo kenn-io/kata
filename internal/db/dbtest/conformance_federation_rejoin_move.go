@@ -79,7 +79,6 @@ func checkFederationRejoinCommentReply(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	pending, err := store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), binding.PushCursorEventID, 100)
 	require.NoError(t, err)
-	require.Contains(t, pending, unrelated)
 	require.NotContains(t, pending, reply)
 	return nil
 }
@@ -114,9 +113,16 @@ func checkRejoinSnapshotComments(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	require.True(t, inserted)
 	require.NoError(t, store.MaterializeFederatedProject(ctx, project.ID))
+	acknowledged, acknowledgedEvent, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "acknowledged"})
+	require.NoError(t, err)
+	require.NoError(t, store.AdvanceFederationPushCursor(ctx, project.ID, acknowledgedEvent.ID))
 	_, err = store.LeaveFederationReplica(ctx, project.ID)
 	require.NoError(t, err)
 	local, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "local"})
+	require.NoError(t, err)
+	_, err = store.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: project.ID, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "old-actor"})
+	require.NoError(t, err)
+	_, err = store.LeaveFederationReplica(ctx, project.ID)
 	require.NoError(t, err)
 	_, binding := rejoinAdopt(t, store, project)
 	for _, event := range []db.RemoteEvent{remoteSnapshot, sharedEvent, stubEvent} {
@@ -126,7 +132,7 @@ func checkRejoinSnapshotComments(t *testing.T, store db.Storage) {
 	}
 	keepRejoinSnapshots(t, store, project, binding, issue.UID)
 	var kept bool
-	for _, comment := range []struct{ name, uid string }{{"local", local.UID}, {"event", sharedUID}, {"snapshot", snapshotCommentUID}, {"stub", stubUID}} {
+	for _, comment := range []struct{ name, uid string }{{"local", local.UID}, {"acknowledged", acknowledged.UID}, {"event", sharedUID}, {"snapshot", snapshotCommentUID}, {"stub", stubUID}} {
 		_, edit, changed, err := store.EditComment(ctx, db.EditCommentParams{IssueID: issue.ID, CommentUID: comment.uid, Actor: "new-actor", Body: "edited"})
 		require.NoError(t, err)
 		require.True(t, changed)

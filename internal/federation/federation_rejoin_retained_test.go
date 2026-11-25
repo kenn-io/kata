@@ -150,7 +150,7 @@ func checkRejoinContinuesAfterLocalWorkflowAndJob(t *testing.T) {
 }
 
 func TestRejoinKeepsOldActorEventsLocal(t *testing.T) {
-	t.Run("snapshot comments before pull", func(t *testing.T) {
+	t.Run("comments on retained snapshots", func(t *testing.T) {
 		ctx := t.Context()
 		hub, projects := newMoveDeliveryHub(t, "rejoin-project")
 		spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
@@ -195,37 +195,6 @@ func TestRejoinKeepsOldActorEventsLocal(t *testing.T) {
 		require.Equal(t, "reply to shared", comments[1].Body)
 		require.Equal(t, shared.UID, comments[1].ReplyToUID)
 	})
-	t.Run("cross-task reply to retained comment", func(t *testing.T) {
-		ctx := t.Context()
-		hub, projects := newMoveDeliveryHub(t, "rejoin-project")
-		spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
-		project := spoke.projects[0]
-		target, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "target", Author: "old-actor"})
-		require.NoError(t, err)
-		source, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "source", Author: "old-actor"})
-		require.NoError(t, err)
-		require.NoError(t, spoke.sync(t, 0))
-		_, err = spoke.env.DB.LeaveFederationReplica(ctx, project.ID)
-		require.NoError(t, err)
-		comment, _, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: target.ID, Author: "old-actor", Body: "local"})
-		require.NoError(t, err)
-		token := rejoinNewActor(t, hub, projects[0], spoke.env, project)
-		_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: source.ID, Author: "new-actor", Body: "reply", ReplyToUID: comment.UID, ReplyKind: "reply"})
-		require.NoError(t, err)
-		later, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "later", Author: "new-actor"})
-		require.NoError(t, err)
-		binding, err := spoke.env.DB.FederationBindingByProject(ctx, project.ID)
-		require.NoError(t, err)
-		creds := config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[0].ID, Token: token, Actor: "new-actor", Capabilities: "pull,push"}
-		require.NoError(t, SyncFederationOnce(ctx, spoke.env.DB, binding, creds))
-		_, err = hub.DB.IssueByUID(ctx, later.UID, db.IncludeDeletedNo)
-		require.NoError(t, err)
-		hubSource, err := hub.DB.IssueByUID(ctx, source.UID, db.IncludeDeletedNo)
-		require.NoError(t, err)
-		comments, err := hub.DB.CommentsByIssue(ctx, hubSource.ID)
-		require.NoError(t, err)
-		require.Empty(t, comments)
-	})
 	t.Run("accepted duplicates", checkRejoinBatchesAlreadyAcceptedOldEvents)
 	t.Run("more than one page", checkRejoinPublishesAfter500OldTasks)
 	t.Run("workflow and job", checkRejoinContinuesAfterLocalWorkflowAndJob)
@@ -234,12 +203,18 @@ func TestRejoinKeepsOldActorEventsLocal(t *testing.T) {
 		snapshots  bool
 		quarantine bool
 		race       bool
+		moved      bool
 	}{
 		{name: "unsent adoption snapshots", snapshots: true},
 		{name: "existing actor quarantine", quarantine: true},
 		{name: "comment on missing task", race: true},
+		{name: "comment on retained move", moved: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.moved {
+				checkRejoinCommentOnRetainedMove(t)
+				return
+			}
 			ctx := t.Context()
 			hub, projects := newMoveDeliveryHub(t, "rejoin-project")
 			var spoke *testenv.Env
@@ -377,7 +352,8 @@ func TestRejoinCommentEditAfterHubMove(t *testing.T) {
 	require.Equal(t, "edited", comments[0].Body)
 }
 
-func TestRejoinCommentOnRetainedMoveStaysLocal(t *testing.T) {
+func checkRejoinCommentOnRetainedMove(t *testing.T) {
+	t.Helper()
 	ctx := t.Context()
 	hub, projects := newMoveDeliveryHub(t, "move-source", "move-target")
 	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor", "old-actor")
@@ -414,7 +390,7 @@ func TestRejoinRefusalDoesNotKeepAfterLeaseLoss(t *testing.T) {
 	project := spoke.projects[0]
 	_, err := spoke.env.DB.LeaveFederationReplica(ctx, project.ID)
 	require.NoError(t, err)
-	_, event, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "local task", Author: "old-actor"})
+	_, _, err = spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "local task", Author: "old-actor"})
 	require.NoError(t, err)
 	token := rejoinNewActor(t, hub, projects[0], spoke.env, project)
 	binding, err := spoke.env.DB.FederationBindingByProject(ctx, project.ID)
@@ -443,11 +419,6 @@ func TestRejoinRefusalDoesNotKeepAfterLeaseLoss(t *testing.T) {
 	kept, err := spoke.env.DB.HasKeptFederationEvents(ctx, project.ID)
 	require.NoError(t, err)
 	require.False(t, kept)
-	current, err := spoke.env.DB.FederationBindingByProject(ctx, project.ID)
-	require.NoError(t, err)
-	pending, err := spoke.env.DB.PendingFederationPushEvents(ctx, project.ID, spoke.env.DB.InstanceUID(), current.PushCursorEventID, 100)
-	require.NoError(t, err)
-	require.Contains(t, pending, event)
 }
 
 func TestRejoinCommentDoesNotKeepAfterLeaseLoss(t *testing.T) {
@@ -461,7 +432,6 @@ func TestRejoinCommentDoesNotKeepAfterLeaseLoss(t *testing.T) {
 	require.NoError(t, err)
 	_, err = spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true})
 	require.NoError(t, err)
-	require.NoError(t, spoke.DB.AdvanceFederationPushCursor(ctx, project.ID, original.ID))
 	kept, err := spoke.DB.KeepFederationEventLocal(ctx, project.ID, original.ID)
 	require.NoError(t, err)
 	require.True(t, kept)

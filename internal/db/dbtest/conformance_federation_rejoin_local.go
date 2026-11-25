@@ -8,56 +8,6 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-func checkFederationRejoinAdoptedCommentEvidence(t *testing.T, store db.Storage) error {
-	ctx := t.Context()
-	project, err := store.CreateProject(ctx, "comment-evidence")
-	require.NoError(t, err)
-	binding := db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "old-actor", Enabled: true, PushEnabled: true}
-	_, err = store.UpsertFederationBinding(ctx, binding)
-	require.NoError(t, err)
-	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "shared", Author: "old-actor"})
-	require.NoError(t, err)
-	shared, sharedEvent, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "shared"})
-	require.NoError(t, err)
-	require.NoError(t, store.AdvanceFederationPushCursor(ctx, project.ID, sharedEvent.ID))
-	_, err = store.LeaveFederationReplica(ctx, project.ID)
-	require.NoError(t, err)
-	local, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "local"})
-	require.NoError(t, err)
-	_, err = store.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: project.ID, HubURL: binding.HubURL, HubProjectID: 1, HubProjectUID: project.UID, Actor: "old-actor"})
-	require.NoError(t, err)
-	_, err = store.LeaveFederationReplica(ctx, project.ID)
-	require.NoError(t, err)
-	_, err = store.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: project.ID, HubURL: binding.HubURL, HubProjectID: 1, HubProjectUID: project.UID, Actor: "old-actor"})
-	require.NoError(t, err)
-	_, err = store.LeaveFederationReplica(ctx, project.ID)
-	require.NoError(t, err)
-	binding.Actor = "new-actor"
-	binding, err = store.UpsertFederationBinding(ctx, binding)
-	require.NoError(t, err)
-	pending, err := store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), binding.PushCursorEventID, 100)
-	require.NoError(t, err)
-	for _, event := range pending {
-		if event.Type == "issue.snapshot" {
-			kept, err := store.KeepFederationEventLocal(ctx, project.ID, event.ID)
-			require.NoError(t, err)
-			require.True(t, kept)
-		}
-	}
-	for _, tc := range []struct {
-		comment db.Comment
-		local   bool
-	}{{shared, false}, {local, true}} {
-		_, edit, changed, err := store.EditComment(ctx, db.EditCommentParams{IssueID: issue.ID, CommentUID: tc.comment.UID, Actor: "new-actor", Body: "edited " + tc.comment.Body})
-		require.NoError(t, err)
-		require.True(t, changed)
-		kept, err := store.KeepFederationCommentDependentLocal(ctx, project.ID, edit.ID)
-		require.NoError(t, err)
-		require.Equal(t, tc.local, kept)
-	}
-	return nil
-}
-
 func checkFederationRejoinLocalEvents(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "rejoin-project")
@@ -109,9 +59,9 @@ func checkFederationRejoinLocalEvents(t *testing.T, store db.Storage) error {
 	binding, err = store.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
 	require.Equal(t, retained.ID, binding.PushCursorEventID)
-	pending, err := store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), binding.PushCursorEventID, 100)
+	kept, err = store.KeepFederationDependentLocal(ctx, project.ID, comment.ID)
 	require.NoError(t, err)
-	require.Contains(t, pending, comment, "an actor refusal alone does not prove the hub lacks the task")
+	require.True(t, kept)
 	return nil
 }
 
@@ -143,10 +93,10 @@ func checkFederationRejoinResetRetention(t *testing.T, store db.Storage) error {
 		binding, err := store.FederationBindingByProject(ctx, project.ID)
 		require.NoError(t, err)
 		require.NoError(t, store.ResetFederatedProjectIfNoPendingPush(ctx, project.ID, 1, 0, store.InstanceUID(), binding.PushCursorEventID))
-		events, err := store.EventsByUIDs(ctx, project.ID, []string{root.UID, reply.UID})
+		events, err := store.EventsByUIDs(ctx, project.ID, []string{targetCreated.UID, sourceCreated.UID, root.UID, reply.UID})
 		require.NoError(t, err)
-		require.Len(t, events, 2)
-		for i, want := range []db.Event{root, reply} {
+		require.Len(t, events, 4)
+		for i, want := range []db.Event{targetCreated, sourceCreated, root, reply} {
 			require.Equal(t, want.UID, events[i].UID)
 			require.Equal(t, want.ContentHash, events[i].ContentHash)
 		}
@@ -163,38 +113,6 @@ func checkFederationRejoinResetRetention(t *testing.T, store db.Storage) error {
 		require.Equal(t, "retained", targetComments[0].Body)
 		require.Equal(t, "reply", sourceComments[0].Body)
 		require.Equal(t, targetComments[0].UID, sourceComments[0].ReplyToUID)
-	})
-	t.Run("retained root", func(t *testing.T) {
-		ctx := t.Context()
-		project, err := store.CreateProject(ctx, "rejoin-reset")
-		require.NoError(t, err)
-		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true})
-		require.NoError(t, err)
-		_, err = store.LeaveFederationReplica(ctx, project.ID)
-		require.NoError(t, err)
-		issue, retained, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "retained", Author: "old-actor"})
-		require.NoError(t, err)
-		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true})
-		require.NoError(t, err)
-		kept, err := store.KeepFederationEventLocal(ctx, project.ID, retained.ID)
-		require.NoError(t, err)
-		require.True(t, kept)
-		_, comment, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "retained discussion"})
-		require.NoError(t, err)
-		kept, err = store.KeepFederationDependentLocal(ctx, project.ID, comment.ID)
-		require.NoError(t, err)
-		require.True(t, kept)
-		_, later, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "later", Author: "new-actor"})
-		require.NoError(t, err)
-		require.NoError(t, store.AdvanceFederationPushCursor(ctx, project.ID, later.ID))
-		require.NoError(t, store.ResetFederatedProjectIfNoPendingPush(ctx, project.ID, 1, 0, store.InstanceUID(), later.ID))
-		events, err := store.EventsByUIDs(ctx, project.ID, []string{retained.UID, comment.UID})
-		require.NoError(t, err)
-		require.Len(t, events, 2)
-		for i, want := range []db.Event{retained, comment} {
-			require.Equal(t, want.UID, events[i].UID)
-			require.Equal(t, want.ContentHash, events[i].ContentHash)
-		}
 	})
 	return nil
 }

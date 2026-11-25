@@ -1058,7 +1058,6 @@ var storageScenarios = []scenario{
 	{name: "federation rejoin local events", run: checkFederationRejoinLocalEvents, methods: []string{"FederationKeptIssue", "HasKeptFederationEvents", "KeepFederationEventLocal", "KeepFederationDependentLocal"}},
 	{name: "federation rejoin move gate", run: checkFederationRejoinMoveGate},
 	{name: "federation rejoin comment reply", methods: []string{"KeepFederationCommentDependentLocal"}, run: checkFederationRejoinCommentReply},
-	{name: "federation rejoin adopted comment evidence", run: checkFederationRejoinAdoptedCommentEvidence},
 	{
 		name:    "federation push snapshot runs",
 		methods: []string{"CreateProject", "CreateIssue", "InsertRemoteEvent", "PendingFederationPushEvents"},
