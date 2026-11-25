@@ -26,7 +26,7 @@ func checkFederationRejoinMoveGate(t *testing.T, store db.Storage, backend Backe
 	t.Run("reversed related link", func(t *testing.T) { require.NoError(t, checkRejoinMoveRetainedReversedRelatedLink(t, store)) })
 	t.Run("snapshot content", func(t *testing.T) { require.NoError(t, checkRejoinMoveRetainedSnapshotContent(t, store)) })
 	t.Run("accepted snapshot content", func(t *testing.T) {
-		for _, content := range []string{"comment", "link"} {
+		for _, content := range []string{"comment", "comment edited", "link"} {
 			t.Run(content, func(t *testing.T) { checkRejoinMoveAcceptedSnapshotContent(t, store, content) })
 		}
 	})
@@ -71,6 +71,12 @@ func checkRejoinMoveAcceptedSnapshotContent(t *testing.T, store db.Storage, cont
 	require.True(t, inserted)
 	bindRejoinSpokes(t, store, target)
 	keepRejoinSnapshots(t, store, project, binding, issue.UID)
+	if content == "comment edited" {
+		_, edit, changed, err := store.EditComment(ctx, db.EditCommentParams{IssueID: issue.ID, CommentUID: commentUID, Actor: "new-actor", Body: "accepted edit"})
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.NoError(t, store.AdvanceFederationPushCursor(ctx, project.ID, edit.ID))
+	}
 	current := pullHubIssueUpdate(t, store, adopted, issue)
 	requireRejoinMove(t, store, current, adopted, target, nil)
 }

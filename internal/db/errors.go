@@ -247,6 +247,8 @@ var (
 	// ErrFederatedMoveUnsupported is returned when a move involves any federated
 	// project. Cross-project federated move semantics need a separate design.
 	ErrFederatedMoveUnsupported = errors.New("federated project move unsupported")
+	// ErrFederatedMoveUnsharedHistory identifies local-only history blocking a move.
+	ErrFederatedMoveUnsharedHistory = errors.New("task has unshared history after rejoin")
 
 	// ErrFederationMoveSourceUnauthorized reports missing or invalid source credential proof.
 	ErrFederationMoveSourceUnauthorized = errors.New("federated move source authority missing")

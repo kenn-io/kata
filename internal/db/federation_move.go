@@ -219,7 +219,7 @@ func CheckFederationKeptIssueMove(ctx context.Context, q moveQuery, from, to int
 		return err
 	}
 	if blocked {
-		return fmt.Errorf("%w: task has unshared history after rejoin", ErrFederatedMoveUnsupported)
+		return errors.Join(ErrFederatedMoveUnsupported, ErrFederatedMoveUnsharedHistory)
 	}
 	return nil
 }
@@ -304,7 +304,7 @@ func federationAcceptedMoveCommentSQL(postgres bool) string {
 	comment := `(proof.type='issue.commented' AND c.uid=` + field("comment_uid") + ` AND c.author=` + field("author") + ` AND c.body=` + field("body") + `)`
 	edit := `(proof.type='issue.comment_edited' AND c.uid=` + field("comment_uid") + ` AND ` + federationKeptCommentVersionSQL("proof", postgres) + `)`
 	snapshot := `(proof.type IN ('issue.created','issue.snapshot') AND EXISTS (SELECT 1 FROM ` + items + ` WHERE c.uid=` + itemField("comment_uid") + ` AND c.author=` + itemField("author") + ` AND c.body=` + itemField("body") + `))`
-	return `EXISTS (SELECT 1 FROM events proof WHERE proof.project_id=history.project_id AND proof.issue_uid=history.issue_uid AND (` + comment + ` OR ` + edit + ` OR ` + snapshot + `) AND NOT ` + federationKeptLocalSQL("proof") + ` AND ((proof.origin_instance_uid<>$4 AND NOT EXISTS (SELECT 1 FROM meta former WHERE former.key=$5 || proof.origin_instance_uid)) OR EXISTS (SELECT 1 FROM meta accepted WHERE accepted.key='` + FederationAcknowledgedEventPrefix + `' || (SELECT uid FROM projects WHERE id=proof.project_id) || '.' || proof.uid AND accepted.value='1')))`
+	return `EXISTS (SELECT 1 FROM events proof LEFT JOIN federation_bindings proof_binding ON proof_binding.project_id=proof.project_id WHERE proof.project_id=history.project_id AND proof.issue_uid=history.issue_uid AND (` + comment + ` OR ` + edit + ` OR ` + snapshot + `) AND NOT ` + federationKeptLocalSQL("proof") + ` AND ((proof.origin_instance_uid=$4 AND proof.id<=proof_binding.push_cursor_event_id) OR (proof.origin_instance_uid<>$4 AND NOT EXISTS (SELECT 1 FROM meta former WHERE former.key=$5 || proof.origin_instance_uid)) OR EXISTS (SELECT 1 FROM meta accepted WHERE accepted.key='` + FederationAcknowledgedEventPrefix + `' || (SELECT uid FROM projects WHERE id=proof.project_id) || '.' || proof.uid AND accepted.value='1')))`
 }
 
 func federationKeptCommentVersionSQL(alias string, postgres bool) string {
