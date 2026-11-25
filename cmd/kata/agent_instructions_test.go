@@ -764,3 +764,40 @@ func TestAgentInstructionsInPlaceRollbackRefusesNewHardLink(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, artifacts[0].Content, string(data))
 }
+
+// A symlink swapped in before rollback must not redirect the in-place restore.
+func TestAgentInstructionsInPlaceRollbackRefusesSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the in-place fallback is Unix-only")
+	}
+	home := t.TempDir()
+	instructions := filepath.Join(home, "AGENTS.md")
+	require.NoError(t, os.WriteFile(instructions, []byte("# Runtime managed\n"), 0o600))
+	elsewhere := filepath.Join(t.TempDir(), "unrelated.md")
+	require.NoError(t, os.WriteFile(elsewhere, []byte("Unrelated\n"), 0o600))
+	artifacts, err := planInstructionArtifacts(home, "example-agent", "install")
+	require.NoError(t, err)
+	write := newInstructionWriter(refuseRenameOver("AGENTS.md"))
+	err = applyInstructionArtifactsWithWriter(artifacts, func(path, content string, keepEmpty bool, mode os.FileMode) error {
+		if strings.HasSuffix(path, "SKILL.md") && content != "" {
+			require.NoError(t, os.Remove(instructions))
+			require.NoError(t, os.Symlink(elsewhere, instructions))
+			return errors.New("injected write failure")
+		}
+		return write(path, content, keepEmpty, mode)
+	})
+	require.ErrorContains(t, err, "injected write failure")
+	data, err := os.ReadFile(elsewhere) //nolint:gosec // G304: fixture under TempDir.
+	require.NoError(t, err)
+	require.Equal(t, "Unrelated\n", string(data))
+}
+
+// Once overwriting starts, any failure is marked errWrittenInPlace. A
+// read-only descriptor makes the real truncate fail.
+func TestOverwriteInstructionFileMarksFailures(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "AGENTS.md")
+	require.NoError(t, os.WriteFile(path, []byte("# Existing\n"), 0o600))
+	file, err := os.Open(path) //nolint:gosec // G304: fixture under TempDir.
+	require.NoError(t, err)
+	require.ErrorIs(t, overwriteInstructionFile(file, []byte("new")), errWrittenInPlace)
+}

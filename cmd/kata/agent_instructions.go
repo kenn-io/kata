@@ -444,12 +444,13 @@ func renameOverRefused(path string, err error) bool {
 
 // writeInstructionInPlace overwrites an existing file without replacing it, so
 // its inode, owner and mode stay. Like atomicfile, it never writes through a
-// hard link, whose other names may belong to a backup or another harness; it
-// checks the opened file before truncating it, so rollback rechecks too. It is
+// hard link, whose other names may belong to a backup or another harness, or
+// follows a symlink; it checks the opened file before truncating it, so
+// rollback rechecks too. It is
 // not atomic: a failure after truncation wraps errWrittenInPlace so the caller
 // restores the preimage.
 func writeInstructionInPlace(path string, data []byte) error {
-	file, err := os.OpenFile(path, os.O_WRONLY, 0) //nolint:gosec // G304: path passed checkInstructionPath and renameOverRefused.
+	file, err := os.OpenFile(path, os.O_WRONLY|openNoFollow, 0) //nolint:gosec // G304: path passed checkInstructionPath and renameOverRefused.
 	if err != nil {
 		return err
 	}
@@ -460,7 +461,13 @@ func writeInstructionInPlace(path string, data []byte) error {
 	if err != nil {
 		return errors.Join(err, file.Close())
 	}
-	err = file.Truncate(0)
+	return overwriteInstructionFile(file, data)
+}
+
+// overwriteInstructionFile replaces the contents of an open file and closes
+// it. Any failure wraps errWrittenInPlace, since the file may be truncated.
+func overwriteInstructionFile(file *os.File, data []byte) error {
+	err := file.Truncate(0)
 	if err == nil {
 		_, err = file.Write(data)
 	}
