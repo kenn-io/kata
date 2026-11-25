@@ -743,16 +743,20 @@ before. The runner takes each project's sync lock and rereads its binding and
 credential before sending, and leaves out a project that is being rebound. A
 project also polls on its own when it pushed or retried a claim earlier in its
 turn, or when its binding, credential or cursor changed after the batch was
-sent. On a PostgreSQL spoke, which holds 25 lock connections, a larger group
-goes out in one batch per 25 projects.
+sent. On a PostgreSQL spoke, which holds 25 lock connections, a batch locks at
+most 20 projects, so claims and cron forwarding still find a free connection
+while it is in flight. A larger group goes out in one batch per 20 projects.
 
 The runner batches only after a hub's poll response advertises the batched
 route, so other hubs keep receiving one poll per project. When a batch is
-refused with `404` or `405`, or times out, the runner reports it once through
-its error log and polls that hub's projects one at a time for the next hour. A
-`403` does the same for that credential's projects only. A `429` or `503` is
-logged once and holds the group's projects on the retry schedule described
-below, as if each project's own poll had been throttled. Signed credentials
+refused with `404` or `405`, or times out, including a `504` from a proxy in
+front of the hub, the runner reports it once through its error log and polls
+that hub's projects one at a time for the next hour. A `403` does the same for
+that credential's projects only. A `429` or `503` is logged once and holds the
+group's projects on the retry schedule described below, as if each project's
+own poll had been throttled. A `429` or `503` for one project inside a batch
+holds that project the same way and pauses the hub's other batches and pulls
+until the hub's wait ends. Signed credentials
 and relay bindings always poll one project at a time, because a signature
 covers one project's request.
 

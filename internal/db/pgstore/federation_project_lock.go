@@ -97,6 +97,10 @@ func releaseFederationProjectLock(releaseTx, releaseSlot func()) func() {
 	}
 }
 
+// FederationLockCapacity is how many federation project locks the store can
+// hold at once: each one keeps a connection from a pool of this size.
+func (s *Store) FederationLockCapacity() int { return federationLockMaxOpenConns }
+
 // TryAcquireFederationProjectSharedLock never waits behind another process's
 // rebind or a saturated federation-lock connection pool. A false result leaves
 // no slot, transaction, or advisory lock behind.

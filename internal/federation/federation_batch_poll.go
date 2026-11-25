@@ -27,6 +27,17 @@ import (
 // embedding host that does not allow the route does.
 const batchPollRefusalHold = time.Hour
 
+// batchPollLockHeadroom is how many of a spoke's federation lock connections a
+// batch leaves free, so claims and cron forwarding, which do not wait for a
+// lock, still find one while the batch is in flight.
+const batchPollLockHeadroom = 5
+
+// federationLockCapacity is a store whose federation project locks each hold
+// one connection from a fixed pool, as PostgreSQL's do.
+type federationLockCapacity interface {
+	FederationLockCapacity() int
+}
+
 // batchPollResult is a project's answer from the pass's batched poll: an empty
 // page for an idle project, or the refusal its single-project poll returned.
 // Body and Err are what PollProjectEvents would have returned.
@@ -136,16 +147,23 @@ type prefetchedFederationPollKey struct{}
 // firstFederationPoll returns this turn's first page. The pass's batched poll
 // answers it only when it checked the cursor the turn holds and the turn has
 // not written to the hub, so a push or claim retry is still followed by a poll
-// that can see it, as before batching. advertised is false for a batched page,
-// which carries no single-poll headers, so the hub's last advertisement stands.
-func firstFederationPoll(ctx context.Context, client *Client, hubProjectID, afterID int64) (api.PollEventsBody, hubPollAdvertisement, bool, error) {
+// that can see it, as before batching. polled reports a fresh poll this turn.
+// Only a fresh poll tells the held-poll watchers what the hub advertises, since
+// a batched page carries no single-poll headers, and only a fresh poll shows a
+// hub has recovered from a capacity cooldown.
+func firstFederationPoll(ctx context.Context, client *Client, hubProjectID, afterID int64) (body api.PollEventsBody, polled bool, err error) {
 	prefetched, _ := ctx.Value(prefetchedFederationPollKey{}).(*prefetchedFederationPoll)
 	observation, _ := ctx.Value(federationTurnObservationKey{}).(*federationTurnObservation)
 	if prefetched != nil && prefetched.afterID == afterID && (observation == nil || !observation.hubWrite) {
-		return prefetched.result.Body, hubPollAdvertisement{}, false, prefetched.result.Err
+		return prefetched.result.Body, false, prefetched.result.Err
 	}
-	body, advertisement, err := client.pollProjectEvents(ctx, hubProjectID, "", afterID, federationPollLimit, 0)
-	return body, advertisement, true, err
+	body, advertised, err := client.pollProjectEvents(ctx, hubProjectID, "", afterID, federationPollLimit, 0)
+	if err == nil {
+		// The pull tells the held-poll watchers whether this hub takes one
+		// watch for all of its bindings before any of them holds a poll there.
+		learnHubFromContext(ctx, client.baseURL, advertised)
+	}
+	return body, true, err
 }
 
 // batchPollKey groups the bindings whose polls one request may carry: the
@@ -309,8 +327,9 @@ func (r *Runner) prefetchPolls(ctx context.Context, spokes []activeSpokeBinding,
 // lockBatchMembers takes each member's shared sync lock without waiting and
 // rereads its binding and credential under that lock, as a turn does. A member
 // that is mid-rebind or no longer in the group is left out and polls in its own
-// turn. Candidates whose lock was not free come back as unlocked. The caller
-// releases the returned locks after the request.
+// turn. Candidates whose lock was not free, or that would use the lock
+// connections kept free, come back as unlocked. The caller releases the
+// returned locks after the request.
 func (r *Runner) lockBatchMembers(ctx context.Context, key batchPollKey, candidates []batchPollMember, credentials config.FederationCredentialStore) (members, unlocked []batchPollMember, release func()) {
 	var releases []func()
 	release = func() {
@@ -318,8 +337,16 @@ func (r *Runner) lockBatchMembers(ctx context.Context, key batchPollKey, candida
 			finish()
 		}
 	}
+	limit := len(candidates)
+	if pool, ok := r.DB.(federationLockCapacity); ok {
+		limit = max(pool.FederationLockCapacity()-batchPollLockHeadroom, 1)
+	}
 	members = make([]batchPollMember, 0, len(candidates))
 	for _, candidate := range candidates {
+		if len(releases) >= limit {
+			unlocked = append(unlocked, candidate)
+			continue
+		}
 		finish, err := federationcoord.TryBeginSync(ctx, federationcoord.Key(r.DB.InstanceUID(), candidate.projectID), r.DB, candidate.projectID)
 		if err != nil {
 			unlocked = append(unlocked, candidate)
@@ -352,7 +379,8 @@ func (r *Runner) lockBatchMembers(ctx context.Context, key batchPollKey, candida
 // prefetchGroup batches one chunk of a credential group. A PostgreSQL spoke
 // holds one connection per project lock and has fewer of them than a chunk
 // can hold, so each round releases its locks before it locks the projects it
-// could not. A group then takes one batch per pool's worth of projects. It
+// could not. A group then takes one batch per pool's worth of projects, less
+// the connections kept free. It
 // stops once the hub refuses or throttles the group or a round locks nothing
 // new.
 func (r *Runner) prefetchGroup(ctx context.Context, key batchPollKey, candidates []batchPollMember, credentials config.FederationCredentialStore, pages map[int64]*prefetchedFederationPoll, now time.Time, retries *SyncRetries) {
@@ -370,7 +398,10 @@ func (r *Runner) prefetchGroup(ctx context.Context, key batchPollKey, candidates
 
 // sendBatch checks locked members in one request and records each idle or
 // refused project's answer. It reports whether the hub asked the group to
-// wait; the members are then held on the retry schedule their turns use.
+// wait. A refusal of the whole batch holds the members on the retry schedule
+// their turns use. A project the hub throttles inside the batch starts the
+// hub's capacity cooldown and its own retry schedule, as its throttled pull
+// would, so no further batch or pull goes to that hub until the wait ends.
 func (r *Runner) sendBatch(ctx context.Context, key batchPollKey, members []batchPollMember, pages map[int64]*prefetchedFederationPoll, retries *SyncRetries) bool {
 	if len(members) < 2 {
 		return false
@@ -417,7 +448,7 @@ func (r *Runner) sendBatch(ctx context.Context, key batchPollKey, members []batc
 		}
 		return true
 	}
-	if reason, wholeHub, refused := batchPollRefusal(err); refused {
+	if summary, wholeHub, refused := batchPollRefusal(err, cred.HubURL); refused {
 		until := r.refusalNow().Add(batchPollRefusalHold)
 		r.batchPolls.refuse(key, wholeHub, until)
 		if r.OnError != nil {
@@ -425,8 +456,7 @@ func (r *Runner) sendBatch(ctx context.Context, key batchPollKey, members []batc
 			if !wholeHub {
 				paused = "this credential's projects"
 			}
-			r.OnError(fmt.Errorf("hub %s answered the batched federation poll with %s; polling %s one at a time until %s",
-				cred.HubURL, reason, paused, until.Format(time.RFC3339)))
+			r.OnError(fmt.Errorf("%s; polling %s one at a time until %s", summary, paused, until.Format(time.RFC3339)))
 		}
 		return false
 	}
@@ -434,14 +464,25 @@ func (r *Runner) sendBatch(ctx context.Context, key batchPollKey, members []batc
 		// Each project's own poll reports whatever is wrong with the hub.
 		return false
 	}
-	hubPull.clear(client.baseURL, probe)
+	var throttled error
 	for i, result := range results {
-		if result != nil {
-			pages[members[i].projectID] = &prefetchedFederationPoll{
-				result: *result, key: key, hubProjectID: members[i].hubProjectID, afterID: members[i].afterID,
-			}
+		if result == nil {
+			continue
+		}
+		pages[members[i].projectID] = &prefetchedFederationPoll{
+			result: *result, key: key, hubProjectID: members[i].hubProjectID, afterID: members[i].afterID,
+		}
+		if hubCapacityUnavailable(result.Err) {
+			throttled = errors.Join(throttled, result.Err)
+			retries.record(members[i].projectID, members[i].retryIdentity, result.Err, r.effectiveInterval(), r.refusalNow())
 		}
 	}
+	if throttled != nil {
+		_, _, retryAfter := classifySyncRetry(throttled)
+		hubPull.recordUnavailable(client.baseURL, probe.version, retryAfter)
+		return true
+	}
+	hubPull.clear(client.baseURL, probe)
 	return false
 }
 
@@ -449,22 +490,24 @@ func (r *Runner) sendBatch(ctx context.Context, key batchPollKey, members []batc
 // a hub or a host in front of it that refuses the route, or a batch that
 // takes longer than the request timeout although single polls may not.
 // wholeHub is false only for 403, which can depend on the credential; a
-// missing route or a timeout affects every credential on that hub.
-func batchPollRefusal(err error) (reason string, wholeHub, refused bool) {
+// missing route or a timeout affects every credential on that hub. A 504 is a
+// proxy in front of the hub timing the batch out. summary says what happened,
+// for the runner's notice.
+func batchPollRefusal(err error, hub string) (summary string, wholeHub, refused bool) {
 	if status, ok := errors.AsType[*HubStatusError](err); ok {
 		switch status.StatusCode {
 		case http.StatusForbidden:
-			return fmt.Sprintf("status %d", status.StatusCode), false, true
+			return fmt.Sprintf("hub %s refused the batched federation poll with status %d", hub, status.StatusCode), false, true
 		case http.StatusNotFound, http.StatusMethodNotAllowed:
-			return fmt.Sprintf("status %d", status.StatusCode), true, true
+			return fmt.Sprintf("hub %s refused the batched federation poll with status %d", hub, status.StatusCode), true, true
+		case http.StatusGatewayTimeout:
+			return fmt.Sprintf("the batched federation poll to hub %s timed out at a proxy (status %d)", hub, status.StatusCode), true, true
 		}
 		return "", false, false
 	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return "a timeout", true, true
-	}
+	// A request timeout, including a context deadline, is a net.Error.
 	if netErr, ok := errors.AsType[net.Error](err); ok && netErr.Timeout() {
-		return "a timeout", true, true
+		return fmt.Sprintf("the batched federation poll to hub %s timed out", hub), true, true
 	}
 	return "", false, false
 }

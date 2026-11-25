@@ -42,11 +42,22 @@ type hubRequestCounts struct{ single, batch, other int }
 
 func newCountingHub(t *testing.T) *countingHub {
 	t.Helper()
+	return newCountingHubWith(t, nil)
+}
+
+// newCountingHubWith lets a test adjust the hub's server configuration, such
+// as an embedding host's federation access controller.
+func newCountingHubWith(t *testing.T, configure func(*daemon.ServerConfig)) *countingHub {
+	t.Helper()
 	store, err := testfix.OpenSQLite(t.Context(), filepath.Join(t.TempDir(), "hub.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, store.Close()) })
 	hub := &countingHub{store: store, counts: map[string]int{}}
-	server := daemon.NewServer(daemon.ServerConfig{DB: store, FederationBatchPoll: true})
+	cfg := daemon.ServerConfig{DB: store, FederationBatchPoll: true}
+	if configure != nil {
+		configure(&cfg)
+	}
+	server := daemon.NewServer(cfg)
 	t.Cleanup(func() { require.NoError(t, server.Close()) })
 	handler := server.Handler()
 	hub.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -353,12 +364,12 @@ func TestBatchPollRefusalHoldsOffATimedOutBatch(t *testing.T) {
 	// The client's request timeout surfaces as a url.Error wrapping the
 	// deadline, under the generated client's "error sending request" prefix.
 	timedOut := fmt.Errorf("error sending request: %w", &url.Error{Op: "Post", URL: "http://daemon.example/api/v1/federation/events:poll", Err: context.DeadlineExceeded})
-	_, wholeHub, refused := batchPollRefusal(timedOut)
+	_, wholeHub, refused := batchPollRefusal(timedOut, "http://daemon.example")
 	assert.True(t, refused)
 	assert.True(t, wholeHub, "a timeout pauses every credential on the hub")
 
 	refusedConnection := fmt.Errorf("error sending request: %w", &url.Error{Op: "Post", URL: "http://daemon.example/api/v1/federation/events:poll", Err: syscall.ECONNREFUSED})
-	_, _, refused = batchPollRefusal(refusedConnection)
+	_, _, refused = batchPollRefusal(refusedConnection, "http://daemon.example")
 	assert.False(t, refused, "an unreachable hub is reported by each project's own poll")
 }
 
@@ -514,4 +525,134 @@ func TestRunnerKeepsTheHubsWatchAdvertisementAcrossBatchedPasses(t *testing.T) {
 		assert.True(t, support.takesWatches(time.Now()),
 			"a batched page carries no poll headers, so the advertisement from the last single poll stands")
 	}
+}
+
+// admissionLimitedHub is an embedding host's federation access controller that
+// reports its admission full for the polls of one hub project.
+type admissionLimitedHub struct {
+	mu      sync.Mutex
+	limited int64
+}
+
+func (a *admissionLimitedHub) AuthorizeFederation(_ context.Context, request daemon.HostFederationAccessRequest) (daemon.HostFederationAccessDecision, error) {
+	a.mu.Lock()
+	limited := a.limited
+	a.mu.Unlock()
+	if request.Operation.ID == "pollFederationProjectEvents" && request.Project.ID == limited {
+		return daemon.HostFederationAccessDecision{}, daemon.ErrHostFederationAdmissionLimited
+	}
+	return daemon.HostFederationAccessDecision{TransactionFence: func(context.Context, db.Transaction) error { return nil }}, nil
+}
+
+func TestRunnerSendsNoFurtherBatchesAfterAProjectIsThrottledInsideOne(t *testing.T) {
+	access := &admissionLimitedHub{}
+	hub := newCountingHubWith(t, func(cfg *daemon.ServerConfig) { cfg.HostFederationAccess = access })
+	spoke := newBatchPollSpoke(t, hub, 5)
+	const secondToken = "second-shared-token"
+	_, err := hub.store.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
+		Token: secondToken, SpokeInstanceUID: spoke.env.DB.InstanceUID(), Capabilities: "claim,pull,push", Actor: "worker",
+	})
+	require.NoError(t, err)
+	for _, project := range spoke.hub[2:4] {
+		cred := spoke.creds[project.UID]
+		cred.Token = secondToken
+		spoke.creds[project.UID] = cred
+	}
+	_ = spoke.pass(t)
+	_ = spoke.pass(t)
+	hub.take()
+	access.mu.Lock()
+	access.limited = spoke.hub[0].ID
+	access.mu.Unlock()
+	retries := NewSyncRetries()
+
+	// The pass reports the throttled project's error.
+	_, _, _, _ = spoke.runner.runOnce(t.Context(), nil, nil, retries)
+	assert.Equal(t, 1, hub.take().batch,
+		"a project the hub throttles inside a batch pauses the hub's other batches, as a throttled pull does")
+	assert.True(t, retries.hubBlocked(hub.server.URL, time.Now()))
+	retry, waiting := retries.FederationSyncRetry(spoke.local[0].ID)
+	require.True(t, waiting, "the throttled project waits as its own throttled pull would")
+	assert.Equal(t, http.StatusTooManyRequests, retry.HTTPStatus)
+}
+
+func TestRunnerEndsAHubCooldownOnlyAfterAFreshPoll(t *testing.T) {
+	hub := newCountingHub(t)
+	spoke := newBatchPollSpoke(t, hub, 3)
+	_ = spoke.pass(t)
+	_ = spoke.pass(t)
+	hub.take()
+	spokes := spoke.spokePasses(t)
+	idle := spokes[0]
+	cred := config.FederationTransportCredential(idle.binding.HubURL, idle.binding.HubProjectID, idle.binding.AllowInsecure, spoke.creds[idle.project.UID])
+	key, ok := batchPollGroupKey(idle.binding, cred)
+	require.True(t, ok)
+	page := &prefetchedFederationPoll{
+		result:       batchPollResult{Body: api.PollEventsBody{Events: []api.EventEnvelope{}, NextAfterID: idle.binding.PullCursorEventID}},
+		key:          key,
+		hubProjectID: idle.binding.HubProjectID,
+		afterID:      idle.binding.PullCursorEventID,
+	}
+	// The hub asked pulls to wait after the batch was read, and that wait has
+	// since run out, so the turn holds the hub's recovery probe.
+	retries := NewSyncRetries()
+	retries.recordHubUnavailable(hub.server.URL, 0, 0, spoke.runner.effectiveInterval(), time.Now().Add(-24*time.Hour))
+	pull := &hubPullRetryContext{retries: retries, interval: spoke.runner.effectiveInterval(), now: time.Now}
+	ctx := context.WithValue(withHubPullRetries(t.Context(), pull), prefetchedFederationPollKey{}, page)
+
+	_, _, err := spoke.runner.runSpoke(ctx, idle, spoke.creds, nil, nil)
+	require.NoError(t, err)
+	assert.Equal(t, hubRequestCounts{}, hub.take(), "the turn uses the page the batch read")
+	_, cooling := retries.hubs[retryHubKey(hub.server.URL)]
+	assert.True(t, cooling, "a page read before the hub asked to wait does not show it has recovered")
+}
+
+// countingLockPoolStore is a lockPoolStore that reports its pool size, as the
+// PostgreSQL store does, and records the most locks held at once.
+type countingLockPoolStore struct {
+	lockPoolStore
+	mu      sync.Mutex
+	maxHeld int
+}
+
+func (s *countingLockPoolStore) FederationLockCapacity() int { return cap(s.connections) }
+
+func (s *countingLockPoolStore) TryAcquireFederationProjectSharedLock(ctx context.Context, projectID int64) (func(), bool, error) {
+	release, ok, err := s.lockPoolStore.TryAcquireFederationProjectSharedLock(ctx, projectID)
+	if ok {
+		s.mu.Lock()
+		s.maxHeld = max(s.maxHeld, len(s.connections))
+		s.mu.Unlock()
+	}
+	return release, ok, err
+}
+
+func TestRunnerLeavesSpokeLocksFreeWhileABatchIsInFlight(t *testing.T) {
+	hub := newCountingHub(t)
+	spoke := newBatchPollSpoke(t, hub, 30)
+	store := &countingLockPoolStore{Storage: spoke.env.DB, connections: make(chan struct{}, 25)}
+	spoke.runner.DB = store
+	_ = spoke.pass(t)
+	_ = spoke.pass(t)
+	hub.take()
+
+	_ = spoke.pass(t)
+	assert.Equal(t, 2, hub.take().batch, "30 projects take a batch of 20 and a batch of 10")
+	assert.LessOrEqual(t, store.maxHeld, 25-batchPollLockHeadroom,
+		"a batch leaves lock connections for claims and cron forwarding")
+}
+
+func TestBatchPollRefusalTreatsAGatewayTimeoutAsATimeout(t *testing.T) {
+	summary, wholeHub, refused := batchPollRefusal(&HubStatusError{StatusCode: http.StatusGatewayTimeout}, "http://daemon.example")
+	assert.True(t, refused, "a proxy that times out the batch would time it out on every pass")
+	assert.True(t, wholeHub)
+	assert.Contains(t, summary, "timed out")
+}
+
+func TestBatchPollRefusalSaysATimedOutHubDidNotAnswer(t *testing.T) {
+	timedOut := fmt.Errorf("error sending request: %w", &url.Error{Op: "Post", URL: "http://daemon.example/api/v1/federation/events:poll", Err: context.DeadlineExceeded})
+	summary, _, _ := batchPollRefusal(timedOut, "http://daemon.example")
+	assert.Equal(t, "the batched federation poll to hub http://daemon.example timed out", summary)
+	summary, _, _ = batchPollRefusal(&HubStatusError{StatusCode: http.StatusNotFound}, "http://daemon.example")
+	assert.Equal(t, "hub http://daemon.example refused the batched federation poll with status 404", summary)
 }
