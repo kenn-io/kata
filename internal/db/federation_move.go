@@ -234,7 +234,7 @@ func federationKeptIssueMoveSQL(postgres bool) string {
 	//nolint:gosec // G202: SQL fragments use fixed aliases; values are bound.
 	return `SELECT EXISTS(SELECT 1 FROM federation_bindings src JOIN federation_bindings dst ON dst.project_id=$2 WHERE src.project_id=$1 AND src.role='spoke' AND dst.role='spoke' AND src.enabled=1 AND dst.enabled=1 AND src.push_enabled=1 AND dst.push_enabled=1 AND (
  (NOT EXISTS(SELECT 1 FROM events e WHERE e.project_id=$1 AND e.issue_uid=$3 AND e.origin_instance_uid<>$4 AND NOT EXISTS(SELECT 1 FROM meta former WHERE former.key=$5 || e.origin_instance_uid) AND NOT ` + federationKeptLocalSQL("e") + `) AND EXISTS(SELECT 1 FROM events root WHERE root.project_id=$1 AND root.issue_uid=$3 AND root.type IN ('issue.created','issue.snapshot') AND ` + unaccepted("root", "src") + `))
- OR EXISTS(SELECT 1 FROM events history LEFT JOIN federation_bindings owner ON owner.project_id=history.project_id WHERE ((history.project_id=$1 AND ` + unaccepted("history", "src") + `) OR (history.project_id<>$1 AND history.type IN ('issue.linked','issue.links_changed','issue.snapshot') AND ` + unaccepted("history", "owner") + `)) AND ` + federationKeptSnapshotHistorySQL(postgres) + `)))`
+ OR EXISTS(SELECT 1 FROM events history LEFT JOIN federation_bindings owner ON owner.project_id=history.project_id WHERE history.issue_uid IN (SELECT $3 UNION SELECT from_issue_uid FROM links WHERE to_issue_uid=$3 UNION SELECT to_issue_uid FROM links WHERE from_issue_uid=$3) AND ((history.project_id=$1 AND ` + unaccepted("history", "src") + `) OR (history.project_id<>$1 AND history.type IN ('issue.linked','issue.links_changed','issue.snapshot') AND ` + unaccepted("history", "owner") + `)) AND ` + federationKeptSnapshotHistorySQL(postgres) + `)))`
 }
 
 // federationKeptSnapshotHistorySQL matches retained history still in the move document.
@@ -248,7 +248,7 @@ func federationKeptSnapshotHistorySQL(postgres bool) string {
 
 // federationAcceptedMoveLinkSQL finds a hub-known event proving this edge and author.
 func federationAcceptedMoveLinkSQL(postgres bool) string {
-	return `EXISTS (SELECT 1 FROM events proof LEFT JOIN federation_bindings proof_binding ON proof_binding.project_id=proof.project_id WHERE proof.project_id IN ($1,history.project_id) AND proof.actor=l.author AND ` + federationLinkEventSQL("proof", postgres) + ` AND NOT ` + federationKeptLocalSQL("proof") + ` AND ((proof.origin_instance_uid=$4 AND (proof.id<=proof_binding.push_cursor_event_id OR NOT (` + FederationUnresolvedEventSQL("proof") + `))) OR (proof.origin_instance_uid<>$4 AND NOT EXISTS(SELECT 1 FROM meta former WHERE former.key=$5 || proof.origin_instance_uid))))`
+	return `EXISTS (SELECT 1 FROM events proof LEFT JOIN federation_bindings proof_binding ON proof_binding.project_id=proof.project_id WHERE proof.issue_uid IN (l.from_issue_uid,l.to_issue_uid) AND proof.project_id IN ($1,history.project_id) AND proof.actor=l.author AND ` + federationLinkEventSQL("proof", postgres) + ` AND NOT ` + federationKeptLocalSQL("proof") + ` AND ((proof.origin_instance_uid=$4 AND (proof.id<=proof_binding.push_cursor_event_id OR NOT (` + FederationUnresolvedEventSQL("proof") + `))) OR (proof.origin_instance_uid<>$4 AND NOT EXISTS(SELECT 1 FROM meta former WHERE former.key=$5 || proof.origin_instance_uid))))`
 }
 
 // federationLinkEventSQL matches link l to a link event's type, endpoints, and direction.
@@ -365,10 +365,10 @@ func keepFederationLocalTx(ctx context.Context, tx *sql.Tx, projectID, eventID i
 	return true, FoldFederationAcknowledgedEvents(ctx, tx, projectID, origin)
 }
 
-// HasKeptFederationEvents reports whether a reset must rebuild local history.
-func HasKeptFederationEvents(ctx context.Context, tx *sql.Tx, projectID int64) (bool, error) {
+// HasKeptFederationEvents reports whether a project has retained events.
+func HasKeptFederationEvents(ctx context.Context, q moveQuery, projectID int64) (bool, error) {
 	var exists bool
-	err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM events e WHERE e.project_id=$1 AND `+federationKeptLocalSQL("e")+`)`, projectID).Scan(&exists)
+	err := q.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM projects p JOIN meta m ON m.key >= $2 || p.uid AND m.key < $2 || p.uid || 'z' AND substr(m.key,1,length($2 || p.uid || '.'))=$2 || p.uid || '.' WHERE p.id=$1 AND m.value='local')`, projectID, FederationAcknowledgedEventPrefix).Scan(&exists)
 	return exists, err
 }
 

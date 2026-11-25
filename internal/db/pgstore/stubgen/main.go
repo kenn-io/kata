@@ -150,6 +150,7 @@ var alreadyImplemented = map[string]bool{
 	"KeepFederationDependentLocal":         true, // federation_control.go
 	"KeepFederationCommentDependentLocal":  true, // federation_control.go
 	"FederationCommentDependent":           true, // federation_control.go
+	"HasKeptFederationEvents":              true, // federation_control.go
 	"FederationKeptIssue":                  true, // federation_control.go
 	"ExportFederationEnrollments":          true, // export.go
 	"ExportFederationQuarantine":           true, // export.go

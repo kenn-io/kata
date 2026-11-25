@@ -25,6 +25,8 @@ type commentDependentProbe struct {
 	db.Storage
 	ids       []int64
 	candidate bool
+	kept      bool
+	lookups   int
 }
 
 func (s *commentDependentProbe) KeepFederationCommentDependentLocal(_ context.Context, _, eventID int64) (bool, error) {
@@ -33,15 +35,26 @@ func (s *commentDependentProbe) KeepFederationCommentDependentLocal(_ context.Co
 }
 
 func (s *commentDependentProbe) FederationCommentDependent(context.Context, int64, int64) (string, string, error) {
+	s.lookups++
 	if s.candidate {
 		return "task", "comment", nil
 	}
 	return "", "", nil
 }
 
+func (s *commentDependentProbe) HasKeptFederationEvents(context.Context, int64) (bool, error) {
+	return s.kept, nil
+}
+
 func TestRejoinCommentHistory(t *testing.T) {
-	t.Run("dependent scan", func(t *testing.T) {
+	t.Run("no retained events", func(t *testing.T) {
 		store := &commentDependentProbe{}
+		_, err := keepFederationCommentDependentsLocal(t.Context(), store, &db.FederationBinding{}, []db.Event{{Type: "issue.comment_edited"}}, nil, 0, nil)
+		require.NoError(t, err)
+		require.Zero(t, store.lookups)
+	})
+	t.Run("dependent scan", func(t *testing.T) {
+		store := &commentDependentProbe{kept: true}
 		pending := []db.Event{
 			{ID: 1, Type: "issue.commented", Payload: `{"body":"plain"}`},
 			{ID: 2, Type: "issue.commented", Payload: `{"reply_to_uid":"target"}`},
@@ -62,7 +75,7 @@ func TestRejoinCommentHistory(t *testing.T) {
 		{name: "repeated adoption", status: http.StatusOK, body: `{"events":[{"event_id":1,"issue_uid":"task","type":"issue.restated","payload":{"comments":[{"comment_uid":"comment"}]}}],"next_after_id":1}`},
 		{name: "edit", status: http.StatusOK, body: `{"events":[{"event_id":1,"issue_uid":"task","type":"issue.comment_edited","payload":{"comment_uid":"comment"}}],"next_after_id":1}`},
 		{name: "missing", status: http.StatusNotFound, wantKeep: true},
-		{name: "push only", status: http.StatusForbidden, wantKeep: true},
+		{name: "push only", status: http.StatusForbidden, wantErr: true},
 		{name: "retry", status: http.StatusInternalServerError, wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -80,7 +93,7 @@ func TestRejoinCommentHistory(t *testing.T) {
 			defer server.Close()
 			client, err := NewClient(t.Context(), server.URL, "token", clientpkg.Opts{})
 			require.NoError(t, err)
-			store := &commentDependentProbe{candidate: true}
+			store := &commentDependentProbe{candidate: true, kept: true}
 			pending := []db.Event{{ID: 1, Type: "issue.comment_edited", Actor: "new-actor"}, {ID: 2, Type: "issue.comment_edited", Actor: "new-actor"}}
 			_, err = keepFederationCommentDependentsLocal(t.Context(), store, &db.FederationBinding{Actor: "new-actor"}, pending, client, 1, make(map[string]map[string]bool))
 			if tc.wantErr {

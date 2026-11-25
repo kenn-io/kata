@@ -928,6 +928,10 @@ func reloadFederationPushCursor(ctx context.Context, store db.Storage, binding *
 
 // keepFederationCommentDependentsLocal keeps edits and replies to local comments local.
 func keepFederationCommentDependentsLocal(ctx context.Context, store db.Storage, binding *db.FederationBinding, pending []db.Event, client *Client, hubProjectID int64, histories map[string]map[string]bool) (bool, error) {
+	kept, err := store.HasKeptFederationEvents(ctx, binding.ProjectID)
+	if err != nil || !kept {
+		return false, err
+	}
 	for _, event := range pending {
 		if event.Type != "issue.comment_edited" && event.Type != "issue.commented" {
 			continue
@@ -947,10 +951,7 @@ func keepFederationCommentDependentsLocal(ctx context.Context, store db.Storage,
 			if !found {
 				history, err := client.issueHistoryThrough(ctx, hubProjectID, issueUID, math.MaxInt64)
 				if err != nil {
-					var status *HubStatusError
-					if !errors.As(err, &status) || status.StatusCode != http.StatusForbidden {
-						return false, err
-					}
+					return false, err
 				}
 				comments = federationHistoryComments(history)
 				histories[issueUID] = comments

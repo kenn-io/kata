@@ -205,3 +205,33 @@ func TestFederationMoveHistorySupersedesSnapshotlessMovesAtBaseline(t *testing.T
 		})
 	}
 }
+
+func TestFederationKeptMoveHistoryUsesIssueIndex(t *testing.T) {
+	pool := sql.OpenDB(referenceConnector{&referenceWork{}})
+	t.Cleanup(func() { require.NoError(t, pool.Close()) })
+	for _, query := range []string{
+		`CREATE TABLE events(id INTEGER PRIMARY KEY, project_id INTEGER, issue_uid TEXT, uid TEXT, origin_instance_uid TEXT, actor TEXT, type TEXT, payload TEXT, created_at TEXT)`,
+		`CREATE INDEX idx_events_issue_uid ON events(issue_uid) WHERE issue_uid IS NOT NULL`,
+		`CREATE TABLE federation_bindings(project_id INTEGER, role TEXT, enabled INTEGER, push_enabled INTEGER, bound_actor TEXT, push_cursor_event_id INTEGER)`,
+		`CREATE TABLE projects(id INTEGER, uid TEXT)`,
+		`CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT)`,
+		`CREATE TABLE comments(uid TEXT, issue_id INTEGER, body TEXT, edited_at TEXT, author TEXT)`,
+		`CREATE TABLE issues(id INTEGER, uid TEXT)`,
+		`CREATE TABLE links(from_issue_uid TEXT, to_issue_uid TEXT, type TEXT, author TEXT)`,
+	} {
+		_, err := pool.ExecContext(t.Context(), query)
+		require.NoError(t, err)
+	}
+	rows, err := pool.QueryContext(t.Context(), `EXPLAIN QUERY PLAN `+federationKeptIssueMoveSQL(false), 1, 2, "task", "origin", FormerInstanceUIDMetaPrefix)
+	require.NoError(t, err)
+	defer func() { _ = rows.Close() }()
+	var plan string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		require.NoError(t, rows.Scan(&id, &parent, &unused, &detail))
+		plan += detail + "\n"
+	}
+	require.NoError(t, rows.Err())
+	require.Contains(t, plan, "SEARCH history USING INDEX idx_events_issue_uid", plan)
+}

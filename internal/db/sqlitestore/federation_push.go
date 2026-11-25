@@ -33,6 +33,11 @@ func (d *Store) KeepFederationDependentLocal(ctx context.Context, projectID, eve
 	return kept, err
 }
 
+// HasKeptFederationEvents reports whether a project has retained events.
+func (d *Store) HasKeptFederationEvents(ctx context.Context, projectID int64) (bool, error) {
+	return db.HasKeptFederationEvents(ctx, d, projectID)
+}
+
 // FederationCommentDependent identifies a comment whose event may remain local.
 func (d *Store) FederationCommentDependent(ctx context.Context, projectID, eventID int64) (string, string, error) {
 	return db.FederationCommentDependent(ctx, d, projectID, eventID, d.InstanceUID(), false)
