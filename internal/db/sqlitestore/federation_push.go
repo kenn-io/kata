@@ -33,6 +33,17 @@ func (d *Store) KeepFederationDependentLocal(ctx context.Context, projectID, eve
 	return kept, err
 }
 
+// KeepFederationCommentEditLocal retains an edit whose original stayed local.
+func (d *Store) KeepFederationCommentEditLocal(ctx context.Context, projectID, eventID int64) (bool, error) {
+	var kept bool
+	err := d.relayTx(ctx, func(tx *sql.Tx) error {
+		var err error
+		kept, err = db.KeepFederationCommentEditLocalTx(ctx, tx, projectID, eventID, d.InstanceUID(), false)
+		return err
+	})
+	return kept, err
+}
+
 // FederationKeptIssue reports whether a task's creation is retained locally.
 func (d *Store) FederationKeptIssue(ctx context.Context, projectID int64, issueUID string) (bool, error) {
 	return db.FederationKeptIssue(ctx, d, projectID, issueUID)

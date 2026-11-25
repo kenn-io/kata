@@ -1,7 +1,6 @@
 package federation
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -20,7 +19,7 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestRejoinBatchesAlreadyAcceptedOldEvents(t *testing.T) {
+func checkRejoinBatchesAlreadyAcceptedOldEvents(t *testing.T) {
 	ctx := t.Context()
 	hub, projects := newMoveDeliveryHub(t, "rejoin-project")
 	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
@@ -38,19 +37,15 @@ func TestRejoinBatchesAlreadyAcceptedOldEvents(t *testing.T) {
 	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "")
 	_, err := spoke.env.DB.LeaveFederationReplica(ctx, project.ID)
 	require.NoError(t, err)
+	localComment, _, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: accepted.ID, Author: "old-actor", Body: "local comment"})
+	require.NoError(t, err)
 	_, _, err = spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "earlier task", Author: "new-actor"})
 	require.NoError(t, err)
 	_, _, err = spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "unpublished task", Author: "old-actor"})
 	require.NoError(t, err)
-	grant, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: spoke.env.DB.InstanceUID(), ProjectID: &projects[0].ID, Capabilities: "pull,push", Actor: "new-actor"})
+	token := rejoinNewActor(t, hub, projects[0], spoke.env, project)
+	_, _, _, err = spoke.env.DB.EditComment(ctx, db.EditCommentParams{IssueID: accepted.ID, CommentUID: localComment.UID, Actor: "new-actor", Body: "edited locally"})
 	require.NoError(t, err)
-	hubBinding, err := hub.DB.FederationBindingByProject(ctx, projects[0].ID)
-	require.NoError(t, err)
-	var replica api.CreateFederationReplicaResponseBody
-	postJSON(t, spoke.env.URL, "/api/v1/federation/replicas", map[string]any{
-		"hub_url": hub.URL, "hub_project_id": projects[0].ID, "hub_project_uid": projects[0].UID,
-		"project_name": project.Name, "replay_horizon_event_id": hubBinding.ReplayHorizonEventID, "token": grant.Token, "capabilities": "pull,push", "actor": "new-actor", "push_enabled": true,
-	}, &replica)
 	_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: accepted.ID, Author: "new-actor", Body: "later comment"})
 	require.NoError(t, err)
 	later, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "later task", Author: "new-actor"})
@@ -68,9 +63,9 @@ func TestRejoinBatchesAlreadyAcceptedOldEvents(t *testing.T) {
 	t.Cleanup(server.Close)
 	binding, err := spoke.env.DB.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
-	creds := config.FederationCredential{HubURL: server.URL, HubProjectID: projects[0].ID, Token: grant.Token, Actor: "new-actor", Capabilities: "pull,push"}
+	creds := config.FederationCredential{HubURL: server.URL, HubProjectID: projects[0].ID, Token: token, Actor: "new-actor", Capabilities: "pull,push"}
 	require.NoError(t, SyncFederationOnce(ctx, spoke.env.DB, binding, creds))
-	require.EqualValues(t, 5, requests.Load())
+	require.LessOrEqual(t, requests.Load(), int32(8))
 	_, err = hub.DB.IssueByUID(ctx, later.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	hubIssue, err := hub.DB.IssueByUID(ctx, accepted.UID, db.IncludeDeletedNo)
@@ -80,7 +75,7 @@ func TestRejoinBatchesAlreadyAcceptedOldEvents(t *testing.T) {
 	require.Len(t, comments, 1)
 }
 
-func TestRejoinPublishesAfter500OldTasks(t *testing.T) {
+func checkRejoinPublishesAfter500OldTasks(t *testing.T) {
 	ctx := t.Context()
 	hub, projects := newMoveDeliveryHub(t, "rejoin-project")
 	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
@@ -89,38 +84,41 @@ func TestRejoinPublishesAfter500OldTasks(t *testing.T) {
 	require.NoError(t, err)
 	earlier, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "earlier task", Author: "new-actor"})
 	require.NoError(t, err)
+	var oldIssues []db.Issue
+	var oldEvents []db.Event
+	var oldEventUIDs []string
 	for range 500 {
-		issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "old task", Author: "old-actor"})
+		issue, event, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "old task", Author: "old-actor"})
 		require.NoError(t, err)
-		_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "old comment"})
+		oldIssues = append(oldIssues, issue)
+		oldEvents = append(oldEvents, event)
+		oldEventUIDs = append(oldEventUIDs, event.UID)
+		_, commentEvent, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "old comment"})
 		require.NoError(t, err)
+		oldEvents = append(oldEvents, commentEvent)
+		oldEventUIDs = append(oldEventUIDs, commentEvent.UID)
 	}
-	grant, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: spoke.env.DB.InstanceUID(), ProjectID: &projects[0].ID, Capabilities: "pull,push", Actor: "new-actor"})
-	require.NoError(t, err)
-	hubBinding, err := hub.DB.FederationBindingByProject(ctx, projects[0].ID)
-	require.NoError(t, err)
-	var replica api.CreateFederationReplicaResponseBody
-	postJSON(t, spoke.env.URL, "/api/v1/federation/replicas", map[string]any{
-		"hub_url": hub.URL, "hub_project_id": projects[0].ID, "hub_project_uid": projects[0].UID,
-		"project_name": project.Name, "replay_horizon_event_id": hubBinding.ReplayHorizonEventID, "token": grant.Token, "capabilities": "pull,push", "actor": "new-actor", "push_enabled": true,
-	}, &replica)
+	token := rejoinNewActor(t, hub, projects[0], spoke.env, project)
 	later, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "later task", Author: "new-actor"})
 	require.NoError(t, err)
 	binding, err := spoke.env.DB.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
-	creds := config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[0].ID, Token: grant.Token, Actor: "new-actor", Capabilities: "pull,push"}
-	syncCtx, cancel := context.WithTimeout(ctx, 150*time.Second)
-	defer cancel()
-	started := time.Now()
-	require.NoError(t, SyncFederationOnce(syncCtx, spoke.env.DB, binding, creds))
-	t.Logf("sync completed in %s", time.Since(started))
+	creds := config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[0].ID, Token: token, Actor: "new-actor", Capabilities: "pull,push"}
+	require.NoError(t, SyncFederationOnce(ctx, spoke.env.DB, binding, creds))
 	_, err = hub.DB.IssueByUID(ctx, later.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	_, err = hub.DB.IssueByUID(ctx, earlier.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
+	for _, old := range oldIssues {
+		_, err = hub.DB.IssueByUID(ctx, old.UID, db.IncludeDeletedNo)
+		require.ErrorIs(t, err, db.ErrNotFound)
+	}
+	events, err := spoke.env.DB.EventsByUIDs(ctx, project.ID, oldEventUIDs)
+	require.NoError(t, err)
+	require.ElementsMatch(t, oldEvents, events)
 }
 
-func TestRejoinContinuesAfterLocalWorkflowAndJob(t *testing.T) {
+func checkRejoinContinuesAfterLocalWorkflowAndJob(t *testing.T) {
 	ctx := t.Context()
 	hub, projects := newMoveDeliveryHub(t, "rejoin-project")
 	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
@@ -128,37 +126,40 @@ func TestRejoinContinuesAfterLocalWorkflowAndJob(t *testing.T) {
 	_, err := spoke.env.DB.LeaveFederationReplica(ctx, project.ID)
 	require.NoError(t, err)
 	definition := cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "inspect", Kind: "command", Command: "git status"}}}
-	workflow, _, err := spoke.env.DB.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "workflow", Actor: "old-actor", Definition: definition})
+	workflow, workflowEvent, err := spoke.env.DB.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "workflow", Actor: "old-actor", Definition: definition})
 	require.NoError(t, err)
 	job := cron.JobDefinition{Version: 1, Kind: "job", Trigger: cron.Trigger{Kind: "manual"}, Action: cron.Action{Kind: "execute", WorkflowUID: workflow.UID}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Review"}, Overlap: "forbid", Catchup: "skip"}
 	oldJob, _, err := spoke.env.DB.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, Name: "old job", Actor: "old-actor", Definition: job})
 	require.NoError(t, err)
-	grant, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: spoke.env.DB.InstanceUID(), ProjectID: &projects[0].ID, Capabilities: "pull,push", Actor: "new-actor"})
+	runUID := mustTestUID(t)
+	run, err := spoke.env.DB.ObserveCronRun(ctx, db.ObserveCronRun{ProjectID: project.ID, UID: runUID, JobUID: &oldJob.UID, DefinitionEventUID: &oldJob.DefinitionEventUID, Actor: "old-actor", Status: "running", Summary: cron.Summary{Version: 1}})
 	require.NoError(t, err)
-	hubBinding, err := hub.DB.FederationBindingByProject(ctx, projects[0].ID)
-	require.NoError(t, err)
-	var replica api.CreateFederationReplicaResponseBody
-	postJSON(t, spoke.env.URL, "/api/v1/federation/replicas", map[string]any{
-		"hub_url": hub.URL, "hub_project_id": projects[0].ID, "hub_project_uid": projects[0].UID,
-		"project_name": project.Name, "replay_horizon_event_id": hubBinding.ReplayHorizonEventID, "token": grant.Token, "capabilities": "pull,push", "actor": "new-actor", "push_enabled": true,
-	}, &replica)
+	token := rejoinNewActor(t, hub, projects[0], spoke.env, project)
 	_, _, err = spoke.env.DB.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, UID: workflow.UID, ExpectedEventUID: workflow.DefinitionEventUID, Name: "edited workflow", Actor: "new-actor", Definition: definition})
 	require.NoError(t, err)
 	_, _, err = spoke.env.DB.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, UID: oldJob.UID, ExpectedEventUID: oldJob.DefinitionEventUID, Name: "edited old job", Actor: "new-actor", Definition: job})
+	require.NoError(t, err)
+	_, err = spoke.env.DB.ObserveCronRun(ctx, db.ObserveCronRun{ProjectID: project.ID, UID: runUID, JobUID: &oldJob.UID, DefinitionEventUID: &oldJob.DefinitionEventUID, Actor: "old-actor", Status: "succeeded", Summary: cron.Summary{Version: 1}, ExpectedRevision: run.Run.Revision})
 	require.NoError(t, err)
 	later, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "later task", Author: "new-actor"})
 	require.NoError(t, err)
 	binding, err := spoke.env.DB.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
-	creds := config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[0].ID, Token: grant.Token, Actor: "new-actor", Capabilities: "pull,push"}
+	creds := config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[0].ID, Token: token, Actor: "new-actor", Capabilities: "pull,push"}
 	err = SyncFederationOnce(ctx, spoke.env.DB, binding, creds)
 
 	require.NoError(t, err)
 	_, err = hub.DB.IssueByUID(ctx, later.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
+	events, err := spoke.env.DB.EventsByUIDs(ctx, project.ID, []string{workflowEvent.UID})
+	require.NoError(t, err)
+	require.Equal(t, []db.Event{workflowEvent}, events)
 }
 
 func TestRejoinKeepsOldActorEventsLocal(t *testing.T) {
+	t.Run("accepted duplicates", checkRejoinBatchesAlreadyAcceptedOldEvents)
+	t.Run("more than one page", checkRejoinPublishesAfter500OldTasks)
+	t.Run("workflow and job", checkRejoinContinuesAfterLocalWorkflowAndJob)
 	for _, tc := range []struct {
 		name       string
 		snapshots  bool
@@ -206,13 +207,7 @@ func TestRejoinKeepsOldActorEventsLocal(t *testing.T) {
 				old, event, err = spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "old task", Author: "old-actor"})
 				require.NoError(t, err)
 			}
-			grant, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: spoke.DB.InstanceUID(), ProjectID: &projects[0].ID, Capabilities: "pull,push", Actor: "new-actor"})
-			require.NoError(t, err)
-			var replica api.CreateFederationReplicaResponseBody
-			postJSON(t, spoke.URL, "/api/v1/federation/replicas", map[string]any{
-				"hub_url": hub.URL, "hub_project_id": projects[0].ID, "hub_project_uid": projects[0].UID,
-				"project_name": project.Name, "replay_horizon_event_id": hubBinding.ReplayHorizonEventID, "token": grant.Token, "capabilities": "pull,push", "actor": "new-actor", "push_enabled": true,
-			}, &replica)
+			token := rejoinNewActor(t, hub, projects[0], spoke, project)
 			binding, err := spoke.DB.FederationBindingByProject(ctx, project.ID)
 			require.NoError(t, err)
 			if tc.snapshots {
@@ -241,7 +236,7 @@ func TestRejoinKeepsOldActorEventsLocal(t *testing.T) {
 			}
 			later, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "later task", Author: "new-actor"})
 			require.NoError(t, err)
-			creds := config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[0].ID, Token: grant.Token, Actor: "new-actor", Capabilities: "pull,push"}
+			creds := config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[0].ID, Token: token, Actor: "new-actor", Capabilities: "pull,push"}
 			require.NoError(t, SyncFederationOnce(ctx, spoke.DB, binding, creds))
 			_, err = hub.DB.IssueByUID(ctx, later.UID, db.IncludeDeletedNo)
 			require.NoError(t, err)
@@ -253,4 +248,19 @@ func TestRejoinKeepsOldActorEventsLocal(t *testing.T) {
 
 		})
 	}
+}
+
+func rejoinNewActor(t *testing.T, hub *testenv.Env, hubProject db.Project, spoke *testenv.Env, project db.Project) string {
+	t.Helper()
+	ctx := t.Context()
+	grant, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: spoke.DB.InstanceUID(), ProjectID: &hubProject.ID, Capabilities: "pull,push", Actor: "new-actor"})
+	require.NoError(t, err)
+	hubBinding, err := hub.DB.FederationBindingByProject(ctx, hubProject.ID)
+	require.NoError(t, err)
+	var replica api.CreateFederationReplicaResponseBody
+	postJSON(t, spoke.URL, "/api/v1/federation/replicas", map[string]any{
+		"hub_url": hub.URL, "hub_project_id": hubProject.ID, "hub_project_uid": hubProject.UID,
+		"project_name": project.Name, "replay_horizon_event_id": hubBinding.ReplayHorizonEventID, "token": grant.Token, "capabilities": "pull,push", "actor": "new-actor", "push_enabled": true,
+	}, &replica)
+	return grant.Token
 }

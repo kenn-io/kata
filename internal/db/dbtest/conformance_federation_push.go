@@ -72,5 +72,20 @@ func checkFederationPushSnapshotRuns(t *testing.T, store db.Storage) error {
 			require.Equal(t, []string{uids[8], uids[9], uids[10]}, []string{continued[0].UID, continued[1].UID, continued[2].UID})
 		}
 	}
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true})
+	require.NoError(t, err)
+	retained, err := store.EventsByUIDs(ctx, project.ID, []string{uids[2]})
+	require.NoError(t, err)
+	require.Len(t, retained, 1)
+	kept, err := store.KeepFederationEventLocal(ctx, project.ID, retained[0].ID)
+	require.NoError(t, err)
+	require.True(t, kept)
+	pending, err := store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), created.ID, 2)
+	require.NoError(t, err)
+	var got []string
+	for _, event := range pending {
+		got = append(got, event.UID)
+	}
+	require.Equal(t, []string{uids[0], uids[1], uids[3], uids[4]}, got)
 	return nil
 }

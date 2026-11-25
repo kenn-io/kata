@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -264,6 +265,7 @@ func pushDirectSpoke(
 ) error {
 	if binding.PushEnabled {
 		retryBatchSize := 0
+		singleRunRetry := false
 	pushLoop:
 		for {
 			if q, err := store.ActiveFederationQuarantine(ctx, binding.ProjectID, db.FederationQuarantineDirectionPush); err == nil {
@@ -299,30 +301,20 @@ func pushDirectSpoke(
 			if len(pending) == 0 {
 				break
 			}
+			if kept, err := keepFederationCommentEditsLocal(ctx, store, binding, pending); err != nil {
+				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+			} else if kept {
+				continue pushLoop
+			}
 			for len(pending) > 0 {
-				batchInput := pending
-				if retryBatchSize > 0 {
-					if pending[0].Actor != binding.Actor {
-						batchInput = pending[:min(retryBatchSize, len(pending))]
-					} else {
-						for i, event := range pending {
-							if event.Actor != binding.Actor {
-								batchInput = pending[:i]
-								break
-							}
-						}
-					}
-				}
+				segment := federationContiguousBaselinePrefix(pending)
+				batchInput := federationRetryBatchInput(segment, binding.Actor, retryBatchSize, singleRunRetry)
 				batch, adoptionBaseline, adoptionBaselineEndEventID, err := nextFederationPushIngestBatch(batchInput)
 				if err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
-				if len(batchInput) < len(pending) {
-					shape := federationPushAdoptionBaselineShape(pending)
-					if shape.valid && shape.hasSnapshot {
-						adoptionBaseline = api.FederationAdoptionBaselineOpen
-						adoptionBaselineEndEventID = pending[len(pending)-1].ID
-					}
+				if shape := federationPushAdoptionBaselineShape(segment); len(batchInput) < len(segment) && shape.valid && shape.hasSnapshot {
+					adoptionBaseline, adoptionBaselineEndEventID = api.FederationAdoptionBaselineOpen, segment[len(segment)-1].ID
 				}
 				sourceTokens, err := federationMoveSourceTokens(ctx, store, credentials, *binding, client.baseURL, batch, opts)
 				if err != nil {
@@ -337,29 +329,26 @@ func pushDirectSpoke(
 				if err != nil {
 					var statusErr *HubStatusError
 					if errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusBadRequest {
+						runRefused := federationRunActorRefused(statusErr.Body)
+						if runRefused && len(batch) > 1 {
+							singleRunRetry = true
+							continue pushLoop
+						}
 						refused := formerActorRefusedEvent(statusErr.Body, batch, binding.Actor)
 						dependent := missingPrimaryRefusedEvent(statusErr.Body, batch)
 						if dependent == nil {
 							dependent = missingDefinitionRefusedEvent(statusErr.Body, batch, binding.Actor)
 						}
+						if dependent == nil && runRefused && batch[0].Type == "cron.run.observed" {
+							dependent = &batch[0]
+						}
 						if refused != nil || dependent != nil {
-							var kept bool
-							var keepErr error
-							if refused != nil {
-								kept, keepErr = store.KeepFederationEventLocal(ctx, binding.ProjectID, refused.ID)
-							} else if dependent != nil {
-								kept, keepErr = store.KeepFederationDependentLocal(ctx, binding.ProjectID, dependent.ID)
-							}
+							kept, keepErr := keepFederationRefusedLocal(ctx, store, binding, refused, dependent)
 							if keepErr != nil {
 								return recordFederationSyncError(ctx, store, binding.ProjectID, keepErr)
 							}
 							if kept {
 								retryBatchSize = 1
-								current, err := store.FederationBindingByProject(ctx, binding.ProjectID)
-								if err != nil {
-									return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-								}
-								binding.PushCursorEventID = current.PushCursorEventID
 								continue pushLoop
 							}
 						}
@@ -405,6 +394,7 @@ func pushDirectSpoke(
 					}
 				}
 				binding.PushCursorEventID = ack.PushCursorEventID
+				singleRunRetry = false
 				if retryBatchSize > 0 && batch[0].Actor != binding.Actor {
 					retryBatchSize = min(retryBatchSize*2, federationPollLimit)
 				}
@@ -871,21 +861,8 @@ func federationIngestEnvelopes(events []db.Event) []api.FederationIngestEventEnv
 }
 
 func nextFederationPushIngestBatch(events []db.Event) ([]db.Event, string, int64, error) {
-	if len(events) <= 1 {
-		if len(events) == 1 {
-			shape := federationPushAdoptionBaselineShape(events)
-			if shape.valid && shape.hasSnapshot {
-				return nextFederationPushAdoptionBaselineIngestBatch(events)
-			}
-			envelope := federationIngestEnvelope(events[0])
-			if _, err := federationIngestRequestSize([]api.FederationIngestEventEnvelope{envelope}, "", 0); err != nil {
-				return nil, "", 0, err
-			}
-		}
-		return events, "", 0, nil
-	}
-	shape := federationPushAdoptionBaselineShape(events)
-	if shape.valid && shape.hasSnapshot {
+	events = federationContiguousBaselinePrefix(events)
+	if shape := federationPushAdoptionBaselineShape(events); len(events) > 0 && shape.valid && shape.hasSnapshot {
 		return nextFederationPushAdoptionBaselineIngestBatch(events)
 	}
 	envelopes := make([]api.FederationIngestEventEnvelope, 0, len(events))
@@ -900,6 +877,85 @@ func nextFederationPushIngestBatch(events []db.Event) ([]db.Event, string, int64
 		}
 	}
 	return events, "", 0, nil
+}
+
+// federationRetryBatchInput narrows a page after a refusal so one retry never
+// resends events the hub already refused or accepted.
+func federationRetryBatchInput(segment []db.Event, actor string, retryBatchSize int, singleRunRetry bool) []db.Event {
+	switch {
+	case singleRunRetry:
+		return segment[:1]
+	case retryBatchSize == 0:
+		return segment
+	case segment[0].Actor != actor:
+		return segment[:min(retryBatchSize, len(segment))]
+	}
+	if i := slices.IndexFunc(segment, func(event db.Event) bool { return event.Actor != actor }); i >= 0 {
+		return segment[:i]
+	}
+	return segment
+}
+
+func reloadFederationPushCursor(ctx context.Context, store db.Storage, binding *db.FederationBinding) error {
+	current, err := store.FederationBindingByProject(ctx, binding.ProjectID)
+	if err == nil {
+		binding.PushCursorEventID = current.PushCursorEventID
+	}
+	return err
+}
+
+// keepFederationCommentEditsLocal keeps an edit local when the comment it
+// edits stayed local, since the hub would otherwise store an unattributed copy.
+func keepFederationCommentEditsLocal(ctx context.Context, store db.Storage, binding *db.FederationBinding, pending []db.Event) (bool, error) {
+	for _, event := range pending {
+		if event.Type != "issue.comment_edited" {
+			continue
+		}
+		kept, err := store.KeepFederationCommentEditLocal(ctx, binding.ProjectID, event.ID)
+		if err != nil {
+			return false, err
+		}
+		if kept {
+			return true, reloadFederationPushCursor(ctx, store, binding)
+		}
+	}
+	return false, nil
+}
+
+const federationRunActorRefusal = "federation ingest validation: run actor differs from bound actor"
+
+func federationRunActorRefused(raw string) bool {
+	hubError, ok := federationQuarantineHubError(raw)
+	return ok && hubError.Code == "validation" && hubError.Message == federationRunActorRefusal
+}
+
+// keepFederationRefusedLocal keeps the event the hub refused, or else its
+// dependent, and reloads the cursor the keep moved.
+func keepFederationRefusedLocal(ctx context.Context, store db.Storage, binding *db.FederationBinding, refused, dependent *db.Event) (bool, error) {
+	var kept bool
+	var err error
+	if refused != nil {
+		kept, err = store.KeepFederationEventLocal(ctx, binding.ProjectID, refused.ID)
+	} else if dependent != nil {
+		kept, err = store.KeepFederationDependentLocal(ctx, binding.ProjectID, dependent.ID)
+	}
+	if err != nil || !kept {
+		return false, err
+	}
+	return true, reloadFederationPushCursor(ctx, store, binding)
+}
+
+func federationContiguousBaselinePrefix(events []db.Event) []db.Event {
+	shape := federationPushAdoptionBaselineShape(events)
+	if !shape.valid || !shape.hasSnapshot {
+		return events
+	}
+	for i := 1; i < len(events); i++ {
+		if events[i].ID != events[i-1].ID+1 {
+			return events[:i]
+		}
+	}
+	return events
 }
 
 func nextFederationPushAdoptionBaselineIngestBatch(events []db.Event) ([]db.Event, string, int64, error) {
