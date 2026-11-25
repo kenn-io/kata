@@ -329,6 +329,10 @@ type IngestFederationProjectEventsPath struct {
 	ProjectID int64 `json:"project_id"`
 }
 
+type WatchFederationProjectEventsPath struct {
+	ProjectID int64 `json:"project_id"`
+}
+
 type GetFederationProjectMetadataPath struct {
 	ProjectID int64 `json:"project_id"`
 }

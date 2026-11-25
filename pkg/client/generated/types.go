@@ -3183,6 +3183,53 @@ func (f FederationViolationSummary) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(f))
 }
 
+type FederationWatchEventsBody struct {
+	// Ready Projects the spoke should poll now: they have events or a reset after their cursor, or their own poll will report why it cannot read them.
+	Ready []int64 `json:"ready" validate:"required"`
+
+	// Unwatched Projects the hub did not watch because their token does not authorize pulls from them now, or because this request cannot carry supplemental tokens. Poll them individually.
+	Unwatched []int64 `json:"unwatched" validate:"required"`
+}
+
+func (f FederationWatchEventsBody) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(f))
+}
+
+type FederationWatchEventsRequestBody struct {
+	// AfterID Cursor for the route project.
+	AfterID int64 `json:"after_id"`
+
+	// Projects Other projects to watch, each with its own cursor and enrollment token.
+	Projects []FederationWatchProject `json:"projects,omitempty"`
+}
+
+func (f FederationWatchEventsRequestBody) Validate() error {
+	var errors runtime.ValidationErrors
+	for i, item := range f.Projects {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Projects[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type FederationWatchProject struct {
+	AfterID   int64 `json:"after_id"`
+	ProjectID int64 `json:"project_id"`
+
+	// Token Federation enrollment token that authorizes pulls from this project. Transport-only; the hub checks it like a route bearer and never stores it.
+	Token string `json:"token" validate:"required"`
+}
+
+func (f FederationWatchProject) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(f))
+}
+
 type FieldDescriptor struct {
 	AcceptedKinds  []string `json:"accepted_kinds" validate:"required"`
 	DisplayName    string   `json:"display_name" validate:"required"`

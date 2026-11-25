@@ -28,6 +28,7 @@ const (
 	// that did not advertise long polls again, in case it was upgraded.
 	federationLongPollReprobe   = time.Hour
 	federationPollWaitMaxHeader = "X-Kata-Federation-Poll-Wait-Max"
+	federationWatchMaxHeader    = "X-Kata-Federation-Watch-Max"
 )
 
 // heldPollTarget names the hub address, bearer and hub project a held poll
@@ -59,8 +60,12 @@ type hubLongPolls struct {
 	// changed carries a wakeup to the runner when a held poll saw work.
 	changed chan struct{}
 
-	mu       sync.Mutex
-	polls    map[int64]*hubLongPoll
+	mu    sync.Mutex
+	polls map[int64]*hubLongPoll
+	// hubs records what each hub address advertised about held polls and
+	// watches; groups holds one watch per hub address and transport.
+	hubs     map[string]*hubWatchSupport
+	groups   map[string]*hubWatchGroup
 	woken    map[int64]bool
 	reported map[int64]bool
 	// watchers joins every watcher goroutine, including those retired by stop
@@ -262,6 +267,9 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 		clientFor config.FederationCredential
 		supported time.Duration
 		answered  *heldAnswer
+		// solo keeps the binding on its own held poll after the hub would
+		// not watch it with its token.
+		solo bool
 	)
 	// unread is the cursor of a page handed to the runner, until a pass
 	// moves the binding past it.
@@ -372,7 +380,6 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 		requestCtx, cancelRequest := context.WithCancel(ctx)
 		doneHeld := federationcoord.BeginHeld(federationcoord.Key(p.store.InstanceUID(), projectID), cancelRequest)
 		p.setHeld(poll, cursor, target, cancelRequest)
-		started := time.Now()
 		requestCtx = httptrace.WithClientTrace(requestCtx, &httptrace.ClientTrace{
 			WroteRequest: func(info httptrace.WroteRequestInfo) {
 				if info.Err == nil {
@@ -380,12 +387,25 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 				}
 			},
 		})
-		body, advertised, err := client.pollProjectEvents(requestCtx, credential.HubProjectID, "", cursor, 1, wait)
+		var held heldResult
+		var group *hubWatchGroup
+		if !solo {
+			group = p.watchGroup(client, credential)
+		}
+		if group != nil {
+			held = group.hold(requestCtx, &watchMember{
+				projectID: projectID, hubProjectID: credential.HubProjectID, cursor: cursor,
+				token: credential.Token, client: client, wait: wait, finishSync: finishSync,
+			})
+		} else {
+			held = p.heldPollResult(requestCtx, client, credential.HubProjectID, cursor, wait)
+		}
 		finishSync()
 		doneHeld()
 		p.clearHeld(poll)
 		superseded := errors.Is(requestCtx.Err(), context.Canceled)
 		cancelRequest()
+		err, advertised := held.err, held.advertised
 		switch {
 		case ctx.Err() != nil:
 			return
@@ -405,11 +425,16 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 			}
 			backoff = min(backoff*2, 16*p.interval)
 			continue
+		case held.unwatched:
+			solo = true
+			continue
+		case held.again:
+			continue
 		case advertised == 0:
 			// The hub cannot hold polls, so it answered at once. Hand any page
 			// it returned to the runner instead of waiting for the next tick.
 			supported = 0
-			if pollChanged(body, cursor) {
+			if held.changed {
 				p.signal(projectID)
 			}
 			if !sleepContext(ctx, federationLongPollReprobe) {
@@ -417,7 +442,7 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 			}
 			continue
 		}
-		if pollChanged(body, cursor) {
+		if held.changed {
 			supported = advertised
 			// Take the pass signal before waking the runner, so a pass that
 			// ends before this goroutine looks again is not missed.
@@ -432,7 +457,7 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 			unread = cursor
 			continue
 		}
-		if time.Since(started) < min(wait, advertised)/2 {
+		if held.elapsed < min(wait, advertised)/2 {
 			// The hub answered at once: it is at its bound for held polls.
 			// The interval pass pulls meanwhile, so retry less often each time.
 			supported = 0

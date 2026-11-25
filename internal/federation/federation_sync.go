@@ -451,10 +451,13 @@ func syncDirectSpoke(
 		}
 		return recordFederationSyncErrorAt(ctx, store, binding.ProjectID, pullErr, at)
 	}
-	body, err := client.PollProjectEvents(ctx, hubProjectID, binding.PullCursorEventID, federationPollLimit)
+	body, advertised, err := client.pollProjectEvents(ctx, hubProjectID, "", binding.PullCursorEventID, federationPollLimit, 0)
 	if err != nil {
 		return recordPullError(err)
 	}
+	// The pull tells the held-poll watchers whether this hub takes one
+	// watch for all of its bindings before any of them holds a poll there.
+	learnHubFromContext(ctx, client.baseURL, advertised)
 	if body.ResetRequired {
 		// A pull-only turn may still carry a writable binding. Reset safety
 		// follows that durable capability, not this turn's push decision.

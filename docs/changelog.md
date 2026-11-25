@@ -10,9 +10,13 @@ All notable changes to kata, grouped by release. Versioned releases start with
 ## Unreleased
 
 - Direct spokes now receive hub changes almost immediately through held polls
-  instead of waiting for the next sync interval. Each idle binding keeps one
-  request open at its hub, which matters for hosts that limit concurrent
-  requests. See [sync scheduling](operations/federation.md#sync-scheduling).
+  instead of waiting for the next sync interval. At a hub that takes watches,
+  an idle spoke keeps one request open for all of its projects there, and the
+  hub still checks each project against its own credential. Projects with a
+  signing key, and hubs that take only held polls, keep one request open per
+  project, which matters for hosts that limit concurrent requests. Hubs without
+  held polls keep pulling on the interval. See
+  [sync scheduling](operations/federation.md#sync-scheduling).
 - Link issues across projects that share an audience in a relay group. Relays
   check the peer's current access to each referenced project before releasing
   events or checkpoints.
