@@ -32,7 +32,7 @@ func routeGoogleToken(t *testing.T, endpoint string) {
 }
 
 func TestVertexEmbeddingCredentials(t *testing.T) {
-	for _, mode := range []string{"token", "vertex"} {
+	for _, mode := range []string{"token", "vertex", "forbidden"} {
 		t.Run(mode, func(t *testing.T) {
 			var tokenRequests, vertexRequests int
 			var tasks []string
@@ -54,7 +54,11 @@ func TestVertexEmbeddingCredentials(t *testing.T) {
 				vertexRequests++
 				require.Equal(t, "/publishers/google/models/gemini-embedding-001:predict", r.URL.Path)
 				if r.Header.Get("Authorization") == "Bearer bad" {
-					w.WriteHeader(http.StatusUnauthorized)
+					status := http.StatusUnauthorized
+					if mode == "forbidden" {
+						status = http.StatusForbidden
+					}
+					w.WriteHeader(status)
 					return
 				}
 				require.Equal(t, "Bearer good", r.Header.Get("Authorization"))

@@ -177,6 +177,11 @@ func LocalProfileEnvironment(profile LocalProfileConfig, autostart bool) ([]stri
 		if os.Getenv("GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES") == "1" {
 			values["GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES"] = "1"
 		}
+		for _, key := range []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_REGION", "AWS_DEFAULT_REGION"} {
+			if value, ok := os.LookupEnv(key); ok {
+				values[key] = value
+			}
+		}
 	}
 	references := []string{profile.Catalog.TokenEnv}
 	if profile.Config != nil {

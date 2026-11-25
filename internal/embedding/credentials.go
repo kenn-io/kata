@@ -122,7 +122,7 @@ func (c *Client) rejectCredential(credential config.EmbeddingCredential, revisio
 		state = "missing"
 		reason = "embedding provider requires an API key (401); set api_key, api_key_file, or api_key_env"
 	}
-	e := c.failCredential(revision, state, reason, provider.StatusCode, c.options.Deployment.API == embedconfig.APIVertex && provider.StatusCode == http.StatusUnauthorized)
+	e := c.failCredential(revision, state, reason, provider.StatusCode, c.options.Deployment.API == embedconfig.APIVertex)
 	e.Provider = provider
 	return e
 }
