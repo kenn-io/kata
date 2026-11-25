@@ -347,7 +347,7 @@ func pushDirectSpoke(
 							var keepErr error
 							if refused != nil {
 								kept, keepErr = store.KeepFederationEventLocal(ctx, binding.ProjectID, refused.ID)
-							} else {
+							} else if dependent != nil {
 								kept, keepErr = store.KeepFederationDependentLocal(ctx, binding.ProjectID, dependent.ID)
 							}
 							if keepErr != nil {
