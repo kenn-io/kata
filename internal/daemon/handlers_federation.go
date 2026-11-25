@@ -664,16 +664,11 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, federationReplicaAPIError(err)
 		}
-		keptLocal, err := cfg.DB.CountKeptFederationEvents(ctx, result.Project.ID)
-		if err != nil {
-			return nil, internalAPIError(err)
-		}
 		return &api.CreateFederationReplicaResponse{Body: api.CreateFederationReplicaResponseBody{
 			Project:               dbProjectToOut(result.Project),
 			Binding:               federationBindingToOut(result.Binding),
 			Adopted:               result.Adopted,
 			AdoptionSnapshotCount: result.AdoptionSnapshotCount,
-			KeptLocalCount:        keptLocal,
 		}}, nil
 	})
 
@@ -1644,10 +1639,6 @@ func federationProjectStatus(
 	if err != nil {
 		return api.FederationProjectStatus{}, internalAPIError(err)
 	}
-	keptLocal, err := store.CountKeptFederationEvents(ctx, binding.ProjectID)
-	if err != nil {
-		return api.FederationProjectStatus{}, internalAPIError(err)
-	}
 	enrollments, err := federationEnrollmentCount(ctx, store, binding)
 	if err != nil {
 		return api.FederationProjectStatus{}, internalAPIError(err)
@@ -1706,7 +1697,6 @@ func federationProjectStatus(
 		PullCursorEventID:           binding.PullCursorEventID,
 		PushCursorEventID:           binding.PushCursorEventID,
 		PendingPushCount:            pendingPush,
-		KeptLocalCount:              keptLocal,
 		PendingPushHighWaterEventID: pendingHighWater,
 		EnrollmentCount:             enrollments,
 		LiveClaimCount:              liveClaims,

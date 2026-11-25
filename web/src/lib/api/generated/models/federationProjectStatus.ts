@@ -23,8 +23,6 @@ export interface FederationProjectStatus {
   hub_project_id?: number
   hub_project_uid?: string
   hub_url?: string
-  /** Events retained on this spoke after the hub refused them. */
-  kept_local_count: number
   last_error?: string
   last_error_at?: string
   last_pull_started_at?: string

@@ -8,8 +8,6 @@ export interface CreateFederationReplicaResponseBody {
   adopted?: boolean
   adoption_snapshot_count?: number
   binding: FederationBindingOut
-  /** Events already retained on this spoke. Sync may retain more. */
-  kept_local_count: number
   project: ProjectOut
   [key: string]: unknown
 }

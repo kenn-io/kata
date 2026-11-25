@@ -622,11 +622,6 @@ func TestRejoinCommentEditAfterHubMove(t *testing.T) {
 	_, err = hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: issue.Revision, Actor: "old-actor"})
 	require.NoError(t, err)
 	require.NoError(t, spoke.sync(t, 0))
-	binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
-	require.NoError(t, err)
-	pending, err := spoke.env.DB.PendingFederationPushEvents(ctx, spoke.projects[0].ID, spoke.env.DB.InstanceUID(), binding.PushCursorEventID, 100)
-	require.NoError(t, err)
-	require.Contains(t, pending, *edit)
 	for _, i := range []int{1, 0, 1} {
 		require.NoError(t, spoke.sync(t, i))
 	}
@@ -700,9 +695,9 @@ func TestRejoinRefusalDoesNotKeepAfterLeaseLoss(t *testing.T) {
 	}
 	err = pushDirectSpoke(ctx, spoke.env.DB, &binding, projects[0].ID, client, nil, validate, nil, clientpkg.Opts{})
 	require.ErrorIs(t, err, errTestFederationLeaseLost)
-	count, err := spoke.env.DB.CountKeptFederationEvents(ctx, project.ID)
+	kept, err := spoke.env.DB.HasKeptFederationEvents(ctx, project.ID)
 	require.NoError(t, err)
-	require.Zero(t, count)
+	require.False(t, kept)
 	current, err := spoke.env.DB.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
 	pending, err := spoke.env.DB.PendingFederationPushEvents(ctx, project.ID, spoke.env.DB.InstanceUID(), current.PushCursorEventID, 100)
@@ -719,19 +714,19 @@ func TestRejoinCommentDoesNotKeepAfterLeaseLoss(t *testing.T) {
 	require.NoError(t, err)
 	comment, original, err := spoke.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "local"})
 	require.NoError(t, err)
-	binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true})
+	_, err = spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true})
 	require.NoError(t, err)
 	require.NoError(t, spoke.DB.AdvanceFederationPushCursor(ctx, project.ID, original.ID))
 	kept, err := spoke.DB.KeepFederationEventLocal(ctx, project.ID, original.ID)
 	require.NoError(t, err)
 	require.True(t, kept)
-	binding, err = spoke.DB.FederationBindingByProject(ctx, project.ID)
+	binding, err := spoke.DB.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
 	_, edit, changed, err := spoke.DB.EditComment(ctx, db.EditCommentParams{IssueID: issue.ID, CommentUID: comment.UID, Actor: "new-actor", Body: "edited"})
 	require.NoError(t, err)
 	require.True(t, changed)
 	var lost atomic.Bool
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		lost.Store(true)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"events":[],"next_after_id":0}`))
@@ -747,9 +742,9 @@ func TestRejoinCommentDoesNotKeepAfterLeaseLoss(t *testing.T) {
 	}
 	err = pushDirectSpoke(ctx, spoke.DB, &binding, 1, client, nil, validate, nil, clientpkg.Opts{})
 	require.ErrorIs(t, err, errTestFederationLeaseLost)
-	count, err := spoke.DB.CountKeptFederationEvents(ctx, project.ID)
+	hasKept, err := spoke.DB.HasKeptFederationEvents(ctx, project.ID)
 	require.NoError(t, err)
-	require.EqualValues(t, 1, count)
+	require.True(t, hasKept)
 	pending, err := spoke.DB.PendingFederationPushEvents(ctx, project.ID, spoke.DB.InstanceUID(), binding.PushCursorEventID, 100)
 	require.NoError(t, err)
 	require.Contains(t, pending, *edit)

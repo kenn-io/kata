@@ -686,7 +686,7 @@ func TestMoveIssue_RetainedHistoryError(t *testing.T) {
 	resp := doPostWithIfMatch(t, env, moveURL(env, src.ID, issue.ShortID), body, fmt.Sprintf(`"rev-%d"`, issue.Revision))
 	raw := readClose(t, resp)
 	require.Equal(t, http.StatusConflict, resp.StatusCode, string(raw))
-	assert.Contains(t, string(raw), "task has unshared history after rejoin")
+	assert.Contains(t, string(raw), "project has retained local events after rejoin")
 }
 
 func TestMoveIssuePublishesSubtreeEventsOnce(t *testing.T) {

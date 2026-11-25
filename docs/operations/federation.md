@@ -2327,8 +2327,10 @@ The first push can take one request per rejected event. A hub reset preserves
 local-only events. Once kept local, an event stays local even if the original
 actor rejoins later.
 A push paused by an earlier version after rejoin resumes after upgrading.
-`kata federation status` reports the number of events kept local. The join
-output shows the count at join time; later syncs may increase it.
+Edits and replies to comments that the hub may not have stay local until the
+hub has supplied or acknowledged the comment. Tasks cannot move into or out of
+a project while it has retained local events. Moves received from the hub still
+apply.
 
 A read-only rejoin keeps held offline edits local until push is enabled.
 
