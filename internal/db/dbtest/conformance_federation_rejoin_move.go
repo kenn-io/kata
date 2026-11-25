@@ -25,6 +25,7 @@ func checkFederationRejoinMoveGate(t *testing.T, store db.Storage, backend Backe
 	t.Run("accepted recreated link", func(t *testing.T) { require.NoError(t, checkRejoinMoveAcceptedRecreatedLink(t, store)) })
 	t.Run("reversed related link", func(t *testing.T) { require.NoError(t, checkRejoinMoveRetainedReversedRelatedLink(t, store)) })
 	t.Run("snapshot content", func(t *testing.T) { require.NoError(t, checkRejoinMoveRetainedSnapshotContent(t, store)) })
+	t.Run("cross-project retained link", func(t *testing.T) { checkRejoinMoveCrossProjectLink(t, store) })
 	t.Run("superseded comment edit", func(t *testing.T) { checkSupersededRetainedCommentEdit(t, store) })
 	t.Run("restore from export", func(t *testing.T) { require.NoError(t, checkRestoredRetainedIssueMove(t, store, backend)) })
 	return nil
@@ -57,6 +58,7 @@ func rejoinRetainedReply(t *testing.T, store db.Storage, name string) (db.Projec
 }
 
 func checkFederationRejoinCommentReply(t *testing.T, store db.Storage) error {
+	t.Run("snapshot comments", func(t *testing.T) { checkRejoinSnapshotComments(t, store) })
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "reply-project")
 	require.NoError(t, err)
@@ -75,6 +77,14 @@ func checkFederationRejoinCommentReply(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	_, unrelated, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: source.ID, Author: "new-actor", Body: "unrelated"})
 	require.NoError(t, err)
+	issueUID, commentUID, err := store.FederationCommentDependent(ctx, project.ID, unrelated.ID)
+	require.NoError(t, err)
+	require.Empty(t, issueUID)
+	require.Empty(t, commentUID)
+	issueUID, commentUID, err = store.FederationCommentDependent(ctx, project.ID, reply.ID)
+	require.NoError(t, err)
+	require.Equal(t, target.UID, issueUID)
+	require.Equal(t, comment.UID, commentUID)
 	kept, err = store.KeepFederationCommentDependentLocal(ctx, project.ID, unrelated.ID)
 	require.NoError(t, err)
 	require.False(t, kept)
@@ -88,6 +98,110 @@ func checkFederationRejoinCommentReply(t *testing.T, store db.Storage) error {
 	require.Contains(t, pending, unrelated)
 	require.NotContains(t, pending, reply)
 	return nil
+}
+
+func checkRejoinSnapshotComments(t *testing.T, store db.Storage) {
+	t.Helper()
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "snapshot-comments")
+	require.NoError(t, err)
+	bindRejoinSpokes(t, store, project)
+	issue := createHubIssue(t, store, project)
+	snapshotCommentUID, err := uid.New()
+	require.NoError(t, err)
+	origin, err := uid.New()
+	require.NoError(t, err)
+	remoteSnapshot := newRemoteEvent(t, project, &issue.UID, "issue.snapshot", "hub-actor", origin, 400, IssueDocument(t, issue.UID, jsontext.Value(`{"uid":"`+issue.UID+`","title":"shared","author":"hub-actor","status":"open","metadata":{},"comments":[{"comment_uid":"`+snapshotCommentUID+`","author":"hub-actor","body":"snapshot shared","created_at":"2026-05-23T12:00:00Z"}]}`)))
+	inserted, err := store.InsertRemoteEvent(ctx, project.ID, remoteSnapshot)
+	require.NoError(t, err)
+	require.True(t, inserted)
+	require.NoError(t, store.MaterializeFederatedProject(ctx, project.ID))
+	sharedUID, err := uid.New()
+	require.NoError(t, err)
+	sharedEvent := newRemoteEvent(t, project, &issue.UID, "issue.commented", "hub-actor", origin, 401, jsontext.Value(`{"comment_uid":"`+sharedUID+`","author":"hub-actor","body":"shared","created_at":"2026-05-23T12:01:00Z"}`))
+	inserted, err = store.InsertRemoteEvent(ctx, project.ID, sharedEvent)
+	require.NoError(t, err)
+	require.True(t, inserted)
+	require.NoError(t, store.MaterializeFederatedProject(ctx, project.ID))
+	stubUID, err := uid.New()
+	require.NoError(t, err)
+	stubEvent := newRemoteEvent(t, project, &issue.UID, "issue.comment_edited", "hub-actor", origin, 402, jsontext.Value(`{"comment_uid":"`+stubUID+`","body":"stub","edited_at":"2026-05-23T12:02:00Z"}`))
+	inserted, err = store.InsertRemoteEvent(ctx, project.ID, stubEvent)
+	require.NoError(t, err)
+	require.True(t, inserted)
+	require.NoError(t, store.MaterializeFederatedProject(ctx, project.ID))
+	_, err = store.LeaveFederationReplica(ctx, project.ID)
+	require.NoError(t, err)
+	local, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "local"})
+	require.NoError(t, err)
+	adopted, err := store.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: project.ID, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "old-actor"})
+	require.NoError(t, err)
+	_, err = store.LeaveFederationReplica(ctx, project.ID)
+	require.NoError(t, err)
+	binding := adopted.Binding
+	binding.Actor = "new-actor"
+	_, err = store.UpsertFederationBinding(ctx, binding)
+	require.NoError(t, err)
+	for _, event := range []db.RemoteEvent{remoteSnapshot, sharedEvent, stubEvent} {
+		inserted, err = store.InsertRemoteEvent(ctx, project.ID, event)
+		require.NoError(t, err)
+		require.True(t, inserted)
+	}
+	pending, err := store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), binding.PushCursorEventID, 100)
+	require.NoError(t, err)
+	var snapshot db.Event
+	for _, event := range pending {
+		if event.Type == "issue.snapshot" && event.IssueUID != nil && *event.IssueUID == issue.UID {
+			snapshot = event
+		}
+	}
+	require.NotEmpty(t, snapshot.UID)
+	kept, err := store.KeepFederationEventLocal(ctx, project.ID, snapshot.ID)
+	require.NoError(t, err)
+	require.True(t, kept)
+	for _, comment := range []struct{ name, uid string }{{"local", local.UID}, {"event", sharedUID}, {"snapshot", snapshotCommentUID}, {"stub", stubUID}} {
+		_, edit, changed, err := store.EditComment(ctx, db.EditCommentParams{IssueID: issue.ID, CommentUID: comment.uid, Actor: "new-actor", Body: "edited"})
+		require.NoError(t, err)
+		require.True(t, changed)
+		kept, err = store.KeepFederationCommentDependentLocal(ctx, project.ID, edit.ID)
+		require.NoError(t, err)
+		require.Equal(t, comment.name == "local", kept, "%s", comment.name)
+		_, reply, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "reply", ReplyToUID: comment.uid, ReplyKind: "reply"})
+		require.NoError(t, err)
+		kept, err = store.KeepFederationCommentDependentLocal(ctx, project.ID, reply.ID)
+		require.NoError(t, err)
+		require.Equal(t, comment.name == "local", kept, "%s", comment.name)
+	}
+}
+
+func checkRejoinMoveCrossProjectLink(t *testing.T, store db.Storage) {
+	t.Helper()
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "cross-link-source")
+	require.NoError(t, err)
+	peerProject, err := store.CreateProject(ctx, "cross-link-peer")
+	require.NoError(t, err)
+	target, err := store.CreateProject(ctx, "cross-link-target")
+	require.NoError(t, err)
+	bindRejoinSpokes(t, store, project, peerProject, target)
+	issue := createHubIssue(t, store, project)
+	peer := createHubIssue(t, store, peerProject)
+	binding, err := store.FederationBindingByProject(ctx, peerProject.ID)
+	require.NoError(t, err)
+	binding.Actor = "old-actor"
+	_, err = store.UpsertFederationBinding(ctx, binding)
+	require.NoError(t, err)
+	_, event, err := store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: peer.ID, ToIssueID: issue.ID, Type: "blocks", Author: "old-actor"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: peer.ID, FromShortID: peer.ShortID, FromUID: peer.UID, ToShortID: issue.ShortID, ToUID: issue.UID, Actor: "old-actor"})
+	require.NoError(t, err)
+	binding.Actor = "new-actor"
+	_, err = store.UpsertFederationBinding(ctx, binding)
+	require.NoError(t, err)
+	kept, err := store.KeepFederationEventLocal(ctx, peerProject.ID, event.ID)
+	require.NoError(t, err)
+	require.True(t, kept, "event: %+v", event)
+	current, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	requireRejoinMove(t, store, current, project, target, db.ErrFederatedMoveUnsupported)
 }
 
 // bindRejoinSpokes binds projects to one hub as push-enabled spokes of new-actor.

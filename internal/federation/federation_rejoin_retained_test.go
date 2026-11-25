@@ -14,6 +14,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
@@ -22,12 +23,20 @@ import (
 
 type commentDependentProbe struct {
 	db.Storage
-	ids []int64
+	ids       []int64
+	candidate bool
 }
 
 func (s *commentDependentProbe) KeepFederationCommentDependentLocal(_ context.Context, _, eventID int64) (bool, error) {
 	s.ids = append(s.ids, eventID)
 	return false, nil
+}
+
+func (s *commentDependentProbe) FederationCommentDependent(context.Context, int64, int64) (string, string, error) {
+	if s.candidate {
+		return "task", "comment", nil
+	}
+	return "", "", nil
 }
 
 func TestRejoinCommentDependentScan(t *testing.T) {
@@ -37,9 +46,57 @@ func TestRejoinCommentDependentScan(t *testing.T) {
 		{ID: 2, Type: "issue.commented", Payload: `{"reply_to_uid":"target"}`},
 		{ID: 3, Type: "issue.comment_edited", Payload: `{}`},
 	}
-	_, err := keepFederationCommentDependentsLocal(t.Context(), store, &db.FederationBinding{}, pending)
+	_, err := keepFederationCommentDependentsLocal(t.Context(), store, &db.FederationBinding{}, pending, nil, 0, nil)
 	require.NoError(t, err)
 	require.Equal(t, []int64{2, 3}, store.ids)
+}
+
+func TestRejoinCommentHistory(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		status   int
+		body     string
+		wantKeep bool
+		wantErr  bool
+	}{
+		{name: "snapshot", status: http.StatusOK, body: `{"events":[{"event_id":1,"issue_uid":"task","type":"issue.snapshot","payload":{"comments":[{"comment_uid":"comment"}]}}],"next_after_id":1}`},
+		{name: "edit", status: http.StatusOK, body: `{"events":[{"event_id":1,"issue_uid":"task","type":"issue.comment_edited","payload":{"comment_uid":"comment"}}],"next_after_id":1}`},
+		{name: "missing", status: http.StatusNotFound, wantKeep: true},
+		{name: "push only", status: http.StatusForbidden, wantKeep: true},
+		{name: "retry", status: http.StatusInternalServerError, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				if tc.status == http.StatusOK && r.URL.Query().Get("after_id") != "0" {
+					_, _ = w.Write([]byte(`{"events":[],"next_after_id":1}`))
+					return
+				}
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			client, err := NewClient(t.Context(), server.URL, "token", clientpkg.Opts{})
+			require.NoError(t, err)
+			store := &commentDependentProbe{candidate: true}
+			pending := []db.Event{{ID: 1, Type: "issue.comment_edited", Actor: "new-actor"}, {ID: 2, Type: "issue.comment_edited", Actor: "new-actor"}}
+			_, err = keepFederationCommentDependentsLocal(t.Context(), store, &db.FederationBinding{Actor: "new-actor"}, pending, client, 1, make(map[string]map[string]bool))
+			if tc.wantErr {
+				require.Error(t, err)
+				require.Empty(t, store.ids)
+				return
+			}
+			require.NoError(t, err)
+			if tc.wantKeep {
+				require.Equal(t, []int64{1, 2}, store.ids)
+			} else {
+				require.Empty(t, store.ids)
+			}
+			require.LessOrEqual(t, calls.Load(), int32(2))
+		})
+	}
 }
 
 func checkRejoinBatchesAlreadyAcceptedOldEvents(t *testing.T) {
@@ -180,6 +237,51 @@ func checkRejoinContinuesAfterLocalWorkflowAndJob(t *testing.T) {
 }
 
 func TestRejoinKeepsOldActorEventsLocal(t *testing.T) {
+	t.Run("snapshot comments before pull", func(t *testing.T) {
+		ctx := t.Context()
+		hub, projects := newMoveDeliveryHub(t, "rejoin-project")
+		spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
+		project := spoke.projects[0]
+		issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "shared task", Author: "old-actor"})
+		require.NoError(t, err)
+		shared, _, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "shared"})
+		require.NoError(t, err)
+		require.NoError(t, spoke.sync(t, 0))
+		_, err = spoke.env.DB.LeaveFederationReplica(ctx, project.ID)
+		require.NoError(t, err)
+		local, _, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "local"})
+		require.NoError(t, err)
+		hubBinding, err := hub.DB.FederationBindingByProject(ctx, projects[0].ID)
+		require.NoError(t, err)
+		_, err = spoke.env.DB.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: project.ID, HubURL: hub.URL, HubProjectID: projects[0].ID, HubProjectUID: projects[0].UID, ReplayHorizonEventID: hubBinding.ReplayHorizonEventID, Actor: "old-actor"})
+		require.NoError(t, err)
+		_, err = spoke.env.DB.LeaveFederationReplica(ctx, project.ID)
+		require.NoError(t, err)
+		token := rejoinNewActor(t, hub, projects[0], spoke.env, project)
+		for _, comment := range []db.Comment{shared, local} {
+			_, _, changed, err := spoke.env.DB.EditComment(ctx, db.EditCommentParams{IssueID: issue.ID, CommentUID: comment.UID, Actor: "new-actor", Body: "edited " + comment.Body})
+			require.NoError(t, err)
+			require.True(t, changed)
+			_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "reply to " + comment.Body, ReplyToUID: comment.UID, ReplyKind: "reply"})
+			require.NoError(t, err)
+		}
+		later, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "later task", Author: "new-actor"})
+		require.NoError(t, err)
+		binding, err := spoke.env.DB.FederationBindingByProject(ctx, project.ID)
+		require.NoError(t, err)
+		creds := config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[0].ID, Token: token, Actor: "new-actor", Capabilities: "pull,push"}
+		require.NoError(t, SyncFederationOnce(ctx, spoke.env.DB, binding, creds))
+		_, err = hub.DB.IssueByUID(ctx, later.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		hubIssue, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		comments, err := hub.DB.CommentsByIssue(ctx, hubIssue.ID)
+		require.NoError(t, err)
+		require.Len(t, comments, 2)
+		require.Equal(t, "edited shared", comments[0].Body)
+		require.Equal(t, "reply to shared", comments[1].Body)
+		require.Equal(t, shared.UID, comments[1].ReplyToUID)
+	})
 	t.Run("cross-task reply to retained comment", func(t *testing.T) {
 		ctx := t.Context()
 		hub, projects := newMoveDeliveryHub(t, "rejoin-project")

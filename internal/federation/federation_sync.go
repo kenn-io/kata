@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"net/http"
 	"os"
 	"regexp"
@@ -266,6 +267,7 @@ func pushDirectSpoke(
 	if binding.PushEnabled {
 		retryBatchSize := 0
 		singleRunRetry := false
+		commentHistories := make(map[string]map[string]bool)
 	pushLoop:
 		for {
 			if q, err := store.ActiveFederationQuarantine(ctx, binding.ProjectID, db.FederationQuarantineDirectionPush); err == nil {
@@ -301,7 +303,7 @@ func pushDirectSpoke(
 			if len(pending) == 0 {
 				break
 			}
-			if kept, err := keepFederationCommentDependentsLocal(ctx, store, binding, pending); err != nil {
+			if kept, err := keepFederationCommentDependentsLocal(ctx, store, binding, pending, client, hubProjectID, commentHistories); err != nil {
 				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 			} else if kept {
 				continue pushLoop
@@ -905,7 +907,7 @@ func reloadFederationPushCursor(ctx context.Context, store db.Storage, binding *
 }
 
 // keepFederationCommentDependentsLocal keeps edits and replies to local comments local.
-func keepFederationCommentDependentsLocal(ctx context.Context, store db.Storage, binding *db.FederationBinding, pending []db.Event) (bool, error) {
+func keepFederationCommentDependentsLocal(ctx context.Context, store db.Storage, binding *db.FederationBinding, pending []db.Event, client *Client, hubProjectID int64, histories map[string]map[string]bool) (bool, error) {
 	for _, event := range pending {
 		if event.Type != "issue.comment_edited" && event.Type != "issue.commented" {
 			continue
@@ -913,6 +915,27 @@ func keepFederationCommentDependentsLocal(ctx context.Context, store db.Storage,
 		if event.Type == "issue.commented" {
 			target, _ := db.StringValue(db.PayloadMap([]byte(event.Payload))["reply_to_uid"])
 			if target == "" {
+				continue
+			}
+		}
+		issueUID, commentUID, err := store.FederationCommentDependent(ctx, binding.ProjectID, event.ID)
+		if err != nil {
+			return false, err
+		}
+		if issueUID != "" && event.Actor == binding.Actor {
+			comments, found := histories[issueUID]
+			if !found {
+				history, err := client.issueHistoryThrough(ctx, hubProjectID, issueUID, math.MaxInt64)
+				if err != nil {
+					var status *HubStatusError
+					if !errors.As(err, &status) || status.StatusCode != http.StatusForbidden {
+						return false, err
+					}
+				}
+				comments = federationHistoryComments(history)
+				histories[issueUID] = comments
+			}
+			if comments[commentUID] {
 				continue
 			}
 		}
@@ -925,6 +948,29 @@ func keepFederationCommentDependentsLocal(ctx context.Context, store db.Storage,
 		}
 	}
 	return false, nil
+}
+
+func federationHistoryComments(history []api.EventEnvelope) map[string]bool {
+	comments := make(map[string]bool)
+	for _, event := range history {
+		switch event.Type {
+		case "issue.commented", "issue.comment_edited":
+			uid, _ := db.StringValue(db.PayloadMap(event.Payload)["comment_uid"])
+			comments[uid] = true
+		case "issue.created", "issue.snapshot":
+			var payload struct {
+				Comments []struct {
+					UID string `json:"comment_uid"`
+				} `json:"comments"`
+			}
+			if json.Unmarshal(event.Payload, &payload) == nil {
+				for _, comment := range payload.Comments {
+					comments[comment.UID] = true
+				}
+			}
+		}
+	}
+	return comments
 }
 
 const federationRunActorRefusal = "federation ingest validation: run actor differs from bound actor"

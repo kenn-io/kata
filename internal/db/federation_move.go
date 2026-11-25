@@ -234,7 +234,7 @@ func federationKeptIssueMoveSQL(postgres bool) string {
 	//nolint:gosec // G202: SQL fragments use fixed aliases; values are bound.
 	return `SELECT EXISTS(SELECT 1 FROM federation_bindings src JOIN federation_bindings dst ON dst.project_id=$2 WHERE src.project_id=$1 AND src.role='spoke' AND dst.role='spoke' AND src.enabled=1 AND dst.enabled=1 AND src.push_enabled=1 AND dst.push_enabled=1 AND (
  (NOT EXISTS(SELECT 1 FROM events e WHERE e.project_id=$1 AND e.issue_uid=$3 AND e.origin_instance_uid<>$4 AND NOT EXISTS(SELECT 1 FROM meta former WHERE former.key=$5 || e.origin_instance_uid) AND NOT ` + federationKeptLocalSQL("e") + `) AND EXISTS(SELECT 1 FROM events root WHERE root.project_id=$1 AND root.issue_uid=$3 AND root.type IN ('issue.created','issue.snapshot') AND ` + unaccepted("root") + `))
- OR EXISTS(SELECT 1 FROM events history WHERE history.project_id=$1 AND ` + unaccepted("history") + ` AND ` + federationKeptSnapshotHistorySQL(postgres) + `)))`
+ OR EXISTS(SELECT 1 FROM events history WHERE ((history.project_id=$1 AND ` + unaccepted("history") + `) OR (history.project_id<>$1 AND history.type IN ('issue.linked','issue.links_changed') AND ` + federationKeptLocalSQL("history") + `)) AND ` + federationKeptSnapshotHistorySQL(postgres) + `)))`
 }
 
 // federationKeptSnapshotHistorySQL matches retained history still in the move document.
@@ -305,12 +305,42 @@ func KeepFederationDependentLocalTx(ctx context.Context, tx *sql.Tx, projectID, 
 
 // KeepFederationCommentDependentLocalTx retains edits and replies to local comments.
 func KeepFederationCommentDependentLocalTx(ctx context.Context, tx *sql.Tx, projectID, eventID int64, origin string, postgres bool) (bool, error) {
+	return keepFederationLocalTx(ctx, tx, projectID, eventID, origin, federationCommentDependentSQL(postgres))
+}
+
+// FederationCommentDependent finds a comment whose pending event may remain local.
+func FederationCommentDependent(ctx context.Context, q moveQuery, projectID, eventID int64, origin string, postgres bool) (string, string, error) {
+	commentUID := `CASE WHEN e.type='issue.comment_edited' THEN json_extract(e.payload,'$.comment_uid') ELSE json_extract(e.payload,'$.reply_to_uid') END`
+	if postgres {
+		commentUID = `CASE WHEN e.type='issue.comment_edited' THEN e.payload::jsonb->>'comment_uid' ELSE e.payload::jsonb->>'reply_to_uid' END`
+	}
+	var issueUID, uid string
+	//nolint:gosec // G202: SQL fragments use fixed aliases; values are bound.
+	err := q.QueryRowContext(ctx, `SELECT i.uid,c.uid FROM events e JOIN comments c ON c.uid=`+commentUID+` JOIN issues i ON i.id=c.issue_id WHERE e.project_id=$1 AND e.id=$2 AND e.origin_instance_uid=$3 AND `+strings.ReplaceAll(federationCommentDependentSQL(postgres), "$4", "$3"), projectID, eventID, origin).Scan(&issueUID, &uid)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", nil
+	}
+	return issueUID, uid, err
+}
+
+func federationCommentDependentSQL(postgres bool) string {
 	match := `((e.type='issue.comment_edited' AND root.issue_uid=e.issue_uid AND json_extract(root.payload,'$.comment_uid')=json_extract(e.payload,'$.comment_uid')) OR (e.type='issue.commented' AND json_extract(root.payload,'$.comment_uid')=json_extract(e.payload,'$.reply_to_uid')))`
+	commentUID := `CASE WHEN e.type='issue.comment_edited' THEN json_extract(e.payload,'$.comment_uid') ELSE json_extract(e.payload,'$.reply_to_uid') END`
+	items := `json_each(CASE WHEN json_type(root.payload,'$.comments')='array' THEN json_extract(root.payload,'$.comments') ELSE '[]' END) item`
+	itemUID := `json_extract(item.value,'$.comment_uid')`
+	proofUID := `json_extract(proof.payload,'$.comment_uid')`
+	proofItems := `json_each(CASE WHEN json_type(proof.payload,'$.comments')='array' THEN json_extract(proof.payload,'$.comments') ELSE '[]' END) item`
 	if postgres {
 		match = `((e.type='issue.comment_edited' AND root.issue_uid=e.issue_uid AND root.payload::jsonb->>'comment_uid'=e.payload::jsonb->>'comment_uid') OR (e.type='issue.commented' AND root.payload::jsonb->>'comment_uid'=e.payload::jsonb->>'reply_to_uid'))`
+		commentUID = `CASE WHEN e.type='issue.comment_edited' THEN e.payload::jsonb->>'comment_uid' ELSE e.payload::jsonb->>'reply_to_uid' END`
+		items = `jsonb_array_elements(CASE WHEN jsonb_typeof(root.payload::jsonb->'comments')='array' THEN root.payload::jsonb->'comments' ELSE '[]'::jsonb END) item(value)`
+		itemUID = `item.value->>'comment_uid'`
+		proofUID = `proof.payload::jsonb->>'comment_uid'`
+		proofItems = `jsonb_array_elements(CASE WHEN jsonb_typeof(proof.payload::jsonb->'comments')='array' THEN proof.payload::jsonb->'comments' ELSE '[]'::jsonb END) item(value)`
 	}
-	condition := `EXISTS (SELECT 1 FROM events root WHERE root.project_id=e.project_id AND root.type='issue.commented' AND ` + federationKeptLocalSQL("root") + ` AND ` + match + `)`
-	return keepFederationLocalTx(ctx, tx, projectID, eventID, origin, condition)
+	accepted := `EXISTS (SELECT 1 FROM events proof WHERE proof.project_id=e.project_id AND ((proof.type IN ('issue.commented','issue.comment_edited') AND ` + proofUID + `=` + commentUID + `) OR (proof.type IN ('issue.created','issue.snapshot') AND EXISTS (SELECT 1 FROM ` + proofItems + ` WHERE ` + itemUID + `=` + commentUID + `))) AND NOT ` + federationKeptLocalSQL("proof") + ` AND ((proof.origin_instance_uid<>$4 AND NOT EXISTS (SELECT 1 FROM meta former WHERE former.key='` + FormerInstanceUIDMetaPrefix + `' || proof.origin_instance_uid)) OR EXISTS (SELECT 1 FROM meta accepted WHERE accepted.key='` + FederationAcknowledgedEventPrefix + `' || (SELECT uid FROM projects WHERE id=proof.project_id) || '.' || proof.uid AND accepted.value='1')))`
+	condition := `EXISTS (SELECT 1 FROM events root WHERE root.project_id=e.project_id AND ` + federationKeptLocalSQL("root") + ` AND ((root.type='issue.commented' AND ` + match + `) OR (root.type IN ('issue.snapshot','issue.created') AND e.type IN ('issue.comment_edited','issue.commented') AND EXISTS (SELECT 1 FROM ` + items + ` WHERE ` + itemUID + `=` + commentUID + `) AND NOT ` + accepted + `)))`
+	return condition
 }
 
 func keepFederationLocalTx(ctx context.Context, tx *sql.Tx, projectID, eventID int64, origin, condition string) (bool, error) {

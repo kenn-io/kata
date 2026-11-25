@@ -33,6 +33,11 @@ func (d *Store) KeepFederationDependentLocal(ctx context.Context, projectID, eve
 	return kept, err
 }
 
+// FederationCommentDependent identifies a comment whose event may remain local.
+func (d *Store) FederationCommentDependent(ctx context.Context, projectID, eventID int64) (string, string, error) {
+	return db.FederationCommentDependent(ctx, d, projectID, eventID, d.InstanceUID(), false)
+}
+
 // KeepFederationCommentDependentLocal retains edits and replies to local comments.
 func (d *Store) KeepFederationCommentDependentLocal(ctx context.Context, projectID, eventID int64) (bool, error) {
 	var kept bool
