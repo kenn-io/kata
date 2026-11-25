@@ -1267,6 +1267,8 @@ dims = 768
 ```
 
 Changing the API creates a separate vector generation.
+Semantic search is unavailable while the new generation is built and returns
+when it is ready.
 Kata sends one input per request to `gemini-embedding-001` on Vertex.
 Credential failures appear in health and search; a later request retries after
 the credentials are repaired.
