@@ -204,11 +204,18 @@ func FederationKeptIssue(ctx context.Context, q moveQuery, projectID int64, issu
 	return kept, err
 }
 
-// CheckFederationKeptIssueMove blocks a move whose source task has no hub history.
+// CheckFederationKeptIssueMove blocks moves of old-actor tasks without known hub history.
 func CheckFederationKeptIssueMove(ctx context.Context, q moveQuery, from, to int64, issueUID, origin string) error {
 	kept, err := FederationKeptIssue(ctx, q, from, issueUID)
-	if err != nil || !kept {
+	if err != nil {
 		return err
+	}
+	if !kept {
+		//nolint:gosec // G202: the SQL fragment uses a fixed alias; values are bound.
+		err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events e JOIN federation_bindings b ON b.project_id=e.project_id WHERE e.project_id=$1 AND e.issue_uid=$2 AND e.origin_instance_uid=$3 AND e.actor<>b.bound_actor AND e.id>b.push_cursor_event_id AND e.type IN ('issue.created','issue.snapshot') AND `+FederationUnresolvedEventSQL("e")+`)`, from, issueUID, origin).Scan(&kept)
+		if err != nil || !kept {
+			return err
+		}
 	}
 	var blocked bool
 	err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings src JOIN federation_bindings dst ON dst.project_id=$2 WHERE src.project_id=$1 AND src.role='spoke' AND dst.role='spoke' AND src.enabled=1 AND dst.enabled=1 AND src.push_enabled=1 AND dst.push_enabled=1 AND NOT EXISTS(SELECT 1 FROM events e WHERE e.project_id=$1 AND e.issue_uid=$3 AND e.origin_instance_uid<>$4))`, from, to, issueUID, origin).Scan(&blocked)
@@ -216,7 +223,7 @@ func CheckFederationKeptIssueMove(ctx context.Context, q moveQuery, from, to int
 		return err
 	}
 	if blocked {
-		return fmt.Errorf("%w: task is kept local after rejoin", ErrFederatedMoveUnsupported)
+		return fmt.Errorf("%w: task has unshared history after rejoin", ErrFederatedMoveUnsupported)
 	}
 	return nil
 }
