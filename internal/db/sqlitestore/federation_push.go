@@ -11,6 +11,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
+// KeepFederationEventLocal records a refused old-actor event and its dependents.
 func (d *Store) KeepFederationEventLocal(ctx context.Context, projectID, eventID int64) (bool, error) {
 	var kept bool
 	err := d.relayTx(ctx, func(tx *sql.Tx) error {
@@ -21,6 +22,7 @@ func (d *Store) KeepFederationEventLocal(ctx context.Context, projectID, eventID
 	return kept, err
 }
 
+// RetainFederationDependents keeps edits that depend on local-only events.
 func (d *Store) RetainFederationDependents(ctx context.Context, projectID int64) error {
 	return d.relayTx(ctx, func(tx *sql.Tx) error {
 		return db.RetainFederationDependentsTx(ctx, tx, projectID, d.InstanceUID(), false)

@@ -198,6 +198,7 @@ func federationKeptLocalSQL(alias string) string {
 
 // KeepFederationEventLocalTx records the hub's refusal for an old-actor event.
 func KeepFederationEventLocalTx(ctx context.Context, tx *sql.Tx, projectID, eventID int64, origin string, postgres bool) (bool, error) {
+	//nolint:gosec // G202: the event type list is fixed; all values are bound.
 	res, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) SELECT $1 || p.uid || '.' || e.uid,'local' FROM events e JOIN projects p ON p.id=e.project_id JOIN federation_bindings b ON b.project_id=e.project_id WHERE e.project_id=$2 AND e.id=$3 AND e.origin_instance_uid=$4 AND e.actor<>b.bound_actor AND e.type IN (`+FederationPushEventTypesSQL()+`) ON CONFLICT(key) DO NOTHING`, FederationAcknowledgedEventPrefix, projectID, eventID, origin)
 	if err != nil {
 		return false, err
@@ -238,6 +239,7 @@ func RetainFederationDependentsTx(ctx context.Context, tx *sql.Tx, projectID int
 		return `json_extract(` + alias + `.payload,'$.` + key + `')`
 	}
 	for {
+		//nolint:gosec // G202: SQL fragments use fixed aliases and JSON keys; values are bound.
 		res, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value)
  SELECT '`+FederationAcknowledgedEventPrefix+`' || p.uid || '.' || e.uid,'local' FROM events e JOIN projects p ON p.id=e.project_id JOIN federation_bindings b ON b.project_id=e.project_id
  WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>b.push_cursor_event_id
@@ -262,6 +264,7 @@ func retainFederationIssueDependentsTx(ctx context.Context, tx *sql.Tx, projectI
 		return `json_extract(` + alias + `.payload,'$.` + key + `')`
 	}
 	localIssue := `EXISTS (SELECT 1 FROM events root WHERE root.project_id=$1 AND root.issue_uid=$3 AND root.type IN ('issue.created','issue.snapshot') AND ` + federationKeptLocalSQL("root") + `)`
+	//nolint:gosec // G202: SQL fragments use fixed aliases and JSON keys; values are bound.
 	_, err := tx.ExecContext(ctx, `WITH RECURSIVE retained_comments(uid) AS (
  SELECT `+field("c", "comment_uid")+` FROM events c
  WHERE c.project_id=$1 AND c.origin_instance_uid=$2 AND c.issue_uid=$3 AND c.type='issue.commented'
@@ -1112,6 +1115,7 @@ func FederationHeldEventSQL(alias string) string {
 // ClearFederatedProjectEvents retains source envelopes still contributing to
 // issues now owned elsewhere. A source reset cannot rewind those destinations.
 func ClearFederatedProjectEvents(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string, postgres bool) error {
+	//nolint:gosec // G202: SQL fragments use fixed aliases; values are bound.
 	if _, err := tx.ExecContext(ctx, `DELETE FROM events AS e WHERE e.project_id=$1
 	 AND NOT (`+federationKeptLocalSQL("e")+`)
 	 AND NOT (`+FederationEventReferencesMovedIssueSQL("e", postgres)+`)

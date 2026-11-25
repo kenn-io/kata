@@ -195,6 +195,7 @@ updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`,
 	return output, err
 }
 
+// KeepFederationEventLocal records a refused old-actor event and its dependents.
 func (s *Store) KeepFederationEventLocal(ctx context.Context, projectID, eventID int64) (bool, error) {
 	var kept bool
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
@@ -205,6 +206,7 @@ func (s *Store) KeepFederationEventLocal(ctx context.Context, projectID, eventID
 	return kept, err
 }
 
+// RetainFederationDependents keeps edits that depend on local-only events.
 func (s *Store) RetainFederationDependents(ctx context.Context, projectID int64) error {
 	return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		return db.RetainFederationDependentsTx(ctx, tx, projectID, s.InstanceUID(), true)
