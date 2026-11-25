@@ -2291,7 +2291,7 @@ On rejoin, pull restarts from the hub's replay horizon, and Kata deduplicates
 already-applied events by event UID. When push resumes under a different actor,
 Kata offers older events in batches. Events the hub already has are
 acknowledged; events it rejects stay on this computer. Later changes to a
-local-only task, and replies to a local-only comment, also stay here. Links
+local-only task also stay here. Links
 from shared tasks to local-only tasks reach the hub but remain unresolved there.
 The first push can take one request per rejected event. A hub reset preserves
 local-only events. Once kept local, an event stays local even if the original

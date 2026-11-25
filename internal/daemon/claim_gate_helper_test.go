@@ -326,6 +326,24 @@ func TestClaimGateHelperSpokeHubNotFoundFallsBackForPendingPushIssue(t *testing.
 	require.NoError(t, err)
 }
 
+func TestClaimGateHelperSpokeHubNotFoundFallsBackForKeptIssue(t *testing.T) {
+	ctx := t.Context()
+	store := openClaimGateHelperDB(t)
+	project, issue := createClaimGateHelperIssue(t, store)
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		api.WriteEnvelope(w, http.StatusNotFound, "issue_not_found", "issue not found")
+	}))
+	t.Cleanup(hub.Close)
+	enableClaimGateHelperSpoke(t, store, project, hub.URL, 99)
+	events, err := store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), 0, 10)
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	kept, err := store.KeepFederationEventLocal(ctx, project.ID, events[0].ID)
+	require.NoError(t, err)
+	require.True(t, kept)
+	require.NoError(t, requireFederatedIssueClaim(ctx, ServerConfig{DB: store}, project.ID, issue, "agent"))
+}
+
 func TestClaimGateHelperSpokeHubNotFoundStillFailsAfterIssuePushed(t *testing.T) {
 	ctx := t.Context()
 	store := openClaimGateHelperDB(t)

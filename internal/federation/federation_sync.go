@@ -263,7 +263,6 @@ func pushDirectSpoke(
 	opts clientpkg.Opts,
 ) error {
 	if binding.PushEnabled {
-		dependentsRetained := false
 		retryBatchSize := 0
 	pushLoop:
 		for {
@@ -275,7 +274,30 @@ func pushDirectSpoke(
 					}
 					return recordFederationSyncError(ctx, store, binding.ProjectID, eventErr)
 				}
-				if retry, reason := autoRetryFederationQuarantine(q, quarantinedEvents, binding.Actor); retry {
+				retry, reason := autoRetryFederationQuarantine(q, quarantinedEvents, binding.Actor)
+				if !retry {
+					if refused := missingPrimaryRefusedEvent(q.Error, quarantinedEvents); refused != nil {
+						kept, err := store.FederationKeptIssue(ctx, binding.ProjectID, *refused.IssueUID)
+						if err != nil {
+							return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+						}
+						if kept {
+							retry, reason = true, "auto-retry after local task retention"
+						}
+					}
+				}
+				if !retry {
+					if refused := missingDefinitionRefusedEvent(q.Error, quarantinedEvents, binding.Actor); refused != nil {
+						kept, err := store.FederationKeptDependent(ctx, binding.ProjectID, refused.ID)
+						if err != nil {
+							return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+						}
+						if kept {
+							retry, reason = true, "auto-retry after local definition retention"
+						}
+					}
+				}
+				if retry {
 					if _, err := store.RetryFederationQuarantine(ctx, db.RetryFederationQuarantineParams{
 						ID:        q.ID,
 						ProjectID: binding.ProjectID,
@@ -290,12 +312,6 @@ func pushDirectSpoke(
 				}
 			} else if err != nil && !errors.Is(err, db.ErrNotFound) {
 				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-			}
-			if !dependentsRetained {
-				if err := store.RetainFederationDependents(ctx, binding.ProjectID); err != nil {
-					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-				}
-				dependentsRetained = true
 			}
 			pending, err := store.PendingFederationPushEvents(
 				ctx, binding.ProjectID, store.InstanceUID(), binding.PushCursorEventID, federationPollLimit)
@@ -344,8 +360,18 @@ func pushDirectSpoke(
 					var statusErr *HubStatusError
 					if errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusBadRequest {
 						refused := formerActorRefusedEvent(statusErr.Body, batch, binding.Actor)
-						if refused != nil {
-							kept, keepErr := store.KeepFederationEventLocal(ctx, binding.ProjectID, refused.ID)
+						dependent := missingPrimaryRefusedEvent(statusErr.Body, batch)
+						if dependent == nil {
+							dependent = missingDefinitionRefusedEvent(statusErr.Body, batch, binding.Actor)
+						}
+						if refused != nil || dependent != nil {
+							var kept bool
+							var keepErr error
+							if refused != nil {
+								kept, keepErr = store.KeepFederationEventLocal(ctx, binding.ProjectID, refused.ID)
+							} else {
+								kept, keepErr = store.KeepFederationDependentLocal(ctx, binding.ProjectID, dependent.ID)
+							}
 							if keepErr != nil {
 								return recordFederationSyncError(ctx, store, binding.ProjectID, keepErr)
 							}
@@ -1028,6 +1054,49 @@ var formerPeerReferenceQuarantine = regexp.MustCompile(
 )
 
 var formerActorQuarantine = regexp.MustCompile(`^federation ingest validation: event ([0-9A-HJKMNP-TV-Z]{26}) actor (".*") does not match bound actor$`)
+
+var missingPrimaryQuarantine = regexp.MustCompile(`^federation ingest validation: (issue\.[a-z_]+) references unknown issue ([0-9A-HJKMNP-TV-Z]{26})$`)
+
+var missingDefinitionQuarantine = regexp.MustCompile(`^federation ingest validation: event ([0-9A-HJKMNP-TV-Z]{26}) (cron\.(?:workflow|job)\.(?:updated|deleted|restored)) payload author (".*") does not match bound actor$`)
+
+func missingDefinitionRefusedEvent(raw string, events []db.Event, actor string) *db.Event {
+	hubError, ok := federationQuarantineHubError(raw)
+	if !ok || hubError.Code != "validation" {
+		return nil
+	}
+	match := missingDefinitionQuarantine.FindStringSubmatch(hubError.Message)
+	if len(match) != 4 {
+		return nil
+	}
+	author, err := strconv.Unquote(match[3])
+	if err != nil || strings.TrimSpace(author) == actor {
+		return nil
+	}
+	for i := range events {
+		event := &events[i]
+		payloadAuthor, _ := db.StringValue(db.PayloadMap([]byte(event.Payload))["author"])
+		if event.UID == match[1] && event.Type == match[2] && event.Actor == actor && payloadAuthor == author {
+			return event
+		}
+	}
+	return nil
+}
+
+func missingPrimaryRefusedEvent(raw string, events []db.Event) *db.Event {
+	hubError, ok := federationQuarantineHubError(raw)
+	if !ok || hubError.Code != "validation" {
+		return nil
+	}
+	match := missingPrimaryQuarantine.FindStringSubmatch(hubError.Message)
+	if len(match) == 3 {
+		for i := range events {
+			if events[i].Type == match[1] && events[i].IssueUID != nil && *events[i].IssueUID == match[2] {
+				return &events[i]
+			}
+		}
+	}
+	return nil
+}
 
 func formerActorRefusedEvent(raw string, events []db.Event, actor string) *db.Event {
 	hubError, ok := federationQuarantineHubError(raw)

@@ -11,22 +11,36 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-// KeepFederationEventLocal records a refused old-actor event and its dependents.
+// KeepFederationEventLocal records a refused old-actor event.
 func (d *Store) KeepFederationEventLocal(ctx context.Context, projectID, eventID int64) (bool, error) {
 	var kept bool
 	err := d.relayTx(ctx, func(tx *sql.Tx) error {
 		var err error
-		kept, err = db.KeepFederationEventLocalTx(ctx, tx, projectID, eventID, d.InstanceUID(), false)
+		kept, err = db.KeepFederationEventLocalTx(ctx, tx, projectID, eventID, d.InstanceUID())
 		return err
 	})
 	return kept, err
 }
 
-// RetainFederationDependents keeps edits that depend on local-only events.
-func (d *Store) RetainFederationDependents(ctx context.Context, projectID int64) error {
-	return d.relayTx(ctx, func(tx *sql.Tx) error {
-		return db.RetainFederationDependentsTx(ctx, tx, projectID, d.InstanceUID(), false)
+// KeepFederationDependentLocal records a hub refusal for local-only history.
+func (d *Store) KeepFederationDependentLocal(ctx context.Context, projectID, eventID int64) (bool, error) {
+	var kept bool
+	err := d.relayTx(ctx, func(tx *sql.Tx) error {
+		var err error
+		kept, err = db.KeepFederationDependentLocalTx(ctx, tx, projectID, eventID, d.InstanceUID(), false)
+		return err
 	})
+	return kept, err
+}
+
+// FederationKeptIssue reports whether a task's creation is retained locally.
+func (d *Store) FederationKeptIssue(ctx context.Context, projectID int64, issueUID string) (bool, error) {
+	return db.FederationKeptIssue(ctx, d, projectID, issueUID)
+}
+
+// FederationKeptDependent reports whether an event depends on local history.
+func (d *Store) FederationKeptDependent(ctx context.Context, projectID, eventID int64) (bool, error) {
+	return db.FederationKeptDependent(ctx, d, projectID, eventID, false)
 }
 
 // PendingFederationPushEvents returns local-origin events that have not yet
