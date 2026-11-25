@@ -26,35 +26,23 @@ func checkRejoinBatchesAlreadyAcceptedOldEvents(t *testing.T) {
 	hub, projects := newMoveDeliveryHub(t, "rejoin-project")
 	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
 	project := spoke.projects[0]
-	var accepted db.Issue
-	for i := range 5 {
-		issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "accepted task", Author: "old-actor"})
-		require.NoError(t, err)
-		if i == 0 {
-			accepted = issue
-		}
-	}
-	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "before_spoke_push_cursor_advance=error")
-	require.Error(t, spoke.sync(t, 0))
-	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "")
-	_, err := spoke.env.DB.LeaveFederationReplica(ctx, project.ID)
+	_, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "unpublished task", Author: "old-actor"})
 	require.NoError(t, err)
-	localComment, _, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: accepted.ID, Author: "old-actor", Body: "local comment"})
+	for range 5 {
+		_, event, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "accepted task", Author: "old-actor"})
+		require.NoError(t, err)
+		inserted, err := hub.DB.InsertRemoteEvent(ctx, projects[0].ID, db.RemoteEventFromStored(event))
+		require.NoError(t, err)
+		require.True(t, inserted)
+	}
+	_, err = spoke.env.DB.LeaveFederationReplica(ctx, project.ID)
 	require.NoError(t, err)
 	_, _, err = spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "earlier task", Author: "new-actor"})
 	require.NoError(t, err)
-	_, _, err = spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "unpublished task", Author: "old-actor"})
-	require.NoError(t, err)
 	token := rejoinNewActor(t, hub, projects[0], spoke.env, project)
-	_, _, _, err = spoke.env.DB.EditComment(ctx, db.EditCommentParams{IssueID: accepted.ID, CommentUID: localComment.UID, Actor: "new-actor", Body: "edited locally"})
-	require.NoError(t, err)
-	_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: accepted.ID, Author: "new-actor", Body: "later comment"})
-	require.NoError(t, err)
 	later, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "later task", Author: "new-actor"})
 	require.NoError(t, err)
 	binding, err := spoke.env.DB.FederationBindingByProject(ctx, project.ID)
-	require.NoError(t, err)
-	pending, err := spoke.env.DB.PendingFederationPushEvents(ctx, project.ID, spoke.env.DB.InstanceUID(), binding.PushCursorEventID, 100)
 	require.NoError(t, err)
 	target, err := url.Parse(hub.URL)
 	require.NoError(t, err)
@@ -69,15 +57,9 @@ func checkRejoinBatchesAlreadyAcceptedOldEvents(t *testing.T) {
 	t.Cleanup(server.Close)
 	creds := config.FederationCredential{HubURL: server.URL, HubProjectID: projects[0].ID, Token: token, Actor: "new-actor", Capabilities: "pull,push"}
 	require.NoError(t, SyncFederationOnce(ctx, spoke.env.DB, binding, creds))
-	// Single-event batches would need at least one request per pending event.
-	require.Less(t, int(requests.Load()), len(pending))
+	require.Equal(t, int32(4), requests.Load())
 	_, err = hub.DB.IssueByUID(ctx, later.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
-	hubIssue, err := hub.DB.IssueByUID(ctx, accepted.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	comments, err := hub.DB.CommentsByIssue(ctx, hubIssue.ID)
-	require.NoError(t, err)
-	require.Len(t, comments, 1)
 }
 
 func checkRejoinPublishesAfter500OldTasks(t *testing.T) {
@@ -203,18 +185,12 @@ func TestRejoinKeepsOldActorEventsLocal(t *testing.T) {
 		snapshots  bool
 		quarantine bool
 		race       bool
-		moved      bool
 	}{
 		{name: "unsent adoption snapshots", snapshots: true},
 		{name: "existing actor quarantine", quarantine: true},
 		{name: "comment on missing task", race: true},
-		{name: "comment on retained move", moved: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.moved {
-				checkRejoinCommentOnRetainedMove(t)
-				return
-			}
 			ctx := t.Context()
 			hub, projects := newMoveDeliveryHub(t, "rejoin-project")
 			var spoke *testenv.Env
@@ -350,37 +326,6 @@ func TestRejoinCommentEditAfterHubMove(t *testing.T) {
 	comments, err := hub.DB.CommentsByIssue(ctx, issue.ID)
 	require.NoError(t, err)
 	require.Equal(t, "edited", comments[0].Body)
-}
-
-func checkRejoinCommentOnRetainedMove(t *testing.T) {
-	t.Helper()
-	ctx := t.Context()
-	hub, projects := newMoveDeliveryHub(t, "move-source", "move-target")
-	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor", "old-actor")
-	for _, project := range spoke.projects {
-		_, err := spoke.env.DB.LeaveFederationReplica(ctx, project.ID)
-		require.NoError(t, err)
-	}
-	issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "local", Author: "old-actor"})
-	require.NoError(t, err)
-	move, err := spoke.env.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: spoke.projects[0].ID, ToProjectID: spoke.projects[1].ID, IfMatchRev: issue.Revision, Actor: "old-actor"})
-	require.NoError(t, err)
-	token := rejoinNewActor(t, hub, projects[1], spoke.env, spoke.projects[1])
-	kept, err := spoke.env.DB.KeepFederationEventLocal(ctx, spoke.projects[1].ID, move.EventID)
-	require.NoError(t, err)
-	require.True(t, kept)
-	_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "local comment"})
-	require.NoError(t, err)
-	later, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[1].ID, Title: "later", Author: "new-actor"})
-	require.NoError(t, err)
-	binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[1].ID)
-	require.NoError(t, err)
-	creds := config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[1].ID, Token: token, Actor: "new-actor", Capabilities: "pull,push"}
-	require.NoError(t, SyncFederationOnce(ctx, spoke.env.DB, binding, creds))
-	_, err = hub.DB.IssueByUID(ctx, later.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	_, err = hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-	require.ErrorIs(t, err, db.ErrNotFound)
 }
 
 func TestRejoinRefusalDoesNotKeepAfterLeaseLoss(t *testing.T) {

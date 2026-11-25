@@ -661,32 +661,32 @@ func TestMoveIssue_FederationErrorNamesMoveRestriction(t *testing.T) {
 			assert.NotContains(t, string(raw), "spoke project is read-only")
 		})
 	}
-}
-
-func TestMoveIssue_RetainedHistoryError(t *testing.T) {
-	env := testenv.New(t, testenv.WithAuthToken("tok"))
-	src, tgt, issue := seedMovePair(t, env)
-	ctx := t.Context()
-	for _, project := range []db.Project{src, tgt} {
-		_, err := env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true})
+	t.Run("retained history", func(t *testing.T) {
+		env := testenv.New(t, testenv.WithAuthToken("tok"))
+		src, tgt, issue := seedMovePair(t, env)
+		ctx := t.Context()
+		for _, project := range []db.Project{src, tgt} {
+			_, err := env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true})
+			require.NoError(t, err)
+		}
+		_, err := env.DB.LeaveFederationReplica(ctx, src.ID)
 		require.NoError(t, err)
-	}
-	_, err := env.DB.LeaveFederationReplica(ctx, src.ID)
-	require.NoError(t, err)
-	_, event, err := env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "local"})
-	require.NoError(t, err)
-	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: src.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: src.ID, HubProjectUID: src.UID, Actor: "new-actor", Enabled: true, PushEnabled: true})
-	require.NoError(t, err)
-	kept, err := env.DB.KeepFederationEventLocal(ctx, src.ID, event.ID)
-	require.NoError(t, err)
-	require.True(t, kept)
-	issue, err = env.DB.IssueByID(ctx, issue.ID)
-	require.NoError(t, err)
-	body := fmt.Sprintf(`{"actor":"tester","to_project_uid":%q}`, tgt.UID)
-	resp := doPostWithIfMatch(t, env, moveURL(env, src.ID, issue.ShortID), body, fmt.Sprintf(`"rev-%d"`, issue.Revision))
-	raw := readClose(t, resp)
-	require.Equal(t, http.StatusConflict, resp.StatusCode, string(raw))
-	assert.Contains(t, string(raw), "project has retained local events after rejoin")
+		_, event, err := env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "local"})
+		require.NoError(t, err)
+		_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: src.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: src.ID, HubProjectUID: src.UID, Actor: "new-actor", Enabled: true, PushEnabled: true})
+		require.NoError(t, err)
+		kept, err := env.DB.KeepFederationEventLocal(ctx, src.ID, event.ID)
+		require.NoError(t, err)
+		require.True(t, kept)
+		issue, err = env.DB.IssueByID(ctx, issue.ID)
+		require.NoError(t, err)
+		body := fmt.Sprintf(`{"actor":"tester","to_project_uid":%q}`, tgt.UID)
+		resp := doPostWithIfMatch(t, env, moveURL(env, src.ID, issue.ShortID), body, fmt.Sprintf(`"rev-%d"`, issue.Revision))
+		raw := readClose(t, resp)
+		require.Equal(t, http.StatusConflict, resp.StatusCode, string(raw))
+		assert.Contains(t, string(raw), `"code":"federated_move_unsupported"`)
+		assert.Contains(t, string(raw), "project has retained local events after rejoin")
+	})
 }
 
 func TestMoveIssuePublishesSubtreeEventsOnce(t *testing.T) {
