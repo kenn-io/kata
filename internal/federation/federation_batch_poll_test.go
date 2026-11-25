@@ -282,6 +282,22 @@ func TestRunnerLeavesARebindingProjectOutOfTheBatch(t *testing.T) {
 	assert.Contains(t, pages, spoke.local[2].ID)
 }
 
+func TestRunnerLeavesAProjectWithAHeldPollOutOfTheBatch(t *testing.T) {
+	hub := newCountingHub(t)
+	spoke := newBatchPollSpoke(t, hub, 4)
+	_ = spoke.pass(t)
+	_ = spoke.pass(t)
+	held := spoke.spokePasses(t)[0].binding
+	client, err := NewClient(t.Context(), hub.server.URL, spoke.sharedTok, spoke.runner.clientOpts())
+	require.NoError(t, err)
+	spoke.runner.longPolls = heldPollFixture(held.ProjectID, held.PullCursorEventID, client.heldPollTarget(held.HubProjectID))
+
+	pages := spoke.runner.prefetchPolls(t.Context(), spoke.spokePasses(t), spoke.creds, func(activeSpokeBinding) bool { return true }, nil)
+	assert.NotContains(t, pages, held.ProjectID, "the hub already holds this project's poll at its cursor")
+	assert.Contains(t, pages, spoke.local[1].ID)
+	assert.Contains(t, pages, spoke.local[2].ID)
+}
+
 func TestRunnerDropsAPrefetchedPageReadFromAnotherHubProject(t *testing.T) {
 	hub := newCountingHub(t)
 	spoke := newBatchPollSpoke(t, hub, 3)

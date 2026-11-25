@@ -378,6 +378,15 @@ func (r *Runner) sendBatch(ctx context.Context, key batchPollKey, members []batc
 	if err != nil {
 		return false
 	}
+	// A member whose poll the hub is holding at its cursor skips its pull
+	// this turn, so the batch would ask about it for nothing.
+	heldCtx := withHubLongPolls(ctx, r.longPolls)
+	members = slices.DeleteFunc(members, func(member batchPollMember) bool {
+		return hubHoldsPull(heldCtx, member.projectID, member.afterID, client.heldPollTarget(member.hubProjectID))
+	})
+	if len(members) < 2 {
+		return false
+	}
 	cursors := make([]api.FederationBatchPollCursor, len(members))
 	for i, member := range members {
 		cursors[i] = api.FederationBatchPollCursor{ProjectID: member.hubProjectID, AfterID: member.afterID}
