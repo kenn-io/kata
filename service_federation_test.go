@@ -84,10 +84,13 @@ func TestServiceRunWakesFederationOnCommittedEvent(t *testing.T) {
 		cancelRun()
 		require.NoError(t, <-runDone)
 	})
+	// Loaded Windows runners start all background workers against SQLite at
+	// once, so give both waits headroom while staying well under the 30-second
+	// federation poll interval.
 	require.Eventually(t, func() bool {
 		status, statusErr := spokeService.store.FederationSyncStatusByProject(ctx, spokeProject.ID)
 		return statusErr == nil && status.LastError != nil
-	}, 2*time.Second, 10*time.Millisecond)
+	}, 10*time.Second, 20*time.Millisecond, "initial federation pass should record the offline hub error")
 
 	binding, err := spokeService.store.FederationBindingByProject(ctx, spokeProject.ID)
 	require.NoError(t, err)
@@ -110,7 +113,7 @@ func TestServiceRunWakesFederationOnCommittedEvent(t *testing.T) {
 		// The hub commit becomes visible before the spoke finishes pulling its echo.
 		// Keep Run alive until that successful pass clears the seeded offline error.
 		return issueErr == nil && statusErr == nil && status.LastError == nil
-	}, 2*time.Second, 10*time.Millisecond, "federation push should be event-driven, not wait for the 30-second poll")
+	}, 10*time.Second, 20*time.Millisecond, "federation push should be event-driven, not wait for the 30-second poll")
 }
 
 func TestMountedServiceOmitsUnsupportedFederationRebindRoute(t *testing.T) {
