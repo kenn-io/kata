@@ -218,11 +218,11 @@ func federationKeptLocalSQL(alias string) string {
 	return `EXISTS (SELECT 1 FROM meta WHERE key='` + FederationAcknowledgedEventPrefix + `' || (SELECT uid FROM projects WHERE id=` + alias + `.project_id) || '.' || ` + alias + `.uid AND value='local')`
 }
 
-// FederationKeptIssue reports whether a task's creation is retained locally.
+// FederationKeptIssue reports whether a task's creation or move is retained locally.
 func FederationKeptIssue(ctx context.Context, q moveQuery, projectID int64, issueUID string) (bool, error) {
 	var kept bool
 	//nolint:gosec // G202: the SQL fragment uses a fixed alias; values are bound.
-	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events e WHERE e.project_id=$1 AND e.issue_uid=$2 AND e.type IN ('issue.created','issue.snapshot') AND `+federationKeptLocalSQL("e")+`)`, projectID, issueUID).Scan(&kept)
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events e WHERE e.project_id=$1 AND e.issue_uid=$2 AND e.type IN ('issue.created','issue.snapshot','issue.moved') AND `+federationKeptLocalSQL("e")+`)`, projectID, issueUID).Scan(&kept)
 	return kept, err
 }
 
