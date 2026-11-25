@@ -2150,8 +2150,10 @@ func ensureReplicaBinding(
 		// An unbound local project holding the hub project UID is the normal
 		// post-leave state: leave removes the binding but the project keeps the
 		// shared identity. A join naming that project is a rejoin — rebind it.
-		// Pull restarts just below the replay horizon. On push, the hub
-		// deduplicates accepted events and rejects unknown old-actor events.
+		// Pull restarts just below the replay horizon (event-UID dedup absorbs
+		// the overlap) and a push-enabled rejoin re-offers local-origin events
+		// from cursor 0 so the hub dedups what it already has and absorbs edits
+		// made while the project was standalone.
 		//
 		// Trust model: a spoke and the hubs it federates with trust each other
 		// (docs/design/federation.md "Tokens And Trust Boundaries" / "No

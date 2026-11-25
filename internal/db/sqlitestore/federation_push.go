@@ -513,7 +513,8 @@ func (d *Store) resetFederatedProjectIfNoPendingPush(
 		         FROM events e
 		        WHERE e.project_id = ?
 		          AND e.origin_instance_uid = ?
-		          AND e.id > ? AND `+db.FederationResetOwedEventSQL("e", false)+`
+		          AND e.id > ?
+		          AND `+db.FederationResetOwedEventSQL("e", false)+`
 		   )
 		   AND NOT EXISTS (
 		       SELECT 1
