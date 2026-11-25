@@ -275,28 +275,6 @@ func pushDirectSpoke(
 					return recordFederationSyncError(ctx, store, binding.ProjectID, eventErr)
 				}
 				retry, reason := autoRetryFederationQuarantine(q, quarantinedEvents, binding.Actor)
-				if !retry {
-					if refused := missingPrimaryRefusedEvent(q.Error, quarantinedEvents); refused != nil {
-						kept, err := store.FederationKeptIssue(ctx, binding.ProjectID, *refused.IssueUID)
-						if err != nil {
-							return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-						}
-						if kept {
-							retry, reason = true, "auto-retry after local task retention"
-						}
-					}
-				}
-				if !retry {
-					if refused := missingDefinitionRefusedEvent(q.Error, quarantinedEvents, binding.Actor); refused != nil {
-						kept, err := store.FederationKeptDependent(ctx, binding.ProjectID, refused.ID)
-						if err != nil {
-							return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-						}
-						if kept {
-							retry, reason = true, "auto-retry after local definition retention"
-						}
-					}
-				}
 				if retry {
 					if _, err := store.RetryFederationQuarantine(ctx, db.RetryFederationQuarantineParams{
 						ID:        q.ID,

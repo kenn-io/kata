@@ -38,11 +38,6 @@ func (d *Store) FederationKeptIssue(ctx context.Context, projectID int64, issueU
 	return db.FederationKeptIssue(ctx, d, projectID, issueUID)
 }
 
-// FederationKeptDependent reports whether an event depends on local history.
-func (d *Store) FederationKeptDependent(ctx context.Context, projectID, eventID int64) (bool, error) {
-	return db.FederationKeptDependent(ctx, d, projectID, eventID, false)
-}
-
 // PendingFederationPushEvents returns local-origin events that have not yet
 // been acknowledged by the hub for a push-enabled spoke binding.
 func (d *Store) PendingFederationPushEvents(

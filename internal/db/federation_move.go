@@ -240,14 +240,6 @@ func federationKeptDependentSQL(postgres bool) string {
 	return `EXISTS (SELECT 1 FROM events root WHERE root.project_id=e.project_id AND ` + federationKeptLocalSQL("root") + ` AND ((root.issue_uid=e.issue_uid AND root.type IN ('issue.created','issue.snapshot')) OR (((e.type IN ('cron.workflow.updated','cron.workflow.deleted','cron.workflow.restored') AND root.type IN ('cron.workflow.created','cron.workflow.snapshot')) OR (e.type IN ('cron.job.updated','cron.job.deleted','cron.job.restored') AND root.type IN ('cron.job.created','cron.job.snapshot'))) AND ` + definitionUID + `)))`
 }
 
-// FederationKeptDependent reports whether an event depends on local history.
-func FederationKeptDependent(ctx context.Context, q moveQuery, projectID, eventID int64, postgres bool) (bool, error) {
-	var kept bool
-	//nolint:gosec // G202: SQL fragments use fixed aliases and JSON keys; values are bound.
-	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events e WHERE e.project_id=$1 AND e.id=$2 AND `+federationKeptDependentSQL(postgres)+`)`, projectID, eventID).Scan(&kept)
-	return kept, err
-}
-
 // KeepFederationDependentLocalTx records a hub refusal for local-only history.
 func KeepFederationDependentLocalTx(ctx context.Context, tx *sql.Tx, projectID, eventID int64, origin string, postgres bool) (bool, error) {
 	//nolint:gosec // G202: SQL fragments use fixed aliases; values are bound.

@@ -149,18 +149,12 @@ func checkFederationRejoinLocalEvents(t *testing.T, store db.Storage) error {
 		kept, err := store.KeepFederationDependentLocal(ctx, project.ID, workflowEdit.ID)
 		require.NoError(t, err)
 		require.False(t, kept)
-		kept, err = store.FederationKeptDependent(ctx, project.ID, workflowEdit.ID)
-		require.NoError(t, err)
-		require.False(t, kept)
 		for _, event := range []db.Event{workflowEvent, jobEvents[0]} {
 			kept, err := store.KeepFederationEventLocal(ctx, project.ID, event.ID)
 			require.NoError(t, err)
 			require.True(t, kept)
 		}
 		for _, event := range []db.Event{workflowEdit, jobEdit[0]} {
-			known, err := store.FederationKeptDependent(ctx, project.ID, event.ID)
-			require.NoError(t, err)
-			require.True(t, known)
 			kept, err := store.KeepFederationDependentLocal(ctx, project.ID, event.ID)
 			require.NoError(t, err)
 			require.True(t, kept)

@@ -222,11 +222,6 @@ func (s *Store) FederationKeptIssue(ctx context.Context, projectID int64, issueU
 	return db.FederationKeptIssue(ctx, s, projectID, issueUID)
 }
 
-// FederationKeptDependent reports whether an event depends on local history.
-func (s *Store) FederationKeptDependent(ctx context.Context, projectID, eventID int64) (bool, error) {
-	return db.FederationKeptDependent(ctx, s, projectID, eventID, true)
-}
-
 // AdvanceFederationPullCursor records the highest consumed hub event id.
 func (s *Store) AdvanceFederationPullCursor(ctx context.Context, projectID, nextCursor int64) error {
 	return s.updateFederationCursor(ctx, projectID, nextCursor, false)
