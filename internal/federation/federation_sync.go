@@ -985,10 +985,21 @@ func keepFederationCommentDependentsLocal(ctx context.Context, store db.Storage,
 		if issueUID != "" && event.Actor == binding.Actor {
 			comments, found := histories[issueUID]
 			if !found {
-				history, err := client.issueHistoryThrough(ctx, hubProjectID, issueUID, math.MaxInt64)
+				history, err := client.readIssueHistoryThrough(ctx, hubProjectID, issueUID, math.MaxInt64, false)
 				if err != nil {
 					var status *HubStatusError
-					if errors.As(err, &status) && status.StatusCode == http.StatusForbidden {
+					if errors.As(err, &status) && status.StatusCode == http.StatusNotFound {
+						pending, err := federationPendingHubChanges(ctx, client, hubProjectID, binding.PullCursorEventID)
+						if err != nil {
+							return false, nil, err
+						}
+						if pending {
+							histories[issueUID] = nil
+						} else {
+							comments = map[string]bool{}
+							histories[issueUID] = comments
+						}
+					} else if errors.As(err, &status) && status.StatusCode == http.StatusForbidden {
 						histories[issueUID] = nil
 					} else {
 						return false, nil, err
@@ -1017,6 +1028,15 @@ func keepFederationCommentDependentsLocal(ctx context.Context, store db.Storage,
 		}
 	}
 	return false, deferred, nil
+}
+
+// A 404 can mean the task moved after this spoke's last pull.
+func federationPendingHubChanges(ctx context.Context, client *Client, projectID, cursor int64) (bool, error) {
+	page, err := client.PollProjectEvents(ctx, projectID, cursor, 1)
+	if err != nil {
+		return false, err
+	}
+	return page.ResetRequired || len(page.Events) > 0, nil
 }
 
 func federationHistoryComments(history []api.EventEnvelope) map[string]bool {
