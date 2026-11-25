@@ -21,42 +21,6 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-type commentDependentProbe struct {
-	db.Storage
-	ids  []int64
-	kept bool
-}
-
-func (s *commentDependentProbe) KeepFederationCommentDependentLocal(_ context.Context, _, eventID int64) (bool, error) {
-	s.ids = append(s.ids, eventID)
-	return false, nil
-}
-
-func (s *commentDependentProbe) HasKeptFederationEvents(context.Context, int64) (bool, error) {
-	return s.kept, nil
-}
-
-func TestRejoinCommentHistory(t *testing.T) {
-	t.Run("no retained events", func(t *testing.T) {
-		store := &commentDependentProbe{}
-		_, err := keepFederationCommentDependentsLocal(t.Context(), store, &db.FederationBinding{}, []db.Event{{Type: "issue.comment_edited"}}, nil)
-		require.NoError(t, err)
-		require.Empty(t, store.ids)
-	})
-	t.Run("dependent scan", func(t *testing.T) {
-		store := &commentDependentProbe{kept: true}
-		pending := []db.Event{
-			{ID: 1, Type: "issue.commented", Payload: `{"body":"plain"}`},
-			{ID: 2, Type: "issue.commented", Payload: `{"reply_to_uid":"target"}`},
-			{ID: 3, Type: "issue.comment_edited", Payload: `{}`},
-		}
-		_, err := keepFederationCommentDependentsLocal(t.Context(), store, &db.FederationBinding{}, pending, nil)
-		require.NoError(t, err)
-		require.Equal(t, []int64{2, 3}, store.ids)
-	})
-
-}
-
 func checkRejoinBatchesAlreadyAcceptedOldEvents(t *testing.T) {
 	ctx := t.Context()
 	hub, projects := newMoveDeliveryHub(t, "rejoin-project")
@@ -126,18 +90,12 @@ func checkRejoinPublishesAfter500OldTasks(t *testing.T) {
 	earlier, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "earlier task", Author: "new-actor"})
 	require.NoError(t, err)
 	var oldIssues []db.Issue
-	var oldEvents []db.Event
-	var oldEventUIDs []string
 	for range 500 {
-		issue, event, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "old task", Author: "old-actor"})
+		issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "old task", Author: "old-actor"})
 		require.NoError(t, err)
 		oldIssues = append(oldIssues, issue)
-		oldEvents = append(oldEvents, event)
-		oldEventUIDs = append(oldEventUIDs, event.UID)
-		_, commentEvent, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "old comment"})
+		_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "old comment"})
 		require.NoError(t, err)
-		oldEvents = append(oldEvents, commentEvent)
-		oldEventUIDs = append(oldEventUIDs, commentEvent.UID)
 	}
 	token := rejoinNewActor(t, hub, projects[0], spoke.env, project)
 	later, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "later task", Author: "new-actor"})
@@ -154,9 +112,6 @@ func checkRejoinPublishesAfter500OldTasks(t *testing.T) {
 		_, err = hub.DB.IssueByUID(ctx, old.UID, db.IncludeDeletedNo)
 		require.ErrorIs(t, err, db.ErrNotFound)
 	}
-	events, err := spoke.env.DB.EventsByUIDs(ctx, project.ID, oldEventUIDs)
-	require.NoError(t, err)
-	require.ElementsMatch(t, oldEvents, events)
 }
 
 func checkRejoinContinuesAfterLocalWorkflowAndJob(t *testing.T) {
@@ -167,7 +122,7 @@ func checkRejoinContinuesAfterLocalWorkflowAndJob(t *testing.T) {
 	_, err := spoke.env.DB.LeaveFederationReplica(ctx, project.ID)
 	require.NoError(t, err)
 	definition := cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "inspect", Kind: "command", Command: "git status"}}}
-	workflow, workflowEvent, err := spoke.env.DB.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "workflow", Actor: "old-actor", Definition: definition})
+	workflow, _, err := spoke.env.DB.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "workflow", Actor: "old-actor", Definition: definition})
 	require.NoError(t, err)
 	job := cron.JobDefinition{Version: 1, Kind: "job", Trigger: cron.Trigger{Kind: "manual"}, Action: cron.Action{Kind: "execute", WorkflowUID: workflow.UID}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Review"}, Overlap: "forbid", Catchup: "skip"}
 	oldJob, _, err := spoke.env.DB.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, Name: "old job", Actor: "old-actor", Definition: job})
@@ -192,9 +147,6 @@ func checkRejoinContinuesAfterLocalWorkflowAndJob(t *testing.T) {
 	require.NoError(t, err)
 	_, err = hub.DB.IssueByUID(ctx, later.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
-	events, err := spoke.env.DB.EventsByUIDs(ctx, project.ID, []string{workflowEvent.UID})
-	require.NoError(t, err)
-	require.Equal(t, []db.Event{workflowEvent}, events)
 }
 
 func TestRejoinKeepsOldActorEventsLocal(t *testing.T) {
@@ -255,10 +207,10 @@ func TestRejoinKeepsOldActorEventsLocal(t *testing.T) {
 		require.NoError(t, spoke.sync(t, 0))
 		_, err = spoke.env.DB.LeaveFederationReplica(ctx, project.ID)
 		require.NoError(t, err)
-		comment, original, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: target.ID, Author: "old-actor", Body: "local"})
+		comment, _, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: target.ID, Author: "old-actor", Body: "local"})
 		require.NoError(t, err)
 		token := rejoinNewActor(t, hub, projects[0], spoke.env, project)
-		_, reply, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: source.ID, Author: "new-actor", Body: "reply", ReplyToUID: comment.UID, ReplyKind: "reply"})
+		_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: source.ID, Author: "new-actor", Body: "reply", ReplyToUID: comment.UID, ReplyKind: "reply"})
 		require.NoError(t, err)
 		later, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "later", Author: "new-actor"})
 		require.NoError(t, err)
@@ -273,9 +225,6 @@ func TestRejoinKeepsOldActorEventsLocal(t *testing.T) {
 		comments, err := hub.DB.CommentsByIssue(ctx, hubSource.ID)
 		require.NoError(t, err)
 		require.Empty(t, comments)
-		events, err := spoke.env.DB.EventsByUIDs(ctx, project.ID, []string{original.UID, reply.UID})
-		require.NoError(t, err)
-		require.ElementsMatch(t, []db.Event{original, reply}, events)
 	})
 	t.Run("accepted duplicates", checkRejoinBatchesAlreadyAcceptedOldEvents)
 	t.Run("more than one page", checkRejoinPublishesAfter500OldTasks)
@@ -361,10 +310,6 @@ func TestRejoinKeepsOldActorEventsLocal(t *testing.T) {
 			require.NoError(t, err)
 			_, err = hub.DB.IssueByUID(ctx, old.UID, db.IncludeDeletedNo)
 			require.ErrorIs(t, err, db.ErrNotFound)
-			events, err := spoke.DB.EventsByUIDs(ctx, project.ID, []string{event.UID})
-			require.NoError(t, err)
-			require.Equal(t, []db.Event{event}, events)
-
 		})
 	}
 }
@@ -585,9 +530,6 @@ func TestRejoinCommentDoesNotKeepAfterLeaseLoss(t *testing.T) {
 	validate := func(context.Context) error { return errTestFederationLeaseLost }
 	err = pushDirectSpoke(ctx, spoke.DB, &binding, 1, client, nil, validate, nil, clientpkg.Opts{})
 	require.ErrorIs(t, err, errTestFederationLeaseLost)
-	hasKept, err := spoke.DB.HasKeptFederationEvents(ctx, project.ID)
-	require.NoError(t, err)
-	require.True(t, hasKept)
 	pending, err := spoke.DB.PendingFederationPushEvents(ctx, project.ID, spoke.DB.InstanceUID(), binding.PushCursorEventID, 100)
 	require.NoError(t, err)
 	require.Contains(t, pending, *edit)

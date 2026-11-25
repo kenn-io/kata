@@ -79,10 +79,7 @@ func checkFederationRejoinLocalEvents(t *testing.T, store db.Storage) error {
 	_, localComment, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: eligibleIssue.ID, Author: "old-actor", Body: "local discussion"})
 	require.NoError(t, err)
 	binding.Actor = "new-actor"
-	binding.PushEnabled = false
-	_, err = store.UpsertFederationBinding(ctx, binding)
-	require.NoError(t, err)
-	binding, err = store.EnableFederationPush(ctx, project.ID, 0)
+	binding, err = store.UpsertFederationBinding(ctx, binding)
 	require.NoError(t, err)
 	_, comment, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: old.ID, Author: "new-actor", Body: "local"})
 	require.NoError(t, err)
