@@ -143,7 +143,7 @@ func (h *hubSpokeHarness) newFront(tb testing.TB) *hubFront {
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.requests.Add(1)
-		isHeldRequest := isHeldPoll(r) || (isWatch(r) && watchHasPositiveWait(r))
+		isHeldRequest := !h.oldHub && !f.refuseHolds.Load() && (isHeldPoll(r) || (isWatch(r) && watchHasPositiveWait(r)))
 		if isHeldRequest {
 			f.heldMu.Lock()
 			f.held++

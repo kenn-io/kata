@@ -427,17 +427,18 @@ func TestRunnerReportsSchedulesOnlyWhileRunning(t *testing.T) {
 	require.False(t, ok, "a stopped runner reports no schedule")
 }
 
-// When a hub answers 429 or 503 on one binding, the runner stops contacting
-// that hub for the rest of the pass and waits until the hub cooldown expires,
-// while bindings on another hub still sync normally.
+// When a hub answers 429 or 503 on one binding's pull, the runner stops
+// pulling the remaining bindings on that hub until the hub cooldown expires,
+// while bindings on another hub still sync normally and scoped ingest 429s do
+// not pause unrelated pulls.
 func TestThrottledHubSkipsRemainingBindingsOnSameHub(t *testing.T) {
 	ctx := t.Context()
 	fleet := newSpokeFleet(t, 10)
 	for _, project := range fleet.projects {
 		fleet.refuse.Delete(project.UID)
 	}
-	// Replace the fleet's hub URL with a throttled hub for the first 9 projects
-	// and a healthy second hub for the 10th project.
+	// Replace the fleet's hub URL with a throttled hub for the first 9 idle
+	// pull bindings and a healthy second hub for the 10th project.
 	var busyHits, healthyHits atomic.Int64
 	busyHub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		busyHits.Add(1)
@@ -470,6 +471,7 @@ func TestThrottledHubSkipsRemainingBindingsOnSameHub(t *testing.T) {
 		binding, err := fleet.store.FederationBindingByProject(ctx, project.ID)
 		require.NoError(t, err)
 		binding.HubURL = targetURL
+		binding.PushEnabled = false
 		_, err = fleet.store.UpsertFederationBinding(ctx, binding)
 		require.NoError(t, err)
 		cred := fleet.credentials.credentials[project.UID]
@@ -479,7 +481,7 @@ func TestThrottledHubSkipsRemainingBindingsOnSameHub(t *testing.T) {
 
 	retries := newSyncRetries(func(limit time.Duration) time.Duration { return limit / 2 })
 	fleet.pass(ctx, retries)
-	require.Equal(t, int64(1), busyHits.Load(), "a 429 on one binding must stop the remaining bindings on the same hub")
+	require.Equal(t, int64(1), busyHits.Load(), "a 429 on one pull must stop the remaining pulls on the same hub")
 	require.Positive(t, healthyHits.Load(), "a throttled hub must not block bindings on another hub")
 
 	// Inside the Retry-After + jitter window, a second pass sends zero requests to the busy hub.
@@ -491,6 +493,84 @@ func TestThrottledHubSkipsRemainingBindingsOnSameHub(t *testing.T) {
 	fleet.now = fleet.now.Add(10 * time.Second)
 	fleet.pass(ctx, retries)
 	require.Equal(t, int64(2), busyHits.Load(), "the hub should be probed once after its cooldown expires")
+}
+
+// A per-credential ingest 429 backs off only that binding without pausing
+// pulls or pushes for other projects on the same hub, and a pull 429 does not
+// block pushes on the same hub.
+func TestScopedIngestThrottleDoesNotPauseOtherBindingsOnSameHub(t *testing.T) {
+	ctx := t.Context()
+	fleet := newSpokeFleet(t, 3)
+	for _, project := range fleet.projects {
+		fleet.refuse.Delete(project.UID)
+	}
+	var throttledIngestProject atomic.Int64
+	var throttledPullProject atomic.Int64
+	var pulls, pushes, project2Pushes atomic.Int64
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var hubProjectID int64
+		_, _ = fmt.Sscanf(r.URL.Path, "/api/v1/projects/%d/", &hubProjectID)
+		if r.Method == http.MethodPost {
+			pushes.Add(1)
+			if hubProjectID == 102 {
+				project2Pushes.Add(1)
+			}
+			if hubProjectID == throttledIngestProject.Load() {
+				w.Header().Set("Retry-After", "60")
+				w.WriteHeader(http.StatusTooManyRequests)
+				return
+			}
+			var push api.FederationIngestEventsRequestBody
+			require.NoError(t, json.UnmarshalRead(r.Body, &push))
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, api.FederationIngestEventsBody{
+				Accepted: len(push.Events), PushCursorEventID: push.Events[len(push.Events)-1].EventID,
+			})
+			return
+		}
+		pulls.Add(1)
+		if hubProjectID == throttledPullProject.Load() {
+			w.Header().Set("Retry-After", "60")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"events":[],"next_after_id":0}`))
+	}))
+	t.Cleanup(hub.Close)
+	for _, project := range fleet.projects {
+		b, err := fleet.store.FederationBindingByProject(ctx, project.ID)
+		require.NoError(t, err)
+		b.HubURL = hub.URL
+		_, err = fleet.store.UpsertFederationBinding(ctx, b)
+		require.NoError(t, err)
+		c := fleet.credentials.credentials[project.UID]
+		c.HubURL = hub.URL
+		require.NoError(t, fleet.credentials.StoreFederationCredential(ctx, project.UID, c))
+	}
+
+	// Project 0 (hubProjectID 100) has a local issue and PushEnabled=true;
+	// throttling its ingest must not block pulls or pushes for projects 1 and 2.
+	throttledIngestProject.Store(100)
+	retries := newSyncRetries(noJitter)
+	fleet.pass(ctx, retries)
+	require.False(t, retries.hubBlocked(hub.URL, fleet.now.Add(time.Second)), "ingest 429 must not trigger a hub-wide pull cooldown")
+	require.Equal(t, int64(2), pulls.Load(), "projects 1 and 2 must still pull")
+	require.Equal(t, int64(2), pushes.Load(), "project 2 must still push")
+
+	// Now throttle project 1's pull (hubProjectID 101) and create a new local
+	// issue on project 2 (PushEnabled=true): project 2's push must still run
+	// even though pulls on the hub are cooled down.
+	throttledIngestProject.Store(0)
+	throttledPullProject.Store(101)
+	_, _, err := fleet.store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fleet.projects[2].ID, Title: "push during pull cooldown", Author: "worker"})
+	require.NoError(t, err)
+	pullsBefore, project2PushesBefore := pulls.Load(), project2Pushes.Load()
+	fleet.now = fleet.now.Add(2 * time.Minute)
+	fleet.pass(ctx, retries)
+	require.True(t, retries.hubBlocked(hub.URL, fleet.now.Add(time.Second)), "pull 429 must trigger hub pull cooldown")
+	require.Equal(t, int64(2), pulls.Load()-pullsBefore, "project 0 and 1 pulled; project 2 pull must be skipped by hub cooldown")
+	require.Equal(t, int64(1), project2Pushes.Load()-project2PushesBefore, "project 2 push must still succeed during pull cooldown")
 }
 
 // A turn that skips HTTP polling because a held poll already covers the binding
@@ -511,7 +591,7 @@ func TestThrottledHubSkippedPullAndMidPassRebind(t *testing.T) {
 		require.NoError(t, err)
 
 		retries := newSyncRetries(noJitter)
-		retries.recordHubUnavailable(binding1.HubURL, time.Minute, 30*time.Second, fleet.now)
+		retries.recordHubUnavailable(binding1.HubURL, 0, time.Minute, 30*time.Second, fleet.now)
 
 		// Attach a long-poll entry marking project 1 quiet well past the cooldown.
 		polls := &hubLongPolls{
@@ -537,7 +617,7 @@ func TestThrottledHubSkippedPullAndMidPassRebind(t *testing.T) {
 		_, _, _, err = fleet.runner.runOnce(ctx, nil, map[int64]bool{fleet.projects[1].ID: true}, retries)
 		require.NoError(t, err)
 		require.Zero(t, fleet.requests.Load(), "quiet held project should make no HTTP request")
-		release, allowed, _, versionAfterSkip := retries.acquireHubProbe(binding1.HubURL, fleet.now)
+		release, allowed, _, versionAfterSkip := retries.acquireHubProbe(binding1.HubURL, fleet.now, time.Minute)
 		require.True(t, allowed)
 		require.NotZero(t, versionAfterSkip, "a skipped pull with no hub response must not clear hub cooldown")
 		release()
@@ -572,6 +652,7 @@ func TestThrottledHubSkippedPullAndMidPassRebind(t *testing.T) {
 			b1, err := fleet.store.FederationBindingByProject(ctx, fleet.projects[1].ID)
 			require.NoError(t, err)
 			b1.HubURL = busyHub.URL
+			b1.PushEnabled = false
 			_, err = fleet.store.UpsertFederationBinding(ctx, b1)
 			require.NoError(t, err)
 			c1 := fleet.credentials.credentials[fleet.projects[1].UID]

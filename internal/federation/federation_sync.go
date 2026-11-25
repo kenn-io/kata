@@ -437,6 +437,13 @@ func syncDirectSpoke(
 			return nil
 		}
 	}
+	hubPull := hubPullRetriesFromContext(ctx)
+	releaseProbe, allowed, _, hubVersion := hubPull.acquire(client.baseURL, opts.Timeout)
+	if !allowed {
+		hubPull.markSkipped()
+		return nil
+	}
+	defer releaseProbe()
 	resumePull, pullStartedAt, err := startFederationPull(ctx, store, binding.ProjectID)
 	if err != nil {
 		return err
@@ -453,6 +460,13 @@ func syncDirectSpoke(
 		return recordFederationSyncErrorAt(ctx, store, binding.ProjectID, pullErr, at)
 	}
 	body, advertised, err := client.pollProjectEvents(ctx, hubProjectID, "", binding.PullCursorEventID, federationPollLimit, 0)
+	if err == nil {
+		hubPull.clear(client.baseURL, hubVersion)
+	} else if hubAskedToWait(err) {
+		_, _, retryAfter := classifySyncRetry(err)
+		hubPull.recordUnavailable(client.baseURL, hubVersion, retryAfter)
+	}
+	releaseProbe()
 	if err != nil {
 		return recordPullError(err)
 	}
@@ -1301,32 +1315,22 @@ func (r *Runner) runOnce(
 				return retry, true, remaining, errors.Join(errs...)
 			}
 		}
-		spokeRemaining, identity, hubOutcome, spokeErr := func() (bool, retryTurnIdentity, spokeHubOutcome, error) {
+		pullCtx := &hubPullRetryContext{retries: retries, interval: r.effectiveInterval(), now: r.refusalNow}
+		spokeRemaining, identity, spokeErr := func() (bool, retryTurnIdentity, error) {
 			if drain != nil {
 				defer drain.Release()
 			}
-			return r.runSpoke(ctx, spoke, credentialStore, validateLease, drain, retries)
+			return r.runSpoke(withHubPullRetries(ctx, pullCtx), spoke, credentialStore, validateLease, drain)
 		}()
-		if hubOutcome.skipped {
-			continue
-		}
 		now := r.refusalNow()
-		retries.recordSchedule(spoke.binding.ProjectID, identity.full, identity.target, false, spokeErr, r.effectiveInterval(), now, &started, time.Time{})
-		if hubOutcome.hubURL != "" {
-			if spokeErr == nil && hubOutcome.contacted {
-				retries.clearHubUnavailable(hubOutcome.hubURL, hubOutcome.hubVersion)
-			} else if hubAskedToWait(spokeErr) {
-				_, _, retryAfter := classifySyncRetry(spokeErr)
-				retries.recordHubUnavailable(hubOutcome.hubURL, retryAfter, r.effectiveInterval(), now)
-			}
-		}
-		if hubOutcome.releaseProbe != nil {
-			hubOutcome.releaseProbe()
+		pullSkipped := pullCtx.pullSkipped.Load()
+		if spokeErr != nil || !pullSkipped {
+			retries.recordSchedule(spoke.binding.ProjectID, identity.full, identity.target, false, spokeErr, r.effectiveInterval(), now, &started, time.Time{})
 		}
 		if errors.Is(spokeErr, context.Canceled) || errors.Is(spokeErr, errFederationRunnerLeaseInvalid) {
 			return nil, false, nil, spokeErr
 		}
-		if spokeErr == nil {
+		if spokeErr == nil && !pullSkipped {
 			r.longPolls.start(spoke)
 		}
 		if spokeErr != nil {
@@ -1380,15 +1384,63 @@ type retryTurnIdentity struct {
 	full, target [32]byte
 }
 
-// spokeHubOutcome records the hub address actually targeted by a turn, whether
-// the turn was held back by an active hub cooldown, and whether a live 2xx hub
-// response completed so only real recovery clears a matching cooldown version.
-type spokeHubOutcome struct {
-	hubURL       string
-	hubVersion   uint64
-	contacted    bool
-	skipped      bool
-	releaseProbe func()
+type hubPullRetriesContextKey struct{}
+
+// hubPullRetryContext scopes the shared hub pull/watch cooldown to direct
+// pull requests inside syncDirectSpoke so per-credential ingest or claim
+// throttles never pause unrelated pulls, and pull cooldowns never block claims
+// or pushes.
+type hubPullRetryContext struct {
+	retries     *SyncRetries
+	interval    time.Duration
+	now         func() time.Time
+	pullSkipped atomic.Bool
+}
+
+func withHubPullRetries(ctx context.Context, pull *hubPullRetryContext) context.Context {
+	if pull == nil || pull.retries == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, hubPullRetriesContextKey{}, pull)
+}
+
+func hubPullRetriesFromContext(ctx context.Context) *hubPullRetryContext {
+	pull, _ := ctx.Value(hubPullRetriesContextKey{}).(*hubPullRetryContext)
+	return pull
+}
+
+func (c *hubPullRetryContext) currentNow() time.Time {
+	if c != nil && c.now != nil {
+		return c.now()
+	}
+	return time.Now()
+}
+
+func (c *hubPullRetryContext) acquire(hubURL string, timeout time.Duration) (func(), bool, time.Time, uint64) {
+	if c == nil || c.retries == nil {
+		return func() {}, true, time.Time{}, 0
+	}
+	return c.retries.acquireHubProbe(hubURL, c.currentNow(), max(2*timeout, 30*time.Second))
+}
+
+func (c *hubPullRetryContext) clear(hubURL string, started uint64) {
+	if c == nil || c.retries == nil {
+		return
+	}
+	c.retries.clearHubUnavailable(hubURL, started)
+}
+
+func (c *hubPullRetryContext) recordUnavailable(hubURL string, started uint64, retryAfter time.Duration) {
+	if c == nil || c.retries == nil {
+		return
+	}
+	c.retries.recordHubUnavailable(hubURL, started, retryAfter, c.interval, c.currentNow())
+}
+
+func (c *hubPullRetryContext) markSkipped() {
+	if c != nil {
+		c.pullSkipped.Store(true)
+	}
 }
 
 // retryIdentityAfterTurn fingerprints a refused or throttled turn, so the next
@@ -1430,32 +1482,26 @@ func (r *Runner) runSpoke(
 	credentialStore config.FederationCredentialStore,
 	validateLease func(context.Context) error,
 	drain *activity.Lease,
-	retries *SyncRetries,
-) (remaining bool, identity retryTurnIdentity, outcome spokeHubOutcome, resultErr error) {
+) (remaining bool, identity retryTurnIdentity, resultErr error) {
 	if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
-		return false, identity, outcome, err
+		return false, identity, err
 	}
 	finishSync, err := federationcoord.BeginSync(ctx,
 		federationcoord.Key(r.DB.InstanceUID(), spoke.binding.ProjectID), r.DB, spoke.binding.ProjectID)
 	if err != nil {
-		return false, identity, outcome, fmt.Errorf("coordinate federation sync: %w", err)
+		return false, identity, fmt.Errorf("coordinate federation sync: %w", err)
 	}
 	defer finishSync()
 	binding, err := r.DB.FederationBindingByProject(ctx, spoke.binding.ProjectID)
 	if err != nil {
-		return false, identity, outcome, err
+		return false, identity, err
 	}
 	if !binding.Enabled || binding.Role != db.FederationRoleSpoke {
-		return false, identity, outcome, nil
+		return false, identity, nil
 	}
 	// turnCredential is the stored credential this turn sends to the hub.
 	var turnCredential config.FederationCredential
-	var contacted atomic.Bool
 	defer func() {
-		outcome.contacted = contacted.Load()
-		if outcome.skipped {
-			return
-		}
 		// Fingerprint before the result hook so the schedule belongs to
 		// the turn, not to a change made after it.
 		var identityErr error
@@ -1469,36 +1515,23 @@ func (r *Runner) runSpoke(
 	}()
 
 	ctx = withHubLongPolls(ctx, r.longPolls)
-	ctx = withHubContacted(ctx, &contacted)
 	cred, _, err := credentialStore.FederationCredential(ctx, spoke.project.UID)
 	if err != nil {
-		return false, identity, outcome, errors.Join(err, r.DB.RecordFederationSyncError(ctx, binding.ProjectID, err, time.Now().UTC()))
+		return false, identity, errors.Join(err, r.DB.RecordFederationSyncError(ctx, binding.ProjectID, err, time.Now().UTC()))
 	}
 	turnCredential = cred
 	cred = config.FederationTransportCredential(
 		binding.HubURL, binding.HubProjectID, binding.AllowInsecure, cred,
 	)
-	actualHubURL := cred.HubURL
-	if actualHubURL == "" {
-		actualHubURL = binding.HubURL
-	}
-	releaseProbe, allowed, _, hubVersion := retries.acquireHubProbe(actualHubURL, r.refusalNow())
-	if !allowed {
-		outcome.skipped = true
-		return false, identity, outcome, nil
-	}
-	outcome.hubURL = actualHubURL
-	outcome.hubVersion = hubVersion
-	outcome.releaseProbe = releaseProbe
 	opts := r.clientOpts()
 	var errs []error
 	if err := retryPendingClaimsOnceWithFence(ctx, r.DB, binding, cred, opts, validateLease); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, errFederationRunnerLeaseInvalid) {
-			return false, identity, outcome, err
+			return false, identity, err
 		}
 		if hubAskedToWait(err) {
 			// The hub asked this binding to wait; replication waits too.
-			return false, identity, outcome, err
+			return false, identity, err
 		}
 		errs = append(errs, err)
 	}
@@ -1518,19 +1551,20 @@ func (r *Runner) runSpoke(
 	}
 	if err := syncErr; err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, errFederationRunnerLeaseInvalid) {
-			return false, identity, outcome, err
+			return false, identity, err
 		}
 		errs = append(errs, err)
 	}
-	if len(errs) == 0 {
+	pullCtx := hubPullRetriesFromContext(ctx)
+	if len(errs) == 0 && (pullCtx == nil || !pullCtx.pullSkipped.Load()) {
 		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
-			return false, identity, outcome, err
+			return false, identity, err
 		}
 		if err := r.DB.ClearFederationSyncError(ctx, binding.ProjectID); err != nil {
 			errs = append(errs, err)
 		}
 	}
-	return remaining, identity, outcome, errors.Join(errs...)
+	return remaining, identity, errors.Join(errs...)
 }
 
 // RetryPendingClaimsOnce retries offline spoke claim requests against their

@@ -6,12 +6,16 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/client"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/federationcoord"
 )
 
@@ -355,7 +359,12 @@ func TestRefusedWatchStaysMultiplexedAndDeliversEvents(t *testing.T) {
 	require.Eventually(t, func() bool { return h.spokeIssueCount(t) == 1 }, 5*time.Second, 20*time.Millisecond,
 		"event was not delivered while holds were refused")
 
-	// Once the hub stops refusing holds, held watches resume and deliver immediately.
+	// While holds are refused, no watch stays held on the hub.
+	h.heldMu.Lock()
+	assert.Zero(t, h.held, "refused holds must not leave watches open")
+	h.heldMu.Unlock()
+
+	// Once the hub stops refusing holds, a held watch stays open and wakes immediately on commit.
 	h.refuseHolds.Store(false)
 	//nolint:kennlint // sleeptest: waits for the next hold probe to stay open over real HTTP.
 	require.Eventually(t, func() bool {
@@ -363,77 +372,101 @@ func TestRefusedWatchStaysMultiplexedAndDeliversEvents(t *testing.T) {
 		defer h.heldMu.Unlock()
 		return h.held == 1
 	}, 10*time.Second, 20*time.Millisecond, "the spoke did not resume holding a watch once hub capacity returned")
+	unwaitedBeforeCommit := h.watchRequestsWithoutWait.Load()
 	h.createIssueIn(t, h.hubProject.ID, "Committed after holds recovered")
 	//nolint:kennlint // sleeptest: delivery crosses real HTTP.
 	require.Eventually(t, func() bool { return h.spokeIssueCount(t) == 2 }, 5*time.Second, 10*time.Millisecond)
+	assert.Equal(t, unwaitedBeforeCommit, h.watchRequestsWithoutWait.Load(),
+		"commit after hold recovery should wake the held watch rather than an unwaited fallback poll")
 }
 
-// Watchers joining over a startup pass that spans more than one join delay
-// coalesce instead of cancelling and reissuing a partial watch on every join.
+// Watchers joining over a startup burst that spans more than one 100 ms join
+// delay coalesce into a single watch instead of cancelling and reissuing a
+// partial watch on every arrival.
 func TestWatchJoinDebounceAvoidsStartupReissueStorm(t *testing.T) {
 	const projects = 10
-	h := newHubSpokeHarness(t, false)
-	h.watches.Store(true)
-	var watches atomic.Int64
-	frontURL := h.bindThrough(t, func(w http.ResponseWriter, r *http.Request, hub http.Handler) {
-		if isWatch(r) {
-			watches.Add(1)
+	var watches, cancelled atomic.Int64
+	gotWatch := make(chan int, projects)
+	releaseWatch := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		watches.Add(1)
+		var body struct {
+			Projects []json.RawMessage `json:"projects"`
 		}
-		if isEventPoll(r) {
-			// Spread initial pulls past the 100 ms join delay to mirror real hub RTT.
-			//nolint:kennlint // sleeptest: simulates network round-trip time on initial pulls.
-			time.Sleep(15 * time.Millisecond)
-		}
-		hub.ServeHTTP(w, r)
-	})
-	var lastHubID int64
-	var lastSpokeID int64
-	for i := 1; i < projects; i++ {
-		spoke, hub := h.addBinding(t, "debounce-project-"+string(rune('a'+i)), frontURL)
-		lastSpokeID, lastHubID = spoke.ID, hub.ID
-	}
-	turns := make(chan int64, 2*projects)
-	h.startConfiguredRunner(t, &Runner{
-		DB: h.spokeDB, Interval: time.Hour,
-		OnSpokeResult: func(id int64, _ error) { turns <- id },
-	})
-	for range projects {
+		_ = json.NewDecoder(r.Body).Decode(&body)
 		select {
-		case <-turns:
-		case <-time.After(30 * time.Second):
-			t.Fatal("initial pass did not finish")
+		case gotWatch <- len(body.Projects) + 1:
+		default:
+		}
+		select {
+		case <-releaseWatch:
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("X-Kata-Federation-Poll-Wait-Max", "45")
+			w.Header().Set("X-Kata-Federation-Watch-Max", "256")
+			_, _ = w.Write([]byte(`{"ready":[],"unwatched":[]}`))
+		case <-r.Context().Done():
+			cancelled.Add(1)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	polls := newHubLongPolls(t.Context(), nil, nil, client.Opts{AllowInsecure: true, Timeout: 30 * time.Second}, 30*time.Second, nil, nil, NewSyncRetries(), time.Now)
+	t.Cleanup(polls.stopAll)
+	polls.learnHub(srv.URL, hubPollAdvertisement{wait: 45 * time.Second, watchMax: 256})
+	leadClient, err := NewClient(t.Context(), srv.URL, "token", client.Opts{AllowInsecure: true, Timeout: 30 * time.Second})
+	require.NoError(t, err)
+	group := polls.watchGroup(leadClient, config.FederationCredential{HubURL: srv.URL, Token: "token", AllowInsecure: true})
+	require.NotNil(t, group)
+
+	var wg sync.WaitGroup
+	results := make(chan heldResult, projects)
+	for i := range projects {
+		c, err := NewClient(t.Context(), srv.URL, "token", client.Opts{AllowInsecure: true, Timeout: 30 * time.Second})
+		require.NoError(t, err)
+		member := &watchMember{
+			projectID:    int64(i + 1),
+			hubProjectID: int64(100 + i),
+			token:        "token",
+			client:       c,
+			wait:         45 * time.Second,
+			finishSync:   func() {},
+		}
+		wg.Go(func() {
+			results <- group.hold(t.Context(), member)
+		})
+		if i+1 < projects {
+			// Spread 10 joins across ~180 ms (> 100 ms join delay, < 500 ms cap).
+			//nolint:kennlint // sleeptest: exercises sliding join debounce across real timers.
+			time.Sleep(20 * time.Millisecond)
 		}
 	}
-	//nolint:kennlint // sleeptest: waits for the coalesced watch to reach the hub over real HTTP.
-	require.Eventually(t, func() bool { return watches.Load() >= 1 }, 10*time.Second, 10*time.Millisecond)
-	//nolint:kennlint // sleeptest: verifies no trailing reissue storm after all watchers joined.
-	time.Sleep(400 * time.Millisecond)
-	assert.LessOrEqual(t, watches.Load(), int64(3),
-		"startup joins triggered %d watches instead of coalescing", watches.Load())
 
-	// The last project to join is still watched and receives commits promptly.
-	h.createIssueIn(t, lastHubID, "Committed on the last project to join")
-	awaitTurns(t, turns, lastSpokeID)
+	select {
+	case count := <-gotWatch:
+		assert.Equal(t, projects, count, "all staggered joins should coalesce into one watch")
+	case <-time.After(5 * time.Second):
+		t.Fatal("coalesced watch did not reach the hub")
+	}
+	close(releaseWatch)
+	wg.Wait()
+	assert.Equal(t, int64(1), watches.Load(), "staggered startup joins must send one watch")
+	assert.Zero(t, cancelled.Load(), "staggered startup joins must not cancel and reissue partial watches")
 }
 
 // When a hub throttles a multiplexed watch with 429 or 503, the hub cooldown
-// keeps both the runner's interval loop and the watch group quiet until Retry-After.
+// also stops unrelated bindings on the same hub that were NOT part of that
+// throttled watch (and therefore carry no per-project retry schedule).
 func TestWatchThrottleDelaysIntervalAndWatchRetries(t *testing.T) {
 	h := newHubSpokeHarness(t, false)
 	h.watches.Store(true)
 	var throttle atomic.Bool
 	var watches, intervalPolls atomic.Int64
-	throttled := make(chan struct{}, 1)
 	frontURL := h.bindThrough(t, func(w http.ResponseWriter, r *http.Request, hub http.Handler) {
 		if isWatch(r) {
 			watches.Add(1)
 			if throttle.Load() {
 				w.Header().Set("Retry-After", "120")
 				w.WriteHeader(http.StatusTooManyRequests)
-				select {
-				case throttled <- struct{}{}:
-				default:
-				}
 				return
 			}
 		}
@@ -442,33 +475,128 @@ func TestWatchThrottleDelaysIntervalAndWatchRetries(t *testing.T) {
 		}
 		hub.ServeHTTP(w, r)
 	})
-	const extra = 5
+	const extra = 3
 	ids := []int64{h.spokeProject.ID}
 	for i := range extra {
 		spoke, _ := h.addBinding(t, "throttle-project-"+string(rune('a'+i)), frontURL)
 		ids = append(ids, spoke.ID)
 	}
 	throttle.Store(true)
-	turns := make(chan int64, 2*len(ids))
+	turns := make(chan int64, 64)
 	retries := NewSyncRetries()
 	h.startConfiguredRunner(t, &Runner{
 		DB: h.spokeDB, Interval: 200 * time.Millisecond, Retries: retries,
-		OnSpokeResult: func(id int64, _ error) { turns <- id },
+		OnSpokeResult: func(id int64, _ error) {
+			select {
+			case turns <- id:
+			default:
+			}
+		},
 	})
 	awaitTurns(t, turns, ids...)
-	select {
-	case <-throttled:
-	case <-time.After(10 * time.Second):
-		t.Fatal("throttled watch did not reach the hub")
-	}
-	// Give the spoke a moment to record the hub cooldown.
+	// Wait until the hub-wide cooldown is recorded from the throttled watch.
 	//nolint:kennlint // sleeptest: waits for the 429 response to be processed over real HTTP.
-	time.Sleep(100 * time.Millisecond)
+	require.Eventually(t, func() bool {
+		return retries.hubBlocked(frontURL, time.Now())
+	}, 10*time.Second, 10*time.Millisecond, "throttled watch did not record hub cooldown")
+
+	// Add a brand-new binding on the SAME hub after the 429; it was never in
+	// the throttled watch and has no per-project retry schedule.
+	freshSpoke, _ := h.addBinding(t, "throttle-fresh-project", frontURL)
+	_, hasPerProjectRetry := retries.FederationSyncRetry(freshSpoke.ID)
+	require.False(t, hasPerProjectRetry, "fresh binding must have no per-project retry schedule")
+
 	watchesAfter := watches.Load()
 	pollsAfter := intervalPolls.Load()
 	h.wake <- struct{}{}
 	//nolint:kennlint // sleeptest: observes several intervals and a wake while Retry-After is active.
-	time.Sleep(time.Second)
-	assert.Equal(t, pollsAfter, intervalPolls.Load(), "runner polled bindings at a hub still in Retry-After cooldown")
+	time.Sleep(800 * time.Millisecond)
+	assert.Equal(t, pollsAfter, intervalPolls.Load(), "hub cooldown must stop polls even for a fresh binding on the same hub")
 	assert.Equal(t, watchesAfter, watches.Load(), "watch group retried before Retry-After elapsed")
+}
+
+// Once a hub cooldown expires, the watch group sends a wait=0 recovery probe
+// so a healthy idle hub clears the cooldown immediately instead of holding the
+// recovery probe open for 45 seconds, then resumes held watches.
+func TestWatchRecoveryProbeUsesZeroWaitAndResumesHeldWatch(t *testing.T) {
+	var seenWaits []string
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seenWaits = append(seenWaits, r.URL.Query().Get("wait"))
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Kata-Federation-Poll-Wait-Max", "45")
+		w.Header().Set("X-Kata-Federation-Watch-Max", "256")
+		_, _ = w.Write([]byte(`{"ready":[],"unwatched":[]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	retries := newSyncRetries(noJitter)
+	retries.recordHubUnavailable(srv.URL, 0, time.Minute, 30*time.Second, now)
+	now = now.Add(time.Minute) // Cooldown has just expired.
+
+	polls := newHubLongPolls(t.Context(), nil, nil, client.Opts{AllowInsecure: true, Timeout: 30 * time.Second}, 30*time.Second, nil, nil, retries, func() time.Time { return now })
+	t.Cleanup(polls.stopAll)
+	polls.learnHub(srv.URL, hubPollAdvertisement{wait: 45 * time.Second, watchMax: 256})
+	c, err := NewClient(t.Context(), srv.URL, "token", client.Opts{AllowInsecure: true, Timeout: 30 * time.Second})
+	require.NoError(t, err)
+	group := polls.watchGroup(c, config.FederationCredential{HubURL: srv.URL, Token: "token", AllowInsecure: true})
+	require.NotNil(t, group)
+	member := &watchMember{
+		projectID: 1, hubProjectID: 100, token: "token", client: c, wait: 45 * time.Second, finishSync: func() {},
+	}
+	res := group.hold(t.Context(), member)
+	require.NoError(t, res.err)
+	require.True(t, res.again, "clean wait=0 recovery probe should ask member to immediately resume held watch")
+	require.False(t, retries.hubBlocked(srv.URL, now), "recovery probe must clear hub cooldown")
+
+	// Next join after cooldown clears must request wait=45 again.
+	res2 := group.hold(t.Context(), member)
+	require.NoError(t, res2.err)
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Equal(t, []string{"0", "45"}, seenWaits, "first post-cooldown watch must be wait=0 probe, followed by held wait=45")
+}
+
+// Joining a watch group during refused-hold pacing returns the remaining wait
+// immediately so the watcher sleeps outside the project's endpoint gate and
+// concurrent rebinds do not stall for the full sync interval.
+func TestWatchPacingWaitReturnsImmediatelyToCaller(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Kata-Federation-Poll-Wait-Max", "45")
+		w.Header().Set("X-Kata-Federation-Watch-Max", "256")
+		_, _ = w.Write([]byte(`{"ready":[],"unwatched":[]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	polls := newHubLongPolls(t.Context(), nil, nil, client.Opts{AllowInsecure: true, Timeout: 30 * time.Second}, 30*time.Second, nil, nil, newSyncRetries(noJitter), func() time.Time { return now })
+	polls.jitter = noJitter
+	t.Cleanup(polls.stopAll)
+	polls.learnHub(srv.URL, hubPollAdvertisement{wait: 45 * time.Second, watchMax: 256})
+	c, err := NewClient(t.Context(), srv.URL, "token", client.Opts{AllowInsecure: true, Timeout: 30 * time.Second})
+	require.NoError(t, err)
+	group := polls.watchGroup(c, config.FederationCredential{HubURL: srv.URL, Token: "token", AllowInsecure: true})
+	require.NotNil(t, group)
+	member := &watchMember{
+		projectID: 1, hubProjectID: 100, token: "token", client: c, wait: 45 * time.Second, finishSync: func() {},
+	}
+	// First watch returns immediately (refused hold), setting nextPollAt = now + 30s.
+	first := group.hold(t.Context(), member)
+	require.NoError(t, first.err)
+	require.True(t, first.quiet)
+	require.Equal(t, 30*time.Second, first.sleep)
+
+	// A second member joining while nextPollAt is 30s away must get an immediate
+	// pace-sleep reply instead of parking inside the group holding its endpoint gate.
+	start := time.Now()
+	second := group.hold(t.Context(), member)
+	require.Less(t, time.Since(start), time.Second, "pacing join must not block caller inside watch group")
+	require.NoError(t, second.err)
+	require.True(t, second.again)
+	require.Equal(t, 30*time.Second, second.sleep)
 }
