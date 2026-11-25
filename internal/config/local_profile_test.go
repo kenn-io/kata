@@ -506,6 +506,25 @@ func TestLocalProfileEnvironmentVertexCredentials(t *testing.T) {
 	require.NotContains(t, env, "GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES=true")
 }
 
+func TestLocalProfileEnvironmentConnectorSharesVertexCredentials(t *testing.T) {
+	for _, key := range []string{"GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_REGION", "AWS_DEFAULT_REGION"} {
+		t.Run(key, func(t *testing.T) {
+			value := "example-value"
+			if key == "GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES" {
+				value = "1"
+			}
+			t.Setenv(key, value)
+			profile := config.LocalProfileConfig{Home: t.TempDir(), Config: &config.DaemonConfig{
+				Search:     config.SearchConfig{Embeddings: config.EmbeddingsConfig{API: embedconfig.APIVertex}},
+				Connectors: []config.ConnectorConfig{{Env: map[string]string{"CREDENTIAL": key}}},
+			}}
+			env, err := config.LocalProfileEnvironment(profile, true)
+			require.NoError(t, err)
+			assert.Equal(t, 1, strings.Count("\n"+strings.Join(env, "\n")+"\n", "\n"+key+"="+value+"\n"))
+		})
+	}
+}
+
 // Contract: a local-profile daemon receives the signing secrets named by its
 // own home's hub keys and saved spoke credentials, not the invoking home's.
 func TestLocalProfileEnvironmentIncludesFederationSigningKeyEnvs(t *testing.T) {
