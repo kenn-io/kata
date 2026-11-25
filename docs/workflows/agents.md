@@ -46,10 +46,17 @@ kata agent-hook instructions uninstall muse --home /path/to/muse-home
 directory, the installer manages a block in `AGENTS.md`,
 `workspace/custom-skills/kata/SKILL.md`, and
 `workspace/custom-skills/kata/POLL.md`, all carrying the canonical hook
-contract. Consumer Muse discovers custom skills in `workspace/custom-skills`
-and needs only `SKILL.md` there. If your Muse reads skills from another
-directory, pass `--skills-dir <dir>` to all three commands. The directory is
-relative to `--home` and must stay inside it; Kata adds the `kata` folder.
+contract, plus a block in `workspace/custom-skills/kata/skill.yaml`. Consumer
+Muse discovers custom skills in `workspace/custom-skills` and reads each
+skill's title, description, category, and `include_in_prompt` setting from
+`skill.yaml`. Kata sets `include_in_prompt: true`, which lists the skill in
+every conversation. Add your own keys outside the marked block; install
+refreshes only the block, and uninstall deletes the file only if nothing else
+remains. Unlike an unmarked `SKILL.md` or `POLL.md`, which stops the install,
+an existing `skill.yaml` without Kata's markers is left untouched with a note. If your Muse reads
+skills from another directory, pass `--skills-dir <dir>` to all three commands.
+The directory is relative to `--home` and must stay inside it; Kata adds the
+`kata` folder.
 
 Kata 0.24.0 and earlier installed the skill under `workspace/skills/kata/`.
 Unless you select that directory, `status` also lists a managed copy there,

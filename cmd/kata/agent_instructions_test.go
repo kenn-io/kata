@@ -152,7 +152,9 @@ func TestAgentInstructionsForeignSuffixesAndActorUpdate(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, applyInstructionArtifacts(updated))
 	for _, a := range updated {
-		require.Contains(t, a.Content, "kata inbox --for 'example-agent/worker' --json")
+		if filepath.Base(a.Path) != "skill.yaml" {
+			require.Contains(t, a.Content, "kata inbox --for 'example-agent/worker' --json")
+		}
 		require.Equal(t, 1, strings.Count(a.Content, "BEGIN KATA HOOKLESS MUSE"))
 		require.True(t, strings.HasSuffix(a.Content, "Foreign suffix\r\n"))
 	}
@@ -195,10 +197,12 @@ func TestAgentInstructionsMuseLifecycle(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(out), &report))
 	require.False(t, report.NativeAttention)
 	require.True(t, report.DryRun)
-	require.Len(t, report.Artifacts, 3)
+	require.Len(t, report.Artifacts, 4)
 	require.NotContains(t, out, "secret-must-not-appear")
 	for _, a := range report.Artifacts {
-		require.Contains(t, a.Content, agentContractText)
+		if filepath.Base(a.Path) != "skill.yaml" {
+			require.Contains(t, a.Content, agentContractText)
+		}
 		require.True(t, a.Changed)
 	}
 	before, err := os.ReadFile(instructions) //nolint:gosec // G304: fixture under TempDir.
@@ -275,7 +279,7 @@ func TestAgentInstructionsUninstallDryPreviewDoesNotWrite(t *testing.T) {
 		} `json:"artifacts"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(installOut), &installed))
-	require.Len(t, installed.Artifacts, 3)
+	require.Len(t, installed.Artifacts, 4)
 	paths := make([]string, 0, len(installed.Artifacts))
 	before := make(map[string][]byte, len(installed.Artifacts))
 	for _, artifact := range installed.Artifacts {
@@ -323,7 +327,7 @@ func TestAgentInstructionsJSONOmitsContentsOutsideDryRuns(t *testing.T) {
 			Artifacts []map[string]json.RawMessage `json:"artifacts"`
 		}
 		require.NoError(t, json.Unmarshal([]byte(out), &response))
-		require.Len(t, response.Artifacts, 3)
+		require.Len(t, response.Artifacts, 4)
 		for _, artifact := range response.Artifacts {
 			_, hasContent := artifact["content"]
 			require.False(t, hasContent)
@@ -490,7 +494,7 @@ func TestAgentInstructionsActorContainingMarkerPhrase(t *testing.T) {
 				} `json:"artifacts"`
 			}
 			require.NoError(t, json.Unmarshal([]byte(out), &report))
-			require.Len(t, report.Artifacts, 3)
+			require.Len(t, report.Artifacts, 4)
 			for _, a := range report.Artifacts {
 				require.Equal(t, "installed", a.State)
 			}
@@ -558,9 +562,10 @@ func TestAgentInstructionsDefaultsToCustomSkills(t *testing.T) {
 	home := realTempHome(t)
 	report := runInstructions(t, "install", "muse", "--home", home, "--actor", "example-agent")
 	require.Equal(t, map[string]string{
-		"AGENTS.md":                             "installed",
-		"workspace/custom-skills/kata/SKILL.md": "installed",
-		"workspace/custom-skills/kata/POLL.md":  "installed",
+		"AGENTS.md":                               "installed",
+		"workspace/custom-skills/kata/SKILL.md":   "installed",
+		"workspace/custom-skills/kata/POLL.md":    "installed",
+		"workspace/custom-skills/kata/skill.yaml": "installed",
 	}, artifactStates(report, home))
 	_, err := os.Stat(filepath.Join(home, "workspace", "skills"))
 	require.ErrorIs(t, err, os.ErrNotExist)
@@ -575,9 +580,10 @@ func TestAgentInstructionsSkillsDirOverride(t *testing.T) {
 		{filepath.Join(home, "skills"), "skills"},
 	} {
 		want := map[string]string{
-			"AGENTS.md":               "installed",
-			tc.rel + "/kata/SKILL.md": "installed",
-			tc.rel + "/kata/POLL.md":  "installed",
+			"AGENTS.md":                 "installed",
+			tc.rel + "/kata/SKILL.md":   "installed",
+			tc.rel + "/kata/POLL.md":    "installed",
+			tc.rel + "/kata/skill.yaml": "installed",
 		}
 		require.Equal(t, want, artifactStates(runInstructions(t, "install", "muse", "--home", home, "--actor", "example-agent", "--skills-dir", tc.dir), home))
 		require.Equal(t, want, artifactStates(runInstructions(t, "status", "muse", "--home", home, "--skills-dir", tc.dir), home))
@@ -602,9 +608,10 @@ func TestAgentInstructionsSkillsDirAcceptsParentAlias(t *testing.T) {
 	}
 	report := runInstructions(t, "install", "muse", "--home", filepath.Join(alias, "muse-home"), "--actor", "example-agent", "--skills-dir", filepath.Join(home, "skills"))
 	require.Equal(t, map[string]string{
-		"AGENTS.md":            "installed",
-		"skills/kata/SKILL.md": "installed",
-		"skills/kata/POLL.md":  "installed",
+		"AGENTS.md":              "installed",
+		"skills/kata/SKILL.md":   "installed",
+		"skills/kata/POLL.md":    "installed",
+		"skills/kata/skill.yaml": "installed",
 	}, artifactStates(report, home))
 }
 
@@ -631,10 +638,11 @@ func TestAgentInstructionsSkillsDirMustStayInsideHome(t *testing.T) {
 }
 
 // installLegacyBundle reproduces an install made before the custom-skills
-// default, with foreign text added to its POLL.md.
+// default, which wrote no skill.yaml, with foreign text added to its POLL.md.
 func installLegacyBundle(t *testing.T, home string) (skill, poll string) {
 	t.Helper()
 	runInstructions(t, "install", "muse", "--home", home, "--actor", "example-agent", "--skills-dir", "workspace/skills")
+	require.NoError(t, os.Remove(filepath.Join(home, "workspace", "skills", "kata", "skill.yaml")))
 	skill = filepath.Join(home, "workspace", "skills", "kata", "SKILL.md")
 	poll = filepath.Join(home, "workspace", "skills", "kata", "POLL.md")
 	data, err := os.ReadFile(poll) //nolint:gosec // G304: fixture under TempDir.
@@ -650,26 +658,28 @@ func TestAgentInstructionsMigratesLegacySkills(t *testing.T) {
 	home := realTempHome(t)
 	skill, poll := installLegacyBundle(t, home)
 	require.Equal(t, map[string]string{
-		"AGENTS.md":                             "installed",
-		"workspace/custom-skills/kata/SKILL.md": "absent",
-		"workspace/custom-skills/kata/POLL.md":  "absent",
-		"workspace/skills/kata/SKILL.md":        "installed",
-		"workspace/skills/kata/POLL.md":         "installed",
+		"AGENTS.md":                               "installed",
+		"workspace/custom-skills/kata/SKILL.md":   "absent",
+		"workspace/custom-skills/kata/POLL.md":    "absent",
+		"workspace/custom-skills/kata/skill.yaml": "absent",
+		"workspace/skills/kata/SKILL.md":          "installed",
+		"workspace/skills/kata/POLL.md":           "installed",
 	}, artifactStates(runInstructions(t, "status", "muse", "--home", home), home))
 
 	require.Equal(t, map[string]string{
-		"AGENTS.md":                             "installed",
-		"workspace/custom-skills/kata/SKILL.md": "installed",
-		"workspace/custom-skills/kata/POLL.md":  "installed",
-		"workspace/skills/kata/SKILL.md":        "removed",
-		"workspace/skills/kata/POLL.md":         "removed",
+		"AGENTS.md":                               "installed",
+		"workspace/custom-skills/kata/SKILL.md":   "installed",
+		"workspace/custom-skills/kata/POLL.md":    "installed",
+		"workspace/custom-skills/kata/skill.yaml": "installed",
+		"workspace/skills/kata/SKILL.md":          "removed",
+		"workspace/skills/kata/POLL.md":           "removed",
 	}, artifactStates(runInstructions(t, "install", "muse", "--home", home, "--actor", "example-agent"), home))
 	_, err := os.Stat(skill)
 	require.ErrorIs(t, err, os.ErrNotExist)
 	data, err := os.ReadFile(poll) //nolint:gosec // G304: fixture under TempDir.
 	require.NoError(t, err)
 	require.Equal(t, "Foreign poll notes\n", string(data))
-	require.Len(t, runInstructions(t, "status", "muse", "--home", home).Artifacts, 3)
+	require.Len(t, runInstructions(t, "status", "muse", "--home", home).Artifacts, 4)
 }
 
 func TestAgentInstructionsUninstallRemovesLegacySkills(t *testing.T) {
@@ -677,11 +687,12 @@ func TestAgentInstructionsUninstallRemovesLegacySkills(t *testing.T) {
 	home := realTempHome(t)
 	skill, poll := installLegacyBundle(t, home)
 	require.Equal(t, map[string]string{
-		"AGENTS.md":                             "removed",
-		"workspace/custom-skills/kata/SKILL.md": "absent",
-		"workspace/custom-skills/kata/POLL.md":  "absent",
-		"workspace/skills/kata/SKILL.md":        "removed",
-		"workspace/skills/kata/POLL.md":         "removed",
+		"AGENTS.md":                               "removed",
+		"workspace/custom-skills/kata/SKILL.md":   "absent",
+		"workspace/custom-skills/kata/POLL.md":    "absent",
+		"workspace/custom-skills/kata/skill.yaml": "absent",
+		"workspace/skills/kata/SKILL.md":          "removed",
+		"workspace/skills/kata/POLL.md":           "removed",
 	}, artifactStates(runInstructions(t, "uninstall", "muse", "--home", home), home))
 	_, err := os.Stat(skill)
 	require.ErrorIs(t, err, os.ErrNotExist)
@@ -739,7 +750,7 @@ func TestAgentInstructionsIgnoresSymlinkedLegacySkills(t *testing.T) {
 		if verb == "install" {
 			args = append(args, "--actor", "example-agent")
 		}
-		require.Len(t, runInstructions(t, args...).Artifacts, 3, verb)
+		require.Len(t, runInstructions(t, args...).Artifacts, 4, verb)
 	}
 	data, err := os.ReadFile(foreign) //nolint:gosec // G304: fixture under TempDir.
 	require.NoError(t, err)
@@ -786,9 +797,81 @@ func TestAgentInstructionsLeavesUnmanagedLegacySkillAlone(t *testing.T) {
 		if verb == "install" {
 			args = append(args, "--actor", "example-agent")
 		}
-		require.Len(t, runInstructions(t, args...).Artifacts, 3, verb)
+		require.Len(t, runInstructions(t, args...).Artifacts, 4, verb)
 	}
 	data, err := os.ReadFile(foreign) //nolint:gosec // G304: fixture under TempDir.
 	require.NoError(t, err)
 	require.Equal(t, "Someone else's skill\n", string(data))
+}
+
+// kenn-io/kata#1315: without skill.yaml, consumer Muse ignores SKILL.md front
+// matter and describes the skill by its first heading line, Kata's marker.
+func TestAgentInstructionsWritesManagedSkillYAML(t *testing.T) {
+	resetFlags(t)
+	home := realTempHome(t)
+	runInstructions(t, "install", "muse", "--home", home, "--actor", "example-agent")
+	path := filepath.Join(home, "workspace", "custom-skills", "kata", "skill.yaml")
+	data, err := os.ReadFile(path) //nolint:gosec // G304: artifact path under TempDir.
+	require.NoError(t, err)
+	require.Equal(t, `# BEGIN KATA HOOKLESS MUSE
+# Managed by Kata: refreshed on every `+"`kata agent-hook instructions install muse`"+`.
+# Add your own keys outside this block; Kata leaves them alone.
+name: kata
+title: "Kata"
+description: "Use at conversation start and before claiming completion for Kata issue work."
+category: "Work and knowledge"
+include_in_prompt: true
+# END KATA HOOKLESS MUSE
+`, string(data))
+	skill, err := os.ReadFile(filepath.Join(filepath.Dir(path), "SKILL.md")) //nolint:gosec // G304: artifact path under TempDir.
+	require.NoError(t, err)
+	var front, meta struct{ Description string }
+	require.NoError(t, yaml.Unmarshal([]byte(strings.Split(string(skill), "---")[1]), &front))
+	require.NoError(t, yaml.Unmarshal(data, &meta))
+	require.Equal(t, front.Description, meta.Description)
+}
+
+// Keys outside the managed block survive reinstall and uninstall; uninstall
+// deletes the file only when nothing else remains.
+func TestAgentInstructionsSkillYAMLKeepsForeignKeys(t *testing.T) {
+	resetFlags(t)
+	home := realTempHome(t)
+	runInstructions(t, "install", "muse", "--home", home, "--actor", "example-agent")
+	path := filepath.Join(home, "workspace", "custom-skills", "kata", "skill.yaml")
+	data, err := os.ReadFile(path) //nolint:gosec // G304: artifact path under TempDir.
+	require.NoError(t, err)
+	edited := "owner: example-team\n" + string(data) + "notes: keep me\n"
+	require.NoError(t, os.WriteFile(path, []byte(edited), 0o600)) //nolint:gosec // G703: path is the test-owned skill.yaml under TempDir.
+	states := artifactStates(runInstructions(t, "install", "muse", "--home", home, "--actor", "example-agent/worker"), home)
+	require.Equal(t, "installed", states["workspace/custom-skills/kata/skill.yaml"])
+	after, err := os.ReadFile(path) //nolint:gosec // G304: artifact path under TempDir.
+	require.NoError(t, err)
+	require.Equal(t, edited, string(after))
+	runInstructions(t, "uninstall", "muse", "--home", home)
+	after, err = os.ReadFile(path) //nolint:gosec // G304: artifact path under TempDir.
+	require.NoError(t, err)
+	require.Equal(t, "owner: example-team\nnotes: keep me\n", string(after))
+}
+
+// An existing skill.yaml without Kata's markers belongs to someone else:
+// install leaves it untouched, notes it, and still installs the rest.
+func TestAgentInstructionsLeavesUnmanagedSkillYAML(t *testing.T) {
+	resetFlags(t)
+	home := realTempHome(t)
+	path := filepath.Join(home, "workspace", "custom-skills", "kata", "skill.yaml")
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+	require.NoError(t, os.WriteFile(path, []byte("name: kata\ntitle: Hand written\n"), 0o600))
+	out, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "instructions", "install", "muse", "--home", home, "--actor", "example-agent", "--json")
+	require.NoError(t, err, stderr)
+	require.Contains(t, stderr, path)
+	require.Equal(t, 1, strings.Count(stderr, "\n"))
+	var report instructionsReport
+	require.NoError(t, json.Unmarshal([]byte(out), &report))
+	states := artifactStates(report, home)
+	require.Equal(t, "unmanaged", states["workspace/custom-skills/kata/skill.yaml"])
+	require.Equal(t, "installed", states["workspace/custom-skills/kata/SKILL.md"])
+	runInstructions(t, "uninstall", "muse", "--home", home)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: fixture under TempDir.
+	require.NoError(t, err)
+	require.Equal(t, "name: kata\ntitle: Hand written\n", string(data))
 }

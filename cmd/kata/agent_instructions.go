@@ -15,12 +15,17 @@ const (
 	hooklessBeginComment = "<!-- BEGIN KATA HOOKLESS MUSE -->"
 	hooklessBeginYAML    = "# BEGIN KATA HOOKLESS MUSE"
 	hooklessEndMarker    = "<!-- END KATA HOOKLESS MUSE -->"
+	hooklessEndYAML      = "# END KATA HOOKLESS MUSE"
 	hooklessAddedNewline = "<!-- KATA HOOKLESS MUSE ADDED PREFIX NEWLINE -->"
 
 	// Consumer Muse discovers custom skills here (kenn-io/kata#1315).
 	museSkillsDir = "workspace/custom-skills"
 	// Kata 0.19.0 through 0.24.0 installed the skill here by default.
 	legacyMuseSkillsDir = "workspace/skills"
+
+	// SKILL.md front matter and skill.yaml share one description; consumer
+	// Muse reads it only from skill.yaml.
+	museSkillDescription = "Use at conversation start and before claiming completion for Kata issue work."
 )
 
 type instructionArtifact struct {
@@ -29,15 +34,20 @@ type instructionArtifact struct {
 	Changed     bool
 	State       string
 	beginMarker string
+	// endMarker defaults to hooklessEndMarker.
+	endMarker string
 	// fence is the line install writes before beginMarker, if any.
 	fence string
 	// retainEmpty keeps the file when uninstall leaves it empty.
 	retainEmpty bool
 	// legacy marks a pre-custom-skills copy that install migrates away.
 	legacy bool
-	before string
-	exists bool
-	mode   os.FileMode
+	// keepUnmanaged leaves an existing unmarked file alone instead of
+	// refusing the install.
+	keepUnmanaged bool
+	before        string
+	exists        bool
+	mode          os.FileMode
 }
 
 func newAgentInstructionsCmd() *cobra.Command {
@@ -90,6 +100,15 @@ func newAgentInstructionsActionCmd(verb string) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if verb == "install" && !flags.Quiet {
+				for _, a := range artifacts {
+					if a.State == "unmanaged" {
+						if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "note: left %s untouched because it has no Kata markers\n", a.Path); err != nil {
+							return err
+						}
+					}
+				}
+			}
 			if verb != "status" && !dryRun {
 				if err := applyInstructionArtifacts(artifacts); err != nil {
 					return err
@@ -135,11 +154,24 @@ native attention support, automatic idle wakeup, or guaranteed session-end hook.
 		{Path: filepath.Join(home, "AGENTS.md"), beginMarker: hooklessBeginComment, retainEmpty: true,
 			Content: start + briefing + agentContractText + end},
 		{Path: filepath.Join(home, skillsDir, "kata", "SKILL.md"), beginMarker: hooklessBeginYAML, fence: "---",
-			Content: skillStart + "name: kata\ndescription: Use at conversation start and before claiming completion for Kata issue work.\n---\n\n" + briefing + agentContractText + end},
+			Content: skillStart + "name: kata\ndescription: " + museSkillDescription + "\n---\n\n" + briefing + agentContractText + end},
 		{Path: filepath.Join(home, skillsDir, "kata", "POLL.md"), beginMarker: hooklessBeginComment,
 			Content: start + musePollSpec(actor) + briefing + agentContractText + end},
+		// Without skill.yaml, consumer Muse ignores SKILL.md front matter and
+		// describes the skill by its first heading line (kenn-io/kata#1315).
+		{Path: filepath.Join(home, skillsDir, "kata", "skill.yaml"), beginMarker: hooklessBeginYAML, endMarker: hooklessEndYAML, keepUnmanaged: true,
+			Content: hooklessBeginYAML + "\n" + museSkillYAML + hooklessEndYAML + "\n"},
 	}
 }
+
+var museSkillYAML = fmt.Sprintf(`# Managed by Kata: refreshed on every `+"`kata agent-hook instructions install muse`"+`.
+# Add your own keys outside this block; Kata leaves them alone.
+name: kata
+title: "Kata"
+description: %q
+category: "Work and knowledge"
+include_in_prompt: true
+`, museSkillDescription)
 
 func musePollSpec(actor string) string {
 	return fmt.Sprintf(`# Recurring task specification for consumer Muse
@@ -282,7 +314,10 @@ func planInstructionArtifacts(home, skillsDir, actor, verb string) ([]instructio
 			}
 			a.mode = info.Mode().Perm()
 		}
-		begin, end, err := instructionBlockSpan(a.before, a.beginMarker, a.fence)
+		if a.endMarker == "" {
+			a.endMarker = hooklessEndMarker
+		}
+		begin, end, err := instructionBlockSpan(a.before, a.beginMarker, a.endMarker, a.fence)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", a.Path, err)
 		}
@@ -320,10 +355,13 @@ func planInstructionArtifacts(home, skillsDir, actor, verb string) ([]instructio
 				a.Content = a.before[:begin] + a.Content + a.before[end:]
 			} else if i == 0 {
 				a.Content = a.before + a.Content
-			} else if a.exists && a.before != "" {
+			} else if a.exists && a.before != "" && !a.keepUnmanaged {
 				return nil, fmt.Errorf("refusing to replace unowned %s", a.Path)
 			}
 			a.State = "installed"
+		}
+		if a.keepUnmanaged && begin < 0 && a.before != "" {
+			a.Content, a.State = a.before, "unmanaged"
 		}
 		a.Changed = verb != "status" && a.Content != a.before
 		planned = append(planned, *a)
@@ -335,9 +373,9 @@ func planInstructionArtifacts(home, skillsDir, actor, verb string) ([]instructio
 // accepts LF and CRLF line endings and a final line without a newline, so
 // marker phrases inside other text, such as an actor name, are not markers.
 // It returns -1, -1 when the content has no markers.
-func instructionBlockSpan(content, beginMarker, fence string) (int, int, error) {
+func instructionBlockSpan(content, beginMarker, endMarker, fence string) (int, int, error) {
 	begins := markerLines(content, beginMarker)
-	ends := markerLines(content, hooklessEndMarker)
+	ends := markerLines(content, endMarker)
 	if len(begins) == 0 && len(ends) == 0 {
 		return -1, -1, nil
 	}
