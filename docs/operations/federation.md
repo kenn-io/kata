@@ -684,9 +684,10 @@ Held polls need a few things from the deployment:
 
 - Proxies between the spoke and hub must allow a request to stay idle for at
   least 45 seconds. Common 60-second idle timeouts are enough.
-- Each idle spoke keeps one request open at each hub that takes watches, plus
-  one per binding with a signing key, and one per binding at a hub that takes
-  only held polls. A host that limits
+- Each idle spoke keeps one request open at each hub where its bindings share
+  a watch, plus one held poll for each binding that polls alone: a binding
+  with a signing key, a binding the hub does not watch, or any binding at a
+  hub that takes only held polls. A host that limits
   concurrent requests per instance, such as some managed platforms, holds more
   open requests than it did with interval polls.
 - A proxy in front of the hub must pass
