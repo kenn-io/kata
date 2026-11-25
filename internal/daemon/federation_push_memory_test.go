@@ -1,10 +1,12 @@
 package daemon
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -21,6 +23,41 @@ import (
 	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 	"golang.org/x/sync/semaphore"
 )
+
+func TestUnsignedFederationPushReadDeadline(t *testing.T) {
+	store := openClaimGateHelperDB(t)
+	project, err := store.CreateProject(t.Context(), "hub-project")
+	require.NoError(t, err)
+	_, err = store.EnableProjectFederation(t.Context(), project.ID, "tester")
+	require.NoError(t, err)
+	enrollment, err := store.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{Token: "enrollment", SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EX", ProjectID: &project.ID, Capabilities: "push", Actor: "tester"})
+	require.NoError(t, err)
+	const budget = 8
+	s := &Server{cfg: ServerConfig{DB: store}, federationPushMemory: semaphore.NewWeighted(budget)}
+	server := httptest.NewServer(s.withFederationIngestPreauthorization(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})))
+	t.Cleanup(server.Close)
+	for _, suffix := range []string{"events:ingest", "relay:accept"} {
+		t.Run(suffix, func(t *testing.T) {
+			t.Parallel()
+			conn, err := net.Dial("tcp", server.Listener.Addr().String())
+			require.NoError(t, err)
+			defer conn.Close()
+			require.NoError(t, conn.SetDeadline(time.Now().Add(7*time.Second)))
+			_, err = fmt.Fprintf(conn, "POST /api/v1/projects/%d/federation/%s HTTP/1.1\r\nHost: example.com\r\nAuthorization: Bearer %s\r\nContent-Length: 8\r\n\r\nx", project.ID, suffix, enrollment.Token)
+			require.NoError(t, err)
+			resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+		})
+	}
+	t.Cleanup(func() {
+		require.True(t, s.federationPushMemory.TryAcquire(budget))
+		s.federationPushMemory.Release(budget)
+	})
+}
 
 type failingPushBody struct{ sent bool }
 

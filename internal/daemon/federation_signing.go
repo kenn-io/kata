@@ -253,9 +253,13 @@ func (s *Server) bufferFederationPush(w http.ResponseWriter, r *http.Request) (*
 		api.WriteEnvelope(w, http.StatusRequestEntityTooLarge, "body_too_large", "federation body is too large")
 		return nil, false
 	}
+	// Match Huma's default body-read timeout, which normally starts after this middleware.
+	controller := http.NewResponseController(w)
+	_ = controller.SetReadDeadline(time.Now().Add(5 * time.Second))
 	body := &federationPushBody{ReadCloser: http.MaxBytesReader(w, r.Body, federationsigning.MaxBodyBytes), memory: s.federationPushMemory}
 	data, err := io.ReadAll(body)
 	if err != nil {
+		// Keep the deadline on errors so the server cannot block draining the body.
 		body.release()
 		if errors.Is(err, errFederationPushMemory) {
 			writeFederationPushMemoryFull(w)
@@ -266,6 +270,7 @@ func (s *Server) bufferFederationPush(w http.ResponseWriter, r *http.Request) (*
 		}
 		return nil, false
 	}
+	_ = controller.SetReadDeadline(time.Time{})
 	r.Body = io.NopCloser(bytes.NewReader(data))
 	return body, true
 }
