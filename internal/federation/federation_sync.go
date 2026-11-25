@@ -302,16 +302,10 @@ func pushDirectSpoke(
 			}
 			for len(pending) > 0 {
 				batchInput := pending
-				if !db.IsFederationSnapshotEvent(pending[0].Type) {
-					for i, event := range pending {
-						if event.Actor != binding.Actor {
-							if i == 0 {
-								batchInput = pending[:1]
-							} else {
-								batchInput = pending[:i]
-							}
-							break
-						}
+				for i, event := range pending {
+					if event.Actor != binding.Actor {
+						batchInput = pending[:max(i, 1)]
+						break
 					}
 				}
 				batch, adoptionBaseline, adoptionBaselineEndEventID, err := nextFederationPushIngestBatch(batchInput)
@@ -330,7 +324,7 @@ func pushDirectSpoke(
 					})
 				if err != nil {
 					var statusErr *HubStatusError
-					if len(batch) == 1 && batch[0].Actor != binding.Actor && errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusBadRequest && federationHubErrorCode(statusErr.Body) == "validation" {
+					if len(batch) == 1 && errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusBadRequest && isFormerActorRefusal(statusErr.Body, batch[0], binding.Actor) {
 						kept, keepErr := store.KeepFederationEventLocal(ctx, binding.ProjectID, batch[0].ID)
 						if keepErr != nil {
 							return recordFederationSyncError(ctx, store, binding.ProjectID, keepErr)
@@ -1005,6 +999,19 @@ var formerPeerReferenceQuarantine = regexp.MustCompile(
 
 var formerActorQuarantine = regexp.MustCompile(`^federation ingest validation: event ([0-9A-HJKMNP-TV-Z]{26}) actor (".*") does not match bound actor$`)
 
+func isFormerActorRefusal(raw string, event db.Event, actor string) bool {
+	hubError, ok := federationQuarantineHubError(raw)
+	if !ok || hubError.Code != "validation" || event.Actor == actor {
+		return false
+	}
+	match := formerActorQuarantine.FindStringSubmatch(hubError.Message)
+	if len(match) != 3 || match[1] != event.UID {
+		return false
+	}
+	oldActor, err := strconv.Unquote(match[2])
+	return err == nil && oldActor == event.Actor
+}
+
 func autoRetryFederationQuarantine(q db.FederationQuarantine, events []db.Event, actor string) (bool, string) {
 	if q.Direction != db.FederationQuarantineDirectionPush {
 		return false, ""
@@ -1016,14 +1023,9 @@ func autoRetryFederationQuarantine(q db.FederationQuarantine, events []db.Event,
 	if !ok || hubError.Code != "validation" {
 		return false, ""
 	}
-	if match := formerActorQuarantine.FindStringSubmatch(hubError.Message); len(match) == 3 {
-		oldActor, err := strconv.Unquote(match[2])
-		if err == nil {
-			for _, event := range events {
-				if event.UID == match[1] && event.Actor == oldActor && event.Actor != actor {
-					return true, "auto-retry after rejoin actor change"
-				}
-			}
+	for _, event := range events {
+		if isFormerActorRefusal(q.Error, event, actor) {
+			return true, "auto-retry after rejoin actor change"
 		}
 	}
 	match := formerPeerReferenceQuarantine.FindStringSubmatch(hubError.Message)
