@@ -331,6 +331,10 @@ type IngestFederationProjectEventsResponse = FederationIngestEventsBody
 
 type IngestFederationProjectEventsErrorResponse = ErrorEnvelope
 
+type WatchFederationProjectEventsResponse = FederationWatchEventsBody
+
+type WatchFederationProjectEventsErrorResponse = ErrorEnvelope
+
 type GetFederationProjectMetadataResponse = ProjectFederationBody
 
 type GetFederationProjectMetadataErrorResponse = ErrorEnvelope
@@ -1324,6 +1328,7 @@ type PollFederationProjectEventsResp200Headers struct {
 	XKataEventFeatures         string `header:"X-Kata-Event-Features"`
 	XKataEventsIssueUID        string `header:"X-Kata-Events-Issue-UID"`
 	XKataFederationPollWaitMax string `header:"X-Kata-Federation-Poll-Wait-Max"`
+	XKataFederationWatchMax    string `header:"X-Kata-Federation-Watch-Max"`
 	XKataRequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
 }
 
@@ -1348,6 +1353,20 @@ type IngestFederationProjectEventsResp struct {
 	JSON200      *IngestFederationProjectEventsResponse
 	Headers200   *IngestFederationProjectEventsResp200Headers
 	JSONDefault  *IngestFederationProjectEventsErrorResponse
+}
+
+type WatchFederationProjectEventsResp200Headers struct {
+	XKataFederationPollWaitMax string `header:"X-Kata-Federation-Poll-Wait-Max"`
+	XKataFederationWatchMax    string `header:"X-Kata-Federation-Watch-Max"`
+}
+
+type WatchFederationProjectEventsResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *WatchFederationProjectEventsResponse
+	Headers200   *WatchFederationProjectEventsResp200Headers
+	JSONDefault  *WatchFederationProjectEventsErrorResponse
 }
 
 type GetFederationProjectMetadataResp200Headers struct {

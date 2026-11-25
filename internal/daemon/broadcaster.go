@@ -68,9 +68,27 @@ type SubFilter struct {
 	// ProjectUID additionally matches moves departing this project, whose
 	// durable event and numeric ProjectID belong to the destination.
 	ProjectUID string
+	// Projects, when set, matches messages for any of these projects, a map of
+	// project ID to UID, each matched as ProjectID and ProjectUID are. It
+	// replaces those two fields.
+	Projects map[int64]string
 }
 
 func (f SubFilter) matches(msg StreamMsg) bool {
+	if f.Projects != nil {
+		if _, watched := f.Projects[msg.ProjectID]; watched {
+			return true
+		}
+		if msg.Kind != StreamKindEvent || msg.movedFromProjectUID == "" {
+			return false
+		}
+		for _, uid := range f.Projects {
+			if uid == msg.movedFromProjectUID {
+				return true
+			}
+		}
+		return false
+	}
 	if f.ProjectID == 0 {
 		return true
 	}

@@ -69,7 +69,7 @@ func buildHostAccessRules() map[string]hostAccessRule {
 		"createCronJob", "replaceCronJob", "archiveCronJob", "restoreCronJob")
 	registerHostAccessRules(rules, hostAccessRule{
 		SelfAuthenticated: true, AcceptsFederationBearer: true, URLProjectAuthority: true,
-	}, "pollFederationProjectEvents")
+	}, "pollFederationProjectEvents", "watchFederationProjectEvents")
 	registerHostAccessRules(rules, hostAccessRule{SelfAuthenticated: true},
 		"forceReleaseIssueLease")
 	registerHostAccessRules(rules, hostAccessRule{ResolvedByHandler: true},

@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
@@ -463,5 +464,54 @@ func TestRunnerHoldsAThrottledGroupInsteadOfPollingItsProjects(t *testing.T) {
 			require.Len(t, spoke.notices, 1, "the throttled batch is reported once")
 			assert.Contains(t, spoke.notices[0], strconv.Itoa(status))
 		})
+	}
+}
+
+func TestRunnerSendsNoBatchToAHubInCapacityCooldown(t *testing.T) {
+	hub := newCountingHub(t)
+	spoke := newBatchPollSpoke(t, hub, 3)
+	_ = spoke.pass(t)
+	hub.take()
+	retries := NewSyncRetries()
+	retries.recordHubUnavailable(hub.server.URL, 0, time.Minute, spoke.runner.effectiveInterval(), time.Now())
+
+	_, _, _, err := spoke.runner.runOnce(t.Context(), nil, nil, retries)
+	require.NoError(t, err)
+	assert.Zero(t, hub.take().batch, "a hub that asked pulls to wait gets no batched poll either")
+}
+
+func TestRunnerPutsAHubThatThrottlesABatchIntoCapacityCooldown(t *testing.T) {
+	hub := newCountingHub(t)
+	spoke := newBatchPollSpoke(t, hub, 3)
+	_ = spoke.pass(t)
+	hub.take()
+	hub.refuseBatch = http.StatusTooManyRequests
+	retries := NewSyncRetries()
+
+	_, _, _, err := spoke.runner.runOnce(t.Context(), nil, nil, retries)
+	require.NoError(t, err)
+	assert.True(t, retries.hubBlocked(hub.server.URL, time.Now()),
+		"a throttled batch pauses the hub's pulls and watches, as a throttled pull does")
+}
+
+func TestRunnerKeepsTheHubsWatchAdvertisementAcrossBatchedPasses(t *testing.T) {
+	hub := newCountingHub(t)
+	spoke := newBatchPollSpoke(t, hub, 3)
+	// A stopped set of watchers still records what hubs advertise, and starts
+	// no held polls that would add requests to the counts.
+	stopped, stop := context.WithCancel(t.Context())
+	stop()
+	polls := newHubLongPolls(stopped, nil, nil, clientpkg.Opts{}, time.Second, nil, nil, nil, time.Now)
+	spoke.runner.longPolls = polls
+	_ = spoke.pass(t)
+	_ = spoke.pass(t)
+	hub.take()
+
+	_ = spoke.pass(t)
+	require.Equal(t, hubRequestCounts{batch: 1}, hub.take(), "the pass is answered by the batch")
+	require.Len(t, polls.hubs, 1)
+	for _, support := range polls.hubs {
+		assert.True(t, support.takesWatches(time.Now()),
+			"a batched page carries no poll headers, so the advertisement from the last single poll stands")
 	}
 }

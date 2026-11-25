@@ -11,6 +11,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"go.kenn.io/kata/internal/activity"
@@ -436,11 +437,24 @@ func syncDirectSpoke(
 			return nil
 		}
 	}
+	hubPull := hubPullRetriesFromContext(ctx)
+	releaseProbe, allowed, _, hubProbe := hubPull.acquire(client.baseURL, opts.Timeout)
+	if !allowed {
+		hubPull.markSkipped()
+		return nil
+	}
+	defer releaseProbe()
 	resumePull, pullStartedAt, err := startFederationPull(ctx, store, binding.ProjectID)
 	if err != nil {
 		return err
 	}
+	pullVersion := hubProbe.version
 	recordPullError := func(pullErr error) error {
+		if hubCapacityUnavailable(pullErr) {
+			_, _, retryAfter := classifySyncRetry(pullErr)
+			hubPull.recordUnavailable(client.baseURL, pullVersion, retryAfter)
+		}
+		releaseProbe()
 		at := time.Now().UTC()
 		if at.Before(pullStartedAt) {
 			at = pullStartedAt
@@ -451,9 +465,17 @@ func syncDirectSpoke(
 		}
 		return recordFederationSyncErrorAt(ctx, store, binding.ProjectID, pullErr, at)
 	}
-	body, err := firstFederationPoll(ctx, client, hubProjectID, binding.PullCursorEventID)
+	body, advertised, polled, err := firstFederationPoll(ctx, client, hubProjectID, binding.PullCursorEventID)
 	if err != nil {
 		return recordPullError(err)
+	}
+	hubPull.clear(client.baseURL, hubProbe)
+	pullVersion = 0
+	releaseProbe()
+	// The pull tells the held-poll watchers whether this hub takes one
+	// watch for all of its bindings before any of them holds a poll there.
+	if polled {
+		learnHubFromContext(ctx, client.baseURL, advertised)
 	}
 	if body.ResetRequired {
 		// A pull-only turn may still carry a writable binding. Reset safety
@@ -1306,21 +1328,26 @@ func (r *Runner) runOnce(
 				return retry, true, remaining, errors.Join(errs...)
 			}
 		}
+		pullCtx := &hubPullRetryContext{retries: retries, interval: r.effectiveInterval(), now: r.refusalNow}
 		spokeRemaining, identity, spokeErr := func() (bool, retryTurnIdentity, error) {
 			if drain != nil {
 				defer drain.Release()
 			}
-			spokeCtx := ctx
+			spokeCtx := withHubPullRetries(ctx, pullCtx)
 			if page := prefetched[spoke.binding.ProjectID]; page != nil {
-				spokeCtx = context.WithValue(ctx, prefetchedFederationPollKey{}, page)
+				spokeCtx = context.WithValue(spokeCtx, prefetchedFederationPollKey{}, page)
 			}
 			return r.runSpoke(spokeCtx, spoke, credentialStore, validateLease, drain)
 		}()
-		retries.recordSchedule(spoke.binding.ProjectID, identity.full, identity.target, false, spokeErr, r.effectiveInterval(), r.refusalNow(), &started, time.Time{})
+		now := r.refusalNow()
+		pullSkipped := pullCtx.pullSkipped.Load()
+		if spokeErr != nil || !pullSkipped {
+			retries.recordSchedule(spoke.binding.ProjectID, identity.full, identity.target, false, spokeErr, r.effectiveInterval(), now, &started, time.Time{})
+		}
 		if errors.Is(spokeErr, context.Canceled) || errors.Is(spokeErr, errFederationRunnerLeaseInvalid) {
 			return nil, false, nil, spokeErr
 		}
-		if spokeErr == nil {
+		if spokeErr == nil && !pullSkipped {
 			r.longPolls.start(spoke)
 		}
 		if spokeErr != nil {
@@ -1372,6 +1399,65 @@ func (r *Runner) retryBlocked(
 
 type retryTurnIdentity struct {
 	full, target [32]byte
+}
+
+type hubPullRetriesContextKey struct{}
+
+// hubPullRetryContext scopes the shared hub pull/watch cooldown to direct
+// pull requests inside syncDirectSpoke so per-credential ingest or claim
+// throttles never pause unrelated pulls, and pull cooldowns never block claims
+// or pushes.
+type hubPullRetryContext struct {
+	retries     *SyncRetries
+	interval    time.Duration
+	now         func() time.Time
+	pullSkipped atomic.Bool
+}
+
+func withHubPullRetries(ctx context.Context, pull *hubPullRetryContext) context.Context {
+	if pull == nil || pull.retries == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, hubPullRetriesContextKey{}, pull)
+}
+
+func hubPullRetriesFromContext(ctx context.Context) *hubPullRetryContext {
+	pull, _ := ctx.Value(hubPullRetriesContextKey{}).(*hubPullRetryContext)
+	return pull
+}
+
+func (c *hubPullRetryContext) currentNow() time.Time {
+	if c != nil && c.now != nil {
+		return c.now()
+	}
+	return time.Now()
+}
+
+func (c *hubPullRetryContext) acquire(hubURL string, timeout time.Duration) (func(), bool, time.Time, hubProbe) {
+	if c == nil || c.retries == nil {
+		return func() {}, true, time.Time{}, hubProbe{}
+	}
+	return c.retries.acquireHubProbe(hubURL, c.currentNow(), max(2*timeout, 30*time.Second))
+}
+
+func (c *hubPullRetryContext) clear(hubURL string, probe hubProbe) {
+	if c == nil || c.retries == nil {
+		return
+	}
+	c.retries.clearHubUnavailable(hubURL, probe)
+}
+
+func (c *hubPullRetryContext) recordUnavailable(hubURL string, started uint64, retryAfter time.Duration) {
+	if c == nil || c.retries == nil {
+		return
+	}
+	c.retries.recordHubUnavailable(hubURL, started, retryAfter, c.interval, c.currentNow())
+}
+
+func (c *hubPullRetryContext) markSkipped() {
+	if c != nil {
+		c.pullSkipped.Store(true)
+	}
 }
 
 // retryIdentityAfterTurn fingerprints a refused or throttled turn, so the next
@@ -1440,7 +1526,9 @@ func (r *Runner) runSpoke(
 		if identityErr != nil {
 			resultErr = errors.Join(resultErr, identityErr)
 		}
-		if r.OnSpokeResult != nil && (!remaining || resultErr != nil) && !errors.Is(resultErr, errFederationRunnerLeaseInvalid) {
+		pullCtx := hubPullRetriesFromContext(ctx)
+		pullSkipped := pullCtx != nil && pullCtx.pullSkipped.Load()
+		if r.OnSpokeResult != nil && (resultErr != nil || !pullSkipped) && (!remaining || resultErr != nil) && !errors.Is(resultErr, errFederationRunnerLeaseInvalid) {
 			r.OnSpokeResult(spoke.binding.ProjectID, resultErr)
 		}
 	}()
@@ -1497,7 +1585,8 @@ func (r *Runner) runSpoke(
 		}
 		errs = append(errs, err)
 	}
-	if len(errs) == 0 {
+	pullCtx := hubPullRetriesFromContext(ctx)
+	if len(errs) == 0 && (pullCtx == nil || !pullCtx.pullSkipped.Load()) {
 		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 			return false, identity, err
 		}

@@ -9,7 +9,6 @@
     orientation: Orientation
     primarySize: number | null
     defaultShare?: number | undefined
-    preserveSize?: boolean
     secondaryBeside?: boolean
     minPrimary?: number
     minSecondary?: number
@@ -24,7 +23,6 @@
     orientation,
     primarySize,
     defaultShare,
-    preserveSize = false,
     secondaryBeside = $bindable(false),
     minPrimary = 200,
     minSecondary = 200,
@@ -79,12 +77,6 @@
     })
     observer.observe(container)
     return () => observer.disconnect()
-  })
-
-  $effect(() => {
-    if (preserveSize || !secondary || totalSize <= 0 || primarySize === null) return
-    const clamped = clampSize(primarySize, totalSize)
-    if (clamped !== primarySize) onResize(clamped)
   })
 
   function startResize(): void {

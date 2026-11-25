@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-20
+last_edited: 2026-11-24
 ---
 
 # Federation
@@ -667,20 +667,41 @@ that fails for a binding ends that binding's held poll until a later pass
 succeeds. Relay bindings and hubs without held-poll support keep pulling on the
 interval.
 
+When the hub also advertises watches, the spoke holds one watch for all of its
+bindings at that hub address instead of one poll per binding. The watch sends
+each binding's own pull token, and the hub checks each project against its own
+token. When a project has work, the hub names it and the spoke pulls that
+project alone. A binding with a signing key keeps its own held poll. If the hub
+does not watch a project with its token, that binding holds its own poll. If
+the hub refuses one binding's credential, for example after its enrollment is
+revoked, the daemon log names that project and only that binding backs off;
+the other bindings at the hub keep sharing a watch. If a proxy in front of the
+hub refuses the watch route, the daemon log reports it and the spoke holds one
+poll per binding for an hour before it tries a watch again, so the log repeats
+at most once an hour while the proxy keeps refusing.
+
 Held polls need a few things from the deployment:
 
 - Proxies between the spoke and hub must allow a request to stay idle for at
   least 45 seconds. Common 60-second idle timeouts are enough.
-- Each idle binding keeps one request open at its hub. A host that limits
+- Each idle spoke keeps one request open at each hub where its bindings share
+  a watch, plus one held poll for each binding that polls alone: a binding
+  with a signing key, a binding the hub does not watch, or any binding at a
+  hub that takes only held polls. A host that limits
   concurrent requests per instance, such as some managed platforms, holds more
   open requests than it did with interval polls.
+- A proxy in front of the hub must pass
+  `POST /api/v1/projects/{project_id}/federation/events:watch` and its `wait`
+  query, along with the event poll.
 - A hub holds at most 32 polls per available CPU, accounting for `GOMAXPROCS`
   and Linux CPU quotas, up to 256 total. Each spoke
   credential can hold at most half the total limit, up to 32, or 16 on a
   one-CPU hub. Signed polls can use at most half of the hub's federation control
-  slots. Past a limit the hub
-  answers at once and the spoke falls back to its interval. It asks for a held
-  poll again after a growing delay, up to 16 intervals.
+  slots. Past a limit the hub answers at once. A shared watch stays multiplexed,
+  polling all of its projects with one unwaited watch per jittered interval
+  while retrying a held watch with growing jittered delays up to 16 intervals;
+  a solo binding records the quiet check and falls back to its interval while
+  retrying held polls on the same jittered schedule.
 - The spoke asks for a wait 15 seconds shorter than its request budget, so a
   `KATA_HTTP_TIMEOUT` under 16 seconds turns held polls off. The daemon log
   says so once for each binding.
@@ -746,16 +767,25 @@ for each one on every interval and every local write:
 | `401` or `403`, the credential was refused | 1 minute | 15 minutes | the credential, binding, or enabled state changes, or another sync of the project succeeds |
 | `429` or `503`, the hub is throttling or unavailable | the sync interval | 5 minutes, or longer when the hub sends `Retry-After` | the credential, binding, or enabled state changes, or another sync of the project succeeds |
 
-Each wait doubles after a failure of the same kind, and Kata subtracts up to a
-quarter at random so spokes spread out their retries. A `Retry-After` hint, in
-seconds or as an HTTP date, sets the shortest wait and is capped at one hour.
-When a turn gets several hints, the longest one counts, even when a refusal in
-the same turn sets the reason. A `429` or `503` ends the turn, so queued lease
-requests and the pull and push wait for the next attempt. A success clears the
-schedule. A wait never shortens the sync interval, and a wake from a local
-write does not bring a waiting project forward. A refused move of one pushed
-issue, `403 federation_project_not_enrolled`, does not count as a refused
-credential. Other projects keep syncing.
+Each per-project wait doubles after a failure of the same kind, and Kata
+subtracts up to a quarter at random so spokes spread out their retries. A
+`Retry-After` hint, in seconds or as an HTTP date, sets the shortest wait and is
+capped at one hour. When a turn gets several hints, the longest one counts, even
+when a refusal in the same turn sets the reason. A `429` or `503` ends the turn,
+so queued lease requests and the pull and push wait for the next attempt. A
+success clears the schedule. A wait never shortens the sync interval, and a wake
+from a local write does not bring a waiting project forward. A refused move of
+one pushed issue, `403 federation_project_not_enrolled`, does not count as a
+refused credential.
+
+When a pull or watch receives `429` or `503`, Kata also applies a shared
+pull/watch cooldown for that hub address (starting at the sync interval,
+doubling up to 5 minutes, honoring `Retry-After`, plus up to a quarter of
+additive jitter) so a busy hub does not receive a pull burst across every
+project bound to it. Once the cooldown expires, a single unwaited recovery
+probe tests the hub before normal concurrent pulls and held watches resume.
+Pending claims, pushes, per-credential ingest refusals, and projects bound to
+other hubs keep syncing independently.
 
 `kata federation status` shows a waiting project's reason, last status code,
 failure count, and next attempt, for example `sync retry: hub refused the

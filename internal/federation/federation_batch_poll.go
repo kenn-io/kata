@@ -136,14 +136,16 @@ type prefetchedFederationPollKey struct{}
 // firstFederationPoll returns this turn's first page. The pass's batched poll
 // answers it only when it checked the cursor the turn holds and the turn has
 // not written to the hub, so a push or claim retry is still followed by a poll
-// that can see it, as before batching.
-func firstFederationPoll(ctx context.Context, client *Client, hubProjectID, afterID int64) (api.PollEventsBody, error) {
+// that can see it, as before batching. advertised is false for a batched page,
+// which carries no single-poll headers, so the hub's last advertisement stands.
+func firstFederationPoll(ctx context.Context, client *Client, hubProjectID, afterID int64) (api.PollEventsBody, hubPollAdvertisement, bool, error) {
 	prefetched, _ := ctx.Value(prefetchedFederationPollKey{}).(*prefetchedFederationPoll)
 	observation, _ := ctx.Value(federationTurnObservationKey{}).(*federationTurnObservation)
 	if prefetched != nil && prefetched.afterID == afterID && (observation == nil || !observation.hubWrite) {
-		return prefetched.result.Body, prefetched.result.Err
+		return prefetched.result.Body, hubPollAdvertisement{}, false, prefetched.result.Err
 	}
-	return client.PollProjectEvents(ctx, hubProjectID, afterID, federationPollLimit)
+	body, advertisement, err := client.pollProjectEvents(ctx, hubProjectID, "", afterID, federationPollLimit, 0)
+	return body, advertisement, true, err
 }
 
 // batchPollKey groups the bindings whose polls one request may carry: the
@@ -374,10 +376,19 @@ func (r *Runner) sendBatch(ctx context.Context, key batchPollKey, members []batc
 		return false
 	}
 	cred := members[0].cred
-	client, err := NewClient(ctx, cred.HubURL, cred.Token, clientOptsForCredential(r.clientOpts(), cred))
+	opts := clientOptsForCredential(r.clientOpts(), cred)
+	client, err := NewClient(ctx, cred.HubURL, cred.Token, opts)
 	if err != nil {
 		return false
 	}
+	// The batch is a pull, so it takes the hub's capacity cooldown as each
+	// member's single pull would: a hub that asked pulls to wait gets none.
+	hubPull := &hubPullRetryContext{retries: retries, interval: r.effectiveInterval(), now: r.refusalNow}
+	releaseProbe, allowed, _, probe := hubPull.acquire(client.baseURL, opts.Timeout)
+	if !allowed {
+		return true
+	}
+	defer releaseProbe()
 	// A member whose poll the hub is holding at its cursor skips its pull
 	// this turn, so the batch would ask about it for nothing.
 	heldCtx := withHubLongPolls(ctx, r.longPolls)
@@ -392,6 +403,10 @@ func (r *Runner) sendBatch(ctx context.Context, key batchPollKey, members []batc
 		cursors[i] = api.FederationBatchPollCursor{ProjectID: member.hubProjectID, AfterID: member.afterID}
 	}
 	results, err := client.pollProjectEventsBatch(ctx, cursors)
+	if hubCapacityUnavailable(err) {
+		_, _, retryAfter := classifySyncRetry(err)
+		hubPull.recordUnavailable(client.baseURL, probe.version, retryAfter)
+	}
 	if hubAskedToWait(err) {
 		for _, member := range members {
 			retries.record(member.projectID, member.retryIdentity, err, r.effectiveInterval(), r.refusalNow())
@@ -419,6 +434,7 @@ func (r *Runner) sendBatch(ctx context.Context, key batchPollKey, members []batc
 		// Each project's own poll reports whatever is wrong with the hub.
 		return false
 	}
+	hubPull.clear(client.baseURL, probe)
 	for i, result := range results {
 		if result != nil {
 			pages[members[i].projectID] = &prefetchedFederationPoll{

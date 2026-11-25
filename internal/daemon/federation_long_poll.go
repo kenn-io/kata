@@ -90,22 +90,24 @@ func federationPollWait(ctx context.Context, requested api.OptionalInt) (time.Du
 	return max(wait, 0), nil
 }
 
-// federationPollWaiter is one admitted held poll.
+// federationPollWaiter is one admitted held poll. It watches one project for
+// a project poll, or several for a watch.
 type federationPollWaiter struct {
 	waits        *federationPollWaits
 	broadcaster  *EventBroadcaster
-	filter       SubFilter
 	local        Subscription
-	remote       <-chan struct{}
+	remote       *federationPollWakeSub
 	unsubRemote  func()
 	enrollmentID int64
 	signed       bool
 }
 
-// admit reserves a held poll for a project, or reports false when a bound is
-// reached. The subscriptions start here, before the caller's first read, so
-// an event that commits after that read still wakes the poll.
-func (w *federationPollWaits) admit(ctx context.Context, broadcaster *EventBroadcaster, enrollmentID int64, project db.Project) (*federationPollWaiter, bool) {
+// admit reserves one held poll for projects, or reports false when a bound is
+// reached. A watch of several projects counts as one held poll: it holds one
+// connection, goroutine and subscription. The subscriptions start here,
+// before the caller's first read, so an event that commits after that read
+// still wakes the poll.
+func (w *federationPollWaits) admit(ctx context.Context, broadcaster *EventBroadcaster, enrollmentID int64, projects ...db.Project) (*federationPollWaiter, bool) {
 	signed := holdsFederationControlAdmission(ctx)
 	w.mu.Lock()
 	if w.total >= w.maxTotal ||
@@ -120,11 +122,14 @@ func (w *federationPollWaits) admit(ctx context.Context, broadcaster *EventBroad
 		w.signed++
 	}
 	w.mu.Unlock()
-	filter := SubFilter{ProjectID: project.ID, ProjectUID: project.UID}
-	remote, unsubRemote := w.remote.subscribe(filter)
+	watched := make(map[int64]string, len(projects))
+	for _, project := range projects {
+		watched[project.ID] = project.UID
+	}
+	remote, unsubRemote := w.remote.subscribe(watched)
 	return &federationPollWaiter{
-		waits: w, broadcaster: broadcaster, filter: filter,
-		local: broadcaster.Subscribe(filter), remote: remote, unsubRemote: unsubRemote,
+		waits: w, broadcaster: broadcaster,
+		local: broadcaster.Subscribe(SubFilter{Projects: watched}), remote: remote, unsubRemote: unsubRemote,
 		enrollmentID: enrollmentID, signed: signed,
 	}, true
 }
@@ -144,36 +149,64 @@ func (p *federationPollWaiter) release() {
 	}
 }
 
-// wait blocks until the project may have a new event, the deadline passes, or
-// the client goes away. It reports whether the poll was woken.
-func (p *federationPollWaiter) wait(ctx context.Context, deadline time.Time) (bool, error) {
+// wait blocks until a watched project may have a new event, the deadline
+// passes, or the client goes away. It returns the projects that may have new
+// events, or none when the deadline passed.
+func (p *federationPollWaiter) wait(ctx context.Context, deadline time.Time) (map[int64]bool, error) {
 	timer := time.NewTimer(time.Until(deadline))
 	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false, ctx.Err()
-	case <-timer.C:
-		return false, nil
-	case _, open := <-p.local.Ch:
-		if !open {
-			// The broadcaster drops a subscriber whose buffer filled; the
-			// overflow itself means events committed.
-			p.local = p.broadcaster.Subscribe(p.filter)
-		}
-	case <-p.remote:
-	}
-	for {
+	woken := map[int64]bool{}
+	for len(woken) == 0 {
 		select {
-		case _, open := <-p.local.Ch:
-			if open {
-				continue
-			}
-			p.local = p.broadcaster.Subscribe(p.filter)
-		case <-p.remote:
-			continue
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-timer.C:
+			return nil, nil
+		case msg, open := <-p.local.Ch:
+			p.receiveLocal(msg, open, woken)
+		case <-p.remote.ch:
+			p.waits.remote.drain(p.remote, woken)
+		}
+	}
+	// Collect the wakes already queued, so one answer covers them. Later ones
+	// wait for the next call, so steady commits cannot hold the answer.
+	for range len(p.local.Ch) {
+		select {
+		case msg, open := <-p.local.Ch:
+			p.receiveLocal(msg, open, woken)
 		default:
 		}
-		return true, nil
+	}
+	select {
+	case <-p.remote.ch:
+		p.waits.remote.drain(p.remote, woken)
+	default:
+	}
+	return woken, nil
+}
+
+// receiveLocal adds the watched projects a local message may concern.
+func (p *federationPollWaiter) receiveLocal(msg StreamMsg, open bool, woken map[int64]bool) {
+	if !open {
+		// The broadcaster drops a subscriber whose buffer filled; the
+		// overflow itself means events committed, in any watched project.
+		p.local = p.broadcaster.Subscribe(SubFilter{Projects: p.remote.projects})
+		for id := range p.remote.projects {
+			woken[id] = true
+		}
+		return
+	}
+	// The broadcaster delivers only messages for watched projects, so the
+	// message's project is watched unless a move departing one sent it.
+	if _, watched := p.remote.projects[msg.ProjectID]; watched {
+		woken[msg.ProjectID] = true
+	}
+	if msg.Kind == StreamKindEvent && msg.movedFromProjectUID != "" {
+		for id, uid := range p.remote.projects {
+			if uid == msg.movedFromProjectUID {
+				woken[id] = true
+			}
+		}
 	}
 }
 
@@ -184,36 +217,55 @@ func federationPollCaughtUp(result db.FederationReadResult) bool {
 }
 
 // federationPollWakeBus fans wakeups from other hub processes out to held polls.
-// Each woken poll reads its own project again under its authorization.
+// Each woken poll reads its own projects again under their authorization.
 type federationPollWakeBus struct {
 	mu     sync.Mutex
 	nextID int
-	subs   map[int]federationPollWakeSub
+	subs   map[int]*federationPollWakeSub
 	secret []byte
 }
 
+// federationPollWakeSub is one held poll's remote wake registration. The bus
+// guards pending.
 type federationPollWakeSub struct {
-	filter SubFilter
-	ch     chan struct{}
+	projects map[int64]string
+	// tags holds each project's keyed wake tag under the bus's current
+	// secret, or -1 when the tag is unknown and every wake applies.
+	tags map[int64]int
+	ch   chan struct{}
+	// pending holds the projects woken since the poll last drained them.
+	pending map[int64]bool
 }
 
 func newFederationPollWakeBus() *federationPollWakeBus {
-	return &federationPollWakeBus{subs: map[int]federationPollWakeSub{}}
+	return &federationPollWakeBus{subs: map[int]*federationPollWakeSub{}}
 }
 
-// subscribe registers a held poll for remote wakes.
-func (b *federationPollWakeBus) subscribe(filter SubFilter) (<-chan struct{}, func()) {
-	ch := make(chan struct{}, 1)
+// subscribe registers a held poll for remote wakes of projects, a map of
+// project ID to UID.
+func (b *federationPollWakeBus) subscribe(projects map[int64]string) (*federationPollWakeSub, func()) {
+	sub := &federationPollWakeSub{projects: projects, ch: make(chan struct{}, 1), pending: map[int64]bool{}}
 	b.mu.Lock()
+	sub.tags = projectWakeTags(b.secret, projects)
 	id := b.nextID
 	b.nextID++
-	b.subs[id] = federationPollWakeSub{filter: filter, ch: ch}
+	b.subs[id] = sub
 	b.mu.Unlock()
-	return ch, func() {
+	return sub, func() {
 		b.mu.Lock()
 		delete(b.subs, id)
 		b.mu.Unlock()
 	}
+}
+
+// drain moves the projects woken for sub into woken.
+func (b *federationPollWakeBus) drain(sub *federationPollWakeSub, woken map[int64]bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for id := range sub.pending {
+		woken[id] = true
+	}
+	clear(sub.pending)
 }
 
 // wake signals every held poll.
@@ -228,21 +280,44 @@ func wakeTag(secret []byte, uid string) int {
 	return int(mac.Sum(nil)[0] & 63)
 }
 
+// projectWakeTags computes each project's wake tag once, so a remote wake
+// compares tags instead of hashing every watched project again.
+func projectWakeTags(secret []byte, projects map[int64]string) map[int64]int {
+	tags := make(map[int64]int, len(projects))
+	for id, uid := range projects {
+		tags[id] = -1
+		if len(secret) > 0 && uid != "" {
+			tags[id] = wakeTag(secret, uid)
+		}
+	}
+	return tags
+}
+
 func (b *federationPollWakeBus) setSecret(secret []byte) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.secret = secret
+	for _, sub := range b.subs {
+		sub.tags = projectWakeTags(secret, sub.projects)
+	}
 }
 
+// wakeTags wakes the projects whose keyed tag is among tags. Without tags or
+// a secret, every project wakes.
 func (b *federationPollWakeBus) wakeTags(tags []int) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for _, sub := range b.subs {
-		if len(tags) > 0 && len(b.secret) > 0 && sub.filter.ProjectUID != "" {
-			tag := wakeTag(b.secret, sub.filter.ProjectUID)
-			if tag != tags[0] && (len(tags) < 2 || tag != tags[1]) {
+		woke := false
+		for id, tag := range sub.tags {
+			if len(tags) > 0 && tag >= 0 && tag != tags[0] && (len(tags) < 2 || tag != tags[1]) {
 				continue
 			}
+			sub.pending[id] = true
+			woke = true
+		}
+		if !woke {
+			continue
 		}
 		select {
 		case sub.ch <- struct{}{}:
@@ -418,11 +493,11 @@ func holdFederationPoll(
 ) (db.FederationReadResult, bool, error) {
 	initial := result
 	for federationPollCaughtUp(result) && time.Now().Before(deadline) {
-		woke, err := waiter.wait(ctx, deadline)
+		woken, err := waiter.wait(ctx, deadline)
 		if err != nil {
 			return result, false, fmt.Errorf("held federation poll ended: %w", err)
 		}
-		if !woke {
+		if len(woken) == 0 {
 			break
 		}
 		readCtx, err := reauthorize()
@@ -450,22 +525,23 @@ func heldFederationPollAllowed(ctx context.Context) bool {
 // reauthorizeFederationPoll repeats the poll's federation authorization
 // without the authorization cached for the request: the signing key,
 // credential, project membership and the host federation decision are all
-// checked again.
-func reauthorizeFederationPoll(ctx context.Context, cfg ServerConfig, authHeader string, projectID int64, operation HostFederationOperation) (context.Context, error) {
+// checked again. It returns the project it read under that authorization.
+func reauthorizeFederationPoll(ctx context.Context, cfg ServerConfig, authHeader string, projectID int64, operation HostFederationOperation) (context.Context, db.Project, error) {
 	if err := recheckFederationSigningKey(ctx); err != nil {
-		return ctx, err
+		return ctx, db.Project{}, err
 	}
 	authorization, err := evaluateFederationRequestForCapabilities(ctx, cfg, authHeader, projectID, []string{"pull"}, operation)
 	if err != nil {
-		return ctx, err
+		return ctx, db.Project{}, err
 	}
 	if err := rejectRelayCredentialOnLegacyEvents(authorization.principal); err != nil {
-		return ctx, err
+		return ctx, db.Project{}, err
 	}
 	ctx = withFederationProjectAuthority(ctx, authorization)
 	ctx = db.WithAdditionalTransactionFence(ctx, authorization.transactionFence)
-	if _, err := activeProjectByID(ctx, cfg.DB, projectID); err != nil {
-		return ctx, err
+	project, err := activeProjectByID(ctx, cfg.DB, projectID)
+	if err != nil {
+		return ctx, db.Project{}, err
 	}
-	return db.WithFederationEventStream(ctx), nil
+	return db.WithFederationEventStream(ctx), project, nil
 }

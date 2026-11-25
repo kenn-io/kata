@@ -64,6 +64,44 @@ describe('AccessManagement', () => {
     expect(await screen.findByText('No teams have access. Server owners still do.')).not.toBeNull()
   })
 
+  it('keeps the selected team checked while reloading a successful save', async () => {
+    let reads = 0
+    let finishReload!: (response: Response) => void
+    const writes: unknown[] = []
+    setGeneratedFetch(async (input, init) => {
+      const path = new URL(String(input)).pathname
+      if (path === '/api/v1/teams')
+        return Response.json({ teams: [{ uid: 'team-one', name: 'example-team', revision: 1 }] })
+      if (init?.method === 'PUT' && path === '/api/v1/projects/7/access') {
+        writes.push(JSON.parse(String(init.body)))
+        return Response.json({
+          policy: { revision: 5, visibility: 'teams', team_uids: ['team-one'] },
+        })
+      }
+      if (path === '/api/v1/projects/7/access') {
+        if (++reads === 2) return new Promise<Response>((resolve) => (finishReload = resolve))
+        return Response.json({ policy: { revision: 4, visibility: 'all', team_uids: [] } })
+      }
+      throw new Error(`Unexpected request: ${path}`)
+    })
+    renderAccess()
+    const visibility = await screen.findByRole('combobox', { name: 'Visibility: Everyone' })
+    await waitFor(() => expect((visibility as HTMLButtonElement).disabled).toBe(false))
+    await fireEvent.click(visibility)
+    await fireEvent.click(screen.getByRole('option', { name: 'Selected teams' }))
+    const team = screen.getByRole('checkbox', { name: 'example-team' }) as HTMLInputElement
+    await fireEvent.click(team)
+    await waitFor(() => expect(reads).toBe(2))
+    expect(writes).toEqual([{ visibility: 'teams', team_uids: ['team-one'], revision: 4 }])
+    expect(team.disabled).toBe(true)
+    expect(team.checked).toBe(true)
+    finishReload(
+      Response.json({ policy: { revision: 5, visibility: 'teams', team_uids: ['team-one'] } }),
+    )
+    await waitFor(() => expect(team.disabled).toBe(false))
+    expect(team.checked).toBe(true)
+  })
+
   it('keeps read errors independent when other reads succeed', async () => {
     setGeneratedFetch(async (input) => {
       const path = new URL(String(input)).pathname

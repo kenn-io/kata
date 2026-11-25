@@ -56,6 +56,7 @@ var federationTransportOperations = map[string]HostFederationOperation{
 	// RefreshProjectFederationBaseline, so this GET writes.
 	"getFederationProjectMetadata": {ID: "getFederationProjectMetadata", Mutation: true},
 	"pollFederationProjectEvents":  {ID: "pollFederationProjectEvents"},
+	"watchFederationProjectEvents": {ID: "watchFederationProjectEvents"},
 	// The batch authenticates nothing itself: each project is served as its
 	// own pollFederationProjectEvents request, with that route's facts.
 	"pollFederationEventsBatch":     {ID: "pollFederationEventsBatch"},

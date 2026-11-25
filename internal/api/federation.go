@@ -533,7 +533,49 @@ type FederationPollEventsResponse struct {
 	EventFeatures         string `header:"X-Kata-Event-Features"`
 	RequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
 	PollWaitMax           int    `header:"X-Kata-Federation-Poll-Wait-Max" doc:"Longest wait, in seconds, this hub accepts on a project event poll."`
+	WatchMax              int    `header:"X-Kata-Federation-Watch-Max" doc:"Most projects, counting the route project, one federation event watch may name. Absent or 0 when this hub does not accept watches."`
 	Body                  PollEventsBody
+}
+
+// FederationWatchEventsRequest waits on several projects at one hub, so a
+// spoke bound to many projects holds one request instead of one per project.
+// The route bearer authorizes the route project; every other project carries
+// the token of its own enrollment.
+type FederationWatchEventsRequest struct {
+	EventFeatures string      `header:"X-Kata-Event-Features"`
+	ProjectID     int64       `path:"project_id"`
+	Authorization string      `header:"Authorization"`
+	Wait          OptionalInt `query:"wait,omitempty" doc:"Seconds the hub may hold the watch while no named project has events after its cursor. The hub caps it at X-Kata-Federation-Poll-Wait-Max and answers at once when it cannot hold the request."`
+	Body          FederationWatchEventsRequestBody
+}
+
+// FederationWatchEventsRequestBody names the route project's cursor and the
+// other projects to watch.
+type FederationWatchEventsRequestBody struct {
+	AfterID  int64                    `json:"after_id" doc:"Cursor for the route project."`
+	Projects []FederationWatchProject `json:"projects,omitempty" doc:"Other projects to watch, each with its own cursor and enrollment token."`
+}
+
+// FederationWatchProject is one project a watch names besides the route
+// project.
+type FederationWatchProject struct {
+	ProjectID int64  `json:"project_id"`
+	AfterID   int64  `json:"after_id"`
+	Token     string `json:"token" doc:"Federation enrollment token that authorizes pulls from this project. Transport-only; the hub checks it like a route bearer and never stores it."`
+}
+
+// FederationWatchEventsResponse says which watched projects have events after
+// their cursors. It carries no events; the spoke pulls those projects.
+type FederationWatchEventsResponse struct {
+	PollWaitMax int `header:"X-Kata-Federation-Poll-Wait-Max" doc:"Longest wait, in seconds, this hub accepts on a project event poll or watch."`
+	WatchMax    int `header:"X-Kata-Federation-Watch-Max" doc:"Most projects, counting the route project, one watch may name."`
+	Body        FederationWatchEventsBody
+}
+
+// FederationWatchEventsBody lists watched projects by hub project ID.
+type FederationWatchEventsBody struct {
+	Ready     []int64 `json:"ready" doc:"Projects the spoke should poll now: they have events or a reset after their cursor, or their own poll will report why it cannot read them."`
+	Unwatched []int64 `json:"unwatched" doc:"Projects the hub did not watch because their token does not authorize pulls from them now, or because this request cannot carry supplemental tokens. Poll them individually."`
 }
 
 // FederationIngestEventsRequest is the enrollment-authenticated push transport

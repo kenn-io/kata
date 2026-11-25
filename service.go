@@ -9,6 +9,7 @@ package kata
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -1262,10 +1263,11 @@ type namedWorker struct {
 	run  func(context.Context) error
 }
 
-// result treats cancellation and automatic transaction rollback as a clean stop
-// only after the run context stops. Other errors remain attributed to the worker.
+// result treats cancellation, automatic transaction rollback, and driver
+// connection teardown from shutdown as a clean stop only after the run context
+// stops. Other errors remain attributed to the worker.
 func (w namedWorker) result(err, terminal error) error {
-	if err == nil || (errors.Is(err, terminal) && isOnlyError(err, terminal, sql.ErrTxDone)) {
+	if err == nil || (errors.Is(err, terminal) && isOnlyError(err, terminal, sql.ErrTxDone, driver.ErrBadConn)) {
 		return nil
 	}
 	return fmt.Errorf("kata: %s worker: %w", w.name, err)

@@ -24,7 +24,7 @@ func registerFederationOperationPolicies(policies map[string]HostOperationPolicy
 
 	registerHostOperations(policies, HostOperationPolicy{
 		Kind: hostOperationFederationTransport, Capability: hostCapabilityFederate,
-	}, "getFederationProjectMetadata", "pollFederationProjectEvents", "pollFederationEventsBatch", "searchFederationProject")
+	}, "getFederationProjectMetadata", "pollFederationProjectEvents", "pollFederationEventsBatch", "watchFederationProjectEvents", "searchFederationProject")
 	registerHostOperations(policies, HostOperationPolicy{
 		Kind: hostOperationFederationTransport, Capability: hostCapabilityFederate, Mutation: true,
 	}, "disconnectRelayEnrollment", "ingestFederationProjectEvents", "getRelayReset", "offerRelayDeliveries", "acceptRelayDeliveries", "ackRelayDeliveries")

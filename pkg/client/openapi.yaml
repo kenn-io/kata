@@ -3089,6 +3089,56 @@ components:
         - issue_uid
         - at
       type: object
+    FederationWatchEventsBody:
+      properties:
+        ready:
+          description: "Projects the spoke should poll now: they have events or a reset after their cursor, or their own poll will report why it cannot read them."
+          items:
+            format: int64
+            type: integer
+          type: array
+        unwatched:
+          description: Projects the hub did not watch because their token does not authorize pulls from them now, or because this request cannot carry supplemental tokens. Poll them individually.
+          items:
+            format: int64
+            type: integer
+          type: array
+      required:
+        - ready
+        - unwatched
+      type: object
+    FederationWatchEventsRequestBody:
+      additionalProperties: false
+      properties:
+        after_id:
+          description: Cursor for the route project.
+          format: int64
+          type: integer
+        projects:
+          description: Other projects to watch, each with its own cursor and enrollment token.
+          items:
+            $ref: "#/components/schemas/FederationWatchProject"
+          type: array
+      required:
+        - after_id
+      type: object
+    FederationWatchProject:
+      additionalProperties: false
+      properties:
+        after_id:
+          format: int64
+          type: integer
+        project_id:
+          format: int64
+          type: integer
+        token:
+          description: Federation enrollment token that authorizes pulls from this project. Transport-only; the hub checks it like a route bearer and never stores it.
+          type: string
+      required:
+        - project_id
+        - after_id
+        - token
+      type: object
     FieldDescriptor:
       properties:
         accepted_kinds:
@@ -7599,7 +7649,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.71.0
+  version: 0.72.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:
@@ -10046,6 +10096,11 @@ paths:
                 description: Longest wait, in seconds, this hub accepts on a project event poll.
                 format: int64
                 type: integer
+            X-Kata-Federation-Watch-Max:
+              schema:
+                description: Most projects, counting the route project, one federation event watch may name. Absent or 0 when this hub does not accept watches.
+                format: int64
+                type: integer
             X-Kata-Required-Event-Features:
               schema:
                 type: string
@@ -10093,6 +10148,62 @@ paths:
             X-Kata-Required-Event-Features:
               schema:
                 type: string
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/federation/events:watch:
+    post:
+      operationId: watchFederationProjectEvents
+      parameters:
+        - in: header
+          name: X-Kata-Event-Features
+          schema:
+            type: string
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: header
+          name: Authorization
+          schema:
+            type: string
+        - description: Seconds the hub may hold the watch while no named project has events after its cursor. The hub caps it at X-Kata-Federation-Poll-Wait-Max and answers at once when it cannot hold the request.
+          explode: false
+          in: query
+          name: wait
+          schema:
+            description: Seconds the hub may hold the watch while no named project has events after its cursor. The hub caps it at X-Kata-Federation-Poll-Wait-Max and answers at once when it cannot hold the request.
+            format: int64
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FederationWatchEventsRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FederationWatchEventsBody"
+          description: OK
+          headers:
+            X-Kata-Federation-Poll-Wait-Max:
+              schema:
+                description: Longest wait, in seconds, this hub accepts on a project event poll or watch.
+                format: int64
+                type: integer
+            X-Kata-Federation-Watch-Max:
+              schema:
+                description: Most projects, counting the route project, one watch may name.
+                format: int64
+                type: integer
         default:
           content:
             application/json:

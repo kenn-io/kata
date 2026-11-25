@@ -157,7 +157,7 @@
     policy = undefined
     policyError = undefined
     if (!preserveDraft) {
-      selectedTeams = []
+      // Keep the current picks visible while disabled; replace them when the read completes.
       policyRetry = undefined
     }
     policyLoading = !!id

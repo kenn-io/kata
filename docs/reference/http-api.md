@@ -373,7 +373,8 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
-| `0.71.0` | `POST /api/v1/federation/events:poll` polls several projects that share one federation credential. |
+| `0.72.0` | `POST /api/v1/federation/events:poll` polls several projects that share one federation credential. |
+| `0.71.0` | Federation event watches hold one request for many projects; event polls advertise `X-Kata-Federation-Watch-Max`. |
 | `0.70.0` | Added `PATCH /api/v1/projects/{project_id}/issues/{ref}/labels`, which applies `add` and `remove` label lists in one transaction and answers with the issue's resulting `labels`. |
 | `0.69.0` | Close responses can include a `parent_ready` issue reference. |
 | `0.67.0` | Federation event polls accept `wait` and advertise `X-Kata-Federation-Poll-Wait-Max`. |
@@ -995,7 +996,38 @@ authority and polls snapshots because the event stream remains protected.
 `GET /api/v1/projects/{project_id}/federation/events` accepts an optional
 `wait` in seconds. A caught-up poll may wait up to 45 seconds for new events;
 a zero or omitted wait answers at once. Successful responses advertise the
-maximum wait in seconds in `X-Kata-Federation-Poll-Wait-Max`.
+maximum wait in seconds in `X-Kata-Federation-Poll-Wait-Max`, and the most
+projects one watch can name in `X-Kata-Federation-Watch-Max`. A hub that
+requires signed federation requests advertises `0` watch projects.
+
+`POST /api/v1/projects/{project_id}/federation/events:watch` holds one request
+for the route project and up to 255 more. The bearer authorizes the route
+project. Each other project in the body carries its own enrollment token:
+
+```json
+{"after_id": 120, "projects": [{"project_id": 7, "after_id": 33, "token": "..."}]}
+```
+
+The hub checks each token against its own project, as it would check a poll
+by that token. It answers as soon as any named project has events or a reset
+after its cursor, when no named project is left to watch, or when the `wait`
+ends. The response names projects only; pull their events with the event
+poll:
+
+```json
+{"ready": [7], "unwatched": []}
+```
+
+`ready` also names a project whose own poll would refuse the read, such as
+for event features the spoke lacks; that poll says why. `unwatched` lists
+projects the hub did not watch: their token does not authorize pulls from
+them, they are outside the request's `X-Kata-Project-Scope`, or the request is
+signed. A signed request proves only the route credential's key, so it
+watches the route project alone. A list
+with more than 255 other projects, a repeated project, the route project, a
+negative cursor, or a missing token returns `400 validation`. The response
+carries the same `X-Kata-Federation-Poll-Wait-Max` and
+`X-Kata-Federation-Watch-Max` headers as the event poll.
 
 `POST /api/v1/federation/events:poll` tells a spoke which of up to 100
 projects have new events, with one federation credential. It returns no

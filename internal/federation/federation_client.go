@@ -91,20 +91,38 @@ func (c *Client) PollIssueEvents(ctx context.Context, hubProjectID int64, issueU
 	return body, err
 }
 
+// hubPollAdvertisement is what a hub says about the polls it can hold: the
+// longest wait, zero when it holds none, and how many projects one watch may
+// name, zero when it takes no watches.
+type hubPollAdvertisement struct {
+	wait     time.Duration
+	watchMax int
+}
+
+func parseHubPollAdvertisement(header http.Header) hubPollAdvertisement {
+	var out hubPollAdvertisement
+	if seconds, err := strconv.Atoi(header.Get(federationPollWaitMaxHeader)); err == nil && seconds > 0 {
+		out.wait = time.Duration(seconds) * time.Second
+	}
+	if projects, err := strconv.Atoi(header.Get(federationWatchMaxHeader)); err == nil && projects > 0 {
+		out.watchMax = projects
+	}
+	return out
+}
+
 // pollProjectEvents polls hub project events strictly after afterID. A
-// positive wait asks the hub to hold a caught-up poll for up to that long; the
-// result then reports the hub's advertised maximum wait, zero when the hub
-// does not hold polls.
+// positive wait asks the hub to hold a caught-up poll for up to that long. The
+// result reports what the hub advertises about held polls and watches.
 func (c *Client) pollProjectEvents(
 	ctx context.Context, hubProjectID int64, issueUID string, afterID int64, limit int, wait time.Duration,
-) (api.PollEventsBody, time.Duration, error) {
+) (api.PollEventsBody, hubPollAdvertisement, error) {
 	httpClient := c.client
 	if wait > 0 {
 		httpClient = noRedirects(httpClient)
 	}
 	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{httpClient}))
 	if err != nil {
-		return api.PollEventsBody{}, 0, err
+		return api.PollEventsBody{}, hubPollAdvertisement{}, err
 	}
 	query := &generated.PollFederationProjectEventsQuery{AfterID: &afterID}
 	if issueUID != "" {
@@ -119,23 +137,46 @@ func (c *Client) pollProjectEvents(
 	response, callErr := apiClient.PollFederationProjectEventsWithResponse(ctx, &generated.PollFederationProjectEventsRequestOptions{PathParams: &generated.PollFederationProjectEventsPath{ProjectID: hubProjectID}, Query: query})
 	var body api.PollEventsBody
 	if response == nil {
-		return body, 0, callErr
+		return body, hubPollAdvertisement{}, callErr
 	}
 	err = decodeReplicationResponse(response.HTTPResponse, response.Body, &body)
 	if body.Events == nil {
 		body.Events = []api.EventEnvelope{}
 	}
 	if err != nil {
-		return body, 0, err
+		return body, hubPollAdvertisement{}, err
 	}
 	if issueUID == "" {
 		observeFederationPoll(ctx, response.HTTPResponse.Header.Get(db.EventFeaturesHeader))
 	}
-	advertised, parseErr := strconv.Atoi(response.HTTPResponse.Header.Get(federationPollWaitMaxHeader))
-	if parseErr != nil || advertised <= 0 {
-		return body, 0, nil
+	return body, parseHubPollAdvertisement(response.HTTPResponse.Header), nil
+}
+
+// watchProjectEvents holds one request at the hub for hubProjectID, which this
+// client's bearer authorizes, and for each of others, which its own token
+// authorizes. The hub answers with the projects that have work after their
+// cursors, or with none when the wait ends.
+func (c *Client) watchProjectEvents(
+	ctx context.Context, hubProjectID, afterID int64, others []generated.FederationWatchProject, wait time.Duration,
+) (api.FederationWatchEventsBody, hubPollAdvertisement, error) {
+	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{noRedirects(c.client)}))
+	if err != nil {
+		return api.FederationWatchEventsBody{}, hubPollAdvertisement{}, err
 	}
-	return body, time.Duration(advertised) * time.Second, nil
+	waitSeconds := int64(wait / time.Second)
+	response, callErr := apiClient.WatchFederationProjectEventsWithResponse(ctx, &generated.WatchFederationProjectEventsRequestOptions{
+		PathParams: &generated.WatchFederationProjectEventsPath{ProjectID: hubProjectID},
+		Query:      &generated.WatchFederationProjectEventsQuery{Wait: &waitSeconds},
+		Body:       &generated.WatchFederationProjectEventsBody{AfterID: afterID, Projects: others},
+	})
+	var body api.FederationWatchEventsBody
+	if response == nil {
+		return body, hubPollAdvertisement{}, callErr
+	}
+	if err := decodeReplicationResponse(response.HTTPResponse, response.Body, &body); err != nil {
+		return body, hubPollAdvertisement{}, err
+	}
+	return body, parseHubPollAdvertisement(response.HTTPResponse.Header), nil
 }
 
 // IngestProjectEvents pushes local spoke events into the hub transport

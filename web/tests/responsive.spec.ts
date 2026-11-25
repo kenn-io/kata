@@ -97,6 +97,109 @@ test('resizing an open drawer restores desktop navigation and its project state'
   await expect(projects).toHaveAttribute('aria-expanded', 'false')
 })
 
+test('Settings tabs stay above the section at desktop and mobile widths', async ({
+  page,
+  kata,
+}) => {
+  await kata.launch(page, '/kata?view=settings&section=appearance')
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 800 })
+    const tabs = page.getByRole('tablist', { name: 'Settings' })
+    const heading = page.getByRole('heading', { name: 'Appearance' })
+    const tabsBounds = (await tabs.boundingBox())!
+    const headingBounds = (await heading.boundingBox())!
+    expect(tabsBounds.y + tabsBounds.height).toBeLessThanOrEqual(headingBounds.y)
+    if (width === 1440) {
+      const headerHeight = await tabs.evaluate((list) =>
+        parseFloat(getComputedStyle(list).getPropertyValue('--layout-header-h')),
+      )
+      expect(tabsBounds.height).toBeCloseTo(headerHeight, 0)
+      const selected = page.getByRole('tab', { name: 'Appearance' })
+      const indicatorBottom = await selected.evaluate(
+        (tab) =>
+          tab.getBoundingClientRect().bottom -
+          Number.parseFloat(getComputedStyle(tab, '::after').bottom),
+      )
+      expect(indicatorBottom).toBeCloseTo(tabsBounds.y + tabsBounds.height - 1, 0)
+    }
+    const labelBounds = (await tabs.locator('.kit-tabs__label').first().boundingBox())!
+    const underline = await page.getByRole('tab', { name: 'Appearance' }).evaluate((tab) => {
+      const bounds = tab.getBoundingClientRect()
+      const style = getComputedStyle(tab, '::after')
+      return {
+        left: bounds.left + parseFloat(style.left),
+        right: bounds.right - parseFloat(style.right),
+      }
+    })
+    expect(underline.left).toBeCloseTo(labelBounds.x, 0)
+    expect(underline.right).toBeCloseTo(labelBounds.x + labelBounds.width, 0)
+    if (width === 1440) {
+      expect(tabsBounds.x).toBeCloseTo(headingBounds.x, 0)
+      expect(tabsBounds.x + tabsBounds.width).toBeCloseTo(headingBounds.x + headingBounds.width, 0)
+    }
+    expect(labelBounds.x).toBeCloseTo(headingBounds.x, 0)
+  }
+})
+
+test('Settings tabs keep direct links and keyboard focus visible on mobile', async ({
+  page,
+  kata,
+}) => {
+  await page.setViewportSize({ width: 390, height: 800 })
+  await kata.launch(page)
+  await kata.loginOwner(page, '/kata?view=settings&section=access')
+  const tabs = page.getByRole('tablist', { name: 'Settings' })
+  const selected = page.getByRole('tab', { name: 'Teams and visibility' })
+  await expect(selected).toHaveAttribute('aria-selected', 'true')
+  const strip = (await tabs.boundingBox())!
+  const tab = (await selected.boundingBox())!
+  const view = (await page.locator('.settings-view').boundingBox())!
+  expect(strip.x).toBeCloseTo(view.x, 0)
+  expect(strip.x + strip.width).toBeCloseTo(view.x + view.width, 0)
+  expect(tab.x).toBeGreaterThanOrEqual(strip.x + 15)
+  expect(tab.x + tab.width).toBeLessThanOrEqual(strip.x + strip.width - 15)
+  const first = page.getByRole('tab', { name: 'Appearance' })
+  const last = page.getByRole('tab', { name: 'Teams and visibility' })
+  await first.click()
+  await expect(page).toHaveURL(/view=settings&section=appearance/)
+  await first.focus()
+  await page.keyboard.press('End')
+  await expect(last).toBeFocused()
+  await expect(page).toHaveURL(/view=settings&section=appearance/)
+  await expect(first).toHaveAttribute('aria-selected', 'true')
+  const focusedStrip = (await tabs.boundingBox())!
+  const focused = (await last.boundingBox())!
+  expect(focused.x).toBeGreaterThanOrEqual(focusedStrip.x)
+  expect(focused.x + focused.width).toBeLessThanOrEqual(focusedStrip.x + focusedStrip.width + 1)
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL(/view=settings&section=access/)
+  await expect(last).toHaveAttribute('aria-selected', 'true')
+})
+
+test('Settings selection updates keep keyboard focus in view', async ({ page, kata }) => {
+  await page.setViewportSize({ width: 390, height: 800 })
+  await kata.launch(page)
+  await kata.loginOwner(page, '/kata?view=settings&section=access')
+  const first = page.getByRole('tab', { name: 'Appearance' })
+  const last = page.getByRole('tab', { name: 'Teams and visibility' })
+  await expect(last).toHaveAttribute('aria-selected', 'true')
+
+  await first.evaluate((tab) => {
+    // Move focus before Svelte runs the effect for the new selection.
+    tab.click()
+    tab.focus()
+    tab.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }))
+  })
+  // Let the deferred selection effect finish before measuring the focused tab.
+  await page.evaluate(() => new Promise(requestAnimationFrame))
+  await expect(last).toBeFocused()
+  await expect(first).toHaveAttribute('aria-selected', 'true')
+  const strip = (await page.getByRole('tablist', { name: 'Settings' }).boundingBox())!
+  const focused = (await last.boundingBox())!
+  expect(focused.x).toBeGreaterThanOrEqual(strip.x)
+  expect(focused.x + focused.width).toBeLessThanOrEqual(strip.x + strip.width + 1)
+})
+
 test('Appearance changes the sidebar color', async ({ page, kata }) => {
   await page.emulateMedia({ colorScheme: 'dark' })
   await kata.launch(page)
@@ -105,7 +208,7 @@ test('Appearance changes the sidebar color', async ({ page, kata }) => {
     page.locator('.kata-sidebar').evaluate((element) => getComputedStyle(element).backgroundColor)
   const darkColor = await sidebarColor()
   await page.getByRole('button', { name: 'Settings' }).click()
-  await page.getByRole('button', { name: /^Appearance/ }).click()
+  await page.getByRole('tab', { name: /^Appearance/ }).click()
   await page.getByRole('radio', { name: 'Light', exact: true }).click()
   await expect.poll(sidebarColor).not.toBe(darkColor)
 })
@@ -324,4 +427,32 @@ test('the task count sits beside the list title', async ({ page, kata }) => {
   expect(count.y + count.height).toBeGreaterThan(title.y)
   expect(count.x).toBeGreaterThan(title.x + title.width)
   expect(count.x - (title.x + title.width)).toBeLessThan(40)
+})
+
+test('the navigation sidebar resizes and collapses, and keeps both across reloads', async ({
+  page,
+  kata,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 800 })
+  await kata.launch(page)
+  const sidebar = page.locator('.kata-sidebar')
+  const handle = page.getByRole('separator', { name: 'Resize sidebar' })
+  const startWidth = (await sidebar.boundingBox())!.width
+
+  const grip = (await handle.boundingBox())!
+  await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(grip.x + grip.width / 2 + 120, grip.y + grip.height / 2, { steps: 5 })
+  await page.mouse.up()
+  await expect.poll(async () => (await sidebar.boundingBox())!.width).toBe(startWidth + 120)
+
+  await page.getByRole('button', { name: 'Collapse sidebar' }).click()
+  await expect(sidebar).toBeHidden()
+  await page.reload()
+  await expect(page.getByRole('button', { name: 'Expand sidebar' })).toBeVisible()
+  await expect(sidebar).toBeHidden()
+
+  await page.getByRole('button', { name: 'Expand sidebar' }).click()
+  await expect(page.getByRole('button', { name: 'Today' })).toBeVisible()
+  await expect.poll(async () => (await sidebar.boundingBox())!.width).toBe(startWidth + 120)
 })
