@@ -172,3 +172,33 @@ func checkFederationRejoinCronDependents(t *testing.T, store db.Storage) error {
 	}
 	return nil
 }
+
+func checkFederationOutOfOrderPush(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "out-of-order-project")
+	require.NoError(t, err)
+	bindRejoinSpokes(t, store, project)
+	_, first, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "first", Author: "new-actor"})
+	require.NoError(t, err)
+	_, second, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "second", Author: "new-actor"})
+	require.NoError(t, err)
+	binding, err := store.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	pending, err := store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), first.ID, 100)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	require.Equal(t, second.UID, pending[0].UID)
+	require.NoError(t, store.AcknowledgeFederationPush(ctx, project.ID, second.ID, nil, []string{second.UID}))
+	current, err := store.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	require.Equal(t, binding.PushCursorEventID, current.PushCursorEventID)
+	pending, err = store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), current.PushCursorEventID, 100)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	require.Equal(t, first.UID, pending[0].UID)
+	require.NoError(t, store.AcknowledgeFederationPush(ctx, project.ID, first.ID, nil, nil))
+	current, err = store.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	require.Equal(t, second.ID, current.PushCursorEventID)
+	return nil
+}

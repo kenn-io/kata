@@ -269,8 +269,12 @@ func pushDirectSpoke(
 		retryBatchSize := 0
 		singleRunRetry := false
 		commentHistories := make(map[string]map[string]bool)
+		deferredComments := make(map[string]bool)
+		scanCursor := binding.PushCursorEventID
+		outOfOrder := false
 	pushLoop:
 		for {
+			scanCursor = max(scanCursor, binding.PushCursorEventID)
 			if q, err := store.ActiveFederationQuarantine(ctx, binding.ProjectID, db.FederationQuarantineDirectionPush); err == nil {
 				quarantinedEvents, eventErr := store.EventsByUIDs(ctx, binding.ProjectID, q.EventUIDs)
 				if eventErr != nil {
@@ -297,17 +301,24 @@ func pushDirectSpoke(
 				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 			}
 			pending, err := store.PendingFederationPushEvents(
-				ctx, binding.ProjectID, store.InstanceUID(), binding.PushCursorEventID, federationPollLimit)
+				ctx, binding.ProjectID, store.InstanceUID(), scanCursor, federationPollLimit)
 			if err != nil {
 				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 			}
 			if len(pending) == 0 {
 				break
 			}
-			if kept, err := keepFederationCommentDependentsLocal(ctx, store, binding, pending, client, hubProjectID, commentHistories); err != nil {
+			pageEnd := pending[len(pending)-1].ID
+			kept, deferred, err := keepFederationCommentDependentsLocal(ctx, store, binding, pending, client, hubProjectID, commentHistories, deferredComments)
+			if err != nil {
 				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-			} else if kept {
+			}
+			if kept {
 				continue pushLoop
+			}
+			if len(deferred) > 0 {
+				outOfOrder = true
+				pending = slices.DeleteFunc(pending, func(event db.Event) bool { return deferred[event.ID] })
 			}
 			for len(pending) > 0 {
 				segment := federationContiguousBaselinePrefix(pending)
@@ -382,7 +393,16 @@ func pushDirectSpoke(
 				// snapshot for them. Those snapshots go, and the project is
 				// rebuilt, in the same transaction that moves the cursor.
 				ackCtx, resets := db.WithFederationMoveResetCapture(ctx)
-				if err := store.AcknowledgeFederationPush(ackCtx, binding.ProjectID, ack.PushCursorEventID, ack.SupersededEventUIDs); err != nil {
+				var accepted []string
+				if outOfOrder {
+					accepted = make([]string, 0, len(batch))
+					for _, event := range batch {
+						if event.ID <= ack.PushCursorEventID {
+							accepted = append(accepted, event.UID)
+						}
+					}
+				}
+				if err := store.AcknowledgeFederationPush(ackCtx, binding.ProjectID, ack.PushCursorEventID, ack.SupersededEventUIDs, accepted); err != nil {
 					// A push that waits for the hub's history is finished by the
 					// next pull and the push after it. The reason is recorded
 					// like any other, so a wait that does not end is visible in
@@ -396,13 +416,20 @@ func pushDirectSpoke(
 						onPulledEvents(reset.ProjectID, []db.Event{{ID: reset.EventID, ProjectID: reset.ProjectID, Type: db.ProjectScopeResetEventType}})
 					}
 				}
-				binding.PushCursorEventID = ack.PushCursorEventID
+				if outOfOrder {
+					if err := reloadFederationPushCursor(ctx, store, binding); err != nil {
+						return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+					}
+				} else {
+					binding.PushCursorEventID = ack.PushCursorEventID
+				}
 				singleRunRetry = false
 				if retryBatchSize > 0 && batch[0].Actor != binding.Actor {
 					retryBatchSize = min(retryBatchSize*2, federationPollLimit)
 				}
 				pending = pendingFederationEventsAfterCursor(pending, ack.PushCursorEventID)
 			}
+			scanCursor = pageEnd
 		}
 		if err := store.RecordFederationSyncPushSuccess(ctx, binding.ProjectID, time.Now().UTC()); err != nil {
 			return err
@@ -927,34 +954,55 @@ func reloadFederationPushCursor(ctx context.Context, store db.Storage, binding *
 }
 
 // keepFederationCommentDependentsLocal keeps edits and replies to local comments local.
-func keepFederationCommentDependentsLocal(ctx context.Context, store db.Storage, binding *db.FederationBinding, pending []db.Event, client *Client, hubProjectID int64, histories map[string]map[string]bool) (bool, error) {
+func keepFederationCommentDependentsLocal(ctx context.Context, store db.Storage, binding *db.FederationBinding, pending []db.Event, client *Client, hubProjectID int64, histories map[string]map[string]bool, deferredComments map[string]bool) (bool, map[int64]bool, error) {
 	kept, err := store.HasKeptFederationEvents(ctx, binding.ProjectID)
 	if err != nil || !kept {
-		return false, err
+		return false, nil, err
 	}
+	deferred := make(map[int64]bool)
 	for _, event := range pending {
 		if event.Type != "issue.comment_edited" && event.Type != "issue.commented" {
 			continue
 		}
+		payload := db.PayloadMap([]byte(event.Payload))
+		uid, _ := db.StringValue(payload["comment_uid"])
+		target := uid
 		if event.Type == "issue.commented" {
-			target, _ := db.StringValue(db.PayloadMap([]byte(event.Payload))["reply_to_uid"])
+			target, _ = db.StringValue(payload["reply_to_uid"])
 			if target == "" {
 				continue
 			}
 		}
+		if deferredComments[target] {
+			deferred[event.ID] = true
+			deferredComments[uid] = true
+			continue
+		}
 		issueUID, commentUID, err := store.FederationCommentDependent(ctx, binding.ProjectID, event.ID)
 		if err != nil {
-			return false, err
+			return false, nil, err
 		}
 		if issueUID != "" && event.Actor == binding.Actor {
 			comments, found := histories[issueUID]
 			if !found {
 				history, err := client.issueHistoryThrough(ctx, hubProjectID, issueUID, math.MaxInt64)
 				if err != nil {
-					return false, err
+					var status *HubStatusError
+					if errors.As(err, &status) && status.StatusCode == http.StatusForbidden {
+						histories[issueUID] = nil
+					} else {
+						return false, nil, err
+					}
+				} else {
+					comments = federationHistoryComments(history)
+					histories[issueUID] = comments
 				}
-				comments = federationHistoryComments(history)
-				histories[issueUID] = comments
+			}
+			if comments == nil {
+				deferred[event.ID] = true
+				deferredComments[target] = true
+				deferredComments[uid] = true
+				continue
 			}
 			if comments[commentUID] {
 				continue
@@ -962,13 +1010,13 @@ func keepFederationCommentDependentsLocal(ctx context.Context, store db.Storage,
 		}
 		kept, err := store.KeepFederationCommentDependentLocal(ctx, binding.ProjectID, event.ID)
 		if err != nil {
-			return false, err
+			return false, nil, err
 		}
 		if kept {
-			return true, reloadFederationPushCursor(ctx, store, binding)
+			return true, nil, reloadFederationPushCursor(ctx, store, binding)
 		}
 	}
-	return false, nil
+	return false, deferred, nil
 }
 
 func federationHistoryComments(history []api.EventEnvelope) map[string]bool {

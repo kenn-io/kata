@@ -49,7 +49,7 @@ func (s *commentDependentProbe) HasKeptFederationEvents(context.Context, int64) 
 func TestRejoinCommentHistory(t *testing.T) {
 	t.Run("no retained events", func(t *testing.T) {
 		store := &commentDependentProbe{}
-		_, err := keepFederationCommentDependentsLocal(t.Context(), store, &db.FederationBinding{}, []db.Event{{Type: "issue.comment_edited"}}, nil, 0, nil)
+		_, _, err := keepFederationCommentDependentsLocal(t.Context(), store, &db.FederationBinding{}, []db.Event{{Type: "issue.comment_edited"}}, nil, 0, nil, make(map[string]bool))
 		require.NoError(t, err)
 		require.Zero(t, store.lookups)
 	})
@@ -60,7 +60,7 @@ func TestRejoinCommentHistory(t *testing.T) {
 			{ID: 2, Type: "issue.commented", Payload: `{"reply_to_uid":"target"}`},
 			{ID: 3, Type: "issue.comment_edited", Payload: `{}`},
 		}
-		_, err := keepFederationCommentDependentsLocal(t.Context(), store, &db.FederationBinding{}, pending, nil, 0, nil)
+		_, _, err := keepFederationCommentDependentsLocal(t.Context(), store, &db.FederationBinding{}, pending, nil, 0, nil, make(map[string]bool))
 		require.NoError(t, err)
 		require.Equal(t, []int64{2, 3}, store.ids)
 	})
@@ -75,7 +75,7 @@ func TestRejoinCommentHistory(t *testing.T) {
 		{name: "repeated adoption", status: http.StatusOK, body: `{"events":[{"event_id":1,"issue_uid":"task","type":"issue.restated","payload":{"comments":[{"comment_uid":"comment"}]}}],"next_after_id":1}`},
 		{name: "edit", status: http.StatusOK, body: `{"events":[{"event_id":1,"issue_uid":"task","type":"issue.comment_edited","payload":{"comment_uid":"comment"}}],"next_after_id":1}`},
 		{name: "missing", status: http.StatusNotFound, wantKeep: true},
-		{name: "push only", status: http.StatusForbidden, wantErr: true},
+		{name: "push only", status: http.StatusForbidden},
 		{name: "retry", status: http.StatusInternalServerError, wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -95,7 +95,7 @@ func TestRejoinCommentHistory(t *testing.T) {
 			require.NoError(t, err)
 			store := &commentDependentProbe{candidate: true, kept: true}
 			pending := []db.Event{{ID: 1, Type: "issue.comment_edited", Actor: "new-actor"}, {ID: 2, Type: "issue.comment_edited", Actor: "new-actor"}}
-			_, err = keepFederationCommentDependentsLocal(t.Context(), store, &db.FederationBinding{Actor: "new-actor"}, pending, client, 1, make(map[string]map[string]bool))
+			_, _, err = keepFederationCommentDependentsLocal(t.Context(), store, &db.FederationBinding{Actor: "new-actor"}, pending, client, 1, make(map[string]map[string]bool), make(map[string]bool))
 			if tc.wantErr {
 				require.Error(t, err)
 				require.Empty(t, store.ids)
@@ -437,4 +437,76 @@ func rejoinNewActor(t *testing.T, hub *testenv.Env, hubProject db.Project, spoke
 		"project_name": project.Name, "replay_horizon_event_id": hubBinding.ReplayHorizonEventID, "token": grant.Token, "capabilities": "pull,push", "actor": "new-actor", "push_enabled": true,
 	}, &replica)
 	return grant.Token
+}
+
+func TestPushOnlyRejoinRetriesUncertainComments(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "rejoin-project")
+	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
+	project := spoke.projects[0]
+	issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "shared task", Author: "old-actor"})
+	require.NoError(t, err)
+	shared, _, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "shared"})
+	require.NoError(t, err)
+	require.NoError(t, spoke.sync(t, 0))
+	_, err = spoke.env.DB.LeaveFederationReplica(ctx, project.ID)
+	require.NoError(t, err)
+	local, _, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "local"})
+	require.NoError(t, err)
+	hubBinding, err := hub.DB.FederationBindingByProject(ctx, projects[0].ID)
+	require.NoError(t, err)
+	_, err = spoke.env.DB.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: project.ID, HubURL: hub.URL, HubProjectID: projects[0].ID, HubProjectUID: projects[0].UID, ReplayHorizonEventID: hubBinding.ReplayHorizonEventID, Actor: "old-actor"})
+	require.NoError(t, err)
+	_, err = spoke.env.DB.LeaveFederationReplica(ctx, project.ID)
+	require.NoError(t, err)
+	readToken := rejoinNewActor(t, hub, projects[0], spoke.env, project)
+	grant, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: spoke.env.DB.InstanceUID(), ProjectID: &projects[0].ID, Capabilities: "push", Actor: "new-actor"})
+	require.NoError(t, err)
+	var pendingUIDs []string
+	for _, comment := range []db.Comment{shared, local} {
+		_, event, changed, err := spoke.env.DB.EditComment(ctx, db.EditCommentParams{IssueID: issue.ID, CommentUID: comment.UID, Actor: "new-actor", Body: "edited " + comment.Body})
+		require.NoError(t, err)
+		require.True(t, changed)
+		pendingUIDs = append(pendingUIDs, event.UID)
+		replyComment, reply, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "reply to " + comment.Body, ReplyToUID: comment.UID, ReplyKind: "reply"})
+		require.NoError(t, err)
+		pendingUIDs = append(pendingUIDs, reply.UID)
+		_, nested, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "nested reply", ReplyToUID: replyComment.UID, ReplyKind: "reply"})
+		require.NoError(t, err)
+		pendingUIDs = append(pendingUIDs, nested.UID)
+	}
+	later, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "later task", Author: "new-actor"})
+	require.NoError(t, err)
+	binding, err := spoke.env.DB.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	client, err := NewClient(ctx, hub.URL, grant.Token, clientpkg.Opts{})
+	require.NoError(t, err)
+	require.NoError(t, PushDirectSpoke(ctx, spoke.env.DB, binding, projects[0].ID, client))
+	_, err = hub.DB.IssueByUID(ctx, later.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	binding, err = spoke.env.DB.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	pending, err := spoke.env.DB.PendingFederationPushEvents(ctx, project.ID, spoke.env.DB.InstanceUID(), binding.PushCursorEventID, 100)
+	require.NoError(t, err)
+	var gotUIDs []string
+	for _, event := range pending {
+		gotUIDs = append(gotUIDs, event.UID)
+	}
+	require.ElementsMatch(t, pendingUIDs, gotUIDs)
+	client, err = NewClient(ctx, hub.URL, readToken, clientpkg.Opts{})
+	require.NoError(t, err)
+	require.NoError(t, PushDirectSpoke(ctx, spoke.env.DB, binding, projects[0].ID, client))
+	hubIssue, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	comments, err := hub.DB.CommentsByIssue(ctx, hubIssue.ID)
+	require.NoError(t, err)
+	require.Len(t, comments, 3)
+	require.Equal(t, "edited shared", comments[0].Body)
+	require.Equal(t, "reply to shared", comments[1].Body)
+	require.Equal(t, shared.UID, comments[1].ReplyToUID)
+	binding, err = spoke.env.DB.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	pending, err = spoke.env.DB.PendingFederationPushEvents(ctx, project.ID, spoke.env.DB.InstanceUID(), binding.PushCursorEventID, 100)
+	require.NoError(t, err)
+	require.Empty(t, pending)
 }

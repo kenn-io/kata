@@ -187,10 +187,14 @@ func federationPushEventTypeCondition(column string) string {
 // rebuilds the project, so an interruption leaves either the whole batch to
 // push again or the finished progress, and the home never shows rows built
 // from a snapshot it no longer holds.
-func (d *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string) error {
+func (d *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs, acceptedEventUIDs []string) error {
 	if len(supersededEventUIDs) == 0 {
 		return d.relayTx(ctx, func(tx *sql.Tx) error {
-			if err := advanceFederationPushCursor(ctx, tx, projectID, nextCursor); err != nil {
+			if acceptedEventUIDs != nil {
+				if err := db.RecordFederationAcknowledgedEvents(ctx, tx, projectID, acceptedEventUIDs); err != nil {
+					return err
+				}
+			} else if err := advanceFederationPushCursor(ctx, tx, projectID, nextCursor); err != nil {
 				return err
 			}
 			return db.FoldFederationAcknowledgedEvents(ctx, tx, projectID, d.InstanceUID())
@@ -201,7 +205,11 @@ func (d *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCu
 		if err != nil {
 			return err
 		}
-		if err := advanceFederationPushCursor(ctx, tx, projectID, nextCursor); err != nil {
+		if acceptedEventUIDs != nil {
+			if err := db.RecordFederationAcknowledgedEvents(ctx, tx, projectID, acceptedEventUIDs); err != nil {
+				return err
+			}
+		} else if err := advanceFederationPushCursor(ctx, tx, projectID, nextCursor); err != nil {
 			return err
 		}
 		if err := db.FoldFederationAcknowledgedEvents(ctx, tx, projectID, d.InstanceUID()); err != nil {
