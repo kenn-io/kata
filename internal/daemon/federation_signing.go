@@ -109,14 +109,7 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 			}
 			if local {
 				// Ingest preauthorization charges unsigned event pushes after it
-				// authorizes them; cron writes are already daemon-authorized here.
-				if isCronJobWriteOperation(route.operation) {
-					body, ok := s.bufferFederationPush(w, r)
-					if !ok {
-						return
-					}
-					defer body.release()
-				}
+				// authorizes them. Local cron writes use their ordinary handler.
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -125,12 +118,15 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 		attachmentTransfer := signingpolicy.Unambiguous(r.URL) && federationsigning.IsAttachmentTransfer(r.Method, r.URL.Path)
 		if push {
 			bodyLimit = federationsigning.MaxBodyBytes
-		} else if attachmentTransfer && r.Method == http.MethodPost {
-			bodyLimit = federationsigning.AttachmentMaxBodyBytes
-			// Uploads spool to temporary disk; two at once bounds that disk use.
+		} else if attachmentTransfer {
+			admission := s.federationReadAdmission
+			if r.Method == http.MethodPost {
+				bodyLimit = federationsigning.AttachmentMaxBodyBytes
+				admission = s.federationTransferAdmission
+			}
 			select {
-			case s.federationTransferAdmission <- struct{}{}:
-				defer func() { <-s.federationTransferAdmission }()
+			case admission <- struct{}{}:
+				defer func() { <-admission }()
 			default:
 				w.Header().Set("Retry-After", "1")
 				api.WriteEnvelope(w, http.StatusTooManyRequests, "admission_limited", "federation admission is full")

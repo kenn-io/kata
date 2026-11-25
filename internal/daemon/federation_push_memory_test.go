@@ -33,7 +33,7 @@ func (b *failingPushBody) Read(p []byte) (int, error) {
 }
 func (*failingPushBody) Close() error { return nil }
 
-// Signed, unsigned, and local cron pushes share one body-byte budget. Bytes are
+// Signed and unsigned federation pushes share one body-byte budget. Bytes are
 // charged as they arrive after authorization and returned on every exit.
 func TestFederationPushMemoryIsSharedAndReleased(t *testing.T) {
 	t.Setenv("TEST_PUSH_MEMORY_KEY", strings.Repeat("k", 64))
@@ -55,6 +55,9 @@ func TestFederationPushMemoryIsSharedAndReleased(t *testing.T) {
 		api := huma.NewAPI(huma.DefaultConfig("fixture", "1"), humago.NewAdapter(http.NewServeMux(), ""))
 		huma.Register(api, huma.Operation{OperationID: "ingestFederationProjectEvents", Method: http.MethodPost, Path: "/api/v1/projects/{project_id}/federation/events:ingest"}, func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
 		huma.Register(api, huma.Operation{OperationID: "createCronJob", Method: http.MethodPost, Path: "/api/v1/projects/{project_id}/cron/jobs"}, func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
+		huma.Register(api, huma.Operation{OperationID: "replaceCronJob", Method: http.MethodPut, Path: "/api/v1/projects/{project_id}/cron/jobs/{cron_uid}"}, func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
+		huma.Register(api, huma.Operation{OperationID: "archiveCronJob", Method: http.MethodDelete, Path: "/api/v1/projects/{project_id}/cron/jobs/{cron_uid}"}, func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
+		huma.Register(api, huma.Operation{OperationID: "restoreCronJob", Method: http.MethodPost, Path: "/api/v1/projects/{project_id}/cron/jobs/{cron_uid}/restore"}, func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
 		const budget = 8
 		s := &Server{api: api, cfg: ServerConfig{DB: store, FederationSigning: v}, federationPushMemory: semaphore.NewWeighted(budget)}
 		release := make(chan struct{})
@@ -98,7 +101,7 @@ func TestFederationPushMemoryIsSharedAndReleased(t *testing.T) {
 			require.True(t, s.federationPushMemory.TryAcquire(budget), msg)
 			s.federationPushMemory.Release(budget)
 		}
-		for _, kind := range []string{"signed", "chunked", "unsigned", "cron"} {
+		for _, kind := range []string{"signed", "chunked", "unsigned"} {
 			require.Equal(t, http.StatusNoContent, serve(request(kind, "1234")).Code, kind)
 			requireFree(kind + " success")
 			w := serve(request(kind, "123456789"))
@@ -133,7 +136,16 @@ func TestFederationPushMemoryIsSharedAndReleased(t *testing.T) {
 			go func() { held <- serve(r).Code }()
 		}
 		synctest.Wait()
-		require.Equal(t, http.StatusTooManyRequests, serve(request("cron", "1")).Code)
+		for _, tc := range []struct{ method, path string }{
+			{http.MethodPost, "/api/v1/projects/1/cron/jobs"},
+			{http.MethodPut, "/api/v1/projects/1/cron/jobs/job"},
+			{http.MethodDelete, "/api/v1/projects/1/cron/jobs/job"},
+			{http.MethodPost, "/api/v1/projects/1/cron/jobs/job/restore"},
+		} {
+			r := httptest.NewRequestWithContext(t.Context(), tc.method, "https://hub.example"+tc.path, strings.NewReader("1"))
+			require.Equal(t, http.StatusNoContent, serve(r).Code, "%s %s", tc.method, tc.path)
+		}
+		require.Equal(t, http.StatusTooManyRequests, serve(request("unsigned", "1")).Code)
 		close(release)
 		for range 3 {
 			require.Equal(t, http.StatusNoContent, <-held)
