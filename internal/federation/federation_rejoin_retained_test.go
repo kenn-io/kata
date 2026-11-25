@@ -462,6 +462,36 @@ func TestRejoinEditOfLocalTaskStaysLocal(t *testing.T) {
 	require.Empty(t, pending)
 }
 
+func TestRejoinCommentOnRetainedMoveStaysLocal(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "move-source", "move-target")
+	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor", "old-actor")
+	for _, project := range spoke.projects {
+		_, err := spoke.env.DB.LeaveFederationReplica(ctx, project.ID)
+		require.NoError(t, err)
+	}
+	issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "local", Author: "old-actor"})
+	require.NoError(t, err)
+	move, err := spoke.env.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: spoke.projects[0].ID, ToProjectID: spoke.projects[1].ID, IfMatchRev: issue.Revision, Actor: "old-actor"})
+	require.NoError(t, err)
+	token := rejoinNewActor(t, hub, projects[1], spoke.env, spoke.projects[1])
+	kept, err := spoke.env.DB.KeepFederationEventLocal(ctx, spoke.projects[1].ID, move.EventID)
+	require.NoError(t, err)
+	require.True(t, kept)
+	_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "local comment"})
+	require.NoError(t, err)
+	later, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[1].ID, Title: "later", Author: "new-actor"})
+	require.NoError(t, err)
+	binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[1].ID)
+	require.NoError(t, err)
+	creds := config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[1].ID, Token: token, Actor: "new-actor", Capabilities: "pull,push"}
+	require.NoError(t, SyncFederationOnce(ctx, spoke.env.DB, binding, creds))
+	_, err = hub.DB.IssueByUID(ctx, later.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	_, err = hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.ErrorIs(t, err, db.ErrNotFound)
+}
+
 func TestRejoinRefusalDoesNotKeepAfterLeaseLoss(t *testing.T) {
 	ctx := t.Context()
 	hub, projects := newMoveDeliveryHub(t, "lease-project")

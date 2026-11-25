@@ -250,7 +250,7 @@ func federationKeptDependentSQL(postgres bool) string {
 	if postgres {
 		definitionUID = `root.payload::jsonb->>'uid'=e.payload::jsonb->>'uid'`
 	}
-	return `EXISTS (SELECT 1 FROM events root WHERE root.project_id=e.project_id AND ` + federationKeptLocalSQL("root") + ` AND ((root.issue_uid=e.issue_uid AND root.type IN ('issue.created','issue.snapshot')) OR (((e.type IN ('cron.workflow.updated','cron.workflow.deleted','cron.workflow.restored') AND root.type IN ('cron.workflow.created','cron.workflow.snapshot')) OR (e.type IN ('cron.job.updated','cron.job.deleted','cron.job.restored') AND root.type IN ('cron.job.created','cron.job.snapshot')) OR (e.type='cron.run.observed' AND root.type IN ('cron.run.observed','cron.run.snapshot'))) AND ` + definitionUID + `)))`
+	return `EXISTS (SELECT 1 FROM events root WHERE root.project_id=e.project_id AND ` + federationKeptLocalSQL("root") + ` AND ((root.issue_uid=e.issue_uid AND root.type IN ('issue.created','issue.snapshot','issue.moved')) OR (((e.type IN ('cron.workflow.updated','cron.workflow.deleted','cron.workflow.restored') AND root.type IN ('cron.workflow.created','cron.workflow.snapshot')) OR (e.type IN ('cron.job.updated','cron.job.deleted','cron.job.restored') AND root.type IN ('cron.job.created','cron.job.snapshot')) OR (e.type='cron.run.observed' AND root.type IN ('cron.run.observed','cron.run.snapshot'))) AND ` + definitionUID + `)))`
 }
 
 // KeepFederationDependentLocalTx records a hub refusal for local-only history.
