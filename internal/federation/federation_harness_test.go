@@ -55,7 +55,9 @@ type hubFront struct {
 	pollsWithWait    atomic.Int64
 	pollsWithoutWait atomic.Int64
 	// watchRequests counts project event watches that reached the hub.
-	watchRequests atomic.Int64
+	watchRequests            atomic.Int64
+	watchRequestsWithWait    atomic.Int64
+	watchRequestsWithoutWait atomic.Int64
 	// held counts the polls with a wait and the watches open at the hub now;
 	// peakHeld is the most that were open at once.
 	heldMu   sync.Mutex
@@ -141,7 +143,8 @@ func (h *hubSpokeHarness) newFront(tb testing.TB) *hubFront {
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.requests.Add(1)
-		if isWatch(r) || isHeldPoll(r) {
+		isHeldRequest := !h.oldHub && !f.refuseHolds.Load() && (isHeldPoll(r) || (isWatch(r) && watchHasPositiveWait(r)))
+		if isHeldRequest {
 			f.heldMu.Lock()
 			f.held++
 			f.peakHeld = max(f.peakHeld, f.held)
@@ -154,11 +157,22 @@ func (h *hubSpokeHarness) newFront(tb testing.TB) *hubFront {
 		}
 		if isWatch(r) {
 			f.watchRequests.Add(1)
-			if seconds := f.holdSeconds.Load(); seconds > 0 {
-				query := r.URL.Query()
-				query.Set("wait", strconv.FormatInt(seconds, 10))
-				r.URL.RawQuery = query.Encode()
+			query := r.URL.Query()
+			if watchHasPositiveWait(r) {
+				f.watchRequestsWithWait.Add(1)
+				switch {
+				case f.holdForever.Load():
+					<-r.Context().Done()
+					return
+				case h.oldHub || f.refuseHolds.Load():
+					query.Del("wait")
+				case f.holdSeconds.Load() > 0:
+					query.Set("wait", strconv.FormatInt(f.holdSeconds.Load(), 10))
+				}
+			} else {
+				f.watchRequestsWithoutWait.Add(1)
 			}
+			r.URL.RawQuery = query.Encode()
 		}
 		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/federation/events") && r.URL.Query().Get("issue_uid") == "" {
 			query := r.URL.Query()
@@ -194,6 +208,11 @@ func (h *hubSpokeHarness) hideWatch(response *http.Response) {
 
 func isWatch(r *http.Request) bool {
 	return r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/federation/events:watch")
+}
+
+func watchHasPositiveWait(r *http.Request) bool {
+	wait, err := strconv.Atoi(r.URL.Query().Get("wait"))
+	return err == nil && wait > 0
 }
 
 // addBinding binds another spoke project, with its own pull enrollment, to a

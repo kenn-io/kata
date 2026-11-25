@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"net/http/httptrace"
 	"strconv"
 	"sync"
@@ -48,6 +49,8 @@ type hubLongPolls struct {
 	interval    time.Duration
 	retries     *SyncRetries
 	now         func() time.Time
+	// jitter returns an additive delay spread in [0, limit).
+	jitter func(limit time.Duration) time.Duration
 	// admission gates the store reads a watcher makes between held polls. A
 	// held poll itself takes no lease, so it never keeps the daemon awake.
 	admission activity.WaitableAdmission
@@ -79,10 +82,13 @@ type hubLongPoll struct {
 	cancel context.CancelFunc
 	done   chan struct{}
 	// heldTarget identifies the hub and credential of the in-flight poll.
-	held       int64
-	heldTarget string
-	cancelHeld context.CancelFunc
-	probedAt   string
+	held        int64
+	heldTarget  string
+	cancelHeld  context.CancelFunc
+	probedAt    string
+	quietCursor int64
+	quietTarget string
+	quietUntil  time.Time
 }
 
 func newHubLongPolls(
@@ -99,8 +105,28 @@ func newHubLongPolls(
 	return &hubLongPolls{
 		store: store, credentials: credentials, opts: opts, interval: interval, admission: admission,
 		notice: notice, ctx: ctx, cancel: cancel, retries: retries, now: now,
+		jitter: func(limit time.Duration) time.Duration {
+			if limit <= 0 {
+				return 0
+			}
+			return rand.N(limit) //nolint:gosec // G404: retry jitter spreads load; it is not a secret.
+		},
 		changed: make(chan struct{}, 1), polls: map[int64]*hubLongPoll{}, passDone: make(chan struct{}),
 	}
+}
+
+func (p *hubLongPolls) jitteredDelay(delay time.Duration) time.Duration {
+	if delay <= 0 || p == nil || p.jitter == nil {
+		return delay
+	}
+	return delay + p.jitter(delay/4)
+}
+
+func (p *hubLongPolls) hubCooldownSleep(until, now time.Time) time.Duration {
+	if !until.IsZero() {
+		return min(max(until.Sub(now), time.Millisecond), p.interval)
+	}
+	return min(p.jitteredDelay(max(p.interval/4, 50*time.Millisecond)), p.interval)
 }
 
 type hubLongPollsContextKey struct{}
@@ -125,14 +151,24 @@ func hubHoldsPull(ctx context.Context, projectID, cursor int64, target string) b
 	polls.mu.Lock()
 	defer polls.mu.Unlock()
 	poll := polls.polls[projectID]
-	if poll == nil || poll.held < 0 {
+	if poll == nil {
 		return false
 	}
-	if poll.heldTarget != target {
-		poll.cancelHeld()
-		return false
+	if poll.held >= 0 {
+		if poll.heldTarget != target {
+			poll.cancelHeld()
+			return false
+		}
+		return poll.held == cursor
 	}
-	return poll.held == cursor
+	if poll.quietCursor >= 0 && polls.now().Before(poll.quietUntil) {
+		if poll.quietTarget != target {
+			poll.quietCursor, poll.quietTarget, poll.quietUntil = -1, "", time.Time{}
+			return false
+		}
+		return poll.quietCursor == cursor
+	}
+	return false
 }
 
 // passCompleted releases polls that are waiting for the runner to apply what
@@ -154,6 +190,29 @@ func (p *hubLongPolls) setHeld(poll *hubLongPoll, cursor int64, target string, c
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	poll.held, poll.heldTarget, poll.cancelHeld = cursor, target, cancel
+	if cursor >= 0 {
+		poll.quietCursor, poll.quietTarget, poll.quietUntil = -1, "", time.Time{}
+	}
+}
+
+func (p *hubLongPolls) setQuiet(poll *hubLongPoll, cursor int64, target string, until time.Time) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	poll.quietCursor, poll.quietTarget, poll.quietUntil = cursor, target, until
+}
+
+// finishHeldQuiet atomically ends the active held marker and publishes the
+// quiet window under one lock acquisition so no interval pass can issue a
+// duplicate pull in between.
+func (p *hubLongPolls) finishHeldQuiet(poll *hubLongPoll, cursor int64, target string, until time.Time) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	poll.held, poll.heldTarget, poll.cancelHeld = -1, "", nil
+	poll.quietCursor, poll.quietTarget, poll.quietUntil = cursor, target, until
+}
+
+func (p *hubLongPolls) clearQuiet(poll *hubLongPoll) {
+	p.setQuiet(poll, -1, "", time.Time{})
 }
 
 func (p *hubLongPolls) setProbed(poll *hubLongPoll, hubURL string) {
@@ -232,7 +291,7 @@ func (p *hubLongPolls) start(spoke activeSpokeBinding) {
 		return
 	}
 	pollCtx, cancel := context.WithCancel(p.ctx)
-	poll := &hubLongPoll{cancel: cancel, done: make(chan struct{}), held: -1}
+	poll := &hubLongPoll{cancel: cancel, done: make(chan struct{}), held: -1, quietCursor: -1}
 	p.polls[projectID] = poll
 	p.watchers.Go(func() {
 		defer close(poll.done)
@@ -262,6 +321,7 @@ type heldAnswer struct {
 // watch holds polls for one binding until ctx ends. Errors and refusals back
 // off; the runner's interval pass keeps pulling meanwhile.
 func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLongPoll) {
+	defer p.clearQuiet(poll)
 	var (
 		client    *Client
 		clientFor config.FederationCredential
@@ -294,7 +354,7 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 		finishSync, err := federationcoord.BeginSync(ctx, federationcoord.Key(p.store.InstanceUID(), projectID), p.store, projectID)
 		if err != nil {
 			release()
-			if !sleepContext(ctx, backoff) {
+			if !sleepContext(ctx, p.jitteredDelay(backoff)) {
 				return
 			}
 			backoff = min(backoff*2, 16*p.interval)
@@ -305,17 +365,26 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 		if !ok {
 			finishSync()
 			release()
-			if !sleepContext(ctx, backoff) {
+			if !sleepContext(ctx, p.jitteredDelay(backoff)) {
 				return
 			}
 			backoff = min(backoff*2, 16*p.interval)
 			continue
 		}
 		identity, err := heldRetryIdentity(binding, credential)
-		if err != nil || p.retries.blockedFor(ctx, projectID, binding, credential, p.now(), version) {
+		now := p.now()
+		if err != nil || p.retries.blockedFor(ctx, projectID, binding, credential, now, version) {
 			finishSync()
 			release()
 			if !sleepContext(ctx, p.interval) {
+				return
+			}
+			continue
+		}
+		if until, blocked := p.retries.hubBlockedUntil(binding.HubURL, now); blocked {
+			finishSync()
+			release()
+			if !sleepContext(ctx, p.hubCooldownSleep(until, now)) {
 				return
 			}
 			continue
@@ -334,7 +403,7 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 				case <-ctx.Done():
 					return
 				case <-p.nextPass():
-				case <-time.After(backoff):
+				case <-time.After(p.jitteredDelay(backoff)):
 				}
 				backoff = min(backoff*2, 16*p.interval)
 				continue
@@ -347,9 +416,10 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 				client = nil
 				finishSync()
 				release()
-				if !sleepContext(ctx, backoff) {
+				if !sleepContext(ctx, p.jitteredDelay(backoff)) {
 					return
 				}
+				backoff = min(backoff*2, 16*p.interval)
 				continue
 			}
 			clientFor = credential
@@ -376,7 +446,7 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 		release()
 		// Interval passes skip this binding's pull while the poll is out at
 		// this target. A hub that cannot hold it answers at once, which ends
-		// the skip.
+		// the skip unless a quiet watch answer covers the next interval.
 		requestCtx, cancelRequest := context.WithCancel(ctx)
 		doneHeld := federationcoord.BeginHeld(federationcoord.Key(p.store.InstanceUID(), projectID), cancelRequest)
 		p.setHeld(poll, cursor, target, cancelRequest)
@@ -398,39 +468,98 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 				token: credential.Token, client: client, wait: wait, finishSync: finishSync,
 			})
 		} else {
-			held = p.heldPollResult(requestCtx, client, credential.HubProjectID, cursor, wait)
+			probeTTL := max(2*opts.Timeout, 30*time.Second)
+			releaseProbe, allowed, retryAt, probe := p.retries.acquireHubProbe(credential.HubURL, p.now(), probeTTL)
+			if !allowed {
+				finishSync()
+				doneHeld()
+				p.clearHeld(poll)
+				cancelRequest()
+				if !sleepContext(ctx, p.hubCooldownSleep(retryAt, p.now())) {
+					return
+				}
+				continue
+			}
+			// Send a post-cooldown recovery probe with wait=0 so a healthy
+			// idle hub clears the cooldown immediately instead of holding all
+			// other callers back for a full wait interval.
+			pollWait := wait
+			if probe.version != 0 {
+				pollWait = 0
+			}
+			held = p.heldPollResult(requestCtx, client, credential.HubProjectID, cursor, pollWait)
+			if held.err == nil {
+				p.retries.clearHubUnavailable(credential.HubURL, probe)
+				if probe.version != 0 && !held.changed && held.advertised > 0 {
+					held.again = true
+				}
+			} else if hubCapacityUnavailable(held.err) && !errors.Is(requestCtx.Err(), context.Canceled) {
+				_, _, retryAfter := classifySyncRetry(held.err)
+				hubWait := p.retries.recordHubUnavailable(credential.HubURL, probe.version, retryAfter, p.interval, p.now())
+				held.sleep = max(p.jitteredDelay(backoff), hubWait)
+			}
+			releaseProbe()
 		}
 		finishSync()
 		doneHeld()
-		p.clearHeld(poll)
 		superseded := errors.Is(requestCtx.Err(), context.Canceled)
 		cancelRequest()
 		err, advertised := held.err, held.advertised
 		switch {
 		case ctx.Err() != nil:
+			p.clearHeld(poll)
 			return
 		case err != nil && superseded:
+			p.clearHeld(poll)
 			// The runner ended a poll held for a target the binding no longer
 			// uses. Poll the current target at once.
 			continue
 		case err != nil:
+			p.clearHeld(poll)
+			var sleep time.Duration
 			if hubAskedToWait(err) {
 				p.retries.recordSchedule(projectID, identity, identity, true, err, p.interval, p.now(), &version, binding.UpdatedAt)
+				if held.sleep > 0 {
+					sleep = held.sleep
+				} else if hubCapacityUnavailable(err) {
+					_, _, retryAfter := classifySyncRetry(err)
+					hubWait := p.retries.recordHubUnavailable(credential.HubURL, 0, retryAfter, p.interval, p.now())
+					sleep = max(p.jitteredDelay(backoff), hubWait)
+				} else {
+					_, _, retryAfter := classifySyncRetry(err)
+					sleep = max(p.jitteredDelay(backoff), min(retryAfter, maxHonoredRetryAfter))
+				}
 			} else {
 				p.reportPollFailureOnce(projectID, err)
+				if held.sleep > 0 {
+					sleep = held.sleep
+				} else {
+					sleep = p.jitteredDelay(backoff)
+				}
 			}
 			supported = 0
-			if !sleepContext(ctx, backoff) {
+			if !sleepContext(ctx, sleep) {
 				return
 			}
 			backoff = min(backoff*2, 16*p.interval)
 			continue
 		case held.unwatched:
+			p.clearHeld(poll)
 			solo = true
 			continue
 		case held.again:
+			if held.sleep > 0 {
+				grace := min(max(p.interval/2, 500*time.Millisecond), 5*time.Second)
+				p.finishHeldQuiet(poll, cursor, target, p.now().Add(held.sleep+grace))
+				if !sleepContext(ctx, held.sleep) {
+					return
+				}
+			} else {
+				p.clearHeld(poll)
+			}
 			continue
 		case advertised == 0:
+			p.clearHeld(poll)
 			// The hub cannot hold polls, so it answered at once. Hand any page
 			// it returned to the runner instead of waiting for the next tick.
 			supported = 0
@@ -443,6 +572,7 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 			continue
 		}
 		if held.changed {
+			p.clearHeld(poll)
 			supported = advertised
 			// Take the pass signal before waking the runner, so a pass that
 			// ends before this goroutine looks again is not missed.
@@ -457,16 +587,33 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 			unread = cursor
 			continue
 		}
+		if held.quiet {
+			supported = advertised
+			backoff = p.interval
+			checkedAt := p.now()
+			answered = &heldAnswer{cursor: cursor, target: target, at: checkedAt.UTC()}
+			grace := min(max(p.interval/2, 500*time.Millisecond), 5*time.Second)
+			p.finishHeldQuiet(poll, cursor, target, checkedAt.Add(held.sleep+grace))
+			if !sleepContext(ctx, held.sleep) {
+				return
+			}
+			continue
+		}
 		if held.elapsed < min(wait, advertised)/2 {
 			// The hub answered at once: it is at its bound for held polls.
-			// The interval pass pulls meanwhile, so retry less often each time.
+			// Record the quiet check so the runner does not immediately
+			// double-poll the same cursor, and retry holding less often with jitter.
 			supported = 0
-			if !sleepContext(ctx, backoff) {
+			checkedAt := p.now()
+			answered = &heldAnswer{cursor: cursor, target: target, at: checkedAt.UTC()}
+			p.finishHeldQuiet(poll, cursor, target, checkedAt.Add(p.interval))
+			if !sleepContext(ctx, p.jitteredDelay(backoff)) {
 				return
 			}
 			backoff = min(backoff*2, 16*p.interval)
 			continue
 		}
+		p.clearHeld(poll)
 		supported = advertised
 		backoff = p.interval
 		answered = &heldAnswer{cursor: cursor, target: target, at: time.Now().UTC()}
