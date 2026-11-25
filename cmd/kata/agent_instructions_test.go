@@ -815,7 +815,7 @@ func TestAgentInstructionsWritesManagedSkillYAML(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, `# BEGIN KATA HOOKLESS MUSE
 # Managed by Kata: refreshed on every `+"`kata agent-hook instructions install muse`"+`.
-# Add your own keys outside this block; Kata leaves them alone.
+# Add your own keys outside this block (don't repeat these); Kata leaves them alone.
 name: kata
 title: "Kata"
 description: "Use at conversation start and before claiming completion for Kata issue work."

@@ -168,7 +168,7 @@ native attention support, automatic idle wakeup, or guaranteed session-end hook.
 }
 
 var museSkillYAML = fmt.Sprintf(`# Managed by Kata: refreshed on every `+"`kata agent-hook instructions install muse`"+`.
-# Add your own keys outside this block; Kata leaves them alone.
+# Add your own keys outside this block (don't repeat these); Kata leaves them alone.
 name: kata
 title: "Kata"
 description: %q
