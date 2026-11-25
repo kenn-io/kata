@@ -206,19 +206,9 @@ func FederationKeptIssue(ctx context.Context, q moveQuery, projectID int64, issu
 
 // CheckFederationKeptIssueMove blocks moves of old-actor tasks without known hub history.
 func CheckFederationKeptIssueMove(ctx context.Context, q moveQuery, from, to int64, issueUID, origin string) error {
-	kept, err := FederationKeptIssue(ctx, q, from, issueUID)
-	if err != nil {
-		return err
-	}
-	if !kept {
-		//nolint:gosec // G202: the SQL fragment uses a fixed alias; values are bound.
-		err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events e JOIN federation_bindings b ON b.project_id=e.project_id WHERE e.project_id=$1 AND e.issue_uid=$2 AND e.origin_instance_uid=$3 AND e.actor<>b.bound_actor AND e.id>b.push_cursor_event_id AND e.type IN ('issue.created','issue.snapshot') AND `+FederationUnresolvedEventSQL("e")+`)`, from, issueUID, origin).Scan(&kept)
-		if err != nil || !kept {
-			return err
-		}
-	}
 	var blocked bool
-	err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings src JOIN federation_bindings dst ON dst.project_id=$2 WHERE src.project_id=$1 AND src.role='spoke' AND dst.role='spoke' AND src.enabled=1 AND dst.enabled=1 AND src.push_enabled=1 AND dst.push_enabled=1 AND NOT EXISTS(SELECT 1 FROM events e WHERE e.project_id=$1 AND e.issue_uid=$3 AND e.origin_instance_uid<>$4))`, from, to, issueUID, origin).Scan(&blocked)
+	//nolint:gosec // G202: SQL fragments use fixed aliases; values are bound.
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings src JOIN federation_bindings dst ON dst.project_id=$2 WHERE src.project_id=$1 AND src.role='spoke' AND dst.role='spoke' AND src.enabled=1 AND dst.enabled=1 AND src.push_enabled=1 AND dst.push_enabled=1 AND NOT EXISTS(SELECT 1 FROM events e WHERE e.project_id=$1 AND e.issue_uid=$3 AND e.origin_instance_uid<>$4) AND EXISTS(SELECT 1 FROM events root WHERE root.project_id=$1 AND root.issue_uid=$3 AND root.type IN ('issue.created','issue.snapshot') AND (`+federationKeptLocalSQL("root")+` OR (root.origin_instance_uid=$4 AND root.actor<>src.bound_actor AND root.id>src.push_cursor_event_id AND `+FederationUnresolvedEventSQL("root")+`))))`, from, to, issueUID, origin).Scan(&blocked)
 	if err != nil {
 		return err
 	}
