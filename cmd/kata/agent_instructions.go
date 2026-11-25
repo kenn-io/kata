@@ -46,9 +46,11 @@ type instructionArtifact struct {
 	// keepUnmanaged leaves an existing unmarked file alone instead of
 	// refusing the install.
 	keepUnmanaged bool
-	before        string
-	exists        bool
-	mode          os.FileMode
+	// bare blocks start at their begin marker and own no separator line.
+	bare   bool
+	before string
+	exists bool
+	mode   os.FileMode
 }
 
 func newAgentInstructionsCmd() *cobra.Command {
@@ -104,7 +106,7 @@ func newAgentInstructionsActionCmd(verb string) *cobra.Command {
 			if verb == "install" && !flags.Quiet {
 				for _, a := range artifacts {
 					if a.State == "unmanaged" {
-						if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "note: left %s untouched because it has no Kata markers\n", a.Path); err != nil {
+						if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "note: %s has no Kata markers, so install leaves it untouched\n", a.Path); err != nil {
 							return err
 						}
 					}
@@ -160,7 +162,7 @@ native attention support, automatic idle wakeup, or guaranteed session-end hook.
 			Content: start + musePollSpec(actor) + briefing + agentContractText + end},
 		// Without skill.yaml, consumer Muse ignores SKILL.md front matter and
 		// describes the skill by its first heading line (kenn-io/kata#1315).
-		{Path: filepath.Join(home, skillsDir, "kata", "skill.yaml"), beginMarker: hooklessBeginYAML, endMarker: hooklessEndYAML, keepUnmanaged: true,
+		{Path: filepath.Join(home, skillsDir, "kata", "skill.yaml"), beginMarker: hooklessBeginYAML, endMarker: hooklessEndYAML, keepUnmanaged: true, bare: true,
 			Content: hooklessBeginYAML + "\n" + museSkillYAML + hooklessEndYAML + "\n"},
 	}
 }
@@ -273,6 +275,19 @@ func homeRelative(home, dir string) (string, error) {
 		return rel, nil
 	}
 	homeInfo, err := os.Stat(home)
+	if errors.Is(err, os.ErrNotExist) {
+		// Nothing exists below a new home, so resolving existing parents
+		// translates only aliases above it.
+		resolvedHome, err := resolveInstructionHome(home)
+		if err != nil {
+			return "", err
+		}
+		resolvedDir, err := resolveInstructionHome(dir)
+		if err != nil {
+			return "", err
+		}
+		return filepath.Rel(resolvedHome, resolvedDir)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -348,7 +363,7 @@ func planInstructionArtifacts(home, skillsDir, actor, verb string) ([]instructio
 		if a.endMarker == "" {
 			a.endMarker = hooklessEndMarker
 		}
-		begin, end, err := instructionBlockSpan(a.before, a.beginMarker, a.endMarker, a.fence)
+		begin, end, err := instructionBlockSpan(a.before, a.beginMarker, a.endMarker, a.fence, a.bare)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", a.Path, err)
 		}
@@ -391,7 +406,7 @@ func planInstructionArtifacts(home, skillsDir, actor, verb string) ([]instructio
 			}
 			a.State = "installed"
 		}
-		if a.keepUnmanaged && begin < 0 && a.before != "" {
+		if a.keepUnmanaged && begin < 0 && a.exists {
 			a.Content, a.State = a.before, "unmanaged"
 		}
 		a.Changed = verb != "status" && a.Content != a.before
@@ -404,7 +419,7 @@ func planInstructionArtifacts(home, skillsDir, actor, verb string) ([]instructio
 // accepts LF and CRLF line endings and a final line without a newline, so
 // marker phrases inside other text, such as an actor name, are not markers.
 // It returns -1, -1 when the content has no markers.
-func instructionBlockSpan(content, beginMarker, endMarker, fence string) (int, int, error) {
+func instructionBlockSpan(content, beginMarker, endMarker, fence string, bare bool) (int, int, error) {
 	begins := markerLines(content, beginMarker)
 	ends := markerLines(content, endMarker)
 	if len(begins) == 0 && len(ends) == 0 {
@@ -415,6 +430,9 @@ func instructionBlockSpan(content, beginMarker, endMarker, fence string) (int, i
 	}
 	if ends[0].start < begins[0].end {
 		return 0, 0, errors.New("misplaced hookless end marker")
+	}
+	if bare {
+		return begins[0].start, ends[0].end, nil
 	}
 	addedNewline := len(markerLines(content[begins[0].end:ends[0].start], hooklessAddedNewline)) > 0
 	begin, err := managedBlockStart(content, begins[0].start, fence, addedNewline)

@@ -48,25 +48,33 @@ kata agent-hook instructions uninstall muse --home /path/to/muse-home
 directory, the installer manages a block in `AGENTS.md`,
 `workspace/custom-skills/kata/SKILL.md`, and
 `workspace/custom-skills/kata/POLL.md`, all carrying the canonical hook
-contract, plus a block in `workspace/custom-skills/kata/skill.yaml`. Consumer
-Muse discovers custom skills in `workspace/custom-skills` and reads each
-skill's title, description, category, and `include_in_prompt` setting from
+contract, plus a block in `workspace/custom-skills/kata/skill.yaml`. Pass
+`--dry` to inspect existing files and print the proposed contents without
+writing files or creating directories.
+
+Consumer Muse discovers custom skills in `workspace/custom-skills` and reads
+each skill's title, description, category, and `include_in_prompt` setting from
 `skill.yaml`. Kata sets `include_in_prompt: true`, which lists the skill in
-every conversation. Add your own keys outside the marked block; install
-refreshes only the block, and uninstall deletes the file only if nothing else
-remains. Unlike an unmarked `SKILL.md` or `POLL.md`, which stops the install,
-an existing `skill.yaml` without Kata's markers is left untouched with a note. If your Muse reads
-skills from another directory, pass `--skills-dir <dir>` to all three commands.
-The directory is relative to `--home` and must stay inside it; Kata adds the
-`kata` folder.
+every conversation. Install refreshes only the marked block, and uninstall
+deletes the file only if nothing else remains. You can add your own keys outside
+the block, but don't repeat Kata's keys there: a key defined twice makes the
+file invalid YAML. To change one of Kata's values, remove the markers; the file
+then belongs to you. Unlike an unmarked `SKILL.md` or `POLL.md`, which stops the
+install, a `skill.yaml` without Kata's markers is reported as `unmanaged` and
+left untouched with a note.
+
+If your Muse reads skills from another directory, pass `--skills-dir <dir>` to
+all three commands. A relative directory is resolved against `--home`; an
+absolute one must lead into `--home`. Either way it must stay inside the home,
+and Kata adds the `kata` folder.
 
 Kata 0.24.0 and earlier installed the skill under `workspace/skills/kata/`.
 Unless you select that directory, `status` also lists a managed copy there,
-`install` moves it to the new location, and `uninstall` removes it. Foreign
-text in those files is kept. To keep using `workspace/skills`, pass
-`--skills-dir workspace/skills`. If you bridged the two locations with a
-symlink, remove it first; the installer refuses symlinks. Pass `--dry` to inspect existing files and
-print the proposed contents without writing files or creating directories.
+`install` moves it to the new location, and `uninstall` removes it. Foreign text
+in those files is kept. To keep using `workspace/skills`, pass
+`--skills-dir workspace/skills`. If you linked `workspace/custom-skills/kata` to the old
+location with a symlink, remove the link first; the installer refuses symlinks
+in the location it writes to.
 
 Installation preserves bytes outside the marked blocks along with existing file
 modes, and reinstalling identical instructions leaves files untouched. Keep each

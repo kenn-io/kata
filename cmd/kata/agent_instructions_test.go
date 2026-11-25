@@ -919,3 +919,56 @@ func TestAgentInstructionsIgnoresLegacyPathThatIsAFile(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(home, "workspace", "skills"), []byte("not a directory\n"), 0o600))
 	require.Len(t, runInstructions(t, "install", "muse", "--home", home, "--actor", "example-agent").Artifacts, 4)
 }
+
+// A first install into a new home accepts an absolute --skills-dir that
+// spells a parent alias differently.
+func TestAgentInstructionsSkillsDirAcceptsParentAliasForNewHome(t *testing.T) {
+	resetFlags(t)
+	root := realTempHome(t)
+	physical := filepath.Join(root, "physical")
+	require.NoError(t, os.MkdirAll(physical, 0o700))
+	alias := filepath.Join(root, "parent-alias")
+	if err := os.Symlink(physical, alias); err != nil {
+		t.Skip("symlinks unavailable")
+	}
+	home := filepath.Join(physical, "new-home")
+	report := runInstructions(t, "install", "muse", "--home", filepath.Join(alias, "new-home"), "--actor", "example-agent", "--skills-dir", filepath.Join(home, "skills"))
+	require.Equal(t, "installed", artifactStates(report, home)["skills/kata/SKILL.md"])
+}
+
+// skill.yaml's block owns no separator, so blank lines around it stay.
+func TestAgentInstructionsSkillYAMLKeepsBlankLineBeforeBlock(t *testing.T) {
+	resetFlags(t)
+	home := realTempHome(t)
+	runInstructions(t, "install", "muse", "--home", home, "--actor", "example-agent")
+	path := filepath.Join(home, "workspace", "custom-skills", "kata", "skill.yaml")
+	data, err := os.ReadFile(path) //nolint:gosec // G304: artifact path under TempDir.
+	require.NoError(t, err)
+	edited := "owner: example-team\n\n" + string(data)
+	require.NoError(t, os.WriteFile(path, []byte(edited), 0o600)) //nolint:gosec // G703: path is the test-owned skill.yaml under TempDir.
+	runInstructions(t, "install", "muse", "--home", home, "--actor", "example-agent")
+	after, err := os.ReadFile(path) //nolint:gosec // G304: artifact path under TempDir.
+	require.NoError(t, err)
+	require.Equal(t, edited, string(after))
+	runInstructions(t, "uninstall", "muse", "--home", home)
+	after, err = os.ReadFile(path) //nolint:gosec // G304: artifact path under TempDir.
+	require.NoError(t, err)
+	require.Equal(t, "owner: example-team\n\n", string(after))
+}
+
+// An existing empty skill.yaml has no Kata markers either: it is someone
+// else's file, so install leaves it with a note and uninstall keeps it.
+func TestAgentInstructionsLeavesEmptySkillYAML(t *testing.T) {
+	resetFlags(t)
+	home := realTempHome(t)
+	path := filepath.Join(home, "workspace", "custom-skills", "kata", "skill.yaml")
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+	require.NoError(t, os.WriteFile(path, nil, 0o600))
+	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "instructions", "install", "muse", "--home", home, "--actor", "example-agent")
+	require.NoError(t, err, stderr)
+	require.Contains(t, stderr, path)
+	runInstructions(t, "uninstall", "muse", "--home", home)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: fixture under TempDir.
+	require.NoError(t, err)
+	require.Empty(t, data)
+}
