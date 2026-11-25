@@ -99,7 +99,7 @@ func newAgentInstructionsActionCmd(verb string) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&home, "home", "", "required harness home containing AGENTS.md and the skills directory")
-	cmd.Flags().StringVar(&skillsDir, "skills-dir", "", "skills directory inside --home (default workspace/custom-skills)")
+	cmd.Flags().StringVar(&skillsDir, "skills-dir", "", "skills directory inside --home that holds the kata skill folder (default workspace/custom-skills)")
 	if verb == "install" {
 		cmd.Flags().StringVar(&actor, "actor", "", "required exact actor or actor/teammate inbox address")
 	}
@@ -216,12 +216,20 @@ func resolveInstructionHome(home string) (string, error) {
 }
 
 // localSkillsDir returns dir relative to home, refusing directories outside
-// it so every managed file stays under the home's path checks.
+// it so every managed file stays under the home's path checks. Parent aliases
+// such as macOS's /var are resolved on both sides first.
 func localSkillsDir(home, dir string) (string, error) {
 	rel := filepath.Clean(dir)
 	if filepath.IsAbs(dir) {
-		var err error
-		if rel, err = filepath.Rel(home, dir); err != nil {
+		resolvedHome, err := resolveInstructionHome(home)
+		if err != nil {
+			return "", err
+		}
+		resolvedDir, err := resolveInstructionHome(rel)
+		if err != nil {
+			return "", err
+		}
+		if rel, err = filepath.Rel(resolvedHome, resolvedDir); err != nil {
 			return "", err
 		}
 	}
@@ -231,18 +239,19 @@ func localSkillsDir(home, dir string) (string, error) {
 	return rel, nil
 }
 
-// planInstructionArtifacts plans the bundle under skillsDir, relative to home.
-// An empty skillsDir selects the default and also plans removal of a managed
-// legacy copy, so install moves it and status and uninstall find it.
+// planInstructionArtifacts plans the bundle under skillsDir, relative to home;
+// empty selects the default. Unless skillsDir is the legacy directory, it also
+// plans removal of a managed legacy copy, so install moves it and status and
+// uninstall find it.
 func planInstructionArtifacts(home, skillsDir, actor, verb string) ([]instructionArtifact, error) {
 	home, err := resolveInstructionHome(home)
 	if err != nil {
 		return nil, err
 	}
-	migrate := skillsDir == ""
-	if migrate {
+	if skillsDir == "" {
 		skillsDir = museSkillsDir
 	}
+	migrate := filepath.Clean(skillsDir) != filepath.Clean(legacyMuseSkillsDir)
 	artifacts := museInstructionArtifacts(home, skillsDir, actor)
 	if migrate {
 		for _, a := range artifacts[1:] {

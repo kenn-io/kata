@@ -570,21 +570,42 @@ func TestAgentInstructionsDefaultsToCustomSkills(t *testing.T) {
 func TestAgentInstructionsSkillsDirOverride(t *testing.T) {
 	resetFlags(t)
 	home := realTempHome(t)
-	for _, dir := range []string{"workspace/skills", filepath.Join(home, "skills")} {
-		rel, err := filepath.Rel(home, filepath.Join(home, strings.TrimPrefix(dir, home)))
-		require.NoError(t, err)
+	for _, tc := range []struct{ dir, rel string }{
+		{"workspace/skills", "workspace/skills"},
+		{filepath.Join(home, "skills"), "skills"},
+	} {
 		want := map[string]string{
-			"AGENTS.md": "installed",
-			filepath.ToSlash(filepath.Join(rel, "kata", "SKILL.md")): "installed",
-			filepath.ToSlash(filepath.Join(rel, "kata", "POLL.md")):  "installed",
+			"AGENTS.md":               "installed",
+			tc.rel + "/kata/SKILL.md": "installed",
+			tc.rel + "/kata/POLL.md":  "installed",
 		}
-		require.Equal(t, want, artifactStates(runInstructions(t, "install", "muse", "--home", home, "--actor", "example-agent", "--skills-dir", dir), home))
-		require.Equal(t, want, artifactStates(runInstructions(t, "status", "muse", "--home", home, "--skills-dir", dir), home))
+		require.Equal(t, want, artifactStates(runInstructions(t, "install", "muse", "--home", home, "--actor", "example-agent", "--skills-dir", tc.dir), home))
+		require.Equal(t, want, artifactStates(runInstructions(t, "status", "muse", "--home", home, "--skills-dir", tc.dir), home))
 		for path := range want {
 			want[path] = "removed"
 		}
-		require.Equal(t, want, artifactStates(runInstructions(t, "uninstall", "muse", "--home", home, "--skills-dir", dir), home))
+		require.Equal(t, want, artifactStates(runInstructions(t, "uninstall", "muse", "--home", home, "--skills-dir", tc.dir), home))
 	}
+}
+
+// An absolute --skills-dir may spell a parent alias, such as macOS's /var,
+// differently from --home.
+func TestAgentInstructionsSkillsDirAcceptsParentAlias(t *testing.T) {
+	resetFlags(t)
+	root := realTempHome(t)
+	physical := filepath.Join(root, "physical")
+	home := filepath.Join(physical, "muse-home")
+	require.NoError(t, os.MkdirAll(home, 0o700))
+	alias := filepath.Join(root, "parent-alias")
+	if err := os.Symlink(physical, alias); err != nil {
+		t.Skip("symlinks unavailable")
+	}
+	report := runInstructions(t, "install", "muse", "--home", filepath.Join(alias, "muse-home"), "--actor", "example-agent", "--skills-dir", filepath.Join(home, "skills"))
+	require.Equal(t, map[string]string{
+		"AGENTS.md":            "installed",
+		"skills/kata/SKILL.md": "installed",
+		"skills/kata/POLL.md":  "installed",
+	}, artifactStates(report, home))
 }
 
 // Every managed file stays inside the harness home.
@@ -739,4 +760,35 @@ func TestAgentInstructionsReportsUninspectableLegacySkills(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(legacy, 0o700) }) //nolint:gosec // G302: restore the fixture directory for cleanup.
 	_, _, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "instructions", "status", "muse", "--home", home)
 	require.ErrorIs(t, err, os.ErrPermission)
+}
+
+// Spelling out the default directory still migrates the legacy copy.
+func TestAgentInstructionsExplicitDefaultMigratesLegacySkills(t *testing.T) {
+	resetFlags(t)
+	home := realTempHome(t)
+	skill, _ := installLegacyBundle(t, home)
+	states := artifactStates(runInstructions(t, "install", "muse", "--home", home, "--actor", "example-agent", "--skills-dir", "workspace/custom-skills"), home)
+	require.Equal(t, "removed", states["workspace/skills/kata/SKILL.md"])
+	_, err := os.Stat(skill)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+// A legacy-location file without Kata's markers belongs to someone else: it
+// is neither reported nor changed.
+func TestAgentInstructionsLeavesUnmanagedLegacySkillAlone(t *testing.T) {
+	resetFlags(t)
+	home := realTempHome(t)
+	foreign := filepath.Join(home, "workspace", "skills", "kata", "SKILL.md")
+	require.NoError(t, os.MkdirAll(filepath.Dir(foreign), 0o700))
+	require.NoError(t, os.WriteFile(foreign, []byte("Someone else's skill\n"), 0o600))
+	for _, verb := range []string{"status", "install", "uninstall"} {
+		args := []string{verb, "muse", "--home", home}
+		if verb == "install" {
+			args = append(args, "--actor", "example-agent")
+		}
+		require.Len(t, runInstructions(t, args...).Artifacts, 3, verb)
+	}
+	data, err := os.ReadFile(foreign) //nolint:gosec // G304: fixture under TempDir.
+	require.NoError(t, err)
+	require.Equal(t, "Someone else's skill\n", string(data))
 }

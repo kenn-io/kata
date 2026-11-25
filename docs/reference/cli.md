@@ -317,9 +317,9 @@ change.
 `instructions uninstall muse --home <path> [--dry]` removes only managed blocks,
 and `instructions status muse --home <path>` reads files without contacting a
 daemon. All three commands accept `--skills-dir <dir>`, a skills directory
-inside `--home` that defaults to `workspace/custom-skills`. Without it, they
-also handle a managed copy left in `workspace/skills` by Kata 0.24.0 and
-earlier: `status` reports it, `install` moves it, and `uninstall` removes its
+inside `--home` that defaults to `workspace/custom-skills`. Unless it names
+`workspace/skills`, they also handle a managed copy left there by Kata 0.24.0
+and earlier: `status` reports it, `install` moves it, and `uninstall` removes its
 managed blocks. All three commands support human, `--agent`, and `--json` output.
 `native_attention` is always false, and the presence of these files does not
 prove runtime loading. Native `install --all` selection does not include these
