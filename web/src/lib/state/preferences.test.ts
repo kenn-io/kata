@@ -42,6 +42,15 @@ describe('origin-local preferences', () => {
     })
   })
 
+  it('keeps the navigation sidebar width and collapsed state', () => {
+    const storage = new MapStorage()
+    expect(loadPreferences(storage)).toMatchObject({ sidebarWidth: 240, sidebarCollapsed: false })
+
+    savePreferences({ ...defaultPreferences, sidebarWidth: 320, sidebarCollapsed: true }, storage)
+
+    expect(loadPreferences(storage)).toMatchObject({ sidebarWidth: 320, sidebarCollapsed: true })
+  })
+
   it('reports degraded origins without copying preference state', () => {
     expect(originStabilityWarning(false)).toContain('temporary browser origin')
     expect(originStabilityWarning(true)).toBeUndefined()
