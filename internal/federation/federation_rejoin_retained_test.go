@@ -49,7 +49,7 @@ func (s *commentDependentProbe) HasKeptFederationEvents(context.Context, int64) 
 func TestRejoinCommentHistory(t *testing.T) {
 	t.Run("no retained events", func(t *testing.T) {
 		store := &commentDependentProbe{}
-		_, _, err := keepFederationCommentDependentsLocal(t.Context(), store, &db.FederationBinding{}, []db.Event{{Type: "issue.comment_edited"}}, nil, 0, nil, make(map[string]bool))
+		_, _, err := keepFederationCommentDependentsLocal(t.Context(), store, &db.FederationBinding{}, []db.Event{{Type: "issue.comment_edited"}}, nil, 0, nil, make(map[string]bool), nil)
 		require.NoError(t, err)
 		require.Zero(t, store.lookups)
 	})
@@ -60,7 +60,7 @@ func TestRejoinCommentHistory(t *testing.T) {
 			{ID: 2, Type: "issue.commented", Payload: `{"reply_to_uid":"target"}`},
 			{ID: 3, Type: "issue.comment_edited", Payload: `{}`},
 		}
-		_, _, err := keepFederationCommentDependentsLocal(t.Context(), store, &db.FederationBinding{}, pending, nil, 0, nil, make(map[string]bool))
+		_, _, err := keepFederationCommentDependentsLocal(t.Context(), store, &db.FederationBinding{}, pending, nil, 0, nil, make(map[string]bool), nil)
 		require.NoError(t, err)
 		require.Equal(t, []int64{2, 3}, store.ids)
 	})
@@ -99,7 +99,7 @@ func TestRejoinCommentHistory(t *testing.T) {
 			require.NoError(t, err)
 			store := &commentDependentProbe{candidate: true, kept: true}
 			pending := []db.Event{{ID: 1, Type: "issue.comment_edited", Actor: "new-actor"}, {ID: 2, Type: "issue.comment_edited", Actor: "new-actor"}}
-			_, _, err = keepFederationCommentDependentsLocal(t.Context(), store, &db.FederationBinding{Actor: "new-actor"}, pending, client, 1, make(map[string]map[string]bool), make(map[string]bool))
+			_, _, err = keepFederationCommentDependentsLocal(t.Context(), store, &db.FederationBinding{Actor: "new-actor"}, pending, client, 1, make(map[string]map[string]bool), make(map[string]bool), nil)
 			if tc.wantErr {
 				require.Error(t, err)
 				require.Empty(t, store.ids)
@@ -595,4 +595,92 @@ func TestRejoinEditOfLocalTaskStaysLocal(t *testing.T) {
 	pending, err := spoke.env.DB.PendingFederationPushEvents(ctx, project.ID, spoke.env.DB.InstanceUID(), binding.PushCursorEventID, 100)
 	require.NoError(t, err)
 	require.Empty(t, pending)
+}
+
+func TestRejoinRefusalDoesNotKeepAfterLeaseLoss(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "lease-project")
+	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
+	project := spoke.projects[0]
+	_, err := spoke.env.DB.LeaveFederationReplica(ctx, project.ID)
+	require.NoError(t, err)
+	_, event, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "local task", Author: "old-actor"})
+	require.NoError(t, err)
+	token := rejoinNewActor(t, hub, projects[0], spoke.env, project)
+	binding, err := spoke.env.DB.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	target, err := url.Parse(hub.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	var lost atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/federation/events:ingest") {
+			lost.Store(true)
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	client, err := NewClient(ctx, server.URL, token, clientpkg.Opts{})
+	require.NoError(t, err)
+	validate := func(context.Context) error {
+		if lost.Load() {
+			return errTestFederationLeaseLost
+		}
+		return nil
+	}
+	err = pushDirectSpoke(ctx, spoke.env.DB, &binding, projects[0].ID, client, nil, validate, nil, clientpkg.Opts{})
+	require.ErrorIs(t, err, errTestFederationLeaseLost)
+	count, err := spoke.env.DB.CountKeptFederationEvents(ctx, project.ID)
+	require.NoError(t, err)
+	require.Zero(t, count)
+	current, err := spoke.env.DB.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	pending, err := spoke.env.DB.PendingFederationPushEvents(ctx, project.ID, spoke.env.DB.InstanceUID(), current.PushCursorEventID, 100)
+	require.NoError(t, err)
+	require.Contains(t, pending, event)
+}
+
+func TestRejoinCommentDoesNotKeepAfterLeaseLoss(t *testing.T) {
+	ctx := t.Context()
+	spoke := testenv.New(t)
+	project, err := spoke.DB.CreateProject(ctx, "lease-comment")
+	require.NoError(t, err)
+	issue, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "task", Author: "old-actor"})
+	require.NoError(t, err)
+	comment, original, err := spoke.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "local"})
+	require.NoError(t, err)
+	binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true})
+	require.NoError(t, err)
+	require.NoError(t, spoke.DB.AdvanceFederationPushCursor(ctx, project.ID, original.ID))
+	kept, err := spoke.DB.KeepFederationEventLocal(ctx, project.ID, original.ID)
+	require.NoError(t, err)
+	require.True(t, kept)
+	binding, err = spoke.DB.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	_, edit, changed, err := spoke.DB.EditComment(ctx, db.EditCommentParams{IssueID: issue.ID, CommentUID: comment.UID, Actor: "new-actor", Body: "edited"})
+	require.NoError(t, err)
+	require.True(t, changed)
+	var lost atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lost.Store(true)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"events":[],"next_after_id":0}`))
+	}))
+	t.Cleanup(server.Close)
+	client, err := NewClient(ctx, server.URL, "token", clientpkg.Opts{})
+	require.NoError(t, err)
+	validate := func(context.Context) error {
+		if lost.Load() {
+			return errTestFederationLeaseLost
+		}
+		return nil
+	}
+	err = pushDirectSpoke(ctx, spoke.DB, &binding, 1, client, nil, validate, nil, clientpkg.Opts{})
+	require.ErrorIs(t, err, errTestFederationLeaseLost)
+	count, err := spoke.DB.CountKeptFederationEvents(ctx, project.ID)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, count)
+	pending, err := spoke.DB.PendingFederationPushEvents(ctx, project.ID, spoke.DB.InstanceUID(), binding.PushCursorEventID, 100)
+	require.NoError(t, err)
+	require.Contains(t, pending, *edit)
 }

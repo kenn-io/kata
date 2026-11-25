@@ -309,8 +309,11 @@ func pushDirectSpoke(
 				break
 			}
 			pageEnd := pending[len(pending)-1].ID
-			kept, deferred, err := keepFederationCommentDependentsLocal(ctx, store, binding, pending, client, hubProjectID, commentHistories, deferredComments)
+			kept, deferred, err := keepFederationCommentDependentsLocal(ctx, store, binding, pending, client, hubProjectID, commentHistories, deferredComments, validateLease)
 			if err != nil {
+				if errors.Is(err, errFederationRunnerLeaseInvalid) {
+					return err
+				}
 				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 			}
 			if kept {
@@ -357,6 +360,9 @@ func pushDirectSpoke(
 							dependent = &batch[0]
 						}
 						if refused != nil || dependent != nil {
+							if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+								return err
+							}
 							kept, keepErr := keepFederationRefusedLocal(ctx, store, binding, refused, dependent)
 							if keepErr != nil {
 								return recordFederationSyncError(ctx, store, binding.ProjectID, keepErr)
@@ -954,7 +960,7 @@ func reloadFederationPushCursor(ctx context.Context, store db.Storage, binding *
 }
 
 // keepFederationCommentDependentsLocal keeps edits and replies to local comments local.
-func keepFederationCommentDependentsLocal(ctx context.Context, store db.Storage, binding *db.FederationBinding, pending []db.Event, client *Client, hubProjectID int64, histories map[string]map[string]bool, deferredComments map[string]bool) (bool, map[int64]bool, error) {
+func keepFederationCommentDependentsLocal(ctx context.Context, store db.Storage, binding *db.FederationBinding, pending []db.Event, client *Client, hubProjectID int64, histories map[string]map[string]bool, deferredComments map[string]bool, validateLease func(context.Context) error) (bool, map[int64]bool, error) {
 	kept, err := store.HasKeptFederationEvents(ctx, binding.ProjectID)
 	if err != nil || !kept {
 		return false, nil, err
@@ -1018,6 +1024,9 @@ func keepFederationCommentDependentsLocal(ctx context.Context, store db.Storage,
 			if comments[commentUID] {
 				continue
 			}
+		}
+		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+			return false, nil, err
 		}
 		kept, err := store.KeepFederationCommentDependentLocal(ctx, binding.ProjectID, event.ID)
 		if err != nil {
