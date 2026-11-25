@@ -724,3 +724,19 @@ func TestAgentInstructionsIgnoresSymlinkedLegacySkills(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "Shared skill\n", string(data))
 }
+
+// Only an unsafe legacy path is skipped. A legacy copy that cannot be
+// inspected is reported, so it is not silently left behind.
+func TestAgentInstructionsReportsUninspectableLegacySkills(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs Unix permissions that bind the current user")
+	}
+	resetFlags(t)
+	home := realTempHome(t)
+	installLegacyBundle(t, home)
+	legacy := filepath.Join(home, "workspace", "skills")
+	require.NoError(t, os.Chmod(legacy, 0))
+	t.Cleanup(func() { _ = os.Chmod(legacy, 0o700) }) //nolint:gosec // G302: restore the fixture directory for cleanup.
+	_, _, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "instructions", "status", "muse", "--home", home)
+	require.ErrorIs(t, err, os.ErrPermission)
+}

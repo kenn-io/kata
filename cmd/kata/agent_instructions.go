@@ -255,7 +255,7 @@ func planInstructionArtifacts(home, skillsDir, actor, verb string) ([]instructio
 	for i := range artifacts {
 		a := &artifacts[i]
 		if err := checkInstructionPath(a.Path, home); err != nil {
-			if a.legacy {
+			if a.legacy && errors.Is(err, errUnsafeInstructionPath) {
 				continue // Kata never wrote through a link, so nothing is managed there.
 			}
 			return nil, err
@@ -380,6 +380,8 @@ func managedBlockStart(content string, marker int, fence string, addedNewline bo
 	return lineStart, nil
 }
 
+var errUnsafeInstructionPath = errors.New("instruction path must use regular files and real directories")
+
 func checkInstructionPath(path, home string) error {
 	for p := path; ; p = filepath.Dir(p) {
 		info, err := os.Lstat(p)
@@ -387,7 +389,7 @@ func checkInstructionPath(path, home string) error {
 			return err
 		}
 		if err == nil && (info.Mode()&os.ModeSymlink != 0 || (p == path && !info.Mode().IsRegular()) || (p != path && !info.IsDir())) {
-			return fmt.Errorf("instruction path must use regular files and real directories: %s", p)
+			return fmt.Errorf("%w: %s", errUnsafeInstructionPath, p)
 		}
 		if p == home || filepath.Dir(p) == p {
 			return nil
