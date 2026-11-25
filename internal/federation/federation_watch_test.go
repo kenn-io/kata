@@ -754,6 +754,16 @@ func TestWatchHeldThrottleBacksOffHeldWaitsAfterRecoveryProbe(t *testing.T) {
 // again and continue watching without it.
 func TestWatchLeadSigningKeyFaultDoesNotPenalizeSiblings(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Projects []json.RawMessage `json:"projects"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if len(body.Projects) == 0 {
+			// Wait for both members to land in one watch flight so scheduling
+			// jitter cannot split them into two single-member watches.
+			<-r.Context().Done()
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		if r.Header.Get("Authorization") == "Bearer bad-lead" {
 			w.WriteHeader(http.StatusServiceUnavailable)
