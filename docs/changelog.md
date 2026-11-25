@@ -7,7 +7,8 @@ last_edited: 2026-11-24
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
-## Unreleased
+## 0.24.0
+<small>2026-11-25</small>
 
 - Direct spokes now receive hub changes almost immediately through held polls
   instead of waiting for the next sync interval. At a hub that takes watches,
