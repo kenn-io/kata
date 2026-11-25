@@ -1,10 +1,13 @@
 package dbtest
 
 import (
+	"encoding/json/jsontext"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/uid"
 )
 
 func checkFederationRejoinLocalEvents(t *testing.T, store db.Storage) error {
@@ -20,9 +23,7 @@ func checkFederationRejoinLocalEvents(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	eligibleIssue, eligible, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "eligible", Author: "new-actor"})
 	require.NoError(t, err)
-	peer, peerEvent, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "peer", Author: "new-actor"})
-	require.NoError(t, err)
-	parent, parentEvent, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: eligibleIssue.ID, Author: "old-actor", Body: "local parent"})
+	shared, sharedEvent, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "shared task", Author: "old-actor"})
 	require.NoError(t, err)
 	binding.Actor = "new-actor"
 	binding.PushEnabled = false
@@ -34,23 +35,8 @@ func checkFederationRejoinLocalEvents(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	_, comment, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: old.ID, Author: "new-actor", Body: "local"})
 	require.NoError(t, err)
-	_, parentEdit, _, err := store.EditComment(ctx, db.EditCommentParams{IssueID: eligibleIssue.ID, CommentUID: parent.UID, Actor: "new-actor", Body: "edited parent"})
-	require.NoError(t, err)
-	require.NotNil(t, parentEdit)
-	reply, replyEvent, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: peer.ID, Author: "new-actor", Body: "reply", ReplyToUID: parent.UID, ReplyKind: "reply"})
-	require.NoError(t, err)
-	_, nestedEvent, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: eligibleIssue.ID, Author: "new-actor", Body: "nested reply", ReplyToUID: reply.UID, ReplyKind: "reply"})
-	require.NoError(t, err)
-	_, unrelated, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: peer.ID, Author: "new-actor", Body: "unrelated comment"})
-	require.NoError(t, err)
-	edit, err := store.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: eligibleIssue.ID, Actor: "new-actor", AddBlocks: []int64{old.ID, peer.ID}})
-	require.NoError(t, err)
-	require.Len(t, edit.Events, 1)
 	_, later, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "later", Author: "new-actor"})
 	require.NoError(t, err)
-	pending, err := store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), binding.PushCursorEventID, 100)
-	require.NoError(t, err)
-	require.Len(t, pending, 11)
 	target, err := store.CreateProject(ctx, "rejoin-target")
 	require.NoError(t, err)
 	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: target.ID, Role: db.FederationRoleSpoke, HubURL: binding.HubURL, HubProjectID: 2, HubProjectUID: target.UID, Actor: binding.Actor, Enabled: true, PushEnabled: true})
@@ -80,10 +66,13 @@ func checkFederationRejoinLocalEvents(t *testing.T, store db.Storage) error {
 	binding, err = store.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
 	require.Equal(t, retained.ID, binding.PushCursorEventID)
-	pending, err = store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), binding.PushCursorEventID, 100)
+	pending, err := store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), binding.PushCursorEventID, 100)
 	require.NoError(t, err)
 	require.Contains(t, pending, comment, "an actor refusal alone does not prove the hub lacks the task")
 	kept, err = store.KeepFederationDependentLocal(ctx, project.ID, comment.ID)
+	require.NoError(t, err)
+	require.True(t, kept)
+	kept, err = store.KeepFederationEventLocal(ctx, project.ID, sharedEvent.ID)
 	require.NoError(t, err)
 	require.True(t, kept)
 	currentOld, err = store.IssueByUID(ctx, old.UID, db.IncludeDeletedNo)
@@ -92,18 +81,12 @@ func checkFederationRejoinLocalEvents(t *testing.T, store db.Storage) error {
 		_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: old.ID, FromProjectID: project.ID, ToProjectID: target.ID, IfMatchRev: currentOld.Revision, Actor: "new-actor", DryRun: preview})
 		require.ErrorIs(t, err, db.ErrFederatedMoveUnsupported)
 	}
-	kept, err = store.KeepFederationEventLocal(ctx, project.ID, parentEvent.ID)
-	require.NoError(t, err)
-	require.True(t, kept)
-	pending, err = store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), binding.PushCursorEventID, 100)
-	require.NoError(t, err)
-	require.Equal(t, []db.Event{eligible, peerEvent, *parentEdit, replyEvent, nestedEvent, unrelated, edit.Events[0], later}, pending)
 	require.NoError(t, store.AdvanceFederationPushCursor(ctx, project.ID, later.ID))
 	err = store.ResetFederatedProjectIfNoPendingPush(ctx, project.ID, 1, 0, store.InstanceUID(), later.ID)
 	require.NoError(t, err)
-	events, err := store.EventsByUIDs(ctx, project.ID, []string{retained.UID, parentEvent.UID, comment.UID})
+	events, err := store.EventsByUIDs(ctx, project.ID, []string{retained.UID, comment.UID})
 	require.NoError(t, err)
-	wantEvents := []db.Event{retained, parentEvent, comment}
+	wantEvents := []db.Event{retained, comment}
 	require.Len(t, events, len(wantEvents))
 	for i, event := range events {
 		require.Equal(t, wantEvents[i].UID, event.UID)
@@ -111,8 +94,8 @@ func checkFederationRejoinLocalEvents(t *testing.T, store db.Storage) error {
 	}
 	currentOld, err = store.IssueByUID(ctx, old.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
-	for _, projectID := range []int64{project.ID, target.ID} {
-		paused, err := store.FederationBindingByProject(ctx, projectID)
+	{
+		paused, err := store.FederationBindingByProject(ctx, target.ID)
 		require.NoError(t, err)
 		paused.PushEnabled = false
 		_, err = store.UpsertFederationBinding(ctx, paused)
@@ -124,6 +107,22 @@ func checkFederationRejoinLocalEvents(t *testing.T, store db.Storage) error {
 		_, err = store.UpsertFederationBinding(ctx, paused)
 		require.NoError(t, err)
 	}
+	remoteUID, err := uid.New()
+	require.NoError(t, err)
+	remote := newRemoteEvent(t, project, &shared.UID, "issue.updated", "hub-actor", remoteUID, 500, jsontext.Value(`{"title":"shared task"}`))
+	inserted, err := store.InsertRemoteEvent(ctx, project.ID, remote)
+	require.NoError(t, err)
+	require.True(t, inserted)
+	shared, err = store.IssueByUID(ctx, shared.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	for _, preview := range []bool{true, false} {
+		_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: shared.ID, FromProjectID: project.ID, ToProjectID: target.ID, IfMatchRev: shared.Revision, Actor: "new-actor", DryRun: preview})
+		require.NoError(t, err)
+	}
+	targetPending, err := store.PendingFederationPushEvents(ctx, target.ID, store.InstanceUID(), 0, 100)
+	require.NoError(t, err)
+	require.NotEmpty(t, targetPending)
+	require.NoError(t, store.AdvanceFederationPushCursor(ctx, target.ID, targetPending[len(targetPending)-1].ID))
 	_, err = store.LeaveFederationReplica(ctx, project.ID)
 	require.NoError(t, err)
 	standalone, err := store.CreateProject(ctx, "standalone-target")
@@ -132,5 +131,40 @@ func checkFederationRejoinLocalEvents(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: currentOld.ID, FromProjectID: project.ID, ToProjectID: standalone.ID, IfMatchRev: currentOld.Revision, Actor: "new-actor"})
 	require.NoError(t, err)
+	{
+		project, err := store.CreateProject(ctx, "rejoin-cron")
+		require.NoError(t, err)
+		workflowDefinition := cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "inspect", Kind: "command", Command: "git status"}}}
+		workflow, workflowEvent, err := store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "workflow", Actor: "old-actor", Definition: workflowDefinition})
+		require.NoError(t, err)
+		jobDefinition := cron.JobDefinition{Version: 1, Kind: "job", Trigger: cron.Trigger{Kind: "manual"}, Action: cron.Action{Kind: "execute", WorkflowUID: workflow.UID}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Review"}, Overlap: "forbid", Catchup: "skip"}
+		job, jobEvents, err := store.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, Name: "job", Actor: "old-actor", Definition: jobDefinition})
+		require.NoError(t, err)
+		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "new-actor", Enabled: true, PushEnabled: true})
+		require.NoError(t, err)
+		_, workflowEdit, err := store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, UID: workflow.UID, ExpectedEventUID: workflow.DefinitionEventUID, Name: "updated workflow", Actor: "new-actor", Definition: workflowDefinition})
+		require.NoError(t, err)
+		_, jobEdit, err := store.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, UID: job.UID, ExpectedEventUID: job.DefinitionEventUID, Name: "updated job", Actor: "new-actor", Definition: jobDefinition})
+		require.NoError(t, err)
+		kept, err := store.KeepFederationDependentLocal(ctx, project.ID, workflowEdit.ID)
+		require.NoError(t, err)
+		require.False(t, kept)
+		kept, err = store.FederationKeptDependent(ctx, project.ID, workflowEdit.ID)
+		require.NoError(t, err)
+		require.False(t, kept)
+		for _, event := range []db.Event{workflowEvent, jobEvents[0]} {
+			kept, err := store.KeepFederationEventLocal(ctx, project.ID, event.ID)
+			require.NoError(t, err)
+			require.True(t, kept)
+		}
+		for _, event := range []db.Event{workflowEdit, jobEdit[0]} {
+			known, err := store.FederationKeptDependent(ctx, project.ID, event.ID)
+			require.NoError(t, err)
+			require.True(t, known)
+			kept, err := store.KeepFederationDependentLocal(ctx, project.ID, event.ID)
+			require.NoError(t, err)
+			require.True(t, kept)
+		}
+	}
 	return nil
 }

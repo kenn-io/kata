@@ -1054,7 +1054,6 @@ var storageScenarios = []scenario{
 		run: checkProjectFederationEnrollmentScope,
 	},
 	{name: "federation rejoin local events", run: checkFederationRejoinLocalEvents, methods: []string{"FederationKeptDependent", "FederationKeptIssue", "KeepFederationEventLocal", "KeepFederationDependentLocal"}},
-	{name: "federation rejoin cron local events", run: checkFederationRejoinCronLocalEvents},
 	{
 		name:    "federation push snapshot runs",
 		methods: []string{"CreateProject", "CreateIssue", "InsertRemoteEvent", "PendingFederationPushEvents"},
