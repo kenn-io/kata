@@ -57,39 +57,40 @@ func TestDiscoveryClosesUnixConnections(t *testing.T) {
 			t.Fatal("discovery connections remained open")
 		}
 	}
-	t.Run("client idle timeout", func(t *testing.T) {
-		synctest.Test(t, func(t *testing.T) {
-			client := unixClient("unused", Opts{})
-			transport := client.Transport.(*http.Transport)
-			closed := make(chan error, 1)
-			transport.DialContext = func(context.Context, string, string) (net.Conn, error) {
-				clientConn, serverConn := net.Pipe()
-				go func() {
-					defer func() { _ = serverConn.Close() }()
-					_, err := http.ReadRequest(bufio.NewReader(serverConn))
-					if err == nil {
-						_, err = io.WriteString(serverConn, "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
-					}
-					if err == nil {
-						_, err = io.Copy(io.Discard, serverConn)
-					}
-					closed <- err
-				}()
-				return clientConn, nil
-			}
-			defer client.CloseIdleConnections()
-			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, UnixBase+"/", nil)
+}
+
+func TestUnixTransportClosesIdleConnections(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		client := unixClient("unused", Opts{})
+		transport := client.Transport.(*http.Transport)
+		closed := make(chan error, 1)
+		transport.DialContext = func(context.Context, string, string) (net.Conn, error) {
+			clientConn, serverConn := net.Pipe()
+			go func() {
+				defer func() { _ = serverConn.Close() }()
+				_, err := http.ReadRequest(bufio.NewReader(serverConn))
+				if err == nil {
+					_, err = io.WriteString(serverConn, "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+				}
+				if err == nil {
+					_, err = io.Copy(io.Discard, serverConn)
+				}
+				closed <- err
+			}()
+			return clientConn, nil
+		}
+		defer client.CloseIdleConnections()
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, UnixBase+"/", nil)
+		require.NoError(t, err)
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		select {
+		case err := <-closed:
 			require.NoError(t, err)
-			resp, err := client.Do(req)
-			require.NoError(t, err)
-			require.NoError(t, resp.Body.Close())
-			select {
-			case err := <-closed:
-				require.NoError(t, err)
-			case <-time.After(91 * time.Second):
-				t.Fatal("idle connection remained open")
-			}
-		})
+		case <-time.After(91 * time.Second):
+			t.Fatal("idle connection remained open")
+		}
 	})
 }
 
