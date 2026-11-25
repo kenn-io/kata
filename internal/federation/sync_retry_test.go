@@ -414,3 +414,20 @@ func TestSyncRetryConcurrentFailuresDoNotCompoundHubDelay(t *testing.T) {
 	release()
 	require.Equal(t, time.Minute, probeWait)
 }
+
+func TestHubCapacityUnavailableExcludesSigningKeyFault(t *testing.T) {
+	sigFault := &HubStatusError{
+		StatusCode: http.StatusServiceUnavailable,
+		Body:       `{"error":{"code":"signature_invalid","message":"federation signature rejected"}}`,
+	}
+	require.True(t, hubAskedToWait(sigFault), "misconfigured enrollment still backs off per binding")
+	require.False(t, hubCapacityUnavailable(sigFault), "per-enrollment 503 signature_invalid must not trigger hub-wide cooldown")
+
+	warming := &HubStatusError{
+		StatusCode: http.StatusServiceUnavailable,
+		Body:       `{"error":{"code":"signing_warming","message":"warming up"}}`,
+	}
+	require.True(t, hubCapacityUnavailable(warming))
+	require.True(t, hubCapacityUnavailable(&HubStatusError{StatusCode: http.StatusTooManyRequests}))
+	require.True(t, hubCapacityUnavailable(&HubStatusError{StatusCode: http.StatusServiceUnavailable}))
+}

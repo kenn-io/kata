@@ -481,7 +481,6 @@ func TestWatchThrottleDelaysIntervalAndWatchRetries(t *testing.T) {
 		spoke, _ := h.addBinding(t, "throttle-project-"+string(rune('a'+i)), frontURL)
 		ids = append(ids, spoke.ID)
 	}
-	throttle.Store(true)
 	turns := make(chan int64, 64)
 	retries := NewSyncRetries()
 	h.startConfiguredRunner(t, &Runner{
@@ -494,6 +493,7 @@ func TestWatchThrottleDelaysIntervalAndWatchRetries(t *testing.T) {
 		},
 	})
 	awaitTurns(t, turns, ids...)
+	throttle.Store(true)
 	// Wait until the hub-wide cooldown is recorded from the throttled watch.
 	//nolint:kennlint // sleeptest: waits for the 429 response to be processed over real HTTP.
 	require.Eventually(t, func() bool {
@@ -601,10 +601,11 @@ func TestWatchPacingWaitReturnsImmediatelyToCaller(t *testing.T) {
 	require.Equal(t, 30*time.Second, second.sleep)
 }
 
-// A member that was already checked in the current pacing window and rejoins
-// while another watch is in flight is drained with its remaining pacing wait
-// once that flight finishes, rather than starting a duplicate watch before its
-// pacing window expires; meanwhile an unchecked member is not starved.
+// An already-checked member that rejoins during another watch's flight is
+// paced immediately at join time rather than cancelling the flight or starting
+// a third watch; meanwhile an unchecked straggler joins without starvation and
+// phase-locks its quiet sleep to the existing nextPollAt so both batches wake
+// together and re-merge into one watch on the next interval tick.
 func TestWatchPendingJoinDoesNotBypassRefusedPacing(t *testing.T) {
 	var requests atomic.Int64
 	inFlight := make(chan struct{}, 1)
@@ -623,7 +624,13 @@ func TestWatchPendingJoinDoesNotBypassRefusedPacing(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	polls := newHubLongPolls(t.Context(), nil, nil, client.Opts{AllowInsecure: true, Timeout: 30 * time.Second}, 30*time.Second, nil, nil, newSyncRetries(noJitter), func() time.Time { return now })
+	var nowMu sync.Mutex
+	clock := func() time.Time {
+		nowMu.Lock()
+		defer nowMu.Unlock()
+		return now
+	}
+	polls := newHubLongPolls(t.Context(), nil, nil, client.Opts{AllowInsecure: true, Timeout: 30 * time.Second}, 30*time.Second, nil, nil, newSyncRetries(noJitter), clock)
 	polls.jitter = noJitter
 	t.Cleanup(polls.stopAll)
 	polls.learnHub(srv.URL, hubPollAdvertisement{wait: 45 * time.Second, watchMax: 256})
@@ -635,32 +642,36 @@ func TestWatchPendingJoinDoesNotBypassRefusedPacing(t *testing.T) {
 	m1 := &watchMember{projectID: 1, hubProjectID: 100, token: "token", client: c, wait: 45 * time.Second, finishSync: func() {}}
 	m2 := &watchMember{projectID: 2, hubProjectID: 101, token: "token", client: c, wait: 45 * time.Second, finishSync: func() {}}
 
-	// 1. m1 receives a refused-hold watch answer, setting its pacing window to now+30s.
+	// 1. m1 receives a refused-hold watch answer at T+0, setting nextPollAt = T+30s.
 	res1 := group.hold(t.Context(), m1)
 	require.NoError(t, res1.err)
 	require.True(t, res1.quiet)
+	require.Equal(t, 30*time.Second, res1.sleep)
 
-	// 2. Unchecked member m2 is NOT starved — it starts watch #2 immediately.
-	//    While watch #2 is in flight, already-checked m1 rejoins; once watch #2
-	//    completes, m1 must be drained with its remaining 30s wait instead of
-	//    triggering watch #3.
+	// 2. At T+10s, unchecked straggler m2 is NOT starved — it runs watch #2 and
+	//    phase-locks to the existing nextPollAt (sleep = 20s, waking at T+30s
+	//    alongside m1 so both re-merge into one watch). While watch #2 is in
+	//    flight, already-checked m1 rejoins and is paced immediately at join
+	//    time for the remaining 20s without triggering watch #3.
+	nowMu.Lock()
+	now = now.Add(10 * time.Second)
+	nowMu.Unlock()
 	res2Ch := make(chan heldResult, 1)
 	res1AgainCh := make(chan heldResult, 1)
 	go func() { res2Ch <- group.hold(t.Context(), m2) }()
 	<-inFlight
 	go func() { res1AgainCh <- group.hold(t.Context(), m1) }()
-	//nolint:kennlint // sleeptest: gives m1's join a moment to queue on g.joins before releasing m2.
-	time.Sleep(20 * time.Millisecond)
-	close(release)
-
-	res2 := <-res2Ch
 	res1Again := <-res1AgainCh
+	close(release)
+	res2 := <-res2Ch
+
+	require.NoError(t, res1Again.err)
+	require.True(t, res1Again.again, "already-checked join during another flight must be paced immediately")
+	require.Equal(t, 20*time.Second, res1Again.sleep)
 	require.NoError(t, res2.err)
 	require.True(t, res2.quiet)
-	require.NoError(t, res1Again.err)
-	require.True(t, res1Again.again, "queued already-checked join must receive pacing sleep instead of bypassing nextPollAt")
-	require.Equal(t, 30*time.Second, res1Again.sleep)
-	assert.Equal(t, int64(2), requests.Load(), "queued already-checked join must not start a third watch inside the pacing window")
+	require.Equal(t, 20*time.Second, res2.sleep, "straggler batch must phase-lock to the existing nextPollAt so batches re-merge")
+	assert.Equal(t, int64(2), requests.Load(), "paced rejoin must not start a third watch inside the pacing window")
 }
 
 // When a held watch (wait > 0) receives 429 (such as a full held-poll pool),

@@ -493,7 +493,7 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 				if probe.version != 0 && !held.changed && held.advertised > 0 {
 					held.again = true
 				}
-			} else if hubAskedToWait(held.err) && !errors.Is(requestCtx.Err(), context.Canceled) {
+			} else if hubCapacityUnavailable(held.err) && !errors.Is(requestCtx.Err(), context.Canceled) {
 				_, _, retryAfter := classifySyncRetry(held.err)
 				hubWait := p.retries.recordHubUnavailable(credential.HubURL, probe.version, retryAfter, p.interval, p.now())
 				held.sleep = max(p.jitteredDelay(backoff), hubWait)
@@ -521,10 +521,13 @@ func (p *hubLongPolls) watch(ctx context.Context, projectID int64, poll *hubLong
 				p.retries.recordSchedule(projectID, identity, identity, true, err, p.interval, p.now(), &version, binding.UpdatedAt)
 				if held.sleep > 0 {
 					sleep = held.sleep
-				} else {
+				} else if hubCapacityUnavailable(err) {
 					_, _, retryAfter := classifySyncRetry(err)
 					hubWait := p.retries.recordHubUnavailable(credential.HubURL, 0, retryAfter, p.interval, p.now())
 					sleep = max(p.jitteredDelay(backoff), hubWait)
+				} else {
+					_, _, retryAfter := classifySyncRetry(err)
+					sleep = max(p.jitteredDelay(backoff), min(retryAfter, maxHonoredRetryAfter))
 				}
 			} else {
 				p.reportPollFailureOnce(projectID, err)

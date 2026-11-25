@@ -251,20 +251,6 @@ func (g *hubWatchGroup) run(ctx context.Context) {
 		}
 		return 0, false
 	}
-	drainPaced := func(now time.Time) bool {
-		for member := range members {
-			if wait, paced := memberPacedWait(member, now); paced {
-				delete(members, member)
-				member.result <- heldResult{again: true, sleep: wait}
-			}
-		}
-		if len(members) == 0 {
-			stopTimer()
-			pendingSince = time.Time{}
-			return true
-		}
-		return false
-	}
 	for {
 		var answers <-chan watchAnswer
 		if flight != nil {
@@ -315,14 +301,10 @@ func (g *hubWatchGroup) run(ctx context.Context) {
 			flight = nil
 			pendingSince = time.Time{}
 			if len(members) > 0 {
-				now := g.polls.now()
-				if drainPaced(now) {
-					continue
-				}
 				if reissued && send == nil {
 					flight = g.start(ctx, members)
 				} else if send == nil {
-					arm(now)
+					arm(g.polls.now())
 				}
 			}
 		case <-send:
@@ -336,9 +318,6 @@ func (g *hubWatchGroup) run(ctx context.Context) {
 					flight.reissued = true
 					flight.cancel()
 				}
-				continue
-			}
-			if drainPaced(g.polls.now()) {
 				continue
 			}
 			flight = g.start(ctx, members)
@@ -492,9 +471,14 @@ func (g *hubWatchGroup) deliver(answer watchAnswer, members map[*watchMember]boo
 				// immediately resume holding watches.
 				recoveryProbeClean = true
 			} else {
+				// Phase-lock any straggler batch to the existing nextPollAt so
+				// staggered batches wake together and re-merge into one watch
+				// on the next interval tick.
 				now := g.polls.now()
-				quietSleep = g.polls.jitteredDelay(g.polls.interval)
-				g.nextPollAt = now.Add(quietSleep)
+				if !g.nextPollAt.After(now) {
+					g.nextPollAt = now.Add(g.polls.jitteredDelay(g.polls.interval))
+				}
+				quietSleep = g.nextPollAt.Sub(now)
 			}
 			if quietSleep > 0 {
 				if g.lastChecked == nil {
@@ -523,7 +507,7 @@ func (g *hubWatchGroup) deliver(answer watchAnswer, members map[*watchMember]boo
 			g.errBackoff = min(g.errBackoff*2, 16*g.polls.interval)
 		}
 		errorSleep = g.polls.jitteredDelay(g.errBackoff)
-		if hubAskedToWait(answer.err) {
+		if hubCapacityUnavailable(answer.err) {
 			now := g.polls.now()
 			_, _, retryAfter := classifySyncRetry(answer.err)
 			hubWait := g.polls.retries.recordHubUnavailable(g.baseURL, flight.probe.version, retryAfter, g.polls.interval, now)

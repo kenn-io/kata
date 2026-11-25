@@ -671,6 +671,46 @@ func TestThrottledHubSkippedPullAndMidPassRebind(t *testing.T) {
 		require.Zero(t, okResults.Load(), "pulls skipped by hub cooldown must not report success telemetry")
 	})
 
+	t.Run("503 signature_invalid backs off only the failing enrollment", func(t *testing.T) {
+		ctx := t.Context()
+		fleet := newSpokeFleet(t, 3)
+		for _, project := range fleet.projects {
+			fleet.refuse.Delete(project.UID)
+		}
+		var polls atomic.Int64
+		hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			polls.Add(1)
+			var hubProjectID int64
+			_, _ = fmt.Sscanf(r.URL.Path, "/api/v1/projects/%d/", &hubProjectID)
+			w.Header().Set("Content-Type", "application/json")
+			if hubProjectID == 100 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = w.Write([]byte(`{"error":{"code":"signature_invalid","message":"federation signature rejected"}}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"events":[],"next_after_id":0}`))
+		}))
+		t.Cleanup(hub.Close)
+		for _, project := range fleet.projects {
+			b, err := fleet.store.FederationBindingByProject(ctx, project.ID)
+			require.NoError(t, err)
+			b.HubURL = hub.URL
+			b.PushEnabled = false
+			_, err = fleet.store.UpsertFederationBinding(ctx, b)
+			require.NoError(t, err)
+			c := fleet.credentials.credentials[project.UID]
+			c.HubURL = hub.URL
+			require.NoError(t, fleet.credentials.StoreFederationCredential(ctx, project.UID, c))
+		}
+
+		retries := newSyncRetries(noJitter)
+		fleet.pass(ctx, retries)
+		require.Equal(t, int64(3), polls.Load(), "healthy sibling projects must still pull after 503 signature_invalid")
+		require.False(t, retries.hubBlocked(hub.URL, fleet.now.Add(time.Second)), "503 signature_invalid must not trigger hub-wide cooldown")
+		_, failingBackedOff := retries.FederationSyncRetry(fleet.projects[0].ID)
+		require.True(t, failingBackedOff, "the misconfigured enrollment must still back off per binding")
+	})
+
 	t.Run("rebind mid-pass records cooldown against reloaded hub URL", func(t *testing.T) {
 		ctx := t.Context()
 		fleet := newSpokeFleet(t, 2)

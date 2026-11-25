@@ -506,6 +506,23 @@ func hubAskedToWait(err error) bool {
 	return false
 }
 
+// hubCapacityUnavailable reports whether err indicates hub-wide throttling or
+// unavailability suitable for a shared hub pull/watch cooldown. A 503 carrying
+// code "signature_invalid" signals a single enrollment's signing-key fault, so
+// only that binding backs off instead of pausing healthy siblings on the hub.
+func hubCapacityUnavailable(err error) bool {
+	for _, hubErr := range hubStatusErrors(err) {
+		if hubErr.StatusCode == http.StatusTooManyRequests {
+			return true
+		}
+		if hubErr.StatusCode == http.StatusServiceUnavailable &&
+			federationHubErrorCode(hubErr.Body) != "signature_invalid" {
+			return true
+		}
+	}
+	return false
+}
+
 // hubStatusErrors walks a joined or wrapped error tree in order.
 func hubStatusErrors(err error) []*HubStatusError {
 	var out []*HubStatusError

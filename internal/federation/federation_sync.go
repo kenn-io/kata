@@ -450,7 +450,7 @@ func syncDirectSpoke(
 	}
 	pullVersion := hubProbe.version
 	recordPullError := func(pullErr error) error {
-		if hubAskedToWait(pullErr) {
+		if hubCapacityUnavailable(pullErr) {
 			_, _, retryAfter := classifySyncRetry(pullErr)
 			hubPull.recordUnavailable(client.baseURL, pullVersion, retryAfter)
 		}
