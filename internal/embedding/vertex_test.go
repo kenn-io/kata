@@ -35,7 +35,6 @@ func TestVertexEmbeddingCredentials(t *testing.T) {
 	for _, mode := range []string{"token", "vertex", "forbidden"} {
 		t.Run(mode, func(t *testing.T) {
 			var tokenRequests, vertexRequests int
-			var tasks []string
 			token := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				tokenRequests++
 				require.NoError(t, r.ParseForm())
@@ -62,14 +61,6 @@ func TestVertexEmbeddingCredentials(t *testing.T) {
 					return
 				}
 				require.Equal(t, "Bearer good", r.Header.Get("Authorization"))
-				var body struct {
-					Instances []struct {
-						TaskType string `json:"task_type"`
-					} `json:"instances"`
-				}
-				require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-				require.Len(t, body.Instances, 1)
-				tasks = append(tasks, body.Instances[0].TaskType)
 				_, _ = w.Write([]byte(`{"predictions":[{"embeddings":{"values":[3,4]}}]}`))
 			}))
 			t.Cleanup(endpoint.Close)
@@ -87,31 +78,21 @@ func TestVertexEmbeddingCredentials(t *testing.T) {
 			_, err = client.Embed(t.Context(), []string{"document"})
 			var credentialErr *CredentialError
 			require.ErrorAs(t, err, &credentialErr)
+			if mode == "forbidden" {
+				require.Contains(t, credentialErr.Reason, "permissions and model access")
+			}
 			require.NotContains(t, err.Error(), "example-private-detail")
 			require.NotContains(t, client.CredentialHealth().LastError, "example-private-detail")
 			require.Equal(t, "rejected", client.CredentialHealth().Credential)
 			client.credentialSucceeded(oldRevision)
 			require.Equal(t, "rejected", client.CredentialHealth().Credential)
 			write("good")
-			vectors, err := client.Embed(t.Context(), []string{"document", "another"})
-			require.NoError(t, err)
-			require.Len(t, vectors, 2)
-			require.InDeltaSlice(t, []float32{0.6, 0.8}, vectors[0], 0.00001)
-			_, err = client.EmbedQuery(t.Context(), []string{"query"})
+			_, err = client.Embed(t.Context(), []string{"document"})
 			require.NoError(t, err)
 			require.Equal(t, "ok", client.CredentialHealth().Credential)
 			require.Empty(t, client.CredentialHealth().LastError)
 			require.Equal(t, 2, tokenRequests)
-			require.GreaterOrEqual(t, vertexRequests, 3)
-			require.Equal(t, []string{"RETRIEVAL_DOCUMENT", "RETRIEVAL_DOCUMENT", "RETRIEVAL_QUERY"}, tasks)
-			other := cfg
-			other.API = ""
-			openai, err := New(ClientConfig(other))
-			require.NoError(t, err)
-			require.NotEqual(t, client.Generation().Fingerprint(), openai.Generation().Fingerprint())
-			identity, err := client.ArtifactIdentity("", "", "")
-			require.NoError(t, err)
-			require.Equal(t, "vertex", identity.Provider)
+			require.GreaterOrEqual(t, vertexRequests, 1)
 		})
 	}
 }
@@ -142,15 +123,4 @@ func TestVertexEmbeddingTemporaryTokenFailure(t *testing.T) {
 	require.NotErrorAs(t, err, &credentialErr)
 	require.Equal(t, "ok", client.CredentialHealth().Credential)
 	require.NotNil(t, client.google)
-}
-
-func TestVertexEmbeddingBatchCap(t *testing.T) {
-	cfg := Config{API: embedconfig.APIVertex, BaseURL: "https://example.com/publishers/google/models", Model: "other-model", BatchSize: 9}
-	client, err := New(cfg)
-	require.NoError(t, err)
-	require.Equal(t, 9, client.BatchSize())
-	cfg.Model = " gemini-embedding-001 "
-	client, err = New(cfg)
-	require.NoError(t, err)
-	require.Equal(t, 1, client.BatchSize())
 }

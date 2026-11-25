@@ -131,11 +131,23 @@ func TestReadTUIConfig(t *testing.T) {
 func TestReadSearchConfig(t *testing.T) {
 	for _, tc := range []struct {
 		name, content, wantError string
+		wantAPISource            string
 		env                      map[string]string
 		want                     config.SearchConfig
 	}{
 		{name: "absent file"},
 		{name: "unknown search key", content: "[search]\nfuture_option = true\n", wantError: "search.future_option"},
+		{
+			name:          "vertex environment",
+			env:           map[string]string{"KATA_SEARCH_EMBEDDINGS_API": " vertex ", "KATA_SEARCH_EMBEDDINGS_BASE_URL": "https://example.com/publishers/google/models", "KATA_SEARCH_EMBEDDINGS_MODEL": "gemini-embedding-001"},
+			want:          config.SearchConfig{Embeddings: config.EmbeddingsConfig{API: "vertex", BaseURL: "https://example.com/publishers/google/models", Model: "gemini-embedding-001"}},
+			wantAPISource: "KATA_SEARCH_EMBEDDINGS_API",
+		},
+		{
+			name:    "vertex TOML whitespace",
+			content: "[search.embeddings]\napi = ' vertex '\nbase_url = 'https://example.com/publishers/google/models'\nmodel = 'gemini-embedding-001'\n",
+			want:    config.SearchConfig{Embeddings: config.EmbeddingsConfig{API: "vertex", BaseURL: "https://example.com/publishers/google/models", Model: "gemini-embedding-001"}},
+		},
 		{
 			name:    "unrelated invalid web config",
 			content: "[search.embeddings]\nbase_url = \"https://embedding.example/v1\"\nmodel = \"example-model\"\ndims = 2\n[web]\npublic_origin = \"http://daemon.example\"\n",
@@ -181,6 +193,11 @@ func TestReadSearchConfig(t *testing.T) {
 			}
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, got)
+			if tc.wantAPISource != "" {
+				cfg, err := config.ReadDaemonConfig()
+				require.NoError(t, err)
+				require.Equal(t, tc.wantAPISource, cfg.Sources["search_embeddings_api"])
+			}
 		})
 	}
 }

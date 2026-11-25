@@ -1,8 +1,6 @@
 package config
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/BurntSushi/toml"
@@ -32,21 +30,4 @@ func TestVertexEmbeddingsConfig(t *testing.T) {
 		alter(&invalid)
 		require.Error(t, ValidateEmbeddings(invalid))
 	}
-}
-
-func TestVertexEmbeddingsEnvironment(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("KATA_HOME", home)
-	t.Setenv("KATA_SEARCH_EMBEDDINGS_API", " vertex ")
-	t.Setenv("KATA_SEARCH_EMBEDDINGS_BASE_URL", "https://example.com/publishers/google/models")
-	t.Setenv("KATA_SEARCH_EMBEDDINGS_MODEL", "gemini-embedding-001")
-	cfg, err := ReadDaemonConfig()
-	require.NoError(t, err)
-	require.Equal(t, embedconfig.APIVertex, cfg.Search.Embeddings.API)
-	require.Equal(t, "KATA_SEARCH_EMBEDDINGS_API", cfg.Sources["search_embeddings_api"])
-	t.Setenv("KATA_SEARCH_EMBEDDINGS_API", "")
-	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[search.embeddings]\napi = ' vertex '\n"), 0o600))
-	cfg, err = ReadDaemonConfig()
-	require.NoError(t, err)
-	require.Equal(t, embedconfig.APIVertex, cfg.Search.Embeddings.API)
 }
