@@ -492,6 +492,7 @@ type Storage interface {
 	KeepFederationDependentLocal(ctx context.Context, projectID, eventID int64) (bool, error)
 	FederationCommentDependent(ctx context.Context, projectID, eventID int64) (issueUID, commentUID string, err error)
 	HasKeptFederationEvents(ctx context.Context, projectID int64) (bool, error)
+	CountKeptFederationEvents(ctx context.Context, projectID int64) (int64, error)
 	KeepFederationCommentDependentLocal(ctx context.Context, projectID, eventID int64) (bool, error)
 	FederationKeptIssue(ctx context.Context, projectID int64, issueUID string) (bool, error)
 	PendingFederationPushStats(ctx context.Context, projectID int64, originInstanceUID string, afterID int64) (int64, int64, error)

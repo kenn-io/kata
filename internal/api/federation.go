@@ -173,6 +173,7 @@ type FederationProjectStatus struct {
 	PullCursorEventID           int64                         `json:"pull_cursor_event_id"`
 	PushCursorEventID           int64                         `json:"push_cursor_event_id"`
 	PendingPushCount            int64                         `json:"pending_push_count"`
+	KeptLocalCount              int64                         `json:"kept_local_count" doc:"Events retained on this spoke after the hub refused them."`
 	PendingPushHighWaterEventID int64                         `json:"pending_push_high_water_event_id"`
 	EnrollmentCount             int64                         `json:"enrollment_count"`
 	LiveClaimCount              int64                         `json:"live_claim_count"`
@@ -468,6 +469,7 @@ type CreateFederationReplicaResponseBody struct {
 	Binding               FederationBindingOut `json:"binding"`
 	Adopted               bool                 `json:"adopted,omitempty,omitzero"`
 	AdoptionSnapshotCount int64                `json:"adoption_snapshot_count,omitempty,omitzero"`
+	KeptLocalCount        int64                `json:"kept_local_count" doc:"Events already retained on this spoke. Sync may retain more."`
 }
 
 // CreateFederationReplicaResponse wraps CreateFederationReplicaResponseBody.

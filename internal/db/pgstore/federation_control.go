@@ -222,6 +222,10 @@ func (s *Store) HasKeptFederationEvents(ctx context.Context, projectID int64) (b
 	return db.HasKeptFederationEvents(ctx, s, projectID)
 }
 
+func (s *Store) CountKeptFederationEvents(ctx context.Context, projectID int64) (int64, error) {
+	return db.CountKeptFederationEvents(ctx, s, projectID)
+}
+
 // FederationCommentDependent identifies a comment whose event may remain local.
 func (s *Store) FederationCommentDependent(ctx context.Context, projectID, eventID int64) (string, string, error) {
 	return db.FederationCommentDependent(ctx, s, projectID, eventID, s.InstanceUID(), true)

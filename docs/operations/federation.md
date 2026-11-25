@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-24
+last_edited: 2026-11-25
 ---
 
 # Federation
@@ -2327,6 +2327,8 @@ The first push can take one request per rejected event. A hub reset preserves
 local-only events. Once kept local, an event stays local even if the original
 actor rejoins later.
 A push paused by an earlier version after rejoin resumes after upgrading.
+`kata federation status` reports the number of events kept local. The join
+output shows the count at join time; later syncs may increase it.
 
 A read-only rejoin keeps held offline edits local until push is enabled.
 

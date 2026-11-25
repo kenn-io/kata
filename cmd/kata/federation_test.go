@@ -3071,6 +3071,7 @@ func TestFederationJoinLeaveJoinRoundTrip(t *testing.T) {
 
 	out := join("rejoin-token")
 	assert.Contains(t, out, "joined federation project fedlab")
+	assert.Contains(t, out, "events already kept local: 0")
 	binding, err := env.DB.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
 	assert.True(t, binding.PushEnabled, "rejoin must honor --push")
@@ -3080,6 +3081,17 @@ func TestFederationJoinLeaveJoinRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "rejoin-token", creds.Projects[project.UID].Token,
 		"rejoin must store the fresh enrollment token")
+	_, oldEvent, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "local task", Author: "old-actor"})
+	require.NoError(t, err)
+	binding.Actor = "new-actor"
+	_, err = env.DB.UpsertFederationBinding(ctx, binding)
+	require.NoError(t, err)
+	kept, err := env.DB.KeepFederationEventLocal(ctx, project.ID, oldEvent.ID)
+	require.NoError(t, err)
+	require.True(t, kept)
+	assert.Contains(t, requireCmdOutput(t, env, "federation", "status"), "events kept local: 1")
+	requireCmdOutput(t, env, "federation", "leave", "--project", "fedlab", "--yes")
+	assert.Contains(t, join("next-rejoin-token"), "events already kept local: 1")
 }
 
 // TestFederationEnrollCLISameNameUIDHolderPrintsRejoinJoin: when the spoke's

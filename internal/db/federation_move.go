@@ -396,6 +396,13 @@ func HasKeptFederationEvents(ctx context.Context, q moveQuery, projectID int64) 
 	return exists, err
 }
 
+// CountKeptFederationEvents counts events retained locally for one project.
+func CountKeptFederationEvents(ctx context.Context, q moveQuery, projectID int64) (int64, error) {
+	var count int64
+	err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM projects p JOIN meta m ON m.key >= $2 || p.uid AND m.key < $2 || p.uid || 'z' AND substr(m.key,1,length($2 || p.uid || '.'))=$2 || p.uid || '.' WHERE p.id=$1 AND m.value='local'`, projectID, FederationAcknowledgedEventPrefix).Scan(&count)
+	return count, err
+}
+
 // CheckFederationMoveSourceLifecycle keeps a native source joined while a
 // destination still owes a locally authored move that needs its credential.
 func CheckFederationMoveSourceLifecycle(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string, leaving bool) error {

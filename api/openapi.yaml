@@ -909,11 +909,16 @@ components:
           type: integer
         binding:
           $ref: "#/components/schemas/FederationBindingOut"
+        kept_local_count:
+          description: Events already retained on this spoke. Sync may retain more.
+          format: int64
+          type: integer
         project:
           $ref: "#/components/schemas/ProjectOut"
       required:
         - project
         - binding
+        - kept_local_count
       type: object
     CreateInitialLinkBody:
       additionalProperties: false
@@ -2799,6 +2804,10 @@ components:
           type: string
         hub_url:
           type: string
+        kept_local_count:
+          description: Events retained on this spoke after the hub refused them.
+          format: int64
+          type: integer
         last_error:
           type: string
         last_error_at:
@@ -2897,6 +2906,7 @@ components:
         - pull_cursor_event_id
         - push_cursor_event_id
         - pending_push_count
+        - kept_local_count
         - pending_push_high_water_event_id
         - enrollment_count
         - live_claim_count
@@ -7818,7 +7828,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.71.0
+  version: 0.72.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:

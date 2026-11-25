@@ -1794,6 +1794,7 @@ func printFederationJoin(cmd *cobra.Command, bs []byte) error {
 			agentRowField("push_enabled", strconv.FormatBool(body.Binding.PushEnabled)),
 			agentRowField("adopted", strconv.FormatBool(body.Adopted)),
 			agentRowField("adoption_snapshots", strconv.FormatInt(body.AdoptionSnapshotCount, 10)),
+			agentRowField("kept_local", strconv.FormatInt(body.KeptLocalCount, 10)),
 		)
 	}
 	if flags.Quiet {
@@ -1805,8 +1806,8 @@ func printFederationJoin(cmd *cobra.Command, bs []byte) error {
 			textsafe.Line(body.Project.Name), body.AdoptionSnapshotCount)
 		return err
 	}
-	_, err := fmt.Fprintf(cmd.OutOrStdout(), "joined federation project %s (push-enabled: %t)\n",
-		textsafe.Line(body.Project.Name), body.Binding.PushEnabled)
+	_, err := fmt.Fprintf(cmd.OutOrStdout(), "joined federation project %s (push-enabled: %t)\nevents already kept local: %d; sync may keep more, check federation status afterward\n",
+		textsafe.Line(body.Project.Name), body.Binding.PushEnabled, body.KeptLocalCount)
 	return err
 }
 
@@ -2301,6 +2302,7 @@ func printFederationStatus(cmd *cobra.Command, body api.FederationStatusBody) er
 			fmt.Sprintf("pull cursor: %d", status.PullCursorEventID),
 			fmt.Sprintf("push cursor: %d", status.PushCursorEventID),
 			fmt.Sprintf("pending push: %d", status.PendingPushCount),
+			fmt.Sprintf("events kept local: %d", status.KeptLocalCount),
 			fmt.Sprintf("last successful sync: %s", formatFederationStatusTime(status.LastSuccessfulSyncAt)),
 			fmt.Sprintf("last error: %s", formatFederationStatusError(status.LastErrorAt, status.LastError)),
 			fmt.Sprintf("live leases: %d", status.LiveClaimCount),
@@ -2484,6 +2486,7 @@ func printFederationStatusAgent(cmd *cobra.Command, body api.FederationStatusBod
 			agentRowField("pull_cursor", strconv.FormatInt(status.PullCursorEventID, 10)),
 			agentRowField("push_cursor", strconv.FormatInt(status.PushCursorEventID, 10)),
 			agentRowField("pending_push", strconv.FormatInt(status.PendingPushCount, 10)),
+			agentRowField("kept_local", strconv.FormatInt(status.KeptLocalCount, 10)),
 			agentRowField("last_sync", formatFederationStatusTime(status.LastSuccessfulSyncAt)),
 			agentRowField("last_error", formatFederationStatusError(status.LastErrorAt, status.LastError)),
 			agentRowField("live_leases", strconv.FormatInt(status.LiveClaimCount, 10)),

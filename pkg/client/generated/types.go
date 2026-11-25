@@ -1072,7 +1072,10 @@ type CreateFederationReplicaResponseBody struct {
 	Adopted               *bool                `json:"adopted,omitempty"`
 	AdoptionSnapshotCount *int64               `json:"adoption_snapshot_count,omitempty"`
 	Binding               FederationBindingOut `json:"binding"`
-	Project               ProjectOut           `json:"project"`
+
+	// KeptLocalCount Events already retained on this spoke. Sync may retain more.
+	KeptLocalCount int64      `json:"kept_local_count"`
+	Project        ProjectOut `json:"project"`
 }
 
 func (c CreateFederationReplicaResponseBody) Validate() error {
@@ -2899,10 +2902,13 @@ type FederationProjectStatus struct {
 	EnrollmentCount       int64                         `json:"enrollment_count"`
 
 	// HasSyncError True when a sync error was recorded and omit_errors removed its text.
-	HasSyncError                *bool                        `json:"has_sync_error,omitempty"`
-	HubProjectID                *int64                       `json:"hub_project_id,omitempty"`
-	HubProjectUID               *string                      `json:"hub_project_uid,omitempty"`
-	HubURL                      *string                      `json:"hub_url,omitempty"`
+	HasSyncError  *bool   `json:"has_sync_error,omitempty"`
+	HubProjectID  *int64  `json:"hub_project_id,omitempty"`
+	HubProjectUID *string `json:"hub_project_uid,omitempty"`
+	HubURL        *string `json:"hub_url,omitempty"`
+
+	// KeptLocalCount Events retained on this spoke after the hub refused them.
+	KeptLocalCount              int64                        `json:"kept_local_count"`
 	LastError                   *string                      `json:"last_error,omitempty"`
 	LastErrorAt                 *time.Time                   `json:"last_error_at,omitempty"`
 	LastPullStartedAt           *time.Time                   `json:"last_pull_started_at,omitempty"`
