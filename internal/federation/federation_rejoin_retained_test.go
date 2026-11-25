@@ -132,8 +132,23 @@ func checkRejoinBatchesAlreadyAcceptedOldEvents(t *testing.T) {
 	require.NoError(t, err)
 	binding, err := spoke.env.DB.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
-	creds := config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[0].ID, Token: token, Actor: "new-actor", Capabilities: "pull,push"}
+	pending, err := spoke.env.DB.PendingFederationPushEvents(ctx, project.ID, spoke.env.DB.InstanceUID(), binding.PushCursorEventID, 100)
+	require.NoError(t, err)
+	target, err := url.Parse(hub.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/federation/events:ingest") {
+			requests.Add(1)
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	creds := config.FederationCredential{HubURL: server.URL, HubProjectID: projects[0].ID, Token: token, Actor: "new-actor", Capabilities: "pull,push"}
 	require.NoError(t, SyncFederationOnce(ctx, spoke.env.DB, binding, creds))
+	// Single-event batches would need at least one request per pending event.
+	require.Less(t, int(requests.Load()), len(pending))
 	_, err = hub.DB.IssueByUID(ctx, later.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	hubIssue, err := hub.DB.IssueByUID(ctx, accepted.UID, db.IncludeDeletedNo)
@@ -169,23 +184,10 @@ func checkRejoinPublishesAfter500OldTasks(t *testing.T) {
 	token := rejoinNewActor(t, hub, projects[0], spoke.env, project)
 	later, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "later task", Author: "new-actor"})
 	require.NoError(t, err)
-	target, err := url.Parse(hub.URL)
-	require.NoError(t, err)
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	var requests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/federation/events:ingest") {
-			requests.Add(1)
-		}
-		proxy.ServeHTTP(w, r)
-	}))
-	t.Cleanup(server.Close)
 	binding, err := spoke.env.DB.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
-	creds := config.FederationCredential{HubURL: server.URL, HubProjectID: projects[0].ID, Token: token, Actor: "new-actor", Capabilities: "pull,push"}
+	creds := config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[0].ID, Token: token, Actor: "new-actor", Capabilities: "pull,push"}
 	require.NoError(t, SyncFederationOnce(ctx, spoke.env.DB, binding, creds))
-	// A single-event retry for each old event would need at least 1,000 requests.
-	require.Less(t, requests.Load(), int32(500))
 	_, err = hub.DB.IssueByUID(ctx, later.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	_, err = hub.DB.IssueByUID(ctx, earlier.UID, db.IncludeDeletedNo)
