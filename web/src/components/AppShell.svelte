@@ -546,9 +546,21 @@
     sidebarDragWidth = null
   }
 
+  // The toggle a person pressed disappears, so focus moves to the one that replaces it.
+  let navigationElement: HTMLDivElement | null = $state(null)
+  let sidebarToggleFocus = $state<boolean | null>(null)
+
   function setSidebarCollapsed(collapsed: boolean): void {
+    sidebarToggleFocus = collapsed
     onPreferencesChange({ ...preferences, sidebarCollapsed: collapsed })
   }
+
+  $effect(() => {
+    if (sidebarToggleFocus === null || preferences.sidebarCollapsed !== sidebarToggleFocus) return
+    const pane = sidebarToggleFocus ? '.navigation-strip' : '.navigation-pane'
+    navigationElement?.querySelector<HTMLElement>(`${pane} .kit-sidebar-toggle`)?.focus()
+    sidebarToggleFocus = null
+  })
 
   function resizeSplit(size: number): void {
     if (route.graph) graphSize = size
@@ -581,6 +593,8 @@
   function beginProjectCreation(intent: 'project' | 'task' = 'project'): void {
     if (projectCreationBlockedReason) return
     if (mediumScreen.current) mobileNavigationOpen = true
+    else if (preferences.sidebarCollapsed)
+      onPreferencesChange({ ...preferences, sidebarCollapsed: false })
     creationIntent = intent
   }
 
@@ -845,7 +859,7 @@
     </TopBar>
   </div>
   <div class="kata-layout" aria-busy={loading}>
-    <div class="desktop-navigation">
+    <div class="desktop-navigation" bind:this={navigationElement}>
       <!-- Hidden rather than unmounted, so collapsing keeps the sidebar's own state. -->
       <div
         class="navigation-pane"
@@ -924,7 +938,6 @@
           orientation={preferences.splitDirection}
           primarySize={route.graph ? graphSize : preferences.splitSize}
           defaultShare={route.graph ? 2 / 3 : undefined}
-          preserveSize={route.graph}
           minPrimary={preferences.splitDirection === 'vertical' ? 220 : 320}
           minSecondary={preferences.splitDirection === 'vertical' ? 220 : 360}
           responsiveBreakpoint={700}

@@ -58,6 +58,16 @@ describe('SplitLayout', () => {
     expect(onResize).not.toHaveBeenCalled()
   })
 
+  it('keeps a saved size that does not fit, so it returns when space does', async () => {
+    mockRect()
+    const onResize = vi.fn()
+    render(SplitLayoutTestHarness, { props: { primarySize: 700, onResize } })
+
+    const handle = screen.getByRole('separator', { name: 'Resize Kata panes' })
+    expect(handle.getAttribute('aria-valuenow')).toBe('600')
+    expect(onResize).not.toHaveBeenCalled()
+  })
+
   it('uses the vertical axis and clamps both resize bounds', async () => {
     mockRect()
     const onResize = vi.fn()

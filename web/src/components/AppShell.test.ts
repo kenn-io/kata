@@ -10,6 +10,7 @@ import { setGeneratedFetch } from '../lib/api/client'
 import { normalizeKataUISnapshot } from '../lib/kata/projection'
 import type { MutationContext, MutationResult } from '../lib/mutations/controller'
 import type { SettingsSection, ShareableFilters } from '../lib/router'
+import { defaultPreferences } from '../lib/state/preferences'
 import type { UISnapshot } from '../lib/state/snapshot'
 import AppShell from './AppShell.svelte'
 
@@ -2018,6 +2019,71 @@ describe('AppShell', () => {
     )
     await view.rerender({ mutationMessage: 'validation: Action refused' })
     await waitFor(() => expect(screen.getAllByText('validation: Action refused')).toHaveLength(1))
+  })
+
+  test('starting a first project expands a collapsed desktop sidebar', async () => {
+    const empty = snapshot()
+    empty.catalog = []
+    empty.collection = []
+    const onPreferencesChange = vi.fn()
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'all-open',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: empty,
+        loading: false,
+        preferences: { ...defaultPreferences, sidebarCollapsed: true },
+        onPreferencesChange,
+        ...mutationProps(),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+
+    const collection = screen.getByRole('region', { name: 'Issues' })
+    await fireEvent.click(within(collection).getByRole('button', { name: 'New project' }))
+
+    expect(onPreferencesChange).toHaveBeenCalledWith(
+      expect.objectContaining({ sidebarCollapsed: false }),
+    )
+  })
+
+  test('collapsing and expanding the sidebar moves focus to the other toggle', async () => {
+    const onPreferencesChange = vi.fn()
+    const view = render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'all-open',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: snapshot(),
+        loading: false,
+        preferences: defaultPreferences,
+        onPreferencesChange,
+        ...mutationProps(),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+
+    const collapse = screen.getByRole('button', { name: 'Collapse sidebar' })
+    collapse.focus()
+    await fireEvent.click(collapse)
+    await view.rerender({ preferences: onPreferencesChange.mock.lastCall![0] })
+    const expand = screen.getByRole('button', { name: 'Expand sidebar' })
+    await waitFor(() => expect(document.activeElement).toBe(expand))
+
+    await fireEvent.click(expand)
+    await view.rerender({ preferences: onPreferencesChange.mock.lastCall![0] })
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Collapse sidebar' })),
+    )
   })
 
   test('distinguishes empty projects from empty tasks and keeps refused capture closed', async () => {
