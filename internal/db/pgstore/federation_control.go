@@ -222,11 +222,6 @@ func (s *Store) HasKeptFederationEvents(ctx context.Context, projectID int64) (b
 	return db.HasKeptFederationEvents(ctx, s, projectID)
 }
 
-// FederationCommentDependent identifies a comment whose event may remain local.
-func (s *Store) FederationCommentDependent(ctx context.Context, projectID, eventID int64) (string, string, error) {
-	return db.FederationCommentDependent(ctx, s, projectID, eventID, s.InstanceUID(), true)
-}
-
 // KeepFederationCommentDependentLocal retains edits and replies to local comments.
 func (s *Store) KeepFederationCommentDependentLocal(ctx context.Context, projectID, eventID int64) (bool, error) {
 	var kept bool
@@ -253,14 +248,10 @@ func (s *Store) AdvanceFederationPullCursor(ctx context.Context, projectID, next
 // rebuilds the project, so an interruption leaves either the whole batch to
 // push again or the finished progress, and the home never shows rows built
 // from a snapshot it no longer holds.
-func (s *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs, acceptedEventUIDs []string) error {
+func (s *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string) error {
 	if len(supersededEventUIDs) == 0 {
 		return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
-			if acceptedEventUIDs != nil {
-				if err := db.RecordFederationAcknowledgedEvents(ctx, tx, projectID, acceptedEventUIDs); err != nil {
-					return err
-				}
-			} else if err := updateFederationCursor(ctx, tx, projectID, nextCursor, true); err != nil {
+			if err := updateFederationCursor(ctx, tx, projectID, nextCursor, true); err != nil {
 				return err
 			}
 			return db.FoldFederationAcknowledgedEvents(ctx, tx, projectID, s.InstanceUID())
@@ -271,11 +262,7 @@ func (s *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCu
 		if err != nil {
 			return err
 		}
-		if acceptedEventUIDs != nil {
-			if err := db.RecordFederationAcknowledgedEvents(ctx, tx, projectID, acceptedEventUIDs); err != nil {
-				return err
-			}
-		} else if err := updateFederationCursor(ctx, tx, projectID, nextCursor, true); err != nil {
+		if err := updateFederationCursor(ctx, tx, projectID, nextCursor, true); err != nil {
 			return err
 		}
 		if err := db.FoldFederationAcknowledgedEvents(ctx, tx, projectID, s.InstanceUID()); err != nil {

@@ -2327,8 +2327,8 @@ The first push can take one request per rejected event. A hub reset preserves
 local-only events. Once kept local, an event stays local even if the original
 actor rejoins later.
 A push paused by an earlier version after rejoin resumes after upgrading.
-Edits and replies to comments that the hub may not have stay local until the
-hub has supplied or acknowledged the comment. Tasks cannot move into or out of
+Edits and replies to comments stay local unless this computer already has evidence
+that the hub supplied or acknowledged the comment when it pushes. Tasks cannot move into or out of
 a project while it has retained local events. Moves received from the hub still
 apply.
 

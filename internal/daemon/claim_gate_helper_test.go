@@ -463,17 +463,13 @@ func openClaimGateHelperDB(t *testing.T) *sqlitestore.Store {
 }
 
 func createClaimGateHelperIssue(t *testing.T, store *sqlitestore.Store) (db.Project, db.Issue) {
-	return createClaimGateHelperIssueAs(t, store, "tester")
-}
-
-func createClaimGateHelperIssueAs(t *testing.T, store *sqlitestore.Store, actor string) (db.Project, db.Issue) {
 	t.Helper()
 	project, err := store.CreateProject(t.Context(), "claim-helper")
 	require.NoError(t, err)
 	issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: project.ID,
 		Title:     "claim helper",
-		Author:    actor,
+		Author:    "tester",
 	})
 	require.NoError(t, err)
 	return project, issue

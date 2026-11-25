@@ -23,23 +23,13 @@ import (
 
 type commentDependentProbe struct {
 	db.Storage
-	ids       []int64
-	candidate bool
-	kept      bool
-	lookups   int
+	ids  []int64
+	kept bool
 }
 
 func (s *commentDependentProbe) KeepFederationCommentDependentLocal(_ context.Context, _, eventID int64) (bool, error) {
 	s.ids = append(s.ids, eventID)
 	return false, nil
-}
-
-func (s *commentDependentProbe) FederationCommentDependent(context.Context, int64, int64) (string, string, error) {
-	s.lookups++
-	if s.candidate {
-		return "task", "comment", nil
-	}
-	return "", "", nil
 }
 
 func (s *commentDependentProbe) HasKeptFederationEvents(context.Context, int64) (bool, error) {
@@ -49,9 +39,9 @@ func (s *commentDependentProbe) HasKeptFederationEvents(context.Context, int64) 
 func TestRejoinCommentHistory(t *testing.T) {
 	t.Run("no retained events", func(t *testing.T) {
 		store := &commentDependentProbe{}
-		_, _, err := keepFederationCommentDependentsLocal(t.Context(), store, &db.FederationBinding{}, []db.Event{{Type: "issue.comment_edited"}}, nil, 0, nil, make(map[string]bool), nil)
+		_, err := keepFederationCommentDependentsLocal(t.Context(), store, &db.FederationBinding{}, []db.Event{{Type: "issue.comment_edited"}}, nil)
 		require.NoError(t, err)
-		require.Zero(t, store.lookups)
+		require.Empty(t, store.ids)
 	})
 	t.Run("dependent scan", func(t *testing.T) {
 		store := &commentDependentProbe{kept: true}
@@ -60,60 +50,11 @@ func TestRejoinCommentHistory(t *testing.T) {
 			{ID: 2, Type: "issue.commented", Payload: `{"reply_to_uid":"target"}`},
 			{ID: 3, Type: "issue.comment_edited", Payload: `{}`},
 		}
-		_, _, err := keepFederationCommentDependentsLocal(t.Context(), store, &db.FederationBinding{}, pending, nil, 0, nil, make(map[string]bool), nil)
+		_, err := keepFederationCommentDependentsLocal(t.Context(), store, &db.FederationBinding{}, pending, nil)
 		require.NoError(t, err)
 		require.Equal(t, []int64{2, 3}, store.ids)
 	})
-	for _, tc := range []struct {
-		name     string
-		status   int
-		body     string
-		wantKeep bool
-		wantErr  bool
-	}{
-		{name: "snapshot", status: http.StatusOK, body: `{"events":[{"event_id":1,"issue_uid":"task","type":"issue.snapshot","payload":{"comments":[{"comment_uid":"comment"}]}}],"next_after_id":1}`},
-		{name: "repeated adoption", status: http.StatusOK, body: `{"events":[{"event_id":1,"issue_uid":"task","type":"issue.restated","payload":{"comments":[{"comment_uid":"comment"}]}}],"next_after_id":1}`},
-		{name: "edit", status: http.StatusOK, body: `{"events":[{"event_id":1,"issue_uid":"task","type":"issue.comment_edited","payload":{"comment_uid":"comment"}}],"next_after_id":1}`},
-		{name: "missing", status: http.StatusNotFound, wantKeep: true},
-		{name: "push only", status: http.StatusForbidden},
-		{name: "retry", status: http.StatusInternalServerError, wantErr: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var calls atomic.Int32
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				calls.Add(1)
-				w.Header().Set("Content-Type", "application/json")
-				if tc.status == http.StatusNotFound && r.URL.Query().Get("issue_uid") == "" {
-					_, _ = w.Write([]byte(`{"events":[],"next_after_id":0}`))
-					return
-				}
-				if tc.status == http.StatusOK && r.URL.Query().Get("after_id") != "0" {
-					_, _ = w.Write([]byte(`{"events":[],"next_after_id":1}`))
-					return
-				}
-				w.WriteHeader(tc.status)
-				_, _ = w.Write([]byte(tc.body))
-			}))
-			defer server.Close()
-			client, err := NewClient(t.Context(), server.URL, "token", clientpkg.Opts{})
-			require.NoError(t, err)
-			store := &commentDependentProbe{candidate: true, kept: true}
-			pending := []db.Event{{ID: 1, Type: "issue.comment_edited", Actor: "new-actor"}, {ID: 2, Type: "issue.comment_edited", Actor: "new-actor"}}
-			_, _, err = keepFederationCommentDependentsLocal(t.Context(), store, &db.FederationBinding{Actor: "new-actor"}, pending, client, 1, make(map[string]map[string]bool), make(map[string]bool), nil)
-			if tc.wantErr {
-				require.Error(t, err)
-				require.Empty(t, store.ids)
-				return
-			}
-			require.NoError(t, err)
-			if tc.wantKeep {
-				require.Equal(t, []int64{1, 2}, store.ids)
-			} else {
-				require.Empty(t, store.ids)
-			}
-			require.LessOrEqual(t, calls.Load(), int32(2))
-		})
-	}
+
 }
 
 func checkRejoinBatchesAlreadyAcceptedOldEvents(t *testing.T) {
@@ -443,92 +384,6 @@ func rejoinNewActor(t *testing.T, hub *testenv.Env, hubProject db.Project, spoke
 	return grant.Token
 }
 
-func TestPushOnlyRejoinRetriesUncertainComments(t *testing.T) {
-	ctx := t.Context()
-	hub, projects := newMoveDeliveryHub(t, "rejoin-project")
-	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
-	project := spoke.projects[0]
-	issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "shared task", Author: "old-actor"})
-	require.NoError(t, err)
-	shared, _, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "shared"})
-	require.NoError(t, err)
-	require.NoError(t, spoke.sync(t, 0))
-	_, err = spoke.env.DB.LeaveFederationReplica(ctx, project.ID)
-	require.NoError(t, err)
-	local, _, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "local"})
-	require.NoError(t, err)
-	hubBinding, err := hub.DB.FederationBindingByProject(ctx, projects[0].ID)
-	require.NoError(t, err)
-	_, err = spoke.env.DB.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: project.ID, HubURL: hub.URL, HubProjectID: projects[0].ID, HubProjectUID: projects[0].UID, ReplayHorizonEventID: hubBinding.ReplayHorizonEventID, Actor: "old-actor"})
-	require.NoError(t, err)
-	_, err = spoke.env.DB.LeaveFederationReplica(ctx, project.ID)
-	require.NoError(t, err)
-	readToken := rejoinNewActor(t, hub, projects[0], spoke.env, project)
-	grant, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: spoke.env.DB.InstanceUID(), ProjectID: &projects[0].ID, Capabilities: "push", Actor: "new-actor"})
-	require.NoError(t, err)
-	var pendingUIDs []string
-	for _, comment := range []db.Comment{shared, local} {
-		_, event, changed, err := spoke.env.DB.EditComment(ctx, db.EditCommentParams{IssueID: issue.ID, CommentUID: comment.UID, Actor: "new-actor", Body: "edited " + comment.Body})
-		require.NoError(t, err)
-		require.True(t, changed)
-		if comment.UID == local.UID {
-			pendingUIDs = append(pendingUIDs, event.UID)
-		}
-		replyComment, reply, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "reply to " + comment.Body, ReplyToUID: comment.UID, ReplyKind: "reply"})
-		require.NoError(t, err)
-		if comment.UID == local.UID {
-			pendingUIDs = append(pendingUIDs, reply.UID)
-		}
-		_, nested, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "new-actor", Body: "nested reply", ReplyToUID: replyComment.UID, ReplyKind: "reply"})
-		require.NoError(t, err)
-		if comment.UID == local.UID {
-			pendingUIDs = append(pendingUIDs, nested.UID)
-		}
-	}
-	later, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "later task", Author: "new-actor"})
-	require.NoError(t, err)
-	binding, err := spoke.env.DB.FederationBindingByProject(ctx, project.ID)
-	require.NoError(t, err)
-	client, err := NewClient(ctx, hub.URL, grant.Token, clientpkg.Opts{})
-	require.NoError(t, err)
-	require.NoError(t, PushDirectSpoke(ctx, spoke.env.DB, binding, projects[0].ID, client))
-	_, err = hub.DB.IssueByUID(ctx, later.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	hubIssue, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	comments, err := hub.DB.CommentsByIssue(ctx, hubIssue.ID)
-	require.NoError(t, err)
-	require.Len(t, comments, 3)
-	require.Equal(t, "edited shared", comments[0].Body)
-	require.Equal(t, "reply to shared", comments[1].Body)
-	require.Equal(t, "nested reply", comments[2].Body)
-	binding, err = spoke.env.DB.FederationBindingByProject(ctx, project.ID)
-	require.NoError(t, err)
-	pending, err := spoke.env.DB.PendingFederationPushEvents(ctx, project.ID, spoke.env.DB.InstanceUID(), binding.PushCursorEventID, 100)
-	require.NoError(t, err)
-	var gotUIDs []string
-	for _, event := range pending {
-		gotUIDs = append(gotUIDs, event.UID)
-	}
-	require.ElementsMatch(t, pendingUIDs, gotUIDs)
-	client, err = NewClient(ctx, hub.URL, readToken, clientpkg.Opts{})
-	require.NoError(t, err)
-	require.NoError(t, PushDirectSpoke(ctx, spoke.env.DB, binding, projects[0].ID, client))
-	hubIssue, err = hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	comments, err = hub.DB.CommentsByIssue(ctx, hubIssue.ID)
-	require.NoError(t, err)
-	require.Len(t, comments, 3)
-	require.Equal(t, "edited shared", comments[0].Body)
-	require.Equal(t, "reply to shared", comments[1].Body)
-	require.Equal(t, shared.UID, comments[1].ReplyToUID)
-	binding, err = spoke.env.DB.FederationBindingByProject(ctx, project.ID)
-	require.NoError(t, err)
-	pending, err = spoke.env.DB.PendingFederationPushEvents(ctx, project.ID, spoke.env.DB.InstanceUID(), binding.PushCursorEventID, 100)
-	require.NoError(t, err)
-	require.Empty(t, pending)
-}
-
 func TestPushOnlyAdoptedCommentsOnBothBackends(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -725,21 +580,9 @@ func TestRejoinCommentDoesNotKeepAfterLeaseLoss(t *testing.T) {
 	_, edit, changed, err := spoke.DB.EditComment(ctx, db.EditCommentParams{IssueID: issue.ID, CommentUID: comment.UID, Actor: "new-actor", Body: "edited"})
 	require.NoError(t, err)
 	require.True(t, changed)
-	var lost atomic.Bool
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		lost.Store(true)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"events":[],"next_after_id":0}`))
-	}))
-	t.Cleanup(server.Close)
-	client, err := NewClient(ctx, server.URL, "token", clientpkg.Opts{})
+	client, err := NewClient(ctx, "https://hub.example", "token", clientpkg.Opts{})
 	require.NoError(t, err)
-	validate := func(context.Context) error {
-		if lost.Load() {
-			return errTestFederationLeaseLost
-		}
-		return nil
-	}
+	validate := func(context.Context) error { return errTestFederationLeaseLost }
 	err = pushDirectSpoke(ctx, spoke.DB, &binding, 1, client, nil, validate, nil, clientpkg.Opts{})
 	require.ErrorIs(t, err, errTestFederationLeaseLost)
 	hasKept, err := spoke.DB.HasKeptFederationEvents(ctx, project.ID)

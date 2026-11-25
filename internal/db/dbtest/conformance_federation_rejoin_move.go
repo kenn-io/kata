@@ -9,7 +9,7 @@ import (
 	"go.kenn.io/kata/internal/uid"
 )
 
-func checkFederationRejoinMoveGate(t *testing.T, store db.Storage, backend Backend) error {
+func checkFederationRejoinMoveGate(t *testing.T, store db.Storage) error {
 	t.Run("retained project blocks unrelated tasks in both directions", func(t *testing.T) {
 		project, _, _, destination, _, _ := rejoinRetainedReply(t, store, "move-project-gate")
 		outgoing := createHubIssue(t, store, project)
@@ -17,7 +17,26 @@ func checkFederationRejoinMoveGate(t *testing.T, store db.Storage, backend Backe
 		requireRejoinMove(t, store, outgoing, project, destination, db.ErrFederatedMoveUnsharedHistory)
 		requireRejoinMove(t, store, incoming, destination, project, db.ErrFederatedMoveUnsharedHistory)
 	})
-	t.Run("restore from export", func(t *testing.T) { require.NoError(t, checkRestoredRetainedIssueMove(t, store, backend)) })
+	t.Run("purging retained history allows moves", func(t *testing.T) {
+		ctx := t.Context()
+		project, err := store.CreateProject(ctx, "purged-retained-source")
+		require.NoError(t, err)
+		destination, err := store.CreateProject(ctx, "purged-retained-destination")
+		require.NoError(t, err)
+		retained, event, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "retained", Author: "old-actor"})
+		require.NoError(t, err)
+		bindRejoinSpokes(t, store, project, destination)
+		kept, err := store.KeepFederationEventLocal(ctx, project.ID, event.ID)
+		require.NoError(t, err)
+		require.True(t, kept)
+		movable := createHubIssue(t, store, project)
+		_, err = store.LeaveFederationReplica(ctx, project.ID)
+		require.NoError(t, err)
+		_, err = store.PurgeIssue(ctx, retained.ID, "new-actor", nil)
+		require.NoError(t, err)
+		bindRejoinSpokes(t, store, project)
+		requireRejoinMove(t, store, movable, project, destination, nil)
+	})
 	return nil
 }
 
@@ -50,20 +69,9 @@ func rejoinRetainedReply(t *testing.T, store db.Storage, name string) (db.Projec
 func checkFederationRejoinCommentReply(t *testing.T, store db.Storage) error {
 	t.Run("snapshot comments", func(t *testing.T) { checkRejoinSnapshotComments(t, store) })
 	ctx := t.Context()
-	project, target, source, _, _, reply := rejoinRetainedReply(t, store, "reply-project")
-	comments, err := store.CommentsByIssue(ctx, target.ID)
-	require.NoError(t, err)
-	require.Len(t, comments, 1)
+	project, _, source, _, _, reply := rejoinRetainedReply(t, store, "reply-project")
 	_, unrelated, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: source.ID, Author: "new-actor", Body: "unrelated"})
 	require.NoError(t, err)
-	issueUID, unrelatedCommentUID, err := store.FederationCommentDependent(ctx, project.ID, unrelated.ID)
-	require.NoError(t, err)
-	require.Empty(t, issueUID)
-	require.Empty(t, unrelatedCommentUID)
-	issueUID, commentUID, err := store.FederationCommentDependent(ctx, project.ID, reply.ID)
-	require.NoError(t, err)
-	require.Equal(t, target.UID, issueUID)
-	require.Equal(t, comments[0].UID, commentUID)
 	kept, err := store.KeepFederationCommentDependentLocal(ctx, project.ID, unrelated.ID)
 	require.NoError(t, err)
 	require.False(t, kept)
@@ -141,8 +149,6 @@ func bindRejoinSpokes(t *testing.T, store db.Storage, projects ...db.Project) {
 	}
 }
 
-// pullHubIssueUpdate applies a hub edit to issue, showing the hub has it, and
-// returns the issue's current row.
 func createHubIssue(t *testing.T, store db.Storage, project db.Project) db.Issue {
 	t.Helper()
 	issueUID, err := uid.New()
@@ -205,5 +211,3 @@ func keepRejoinSnapshots(t *testing.T, store db.Storage, project db.Project, b d
 	require.NotZero(t, n)
 	return snapshot
 }
-
-// A combined edit can prove the hub accepted a retained link.

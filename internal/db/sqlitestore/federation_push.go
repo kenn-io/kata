@@ -38,11 +38,6 @@ func (d *Store) HasKeptFederationEvents(ctx context.Context, projectID int64) (b
 	return db.HasKeptFederationEvents(ctx, d, projectID)
 }
 
-// FederationCommentDependent identifies a comment whose event may remain local.
-func (d *Store) FederationCommentDependent(ctx context.Context, projectID, eventID int64) (string, string, error) {
-	return db.FederationCommentDependent(ctx, d, projectID, eventID, d.InstanceUID(), false)
-}
-
 // KeepFederationCommentDependentLocal retains edits and replies to local comments.
 func (d *Store) KeepFederationCommentDependentLocal(ctx context.Context, projectID, eventID int64) (bool, error) {
 	var kept bool
@@ -187,14 +182,10 @@ func federationPushEventTypeCondition(column string) string {
 // rebuilds the project, so an interruption leaves either the whole batch to
 // push again or the finished progress, and the home never shows rows built
 // from a snapshot it no longer holds.
-func (d *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs, acceptedEventUIDs []string) error {
+func (d *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string) error {
 	if len(supersededEventUIDs) == 0 {
 		return d.relayTx(ctx, func(tx *sql.Tx) error {
-			if acceptedEventUIDs != nil {
-				if err := db.RecordFederationAcknowledgedEvents(ctx, tx, projectID, acceptedEventUIDs); err != nil {
-					return err
-				}
-			} else if err := advanceFederationPushCursor(ctx, tx, projectID, nextCursor); err != nil {
+			if err := advanceFederationPushCursor(ctx, tx, projectID, nextCursor); err != nil {
 				return err
 			}
 			return db.FoldFederationAcknowledgedEvents(ctx, tx, projectID, d.InstanceUID())
@@ -205,11 +196,7 @@ func (d *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCu
 		if err != nil {
 			return err
 		}
-		if acceptedEventUIDs != nil {
-			if err := db.RecordFederationAcknowledgedEvents(ctx, tx, projectID, acceptedEventUIDs); err != nil {
-				return err
-			}
-		} else if err := advanceFederationPushCursor(ctx, tx, projectID, nextCursor); err != nil {
+		if err := advanceFederationPushCursor(ctx, tx, projectID, nextCursor); err != nil {
 			return err
 		}
 		if err := db.FoldFederationAcknowledgedEvents(ctx, tx, projectID, d.InstanceUID()); err != nil {

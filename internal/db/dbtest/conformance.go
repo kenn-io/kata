@@ -1055,10 +1055,9 @@ var storageScenarios = []scenario{
 	},
 	{name: "federation rejoin cron dependents", run: checkFederationRejoinCronDependents},
 	{name: "federation rejoin reset retention", run: checkFederationRejoinResetRetention},
-	{name: "federation out of order push", run: checkFederationOutOfOrderPush},
 	{name: "federation rejoin local events", run: checkFederationRejoinLocalEvents, methods: []string{"FederationKeptIssue", "HasKeptFederationEvents", "KeepFederationEventLocal", "KeepFederationDependentLocal"}},
-	{name: "federation rejoin move gate", runWithBackend: checkFederationRejoinMoveGate},
-	{name: "federation rejoin comment reply", methods: []string{"FederationCommentDependent", "KeepFederationCommentDependentLocal"}, run: checkFederationRejoinCommentReply},
+	{name: "federation rejoin move gate", run: checkFederationRejoinMoveGate},
+	{name: "federation rejoin comment reply", methods: []string{"KeepFederationCommentDependentLocal"}, run: checkFederationRejoinCommentReply},
 	{name: "federation rejoin adopted comment evidence", run: checkFederationRejoinAdoptedCommentEvidence},
 	{
 		name:    "federation push snapshot runs",

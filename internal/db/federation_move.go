@@ -263,21 +263,6 @@ func KeepFederationCommentDependentLocalTx(ctx context.Context, tx *sql.Tx, proj
 	return keepFederationLocalTx(ctx, tx, projectID, eventID, origin, federationCommentDependentSQL(postgres))
 }
 
-// FederationCommentDependent finds a comment whose pending event may remain local.
-func FederationCommentDependent(ctx context.Context, q moveQuery, projectID, eventID int64, origin string, postgres bool) (string, string, error) {
-	commentUID := `CASE WHEN e.type='issue.comment_edited' THEN json_extract(e.payload,'$.comment_uid') ELSE json_extract(e.payload,'$.reply_to_uid') END`
-	if postgres {
-		commentUID = `CASE WHEN e.type='issue.comment_edited' THEN e.payload::jsonb->>'comment_uid' ELSE e.payload::jsonb->>'reply_to_uid' END`
-	}
-	var issueUID, uid string
-	//nolint:gosec // G202: SQL fragments use fixed aliases; values are bound.
-	err := q.QueryRowContext(ctx, `SELECT i.uid,c.uid FROM events e JOIN comments c ON c.uid=`+commentUID+` JOIN issues i ON i.id=c.issue_id WHERE e.project_id=$1 AND e.id=$2 AND e.origin_instance_uid=$3 AND `+strings.ReplaceAll(federationCommentDependentSQL(postgres), "$4", "$3"), projectID, eventID, origin).Scan(&issueUID, &uid)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", "", nil
-	}
-	return issueUID, uid, err
-}
-
 func federationCommentDependentSQL(postgres bool) string {
 	match := `((e.type='issue.comment_edited' AND root.issue_uid=e.issue_uid AND json_extract(root.payload,'$.comment_uid')=json_extract(e.payload,'$.comment_uid')) OR (e.type='issue.commented' AND json_extract(root.payload,'$.comment_uid')=json_extract(e.payload,'$.reply_to_uid')))`
 	commentUID := `CASE WHEN e.type='issue.comment_edited' THEN json_extract(e.payload,'$.comment_uid') ELSE json_extract(e.payload,'$.reply_to_uid') END`
@@ -318,7 +303,7 @@ func keepFederationLocalTx(ctx context.Context, tx *sql.Tx, projectID, eventID i
 // HasKeptFederationEvents reports whether a project has retained events.
 func HasKeptFederationEvents(ctx context.Context, q moveQuery, projectID int64) (bool, error) {
 	var exists bool
-	err := q.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM projects p JOIN meta m ON m.key >= $2 || p.uid AND m.key < $2 || p.uid || 'z' AND substr(m.key,1,length($2 || p.uid || '.'))=$2 || p.uid || '.' WHERE p.id=$1 AND m.value='local')`, projectID, FederationAcknowledgedEventPrefix).Scan(&exists)
+	err := q.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM projects p JOIN meta m ON m.key >= $2 || p.uid AND m.key < $2 || p.uid || 'z' AND substr(m.key,1,length($2 || p.uid || '.'))=$2 || p.uid || '.' JOIN events e ON e.project_id=p.id AND m.key=$2 || p.uid || '.' || e.uid WHERE p.id=$1 AND m.value='local')`, projectID, FederationAcknowledgedEventPrefix).Scan(&exists)
 	return exists, err
 }
 

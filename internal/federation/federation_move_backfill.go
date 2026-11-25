@@ -48,17 +48,14 @@ func backfillFederationMoveHistory(ctx context.Context, client *Client, projectI
 }
 
 func (c *Client) issueHistoryThrough(ctx context.Context, projectID int64, uid string, through int64) ([]api.EventEnvelope, error) {
-	return c.readIssueHistoryThrough(ctx, projectID, uid, through, true)
-}
 
-func (c *Client) readIssueHistoryThrough(ctx context.Context, projectID int64, uid string, through int64, allowMissing bool) ([]api.EventEnvelope, error) {
 	var events []api.EventEnvelope
 	var cursor int64
 	for {
 		page, err := c.PollIssueEvents(ctx, projectID, uid, cursor, federationPollLimit)
 		if err != nil {
 			var status *HubStatusError
-			if allowMissing && errors.As(err, &status) && status != nil && status.StatusCode == http.StatusNotFound {
+			if errors.As(err, &status) && status != nil && status.StatusCode == http.StatusNotFound {
 				// This route may now be a historical transit project. Its normal
 				// stream still delivers the move out; only the current owner can
 				// authorize the independent history read.

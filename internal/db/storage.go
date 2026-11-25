@@ -490,19 +490,17 @@ type Storage interface {
 	PendingFederationPushEvents(ctx context.Context, projectID int64, originInstanceUID string, afterID int64, limit int) ([]Event, error)
 	KeepFederationEventLocal(ctx context.Context, projectID, eventID int64) (bool, error)
 	KeepFederationDependentLocal(ctx context.Context, projectID, eventID int64) (bool, error)
-	FederationCommentDependent(ctx context.Context, projectID, eventID int64) (issueUID, commentUID string, err error)
 	HasKeptFederationEvents(ctx context.Context, projectID int64) (bool, error)
 	KeepFederationCommentDependentLocal(ctx context.Context, projectID, eventID int64) (bool, error)
 	FederationKeptIssue(ctx context.Context, projectID int64, issueUID string) (bool, error)
 	PendingFederationPushStats(ctx context.Context, projectID int64, originInstanceUID string, afterID int64) (int64, int64, error)
 	AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error
-	// AcknowledgeFederationPush advances the push cursor, or records exact
-	// accepted events when acceptedEventUIDs is non-nil. It also deletes this
+	// AcknowledgeFederationPush advances the push cursor. It also deletes this
 	// home's own adoption snapshots that the hub acknowledged without storing
 	// and rebuilds the project from the remaining history, all in one
 	// transaction. It changes nothing and returns ErrFederationPushAwaitsPull
 	// while the home has no other history of one of those issues.
-	AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs, acceptedEventUIDs []string) error
+	AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string) error
 	EnableFederationPush(ctx context.Context, projectID int64, cursor int64) (FederationBinding, error)
 	// DisableFederationPushWhenSettled turns push off for a direct spoke
 	// binding in the same transaction that proves no local-origin event above

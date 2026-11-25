@@ -51,13 +51,9 @@ func checkFederationRejoinAdoptedCommentEvidence(t *testing.T, store db.Storage)
 		_, edit, changed, err := store.EditComment(ctx, db.EditCommentParams{IssueID: issue.ID, CommentUID: tc.comment.UID, Actor: "new-actor", Body: "edited " + tc.comment.Body})
 		require.NoError(t, err)
 		require.True(t, changed)
-		_, commentUID, err := store.FederationCommentDependent(ctx, project.ID, edit.ID)
+		kept, err := store.KeepFederationCommentDependentLocal(ctx, project.ID, edit.ID)
 		require.NoError(t, err)
-		if tc.local {
-			require.Equal(t, tc.comment.UID, commentUID)
-		} else {
-			require.Empty(t, commentUID)
-		}
+		require.Equal(t, tc.local, kept)
 	}
 	return nil
 }
@@ -235,35 +231,5 @@ func checkFederationRejoinCronDependents(t *testing.T, store db.Storage) error {
 		require.NoError(t, err)
 		require.True(t, kept)
 	}
-	return nil
-}
-
-func checkFederationOutOfOrderPush(t *testing.T, store db.Storage) error {
-	ctx := t.Context()
-	project, err := store.CreateProject(ctx, "out-of-order-project")
-	require.NoError(t, err)
-	bindRejoinSpokes(t, store, project)
-	_, first, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "first", Author: "new-actor"})
-	require.NoError(t, err)
-	_, second, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "second", Author: "new-actor"})
-	require.NoError(t, err)
-	binding, err := store.FederationBindingByProject(ctx, project.ID)
-	require.NoError(t, err)
-	pending, err := store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), first.ID, 100)
-	require.NoError(t, err)
-	require.Len(t, pending, 1)
-	require.Equal(t, second.UID, pending[0].UID)
-	require.NoError(t, store.AcknowledgeFederationPush(ctx, project.ID, second.ID, nil, []string{second.UID}))
-	current, err := store.FederationBindingByProject(ctx, project.ID)
-	require.NoError(t, err)
-	require.Equal(t, binding.PushCursorEventID, current.PushCursorEventID)
-	pending, err = store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), current.PushCursorEventID, 100)
-	require.NoError(t, err)
-	require.Len(t, pending, 1)
-	require.Equal(t, first.UID, pending[0].UID)
-	require.NoError(t, store.AcknowledgeFederationPush(ctx, project.ID, first.ID, nil, nil))
-	current, err = store.FederationBindingByProject(ctx, project.ID)
-	require.NoError(t, err)
-	require.Equal(t, second.ID, current.PushCursorEventID)
 	return nil
 }
