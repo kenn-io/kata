@@ -19,14 +19,14 @@ import (
 // artifact write fails. Reproduce a partial uninstall with an injected I/O error.
 func TestAgentInstructionsRollbackPreservesDeletedPreimage(t *testing.T) {
 	home := t.TempDir()
-	artifacts, err := planInstructionArtifacts(home, "example-agent", "install")
+	artifacts, err := planInstructionArtifacts(home, "", "example-agent", "install")
 	require.NoError(t, err)
 	require.NoError(t, applyInstructionArtifacts(artifacts))
 	path := artifacts[0].Path
 	require.NoError(t, os.Chmod(path, 0o640)) //nolint:gosec // G302: exercise preservation of an existing fixture mode.
 	before, err := os.ReadFile(path)          //nolint:gosec // G304: artifact path under TempDir.
 	require.NoError(t, err)
-	artifacts, err = planInstructionArtifacts(home, "", "uninstall")
+	artifacts, err = planInstructionArtifacts(home, "", "", "uninstall")
 	require.NoError(t, err)
 	failed := false
 	err = applyInstructionArtifactsWithWriter(artifacts, func(path, content string, exists bool, mode os.FileMode) error {
@@ -49,7 +49,7 @@ func TestAgentInstructionsRollbackPreservesDeletedPreimage(t *testing.T) {
 
 func TestAgentInstructionsSnapshotAndPathProtection(t *testing.T) {
 	home := t.TempDir()
-	artifacts, err := planInstructionArtifacts(home, "example-agent", "install")
+	artifacts, err := planInstructionArtifacts(home, "", "example-agent", "install")
 	require.NoError(t, err)
 	path := artifacts[0].Path
 	require.NoError(t, os.WriteFile(path, []byte("Concurrent edit"), 0o600))
@@ -64,7 +64,7 @@ func TestAgentInstructionsSnapshotAndPathProtection(t *testing.T) {
 	if err := os.Symlink(home, alias); err != nil {
 		t.Skip("symlinks unavailable")
 	}
-	_, err = planInstructionArtifacts(alias, "example-agent", "install")
+	_, err = planInstructionArtifacts(alias, "", "example-agent", "install")
 	require.ErrorContains(t, err, "real directories")
 }
 
@@ -79,20 +79,20 @@ func TestAgentInstructionsAllowsParentAlias(t *testing.T) {
 	if err := os.Symlink(physical, alias); err != nil {
 		t.Skip("symlinks unavailable")
 	}
-	artifacts, err := planInstructionArtifacts(filepath.Join(alias, "muse-home"), "example-agent", "install")
+	artifacts, err := planInstructionArtifacts(filepath.Join(alias, "muse-home"), "", "example-agent", "install")
 	require.NoError(t, err)
 	resolvedHome, err := filepath.EvalSymlinks(home)
 	require.NoError(t, err)
 	require.Equal(t, filepath.Join(resolvedHome, "AGENTS.md"), artifacts[0].Path)
 	require.NoError(t, applyInstructionArtifacts(artifacts))
-	remove, err := planInstructionArtifacts(filepath.Join(alias, "muse-home"), "", "uninstall")
+	remove, err := planInstructionArtifacts(filepath.Join(alias, "muse-home"), "", "", "uninstall")
 	require.NoError(t, err)
 	require.NoError(t, applyInstructionArtifacts(remove))
 }
 
 func TestAgentInstructionsPublishedFailureRollsBack(t *testing.T) {
 	home := t.TempDir()
-	artifacts, err := planInstructionArtifacts(home, "example-agent", "install")
+	artifacts, err := planInstructionArtifacts(home, "", "example-agent", "install")
 	require.NoError(t, err)
 	failed := false
 	err = applyInstructionArtifactsWithWriter(artifacts, func(path, content string, exists bool, mode os.FileMode) error {
@@ -115,7 +115,7 @@ func TestAgentInstructionsRollbackRestoresExistingEmptyFile(t *testing.T) {
 	home := t.TempDir()
 	path := filepath.Join(home, "AGENTS.md")
 	require.NoError(t, os.WriteFile(path, nil, 0o600))
-	artifacts, err := planInstructionArtifacts(home, "example-agent", "install")
+	artifacts, err := planInstructionArtifacts(home, "", "example-agent", "install")
 	require.NoError(t, err)
 	failed := false
 	err = applyInstructionArtifactsWithWriter(artifacts, func(path, content string, keepEmpty bool, mode os.FileMode) error {
@@ -138,7 +138,7 @@ func TestAgentInstructionsRollbackRestoresExistingEmptyFile(t *testing.T) {
 
 func TestAgentInstructionsForeignSuffixesAndActorUpdate(t *testing.T) {
 	home := t.TempDir()
-	artifacts, err := planInstructionArtifacts(home, "example-agent", "install")
+	artifacts, err := planInstructionArtifacts(home, "", "example-agent", "install")
 	require.NoError(t, err)
 	require.NoError(t, applyInstructionArtifacts(artifacts))
 	for _, a := range artifacts {
@@ -148,7 +148,7 @@ func TestAgentInstructionsForeignSuffixesAndActorUpdate(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, file.Close())
 	}
-	updated, err := planInstructionArtifacts(home, "example-agent/worker", "install")
+	updated, err := planInstructionArtifacts(home, "", "example-agent/worker", "install")
 	require.NoError(t, err)
 	require.NoError(t, applyInstructionArtifacts(updated))
 	for _, a := range updated {
@@ -156,7 +156,7 @@ func TestAgentInstructionsForeignSuffixesAndActorUpdate(t *testing.T) {
 		require.Equal(t, 1, strings.Count(a.Content, "BEGIN KATA HOOKLESS MUSE"))
 		require.True(t, strings.HasSuffix(a.Content, "Foreign suffix\r\n"))
 	}
-	uninstall, err := planInstructionArtifacts(home, "", "uninstall")
+	uninstall, err := planInstructionArtifacts(home, "", "", "uninstall")
 	require.NoError(t, err)
 	require.NoError(t, applyInstructionArtifacts(uninstall))
 	for _, a := range uninstall {
@@ -374,7 +374,7 @@ func TestAgentInstructionsRefusesForeignAndMalformedBeforeWriting(t *testing.T) 
 	for _, content := range []string{"Unowned skill\n", "---\n# BEGIN KATA HOOKLESS MUSE\nunfinished"} {
 		t.Run(content, func(t *testing.T) {
 			home := t.TempDir()
-			skill := filepath.Join(home, "workspace", "skills", "kata", "SKILL.md")
+			skill := filepath.Join(home, "workspace", "custom-skills", "kata", "SKILL.md")
 			require.NoError(t, os.MkdirAll(filepath.Dir(skill), 0o700))
 			require.NoError(t, os.WriteFile(skill, []byte(content), 0o600))
 			out, _, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "instructions", "install", "muse", "--home", home, "--actor", "example-agent")
@@ -434,8 +434,8 @@ func TestAgentInstructionsUninstallAfterLineEndingEdits(t *testing.T) {
 			require.NoError(t, os.WriteFile(instructions, []byte("# Existing\n"), 0o600))
 			_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "instructions", "install", "muse", "--home", home, "--actor", "example-agent")
 			require.NoError(t, err, stderr)
-			skill := filepath.Join(home, "workspace", "skills", "kata", "SKILL.md")
-			poll := filepath.Join(home, "workspace", "skills", "kata", "POLL.md")
+			skill := filepath.Join(home, "workspace", "custom-skills", "kata", "SKILL.md")
+			poll := filepath.Join(home, "workspace", "custom-skills", "kata", "POLL.md")
 			for _, path := range []string{instructions, skill, poll} {
 				data, err := os.ReadFile(path) //nolint:gosec // G304: artifact path under TempDir.
 				require.NoError(t, err)
@@ -496,7 +496,7 @@ func TestAgentInstructionsActorContainingMarkerPhrase(t *testing.T) {
 			}
 			_, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hook", "instructions", "uninstall", "muse", "--home", home)
 			require.NoError(t, err, stderr)
-			_, err = os.Stat(filepath.Join(home, "workspace", "skills", "kata", "SKILL.md"))
+			_, err = os.Stat(filepath.Join(home, "workspace", "custom-skills", "kata", "SKILL.md"))
 			require.ErrorIs(t, err, os.ErrNotExist)
 		})
 	}
@@ -516,4 +516,186 @@ func TestAgentInstructionsUninstallKeepsEmptyAgentsFile(t *testing.T) {
 	data, err := os.ReadFile(instructions) //nolint:gosec // G304: fixture under TempDir.
 	require.NoError(t, err)
 	require.Empty(t, data)
+}
+
+type instructionsReport struct {
+	Artifacts []struct {
+		Path    string `json:"path"`
+		Changed bool   `json:"changed"`
+		State   string `json:"state"`
+	} `json:"artifacts"`
+}
+
+func runInstructions(t *testing.T, args ...string) instructionsReport {
+	t.Helper()
+	out, stderr, err := executeAgentHook(t, unreadableHookInput{}, append(append([]string{"agent-hook", "instructions"}, args...), "--json")...)
+	require.NoError(t, err, stderr)
+	var report instructionsReport
+	require.NoError(t, json.Unmarshal([]byte(out), &report))
+	return report
+}
+
+func artifactStates(report instructionsReport, home string) map[string]string {
+	states := map[string]string{}
+	for _, a := range report.Artifacts {
+		rel, _ := filepath.Rel(home, a.Path)
+		states[filepath.ToSlash(rel)] = a.State
+	}
+	return states
+}
+
+func realTempHome(t *testing.T) string {
+	t.Helper()
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	return home
+}
+
+// kenn-io/kata#1315: consumer Muse discovers custom skills in
+// workspace/custom-skills/<name>/, where SKILL.md alone is enough.
+func TestAgentInstructionsDefaultsToCustomSkills(t *testing.T) {
+	resetFlags(t)
+	home := realTempHome(t)
+	report := runInstructions(t, "install", "muse", "--home", home, "--actor", "example-agent")
+	require.Equal(t, map[string]string{
+		"AGENTS.md":                             "installed",
+		"workspace/custom-skills/kata/SKILL.md": "installed",
+		"workspace/custom-skills/kata/POLL.md":  "installed",
+	}, artifactStates(report, home))
+	_, err := os.Stat(filepath.Join(home, "workspace", "skills"))
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+// --skills-dir selects another skills directory inside home for every verb.
+func TestAgentInstructionsSkillsDirOverride(t *testing.T) {
+	resetFlags(t)
+	home := realTempHome(t)
+	for _, dir := range []string{"workspace/skills", filepath.Join(home, "skills")} {
+		rel, err := filepath.Rel(home, filepath.Join(home, strings.TrimPrefix(dir, home)))
+		require.NoError(t, err)
+		want := map[string]string{
+			"AGENTS.md": "installed",
+			filepath.ToSlash(filepath.Join(rel, "kata", "SKILL.md")): "installed",
+			filepath.ToSlash(filepath.Join(rel, "kata", "POLL.md")):  "installed",
+		}
+		require.Equal(t, want, artifactStates(runInstructions(t, "install", "muse", "--home", home, "--actor", "example-agent", "--skills-dir", dir), home))
+		require.Equal(t, want, artifactStates(runInstructions(t, "status", "muse", "--home", home, "--skills-dir", dir), home))
+		for path := range want {
+			want[path] = "removed"
+		}
+		require.Equal(t, want, artifactStates(runInstructions(t, "uninstall", "muse", "--home", home, "--skills-dir", dir), home))
+	}
+}
+
+// Every managed file stays inside the harness home.
+func TestAgentInstructionsSkillsDirMustStayInsideHome(t *testing.T) {
+	home := realTempHome(t)
+	for _, dir := range []string{"../outside", filepath.Join(filepath.Dir(home), "outside")} {
+		t.Run(dir, func(t *testing.T) {
+			resetFlags(t)
+			for _, verb := range []string{"install", "status", "uninstall"} {
+				args := []string{"agent-hook", "instructions", verb, "muse", "--home", home, "--skills-dir", dir}
+				if verb == "install" {
+					args = append(args, "--actor", "example-agent")
+				}
+				out, _, err := executeAgentHook(t, unreadableHookInput{}, args...)
+				require.Error(t, err)
+				require.Empty(t, out)
+				require.Equal(t, ExitUsage, exitCodeForErr(err, runEEntered))
+			}
+			_, err := os.Stat(filepath.Join(home, "AGENTS.md"))
+			require.ErrorIs(t, err, os.ErrNotExist)
+		})
+	}
+}
+
+// installLegacyBundle reproduces an install made before the custom-skills
+// default, with foreign text added to its POLL.md.
+func installLegacyBundle(t *testing.T, home string) (skill, poll string) {
+	t.Helper()
+	runInstructions(t, "install", "muse", "--home", home, "--actor", "example-agent", "--skills-dir", "workspace/skills")
+	skill = filepath.Join(home, "workspace", "skills", "kata", "SKILL.md")
+	poll = filepath.Join(home, "workspace", "skills", "kata", "POLL.md")
+	data, err := os.ReadFile(poll) //nolint:gosec // G304: fixture under TempDir.
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(poll, append(data, "Foreign poll notes\n"...), 0o600)) //nolint:gosec // G703: poll is the test-owned legacy POLL.md under TempDir.
+	return skill, poll
+}
+
+// Without --skills-dir, an older workspace/skills/kata copy is reported,
+// moved on install, and removed on uninstall, so two copies cannot drift.
+func TestAgentInstructionsMigratesLegacySkills(t *testing.T) {
+	resetFlags(t)
+	home := realTempHome(t)
+	skill, poll := installLegacyBundle(t, home)
+	require.Equal(t, map[string]string{
+		"AGENTS.md":                             "installed",
+		"workspace/custom-skills/kata/SKILL.md": "absent",
+		"workspace/custom-skills/kata/POLL.md":  "absent",
+		"workspace/skills/kata/SKILL.md":        "installed",
+		"workspace/skills/kata/POLL.md":         "installed",
+	}, artifactStates(runInstructions(t, "status", "muse", "--home", home), home))
+
+	require.Equal(t, map[string]string{
+		"AGENTS.md":                             "installed",
+		"workspace/custom-skills/kata/SKILL.md": "installed",
+		"workspace/custom-skills/kata/POLL.md":  "installed",
+		"workspace/skills/kata/SKILL.md":        "removed",
+		"workspace/skills/kata/POLL.md":         "removed",
+	}, artifactStates(runInstructions(t, "install", "muse", "--home", home, "--actor", "example-agent"), home))
+	_, err := os.Stat(skill)
+	require.ErrorIs(t, err, os.ErrNotExist)
+	data, err := os.ReadFile(poll) //nolint:gosec // G304: fixture under TempDir.
+	require.NoError(t, err)
+	require.Equal(t, "Foreign poll notes\n", string(data))
+	require.Len(t, runInstructions(t, "status", "muse", "--home", home).Artifacts, 3)
+}
+
+func TestAgentInstructionsUninstallRemovesLegacySkills(t *testing.T) {
+	resetFlags(t)
+	home := realTempHome(t)
+	skill, poll := installLegacyBundle(t, home)
+	require.Equal(t, map[string]string{
+		"AGENTS.md":                             "removed",
+		"workspace/custom-skills/kata/SKILL.md": "absent",
+		"workspace/custom-skills/kata/POLL.md":  "absent",
+		"workspace/skills/kata/SKILL.md":        "removed",
+		"workspace/skills/kata/POLL.md":         "removed",
+	}, artifactStates(runInstructions(t, "uninstall", "muse", "--home", home), home))
+	_, err := os.Stat(skill)
+	require.ErrorIs(t, err, os.ErrNotExist)
+	data, err := os.ReadFile(poll) //nolint:gosec // G304: fixture under TempDir.
+	require.NoError(t, err)
+	require.Equal(t, "Foreign poll notes\n", string(data))
+}
+
+// A failure while removing the legacy copy restores both locations.
+func TestAgentInstructionsLegacyMigrationRollsBack(t *testing.T) {
+	resetFlags(t)
+	home := realTempHome(t)
+	skill, poll := installLegacyBundle(t, home)
+	before := map[string][]byte{}
+	for _, path := range []string{filepath.Join(home, "AGENTS.md"), skill, poll} {
+		data, err := os.ReadFile(path) //nolint:gosec // G304: fixture under TempDir.
+		require.NoError(t, err)
+		before[path] = data
+	}
+	artifacts, err := planInstructionArtifacts(home, "", "example-agent", "install")
+	require.NoError(t, err)
+	err = applyInstructionArtifactsWithWriter(artifacts, func(path, content string, keepEmpty bool, mode os.FileMode) error {
+		if path == poll && !strings.Contains(content, "BEGIN KATA HOOKLESS MUSE") {
+			return errors.New("injected legacy removal failure")
+		}
+		return writeInstructionArtifact(path, content, keepEmpty, mode)
+	})
+	require.ErrorContains(t, err, "injected legacy removal failure")
+	for path, want := range before {
+		data, err := os.ReadFile(path) //nolint:gosec // G304: fixture under TempDir.
+		require.NoError(t, err)
+		require.Equal(t, string(want), string(data))
+	}
+	for _, name := range []string{"SKILL.md", "POLL.md"} {
+		_, err := os.Stat(filepath.Join(home, "workspace", "custom-skills", "kata", name))
+		require.ErrorIs(t, err, os.ErrNotExist)
+	}
 }

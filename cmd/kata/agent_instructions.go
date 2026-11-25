@@ -16,6 +16,11 @@ const (
 	hooklessBeginYAML    = "# BEGIN KATA HOOKLESS MUSE"
 	hooklessEndMarker    = "<!-- END KATA HOOKLESS MUSE -->"
 	hooklessAddedNewline = "<!-- KATA HOOKLESS MUSE ADDED PREFIX NEWLINE -->"
+
+	// Consumer Muse discovers custom skills here (kenn-io/kata#1315).
+	museSkillsDir = "workspace/custom-skills"
+	// Kata 0.19.0 through 0.24.0 installed the skill here by default.
+	legacyMuseSkillsDir = "workspace/skills"
 )
 
 type instructionArtifact struct {
@@ -28,9 +33,11 @@ type instructionArtifact struct {
 	fence string
 	// retainEmpty keeps the file when uninstall leaves it empty.
 	retainEmpty bool
-	before      string
-	exists      bool
-	mode        os.FileMode
+	// legacy marks a pre-custom-skills copy that install migrates away.
+	legacy bool
+	before string
+	exists bool
+	mode   os.FileMode
 }
 
 func newAgentInstructionsCmd() *cobra.Command {
@@ -45,7 +52,7 @@ func newAgentInstructionsCmd() *cobra.Command {
 }
 
 func newAgentInstructionsActionCmd(verb string) *cobra.Command {
-	var home, actor string
+	var home, skillsDir, actor string
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use: verb + " muse", Short: verb + " a hookless instruction bundle (e.g. Muse)",
@@ -74,7 +81,12 @@ func newAgentInstructionsActionCmd(verb string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			artifacts, err := planInstructionArtifacts(root, actor, verb)
+			if skillsDir != "" {
+				if skillsDir, err = localSkillsDir(root, skillsDir); err != nil {
+					return agentHookUsage("--skills-dir must name a directory inside --home")
+				}
+			}
+			artifacts, err := planInstructionArtifacts(root, skillsDir, actor, verb)
 			if err != nil {
 				return err
 			}
@@ -86,7 +98,8 @@ func newAgentInstructionsActionCmd(verb string) *cobra.Command {
 			return printInstructionArtifacts(cmd, verb, dryRun, artifacts)
 		},
 	}
-	cmd.Flags().StringVar(&home, "home", "", "required harness home containing AGENTS.md and workspace/skills")
+	cmd.Flags().StringVar(&home, "home", "", "required harness home containing AGENTS.md and the skills directory")
+	cmd.Flags().StringVar(&skillsDir, "skills-dir", "", "skills directory inside --home (default workspace/custom-skills)")
 	if verb == "install" {
 		cmd.Flags().StringVar(&actor, "actor", "", "required exact actor or actor/teammate inbox address")
 	}
@@ -98,7 +111,7 @@ func newAgentInstructionsActionCmd(verb string) *cobra.Command {
 
 // All artifacts consume the same contract as native prompt injection. Only
 // hookless setup and delivery instructions differ between them.
-func museInstructionArtifacts(home, actor string) []instructionArtifact {
+func museInstructionArtifacts(home, skillsDir, actor string) []instructionArtifact {
 	start := "\n" + hooklessBeginComment + "\n"
 	skillStart := "---\n" + hooklessBeginYAML + "\n"
 	end := hooklessEndMarker + "\n"
@@ -121,9 +134,9 @@ native attention support, automatic idle wakeup, or guaranteed session-end hook.
 	return []instructionArtifact{
 		{Path: filepath.Join(home, "AGENTS.md"), beginMarker: hooklessBeginComment, retainEmpty: true,
 			Content: start + briefing + agentContractText + end},
-		{Path: filepath.Join(home, "workspace", "skills", "kata", "SKILL.md"), beginMarker: hooklessBeginYAML, fence: "---",
+		{Path: filepath.Join(home, skillsDir, "kata", "SKILL.md"), beginMarker: hooklessBeginYAML, fence: "---",
 			Content: skillStart + "name: kata\ndescription: Use at conversation start and before claiming completion for Kata issue work.\n---\n\n" + briefing + agentContractText + end},
-		{Path: filepath.Join(home, "workspace", "skills", "kata", "POLL.md"), beginMarker: hooklessBeginComment,
+		{Path: filepath.Join(home, skillsDir, "kata", "POLL.md"), beginMarker: hooklessBeginComment,
 			Content: start + musePollSpec(actor) + briefing + agentContractText + end},
 	}
 }
@@ -202,12 +215,43 @@ func resolveInstructionHome(home string) (string, error) {
 	}
 }
 
-func planInstructionArtifacts(home, actor, verb string) ([]instructionArtifact, error) {
+// localSkillsDir returns dir relative to home, refusing directories outside
+// it so every managed file stays under the home's path checks.
+func localSkillsDir(home, dir string) (string, error) {
+	rel := filepath.Clean(dir)
+	if filepath.IsAbs(dir) {
+		var err error
+		if rel, err = filepath.Rel(home, dir); err != nil {
+			return "", err
+		}
+	}
+	if !filepath.IsLocal(rel) {
+		return "", fmt.Errorf("skills directory outside home: %s", dir)
+	}
+	return rel, nil
+}
+
+// planInstructionArtifacts plans the bundle under skillsDir, relative to home.
+// An empty skillsDir selects the default and also plans removal of a managed
+// legacy copy, so install moves it and status and uninstall find it.
+func planInstructionArtifacts(home, skillsDir, actor, verb string) ([]instructionArtifact, error) {
 	home, err := resolveInstructionHome(home)
 	if err != nil {
 		return nil, err
 	}
-	artifacts := museInstructionArtifacts(home, actor)
+	migrate := skillsDir == ""
+	if migrate {
+		skillsDir = museSkillsDir
+	}
+	artifacts := museInstructionArtifacts(home, skillsDir, actor)
+	if migrate {
+		for _, a := range artifacts[1:] {
+			a.Path = filepath.Join(home, legacyMuseSkillsDir, "kata", filepath.Base(a.Path))
+			a.legacy = true
+			artifacts = append(artifacts, a)
+		}
+	}
+	planned := artifacts[:0]
 	for i := range artifacts {
 		a := &artifacts[i]
 		if err := checkInstructionPath(a.Path, home); err != nil {
@@ -230,11 +274,18 @@ func planInstructionArtifacts(home, actor, verb string) ([]instructionArtifact, 
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", a.Path, err)
 		}
+		if a.legacy && begin < 0 {
+			continue // Only a managed legacy copy is reported or migrated.
+		}
 		a.State = "absent"
 		if begin >= 0 {
 			a.State = "installed"
 		}
-		switch verb {
+		action := verb
+		if a.legacy && verb == "install" {
+			action = "uninstall"
+		}
+		switch action {
 		case "status":
 			a.Content = "" // Status reports ownership on disk, never runtime loading.
 		case "uninstall":
@@ -263,8 +314,9 @@ func planInstructionArtifacts(home, actor, verb string) ([]instructionArtifact, 
 			a.State = "installed"
 		}
 		a.Changed = verb != "status" && a.Content != a.before
+		planned = append(planned, *a)
 	}
-	return artifacts, nil
+	return planned, nil
 }
 
 // instructionBlockSpan locates the managed block by complete marker lines. It
