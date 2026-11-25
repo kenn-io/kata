@@ -957,7 +957,7 @@ func federationHistoryComments(history []api.EventEnvelope) map[string]bool {
 		case "issue.commented", "issue.comment_edited":
 			uid, _ := db.StringValue(db.PayloadMap(event.Payload)["comment_uid"])
 			comments[uid] = true
-		case "issue.created", "issue.snapshot":
+		case "issue.created", "issue.snapshot", db.RepeatedImportEventType:
 			var payload struct {
 				Comments []struct {
 					UID string `json:"comment_uid"`

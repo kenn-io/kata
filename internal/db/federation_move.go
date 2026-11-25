@@ -228,13 +228,13 @@ func CheckFederationKeptIssueMove(ctx context.Context, q moveQuery, from, to int
 // with local-only discussion or links. Hub-known history, including history
 // restored from a full backup, does not block a move.
 func federationKeptIssueMoveSQL(postgres bool) string {
-	unaccepted := func(alias string) string {
-		return `(` + federationKeptLocalSQL(alias) + ` OR (` + alias + `.origin_instance_uid=$4 AND ` + alias + `.actor<>src.bound_actor AND ` + alias + `.id>src.push_cursor_event_id AND ` + FederationUnresolvedEventSQL(alias) + `))`
+	unaccepted := func(alias, binding string) string {
+		return `(` + federationKeptLocalSQL(alias) + ` OR (` + alias + `.origin_instance_uid=$4 AND ` + alias + `.actor<>` + binding + `.bound_actor AND ` + alias + `.id>` + binding + `.push_cursor_event_id AND ` + FederationUnresolvedEventSQL(alias) + `))`
 	}
 	//nolint:gosec // G202: SQL fragments use fixed aliases; values are bound.
 	return `SELECT EXISTS(SELECT 1 FROM federation_bindings src JOIN federation_bindings dst ON dst.project_id=$2 WHERE src.project_id=$1 AND src.role='spoke' AND dst.role='spoke' AND src.enabled=1 AND dst.enabled=1 AND src.push_enabled=1 AND dst.push_enabled=1 AND (
- (NOT EXISTS(SELECT 1 FROM events e WHERE e.project_id=$1 AND e.issue_uid=$3 AND e.origin_instance_uid<>$4 AND NOT EXISTS(SELECT 1 FROM meta former WHERE former.key=$5 || e.origin_instance_uid) AND NOT ` + federationKeptLocalSQL("e") + `) AND EXISTS(SELECT 1 FROM events root WHERE root.project_id=$1 AND root.issue_uid=$3 AND root.type IN ('issue.created','issue.snapshot') AND ` + unaccepted("root") + `))
- OR EXISTS(SELECT 1 FROM events history WHERE ((history.project_id=$1 AND ` + unaccepted("history") + `) OR (history.project_id<>$1 AND history.type IN ('issue.linked','issue.links_changed') AND ` + federationKeptLocalSQL("history") + `)) AND ` + federationKeptSnapshotHistorySQL(postgres) + `)))`
+ (NOT EXISTS(SELECT 1 FROM events e WHERE e.project_id=$1 AND e.issue_uid=$3 AND e.origin_instance_uid<>$4 AND NOT EXISTS(SELECT 1 FROM meta former WHERE former.key=$5 || e.origin_instance_uid) AND NOT ` + federationKeptLocalSQL("e") + `) AND EXISTS(SELECT 1 FROM events root WHERE root.project_id=$1 AND root.issue_uid=$3 AND root.type IN ('issue.created','issue.snapshot') AND ` + unaccepted("root", "src") + `))
+ OR EXISTS(SELECT 1 FROM events history LEFT JOIN federation_bindings owner ON owner.project_id=history.project_id WHERE ((history.project_id=$1 AND ` + unaccepted("history", "src") + `) OR (history.project_id<>$1 AND history.type IN ('issue.linked','issue.links_changed','issue.snapshot') AND ` + unaccepted("history", "owner") + `)) AND ` + federationKeptSnapshotHistorySQL(postgres) + `)))`
 }
 
 // federationKeptSnapshotHistorySQL matches retained history still in the move document.
@@ -255,10 +255,16 @@ func federationKeptSnapshotHistorySQL(postgres bool) string {
 // federationAcceptedMoveLinkSQL finds a hub-known event proving this edge and author.
 func federationAcceptedMoveLinkSQL(postgres bool) string {
 	field := func(key string) string { return `json_extract(proof.payload,'$.` + key + `')` }
+	contains := func(key, value string) string {
+		return `EXISTS (SELECT 1 FROM json_each(CASE WHEN json_type(proof.payload,'$.` + key + `')='array' THEN json_extract(proof.payload,'$.` + key + `') ELSE '[]' END) peer WHERE peer.value=` + value + `)`
+	}
 	if postgres {
 		field = func(key string) string { return `proof.payload::jsonb->>'` + key + `'` }
+		contains = func(key, value string) string {
+			return `EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(proof.payload::jsonb->'` + key + `')='array' THEN proof.payload::jsonb->'` + key + `' ELSE '[]'::jsonb END) peer(uid) WHERE peer.uid=` + value + `)`
+		}
 	}
-	return `EXISTS (SELECT 1 FROM events proof WHERE proof.project_id=$1 AND proof.type='issue.linked' AND proof.actor=l.author AND l.type=` + field("type") + ` AND ((l.from_issue_uid=` + field("from_uid") + ` AND l.to_issue_uid=` + field("to_uid") + `) OR (l.type='related' AND l.from_issue_uid=` + field("to_uid") + ` AND l.to_issue_uid=` + field("from_uid") + `)) AND NOT ` + federationKeptLocalSQL("proof") + ` AND ((proof.origin_instance_uid=$4 AND (proof.id<=src.push_cursor_event_id OR NOT (` + FederationUnresolvedEventSQL("proof") + `))) OR (proof.origin_instance_uid<>$4 AND NOT EXISTS(SELECT 1 FROM meta former WHERE former.key=$5 || proof.origin_instance_uid))))`
+	return `EXISTS (SELECT 1 FROM events proof LEFT JOIN federation_bindings proof_binding ON proof_binding.project_id=proof.project_id WHERE proof.project_id IN ($1,history.project_id) AND proof.actor=l.author AND ((proof.type='issue.linked' AND l.type=` + field("type") + ` AND ((l.from_issue_uid=` + field("from_uid") + ` AND l.to_issue_uid=` + field("to_uid") + `) OR (l.type='related' AND l.from_issue_uid=` + field("to_uid") + ` AND l.to_issue_uid=` + field("from_uid") + `))) OR (proof.type='issue.links_changed' AND ((l.type='parent' AND l.from_issue_uid=proof.issue_uid AND l.to_issue_uid=` + field("parent_set_uid") + `) OR (l.type='blocks' AND l.from_issue_uid=proof.issue_uid AND ` + contains("blocks_added_uids", "l.to_issue_uid") + `) OR (l.type='blocks' AND l.to_issue_uid=proof.issue_uid AND ` + contains("blocked_by_added_uids", "l.from_issue_uid") + `) OR (l.type='related' AND ((l.from_issue_uid=proof.issue_uid AND ` + contains("related_added_uids", "l.to_issue_uid") + `) OR (l.to_issue_uid=proof.issue_uid AND ` + contains("related_added_uids", "l.from_issue_uid") + `)))))) AND NOT ` + federationKeptLocalSQL("proof") + ` AND ((proof.origin_instance_uid=$4 AND (proof.id<=proof_binding.push_cursor_event_id OR NOT (` + FederationUnresolvedEventSQL("proof") + `))) OR (proof.origin_instance_uid<>$4 AND NOT EXISTS(SELECT 1 FROM meta former WHERE former.key=$5 || proof.origin_instance_uid))))`
 }
 
 // federationKeptSnapshotContentSQL matches retained snapshot content still in the move.
@@ -275,7 +281,7 @@ func federationKeptSnapshotContentSQL(postgres bool) string {
 		field = func(key string) string { return `item.value->>'` + key + `'` }
 		incoming = `COALESCE(item.value->>'incoming','false')='true'`
 	}
-	return `(history.type='issue.snapshot' AND history.issue_uid=$3 AND (EXISTS (SELECT 1 FROM comments c JOIN issues i ON i.id=c.issue_id, ` + items("comments") + ` WHERE i.uid=$3 AND c.uid=` + field("comment_uid") + ` AND c.author=` + field("author") + `) OR EXISTS (SELECT 1 FROM links l, ` + items("links") + ` WHERE l.type=` + field("type") + ` AND l.author=COALESCE(NULLIF(` + field("author") + `,''),history.actor) AND NOT ` + federationAcceptedMoveLinkSQL(postgres) + ` AND ((l.from_issue_uid=$3 AND l.to_issue_uid=` + field("to_issue_uid") + ` AND (l.type='related' OR NOT (` + incoming + `))) OR (l.to_issue_uid=$3 AND l.from_issue_uid=` + field("to_issue_uid") + ` AND (l.type='related' OR (` + incoming + `)))))))`
+	return `(history.type='issue.snapshot' AND ((history.issue_uid=$3 AND EXISTS (SELECT 1 FROM comments c JOIN issues i ON i.id=c.issue_id, ` + items("comments") + ` WHERE i.uid=$3 AND c.uid=` + field("comment_uid") + ` AND c.author=` + field("author") + `)) OR EXISTS (SELECT 1 FROM links l, ` + items("links") + ` WHERE (l.from_issue_uid=$3 OR l.to_issue_uid=$3) AND l.type=` + field("type") + ` AND l.author=COALESCE(NULLIF(` + field("author") + `,''),history.actor) AND NOT ` + federationAcceptedMoveLinkSQL(postgres) + ` AND ((l.from_issue_uid=history.issue_uid AND l.to_issue_uid=` + field("to_issue_uid") + ` AND (l.type='related' OR NOT (` + incoming + `))) OR (l.to_issue_uid=history.issue_uid AND l.from_issue_uid=` + field("to_issue_uid") + ` AND (l.type='related' OR (` + incoming + `)))))))`
 }
 
 func federationKeptCommentVersionSQL(postgres bool) string {

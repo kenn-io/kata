@@ -26,6 +26,9 @@ func checkFederationRejoinMoveGate(t *testing.T, store db.Storage, backend Backe
 	t.Run("reversed related link", func(t *testing.T) { require.NoError(t, checkRejoinMoveRetainedReversedRelatedLink(t, store)) })
 	t.Run("snapshot content", func(t *testing.T) { require.NoError(t, checkRejoinMoveRetainedSnapshotContent(t, store)) })
 	t.Run("cross-project retained link", func(t *testing.T) { checkRejoinMoveCrossProjectLink(t, store) })
+	t.Run("accepted combined link", func(t *testing.T) { checkAcceptedCombinedLink(t, store) })
+	t.Run("accepted cross-project link", func(t *testing.T) { checkAcceptedCrossProjectLink(t, store) })
+	t.Run("cross-project snapshot link", func(t *testing.T) { checkCrossProjectSnapshotLink(t, store) })
 	t.Run("superseded comment edit", func(t *testing.T) { checkSupersededRetainedCommentEdit(t, store) })
 	t.Run("restore from export", func(t *testing.T) { require.NoError(t, checkRestoredRetainedIssueMove(t, store, backend)) })
 	return nil
@@ -196,10 +199,13 @@ func checkRejoinMoveCrossProjectLink(t *testing.T, store db.Storage) {
 	binding.Actor = "new-actor"
 	_, err = store.UpsertFederationBinding(ctx, binding)
 	require.NoError(t, err)
+	current, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	requireRejoinMove(t, store, current, project, target, db.ErrFederatedMoveUnsupported)
 	kept, err := store.KeepFederationEventLocal(ctx, peerProject.ID, event.ID)
 	require.NoError(t, err)
 	require.True(t, kept, "event: %+v", event)
-	current, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	current, err = store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	requireRejoinMove(t, store, current, project, target, db.ErrFederatedMoveUnsupported)
 }
@@ -509,4 +515,137 @@ func checkSupersededRetainedCommentEdit(t *testing.T, store db.Storage) {
 	current := pullHubIssueUpdate(t, store, project, issue)
 	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: current.ID, FromProjectID: project.ID, ToProjectID: target.ID, IfMatchRev: current.Revision, Actor: "new-actor", DryRun: true})
 	require.NoError(t, err)
+}
+
+func reviewRejoinAdopt(t *testing.T, store db.Storage, project db.Project) (db.Project, db.FederationBinding) {
+	t.Helper()
+	ctx := t.Context()
+	_, err := store.LeaveFederationReplica(ctx, project.ID)
+	require.NoError(t, err)
+	adopted, err := store.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: project.ID, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "old-actor"})
+	require.NoError(t, err)
+	_, err = store.LeaveFederationReplica(ctx, project.ID)
+	require.NoError(t, err)
+	b := adopted.Binding
+	b.Actor = "new-actor"
+	_, err = store.UpsertFederationBinding(ctx, b)
+	require.NoError(t, err)
+	return adopted.Project, b
+}
+
+func reviewKeepSnapshots(t *testing.T, store db.Storage, project db.Project, b db.FederationBinding, issueUID string) {
+	t.Helper()
+	pending, err := store.PendingFederationPushEvents(t.Context(), project.ID, store.InstanceUID(), b.PushCursorEventID, 100)
+	require.NoError(t, err)
+	n := 0
+	for _, e := range pending {
+		if e.Type == "issue.snapshot" && e.IssueUID != nil && *e.IssueUID == issueUID {
+			kept, err := store.KeepFederationEventLocal(t.Context(), project.ID, e.ID)
+			require.NoError(t, err)
+			require.True(t, kept)
+			n++
+		}
+	}
+	require.NotZero(t, n)
+}
+
+// A combined edit can prove the hub accepted a retained link.
+func checkAcceptedCombinedLink(t *testing.T, store db.Storage) {
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "accepted-link-source")
+	require.NoError(t, err)
+	target, err := store.CreateProject(ctx, "accepted-link-target")
+	require.NoError(t, err)
+	bindRejoinSpokes(t, store, project)
+	issue := createHubIssue(t, store, project)
+	peer := createHubIssue(t, store, project)
+	origin, err := uid.New()
+	require.NoError(t, err)
+	ev := newRemoteEvent(t, project, &issue.UID, "issue.links_changed", "old-actor", origin, 410, jsontext.Value(`{"blocks_added_uids":["`+peer.UID+`"]}`))
+	ins, err := store.InsertRemoteEvent(ctx, project.ID, ev)
+	require.NoError(t, err)
+	require.True(t, ins)
+	require.NoError(t, store.MaterializeFederatedProject(ctx, project.ID))
+	p, b := reviewRejoinAdopt(t, store, project)
+	ins, err = store.InsertRemoteEvent(ctx, project.ID, ev)
+	require.NoError(t, err)
+	require.True(t, ins)
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: target.ID, Role: db.FederationRoleSpoke, HubURL: b.HubURL, HubProjectID: 2, HubProjectUID: target.UID, Actor: "new-actor", Enabled: true, PushEnabled: true})
+	require.NoError(t, err)
+	reviewKeepSnapshots(t, store, p, b, issue.UID)
+	current := pullHubIssueUpdate(t, store, p, issue)
+	requireRejoinMove(t, store, current, p, target, nil)
+}
+
+func checkAcceptedCrossProjectLink(t *testing.T, store db.Storage) {
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "cross-accepted-source")
+	require.NoError(t, err)
+	peerProject, err := store.CreateProject(ctx, "cross-accepted-peer")
+	require.NoError(t, err)
+	target, err := store.CreateProject(ctx, "cross-accepted-target")
+	require.NoError(t, err)
+	bindRejoinSpokes(t, store, project, peerProject, target)
+	issue := createHubIssue(t, store, project)
+	peer := createHubIssue(t, store, peerProject)
+	binding, err := store.FederationBindingByProject(ctx, peerProject.ID)
+	require.NoError(t, err)
+	binding.Actor = "old-actor"
+	_, err = store.UpsertFederationBinding(ctx, binding)
+	require.NoError(t, err)
+	params := db.LinkEventParams{EventType: "issue.linked", EventIssueID: peer.ID, FromShortID: peer.ShortID, FromUID: peer.UID, ToShortID: issue.ShortID, ToUID: issue.UID, Actor: "old-actor"}
+	_, retained, err := store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: peer.ID, ToIssueID: issue.ID, Type: "blocks", Author: "old-actor"}, params)
+	require.NoError(t, err)
+	origin, err := uid.New()
+	require.NoError(t, err)
+	event := newRemoteEvent(t, peerProject, &peer.UID, "issue.linked", "old-actor", origin, 420, jsontext.Value(`{"type":"blocks","from_uid":"`+peer.UID+`","to_uid":"`+issue.UID+`"}`))
+	inserted, err := store.InsertRemoteEvent(ctx, peerProject.ID, event)
+	require.NoError(t, err)
+	require.True(t, inserted)
+	binding.Actor = "new-actor"
+	_, err = store.UpsertFederationBinding(ctx, binding)
+	require.NoError(t, err)
+	kept, err := store.KeepFederationEventLocal(ctx, peerProject.ID, retained.ID)
+	require.NoError(t, err)
+	require.True(t, kept)
+	current, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	requireRejoinMove(t, store, current, project, target, nil)
+}
+
+func checkCrossProjectSnapshotLink(t *testing.T, store db.Storage) {
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "snapshot-cross-source")
+	require.NoError(t, err)
+	peerProject, err := store.CreateProject(ctx, "snapshot-cross-peer")
+	require.NoError(t, err)
+	target, err := store.CreateProject(ctx, "snapshot-cross-target")
+	require.NoError(t, err)
+	bindRejoinSpokes(t, store, project, peerProject, target)
+	issue := createHubIssue(t, store, project)
+	peer := createHubIssue(t, store, peerProject)
+	binding, err := store.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	_, err = store.LeaveFederationReplica(ctx, project.ID)
+	require.NoError(t, err)
+	_, err = store.LeaveFederationReplica(ctx, peerProject.ID)
+	require.NoError(t, err)
+	_, _, err = store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: peer.ID, ToIssueID: issue.ID, Type: "blocks", Author: "old-actor"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: peer.ID, FromShortID: peer.ShortID, FromUID: peer.UID, ToShortID: issue.ShortID, ToUID: issue.UID, Actor: "old-actor"})
+	require.NoError(t, err)
+	adopted, err := store.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: peerProject.ID, HubURL: "https://hub.example", HubProjectID: 2, HubProjectUID: peerProject.UID, Actor: "old-actor"})
+	require.NoError(t, err)
+	_, err = store.UpsertFederationBinding(ctx, binding)
+	require.NoError(t, err)
+	_, err = store.LeaveFederationReplica(ctx, peerProject.ID)
+	require.NoError(t, err)
+	peerBinding := adopted.Binding
+	peerBinding.Actor = "new-actor"
+	_, err = store.UpsertFederationBinding(ctx, peerBinding)
+	require.NoError(t, err)
+	reviewKeepSnapshots(t, store, peerProject, peerBinding, peer.UID)
+	_, err = store.LinkByEndpoints(ctx, peer.ID, issue.ID, "blocks")
+	require.NoError(t, err)
+	current, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	requireRejoinMove(t, store, current, project, target, db.ErrFederatedMoveUnsupported)
 }

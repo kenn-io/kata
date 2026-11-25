@@ -60,6 +60,7 @@ func TestRejoinCommentHistory(t *testing.T) {
 		wantErr  bool
 	}{
 		{name: "snapshot", status: http.StatusOK, body: `{"events":[{"event_id":1,"issue_uid":"task","type":"issue.snapshot","payload":{"comments":[{"comment_uid":"comment"}]}}],"next_after_id":1}`},
+		{name: "repeated adoption", status: http.StatusOK, body: `{"events":[{"event_id":1,"issue_uid":"task","type":"issue.restated","payload":{"comments":[{"comment_uid":"comment"}]}}],"next_after_id":1}`},
 		{name: "edit", status: http.StatusOK, body: `{"events":[{"event_id":1,"issue_uid":"task","type":"issue.comment_edited","payload":{"comment_uid":"comment"}}],"next_after_id":1}`},
 		{name: "missing", status: http.StatusNotFound, wantKeep: true},
 		{name: "push only", status: http.StatusForbidden, wantKeep: true},
