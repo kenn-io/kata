@@ -1288,7 +1288,9 @@ func (r *Runner) runOnce(
 	var errs []error
 	for _, spoke := range spokes {
 		started := retries.version(spoke.binding.ProjectID)
-		if (len(only) > 0 && !only[spoke.binding.ProjectID]) || r.retryBlocked(ctx, retries, spoke, credentialStore) {
+		if (len(only) > 0 && !only[spoke.binding.ProjectID]) ||
+			retries.hubBlocked(spoke.binding.HubURL, r.refusalNow()) ||
+			r.retryBlocked(ctx, retries, spoke, credentialStore) {
 			continue
 		}
 		var drain *activity.Lease
@@ -1305,7 +1307,14 @@ func (r *Runner) runOnce(
 			}
 			return r.runSpoke(ctx, spoke, credentialStore, validateLease, drain)
 		}()
-		retries.recordSchedule(spoke.binding.ProjectID, identity.full, identity.target, false, spokeErr, r.effectiveInterval(), r.refusalNow(), &started, time.Time{})
+		now := r.refusalNow()
+		retries.recordSchedule(spoke.binding.ProjectID, identity.full, identity.target, false, spokeErr, r.effectiveInterval(), now, &started, time.Time{})
+		if spokeErr == nil {
+			retries.clearHubUnavailable(spoke.binding.HubURL)
+		} else if hubAskedToWait(spokeErr) {
+			_, _, retryAfter := classifySyncRetry(spokeErr)
+			retries.recordHubUnavailable(spoke.binding.HubURL, retryAfter, r.effectiveInterval(), now)
+		}
 		if errors.Is(spokeErr, context.Canceled) || errors.Is(spokeErr, errFederationRunnerLeaseInvalid) {
 			return nil, false, nil, spokeErr
 		}

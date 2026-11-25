@@ -309,3 +309,166 @@ func TestRefusedLeadCredentialKeepsTheOthersWatching(t *testing.T) {
 	h.createIssueIn(t, otherHub.ID, "Committed beside a refused binding")
 	awaitTurns(t, turns, other.ID)
 }
+
+// When a hub that takes watches refuses to hold one (at its held-poll bound),
+// the spoke must stay multiplexed on one watch per interval instead of falling
+// back to an unwaited poll per project every interval. Events still arrive, and
+// once the hub accepts holds again, held watches resume.
+func TestRefusedWatchStaysMultiplexedAndDeliversEvents(t *testing.T) {
+	const projects = 12
+	h, _ := newQuietSpoke(t, true, projects)
+	h.refuseHolds.Store(true)
+	var initialDone atomic.Int64
+	h.startConfiguredRunner(t, &Runner{
+		DB: h.spokeDB, Interval: 200 * time.Millisecond,
+		OnSpokeResult: func(int64, error) { initialDone.Add(1) },
+	})
+	//nolint:kennlint // sleeptest: waits for the first pass across all bindings over real HTTP.
+	require.Eventually(t, func() bool { return initialDone.Load() >= projects }, 30*time.Second, 10*time.Millisecond,
+		"the first runner pass did not finish")
+	// Wait for the initial refused watch to land and settle.
+	//nolint:kennlint // sleeptest: the initial watch reaches the hub over real HTTP.
+	require.Eventually(t, func() bool { return h.watchRequests.Load() >= 1 }, 10*time.Second, 10*time.Millisecond,
+		"the spoke never sent a watch")
+	//nolint:kennlint // sleeptest: lets the refused watch's quiet window begin over real HTTP.
+	time.Sleep(300 * time.Millisecond)
+
+	unwaitedBefore := h.pollsWithoutWait.Load()
+	watchesBefore := h.watchRequests.Load()
+	waitWatchesBefore := h.watchRequestsWithWait.Load()
+	//nolint:kennlint // sleeptest: measures idle request counts over real HTTP across several intervals.
+	time.Sleep(1500 * time.Millisecond)
+
+	unwaitedDelta := h.pollsWithoutWait.Load() - unwaitedBefore
+	watchesDelta := h.watchRequests.Load() - watchesBefore
+	waitWatchesDelta := h.watchRequestsWithWait.Load() - waitWatchesBefore
+	assert.Zero(t, unwaitedDelta,
+		"refused watches fell back to unwaited per-project polls (%d polls in 1.5s)", unwaitedDelta)
+	assert.GreaterOrEqual(t, watchesDelta, int64(2), "the spoke stopped checking the hub via watches while holds were refused")
+	assert.LessOrEqual(t, watchesDelta, int64(12), "the spoke sent too many watches while holds were refused")
+	assert.Less(t, waitWatchesDelta, watchesDelta,
+		"hold-backoff watches kept asking to hold on every interval instead of sending wait=0 between probes")
+
+	// Events still arrive promptly on the multiplexed watch interval, pulling only the changed project.
+	h.createIssueIn(t, h.hubProject.ID, "Committed while holds are refused")
+	//nolint:kennlint // sleeptest: delivery crosses real HTTP on the next watch tick.
+	require.Eventually(t, func() bool { return h.spokeIssueCount(t) == 1 }, 5*time.Second, 20*time.Millisecond,
+		"event was not delivered while holds were refused")
+
+	// Once the hub stops refusing holds, held watches resume and deliver immediately.
+	h.refuseHolds.Store(false)
+	//nolint:kennlint // sleeptest: waits for the next hold probe to stay open over real HTTP.
+	require.Eventually(t, func() bool {
+		h.heldMu.Lock()
+		defer h.heldMu.Unlock()
+		return h.held == 1
+	}, 10*time.Second, 20*time.Millisecond, "the spoke did not resume holding a watch once hub capacity returned")
+	h.createIssueIn(t, h.hubProject.ID, "Committed after holds recovered")
+	//nolint:kennlint // sleeptest: delivery crosses real HTTP.
+	require.Eventually(t, func() bool { return h.spokeIssueCount(t) == 2 }, 5*time.Second, 10*time.Millisecond)
+}
+
+// Watchers joining over a startup pass that spans more than one join delay
+// coalesce instead of cancelling and reissuing a partial watch on every join.
+func TestWatchJoinDebounceAvoidsStartupReissueStorm(t *testing.T) {
+	const projects = 10
+	h := newHubSpokeHarness(t, false)
+	h.watches.Store(true)
+	var watches atomic.Int64
+	frontURL := h.bindThrough(t, func(w http.ResponseWriter, r *http.Request, hub http.Handler) {
+		if isWatch(r) {
+			watches.Add(1)
+		}
+		if isEventPoll(r) {
+			// Spread initial pulls across ~250 ms (> 100 ms join delay) to mirror real hub RTT.
+			//nolint:kennlint // sleeptest: simulates network round-trip time on initial pulls.
+			time.Sleep(25 * time.Millisecond)
+		}
+		hub.ServeHTTP(w, r)
+	})
+	var lastHubID int64
+	var lastSpokeID int64
+	for i := 1; i < projects; i++ {
+		spoke, hub := h.addBinding(t, "debounce-project-"+string(rune('a'+i)), frontURL)
+		lastSpokeID, lastHubID = spoke.ID, hub.ID
+	}
+	turns := make(chan int64, 2*projects)
+	h.startConfiguredRunner(t, &Runner{
+		DB: h.spokeDB, Interval: time.Hour,
+		OnSpokeResult: func(id int64, _ error) { turns <- id },
+	})
+	for range projects {
+		select {
+		case <-turns:
+		case <-time.After(30 * time.Second):
+			t.Fatal("initial pass did not finish")
+		}
+	}
+	//nolint:kennlint // sleeptest: waits for the coalesced watch to reach the hub over real HTTP.
+	require.Eventually(t, func() bool { return watches.Load() >= 1 }, 10*time.Second, 10*time.Millisecond)
+	//nolint:kennlint // sleeptest: verifies no trailing reissue storm after all watchers joined.
+	time.Sleep(400 * time.Millisecond)
+	assert.LessOrEqual(t, watches.Load(), int64(2),
+		"startup joins triggered %d watches instead of coalescing", watches.Load())
+
+	// The last project to join is still watched and receives commits promptly.
+	h.createIssueIn(t, lastHubID, "Committed on the last project to join")
+	awaitTurns(t, turns, lastSpokeID)
+}
+
+// When a hub throttles a multiplexed watch with 429 or 503, the hub cooldown
+// keeps both the runner's interval loop and the watch group quiet until Retry-After.
+func TestWatchThrottleDelaysIntervalAndWatchRetries(t *testing.T) {
+	h := newHubSpokeHarness(t, false)
+	h.watches.Store(true)
+	var throttle atomic.Bool
+	var watches, intervalPolls atomic.Int64
+	throttled := make(chan struct{}, 1)
+	frontURL := h.bindThrough(t, func(w http.ResponseWriter, r *http.Request, hub http.Handler) {
+		if isWatch(r) {
+			watches.Add(1)
+			if throttle.Load() {
+				w.Header().Set("Retry-After", "120")
+				w.WriteHeader(http.StatusTooManyRequests)
+				select {
+				case throttled <- struct{}{}:
+				default:
+				}
+				return
+			}
+		}
+		if isEventPoll(r) {
+			intervalPolls.Add(1)
+		}
+		hub.ServeHTTP(w, r)
+	})
+	const extra = 5
+	ids := []int64{h.spokeProject.ID}
+	for i := range extra {
+		spoke, _ := h.addBinding(t, "throttle-project-"+string(rune('a'+i)), frontURL)
+		ids = append(ids, spoke.ID)
+	}
+	throttle.Store(true)
+	turns := make(chan int64, 2*len(ids))
+	retries := NewSyncRetries()
+	h.startConfiguredRunner(t, &Runner{
+		DB: h.spokeDB, Interval: 200 * time.Millisecond, Retries: retries,
+		OnSpokeResult: func(id int64, _ error) { turns <- id },
+	})
+	awaitTurns(t, turns, ids...)
+	select {
+	case <-throttled:
+	case <-time.After(10 * time.Second):
+		t.Fatal("throttled watch did not reach the hub")
+	}
+	// Give the spoke a moment to record the hub cooldown.
+	//nolint:kennlint // sleeptest: waits for the 429 response to be processed over real HTTP.
+	time.Sleep(100 * time.Millisecond)
+	watchesAfter := watches.Load()
+	pollsAfter := intervalPolls.Load()
+	h.wake <- struct{}{}
+	//nolint:kennlint // sleeptest: observes several intervals and a wake while Retry-After is active.
+	time.Sleep(time.Second)
+	assert.Equal(t, pollsAfter, intervalPolls.Load(), "runner polled bindings at a hub still in Retry-After cooldown")
+	assert.Equal(t, watchesAfter, watches.Load(), "watch group retried before Retry-After elapsed")
+}

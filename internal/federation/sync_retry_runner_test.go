@@ -427,6 +427,72 @@ func TestRunnerReportsSchedulesOnlyWhileRunning(t *testing.T) {
 	require.False(t, ok, "a stopped runner reports no schedule")
 }
 
+// When a hub answers 429 or 503 on one binding, the runner stops contacting
+// that hub for the rest of the pass and waits until the hub cooldown expires,
+// while bindings on another hub still sync normally.
+func TestThrottledHubSkipsRemainingBindingsOnSameHub(t *testing.T) {
+	ctx := t.Context()
+	fleet := newSpokeFleet(t, 10)
+	for _, project := range fleet.projects {
+		fleet.refuse.Delete(project.UID)
+	}
+	// Replace the fleet's hub URL with a throttled hub for the first 9 projects
+	// and a healthy second hub for the 10th project.
+	var busyHits, healthyHits atomic.Int64
+	busyHub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		busyHits.Add(1)
+		w.Header().Set("Retry-After", "60")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	t.Cleanup(busyHub.Close)
+	healthyHub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		healthyHits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPost {
+			var push api.FederationIngestEventsRequestBody
+			if err := json.UnmarshalRead(r.Body, &push); err != nil || len(push.Events) == 0 {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			_ = json.MarshalWrite(w, api.FederationIngestEventsBody{
+				Accepted: len(push.Events), PushCursorEventID: push.Events[len(push.Events)-1].EventID,
+			})
+			return
+		}
+		_, _ = w.Write([]byte(`{"events":[],"next_after_id":0}`))
+	}))
+	t.Cleanup(healthyHub.Close)
+	for i, project := range fleet.projects {
+		targetURL := busyHub.URL
+		if i == len(fleet.projects)-1 {
+			targetURL = healthyHub.URL
+		}
+		binding, err := fleet.store.FederationBindingByProject(ctx, project.ID)
+		require.NoError(t, err)
+		binding.HubURL = targetURL
+		_, err = fleet.store.UpsertFederationBinding(ctx, binding)
+		require.NoError(t, err)
+		cred := fleet.credentials.credentials[project.UID]
+		cred.HubURL = targetURL
+		require.NoError(t, fleet.credentials.StoreFederationCredential(ctx, project.UID, cred))
+	}
+
+	retries := newSyncRetries(func(limit time.Duration) time.Duration { return limit / 2 })
+	fleet.pass(ctx, retries)
+	require.Equal(t, int64(1), busyHits.Load(), "a 429 on one binding must stop the remaining bindings on the same hub")
+	require.Positive(t, healthyHits.Load(), "a throttled hub must not block bindings on another hub")
+
+	// Inside the Retry-After + jitter window, a second pass sends zero requests to the busy hub.
+	fleet.now = fleet.now.Add(65 * time.Second)
+	fleet.pass(ctx, retries)
+	require.Equal(t, int64(1), busyHits.Load(), "jittered hub cooldown must hold past the base Retry-After")
+
+	// Past Retry-After + jitter (60s + 7.5s = 67.5s), the runner probes the hub again.
+	fleet.now = fleet.now.Add(10 * time.Second)
+	fleet.pass(ctx, retries)
+	require.Equal(t, int64(2), busyHits.Load(), "the hub should be probed once after its cooldown expires")
+}
+
 // BenchmarkRunnerPass times one automatic runner pass over 50 bound projects.
 // In "refused" the hub refuses every credential and the pass runs while each
 // binding is already waiting on its schedule; "accepted" is the ordinary pass

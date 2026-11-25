@@ -13,9 +13,14 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
-// federationWatchJoinDelay lets the watchers of one hub, which start together
-// after a runner pass, join one watch instead of reissuing it once per join.
-const federationWatchJoinDelay = 100 * time.Millisecond
+// federationWatchJoinDelay debounces joins from one hub's watchers so a pass
+// or timeout that finishes across many projects settles into one watch instead
+// of cancelling and reissuing partial watches. federationWatchJoinMaxWait caps
+// how long steady joins can defer starting a watch.
+const (
+	federationWatchJoinDelay   = 100 * time.Millisecond
+	federationWatchJoinMaxWait = 500 * time.Millisecond
+)
 
 // hubWatchSupport is what the spoke has learned about one hub's watches.
 type hubWatchSupport struct {
@@ -41,6 +46,13 @@ type heldResult struct {
 	// again asks the watcher to hold again at once: the hub answered for
 	// other bindings, or the spoke stopped sending it watches.
 	again bool
+	// quiet reports a clean caught-up watch answer whose hold was refused or
+	// skipped during hold-backoff; the watcher records pull success, skips
+	// interval pulls for sleep, and rejoins the watch after sleep.
+	quiet bool
+	// sleep overrides the watcher's local delay so every member of one watch
+	// wakes together on a shared jittered schedule.
+	sleep time.Duration
 }
 
 // takesWatches reports whether a watch at the hub can carry several bindings.
@@ -140,6 +152,12 @@ type hubWatchGroup struct {
 	joins   chan *watchMember
 	leaves  chan *watchMember
 	done    chan struct{}
+
+	// Pacing state owned solely by run().
+	holdBackoff time.Duration
+	holdRetryAt time.Time
+	nextPollAt  time.Time
+	errBackoff  time.Duration
 }
 
 // hold waits for the hub's answer for member. When ctx ends, as an endpoint
@@ -175,12 +193,13 @@ func (g *hubWatchGroup) hold(ctx context.Context, member *watchMember) heldResul
 
 // watchFlight is one watch request in flight.
 type watchFlight struct {
-	lead     *watchMember
-	members  map[*watchMember]bool
-	cancel   context.CancelFunc
-	started  time.Time
-	done     chan watchAnswer
-	reissued bool
+	lead          *watchMember
+	members       map[*watchMember]bool
+	requestedWait time.Duration
+	cancel        context.CancelFunc
+	started       time.Time
+	done          chan watchAnswer
+	reissued      bool
 }
 
 type watchAnswer struct {
@@ -196,14 +215,31 @@ func (g *hubWatchGroup) run(ctx context.Context) {
 	defer close(g.done)
 	members := map[*watchMember]bool{}
 	var (
-		flight  *watchFlight
-		leaving []*watchMember
-		send    <-chan time.Time
+		flight       *watchFlight
+		leaving      []*watchMember
+		sendTimer    *time.Timer
+		send         <-chan time.Time
+		pendingSince time.Time
 	)
-	arm := func() {
-		if send == nil {
-			send = time.After(federationWatchJoinDelay)
+	stopTimer := func() {
+		if sendTimer != nil {
+			sendTimer.Stop()
 		}
+		send = nil
+	}
+	defer stopTimer()
+	arm := func(now time.Time) {
+		if pendingSince.IsZero() {
+			pendingSince = now
+		}
+		remaining := max(federationWatchJoinMaxWait-now.Sub(pendingSince), 0)
+		delay := min(federationWatchJoinDelay, remaining)
+		if flight == nil && !g.holdRetryAt.IsZero() && now.Before(g.holdRetryAt) && now.Before(g.nextPollAt) {
+			delay = max(delay, g.nextPollAt.Sub(now))
+		}
+		stopTimer()
+		sendTimer = time.NewTimer(delay)
+		send = sendTimer.C
 	}
 	for {
 		var answers <-chan watchAnswer
@@ -219,11 +255,7 @@ func (g *hubWatchGroup) run(ctx context.Context) {
 			return
 		case member := <-g.joins:
 			members[member] = true
-			if flight != nil {
-				flight.reissued = true
-				flight.cancel()
-			}
-			arm()
+			arm(g.polls.now())
 		case member := <-g.leaves:
 			delete(members, member)
 			if flight != nil && flight.members[member] {
@@ -238,19 +270,42 @@ func (g *hubWatchGroup) run(ctx context.Context) {
 				close(member.left)
 			}
 			leaving = nil
+			reissued := answer.err != nil && answer.flight.reissued
 			g.deliver(answer, members)
 			flight = nil
 			if len(members) > 0 {
-				arm()
+				if reissued && send == nil {
+					pendingSince = time.Time{}
+					flight = g.start(ctx, members)
+				} else if send == nil {
+					arm(g.polls.now())
+				}
 			}
 		case <-send:
 			send = nil
-			if flight != nil || len(members) == 0 {
+			pendingSince = time.Time{}
+			if len(members) == 0 {
+				continue
+			}
+			if flight != nil {
+				if hasUnwatchedMember(members, flight.members) {
+					flight.reissued = true
+					flight.cancel()
+				}
 				continue
 			}
 			flight = g.start(ctx, members)
 		}
 	}
+}
+
+func hasUnwatchedMember(members, inFlight map[*watchMember]bool) bool {
+	for member := range members {
+		if !inFlight[member] {
+			return true
+		}
+	}
+	return false
 }
 
 // start sends one watch for members. The lowest local project leads with its
@@ -266,7 +321,7 @@ func (g *hubWatchGroup) start(ctx context.Context, members map[*watchMember]bool
 		limit = support.advertised.watchMax
 	}
 	g.polls.mu.Unlock()
-	if !takes {
+	if !takes || g.polls.retries.hubBlocked(g.baseURL, g.polls.now()) {
 		for member := range members {
 			delete(members, member)
 			member.result <- heldResult{again: true}
@@ -300,6 +355,11 @@ func (g *hubWatchGroup) start(ctx context.Context, members map[*watchMember]bool
 		others = append(others, generated.FederationWatchProject{ProjectID: member.hubProjectID, AfterID: member.cursor, Token: member.token})
 		wait = min(wait, member.wait)
 	}
+	effectiveWait := wait
+	if !g.holdRetryAt.IsZero() && g.polls.now().Before(g.holdRetryAt) {
+		effectiveWait = 0
+	}
+	flight.requestedWait = effectiveWait
 	requestCtx, cancel := context.WithCancel(ctx)
 	flight.cancel = cancel
 	requestCtx = httptrace.WithClientTrace(requestCtx, &httptrace.ClientTrace{
@@ -314,7 +374,7 @@ func (g *hubWatchGroup) start(ctx context.Context, members map[*watchMember]bool
 	flight.started = time.Now()
 	g.polls.watchers.Go(func() {
 		defer cancel()
-		body, advertised, err := lead.client.watchProjectEvents(requestCtx, lead.hubProjectID, lead.cursor, others, wait)
+		body, advertised, err := lead.client.watchProjectEvents(requestCtx, lead.hubProjectID, lead.cursor, others, effectiveWait)
 		answer := watchAnswer{flight: flight, advertised: advertised, err: err, ready: map[int64]bool{}, unwatched: map[int64]bool{}}
 		for _, id := range body.Ready {
 			answer.ready[id] = true
@@ -336,38 +396,82 @@ func (g *hubWatchGroup) deliver(answer watchAnswer, members map[*watchMember]boo
 		return
 	}
 	elapsed := time.Since(flight.started)
+	var quietSleep time.Duration
+	var errorSleep time.Duration
+	routeRefused, leadDenied := watchRefusal(answer.err)
+	switch {
+	case answer.err == nil:
+		g.errBackoff = 0
+		g.polls.retries.clearHubUnavailable(g.baseURL)
+		g.polls.learnHub(g.baseURL, answer.advertised)
+		if answer.advertised.wait > 0 && answer.advertised.watchMax > 1 {
+			if flight.requestedWait > 0 {
+				if len(answer.ready) == 0 && elapsed < min(flight.requestedWait, answer.advertised.wait)/2 {
+					// The hub answered at once: its held-poll bound is full.
+					// Keep checking all watched projects with one wait=0 watch
+					// per interval, and probe wait>0 again with jittered backoff.
+					if g.holdBackoff == 0 {
+						g.holdBackoff = 2 * g.polls.interval
+					} else {
+						g.holdBackoff = min(g.holdBackoff*2, 16*g.polls.interval)
+					}
+					now := g.polls.now()
+					g.holdRetryAt = now.Add(g.polls.jitteredDelay(g.holdBackoff))
+					quietSleep = g.polls.jitteredDelay(g.polls.interval)
+					g.nextPollAt = now.Add(quietSleep)
+				} else if len(answer.ready) == 0 {
+					g.holdBackoff = 0
+					g.holdRetryAt = time.Time{}
+					g.nextPollAt = time.Time{}
+				}
+			} else {
+				now := g.polls.now()
+				quietSleep = g.polls.jitteredDelay(g.polls.interval)
+				g.nextPollAt = now.Add(quietSleep)
+			}
+		}
+	case leadDenied:
+		// The hub refused the lead's own credential or project. That is the
+		// lead's failure alone; the others watch again without it.
+	case routeRefused:
+		g.polls.refuseWatches(g.baseURL)
+		g.polls.report(fmt.Errorf("federation hub %s refused the watch request, so the spoke holds one poll per project for the next hour; check that a proxy in front of the hub allows POST /api/v1/projects/{project_id}/federation/events:watch: %w",
+			g.baseURL, answer.err))
+	default:
+		if g.errBackoff == 0 {
+			g.errBackoff = g.polls.interval
+		} else {
+			g.errBackoff = min(g.errBackoff*2, 16*g.polls.interval)
+		}
+		errorSleep = g.polls.jitteredDelay(g.errBackoff)
+		if hubAskedToWait(answer.err) {
+			_, _, retryAfter := classifySyncRetry(answer.err)
+			hubWait := g.polls.retries.recordHubUnavailable(g.baseURL, retryAfter, g.polls.interval, g.polls.now())
+			errorSleep = max(errorSleep, hubWait)
+		}
+	}
 	result := func(member *watchMember) heldResult {
 		switch {
+		case leadDenied:
+			if member == flight.lead {
+				return heldResult{err: answer.err}
+			}
+			return heldResult{again: true}
+		case routeRefused:
+			return heldResult{again: true}
 		case answer.err != nil:
-			return heldResult{err: answer.err}
+			return heldResult{err: answer.err, sleep: errorSleep}
 		case answer.ready[member.hubProjectID]:
 			return heldResult{changed: true, advertised: answer.advertised.wait}
 		case answer.unwatched[member.hubProjectID]:
 			return heldResult{unwatched: true}
+		case quietSleep > 0:
+			return heldResult{advertised: answer.advertised.wait, elapsed: elapsed, sleep: quietSleep, quiet: true}
 		case len(answer.ready) > 0:
 			return heldResult{again: true}
 		default:
 			return heldResult{advertised: answer.advertised.wait, elapsed: elapsed}
 		}
-	}
-	routeRefused, leadDenied := watchRefusal(answer.err)
-	switch {
-	case answer.err == nil:
-		g.polls.learnHub(g.baseURL, answer.advertised)
-	case leadDenied:
-		// The hub refused the lead's own credential or project. That is the
-		// lead's failure alone; the others watch again without it.
-		result = func(member *watchMember) heldResult {
-			if member == flight.lead {
-				return heldResult{err: answer.err}
-			}
-			return heldResult{again: true}
-		}
-	case routeRefused:
-		g.polls.refuseWatches(g.baseURL)
-		g.polls.report(fmt.Errorf("federation hub %s refused the watch request, so the spoke holds one poll per project for the next hour; check that a proxy in front of the hub allows POST /api/v1/projects/{project_id}/federation/events:watch: %w",
-			g.baseURL, answer.err))
-		result = func(*watchMember) heldResult { return heldResult{again: true} }
 	}
 	for member := range flight.members {
 		if !members[member] {

@@ -16,6 +16,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/httpurl"
 )
 
 // A refused credential needs a change somewhere before a retry can pass: a new
@@ -55,9 +56,17 @@ const (
 type SyncRetries struct {
 	mu     sync.Mutex
 	states map[int64]syncRetry
+	hubs   map[string]hubRetry
 	next   uint64
-	// jitter returns how much to take off a delay, in [0, limit).
+	// jitter returns how much to adjust a delay, in [0, limit).
 	jitter func(limit time.Duration) time.Duration
+}
+
+// hubRetry holds a hub-wide cooldown after a 429 or 503 capacity refusal so
+// one busy hub stops receiving a burst across every project bound to it.
+type hubRetry struct {
+	delay         time.Duration
+	nextAttemptAt time.Time
 }
 
 type syncRetry struct {
@@ -88,7 +97,11 @@ func NewSyncRetries() *SyncRetries {
 }
 
 func newSyncRetries(jitter func(time.Duration) time.Duration) *SyncRetries {
-	return &SyncRetries{states: map[int64]syncRetry{}, jitter: jitter}
+	return &SyncRetries{
+		states: map[int64]syncRetry{},
+		hubs:   map[string]hubRetry{},
+		jitter: jitter,
+	}
 }
 
 // FederationSyncRetry returns the binding's retry schedule while the runner is
@@ -274,6 +287,80 @@ func (s *SyncRetries) reset() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	clear(s.states)
+	clear(s.hubs)
+}
+
+func retryHubKey(hubURL string) string {
+	canonical, err := httpurl.CanonicalHTTPBaseURL(hubURL)
+	if err == nil && canonical != "" {
+		return canonical
+	}
+	return strings.TrimSpace(hubURL)
+}
+
+// recordHubUnavailable backs off every binding targeting hubURL after a 429 or
+// 503 capacity refusal. Additive jitter keeps the wait at or above both
+// interval and Retry-After while spreading retries across spokes.
+func (s *SyncRetries) recordHubUnavailable(hubURL string, retryAfter, interval time.Duration, completed time.Time) time.Duration {
+	if s == nil {
+		return 0
+	}
+	key := retryHubKey(hubURL)
+	if key == "" {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.hubs == nil {
+		s.hubs = map[string]hubRetry{}
+	}
+	previous, ok := s.hubs[key]
+	delay := nextRetryDelay(previous.delay, ok, interval, max(unavailableRetryMaxDelay, interval))
+	base := max(delay, min(retryAfter, maxHonoredRetryAfter))
+	wait := base + s.jitter(base/4)
+	nextAt := completed.Add(wait).UTC()
+	if ok && previous.nextAttemptAt.After(nextAt) {
+		nextAt = previous.nextAttemptAt
+	}
+	s.hubs[key] = hubRetry{delay: delay, nextAttemptAt: nextAt}
+	return max(nextAt.Sub(completed), 0)
+}
+
+// clearHubUnavailable ends a hub's capacity cooldown after a clean response.
+func (s *SyncRetries) clearHubUnavailable(hubURL string) {
+	if s == nil {
+		return
+	}
+	key := retryHubKey(hubURL)
+	if key == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.hubs, key)
+}
+
+// hubBlockedUntil reports whether hubURL is in a capacity cooldown at now.
+func (s *SyncRetries) hubBlockedUntil(hubURL string, now time.Time) (time.Time, bool) {
+	if s == nil {
+		return time.Time{}, false
+	}
+	key := retryHubKey(hubURL)
+	if key == "" {
+		return time.Time{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state, ok := s.hubs[key]
+	if !ok || !now.Before(state.nextAttemptAt) {
+		return time.Time{}, false
+	}
+	return state.nextAttemptAt, true
+}
+
+func (s *SyncRetries) hubBlocked(hubURL string, now time.Time) bool {
+	_, blocked := s.hubBlockedUntil(hubURL, now)
+	return blocked
 }
 
 // classifySyncRetry finds the hub response that decides a failed turn's retry
