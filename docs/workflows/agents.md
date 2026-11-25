@@ -54,8 +54,9 @@ uninstall replace each file atomically. On Linux and macOS, if the system
 refuses to replace an existing file, as Muse does for its runtime-managed
 `AGENTS.md`, they write that file in place instead, keeping its owner and mode.
 An in-place write is not atomic, so Muse could briefly read a partial file. A
-later failure still restores the file in place. A file with other hard links is
-never written in place. Keep each
+later failure restores the file in place. A file with other hard links is never
+written in place; if a link appears before that restore, the install fails and
+leaves the updated file for you to check. Keep each
 marker on its own line; LF or CRLF line endings and a missing final newline are
 accepted. Before writing anything, the installer stops with an error if it finds
 an existing unmarked skill or poll file, malformed markers, or a symlink at the
