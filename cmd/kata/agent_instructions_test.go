@@ -533,6 +533,9 @@ func refuseRenameOver(base string) func(string, []byte, os.FileMode) error {
 // kenn-io/kata#1315: a runtime-managed AGENTS.md cannot be replaced by rename,
 // but can be written. Install must update it in place instead of aborting.
 func TestAgentInstructionsWritesInPlaceWhenRenameOverIsRefused(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the in-place fallback is Unix-only")
+	}
 	home := t.TempDir()
 	instructions := filepath.Join(home, "AGENTS.md")
 	require.NoError(t, os.WriteFile(instructions, []byte("# Runtime managed\n"), 0o640)) //nolint:gosec // G306: exercise preservation of an existing fixture mode.
@@ -557,6 +560,9 @@ func TestAgentInstructionsWritesInPlaceWhenRenameOverIsRefused(t *testing.T) {
 // Rollback after a later failure must restore an in-place write through the
 // same fallback, leaving the runtime-managed file as it was.
 func TestAgentInstructionsRollbackRestoresInPlaceWrite(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the in-place fallback is Unix-only")
+	}
 	home := t.TempDir()
 	instructions := filepath.Join(home, "AGENTS.md")
 	require.NoError(t, os.WriteFile(instructions, []byte("# Runtime managed\n"), 0o600))
@@ -580,9 +586,9 @@ func TestAgentInstructionsRollbackRestoresInPlaceWrite(t *testing.T) {
 	require.True(t, os.SameFile(before, after))
 }
 
-// A write that started in place has already changed the file, so a failure
-// after that point must restore it with the files written before it.
-func TestAgentInstructionsInPlaceFailureRollsBack(t *testing.T) {
+// errWrittenInPlace means the failing file was already changed, so rollback
+// restores it along with the files written before it.
+func TestAgentInstructionsRollbackRestoresFileMarkedWrittenInPlace(t *testing.T) {
 	home := t.TempDir()
 	artifacts, err := planInstructionArtifacts(home, "example-agent", "install")
 	require.NoError(t, err)
@@ -595,11 +601,92 @@ func TestAgentInstructionsInPlaceFailureRollsBack(t *testing.T) {
 		}
 		return err
 	})
-	require.Error(t, err)
+	require.ErrorIs(t, err, errWrittenInPlace)
 	for _, a := range artifacts {
 		_, err := os.Stat(a.Path)
 		require.ErrorIs(t, err, os.ErrNotExist)
 	}
+}
+
+// A write that fails after the in-place open has truncated the file must
+// report errWrittenInPlace. /dev/full accepts the open and fails every write.
+func TestWriteInstructionInPlaceMarksFailureAfterTruncation(t *testing.T) {
+	if _, err := os.Stat("/dev/full"); err != nil {
+		t.Skip("/dev/full unavailable")
+	}
+	err := writeInstructionInPlace("/dev/full", []byte("content"))
+	require.ErrorIs(t, err, errWrittenInPlace)
+	require.ErrorIs(t, err, syscall.ENOSPC)
+}
+
+// atomicfile never writes through a hard link, so neither does the fallback:
+// the other name may belong to a backup or another harness.
+func TestAgentInstructionsInPlaceFallbackRefusesHardLinks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the in-place fallback is Unix-only")
+	}
+	home := t.TempDir()
+	instructions := filepath.Join(home, "AGENTS.md")
+	require.NoError(t, os.WriteFile(instructions, []byte("# Shared\n"), 0o600))
+	other := filepath.Join(t.TempDir(), "AGENTS-backup.md")
+	require.NoError(t, os.Link(instructions, other))
+	artifacts, err := planInstructionArtifacts(home, "example-agent", "install")
+	require.NoError(t, err)
+	err = applyInstructionArtifactsWithWriter(artifacts, newInstructionWriter(refuseRenameOver("AGENTS.md")))
+	require.ErrorIs(t, err, syscall.EPERM)
+	data, err := os.ReadFile(other) //nolint:gosec // G304: fixture under TempDir.
+	require.NoError(t, err)
+	require.Equal(t, "# Shared\n", string(data))
+}
+
+// Once a file refused rename-over, rollback restores it in place without
+// staging another copy, which can fail on a full disk.
+func TestAgentInstructionsRollbackRestoresInPlaceWithoutStaging(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the in-place fallback is Unix-only")
+	}
+	home := t.TempDir()
+	instructions := filepath.Join(home, "AGENTS.md")
+	require.NoError(t, os.WriteFile(instructions, []byte("# Runtime managed\n"), 0o600))
+	artifacts, err := planInstructionArtifacts(home, "example-agent", "install")
+	require.NoError(t, err)
+	full := false
+	replace := func(path string, data []byte, mode os.FileMode) error {
+		switch {
+		case full:
+			return fmt.Errorf("atomicfile: create %s: %w", path, syscall.ENOSPC)
+		case filepath.Base(path) == "AGENTS.md":
+			return &os.LinkError{Op: "rename", Old: path + ".tmp", New: path, Err: syscall.EPERM}
+		case filepath.Base(path) == "POLL.md":
+			full = true
+			return fmt.Errorf("atomicfile: create %s: %w", path, syscall.ENOSPC)
+		}
+		return atomicReplaceInstruction(path, data, mode)
+	}
+	err = applyInstructionArtifactsWithWriter(artifacts, newInstructionWriter(replace))
+	require.ErrorIs(t, err, syscall.ENOSPC)
+	data, err := os.ReadFile(instructions) //nolint:gosec // G304: fixture under TempDir.
+	require.NoError(t, err)
+	require.Equal(t, "# Runtime managed\n", string(data))
+	_, err = os.Stat(artifacts[1].Path)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+// When the in-place fallback cannot open the file either, the error still
+// explains that rename-over was refused first.
+func TestAgentInstructionsFallbackOpenFailureKeepsRenameError(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs Unix permissions that bind the current user")
+	}
+	home := t.TempDir()
+	instructions := filepath.Join(home, "AGENTS.md")
+	require.NoError(t, os.WriteFile(instructions, []byte("# Read only\n"), 0o400))
+	artifacts, err := planInstructionArtifacts(home, "example-agent", "install")
+	require.NoError(t, err)
+	err = applyInstructionArtifactsWithWriter(artifacts, newInstructionWriter(refuseRenameOver("AGENTS.md")))
+	var linkErr *os.LinkError
+	require.ErrorAs(t, err, &linkErr)
+	require.ErrorIs(t, err, syscall.EACCES)
 }
 
 // Only a refused rename over an existing file falls back. Other failures, and

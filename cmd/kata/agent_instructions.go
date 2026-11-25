@@ -342,7 +342,7 @@ func checkInstructionPath(path, home string) error {
 }
 
 func applyInstructionArtifacts(artifacts []instructionArtifact) error {
-	return applyInstructionArtifactsWithWriter(artifacts, writeInstructionArtifact)
+	return applyInstructionArtifactsWithWriter(artifacts, newInstructionWriter(atomicReplaceInstruction))
 }
 
 func applyInstructionArtifactsWithWriter(artifacts []instructionArtifact, write func(string, string, bool, os.FileMode) error) error {
@@ -386,15 +386,22 @@ func applyInstructionArtifactsWithWriter(artifacts []instructionArtifact, write 
 // file. Like atomicfile.ErrPublished, it means the file needs restoring.
 var errWrittenInPlace = errors.New("instruction file partially written in place")
 
-var writeInstructionArtifact = newInstructionWriter(atomicReplaceInstruction)
+func writeInstructionArtifact(path, content string, keepEmpty bool, mode os.FileMode) error {
+	return newInstructionWriter(atomicReplaceInstruction)(path, content, keepEmpty, mode)
+}
 
 func atomicReplaceInstruction(path string, data []byte, mode os.FileMode) error {
 	return atomicfile.WriteFile(path, data, atomicfile.WithPerm(mode))
 }
 
-// keepEmpty writes an empty file instead of removing it. Rollback uses it to
-// restore an existing empty preimage; uninstall uses it to retain AGENTS.md.
+// newInstructionWriter returns a writer for one batch. It replaces files
+// through replace, falling back to an in-place write where rename-over is
+// refused, and keeps writing those files in place, so rollback restores them
+// without staging another copy. keepEmpty writes an empty file instead of
+// removing it. Rollback uses it to restore an existing empty preimage;
+// uninstall uses it to retain AGENTS.md.
 func newInstructionWriter(replace func(string, []byte, os.FileMode) error) func(string, string, bool, os.FileMode) error {
+	inPlace := map[string]bool{}
 	return func(path, content string, keepEmpty bool, mode os.FileMode) error {
 		if content == "" && !keepEmpty {
 			err := os.Remove(path)
@@ -403,6 +410,9 @@ func newInstructionWriter(replace func(string, []byte, os.FileMode) error) func(
 			}
 			return err
 		}
+		if inPlace[path] {
+			return writeInstructionInPlace(path, []byte(content))
+		}
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			return err
 		}
@@ -410,21 +420,26 @@ func newInstructionWriter(replace func(string, []byte, os.FileMode) error) func(
 		if !renameOverRefused(path, err) {
 			return err
 		}
-		return writeInstructionInPlace(path, []byte(content))
+		inPlace[path] = true
+		if inPlaceErr := writeInstructionInPlace(path, []byte(content)); inPlaceErr != nil {
+			return errors.Join(err, inPlaceErr)
+		}
+		return nil
 	}
 }
 
 // renameOverRefused reports a permission error from renaming over an existing
-// regular file. Runtime-managed files such as consumer Muse's AGENTS.md can be
-// written but not replaced (kenn-io/kata#1315). atomicfile has removed its
-// staging file by then and left the target untouched.
+// regular file with no other hard links. Runtime-managed files such as
+// consumer Muse's AGENTS.md can be written but not replaced
+// (kenn-io/kata#1315); atomicfile leaves the target untouched. Only Unix
+// reports this as a rename error, so the fallback is Unix-only.
 func renameOverRefused(path string, err error) bool {
 	var linkErr *os.LinkError
 	if !errors.As(err, &linkErr) || linkErr.Op != "rename" || !errors.Is(err, fs.ErrPermission) {
 		return false
 	}
 	info, statErr := os.Lstat(path)
-	return statErr == nil && info.Mode().IsRegular()
+	return statErr == nil && info.Mode().IsRegular() && singleLinkFile(info)
 }
 
 // writeInstructionInPlace overwrites an existing file without replacing it, so
@@ -443,7 +458,7 @@ func writeInstructionInPlace(path string, data []byte) error {
 		err = closeErr
 	}
 	if err != nil {
-		return fmt.Errorf("%w: %s: %w", errWrittenInPlace, path, err)
+		return fmt.Errorf("%w: %w", errWrittenInPlace, err)
 	}
 	return nil
 }
