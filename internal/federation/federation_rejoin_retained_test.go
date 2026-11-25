@@ -1,6 +1,7 @@
 package federation
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -77,6 +78,46 @@ func TestRejoinBatchesAlreadyAcceptedOldEvents(t *testing.T) {
 	comments, err := hub.DB.CommentsByIssue(ctx, hubIssue.ID)
 	require.NoError(t, err)
 	require.Len(t, comments, 1)
+}
+
+func TestRejoinPublishesAfter500OldTasks(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "rejoin-project")
+	spoke := newMoveDeliverySpoke(t, hub, projects, "old-actor")
+	project := spoke.projects[0]
+	_, err := spoke.env.DB.LeaveFederationReplica(ctx, project.ID)
+	require.NoError(t, err)
+	earlier, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "earlier task", Author: "new-actor"})
+	require.NoError(t, err)
+	for range 500 {
+		issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "old task", Author: "old-actor"})
+		require.NoError(t, err)
+		_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "old-actor", Body: "old comment"})
+		require.NoError(t, err)
+	}
+	grant, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: spoke.env.DB.InstanceUID(), ProjectID: &projects[0].ID, Capabilities: "pull,push", Actor: "new-actor"})
+	require.NoError(t, err)
+	hubBinding, err := hub.DB.FederationBindingByProject(ctx, projects[0].ID)
+	require.NoError(t, err)
+	var replica api.CreateFederationReplicaResponseBody
+	postJSON(t, spoke.env.URL, "/api/v1/federation/replicas", map[string]any{
+		"hub_url": hub.URL, "hub_project_id": projects[0].ID, "hub_project_uid": projects[0].UID,
+		"project_name": project.Name, "replay_horizon_event_id": hubBinding.ReplayHorizonEventID, "token": grant.Token, "capabilities": "pull,push", "actor": "new-actor", "push_enabled": true,
+	}, &replica)
+	later, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "later task", Author: "new-actor"})
+	require.NoError(t, err)
+	binding, err := spoke.env.DB.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	creds := config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[0].ID, Token: grant.Token, Actor: "new-actor", Capabilities: "pull,push"}
+	syncCtx, cancel := context.WithTimeout(ctx, 150*time.Second)
+	defer cancel()
+	started := time.Now()
+	require.NoError(t, SyncFederationOnce(syncCtx, spoke.env.DB, binding, creds))
+	t.Logf("sync completed in %s", time.Since(started))
+	_, err = hub.DB.IssueByUID(ctx, later.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	_, err = hub.DB.IssueByUID(ctx, earlier.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
 }
 
 func TestRejoinContinuesAfterLocalWorkflowAndJob(t *testing.T) {
