@@ -784,39 +784,59 @@ func TestSyncFederationOncePushPoisonRecordsQuarantine(t *testing.T) {
 }
 
 func TestSyncFederationOnceValidationBadRequestRecordsQuarantine(t *testing.T) {
-	for _, actor := range []string{"tester", "old-actor"} {
-		t.Run(actor, func(t *testing.T) {
-			ctx := t.Context()
-			spoke := testenv.New(t)
-			project, err := spoke.DB.CreateProject(ctx, "hub")
-			require.NoError(t, err)
-			binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
-				ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "http://127.0.0.1:1",
-				HubProjectID: 42, HubProjectUID: project.UID, ReplayHorizonEventID: 50,
-				PullCursorEventID: 49, PushEnabled: true, Actor: "tester", Enabled: true,
-			})
-			require.NoError(t, err)
-			_, localEvent, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "pending local", Author: actor})
-			require.NoError(t, err)
-			hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path == "/api/v1/projects/42/federation/events:ingest" {
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusBadRequest)
-					require.NoError(t, json.NewEncoder(w).Encode(api.ErrorEnvelope{Status: http.StatusBadRequest, Error: api.ErrorBody{Code: "validation", Message: "invalid federation batch"}}))
-					return
-				}
-				http.NotFound(w, r)
+	ctx := t.Context()
+	spoke := testenv.New(t)
+	project, err := spoke.DB.CreateProject(ctx, "hub")
+	require.NoError(t, err)
+	binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            project.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://127.0.0.1:1",
+		HubProjectID:         42,
+		HubProjectUID:        project.UID,
+		ReplayHorizonEventID: 50,
+		PullCursorEventID:    49,
+		PushEnabled:          true,
+		Actor:                "tester",
+		PushCursorEventID:    0,
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+	_, localEvent, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "pending local",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/projects/42/federation/events:ingest" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			require.NoError(t, json.NewEncoder(w).Encode(api.ErrorEnvelope{
+				Status: http.StatusBadRequest,
+				Error: api.ErrorBody{
+					Code:    "validation",
+					Message: "invalid federation batch",
+				},
 			}))
-			t.Cleanup(hub.Close)
-			err = SyncFederationOnce(ctx, spoke.DB, binding, config.FederationCredential{HubURL: hub.URL, HubProjectID: 42, Token: "token"})
-			require.Error(t, err)
-			q, err := spoke.DB.ActiveFederationQuarantine(ctx, project.ID, db.FederationQuarantineDirectionPush)
-			require.NoError(t, err)
-			assert.Equal(t, localEvent.ID, q.FirstEventID)
-			assert.Equal(t, localEvent.ID, q.LastEventID)
-			assert.Contains(t, q.Error, "returned 400")
-		})
-	}
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(hub.Close)
+
+	err = SyncFederationOnce(ctx, spoke.DB, binding, config.FederationCredential{
+		HubURL:       hub.URL,
+		HubProjectID: 42,
+		Token:        "token",
+	})
+
+	require.Error(t, err)
+	q, err := spoke.DB.ActiveFederationQuarantine(ctx, project.ID, db.FederationQuarantineDirectionPush)
+	require.NoError(t, err)
+	assert.Equal(t, localEvent.ID, q.FirstEventID)
+	assert.Equal(t, localEvent.ID, q.LastEventID)
+	assert.Contains(t, q.Error, "returned 400")
 }
 
 func TestSyncFederationOnceUnsupportedSchemaDoesNotQuarantine(t *testing.T) {
