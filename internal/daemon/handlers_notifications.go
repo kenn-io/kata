@@ -169,13 +169,16 @@ func registerNotificationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		recipients := []string{to}
 		ctx = db.WithMetadataPatchHook(ctx, func(ctx context.Context, tx *sql.Tx, current db.Issue) (map[string]jsontext.Value, error) {
-			// Send stores the mapped actor, so the comparison names if_from
-			// the way a send would have stored it.
-			mappedIfFrom, err := notificationMutationActorTx(ctx, tx, current.ProjectID, in.Body.IfFrom)
-			if err != nil {
-				return nil, err
+			// A send stores the binding's mapped actor, so the caller's own
+			// name also matches what its sends stored; any other if_from
+			// compares exactly, so naming someone else never over-clears.
+			storedIfFrom := in.Body.IfFrom
+			if in.Body.IfFrom == actor {
+				if storedIfFrom, err = notificationMutationActorTx(ctx, tx, current.ProjectID, actor); err != nil {
+					return nil, err
+				}
 			}
-			return clearNotificationIfFrom(current, to, in.Body.IfFrom, mappedIfFrom), nil
+			return clearNotificationIfFrom(current, to, in.Body.IfFrom, storedIfFrom), nil
 		})
 		return commitNotificationPatch(ctx, cfg, issue.ID, actor, &recipients)
 	}))
@@ -318,12 +321,12 @@ func heldNotification(issue db.Issue, recipient string) (notification.Value, jso
 }
 
 // clearNotificationIfFrom removes recipient's request only while its stored
-// from field equals ifFrom, or equals mappedIfFrom, the value a send naming
-// ifFrom stores on a push-enabled spoke; that is a comparison of stored data,
-// not a check of who wrote the request. Otherwise it patches nothing.
-func clearNotificationIfFrom(issue db.Issue, recipient, ifFrom, mappedIfFrom string) map[string]jsontext.Value {
+// from field equals ifFrom, or equals storedIfFrom, the value the caller's
+// own sends store on a push-enabled spoke; that is a comparison of stored
+// data, not a check of who wrote the request. Otherwise it patches nothing.
+func clearNotificationIfFrom(issue db.Issue, recipient, ifFrom, storedIfFrom string) map[string]jsontext.Value {
 	held, _, ok := heldNotification(issue, recipient)
-	if !ok || (held.From != ifFrom && held.From != mappedIfFrom) {
+	if !ok || (held.From != ifFrom && held.From != storedIfFrom) {
 		return map[string]jsontext.Value{}
 	}
 	return map[string]jsontext.Value{notification.MetadataKey(recipient): jsontext.Value("null")}

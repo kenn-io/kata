@@ -672,7 +672,7 @@ func (c ClaimViolationOut) Validate() error {
 type ClearNotificationRequestBody struct {
 	Actor *string `json:"actor,omitempty"`
 
-	// IfFrom Remove the request only while its stored from field equals this actor. A stored-field check, not proof of who wrote it
+	// IfFrom Remove the request only while its stored from field equals this actor or, when this names the caller on a push-enabled spoke, the spoke's bound actor. A stored-field check, not proof of who wrote it
 	IfFrom string `json:"if_from" validate:"required"`
 
 	// To Recipient address: <actor> or <actor>/<teammate>

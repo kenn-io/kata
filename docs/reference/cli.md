@@ -1454,10 +1454,11 @@ normally. It cannot be combined with `--broadcast` or `--clear`.
 field equals `<actor>`; otherwise it changes nothing and reports
 `left unchanged`. This compares the stored field and does not verify who wrote
 it: any actor allowed to write issue metadata can store a request with another
-actor's name in `from`. On a project with a push-enabled spoke binding, every
-local request is stored under the binding's bound actor, so local senders
-cannot be told apart there: any `<actor>` clears a request a local sender
-wrote, and only a request stored under another name needs that exact name.
+actor's name in `from`. On a direct push-enabled spoke whose binding has a
+bound actor, every local request is stored under that bound actor, so an
+`<actor>` that names the caller also matches it: a sender can clear its own
+request there, but local senders cannot be told apart, so any of them naming
+itself can clear another's. Any other `<actor>` must equal the stored `from`.
 Both checks run inside the daemon's write, so they hold
 against concurrent senders. Over HTTP, `--no-replace` is `replace: false` on
 the notifications endpoint, and a refusal answers 409 `notification_held` with

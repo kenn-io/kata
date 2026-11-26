@@ -26,7 +26,7 @@ type ClearNotificationRequest struct {
 	Body struct {
 		Actor  string `json:"actor,omitempty"`
 		To     string `json:"to" required:"true" doc:"Recipient address: <actor> or <actor>/<teammate>"`
-		IfFrom string `json:"if_from" required:"true" doc:"Remove the request only while its stored from field equals this actor. A stored-field check, not proof of who wrote it"`
+		IfFrom string `json:"if_from" required:"true" doc:"Remove the request only while its stored from field equals this actor or, when this names the caller on a push-enabled spoke, the spoke's bound actor. A stored-field check, not proof of who wrote it"`
 	}
 }
 

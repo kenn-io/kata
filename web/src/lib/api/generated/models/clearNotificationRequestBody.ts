@@ -4,7 +4,7 @@
 
 export interface ClearNotificationRequestBody {
   actor?: string
-  /** Remove the request only while its stored from field equals this actor. A stored-field check, not proof of who wrote it */
+  /** Remove the request only while its stored from field equals this actor or, when this names the caller on a push-enabled spoke, the spoke's bound actor. A stored-field check, not proof of who wrote it */
   if_from: string
   /** Recipient address: <actor> or <actor>/<teammate> */
   to: string

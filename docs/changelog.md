@@ -9,7 +9,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
-- Send a [request without replacing one](reference/cli.md#teammate-requests) the recipient still holds with `kata notify --no-replace`, and clear a request only while its stored `from` field is a given actor with `kata notify --clear --if-from <actor>`. `--no-replace` does not combine with `--broadcast` or `--clear`; `--if-from` needs `--clear`, compares the stored `from` and does not verify who wrote the request, and a plain `--clear` still clears unconditionally. Both need a daemon on API 0.72.0 or newer.
+- Send a [request without replacing one](reference/cli.md#teammate-requests) the recipient still holds with `kata notify --no-replace`, and clear a request only while its stored `from` field is a given actor with `kata notify --clear --if-from <actor>`. `--no-replace` does not combine with `--broadcast` or `--clear`; `--if-from` needs `--clear`, compares the stored `from` (on a push-enabled spoke, naming yourself also matches the bound actor your sends are stored under) and does not verify who wrote the request, and a plain `--clear` still clears unconditionally. Both need a daemon on API 0.72.0 or newer.
 
 ## 0.24.0
 <small>2026-11-25</small>

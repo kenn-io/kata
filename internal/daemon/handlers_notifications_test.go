@@ -364,4 +364,10 @@ func TestNotifyClearIfFromOnPushSpokeMatchesSender(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, clear("worker"))
 	require.True(t, clear("peer"))
+
+	// Naming another sender leaves a request sent here since in place, even
+	// though both names would map to the binding's actor on a send.
+	send()
+	require.False(t, clear("peer"), "naming another sender keeps a local request")
+	require.True(t, clear("worker"))
 }

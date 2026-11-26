@@ -494,7 +494,7 @@ components:
         actor:
           type: string
         if_from:
-          description: Remove the request only while its stored from field equals this actor. A stored-field check, not proof of who wrote it
+          description: Remove the request only while its stored from field equals this actor or, when this names the caller on a push-enabled spoke, the spoke's bound actor. A stored-field check, not proof of who wrote it
           type: string
         to:
           description: "Recipient address: <actor> or <actor>/<teammate>"
