@@ -236,14 +236,15 @@ func eventDescription(e EventLogEntry) string {
 // chunk. Most events are single-line: "[type] time actor — description".
 // issue.closed events additionally emit indented continuation lines
 // surfacing the close message and each evidence item so reviewers can
-// audit closures directly from the events tab.
+// audit closures directly from the events tab; issue.soft_deleted events
+// with a reason emit wrapped "reason:" rows.
 func eventChunkLines(e EventLogEntry, width int, isCursor bool, current map[string]metadata.Attachment) []string {
 	// Type is daemon-authored; Actor and description interpolate
 	// agent-authored payload fields — sanitize both.
 	head := fmt.Sprintf("[%s] %s %s — %s",
 		e.Type, fmtTime(e.CreatedAt),
 		sanitizeForDisplay(authorname.Display(e.Actor)),
-		sanitizeForLine(eventDescription(e)))
+		sanitizeForDisplay(eventDescription(e)))
 	lines := []string{applyActivityCursor(head, isCursor)}
 	switch e.Type {
 	case "issue.closed":
