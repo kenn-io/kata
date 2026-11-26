@@ -160,10 +160,7 @@ func selectedDaemonDiagnosis(selection client.DaemonSelection, expectedProject s
 	return result
 }
 
-func currentHomeStorageIsAbsent(dsn string, openErr error) bool {
-	if errors.Is(openErr, os.ErrNotExist) {
-		return true
-	}
+func currentHomeSQLiteAbsent(dsn string) bool {
 	backend, err := storeopen.BackendForDSN(dsn)
 	if err != nil || backend == storeopen.BackendPostgres {
 		return false
@@ -171,6 +168,23 @@ func currentHomeStorageIsAbsent(dsn string, openErr error) bool {
 	path := strings.TrimPrefix(dsn, "sqlite://")
 	_, err = os.Stat(path)
 	return errors.Is(err, os.ErrNotExist)
+}
+
+func currentHomeStorageIsAbsent(dsn string, openErr error) bool {
+	if errors.Is(openErr, os.ErrNotExist) {
+		return true
+	}
+	return currentHomeSQLiteAbsent(dsn)
+}
+
+// currentHomeStorageInitializing reports whether another kata daemon holds the
+// SQLite store owner lock while creating and bootstrapping the database.
+func currentHomeStorageInitializing(dsn string, ownerLocks []string) bool {
+	backend, err := storeopen.BackendForDSN(dsn)
+	if err != nil || backend == storeopen.BackendPostgres {
+		return false
+	}
+	return daemonruntime.StoreOwnerLocked(ownerLocks)
 }
 
 func diagnoseDaemonSelection(
@@ -246,28 +260,40 @@ func diagnoseDaemonSelection(
 			result.Message = "another kata process holds the SQLite storage lock, usually a daemon upgrading the database"
 			return withDiagnosisAction(result), selection, nil
 		}
+		// Snapshot absence before opening read-only so a starting daemon that
+		// creates the file mid-probe is not reported as unreadable_storage.
+		absentBeforeOpen := currentHomeSQLiteAbsent(dsn)
+		ownerLocks := daemonruntime.StoreOwnerLockPaths(ns.DataDir, dsn)
 		store, err = storeopen.OpenReadOnly(ctx, dsn)
 		if err != nil || store == nil {
-			if err != nil && !currentHomeStorageIsAbsent(dsn, err) {
+			if err != nil && !absentBeforeOpen && !currentHomeStorageIsAbsent(dsn, err) &&
+				!currentHomeStorageInitializing(dsn, ownerLocks) {
 				result.State = "unreadable_storage"
 				result.Message = err.Error()
 				return report(), selection, nil
 			}
 			store = nil
-		} else {
-			if err = store.RefreshInstanceUID(ctx); err != nil {
-				_ = store.Close()
+		} else if err = store.RefreshInstanceUID(ctx); err != nil {
+			_ = store.Close()
+			if currentHomeStorageInitializing(dsn, ownerLocks) {
+				store = nil
+			} else {
 				result.State = "unreadable_storage"
 				result.Message = err.Error()
 				return report(), selection, nil
 			}
+		} else {
 			result.ObservedInstanceUID = store.InstanceUID()
 			result.SchemaVersion, err = store.SchemaVersion(ctx)
 			if err != nil {
 				_ = store.Close()
-				result.State = "unreadable_storage"
-				result.Message = err.Error()
-				return report(), selection, nil
+				if currentHomeStorageInitializing(dsn, ownerLocks) {
+					store = nil
+				} else {
+					result.State = "unreadable_storage"
+					result.Message = err.Error()
+					return report(), selection, nil
+				}
 			}
 		}
 	}
