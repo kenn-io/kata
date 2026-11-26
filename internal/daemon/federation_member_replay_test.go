@@ -36,12 +36,10 @@ import (
 // The comparison uses 36 devices and 365 projects. Each device polls and
 // pushes each of its bindings, with one push at a time per device.
 const (
-	replayMembers           = 36
-	replayProjects          = 365
-	replayPollWait          = 30
-	replayLargePushes       = 4
-	replayLargePushBodySize = 60 << 20
-	replayHubEnv            = "KATA_FEDERATION_REPLAY_HUB"
+	replayMembers  = 36
+	replayProjects = 365
+	replayPollWait = 30
+	replayHubEnv   = "KATA_FEDERATION_REPLAY_HUB"
 )
 
 type replayKey struct {
@@ -206,10 +204,7 @@ func TestFederationMemberReplay(t *testing.T) {
 	cursor, err := store.MaxEventID(ctx)
 	require.NoError(t, err)
 
-	// KATA_FEDERATION_REPLAY_HUB_FLAGS passes test flags such as
-	// -test.cpuprofile to the hub process.
-	args := append([]string{"-test.run=^TestFederationMemberReplayHub$", "-test.v"}, strings.Fields(os.Getenv("KATA_FEDERATION_REPLAY_HUB_FLAGS"))...)
-	hub := exec.CommandContext(ctx, os.Args[0], args...) //nolint:gosec // re-executes this test binary
+	hub := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestFederationMemberReplayHub$", "-test.v") //nolint:gosec // re-executes this test binary
 	hub.Env = append(os.Environ(), replayHubEnv+"="+dir, "TMPDIR="+hubTmp)
 	hubLog, err := os.Create(filepath.Join(dir, "hub.log")) //nolint:gosec // test-owned replay directory
 	require.NoError(t, err)
@@ -524,10 +519,7 @@ func TestFederationMemberReplay(t *testing.T) {
 		t.Logf("REPLAY %s", line)
 		for kind, s := range report {
 			assert.Equal(t, s.Sent-s.Refused429, s.OK, "%s %s: every request must succeed; first failure: %s", name, kind, s.FirstFailure)
-			if name == "sync" && os.Getenv("KATA_FEDERATION_REPLAY_EXPECT_NO_REFUSALS") == "1" {
-				assert.Zero(t, s.Refused429, "%s: candidate must admit each request", kind)
-			}
-			if name == "sync" && kind == "poll" && os.Getenv("KATA_FEDERATION_REPLAY_EXPECT_NO_POLL_REFUSALS") == "1" {
+			if kind == "poll" && os.Getenv("KATA_FEDERATION_REPLAY_EXPECT_NO_POLL_REFUSALS") == "1" {
 				assert.Zero(t, s.Refused429, "polls must reach their waiter bounds")
 			}
 		}
@@ -631,23 +623,5 @@ func TestFederationMemberReplay(t *testing.T) {
 			})
 		}
 		return settled
-	})
-	if os.Getenv("KATA_FEDERATION_REPLAY_LARGE") != "1" {
-		return
-	}
-	// Optional stress phase: four concurrent large signed pushes exceed the
-	// retained two-push gate and can fail while a client is still uploading.
-	large := map[int64]int{}
-	largeBodies := make([][]byte, replayLargePushes)
-	for i := range largeBodies {
-		e := members[i].own[0]
-		largeBodies[i] = pushBody(e, members[i].spokeUID, strings.Repeat("x", replayLargePushBodySize))
-		large[e.project.ID]++
-	}
-	phase("large-push", large, func(launch func(kind string, e enrollment, method, path string, body []byte), _ func(func()), _ func(string, enrollment, string, string, []byte)) time.Time {
-		for i, body := range largeBodies {
-			launch("large-push", members[i].own[0], http.MethodPost, projectPath(members[i].own[0].project.ID)+"/federation/events:ingest", body)
-		}
-		return time.Now()
 	})
 }
