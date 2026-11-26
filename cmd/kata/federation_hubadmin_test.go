@@ -2,17 +2,49 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"testing/synctest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"go.kenn.io/kata/internal/config"
 )
+
+type hubBusyThenSuccess struct{ calls int }
+
+func (tr *hubBusyThenSuccess) RoundTrip(req *http.Request) (*http.Response, error) {
+	tr.calls++
+	if tr.calls == 1 {
+		return &http.Response{StatusCode: 429, Header: http.Header{"Retry-After": []string{"5"}}, Body: io.NopCloser(strings.NewReader("Rate exceeded.")), Request: req}, nil
+	}
+	return &http.Response{StatusCode: 200, Header: make(http.Header), Body: http.NoBody, Request: req}, nil
+}
+
+func TestHubAdminClientRetriesFiveSecondHint(t *testing.T) {
+	t.Setenv("KATA_HTTP_TIMEOUT", "")
+	synctest.Test(t, func(t *testing.T) {
+		hc, err := hubAdminClient(t.Context(), hubAdminAuth{url: "https://hub.example"})
+		require.NoError(t, err)
+		transport := &hubBusyThenSuccess{}
+		busy := hc.Transport.(busyTransport)
+		busy.next = transport
+		hc.Transport = busy
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "https://hub.example", strings.NewReader("payload"))
+		require.NoError(t, err)
+		resp, err := hc.Do(req) //nolint:gosec // fake transport
+		require.NoError(t, err)
+		defer func() { assert.NoError(t, resp.Body.Close()) }()
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		require.Equal(t, 2, transport.calls)
+	})
+}
 
 // catalog builds a minimal daemon catalog for resolver tests.
 func catalog(entries ...config.CatalogDaemonConfig) *config.DaemonConfig {

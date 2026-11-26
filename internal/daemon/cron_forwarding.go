@@ -89,6 +89,7 @@ func forwardCronJob(ctx context.Context, cfg ServerConfig, projectID int64, uid,
 	if err != nil {
 		return nil, true, cronForwardUnavailable("federation transport is unavailable")
 	}
+	observeHubBusy(client)
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	path := fmt.Sprintf("%s/api/v1/projects/%d", bindingOrigin, binding.HubProjectID)
 	var meta api.ProjectFederationBody
@@ -99,6 +100,9 @@ func forwardCronJob(ctx context.Context, cfg ServerConfig, projectID int64, uid,
 		return nil, true, api.NewError(409, "federated_read_only", "owning hub does not support native cron writes", "Upgrade the hub, or run the command against it with --daemon <hub-name>.", nil)
 	}
 	if err := cfg.FederationPushPending(ctx, binding, cred); err != nil {
+		if busy := syncHubBusy(err, bindingOrigin); busy != nil {
+			return nil, true, busy
+		}
 		return nil, true, cronForwardUnavailable("pending federation push failed; no cron write was sent")
 	}
 	// Admission excludes rebind and leave, but a rejoin can rewrite the binding
@@ -194,6 +198,9 @@ func cronHubRequest(ctx context.Context, client *http.Client, method, path strin
 	req.Header.Set(db.EventFeaturesHeader, db.SupportedEventFeatures)
 	response, err := client.Do(req)
 	if err != nil {
+		if busy := forwardedHubBusy(err); busy != nil {
+			return busy
+		}
 		if method == http.MethodGet {
 			return cronForwardUnavailable("hub metadata is unavailable")
 		}

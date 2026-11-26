@@ -100,7 +100,7 @@ type bridgeDisconnectResponse struct {
 // R9: disconnect previews without mutation, revokes exactly the retained narrow
 // grant, and safely resumes after a lost upstream response without losing data.
 func TestFederationBridgeDisconnectLifecycle(t *testing.T) {
-	for _, mode := range []string{"normal", "lost_response", "disconnect_write_race", "disconnect_validation_write_race", "pending_enrollment", "precommit_enrollment_failure", "partial_project_only", "partial_binding_without_relay", "partial_project_archived", "inflight_enrollment", "parent_revoked", "credential_changed", "archived", "archived_pending", "signed_disconnect"} {
+	for _, mode := range []string{"normal", "lost_response", "busy_enrollment", "busy_disconnect", "disconnect_write_race", "disconnect_validation_write_race", "pending_enrollment", "precommit_enrollment_failure", "partial_project_only", "partial_binding_without_relay", "partial_project_archived", "inflight_enrollment", "parent_revoked", "credential_changed", "archived", "archived_pending", "signed_disconnect"} {
 		t.Run(mode, func(t *testing.T) {
 			projectAccessBackends(t, func(t *testing.T, store db.Storage) {
 				t.Setenv("KATA_HOME", t.TempDir())
@@ -132,6 +132,11 @@ func TestFederationBridgeDisconnectLifecycle(t *testing.T) {
 				upstreamURL, err := url.Parse(root.server.URL)
 				require.NoError(t, err)
 				remoteHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if (mode == "busy_enrollment" && r.URL.Path == "/api/v1/federation/enrollments") || (mode == "busy_disconnect" && r.URL.Path == fmt.Sprintf("/api/v1/projects/%d/federation/relay:disconnect", root.private.ID)) {
+						w.Header().Set("Retry-After", "2")
+						http.Error(w, "Rate exceeded.", http.StatusTooManyRequests)
+						return
+					}
 					if r.URL.Path == "/api/v1/federation/enrollments" {
 						require.Equal(t, "Bearer member-test-token", r.Header.Get("Authorization"))
 						if mode == "inflight_enrollment" {
@@ -312,6 +317,11 @@ func TestFederationBridgeDisconnectLifecycle(t *testing.T) {
 					return
 				}
 				code, _, raw := request.request(t, http.MethodPost, "/api/v1/federation/bridges", "", map[string]any{"hub_catalog": "selected-hub", "hub_project": root.private.Name, "project_name": "shared-replica", "actor": "local-member", "serve_downstream": false}, headers)
+				if mode == "busy_enrollment" {
+					require.Equal(t, http.StatusTooManyRequests, code, string(raw))
+					require.Equal(t, "server_busy", bridgeErrorCode(t, raw))
+					return
+				}
 				expected := http.StatusOK
 				switch mode {
 				case "pending_enrollment", "precommit_enrollment_failure":
@@ -409,6 +419,11 @@ func TestFederationBridgeDisconnectLifecycle(t *testing.T) {
 					require.ErrorIs(t, writeErr, db.ErrFederatedReadOnly, "disconnect must fence local writes before the hub grant is revoked")
 				} else {
 					code, _, raw = request.request(t, http.MethodPost, path, "", map[string]any{}, headers)
+				}
+				if mode == "busy_disconnect" {
+					require.Equal(t, http.StatusTooManyRequests, code, string(raw))
+					require.Equal(t, "server_busy", bridgeErrorCode(t, raw))
+					return
 				}
 				if mode == "disconnect_validation_write_race" {
 					require.NotEmpty(t, raceIssueUID, "the disconnect race hook must commit an issue before the push fence")

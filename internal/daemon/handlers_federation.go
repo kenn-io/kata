@@ -1278,6 +1278,9 @@ func abortFederationReplicaLeave(
 }
 
 func federationReplicaAPIError(err error) error {
+	if busy := forwardedHubBusy(err); busy != nil {
+		return busy
+	}
 	if apiErr := relayCrossProjectLinksAPIError(err); apiErr != nil {
 		return apiErr
 	}
