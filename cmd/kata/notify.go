@@ -253,7 +253,7 @@ func notificationAPIError(status int, body []byte) *cliError {
 		Message string `json:"message"`
 	}
 	if json.Unmarshal(err.Data, &held) == nil && held.From != "" {
-		err.Message = fmt.Sprintf("%s: from %s: %s", err.Message, textsafe.Line(held.From), textsafe.Line(held.Message))
+		err.Message = fmt.Sprintf("%s: from %s: %s", err.Message, textsafe.Line(notification.DisplayValue(notification.Value{From: held.From}).From), textsafe.Line(held.Message))
 	}
 	return err
 }

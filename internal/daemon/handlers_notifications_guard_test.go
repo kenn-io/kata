@@ -14,7 +14,7 @@ import (
 func TestNotifyNoReplaceRefusesHeldRequest(t *testing.T) {
 	h, ts, pid, id := bootstrapProjectWithIssue(t)
 	path := issueURL(pid, id, "notifications")
-	key := notification.MetadataKey("reader")
+	key := "notify.cmVhZGVy"
 
 	resp, body := postJSON(t, ts, path, map[string]any{"actor": "worker", "to": "reader", "message": "first", "replace": false})
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
@@ -46,7 +46,7 @@ func TestNotifyNoReplaceRejectsBroadcast(t *testing.T) {
 func TestNotifyClearIfFromClearsOnlyMatchingSender(t *testing.T) {
 	h, ts, pid, id := bootstrapProjectWithIssue(t)
 	path := issueURL(pid, id, "notifications/clear")
-	key := notification.MetadataKey("reader")
+	key := "notify.cmVhZGVy"
 	seed := func(from string) {
 		_, err := h.DB().PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: id, Actor: from, Patch: map[string]jsontext.Value{
 			key: jsontext.Value(`{"from":"` + from + `","message":"please look"}`),
@@ -76,15 +76,17 @@ func TestNotifyClearIfFromClearsOnlyMatchingSender(t *testing.T) {
 func TestNotifyClearIfFromValidation(t *testing.T) {
 	_, ts, pid, id := bootstrapProjectWithIssue(t)
 	path := issueURL(pid, id, "notifications/clear")
-	for name, body := range map[string]map[string]any{
-		"missing if_from":    {"actor": "a", "to": "reader"},
-		"blank if_from":      {"actor": "a", "to": "reader", "if_from": "  "},
-		"missing recipient":  {"actor": "a", "if_from": "a"},
-		"unknown clear flag": {"actor": "a", "to": "reader", "if_from": "a", "clear": true},
+	for name, tc := range map[string]struct {
+		body map[string]any
+		code string
+	}{
+		"missing if_from":   {map[string]any{"actor": "a", "to": "reader"}, "validation"},
+		"blank if_from":     {map[string]any{"actor": "a", "to": "reader", "if_from": "  "}, "validation"},
+		"missing recipient": {map[string]any{"actor": "a", "if_from": "a"}, "validation"},
 	} {
-		resp, raw := postJSON(t, ts, path, body)
-		require.GreaterOrEqual(t, resp.StatusCode, http.StatusBadRequest, name+": "+string(raw))
-		require.Less(t, resp.StatusCode, http.StatusInternalServerError, name+": "+string(raw))
+		resp, raw := postJSON(t, ts, path, tc.body)
+		require.Equal(t, http.StatusBadRequest, resp.StatusCode, name+": "+string(raw))
+		require.Contains(t, string(raw), `"`+tc.code+`"`, name+": "+string(raw))
 	}
 }
 

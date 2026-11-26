@@ -373,7 +373,7 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
-| `0.72.0` | Notification requests accept `replace: false`, which refuses with `409 notification_held` while the recipient holds a request, and the clear endpoint accepts `if_from` to clear only a request from that sender. |
+| `0.72.0` | Notification requests accept `replace: false`, which refuses with `409 notification_held` while the recipient holds a request. Added `POST /api/v1/projects/{project_id}/issues/{ref}/notifications/clear`, which clears a request only while its stored `from` equals the required `if_from`. |
 | `0.71.0` | Federation event watches hold one request for many projects; event polls advertise `X-Kata-Federation-Watch-Max`. |
 | `0.70.0` | Added `PATCH /api/v1/projects/{project_id}/issues/{ref}/labels`, which applies `add` and `remove` label lists in one transaction and answers with the issue's resulting `labels`. |
 | `0.69.0` | Close responses can include a `parent_ready` issue reference. |

@@ -333,3 +333,35 @@ func TestNotifyRejectsDetachedScopedSource(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, string(current.Metadata), "notify.")
 }
+
+func TestNotifyClearIfFromOnPushSpokeMatchesSender(t *testing.T) {
+	env, project, issue := pushSpokeNotificationFixture(t)
+	base := fmt.Sprintf("/api/v1/projects/%d/issues/%s/notifications", project.ID, issue.ShortID)
+	send := func() {
+		response, body := envDoRaw(t, env, http.MethodPost, base,
+			map[string]any{"actor": "worker", "to": "reader", "message": "look"}, nil)
+		require.Equal(t, http.StatusOK, response.StatusCode, string(body))
+	}
+	clear := func(ifFrom string) bool {
+		response, body := envDoRaw(t, env, http.MethodPost, base+"/clear",
+			map[string]any{"actor": "worker", "to": "reader", "if_from": ifFrom}, nil)
+		require.Equal(t, http.StatusOK, response.StatusCode, string(body))
+		var out struct {
+			Changed bool `json:"changed"`
+		}
+		require.NoError(t, json.Unmarshal(body, &out))
+		return out.Changed
+	}
+
+	send()
+	require.True(t, clear("worker"), "a sender clears the request it sent")
+
+	// A request written under a name the spoke binding does not produce
+	// stays put when another actor names a different sender.
+	_, err := env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "peer", Patch: map[string]jsontext.Value{
+		"notify.cmVhZGVy": jsontext.Value(`{"from":"peer","message":"remote"}`),
+	}})
+	require.NoError(t, err)
+	require.False(t, clear("worker"))
+	require.True(t, clear("peer"))
+}

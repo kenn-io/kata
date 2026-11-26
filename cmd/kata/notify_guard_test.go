@@ -75,3 +75,13 @@ func TestNotifyGuardFlagValidation(t *testing.T) {
 		_ = requireCLIError(t, err, ExitValidation)
 	}
 }
+
+func TestNotificationAPIErrorShowsDisplayNameForFederatedSender(t *testing.T) {
+	const stored = "Ana [member:11111111-1111-4111-8111-111111111111; enrollment:11111111-1111-4111-8111-111111111111]"
+	body := []byte(`{"status":409,"error":{"code":"notification_held","message":"held","data":{"from":"` + stored + `","message":"first pass"}}}`)
+
+	cli := notificationAPIError(http.StatusConflict, body)
+
+	assert.Equal(t, "held: from Ana: first pass", cli.Message)
+	assert.Contains(t, string(cli.Data), stored, "error.data keeps the stored sender")
+}

@@ -1445,7 +1445,8 @@ In `--agent` inbox output, pass `from_address` to `kata notify --to`.
 
 `--no-replace` refuses to overwrite a request the recipient still holds: the
 command exits with the conflict code and the error names the held request's
-`from` and `message`, which stay in place, only when the caller could read the
+`from` (shown as in the inbox, without any federation connection suffix) and
+`message`, which stay in place, only when the caller could read the
 held request through ordinary reads; otherwise the error carries no details and
 the CLI prints the refusal without them. Without a held request it sends
 normally. It cannot be combined with `--broadcast` or `--clear`.
@@ -1453,7 +1454,11 @@ normally. It cannot be combined with `--broadcast` or `--clear`.
 field equals `<actor>`; otherwise it changes nothing and reports
 `left unchanged`. This compares the stored field and does not verify who wrote
 it: any actor allowed to write issue metadata can store a request with another
-actor's name in `from`. Both checks run inside the daemon's write, so they hold
+actor's name in `from`. On a project with a push-enabled spoke binding, every
+local request is stored under the binding's bound actor, so local senders
+cannot be told apart there: any `<actor>` clears a request a local sender
+wrote, and only a request stored under another name needs that exact name.
+Both checks run inside the daemon's write, so they hold
 against concurrent senders. Over HTTP, `--no-replace` is `replace: false` on
 the notifications endpoint, and a refusal answers 409 `notification_held` with
 `from` and `message` in `error.data` only when the caller could read the held
