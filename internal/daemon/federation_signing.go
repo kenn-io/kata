@@ -107,9 +107,7 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 				}
 			}
 		}
-		// Bulk uploads retain their memory bound without occupying the slots
-		// used by metadata, event polls, and lease requests.
-		admission := s.federationControlAdmission
+		var admission chan struct{}
 		bodyLimit := int64(64 << 10)
 		attachmentTransfer := signingpolicy.Unambiguous(r.URL) && federationsigning.IsAttachmentTransfer(r.Method, r.URL.Path)
 		if route.operation == "ingestFederationProjectEvents" || route.operation == "acceptRelayDeliveries" || isCronJobWriteOperation(route.operation) {
@@ -124,16 +122,15 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 				admission = s.federationReadAdmission
 			}
 		}
-		select {
-		case admission <- struct{}{}:
-			defer func() { <-admission }()
-			if admission == s.federationControlAdmission {
-				r = r.WithContext(withFederationControlAdmission(r.Context()))
+		if admission != nil {
+			select {
+			case admission <- struct{}{}:
+				defer func() { <-admission }()
+			default:
+				w.Header().Set("Retry-After", "1")
+				api.WriteEnvelope(w, http.StatusTooManyRequests, "admission_limited", "federation admission is full")
+				return
 			}
-		default:
-			w.Header().Set("Retry-After", "1")
-			api.WriteEnvelope(w, http.StatusTooManyRequests, "admission_limited", "federation admission is full")
-			return
 		}
 		deadline := time.Now().Add(60 * time.Second)
 		if attachmentTransfer {

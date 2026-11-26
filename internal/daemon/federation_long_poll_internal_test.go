@@ -19,69 +19,52 @@ import (
 	"go.kenn.io/kata/internal/db/sqlitestore"
 )
 
-func TestFederationPollWaitsKeepHalfTheControlAdmissionSlotsFree(t *testing.T) {
-	waits := newFederationPollWaits(16, 8)
-	broadcaster := NewEventBroadcaster()
-	project := db.Project{ID: 7, UID: "01HZNQ7VFPK1XGD8R5MABCD4EA"}
-	signedCtx := withFederationControlAdmission(t.Context())
-	for enrollment := range int64(8) {
-		waiter, ok := waits.admit(signedCtx, broadcaster, enrollment, project)
-		require.True(t, ok, "signed poll %d", enrollment)
-		t.Cleanup(waiter.release)
-	}
-	_, ok := waits.admit(signedCtx, broadcaster, 100, project)
-	assert.False(t, ok, "a signed poll beyond half the control slots must answer at once")
-	unsigned, ok := waits.admit(t.Context(), broadcaster, 100, project)
-	require.True(t, ok, "unsigned polls hold no control slot")
-	unsigned.release()
-}
-
 func TestFederationPollWaitsBoundEveryHeldPoll(t *testing.T) {
-	waits := newFederationPollWaits(16, 8)
+	waits := newFederationPollWaits(8)
 	broadcaster := NewEventBroadcaster()
 	project := db.Project{ID: 7, UID: "01HZNQ7VFPK1XGD8R5MABCD4EA"}
 	for range federationPollMaxWaitersPerCredential {
-		waiter, ok := waits.admit(t.Context(), broadcaster, -1, project)
+		waiter, ok := waits.admit(broadcaster, -1, project)
 		require.True(t, ok)
 		t.Cleanup(waiter.release)
 	}
-	_, ok := waits.admit(t.Context(), broadcaster, -1, project)
+	_, ok := waits.admit(broadcaster, -1, project)
 	assert.False(t, ok)
 
 	t.Run("reserve capacity for other credentials", func(t *testing.T) {
-		waits := newFederationPollWaits(16, 1)
+		waits := newFederationPollWaits(1)
 		broadcaster := NewEventBroadcaster()
 		project := db.Project{ID: 7, UID: "01HZNQ7VFPK1XGD8R5MABCD4EA"}
 		for range 16 {
-			waiter, ok := waits.admit(t.Context(), broadcaster, 1, project)
+			waiter, ok := waits.admit(broadcaster, 1, project)
 			require.True(t, ok)
 			t.Cleanup(waiter.release)
 		}
-		_, ok := waits.admit(t.Context(), broadcaster, 1, project)
+		_, ok := waits.admit(broadcaster, 1, project)
 		assert.False(t, ok)
-		other, ok := waits.admit(t.Context(), broadcaster, 2, project)
+		other, ok := waits.admit(broadcaster, 2, project)
 		require.True(t, ok)
 		other.release()
 	})
 
 	for _, tc := range []struct{ cpus, limit int }{{1, 32}, {16, 256}} {
 		t.Run(fmt.Sprintf("%d CPUs", tc.cpus), func(t *testing.T) {
-			waits := newFederationPollWaits(16, tc.cpus)
+			waits := newFederationPollWaits(tc.cpus)
 			broadcaster := NewEventBroadcaster()
 			project := db.Project{ID: 7, UID: "01HZNQ7VFPK1XGD8R5MABCD4EA"}
 			for enrollment := range int64(tc.limit) {
-				waiter, ok := waits.admit(t.Context(), broadcaster, enrollment, project)
+				waiter, ok := waits.admit(broadcaster, enrollment, project)
 				require.True(t, ok)
 				t.Cleanup(waiter.release)
 			}
-			_, ok := waits.admit(t.Context(), broadcaster, int64(tc.limit), project)
+			_, ok := waits.admit(broadcaster, int64(tc.limit), project)
 			assert.False(t, ok)
 		})
 	}
 }
 
 func TestFederationPollWakeIgnoresItsOwnInstance(t *testing.T) {
-	waits := newFederationPollWaits(16, 8)
+	waits := newFederationPollWaits(8)
 	woken, unsubscribe := waits.remote.subscribe(map[int64]string{1: "project"})
 	defer unsubscribe()
 	waits.remote.setSecret([]byte("test secret"))
@@ -108,7 +91,7 @@ func (recordingPollWakeBus) ListenFederationPollWake(ctx context.Context, _ func
 
 func TestFederationPollRemoteWakeMatchesProjectAndMoveSource(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		writer, reader := newFederationPollWaits(16, 8), newFederationPollWaits(16, 8)
+		writer, reader := newFederationPollWaits(8), newFederationPollWaits(8)
 		writer.remote.setSecret([]byte("test secret"))
 		reader.remote.setSecret([]byte("test secret"))
 		broadcaster := NewEventBroadcaster()
@@ -122,7 +105,7 @@ func TestFederationPollRemoteWakeMatchesProjectAndMoveSource(t *testing.T) {
 		defer func() { cancel(); <-done }()
 		var waiters []*federationPollWaiter
 		for i, uid := range []string{"source", "destination", "unrelated"} {
-			waiter, ok := reader.admit(ctx, NewEventBroadcaster(), int64(i+1), db.Project{ID: int64(i + 1), UID: uid})
+			waiter, ok := reader.admit(NewEventBroadcaster(), int64(i+1), db.Project{ID: int64(i + 1), UID: uid})
 			require.True(t, ok)
 			defer waiter.release()
 			waiters = append(waiters, waiter)
@@ -177,7 +160,7 @@ func TestFederationPollWakeBridgeStopsWhenItsStoreCloses(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		runFederationPollWakeBridge(t.Context(), closedPollWakeBus{}, NewEventBroadcaster(), newFederationPollWaits(16, 8), slog.New(slog.DiscardHandler))
+		runFederationPollWakeBridge(t.Context(), closedPollWakeBus{}, NewEventBroadcaster(), newFederationPollWaits(8), slog.New(slog.DiscardHandler))
 	}()
 	select {
 	case <-done:
@@ -256,7 +239,7 @@ func TestFederationPollWaitAnswersAtOnceWhenCredentialWaitersAreFull(t *testing.
 	project := db.Project{ID: hub.projectID}
 	limit := min(federationPollMaxWaitersPerCredential, hub.waits.maxTotal/2)
 	for range limit {
-		waiter, ok := hub.waits.admit(ctx, broadcaster, hub.enrollmentID, project)
+		waiter, ok := hub.waits.admit(broadcaster, hub.enrollmentID, project)
 		require.True(t, ok)
 		t.Cleanup(waiter.release)
 	}
@@ -276,7 +259,7 @@ func TestFederationPollWaitCapsOversizedWaits(t *testing.T) {
 }
 
 func TestFederationPollWakeTagsAndFallback(t *testing.T) {
-	writer, reader := newFederationPollWaits(16, 8), newFederationPollWaits(16, 8)
+	writer, reader := newFederationPollWaits(8), newFederationPollWaits(8)
 	writer.remote.setSecret([]byte("first secret"))
 	msg := NewEventMsg(123456, db.Event{ProjectUID: "destination-project-uid", Type: "issue.moved", Payload: `{"from_project_uid":"source-project-uid"}`})
 	first := writer.messageFor(msg)
@@ -310,9 +293,9 @@ func TestFederationPollWakeTagsAndFallback(t *testing.T) {
 // in another project neither overflows it nor wakes every watched project.
 func TestFederationWatchWaiterIgnoresOtherProjects(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		waits := newFederationPollWaits(16, 8)
+		waits := newFederationPollWaits(8)
 		broadcaster := NewEventBroadcaster()
-		waiter, ok := waits.admit(t.Context(), broadcaster, 1,
+		waiter, ok := waits.admit(broadcaster, 1,
 			db.Project{ID: 7, UID: "01HZNQ7VFPK1XGD8R5MABCD4EA"},
 			db.Project{ID: 8, UID: "01HZNQ7VFPK1XGD8R5MABCD4EB"})
 		require.True(t, ok)

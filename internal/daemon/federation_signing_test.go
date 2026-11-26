@@ -1,7 +1,6 @@
 package daemon_test
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/ed25519"
@@ -402,43 +401,73 @@ func TestFederationIngressBoundsHeaders(t *testing.T) {
 	require.NoError(t, <-done)
 }
 
-func TestFederationIngressBoundsConnections(t *testing.T) {
+// Sixteen held polls must not prevent another member request from reaching the hub.
+func TestFederationIngressServesMemberPastSixteenConnections(t *testing.T) {
+	t.Setenv("TEST_LISTENER_KEY", strings.Repeat("k", 64))
+	source := signingpolicy.Source{KeyID: "key-a", KeyEnv: "TEST_LISTENER_KEY"}
 	env := testenv.New(t)
-	srv := daemon.NewServer(daemon.ServerConfig{DB: env.DB})
+	project := createFederatedHubProject(t, env, "hub-project")
+	enrollment, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{Token: "enrollment", SpokeInstanceUID: federationTestSpokeUID, ProjectID: &project.ID, Capabilities: "pull", Actor: "tester"})
+	require.NoError(t, err)
+	state := filepath.Join(t.TempDir(), "replay.state")
+	require.NoError(t, federationsigning.InitializeReplayState(state))
+	verifier, err := federationsigning.NewVerifier("https://hub.example", []signingpolicy.Key{{Source: source, EnrollmentID: enrollment.Enrollment.ID}}, state)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = verifier.Close() })
+	verifier.SkipStartupForTest()
+	reads := newFederationReadProbe(env.DB)
+	srv := daemon.NewServer(daemon.ServerConfig{DB: reads.storage(), FederationSigning: verifier})
 	t.Cleanup(func() { _ = srv.Close() })
 	listener, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
 	done := make(chan error, 1)
 	go func() {
 		done <- srv.ServeListeners(ctx, daemon.ListenerBinding{Listener: listener, Policy: daemon.ListenerPolicy{Kind: daemon.ListenerFederation}})
 	}()
-	var connections []net.Conn
-	t.Cleanup(func() {
-		for _, c := range connections {
-			_ = c.Close()
-		}
-	})
-	for range 16 {
-		c, err := (&net.Dialer{Timeout: time.Second}).DialContext(t.Context(), "tcp", listener.Addr().String())
+	defer func() { cancel(); require.NoError(t, <-done) }()
+	client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+	defer client.CloseIdleConnections()
+	cursor, err := env.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
+	request := func(path string) *http.Request {
+		t.Helper()
+		r, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://hub.example"+path, nil)
 		require.NoError(t, err)
-		connections = append(connections, c)
+		r.Header.Set("Authorization", "Bearer "+enrollment.Token)
+		require.NoError(t, federationsigning.Sign(r, source))
+		r.URL.Scheme, r.URL.Host, r.Host = "http", listener.Addr().String(), "hub.example"
+		return r
 	}
-	extra, err := (&net.Dialer{Timeout: time.Second}).DialContext(t.Context(), "tcp", listener.Addr().String())
-	require.NoError(t, err)
-	defer func() { _ = extra.Close() }()
-	require.NoError(t, extra.SetReadDeadline(time.Now().Add(500*time.Millisecond))) //nolint:kennlint // deadlinetest: the admission slots stay occupied; the extra connection must receive no response
-	_, err = fmt.Fprint(extra, "GET /unavailable HTTP/1.1\r\nHost: daemon.example\r\n\r\n")
-	require.NoError(t, err)
-	_, err = bufio.NewReader(extra).ReadByte()
-	require.Error(t, err, "seventeenth connection waits for admission")
-	for _, c := range connections {
-		_ = c.Close()
+	polls := make(chan error, 16)
+	for i := range 16 {
+		r := request(fmt.Sprintf("%s/federation/events?after_id=%d&wait=30", projectPath(project.ID), cursor))
+		go func() {
+			resp, err := client.Do(r) //nolint:gosec // test-owned loopback listener
+			if err == nil {
+				_ = resp.Body.Close()
+			}
+			polls <- err
+		}()
+		reads.waitForReads(t, i+1)
+		select {
+		case err := <-polls:
+			t.Fatalf("poll %d answered before the next event: %v", i+1, err)
+		default:
+		}
 	}
-	_ = extra.Close()
-	cancel()
-	require.NoError(t, <-done)
+	metadataCtx, stopMetadata := context.WithTimeout(ctx, 5*time.Second)
+	defer stopMetadata()
+	metadata := request(projectPath(project.ID) + "/federation/metadata").WithContext(metadataCtx)
+	resp, err := client.Do(metadata) //nolint:gosec // test-owned loopback listener
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	select {
+	case err := <-polls:
+		t.Fatalf("a held poll answered before the next event: %v", err)
+	default:
+	}
 }
 
 func TestRequiredSigningPreservesLocalBearerLeaseAuthority(t *testing.T) {

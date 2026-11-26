@@ -38,7 +38,6 @@ import (
 	"go.kenn.io/kata/internal/todoistsync"
 	"go.kenn.io/kata/internal/twentysync"
 	"go.kenn.io/kata/internal/vector"
-	"golang.org/x/net/netutil"
 )
 
 // ServerConfig wires the daemon's runtime dependencies. DB and StartedAt are
@@ -294,7 +293,6 @@ type Server struct {
 	federationIngestAdmission   chan struct{}
 	federationTransferAdmission chan struct{}
 	federationReadAdmission     chan struct{}
-	federationControlAdmission  chan struct{}
 	stopFederationPollBridge    func()
 	cfg                         ServerConfig
 	baseHandler                 http.Handler
@@ -403,14 +401,12 @@ func NewServer(cfg ServerConfig) *Server {
 	withRootAttribution(humaAPI, cfg.RootSigning)
 	withExternalRootAdministration(humaAPI, cfg.Auth.AllowIdentityConnectorAdministration)
 
-	controlAdmission := make(chan struct{}, 16)
-	cfg.federationPollWaits = newFederationPollWaits(cap(controlAdmission), federationPollCPUs())
+	cfg.federationPollWaits = newFederationPollWaits(federationPollCPUs())
 	s := &Server{
 		cfg: cfg, api: humaAPI,
 		federationIngestAdmission:   make(chan struct{}, 2),
 		federationTransferAdmission: make(chan struct{}, 2),
 		federationReadAdmission:     make(chan struct{}, 16),
-		federationControlAdmission:  controlAdmission,
 	}
 	registerRoutes(humaAPI, mux, cfg)
 	s.stopFederationPollBridge = startFederationPollBridge(cfg)
@@ -583,7 +579,6 @@ func (s *Server) serve(
 		httpSrv.ReadTimeout = 60 * time.Second
 		httpSrv.WriteTimeout = 60 * time.Second
 		httpSrv.IdleTimeout = 10 * time.Second
-		l = netutil.LimitListener(l, 16)
 	}
 	shutdownDone := make(chan error, 1)
 	go func() {

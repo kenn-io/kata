@@ -696,8 +696,7 @@ Held polls need a few things from the deployment:
 - A hub holds at most 32 polls per available CPU, accounting for `GOMAXPROCS`
   and Linux CPU quotas, up to 256 total. Each spoke
   credential can hold at most half the total limit, up to 32, or 16 on a
-  one-CPU hub. Signed polls can use at most half of the hub's federation control
-  slots. Past a limit the hub answers at once. A shared watch stays multiplexed,
+  one-CPU hub. Past a limit the hub answers at once. A shared watch stays multiplexed,
   polling all of its projects with one unwaited watch per jittered interval
   while retrying a held watch with growing jittered delays up to 16 intervals;
   a solo binding records the quiet check and falls back to its interval while
