@@ -7,6 +7,8 @@ export interface NotifyIssueRequestBody {
   broadcast?: boolean
   message: string
   re?: string
+  /** false answers 409 notification_held instead of replacing the recipient's held request; absent means true */
+  replace?: boolean
   teammate?: string
   teammates?: boolean
   to?: string

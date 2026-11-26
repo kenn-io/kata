@@ -29,7 +29,11 @@ func registerNotificationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, api.NewError(400, "validation", err.Error(), "", nil)
 		}
-		if strings.TrimSpace(in.Body.Message) == "" || !utf8.ValidString(in.Body.Message) || len(in.Body.Message) > notification.MessageMaxBytes {
+		noReplace := in.Body.Replace != nil && !*in.Body.Replace
+		switch {
+		case noReplace && in.Body.Broadcast:
+			return nil, api.NewError(400, "validation", "replace=false cannot be combined with broadcast", "", nil)
+		case strings.TrimSpace(in.Body.Message) == "" || !utf8.ValidString(in.Body.Message) || len(in.Body.Message) > notification.MessageMaxBytes:
 			return nil, api.NewError(400, "validation", "message must be nonblank valid UTF-8 and at most 1024 bytes", "", nil)
 		}
 		if in.Body.Broadcast && in.Body.To != "" {
@@ -72,6 +76,29 @@ func registerNotificationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			allowed, err := notificationAllowedTx(ctx, tx)
 			if err != nil {
 				return nil, err
+			}
+			if noReplace {
+				if held, raw, ok := heldNotification(current, to); ok {
+					// Reads drop a request whose reference the caller cannot
+					// read; the conflict names it only under the same rule.
+					var details map[string]any
+					visible := true
+					if notificationReadRestricted(ctx) {
+						for _, ref := range notification.References(raw) {
+							visible, err = notificationHistoryVisibleTx(ctx, tx, ref, allowed)
+							if err != nil {
+								return nil, err
+							}
+							if !visible {
+								break
+							}
+						}
+					}
+					if visible {
+						details = map[string]any{"from": held.From, "message": held.Message}
+					}
+					return nil, api.NewError(409, "notification_held", "recipient already has an unanswered request on this issue", "send with replace omitted or true to replace it, or wait for it to be cleared", details)
+				}
 			}
 			if re != "" {
 				if err := notificationCommentTx(ctx, tx, current, re, allowed); err != nil {
@@ -119,43 +146,85 @@ func registerNotificationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			return patch, nil
 		})
-		result, err := cfg.DB.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: actor})
-		err = finishPeerFenceRejection(ctx, err)
-		if errors.Is(err, db.ErrTransactionFinalizationFailed) {
-			// A failed rollback or host cleanup is retryable; it must not read
-			// as the denial or missing comment that it may also carry.
-			return nil, internalAPIError(err)
-		}
-		if errors.Is(err, db.ErrNotFound) {
-			return nil, api.NewError(404, "comment_not_found", "comment not found", "", nil)
-		}
-		if err != nil {
-			if _, ok := errors.AsType[huma.StatusError](err); ok {
-				return nil, err
-			}
-			if apiErr := federationReadOnlyError(err); apiErr != nil {
-				return nil, apiErr
-			}
-			return nil, internalAPIError(err)
-		}
-		if result.Changed {
-			cfg.Publish().Event(result.Event.ProjectID, result.Event)
-		}
-		out := &api.NotifyIssueResponse{}
-		out.Body.Issue = result.Issue
-		out.Body.Changed = result.Changed
-		out.Body.Recipients = recipients
-		if out.Body.Recipients == nil {
-			out.Body.Recipients = []string{}
-		}
-		if result.Changed {
-			out.Body.Event, err = scopedMutationEvent(ctx, cfg.DB, &result.Event)
-			if err != nil {
-				return nil, err
-			}
-		}
-		return out, nil
+		return commitNotificationPatch(ctx, cfg, issue.ID, actor, &recipients)
 	}))
+	huma.Register(humaAPI, huma.Operation{OperationID: "clearNotificationIfFrom", Method: http.MethodPost, Path: "/api/v1/projects/{project_id}/issues/{ref}/notifications/clear"}, withResolvedProject(cfg, func(ctx context.Context, in *api.ClearNotificationRequest) (*api.NotifyIssueResponse, error) {
+		actor, err := attributedActor(ctx, in.Body.Actor)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(in.Body.IfFrom) == "" {
+			return nil, api.NewError(400, "validation", "if_from must be a nonblank actor", "", nil)
+		}
+		to, err := notification.NormalizeRecipient(in.Body.To)
+		if err != nil {
+			return nil, api.NewError(400, "validation", err.Error(), "", nil)
+		}
+		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
+		if err != nil {
+			return nil, err
+		}
+		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, issue, actor); err != nil {
+			return nil, err
+		}
+		recipients := []string{to}
+		ctx = db.WithMetadataPatchHook(ctx, func(ctx context.Context, tx *sql.Tx, current db.Issue) (map[string]jsontext.Value, error) {
+			// A send stores the binding's mapped actor, so the caller's own
+			// name also matches what its sends stored; any other if_from
+			// compares exactly, so naming someone else never over-clears.
+			storedIfFrom := in.Body.IfFrom
+			if in.Body.IfFrom == actor {
+				mapped, err := notificationMutationActorTx(ctx, tx, current.ProjectID, actor)
+				if err != nil {
+					return nil, err
+				}
+				storedIfFrom = mapped
+			}
+			return clearNotificationIfFrom(current, to, in.Body.IfFrom, storedIfFrom), nil
+		})
+		return commitNotificationPatch(ctx, cfg, issue.ID, actor, &recipients)
+	}))
+}
+
+// commitNotificationPatch runs the metadata write whose patch the context's
+// hook computes and shapes the response for the recipients the hook chose.
+func commitNotificationPatch(ctx context.Context, cfg ServerConfig, issueID int64, actor string, recipients *[]string) (*api.NotifyIssueResponse, error) {
+	result, err := cfg.DB.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issueID, Actor: actor})
+	err = finishPeerFenceRejection(ctx, err)
+	if errors.Is(err, db.ErrTransactionFinalizationFailed) {
+		// A failed rollback or host cleanup is retryable; it must not read
+		// as the denial or missing comment that it may also carry.
+		return nil, internalAPIError(err)
+	}
+	if errors.Is(err, db.ErrNotFound) {
+		return nil, api.NewError(404, "comment_not_found", "comment not found", "", nil)
+	}
+	if err != nil {
+		if _, ok := errors.AsType[huma.StatusError](err); ok {
+			return nil, err
+		}
+		if apiErr := federationReadOnlyError(err); apiErr != nil {
+			return nil, apiErr
+		}
+		return nil, internalAPIError(err)
+	}
+	if result.Changed {
+		cfg.Publish().Event(result.Event.ProjectID, result.Event)
+	}
+	out := &api.NotifyIssueResponse{}
+	out.Body.Issue = result.Issue
+	out.Body.Changed = result.Changed
+	out.Body.Recipients = *recipients
+	if out.Body.Recipients == nil {
+		out.Body.Recipients = []string{}
+	}
+	if result.Changed {
+		out.Body.Event, err = scopedMutationEvent(ctx, cfg.DB, &result.Event)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 func broadcastCandidatesTx(ctx context.Context, tx *sql.Tx, issue db.Issue, allowed map[int64]bool) ([]notification.Identity, error) {
@@ -235,4 +304,32 @@ func resolveNotificationComment(ctx context.Context, store db.Storage, issue db.
 		return "", err
 	}
 	return target.UID, nil
+}
+
+// heldNotification returns the request stored for recipient, if the slot
+// holds a usable one. A malformed slot is invisible to the inbox, so it does
+// not block a new request.
+func heldNotification(issue db.Issue, recipient string) (notification.Value, jsontext.Value, bool) {
+	var slots map[string]jsontext.Value
+	if issue.Metadata == "" || json.Unmarshal([]byte(issue.Metadata), &slots) != nil {
+		return notification.Value{}, nil, false
+	}
+	raw, ok := slots[notification.MetadataKey(recipient)]
+	if !ok {
+		return notification.Value{}, nil, false
+	}
+	value, _, err := notification.DecodeValue(raw)
+	return value, raw, err == nil
+}
+
+// clearNotificationIfFrom removes recipient's request only while its stored
+// from field equals ifFrom, or equals storedIfFrom, the value the caller's
+// own sends store on a push-enabled spoke; that is a comparison of stored
+// data, not a check of who wrote the request. Otherwise it patches nothing.
+func clearNotificationIfFrom(issue db.Issue, recipient, ifFrom, storedIfFrom string) map[string]jsontext.Value {
+	held, _, ok := heldNotification(issue, recipient)
+	if !ok || (held.From != ifFrom && held.From != storedIfFrom) {
+		return map[string]jsontext.Value{}
+	}
+	return map[string]jsontext.Value{notification.MetadataKey(recipient): jsontext.Value("null")}
 }

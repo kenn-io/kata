@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-21
+last_edited: 2026-11-26
 ---
 
 # CLI reference
@@ -1416,8 +1416,11 @@ the job. Put the repeating work under the issue with
 ```sh
 kata notify <ref> [--to <recipient> | --broadcast] \
   [--re <comment>] [--teammates] --message TEXT
-kata notify <ref> --to <recipient> --clear
+kata notify <ref> --to <recipient> [--if-from <actor>] --clear
+kata notify <ref> --to <recipient> --no-replace --message TEXT
 kata notify abc4 --to coordinator --message "Please decide"
+kata notify abc4 --to coordinator --message "Second ask" --no-replace
+kata notify abc4 --to coordinator --clear --if-from worker
 kata notify abc4 --to coordinator/teammate-1 --message "Please check the reproduction"
 kata notify abc4 --to coordinator/teammate-1 --re c:xbzxrq --message "Please check this finding"
 kata notify abc4 --broadcast --message "Please review the latest findings"
@@ -1439,6 +1442,31 @@ recipient wins. Closure can still race with the write, and either way the
 request stays hidden while the issue is closed. Messages must be nonblank and at
 most 1024 bytes. Requests do not change ownership or readiness.
 In `--agent` inbox output, pass `from_address` to `kata notify --to`.
+
+`--no-replace` refuses to overwrite a request the recipient still holds: the
+command exits with the conflict code and the error names the held request's
+`from` (shown as in the inbox, without any federation connection suffix) and
+`message`, which stay in place, only when the caller could read the
+held request through ordinary reads; otherwise the error carries no details and
+the CLI prints the refusal without them. Without a held request it sends
+normally. It cannot be combined with `--broadcast` or `--clear`.
+`--clear --if-from <actor>` clears the request only while its stored `from`
+field equals `<actor>`; otherwise it changes nothing and reports
+`left unchanged`. This compares the stored field and does not verify who wrote
+it: any actor allowed to write issue metadata can store a request with another
+actor's name in `from`. On a direct push-enabled spoke whose binding has a
+bound actor, every local request is stored under that bound actor, so an
+`<actor>` that names the caller also matches it: a sender can clear its own
+request there, but local senders cannot be told apart, so any of them naming
+itself can clear another's. Any other `<actor>` must equal the stored `from`.
+Both checks run inside the daemon's write, so they hold
+against concurrent senders. Over HTTP, `--no-replace` is `replace: false` on
+the notifications endpoint, and a refusal answers 409 `notification_held` with
+`from` and `message` in `error.data` only when the caller could read the held
+request through ordinary reads; otherwise `error.data` is empty.
+`--clear --if-from` is `POST .../notifications/clear` with `to` and `if_from`.
+Both flags need a daemon that reports API 0.72.0 or newer; an older daemon
+gets an upgrade message.
 
 To ask the recipient to answer one visible comment, pass `--re <comment>`. A
 typed reply clears the matching request and notifies the original requester on

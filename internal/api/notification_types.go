@@ -14,6 +14,19 @@ type NotifyIssueRequest struct {
 		Message   string `json:"message" required:"true"`
 		Broadcast bool   `json:"broadcast,omitzero"`
 		Teammates bool   `json:"teammates,omitzero"`
+		Replace   *bool  `json:"replace,omitempty" doc:"false answers 409 notification_held instead of replacing the recipient's held request; absent means true"`
+	}
+}
+
+// ClearNotificationRequest removes a recipient's request while it is still one
+// that the given actor sent.
+type ClearNotificationRequest struct {
+	ProjectTarget
+	Ref  string `path:"ref" required:"true"`
+	Body struct {
+		Actor  string `json:"actor,omitempty"`
+		To     string `json:"to" required:"true" doc:"Recipient address: <actor> or <actor>/<teammate>"`
+		IfFrom string `json:"if_from" required:"true" doc:"Remove the request only while its stored from field equals this actor or, when this names the caller on a push-enabled spoke, the spoke's bound actor. A stored-field check, not proof of who wrote it"`
 	}
 }
 

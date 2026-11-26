@@ -1,11 +1,15 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-24
+last_edited: 2026-11-26
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
+
+## Unreleased
+
+- Send a [request without replacing one](reference/cli.md#teammate-requests) the recipient still holds with `kata notify --no-replace`, and clear a request only while its stored `from` field is a given actor with `kata notify --clear --if-from <actor>`. `--no-replace` does not combine with `--broadcast` or `--clear`; `--if-from` needs `--clear`, compares the stored `from` (on a push-enabled spoke, naming yourself also matches the bound actor your sends are stored under) and does not verify who wrote the request, and a plain `--clear` still clears unconditionally. Both need a daemon on API 0.72.0 or newer.
 
 ## 0.24.0
 <small>2026-11-25</small>
