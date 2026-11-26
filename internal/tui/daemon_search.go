@@ -268,10 +268,10 @@ func (m Model) guardAnswer(connGen uint64, req int64, query SearchQuery) (Model,
 		m.list.ranked.pending, m.list.ranked.asked = false, ""
 		return m, false
 	}
-	if m.modal != modalNone || m.view != viewList || !m.listIsActive() || (m.input.kind != inputNone && m.input.kind != inputSearchBar) {
-		// Swapping the rows would move the selection under a form, another
-		// view or a focused detail pane. Forget the ask so the next time the
-		// bar opens it asks again.
+	if m.input.kind != inputSearchBar || m.modal != modalNone || m.view != viewList || !m.listIsActive() {
+		// Only the open bar owns the rows: once the search is committed, any
+		// key may act on the selection, so an answer must not move it. Forget
+		// the ask so the next time the bar opens it asks again.
 		m.list.ranked = r.discardInFlight()
 		return m, false
 	}
