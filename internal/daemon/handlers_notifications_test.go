@@ -342,7 +342,7 @@ func TestNotifyClearIfFromOnPushSpokeMatchesSender(t *testing.T) {
 			map[string]any{"actor": "worker", "to": "reader", "message": "look"}, nil)
 		require.Equal(t, http.StatusOK, response.StatusCode, string(body))
 	}
-	clear := func(ifFrom string) bool {
+	clearIfFrom := func(ifFrom string) bool {
 		response, body := envDoRaw(t, env, http.MethodPost, base+"/clear",
 			map[string]any{"actor": "worker", "to": "reader", "if_from": ifFrom}, nil)
 		require.Equal(t, http.StatusOK, response.StatusCode, string(body))
@@ -354,7 +354,7 @@ func TestNotifyClearIfFromOnPushSpokeMatchesSender(t *testing.T) {
 	}
 
 	send()
-	require.True(t, clear("worker"), "a sender clears the request it sent")
+	require.True(t, clearIfFrom("worker"), "a sender clears the request it sent")
 
 	// A request written under a name the spoke binding does not produce
 	// stays put when another actor names a different sender.
@@ -362,12 +362,12 @@ func TestNotifyClearIfFromOnPushSpokeMatchesSender(t *testing.T) {
 		"notify.cmVhZGVy": jsontext.Value(`{"from":"peer","message":"remote"}`),
 	}})
 	require.NoError(t, err)
-	require.False(t, clear("worker"))
-	require.True(t, clear("peer"))
+	require.False(t, clearIfFrom("worker"))
+	require.True(t, clearIfFrom("peer"))
 
 	// Naming another sender leaves a request sent here since in place, even
 	// though both names would map to the binding's actor on a send.
 	send()
-	require.False(t, clear("peer"), "naming another sender keeps a local request")
-	require.True(t, clear("worker"))
+	require.False(t, clearIfFrom("peer"), "naming another sender keeps a local request")
+	require.True(t, clearIfFrom("worker"))
 }
