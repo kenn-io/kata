@@ -45,7 +45,7 @@ func TestFederationAttachmentSigningProfile(t *testing.T) {
 			path := strings.Replace(tc.path, "/projects/1/", "/projects/{project_id}/", 1)
 			huma.Register(api, huma.Operation{OperationID: tc.operation, Method: tc.method, Path: path}, func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
 			s := &Server{api: api, federationIngestAdmission: make(chan struct{}, 1), federationTransferAdmission: make(chan struct{}, 1), federationReadAdmission: make(chan struct{}, 1)}
-			// Saturate the opposite pool so transfers and control requests stay independent.
+			// Saturate the pools each route must not use.
 			if tc.bulk {
 				s.federationIngestAdmission <- struct{}{}
 			} else {
