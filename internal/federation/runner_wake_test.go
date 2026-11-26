@@ -229,3 +229,209 @@ func TestRunnerKeepsWakesAFullPassDidNotServe(t *testing.T) {
 		})
 	}
 }
+
+func TestRunnerWakePushesMoveIntoLowerIDProjectBeforeTheInterval(t *testing.T) {
+	hub := testenv.New(t)
+	spoke := testenv.New(t)
+	t.Setenv("KATA_HOME", t.TempDir())
+	bound := bindSpokeProjects(t, hub.DB, spoke.DB, hub.URL, 2)
+	// The runner serves bindings in project ID order, so the destination
+	// takes its turn before the source.
+	destination, source := bound[0], bound[1]
+	require.Less(t, destination.spoke.ID, source.spoke.ID)
+
+	wake := NewWakeQueue()
+	results := newSpokeResults()
+	runner, debounces := newWakeRunner(t, spoke, wake, results)
+	ctx := t.Context()
+	go func() { _ = runner.Run(ctx) }()
+	results.await(t, destination.spoke.ID, source.spoke.ID)
+
+	issue, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.spoke.ID, Title: "moved before its first push", Author: "tester"})
+	require.NoError(t, err)
+	_, err = spoke.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: issue.ID, FromProjectID: source.spoke.ID, ToProjectID: destination.spoke.ID,
+		IfMatchRev: issue.Revision, Actor: "tester",
+	})
+	require.NoError(t, err)
+	// The daemon wakes the source for the creation, and both projects for the move.
+	wake.WakeProject(source.spoke.ID)
+	wake.WakeProject(destination.spoke.ID)
+	awaitDebounce(t, debounces).fire <- time.Now()
+	results.await(t, destination.spoke.ID, source.spoke.ID)
+	// The runner debounces this wake only after the pass ends.
+	wake.WakeAll()
+	awaitDebounce(t, debounces)
+
+	got, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err, "the hub has the issue before the next interval")
+	assert.Equal(t, destination.hub.ID, got.ProjectID, "the hub has the move before the next interval")
+}
+
+// Moves that depend on other moves reach the hub in the pass that follows
+// them. Projects are numbered in ID order, which is the order the runner
+// serves them in.
+func TestRunnerWakePushesDependentMovesBeforeTheInterval(t *testing.T) {
+	type move struct{ from, to int }
+	cases := []struct {
+		name string
+		// issues lists, per issue, the project it is created in and the moves
+		// made before the next push.
+		issues [][]move
+	}{
+		{
+			name:   "a chain of moves into lower IDs",
+			issues: [][]move{{{from: 2, to: 1}, {from: 1, to: 0}}},
+		},
+		{
+			name:   "each destination waits on a later source",
+			issues: [][]move{{{from: 1, to: 0}}, {{from: 2, to: 1}}},
+		},
+		{
+			name:   "a destination waits on a pushed source and a refused one",
+			issues: [][]move{{{from: 2, to: 0}}, {{from: 3, to: 1}, {from: 1, to: 0}}},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hub := testenv.New(t)
+			spoke := testenv.New(t)
+			t.Setenv("KATA_HOME", t.TempDir())
+			bound := bindSpokeProjects(t, hub.DB, spoke.DB, hub.URL, 4)
+			ids := make([]int64, 0, len(bound))
+			for _, project := range bound {
+				ids = append(ids, project.spoke.ID)
+			}
+			require.IsIncreasing(t, ids)
+
+			wake := NewWakeQueue()
+			results := newSpokeResults()
+			runner, debounces := newWakeRunner(t, spoke, wake, results)
+			ctx := t.Context()
+			go func() { _ = runner.Run(ctx) }()
+			results.await(t, ids...)
+
+			type want struct {
+				uid     string
+				project int64
+			}
+			var wants []want
+			for _, moves := range tc.issues {
+				issue, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
+					ProjectID: bound[moves[0].from].spoke.ID, Title: "moved before its first push", Author: "tester",
+				})
+				require.NoError(t, err)
+				for _, step := range moves {
+					out, err := spoke.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+						IssueID: issue.ID, FromProjectID: bound[step.from].spoke.ID, ToProjectID: bound[step.to].spoke.ID,
+						IfMatchRev: issue.Revision, Actor: "tester",
+					})
+					require.NoError(t, err)
+					issue = out.Issue
+				}
+				wants = append(wants, want{uid: issue.UID, project: bound[moves[len(moves)-1].to].hub.ID})
+			}
+			// The daemon wakes every project for a move.
+			wake.WakeAll()
+			awaitDebounce(t, debounces).fire <- time.Now()
+			results.await(t, ids[0])
+			// The pass took its wakes before its first turn, so the runner
+			// debounces this one only after the pass ends.
+			wake.WakeAll()
+			awaitDebounce(t, debounces)
+
+			for _, w := range wants {
+				got, err := hub.DB.IssueByUID(ctx, w.uid, db.IncludeDeletedNo)
+				require.NoError(t, err, "the hub has the issue before the next interval")
+				assert.Equal(t, w.project, got.ProjectID, "the hub has the move before the next interval")
+			}
+		})
+	}
+}
+
+// Only the hub's refusal of a move push sends a turn back for a retry in the
+// same pass. A 404 from another request, or a hub that asked the spoke to
+// wait, leaves the turn to the retry schedule.
+func TestPendingMoveSourcesNeedsAMovePushRefusal(t *testing.T) {
+	hub := testenv.New(t)
+	spoke := testenv.New(t)
+	t.Setenv("KATA_HOME", t.TempDir())
+	bound := bindSpokeProjects(t, hub.DB, spoke.DB, hub.URL, 2)
+	destination, source := bound[0], bound[1]
+	ctx := t.Context()
+	issue, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.spoke.ID, Title: "moved before its first push", Author: "tester"})
+	require.NoError(t, err)
+	_, err = spoke.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: issue.ID, FromProjectID: source.spoke.ID, ToProjectID: destination.spoke.ID,
+		IfMatchRev: issue.Revision, Actor: "tester",
+	})
+	require.NoError(t, err)
+
+	pushRefused := &HubStatusError{Path: "/api/v1/projects/7/federation/events:ingest", StatusCode: 404}
+	claimMissing := &HubStatusError{Path: "/api/v1/projects/7/issues/abc4/actions/claim", StatusCode: 404}
+	cases := []struct {
+		name string
+		err  error
+		want map[string]bool
+	}{
+		{name: "push refused", err: pushRefused, want: map[string]bool{source.hub.UID: true}},
+		{name: "claim missing", err: claimMissing},
+		{
+			name: "claim missing and hub unavailable",
+			err:  errors.Join(claimMissing, &HubStatusError{Path: pushRefused.Path, StatusCode: 503}),
+		},
+		{
+			name: "push refused and claim unauthorized",
+			err:  errors.Join(&HubStatusError{Path: claimMissing.Path, StatusCode: 401}, pushRefused),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := pendingMoveSources(ctx, spoke.DB, destination.spoke.ID, tc.err)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// A source whose events reach the hub counts as pushed even when its turn
+// also fails to retry an offline claim. The claim here names an issue the hub
+// has not seen, so the hub answers it with 404.
+func TestRunnerWakePushesMoveWhenTheSourceClaimRetryFails(t *testing.T) {
+	hub := testenv.New(t)
+	spoke := testenv.New(t)
+	t.Setenv("KATA_HOME", t.TempDir())
+	bound := bindSpokeProjects(t, hub.DB, spoke.DB, hub.URL, 2)
+	destination, source := bound[0], bound[1]
+	require.Less(t, destination.spoke.ID, source.spoke.ID)
+
+	wake := NewWakeQueue()
+	results := newSpokeResults()
+	runner, debounces := newWakeRunner(t, spoke, wake, results)
+	runner.OnError = func(error) {}
+	ctx := t.Context()
+	go func() { _ = runner.Run(ctx) }()
+	results.await(t, destination.spoke.ID, source.spoke.ID)
+
+	claimed, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.spoke.ID, Title: "claimed before its first push", Author: "tester"})
+	require.NoError(t, err)
+	_, err = spoke.DB.EnqueuePendingClaim(ctx, pendingClaimParams(spoke.DB, source.spoke.ID, claimed.ShortID, "tester"))
+	require.NoError(t, err)
+	issue, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.spoke.ID, Title: "moved before its first push", Author: "tester"})
+	require.NoError(t, err)
+	_, err = spoke.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: issue.ID, FromProjectID: source.spoke.ID, ToProjectID: destination.spoke.ID,
+		IfMatchRev: issue.Revision, Actor: "tester",
+	})
+	require.NoError(t, err)
+	wake.WakeAll()
+	awaitDebounce(t, debounces).fire <- time.Now()
+	results.await(t, destination.spoke.ID, source.spoke.ID)
+	// The runner debounces this wake only after the pass ends.
+	wake.WakeAll()
+	awaitDebounce(t, debounces)
+
+	got, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err, "the hub has the issue before the next interval")
+	assert.Equal(t, destination.hub.ID, got.ProjectID, "the hub has the move before the next interval")
+}
