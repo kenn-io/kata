@@ -72,7 +72,7 @@ func TestIssueMetadataIndexMigrationUpgradesVersion55(t *testing.T) {
 	t.Cleanup(func() { _ = upgraded.Close() })
 	version, err := upgraded.SchemaVersion(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, 56, version)
+	assert.Equal(t, db.CurrentSchemaVersion(), version)
 	issues, err := upgraded.ListAllIssues(ctx, db.ListAllIssuesParams{
 		CreatedFirst: true,
 		Meta:         []db.MetaFilter{{Key: "work.attention"}},
