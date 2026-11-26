@@ -277,9 +277,10 @@ func (m Model) guardAnswer(connGen uint64, req int64, query SearchQuery) (Model,
 	return m, true
 }
 
-// failAsk shows why the ask failed and keeps the rows as they were.
+// failAsk shows why the ask failed and keeps the rows as they were. The query
+// is forgotten so Enter or reopening the bar can ask for the same text again.
 func (m Model) failAsk(err error) Model {
-	m.list.ranked.pending = false
+	m.list.ranked.pending, m.list.ranked.asked = false, ""
 	m.list.ranked.err = err
 	m.list.status = searchFailedStatus(err)
 	return m

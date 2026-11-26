@@ -183,6 +183,26 @@ func TestDaemonSearch_FailureBeforeAnyAnswerShowsOnceAtEverySize(t *testing.T) {
 	}
 }
 
+func TestDaemonSearch_EnterRetriesTheSameQueryAfterAFailure(t *testing.T) {
+	m, api := daemonSearchFixture(t)
+	alpha, _, _ := searchTestIssues()
+	api.searchFn = func(SearchQuery) (*SearchAnswer, error) { return nil, errors.New("daemon timed out") }
+	m = openBarFromCmd(t, m, '/')
+	m, _ = stepModel(m, ctrlT)
+	m, cmds := typeText(m, "payments")
+	m = settleSearch(m, cmds...)
+	require.Equal(t, "search failed", m.list.rankedNote())
+
+	// The daemon recovers; Enter on the unchanged text asks it again.
+	api.searchFn = answerWith("hybrid", alpha)
+	m, cmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = settleSearch(m, cmd)
+
+	require.Equal(t, []SearchQuery{{Query: "payments", Limit: 50}, {Query: "payments", Limit: 50}}, api.searchCalls)
+	require.Equal(t, []string{"01TEST-aaa1"}, visibleUIDs(m))
+	require.Equal(t, "ranked by words and meaning", m.list.rankedNote())
+}
+
 func TestDaemonSearch_EscRestoresPreviousListAndDropsPendingAsk(t *testing.T) {
 	m, api := daemonSearchFixture(t)
 	_, beta, gamma := searchTestIssues()
