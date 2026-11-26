@@ -36,7 +36,6 @@ var (
 
 type daemonLivenessConfig struct {
 	Endpoint         kitdaemon.Endpoint
-	ExpectedPID      int
 	Interval         time.Duration
 	ProbeTimeout     time.Duration
 	FailureThreshold int
@@ -55,7 +54,6 @@ func startDaemonLivenessWatchdog(
 ) {
 	cfg := daemonLivenessConfig{
 		Endpoint:         endpoint,
-		ExpectedPID:      os.Getpid(),
 		Interval:         daemonLivenessInterval,
 		ProbeTimeout:     daemonLivenessProbeTimeout,
 		FailureThreshold: daemonLivenessFailureThreshold,
@@ -73,32 +71,10 @@ func startDaemonLivenessWatchdog(
 }
 
 func runDaemonLivenessWatchdog(ctx context.Context, cfg daemonLivenessConfig) {
-	interval := cfg.Interval
-	if interval <= 0 {
-		interval = defaultDaemonLivenessInterval
-	}
-	probeTimeout := cfg.ProbeTimeout
-	if probeTimeout <= 0 {
-		probeTimeout = defaultDaemonLivenessProbeTimeout
-	}
-	failureThreshold := cfg.FailureThreshold
-	if failureThreshold <= 0 {
-		failureThreshold = defaultDaemonLivenessFailureThreshold
-	}
-	expectedPID := cfg.ExpectedPID
-	if expectedPID <= 0 {
-		expectedPID = os.Getpid()
-	}
-	exitFn := cfg.Exit
-	if exitFn == nil {
-		exitFn = os.Exit
-	}
-
 	probe := cfg.Probe
-	cleanup := func() {}
 	if probe == nil {
 		var err error
-		probe, cleanup, err = newDaemonLivenessProbe(cfg.Endpoint, expectedPID)
+		probe, err = newDaemonLivenessProbe(cfg.Endpoint)
 		if err != nil {
 			if cfg.Diagnostics != nil {
 				_, _ = fmt.Fprintf(cfg.Diagnostics, "kata daemon: liveness watchdog disabled: %v\n", err)
@@ -106,11 +82,10 @@ func runDaemonLivenessWatchdog(ctx context.Context, cfg daemonLivenessConfig) {
 			return
 		}
 	}
-	defer cleanup()
 
 	// Wait one full interval between probes so wake-from-sleep or momentary
 	// stalls cannot trigger back-to-back burst failures.
-	timer := time.NewTimer(interval)
+	timer := time.NewTimer(cfg.Interval)
 	defer timer.Stop()
 
 	consecutiveFailures := 0
@@ -124,7 +99,7 @@ func runDaemonLivenessWatchdog(ctx context.Context, cfg daemonLivenessConfig) {
 			return
 		}
 
-		probeCtx, probeCancel := context.WithTimeout(ctx, probeTimeout)
+		probeCtx, probeCancel := context.WithTimeout(ctx, cfg.ProbeTimeout)
 		err := probe(probeCtx)
 		probeCancel()
 		if ctx.Err() != nil {
@@ -132,36 +107,43 @@ func runDaemonLivenessWatchdog(ctx context.Context, cfg daemonLivenessConfig) {
 		}
 		if err == nil {
 			consecutiveFailures = 0
-			timer.Reset(interval)
+			timer.Reset(cfg.Interval)
 			continue
 		}
 
 		consecutiveFailures++
-		if consecutiveFailures >= failureThreshold {
+		if consecutiveFailures >= cfg.FailureThreshold {
 			report := formatDaemonLivenessTrip(
 				cfg.Endpoint,
-				expectedPID,
+				os.Getpid(),
 				consecutiveFailures,
-				probeTimeout,
-				interval,
+				cfg.ProbeTimeout,
+				cfg.Interval,
 				err,
 				captureAllGoroutineStacks(),
 			)
 			writeDaemonLivenessReport(cfg.Diagnostics, report)
+			// Shutdown or an accepted restart may have begun during stack
+			// capture or the bounded stderr write; let it finish cleanly.
+			if ctx.Err() != nil {
+				return
+			}
 			if cfg.BeforeExit != nil {
 				cfg.BeforeExit()
 			}
-			exitFn(ExitInternal)
+			if cfg.Exit != nil {
+				cfg.Exit(ExitInternal)
+			}
 			return
 		}
-		timer.Reset(interval)
+		timer.Reset(cfg.Interval)
 	}
 }
 
-func newDaemonLivenessProbe(endpoint kitdaemon.Endpoint, expectedPID int) (func(context.Context) error, func(), error) {
+func newDaemonLivenessProbe(endpoint kitdaemon.Endpoint) (func(context.Context) error, error) {
 	target, err := daemonMCPSelfEndpoint(endpoint)
 	if err != nil {
-		return nil, nil, fmt.Errorf("resolve liveness probe endpoint: %w", err)
+		return nil, fmt.Errorf("resolve liveness probe endpoint: %w", err)
 	}
 
 	dialer := &net.Dialer{}
@@ -219,12 +201,12 @@ func newDaemonLivenessProbe(endpoint kitdaemon.Endpoint, expectedPID int) (func(
 		if !info.OK || info.Service != "kata" {
 			return fmt.Errorf("invalid /api/v1/ping response: ok=%t service=%q", info.OK, info.Service)
 		}
-		if expectedPID > 0 && info.PID != expectedPID {
+		if expectedPID := os.Getpid(); info.PID != expectedPID {
 			return fmt.Errorf("/api/v1/ping reported pid %d, expected %d", info.PID, expectedPID)
 		}
 		return nil
 	}
-	return probe, transport.CloseIdleConnections, nil
+	return probe, nil
 }
 
 func captureAllGoroutineStacks() []byte {
@@ -250,7 +232,7 @@ func formatDaemonLivenessTrip(
 	var buf bytes.Buffer
 	_, _ = fmt.Fprintf(
 		&buf,
-		"kata daemon: liveness watchdog tripped: pid=%d endpoint=%s failed %d consecutive /api/v1/ping probes (timeout=%s, interval=%s); last error: %v\n",
+		"kata daemon: stopped answering /api/v1/ping (pid=%d, endpoint=%s, %d consecutive failures, timeout=%s, interval=%s); last error: %v\n",
 		pid,
 		endpoint.ConfigAddress(),
 		failures,
@@ -258,7 +240,11 @@ func formatDaemonLivenessTrip(
 		interval,
 		lastErr,
 	)
-	_, _ = buf.WriteString("kata daemon: dumping goroutine stacks and exiting so supervisor can restart\n")
+	_, _ = fmt.Fprintf(
+		&buf,
+		"kata daemon: writing goroutine stacks below and exiting with status %d; a service supervisor will restart it, or the next kata command will start a new daemon\n",
+		ExitInternal,
+	)
 	_, _ = buf.Write(stacks)
 	if len(stacks) == 0 || stacks[len(stacks)-1] != '\n' {
 		_ = buf.WriteByte('\n')
@@ -300,7 +286,7 @@ func isRegularFileWriter(w io.Writer) bool {
 		return false
 	}
 	info, err := f.Stat()
-	return err == nil && info.Mode().IsRegular()
+	return err == nil && info != nil && info.Mode().IsRegular()
 }
 
 func writeBounded(w io.Writer, data []byte, timeout time.Duration) {

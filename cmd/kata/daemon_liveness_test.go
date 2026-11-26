@@ -52,7 +52,6 @@ func TestDaemonLivenessWatchdog_RecoversFromTransientFailures(t *testing.T) {
 			defer close(done)
 			runDaemonLivenessWatchdog(ctx, daemonLivenessConfig{
 				Endpoint:         kitdaemon.Endpoint{Network: kitdaemon.NetworkTCP, Address: "127.0.0.1:1"},
-				ExpectedPID:      os.Getpid(),
 				Interval:         defaultDaemonLivenessInterval,
 				ProbeTimeout:     defaultDaemonLivenessProbeTimeout,
 				FailureThreshold: defaultDaemonLivenessFailureThreshold,
@@ -105,9 +104,6 @@ func TestDaemonLivenessWatchdog_TripsOnWedgedListenerAndDumpsStacks(t *testing.T
 		}
 	}()
 
-	runtimeFile := filepath.Join(t.TempDir(), "daemon.runtime.json")
-	require.NoError(t, os.WriteFile(runtimeFile, []byte("{}"), 0o600))
-
 	var logBuf bytes.Buffer
 	exitCode := make(chan int, 1)
 	done := make(chan struct{})
@@ -115,12 +111,10 @@ func TestDaemonLivenessWatchdog_TripsOnWedgedListenerAndDumpsStacks(t *testing.T
 		defer close(done)
 		runDaemonLivenessWatchdog(t.Context(), daemonLivenessConfig{
 			Endpoint:         kitdaemon.Endpoint{Network: kitdaemon.NetworkTCP, Address: ln.Addr().String()},
-			ExpectedPID:      os.Getpid(),
 			Interval:         10 * time.Millisecond,
 			ProbeTimeout:     40 * time.Millisecond, //nolint:kennlint // deadlinetest: wedged listener holds connections open so probe timeout is the asserted failure
 			FailureThreshold: 3,
 			Diagnostics:      &logBuf,
-			BeforeExit:       func() { _ = os.Remove(runtimeFile) },
 			Exit:             func(code int) { exitCode <- code },
 		})
 	}()
@@ -133,14 +127,10 @@ func TestDaemonLivenessWatchdog_TripsOnWedgedListenerAndDumpsStacks(t *testing.T
 	}
 	<-done
 
-	assert.NoFileExists(t, runtimeFile, "watchdog must remove runtime file before exit")
 	dump := logBuf.String()
-	assert.Contains(t, dump, "liveness watchdog tripped")
-	assert.Contains(t, dump, "failed 3 consecutive /api/v1/ping probes")
+	assert.Contains(t, dump, "stopped answering /api/v1/ping")
+	assert.Contains(t, dump, "3 consecutive failures")
 	assert.Contains(t, dump, "goroutine ")
-	acceptedMu.Lock()
-	assert.GreaterOrEqual(t, len(accepted), 3, "each probe must open a fresh connection")
-	acceptedMu.Unlock()
 }
 
 func TestDaemonLivenessWatchdog_DoesNotTripOnIntentionalShutdown(t *testing.T) {
@@ -154,7 +144,6 @@ func TestDaemonLivenessWatchdog_DoesNotTripOnIntentionalShutdown(t *testing.T) {
 		defer close(done)
 		runDaemonLivenessWatchdog(ctx, daemonLivenessConfig{
 			Endpoint:         kitdaemon.Endpoint{Network: kitdaemon.NetworkTCP, Address: "127.0.0.1:1"},
-			ExpectedPID:      os.Getpid(),
 			Interval:         5 * time.Millisecond,
 			ProbeTimeout:     time.Second,
 			FailureThreshold: 1,
@@ -174,6 +163,47 @@ func TestDaemonLivenessWatchdog_DoesNotTripOnIntentionalShutdown(t *testing.T) {
 
 	assert.False(t, exited.Load(), "intentional shutdown must not trigger watchdog exit")
 	assert.Empty(t, logBuf.String(), "intentional shutdown must not dump watchdog stacks")
+}
+
+type cancellingDiagnosticWriter struct {
+	cancel context.CancelFunc
+	buf    bytes.Buffer
+}
+
+func (w *cancellingDiagnosticWriter) Write(p []byte) (int, error) {
+	n, err := w.buf.Write(p)
+	w.cancel()
+	return n, err
+}
+
+func TestDaemonLivenessWatchdog_SkipsExitWhenShutdownCancelsDuringReport(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+
+		writer := &cancellingDiagnosticWriter{cancel: cancel}
+		var beforeExitCalled atomic.Bool
+		var exited atomic.Bool
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			runDaemonLivenessWatchdog(ctx, daemonLivenessConfig{
+				Endpoint:         kitdaemon.Endpoint{Network: kitdaemon.NetworkTCP, Address: "127.0.0.1:1"},
+				Interval:         defaultDaemonLivenessInterval,
+				ProbeTimeout:     defaultDaemonLivenessProbeTimeout,
+				FailureThreshold: 1,
+				Diagnostics:      writer,
+				Probe:            func(context.Context) error { return errors.New("probe failed") },
+				BeforeExit:       func() { beforeExitCalled.Store(true) },
+				Exit:             func(int) { exited.Store(true) },
+			})
+		}()
+
+		<-done
+		assert.False(t, beforeExitCalled.Load(), "shutdown starting during report must skip runtime cleanup")
+		assert.False(t, exited.Load(), "shutdown starting during report must skip forced exit")
+	})
 }
 
 func TestDaemonLivenessWatchdog_DetectsPIDMismatch(t *testing.T) {
@@ -203,7 +233,6 @@ func TestDaemonLivenessWatchdog_DetectsPIDMismatch(t *testing.T) {
 		defer close(done)
 		runDaemonLivenessWatchdog(t.Context(), daemonLivenessConfig{
 			Endpoint:         kitdaemon.Endpoint{Network: kitdaemon.NetworkTCP, Address: ln.Addr().String()},
-			ExpectedPID:      os.Getpid(),
 			Interval:         5 * time.Millisecond,
 			ProbeTimeout:     time.Second,
 			FailureThreshold: 2,
@@ -238,7 +267,6 @@ func TestDaemonLivenessWatchdog_RetainsDumpAndExitsWhenStderrBlocked(t *testing.
 		defer close(done)
 		runDaemonLivenessWatchdog(t.Context(), daemonLivenessConfig{
 			Endpoint:         kitdaemon.Endpoint{Network: kitdaemon.NetworkTCP, Address: "127.0.0.1:1"},
-			ExpectedPID:      os.Getpid(),
 			Interval:         5 * time.Millisecond,
 			ProbeTimeout:     time.Second,
 			FailureThreshold: 1,
@@ -255,7 +283,7 @@ func TestDaemonLivenessWatchdog_RetainsDumpAndExitsWhenStderrBlocked(t *testing.
 		t.Fatal("blocked stderr prevented watchdog from exiting")
 	}
 	<-done
-	assert.Contains(t, retained.String(), "liveness watchdog tripped")
+	assert.Contains(t, retained.String(), "stopped answering /api/v1/ping")
 	assert.Contains(t, retained.String(), "goroutine ")
 }
 
@@ -307,12 +335,10 @@ func TestDaemonLivenessProbe_RealServerSocketAndSharedTCPWithoutResettingIdle(t 
 		}()
 		idle.Start()
 
-		probe, cleanup, err := newDaemonLivenessProbe(
+		probe, err := newDaemonLivenessProbe(
 			kitdaemon.Endpoint{Network: kitdaemon.NetworkUnix, Address: sockPath},
-			os.Getpid(),
 		)
 		require.NoError(t, err)
-		defer cleanup()
 
 		probeCtx, probeCancel := context.WithTimeout(t.Context(), 2*time.Second)
 		defer probeCancel()
@@ -388,12 +414,10 @@ func TestDaemonLivenessProbe_RealServerSocketAndSharedTCPWithoutResettingIdle(t 
 			})
 		}()
 
-		probe, cleanup, err := newDaemonLivenessProbe(
+		probe, err := newDaemonLivenessProbe(
 			kitdaemon.Endpoint{Network: kitdaemon.NetworkTCP, Address: runtimeAddr},
-			os.Getpid(),
 		)
 		require.NoError(t, err)
-		defer cleanup()
 
 		probeCtx, probeCancel := context.WithTimeout(t.Context(), 2*time.Second)
 		defer probeCancel()
@@ -593,7 +617,6 @@ func TestDaemonLivenessWatchdog_DoesNotTripDuringSlowStartup(t *testing.T) {
 		stallTimer.Stop()
 		t.Fatalf("daemon exited prematurely during slow startup: %v", err)
 	}
-	assert.Zero(t, observed.accepted.Load(), "watchdog must not probe before daemon readiness")
 	close(releaseStartup)
 
 	// Wait for at least two real watchdog probes to be accepted after readiness.
@@ -615,7 +638,7 @@ func TestDaemonLivenessWatchdog_DoesNotTripDuringSlowStartup(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("daemon did not shut down cleanly")
 	}
-	assert.NotContains(t, diagnostics.String(), "liveness watchdog tripped")
+	assert.NotContains(t, diagnostics.String(), "stopped answering /api/v1/ping")
 }
 
 func TestDaemonLivenessWatchdog_SubprocessDumpsToDaemonLogAndExitsNonzero(t *testing.T) {
@@ -640,8 +663,9 @@ func TestDaemonLivenessWatchdog_SubprocessDumpsToDaemonLogAndExitsNonzero(t *tes
 	logPath := filepath.Join(ns.DataDir, "daemon.log")
 	contents, readErr := os.ReadFile(logPath) // #nosec G304 -- test-owned daemon.log under t.TempDir
 	require.NoError(t, readErr)
-	assert.Contains(t, string(contents), "liveness watchdog tripped")
-	assert.Contains(t, string(contents), "failed 2 consecutive /api/v1/ping probes")
+	assert.Contains(t, string(contents), "stopped answering /api/v1/ping")
+	assert.Contains(t, string(contents), "2 consecutive failures")
+	assert.Contains(t, string(contents), "a service supervisor will restart it, or the next kata command will start a new daemon")
 	assert.Contains(t, string(contents), "goroutine ")
 	assert.Contains(t, string(contents), "runDaemonLivenessWatchdog")
 
