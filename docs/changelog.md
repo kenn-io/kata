@@ -11,9 +11,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Find an issue in `kata tui` by what it is about: press `/` in a project, then
   `ctrl+t` to ask the daemon for ranked results instead of filtering the loaded
-  rows. Results come from the issues the TUI has loaded (up to 2,000 per
-  project), and a note shows whether the daemon ranked by words and meaning or
-  by words only, and counts hits beyond the loaded issues.
+  rows. Of the daemon's best 50 hits, the TUI shows those among the issues it
+  has loaded (up to 2,000 per project); a note shows whether the daemon ranked
+  by words and meaning or by words only, and counts the hits beyond them.
   See [search by meaning in the TUI](guide/semantic-search.md#search-by-meaning-in-the-tui).
 
 ## 0.24.0

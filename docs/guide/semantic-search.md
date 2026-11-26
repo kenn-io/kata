@@ -200,13 +200,13 @@ appears in the `mode` field (`lexical`, `hybrid`, or `semantic`); see the
 
 `kata tui`'s `/` search filters the rows already loaded, by title and ID. To
 find an issue by what it is about, press `/` in a project, then `ctrl+t` to ask
-the daemon instead. The daemon ranks the project's issues in auto mode, so
-the results follow its order, flat rather than nested. The TUI shows only hits
-among the issues it has loaded (up to 2,000 per project), and the other list
-filters (status, labels, owner, date) still narrow what shows. A note beside the
+the daemon instead. The daemon ranks the project's issues in auto mode and
+the TUI takes its best 50 hits, flat and in the daemon's order. It shows only
+the hits among the issues it has loaded (up to 2,000 per project), and the
+other list filters (status, labels, owner, date) narrow those. A note beside the
 search line says whether the daemon ranked by words and meaning or by words
-only, and, in a project with more issues than the TUI loads, how many hits lie
-beyond them.
+only, and, in a project with more issues than the TUI loads, how many of the 50
+hits lie beyond them.
 
 The choice lasts until you quit. Press `ctrl+t` again to filter the loaded rows
 by text. Results come after you stop typing; a blank query shows the normal
