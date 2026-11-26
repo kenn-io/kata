@@ -1309,6 +1309,7 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly, n
 	restart := newDaemonRestart(diagnostics)
 	err := runDaemonProcess(ctx, listen, insecureReadonly, noAutoToken, restart, diagnostics)
 	if err != nil {
+		restart.reportShutdownFailure(err)
 		err = reportRestartFailure(startedForRestartReply, err)
 	} else {
 		err = restart.exec(ctx)
@@ -1353,7 +1354,7 @@ func runDaemonProcess(
 			return fmt.Errorf("daemon already running pid=%d; wait for it to exit before starting another daemon; runtime record: %s; remove that file if no kata daemon owns that PID", record.PID, record.SourcePath)
 		}
 	}
-	listener, err := kitdaemon.Listen(ctx, endpoint, kitdaemon.WithRuntimeStore(runtimeStore))
+	listener, err := listenPrimaryDaemon(ctx, endpoint, kitdaemon.WithRuntimeStore(runtimeStore))
 	if err != nil {
 		return err
 	}
@@ -1542,6 +1543,22 @@ func runDaemonProcess(
 		daemonLog.Printf("shared embeddings choice: %v", startup.ChoiceErr)
 	}
 
+	// Complete fallible startup initialization before launching background
+	// workers so an early error never closes the store or owner lock while
+	// workers are still running.
+	externalRootRegistry, err := rootbridge.NewRegistry(ctx, dcfg.Connectors, nil)
+	if err != nil {
+		return err
+	}
+	var signingVerifier *federationsigning.Verifier
+	if dcfg.Federation.Signing.ExternalURL != "" {
+		signingVerifier, err = federationsigning.NewVerifier(dcfg.Federation.Signing.ExternalURL, dcfg.Federation.Signing.Keys, dcfg.Federation.Signing.ReplayStateFile)
+		if err != nil {
+			return fmt.Errorf("initialize federation signing: %w", err)
+		}
+		defer func() { _ = signingVerifier.Close() }()
+	}
+
 	broadcaster := daemon.NewEventBroadcaster()
 	publisher := daemon.NewEventPublisher(broadcaster, disp)
 	embedder, vectorIndex, reconcilerHealth, embeddingWake, err := startEmbeddingReconciler(
@@ -1641,10 +1658,6 @@ func runDaemonProcess(
 		ctx, workers, waitableDrainAdmission, store, tickTickSyncFetcher, publisher, daemonLog, tickTickSyncProgress,
 	)
 
-	externalRootRegistry, err := rootbridge.NewRegistry(ctx, dcfg.Connectors, nil)
-	if err != nil {
-		return err
-	}
 	externalRootReconciler := rootbridge.NewReconciler(store, externalRootRegistry, rootbridge.ReconcilerConfig{
 		RetryAt:         rootbridge.ExternalRootRetryAt(nil),
 		DefaultTimezone: dcfg.Timezone,
@@ -1683,15 +1696,6 @@ func runDaemonProcess(
 	})
 	startExternalRootEventWake(ctx, workers, store, broadcaster, externalRootWake)
 
-	var signingVerifier *federationsigning.Verifier
-	if dcfg.Federation.Signing.ExternalURL != "" {
-		var err error
-		signingVerifier, err = federationsigning.NewVerifier(dcfg.Federation.Signing.ExternalURL, dcfg.Federation.Signing.Keys, dcfg.Federation.Signing.ReplayStateFile)
-		if err != nil {
-			return fmt.Errorf("initialize federation signing: %w", err)
-		}
-		defer func() { _ = signingVerifier.Close() }()
-	}
 	docbankClient := docbank.New(dcfg.Docbank)
 	var mcpHandler http.Handler
 	if dcfg.MCP.Enabled {
@@ -1904,6 +1908,7 @@ func runDaemonProcess(
 			if idleController != nil {
 				idleController.Start()
 			}
+			startDaemonLivenessWatchdog(ctx, workers, runtimeEndpoint, path, diagnostics)
 			if listen != "" {
 				_, _ = fmt.Fprintf(diagnostics, "kata daemon: listening on %s\n", rec.Endpoint().ConfigAddress())
 			}
