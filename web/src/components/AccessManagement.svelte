@@ -1,5 +1,17 @@
 <script lang="ts">
-  import { Checkbox } from '@kenn-io/kit-ui'
+  import CircleAlertIcon from '@lucide/svelte/icons/circle-alert'
+  import PlusIcon from '@lucide/svelte/icons/plus'
+  import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw'
+  import {
+    Avatar,
+    Button,
+    Checkbox,
+    Disclosure,
+    Notice,
+    SelectDropdown,
+    SettingsSection,
+  } from '@kenn-io/kit-ui'
+
   import {
     addTeamMember,
     createTeam,
@@ -27,24 +39,32 @@
   let { projects, pending, message, onMutation }: Props = $props()
   let teams = $state<Team[]>([])
   let name = $state('')
+  let naming = $state(false)
   let loading = $state(true)
-  let error = $state<string>()
+  let teamsError = $state<string>()
+  let membersError = $state<string>()
+  let policyError = $state<string>()
   let busy = $state(false)
   let teamUID = $state('')
   let members = $state<string[]>([])
   let member = $state('')
+  let addingMember = $state(false)
   let teamLoading = $state(false)
   let projectID = $state('')
   let policy = $state<ProjectAccessPolicy>()
   let visibility = $state<'all' | 'teams'>('all')
   let selectedTeams = $state<string[]>([])
   let policyLoading = $state(false)
-  const controlID = $props.id()
+  let policyRetry = $state<{ visibility: 'all' | 'teams'; team_uids: string[] }>()
   const lifetime = new AbortController()
   let teamAbort: AbortController | undefined
   let policyAbort: AbortController | undefined
   let listAbort: AbortController | undefined
   let disabled = $derived(pending || busy)
+  let policyDisabled = $derived(disabled || loading || policyLoading || !policy)
+  let projectOptions = $derived(
+    projects.map((entry) => ({ value: String(entry.project.id), label: entry.project.name })),
+  )
 
   $effect(() => {
     void refresh()
@@ -58,12 +78,25 @@
   $effect(() => {
     const uid = teamUID
     member = ''
+    addingMember = false
     void loadMembers(uid)
+  })
+  // Visibility always shows a project: the first, until another is picked.
+  $effect(() => {
+    if (!projectOptions.some((option) => option.value === projectID))
+      projectID = projectOptions[0]?.value ?? ''
   })
   $effect(() => {
     const id = projectID
     void loadPolicy(id)
   })
+
+  // Deleted teams leave the open team and any retained visibility draft.
+  function dropMissingTeams(): void {
+    const exists = (uid: string) => teams.some((team) => team.uid === uid)
+    if (!exists(teamUID)) teamUID = ''
+    selectedTeams = selectedTeams.filter(exists)
+  }
 
   async function refresh(): Promise<void> {
     if (lifetime.signal.aborted) return
@@ -75,20 +108,33 @@
       if (abort.signal.aborted || lifetime.signal.aborted) return
       if (response.status !== 200) throw new Error()
       teams = response.data.teams
-      if (!teams.some((team) => team.uid === teamUID)) teamUID = ''
-      error = undefined
+      dropMissingTeams()
+      teamsError = undefined
     } catch {
       if (!abort.signal.aborted && !lifetime.signal.aborted)
-        error = 'Unable to read teams. Refresh to try again.'
+        teamsError = "Couldn't load teams. Refresh to try again."
     } finally {
       if (!abort.signal.aborted && !lifetime.signal.aborted) loading = false
     }
+  }
+
+  // Refresh reloads everything the section shows: teams, the open team's
+  // members, and the chosen project's visibility.
+  async function refreshAll(): Promise<void> {
+    const uid = teamUID
+    const id = projectID
+    await Promise.all([
+      refresh(),
+      uid ? loadMembers(uid) : undefined,
+      id ? loadPolicy(id, !!policyRetry) : undefined,
+    ])
   }
 
   async function loadMembers(uid: string): Promise<void> {
     teamAbort?.abort()
     const abort = (teamAbort = new AbortController())
     members = []
+    membersError = undefined
     teamLoading = !!uid
     if (!uid || lifetime.signal.aborted) return
     try {
@@ -96,19 +142,24 @@
       if (abort.signal.aborted || lifetime.signal.aborted) return
       if (response.status !== 200) throw new Error()
       members = response.data.members
-      error = undefined
+      membersError = undefined
     } catch {
-      if (!abort.signal.aborted && !lifetime.signal.aborted) error = 'Unable to read team members.'
+      if (!abort.signal.aborted && !lifetime.signal.aborted)
+        membersError = "Couldn't load team members."
     } finally {
       if (!abort.signal.aborted && !lifetime.signal.aborted) teamLoading = false
     }
   }
 
-  async function loadPolicy(id: string): Promise<void> {
+  async function loadPolicy(id: string, preserveDraft = false): Promise<void> {
     policyAbort?.abort()
     const abort = (policyAbort = new AbortController())
     policy = undefined
-    selectedTeams = []
+    policyError = undefined
+    if (!preserveDraft) {
+      // Keep the current picks visible while disabled; replace them when the read completes.
+      policyRetry = undefined
+    }
     policyLoading = !!id
     if (!id || lifetime.signal.aborted) return
     try {
@@ -116,12 +167,14 @@
       if (abort.signal.aborted || lifetime.signal.aborted) return
       if (response.status !== 200) throw new Error()
       policy = response.data.policy
-      visibility = policy.visibility === 'teams' ? 'teams' : 'all'
-      selectedTeams = [...policy.team_uids]
-      error = undefined
+      if (!preserveDraft) {
+        visibility = policy.visibility === 'teams' ? 'teams' : 'all'
+        selectedTeams = [...policy.team_uids]
+      }
+      policyError = undefined
     } catch {
       if (!abort.signal.aborted && !lifetime.signal.aborted)
-        error = 'Unable to read project visibility.'
+        policyError = "Couldn't load project visibility."
     } finally {
       if (!abort.signal.aborted && !lifetime.signal.aborted) policyLoading = false
     }
@@ -153,6 +206,7 @@
       )
     ) {
       name = ''
+      naming = false
       await refresh()
     }
   }
@@ -170,12 +224,12 @@
     ) {
       if (teamUID !== uid) return
       member = ''
+      addingMember = false
       await loadMembers(uid)
     }
   }
 
-  async function removeTeam(): Promise<void> {
-    const uid = teamUID
+  async function removeTeam(uid: string): Promise<void> {
     const selectedProjectID = projectID
     if (!uid || !confirm('Delete this team and revoke its project access?')) return
     if (
@@ -190,204 +244,458 @@
     }
   }
 
-  async function savePolicy(): Promise<void> {
+  // A new selected-teams policy waits for a team pick, unless it retries a failed empty submit.
+  function waitsForTeam(next: 'all' | 'teams', nextTeams: readonly string[]): boolean {
+    const failedEmpty = policyRetry?.visibility === 'teams' && !policyRetry.team_uids.length
+    return next === 'teams' && !nextTeams.length && policy?.visibility !== 'teams' && !failedEmpty
+  }
+
+  // Visibility saves as it changes, against the revision it was loaded at.
+  async function savePolicy(
+    nextVisibility: 'all' | 'teams',
+    nextTeams: readonly string[],
+  ): Promise<void> {
     if (!policy || policyLoading) return
+    visibility = nextVisibility
+    selectedTeams = [...nextTeams]
+    if (waitsForTeam(nextVisibility, nextTeams)) return
     const id = projectID
     const draft = {
-      visibility,
-      team_uids: visibility === 'teams' ? [...selectedTeams] : [],
+      visibility: nextVisibility,
+      team_uids: nextVisibility === 'teams' ? [...nextTeams] : [],
       revision: policy.revision,
     }
-    if (
-      await mutate(draft, (context) =>
-        setProjectAccess({ projectId: Number(id) }, draft, {
-          headers: context.headers,
-          signal: lifetime.signal,
-        }),
-      )
-    ) {
-      if (projectID === id) await loadPolicy(id)
+    const saved = await mutate(draft, (context) =>
+      setProjectAccess({ projectId: Number(id) }, draft, {
+        headers: context.headers,
+        signal: lifetime.signal,
+      }),
+    )
+    if (projectID === id && !lifetime.signal.aborted) {
+      policyRetry = saved ? undefined : draft
+      await loadPolicy(id, !saved)
     }
+  }
+
+  function memberCount(count: number): string {
+    return `${count} ${count === 1 ? 'member' : 'members'}`
   }
 </script>
 
+{#snippet errorIcon()}<CircleAlertIcon />{/snippet}
+
 <div class="access-management">
-  {#if message || error}<p role="alert">{message ?? error}</p>{/if}
-  <button type="button" disabled={disabled || loading} onclick={() => void refresh()}
-    >Refresh teams</button
-  >
-  <form
-    onsubmit={(event) => {
-      event.preventDefault()
-      void create()
-    }}
-  >
-    <label>New team name <input bind:value={name} required {disabled} /></label>
-    <button type="submit" disabled={disabled || loading || !name.trim()}>Create team</button>
-  </form>
-  <label for={`${controlID}-team`}>Team</label>
-  <select id={`${controlID}-team`} bind:value={teamUID} disabled={disabled || loading}>
-    <option value="">Choose a team</option>
-    {#each teams as team (team.uid)}<option value={team.uid}>{team.name}</option>{/each}
-  </select>
-  {#if teamUID}
-    <ul aria-label="Team members">
-      {#each members as account (account)}<li>
-          {account}
-          <button
-            type="button"
-            aria-label={`Remove ${account}`}
-            disabled={disabled || teamLoading || loading}
-            onclick={() => void changeMember(account, false)}>Remove</button
-          >
-        </li>{/each}
-    </ul>
-    <form
-      onsubmit={(event) => {
-        event.preventDefault()
-        void changeMember(member.trim(), true)
-      }}
-    >
-      <label
-        >Member account <input
-          bind:value={member}
-          required
-          disabled={disabled || teamLoading || loading}
-        /></label
+  {#if message}<Notice variant="inline" live tone="error" icon={errorIcon} {message} />{/if}
+
+  <SettingsSection title="Teams">
+    <div class="settings-title-action">
+      <Button
+        size="sm"
+        ariaLabel="Refresh teams"
+        disabled={disabled || loading}
+        onclick={() => void refreshAll()}
       >
-      <button type="submit" disabled={disabled || teamLoading || loading || !member.trim()}
-        >Add member</button
-      >
-    </form>
-    <button
-      type="button"
-      disabled={disabled || teamLoading || loading}
-      onclick={() => void removeTeam()}>Delete team</button
-    >
-  {/if}
-  <label for={`${controlID}-project`}>Project visibility</label>
-  <select id={`${controlID}-project`} bind:value={projectID} {disabled}>
-    <option value="">Choose a project</option>
-    {#each projects as entry (entry.project.uid)}<option value={String(entry.project.id)}
-        >{entry.project.name}</option
-      >{/each}
-  </select>
-  {#if projectID}
-    <form
-      onsubmit={(event) => {
-        event.preventDefault()
-        void savePolicy()
-      }}
-    >
-      <label for={`${controlID}-visibility`}>Visibility</label>
-      <select
-        id={`${controlID}-visibility`}
-        bind:value={visibility}
-        disabled={disabled || policyLoading || !policy}
-      >
-        <option value="all">All enrolled users</option><option value="teams">Selected teams</option>
-      </select>
-      {#if visibility === 'teams'}
-        <fieldset disabled={disabled || loading || policyLoading || !policy}>
-          <legend>Teams with access</legend>
-          {#each teams as team (team.uid)}
-            <Checkbox
-              label={team.name}
-              checked={selectedTeams.includes(team.uid)}
-              disabled={disabled || loading || policyLoading || !policy}
-              onchange={(checked) => {
-                selectedTeams = checked
-                  ? [...selectedTeams, team.uid]
-                  : selectedTeams.filter((uid) => uid !== team.uid)
+        <RefreshCwIcon size={14} aria-hidden="true" />
+        <span>Refresh</span>
+      </Button>
+    </div>
+
+    {#if teamsError}
+      <Notice variant="inline" live tone="error" icon={errorIcon} message={teamsError} />
+    {/if}
+    {#if loading && teams.length === 0}
+      <p class="note" role="status">Loading teams…</p>
+    {:else if teams.length === 0}
+      <p class="note">No teams yet.</p>
+    {:else}
+      <ul class="teams" aria-label="Teams">
+        {#each teams as team (team.uid)}
+          {@const open = teamUID === team.uid}
+          <li class="team">
+            <Disclosure
+              variant="plain"
+              {open}
+              ontoggle={(next) => {
+                if (next) teamUID = team.uid
+                else if (teamUID === team.uid) teamUID = ''
               }}
-            />
-          {/each}
-          <p>
-            No selected teams means no team members have access. Daemon owners retain administration
-            access.
-          </p>
-        </fieldset>
-      {/if}
-      <button type="submit" disabled={disabled || loading || policyLoading || !policy}
-        >Save visibility</button
+            >
+              {#snippet summary()}
+                <span class="team-name">{team.name}</span>
+                {#if open && !teamLoading && !membersError}
+                  <span class="team-count">{memberCount(members.length)}</span>
+                {/if}
+              {/snippet}
+              {#if !open}
+                <!-- Only the open team's members are loaded. -->
+              {:else if teamLoading}
+                <p class="note" role="status">Loading members…</p>
+              {:else if membersError}
+                <Notice
+                  variant="inline"
+                  live
+                  tone="error"
+                  icon={errorIcon}
+                  message={membersError}
+                />
+              {:else}
+                <ul class="members" aria-label="Team members">
+                  {#each members as account (account)}
+                    <li class="member">
+                      <Avatar name={account} decorative size={18} />
+                      <span class="member-name">{account}</span>
+                      <Button
+                        size="sm"
+                        surface="soft"
+                        ariaLabel={`Remove ${account}`}
+                        disabled={disabled || loading}
+                        onclick={() => void changeMember(account, false)}>Remove</Button
+                      >
+                    </li>
+                  {/each}
+                </ul>
+                {#if addingMember}
+                  <form
+                    class="inline-field"
+                    onsubmit={(event) => {
+                      event.preventDefault()
+                      void changeMember(member.trim(), true)
+                    }}
+                  >
+                    <!-- svelte-ignore a11y_autofocus -->
+                    <input
+                      bind:value={member}
+                      aria-label="Member account"
+                      placeholder="Account"
+                      autofocus
+                      required
+                      pattern=".*\S.*"
+                      disabled={disabled || loading}
+                    />
+                    <Button type="submit" size="sm" disabled={disabled || loading}
+                      >Add member</Button
+                    >
+                  </form>
+                {:else}
+                  <button
+                    type="button"
+                    class="add-row"
+                    disabled={disabled || loading}
+                    onclick={() => (addingMember = true)}
+                  >
+                    <PlusIcon size={14} aria-hidden="true" />
+                    <span>Add member</span>
+                  </button>
+                {/if}
+              {/if}
+            </Disclosure>
+            {#if open}
+              <div class="team-action">
+                <button
+                  type="button"
+                  class="text-action"
+                  aria-label={`Delete ${team.name}`}
+                  disabled={disabled || teamLoading || loading}
+                  onclick={() => void removeTeam(team.uid)}>Delete…</button
+                >
+              </div>
+            {/if}
+          </li>
+        {/each}
+      </ul>
+    {/if}
+
+    {#if naming}
+      <form
+        class="inline-field"
+        onsubmit={(event) => {
+          event.preventDefault()
+          void create()
+        }}
       >
+        <!-- svelte-ignore a11y_autofocus -->
+        <input
+          bind:value={name}
+          aria-label="New team name"
+          placeholder="Team name"
+          autofocus
+          required
+          pattern=".*\S.*"
+          {disabled}
+        />
+        <Button type="submit" size="sm" disabled={disabled || loading}>Create team</Button>
+      </form>
+    {:else}
       <button
         type="button"
-        disabled={disabled || policyLoading}
-        onclick={() => void loadPolicy(projectID)}>Reload visibility</button
+        class="add-row"
+        disabled={disabled || loading}
+        onclick={() => (naming = true)}
       >
-    </form>
-  {/if}
+        <PlusIcon size={14} aria-hidden="true" />
+        <span>New team</span>
+      </button>
+    {/if}
+  </SettingsSection>
+
+  <SettingsSection title="Project visibility" description="Server owners see every project.">
+    {#if policyError}
+      <Notice variant="inline" live tone="error" icon={errorIcon} message={policyError} />
+    {/if}
+    {#if projectOptions.length === 0}
+      <p class="note">No projects yet.</p>
+    {:else}
+      <div class="settings-row">
+        <span class="row-label">Project</span>
+        <SelectDropdown
+          title="Project"
+          value={projectID}
+          options={projectOptions}
+          {disabled}
+          onchange={(value) => {
+            projectID = value
+          }}
+        />
+      </div>
+      <div class="settings-row">
+        <span class="row-label">Visibility</span>
+        <SelectDropdown
+          title="Visibility"
+          value={visibility}
+          options={[
+            { value: 'all', label: 'Everyone' },
+            { value: 'teams', label: 'Selected teams' },
+          ]}
+          disabled={policyDisabled}
+          onchange={(value) =>
+            void savePolicy(
+              value === 'teams' ? 'teams' : 'all',
+              value === 'teams' ? selectedTeams : [],
+            )}
+        />
+      </div>
+      {#if visibility === 'teams'}
+        <fieldset class="settings-row team-picks" disabled={policyDisabled}>
+          <legend class="row-label">Teams with access</legend>
+          <div class="picks">
+            {#each teams as team (team.uid)}
+              <Checkbox
+                label={team.name}
+                checked={selectedTeams.includes(team.uid)}
+                disabled={policyDisabled}
+                onchange={(checked) =>
+                  void savePolicy(
+                    'teams',
+                    checked
+                      ? [...selectedTeams, team.uid]
+                      : selectedTeams.filter((uid) => uid !== team.uid),
+                  )}
+              />
+            {:else}
+              <p class="note">Create a team above to pick it here.</p>
+            {/each}
+            {#if teams.length > 0 && selectedTeams.length === 0}
+              <p class="note">
+                {policy?.visibility === 'teams' && policy.team_uids.length === 0
+                  ? 'No teams have access. Server owners still do.'
+                  : 'Pick a team to save.'}
+              </p>
+            {/if}
+          </div>
+        </fieldset>
+      {/if}
+      {#if policyRetry}
+        <Button
+          size="sm"
+          disabled={policyDisabled || waitsForTeam(visibility, selectedTeams)}
+          onclick={() => void savePolicy(visibility, selectedTeams)}
+        >
+          Retry saving visibility
+        </Button>
+      {/if}
+    {/if}
+  </SettingsSection>
 </div>
 
 <style>
   .access-management {
     display: grid;
-    gap: var(--space-3);
+    gap: var(--space-7);
     min-width: 0;
   }
-  form {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: end;
-    gap: var(--space-3);
-  }
-  label {
-    display: grid;
-    gap: 4px;
-  }
-  input,
-  select {
-    min-width: 0;
-    max-width: 100%;
-    padding: 6px 8px;
-    border: 1px solid var(--border-default);
-    border-radius: 4px;
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    font: inherit;
-  }
-  select {
-    width: min(100%, 24rem);
-  }
-  button {
-    width: fit-content;
-    max-width: 100%;
-    padding: 5px 10px;
-    border: 1px solid var(--border-default);
-    border-radius: 4px;
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    font: inherit;
-  }
-  button:disabled {
-    opacity: var(--opacity-disabled);
-    cursor: wait;
-  }
-  button:hover:not(:disabled) {
-    background: var(--bg-surface-hover);
-  }
-  fieldset {
-    min-width: 0;
-    width: 100%;
-    padding: var(--space-3);
-    border: 1px solid var(--border-default);
-  }
-  li {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--space-2);
-    overflow-wrap: anywhere;
-  }
-  p {
-    color: var(--text-muted);
+
+  .note {
+    margin: 0;
+    color: var(--text-secondary);
     font-size: var(--font-size-sm);
   }
-  ul {
+
+  .teams,
+  .members {
+    display: grid;
+    margin: 0;
     padding: 0;
     list-style: none;
+  }
+
+  .team {
+    position: relative;
+    min-width: 0;
+  }
+
+  .team :global(.kit-disclosure__summary) {
+    padding-right: 96px;
+    font-size: var(--font-size-md);
+  }
+
+  .team-name {
+    font-weight: var(--font-weight-semibold);
+  }
+
+  .team-count {
+    margin-left: var(--space-2);
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+    font-weight: 400;
+  }
+
+  /* Delete… sits on the open team's own row, at the right. */
+  .team-action {
+    position: absolute;
+    top: 0;
+    right: 0;
+    display: flex;
+    align-items: center;
+    height: calc(1lh + 2 * var(--space-2));
+  }
+
+  .members {
+    gap: var(--space-1);
+  }
+
+  .member {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-height: 32px;
+    color: var(--text-primary);
+  }
+
+  .member-name {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .text-action,
+  .add-row {
+    border: 0;
+    background: none;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: var(--font-size-md);
+    cursor: pointer;
+  }
+
+  .text-action {
+    padding: 2px var(--space-3);
+    border-radius: var(--radius-sm);
+  }
+
+  .text-action:hover:not(:disabled) {
+    background: var(--bg-surface-hover);
+    color: var(--text-primary);
+  }
+
+  .text-action:disabled,
+  .add-row:disabled {
+    cursor: wait;
+    opacity: var(--opacity-disabled);
+  }
+
+  .add-row {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    width: fit-content;
+    min-height: 32px;
+    padding: 0;
+  }
+
+  .add-row:hover:not(:disabled) {
+    color: var(--text-primary);
+  }
+
+  .inline-field {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .inline-field input {
+    box-sizing: border-box;
+    width: var(--layout-settings-select-w);
+    max-width: 100%;
+    padding: 6px 10px;
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font: inherit;
+  }
+
+  /* A settings row: a 160px label column with its control right after it. */
+  .settings-row {
+    display: grid;
+    grid-template-columns: var(--layout-settings-label-w) minmax(0, var(--layout-settings-select-w));
+    align-items: center;
+    min-height: 40px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    min-width: 0;
+  }
+
+  .settings-row :global(.kit-select-dropdown) {
+    width: 100%;
+  }
+
+  .row-label {
+    padding: 0;
+    color: var(--text-primary);
+  }
+
+  /* A fieldset's legend can't sit in a grid cell, so the label floats into
+     the first column and the picks fill the second. */
+  .team-picks {
+    display: block;
+  }
+
+  .team-picks .row-label {
+    float: left;
+    width: var(--layout-settings-label-w);
+    line-height: 28px;
+  }
+
+  .picks {
     display: grid;
     gap: var(--space-2);
+    margin-left: var(--layout-settings-label-w);
+    padding-top: 4px;
+  }
+
+  @media (max-width: 760px) {
+    .settings-row {
+      grid-template-columns: 1fr;
+      gap: var(--space-2);
+    }
+
+    .team-picks .row-label {
+      float: none;
+    }
+
+    .picks {
+      margin-left: 0;
+    }
   }
 </style>

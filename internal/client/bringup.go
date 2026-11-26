@@ -207,7 +207,7 @@ func (s executableStart) startIfStopped(
 type inProcessStart struct{}
 
 func (inProcessStart) profile(ctx context.Context, selection DaemonSelection) (ResolvedDaemon, bool, error) {
-	resolved, err := ensureLocalProfile(ctx, selection)
+	resolved, err := EnsureLocalProfileSelection(ctx, selection)
 	return resolved, err == nil, err
 }
 

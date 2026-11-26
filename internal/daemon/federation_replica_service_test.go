@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -17,6 +18,7 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/federationcoord"
 	"go.kenn.io/kata/internal/testfix"
 )
 
@@ -2513,3 +2515,118 @@ var _ config.FederationCredentialStore = (*replicaCredentialStore)(nil)
 var _ config.FederationManagedCredentialStore = (*replicaCredentialStore)(nil)
 var _ config.FederationCredentialReplacer = (*replicaCredentialStore)(nil)
 var _ config.FederationCredentialStore = baseCredentialStore{}
+
+func TestEnsureFederationReplicaReplacesOnlyTheNamedBoundActor(t *testing.T) {
+	store := openReplicaServiceStore(t)
+	credentials := newReplicaCredentialStore()
+	first := replicaServiceParams()
+	first.PushEnabled = false
+	result, err := daemon.EnsureFederationReplica(t.Context(), store, credentials, nil, first)
+	require.NoError(t, err)
+	saved, ok, err := credentials.FederationCredential(t.Context(), result.Project.UID)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	second := replicaServiceParams()
+	second.Credential.Actor = "sync-agent-renewed"
+	second.ExpectedCredential = &saved
+	for _, replaces := range []string{"", "someone-else"} {
+		second.ReplacesBoundActor = replaces
+		_, err = daemon.EnsureFederationReplica(t.Context(), store, credentials, nil, second)
+		require.ErrorIs(t, err, daemon.ErrFederationReplicaBindingConflict, "replacing %q must not move the bound actor", replaces)
+		binding, err := store.FederationBindingByProject(t.Context(), result.Project.ID)
+		require.NoError(t, err)
+		assert.Equal(t, "sync-agent", binding.Actor)
+		assert.False(t, binding.PushEnabled)
+	}
+
+	second.ReplacesBoundActor = "sync-agent"
+	replaced, err := daemon.EnsureFederationReplica(t.Context(), store, credentials, nil, second)
+	require.NoError(t, err)
+	assert.Equal(t, "sync-agent-renewed", replaced.Binding.Actor)
+	assert.True(t, replaced.Binding.PushEnabled)
+	stored, ok, err := credentials.FederationCredential(t.Context(), result.Project.UID)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, "sync-agent-renewed", stored.Actor)
+}
+
+// A sync turn reads the binding once. One that started while the replica was
+// read-only would reset the project without checking for local changes, so
+// turning writes on waits for running syncs to finish. That holds for a new
+// approval naming a new actor, and for an approval reused after a downgrade
+// turned push off and then failed to release it.
+func TestEnsureFederationReplicaPushChangeWaitsForRunningSync(t *testing.T) {
+	for _, tc := range []struct {
+		name, actor, replaces string
+	}{
+		{name: "new approval with new actor", actor: "sync-agent-renewed", replaces: "sync-agent"},
+		{name: "reused approval", actor: "sync-agent"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			checkPushChangeWaitsForRunningSync(t, tc.actor, tc.replaces)
+		})
+	}
+}
+
+func checkPushChangeWaitsForRunningSync(t *testing.T, actor, replaces string) {
+	t.Helper()
+	store := openReplicaServiceStore(t)
+	credentials := newReplicaCredentialStore()
+	first := replicaServiceParams()
+	first.PushEnabled = false
+	result, err := daemon.EnsureFederationReplica(t.Context(), store, credentials, nil, first)
+	require.NoError(t, err)
+	saved, ok, err := credentials.FederationCredential(t.Context(), result.Project.UID)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	key := federationcoord.Key(store.InstanceUID(), result.Project.ID)
+	finishSync, err := federationcoord.BeginSync(t.Context(), key, store, result.Project.ID)
+	require.NoError(t, err)
+	syncFinished := false
+	defer func() {
+		if !syncFinished {
+			finishSync()
+		}
+	}()
+	second := replicaServiceParams()
+	second.Credential.Actor = actor
+	second.ExpectedCredential = &saved
+	second.ReplacesBoundActor = replaces
+	type outcome struct {
+		result daemon.EnsureFederationReplicaResult
+		err    error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		upgraded, err := daemon.EnsureFederationReplica(t.Context(), store, credentials, nil, second)
+		done <- outcome{upgraded, err}
+	}()
+	// A waiting drain makes new transport admission report busy.
+	for {
+		select {
+		case got := <-done:
+			require.Failf(t, "turning push on did not wait for the running sync", "push enabled %v, err %v", got.result.Binding.PushEnabled, got.err)
+		default:
+		}
+		release, err := federationcoord.TryBeginSync(t.Context(), key, store, result.Project.ID)
+		if errors.Is(err, federationcoord.ErrBusy) {
+			break
+		}
+		require.NoError(t, err)
+		release()
+		runtime.Gosched()
+	}
+	binding, err := store.FederationBindingByProject(t.Context(), result.Project.ID)
+	require.NoError(t, err)
+	assert.False(t, binding.PushEnabled, "writes stay off while the read-only sync runs")
+	assert.Equal(t, "sync-agent", binding.Actor)
+
+	syncFinished = true
+	finishSync()
+	got := <-done
+	require.NoError(t, got.err)
+	assert.True(t, got.result.Binding.PushEnabled)
+	assert.Equal(t, actor, got.result.Binding.Actor)
+}

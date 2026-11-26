@@ -317,13 +317,7 @@ func (d *Store) patchRecurrence(ctx context.Context, in db.PatchRecurrenceIn) (d
 		if in.Update.TemplateTitle != nil {
 			nextTitle = *in.Update.TemplateTitle
 		}
-		var nextMeta jsontext.Value
-		if in.Update.TemplateMetadata != nil {
-			nextMeta = *in.Update.TemplateMetadata
-		} else {
-			nextMeta = jsontext.Value(cur.TemplateMetadata)
-		}
-		if err := db.ValidateRecurrenceTemplate(nextTitle, nextMeta); err != nil {
+		if err := db.ValidateRecurrenceTemplatePatch(nextTitle, jsontext.Value(cur.TemplateMetadata), in.Update.TemplateMetadata); err != nil {
 			return out, err
 		}
 	}

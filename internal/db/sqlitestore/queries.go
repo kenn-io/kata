@@ -175,6 +175,11 @@ func (d *Store) ProjectByUID(ctx context.Context, uid string) (db.Project, error
 	return hideSystemProject(scanProject(row))
 }
 
+// ProjectByUIDTx resolves a project on the caller's transaction.
+func (d *Store) ProjectByUIDTx(ctx context.Context, tx db.Transaction, uid string) (db.Project, error) {
+	return hideSystemProject(scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE uid = ?`, uid)))
+}
+
 // HardDeleteProject permanently removes a project row by id and returns the
 // reset cursor reserved for its deleted lifecycle events. It exists for the
 // init-race orphan-cleanup path (a freshly created project whose alias attach
@@ -1825,9 +1830,27 @@ func (d *Store) closeIssueGuarded(
 		}
 		events = append(events, generated...)
 	}
+	unlabeled, err := d.detachLabelTx(ctx, tx, issue, projectName, "issue.unlabeled", "needs-review", p.Actor, closedAt)
+	if err != nil && !errors.Is(err, db.ErrNotFound) {
+		return db.Issue{}, nil, false, err
+	}
+	if err == nil {
+		events = append(events, unlabeled)
+	}
+
 	updated, err := issueByIDTx(ctx, tx, p.IssueID)
 	if err != nil {
 		return db.Issue{}, nil, false, err
+	}
+	if hasParent {
+		err = tx.QueryRowContext(ctx, `SELECT parent.id FROM issues parent JOIN projects p ON p.id = parent.project_id
+			WHERE parent.uid = ? AND parent.status = 'open' AND parent.deleted_at IS NULL AND p.deleted_at IS NULL
+			AND NOT EXISTS (SELECT 1 FROM links l JOIN issues child ON child.id = l.from_issue_id
+			JOIN projects cp ON cp.id = child.project_id WHERE l.type = 'parent' AND l.to_issue_id = parent.id
+			AND child.status = 'open' AND child.deleted_at IS NULL AND cp.deleted_at IS NULL)`, parentUID).Scan(&events[0].ReadyParentID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return db.Issue{}, nil, false, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		// Preserve the attempted result so the daemon can match its keyed

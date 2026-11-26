@@ -12,6 +12,7 @@ import (
 
 	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/teammate"
+	katauid "go.kenn.io/kata/internal/uid"
 )
 
 // EventTimestampFormat is the millisecond UTC representation covered by portable event hashes.
@@ -300,31 +301,38 @@ func stringPointersEqual(left, right *string) bool {
 	return *left == *right
 }
 
-// DirectLinkAdditionPeers returns only explicit link additions eligible for
+// DirectLinkPeers returns explicit link endpoints eligible for
 // a supplemental direct-spoke proof. It never modifies the event payload.
-func DirectLinkAdditionPeers(event FoldEvent) (map[string]bool, error) {
-	if !directLinkAdditionEligible(event) {
+func DirectLinkPeers(event FoldEvent) (map[string]bool, error) {
+	if event.Type != "issue.unlinked" && !directLinkAdditionEligible(event) {
 		return nil, nil
 	}
 	var peers map[string]bool
-	_, _, err := StripCrossProjectLinkAdditions(event, func(uid string) bool {
+	add := func(uid string) {
 		if uid != "" {
 			if peers == nil {
 				peers = make(map[string]bool)
 			}
 			peers[uid] = true
 		}
+	}
+	_, _, err := StripCrossProjectLinkAdditions(event, func(uid string) bool {
+		add(uid)
 		return false
 	})
-	if event.Type == "issue.links_changed" && len(peers) != 0 {
-		// A peer used for a removal in the same edit needs ordinary authority.
+	if event.Type == "issue.links_changed" || event.Type == "issue.unlinked" {
 		payload := PayloadMap(event.Payload)
-		removed, _ := StringValue(payload["parent_removed_uid"])
-		delete(peers, removed)
-		for _, key := range []string{"blocks_removed_uids", "blocked_by_removed_uids", "related_removed_uids"} {
-			for _, uid := range StringSlice(payload[key]) {
-				delete(peers, uid)
+		if event.Type == "issue.links_changed" {
+			uid, _ := StringValue(payload["parent_removed_uid"])
+			add(uid)
+			for _, key := range []string{"blocks_removed_uids", "blocked_by_removed_uids", "related_removed_uids"} {
+				for _, uid := range StringSlice(payload[key]) {
+					delete(peers, uid)
+				}
 			}
+		} else if kind, _ := StringValue(payload["type"]); kind == "parent" {
+			child, parent := parentRemovalEndpoints(event, payload)
+			add(map[string]string{child: parent, parent: child}[event.IssueUID])
 		}
 	}
 	return peers, err
@@ -348,41 +356,146 @@ func directLinkAdditionEligible(event FoldEvent) bool {
 	return child != "" && child == event.IssueUID
 }
 
-// DirectParentRemovals identifies the old endpoint of each parent assignment.
-// A later clear cannot undo the fact that setting the parent displaced an edge.
-// Key the removals by event so each displaced endpoint gets ordinary authority.
-func DirectParentRemovals(ctx context.Context, tx Transaction, events []RemoteEvent) (map[string][]string, error) {
-	var ordered []FoldEvent
-	for _, event := range events {
-		switch event.Type {
-		case "issue.created", "issue.links_changed", "issue.linked", "issue.snapshot", "issue.moved":
-			ordered = append(ordered, moveSnapshotFoldEvent(FederationMoveSnapshotEvent(event)))
+// DirectParentRemovals tracks parent operations only when needed for
+// reference authorization or validation of an older child-primary unlink.
+func DirectParentRemovals(ctx context.Context, tx federationHistoryQuery, events []RemoteEvent, authorizeReference bool) (map[string][]string, error) {
+	if !authorizeReference {
+		needed := false
+		for _, event := range events {
+			if event.Type != "issue.unlinked" {
+				continue
+			}
+			payload := PayloadMap(event.Payload)
+			_, hasFrom := payload["link_from_uid"]
+			_, hasTo := payload["link_to_uid"]
+			child, parent := parentRemovalEndpoints(moveSnapshotFoldEvent(event), payload)
+			if !hasFrom && !hasTo && child != "" && parent != "" {
+				needed = true
+				break
+			}
+		}
+		if !needed {
+			return nil, nil
 		}
 	}
+	ordered := make([]FoldEvent, 0, len(events))
+	for _, event := range events {
+		ordered = append(ordered, moveSnapshotFoldEvent(event))
+	}
 	slices.SortStableFunc(ordered, func(a, b FoldEvent) int { return compareClock(clockOf(a), clockOf(b)) })
-
-	parents := make(map[string]string)
-	removed := make(map[string][]string)
+	parents := map[string]string{}
+	removed := map[string][]string{}
+	parentOf := func(child string) (string, error) {
+		if parent, known := parents[child]; known {
+			return parent, nil
+		}
+		var parent string
+		err := tx.QueryRowContext(ctx, `SELECT to_issue_uid FROM links WHERE from_issue_uid=$1 AND type='parent'`, child).Scan(&parent)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return "", err
+		}
+		parents[child] = parent
+		return parent, nil
+	}
 	for _, event := range ordered {
+		if event.Type == "issue.unlinked" || event.Type == "issue.links_changed" {
+			from, to := parentRemovalEndpoints(event, PayloadMap(event.Payload))
+			if from != "" && to != "" {
+				parent, err := parentOf(from)
+				if err != nil {
+					return nil, err
+				}
+				_, hasFrom := PayloadMap(event.Payload)["link_from_uid"]
+				_, hasTo := PayloadMap(event.Payload)["link_to_uid"]
+				if event.Type == "issue.unlinked" && !hasFrom && !hasTo && parent != to {
+					return nil, fmt.Errorf("%w: This older change tries to remove a parent the issue no longer has", ErrFederationIngestValidation)
+				}
+				if parent == to {
+					parents[from] = ""
+				}
+			}
+		}
 		assignments, err := directParentAssignments(event)
 		if err != nil {
 			return nil, err
 		}
 		for _, key := range assignments {
-			previous, known := parents[key.FromUID]
-			if !known {
-				err := tx.QueryRowContext(ctx, `SELECT to_issue_uid FROM links WHERE from_issue_uid=$1 AND type='parent'`, key.FromUID).Scan(&previous)
-				if err != nil && !errors.Is(err, sql.ErrNoRows) {
-					return nil, err
-				}
+			parent, err := parentOf(key.FromUID)
+			if err != nil {
+				return nil, err
 			}
-			if previous != "" && previous != key.ToUID {
-				removed[event.UID] = append(removed[event.UID], previous)
+			if parent != "" && parent != key.ToUID {
+				removed[event.UID] = append(removed[event.UID], parent)
 			}
 			parents[key.FromUID] = key.ToUID
 		}
 	}
 	return removed, nil
+}
+
+// parentRemovalEndpoints returns the child-to-parent storage endpoints removed
+// by event. Old parent unlinks without storage endpoints are read as
+// from_uid -> to_uid only when the event's primary issue is the child.
+func parentRemovalEndpoints(event FoldEvent, payload map[string]jsontext.Value) (string, string) {
+	if event.Type == "issue.links_changed" {
+		to, _ := StringValue(payload["parent_removed_uid"])
+		return event.IssueUID, to
+	}
+	if kind, _ := StringValue(payload["type"]); kind != "parent" {
+		return "", ""
+	}
+	_, fromPresent := payload["link_from_uid"]
+	_, toPresent := payload["link_to_uid"]
+	if !fromPresent && !toPresent {
+		from, _ := StringValue(payload["from_uid"])
+		to, _ := StringValue(payload["to_uid"])
+		if from != event.IssueUID {
+			return "", ""
+		}
+		return from, to
+	}
+	from, _ := StringValue(payload["link_from_uid"])
+	to, _ := StringValue(payload["link_to_uid"])
+	return from, to
+}
+
+// ValidateUnlinkStorageEndpoints checks the optional directional storage
+// endpoints of an issue.unlinked event. Blocks unlinks must carry them. Parent
+// unlinks may omit both only in the old form whose primary issue is the
+// payload from_uid (the child). The payload is never rewritten.
+func ValidateUnlinkStorageEndpoints(
+	event RemoteEvent,
+	payload map[string]jsontext.Value,
+	linkType, primaryUID, fromUID, toUID string,
+) error {
+	if event.Type != "issue.unlinked" {
+		return nil
+	}
+	rawFrom, fromPresent := payload["link_from_uid"]
+	rawTo, toPresent := payload["link_to_uid"]
+	if fromPresent != toPresent {
+		return fmt.Errorf("%w: issue.unlinked storage endpoints must be paired", ErrFederationIngestValidation)
+	}
+	if !fromPresent {
+		if linkType == "blocks" || (linkType == "parent" && primaryUID != fromUID) {
+			return fmt.Errorf("%w: issue.unlinked missing directional storage endpoints", ErrFederationIngestValidation)
+		}
+		return nil
+	}
+	linkFromUID, fromOK := StringValue(rawFrom)
+	linkToUID, toOK := StringValue(rawTo)
+	if !fromOK || !toOK {
+		return fmt.Errorf("%w: issue.unlinked storage endpoints must be strings", ErrFederationIngestValidation)
+	}
+	if !katauid.Valid(linkFromUID) || !katauid.Valid(linkToUID) || linkFromUID == linkToUID {
+		return fmt.Errorf("%w: issue.unlinked has invalid storage endpoints", ErrFederationIngestValidation)
+	}
+	matchesForward := linkFromUID == fromUID && linkToUID == toUID
+	matchesReverse := linkFromUID == toUID && linkToUID == fromUID
+	if !matchesForward && !matchesReverse {
+		return fmt.Errorf("%w: issue.unlinked storage endpoints disagree with payload endpoints", ErrFederationIngestValidation)
+	}
+	return nil
 }
 
 func directParentAssignments(event FoldEvent) ([]FoldLinkKey, error) {

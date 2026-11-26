@@ -22,8 +22,16 @@ func newCommentCmd() *cobra.Command {
 		Use:   "comment <issue-ref>",
 		Short: "append a comment to an issue",
 		Long: `Append a comment. Body comes from -m/--body, --body-file, or --body-stdin.
-KATA_TEAMMATE (or --teammate) records which teammate wrote it.`,
-		Example: `  kata comment abc4 -m "Reproduced on Safari 18; fix in progress." --agent
+KATA_TEAMMATE (or --teammate) records which teammate wrote it.
+
+Comment only with findings a later reader needs; keep live status in
+work.attention_msg. Correct your own comment with kata comment edit. An open,
+unmerged PR is unfinished: leave the issue open, update work.attention and
+work.attention_msg, and add the needs-review label.`,
+		Example: `  kata comment abc4 --body-stdin --agent <<-'EOF'
+	Safari 18 fires the callback twice; ` + "`retry()`" + ` runs on both.
+	EOF
+
   kata comment abc4 --body-file notes.md --agent`,
 		Args: cobra.ExactArgs(1),
 	}
@@ -143,11 +151,13 @@ KATA_TEAMMATE (or --teammate) records which teammate wrote it.`,
 func newCommentEditCmd() *cobra.Command {
 	var src BodySources
 	cmd := &cobra.Command{
-		Use:     "edit <issue-ref> <comment-uid>",
-		Short:   "edit a comment body",
-		Long:    `Replace the body of one comment. Find its comment UID with kata show; use -m/--body, --body-file, or --body-stdin.`,
-		Example: `  kata comment edit abc4 <comment-uid> -m "corrected repro steps" --agent`,
-		Args:    cobra.ExactArgs(2),
+		Use:   "edit <issue-ref> <comment-uid>",
+		Short: "edit a comment body",
+		Long:  `Replace the body of one comment. Find its comment UID with kata show; use -m/--body, --body-file, or --body-stdin.`,
+		Example: `  kata comment edit abc4 <comment-uid> --body-stdin --agent <<-'EOF'
+	Corrected repro steps: run ` + "`make test`" + ` twice.
+	EOF`,
+		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			src.BodySet = cmd.Flags().Changed("body")
 			src.FileSet = cmd.Flags().Changed("body-file")
@@ -224,11 +234,7 @@ func normalizeCommentMessageFlag(_ *pflag.FlagSet, name string) pflag.Normalized
 func resolveCommentBody(cmd *cobra.Command, src BodySources) (string, error) {
 	body, err := resolveBody(src, cmd.InOrStdin())
 	if err != nil {
-		code := ExitValidation
-		if strings.HasPrefix(err.Error(), "must pass exactly one of") {
-			code = ExitUsage
-		}
-		return "", &cliError{Message: err.Error(), Kind: kindForExit(code), ExitCode: code}
+		return "", err
 	}
 	if strings.TrimSpace(body) == "" {
 		return "", &cliError{Message: "comment body is required (--body, --body-file, --body-stdin)", Kind: kindValidation, ExitCode: ExitValidation}

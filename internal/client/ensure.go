@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -92,6 +93,8 @@ var ErrDaemonNotReplaceable = errors.New("left the running daemon in place")
 // RestartLocalDaemon is installed by the CLI to replace a capable daemon in
 // its own environment. The caller holds the start lock through readiness.
 var RestartLocalDaemon func(context.Context, *daemonruntime.Namespace, kitdaemon.RuntimeRecord) (kitdaemon.RuntimeRecord, error)
+
+type requireWebAssetsKey struct{}
 
 var (
 	currentVersionForEnsure      = func() string { return version.Version }
@@ -229,6 +232,7 @@ func waitForSupervisedDaemon(
 	ctx context.Context, configPath string, migrating func(context.Context) bool,
 	scan func(context.Context) (ensureDiscovery, error),
 ) (RunningDaemon, error) {
+	caller := ctx
 	ctx, cancel := context.WithTimeout(ctx, daemonStartupWait)
 	defer cancel()
 	var running RunningDaemon
@@ -244,6 +248,12 @@ func waitForSupervisedDaemon(
 			running = runningDaemonForLive(found.Daemon)
 			return true, nil
 		case daemonScanStale:
+			if (daemonVersionCheckSkipped() || daemonVersionCompatible(found.Daemon.Info)) && placeholderDaemon(ctx, found.Daemon) {
+				if err := refuseDaemonDowngrade(found.Daemon.Info); err != nil {
+					return false, err
+				}
+				return false, fmt.Errorf("%w: the daemon has no web UI; restart it with your service manager (autostart = false)", ErrDaemonNotReplaceable)
+			}
 			return false, externallyManagedVersionError(found.Daemon.Info)
 		}
 		return false, nil
@@ -254,18 +264,47 @@ func waitForSupervisedDaemon(
 	if !errors.Is(err, ErrLocalDaemonUnreachable) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
 		return RunningDaemon{}, err
 	}
-	message := fmt.Errorf("%w; did not become ready (limit %s or the caller's deadline); start or restart it with your service manager (%s)", ErrDaemonManagedExternally, daemonStartupWait, configPath)
+	message := fmt.Errorf("%w; did not become ready (limit %s or the caller's deadline) (%s)", ErrDaemonManagedExternally, daemonStartupWait, configPath)
+	advice := ""
 	if migrating(ctx) {
 		message = fmt.Errorf("%w; a SQLite migration is in progress; retry when it finishes and do not interrupt the daemon (%s)", ErrDaemonManagedExternally, configPath)
+	} else if !errors.Is(caller.Err(), context.Canceled) {
+		advice = "start or restart it with your service manager"
 	}
 	if unreachable != nil {
-		message = fmt.Errorf("%w: %w", message, unreachable)
+		if e, ok := errors.AsType[*LocalDaemonUnreachableError](unreachable); ok {
+			if advice != "" {
+				e.ManagedExternally = true
+				advice = e.RecoveryAdvice()
+			} else if !errors.Is(caller.Err(), context.Canceled) {
+				advice = strings.TrimSpace(e.profilingAdvice())
+			}
+			message = &supervisedWaitError{message: message.Error() + ": " + e.Summary(), cause: errors.Join(message, unreachable)}
+		} else {
+			message = fmt.Errorf("%w: %w", message, unreachable)
+		}
 	}
-	if ctx.Err() != nil {
-		return RunningDaemon{}, fmt.Errorf("%w: %w", message, ctx.Err())
+	if ctx.Err() != nil && !errors.Is(message, ctx.Err()) {
+		message = fmt.Errorf("%w: %w", message, ctx.Err())
 	}
-	return RunningDaemon{}, message
+	return RunningDaemon{}, &supervisedWaitError{message: message.Error(), cause: message, advice: advice}
 }
+
+type supervisedWaitError struct {
+	message string
+	cause   error
+	advice  string
+}
+
+func (e *supervisedWaitError) Error() string {
+	if e.advice == "" {
+		return e.message
+	}
+	return e.message + "; " + e.advice
+}
+func (e *supervisedWaitError) Summary() string        { return e.message }
+func (e *supervisedWaitError) Unwrap() error          { return e.cause }
+func (e *supervisedWaitError) RecoveryAdvice() string { return e.advice }
 
 func canRestartLocalDaemon(record kitdaemon.RuntimeRecord) bool {
 	return record.Metadata[daemonruntime.RuntimeRestartExecutableKey] == "1" && daemonruntime.RuntimeProcessAlive(record)
@@ -293,9 +332,12 @@ func discoverForStart(ctx context.Context, dataDir string) (ensureDiscovery, fun
 	if (err != nil && !errors.Is(err, ErrLocalDaemonUnreachable)) || found.Outcome == daemonScanCompatible {
 		return found, func() {}, err
 	}
-	release, err := (kitdaemon.RuntimeStore{Dir: dataDir}).AcquireStartLock(ctx)
-	if err != nil {
-		return ensureDiscovery{}, nil, fmt.Errorf("auto-start daemon: %w", err)
+	release, lockErr := (kitdaemon.RuntimeStore{Dir: dataDir}).AcquireStartLock(ctx)
+	if lockErr != nil {
+		if errors.Is(lockErr, context.DeadlineExceeded) && err != nil {
+			lockErr = errors.Join(err, lockErr)
+		}
+		return ensureDiscovery{}, nil, fmt.Errorf("auto-start daemon: %w", lockErr)
 	}
 	found, err = discoverForEnsure(ctx, dataDir)
 	if err != nil {
@@ -415,7 +457,7 @@ func discoverForEnsureUsing(ctx context.Context, dataDir string, scan liveDaemon
 			}
 			return ensureDiscovery{}, err
 		}
-		if daemonVersionCheckSkipped() || daemonVersionCompatible(candidate.Info) {
+		if daemonCompatible(ctx, candidate) {
 			return ensureDiscovery{Outcome: daemonScanCompatible, Daemon: candidate}, nil
 		}
 		if stale.Outcome == daemonScanNone {
@@ -443,6 +485,15 @@ func daemonVersionCompatible(info PingInfo) bool {
 	return info.Service == daemonServiceName && info.Version == currentVersionForEnsure()
 }
 
+func placeholderDaemon(ctx context.Context, candidate liveDaemon) bool {
+	required, _ := ctx.Value(requireWebAssetsKey{}).(bool)
+	return required && slices.Contains(strings.Split(candidate.Record.Metadata["web_capabilities"], ","), daemonruntime.WebCapabilityPlaceholderAssets)
+}
+
+func daemonCompatible(ctx context.Context, candidate liveDaemon) bool {
+	return (daemonVersionCheckSkipped() || daemonVersionCompatible(candidate.Info)) && !placeholderDaemon(ctx, candidate)
+}
+
 func stopRunningDaemons(ctx context.Context, dataDir, dbhash string) error {
 	var targets []kitdaemon.RuntimeRecord
 	var unreachable error
@@ -454,7 +505,7 @@ func stopRunningDaemons(ctx context.Context, dataDir, dbhash string) error {
 			}
 			return err
 		}
-		if candidate.Info.Service != daemonServiceName || daemonVersionCompatible(candidate.Info) {
+		if candidate.Info.Service != daemonServiceName || daemonCompatible(ctx, candidate) {
 			continue
 		}
 		address := candidate.Record.Endpoint().ConfigAddress()
@@ -468,6 +519,12 @@ func stopRunningDaemons(ctx context.Context, dataDir, dbhash string) error {
 			return fmt.Errorf("daemon at %s (pid %d) runs an incompatible version, but its process identity cannot be verified; stop it manually", address, candidate.Record.PID)
 		}
 		targets = append(targets, candidate.Record)
+	}
+	if ctx.Err() != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) && unreachable != nil {
+			return unreachable
+		}
+		return ctx.Err()
 	}
 	if len(targets) == 0 {
 		return unreachable

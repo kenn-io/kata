@@ -510,3 +510,29 @@ runtime table and sequence grants remain sufficient, and runtime credentials
 cannot migrate. Start the matching schema 52 binary after migration. Older
 binaries cannot open schema 52; rollback requires the pre-upgrade backup and
 matching older binary.
+
+## Schema 53: move events by destination project
+
+Every federation poll checks whether an issue ever moved into the polled
+project, because a peer without move support cannot read that project. Without
+an index, that check read through all of the project's events whenever the
+project had no incoming move. The 52→53 migration adds
+`idx_events_project_moves` on `events(project_id, id)` for `issue.moved` rows,
+then runs `ANALYZE events`. The check becomes one index lookup. Fresh
+PostgreSQL and SQLite databases include the same index, and event contents and
+table columns stay intact.
+
+Stop serving daemons and imports, back up the database, and run
+`kata storage postgres migrate` with schema-owner credentials. Building the
+index reads `events` and blocks event writes; allow an offline window that fits
+the event log's size. Existing table grants remain sufficient, and runtime
+credentials cannot migrate. SQLite stores at schema 41 or later upgrade
+[in place](../operations/backup-restore.md#slow-or-interrupted-upgrade-startup).
+Start the matching schema 53 binary after migration. Older binaries
+cannot open schema 53; rollback requires the pre-upgrade backup and matching
+older binary.
+
+## Schema 54: held federation cursors
+
+Schema 54 changes the recorded version without changing tables or indexes.
+The version prevents older binaries from deleting held federation edits during a reset.

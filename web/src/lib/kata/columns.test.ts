@@ -3,15 +3,20 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   KATA_OPTIONAL_TASK_COLUMNS,
   KATA_TASK_COLUMNS_STORAGE_KEY,
+  KATA_TASK_COLUMN_WIDTHS_STORAGE_KEY,
   defaultKataTaskColumnVisibility,
   loadKataTaskColumnVisibility,
+  loadKataTaskColumnWidths,
   persistKataTaskColumnVisibility,
+  persistKataTaskColumnWidths,
   summarizeBlockedBy,
 } from './columns'
 
 describe('Kata task column visibility', () => {
-  it('defaults every optional column to visible except Blocked by', () => {
+  it('shows Project and hides ID and Blocked by by default', () => {
     expect(defaultKataTaskColumnVisibility()).toEqual({
+      id: false,
+      project: true,
       updated: true,
       priority: true,
       due: true,
@@ -23,17 +28,19 @@ describe('Kata task column visibility', () => {
 
   it('restores known columns and ignores duplicate or unknown keys', () => {
     const storage = {
-      getItem: vi.fn(() => JSON.stringify(['tags', 'future-column', 'updated', 'tags'])),
+      getItem: vi.fn(() => JSON.stringify(['id', 'project', 'future-column', 'updated', 'id'])),
       setItem: vi.fn(),
     }
 
     expect(loadKataTaskColumnVisibility(storage)).toEqual({
+      id: true,
+      project: true,
       updated: true,
       priority: false,
       due: false,
       owner: false,
       blockedBy: false,
-      tags: true,
+      tags: false,
     })
   })
 
@@ -44,6 +51,23 @@ describe('Kata task column visibility', () => {
       expect(loadKataTaskColumnVisibility(storage)).toEqual(defaultKataTaskColumnVisibility())
     },
   )
+
+  it('enables Project for saved v1 columns without writing on load', () => {
+    const storage = {
+      getItem: vi.fn((key: string) =>
+        key === 'kata:issue-columns/v1' ? JSON.stringify(['updated', 'owner']) : null,
+      ),
+      setItem: vi.fn(),
+    }
+    expect(loadKataTaskColumnVisibility(storage)).toMatchObject({
+      id: false,
+      updated: true,
+      owner: true,
+      project: true,
+      due: false,
+    })
+    expect(storage.setItem).not.toHaveBeenCalled()
+  })
 
   it('falls back when storage reads throw', () => {
     const storage = {
@@ -59,12 +83,21 @@ describe('Kata task column visibility', () => {
   it('persists visible keys and tolerates write failures', () => {
     const setItem = vi.fn()
     persistKataTaskColumnVisibility(
-      { updated: true, priority: false, due: true, owner: false, blockedBy: false, tags: false },
+      {
+        id: true,
+        project: false,
+        updated: true,
+        priority: false,
+        due: true,
+        owner: false,
+        blockedBy: false,
+        tags: false,
+      },
       { getItem: vi.fn(), setItem },
     )
     expect(setItem).toHaveBeenCalledWith(
       KATA_TASK_COLUMNS_STORAGE_KEY,
-      JSON.stringify(['updated', 'due']),
+      JSON.stringify(['id', 'due', 'updated']),
     )
 
     expect(() =>
@@ -76,13 +109,45 @@ describe('Kata task column visibility', () => {
       }),
     ).not.toThrow()
     expect(KATA_OPTIONAL_TASK_COLUMNS.map((column) => column.id)).toEqual([
+      'id',
+      'project',
+      'due',
       'updated',
       'priority',
-      'due',
       'owner',
       'blockedBy',
       'tags',
     ])
+  })
+
+  it('loads and clamps known saved widths', () => {
+    const storage = {
+      getItem: vi.fn(() =>
+        JSON.stringify({ id: 20, project: 500, due: 72, unknown: 90, owner: 'wide' }),
+      ),
+      setItem: vi.fn(),
+    }
+    expect(loadKataTaskColumnWidths(storage)).toEqual({ id: 48, project: 480, due: 72 })
+  })
+
+  it('persists column widths and tolerates storage failures', () => {
+    const setItem = vi.fn()
+    persistKataTaskColumnWidths({ id: 72, project: 120, due: 64 }, { getItem: vi.fn(), setItem })
+    expect(setItem).toHaveBeenCalledWith(
+      KATA_TASK_COLUMN_WIDTHS_STORAGE_KEY,
+      JSON.stringify({ id: 72, project: 120, due: 64 }),
+    )
+    expect(() =>
+      persistKataTaskColumnWidths(
+        { due: 80 },
+        {
+          getItem: vi.fn(),
+          setItem: vi.fn(() => {
+            throw new Error('quota')
+          }),
+        },
+      ),
+    ).not.toThrow()
   })
 })
 

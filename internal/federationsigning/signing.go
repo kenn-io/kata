@@ -49,6 +49,10 @@ var (
 	components     = []string{"@method", "@target-uri", "content-digest", "content-type", "authorization"}
 )
 
+func sha256ContentDigest(digest []byte) string {
+	return "sha-256=:" + base64.StdEncoding.EncodeToString(digest) + ":"
+}
+
 // Verifier owns one bounded admission cache and its durable restart barrier.
 type Verifier struct {
 	statePath      string
@@ -177,11 +181,42 @@ func profile(r *http.Request) bool {
 	return true
 }
 
-// Verify checks the MAC before reading a bounded body, then admits the nonce
-// atomically. The caller must first authenticate the live native enrollment.
-func (v *Verifier) Verify(r *http.Request, enrollmentID int64) error {
+// Admission identifies the key that verified one request.
+type Admission struct {
+	verifier *Verifier
+	key      signingpolicy.Key
+	secret   [sha256.Size]byte
+}
+
+// Current reports whether the key that verified the request would still
+// verify it: the key has not reached NotAfter and its source still holds the
+// secret the request was verified with. A request served over a long time,
+// such as a held poll, checks this before releasing data.
+func (a Admission) Current() error {
+	if a.verifier == nil {
+		return signingpolicy.ErrKeyRejected
+	}
+	if a.key.NotAfter != 0 && a.verifier.now().Unix() >= a.key.NotAfter {
+		return signingpolicy.ErrKeyRejected
+	}
+	current, err := a.key.Load()
+	if err != nil {
+		return err
+	}
+	digest := sha256.Sum256(current)
+	if subtle.ConstantTimeCompare(digest[:], a.secret[:]) != 1 {
+		return signingpolicy.ErrKeyRejected
+	}
+	return nil
+}
+
+// Verify checks the MAC before reading a bounded body. Binary transfers admit
+// their nonce before body I/O; ordinary requests retain post-body admission.
+// The caller must first authenticate the live native enrollment. It returns
+// the admission that names the verifying key.
+func (v *Verifier) Verify(r *http.Request, enrollmentID int64) (Admission, error) {
 	if !singleHeaders(r) || !signingpolicy.Unambiguous(r.URL) || !profile(r) {
-		return signingpolicy.ErrInvalid
+		return Admission{}, signingpolicy.ErrInvalid
 	}
 	now := v.now()
 	v.mu.Lock()
@@ -193,29 +228,29 @@ func (v *Verifier) Verify(r *http.Request, enrollmentID int64) error {
 	}
 	v.mu.Unlock()
 	if unavailable {
-		return ErrState
+		return Admission{}, ErrState
 	}
 	if warming {
-		return ErrWarming
+		return Admission{}, ErrWarming
 	}
 	d, err := httpsign.RequestDetails("sig1", r)
 	if err != nil || d.KeyID == nil || d.Alg != "hmac-sha256" || d.Nonce == nil ||
 		len(*d.Nonce) != 32 || !fresh(d, now) {
-		return signingpolicy.ErrInvalid
+		return Admission{}, signingpolicy.ErrInvalid
 	}
 	if _, err := base64.RawURLEncoding.DecodeString(*d.Nonce); err != nil {
-		return signingpolicy.ErrInvalid
+		return Admission{}, signingpolicy.ErrInvalid
 	}
 	k, ok := v.keys[*d.KeyID]
 	if !ok || k.EnrollmentID != enrollmentID || (k.NotAfter != 0 && now.Unix() >= k.NotAfter) {
-		return signingpolicy.ErrKeyRejected
+		return Admission{}, signingpolicy.ErrKeyRejected
 	}
 	secret, err := k.Load()
 	if err != nil {
-		return err
+		return Admission{}, err
 	}
 	if subtle.ConstantTimeCompare(secret, []byte(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))) == 1 {
-		return signingpolicy.ErrKey
+		return Admission{}, signingpolicy.ErrKey
 	}
 	cloned := r.Clone(r.Context())
 	u := *r.URL
@@ -224,57 +259,94 @@ func (v *Verifier) Verify(r *http.Request, enrollmentID int64) error {
 	vc := httpsign.NewVerifyConfig().SetVerifyCreated(false).SetRejectExpired(false).SetKeyID(k.KeyID)
 	verifier, err := httpsign.NewHMACSHA256Verifier(secret, vc, httpsign.Headers(components...))
 	if err != nil || httpsign.VerifyRequest("sig1", *verifier, cloned) != nil {
-		return signingpolicy.ErrInvalid
+		return Admission{}, signingpolicy.ErrInvalid
+	}
+	if IsAttachmentTransfer(r.Method, r.URL.Path) {
+		digestHeader := r.Header.Get("Content-Digest")
+		encoded := strings.TrimSuffix(strings.TrimPrefix(digestHeader, "sha-256=:"), ":")
+		digestBytes, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil || len(digestBytes) != sha256.Size || digestHeader != sha256ContentDigest(digestBytes) {
+			return Admission{}, signingpolicy.ErrInvalid
+		}
+		admission, err := v.admit(r, k, secret, d)
+		if err != nil {
+			return Admission{}, err
+		}
+		bodyLimit := int64(MaxBodyBytes)
+		if r.Method == http.MethodPost {
+			bodyLimit = AttachmentMaxBodyBytes
+		}
+		body, digest, err := spoolBody(r.Context(), r.Body, r.ContentLength, bodyLimit)
+		if err != nil {
+			return Admission{}, errors.Join(signingpolicy.ErrInvalid, err)
+		}
+		if subtle.ConstantTimeCompare([]byte(digest), []byte(r.Header.Get("Content-Digest"))) != 1 {
+			_ = body.Close()
+			return Admission{}, signingpolicy.ErrInvalid
+		}
+		// Admission freshness was already durably checked. Only live authority,
+		// cancellation and clock/state safety are rechecked after a long body.
+		if err := v.transferStillAuthorized(r, k, secret); err != nil {
+			_ = body.Close()
+			return Admission{}, err
+		}
+		r.Body = body
+		return admission, nil
 	}
 	if r.ContentLength > MaxBodyBytes {
-		return signingpolicy.ErrInvalid
+		return Admission{}, signingpolicy.ErrInvalid
 	}
 	var body []byte
 	if r.Body != nil {
 		body, err = io.ReadAll(io.LimitReader(r.Body, MaxBodyBytes+1))
 		_ = r.Body.Close()
 		if err != nil {
-			return errors.Join(signingpolicy.ErrInvalid, err)
+			return Admission{}, errors.Join(signingpolicy.ErrInvalid, err)
 		}
 		if len(body) > MaxBodyBytes {
-			return signingpolicy.ErrInvalid
+			return Admission{}, signingpolicy.ErrInvalid
 		}
 	}
 	digest := sha256.Sum256(body)
-	expected := "sha-256=:" + base64.StdEncoding.EncodeToString(digest[:]) + ":"
+	expected := sha256ContentDigest(digest[:])
 	if subtle.ConstantTimeCompare([]byte(expected), []byte(r.Header.Get("Content-Digest"))) != 1 {
-		return signingpolicy.ErrInvalid
+		return Admission{}, signingpolicy.ErrInvalid
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
 
 	if r.Context().Err() != nil {
-		return signingpolicy.ErrInvalid
+		return Admission{}, signingpolicy.ErrInvalid
 	}
 	now = v.now()
 	if !fresh(d, now) {
-		return signingpolicy.ErrInvalid
+		return Admission{}, signingpolicy.ErrInvalid
 	}
 	current, err := k.Load()
 	if err != nil {
-		return err
+		return Admission{}, err
 	}
 	if subtle.ConstantTimeCompare(secret, current) != 1 || (k.NotAfter != 0 && now.Unix() >= k.NotAfter) {
-		return signingpolicy.ErrKeyRejected
+		return Admission{}, signingpolicy.ErrKeyRejected
 	}
+	return v.admit(r, k, secret, d)
+}
+
+// admit preserves the ordinary replay watermark and restart-barrier protocol.
+func (v *Verifier) admit(r *http.Request, k signingpolicy.Key, secret []byte, d *httpsign.MessageDetails) (Admission, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	now = v.now()
+	now := v.now()
 	if v.closed || v.failed {
-		return ErrState
+		return Admission{}, ErrState
 	}
 	if now.UnixNano() < v.last.UnixNano() {
-		return ErrWarming
+		return Admission{}, ErrWarming
 	}
 	if r.Context().Err() != nil || !fresh(d, now) {
-		return signingpolicy.ErrInvalid
+		return Admission{}, signingpolicy.ErrInvalid
 	}
 	if k.NotAfter != 0 && now.Unix() >= k.NotAfter {
-		return signingpolicy.ErrKeyRejected
+		return Admission{}, signingpolicy.ErrKeyRejected
 	}
 	v.last = now
 	for nonce, expiry := range v.seen {
@@ -284,34 +356,58 @@ func (v *Verifier) Verify(r *http.Request, enrollmentID int64) error {
 	}
 	nonce := k.KeyID + ":" + *d.Nonce
 	if _, exists := v.seen[nonce]; exists {
-		return signingpolicy.ErrInvalid
+		return Admission{}, signingpolicy.ErrInvalid
 	}
 	if len(v.seen) >= v.capacity {
-		return ErrCapacity
+		return Admission{}, ErrCapacity
 	}
 	if d.Expires.Unix() > v.watermark {
 		if err := atomicfile.WriteFile(v.statePath, []byte(strconv.FormatInt(d.Expires.Unix(), 10)+"\n"), atomicfile.WithPrivate()); err != nil {
 			v.failed = true
-			return ErrState
+			return Admission{}, ErrState
 		}
 		v.watermark = d.Expires.Unix()
 	}
 	now = v.now()
 	if now.UnixNano() < v.last.UnixNano() {
-		return ErrWarming
+		return Admission{}, ErrWarming
 	}
 	if r.Context().Err() != nil || !fresh(d, now) {
-		return signingpolicy.ErrInvalid
+		return Admission{}, signingpolicy.ErrInvalid
 	}
-	current, err = k.Load()
+	current, err := k.Load()
+	if err != nil {
+		return Admission{}, err
+	}
+	if subtle.ConstantTimeCompare(secret, current) != 1 || (k.NotAfter != 0 && now.Unix() >= k.NotAfter) {
+		return Admission{}, signingpolicy.ErrKeyRejected
+	}
+	v.last = now
+	v.seen[nonce] = *d.Expires
+	return Admission{verifier: v, key: k, secret: sha256.Sum256(secret)}, nil
+}
+
+func (v *Verifier) transferStillAuthorized(r *http.Request, k signingpolicy.Key, secret []byte) error {
+	current, err := k.Load()
 	if err != nil {
 		return err
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	now := v.now()
+	if v.closed || v.failed {
+		return ErrState
+	}
+	if now.UnixNano() < v.last.UnixNano() {
+		return ErrWarming
+	}
+	if r.Context().Err() != nil {
+		return signingpolicy.ErrInvalid
 	}
 	if subtle.ConstantTimeCompare(secret, current) != 1 || (k.NotAfter != 0 && now.Unix() >= k.NotAfter) {
 		return signingpolicy.ErrKeyRejected
 	}
 	v.last = now
-	v.seen[nonce] = *d.Expires
 	return nil
 }
 
@@ -320,7 +416,18 @@ func Sign(r *http.Request, source signingpolicy.Source) error {
 	if !signingpolicy.Unambiguous(r.URL) {
 		return signingpolicy.ErrInvalid
 	}
-	r.Header.Set("Content-Type", "application/json")
+	path := r.URL.Path
+	if source.HubURL != "" {
+		base, err := signingpolicy.ExternalBase(source.HubURL)
+		if err != nil {
+			return err
+		}
+		path = strings.TrimPrefix(path, base.Path)
+	}
+	transfer := IsAttachmentTransfer(r.Method, path)
+	if !transfer || r.Method != http.MethodPost {
+		r.Header.Set("Content-Type", "application/json")
+	}
 	key, err := source.Load()
 	if err != nil {
 		return err
@@ -337,13 +444,39 @@ func Sign(r *http.Request, source signingpolicy.Source) error {
 	if err != nil {
 		return signingpolicy.ErrKey
 	}
-	digest, err := httpsign.GenerateContentDigestHeader(&r.Body, []string{httpsign.DigestSha256}, httpsign.NewDigestOptions().SetMaxBodySize(MaxBodyBytes))
+	var digest string
+	var spool *bodySpool
+	if transfer && r.Method == http.MethodPost {
+		// Client requests use zero for an unknown length when a body is present.
+		// Received requests retain exact zero validation in the shared spool.
+		length := r.ContentLength
+		if length == 0 && r.Body != nil && r.Body != http.NoBody {
+			length = -1
+		}
+		spool, digest, err = spoolBody(r.Context(), r.Body, length, AttachmentMaxBodyBytes)
+		if err == nil {
+			r.Body = spool
+			var info os.FileInfo
+			info, err = spool.Stat()
+			if err == nil {
+				r.ContentLength = info.Size()
+			}
+		}
+	} else {
+		digest, err = httpsign.GenerateContentDigestHeader(&r.Body, []string{httpsign.DigestSha256}, httpsign.NewDigestOptions().SetMaxBodySize(MaxBodyBytes))
+	}
 	if err != nil {
-		return signingpolicy.ErrInvalid
+		if spool != nil {
+			_ = spool.Close()
+		}
+		return errors.Join(signingpolicy.ErrInvalid, err)
 	}
 	r.Header.Set("Content-Digest", digest)
 	input, sig, err := httpsign.SignRequest("sig1", *signer, r)
 	if err != nil {
+		if spool != nil {
+			_ = spool.Close()
+		}
 		return signingpolicy.ErrInvalid
 	}
 	r.Header.Set("Signature-Input", input)
@@ -381,8 +514,13 @@ func (t transport) RoundTrip(r *http.Request) (*http.Response, error) {
 	cloned.URL.Scheme, cloned.URL.Host = t.base.Scheme, t.base.Host
 	cloned.Host = t.base.Host
 	cloned.Header.Set("Authorization", "Bearer "+t.token)
-	if err := Sign(cloned, t.source); err != nil {
+	source := t.source
+	source.HubURL = t.base.String()
+	if err := Sign(cloned, source); err != nil {
 		return nil, err
+	}
+	if IsAttachmentTransfer(cloned.Method, strings.TrimPrefix(cloned.URL.Path, t.base.Path)) && cloned.Method == http.MethodPost {
+		defer func() { _ = cloned.Body.Close() }()
 	}
 	// The underlying Transport must not transparently resend a nonce after
 	// a response is lost. Native retries reenter this signer with a fresh nonce.

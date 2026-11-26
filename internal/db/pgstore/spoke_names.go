@@ -7,6 +7,11 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
+// FormerInstanceUIDs returns the identities retained by restores.
+func (s *Store) FormerInstanceUIDs(ctx context.Context) ([]string, error) {
+	return db.ReadFormerInstanceUIDs(ctx, s)
+}
+
 // ListFederationSpokeNames reads this hub's local display labels.
 func (s *Store) ListFederationSpokeNames(ctx context.Context) (map[string]string, error) {
 	return db.ReadFederationSpokeNames(ctx, s)

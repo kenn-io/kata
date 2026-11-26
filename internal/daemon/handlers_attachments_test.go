@@ -27,6 +27,7 @@ import (
 	"go.kenn.io/kata/internal/docbank/docbanktest"
 	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/testenv"
+	"go.kenn.io/kata/internal/testfix"
 	"go.kenn.io/kata/internal/uid"
 )
 
@@ -174,9 +175,6 @@ func TestAttachmentUploadRechecksAuthority(t *testing.T) {
 	}
 }
 
-type attachmentUnreadBody struct{ reads int }
-
-func (b *attachmentUnreadBody) Read([]byte) (int, error) { b.reads++; return 0, io.ErrUnexpectedEOF }
 func TestAttachmentAdmissionBeforeBody(t *testing.T) {
 	for _, tc := range []struct {
 		name                 string
@@ -203,7 +201,7 @@ func TestAttachmentAdmissionBeforeBody(t *testing.T) {
 				cfg.Docbank = docbank.NewClient(f.Server.URL, func() (string, error) { return "test-key", nil })
 				cfg.DocbankFolder = "/kata"
 			}
-			body := &attachmentUnreadBody{}
+			body := &testfix.ReadCountingBody{}
 			endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments?name=%s&actor=operator", p.ID, iss.ShortID, tc.filename)
 			req := httptest.NewRequestWithContext(t.Context(), "POST", endpoint, body)
 			req.RemoteAddr = "127.0.0.1:1234"
@@ -212,22 +210,18 @@ func TestAttachmentAdmissionBeforeBody(t *testing.T) {
 			daemon.NewServer(cfg).Handler().ServeHTTP(res, req)
 			require.Equal(t, tc.want, res.Code, res.Body.String())
 			require.Contains(t, res.Body.String(), tc.code)
-			require.Zero(t, body.reads)
+			require.Zero(t, body.Reads)
 			require.Empty(t, f.Requests())
 		})
 	}
 }
-
-type attachmentZeros struct{}
-
-func (attachmentZeros) Read(b []byte) (int, error) { clear(b); return len(b), nil }
 
 // TestAttachmentOversizeBeforeVault streams 256 MiB through a temporary file.
 func TestAttachmentOversizeBeforeVault(t *testing.T) {
 	env, f := attachmentEnv(t)
 	p, iss := seedProjectAndIssue(t, env)
 	endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", p.ID, iss.ShortID)
-	body := io.LimitReader(attachmentZeros{}, (256<<20)+1)
+	body := io.LimitReader(&testfix.ReadCountingBody{}, (256<<20)+1)
 	status, raw := attachmentUpload(t, env, endpoint, "shot.png", body)
 	require.Equal(t, 413, status, string(raw))
 	require.Contains(t, string(raw), "attachment_too_large")

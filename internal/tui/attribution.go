@@ -1,6 +1,9 @@
 package tui
 
-import "go.kenn.io/kata/internal/db"
+import (
+	"go.kenn.io/kata/internal/authorname"
+	"go.kenn.io/kata/internal/db"
+)
 
 // The daemon supplies verified creation projections. Source labels remain
 // visible for pending and legacy records without asserting accountability.
@@ -14,12 +17,13 @@ func creationAttributionLines(view db.AttributionView, author, teammate string, 
 	}
 	fields := []string{"creation: " + state}
 	if state == "verified" && view.AccountableActor != "" {
-		fields = append(fields, "accountable: "+sanitizeForLine(view.AccountableActor))
+		fields = append(fields, "accountable: "+sanitizeForLine(authorname.Display(view.AccountableActor)))
 	}
 	source := view.SourceActor
 	if source == "" {
 		source = author
 	}
+	source = authorname.Display(source)
 	if teammate != "" {
 		source += " / " + teammate
 	}

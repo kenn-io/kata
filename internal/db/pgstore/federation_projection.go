@@ -168,7 +168,7 @@ func (s *Store) leaveFederationReplica(ctx context.Context, projectID int64, dis
 		if discardRelay {
 			err = s.discardRelayHopStateTx(ctx, tx, projectID, binding.RelayConfig)
 		} else {
-			err = s.validateRelayLifecycleTx(ctx, tx, projectID)
+			err = s.validateRelayLifecycleTx(ctx, tx, projectID, true)
 			if err == nil && binding.RelayConfig != nil {
 				err = deleteRelayBindingStateTx(ctx, tx, binding.RelayConfig.BindingUID)
 			}
@@ -178,6 +178,12 @@ func (s *Store) leaveFederationReplica(ctx context.Context, projectID int64, dis
 		}
 		if err := db.ClearFederationProjectIdentityDependencies(ctx, tx, project.UID); err != nil {
 			return mapSQLError(err, nil)
+		}
+		if err := db.RetainFederationHeldCursor(ctx, tx, projectID, project.UID, s.InstanceUID()); err != nil {
+			return mapSQLError(err, nil)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=$1`, db.FederationLeaveFencePrefix+project.UID); err != nil {
+			return err
 		}
 		for _, query := range []string{
 			`DELETE FROM federation_quarantine WHERE project_id=$1`,
@@ -492,29 +498,6 @@ func (s *Store) materializeFederatedProjectTx(
 	acceptedEventUIDs []string,
 	validator *db.CronReplayValidator,
 ) error {
-	return s.materializeFederatedProjectTxScoped(ctx, tx, projectID, reconcileLinks, acceptedEventUIDs, validator, false)
-}
-
-func (s *Store) materializeFederatedProjectRelayTx(
-	ctx context.Context,
-	tx *sql.Tx,
-	projectID int64,
-	reconcileLinks bool,
-	acceptedEventUIDs []string,
-	validator *db.CronReplayValidator,
-) error {
-	return s.materializeFederatedProjectTxScoped(ctx, tx, projectID, reconcileLinks, acceptedEventUIDs, validator, true)
-}
-
-func (s *Store) materializeFederatedProjectTxScoped(
-	ctx context.Context,
-	tx *sql.Tx,
-	projectID int64,
-	reconcileLinks bool,
-	acceptedEventUIDs []string,
-	validator *db.CronReplayValidator,
-	projectOnlyLinks bool,
-) error {
 	if err := db.LockCronProject(ctx, tx, projectID); err != nil {
 		return err
 	}
@@ -669,13 +652,9 @@ func (s *Store) materializeFederatedProjectTxScoped(
 		// — is the transaction's lock-acquisition order under concurrent
 		// materialization of two projects in one group. Do not hoist it into the
 		// struct's construction above.
-		if projectOnlyLinks {
-			m.groupProjectIDs = []int64{projectID}
-		} else {
-			m.groupProjectIDs, err = federationBindingGroupProjectIDs(ctx, tx, m.binding)
-			if err != nil {
-				return err
-			}
+		m.groupProjectIDs, err = federationBindingGroupProjectIDs(ctx, tx, m.binding)
+		if err != nil {
+			return err
 		}
 		if err := reconcileFederatedLinkGroup(ctx, tx, m, issueIDs); err != nil {
 			return err

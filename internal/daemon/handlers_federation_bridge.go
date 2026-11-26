@@ -49,11 +49,19 @@ func registerRelayHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if cfg.RootSigning != nil {
 			signer = cfg.RootSigning.Signer()
 		}
+		ctx = db.WithRelayPeerEventFeatures(ctx, in.EventFeatures)
 		checkpoint, err := store.CreateRelayReset(ctx, principal.RelayBindingUID, signer)
+		if err != nil {
+			return nil, relayTransportError(finishPeerFenceRejection(ctx, err))
+		}
+		required, err := db.RelayResetRequiredFeatures(checkpoint.Snapshot)
 		if err != nil {
 			return nil, relayTransportError(err)
 		}
-		return &api.RelayResetResponse{Body: checkpoint}, nil
+		if err := db.RequireEventFeatures(in.EventFeatures, required); err != nil {
+			return nil, federationFeatureError(err)
+		}
+		return &api.RelayResetResponse{Body: checkpoint, EventFeatures: db.SupportedEventFeatures, RequiredEventFeatures: required}, nil
 	})
 	huma.Register(humaAPI, huma.Operation{OperationID: "offerRelayDeliveries", Method: http.MethodGet, Path: "/api/v1/projects/{project_id}/federation/relay"}, func(ctx context.Context, in *api.RelayOfferRequest) (*api.RelayOfferResponse, error) {
 		ctx, principal, err := authorizeRelayRequest(ctx, cfg, in.Authorization, in.ProjectID, "pull", "offerRelayDeliveries")
@@ -74,14 +82,23 @@ func registerRelayHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			return &api.RelayOfferResponse{Body: db.RelayBatch{Stream: db.RelayStreamArtifact, Artifacts: artifacts}}, nil
 		}
+		ctx = db.WithRelayPeerEventFeatures(ctx, in.EventFeatures)
 		ctx = db.WithRelayRequestedEpoch(ctx, in.Epoch)
 		envelopes, err := cfg.DB.PendingRelayDeliveries(ctx, principal.RelayBindingUID, in.Stream, in.Limit)
 		if err != nil {
-			return nil, relayTransportError(err)
+			return nil, relayTransportError(finishPeerFenceRejection(ctx, err))
 		}
 		// Zero is a valid replay baseline. Durable per-hop acceptance rejects
 		// skipped prefixes and deduplicates the retained envelopes after lost ACKs.
-		return &api.RelayOfferResponse{Body: db.RelayBatch{Stream: in.Stream, Envelopes: envelopes}}, nil
+		batch := db.RelayBatch{Stream: in.Stream, Envelopes: envelopes}
+		required, err := db.RelayBatchRequiredFeatures(batch)
+		if err != nil {
+			return nil, relayTransportError(err)
+		}
+		if err := db.RequireEventFeatures(in.EventFeatures, required); err != nil {
+			return nil, federationFeatureError(err)
+		}
+		return &api.RelayOfferResponse{Body: batch, EventFeatures: db.SupportedEventFeatures, RequiredEventFeatures: required}, nil
 	})
 	huma.Register(humaAPI, huma.Operation{OperationID: "acceptRelayDeliveries", Method: http.MethodPost, Path: "/api/v1/projects/{project_id}/federation/relay:accept", MaxBodyBytes: 128 << 20}, func(ctx context.Context, in *api.RelayAcceptRequest) (*api.RelayAcceptResponse, error) {
 		ctx, principal, err := authorizeRelayRequest(ctx, cfg, in.Authorization, in.ProjectID, "push", "acceptRelayDeliveries")
@@ -134,6 +151,9 @@ func authorizeRelayRequest(ctx context.Context, cfg ServerConfig, auth string, p
 }
 
 func relayTransportError(err error) error {
+	if errors.Is(err, db.ErrUnsupportedEventFeatures) {
+		return federationFeatureError(err)
+	}
 	if apiErr := relayCrossProjectLinksAPIError(err); apiErr != nil {
 		return apiErr
 	}
@@ -149,6 +169,9 @@ func relayTransportError(err error) error {
 	if errors.Is(err, db.ErrFederationResetBlockedByPendingPush) || errors.Is(err, db.ErrFederationResetBlockedByQuarantine) || errors.Is(err, db.ErrFederationResetBlockedByExternalRoot) {
 		return api.NewError(http.StatusConflict, "relay_reset_blocked", "relay reset is blocked by retained work or bindings", "", nil)
 	}
+	if errors.Is(err, db.ErrTransactionFinalizationFailed) || errors.Is(err, errHostFederationAccessUnavailable) {
+		return api.NewError(http.StatusServiceUnavailable, "access_unavailable", "relay storage or authorization is unavailable", "", nil)
+	}
 	if errors.Is(err, db.ErrNotFound) {
 		return federationCredentialDenied()
 	}
@@ -161,9 +184,6 @@ func relayTransportError(err error) error {
 	if errors.Is(err, db.ErrFederationIngestValidation) || errors.Is(err, db.ErrRemoteEventHashMismatch) {
 		// Do not expose source, constraint or project details in protocol errors.
 		return api.NewError(http.StatusBadRequest, "relay_invalid", "relay batch, epoch or acknowledgement is invalid", "", nil)
-	}
-	if errors.Is(err, db.ErrTransactionFinalizationFailed) || errors.Is(err, errHostFederationAccessUnavailable) {
-		return api.NewError(http.StatusServiceUnavailable, "access_unavailable", "relay storage or authorization is unavailable", "", nil)
 	}
 	if apiErr, ok := errors.AsType[*api.APIError](err); ok {
 		if apiErr.Status == http.StatusForbidden || apiErr.Status == http.StatusNotFound {

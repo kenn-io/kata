@@ -29,6 +29,38 @@ function task(overrides: Partial<KataTaskSummary>): KataTaskSummary {
 }
 
 describe('kata task sorting', () => {
+  test('orders trees by their earliest descendant deadline', () => {
+    const parent = task({ uid: 'parent' })
+    const child = task({ uid: 'child', deadline_on_date: '2026-05-01' })
+    const middle = task({ uid: 'middle', deadline_on_date: '2026-05-10' })
+    const empty = task({ uid: 'empty' })
+    const children = (item: KataTaskSummary) => (item.uid === 'parent' ? [child] : [])
+    expect(
+      sortKataTasks([empty, middle, parent], { key: 'due', direction: 'asc' }, children).map(
+        (item) => item.uid,
+      ),
+    ).toEqual(['parent', 'middle', 'empty'])
+    expect(
+      sortKataTasks([empty, middle, parent], { key: 'due', direction: 'desc' }, children).map(
+        (item) => item.uid,
+      ),
+    ).toEqual(['middle', 'parent', 'empty'])
+  })
+  test('sorts deadlines while leaving undated tasks last in either direction', () => {
+    const tasks = [
+      task({ uid: 'none' }),
+      task({ uid: 'later', deadline_on_date: '2026-05-20' }),
+      task({ uid: 'early', metadata: { deadline_on: '2026-05-01' } }),
+    ]
+    expect(sortKataTasks(tasks, { key: 'due', direction: 'asc' }).map((item) => item.uid)).toEqual([
+      'early',
+      'later',
+      'none',
+    ])
+    expect(sortKataTasks(tasks, { key: 'due', direction: 'desc' }).map((item) => item.uid)).toEqual(
+      ['later', 'early', 'none'],
+    )
+  })
   test('defaults to recently updated first and toggles the active key', () => {
     expect(DEFAULT_KATA_TASK_SORT).toEqual({ key: 'updated', direction: 'desc' })
     expect(toggleKataTaskSort(DEFAULT_KATA_TASK_SORT, 'updated')).toEqual({

@@ -246,6 +246,9 @@ func TestUndoClientRecordsSupportedFieldChanges(t *testing.T) {
 		{"label remove", Issue{Status: "open", Labels: []string{"urgent"}}, Issue{Status: "open"}, "label.remove", func(c *undoClient) (*MutationResp, error) {
 			return c.RemoveLabel(t.Context(), 7, "abc4", "urgent", "bob")
 		}},
+		{"priority label remove", Issue{Status: "open", Labels: []string{"p2"}}, Issue{Status: "open"}, "", func(c *undoClient) (*MutationResp, error) {
+			return c.RemoveLabel(t.Context(), 7, "abc4", "p2", "bob")
+		}},
 		{"body", Issue{Status: "open", Body: "before"}, Issue{Status: "open", Body: "after"}, "body.edit", func(c *undoClient) (*MutationResp, error) {
 			return c.EditBody(t.Context(), 7, "abc4", "after", "bob", nil)
 		}},
@@ -258,6 +261,11 @@ func TestUndoClientRecordsSupportedFieldChanges(t *testing.T) {
 			f := &undoTestAPI{issue: tc.before, writeResp: &MutationResp{Issue: &tc.after, Changed: true}}
 			resp, err := tc.call(newConnectedUndoClient(t, f))
 			require.NoError(t, err)
+			if tc.kind == "" {
+				require.Nil(t, resp.undo.entry)
+				require.Equal(t, "removing a priority label cannot be undone", resp.undo.boundary)
+				return
+			}
 			require.NotNil(t, resp.undo.entry)
 			require.Equal(t, tc.kind, resp.undo.entry.kind)
 			require.Equal(t, tc.before.Body, resp.undo.entry.before.Body)

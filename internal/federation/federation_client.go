@@ -2,11 +2,13 @@ package federation
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -48,6 +50,8 @@ func (e *HubStatusError) Error() string {
 type Client struct {
 	baseURL string
 	client  *http.Client
+	// tokenDigest identifies the bearer without keeping another copy of it.
+	tokenDigest [sha256.Size]byte
 }
 
 // NewClient builds a bearer-pinned HTTP client for a trusted hub.
@@ -66,8 +70,9 @@ func NewClient(ctx context.Context, baseURL string, token string, opts clientpkg
 		}
 	}
 	return &Client{
-		baseURL: canonicalBaseURL,
-		client:  c,
+		baseURL:     canonicalBaseURL,
+		client:      c,
+		tokenDigest: sha256.Sum256([]byte(token)),
 	}, nil
 }
 
@@ -75,19 +80,49 @@ func NewClient(ctx context.Context, baseURL string, token string, opts clientpkg
 func (c *Client) PollProjectEvents(
 	ctx context.Context, hubProjectID, afterID int64, limit int,
 ) (api.PollEventsBody, error) {
-	return c.pollProjectEvents(ctx, hubProjectID, "", afterID, limit)
+	body, _, err := c.pollProjectEvents(ctx, hubProjectID, "", afterID, limit, 0)
+	return body, err
 }
 
 // PollIssueEvents reads retained history for an issue currently owned by the
 // authenticated hub project, independently of that project's polling cursor.
 func (c *Client) PollIssueEvents(ctx context.Context, hubProjectID int64, issueUID string, afterID int64, limit int) (api.PollEventsBody, error) {
-	return c.pollProjectEvents(ctx, hubProjectID, issueUID, afterID, limit)
+	body, _, err := c.pollProjectEvents(ctx, hubProjectID, issueUID, afterID, limit, 0)
+	return body, err
 }
 
-func (c *Client) pollProjectEvents(ctx context.Context, hubProjectID int64, issueUID string, afterID int64, limit int) (api.PollEventsBody, error) {
-	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{c.client}))
+// hubPollAdvertisement is what a hub says about the polls it can hold: the
+// longest wait, zero when it holds none, and how many projects one watch may
+// name, zero when it takes no watches.
+type hubPollAdvertisement struct {
+	wait     time.Duration
+	watchMax int
+}
+
+func parseHubPollAdvertisement(header http.Header) hubPollAdvertisement {
+	var out hubPollAdvertisement
+	if seconds, err := strconv.Atoi(header.Get(federationPollWaitMaxHeader)); err == nil && seconds > 0 {
+		out.wait = time.Duration(seconds) * time.Second
+	}
+	if projects, err := strconv.Atoi(header.Get(federationWatchMaxHeader)); err == nil && projects > 0 {
+		out.watchMax = projects
+	}
+	return out
+}
+
+// pollProjectEvents polls hub project events strictly after afterID. A
+// positive wait asks the hub to hold a caught-up poll for up to that long. The
+// result reports what the hub advertises about held polls and watches.
+func (c *Client) pollProjectEvents(
+	ctx context.Context, hubProjectID int64, issueUID string, afterID int64, limit int, wait time.Duration,
+) (api.PollEventsBody, hubPollAdvertisement, error) {
+	httpClient := c.client
+	if wait > 0 {
+		httpClient = noRedirects(httpClient)
+	}
+	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{httpClient}))
 	if err != nil {
-		return api.PollEventsBody{}, err
+		return api.PollEventsBody{}, hubPollAdvertisement{}, err
 	}
 	query := &generated.PollFederationProjectEventsQuery{AfterID: &afterID}
 	if issueUID != "" {
@@ -96,16 +131,49 @@ func (c *Client) pollProjectEvents(ctx context.Context, hubProjectID int64, issu
 	if limit > 0 {
 		query.Limit = new(int64(limit))
 	}
+	if wait > 0 {
+		query.Wait = new(int64(wait / time.Second))
+	}
 	response, callErr := apiClient.PollFederationProjectEventsWithResponse(ctx, &generated.PollFederationProjectEventsRequestOptions{PathParams: &generated.PollFederationProjectEventsPath{ProjectID: hubProjectID}, Query: query})
 	var body api.PollEventsBody
 	if response == nil {
-		return body, callErr
+		return body, hubPollAdvertisement{}, callErr
 	}
 	err = decodeReplicationResponse(response.HTTPResponse, response.Body, &body)
 	if body.Events == nil {
 		body.Events = []api.EventEnvelope{}
 	}
-	return body, err
+	if err != nil {
+		return body, hubPollAdvertisement{}, err
+	}
+	return body, parseHubPollAdvertisement(response.HTTPResponse.Header), nil
+}
+
+// watchProjectEvents holds one request at the hub for hubProjectID, which this
+// client's bearer authorizes, and for each of others, which its own token
+// authorizes. The hub answers with the projects that have work after their
+// cursors, or with none when the wait ends.
+func (c *Client) watchProjectEvents(
+	ctx context.Context, hubProjectID, afterID int64, others []generated.FederationWatchProject, wait time.Duration,
+) (api.FederationWatchEventsBody, hubPollAdvertisement, error) {
+	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{noRedirects(c.client)}))
+	if err != nil {
+		return api.FederationWatchEventsBody{}, hubPollAdvertisement{}, err
+	}
+	waitSeconds := int64(wait / time.Second)
+	response, callErr := apiClient.WatchFederationProjectEventsWithResponse(ctx, &generated.WatchFederationProjectEventsRequestOptions{
+		PathParams: &generated.WatchFederationProjectEventsPath{ProjectID: hubProjectID},
+		Query:      &generated.WatchFederationProjectEventsQuery{Wait: &waitSeconds},
+		Body:       &generated.WatchFederationProjectEventsBody{AfterID: afterID, Projects: others},
+	})
+	var body api.FederationWatchEventsBody
+	if response == nil {
+		return body, hubPollAdvertisement{}, callErr
+	}
+	if err := decodeReplicationResponse(response.HTTPResponse, response.Body, &body); err != nil {
+		return body, hubPollAdvertisement{}, err
+	}
+	return body, parseHubPollAdvertisement(response.HTTPResponse.Header), nil
 }
 
 // IngestProjectEvents pushes local spoke events into the hub transport
@@ -137,9 +205,7 @@ func (c *Client) IngestProjectEventsWithOptions(
 	if len(opts.MoveSourceTokens) > 0 {
 		// Supplemental credentials belong to this mount. A redirect can name a
 		// different mount on the same origin and can replay the request body.
-		pinned := *httpClient
-		pinned.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-		httpClient = &pinned
+		httpClient = noRedirects(httpClient)
 	}
 	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{httpClient}))
 	if err != nil {
@@ -249,6 +315,19 @@ func (c *Client) OfferRelayDeliveries(ctx context.Context, projectID int64, stre
 
 // AcceptRelayDeliveries submits an authenticated hop batch and returns its accepted prefix.
 func (c *Client) AcceptRelayDeliveries(ctx context.Context, projectID int64, batch db.RelayBatch) (db.RelayAcceptance, error) {
+	required, err := db.RelayBatchRequiredFeatures(batch)
+	if err != nil {
+		return db.RelayAcceptance{}, err
+	}
+	if required != "" {
+		_, supported, err := c.projectFederationFeatures(ctx, projectID)
+		if err != nil {
+			return db.RelayAcceptance{}, err
+		}
+		if err := db.RequireEventFeatures(supported, required); err != nil {
+			return db.RelayAcceptance{}, err
+		}
+	}
 	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{c.client}))
 	if err != nil {
 		return db.RelayAcceptance{}, err
@@ -346,4 +425,10 @@ func decodeReplicationResponse(resp *http.Response, body []byte, out any) error 
 		return fmt.Errorf("decode hub %s response: %w", resp.Request.URL.Path, err)
 	}
 	return nil
+}
+
+func noRedirects(client *http.Client) *http.Client {
+	pinned := *client
+	pinned.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return &pinned
 }

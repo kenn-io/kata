@@ -105,7 +105,7 @@ func (s *Store) ReplaceParentAndEvents(
 		unlinkedPayload, err := json.Marshal(map[string]any{
 			"link_id": oldLink.ID, "type": oldLink.Type,
 			"from_short_id": input.UnlinkEvent.FromShortID, "from_uid": input.UnlinkEvent.FromUID,
-			"to_short_id": input.UnlinkEvent.ToShortID, "to_uid": input.UnlinkEvent.ToUID,
+			"to_short_id": input.UnlinkEvent.ToShortID, "to_uid": input.UnlinkEvent.ToUID, "link_from_uid": oldLink.FromIssueUID, "link_to_uid": oldLink.ToIssueUID,
 			"updated_at": updatedAt,
 		})
 		if err != nil {

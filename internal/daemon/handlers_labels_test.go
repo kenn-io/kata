@@ -1,13 +1,52 @@
 package daemon_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
+
+func TestAddLabel_PriorityLabelRejected(t *testing.T) {
+	env := testenv.New(t)
+	pid, n := setupOneIssue(t, env)
+	issue, err := env.DB.IssueByID(t.Context(), n)
+	require.NoError(t, err)
+	for _, label := range []string{"p0", "p1", "p2", "p3", "p4", "priority:high", "priority:"} {
+		t.Run(label, func(t *testing.T) {
+			resp, body := envDoRaw(t, env, http.MethodPost, issuePath(pid, n, "labels"), map[string]string{"actor": "tester", "label": label}, nil)
+			assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+			assert.Contains(t, string(body), "kata edit kata#"+issue.ShortID+" --priority N")
+		})
+	}
+	resp, body := envDoRaw(t, env, http.MethodPost, issuePathRef(pid, issue.UID, "labels"), map[string]string{"actor": "tester", "label": "p2"}, nil)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	assert.Contains(t, string(body), "kata edit kata#"+issue.ShortID+" --priority N")
+	_, _, err = env.DB.AddLabelAndEvent(t.Context(), n, db.LabelEventParams{EventType: "issue.labeled", Label: "p2", Actor: "tester"})
+	require.NoError(t, err)
+	resp, body = envDoRaw(t, env, http.MethodPost, issuePath(pid, n, "labels"), map[string]string{"actor": "tester", "label": "p2"}, nil)
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode, string(body))
+	assert.Contains(t, string(body), "kata edit kata#"+issue.ShortID+" --priority N")
+	for _, label := range []string{"p5", "priority"} {
+		postLabel(t, env, pid, n, label)
+	}
+}
+
+func TestUpdateLabels_PriorityAddChangesNothing(t *testing.T) {
+	env := testenv.New(t)
+	pid, issueID := setupOneIssue(t, env)
+	postLabel(t, env, pid, issueID, "bug")
+
+	resp, raw := envDoRaw(t, env, http.MethodPatch, issuePath(pid, issueID, "labels"),
+		map[string]any{"actor": "tester", "add": []string{"priority:high"}, "remove": []string{"bug"}}, nil)
+	assertAPIError(t, resp.StatusCode, raw, http.StatusBadRequest, "validation")
+	assert.Contains(t, string(raw), "--priority N")
+	assert.Equal(t, []string{"bug"}, issueLabelNames(t, env, issueID))
+}
 
 func TestAddLabel_HappyPath(t *testing.T) {
 	env := testenv.New(t)
@@ -79,7 +118,7 @@ func TestLabelsList_ReturnsCounts(t *testing.T) {
 	pid, a := setupOneIssue(t, env)
 	b := createIssueViaHTTP(t, env, pid, "b")
 	postLabel(t, env, pid, a, "bug")
-	postLabel(t, env, pid, a, "priority:high")
+	postLabel(t, env, pid, a, "area:ui")
 	postLabel(t, env, pid, b, "bug")
 
 	var out struct {
@@ -94,5 +133,96 @@ func TestLabelsList_ReturnsCounts(t *testing.T) {
 		got[c.Label] = c.Count
 	}
 	assert.Equal(t, int64(2), got["bug"])
-	assert.Equal(t, int64(1), got["priority:high"])
+	assert.Equal(t, int64(1), got["area:ui"])
+}
+
+// issueLabelNames reads the labels straight from the store so tests check
+// what is persisted, not what the response claims.
+func issueLabelNames(t *testing.T, env *testenv.Env, issueID int64) []string {
+	t.Helper()
+	rows, err := env.DB.LabelsByIssue(t.Context(), issueID)
+	require.NoError(t, err)
+	names := make([]string, 0, len(rows))
+	for _, r := range rows {
+		names = append(names, r.Label)
+	}
+	return names
+}
+
+func TestUpdateLabels_SwapsTriageLabels(t *testing.T) {
+	env := testenv.New(t)
+	pid, n := setupOneIssue(t, env)
+	postLabel(t, env, pid, n, "ready-for-agent")
+	postLabel(t, env, pid, n, "keep")
+
+	resp, raw := envDoRaw(t, env, http.MethodPatch, issuePath(pid, n, "labels"),
+		map[string]any{"actor": "tester", "add": []string{"ready-for-human"}, "remove": []string{"ready-for-agent"}}, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	var out struct {
+		Labels []string `json:"labels"`
+		Events []struct {
+			Type string `json:"type"`
+		} `json:"events"`
+		Changed bool `json:"changed"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &out))
+	assert.Equal(t, []string{"keep", "ready-for-human"}, out.Labels)
+	assert.True(t, out.Changed)
+	require.Len(t, out.Events, 2)
+	assert.Equal(t, "issue.unlabeled", out.Events[0].Type)
+	assert.Equal(t, "issue.labeled", out.Events[1].Type)
+	assert.ElementsMatch(t, []string{"keep", "ready-for-human"}, issueLabelNames(t, env, n))
+}
+
+func TestUpdateLabels_NoOpReportsLabelsWithoutEvents(t *testing.T) {
+	env := testenv.New(t)
+	pid, n := setupOneIssue(t, env)
+	postLabel(t, env, pid, n, "bug")
+
+	resp, raw := envDoRaw(t, env, http.MethodPatch, issuePath(pid, n, "labels"),
+		map[string]any{"actor": "tester", "add": []string{"bug"}, "remove": []string{"absent"}}, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	var out struct {
+		Labels  []string `json:"labels"`
+		Events  []any    `json:"events"`
+		Changed bool     `json:"changed"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &out))
+	assert.Equal(t, []string{"bug"}, out.Labels)
+	assert.Empty(t, out.Events)
+	assert.False(t, out.Changed)
+}
+
+func TestUpdateLabels_SameLabelInAddAndRemoveIs400(t *testing.T) {
+	env := testenv.New(t)
+	pid, n := setupOneIssue(t, env)
+	postLabel(t, env, pid, n, "ready-for-agent")
+
+	resp, raw := envDoRaw(t, env, http.MethodPatch, issuePath(pid, n, "labels"),
+		map[string]any{"actor": "tester", "add": []string{"ready-for-agent"}, "remove": []string{"ready-for-agent"}}, nil)
+	assertAPIError(t, resp.StatusCode, raw, http.StatusBadRequest, "validation")
+	assert.Contains(t, string(raw), "ready-for-agent")
+	assert.Equal(t, []string{"ready-for-agent"}, issueLabelNames(t, env, n))
+}
+
+func TestUpdateLabels_InvalidRemoveChangesNothing(t *testing.T) {
+	env := testenv.New(t)
+	pid, n := setupOneIssue(t, env)
+	postLabel(t, env, pid, n, "ready-for-agent")
+
+	// The mistyped remove names no attached label, so only validation stops
+	// the add from landing next to ready-for-agent.
+	resp, raw := envDoRaw(t, env, http.MethodPatch, issuePath(pid, n, "labels"),
+		map[string]any{"actor": "tester", "add": []string{"ready-for-human"}, "remove": []string{"Ready-For-Agent"}}, nil)
+	assertAPIError(t, resp.StatusCode, raw, http.StatusBadRequest, "validation")
+	assert.Equal(t, []string{"ready-for-agent"}, issueLabelNames(t, env, n))
+}
+
+func TestUpdateLabels_EmptyListsAre400(t *testing.T) {
+	env := testenv.New(t)
+	pid, n := setupOneIssue(t, env)
+
+	resp, raw := envDoRaw(t, env, http.MethodPatch, issuePath(pid, n, "labels"),
+		map[string]any{"actor": "tester", "add": []string{}, "remove": []string{}}, nil)
+	assertAPIError(t, resp.StatusCode, raw, http.StatusBadRequest, "validation")
 }

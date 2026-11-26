@@ -1,6 +1,7 @@
 import type { KataTaskSummary } from './types'
+import { deadlineDate } from './view'
 
-export type KataTaskSortKey = 'priority' | 'title' | 'updated' | 'owner' | 'id'
+export type KataTaskSortKey = 'priority' | 'title' | 'updated' | 'owner' | 'id' | 'due'
 export type KataTaskSortDirection = 'asc' | 'desc'
 
 export interface KataTaskSort {
@@ -14,6 +15,7 @@ export const KATA_TASK_NATURAL_DIRECTION: Record<KataTaskSortKey, KataTaskSortDi
   updated: 'desc',
   owner: 'asc',
   id: 'asc',
+  due: 'asc',
 }
 
 export const DEFAULT_KATA_TASK_SORT: KataTaskSort = {
@@ -31,18 +33,58 @@ export function toggleKataTaskSort(current: KataTaskSort, key: KataTaskSortKey):
 export function sortKataTasks(
   issues: readonly KataTaskSummary[],
   sort: KataTaskSort,
+  childrenOf?: (issue: KataTaskSummary) => readonly KataTaskSummary[],
+  dateOf: (issue: KataTaskSummary) => string | undefined = deadlineDate,
 ): KataTaskSummary[] {
-  return [...issues].sort((a, b) => compareKataTasks(a, b, sort))
+  const dueDate = dueDateLookup(childrenOf, dateOf)
+  return [...issues].sort((a, b) => compareWithDueDate(a, b, sort, dueDate))
+}
+
+function dueDateLookup(
+  childrenOf?: (issue: KataTaskSummary) => readonly KataTaskSummary[],
+  dateOf: (issue: KataTaskSummary) => string | undefined = deadlineDate,
+) {
+  const dates = new Map<KataTaskSummary, string | undefined>()
+  return (issue: KataTaskSummary): string | undefined => {
+    if (dates.has(issue)) return dates.get(issue)
+    const seen = new Set<string>()
+    const visit = (item: KataTaskSummary): string | undefined => {
+      if (seen.has(item.uid)) return undefined
+      seen.add(item.uid)
+      let earliest = dateOf(item)
+      for (const child of childrenOf?.(item) ?? []) {
+        const date = visit(child)
+        if (date && (!earliest || date < earliest)) earliest = date
+      }
+      return earliest
+    }
+    const date = visit(issue)
+    dates.set(issue, date)
+    return date
+  }
 }
 
 export function compareKataTasks(
   a: KataTaskSummary,
   b: KataTaskSummary,
   sort: KataTaskSort,
+  childrenOf?: (issue: KataTaskSummary) => readonly KataTaskSummary[],
 ): number {
-  const missing = compareMissing(a, b, sort.key)
+  return compareWithDueDate(a, b, sort, dueDateLookup(childrenOf))
+}
+
+function compareWithDueDate(
+  a: KataTaskSummary,
+  b: KataTaskSummary,
+  sort: KataTaskSort,
+  dueDate: (issue: KataTaskSummary) => string | undefined,
+): number {
+  const missing = compareMissing(a, b, sort.key, dueDate)
   if (missing !== 0) return missing
-  const primary = compareKey(a, b, sort.key)
+  const primary =
+    sort.key === 'due'
+      ? (dueDate(a) ?? '').localeCompare(dueDate(b) ?? '')
+      : compareKey(a, b, sort.key)
   const ordered = sort.direction === 'asc' ? primary : -primary
   if (ordered !== 0) return ordered
   if (sort.key !== 'updated') {
@@ -52,16 +94,21 @@ export function compareKataTasks(
   return a.uid.localeCompare(b.uid)
 }
 
-function compareMissing(a: KataTaskSummary, b: KataTaskSummary, key: KataTaskSortKey): number {
+function compareMissing(
+  a: KataTaskSummary,
+  b: KataTaskSummary,
+  key: KataTaskSortKey,
+  dueDate: (issue: KataTaskSummary) => string | undefined,
+): number {
   if (key === 'priority') {
     const am = a.priority === undefined
     const bm = b.priority === undefined
     if (am && bm) return 0
     if (am) return 1
     if (bm) return -1
-  } else if (key === 'owner') {
-    const am = !a.owner
-    const bm = !b.owner
+  } else if (key === 'owner' || key === 'due') {
+    const am = key === 'owner' ? !a.owner : !dueDate(a)
+    const bm = key === 'owner' ? !b.owner : !dueDate(b)
     if (am && bm) return 0
     if (am) return 1
     if (bm) return -1
@@ -87,5 +134,7 @@ function compareKey(a: KataTaskSummary, b: KataTaskSummary, key: KataTaskSortKey
       return (a.owner ?? '').localeCompare(b.owner ?? '', undefined, { sensitivity: 'base' })
     case 'id':
       return a.qualified_id.localeCompare(b.qualified_id, undefined, { numeric: true })
+    case 'due':
+      return (deadlineDate(a) ?? '').localeCompare(deadlineDate(b) ?? '')
   }
 }

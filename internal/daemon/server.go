@@ -47,6 +47,7 @@ import (
 // through). Hooks is optional and defaults to hooks.NewNoop() when nil so
 // mutation handlers can fan out events unconditionally.
 type ServerConfig struct {
+	EmbeddingProjectAllowed   func(context.Context, string) (bool, error)
 	FederationSigning         *federationsigning.Verifier
 	FederationSigningRequired bool
 	DB                        db.Storage
@@ -83,6 +84,8 @@ type ServerConfig struct {
 	// supplied binding and credential. It is used when a forwarded claim
 	// discovers that the issue has moved into another joined hub project.
 	FederationPullOnce func(context.Context, db.FederationBinding, config.FederationCredential) error
+	// FederationSyncOnce exchanges pending project events before an origin write.
+	FederationSyncOnce func(context.Context, db.FederationBinding, config.FederationCredential) error
 	// EmbeddingWake notifies the existing local worker after artifact commit.
 	EmbeddingWake                 func()
 	FederationCredentials         config.FederationCredentialStore
@@ -166,6 +169,10 @@ type ServerConfig struct {
 	// bearer-derived principal). Nil uses slog.Default(); tests inject a
 	// per-test logger so output is observable and isolated.
 	Logger *slog.Logger
+
+	// federationPollWaits is owned by the server NewServer builds; it bounds
+	// and wakes held federation event polls.
+	federationPollWaits *federationPollWaits
 
 	// Embedder is the semantic-search embedding client. Nil means semantic
 	// search is disabled and the search handler falls back to lexical-only.
@@ -284,14 +291,17 @@ func NewDefaultGitHubSyncRunner(cfg GitHubSyncRunnerConfig) GitHubSyncRunner {
 
 // Server bundles the http handler and lifecycle.
 type Server struct {
-	federationIngestAdmission  chan struct{}
-	federationControlAdmission chan struct{}
-	cfg                        ServerConfig
-	baseHandler                http.Handler
-	handler                    http.Handler
-	api                        huma.API
-	authPolicy                 authPolicy
-	noProjectDataRoutes        noProjectDataRouteMatcher
+	federationIngestAdmission   chan struct{}
+	federationTransferAdmission chan struct{}
+	federationReadAdmission     chan struct{}
+	federationControlAdmission  chan struct{}
+	stopFederationPollBridge    func()
+	cfg                         ServerConfig
+	baseHandler                 http.Handler
+	handler                     http.Handler
+	api                         huma.API
+	authPolicy                  authPolicy
+	noProjectDataRoutes         noProjectDataRouteMatcher
 
 	shutdownTimeout time.Duration
 }
@@ -393,12 +403,17 @@ func NewServer(cfg ServerConfig) *Server {
 	withRootAttribution(humaAPI, cfg.RootSigning)
 	withExternalRootAdministration(humaAPI, cfg.Auth.AllowIdentityConnectorAdministration)
 
+	controlAdmission := make(chan struct{}, 16)
+	cfg.federationPollWaits = newFederationPollWaits(cap(controlAdmission), federationPollCPUs())
 	s := &Server{
 		cfg: cfg, api: humaAPI,
-		federationIngestAdmission:  make(chan struct{}, 2),
-		federationControlAdmission: make(chan struct{}, 16),
+		federationIngestAdmission:   make(chan struct{}, 2),
+		federationTransferAdmission: make(chan struct{}, 2),
+		federationReadAdmission:     make(chan struct{}, 16),
+		federationControlAdmission:  controlAdmission,
 	}
 	registerRoutes(humaAPI, mux, cfg)
+	s.stopFederationPollBridge = startFederationPollBridge(cfg)
 	if cfg.WebSessions != nil {
 		registerUISessionHandlers(mux, cfg.WebSessions)
 	}
@@ -492,6 +507,9 @@ func (s *Server) API() huma.API { return s.api }
 // Close releases signing replay ownership. Call it after HTTP handlers drain;
 // the database remains owned by the caller.
 func (s *Server) Close() error {
+	if s.stopFederationPollBridge != nil {
+		s.stopFederationPollBridge()
+	}
 	if s.cfg.FederationSigning != nil {
 		return s.cfg.FederationSigning.Close()
 	}
@@ -806,7 +824,7 @@ func registerLinks(humaAPI huma.API, cfg ServerConfig) {
 	registerLinksHandlers(humaAPI, cfg)
 }
 
-// registerLabels registers POST/DELETE /labels and GET /labels (counts) routes.
+// registerLabels registers POST/PATCH/DELETE /labels and GET /labels (counts) routes.
 func registerLabels(humaAPI huma.API, cfg ServerConfig) {
 	registerLabelsHandlers(humaAPI, cfg)
 }

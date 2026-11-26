@@ -3,6 +3,7 @@ package pgstore
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -15,10 +16,16 @@ func validateRelayLinkEndpointsInProject(
 	projectID int64,
 	event db.RemoteEvent,
 ) error {
-	if !db.FederationEventAffectsLinks(event.Type) {
+	if !db.FederationEventAffectsLinks(event.Type) || event.Type == "issue.unlinked" {
 		return nil
 	}
 	payload := db.PayloadMap(event.Payload)
+	if event.Type == "issue.links_changed" {
+		event.RelatedIssueUID = nil
+		for _, key := range []string{"parent_removed_uid", "blocks_removed_uids", "blocked_by_removed_uids", "related_removed_uids"} {
+			delete(payload, key)
+		}
+	}
 	primaryUID := db.EventIssueUID(event.IssueUID)
 	refs, err := payloadReferencedIssueUIDs(event, payload)
 	if err != nil {
@@ -29,18 +36,52 @@ func validateRelayLinkEndpointsInProject(
 			continue
 		}
 		var endpointProjectID int64
-		err := tx.QueryRowContext(ctx, `SELECT project_id FROM issues WHERE uid=$1`, issueUID).Scan(&endpointProjectID)
+		var archived bool
+		err := tx.QueryRowContext(ctx, `SELECT i.project_id, p.deleted_at IS NOT NULL FROM issues i JOIN projects p ON p.id=i.project_id WHERE i.uid=$1`, issueUID).Scan(&endpointProjectID, &archived)
 		if err == sql.ErrNoRows {
 			continue // Same-project peers may arrive later in the relay stream.
 		}
 		if err != nil {
 			return mapSQLError(err, nil)
 		}
-		if endpointProjectID != projectID {
+		if endpointProjectID == projectID {
+			continue
+		}
+		allowed, err := relayCrossProjectEndpointAllowed(ctx, tx, projectID, endpointProjectID, archived, event)
+		if err != nil {
+			return err
+		}
+		if !allowed {
 			return fmt.Errorf("%w: relay link endpoint %s belongs to another project", db.ErrFederationIngestValidation, issueUID)
 		}
 	}
 	return nil
+}
+
+// relayCrossProjectEndpointAllowed accepts a link endpoint in another project
+// only for a root-authored event: an archived endpoint project is skipped, and
+// a live one must share the event project's relay audience.
+func relayCrossProjectEndpointAllowed(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID, endpointProjectID int64,
+	archived bool,
+	event db.RemoteEvent,
+) (bool, error) {
+	pin, err := rootPinTx(ctx, tx, event.ProjectUID, "")
+	if errors.Is(err, db.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if event.OriginInstanceUID != pin.AuthorityUID {
+		return false, nil
+	}
+	if archived {
+		return true, nil
+	}
+	return relaySharedProjectsTx(ctx, tx, projectID, endpointProjectID, false)
 }
 
 // relayOriginClassifier decides from durable per-event provenance whether a
@@ -133,7 +174,7 @@ func scanRelayClassifierKeys(rows *sql.Rows, keys map[string]struct{}, columns i
 // filterRelayCrossProjectLinkEvents keeps deferred relay link additions from
 // resolving against issues in another local project during a later group
 // materialization. Only the crossing additions are removed; a composite
-// event keeps its same-project effects and every removal is applied.
+// event keeps its same-project effects and root-authored removals.
 func filterRelayCrossProjectLinkEvents(
 	ctx context.Context,
 	tx *sql.Tx,
@@ -150,47 +191,114 @@ func filterRelayCrossProjectLinkEvents(
 	if !slices.ContainsFunc(events, classifier.relaySourced) {
 		return events, nil
 	}
-	placeholders, args := postgresIDPlaceholders(projectIDs, 1)
-	issueRows, err := tx.QueryContext(ctx, fmt.Sprintf(`
-		SELECT i.uid, p.uid
-		  FROM issues i JOIN projects p ON p.id=i.project_id
-		 WHERE p.id IN (%s)`, placeholders), args...)
+	issueProjects, err := relayLinkEndpointProjects(ctx, tx, events)
 	if err != nil {
-		return nil, mapSQLError(err, nil)
+		return nil, err
 	}
-	issueProjects := map[string]string{}
-	for issueRows.Next() {
-		var issueUID, projectUID string
-		if err := issueRows.Scan(&issueUID, &projectUID); err != nil {
-			_ = issueRows.Close()
-			return nil, mapSQLError(err, nil)
-		}
-		issueProjects[issueUID] = projectUID
-	}
-	if err := issueRows.Err(); err != nil {
-		_ = issueRows.Close()
-		return nil, mapSQLError(err, nil)
-	}
-	if err := issueRows.Close(); err != nil {
-		return nil, mapSQLError(err, nil)
-	}
+
 	filtered := make([]db.FoldEvent, 0, len(events))
 	for _, event := range events {
 		if !classifier.relaySourced(event) {
 			filtered = append(filtered, event)
 			continue
 		}
-		crossProject := func(peerUID string) bool {
-			projectUID, ok := issueProjects[peerUID]
-			return ok && projectUID != event.ProjectUID
+		pin, err := rootPinTx(ctx, tx, event.ProjectUID, "")
+		if err != nil && !errors.Is(err, db.ErrNotFound) {
+			return nil, err
 		}
-		stripped, keep, err := db.StripCrossProjectLinkAdditions(event, crossProject)
+		rootOrigin := err == nil && pin.AuthorityUID == event.OriginInstanceUID
+		var lookupErr error
+		shared := map[string]bool{}
+		crosses := func(uid string) bool {
+			if lookupErr != nil {
+				return true
+			}
+			peer := issueProjects[uid]
+			if peer == "" || peer == event.ProjectUID {
+				return false
+			}
+			if !rootOrigin {
+				return true
+			}
+			allowed, ok := shared[peer]
+			if !ok {
+				allowed, lookupErr = relayFoldPeerAllowed(ctx, tx, event.ProjectUID, peer)
+				shared[peer] = allowed
+			}
+			return !allowed
+		}
+		stripped, keep, err := db.StripCrossProjectLinkAdditions(event, crosses)
 		if err != nil {
 			return nil, err
+		}
+		if lookupErr != nil {
+			return nil, lookupErr
 		}
 		if keep {
 			filtered = append(filtered, stripped)
 		}
 	}
 	return filtered, nil
+}
+
+// relayFoldPeerAllowed applies the admission rule of
+// relayCrossProjectEndpointAllowed to a root-authored link at fold time: a link
+// with an archived endpoint project keeps its row, which readers hide until the
+// project is restored, and two live projects must share the relay audience.
+func relayFoldPeerAllowed(ctx context.Context, tx *sql.Tx, sourceUID, peerUID string) (bool, error) {
+	var sourceID, peerID int64
+	var archived bool
+	err := tx.QueryRowContext(ctx, `SELECT s.id, p.id, s.deleted_at IS NOT NULL OR p.deleted_at IS NOT NULL FROM projects s, projects p WHERE s.uid=$1 AND p.uid=$2`, sourceUID, peerUID).Scan(&sourceID, &peerID, &archived)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil || archived {
+		return archived, err
+	}
+	return relaySharedProjectsTx(ctx, tx, sourceID, peerID, false)
+}
+
+// relayLinkEndpointProjects resolves only issue UIDs referenced by this fold.
+func relayLinkEndpointProjects(ctx context.Context, tx *sql.Tx, events []db.FoldEvent) (map[string]string, error) {
+	refs := map[string]struct{}{}
+	for _, event := range events {
+		if event.IssueUID != "" {
+			refs[event.IssueUID] = struct{}{}
+		}
+		var related *string
+		if event.RelatedIssueUID != "" {
+			related = &event.RelatedIssueUID
+		}
+		remote := db.RemoteEvent{EventUID: event.UID, Type: event.Type, RelatedIssueUID: related, Payload: event.Payload}
+		peers, err := payloadReferencedIssueUIDs(remote, db.PayloadMap(event.Payload))
+		if err != nil {
+			return nil, err
+		}
+		for _, peer := range peers {
+			if peer != "" {
+				refs[peer] = struct{}{}
+			}
+		}
+	}
+	ids := make([]string, 0, len(refs))
+	for id := range refs {
+		ids = append(ids, id)
+	}
+	owners := make(map[string]string, len(ids))
+	rows, err := tx.QueryContext(ctx, `SELECT i.uid,p.uid FROM issues i JOIN projects p ON p.id=i.project_id WHERE i.uid = ANY($1::text[])`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var issue, project string
+		if err := rows.Scan(&issue, &project); err != nil {
+			return nil, err
+		}
+		owners[issue] = project
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return owners, nil
 }

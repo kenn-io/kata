@@ -1442,9 +1442,7 @@ func TestProjectAccessStreamRevocation(t *testing.T) {
 		t.Run(wakeup, func(t *testing.T) {
 			projectAccessBackends(t, func(t *testing.T, store db.Storage) {
 				f := newProjectAccessFixture(t, store)
-				// The store and server stay outside the bubble; the stream, its
-				// heartbeat ticker, and the request deadline use the fake clock.
-				synctest.Test(t, func(t *testing.T) {
+				run := func(t *testing.T) {
 					ctx, cancel := context.WithTimeout(t.Context(), 35*time.Second)
 					defer cancel()
 					req := httptest.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/api/v1/events/stream?project_id=%d", f.server.URL, f.private.ID), nil)
@@ -1492,7 +1490,13 @@ func TestProjectAccessStreamRevocation(t *testing.T) {
 					assert.Empty(t, string(raw), "no event, reset or heartbeat follows revocation")
 					assert.NoError(t, err)
 					assert.NoError(t, ctx.Err(), "revocation closes stream before the request deadline")
-				})
+				}
+				if _, ok := store.(*pgstore.Store); ok {
+					// PostgreSQL connections created in a bubble cannot be closed outside it.
+					run(t)
+				} else {
+					synctest.Test(t, run)
+				}
 			})
 		})
 	}
@@ -1727,7 +1731,7 @@ func TestProjectAccessRegisteredProjectOperations(t *testing.T) {
 					// Body-bearing federation routes authenticate enrollment before
 					// Huma dispatch or reading input. Other project routes retain 404.
 					switch op.OperationID {
-					case "ingestFederationProjectEvents", "acceptRelayDeliveries", "ackRelayDeliveries":
+					case "ingestFederationProjectEvents", "watchFederationProjectEvents", "acceptRelayDeliveries", "ackRelayDeliveries":
 						want = http.StatusForbidden
 					}
 					assert.Equal(t, want, status, string(body))
@@ -2069,6 +2073,37 @@ func TestProjectAccessCloseGuardConcealsPrivateChildren(t *testing.T) {
 		current, err := store.IssueByID(t.Context(), f.visible.ID)
 		require.NoError(t, err)
 		assert.Equal(t, "open", current.Status)
+	})
+}
+
+func TestProjectAccessCloseHintCountsPrivateChildren(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		last, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: f.public.ID, Title: "Last child", Author: "member"})
+		require.NoError(t, err)
+		_, err = store.CreateLink(t.Context(), db.CreateLinkParams{FromIssueID: last.ID, ToIssueID: f.visible.ID, Type: "parent", Author: "member"})
+		require.NoError(t, err)
+		path := fmt.Sprintf("/api/v1/projects/%d/issues/%s/actions/close", f.public.ID, last.ShortID)
+		body := map[string]any{"reason": "done", "message": "Completed the requested behavior with concrete review evidence.", "evidence": []map[string]string{{"type": "commit", "sha": "abcdef0123456789"}}, "retry_protocol": "close-v1"}
+		status, _, response := f.request(t, http.MethodPost, path, "nonmember", body, nil)
+		require.Equal(t, http.StatusOK, status, string(response))
+		assert.Contains(t, string(response), `"parent_ready"`)
+		assert.Contains(t, string(response), f.public.Name+"#"+f.visible.ShortID)
+	})
+}
+
+func TestProjectAccessCloseHintConcealsPrivateParent(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		_, err := store.CreateLink(t.Context(), db.CreateLinkParams{FromIssueID: f.visible.ID, ToIssueID: f.issue.ID, Type: "parent", Author: "member"})
+		require.NoError(t, err)
+		path := fmt.Sprintf("/api/v1/projects/%d/issues/%s/actions/close", f.public.ID, f.visible.ShortID)
+		body := map[string]any{"reason": "done", "message": "Completed the requested behavior with concrete review evidence.", "evidence": []map[string]string{{"type": "commit", "sha": "abcdef0123456789"}}}
+		status, _, response := f.request(t, http.MethodPost, path, "nonmember", body, nil)
+		require.Equal(t, http.StatusOK, status, string(response))
+		assert.NotContains(t, string(response), `"parent_ready"`)
+		assert.NotContains(t, string(response), f.issue.UID)
+		assert.NotContains(t, string(response), f.private.Name)
 	})
 }
 

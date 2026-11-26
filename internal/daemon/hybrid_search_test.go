@@ -155,6 +155,40 @@ func TestHybridSearchHubPreservesLexicalTitle(t *testing.T) {
 	require.Equal(t, "local title", result.Hits[0].Issue.Title)
 }
 
+func TestHybridSearchHubLexicalRanking(t *testing.T) {
+	ctx := t.Context()
+	store := newReconcilerTestStore(t)
+	project, err := store.CreateProject(ctx, "shared")
+	require.NoError(t, err)
+	local, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "zebra local", Author: "tester"})
+	require.NoError(t, err)
+	stale, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "old title", Author: "tester"})
+	require.NoError(t, err)
+	hubCopy := stale
+	hubCopy.ID, hubCopy.ShortID, hubCopy.Title = 100, "hub-ref", "zebra hub title"
+	localHubCopy := local
+	localHubCopy.ID, localHubCopy.ShortID, localHubCopy.Title = 102, "hub-local", "zebra hub copy"
+	remote := db.Issue{ID: 101, UID: "01HZNQ7VFPK1XGD8R5MABXD4EX", ShortID: "remote", Title: "zebra remote"}
+	mode := "lexical"
+	params := hybridParams{ProjectID: project.ID, Query: "zebra", Limit: 10, Requested: "auto", HubMode: &mode, Hub: func(context.Context, hybridParams, int) ([]api.FederationSearchHit, bool, error) {
+		return []api.FederationSearchHit{{Issue: hubCopy, Score: 0.8}, {Issue: remote, Score: 0.7}, {Issue: localHubCopy, Score: 0.6}}, false, nil
+	}}
+	result, err := hybridSearch(ctx, store, nil, nil, params)
+	require.NoError(t, err)
+	require.Equal(t, modeLexical, result.Mode)
+	require.Len(t, result.Hits, 3)
+	require.Equal(t, local.UID, result.Hits[0].Issue.UID)
+	require.Equal(t, local.Title, result.Hits[0].Issue.Title)
+	require.NotEqual(t, 0.6, result.Hits[0].Score)
+	require.Equal(t, stale.UID, result.Hits[1].Issue.UID)
+	require.Equal(t, stale.ID, result.Hits[1].Issue.ID)
+	require.Equal(t, stale.ShortID, result.Hits[1].Issue.ShortID)
+	require.Equal(t, "zebra hub title", result.Hits[1].Issue.Title)
+	require.Equal(t, 0.8, result.Hits[1].Score)
+	require.Equal(t, remote.UID, result.Hits[2].Issue.UID)
+	require.Equal(t, 0.7, result.Hits[2].Score)
+}
+
 func TestHybridSearchLexicalWhenUnconfigured(t *testing.T) {
 	ctx := t.Context()
 	store := newReconcilerTestStore(t)
@@ -1035,7 +1069,7 @@ func TestVectorLegLabelFilterRetriesPastStaleInitialSQLiteWindow(t *testing.T) {
 	} else if !changed {
 		t.Fatal("fixture edit must advance the stale issue's content revision")
 	}
-	if _, err := idx.RefreshMirror(ctx, store); err != nil {
+	if _, err := idx.RefreshMirror(ctx, store, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1395,7 +1429,7 @@ func TestSearchLabelCeilingProbeSurvivesStaleSQLiteVector(t *testing.T) {
 	} else if !changed {
 		t.Fatal("fixture edit must advance the stale issue's content revision")
 	}
-	if _, err := idx.RefreshMirror(ctx, store); err != nil {
+	if _, err := idx.RefreshMirror(ctx, store, nil); err != nil {
 		t.Fatal(err)
 	}
 

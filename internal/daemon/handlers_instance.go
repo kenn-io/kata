@@ -41,7 +41,11 @@ func registerInstanceHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out.Body.ProvenanceProtocolVersion = 1
 		out.Body.EmbeddingArtifactProtocolVersion = 1
 		out.Body.WebUIContractVersion = api.UISnapshotContractVersion
-		out.Body.WebUICapabilities = effectiveUIPolicy(ctx, cfg).Capabilities
+		policy, err := loadUIPolicy(ctx, cfg)
+		if err != nil {
+			return nil, internalAPIError(err)
+		}
+		out.Body.WebUICapabilities = policy.Capabilities
 		out.Body.IssueSubtreeTokens = true
 		out.Body.IssueStatusSync = true
 		out.Body.FederationSigningRequired = cfg.FederationSigningRequired
@@ -65,7 +69,7 @@ func instanceAuthInfo(ctx context.Context, cfg ServerConfig) api.AuthInfoOut {
 	}
 	if principal.Scope != nil {
 		out.Scope = tokenScopeOut(principal.Scope)
-		out.AllowedActions = issueScopedAllowedActions(effectiveUIPolicy(ctx, cfg).Capabilities.Writable)
+		out.AllowedActions = issueScopedAllowedActions(effectiveUIPolicy(ctx, cfg, false).Capabilities.Writable)
 	}
 	out.CloseRequiresEvidence = closeRequiresEvidence(ctx)
 	out.TokenAuditRead = tokenAuditReadAllowed(ctx)

@@ -2,6 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -109,10 +113,10 @@ func TestQuickstartExplainsTeammateFlow(t *testing.T) {
 		"KATA_TEAMMATE=teammate-1",
 		"KATA_INBOX_USER=coordinator/teammate-1",
 		"metadata.teammate",
-		"kata comment abc4 --body \"Checked the retry path\"",
+		"kata comment abc4 --body-stdin <<-'EOF'\n\tThe retry path reuses the original export ID.\n\tEOF\n",
 		"kata create \"Check retry behavior\" --parent abc4 --idempotency-key retry-teammate-1",
-		"kata --teammate=teammate-2 comment abc4 --body \"Independent review\"",
-		"kata --teammate='' comment abc4 --body \"Coordinator summary\"",
+		"kata --teammate=teammate-2 comment abc4 --body-stdin <<-'EOF'\n\tA retry after a timeout creates a second export.\n\tEOF\n",
+		"kata --teammate='' comment abc4 --body-stdin <<-'EOF'\n\tBoth retry findings trace to the missing export ID check.\n\tEOF\n",
 		"kata notify abc4 --to coordinator --message \"Please decide\"",
 		"kata notify abc4 --to coordinator/teammate-1",
 		"kata inbox --for coordinator/teammate-1",
@@ -120,6 +124,7 @@ func TestQuickstartExplainsTeammateFlow(t *testing.T) {
 	} {
 		require.Contains(t, out, text)
 	}
+	require.NotContains(t, out, "comment abc4 --body \"")
 }
 
 func TestQuickstart_IncludesScheduleDeadlineAndSomedayCommands(t *testing.T) {
@@ -262,5 +267,131 @@ func TestQuickstartLocalProfileRecoveryGuidance(t *testing.T) {
 		assert.Contains(t, out, "kata daemon diagnose")
 		assert.Contains(t, out, "kata daemon recover")
 		assert.Contains(t, out, "Never remove a workspace override to repair a stopped daemon")
+	}
+}
+
+// Product contract: every CLI guide says comments carry findings,
+// keeps live status in work.attention_msg, corrects a comment by editing it,
+// treats an open, unmerged PR as unfinished, and passes comment text through a
+// quoted heredoc whose terminator ends stdin.
+func TestGuidesSayCommentsCarryFindings(t *testing.T) {
+	guides := map[string]string{}
+	for _, format := range []string{"human", "agent", "contract"} {
+		resetFlags(t)
+		out := executeRoot(t, newRootCmd(), "quickstart", "--format", format)
+		guides["quickstart "+format] = string(out)
+	}
+	for name, text := range guides {
+		assert.Contains(t, text, "kata meta set <ref> work.attention_msg \"<what remains>\"", name)
+		assert.Contains(t, text, "leave the issue open, update work.attention and work.attention_msg", name)
+		assert.Contains(t, text, "kata label add <ref> needs-review", name)
+		assert.Contains(t, text, "kata comment edit", name)
+		assert.Contains(t, text, "kata meta set <ref> work.pr_url <url>", name)
+		assert.Contains(t, text, "--pr <url>", name)
+		assert.Contains(t, text, "not merged", name)
+		if name != "quickstart contract" {
+			assertClosedBodyStdinHeredoc(t, name, text)
+		}
+	}
+	t.Run("contract heredoc", func(t *testing.T) {
+		bash, err := exec.LookPath("bash")
+		if err != nil {
+			t.Skip("bash unavailable")
+		}
+		output := guides["quickstart contract"]
+		start := strings.Index(output, "kata comment <ref> --body-stdin --agent <<-'EOF'\n")
+		require.NotEqual(t, -1, start)
+		example := output[start:]
+		end := strings.Index(example, "\n\tEOF\n")
+		require.NotEqual(t, -1, end)
+		example = example[:end+len("\n\tEOF\n")]
+		example = strings.Replace(example, "<ref>", "abc4", 1)
+		example = strings.Replace(example, "<finding>", "The `printf changed` result costs $HOME.", 1)
+		script := "kata() { cat; }\n" + example + "printf 'next command\\n'\n"
+		cmd := exec.CommandContext(t.Context(), bash, "-c", script) //nolint:gosec // The script contains a controlled example and fixture text.
+		got, err := cmd.CombinedOutput()
+		require.NoError(t, err, string(got))
+		assert.Equal(t, "The `printf changed` result costs $HOME.\nnext command\n", string(got))
+	})
+	// The retry after a failed mutation comment, and the edit example, carry
+	// comment text, so they use the quoted heredoc too.
+	assert.Contains(t, guides["quickstart human"], "retry with a quoted heredoc:\n\n   kata comment <ref> --body-stdin <<-'EOF'\n")
+	assert.NotContains(t, guides["quickstart human"], "--body ...")
+	resetFlags(t)
+	commentHelp := string(executeRoot(t, newRootCmd(), "comment", "--help"))
+	assert.Contains(t, commentHelp, "findings a later reader needs")
+	assert.Contains(t, commentHelp, "work.attention_msg")
+	assert.Contains(t, commentHelp, "kata comment edit")
+	assert.Contains(t, commentHelp, "unmerged PR is unfinished")
+	assert.Contains(t, commentHelp, "needs-review")
+	assertClosedBodyStdinHeredoc(t, "comment help", commentHelp)
+	guides["comment help"] = commentHelp
+	resetFlags(t)
+	editHelp := string(executeRoot(t, newRootCmd(), "comment", "edit", "--help"))
+	assert.Contains(t, editHelp, "kata comment edit abc4 <comment-uid> --body-stdin --agent <<-'EOF'")
+	assert.NotContains(t, editHelp, "-m \"")
+	assertClosedBodyStdinHeredoc(t, "comment edit help", editHelp)
+	for _, args := range [][]string{{"--help"}, {"meta", "--help"}, {"close", "--help"}, {"label", "add", "--help"}, {"claim", "--help"}, {"assign", "--help"}} {
+		resetFlags(t)
+		guides[strings.Join(args, " ")] = string(executeRoot(t, newRootCmd(), args...))
+	}
+	assert.Contains(t, guides["meta --help"], "work.pr_url")
+	// The guides teach timed claims and renewal without --if-unowned.
+	for _, name := range []string{"quickstart human", "quickstart agent", "quickstart contract", "--help", "claim --help", "assign --help"} {
+		assertClaimsCarryTTL(t, name, guides[name])
+		if name != "assign --help" {
+			assert.Contains(t, guides[name], "without --if-unowned", name)
+		}
+	}
+	for _, path := range []string{"docs/get-started/quickstart.md", "docs/workflows/agents.md", "docs/operations/agent-orchestration.md"} {
+		raw, err := os.ReadFile(filepath.Join("..", "..", path)) //nolint:gosec // G304: paths are fixed documentation files.
+		require.NoError(t, err)
+		assertClaimsCarryTTL(t, path, string(raw))
+		assert.Contains(t, string(raw), "work.pr_url", path)
+		assert.Contains(t, string(raw), "--pr <url>", path)
+	}
+	assert.NotContains(t, guides["claim --help"], `--comment "starting on the Safari path"`)
+	for name, text := range guides {
+		assert.NotRegexp(t, `\bprogress\b`, text, name)
+		assert.NotContains(t, text, "needs-review --comment", name)
+	}
+}
+
+// The <<- operator strips tabs, but not spaces, from a heredoc terminator.
+func assertClosedBodyStdinHeredoc(t *testing.T, name, text string) {
+	t.Helper()
+	open, found := false, 0
+	for line := range strings.SplitSeq(text, "\n") {
+		if strings.Contains(line, "--body-stdin") && strings.HasSuffix(line, "<<-'EOF'") {
+			if open {
+				t.Errorf("%s: heredoc opened before the previous one closed", name)
+			}
+			open = true
+			found++
+		} else if open && strings.TrimLeft(line, "\t") == "EOF" {
+			open = false
+		}
+	}
+	if open {
+		t.Errorf("%s: heredoc never closed by an EOF line with only tabs before it", name)
+	}
+	if found == 0 {
+		t.Errorf("%s: no --body-stdin <<-'EOF' example", name)
+	}
+}
+
+var claimCommand = regexp.MustCompile("kata claim [<\\w][^\\n`<#\"]*")
+
+// assertClaimsCarryTTL checks that each matched claim command names --ttl.
+func assertClaimsCarryTTL(t *testing.T, name, text string) {
+	t.Helper()
+	matches := claimCommand.FindAllString(text, -1)
+	assert.NotEmpty(t, matches, name)
+	for _, match := range matches {
+		command := strings.TrimSpace(match)
+		if strings.HasSuffix(command, "[flags]") {
+			continue // the cobra usage line is a synopsis, not a command
+		}
+		assert.Contains(t, command, "--ttl", "%s: %q", name, command)
 	}
 }

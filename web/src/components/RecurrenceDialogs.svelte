@@ -15,8 +15,15 @@
     disabled?: boolean | undefined
     draftFenceGeneration?: number | undefined
     onCreate: (projectID: number, input: KataCreateRecurrenceInput) => Promise<void>
-    onPatch: (id: number, input: KataPatchRecurrenceInput, etag: string) => Promise<void>
-    onDelete: (recurrence: KataRecurrence) => Promise<boolean>
+    // Edit and stop are offered only where a caller passes these.
+    onPatch?:
+      | ((
+          recurrence: KataRecurrence,
+          input: KataPatchRecurrenceInput,
+          etag: string,
+        ) => Promise<void>)
+      | undefined
+    onDelete?: ((recurrence: KataRecurrence) => Promise<void>) | undefined
   }
 
   let {
@@ -35,11 +42,18 @@
     | { open: true; mode: 'create'; recurrence: null; etag: '' }
     | { open: true; mode: 'edit'; recurrence: KataRecurrence; etag: string }
   >({ open: false, mode: 'create', recurrence: null, etag: '' })
-  let recurrenceDelete = $state<{ open: boolean; recurrence: KataRecurrence | null }>({
+  // `changed` marks a rule that moved to a newer revision while its stop
+  // dialog was open; Stop stays off until the user acknowledges the new rule.
+  let recurrenceDelete = $state<{
+    open: boolean
+    recurrence: KataRecurrence | null
+    changed?: boolean
+  }>({
     open: false,
     recurrence: null,
   })
   let deletingRecurrence = $state(false)
+  let deleteError = $state('')
   let lastDraftFenceGeneration = $state<number | null>(null)
 
   $effect(() => {
@@ -65,7 +79,7 @@
   }
 
   export function openEditRecurrence(recurrence: KataRecurrence): void {
-    if (disabled) return
+    if (disabled || !onPatch) return
     recurrenceDialog = {
       open: true,
       mode: 'edit',
@@ -75,7 +89,8 @@
   }
 
   export function openDeleteRecurrence(recurrence: KataRecurrence): void {
-    if (disabled) return
+    if (disabled || !onDelete) return
+    deleteError = ''
     recurrenceDelete = { open: true, recurrence }
   }
 
@@ -95,7 +110,8 @@
       return
     }
     if (fresh.revision !== target.revision) {
-      recurrenceDelete = { open: true, recurrence: fresh }
+      recurrenceDelete = { open: true, recurrence: fresh, changed: true }
+      deleteError = changedRuleMessage
     }
   }
 
@@ -108,14 +124,30 @@
     recurrenceDelete = { open: false, recurrence: null }
   }
 
+  function acknowledgeChangedRecurrence(): void {
+    recurrenceDelete = { ...recurrenceDelete, changed: false }
+    deleteError = ''
+  }
+
+  const changedRuleMessage =
+    'This rule changed elsewhere. Review the current rule before stopping it.'
+
   async function confirmDeleteRecurrence(): Promise<void> {
     const recurrence = recurrenceDelete.recurrence
-    if (disabled || !recurrence || deletingRecurrence) return
+    if (disabled || !onDelete || !recurrence || recurrenceDelete.changed || deletingRecurrence)
+      return
     deletingRecurrence = true
+    deleteError = ''
     try {
-      const ok = await onDelete(recurrence)
-      if (ok) {
-        recurrenceDelete = { open: false, recurrence: null }
+      await onDelete(recurrence)
+      recurrenceDelete = { open: false, recurrence: null }
+    } catch (error) {
+      if (error && typeof error === 'object' && 'status' in error && error.status === 412) {
+        deleteError = changedRuleMessage
+        if (recurrenceDelete.recurrence?.uid === recurrence.uid)
+          recurrenceDelete = { ...recurrenceDelete, changed: true }
+      } else {
+        deleteError = error instanceof Error ? error.message : 'Could not stop repeating.'
       }
     } finally {
       deletingRecurrence = false
@@ -123,21 +155,28 @@
   }
 </script>
 
-{#if selectedIssue && recurrenceDialog.open}
+{#if recurrenceDialog.open && (selectedIssue || recurrenceDialog.mode === 'edit')}
   <RecurrenceEditorDialog
     open={recurrenceDialog.open}
-    mode={recurrenceDialog.mode === 'create'
+    mode={recurrenceDialog.mode === 'create' && selectedIssue
       ? {
           kind: 'create',
           projectID: selectedIssue.issue.project_id,
           initialIssueRef: selectedIssue.issue.short_id,
+          prefill: {
+            title: selectedIssue.issue.title,
+            body: selectedIssue.issue.body,
+            owner: selectedIssue.issue.owner,
+            priority: selectedIssue.issue.priority,
+            labels: selectedIssue.labels.map((label) => label.label),
+          },
         }
-      : { kind: 'edit', recurrence: recurrenceDialog.recurrence, etag: recurrenceDialog.etag }}
+      : { kind: 'edit', recurrence: recurrenceDialog.recurrence!, etag: recurrenceDialog.etag }}
     {actor}
     {disabled}
     onClose={closeRecurrenceDialog}
     {onCreate}
-    {onPatch}
+    onPatch={onPatch!}
   />
 {/if}
 
@@ -145,7 +184,9 @@
   <RecurrenceDeleteDialog
     open={recurrenceDelete.open}
     recurrence={recurrenceDelete.recurrence}
-    {disabled}
+    error={deleteError}
+    disabled={disabled || deletingRecurrence || recurrenceDelete.changed}
+    onReviewChange={recurrenceDelete.changed ? acknowledgeChangedRecurrence : undefined}
     onConfirm={() => {
       void confirmDeleteRecurrence()
     }}

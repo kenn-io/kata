@@ -108,9 +108,14 @@ type EnsureFederationReplicaParams struct {
 	ProjectResetSink           func(projectID, cursor int64)
 	PushEnabled, AdoptExisting bool
 	AttachEmpty                bool
-	Relay                      *api.RelayHandshake
-	RelayLocalActor            string
-	RelayServeDownstream       bool
+	// ReplacesBoundActor names the bound actor an approval for a changed
+	// intent replaces. Only that exact actor moves to Credential.Actor, and
+	// only once no work tied to it remains open. Every other caller leaves it
+	// empty, so a changed actor still conflicts.
+	ReplacesBoundActor   string
+	Relay                *api.RelayHandshake
+	RelayLocalActor      string
+	RelayServeDownstream bool
 }
 
 // FederationReplicaCredentialRekeySource identifies the standalone credential
@@ -268,15 +273,15 @@ func PrepareFederationReplicaLeave(
 			"read federation replica project before leave preparation: %w", err,
 		)
 	}
-	return prepareFederationReplicaLeave(ctx, store, managed, project, preparationID)
+	return prepareFederationReplicaLeave(ctx, store, managed, project, preparationID, true)
 }
 
-func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, managed config.FederationManagedCredentialStore, project db.Project, preparationID string) (PrepareFederationReplicaLeaveResult, error) {
+func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, managed config.FederationManagedCredentialStore, project db.Project, preparationID string, detach bool) (PrepareFederationReplicaLeaveResult, error) {
 	// Refuse known source credential dependencies before marking leave pending
 	// or allowing the caller to revoke that credential at the hub.
 	if project.ID > 0 {
 		if lifecycle, ok := store.(db.RelayLifecycleStore); ok {
-			if err := lifecycle.ValidateRelayLifecycle(ctx, project.ID); err != nil {
+			if err := validateFederationLeaveDisposition(ctx, lifecycle, project.ID, detach); err != nil {
 				return PrepareFederationReplicaLeaveResult{}, err
 			}
 		}
@@ -346,7 +351,7 @@ func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, manage
 				}
 				nativeLeaveRecorded = true
 			}
-			if err := fencer.FenceRelayDisconnect(ctx, project.ID); err != nil {
+			if err := fenceFederationLeaveDisposition(ctx, fencer, project.ID, detach); err != nil {
 				ensureFederationReplicaMu.Unlock()
 				if nativeLeaveRecorded && nativeLeaveAddedPreparation {
 					if restoreErr := rollbackFailedNativeLeavePreparation(
@@ -416,6 +421,15 @@ func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, manage
 			if found && match.Credential.Provider != nil && project.ID != 0 {
 				if err := stopProviderFederationTransport(ctx, store, project.ID); err != nil {
 					return fail(err)
+				}
+				if detach {
+					fencer, ok := store.(db.RelayDisconnectFenceStore)
+					if !ok {
+						return fail(fmt.Errorf("federation leave fence is unavailable"))
+					}
+					if err := fencer.FenceFederationLeave(ctx, project.ID); err != nil {
+						return fail(err)
+					}
 				}
 			}
 			return PrepareFederationReplicaLeaveResult{
@@ -1141,6 +1155,12 @@ func ensureFederationReplicaState(
 	credentials config.FederationCredentialStore,
 	p EnsureFederationReplicaParams,
 ) (EnsureFederationReplicaResult, error) {
+	// Taken before the replica mutex, the same order as rebind.
+	finishDrain, err := drainSyncForAccessChange(ctx, store, p)
+	if err != nil {
+		return EnsureFederationReplicaResult{}, err
+	}
+	defer finishDrain()
 	ensureFederationReplicaMu.Lock()
 	defer ensureFederationReplicaMu.Unlock()
 
@@ -1183,6 +1203,9 @@ func ensureFederationReplicaState(
 		}
 	}
 
+	if err := replaceProviderBoundActor(ctx, store, p); err != nil {
+		return EnsureFederationReplicaResult{}, err
+	}
 	result, err := ensureReplicaBindingOrAdopt(ctx, store, p)
 	if p.ProjectResetSink != nil {
 		for _, projectID := range result.ResetProjectIDs {
@@ -1290,6 +1313,82 @@ func ensureFederationReplicaState(
 		federationReplicaOperationKey(store, p.ProjectName, p.Credential),
 	)
 	return result, nil
+}
+
+// drainSyncForAccessChange waits for running syncs and holds new ones while
+// an attached replica's bound actor moves or push turns on or off. A sync
+// turn reads the binding once; one that started read-only resets the project
+// without checking for local changes, which would delete changes made after
+// writes turn on. Everything after the drain rereads the binding. A relay
+// binding drains later, after its binding is ensured.
+func drainSyncForAccessChange(ctx context.Context, store db.Storage, p EnsureFederationReplicaParams) (func(), error) {
+	if p.Relay != nil {
+		return func() {}, nil
+	}
+	project, err := store.ProjectByName(ctx, p.ProjectName)
+	if errors.Is(err, db.ErrNotFound) {
+		return func() {}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	binding, err := store.FederationBindingByProject(ctx, project.ID)
+	if errors.Is(err, db.ErrNotFound) {
+		return func() {}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	// A binding for another hub project conflicts later; it has no sync to
+	// drain for this one.
+	if binding.HubProjectUID != p.HubProjectUID ||
+		binding.PushEnabled == p.PushEnabled && strings.TrimSpace(binding.Actor) == strings.TrimSpace(p.Credential.Actor) {
+		return func() {}, nil
+	}
+	return federationcoord.BeginRebind(ctx, federationcoord.Key(store.InstanceUID(), project.ID), store, project.ID)
+}
+
+// replaceProviderBoundActor moves an attached replica to the actor of the
+// approval that replaced its earlier one. The binding must still name the
+// replaced actor and the same hub project.
+func replaceProviderBoundActor(ctx context.Context, store db.Storage, p EnsureFederationReplicaParams) error {
+	from, to := strings.TrimSpace(p.ReplacesBoundActor), strings.TrimSpace(p.Credential.Actor)
+	if from == "" || from == to {
+		return nil
+	}
+	project, err := store.ProjectByUID(ctx, p.HubProjectUID)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return ErrFederationReplicaBindingConflict
+		}
+		return err
+	}
+	binding, err := store.FederationBindingByProject(ctx, project.ID)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return ErrFederationReplicaBindingConflict
+		}
+		return err
+	}
+	if binding.HubProjectUID != p.HubProjectUID || binding.HubProjectID != p.HubProjectID {
+		return ErrFederationReplicaBindingConflict
+	}
+	_, err = store.ReplaceFederationBoundActorWhenSettled(ctx, project.ID, store.InstanceUID(), from, to)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, db.ErrFederationBoundActorChanged):
+		return ErrFederationReplicaBindingConflict
+	case federationReplicaWorkOpen(err):
+		return errors.Join(ErrFederationProviderIntentChangeBlocked, err)
+	default:
+		return err
+	}
+}
+
+func federationReplicaWorkOpen(err error) bool {
+	return errors.Is(err, db.ErrFederationPushPending) || errors.Is(err, db.ErrFederationClaimsHeld) ||
+		errors.Is(err, db.ErrFederationRunsActive) || errors.Is(err, db.ErrFederationResetBlockedByPendingPush)
 }
 
 func revalidateManagedReservation(
@@ -2188,4 +2287,11 @@ func replicaBindingConflictDetails(
 
 func federationReplicaError(kind error, message, hint string) *FederationReplicaError {
 	return &FederationReplicaError{kind: kind, message: message, hint: hint}
+}
+
+func fenceFederationLeaveDisposition(ctx context.Context, fencer db.RelayDisconnectFenceStore, projectID int64, detach bool) error {
+	if detach {
+		return fencer.FenceFederationLeave(ctx, projectID)
+	}
+	return fencer.FenceRelayDisconnect(ctx, projectID)
 }

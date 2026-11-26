@@ -81,61 +81,37 @@ test('issue list columns stay in place when clearing a search makes the list scr
   )
 })
 
-test('issue actions stay in place when selecting a longer issue makes the detail scroll', async ({
-  page,
-  kata,
-}) => {
-  await page.setViewportSize({ width: 1000, height: 1100 })
-  const credentials = await kata.launch(page)
-  const short = await kata.seedIssue(page, credentials, {
-    title: 'Scrollbar short detail',
-    body: 'Short body',
-  })
-  await kata.seedIssue(page, credentials, {
-    title: 'Scrollbar long detail',
-    body: Array.from({ length: 200 }, (_, index) => `Paragraph ${index}.`).join('\n\n'),
-  })
-  await page.goto(`${kata.origin}/kata?issue=${short.uid}`)
-  await expect(page.getByRole('heading', { name: 'Scrollbar short detail' })).toBeVisible()
+for (const viewport of [
+  { width: 1000, height: 1100 },
+  { width: 1400, height: 1300 },
+]) {
+  test(`issue actions stay in place when the detail scrolls at ${viewport.width}x${viewport.height}`, async ({
+    page,
+    kata,
+  }) => {
+    await page.setViewportSize(viewport)
+    const credentials = await kata.launch(page)
+    const short = await kata.seedIssue(page, credentials, {
+      title: 'Scrollbar short detail',
+      body: 'Short body',
+    })
+    const long = await kata.seedIssue(page, credentials, {
+      title: 'Scrollbar long detail',
+      body: Array.from({ length: 200 }, (_, index) => `Paragraph ${index}.`).join('\n\n'),
+    })
+    await page.goto(`${kata.origin}/kata?issue=${short.uid}`)
+    await expect(page.getByRole('heading', { name: 'Scrollbar short detail' })).toBeVisible()
 
-  await expectNoShiftWhenScrollbarAppears(
-    page.locator('.shared-detail'),
-    page.getByRole('button', { name: 'Edit issue' }),
-    async () => {
-      await page.getByRole('button', { name: /Scrollbar long detail/ }).click()
-      await expect(page.getByRole('heading', { name: 'Scrollbar long detail' })).toBeVisible()
-    },
-  )
-})
-
-test('editor actions stay in place when selecting a longer issue makes the editor scroll', async ({
-  page,
-  kata,
-}) => {
-  await page.setViewportSize({ width: 1400, height: 1300 })
-  const credentials = await kata.launch(page)
-  const short = await kata.seedIssue(page, credentials, {
-    title: 'Scrollbar short editor',
-    body: 'Short body',
+    await expectNoShiftWhenScrollbarAppears(
+      page.locator('.kata-detail'),
+      page.getByRole('button', { name: 'Edit title' }),
+      async () => {
+        await page.locator(`button.row[data-uid="${long.uid}"] .title-text`).click()
+        await expect(page.getByRole('heading', { name: 'Scrollbar long detail' })).toBeVisible()
+      },
+    )
   })
-  await kata.seedIssue(page, credentials, {
-    title: 'Scrollbar long editor',
-    body: Array.from({ length: 200 }, (_, index) => `Paragraph ${index}.`).join('\n\n'),
-  })
-  await page.goto(`${kata.origin}/kata?issue=${short.uid}`)
-  await page.getByRole('button', { name: 'Edit issue' }).click()
-
-  await expectNoShiftWhenScrollbarAppears(
-    page.locator('.kata-detail'),
-    page.getByRole('button', { name: 'More actions' }),
-    async () => {
-      await page.getByRole('button', { name: /Scrollbar long editor/ }).click()
-      await expect(page.getByRole('region', { name: 'Task detail' })).toContainText(
-        'Scrollbar long editor',
-      )
-    },
-  )
-})
+}
 
 test('credential controls stay in place when clearing a search makes the page scroll', async ({
   page,
@@ -154,7 +130,7 @@ test('credential controls stay in place when clearing a search makes the page sc
     route.fulfill({
       json: {
         tokens: Array.from({ length: 60 }, (_, index) => ({
-          id: `example-token-${index}`,
+          id: index,
           name: `example-name-${index}`,
           actor: 'user-a',
           state: 'live',
@@ -166,12 +142,12 @@ test('credential controls stay in place when clearing a search makes the page sc
   await page.goto(`${kata.origin}/kata?view=credentials`)
   const search = page.getByRole('searchbox', { name: 'Search credentials' })
   await search.fill('example-name-59')
-  const filler = page.getByRole('cell', { name: 'example-token-0', exact: true })
+  const filler = page.getByText('example-name-0', { exact: true })
   await expect(filler).toBeHidden()
 
   await expectNoShiftWhenScrollbarAppears(
-    page.locator('.credential-scene'),
-    page.getByRole('button', { name: 'Refresh' }),
+    page.locator('.settings-view > .kit-tabs'),
+    page.getByRole('button', { name: 'Refresh credentials' }),
     async () => {
       await search.fill('')
       await expect(filler).toBeVisible()
@@ -187,10 +163,13 @@ test('move picker counts stay in place when clearing its search makes the list s
   const issue = await kata.seedIssue(page, credentials, { title: 'Scrollbar move picker' })
   await addCatalogProjects(page)
   await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
-  await page.getByRole('button', { name: 'Edit issue' }).click()
-  await page.getByRole('button', { name: 'More actions' }).click()
-  await page.getByRole('menuitem', { name: 'Move to another project' }).click()
+  await page.getByRole('button', { name: 'Project: example-project', exact: true }).click()
   const search = page.getByRole('searchbox', { name: 'Find project' })
+  const picker = page.getByRole('dialog', { name: 'Move task' })
+  await expect(picker).toBeVisible()
+  const bounds = await picker.boundingBox()
+  expect(bounds).not.toBeNull()
+  expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(page.viewportSize()!.height)
   await search.fill('example-extra-39')
   const options = page.locator('.move-options')
   const filler = options.getByRole('button', { name: /example-extra-0/ })

@@ -7,6 +7,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"go.kenn.io/kata/internal/db"
@@ -1311,7 +1312,7 @@ func payloadDeferredLinkIssueUIDs(
 		if err := validateFederationLinkPeer(primaryIssueUID, peerUID); err != nil {
 			return nil, err
 		}
-		if err := validateFederationUnlinkStorageEndpoints(ev, payload, linkType, fromUID, toUID); err != nil {
+		if err := db.ValidateUnlinkStorageEndpoints(ev, payload, linkType, primaryIssueUID, fromUID, toUID); err != nil {
 			return nil, err
 		}
 		add(peerUID)
@@ -1381,45 +1382,6 @@ func payloadLinksChangedIssueUIDs(
 	return refs, nil
 }
 
-func validateFederationUnlinkStorageEndpoints(
-	ev db.RemoteEvent,
-	payload map[string]jsontext.Value,
-	linkType, fromUID, toUID string,
-) error {
-	if ev.Type != "issue.unlinked" {
-		return nil
-	}
-	rawFrom, fromPresent := payload["link_from_uid"]
-	rawTo, toPresent := payload["link_to_uid"]
-	if fromPresent != toPresent {
-		return fmt.Errorf("%w: issue.unlinked storage endpoints must be paired", db.ErrFederationIngestValidation)
-	}
-	if !fromPresent {
-		if linkType == "blocks" || linkType == "parent" {
-			return fmt.Errorf("%w: issue.unlinked missing directional storage endpoints",
-				db.ErrFederationIngestValidation)
-		}
-		return nil
-	}
-	linkFromUID, fromOK := db.StringValue(rawFrom)
-	linkToUID, toOK := db.StringValue(rawTo)
-	if !fromOK || !toOK {
-		return fmt.Errorf("%w: issue.unlinked storage endpoints must be strings",
-			db.ErrFederationIngestValidation)
-	}
-	if !katauid.Valid(linkFromUID) || !katauid.Valid(linkToUID) || linkFromUID == linkToUID {
-		return fmt.Errorf("%w: issue.unlinked has invalid storage endpoints",
-			db.ErrFederationIngestValidation)
-	}
-	matchesForward := linkFromUID == fromUID && linkToUID == toUID
-	matchesReverse := linkFromUID == toUID && linkToUID == fromUID
-	if !matchesForward && !matchesReverse {
-		return fmt.Errorf("%w: issue.unlinked storage endpoints disagree with payload endpoints",
-			db.ErrFederationIngestValidation)
-	}
-	return nil
-}
-
 func validateFederationLinkType(linkType string) error {
 	switch linkType {
 	case "parent", "blocks", "related":
@@ -1462,7 +1424,11 @@ type payloadLink struct {
 }
 
 func payloadLinks(ev db.RemoteEvent) ([]payloadLink, error) {
+	moved := ev.Type == "issue.moved"
 	ev = db.FederationMoveSnapshotEvent(ev)
+	if moved && len(ev.Payload) == 0 {
+		return nil, nil
+	}
 	var created struct {
 		Links []payloadLink `json:"links"`
 	}
@@ -1609,14 +1575,8 @@ func (d *Store) authorizeFederationMoveTx(ctx context.Context, tx *sql.Tx, p db.
 // affected issue's current owner. Duplicates already passed this acceptance
 // boundary and must not acquire new authority merely to acknowledge a retry.
 func (d *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.Tx, p db.FederationIngestParams, events []db.RemoteEvent, moveSnapshots *db.FederationMoveSnapshotValidator) error {
-	var parentRemovals map[string][]string
-	if p.AuthorizeReference != nil {
-		var err error
-		parentRemovals, err = db.DirectParentRemovals(ctx, tx, events)
-		if err != nil {
-			return err
-		}
-	}
+	// Report graph validation only after checking current project authority.
+	parentRemovals, err := db.DirectParentRemovals(ctx, tx, events, p.AuthorizeReference != nil)
 	staged := map[string]int64{}
 	type checkedProject struct {
 		id        int64
@@ -1657,15 +1617,18 @@ func (d *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.
 			}
 			refs = append(refs, replyIssues...)
 		}
-		peers, err := db.DirectLinkAdditionPeers(db.FoldEvent{Type: event.Type, UID: event.EventUID, IssueUID: primary, Payload: event.Payload})
+		peers, err := db.DirectLinkPeers(db.FoldEvent{Type: event.Type, UID: event.EventUID, IssueUID: db.EventIssueUID(event.IssueUID), Payload: event.Payload})
 		if err != nil {
 			return err
 		}
-		for _, previous := range parentRemovals[event.EventUID] {
-			refs = append(refs, previous)
-			delete(peers, previous)
+		explicitRefs := refs
+		if p.AuthorizeReference != nil {
+			for _, previous := range parentRemovals[event.EventUID] {
+				refs = append(refs, previous)
+				delete(peers, previous)
+			}
 		}
-		refs = append(refs, primary)
+		refs = append([]string{primary}, refs...)
 		for _, issueUID := range refs {
 			if issueUID == "" {
 				continue
@@ -1693,6 +1656,9 @@ func (d *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.
 			}
 			if err := d.authorizeFederationAffectedProjectTx(ctx, tx, p, current, project.UID, reference); err != nil {
 				if errors.Is(err, db.ErrFederationMoveSourceUnauthorized) {
+					if issueUID != primary && !slices.Contains(explicitRefs, issueUID) {
+						issueUID = ""
+					}
 					return &db.FederationProjectNotEnrolledError{IssueUID: issueUID, Err: err}
 				}
 				return err
@@ -1712,7 +1678,7 @@ func (d *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.
 			staged[primary] = to
 		}
 	}
-	return nil
+	return err
 }
 
 // A supplemental project uses the route grant only when that grant covers it.

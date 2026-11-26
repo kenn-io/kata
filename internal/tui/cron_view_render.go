@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mattn/go-runewidth"
+	"go.kenn.io/kata/internal/authorname"
 	"go.kenn.io/kata/pkg/client/generated"
 	"go.kenn.io/kit/tui/helplayout"
 	"go.kenn.io/kit/tui/termtext"
@@ -284,7 +285,7 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 			d.field("Started", cronTime(r.StartedAt))
 			d.field("Ended", cronTime(r.EndedAt))
 			d.field("Recorded", r.CreatedAt.Format(time.RFC3339))
-			d.field("Actor", r.Actor)
+			d.field("Actor", authorname.Display(r.Actor))
 			d.field("Executor", ownerText(r.ExecutorLabel))
 			d.field("Teammate", ownerText(r.Teammate))
 			d.field("Issue", cronRunIssue(r))

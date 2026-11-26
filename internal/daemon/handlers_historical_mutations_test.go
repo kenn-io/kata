@@ -40,6 +40,7 @@ func TestHistoricalMutationClaimGate(t *testing.T) {
 		{name: "unassign", suffix: "actions/unassign"},
 		{name: "claim", suffix: "actions/claim"},
 		{name: "label add", suffix: "labels", body: map[string]any{"label": "review"}},
+		{name: "label swap", method: http.MethodPatch, suffix: "labels", body: map[string]any{"add": []string{"review"}, "remove": []string{"triage"}}},
 		{name: "label remove", method: http.MethodDelete, suffix: "labels/review?actor=agent"},
 		{name: "close", suffix: "actions/close", body: map[string]any{"reason": "wontfix", "message": "Reviewed the proposed work and recorded why it should stop here."}},
 		{name: "reopen", suffix: "actions/reopen", prepare: "close"},

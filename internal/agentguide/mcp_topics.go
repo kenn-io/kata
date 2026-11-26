@@ -7,7 +7,7 @@ func MCPGuide(name string) (string, bool) {
 	call := func(tool, args string) string {
 		return "\n```json\n{\"tool\":\"" + tool + "\",\"arguments\":" + args + "}\n```\n"
 	}
-	const scope = "The connection fixes actor and project scope. Read its server instructions for the actual identity and allowed projects. In multi-project scope, use project#ref for existing issues; create requires project. Pass project only when the tool schema permits it. Call the section loader, then refresh the tool list for its typed schemas. Examples use placeholder projects and refs; replace them with returned values.\n"
+	const scope = "The connection fixes actor and project scope. Read its server instructions for the actual identity and allowed projects. In multi-project scope, use project#ref for existing issues; create requires project. Pass project only when the tool schema permits it. Call the section loader, then refresh the tool list for its typed schemas. Examples use placeholder projects and refs; replace them with returned values.\n\n" + MCPCommentRules
 	const refresh = "\nRefresh the tool list before calling the newly loaded tools.\n"
 	switch name {
 	case "workflow":
@@ -66,21 +66,21 @@ key and arguments. A look-alike refusal means inspect/reuse the returned match;
 force_new is only for genuinely different work. Capture the returned issue ref
 and web_url. Replace spoke-project#abc4 below with that actual qualified ref.
 ` + call("kata.create", `{"project":"spoke-project","title":"Complete example task","body":"Make the requested change and review the result.","idempotency_key":"example-task-create-1"}`) +
-			call("kata.claim", `{"ref":"spoke-project#abc4","if_unowned":true}`) +
-			call("kata.set_metadata", `{"ref":"spoke-project#abc4","patch":{"work.attention":"ok","work.attention_msg":"Implementing the requested change."}}`) + `
-Do the requested work. Record findings useful to the next reader with a new
+			call("kata.claim", `{"ref":"spoke-project#abc4","if_unowned":true,"ttl_seconds":7200}`) +
+			call("kata.set_metadata", `{"ref":"spoke-project#abc4","patch":{"work.attention":"ok","work.attention_msg":"Implementing the requested change."}}`) + "\n" + MCPClaimRules + `Do the requested work. Record findings useful to the next reader with a new
 stable comment key; keep your own attention fields current. Read delegated
 work.* without writing it. Stamp work.branch once when using a dedicated branch.
-` + call("kata.comment", `{"ref":"spoke-project#abc4","body":"Completed the requested change and reviewed the result.","idempotency_key":"example-task-progress-1"}`) +
+` + call("kata.comment", `{"ref":"spoke-project#abc4","body":"The requested change also affects the settings page; review it there.","idempotency_key":"example-task-finding-1"}`) +
 			call("kata.show", `{"ref":"spoke-project#abc4"}`) +
 			call("kata.load_issue_lifecycle", `{}`) + refresh + `
 Close only after verification, with a message of at least 40 characters and
 typed evidence describing actual completed work. The example's external account
 must be replaced with your own evidence. Open children prevent parent closure.
-` + call("kata.close", `{"ref":"spoke-project#abc4","reason":"done","message":"Completed the example task and reviewed the resulting changes.","evidence":[{"type":"external","account":"Checked the fixture issue and its progress through the MCP client."}]}`) + `
-If unfinished, leave it open, record what remains, set needs-review with
-kata.set_label and update both attention fields. Never delete or purge without
-the user's explicit authorization for that exact action and issue.
+For work without a PR:
+` + call("kata.close", `{"ref":"spoke-project#abc4","reason":"done","message":"Completed the example task and reviewed the resulting changes.","evidence":[{"type":"external","account":"Checked the fixture issue and its comment through the MCP client."}]}`) + `
+If unfinished, leave it open, update work.attention, put what remains in
+work.attention_msg and set needs-review with kata.set_label. Never delete or
+purge without the user's explicit authorization for that exact action and issue.
 `, true
 	case "issues":
 		return "# Find, create and update issues\n\n" + scope + `
@@ -105,24 +105,26 @@ Use returned web_url values for links rather than constructing URLs.
 Load kata.load_issue_discovery and refresh for next/ready/show. Inspect an issue
 before claiming. Load kata.load_issue_mutation and refresh for claim.
 ` + call("kata.next", `{"project":"spoke-project","unowned":true}`) +
-			call("kata.claim", `{"ref":"spoke-project#abc4","if_unowned":true}`) + `
+			call("kata.claim", `{"ref":"spoke-project#abc4","if_unowned":true,"ttl_seconds":7200}`) + `
 A current owner conflict is not permission to force takeover. if_unowned is an
 atomic claim guard. ttl_seconds may bound a claim from 60 to 86400 seconds.
-Load kata.load_coordination and refresh to release only the expected owner.
+` + MCPClaimRules + `Load kata.load_coordination and refresh to release only the expected owner.
 ` + call("kata.unassign", `{"ref":"spoke-project#abc4","expected_owner":"example-agent"}`) + `
 Maintain your own work.attention (ok, stuck, needs-human) and work.attention_msg.
-Read sibling work.* without writing it; ignore work.* on closed issues.
+Read sibling work.* without writing it. On closed issues, ignore work.* except
+work.pr_url.
 `, true
 	case "closing":
 		return "# Close with evidence\n\n" + scope + `
 Load kata.load_issue_lifecycle and refresh. done requires a substantive message
 of at least 40 characters and typed evidence. Use actual commit SHA, PR URL,
 executed test command, reviewed paths or an external completion account.
+For work without a PR:
 ` + call("kata.close", `{"ref":"spoke-project#abc4","reason":"done","message":"Implemented the export retry and reviewed the completed changes.","evidence":[{"type":"reviewed-paths","paths":["export.go"]}]}`) + `
-Never close unfinished work. Load kata.load_issue_mutation and refresh, record
-what remains with kata.comment and a stable idempotency_key, then label it:
+Never close unfinished work. Load kata.load_issue_mutation and refresh, update
+work.attention and work.attention_msg and set the needs-review label:
 ` + call("kata.set_label", `{"ref":"spoke-project#abc4","label":"needs-review","present":true}`) + `
-Update both attention fields before handoff. Open children prevent parent close.
+Open children prevent parent close.
 duplicate/superseded require at least 20 message characters and exactly one
 matching duplicate-of/superseded-by evidence with issue_ref. wontfix requires
 60 message characters and no evidence. audit-no-change needs a 40-character
@@ -135,8 +137,8 @@ user authorization for that exact issue and action, plus exact confirmation.
 The actor comes from server startup. A startup teammate is the default; create
 and comment accept teammate overrides when agents share a connection. Empty
 teammate suppresses the default. Keep the actor and assign distinct teammates.
-Load kata.load_issue_mutation and refresh for attributed progress and attention.
-` + call("kata.comment", `{"ref":"spoke-project#abc4","teammate":"worker-1","body":"The export fixture is ready for review.","idempotency_key":"worker-1-ready-1"}`) +
+Load kata.load_issue_mutation and refresh for attributed comments and attention.
+` + call("kata.comment", `{"ref":"spoke-project#abc4","teammate":"worker-1","body":"The export fixture omits the retry case, so it cannot catch a duplicate export.","idempotency_key":"worker-1-finding-1"}`) +
 			call("kata.set_metadata", `{"ref":"spoke-project#abc4","patch":{"work.attention":"needs-human","work.attention_msg":"Ready for the assigned reviewer."}}`) + `
 Only write your own work.* keys. Delegated issues may have a parent and branch
 metadata; use real blocking relationships only for prerequisites.

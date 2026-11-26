@@ -86,7 +86,9 @@ import type {
   DisconnectRelayEnrollmentPathParameters,
   DisconnectRelayRequestBody,
   DisconnectRelayResponseBody,
+  DocbankDescriptor,
   DocbankProbe,
+  DocbankServiceCapabilities,
   DoctorResponseBody,
   EditCommentPathParameters,
   EditCommentRequestBody,
@@ -102,6 +104,10 @@ import type {
   ExternalRootActionRequestBody,
   ExternalRootBridgeOut,
   ExternalRootRunOut,
+  FederatedDocbankCapabilitiesParams,
+  FederatedDocbankCapabilitiesPathParameters,
+  FederatedDocbankContentParams,
+  FederatedDocbankContentPathParameters,
   FederationBridgeBody,
   FederationBridgeDisconnectResult,
   FederationBridgeStatusBody,
@@ -113,6 +119,8 @@ import type {
   FederationSearchResponseBody,
   FederationSpokeNameOut,
   FederationStatusBody,
+  FederationWatchEventsBody,
+  FederationWatchEventsRequestBody,
   ForceReleaseIssueLeasePathParameters,
   GetConnectorStatusPathParameters,
   GetCronCapabilitiesPathParameters,
@@ -149,6 +157,8 @@ import type {
   LeaveFederationReplicaResultBody,
   LinkAttachmentInput,
   LinkAttachmentPathParameters,
+  LinkFederatedDocbankParams,
+  LinkFederatedDocbankPathParameters,
   ListAllIssuesParams,
   ListAllIssuesResponseBody,
   ListConnectorFieldsPathParameters,
@@ -325,6 +335,13 @@ import type {
   UnbindExternalRootParams,
   UnbindExternalRootPathParameters,
   UnmapConnectorFieldPathParameters,
+  UpdateLabelsPathParameters,
+  UpdateLabelsRequestBody,
+  UpdateLabelsResponseBody,
+  UploadFederatedDocbankParams,
+  UploadFederatedDocbankPathParameters,
+  WatchFederationProjectEventsParams,
+  WatchFederationProjectEventsPathParameters,
 } from '../models'
 
 import { orvalFetch } from '../../client.ts'
@@ -3449,6 +3466,246 @@ export const getProjectFederation = async (
   )
 }
 
+export type federatedDocbankCapabilitiesResponse200 = {
+  data: DocbankServiceCapabilities
+  status: 200
+}
+
+export type federatedDocbankCapabilitiesResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type federatedDocbankCapabilitiesResponseSuccess =
+  federatedDocbankCapabilitiesResponse200 & {
+    headers: Headers
+  }
+export type federatedDocbankCapabilitiesResponseError =
+  federatedDocbankCapabilitiesResponseDefault & {
+    headers: Headers
+  }
+
+export type federatedDocbankCapabilitiesResponse =
+  | federatedDocbankCapabilitiesResponseSuccess
+  | federatedDocbankCapabilitiesResponseError
+
+export const getFederatedDocbankCapabilitiesUrl = (
+  { projectId }: FederatedDocbankCapabilitiesPathParameters,
+  params: FederatedDocbankCapabilitiesParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/docbank/capabilities?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/docbank/capabilities`
+}
+
+export const federatedDocbankCapabilities = async (
+  { projectId }: FederatedDocbankCapabilitiesPathParameters,
+  params: FederatedDocbankCapabilitiesParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<federatedDocbankCapabilitiesResponse> => {
+  return orvalFetch<federatedDocbankCapabilitiesResponse>(
+    getFederatedDocbankCapabilitiesUrl({ projectId }, params),
+    {
+      ...options,
+      method: 'GET',
+    },
+  )
+}
+
+export type linkFederatedDocbankResponse200 = {
+  data: DocbankDescriptor
+  status: 200
+}
+
+export type linkFederatedDocbankResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type linkFederatedDocbankResponseSuccess = linkFederatedDocbankResponse200 & {
+  headers: Headers
+}
+export type linkFederatedDocbankResponseError = linkFederatedDocbankResponseDefault & {
+  headers: Headers
+}
+
+export type linkFederatedDocbankResponse =
+  | linkFederatedDocbankResponseSuccess
+  | linkFederatedDocbankResponseError
+
+export const getLinkFederatedDocbankUrl = (
+  { projectId, ref }: LinkFederatedDocbankPathParameters,
+  params: LinkFederatedDocbankParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/docbank/issues/${encodeURIComponent(String(ref))}/links?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/docbank/issues/${encodeURIComponent(String(ref))}/links`
+}
+
+export const linkFederatedDocbank = async (
+  { projectId, ref }: LinkFederatedDocbankPathParameters,
+  linkAttachmentInput: LinkAttachmentInput,
+  params: LinkFederatedDocbankParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<linkFederatedDocbankResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<linkFederatedDocbankResponse>(
+    getLinkFederatedDocbankUrl({ projectId, ref }, params),
+    {
+      ...options,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+      body: JSON.stringify(linkAttachmentInput),
+    },
+  )
+}
+
+export type uploadFederatedDocbankResponse200 = {
+  data: DocbankDescriptor
+  status: 200
+}
+
+export type uploadFederatedDocbankResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type uploadFederatedDocbankResponseSuccess = uploadFederatedDocbankResponse200 & {
+  headers: Headers
+}
+export type uploadFederatedDocbankResponseError = uploadFederatedDocbankResponseDefault & {
+  headers: Headers
+}
+
+export type uploadFederatedDocbankResponse =
+  | uploadFederatedDocbankResponseSuccess
+  | uploadFederatedDocbankResponseError
+
+export const getUploadFederatedDocbankUrl = (
+  { projectId, ref }: UploadFederatedDocbankPathParameters,
+  params: UploadFederatedDocbankParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/docbank/issues/${encodeURIComponent(String(ref))}/uploads?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/docbank/issues/${encodeURIComponent(String(ref))}/uploads`
+}
+
+export const uploadFederatedDocbank = async (
+  { projectId, ref }: UploadFederatedDocbankPathParameters,
+  uploadFederatedDocbankBody: Blob,
+  params: UploadFederatedDocbankParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<uploadFederatedDocbankResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<uploadFederatedDocbankResponse>(
+    getUploadFederatedDocbankUrl({ projectId, ref }, params),
+    {
+      ...options,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream', ...getHeaders(options?.headers) },
+      body: uploadFederatedDocbankBody,
+    },
+  )
+}
+
+export type federatedDocbankContentResponse200 = {
+  data: Blob
+  status: 200
+}
+
+export type federatedDocbankContentResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type federatedDocbankContentResponseSuccess = federatedDocbankContentResponse200 & {
+  headers: Headers
+}
+export type federatedDocbankContentResponseError = federatedDocbankContentResponseDefault & {
+  headers: Headers
+}
+
+export type federatedDocbankContentResponse =
+  | federatedDocbankContentResponseSuccess
+  | federatedDocbankContentResponseError
+
+export const getFederatedDocbankContentUrl = (
+  { projectId, versionId }: FederatedDocbankContentPathParameters,
+  params: FederatedDocbankContentParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/docbank/versions/${encodeURIComponent(String(versionId))}/content?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/docbank/versions/${encodeURIComponent(String(versionId))}/content`
+}
+
+export const federatedDocbankContent = async (
+  { projectId, versionId }: FederatedDocbankContentPathParameters,
+  params: FederatedDocbankContentParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<federatedDocbankContentResponse> => {
+  return orvalFetch<federatedDocbankContentResponse>(
+    getFederatedDocbankContentUrl({ projectId, versionId }, params),
+    {
+      ...options,
+      method: 'GET',
+    },
+  )
+}
+
 export type enableProjectFederationResponse200 = {
   data: ProjectFederationBody
   status: 200
@@ -3601,6 +3858,73 @@ export const ingestFederationProjectEvents = async (
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
       body: JSON.stringify(federationIngestEventsRequestBody),
+    },
+  )
+}
+
+export type watchFederationProjectEventsResponse200 = {
+  data: FederationWatchEventsBody
+  status: 200
+}
+
+export type watchFederationProjectEventsResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type watchFederationProjectEventsResponseSuccess =
+  watchFederationProjectEventsResponse200 & {
+    headers: Headers
+  }
+export type watchFederationProjectEventsResponseError =
+  watchFederationProjectEventsResponseDefault & {
+    headers: Headers
+  }
+
+export type watchFederationProjectEventsResponse =
+  | watchFederationProjectEventsResponseSuccess
+  | watchFederationProjectEventsResponseError
+
+export const getWatchFederationProjectEventsUrl = (
+  { projectId }: WatchFederationProjectEventsPathParameters,
+  params?: WatchFederationProjectEventsParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/events:watch?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/events:watch`
+}
+
+export const watchFederationProjectEvents = async (
+  { projectId }: WatchFederationProjectEventsPathParameters,
+  federationWatchEventsRequestBody: FederationWatchEventsRequestBody,
+  params?: WatchFederationProjectEventsParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<watchFederationProjectEventsResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<watchFederationProjectEventsResponse>(
+    getWatchFederationProjectEventsUrl({ projectId }, params),
+    {
+      ...options,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+      body: JSON.stringify(federationWatchEventsRequestBody),
     },
   )
 }
@@ -5663,6 +5987,50 @@ export const reachableIssueGraph = async (
       method: 'GET',
     },
   )
+}
+
+export type updateLabelsResponse200 = {
+  data: UpdateLabelsResponseBody
+  status: 200
+}
+
+export type updateLabelsResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type updateLabelsResponseSuccess = updateLabelsResponse200 & {
+  headers: Headers
+}
+export type updateLabelsResponseError = updateLabelsResponseDefault & {
+  headers: Headers
+}
+
+export type updateLabelsResponse = updateLabelsResponseSuccess | updateLabelsResponseError
+
+export const getUpdateLabelsUrl = ({ projectId, ref }: UpdateLabelsPathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/issues/${encodeURIComponent(String(ref))}/labels`
+}
+
+export const updateLabels = async (
+  { projectId, ref }: UpdateLabelsPathParameters,
+  updateLabelsRequestBody: UpdateLabelsRequestBody,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<updateLabelsResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<updateLabelsResponse>(getUpdateLabelsUrl({ projectId, ref }), {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(updateLabelsRequestBody),
+  })
 }
 
 export type addLabelResponse200 = {

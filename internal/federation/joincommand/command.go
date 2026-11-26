@@ -9,6 +9,7 @@ import (
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/shellquote"
 )
 
 // Build returns a shell command for joining the supplied grant, or an empty
@@ -43,18 +44,7 @@ func Build(in api.FederationJoinInstructions, signingTemplate bool) string {
 		args = append(args, "--signing-key-id", "<signing-key-id>", "--signing-key-file", "<absolute-path-to-spoke-key>")
 	}
 	for i, arg := range args {
-		args[i] = ShellQuote(arg)
+		args[i] = shellquote.Quote(arg)
 	}
 	return strings.Join(args, " ")
-}
-
-// ShellQuote returns s as one POSIX shell argument, quoting it only when it
-// holds characters outside the plain command-line set.
-func ShellQuote(s string) string {
-	if s != "" && strings.IndexFunc(s, func(r rune) bool {
-		return (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && !strings.ContainsRune("-_./:=,", r)
-	}) == -1 {
-		return s
-	}
-	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }

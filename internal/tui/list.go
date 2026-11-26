@@ -482,11 +482,7 @@ func (lm listModel) applyChildSortKey(msg tea.KeyPressMsg, km keymap) (listModel
 		return lm, true
 	}
 	lm = lm.syncSelection(lm.visibleRows())
-	if lm.childSort == childSortTemporal {
-		lm.childSort = childSortTopological
-	} else {
-		lm.childSort = childSortTemporal
-	}
+	lm.childSort = lm.childSort.next()
 	lm.status = "graph order: " + lm.childSort.label()
 	return lm.restoreCursorToSelection(), true
 }

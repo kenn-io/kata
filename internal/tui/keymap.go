@@ -79,7 +79,7 @@ func newKeymap() keymap {
 		Expand:         key{Keys: []string{"right"}, Help: "expand"},
 		Collapse:       key{Keys: []string{"left"}, Help: "collapse"},
 		ExpandAll:      key{Keys: []string{"E"}, Help: "expand/collapse all"},
-		SortChildren:   key{Keys: []string{"o"}, Help: "toggle graph order"},
+		SortChildren:   key{Keys: []string{"o"}, Help: "cycle child order"},
 		Search:         key{Keys: []string{"/"}, Help: "search"},
 		FilterStatus:   key{Keys: []string{"s"}, Help: "cycle status filter"},
 		FilterForm:     key{Keys: []string{"f"}, Help: "filter (form)"},

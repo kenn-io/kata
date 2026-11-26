@@ -98,6 +98,11 @@ func discoverLocalProfileWithVerifier(
 	var unreachable error
 	for candidate, err := range scan(ctx, resolved.LocalProfile.DataDir) {
 		if err != nil {
+			if e, ok := errors.AsType[*LocalDaemonUnreachableError](err); ok {
+				e.Profile = resolved.Name
+				e.ProfileAutostart = selection.Profile.Config.AutostartEnabled()
+				e.ManagedExternally = !e.ProfileAutostart
+			}
 			if errors.Is(err, ErrLocalDaemonUnreachable) {
 				unreachable = err
 				continue
@@ -106,6 +111,7 @@ func discoverLocalProfileWithVerifier(
 		}
 		resolved = resolved.WithRunning(runningDaemonForLive(candidate))
 		resolved.UnixSocket = candidate.UnixSocket
+		resolved.runtime = &candidate.Record
 		if verify != nil {
 			if err := verify(ctx, resolved); err != nil {
 				return resolved, false, err
@@ -233,7 +239,13 @@ func EnsureLocalProfileSelection(ctx context.Context, selection DaemonSelection)
 	if selection.Profile == nil || selection.Resolved.LocalProfile == nil {
 		return selection.Resolved, errors.New("selection is not a registered local profile")
 	}
-	return ensureLocalProfile(ctx, selection)
+	resolved, err := ensureLocalProfile(ctx, selection)
+	if e, ok := errors.AsType[*LocalDaemonUnreachableError](err); ok {
+		e.Profile = resolved.Name
+		e.ProfileAutostart = selection.Profile.Config.AutostartEnabled()
+		e.ManagedExternally = !e.ProfileAutostart
+	}
+	return resolved, err
 }
 
 // EnsureSameLocalProfile refreshes the original profile snapshot without reading
@@ -272,5 +284,5 @@ func waitForSupervisedProfile(ctx context.Context, resolved ResolvedDaemon, prof
 }
 
 func profileCutoverLocked(profile config.LocalProfileConfig) func(context.Context) bool {
-	return func(context.Context) bool { return sqliteCutoverLockedForDSN(profile.DSN) }
+	return func(context.Context) bool { return SQLiteCutoverLockedForDSN(profile.DSN) }
 }

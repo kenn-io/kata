@@ -5,6 +5,7 @@ interface Attachment {
   media_type: string
   size: number
   docbank_version: string
+  origin?: string
 }
 function attachment(value: unknown): Attachment | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
@@ -50,7 +51,9 @@ export function closingAttachments(
     const frozen = hasSnapshot ? attachment(evidence.attachment) : current
     if (!frozen) return [{ label: hasSnapshot ? 'Invalid attachment' : 'Attachment removed' }]
     const matches =
-      current && current.docbank_version.toLowerCase() === frozen.docbank_version.toLowerCase()
+      current &&
+      current.docbank_version.toLowerCase() === frozen.docbank_version.toLowerCase() &&
+      (current.origin ?? '') === (frozen.origin ?? '')
     const state = matches ? '' : current ? ' (changed)' : ' (removed)'
     const label = `${frozen.name} · ${frozen.size} bytes${state}`
     return [{ label, ...(matches ? { href: `#kata-attachment-${encodeURIComponent(id)}` } : {}) }]

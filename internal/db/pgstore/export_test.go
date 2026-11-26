@@ -2,8 +2,11 @@ package pgstore
 
 import (
 	"context"
+	"database/sql/driver"
 	"testing"
 	"time"
+
+	"go.kenn.io/kata/internal/testenv/sqlcount"
 )
 
 const BatchProjectStatsSQLForTest = batchProjectStatsSQL
@@ -58,3 +61,13 @@ func SetStatementTimeoutForTest(t testing.TB, timeout string) {
 // FederationFoldEventsQueryForTest returns the SQL and arguments that the
 // federation fold runs for projectID, so cost tests can EXPLAIN it.
 var FederationFoldEventsQueryForTest = federationFoldEventsQuery
+
+// CountStatementsForTest wraps the connections of stores opened after this
+// call, so they count statements run under a sqlcount.Counter context.
+func CountStatementsForTest() func() {
+	previous := wrapPostgresConnector
+	wrapPostgresConnector = func(connector driver.Connector) driver.Connector {
+		return sqlcount.WrapConnector(previous(connector))
+	}
+	return func() { wrapPostgresConnector = previous }
+}

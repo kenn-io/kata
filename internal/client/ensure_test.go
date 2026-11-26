@@ -3,15 +3,19 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"iter"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -26,6 +30,39 @@ import (
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
+
+func TestDiscoveryReplacesPlaceholderOnlyWithReleaseAssets(t *testing.T) {
+	oldVersion := currentVersionForEnsure
+	t.Cleanup(func() { currentVersionForEnsure = oldVersion })
+	currentVersionForEnsure = func() string { return "v0.23.0" }
+	for _, tc := range []struct {
+		name, version, capabilities string
+		assets, skip                bool
+		want                        daemonScanOutcome
+	}{
+		{"same release placeholder", "v0.23.0", "loopback,sse,placeholder-assets", true, false, daemonScanStale},
+		{"source CLI placeholder", "v0.23.0", "loopback,sse,placeholder-assets", false, false, daemonScanCompatible},
+		{"release daemon", "v0.23.0", "loopback,sse", true, false, daemonScanCompatible},
+		{"version-check-disabled", "v0.23.0", "loopback,sse,placeholder-assets", true, true, daemonScanStale},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			skip := ""
+			if tc.skip {
+				skip = "1"
+			}
+			t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", skip)
+			ctx := context.WithValue(t.Context(), requireWebAssetsKey{}, tc.assets)
+			scan := func(context.Context, string) iter.Seq2[liveDaemon, error] {
+				return func(yield func(liveDaemon, error) bool) {
+					yield(liveDaemon{Info: PingInfo{Service: "kata", Version: tc.version}, Record: kitdaemon.RuntimeRecord{Metadata: map[string]string{"web_capabilities": tc.capabilities}}}, nil)
+				}
+			}
+			found, err := discoverForEnsureUsing(ctx, "", scan)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, found.Outcome)
+		})
+	}
+}
 
 // A binary that cannot open the storage cannot replace the daemon serving it,
 // so the live daemon must keep running.
@@ -252,6 +289,27 @@ func TestEnsureRunningDiscoveryWaitsForStartLockWhenDaemonUnreachable(t *testing
 	assert.Equal(t, wantURL, got.url)
 	assert.Zero(t, state.stopCalls)
 	assert.Zero(t, state.startCalls)
+}
+
+func TestEnsureRunningReportsUnreachableDaemonWhenStartLockWaitExpires(t *testing.T) {
+	tmp := setupKataEnv(t)
+	address := "unix://" + filepath.Join(tmp, "missing.sock")
+	require.NoError(t, writeRuntimeRecord(t, tmp, address))
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	release, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).AcquireStartLock(t.Context())
+	require.NoError(t, err)
+	defer release()
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		_, err := EnsureRunning(ctx)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+		assert.Contains(t, err.Error(), address)
+		assert.Contains(t, err.Error(), strconv.Quote(filepath.Join(ns.DataDir, "daemon.log")))
+		assert.Contains(t, err.Error(), fmt.Sprintf("pid %d", os.Getpid()))
+	})
 }
 
 func TestEnsureRunningRestartsWhenDaemonVersionUnknown(t *testing.T) {
@@ -800,6 +858,58 @@ func TestStopRunningDaemonsSignalsVerifiedIncompatibleRuntime(t *testing.T) {
 	assert.Equal(t, ns.DBHash, signaledDBHash)
 }
 
+func TestStopRunningDaemonsDoesNotSignalAfterProbeDeadline(t *testing.T) {
+	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+	tmp := setupKataEnv(t)
+	child, _ := startLongLivedTestProcess(t)
+	oldPID, blockedPID := os.Getpid(), child.Process.Pid
+	if fmt.Sprint(oldPID) > fmt.Sprint(blockedPID) {
+		oldPID, blockedPID = blockedPID, oldPID
+	}
+	_, addr := startMockDaemonPing(t, map[string]any{
+		"ok": true, "service": "kata", "version": "old-version", "pid": oldPID,
+	})
+	require.NoError(t, writeRuntimeRecordForPID(t, tmp, oldPID, addr))
+	deadline := make(chan struct{})
+	blocked := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		close(deadline)
+		<-r.Context().Done()
+	}))
+	t.Cleanup(blocked.Close)
+	require.NoError(t, writeRuntimeRecordForPID(t, tmp, blockedPID, strings.TrimPrefix(blocked.URL, "http://")))
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	origSignal := signalDaemonStopForEnsure
+	signals := 0
+	signalDaemonStopForEnsure = func(kitdaemon.RuntimeRecord, string) error {
+		signals++
+		return nil
+	}
+	t.Cleanup(func() { signalDaemonStopForEnsure = origSignal })
+	ctx := probeDeadlineContext{Context: t.Context(), done: deadline}
+	err = stopRunningDaemons(ctx, ns.DataDir, ns.DBHash)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+	assert.Contains(t, err.Error(), strings.TrimPrefix(blocked.URL, "http://"))
+	assert.Zero(t, signals)
+}
+
+// probeDeadlineContext expires when the later endpoint receives its probe.
+type probeDeadlineContext struct {
+	context.Context
+	done <-chan struct{}
+}
+
+func (c probeDeadlineContext) Done() <-chan struct{} { return c.done }
+func (c probeDeadlineContext) Err() error {
+	select {
+	case <-c.done:
+		return context.DeadlineExceeded
+	default:
+		return c.Context.Err()
+	}
+}
+
 func TestDaemonDiscoveryPreservesRecordPublishedDuringProbe(t *testing.T) {
 	tmp := setupKataEnv(t)
 	ns, err := daemonruntime.NewNamespace()
@@ -1080,18 +1190,48 @@ func writeUnverifiableRecord(t *testing.T, pid int, addr string, metadata map[st
 }
 
 func TestEnsureRunningReportsLiveUnreachableDaemonWithoutAutoStart(t *testing.T) {
-	tmp := setupKataEnv(t)
-	address := "unix://" + filepath.Join(tmp, "missing.sock")
-	require.NoError(t, writeRuntimeRecord(t, tmp, address))
-	restore := patchEnsureHooks(t, currentVersionForEnsure(), "http://new-daemon")
+	for _, custom := range []bool{false, true} {
+		name := "ordinary socket"
+		if custom {
+			name = "socket containing synthetic host"
+		}
+		t.Run(name, func(t *testing.T) {
+			if custom && runtime.GOOS == "windows" {
+				t.Skip("Unix sockets are unsupported on Windows")
+			}
+			tmp := setupKataEnv(t)
+			socketDir, err := os.MkdirTemp("", "sock-")
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, os.RemoveAll(socketDir)) })
+			socket := filepath.Join(socketDir, "missing.sock")
+			if custom {
+				socket = socketDir + "/http://kata.invalid/missing.sock"
+			}
+			address := "unix://" + socket
+			require.NoError(t, writeRuntimeRecord(t, tmp, address))
+			restore := patchEnsureHooks(t, currentVersionForEnsure(), "http://new-daemon")
 
-	_, err := EnsureRunning(t.Context())
+			_, err = EnsureRunning(t.Context())
 
-	require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
-	assert.Contains(t, err.Error(), fmt.Sprintf("daemon pid %d is running", os.Getpid()))
-	assert.Contains(t, err.Error(), address)
-	assert.Contains(t, err.Error(), "missing.sock")
-	assert.Zero(t, restore.startCalls)
+			require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+			assert.Contains(t, err.Error(), fmt.Sprintf("daemon pid %d is running", os.Getpid()))
+			assert.Contains(t, err.Error(), address)
+			assert.Contains(t, err.Error(), `Get "/api/v1/ping"`)
+			if custom {
+				assert.Contains(t, err.Error(), "dial unix "+socket)
+			} else {
+				assert.NotContains(t, err.Error(), "kata.invalid")
+			}
+			unreachable, ok := errors.AsType[*LocalDaemonUnreachableError](err)
+			require.True(t, ok)
+			assert.Equal(t, os.Getpid(), unreachable.PID)
+			assert.Equal(t, address, unreachable.Address)
+			urlErr, ok := errors.AsType[*url.Error](err)
+			require.True(t, ok)
+			assert.Equal(t, "http://kata.invalid/api/v1/ping", urlErr.URL)
+			assert.Zero(t, restore.startCalls)
+		})
+	}
 }
 
 func TestEnsureRunningPrioritizesUnreachableDaemonOverIncompatibleDaemon(t *testing.T) {

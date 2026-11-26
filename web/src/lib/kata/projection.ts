@@ -391,6 +391,9 @@ function normalizeSelectedDetail(
   const parent = selectedIssue.parent ? issuesByUID.get(selectedIssue.parent.uid) : undefined
   return {
     issue: { ...selectedIssue, body: selectedIssue.body ?? '' },
+    ...(selected.effective_close_event
+      ? { effective_close_event: normalizeEvent(selected.effective_close_event) }
+      : {}),
     comments: (selected.comments ?? []).map((comment) => ({
       id: comment.id,
       ...(comment.uid === undefined ? {} : { uid: comment.uid }),
@@ -468,6 +471,7 @@ function normalizeIssue(
     deadline_on_date: issue.deadline_on_date,
     metadata: { ...issue.metadata },
     revision: issue.revision,
+    content_revision: issue.content_revision,
     owner: issue.owner,
     assignment_expires_on: issue.assignment_expires_on,
     author: issue.author,

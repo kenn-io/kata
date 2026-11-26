@@ -473,7 +473,25 @@ func (s *Store) closeIssueWithEvents(
 			}
 			events = append(events, generated...)
 		}
+		unlabeled, err := s.detachLabelTx(ctx, tx, current, project, "issue.unlabeled", "needs-review", p.Actor, closedAt)
+		if err != nil && !errors.Is(err, db.ErrNotFound) {
+			return err
+		}
+		if err == nil {
+			events = append(events, unlabeled)
+		}
+
 		issue, err = scanIssue(ctx, tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = $1`, current.ID))
+		if err == nil && *parentUID != "" {
+			queryErr := tx.QueryRowContext(ctx, `SELECT parent.id FROM issues parent JOIN projects p ON p.id = parent.project_id
+				WHERE parent.uid = $1 AND parent.status = 'open' AND parent.deleted_at IS NULL AND p.deleted_at IS NULL
+				AND NOT EXISTS (SELECT 1 FROM links l JOIN issues child ON child.id = l.from_issue_id
+				JOIN projects cp ON cp.id = child.project_id WHERE l.type = 'parent' AND l.to_issue_id = parent.id
+				AND child.status = 'open' AND child.deleted_at IS NULL AND cp.deleted_at IS NULL)`, *parentUID).Scan(&events[0].ReadyParentID)
+			if queryErr != nil && !errors.Is(queryErr, sql.ErrNoRows) {
+				return mapSQLError(queryErr, nil)
+			}
+		}
 		return err
 	})
 	return issue, events, changed, err

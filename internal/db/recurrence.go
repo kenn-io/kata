@@ -45,6 +45,24 @@ func ValidateRecurrenceTemplate(title string, metadata jsontext.Value) error {
 	return err
 }
 
+// ValidateRecurrenceTemplatePatch validates the template a patch leaves. When
+// the patch keeps the saved metadata, a legacy work.attention value is skipped;
+// every other reserved key is still checked.
+func ValidateRecurrenceTemplatePatch(title string, saved jsontext.Value, supplied *jsontext.Value) error {
+	if supplied != nil {
+		return ValidateRecurrenceTemplate(title, *supplied)
+	}
+	if strings.TrimSpace(title) == "" {
+		return fmt.Errorf("%w: template_title must be non-empty", ErrInvalidRecurrence)
+	}
+	object, err := decodeRecurrenceTemplateMetadata(saved)
+	if err != nil {
+		return err
+	}
+	delete(object, "work.attention")
+	return validateRecurrenceTemplateMetadataObject(object)
+}
+
 // ComposeRecurrenceIssueMetadata stamps the occurrence's civil date and
 // authoritative IANA timezone before validating the resulting issue metadata.
 // The order preserves compatibility with templates written by older versions:
@@ -87,12 +105,20 @@ func composeRecurrenceIssueMetadata(
 	}
 	object["scheduled_on"] = scheduledOn
 	object["timezone"] = timezoneValue
+	// An existing issue keeps its stored attention. A new occurrence omits
+	// unsupported attention inherited from a legacy template, whose saved
+	// metadata stays unchanged.
+	attention, hasAttention := object["work.attention"]
+	delete(object, "work.attention")
 	validate := validateRecurrenceIssueMetadataObject
 	if template {
 		validate = validateRecurrenceTemplateMetadataObject
 	}
 	if err := validate(object); err != nil {
 		return nil, err
+	}
+	if hasAttention && (!template || metadata.ValidateCreateValue(metadata.IssueRegistry, "work.attention", attention) == nil) {
+		object["work.attention"] = attention
 	}
 	value, err := json.Marshal(object)
 	if err != nil {

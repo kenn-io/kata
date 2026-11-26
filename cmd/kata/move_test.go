@@ -40,6 +40,15 @@ func TestMoveCLI_RoundTrip(t *testing.T) {
 	assert.NotEmpty(t, stored.ShortID)
 }
 
+func TestMoveCLI_EmptyRefsFileDoesNotMoveIssue(t *testing.T) {
+	env, dir, source, target, root := setupMoveCLIProjects(t)
+	_, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "move", "--refs-from", "", source.Name+"#"+root.ShortID, target.Name)
+	assert.ErrorContains(t, err, "--refs-from requires a file path")
+	storedRoot, err := env.DB.IssueByID(t.Context(), root.ID)
+	require.NoError(t, err)
+	assert.Equal(t, source.ID, storedRoot.ProjectID)
+}
+
 func TestMoveCLI_DryRunDoesNotMoveIssue(t *testing.T) {
 	env, dir, source, target, issue := setupMoveCLIProjects(t)
 

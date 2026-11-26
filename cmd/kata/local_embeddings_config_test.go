@@ -24,7 +24,7 @@ func clearLocalEmbeddingsEnv(t *testing.T) string {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	for _, key := range []string{"KATA_SEARCH_EMBEDDINGS_BASE_URL", "KATA_SEARCH_EMBEDDINGS_MODEL", "KATA_SEARCH_EMBEDDINGS_DIMS", "KATA_SEARCH_EMBEDDINGS_API_KEY_FILE", "KATA_SEARCH_EMBEDDINGS_DOCUMENT_PREFIX", "KATA_SEARCH_EMBEDDINGS_DOCUMENT_SUFFIX", "KATA_SEARCH_EMBEDDINGS_QUERY_PREFIX", "KATA_SEARCH_EMBEDDINGS_QUERY_SUFFIX", "KATA_SEARCH_EMBEDDINGS_REQUEST_DIMENSIONS"} {
+	for _, key := range []string{"KATA_SEARCH_EMBEDDINGS_API", "KATA_SEARCH_EMBEDDINGS_BASE_URL", "KATA_SEARCH_EMBEDDINGS_MODEL", "KATA_SEARCH_EMBEDDINGS_DIMS", "KATA_SEARCH_EMBEDDINGS_API_KEY_FILE", "KATA_SEARCH_EMBEDDINGS_DOCUMENT_PREFIX", "KATA_SEARCH_EMBEDDINGS_DOCUMENT_SUFFIX", "KATA_SEARCH_EMBEDDINGS_QUERY_PREFIX", "KATA_SEARCH_EMBEDDINGS_QUERY_SUFFIX", "KATA_SEARCH_EMBEDDINGS_REQUEST_DIMENSIONS"} {
 		t.Setenv(key, "")
 	}
 	return home
@@ -39,6 +39,7 @@ func TestLocalEmbeddingsTOMLLayouts(t *testing.T) {
 		comments                                []string
 		wantDims                                int
 	}{
+		{name: "vertex", body: "[search.embeddings]\napi='vertex'\nbase_url='https://example.com/publishers/google/models'\nmodel='gemini-embedding-001'\n", comments: []string{"# api = \"vertex\"", "# base_url = \"https://example.com/publishers/google/models\""}, wantDims: 768},
 		{name: "external revision", body: "[search.embeddings]\nbase_url='http://127.0.0.1:11434/v1'\nmodel='nomic-embed-text'\ndims=768\nfingerprint_salt='changed-nomic-weights'\n", comments: []string{"# fingerprint_salt = \"changed-nomic-weights\""}, wantDims: 768},
 		{name: "temporary recipe override", body: "[search.embeddings]\nbase_url='http://127.0.0.1:11434/v1'\nmodel='mxbai-embed-large'\ndims=1024\n", modelEnv: "nomic-embed-text", dimsEnv: "768", comments: []string{"# base_url = \"http://127.0.0.1:11434/v1\"", "# model = \"mxbai-embed-large\"", "# dims = 1024"}, wantDims: 768},
 		{name: "local salt", body: "[search.embeddings]\nlocal=true\nfingerprint_salt='manual-reindex'\n", wantSalt: "manual-reindex"},
@@ -68,6 +69,7 @@ func TestLocalEmbeddingsTOMLLayouts(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, next.Embeddings.Local)
 			require.Empty(t, next.Embeddings.BaseURL)
+			require.Empty(t, next.Embeddings.API)
 			require.Equal(t, tc.wantSalt, next.Embeddings.FingerprintSalt)
 			require.Equal(t, "nomic-embed-text", next.Embeddings.Model)
 			require.Equal(t, tc.wantDims, next.Embeddings.Dims)

@@ -1,12 +1,12 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte'
   import ELK, { type ElkNode } from 'elkjs/lib/elk.bundled.js'
   import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left'
-  import { FilterDropdown } from '@kenn-io/kit-ui'
+  import { Card, FilterDropdown } from '@kenn-io/kit-ui'
   import {
     Background,
     BackgroundVariant,
     Controls,
-    MiniMap,
     SvelteFlow,
     type Node as SvelteFlowNode,
     type NodeTypes,
@@ -21,6 +21,8 @@
   } from '../lib/graph/debug'
   import { filterSnapshotGraph } from '../lib/graph/snapshot'
   import GraphIssueNode from './GraphIssueNode.svelte'
+  import GraphAutoFit from './GraphAutoFit.svelte'
+  import GraphMiniMap from './GraphMiniMap.svelte'
   import {
     buildKataReachableGraph,
     type KataGraphContextDepth,
@@ -32,7 +34,6 @@
 
   type KataGraphLayoutMode = 'compact' | 'elk'
   type KataGraphDirectionChoice = 'follow' | KataGraphLayoutDirection
-
   interface KataGraphPreferences {
     contextDepth: KataGraphContextDepth
     depthLimit: KataGraphDepthLimit
@@ -52,18 +53,18 @@
   }
 
   interface Props {
+    headerActions?: Snippet | undefined
     graph: KataReachableGraphResponse
     sourceIssue: KataTaskSummary
-    selectedUID: string | null
     layoutDirection?: KataGraphLayoutDirection | undefined
     onBack: () => void
     onSelectIssue: (uid: string) => void
   }
 
   let {
+    headerActions,
     graph: snapshotGraph,
     sourceIssue,
-    selectedUID,
     layoutDirection = 'LR',
     onBack,
     onSelectIssue,
@@ -94,7 +95,6 @@
   let graph = $derived(
     buildKataReachableGraph({
       sourceUID: sourceIssue.uid,
-      selectedUID,
       graph: graphResponse,
       contextDepth,
       layoutDirection: effectiveLayoutDirection,
@@ -111,13 +111,6 @@
   let layoutReady = $derived(layoutMode === 'compact' || layoutedKey === activeLayoutKey)
   let source = $derived(
     graphResponse?.nodes.find((task) => task.uid === sourceIssue.uid) ?? sourceIssue,
-  )
-  let graphFilterActive = $derived(
-    hideDone ||
-      depthLimit !== defaultGraphPreferences.depthLimit ||
-      contextDepth !== defaultGraphPreferences.contextDepth ||
-      layoutMode !== defaultGraphPreferences.layoutMode ||
-      graphDirectionOverride !== defaultGraphPreferences.layoutDirection,
   )
   let layoutRun = 0
   const elkDefaultLayoutOptions = {
@@ -149,39 +142,39 @@
     kataTask: GraphIssueNode,
   }
   const depthOptions = [
-    { value: 'full', label: 'Full' },
-    { value: '1', label: '1 edge' },
-    { value: '2', label: '2 edges' },
-    { value: '3', label: '3 edges' },
+    { value: 'full', label: 'All' },
+    { value: '1', label: 'Up to 1 link away' },
+    { value: '2', label: 'Up to 2 links away' },
+    { value: '3', label: 'Up to 3 links away' },
   ] as const satisfies readonly { value: KataGraphDepthLimit; label: string }[]
   const contextOptions = [
     { value: 'all', label: 'All' },
-    { value: '1', label: '1 edge' },
-    { value: '2', label: '2 edges' },
-    { value: '3', label: '3 edges' },
+    { value: '1', label: 'Within 1 link' },
+    { value: '2', label: 'Within 2 links' },
+    { value: '3', label: 'Within 3 links' },
   ] as const satisfies readonly { value: KataGraphContextDepth; label: string }[]
   const layoutOptions = [
     { value: 'compact', label: 'Compact' },
-    { value: 'elk', label: 'ELK' },
+    { value: 'elk', label: 'Layered' },
   ] as const satisfies readonly { value: KataGraphLayoutMode; label: string }[]
   const graphDirectionOptions = [
-    { value: 'follow', label: 'Follow split' },
+    { value: 'follow', label: 'Auto' },
     { value: 'LR', label: 'Left to right' },
     { value: 'TB', label: 'Top to bottom' },
   ] as const satisfies readonly { value: KataGraphDirectionChoice; label: string }[]
-  let graphDirectionDetail = $derived(
-    graphDirectionOverride === null
-      ? `Follow ${effectiveLayoutDirection}`
-      : `Pinned ${effectiveLayoutDirection}`,
-  )
+  // The trigger names only the settings that differ from the defaults, so it
+  // reads just "Graph filters" until one changes.
   let graphFilterDetail = $derived.by(() => {
-    const parts = [
-      optionLabel(depthOptions, depthLimit),
-      optionLabel(contextOptions, contextDepth),
-      optionLabel(layoutOptions, layoutMode),
-      graphDirectionDetail,
-    ]
-    if (hideDone) parts.push('Hide done')
+    const parts: string[] = []
+    if (depthLimit !== defaultGraphPreferences.depthLimit)
+      parts.push(optionLabel(depthOptions, depthLimit))
+    if (contextDepth !== defaultGraphPreferences.contextDepth)
+      parts.push(optionLabel(contextOptions, contextDepth))
+    if (layoutMode !== defaultGraphPreferences.layoutMode)
+      parts.push(optionLabel(layoutOptions, layoutMode))
+    if (graphDirectionOverride !== null)
+      parts.push(optionLabel(graphDirectionOptions, graphDirectionOverride))
+    if (hideDone) parts.push('Hide closed')
     return parts.join(' · ')
   })
   const graphFilterSections = $derived.by(() => [
@@ -195,7 +188,7 @@
       })),
     },
     {
-      title: 'Context',
+      title: 'Highlight',
       items: contextOptions.map((option) => ({
         id: `context-${option.value}`,
         label: option.label,
@@ -229,7 +222,7 @@
       items: [
         {
           id: 'visibility-hide-done',
-          label: 'Hide done',
+          label: 'Hide closed',
           active: hideDone,
           onSelect: () => {
             hideDone = !hideDone
@@ -238,11 +231,18 @@
       ],
     },
   ])
+  // What each line style means, keyed on a card in the canvas corner.
+  const lineKey = [
+    { kind: 'blocks', label: 'Blocks' },
+    { kind: 'parent', label: 'Parent → child' },
+    { kind: 'related', label: 'Related' },
+  ] as const
   const graphMinZoom = 0.02
   const fitViewOptions = {
     duration: 0,
-    padding: 0.12,
+    padding: { top: '16px', right: '16px', bottom: '16px', left: '180px' } as const,
     minZoom: graphMinZoom,
+    maxZoom: 1.25,
   }
 
   function isContextDepth(value: unknown): value is KataGraphContextDepth {
@@ -329,13 +329,9 @@
     return `${ref.side}:${ref.kind}:${ref.uid}:${ref.otherUID}`
   }
 
-  function selectNodeID(uid: string): void {
-    onSelectIssue(uid)
-  }
-
   function selectNode(node: KataGraphNode): void {
     if (!node.data.selectable) return
-    selectNodeID(node.id)
+    onSelectIssue(node.id)
   }
 
   function withNodeActivation(node: KataGraphNode): KataGraphNode {
@@ -343,7 +339,7 @@
       ...node,
       data: {
         ...node.data,
-        onSelect: selectNodeID,
+        onSelect: onSelectIssue,
       },
     }
   }
@@ -445,13 +441,13 @@
     if (data.status === 'closed' && data.closedReason === 'done') return 'var(--text-muted)'
     if (data.isDepthContext) return 'var(--text-muted)'
     if (data.status === 'uncached') return 'var(--bg-surface-hover)'
-    if (data.isSource || data.isSelected) return 'var(--accent-blue)'
+    if (data.isSource) return 'var(--accent-blue)'
     return 'var(--bg-surface)'
   }
 
   function minimapNodeStrokeColor(node: SvelteFlowNode): string {
     const data = minimapData(node)
-    if (data.isSource || data.isSelected) return 'var(--accent-blue)'
+    if (data.isSource) return 'var(--accent-blue)'
     return 'var(--border-default)'
   }
 
@@ -511,7 +507,6 @@
   $effect(() => {
     const snapshot = {
       sourceUID: sourceIssue.uid,
-      selectedUID,
       hideDone,
       contextDepth,
       depthLimit,
@@ -565,15 +560,16 @@
       </div>
     </div>
     <div class="graph-control-row" aria-label="Graph controls">
+      {#if headerActions}{@render headerActions()}{/if}
       <div class="graph-filter-menu">
         <FilterDropdown
           label="Graph filters"
           detail={graphFilterDetail}
           title="Graph filters"
-          active={graphFilterActive}
           showBadge={false}
           sections={graphFilterSections}
           minWidth="220px"
+          align="end"
         />
       </div>
     </div>
@@ -587,7 +583,6 @@
         nodes={interactiveNodes}
         edges={graph.edges}
         {nodeTypes}
-        fitView
         {fitViewOptions}
         autoPanOnSelection={false}
         autoPanOnNodeFocus={false}
@@ -600,10 +595,35 @@
         elevateEdgesOnSelect={false}
         onnodeclick={({ node }) => selectNode(node as KataGraphNode)}
       >
-        <Controls />
-        <MiniMap nodeColor={minimapNodeColor} nodeStrokeColor={minimapNodeStrokeColor} />
+        <Controls {fitViewOptions} orientation="horizontal" />
+        {#if layoutReady}
+          <GraphAutoFit options={fitViewOptions} signature={activeLayoutKey} />
+        {/if}
+        <GraphMiniMap nodeColor={minimapNodeColor} nodeStrokeColor={minimapNodeStrokeColor} />
         <Background variant={BackgroundVariant.Dots} gap={14} size={1} />
       </SvelteFlow>
+      <div class="graph-key" role="group" aria-label="Line key">
+        <Card level="raised" padding="sm">
+          {#each lineKey as entry (entry.kind)}
+            <span class="graph-key-row">
+              <svg
+                class={['graph-key-line', `graph-key-line--${entry.kind}`]}
+                width="28"
+                height="10"
+                viewBox="0 0 28 10"
+                aria-hidden="true"
+                ><line
+                  x1="1"
+                  y1="5"
+                  x2={entry.kind !== 'related' ? 21 : 27}
+                  y2="5"
+                />{#if entry.kind !== 'related'}<path d="M20 1 L27 5 L20 9 Z" />{/if}</svg
+              >
+              <span>{entry.label}</span>
+            </span>
+          {/each}
+        </Card>
+      </div>
     </div>
   {/if}
 </section>
@@ -614,6 +634,7 @@
     --kata-graph-edge-context: color-mix(in srgb, var(--border-default) 76%, var(--bg-primary));
     --kata-graph-edge-related: color-mix(in srgb, var(--text-muted) 46%, var(--bg-primary));
     --kata-graph-edge-selected: color-mix(in srgb, var(--text-secondary) 82%, var(--text-primary));
+    --kata-graph-edge-blocks: color-mix(in srgb, var(--accent-amber) 75%, var(--bg-primary));
     --kata-graph-edge-selected-blocks: color-mix(
       in srgb,
       var(--accent-amber) 90%,
@@ -634,15 +655,20 @@
     --kata-graph-edge-context: color-mix(in srgb, var(--text-muted) 45%, var(--bg-primary));
     --kata-graph-edge-related: color-mix(in srgb, var(--text-muted) 74%, var(--bg-primary));
     --kata-graph-edge-selected: var(--text-primary);
+    --kata-graph-edge-blocks: color-mix(in srgb, var(--accent-amber) 85%, var(--bg-primary));
     --kata-graph-edge-selected-blocks: var(--accent-amber);
   }
 
+  /* One header band: Tasks and the title, then the pane actions and Graph
+     filters at the right edge. */
   .graph-toolbar {
     flex: 0 0 auto;
+    box-sizing: border-box;
+    min-height: var(--layout-header-h);
     display: flex;
-    flex-direction: column;
+    align-items: center;
     gap: 8px;
-    padding: 10px 14px;
+    padding: 8px 14px;
     border-bottom: 1px solid var(--border-default);
     background: var(--bg-surface);
   }
@@ -656,11 +682,12 @@
   }
 
   .graph-title-row {
-    width: 100%;
+    flex: 1 1 auto;
   }
 
   .graph-control-row {
-    flex-wrap: wrap;
+    flex: 0 1 auto;
+    margin-left: auto;
   }
 
   .toolbar-button {
@@ -725,6 +752,10 @@
     overflow-y: auto;
   }
 
+  .graph-filter-menu :global(.kit-filter-dropdown__item:not(.active, .excluded)) {
+    opacity: 1;
+  }
+
   .graph-source {
     flex: 1 1 180px;
     min-width: 0;
@@ -741,9 +772,20 @@
     font-size: var(--font-size-sm);
   }
 
+  /* A narrow pane drops the controls to a full-width second row. */
   @container (max-width: 700px) {
     .graph-toolbar {
+      flex-direction: column;
+      align-items: stretch;
       padding: 9px 12px;
+    }
+
+    .graph-control-row {
+      margin-left: 0;
+    }
+
+    .graph-filter-menu {
+      flex: 1 1 auto;
     }
 
     .graph-source {
@@ -759,9 +801,55 @@
   .graph-canvas {
     position: relative;
     flex: 1 1 auto;
-    min-height: 360px;
+    min-height: 0;
     overflow: hidden;
     contain: paint;
+  }
+
+  /* The fit padding leaves room for the key and controls. */
+  .graph-key {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    z-index: 5;
+    pointer-events: none;
+  }
+
+  .graph-key :global(.kit-card) {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .graph-key-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+    line-height: 20px;
+  }
+
+  /* Each swatch draws its line with the same variable as the edges. */
+  .graph-key-line {
+    flex: 0 0 auto;
+    stroke-width: 1.8;
+  }
+
+  .graph-key-line--blocks {
+    stroke: var(--kata-graph-edge-selected-blocks);
+    fill: var(--kata-graph-edge-selected-blocks);
+  }
+
+  .graph-key-line--parent {
+    stroke: var(--kata-graph-edge-selected);
+    fill: var(--kata-graph-edge-selected);
+  }
+
+  .graph-key-line--related {
+    stroke: var(--kata-graph-edge-related);
+    stroke-dasharray: 6 4;
   }
 
   :global(.kata-graph-pane .svelte-flow__controls) {
@@ -829,13 +917,16 @@
     stroke: var(--kata-graph-edge-ambient);
   }
 
+  :global(.kata-graph-edge--blocks .svelte-flow__edge-path) {
+    stroke: var(--kata-graph-edge-blocks);
+  }
+
   :global(.kata-graph-edge--related .svelte-flow__edge-path) {
     stroke: var(--kata-graph-edge-related);
     stroke-dasharray: 6 4;
   }
 
   :global(.kata-graph-edge--ambient .svelte-flow__edge-path) {
-    stroke: var(--kata-graph-edge-ambient);
     stroke-width: 1.4;
   }
 

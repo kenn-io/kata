@@ -2,7 +2,6 @@
   import { Button, cleanupTheme, initTheme, setThemeMode } from '@kenn-io/kit-ui'
   import { startBrowserTelemetry } from '@kenn-io/kit-ui/utils/browser-telemetry'
   import { onMount } from 'svelte'
-  import { SvelteMap } from 'svelte/reactivity'
 
   import { commentRetryIdentity } from './lib/kata/commentRetry'
   import type { KataCommentReplyIntent } from './lib/kata/types'
@@ -11,6 +10,7 @@
   import LaunchHint from './components/LaunchHint.svelte'
   import LoginView from './components/LoginView.svelte'
   import RouteError from './components/RouteError.svelte'
+  import StatusPage from './components/shared/StatusPage.svelte'
   import VersionMismatch from './components/VersionMismatch.svelte'
   import { createCredentialedFetch, setGeneratedFetch } from './lib/api/client'
   import {
@@ -33,6 +33,7 @@
     patchProjectMetadata,
     patchRecurrence as patchRecurrenceRequest,
     readUIReferences,
+    resolveUIIssueReference,
     removeLabel as removeLabelRequest,
     reopenIssue as reopenIssueRequest,
     setIssuePriority,
@@ -46,7 +47,12 @@
     type UIReferencesResponseBody,
     type TokenOut,
   } from './lib/api/generated'
-  import { createDaemonFetch, fetchWebDaemons, type WebDaemonInfo } from './lib/daemons/client'
+  import {
+    createDaemonFetch,
+    fetchWebDaemons,
+    rosterUnavailable,
+    type WebDaemonInfo,
+  } from './lib/daemons/client'
   import { loadDaemonRoute, saveDaemonRoute } from './lib/daemons/state'
   import {
     AuthenticationRequiredError,
@@ -115,6 +121,7 @@
   const selectedAuthentication = selectAuthenticationMode(launch)
   const initialRoute = parseRoute(new URL(window.location.href))
   let route = $state(initialRoute)
+  let linkUpgradeRequired = false
   let acceptedRoute = $state<AppRoute | undefined>()
   let returnPath = $state(launch.returnPath)
   let mode = $state(initialMode(launch, initialRoute, selectedAuthentication))
@@ -154,7 +161,9 @@
   let mutationPending = $state(false)
   let mutationState = $state<MutationState>({ kind: 'idle' })
   let draftFenceGeneration = $state(0)
-  let pendingCreate: { title: string; parentIssueUID?: string; key: string } | undefined
+  let pendingCreate:
+    | { title: string; parentIssueUID?: string; projectUID: string; key: string }
+    | undefined
   let pendingComment: { identity: string; key: string } | undefined
   let automaticSessionAttempted: 'loopback' | 'proxy' | undefined
   let advertisedAuthentication: 'loopback' | 'login' | 'proxy' | 'unavailable' | undefined
@@ -179,7 +188,6 @@
   let credentialError = $state<string | undefined>()
   let credentialAbort: AbortController | undefined
   let credentialGeneration = 0
-  const credentialReturnRoutes = new SvelteMap<string, AppRoute>()
   let destroyed = false
   const observedFetch: typeof fetch = async (input, init) => {
     const response = await fetch(input, init)
@@ -299,10 +307,14 @@
     )
   }
 
+  let recurrenceRevision = $state(0)
   const invalidations = new InvalidationController((full) => refreshSnapshot(full))
   const stream = new EventStreamController({
     connect: (cursor, signal, onOpen) => openEventStream(browserFetch, cursor, signal, onOpen),
-    onFrame: (frame) => invalidations.frame(frame),
+    onFrame: (frame) => {
+      if (frame.event.startsWith('recurrence.')) recurrenceRevision++
+      invalidations.frame(frame)
+    },
     onAuthenticationRequired: requireAuthentication,
     onState: (state) => {
       const wasReconnecting = liveUpdatesReconnecting
@@ -335,7 +347,8 @@
       state.snapshot &&
       !state.loading &&
       !state.authenticationRequired &&
-      route.kind !== 'route-error'
+      route.kind !== 'route-error' &&
+      (!route.link || route.issueUID !== undefined)
     ) {
       mode = 'ready'
     }
@@ -343,6 +356,26 @@
 
   $effect(() => {
     setThemeMode(preferences.theme)
+  })
+
+  $effect(() => {
+    if (
+      route.kind === 'kata' &&
+      route.view === 'credentials' &&
+      authority?.snapshot &&
+      authority.snapshot.capabilities.token_audit_read !== true &&
+      !authority.loading &&
+      !authority.stale &&
+      !authority.authenticationRequired &&
+      !daemonSwitching &&
+      !daemonError
+    ) {
+      fenceCredentialAudit()
+      route = { ...route, view: 'settings', section: 'appearance' }
+      history.replaceState(null, '', serializeRoute(route))
+      if (activeDaemonID) saveDaemonRoute(activeDaemonID, serializeRoute(route))
+      loadRoute()
+    }
   })
 
   $effect(() => {
@@ -379,7 +412,7 @@
         mode = 'route-error'
         return
       }
-      mode = authority?.snapshot ? 'ready' : 'loading'
+      mode = authority?.snapshot && !next.link ? 'ready' : 'loading'
       loadRoute()
     }
     document.addEventListener('visibilitychange', visibility)
@@ -466,10 +499,15 @@
   }
 
   function navigate(next: AppRoute): void {
-    const opensCredentials =
-      route.kind !== 'route-error' && !isDaemonView(route.view) && isDaemonView(next.view)
-    if (opensCredentials && route.kind !== 'route-error') {
-      credentialReturnRoutes.set(credentialRouteKey(activeDaemonID), route)
+    const current = route.kind === 'kata' ? route : undefined
+    if (
+      next.link &&
+      (!next.issueUID ||
+        next.issueUID !== current?.issueUID ||
+        next.projectUID !== current?.projectUID)
+    ) {
+      next = { ...next }
+      delete next.link
     }
     if (
       route.kind !== 'route-error' &&
@@ -478,11 +516,7 @@
     ) {
       fenceCredentialAudit()
     }
-    history.pushState(
-      opensCredentials ? { kataCredentialReturn: credentialRouteKey(activeDaemonID) } : null,
-      '',
-      serializeRoute(next),
-    )
+    history.pushState(null, '', serializeRoute(next))
     route = next
     if (activeDaemonID) saveDaemonRoute(activeDaemonID, serializeRoute(next))
     mode = authority?.snapshot ? 'ready' : 'loading'
@@ -512,6 +546,7 @@
     const accepted = snapshots.state
     return (
       next.issueUID === undefined &&
+      !next.link &&
       !isDaemonView(next.view) &&
       accepted.snapshot !== undefined &&
       accepted.intent !== undefined &&
@@ -533,22 +568,6 @@
   function requestIntentForRoute(next: AppRoute): UISnapshotIntent {
     const intent = snapshotRequestIntent(snapshotIntentForRoute(next))
     return activeDaemonID ? { ...intent, daemonID: activeDaemonID } : intent
-  }
-
-  function returnFromCredentials(): void {
-    const state = history.state as { kataCredentialReturn?: unknown } | null
-    if (state?.kataCredentialReturn === credentialRouteKey(activeDaemonID)) {
-      history.back()
-      return
-    }
-    navigate(
-      credentialReturnRoutes.get(credentialRouteKey(activeDaemonID)) ?? {
-        kind: 'kata',
-        view: 'all-open',
-        graph: false,
-        filters: { status: [], owner: [], label: [], relationship: [] },
-      },
-    )
   }
 
   async function createProject(name: string, makeInbox = false): Promise<{ changed: boolean }> {
@@ -575,36 +594,27 @@
     )
   }
 
-  async function designateInbox(projectUID: string): Promise<void> {
-    const projects = authority?.snapshot?.catalog?.map(({ project }) => project) ?? []
-    const target = projects.find((project) => project.uid === projectUID)
-    if (!target) throw new Error('Inbox project is not available.')
-    if (target.metadata?.role === 'inbox') return
-
-    const accepted = await runMutation({ draft: projectUID }, (context) =>
-      patchInboxProject(target, context),
-    )
-    if (!accepted) {
-      throw new Error(mutationMessage(mutationState) ?? 'Could not designate the Inbox project.')
-    }
-  }
-
   async function createIssue(
     title: string,
     parent?: { projectID: number; projectUID: string; issueUID: string },
+    projectUID?: string,
   ): Promise<void> {
     const project = parent
       ? authority?.snapshot?.catalog?.find(({ project }) => project.id === parent.projectID)
           ?.project
-      : authority?.snapshot?.catalog?.find(({ project }) => project.metadata?.role === 'inbox')
-          ?.project
+      : authority?.snapshot?.catalog?.find(({ project }) =>
+          projectUID ? project.uid === projectUID : project.metadata?.role === 'inbox',
+        )?.project
     if (!project) throw new Error('Task project is not available.')
 
     const create =
-      pendingCreate?.title === title && pendingCreate.parentIssueUID === parent?.issueUID
+      pendingCreate?.title === title &&
+      pendingCreate.parentIssueUID === parent?.issueUID &&
+      pendingCreate.projectUID === project.uid
         ? pendingCreate
         : {
             title,
+            projectUID: project.uid,
             ...(parent ? { parentIssueUID: parent.issueUID } : {}),
             key: globalThis.crypto.randomUUID(),
           }
@@ -683,9 +693,11 @@
         ),
       )
     }
-    const body: { title?: string; body?: string } = {}
+    const body: { title?: string; body?: string; expected_content_revision?: number } = {}
     if (patch.title !== undefined) body.title = patch.title
     if (patch.body !== undefined) body.body = patch.body
+    if (patch.expected_content_revision !== undefined)
+      body.expected_content_revision = patch.expected_content_revision
     return runMutation({ draft: patch }, (context) =>
       editIssueRequest(
         { projectId: String(target.project_id), ref: target.ref },
@@ -769,15 +781,14 @@
       ),
     )
     if (!accepted) throw new Error(mutationMessage(mutationState) ?? 'Could not create recurrence.')
+    recurrenceRevision++
   }
 
   async function patchRecurrence(
-    id: number,
+    recurrence: KataRecurrence,
     input: KataPatchRecurrenceInput,
     etag: string,
   ): Promise<void> {
-    const recurrence = authority?.snapshot?.selected?.recurrences?.find((item) => item.id === id)
-    if (!recurrence) throw new Error(`Recurrence is not loaded: id=${id}`)
     const body: PatchRecurrenceRequestBody = {}
     if (input.rrule !== undefined) body.rrule = input.rrule
     if (input.dtstart !== undefined) body.dtstart = input.dtstart
@@ -790,24 +801,21 @@
         { headers: context.headers },
       ),
     )
-    if (accepted) return
+    if (accepted) {
+      recurrenceRevision++
+      return
+    }
     if (mutationState.kind === 'revision-conflict') {
-      const replacement = authority?.snapshot?.selected?.recurrences?.find(
-        (item) => item.uid === recurrence.uid,
-      )
       throw Object.assign(new Error(mutationState.detail), {
         status: 412,
         code: mutationState.code,
-        ...(replacement
-          ? { response: { recurrence: replacement, etag: `"rev-${replacement.revision}"` } }
-          : {}),
       })
     }
     throw new Error(mutationMessage(mutationState) ?? 'Could not update recurrence.')
   }
 
-  async function deleteRecurrence(recurrence: KataRecurrence): Promise<boolean> {
-    return runMutation(
+  async function deleteRecurrence(recurrence: KataRecurrence): Promise<void> {
+    const accepted = await runMutation(
       { draft: recurrence, revision: `"rev-${recurrence.revision}"` },
       async (context) => {
         const result = await deleteRecurrenceRequest(
@@ -820,6 +828,13 @@
         return { ...result, data: result.status === 204 ? true : result.data }
       },
     )
+    if (!accepted) {
+      if (mutationState.kind === 'revision-conflict') {
+        throw Object.assign(new Error(mutationState.detail), { status: 412 })
+      }
+      throw new Error(mutationMessage(mutationState) ?? 'Could not stop repeating.')
+    }
+    recurrenceRevision++
   }
 
   function recurrenceTemplate(
@@ -957,15 +972,6 @@
         context.body({}, requestActor),
       ),
     )
-  }
-
-  function deleteIssue(): Promise<boolean> {
-    return closeIssue({
-      reason: 'wontfix',
-      message:
-        'Removed from active work through the web issue detail because this task is no longer intended to be completed.',
-      evidence: [],
-    })
   }
 
   async function runMutation(
@@ -1182,7 +1188,7 @@
       references = undefined
       acceptedRoute = undefined
       mode = 'loading'
-      daemonError = 'Configured daemons are unavailable'
+      daemonError = rosterUnavailable
       return false
     } finally {
       if (daemonRosterAbort === abort) daemonRosterAbort = undefined
@@ -1228,6 +1234,7 @@
     references = undefined
     activeDaemonID = id
     explicitDaemonID = id
+    linkUpgradeRequired = false
     route = restored
     acceptedRoute = undefined
     history.replaceState(null, '', serializeRoute(restored))
@@ -1250,6 +1257,11 @@
       return
     }
 
+    if ((linkUpgradeRequired || currentRoute().kind === 'route-error') && activeDaemonID === id) {
+      daemonSwitching = false
+      return
+    }
+
     daemonError = `Could not connect to ${id}`
     if (sourceDaemon && sourceRoute) {
       activeDaemonID = sourceDaemon
@@ -1266,7 +1278,54 @@
 
   async function refreshSnapshot(full: boolean): Promise<boolean> {
     if (route.kind === 'route-error') return false
-    const accepted = await snapshots.load(requestIntentForRoute(route), { full })
+    if (route.link && !route.issueUID) {
+      linkUpgradeRequired = false
+      const pending = route
+      const link = route.link
+      const daemonID = activeDaemonID
+      mode = 'loading'
+      try {
+        const result = await resolveUIIssueReference({
+          ref: link.issue,
+          ...(link.scope ? { project: link.scope } : {}),
+        })
+        if (destroyed || route !== pending || daemonID !== activeDaemonID) return false
+        if (result.status === 401) {
+          snapshots.markAuthenticationRequired()
+          requireAuthentication()
+          return false
+        }
+        if (result.status === 422) {
+          linkUpgradeRequired = true
+          snapshots.markFailure('Upgrade the selected daemon to open short issue links.')
+          return false
+        }
+        if (result.status === 404) {
+          route = {
+            kind: 'route-error',
+            path: window.location.pathname + window.location.search,
+            reason: 'issue_uid',
+            searchRef: link.issue,
+          }
+          mode = 'route-error'
+          return false
+        }
+        if (result.status !== 200) {
+          snapshots.markFailure()
+          return false
+        }
+        const resolved: AppRoute = { ...pending, issueUID: result.data.issue.uid }
+        if (result.data.scope_project_uid) resolved.projectUID = result.data.scope_project_uid
+        else delete resolved.projectUID
+        route = resolved
+      } catch {
+        if (!destroyed && route === pending && daemonID === activeDaemonID) snapshots.markFailure()
+        return false
+      }
+    }
+    const snapshotRoute = currentRoute()
+    if (snapshotRoute.kind === 'route-error') return false
+    const accepted = await snapshots.load(requestIntentForRoute(snapshotRoute), { full })
     if (snapshots.state.authenticationRequired) {
       requireAuthentication()
       return false
@@ -1324,7 +1383,7 @@
         requireAuthentication()
       } else {
         credentialTokens = []
-        credentialError = 'Credential inventory is unavailable.'
+        credentialError = "Couldn't load credentials."
       }
     } catch {
       if (
@@ -1334,7 +1393,7 @@
         daemonID === activeDaemonID
       ) {
         credentialTokens = []
-        credentialError = 'Credential inventory is unavailable.'
+        credentialError = "Couldn't load credentials."
       }
     } finally {
       if (generation === credentialGeneration) credentialLoading = false
@@ -1354,21 +1413,21 @@
   function isDaemonView(view: AppRoute['view']): boolean {
     return view === 'credentials' || view === 'settings'
   }
-
-  function credentialRouteKey(daemonID: string | undefined): string {
-    return daemonID ?? '__direct__'
-  }
 </script>
 
-<main aria-labelledby="kata-heading" class="kata-app" class:ready={mode === 'ready'}>
-  <h1 id="kata-heading" class:kit-sr-only={mode === 'ready'}>Kata</h1>
+<main aria-label="Kata" class="kata-app" class:ready={mode === 'ready' && !versionMismatch}>
+  {#if mode === 'ready' && !versionMismatch}<h1 class="kit-sr-only">Kata</h1>{/if}
   {#if versionMismatch}
     <VersionMismatch />
   {:else if mode === 'loading'}
     {#if daemonError}
-      <section class="kata-authority-recovery" role="alert">
-        <span>{daemonError}</span>
-        <Button label="Retry daemon roster" onclick={() => void startAuthority()} />
+      <StatusPage alert tone="danger" title="Can't reach a server" description={daemonError}>
+        <Button
+          tone="info"
+          surface="solid"
+          label="Try again"
+          onclick={() => void startAuthority()}
+        />
         {#if daemonInfos.length > 0}
           <KataDaemonSwitcher
             daemons={daemonInfos}
@@ -1380,11 +1439,15 @@
             onOpen={() => void refreshDaemonRoster()}
           />
         {/if}
-      </section>
+      </StatusPage>
     {:else if authority?.error && !authority.loading}
-      <section class="kata-authority-recovery" role="alert">
-        <span>{authority.error}</span>
-        <Button label="Retry" onclick={() => void startAuthority()} />
+      <StatusPage
+        alert
+        tone="danger"
+        title="Kata couldn't load this workspace"
+        description={authority.error}
+      >
+        <Button tone="info" surface="solid" label="Retry" onclick={() => void startAuthority()} />
         {#if daemonInfos.length > 0}
           <KataDaemonSwitcher
             daemons={daemonInfos}
@@ -1396,19 +1459,29 @@
             onOpen={() => void refreshDaemonRoster()}
           />
         {/if}
-      </section>
+      </StatusPage>
     {:else}
-      <p role="status">Loading Kata…</p>
+      <div role="status"><h1 class="loading-heading">Loading…</h1></div>
     {/if}
   {:else if route.kind === 'route-error'}
-    <RouteError {route} onSearch={search} />
+    <RouteError
+      {route}
+      onSearch={search}
+      onOpenInbox={() =>
+        navigate({
+          kind: 'kata',
+          view: 'inbox',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [], text: '' },
+        })}
+    />
   {:else}
     {#if mode === 'launch'}
       <LaunchHint issueRef={undefined} />
     {:else if mode === 'login'}
       <LoginView {returnPath} onLogin={login} />
     {/if}
-    {#if !authority?.snapshot && daemonInfos.length > 0 && (mode === 'launch' || mode === 'login')}
+    {#if daemonInfos.length > 0 && (mode === 'launch' || mode === 'login')}
       <KataDaemonSwitcher
         daemons={daemonInfos}
         activeId={activeDaemonID}
@@ -1419,7 +1492,7 @@
         onOpen={() => void refreshDaemonRoster()}
       />
     {/if}
-    {#if authority?.snapshot && (mode === 'ready' || mode === 'launch' || mode === 'login')}
+    {#if authority?.snapshot && mode === 'ready'}
       <AppShell
         {syncRefreshGeneration}
         {searchSettingsPostFetch}
@@ -1427,6 +1500,9 @@
         requestedRoute={route !== acceptedRoute ? route : undefined}
         onSearchEmpty={() => reportOutcome('search_empty')}
         snapshot={shellSnapshot!}
+        selfActor={shellSnapshot!.capabilities.actor_policy === 'identity'
+          ? shellSnapshot!.capabilities.account
+          : requestActor}
         loading={authority.loading}
         canMutate={authority.canMutate}
         {mutationPending}
@@ -1447,14 +1523,12 @@
         onAccessMutation={(draft, mutate) => runMutation({ draft }, mutate, accessMutations)}
         onRefreshCredentials={refreshCredentials}
         canAdministerDaemon={canAdministerDaemon()}
-        onBackFromCredentials={returnFromCredentials}
         onSelectDaemon={(id) => void switchDaemon(id)}
         onOpenDaemon={() => void refreshDaemonRoster()}
         onPreferencesChange={updatePreferences}
         ownerOptions={(references?.owners ?? []).map((owner) => ({ name: owner, label: owner }))}
         onNavigate={navigate}
         onCreateProject={createProject}
-        onDesignateInbox={designateInbox}
         onCreateIssue={createIssue}
         {searchReferences}
         onMoveIssue={moveIssue}
@@ -1470,7 +1544,7 @@
         onRemoveLabel={removeLabel}
         onCloseIssue={closeIssue}
         onReopenIssue={reopenIssue}
-        onDeleteIssue={deleteIssue}
+        {recurrenceRevision}
         onCreateRecurrence={createRecurrence}
         onPatchRecurrence={patchRecurrence}
         onDeleteRecurrence={deleteRecurrence}

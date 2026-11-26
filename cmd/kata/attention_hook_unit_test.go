@@ -12,6 +12,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 )
 
 type fakeAttnDaemon struct {
@@ -24,7 +25,7 @@ type fakeAttnDaemon struct {
 
 type conditionalMetaWrite struct {
 	ref      string
-	patch    map[string]string
+	patch    map[string]any
 	revision int64
 }
 
@@ -39,7 +40,7 @@ func (f *fakeAttnDaemon) lookup(ref string) attnLookup {
 	return attnLookup{kind: lookupGone}
 }
 
-func (f *fakeAttnDaemon) setMetaIfRevision(ref string, patch map[string]string, revision int64) attnWriteResult {
+func (f *fakeAttnDaemon) setMetaIfRevision(ref string, patch map[string]any, revision int64) attnWriteResult {
 	call := len(f.conditionalWrites)
 	f.conditionalWrites = append(f.conditionalWrites, conditionalMetaWrite{
 		ref: ref, patch: patch, revision: revision,
@@ -50,7 +51,7 @@ func (f *fakeAttnDaemon) setMetaIfRevision(ref string, patch map[string]string, 
 	return attnWriteApplied
 }
 
-func TestAttnStart_ConditionallySetsOnlyAttentionOKForOpenIssue(t *testing.T) {
+func TestAttnStart_ConditionallySetsAttentionOKForOpenIssue(t *testing.T) {
 	d := &fakeAttnDaemon{lookups: map[string]attnLookup{
 		"abc4": {kind: lookupOpen, attention: attnValueNeedsHuman, revision: 13},
 	}}
@@ -59,7 +60,7 @@ func TestAttnStart_ConditionallySetsOnlyAttentionOKForOpenIssue(t *testing.T) {
 
 	assert.Equal(t, []string{"abc4"}, d.lookupRefs)
 	assert.Equal(t, []conditionalMetaWrite{{
-		ref: "abc4", patch: map[string]string{attentionKey: attnValueOK}, revision: 13,
+		ref: "abc4", patch: map[string]any{attentionKey: attnValueOK, attentionSessionKey: nil}, revision: 13,
 	}}, d.conditionalWrites)
 }
 
@@ -95,9 +96,41 @@ func TestAttnStart_RetriesOnceAfterRevisionConflict(t *testing.T) {
 
 	assert.Equal(t, []string{"abc4", "abc4"}, d.lookupRefs)
 	assert.Equal(t, []conditionalMetaWrite{
-		{ref: "abc4", patch: map[string]string{attentionKey: attnValueOK}, revision: 13},
-		{ref: "abc4", patch: map[string]string{attentionKey: attnValueOK}, revision: 14},
+		{ref: "abc4", patch: map[string]any{attentionKey: attnValueOK, attentionSessionKey: nil}, revision: 13},
+		{ref: "abc4", patch: map[string]any{attentionKey: attnValueOK, attentionSessionKey: nil}, revision: 14},
 	}, d.conditionalWrites)
+}
+
+func TestAttentionStartPreservesChangedMessageOnRetry(t *testing.T) {
+	for _, native := range []bool{false, true} {
+		t.Run(map[bool]string{false: "legacy", true: "native"}[native], func(t *testing.T) {
+			d := &fakeAttnDaemon{
+				lookupSequence: []attnLookup{
+					{kind: lookupOpen, attention: attnValueNeedsHuman, message: db.ExpiredAssignmentMessage, session: "old", revision: 1},
+					{kind: lookupOpen, attention: attnValueNeedsHuman, message: "please review", session: "old", revision: 2},
+				},
+				conditionalResults: []attnWriteResult{attnWriteConflict},
+			}
+			if native {
+				require.NoError(t, attnStartSession(d, "abc4", "same"))
+			} else {
+				attnStart(d, "abc4")
+			}
+			require.Len(t, d.conditionalWrites, 2)
+			assert.Contains(t, d.conditionalWrites[0].patch, attentionMsgKey)
+			assert.Nil(t, d.conditionalWrites[0].patch[attentionMsgKey])
+			assert.NotContains(t, d.conditionalWrites[1].patch, attentionMsgKey)
+		})
+	}
+}
+
+func TestNativeAttentionStartClearsExpiryForSameSession(t *testing.T) {
+	d := &fakeAttnDaemon{lookups: map[string]attnLookup{
+		"abc4": {kind: lookupOpen, attention: attnValueNeedsHuman, message: db.ExpiredAssignmentMessage, session: "same", revision: 1},
+	}}
+	require.NoError(t, attnStartSession(d, "abc4", "same"))
+	require.Len(t, d.conditionalWrites, 1)
+	assert.Equal(t, map[string]any{attentionKey: attnValueOK, attentionMsgKey: nil, attentionSessionKey: "same"}, d.conditionalWrites[0].patch)
 }
 
 func TestAttnEnd_AtomicallySetsHandoffForOpenOKIssue(t *testing.T) {
@@ -110,7 +143,7 @@ func TestAttnEnd_AtomicallySetsHandoffForOpenOKIssue(t *testing.T) {
 	assert.Equal(t, []string{"abc4"}, d.lookupRefs)
 	require.Equal(t, []conditionalMetaWrite{{
 		ref: "abc4",
-		patch: map[string]string{
+		patch: map[string]any{
 			attentionKey:    attnValueNeedsHuman,
 			attentionMsgKey: attnHandoffMsg,
 		},
@@ -303,7 +336,7 @@ func TestLiveAttnDaemon_ConditionalSetSendsOnlyActorPatchAndIfMatch(t *testing.T
 	flags.Project = "example-project"
 	flags.As = "agent-a"
 	d := &liveAttnDaemon{cmd: cmd}
-	result := d.setMetaIfRevision("abc4", map[string]string{
+	result := d.setMetaIfRevision("abc4", map[string]any{
 		attentionKey:    attnValueNeedsHuman,
 		attentionMsgKey: attnHandoffMsg,
 	}, 17)

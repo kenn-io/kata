@@ -6,7 +6,6 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,6 +17,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/testfix"
 )
 
 var errRelayPostCommitLookup = errors.New("post-commit event lookup failed")
@@ -159,14 +159,6 @@ func TestRelayEnrollmentHTTPAccountAndHandshake(t *testing.T) {
 	})
 }
 
-type relayCountingBody struct {
-	reader io.Reader
-	reads  int
-}
-
-func (b *relayCountingBody) Read(p []byte) (int, error) { b.reads++; return b.reader.Read(p) }
-func (*relayCountingBody) Close() error                 { return nil }
-
 // R3: transport authentication precedes decoding attacker-controlled bodies,
 // including on the small ACK route. Scope is resolved from the URL and grant.
 func TestRelayHTTPAuthenticatesBeforeReadingBody(t *testing.T) {
@@ -175,9 +167,9 @@ func TestRelayHTTPAuthenticatesBeforeReadingBody(t *testing.T) {
 		t.Cleanup(func() { require.NoError(t, server.Close()) })
 		for _, suffix := range []string{":accept", ":ack"} {
 			t.Run(suffix, func(t *testing.T) {
-				body := &relayCountingBody{reader: strings.NewReader(`{"stream":"events","after":0,"envelopes":[]}`)}
+				body := &testfix.ReadCountingBody{Reader: strings.NewReader(`{"stream":"events","after":0,"envelopes":[]}`)}
 				if suffix == ":ack" {
-					body.reader = strings.NewReader(`{"stream":"events","epoch":1,"through":1,"digest":"digest"}`)
+					body.Reader = strings.NewReader(`{"stream":"events","epoch":1,"through":1,"digest":"digest"}`)
 				}
 				request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://localhost/api/v1/projects/1/federation/relay"+suffix, body)
 				request.Header.Set("Authorization", "Bearer invalid-relay-test-token")
@@ -185,7 +177,7 @@ func TestRelayHTTPAuthenticatesBeforeReadingBody(t *testing.T) {
 				response := httptest.NewRecorder()
 				server.Handler().ServeHTTP(response, request)
 				require.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
-				require.Zero(t, body.reads, "invalid credentials must not read the relay body")
+				require.Zero(t, body.Reads, "invalid credentials must not read the relay body")
 			})
 		}
 	})

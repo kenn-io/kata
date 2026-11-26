@@ -8,16 +8,59 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/daemonruntime"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
+
+func TestPrepareWebUIRequiresAssetsDuringDaemonSelection(t *testing.T) {
+	home := setupKataEnv(t)
+	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+	t.Setenv("KATA_SERVER", "")
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(home, "kata.db"))
+	require.NoError(t, err)
+	uid := store.InstanceUID()
+	require.NoError(t, store.Close())
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/ping" {
+			_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version, os.Getpid())
+			return
+		}
+		_, _ = fmt.Fprintf(w, `{"instance_uid":%q}`, uid)
+	}))
+	t.Cleanup(server.Close)
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
+	require.True(t, ok)
+	record := kitdaemon.RuntimeRecord{PID: os.Getpid(), ProcessIdentityV2: identity, Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://"), StartedAt: time.Now(), Metadata: map[string]string{daemonruntime.RuntimeRestartExecutableKey: "1", "web_origin": server.URL, "web_origin_stable": "true", "web_capabilities": "loopback,sse,placeholder-assets"}}
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(record)
+	require.NoError(t, err)
+	oldRestart := RestartLocalDaemon
+	t.Cleanup(func() { RestartLocalDaemon = oldRestart })
+	restarts := 0
+	RestartLocalDaemon = func(_ context.Context, target *daemonruntime.Namespace, old kitdaemon.RuntimeRecord) (kitdaemon.RuntimeRecord, error) {
+		restarts++
+		assert.Equal(t, ns.DataDir, target.DataDir)
+		assert.Equal(t, record.PID, old.PID)
+		record.Metadata["web_capabilities"] = "loopback,sse"
+		_, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(record)
+		return record, err
+	}
+	_, err = PrepareWebUI(t.Context(), PrepareWebUIOptions{RequireWebAssets: true})
+	require.NoError(t, err)
+	assert.Equal(t, 1, restarts)
+}
 
 func TestOpenWebUILocalLoopbackOpensDirectly(t *testing.T) {
 	var opened WebUILaunch

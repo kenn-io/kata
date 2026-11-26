@@ -13,6 +13,22 @@ import (
 const goodULID1 = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 const goodULID2 = "01ARZ3NDEKTSV4RRFFQ69G5FAW"
 
+func TestValidateAttention(t *testing.T) {
+	for _, raw := range []string{`"ok"`, `"needs-human"`, `"stuck"`, `null`} {
+		assert.NoError(t, Validate(IssueRegistry, "work.attention", jsontext.Value(raw)))
+	}
+	for _, raw := range []string{`"working"`, `"\"needs-human\""`, `""`, `true`} {
+		err := Validate(IssueRegistry, "work.attention", jsontext.Value(raw))
+		require.ErrorIs(t, err, ErrInvalidValue)
+		assert.Equal(t, "invalid value: work.attention must be one of ok, needs-human, stuck", err.Error())
+	}
+	for _, raw := range []string{`null`, ``} {
+		err := ValidateCreateValue(IssueRegistry, "work.attention", jsontext.Value(raw))
+		require.ErrorIs(t, err, ErrInvalidValue)
+		assert.Contains(t, err.Error(), "ok, needs-human, stuck")
+	}
+}
+
 // TestValidateCreateValue_RejectsNullAndEmpty pins the create-time rule that a
 // null or empty value is a caller error (nothing to clear at creation), and
 // that the rejection wraps ErrInvalidValue so handlers map it to a 400.

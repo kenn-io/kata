@@ -36,6 +36,7 @@ export interface KataFixture {
   projectID: number
   projectUID: string
   launch(page: Page, route?: string): Promise<BrowserCredentials>
+  loginOwner(page: Page, route: string): Promise<BrowserCredentials>
   snapshot(
     page: Page,
     credentials: BrowserCredentials,
@@ -72,16 +73,22 @@ const daemonStderr = new WeakMap<ChildProcess, string>()
 
 export const test = base.extend<{ kata: KataFixture; diagnosticKata: KataFixture }>({
   kata: [
-    async ({ browserName }, use) => {
+    async ({ browserName, page }, use) => {
       void browserName
       const running = await startProductionFixture()
       try {
         await use(running.fixture)
       } finally {
-        await running.stop()
+        try {
+          // Finish intercepted requests before their temporary daemon shuts down.
+          await page.unrouteAll({ behavior: 'wait' })
+        } finally {
+          await running.stop()
+        }
       }
     },
-    { scope: 'worker', timeout: 120_000 },
+    // Each test needs fresh tasks, projects, and daemon settings, even on the same worker.
+    { scope: 'test', timeout: 120_000 },
   ],
   diagnosticKata: async ({ browserName }, use) => {
     void browserName
@@ -273,7 +280,7 @@ listen = "127.0.0.1:${port}"
     },
     async launch(page, route = '/kata?view=all-open') {
       await page.goto(`${origin}${route}`)
-      await expect(page.getByRole('button', { name: 'New task' })).toBeVisible()
+      await expect(page.getByRole('region', { name: 'Kata workspace' })).toBeVisible()
       const credentials = await page.evaluate(() => {
         const value = sessionStorage.getItem('kata.web.session.v1')
         if (!value) return null
@@ -285,6 +292,22 @@ listen = "127.0.0.1:${port}"
       })
       if (!credentials?.session || !credentials.csrf)
         throw new Error('browser session was not stored')
+      return credentials
+    },
+    async loginOwner(page, route) {
+      const login = await page.request.post(`${origin}/api/v1/ui/session/login`, {
+        headers: { Origin: origin },
+        data: { token: 'example-local-token', return_path: route },
+      })
+      expect(login.ok()).toBe(true)
+      const credentials = (await login.json()) as BrowserCredentials
+      await page.evaluate((value) => {
+        sessionStorage.setItem(
+          'kata.web.session.v1',
+          JSON.stringify({ session: value.session, csrf: value.csrf }),
+        )
+      }, credentials)
+      await page.goto(`${origin}${route}`)
       return credentials
     },
     async snapshot(page, credentials, query = 'view=all-open') {

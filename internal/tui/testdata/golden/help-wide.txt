@@ -28,7 +28,7 @@ left        collapse                   ↑↓     scroll detail viewport
 E           expand/collapse all        enter  open child
 n           new issue (form)
 v           toggle flat/nested view
-o           toggle graph order
+o           cycle child order
 x           close
 V           close with evidence
 r           reopen

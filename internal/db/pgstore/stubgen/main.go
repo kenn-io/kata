@@ -43,6 +43,7 @@ const (
 // *sql.DB. Each method that lands a real query gets added here, and
 // the generator's output for that method disappears on the next regenerate.
 var alreadyImplemented = map[string]bool{
+	"FormerInstanceUIDs":               true,
 	"DispatchRecurringCron":            true, // cron.go
 	"ListRecurringCronJobs":            true, // cron.go
 	"ActivateMCPEventSubscription":     true, // mcp_event_subscriptions.go
@@ -109,6 +110,8 @@ var alreadyImplemented = map[string]bool{
 	"AttributionReceiptsAfter": true, // federation_provenance.go
 	"ExportAttribution":        true, // federation_provenance.go
 
+	"ReplaceFederationBoundActorWhenSettled": true, // federation_control.go
+
 	"CreateTeam":                           true, // project_access.go
 	"TeamByUID":                            true, // project_access.go
 	"ListTeams":                            true, // project_access.go
@@ -119,8 +122,11 @@ var alreadyImplemented = map[string]bool{
 	"ProjectAccessPolicy":                  true, // project_access.go
 	"SetProjectAccessPolicy":               true, // project_access.go
 	"AccessibleProjectUIDs":                true, // project_access.go
+	"ProjectAccessibleToActor":             true, // project_access.go
+	"AnonymousProjectAccess":               true, // project_access.go
 	"AnonymousAccessibleProjectUIDs":       true, // project_access.go
 	"ProjectAccessRevision":                true, // project_access.go
+	"ProjectByUIDTx":                       true, // projects.go
 	"ProjectAccessTransactionFence":        true, // project_access.go
 	"ExportProjectAccess":                  true, // project_access.go
 	"ApplyExternalFieldProjection":         true, // external_roots.go
@@ -137,6 +143,7 @@ var alreadyImplemented = map[string]bool{
 	"CreateProjectFederationEnrollment":    true, // federation_control.go
 	"RotateFederationEnrollment":           true, // federation_control.go
 	"EnableFederationPush":                 true, // federation_control.go
+	"DisableFederationPushWhenSettled":     true, // federation_control.go
 	"EnableProjectFederation":              true, // federation_projection.go
 	"ExportFederationBindings":             true, // export.go
 	"ExportFederationEnrollments":          true, // export.go
@@ -157,6 +164,7 @@ var alreadyImplemented = map[string]bool{
 	"RecordFederationSyncError":            true, // federation_control.go
 	"RecordFederationSyncPullStarted":      true, // federation_control.go
 	"RecordFederationSyncPullSuccess":      true, // federation_control.go
+	"RecordFederationHeldPullSuccess":      true, // federation_control.go
 	"RecordFederationSyncPushStarted":      true, // federation_control.go
 	"RecordFederationSyncPushSuccess":      true, // federation_control.go
 	"RecordFederationSyncReset":            true, // federation_control.go
@@ -176,6 +184,7 @@ var alreadyImplemented = map[string]bool{
 	"ApplyExternalRootProjection":          true, // external_roots.go
 	"AttachAlias":                          true, // aliases.go
 	"BatchProjectStats":                    true, // project_lifecycle.go
+	"ChangeLabelsAndEvents":                true, // labels.go
 	"ChildrenOfIssue":                      true, // relationship_queries.go
 	"ClaimIssueSyncBinding":                true, // issue_sync.go
 	"ClaimExternalRootBinding":             true, // external_roots.go
