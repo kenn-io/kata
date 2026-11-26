@@ -1161,3 +1161,45 @@ func TestDaemonDiagnoseIgnoresOtherDatabaseCutover(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(out), &body))
 	assert.Equal(t, "work", body["profile"])
 }
+
+func TestDaemonDiagnoseAndStatusDuringInitialStartup(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_DB", "")
+	t.Setenv("KATA_DSN", "")
+	t.Setenv("KATA_SERVER", "")
+	t.Chdir(t.TempDir())
+
+	path := filepath.Join(home, "kata.db")
+	// Simulate a newly created SQLite file whose schema bootstrap has not
+	// committed yet (no meta table).
+	require.NoError(t, os.WriteFile(path, nil, 0o600))
+
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	releaseOwner, err := daemonruntime.AcquireStoreOwnerLock(t.Context(), daemonruntime.StoreOwnerLockPaths(ns.DataDir, path))
+	require.NoError(t, err)
+	t.Cleanup(releaseOwner)
+
+	out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
+	require.NoError(t, err)
+	assertDiagnosticState(t, out, "local_stopped")
+
+	statusOut, _, err := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
+	cliErr := requireCLIError(t, err, ExitDaemonUnavail)
+	assert.Equal(t, "local_stopped", cliErr.Code)
+	var status struct {
+		Selected struct {
+			State string `json:"state"`
+		} `json:"selected"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(statusOut), &status))
+	assert.Equal(t, "local_stopped", status.Selected.State)
+
+	// Releasing the owner lock means no daemon is initializing storage, so the
+	// uninitialized database file must report unreadable_storage again.
+	releaseOwner()
+	out, _, err = executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
+	require.NoError(t, err)
+	assertDiagnosticState(t, out, "unreadable_storage")
+}
