@@ -119,7 +119,7 @@ export function describeKataEvent(event: KataTaskEvent): KataEventDescriptor {
       return { icon: FolderInputIcon, label, tone: 'neutral' }
     }
     case 'issue.soft_deleted': {
-      const reason = payload.reason as string | undefined
+      const reason = typeof payload.reason === 'string' ? payload.reason : ''
       return {
         icon: TrashIcon,
         label: reason ? `deleted (${reason})` : 'deleted',

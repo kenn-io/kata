@@ -55,7 +55,7 @@ var eventDescribers = map[string]eventDescriber{
 	"issue.priority_cleared":   priorityClearedDesc,
 	"issue.updated":            staticDesc("updated"),
 	"issue.restated":           staticDesc("updated from an imported copy"),
-	"issue.soft_deleted":       func(e EventLogEntry) string { return "deleted" + reasonSuffix(e) },
+	"issue.soft_deleted":       staticDesc("deleted"),
 	"issue.restored":           staticDesc("restored"),
 }
 
@@ -245,8 +245,13 @@ func eventChunkLines(e EventLogEntry, width int, isCursor bool, current map[stri
 		sanitizeForDisplay(authorname.Display(e.Actor)),
 		sanitizeForLine(eventDescription(e)))
 	lines := []string{applyActivityCursor(head, isCursor)}
-	if e.Type == "issue.closed" {
+	switch e.Type {
+	case "issue.closed":
 		lines = append(lines, closeDetailLines(e, width, current)...)
+	case "issue.soft_deleted":
+		if reason := payloadString(e, "reason"); reason != "" {
+			lines = append(lines, wrapDetailRow("  reason: ", sanitizeForLine(reason), width)...)
+		}
 	}
 	return lines
 }
@@ -438,7 +443,7 @@ func joinStringArray(m map[string]any, key string) string {
 	return strings.Join(parts, ", ")
 }
 
-// reasonSuffix renders " (reason)" for closed and deleted events that carry one.
+// reasonSuffix renders " (reason)" for closed events that carry one.
 func reasonSuffix(e EventLogEntry) string {
 	if r := payloadString(e, "reason"); r != "" {
 		return " (" + r + ")"

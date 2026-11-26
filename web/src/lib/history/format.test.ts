@@ -55,6 +55,14 @@ describe('describeKataEvent', () => {
     expect(descriptor.label).toBe('deleted (duplicate of the import task)')
     expect(descriptor.tone).toBe('negative')
   })
+
+  test.each([[{ reason: { text: 'x' } }], [{ reason: 42 }]])(
+    'issue.soft_deleted ignores a non-string reason %j',
+    (payload) => {
+      expect(describeKataEvent(makeEvent('issue.soft_deleted', payload)).label).toBe('deleted')
+    },
+  )
+
   test('issue.labeled formats the label value', () => {
     expect(describeKataEvent(makeEvent('issue.labeled', { label: 'p0' })).label).toBe(
       'added label p0',
