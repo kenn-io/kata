@@ -14,9 +14,11 @@ import (
 	"strings"
 	"testing"
 
+	"cloud.google.com/go/auth/credentials"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kit/embedconfig"
 )
 
 func TestDaemonConfigLocalProfile(t *testing.T) {
@@ -442,6 +444,83 @@ func TestLocalProfileEnvironmentTrustsConfiguredCertificateAuthority(t *testing.
 			child.Env = append(env, "PROFILE_TLS_PROBE="+server.URL)
 			output, err := child.CombinedOutput()
 			require.NoError(t, err, "%s", output)
+		})
+	}
+}
+
+func TestLocalProfileEnvironmentVertexCredentials(t *testing.T) {
+	if os.Getenv("PROFILE_AWS_ADC_PROBE") == "1" {
+		creds, err := credentials.DetectDefault(&credentials.DetectOptions{Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}})
+		require.NoError(t, err)
+		token, err := creds.Token(t.Context())
+		require.NoError(t, err)
+		require.Equal(t, "example-google-token", token.Value)
+		return
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseForm())
+		subject, err := url.QueryUnescape(r.Form.Get("subject_token"))
+		require.NoError(t, err)
+		require.Contains(t, subject, "example-access")
+		require.Contains(t, subject, "example-session")
+		require.Contains(t, subject, "us-west-1")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"example-google-token","token_type":"Bearer","expires_in":3600}`))
+	}))
+	t.Cleanup(server.Close)
+	path := filepath.Join(t.TempDir(), "credentials.json")
+	body := fmt.Sprintf(`{"type":"external_account","audience":"//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/example/providers/aws","subject_token_type":"urn:ietf:params:aws:token-type:aws4_request","token_url":%q,"credential_source":{"environment_id":"aws1","region_url":"http://127.0.0.1/region","url":"http://127.0.0.1/credentials","regional_cred_verification_url":"https://sts.{region}.amazonaws.com?Action=GetCallerIdentity&Version=2011-06-15"}}`, server.URL)
+	require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
+	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", path)
+	t.Setenv("GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES", "1")
+	for key, value := range map[string]string{"AWS_ACCESS_KEY_ID": "example-access", "AWS_SECRET_ACCESS_KEY": "example-secret", "AWS_SESSION_TOKEN": "example-session"} {
+		t.Setenv(key, value)
+	}
+	profile := config.LocalProfileConfig{Home: t.TempDir(), Config: &config.DaemonConfig{}}
+	env, err := config.LocalProfileEnvironment(profile, true)
+	require.NoError(t, err)
+	require.NotContains(t, env, "GOOGLE_APPLICATION_CREDENTIALS="+path)
+	require.NotContains(t, env, "GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES=1")
+	require.NotContains(t, env, "AWS_ACCESS_KEY_ID=example-access")
+	profile.Config.Search.Embeddings.API = embedconfig.APIVertex
+	for _, regionKey := range []string{"AWS_REGION", "AWS_DEFAULT_REGION"} {
+		t.Run(regionKey, func(t *testing.T) {
+			t.Setenv("AWS_REGION", "")
+			t.Setenv("AWS_DEFAULT_REGION", "")
+			t.Setenv(regionKey, "us-west-1")
+			env, err := config.LocalProfileEnvironment(profile, true)
+			require.NoError(t, err)
+			require.Contains(t, env, "GOOGLE_APPLICATION_CREDENTIALS="+path)
+			require.Contains(t, env, "GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES=1")
+			require.Contains(t, env, regionKey+"=us-west-1")
+			//nolint:gosec // Relaunch this test with the generated local-profile environment.
+			child := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestLocalProfileEnvironmentVertexCredentials$")
+			child.Env = append(env, "PROFILE_AWS_ADC_PROBE=1")
+			output, err := child.CombinedOutput()
+			require.NoError(t, err, "%s", output)
+		})
+	}
+	t.Setenv("GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES", "true")
+	env, err = config.LocalProfileEnvironment(profile, true)
+	require.NoError(t, err)
+	require.NotContains(t, env, "GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES=true")
+}
+
+func TestLocalProfileEnvironmentConnectorSharesVertexCredentials(t *testing.T) {
+	for _, key := range []string{"GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_REGION", "AWS_DEFAULT_REGION"} {
+		t.Run(key, func(t *testing.T) {
+			value := "example-value"
+			if key == "GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES" {
+				value = "1"
+			}
+			t.Setenv(key, value)
+			profile := config.LocalProfileConfig{Home: t.TempDir(), Config: &config.DaemonConfig{
+				Search:     config.SearchConfig{Embeddings: config.EmbeddingsConfig{API: embedconfig.APIVertex}},
+				Connectors: []config.ConnectorConfig{{Env: map[string]string{"CREDENTIAL": key}}},
+			}}
+			env, err := config.LocalProfileEnvironment(profile, true)
+			require.NoError(t, err)
+			assert.Equal(t, 1, strings.Count("\n"+strings.Join(env, "\n")+"\n", "\n"+key+"="+value+"\n"))
 		})
 	}
 }

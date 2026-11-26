@@ -36,8 +36,8 @@ search then runs two legs and merges their results:
 Kata merges both lists with reciprocal rank fusion, so an issue that ranks high
 in either leg surfaces, and an issue that ranks high in both rises to the top.
 
-Kata can run a shared local embeddings server or use an OpenAI-compatible
-`/embeddings` endpoint, such as Ollama or a hosted provider.
+Kata can run a shared local embeddings server, use an OpenAI-compatible
+`/embeddings` endpoint, or connect to [Vertex AI](../reference/configuration.md#semantic-search).
 
 ## Enabling it
 

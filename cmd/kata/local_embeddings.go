@@ -333,6 +333,7 @@ func localEmbeddingsConfig(data []byte, current config.EmbeddingsConfig, baseURL
 	}
 	previous := maps.Clone(fields)
 	delete(fields, "base_url")
+	delete(fields, "api")
 	// Environment overrides don't persist, so the written recipe must suit the built-in server.
 	if localEmbeddingRecipeNeedsReset(written.Embeddings, current) {
 		for _, key := range []string{"model", "dims", "document_prefix", "document_suffix", "query_prefix", "query_suffix", "fingerprint_salt", "request_dimensions"} {

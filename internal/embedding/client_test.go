@@ -244,6 +244,19 @@ func TestGenerationFingerprintComponents(t *testing.T) {
 	if len(fps) != 3 {
 		t.Fatalf("model/salt must each change the fingerprint, got %d distinct", len(fps))
 	}
+	cfg := Config{BaseURL: "https://example.com/publishers/google/models", Model: "gemini-embedding-001", Dims: 4}
+	openai, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.API = "vertex"
+	vertex, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vertex.Generation().Fingerprint() == openai.Generation().Fingerprint() {
+		t.Fatal("Vertex and OpenAI must use separate generations")
+	}
 }
 
 func TestEncodeFuncRecoversPanic(t *testing.T) {

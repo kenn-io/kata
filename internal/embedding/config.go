@@ -12,6 +12,7 @@ import (
 // ClientConfig converts daemon settings to client settings.
 func ClientConfig(ec config.EmbeddingsConfig) Config {
 	cfg := Config{
+		API:                 ec.API,
 		BaseURL:             ec.BaseURL,
 		Model:               ec.Model,
 		Credential:          ec.ResolveCredential(),
