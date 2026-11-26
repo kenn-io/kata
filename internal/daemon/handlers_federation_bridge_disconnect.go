@@ -57,6 +57,7 @@ func registerFederationBridgeDisconnect(humaAPI huma.API, cfg ServerConfig) {
 					"saved bridge signing credential is unavailable", "restore its configured key source before retrying disconnect", nil)
 			}
 		}
+		observeHubBusy(client)
 		validate := func() error {
 			current, found, err := credentials.FederationCredential(ctx, projectUID)
 			if err != nil {

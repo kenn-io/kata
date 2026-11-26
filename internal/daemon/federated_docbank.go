@@ -156,6 +156,9 @@ func docbankForwardRequest(ctx context.Context, cfg ServerConfig, binding db.Fed
 	}
 	resp, err := remote.client.Do(req) //nolint:gosec // G704: destination and credential are pinned to the project's configured upstream origin.
 	if err != nil {
+		if busy := forwardedHubBusy(err); busy != nil {
+			return nil, busy
+		}
 		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			return nil, attachmentError(http.StatusRequestEntityTooLarge, "attachment_too_large")
 		}
@@ -290,6 +293,9 @@ func ensureDocbankIssueUpstream(ctx context.Context, cfg ServerConfig, project d
 	syncCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	if err := cfg.FederationSyncOnce(syncCtx, binding, credential); err != nil {
+		if busy := syncHubBusy(err, binding.HubURL); busy != nil {
+			return busy
+		}
 		return attachmentError(http.StatusServiceUnavailable, "federation_offline")
 	}
 	currentBinding, err := cfg.DB.FederationBindingByProject(ctx, project.ID)

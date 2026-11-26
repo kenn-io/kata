@@ -22,6 +22,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -35,6 +36,53 @@ import (
 	katauid "go.kenn.io/kata/internal/uid"
 	"go.kenn.io/kata/internal/version"
 )
+
+func TestFederationJoinMetadataBusy(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, code, message string
+		recover                   bool
+		attempts                  int32
+	}{
+		{"retry", "Rate exceeded.", "", "", true, 2},
+		{"busy", "Rate exceeded.", "server_busy", "127.0.0.1 is busy", false, 1},
+		{"rule", `{"error":{"code":"sibling_throttle","message":"too many siblings"}}`, "sibling_throttle", "too many siblings", false, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var attempts atomic.Int32
+			previousTransport := http.DefaultTransport
+			http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				if attempts.Add(1) > 1 && tc.recover {
+					return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"project_uid":"project-uid","replay_horizon_event_id":1}`)), Request: req}, nil
+				}
+				header := make(http.Header)
+				if tc.recover {
+					header.Set("Retry-After", "5")
+				} else {
+					header.Set("Retry-After", "60")
+				}
+				return &http.Response{StatusCode: http.StatusTooManyRequests, Header: header, Body: io.NopCloser(strings.NewReader(tc.body)), Request: req}, nil
+			})
+			t.Cleanup(func() { http.DefaultTransport = previousTransport })
+			var err error
+			synctest.Test(t, func(t *testing.T) {
+				_, err = fetchFederationJoinMetadata(t.Context(), federationJoinBundle{HubURL: "http://127.0.0.1", HubProjectID: 1, Token: "token"})
+			})
+			if tc.recover {
+				require.NoError(t, err)
+			} else {
+				var cliErr *cliError
+				require.ErrorAs(t, err, &cliErr)
+				require.Equal(t, tc.code, cliErr.Code)
+				require.Contains(t, cliErr.Message, tc.message)
+				if tc.code == api.CodeServerBusy {
+					require.Equal(t, kindServerBusy, cliErr.Kind)
+					require.Equal(t, ExitDaemonUnavail, cliErr.ExitCode)
+				}
+			}
+			require.Equal(t, tc.attempts, attempts.Load())
+		})
+	}
+}
 
 func TestFederationStatusJSONOutput(t *testing.T) {
 	env, project := setupFederationStatusCLIState(t)
@@ -1537,6 +1585,32 @@ func TestFederationSpokeHTTPClientDoesNotUseKATAServerGlobalAuth(t *testing.T) {
 
 	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
 	assert.Empty(t, gotAuth)
+}
+
+func TestFederationSpokePreflightBusy(t *testing.T) {
+	resetFlags(t)
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_SERVER", "")
+	t.Setenv("KATA_AUTH_TOKEN", "hub-token")
+	t.Setenv("KATA_HTTP_TIMEOUT", "")
+	flags.Daemon = "spoke"
+	var calls atomic.Int32
+	previousTransport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		assert.Empty(t, r.Header.Get("Authorization"))
+		if calls.Add(1) == 1 {
+			return &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{"Retry-After": []string{"5"}}, Body: io.NopCloser(strings.NewReader("Rate exceeded")), Request: r}, nil
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"instance_uid":"01HZZZZZZZZZZZZZZZZZZZZZ01"}`)), Request: r}, nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = previousTransport })
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(fmt.Sprintf("[[daemon]]\nname = %q\nurl = %q\n", "spoke", "http://127.0.0.1")), 0o600))
+	synctest.Test(t, func(t *testing.T) {
+		err := federationSpokeProbePreflight(t.Context(), "01HZZZZZZZZZZZZZZZZZZZZZ01")
+		require.NoError(t, err)
+	})
+	require.Equal(t, int32(2), calls.Load())
 }
 
 func TestFederationSpokeHTTPClientDoesNotUseNamedDaemonGlobalAuthFallback(t *testing.T) {

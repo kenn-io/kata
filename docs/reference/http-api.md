@@ -81,6 +81,10 @@ CLI commands and flags, such as `--force`, rather than request fields. Hints for
 errors that only direct API calls can trigger may name request fields. In
 scripts, branch on `code` instead of matching `message` or `hint`.
 
+HTTP 429 with code `server_busy` means an upstream hub refused the request
+because it is busy. The message names the hub. A `Retry-After` header, when
+present, states when to retry.
+
 ```json
 {"error":{"code":"project_not_initialized","message":"no .kata.toml ancestor and no git ancestor","hint":"run \"kata init --project <name>\" in the workspace root, or pass --project <name>"}}
 ```

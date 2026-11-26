@@ -1,7 +1,9 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
@@ -19,6 +22,45 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federationcoord"
 )
+
+type docbankBusySyncError struct{}
+
+func (docbankBusySyncError) Error() string                 { return "busy" }
+func (docbankBusySyncError) HTTPStatus() int               { return http.StatusTooManyRequests }
+func (docbankBusySyncError) HTTPBody() string              { return `{"error":{"code":"admission_limited"}}` }
+func (docbankBusySyncError) HTTPRetryAfter() time.Duration { return 5 * time.Second }
+
+func TestDocbankPendingSyncBusy(t *testing.T) {
+	store := openClaimGateHelperDB(t)
+	project, issue := createClaimGateHelperIssue(t, store)
+	binding := db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "operator"}
+	_, err := store.UpsertFederationBinding(t.Context(), binding)
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name   string
+		err    error
+		status int
+		code   string
+	}{
+		{"busy", docbankBusySyncError{}, 429, "server_busy"},
+		{"offline", errors.New("unavailable"), 503, "federation_offline"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := ServerConfig{DB: store, FederationCredentials: uiCapabilityCredentials{credential: config.FederationCredential{HubURL: binding.HubURL, HubProjectID: 1, Token: "fixture"}}, FederationSyncOnce: func(context.Context, db.FederationBinding, config.FederationCredential) error { return tc.err }}
+			err := ensureDocbankIssueUpstream(t.Context(), cfg, project, binding, issue, &claimRefreshResult{binding: binding, known: true, missing: true})
+			var apiErr *api.APIError
+			require.ErrorAs(t, err, &apiErr)
+			require.Equal(t, tc.status, apiErr.Status)
+			require.Equal(t, tc.code, apiErr.Code)
+			if tc.name == "busy" {
+				require.Contains(t, apiErr.Message, "hub.example")
+				var headers huma.HeadersError
+				require.ErrorAs(t, err, &headers)
+				require.Equal(t, "5", headers.GetHeaders().Get("Retry-After"))
+			}
+		})
+	}
+}
 
 func TestDocbankForwardMapsHubCredentialRejection(t *testing.T) {
 	store := openClaimGateHelperDB(t)

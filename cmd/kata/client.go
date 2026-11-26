@@ -226,7 +226,7 @@ func httpClientFor(ctx context.Context, baseURL string) (*http.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return markDaemonHTTPClient(baseURL, hc)
+	return retryingDaemonHTTPClient(baseURL, hc, false)
 }
 
 func httpClientForResolved(ctx context.Context, resolved client.ResolvedDaemon) (*http.Client, error) {
@@ -236,7 +236,7 @@ func httpClientForResolved(ctx context.Context, resolved client.ResolvedDaemon) 
 	if err != nil {
 		return nil, err
 	}
-	return markDaemonHTTPClient(resolved.BaseURL, hc)
+	return retryingDaemonHTTPClient(resolved.BaseURL, hc, false)
 }
 
 // longRunningClientFor builds a variant with no overall Client.Timeout for
@@ -255,7 +255,7 @@ func longRunningClientFor(ctx context.Context, baseURL string) (*http.Client, er
 	if err != nil {
 		return nil, err
 	}
-	return markDaemonHTTPClient(baseURL, hc)
+	return retryingDaemonHTTPClient(baseURL, hc, false)
 }
 
 func longRunningClientForResolved(ctx context.Context, resolved client.ResolvedDaemon) (*http.Client, error) {
@@ -263,7 +263,7 @@ func longRunningClientForResolved(ctx context.Context, resolved client.ResolvedD
 	if err != nil {
 		return nil, err
 	}
-	return markDaemonHTTPClient(resolved.BaseURL, hc)
+	return retryingDaemonHTTPClient(resolved.BaseURL, hc, false)
 }
 
 // streamingClientFor builds the SSE-friendly variant. Body cancellation comes
@@ -284,7 +284,7 @@ func streamingClientFor(ctx context.Context, baseURL string) (*http.Client, erro
 	if err != nil {
 		return nil, err
 	}
-	return markDaemonHTTPClient(baseURL, hc)
+	return retryingDaemonHTTPClient(baseURL, hc, true)
 }
 
 func streamingClientForResolved(ctx context.Context, resolved client.ResolvedDaemon) (*http.Client, error) {
@@ -294,7 +294,17 @@ func streamingClientForResolved(ctx context.Context, resolved client.ResolvedDae
 	if err != nil {
 		return nil, err
 	}
-	return markDaemonHTTPClient(resolved.BaseURL, hc)
+	return retryingDaemonHTTPClient(resolved.BaseURL, hc, true)
+}
+
+func retryingDaemonHTTPClient(baseURL string, hc *http.Client, stream bool) (*http.Client, error) {
+	marked, err := markDaemonHTTPClient(baseURL, hc)
+	if err != nil {
+		return nil, err
+	}
+	budget, _ := client.ParseHTTPTimeout(os.Getenv(client.HTTPTimeoutEnvVar), BusyRetryBudget)
+	configureBusy(marked, budget, stream)
+	return marked, nil
 }
 
 type daemonTransportError struct {
