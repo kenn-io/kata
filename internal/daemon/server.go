@@ -38,7 +38,6 @@ import (
 	"go.kenn.io/kata/internal/todoistsync"
 	"go.kenn.io/kata/internal/twentysync"
 	"go.kenn.io/kata/internal/vector"
-	"golang.org/x/sync/semaphore"
 )
 
 // ServerConfig wires the daemon's runtime dependencies. DB and StartedAt are
@@ -294,7 +293,6 @@ type Server struct {
 	federationIngestAdmission   chan struct{}
 	federationTransferAdmission chan struct{}
 	federationReadAdmission     chan struct{}
-	federationPushMemory        *semaphore.Weighted
 	stopFederationPollBridge    func()
 	cfg                         ServerConfig
 	baseHandler                 http.Handler
@@ -409,8 +407,6 @@ func NewServer(cfg ServerConfig) *Server {
 		federationIngestAdmission:   make(chan struct{}, 2),
 		federationTransferAdmission: make(chan struct{}, 2),
 		federationReadAdmission:     make(chan struct{}, 16),
-		// Verification buffers push bodies; reserve the previous two-body budget.
-		federationPushMemory: semaphore.NewWeighted(2 * federationsigning.MaxBodyBytes),
 	}
 	registerRoutes(humaAPI, mux, cfg)
 	s.stopFederationPollBridge = startFederationPollBridge(cfg)
@@ -475,7 +471,7 @@ func (s *Server) HandlerFor(policy ListenerPolicy) (http.Handler, error) {
 	if base == nil {
 		base = s.handler
 	} else {
-		base = s.withFederationIngestPreauthorization(base)
+		base = withFederationIngestPreauthorization(s.cfg, base)
 		base = s.withFederationSigning(base, false)
 		// Signed uploads read their body during verification, so the
 		// foreground lease must already cover that work.

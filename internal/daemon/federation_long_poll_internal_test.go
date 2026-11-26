@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -171,16 +170,15 @@ func TestFederationPollWakeBridgeStopsWhenItsStoreCloses(t *testing.T) {
 }
 
 // internalLongPollHub serves a hub over real HTTP with one pull enrollment
-// per member for one federated project, and exposes the hub's held-poll
-// bookkeeping.
+// for one federated project, and exposes the hub's held-poll bookkeeping.
 type internalLongPollHub struct {
-	waits       *federationPollWaits
-	broadcaster *EventBroadcaster
-	url         string
-	projectID   int64
+	waits        *federationPollWaits
+	url          string
+	projectID    int64
+	enrollmentID int64
 }
 
-func newInternalLongPollHub(t *testing.T, members int) internalLongPollHub {
+func newInternalLongPollHub(t *testing.T) internalLongPollHub {
 	t.Helper()
 	ctx := t.Context()
 	store, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "hub.db"))
@@ -190,141 +188,66 @@ func newInternalLongPollHub(t *testing.T, members int) internalLongPollHub {
 	require.NoError(t, err)
 	_, err = store.EnableProjectFederation(ctx, project.ID, "tester")
 	require.NoError(t, err)
-	for member := range members {
-		_, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
-			Token: memberPollToken(member), SpokeInstanceUID: fmt.Sprintf("01HZNQ7VFPK1XGD8R5MABCD4E%c", 'B'+member),
-			ProjectID: &project.ID, Capabilities: "pull", Actor: "tester",
-		})
-		require.NoError(t, err)
-	}
+	enrollment, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
+		Token: "long-poll-token", SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EB",
+		ProjectID: &project.ID, Capabilities: "pull", Actor: "tester",
+	})
+	require.NoError(t, err)
 	hub := NewServer(ServerConfig{DB: store, StartedAt: time.Now().UTC()})
 	t.Cleanup(func() { _ = hub.Close() })
 	server := httptest.NewServer(hub.Handler())
 	t.Cleanup(server.Close)
 	return internalLongPollHub{
-		waits: hub.cfg.federationPollWaits, broadcaster: hub.cfg.Broadcaster,
-		url: server.URL, projectID: project.ID,
+		waits: hub.cfg.federationPollWaits, url: server.URL,
+		projectID: project.ID, enrollmentID: enrollment.Enrollment.ID,
 	}
-}
-
-func memberPollToken(member int) string {
-	return fmt.Sprintf("long-poll-token-%d", member)
-}
-
-type internalPollResult struct {
-	status  int
-	cursor  int64
-	elapsed time.Duration
-	err     error
 }
 
 // poll returns the response status, the page's next cursor and how long the
 // hub took to answer.
-func (h internalLongPollHub) poll(ctx context.Context, member int, afterID int64, wait string) internalPollResult {
+func (h internalLongPollHub) poll(ctx context.Context, afterID int64, wait string) (int, int64, time.Duration, error) {
 	url := fmt.Sprintf("%s/api/v1/projects/%d/federation/events?after_id=%d&wait=%s", h.url, h.projectID, afterID, wait)
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return internalPollResult{err: err}
+		return 0, 0, 0, err
 	}
-	request.Header.Set("Authorization", "Bearer "+memberPollToken(member))
+	request.Header.Set("Authorization", "Bearer long-poll-token")
 	started := time.Now()
 	response, err := http.DefaultClient.Do(request) //nolint:gosec // test-owned loopback hub
 	if err != nil {
-		return internalPollResult{err: err}
+		return 0, 0, 0, err
 	}
 	defer func() { _ = response.Body.Close() }()
 	var page struct {
 		NextAfterID int64 `json:"next_after_id"`
 	}
-	err = json.NewDecoder(response.Body).Decode(&page)
-	return internalPollResult{status: response.StatusCode, cursor: page.NextAfterID, elapsed: time.Since(started), err: err}
-}
-
-func (h internalLongPollHub) subscriptions() int {
-	h.broadcaster.mu.Lock()
-	defer h.broadcaster.mu.Unlock()
-	return len(h.broadcaster.subs)
-}
-
-// hold starts n held polls for member and returns once the hub holds them.
-func (h internalLongPollHub) hold(t *testing.T, member, n int, afterID int64) []<-chan internalPollResult {
-	t.Helper()
-	want := h.subscriptions() + n
-	polls := make([]<-chan internalPollResult, n)
-	for i := range polls {
-		done := make(chan internalPollResult, 1)
-		go func() { done <- h.poll(t.Context(), member, afterID, "30") }()
-		polls[i] = done
+	if err := json.NewDecoder(response.Body).Decode(&page); err != nil {
+		return response.StatusCode, 0, 0, err
 	}
-	//nolint:kennlint // sleeptest: real HTTP polls cannot run in a synctest bubble, and the hub signals nothing when it holds one
-	require.Eventually(t, func() bool { return h.subscriptions() == want }, 10*time.Second, 10*time.Millisecond, "member %d's polls were not all held", member)
-	return polls
+	return response.StatusCode, page.NextAfterID, time.Since(started), nil
 }
 
-// requireAnswersAtOnce sends one more held poll and requires an immediate
-// ordinary answer that holds no subscription.
-func (h internalLongPollHub) requireAnswersAtOnce(t *testing.T, member int, afterID int64) {
-	t.Helper()
-	held := h.subscriptions()
-	result := h.poll(t.Context(), member, afterID, "30")
-	require.NoError(t, result.err)
-	require.Equal(t, http.StatusOK, result.status)
-	assert.Equal(t, afterID, result.cursor)
-	assert.Less(t, result.elapsed, 5*time.Second, "a poll past the waiter bound must answer like an ordinary poll")
-	assert.Equal(t, held, h.subscriptions())
-}
+func TestFederationPollWaitAnswersAtOnceWhenCredentialWaitersAreFull(t *testing.T) {
+	ctx := t.Context()
+	hub := newInternalLongPollHub(t)
+	status, cursor, _, err := hub.poll(ctx, 0, "0")
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, status)
+	require.Positive(t, cursor)
 
-// requireWakeAfterCommit creates an issue through the hub and requires every
-// held poll to answer with the new event.
-func (h internalLongPollHub) requireWakeAfterCommit(t *testing.T, afterID int64, polls []<-chan internalPollResult) {
-	t.Helper()
-	body := strings.NewReader(`{"actor":"tester","title":"Wakes held polls"}`)
-	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, fmt.Sprintf("%s/api/v1/projects/%d/issues", h.url, h.projectID), body)
-	require.NoError(t, err)
-	request.Header.Set("Content-Type", "application/json")
-	response, err := http.DefaultClient.Do(request) //nolint:gosec // test-owned loopback hub
-	require.NoError(t, err)
-	require.NoError(t, response.Body.Close())
-	require.Equal(t, http.StatusOK, response.StatusCode)
-	for i, done := range polls {
-		select {
-		case result := <-done:
-			require.NoError(t, result.err)
-			require.Equal(t, http.StatusOK, result.status)
-			require.Greater(t, result.cursor, afterID, "poll %d answered without the commit", i)
-		case <-time.After(10 * time.Second): //nolint:kennlint // deadlinetest: bounds a held poll that never wakes.
-			t.Fatalf("poll %d did not wake", i)
-		}
+	broadcaster := NewEventBroadcaster()
+	project := db.Project{ID: hub.projectID}
+	limit := min(federationPollMaxWaitersPerCredential, hub.waits.maxTotal/2)
+	for range limit {
+		waiter, ok := hub.waits.admit(broadcaster, hub.enrollmentID, project)
+		require.True(t, ok)
+		t.Cleanup(waiter.release)
 	}
-}
 
-// Polls past a waiter bound answer at once, while admitted polls stay held,
-// wake on the next commit, and leave room for other members.
-func TestFederationPollAnswersExcessPollsAtOnce(t *testing.T) {
-	t.Run("per enrollment", func(t *testing.T) {
-		hub := newInternalLongPollHub(t, 2)
-		hub.waits.maxTotal = federationPollMaxWaiters
-		cursor := hub.poll(t.Context(), 0, 0, "0").cursor
-		require.Positive(t, cursor)
-		held := hub.hold(t, 0, federationPollMaxWaitersPerCredential, cursor)
-		hub.requireAnswersAtOnce(t, 0, cursor)
-		held = append(held, hub.hold(t, 1, 1, cursor)...)
-		hub.requireWakeAfterCommit(t, cursor, held)
-	})
-	t.Run("total and per CPU", func(t *testing.T) {
-		assert.Equal(t, federationPollMaxWaiters, newFederationPollWaits(16).maxTotal)
-		hub := newInternalLongPollHub(t, 3)
-		hub.waits.maxTotal = newFederationPollWaits(1).maxTotal
-		require.Equal(t, federationPollMaxWaitersPerCPU, hub.waits.maxTotal)
-		cursor := hub.poll(t.Context(), 0, 0, "0").cursor
-		require.Positive(t, cursor)
-		half := federationPollMaxWaitersPerCPU / 2
-		held := hub.hold(t, 0, half, cursor)
-		hub.requireAnswersAtOnce(t, 0, cursor)
-		held = append(held, hub.hold(t, 1, half, cursor)...)
-		hub.requireAnswersAtOnce(t, 2, cursor)
-		hub.requireWakeAfterCommit(t, cursor, held)
-	})
+	status, _, elapsed, err := hub.poll(ctx, cursor, "45")
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, status)
+	assert.Less(t, elapsed, 5*time.Second, "a poll beyond the per-credential bound must answer like an ordinary poll")
 }
 
 func TestFederationPollWaitCapsOversizedWaits(t *testing.T) {

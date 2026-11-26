@@ -38,16 +38,13 @@ remove disagreements among URL decoding, ServeMux and reverse proxies.
 Native enrollment auth precedes MAC verification and body decoding. MAC
 verification precedes bounded body hashing. Freshness, key validity and
 cancellation are checked again before atomic replay admission and after durable
-publication. Two signed pushes may run at once. Pushes also reserve body bytes
-as they arrive from a shared 256 MiB budget through handler execution.
-Control requests have a 64 KiB body
+publication. Two ingests may run at once, with admission held through handler
+execution. Control requests have a 64 KiB body
 limit, while the native 64 MiB adoption limit remains available for ingests.
 Signed relay envelopes have a 128 MiB request budget so JSON and base64
 encoding fit around the 64 MiB raw relay batch limit. Bounded memory buffering
-avoids a second temporary-file lifecycle for incoming event bodies. Two signed
-attachment uploads may spool to temporary disk at once, and 16 attachment reads
-may run concurrently. A full push budget or attachment limit returns `429` with
-`Retry-After`.
+avoids a second temporary-file lifecycle for incoming event bodies. Saturated
+pools return `429` with `Retry-After`.
 
 A durable maximum-admitted-expiry watermark complements the bounded nonce
 cache. Atomic publication fsyncs the file and directory before dispatch. One
@@ -89,7 +86,8 @@ problem and never records the relay grant as revoked. A `signing_warming` answer
 is temporary; operators can retry after `Retry-After`, and the hub never records
 the relay grant as revoked. A bridge whose hub is
 gone detaches with `kata federation bridge disconnect --local-only`, and the
-hub operator revokes the grant. Native header, body, duration and push-memory limits bound work before execution.
+hub operator revokes the grant. Native header, body, duration and
+concurrent admission limits bound work before execution.
 
 The [operator guide](../operations/federation-signing.md) owns the exact wire
 profile, limits, configuration, rotation and recovery procedures. Additional

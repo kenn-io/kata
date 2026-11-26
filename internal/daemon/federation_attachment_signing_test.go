@@ -21,7 +21,6 @@ import (
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/federationsigning"
 	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
-	"golang.org/x/sync/semaphore"
 )
 
 // These requests deliberately fail authorization after admission. That lets the
@@ -45,9 +44,8 @@ func TestFederationAttachmentSigningProfile(t *testing.T) {
 			api := huma.NewAPI(huma.DefaultConfig("fixture", "1"), humago.NewAdapter(http.NewServeMux(), ""))
 			path := strings.Replace(tc.path, "/projects/1/", "/projects/{project_id}/", 1)
 			huma.Register(api, huma.Operation{OperationID: tc.operation, Method: tc.method, Path: path}, func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
-			s := &Server{api: api, federationIngestAdmission: make(chan struct{}, 1), federationTransferAdmission: make(chan struct{}, 1), federationReadAdmission: make(chan struct{}, 1), federationPushMemory: semaphore.NewWeighted(1)}
-			// Fill the budgets a route must not use.
-			require.True(t, s.federationPushMemory.TryAcquire(1))
+			s := &Server{api: api, federationIngestAdmission: make(chan struct{}, 1), federationTransferAdmission: make(chan struct{}, 1), federationReadAdmission: make(chan struct{}, 1)}
+			// Saturate the opposite pool so transfers and control requests stay independent.
 			if tc.bulk {
 				s.federationIngestAdmission <- struct{}{}
 			} else {
@@ -132,7 +130,7 @@ func testFederationAttachmentSigningMode(t *testing.T, mode string) {
 			path = fmt.Sprintf("/api/v1/projects/%d/federation/docbank/capabilities", project.ID)
 		}
 		huma.Register(api, huma.Operation{OperationID: operation, Method: method, Path: route}, func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
-		s := &Server{api: api, cfg: ServerConfig{DB: store, FederationSigning: v}, federationIngestAdmission: make(chan struct{}, 1), federationTransferAdmission: make(chan struct{}, 1), federationReadAdmission: make(chan struct{}, 1), federationPushMemory: semaphore.NewWeighted(1)}
+		s := &Server{api: api, cfg: ServerConfig{DB: store, FederationSigning: v}, federationIngestAdmission: make(chan struct{}, 1), federationTransferAdmission: make(chan struct{}, 1), federationReadAdmission: make(chan struct{}, 1)}
 		var body io.Reader = strings.NewReader("binary")
 		if mode == "push-only preflight" {
 			body = nil
@@ -189,7 +187,6 @@ func (b *attachmentSigningRevocationBody) Read(p []byte) (int, error) {
 }
 func (*attachmentSigningRevocationBody) Close() error { return nil }
 
-// Temporary disk bounds uploads to two at once; reads and sync are not counted.
 func TestFederationAttachmentReadAndUploadAdmissionAreIndependent(t *testing.T) {
 	t.Setenv("TEST_TRANSFER_POOLS_KEY", strings.Repeat("k", 64))
 	source := signingpolicy.Source{KeyID: "key-a", KeyEnv: "TEST_TRANSFER_POOLS_KEY"}
@@ -231,10 +228,10 @@ func TestFederationAttachmentReadAndUploadAdmissionAreIndependent(t *testing.T) 
 		}
 		for _, tc := range []struct {
 			name, blockedMethod, blockedPath, otherMethod, otherPath string
-			count, nextStatus                                        int
+			count                                                    int
 		}{
-			{"uploads do not block reads", http.MethodPost, upload, http.MethodGet, content, 2, http.StatusTooManyRequests},
-			{"reads do not block uploads or control", http.MethodGet, content, http.MethodPost, upload, 16, http.StatusTooManyRequests},
+			{"uploads do not block reads", http.MethodPost, upload, http.MethodGet, content, 2},
+			{"reads do not block uploads or control", http.MethodGet, content, http.MethodPost, upload, 16},
 		} {
 			func() {
 				entered, release := make(chan struct{}, tc.count), make(chan struct{})
@@ -268,10 +265,8 @@ func TestFederationAttachmentReadAndUploadAdmissionAreIndependent(t *testing.T) 
 				}
 				full := httptest.NewRecorder()
 				handler.ServeHTTP(full, request(tc.blockedMethod, tc.blockedPath, false))
-				require.Equal(t, tc.nextStatus, full.Code, "%s: %s", tc.name, full.Body.String())
-				if tc.nextStatus == http.StatusTooManyRequests {
-					require.Equal(t, "1", full.Header().Get("Retry-After"))
-				}
+				require.Equal(t, http.StatusTooManyRequests, full.Code, "%s: %s", tc.name, full.Body.String())
+				require.Equal(t, "1", full.Header().Get("Retry-After"))
 				for _, other := range []struct{ method, path string }{{tc.otherMethod, tc.otherPath}, {http.MethodGet, control}, {http.MethodPost, prefix + "/events:ingest"}} {
 					w := httptest.NewRecorder()
 					handler.ServeHTTP(w, request(other.method, other.path, false))
