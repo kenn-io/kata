@@ -16,6 +16,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/httpurl"
 )
 
 // A refused credential needs a change somewhere before a retry can pass: a new
@@ -55,9 +56,33 @@ const (
 type SyncRetries struct {
 	mu     sync.Mutex
 	states map[int64]syncRetry
+	hubs   map[string]hubRetry
 	next   uint64
-	// jitter returns how much to take off a delay, in [0, limit).
+	// jitter returns how much to adjust a delay, in [0, limit).
 	jitter func(limit time.Duration) time.Duration
+}
+
+// defaultHubProbeTTL bounds how long a single recovery probe reservation can
+// hold back other callers if its request stalls unexpectedly.
+const defaultHubProbeTTL = 3 * time.Minute
+
+// hubProbe identifies an acquired hub pull/watch probe so clearHubUnavailable
+// only clears a cooldown matching both its version and active probe owner.
+type hubProbe struct {
+	version uint64
+	id      uint64
+}
+
+// hubRetry holds a hub-wide pull/watch cooldown after a 429 or 503 capacity
+// refusal so one busy hub stops receiving a burst across every project bound to
+// it. probeID and probeUntil reserve a single recovery probe once nextAttemptAt
+// passes, independently of the cooldown version.
+type hubRetry struct {
+	version       uint64
+	delay         time.Duration
+	nextAttemptAt time.Time
+	probeID       uint64
+	probeUntil    time.Time
 }
 
 type syncRetry struct {
@@ -88,7 +113,11 @@ func NewSyncRetries() *SyncRetries {
 }
 
 func newSyncRetries(jitter func(time.Duration) time.Duration) *SyncRetries {
-	return &SyncRetries{states: map[int64]syncRetry{}, jitter: jitter}
+	return &SyncRetries{
+		states: map[int64]syncRetry{},
+		hubs:   map[string]hubRetry{},
+		jitter: jitter,
+	}
 }
 
 // FederationSyncRetry returns the binding's retry schedule while the runner is
@@ -274,6 +303,167 @@ func (s *SyncRetries) reset() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	clear(s.states)
+	clear(s.hubs)
+}
+
+func retryHubKey(hubURL string) string {
+	canonical, err := httpurl.CanonicalHTTPBaseURL(hubURL)
+	if err == nil && canonical != "" {
+		return canonical
+	}
+	return strings.TrimSpace(hubURL)
+}
+
+// recordHubUnavailable backs off pull and watch traffic targeting hubURL after
+// a 429 or 503 capacity refusal. Additive jitter keeps the wait at or above
+// both interval and Retry-After while spreading retries across spokes.
+//
+// started is the hub cooldown version observed when the failing request began.
+// Only the first failure or a failing post-cooldown recovery probe (started ==
+// previous.version) escalates delay; concurrent pre-cooldown failures that
+// arrive afterward preserve the active delay and probe reservation while still
+// honoring any longer Retry-After.
+func (s *SyncRetries) recordHubUnavailable(hubURL string, started uint64, retryAfter, interval time.Duration, completed time.Time) time.Duration {
+	if s == nil {
+		return 0
+	}
+	key := retryHubKey(hubURL)
+	if key == "" {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.hubs == nil {
+		s.hubs = map[string]hubRetry{}
+	}
+	previous, ok := s.hubs[key]
+	probeID, probeUntil := previous.probeID, previous.probeUntil
+	var version uint64
+	var delay time.Duration
+	escalate := !ok || started == previous.version
+	if escalate {
+		delay = nextRetryDelay(previous.delay, ok, interval, max(unavailableRetryMaxDelay, interval))
+	} else {
+		delay = previous.delay
+	}
+	base := max(delay, min(retryAfter, maxHonoredRetryAfter))
+	wait := base + s.jitter(base/4)
+	nextAt := completed.Add(wait).UTC()
+	extended := ok && nextAt.After(previous.nextAttemptAt)
+	if ok && previous.nextAttemptAt.After(nextAt) {
+		nextAt = previous.nextAttemptAt
+	}
+	if escalate || extended {
+		// Bump version on any first/probe failure or whenever a late Retry-After
+		// extends nextAttemptAt, so an earlier in-flight probe cannot clear the
+		// extended wait.
+		s.next++
+		version = s.next
+	} else {
+		version = previous.version
+	}
+	s.hubs[key] = hubRetry{
+		version: version, delay: delay, nextAttemptAt: nextAt,
+		probeID: probeID, probeUntil: probeUntil,
+	}
+	return max(nextAt.Sub(completed), 0)
+}
+
+// clearHubUnavailable ends a hub's capacity cooldown after an eligible
+// recovery request succeeds. An older in-flight request whose started version
+// predates a newer or extended cooldown, or an expired probe superseded by a
+// newer probe owner, cannot erase it.
+func (s *SyncRetries) clearHubUnavailable(hubURL string, probe hubProbe) {
+	if s == nil {
+		return
+	}
+	key := retryHubKey(hubURL)
+	if key == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state, ok := s.hubs[key]
+	if ok && state.version == probe.version && (state.probeID == 0 || state.probeID == probe.id) {
+		delete(s.hubs, key)
+	}
+}
+
+// acquireHubProbe checks whether hubURL may be contacted for a pull or watch at
+// now. While a hub is healthy it admits every caller concurrently with a zero
+// probe. While its cooldown is active it denies callers until nextAttemptAt.
+// Once the cooldown expires it admits one recovery probe at a time (bounded by
+// probeTTL) until that probe finishes or expires.
+func (s *SyncRetries) acquireHubProbe(hubURL string, now time.Time, probeTTL time.Duration) (release func(), allowed bool, retryAt time.Time, probe hubProbe) {
+	if s == nil {
+		return func() {}, true, time.Time{}, hubProbe{}
+	}
+	key := retryHubKey(hubURL)
+	if key == "" {
+		return func() {}, true, time.Time{}, hubProbe{}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state, ok := s.hubs[key]
+	if !ok {
+		return func() {}, true, time.Time{}, hubProbe{}
+	}
+	if now.Before(state.nextAttemptAt) {
+		return nil, false, state.nextAttemptAt, hubProbe{version: state.version}
+	}
+	if state.probeID != 0 && now.Before(state.probeUntil) {
+		return nil, false, time.Time{}, hubProbe{version: state.version}
+	}
+	if probeTTL <= 0 {
+		probeTTL = defaultHubProbeTTL
+	}
+	s.next++
+	probeID := s.next
+	state.probeID = probeID
+	state.probeUntil = now.Add(probeTTL).UTC()
+	s.hubs[key] = state
+	acquired := hubProbe{version: state.version, id: probeID}
+	return sync.OnceFunc(func() { s.releaseHubProbe(key, probeID) }), true, time.Time{}, acquired
+}
+
+func (s *SyncRetries) releaseHubProbe(key string, probeID uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state, ok := s.hubs[key]
+	if ok && state.probeID == probeID {
+		state.probeID = 0
+		state.probeUntil = time.Time{}
+		s.hubs[key] = state
+	}
+}
+
+// hubBlockedUntil reports whether hubURL is in a capacity cooldown at now.
+func (s *SyncRetries) hubBlockedUntil(hubURL string, now time.Time) (time.Time, bool) {
+	if s == nil {
+		return time.Time{}, false
+	}
+	key := retryHubKey(hubURL)
+	if key == "" {
+		return time.Time{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state, ok := s.hubs[key]
+	if !ok {
+		return time.Time{}, false
+	}
+	if now.Before(state.nextAttemptAt) {
+		return state.nextAttemptAt, true
+	}
+	if state.probeID != 0 && now.Before(state.probeUntil) {
+		return time.Time{}, true
+	}
+	return time.Time{}, false
+}
+
+func (s *SyncRetries) hubBlocked(hubURL string, now time.Time) bool {
+	_, blocked := s.hubBlockedUntil(hubURL, now)
+	return blocked
 }
 
 // classifySyncRetry finds the hub response that decides a failed turn's retry
@@ -310,6 +500,26 @@ func classifySyncRetry(err error) (reason string, status int, retryAfter time.Du
 func hubAskedToWait(err error) bool {
 	for _, hubErr := range hubStatusErrors(err) {
 		if hubErr.StatusCode == http.StatusTooManyRequests || hubErr.StatusCode == http.StatusServiceUnavailable {
+			return true
+		}
+	}
+	return false
+}
+
+// hubCapacityUnavailable reports whether err indicates hub-wide throttling or
+// unavailability suitable for a shared hub pull/watch cooldown. The hub uses
+// 503 signature_invalid for both a single enrollment's signing-key fault
+// (signingpolicy.ErrKey) and a hub verifier state fault
+// (federationsigning.ErrState); because the wire code cannot distinguish them,
+// we keep 503 signature_invalid on per-binding exponential backoff so one
+// misconfigured enrollment cannot pause healthy siblings on the same hub.
+func hubCapacityUnavailable(err error) bool {
+	for _, hubErr := range hubStatusErrors(err) {
+		if hubErr.StatusCode == http.StatusTooManyRequests {
+			return true
+		}
+		if hubErr.StatusCode == http.StatusServiceUnavailable &&
+			federationHubErrorCode(hubErr.Body) != "signature_invalid" {
 			return true
 		}
 	}

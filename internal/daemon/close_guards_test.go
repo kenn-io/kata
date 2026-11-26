@@ -1173,3 +1173,125 @@ func TestThrottle_DryRunDoesNotEmitEvent(t *testing.T) {
 			string(ev.Payload))
 	}
 }
+
+type afterCloseStore struct {
+	db.Storage
+	after func(context.Context, int64) error
+}
+
+func (s *afterCloseStore) CloseIssueGuarded(ctx context.Context, p db.CloseIssueParams) (db.Issue, []db.Event, bool, error) {
+	issue, events, changed, err := s.Storage.CloseIssueGuarded(ctx, p)
+	if err == nil && changed && s.after != nil {
+		err = s.after(ctx, p.IssueID)
+	}
+	return issue, events, changed, err
+}
+
+func TestCloseParentHint_ParentAtClose(t *testing.T) {
+	var wrapped *afterCloseStore
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+		wrapped = &afterCloseStore{Storage: cfg.DB}
+		cfg.DB = wrapped
+	})
+	pid := initLocalWorkspace(t, env, "kata")
+	original := createIssueViaHTTP(t, env, pid, "original parent")
+	other := createIssueViaHTTP(t, env, pid, "other parent")
+	child := createIssueViaHTTP(t, env, pid, "child")
+	postLink(t, env, pid, child, "parent", original)
+	wrapped.after = func(ctx context.Context, issueID int64) error {
+		link, err := env.DB.ParentOf(ctx, issueID)
+		if err != nil {
+			return err
+		}
+		if err := env.DB.DeleteLinkByID(ctx, link.ID); err != nil {
+			return err
+		}
+		_, err = env.DB.CreateLink(ctx, db.CreateLinkParams{FromIssueID: issueID, ToIssueID: other, Type: "parent", Author: "tester"})
+		return err
+	}
+	resp, result := closeIssueWithEvidence(t, env, pid, child, "tester", "done", "Completed the requested work and verified the result.", []map[string]any{{"type": "commit", "sha": "abc1234"}})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(result))
+	assert.Contains(t, string(result), `"qualified_id":"kata#`+refForIssue(t, env, original)+`"`)
+	assert.NotContains(t, string(result), `"qualified_id":"kata#`+refForIssue(t, env, other)+`"`)
+}
+
+func TestCloseParentHint_ConcurrentStores(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		project, err := store.CreateProject(t.Context(), "example-project")
+		require.NoError(t, err)
+		parent, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Parent", Author: "tester"})
+		require.NoError(t, err)
+		var children []db.Issue
+		for _, title := range []string{"First", "Last"} {
+			child, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: title, Author: "tester"})
+			require.NoError(t, err)
+			_, err = store.CreateLink(t.Context(), db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: parent.ID, Type: "parent", Author: "tester"})
+			require.NoError(t, err)
+			children = append(children, child)
+		}
+		type result struct {
+			events []db.Event
+			err    error
+		}
+		results := make(chan result, len(children))
+		start := make(chan struct{})
+		for _, child := range children {
+			go func() {
+				<-start
+				var events []db.Event
+				err := store.RetryTransient(t.Context(), func() error {
+					var err error
+					_, events, _, err = store.CloseIssueGuarded(t.Context(), db.CloseIssueParams{IssueID: child.ID, Reason: "done", Actor: "tester", Message: "Completed and verified the requested work."})
+					return err
+				})
+				results <- result{events, err}
+			}()
+		}
+		close(start)
+		ready := 0
+		for range children {
+			select {
+			case result := <-results:
+				require.NoError(t, result.err)
+				require.NotEmpty(t, result.events)
+				if result.events[0].ReadyParentID == parent.ID {
+					ready++
+				}
+			case <-time.After(30 * time.Second):
+				t.Fatal("concurrent closes did not finish")
+			}
+		}
+		assert.Equal(t, 1, ready)
+		for _, state := range []string{"closed", "archived", "other-project-child"} {
+			t.Run(state, func(t *testing.T) {
+				parentProject, err := store.CreateProject(t.Context(), "parent-"+state)
+				require.NoError(t, err)
+				parent, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: parentProject.ID, Title: "Parent", Author: "tester"})
+				require.NoError(t, err)
+				if state == "closed" {
+					_, _, _, err = store.CloseIssue(t.Context(), parent.ID, "done", "tester", "Completed the parent work and verified the result.", nil)
+					require.NoError(t, err)
+				}
+				child, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Child", Author: "tester"})
+				require.NoError(t, err)
+				_, err = store.CreateLink(t.Context(), db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: parent.ID, Type: "parent", Author: "tester"})
+				require.NoError(t, err)
+				if state == "archived" {
+					_, _, err = store.RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: parentProject.ID, Actor: "tester", Force: true})
+					require.NoError(t, err)
+				}
+				if state == "other-project-child" {
+					sibling, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: parentProject.ID, Title: "Sibling", Author: "tester"})
+					require.NoError(t, err)
+					_, err = store.CreateLink(t.Context(), db.CreateLinkParams{FromIssueID: sibling.ID, ToIssueID: parent.ID, Type: "parent", Author: "tester"})
+					require.NoError(t, err)
+				}
+				_, events, changed, err := store.CloseIssueGuarded(t.Context(), db.CloseIssueParams{IssueID: child.ID, Reason: "done", Actor: "tester", Message: "Completed the requested work and verified the result."})
+				require.NoError(t, err)
+				require.True(t, changed)
+				require.NotEmpty(t, events)
+				assert.Zero(t, events[0].ReadyParentID)
+			})
+		}
+	})
+}

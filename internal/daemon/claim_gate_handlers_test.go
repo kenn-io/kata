@@ -43,6 +43,7 @@ func TestClaimGateLinkLabelAssignUnassignMetadataDeleteRestoreAllowsUnclaimedFed
 		{name: "Unassign", build: claimGateUnassignRequest},
 		{name: "LabelAdd", build: claimGateLabelAddRequest},
 		{name: "LabelRemove", build: claimGateLabelRemoveRequest},
+		{name: "LabelSwap", build: claimGateLabelSwapRequest},
 		{name: "Metadata", build: claimGateMetadataRequest},
 		{name: "Delete", build: claimGateDeleteRequest},
 		{name: "Restore", build: claimGateRestoreRequest},
@@ -627,6 +628,7 @@ func TestClaimGateCommentsCreateAndNonFederatedProjects(t *testing.T) {
 		{name: "PriorityAction", build: claimGatePriorityRequest},
 		{name: "LabelAdd", build: claimGateLabelAddRequest},
 		{name: "LabelRemove", build: claimGateLabelRemoveRequest},
+		{name: "LabelSwap", build: claimGateLabelSwapRequest},
 		{name: "Metadata", build: claimGateMetadataRequest},
 		{name: "Close", build: claimGateCloseRequest},
 		{name: "Reopen", build: claimGateReopenRequest},
@@ -815,6 +817,15 @@ func claimGateLabelAddRequest(t *testing.T, federated bool) (*testenv.Env, claim
 		method: http.MethodPost,
 		path:   issuePathRef(project.ID, issue.ShortID, "labels"),
 		body:   map[string]string{"actor": "agent", "label": "area:db"},
+	}
+}
+
+func claimGateLabelSwapRequest(t *testing.T, federated bool) (*testenv.Env, claimGateHTTPRequest) {
+	env, project, issue := setupClaimGateIssue(t, federated)
+	return env, claimGateHTTPRequest{
+		method: http.MethodPatch,
+		path:   issuePathRef(project.ID, issue.ShortID, "labels"),
+		body:   map[string]any{"actor": "agent", "add": []string{"area:db"}, "remove": []string{"area:ui"}},
 	}
 }
 

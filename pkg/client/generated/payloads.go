@@ -70,6 +70,8 @@ type EnableProjectFederationBody = EnableProjectFederationRequestBody
 
 type IngestFederationProjectEventsBody = FederationIngestEventsRequestBody
 
+type WatchFederationProjectEventsBody = FederationWatchEventsRequestBody
+
 type RetryFederationQuarantineBody = RetryFederationQuarantineRequestBody
 
 type SkipFederationQuarantineBody = SkipFederationQuarantineRequestBody
@@ -131,6 +133,8 @@ type ResumeExternalRootBridgeBody = ExternalRootActionRequestBody
 type CreateCommentBody = CommentRequestBody
 
 type EditCommentBody = EditCommentRequestBody
+
+type UpdateLabelsBody = UpdateLabelsRequestBody
 
 type AddLabelBody = AddLabelRequestBody
 

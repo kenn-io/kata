@@ -3,7 +3,8 @@
 
   interface Props {
     orientation?: 'horizontal' | 'vertical'
-    primarySize?: number
+    primarySize?: number | null
+    defaultShare?: number
     minPrimary?: number
     minSecondary?: number
     responsiveBreakpoint?: number
@@ -14,6 +15,7 @@
   let {
     orientation = 'horizontal',
     primarySize = 300,
+    defaultShare,
     minPrimary = 200,
     minSecondary = 200,
     responsiveBreakpoint = 0,
@@ -26,6 +28,7 @@
 <SplitLayout
   {orientation}
   {primarySize}
+  {defaultShare}
   {minPrimary}
   {minSecondary}
   {responsiveBreakpoint}

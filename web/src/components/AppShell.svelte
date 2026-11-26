@@ -8,6 +8,9 @@
     IconButton,
     PageHeader,
     SegmentedControl,
+    SidebarToggle,
+    SplitResizeHandle,
+    type SplitResizeEvent,
     Tooltip,
     TopBar,
     type TypeaheadOption,
@@ -24,7 +27,7 @@
 
   import type { TokenOut, UIIssueReference } from '../lib/api/generated'
   import type { WebDaemonInfo } from '../lib/daemons/client'
-  import type { KataRoute, ShareableFilters, SystemView } from '../lib/router'
+  import type { KataRoute, SettingsSection, ShareableFilters, SystemView } from '../lib/router'
   import {
     deriveKataAreas,
     defaultKataTaskSearchFilters,
@@ -50,7 +53,12 @@
     snapshotIntentForRoute,
     type UISnapshot,
   } from '../lib/state/snapshot'
-  import { defaultPreferences, type Preferences } from '../lib/state/preferences'
+  import {
+    defaultPreferences,
+    maxSidebarWidth,
+    minSidebarWidth,
+    type Preferences,
+  } from '../lib/state/preferences'
   import AccessManagement from './AccessManagement.svelte'
   import IssueBoard from './IssueBoard.svelte'
   import type { MutationContext, MutationResult } from '../lib/mutations/controller'
@@ -64,6 +72,7 @@
   import QuickCapture from './QuickCapture.svelte'
   import ProjectRecurrences from './ProjectRecurrences.svelte'
   import SearchSettings from './SearchSettings.svelte'
+  import SettingsView, { type SettingsSectionID } from './SettingsView.svelte'
   import Sidebar from './Sidebar.svelte'
   import SplitLayout from './SplitLayout.svelte'
 
@@ -106,7 +115,6 @@
         ) => Promise<boolean>)
       | undefined
     onRefreshCredentials?: (() => void | Promise<void>) | undefined
-    onBackFromCredentials?: (() => void | Promise<void>) | undefined
     onSearchEmpty?: (() => void) | undefined
     onNavigate: (route: AppRoute) => void | Promise<void>
     onCreateProject: (name: string, designateInbox?: boolean) => Promise<KataTaskMutationResponse>
@@ -193,7 +201,6 @@
     onOpenDaemon = () => {},
     onAccessMutation = undefined,
     onRefreshCredentials = () => {},
-    onBackFromCredentials = () => {},
     onSearchEmpty = undefined,
     onNavigate,
     onCreateProject,
@@ -305,9 +312,7 @@
   let linkFilters = $state(createKataLinkFilters('all'))
   let navigationGeneration = $state(0)
   let viewer = $derived(attentionViewer(snapshot.capabilities.account))
-  let credentialRoute = $derived(route.view === 'credentials')
-  let settingsRoute = $derived(route.view === 'settings')
-  let daemonRoute = $derived(credentialRoute || settingsRoute)
+  let daemonRoute = $derived(route.view === 'credentials' || route.view === 'settings')
   let settingsHost = $derived.by(() => {
     const remote = activeConnection && !activeConnection.local ? activeConnection.url : undefined
     const host = remote ? new URL(remote).hostname : globalThis.location?.hostname
@@ -322,10 +327,14 @@
       !daemonSwitching &&
       (!activeDaemonID || activeConnection?.local === true),
   )
-  let graphSelectedUID = $derived<string | null>(
-    route.issueUID && route.graph ? route.issueUID : null,
-  )
-
+  let credentialAuditAvailable = $derived(snapshot.capabilities.token_audit_read === true)
+  // Settings opens on Search by meaning. A section this session can't use
+  // shows Appearance instead, without reading anything it isn't allowed to.
+  let settingsSection = $derived.by<SettingsSectionID>(() => {
+    if (route.view === 'credentials') return credentialAuditAvailable ? 'credentials' : 'appearance'
+    const section = route.section ?? 'search'
+    return section === 'access' && !accessAdministrationAvailable ? 'appearance' : section
+  })
   let inboxProject = $derived(
     projection.projects.find((project) => project.metadata.role === 'inbox'),
   )
@@ -475,21 +484,30 @@
     })
   }
 
-  function openCredentials(): void {
-    closeNavigation()
-    navigate({
-      kind: 'kata',
-      view: 'credentials',
-      graph: false,
-      filters: emptyShareableFilters(),
-    })
-  }
-
   function openSettings(): void {
     closeNavigation()
     navigate({
       kind: 'kata',
       view: 'settings',
+      graph: false,
+      filters: emptyShareableFilters(),
+    })
+  }
+
+  // Credentials keeps its own address; every other section is a Settings one.
+  function openSettingsSection(section: SettingsSectionID): void {
+    if (
+      section === settingsSection &&
+      (section === 'credentials'
+        ? route.view === 'credentials'
+        : route.view === 'settings' && (route.section ?? 'search') === section)
+    )
+      return
+    navigate({
+      kind: 'kata',
+      ...(section === 'credentials'
+        ? { view: 'credentials' as const }
+        : { view: 'settings' as const, section: section as SettingsSection }),
       graph: false,
       filters: emptyShareableFilters(),
     })
@@ -587,9 +605,49 @@
     onPreferencesChange({ ...preferences, splitDirection: direction })
   }
 
-  function resizeSplit(size: number): void {
-    onPreferencesChange({ ...preferences, splitSize: size })
+  // A drag shows its width at once and saves it when the pointer lets go.
+  let sidebarDragWidth = $state<number | null>(null)
+  let sidebarWidth = $derived(sidebarDragWidth ?? preferences.sidebarWidth)
+  let sidebarResizeStart = 0
+
+  function sidebarWidthAfter(event: SplitResizeEvent): number {
+    return Math.max(minSidebarWidth, Math.min(maxSidebarWidth, sidebarResizeStart + event.delta))
   }
+
+  function finishSidebarResize(event: SplitResizeEvent): void {
+    onPreferencesChange({ ...preferences, sidebarWidth: sidebarWidthAfter(event) })
+    sidebarDragWidth = null
+  }
+
+  // The toggle a person pressed disappears, so focus moves to the one that replaces it.
+  let navigationElement: HTMLDivElement | null = $state(null)
+  let sidebarToggleFocus = $state<boolean | null>(null)
+
+  function setSidebarCollapsed(collapsed: boolean): void {
+    sidebarToggleFocus = collapsed
+    onPreferencesChange({ ...preferences, sidebarCollapsed: collapsed })
+  }
+
+  $effect(() => {
+    if (sidebarToggleFocus === null || preferences.sidebarCollapsed !== sidebarToggleFocus) return
+    const pane = sidebarToggleFocus ? '.navigation-strip' : '.navigation-pane'
+    navigationElement?.querySelector<HTMLElement>(`${pane} .kit-sidebar-toggle`)?.focus()
+    sidebarToggleFocus = null
+  })
+
+  function resizeSplit(size: number): void {
+    if (route.graph) graphSize = size
+    else onPreferencesChange({ ...preferences, splitSize: size })
+  }
+
+  let graphSize = $state<number | null>(null)
+  $effect(() => {
+    if (!route.graph) graphSize = null
+  })
+  $effect(() => {
+    void detailBeside
+    graphSize = null
+  })
 
   function beginNewTask(): void {
     if (newTaskBlockedReason) return
@@ -608,6 +666,8 @@
   function beginProjectCreation(intent: 'project' | 'task' = 'project'): void {
     if (projectCreationBlockedReason) return
     if (mediumScreen.current) mobileNavigationOpen = true
+    else if (preferences.sidebarCollapsed)
+      onPreferencesChange({ ...preferences, sidebarCollapsed: false })
     creationIntent = intent
   }
 
@@ -783,7 +843,7 @@
   </EmptyState>
 {/snippet}
 
-{#snippet navigationSidebar()}
+{#snippet navigationSidebar(collapsible: boolean)}
   <Sidebar
     {areas}
     currentView={{
@@ -795,14 +855,11 @@
     {projectCreationBlockedReason}
     bind:creationIntent
     {draftFenceGeneration}
-    credentialAuditAvailable={snapshot.capabilities.token_audit_read === true}
-    credentialAuditActive={credentialRoute}
-    settingsActive={settingsRoute}
+    settingsActive={daemonRoute}
     onOpenSettings={openSettings}
     onOpenView={openView}
     onOpenProject={openProject}
     onCreateProject={createProject}
-    onOpenCredentials={openCredentials}
   >
     {#snippet header()}
       <div class="header-server">
@@ -830,6 +887,9 @@
           <Tooltip text={newTaskBlockedReason}>{@render newTaskButton()}</Tooltip>
         {:else}
           {@render newTaskButton()}
+        {/if}
+        {#if collapsible}
+          <SidebarToggle state="expanded" onclick={() => setSidebarCollapsed(true)} />
         {/if}
       </div>
     {/snippet}
@@ -862,9 +922,7 @@
             mobileNavigationOpen = true
           }}><MenuIcon size={18} /></IconButton
         >
-        <strong
-          >{settingsRoute ? 'Settings' : credentialRoute ? 'Credentials' : scopeLabel()}</strong
-        >
+        <strong>{daemonRoute ? 'Settings' : scopeLabel()}</strong>
       {/snippet}
       {#snippet right()}
         {#if mediumScreen.current}
@@ -877,81 +935,88 @@
       {/snippet}
     </TopBar>
   </div>
-  {#if selectedProject && !daemonRoute && !stale && !daemonSwitching && !reconnecting && !credentialExpired && !daemonError && !scopedAuthority && (!activeDaemonID || activeConnection?.local === true)}
-    {#key `${activeDaemonID ?? 'direct'}:${draftFenceGeneration}:${selectedProject.uid}`}
-      <ProjectSyncStatus
-        projectID={selectedProject.id}
-        projectUID={selectedProject.uid}
-        refreshGeneration={syncRefreshGeneration}
-      />
-    {/key}
-  {/if}
   <div class="kata-layout" aria-busy={loading}>
-    <div class="desktop-navigation">
-      {@render navigationSidebar()}
+    <div class="desktop-navigation" bind:this={navigationElement}>
+      <!-- Hidden rather than unmounted, so collapsing keeps the sidebar's own state. -->
+      <div
+        class="navigation-pane"
+        hidden={preferences.sidebarCollapsed}
+        style:width={`${sidebarWidth}px`}
+      >
+        {@render navigationSidebar(true)}
+      </div>
+      {#if preferences.sidebarCollapsed}
+        <div class="navigation-strip">
+          <SidebarToggle
+            state="collapsed"
+            class="kit-sidebar-toggle--compact"
+            onclick={() => setSidebarCollapsed(false)}
+          />
+        </div>
+      {:else}
+        <SplitResizeHandle
+          ariaLabel="Resize sidebar"
+          orientation="horizontal"
+          ariaValueMin={minSidebarWidth}
+          ariaValueMax={maxSidebarWidth}
+          ariaValueNow={sidebarWidth}
+          onResizeStart={() => (sidebarResizeStart = sidebarWidth)}
+          onResize={(event) => (sidebarDragWidth = sidebarWidthAfter(event))}
+          onResizeEnd={finishSidebarResize}
+        />
+      {/if}
     </div>
-
     <div class="kata-main">
-      {#if mutationMessage && !captureOpen && (!credentialRoute || !accessAdministrationAvailable || !onAccessMutation)}
+      {#if mutationMessage && !captureOpen && (settingsSection !== 'access' || !daemonRoute || !accessAdministrationAvailable || !onAccessMutation)}
         <p class="mutation-message" role="alert">{mutationMessage}</p>
       {/if}
-      {#if credentialRoute}
-        <div class="credential-scene">
-          <CredentialAudit
-            tokens={credentialTokens}
-            loading={credentialLoading}
-            error={snapshot.capabilities.token_audit_read
-              ? credentialError
-              : 'Credential inventory is unavailable for this session.'}
-            onRefresh={onRefreshCredentials}
-            onBack={onBackFromCredentials}
-          />
-          {#if accessAdministrationAvailable}
-            <section class="access-administration" aria-label="Teams and visibility">
-              <PageHeader level={2} title="Teams and visibility" />
-              {#if onAccessMutation}
-                {#key `${activeDaemonID ?? 'direct'}:${draftFenceGeneration}`}
-                  <AccessManagement
-                    projects={snapshot.catalog}
-                    pending={mutationPending || loading || !accessAdministrationAvailable}
-                    message={captureOpen ? undefined : mutationMessage}
-                    onMutation={onAccessMutation}
-                  />
-                {/key}
-              {/if}
-            </section>
-          {/if}
-        </div>
-      {:else if settingsRoute}
-        {#key activeDaemonID ?? 'direct'}
-          <SearchSettings
-            postFetch={searchSettingsPostFetch}
-            {canAdministerDaemon}
-            originStable={snapshot.origin_stable}
-            onback={onBackFromCredentials}
-            remoteHost={settingsHost}
-          >
-            <div class="appearance">
-              <span>Theme</span><SegmentedControl
-                ariaLabel="Theme"
-                options={[
-                  { value: 'system', label: 'System' },
-                  { value: 'light', label: 'Light' },
-                  { value: 'dark', label: 'Dark' },
-                ]}
-                value={preferences.theme}
-                onchange={(theme) =>
-                  onPreferencesChange({ ...preferences, theme: theme as Preferences['theme'] })}
+      {#if daemonRoute}
+        <SettingsView
+          active={settingsSection}
+          theme={preferences.theme}
+          onThemeChange={(theme) => onPreferencesChange({ ...preferences, theme })}
+          credentialsAvailable={credentialAuditAvailable}
+          accessAvailable={accessAdministrationAvailable}
+          onSelect={openSettingsSection}
+        >
+          {#snippet search()}
+            {#key activeDaemonID ?? 'direct'}
+              <SearchSettings
+                postFetch={searchSettingsPostFetch}
+                {canAdministerDaemon}
+                originStable={snapshot.origin_stable}
+                remoteHost={settingsHost}
               />
-            </div>
-          </SearchSettings>
-        {/key}
+            {/key}
+          {/snippet}
+          {#snippet credentials()}
+            <CredentialAudit
+              tokens={credentialTokens}
+              loading={credentialLoading}
+              error={credentialError}
+              onRefresh={onRefreshCredentials}
+            />
+          {/snippet}
+          {#snippet access()}
+            {#if onAccessMutation}
+              {#key `${activeDaemonID ?? 'direct'}:${draftFenceGeneration}`}
+                <AccessManagement
+                  projects={snapshot.catalog}
+                  pending={mutationPending || loading || !accessAdministrationAvailable}
+                  message={captureOpen ? undefined : mutationMessage}
+                  onMutation={onAccessMutation}
+                />
+              {/key}
+            {/if}
+          {/snippet}
+        </SettingsView>
       {:else if boardRoute}
         {@render boardPane()}
       {:else}
         <SplitLayout
           orientation={preferences.splitDirection}
-          primarySize={preferences.splitSize}
+          primarySize={route.graph ? graphSize : preferences.splitSize}
+          defaultShare={route.graph ? 2 / 3 : undefined}
           minPrimary={preferences.splitDirection === 'vertical' ? 220 : 320}
           minSecondary={preferences.splitDirection === 'vertical' ? 220 : 360}
           responsiveBreakpoint={700}
@@ -981,7 +1046,7 @@
 
 {#if mobileNavigationOpen}
   <DetailDrawer title="Navigation" width="min(320px, calc(100vw - 40px))" onclose={closeNavigation}>
-    {@render navigationSidebar()}
+    {@render navigationSidebar(false)}
   </DetailDrawer>
 {/if}
 
@@ -998,19 +1063,34 @@
   </IconButton>
 {/snippet}
 
+{#snippet projectSync()}
+  {#if selectedProject && !daemonRoute && !stale && !daemonSwitching && !reconnecting && !credentialExpired && !daemonError && !scopedAuthority && (!activeDaemonID || activeConnection?.local === true)}
+    {#key `${activeDaemonID ?? 'direct'}:${draftFenceGeneration}:${selectedProject.uid}`}
+      <ProjectSyncStatus
+        projectID={selectedProject.id}
+        projectUID={selectedProject.uid}
+        refreshGeneration={syncRefreshGeneration}
+      />
+    {/key}
+  {/if}
+{/snippet}
+
 {#snippet listPane()}
   <div class="list-column kata-list">
     {#if route.issueUID && route.graph}
       {#if projection.selected_graph && projection.selected_detail}
+        {#snippet graphActions()}
+          {@render projectSync()}
+          {@render paneDirection()}
+        {/snippet}
         <IssueGraph
-          headerActions={paneDirection}
+          headerActions={graphActions}
           graph={projection.selected_graph}
           sourceIssue={projection.selected_detail.issue}
-          selectedUID={graphSelectedUID}
           layoutDirection={preferences.splitDirection === 'horizontal' ? 'LR' : 'TB'}
           onBack={closeGraph}
           onSelectIssue={(uid) => {
-            graphSelectedUID = uid
+            if (uid !== route.issueUID) openGraph(uid)
           }}
         />
       {:else}
@@ -1030,6 +1110,7 @@
         />
       {/snippet}
       {#snippet projectRecurrences()}
+        {@render projectSync()}
         {#if selectedProject && !scopedAuthority}
           {#key selectedProject.uid}
             <ProjectRecurrences
@@ -1308,14 +1389,6 @@
     font-size: var(--font-size-sm);
   }
 
-  .appearance {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    padding: 16px 0;
-  }
-
   .daemon-fallback-status {
     color: var(--text-muted);
     font-size: var(--font-size-xs);
@@ -1372,14 +1445,38 @@
   .kata-layout {
     min-height: 0;
     flex: 1;
-    display: grid;
-    grid-template-columns: 240px minmax(0, 1fr);
+    display: flex;
   }
 
   .desktop-navigation {
+    flex: none;
+    min-height: 0;
+    display: flex;
+  }
+
+  .navigation-pane {
     min-width: 0;
     min-height: 0;
     display: flex;
+  }
+
+  .navigation-pane[hidden] {
+    display: none;
+  }
+
+  .navigation-strip {
+    width: 28px;
+    display: flex;
+    justify-content: center;
+    padding-top: var(--space-3);
+    border-right: 1px solid var(--border-muted);
+    background: var(--bg-primary);
+  }
+
+  .header-task {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
   }
 
   /* The slim bar and the drawer's header take the sidebar header's 48px. */
@@ -1395,28 +1492,12 @@
   }
 
   .kata-main {
+    flex: 1;
     min-width: 0;
     min-height: 0;
     display: flex;
     position: relative;
     overflow: hidden;
-  }
-
-  .credential-scene {
-    min-width: 0;
-    flex: 1;
-    overflow: auto;
-    /* Reserve the scrollbar's width so controls do not shift when a search
-       changes whether the credential table overflows. */
-    scrollbar-gutter: stable;
-  }
-
-  .access-administration {
-    display: grid;
-    gap: var(--space-4);
-    padding: var(--space-5);
-    background: var(--bg-primary);
-    border-top: 1px solid var(--border-default);
   }
 
   .list-column {
@@ -1496,10 +1577,6 @@
   }
 
   @media (max-width: 760px) {
-    .kata-layout {
-      grid-template-columns: 1fr;
-    }
-
     .desktop-navigation {
       display: none;
     }

@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -79,6 +78,10 @@ func (h *hubSpokeHarness) front(t *testing.T, serve func(http.ResponseWriter, *h
 	require.NoError(t, err)
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	proxy.ErrorLog = log.New(io.Discard, "", 0)
+	proxy.ModifyResponse = func(response *http.Response) error {
+		h.hideWatch(response)
+		return nil
+	}
 	front := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { serve(w, r, proxy) }))
 	t.Cleanup(front.Close)
 	return front.URL
@@ -505,31 +508,13 @@ func TestStoppedWatcherIsJoinedAtShutdown(t *testing.T) {
 
 func TestHeldPollWakeRunsOnlyItsProject(t *testing.T) {
 	h := newHubSpokeHarness(t, false)
-	ctx := t.Context()
-	hubProject, err := h.hubDB.CreateProject(ctx, "other-hub-project")
-	require.NoError(t, err)
-	_, err = h.hubDB.EnableProjectFederation(ctx, hubProject.ID, "tester")
-	require.NoError(t, err)
-	enrollment, err := h.hubDB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{Token: "other-pull-token", SpokeInstanceUID: h.spokeDB.InstanceUID(), ProjectID: &hubProject.ID, Capabilities: "pull", Actor: "tester"}) //nolint:gosec // test-only bearer token
-	require.NoError(t, err)
-	other, err := h.spokeDB.CreateProjectWithUID(ctx, "other-spoke-project", hubProject.UID)
-	require.NoError(t, err)
-	_, err = h.spokeDB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: other.ID, Role: db.FederationRoleSpoke, HubURL: h.url, HubProjectID: hubProject.ID, HubProjectUID: hubProject.UID, Enabled: true})
-	require.NoError(t, err)
-	require.NoError(t, config.WriteFederationCredential(other.UID, config.FederationCredential{HubURL: h.url, HubProjectID: hubProject.ID, Token: enrollment.Token}))
+	other, hubProject := h.addBinding(t, "other-hub-project", h.url)
 	turns := make(chan int64, 16)
 	h.startConfiguredRunner(t, &Runner{DB: h.spokeDB, Interval: time.Hour, OnSpokeResult: func(id int64, _ error) { turns <- id }})
 	//nolint:kennlint // sleeptest: both held polls must reach the hub over HTTP before the commit.
 	require.Eventually(t, func() bool { return h.pollsWithWait.Load() >= 2 }, 10*time.Second, 10*time.Millisecond)
-	for range 2 {
-		select {
-		case <-turns:
-		case <-time.After(10 * time.Second):
-			t.Fatal("initial sync did not finish")
-		}
-	}
-	var created any
-	h.post(t, "/api/v1/projects/"+strconv.FormatInt(hubProject.ID, 10)+"/issues", map[string]any{"actor": "tester", "title": "event in one project"}, &created)
+	awaitTurns(t, turns, h.spokeProject.ID, other.ID)
+	h.createIssueIn(t, hubProject.ID, "event in one project")
 	select {
 	case id := <-turns:
 		require.Equal(t, other.ID, id, "an unrelated project ran after the wake")

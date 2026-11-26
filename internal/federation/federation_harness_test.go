@@ -37,6 +37,9 @@ type hubSpokeHarness struct {
 	spokeProject db.Project
 	pullToken    string
 	oldHub       bool
+	// watches lets the spoke see the hub's watch advertisement. Without it
+	// every proxy drops the header, so the spoke holds one poll per project.
+	watches atomic.Bool
 	// wake wakes the runner startRunner started.
 	wake chan struct{}
 }
@@ -51,14 +54,23 @@ type hubFront struct {
 	// reached the hub with and without a wait.
 	pollsWithWait    atomic.Int64
 	pollsWithoutWait atomic.Int64
+	// watchRequests counts project event watches that reached the hub.
+	watchRequests            atomic.Int64
+	watchRequestsWithWait    atomic.Int64
+	watchRequestsWithoutWait atomic.Int64
+	// held counts the polls with a wait and the watches open at the hub now;
+	// peakHeld is the most that were open at once.
+	heldMu   sync.Mutex
+	held     int
+	peakHeld int
 	// holdForever keeps a poll with a wait open until its client goes away, as
 	// a network interruption would.
 	holdForever atomic.Bool
 	// refuseHolds makes the hub answer a poll with a wait at once, as a hub at
 	// its held-poll bound does.
 	refuseHolds atomic.Bool
-	// holdSeconds, when set, replaces the wait a poll asks for and the
-	// maximum the hub advertises, as a hub with a shorter maximum would.
+	// holdSeconds, when set, replaces the wait a poll or watch asks for and
+	// the maximum the hub advertises, as a hub with a shorter maximum would.
 	holdSeconds atomic.Int64
 }
 
@@ -121,6 +133,7 @@ func (h *hubSpokeHarness) newFront(tb testing.TB) *hubFront {
 	proxy.ErrorLog = log.New(io.Discard, "", 0)
 	f := &hubFront{}
 	proxy.ModifyResponse = func(response *http.Response) error {
+		h.hideWatch(response)
 		if h.oldHub {
 			response.Header.Del("X-Kata-Federation-Poll-Wait-Max")
 		} else if seconds := f.holdSeconds.Load(); seconds > 0 && response.Header.Get("X-Kata-Federation-Poll-Wait-Max") != "" {
@@ -130,6 +143,37 @@ func (h *hubSpokeHarness) newFront(tb testing.TB) *hubFront {
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.requests.Add(1)
+		isHeldRequest := !h.oldHub && !f.refuseHolds.Load() && (isHeldPoll(r) || (isWatch(r) && watchHasPositiveWait(r)))
+		if isHeldRequest {
+			f.heldMu.Lock()
+			f.held++
+			f.peakHeld = max(f.peakHeld, f.held)
+			f.heldMu.Unlock()
+			defer func() {
+				f.heldMu.Lock()
+				f.held--
+				f.heldMu.Unlock()
+			}()
+		}
+		if isWatch(r) {
+			f.watchRequests.Add(1)
+			query := r.URL.Query()
+			if watchHasPositiveWait(r) {
+				f.watchRequestsWithWait.Add(1)
+				switch {
+				case f.holdForever.Load():
+					<-r.Context().Done()
+					return
+				case h.oldHub || f.refuseHolds.Load():
+					query.Del("wait")
+				case f.holdSeconds.Load() > 0:
+					query.Set("wait", strconv.FormatInt(f.holdSeconds.Load(), 10))
+				}
+			} else {
+				f.watchRequestsWithoutWait.Add(1)
+			}
+			r.URL.RawQuery = query.Encode()
+		}
 		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/federation/events") && r.URL.Query().Get("issue_uid") == "" {
 			query := r.URL.Query()
 			if !query.Has("wait") {
@@ -153,6 +197,54 @@ func (h *hubSpokeHarness) newFront(tb testing.TB) *hubFront {
 	tb.Cleanup(server.Close)
 	f.url = server.URL
 	return f
+}
+
+// hideWatch drops the hub's watch advertisement unless the test opted in.
+func (h *hubSpokeHarness) hideWatch(response *http.Response) {
+	if !h.watches.Load() {
+		response.Header.Del("X-Kata-Federation-Watch-Max")
+	}
+}
+
+func isWatch(r *http.Request) bool {
+	return r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/federation/events:watch")
+}
+
+func watchHasPositiveWait(r *http.Request) bool {
+	wait, err := strconv.Atoi(r.URL.Query().Get("wait"))
+	return err == nil && wait > 0
+}
+
+// addBinding binds another spoke project, with its own pull enrollment, to a
+// new project on the same hub through hubURL.
+func (h *hubSpokeHarness) addBinding(tb testing.TB, name, hubURL string) (spoke, hub db.Project) {
+	tb.Helper()
+	ctx := context.WithoutCancel(tb.Context())
+	hub, err := h.hubDB.CreateProject(ctx, name)
+	require.NoError(tb, err)
+	_, err = h.hubDB.EnableProjectFederation(ctx, hub.ID, "tester")
+	require.NoError(tb, err)
+	enrollment, err := h.hubDB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
+		Token: name + "-pull-token", SpokeInstanceUID: h.spokeDB.InstanceUID(), ProjectID: &hub.ID, Capabilities: "pull", Actor: "tester",
+	})
+	require.NoError(tb, err)
+	spoke, err = h.spokeDB.CreateProjectWithUID(ctx, name, hub.UID)
+	require.NoError(tb, err)
+	_, err = h.spokeDB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: spoke.ID, Role: db.FederationRoleSpoke, HubURL: hubURL,
+		HubProjectID: hub.ID, HubProjectUID: hub.UID, Enabled: true,
+	})
+	require.NoError(tb, err)
+	require.NoError(tb, config.WriteFederationCredential(spoke.UID, config.FederationCredential{HubURL: hubURL, HubProjectID: hub.ID, Token: enrollment.Token}))
+	return spoke, hub
+}
+
+// createIssueIn commits an issue in a hub project.
+func (h *hubSpokeHarness) createIssueIn(tb testing.TB, hubProjectID int64, title string) {
+	tb.Helper()
+	var out map[string]any
+	h.post(tb, "/api/v1/projects/"+strconv.FormatInt(hubProjectID, 10)+"/issues",
+		map[string]any{"actor": "tester", "title": title}, &out)
 }
 
 // moveTo points the spoke's binding and credential at another front, as an
@@ -231,7 +323,5 @@ func (h *hubSpokeHarness) spokeIssueCount(tb testing.TB) int {
 
 func (h *hubSpokeHarness) createHubIssue(tb testing.TB, title string) {
 	tb.Helper()
-	var out map[string]any
-	h.post(tb, "/api/v1/projects/"+strconv.FormatInt(h.hubProject.ID, 10)+"/issues",
-		map[string]any{"actor": "tester", "title": title}, &out)
+	h.createIssueIn(tb, h.hubProject.ID, title)
 }

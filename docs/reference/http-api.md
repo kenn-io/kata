@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-20
+last_edited: 2026-11-24
 ---
 
 # HTTP API schema
@@ -293,6 +293,11 @@ with a separate health probe. Whenever you send `Idempotency-Key` or `If-Match`,
 also send `retry_protocol: "close-v1"`. Current daemons require that marker, and
 older daemons reject the unknown field before the close can run.
 
+Starting in API `0.69.0`, a successful close can include
+`parent_ready`, an issue reference for an open parent with no open children.
+The field is omitted for retries, dry runs, unchanged closes, inaccessible
+parents, and when the advisory lookup fails.
+
 `api_schema_version` is **optional in the schema** even though current daemons
 always send it. A version-detection field has to survive version skew, so a
 client generated from a newer schema can still parse responses from an older
@@ -368,6 +373,9 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
+| `0.71.0` | Federation event watches hold one request for many projects; event polls advertise `X-Kata-Federation-Watch-Max`. |
+| `0.70.0` | Added `PATCH /api/v1/projects/{project_id}/issues/{ref}/labels`, which applies `add` and `remove` label lists in one transaction and answers with the issue's resulting `labels`. |
+| `0.69.0` | Close responses can include a `parent_ready` issue reference. |
 | `0.67.0` | Federation event polls accept `wait` and advertise `X-Kata-Federation-Poll-Wait-Max`. |
 | `0.66.0` | Federation search accepts `auto` and reports its effective mode, matched fields, and any fallback reason. |
 | `0.64.0` | Routes shared-project attachments to their Docbank origin. Attachment references can include `origin`; the UI attachment capability is enabled when the daemon has a local Docbank or any enabled spoke binding. A disabled spoke rejects uploads and links with `503 federation_offline`, even when it has a local vault. Federation peers advertise `docbank_origin_v1` before receiving origin references. |
@@ -747,6 +755,7 @@ These operations accept either a numeric project ID or a `name:` selector:
 | `PATCH` | `/api/v1/projects/name:example-project/issues/{ref}` |
 | `POST` | `/api/v1/projects/name:example-project/issues/{ref}/comments` |
 | `POST` | `/api/v1/projects/name:example-project/issues/{ref}/labels` |
+| `PATCH` | `/api/v1/projects/name:example-project/issues/{ref}/labels` |
 
 URL-encode the project selector as a single path segment. Numeric paths such as
 `/api/v1/projects/42/issues` remain valid, and the issue ref and mutation body
@@ -991,7 +1000,38 @@ authority and polls snapshots because the event stream remains protected.
 `GET /api/v1/projects/{project_id}/federation/events` accepts an optional
 `wait` in seconds. A caught-up poll may wait up to 45 seconds for new events;
 a zero or omitted wait answers at once. Successful responses advertise the
-maximum wait in seconds in `X-Kata-Federation-Poll-Wait-Max`.
+maximum wait in seconds in `X-Kata-Federation-Poll-Wait-Max`, and the most
+projects one watch can name in `X-Kata-Federation-Watch-Max`. A hub that
+requires signed federation requests advertises `0` watch projects.
+
+`POST /api/v1/projects/{project_id}/federation/events:watch` holds one request
+for the route project and up to 255 more. The bearer authorizes the route
+project. Each other project in the body carries its own enrollment token:
+
+```json
+{"after_id": 120, "projects": [{"project_id": 7, "after_id": 33, "token": "..."}]}
+```
+
+The hub checks each token against its own project, as it would check a poll
+by that token. It answers as soon as any named project has events or a reset
+after its cursor, when no named project is left to watch, or when the `wait`
+ends. The response names projects only; pull their events with the event
+poll:
+
+```json
+{"ready": [7], "unwatched": []}
+```
+
+`ready` also names a project whose own poll would refuse the read, such as
+for event features the spoke lacks; that poll says why. `unwatched` lists
+projects the hub did not watch: their token does not authorize pulls from
+them, they are outside the request's `X-Kata-Project-Scope`, or the request is
+signed. A signed request proves only the route credential's key, so it
+watches the route project alone. A list
+with more than 255 other projects, a repeated project, the route project, a
+negative cursor, or a missing token returns `400 validation`. The response
+carries the same `X-Kata-Federation-Poll-Wait-Max` and
+`X-Kata-Federation-Watch-Max` headers as the event poll.
 
 `POST /api/v1/projects/{project_id}/federation/events:ingest` returns
 `400 validation` when a fresh event references a stored sibling-project issue
@@ -1148,6 +1188,35 @@ Editing a comment overwrites its current body while keeping the original
 author, UID, creation time, and thread position. This is the supported way to
 redact comment text before enrolling a project in federation; it does not purge
 data that has already crossed into another federated event log.
+
+## Label Endpoints
+
+`POST /api/v1/projects/{project_id}/issues/{ref}/labels` attaches one label and
+`DELETE /api/v1/projects/{project_id}/issues/{ref}/labels/{label}` detaches one.
+
+To change several labels at once, for example moving an issue from
+`ready-for-agent` to `ready-for-human`, send `PATCH
+/api/v1/projects/{project_id}/issues/{ref}/labels` with `add` and `remove`
+lists (API `0.70.0` or newer):
+
+```json
+{"actor": "reviewer", "add": ["ready-for-human"], "remove": ["ready-for-agent"]}
+```
+
+The daemon removes the `remove` labels, then attaches the `add` labels, in one
+transaction. Labels already attached or already absent are skipped without an
+event. The response carries `issue`, `labels` (the issue's labels after the
+change, sorted, read in the same transaction), `events` (`issue.unlabeled` then
+`issue.labeled`, empty when nothing changed), and `changed`.
+
+A request returns `400 validation` and changes nothing when both lists are
+empty, when a label in either list does not match `[a-z0-9._:-]` with length
+1..64 (a mistyped `remove` entry included), or when the same label appears in
+both lists. The PATCH route's project path accepts a `name:` selector.
+
+Labels `p0` through `p4` and labels beginning with `priority:` are reserved.
+Set issue priority through the priority field. You can remove a priority label
+already attached to the issue.
 
 ## Attachment Endpoints
 

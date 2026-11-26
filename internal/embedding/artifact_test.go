@@ -253,6 +253,15 @@ func TestEmbeddingArtifactClientIdentity(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, string(raw), cfg.Credential.Key)
 	require.NotContains(t, string(raw), cfg.BaseURL)
+	vertex := cfg
+	vertex.API = "vertex"
+	vertex.BaseURL = "https://encoder.example/publishers/google/models"
+	vertex.Credential = config.EmbeddingCredential{}
+	openai := vertex
+	openai.API = ""
+	vertexIdentity := makeIdentity(vertex)
+	require.Equal(t, "vertex", vertexIdentity.Provider)
+	require.NotEqual(t, makeIdentity(openai).RecipeFingerprint, vertexIdentity.RecipeFingerprint)
 }
 
 // redigest makes an artifact's checksums match damaged vector bytes, so a

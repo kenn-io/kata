@@ -3183,6 +3183,53 @@ func (f FederationViolationSummary) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(f))
 }
 
+type FederationWatchEventsBody struct {
+	// Ready Projects the spoke should poll now: they have events or a reset after their cursor, or their own poll will report why it cannot read them.
+	Ready []int64 `json:"ready" validate:"required"`
+
+	// Unwatched Projects the hub did not watch because their token does not authorize pulls from them now, or because this request cannot carry supplemental tokens. Poll them individually.
+	Unwatched []int64 `json:"unwatched" validate:"required"`
+}
+
+func (f FederationWatchEventsBody) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(f))
+}
+
+type FederationWatchEventsRequestBody struct {
+	// AfterID Cursor for the route project.
+	AfterID int64 `json:"after_id"`
+
+	// Projects Other projects to watch, each with its own cursor and enrollment token.
+	Projects []FederationWatchProject `json:"projects,omitempty"`
+}
+
+func (f FederationWatchEventsRequestBody) Validate() error {
+	var errors runtime.ValidationErrors
+	for i, item := range f.Projects {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Projects[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type FederationWatchProject struct {
+	AfterID   int64 `json:"after_id"`
+	ProjectID int64 `json:"project_id"`
+
+	// Token Federation enrollment token that authorizes pulls from this project. Transport-only; the hub checks it like a route bearer and never stores it.
+	Token string `json:"token" validate:"required"`
+}
+
+func (f FederationWatchProject) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(f))
+}
+
 type FieldDescriptor struct {
 	AcceptedKinds  []string `json:"accepted_kinds" validate:"required"`
 	DisplayName    string   `json:"display_name" validate:"required"`
@@ -5063,11 +5110,12 @@ func (m MoveIssueResponseBody) Validate() error {
 }
 
 type MutationResponseBody struct {
-	Changed       bool   `json:"changed"`
-	Event         Event  `json:"event"`
-	Issue         Issue  `json:"issue"`
-	OriginalEvent *Event `json:"original_event,omitempty"`
-	Reused        *bool  `json:"reused,omitempty"`
+	Changed       bool      `json:"changed"`
+	Event         Event     `json:"event"`
+	Issue         Issue     `json:"issue"`
+	OriginalEvent *Event    `json:"original_event,omitempty"`
+	ParentReady   *IssueRef `json:"parent_ready,omitempty"`
+	Reused        *bool     `json:"reused,omitempty"`
 }
 
 func (m MutationResponseBody) Validate() error {
@@ -5086,6 +5134,13 @@ func (m MutationResponseBody) Validate() error {
 		if v, ok := any(m.OriginalEvent).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("OriginalEvent", err)
+			}
+		}
+	}
+	if m.ParentReady != nil {
+		if v, ok := any(m.ParentReady).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("ParentReady", err)
 			}
 		}
 	}
@@ -7964,4 +8019,51 @@ func (u UISnapshotResponseBody) Validate() error {
 type UnassignRequestBody struct {
 	Actor         *string `json:"actor,omitempty"`
 	ExpectedOwner *string `json:"expected_owner,omitempty"`
+}
+
+type UpdateLabelsRequestBody struct {
+	Actor *string `json:"actor,omitempty"`
+
+	// Add Labels to attach. Labels already attached change nothing.
+	Add []string `json:"add,omitempty"`
+
+	// Remove Labels to detach. Labels not attached change nothing. A label must not appear in both add and remove.
+	Remove []string `json:"remove,omitempty"`
+}
+
+type UpdateLabelsResponseBody struct {
+	Changed bool `json:"changed"`
+
+	// Events issue.unlabeled then issue.labeled events the request recorded; empty when nothing changed.
+	Events []Event `json:"events" validate:"required"`
+	Issue  Issue   `json:"issue"`
+
+	// Labels The issue's labels after the change, sorted.
+	Labels []string `json:"labels" validate:"required"`
+}
+
+func (u UpdateLabelsResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(u.Events, "required"); err != nil {
+		errors = errors.Append("Events", err)
+	}
+	for i, item := range u.Events {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Events[%d]", i), err)
+			}
+		}
+	}
+	if v, ok := any(u.Issue).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Issue", err)
+		}
+	}
+	if err := typesValidator.Var(u.Labels, "required"); err != nil {
+		errors = errors.Append("Labels", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }

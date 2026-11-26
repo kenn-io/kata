@@ -224,7 +224,9 @@ func TestManagedExternallyDoesNotWaitForStartLock(t *testing.T) {
 	release, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).AcquireStartLock(t.Context())
 	require.NoError(t, err)
 	defer release()
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	// The start lock stays held until this function returns, so waiting on it
+	// would still time out even with headroom for loaded loopback probes.
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	running, err := ensureLocalRunningTarget(ctx)
 	require.NoError(t, err)

@@ -12,6 +12,7 @@ export const systemViews = [
 
 export type SystemView = (typeof systemViews)[number]
 export type DaemonView = 'credentials' | 'settings'
+export type SettingsSection = 'appearance' | 'search' | 'access'
 
 export interface ShareableFilters {
   status: string[]
@@ -29,6 +30,7 @@ export type KataRoute =
   | (RouteBase & {
       kind: 'kata'
       view?: SystemView | DaemonView
+      section?: SettingsSection
       projectUID?: string
       issueUID?: string
       link?: { scope?: string; issue: string }
@@ -50,9 +52,11 @@ export function parseRoute(url: URL, routePath = applicationRoutePath()): KataRo
   }
   const view = url.searchParams.get('view')?.trim()
   if (view === 'credentials' || view === 'settings') {
+    const section = url.searchParams.get('section')
     return {
       kind: 'kata',
       view,
+      ...(view === 'settings' && isSettingsSection(section) ? { section } : {}),
       graph: false,
       filters: { status: [], owner: [], label: [], relationship: [] },
     }
@@ -106,6 +110,7 @@ export function serializeRoute(route: KataRoute, routePath = applicationRoutePat
   if (route.kind === 'route-error') return route.path
   const query = new URLSearchParams()
   if (route.view) query.set('view', route.view)
+  if (route.view === 'settings' && route.section) query.set('section', route.section)
   const scope = route.link ? route.link.scope : route.projectUID
   const issue = route.link ? route.link.issue : route.issueUID
   if (scope) query.set('scope', scope)
@@ -147,6 +152,10 @@ function sortedUnique(values: readonly string[]): string[] {
 
 function isSystemView(value: string | undefined): value is SystemView {
   return systemViews.includes(value as SystemView)
+}
+
+function isSettingsSection(value: string | null): value is SettingsSection {
+  return value === 'appearance' || value === 'search' || value === 'access'
 }
 
 export function validUID(value: string): boolean {

@@ -76,6 +76,7 @@ work.* without writing it. Stamp work.branch once when using a dedicated branch.
 Close only after verification, with a message of at least 40 characters and
 typed evidence describing actual completed work. The example's external account
 must be replaced with your own evidence. Open children prevent parent closure.
+For work without a PR:
 ` + call("kata.close", `{"ref":"spoke-project#abc4","reason":"done","message":"Completed the example task and reviewed the resulting changes.","evidence":[{"type":"external","account":"Checked the fixture issue and its comment through the MCP client."}]}`) + `
 If unfinished, leave it open, update work.attention, put what remains in
 work.attention_msg and set needs-review with kata.set_label. Never delete or
@@ -110,13 +111,15 @@ atomic claim guard. ttl_seconds may bound a claim from 60 to 86400 seconds.
 ` + MCPClaimRules + `Load kata.load_coordination and refresh to release only the expected owner.
 ` + call("kata.unassign", `{"ref":"spoke-project#abc4","expected_owner":"example-agent"}`) + `
 Maintain your own work.attention (ok, stuck, needs-human) and work.attention_msg.
-Read sibling work.* without writing it; ignore work.* on closed issues.
+Read sibling work.* without writing it. On closed issues, ignore work.* except
+work.pr_url.
 `, true
 	case "closing":
 		return "# Close with evidence\n\n" + scope + `
 Load kata.load_issue_lifecycle and refresh. done requires a substantive message
 of at least 40 characters and typed evidence. Use actual commit SHA, PR URL,
 executed test command, reviewed paths or an external completion account.
+For work without a PR:
 ` + call("kata.close", `{"ref":"spoke-project#abc4","reason":"done","message":"Implemented the export retry and reviewed the completed changes.","evidence":[{"type":"reviewed-paths","paths":["export.go"]}]}`) + `
 Never close unfinished work. Load kata.load_issue_mutation and refresh, update
 work.attention and work.attention_msg and set the needs-review label:

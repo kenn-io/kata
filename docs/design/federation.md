@@ -325,6 +325,18 @@ checks authorization and reads again. The hub bounds held polls in total, per
 credential, and for signed requests holding a control slot; past a bound it
 answers at once.
 
+A spoke with several bindings at one hub holds one watch for all of them, so
+held requests grow with spokes, not with projects. The watch route takes the
+route project's bearer and, for each other project, that binding's own
+project-scoped token. The hub authorizes each project with its own token alone,
+apart from the route credential's project scope, so no credential reaches a
+project it could not poll. The answer names the projects with work and carries
+none of their events; the spoke pulls each through the event poll. A project
+whose token stops authorizing it during the wait drops out of the answer as
+unwatched. A signature proves only the route credential's key, so signed
+requests and hubs that require signatures do not use watches. Each watch counts
+as one held poll against the hub's bounds.
+
 Hub processes sharing a PostgreSQL database and schema relay commit wakeups to each other with `LISTEN/NOTIFY` on a dedicated connection. The channel derives from the instance UID and schema name, which distinguish installations but are not secrets. Any role connected to the database can derive it, listen for wakes, and send wakes. A wake carries the publishing process's instance tag and up to two keyed 64-bucket project tags. A receiving process wakes polls in those buckets, and each poll reauthorizes and rereads its own project. A role without access to application tables can observe wake activity and co-occurring buckets on a move. Notifications omit project IDs and issue content. Each process also wakes its held polls after its listener reconnects, because notifications sent while it was disconnected are lost.
 
 SQLite direct spokes prepare pulled issue histories and projection differences

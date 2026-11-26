@@ -8,11 +8,16 @@ export interface Preferences {
   collapsedGroups: string[]
   /** Board cards show one line each. */
   boardCompact: boolean
-  /** Board column IDs (such as `done` or `label:review`) shown as narrow strips. */
+  /** Board column IDs (such as `done`) shown as narrow strips. */
   collapsedBoardColumns: string[]
   /** Flash board cards that someone else moved or added. */
   boardHighlightRemote: boolean
+  sidebarWidth: number
+  sidebarCollapsed: boolean
 }
+
+export const minSidebarWidth = 180
+export const maxSidebarWidth = 600
 
 export const defaultPreferences: Preferences = {
   theme: 'system',
@@ -23,6 +28,8 @@ export const defaultPreferences: Preferences = {
   boardCompact: false,
   collapsedBoardColumns: [],
   boardHighlightRemote: true,
+  sidebarWidth: 240,
+  sidebarCollapsed: false,
 }
 
 export function loadPreferences(storage: Storage = localStorage): Preferences {
@@ -42,6 +49,8 @@ export function loadPreferences(storage: Storage = localStorage): Preferences {
       boardCompact: value.boardCompact === true,
       collapsedBoardColumns: stringArray(value.collapsedBoardColumns, []),
       boardHighlightRemote: value.boardHighlightRemote !== false,
+      sidebarWidth: sidebarWidth(value.sidebarWidth),
+      sidebarCollapsed: value.sidebarCollapsed === true,
     }
   } catch {
     return cloneDefaults()
@@ -73,6 +82,8 @@ export function savePreferences(
     boardCompact: current.boardCompact === true,
     collapsedBoardColumns: stringArray(current.collapsedBoardColumns, []),
     boardHighlightRemote: current.boardHighlightRemote !== false,
+    sidebarWidth: sidebarWidth(current.sidebarWidth),
+    sidebarCollapsed: current.sidebarCollapsed === true,
   }
   storage.setItem(preferencesStorageKey, JSON.stringify(allowed))
 }
@@ -89,6 +100,12 @@ function cloneDefaults(): Preferences {
     collapsedGroups: [...defaultPreferences.collapsedGroups],
     collapsedBoardColumns: [...defaultPreferences.collapsedBoardColumns],
   }
+}
+
+function sidebarWidth(value: unknown): number {
+  return typeof value === 'number' && value >= minSidebarWidth && value <= maxSidebarWidth
+    ? value
+    : defaultPreferences.sidebarWidth
 }
 
 function stringArray(value: unknown, fallback: readonly string[]): string[] {

@@ -87,6 +87,11 @@ func (s *Store) AdoptProjectIntoFederation(
 			}
 		}
 
+		if project.UID == params.HubProjectUID {
+			if err := db.RetainFederationAdoptedComments(ctx, tx, project.ID, project.UID, s.InstanceUID(), true); err != nil {
+				return err
+			}
+		}
 		if project.UID != params.HubProjectUID {
 			if err := db.CheckFederationProjectIdentityRetirement(ctx, tx, project); err != nil {
 				return err

@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-11-20
+last_edited: 2026-11-23
 ---
 
 # Agent workflows
@@ -959,6 +959,8 @@ Use `--related` only for context.
 
 ## Close only when verified
 
+Record an open issue's PR in `work.pr_url` and attach it with `--pr <url>` when closing it as done.
+
 Do not close an issue because you attempted the work. Close it only when the
 requested work is complete and freshly verified:
 
@@ -1041,5 +1043,5 @@ asks for that exact operation and issue ref. `delete` is reversible, while
 4. Comment with findings a later reader needs; keep status in `work.attention_msg`.
 5. Implement and verify.
 6. Commit repository changes.
-7. Close the issue with evidence as soon as it is verified.
+7. Record an open PR in `work.pr_url` and close verified work with `--pr <url>` when it has a PR, or other evidence otherwise.
 8. Move to the next ready issue.

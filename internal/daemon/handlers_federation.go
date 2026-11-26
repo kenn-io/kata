@@ -957,6 +957,8 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		return &api.LeaveFederationReplicaResponse{Body: body}, nil
 	})
 
+	registerFederationWatch(humaAPI, cfg)
+
 	huma.Register(humaAPI, huma.Operation{
 		OperationID: "pollFederationProjectEvents",
 		Method:      "GET",
@@ -1008,7 +1010,8 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 		}
 		reauthorize := func() (context.Context, error) {
-			return reauthorizeFederationPoll(requestCtx, cfg, in.Authorization, in.ProjectID, operation)
+			readCtx, _, err := reauthorizeFederationPoll(requestCtx, cfg, in.Authorization, in.ProjectID, operation)
+			return readCtx, err
 		}
 		result, err := read(ctx)
 		if err != nil {
@@ -1030,8 +1033,8 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		return &api.FederationPollEventsResponse{
 			EventFeatures: db.SupportedEventFeatures, RequiredEventFeatures: result.RequiredFeatures,
-			PollWaitMax: int(federationPollWaitMax / time.Second),
-			Body:        api.PollEventsBody{Events: toEnvelopes(result.Events), NextAfterID: result.NextAfterID, ResetRequired: result.ResetAfterID > 0, ResetAfterID: result.ResetAfterID},
+			PollWaitMax: int(federationPollWaitMax / time.Second), WatchMax: federationWatchAdvertised(cfg),
+			Body: api.PollEventsBody{Events: toEnvelopes(result.Events), NextAfterID: result.NextAfterID, ResetRequired: result.ResetAfterID > 0, ResetAfterID: result.ResetAfterID},
 		}, nil
 	})
 

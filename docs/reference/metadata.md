@@ -1,7 +1,7 @@
 ---
 title: Metadata
 description: Reference Kata's issue and project metadata model, reserved keys, scheduling fields, and update rules.
-last_edited: 2026-11-20
+last_edited: 2026-11-23
 ---
 
 # Metadata
@@ -41,7 +41,8 @@ Closing an issue does **not** touch its metadata. Anything written while an
 issue was open stays on the closed issue unchanged. If your consumer treats
 metadata as live state (see
 [Orchestration conventions](#orchestration-conventions-work-keys)), ignore it
-on closed issues rather than expecting close to reset it.
+on closed issues rather than expecting close to reset it. `work.pr_url` is the
+exception: it still links the issue's PR after close.
 
 ## Reserved keys vs opaque pass-through
 
@@ -295,6 +296,9 @@ recipe.
   launcher. Kata does not learn git and never validates it against a
   repository, so it accepts any string. A stale value is a coordination problem
   for the consumer, not an error Kata can detect.
+- **`work.pr_url`** (string). The issue's PR URL, recorded while the issue is
+  open and still valid after closing. Attach the same PR as evidence when
+  closing the issue as done.
 - **`work.attention`** (`ok | needs-human | stuck`). The working-agent side's
   live signal about whether a human is wanted:
     - `ok`: proceeding, no human needed.
@@ -313,10 +317,10 @@ with a leading `!` and shows the level with `work.attention_msg` as an
 
 ### Scope
 
-`work.*` is meaningful only while an issue is **open**. Because closing an
-issue does not reset its metadata, a closed issue can still carry a stale
-`work.attention`. Consumers must ignore `work.*` on closed issues rather than
-surface it.
+Write `work.*` only while an issue is **open**. Closing an issue does not reset
+its metadata, so a closed issue can still carry a stale `work.attention`.
+Consumers must ignore `work.*` on closed issues rather than surface it, except
+`work.pr_url`, which remains a link to the PR.
 
 ### Concurrency
 

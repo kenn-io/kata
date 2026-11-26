@@ -76,6 +76,9 @@ func (s *Store) moveIssueProjectTx(ctx context.Context, tx *sql.Tx, input db.Mov
 		if input.IfMatchRev != current.Revision {
 			return &db.RevisionConflictError{CurrentRevision: current.Revision}
 		}
+		if err := db.CheckFederationKeptIssueMove(ctx, tx, input.FromProjectID, input.ToProjectID); err != nil {
+			return err
+		}
 		if current.RecurrenceID != nil {
 			return &db.RecurrencePinnedError{}
 		}

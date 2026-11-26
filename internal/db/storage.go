@@ -249,6 +249,14 @@ type Storage interface {
 	AddLabelAndEvent(ctx context.Context, issueID int64, ev LabelEventParams) (IssueLabel, Event, error)
 	RemoveLabel(ctx context.Context, issueID int64, label string) error
 	RemoveLabelAndEvent(ctx context.Context, issueID int64, ev LabelEventParams) (Event, error)
+	// ChangeLabelsAndEvents removes p.Remove, then adds p.Add, in one transaction.
+	// Each label that actually changes emits one issue.unlabeled or issue.labeled
+	// event; absent removes and already-attached adds are skipped silently. An
+	// invalid add label returns ErrLabelInvalid and rolls back every change;
+	// remove labels are not validated, so callers check them with ValidLabel.
+	// Returns the issue's labels after the change (sorted, non-nil) and the
+	// emitted events in order.
+	ChangeLabelsAndEvents(ctx context.Context, issueID int64, p ChangeLabelsParams) ([]string, []Event, error)
 	HasLabel(ctx context.Context, issueID int64, label string) (bool, error)
 	LabelByEndpoints(ctx context.Context, issueID int64, label string) (IssueLabel, error)
 	LabelCounts(ctx context.Context, projectID int64) ([]LabelCount, error)
@@ -480,6 +488,11 @@ type Storage interface {
 
 	// federation: push + ingest
 	PendingFederationPushEvents(ctx context.Context, projectID int64, originInstanceUID string, afterID int64, limit int) ([]Event, error)
+	KeepFederationEventLocal(ctx context.Context, projectID, eventID int64) (bool, error)
+	KeepFederationDependentLocal(ctx context.Context, projectID, eventID int64) (bool, error)
+	HasKeptFederationEvents(ctx context.Context, projectID int64) (bool, error)
+	KeepFederationCommentDependentLocal(ctx context.Context, projectID, eventID int64) (bool, error)
+	FederationKeptIssue(ctx context.Context, projectID int64, issueUID string) (bool, error)
 	PendingFederationPushStats(ctx context.Context, projectID int64, originInstanceUID string, afterID int64) (int64, int64, error)
 	AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error
 	// AcknowledgeFederationPush advances the push cursor. It also deletes this

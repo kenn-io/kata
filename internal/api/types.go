@@ -546,6 +546,7 @@ type MutationResponse struct {
 		OriginalEvent *db.Event `json:"original_event,omitempty"`
 		Changed       bool      `json:"changed"`
 		Reused        bool      `json:"reused,omitzero"`
+		ParentReady   *IssueRef `json:"parent_ready,omitempty" doc:"Open parent with no open children after this close; set only by close."`
 	}
 }
 
@@ -1211,6 +1212,30 @@ type AddLabelResponse struct {
 		Label   db.IssueLabel `json:"label"`
 		Event   *db.Event     `json:"event"`
 		Changed bool          `json:"changed"`
+	}
+}
+
+// UpdateLabelsRequest is PATCH /api/v1/projects/{id}/issues/{ref}/labels.
+// Remove is applied before Add, both inside one transaction.
+type UpdateLabelsRequest struct {
+	ProjectTarget
+	Ref  string `path:"ref" required:"true"`
+	Body struct {
+		Actor  string   `json:"actor,omitempty"`
+		Add    []string `json:"add,omitempty" doc:"Labels to attach. Labels already attached change nothing."`
+		Remove []string `json:"remove,omitempty" doc:"Labels to detach. Labels not attached change nothing. A label must not appear in both add and remove."`
+	}
+}
+
+// UpdateLabelsResponse answers with the issue's labels after the change, read
+// in the same transaction, so a caller never has to guess which labels remain.
+type UpdateLabelsResponse struct {
+	ProjectNameHeader
+	Body struct {
+		Issue   db.Issue   `json:"issue"`
+		Labels  []string   `json:"labels" doc:"The issue's labels after the change, sorted."`
+		Events  []db.Event `json:"events" doc:"issue.unlabeled then issue.labeled events the request recorded; empty when nothing changed."`
+		Changed bool       `json:"changed"`
 	}
 }
 

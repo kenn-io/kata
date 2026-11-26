@@ -3,6 +3,8 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
 	"sort"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -11,16 +13,25 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-// registerLabelsHandlers installs POST/DELETE /labels and GET /labels (counts).
-// AddLabelAndEvent and RemoveLabelAndEvent wrap the label mutation, the matching
-// issue.labeled / issue.unlabeled event, and the issues.updated_at touch in one
-// TX so there's no window where the row mutation lands without its event.
+// registerLabelsHandlers installs POST/PATCH/DELETE /labels and GET /labels
+// (counts). AddLabelAndEvent and RemoveLabelAndEvent wrap the label mutation,
+// the matching issue.labeled / issue.unlabeled event, and the issues.updated_at
+// touch in one TX so there's no window where the row mutation lands without its
+// event. PATCH applies a remove list and an add list through
+// ChangeLabelsAndEvents in one TX, so a triage swap never leaves the issue
+// carrying both labels or neither.
 func registerLabelsHandlers(humaAPI huma.API, cfg ServerConfig) {
 	huma.Register(humaAPI, huma.Operation{
 		OperationID: "addLabel",
 		Method:      "POST",
 		Path:        "/api/v1/projects/{project_id}/issues/{ref}/labels",
 	}, withResolvedProject(cfg, addLabelHandler(cfg)))
+
+	huma.Register(humaAPI, huma.Operation{
+		OperationID: "updateLabels",
+		Method:      "PATCH",
+		Path:        "/api/v1/projects/{project_id}/issues/{ref}/labels",
+	}, withResolvedProject(cfg, updateLabelsHandler(cfg)))
 
 	huma.Register(humaAPI, huma.Operation{
 		OperationID: "removeLabel",
@@ -49,11 +60,7 @@ func addLabelHandler(cfg ServerConfig) func(context.Context, *api.AddLabelReques
 			return nil, err
 		}
 		if db.IsPriorityLabel(in.Body.Label) {
-			project, err := activeProjectByID(ctx, cfg.DB, issue.ProjectID)
-			if err != nil {
-				return nil, err
-			}
-			return nil, api.NewError(400, "validation", "use the priority field: kata edit "+qualifiedID(project.Name, issue.ShortID)+" --priority N or kata.edit with priority", "", nil)
+			return nil, priorityLabelError(ctx, cfg.DB, issue)
 		}
 
 		ev := db.LabelEventParams{
@@ -76,8 +83,7 @@ func addLabelHandler(cfg ServerConfig) func(context.Context, *api.AddLabelReques
 			out.Body.Changed = false
 			return out, nil
 		case errors.Is(err, db.ErrLabelInvalid):
-			return nil, api.NewError(400, "validation",
-				"label must match charset [a-z0-9._:-] and length 1..64", "", nil)
+			return nil, api.NewError(400, "validation", invalidLabelMessage, "", nil)
 		case errors.Is(err, db.ErrFederatedReadOnly):
 			return nil, federationReadOnlyError(err)
 		case err != nil:
@@ -98,6 +104,94 @@ func addLabelHandler(cfg ServerConfig) func(context.Context, *api.AddLabelReques
 		out.Body.Label = row
 		out.Body.Event = projected
 		out.Body.Changed = true
+		return out, nil
+	}
+}
+
+const invalidLabelMessage = "label must match charset [a-z0-9._:-] and length 1..64"
+
+func priorityLabelError(ctx context.Context, store db.Storage, issue db.Issue) error {
+	project, err := activeProjectByID(ctx, store, issue.ProjectID)
+	if err != nil {
+		return err
+	}
+	return api.NewError(400, "validation", "use the priority field: kata edit "+qualifiedID(project.Name, issue.ShortID)+" --priority N or kata.edit with priority", "", nil)
+}
+
+func updateLabelsHandler(cfg ServerConfig) func(context.Context, *api.UpdateLabelsRequest) (*api.UpdateLabelsResponse, error) {
+	return func(ctx context.Context, in *api.UpdateLabelsRequest) (*api.UpdateLabelsResponse, error) {
+		actor, err := attributedActor(ctx, in.Body.Actor)
+		if err != nil {
+			return nil, err
+		}
+		// The stores skip a remove that matches nothing without validating it,
+		// so a mistyped remove would leave the issue carrying both labels.
+		if slices.ContainsFunc(slices.Concat(in.Body.Add, in.Body.Remove), func(l string) bool { return !db.ValidLabel(l) }) {
+			return nil, api.NewError(400, "validation", invalidLabelMessage, "", nil)
+		}
+		add, remove := in.Body.Add, in.Body.Remove
+		if len(add) == 0 && len(remove) == 0 {
+			return nil, api.NewError(400, "validation", "add or remove must name at least one label", "", nil)
+		}
+		removing := make(map[string]struct{}, len(remove))
+		for _, l := range remove {
+			removing[l] = struct{}{}
+		}
+		for _, l := range add {
+			if _, both := removing[l]; both {
+				return nil, api.NewError(400, "validation",
+					fmt.Sprintf("label %q is in both add and remove", l), "", nil)
+			}
+		}
+		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
+		if err != nil {
+			return nil, err
+		}
+		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, issue, actor); err != nil {
+			return nil, err
+		}
+		if slices.ContainsFunc(add, db.IsPriorityLabel) {
+			return nil, priorityLabelError(ctx, cfg.DB, issue)
+		}
+
+		labels, events, err := cfg.DB.ChangeLabelsAndEvents(ctx, issue.ID, db.ChangeLabelsParams{
+			Add:    add,
+			Remove: remove,
+			Actor:  actor,
+		})
+		switch {
+		case errors.Is(err, db.ErrLabelInvalid):
+			return nil, api.NewError(400, "validation", invalidLabelMessage, "", nil)
+		case errors.Is(err, db.ErrNotFound):
+			return nil, api.NewError(404, "issue_not_found", "issue not found", "", nil)
+		case errors.Is(err, db.ErrFederatedReadOnly):
+			return nil, federationReadOnlyError(err)
+		case err != nil:
+			return nil, internalAPIError(err)
+		}
+
+		// Publish the committed batch before projecting so a projection
+		// error cannot leave a committed event unpublished.
+		cfg.Publish().EventsByProject(events)
+		projectedEvents := make([]db.Event, 0, len(events))
+		for i := range events {
+			projected, err := scopedMutationEvent(ctx, cfg.DB, &events[i])
+			if err != nil {
+				return nil, err
+			}
+			if projected != nil {
+				projectedEvents = append(projectedEvents, *projected)
+			}
+		}
+		updatedIssue, err := cfg.DB.IssueByID(ctx, issue.ID)
+		if err != nil {
+			return nil, internalAPIError(err)
+		}
+		out := &api.UpdateLabelsResponse{}
+		out.Body.Issue = updatedIssue
+		out.Body.Labels = labels
+		out.Body.Events = projectedEvents
+		out.Body.Changed = len(events) > 0
 		return out, nil
 	}
 }

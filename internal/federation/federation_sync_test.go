@@ -1157,7 +1157,7 @@ func TestAutoRetryFederationQuarantineRequiresExactFormerPeerMessage(t *testing.
 			Direction: db.FederationQuarantineDirectionPush,
 			Error: "hub /api/v1/projects/42/federation/events:ingest returned 400: " +
 				string(body),
-		}, nil)
+		}, nil, "tester")
 
 		assert.False(t, retry)
 		assert.Empty(t, reason)
@@ -3053,6 +3053,23 @@ func TestNextFederationPushIngestBatchMarksSingleSnapshotBaselineComplete(t *tes
 	require.Len(t, batch, 1)
 	assert.Equal(t, api.FederationAdoptionBaselineComplete, adoptionBaseline)
 	assert.Equal(t, int64(1), adoptionBaselineEndEventID)
+}
+
+func TestNextFederationPushIngestBatchSplitsGappedSnapshots(t *testing.T) {
+	projectUID := mustTestUID(t)
+	issueUID := mustTestUID(t)
+	secondIssueUID := mustTestUID(t)
+	payload := `{"uid":"` + issueUID + `","title":"task","author":"worker","status":"open"}`
+	secondPayload := `{"uid":"` + secondIssueUID + `","title":"task","author":"worker","status":"open"}`
+	events := []db.Event{
+		syncTestEvent(t, 2, projectUID, "spoke-project", &issueUID, "issue.snapshot", payload),
+		syncTestEvent(t, 4, projectUID, "spoke-project", &secondIssueUID, "issue.snapshot", secondPayload),
+	}
+	batch, marker, end, err := nextFederationPushIngestBatch(events)
+	require.NoError(t, err)
+	require.Len(t, batch, 1)
+	assert.Equal(t, api.FederationAdoptionBaselineComplete, marker)
+	assert.EqualValues(t, 2, end)
 }
 
 func TestSyncFederationOncePushesAllPendingBatchesBeforePull(t *testing.T) {

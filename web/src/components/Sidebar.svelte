@@ -3,7 +3,6 @@
   import BellRingIcon from '@lucide/svelte/icons/bell-ring'
   import BookCheckIcon from '@lucide/svelte/icons/book-check'
   import InboxIcon from '@lucide/svelte/icons/inbox'
-  import KeyRoundIcon from '@lucide/svelte/icons/key-round'
   import ListTodoIcon from '@lucide/svelte/icons/list-todo'
   import PlusIcon from '@lucide/svelte/icons/plus'
   import SettingsIcon from '@lucide/svelte/icons/settings'
@@ -30,14 +29,11 @@
     projectCreationBlockedReason: string | undefined
     creationIntent?: 'project' | 'task' | null
     draftFenceGeneration?: number | undefined
-    credentialAuditAvailable?: boolean | undefined
-    credentialAuditActive?: boolean | undefined
     settingsActive?: boolean | undefined
     header?: Snippet | undefined
     onOpenView: (name: KataTaskViewName) => void | Promise<void>
     onOpenProject: (projectUID: string) => void | Promise<void>
     onCreateProject: (name: string) => Promise<KataTaskMutationResponse>
-    onOpenCredentials?: (() => void | Promise<void>) | undefined
     onOpenSettings?: (() => void | Promise<void>) | undefined
   }
 
@@ -48,14 +44,11 @@
     projectCreationBlockedReason,
     creationIntent = $bindable(null),
     draftFenceGeneration = 0,
-    credentialAuditAvailable = false,
-    credentialAuditActive = false,
     settingsActive = false,
     header,
     onOpenView,
     onOpenProject,
     onCreateProject,
-    onOpenCredentials = () => {},
     onOpenSettings = () => {},
   }: Props = $props()
 
@@ -176,8 +169,7 @@
         <button
           type="button"
           class:group-start={view.name === 'all'}
-          class:active={!credentialAuditActive &&
-            !settingsActive &&
+          class:active={!settingsActive &&
             currentView.name === view.name &&
             (view.name !== 'all' || searchFilters.scope.kind === 'all')}
           aria-label={count !== undefined ? `${view.label} ${count}` : view.label}
@@ -252,20 +244,7 @@
       {/if}
     </div>
   </ScrollBox>
-  <nav
-    class="kata-nav sidebar-footer"
-    aria-label={credentialAuditAvailable ? 'Credentials and Settings' : 'Settings'}
-  >
-    {#if credentialAuditAvailable}
-      <button
-        type="button"
-        class:active={credentialAuditActive}
-        onclick={() => void onOpenCredentials()}
-      >
-        <span class="nav-icon"><KeyRoundIcon size={16} /></span>
-        <span class="nav-label">Credentials</span>
-      </button>
-    {/if}
+  <nav class="kata-nav sidebar-footer" aria-label="Settings">
     <button type="button" class:active={settingsActive} onclick={() => void onOpenSettings()}>
       <span class="nav-icon"><SettingsIcon size={16} /></span>
       <span class="nav-label">Settings</span>
@@ -280,7 +259,6 @@
     flex-direction: column;
     min-width: 0;
     min-height: 0;
-    border-right: 1px solid var(--border-muted);
     background: var(--bg-primary);
   }
 

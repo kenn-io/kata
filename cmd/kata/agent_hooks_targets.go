@@ -47,6 +47,7 @@ func lookupAgentHookCapability(name string) (agentHookCapability, error) {
 		for _, capability := range agentHookCapabilities() {
 			names = append(names, capability.Name)
 		}
+		names = append(names, "agy")
 		return agentHookCapability{}, agentHookUsage(fmt.Sprintf("unknown harness %q; choose %s", name, strings.Join(names, ", ")))
 	}
 	for _, capability := range agentHookCapabilities() {

@@ -6,7 +6,10 @@
     ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
   --letter-spacing-label: 0;
   --line-height-prose: 1.55;
+  --layout-inset: 16px;
   --layout-header-h: 48px;
+  --layout-settings-label-w: 160px;
+  --layout-settings-select-w: 240px;
   --nav-item-h: 34px;
   --nav-subitem-h: 26px;
 }

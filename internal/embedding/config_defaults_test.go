@@ -21,6 +21,8 @@ func TestEmbeddingDefaults(t *testing.T) {
 		{"explicit", config.EmbeddingsConfig{Local: true, Model: "nomic-embed-text", BatchSize: 17, TimeoutSeconds: 42}, 17, 42 * time.Second},
 		{"batch override", config.EmbeddingsConfig{Local: true, Model: "nomic-embed-text", BatchSize: 17}, 17, 5 * time.Minute},
 		{"timeout override", config.EmbeddingsConfig{Local: true, Model: "nomic-embed-text", TimeoutSeconds: 42}, 8, 42 * time.Second},
+		{"vertex capped", config.EmbeddingsConfig{API: "vertex", BaseURL: "https://example.com/publishers/google/models", Model: " gemini-embedding-001 ", BatchSize: 9}, 1, 0},
+		{"vertex other model", config.EmbeddingsConfig{API: "vertex", BaseURL: "https://example.com/publishers/google/models", Model: "other-model", BatchSize: 9}, 9, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := ClientConfig(tc.config)

@@ -2149,7 +2149,7 @@ describe('App', () => {
     expect(screen.getByRole('heading', { name: 'All open' })).not.toBeNull()
   })
 
-  it('loads credential audit metadata without sending the credential route to snapshots and returns to the issue route', async () => {
+  it('loads credential audit metadata from Settings without sending the credential route to snapshots', async () => {
     history.replaceState(null, '', '/kata?issue=01J00000000000000000000001&graph=1#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
@@ -2174,6 +2174,7 @@ describe('App', () => {
         if (target.pathname === '/api/v1/ui/references') {
           return Response.json({ issues: [], labels: [], owners: [], projects: [] })
         }
+        if (target.pathname === '/api/v1/embeddings/local') return new Response('', { status: 503 })
         if (target.pathname === '/api/v1/tokens') {
           tokenReads += 1
           return Response.json({
@@ -2197,21 +2198,51 @@ describe('App', () => {
 
     render(App)
     expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
-    await fireEvent.click(screen.getByRole('button', { name: 'Credentials' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
+    await fireEvent.click(await screen.findByRole('tab', { name: 'Credentials' }))
 
     expect(await screen.findByText('Build worker')).not.toBeNull()
-    expect(snapshotViews).toEqual(['all-open', 'all-open'])
+    expect(snapshotViews.length).toBeGreaterThan(0)
+    expect(snapshotViews.every((view) => view === 'all-open')).toBe(true)
     expect(tokenReads).toBe(1)
     expect(window.location.search).toBe('?view=credentials')
 
     cleanup()
     render(App)
     expect(await screen.findByRole('heading', { name: 'Credentials' })).not.toBeNull()
-    await fireEvent.click(screen.getByRole('button', { name: 'Back to issues' }))
-    await waitFor(() =>
-      expect(window.location.search).toBe('?issue=01J00000000000000000000001&graph=1'),
-    )
   })
+
+  it.each(['false', 'absent'])(
+    'replaces a Credentials address when audit access is %s',
+    async (access) => {
+      history.replaceState(null, '', '/kata?view=credentials#direct=1')
+      sessionStorage.setItem(
+        'kata.web.session.v1',
+        JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+      )
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request =
+            input instanceof Request
+              ? input
+              : new Request(new URL(String(input), window.location.origin), init)
+          const path = new URL(request.url).pathname
+          if (path === '/api/v1/ui/snapshot') {
+            const body = snapshot()
+            if (access === 'absent') Reflect.deleteProperty(body.capabilities, 'token_audit_read')
+            return Response.json(body, { headers: { ETag: '"snapshot-1"' } })
+          }
+          if (path === '/api/v1/ui/references')
+            return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+          throw new Error(`Unexpected request: ${request.method} ${path}`)
+        }),
+      )
+      render(App)
+      await screen.findByRole('heading', { name: 'Appearance' })
+      await waitFor(() => expect(window.location.search).toBe('?view=settings&section=appearance'))
+    },
+  )
 
   it('aborts and fences a delayed credential response after leaving the route', async () => {
     history.replaceState(null, '', '/kata?view=credentials#direct=1')
@@ -2324,9 +2355,7 @@ describe('App', () => {
     expect(await screen.findByText('Build worker')).not.toBeNull()
     await fireEvent.click(screen.getByRole('button', { name: 'Refresh credentials' }))
 
-    expect((await screen.findByRole('alert')).textContent).toContain(
-      'Credential inventory is unavailable.',
-    )
+    expect((await screen.findByRole('alert')).textContent).toContain("Couldn't load credentials.")
     expect(screen.queryByText('Build worker')).toBeNull()
     expect(tokenReads).toBe(2)
     expect(sessionStorage.getItem('kata.web.session.v1')).toContain('admin-session')
@@ -2460,7 +2489,7 @@ describe('App', () => {
                 project_id: 7,
                 project_uid: '01J00000000000000000000002',
                 enabled: true,
-                role: 'replica',
+                role: 'spoke',
                 pending_push_count: pending,
               },
             ],
@@ -2482,16 +2511,16 @@ describe('App', () => {
     render(App)
     await vi.advanceTimersByTimeAsync(0)
     await tick()
-    expect(screen.getByText('Pending: 2')).not.toBeNull()
+    expect(screen.getByText('2 to sync')).not.toBeNull()
     pending = 0
     await vi.advanceTimersByTimeAsync(30_000)
     await tick()
-    expect(screen.getByText('Pending: 0')).not.toBeNull()
+    expect(screen.getByText('No changes to send')).not.toBeNull()
     pending = 3
     document.dispatchEvent(new Event('visibilitychange'))
     await vi.advanceTimersByTimeAsync(0)
     await tick()
-    expect(screen.getByText('Pending: 3')).not.toBeNull()
+    expect(screen.getByText('3 to sync')).not.toBeNull()
   })
 
   it('refreshes credential metadata periodically only while the page is visible', async () => {
@@ -3386,6 +3415,7 @@ describe('App', () => {
 
     expect(document.documentElement.classList.contains('dark')).toBe(true)
     await fireEvent.click(await screen.findByRole('button', { name: 'Settings' }))
+    await fireEvent.click(await screen.findByRole('tab', { name: 'Appearance' }))
     await fireEvent.click(await screen.findByRole('radio', { name: 'System' }))
     expect(JSON.parse(localStorage.getItem(preferencesStorageKey) ?? '{}')).toEqual(
       expect.objectContaining({ theme: 'system', splitDirection: 'horizontal', splitSize: 520 }),
@@ -3915,9 +3945,10 @@ describe('App', () => {
     await waitFor(() =>
       expect(screen.queryByRole('status', { name: 'Active connection' })).toBeNull(),
     )
-    await fireEvent.click(screen.getByRole('button', { name: 'Credentials' }))
-    expect(await screen.findByRole('heading', { name: 'Credentials' })).not.toBeNull()
-    expect(await screen.findByRole('heading', { name: 'Teams and visibility' })).not.toBeNull()
+    await fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
+    expect(await screen.findByRole('tab', { name: 'Credentials' })).not.toBeNull()
+    await fireEvent.click(await screen.findByRole('tab', { name: 'Teams and visibility' }))
+    expect(await screen.findByRole('heading', { name: 'Teams' })).not.toBeNull()
   }, 15_000)
 
   it('restores owner settings after a quiet SSE reconnect', async () => {
@@ -3969,7 +4000,7 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: 'Credentials' })).not.toBeNull()
     await waitFor(() => expect(snapshotRequests.length).toBeGreaterThanOrEqual(2))
     await waitFor(() => expect(streamRequests).toBeGreaterThanOrEqual(2))
-    expect(await screen.findByRole('heading', { name: 'Teams and visibility' })).not.toBeNull()
+    expect(await screen.findByRole('tab', { name: 'Teams and visibility' })).not.toBeNull()
   })
 
   it('refreshes authority when the initial SSE connection opens', async () => {

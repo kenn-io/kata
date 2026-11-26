@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"go.kenn.io/kata/internal/uid"
+	"go.kenn.io/kit/embedconfig"
 	kitvec "go.kenn.io/kit/vector"
 )
 
@@ -273,9 +274,13 @@ func (c *Client) ArtifactIdentity(projectUID, issueUID, producerUID string) (Art
 		return ArtifactIdentity{}, err
 	}
 	recipe := sha256.Sum256([]byte(fmt.Sprintf("%s\n%s\n%d/%d", inputIdentity, ArtifactFloat32Encoding, RecipeSplitMaxRunes, RecipeSplitOverlap)))
+	provider := "openai-compatible"
+	if c.space.Deployment.API == embedconfig.APIVertex {
+		provider = "vertex"
+	}
 	return ArtifactIdentity{
 		ProjectUID: projectUID, IssueUID: issueUID, ProducerInstanceUID: producerUID,
-		RecipeFingerprint: hex.EncodeToString(recipe[:]), Provider: "openai-compatible",
+		RecipeFingerprint: hex.EncodeToString(recipe[:]), Provider: provider,
 		Model: c.space.Model.Name, ModelRevision: c.space.Model.Revision,
 		Dimensions: c.space.Model.Dimensions, InputType: string(c.space.Roles.InputType),
 		Normalization: string(c.space.Model.Normalization), Preprocessing: c.space.Input.Recipe,

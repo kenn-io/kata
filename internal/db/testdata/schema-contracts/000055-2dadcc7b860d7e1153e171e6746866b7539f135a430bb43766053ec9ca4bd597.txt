@@ -1,0 +1,1 @@
+Retain federation events across actor changes and resets.

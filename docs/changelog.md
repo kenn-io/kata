@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-24
+last_edited: 2026-11-26
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -14,8 +14,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
   `kata notify` requests for you, and tasks labelled `needs-review`, grouped by
   urgency. Rows in every list carry a badge with the reason. See
   [Navigate projects and collections](guide/web-ui.md#navigate-projects-and-collections).
-- See a project as a board in the Web UI. Switch the header to **Board** to
-  lay cards out in four columns that follow what Kata already records: Open,
+- See a project as a board in the Web UI. Switch a list to **Board** to lay
+  cards out in four columns that follow what Kata already records: Open,
   In progress (claimed), Needs attention (waiting on a human), and Done. Drag a
   card, use its actions menu, or press **Alt+←**/**Alt+→**, and the board
   performs the matching action: claim, release, clear the attention you
@@ -32,10 +32,17 @@ All notable changes to kata, grouped by release. Versioned releases start with
   among cards of the same priority. See
   [Work on a board](guide/web-ui.md#work-on-a-board).
 
+## 0.24.0
+<small>2026-11-25</small>
+
 - Direct spokes now receive hub changes almost immediately through held polls
-  instead of waiting for the next sync interval. Each idle binding keeps one
-  request open at its hub, which matters for hosts that limit concurrent
-  requests. See [sync scheduling](operations/federation.md#sync-scheduling).
+  instead of waiting for the next sync interval. At a hub that takes watches,
+  an idle spoke keeps one request open for all of its projects there, and the
+  hub still checks each project against its own credential. Projects with a
+  signing key, and hubs that take only held polls, keep one request open per
+  project, which matters for hosts that limit concurrent requests. Hubs without
+  held polls keep pulling on the interval. See
+  [sync scheduling](operations/federation.md#sync-scheduling).
 - Link issues across projects that share an audience in a relay group. Relays
   check the peer's current access to each referenced project before releasing
   events or checkpoints.
@@ -56,6 +63,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Apps that embed Kata can choose which projects send issue text to the
   embedding provider by setting `Config.EmbeddingProjectAllowed`. See
   [semantic search](development/embedding.md#semantic-search).
+- Open an issue’s PR from its web page when its URL is recorded in `work.pr_url`. Agent guides explain how to record the URL and attach PR evidence when closing work.
 - Reject `work.attention` values other than `ok`, `needs-human`, and `stuck`.
 - Diagnose reports when SQLite storage is busy with an upgrade or import.
 - Refuse cross-project links when a project has an active relay enrollment without a binding.
@@ -116,6 +124,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
   cycles topological, temporal, and priority order. Priority order matches
   `kata next`: highest priority first, unprioritized last, then most recently
   updated.
+- Swap triage labels, such as `ready-for-agent` to `ready-for-human`, in one
+  request that applies fully or not at all and answers with the issue's
+  resulting labels: `PATCH /api/v1/projects/{project_id}/issues/{ref}/labels`
+  takes `add` and `remove` lists. Needs a daemon on API 0.70.0 or newer. See
+  [labels](reference/http-api.md#label-endpoints).
 - Let a service manager own the local daemon. Set top-level `autostart = false`
   in `config.toml`, and Kata commands, including `kata daemon recover`, wait up
   to 30 seconds for the supervised daemon instead of starting their own. See

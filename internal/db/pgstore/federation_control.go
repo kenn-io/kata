@@ -195,6 +195,49 @@ updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`,
 	return output, err
 }
 
+// KeepFederationEventLocal records a refused old-actor event.
+func (s *Store) KeepFederationEventLocal(ctx context.Context, projectID, eventID int64) (bool, error) {
+	var kept bool
+	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		var err error
+		kept, err = db.KeepFederationEventLocalTx(ctx, tx, projectID, eventID, s.InstanceUID())
+		return err
+	})
+	return kept, err
+}
+
+// KeepFederationDependentLocal records a hub refusal for local-only history.
+func (s *Store) KeepFederationDependentLocal(ctx context.Context, projectID, eventID int64) (bool, error) {
+	var kept bool
+	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		var err error
+		kept, err = db.KeepFederationDependentLocalTx(ctx, tx, projectID, eventID, s.InstanceUID(), true)
+		return err
+	})
+	return kept, err
+}
+
+// HasKeptFederationEvents reports whether a project has retained events.
+func (s *Store) HasKeptFederationEvents(ctx context.Context, projectID int64) (bool, error) {
+	return db.HasKeptFederationEvents(ctx, s, projectID)
+}
+
+// KeepFederationCommentDependentLocal retains edits and replies to local comments.
+func (s *Store) KeepFederationCommentDependentLocal(ctx context.Context, projectID, eventID int64) (bool, error) {
+	var kept bool
+	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		var err error
+		kept, err = db.KeepFederationCommentDependentLocalTx(ctx, tx, projectID, eventID, s.InstanceUID(), true)
+		return err
+	})
+	return kept, err
+}
+
+// FederationKeptIssue reports whether a task's creation is retained locally.
+func (s *Store) FederationKeptIssue(ctx context.Context, projectID int64, issueUID string) (bool, error) {
+	return db.FederationKeptIssue(ctx, s, projectID, issueUID)
+}
+
 // AdvanceFederationPullCursor records the highest consumed hub event id.
 func (s *Store) AdvanceFederationPullCursor(ctx context.Context, projectID, nextCursor int64) error {
 	return s.updateFederationCursor(ctx, projectID, nextCursor, false)

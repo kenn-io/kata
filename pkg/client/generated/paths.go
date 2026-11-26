@@ -329,6 +329,10 @@ type IngestFederationProjectEventsPath struct {
 	ProjectID int64 `json:"project_id"`
 }
 
+type WatchFederationProjectEventsPath struct {
+	ProjectID int64 `json:"project_id"`
+}
+
 type GetFederationProjectMetadataPath struct {
 	ProjectID int64 `json:"project_id"`
 }
@@ -660,6 +664,16 @@ type ReachableIssueGraphPath struct {
 
 func (r ReachableIssueGraphPath) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
+type UpdateLabelsPath struct {
+	// ProjectID Numeric project ID or name:<project name>; name: alone requires an alias
+	ProjectID string `json:"project_id" validate:"required"`
+	Ref       string `json:"ref" validate:"required"`
+}
+
+func (u UpdateLabelsPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(u))
 }
 
 type AddLabelPath struct {
