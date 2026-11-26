@@ -234,12 +234,13 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 		}
 
 		validator := db.NewCronReplayValidator(tx, false)
+		bumped := map[int64]struct{}{}
 		for i := range prepared.projects {
 			p := prepared.projects[(i+1)%len(prepared.projects)]
 			m := p.materialization
 			m.linkProjects = nil
 			m.staleIssues = nil
-			if err := m.apply(ctx, tx, p.id, validator); err != nil {
+			if err := m.applyWithBumped(ctx, tx, p.id, validator, bumped); err != nil {
 				return err
 			}
 			if len(p.moved.Issues) > 0 {
@@ -248,7 +249,7 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 				if err := moved.prepareRows(ctx, tx, p.id, scope); err != nil {
 					return err
 				}
-				if err := moved.apply(ctx, tx, p.id, validator); err != nil {
+				if err := moved.applyWithBumped(ctx, tx, p.id, validator, bumped); err != nil {
 					return err
 				}
 			}
@@ -273,7 +274,7 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 			if err != nil {
 				return err
 			}
-			if err := reconcileFederatedLinkRows(ctx, tx, m.links, ids, rows); err != nil {
+			if err := reconcileFederatedLinkRows(ctx, tx, m.links, ids, rows, bumped); err != nil {
 				return err
 			}
 		}

@@ -891,8 +891,9 @@ type ClaimViolationOut struct {
 // EditIssueRequest is PATCH /api/v1/projects/{id}/issues/{ref}.
 type EditIssueRequest struct {
 	ProjectTarget
-	Ref  string `path:"ref" required:"true"`
-	Body struct {
+	Ref     string `path:"ref" required:"true"`
+	IfMatch string `header:"If-Match"`
+	Body    struct {
 		Actor         string      `json:"actor,omitempty"`
 		Title         *string     `json:"title,omitempty"`
 		Body          *string     `json:"body,omitempty"`
@@ -1015,6 +1016,7 @@ type CommentResponse struct {
 type ActionRequest struct {
 	ProjectID int64  `path:"project_id" required:"true"`
 	Ref       string `path:"ref" required:"true"`
+	IfMatch   string `header:"If-Match"`
 	Body      ActionRequestBody
 }
 
@@ -1067,6 +1069,7 @@ type ActionRequestBody struct {
 type CreateLinkRequest struct {
 	ProjectID int64  `path:"project_id" required:"true"`
 	Ref       string `path:"ref" required:"true"`
+	IfMatch   string `header:"If-Match"`
 	Body      struct {
 		Actor   string `json:"actor,omitempty"`
 		Type    string `json:"type" required:"true" enum:"parent,blocks,related"`
@@ -1119,6 +1122,7 @@ type DeleteLinkRequest struct {
 	Ref       string `path:"ref" required:"true"`
 	LinkID    int64  `path:"link_id" required:"true"`
 	Actor     string `query:"actor" required:"true"`
+	IfMatch   string `header:"If-Match"`
 }
 
 // RemoveProjectRequest is DELETE /api/v1/projects/{id} — archives the project
@@ -1197,8 +1201,9 @@ type DetachProjectAliasResponse struct {
 // AddLabelRequest is POST /api/v1/projects/{id}/issues/{ref}/labels.
 type AddLabelRequest struct {
 	ProjectTarget
-	Ref  string `path:"ref" required:"true"`
-	Body struct {
+	Ref     string `path:"ref" required:"true"`
+	IfMatch string `header:"If-Match"`
+	Body    struct {
 		Actor string `json:"actor,omitempty"`
 		Label string `json:"label" required:"true"`
 	}
@@ -1219,8 +1224,9 @@ type AddLabelResponse struct {
 // Remove is applied before Add, both inside one transaction.
 type UpdateLabelsRequest struct {
 	ProjectTarget
-	Ref  string `path:"ref" required:"true"`
-	Body struct {
+	Ref     string `path:"ref" required:"true"`
+	IfMatch string `header:"If-Match"`
+	Body    struct {
 		Actor  string   `json:"actor,omitempty"`
 		Add    []string `json:"add,omitempty" doc:"Labels to attach. Labels already attached change nothing."`
 		Remove []string `json:"remove,omitempty" doc:"Labels to detach. Labels not attached change nothing. A label must not appear in both add and remove."`
@@ -1245,12 +1251,14 @@ type RemoveLabelRequest struct {
 	Ref       string `path:"ref" required:"true"`
 	Label     string `path:"label" required:"true"`
 	Actor     string `query:"actor"`
+	IfMatch   string `header:"If-Match"`
 }
 
 // AssignRequest is POST /api/v1/projects/{id}/issues/{ref}/actions/assign.
 type AssignRequest struct {
 	ProjectID int64  `path:"project_id" required:"true"`
 	Ref       string `path:"ref" required:"true"`
+	IfMatch   string `header:"If-Match"`
 	Body      struct {
 		Actor string `json:"actor,omitempty"`
 		Owner string `json:"owner" required:"true"`
@@ -1265,6 +1273,7 @@ type AssignRequest struct {
 type PriorityRequest struct {
 	ProjectID int64  `path:"project_id" required:"true"`
 	Ref       string `path:"ref" required:"true"`
+	IfMatch   string `header:"If-Match"`
 	Body      struct {
 		Actor    string `json:"actor,omitempty"`
 		Priority *int64 `json:"priority,omitempty"`
@@ -1276,6 +1285,7 @@ type PriorityRequest struct {
 type UnassignRequest struct {
 	ProjectID int64  `path:"project_id" required:"true"`
 	Ref       string `path:"ref" required:"true"`
+	IfMatch   string `header:"If-Match"`
 	Body      struct {
 		Actor         string  `json:"actor,omitempty"`
 		ExpectedOwner *string `json:"expected_owner,omitempty"`

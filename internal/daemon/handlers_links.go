@@ -71,6 +71,10 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 		if err != nil {
 			return nil, err
 		}
+		ifMatchRev, err := parseOptionalIfMatchRevision(in.IfMatch)
+		if err != nil {
+			return nil, err
+		}
 		from, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
 		if err != nil {
 			return nil, err
@@ -131,10 +135,15 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 			storageFromID, storageToID = storageToID, storageFromID
 			canonicalFromPeer, canonicalToPeer = canonicalToPeer, canonicalFromPeer
 		}
-		if existing, lookupErr := cfg.DB.LinkByEndpoints(ctx, storageFromID, storageToID, in.Body.Type); lookupErr == nil {
-			return mutationLinkResponse(from, existing, canonicalFromPeer, canonicalToPeer, nil, false), nil
-		} else if !errors.Is(lookupErr, db.ErrNotFound) {
-			return nil, internalAPIError(lookupErr)
+		if ifMatchRev != nil && from.Revision != *ifMatchRev {
+			return nil, issueRevisionConflictError(from.Revision)
+		}
+		if ifMatchRev == nil {
+			if existing, lookupErr := cfg.DB.LinkByEndpoints(ctx, storageFromID, storageToID, in.Body.Type); lookupErr == nil {
+				return mutationLinkResponse(from, existing, canonicalFromPeer, canonicalToPeer, nil, false), nil
+			} else if !errors.Is(lookupErr, db.ErrNotFound) {
+				return nil, internalAPIError(lookupErr)
+			}
 		}
 		if err := checkLinkBoundaryBeforeMutation(ctx, cfg.DB, from.ID, to.ID); err != nil {
 			return nil, err
@@ -150,6 +159,7 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 			ToShortID:    to.ShortID,
 			ToUID:        to.UID,
 			Actor:        actor,
+			IfMatchRev:   ifMatchRev,
 		}
 
 		// Parent --replace path: swap the existing parent and new parent in
@@ -170,7 +180,7 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 					"the requested parent is a descendant of this issue", nil)
 			}
 			if existing, perr := cfg.DB.ParentOf(ctx, from.ID); perr == nil {
-				if existing.ToIssueID == to.ID {
+				if existing.ToIssueID == to.ID && ifMatchRev == nil {
 					// Replacing with the same parent is a no-op.
 					return mutationLinkResponse(from, existing, canonicalFromPeer, canonicalToPeer, nil, false), nil
 				}
@@ -208,8 +218,12 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 					},
 					UnlinkEvent: unlinkEv,
 					LinkEvent:   linkEv,
+					IfMatchRev:  ifMatchRev,
 				})
 				if err != nil {
+					if conflict, ok := errors.AsType[*db.RevisionConflictError](err); ok {
+						return nil, issueRevisionConflictError(conflict.CurrentRevision)
+					}
 					if errors.Is(err, db.ErrLinkExists) {
 						current, lookupErr := cfg.DB.LinkByEndpoints(ctx, storageFromID, storageToID, in.Body.Type)
 						if lookupErr != nil {
@@ -269,7 +283,10 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 			Author:      actor,
 		}, linkEv)
 		var archivedTarget *db.LinkTargetArchivedError
+		var revConflict *db.RevisionConflictError
 		switch {
+		case errors.As(err, &revConflict):
+			return nil, issueRevisionConflictError(revConflict.CurrentRevision)
 		case errors.As(err, &archivedTarget):
 			return nil, linkTargetArchivedError(archivedTarget)
 		case errors.Is(err, db.ErrLinkExists):
@@ -367,9 +384,16 @@ func deleteLinkHandler(cfg ServerConfig) func(context.Context, *api.DeleteLinkRe
 		if err != nil {
 			return nil, err
 		}
+		ifMatchRev, err := parseOptionalIfMatchRevision(in.IfMatch)
+		if err != nil {
+			return nil, err
+		}
 		from, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
 		if err != nil {
 			return nil, err
+		}
+		if ifMatchRev != nil && from.Revision != *ifMatchRev {
+			return nil, issueRevisionConflictError(from.Revision)
 		}
 
 		link, err := cfg.DB.LinkByID(ctx, in.LinkID)
@@ -431,8 +455,12 @@ func deleteLinkHandler(cfg ServerConfig) func(context.Context, *api.DeleteLinkRe
 			ToShortID:    linkTo.ShortID,
 			ToUID:        linkTo.UID,
 			Actor:        actor,
+			IfMatchRev:   ifMatchRev,
 		}
 		evt, err := cfg.DB.DeleteLinkAndEvent(ctx, link, ev)
+		if conflict, ok := errors.AsType[*db.RevisionConflictError](err); ok {
+			return nil, issueRevisionConflictError(conflict.CurrentRevision)
+		}
 		if errors.Is(err, db.ErrNotFound) {
 			// Lost the race against another DELETE; surface as no-op.
 			out := &api.MutationResponse{}

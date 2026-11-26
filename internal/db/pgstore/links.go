@@ -45,9 +45,15 @@ func (s *Store) CreateLinkAndEvent(
 	var link db.Link
 	var event db.Event
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		if err := lockIssuesByIDOrderTx(ctx, tx, params.FromIssueID, params.ToIssueID); err != nil {
+			return err
+		}
 		eventIssue, project, err := lockedIssueTx(ctx, tx, eventParams.EventIssueID, false)
 		if err != nil {
 			return err
+		}
+		if eventParams.IfMatchRev != nil && *eventParams.IfMatchRev != eventIssue.Revision {
+			return &db.RevisionConflictError{CurrentRevision: eventIssue.Revision}
 		}
 		actor := strings.TrimSpace(eventParams.Actor)
 		if actor == "" {
@@ -98,9 +104,17 @@ func (s *Store) CreateLinkAndEvent(
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx,
-			`UPDATE issues SET updated_at = $1 WHERE id = $2`, updatedAt, eventIssue.ID)
-		return mapSQLError(err, nil)
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE issues SET updated_at = $1, revision = revision + 1 WHERE id = $2`, updatedAt, eventIssue.ID); err != nil {
+			return mapSQLError(err, nil)
+		}
+		if relatedID != eventIssue.ID {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE issues SET revision = revision + 1 WHERE id = $1`, relatedID); err != nil {
+				return mapSQLError(err, nil)
+			}
+		}
+		return nil
 	})
 	return link, event, err
 }
@@ -131,9 +145,15 @@ func (s *Store) DeleteLinkAndEvent(
 ) (db.Event, error) {
 	var event db.Event
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		if err := lockIssuesByIDOrderTx(ctx, tx, link.FromIssueID, link.ToIssueID); err != nil {
+			return err
+		}
 		eventIssue, project, err := lockedIssueTx(ctx, tx, eventParams.EventIssueID, false)
 		if err != nil {
 			return err
+		}
+		if eventParams.IfMatchRev != nil && *eventParams.IfMatchRev != eventIssue.Revision {
+			return &db.RevisionConflictError{CurrentRevision: eventIssue.Revision}
 		}
 		eventParams.Actor, err = effectiveLocalMutationActorTx(ctx, tx, project.ID, eventParams.Actor)
 		if err != nil {
@@ -178,9 +198,17 @@ func (s *Store) DeleteLinkAndEvent(
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx,
-			`UPDATE issues SET updated_at = $1 WHERE id = $2`, updatedAt, eventIssue.ID)
-		return mapSQLError(err, nil)
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE issues SET updated_at = $1, revision = revision + 1 WHERE id = $2`, updatedAt, eventIssue.ID); err != nil {
+			return mapSQLError(err, nil)
+		}
+		if relatedID != eventIssue.ID {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE issues SET revision = revision + 1 WHERE id = $1`, relatedID); err != nil {
+				return mapSQLError(err, nil)
+			}
+		}
+		return nil
 	})
 	return event, err
 }

@@ -201,6 +201,7 @@ func reconcileFederatedLinkGroup(
 	if err := validateFederatedParentGraph(desired); err != nil {
 		return err
 	}
+	var changedIssues []int64
 	for key, row := range existing {
 		if _, ok := desired[key]; ok {
 			continue
@@ -208,6 +209,7 @@ func reconcileFederatedLinkGroup(
 		if _, err := tx.ExecContext(ctx, `DELETE FROM links WHERE id=$1`, row.id); err != nil {
 			return mapSQLError(err, nil)
 		}
+		changedIssues = append(changedIssues, row.fromID, row.toID)
 	}
 	for key, row := range desired {
 		author := nonEmptyFederationAuthor(row.author)
@@ -221,6 +223,9 @@ from_issue_uid=$3,to_issue_uid=$4,type=$5,author=$6,created_at=COALESCE(NULLIF($
 			if err != nil {
 				return mapSQLError(err, linkConstraintErrors)
 			}
+			if existingRow.fromID != row.fromID || existingRow.toID != row.toID {
+				changedIssues = append(changedIssues, existingRow.fromID, existingRow.toID, row.fromID, row.toID)
+			}
 			continue
 		}
 		_, err := tx.ExecContext(ctx, `INSERT INTO links(
@@ -230,8 +235,9 @@ from_issue_id,to_issue_id,from_issue_uid,to_issue_uid,type,author,created_at
 		if err != nil {
 			return mapSQLError(err, linkConstraintErrors)
 		}
+		changedIssues = append(changedIssues, row.fromID, row.toID)
 	}
-	return nil
+	return m.bumpUnbumpedRevisionsTx(ctx, tx, changedIssues)
 }
 
 func federationGroupFoldProjection(

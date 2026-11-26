@@ -53,8 +53,42 @@ func (*CloseActionRequest) Resolve(ctx huma.Context) []error {
 // Resolve rejects an empty If-Match on recurrence creation so a malformed
 // conditional attach is not silently downgraded to an unconditional one.
 func (*CreateRecurrenceRequest) Resolve(ctx huma.Context) []error {
+	return rejectEmptyIfMatch(ctx)
+}
+
+func rejectEmptyIfMatch(ctx huma.Context) []error {
 	if ifMatchPresentButEmpty(ctx) {
 		return []error{NewError(400, "validation", "If-Match header required", "", nil)}
 	}
 	return nil
 }
+
+// Resolve rejects a present-but-empty If-Match header on PATCH /issues/{ref}.
+func (*EditIssueRequest) Resolve(ctx huma.Context) []error { return rejectEmptyIfMatch(ctx) }
+
+// Resolve rejects a present-but-empty If-Match header on POST /actions/reopen.
+func (*ActionRequest) Resolve(ctx huma.Context) []error { return rejectEmptyIfMatch(ctx) }
+
+// Resolve rejects a present-but-empty If-Match header on POST /links.
+func (*CreateLinkRequest) Resolve(ctx huma.Context) []error { return rejectEmptyIfMatch(ctx) }
+
+// Resolve rejects a present-but-empty If-Match header on DELETE /links/{link_id}.
+func (*DeleteLinkRequest) Resolve(ctx huma.Context) []error { return rejectEmptyIfMatch(ctx) }
+
+// Resolve rejects a present-but-empty If-Match header on POST /labels.
+func (*AddLabelRequest) Resolve(ctx huma.Context) []error { return rejectEmptyIfMatch(ctx) }
+
+// Resolve rejects a present-but-empty If-Match header on PATCH /labels.
+func (*UpdateLabelsRequest) Resolve(ctx huma.Context) []error { return rejectEmptyIfMatch(ctx) }
+
+// Resolve rejects a present-but-empty If-Match header on DELETE /labels/{label}.
+func (*RemoveLabelRequest) Resolve(ctx huma.Context) []error { return rejectEmptyIfMatch(ctx) }
+
+// Resolve rejects a present-but-empty If-Match header on POST /actions/assign.
+func (*AssignRequest) Resolve(ctx huma.Context) []error { return rejectEmptyIfMatch(ctx) }
+
+// Resolve rejects a present-but-empty If-Match header on POST /actions/unassign.
+func (*UnassignRequest) Resolve(ctx huma.Context) []error { return rejectEmptyIfMatch(ctx) }
+
+// Resolve rejects a present-but-empty If-Match header on POST /actions/priority.
+func (*PriorityRequest) Resolve(ctx huma.Context) []error { return rejectEmptyIfMatch(ctx) }

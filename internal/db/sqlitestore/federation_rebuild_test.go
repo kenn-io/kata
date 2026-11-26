@@ -350,7 +350,9 @@ func TestMoveRebuildMatchesLockedRebuild(t *testing.T) {
 		require.NoError(t, err)
 		_, linkEvent, err := hub.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: issue.ID, ToIssueID: peer.ID, Type: "related", Author: "tester"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: issue.ID, FromUID: issue.UID, ToUID: peer.UID, Actor: "tester"})
 		require.NoError(t, err)
-		lastMove, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: peer.ID, FromProjectID: middle.ID, ToProjectID: last.ID, IfMatchRev: peer.Revision, Actor: "tester"})
+		peerAfterLink, err := hub.IssueByID(ctx, peer.ID)
+		require.NoError(t, err)
+		lastMove, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: peer.ID, FromProjectID: middle.ID, ToProjectID: last.ID, IfMatchRev: peerAfterLink.Revision, Actor: "tester"})
 		require.NoError(t, err)
 		for _, project := range []db.Project{source, middle, last} {
 			_, err = d.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "tester"})
@@ -489,7 +491,9 @@ func TestMoveRebuildPreservesLinks(t *testing.T) {
 				return link
 			}
 			move := func(store *Store, item db.Issue, from, to db.Project) db.MoveIssueProjectOut {
-				result, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: item.ID, FromProjectID: from.ID, ToProjectID: to.ID, IfMatchRev: item.Revision, Actor: "tester"})
+				current, err := store.IssueByID(ctx, item.ID)
+				require.NoError(t, err)
+				result, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: item.ID, FromProjectID: from.ID, ToProjectID: to.ID, IfMatchRev: current.Revision, Actor: "tester"})
 				require.NoError(t, err)
 				return result
 			}

@@ -22,6 +22,7 @@ type importIssueState struct {
 	healed              bool
 	presentationUpdated bool
 	sourceCurrent       bool
+	revisionBumped      bool
 }
 
 // ImportBatch imports external issues atomically. Issues and comments are
@@ -69,6 +70,8 @@ func (d *Store) importBatch(ctx context.Context, p db.ImportBatchParams) (db.Imp
 	result := db.ImportBatchResult{Source: p.Source, Items: make([]db.ImportItemResult, 0, len(p.Items)), Errors: []string{}}
 	events := []db.Event{}
 	states := make(map[string]*importIssueState, len(p.Items))
+	bumpedRevisions := map[int64]struct{}{}
+	pendingRevisions := map[int64]struct{}{}
 
 	for _, item := range p.Items {
 		state, evt, err := d.importIssue(ctx, tx, p, item, projectName, projectUID)
@@ -79,6 +82,9 @@ func (d *Store) importBatch(ctx context.Context, p db.ImportBatchParams) (db.Imp
 			events = append(events, *evt)
 		}
 		states[item.ExternalID] = state
+		if state.created || state.revisionBumped {
+			bumpedRevisions[state.issue.ID] = struct{}{}
+		}
 		switch {
 		case state.created:
 			result.Created++
@@ -116,6 +122,9 @@ func (d *Store) importBatch(ctx context.Context, p db.ImportBatchParams) (db.Imp
 			if err != nil {
 				return db.ImportBatchResult{}, nil, err
 			}
+			if len(labelEvents) > 0 {
+				pendingRevisions[state.issue.ID] = struct{}{}
+			}
 			events = append(events, labelEvents...)
 		}
 	}
@@ -131,8 +140,27 @@ func (d *Store) importBatch(ctx context.Context, p db.ImportBatchParams) (db.Imp
 			if err != nil {
 				return db.ImportBatchResult{}, nil, err
 			}
+			for _, ev := range linkEvents {
+				if ev.IssueID != nil {
+					pendingRevisions[*ev.IssueID] = struct{}{}
+				}
+				if ev.RelatedIssueID != nil {
+					pendingRevisions[*ev.RelatedIssueID] = struct{}{}
+				}
+			}
 			events = append(events, linkEvents...)
 			result.Links += n
+		}
+	}
+	if len(pendingRevisions) > 0 {
+		toBump := make([]int64, 0, len(pendingRevisions))
+		for id := range pendingRevisions {
+			if _, already := bumpedRevisions[id]; !already {
+				toBump = append(toBump, id)
+			}
+		}
+		if err := bumpIssueRevisionsTx(ctx, tx, toBump); err != nil {
+			return db.ImportBatchResult{}, nil, err
 		}
 	}
 
@@ -329,7 +357,7 @@ func (d *Store) importIssue(ctx context.Context, tx *sql.Tx, p db.ImportBatchPar
 		if err != nil {
 			return nil, nil, err
 		}
-		return &importIssueState{item: item, issue: updated, presentationUpdated: true, sourceCurrent: sourceCurrent}, &evt, nil
+		return &importIssueState{item: item, issue: updated, presentationUpdated: true, sourceCurrent: sourceCurrent, revisionBumped: updated.Revision != existing.Revision}, &evt, nil
 	}
 	if item.UpdatedAt.After(existing.UpdatedAt) {
 		updated, evt, err := d.updateImportedIssue(ctx, tx, p, item, existing, projectName)
@@ -340,14 +368,14 @@ func (d *Store) importIssue(ctx context.Context, tx *sql.Tx, p db.ImportBatchPar
 		if err != nil {
 			return nil, nil, err
 		}
-		return &importIssueState{item: item, issue: updated, sourceNewer: true}, &evt, nil
+		return &importIssueState{item: item, issue: updated, sourceNewer: true, revisionBumped: updated.Revision != existing.Revision}, &evt, nil
 	}
 	if db.ImportOwnsSameSourceVersionStatus(p, mapping, existing, item) {
 		updated, evt, err := d.updateImportedIssue(ctx, tx, p, db.ImportedStatusOnlyItem(existing, item), existing, projectName)
 		if err != nil {
 			return nil, nil, err
 		}
-		return &importIssueState{item: item, issue: updated, presentationUpdated: true, sourceCurrent: sourceCurrent}, &evt, nil
+		return &importIssueState{item: item, issue: updated, presentationUpdated: true, sourceCurrent: sourceCurrent, revisionBumped: updated.Revision != existing.Revision}, &evt, nil
 	}
 	// The source is not newer overall, but a corrected earlier created_at must
 	// still heal a row whose stored created_at was synthesized late by an older
@@ -462,7 +490,7 @@ func (d *Store) updateImportedIssue(ctx context.Context, tx *sql.Tx, p db.Import
 		bump = `, content_revision = content_revision + 1`
 	}
 	owner := db.NormalizeImportOwner(item.Owner)
-	if item.Status != existing.Status || !ownerEqual(owner, existing.Owner) || (item.Status == "closed" && existing.AssignmentExpiresOn != nil) {
+	if item.Status != existing.Status || !ownerEqual(owner, existing.Owner) || !priorityEqual(item.Priority, existing.Priority) || (item.Status == "closed" && existing.AssignmentExpiresOn != nil) {
 		bump += `, revision = revision + 1`
 	}
 	// Preserve a timed owner while it is open, but make ownership permanent

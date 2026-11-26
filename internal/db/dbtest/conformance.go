@@ -439,6 +439,31 @@ var storageScenarios = []scenario{
 		methods: []string{"CreateIssue", "CreateProject", "IssueByID", "RewriteAuthorIdentity"},
 		run:     checkIssueRevisionAuthorRewrite,
 	},
+	{
+		name:    "issue revision priority",
+		methods: []string{"CreateIssue", "CreateProject", "EditIssueAtomic", "IssueByID", "UpdatePriorityGuarded"},
+		run:     checkIssueRevisionPriority,
+	},
+	{
+		name:    "issue revision labels",
+		methods: []string{"AddLabelAndEvent", "ChangeLabelsAndEvents", "CreateIssue", "CreateProject", "IssueByID", "RemoveLabelAndEvent"},
+		run:     checkIssueRevisionLabels,
+	},
+	{
+		name:    "issue revision links",
+		methods: []string{"CreateIssue", "CreateLinkAndEvent", "CreateProject", "DeleteLinkAndEvent", "EditIssueAtomic", "IssueByID"},
+		run:     checkIssueRevisionLinks,
+	},
+	{
+		name:    "issue revision guarded lifecycle",
+		methods: []string{"CloseIssue", "CreateIssue", "CreateProject", "ReopenIssueGuarded", "UpdateOwnerGuarded"},
+		run:     checkIssueRevisionGuardedLifecycle,
+	},
+	{
+		name:    "issue revision federation parity",
+		methods: []string{"CreateProject", "InsertRemoteEvent", "IssueByUID", "MaterializeFederatedProject", "UpsertFederationBinding"},
+		run:     checkIssueRevisionFederationParity,
+	},
 	{name: "search status", methods: []string{"SearchFTS", "SearchFTSAny"}, run: checkSearchStatus},
 	{name: "lookalike keeps rewritten body duplicate", methods: []string{"CreateProject", "CreateIssue", "SearchFTSAny"}, run: checkLookalikeKeepsRewrittenBodyDuplicate},
 	{name: "duplicate survives higher word count distractors", methods: []string{"CreateProject", "CreateIssue", "SearchFTSAny"}, run: checkDuplicateSurvivesHigherWordCountDistractors},

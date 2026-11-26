@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-24
+last_edited: 2026-11-26
 ---
 
 # HTTP API schema
@@ -138,16 +138,35 @@ even in an archived project, and otherwise it returns `404 not_found`.
 
 ## Editing an issue safely
 
-Pass the edit precondition in the request body rather than in `If-Match`,
-because `If-Match` checks the issue `revision`, which a title or body edit does
-not change. On `PATCH /projects/{project_id}/issues/{ref}`, send the
-`content_revision` you read as `expected_content_revision`. The daemon compares
-it against the stored value in the same transaction as the write, so if someone
-edited the title or body in between, the request returns HTTP 412 with code
-`revision_conflict` and writes nothing, including any priority, owner, or link
-changes in the same payload. To make an unconditional edit, omit
-`expected_content_revision`. A new issue starts at `content_revision` `0`, so
-send `0` instead of omitting the field.
+Issue rows track two independent revision counters:
+
+- `revision` advances when an issue's status, owner, priority, metadata, labels,
+  or links change (a link write advances both endpoint issues' revisions;
+  replacing a parent also advances the old and new parent).
+- `content_revision` starts at `0` on a new issue and advances when an edit
+  changes the title or body.
+
+Existing-issue write routes accept an optional `If-Match: "rev-N"` header
+checked against `revision` in the same transaction as the write: `PATCH`
+`/projects/{project_id}/issues/{ref}`, `POST` `.../actions/reopen`, `POST`
+`.../actions/assign`, `POST` `.../actions/unassign`, `POST` `.../actions/priority`,
+`POST` `.../labels`, `PATCH` `.../labels`, `DELETE` `.../labels/{label}`,
+`POST` `.../links`, and `DELETE` `.../links/{link_id}` (in addition to
+metadata patches, close, and move). Omit `If-Match` for an unconditional write.
+An empty or malformed `If-Match` header returns HTTP `400` with code
+`validation`. A stale `If-Match` returns HTTP `412` with code
+`revision_conflict` and writes nothing, even when the requested write would be a
+no-op. No-op writes with a matching `If-Match` return `200` without advancing
+`revision`.
+
+To guard title or body edits on `PATCH /projects/{project_id}/issues/{ref}`,
+send the `content_revision` you read as `expected_content_revision`. You can
+combine `If-Match` and `expected_content_revision` in the same request; the
+daemon checks both in the write transaction, so a mismatch on either returns
+HTTP `412` with code `revision_conflict` and writes nothing, including any
+priority, owner, or link changes in the same payload. Omit
+`expected_content_revision` to skip the content check, or send `0` for an
+unedited issue.
 
 ## Recurrence timezones
 
@@ -373,6 +392,7 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
+| `0.72.0` | Existing-issue write routes (edit, reopen, assign, unassign, priority, labels, and links) accept an optional `If-Match: "rev-N"` precondition header; priority, label, and link changes (on both endpoints) advance `issues.revision`. |
 | `0.71.0` | Federation event watches hold one request for many projects; event polls advertise `X-Kata-Federation-Watch-Max`. |
 | `0.70.0` | Added `PATCH /api/v1/projects/{project_id}/issues/{ref}/labels`, which applies `add` and `remove` label lists in one transaction and answers with the issue's resulting `labels`. |
 | `0.69.0` | Close responses can include a `parent_ready` issue reference. |

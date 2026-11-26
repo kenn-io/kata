@@ -32,6 +32,9 @@ func (s *Store) EditIssueAtomic(ctx context.Context, params db.EditIssueAtomicPa
 		if err := ensureProjectWritableTx(ctx, tx, project.ID); err != nil {
 			return err
 		}
+		if params.IfMatchRev != nil && *params.IfMatchRev != current.Revision {
+			return &db.RevisionConflictError{CurrentRevision: current.Revision}
+		}
 		if params.ExpectedContentRevision != nil && *params.ExpectedContentRevision != current.ContentRevision {
 			return &db.ContentRevisionConflictError{CurrentContentRevision: current.ContentRevision}
 		}
@@ -43,6 +46,7 @@ func (s *Store) EditIssueAtomic(ctx context.Context, params db.EditIssueAtomicPa
 			return err
 		}
 		updatedAt := mutationTimestamp()
+		revChanged := false
 
 		fieldPlan, err := db.PlanIssueFieldEdit(current, params.Title, params.Body, params.Owner, updatedAt)
 		if err != nil {
@@ -66,12 +70,10 @@ func (s *Store) EditIssueAtomic(ctx context.Context, params db.EditIssueAtomicPa
 				args = append(args, fieldPlan.Owner)
 				sets = append(sets, fmt.Sprintf("owner = $%d", len(args)))
 				sets = append(sets, "assignment_expires_on = NULL")
+				revChanged = true
 			}
 			args = append(args, updatedAt)
 			sets = append(sets, fmt.Sprintf("updated_at = $%d", len(args)))
-			if fieldPlan.OwnerChanged {
-				sets = append(sets, "revision = revision + 1")
-			}
 			if fieldPlan.ContentChanged() {
 				sets = append(sets, "content_revision = content_revision + 1")
 			}
@@ -111,10 +113,11 @@ func (s *Store) EditIssueAtomic(ctx context.Context, params db.EditIssueAtomicPa
 				}
 				result.Events = append(result.Events, event)
 				result.AnyChange = true
+				revChanged = true
 			}
 		}
 
-		linksChanged, err := s.applyAtomicLinkDeltaTx(ctx, tx, current, params, &result.Changes, updatedAt)
+		linksChanged, peerIDs, err := s.applyAtomicLinkDeltaTx(ctx, tx, current, params, &result.Changes, updatedAt)
 		if err != nil {
 			return err
 		}
@@ -138,6 +141,14 @@ func (s *Store) EditIssueAtomic(ctx context.Context, params db.EditIssueAtomicPa
 			}
 			result.Events = append(result.Events, event)
 			result.AnyChange = true
+			revChanged = true
+		}
+
+		if revChanged {
+			peerIDs = append(peerIDs, current.ID)
+		}
+		if err := bumpIssueRevisionsTx(ctx, tx, peerIDs); err != nil {
+			return err
 		}
 
 		result.Issue, err = scanIssue(ctx, tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = $1`, current.ID))
@@ -239,57 +250,59 @@ func (s *Store) applyAtomicLinkDeltaTx(
 	params db.EditIssueAtomicParams,
 	changes *db.AtomicEditChanges,
 	updatedAt string,
-) (bool, error) {
+) (bool, []int64, error) {
 	changed := false
+	var changedPeers []int64
 	if params.SetParent != nil || params.RemoveParent != nil {
 		if _, err := tx.ExecContext(ctx,
 			`SELECT pg_advisory_xact_lock(hashtext(current_schema()), hashint8($1))`, issue.ID); err != nil {
-			return changed, mapSQLError(err, nil)
+			return changed, changedPeers, mapSQLError(err, nil)
 		}
 	}
 	if params.SetParent != nil {
 		target, err := atomicIssueByIDTx(ctx, tx, *params.SetParent, false)
 		if errors.Is(err, db.ErrNotFound) {
-			return changed, &db.LinkTargetNotFoundError{Number: *params.SetParent}
+			return changed, changedPeers, &db.LinkTargetNotFoundError{Number: *params.SetParent}
 		}
 		if err != nil {
-			return changed, err
+			return changed, changedPeers, err
 		}
 		if target.ID == issue.ID {
-			return changed, db.ErrSelfLink
+			return changed, changedPeers, db.ErrSelfLink
 		}
 		if err := checkLinkEndpointsProjectAccessTx(ctx, tx, issue.ID, target.ID); err != nil {
-			return changed, err
+			return changed, changedPeers, err
 		}
 		if err := requireAddableLinkTargetTx(ctx, tx, target.ID); err != nil {
-			return changed, err
+			return changed, changedPeers, err
 		}
 		if err := assertNoParentCycleTx(ctx, tx, issue.ID, target.ID); err != nil {
-			return changed, err
+			return changed, changedPeers, err
 		}
 		existing, err := atomicLinkByEndpointsTx(ctx, tx, issue.ID, 0, "parent", true)
 		if err != nil && !errors.Is(err, db.ErrNotFound) {
-			return changed, err
+			return changed, changedPeers, err
 		}
 		if errors.Is(err, db.ErrNotFound) || existing.ToIssueID != target.ID {
 			if err == nil {
 				parentProjectUID, uidErr := linkedParentProjectUIDTx(ctx, tx, existing.ToIssueID)
 				if uidErr != nil {
-					return changed, uidErr
+					return changed, changedPeers, uidErr
 				}
 				if err := db.CheckProjectAccessTransaction(ctx, tx, parentProjectUID); err != nil {
-					return changed, err
+					return changed, changedPeers, err
 				}
 				identity, identityErr := atomicPeerIdentityTx(ctx, tx, existing.ToIssueID)
 				if identityErr != nil {
-					return changed, identityErr
+					return changed, changedPeers, identityErr
 				}
 				deleted, deleteErr := deleteAtomicLinkTx(ctx, tx, existing.ID)
 				if deleteErr != nil {
-					return changed, deleteErr
+					return changed, changedPeers, deleteErr
 				}
 				if deleted {
 					changes.ParentRemoved = &identity
+					changedPeers = append(changedPeers, existing.ToIssueID)
 					changed = true
 				}
 			}
@@ -297,14 +310,15 @@ func (s *Store) applyAtomicLinkDeltaTx(
 				FromIssueID: issue.ID, ToIssueID: target.ID, Type: "parent", Author: params.Actor,
 			})
 			if insertErr != nil && !errors.Is(insertErr, db.ErrLinkExists) {
-				return changed, insertErr
+				return changed, changedPeers, insertErr
 			}
 			if insertErr == nil {
 				identity, identityErr := atomicPeerIdentityTx(ctx, tx, target.ID)
 				if identityErr != nil {
-					return changed, identityErr
+					return changed, changedPeers, identityErr
 				}
 				changes.ParentSet = &identity
+				changedPeers = append(changedPeers, target.ID)
 				changed = true
 			}
 		}
@@ -313,97 +327,141 @@ func (s *Store) applyAtomicLinkDeltaTx(
 	if params.RemoveParent != nil {
 		existing, err := atomicLinkByEndpointsTx(ctx, tx, issue.ID, 0, "parent", true)
 		if errors.Is(err, db.ErrNotFound) {
-			return changed, db.ErrParentMismatch
+			return changed, changedPeers, db.ErrParentMismatch
 		}
 		if err != nil {
-			return changed, err
+			return changed, changedPeers, err
 		}
 		if existing.ToIssueID != *params.RemoveParent {
-			return changed, db.ErrParentMismatch
+			return changed, changedPeers, db.ErrParentMismatch
 		}
 		if err := checkLinkEndpointsProjectAccessTx(ctx, tx, issue.ID, existing.ToIssueID); err != nil {
-			return changed, err
+			return changed, changedPeers, err
 		}
 		identity, err := atomicPeerIdentityTx(ctx, tx, existing.ToIssueID)
 		if err != nil {
-			return changed, err
+			return changed, changedPeers, err
 		}
 		deleted, err := deleteAtomicLinkTx(ctx, tx, existing.ID)
 		if err != nil {
-			return changed, err
+			return changed, changedPeers, err
 		}
 		if !deleted {
-			return changed, db.ErrParentMismatch
+			return changed, changedPeers, db.ErrParentMismatch
 		}
 		changes.ParentRemoved = &identity
+		changedPeers = append(changedPeers, existing.ToIssueID)
 		changed = true
 	}
 
 	for _, targetID := range params.AddBlocks {
 		added, peer, err := atomicAddEdgeTx(ctx, tx, issue, targetID, "blocks", params.Actor, false)
 		if err != nil {
-			return changed, err
+			return changed, changedPeers, err
 		}
 		if added {
 			changes.BlocksAdded = append(changes.BlocksAdded, peer)
+			changedPeers = append(changedPeers, targetID)
 			changed = true
 		}
 	}
 	for _, targetID := range params.AddBlockedBy {
 		added, peer, err := atomicAddEdgeTx(ctx, tx, issue, targetID, "blocks", params.Actor, true)
 		if err != nil {
-			return changed, err
+			return changed, changedPeers, err
 		}
 		if added {
 			changes.BlockedByAdded = append(changes.BlockedByAdded, peer)
+			changedPeers = append(changedPeers, targetID)
 			changed = true
 		}
 	}
 	for _, targetID := range params.AddRelated {
 		added, peer, err := atomicAddEdgeTx(ctx, tx, issue, targetID, "related", params.Actor, false)
 		if err != nil {
-			return changed, err
+			return changed, changedPeers, err
 		}
 		if added {
 			changes.RelatedAdded = append(changes.RelatedAdded, peer)
+			changedPeers = append(changedPeers, targetID)
 			changed = true
 		}
 	}
 	for _, targetID := range params.RemoveBlocks {
 		removed, peer, err := atomicRemoveEdgeTx(ctx, tx, issue, targetID, "blocks", false)
 		if err != nil {
-			return changed, err
+			return changed, changedPeers, err
 		}
 		if removed {
 			changes.BlocksRemoved = append(changes.BlocksRemoved, peer)
+			changedPeers = append(changedPeers, targetID)
 			changed = true
 		}
 	}
 	for _, targetID := range params.RemoveBlockedBy {
 		removed, peer, err := atomicRemoveEdgeTx(ctx, tx, issue, targetID, "blocks", true)
 		if err != nil {
-			return changed, err
+			return changed, changedPeers, err
 		}
 		if removed {
 			changes.BlockedByRemoved = append(changes.BlockedByRemoved, peer)
+			changedPeers = append(changedPeers, targetID)
 			changed = true
 		}
 	}
 	for _, targetID := range params.RemoveRelated {
 		removed, peer, err := atomicRemoveEdgeTx(ctx, tx, issue, targetID, "related", false)
 		if err != nil {
-			return changed, err
+			return changed, changedPeers, err
 		}
 		if removed {
 			changes.RelatedRemoved = append(changes.RelatedRemoved, peer)
+			changedPeers = append(changedPeers, targetID)
 			changed = true
 		}
 	}
 	if changed {
 		_, err := tx.ExecContext(ctx, `UPDATE issues SET updated_at = $1 WHERE id = $2`, updatedAt, issue.ID)
-		return true, mapSQLError(err, nil)
+		return true, changedPeers, mapSQLError(err, nil)
 	}
-	return false, nil
+	return false, nil, nil
+}
+
+func lockIssuesByIDOrderTx(ctx context.Context, tx *sql.Tx, ids ...int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	sorted := slices.Clone(ids)
+	slices.Sort(sorted)
+	sorted = slices.Compact(sorted)
+	rows, err := tx.QueryContext(ctx,
+		`SELECT id FROM issues WHERE id = ANY($1::bigint[]) ORDER BY id FOR UPDATE`, sorted)
+	if err != nil {
+		return mapSQLError(err, nil)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var ignored int64
+		if err := rows.Scan(&ignored); err != nil {
+			return mapSQLError(err, nil)
+		}
+	}
+	return mapSQLError(rows.Err(), nil)
+}
+
+func bumpIssueRevisionsTx(ctx context.Context, tx *sql.Tx, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	sorted := slices.Clone(ids)
+	slices.Sort(sorted)
+	sorted = slices.Compact(sorted)
+	_, err := tx.ExecContext(ctx, `
+		UPDATE issues i
+		   SET revision = i.revision + 1
+		  FROM (SELECT id FROM issues WHERE id = ANY($1::bigint[]) ORDER BY id FOR UPDATE) locked
+		 WHERE i.id = locked.id`, sorted)
+	return mapSQLError(err, nil)
 }
 
 func atomicAddEdgeTx(

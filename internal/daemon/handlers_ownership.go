@@ -28,6 +28,10 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		ifMatchRev, err := parseOptionalIfMatchRevision(in.IfMatch)
+		if err != nil {
+			return nil, err
+		}
 		owner := strings.TrimSpace(in.Body.Owner)
 		if owner == "" {
 			return nil, api.NewError(400, "validation", "owner must be non-empty", "", nil)
@@ -39,8 +43,13 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, issue, actor); err != nil {
 			return nil, err
 		}
-		updated, evt, changed, err := cfg.DB.UpdateOwner(ctx, issue.ID, &owner, actor)
+		updated, evt, changed, err := cfg.DB.UpdateOwnerGuarded(ctx, db.UpdateOwnerParams{
+			IssueID: issue.ID, Owner: &owner, Actor: actor, IfMatchRev: ifMatchRev,
+		})
 		if err != nil {
+			if conflict, ok := errors.AsType[*db.RevisionConflictError](err); ok {
+				return nil, issueRevisionConflictError(conflict.CurrentRevision)
+			}
 			if apiErr := federationReadOnlyError(err); apiErr != nil {
 				return nil, apiErr
 			}
@@ -69,6 +78,10 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		ifMatchRev, err := parseOptionalIfMatchRevision(in.IfMatch)
+		if err != nil {
+			return nil, err
+		}
 		var expectedOwner *string
 		if in.Body.ExpectedOwner != nil {
 			expected := strings.TrimSpace(*in.Body.ExpectedOwner)
@@ -85,8 +98,13 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, issue, actor); err != nil {
 			return nil, err
 		}
-		updated, evt, changed, err := cfg.DB.UnassignOwner(ctx, issue.ID, actor, expectedOwner)
+		updated, evt, changed, err := cfg.DB.UpdateOwnerGuarded(ctx, db.UpdateOwnerParams{
+			IssueID: issue.ID, Actor: actor, ExpectedOwner: expectedOwner, IfMatchRev: ifMatchRev,
+		})
 		if err != nil {
+			if conflict, ok := errors.AsType[*db.RevisionConflictError](err); ok {
+				return nil, issueRevisionConflictError(conflict.CurrentRevision)
+			}
 			if errors.Is(err, db.ErrOwnerMismatch) {
 				var currentOwner any
 				if updated.Owner != nil {

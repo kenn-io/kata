@@ -44,9 +44,17 @@ func (s *Store) ReplaceParentAndEvents(
 			return err
 		}
 
+		if err := lockIssuesByIDOrderTx(ctx, tx,
+			input.Link.FromIssueID, input.ExpectedParentIssueID, input.Link.ToIssueID,
+		); err != nil {
+			return err
+		}
 		eventIssue, project, err := lockedIssueTx(ctx, tx, input.Link.FromIssueID, false)
 		if err != nil {
 			return err
+		}
+		if input.IfMatchRev != nil && *input.IfMatchRev != eventIssue.Revision {
+			return &db.RevisionConflictError{CurrentRevision: eventIssue.Revision}
 		}
 		if _, err := tx.ExecContext(ctx,
 			`SELECT pg_advisory_xact_lock(hashtext(current_schema()), hashint8($1))`, input.Link.FromIssueID); err != nil {
@@ -141,10 +149,10 @@ func (s *Store) ReplaceParentAndEvents(
 			return err
 		}
 		if _, err := tx.ExecContext(ctx,
-			`UPDATE issues SET updated_at = $1 WHERE id = $2`, updatedAt, eventIssue.ID); err != nil {
+			`UPDATE issues SET updated_at = $1, revision = revision + 1 WHERE id = $2`, updatedAt, eventIssue.ID); err != nil {
 			return mapSQLError(err, nil)
 		}
-		return nil
+		return bumpIssueRevisionsTx(ctx, tx, []int64{oldLink.ToIssueID, result.Link.ToIssueID})
 	})
 	return result, err
 }

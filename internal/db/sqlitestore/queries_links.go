@@ -415,6 +415,9 @@ func (d *Store) createLinkAndEvent(ctx context.Context, p db.CreateLinkParams, e
 	if err != nil {
 		return db.Link{}, db.Event{}, err
 	}
+	if ev.IfMatchRev != nil && *ev.IfMatchRev != eventIssue.Revision {
+		return db.Link{}, db.Event{}, &db.RevisionConflictError{CurrentRevision: eventIssue.Revision}
+	}
 	if err := checkLinkEndpointsProjectAccessTx(ctx, tx, p.FromIssueID, p.ToIssueID); err != nil {
 		return db.Link{}, db.Event{}, err
 	}
@@ -507,9 +510,16 @@ func (d *Store) createLinkAndEvent(ctx context.Context, p db.CreateLinkParams, e
 	}
 
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE issues SET updated_at = ? WHERE id = ?`,
+		`UPDATE issues SET updated_at = ?, revision = revision + 1 WHERE id = ?`,
 		ts, ev.EventIssueID); err != nil {
 		return db.Link{}, db.Event{}, fmt.Errorf("touch issue: %w", err)
+	}
+	if relatedID != ev.EventIssueID {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE issues SET revision = revision + 1 WHERE id = ?`,
+			relatedID); err != nil {
+			return db.Link{}, db.Event{}, fmt.Errorf("bump link peer revision: %w", err)
+		}
 	}
 
 	// Re-fetch the inserted row INSIDE the TX so a post-commit failure
@@ -547,6 +557,9 @@ func (d *Store) deleteLinkAndEvent(ctx context.Context, link db.Link, ev db.Link
 	eventIssue, projectName, err := lookupIssueForEvent(ctx, tx, ev.EventIssueID)
 	if err != nil {
 		return db.Event{}, err
+	}
+	if ev.IfMatchRev != nil && *ev.IfMatchRev != eventIssue.Revision {
+		return db.Event{}, &db.RevisionConflictError{CurrentRevision: eventIssue.Revision}
 	}
 	if err := checkLinkEndpointsProjectAccessTx(ctx, tx, link.FromIssueID, link.ToIssueID); err != nil {
 		return db.Event{}, err
@@ -595,9 +608,16 @@ func (d *Store) deleteLinkAndEvent(ctx context.Context, link db.Link, ev db.Link
 		return db.Event{}, err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE issues SET updated_at = ? WHERE id = ?`,
+		`UPDATE issues SET updated_at = ?, revision = revision + 1 WHERE id = ?`,
 		ts, ev.EventIssueID); err != nil {
 		return db.Event{}, fmt.Errorf("touch issue: %w", err)
+	}
+	if relatedID != ev.EventIssueID {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE issues SET revision = revision + 1 WHERE id = ?`,
+			relatedID); err != nil {
+			return db.Event{}, fmt.Errorf("bump link peer revision: %w", err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return db.Event{}, fmt.Errorf("commit: %w", err)

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strconv"
 
@@ -28,6 +29,10 @@ func registerPriorityHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		ifMatchRev, err := parseOptionalIfMatchRevision(in.IfMatch)
+		if err != nil {
+			return nil, err
+		}
 		if err := validatePriorityRange(in.Body.Priority); err != nil {
 			return nil, err
 		}
@@ -38,8 +43,13 @@ func registerPriorityHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, issue, actor); err != nil {
 			return nil, err
 		}
-		updated, evt, changed, err := cfg.DB.UpdatePriority(ctx, issue.ID, in.Body.Priority, actor)
+		updated, evt, changed, err := cfg.DB.UpdatePriorityGuarded(ctx, db.UpdatePriorityParams{
+			IssueID: issue.ID, Priority: in.Body.Priority, Actor: actor, IfMatchRev: ifMatchRev,
+		})
 		if err != nil {
+			if conflict, ok := errors.AsType[*db.RevisionConflictError](err); ok {
+				return nil, issueRevisionConflictError(conflict.CurrentRevision)
+			}
 			if apiErr := federationReadOnlyError(err); apiErr != nil {
 				return nil, apiErr
 			}

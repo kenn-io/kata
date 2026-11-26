@@ -105,37 +105,50 @@ func (s *Store) EditIssue(ctx context.Context, params db.EditIssueParams) (db.Is
 
 // UpdateOwner changes assignment state, treating an equal value as a no-op.
 func (s *Store) UpdateOwner(ctx context.Context, issueID int64, owner *string, actor string) (db.Issue, *db.Event, bool, error) {
-	return s.updateOwner(ctx, issueID, owner, actor, nil)
+	return s.UpdateOwnerGuarded(ctx, db.UpdateOwnerParams{
+		IssueID: issueID, Owner: owner, Actor: actor,
+	})
 }
 
 // UnassignOwner clears ownership only when expectedOwner is nil or matches the
 // current owner. A mismatch returns the current issue without an event.
 func (s *Store) UnassignOwner(ctx context.Context, issueID int64, actor string, expectedOwner *string) (db.Issue, *db.Event, bool, error) {
-	return s.updateOwner(ctx, issueID, nil, actor, expectedOwner)
+	return s.UpdateOwnerGuarded(ctx, db.UpdateOwnerParams{
+		IssueID: issueID, Actor: actor, ExpectedOwner: expectedOwner,
+	})
 }
 
-func (s *Store) updateOwner(ctx context.Context, issueID int64, owner *string, actor string, expectedOwner *string) (db.Issue, *db.Event, bool, error) {
-	return s.updateIssueAttribute(ctx, issueID, actor, func(current db.Issue, updatedAt string) (string, any, string, string, bool, error) {
-		if expectedOwner != nil && !equalStringPointers(current.Owner, expectedOwner) {
+// UpdateOwnerGuarded changes or clears ownership with optional revision and
+// expected-owner guards.
+func (s *Store) UpdateOwnerGuarded(ctx context.Context, p db.UpdateOwnerParams) (db.Issue, *db.Event, bool, error) {
+	return s.updateIssueAttribute(ctx, p.IssueID, p.Actor, p.IfMatchRev, func(current db.Issue, updatedAt string) (string, any, string, string, bool, error) {
+		if p.ExpectedOwner != nil && !equalStringPointers(current.Owner, p.ExpectedOwner) {
 			return "", nil, "", "", false, db.ErrOwnerMismatch
 		}
-		if equalStringPointers(current.Owner, owner) && current.AssignmentExpiresOn == nil {
+		if equalStringPointers(current.Owner, p.Owner) && current.AssignmentExpiresOn == nil {
 			return "", nil, "", "", false, nil
 		}
-		payload := map[string]any{"owner": owner, "updated_at": updatedAt}
+		payload := map[string]any{"owner": p.Owner, "updated_at": updatedAt}
 		eventType := "issue.unassigned"
-		if owner != nil {
+		if p.Owner != nil {
 			eventType = "issue.assigned"
 		}
 		body, err := json.Marshal(payload)
-		return "owner", owner, eventType, string(body), true, err
+		return "owner", p.Owner, eventType, string(body), true, err
 	})
 }
 
 // UpdatePriority changes priority state, treating an equal value as a no-op.
 func (s *Store) UpdatePriority(ctx context.Context, issueID int64, priority *int64, actor string) (db.Issue, *db.Event, bool, error) {
-	return s.updateIssueAttribute(ctx, issueID, actor, func(current db.Issue, updatedAt string) (string, any, string, string, bool, error) {
-		if equalIntPointers(current.Priority, priority) {
+	return s.UpdatePriorityGuarded(ctx, db.UpdatePriorityParams{
+		IssueID: issueID, Priority: priority, Actor: actor,
+	})
+}
+
+// UpdatePriorityGuarded changes priority state with an optional revision guard.
+func (s *Store) UpdatePriorityGuarded(ctx context.Context, p db.UpdatePriorityParams) (db.Issue, *db.Event, bool, error) {
+	return s.updateIssueAttribute(ctx, p.IssueID, p.Actor, p.IfMatchRev, func(current db.Issue, updatedAt string) (string, any, string, string, bool, error) {
+		if equalIntPointers(current.Priority, p.Priority) {
 			return "", nil, "", "", false, nil
 		}
 		payload := map[string]any{"updated_at": updatedAt}
@@ -143,12 +156,12 @@ func (s *Store) UpdatePriority(ctx context.Context, issueID int64, priority *int
 		if current.Priority != nil {
 			payload["old_priority"] = *current.Priority
 		}
-		if priority != nil {
-			payload["priority"] = *priority
+		if p.Priority != nil {
+			payload["priority"] = *p.Priority
 			eventType = "issue.priority_set"
 		}
 		body, err := json.Marshal(payload)
-		return "priority", priority, eventType, string(body), true, err
+		return "priority", p.Priority, eventType, string(body), true, err
 	})
 }
 
@@ -165,6 +178,7 @@ func (s *Store) updateIssueAttribute(
 	ctx context.Context,
 	issueID int64,
 	actor string,
+	ifMatchRev *int64,
 	plan issueAttributePlan,
 ) (db.Issue, *db.Event, bool, error) {
 	var issue db.Issue
@@ -177,6 +191,9 @@ func (s *Store) updateIssueAttribute(
 			return err
 		}
 		issue = current
+		if ifMatchRev != nil && *ifMatchRev != current.Revision {
+			return &db.RevisionConflictError{CurrentRevision: current.Revision}
+		}
 		updatedAt := mutationTimestamp()
 		column, value, eventType, payload, shouldChange, err := plan(current, updatedAt)
 		if err != nil {
@@ -191,7 +208,7 @@ func (s *Store) updateIssueAttribute(
 		case "owner":
 			query = `UPDATE issues SET owner = $1, assignment_expires_on = NULL, revision = revision + 1, updated_at = $2 WHERE id = $3`
 		case "priority":
-			query = `UPDATE issues SET priority = $1, updated_at = $2 WHERE id = $3`
+			query = `UPDATE issues SET priority = $1, revision = revision + 1, updated_at = $2 WHERE id = $3`
 		default:
 			return fmt.Errorf("unsupported issue attribute %q", column)
 		}
@@ -499,12 +516,17 @@ func (s *Store) closeIssueWithEvents(
 
 // ReopenIssue clears close state; an already-open issue is a no-op.
 func (s *Store) ReopenIssue(ctx context.Context, issueID int64, actor string) (db.Issue, *db.Event, bool, error) {
-	return s.transitionIssue(ctx, issueID, actor, false)
+	return s.transitionIssue(ctx, issueID, actor, nil, false)
+}
+
+// ReopenIssueGuarded clears close state with an optional revision guard.
+func (s *Store) ReopenIssueGuarded(ctx context.Context, p db.ReopenIssueParams) (db.Issue, *db.Event, bool, error) {
+	return s.transitionIssue(ctx, p.IssueID, p.Actor, p.IfMatchRev, false)
 }
 
 // SoftDeleteIssue hides an issue while retaining all dependent state.
 func (s *Store) SoftDeleteIssue(ctx context.Context, issueID int64, actor string) (db.Issue, *db.Event, bool, error) {
-	return s.transitionIssue(ctx, issueID, actor, true)
+	return s.transitionIssue(ctx, issueID, actor, nil, true)
 }
 
 // RestoreIssue makes a soft-deleted issue visible again.
@@ -542,7 +564,7 @@ func (s *Store) RestoreIssue(ctx context.Context, issueID int64, actor string) (
 	return issue, event, changed, err
 }
 
-func (s *Store) transitionIssue(ctx context.Context, issueID int64, actor string, deleteIssue bool) (db.Issue, *db.Event, bool, error) {
+func (s *Store) transitionIssue(ctx context.Context, issueID int64, actor string, ifMatchRev *int64, deleteIssue bool) (db.Issue, *db.Event, bool, error) {
 	var issue db.Issue
 	var event *db.Event
 	var changed bool
@@ -551,6 +573,9 @@ func (s *Store) transitionIssue(ctx context.Context, issueID int64, actor string
 		current, project, err := lockedIssueTx(ctx, tx, issueID, deleteIssue)
 		if err != nil {
 			return err
+		}
+		if ifMatchRev != nil && *ifMatchRev != current.Revision {
+			return &db.RevisionConflictError{CurrentRevision: current.Revision}
 		}
 		if deleteIssue && current.DeletedAt != nil || !deleteIssue && current.Status == "open" {
 			issue = current

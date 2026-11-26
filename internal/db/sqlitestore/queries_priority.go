@@ -19,23 +19,33 @@ import (
 //     emitted only when there was a prior value to clear; clearing an
 //     already-null priority is a no-op (changed=false, no event).
 func (d *Store) UpdatePriority(ctx context.Context, issueID int64, newPriority *int64, actor string) (db.Issue, *db.Event, bool, error) {
-	return retryWrite3(ctx, d, func() (db.Issue, *db.Event, bool, error) {
-		return d.updatePriority(ctx, issueID, newPriority, actor)
+	return d.UpdatePriorityGuarded(ctx, db.UpdatePriorityParams{
+		IssueID: issueID, Priority: newPriority, Actor: actor,
 	})
 }
 
-func (d *Store) updatePriority(ctx context.Context, issueID int64, newPriority *int64, actor string) (db.Issue, *db.Event, bool, error) {
+// UpdatePriorityGuarded sets issues.priority with an optional revision guard.
+func (d *Store) UpdatePriorityGuarded(ctx context.Context, p db.UpdatePriorityParams) (db.Issue, *db.Event, bool, error) {
+	return retryWrite3(ctx, d, func() (db.Issue, *db.Event, bool, error) {
+		return d.updatePriority(ctx, p)
+	})
+}
+
+func (d *Store) updatePriority(ctx context.Context, p db.UpdatePriorityParams) (db.Issue, *db.Event, bool, error) {
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return db.Issue{}, nil, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	issue, projectName, err := lookupIssueForEvent(ctx, tx, issueID)
+	issue, projectName, err := lookupIssueForEvent(ctx, tx, p.IssueID)
 	if err != nil {
 		return db.Issue{}, nil, false, err
 	}
-	if priorityEqual(issue.Priority, newPriority) {
+	if p.IfMatchRev != nil && *p.IfMatchRev != issue.Revision {
+		return db.Issue{}, nil, false, &db.RevisionConflictError{CurrentRevision: issue.Revision}
+	}
+	if priorityEqual(issue.Priority, p.Priority) {
 		if err := tx.Commit(); err != nil {
 			return db.Issue{}, nil, false, err
 		}
@@ -46,12 +56,13 @@ func (d *Store) updatePriority(ctx context.Context, issueID int64, newPriority *
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE issues
 		 SET priority   = ?,
+		     revision   = revision + 1,
 		     updated_at = ?
-		 WHERE id = ?`, newPriority, ts, issueID); err != nil {
+		 WHERE id = ?`, p.Priority, ts, p.IssueID); err != nil {
 		return db.Issue{}, nil, false, fmt.Errorf("update priority: %w", err)
 	}
 
-	eventType, payload, err := priorityEventPayload(issue.Priority, newPriority, ts)
+	eventType, payload, err := priorityEventPayload(issue.Priority, p.Priority, ts)
 	if err != nil {
 		return db.Issue{}, nil, false, err
 	}
@@ -60,13 +71,13 @@ func (d *Store) updatePriority(ctx context.Context, issueID int64, newPriority *
 		ProjectName: projectName,
 		IssueID:     &issue.ID,
 		Type:        eventType,
-		Actor:       actor,
+		Actor:       p.Actor,
 		Payload:     payload,
 	})
 	if err != nil {
 		return db.Issue{}, nil, false, err
 	}
-	updated, err := issueByIDTx(ctx, tx, issueID)
+	updated, err := issueByIDTx(ctx, tx, p.IssueID)
 	if err != nil {
 		return db.Issue{}, nil, false, err
 	}

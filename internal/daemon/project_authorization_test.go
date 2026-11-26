@@ -1277,6 +1277,17 @@ func (s *projectAccessBeforeReopenStore) ReopenIssue(
 	return s.Storage.ReopenIssue(ctx, issueID, actor)
 }
 
+func (s *projectAccessBeforeReopenStore) ReopenIssueGuarded(
+	ctx context.Context, params db.ReopenIssueParams,
+) (db.Issue, *db.Event, bool, error) {
+	if s.before != nil {
+		before := s.before
+		s.before = nil
+		before(params.IssueID)
+	}
+	return s.Storage.ReopenIssueGuarded(ctx, params)
+}
+
 func (s *projectAccessBeforeCommentsReadStore) ReadCommentGraph(ctx context.Context, query db.CommentGraphQuery) (db.CommentGraphData, error) {
 	if s.before != nil {
 		before := s.before
@@ -1688,7 +1699,9 @@ func TestProjectAccessCompoundAndMovedEvents(t *testing.T) {
 		status, _, body := f.request(t, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/events", f.public.ID), "nonmember", nil, nil)
 		assert.Equal(t, http.StatusOK, status, string(body))
 		assert.NotContains(t, string(body), f.issue.UID, "every compound peer must be authorized")
-		_, err = store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: f.issue.ID, FromProjectID: f.private.ID, ToProjectID: f.public.ID, IfMatchRev: f.issue.Revision, Actor: "member"})
+		movedIssue, err := store.IssueByID(t.Context(), f.issue.ID)
+		require.NoError(t, err)
+		_, err = store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: f.issue.ID, FromProjectID: f.private.ID, ToProjectID: f.public.ID, IfMatchRev: movedIssue.Revision, Actor: "member"})
 		require.NoError(t, err)
 		for _, path := range []string{fmt.Sprintf("/api/v1/projects/%d/events", f.public.ID), "/api/v1/ui/snapshot?view=all-open&include_history=true&selected_issue_uid=" + f.visible.UID} {
 			status, _, body := f.request(t, http.MethodGet, path, "nonmember", nil, nil)
@@ -1697,7 +1710,9 @@ func TestProjectAccessCompoundAndMovedEvents(t *testing.T) {
 		}
 		// Moving a public issue into a private project also hides its earlier
 		// public events, which carry the original title and issue UID.
-		_, err = store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: peer.ID, FromProjectID: f.public.ID, ToProjectID: f.private.ID, IfMatchRev: peer.Revision, Actor: "member"})
+		movedPeer, err := store.IssueByID(t.Context(), peer.ID)
+		require.NoError(t, err)
+		_, err = store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: peer.ID, FromProjectID: f.public.ID, ToProjectID: f.private.ID, IfMatchRev: movedPeer.Revision, Actor: "member"})
 		require.NoError(t, err)
 		status, _, body = f.request(t, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/events", f.public.ID), "nonmember", nil, nil)
 		assert.Equal(t, http.StatusOK, status, string(body))

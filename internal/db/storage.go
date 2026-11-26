@@ -210,6 +210,7 @@ type Storage interface {
 	// idempotency lock can compare those events with the persisted receipt.
 	CloseIssueGuarded(ctx context.Context, p CloseIssueParams) (Issue, []Event, bool, error)
 	ReopenIssue(ctx context.Context, issueID int64, actor string) (Issue, *Event, bool, error)
+	ReopenIssueGuarded(ctx context.Context, p ReopenIssueParams) (Issue, *Event, bool, error)
 	SoftDeleteIssue(ctx context.Context, issueID int64, actor string) (Issue, *Event, bool, error)
 	RestoreIssue(ctx context.Context, issueID int64, actor string) (Issue, *Event, bool, error)
 	PurgeIssue(ctx context.Context, issueID int64, actor string, reason *string) (PurgeLog, error)
@@ -223,7 +224,9 @@ type Storage interface {
 	ExpireAssignments(ctx context.Context, p ExpireAssignmentsParams) ([]Event, error)
 	UpdateOwner(ctx context.Context, issueID int64, newOwner *string, actor string) (Issue, *Event, bool, error)
 	UnassignOwner(ctx context.Context, issueID int64, actor string, expectedOwner *string) (Issue, *Event, bool, error)
+	UpdateOwnerGuarded(ctx context.Context, p UpdateOwnerParams) (Issue, *Event, bool, error)
 	UpdatePriority(ctx context.Context, issueID int64, newPriority *int64, actor string) (Issue, *Event, bool, error)
+	UpdatePriorityGuarded(ctx context.Context, p UpdatePriorityParams) (Issue, *Event, bool, error)
 	PatchIssueMetadata(ctx context.Context, in PatchIssueMetadataIn) (PatchIssueMetadataOut, error)
 	// ListDueNotificationIssueIDs returns live open issues that may be due at now,
 	// or hold an automatic inbox entry that may need cleanup.

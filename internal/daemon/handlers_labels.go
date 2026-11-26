@@ -52,6 +52,10 @@ func addLabelHandler(cfg ServerConfig) func(context.Context, *api.AddLabelReques
 		if err != nil {
 			return nil, err
 		}
+		ifMatchRev, err := parseOptionalIfMatchRevision(in.IfMatch)
+		if err != nil {
+			return nil, err
+		}
 		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
 		if err != nil {
 			return nil, err
@@ -64,12 +68,16 @@ func addLabelHandler(cfg ServerConfig) func(context.Context, *api.AddLabelReques
 		}
 
 		ev := db.LabelEventParams{
-			EventType: "issue.labeled",
-			Label:     in.Body.Label,
-			Actor:     actor,
+			EventType:  "issue.labeled",
+			Label:      in.Body.Label,
+			Actor:      actor,
+			IfMatchRev: ifMatchRev,
 		}
 		row, evt, err := cfg.DB.AddLabelAndEvent(ctx, issue.ID, ev)
+		var revConflict *db.RevisionConflictError
 		switch {
+		case errors.As(err, &revConflict):
+			return nil, issueRevisionConflictError(revConflict.CurrentRevision)
 		case errors.Is(err, db.ErrLabelExists):
 			// No-op: re-fetch existing row to populate the response.
 			existing, lerr := cfg.DB.LabelByEndpoints(ctx, issue.ID, in.Body.Label)
@@ -124,6 +132,10 @@ func updateLabelsHandler(cfg ServerConfig) func(context.Context, *api.UpdateLabe
 		if err != nil {
 			return nil, err
 		}
+		ifMatchRev, err := parseOptionalIfMatchRevision(in.IfMatch)
+		if err != nil {
+			return nil, err
+		}
 		// The stores skip a remove that matches nothing without validating it,
 		// so a mistyped remove would leave the issue carrying both labels.
 		if slices.ContainsFunc(slices.Concat(in.Body.Add, in.Body.Remove), func(l string) bool { return !db.ValidLabel(l) }) {
@@ -155,11 +167,15 @@ func updateLabelsHandler(cfg ServerConfig) func(context.Context, *api.UpdateLabe
 		}
 
 		labels, events, err := cfg.DB.ChangeLabelsAndEvents(ctx, issue.ID, db.ChangeLabelsParams{
-			Add:    add,
-			Remove: remove,
-			Actor:  actor,
+			Add:        add,
+			Remove:     remove,
+			Actor:      actor,
+			IfMatchRev: ifMatchRev,
 		})
+		var revConflict *db.RevisionConflictError
 		switch {
+		case errors.As(err, &revConflict):
+			return nil, issueRevisionConflictError(revConflict.CurrentRevision)
 		case errors.Is(err, db.ErrLabelInvalid):
 			return nil, api.NewError(400, "validation", invalidLabelMessage, "", nil)
 		case errors.Is(err, db.ErrNotFound):
@@ -202,6 +218,10 @@ func removeLabelHandler(cfg ServerConfig) func(context.Context, *api.RemoveLabel
 		if err != nil {
 			return nil, err
 		}
+		ifMatchRev, err := parseOptionalIfMatchRevision(in.IfMatch)
+		if err != nil {
+			return nil, err
+		}
 		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
 		if err != nil {
 			return nil, err
@@ -211,11 +231,15 @@ func removeLabelHandler(cfg ServerConfig) func(context.Context, *api.RemoveLabel
 		}
 
 		ev := db.LabelEventParams{
-			EventType: "issue.unlabeled",
-			Label:     in.Label,
-			Actor:     actor,
+			EventType:  "issue.unlabeled",
+			Label:      in.Label,
+			Actor:      actor,
+			IfMatchRev: ifMatchRev,
 		}
 		evt, err := cfg.DB.RemoveLabelAndEvent(ctx, issue.ID, ev)
+		if conflict, ok := errors.AsType[*db.RevisionConflictError](err); ok {
+			return nil, issueRevisionConflictError(conflict.CurrentRevision)
+		}
 		if errors.Is(err, db.ErrNotFound) {
 			// Idempotent: the label was never attached → no-op envelope.
 			out := &api.MutationResponse{}

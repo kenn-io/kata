@@ -452,12 +452,16 @@ func federationEventStamp(ctx context.Context, tx *sql.Tx, projectID int64, even
 }
 
 func (m *federationMaterialization) apply(ctx context.Context, tx *sql.Tx, projectID int64, validator *db.CronReplayValidator) error {
+	return m.applyWithBumped(ctx, tx, projectID, validator, map[int64]struct{}{})
+}
+
+func (m *federationMaterialization) applyWithBumped(ctx context.Context, tx *sql.Tx, projectID int64, validator *db.CronReplayValidator, bumped map[int64]struct{}) error {
 	if m.cronAffected {
 		if err := db.MaterializeCronDefinitions(ctx, tx, projectID, m.binding.HubProjectUID, m.projection, validator); err != nil {
 			return err
 		}
 	}
-	changedIDs, err := reconcileFederatedIssuesFromRows(ctx, tx, projectID, m.projection, m.issueRows)
+	changedIDs, err := reconcileFederatedIssuesFromRows(ctx, tx, projectID, m.projection, m.issueRows, bumped)
 	if err != nil {
 		return err
 	}
@@ -473,11 +477,11 @@ func (m *federationMaterialization) apply(ctx context.Context, tx *sql.Tx, proje
 	if err := reconcileFederatedCommentsFromRows(ctx, tx, m.issueIDs, m.projection, m.commentRows); err != nil {
 		return err
 	}
-	if err := reconcileFederatedLabelsFromRows(ctx, tx, m.issueIDs, m.projection, m.labelRows); err != nil {
+	if err := reconcileFederatedLabelsFromRows(ctx, tx, m.issueIDs, m.projection, m.labelRows, bumped); err != nil {
 		return err
 	}
 	if m.linkProjects != nil {
-		if err := reconcileFederatedLinkRows(ctx, tx, m.links, m.linkIDs, m.linkRows); err != nil {
+		if err := reconcileFederatedLinkRows(ctx, tx, m.links, m.linkIDs, m.linkRows, bumped); err != nil {
 			return err
 		}
 	}
@@ -512,7 +516,8 @@ func applyUnjoinedMovedIssue(ctx context.Context, tx *sql.Tx, projectID int64, i
 			delete(m.labelRows, key)
 		}
 	}
-	changed, err := reconcileFederatedIssuesFromRows(ctx, tx, projectID, m.projection, m.issueRows)
+	bumped := map[int64]struct{}{}
+	changed, err := reconcileFederatedIssuesFromRows(ctx, tx, projectID, m.projection, m.issueRows, bumped)
 	if err != nil {
 		return err
 	}
@@ -520,7 +525,7 @@ func applyUnjoinedMovedIssue(ctx context.Context, tx *sql.Tx, projectID int64, i
 	if err := reconcileFederatedCommentsFromRows(ctx, tx, m.issueIDs, m.projection, m.commentRows); err != nil {
 		return err
 	}
-	return reconcileFederatedLabelsFromRows(ctx, tx, m.issueIDs, m.projection, m.labelRows)
+	return reconcileFederatedLabelsFromRows(ctx, tx, m.issueIDs, m.projection, m.labelRows, bumped)
 }
 
 // prepareRows compares against persisted values, rather than a previous fold:
