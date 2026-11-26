@@ -2,18 +2,21 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/federationsigning"
 	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
+	"go.kenn.io/kata/internal/rootbridge"
 	"go.kenn.io/kata/internal/telemetry"
 )
 
@@ -114,8 +117,19 @@ enrollment_id = 2
 key_file = %q
 `, keyFile, keyFile)
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(body), 0600))
-	err := runDaemonWithListen(t.Context(), "", false, false)
+	var externalRootStarted atomic.Bool
+	originalRun := runExternalRootRunner
+	runExternalRootRunner = func(ctx context.Context, _ *rootbridge.Runner) error {
+		externalRootStarted.Store(true)
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	t.Cleanup(func() { runExternalRootRunner = originalRun })
+	var diagnostics bytes.Buffer
+	err := runDaemonProcess(t.Context(), "", false, false, nil, &diagnostics)
 	require.ErrorIs(t, err, signingpolicy.ErrSharedSecret)
 	require.ErrorContains(t, err, "key-a")
 	require.ErrorContains(t, err, "key-b")
+	require.False(t, externalRootStarted.Load(), "background workers must not start before fallible startup initialization completes")
+	require.NotContains(t, diagnostics.String(), "database is closed")
 }
