@@ -330,7 +330,7 @@
   }
 
   .complete-message textarea:focus {
-    outline: 2px solid var(--focus-ring);
+    outline: var(--focus-ring);
     outline-offset: 1px;
   }
 </style>

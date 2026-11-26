@@ -516,6 +516,20 @@ describe('IssueBoard density, collapsing, and comments', () => {
     expect(within(card).queryByText('user-b')).toBeNull()
   })
 
+  it('says what each empty column is missing, and offers collapse only where it saves space', () => {
+    renderBoard({ issues: [], onToggleColumn: vi.fn() })
+
+    expect(within(column('Open')).getByText('No open tasks')).toBeTruthy()
+    expect(within(column('In progress')).getByText('Nothing claimed')).toBeTruthy()
+    expect(within(column('Needs attention')).getByText('Nothing needs you')).toBeTruthy()
+    expect(within(column('Done')).getByText('Nothing done yet')).toBeTruthy()
+    // With every column empty, narrowing three of them would hide nothing.
+    expect(
+      screen.getAllByRole('button', { name: /^Collapse/ }).map((button) => button.textContent),
+    ).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'Collapse Done' })).toBeTruthy()
+  })
+
   it('offers to collapse Done and empty columns, and a collapsed column still takes drops', async () => {
     const props = renderBoard({
       issues: [triage, shipped],

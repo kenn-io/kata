@@ -47,3 +47,20 @@ test('a card opened on a phone fills the screen with a finger-sized close button
   await close.click()
   await expect(drawer).toBeHidden()
 })
+
+test('a keyboard-focused board card shows the focus ring', async ({ page, kata }) => {
+  const credentials = await kata.launch(page)
+  const issue = await kata.seedIssue(page, credentials, { title: 'Focusable board card' })
+  await page.goto(`${kata.origin}/kata?scope=${kata.projectUID}&layout=board`)
+
+  const card = page.getByRole('button', { name: issue.title, exact: true })
+  await expect(card).toBeVisible()
+  await page.keyboard.press('Tab')
+  await card.focus()
+  await page.keyboard.press('ArrowDown')
+
+  // An invalid outline value is dropped, leaving keyboard users no ring.
+  await expect
+    .poll(() => card.evaluate((element) => getComputedStyle(element).outlineStyle))
+    .not.toBe('none')
+})

@@ -6,6 +6,7 @@
     EmptyState,
     MEDIA,
     IconButton,
+    Checkbox,
     PageHeader,
     SegmentedControl,
     SidebarToggle,
@@ -16,9 +17,6 @@
     type TypeaheadOption,
   } from '@kenn-io/kit-ui'
   import KanbanIcon from '@lucide/svelte/icons/square-kanban'
-  import Rows2Icon from '@lucide/svelte/icons/rows-2'
-  import SparklesIcon from '@lucide/svelte/icons/sparkles'
-  import Rows4Icon from '@lucide/svelte/icons/rows-4'
   import ListIcon from '@lucide/svelte/icons/list'
   import LayoutPanelLeftIcon from '@lucide/svelte/icons/layout-panel-left'
   import LayoutPanelTopIcon from '@lucide/svelte/icons/layout-panel-top'
@@ -60,6 +58,7 @@
     type Preferences,
   } from '../lib/state/preferences'
   import AccessManagement from './AccessManagement.svelte'
+  import DisplayMenu from './DisplayMenu.svelte'
   import IssueBoard from './IssueBoard.svelte'
   import type { MutationContext, MutationResult } from '../lib/mutations/controller'
   import CredentialAudit from './CredentialAudit.svelte'
@@ -1194,40 +1193,31 @@
     <div class="board-header">
       <PageHeader level={2} title={scopeLabel()}>
         {#snippet actions()}
-          <SegmentedControl
-            class="density-toggle"
-            ariaLabel="Card density"
-            value={preferences.boardCompact ? 'compact' : 'comfortable'}
-            options={[
-              { value: 'comfortable', label: 'Comfortable cards', title: 'Comfortable cards' },
-              { value: 'compact', label: 'Compact cards', title: 'Compact cards: one line each' },
-            ]}
-            onchange={(value) =>
-              onPreferencesChange({ ...preferences, boardCompact: value === 'compact' })}
-          >
-            {#snippet segment(option)}
-              {#if option.value === 'compact'}
-                <Rows4Icon size={14} strokeWidth={1.8} aria-hidden="true" />
-              {:else}
-                <Rows2Icon size={14} strokeWidth={1.8} aria-hidden="true" />
-              {/if}
-            {/snippet}
-          </SegmentedControl>
-          <IconButton
-            ariaLabel="Highlight changes by others"
-            ariaPressed={preferences.boardHighlightRemote}
-            title={preferences.boardHighlightRemote
-              ? 'Highlighting cards others move or add (click to turn off)'
-              : 'Not highlighting cards others move or add (click to turn on)'}
-            onclick={() =>
-              onPreferencesChange({
-                ...preferences,
-                boardHighlightRemote: !preferences.boardHighlightRemote,
-              })}
-          >
-            <SparklesIcon size={15} strokeWidth={1.8} aria-hidden="true" />
-          </IconButton>
           {@render layoutControl()}
+          <DisplayMenu>
+            <div class="display-menu__section">
+              <div class="display-menu__title">Cards</div>
+              <SegmentedControl
+                ariaLabel="Cards"
+                options={[
+                  { value: 'comfortable', label: 'Comfortable' },
+                  { value: 'compact', label: 'Compact' },
+                ]}
+                value={preferences.boardCompact ? 'compact' : 'comfortable'}
+                onchange={(value) =>
+                  onPreferencesChange({ ...preferences, boardCompact: value === 'compact' })}
+                block
+              />
+            </div>
+            <div class="display-menu__section">
+              <Checkbox
+                checked={preferences.boardHighlightRemote}
+                label="Highlight changes by others"
+                onchange={(checked) =>
+                  onPreferencesChange({ ...preferences, boardHighlightRemote: checked })}
+              />
+            </div>
+          </DisplayMenu>
         {/snippet}
       </PageHeader>
     </div>

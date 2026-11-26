@@ -2,7 +2,7 @@
   import {
     Button,
     FlashBanner,
-    KbdBadge,
+    Chip,
     Menu,
     MenuContent,
     MenuItem,
@@ -10,7 +10,6 @@
     showFlash,
     type MenuAnchorPoint,
   } from '@kenn-io/kit-ui'
-  import { hashColor } from '@kenn-io/kit-ui/utils/color-hash'
   import CalendarIcon from '@lucide/svelte/icons/calendar'
   import CirclePauseIcon from '@lucide/svelte/icons/circle-pause'
   import HourglassIcon from '@lucide/svelte/icons/hourglass'
@@ -183,6 +182,14 @@
     }),
   )
   let collapsedSet = $derived(new Set(collapsedColumns))
+  // Narrowing empty columns helps only when other columns have cards to show.
+  let boardEmpty = $derived(board.columns.every((column) => column.total === 0))
+  const emptyText: Record<BoardColumnID, string> = {
+    open: 'No open tasks',
+    'in-progress': 'Nothing claimed',
+    attention: 'Nothing needs you',
+    done: 'Nothing done yet',
+  }
   let issuesByUID = $derived(new Map(issues.map((issue) => [issue.uid, issue])))
   const today = localDateString()
 
@@ -531,21 +538,23 @@
   aria-describedby={helpID}
   bind:this={boardElement}
 >
-  <p class="board-note" class:board-note--hint={!moveBlockedReason} id={helpID}>
-    {#if moveBlockedReason}
+  {#if moveBlockedReason}
+    <p class="board-note" id={helpID}>
       <OctagonAlertIcon size={12} strokeWidth={2} aria-hidden="true" />
       {moveBlockedReason}
-    {:else}
-      Drag cards between columns, or focus a card and press
-      <KbdBadge keys={['Alt', '←']} joiner="plus" ariaLabel="Alt plus Left arrow" /> or
-      <KbdBadge keys={['Alt', '→']} joiner="plus" ariaLabel="Alt plus Right arrow" />.
-    {/if}
-  </p>
+    </p>
+  {:else}
+    <!-- Cards also advertise the shortcuts through aria-keyshortcuts. -->
+    <p class="kit-sr-only" id={helpID}>
+      Drag cards between columns, or focus a card and press Alt plus Left arrow or Alt plus Right
+      arrow to move it.
+    </p>
+  {/if}
   <div class="board-columns">
     {#each board.columns as column (column.id)}
       {@const headingID = `board-heading-${column.id}`}
       {@const collapsed = collapsedSet.has(column.id)}
-      {@const canCollapse = column.id === 'done' || column.total === 0}
+      {@const canCollapse = column.id === 'done' || (column.total === 0 && !boardEmpty)}
       <section
         class="board-column"
         class:collapsed
@@ -600,7 +609,7 @@
           <!-- Collapsed: the strip keeps its count and still accepts drops. -->
         {:else if column.issues.length === 0}
           <p class="column-empty">
-            {column.id === 'done' ? 'Nothing done yet' : 'No cards'}
+            {emptyText[column.id]}
           </p>
         {:else}
           <ul class="column-cards" aria-labelledby={headingID}>
@@ -724,7 +733,7 @@
                       </span>
                     {/if}
                     {#each extraLabels as label (label)}
-                      <span class="meta label" style:--label-color={hashColor(label)}>{label}</span>
+                      <Chip size="xs" tone="neutral">{label}</Chip>
                     {/each}
                     {#if issue.owner}
                       <span class="meta owner"
@@ -953,10 +962,9 @@
     display: flex;
     align-items: center;
     gap: var(--space-3);
+    /* Every header is as tall as one with a collapse button, so titles line up. */
+    min-height: calc(22px + 2 * var(--space-3));
     padding: var(--space-3) var(--space-4);
-    border-top: 2px solid var(--column-color);
-    border-start-start-radius: var(--radius-md);
-    border-start-end-radius: var(--radius-md);
   }
 
   .column-toggle {
@@ -980,7 +988,7 @@
   }
 
   .column-toggle:focus-visible {
-    outline: 2px solid var(--focus-ring);
+    outline: var(--focus-ring);
     outline-offset: 1px;
   }
 
@@ -1073,8 +1081,7 @@
   /* Subtasks sit under their parent, indented one step per level. */
   .card.child {
     margin-inline-start: calc(var(--depth) * var(--space-5));
-    border-inline-start: 3px solid
-      color-mix(in srgb, var(--accent-purple) 45%, var(--border-default));
+    border-inline-start: 3px solid var(--border-default);
     border-start-start-radius: 0;
     border-end-start-radius: 0;
   }
@@ -1119,7 +1126,7 @@
   }
 
   .card-open:focus-visible {
-    outline: 2px solid var(--focus-ring);
+    outline: var(--focus-ring);
     outline-offset: 1px;
   }
 
@@ -1307,15 +1314,6 @@
     color: var(--accent-red);
   }
 
-  .meta.label {
-    padding: 0 6px;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--label-color) 12%, transparent);
-    /* Pull the hue toward the text color so every palette entry clears 4.5:1. */
-    color: color-mix(in srgb, var(--label-color) 55%, var(--text-primary));
-    line-height: 16px;
-  }
-
   /* Comment count: a tinted pill at the right of the detail row, shown only
      when an issue has comments. */
   .comment-pill {
@@ -1456,7 +1454,7 @@
   }
 
   .ask-field input:focus {
-    outline: 2px solid var(--focus-ring);
+    outline: var(--focus-ring);
     outline-offset: 1px;
   }
 
@@ -1483,7 +1481,7 @@
 
   .column-add:focus-visible,
   .add-card-input:focus {
-    outline: 2px solid var(--focus-ring);
+    outline: var(--focus-ring);
     outline-offset: 1px;
   }
 
@@ -1555,10 +1553,6 @@
   }
 
   @media (max-width: 640px) {
-    .board-note--hint {
-      display: none;
-    }
-
     .board-columns {
       padding-inline: var(--space-4);
       scroll-snap-type: x mandatory;

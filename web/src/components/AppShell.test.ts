@@ -225,7 +225,7 @@ describe('AppShell', () => {
       ).toBeTruthy()
     })
 
-    test('switches cards to compact from the density control and remembers it', async () => {
+    test('switches cards to compact from the Display menu and remembers it', async () => {
       const onPreferencesChange = vi.fn()
       render(AppShell, {
         props: {
@@ -239,9 +239,11 @@ describe('AppShell', () => {
         },
       })
 
+      // The board keeps its options in the same Display menu as the list.
+      await fireEvent.click(screen.getByRole('button', { name: 'Display' }))
       await fireEvent.click(
-        within(screen.getByRole('radiogroup', { name: 'Card density' })).getByRole('radio', {
-          name: 'Compact cards',
+        within(screen.getByRole('radiogroup', { name: 'Cards' })).getByRole('radio', {
+          name: 'Compact',
         }),
       )
 
@@ -250,7 +252,7 @@ describe('AppShell', () => {
       )
     })
 
-    test("turns highlights for other people's changes off from the board toolbar", async () => {
+    test("turns highlights for other people's changes off from the Display menu", async () => {
       const onPreferencesChange = vi.fn()
       render(AppShell, {
         props: {
@@ -264,8 +266,9 @@ describe('AppShell', () => {
         },
       })
 
-      const toggle = screen.getByRole('button', { name: 'Highlight changes by others' })
-      expect(toggle.getAttribute('aria-pressed')).toBe('true')
+      await fireEvent.click(screen.getByRole('button', { name: 'Display' }))
+      const toggle = screen.getByRole('checkbox', { name: 'Highlight changes by others' })
+      expect((toggle as HTMLInputElement).checked).toBe(true)
       await fireEvent.click(toggle)
 
       expect(onPreferencesChange).toHaveBeenCalledWith(

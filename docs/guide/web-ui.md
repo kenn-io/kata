@@ -1,7 +1,7 @@
 ---
 title: Web UI
 description: Browse and manage Kata projects and issues in the daemon-served browser application.
-last_edited: 2026-11-24
+last_edited: 2026-11-26
 ---
 
 # Web UI
@@ -175,8 +175,8 @@ the right of its detail row.
 
 The board updates live as people and agents change issues. A card that someone
 else moves or adds flashes purple for a moment; your own moves flash blue. Turn
-the purple highlight off or on with the **Highlight changes by others** button
-(the sparkles icon in the board's header); the browser remembers the choice.
+the purple highlight off or on with **Highlight changes by others** in the
+board's **Display** menu; the browser remembers the choice.
 
 An issue with subtasks is an epic: its card carries an **Epic** badge, and
 subtasks in the same column are listed directly under it, indented one step per
@@ -184,11 +184,11 @@ level. A subtask whose epic sits in another column shows that epic's ID beside
 its own. Subtasks still move on their own.
 
 Move a card by dragging it, from its actions menu (**…**), or by focusing it
-and pressing **Alt+←** or **Alt+→**, which skip Needs attention. Arrow keys move focus between cards and
-columns. A moved card flashes briefly where it lands, and a banner offers
+and pressing **Alt+←** or **Alt+→**, which skip Needs attention. Arrow keys move
+focus between cards and columns. A moved card flashes briefly where it lands, and a banner offers
 **Undo** for ten seconds when the move only claimed or released the issue;
 **Ctrl+Z** (**⌘Z** on macOS) undoes that move too, except inside a text field.
-Moves that reopen, close, flag, or clear attention have no Undo, because they
+Moves that reopen, close, or clear attention have no Undo, because they
 cannot be reversed exactly. Select a card to open its full detail in a side
 drawer; on a phone the drawer fills the screen. **Esc**, the close button, or
 the browser's back gesture closes it.
@@ -199,11 +199,12 @@ close the form. The board across all projects does not offer **Add card**,
 because it has no single project to add to. Read-only and stale sessions show
 the board but do not move cards.
 
-The **Card density** switch in the board's header chooses comfortable cards or
-compact cards, which show only the ID, priority, and title on one line. Done and
-any empty column have a collapse button in their header that shrinks the column
-to a narrow strip with its count; a collapsed column still accepts dropped
-cards. The browser remembers the density and collapsed columns.
+The board's **Display** menu, in the same place as the list's, chooses
+comfortable cards or compact cards, which show only the ID, priority, and title
+on one line. Done, and any empty column while other columns have cards, has a
+collapse button in its header that shrinks the column to a narrow strip with its
+count; a collapsed column still accepts dropped cards. The browser remembers
+these choices.
 
 ## Manage an issue
 
