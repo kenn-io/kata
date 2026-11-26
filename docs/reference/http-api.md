@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-24
+last_edited: 2026-11-26
 ---
 
 # HTTP API schema
@@ -377,6 +377,7 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
+| `0.72.0` | Forwarded hub requests report busy refusals as `429 server_busy` and preserve `Retry-After` hints. |
 | `0.71.0` | Federation event watches hold one request for many projects; event polls advertise `X-Kata-Federation-Watch-Max`. |
 | `0.70.0` | Added `PATCH /api/v1/projects/{project_id}/issues/{ref}/labels`, which applies `add` and `remove` label lists in one transaction and answers with the issue's resulting `labels`. |
 | `0.69.0` | Close responses can include a `parent_ready` issue reference. |
