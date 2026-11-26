@@ -174,9 +174,11 @@ func registerNotificationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			// compares exactly, so naming someone else never over-clears.
 			storedIfFrom := in.Body.IfFrom
 			if in.Body.IfFrom == actor {
-				if storedIfFrom, err = notificationMutationActorTx(ctx, tx, current.ProjectID, actor); err != nil {
+				mapped, err := notificationMutationActorTx(ctx, tx, current.ProjectID, actor)
+				if err != nil {
 					return nil, err
 				}
+				storedIfFrom = mapped
 			}
 			return clearNotificationIfFrom(current, to, in.Body.IfFrom, storedIfFrom), nil
 		})
