@@ -329,9 +329,16 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		ifMatchRev, err := parseOptionalIfMatchRevision(in.IfMatch)
+		if err != nil {
+			return nil, err
+		}
 		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
 		if err != nil {
 			return nil, err
+		}
+		if ifMatchRev != nil && issue.Revision != *ifMatchRev {
+			return nil, issueRevisionConflictError(issue.Revision)
 		}
 		if issue.Status == "open" {
 			out := &api.MutationResponse{}
@@ -346,10 +353,15 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		var changed bool
 		err = cfg.DB.RetryTransient(ctx, func() error {
 			var err error
-			updated, evt, changed, err = cfg.DB.ReopenIssue(ctx, issue.ID, actor)
+			updated, evt, changed, err = cfg.DB.ReopenIssueGuarded(ctx, db.ReopenIssueParams{
+				IssueID: issue.ID, Actor: actor, IfMatchRev: ifMatchRev,
+			})
 			return err
 		})
 		if err != nil {
+			if conflict, ok := errors.AsType[*db.RevisionConflictError](err); ok {
+				return nil, issueRevisionConflictError(conflict.CurrentRevision)
+			}
 			if apiErr := federationReadOnlyError(err); apiErr != nil {
 				return nil, apiErr
 			}

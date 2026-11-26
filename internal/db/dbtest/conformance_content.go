@@ -611,7 +611,7 @@ func checkChangeLabels(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	assert.True(t, after.UpdatedAt.Equal(touchedAt), "updated_at %v is the call's timestamp %s", after.UpdatedAt, addedAt)
 	assert.True(t, after.UpdatedAt.After(before.UpdatedAt), "updated_at must move")
-	assert.Equal(t, before.Revision, after.Revision, "label edits do not bump revision")
+	assert.Equal(t, before.Revision+1, after.Revision, "label edits advance revision")
 
 	eventsBeforeNoop := eventCount()
 	labels, events, err = store.ChangeLabelsAndEvents(ctx, settled.ID, params)
@@ -624,6 +624,7 @@ func checkChangeLabels(t *testing.T, store db.Storage) error {
 	unchanged, err := store.IssueByID(ctx, settled.ID)
 	require.NoError(t, err)
 	assert.True(t, unchanged.UpdatedAt.Equal(importedAt), "no-op call must not touch updated_at")
+	assert.Equal(t, settled.Revision, unchanged.Revision, "no-op call must not bump revision")
 
 	labels, events, err = store.ChangeLabelsAndEvents(ctx, issueID, db.ChangeLabelsParams{
 		Remove: []string{"ready-for-human"}, Actor: "label-author",

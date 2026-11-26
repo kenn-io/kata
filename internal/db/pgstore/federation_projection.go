@@ -464,7 +464,38 @@ type federatedMaterialization struct {
 	groupProjectIDs []int64
 	events          map[int64][]db.FoldEvent
 	existingIssues  map[string]federatedIssueRow
+	bumpedRevisions map[int64]struct{}
 	observeFold     func(projectID int64)
+}
+
+func (m *federatedMaterialization) markRevisionBumped(issueID int64) {
+	if m.bumpedRevisions == nil {
+		m.bumpedRevisions = map[int64]struct{}{}
+	}
+	m.bumpedRevisions[issueID] = struct{}{}
+}
+
+func (m *federatedMaterialization) bumpUnbumpedRevisionsTx(ctx context.Context, tx *sql.Tx, issueIDs []int64) error {
+	if len(issueIDs) == 0 {
+		return nil
+	}
+	var toBump []int64
+	for _, id := range issueIDs {
+		if _, already := m.bumpedRevisions[id]; already {
+			continue
+		}
+		toBump = append(toBump, id)
+	}
+	if len(toBump) == 0 {
+		return nil
+	}
+	if err := bumpIssueRevisionsTx(ctx, tx, toBump); err != nil {
+		return err
+	}
+	for _, id := range toBump {
+		m.markRevisionBumped(id)
+	}
+	return nil
 }
 
 func (m *federatedMaterialization) foldEvents(
@@ -581,14 +612,15 @@ func (s *Store) materializeFederatedProjectTx(
 		if err != nil {
 			return err
 		}
-		ids, err := s.reconcileFederatedIssues(ctx, tx, &federatedMaterialization{projectID: projectID, existingIssues: rows}, view)
+		sub := &federatedMaterialization{projectID: projectID, existingIssues: rows}
+		ids, err := s.reconcileFederatedIssues(ctx, tx, sub, view)
 		if err != nil {
 			return err
 		}
 		if err := reconcileFederatedComments(ctx, tx, projectID, ids, view, issue.UID); err != nil {
 			return err
 		}
-		return reconcileFederatedLabels(ctx, tx, projectID, ids, view, issue.UID)
+		return reconcileFederatedLabels(ctx, tx, projectID, ids, view, sub, issue.UID)
 	}, acceptedEventUIDs, func(project db.Project, reference *db.FederationMovedReference) (int64, error) {
 		payload := "{}"
 		var issueUID *string
@@ -643,7 +675,7 @@ func (s *Store) materializeFederatedProjectTx(
 	if err := reconcileFederatedComments(ctx, tx, projectID, issueIDs, projection); err != nil {
 		return err
 	}
-	if err := reconcileFederatedLabels(ctx, tx, projectID, issueIDs, projection); err != nil {
+	if err := reconcileFederatedLabels(ctx, tx, projectID, issueIDs, projection, m); err != nil {
 		return err
 	}
 	if reconcileLinks {
@@ -713,7 +745,7 @@ func (s *Store) reconcileFederatedIssues(
 				}
 				return nil, err
 			}
-			_, err := tx.ExecContext(ctx, `UPDATE issues SET short_id=$1,title=$2,body=$3,status=$4,
+			res, err := tx.ExecContext(ctx, `UPDATE issues SET short_id=$1,title=$2,body=$3,status=$4,
 closed_reason=$5,owner=$6,assignment_expires_on=$7,priority=$8,author=$9,created_at=$10,updated_at=$11,
 closed_at=$12,deleted_at=$13,metadata=$14,
 revision=revision+1,content_revision=content_revision+CASE
@@ -728,6 +760,9 @@ ROW($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
 				string(metadata), row.id)
 			if err != nil {
 				return nil, mapSQLError(err, nil)
+			}
+			if affected, aErr := res.RowsAffected(); aErr == nil && affected > 0 {
+				m.markRevisionBumped(row.id)
 			}
 			output[issueUID] = row.id
 			continue
@@ -745,6 +780,7 @@ created_at,updated_at,closed_at,deleted_at,metadata,revision
 		if err != nil {
 			return nil, mapSQLError(err, nil)
 		}
+		m.markRevisionBumped(issueID)
 		output[issueUID] = issueID
 	}
 	return output, nil
@@ -974,6 +1010,7 @@ func reconcileFederatedLabels(
 	projectID int64,
 	issueIDs map[string]int64,
 	projection db.FoldProjection,
+	m *federatedMaterialization,
 	scope ...string,
 ) error {
 	existing, err := federatedLabelKeys(ctx, tx, projectID, scope...)
@@ -988,6 +1025,7 @@ func reconcileFederatedLabels(
 		}
 		desired[federatedLabelKey{issueID: issueID, label: key.Label}] = struct{}{}
 	}
+	var changedIssues []int64
 	for key := range existing {
 		if len(scope) > 0 {
 			if _, ok := projection.Labels[db.FoldLabelKey{IssueUID: scope[0], Label: key.label}]; !ok {
@@ -1001,6 +1039,7 @@ func reconcileFederatedLabels(
 			`DELETE FROM issue_labels WHERE issue_id=$1 AND label=$2`, key.issueID, key.label); err != nil {
 			return mapSQLError(err, nil)
 		}
+		changedIssues = append(changedIssues, key.issueID)
 	}
 	for key := range desired {
 		if _, ok := existing[key]; ok {
@@ -1011,8 +1050,9 @@ func reconcileFederatedLabels(
 			key.issueID, key.label); err != nil {
 			return mapSQLError(err, nil)
 		}
+		changedIssues = append(changedIssues, key.issueID)
 	}
-	return nil
+	return m.bumpUnbumpedRevisionsTx(ctx, tx, changedIssues)
 }
 
 func federatedLabelKeys(

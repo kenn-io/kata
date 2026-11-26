@@ -22,6 +22,7 @@ type importIssueState struct {
 	healed              bool
 	presentationUpdated bool
 	sourceCurrent       bool
+	revisionBumped      bool
 }
 
 // ImportBatch atomically reconciles one normalized external issue batch.
@@ -59,6 +60,8 @@ func (s *Store) ImportBatch(
 		}
 
 		states := make(map[string]*importIssueState, len(attemptParams.Items))
+		bumpedRevisions := map[int64]struct{}{}
+		pendingRevisions := map[int64]struct{}{}
 		for _, item := range attemptParams.Items {
 			state, event, err := s.importIssue(ctx, tx, attemptParams, item, project)
 			if err != nil {
@@ -68,6 +71,9 @@ func (s *Store) ImportBatch(
 				events = append(events, *event)
 			}
 			states[item.ExternalID] = state
+			if state.created || state.revisionBumped {
+				bumpedRevisions[state.issue.ID] = struct{}{}
+			}
 			status := "unchanged"
 			switch {
 			case state.created:
@@ -100,6 +106,9 @@ func (s *Store) ImportBatch(
 				if err != nil {
 					return err
 				}
+				if len(labelEvents) > 0 {
+					pendingRevisions[state.issue.ID] = struct{}{}
+				}
 				events = append(events, labelEvents...)
 			}
 		}
@@ -121,8 +130,27 @@ func (s *Store) ImportBatch(
 			if err != nil {
 				return err
 			}
+			for _, ev := range linkEvents {
+				if ev.IssueID != nil {
+					pendingRevisions[*ev.IssueID] = struct{}{}
+				}
+				if ev.RelatedIssueID != nil {
+					pendingRevisions[*ev.RelatedIssueID] = struct{}{}
+				}
+			}
 			events = append(events, linkEvents...)
 			result.Links += count
+		}
+		if len(pendingRevisions) > 0 {
+			toBump := make([]int64, 0, len(pendingRevisions))
+			for id := range pendingRevisions {
+				if _, already := bumpedRevisions[id]; !already {
+					toBump = append(toBump, id)
+				}
+			}
+			if err := bumpIssueRevisionsTx(ctx, tx, toBump); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -305,7 +333,7 @@ func (s *Store) importIssue(
 		if err != nil {
 			return nil, nil, err
 		}
-		return &importIssueState{item: item, issue: updated, presentationUpdated: true, sourceCurrent: sourceCurrent}, &event, nil
+		return &importIssueState{item: item, issue: updated, presentationUpdated: true, sourceCurrent: sourceCurrent, revisionBumped: updated.Revision != existing.Revision}, &event, nil
 	}
 	if item.UpdatedAt.After(existing.UpdatedAt) {
 		updated, event, err := s.updateImportedIssue(ctx, tx, params, item, existing, project)
@@ -318,14 +346,14 @@ func (s *Store) importIssue(
 		}); err != nil {
 			return nil, nil, err
 		}
-		return &importIssueState{item: item, issue: updated, sourceNewer: true}, &event, nil
+		return &importIssueState{item: item, issue: updated, sourceNewer: true, revisionBumped: updated.Revision != existing.Revision}, &event, nil
 	}
 	if db.ImportOwnsSameSourceVersionStatus(params, mapping, existing, item) {
 		updated, event, err := s.updateImportedIssue(ctx, tx, params, db.ImportedStatusOnlyItem(existing, item), existing, project)
 		if err != nil {
 			return nil, nil, err
 		}
-		return &importIssueState{item: item, issue: updated, presentationUpdated: true, sourceCurrent: sourceCurrent}, &event, nil
+		return &importIssueState{item: item, issue: updated, presentationUpdated: true, sourceCurrent: sourceCurrent, revisionBumped: updated.Revision != existing.Revision}, &event, nil
 	}
 	if item.CreatedAt.Before(existing.CreatedAt) {
 		healed, event, err := s.healImportedCreatedAt(ctx, tx, params, item, existing, project)
@@ -438,7 +466,7 @@ func (s *Store) updateImportedIssue(
 		bump = `,content_revision=content_revision+1`
 	}
 	owner := db.NormalizeImportOwner(item.Owner)
-	if item.Status != existing.Status || !equalStringPointers(owner, existing.Owner) || (item.Status == "closed" && existing.AssignmentExpiresOn != nil) {
+	if item.Status != existing.Status || !equalStringPointers(owner, existing.Owner) || !equalIntPointers(item.Priority, existing.Priority) || (item.Status == "closed" && existing.AssignmentExpiresOn != nil) {
 		bump += `,revision=revision+1`
 	}
 	var closedAt any

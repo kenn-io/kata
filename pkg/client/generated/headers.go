@@ -123,6 +123,11 @@ type EditIssueHeaders struct {
 
 	// XKataProjectAliasKind Workspace alias kind; required with X-Kata-Project-Alias
 	XKataProjectAliasKind *string `json:"X-Kata-Project-Alias-Kind,omitempty"`
+	IfMatch               *string `json:"If-Match,omitempty"`
+}
+
+type AssignIssueHeaders struct {
+	IfMatch *string `json:"If-Match,omitempty"`
 }
 
 type ClaimIssueHeaders struct {
@@ -144,8 +149,20 @@ type MoveIssueHeaders struct {
 	IfMatch *string `json:"If-Match,omitempty"`
 }
 
+type SetIssuePriorityHeaders struct {
+	IfMatch *string `json:"If-Match,omitempty"`
+}
+
 type PurgeIssueHeaders struct {
 	XKataConfirm *string `json:"X-Kata-Confirm,omitempty"`
+}
+
+type ReopenIssueHeaders struct {
+	IfMatch *string `json:"If-Match,omitempty"`
+}
+
+type UnassignIssueHeaders struct {
+	IfMatch *string `json:"If-Match,omitempty"`
 }
 
 type CreateCommentHeaders struct {
@@ -163,6 +180,7 @@ type UpdateLabelsHeaders struct {
 
 	// XKataProjectAliasKind Workspace alias kind; required with X-Kata-Project-Alias
 	XKataProjectAliasKind *string `json:"X-Kata-Project-Alias-Kind,omitempty"`
+	IfMatch               *string `json:"If-Match,omitempty"`
 }
 
 type AddLabelHeaders struct {
@@ -171,6 +189,11 @@ type AddLabelHeaders struct {
 
 	// XKataProjectAliasKind Workspace alias kind; required with X-Kata-Project-Alias
 	XKataProjectAliasKind *string `json:"X-Kata-Project-Alias-Kind,omitempty"`
+	IfMatch               *string `json:"If-Match,omitempty"`
+}
+
+type RemoveLabelHeaders struct {
+	IfMatch *string `json:"If-Match,omitempty"`
 }
 
 type GetIssueLeaseStatusHeaders struct {
@@ -191,6 +214,14 @@ type ReleaseIssueLeaseHeaders struct {
 
 type RenewIssueLeaseHeaders struct {
 	Authorization *string `json:"Authorization,omitempty"`
+}
+
+type CreateLinkHeaders struct {
+	IfMatch *string `json:"If-Match,omitempty"`
+}
+
+type DeleteLinkHeaders struct {
+	IfMatch *string `json:"If-Match,omitempty"`
 }
 
 type PatchIssueMetadataHeaders struct {

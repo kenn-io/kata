@@ -56,6 +56,13 @@ func (d *Store) replaceParentAndEventsTx(
 		return result, err
 	}
 
+	eventIssue, projectName, err := lookupIssueForEvent(ctx, tx, input.Link.FromIssueID)
+	if err != nil {
+		return result, err
+	}
+	if input.IfMatchRev != nil && *input.IfMatchRev != eventIssue.Revision {
+		return result, &db.RevisionConflictError{CurrentRevision: eventIssue.Revision}
+	}
 	oldLink, err := scanLink(tx.QueryRowContext(ctx,
 		linkSelect+` WHERE from_issue_id = ? AND type = 'parent'`, input.Link.FromIssueID))
 	if errors.Is(err, db.ErrNotFound) {
@@ -69,11 +76,6 @@ func (d *Store) replaceParentAndEventsTx(
 	}
 	if oldLink.ID != input.ExpectedParentLinkID || oldLink.ToIssueID != input.ExpectedParentIssueID {
 		return result, db.ErrParentMismatch
-	}
-
-	eventIssue, projectName, err := lookupIssueForEvent(ctx, tx, input.Link.FromIssueID)
-	if err != nil {
-		return result, err
 	}
 	actor := input.LinkEvent.Actor
 	if actor == "" {
@@ -151,8 +153,11 @@ func (d *Store) replaceParentAndEventsTx(
 	if err != nil {
 		return result, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE issues SET updated_at = ? WHERE id = ?`, updatedAt, eventIssue.ID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE issues SET updated_at = ?, revision = revision + 1 WHERE id = ?`, updatedAt, eventIssue.ID); err != nil {
 		return result, fmt.Errorf("touch replacement issue: %w", err)
+	}
+	if err := bumpIssueRevisionsTx(ctx, tx, []int64{oldLink.ToIssueID, result.Link.ToIssueID}); err != nil {
+		return result, err
 	}
 	if err := tx.Commit(); err != nil {
 		return result, fmt.Errorf("commit parent replacement: %w", err)

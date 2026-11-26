@@ -47,6 +47,9 @@ func (s *Store) AddLabelAndEvent(
 		if err != nil {
 			return err
 		}
+		if params.IfMatchRev != nil && *params.IfMatchRev != issue.Revision {
+			return &db.RevisionConflictError{CurrentRevision: issue.Revision}
+		}
 		params.Actor, err = effectiveLocalMutationActorTx(ctx, tx, project.ID, params.Actor)
 		if err != nil {
 			return err
@@ -92,6 +95,9 @@ func (s *Store) RemoveLabelAndEvent(
 		if err != nil {
 			return err
 		}
+		if params.IfMatchRev != nil && *params.IfMatchRev != issue.Revision {
+			return &db.RevisionConflictError{CurrentRevision: issue.Revision}
+		}
 		params.Actor, err = effectiveLocalMutationActorTx(ctx, tx, project.ID, params.Actor)
 		if err != nil {
 			return err
@@ -124,6 +130,9 @@ func (s *Store) ChangeLabelsAndEvents(
 		issue, project, err := lockedIssueTx(ctx, tx, issueID, false)
 		if err != nil {
 			return err
+		}
+		if params.IfMatchRev != nil && *params.IfMatchRev != issue.Revision {
+			return &db.RevisionConflictError{CurrentRevision: issue.Revision}
 		}
 		actor, err := effectiveLocalMutationActorTx(ctx, tx, project.ID, params.Actor)
 		if err != nil {
@@ -236,7 +245,7 @@ func (s *Store) insertLabelEventTx(
 
 func touchIssueTx(ctx context.Context, tx *sql.Tx, issueID int64, updatedAt string) error {
 	_, err := tx.ExecContext(ctx,
-		`UPDATE issues SET updated_at = $1 WHERE id = $2`, updatedAt, issueID)
+		`UPDATE issues SET updated_at = $1, revision = revision + 1 WHERE id = $2`, updatedAt, issueID)
 	return mapSQLError(err, nil)
 }
 

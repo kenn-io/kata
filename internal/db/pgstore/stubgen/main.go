@@ -375,6 +375,7 @@ var alreadyImplemented = map[string]bool{
 	"RenameProjectAndEvent":                true, // projects.go
 	"RelationshipsByIssues":                true, // relationship_queries.go
 	"ReopenIssue":                          true, // issue_lifecycle.go
+	"ReopenIssueGuarded":                   true, // issue_lifecycle.go
 	"ResolveAPIToken":                      true, // tokens.go
 	"ResolveExternalFieldConflict":         true, // external_roots.go
 	"ResolvePendingClaim":                  true, // claims_pending.go
@@ -400,8 +401,10 @@ var alreadyImplemented = map[string]bool{
 	"UnresolvedClaimViolationsForIssue":    true, // claim_violations.go
 	"UnresolvedClaimViolationsForProject":  true, // claim_violations.go
 	"UpdateOwner":                          true, // issue_lifecycle.go
+	"UpdateOwnerGuarded":                   true, // issue_lifecycle.go
 	"UnassignOwner":                        true, // issue_lifecycle.go
 	"UpdatePriority":                       true, // issue_lifecycle.go
+	"UpdatePriorityGuarded":                true, // issue_lifecycle.go
 	"UpsertClaimCache":                     true, // claims_pending.go
 	"UpsertImportMapping":                  true, // import_mappings.go
 	"UpsertExternalCommentProjection":      true, // external_roots.go

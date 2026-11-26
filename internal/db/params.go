@@ -361,6 +361,11 @@ type EditIssueAtomicParams struct {
 	// legacy unrestricted behavior for non-scoped clients.
 	ExpectedLinkProjectUIDs map[int64]string
 
+	// IfMatchRev, when non-nil, must equal the issue's current revision inside
+	// the mutation transaction or nothing is written and *RevisionConflictError
+	// is returned. nil = unconditional.
+	IfMatchRev *int64
+
 	// ExpectedContentRevision, when non-nil, must equal the issue's current
 	// content_revision inside the mutation transaction or nothing is written
 	// and *ContentRevisionConflictError is returned. nil = unconditional.
@@ -428,6 +433,7 @@ type LinkEventParams struct {
 	ToShortID    string // payload field; matches the OTHER endpoint's short_id
 	ToUID        string // payload field; canonical pointer to the other endpoint
 	Actor        string
+	IfMatchRev   *int64 // optional optimistic-concurrency check against EventIssueID's revision
 }
 
 // ReplaceParentAndEventsParams atomically swaps one existing parent link for
@@ -438,6 +444,7 @@ type ReplaceParentAndEventsParams struct {
 	Link                  CreateLinkParams
 	UnlinkEvent           LinkEventParams
 	LinkEvent             LinkEventParams
+	IfMatchRev            *int64
 }
 
 // LabelEventParams describes the event-emission side of a label mutation. The
@@ -445,17 +452,43 @@ type ReplaceParentAndEventsParams struct {
 // (label insert/delete) from the event metadata so the handler can emit the
 // matching issue.labeled / issue.unlabeled event without an extra round trip.
 type LabelEventParams struct {
-	EventType string // "issue.labeled" | "issue.unlabeled"
-	Label     string // the label being added/removed (used for both DB op and event payload)
-	Actor     string
+	EventType  string // "issue.labeled" | "issue.unlabeled"
+	Label      string // the label being added/removed (used for both DB op and event payload)
+	Actor      string
+	IfMatchRev *int64 // optional optimistic-concurrency check against issue.revision
 }
 
 // ChangeLabelsParams removes and adds labels on one issue in one transaction.
 // Callers pass disjoint Add and Remove lists.
 type ChangeLabelsParams struct {
-	Add    []string
-	Remove []string
-	Actor  string
+	Add        []string
+	Remove     []string
+	Actor      string
+	IfMatchRev *int64 // optional optimistic-concurrency check against issue.revision
+}
+
+// ReopenIssueParams carries inputs for ReopenIssueGuarded.
+type ReopenIssueParams struct {
+	IssueID    int64
+	Actor      string
+	IfMatchRev *int64
+}
+
+// UpdateOwnerParams carries inputs for UpdateOwnerGuarded (assign and unassign).
+type UpdateOwnerParams struct {
+	IssueID       int64
+	Owner         *string
+	Actor         string
+	ExpectedOwner *string
+	IfMatchRev    *int64
+}
+
+// UpdatePriorityParams carries inputs for UpdatePriorityGuarded.
+type UpdatePriorityParams struct {
+	IssueID    int64
+	Priority   *int64
+	Actor      string
+	IfMatchRev *int64
 }
 
 // AliasRow is the slim view of a project alias the hook resolver needs.

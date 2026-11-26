@@ -1035,7 +1035,7 @@ func (d *Store) enableProjectFederationTx(
 			if err != nil {
 				return db.FederationBinding{}, err
 			}
-			if err := reconcileFederatedLinkGroup(ctx, tx, groupProjectIDs, groupProjectIDs, 0, nil); err != nil {
+			if err := reconcileFederatedLinkGroup(ctx, tx, groupProjectIDs, groupProjectIDs, 0, nil, nil); err != nil {
 				return db.FederationBinding{}, err
 			}
 		}
@@ -1361,7 +1361,8 @@ func (d *Store) materializeFederatedProjectTx(
 			return err
 		}
 	}
-	issueIDs, err := reconcileFederatedIssues(ctx, tx, projectID, projection)
+	bumped := map[int64]struct{}{}
+	issueIDs, err := reconcileFederatedIssues(ctx, tx, projectID, projection, bumped)
 	if err != nil {
 		return err
 	}
@@ -1371,11 +1372,11 @@ func (d *Store) materializeFederatedProjectTx(
 	if err := reconcileFederatedComments(ctx, tx, projectID, issueIDs, projection); err != nil {
 		return err
 	}
-	if err := reconcileFederatedLabels(ctx, tx, projectID, issueIDs, projection); err != nil {
+	if err := reconcileFederatedLabels(ctx, tx, projectID, issueIDs, projection, bumped); err != nil {
 		return err
 	}
 	if reconcileLinks {
-		if err := reconcileFederatedLinks(ctx, tx, binding, projectID, issueIDs); err != nil {
+		if err := reconcileFederatedLinks(ctx, tx, binding, projectID, issueIDs, bumped); err != nil {
 			return err
 		}
 	}
@@ -2087,16 +2088,16 @@ func clearFederatedProjection(ctx context.Context, tx *sql.Tx, projectID int64) 
 }
 
 func reconcileFederatedIssues(
-	ctx context.Context, tx *sql.Tx, projectID int64, projection db.FoldProjection,
+	ctx context.Context, tx *sql.Tx, projectID int64, projection db.FoldProjection, bumped map[int64]struct{},
 ) (map[string]int64, error) {
 	existing, err := federatedIssueRowsByUID(ctx, tx, projectID, nil)
 	if err != nil {
 		return nil, err
 	}
-	return reconcileFederatedIssuesFromRows(ctx, tx, projectID, projection, existing)
+	return reconcileFederatedIssuesFromRows(ctx, tx, projectID, projection, existing, bumped)
 }
 
-func reconcileFederatedIssuesFromRows(ctx context.Context, tx *sql.Tx, projectID int64, projection db.FoldProjection, existing map[string]federatedIssueRow) (map[string]int64, error) {
+func reconcileFederatedIssuesFromRows(ctx context.Context, tx *sql.Tx, projectID int64, projection db.FoldProjection, existing map[string]federatedIssueRow, bumped map[int64]struct{}) (map[string]int64, error) {
 	out := map[string]int64{}
 	for _, issue := range projection.SortedIssues() {
 		uid := issue.UID
@@ -2130,7 +2131,7 @@ func reconcileFederatedIssuesFromRows(ctx context.Context, tx *sql.Tx, projectID
 			args = append(args, issue.Title, issue.Body)
 			args = append(args, row.id)
 			args = append(args, issueValues...)
-			_, err := tx.ExecContext(ctx, `
+			res, err := tx.ExecContext(ctx, `
 					UPDATE issues
 					   SET short_id = ?,
 					       title = ?,
@@ -2172,6 +2173,11 @@ func reconcileFederatedIssuesFromRows(ctx context.Context, tx *sql.Tx, projectID
 			if err != nil {
 				return nil, fmt.Errorf("update federated issue %s: %w", uid, err)
 			}
+			if bumped != nil {
+				if affected, aErr := res.RowsAffected(); aErr == nil && affected > 0 {
+					bumped[row.id] = struct{}{}
+				}
+			}
 			out[uid] = row.id
 			continue
 		}
@@ -2189,6 +2195,9 @@ func reconcileFederatedIssuesFromRows(ctx context.Context, tx *sql.Tx, projectID
 		id, err := res.LastInsertId()
 		if err != nil {
 			return nil, err
+		}
+		if bumped != nil {
+			bumped[id] = struct{}{}
 		}
 		out[uid] = id
 	}
@@ -2448,17 +2457,42 @@ type federatedLabelKey struct {
 	label   string
 }
 
+func bumpUnbumpedRevisionsTx(ctx context.Context, tx *sql.Tx, issueIDs []int64, bumped map[int64]struct{}) error {
+	if len(issueIDs) == 0 {
+		return nil
+	}
+	var toBump []int64
+	for _, id := range issueIDs {
+		if _, already := bumped[id]; already {
+			continue
+		}
+		toBump = append(toBump, id)
+	}
+	if len(toBump) == 0 {
+		return nil
+	}
+	if err := bumpIssueRevisionsTx(ctx, tx, toBump); err != nil {
+		return err
+	}
+	if bumped != nil {
+		for _, id := range toBump {
+			bumped[id] = struct{}{}
+		}
+	}
+	return nil
+}
+
 func reconcileFederatedLabels(
-	ctx context.Context, tx *sql.Tx, projectID int64, issueIDs map[string]int64, projection db.FoldProjection,
+	ctx context.Context, tx *sql.Tx, projectID int64, issueIDs map[string]int64, projection db.FoldProjection, bumped map[int64]struct{},
 ) error {
 	existing, err := federatedLabelKeys(ctx, tx, projectID, nil)
 	if err != nil {
 		return err
 	}
-	return reconcileFederatedLabelsFromRows(ctx, tx, issueIDs, projection, existing)
+	return reconcileFederatedLabelsFromRows(ctx, tx, issueIDs, projection, existing, bumped)
 }
 
-func reconcileFederatedLabelsFromRows(ctx context.Context, tx *sql.Tx, issueIDs map[string]int64, projection db.FoldProjection, existing map[federatedLabelKey]struct{}) error {
+func reconcileFederatedLabelsFromRows(ctx context.Context, tx *sql.Tx, issueIDs map[string]int64, projection db.FoldProjection, existing map[federatedLabelKey]struct{}, bumped map[int64]struct{}) error {
 	desired := map[federatedLabelKey]struct{}{}
 	for _, key := range projection.PresentLabels() {
 		issueID, ok := issueIDs[key.IssueUID]
@@ -2467,6 +2501,7 @@ func reconcileFederatedLabelsFromRows(ctx context.Context, tx *sql.Tx, issueIDs 
 		}
 		desired[federatedLabelKey{issueID: issueID, label: key.Label}] = struct{}{}
 	}
+	var changedIssues []int64
 	for key := range existing {
 		if _, ok := desired[key]; ok {
 			continue
@@ -2475,6 +2510,7 @@ func reconcileFederatedLabelsFromRows(ctx context.Context, tx *sql.Tx, issueIDs 
 			`DELETE FROM issue_labels WHERE issue_id = ? AND label = ?`, key.issueID, key.label); err != nil {
 			return fmt.Errorf("delete stale federated label %s: %w", key.label, err)
 		}
+		changedIssues = append(changedIssues, key.issueID)
 	}
 	for key := range desired {
 		if _, ok := existing[key]; ok {
@@ -2485,8 +2521,9 @@ func reconcileFederatedLabelsFromRows(ctx context.Context, tx *sql.Tx, issueIDs 
 			key.issueID, key.label); err != nil {
 			return fmt.Errorf("insert federated label %s: %w", key.label, err)
 		}
+		changedIssues = append(changedIssues, key.issueID)
 	}
-	return nil
+	return bumpUnbumpedRevisionsTx(ctx, tx, changedIssues, bumped)
 }
 
 func federatedLabelKeys(ctx context.Context, tx *sql.Tx, projectID int64, stamp *federationRowHasher, issueScope ...string) (map[federatedLabelKey]struct{}, error) {
@@ -2541,12 +2578,13 @@ func reconcileFederatedLinks(
 	binding db.FederationBinding,
 	currentProjectID int64,
 	currentIssueIDs map[string]int64,
+	bumped map[int64]struct{},
 ) error {
 	projectIDs, err := federationBindingGroupProjectIDs(ctx, tx, binding)
 	if err != nil {
 		return err
 	}
-	return reconcileFederatedLinkGroup(ctx, tx, projectIDs, projectIDs, currentProjectID, currentIssueIDs)
+	return reconcileFederatedLinkGroup(ctx, tx, projectIDs, projectIDs, currentProjectID, currentIssueIDs, bumped)
 }
 
 func reconcileFederatedLinkGroup(
@@ -2556,17 +2594,19 @@ func reconcileFederatedLinkGroup(
 	ownedProjectIDs []int64,
 	currentProjectID int64,
 	currentIssueIDs map[string]int64,
+	bumped map[int64]struct{},
 ) error {
 	projection, err := federationGroupFoldProjection(ctx, tx, desiredProjectIDs)
 	if err != nil {
 		return err
 	}
-	return reconcileFederatedLinkProjection(ctx, tx, projection, desiredProjectIDs, ownedProjectIDs, currentProjectID, currentIssueIDs)
+	return reconcileFederatedLinkProjection(ctx, tx, projection, desiredProjectIDs, ownedProjectIDs, currentProjectID, currentIssueIDs, bumped)
 }
 
 func reconcileFederatedLinkProjection(
 	ctx context.Context, tx *sql.Tx, projection db.FoldProjection,
 	desiredProjectIDs, ownedProjectIDs []int64, currentProjectID int64, currentIssueIDs map[string]int64,
+	bumped map[int64]struct{},
 ) error {
 	issueIDs, err := federationGroupIssueIDs(ctx, tx, desiredProjectIDs, currentProjectID, currentIssueIDs, nil, nil)
 	if err != nil {
@@ -2576,10 +2616,10 @@ func reconcileFederatedLinkProjection(
 	if err != nil {
 		return err
 	}
-	return reconcileFederatedLinkRows(ctx, tx, projection, issueIDs, existing)
+	return reconcileFederatedLinkRows(ctx, tx, projection, issueIDs, existing, bumped)
 }
 
-func reconcileFederatedLinkRows(ctx context.Context, tx *sql.Tx, projection db.FoldProjection, issueIDs map[string]int64, existing map[db.FoldLinkKey]federatedLinkRow) error {
+func reconcileFederatedLinkRows(ctx context.Context, tx *sql.Tx, projection db.FoldProjection, issueIDs map[string]int64, existing map[db.FoldLinkKey]federatedLinkRow, bumped map[int64]struct{}) error {
 	desired := map[db.FoldLinkKey]federatedLinkRow{}
 	for _, edge := range projection.PresentLinks() {
 		key, state := edge.Key, edge.State
@@ -2610,6 +2650,7 @@ func reconcileFederatedLinkRows(ctx context.Context, tx *sql.Tx, projection db.F
 	if err := validateFederatedParentGraph(desired); err != nil {
 		return err
 	}
+	var changedIssues []int64
 	for key, row := range existing {
 		if _, ok := desired[key]; ok {
 			continue
@@ -2617,6 +2658,7 @@ func reconcileFederatedLinkRows(ctx context.Context, tx *sql.Tx, projection db.F
 		if _, err := tx.ExecContext(ctx, `DELETE FROM links WHERE id = ?`, row.id); err != nil {
 			return fmt.Errorf("delete stale federated link %s %s->%s: %w", key.Type, key.FromUID, key.ToUID, err)
 		}
+		changedIssues = append(changedIssues, row.fromID, row.toID)
 	}
 	for key, row := range desired {
 		if existingRow, ok := existing[key]; ok {
@@ -2632,6 +2674,9 @@ func reconcileFederatedLinkRows(ctx context.Context, tx *sql.Tx, projection db.F
 				row.fromID, row.toID, row.fromUID, row.toUID, row.typ, nonEmptyAuthor(row.author), row.createdAt, existingRow.id); err != nil {
 				return fmt.Errorf("update federated link %s %s->%s: %w", key.Type, key.FromUID, key.ToUID, err)
 			}
+			if existingRow.fromID != row.fromID || existingRow.toID != row.toID {
+				changedIssues = append(changedIssues, existingRow.fromID, existingRow.toID, row.fromID, row.toID)
+			}
 			continue
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -2640,8 +2685,9 @@ func reconcileFederatedLinkRows(ctx context.Context, tx *sql.Tx, projection db.F
 			row.fromID, row.toID, row.fromUID, row.toUID, row.typ, nonEmptyAuthor(row.author), row.createdAt); err != nil {
 			return fmt.Errorf("insert federated link %s %s->%s: %w", key.Type, key.FromUID, key.ToUID, err)
 		}
+		changedIssues = append(changedIssues, row.fromID, row.toID)
 	}
-	return nil
+	return bumpUnbumpedRevisionsTx(ctx, tx, changedIssues, bumped)
 }
 
 func validateFederatedParentGraph(desired map[db.FoldLinkKey]federatedLinkRow) error {
@@ -2705,7 +2751,7 @@ func reconcileFederationBindingTransitionLinks(
 			return err
 		}
 		if err := reconcileFederatedLinkGroup(
-			ctx, tx, remainingProjectIDs, remainingProjectIDs, 0, nil,
+			ctx, tx, remainingProjectIDs, remainingProjectIDs, 0, nil, nil,
 		); err != nil {
 			return err
 		}
@@ -2731,7 +2777,7 @@ func reconcileFederationBindingTransitionLinks(
 	if err := removeIncompatibleFederatedBoundaryLinks(ctx, tx, current.ProjectID, currentProjectIDs); err != nil {
 		return err
 	}
-	return reconcileFederatedLinkGroup(ctx, tx, currentProjectIDs, currentProjectIDs, 0, nil)
+	return reconcileFederatedLinkGroup(ctx, tx, currentProjectIDs, currentProjectIDs, 0, nil, nil)
 }
 
 func removeFederatedBoundaryLinksBetweenProjectAndGroup(

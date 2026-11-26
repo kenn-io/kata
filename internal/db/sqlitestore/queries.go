@@ -1912,13 +1912,20 @@ func (d *Store) insertCloseThrottledEvent(
 func (d *Store) ReopenIssue(
 	ctx context.Context, issueID int64, actor string,
 ) (db.Issue, *db.Event, bool, error) {
+	return d.ReopenIssueGuarded(ctx, db.ReopenIssueParams{IssueID: issueID, Actor: actor})
+}
+
+// ReopenIssueGuarded clears status=closed with an optional revision guard.
+func (d *Store) ReopenIssueGuarded(
+	ctx context.Context, p db.ReopenIssueParams,
+) (db.Issue, *db.Event, bool, error) {
 	return retryWrite3(ctx, d, func() (db.Issue, *db.Event, bool, error) {
-		return d.reopenIssue(ctx, issueID, actor)
+		return d.reopenIssue(ctx, p)
 	})
 }
 
 func (d *Store) reopenIssue(
-	ctx context.Context, issueID int64, actor string,
+	ctx context.Context, p db.ReopenIssueParams,
 ) (db.Issue, *db.Event, bool, error) {
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
@@ -1926,9 +1933,12 @@ func (d *Store) reopenIssue(
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	issue, projectName, err := lookupIssueForEvent(ctx, tx, issueID)
+	issue, projectName, err := lookupIssueForEvent(ctx, tx, p.IssueID)
 	if err != nil {
 		return db.Issue{}, nil, false, err
+	}
+	if p.IfMatchRev != nil && *p.IfMatchRev != issue.Revision {
+		return db.Issue{}, nil, false, &db.RevisionConflictError{CurrentRevision: issue.Revision}
 	}
 	if issue.Status == "open" {
 		if err := tx.Commit(); err != nil {
@@ -1947,7 +1957,7 @@ func (d *Store) reopenIssue(
 		     closed_reason = NULL,
 		     closed_at     = NULL,
 		     updated_at    = ?
-		 WHERE id = ?`, reopenedAt, issueID); err != nil {
+		 WHERE id = ?`, reopenedAt, p.IssueID); err != nil {
 		return db.Issue{}, nil, false, fmt.Errorf("reopen: %w", err)
 	}
 	payloadBytes, err := json.Marshal(struct {
@@ -1962,7 +1972,7 @@ func (d *Store) reopenIssue(
 		ProjectName: projectName,
 		IssueID:     &issue.ID,
 		Type:        "issue.reopened",
-		Actor:       actor,
+		Actor:       p.Actor,
 		Payload:     string(payloadBytes),
 	})
 	if err != nil {
@@ -1972,7 +1982,7 @@ func (d *Store) reopenIssue(
 		return db.Issue{}, nil, false, err
 	}
 
-	updated, err := issueByIDTx(ctx, tx, issueID)
+	updated, err := issueByIDTx(ctx, tx, p.IssueID)
 	if err != nil {
 		return db.Issue{}, nil, false, err
 	}
@@ -2203,35 +2213,46 @@ type eventInsert struct {
 // assigned/unassigned event. newOwner == nil means unassign. No-op when the
 // new value matches the current value (returns nil event, changed=false).
 func (d *Store) UpdateOwner(ctx context.Context, issueID int64, newOwner *string, actor string) (db.Issue, *db.Event, bool, error) {
-	return retryWrite3(ctx, d, func() (db.Issue, *db.Event, bool, error) {
-		return d.updateOwner(ctx, issueID, newOwner, actor, nil)
+	return d.UpdateOwnerGuarded(ctx, db.UpdateOwnerParams{
+		IssueID: issueID, Owner: newOwner, Actor: actor,
 	})
 }
 
 // UnassignOwner clears ownership only when expectedOwner is nil or matches the
 // current owner. A mismatch returns the current issue without an event.
 func (d *Store) UnassignOwner(ctx context.Context, issueID int64, actor string, expectedOwner *string) (db.Issue, *db.Event, bool, error) {
-	return retryWrite3(ctx, d, func() (db.Issue, *db.Event, bool, error) {
-		return d.updateOwner(ctx, issueID, nil, actor, expectedOwner)
+	return d.UpdateOwnerGuarded(ctx, db.UpdateOwnerParams{
+		IssueID: issueID, Actor: actor, ExpectedOwner: expectedOwner,
 	})
 }
 
-func (d *Store) updateOwner(ctx context.Context, issueID int64, newOwner *string, actor string, expectedOwner *string) (db.Issue, *db.Event, bool, error) {
+// UpdateOwnerGuarded changes or clears ownership with optional revision and
+// expected-owner guards.
+func (d *Store) UpdateOwnerGuarded(ctx context.Context, p db.UpdateOwnerParams) (db.Issue, *db.Event, bool, error) {
+	return retryWrite3(ctx, d, func() (db.Issue, *db.Event, bool, error) {
+		return d.updateOwner(ctx, p)
+	})
+}
+
+func (d *Store) updateOwner(ctx context.Context, p db.UpdateOwnerParams) (db.Issue, *db.Event, bool, error) {
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return db.Issue{}, nil, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	issue, projectName, err := lookupIssueForEvent(ctx, tx, issueID)
+	issue, projectName, err := lookupIssueForEvent(ctx, tx, p.IssueID)
 	if err != nil {
 		return db.Issue{}, nil, false, err
 	}
-	if expectedOwner != nil && !ownerEqual(issue.Owner, expectedOwner) {
+	if p.IfMatchRev != nil && *p.IfMatchRev != issue.Revision {
+		return db.Issue{}, nil, false, &db.RevisionConflictError{CurrentRevision: issue.Revision}
+	}
+	if p.ExpectedOwner != nil && !ownerEqual(issue.Owner, p.ExpectedOwner) {
 		return issue, nil, false, db.ErrOwnerMismatch
 	}
 	// No-op: same owner.
-	if ownerEqual(issue.Owner, newOwner) && issue.AssignmentExpiresOn == nil {
+	if ownerEqual(issue.Owner, p.Owner) && issue.AssignmentExpiresOn == nil {
 		if err := tx.Commit(); err != nil {
 			return db.Issue{}, nil, false, err
 		}
@@ -2245,15 +2266,15 @@ func (d *Store) updateOwner(ctx context.Context, issueID int64, newOwner *string
 		     revision   = revision + 1,
 		     assignment_expires_on = NULL,
 		     updated_at = ?
-		 WHERE id = ?`, newOwner, ts, issueID); err != nil {
+		 WHERE id = ?`, p.Owner, ts, p.IssueID); err != nil {
 		return db.Issue{}, nil, false, fmt.Errorf("update owner: %w", err)
 	}
 
 	eventType := "issue.unassigned"
 	ownerPayload := map[string]any{"owner": nil, "updated_at": ts}
-	if newOwner != nil {
+	if p.Owner != nil {
 		eventType = "issue.assigned"
-		ownerPayload["owner"] = *newOwner
+		ownerPayload["owner"] = *p.Owner
 	}
 	bs, marshalErr := json.Marshal(ownerPayload)
 	if marshalErr != nil {
@@ -2265,13 +2286,13 @@ func (d *Store) updateOwner(ctx context.Context, issueID int64, newOwner *string
 		ProjectName: projectName,
 		IssueID:     &issue.ID,
 		Type:        eventType,
-		Actor:       actor,
+		Actor:       p.Actor,
 		Payload:     payload,
 	})
 	if err != nil {
 		return db.Issue{}, nil, false, err
 	}
-	updated, err := issueByIDTx(ctx, tx, issueID)
+	updated, err := issueByIDTx(ctx, tx, p.IssueID)
 	if err != nil {
 		return db.Issue{}, nil, false, err
 	}

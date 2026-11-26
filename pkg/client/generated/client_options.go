@@ -4488,6 +4488,7 @@ func (o *EditIssueRequestOptions) GetHeader() (map[string]string, error) {
 type AssignIssueRequestOptions struct {
 	PathParams *AssignIssuePath
 	Body       *AssignIssueBody
+	Header     *AssignIssueHeaders
 }
 
 // Validate validates all the fields in the options.
@@ -4507,6 +4508,14 @@ func (o *AssignIssueRequestOptions) Validate() error {
 		if v, ok := any(o.Body).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Body", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
 			}
 		}
 	}
@@ -4534,7 +4543,7 @@ func (o *AssignIssueRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *AssignIssueRequestOptions) GetHeader() (map[string]string, error) {
-	return nil, nil
+	return runtime.AsMap[string](o.Header)
 }
 
 // ClaimIssueRequestOptions is the options needed to make a request to ClaimIssue.
@@ -4789,6 +4798,7 @@ func (o *MoveIssueRequestOptions) GetHeader() (map[string]string, error) {
 type SetIssuePriorityRequestOptions struct {
 	PathParams *SetIssuePriorityPath
 	Body       *SetIssuePriorityBody
+	Header     *SetIssuePriorityHeaders
 }
 
 // Validate validates all the fields in the options.
@@ -4808,6 +4818,14 @@ func (o *SetIssuePriorityRequestOptions) Validate() error {
 		if v, ok := any(o.Body).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Body", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
 			}
 		}
 	}
@@ -4835,7 +4853,7 @@ func (o *SetIssuePriorityRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *SetIssuePriorityRequestOptions) GetHeader() (map[string]string, error) {
-	return nil, nil
+	return runtime.AsMap[string](o.Header)
 }
 
 // PurgeIssueRequestOptions is the options needed to make a request to PurgeIssue.
@@ -4904,6 +4922,7 @@ func (o *PurgeIssueRequestOptions) GetHeader() (map[string]string, error) {
 type ReopenIssueRequestOptions struct {
 	PathParams *ReopenIssuePath
 	Body       *ReopenIssueBody
+	Header     *ReopenIssueHeaders
 }
 
 // Validate validates all the fields in the options.
@@ -4923,6 +4942,14 @@ func (o *ReopenIssueRequestOptions) Validate() error {
 		if v, ok := any(o.Body).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Body", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
 			}
 		}
 	}
@@ -4950,7 +4977,7 @@ func (o *ReopenIssueRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *ReopenIssueRequestOptions) GetHeader() (map[string]string, error) {
-	return nil, nil
+	return runtime.AsMap[string](o.Header)
 }
 
 // RestoreIssueRequestOptions is the options needed to make a request to RestoreIssue.
@@ -5010,6 +5037,7 @@ func (o *RestoreIssueRequestOptions) GetHeader() (map[string]string, error) {
 type UnassignIssueRequestOptions struct {
 	PathParams *UnassignIssuePath
 	Body       *UnassignIssueBody
+	Header     *UnassignIssueHeaders
 }
 
 // Validate validates all the fields in the options.
@@ -5029,6 +5057,14 @@ func (o *UnassignIssueRequestOptions) Validate() error {
 		if v, ok := any(o.Body).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Body", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
 			}
 		}
 	}
@@ -5056,7 +5092,7 @@ func (o *UnassignIssueRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *UnassignIssueRequestOptions) GetHeader() (map[string]string, error) {
-	return nil, nil
+	return runtime.AsMap[string](o.Header)
 }
 
 // AddAttachmentRequestOptions is the options needed to make a request to AddAttachment.
@@ -5938,6 +5974,7 @@ func (o *AddLabelRequestOptions) GetHeader() (map[string]string, error) {
 type RemoveLabelRequestOptions struct {
 	PathParams *RemoveLabelPath
 	Query      *RemoveLabelQuery
+	Header     *RemoveLabelHeaders
 }
 
 // Validate validates all the fields in the options.
@@ -5957,6 +5994,14 @@ func (o *RemoveLabelRequestOptions) Validate() error {
 		if v, ok := any(o.Query).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Query", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
 			}
 		}
 	}
@@ -5984,7 +6029,7 @@ func (o *RemoveLabelRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *RemoveLabelRequestOptions) GetHeader() (map[string]string, error) {
-	return nil, nil
+	return runtime.AsMap[string](o.Header)
 }
 
 // GetIssueLeaseStatusRequestOptions is the options needed to make a request to GetIssueLeaseStatus.
@@ -6292,6 +6337,7 @@ func (o *RenewIssueLeaseRequestOptions) GetHeader() (map[string]string, error) {
 type CreateLinkRequestOptions struct {
 	PathParams *CreateLinkPath
 	Body       *CreateLinkBody
+	Header     *CreateLinkHeaders
 }
 
 // Validate validates all the fields in the options.
@@ -6311,6 +6357,14 @@ func (o *CreateLinkRequestOptions) Validate() error {
 		if v, ok := any(o.Body).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Body", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
 			}
 		}
 	}
@@ -6338,13 +6392,14 @@ func (o *CreateLinkRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *CreateLinkRequestOptions) GetHeader() (map[string]string, error) {
-	return nil, nil
+	return runtime.AsMap[string](o.Header)
 }
 
 // DeleteLinkRequestOptions is the options needed to make a request to DeleteLink.
 type DeleteLinkRequestOptions struct {
 	PathParams *DeleteLinkPath
 	Query      *DeleteLinkQuery
+	Header     *DeleteLinkHeaders
 }
 
 // Validate validates all the fields in the options.
@@ -6364,6 +6419,14 @@ func (o *DeleteLinkRequestOptions) Validate() error {
 		if v, ok := any(o.Query).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Query", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
 			}
 		}
 	}
@@ -6391,7 +6454,7 @@ func (o *DeleteLinkRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *DeleteLinkRequestOptions) GetHeader() (map[string]string, error) {
-	return nil, nil
+	return runtime.AsMap[string](o.Header)
 }
 
 // GetIssueMetadataRequestOptions is the options needed to make a request to GetIssueMetadata.

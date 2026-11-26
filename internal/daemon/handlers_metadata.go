@@ -70,6 +70,11 @@ func parseOptionalIfMatchRevision(raw string) (*int64, error) {
 	return &rev, nil
 }
 
+func issueRevisionConflictError(current int64) error {
+	return api.NewError(412, "revision_conflict",
+		fmt.Sprintf("issue revision is %d", current), "", nil)
+}
+
 func patchIssueMetadataHandler(cfg ServerConfig) func(context.Context, *api.PatchIssueMetadataRequest) (*api.PatchIssueMetadataResponse, error) {
 	return func(ctx context.Context, in *api.PatchIssueMetadataRequest) (*api.PatchIssueMetadataResponse, error) {
 		actor, err := attributedActor(ctx, in.Body.Actor)

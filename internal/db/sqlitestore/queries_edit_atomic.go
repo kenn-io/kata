@@ -43,6 +43,9 @@ func (d *Store) editIssueAtomic(ctx context.Context, p db.EditIssueAtomicParams)
 	if err != nil {
 		return db.EditIssueAtomicResult{}, err
 	}
+	if p.IfMatchRev != nil && *p.IfMatchRev != issue.Revision {
+		return db.EditIssueAtomicResult{}, &db.RevisionConflictError{CurrentRevision: issue.Revision}
+	}
 	if p.ExpectedContentRevision != nil && *p.ExpectedContentRevision != issue.ContentRevision {
 		return db.EditIssueAtomicResult{}, &db.ContentRevisionConflictError{CurrentContentRevision: issue.ContentRevision}
 	}
@@ -55,9 +58,10 @@ func (d *Store) editIssueAtomic(ctx context.Context, p db.EditIssueAtomicParams)
 	}
 
 	var (
-		events    []db.Event
-		changes   db.AtomicEditChanges
-		anyChange bool
+		events     []db.Event
+		changes    db.AtomicEditChanges
+		anyChange  bool
+		revChanged bool
 	)
 
 	// A single timestamp for the whole atomic edit: each sub-mutation's row
@@ -82,7 +86,7 @@ func (d *Store) editIssueAtomic(ctx context.Context, p db.EditIssueAtomicParams)
 		sets = append([]string{`updated_at = ?`}, sets...)
 		args = append([]any{ts}, args...)
 		if slices.Contains(sets, `owner = ?`) {
-			sets = append(sets, `revision = revision + 1`)
+			revChanged = true
 		}
 		if contentFieldsChanged(issue, p.Title, p.Body) {
 			sets = append(sets, `content_revision = content_revision + 1`)
@@ -139,12 +143,13 @@ func (d *Store) editIssueAtomic(ctx context.Context, p db.EditIssueAtomicParams)
 			}
 			events = append(events, evt)
 			anyChange = true
+			revChanged = true
 		}
 	}
 
 	// 3. Link delta. Any error here rolls back the entire TX, including
 	// the field/priority changes above.
-	linkChanged, err := d.applyLinksDeltaTx(ctx, tx, issue, p, &changes, ts)
+	linkChanged, peerIDs, err := d.applyLinksDeltaTx(ctx, tx, issue, p, &changes, ts)
 	if err != nil {
 		return db.EditIssueAtomicResult{}, err
 	}
@@ -178,6 +183,14 @@ func (d *Store) editIssueAtomic(ctx context.Context, p db.EditIssueAtomicParams)
 		}
 		events = append(events, evt)
 		anyChange = true
+		revChanged = true
+	}
+
+	if revChanged {
+		peerIDs = append(peerIDs, issue.ID)
+	}
+	if err := bumpIssueRevisionsTx(ctx, tx, peerIDs); err != nil {
+		return db.EditIssueAtomicResult{}, err
 	}
 
 	updated, err := issueByIDTx(ctx, tx, p.IssueID)
@@ -228,8 +241,9 @@ func linksChangedPayload(c db.AtomicEditChanges, ts string) ([]byte, error) {
 // applyLinksDeltaTx is the per-TX worker that performs every link mutation.
 // Returns true when at least one row in `links` was inserted or deleted.
 // Touches the issue's updated_at exactly once at the end if changed link changed.
-func (d *Store) applyLinksDeltaTx(ctx context.Context, tx *sql.Tx, issue db.Issue, p db.EditIssueAtomicParams, changes *db.AtomicEditChanges, ts string) (bool, error) {
+func (d *Store) applyLinksDeltaTx(ctx context.Context, tx *sql.Tx, issue db.Issue, p db.EditIssueAtomicParams, changes *db.AtomicEditChanges, ts string) (bool, []int64, error) {
 	changed := false
+	var changedPeers []int64
 
 	// set_parent: replaces an existing parent if present. No-op when the
 	// existing parent already points at the requested target. Cycle check
@@ -241,26 +255,26 @@ func (d *Store) applyLinksDeltaTx(ctx context.Context, tx *sql.Tx, issue db.Issu
 		// parent must not be a hidden issue.
 		target, err := lookupIssueByIDTx(ctx, tx, *p.SetParent)
 		if errors.Is(err, db.ErrNotFound) {
-			return changed, &db.LinkTargetNotFoundError{Number: *p.SetParent}
+			return changed, changedPeers, &db.LinkTargetNotFoundError{Number: *p.SetParent}
 		}
 		if err != nil {
-			return changed, err
+			return changed, changedPeers, err
 		}
 		if target.ID == issue.ID {
-			return changed, db.ErrSelfLink
+			return changed, changedPeers, db.ErrSelfLink
 		}
 		if err := checkLinkEndpointsProjectAccessTx(ctx, tx, issue.ID, target.ID); err != nil {
-			return changed, err
+			return changed, changedPeers, err
 		}
 		if err := requireAddableLinkTargetTx(ctx, tx, target.ID); err != nil {
-			return changed, err
+			return changed, changedPeers, err
 		}
 		if err := assertNoParentCycleTx(ctx, tx, issue.ID, target.ID); err != nil {
-			return changed, err
+			return changed, changedPeers, err
 		}
 		existing, perr := lookupParentOfTx(ctx, tx, issue.ID)
 		if perr != nil && !errors.Is(perr, db.ErrNotFound) {
-			return changed, perr
+			return changed, changedPeers, perr
 		}
 		hasExisting := !errors.Is(perr, db.ErrNotFound)
 		if !hasExisting || existing.ToIssueID != target.ID {
@@ -268,10 +282,10 @@ func (d *Store) applyLinksDeltaTx(ctx context.Context, tx *sql.Tx, issue db.Issu
 			if hasExisting {
 				parentProjectUID, uidErr := linkedParentProjectUIDTx(ctx, tx, existing.ToIssueID)
 				if uidErr != nil {
-					return changed, uidErr
+					return changed, changedPeers, uidErr
 				}
 				if err := db.CheckProjectAccessTransaction(ctx, tx, parentProjectUID); err != nil {
-					return changed, err
+					return changed, changedPeers, err
 				}
 				// Capture the OLD parent's identity so the change payload
 				// surfaces a parent_removed entry. Use the soft-delete-
@@ -280,15 +294,15 @@ func (d *Store) applyLinksDeltaTx(ctx context.Context, tx *sql.Tx, issue db.Issu
 				// need its endpoint identity to describe the removal.
 				oldIdentity, lerr := peerIdentityTx(ctx, tx, existing.ToIssueID)
 				if lerr != nil {
-					return changed, lerr
+					return changed, changedPeers, lerr
 				}
 				res, err := tx.ExecContext(ctx, `DELETE FROM links WHERE id = ?`, existing.ID)
 				if err != nil {
-					return changed, fmt.Errorf("delete existing parent: %w", err)
+					return changed, changedPeers, fmt.Errorf("delete existing parent: %w", err)
 				}
 				rows, err := res.RowsAffected()
 				if err != nil {
-					return changed, fmt.Errorf("delete existing parent rows affected: %w", err)
+					return changed, changedPeers, fmt.Errorf("delete existing parent rows affected: %w", err)
 				}
 				// rows == 0 means a concurrent transaction already
 				// removed the link we expected to delete. Don't claim
@@ -297,6 +311,7 @@ func (d *Store) applyLinksDeltaTx(ctx context.Context, tx *sql.Tx, issue db.Issu
 				// reachable).
 				if rows > 0 {
 					changes.ParentRemoved = &oldIdentity
+					changedPeers = append(changedPeers, existing.ToIssueID)
 					recordedRemoval = true
 				}
 			}
@@ -312,13 +327,14 @@ func (d *Store) applyLinksDeltaTx(ctx context.Context, tx *sql.Tx, issue db.Issu
 					changed = true
 				}
 			case err != nil:
-				return changed, err
+				return changed, changedPeers, err
 			default:
 				newIdentity, ierr := peerIdentityTx(ctx, tx, target.ID)
 				if ierr != nil {
-					return changed, ierr
+					return changed, changedPeers, ierr
 				}
 				changes.ParentSet = &newIdentity
+				changedPeers = append(changedPeers, target.ID)
 				changed = true
 			}
 		}
@@ -328,33 +344,33 @@ func (d *Store) applyLinksDeltaTx(ctx context.Context, tx *sql.Tx, issue db.Issu
 	if p.RemoveParent != nil {
 		existing, perr := lookupParentOfTx(ctx, tx, issue.ID)
 		if errors.Is(perr, db.ErrNotFound) {
-			return changed, db.ErrParentMismatch
+			return changed, changedPeers, db.ErrParentMismatch
 		}
 		if perr != nil {
-			return changed, perr
+			return changed, changedPeers, perr
 		}
 		// Soft-delete-tolerant: the parent peer may have been soft-deleted
 		// since this issue was last edited; the link row still exists and
 		// the user can still ask to clean it up.
 		parentIssue, err := lookupIssueByIDTxIncludingDeleted(ctx, tx, existing.ToIssueID)
 		if err != nil {
-			return changed, err
+			return changed, changedPeers, err
 		}
 		// RemoveParent's int64 ref is interpreted as the parent's row id
 		// for now (Task 10 migrates the public param to short_id).
 		if parentIssue.ID != *p.RemoveParent {
-			return changed, db.ErrParentMismatch
+			return changed, changedPeers, db.ErrParentMismatch
 		}
 		if err := checkLinkEndpointsProjectAccessTx(ctx, tx, issue.ID, parentIssue.ID); err != nil {
-			return changed, err
+			return changed, changedPeers, err
 		}
 		res, err := tx.ExecContext(ctx, `DELETE FROM links WHERE id = ?`, existing.ID)
 		if err != nil {
-			return changed, fmt.Errorf("delete parent: %w", err)
+			return changed, changedPeers, fmt.Errorf("delete parent: %w", err)
 		}
 		rows, err := res.RowsAffected()
 		if err != nil {
-			return changed, fmt.Errorf("delete parent rows affected: %w", err)
+			return changed, changedPeers, fmt.Errorf("delete parent rows affected: %w", err)
 		}
 		// rows == 0 means a concurrent edit removed the parent link we
 		// thought we'd just verified. The strict assertion ("the parent
@@ -362,13 +378,14 @@ func (d *Store) applyLinksDeltaTx(ctx context.Context, tx *sql.Tx, issue db.Issu
 		// 409 the no-parent case produces, so the user knows their view
 		// of the world was stale.
 		if rows == 0 {
-			return changed, db.ErrParentMismatch
+			return changed, changedPeers, db.ErrParentMismatch
 		}
 		removedIdentity, ierr := peerIdentityTx(ctx, tx, parentIssue.ID)
 		if ierr != nil {
-			return changed, ierr
+			return changed, changedPeers, ierr
 		}
 		changes.ParentRemoved = &removedIdentity
+		changedPeers = append(changedPeers, parentIssue.ID)
 		changed = true
 	}
 
@@ -376,10 +393,11 @@ func (d *Store) applyLinksDeltaTx(ctx context.Context, tx *sql.Tx, issue db.Issu
 	for _, n := range p.AddBlocks {
 		added, peer, err := addEdgeTx(ctx, tx, issue, n, "blocks", p.Actor, false)
 		if err != nil {
-			return changed, err
+			return changed, changedPeers, err
 		}
 		if added {
 			changes.BlocksAdded = append(changes.BlocksAdded, peer)
+			changedPeers = append(changedPeers, n)
 			changed = true
 		}
 	}
@@ -387,10 +405,11 @@ func (d *Store) applyLinksDeltaTx(ctx context.Context, tx *sql.Tx, issue db.Issu
 	for _, n := range p.AddBlockedBy {
 		added, peer, err := addEdgeTx(ctx, tx, issue, n, "blocks", p.Actor, true)
 		if err != nil {
-			return changed, err
+			return changed, changedPeers, err
 		}
 		if added {
 			changes.BlockedByAdded = append(changes.BlockedByAdded, peer)
+			changedPeers = append(changedPeers, n)
 			changed = true
 		}
 	}
@@ -398,10 +417,11 @@ func (d *Store) applyLinksDeltaTx(ctx context.Context, tx *sql.Tx, issue db.Issu
 	for _, n := range p.AddRelated {
 		added, peer, err := addEdgeTx(ctx, tx, issue, n, "related", p.Actor, false)
 		if err != nil {
-			return changed, err
+			return changed, changedPeers, err
 		}
 		if added {
 			changes.RelatedAdded = append(changes.RelatedAdded, peer)
+			changedPeers = append(changedPeers, n)
 			changed = true
 		}
 	}
@@ -410,30 +430,33 @@ func (d *Store) applyLinksDeltaTx(ctx context.Context, tx *sql.Tx, issue db.Issu
 	for _, n := range p.RemoveBlocks {
 		removed, peer, err := removeEdgeTx(ctx, tx, issue, n, "blocks", false)
 		if err != nil {
-			return changed, err
+			return changed, changedPeers, err
 		}
 		if removed {
 			changes.BlocksRemoved = append(changes.BlocksRemoved, peer)
+			changedPeers = append(changedPeers, n)
 			changed = true
 		}
 	}
 	for _, n := range p.RemoveBlockedBy {
 		removed, peer, err := removeEdgeTx(ctx, tx, issue, n, "blocks", true)
 		if err != nil {
-			return changed, err
+			return changed, changedPeers, err
 		}
 		if removed {
 			changes.BlockedByRemoved = append(changes.BlockedByRemoved, peer)
+			changedPeers = append(changedPeers, n)
 			changed = true
 		}
 	}
 	for _, n := range p.RemoveRelated {
 		removed, peer, err := removeEdgeTx(ctx, tx, issue, n, "related", false)
 		if err != nil {
-			return changed, err
+			return changed, changedPeers, err
 		}
 		if removed {
 			changes.RelatedRemoved = append(changes.RelatedRemoved, peer)
+			changedPeers = append(changedPeers, n)
 			changed = true
 		}
 	}
@@ -442,10 +465,25 @@ func (d *Store) applyLinksDeltaTx(ctx context.Context, tx *sql.Tx, issue db.Issu
 		if _, err := tx.ExecContext(ctx,
 			`UPDATE issues SET updated_at = ? WHERE id = ?`,
 			ts, issue.ID); err != nil {
-			return changed, fmt.Errorf("touch issue: %w", err)
+			return changed, changedPeers, fmt.Errorf("touch issue: %w", err)
 		}
 	}
-	return changed, nil
+	return changed, changedPeers, nil
+}
+
+func bumpIssueRevisionsTx(ctx context.Context, tx *sql.Tx, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	sorted := slices.Clone(ids)
+	slices.Sort(sorted)
+	sorted = slices.Compact(sorted)
+	for _, id := range sorted {
+		if _, err := tx.ExecContext(ctx, `UPDATE issues SET revision = revision + 1 WHERE id = ?`, id); err != nil {
+			return fmt.Errorf("bump issue %d revision: %w", id, err)
+		}
+	}
+	return nil
 }
 
 // peerIdentityTx reads a peer's display identity inside the mutating

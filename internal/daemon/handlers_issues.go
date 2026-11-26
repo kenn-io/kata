@@ -560,6 +560,10 @@ func editIssueHandler(cfg ServerConfig) func(context.Context, *api.EditIssueRequ
 		if err != nil {
 			return nil, err
 		}
+		ifMatchRev, err := parseOptionalIfMatchRevision(in.IfMatch)
+		if err != nil {
+			return nil, err
+		}
 		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
 		if err != nil {
 			return nil, err
@@ -614,6 +618,7 @@ func editIssueHandler(cfg ServerConfig) func(context.Context, *api.EditIssueRequ
 			SetPriority:   in.Body.SetPriority,
 			ClearPriority: in.Body.ClearPriority,
 
+			IfMatchRev:              ifMatchRev,
 			ExpectedContentRevision: in.Body.ExpectedContentRevision,
 		}
 		if hasLinkChange {
@@ -717,8 +722,11 @@ func linksDeltaRequestsAnyOp(d *api.LinksDelta) bool {
 func mapAtomicEditError(err error, issueShortID string, delta *api.LinksDelta) error {
 	var lt *db.LinkTargetNotFoundError
 	var archivedTarget *db.LinkTargetArchivedError
+	var revisionConflict *db.RevisionConflictError
 	var contentConflict *db.ContentRevisionConflictError
 	switch {
+	case errors.As(err, &revisionConflict):
+		return issueRevisionConflictError(revisionConflict.CurrentRevision)
 	case errors.As(err, &contentConflict):
 		return api.NewError(412, "revision_conflict",
 			fmt.Sprintf("issue content revision is %d", contentConflict.CurrentContentRevision),

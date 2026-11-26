@@ -174,6 +174,9 @@ func (d *Store) addLabelAndEvent(ctx context.Context, issueID int64, ev db.Label
 	if err := ensureProjectWritableTx(ctx, tx, issue.ProjectID); err != nil {
 		return db.IssueLabel{}, db.Event{}, err
 	}
+	if ev.IfMatchRev != nil && *ev.IfMatchRev != issue.Revision {
+		return db.IssueLabel{}, db.Event{}, &db.RevisionConflictError{CurrentRevision: issue.Revision}
+	}
 	ev.Actor, err = d.effectiveLocalMutationActorTx(ctx, tx, issue.ProjectID, ev.Actor)
 	if err != nil {
 		return db.IssueLabel{}, db.Event{}, err
@@ -226,6 +229,9 @@ func (d *Store) removeLabelAndEvent(ctx context.Context, issueID int64, ev db.La
 	if err := ensureProjectWritableTx(ctx, tx, issue.ProjectID); err != nil {
 		return db.Event{}, err
 	}
+	if ev.IfMatchRev != nil && *ev.IfMatchRev != issue.Revision {
+		return db.Event{}, &db.RevisionConflictError{CurrentRevision: issue.Revision}
+	}
 
 	ts := nowTimestamp()
 	evt, err := d.detachLabelTx(ctx, tx, issue, projectName, ev.EventType, ev.Label, ev.Actor, ts)
@@ -263,6 +269,9 @@ func (d *Store) changeLabelsAndEvents(ctx context.Context, issueID int64, p db.C
 	}
 	if err := ensureProjectWritableTx(ctx, tx, issue.ProjectID); err != nil {
 		return nil, nil, err
+	}
+	if p.IfMatchRev != nil && *p.IfMatchRev != issue.Revision {
+		return nil, nil, &db.RevisionConflictError{CurrentRevision: issue.Revision}
 	}
 	actor, err := d.effectiveLocalMutationActorTx(ctx, tx, issue.ProjectID, p.Actor)
 	if err != nil {
@@ -361,7 +370,7 @@ func (d *Store) insertLabelEventTx(ctx context.Context, tx *sql.Tx, issue db.Iss
 
 func touchIssueTx(ctx context.Context, tx *sql.Tx, issueID int64, ts string) error {
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE issues SET updated_at = ? WHERE id = ?`, ts, issueID); err != nil {
+		`UPDATE issues SET updated_at = ?, revision = revision + 1 WHERE id = ?`, ts, issueID); err != nil {
 		return fmt.Errorf("touch issue: %w", err)
 	}
 	return nil
