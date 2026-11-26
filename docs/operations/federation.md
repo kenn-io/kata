@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-24
+last_edited: 2026-11-25
 ---
 
 # Federation
@@ -2318,11 +2318,19 @@ before saving its binding. Repeat the join for the same local name and hub
 project identity to bind that existing project.
 
 On rejoin, pull restarts from the hub's replay horizon, and Kata deduplicates
-already-applied events by event UID. A push-enabled rejoin re-offers
-local-origin events from the beginning; the hub deduplicates what it already
-has and absorbs any edits made while the project was standalone. Rejoin with
-the same actor the enrollment is bound to. Events authored as a different actor
-are rejected by the hub and quarantined.
+already-applied events by event UID. When push resumes under a different actor,
+Kata offers older events in batches. Events the hub already has are
+acknowledged; events it rejects stay on this computer. Later changes to a
+local-only task also stay here. Links
+from shared tasks to local-only tasks reach the hub but remain unresolved there.
+The first push can take one request per rejected event. A hub reset preserves
+local-only events. Once kept local, an event stays local even if the original
+actor rejoins later.
+A push paused by an earlier version after rejoin resumes after upgrading.
+Edits and replies to comments stay local unless this computer already has evidence
+that the hub supplied or acknowledged the comment when it pushes. Tasks cannot move into or out of
+a project while it has retained local events. Moves received from the hub still
+apply.
 
 A read-only rejoin keeps held offline edits local until push is enabled.
 

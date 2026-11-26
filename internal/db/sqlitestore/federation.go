@@ -1512,10 +1512,21 @@ func (d *Store) resetFederatedProject(ctx context.Context, projectID, replayHori
 	if n == 0 {
 		return db.ErrNotFound
 	}
+	if err := d.restoreRetainedFederationProjection(ctx, tx, projectID); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit federated reset: %w", err)
 	}
 	return nil
+}
+
+func (d *Store) restoreRetainedFederationProjection(ctx context.Context, tx *sql.Tx, projectID int64) error {
+	kept, err := db.HasKeptFederationEvents(ctx, tx, projectID)
+	if err != nil || !kept {
+		return err
+	}
+	return d.materializeFederatedProjectTx(ctx, tx, projectID, true, nil, nil)
 }
 
 func rejectLegacyFederationResetTx(ctx context.Context, tx *sql.Tx, projectID int64) error {
@@ -3174,6 +3185,11 @@ func (d *Store) adoptProjectIntoFederation(
 		}
 	}
 
+	if project.UID == p.HubProjectUID {
+		if err := db.RetainFederationAdoptedComments(ctx, tx, project.ID, project.UID, d.InstanceUID(), false); err != nil {
+			return db.AdoptProjectIntoFederationResult{}, err
+		}
+	}
 	if project.UID != p.HubProjectUID {
 		if err := db.CheckFederationProjectIdentityRetirement(ctx, tx, project); err != nil {
 			return db.AdoptProjectIntoFederationResult{}, err

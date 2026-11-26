@@ -146,6 +146,11 @@ var alreadyImplemented = map[string]bool{
 	"DisableFederationPushWhenSettled":     true, // federation_control.go
 	"EnableProjectFederation":              true, // federation_projection.go
 	"ExportFederationBindings":             true, // export.go
+	"KeepFederationEventLocal":             true, // federation_control.go
+	"KeepFederationDependentLocal":         true, // federation_control.go
+	"KeepFederationCommentDependentLocal":  true, // federation_control.go
+	"HasKeptFederationEvents":              true, // federation_control.go
+	"FederationKeptIssue":                  true, // federation_control.go
 	"ExportFederationEnrollments":          true, // export.go
 	"ExportFederationQuarantine":           true, // export.go
 	"ExportFederationSyncStatus":           true, // export.go

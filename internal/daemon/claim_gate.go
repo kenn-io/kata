@@ -248,6 +248,10 @@ func pendingPushMayMaterializeIssue(
 	binding db.FederationBinding,
 	issueUID string,
 ) (bool, error) {
+	kept, err := store.FederationKeptIssue(ctx, binding.ProjectID, issueUID)
+	if err != nil || kept {
+		return kept, err
+	}
 	afterID := binding.PushCursorEventID
 	for {
 		events, err := store.PendingFederationPushEvents(ctx, binding.ProjectID, store.InstanceUID(), afterID, 1000)

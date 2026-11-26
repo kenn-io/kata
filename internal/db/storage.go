@@ -488,6 +488,11 @@ type Storage interface {
 
 	// federation: push + ingest
 	PendingFederationPushEvents(ctx context.Context, projectID int64, originInstanceUID string, afterID int64, limit int) ([]Event, error)
+	KeepFederationEventLocal(ctx context.Context, projectID, eventID int64) (bool, error)
+	KeepFederationDependentLocal(ctx context.Context, projectID, eventID int64) (bool, error)
+	HasKeptFederationEvents(ctx context.Context, projectID int64) (bool, error)
+	KeepFederationCommentDependentLocal(ctx context.Context, projectID, eventID int64) (bool, error)
+	FederationKeptIssue(ctx context.Context, projectID int64, issueUID string) (bool, error)
 	PendingFederationPushStats(ctx context.Context, projectID int64, originInstanceUID string, afterID int64) (int64, int64, error)
 	AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error
 	// AcknowledgeFederationPush advances the push cursor. It also deletes this

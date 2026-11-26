@@ -536,3 +536,9 @@ older binary.
 
 Schema 54 changes the recorded version without changing tables or indexes.
 The version prevents older binaries from deleting held federation edits during a reset.
+
+## Schema 55: local federation event fence
+
+Schema 55 changes only the recorded version. It prevents older binaries from
+deleting local-only federation events during a reset. Run `kata storage postgres migrate`
+with schema-owner credentials before starting the new binary. SQLite upgrades in place.

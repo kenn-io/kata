@@ -1053,6 +1053,11 @@ var storageScenarios = []scenario{
 		},
 		run: checkProjectFederationEnrollmentScope,
 	},
+	{name: "federation rejoin cron dependents", run: checkFederationRejoinCronDependents},
+	{name: "federation rejoin reset retention", run: checkFederationRejoinResetRetention},
+	{name: "federation rejoin local events", run: checkFederationRejoinLocalEvents, methods: []string{"FederationKeptIssue", "HasKeptFederationEvents", "KeepFederationEventLocal", "KeepFederationDependentLocal"}},
+	{name: "federation rejoin move gate", run: checkFederationRejoinMoveGate},
+	{name: "federation rejoin comment reply", methods: []string{"KeepFederationCommentDependentLocal"}, run: checkFederationRejoinCommentReply},
 	{
 		name:    "federation push snapshot runs",
 		methods: []string{"CreateProject", "CreateIssue", "InsertRemoteEvent", "PendingFederationPushEvents"},

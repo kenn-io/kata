@@ -66,6 +66,28 @@ const FederationHeldCursorPrefix = "federation_held_cursor."
 // FederationAcknowledgedEventPrefix identifies events accepted out of order.
 const FederationAcknowledgedEventPrefix = "federation_acknowledged_event."
 
+// FederationAcceptedCommentPrefix retains comment identity when adoption replaces history.
+const FederationAcceptedCommentPrefix = "federation_accepted_comment."
+
+// RetainFederationAdoptedComments saves proof before adoption deletes events.
+func RetainFederationAdoptedComments(ctx context.Context, tx *sql.Tx, projectID int64, projectUID, origin string, postgres bool) error {
+	commentUID := `json_extract(e.payload,'$.comment_uid')`
+	items := `json_each(CASE WHEN json_type(e.payload,'$.comments')='array' THEN json_extract(e.payload,'$.comments') ELSE '[]' END) item`
+	itemUID := `json_extract(item.value,'$.comment_uid')`
+	if postgres {
+		commentUID = `e.payload::jsonb->>'comment_uid'`
+		items = `jsonb_array_elements(CASE WHEN jsonb_typeof(e.payload::jsonb->'comments')='array' THEN e.payload::jsonb->'comments' ELSE '[]'::jsonb END) item(value)`
+		itemUID = `item.value->>'comment_uid'`
+	}
+	proof := `e.project_id=$2 AND NOT ` + federationKeptLocalSQL("e") + ` AND ((e.origin_instance_uid=$3 AND e.id<=COALESCE((SELECT CAST(value AS BIGINT) FROM meta WHERE key=$4),0)) OR (e.origin_instance_uid<>$3 AND NOT EXISTS (SELECT 1 FROM meta WHERE key=$5 || e.origin_instance_uid)) OR EXISTS (SELECT 1 FROM meta WHERE key=$6 || e.uid AND value='1'))`
+	//nolint:gosec // SQL fragments are fixed by the backend; all values are bound.
+	_, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) SELECT $1 || uid,'1' FROM (
+ SELECT `+commentUID+` AS uid FROM events e WHERE `+proof+` AND e.type IN ('issue.commented','issue.comment_edited')
+ UNION SELECT `+itemUID+` AS uid FROM events e CROSS JOIN `+items+` WHERE `+proof+` AND e.type IN ('issue.created','issue.snapshot','`+RepeatedImportEventType+`')
+ ) comments WHERE uid IS NOT NULL AND uid<>'' ON CONFLICT(key) DO NOTHING`, FederationAcceptedCommentPrefix+projectUID+".", projectID, origin, FederationHeldCursorPrefix+projectUID, FormerInstanceUIDMetaPrefix, FederationAcknowledgedEventPrefix+projectUID+".")
+	return err
+}
+
 // FederationUnresolvedEventSQL excludes events already accepted or superseded on leave.
 func FederationUnresolvedEventSQL(alias string) string {
 	return alias + `.type IN (` + FederationPushEventTypesSQL() + `) AND NOT EXISTS (SELECT 1 FROM meta WHERE key='` + FederationAcknowledgedEventPrefix + `' || (SELECT uid FROM projects WHERE id=` + alias + `.project_id) || '.' || ` + alias + `.uid)`
@@ -189,6 +211,100 @@ func RestoreFederationPushCursor(ctx context.Context, tx *sql.Tx, projectID, cur
 	}
 	_, err = tx.ExecContext(ctx, `DELETE FROM meta WHERE key=$1 || (SELECT uid FROM projects WHERE id=$2)`, FederationHeldCursorPrefix, projectID)
 	return max(held, bindingCursor), err
+}
+
+// federationKeptLocalSQL identifies events the hub refused after rejoin.
+func federationKeptLocalSQL(alias string) string {
+	return `EXISTS (SELECT 1 FROM meta WHERE key='` + FederationAcknowledgedEventPrefix + `' || (SELECT uid FROM projects WHERE id=` + alias + `.project_id) || '.' || ` + alias + `.uid AND value='local')`
+}
+
+// FederationKeptIssue reports whether a task's creation or move is retained locally.
+func FederationKeptIssue(ctx context.Context, q moveQuery, projectID int64, issueUID string) (bool, error) {
+	var kept bool
+	//nolint:gosec // G202: the SQL fragment uses a fixed alias; values are bound.
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events e WHERE e.project_id=$1 AND e.issue_uid=$2 AND e.type IN ('issue.created','issue.snapshot','issue.moved') AND `+federationKeptLocalSQL("e")+`)`, projectID, issueUID).Scan(&kept)
+	return kept, err
+}
+
+// CheckFederationKeptIssueMove blocks moves involving a project with retained events.
+func CheckFederationKeptIssueMove(ctx context.Context, q moveQuery, from, to int64) error {
+	for _, projectID := range []int64{from, to} {
+		kept, err := HasKeptFederationEvents(ctx, q, projectID)
+		if err != nil {
+			return err
+		}
+		if kept {
+			return errors.Join(ErrFederatedMoveUnsupported, ErrFederatedMoveUnsharedHistory)
+		}
+	}
+	return nil
+}
+
+// KeepFederationEventLocalTx records the hub's refusal for an old-actor event.
+func KeepFederationEventLocalTx(ctx context.Context, tx *sql.Tx, projectID, eventID int64, origin string) (bool, error) {
+	return keepFederationLocalTx(ctx, tx, projectID, eventID, origin, `EXISTS (SELECT 1 FROM federation_bindings b WHERE b.project_id=e.project_id AND b.bound_actor<>e.actor) AND e.type IN (`+FederationPushEventTypesSQL()+`)`)
+}
+
+func federationKeptDependentSQL(postgres bool) string {
+	definitionUID := `json_extract(root.payload,'$.uid')=json_extract(e.payload,'$.uid')`
+	if postgres {
+		definitionUID = `root.payload::jsonb->>'uid'=e.payload::jsonb->>'uid'`
+	}
+	return `EXISTS (SELECT 1 FROM events root WHERE root.project_id=e.project_id AND ` + federationKeptLocalSQL("root") + ` AND ((root.issue_uid=e.issue_uid AND root.type IN ('issue.created','issue.snapshot','issue.moved')) OR (((e.type IN ('cron.workflow.updated','cron.workflow.deleted','cron.workflow.restored') AND root.type IN ('cron.workflow.created','cron.workflow.snapshot')) OR (e.type IN ('cron.job.updated','cron.job.deleted','cron.job.restored') AND root.type IN ('cron.job.created','cron.job.snapshot')) OR (e.type='cron.run.observed' AND root.type IN ('cron.run.observed','cron.run.snapshot'))) AND ` + definitionUID + `)))`
+}
+
+// KeepFederationDependentLocalTx records a hub refusal for local-only history.
+func KeepFederationDependentLocalTx(ctx context.Context, tx *sql.Tx, projectID, eventID int64, origin string, postgres bool) (bool, error) {
+	return keepFederationLocalTx(ctx, tx, projectID, eventID, origin, federationKeptDependentSQL(postgres))
+}
+
+// KeepFederationCommentDependentLocalTx retains edits and replies to local comments.
+func KeepFederationCommentDependentLocalTx(ctx context.Context, tx *sql.Tx, projectID, eventID int64, origin string, postgres bool) (bool, error) {
+	return keepFederationLocalTx(ctx, tx, projectID, eventID, origin, federationCommentDependentSQL(postgres))
+}
+
+func federationCommentDependentSQL(postgres bool) string {
+	match := `((e.type='issue.comment_edited' AND root.issue_uid=e.issue_uid AND json_extract(root.payload,'$.comment_uid')=json_extract(e.payload,'$.comment_uid')) OR (e.type='issue.commented' AND json_extract(root.payload,'$.comment_uid')=json_extract(e.payload,'$.reply_to_uid')))`
+	commentUID := `CASE WHEN e.type='issue.comment_edited' THEN json_extract(e.payload,'$.comment_uid') ELSE json_extract(e.payload,'$.reply_to_uid') END`
+	items := `json_each(CASE WHEN json_type(root.payload,'$.comments')='array' THEN json_extract(root.payload,'$.comments') ELSE '[]' END) item`
+	itemUID := `json_extract(item.value,'$.comment_uid')`
+	proofUID := `json_extract(proof.payload,'$.comment_uid')`
+	proofItems := `json_each(CASE WHEN json_type(proof.payload,'$.comments')='array' THEN json_extract(proof.payload,'$.comments') ELSE '[]' END) item`
+	if postgres {
+		match = `((e.type='issue.comment_edited' AND root.issue_uid=e.issue_uid AND root.payload::jsonb->>'comment_uid'=e.payload::jsonb->>'comment_uid') OR (e.type='issue.commented' AND root.payload::jsonb->>'comment_uid'=e.payload::jsonb->>'reply_to_uid'))`
+		commentUID = `CASE WHEN e.type='issue.comment_edited' THEN e.payload::jsonb->>'comment_uid' ELSE e.payload::jsonb->>'reply_to_uid' END`
+		items = `jsonb_array_elements(CASE WHEN jsonb_typeof(root.payload::jsonb->'comments')='array' THEN root.payload::jsonb->'comments' ELSE '[]'::jsonb END) item(value)`
+		itemUID = `item.value->>'comment_uid'`
+		proofUID = `proof.payload::jsonb->>'comment_uid'`
+		proofItems = `jsonb_array_elements(CASE WHEN jsonb_typeof(proof.payload::jsonb->'comments')='array' THEN proof.payload::jsonb->'comments' ELSE '[]'::jsonb END) item(value)`
+	}
+	accepted := `(EXISTS (SELECT 1 FROM meta WHERE key='` + FederationAcceptedCommentPrefix + `' || (SELECT uid FROM projects WHERE id=e.project_id) || '.' || ` + commentUID + ` AND value='1') OR EXISTS (SELECT 1 FROM events proof WHERE proof.project_id=e.project_id AND ((proof.type IN ('issue.commented','issue.comment_edited') AND ` + proofUID + `=` + commentUID + `) OR (proof.type IN ('issue.created','issue.snapshot','` + RepeatedImportEventType + `') AND EXISTS (SELECT 1 FROM ` + proofItems + ` WHERE ` + itemUID + `=` + commentUID + `))) AND NOT ` + federationKeptLocalSQL("proof") + ` AND ((proof.origin_instance_uid<>$4 AND NOT EXISTS (SELECT 1 FROM meta former WHERE former.key='` + FormerInstanceUIDMetaPrefix + `' || proof.origin_instance_uid)) OR EXISTS (SELECT 1 FROM meta accepted WHERE accepted.key='` + FederationAcknowledgedEventPrefix + `' || (SELECT uid FROM projects WHERE id=proof.project_id) || '.' || proof.uid AND accepted.value='1'))))`
+	condition := `EXISTS (SELECT 1 FROM events root WHERE root.project_id=e.project_id AND ` + federationKeptLocalSQL("root") + ` AND ((root.type='issue.commented' AND ` + match + `) OR (root.type IN ('issue.snapshot','issue.created') AND e.type IN ('issue.comment_edited','issue.commented') AND EXISTS (SELECT 1 FROM ` + items + ` WHERE ` + itemUID + `=` + commentUID + `))) AND NOT ` + accepted + `)`
+	return condition
+}
+
+func keepFederationLocalTx(ctx context.Context, tx *sql.Tx, projectID, eventID int64, origin, condition string) (bool, error) {
+	//nolint:gosec // G202: SQL fragments use fixed aliases; values are bound.
+	res, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value)
+ SELECT $1 || p.uid || '.' || e.uid,'local' FROM events e JOIN projects p ON p.id=e.project_id
+ WHERE e.project_id=$2 AND e.id=$3 AND e.origin_instance_uid=$4
+ AND `+condition+`
+ ON CONFLICT(key) DO NOTHING`, FederationAcknowledgedEventPrefix, projectID, eventID, origin)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil || n == 0 {
+		return false, err
+	}
+	return true, FoldFederationAcknowledgedEvents(ctx, tx, projectID, origin)
+}
+
+// HasKeptFederationEvents reports whether a project has retained events.
+func HasKeptFederationEvents(ctx context.Context, q moveQuery, projectID int64) (bool, error) {
+	var exists bool
+	err := q.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM projects p JOIN meta m ON m.key >= $2 || p.uid AND m.key < $2 || p.uid || 'z' AND substr(m.key,1,length($2 || p.uid || '.'))=$2 || p.uid || '.' JOIN events e ON e.project_id=p.id AND m.key=$2 || p.uid || '.' || e.uid WHERE p.id=$1 AND m.value='local')`, projectID, FederationAcknowledgedEventPrefix).Scan(&exists)
+	return exists, err
 }
 
 // CheckFederationMoveSourceLifecycle keeps a native source joined while a
@@ -1010,6 +1126,7 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
 	// Keep this spoke's edits that a left project never had acknowledged.
 	//nolint:gosec // Only the fixed snapshot type list is joined; values are bound.
 	_, err = tx.ExecContext(ctx, `DELETE FROM events AS e WHERE e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)
+ AND NOT (`+federationKeptLocalSQL("e")+`)
  AND NOT (e.origin_instance_uid=$2 AND e.type NOT IN ('issue.created','issue.moved',`+FederationSnapshotEventTypesSQL()+`) AND (`+FederationHeldEventSQL("e")+` OR (EXISTS (SELECT 1 FROM federation_bindings b WHERE b.project_id=e.project_id AND e.id>b.push_cursor_event_id) AND `+FederationEventReferencesMovedIssueSQL("e", postgres)+`)))`, projectID, originInstanceUID)
 	return err
 }
@@ -1024,7 +1141,9 @@ func FederationHeldEventSQL(alias string) string {
 // ClearFederatedProjectEvents retains source envelopes still contributing to
 // issues now owned elsewhere. A source reset cannot rewind those destinations.
 func ClearFederatedProjectEvents(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string, postgres bool) error {
+	//nolint:gosec // G202: SQL fragments use fixed aliases; values are bound.
 	if _, err := tx.ExecContext(ctx, `DELETE FROM events AS e WHERE e.project_id=$1
+	 AND NOT (`+federationKeptLocalSQL("e")+`)
 	 AND NOT (`+FederationEventReferencesMovedIssueSQL("e", postgres)+`)
  AND NOT (e.origin_instance_uid=$2 AND `+FederationHeldEventSQL("e")+`)`, projectID, originInstanceUID); err != nil {
 		return err
