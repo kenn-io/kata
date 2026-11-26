@@ -6,10 +6,17 @@ import (
 	"testing"
 	"time"
 
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv/sqlcount"
 )
 
 const BatchProjectStatsSQLForTest = batchProjectStatsSQL
+
+// BuildListAllIssuesQueryForTest returns the exact SQL and arguments
+// ListAllIssues runs, so benchmarks can explain the plan they time.
+func BuildListAllIssuesQueryForTest(ctx context.Context, params db.ListAllIssuesParams) (string, []any) {
+	return buildListAllIssuesQuery(ctx, params, false)
+}
 
 // NewStoreForTesting builds a Store with the given dsn but no live *sql.DB.
 // EXPORTED FOR TESTS ONLY — production callers cannot reach this. Used by
