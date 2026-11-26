@@ -285,12 +285,14 @@ insufficient. Switch back to the runtime DSN and validation mode before you
 restart the daemon. For the full ordering, see
 [Backup and restore](backup-restore.md).
 
-Budget up to 54 PostgreSQL connections per daemon process. Each daemon process
-opens three pools: the primary query pool allows 25 connections, a separate
+Budget up to 56 PostgreSQL connections per daemon process. Each daemon process
+opens four pools: the primary query pool allows 25 connections, a separate
 four-connection coordination pool serializes idempotent creates across replicas,
-and a separate 25-connection pool holds federation project locks. Keeping
-coordination separate prevents a burst of distinct idempotency keys from
-reserving every query connection while their mutations wait for the same pool.
+a separate 25-connection pool holds federation project locks, and a separate
+two-connection pool reads the newest event clock after a writer holds the event
+sequence lock. Keeping coordination separate prevents a burst of distinct
+idempotency keys from reserving every query connection while their mutations
+wait for the same pool.
 Multiply this budget by the maximum number of daemon replicas that can reach
 one database.
 

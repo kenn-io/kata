@@ -116,7 +116,7 @@ func (s *Store) AdoptProjectIntoFederation(
 		if err := lockEventSequenceTx(ctx, tx); err != nil {
 			return err
 		}
-		boundary, err := nextEventHLCTx(ctx, tx, time.Now().UTC())
+		boundary, err := s.nextEventHLCTx(ctx, tx, time.Now().UTC())
 		if err != nil {
 			return err
 		}

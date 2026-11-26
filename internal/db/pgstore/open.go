@@ -27,10 +27,14 @@ var statementTimeout = "30s"
 // deployments. Future phases may expose these through DSN params or
 // [storage] config.
 const (
-	defaultMaxOpenConns        = 25
-	defaultMaxIdleConns        = 5
-	idempotencyMaxOpenConns    = 4
-	idempotencyMaxIdleConns    = 1
+	defaultMaxOpenConns     = 25
+	defaultMaxIdleConns     = 5
+	idempotencyMaxOpenConns = 4
+	idempotencyMaxIdleConns = 1
+	// Only the holder of the event sequence lock reads the clock, so one
+	// connection serves a store; the second absorbs a replacement.
+	eventClockMaxOpenConns     = 2
+	eventClockMaxIdleConns     = 1
 	federationLockMaxOpenConns = 25
 	federationLockMaxIdleConns = 1
 	// One connection listens for poll wakeups while it is serving; the other
@@ -179,6 +183,11 @@ func openInternal(
 	if err := s.idempotencyDB.PingContext(ctx); err != nil {
 		_ = s.Close()
 		return nil, fmt.Errorf("ping postgres idempotency coordinator: %w", err)
+	}
+	s.eventClockDB = newPostgresPool(*connConfig, eventClockMaxOpenConns, eventClockMaxIdleConns)
+	if err := s.eventClockDB.PingContext(ctx); err != nil {
+		_ = s.Close()
+		return nil, fmt.Errorf("ping postgres event clock reader: %w", err)
 	}
 	s.federationLockDB = newPostgresPool(
 		*connConfig, federationLockMaxOpenConns, federationLockMaxIdleConns,
