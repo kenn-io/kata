@@ -30,8 +30,7 @@ type rankedSearch struct {
 	// never matches, so zeroing it discards whatever is still in flight.
 	req     int64
 	pending bool
-	// asked is the query sent with req while that ask can still answer, so a
-	// repeated query is not asked twice; a failed or dropped ask clears it.
+	// asked is the query of the ask that can still answer, so it is not asked twice.
 	asked string
 	err   error
 
