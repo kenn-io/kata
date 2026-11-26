@@ -279,6 +279,31 @@ func TestDaemonSearch_LateAnswerDoesNotMoveSelectionUnderAnotherView(t *testing.
 	require.Equal(t, "01TEST-ccc3", uid, "the answer must not re-rank rows behind the help overlay")
 }
 
+func TestDaemonSearch_LateAnswerLeavesAFocusedSplitDetailAlone(t *testing.T) {
+	m, api := daemonSearchFixture(t)
+	alpha, _, gamma := searchTestIssues()
+	api.searchFn = answerWith("hybrid", alpha, gamma)
+	m = resizeModel(m, 160, 40)
+	require.Equal(t, splitlayout.Split, m.layout)
+	m = openBarFromCmd(t, m, '/')
+	m, _ = stepModel(m, ctrlT)
+	m, cmds := typeText(m, "login")
+	m, ask := stepModel(m, onlyMsg(t, cmds[len(cmds)-1]))
+	inFlight := onlyMsg(t, ask)
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.Equal(t, "01TEST-ccc3", m.detail.issue.UID)
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyTab})
+	require.Equal(t, focusDetail, m.focus)
+
+	m, _ = stepModel(m, inFlight)
+
+	require.Equal(t, focusDetail, m.focus)
+	require.Equal(t, "01TEST-ccc3", m.detail.issue.UID, "the answer must not swap the issue being read")
+	_, uid, _ := highlightedIdentity(m.list)
+	require.Equal(t, "01TEST-ccc3", uid)
+}
+
 func TestDaemonSearch_AnswerFollowsSelectionInSplitDetail(t *testing.T) {
 	m, api := daemonSearchFixture(t)
 	alpha, _, gamma := searchTestIssues()
