@@ -7,7 +7,9 @@
 
   interface Props {
     orientation: Orientation
-    primarySize: number
+    primarySize: number | null
+    defaultShare?: number | undefined
+    secondaryBeside?: boolean
     minPrimary?: number
     minSecondary?: number
     responsiveBreakpoint?: number
@@ -20,6 +22,8 @@
   let {
     orientation,
     primarySize,
+    defaultShare,
+    secondaryBeside = $bindable(false),
     minPrimary = 200,
     minSecondary = 200,
     responsiveBreakpoint = 0,
@@ -42,6 +46,9 @@
       ? 'vertical'
       : orientation,
   )
+  $effect(() => {
+    secondaryBeside = Boolean(secondary) && effectiveOrientation === 'horizontal'
+  })
   const totalSize = $derived(effectiveOrientation === 'vertical' ? containerHeight : containerWidth)
 
   function axisSize(rect: DOMRect): number {
@@ -72,15 +79,9 @@
     return () => observer.disconnect()
   })
 
-  $effect(() => {
-    if (!secondary || totalSize <= 0) return
-    const clamped = clampSize(primarySize, totalSize)
-    if (clamped !== primarySize) onResize(clamped)
-  })
-
   function startResize(): void {
     if (!container) return
-    resizeStartSize = primarySize
+    resizeStartSize = appliedSize
     resizeTotalSize = axisSize(container.getBoundingClientRect())
   }
 
@@ -89,7 +90,8 @@
     onResize(clampSize(resizeStartSize + event.delta * multiplier, resizeTotalSize))
   }
 
-  const appliedSize = $derived(totalSize > 0 ? clampSize(primarySize, totalSize) : primarySize)
+  const desiredSize = $derived(primarySize ?? totalSize * (defaultShare ?? 0))
+  const appliedSize = $derived(totalSize > 0 ? clampSize(desiredSize, totalSize) : desiredSize)
   const valueMax = $derived(
     totalSize > 0 ? Math.max(minPrimary, totalSize - minSecondary) : minPrimary,
   )

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/authorname"
 	"go.kenn.io/kata/internal/textsafe"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -198,46 +199,11 @@ func fetchDigest(ctx context.Context, client *http.Client, baseURL string, opts 
 }
 
 func printDigestHuman(cmd *cobra.Command, bs []byte) error {
-	var b struct {
-		Since      time.Time `json:"since"`
-		Until      time.Time `json:"until"`
-		EventCount int       `json:"event_count"`
-		ProjectID  int64     `json:"project_id"`
-		Totals     struct {
-			Created    int `json:"created"`
-			Closed     int `json:"closed"`
-			Reopened   int `json:"reopened"`
-			Commented  int `json:"commented"`
-			Edited     int `json:"edited"`
-			Assigned   int `json:"assigned"`
-			Unassigned int `json:"unassigned"`
-			Labeled    int `json:"labeled"`
-			Unlabeled  int `json:"unlabeled"`
-			Linked     int `json:"linked"`
-			Unlinked   int `json:"unlinked"`
-			Unblocked  int `json:"unblocked"`
-		} `json:"totals"`
-		Actors []struct {
-			Actor  string `json:"actor"`
-			Totals struct {
-				Created   int `json:"created"`
-				Closed    int `json:"closed"`
-				Reopened  int `json:"reopened"`
-				Commented int `json:"commented"`
-				Unblocked int `json:"unblocked"`
-			} `json:"totals"`
-			Issues []struct {
-				ProjectID    int64    `json:"project_id"`
-				ProjectName  string   `json:"project_name"`
-				IssueShortID string   `json:"issue_short_id"`
-				IssueUID     string   `json:"issue_uid"`
-				Actions      []string `json:"actions"`
-			} `json:"issues"`
-		} `json:"actors"`
-	}
+	var b generated.DigestResponseBody
 	if err := json.Unmarshal(bs, &b); err != nil {
 		return err
 	}
+	b.Actors = authorname.GroupDigest(b.Actors)
 	out := cmd.OutOrStdout()
 	if _, err := fmt.Fprintf(out, "digest %s → %s  (%d events)\n",
 		b.Since.Format(time.RFC3339), b.Until.Format(time.RFC3339), b.EventCount); err != nil {
@@ -276,22 +242,12 @@ func printDigestHuman(cmd *cobra.Command, bs []byte) error {
 }
 
 func printDigestAgent(cmd *cobra.Command, bs []byte) error {
-	var b struct {
-		Since      time.Time `json:"since"`
-		Until      time.Time `json:"until"`
-		EventCount int       `json:"event_count"`
-		Actors     []struct {
-			Actor  string `json:"actor"`
-			Issues []struct {
-				ProjectName  string   `json:"project_name"`
-				IssueShortID string   `json:"issue_short_id"`
-				Actions      []string `json:"actions"`
-			} `json:"issues"`
-		} `json:"actors"`
-	}
+	var b generated.DigestResponseBody
 	if err := json.Unmarshal(bs, &b); err != nil {
 		return err
 	}
+	filters := authorname.DigestFilters(b.Actors)
+	b.Actors = authorname.GroupDigest(b.Actors)
 	count := 0
 	for _, a := range b.Actors {
 		count += len(a.Issues)
@@ -304,6 +260,10 @@ func printDigestAgent(cmd *cobra.Command, bs []byte) error {
 		return err
 	}
 	for _, a := range b.Actors {
+		encoded, err := json.Marshal(filters[a.Actor])
+		if err != nil {
+			return err
+		}
 		for _, iss := range a.Issues {
 			fields := []agentField{
 				agentRowField("actor", a.Actor),
@@ -313,6 +273,7 @@ func printDigestAgent(cmd *cobra.Command, bs []byte) error {
 			if iss.ProjectName != "" {
 				fields = append(fields, agentRowField("project", iss.ProjectName))
 			}
+			fields = append(fields, agentRowField("actor_filters", string(encoded)))
 			if err := writeAgentKVRow(out, fields...); err != nil {
 				return err
 			}

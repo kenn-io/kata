@@ -89,6 +89,7 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 		var res hybridResult
 		hash := ""
 		remoteURLs := map[string]string{}
+		var hubMode, hubDegradedReason string
 		if stable {
 			params := db.SearchFTSParams{ProjectID: in.ProjectID, Query: in.Query, Status: in.Status, IncludeDeleted: in.IncludeDeleted, Labels: in.Labels, ExcludeLabels: in.ExcludeLabels, IssueScope: issueScopeFromContext(ctx), StableOrder: true}
 			normalized := params
@@ -110,28 +111,27 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 				ProjectID: in.ProjectID, Query: in.Query, Limit: limit, ProbeLimit: probeLimit,
 				IncludeDeleted: in.IncludeDeleted, Requested: mode,
 				Labels: in.Labels, ExcludeLabels: in.ExcludeLabels, Status: in.Status,
-				IssueScope: issueScopeFromContext(ctx),
+				IssueScope:              issueScopeFromContext(ctx),
+				EmbeddingProjectAllowed: cfg.EmbeddingProjectAllowed,
 			}
 			if direct {
+				params.HubMode = &hubMode
 				params.Hub = func(ctx context.Context, p hybridParams, fetch int) ([]api.FederationSearchHit, bool, error) {
-					timeout := 5 * time.Second
-					if p.Requested == "" || p.Requested == "auto" {
-						timeout = time.Second
-					}
-					ctx, cancel := context.WithTimeout(ctx, timeout)
+					ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
 					defer cancel()
 					client, cred, err := claimForwardClient(ctx, cfg, binding)
 					if err != nil {
 						return nil, false, wrapHubSearchError(err)
 					}
-					hits, bounded, err := client.SearchShared(ctx, cred.HubProjectID, p, fetch)
+					body, err := client.SearchShared(ctx, cred.HubProjectID, p, fetch)
 					if err != nil {
 						return nil, false, wrapHubSearchError(err)
 					}
-					for _, hit := range hits {
+					hubMode, hubDegradedReason = body.Mode, body.DegradedReason
+					for _, hit := range body.Hits {
 						remoteURLs[hit.Issue.UID] = hit.WebURL
 					}
-					return hits, bounded, nil
+					return body.Hits, body.Bounded, nil
 				}
 			}
 			res, err = hybridSearch(ctx, cfg.DB, cfg.VectorIndex, cfg.Embedder, params)
@@ -151,6 +151,9 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		if !direct {
 			markEmbeddingUnavailable(&res, cfg.EmbeddingUnavailableReason, mode)
+		}
+		if hubDegradedReason != "" {
+			res.Degraded, res.DegradedReason = true, "hub search: "+hubDegradedReason
 		}
 		more := len(res.Hits) > limit
 		page := api.PageMetadata{Complete: !more, Truncated: more}

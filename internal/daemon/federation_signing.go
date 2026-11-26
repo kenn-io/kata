@@ -24,6 +24,7 @@ var signingCapabilities = map[string][]string{
 	"restoreCronJob":                {"push"},
 	"getFederationProjectMetadata":  {"pull", "push"},
 	"pollFederationProjectEvents":   {"pull"},
+	"watchFederationProjectEvents":  {"pull"},
 	"searchFederationProject":       {"pull"},
 	"ingestFederationProjectEvents": {"push"},
 	"disconnectRelayEnrollment":     {"push"},
@@ -36,6 +37,10 @@ var signingCapabilities = map[string][]string{
 	"renewIssueLease":               {"claim"},
 	"releaseIssueLease":             {"claim"},
 	"getIssueLeaseStatus":           {"claim"},
+	"uploadFederatedDocbank":        {"push"},
+	"linkFederatedDocbank":          {"push"},
+	"federatedDocbankCapabilities":  {"pull", "push"},
+	"federatedDocbankContent":       {"pull"},
 }
 
 func isCronJobWriteOperation(operation string) bool {
@@ -106,19 +111,34 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 		// used by metadata, event polls, and lease requests.
 		admission := s.federationControlAdmission
 		bodyLimit := int64(64 << 10)
+		attachmentTransfer := signingpolicy.Unambiguous(r.URL) && federationsigning.IsAttachmentTransfer(r.Method, r.URL.Path)
 		if route.operation == "ingestFederationProjectEvents" || route.operation == "acceptRelayDeliveries" || isCronJobWriteOperation(route.operation) {
 			admission = s.federationIngestAdmission
 			bodyLimit = federationsigning.MaxBodyBytes
 		}
+		if attachmentTransfer {
+			if r.Method == http.MethodPost {
+				admission = s.federationTransferAdmission
+				bodyLimit = federationsigning.AttachmentMaxBodyBytes
+			} else {
+				admission = s.federationReadAdmission
+			}
+		}
 		select {
 		case admission <- struct{}{}:
 			defer func() { <-admission }()
+			if admission == s.federationControlAdmission {
+				r = r.WithContext(withFederationControlAdmission(r.Context()))
+			}
 		default:
 			w.Header().Set("Retry-After", "1")
 			api.WriteEnvelope(w, http.StatusTooManyRequests, "admission_limited", "federation admission is full")
 			return
 		}
 		deadline := time.Now().Add(60 * time.Second)
+		if attachmentTransfer {
+			deadline = time.Now().Add(federationsigning.AttachmentTransferTimeout)
+		}
 		_ = http.NewResponseController(w).SetReadDeadline(deadline)
 		_ = http.NewResponseController(w).SetWriteDeadline(deadline)
 		ctx, cancel := context.WithDeadline(r.Context(), deadline)
@@ -167,7 +187,8 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 				return
 			}
 			r = r.WithContext(ctx)
-			err = s.cfg.FederationSigning.Verify(r, authorization.principal.EnrollmentID)
+			var admission federationsigning.Admission
+			admission, err = s.cfg.FederationSigning.Verify(r, authorization.principal.EnrollmentID)
 			if err != nil {
 				// Warm-up is not a signature fault: tell the spoke to retry
 				// rather than to check its keys and clock.
@@ -192,6 +213,13 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 				api.WriteEnvelope(w, status, "signature_invalid", "federation signature rejected")
 				return
 			}
+			if attachmentTransfer {
+				// Verify replaced the wire body with a verified disk spool. Keep it
+				// alive through the handler, including final authorization failures.
+				body := r.Body
+				defer func() { _ = body.Close() }()
+			}
+			ctx = withFederationSigningAdmission(ctx, admission)
 			// Revocation during body upload must also stop reads. Mutations retain
 			// their native transaction fence through the cached authorization.
 			if !relayCleanup {
@@ -208,6 +236,35 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 		ctx = withFederationAuthorization(ctx, auth, route.projectID, strings.Join(route.capabilities, ","), operation, authorization)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+type federationSigningAdmissionContextKey struct{}
+
+// withFederationSigningAdmission records the key that verified the request's
+// signature, so a request held open can check that key again before it
+// releases data.
+func withFederationSigningAdmission(ctx context.Context, admission federationsigning.Admission) context.Context {
+	return context.WithValue(ctx, federationSigningAdmissionContextKey{}, admission)
+}
+
+// recheckFederationSigningKey fails when the key that verified a signed
+// request has since expired or had its secret replaced. Unsigned requests
+// pass.
+func recheckFederationSigningKey(ctx context.Context) error {
+	admission, signed := ctx.Value(federationSigningAdmissionContextKey{}).(federationsigning.Admission)
+	if !signed {
+		return nil
+	}
+	err := admission.Current()
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, signingpolicy.ErrKey):
+		return api.NewError(http.StatusServiceUnavailable, "signature_invalid", "federation signature rejected", "", nil)
+	default:
+		// Answer as verification answers a key that is already retired.
+		return api.NewError(http.StatusUnauthorized, "signature_invalid", "federation signature rejected", "", nil)
+	}
 }
 
 func evaluateRelaySelfRevocation(

@@ -3,6 +3,8 @@
 package generated
 
 import (
+	"uuid"
+
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 )
 
@@ -275,6 +277,46 @@ type GetProjectFederationPath struct {
 	ProjectID int64 `json:"project_id"`
 }
 
+type FederatedDocbankCapabilitiesPath struct {
+	ProjectID int64 `json:"project_id"`
+}
+
+type LinkFederatedDocbankPath struct {
+	ProjectID int64  `json:"project_id"`
+	Ref       string `json:"ref" validate:"required"`
+}
+
+func (l LinkFederatedDocbankPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(l))
+}
+
+type UploadFederatedDocbankPath struct {
+	ProjectID int64  `json:"project_id"`
+	Ref       string `json:"ref" validate:"required"`
+}
+
+func (u UploadFederatedDocbankPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(u))
+}
+
+type FederatedDocbankContentPath struct {
+	ProjectID int64     `json:"project_id"`
+	VersionID uuid.UUID `json:"version_id" validate:"required"`
+}
+
+func (f FederatedDocbankContentPath) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(f.VersionID).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("VersionID", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type EnableProjectFederationPath struct {
 	ProjectID int64 `json:"project_id"`
 }
@@ -284,6 +326,10 @@ type PollFederationProjectEventsPath struct {
 }
 
 type IngestFederationProjectEventsPath struct {
+	ProjectID int64 `json:"project_id"`
+}
+
+type WatchFederationProjectEventsPath struct {
 	ProjectID int64 `json:"project_id"`
 }
 
@@ -618,6 +664,16 @@ type ReachableIssueGraphPath struct {
 
 func (r ReachableIssueGraphPath) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
+type UpdateLabelsPath struct {
+	// ProjectID Numeric project ID or name:<project name>; name: alone requires an alias
+	ProjectID string `json:"project_id" validate:"required"`
+	Ref       string `json:"ref" validate:"required"`
+}
+
+func (u UpdateLabelsPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(u))
 }
 
 type AddLabelPath struct {

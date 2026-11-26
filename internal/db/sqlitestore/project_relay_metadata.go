@@ -23,6 +23,7 @@ func deleteProjectRelayMetadata(ctx context.Context, execer contextExecer, proje
 	pendingPrefix := db.PendingCreationMetadataPrefix + projectUID + "."
 	supersededPrefix := db.RelayResetSupersededMetadataPrefix + projectUID + "."
 	identityDependencyPrefix := db.FederationProjectIdentityDependencyPrefix + projectUID + "."
+	ackPrefix := db.FederationAcknowledgedEventPrefix + projectUID + "."
 	_, err := execer.ExecContext(ctx, `DELETE FROM meta
 		WHERE key = ?
 		   OR key = ?
@@ -31,10 +32,11 @@ func deleteProjectRelayMetadata(ctx context.Context, execer contextExecer, proje
 		   OR substr(key, 1, length(?)) = ?
 		   OR substr(key, 1, length(?)) = ?
 		   OR substr(key, 1, length(?)) = ?
+		   OR substr(key, 1, length(?)) = ?
 		   OR substr(key, 1, length(?)) = ?`,
 		resetKey, db.AttributionUIResetMetadataPrefix+projectUID, db.ProjectStreamResetMetadataPrefix+projectUID,
 		resetPrefix, resetPrefix, transitionPrefix, transitionPrefix, pendingPrefix, pendingPrefix,
-		supersededPrefix, supersededPrefix, identityDependencyPrefix, identityDependencyPrefix)
+		supersededPrefix, supersededPrefix, identityDependencyPrefix, identityDependencyPrefix, ackPrefix, ackPrefix)
 	return err
 }
 

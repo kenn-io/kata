@@ -208,12 +208,57 @@ func (g GetProjectFederationQuery) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(g))
 }
 
+type FederatedDocbankCapabilitiesQuery struct {
+	ProjectUID string  `json:"project_uid" validate:"required"`
+	Origin     *string `json:"origin,omitempty"`
+}
+
+func (f FederatedDocbankCapabilitiesQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(f))
+}
+
+type LinkFederatedDocbankQuery struct {
+	Origin     string `json:"origin" validate:"required"`
+	ProjectUID string `json:"project_uid" validate:"required"`
+}
+
+func (l LinkFederatedDocbankQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(l))
+}
+
+type UploadFederatedDocbankQuery struct {
+	Origin     string `json:"origin" validate:"required"`
+	ProjectUID string `json:"project_uid" validate:"required"`
+	Name       string `json:"name" validate:"required"`
+}
+
+func (u UploadFederatedDocbankQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(u))
+}
+
+type FederatedDocbankContentQuery struct {
+	ProjectUID string `json:"project_uid" validate:"required"`
+	Origin     string `json:"origin" validate:"required"`
+}
+
+func (f FederatedDocbankContentQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(f))
+}
+
 type PollFederationProjectEventsQuery struct {
 	AfterID *int64 `json:"after_id,omitempty"`
 
 	// IssueUID Read retained history only for an issue currently owned by this project, independently of the project cursor.
 	IssueUID *string `json:"issue_uid,omitempty"`
 	Limit    *int64  `json:"limit,omitempty"`
+
+	// Wait Seconds the hub may hold a caught-up project poll until an event commits. The hub caps it at the value in X-Kata-Federation-Poll-Wait-Max and answers at once when it cannot hold the request.
+	Wait *int64 `json:"wait,omitempty"`
+}
+
+type WatchFederationProjectEventsQuery struct {
+	// Wait Seconds the hub may hold the watch while no named project has events after its cursor. The hub caps it at X-Kata-Federation-Poll-Wait-Max and answers at once when it cannot hold the request.
+	Wait *int64 `json:"wait,omitempty"`
 }
 
 type OfferRelayDeliveriesQuery struct {
@@ -252,7 +297,10 @@ func (o OfferRelayDeliveriesQuery) Validate() error {
 }
 
 type SearchFederationProjectQuery struct {
-	Q            string                              `json:"q" validate:"required"`
+	Q string `json:"q" validate:"required"`
+
+	// Auto Fall back to keyword search when the hub cannot run semantic search. Absent means strict semantic.
+	Auto         *bool                               `json:"auto,omitempty"`
 	Limit        *int64                              `json:"limit,omitempty"`
 	Status       *SearchFederationProjectQueryStatus `json:"status,omitempty"`
 	Label        []string                            `json:"label,omitempty"`
@@ -528,8 +576,9 @@ func (r ReadyIssuesGlobalQuery) Validate() error {
 }
 
 type ResolveUIIssueReferenceQuery struct {
-	ProjectID int64  `json:"project_id"`
-	Ref       string `json:"ref" validate:"required"`
+	ProjectID *int64  `json:"project_id,omitempty"`
+	Project   *string `json:"project,omitempty"`
+	Ref       string  `json:"ref" validate:"required"`
 }
 
 func (r ResolveUIIssueReferenceQuery) Validate() error {

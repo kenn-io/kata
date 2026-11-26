@@ -358,10 +358,12 @@ type ClaimStatus struct {
 // ClaimGateParams checks whether a local mutation can proceed using the
 // cached authoritative claim state available to this database.
 type ClaimGateParams struct {
-	ProjectID int64
-	IssueRef  string
-	Principal ClaimPrincipal
-	Now       time.Time
+	// ApplyTransactionFence admits external effects even without a local mutation.
+	ApplyTransactionFence bool
+	ProjectID             int64
+	IssueRef              string
+	Principal             ClaimPrincipal
+	Now                   time.Time
 }
 
 // ProjectAlias mirrors a row in project_aliases.
@@ -451,6 +453,7 @@ type Comment struct {
 // merge, federation merge) — UIDs remain canonical, short_ids are display
 // snapshots resolved on every read.
 type Event struct {
+	ReadyParentID       int64     `json:"-"` // Close-time advisory, never persisted or replicated.
 	OriginSpokeName     string    `json:"-"` // Hub-local response label; never persisted or replicated.
 	ID                  int64     `json:"id"`
 	UID                 string    `json:"uid"`

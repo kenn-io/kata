@@ -3,7 +3,8 @@
 
   interface Props {
     orientation?: 'horizontal' | 'vertical'
-    primarySize?: number
+    primarySize?: number | null
+    defaultShare?: number
     minPrimary?: number
     minSecondary?: number
     responsiveBreakpoint?: number
@@ -14,25 +15,30 @@
   let {
     orientation = 'horizontal',
     primarySize = 300,
+    defaultShare,
     minPrimary = 200,
     minSecondary = 200,
     responsiveBreakpoint = 0,
     onResize = () => {},
     showSecondary = true,
   }: Props = $props()
+  let secondaryBeside = $state(false)
 </script>
 
 <SplitLayout
   {orientation}
   {primarySize}
+  {defaultShare}
   {minPrimary}
   {minSecondary}
   {responsiveBreakpoint}
   ariaLabel="Resize Kata panes"
   {onResize}
+  bind:secondaryBeside
   secondary={showSecondary ? secondary : undefined}
 >
   {#snippet primary()}Primary{/snippet}
 </SplitLayout>
+<span data-testid="secondary-beside">{String(secondaryBeside)}</span>
 
 {#snippet secondary()}Secondary{/snippet}

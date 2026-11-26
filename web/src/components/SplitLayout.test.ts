@@ -58,6 +58,16 @@ describe('SplitLayout', () => {
     expect(onResize).not.toHaveBeenCalled()
   })
 
+  it('keeps a saved size that does not fit, so it returns when space does', async () => {
+    mockRect()
+    const onResize = vi.fn()
+    render(SplitLayoutTestHarness, { props: { primarySize: 700, onResize } })
+
+    const handle = screen.getByRole('separator', { name: 'Resize Kata panes' })
+    expect(handle.getAttribute('aria-valuenow')).toBe('600')
+    expect(onResize).not.toHaveBeenCalled()
+  })
+
   it('uses the vertical axis and clamps both resize bounds', async () => {
     mockRect()
     const onResize = vi.fn()
@@ -78,20 +88,29 @@ describe('SplitLayout', () => {
     expect(onResize).toHaveBeenLastCalledWith(274)
   })
 
-  it('stacks a side-by-side split from the measured pane width', async () => {
+  it('reports when the secondary pane sits beside the primary pane', async () => {
+    mockRect()
+    const horizontal = render(SplitLayoutTestHarness)
+    await waitFor(() => expect(screen.getByTestId('secondary-beside').textContent).toBe('true'))
+
+    horizontal.unmount()
+    vi.restoreAllMocks()
+    mockRect()
+    const vertical = render(SplitLayoutTestHarness, { props: { orientation: 'vertical' } })
+    await waitFor(() => expect(screen.getByTestId('secondary-beside').textContent).toBe('false'))
+
+    vertical.unmount()
+    vi.restoreAllMocks()
     mockRect(620, 800)
-    const { container } = render(SplitLayoutTestHarness, {
+    const stacked = render(SplitLayoutTestHarness, {
       props: { orientation: 'horizontal', responsiveBreakpoint: 700 },
     })
-
-    await waitFor(() =>
-      expect(container.querySelector('.kata-sash')?.getAttribute('data-orientation')).toBe(
+    await waitFor(() => {
+      expect(stacked.container.querySelector('.kata-sash')?.getAttribute('data-orientation')).toBe(
         'vertical',
-      ),
-    )
-    expect(
-      screen.getByRole('separator', { name: 'Resize Kata panes' }).getAttribute('aria-orientation'),
-    ).toBe('horizontal')
+      )
+      expect(screen.getByTestId('secondary-beside').textContent).toBe('false')
+    })
   })
 
   it('preserves the split preference while the detail pane is closed', () => {
@@ -103,5 +122,17 @@ describe('SplitLayout', () => {
 
     expect(screen.queryByRole('separator')).toBeNull()
     expect(onResize).not.toHaveBeenCalled()
+  })
+
+  it('starts at the default share and reports a resize in pixels', async () => {
+    mockRect(1200, 600)
+    const onResize = vi.fn()
+    render(SplitLayoutTestHarness, { props: { primarySize: null, defaultShare: 2 / 3, onResize } })
+
+    const handle = screen.getByRole('separator', { name: 'Resize Kata panes' })
+    expect(handle.getAttribute('aria-valuenow')).toBe('800')
+    expect(onResize).not.toHaveBeenCalled()
+    await fireEvent.keyDown(handle, { key: 'ArrowRight' })
+    expect(onResize).toHaveBeenLastCalledWith(816)
   })
 })

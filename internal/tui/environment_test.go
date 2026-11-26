@@ -13,6 +13,7 @@ import (
 
 func TestMain(m *testing.M) {
 	version.Version = "v1.2.3"
+	version.Commit = "1234567"
 	for _, key := range []string{"CI", "DO_NOT_TRACK", "TELEMETRY_ENABLED", "KATA_TELEMETRY_ENABLED"} {
 		if err := os.Unsetenv(key); err != nil {
 			fmt.Fprintln(os.Stderr, err)

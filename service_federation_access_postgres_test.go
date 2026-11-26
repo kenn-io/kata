@@ -85,12 +85,19 @@ func TestServicePostgresFederationPollFencedWithoutEventPredicateLocks(t *testin
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 
+	var pollTransaction string
 	controller := &recordingFederationAccessController{
 		decide: func(request kata.FederationAccessRequest) (kata.FederationAccessDecision, error) {
 			if request.Operation.ID != "pollFederationProjectEvents" {
 				return kata.FederationAccessDecision{}, nil
 			}
 			return kata.FederationAccessDecision{TransactionFence: func(ctx context.Context, tx kata.Transaction) error {
+				// Identify this poll even after commit, when retained predicate locks
+				// no longer have a backend PID in pg_locks.
+				if err := tx.QueryRowContext(ctx, `SELECT virtualtransaction FROM pg_locks
+					WHERE pid=pg_backend_pid() AND locktype='virtualxid' AND granted`).Scan(&pollTransaction); err != nil {
+					return err
+				}
 				var uses int
 				err := tx.QueryRowContext(ctx, `UPDATE federation_host.grant_state
 					SET uses=uses+1 WHERE allowed RETURNING uses`).Scan(&uses)
@@ -151,10 +158,13 @@ func TestServicePostgresFederationPollFencedWithoutEventPredicateLocks(t *testin
 	require.NotEmpty(t, page.Events)
 	assert.Equal(t, &shortID, page.Events[len(page.Events)-1].IssueShortID)
 	assert.Equal(t, page.Events[len(page.Events)-1].EventID, page.NextAfterID)
+	require.NotEmpty(t, pollTransaction)
+	// Other databases on the shared test server can keep setup transactions
+	// and their predicate locks alive. Count only locks from this poll.
 	var locks, uses int
 	require.NoError(t, inspection.QueryRowContext(ctx, `SELECT count(*) FROM pg_locks
-		WHERE mode='SIReadLock' AND database=(SELECT oid FROM pg_database WHERE datname=current_database())
-		AND (relation='kata.events'::regclass OR relation IN (SELECT indexrelid FROM pg_index WHERE indrelid='kata.events'::regclass))`).Scan(&locks))
+		WHERE virtualtransaction=$1 AND mode='SIReadLock' AND database=(SELECT oid FROM pg_database WHERE datname=current_database())
+		AND (relation='kata.events'::regclass OR relation IN (SELECT indexrelid FROM pg_index WHERE indrelid='kata.events'::regclass))`, pollTransaction).Scan(&locks))
 	assert.Zero(t, locks, "polls must leave the predicate-lock budget available to serializable writes")
 	require.NoError(t, inspection.QueryRowContext(ctx, `UPDATE federation_host.grant_state SET allowed=false RETURNING uses`).Scan(&uses))
 	assert.Equal(t, 1, uses, "the host fence's write must commit with the page")

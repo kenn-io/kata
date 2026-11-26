@@ -18,24 +18,39 @@ import (
 
 func newMoveCmd() *cobra.Command {
 	var dryRun, single bool
+	var refsFrom string
 	cmd := &cobra.Command{
-		Use:   "move <issue-ref> <project>",
-		Short: "move an issue subtree to another project",
+		Use:   "move <issue-ref>... <project>",
+		Short: "move issues to another project",
 		Long: `Move an issue and all its descendants to another project.
 Use --single to move only the selected issue.
+
+Two or more refs, or --refs-from, move each issue alone and report a result
+for every input.
 
 The issue keeps its UID, comments, history, and all of its links
 (parent, blocks/blocked-by, related) — relationships are never severed
 by a move and may span projects afterward. A fresh short_id is
 assigned in the target project.`,
-		Example: `  kata move abc4 example-project --dry --agent`,
-		Args:    cobra.ExactArgs(2),
+		Example: `  kata move abc4 example-project --dry --agent
+  kata move source#abc4 source#def5 example-project
+  kata move --refs-from routing.tsv --comment "routed"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMove(cmd, args[0], args[1], dryRun, single)
+			if cmd.Flags().Changed("refs-from") && refsFrom == "" {
+				return moveBatchUsage("--refs-from requires a file path")
+			}
+			if !cmd.Flags().Changed("refs-from") && len(args) == 2 {
+				return runMove(cmd, args[0], args[1], dryRun, single)
+			}
+			if dryRun {
+				return moveBatchUsage("--dry accepts one issue ref and a target project")
+			}
+			return runMoveBatch(cmd, args, refsFrom)
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry", false, "validate and preview without mutating")
 	cmd.Flags().BoolVar(&single, "single", false, "move only the selected issue")
+	cmd.Flags().StringVar(&refsFrom, "refs-from", "", "read ref or ref<TAB>project per line from a file")
 	addCommentFlag(cmd)
 	return cmd
 }
@@ -121,19 +136,7 @@ func runMove(cmd *cobra.Command, rawRef, targetProject string, dryRun, single bo
 	if err != nil {
 		return err
 	}
-	request := &generated.MoveIssueRequestOptions{
-		PathParams: &generated.MoveIssuePath{ProjectID: pid, Ref: ref.RefForAPI},
-		Body:       &generated.MoveIssueBody{Actor: &actor, ToProjectUID: target.UID},
-	}
-	if dryRun {
-		request.Body.DryRun = &dryRun
-	} else {
-		etag := fmt.Sprintf(`"rev-%d"`, sourceIssue.Revision)
-		request.Header = &generated.MoveIssueHeaders{IfMatch: &etag}
-	}
-	if single && subtreeSupported {
-		request.Body.Single = &single
-	}
+	request := moveRequest(pid, ref.RefForAPI, actor, target.UID, sourceIssue.Revision, dryRun, single && subtreeSupported)
 	response, callErr := apiClient.MoveIssueWithResponse(ctx, request)
 	if response == nil {
 		return externalCLITransportError(response, callErr)
@@ -165,6 +168,23 @@ func runMove(cmd *cobra.Command, rawRef, targetProject string, dryRun, single bo
 		return err
 	}
 	return printMove(cmd, bs, sourceProject, sourceIssue.ShortID, target.Name)
+}
+
+func moveRequest(pid int64, ref, actor, targetUID string, revision int64, dryRun, single bool) *generated.MoveIssueRequestOptions {
+	request := &generated.MoveIssueRequestOptions{
+		PathParams: &generated.MoveIssuePath{ProjectID: pid, Ref: ref},
+		Body:       &generated.MoveIssueBody{Actor: &actor, ToProjectUID: targetUID},
+	}
+	if dryRun {
+		request.Body.DryRun = &dryRun
+	} else {
+		etag := fmt.Sprintf(`"rev-%d"`, revision)
+		request.Header = &generated.MoveIssueHeaders{IfMatch: &etag}
+	}
+	if single {
+		request.Body.Single = &single
+	}
+	return request
 }
 
 func moveSourceProjectName(ctx context.Context, client *http.Client, baseURL string, requestedProjectID, currentProjectID int64, requestedName string) (string, error) {
@@ -209,6 +229,22 @@ func fetchMoveIssue(ctx context.Context, client *http.Client, baseURL string, pr
 		return moveIssueWire{}, err
 	}
 	return out.Issue, nil
+}
+
+// fetchIssueByUID looks up an issue by UID in any project.
+func fetchIssueByUID(ctx context.Context, client *kataclient.Client, uid string) (moveIssueWire, error) {
+	response, callErr := client.ShowIssueByUIDWithResponse(ctx, &generated.ShowIssueByUIDRequestOptions{PathParams: &generated.ShowIssueByUIDPath{UID: uid}})
+	if response == nil {
+		return moveIssueWire{}, externalCLITransportError(response, callErr)
+	}
+	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+		return moveIssueWire{}, err
+	}
+	var out struct {
+		Issue moveIssueWire `json:"issue"`
+	}
+	err := json.Unmarshal(response.Body, &out)
+	return out.Issue, err
 }
 
 func printMove(cmd *cobra.Command, bs []byte, sourceProject, oldShortID, targetProject string) error {

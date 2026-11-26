@@ -3,6 +3,7 @@ package vector_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -61,7 +62,7 @@ func TestEmbeddingPreparedPageRechecksBeforePaidDispatch(t *testing.T) {
 					require.NoError(t, err)
 					issues = append(issues, issue)
 				}
-				_, err = ix.RefreshMirror(ctx, source)
+				_, err = ix.RefreshMirror(ctx, source, nil)
 				require.NoError(t, err)
 				var requests atomic.Int32
 				provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -127,7 +128,7 @@ func TestEmbeddingPreparedPageRechecksBeforePaidDispatch(t *testing.T) {
 				case strings.HasPrefix(mode, "edited"):
 					require.EqualValues(t, editedRequests, requests.Load(), "only the unchanged document is dispatched")
 					require.EqualValues(t, 1, backlog, "the edited document stays pending")
-					_, err = ix.RefreshMirror(ctx, source)
+					_, err = ix.RefreshMirror(ctx, source, nil)
 					require.NoError(t, err)
 					requests.Store(0)
 				default:
@@ -189,7 +190,7 @@ func TestEmbeddingPreparedPageRevalidatesProjectAuthorityOncePerDispatchBatch(t 
 					})
 					require.NoError(t, err)
 				}
-				_, err = ix.RefreshMirror(ctx, source)
+				_, err = ix.RefreshMirror(ctx, source, nil)
 				require.NoError(t, err)
 				client, err := embedding.New(embedding.Config{BaseURL: "https://encoder.example/v1", Model: "example-model", Dims: 2})
 				require.NoError(t, err)
@@ -228,4 +229,74 @@ func TestEmbeddingPreparedPageRevalidatesProjectAuthorityOncePerDispatchBatch(t 
 			})
 		}
 	}
+}
+
+func TestEmbeddingArtifactDenialDefersDispatch(t *testing.T) {
+	ctx := t.Context()
+	source, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "canonical.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, source.Close()) })
+	ix, err := vector.Open(ctx, filepath.Join(t.TempDir(), "vectors.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, ix.Close()) })
+	project, err := source.CreateProject(ctx, "denied-artifact-project")
+	require.NoError(t, err)
+	issue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Private text", Author: "member"})
+	require.NoError(t, err)
+	_, err = ix.RefreshMirror(ctx, source, nil)
+	require.NoError(t, err)
+	client, err := embedding.New(embedding.Config{BaseURL: "https://encoder.example/v1", Model: "example-model", Dims: 2})
+	require.NoError(t, err)
+	recipe, err := client.ArtifactIdentity("", "", source.InstanceUID())
+	require.NoError(t, err)
+	key := client.Generation().Fingerprint()
+	require.NoError(t, ix.EnsureBuilding(ctx, key, client.Generation()))
+	identity := recipe
+	identity.ProjectUID, identity.IssueUID = project.UID, issue.UID
+	artifact, err := embedding.NewArtifact(identity, embedding.EmbedText(issue.Title, issue.Body), [][]float32{{1, 0}})
+	require.NoError(t, err)
+	checks, dispatches := 0, 0
+	allowed := func(ctx context.Context, projectUID string) (bool, error) {
+		require.Equal(t, project.UID, projectUID)
+		checks++
+		if checks == 2 {
+			retained, err := source.RetainEmbeddingArtifact(ctx, artifact)
+			require.NoError(t, err)
+			require.True(t, retained)
+		}
+		return checks != 3, nil
+	}
+	encode := func(_ context.Context, _ []string) ([][]float32, error) {
+		dispatches++
+		return [][]float32{{1, 0}}, nil
+	}
+	_, _, err = ix.FillWithArtifactsDetailed(ctx, key, source, recipe, encode, 1, nil, nil, allowed, allowed)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, checks, 3)
+	require.Zero(t, dispatches, "a denied artifact check must defer its document")
+	backlog, err := ix.Backlog(ctx, key)
+	require.NoError(t, err)
+	require.Zero(t, backlog, "a later allowed check can reuse the retained artifact")
+
+	issue, _, err = source.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Another task", Author: "member"})
+	require.NoError(t, err)
+	_, err = ix.RefreshMirror(ctx, source, nil)
+	require.NoError(t, err)
+	identity.IssueUID = issue.UID
+	artifact, err = embedding.NewArtifact(identity, embedding.EmbedText(issue.Title, issue.Body), [][]float32{{1, 0}})
+	require.NoError(t, err)
+	retained, err := source.RetainEmbeddingArtifact(ctx, artifact)
+	require.NoError(t, err)
+	require.True(t, retained)
+	policyErr := errors.New("policy unavailable")
+	policyError := func(_ context.Context, projectUID string) (bool, error) {
+		require.Equal(t, project.UID, projectUID)
+		return false, policyErr
+	}
+	_, _, err = ix.FillWithArtifactsDetailed(ctx, key, source, recipe, encode, 1, nil, nil, policyError, policyError)
+	require.ErrorIs(t, err, policyErr)
+	require.Zero(t, dispatches)
+	backlog, err = ix.Backlog(ctx, key)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, backlog)
 }

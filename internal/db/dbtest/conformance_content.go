@@ -519,6 +519,137 @@ func checkLabels(t *testing.T, store db.Storage) error {
 	return nil
 }
 
+func checkChangeLabels(t *testing.T, store db.Storage) error {
+	t.Helper()
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "change-labels-project")
+	if err != nil {
+		return err
+	}
+	// Imported issues keep the updated_at they are given, so a store that
+	// skips the touch, or touches on a no-op, leaves a visible difference.
+	importedAt := time.Date(2026, 7, 1, 10, 0, 0, 0, time.UTC)
+	imported, _, err := store.ImportBatch(ctx, db.ImportBatchParams{
+		ProjectID: project.ID, Source: "tracker", Actor: "label-author",
+		Items: []db.ImportItem{
+			{
+				ExternalID: "swap", Title: "swap labels", Author: "label-author", Status: "open",
+				CreatedAt: importedAt, UpdatedAt: importedAt, Labels: []string{"ready-for-agent"},
+			},
+			{
+				ExternalID: "settled", Title: "already swapped", Author: "label-author", Status: "open",
+				CreatedAt: importedAt, UpdatedAt: importedAt, Labels: []string{"ready-for-human"},
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("import fixtures: %w", err)
+	}
+	require.Len(t, imported.Items, 2)
+	importedIssue := func(i int) db.Issue {
+		t.Helper()
+		issue, err := store.IssueByShortID(ctx, project.ID, imported.Items[i].IssueShortID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		require.True(t, issue.UpdatedAt.Equal(importedAt), "fixture keeps the imported updated_at")
+		return issue
+	}
+	before, settled := importedIssue(0), importedIssue(1)
+	issueID := before.ID
+	labelNames := func() []string {
+		t.Helper()
+		rows, err := store.LabelsByIssue(ctx, issueID)
+		require.NoError(t, err)
+		names := make([]string, 0, len(rows))
+		for _, row := range rows {
+			names = append(names, row.Label)
+		}
+		return names
+	}
+	eventCount := func() int {
+		t.Helper()
+		events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, Limit: 1000})
+		require.NoError(t, err)
+		return len(events)
+	}
+	labelEventPayload := func(e db.Event) (label, updatedAt string) {
+		t.Helper()
+		var payload struct {
+			IssueUID  string `json:"issue_uid"`
+			Label     string `json:"label"`
+			UpdatedAt string `json:"updated_at"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(e.Payload), &payload))
+		assert.Equal(t, before.UID, payload.IssueUID)
+		return payload.Label, payload.UpdatedAt
+	}
+
+	params := db.ChangeLabelsParams{
+		Add:    []string{"ready-for-human"},
+		Remove: []string{"ready-for-agent"},
+		Actor:  "label-author",
+	}
+	labels, events, err := store.ChangeLabelsAndEvents(ctx, issueID, params)
+	if err != nil {
+		return fmt.Errorf("swap labels: %w", err)
+	}
+	assert.Equal(t, []string{"ready-for-human"}, labels)
+	require.Len(t, events, 2)
+	assert.Equal(t, "issue.unlabeled", events[0].Type)
+	assert.Equal(t, "issue.labeled", events[1].Type)
+	assert.Equal(t, "label-author", events[0].Actor)
+	assert.Equal(t, "label-author", events[1].Actor)
+	removedLabel, removedAt := labelEventPayload(events[0])
+	addedLabel, addedAt := labelEventPayload(events[1])
+	assert.Equal(t, "ready-for-agent", removedLabel)
+	assert.Equal(t, "ready-for-human", addedLabel)
+	assert.Equal(t, removedAt, addedAt, "events of one call share a timestamp")
+	assert.Less(t, events[0].ID, events[1].ID)
+	assert.Equal(t, []string{"ready-for-human"}, labelNames())
+	after, err := store.IssueByID(ctx, issueID)
+	require.NoError(t, err)
+	touchedAt, err := time.Parse(time.RFC3339Nano, addedAt)
+	require.NoError(t, err)
+	assert.True(t, after.UpdatedAt.Equal(touchedAt), "updated_at %v is the call's timestamp %s", after.UpdatedAt, addedAt)
+	assert.True(t, after.UpdatedAt.After(before.UpdatedAt), "updated_at must move")
+	assert.Equal(t, before.Revision, after.Revision, "label edits do not bump revision")
+
+	eventsBeforeNoop := eventCount()
+	labels, events, err = store.ChangeLabelsAndEvents(ctx, settled.ID, params)
+	if err != nil {
+		return fmt.Errorf("swap already applied: %w", err)
+	}
+	assert.Equal(t, []string{"ready-for-human"}, labels)
+	assert.Empty(t, events)
+	assert.Equal(t, eventsBeforeNoop, eventCount())
+	unchanged, err := store.IssueByID(ctx, settled.ID)
+	require.NoError(t, err)
+	assert.True(t, unchanged.UpdatedAt.Equal(importedAt), "no-op call must not touch updated_at")
+
+	labels, events, err = store.ChangeLabelsAndEvents(ctx, issueID, db.ChangeLabelsParams{
+		Remove: []string{"ready-for-human"}, Actor: "label-author",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{}, labels, "no labels is an empty slice, not nil")
+	assert.Len(t, events, 1)
+	_, err = store.AddLabel(ctx, issueID, "ready-for-human", "label-author")
+	require.NoError(t, err)
+
+	eventsBeforeInvalid := eventCount()
+	_, events, err = store.ChangeLabelsAndEvents(ctx, issueID, db.ChangeLabelsParams{
+		Add:    []string{"fine-label", "Not Valid!"},
+		Remove: []string{"ready-for-human"},
+		Actor:  "label-author",
+	})
+	assert.ErrorIs(t, err, db.ErrLabelInvalid)
+	assert.Empty(t, events)
+	assert.Equal(t, []string{"ready-for-human"}, labelNames(), "invalid add must roll back earlier changes")
+	assert.Equal(t, eventsBeforeInvalid, eventCount())
+
+	_, _, err = store.ChangeLabelsAndEvents(ctx, issueID+1_000_000, params)
+	assert.ErrorIs(t, err, db.ErrNotFound)
+	return nil
+}
+
 func checkLinksAndRelationshipProjections(t *testing.T, store db.Storage) error {
 	t.Helper()
 	ctx := t.Context()

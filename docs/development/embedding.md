@@ -29,6 +29,15 @@ another replica or from host-owned workers that write directly to storage can
 wait until the next sweep, which defaults to five minutes, plus indexing time
 before they appear in semantic search.
 A host worker fence stops the embedding worker when it rejects a transaction.
+Set `Config.EmbeddingProjectAllowed` to limit indexing and query embedding to
+host-approved project UIDs. Returning false excludes a project and removes its
+existing mirror and vectors on the next refresh. Returning an error aborts the
+attempt; the worker retries with backoff. Kata checks the callback again on
+later attempts. A nil callback allows every project. For excluded projects,
+explicit semantic and hybrid searches return unavailable, while auto search
+falls back to keyword search.
+Daemons sharing a PostgreSQL schema must return the same decision for each
+project because they share the mirror, vector index, and reconciler lease.
 The Postgres database needs the pgvector extension. Without it, lexical search
 remains available and semantic search reports the missing extension. After
 installing pgvector, have the schema owner open the service once with
@@ -369,8 +378,9 @@ described above.
 
 A direct spoke can use separate project actors for one principal when its
 host implements `FederationReferenceAccessController` on
-`Config.FederationAccess`. This applies to link additions in `issue.created`
-and `issue.links_changed`. The spoke supplies the referenced project's push
+`Config.FederationAccess`. This applies to link additions in issue creation or
+composite edits, and to parent link additions, removals, or replacements.
+The spoke supplies the referenced project's push
 credential for the same hub URL, including its mount path. Kata calls
 `AuthorizeFederation` for that project with the mutation operation
 `authorizeFederationIssueReference`. After fencing both credentials, Kata calls
@@ -381,9 +391,10 @@ spoke. Other errors report that authorization is unavailable. The route handles
 ingest admission once for the batch. The peer operation checks project access
 within that admission.
 
-Link removals and moves still require ordinary same-actor authority. This
-includes a parent displaced when the spoke sets a new one. Without that authority, the batch stays pending at its original cursor. Requests with
-an additional in-process principal also require matching project actors.
+Other link removals, moves, and a displaced parent known only to the hub require
+ordinary same-actor authority. Without that authority, the batch stays pending at
+its original cursor. Requests with an additional in-process principal also
+require matching project actors.
 
 ## Restricted embedding profile
 
@@ -578,6 +589,16 @@ internal project name, and a rename does not change the approved identity.
 - Attachment replaces old local catalog events when the project takes the
   hub identity. Their checksums name the old identity. One new local event
   updates browser readers without pushing empty metadata to the hub.
+- Changing `intent` between `read_only` and `collaborate` on an attached
+  replica keeps its binding and data. Kata releases the saved request, then
+  authorizes a new request UUID and candidate token with the new intent and
+  the original `spoke_instance_uid` and `local_project_uid`. The provider must
+  approve the same hub project. The new approval may name a different
+  `actor`; that actor replaces the replica's bound actor. Kata applies the
+  replacement only after the hub accepted every local change and no claim,
+  claim request, or running cron run belongs to the old actor, and retries
+  until then. Kata repeats an unconfirmed release, so a release of an already
+  released request must return `released`.
 - Normal leave stops transport and asks the saved provider to release the
   exact request. Unconfirmed cleanup remains pending rather than deleting its
   credential. Once confirmed, the secret is removed; a closed marker prevents
@@ -585,7 +606,8 @@ internal project name, and a rename does not change the approved identity.
 
 Kata's credential file can retain the provider operation beside its saved
 token. It stores the request UUID, executable arguments, intent, original local
-project and installation identifiers, and any accepted enrollment and expiry.
+project and installation identifiers, any accepted enrollment and expiry, and,
+after an intent change, the bound actor the new approval replaces.
 Moving a credential to the hub project UID preserves the original request.
 Updates and cleanup compare the whole saved operation by value, so rereading
 the file does not break a retry and stale cleanup cannot delete a newer request.

@@ -10,12 +10,14 @@ import (
 // commit. Call before external credential teardown; normal pause retains intent.
 type RelayLifecycleStore interface {
 	ValidateRelayLifecycle(context.Context, int64) error
+	ValidateFederationLeave(context.Context, int64) error
 }
 
 // RelayDisconnectFenceStore validates retained relay work and disables relay
 // writes in the same native transaction before upstream revocation.
 type RelayDisconnectFenceStore interface {
 	FenceRelayDisconnect(context.Context, int64) error
+	FenceFederationLeave(context.Context, int64) error
 }
 
 // RelayLocalDetacher detaches a relay replica without its upstream hub. It
@@ -141,7 +143,7 @@ func (p RelayResetProtocol) DiscardHopState(ctx context.Context, projectID int64
 // FenceDisconnect validates retained relay work and disables relay writes in
 // one transaction so a concurrent local mutation cannot slip between the two.
 // A project without a binding has nothing to fence.
-func (p RelayResetProtocol) FenceDisconnect(ctx context.Context, projectID int64) error {
+func (p RelayResetProtocol) FenceDisconnect(ctx context.Context, projectID int64, preserveStopped bool) error {
 	if err := p.Backend.LockProject(ctx, projectID); err != nil {
 		return err
 	}
@@ -159,7 +161,7 @@ func (p RelayResetProtocol) FenceDisconnect(ctx context.Context, projectID int64
 		return ErrFederationRebindConflict
 	}
 	next := binding
-	next.Enabled = true
+	next.Enabled = !preserveStopped || binding.Enabled
 	next.PushEnabled = false
 	if err := CheckRelayBindingUpdate(&binding, next); err != nil {
 		return err
@@ -170,7 +172,7 @@ func (p RelayResetProtocol) FenceDisconnect(ctx context.Context, projectID int64
 	if err := p.Backend.RejectExternalRootProject(ctx, projectID); err != nil {
 		return err
 	}
-	if err := p.Backend.DisableRelayPush(ctx, projectID); err != nil {
+	if err := p.Backend.DisableRelayPush(ctx, projectID, next.Enabled); err != nil {
 		return err
 	}
 	return p.Backend.ReconcileBindingTransitionLinks(ctx, &binding, next)

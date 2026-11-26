@@ -40,7 +40,7 @@ func TestPostgresMutatorsRequireTheReconcilerLease(t *testing.T) {
 			return idx.CutOver(ctx, "unleased")
 		}},
 		{"RefreshMirror", func() error {
-			_, err := idx.RefreshMirror(ctx, store)
+			_, err := idx.RefreshMirror(ctx, store, nil)
 			return err
 		}},
 		{"SaveVectors", func() error {

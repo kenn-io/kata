@@ -189,3 +189,22 @@ func TestInboxReturnsEveryMatchAndStaysProjectScoped(t *testing.T) {
 	assert.Contains(t, runCLI(t, env, dir, "--project", "other-project", "inbox", "--for", "reviewer"),
 		"other request")
 }
+
+func TestInboxFederatedSender(t *testing.T) {
+	env, dir, _, ref := setupWorkspaceWithIssue(t, "review")
+	actor := "Ana [member:11111111-1111-4111-8111-111111111111; enrollment:11111111-1111-4111-8111-111111111111]"
+	value, err := json.Marshal(notificationValue{From: actor, Message: "Please review"})
+	require.NoError(t, err)
+	runCLI(t, env, dir, "meta", "set", ref, "notify.cmV2aWV3ZXI", string(value), "--json-value")
+	for _, mode := range [][]string{{}, {"--context"}} {
+		args := append([]string{"inbox", "--for", "reviewer"}, mode...)
+		out := runCLI(t, env, dir, args...)
+		assert.Contains(t, out, "Ana")
+		assert.NotContains(t, out, "member:")
+	}
+	agent := runCLI(t, env, dir, "inbox", "--for", "reviewer", "--agent")
+	assert.Contains(t, agent, "from=Ana")
+	assert.Contains(t, agent, "from_address=")
+	out := runCLI(t, env, dir, "inbox", "--for", "reviewer", "--json")
+	assert.Contains(t, out, actor)
+}

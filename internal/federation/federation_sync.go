@@ -11,6 +11,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"go.kenn.io/kata/internal/activity"
@@ -148,6 +149,18 @@ func syncFederationOnceWithPulledEvents(
 		return fmt.Errorf("coordinate federation sync: %w", err)
 	}
 	defer finish()
+	// The caller read the binding before waiting for this turn. An intent
+	// change can turn push on meanwhile, and a read-only copy would reset
+	// the project without checking for local changes.
+	current, err := store.FederationBindingByProject(ctx, binding.ProjectID)
+	if err != nil {
+		return fmt.Errorf("reload federation binding after waiting to sync: %w", err)
+	}
+	if !current.Enabled || current.Role != binding.Role || current.HubProjectUID != binding.HubProjectUID ||
+		current.HubProjectID != binding.HubProjectID || (current.RelayConfig == nil) != (binding.RelayConfig == nil) {
+		return errors.New("federation binding changed while waiting to sync")
+	}
+	binding = current
 	for {
 		pushThisTurn := allowPush && binding.PushEnabled
 		remaining, err := syncFederationOnceWithFence(ctx, store, binding, creds, pushThisTurn, opts, onPulledEvents, nil, credentialStores...)
@@ -390,13 +403,13 @@ func syncDirectSpoke(
 	credentials config.FederationCredentialStore,
 	opts clientpkg.Opts,
 ) (retErr error) {
-	runStartBinding := binding
+	runStartBinding, awaited := binding, false
 	var pushErr error
 	if pushThisTurn {
 		// A push that waits for the hub's history is finished by the pull
-		// below and the next cycle's push.
-		if err := pushDirectSpoke(ctx, store, &binding, hubProjectID, client, onPulledEvents, validateLease, credentials, opts); err != nil &&
-			!errors.Is(err, db.ErrFederationPushAwaitsPull) {
+		// below, which a held poll does not replace, and the next push.
+		err := pushDirectSpoke(ctx, store, &binding, hubProjectID, client, onPulledEvents, validateLease, credentials, opts)
+		if awaited = errors.Is(err, db.ErrFederationPushAwaitsPull); err != nil && !awaited {
 			if !isFederationProjectNotEnrolledError(err) {
 				return err
 			}
@@ -411,11 +424,37 @@ func syncDirectSpoke(
 			}()
 		}
 	}
+	if pushErr == nil && !awaited && hubHoldsPull(ctx, binding.ProjectID, binding.PullCursorEventID, client.heldPollTarget(hubProjectID)) {
+		interrupted, err := federationPullInterrupted(ctx, store, binding.ProjectID)
+		if err != nil {
+			return err
+		}
+		if !interrupted {
+			// A poll at this cursor is out at the hub, which answers it as
+			// soon as anything new is visible, and that answer wakes the
+			// runner. An ordinary poll now would return an empty page. The
+			// watcher records the pull when the hub answers.
+			return nil
+		}
+	}
+	hubPull := hubPullRetriesFromContext(ctx)
+	releaseProbe, allowed, _, hubProbe := hubPull.acquire(client.baseURL, opts.Timeout)
+	if !allowed {
+		hubPull.markSkipped()
+		return nil
+	}
+	defer releaseProbe()
 	resumePull, pullStartedAt, err := startFederationPull(ctx, store, binding.ProjectID)
 	if err != nil {
 		return err
 	}
+	pullVersion := hubProbe.version
 	recordPullError := func(pullErr error) error {
+		if hubCapacityUnavailable(pullErr) {
+			_, _, retryAfter := classifySyncRetry(pullErr)
+			hubPull.recordUnavailable(client.baseURL, pullVersion, retryAfter)
+		}
+		releaseProbe()
 		at := time.Now().UTC()
 		if at.Before(pullStartedAt) {
 			at = pullStartedAt
@@ -426,10 +465,16 @@ func syncDirectSpoke(
 		}
 		return recordFederationSyncErrorAt(ctx, store, binding.ProjectID, pullErr, at)
 	}
-	body, err := client.PollProjectEvents(ctx, hubProjectID, binding.PullCursorEventID, federationPollLimit)
+	body, advertised, err := client.pollProjectEvents(ctx, hubProjectID, "", binding.PullCursorEventID, federationPollLimit, 0)
 	if err != nil {
 		return recordPullError(err)
 	}
+	hubPull.clear(client.baseURL, hubProbe)
+	pullVersion = 0
+	releaseProbe()
+	// The pull tells the held-poll watchers whether this hub takes one
+	// watch for all of its bindings before any of them holds a poll there.
+	learnHubFromContext(ctx, client.baseURL, advertised)
 	if body.ResetRequired {
 		// A pull-only turn may still carry a writable binding. Reset safety
 		// follows that durable capability, not this turn's push decision.
@@ -438,14 +483,6 @@ func syncDirectSpoke(
 				return recordPullError(ErrFederationResetBlockedByQuarantine)
 			} else if err != nil && !errors.Is(err, db.ErrNotFound) {
 				return recordPullError(err)
-			}
-			pending, err := store.PendingFederationPushEvents(
-				ctx, binding.ProjectID, store.InstanceUID(), binding.PushCursorEventID, 1)
-			if err != nil {
-				return recordPullError(err)
-			}
-			if len(pending) > 0 {
-				return recordPullError(ErrFederationResetBlockedByPendingPush)
 			}
 		}
 		meta, err := client.ProjectFederation(ctx, hubProjectID)
@@ -666,22 +703,48 @@ func syncDirectSpoke(
 }
 
 func startFederationPull(ctx context.Context, store db.Storage, projectID int64) (bool, time.Time, error) {
-	previousPull, err := store.FederationSyncStatusByProject(ctx, projectID)
-	if err != nil && !errors.Is(err, db.ErrNotFound) {
+	resumePull, err := federationPullInterrupted(ctx, store, projectID)
+	if err != nil {
 		return false, time.Time{}, err
 	}
-	resumePull := previousPull.LastPullStartedAt != nil &&
-		(previousPull.LastPullSuccessAt == nil || previousPull.LastPullStartedAt.After(*previousPull.LastPullSuccessAt))
 	startedAt := time.Now().UTC().Truncate(time.Millisecond)
-	for _, previous := range []*time.Time{previousPull.LastPullStartedAt, previousPull.LastPullSuccessAt} {
-		if previous != nil && !startedAt.After(*previous) {
-			startedAt = previous.Truncate(time.Millisecond).Add(time.Millisecond)
-		}
-	}
 	if err := store.RecordFederationSyncPullStarted(ctx, projectID, startedAt); err != nil {
 		return false, time.Time{}, err
 	}
-	return resumePull, startedAt, nil
+	startedAt, err = storedPullStart(ctx, store, projectID, startedAt)
+	return resumePull, startedAt, err
+}
+
+// storedPullStart returns the start the store kept, which it moves past any
+// earlier success. A binding left since the write has no status, so the
+// caller's own start stands.
+func storedPullStart(ctx context.Context, store db.Storage, projectID int64, startedAt time.Time) (time.Time, error) {
+	status, err := store.FederationSyncStatusByProject(ctx, projectID)
+	if errors.Is(err, db.ErrNotFound) || (err == nil && status.LastPullStartedAt == nil) {
+		return startedAt, nil
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	return *status.LastPullStartedAt, nil
+}
+
+// federationPullInterrupted reports whether the binding's last pull started
+// and never completed.
+func federationPullInterrupted(ctx context.Context, store db.Storage, projectID int64) (bool, error) {
+	status, err := store.FederationSyncStatusByProject(ctx, projectID)
+	if errors.Is(err, db.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return pullInterrupted(status), nil
+}
+
+func pullInterrupted(status db.FederationSyncStatus) bool {
+	return status.LastPullStartedAt != nil &&
+		(status.LastPullSuccessAt == nil || status.LastPullStartedAt.After(*status.LastPullSuccessAt))
 }
 
 func validateFederationRunnerLease(ctx context.Context, validate func(context.Context) error) error {
@@ -1132,6 +1195,8 @@ type Runner struct {
 	// debounceTimer starts the wait between a wake and the pass it causes. Nil
 	// means a real timer.
 	debounceTimer func(time.Duration) Timer
+	// longPolls holds polls at hubs that support them while Run leads.
+	longPolls *hubLongPolls
 }
 
 func (r *Runner) newDebounceTimer(delay time.Duration) Timer {
@@ -1229,6 +1294,7 @@ func (r *Runner) runOnce(
 		active[spoke.binding.ProjectID] = true
 	}
 	retries.retain(active)
+	r.longPolls.reconcile(spokes)
 	if len(spokes) == 0 {
 		return nil, false, nil, nil
 	}
@@ -1238,7 +1304,9 @@ func (r *Runner) runOnce(
 	}
 	var errs []error
 	for _, spoke := range spokes {
-		if (len(only) > 0 && !only[spoke.binding.ProjectID]) || r.retryBlocked(ctx, retries, spoke, credentialStore) {
+		started := retries.version(spoke.binding.ProjectID)
+		if (len(only) > 0 && !only[spoke.binding.ProjectID]) ||
+			r.retryBlocked(ctx, retries, spoke, credentialStore) {
 			continue
 		}
 		var drain *activity.Lease
@@ -1249,17 +1317,26 @@ func (r *Runner) runOnce(
 				return retry, true, remaining, errors.Join(errs...)
 			}
 		}
-		spokeRemaining, identity, spokeErr := func() (bool, [32]byte, error) {
+		pullCtx := &hubPullRetryContext{retries: retries, interval: r.effectiveInterval(), now: r.refusalNow}
+		spokeRemaining, identity, spokeErr := func() (bool, retryTurnIdentity, error) {
 			if drain != nil {
 				defer drain.Release()
 			}
-			return r.runSpoke(ctx, spoke, credentialStore, validateLease, drain)
+			return r.runSpoke(withHubPullRetries(ctx, pullCtx), spoke, credentialStore, validateLease, drain)
 		}()
-		retries.record(spoke.binding.ProjectID, identity, spokeErr, r.effectiveInterval(), r.refusalNow())
+		now := r.refusalNow()
+		pullSkipped := pullCtx.pullSkipped.Load()
+		if spokeErr != nil || !pullSkipped {
+			retries.recordSchedule(spoke.binding.ProjectID, identity.full, identity.target, false, spokeErr, r.effectiveInterval(), now, &started, time.Time{})
+		}
 		if errors.Is(spokeErr, context.Canceled) || errors.Is(spokeErr, errFederationRunnerLeaseInvalid) {
 			return nil, false, nil, spokeErr
 		}
+		if spokeErr == nil && !pullSkipped {
+			r.longPolls.start(spoke)
+		}
 		if spokeErr != nil {
+			r.longPolls.stop(spoke.binding.ProjectID)
 			errs = append(errs, spokeErr)
 			// A turn that failed anywhere, including its claim retries, waits
 			// for the interval like a drained project; only a clean turn that
@@ -1293,15 +1370,79 @@ func (r *Runner) retryBlocked(
 	case syncRetryRelayCrossProjectLinks:
 		return retries.blocked(spoke.binding.ProjectID, [32]byte{}, r.refusalNow())
 	}
+	version := retries.version(spoke.binding.ProjectID)
+	binding, err := r.DB.FederationBindingByProject(ctx, spoke.binding.ProjectID)
+	if err != nil {
+		return false
+	}
 	credential, _, err := credentialStore.FederationCredential(ctx, spoke.project.UID)
 	if err != nil {
 		return false
 	}
-	identity, err := syncRetryIdentity(spoke.binding, credential)
-	if err != nil {
-		return false
+	return retries.blockedFor(ctx, spoke.binding.ProjectID, binding, credential, r.refusalNow(), version)
+}
+
+type retryTurnIdentity struct {
+	full, target [32]byte
+}
+
+type hubPullRetriesContextKey struct{}
+
+// hubPullRetryContext scopes the shared hub pull/watch cooldown to direct
+// pull requests inside syncDirectSpoke so per-credential ingest or claim
+// throttles never pause unrelated pulls, and pull cooldowns never block claims
+// or pushes.
+type hubPullRetryContext struct {
+	retries     *SyncRetries
+	interval    time.Duration
+	now         func() time.Time
+	pullSkipped atomic.Bool
+}
+
+func withHubPullRetries(ctx context.Context, pull *hubPullRetryContext) context.Context {
+	if pull == nil || pull.retries == nil {
+		return ctx
 	}
-	return retries.blocked(spoke.binding.ProjectID, identity, r.refusalNow())
+	return context.WithValue(ctx, hubPullRetriesContextKey{}, pull)
+}
+
+func hubPullRetriesFromContext(ctx context.Context) *hubPullRetryContext {
+	pull, _ := ctx.Value(hubPullRetriesContextKey{}).(*hubPullRetryContext)
+	return pull
+}
+
+func (c *hubPullRetryContext) currentNow() time.Time {
+	if c != nil && c.now != nil {
+		return c.now()
+	}
+	return time.Now()
+}
+
+func (c *hubPullRetryContext) acquire(hubURL string, timeout time.Duration) (func(), bool, time.Time, hubProbe) {
+	if c == nil || c.retries == nil {
+		return func() {}, true, time.Time{}, hubProbe{}
+	}
+	return c.retries.acquireHubProbe(hubURL, c.currentNow(), max(2*timeout, 30*time.Second))
+}
+
+func (c *hubPullRetryContext) clear(hubURL string, probe hubProbe) {
+	if c == nil || c.retries == nil {
+		return
+	}
+	c.retries.clearHubUnavailable(hubURL, probe)
+}
+
+func (c *hubPullRetryContext) recordUnavailable(hubURL string, started uint64, retryAfter time.Duration) {
+	if c == nil || c.retries == nil {
+		return
+	}
+	c.retries.recordHubUnavailable(hubURL, started, retryAfter, c.interval, c.currentNow())
+}
+
+func (c *hubPullRetryContext) markSkipped() {
+	if c != nil {
+		c.pullSkipped.Store(true)
+	}
 }
 
 // retryIdentityAfterTurn fingerprints a refused or throttled turn, so the next
@@ -1317,15 +1458,20 @@ func (r *Runner) retryIdentityAfterTurn(
 	spoke activeSpokeBinding,
 	credential config.FederationCredential,
 	turnErr error,
-) ([32]byte, error) {
+) (retryTurnIdentity, error) {
 	if reason, _, _ := classifySyncRetry(turnErr); reason == "" {
-		return [32]byte{}, nil
+		return retryTurnIdentity{}, nil
 	}
 	binding, err := r.DB.FederationBindingByProject(ctx, spoke.binding.ProjectID)
 	if err != nil {
-		return [32]byte{}, fmt.Errorf("reload federation binding for retry: %w", err)
+		return retryTurnIdentity{}, fmt.Errorf("reload federation binding for retry: %w", err)
 	}
-	return syncRetryIdentity(binding, credential)
+	full, err := syncRetryIdentity(binding, credential)
+	if err != nil {
+		return retryTurnIdentity{}, err
+	}
+	target, err := heldRetryIdentity(binding, credential)
+	return retryTurnIdentity{full: full, target: target}, err
 }
 
 // runSpoke gives one spoke a sync turn and reports whether that turn stopped
@@ -1338,7 +1484,7 @@ func (r *Runner) runSpoke(
 	credentialStore config.FederationCredentialStore,
 	validateLease func(context.Context) error,
 	drain *activity.Lease,
-) (remaining bool, identity [32]byte, resultErr error) {
+) (remaining bool, identity retryTurnIdentity, resultErr error) {
 	if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 		return false, identity, err
 	}
@@ -1365,11 +1511,14 @@ func (r *Runner) runSpoke(
 		if identityErr != nil {
 			resultErr = errors.Join(resultErr, identityErr)
 		}
-		if r.OnSpokeResult != nil && (!remaining || resultErr != nil) && !errors.Is(resultErr, errFederationRunnerLeaseInvalid) {
+		pullCtx := hubPullRetriesFromContext(ctx)
+		pullSkipped := pullCtx != nil && pullCtx.pullSkipped.Load()
+		if r.OnSpokeResult != nil && (resultErr != nil || !pullSkipped) && (!remaining || resultErr != nil) && !errors.Is(resultErr, errFederationRunnerLeaseInvalid) {
 			r.OnSpokeResult(spoke.binding.ProjectID, resultErr)
 		}
 	}()
 
+	ctx = withHubLongPolls(ctx, r.longPolls)
 	cred, _, err := credentialStore.FederationCredential(ctx, spoke.project.UID)
 	if err != nil {
 		return false, identity, errors.Join(err, r.DB.RecordFederationSyncError(ctx, binding.ProjectID, err, time.Now().UTC()))
@@ -1410,7 +1559,8 @@ func (r *Runner) runSpoke(
 		}
 		errs = append(errs, err)
 	}
-	if len(errs) == 0 {
+	pullCtx := hubPullRetriesFromContext(ctx)
+	if len(errs) == 0 && (pullCtx == nil || !pullCtx.pullSkipped.Load()) {
 		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 			return false, identity, err
 		}
@@ -1731,8 +1881,18 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	credentials := r.Credentials
+	if credentials == nil {
+		credentials = config.DefaultFederationCredentialStore()
+	}
+	polls := newHubLongPolls(ctx, r.DB, credentials, r.clientOpts(), interval, r.DrainAdmission, r.OnError, retries, r.refusalNow)
+	r.longPolls = polls
+	defer func() {
+		polls.stopAll()
+		r.longPolls = nil
+	}()
 	// pending holds the spokes whose last turn stopped at its budget; the next
-	// pass serves only them until a tick or wake widens it to every spoke.
+	// pass serves only them until a tick or external wake widens it to every spoke.
 	var pending map[int64]bool
 	for {
 		if validateLease != nil {
@@ -1741,6 +1901,7 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 			}
 		}
 		retry, denied, remaining, err := r.runOnce(ctx, validateLease, pending, retries)
+		polls.passCompleted()
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, errFederationRunnerLeaseInvalid) {
 				return err
@@ -1764,13 +1925,15 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 		pending = remaining
 		if len(pending) > 0 {
 			// A budgeted turn left deliveries pending. Serve those spokes again
-			// now instead of after an interval; a tick or wake that has already
-			// arrived widens the pass to every spoke.
+			// now instead of after an interval. A held-poll answer adds its
+			// spoke; a tick or external wake selects every spoke.
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-ticker.C:
 				pending = nil
+			case <-polls.changed:
+				pending = polls.takeChanged(pending)
 			case <-r.Wake:
 				pending = nil
 			default:
@@ -1781,6 +1944,8 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+		case <-polls.changed:
+			pending = polls.takeChanged(nil)
 		case <-r.Wake:
 			timer := r.newDebounceTimer(debounce)
 			select {
@@ -1932,7 +2097,7 @@ func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentia
 func directLinkProjects(ctx context.Context, store db.Storage, events []db.Event) (map[int64]bool, error) {
 	peers := map[string]bool{}
 	for _, event := range events {
-		additions, err := db.DirectLinkAdditionPeers(db.FoldEvent{Type: event.Type, UID: event.UID, IssueUID: db.EventIssueUID(event.IssueUID), Payload: []byte(event.Payload)})
+		additions, err := db.DirectLinkPeers(db.FoldEvent{Type: event.Type, UID: event.UID, IssueUID: db.EventIssueUID(event.IssueUID), Payload: []byte(event.Payload)})
 		if err != nil {
 			return nil, err
 		}

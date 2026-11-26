@@ -11,6 +11,7 @@ export const systemViews = [
 
 export type SystemView = (typeof systemViews)[number]
 export type DaemonView = 'credentials' | 'settings'
+export type SettingsSection = 'appearance' | 'search' | 'access'
 
 export interface ShareableFilters {
   status: string[]
@@ -28,8 +29,10 @@ export type KataRoute =
   | (RouteBase & {
       kind: 'kata'
       view?: SystemView | DaemonView
+      section?: SettingsSection
       projectUID?: string
       issueUID?: string
+      link?: { scope?: string; issue: string }
       graph: boolean
     })
   | {
@@ -46,9 +49,11 @@ export function parseRoute(url: URL, routePath = applicationRoutePath()): KataRo
   }
   const view = url.searchParams.get('view')?.trim()
   if (view === 'credentials' || view === 'settings') {
+    const section = url.searchParams.get('section')
     return {
       kind: 'kata',
       view,
+      ...(view === 'settings' && isSettingsSection(section) ? { section } : {}),
       graph: false,
       filters: { status: [], owner: [], label: [], relationship: [] },
     }
@@ -57,11 +62,26 @@ export function parseRoute(url: URL, routePath = applicationRoutePath()): KataRo
     return { kind: 'route-error', path: url.pathname + url.search, reason: 'view' }
   }
   const normalizedView = view && isSystemView(view) ? view : undefined
-  const projectUID = url.searchParams.get('scope')?.trim()
+  const scope = url.searchParams.get('scope') || undefined
+  const issue = url.searchParams.get('issue') || undefined
+  if (
+    issue &&
+    ((scope && !validUID(scope)) || !validUID(issue)) &&
+    (scope || issue.includes('#'))
+  ) {
+    return {
+      kind: 'kata',
+      ...(normalizedView ? { view: normalizedView } : {}),
+      link: { ...(scope ? { scope } : {}), issue },
+      graph: url.searchParams.get('graph') === '1',
+      filters,
+    }
+  }
+  const projectUID = scope?.trim()
   if (projectUID && !validUID(projectUID)) {
     return { kind: 'route-error', path: url.pathname + url.search, reason: 'project_uid' }
   }
-  const issueUID = url.searchParams.get('issue')?.trim()
+  const issueUID = issue?.trim()
   if (issueUID && !validUID(issueUID)) {
     const routeError: Extract<KataRoute, { kind: 'route-error' }> = {
       kind: 'route-error',
@@ -85,9 +105,12 @@ export function serializeRoute(route: KataRoute, routePath = applicationRoutePat
   if (route.kind === 'route-error') return route.path
   const query = new URLSearchParams()
   if (route.view) query.set('view', route.view)
-  if (route.projectUID) query.set('scope', route.projectUID)
-  if (route.issueUID) query.set('issue', route.issueUID)
-  if (route.graph && route.issueUID) query.set('graph', '1')
+  if (route.view === 'settings' && route.section) query.set('section', route.section)
+  const scope = route.link ? route.link.scope : route.projectUID
+  const issue = route.link ? route.link.issue : route.issueUID
+  if (scope) query.set('scope', scope)
+  if (issue) query.set('issue', issue)
+  if (route.graph && (route.link || route.issueUID)) query.set('graph', '1')
   for (const [name, values] of [
     ['label', route.filters.label],
     ['owner', route.filters.owner],
@@ -125,7 +148,11 @@ function isSystemView(value: string | undefined): value is SystemView {
   return systemViews.includes(value as SystemView)
 }
 
-function validUID(value: string): boolean {
+function isSettingsSection(value: string | null): value is SettingsSection {
+  return value === 'appearance' || value === 'search' || value === 'access'
+}
+
+export function validUID(value: string): boolean {
   return /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/.test(value)
 }
 

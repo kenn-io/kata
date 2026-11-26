@@ -78,7 +78,7 @@ describe('RecurrenceEditor — Common-mode rendering', () => {
         onSaved: vi.fn(),
       },
     })
-    expectDropdown('Frequency', 'Weekly')
+    expectDropdown('Frequency', 'week')
     const interval = screen.getByLabelText(/Every/i) as HTMLInputElement
     expect(interval.value).toBe('1')
     // Exactly one weekday chip is pre-selected (matches dtstart's weekday)
@@ -98,7 +98,7 @@ describe('RecurrenceEditor — Common-mode rendering', () => {
         onSaved: vi.fn(),
       },
     })
-    await chooseDropdown('Frequency', 'Monthly')
+    await chooseDropdown('Frequency', 'month')
     expect(screen.getByLabelText(/On day/i)).toBeTruthy()
     expect(screen.getByLabelText(/On the/i)).toBeTruthy()
   })
@@ -113,7 +113,7 @@ describe('RecurrenceEditor — Common-mode rendering', () => {
         onSaved: vi.fn(),
       },
     })
-    await chooseDropdown('Frequency', 'Yearly')
+    await chooseDropdown('Frequency', 'year')
     expectDropdown('Month', MONTH_LONG[new Date().getMonth()]!)
   })
 
@@ -134,11 +134,11 @@ describe('RecurrenceEditor — Common-mode rendering', () => {
         onSaved: vi.fn(),
       },
     })
-    await chooseDropdown('Frequency', 'Monthly')
+    await chooseDropdown('Frequency', 'month')
     const lastDay = screen.getByLabelText(/Last day of month/i) as HTMLInputElement
     await fireEvent.click(lastDay)
     expect(lastDay.checked).toBe(true)
-    await chooseDropdown('Frequency', 'Yearly')
+    await chooseDropdown('Frequency', 'year')
     // Click the "On day" radio for yearly mode so the day input becomes
     // the user-active control (the editor leaves yearlyDayMode at
     // "none" by default).
@@ -185,11 +185,11 @@ describe('RecurrenceEditor — delete', () => {
       },
     })
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Stop repeating' }))
     expect(onConfirm).toHaveBeenCalledOnce()
 
     await view.rerender({ disabled: true })
-    const deleteButton = screen.getByRole('button', { name: 'Delete' }) as HTMLButtonElement
+    const deleteButton = screen.getByRole('button', { name: 'Stop repeating' }) as HTMLButtonElement
     expect(deleteButton.disabled).toBe(true)
   })
 })
@@ -226,7 +226,7 @@ describe('RecurrenceEditor — Template block + summary', () => {
     })
     const summary = screen.getByTestId('recurrence-summary')
     expect(summary.textContent ?? '').toMatch(/^Weekly on /)
-    await chooseDropdown('Frequency', 'Daily')
+    await chooseDropdown('Frequency', 'day')
     expect(summary.textContent).toBe('Daily')
   })
 
@@ -297,7 +297,7 @@ describe('RecurrenceEditor — mode toggle', () => {
     const textarea = screen.getByLabelText(/RRULE/i) as HTMLTextAreaElement
     await fireEvent.input(textarea, { target: { value: 'FREQ=DAILY;INTERVAL=2' } })
     await fireEvent.click(screen.getByRole('button', { name: /Use Common mode/i }))
-    expectDropdown('Frequency', 'Daily')
+    expectDropdown('Frequency', 'day')
     expect((screen.getByLabelText(/Every/i) as HTMLInputElement).value).toBe('2')
   })
 
@@ -484,7 +484,7 @@ describe('RecurrenceEditor — edit mode prefill', () => {
         onPatch: vi.fn(),
       },
     })
-    expectDropdown('Frequency', 'Weekly')
+    expectDropdown('Frequency', 'week')
     expect((screen.getByLabelText(/Title/i) as HTMLInputElement).value).toBe('Weekly review')
   })
 
@@ -749,18 +749,8 @@ describe('RecurrenceEditor — edit diff', () => {
 })
 
 describe('RecurrenceEditor — 412 conflict', () => {
-  test('412 response repopulates form with server payload and shows the exact banner text', async () => {
-    const updatedServer: KataRecurrence = {
-      ...sample,
-      template_title: 'Updated upstream',
-      revision: 2,
-    }
-    const apiError = Object.assign(new Error('revision mismatch'), {
-      status: 412,
-      code: 'precondition_failed',
-      response: { recurrence: updatedServer, etag: '"rev-2"' },
-    })
-    const onPatch = vi.fn().mockRejectedValue(apiError)
+  test('keeps the draft when the rule changes', async () => {
+    const onPatch = vi.fn().mockRejectedValue(Object.assign(new Error('Conflict'), { status: 412 }))
     render(RecurrenceEditorDialog, {
       props: {
         open: true,
@@ -774,72 +764,17 @@ describe('RecurrenceEditor — 412 conflict', () => {
     await fireEvent.input(screen.getByLabelText(/Title/i), { target: { value: 'My edit' } })
     await fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     expect(
-      screen.getByText('Server version loaded; your unsaved edits were not applied.'),
+      screen.getByText(
+        'This rule changed elsewhere. Your draft is kept. Copy it, close, and reopen the rule to see the current version.',
+      ),
     ).toBeTruthy()
-    expect((screen.getByLabelText(/Title/i) as HTMLInputElement).value).toBe('Updated upstream')
-  })
-
-  test('412 with changed RRULE: form schedule fields reset to server values', async () => {
-    const updatedServer: KataRecurrence = {
-      ...sample,
-      rrule: 'FREQ=DAILY;INTERVAL=3',
-      revision: 2,
-    }
-    const apiError = Object.assign(new Error('revision mismatch'), {
-      status: 412,
-      code: 'precondition_failed',
-      response: { recurrence: updatedServer, etag: '"rev-2"' },
-    })
-    const onPatch = vi.fn().mockRejectedValue(apiError)
-    render(RecurrenceEditorDialog, {
-      props: {
-        open: true,
-        mode: editMode,
-        actor: 'user-a',
-        onClose: vi.fn(),
-        onCreate: vi.fn(),
-        onPatch,
-      },
-    })
-    // User changes title; server rule changes underneath.
-    await fireEvent.input(screen.getByLabelText(/Title/i), { target: { value: 'My edit' } })
-    await fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-    // After 412 reload: form shows server's DAILY with interval 3.
-    expectDropdown('Frequency', 'Daily')
-    expect((screen.getByLabelText(/Every/i) as HTMLInputElement).value).toBe('3')
-  })
-
-  test('412 then re-Save: second onPatch call uses the server-attached etag', async () => {
-    const updatedServer: KataRecurrence = { ...sample, template_title: 'Server title', revision: 2 }
-    let callCount = 0
-    const onPatch = vi.fn().mockImplementation(() => {
-      callCount += 1
-      if (callCount === 1) {
-        const err = Object.assign(new Error('revision mismatch'), {
-          status: 412,
-          code: 'precondition_failed',
-          response: { recurrence: updatedServer, etag: '"rev-2"' },
-        })
-        return Promise.reject(err)
-      }
-      return Promise.resolve()
-    })
-    render(RecurrenceEditorDialog, {
-      props: {
-        open: true,
-        mode: editMode,
-        actor: 'user-a',
-        onClose: vi.fn(),
-        onCreate: vi.fn(),
-        onPatch,
-      },
-    })
-    await fireEvent.input(screen.getByLabelText(/Title/i), { target: { value: 'First edit' } })
-    await fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-    // 412 fires; banner appears; form now shows server values.
-    await fireEvent.input(screen.getByLabelText(/Title/i), { target: { value: 'Second edit' } })
-    await fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-    expect(onPatch).toHaveBeenCalledTimes(2)
-    expect(onPatch.mock.calls[1]![2]).toBe('"rev-2"')
+    expect((screen.getByLabelText(/Title/i) as HTMLInputElement).value).toBe('My edit')
+    expect(onPatch).toHaveBeenCalledWith(sample, expect.anything(), '"rev-1"')
+    const save = screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement
+    expect(save.disabled).toBe(true)
+    await fireEvent.input(screen.getByLabelText(/Title/i), { target: { value: 'My revised edit' } })
+    expect(save.disabled).toBe(true)
+    await fireEvent.click(save)
+    expect(onPatch).toHaveBeenCalledTimes(1)
   })
 })

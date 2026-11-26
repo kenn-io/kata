@@ -22,6 +22,7 @@ func applyDeploymentEnv(cfg *DaemonConfig) error {
 		"KATA_BACKUP_DIR":                     &cfg.Backup.Dir,
 		"KATA_BACKUP_INTERVAL":                &cfg.Backup.Interval,
 		"KATA_BACKUP_RETAIN":                  &cfg.Backup.Retain,
+		"KATA_SEARCH_EMBEDDINGS_API":          (*string)(&cfg.Search.Embeddings.API),
 		"KATA_SEARCH_EMBEDDINGS_BASE_URL":     &cfg.Search.Embeddings.BaseURL,
 		"KATA_SEARCH_EMBEDDINGS_MODEL":        &cfg.Search.Embeddings.Model,
 		"KATA_SEARCH_EMBEDDINGS_API_KEY_FILE": &cfg.Search.Embeddings.APIKeyFile,
@@ -46,8 +47,9 @@ func applyDeploymentEnv(cfg *DaemonConfig) error {
 		cfg.Sources["mcp_startup_sections"] = "KATA_MCP_STARTUP_SECTIONS"
 	}
 	for name, field := range map[string]*bool{
-		"KATA_MCP_ENABLED":      &cfg.MCP.Enabled,
-		"KATA_MCP_ALL_PROJECTS": &cfg.MCP.AllProjects,
+		"KATA_DOCBANK_TRUST_PRIVATE_NETWORK": &cfg.Docbank.TrustPrivateNetwork,
+		"KATA_MCP_ENABLED":                   &cfg.MCP.Enabled,
+		"KATA_MCP_ALL_PROJECTS":              &cfg.MCP.AllProjects,
 	} {
 		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
 			parsed, err := strconv.ParseBool(value)

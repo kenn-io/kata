@@ -26,10 +26,14 @@ type HostFederationOperation struct {
 // hostOperationPolicies declares for the same route, which is why this table is
 // its own source of truth and not derived from that registry.
 var federationTransportOperations = map[string]HostFederationOperation{
-	"createCronJob":  {ID: "createCronJob", Mutation: true},
-	"replaceCronJob": {ID: "replaceCronJob", Mutation: true},
-	"archiveCronJob": {ID: "archiveCronJob", Mutation: true},
-	"restoreCronJob": {ID: "restoreCronJob", Mutation: true},
+	"federatedDocbankCapabilities": {ID: "federatedDocbankCapabilities"},
+	"uploadFederatedDocbank":       {ID: "uploadFederatedDocbank", Mutation: true},
+	"linkFederatedDocbank":         {ID: "linkFederatedDocbank", Mutation: true},
+	"federatedDocbankContent":      {ID: "federatedDocbankContent"},
+	"createCronJob":                {ID: "createCronJob", Mutation: true},
+	"replaceCronJob":               {ID: "replaceCronJob", Mutation: true},
+	"archiveCronJob":               {ID: "archiveCronJob", Mutation: true},
+	"restoreCronJob":               {ID: "restoreCronJob", Mutation: true},
 	// Cleanup authenticates its exact secret/project/peer inside the native
 	// revocation transaction; it cannot acquire project data or write authority.
 	"disconnectRelayEnrollment": {ID: "disconnectRelayEnrollment", Mutation: true},
@@ -52,6 +56,7 @@ var federationTransportOperations = map[string]HostFederationOperation{
 	// RefreshProjectFederationBaseline, so this GET writes.
 	"getFederationProjectMetadata":  {ID: "getFederationProjectMetadata", Mutation: true},
 	"pollFederationProjectEvents":   {ID: "pollFederationProjectEvents"},
+	"watchFederationProjectEvents":  {ID: "watchFederationProjectEvents"},
 	"searchFederationProject":       {ID: "searchFederationProject"},
 	"ingestFederationProjectEvents": {ID: "ingestFederationProjectEvents", Mutation: true},
 }

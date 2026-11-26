@@ -67,6 +67,14 @@ for (const { daemon, roundTripMilliseconds } of daemons) {
         budgetMilliseconds,
       )
     }
+
+    // Reaching the end must still reveal and focus tasks beyond the first batches.
+    const rows = page.locator('button.row[data-uid]')
+    await rows.first().focus()
+    await page.keyboard.press('End')
+    await expect.poll(() => rows.count()).toBeGreaterThan(150)
+    await expect(rows.last()).toBeFocused()
+    await expect(rows.last()).toBeInViewport()
   })
 }
 
@@ -93,9 +101,11 @@ async function switchTo(page: Page, name: string): Promise<number> {
         ) {
           return false
         }
-        const badges = [...document.querySelectorAll('button.row[data-uid] .id-badge')]
-        if (expected !== '0' && badges.length === 0) return false
-        return badges.every((badge) => badge.getAttribute('title')?.startsWith(`${name}#`))
+        const rows = [...document.querySelectorAll<HTMLElement>('button.row[data-uid]')]
+        if (expected !== '0' && rows.length === 0) return false
+        return rows.every((row) =>
+          row.querySelector('.kit-sr-only')?.textContent?.trim().startsWith(`ID ${name}#`),
+        )
       }
       return new Promise<number>((resolve, reject) => {
         const start = performance.now()

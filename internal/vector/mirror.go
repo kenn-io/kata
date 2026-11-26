@@ -18,16 +18,17 @@ const mirrorPageSize = 500
 // issues is a privacy contract: mirror content is sent to the embedding
 // endpoint, and deleting an issue must stop that outbound flow. A restore
 // puts the issue back in the feed, re-mirroring and re-embedding it. It
-// returns the number of rows written or removed.
-func (ix *Index) RefreshMirror(ctx context.Context, store db.Storage) (int, error) {
+// returns the number of rows written or removed. A nil allowed callback permits
+// every project.
+func (ix *Index) RefreshMirror(ctx context.Context, store db.Storage, allowed func(context.Context, string) (bool, error)) (int, error) {
 	if ix.pg != nil {
-		return ix.pg.refreshMirror(ctx, store)
+		return ix.pg.refreshMirror(ctx, store, allowed)
 	}
 	known, err := loadMirrorKeys(ctx, ix.db, `SELECT issue_uid, content_revision, project_uid FROM issue_mirror`)
 	if err != nil {
 		return 0, fmt.Errorf("vector: scan mirror keys: %w", err)
 	}
-	changed, stale, err := syncMirror(ctx, store, known, func(page []db.IssueContent) (int, error) {
+	changed, stale, err := syncMirror(ctx, store, known, allowed, func(page []db.IssueContent) (int, error) {
 		changed := 0
 		for _, ic := range page {
 			res, err := ix.db.ExecContext(ctx, `
@@ -99,7 +100,7 @@ func loadMirrorKeys(ctx context.Context, queryer mirrorQuerier, query string) (m
 
 // syncMirror consumes known as it pages the live feed. Leftovers are safe to
 // remove only after every page has been read successfully.
-func syncMirror(ctx context.Context, store db.Storage, known map[string]mirrorKey, upsert func([]db.IssueContent) (int, error)) (changed int, leftovers []string, err error) {
+func syncMirror(ctx context.Context, store db.Storage, known map[string]mirrorKey, allowed func(context.Context, string) (bool, error), upsert func([]db.IssueContent) (int, error)) (changed int, leftovers []string, err error) {
 	var afterID int64
 	for {
 		page, err := store.ListIssueContent(ctx, afterID, mirrorPageSize)
@@ -109,9 +110,23 @@ func syncMirror(ctx context.Context, store db.Storage, known map[string]mirrorKe
 		if len(page) == 0 {
 			break
 		}
+		projects := make(map[string]bool)
 		var updates []db.IssueContent
 		for _, issue := range page {
 			afterID = issue.ID
+			if allowed != nil {
+				ok, seen := projects[issue.ProjectUID]
+				if !seen {
+					ok, err = allowed(ctx, issue.ProjectUID)
+					if err != nil {
+						return changed, nil, fmt.Errorf("vector: check project eligibility: %w", err)
+					}
+					projects[issue.ProjectUID] = ok
+				}
+				if !ok {
+					continue
+				}
+			}
 			key, exists := known[issue.UID]
 			delete(known, issue.UID)
 			if exists && key.revision == issue.ContentRevision && key.projectUID == issue.ProjectUID {

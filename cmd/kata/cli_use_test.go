@@ -30,6 +30,7 @@ import (
 	"go.kenn.io/kata/internal/telemetry"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/tui"
+	"go.kenn.io/kata/internal/version"
 	kataclient "go.kenn.io/kata/pkg/client"
 )
 
@@ -95,6 +96,34 @@ func settledCLIUse(t *testing.T, run func(*testing.T)) {
 }
 
 var cliSurface = []map[string]any{{"surface": "cli"}}
+
+func TestCLIUseSkipsTaggedGoInstall(t *testing.T) {
+	oldVersion, oldCommit := version.Version, version.Commit
+	version.Version, version.Commit = "v0.23.0", "unknown"
+	t.Cleanup(func() { version.Version, version.Commit = oldVersion, oldCommit })
+	t.Setenv("TELEMETRY_ENABLED", "1")
+	t.Setenv("KATA_TELEMETRY_ENABLED", "")
+	t.Setenv(hooks.HookVersionEnv, "")
+	t.Setenv("KATA_HOME", t.TempDir())
+	stubIsTTY(t, true)
+	assert.False(t, reportsCLIUse(findCommand(t, "projects", "list")))
+	target := newCLIUseDaemon(t)
+	settledCLIUse(t, func(t *testing.T) {
+		cmd := findCommand(t, "agent-contract-hook")
+		cmd.SetContext(t.Context())
+		cliUseTarget.Store(&client.ResolvedDaemon{BaseURL: target.url})
+		t.Cleanup(func() { cliUseTarget.Store(nil) })
+		require.True(t, reportsAgentUse(cmd))
+		reportCLIUse(cmd)
+		synctest.Wait()
+		assert.Zero(t, target.posts.Load())
+		version.Commit = "1234567"
+		require.True(t, telemetry.Eligible())
+		reportCLIUse(cmd)
+		synctest.Wait()
+		target.waitForPosts(t, 1)
+	})
+}
 
 // newCLIUseEnv boots a daemon whose reporter is reporter, for a person at a
 // terminal with no hook marker inherited.

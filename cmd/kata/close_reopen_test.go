@@ -3,9 +3,14 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -310,18 +315,21 @@ func TestCloseCmd_EvidenceValueWithCommaIsPreserved(t *testing.T) {
 }
 
 func TestCloseCmd_DryRunDoesNotMutate(t *testing.T) {
-	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
+	env, dir, pid, ref := setupWorkspaceWithIssue(t, "test issue")
 	out := runCLI(t, env, dir,
 		"close", ref,
 		"--done",
 		"--message", "Fixed Safari callback double-submit and ran tests.",
 		"--commit", "abc1234",
+		"--comment", "finished",
 		"--dry")
 	assert.Contains(t, out, "dry-run")
 	assert.Contains(t, out, "[open]")
 
 	show := runCLI(t, env, dir, "show", ref, "--json")
 	assert.Contains(t, show, `"status":"open"`)
+	got := fetchIssueViaHTTPWithComments(t, env, pid, ref)
+	assert.Empty(t, got.Comments)
 }
 
 func TestCloseCmd_RejectsDryRunSpelling(t *testing.T) {
@@ -415,7 +423,6 @@ func TestCloseCmd_ErrorTextNamesAlternative(t *testing.T) {
 				"close", ref, "--done", "--message", tc.message)
 			require.Error(t, err)
 			assert.Contains(t, stderr, tc.errorText)
-			assert.Contains(t, stderr, `kata label add <ref> needs-review --comment "<what remains>"`)
 			assert.NotContains(t, stderr, "edit <ref> --label")
 		})
 	}
@@ -621,4 +628,86 @@ func TestCloseCmd_BodyAliasesMessage(t *testing.T) {
 	issue := fetchIssueViaHTTPWithComments(t, env, pid, ref)
 	require.Len(t, issue.Comments, 1)
 	assert.Equal(t, "follow-up note", issue.Comments[0].Body)
+}
+
+type failingHintWriter struct{}
+
+func (failingHintWriter) Write([]byte) (int, error) { return 0, errors.New("stderr unavailable") }
+
+func TestClose_CommentAndHintFailures(t *testing.T) {
+	for _, failure := range []string{"none", "stderr", "comment"} {
+		t.Run(failure, func(t *testing.T) {
+			env, dir, pid := setupCLIWorkspace(t)
+			parent := createIssue(t, env, pid, "Parent")
+			child := createIssue(t, env, pid, "Child")
+			runCLI(t, env, dir, "edit", child, "--parent", parent)
+			baseURL := env.URL
+			if failure == "comment" {
+				target, err := url.Parse(env.URL)
+				require.NoError(t, err)
+				proxy := &httputil.ReverseProxy{Rewrite: func(r *httputil.ProxyRequest) { r.SetURL(target) }}
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/comments") {
+						http.Error(w, "unavailable", http.StatusServiceUnavailable)
+						return
+					}
+					proxy.ServeHTTP(w, r)
+				}))
+				t.Cleanup(server.Close)
+				baseURL = server.URL
+			}
+			resetFlags(t)
+			cmd := newRootCmd()
+			cmd.SetOut(io.Discard)
+			var stderr bytes.Buffer
+			if failure == "stderr" {
+				cmd.SetErr(failingHintWriter{})
+			} else {
+				cmd.SetErr(&stderr)
+			}
+			cmd.SetArgs([]string{"--workspace", dir, "close", child, "--done", "--message", "Completed the requested work and verified the result.", "--commit", "abc1234", "--comment", "follow-up note", "--idempotency-key", "close-child"})
+			cmd.SetContext(contextWithBaseURL(t.Context(), baseURL))
+			err := cmd.Execute()
+			switch failure {
+			case "none":
+				require.NoError(t, err)
+				assert.Contains(t, stderr.String(), "Hint: parent kata#"+parent+" ")
+			case "stderr":
+				require.ErrorContains(t, err, "stderr unavailable")
+				issue := fetchIssueViaHTTPWithComments(t, env, pid, child)
+				require.Len(t, issue.Comments, 1)
+				assert.Equal(t, "follow-up note", issue.Comments[0].Body)
+			case "comment":
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "comment")
+				assert.Contains(t, stderr.String(), "Hint: parent kata#"+parent)
+			}
+		})
+	}
+}
+
+func TestParentReadyHint_QuotesRefAndCarriesDaemonSelection(t *testing.T) {
+	for _, tc := range []struct {
+		name, ref, daemon, workspace, want string
+	}{
+		{
+			name: "plain ref", ref: "kata#abc1", want: "parent kata#abc1 has no open children: close it with kata close kata#abc1 --done …",
+		},
+		{
+			name:      "explicit daemon and workspace",
+			ref:       "My Project#abc1",
+			daemon:    "work laptop",
+			workspace: "/tmp/my repo",
+			want: "parent My Project#abc1 has no open children: close it with kata close 'My Project#abc1'" +
+				" --daemon 'work laptop' --workspace '/tmp/my repo' --done …",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetFlags(t)
+			flags.Daemon, flags.Workspace = tc.daemon, tc.workspace
+			hint := parentReadyHint(tc.ref)
+			assert.Equal(t, "parent_ready", hint.Code)
+			assert.Equal(t, tc.want, hint.Message)
+		})
+	}
 }

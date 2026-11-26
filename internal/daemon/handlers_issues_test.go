@@ -1730,6 +1730,26 @@ func TestCreateIssue_InvalidLabelIs400(t *testing.T) {
 	assert.Equal(t, 400, resp.StatusCode)
 }
 
+func TestCreateIssue_PriorityLabelRejected(t *testing.T) {
+	env := testenv.New(t)
+	pid := initLocalWorkspace(t, env, "kata")
+	resp, body := envDoRaw(t, env, http.MethodPost, projectPath(pid)+"/issues", map[string]any{
+		"actor": "tester", "title": "priority label", "labels": []string{"p2"},
+	}, nil)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	assert.Contains(t, string(body), "kata create --priority N")
+	labels := []string{"p2"}
+	_, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: pid, Title: "priority label", Author: "tester", Labels: labels,
+		IdempotencyKey: "retry-key", IdempotencyFingerprint: db.Fingerprint("priority label", "", nil, labels, nil, nil, nil),
+	})
+	require.NoError(t, err)
+	resp, body = envDoRaw(t, env, http.MethodPost, projectPath(pid)+"/issues", map[string]any{
+		"actor": "tester", "title": "priority label", "labels": labels,
+	}, map[string]string{"Idempotency-Key": "retry-key"})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+}
+
 // TestCreateIssue_InitialSelfLinkIs400 verifies that an initial link whose
 // to_number equals the issue being created (which lands as #1 in a fresh
 // project) surfaces as a 400 validation error, not a 500. The DB layer

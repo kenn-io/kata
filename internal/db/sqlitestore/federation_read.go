@@ -46,6 +46,12 @@ func (d *Store) ReadFederation(ctx context.Context, in db.FederationReadParams) 
 		return err
 	}
 	err := d.RetryTransient(ctx, func() error {
+		var quiet bool
+		var err error
+		out, quiet, err = db.QuietFederationPoll(ctx, d, in, false)
+		if quiet || err != nil {
+			return err
+		}
 		tx, err := d.BeginTx(ctx, &sql.TxOptions{ReadOnly: !in.Metadata})
 		if err != nil {
 			return err

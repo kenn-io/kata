@@ -509,7 +509,7 @@ func webLocalSPARequestAllowed(r *http.Request) bool {
 	case "metadata":
 		return len(parts) == 2 && r.Method == http.MethodPost
 	case "recurrences":
-		return (len(parts) == 2 && r.Method == http.MethodPost) ||
+		return (len(parts) == 2 && (r.Method == http.MethodGet || r.Method == http.MethodPost)) ||
 			(len(parts) == 3 && (r.Method == http.MethodPatch || r.Method == http.MethodDelete))
 	case "issues":
 		return webLocalIssueRequestAllowed(r, parts[2:])
@@ -530,7 +530,11 @@ func webLocalIssueRequestAllowed(r *http.Request, parts []string) bool {
 	}
 	if len(parts) == 2 {
 		switch parts[1] {
-		case "comments", "labels", "links", "metadata", "notifications", "attachments":
+		case "labels":
+			// PATCH swaps labels in one request: the same authority as
+			// adding or removing one label.
+			return r.Method == http.MethodPost || r.Method == http.MethodPatch
+		case "comments", "links", "metadata", "notifications", "attachments":
 			return r.Method == http.MethodPost
 		case "actions":
 			return false

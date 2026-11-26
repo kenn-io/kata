@@ -1276,10 +1276,11 @@ func createClaimHubIssueInDB(t *testing.T, store *sqlitestore.Store) (db.Project
 func createClaimForwardingPair(
 	t *testing.T,
 	capabilities string,
+	hubOptions ...testenv.Option,
 ) (*testenv.Env, *testenv.Env, db.Project, db.Project, db.Issue, string) {
 	t.Helper()
 	ctx := t.Context()
-	hub := testenv.New(t)
+	hub := testenv.New(t, hubOptions...)
 	hubProject, issue := createClaimHubIssue(t, hub)
 	spoke := testenv.New(t)
 	spokeProject, err := spoke.DB.CreateProjectWithUID(ctx, hubProject.Name, hubProject.UID)

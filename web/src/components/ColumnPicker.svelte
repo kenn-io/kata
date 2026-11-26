@@ -1,22 +1,28 @@
 <script lang="ts">
-  import Columns3Icon from '@lucide/svelte/icons/columns-3'
-  import { Checkbox, autoReposition, dismissable, floatingPopoverStyle } from '@kenn-io/kit-ui'
+  import SlidersHorizontalIcon from '@lucide/svelte/icons/sliders-horizontal'
+  import {
+    Checkbox,
+    SegmentedControl,
+    autoReposition,
+    dismissable,
+    floatingPopoverStyle,
+  } from '@kenn-io/kit-ui'
   import { tick } from 'svelte'
-  import { KATA_OPTIONAL_TASK_COLUMNS, type KataTaskColumnVisibility } from '../lib/kata/columns'
+  import type { KataOptionalTaskColumn, KataTaskColumnVisibility } from '../lib/kata/columns'
 
   interface Props {
     visibility: KataTaskColumnVisibility
+    columns: readonly { id: KataOptionalTaskColumn; label: string }[]
+    splitDirection: 'horizontal' | 'vertical'
+    onSplitDirectionChange: (direction: 'horizontal' | 'vertical') => void
     onchange: (visibility: KataTaskColumnVisibility) => void
-    onShowAll: () => void
   }
 
-  let { visibility, onchange, onShowAll }: Props = $props()
+  let { visibility, columns, splitDirection, onSplitDirectionChange, onchange }: Props = $props()
   let open = $state(false)
   let trigger = $state<HTMLButtonElement>()
   let panel = $state<HTMLDivElement>()
   let panelStyle = $state('')
-
-  const allVisible = $derived(KATA_OPTIONAL_TASK_COLUMNS.every((column) => visibility[column.id]))
 
   $effect(() => {
     if (!open) return
@@ -53,100 +59,106 @@
   }
 </script>
 
-<div class="column-picker">
+<div class="display-menu">
   <button
     bind:this={trigger}
     type="button"
-    aria-label="Columns"
-    title="Choose columns shown when space allows"
+    aria-label="Display"
+    title="Display"
     aria-expanded={open}
     onclick={() => void toggle()}
   >
-    <Columns3Icon size={13} strokeWidth={2} aria-hidden="true" />
-    <span class="action-label">Columns</span>
+    <SlidersHorizontalIcon size={14} strokeWidth={2} aria-hidden="true" />
+    <span class="action-label">Display</span>
   </button>
   {#if open}
-    <div bind:this={panel} class="column-picker__panel kit-popover-card" style={panelStyle}>
-      <div class="column-picker__title">Shown when space allows</div>
-      {#each KATA_OPTIONAL_TASK_COLUMNS as column (column.id)}
-        <Checkbox
-          checked={visibility[column.id]}
-          label={column.label}
-          onchange={(checked) => onchange({ ...visibility, [column.id]: checked })}
+    <div bind:this={panel} class="display-menu__panel kit-popover-card" style={panelStyle}>
+      <div class="display-menu__section">
+        <div class="display-menu__title">Task opens</div>
+        <SegmentedControl
+          ariaLabel="Task opens"
+          options={[
+            { value: 'horizontal', label: 'Beside list' },
+            { value: 'vertical', label: 'Below list' },
+          ]}
+          value={splitDirection}
+          onchange={(value) => onSplitDirectionChange(value as 'horizontal' | 'vertical')}
+          block
         />
-      {/each}
-      <button type="button" class="column-picker__reset" disabled={allVisible} onclick={onShowAll}>
-        Show all
-      </button>
+      </div>
+      <div class="display-menu__section">
+        <div class="display-menu__title">Columns, shown when space allows</div>
+        {#each columns as column (column.id)}
+          <Checkbox
+            checked={visibility[column.id]}
+            label={column.label}
+            onchange={(checked) => onchange({ ...visibility, [column.id]: checked })}
+          />
+        {/each}
+      </div>
     </div>
   {/if}
 </div>
 
 <style>
-  .column-picker {
+  .display-menu {
     position: relative;
     flex-shrink: 0;
   }
 
-  .column-picker > button {
+  .display-menu > button {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: var(--space-2);
-    min-height: 26px;
-    padding: 0 var(--space-4);
+    height: 24px;
+    padding: 0 9px;
     border: 1px solid var(--border-default);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     background: var(--bg-surface);
     color: var(--text-secondary);
     font: inherit;
-    font-size: var(--font-size-xs);
-    font-weight: 500;
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium);
     white-space: nowrap;
     cursor: pointer;
   }
 
-  .column-picker > button:hover,
-  .column-picker > button:focus-visible,
-  .column-picker > button[aria-expanded='true'] {
+  .display-menu > button:hover,
+  .display-menu > button:focus-visible,
+  .display-menu > button[aria-expanded='true'] {
     border-color: var(--text-muted);
     color: var(--text-primary);
   }
 
-  .column-picker__panel {
+  .display-menu__panel {
     position: fixed;
     z-index: var(--z-popover);
     display: flex;
     flex-direction: column;
-    gap: var(--space-4);
-    min-width: 180px;
+    gap: 16px;
+    min-width: 240px;
     max-width: calc(100vw - 16px);
     max-height: calc(100vh - 16px);
     overflow-y: auto;
     padding: var(--space-5);
   }
 
-  .column-picker__title {
+  .display-menu__section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .display-menu__title {
     color: var(--text-muted);
     font-size: var(--font-size-xs);
     font-weight: var(--font-weight-medium);
   }
 
-  .column-picker__reset {
-    margin-top: var(--space-2);
-    padding: var(--space-3) var(--space-4) 0;
-    border: 0;
-    border-top: 1px solid var(--border-muted);
-    background: transparent;
-    color: var(--accent-blue);
-    font: inherit;
-    font-size: var(--font-size-xs);
-    text-align: left;
-    cursor: pointer;
-  }
-
-  .column-picker__reset:disabled {
-    color: var(--text-muted);
-    cursor: default;
+  @container list (max-width: 420px) {
+    .action-label {
+      display: none;
+    }
   }
 </style>

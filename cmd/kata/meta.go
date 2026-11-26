@@ -14,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/commentref"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/textsafe"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -27,10 +28,12 @@ func newMetaCmd() *cobra.Command {
   work.attention      ok | needs-human | stuck  (agent's live signal)
   work.attention_msg  one-line reason shown with work.attention
   work.branch         git branch doing the work
+  work.pr_url         the issue's PR URL, still valid after close
   someday             true (with --json-value) parks the issue without a date
-By convention, agents write only their own work.* keys and never on closed
-issues; Kata does not enforce this. Planning dates use kata schedule and
-kata deadline.`,
+Kata accepts only the listed work.attention values. By convention, agents
+write only their own work.* keys and never on closed issues, and readers
+ignore work.* on closed issues except work.pr_url. Planning dates use
+kata schedule and kata deadline.`,
 	}
 	cmd.AddCommand(newMetaSetCmd(), newMetaUnsetCmd(), newMetaGetCmd())
 	return cmd
@@ -52,7 +55,7 @@ See kata meta --help for the keys agents use.`,
   kata meta set abc4 someday true --json-value --agent`,
 		Args: cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			value, err := parseMetaSetValue(args[2], jsonValue)
+			value, err := parseMetaSetValue(args[1], args[2], jsonValue)
 			if err != nil {
 				return err
 			}
@@ -104,7 +107,7 @@ func newMetaGetCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "get <ref> [key]",
 		Short:   "get issue metadata",
-		Long:    `Read one metadata key, or omit the key to read all metadata. See kata meta --help for the keys agents use.`,
+		Long:    `Read one metadata key, or omit the key to read all metadata. An unset key succeeds with an empty answer; a missing issue still fails as not found. See kata meta --help for the keys agents use.`,
 		Example: `  kata meta get abc4 work.attention --agent`,
 		Args:    cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -182,9 +185,12 @@ type metaGetKeyJSON struct {
 	Value    jsontext.Value `json:"value"`
 }
 
-func parseMetaSetValue(raw string, asJSON bool) (jsontext.Value, error) {
-	return parseMetaValue(raw, asJSON,
-		"null is not allowed with --json-value; use `kata meta unset` to clear a key")
+func parseMetaSetValue(key, raw string, asJSON bool) (jsontext.Value, error) {
+	message := "null is not allowed with --json-value; use `kata meta unset` to clear a key"
+	if metadata.IssueRegistry[key].Type == metadata.TypeAttention {
+		message = metadata.AttentionValuesMessage + "; " + message
+	}
+	return parseMetaValue(raw, asJSON, message)
 }
 
 func parseMetaGuardValue(raw string, asJSON bool) (jsontext.Value, error) {
@@ -511,11 +517,13 @@ func printMetaGet(cmd *cobra.Command, issue metaIssueWire, key string) error {
 	if key != "" {
 		value, ok := issue.Metadata[key]
 		if !ok {
-			return &cliError{
-				Message:  fmt.Sprintf("metadata key not found: %s", key),
-				Kind:     kindNotFound,
-				ExitCode: ExitNotFound,
+			switch mode {
+			case outputJSON:
+				return printMetaValue(cmd, key, jsontext.Value("null"), issue, mode)
+			case outputAgent:
+				return printMetaAgentSummary(cmd, issue, 0)
 			}
+			return nil
 		}
 		return printMetaValue(cmd, key, value, issue, mode)
 	}
@@ -532,8 +540,7 @@ func printMetaGet(cmd *cobra.Command, issue metaIssueWire, key string) error {
 		return err
 	}
 	if mode == outputAgent {
-		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "OK meta get %s count=%d revision=rev-%d\n",
-			agentValue(issue.ShortID), len(issue.Metadata), issue.Revision); err != nil {
+		if err := printMetaAgentSummary(cmd, issue, len(issue.Metadata)); err != nil {
 			return err
 		}
 		for _, k := range sortedMetaKeys(issue.Metadata) {
@@ -575,8 +582,7 @@ func printMetaValue(cmd *cobra.Command, key string, value jsontext.Value, issue 
 		return err
 	}
 	if mode == outputAgent {
-		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "OK meta get %s count=1 revision=rev-%d\n",
-			agentValue(issue.ShortID), issue.Revision); err != nil {
+		if err := printMetaAgentSummary(cmd, issue, 1); err != nil {
 			return err
 		}
 		return writeMetaAgentRow(cmd, key, compact)
@@ -587,6 +593,11 @@ func printMetaValue(cmd *cobra.Command, key string, value jsontext.Value, issue 
 		return err
 	}
 	_, err := fmt.Fprintln(cmd.OutOrStdout(), textsafe.Line(string(compact)))
+	return err
+}
+
+func printMetaAgentSummary(cmd *cobra.Command, issue metaIssueWire, count int) error {
+	_, err := fmt.Fprintf(cmd.OutOrStdout(), "OK meta get %s count=%d revision=rev-%d\n", agentValue(issue.ShortID), count, issue.Revision)
 	return err
 }
 

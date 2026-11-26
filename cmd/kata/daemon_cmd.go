@@ -725,8 +725,20 @@ func daemonStatusCmd() *cobra.Command {
 			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Selected daemon: %s (source: %s)\n", selected.State, selected.Source); err != nil {
 				return err
 			}
+			// The selected state is already shown; stderr keeps the recovery hint.
+			if cli, ok := errors.AsType[*cliError](statusErr); ok && selected.State == "local_unreachable" {
+				cli.Message = ""
+				cli.Hint = selected.NextAction
+			}
 			if selected.Message != "" {
-				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "  reason: %s\n", selected.Message); err != nil {
+				reason := selected.Message
+				for _, d := range out.Daemons {
+					if selected.statusReason != "" && d.PID == selected.PID && d.Address == selected.Endpoint {
+						reason = selected.statusReason
+						break
+					}
+				}
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "  reason: %s\n", reason); err != nil {
 					return err
 				}
 			}
@@ -1487,6 +1499,13 @@ func runDaemonProcess(
 		insecureReadonly, allowLocalSession, allowTrustedProxySession, dcfg.Auth.Token,
 	)
 	webCapabilities := []string{webAuthentication, updates}
+	webHandler, releaseAssets, err := kataweb.NewEmbeddedHandlerWithReleaseStatus()
+	if err != nil {
+		return fmt.Errorf("build embedded web handler: %w", err)
+	}
+	if !releaseAssets {
+		webCapabilities = append(webCapabilities, daemonruntime.WebCapabilityPlaceholderAssets)
+	}
 	webRuntime, err := daemon.NewWebRuntime(daemon.WebRuntimeOptions{
 		Origin:       webEndpoint.Origin,
 		OriginStable: webEndpoint.OriginStable,
@@ -1673,10 +1692,6 @@ func runDaemonProcess(
 		}
 		defer func() { _ = signingVerifier.Close() }()
 	}
-	webHandler, err := kataweb.NewEmbeddedHandler()
-	if err != nil {
-		return fmt.Errorf("build embedded web handler: %w", err)
-	}
 	docbankClient := docbank.New(dcfg.Docbank)
 	var mcpHandler http.Handler
 	if dcfg.MCP.Enabled {
@@ -1738,6 +1753,9 @@ func runDaemonProcess(
 		MCPEvents:                 mcpEvents,
 		MCPEventsDisabledReason:   mcpEventsReason,
 		FederationWake:            federationWake,
+		FederationSyncOnce: func(ctx context.Context, binding db.FederationBinding, credential config.FederationCredential) error {
+			return federation.SyncFederationOnceWithPulledEvents(ctx, store, binding, credential, client.Opts{}, publisher.Events)
+		},
 		FederationPullOnce: func(ctx context.Context, binding db.FederationBinding, credential config.FederationCredential) error {
 			return federation.SyncFederationPullOnlyOnceWithPulledEvents(ctx, store, binding, credential, client.Opts{}, publisher.Events)
 		},
@@ -2253,7 +2271,7 @@ func startEmbeddingReconciler(
 	if len(publishers) > 0 {
 		publisher = publishers[0]
 	}
-	reconciler := daemon.NewConfiguredEmbeddingReconciler(store, idx, embedder, ec, publisher, drainAdmission, config.DefaultFederationCredentialStore(), federation.EmbeddingProducerConnected, federation.EmbeddingProducerAuthorized)
+	reconciler := daemon.NewConfiguredEmbeddingReconciler(store, idx, embedder, ec, publisher, drainAdmission, config.DefaultFederationCredentialStore(), federation.EmbeddingProducerConnected, federation.EmbeddingProducerAuthorized, nil)
 	workers.Go(func() {
 		if err := reconciler.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			daemonLog.Printf("reconciler: %v", err)

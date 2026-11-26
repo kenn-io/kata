@@ -35,7 +35,7 @@ const RepeatedAdoptionEventFeature = "repeated_adoption_v1"
 const RelayCrossLinksEventFeature = "relay_cross_links_v1"
 
 // SupportedEventFeatures lists event capabilities understood by this daemon.
-const SupportedEventFeatures = CronEventFeature + "," + IssueMoveEventFeature + "," + RepeatedAdoptionEventFeature + "," + IssueDateZoneEventFeature + "," + RelayCrossLinksEventFeature
+const SupportedEventFeatures = CronEventFeature + "," + DocbankOriginEventFeature + "," + IssueMoveEventFeature + "," + RepeatedAdoptionEventFeature + "," + IssueDateZoneEventFeature + "," + RelayCrossLinksEventFeature
 
 // Native cron job projections are immutable and retained as tombstones, so a
 // positive job result remains valid for that project UID's lifetime.
@@ -64,13 +64,14 @@ func MergeEventFeatures(values ...string) string {
 func PayloadRequiredFeatures(kind, payload string) (string, error) {
 	native, nativeErr := payloadHasNativeRecurringState(kind, payload)
 	zone, zoneErr := payloadZonedDateFeature(kind, payload)
-	if err := cmp.Or(nativeErr, zoneErr); err != nil {
+	origin, originErr := payloadDocbankOriginFeature(kind, payload)
+	if err := cmp.Or(nativeErr, zoneErr, originErr); err != nil {
 		return "", err
 	}
 	if native {
 		zone = MergeEventFeatures(zone, CronEventFeature)
 	}
-	return MergeEventFeatures(EventRequiredFeatures(kind), zone), nil
+	return MergeEventFeatures(EventRequiredFeatures(kind), zone, origin), nil
 }
 
 func payloadZonedDateFeature(kind, payload string) (string, error) {
@@ -337,6 +338,48 @@ type FederationReadResult struct {
 	ResetAfterID           int64
 }
 
+// QuietFederationPoll uses request-entry authorization and skips transaction fences.
+// Its cursor and membership decision share one statement snapshot.
+func QuietFederationPoll(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, in FederationReadParams, postgres bool) (FederationReadResult, bool, error) {
+	var out FederationReadResult
+	if in.Metadata || in.IssueUID != "" {
+		return out, false, nil
+	}
+	movedFrom, candidates := federationCandidates(postgres)
+	candidates = strings.ReplaceAll(candidates, "$3", `(SELECT uid FROM projects WHERE id=$1)`)
+	query := `WITH bounds AS (SELECT COALESCE(MAX(id),0) AS newest FROM events)
+ SELECT p.uid, bounds.newest,
+ EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=p.id),
+ EXISTS(SELECT 1 FROM purge_log WHERE project_id=p.id AND purge_reset_after_event_id>$2) OR
+ EXISTS(SELECT 1 FROM project_purge_log WHERE project_id=p.id AND purge_reset_after_event_id>$2) OR
+ EXISTS(SELECT 1 FROM meta WHERE key=$3 || p.uid AND CASE WHEN key=$3 || p.uid THEN CAST(value AS BIGINT) END>$2),
+ CASE WHEN bounds.newest<=$2 THEN false
+ WHEN (SELECT COUNT(*) FROM (SELECT 1 FROM issues WHERE project_id=$1 LIMIT (SELECT newest-$2+1 FROM bounds)) owned) >= bounds.newest-$2
+ THEN EXISTS(SELECT 1 FROM events e WHERE e.id>$2 AND e.id<=bounds.newest AND e.type<>'sync.reset_required' AND
+ (e.project_id=$1 OR (SELECT i.project_id FROM issues i WHERE i.uid=e.issue_uid)=$1 OR (e.type='issue.moved' AND ` + movedFrom + `=p.uid)))
+ ELSE EXISTS(SELECT 1 FROM (` + candidates + `) candidates WHERE id IS NOT NULL) END
+ FROM projects p CROSS JOIN bounds WHERE p.id=$1 AND p.deleted_at IS NULL`
+	var uid string
+	var newest int64
+	var bound, reset, visible bool
+	err := q.QueryRowContext(ctx, query, in.ProjectID, in.AfterID, ProjectStreamResetMetadataPrefix).Scan(&uid, &newest, &bound, &reset, &visible)
+	if errors.Is(err, sql.ErrNoRows) {
+		return out, false, nil
+	}
+	if err != nil || !bound || reset || visible {
+		return out, false, err
+	}
+	out = FederationReadResult{Events: []Event{}, NextAfterID: max(in.AfterID, newest)}
+	out.RequiredFeatures, err = ProjectRequiredEventFeatures(ctx, q, uid)
+	if err == nil {
+		err = RequireEventFeatures(in.Features, out.RequiredFeatures)
+	}
+	return out, true, err
+}
+
 // ReadFederationTransaction supplies common decisions while each backend owns
 // its isolation/retry/fences, baseline event writer and event row decoder.
 func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationReadParams, project Project, binding FederationBinding, refresh func() (FederationBinding, error), readEvents func(int64, int) ([]Event, error)) (FederationReadResult, error) {
@@ -363,10 +406,12 @@ func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationRea
 		after = binding.ReplayHorizonEventID
 	}
 	var reset sql.NullInt64
-	err = tx.QueryRowContext(ctx, `SELECT MAX(cursor) FROM (
+	var newest int64
+	err = tx.QueryRowContext(ctx, `SELECT (SELECT MAX(cursor) FROM (
  SELECT MAX(purge_reset_after_event_id) AS cursor FROM purge_log WHERE project_id=$1 AND purge_reset_after_event_id>$2
  UNION ALL SELECT MAX(purge_reset_after_event_id) AS cursor FROM project_purge_log WHERE project_id=$1 AND purge_reset_after_event_id>$2
- UNION ALL SELECT CAST(value AS BIGINT) AS cursor FROM meta WHERE key=$3 AND CAST(value AS BIGINT)>$2) resets`, project.ID, after, ProjectStreamResetMetadataPrefix+project.UID).Scan(&reset)
+ UNION ALL SELECT CASE WHEN key=$3 THEN CAST(value AS BIGINT) END AS cursor FROM meta WHERE key=$3 AND CASE WHEN key=$3 THEN CAST(value AS BIGINT) END>$2) resets),
+ COALESCE((SELECT MAX(id) FROM events),0)`, project.ID, after, ProjectStreamResetMetadataPrefix+project.UID).Scan(&reset, &newest)
 	if err != nil {
 		return out, err
 	}
@@ -400,6 +445,15 @@ func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationRea
 	out.Events, err = readEvents(in.AfterID, in.Limit)
 	if err != nil {
 		return out, err
+	}
+	if len(out.Events) == 0 && in.IssueUID == "" {
+		// An empty page read every event through the snapshot's newest, and
+		// event IDs follow commit order, so no feed event at or below it can
+		// appear later. Moving the cursor there keeps the next poll's read to
+		// what the hub writes after this one. A move into the project later
+		// exposes older history filed elsewhere; spokes read that through the
+		// moved issue's own history, whatever their cursor.
+		out.NextAfterID = max(in.AfterID, newest)
 	}
 	// Inspect the returned page itself, including when a store was imported from
 	// an earlier snapshot with a missing protocol latch. Never trust a pre-read.

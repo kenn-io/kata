@@ -514,3 +514,95 @@ func requireRunnerWaitsForInterval(t *testing.T, wake chan<- struct{}, debouncin
 		t.Fatal("the runner repeated a turn instead of waiting for its interval")
 	}
 }
+
+// A relay backlog that keeps the runner repeating budgeted turns must not hold
+// back a direct hub's held-poll answer until the backlog drains.
+func TestRunnerDeliversHeldPollAnswersDuringARelayBacklog(t *testing.T) {
+	ctx := t.Context()
+	busy := newRelayMatrixNode(t, "sqlite", "busy-member")
+	relay := newRelayMatrixNode(t, "sqlite", "relay-member")
+	project, err := busy.store.CreateProject(ctx, "busy-project")
+	require.NoError(t, err)
+	busy.project = project
+	_, err = busy.store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleHub, HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true})
+	require.NoError(t, err)
+	public := busy.signer.PrivateKey.Public().(ed25519.PublicKey)
+	require.NoError(t, busy.store.PinRootAuthority(ctx, db.RootKeyPin{ProjectUID: project.UID, AuthorityUID: busy.store.InstanceUID(), KeyID: db.RootPublicKeyID(public), PublicKey: public}))
+	enrollRelayMatrixReplica(t, busy, relay, "busy-alias", false)
+	busyReplica, err := relay.store.ProjectByUID(ctx, project.UID)
+	require.NoError(t, err)
+
+	// A direct hub that holds polls, joined by the same daemon.
+	hubStore := openRelayMatrixStore(t, "sqlite", false)
+	hub := daemon.NewServer(daemon.ServerConfig{DB: hubStore, StartedAt: time.Now().UTC()})
+	t.Cleanup(func() { require.NoError(t, hub.Close()) })
+	var held atomic.Int64
+	hubHandler := hub.Handler()
+	hubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The spoke holds a poll, or a watch where the hub takes watches.
+		if r.URL.Query().Has("wait") && (strings.HasSuffix(r.URL.Path, "/federation/events") || strings.HasSuffix(r.URL.Path, "/federation/events:watch")) {
+			held.Add(1)
+		}
+		hubHandler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(hubServer.Close)
+	hubProject, err := hubStore.CreateProject(ctx, "direct-project")
+	require.NoError(t, err)
+	_, err = hubStore.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: hubProject.ID, Role: db.FederationRoleHub, HubProjectID: hubProject.ID, HubProjectUID: hubProject.UID, Enabled: true})
+	require.NoError(t, err)
+	enrollment, err := hubStore.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
+		Token: "direct-pull-token", SpokeInstanceUID: relay.store.InstanceUID(),
+		ProjectID: &hubProject.ID, Capabilities: "pull", Actor: "tester",
+	})
+	require.NoError(t, err)
+	direct, err := relay.store.CreateProjectWithUID(ctx, "direct-project", hubProject.UID)
+	require.NoError(t, err)
+	_, err = relay.store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: direct.ID, Role: db.FederationRoleSpoke, HubURL: hubServer.URL, HubProjectID: hubProject.ID, HubProjectUID: hubProject.UID, Enabled: true})
+	require.NoError(t, err)
+	require.NoError(t, relay.credentials.StoreFederationCredential(ctx, hubProject.UID, config.FederationCredential{HubURL: hubServer.URL, HubProjectID: hubProject.ID, Token: enrollment.Token}))
+
+	wake := make(chan struct{}, 1)
+	runner := &federation.Runner{DB: relay.store, Credentials: relay.credentials, Interval: time.Hour, Wake: wake, Debounce: time.Millisecond}
+	runCtx, cancel := context.WithCancel(ctx)
+	done := make(chan error, 1)
+	go func() { done <- runner.Run(runCtx) }()
+	defer func() { cancel(); require.ErrorIs(t, <-done, context.Canceled) }()
+	//nolint:kennlint // sleeptest: The runner holds its poll at the direct hub over real HTTP.
+	require.Eventually(t, func() bool { return held.Load() > 0 }, 20*time.Second, 20*time.Millisecond, "the runner never held a poll at the direct hub")
+
+	t.Cleanup(federation.SetRelaySyncTurnBudgetForTest(1, 2))
+	const backlog = 400
+	for i := range backlog {
+		_, _, err := busy.store.CreateIssue(db.WithRootAttribution(ctx, busy.signer, busy.account), db.CreateIssueParams{ProjectID: project.ID, Title: fmt.Sprintf("Busy backlog %d", i), Author: "assistant"})
+		require.NoError(t, err)
+	}
+	mirrored := func() int {
+		issues, err := relay.store.ListIssues(ctx, db.ListIssuesParams{ProjectID: busyReplica.ID})
+		require.NoError(t, err)
+		return len(issues)
+	}
+	wake <- struct{}{}
+	//nolint:kennlint // sleeptest: The runner drives real HTTP relay hops; bounded polling observes the mirrored projection.
+	// Several budgeted turns have run, so the runner is past its full pass and
+	// serves only the backlog.
+	require.Eventually(t, func() bool { return mirrored() >= 10 }, 20*time.Second, 5*time.Millisecond, "the backlog never started")
+
+	// Commit through the hub's API, which wakes its held polls.
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		fmt.Sprintf("%s/api/v1/projects/%d/issues", hubServer.URL, hubProject.ID),
+		strings.NewReader(`{"actor":"tester","title":"Committed during the backlog"}`))
+	require.NoError(t, err)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request) //nolint:gosec // test-owned loopback hub
+	require.NoError(t, err)
+	require.NoError(t, response.Body.Close())
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	delivered := func() bool {
+		issues, err := relay.store.ListIssues(ctx, db.ListIssuesParams{ProjectID: direct.ID})
+		require.NoError(t, err)
+		return len(issues) == 1
+	}
+	//nolint:kennlint // sleeptest: The runner pulls the direct hub over real HTTP.
+	require.Eventually(t, delivered, 60*time.Second, 5*time.Millisecond)
+	require.Less(t, mirrored(), backlog, "the direct hub's event waited for the relay backlog to drain")
+}

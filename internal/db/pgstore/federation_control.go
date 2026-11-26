@@ -147,6 +147,16 @@ WHERE project_id=$1 AND active=1 LIMIT 1`, input.ProjectID).Scan(&externalRootBi
 		if err := db.CheckRelayBindingUpdate(previous, input); err != nil {
 			return err
 		}
+		if input.PushEnabled && input.Enabled && input.RelayConfig == nil {
+			var prior int64
+			if previous != nil {
+				prior = previous.PushCursorEventID
+			}
+			input.PushCursorEventID, err = db.RestoreFederationPushCursor(ctx, tx, input.ProjectID, input.PushCursorEventID, prior)
+			if err != nil {
+				return err
+			}
+		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO federation_bindings(
   project_id, role, hub_url, hub_project_id, hub_project_uid,
   replay_horizon_event_id, pull_cursor_event_id, push_enabled,
@@ -174,7 +184,12 @@ updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`,
 		if err := reconcileFederationBindingTransitionLinks(ctx, tx, previous, output); err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `DELETE FROM meta WHERE key = $1 || (SELECT uid FROM projects WHERE id = $2 AND deleted_at IS NULL)`, db.FederationRetainedProjectPrefix, input.ProjectID)
+		if !db.PreserveFederationLeaveFenceOnStop(previous, input) {
+			if _, err = tx.ExecContext(ctx, `DELETE FROM meta WHERE key=$1 || (SELECT uid FROM projects WHERE id=$2)`, db.FederationLeaveFencePrefix, input.ProjectID); err != nil {
+				return err
+			}
+		}
+		_, err = tx.ExecContext(ctx, `DELETE FROM meta WHERE key=$1 || (SELECT uid FROM projects WHERE id=$2 AND deleted_at IS NULL)`, db.FederationRetainedProjectPrefix, input.ProjectID)
 		return err
 	})
 	return output, err
@@ -192,7 +207,12 @@ func (s *Store) AdvanceFederationPullCursor(ctx context.Context, projectID, next
 // from a snapshot it no longer holds.
 func (s *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string) error {
 	if len(supersededEventUIDs) == 0 {
-		return s.AdvanceFederationPushCursor(ctx, projectID, nextCursor)
+		return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+			if err := updateFederationCursor(ctx, tx, projectID, nextCursor, true); err != nil {
+				return err
+			}
+			return db.FoldFederationAcknowledgedEvents(ctx, tx, projectID, s.InstanceUID())
+		})
 	}
 	return s.materializeFederatedProjectAfter(ctx, projectID, func(ctx context.Context, tx *sql.Tx) error {
 		deleted, err := db.AcknowledgeSupersededFederationSnapshots(ctx, tx, projectID, s.instanceUID, supersededEventUIDs)
@@ -200,6 +220,9 @@ func (s *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCu
 			return err
 		}
 		if err := updateFederationCursor(ctx, tx, projectID, nextCursor, true); err != nil {
+			return err
+		}
+		if err := db.FoldFederationAcknowledgedEvents(ctx, tx, projectID, s.InstanceUID()); err != nil {
 			return err
 		}
 		if deleted == 0 {
@@ -279,10 +302,161 @@ func (s *Store) EnableFederationPush(ctx context.Context, projectID int64, curso
 		}
 		next := binding
 		next.PushEnabled = true
+		cursor, err = db.RestoreFederationPushCursor(ctx, tx, projectID, max(cursor, binding.PushCursorEventID), binding.PushCursorEventID)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, `UPDATE federation_bindings SET push_enabled=1,
 push_cursor_event_id=GREATEST(push_cursor_event_id,$1),
 updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
 WHERE project_id=$2`, cursor, projectID); err != nil {
+			return mapSQLError(err, nil)
+		}
+		output, err = scanFederationBinding(tx.QueryRowContext(ctx,
+			federationBindingSelect+` WHERE project_id=$1`, projectID))
+		return err
+	})
+	return output, err
+}
+
+// DisableFederationPushWhenSettled turns push off only while this replica has
+// no unaccepted local-origin events, live claims, open claim requests, or
+// unfinished cron runs. The
+// serializable transaction makes the checks and the update one decision.
+func (s *Store) DisableFederationPushWhenSettled(ctx context.Context, projectID int64, originInstanceUID string) (db.FederationBinding, error) {
+	var output db.FederationBinding
+	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		output = db.FederationBinding{}
+		if err := db.LockCronProject(ctx, tx, projectID); err != nil {
+			return err
+		}
+		binding, err := scanFederationBinding(tx.QueryRowContext(ctx,
+			federationBindingSelect+` WHERE project_id=$1 FOR UPDATE`, projectID))
+		if err != nil {
+			return err
+		}
+		if !binding.PushEnabled {
+			// A retry after a failed provider release finds push already
+			// off while the old credential still forwards claims.
+			if err := pgFederationReplicaSettledTx(ctx, tx, binding, originInstanceUID); err != nil {
+				return err
+			}
+			output = binding
+			return nil
+		}
+		if binding.Role != db.FederationRoleSpoke || binding.RelayConfig != nil {
+			return fmt.Errorf("disable federation push: only a direct spoke binding can stop pushing")
+		}
+		// An enabled read-only spoke cannot own an external root binding,
+		// the same rule UpsertFederationBinding enforces.
+		if binding.Enabled {
+			var externalRootBindingID int64
+			err := tx.QueryRowContext(ctx, `SELECT id FROM external_root_bindings
+WHERE project_id=$1 AND active=1 LIMIT 1 FOR UPDATE`, projectID).Scan(&externalRootBindingID)
+			if err == nil {
+				return db.ErrExternalRootFederationConflict
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return mapSQLError(err, nil)
+			}
+		}
+		if err := pgFederationReplicaSettledTx(ctx, tx, binding, originInstanceUID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE federation_bindings SET push_enabled=0,
+updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+WHERE project_id=$1`, projectID); err != nil {
+			return mapSQLError(err, nil)
+		}
+		output, err = scanFederationBinding(tx.QueryRowContext(ctx,
+			federationBindingSelect+` WHERE project_id=$1`, projectID))
+		return err
+	})
+	return output, err
+}
+
+// pgFederationReplicaSettledTx refuses while work tied to the binding's actor
+// is still open: local changes above the push cursor while push is on, live
+// claims or claim requests held through this replica, and cron runs this
+// replica's actor has not finished.
+func pgFederationReplicaSettledTx(ctx context.Context, tx *sql.Tx, binding db.FederationBinding, originInstanceUID string) error {
+	// A destination that still owes a move out of this project needs this
+	// project's current credential and actor to deliver it.
+	if err := db.CheckFederationMoveSourceLifecycle(ctx, tx, binding.ProjectID, originInstanceUID, false); err != nil {
+		return err
+	}
+	if binding.PushEnabled {
+		var pending bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM events e
+WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND `+db.FederationUnresolvedEventSQL("e")+`)`,
+			binding.ProjectID, originInstanceUID, binding.PushCursorEventID).Scan(&pending); err != nil {
+			return mapSQLError(err, nil)
+		}
+		if pending {
+			return db.ErrFederationPushPending
+		}
+	}
+	actor := strings.TrimSpace(binding.Actor)
+	var claims bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM issue_claims
+WHERE project_id=$1 AND released_at IS NULL
+  AND (claim_kind='hard' OR expires_at > $2)
+  AND holder_instance_uid=$3)
+OR EXISTS (SELECT 1 FROM pending_claim_requests
+WHERE project_id=$1 AND rejected_at IS NULL AND resolved_at IS NULL)`,
+		binding.ProjectID, storedTime(time.Now()), originInstanceUID).Scan(&claims); err != nil {
+		return mapSQLError(err, nil)
+	}
+	if claims {
+		return db.ErrFederationClaimsHeld
+	}
+	var runs bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM cron_runs
+WHERE project_id=$1 AND status='running' AND actor=$2)`, binding.ProjectID, actor).Scan(&runs); err != nil {
+		return mapSQLError(err, nil)
+	}
+	if runs {
+		return db.ErrFederationRunsActive
+	}
+	return nil
+}
+
+// ReplaceFederationBoundActorWhenSettled moves a direct spoke binding from
+// one bound actor to another only while no work tied to the old actor is
+// open, so nothing later presents the old actor to the hub.
+func (s *Store) ReplaceFederationBoundActorWhenSettled(ctx context.Context, projectID int64, originInstanceUID, fromActor, toActor string) (db.FederationBinding, error) {
+	fromActor, toActor = strings.TrimSpace(fromActor), strings.TrimSpace(toActor)
+	if fromActor == "" || toActor == "" {
+		return db.FederationBinding{}, fmt.Errorf("replace federation bound actor: both actors are required")
+	}
+	var output db.FederationBinding
+	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		output = db.FederationBinding{}
+		if err := db.LockCronProject(ctx, tx, projectID); err != nil {
+			return err
+		}
+		binding, err := scanFederationBinding(tx.QueryRowContext(ctx,
+			federationBindingSelect+` WHERE project_id=$1 FOR UPDATE`, projectID))
+		if err != nil {
+			return err
+		}
+		switch strings.TrimSpace(binding.Actor) {
+		case toActor:
+			output = binding
+			return nil
+		case fromActor:
+		default:
+			return db.ErrFederationBoundActorChanged
+		}
+		if binding.Role != db.FederationRoleSpoke || binding.RelayConfig != nil {
+			return fmt.Errorf("replace federation bound actor: only a direct spoke binding has a replaceable actor")
+		}
+		if err := pgFederationReplicaSettledTx(ctx, tx, binding, originInstanceUID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE federation_bindings SET bound_actor=$1,
+updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+WHERE project_id=$2`, toActor, projectID); err != nil {
 			return mapSQLError(err, nil)
 		}
 		output, err = scanFederationBinding(tx.QueryRowContext(ctx,
@@ -298,14 +472,31 @@ func (s *Store) FederationSyncStatusByProject(ctx context.Context, projectID int
 		federationSyncStatusSelect+` WHERE project_id=$1`, projectID))
 }
 
-// RecordFederationSyncPullStarted records the start of a pull attempt.
+// RecordFederationSyncPullStarted records the start after any held-poll success.
 func (s *Store) RecordFederationSyncPullStarted(ctx context.Context, projectID int64, at time.Time) error {
-	return s.upsertFederationSyncTime(ctx, projectID, "last_pull_started_at", at)
+	_, err := s.ExecContext(ctx, `INSERT INTO federation_sync_status(project_id,last_pull_started_at)
+SELECT $1,$2 WHERE EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=$1)
+ON CONFLICT(project_id) DO UPDATE SET last_pull_started_at=to_char(
+GREATEST(EXCLUDED.last_pull_started_at::timestamptz,
+COALESCE(federation_sync_status.last_pull_started_at::timestamptz + interval '1 millisecond', EXCLUDED.last_pull_started_at::timestamptz),
+COALESCE(federation_sync_status.last_pull_success_at::timestamptz + interval '1 millisecond', EXCLUDED.last_pull_started_at::timestamptz))
+AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`, projectID, storedTime(at))
+	return mapSQLError(err, nil)
 }
 
 // RecordFederationSyncPullSuccess records a successful pull.
 func (s *Store) RecordFederationSyncPullSuccess(ctx context.Context, projectID int64, at time.Time) error {
 	return s.upsertFederationSyncTime(ctx, projectID, "last_pull_success_at", at)
+}
+
+// RecordFederationHeldPullSuccess records an idle poll without hiding an unfinished pull.
+func (s *Store) RecordFederationHeldPullSuccess(ctx context.Context, projectID int64, at time.Time) error {
+	_, err := s.ExecContext(ctx, `INSERT INTO federation_sync_status(project_id,last_pull_success_at)
+SELECT $1,$2 WHERE EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=$1)
+ON CONFLICT(project_id) DO UPDATE SET last_pull_success_at=EXCLUDED.last_pull_success_at
+WHERE (federation_sync_status.last_pull_started_at IS NULL OR (federation_sync_status.last_pull_success_at IS NOT NULL AND federation_sync_status.last_pull_started_at <= federation_sync_status.last_pull_success_at))
+AND (federation_sync_status.last_pull_success_at IS NULL OR federation_sync_status.last_pull_success_at < EXCLUDED.last_pull_success_at)`, projectID, storedTime(at))
+	return mapSQLError(err, nil)
 }
 
 // RecordFederationSyncPushStarted records the start of a push attempt.

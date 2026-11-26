@@ -203,6 +203,7 @@ type Attachment struct {
 	DocbankVersion uuid.UUID `json:"docbank_version" validate:"required"`
 	MediaType      string    `json:"media_type" validate:"required"`
 	Name           string    `json:"name" validate:"required"`
+	Origin         *string   `json:"origin,omitempty"`
 	Size           int64     `json:"size"`
 }
 
@@ -1958,6 +1959,27 @@ type DisconnectRelayResponseBody struct {
 	Revoked bool `json:"revoked"`
 }
 
+type DocbankDescriptor struct {
+	Attachment Attachment `json:"attachment"`
+	ProjectUID string     `json:"project_uid" validate:"required"`
+}
+
+func (d DocbankDescriptor) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(d.Attachment).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Attachment", err)
+		}
+	}
+	if err := typesValidator.Var(d.ProjectUID, "required"); err != nil {
+		errors = errors.Append("ProjectUID", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type DocbankHealth struct {
 	// Credential Docbank API key state, ok or missing; an advisory warning that does not change health.ok.
 	Credential string `json:"credential" validate:"required"`
@@ -1982,6 +2004,16 @@ type DocbankProbe struct {
 
 	// Reachable Whether Docbank answered the request.
 	Reachable bool `json:"reachable"`
+}
+
+type DocbankServiceCapabilities struct {
+	Origin     string `json:"origin" validate:"required"`
+	ProjectUID string `json:"project_uid" validate:"required"`
+	Version    int64  `json:"version"`
+}
+
+func (d DocbankServiceCapabilities) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(d))
 }
 
 type DoctorResponseBody struct {
@@ -3043,9 +3075,10 @@ func (f FederationRootKeyRepinResult) Validate() error {
 }
 
 type FederationSearchHit struct {
-	Issue  Issue   `json:"issue"`
-	Score  float64 `json:"score"`
-	WebURL *string `json:"web_url,omitempty"`
+	Issue     Issue    `json:"issue"`
+	MatchedIn []string `json:"matched_in,omitempty"`
+	Score     float64  `json:"score"`
+	WebURL    *string  `json:"web_url,omitempty"`
 }
 
 func (f FederationSearchHit) Validate() error {
@@ -3062,8 +3095,10 @@ func (f FederationSearchHit) Validate() error {
 }
 
 type FederationSearchResponseBody struct {
-	Bounded bool                  `json:"bounded"`
-	Hits    []FederationSearchHit `json:"hits" validate:"required"`
+	Bounded        bool                  `json:"bounded"`
+	DegradedReason *string               `json:"degraded_reason,omitempty"`
+	Hits           []FederationSearchHit `json:"hits" validate:"required"`
+	Mode           *string               `json:"mode,omitempty"`
 }
 
 func (f FederationSearchResponseBody) Validate() error {
@@ -3159,6 +3194,53 @@ type FederationViolationSummary struct {
 }
 
 func (f FederationViolationSummary) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(f))
+}
+
+type FederationWatchEventsBody struct {
+	// Ready Projects the spoke should poll now: they have events or a reset after their cursor, or their own poll will report why it cannot read them.
+	Ready []int64 `json:"ready" validate:"required"`
+
+	// Unwatched Projects the hub did not watch because their token does not authorize pulls from them now, or because this request cannot carry supplemental tokens. Poll them individually.
+	Unwatched []int64 `json:"unwatched" validate:"required"`
+}
+
+func (f FederationWatchEventsBody) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(f))
+}
+
+type FederationWatchEventsRequestBody struct {
+	// AfterID Cursor for the route project.
+	AfterID int64 `json:"after_id"`
+
+	// Projects Other projects to watch, each with its own cursor and enrollment token.
+	Projects []FederationWatchProject `json:"projects,omitempty"`
+}
+
+func (f FederationWatchEventsRequestBody) Validate() error {
+	var errors runtime.ValidationErrors
+	for i, item := range f.Projects {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Projects[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type FederationWatchProject struct {
+	AfterID   int64 `json:"after_id"`
+	ProjectID int64 `json:"project_id"`
+
+	// Token Federation enrollment token that authorizes pulls from this project. Transport-only; the hub checks it like a route bearer and never stores it.
+	Token string `json:"token" validate:"required"`
+}
+
+func (f FederationWatchProject) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(f))
 }
 
@@ -5042,11 +5124,12 @@ func (m MoveIssueResponseBody) Validate() error {
 }
 
 type MutationResponseBody struct {
-	Changed       bool   `json:"changed"`
-	Event         Event  `json:"event"`
-	Issue         Issue  `json:"issue"`
-	OriginalEvent *Event `json:"original_event,omitempty"`
-	Reused        *bool  `json:"reused,omitempty"`
+	Changed       bool      `json:"changed"`
+	Event         Event     `json:"event"`
+	Issue         Issue     `json:"issue"`
+	OriginalEvent *Event    `json:"original_event,omitempty"`
+	ParentReady   *IssueRef `json:"parent_ready,omitempty"`
+	Reused        *bool     `json:"reused,omitempty"`
 }
 
 func (m MutationResponseBody) Validate() error {
@@ -5065,6 +5148,13 @@ func (m MutationResponseBody) Validate() error {
 		if v, ok := any(m.OriginalEvent).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("OriginalEvent", err)
+			}
+		}
+	}
+	if m.ParentReady != nil {
+		if v, ok := any(m.ParentReady).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("ParentReady", err)
 			}
 		}
 	}
@@ -7632,7 +7722,8 @@ func (u UIIssueReference) Validate() error {
 }
 
 type UIIssueReferenceResponseBody struct {
-	Issue IssueStruct `json:"issue"`
+	Issue           IssueStruct `json:"issue"`
+	ScopeProjectUID *string     `json:"scope_project_uid,omitempty"`
 }
 
 func (u UIIssueReferenceResponseBody) Validate() error {
@@ -7775,13 +7866,14 @@ func (u UIReferencesResponseBody) Validate() error {
 }
 
 type UISelectedAuthority struct {
-	Comments    []CommentOut `json:"comments" validate:"required"`
-	History     []Event      `json:"history" validate:"required"`
-	Issue       *UIIssue     `json:"issue,omitempty"`
-	Labels      []IssueLabel `json:"labels" validate:"required"`
-	Links       []UILink     `json:"links" validate:"required"`
-	Recurrences []Recurrence `json:"recurrences" validate:"required"`
-	State       string       `json:"state" validate:"required"`
+	Comments            []CommentOut `json:"comments" validate:"required"`
+	EffectiveCloseEvent *Event       `json:"effective_close_event,omitempty"`
+	History             []Event      `json:"history" validate:"required"`
+	Issue               *UIIssue     `json:"issue,omitempty"`
+	Labels              []IssueLabel `json:"labels" validate:"required"`
+	Links               []UILink     `json:"links" validate:"required"`
+	Recurrences         []Recurrence `json:"recurrences" validate:"required"`
+	State               string       `json:"state" validate:"required"`
 }
 
 func (u UISelectedAuthority) Validate() error {
@@ -7793,6 +7885,13 @@ func (u UISelectedAuthority) Validate() error {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append(fmt.Sprintf("Comments[%d]", i), err)
+			}
+		}
+	}
+	if u.EffectiveCloseEvent != nil {
+		if v, ok := any(u.EffectiveCloseEvent).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("EffectiveCloseEvent", err)
 			}
 		}
 	}
@@ -7933,4 +8032,51 @@ func (u UISnapshotResponseBody) Validate() error {
 type UnassignRequestBody struct {
 	Actor         *string `json:"actor,omitempty"`
 	ExpectedOwner *string `json:"expected_owner,omitempty"`
+}
+
+type UpdateLabelsRequestBody struct {
+	Actor *string `json:"actor,omitempty"`
+
+	// Add Labels to attach. Labels already attached change nothing.
+	Add []string `json:"add,omitempty"`
+
+	// Remove Labels to detach. Labels not attached change nothing. A label must not appear in both add and remove.
+	Remove []string `json:"remove,omitempty"`
+}
+
+type UpdateLabelsResponseBody struct {
+	Changed bool `json:"changed"`
+
+	// Events issue.unlabeled then issue.labeled events the request recorded; empty when nothing changed.
+	Events []Event `json:"events" validate:"required"`
+	Issue  Issue   `json:"issue"`
+
+	// Labels The issue's labels after the change, sorted.
+	Labels []string `json:"labels" validate:"required"`
+}
+
+func (u UpdateLabelsResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(u.Events, "required"); err != nil {
+		errors = errors.Append("Events", err)
+	}
+	for i, item := range u.Events {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Events[%d]", i), err)
+			}
+		}
+	}
+	if v, ok := any(u.Issue).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Issue", err)
+		}
+	}
+	if err := typesValidator.Var(u.Labels, "required"); err != nil {
+		errors = errors.Append("Labels", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }

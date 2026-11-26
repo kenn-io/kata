@@ -28,6 +28,7 @@ import (
 
 // daemonDiagnosis contains operational identity, never authentication secrets.
 type daemonDiagnosis struct {
+	statusReason        string
 	State               string `json:"state"`
 	Message             string `json:"message,omitempty"`
 	ProjectState        string `json:"project_state,omitempty"`
@@ -179,6 +180,22 @@ func diagnoseDaemonSelection(
 	defer cancel()
 	var err error
 	result := selectedDaemonDiagnosis(selection, expectedProject)
+	var dsn string
+	if selection.Profile != nil {
+		dsn = selection.Profile.DSN
+	} else if selection.Resolved.BaseURL == "" {
+		dsn, err = config.KataDSN(ctx)
+		if err != nil {
+			return result, selection, err
+		}
+	}
+	report := func() daemonDiagnosis {
+		if dsn != "" && result.State != "ready" && client.SQLiteCutoverLockedForDSN(dsn) {
+			result.State = "storage_busy"
+			result.Message = "another kata process holds the SQLite storage lock, usually a daemon upgrading the database"
+		}
+		return withDiagnosisAction(result)
+	}
 	result.Project = strings.TrimSpace(flags.Project)
 	if result.Project == "" {
 		start, err := resolveStartPath(flags.Workspace)
@@ -190,6 +207,11 @@ func diagnoseDaemonSelection(
 	var store db.Storage
 	if selection.Profile != nil {
 		profile := *selection.Profile
+		if client.SQLiteCutoverLockedForDSN(dsn) {
+			result.State = "storage_busy"
+			result.Message = "another kata process holds the SQLite storage lock, usually a daemon upgrading the database"
+			return withDiagnosisAction(result), selection, nil
+		}
 		identity, err := client.InspectLocalProfileStorage(ctx, profile)
 		result.ObservedInstanceUID = identity.InstanceUID
 		result.SchemaVersion = identity.SchemaVersion
@@ -199,36 +221,37 @@ func diagnoseDaemonSelection(
 			if errors.Is(err, client.ErrProfileIdentityMismatch) {
 				result.State = "wrong_database"
 			}
-			return withDiagnosisAction(result), selection, nil
+			return report(), selection, nil
 		}
 		if result.SchemaVersion != db.CurrentSchemaVersion() {
 			result.State = "version_mismatch"
-			return withDiagnosisAction(result), selection, nil
+			return report(), selection, nil
 		}
 		store, err = storageinspect.OpenProfileReadOnly(ctx, profile)
 		if err != nil {
 			result.State = "missing_profile_storage"
 			result.Message = err.Error()
-			return withDiagnosisAction(result), selection, nil
+			return report(), selection, nil
 		}
 		result.State = "stopped_local_profile"
 	} else if selection.Resolved.BaseURL == "" {
 		result.Home, _ = config.KataHome()
-		dsn, err := config.KataDSN(ctx)
-		if err != nil {
-			return result, selection, err
-		}
 		ns, err := daemonruntime.NewNamespace()
 		if err != nil {
 			return result, selection, err
 		}
 		result.StorageID = ns.DBHash
+		if client.SQLiteCutoverLockedForDSN(dsn) {
+			result.State = "storage_busy"
+			result.Message = "another kata process holds the SQLite storage lock, usually a daemon upgrading the database"
+			return withDiagnosisAction(result), selection, nil
+		}
 		store, err = storeopen.OpenReadOnly(ctx, dsn)
 		if err != nil || store == nil {
 			if err != nil && !currentHomeStorageIsAbsent(dsn, err) {
 				result.State = "unreadable_storage"
 				result.Message = err.Error()
-				return withDiagnosisAction(result), selection, nil
+				return report(), selection, nil
 			}
 			store = nil
 		} else {
@@ -236,7 +259,7 @@ func diagnoseDaemonSelection(
 				_ = store.Close()
 				result.State = "unreadable_storage"
 				result.Message = err.Error()
-				return withDiagnosisAction(result), selection, nil
+				return report(), selection, nil
 			}
 			result.ObservedInstanceUID = store.InstanceUID()
 			result.SchemaVersion, err = store.SchemaVersion(ctx)
@@ -244,25 +267,28 @@ func diagnoseDaemonSelection(
 				_ = store.Close()
 				result.State = "unreadable_storage"
 				result.Message = err.Error()
-				return withDiagnosisAction(result), selection, nil
+				return report(), selection, nil
 			}
 		}
 	}
 	if store == nil && expectedProject != "" {
 		result.State = "project_unverifiable"
-		return withDiagnosisAction(result), selection, nil
+		return report(), selection, nil
 	}
 	if store != nil {
 		defer func() { _ = store.Close() }()
 		if result.SchemaVersion != db.CurrentSchemaVersion() {
 			result.State = "version_mismatch"
-			return withDiagnosisAction(result), selection, nil
+			return report(), selection, nil
 		}
 		if !inspectDiagnosisProject(ctx, store, &result) {
-			return withDiagnosisAction(result), selection, nil
+			return report(), selection, nil
 		}
 	}
 	result, selection, err = probeDaemonSelection(ctx, result, selection)
+	if err == nil && result.State != "ready" {
+		result = report()
+	}
 	if result.State == "ready" {
 		result.Writable, result.ActorPolicy = liveDaemonCapabilities(ctx, selection.Resolved)
 		result.RootSigning = liveRootSigningHealth(ctx, selection.Resolved)
@@ -340,11 +366,12 @@ func probeDaemonSelection(
 		}
 		resolved, found, err = client.DiscoverResolved(ctx, ns.DataDir)
 		if found && selection.Resolved.Name != "" {
-			resolved = selection.Resolved.WithRunning(resolved.Running())
+			resolved = selection.Resolved.WithDiscovered(resolved)
 		}
 	}
 	if err != nil {
 		result.Message = err.Error()
+		result = diagnosisUnreachable(result, err)
 		if errors.Is(err, client.ErrProfileIdentityMismatch) {
 			result.State = "wrong_database"
 			if mismatch, ok := errors.AsType[*client.LocalProfileIdentityError](err); ok {
@@ -378,14 +405,8 @@ func probeDaemonSelection(
 		return result, selection, err
 	}
 	ping, err := apiClient.Ping(ctx)
-	if err != nil {
-		result.State = "local_unreachable"
-		if result.Kind == "remote" {
-			result.State = unavailableRemoteState(result.Endpoint)
-		}
-		return withDiagnosisAction(result), selection, nil
-	}
-	if ping == nil || !ping.Ok || ping.Service != "kata" {
+	if err != nil || ping == nil || !ping.Ok || ping.Service != "kata" {
+		result = diagnosisUnreachable(result, resolved.Unreachable(ctx, err))
 		result.State = "local_unreachable"
 		if result.Kind == "remote" {
 			result.State = unavailableRemoteState(result.Endpoint)
@@ -471,6 +492,14 @@ func safeDaemonOrigin(value string) string {
 	return parsed.Scheme + "://" + parsed.Host
 }
 
+func diagnosisUnreachable(result daemonDiagnosis, err error) daemonDiagnosis {
+	if e, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok {
+		result.Message, result.NextAction, result.PID, result.Endpoint = e.Summary(), e.RecoveryAdvice(), e.PID, e.Address
+		result.statusReason = e.Reason()
+	}
+	return result
+}
+
 func withDiagnosisAction(result daemonDiagnosis) daemonDiagnosis {
 	switch result.State {
 	case "ready":
@@ -487,6 +516,8 @@ func withDiagnosisAction(result daemonDiagnosis) daemonDiagnosis {
 		result.NextAction = "restore the configured server connection; retain the selected target"
 	case "missing_profile_storage":
 		result.NextAction = "restore access to this profile's existing storage; recovery never initializes it"
+	case "storage_busy":
+		result.NextAction = "wait for the SQLite upgrade or import to finish, then rerun kata daemon diagnose"
 	case "unreadable_storage":
 		result.NextAction = "restore access to the current home's existing storage metadata before starting its daemon"
 	case "wrong_database":
@@ -505,14 +536,20 @@ func withDiagnosisAction(result daemonDiagnosis) daemonDiagnosis {
 	case "selection_error":
 		result.NextAction = "repair the selected routing configuration; current-home processes are listed separately"
 	default:
-		result.NextAction = "inspect the selected process and its credentials; do not switch databases"
+		if result.State != "local_unreachable" || (result.NextAction == "" && (result.Message == "" || result.PID == 0)) {
+			result.NextAction = "inspect the selected process and its credentials; do not switch databases"
+		}
 	}
 	return result
 }
 
 func diagnosisError(result daemonDiagnosis) error {
 	data, _ := json.Marshal(result)
-	return &cliError{Message: result.State + ": " + result.NextAction, Code: result.State, Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail, Data: data}
+	message, hint := result.State+": "+result.NextAction, ""
+	if result.State == "local_unreachable" && result.Message != "" {
+		message, hint = result.Message, result.NextAction
+	}
+	return &cliError{Message: message, Hint: hint, Code: result.State, Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail, Data: data}
 }
 
 func printDaemonDiagnosis(cmd *cobra.Command, result daemonDiagnosis) error {

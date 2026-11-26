@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"go.kenn.io/kata/internal/version"
 	"go.kenn.io/kit/telemetry/posthog"
 )
 
@@ -51,6 +52,12 @@ type Options struct {
 	InstalledAt time.Time
 	Version     string
 	Commit      string
+}
+
+// Eligible reports whether this build can forward usage events.
+func Eligible() bool {
+	// Tagged Go installs have a release version but no embedded revision.
+	return version.Commit != "unknown" && posthog.Eligible(envPrefix, version.Version)
 }
 
 // NewReporter builds an enabled reporter, or a disabled one that keeps the

@@ -6,14 +6,21 @@ export interface Preferences {
   splitDirection: 'horizontal' | 'vertical'
   splitSize: number
   collapsedGroups: string[]
+  sidebarWidth: number
+  sidebarCollapsed: boolean
 }
+
+export const minSidebarWidth = 180
+export const maxSidebarWidth = 600
 
 export const defaultPreferences: Preferences = {
   theme: 'system',
   columns: ['status', 'title'],
-  splitDirection: 'vertical',
-  splitSize: 420,
+  splitDirection: 'horizontal',
+  splitSize: 480,
   collapsedGroups: [],
+  sidebarWidth: 240,
+  sidebarCollapsed: false,
 }
 
 export function loadPreferences(storage: Storage = localStorage): Preferences {
@@ -30,6 +37,8 @@ export function loadPreferences(storage: Storage = localStorage): Preferences {
           ? value.splitSize
           : defaultPreferences.splitSize,
       collapsedGroups: stringArray(value.collapsedGroups, []),
+      sidebarWidth: sidebarWidth(value.sidebarWidth),
+      sidebarCollapsed: value.sidebarCollapsed === true,
     }
   } catch {
     return cloneDefaults()
@@ -58,6 +67,8 @@ export function savePreferences(
         ? current.splitSize
         : defaultPreferences.splitSize,
     collapsedGroups: stringArray(current.collapsedGroups, []),
+    sidebarWidth: sidebarWidth(current.sidebarWidth),
+    sidebarCollapsed: current.sidebarCollapsed === true,
   }
   storage.setItem(preferencesStorageKey, JSON.stringify(allowed))
 }
@@ -73,6 +84,12 @@ function cloneDefaults(): Preferences {
     columns: [...defaultPreferences.columns],
     collapsedGroups: [...defaultPreferences.collapsedGroups],
   }
+}
+
+function sidebarWidth(value: unknown): number {
+  return typeof value === 'number' && value >= minSidebarWidth && value <= maxSidebarWidth
+    ? value
+    : defaultPreferences.sidebarWidth
 }
 
 function stringArray(value: unknown, fallback: readonly string[]): string[] {

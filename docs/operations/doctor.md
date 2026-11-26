@@ -1,14 +1,14 @@
 ---
 title: Diagnosing setup
 description: Diagnose setup with kata doctor.
-last_edited: 2026-11-17
+last_edited: 2026-11-20
 ---
 
 # Diagnosing setup
 
-Run `kata doctor` first when the CLI, daemon, workspace binding, or hooks appear
-broken. It gathers findings and suggests fixes, including when the selected
-daemon is stopped. It does not apply those fixes.
+When the CLI, daemon, workspace binding, or hooks seem broken, run `kata doctor`
+first. It checks your setup and suggests fixes, even when the selected daemon is
+stopped. It does not apply those fixes.
 
 ```sh
 kata doctor
@@ -17,34 +17,40 @@ kata doctor --agent --workspace /path/to/example-workspace
 kata doctor --daemon example-remote --project example-project
 ```
 
-Daemon selection follows the normal CLI precedence: an explicit `--daemon`,
-then `KATA_SERVER`, the workspace's `.kata.local.toml`, `active_daemon`, and
-local runtime discovery. The local override can select a URL or a named local
-profile. Doctor validates the closest honored `.kata.local.toml` between the
-start directory and its workspace boundary, including subdirectory overrides.
-An unavailable configured target does not fall back to a local daemon.
+Doctor selects a daemon using the standard CLI precedence: an explicit
+`--daemon`, then `KATA_SERVER`, the workspace's `.kata.local.toml`,
+`active_daemon`, and finally local runtime discovery. A local override can point
+to a URL or a named local profile. Doctor validates the closest honored
+`.kata.local.toml` between your starting directory and its workspace boundary,
+including subdirectory overrides. If a configured target is unavailable, doctor
+does not fall back to a local daemon.
 
-A stopped local daemon or local profile is informational: the next ordinary
-`kata` command starts it, so doctor skips the daemon checks without failing.
-Run `kata daemon start` and rerun doctor to check the daemon itself. A default
-local runtime directory without owner-only permissions is a warning; doctor does
-not inspect or repair it, and the next ordinary command restores its
-permissions. A local profile's runtime directory without owner-only
-permissions fails, because ordinary commands reject it without repair; restrict
-the directory under `<profile home>/runtime` to its owner by hand. A configured target that does not answer, or a live local
-runtime record whose endpoint does not answer, also fails.
+A stopped local daemon or local profile is informational. The next ordinary
+`kata` command starts it, so doctor skips the daemon checks without failing. To
+check the daemon itself, run `kata daemon start` and rerun `kata doctor`.
 
-Every doctor API request has a five-second deadline and response bodies are
-capped at eight MiB. Local runtime discovery uses a separate one-second ping
-before the API client is created; its response is not subject to that cap.
-Doctor rejects redirects during discovery and diagnostic requests.
+If a default local runtime directory does not have owner-only
+permissions, doctor reports a warning; it does not inspect or repair the
+directory, and the next ordinary command restores its permissions. If a local
+profile's runtime directory does not have owner-only permissions, doctor fails,
+because ordinary commands reject it without repair. Restrict
+`<profile home>/runtime` to its owner by hand. Doctor also fails if a configured
+target does not answer, or if a live local runtime record points to an endpoint
+that does not answer.
 
-Doctor does not start/restart daemons, create runtime directories, open a
+Doctor API requests have a five-second deadline, except the `daemon.docbank`
+probe, which has ten seconds; all response bodies are capped at eight MiB.
+Before creating the API client, local runtime discovery sends a separate
+one-second ping whose response is not subject to that cap. Doctor rejects
+redirects during discovery and diagnostic requests.
+
+Doctor does not start or restart daemons, create runtime directories, open a
 database, run migrations or hooks, call embedding providers or hubs, initialize
-projects, or repair files. The agent check preserves hook configuration and
-trust, but can create Codex state. Normal daemon authentication/access-log
-bookkeeping can still record requests. Local configuration findings describe this client's
-files; remote process findings come from the selected daemon.
+projects, or repair files. The agent check preserves your hook configuration and
+trust, though it can create Codex state. Normal daemon authentication and
+access-log bookkeeping can still record requests. Local configuration findings
+describe the files on your client machine, while remote process findings come
+from the selected daemon.
 
 ## Findings and fixes
 
@@ -66,53 +72,56 @@ files; remote process findings come from the selected daemon.
 | `daemon.docbank` | The daemon can resolve its `[docbank]` API key, and Docbank answers one read-only request and accepts that key. `local = true` has no key source to check, and a daemon older than API 0.54.0 resolves the key without contacting Docbank. A daemon that has the probe route but cannot answer it also warns | Fix the key source the check names on the daemon host, the `[docbank]` url, or the key Docbank issued; see the [key file rules](../reference/configuration.md#credentials-and-batching). |
 | `daemon.federation` | Declarative mapping convergence | Resolve pending/conflicting mappings and credential origin problems. |
 
-For federation signing and ingress validation failures, `config.daemon` includes
-the reason in `details`. Other configuration errors, parser text, unknown key
-names and credentials remain omitted from reports.
+When federation signing or ingress validation fails, `config.daemon` includes
+the reason in `details`. Reports omit other configuration errors, parser text,
+unknown key names, and credentials.
 
-Doctor checks the same project name as ordinary commands: `--project`, then
-`[project].name` in `.kata.toml`. Project lookup uses an exact name and GET
-requests only. It does not resolve
-aliases, follow a renamed binding, or rewrite `.kata.toml`. A principal without
-catalog visibility gets an unverified-project warning. Archived projects do not
-count as usable.
+Doctor looks up the same project name that ordinary commands use: `--project`
+first, then `[project].name` in `.kata.toml`. It matches by exact name using GET
+requests only, and it does not resolve aliases, follow a renamed binding, or
+rewrite `.kata.toml`. If your principal cannot see the project catalog, doctor
+reports an unverified-project warning. Archived projects do not count as usable.
 
-The daemon resolves active hook commands using its own PATH. Doctor compares
-that result with the shell only to identify a mismatch. Missing executables or
-working directories fail the check. Historical run failures remain aggregate:
-reloading/reordering hooks cannot attribute old failures to today's indices.
-Nonzero exits, spawn failures, timeouts, missing directories and daemon shutdown
-interruptions count as failures. History is limited to retained active/rotated
-logs, an eight-MiB total scan and at most 64 rotated files, prioritizing the
-newest records. Counts cover only scanned records, so they can omit runs from
-the seven-day window. Reaching a scan limit is informational. Recent failures
-or missing, malformed, or unreadable history produce a warning even when the
-scan also reaches its limit.
+The daemon resolves active hook commands using its own PATH, and doctor compares
+that result with your shell only to spot a mismatch. Any missing executable or
+working directory fails the check.
+
+Historical hook run failures remain aggregate; reloading or reordering hooks
+cannot attribute old failures to today's indices. Nonzero exits, spawn failures,
+timeouts, missing directories, and daemon shutdown interruptions all count as
+failures. The scan reads retained active and rotated logs up to eight MiB total
+and at most 64 rotated files, prioritizing the newest records. Counts cover only
+scanned records, so they can omit runs from the seven-day window. Reaching a
+scan limit is informational, while recent failures or missing, malformed, or
+unreadable history produce a warning even when the scan reaches its limit.
 
 Process diagnostics require operator authority: owner-local CLI access, the
-configured static/bootstrap token, or a mounted host's explicit manage grant.
+configured static or bootstrap token, or a mounted host's explicit manage grant.
 Ordinary identity tokens, browser sessions, trusted-proxy principals, anonymous
-read-only access and tokenless private-network writes cannot obtain them.
-A missing/hidden endpoint warns that diagnostics are unsupported or not visible;
-it does not prove the daemon is old. Other checks still run.
+read-only access, and tokenless private-network writes cannot obtain them. If
+the endpoint is missing or hidden, doctor warns that diagnostics are unsupported
+or not visible. That warning does not prove the daemon is old, and the other
+checks still run.
 
-Embedding health does not make a provider call. When the daemon exposes
-diagnostics but omits embedding health, doctor reports embeddings as disabled
-and notes that lexical search remains available. When diagnostics are hidden,
-embedding configuration remains unknown. Federation health covers
-declarative mapping reconciliation; it does not assert hub connectivity or
-event replication health. Missing optional integration aggregates are
-informational. A skipped prerequisite is also informational, never a successful
-diagnosis.
+Embedding health checks never call an embedding provider. When the daemon
+exposes diagnostics without embedding health, doctor reports embeddings as
+disabled and notes that lexical search remains available; when diagnostics are
+hidden, embedding configuration stays unknown. Federation health covers
+declarative mapping reconciliation and does not assert hub connectivity or event
+replication health. Missing optional integration aggregates are informational,
+and a skipped prerequisite is also informational, never a successful diagnosis.
 
 ## Agent output
 
-`--json` includes `version: 1`, a `checks` array and `summary` counts. Each check
-contains `id`, `category`, `status`, `summary`, `details` (an array), and `fix`.
-Check IDs are stable; consumers should branch on ID and status rather than
-human prose. `--agent` emits line-oriented findings with quoted prose values.
-Warnings alone exit 0; any failure exits 1 with error kind `checks_failed`.
-Argument/output-mode errors keep the normal CLI exit codes. A check panic or
-invalid status becomes a sanitized failed finding, and subsequent checks
-continue. Reports omit credentials, raw parser/HTTP
-errors, hook arguments and environment, and hook output contents.
+With `--json`, output includes `version: 1`, a `checks` array, and `summary`
+counts. Each check contains `id`, `category`, `status`, `summary`, `details` (an
+array), and `fix`. Check IDs are stable; branch on ID and status rather than
+human prose.
+
+With `--agent`, doctor prints line-oriented findings with quoted prose values.
+Warnings alone exit with code 0, while any failure exits with code 1 and error
+kind `checks_failed`. Argument and output-mode errors keep the normal CLI exit
+codes. If a check panics or returns an invalid status, doctor turns it into a
+sanitized failed finding and continues running the remaining checks. Reports
+omit credentials, raw parser or HTTP errors, hook arguments and environment, and
+hook output contents.

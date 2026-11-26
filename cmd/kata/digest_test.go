@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/testenv"
@@ -128,4 +130,17 @@ func TestDigest_ParseSinceUntil(t *testing.T) {
 
 	_, err = parseSinceUntil("garbage", now)
 	require.Error(t, err)
+}
+
+func TestDigestFederatedAuthors(t *testing.T) {
+	const actor = "Ana [member:11111111-1111-4111-8111-111111111111; enrollment:11111111-1111-4111-8111-111111111111]"
+	body := []byte(`{"since":"2026-08-11T00:00:00Z","until":"2026-08-12T00:00:00Z","actors":[{"actor":"` + actor + `","totals":{"created":1},"issues":[{"issue_uid":"issue-one","issue_short_id":"one","actions":["created"]}]},{"actor":"Ana","totals":{"created":2},"issues":[{"issue_uid":"issue-two","issue_short_id":"two","actions":["created"]}]}]}`)
+	var out bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetOut(&out)
+	require.NoError(t, printDigestHuman(cmd, body))
+	assert.NotContains(t, out.String(), "member:")
+	out.Reset()
+	require.NoError(t, printDigestAgent(cmd, body))
+	assert.Contains(t, out.String(), `actor_filters="[\"`+actor+`\",\"Ana\"]"`)
 }

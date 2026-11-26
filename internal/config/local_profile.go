@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/oklog/ulid/v2"
+	"go.kenn.io/kit/embedconfig"
 )
 
 func normalizeLocalProfileEntry(entry *CatalogDaemonConfig) error {
@@ -164,9 +165,26 @@ func localProfileSigningReferences(profile LocalProfileConfig) ([]string, error)
 // The returned slice does not mutate the process environment.
 func LocalProfileEnvironment(profile LocalProfileConfig, autostart bool) ([]string, error) {
 	values := map[string]string{}
+	copied := map[string]bool{}
 	for _, key := range []string{"PATH", "HOME", "USER", "LOGNAME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "SystemRoot", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TMP", "TEMP", "TMPDIR", "XDG_RUNTIME_DIR", "LANG", "LC_ALL", "TZ", "GOCACHE", "GOMODCACHE", "GOPATH", "KATA_HTTP_TIMEOUT", "KATA_TELEMETRY_ENABLED", "TELEMETRY_ENABLED", "DO_NOT_TRACK", "CI", "SSL_CERT_FILE", "SSL_CERT_DIR", "DOCBANK_HOME"} {
 		if value, ok := os.LookupEnv(key); ok {
 			values[key] = value
+		}
+	}
+	if profile.Config != nil && profile.Config.Search.Embeddings.API == embedconfig.APIVertex {
+		if value, ok := os.LookupEnv("GOOGLE_APPLICATION_CREDENTIALS"); ok {
+			values["GOOGLE_APPLICATION_CREDENTIALS"] = value
+			copied["GOOGLE_APPLICATION_CREDENTIALS"] = true
+		}
+		if os.Getenv("GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES") == "1" {
+			values["GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES"] = "1"
+			copied["GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES"] = true
+		}
+		for _, key := range []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_REGION", "AWS_DEFAULT_REGION"} {
+			if value, ok := os.LookupEnv(key); ok {
+				values[key] = value
+				copied[key] = true
+			}
 		}
 	}
 	references := []string{profile.Catalog.TokenEnv}
@@ -200,9 +218,9 @@ func LocalProfileEnvironment(profile LocalProfileConfig, autostart bool) ([]stri
 	references = append(references, signingReferences...)
 	reserved := []string{
 		"KATA_LISTEN", "KATA_WEB_LISTEN", "KATA_WEB_PUBLIC_ORIGIN", "KATA_AUTH_TOKEN_FILE",
-		"KATA_DOCBANK_URL", "KATA_DOCBANK_API_KEY_FILE", "KATA_DOCBANK_FOLDER",
+		"KATA_DOCBANK_URL", "KATA_DOCBANK_API_KEY_FILE", "KATA_DOCBANK_FOLDER", "KATA_DOCBANK_TRUST_PRIVATE_NETWORK",
 		"KATA_MCP_ENABLED", "KATA_MCP_ACTOR", "KATA_MCP_PROJECTS", "KATA_MCP_ALL_PROJECTS", "KATA_MCP_STARTUP_SECTIONS", "KATA_MCP_TOKEN_FILE",
-		"KATA_SEARCH_EMBEDDINGS_BASE_URL", "KATA_SEARCH_EMBEDDINGS_MODEL", "KATA_SEARCH_EMBEDDINGS_DIMS", "KATA_SEARCH_EMBEDDINGS_API_KEY_FILE",
+		"KATA_SEARCH_EMBEDDINGS_API", "KATA_SEARCH_EMBEDDINGS_BASE_URL", "KATA_SEARCH_EMBEDDINGS_MODEL", "KATA_SEARCH_EMBEDDINGS_DIMS", "KATA_SEARCH_EMBEDDINGS_API_KEY_FILE",
 		"KATA_SEARCH_EMBEDDINGS_DOCUMENT_PREFIX", "KATA_SEARCH_EMBEDDINGS_DOCUMENT_SUFFIX",
 		"KATA_SEARCH_EMBEDDINGS_QUERY_PREFIX", "KATA_SEARCH_EMBEDDINGS_QUERY_SUFFIX",
 		"KATA_SEARCH_EMBEDDINGS_REQUEST_DIMENSIONS",
@@ -217,7 +235,6 @@ func LocalProfileEnvironment(profile LocalProfileConfig, autostart bool) ([]stri
 		"TELEMETRY_ENABLED", "DO_NOT_TRACK", "CI",
 		"KATA_TEST_FEDERATION_FAILPOINTS", "KATA_GITHUB_SYNC_ALLOWED_HOSTS",
 	}
-	copied := map[string]bool{}
 	for _, key := range references {
 		if key == "" || copied[key] {
 			continue

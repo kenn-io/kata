@@ -136,14 +136,33 @@ func (d *Store) FederationSyncStatusByProject(ctx context.Context, projectID int
 		 WHERE project_id = ?`, projectID))
 }
 
-// RecordFederationSyncPullStarted records that a pull attempt began.
+// RecordFederationSyncPullStarted records the start after any held-poll success.
 func (d *Store) RecordFederationSyncPullStarted(ctx context.Context, projectID int64, at time.Time) error {
-	return d.upsertFederationSyncTime(ctx, projectID, "last_pull_started_at", at)
+	return d.RetryTransient(ctx, func() error {
+		_, err := d.ExecContext(ctx, `INSERT INTO federation_sync_status(project_id,last_pull_started_at)
+SELECT ?,? WHERE EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=?)
+ON CONFLICT(project_id) DO UPDATE SET last_pull_started_at=MAX(excluded.last_pull_started_at,
+COALESCE(strftime('%Y-%m-%dT%H:%M:%fZ',last_pull_started_at,'+0.001 seconds'),excluded.last_pull_started_at),
+COALESCE(strftime('%Y-%m-%dT%H:%M:%fZ',last_pull_success_at,'+0.001 seconds'),excluded.last_pull_started_at))`, projectID, at.UTC().Format(sqliteTimeFormat), projectID)
+		return err
+	})
 }
 
 // RecordFederationSyncPullSuccess records that a pull attempt completed.
 func (d *Store) RecordFederationSyncPullSuccess(ctx context.Context, projectID int64, at time.Time) error {
 	return d.upsertFederationSyncTime(ctx, projectID, "last_pull_success_at", at)
+}
+
+// RecordFederationHeldPullSuccess records an idle poll without hiding an unfinished pull.
+func (d *Store) RecordFederationHeldPullSuccess(ctx context.Context, projectID int64, at time.Time) error {
+	return d.RetryTransient(ctx, func() error {
+		_, err := d.ExecContext(ctx, `INSERT INTO federation_sync_status(project_id, last_pull_success_at)
+			SELECT ?, ? WHERE EXISTS (SELECT 1 FROM federation_bindings WHERE project_id = ?)
+			ON CONFLICT(project_id) DO UPDATE SET last_pull_success_at = excluded.last_pull_success_at
+			WHERE (last_pull_started_at IS NULL OR (last_pull_success_at IS NOT NULL AND last_pull_started_at <= last_pull_success_at))
+			AND (last_pull_success_at IS NULL OR last_pull_success_at < excluded.last_pull_success_at)`, projectID, at.UTC().Format(sqliteTimeFormat), projectID)
+		return err
+	})
 }
 
 // RecordFederationSyncPushStarted records that outbound federation work began.
@@ -529,6 +548,16 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 	if err := db.CheckRelayBindingUpdate(previous, b); err != nil {
 		return db.FederationBinding{}, err
 	}
+	if b.PushEnabled && b.Enabled && b.RelayConfig == nil {
+		var prior int64
+		if previous != nil {
+			prior = previous.PushCursorEventID
+		}
+		b.PushCursorEventID, err = db.RestoreFederationPushCursor(ctx, tx, b.ProjectID, b.PushCursorEventID, prior)
+		if err != nil {
+			return db.FederationBinding{}, err
+		}
+	}
 	allowInsecure := 0
 	if b.AllowInsecure {
 		allowInsecure = 1
@@ -566,7 +595,12 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 	if err := reconcileFederationBindingTransitionLinks(ctx, tx, previous, binding); err != nil {
 		return db.FederationBinding{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key = ? || (SELECT uid FROM projects WHERE id = ? AND deleted_at IS NULL)`, db.FederationRetainedProjectPrefix, b.ProjectID); err != nil {
+	if !db.PreserveFederationLeaveFenceOnStop(previous, b) {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=? || (SELECT uid FROM projects WHERE id=?)`, db.FederationLeaveFencePrefix, b.ProjectID); err != nil {
+			return db.FederationBinding{}, err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=? || (SELECT uid FROM projects WHERE id=? AND deleted_at IS NULL)`, db.FederationRetainedProjectPrefix, b.ProjectID); err != nil {
 		return db.FederationBinding{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -639,7 +673,7 @@ func (d *Store) leaveFederationReplica(ctx context.Context, projectID int64, dis
 	if discardRelay {
 		err = d.discardRelayHopStateTx(ctx, tx, projectID, binding.RelayConfig)
 	} else {
-		err = d.validateRelayLifecycleTx(ctx, tx, projectID)
+		err = d.validateRelayLifecycleTx(ctx, tx, projectID, true)
 		if err == nil && binding.RelayConfig != nil {
 			err = deleteRelayBindingStateTx(ctx, tx, binding.RelayConfig.BindingUID)
 		}
@@ -649,6 +683,12 @@ func (d *Store) leaveFederationReplica(ctx context.Context, projectID int64, dis
 	}
 	if err := db.ClearFederationProjectIdentityDependencies(ctx, tx, uid); err != nil {
 		return db.LeaveFederationResult{}, fmt.Errorf("clear former project identity dependencies: %w", err)
+	}
+	if err := db.RetainFederationHeldCursor(ctx, tx, projectID, uid, d.InstanceUID()); err != nil {
+		return db.LeaveFederationResult{}, fmt.Errorf("retain held federation cursor: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=?`, db.FederationLeaveFencePrefix+uid); err != nil {
+		return db.LeaveFederationResult{}, err
 	}
 	for _, stmt := range []string{
 		`DELETE FROM federation_quarantine WHERE project_id = ?`,
@@ -1446,10 +1486,10 @@ func (d *Store) resetFederatedProject(ctx context.Context, projectID, replayHori
 	if err := rejectLegacyFederationResetTx(ctx, tx, projectID); err != nil {
 		return err
 	}
-	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID, d.instanceUID); err != nil {
+	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID, d.instanceUID, false); err != nil {
 		return err
 	}
-	if err := db.ClearFederatedProjectEvents(ctx, tx, projectID); err != nil {
+	if err := db.ClearFederatedProjectEvents(ctx, tx, projectID, d.instanceUID, false); err != nil {
 		return fmt.Errorf("clear federated events: %w", err)
 	}
 	if err := clearFederatedProjection(ctx, tx, projectID); err != nil {

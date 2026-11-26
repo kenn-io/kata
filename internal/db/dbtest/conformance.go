@@ -55,6 +55,7 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
+	{name: "former instance identities", methods: []string{"ImportReplay", "FormerInstanceUIDs", "ExportMeta", "ExportEvents"}, runWithBackend: checkFormerInstanceIdentities},
 	{name: "attachment close evidence", methods: []string{"CloseIssueGuarded", "PatchIssueMetadata", "EventsByUIDs"}, run: checkAttachmentCloseEvidence},
 	{name: "search tokenizer words", methods: []string{"CreateProject", "CreateIssue", "SearchFTS", "SearchFTSAny"}, runWithBackend: checkSearchTokenizerWords},
 	{name: "setup finished delivery", methods: []string{"PrepareSetupFinished", "CompleteSetupFinished", "SystemProject", "CloseIssue", "SoftDeleteIssue", "RemoveProject"}, runWithBackend: checkSetupFinishedDelivery},
@@ -78,6 +79,7 @@ var storageScenarios = []scenario{
 	{name: "recurring backlog matches delivery", methods: []string{"CloseIssue", "ReopenIssue", "DispatchRecurringCron"}, run: checkRecurringBacklogMatchesDelivery},
 	{name: "recurring cron", methods: []string{"ListRecurringCronJobs", "DispatchRecurringCron"}, runWithBackend: checkRecurringCron},
 	{name: "close transcript", run: checkCloseTranscript},
+	{name: "close removes needs review", methods: []string{"CreateProject", "CreateIssue", "AddLabelAndEvent", "CloseIssueWithEvents", "HasLabel", "EventsAfter"}, run: checkCloseRemovesNeedsReview},
 	{name: "comment notifications", methods: []string{"CreateComment", "PatchIssueMetadata"}, run: checkCommentNotifications},
 	{name: "comment metadata multi issue", methods: []string{"CreateComment", "CreateIssue", "CreateProject", "EventsAfter", "IssueByID", "MaxEventID", "PatchIssueMetadata"}, run: checkCommentMetadataMultiIssue},
 	{name: "metadata patch transaction hook", methods: []string{"CreateIssue", "CreateProject", "EventsAfter", "PatchIssueMetadata"}, run: checkMetadataPatchTransactionHook},
@@ -213,7 +215,7 @@ var storageScenarios = []scenario{
 		RunUpstreamAttribution(t, store)
 		return nil
 	}},
-	{name: "project access", methods: []string{"CreateTeam", "TeamByUID", "ListTeams", "DeleteTeam", "TeamMembers", "SetTeamMembership", "MigrateTeamActor", "ProjectAccessPolicy", "SetProjectAccessPolicy", "AccessibleProjectUIDs", "AnonymousAccessibleProjectUIDs", "ProjectAccessRevision", "ProjectAccessTransactionFence", "ExportProjectAccess"}, run: func(t *testing.T, store db.Storage) error {
+	{name: "project access", methods: []string{"CreateTeam", "TeamByUID", "ListTeams", "DeleteTeam", "TeamMembers", "SetTeamMembership", "MigrateTeamActor", "ProjectAccessPolicy", "SetProjectAccessPolicy", "AccessibleProjectUIDs", "ProjectAccessibleToActor", "AnonymousAccessibleProjectUIDs", "AnonymousProjectAccess", "ProjectAccessRevision", "ProjectAccessTransactionFence", "ExportProjectAccess"}, run: func(t *testing.T, store db.Storage) error {
 		RunProjectAccessMergeIsolation(t, store)
 		RunProjectAccessConformance(t, store)
 		RunProjectAccessTokenEnrollment(t, store)
@@ -234,6 +236,9 @@ var storageScenarios = []scenario{
 	{name: "federated parked move recovery", methods: []string{"IsFederationRetainedProject", "MaxEventID", "LeaveFederationReplica", "FederationBindingByProject", "CreateComment", "PendingFederationPushEvents", "PendingFederationPushStats", "ResetFederatedProjectIfNoPendingPush", "AdvanceFederationPushCursor", "ResetFederatedProject", "EventsByUIDs", "CommentsByIssue", "ProjectByUID", "ProjectAccessPolicy", "RestoreProject", "CreateIssue", "CreateProject", "CreateProjectWithUID", "EnableProjectFederation", "InsertRemoteEvents", "CreateLinkAndEvent", "MaterializeFederatedProject", "MoveIssueProject", "UpsertFederationBinding", "IssueByUID"}, runWithBackend: checkFederatedParkedMoveRecovery},
 	{name: "remote event batch insert", methods: []string{"InsertRemoteEvents", "AdoptProjectIntoFederation", "MaterializeFederatedProject"}, runWithBackend: checkRemoteEventBatchInsert},
 	{name: "pushed definition authorship", methods: []string{"PutCronWorkflow", "IngestFederationEvents", "CronWorkflow"}, run: checkPushedDefinitionAuthorship},
+	{name: "federation push disable waits for local work", methods: []string{"CreateProject", "CreateIssue", "UpsertFederationBinding", "DisableFederationPushWhenSettled", "MaxLocalOriginEventID", "AdvanceFederationPushCursor", "UpsertClaimCache", "ApplyClaimStatus", "EnqueuePendingClaim", "RejectPendingClaim", "FederationBindingByProject", "IssueByID"}, run: checkFederationPushDisableWaitsForLocalWork},
+	{name: "federation push disable refuses an external root", methods: []string{"CreateProject", "CreateIssue", "CreateExternalRootBinding", "UpsertFederationBinding", "DisableFederationPushWhenSettled", "MaxLocalOriginEventID", "AdvanceFederationPushCursor", "FederationBindingByProject", "ExternalRootBindingByID"}, run: checkFederationPushDisableRefusesExternalRoot},
+	{name: "federation bound actor replacement waits for work", methods: []string{"CreateProject", "CreateIssue", "ObserveCronRun", "AdoptProjectIntoFederation", "EnableFederationPush", "ReplaceFederationBoundActorWhenSettled", "MaxLocalOriginEventID", "AdvanceFederationPushCursor", "FederationBindingByProject", "UpsertFederationBinding"}, run: checkFederationBoundActorReplacementWaitsForWork},
 	{name: "run actor survives push enablement", methods: []string{"ObserveCronRun", "AdoptProjectIntoFederation", "EnableFederationPush"}, run: checkRunActorSurvivesPushEnablement},
 	{name: "hub accepts known run actor", methods: []string{"ObserveCronRun", "IngestFederationEvents"}, run: checkHubAcceptsKnownRunActor},
 	{name: "cron reads tolerate tightened rules", methods: []string{"PutCronJob", "CronJob", "ListCronJobs", "ExportCronJobs"}, run: checkCronReadsTolerateTightenedRules},
@@ -347,7 +352,7 @@ var storageScenarios = []scenario{
 	{name: "issue status archive fence", methods: []string{"CreateProject", "ClaimIssueSyncBinding", "UpsertIssueSyncBinding", "RemoveProject", "RestoreProject"}, run: checkIssueStatusArchiveFence},
 	{name: "issue status locator", methods: []string{"CreateIssue", "CreateProject", "CloseIssue", "ClaimIssueSyncBinding", "SoftDeleteIssue", "UpsertIssueSyncBinding", "UpsertImportMapping"}, runWithBackend: checkIssueStatusLocator},
 	{name: "federated move cron metadata", methods: []string{"DispatchRecurringCron", "IngestFederationEvents"}, run: checkFederatedMoveCronMetadata},
-	{name: "federated move guards", methods: []string{"AdvanceFederationPushCursor", "ClaimExternalRootBinding", "CreateComment", "CreateExternalRootBinding", "CreateFederationEnrollment", "CreateIssue", "CreateProject", "CreateRecurrence", "EditIssue", "EnableProjectFederation", "FederationBindingByProject", "FederationEnrollmentTransactionFence", "IngestFederationEvents", "IssueByID", "LeaveFederationReplica", "MaterializeNext", "MaxEventID", "MoveIssueProject", "ProjectByID", "RecordFederationQuarantine", "RemoveProject", "SkipFederationQuarantine", "UpsertFederationBinding", "UpsertImportMapping", "UpsertIssueSyncBinding"}, run: checkFederatedMoveGuards},
+	{name: "federated move guards", methods: []string{"AdvanceFederationPushCursor", "ClaimExternalRootBinding", "CreateComment", "CreateExternalRootBinding", "CreateFederationEnrollment", "CreateIssue", "CreateProject", "CreateRecurrence", "DisableFederationPushWhenSettled", "EditIssue", "EnableProjectFederation", "FederationBindingByProject", "FederationEnrollmentTransactionFence", "IngestFederationEvents", "IssueByID", "LeaveFederationReplica", "MaterializeNext", "MaxEventID", "MoveIssueProject", "ProjectByID", "RecordFederationQuarantine", "RemoveProject", "ReplaceFederationBoundActorWhenSettled", "SkipFederationQuarantine", "UpsertFederationBinding", "UpsertImportMapping", "UpsertIssueSyncBinding"}, run: checkFederatedMoveGuards},
 	{name: "federated former project identity cleanup", methods: []string{"PurgeProject", "MergeProjects", "LeaveFederationReplica", "RemoveProject", "ResetFederatedProject"}, run: checkFederatedFormerProjectIdentityCleanup},
 	{name: "federated former project identity adoption", methods: []string{"AdoptProjectIntoFederation", "LeaveFederationReplica", "ResetFederatedProject"}, run: checkFederatedFormerProjectIdentityAdoption},
 	{name: "federated receiver departing references", methods: []string{"InsertRemoteEvents", "MaterializeFederatedProject", "IssueByShortID", "CreateIssue", "PurgeIssue", "MergeProjects"}, runWithBackend: checkFederatedReceiverDepartingReferences},
@@ -363,8 +368,10 @@ var storageScenarios = []scenario{
 	{name: "moved ordinary issue adoption", methods: []string{"CreateProject", "CreateIssue", "MoveIssueProject", "AdoptProjectIntoFederation", "IssueByUID", "PendingFederationPushEvents"}, run: checkMovedOrdinaryIssueAdoption},
 	{name: "federated cron run issue authority", methods: []string{"IngestFederationEvents", "MoveIssueProject", "ObserveCronRun"}, run: checkFederatedCronRunIssueAuthority},
 	{name: "federated reference batch authority", methods: []string{"IngestFederationEvents"}, run: checkFederatedReferenceBatchAuthority},
+	{name: "federated parent without reference controller", methods: []string{"IngestFederationEvents"}, run: checkFederatedParentWithoutReferenceController},
 	{name: "federated fresh current project authority", methods: []string{"IngestFederationEvents", "MoveIssueProject"}, run: checkFederatedFreshCurrentProjectAuthority},
-	{name: "federated move reset after acknowledged source leave", methods: []string{"CreateIssue", "MoveIssueProject", "AdvanceFederationPushCursor", "LeaveFederationReplica", "ResetFederatedProject", "ResetFederatedProjectIfNoPendingPush"}, run: checkFederatedMoveResetAfterAcknowledgedSourceLeave},
+	{name: "federated move reset after acknowledged source leave", methods: []string{"CreateIssue", "CreateComment", "MoveIssueProject", "AdvanceFederationPushCursor", "LeaveFederationReplica", "ResetFederatedProject", "ResetFederatedProjectIfNoPendingPush", "EventsByUIDs"}, run: checkFederatedMoveResetAfterAcknowledgedSourceLeave},
+	{name: "federated overtaken move source leave", methods: []string{"CreateIssue", "CreateComment", "MoveIssueProject", "InsertRemoteEvents", "MaterializeFederatedProject", "LeaveFederationReplica", "RemoveProject", "DisableFederationPushWhenSettled", "AdvanceFederationPushCursor", "ResetFederatedProjectIfNoPendingPush", "PendingFederationPushEvents", "PendingFederationPushStats", "EventsByUIDs", "FederationBindingByProject", "ReplaceFederationBoundActorWhenSettled"}, runWithBackend: checkFederatedOvertakenMoveSourceLeave},
 	{name: "federated move reset retained link", methods: []string{"CreateLinkAndEvent", "ResetFederatedProject", "ResetFederatedProjectIfNoPendingPush"}, run: checkFederatedMoveResetRetainedLink},
 	{name: "federated move source reset", methods: []string{"ResetFederatedProject", "ResetFederatedProjectIfNoPendingPush"}, run: checkFederatedMoveSourceReset},
 	{name: "federated move detached destination", methods: []string{"LeaveFederationReplica", "MaterializeFederatedProject"}, run: checkFederatedMoveDetachedDestination},
@@ -373,6 +380,10 @@ var storageScenarios = []scenario{
 	{name: "federated move replay embedding artifacts", methods: []string{"IngestFederationEvents", "InsertRemoteEvents", "MaterializeFederatedProject"}, run: checkFederatedMoveReplayEmbeddingArtifacts},
 	{name: "federated read pages", methods: []string{"ReadFederation"}, runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
 		checkFederatedReadPages(t, store, backend)
+		return nil
+	}},
+	{name: "federated quiet poll feed", methods: []string{"ReadFederation", "MoveIssueProject", "PurgeIssue"}, runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+		checkFederatedQuietPollFeed(t, store, backend)
 		return nil
 	}},
 	{name: "federated move remote edit history", methods: []string{"AdvanceFederationPushCursor", "CreateProject", "CreateIssue", "EditIssue", "EventsByUIDs", "MoveIssueProject", "InsertRemoteEvents", "MaterializeFederatedProject", "ResetFederatedProject", "UpsertFederationBinding", "IssueByUID", "ReadFederation"}, runWithBackend: checkFederatedMoveRemoteEditHistory},
@@ -689,6 +700,12 @@ var storageScenarios = []scenario{
 		run:     checkBoundedAssignmentExpiry,
 	},
 	{
+		name:    "expired assignment attention handoff",
+		methods: []string{"ClaimOwner", "CreateIssue", "CreateProject", "ExpireAssignments", "IssueByID", "PatchIssueMetadata"},
+		run:     checkExpiredAssignmentAttentionHandoff,
+	},
+	{name: "expired assignment federation replay", runWithBackend: checkExpiredAssignmentFederationReplay},
+	{
 		name:    "expected owner unassign",
 		methods: []string{"CreateIssue", "CreateProject", "UnassignOwner"},
 		run:     checkExpectedOwnerUnassign,
@@ -714,6 +731,14 @@ var storageScenarios = []scenario{
 			"RemoveLabelAndEvent", "SoftDeleteIssue",
 		},
 		run: checkLabels,
+	},
+	{
+		name: "change labels",
+		methods: []string{
+			"AddLabel", "ChangeLabelsAndEvents", "CreateIssue", "CreateProject", "EventsAfter", "IssueByID",
+			"LabelsByIssue",
+		},
+		run: checkChangeLabels,
 	},
 	{
 		name: "links and relationship projections",
@@ -776,6 +801,11 @@ var storageScenarios = []scenario{
 			"ResolveAPIToken", "RevokeAPIToken", "SystemProject",
 		},
 		run: checkAPITokensAndSystemProject,
+	},
+	{
+		name:    "legacy attention recurrence",
+		methods: []string{"CreateProject", "CreateIssue", "CreateRecurrence", "CreateRecurrenceForIssue", "PatchRecurrence", "MaterializeNext", "IssueByID"},
+		run:     checkLegacyAttentionRecurrence,
 	},
 	{
 		name: "recurrences",
@@ -992,7 +1022,7 @@ var storageScenarios = []scenario{
 			"FederationBindingByProject", "FederationEnrollmentTransactionFence",
 			"FederationSyncStatusByProject", "FindActiveFederationEnrollment", "ListFederationBindings",
 			"ListFederationEnrollments", "LinkByEndpoints", "PurgeIssue", "RecordFederationQuarantine", "RecordFederationSyncError",
-			"RecordFederationSyncPullStarted", "RecordFederationSyncPullSuccess",
+			"RecordFederationSyncPullStarted", "RecordFederationSyncPullSuccess", "RecordFederationHeldPullSuccess",
 			"RecordFederationSyncPushStarted", "RecordFederationSyncPushSuccess",
 			"RecordFederationSyncReset", "RetryFederationQuarantine", "RevokeFederationEnrollment",
 			"SkipFederationQuarantine", "UpsertFederationBinding",

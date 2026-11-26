@@ -6,7 +6,7 @@ import type {
   KataIssueDetailWire,
 } from './types.js'
 
-function creationFor(wire: KataCreationAttributionWire & { author?: string | undefined }): {
+export function creationFor(wire: KataCreationAttributionWire & { author?: string | undefined }): {
   creation?: KataCreationAttributionModel
 } {
   if (!wire.verification) return {}

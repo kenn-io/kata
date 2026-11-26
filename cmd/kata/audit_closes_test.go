@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -76,17 +77,31 @@ func TestAuditCloses_AgentOutputShape(t *testing.T) {
 // TestAuditCloses_FilterByActor verifies --actor narrows results to a
 // single actor's closes.
 func TestAuditCloses_FilterByActor(t *testing.T) {
+	actor := "Ana [member:11111111-1111-4111-8111-111111111111; enrollment:11111111-1111-4111-8111-111111111111]"
 	env, dir, pid, refOne := setupWorkspaceWithIssue(t, "issue one")
 	refTwo := createIssue(t, env, pid, "issue two")
-	runCLIAs(t, env, dir, "alice", "close", refOne, "--done",
+	runCLIAs(t, env, dir, actor, "close", refOne, "--done",
 		"--message", "Fixed the issue alice owned and ran the auth tests.",
 		"--commit", "abc1234")
 	runCLIAs(t, env, dir, "bob", "close", refTwo, "--done",
 		"--message", "Fixed the issue bob owned and ran the cache tests.",
 		"--commit", "def5678")
 
-	out := runCLI(t, env, dir, "audit", "closes", "--actor", "alice", "--json")
-	assert.Contains(t, out, `"actor":"alice"`)
+	out := runCLI(t, env, dir, "audit", "closes", "--actor", actor, "--json")
+	assert.Contains(t, out, actor)
+	human := runCLI(t, env, dir, "audit", "closes", "--actor", actor)
+	assert.Contains(t, human, "Ana")
+	assert.NotContains(t, human, "member:")
+	agent := runCLI(t, env, dir, "--agent", "audit", "closes")
+	assert.Contains(t, agent, "actor=Ana")
+	_, value, found := strings.Cut(agent, "actor_filter=")
+	require.True(t, found)
+	value, _, _ = strings.Cut(value, "\n")
+	filter, err := strconv.Unquote(value)
+	require.NoError(t, err)
+	filtered := runCLI(t, env, dir, "--agent", "audit", "closes", "--actor", filter)
+	assert.Contains(t, filtered, "issue="+refOne)
+	assert.NotContains(t, filtered, "issue="+refTwo)
 	assert.NotContains(t, out, `"actor":"bob"`)
 }
 

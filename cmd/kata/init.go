@@ -21,38 +21,41 @@ import (
 	"go.kenn.io/kata/internal/textsafe"
 	"go.kenn.io/kit/atomicfile"
 	"go.kenn.io/kit/fslink"
+	"go.kenn.io/kit/pathresolve"
 )
 
 // initOptions holds the flags specific to `kata init`.
 type initOptions struct {
-	Project        string
-	Replace        bool
-	Reassign       bool
-	WithAgents     bool
-	AgentMode      string
-	WithHooks      bool
-	WithCodexHooks bool
-	WithAgentHooks []string
-	AgentHooks     []string
-	ContractOnly   bool
-	OpenCodeAPI    string
-	Actor          string
+	Project         string
+	Replace         bool
+	Reassign        bool
+	WithAgents      bool
+	AgentMode       string
+	WithHooks       bool
+	WithCodexHooks  bool
+	WithAgentHooks  []string
+	AgentHooks      []string
+	ContractOnly    bool
+	OpenCodeAPI     string
+	Actor           string
+	SkipLocalWrites bool
 }
 
 // callInitOpts is the parameter bag passed to callInit.
 type callInitOpts struct {
-	Project        string
-	Replace        bool
-	Reassign       bool
-	WithAgents     bool
-	AgentMode      string
-	WithHooks      bool
-	WithCodexHooks bool
-	WithAgentHooks []string
-	AgentHooks     []string
-	ContractOnly   bool
-	OpenCodeAPI    string
-	Actor          string
+	Project         string
+	Replace         bool
+	Reassign        bool
+	WithAgents      bool
+	AgentMode       string
+	WithHooks       bool
+	WithCodexHooks  bool
+	WithAgentHooks  []string
+	AgentHooks      []string
+	ContractOnly    bool
+	OpenCodeAPI     string
+	Actor           string
+	SkipLocalWrites bool
 }
 
 // cliError is a structured error that carries an exit code for main().
@@ -129,6 +132,83 @@ func kindForStatus(status int) errKind {
 	return kindInternal
 }
 
+// checkExplicitWorkspaceBinding refuses an explicit --workspace whose binding
+// lives outside it and would be changed, or whose symlink resolves elsewhere.
+func checkExplicitWorkspaceBinding(workspace string, opts *initOptions) error {
+	if flags.Workspace == "" {
+		return nil
+	}
+	paths, err := config.DiscoverPaths(workspace)
+	if err != nil {
+		return nil
+	}
+	dest := config.WriteDestination(paths, workspace)
+	if paths.WorkspaceRoot != "" && !sameAgentHookFile(dest, workspace) {
+		return checkEnclosingBinding(workspace, dest, opts)
+	}
+	return checkBindingLinks(workspace, dest)
+}
+
+func checkEnclosingBinding(workspace, dest string, opts *initOptions) error {
+	if enclosingInitIsNoOp(dest, *opts) {
+		opts.SkipLocalWrites = true
+		return nil
+	}
+	return initBindingConflict(fmt.Sprintf("%q already binds %q.", filepath.Join(dest, config.ProjectConfigFilename), workspace),
+		"To change the enclosing binding, set --workspace to its folder, keep your other options, and use --replace when changing projects.")
+}
+
+func checkBindingLinks(workspace, dest string) error {
+	for _, dir := range []string{workspace, dest} {
+		if _, err := bindingTarget(workspace, filepath.Join(dir, config.ProjectConfigFilename)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func enclosingInitIsNoOp(dest string, opts initOptions) bool {
+	if opts.Reassign || opts.WithAgents || opts.WithHooks || opts.WithCodexHooks || len(opts.WithAgentHooks) != 0 || len(opts.AgentHooks) != 0 {
+		return false
+	}
+	cfg, err := config.ReadProjectConfig(dest)
+	if err != nil || (strings.TrimSpace(opts.Project) != "" && strings.TrimSpace(opts.Project) != cfg.Project.Name) {
+		return false
+	}
+	data, err := os.ReadFile(filepath.Join(dest, config.ProjectConfigFilename)) //nolint:gosec // dest is the discovered binding directory
+	if err != nil || !config.HasProjectConfigHeader(data) {
+		return false
+	}
+	data, err = os.ReadFile(filepath.Join(dest, ".gitignore")) //nolint:gosec // dest is the discovered binding directory
+	return err == nil && hasGitignoreEntry(data, ".kata.local.toml")
+}
+
+// bindingTarget refuses a binding symlink, dangling or not, that resolves
+// outside the explicit workspace. A regular or missing file passes.
+func bindingTarget(workspace, bindingPath string) (string, error) {
+	dir, err := pathresolve.EvalSymlinks(workspace)
+	if err != nil {
+		return "", err
+	}
+	target, err := pathresolve.EvalSymlinksAllowMissing(bindingPath)
+	if err != nil {
+		return "", err
+	}
+	parent, err := pathresolve.EvalSymlinks(filepath.Dir(bindingPath))
+	if err != nil {
+		return "", err
+	}
+	if rel, err := filepath.Rel(dir, target); target != filepath.Join(parent, filepath.Base(bindingPath)) && (err != nil || !filepath.IsLocal(rel)) {
+		return "", initBindingConflict(fmt.Sprintf("%q links to %q, outside %q.", bindingPath, target, workspace),
+			"Replace this workspace's .kata.toml symlink with a local binding before retrying.")
+	}
+	return target, nil
+}
+
+func initBindingConflict(message, hint string) error {
+	return &cliError{Message: message, Hint: hint, Kind: kindConflict, Code: "project_binding_conflict", ExitCode: ExitConflict}
+}
+
 // newInitCmd returns the cobra.Command for `kata init`.
 func newInitCmd() *cobra.Command {
 	var opts initOptions
@@ -176,11 +256,15 @@ Name agents for explicit setup; use --local for project scope. If a user-level h
 			if cmd.Flags().Changed("contract-only") && len(opts.AgentHooks) == 0 {
 				return agentHookUsage("init --contract-only requires --agent-hooks")
 			}
-			callOpts, err := prepareInitHookOptions(cmd.Context(), callInitOpts(opts))
+			startPath, err := resolveStartPath(flags.Workspace)
 			if err != nil {
 				return err
 			}
-			startPath, err := resolveStartPath(flags.Workspace)
+			opts.Project = flags.Project
+			if err := checkExplicitWorkspaceBinding(startPath, &opts); err != nil {
+				return err
+			}
+			callOpts, err := prepareInitHookOptions(cmd.Context(), callInitOpts(opts))
 			if err != nil {
 				return err
 			}
@@ -373,13 +457,25 @@ func runNameInit(ctx context.Context, baseURL string, in localInit, opts callIni
 	}
 
 	dest := config.WriteDestination(in.Disc, in.StartPath)
+	if opts.SkipLocalWrites {
+		return formatInitOutput(bs, resp.Project.Name, dest, resp.Created, resp.Created, nil, "")
+	}
+	bindingPath := filepath.Join(dest, config.ProjectConfigFilename)
+	if flags.Workspace != "" {
+		bindingPath, err = bindingTarget(in.StartPath, bindingPath)
+	} else {
+		bindingPath, err = pathresolve.EvalSymlinksAllowMissing(bindingPath)
+	}
+	if err != nil {
+		return "", err
+	}
 	guidanceWarning := ""
 	tomlChanged := needsTomlWrite(in.ExistingToml, resp.Project.Name)
 	if tomlChanged {
-		if err := config.WriteProjectConfig(dest, resp.Project.Name); err != nil {
+		if err := config.ReplaceProjectConfig(bindingPath, resp.Project.Name); err != nil {
 			return "", fmt.Errorf("write .kata.toml: %w", err)
 		}
-	} else if tomlChanged, err = config.EnsureProjectConfigHeader(dest); err != nil {
+	} else if tomlChanged, err = config.EnsureProjectConfigHeader(bindingPath); err != nil {
 		err = fmt.Errorf("write .kata.toml: %w", err)
 		warnAgentsUpdate(err)
 		guidanceWarning = err.Error()
@@ -750,6 +846,15 @@ func mapStatusToExit(status int, _ string) int {
 	}
 }
 
+func hasGitignoreEntry(data []byte, entry string) bool {
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if strings.TrimSpace(line) == entry {
+			return true
+		}
+	}
+	return false
+}
+
 // ensureGitignoreEntry appends a single line to <dir>/.gitignore if the entry
 // is not already present. It creates the file if absent and returns whether the
 // file changed. Re-running on a file that already lists the entry is a no-op.
@@ -760,10 +865,8 @@ func ensureGitignoreEntry(dir, entry string) (bool, error) {
 	case err == nil:
 		// Walk lines so we don't false-match a substring inside a longer
 		// pattern (e.g. ".kata.local.toml.bak").
-		for line := range strings.SplitSeq(string(existing), "\n") {
-			if strings.TrimSpace(line) == entry {
-				return false, nil
-			}
+		if hasGitignoreEntry(existing, entry) {
+			return false, nil
 		}
 		// Preserve trailing-newline convention: if the file ends without
 		// a newline, add one before appending so we don't merge our line

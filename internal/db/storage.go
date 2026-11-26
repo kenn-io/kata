@@ -121,6 +121,8 @@ type Storage interface {
 	ProjectAccessPolicy(ctx context.Context, projectUID string) (ProjectAccessPolicy, error)
 	SetProjectAccessPolicy(ctx context.Context, policy ProjectAccessPolicy, adminActor string) (ProjectAccessPolicy, Event, error)
 	AccessibleProjectUIDs(ctx context.Context, actor string) ([]string, error)
+	ProjectAccessibleToActor(ctx context.Context, actor, projectUID string) (bool, error)
+	AnonymousProjectAccess(ctx context.Context, projectID int64) (projectUID string, accessible bool, err error)
 	AnonymousAccessibleProjectUIDs(ctx context.Context) ([]string, error)
 	ProjectAccessRevision(ctx context.Context) (int64, error)
 	ProjectAccessTransactionFence(actor string, projectUIDs []string) TransactionFence
@@ -134,6 +136,7 @@ type Storage interface {
 	ClaimScreenView(ctx context.Context, screen, day string) (bool, error)
 	ReleaseScreenView(ctx context.Context, screen, day string) error
 	InstanceUID() string
+	FormerInstanceUIDs(context.Context) ([]string, error)
 	RefreshInstanceUID(ctx context.Context) error
 	// InstanceCreatedAt reports when InstanceUID was generated, or zero when
 	// the instance predates recording it.
@@ -246,6 +249,14 @@ type Storage interface {
 	AddLabelAndEvent(ctx context.Context, issueID int64, ev LabelEventParams) (IssueLabel, Event, error)
 	RemoveLabel(ctx context.Context, issueID int64, label string) error
 	RemoveLabelAndEvent(ctx context.Context, issueID int64, ev LabelEventParams) (Event, error)
+	// ChangeLabelsAndEvents removes p.Remove, then adds p.Add, in one transaction.
+	// Each label that actually changes emits one issue.unlabeled or issue.labeled
+	// event; absent removes and already-attached adds are skipped silently. An
+	// invalid add label returns ErrLabelInvalid and rolls back every change;
+	// remove labels are not validated, so callers check them with ValidLabel.
+	// Returns the issue's labels after the change (sorted, non-nil) and the
+	// emitted events in order.
+	ChangeLabelsAndEvents(ctx context.Context, issueID int64, p ChangeLabelsParams) ([]string, []Event, error)
 	HasLabel(ctx context.Context, issueID int64, label string) (bool, error)
 	LabelByEndpoints(ctx context.Context, issueID int64, label string) (IssueLabel, error)
 	LabelCounts(ctx context.Context, projectID int64) ([]LabelCount, error)
@@ -410,6 +421,7 @@ type Storage interface {
 	FederationSyncStatusByProject(ctx context.Context, projectID int64) (FederationSyncStatus, error)
 	RecordFederationSyncPullStarted(ctx context.Context, projectID int64, at time.Time) error
 	RecordFederationSyncPullSuccess(ctx context.Context, projectID int64, at time.Time) error
+	RecordFederationHeldPullSuccess(ctx context.Context, projectID int64, at time.Time) error
 	RecordFederationSyncPushStarted(ctx context.Context, projectID int64, at time.Time) error
 	RecordFederationSyncPushSuccess(ctx context.Context, projectID int64, at time.Time) error
 	RecordFederationSyncReset(ctx context.Context, projectID int64, at time.Time) error
@@ -485,6 +497,23 @@ type Storage interface {
 	// while the home has no other history of one of those issues.
 	AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string) error
 	EnableFederationPush(ctx context.Context, projectID int64, cursor int64) (FederationBinding, error)
+	// DisableFederationPushWhenSettled turns push off for a direct spoke
+	// binding in the same transaction that proves no local-origin event above
+	// the push cursor, no live claim held by this replica, no open claim
+	// request, and no cron run still running as the bound actor remains.
+	// Otherwise it changes nothing and returns ErrFederationPushPending,
+	// ErrFederationClaimsHeld, or ErrFederationRunsActive. An enabled binding
+	// whose project has an active external root binding returns
+	// ErrExternalRootFederationConflict, as UpsertFederationBinding does for a
+	// read-only spoke. A binding whose push is already off is returned
+	// unchanged once the same claim and cron run checks pass.
+	DisableFederationPushWhenSettled(ctx context.Context, projectID int64, originInstanceUID string) (FederationBinding, error)
+	// ReplaceFederationBoundActorWhenSettled changes a direct spoke binding's
+	// bound actor from fromActor to toActor under the same settled checks,
+	// with pending push checked only while push is on. It returns the binding
+	// unchanged when it already has toActor and ErrFederationBoundActorChanged
+	// when it has neither actor.
+	ReplaceFederationBoundActorWhenSettled(ctx context.Context, projectID int64, originInstanceUID, fromActor, toActor string) (FederationBinding, error)
 	ResetFederatedProjectIfNoPendingPush(ctx context.Context, projectID, replayHorizonEventID, pullCursorEventID int64, originInstanceUID string, pushCursorEventID int64) error
 	IngestFederationEvents(ctx context.Context, p FederationIngestParams) (FederationIngestResult, error)
 }

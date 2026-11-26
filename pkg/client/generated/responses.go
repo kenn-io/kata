@@ -299,6 +299,22 @@ type GetProjectFederationResponse = ProjectFederationBody
 
 type GetProjectFederationErrorResponse = ErrorEnvelope
 
+type FederatedDocbankCapabilitiesResponse = DocbankServiceCapabilities
+
+type FederatedDocbankCapabilitiesErrorResponse = ErrorEnvelope
+
+type LinkFederatedDocbankResponse = DocbankDescriptor
+
+type LinkFederatedDocbankErrorResponse = ErrorEnvelope
+
+type UploadFederatedDocbankResponse = DocbankDescriptor
+
+type UploadFederatedDocbankErrorResponse = ErrorEnvelope
+
+type FederatedDocbankContentResponse = []byte
+
+type FederatedDocbankContentErrorResponse = ErrorEnvelope
+
 type EnableProjectFederationResponse = ProjectFederationBody
 
 type EnableProjectFederationErrorResponse = ErrorEnvelope
@@ -310,6 +326,10 @@ type PollFederationProjectEventsErrorResponse = ErrorEnvelope
 type IngestFederationProjectEventsResponse = FederationIngestEventsBody
 
 type IngestFederationProjectEventsErrorResponse = ErrorEnvelope
+
+type WatchFederationProjectEventsResponse = FederationWatchEventsBody
+
+type WatchFederationProjectEventsErrorResponse = ErrorEnvelope
 
 type GetFederationProjectMetadataResponse = ProjectFederationBody
 
@@ -482,6 +502,10 @@ type EditCommentErrorResponse = ErrorEnvelope
 type ReachableIssueGraphResponse = ReachableGraphResponseBody
 
 type ReachableIssueGraphErrorResponse = ErrorEnvelope
+
+type UpdateLabelsResponse = UpdateLabelsResponseBody
+
+type UpdateLabelsErrorResponse = ErrorEnvelope
 
 type AddLabelResponse = AddLabelResponseBody
 
@@ -1242,6 +1266,37 @@ type GetProjectFederationResp struct {
 	JSONDefault  *GetProjectFederationErrorResponse
 }
 
+type FederatedDocbankCapabilitiesResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *FederatedDocbankCapabilitiesResponse
+	JSONDefault  *FederatedDocbankCapabilitiesErrorResponse
+}
+
+type LinkFederatedDocbankResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *LinkFederatedDocbankResponse
+	JSONDefault  *LinkFederatedDocbankErrorResponse
+}
+
+type UploadFederatedDocbankResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *UploadFederatedDocbankResponse
+	JSONDefault  *UploadFederatedDocbankErrorResponse
+}
+
+type FederatedDocbankContentResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSONDefault  *FederatedDocbankContentErrorResponse
+}
+
 type EnableProjectFederationResp200Headers struct {
 	XKataEventFeatures         string `header:"X-Kata-Event-Features"`
 	XKataRequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
@@ -1259,6 +1314,8 @@ type EnableProjectFederationResp struct {
 type PollFederationProjectEventsResp200Headers struct {
 	XKataEventFeatures         string `header:"X-Kata-Event-Features"`
 	XKataEventsIssueUID        string `header:"X-Kata-Events-Issue-UID"`
+	XKataFederationPollWaitMax string `header:"X-Kata-Federation-Poll-Wait-Max"`
+	XKataFederationWatchMax    string `header:"X-Kata-Federation-Watch-Max"`
 	XKataRequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
 }
 
@@ -1283,6 +1340,20 @@ type IngestFederationProjectEventsResp struct {
 	JSON200      *IngestFederationProjectEventsResponse
 	Headers200   *IngestFederationProjectEventsResp200Headers
 	JSONDefault  *IngestFederationProjectEventsErrorResponse
+}
+
+type WatchFederationProjectEventsResp200Headers struct {
+	XKataFederationPollWaitMax string `header:"X-Kata-Federation-Poll-Wait-Max"`
+	XKataFederationWatchMax    string `header:"X-Kata-Federation-Watch-Max"`
+}
+
+type WatchFederationProjectEventsResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *WatchFederationProjectEventsResponse
+	Headers200   *WatchFederationProjectEventsResp200Headers
+	JSONDefault  *WatchFederationProjectEventsErrorResponse
 }
 
 type GetFederationProjectMetadataResp200Headers struct {
@@ -1315,12 +1386,23 @@ type SkipFederationQuarantineResp struct {
 	JSONDefault  *SkipFederationQuarantineErrorResponse
 }
 
+type OfferRelayDeliveriesResp200Headers struct {
+	XKataEventFeatures         string `header:"X-Kata-Event-Features"`
+	XKataRequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
+}
+
 type OfferRelayDeliveriesResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
 	StatusCode   int
 	JSON200      *OfferRelayDeliveriesResponse
+	Headers200   *OfferRelayDeliveriesResp200Headers
 	JSONDefault  *OfferRelayDeliveriesErrorResponse
+}
+
+type GetRelayResetResp200Headers struct {
+	XKataEventFeatures         string `header:"X-Kata-Event-Features"`
+	XKataRequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
 }
 
 type GetRelayResetResp struct {
@@ -1328,6 +1410,7 @@ type GetRelayResetResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *GetRelayResetResponse
+	Headers200   *GetRelayResetResp200Headers
 	JSONDefault  *GetRelayResetErrorResponse
 }
 
@@ -1692,6 +1775,19 @@ type ReachableIssueGraphResp struct {
 	StatusCode   int
 	JSON200      *ReachableIssueGraphResponse
 	JSONDefault  *ReachableIssueGraphErrorResponse
+}
+
+type UpdateLabelsResp200Headers struct {
+	XKataProjectName string `header:"X-Kata-Project-Name"`
+}
+
+type UpdateLabelsResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *UpdateLabelsResponse
+	Headers200   *UpdateLabelsResp200Headers
+	JSONDefault  *UpdateLabelsErrorResponse
 }
 
 type AddLabelResp200Headers struct {

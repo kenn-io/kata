@@ -93,12 +93,14 @@ test('captures stable Web UI documentation states from synthetic issues', async 
   await capture(page, join(outputDir, 'workspace.png'), replacements)
 
   await page.goto(`${kata.origin}/kata?issue=${parent.uid}`)
-  await page.getByRole('button', { name: 'Switch to side-by-side layout' }).click()
-  await expect(page.getByRole('button', { name: 'Switch to stacked layout' })).toBeVisible()
+  await page.getByRole('button', { name: 'Display' }).click()
+  await page.getByRole('radio', { name: 'Beside list' }).click()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('separator', { name: 'Resize Kata panes' })).toBeVisible()
   await page.evaluate(() => {
     document.documentElement.style.zoom = '0.875'
   })
-  await page.getByRole('button', { name: 'Edit issue' }).click()
+  await page.getByRole('button', { name: 'Add comment' }).click()
   await page
     .getByRole('textbox', { name: 'Comment' })
     .fill('The synthetic release is ready for documentation review.')
@@ -106,19 +108,15 @@ test('captures stable Web UI documentation states from synthetic issues', async 
   await expect(
     page.getByText('The synthetic release is ready for documentation review.'),
   ).toBeVisible()
-  await page.getByRole('button', { name: 'More actions' }).click()
-  await page.getByRole('menuitem', { name: 'Add checklist' }).click()
+  await page.getByRole('button', { name: 'Add item' }).click()
   await page.getByRole('textbox', { name: 'New checklist item' }).fill('Verify example build')
   await page.getByRole('textbox', { name: 'New checklist item' }).press('Enter')
   await expect(page.getByRole('checkbox', { name: 'Verify example build' })).toBeVisible()
-  await page.getByRole('button', { name: 'Done editing' }).click()
   await expect(page.getByRole('region', { name: 'Description' })).toContainText('Release checklist')
   await expect(page.getByRole('region', { name: 'Links' })).toContainText(
     /Document browser workflows|Verify example packages|Coordinate example announcement/,
   )
-  await expect(page.getByRole('region', { name: 'Recurrences' })).toContainText(
-    'Weekly example review',
-  )
+  await expect(page.getByLabel('Properties')).toContainText('Repeats')
   await capture(page, join(outputDir, 'issue-detail.png'), replacements)
 
   const unlink = await kata.request(
@@ -133,7 +131,9 @@ test('captures stable Web UI documentation states from synthetic issues', async 
   await page.evaluate(() => {
     document.documentElement.style.zoom = ''
   })
-  await page.getByRole('button', { name: 'Switch to stacked layout' }).click()
+  await page.getByRole('button', { name: 'Display' }).click()
+  await page.getByRole('radio', { name: 'Beside list' }).click()
+  await page.keyboard.press('Escape')
   await page.goto(`${kata.origin}/kata?issue=${parent.uid}&graph=1`)
   const graph = page.getByRole('region', { name: 'Reachable task graph' })
   await expect(graph).toBeVisible()

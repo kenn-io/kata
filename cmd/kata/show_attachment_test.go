@@ -27,6 +27,39 @@ func TestPrintShowAttachmentEvidenceOmitsMediaType(t *testing.T) {
 	require.Equal(t, "Evidence: attachment attachment-1: report.pdf · 5 bytes\n", output.String())
 }
 
+func TestPrintShowAttachmentEvidenceChangedOrigin(t *testing.T) {
+	const attachmentID = "attachment-1"
+	var response showResponseForCLI
+	response.Issue.Metadata = map[string]jsontext.Value{
+		metadata.AttachmentPrefix + attachmentID: jsontext.Value(`{"name":"report.pdf","media_type":"application/pdf","size":5,"docbank_version":"00000000-0000-4000-8000-000000000001","origin":"01ARZ3NDEKTSV4RRFFQ69G5FAW"}`),
+	}
+	frozen, valid := metadata.Valid(jsontext.Value(`{"name":"report.pdf","media_type":"application/pdf","size":5,"docbank_version":"00000000-0000-4000-8000-000000000001","origin":"01ARZ3NDEKTSV4RRFFQ69G5FAV"}`))
+	require.True(t, valid)
+	response.CloseEvidence = []db.Evidence{{Type: "attachment", AttachmentID: attachmentID, Attachment: &frozen}}
+	var output bytes.Buffer
+	require.NoError(t, printShowAttachmentEvidence(&output, response))
+	require.Equal(t, "Evidence: attachment attachment-1: report.pdf · 5 bytes (changed)\n", output.String())
+
+	withoutOrigin := jsontext.Value(`{"name":"report.pdf","media_type":"application/pdf","size":5,"docbank_version":"00000000-0000-4000-8000-000000000001"}`)
+	response.Issue.Metadata[metadata.AttachmentPrefix+attachmentID] = withoutOrigin
+	output.Reset()
+	require.NoError(t, printShowAttachmentEvidence(&output, response))
+	require.Equal(t, "Evidence: attachment attachment-1: report.pdf · 5 bytes (changed)\n", output.String())
+
+	legacy, valid := metadata.Valid(withoutOrigin)
+	require.True(t, valid)
+	response.CloseEvidence[0].Attachment = &legacy
+	response.Issue.Metadata[metadata.AttachmentPrefix+attachmentID] = jsontext.Value(`{"name":"report.pdf","media_type":"application/pdf","size":5,"docbank_version":"00000000-0000-4000-8000-000000000001","origin":"01ARZ3NDEKTSV4RRFFQ69G5FAW"}`)
+	output.Reset()
+	require.NoError(t, printShowAttachmentEvidence(&output, response))
+	require.Equal(t, "Evidence: attachment attachment-1: report.pdf · 5 bytes (changed)\n", output.String())
+
+	response.Issue.Metadata[metadata.AttachmentPrefix+attachmentID] = withoutOrigin
+	output.Reset()
+	require.NoError(t, printShowAttachmentEvidence(&output, response))
+	require.Equal(t, "Evidence: attachment attachment-1: report.pdf · 5 bytes\n", output.String())
+}
+
 func TestPrintShowAttachmentEvidenceInvalidDetails(t *testing.T) {
 	var response showResponseForCLI
 	response.CloseEvidence = []db.Evidence{{

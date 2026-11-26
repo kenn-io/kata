@@ -94,7 +94,11 @@ func TestE2E_AgentHooksAttentionParity(t *testing.T) {
 			for _, visible := range []bool{false, true} {
 				ref := createIssue(t, env, pid, fmt.Sprintf("example tracked work %s visible=%t", scenario.name, visible))
 				runCLI(t, env, dir, "meta", "set", ref, attentionMsgKey, "existing context")
-				if scenario.initial != "" {
+				if scenario.name == "end number" {
+					// Seed a legacy value that metadata validation now rejects.
+					_, err := env.DB.ExecContext(t.Context(), `UPDATE issues SET metadata=json_set(metadata, '$."work.attention"', 7) WHERE short_id=?`, ref)
+					require.NoError(t, err)
+				} else if scenario.initial != "" {
 					runCLI(t, env, dir, "meta", "set", ref, attentionKey, scenario.initial, "--json-value")
 				}
 				if scenario.closed {

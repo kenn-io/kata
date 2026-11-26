@@ -13,6 +13,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/authorname"
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
@@ -176,7 +177,7 @@ func printShowHuman(
 		b.Issue.ShortID,
 		textsafe.Line(b.Issue.Title),
 		b.Issue.Status,
-		textsafe.Line(b.Issue.Author)); err != nil {
+		textsafe.Line(authorname.Display(b.Issue.Author))); err != nil {
 		return err
 	}
 	if attribution := showCreationAttribution(b.Issue.AttributionView, b.Issue.Author); attribution != "" {
@@ -509,12 +510,13 @@ func showCreationAttribution(view db.AttributionView, author string) string {
 	}
 	value := "attribution=" + state + " source=" + textsafe.Line(commentAttribution(source, view.Teammate))
 	if state == "verified" && view.AccountableActor != "" {
-		value += " accountable=" + textsafe.Line(view.AccountableActor)
+		value += " accountable=" + textsafe.Line(authorname.Display(view.AccountableActor))
 	}
 	return value
 }
 
 func commentAttribution(author, teammate string) string {
+	author = authorname.Display(author)
 	if teammate == "" {
 		return author
 	}
@@ -603,7 +605,7 @@ func printShowAgent(w io.Writer, b showResponseForCLI, subjectProject, operation
 		for _, c := range b.Comments {
 			fields := []agentField{
 				agentRowField("uid", c.UID),
-				agentRowField("author", c.Author),
+				agentRowField("author", authorname.Display(c.Author)),
 			}
 			if c.Handle != "" {
 				fields = append(fields, agentRowField("handle", commentref.HandleForIssue(c.Handle, c.IssueUID, c.IssueShortID, b.Issue.UID)))
@@ -624,6 +626,7 @@ func printShowAgent(w io.Writer, b showResponseForCLI, subjectProject, operation
 			if c.BacklinksTruncated {
 				fields = append(fields, agentRowField("backlinks_truncated", "true"))
 			}
+			fields = append(fields, agentRowField("author_filter", c.Author))
 			if err := writeAgentKVRow(w, fields...); err != nil {
 				return err
 			}
@@ -632,7 +635,7 @@ func printShowAgent(w io.Writer, b showResponseForCLI, subjectProject, operation
 				if _, err := fmt.Fprint(w, "reply "); err != nil {
 					return err
 				}
-				if err := writeAgentKVRow(w, agentRowField("kind", r.Kind), agentRowField("uid", r.UID), agentRowField("handle", r.Handle), agentRowField("author", r.Author), agentRowField("status", r.Status), agentRowField("target_edited", fmt.Sprint(r.TargetEdited))); err != nil {
+				if err := writeAgentKVRow(w, agentRowField("kind", r.Kind), agentRowField("uid", r.UID), agentRowField("handle", r.Handle), agentRowField("author", authorname.Display(r.Author)), agentRowField("status", r.Status), agentRowField("target_edited", fmt.Sprint(r.TargetEdited))); err != nil {
 					return err
 				}
 			}
@@ -710,7 +713,7 @@ func printShowAgentLeaseViolationLines(w io.Writer, violations []claimViolationF
 		if err := writeAgentKVRow(w,
 			agentRowField("lease_violation", v.At.UTC().Format(time.RFC3339)),
 			agentRowField("event", v.OffendingEventType),
-			agentRowField("actor", v.Actor),
+			agentRowField("actor", authorname.Display(v.Actor)),
 			agentRowField("offending_instance", v.OffendingOriginInstanceUID),
 			agentRowField("reason", v.Reason),
 		); err != nil {
@@ -787,7 +790,7 @@ func printShowClaimViolationLines(
 		if _, err := fmt.Fprintf(out, "lease violation: %s %s by %s from instance %s (%s)\n",
 			v.At.UTC().Format(time.RFC3339),
 			textsafe.Line(v.OffendingEventType),
-			textsafe.Line(v.Actor),
+			textsafe.Line(authorname.Display(v.Actor)),
 			textsafe.Line(v.OffendingOriginInstanceUID),
 			textsafe.Line(v.Reason)); err != nil {
 			return err

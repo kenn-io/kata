@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -56,6 +58,52 @@ func TestManagedExternallyDoesNotAutostart(t *testing.T) {
 }
 
 func TestManagedExternallyUnreachableDetail(t *testing.T) {
+	t.Run("wrapped deadline", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			probe := &LocalDaemonUnreachableError{PID: 123, Address: "127.0.0.1:1234", DataDir: "/example/runtime", cause: fmt.Errorf("probe: %w", context.DeadlineExceeded)}
+			_, err := waitForSupervisedDaemon(t.Context(), "/example/config.toml", func(context.Context) bool { return false }, func(context.Context) (ensureDiscovery, error) {
+				return ensureDiscovery{}, probe
+			})
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+			require.Equal(t, 1, strings.Count(err.Error(), "context deadline exceeded"))
+		})
+	})
+	t.Run("caller cancels while probing", func(t *testing.T) {
+		setupKataEnv(t)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		_, err := waitForSupervisedDaemon(ctx, "/example/config.toml", func(context.Context) bool { return false }, func(ctx context.Context) (ensureDiscovery, error) {
+			cancel()
+			return ensureDiscovery{}, ctx.Err()
+		})
+		require.ErrorIs(t, err, context.Canceled)
+		var advised interface{ RecoveryAdvice() string }
+		require.ErrorAs(t, err, &advised)
+		require.Empty(t, advised.RecoveryAdvice())
+	})
+	t.Run("last typed probe", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			probe := &LocalDaemonUnreachableError{PID: 123, Address: "127.0.0.1:1234", DataDir: "/example/runtime", VerifiedProcess: true, WebOrigin: "http://127.0.0.1:1234", cause: errors.New("probe failed")}
+			_, err := waitForSupervisedDaemon(t.Context(), "/example/config.toml", func(context.Context) bool { return false }, func(context.Context) (ensureDiscovery, error) {
+				return ensureDiscovery{}, probe
+			})
+			require.Equal(t, 1, strings.Count(err.Error(), "service manager"))
+			var advised interface{ RecoveryAdvice() string }
+			require.ErrorAs(t, err, &advised)
+			require.Equal(t, 1, strings.Count(advised.RecoveryAdvice(), "service manager"))
+		})
+	})
+	t.Run("migration retains profiling URL", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			probe := &LocalDaemonUnreachableError{PID: 123, WebOrigin: "http://127.0.0.1:1234", VerifiedProcess: true, cause: errors.New("probe failed")}
+			_, err := waitForSupervisedDaemon(t.Context(), "/example/config.toml", func(context.Context) bool { return true }, func(context.Context) (ensureDiscovery, error) {
+				return ensureDiscovery{}, probe
+			})
+			require.ErrorContains(t, err, "http://127.0.0.1:1234/debug/pprof/goroutine?debug=2")
+			require.NotContains(t, err.Error(), "kill -QUIT")
+			require.NotContains(t, err.Error(), "Restart it")
+		})
+	})
 	for _, clear := range []bool{false, true} {
 		t.Run(fmt.Sprintf("clear=%t", clear), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -82,6 +130,59 @@ func TestManagedExternallyUnreachableDetail(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestDaemonRecoveryAdvice(t *testing.T) {
+	t.Run("unverified process retains profiling URL", func(t *testing.T) {
+		err := &LocalDaemonUnreachableError{PID: 123, WebOrigin: "http://127.0.0.1:1234"}
+		require.Contains(t, err.RecoveryAdvice(), "http://127.0.0.1:1234/debug/pprof/goroutine?debug=2")
+		require.NotContains(t, err.RecoveryAdvice(), "kill -QUIT")
+	})
+	t.Run("verified process", func(t *testing.T) {
+		err := &LocalDaemonUnreachableError{PID: 123, VerifiedProcess: true, autoStarted: true, WebOrigin: "http://127.0.0.1:1234"}
+		require.Contains(t, err.RecoveryAdvice(), "http://127.0.0.1:1234/debug/pprof/goroutine?debug=2")
+		require.Contains(t, err.RecoveryAdvice(), "Wait during startup or migration")
+		require.Contains(t, err.RecoveryAdvice(), "rerun the original command")
+		require.Contains(t, err.RecoveryAdvice(), "any command that autostarts")
+		require.Contains(t, err.RecoveryAdvice(), "daemon status, daemon diagnose, and health only inspect")
+		if runtime.GOOS != "windows" {
+			require.Contains(t, err.RecoveryAdvice(), "kill -QUIT 123")
+		}
+	})
+	t.Run("profile with quote", func(t *testing.T) {
+		err := &LocalDaemonUnreachableError{PID: 123, VerifiedProcess: true, Profile: "team's profile", ProfileAutostart: true}
+		command := `kata --daemon 'team'"'"'s profile' daemon recover`
+		if runtime.GOOS == "windows" {
+			command = `kata --daemon 'team''s profile' daemon recover`
+		}
+		require.Contains(t, err.RecoveryAdvice(), command)
+	})
+}
+
+func TestDiscoveryDeadlineAfterEarlierUnreachableRuntime(t *testing.T) {
+	setupKataEnv(t)
+	child, _ := startLongLivedTestProcess(t)
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond)
+		defer cancel()
+		scan := func(ctx context.Context, dir string) iter.Seq2[liveDaemon, error] {
+			return liveDaemonsUsing(ctx, dir, func(string) ([]kitdaemon.RuntimeRecord, error) {
+				return []kitdaemon.RuntimeRecord{
+					{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1234"},
+					{PID: child.Process.Pid, Network: "tcp", Address: "127.0.0.1:5678"},
+				}, nil
+			}, func(ctx context.Context, address string) (string, PingInfo, error) {
+				if address == "127.0.0.1:1234" {
+					return "", PingInfo{}, errors.New("first probe failed")
+				}
+				<-ctx.Done()
+				return "", PingInfo{}, ctx.Err()
+			})
+		}
+		_, _, err := discoverResolved(ctx, "/example/runtime", scan)
+		require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+		require.ErrorContains(t, err, "127.0.0.1:1234")
+	})
 }
 
 func TestManagedExternallyProfileDoesNotAutostart(t *testing.T) {
@@ -123,7 +224,9 @@ func TestManagedExternallyDoesNotWaitForStartLock(t *testing.T) {
 	release, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).AcquireStartLock(t.Context())
 	require.NoError(t, err)
 	defer release()
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	// The start lock stays held until this function returns, so waiting on it
+	// would still time out even with headroom for loaded loopback probes.
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	running, err := ensureLocalRunningTarget(ctx)
 	require.NoError(t, err)
@@ -182,6 +285,30 @@ func TestExternallyManagedVersionErrorGuidesByDirection(t *testing.T) {
 	err = externallyManagedVersionError(PingInfo{Version: "v0.3.0"})
 	require.ErrorIs(t, err, ErrDaemonNotReplaceable)
 	require.ErrorContains(t, err, "use a newer kata binary")
+}
+
+func TestSupervisedDaemonReportsStaleReason(t *testing.T) {
+	patchEnsureHooks(t, "v0.2.0", "http://spawned")
+	for _, tc := range []struct {
+		name, version, skip, want, absent string
+	}{
+		{"same version", "v0.2.0", "", "the daemon has no web UI; restart it with your service manager", "differs"},
+		{"older version", "v0.1.0", "", "differs from this kata binary", "no web UI"},
+		{"skipped version check", "v0.1.0", "1", "the daemon has no web UI; restart it with your service manager", "differs"},
+		{"newer version", "v0.3.0", "", "use a newer kata binary", "no web UI"},
+		{"skipped newer version", "v0.3.0", "1", "use a newer kata binary", "no web UI"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", tc.skip)
+			ctx := context.WithValue(t.Context(), requireWebAssetsKey{}, true)
+			_, err := waitForSupervisedDaemon(ctx, "config.toml", func(context.Context) bool { return false }, func(context.Context) (ensureDiscovery, error) {
+				return ensureDiscovery{Outcome: daemonScanStale, Daemon: liveDaemon{Info: PingInfo{Service: daemonServiceName, Version: tc.version}, Record: kitdaemon.RuntimeRecord{Metadata: map[string]string{"web_capabilities": "loopback,sse,placeholder-assets"}}}}, nil
+			})
+			require.ErrorIs(t, err, ErrDaemonNotReplaceable)
+			require.ErrorContains(t, err, tc.want)
+			require.NotContains(t, err.Error(), tc.absent)
+		})
+	}
 }
 
 // The daemon's own auth.token_env is supervisor-owned: selection must accept it

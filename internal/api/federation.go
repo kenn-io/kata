@@ -13,6 +13,7 @@ type FederationSearchRequest struct {
 	ProjectID     int64    `path:"project_id"`
 	Authorization string   `header:"Authorization"`
 	Query         string   `query:"q" required:"true"`
+	Auto          bool     `query:"auto,omitempty" doc:"Fall back to keyword search when the hub cannot run semantic search. Absent means strict semantic."`
 	Limit         int      `query:"limit,omitempty"`
 	Status        string   `query:"status,omitempty" enum:"open,closed"`
 	Labels        []string `query:"label,explode"`
@@ -21,17 +22,23 @@ type FederationSearchRequest struct {
 
 // FederationSearchHit contains a ranked issue from a hub search.
 type FederationSearchHit struct {
-	Issue  db.Issue `json:"issue"`
-	Score  float64  `json:"score"`
-	WebURL string   `json:"web_url,omitempty"`
+	Issue     db.Issue `json:"issue"`
+	Score     float64  `json:"score"`
+	WebURL    string   `json:"web_url,omitempty"`
+	MatchedIn []string `json:"matched_in,omitempty"`
+}
+
+// FederationSearchResponseBody contains the hub's search results and mode.
+type FederationSearchResponseBody struct {
+	Hits           []FederationSearchHit `json:"hits"`
+	Bounded        bool                  `json:"bounded"`
+	Mode           string                `json:"mode,omitempty"`
+	DegradedReason string                `json:"degraded_reason,omitempty"`
 }
 
 // FederationSearchResponse contains the hub's ranked issues and search bound.
 type FederationSearchResponse struct {
-	Body struct {
-		Hits    []FederationSearchHit `json:"hits"`
-		Bounded bool                  `json:"bounded"`
-	}
+	Body FederationSearchResponseBody
 }
 
 // EnableProjectFederationRequest enables pull federation on one hub project.
@@ -301,10 +308,18 @@ type RelayResetRequest struct {
 }
 
 // RelayResetResponse returns the retained signed checkpoint and its hop translation.
-type RelayResetResponse struct{ Body db.RelayResetCheckpoint }
+type RelayResetResponse struct {
+	EventFeatures         string `header:"X-Kata-Event-Features"`
+	RequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
+	Body                  db.RelayResetCheckpoint
+}
 
 // RelayOfferResponse returns the emitted prefix retained for retry.
-type RelayOfferResponse struct{ Body db.RelayBatch }
+type RelayOfferResponse struct {
+	EventFeatures         string `header:"X-Kata-Event-Features"`
+	RequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
+	Body                  db.RelayBatch
+}
 
 // RelayAcceptRequest submits an authenticated batch for durable prefix acceptance.
 type RelayAcceptRequest struct {
@@ -508,6 +523,59 @@ type FederationPollEventsRequest struct {
 	AfterID       int64       `query:"after_id,omitempty"`
 	IssueUID      string      `query:"issue_uid,omitempty" doc:"Read retained history only for an issue currently owned by this project, independently of the project cursor."`
 	Limit         OptionalInt `query:"limit,omitempty"`
+	Wait          OptionalInt `query:"wait,omitempty" doc:"Seconds the hub may hold a caught-up project poll until an event commits. The hub caps it at the value in X-Kata-Federation-Poll-Wait-Max and answers at once when it cannot hold the request."`
+}
+
+// FederationPollEventsResponse is a project event page. It advertises how long
+// the hub may hold a caught-up poll.
+type FederationPollEventsResponse struct {
+	IssueUID              string `header:"X-Kata-Events-Issue-UID" doc:"Resolved subject UID when the issue filter is applied, including empty pages."`
+	EventFeatures         string `header:"X-Kata-Event-Features"`
+	RequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
+	PollWaitMax           int    `header:"X-Kata-Federation-Poll-Wait-Max" doc:"Longest wait, in seconds, this hub accepts on a project event poll."`
+	WatchMax              int    `header:"X-Kata-Federation-Watch-Max" doc:"Most projects, counting the route project, one federation event watch may name. Absent or 0 when this hub does not accept watches."`
+	Body                  PollEventsBody
+}
+
+// FederationWatchEventsRequest waits on several projects at one hub, so a
+// spoke bound to many projects holds one request instead of one per project.
+// The route bearer authorizes the route project; every other project carries
+// the token of its own enrollment.
+type FederationWatchEventsRequest struct {
+	EventFeatures string      `header:"X-Kata-Event-Features"`
+	ProjectID     int64       `path:"project_id"`
+	Authorization string      `header:"Authorization"`
+	Wait          OptionalInt `query:"wait,omitempty" doc:"Seconds the hub may hold the watch while no named project has events after its cursor. The hub caps it at X-Kata-Federation-Poll-Wait-Max and answers at once when it cannot hold the request."`
+	Body          FederationWatchEventsRequestBody
+}
+
+// FederationWatchEventsRequestBody names the route project's cursor and the
+// other projects to watch.
+type FederationWatchEventsRequestBody struct {
+	AfterID  int64                    `json:"after_id" doc:"Cursor for the route project."`
+	Projects []FederationWatchProject `json:"projects,omitempty" doc:"Other projects to watch, each with its own cursor and enrollment token."`
+}
+
+// FederationWatchProject is one project a watch names besides the route
+// project.
+type FederationWatchProject struct {
+	ProjectID int64  `json:"project_id"`
+	AfterID   int64  `json:"after_id"`
+	Token     string `json:"token" doc:"Federation enrollment token that authorizes pulls from this project. Transport-only; the hub checks it like a route bearer and never stores it."`
+}
+
+// FederationWatchEventsResponse says which watched projects have events after
+// their cursors. It carries no events; the spoke pulls those projects.
+type FederationWatchEventsResponse struct {
+	PollWaitMax int `header:"X-Kata-Federation-Poll-Wait-Max" doc:"Longest wait, in seconds, this hub accepts on a project event poll or watch."`
+	WatchMax    int `header:"X-Kata-Federation-Watch-Max" doc:"Most projects, counting the route project, one watch may name."`
+	Body        FederationWatchEventsBody
+}
+
+// FederationWatchEventsBody lists watched projects by hub project ID.
+type FederationWatchEventsBody struct {
+	Ready     []int64 `json:"ready" doc:"Projects the spoke should poll now: they have events or a reset after their cursor, or their own poll will report why it cannot read them."`
+	Unwatched []int64 `json:"unwatched" doc:"Projects the hub did not watch because their token does not authorize pulls from them now, or because this request cannot carry supplemental tokens. Poll them individually."`
 }
 
 // FederationIngestEventsRequest is the enrollment-authenticated push transport
