@@ -1316,6 +1316,9 @@ func (r *Runner) runOnce(
 		if endsFederationPass(turn.err) {
 			return nil, false, nil, turn.err
 		}
+		if turn.pushed && !turn.remaining {
+			markSourcePushed(awaiting, spoke.binding.HubProjectUID)
+		}
 		if turn.err != nil {
 			sources, err := pendingMoveSources(ctx, r.DB, spoke.binding.ProjectID, turn.err)
 			if err != nil {
@@ -1333,16 +1336,14 @@ func (r *Runner) runOnce(
 		}
 		if turn.remaining {
 			remaining = withProject(remaining, spoke.binding.ProjectID)
-			continue
 		}
-		markSourcePushed(awaiting, spoke.binding.HubProjectUID)
 	}
 	// A retry that pushes cleanly is itself a source another refused turn may
 	// wait on, as in a chain of moves. A refused turn runs again each time one
-	// of its sources pushes cleanly after its last attempt, until a round
-	// retries nothing. A project pushes cleanly at most once per pass and
-	// every retry needs a new clean push, so the loop ends even when moves
-	// form a cycle.
+	// of its sources pushes after its last attempt, until a round retries
+	// nothing. Only a turn whose own push the hub refused waits on sources,
+	// so a project pushes at most once per pass and every retry needs a new
+	// push. The loop ends even when moves form a cycle.
 	for progress := true; progress; {
 		progress = false
 		for _, refused := range awaiting {
@@ -1358,6 +1359,9 @@ func (r *Runner) runOnce(
 				return nil, false, nil, turn.err
 			}
 			refused.err = turn.err
+			if turn.pushed && !turn.remaining {
+				markSourcePushed(awaiting, refused.spoke.binding.HubProjectUID)
+			}
 			if turn.err != nil {
 				sources, err := pendingMoveSources(ctx, r.DB, refused.spoke.binding.ProjectID, turn.err)
 				if err != nil {
@@ -1368,9 +1372,7 @@ func (r *Runner) runOnce(
 			}
 			if turn.remaining {
 				remaining = withProject(remaining, refused.spoke.binding.ProjectID)
-				continue
 			}
-			markSourcePushed(awaiting, refused.spoke.binding.HubProjectUID)
 		}
 	}
 	return nil, false, remaining, errors.Join(append(errs, unresolvedMoveErrors(awaiting)...)...)
@@ -1438,16 +1440,16 @@ func (r *Runner) retryIdentityAfterTurn(
 	return retryTurnIdentity{full: full, target: target}, err
 }
 
-// markSourcePushed records that the project with this hub UID pushed cleanly,
-// so every refused turn waiting on it may run again.
+// markSourcePushed records that the project with this hub UID pushed its
+// events, so every refused turn waiting on it may run again.
 func markSourcePushed(awaiting []*awaitingMoveSource, hubProjectUID string) {
 	for _, refused := range awaiting {
 		refused.sourcePushed = refused.sourcePushed || refused.sources[hubProjectUID]
 	}
 }
 
-// unresolvedMoveErrors returns the errors of the refused turns that have not
-// pushed cleanly in this pass.
+// unresolvedMoveErrors returns the errors of the refused turns whose latest
+// attempt in this pass failed.
 func unresolvedMoveErrors(awaiting []*awaitingMoveSource) []error {
 	var errs []error
 	for _, refused := range awaiting {
@@ -1486,10 +1488,10 @@ type awaitingMoveSource struct {
 	spoke activeSpokeBinding
 	// sources holds the hub project UIDs the refused moves came from.
 	sources map[string]bool
-	// err is the latest error of the project's turns, nil once a retry
-	// pushes cleanly.
+	// err is the error of the project's latest turn, nil once a retry
+	// succeeds.
 	err error
-	// sourcePushed reports that a source pushed cleanly after the turn's
+	// sourcePushed reports that a source pushed its events after the turn's
 	// latest attempt.
 	sourcePushed bool
 }
@@ -1498,9 +1500,12 @@ type awaitingMoveSource struct {
 // drain admission refused the turn, and retry fires when it may admit one.
 type spokeTurn struct {
 	remaining bool
-	err       error
-	denied    bool
-	retry     <-chan struct{}
+	// pushed reports that the turn's replication finished without error,
+	// even when err holds a failed claim retry.
+	pushed bool
+	err    error
+	denied bool
+	retry  <-chan struct{}
 }
 
 // runSpokeTurn gives one spoke a sync turn under the drain admission, records
@@ -1529,7 +1534,7 @@ func (r *Runner) runSpokeTurn(
 		if drain != nil {
 			defer drain.Release()
 		}
-		turn.remaining, identity, turn.err = r.runSpoke(ctx, spoke, credentialStore, validateLease, drain)
+		turn.remaining, turn.pushed, identity, turn.err = r.runSpoke(ctx, spoke, credentialStore, validateLease, drain)
 	}()
 	retries.recordSchedule(spoke.binding.ProjectID, identity.full, identity.target, false, turn.err, r.effectiveInterval(), r.refusalNow(), &started, time.Time{})
 	switch {
@@ -1580,7 +1585,9 @@ func pendingMoveSources(ctx context.Context, store db.Storage, projectID int64, 
 }
 
 // runSpoke gives one spoke a sync turn and reports whether that turn stopped
-// at its budget with deliveries still pending. A turn that ends with a
+// at its budget with deliveries still pending. pushed reports that the turn's
+// replication finished without error, even when its claim retries failed. A
+// turn that ends with a
 // retryable hub refusal also returns the retry identity it used, read while
 // the turn still holds the project's sync lock.
 func (r *Runner) runSpoke(
@@ -1589,22 +1596,22 @@ func (r *Runner) runSpoke(
 	credentialStore config.FederationCredentialStore,
 	validateLease func(context.Context) error,
 	drain *activity.Lease,
-) (remaining bool, identity retryTurnIdentity, resultErr error) {
+) (remaining, pushed bool, identity retryTurnIdentity, resultErr error) {
 	if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
-		return false, identity, err
+		return false, false, identity, err
 	}
 	finishSync, err := federationcoord.BeginSync(ctx,
 		federationcoord.Key(r.DB.InstanceUID(), spoke.binding.ProjectID), r.DB, spoke.binding.ProjectID)
 	if err != nil {
-		return false, identity, fmt.Errorf("coordinate federation sync: %w", err)
+		return false, false, identity, fmt.Errorf("coordinate federation sync: %w", err)
 	}
 	defer finishSync()
 	binding, err := r.DB.FederationBindingByProject(ctx, spoke.binding.ProjectID)
 	if err != nil {
-		return false, identity, err
+		return false, false, identity, err
 	}
 	if !binding.Enabled || binding.Role != db.FederationRoleSpoke {
-		return false, identity, nil
+		return false, false, identity, nil
 	}
 	// turnCredential is the stored credential this turn sends to the hub.
 	var turnCredential config.FederationCredential
@@ -1624,7 +1631,7 @@ func (r *Runner) runSpoke(
 	ctx = withHubLongPolls(ctx, r.longPolls)
 	cred, _, err := credentialStore.FederationCredential(ctx, spoke.project.UID)
 	if err != nil {
-		return false, identity, errors.Join(err, r.DB.RecordFederationSyncError(ctx, binding.ProjectID, err, time.Now().UTC()))
+		return false, false, identity, errors.Join(err, r.DB.RecordFederationSyncError(ctx, binding.ProjectID, err, time.Now().UTC()))
 	}
 	turnCredential = cred
 	cred = config.FederationTransportCredential(
@@ -1634,11 +1641,11 @@ func (r *Runner) runSpoke(
 	var errs []error
 	if err := retryPendingClaimsOnceWithFence(ctx, r.DB, binding, cred, opts, validateLease); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, errFederationRunnerLeaseInvalid) {
-			return false, identity, err
+			return false, false, identity, err
 		}
 		if hubAskedToWait(err) {
 			// The hub asked this binding to wait; replication waits too.
-			return false, identity, err
+			return false, false, identity, err
 		}
 		errs = append(errs, err)
 	}
@@ -1658,19 +1665,19 @@ func (r *Runner) runSpoke(
 	}
 	if err := syncErr; err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, errFederationRunnerLeaseInvalid) {
-			return false, identity, err
+			return false, false, identity, err
 		}
 		errs = append(errs, err)
 	}
 	if len(errs) == 0 {
 		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
-			return false, identity, err
+			return false, false, identity, err
 		}
 		if err := r.DB.ClearFederationSyncError(ctx, binding.ProjectID); err != nil {
 			errs = append(errs, err)
 		}
 	}
-	return remaining, identity, errors.Join(errs...)
+	return remaining, syncErr == nil, identity, errors.Join(errs...)
 }
 
 // RetryPendingClaimsOnce retries offline spoke claim requests against their

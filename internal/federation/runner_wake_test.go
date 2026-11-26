@@ -393,3 +393,45 @@ func TestPendingMoveSourcesNeedsAMovePushRefusal(t *testing.T) {
 		})
 	}
 }
+
+// A source whose events reach the hub counts as pushed even when its turn
+// also fails to retry an offline claim. The claim here names an issue the hub
+// has not seen, so the hub answers it with 404.
+func TestRunnerWakePushesMoveWhenTheSourceClaimRetryFails(t *testing.T) {
+	hub := testenv.New(t)
+	spoke := testenv.New(t)
+	t.Setenv("KATA_HOME", t.TempDir())
+	bound := bindSpokeProjects(t, hub.DB, spoke.DB, hub.URL, 2)
+	destination, source := bound[0], bound[1]
+	require.Less(t, destination.spoke.ID, source.spoke.ID)
+
+	wake := NewWakeQueue()
+	results := newSpokeResults()
+	runner, debounces := newWakeRunner(t, spoke, wake, results)
+	runner.OnError = func(error) {}
+	ctx := t.Context()
+	go func() { _ = runner.Run(ctx) }()
+	results.await(t, destination.spoke.ID, source.spoke.ID)
+
+	claimed, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.spoke.ID, Title: "claimed before its first push", Author: "tester"})
+	require.NoError(t, err)
+	_, err = spoke.DB.EnqueuePendingClaim(ctx, pendingClaimParams(spoke.DB, source.spoke.ID, claimed.ShortID, "tester"))
+	require.NoError(t, err)
+	issue, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.spoke.ID, Title: "moved before its first push", Author: "tester"})
+	require.NoError(t, err)
+	_, err = spoke.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: issue.ID, FromProjectID: source.spoke.ID, ToProjectID: destination.spoke.ID,
+		IfMatchRev: issue.Revision, Actor: "tester",
+	})
+	require.NoError(t, err)
+	wake.WakeAll()
+	awaitDebounce(t, debounces).fire <- time.Now()
+	results.await(t, destination.spoke.ID, source.spoke.ID)
+	// The runner debounces this wake only after the pass ends.
+	wake.WakeAll()
+	awaitDebounce(t, debounces)
+
+	got, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err, "the hub has the issue before the next interval")
+	assert.Equal(t, destination.hub.ID, got.ProjectID, "the hub has the move before the next interval")
+}
