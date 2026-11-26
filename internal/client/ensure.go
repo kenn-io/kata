@@ -205,6 +205,9 @@ func ensureLocalRunningTarget(ctx context.Context) (RunningDaemon, error) {
 	case daemonScanCompatible:
 		return runningDaemonForLive(found.Daemon), nil
 	case daemonScanStale:
+		if err := requireUnmanagedEnsureHome(ctx, found.Daemon.Record); err != nil {
+			return RunningDaemon{}, err
+		}
 		if err := checkDaemonReplaceable(ctx, found.Daemon.Info); err != nil {
 			return RunningDaemon{}, err
 		}
@@ -214,6 +217,9 @@ func ensureLocalRunningTarget(ctx context.Context) (RunningDaemon, error) {
 		if err := stopRunningDaemonsForEnsure(ctx, ns.DataDir, ns.DBHash); err != nil {
 			return RunningDaemon{}, err
 		}
+	}
+	if err := requireUnmanagedEnsureHome(ctx, kitdaemon.RuntimeRecord{}); err != nil {
+		return RunningDaemon{}, err
 	}
 	return startDaemonForEnsure(ctx, ns.DataDir)
 }
@@ -307,7 +313,7 @@ func (e *supervisedWaitError) Unwrap() error          { return e.cause }
 func (e *supervisedWaitError) RecoveryAdvice() string { return e.advice }
 
 func canRestartLocalDaemon(record kitdaemon.RuntimeRecord) bool {
-	return record.Metadata[daemonruntime.RuntimeRestartExecutableKey] == "1" && daemonruntime.RuntimeProcessAlive(record)
+	return record.Metadata[daemonruntime.RuntimeSocketActivationKey] == "" && record.Metadata[daemonruntime.RuntimeRestartExecutableKey] == "1" && daemonruntime.RuntimeProcessAlive(record)
 }
 
 func restartLocalDaemon(ctx context.Context, ns *daemonruntime.Namespace, previous kitdaemon.RuntimeRecord) (RunningDaemon, error) {
@@ -320,6 +326,17 @@ func restartLocalDaemon(ctx context.Context, ns *daemonruntime.Namespace, previo
 	}
 	_, baseURL := LocalHTTPClient(record.Endpoint().ConfigAddress())
 	return runningDaemonForLive(liveDaemon{Record: record, BaseURL: baseURL}), nil
+}
+
+func requireUnmanagedEnsureHome(ctx context.Context, record kitdaemon.RuntimeRecord) error {
+	if mode := record.Metadata[daemonruntime.RuntimeSocketActivationKey]; mode != "" {
+		return config.SocketActivationControlError(mode)
+	}
+	home, err := config.KataHome()
+	if err != nil {
+		return err
+	}
+	return config.RequireUnmanagedDaemonHome(ctx, home)
 }
 
 // discoverForStart returns a compatible daemon without locking. Any other
