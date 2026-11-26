@@ -549,7 +549,7 @@ describe('IssueBoard density, collapsing, and comments', () => {
     expect(screen.getByRole('dialog', { name: 'Complete task' })).toBeTruthy()
   })
 
-  it('shows a comment pill only on cards that have comments', () => {
+  it('shows a comment count only on cards that have comments', () => {
     renderBoard({ issues: [{ ...triage, comment_count: 3 }, doing] })
 
     expect(

@@ -170,8 +170,8 @@ shows **Starts** with the date, or **Someday**. You can still claim it.
 
 Cards are ordered by priority. Among cards of the same priority, the one with
 the most comments comes first, then the most recently updated, so busy issues
-rise to the top. A comfortable card with comments shows a comment-count pill at
-the right of its detail row.
+rise to the top. A comfortable card with comments shows a comment icon and
+count at the right of its detail row.
 
 The board updates live as people and agents change issues. A card that someone
 else moves or adds flashes purple for a moment; your own moves flash blue. Turn

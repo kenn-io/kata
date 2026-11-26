@@ -1314,20 +1314,16 @@
     color: var(--accent-red);
   }
 
-  /* Comment count: a tinted pill at the right of the detail row, shown only
-     when an issue has comments. */
+  /* Comment count: quiet secondary ink at the right of the detail row, shown
+     only when an issue has comments, so it never competes with attention. */
   .comment-pill {
     display: inline-flex;
     align-items: center;
     gap: var(--space-1);
-    padding: 0 7px;
-    border: 1px solid color-mix(in srgb, var(--accent-blue) 40%, var(--border-default));
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--accent-blue) 12%, transparent);
-    color: color-mix(in srgb, var(--accent-blue) 75%, var(--text-primary));
+    color: var(--text-secondary);
     font-size: var(--font-size-xs);
     font-variant-numeric: tabular-nums;
-    font-weight: var(--font-weight-semibold);
+    font-weight: var(--font-weight-medium);
     line-height: 18px;
   }
 
