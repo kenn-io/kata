@@ -301,7 +301,10 @@ describe('IssueBoard moves', () => {
     expect(within(column('In progress')).getByText('Triage inbox')).toBeTruthy()
     finish(false)
     await waitFor(() => expect(within(column('Open')).getByText('Triage inbox')).toBeTruthy())
-    expect(screen.getByText(/Could not move Triage inbox/)).toBeTruthy()
+    // An earlier step of the move may have saved, so claim nothing about where
+    // the card is; the refreshed board shows that.
+    expect(screen.getByText('Could not finish moving Triage inbox.')).toBeTruthy()
+    expect(screen.queryByText(/back in/)).toBeNull()
   })
 
   it('asks the owner from the card menu without moving the card', async () => {

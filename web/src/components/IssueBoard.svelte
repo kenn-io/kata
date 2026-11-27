@@ -280,7 +280,9 @@
       releaseOwnChange(issue.uid)
     }
     if (!moved) {
-      announcement = `Could not move ${issue.title}. It is back in its column.`
+      // A move can take several kata actions, and an earlier one (such as the
+      // reopen) may have saved; the refreshed board shows where the card is.
+      announcement = `Could not finish moving ${issue.title}.`
       return false
     }
     // The banner is a status region, so it carries the success message.
