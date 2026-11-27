@@ -6,7 +6,6 @@
     Menu,
     MenuContent,
     MenuItem,
-    dismissFlash,
     showFlash,
     type MenuAnchorPoint,
   } from '@kenn-io/kit-ui'
@@ -21,7 +20,6 @@
   import ListTreeIcon from '@lucide/svelte/icons/list-tree'
   import OctagonAlertIcon from '@lucide/svelte/icons/octagon-alert'
   import PlusIcon from '@lucide/svelte/icons/plus'
-  import { onDestroy } from 'svelte'
   import { SvelteMap, SvelteSet } from 'svelte/reactivity'
 
   import {
@@ -155,11 +153,6 @@
     // A refresh can land just after the save returns, so keep it ours a little longer.
     setTimeout(() => ownChanges.delete(uid), highlightMs)
   }
-  const undoMs = 10_000
-  let lastMove: { uid: string; from: BoardColumnID; flash: number } | null = null
-  onDestroy(() => {
-    if (lastMove) dismissFlash(lastMove.flash)
-  })
   let doneLimit = $state(defaultDoneLimit)
   let announcement = $state('')
   let draggingUID = $state<string | null>(null)
@@ -269,7 +262,6 @@
     target: BoardColumnID,
     plan: BoardMovePlan,
   ): Promise<boolean> {
-    const from = currentColumn(issue)
     markOwnChange(issue.uid)
     pending.set(issue.uid, target)
     announcement = `Moving ${issue.title} to ${columnTitle(target)}…`
@@ -287,21 +279,8 @@
     // The banner is a status region, so it carries the success message.
     announcement = ''
     highlight(issue.uid)
-    if (lastMove) dismissFlash(lastMove.flash)
-    lastMove = null
-    const message = `Moved ${issue.title} to ${columnTitle(target)}.`
-    // Only a plain claim or release can be undone exactly; reopening and
-    // clearing attention cannot.
-    const undoable = (plan.claim || plan.release) && !plan.reopen && !plan.clearAttention
-    if (!undoable || undoing) {
-      showFlash(message)
-      return true
-    }
-    const flash = showFlash(message, {
-      durationMs: undoMs,
-      action: { label: 'Undo', onclick: () => void undoLastMove() },
-    })
-    lastMove = { uid: issue.uid, from, flash }
+    // Every move is one kata action, so moving the card back reverses it.
+    showFlash(`Moved ${issue.title} to ${columnTitle(target)}.`)
     return true
   }
 
@@ -339,37 +318,9 @@
     }
   }
 
-  let undoing = false
-  async function undoLastMove(): Promise<void> {
-    const move = lastMove
-    lastMove = null
-    if (!move) return
-    dismissFlash(move.flash)
-    const issue = issuesByUID.get(move.uid)
-    if (!issue) return
-    undoing = true
-    try {
-      await moveTo(issue, move.from)
-    } finally {
-      undoing = false
-    }
-  }
-
   function highlight(uid: string): void {
     justMoved.add(uid)
     setTimeout(() => justMoved.delete(uid), highlightMs)
-  }
-
-  function handleBoardKeydown(event: KeyboardEvent): void {
-    if (event.key.toLowerCase() !== 'z' || !(event.ctrlKey || event.metaKey) || event.shiftKey) {
-      return
-    }
-    if (!lastMove || completing) return
-    // Leave undo inside text fields (search, filters, dialogs) to the field.
-    const target = event.target as HTMLElement | null
-    if (target?.closest('input, textarea, select, [contenteditable="true"]')) return
-    event.preventDefault()
-    void undoLastMove()
   }
 
   async function complete(request: KataTaskCloseRequest): Promise<boolean> {
@@ -891,8 +842,6 @@
   </div>
   <p class="kit-sr-only" role="status" aria-live="polite">{announcement}</p>
 </section>
-
-<svelte:window onkeydown={handleBoardKeydown} />
 
 <FlashBanner top="72px" />
 

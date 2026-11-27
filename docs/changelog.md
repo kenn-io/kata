@@ -25,8 +25,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
   whole issue in a drawer. Epics show an **Epic** badge with their subtasks
   listed underneath, and Done loads closed issues 30 at a time from the
   daemon, so projects with long histories open quickly. Switch to compact
-  one-line cards, collapse Done or empty columns to narrow strips, add cards
-  to Open, and undo a claim or release from the banner or with Ctrl+Z. The
+  one-line cards, collapse Done or empty columns to narrow strips, and add
+  cards to Open. The
   board updates live: cards that others move or add flash (you can turn this
   off), cards show their comment count, and the most discussed card leads
   among cards of the same priority. See

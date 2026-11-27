@@ -1,7 +1,7 @@
 ---
 title: Web UI
 description: Browse and manage Kata projects and issues in the daemon-served browser application.
-last_edited: 2026-11-26
+last_edited: 2026-11-27
 ---
 
 # Web UI
@@ -185,13 +185,11 @@ its own. Subtasks still move on their own.
 
 Move a card by dragging it, from its actions menu (**…**), or by focusing it
 and pressing **Alt+←** or **Alt+→**, which skip Needs attention. Arrow keys move
-focus between cards and columns. A moved card flashes briefly where it lands, and a banner offers
-**Undo** for ten seconds when the move only claimed or released the issue;
-**Ctrl+Z** (**⌘Z** on macOS) undoes that move too, except inside a text field.
-Moves that reopen, close, or clear attention have no Undo, because they
-cannot be reversed exactly. Select a card to open its full detail in a side
-drawer; on a phone the drawer fills the screen. **Esc**, the close button, or
-the browser's back gesture closes it.
+focus between cards and columns. A moved card flashes briefly where it lands,
+and a banner confirms the move. Each move is one kata action, so moving the card
+back reverses it. Select a card to open its full detail in a side drawer; on a
+phone the drawer fills the screen. **Esc**, the close button, or the browser's
+back gesture closes it.
 
 On a project board, **Add card** at the foot of Open creates an issue in that
 project. Press **Enter** to add and keep typing the next card, or **Esc** to

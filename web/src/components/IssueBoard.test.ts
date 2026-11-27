@@ -427,46 +427,16 @@ describe('IssueBoard after a move', () => {
     )
   })
 
-  it('offers Undo for a claim, which releases the card again', async () => {
+  it('confirms a move without Undo, and leaves Ctrl+Z to the browser', async () => {
+    // Every move is one kata action; moving the card back reverses it.
     const { onMoveIssue } = renderMoving({ ...triage, owner: 'kata-web' })
 
     await fireEvent.keyDown(cardButton('Triage inbox'), { key: 'ArrowRight', altKey: true })
-    await fireEvent.click(await screen.findByRole('button', { name: 'Undo' }))
+    await screen.findByText('Moved Triage inbox to In progress.')
+    expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull()
+    await fireEvent.keyDown(cardButton('Triage inbox'), { key: 'z', ctrlKey: true })
 
-    expect(onMoveIssue).toHaveBeenCalledTimes(2)
-    expect(onMoveIssue).toHaveBeenLastCalledWith(expect.objectContaining({ uid: 'u-triage' }), {
-      release: true,
-    })
-  })
-
-  it('undoes the last move with Ctrl+Z, but leaves Ctrl+Z in a text field alone', async () => {
-    const { onMoveIssue } = renderMoving({ ...doing, owner: undefined })
-    const field = document.createElement('input')
-    document.body.append(field)
-
-    await fireEvent.keyDown(cardButton('Write the parser'), { key: 'ArrowLeft', altKey: true })
-    await screen.findByRole('button', { name: 'Undo' })
-    await fireEvent.keyDown(field, { key: 'z', ctrlKey: true })
     expect(onMoveIssue).toHaveBeenCalledOnce()
-    await fireEvent.keyDown(cardButton('Write the parser'), { key: 'z', ctrlKey: true })
-
-    expect(onMoveIssue).toHaveBeenCalledTimes(2)
-    expect(onMoveIssue).toHaveBeenLastCalledWith(expect.objectContaining({ uid: 'u-doing' }), {
-      claim: true,
-    })
-    field.remove()
-  })
-
-  it('does not offer Undo for moves that cannot be reversed exactly', async () => {
-    renderBoard()
-
-    await dragTo('Ship the release', 'Open', 'u-shipped')
-    await screen.findByText('Moved Ship the release to Open.')
-    expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull()
-
-    await fireEvent.keyDown(cardButton('Choose a schema'), { key: 'ArrowLeft', altKey: true })
-    await screen.findByText('Moved Choose a schema to In progress.')
-    expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull()
   })
 })
 
