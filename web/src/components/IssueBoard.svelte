@@ -675,6 +675,7 @@
                   data-card-uid={issue.uid}
                   aria-labelledby={titleID}
                   aria-describedby={[
+                    `board-card-identity-${issue.uid}`,
                     issue.parent ? relationID : '',
                     !compact && reasons.length > 0 ? `board-card-reason-${issue.uid}` : '',
                     compact ? '' : metaID,
@@ -718,6 +719,10 @@
                     <span class="card-epic">Epic</span>
                   {/if}
                 </div>
+                <!-- Compact cards hide the project, so the description always names both. -->
+                <span class="kit-sr-only" id={`board-card-identity-${issue.uid}`}
+                  >{issue.qualified_id}{showProject ? `, project ${issue.project_name}` : ''}</span
+                >
                 {#if issue.parent}
                   <span class="kit-sr-only" id={relationID}
                     >Subtask of {parent?.title ?? issue.parent.short_id}</span

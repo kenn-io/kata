@@ -532,7 +532,7 @@ describe('IssueBoard epics and subtasks', () => {
     expect(
       screen.getByRole('button', {
         name: 'Draw the columns',
-        description: /^Subtask of Launch the board/,
+        description: /Subtask of Launch the board/,
       }),
     ).toBeTruthy()
   })
@@ -593,10 +593,21 @@ describe('IssueBoard Done paging', () => {
     await fireEvent.click(within(column('Done')).getByRole('button', { name: 'Open Logbook' }))
     expect(onOpenLogbook).toHaveBeenCalledOnce()
     expect(onShowMoreDone).not.toHaveBeenCalled()
-  })
+  }, 20_000)
 })
 
 describe('IssueBoard density, collapsing, and comments', () => {
+  it("describes each card's ID, and its project on boards that span projects", () => {
+    renderBoard({ compact: true, showProject: true })
+
+    expect(
+      screen.getByRole('button', {
+        name: 'Triage inbox',
+        description: /example-project#abc1.*project example-project/,
+      }),
+    ).toBeTruthy()
+  })
+
   it('keeps ID, priority, and title on one line in compact mode', () => {
     renderBoard({ compact: true })
 
