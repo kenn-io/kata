@@ -378,6 +378,33 @@ describe('IssueBoard moves', () => {
     })
   })
 
+  it('keeps the completion note when the daemon refuses the close', async () => {
+    const note = 'No longer needed because the inbox flow was replaced last week.'
+    const props = renderBoard({ onCompleteIssue: vi.fn(async () => false) })
+
+    await dragTo('Triage inbox', 'Done', 'u-triage')
+    const dialog = screen.getByRole('dialog', { name: 'Complete task' })
+    await fireEvent.click(within(dialog).getByRole('radio', { name: /Won't do/ }))
+    await fireEvent.input(within(dialog).getByRole('textbox'), { target: { value: note } })
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Complete' }))
+
+    await waitFor(() => expect(props.onCompleteIssue).toHaveBeenCalledOnce())
+    const stillOpen = screen.getByRole('dialog', { name: 'Complete task' })
+    expect((within(stillOpen).getByRole('textbox') as HTMLTextAreaElement).value).toBe(note)
+    expect(within(column('Open')).getByText('Triage inbox')).toBeTruthy()
+  })
+
+  it('closes the completion form once the daemon accepts the close', async () => {
+    renderBoard()
+
+    await dragTo('Triage inbox', 'Done', 'u-triage')
+    const dialog = screen.getByRole('dialog', { name: 'Complete task' })
+    await fireEvent.click(within(dialog).getByRole('radio', { name: /Won't do/ }))
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Complete' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Complete task' })).toBeNull())
+  })
+
   it('reopens and claims a Done card dragged into In progress', async () => {
     const props = renderBoard()
 

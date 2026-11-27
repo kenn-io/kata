@@ -328,7 +328,6 @@
     if (!issue) return false
     markOwnChange(issue.uid)
     pending.set(issue.uid, 'done')
-    completing = null
     announcement = `Completing ${issue.title}…`
     let closed = false
     try {
@@ -337,6 +336,9 @@
       pending.delete(issue.uid)
       releaseOwnChange(issue.uid)
     }
+    // The form stays open until the daemon accepts the close, so a refused
+    // close keeps the reason, note, and evidence for another try.
+    if (closed) completing = null
     announcement = closed ? `Completed ${issue.title}.` : `Could not complete ${issue.title}.`
     return closed
   }
