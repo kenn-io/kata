@@ -1793,7 +1793,9 @@ func (c CronWorkflowStepResponse) Validate() error {
 }
 
 type DestructiveActionRequestBody struct {
-	Actor  string  `json:"actor" validate:"required"`
+	Actor string `json:"actor" validate:"required"`
+
+	// Reason Why the issue is removed. Delete records it on the issue.soft_deleted event; purge stores it in purge_log.reason.
 	Reason *string `json:"reason,omitempty"`
 }
 

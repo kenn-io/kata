@@ -1,1 +1,0 @@
-Direct-spoke federation ingest accepts partial_not_enrolled=true and returns refused_events for issues in unenrolled projects.

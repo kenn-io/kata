@@ -1623,7 +1623,7 @@ func TestEnableProjectFederationEmitsBaselineSnapshotsAtHorizon(t *testing.T) {
 	})
 	require.NoError(t, err)
 	p = projectMetaOut.Project
-	deleted, _, _, err = d.SoftDeleteIssue(ctx, deleted.ID, "bob")
+	deleted, _, _, err = d.SoftDeleteIssue(ctx, deleted.ID, "bob", "")
 	require.NoError(t, err)
 
 	binding, err := d.EnableProjectFederation(ctx, p.ID, "federation")
@@ -4968,7 +4968,7 @@ func TestFederatedSpokeWriteGatePushDisabledRejectsAndPushEnabledPermits(t *test
 			return err
 		},
 		"soft delete": func(ctx context.Context, d *sqlitestore.Store, _ db.Project, issue, _ db.Issue) error {
-			_, _, _, err := d.SoftDeleteIssue(ctx, issue.ID, "tester")
+			_, _, _, err := d.SoftDeleteIssue(ctx, issue.ID, "tester", "")
 			return err
 		},
 		"issue metadata": func(ctx context.Context, d *sqlitestore.Store, _ db.Project, issue, _ db.Issue) error {

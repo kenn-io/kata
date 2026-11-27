@@ -135,7 +135,7 @@ func TestMoveIssueProject_RefusesSoftDeleted(t *testing.T) {
 	iss := seedIssueInProject(t, d, src.ID, "bye", "tester")
 
 	// Soft-delete the issue.
-	_, _, _, err := d.SoftDeleteIssue(ctx, iss.ID, "tester")
+	_, _, _, err := d.SoftDeleteIssue(ctx, iss.ID, "tester", "")
 	require.NoError(t, err)
 
 	// Move should fail: soft-deleted issue is not "in" the project.

@@ -48,7 +48,7 @@ func TestReadUIGraphLinksLargeIssueSet(t *testing.T) {
 	require.NoError(t, rows.Close())
 	// Keep links with one or both endpoints outside the visible snapshot.
 	for _, id := range []int64{16385, 16386} {
-		_, _, _, err := store.SoftDeleteIssue(t.Context(), id, "user-a")
+		_, _, _, err := store.SoftDeleteIssue(t.Context(), id, "user-a", "")
 		require.NoError(t, err)
 	}
 	// Use one raw connection so page counts cover the whole snapshot.

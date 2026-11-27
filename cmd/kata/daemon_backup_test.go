@@ -31,7 +31,7 @@ func TestDaemonScheduledBackupRestoresAllProjectsAndDeletedIssues(t *testing.T) 
 			require.NoError(t, err)
 			originals = append(originals, issue)
 		}
-		_, _, _, err := store.SoftDeleteIssue(t.Context(), originals[1].ID, "tester")
+		_, _, _, err := store.SoftDeleteIssue(t.Context(), originals[1].ID, "tester", "")
 		require.NoError(t, err)
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()

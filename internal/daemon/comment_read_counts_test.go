@@ -45,7 +45,7 @@ func checkShowCommentReadCount(t *testing.T, deleted, scoped bool, count uint8) 
 	}
 	ctx := t.Context()
 	if deleted {
-		issue, _, _, err = store.SoftDeleteIssue(ctx, issue.ID, "finder")
+		issue, _, _, err = store.SoftDeleteIssue(ctx, issue.ID, "finder", "")
 		require.NoError(t, err)
 	} else if scoped {
 		ctx = withScopedAuthorizationTestPrincipal(t, store, project, issue)

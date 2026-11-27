@@ -183,7 +183,7 @@ func TestReachableGraph_OmitsDeletedAndArchivedEndpoints(t *testing.T) {
 	source := graphIssue(t, h, pid, "01HZNQ7VFPK1XGD8R5MABCD4E1", "source")
 	deleted := graphIssue(t, h, pid, "01HZNQ7VFPK1XGD8R5MABCD4E2", "deleted")
 	graphLink(t, h, pid, source.ID, deleted.ID, "blocks")
-	_, _, changed, err := h.DB().SoftDeleteIssue(ctx, deleted.ID, "tester")
+	_, _, changed, err := h.DB().SoftDeleteIssue(ctx, deleted.ID, "tester", "")
 	require.NoError(t, err)
 	require.True(t, changed)
 

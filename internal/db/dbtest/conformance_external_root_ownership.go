@@ -505,7 +505,7 @@ func checkExternalRootContentOwnership(t *testing.T, store db.Storage, backend B
 			Body: hubIssue.Body, Author: "tester",
 		})
 		require.NoError(t, err)
-		_, remoteEvent, changed, err := spoke.SoftDeleteIssue(ctx, spokeIssue.ID, "tester")
+		_, remoteEvent, changed, err := spoke.SoftDeleteIssue(ctx, spokeIssue.ID, "tester", "")
 		require.NoError(t, err)
 		require.True(t, changed)
 		require.NotNil(t, remoteEvent)

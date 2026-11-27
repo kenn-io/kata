@@ -192,7 +192,7 @@ func TestClose_IdempotencyReplaysReceiptAfterSoftDelete(t *testing.T) {
 	require.NoError(t, json.Unmarshal(first.body, &firstOut.Body))
 	require.NotNil(t, firstOut.Body.Event)
 
-	_, _, changed, err := h.DB().SoftDeleteIssue(t.Context(), issueID, "agent-one")
+	_, _, changed, err := h.DB().SoftDeleteIssue(t.Context(), issueID, "agent-one", "")
 	require.NoError(t, err)
 	require.True(t, changed)
 

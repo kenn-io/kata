@@ -68,7 +68,7 @@ func checkSelectedCommentGraph(t *testing.T, store db.Storage) error {
 	denied, err := store.ReadCommentGraph(ctx, db.CommentGraphQuery{ProjectID: project.ID, IssueScope: query.IssueScope, Reference: &db.CommentGraphReference{UID: target.UID}})
 	require.NoError(t, err)
 	require.Empty(t, denied.Comments)
-	_, _, _, err = store.SoftDeleteIssue(ctx, source.ID, "worker")
+	_, _, _, err = store.SoftDeleteIssue(ctx, source.ID, "worker", "")
 	require.NoError(t, err)
 	query.IncludeDeletedSourceIssueID = source.ID
 	deleted, err := store.ReadCommentGraph(ctx, query)

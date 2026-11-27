@@ -254,6 +254,39 @@ func (c *Client) listIssuesAt(ctx context.Context, projectID *int64, f ListFilte
 	return resp.Issues, err
 }
 
+// SearchIssues asks the daemon to rank one project's issues for q.Query. The
+// daemon picks words or words and meaning itself.
+func (c *Client) SearchIssues(ctx context.Context, projectID int64, q SearchQuery) (*SearchAnswer, error) {
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil, err
+	}
+	params := &generated.SearchIssuesQuery{Q: q.Query}
+	if q.Limit > 0 {
+		params.Limit = new(int64(q.Limit))
+	}
+	wire, callErr := apiClient.SearchIssuesWithResponse(ctx, &generated.SearchIssuesRequestOptions{
+		PathParams: &generated.SearchIssuesPath{ProjectID: projectID}, Query: params,
+	})
+	if wire == nil {
+		return nil, callErr
+	}
+	var resp struct {
+		Mode    string `json:"mode"`
+		Results []struct {
+			Issue Issue `json:"issue"`
+		} `json:"results"`
+	}
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
+		return nil, err
+	}
+	answer := &SearchAnswer{Issues: make([]Issue, len(resp.Results)), Mode: resp.Mode}
+	for i, hit := range resp.Results {
+		answer.Issues[i] = hit.Issue
+	}
+	return answer, nil
+}
+
 // GetIssueDetail fetches a single issue plus hierarchy metadata by ref.
 // ref is a short_id, qualified short_id, or UID — the daemon's path
 // resolver picks the matching column.

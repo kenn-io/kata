@@ -14,6 +14,8 @@ import (
 type daemonWorkerGroup struct {
 	mu       sync.Mutex
 	wg       sync.WaitGroup
+	holding  bool
+	deferred []func()
 	stopping bool
 }
 
@@ -45,6 +47,20 @@ func newDaemonWorkerGroup() *daemonWorkerGroup {
 	return &daemonWorkerGroup{}
 }
 
+// Hold defers subsequent Go registrations until Start is called after daemon
+// readiness is published, so periodic background polling loops do not compete
+// with HTTP startup or launch on a failed start.
+func (g *daemonWorkerGroup) Hold() {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !g.stopping {
+		g.holding = true
+	}
+}
+
 func (g *daemonWorkerGroup) Go(worker func()) bool {
 	if g == nil || worker == nil {
 		return false
@@ -54,10 +70,36 @@ func (g *daemonWorkerGroup) Go(worker func()) bool {
 	if g.stopping {
 		return false
 	}
+	if g.holding {
+		g.deferred = append(g.deferred, worker)
+		return true
+	}
 	g.wg.Go(func() {
 		worker()
 	})
 	return true
+}
+
+func (g *daemonWorkerGroup) Start() {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !g.holding {
+		return
+	}
+	g.holding = false
+	pending := g.deferred
+	g.deferred = nil
+	if g.stopping {
+		return
+	}
+	for _, worker := range pending {
+		g.wg.Go(func() {
+			worker()
+		})
+	}
 }
 
 func (g *daemonWorkerGroup) Wait(ctx context.Context) bool {
@@ -66,6 +108,8 @@ func (g *daemonWorkerGroup) Wait(ctx context.Context) bool {
 	}
 	g.mu.Lock()
 	g.stopping = true
+	g.holding = false
+	g.deferred = nil
 	g.mu.Unlock()
 	done := make(chan struct{})
 	go func() {

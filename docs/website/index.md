@@ -84,11 +84,11 @@ calls per task. At 4ms each that costs half a second.
   hooks for Claude Code and Codex so the ledger knows which issues have an
   agent on them right now.
 
-In 0.23.0, turn on search by meaning with one command, move issues and manage
-repeating schedules and workflows in the terminal UI, and connect assistants
-that use MCP without a shell. See the
-[release notes](https://katatracker.com/docs/changelog/#0230) for setup links
-and the schema 50 upgrade requirements.
+In 0.24.0, work in the redesigned web sidebar and side-by-side task view, get
+hub changes on direct spokes within milliseconds through held polls, set up
+agent hooks with `kata agent setup`, and run semantic search with Vertex AI.
+See the [release notes](https://katatracker.com/docs/changelog/#0240) for
+setup links and the schema 55 upgrade requirements.
 
 ## 04 / Discipline: a close is a completion claim
 

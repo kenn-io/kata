@@ -132,10 +132,10 @@ func checkIssueRelationships(t *testing.T, store db.Storage) error {
 
 	// A soft-deleted parent is still a parent: the parent query deliberately
 	// has no deleted_at filter on the peer, unlike blocks and related.
-	if _, _, _, deleteErr := store.SoftDeleteIssue(ctx, parent.ID, "relationship-author"); deleteErr != nil {
+	if _, _, _, deleteErr := store.SoftDeleteIssue(ctx, parent.ID, "relationship-author", ""); deleteErr != nil {
 		return fmt.Errorf("soft delete parent: %w", deleteErr)
 	}
-	if _, _, _, deleteErr := store.SoftDeleteIssue(ctx, peer.ID, "relationship-author"); deleteErr != nil {
+	if _, _, _, deleteErr := store.SoftDeleteIssue(ctx, peer.ID, "relationship-author", ""); deleteErr != nil {
 		return fmt.Errorf("soft delete peer: %w", deleteErr)
 	}
 	byID, err = store.RelationshipsByIssues(ctx, []int64{subject.ID})
@@ -481,7 +481,7 @@ func checkLabels(t *testing.T, store db.Storage) error {
 	}
 	assert.Empty(t, empty)
 
-	_, _, _, err = store.SoftDeleteIssue(ctx, second.ID, "label-author")
+	_, _, _, err = store.SoftDeleteIssue(ctx, second.ID, "label-author", "")
 	if err != nil {
 		return fmt.Errorf("soft delete labeled issue: %w", err)
 	}
@@ -993,7 +993,7 @@ func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return err
 	}
-	_, _, _, err = store.SoftDeleteIssue(ctx, deleted.ID, "discovery-author")
+	_, _, _, err = store.SoftDeleteIssue(ctx, deleted.ID, "discovery-author", "")
 	if err != nil {
 		return fmt.Errorf("delete discovery issue: %w", err)
 	}

@@ -4198,3 +4198,49 @@ func TestDaemonControlsSkipUnknownRecord(t *testing.T) {
 		})
 	}
 }
+
+func TestDaemonStartsBackgroundWorkersAfterPublishingReadiness(t *testing.T) {
+	resetFlags(t)
+	setupKataEnv(t)
+	t.Setenv("PORT", "")
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	originalTelemetry := newTelemetryReporter
+	newTelemetryReporter = func(telemetry.Options) telemetry.Client { return &fakeTelemetryReporter{} }
+	t.Cleanup(func() { newTelemetryReporter = originalTelemetry })
+
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	runtimePath, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Path(os.Getpid())
+	require.NoError(t, err)
+
+	originalRun := runExternalRootRunner
+	runtimePresentAtStart := make(chan bool, 1)
+	runExternalRootRunner = func(ctx context.Context, _ *rootbridge.Runner) error {
+		_, statErr := os.Stat(runtimePath)
+		runtimePresentAtStart <- statErr == nil
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	t.Cleanup(func() { runExternalRootRunner = originalRun })
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, false) }()
+
+	select {
+	case present := <-runtimePresentAtStart:
+		assert.True(t, present, "runtime readiness file must be published before background workers start")
+	case <-time.After(3 * time.Second):
+		cancel()
+		t.Fatal("external root runner was not started")
+	}
+	cancel()
+	select {
+	case runErr := <-done:
+		if runErr != nil {
+			require.ErrorIs(t, runErr, context.Canceled)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("daemon did not stop after context cancellation")
+	}
+}

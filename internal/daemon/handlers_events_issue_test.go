@@ -728,7 +728,7 @@ func TestPollProjectEventsIssueReadsSoftDeletedHistoryForRestoreCaller(t *testin
 
 	t.Run("allowed caller reads history including the delete event", func(t *testing.T) {
 		env, project, issue := setupClaimGateIssue(t, false)
-		_, deleted, _, err := env.DB.SoftDeleteIssue(t.Context(), issue.ID, "tester")
+		_, deleted, _, err := env.DB.SoftDeleteIssue(t.Context(), issue.ID, "tester", "")
 		require.NoError(t, err)
 
 		for _, ref := range []string{issue.ShortID, issue.UID, project.Name + "#" + issue.ShortID} {
@@ -749,7 +749,7 @@ func TestPollProjectEventsIssueReadsSoftDeletedHistoryForRestoreCaller(t *testin
 	t.Run("claim holder naming itself reads history; other actors get 404", func(t *testing.T) {
 		env, project, issue := setupClaimGateIssue(t, true)
 		acquireClaimGateIssue(t, env, project, issue, "other")
-		_, _, _, err := env.DB.SoftDeleteIssue(t.Context(), issue.ID, "other")
+		_, _, _, err := env.DB.SoftDeleteIssue(t.Context(), issue.ID, "other", "")
 		require.NoError(t, err)
 
 		restore, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(project.ID, issue.ShortID, "actions/restore"),
@@ -768,7 +768,7 @@ func TestPollProjectEventsIssueReadsSoftDeletedHistoryForRestoreCaller(t *testin
 	t.Run("insecure-readonly anonymous caller gets 404", func(t *testing.T) {
 		env := testenv.New(t, testenv.WithInsecureReadonly())
 		project, issue, _ := setupClaimGateProject(t, env, false)
-		_, _, _, err := env.DB.SoftDeleteIssue(t.Context(), issue.ID, "tester")
+		_, _, _, err := env.DB.SoftDeleteIssue(t.Context(), issue.ID, "tester", "")
 		require.NoError(t, err)
 
 		// Naming an actor keeps actor validation from refusing on its own, so
@@ -817,7 +817,7 @@ func TestPollProjectEventsIssueDeletedHistoryIsNotFoundUnderHostAccess(t *testin
 				})
 				require.NoError(t, err)
 			}
-			_, _, _, err = dbh.db.SoftDeleteIssue(t.Context(), deleted.ID, "agent")
+			_, _, _, err = dbh.db.SoftDeleteIssue(t.Context(), deleted.ID, "agent", "")
 			require.NoError(t, err)
 			if tc.movedArchived {
 				_, _, err = dbh.db.RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: target.ID, Actor: "agent", Force: true})

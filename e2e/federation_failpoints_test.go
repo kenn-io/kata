@@ -237,7 +237,7 @@ func (fx *federationStressFixture) waitForNodeUnavailable(t *testing.T, node *fe
 
 func (fx *federationStressFixture) stopNode(t *testing.T, node *federationStressNode) {
 	t.Helper()
-	stopDaemon(node.cmd)
+	node.proc.stop()
 	fx.waitForNodeUnavailable(t, node)
 }
 
@@ -259,18 +259,18 @@ func (fx *federationStressFixture) waitForHTTPUnavailable(t *testing.T, client *
 
 func (fx *federationStressFixture) restartHub(t *testing.T) {
 	t.Helper()
-	stopDaemon(fx.hub.cmd)
+	fx.hub.proc.stop()
 	addr := strings.TrimPrefix(fx.hub.url, "http://")
-	fx.hub.cmd = startFederationStressTCPDaemon(t, fx.bin, fx.hub.dirs, fx.hub.stderr, addr)
-	stressWaitForPing(t, fx.hub.url, 5*time.Second)
+	fx.hub.proc = startFederationStressTCPDaemon(t, fx.bin, fx.hub.dirs, fx.hub.stderr, addr)
+	stressWaitForPing(t, fx.hub.url, 5*time.Second, fx.hub.proc, fx.hub.stderr)
 	fx.hub.running = true
 }
 
 func (fx *federationStressFixture) restartSpoke(t *testing.T, spoke *federationStressNode) {
 	t.Helper()
-	stopDaemon(spoke.cmd)
-	spoke.cmd = startFederationStressUnixDaemon(t, fx.bin, spoke.dirs, spoke.stderr)
-	spoke.url, spoke.http = stressConnectDaemon(t, spoke.dirs, spoke.stderr)
+	spoke.proc.stop()
+	spoke.proc = startFederationStressUnixDaemon(t, fx.bin, spoke.dirs, spoke.stderr)
+	spoke.url, spoke.http = stressConnectDaemon(t, spoke.dirs, spoke.proc, spoke.stderr)
 	spoke.running = true
 }
 

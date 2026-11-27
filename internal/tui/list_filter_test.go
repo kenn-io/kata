@@ -42,6 +42,21 @@ type fakeListAPI struct {
 	createErr          error
 	closeErr           error
 	setPriorityErr     error
+	// searchFn answers SearchIssues; the call is recorded first.
+	searchFn    func(SearchQuery) (*SearchAnswer, error)
+	searchCalls []SearchQuery
+	searchPIDs  []int64
+}
+
+func (f *fakeListAPI) SearchIssues(
+	_ context.Context, projectID int64, q SearchQuery,
+) (*SearchAnswer, error) {
+	f.searchCalls = append(f.searchCalls, q)
+	f.searchPIDs = append(f.searchPIDs, projectID)
+	if f.searchFn == nil {
+		return &SearchAnswer{Mode: "lexical"}, nil
+	}
+	return f.searchFn(q)
 }
 
 func (f *fakeListAPI) ListIssues(

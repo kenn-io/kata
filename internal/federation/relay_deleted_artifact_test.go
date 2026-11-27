@@ -27,7 +27,7 @@ func TestRelayDeletedArtifactPrefix(t *testing.T) {
 			durable, err := root.store.(db.EmbeddingArtifactStorage).RetainEmbeddingArtifact(t.Context(), artifact)
 			require.NoError(t, err)
 			require.True(t, durable)
-			_, _, _, err = root.store.SoftDeleteIssue(t.Context(), a.ID, root.account)
+			_, _, _, err = root.store.SoftDeleteIssue(t.Context(), a.ID, root.account, "")
 			require.NoError(t, err)
 			b, _, err := root.store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: root.project.ID, Title: "Live vector", Author: root.account})
 			require.NoError(t, err)
@@ -94,7 +94,7 @@ func TestRelayDeletedArtifactInFlight(t *testing.T) {
 				require.Len(t, payloads, 1)
 				senderIssue, err := sender.store.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
 				require.NoError(t, err)
-				_, _, _, err = sender.store.SoftDeleteIssue(t.Context(), senderIssue.ID, sender.account)
+				_, _, _, err = sender.store.SoftDeleteIssue(t.Context(), senderIssue.ID, sender.account, "")
 				require.NoError(t, err)
 				payloadsAfterDelete, err := sender.store.(db.RelayArtifactStorage).RelayArtifactPayloads(t.Context(), c.BindingUID, c.ResetEpoch, acceptance.MissingDigests)
 				require.ErrorIs(t, err, db.ErrEmbeddingArtifactMiss, "retired downloads are retryable, not authority revocation")
@@ -111,7 +111,7 @@ func TestRelayDeletedArtifactInFlight(t *testing.T) {
 				}
 				receiverIssue, err := receiver.store.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
 				require.NoError(t, err)
-				_, _, _, err = receiver.store.SoftDeleteIssue(t.Context(), receiverIssue.ID, receiver.account)
+				_, _, _, err = receiver.store.SoftDeleteIssue(t.Context(), receiverIssue.ID, receiver.account, "")
 				require.NoError(t, err)
 				batch.Artifacts = payloads // Download won the race; commit must still discard it.
 				acceptance, err = receiver.store.AcceptRelayDeliveries(t.Context(), c.BindingUID, batch)

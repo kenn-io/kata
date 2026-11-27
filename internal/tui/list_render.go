@@ -46,6 +46,8 @@ type viewChrome struct {
 	moveStep      moveStep         // the Move form step, for its footer
 	deleteHidden  bool             // the connected credentials cannot delete
 	moveHidden    bool             // move is not on offer (credentials, saved context, or a pending lookup)
+	daemonSearch  daemonSearchHint // the search bar can ask the daemon (one project in scope)
+	statusOnInfo  bool             // the info line draws the list's status (full list, or split with list focus)
 }
 
 // View renders the list under the M3.5 chrome layer:
@@ -65,7 +67,8 @@ func (lm listModel) View(width, height int, chrome viewChrome) string {
 		return lm.renderTinyFallback(width, height, chrome)
 	}
 	title := renderTitleBar(width, chrome.scope, chrome.version, chrome.daemon)
-	stats := renderStatsLine(width, lm.issueCounts(), lm.filter, chrome.input)
+	chrome.statusOnInfo = true
+	stats := renderStatsLine(width, lm.issueCounts(), lm.filter, chrome.input, lm.statsNote(chrome))
 	helpRows := listHelpRows(lm, chrome)
 	footerLines := helpLines(helpRows, width)
 	footer := renderFooterHelpTable(helpRows, width)
@@ -95,8 +98,17 @@ func (lm listModel) View(width, height int, chrome viewChrome) string {
 // title-bar / info-line / footer are composed by renderSplit, not
 // here — this returns just the body region.
 func (lm listModel) ViewBody(width, bodyRows int, chrome viewChrome) string {
-	return renderStatsLine(width, lm.issueCounts(), lm.filter, chrome.input) + "\n" +
+	return renderStatsLine(width, lm.issueCounts(), lm.filter, chrome.input, lm.statsNote(chrome)) + "\n" +
 		lm.renderBodyArea(width, bodyRows-1, chrome)
+}
+
+// statsNote is the daemon-search note for the stats line. A failure before
+// any answer is left off while the info line draws that failure in full.
+func (lm listModel) statsNote(chrome viewChrome) string {
+	if chrome.statusOnInfo && lm.ranked.err != nil && !lm.rankedShown() && lm.status == searchFailedStatus(lm.ranked.err) {
+		return ""
+	}
+	return lm.rankedNote()
 }
 
 // listMinHeight is the smallest height for the full list chrome.
@@ -126,7 +138,7 @@ func (lm listModel) renderTinyFallback(width, height int, chrome viewChrome) str
 	if height <= 1 {
 		return title
 	}
-	rows := []string{title, renderStatsLine(width, lm.issueCounts(), lm.filter, chrome.input)}
+	rows := []string{title, renderStatsLine(width, lm.issueCounts(), lm.filter, chrome.input, lm.rankedNote())}
 	if height > 2 {
 		rows = append(rows, lm.renderBodyArea(width, height-2, chrome))
 	}
@@ -241,7 +253,7 @@ func titleBarInnerWidth(width int) int {
 // SSE state and the actor used to live here in M1; both are gone
 // (SSE surfaces as a flash on the info line when degraded; actor
 // stays in lm.actor for mutation dispatch but isn't surfaced).
-func renderStatsLine(width int, c issueCounts, f ListFilter, input inputState) string {
+func renderStatsLine(width int, c issueCounts, f ListFilter, input inputState, note string) string {
 	left := "/ search"
 	if f.Search != "" {
 		left = "/" + sanitizeForLine(f.Search)
@@ -253,6 +265,9 @@ func renderStatsLine(width int, c issueCounts, f ListFilter, input inputState) s
 	right := statsCountsText(c)
 	if chips := renderChips(f); chips != "" {
 		right += " · " + chips
+	}
+	if note != "" {
+		right = note + " · " + right
 	}
 	body := padLeftRightInside(left, right, titleBarInnerWidth(width))
 	return statsLineStyle.Render(body)

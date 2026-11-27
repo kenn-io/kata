@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-21
+last_edited: 2026-11-27
 ---
 
 # CLI reference
@@ -267,11 +267,11 @@ this text in a harness-native response. To load it in every session, see
 
 ## Agent setup
 
-In unreleased builds, `kata agent setup [<harness>...]` installs user hooks for
-the agents you name. If you pass no names, it selects installed Claude Code and
-Codex. To check readiness without installing anything, add `--check`. When Codex
-hooks need review, open Codex and run `/hooks`. The command exits with code 1
-when a selected agent needs attention.
+In Kata 0.24.0 and later, `kata agent setup [<harness>...]` installs user hooks
+for the agents you name. If you pass no names, it selects installed Claude Code
+and Codex. To check readiness without installing anything, add `--check`. When
+Codex hooks need review, open Codex and run `/hooks`. The command exits with
+code 1 when a selected agent needs attention.
 
 ## Agent hook
 
@@ -1256,7 +1256,7 @@ kata reopen <ref> [--comment TEXT]
 Delete, restore, and purge:
 
 ```sh
-kata delete <ref> --force --confirm "DELETE <qualified-id>"
+kata delete <ref> --force --confirm "DELETE <qualified-id>" [--reason TEXT]
 kata restore <ref>
 kata purge <ref> --force --confirm "PURGE <qualified-id>"
 ```
@@ -1265,6 +1265,11 @@ kata purge <ref> --force --confirm "PURGE <qualified-id>"
 confirmation string is the issue's qualified short ID, for example
 `DELETE kata#abc4`. Agents must not run `delete` or `purge` unless the user
 explicitly asks for that exact operation and ref.
+
+`delete --reason` records why on the issue's `issue.soft_deleted` event, so
+whoever reads the deleted issue's history before restoring it sees the reason.
+It needs a daemon that reports API 0.73.0 or newer; an older daemon gets an
+upgrade message and the issue is not deleted.
 
 ## Labels, ownership, and claiming
 
@@ -2028,6 +2033,11 @@ kata tui [issue-ref]
 Search stays visible above the issue list and the **Jobs**, **Runs**, and
 **Workflows** lists. To edit the current query, press `/` or, with `--mouse`,
 click the search line.
+In the issue list, press `ctrl+t` in the search line to have the daemon rank the
+project's issues instead of filtering the loaded rows. Of the daemon's best 50
+hits, the TUI shows those among the issues it has loaded (up to 2,000 per
+project), and a note counts the rest; see
+[search by meaning in the TUI](../guide/semantic-search.md#search-by-meaning-in-the-tui).
 
 `kata tui` asks for confirmation when you press `q`. To quit immediately, set
 `[tui] confirm_quit = false`; see
