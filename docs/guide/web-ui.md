@@ -1,7 +1,7 @@
 ---
 title: Web UI
 description: Browse and manage Kata projects and issues in the daemon-served browser application.
-last_edited: 2026-11-21
+last_edited: 2026-11-27
 ---
 
 # Web UI
@@ -104,7 +104,10 @@ left out, and the column hides at narrow list widths.
 
 At narrow window widths the task list stays primary: at 760px and below the menu button opens the sidebar
 in a drawer, and filter controls wrap to fit the list pane, including
-side-by-side detail layouts.
+side-by-side detail layouts. On wider windows, drag the sidebar edge to resize
+it between 180px and 600px, or use the collapse button beside **New task** to
+fold it into a thin strip. Kata saves the width and collapsed state with your
+other browser preferences.
 
 ![Kata Web UI showing a synthetic project and issue hierarchy](/docs/assets/screenshots/web-ui/workspace.png)
 
