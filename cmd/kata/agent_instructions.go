@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -15,7 +16,17 @@ const (
 	hooklessBeginComment = "<!-- BEGIN KATA HOOKLESS MUSE -->"
 	hooklessBeginYAML    = "# BEGIN KATA HOOKLESS MUSE"
 	hooklessEndMarker    = "<!-- END KATA HOOKLESS MUSE -->"
+	hooklessEndYAML      = "# END KATA HOOKLESS MUSE"
 	hooklessAddedNewline = "<!-- KATA HOOKLESS MUSE ADDED PREFIX NEWLINE -->"
+
+	// Consumer Muse discovers custom skills here (kenn-io/kata#1315).
+	museSkillsDir = "workspace/custom-skills"
+	// Kata 0.19.0 through 0.24.0 installed the skill here by default.
+	legacyMuseSkillsDir = "workspace/skills"
+
+	// SKILL.md front matter and skill.yaml share one description; consumer
+	// Muse reads it only from skill.yaml.
+	museSkillDescription = "Use at conversation start and before claiming completion for Kata issue work."
 )
 
 type instructionArtifact struct {
@@ -24,13 +35,22 @@ type instructionArtifact struct {
 	Changed     bool
 	State       string
 	beginMarker string
+	// endMarker defaults to hooklessEndMarker.
+	endMarker string
 	// fence is the line install writes before beginMarker, if any.
 	fence string
 	// retainEmpty keeps the file when uninstall leaves it empty.
 	retainEmpty bool
-	before      string
-	exists      bool
-	mode        os.FileMode
+	// legacy marks a pre-custom-skills copy that install migrates away.
+	legacy bool
+	// keepUnmanaged leaves an existing unmarked file alone instead of
+	// refusing the install.
+	keepUnmanaged bool
+	// bare blocks start at their begin marker and own no separator line.
+	bare   bool
+	before string
+	exists bool
+	mode   os.FileMode
 }
 
 func newAgentInstructionsCmd() *cobra.Command {
@@ -45,7 +65,7 @@ func newAgentInstructionsCmd() *cobra.Command {
 }
 
 func newAgentInstructionsActionCmd(verb string) *cobra.Command {
-	var home, actor string
+	var home, skillsDir, actor string
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use: verb + " muse", Short: verb + " a hookless instruction bundle (e.g. Muse)",
@@ -74,9 +94,23 @@ func newAgentInstructionsActionCmd(verb string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			artifacts, err := planInstructionArtifacts(root, actor, verb)
+			if skillsDir != "" {
+				if skillsDir, err = localSkillsDir(root, skillsDir); err != nil {
+					return agentHookUsage("--skills-dir must name a directory inside --home")
+				}
+			}
+			artifacts, err := planInstructionArtifacts(root, skillsDir, actor, verb)
 			if err != nil {
 				return err
+			}
+			if verb == "install" && !flags.Quiet {
+				for _, a := range artifacts {
+					if a.State == "unmanaged" {
+						if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "note: %s has no Kata markers, so install leaves it untouched\n", a.Path); err != nil {
+							return err
+						}
+					}
+				}
 			}
 			if verb != "status" && !dryRun {
 				if err := applyInstructionArtifacts(artifacts); err != nil {
@@ -86,7 +120,8 @@ func newAgentInstructionsActionCmd(verb string) *cobra.Command {
 			return printInstructionArtifacts(cmd, verb, dryRun, artifacts)
 		},
 	}
-	cmd.Flags().StringVar(&home, "home", "", "required harness home containing AGENTS.md and workspace/skills")
+	cmd.Flags().StringVar(&home, "home", "", "required harness home containing AGENTS.md and the skills directory")
+	cmd.Flags().StringVar(&skillsDir, "skills-dir", "", "skills directory inside --home that holds the kata skill folder (default workspace/custom-skills)")
 	if verb == "install" {
 		cmd.Flags().StringVar(&actor, "actor", "", "required exact actor or actor/teammate inbox address")
 	}
@@ -98,7 +133,7 @@ func newAgentInstructionsActionCmd(verb string) *cobra.Command {
 
 // All artifacts consume the same contract as native prompt injection. Only
 // hookless setup and delivery instructions differ between them.
-func museInstructionArtifacts(home, actor string) []instructionArtifact {
+func museInstructionArtifacts(home, skillsDir, actor string) []instructionArtifact {
 	start := "\n" + hooklessBeginComment + "\n"
 	skillStart := "---\n" + hooklessBeginYAML + "\n"
 	end := hooklessEndMarker + "\n"
@@ -121,12 +156,25 @@ native attention support, automatic idle wakeup, or guaranteed session-end hook.
 	return []instructionArtifact{
 		{Path: filepath.Join(home, "AGENTS.md"), beginMarker: hooklessBeginComment, retainEmpty: true,
 			Content: start + briefing + agentContractText + end},
-		{Path: filepath.Join(home, "workspace", "skills", "kata", "SKILL.md"), beginMarker: hooklessBeginYAML, fence: "---",
-			Content: skillStart + "name: kata\ndescription: Use at conversation start and before claiming completion for Kata issue work.\n---\n\n" + briefing + agentContractText + end},
-		{Path: filepath.Join(home, "workspace", "skills", "kata", "POLL.md"), beginMarker: hooklessBeginComment,
+		{Path: filepath.Join(home, skillsDir, "kata", "SKILL.md"), beginMarker: hooklessBeginYAML, fence: "---",
+			Content: skillStart + "name: kata\ndescription: " + museSkillDescription + "\n---\n\n" + briefing + agentContractText + end},
+		{Path: filepath.Join(home, skillsDir, "kata", "POLL.md"), beginMarker: hooklessBeginComment,
 			Content: start + musePollSpec(actor) + briefing + agentContractText + end},
+		// Without skill.yaml, consumer Muse ignores SKILL.md front matter and
+		// describes the skill by its first heading line (kenn-io/kata#1315).
+		{Path: filepath.Join(home, skillsDir, "kata", "skill.yaml"), beginMarker: hooklessBeginYAML, endMarker: hooklessEndYAML, keepUnmanaged: true, bare: true,
+			Content: hooklessBeginYAML + "\n" + museSkillYAML + hooklessEndYAML + "\n"},
 	}
 }
+
+var museSkillYAML = fmt.Sprintf(`# Managed by Kata: refreshed on every `+"`kata agent-hook instructions install muse`"+`.
+# Add your own keys outside this block (don't repeat these); Kata leaves them alone.
+name: kata
+title: "Kata"
+description: %q
+category: "Work and knowledge"
+include_in_prompt: true
+`, museSkillDescription)
 
 func musePollSpec(actor string) string {
 	return fmt.Sprintf(`# Recurring task specification for consumer Muse
@@ -202,15 +250,101 @@ func resolveInstructionHome(home string) (string, error) {
 	}
 }
 
-func planInstructionArtifacts(home, actor, verb string) ([]instructionArtifact, error) {
+// localSkillsDir returns dir relative to home, refusing directories outside
+// it so every managed file stays under the home's path checks.
+func localSkillsDir(home, dir string) (string, error) {
+	rel := filepath.Clean(dir)
+	if filepath.IsAbs(rel) {
+		var err error
+		if rel, err = homeRelative(home, rel); err != nil {
+			return "", err
+		}
+	}
+	if !filepath.IsLocal(rel) {
+		return "", fmt.Errorf("skills directory outside home: %s", dir)
+	}
+	return rel, nil
+}
+
+// homeRelative returns dir relative to home. When dir reaches home through a
+// different parent alias, such as macOS's /var, it uses the shallowest
+// ancestor that is home and keeps the rest literal, so the path checks still
+// see any symlink below home.
+func homeRelative(home, dir string) (string, error) {
+	if rel, err := filepath.Rel(home, dir); err == nil && filepath.IsLocal(rel) {
+		return rel, nil
+	}
+	homeInfo, err := os.Stat(home)
+	if errors.Is(err, os.ErrNotExist) {
+		// Nothing exists below a new home, so resolving existing parents
+		// translates only aliases above it.
+		resolvedHome, err := resolveInstructionHome(home)
+		if err != nil {
+			return "", err
+		}
+		resolvedDir, err := resolveInstructionHome(dir)
+		if err != nil {
+			return "", err
+		}
+		return filepath.Rel(resolvedHome, resolvedDir)
+	}
+	if err != nil {
+		return "", err
+	}
+	var ancestors []string
+	for p := dir; ; p = filepath.Dir(p) {
+		ancestors = append(ancestors, p)
+		if filepath.Dir(p) == p {
+			break
+		}
+	}
+	for _, ancestor := range slices.Backward(ancestors) {
+		if info, err := os.Stat(ancestor); err == nil && os.SameFile(info, homeInfo) {
+			return filepath.Rel(ancestor, dir)
+		}
+	}
+	return "", fmt.Errorf("skills directory outside home: %s", dir)
+}
+
+// sameSkillsDir reports whether two skills directories under home are one,
+// including different spellings on a case-insensitive file system.
+func sameSkillsDir(home, a, b string) bool {
+	if filepath.Clean(a) == filepath.Clean(b) {
+		return true
+	}
+	infoA, errA := os.Stat(filepath.Join(home, a))
+	infoB, errB := os.Stat(filepath.Join(home, b))
+	return errA == nil && errB == nil && os.SameFile(infoA, infoB)
+}
+
+// planInstructionArtifacts plans the bundle under skillsDir, relative to home;
+// empty selects the default. Unless skillsDir is the legacy directory, it also
+// plans removal of a managed legacy copy, so install moves it and status and
+// uninstall find it.
+func planInstructionArtifacts(home, skillsDir, actor, verb string) ([]instructionArtifact, error) {
 	home, err := resolveInstructionHome(home)
 	if err != nil {
 		return nil, err
 	}
-	artifacts := museInstructionArtifacts(home, actor)
+	if skillsDir == "" {
+		skillsDir = museSkillsDir
+	}
+	migrate := !sameSkillsDir(home, skillsDir, legacyMuseSkillsDir)
+	artifacts := museInstructionArtifacts(home, skillsDir, actor)
+	if migrate {
+		for _, a := range artifacts[1:] {
+			a.Path = filepath.Join(home, legacyMuseSkillsDir, "kata", filepath.Base(a.Path))
+			a.legacy = true
+			artifacts = append(artifacts, a)
+		}
+	}
+	planned := artifacts[:0]
 	for i := range artifacts {
 		a := &artifacts[i]
 		if err := checkInstructionPath(a.Path, home); err != nil {
+			if a.legacy && errors.Is(err, errUnsafeInstructionPath) {
+				continue // Kata never wrote through a link, so nothing is managed there.
+			}
 			return nil, err
 		}
 		var err error
@@ -226,15 +360,25 @@ func planInstructionArtifacts(home, actor, verb string) ([]instructionArtifact, 
 			}
 			a.mode = info.Mode().Perm()
 		}
-		begin, end, err := instructionBlockSpan(a.before, a.beginMarker, a.fence)
+		if a.endMarker == "" {
+			a.endMarker = hooklessEndMarker
+		}
+		begin, end, err := instructionBlockSpan(a.before, a.beginMarker, a.endMarker, a.fence, a.bare)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", a.Path, err)
+		}
+		if a.legacy && begin < 0 {
+			continue // Only a managed legacy copy is reported or migrated.
 		}
 		a.State = "absent"
 		if begin >= 0 {
 			a.State = "installed"
 		}
-		switch verb {
+		action := verb
+		if a.legacy && verb == "install" {
+			action = "uninstall"
+		}
+		switch action {
 		case "status":
 			a.Content = "" // Status reports ownership on disk, never runtime loading.
 		case "uninstall":
@@ -257,23 +401,27 @@ func planInstructionArtifacts(home, actor, verb string) ([]instructionArtifact, 
 				a.Content = a.before[:begin] + a.Content + a.before[end:]
 			} else if i == 0 {
 				a.Content = a.before + a.Content
-			} else if a.exists && a.before != "" {
+			} else if a.exists && a.before != "" && !a.keepUnmanaged {
 				return nil, fmt.Errorf("refusing to replace unowned %s", a.Path)
 			}
 			a.State = "installed"
 		}
+		if a.keepUnmanaged && begin < 0 && a.exists {
+			a.Content, a.State = a.before, "unmanaged"
+		}
 		a.Changed = verb != "status" && a.Content != a.before
+		planned = append(planned, *a)
 	}
-	return artifacts, nil
+	return planned, nil
 }
 
 // instructionBlockSpan locates the managed block by complete marker lines. It
 // accepts LF and CRLF line endings and a final line without a newline, so
 // marker phrases inside other text, such as an actor name, are not markers.
 // It returns -1, -1 when the content has no markers.
-func instructionBlockSpan(content, beginMarker, fence string) (int, int, error) {
+func instructionBlockSpan(content, beginMarker, endMarker, fence string, bare bool) (int, int, error) {
 	begins := markerLines(content, beginMarker)
-	ends := markerLines(content, hooklessEndMarker)
+	ends := markerLines(content, endMarker)
 	if len(begins) == 0 && len(ends) == 0 {
 		return -1, -1, nil
 	}
@@ -282,6 +430,9 @@ func instructionBlockSpan(content, beginMarker, fence string) (int, int, error) 
 	}
 	if ends[0].start < begins[0].end {
 		return 0, 0, errors.New("misplaced hookless end marker")
+	}
+	if bare {
+		return begins[0].start, ends[0].end, nil
 	}
 	addedNewline := len(markerLines(content[begins[0].end:ends[0].start], hooklessAddedNewline)) > 0
 	begin, err := managedBlockStart(content, begins[0].start, fence, addedNewline)
@@ -325,19 +476,31 @@ func managedBlockStart(content string, marker int, fence string, addedNewline bo
 	return lineStart, nil
 }
 
+var errUnsafeInstructionPath = errors.New("instruction path must use regular files and real directories")
+
+// checkInstructionPath walks from home to path, so a symlink or file where a
+// directory belongs is reported as unsafe before anything below it is read.
 func checkInstructionPath(path, home string) error {
+	var chain []string
 	for p := path; ; p = filepath.Dir(p) {
-		info, err := os.Lstat(p)
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		if err == nil && (info.Mode()&os.ModeSymlink != 0 || (p == path && !info.Mode().IsRegular()) || (p != path && !info.IsDir())) {
-			return fmt.Errorf("instruction path must use regular files and real directories: %s", p)
-		}
+		chain = append(chain, p)
 		if p == home || filepath.Dir(p) == p {
-			return nil
+			break
 		}
 	}
+	for _, p := range slices.Backward(chain) {
+		info, err := os.Lstat(p)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 || (p == path && !info.Mode().IsRegular()) || (p != path && !info.IsDir()) {
+			return fmt.Errorf("%w: %s", errUnsafeInstructionPath, p)
+		}
+	}
+	return nil
 }
 
 func applyInstructionArtifacts(artifacts []instructionArtifact) error {
