@@ -59,10 +59,12 @@ describe('projectKataWorkspaceView', () => {
     ])
   })
 
-  test('keeps filtered Needs attention results to issues that need attention', () => {
+  test('keeps a status-filtered Needs attention list to issues that need attention', () => {
+    // A status filter flattens the view into plain results, so only the
+    // attention filter keeps the quiet issue out.
     const view = projectKataWorkspaceView({
       view: 'attention',
-      filters: { ...defaultKataTaskSearchFilters('attention'), owner: 'user-a' },
+      filters: { ...defaultKataTaskSearchFilters('attention'), status: 'all' },
       snapshot: { projects, fetched_at: '2026-05-15T16:00:00.000Z' },
       issues: [issue('quiet'), issue('waiting', { 'work.attention': 'needs-human' })],
       today: '2026-05-15',
