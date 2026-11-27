@@ -779,7 +779,6 @@
                     aria-label={`Actions for ${issue.title}`}
                     aria-haspopup="menu"
                     title="Move or ask…"
-                    tabindex="-1"
                     disabled={pending.has(issue.uid)}
                     onclick={(event) => openMenu(event, issue)}
                   >

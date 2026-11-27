@@ -158,3 +158,18 @@ for (const colorScheme of ['light', 'dark'] as const) {
     expect(results.violations).toEqual([])
   })
 }
+
+test('the card actions menu, and Ask… in it, can be reached from the keyboard', async ({
+  page,
+  kata,
+}) => {
+  const credentials = await kata.launch(page)
+  const issue = await kata.seedIssue(page, credentials, { title: 'Keyboard reachable card' })
+  await openBoard(page, kata)
+
+  await column(page, 'Open').getByRole('button', { name: issue.title, exact: true }).focus()
+  await page.keyboard.press('Tab')
+  await expect(page.getByRole('button', { name: `Actions for ${issue.title}` })).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('menuitem', { name: 'Ask user-a…' })).toBeVisible()
+})

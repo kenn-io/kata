@@ -183,8 +183,9 @@ subtasks in the same column are listed directly under it, indented one step per
 level. A subtask whose epic sits in another column shows that epic's ID beside
 its own. Subtasks still move on their own.
 
-Move a card by dragging it, from its actions menu (**…**), or by focusing it
-and pressing **Alt+←** or **Alt+→**, which skip Needs attention. Arrow keys move
+Move a card by dragging it, from its actions menu (**…**, the next **Tab** stop
+after the card), or by focusing it and pressing **Alt+←** or **Alt+→**, which
+skip Needs attention. Arrow keys move
 focus between cards and columns. A moved card flashes briefly where it lands,
 and a banner confirms the move. Each move is one kata action, so moving the card
 back reverses it. Select a card to open its full detail in a side drawer; on a
