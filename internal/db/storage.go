@@ -210,7 +210,8 @@ type Storage interface {
 	// idempotency lock can compare those events with the persisted receipt.
 	CloseIssueGuarded(ctx context.Context, p CloseIssueParams) (Issue, []Event, bool, error)
 	ReopenIssue(ctx context.Context, issueID int64, actor string) (Issue, *Event, bool, error)
-	SoftDeleteIssue(ctx context.Context, issueID int64, actor string) (Issue, *Event, bool, error)
+	// SoftDeleteIssue records a non-empty reason on its issue.soft_deleted event.
+	SoftDeleteIssue(ctx context.Context, issueID int64, actor, reason string) (Issue, *Event, bool, error)
 	RestoreIssue(ctx context.Context, issueID int64, actor string) (Issue, *Event, bool, error)
 	PurgeIssue(ctx context.Context, issueID int64, actor string, reason *string) (PurgeLog, error)
 	// PurgeProject permanently deletes an archived project and all its
@@ -501,6 +502,16 @@ type Storage interface {
 	// transaction. It changes nothing and returns ErrFederationPushAwaitsPull
 	// while the home has no other history of one of those issues.
 	AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string) error
+	// AcknowledgeFederationPushEvents records specific local-origin events as
+	// accepted by the hub and advances the monotonic push cursor only through
+	// consecutive acknowledged events, keeping any earlier unresolved events
+	// pending.
+	AcknowledgeFederationPushEvents(ctx context.Context, projectID int64, eventUIDs []string) error
+	// IsFederationEventAcknowledged reports whether an event in projectID is
+	// already accepted on the hub (through the push cursor, an out-of-order
+	// acknowledgement marker, or a pulled remote event), excluding locally
+	// retained events and unpushed former-instance events.
+	IsFederationEventAcknowledged(ctx context.Context, projectID int64, eventUID string) (bool, error)
 	EnableFederationPush(ctx context.Context, projectID int64, cursor int64) (FederationBinding, error)
 	// DisableFederationPushWhenSettled turns push off for a direct spoke
 	// binding in the same transaction that proves no local-origin event above

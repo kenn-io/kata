@@ -145,7 +145,7 @@ func checkMoveReusedOldRefs(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	require.Equal(t, replacement.UID, got.UID)
 
-	_, _, _, err = store.SoftDeleteIssue(ctx, replacement.ID, "worker")
+	_, _, _, err = store.SoftDeleteIssue(ctx, replacement.ID, "worker", "")
 	require.NoError(t, err)
 	_, err = store.IssueByShortID(ctx, source.ID, "d4ex", db.IncludeDeletedNo)
 	assert.ErrorIs(t, err, db.ErrNotFound, "a deleted local issue must block historical fallback")
@@ -357,7 +357,7 @@ func checkMoveTreeStopsAtDeletedIssue(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	grandchild, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "grandchild", Author: "worker", Links: []db.InitialLink{{Type: "parent", ToNumber: deleted.ID}}})
 	require.NoError(t, err)
-	_, _, _, err = store.SoftDeleteIssue(ctx, deleted.ID, "worker")
+	_, _, _, err = store.SoftDeleteIssue(ctx, deleted.ID, "worker", "")
 	require.NoError(t, err)
 	moved, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: root.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: root.Revision, Actor: "worker"})
 	require.NoError(t, err)
@@ -413,7 +413,7 @@ func checkCloseRechecksEvidenceTargets(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	deleted, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "deleted original", Author: "worker"})
 	require.NoError(t, err)
-	_, _, _, err = store.SoftDeleteIssue(ctx, deleted.ID, "worker")
+	_, _, _, err = store.SoftDeleteIssue(ctx, deleted.ID, "worker", "")
 	require.NoError(t, err)
 	denied := errors.New("project denied")
 	scoped := db.WithProjectAccessTransactionCheck(ctx, func(_ context.Context, _ db.Transaction, projectUID string) error {

@@ -878,7 +878,7 @@ func checkActiveProjectionExports(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return err
 	}
-	if _, _, _, err := store.SoftDeleteIssue(ctx, deleted.ID, "exporter"); err != nil {
+	if _, _, _, err := store.SoftDeleteIssue(ctx, deleted.ID, "exporter", ""); err != nil {
 		return err
 	}
 

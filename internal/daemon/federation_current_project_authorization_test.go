@@ -96,3 +96,112 @@ func TestFederationFreshCurrentProjectHostAuthority(t *testing.T) {
 		})
 	}
 }
+
+func TestFederationIngestPartialNotEnrolledHTTP(t *testing.T) {
+	ctx := t.Context()
+	env := testenv.New(t)
+	source, target, moved := seedMovePair(t, env)
+	for _, project := range []db.Project{source, target} {
+		_, err := env.DB.EnableProjectFederation(ctx, project.ID, "tester")
+		require.NoError(t, err)
+	}
+	stayingA, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "Staying A", Author: "tester"})
+	require.NoError(t, err)
+	stayingB, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "Staying B", Author: "tester"})
+	require.NoError(t, err)
+	_, err = env.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: moved.ID, FromProjectID: source.ID, ToProjectID: target.ID,
+		IfMatchRev: moved.Revision, Actor: "tester",
+	})
+	require.NoError(t, err)
+
+	origin, err := uid.New()
+	require.NoError(t, err)
+	routeGrant, err := env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+		SpokeInstanceUID: origin, ProjectID: &source.ID, Capabilities: "push,pull", Actor: "tester",
+	})
+	require.NoError(t, err)
+
+	makeEnvelope := func(sourceID int64, issueUID, title string, offset time.Duration) api.FederationIngestEventEnvelope {
+		t.Helper()
+		eventUID, err := uid.New()
+		require.NoError(t, err)
+		at := time.Now().UTC().Add(time.Hour + offset).Truncate(time.Millisecond)
+		payload, err := json.Marshal(map[string]string{"uid": issueUID, "title": title})
+		require.NoError(t, err)
+		remote := db.RemoteEvent{
+			EventUID: eventUID, OriginInstanceUID: origin, ProjectUID: source.UID, ProjectName: source.Name,
+			IssueUID: &issueUID, Type: "issue.updated", Actor: "tester",
+			Payload: jsontext.Value(payload), HLCPhysicalMS: at.UnixMilli(), CreatedAt: at,
+		}
+		remote.ContentHash, err = db.RemoteEventContentHash(remote)
+		require.NoError(t, err)
+		return api.FederationIngestEventEnvelope{
+			EventID: sourceID, EventUID: eventUID, OriginInstanceUID: origin,
+			ProjectUID: source.UID, ProjectName: source.Name, IssueUID: &issueUID,
+			Type: remote.Type, Actor: remote.Actor, Payload: remote.Payload,
+			HLCPhysicalMS: remote.HLCPhysicalMS, ContentHash: remote.ContentHash, CreatedAt: at,
+		}
+	}
+
+	evBefore := makeEnvelope(1, stayingA.UID, "Before moved", time.Second)
+	evMoved := makeEnvelope(2, moved.UID, "Blocked moved", 2*time.Second)
+	evAfter := makeEnvelope(3, stayingB.UID, "After moved", 3*time.Second)
+
+	headers := bearer(routeGrant.Token)
+	headers[db.EventFeaturesHeader] = db.SupportedEventFeatures
+	mixedBody := api.FederationIngestEventsRequestBody{
+		SchemaVersion: db.CurrentSchemaVersion(),
+		Events:        []api.FederationIngestEventEnvelope{evBefore, evMoved, evAfter},
+	}
+
+	// Without partial_not_enrolled, the whole batch fails with 403 and writes nothing.
+	resp, raw := envDoRaw(t, env, http.MethodPost, projectPath(source.ID)+"/federation/events:ingest", mixedBody, headers)
+	envelope := assertAPIError(t, resp.StatusCode, raw, http.StatusForbidden, db.FederationProjectNotEnrolledCode)
+	require.Contains(t, envelope.Error.Message, moved.UID)
+	require.NotContains(t, string(raw), target.Name)
+	require.NotContains(t, string(raw), target.UID)
+	checkA, err := env.DB.IssueByUID(ctx, stayingA.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "Staying A", checkA.Title)
+
+	// With partial_not_enrolled=true, unrelated events are accepted and only the moved issue event is refused.
+	resp, raw = envDoRaw(t, env, http.MethodPost, projectPath(source.ID)+"/federation/events:ingest?partial_not_enrolled=true", mixedBody, headers)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "%s", raw)
+	var ack api.FederationIngestEventsBody
+	require.NoError(t, json.Unmarshal(raw, &ack))
+	require.Equal(t, 2, ack.Accepted)
+	require.Zero(t, ack.Duplicates)
+	require.EqualValues(t, 1, ack.PushCursorEventID)
+	require.Len(t, ack.RefusedEvents, 1)
+	require.Equal(t, int64(2), ack.RefusedEvents[0].EventID)
+	require.Equal(t, evMoved.EventUID, ack.RefusedEvents[0].EventUID)
+	require.Equal(t, db.FederationProjectNotEnrolledCode, ack.RefusedEvents[0].Code)
+	require.Equal(t, moved.UID, ack.RefusedEvents[0].IssueUID)
+	require.NotContains(t, string(raw), target.Name)
+	require.NotContains(t, string(raw), target.UID)
+
+	checkA, err = env.DB.IssueByUID(ctx, stayingA.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "Before moved", checkA.Title)
+	checkB, err := env.DB.IssueByUID(ctx, stayingB.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "After moved", checkB.Title)
+	checkMoved, err := env.DB.IssueByUID(ctx, moved.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, moved.Title, checkMoved.Title)
+
+	// With partial_not_enrolled=true and all events refused, the hub returns 200 with refused_events populated.
+	allRefusedBody := api.FederationIngestEventsRequestBody{
+		SchemaVersion: db.CurrentSchemaVersion(),
+		Events:        []api.FederationIngestEventEnvelope{evMoved},
+	}
+	resp, raw = envDoRaw(t, env, http.MethodPost, projectPath(source.ID)+"/federation/events:ingest?partial_not_enrolled=true", allRefusedBody, headers)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "%s", raw)
+	var allRefusedAck api.FederationIngestEventsBody
+	require.NoError(t, json.Unmarshal(raw, &allRefusedAck))
+	require.Zero(t, allRefusedAck.Accepted)
+	require.Zero(t, allRefusedAck.PushCursorEventID)
+	require.Len(t, allRefusedAck.RefusedEvents, 1)
+	require.Equal(t, evMoved.EventUID, allRefusedAck.RefusedEvents[0].EventUID)
+}

@@ -29,7 +29,7 @@ func TestListIssueContentPaginatesLiveIssues(t *testing.T) {
 	uids := []string{issues[0].UID, issues[1].UID, issues[2].UID}
 	// Soft-delete the middle issue: it must leave the feed so its content is
 	// never re-sent to the embedding endpoint while deleted.
-	_, _, _, err := d.SoftDeleteIssue(ctx, issues[1].ID, "x")
+	_, _, _, err := d.SoftDeleteIssue(ctx, issues[1].ID, "x", "")
 	require.NoError(t, err)
 
 	// An issue in a deleted project must not be listed.

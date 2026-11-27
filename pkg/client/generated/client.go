@@ -5520,11 +5520,16 @@ func (c *Client) PollFederationProjectEvents(ctx context.Context, options *PollF
 
 func (c *Client) IngestFederationProjectEvents(ctx context.Context, options *IngestFederationProjectEventsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*IngestFederationProjectEventsResponse, error) {
 	var err error
+
+	queryEncoding := map[string]runtime.QueryEncoding{
+		"partial_not_enrolled": {Style: "form", Explode: &[]bool{false}[0]},
+	}
 	reqParams := runtime.RequestOptionsParameters{
-		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/federation/events:ingest",
-		Method:      "POST",
-		Options:     options,
-		ContentType: "application/json",
+		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/federation/events:ingest",
+		Method:        "POST",
+		Options:       options,
+		ContentType:   "application/json",
+		QueryEncoding: queryEncoding,
 	}
 
 	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)

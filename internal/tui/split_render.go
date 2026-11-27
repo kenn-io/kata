@@ -49,6 +49,7 @@ func renderSplitListPane(m Model, paneW, paneH int) string {
 	}
 	chrome := m.chrome()
 	chrome.narrow = true
+	chrome.statusOnInfo = m.focus == focusList
 	body := m.list.ViewBody(innerW, innerH, chrome)
 	border := panelInactiveBorder
 	if m.focus == focusList {

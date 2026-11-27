@@ -256,10 +256,9 @@ renew it, and close only when the work is verified. Close each verified issue
 promptly with valid evidence and a substantive message. [Agent workflows](docs/workflows/agents.md) is the same
 contract in long form.
 
-On `main`, install the contract for Claude Code and Codex sessions that start
-inside a kata workspace on this machine. Setup selects whichever are installed.
-
-Not in the latest release yet.
+In Kata 0.24.0 and later, install the contract for Claude Code and Codex
+sessions that start inside a kata workspace on this machine. Setup selects
+whichever are installed:
 
 ```sh
 kata agent setup

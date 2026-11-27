@@ -463,7 +463,7 @@ func TestReadUIReferencesFiltersIssueUIDs(t *testing.T) {
 		ProjectID: firstProject.ID, Title: "Deleted selected issue", Author: "user-a",
 	})
 	require.NoError(t, err)
-	_, _, _, err = store.SoftDeleteIssue(ctx, deleted.ID, "user-a")
+	_, _, _, err = store.SoftDeleteIssue(ctx, deleted.ID, "user-a", "")
 	require.NoError(t, err)
 	archivedProject := createUIProject(t, store, "archived-project")
 	archived, _, err := store.CreateIssue(ctx, db.CreateIssueParams{

@@ -145,7 +145,7 @@ func TestProjectAccessCommittedPatchReleasedAfterConcurrentDelete(t *testing.T) 
 		f = projectAccessFixtureWithStorage(t, f, projectAccessReleaseStore{
 			Storage: store,
 			afterPatch: func(db.PatchIssueMetadataOut) {
-				_, _, _, err := store.SoftDeleteIssue(t.Context(), f.issue.ID, "admin")
+				_, _, _, err := store.SoftDeleteIssue(t.Context(), f.issue.ID, "admin", "")
 				require.NoError(t, err)
 			},
 		})

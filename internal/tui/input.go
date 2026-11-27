@@ -343,6 +343,7 @@ type inputState struct {
 	saving                 bool
 	initialFieldValues     []string
 	preFilter              ListFilter
+	preRanked              rankedSearch
 	preListSelection       listSelectionSnapshot
 	restoreSplitDetail     bool
 	preSplitDetail         *detailModel

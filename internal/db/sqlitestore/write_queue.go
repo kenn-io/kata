@@ -14,6 +14,16 @@ import (
 // In-process queue admission is bounded by the caller context instead.
 const sqliteBusyTimeout = 5 * time.Second
 
+// sqliteMaxOpenConns caps concurrent SQLite driver connections per Store.
+// Writes serialize through writeQueue, while a small retained pool lets WAL
+// readers and export snapshots run concurrently without letting startup or
+// background-worker bursts open and immediately close a dozen modernc handles
+// that each re-parse the schema under the allocator mutex.
+const (
+	sqliteMaxOpenConns = 4
+	sqliteMaxIdleConns = sqliteMaxOpenConns
+)
+
 // writeQueue admits one in-process SQLite writer at a time, in arrival order.
 //
 // SQLite's busy handler makes a blocked writer sleep and poll, so whichever
@@ -97,7 +107,10 @@ func openQueuedSQLite(dsn string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	return sql.OpenDB(queuedConnector{dsn: dsn, driver: drv, queue: newWriteQueue()}), nil
+	sdb := sql.OpenDB(queuedConnector{dsn: dsn, driver: drv, queue: newWriteQueue()})
+	sdb.SetMaxOpenConns(sqliteMaxOpenConns)
+	sdb.SetMaxIdleConns(sqliteMaxIdleConns)
+	return sdb, nil
 }
 
 // registeredSQLiteDriver returns the driver registered as "sqlite", keeping

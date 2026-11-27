@@ -31,7 +31,7 @@ func TestRelayOfflineRestoreArtifactDelivery(t *testing.T) {
 				durable, err := sender.store.(db.EmbeddingArtifactStorage).RetainEmbeddingArtifact(t.Context(), artifact)
 				require.NoError(t, err)
 				require.True(t, durable)
-				_, _, _, err = sender.store.SoftDeleteIssue(t.Context(), issue.ID, sender.account)
+				_, _, _, err = sender.store.SoftDeleteIssue(t.Context(), issue.ID, sender.account, "")
 				require.NoError(t, err)
 				_, _, changed, err := sender.store.RestoreIssue(t.Context(), issue.ID, sender.account)
 				require.NoError(t, err)

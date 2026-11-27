@@ -192,7 +192,7 @@ func RunLiveOnlyBackupPreservesSignedSoftDeletedPeer(t *testing.T, store db.Stor
 	require.NoError(t, store.ApplyUpstreamAttribution(ctx, pin, receipt))
 	_, err = store.LeaveFederationReplica(ctx, project.ID)
 	require.NoError(t, err)
-	_, _, changed, err := store.SoftDeleteIssue(ctx, peer.ID, "example-actor")
+	_, _, changed, err := store.SoftDeleteIssue(ctx, peer.ID, "example-actor", "")
 	require.NoError(t, err)
 	require.True(t, changed)
 

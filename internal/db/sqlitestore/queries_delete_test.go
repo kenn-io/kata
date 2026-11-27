@@ -15,7 +15,7 @@ func TestSoftDeleteIssue_SetsDeletedAtAndEmitsEvent(t *testing.T) {
 	t.Parallel()
 	d, ctx, _, issue := setupTestIssue(t)
 
-	updated, evt, changed, err := d.SoftDeleteIssue(ctx, issue.ID, "agent")
+	updated, evt, changed, err := d.SoftDeleteIssue(ctx, issue.ID, "agent", "")
 	require.NoError(t, err)
 	require.NotNil(t, evt)
 	assert.True(t, changed)
@@ -36,7 +36,7 @@ func TestSoftDeleteIssue_AlreadyDeletedIsNoOp(t *testing.T) {
 	t.Parallel()
 	d, ctx, _, issue := setupSoftDeletedIssue(t)
 
-	updated, evt, changed, err := d.SoftDeleteIssue(ctx, issue.ID, "agent")
+	updated, evt, changed, err := d.SoftDeleteIssue(ctx, issue.ID, "agent", "")
 	require.NoError(t, err)
 	assert.Nil(t, evt, "no-op should return nil event")
 	assert.False(t, changed)
@@ -47,7 +47,7 @@ func TestSoftDeleteIssue_UnknownIssueIsErrNotFound(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
 	ctx := t.Context()
-	_, _, _, err := d.SoftDeleteIssue(ctx, 9999, "agent")
+	_, _, _, err := d.SoftDeleteIssue(ctx, 9999, "agent", "")
 	assert.True(t, errors.Is(err, db.ErrNotFound))
 }
 
@@ -97,7 +97,7 @@ func TestSoftDeleteRestore_RoundTripVisibility(t *testing.T) {
 	assert.Equal(t, issue.ID, listed[0].ID)
 
 	// After soft-delete: hidden from default list.
-	_, _, _, err = d.SoftDeleteIssue(ctx, issue.ID, "agent")
+	_, _, _, err = d.SoftDeleteIssue(ctx, issue.ID, "agent", "")
 	require.NoError(t, err)
 	listed, err = d.ListIssues(ctx, db.ListIssuesParams{ProjectID: p.ID})
 	require.NoError(t, err)
@@ -149,7 +149,7 @@ func TestSoftDeleteIssue_ScopesByIssueID(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	updated, evt, changed, err := d.SoftDeleteIssue(ctx, target.ID, "agent")
+	updated, evt, changed, err := d.SoftDeleteIssue(ctx, target.ID, "agent", "")
 	require.NoError(t, err)
 	require.NotNil(t, evt)
 	assert.True(t, changed)

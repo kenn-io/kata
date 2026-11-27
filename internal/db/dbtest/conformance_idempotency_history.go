@@ -36,7 +36,7 @@ func checkHistoricalCloseReceipts(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return err
 	}
-	_, _, _, err = store.SoftDeleteIssue(ctx, moved.Issue.ID, "agent")
+	_, _, _, err = store.SoftDeleteIssue(ctx, moved.Issue.ID, "agent", "")
 	if err != nil {
 		return err
 	}

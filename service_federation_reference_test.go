@@ -314,7 +314,7 @@ func TestDirectPushWithProjectScopedActors(t *testing.T) {
 					Links: []db.InitialLink{{Type: "related", ToNumber: local.ID}},
 				})
 				require.NoError(t, err)
-				_, _, _, err = spoke.DB.SoftDeleteIssue(ctx, local.ID, "peer-member")
+				_, _, _, err = spoke.DB.SoftDeleteIssue(ctx, local.ID, "peer-member", "")
 				require.NoError(t, err)
 				require.NoError(t, syncProject(1))
 				deleted, err := hub.store.IssueByUID(ctx, peer.UID, db.IncludeDeletedYes)

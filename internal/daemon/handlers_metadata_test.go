@@ -93,7 +93,7 @@ func TestGetIssueMetadataRejectsInvisibleReferences(t *testing.T) {
 	t.Run("deleted issue", func(t *testing.T) {
 		env := testenv.New(t)
 		project, issue := seedProjectAndIssue(t, env)
-		_, _, _, err := env.DB.SoftDeleteIssue(t.Context(), issue.ID, "tester")
+		_, _, _, err := env.DB.SoftDeleteIssue(t.Context(), issue.ID, "tester", "")
 		require.NoError(t, err)
 		path := fmt.Sprintf("/api/v1/projects/%d/issues/%s/metadata", project.ID, issue.ShortID)
 		resp, raw := envDoRaw(t, env, http.MethodGet, path, nil, nil)

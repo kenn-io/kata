@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -279,4 +280,41 @@ func TestDaemonShutdownCoordinatorSkipsHookShutdownWhenHTTPRemainsUnjoined(t *te
 		t.Fatal("hook shutdown must not seal the queue while an HTTP producer remains unjoined")
 	default:
 	}
+}
+
+func TestDeferredDaemonWorkerGroup(t *testing.T) {
+	t.Run("holds_workers_until_start", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			group := newDaemonWorkerGroup()
+			group.Hold()
+			var ran atomic.Int32
+			require.True(t, group.Go(func() { ran.Add(1) }))
+			require.True(t, group.Go(func() { ran.Add(1) }))
+			synctest.Wait()
+			require.Zero(t, ran.Load(), "queued workers must not start before Start is called")
+
+			group.Start()
+			synctest.Wait()
+			require.Equal(t, int32(2), ran.Load())
+
+			require.True(t, group.Go(func() { ran.Add(1) }))
+			synctest.Wait()
+			require.Equal(t, int32(3), ran.Load(), "workers added after Start must run immediately")
+			require.True(t, group.Wait(t.Context()))
+		})
+	})
+
+	t.Run("drops_queued_workers_on_early_wait", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			group := newDaemonWorkerGroup()
+			group.Hold()
+			var ran atomic.Int32
+			require.True(t, group.Go(func() { ran.Add(1) }))
+			require.True(t, group.Wait(t.Context()))
+			group.Start()
+			synctest.Wait()
+			require.Zero(t, ran.Load(), "workers queued before an early shutdown must never start")
+			require.False(t, group.Go(func() { ran.Add(1) }))
+		})
+	})
 }
