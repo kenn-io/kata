@@ -6,7 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -413,4 +415,38 @@ func TestEventsFederatedActorDisplay(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, out.String(), actor)
 	})
+}
+
+func TestEventsTailBusyKeepsReconnecting(t *testing.T) {
+	var calls atomic.Int32
+	connected := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) <= 4 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(429)
+			_, _ = w.Write([]byte("Rate exceeded."))
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(200)
+		w.(http.Flusher).Flush()
+		connected <- struct{}{}
+		<-r.Context().Done()
+	}))
+	t.Cleanup(server.Close)
+	resetFlags(t)
+	ctx, cancel := context.WithTimeout(contextWithBaseURL(t.Context(), server.URL), 3*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	started := time.Now()
+	go func() { _, _, err := executeRootCapture(t, ctx, "events", "--tail", "--project-id", "1"); done <- err }()
+	select {
+	case <-connected:
+		assert.Less(t, time.Since(started), tailBackoffStart/2)
+		cancel()
+	case <-ctx.Done():
+		t.Error("stream did not reconnect after busy retries")
+	}
+	err := <-done
+	assert.NotErrorIs(t, err, errTerminalHTTP)
 }

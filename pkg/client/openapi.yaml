@@ -7613,7 +7613,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.72.0
+  version: 0.73.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:

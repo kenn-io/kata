@@ -151,6 +151,15 @@ func (r *daemonRestart) exec(ctx context.Context) error {
 	return nil
 }
 
+// reportShutdownFailure reports a daemon shutdown error to the caller waiting
+// on an already-accepted restart request before re-execution was skipped.
+func (r *daemonRestart) reportShutdownFailure(err error) {
+	if r == nil || err == nil || !r.requested.Load() || r.reply == "" {
+		return
+	}
+	writeRestartFailure(r.dir, r.reply, fmt.Errorf("shutdown before restart: %w", err))
+}
+
 // metadata advertises restart support and the request this daemon was started
 // for. A daemon without an installed executable says so, which distinguishes
 // it from an older release that cannot accept executable requests.

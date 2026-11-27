@@ -153,7 +153,7 @@ func (f *cronForwardFixture) put(t *testing.T, uid, expected string) (*http.Resp
 }
 
 func TestCronSpokeForwardRefusals(t *testing.T) {
-	for _, kind := range []string{"disabled", "push-disabled", "relay", "no-credentials", "credential-target", "credential-project", "unavailable", "old-hub", "revoked-enrollment", "push-failure", "changed-binding", "busy"} {
+	for _, kind := range []string{"disabled", "push-disabled", "relay", "no-credentials", "credential-target", "credential-project", "unavailable", "old-hub", "hub-busy", "revoked-enrollment", "push-failure", "push-busy", "changed-binding", "busy"} {
 		t.Run(kind, func(t *testing.T) {
 			var release func()
 			f := newCronForwardFixture(t, func(f *cronForwardFixture, cfg *daemon.ServerConfig) {
@@ -180,9 +180,15 @@ func TestCronSpokeForwardRefusals(t *testing.T) {
 					cfg.FederationPushPending = nil
 				case "revoked-enrollment":
 					require.NoError(t, f.hub.DB.RevokeFederationEnrollment(t.Context(), f.enrollmentID))
-				case "old-hub":
+				case "old-hub", "hub-busy":
 					endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						require.Equal(t, http.MethodGet, r.Method)
+						if kind == "hub-busy" {
+							w.Header().Set("Retry-After", "2")
+							w.WriteHeader(http.StatusTooManyRequests)
+							_, _ = w.Write([]byte("Rate exceeded."))
+							return
+						}
 						_, _ = w.Write([]byte(`{}`))
 					}))
 					t.Cleanup(endpoint.Close)
@@ -194,6 +200,10 @@ func TestCronSpokeForwardRefusals(t *testing.T) {
 					cfg.FederationPushPending = func(context.Context, db.FederationBinding, config.FederationCredential) error {
 						return errors.New("push failed")
 					}
+				case "push-busy":
+					cfg.FederationPushPending = func(context.Context, db.FederationBinding, config.FederationCredential) error {
+						return fmt.Errorf("push: %w", &federation.HubStatusError{StatusCode: http.StatusTooManyRequests, Body: `{"error":{"code":"admission_limited","message":"busy"}}`, RetryAfter: 5 * time.Second})
+					}
 				case "changed-binding":
 					cfg.FederationPushPending = func(ctx context.Context, b db.FederationBinding, _ config.FederationCredential) error {
 						b.HubURL = "https://other.example"
@@ -204,7 +214,7 @@ func TestCronSpokeForwardRefusals(t *testing.T) {
 					release, err = federationcoord.BeginRebind(t.Context(), federationcoord.Key(f.spoke.DB.InstanceUID(), f.sp.ID), f.spoke.DB, f.sp.ID)
 					require.NoError(t, err)
 				}
-				if kind == "disabled" || kind == "push-disabled" || kind == "old-hub" {
+				if kind == "disabled" || kind == "push-disabled" || kind == "old-hub" || kind == "hub-busy" {
 					_, err = f.spoke.DB.UpsertFederationBinding(t.Context(), b)
 					require.NoError(t, err)
 				}
@@ -219,6 +229,10 @@ func TestCronSpokeForwardRefusals(t *testing.T) {
 			}
 			if kind == "revoked-enrollment" {
 				want = 403
+			}
+			if kind == "hub-busy" || kind == "push-busy" {
+				want = http.StatusTooManyRequests
+				assertAPIError(t, response.StatusCode, raw, want, "server_busy")
 			}
 			require.Equalf(t, want, response.StatusCode, "%s", raw)
 			require.NotContains(t, string(raw), f.credential.Token)

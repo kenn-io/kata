@@ -409,6 +409,14 @@ func ensureSpokeDaemonContext(ctx context.Context) (context.Context, string, err
 }
 
 func federationSpokeHTTPClient(ctx context.Context, spokeURL string) (*http.Client, error) {
+	hc, err := federationSpokeHTTPClientForTarget(ctx, spokeURL)
+	if err != nil {
+		return nil, err
+	}
+	return retryingDaemonHTTPClient(spokeURL, hc, false)
+}
+
+func federationSpokeHTTPClientForTarget(ctx context.Context, spokeURL string) (*http.Client, error) {
 	if resolved, ok := ctx.Value(resolvedDaemonContextKey{}).(clientpkg.ResolvedDaemon); ok && resolved.BaseURL == spokeURL {
 		return clientpkg.NewHTTPClientForResolved(ctx, resolved, clientpkg.Opts{Timeout: envHTTPTimeout(defaultHTTPTimeout)})
 	}
@@ -1463,11 +1471,16 @@ type federationJoinBundle struct {
 
 var fetchFederationJoinMetadata = func(ctx context.Context, bundle federationJoinBundle) (api.ProjectFederationBody, error) {
 	client, err := hubclient.NewClient(ctx, bundle.HubURL, bundle.Token,
-		clientpkg.Opts{Timeout: envHTTPTimeout(defaultHTTPTimeout), AllowInsecure: bundle.AllowInsecure, FederationSigning: bundle.Signing})
+		clientpkg.Opts{Timeout: envHTTPTimeout(BusyRetryBudget), AllowInsecure: bundle.AllowInsecure, FederationSigning: bundle.Signing})
 	if err != nil {
 		return api.ProjectFederationBody{}, err
 	}
-	return client.ProjectFederation(ctx, bundle.HubProjectID)
+	configureBusy(client.HTTPClient(), envHTTPTimeout(BusyRetryBudget), false)
+	metadata, err := client.ProjectFederation(ctx, bundle.HubProjectID)
+	if status, ok := errors.AsType[*hubclient.HubStatusError](err); ok && status.StatusCode == http.StatusTooManyRequests {
+		return api.ProjectFederationBody{}, apiErrFromBody(status.StatusCode, []byte(status.Body))
+	}
+	return metadata, err
 }
 
 func hydrateFederationJoinMetadata(ctx context.Context, bundle *federationJoinBundle) error {

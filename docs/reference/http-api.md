@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-24
+last_edited: 2026-11-26
 ---
 
 # HTTP API schema
@@ -80,6 +80,10 @@ structured details. When a `kata` command can trigger the error, the hint names
 CLI commands and flags, such as `--force`, rather than request fields. Hints for
 errors that only direct API calls can trigger may name request fields. In
 scripts, branch on `code` instead of matching `message` or `hint`.
+
+HTTP 429 with code `server_busy` means an upstream hub refused the request
+because it is busy. The message names the hub. A `Retry-After` header, when
+present, states when to retry.
 
 ```json
 {"error":{"code":"project_not_initialized","message":"no .kata.toml ancestor and no git ancestor","hint":"run \"kata init --project <name>\" in the workspace root, or pass --project <name>"}}
@@ -373,7 +377,8 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
-| `0.72.0` | Direct-spoke ingest (`POST /api/v1/projects/{project_id}/federation/events:ingest`) accepts optional `partial_not_enrolled=true` and returns optional `refused_events` for events touching issues in unenrolled projects (plus intra-batch dependents) while accepting unrelated events in the same batch. |
+| `0.73.0` | Direct-spoke ingest (`POST /api/v1/projects/{project_id}/federation/events:ingest`) accepts optional `partial_not_enrolled=true` and returns optional `refused_events` for events touching issues in unenrolled projects (plus intra-batch dependents) while accepting unrelated events in the same batch. |
+| `0.72.0` | Forwarded hub requests report busy refusals as `429 server_busy` and preserve `Retry-After` hints. |
 | `0.71.0` | Federation event watches hold one request for many projects; event polls advertise `X-Kata-Federation-Watch-Max`. |
 | `0.70.0` | Added `PATCH /api/v1/projects/{project_id}/issues/{ref}/labels`, which applies `add` and `remove` label lists in one transaction and answers with the issue's resulting `labels`. |
 | `0.69.0` | Close responses can include a `parent_ready` issue reference. |

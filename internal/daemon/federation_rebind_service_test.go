@@ -1436,3 +1436,25 @@ func cancelPrepareWhileDraining(
 	_, err = endOperation(t.Context(), 0)
 	require.NoError(t, err)
 }
+
+func TestRebindFederationReplicaBusyHub(t *testing.T) {
+	store, project, _ := prepareFederationRebind(t, rebindSourceURL)
+	credentials := newReplicaCredentialStore()
+	originalCredential := rebindCredential(rebindSourceURL, false, false)
+	credentials.put(project.UID, originalCredential)
+	hub := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "2")
+		w.WriteHeader(429)
+		_, _ = w.Write([]byte("Rate exceeded."))
+	}))
+	t.Cleanup(hub.Close)
+	// Top-level tests run serially; parallel tests wait until this test and its
+	// server cleanup finish before they can use the default transport.
+	previousTransport := http.DefaultTransport
+	http.DefaultTransport = hub.Client().Transport
+	t.Cleanup(func() { http.DefaultTransport = previousTransport })
+	server := startTestServer(t, daemon.ServerConfig{DB: store, FederationCredentials: credentials, FederationCatalog: []config.CatalogDaemonConfig{{Name: "primary-hub", URL: hub.URL, AllowInsecure: true}}})
+	path := fmt.Sprintf("/api/v1/federation/replicas/%d/actions/rebind", project.ID)
+	resp, raw := doReq(t, server, http.MethodPost, path, map[string]any{"hub_catalog": "primary-hub"}, nil)
+	assertAPIError(t, resp.StatusCode, raw, 429, "server_busy")
+}

@@ -314,6 +314,9 @@ func runEventsTail(cmd *cobra.Command, opts eventsTailOptions) error {
 		}
 		res, sErr := streamOnce(ctx, apiClient, query, cursor, out, mode)
 		streamErr = sErr
+		if busy, ok := errors.AsType[*BusyStreamError](sErr); ok {
+			return struct{}{}, backoff.RetryAfter(busy.RetryAfter, sErr)
+		}
 		if errors.Is(sErr, errTerminalHTTP) {
 			return struct{}{}, backoff.Permanent(sErr)
 		}
@@ -518,3 +521,11 @@ func tailQuery(ctx context.Context, baseURL string, opts eventsTailOptions) (*ge
 	query.ProjectID = &pid
 	return query, nil
 }
+
+// BusyStreamError lets a tail reconnect after a busy response.
+type BusyStreamError struct {
+	Message    string
+	RetryAfter time.Duration
+}
+
+func (e *BusyStreamError) Error() string { return e.Message }

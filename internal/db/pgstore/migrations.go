@@ -92,6 +92,9 @@ var federationCursorFenceMigrationSQL string
 //go:embed migrations/000055_federation_local_event_fence.up.sql
 var federationLocalEventFenceMigrationSQL string
 
+//go:embed migrations/000056_issue_metadata_index.up.sql
+var issueMetadataIndexMigrationSQL string
+
 // Migration is one immutable Postgres schema transition. Assets form an exact
 // version chain; callers applying them externally must stamp ToVersion only
 // after SQL succeeds in the same transaction.
@@ -158,6 +161,7 @@ var migrationAssets = []Migration{
 	{FromVersion: 52, ToVersion: 53, Name: "000053_event_project_moves_index.up.sql", SQL: eventProjectMovesIndexMigrationSQL},
 	{FromVersion: 53, ToVersion: 54, Name: "000054_federation_cursor_fence.up.sql", SQL: federationCursorFenceMigrationSQL},
 	{FromVersion: 54, ToVersion: 55, Name: "000055_federation_local_event_fence.up.sql", SQL: federationLocalEventFenceMigrationSQL},
+	{FromVersion: 55, ToVersion: 56, Name: "000056_issue_metadata_index.up.sql", SQL: issueMetadataIndexMigrationSQL},
 }
 
 // Migrations returns forward migrations from previously released Postgres

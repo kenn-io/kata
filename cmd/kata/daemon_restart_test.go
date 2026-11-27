@@ -331,3 +331,27 @@ func TestDaemonRestartWatch_RefusalReleasesIdleHold(t *testing.T) {
 		<-done
 	})
 }
+
+func TestDaemonRestart_ReportsShutdownFailureToWaitingCaller(t *testing.T) {
+	dir := t.TempDir()
+	reply := filepath.Join(dir, "restart-reply-caller")
+	require.NoError(t, os.WriteFile(reply, nil, 0o600))
+	identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
+	require.True(t, ok)
+	restart := &daemonRestart{dir: dir, reply: filepath.Base(reply)}
+	restart.requested.Store(true)
+
+	synctest.Test(t, func(t *testing.T) {
+		previous := kitdaemon.RuntimeRecord{PID: os.Getpid(), ProcessIdentityV2: identity, StartedAt: time.Now()}
+		result := make(chan error, 1)
+		go func() {
+			_, err := waitForDaemonReplacement(t.Context(), kitdaemon.RuntimeStore{Dir: dir}, previous, reply)
+			result <- err
+		}()
+		synctest.Wait()
+
+		restart.reportShutdownFailure(errors.New("background workers did not stop within 25s"))
+
+		require.ErrorContains(t, <-result, "background workers did not stop within 25s")
+	})
+}

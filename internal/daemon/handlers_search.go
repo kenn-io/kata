@@ -137,6 +137,9 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 			res, err = hybridSearch(ctx, cfg.DB, cfg.VectorIndex, cfg.Embedder, params)
 		}
 		if err != nil {
+			if busy := forwardedHubBusy(err); busy != nil {
+				return nil, busy
+			}
 			if me, ok := errors.AsType[*modeError](err); ok {
 				kind := "validation"
 				if me.Status() == 503 {

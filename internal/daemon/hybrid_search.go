@@ -136,6 +136,9 @@ func hybridSearch(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 	// to lexical, labeled (keeps "silent-but-labeled" honest).
 	if vecErr != nil {
 		if strict {
+			if busy := forwardedHubBusy(vecErr); busy != nil {
+				return hybridResult{}, busy
+			}
 			status := 503
 			if _, ok := errors.AsType[*embedding.CredentialError](vecErr); ok {
 				status = 400
