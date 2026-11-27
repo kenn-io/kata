@@ -291,6 +291,39 @@ func (s *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCu
 	})
 }
 
+// AcknowledgeFederationPushEvents records accepted local-origin events out of
+// order and folds the monotonic push cursor through any consecutive
+// acknowledged prefix without skipping earlier unresolved events.
+func (s *Store) AcknowledgeFederationPushEvents(ctx context.Context, projectID int64, eventUIDs []string) error {
+	return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, `UPDATE federation_bindings SET
+last_sync_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+WHERE project_id=$1`, projectID)
+		if err != nil {
+			return mapSQLError(err, nil)
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return mapSQLError(err, nil)
+		}
+		if count == 0 {
+			return db.ErrNotFound
+		}
+		if err := db.RecordFederationAcknowledgedEvents(ctx, tx, projectID, eventUIDs); err != nil {
+			return mapSQLError(err, nil)
+		}
+		return mapSQLError(db.FoldFederationAcknowledgedEvents(ctx, tx, projectID, s.InstanceUID()), nil)
+	})
+}
+
+// IsFederationEventAcknowledged reports whether an event in projectID is
+// already accepted on the hub.
+func (s *Store) IsFederationEventAcknowledged(ctx context.Context, projectID int64, eventUID string) (bool, error) {
+	acknowledged, err := db.IsFederationEventAcknowledged(ctx, s, projectID, eventUID, s.InstanceUID())
+	return acknowledged, mapSQLError(err, nil)
+}
+
 // AdvanceFederationPushCursor advances the acknowledged local event id monotonically.
 func (s *Store) AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error {
 	return s.updateFederationCursor(ctx, projectID, nextCursor, true)

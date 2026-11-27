@@ -7,7 +7,6 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 
 	"go.kenn.io/kata/internal/db"
@@ -354,8 +353,58 @@ func (d *Store) ingestFederationEventsOnce(
 	for _, winner := range repeatedWinners {
 		freshEvents = append(freshEvents, winner.event)
 	}
-	if err := d.authorizeFederationCurrentIssuesTx(ctx, tx, p, freshEvents, moveSnapshots); err != nil {
+	allowPartial := p.AllowPartialNotEnrolled &&
+		p.AdoptionBaseline == "" &&
+		!adoptionSnapshotAuthorState.allowAuthorPreservation &&
+		!adoptionSnapshotAuthorState.overrideSnapshotAuthors &&
+		!adoptionSnapshotAuthorState.duplicateOnly
+	refused, err := d.authorizeFederationCurrentIssuesTx(ctx, tx, p, freshEvents, moveSnapshots, allowPartial)
+	if err != nil {
 		return db.FederationIngestResult{}, db.FinishTransactionRollback(ctx, err, tx.Rollback())
+	}
+	if len(refused) > 0 {
+		for _, in := range prepared {
+			if in.Duplicate {
+				continue
+			}
+			if err := cronValidator.Validate(ctx, p.ProjectID, in.Event); err != nil {
+				return db.FederationIngestResult{}, err
+			}
+		}
+		result.RefusedEvents, result.PushCursorEventID = db.SummarizeRefusedFederationIngestEvents(p.Events, refused)
+		filteredPrepared := make([]preparedFederationIngestEvent, 0, len(prepared))
+		filteredFresh := make([]db.RemoteEvent, 0, len(freshEvents))
+		result.RequiredEventFeatures = required
+		for _, in := range prepared {
+			if _, isRefused := refused[in.Event.EventUID]; isRefused {
+				if in.Duplicate {
+					result.Duplicates--
+				}
+				continue
+			}
+			filteredPrepared = append(filteredPrepared, in)
+			if !in.Duplicate {
+				filteredFresh = append(filteredFresh, in.Event)
+			}
+			feature, featureErr := db.PayloadRequiredFeatures(in.Event.Type, string(in.Event.Payload))
+			if featureErr != nil {
+				return db.FederationIngestResult{}, featureErr
+			}
+			if feature != "" {
+				result.RequiredEventFeatures = db.MergeEventFeatures(result.RequiredEventFeatures, feature)
+			}
+		}
+		prepared = filteredPrepared
+		if len(filteredFresh) > 0 {
+			cronValidator = db.NewCronReplayValidator(tx, false)
+			if err := cronValidator.PrepareEvents(ctx, p.ProjectID, filteredFresh); err != nil {
+				return db.FederationIngestResult{}, err
+			}
+			materialization, err = prepareFederationMaterializationTx(ctx, tx, p.ProjectID, prepared)
+			if err != nil {
+				return db.FederationIngestResult{}, err
+			}
+		}
 	}
 	for _, in := range prepared {
 		if in.Duplicate {
@@ -1574,111 +1623,23 @@ func (d *Store) authorizeFederationMoveTx(ctx context.Context, tx *sql.Tx, p db.
 // Fresh events retain their authored envelope, but authorization follows every
 // affected issue's current owner. Duplicates already passed this acceptance
 // boundary and must not acquire new authority merely to acknowledge a retry.
-func (d *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.Tx, p db.FederationIngestParams, events []db.RemoteEvent, moveSnapshots *db.FederationMoveSnapshotValidator) error {
-	// Report graph validation only after checking current project authority.
-	parentRemovals, err := db.DirectParentRemovals(ctx, tx, events, p.AuthorizeReference != nil)
-	staged := map[string]int64{}
-	type checkedProject struct {
-		id        int64
-		reference bool
-	}
-	checked := map[checkedProject]bool{}
-	for _, event := range events {
-		referenceEvent, err := moveSnapshots.UnprovenReferences(ctx, event)
-		if err != nil {
-			return err
-		}
-		var primary string
-		var refs []string
-		switch {
-		case strings.HasPrefix(event.Type, "issue."):
-			var err error
-			primary = db.EventIssueUID(event.IssueUID)
-			refs, err = payloadReferencedIssueUIDs(referenceEvent, db.PayloadMap(referenceEvent.Payload))
-			if err != nil {
-				return err
-			}
-		case event.Type == "cron.run.observed" || event.Type == "cron.run.snapshot":
-			// A run's UID identifies the run, not its optional issue reference.
-			var run db.CronRunObservation
-			if err := json.Unmarshal(event.Payload, &run); err != nil {
-				return err
-			}
-			if run.IssueUID != nil {
-				primary = *run.IssueUID
-			}
-		default:
-			continue
-		}
-		if event.Type == "issue.moved" {
-			replyIssues, err := db.FederationMoveSnapshotReplyIssues(ctx, tx, referenceEvent)
-			if err != nil {
-				return err
-			}
-			refs = append(refs, replyIssues...)
-		}
-		peers, err := db.DirectLinkPeers(db.FoldEvent{Type: event.Type, UID: event.EventUID, IssueUID: db.EventIssueUID(event.IssueUID), Payload: event.Payload})
-		if err != nil {
-			return err
-		}
-		explicitRefs := refs
-		if p.AuthorizeReference != nil {
-			for _, previous := range parentRemovals[event.EventUID] {
-				refs = append(refs, previous)
-				delete(peers, previous)
-			}
-		}
-		refs = append([]string{primary}, refs...)
-		for _, issueUID := range refs {
-			if issueUID == "" {
-				continue
-			}
-			current, known := staged[issueUID]
-			if !known {
-				err := tx.QueryRowContext(ctx, `SELECT project_id FROM issues WHERE uid=$1`, issueUID).Scan(&current)
-				if errors.Is(err, sql.ErrNoRows) {
-					// Existing validation permits deferred links and fresh creation.
-					continue
-				}
-				if err != nil {
-					return err
-				}
-				staged[issueUID] = current
-			}
-			reference := issueUID != primary && peers[issueUID]
-			key := checkedProject{current, reference}
-			if current == p.ProjectID || checked[key] {
-				continue
-			}
-			project, err := scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id=$1 AND deleted_at IS NULL`, current))
-			if err != nil {
-				return err
-			}
-			if err := d.authorizeFederationAffectedProjectTx(ctx, tx, p, current, project.UID, reference); err != nil {
-				if errors.Is(err, db.ErrFederationMoveSourceUnauthorized) {
-					if issueUID != primary && !slices.Contains(explicitRefs, issueUID) {
-						issueUID = ""
-					}
-					return &db.FederationProjectNotEnrolledError{IssueUID: issueUID, Err: err}
-				}
-				return err
-			}
-			checked[key] = true
-		}
-		switch event.Type {
-		case "issue.created", "issue.snapshot":
-			if _, exists := staged[primary]; !exists {
-				staged[primary] = p.ProjectID
-			}
-		case "issue.moved":
-			_, to, err := db.FederationMoveProjects(ctx, tx, p.ProjectID, event)
-			if err != nil {
-				return err
-			}
-			staged[primary] = to
-		}
-	}
-	return err
+func (d *Store) authorizeFederationCurrentIssuesTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	p db.FederationIngestParams,
+	events []db.RemoteEvent,
+	moveSnapshots *db.FederationMoveSnapshotValidator,
+	allowPartial bool,
+) (map[string]*db.FederationProjectNotEnrolledError, error) {
+	return db.AuthorizeFederationCurrentIssuesTx(
+		ctx, tx, p, events, moveSnapshots, allowPartial,
+		func(event db.RemoteEvent) ([]string, error) {
+			return payloadReferencedIssueUIDs(event, db.PayloadMap(event.Payload))
+		},
+		func(ctx context.Context, projectID int64, projectUID string, reference bool) error {
+			return d.authorizeFederationAffectedProjectTx(ctx, tx, p, projectID, projectUID, reference)
+		},
+	)
 }
 
 // A supplemental project uses the route grant only when that grant covers it.

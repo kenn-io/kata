@@ -502,6 +502,16 @@ type Storage interface {
 	// transaction. It changes nothing and returns ErrFederationPushAwaitsPull
 	// while the home has no other history of one of those issues.
 	AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string) error
+	// AcknowledgeFederationPushEvents records specific local-origin events as
+	// accepted by the hub and advances the monotonic push cursor only through
+	// consecutive acknowledged events, keeping any earlier unresolved events
+	// pending.
+	AcknowledgeFederationPushEvents(ctx context.Context, projectID int64, eventUIDs []string) error
+	// IsFederationEventAcknowledged reports whether an event in projectID is
+	// already accepted on the hub (through the push cursor, an out-of-order
+	// acknowledgement marker, or a pulled remote event), excluding locally
+	// retained events and unpushed former-instance events.
+	IsFederationEventAcknowledged(ctx context.Context, projectID int64, eventUID string) (bool, error)
 	EnableFederationPush(ctx context.Context, projectID int64, cursor int64) (FederationBinding, error)
 	// DisableFederationPushWhenSettled turns push off for a direct spoke
 	// binding in the same transaction that proves no local-origin event above

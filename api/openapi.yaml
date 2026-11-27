@@ -2683,6 +2683,10 @@ components:
         push_cursor_event_id:
           format: int64
           type: integer
+        refused_events:
+          items:
+            $ref: "#/components/schemas/FederationIngestRefusedEvent"
+          type: array
         superseded_event_uids:
           items:
             type: string
@@ -2714,6 +2718,26 @@ components:
           type: integer
       required:
         - schema_version
+      type: object
+    FederationIngestRefusedEvent:
+      additionalProperties: true
+      properties:
+        code:
+          type: string
+        event_id:
+          format: int64
+          type: integer
+        event_uid:
+          type: string
+        issue_uid:
+          type: string
+        message:
+          type: string
+      required:
+        - event_id
+        - event_uid
+        - code
+        - message
       type: object
     FederationJoinInstructions:
       additionalProperties: true
@@ -7819,7 +7843,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.73.0
+  version: 0.74.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:
@@ -10261,6 +10285,13 @@ paths:
           name: Authorization
           schema:
             type: string
+        - description: When true on a non-adoption push batch, accept authorized events and return refused_events for events touching issues in unenrolled projects instead of rejecting the entire batch with 403.
+          explode: false
+          in: query
+          name: partial_not_enrolled
+          schema:
+            description: When true on a non-adoption push batch, accept authorized events and return refused_events for events touching issues in unenrolled projects instead of rejecting the entire batch with 403.
+            type: boolean
       requestBody:
         content:
           application/json:

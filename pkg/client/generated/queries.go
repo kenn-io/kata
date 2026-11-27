@@ -256,6 +256,11 @@ type PollFederationProjectEventsQuery struct {
 	Wait *int64 `json:"wait,omitempty"`
 }
 
+type IngestFederationProjectEventsQuery struct {
+	// PartialNotEnrolled When true on a non-adoption push batch, accept authorized events and return refused_events for events touching issues in unenrolled projects instead of rejecting the entire batch with 403.
+	PartialNotEnrolled *bool `json:"partial_not_enrolled,omitempty"`
+}
+
 type WatchFederationProjectEventsQuery struct {
 	// Wait Seconds the hub may hold the watch while no named project has events after its cursor. The hub caps it at X-Kata-Federation-Poll-Wait-Max and answers at once when it cannot hold the request.
 	Wait *int64 `json:"wait,omitempty"`

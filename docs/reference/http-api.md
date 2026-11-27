@@ -385,6 +385,7 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
+| `0.74.0` | Direct-spoke ingest (`POST /api/v1/projects/{project_id}/federation/events:ingest`) accepts optional `partial_not_enrolled=true` and returns optional `refused_events` for events touching issues in unenrolled projects (plus intra-batch dependents) while accepting unrelated events in the same batch. |
 | `0.73.0` | `POST /api/v1/projects/{project_id}/issues/{ref}/actions/delete` records its `reason` on the `issue.soft_deleted` event. |
 | `0.72.0` | Forwarded hub requests report busy refusals as `429 server_busy` and preserve `Retry-After` hints. |
 | `0.71.0` | Federation event watches hold one request for many projects; event polls advertise `X-Kata-Federation-Watch-Max`. |

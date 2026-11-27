@@ -2378,15 +2378,22 @@ that carry a different hash, materializes the batch, and returns the advanced
 push cursor.
 
 An event can touch an issue that the hub now holds in a project the spoke has
-not joined, for example after another peer moved the issue. When that happens,
-the hub rejects the batch with `403 federation_project_not_enrolled`. The error
+not joined, for example after another peer moved the issue. Direct spokes send
+`partial_not_enrolled=true` on ordinary pushes so the hub accepts and
+materializes unrelated events in the same batch while withholding only the
+offending events (and intra-batch dependents) in `refused_events`. Each refusal
 names the issue without naming its current project, because the spoke has not
 joined that project. `auth_invalid` is reserved for a failure of the spoke's
-own credential. The spoke still pulls, so hub changes keep arriving and the
-move takes the issue out of the joined project. The spoke's other unsent
-changes in that project wait behind the refused event. To send them, ask the
-hub operator which project holds the issue, join it with push access and the
-same actor, and sync again.
+own credential. The spoke records the accepted events out of order without
+advancing its push cursor past the refused events, surfaces the
+`federation_project_not_enrolled` refusal in sync status, and still pulls so
+hub changes keep arriving and the move takes the issue out of the joined
+project. Unrelated local edits continue pushing on subsequent syncs, while the
+refused events stay held until you join the issue's current project with push
+access and the same actor (or the issue moves back to a joined project) and
+sync again. Older hubs that ignore `partial_not_enrolled=true` reject the batch
+with `403 federation_project_not_enrolled`; the spoke still pulls and surfaces
+the refusal.
 
 On SQLite, ordinary issue pushes fold the histories of touched issues and
 reconcile only their projection rows. Cron events add the project's complete

@@ -136,6 +136,8 @@ var alreadyImplemented = map[string]bool{
 	"AdvanceFederationPullCursor":          true, // federation_control.go
 	"AdvanceFederationPushCursor":          true, // federation_control.go
 	"AcknowledgeFederationPush":            true, // federation_control.go
+	"AcknowledgeFederationPushEvents":      true, // federation_control.go
+	"IsFederationEventAcknowledged":        true, // federation_control.go
 	"AuthorizeFederationToken":             true, // federation_control.go
 	"ClearFederationSyncError":             true, // federation_control.go
 	"CountActiveFederationEnrollments":     true, // federation_control.go

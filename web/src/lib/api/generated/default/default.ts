@@ -143,6 +143,7 @@ import type {
   ImportBatchResult,
   ImportIssuesPathParameters,
   ImportRequestBody,
+  IngestFederationProjectEventsParams,
   IngestFederationProjectEventsPathParameters,
   InitProjectRequestBody,
   InitProjectResponseBody,
@@ -3832,15 +3833,29 @@ export type ingestFederationProjectEventsResponse =
   | ingestFederationProjectEventsResponseSuccess
   | ingestFederationProjectEventsResponseError
 
-export const getIngestFederationProjectEventsUrl = ({
-  projectId,
-}: IngestFederationProjectEventsPathParameters) => {
-  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/events:ingest`
+export const getIngestFederationProjectEventsUrl = (
+  { projectId }: IngestFederationProjectEventsPathParameters,
+  params?: IngestFederationProjectEventsParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/events:ingest?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/events:ingest`
 }
 
 export const ingestFederationProjectEvents = async (
   { projectId }: IngestFederationProjectEventsPathParameters,
   federationIngestEventsRequestBody: FederationIngestEventsRequestBody,
+  params?: IngestFederationProjectEventsParams,
   options?: Parameters<typeof orvalFetch>[1],
 ): Promise<ingestFederationProjectEventsResponse> => {
   const getHeaders = (
@@ -3852,7 +3867,7 @@ export const ingestFederationProjectEvents = async (
     return h
   }
   return orvalFetch<ingestFederationProjectEventsResponse>(
-    getIngestFederationProjectEventsUrl({ projectId }),
+    getIngestFederationProjectEventsUrl({ projectId }, params),
     {
       ...options,
       method: 'POST',
