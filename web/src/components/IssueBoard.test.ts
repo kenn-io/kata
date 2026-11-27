@@ -558,9 +558,15 @@ describe('IssueBoard Done paging', () => {
   )
 
   it('shows only the newest Done cards until asked for more', async () => {
+    // Given oldest first, as an older daemon without closed paging sends them.
     renderBoard({ issues: closed })
 
-    expect(within(column('Done')).getAllByRole('listitem')).toHaveLength(30)
+    const shown = within(column('Done'))
+      .getAllByRole('listitem')
+      .map((card) => card.querySelector('.card-title')?.textContent)
+    expect(shown).toHaveLength(30)
+    expect(shown[0]).toBe('Closed 34')
+    expect(shown).not.toContain('Closed 4')
     await fireEvent.click(screen.getByRole('button', { name: 'Show 5 more' }))
     expect(within(column('Done')).getAllByRole('listitem')).toHaveLength(35)
   })
