@@ -1223,7 +1223,6 @@ type spokeRefusedCommentChecker struct {
 	acceptedComments   map[string]bool
 	hubCommentsByIssue map[string]map[string]bool
 	bindingsByProject  map[int64]*db.FederationBinding
-	hasKeptByProject   map[int64]bool
 }
 
 func newSpokeRefusedCommentChecker(store db.Storage, hubBaseURL string) *spokeRefusedCommentChecker {
@@ -1234,7 +1233,6 @@ func newSpokeRefusedCommentChecker(store db.Storage, hubBaseURL string) *spokeRe
 		acceptedComments:   map[string]bool{},
 		hubCommentsByIssue: map[string]map[string]bool{},
 		bindingsByProject:  map[int64]*db.FederationBinding{},
-		hasKeptByProject:   map[int64]bool{},
 	}
 }
 
@@ -1286,7 +1284,7 @@ func (c *spokeRefusedCommentChecker) commentAlreadyPresentFunc(ctx context.Conte
 		if !cached {
 			var err error
 			present, err = spokeIssueCommentsOnHub(
-				ctx, c.store, c.canonicalHub, issueUID, c.refusedEventUIDs, c.bindingsByProject, c.hasKeptByProject,
+				ctx, c.store, c.canonicalHub, issueUID, c.refusedEventUIDs, c.bindingsByProject,
 			)
 			if err != nil {
 				return false, err
@@ -1337,10 +1335,8 @@ func spokeIssueCommentsOnHub(
 	issueUID string,
 	refusedEventUIDs map[string]bool,
 	bindingsByProject map[int64]*db.FederationBinding,
-	hasKeptByProject map[int64]bool,
 ) (map[string]bool, error) {
 	present := map[string]bool{}
-	localOrigin := store.InstanceUID()
 	types := []string{"issue.commented", "issue.created", "issue.snapshot", "issue.moved", db.RepeatedImportEventType}
 	var afterID int64
 	for {
@@ -1388,34 +1384,9 @@ func spokeIssueCommentsOnHub(
 			if projBinding == nil {
 				continue
 			}
-			onHub := false
-			if hist.OriginInstanceUID != localOrigin {
-				onHub = true
-			} else if hist.ID > projBinding.PushCursorEventID {
-				ack, err := store.IsFederationEventAcknowledged(ctx, hist.ProjectID, hist.UID)
-				if err != nil {
-					return nil, err
-				}
-				onHub = ack
-			} else {
-				hasKept, keptKnown := hasKeptByProject[hist.ProjectID]
-				if !keptKnown {
-					var err error
-					hasKept, err = store.HasKeptFederationEvents(ctx, hist.ProjectID)
-					if err != nil {
-						return nil, err
-					}
-					hasKeptByProject[hist.ProjectID] = hasKept
-				}
-				if !hasKept {
-					onHub = true
-				} else {
-					ack, err := store.IsFederationEventAcknowledged(ctx, hist.ProjectID, hist.UID)
-					if err != nil {
-						return nil, err
-					}
-					onHub = ack
-				}
+			onHub, err := store.IsFederationEventAcknowledged(ctx, hist.ProjectID, hist.UID)
+			if err != nil {
+				return nil, err
 			}
 			if !onHub {
 				continue

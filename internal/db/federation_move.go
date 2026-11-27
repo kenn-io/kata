@@ -103,11 +103,27 @@ func RecordFederationAcknowledgedEvents(ctx context.Context, tx *sql.Tx, project
 	return nil
 }
 
-// IsFederationEventAcknowledged reports whether eventUID has an out-of-order
-// hub acknowledgement marker for projectID.
-func IsFederationEventAcknowledged(ctx context.Context, q moveQuery, projectID int64, eventUID string) (bool, error) {
+// IsFederationEventAcknowledged reports whether eventUID in projectID is
+// already accepted on the hub (through the push cursor, an out-of-order
+// acknowledgement marker, or a pulled remote event), excluding individually
+// retained local-only events and unpushed former-instance events.
+func IsFederationEventAcknowledged(ctx context.Context, q moveQuery, projectID int64, eventUID, localOrigin string) (bool, error) {
 	var acknowledged bool
-	err := q.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM meta m JOIN projects p ON p.id=$1 WHERE m.key=$2 || p.uid || '.' || $3 AND m.value='1')`, projectID, FederationAcknowledgedEventPrefix, eventUID).Scan(&acknowledged)
+	//nolint:gosec // SQL fragment uses fixed alias e; all values are bound.
+	err := q.QueryRowContext(ctx, `SELECT EXISTS (
+		SELECT 1
+		  FROM events e
+		  JOIN projects p ON p.id = e.project_id
+		  LEFT JOIN federation_bindings b ON b.project_id = e.project_id
+		 WHERE e.project_id = $1
+		   AND e.uid = $2
+		   AND NOT `+federationKeptLocalSQL("e")+`
+		   AND (
+		     (e.origin_instance_uid = $3 AND b.push_cursor_event_id IS NOT NULL AND e.id <= b.push_cursor_event_id)
+		     OR (e.origin_instance_uid <> $3 AND NOT EXISTS (SELECT 1 FROM meta former WHERE former.key = $4 || e.origin_instance_uid))
+		     OR EXISTS (SELECT 1 FROM meta ack WHERE ack.key = $5 || p.uid || '.' || e.uid AND ack.value = '1')
+		   )
+	)`, projectID, eventUID, localOrigin, FormerInstanceUIDMetaPrefix, FederationAcknowledgedEventPrefix).Scan(&acknowledged)
 	return acknowledged, err
 }
 

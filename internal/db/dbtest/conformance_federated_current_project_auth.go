@@ -830,5 +830,30 @@ func checkFederatedPartialNotEnrolledIngest(t *testing.T, store db.Storage) erro
 	require.NoError(t, err)
 	require.Empty(t, pending)
 
+	// Ordinary push-cursor acknowledgement counts as acknowledged even without a
+	// per-event '1' marker, while an individually kept-local event does not.
+	_, eCursorAck, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spokeProj.ID, Title: "Cursor acked", Author: "worker"})
+	require.NoError(t, err)
+	require.NoError(t, store.AcknowledgeFederationPush(ctx, spokeProj.ID, eCursorAck.ID, nil))
+	binding, err = store.FederationBindingByProject(ctx, spokeProj.ID)
+	require.NoError(t, err)
+	binding.Actor = "former-actor"
+	_, err = store.UpsertFederationBinding(ctx, binding)
+	require.NoError(t, err)
+	_, eKeptLocal, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spokeProj.ID, Title: "Kept local", Author: "former-actor"})
+	require.NoError(t, err)
+	binding.Actor = "worker"
+	_, err = store.UpsertFederationBinding(ctx, binding)
+	require.NoError(t, err)
+	kept, err := store.KeepFederationEventLocal(ctx, spokeProj.ID, eKeptLocal.ID)
+	require.NoError(t, err)
+	require.True(t, kept)
+	ackCursor, err := store.IsFederationEventAcknowledged(ctx, spokeProj.ID, eCursorAck.UID)
+	require.NoError(t, err)
+	require.True(t, ackCursor, "events acknowledged through push_cursor_event_id must report acknowledged")
+	ackKept, err := store.IsFederationEventAcknowledged(ctx, spokeProj.ID, eKeptLocal.UID)
+	require.NoError(t, err)
+	require.False(t, ackKept, "events retained locally must not report acknowledged")
+
 	return nil
 }

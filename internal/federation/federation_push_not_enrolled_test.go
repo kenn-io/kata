@@ -630,6 +630,103 @@ func TestSyncFederationMultipleUnenrolledIssuesAndLegacyHub403(t *testing.T) {
 		require.NotContains(t, stayingCommentUIDs, replyUnpushedInB.UID, "reply to comment only introduced by the refused move must remain deferred")
 	})
 
+	t.Run("refused move with unrelated kept-local history still allows replies to previously pushed comment", func(t *testing.T) {
+		ctx := t.Context()
+		hub, projects := newMoveDeliveryHub(t, "joined-kept-a", "joined-kept-b", "absent-kept-c")
+		spoke := newMoveDeliverySpoke(t, hub, projects[:2])
+
+		bigBody := strings.Repeat("k", (maxFederationPushIngestBodyBytes/2)+64<<10)
+		moved, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "moved peer", Author: "worker"})
+		require.NoError(t, err)
+		staying, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "staying sibling", Author: "worker"})
+		require.NoError(t, err)
+		mover, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "mover issue", Body: bigBody, Author: "worker"})
+		require.NoError(t, err)
+		require.NoError(t, spoke.sync(t, 0))
+		require.NoError(t, spoke.sync(t, 1))
+
+		localMoved, err := spoke.env.DB.IssueByUID(ctx, moved.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		localStay, err := spoke.env.DB.IssueByUID(ctx, staying.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		localMover, err := spoke.env.DB.IssueByUID(ctx, mover.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+
+		// 1. Push a local comment via an ordinary push (advances push_cursor_event_id
+		//    without creating a per-event acknowledgement marker).
+		previouslyPushed, _, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{
+			IssueID: localMover.ID, Author: "worker", Body: "previously pushed local comment",
+		})
+		require.NoError(t, err)
+		require.NoError(t, spoke.sync(t, 0))
+
+		// Move `moved` on the hub into the unjoined third project.
+		_, err = hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+			IssueID: moved.ID, FromProjectID: projects[0].ID, ToProjectID: projects[2].ID,
+			IfMatchRev: moved.Revision, Actor: "worker",
+		})
+		require.NoError(t, err)
+
+		// 2. Round-trip localMover A -> B -> A linking to moved so the large move-back
+		//    snapshot includes previouslyPushed and is refused in Batch 1.
+		localMover, err = spoke.env.DB.IssueByUID(ctx, mover.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		movedToB, err := spoke.env.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+			IssueID: localMover.ID, FromProjectID: spoke.projects[0].ID, ToProjectID: spoke.projects[1].ID,
+			IfMatchRev: localMover.Revision, Actor: "worker",
+		})
+		require.NoError(t, err)
+		_, _, err = spoke.env.DB.CreateLinkAndEvent(ctx,
+			db.CreateLinkParams{FromIssueID: movedToB.Issue.ID, ToIssueID: localMoved.ID, Type: "blocks", Author: "worker"},
+			db.LinkEventParams{EventType: "issue.linked", EventIssueID: movedToB.Issue.ID, FromUID: movedToB.Issue.UID, FromShortID: movedToB.Issue.ShortID, ToUID: localMoved.UID, ToShortID: localMoved.ShortID, Actor: "worker"},
+		)
+		require.NoError(t, err)
+		refreshedMover, err := spoke.env.DB.IssueByUID(ctx, mover.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		_, err = spoke.env.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+			IssueID: refreshedMover.ID, FromProjectID: spoke.projects[1].ID, ToProjectID: spoke.projects[0].ID,
+			IfMatchRev: refreshedMover.Revision, Actor: "worker",
+		})
+		require.NoError(t, err)
+
+		// 3. Simulate rejoining with an unrelated former-actor local-only event so
+		//    HasKeptFederationEvents is true on projects[0].
+		binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
+		require.NoError(t, err)
+		binding.Actor = "former-actor"
+		_, err = spoke.env.DB.UpsertFederationBinding(ctx, binding)
+		require.NoError(t, err)
+		_, keptEv, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: spoke.projects[0].ID, Title: "unrelated kept-local issue", Author: "former-actor",
+		})
+		require.NoError(t, err)
+		binding.Actor = "worker"
+		_, err = spoke.env.DB.UpsertFederationBinding(ctx, binding)
+		require.NoError(t, err)
+		kept, err := spoke.env.DB.KeepFederationEventLocal(ctx, spoke.projects[0].ID, keptEv.ID)
+		require.NoError(t, err)
+		require.True(t, kept)
+
+		// 4. Reply on staying forced into Batch 2 by bigBody targeting previouslyPushed.
+		replyPreviouslyPushed, _, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{
+			IssueID: localStay.ID, Author: "worker", Body: bigBody + "-reply-previously-pushed",
+			ReplyToUID: previouslyPushed.UID, ReplyKind: "reply",
+		})
+		require.NoError(t, err)
+
+		err = spoke.sync(t, 0)
+		require.ErrorContains(t, err, db.FederationProjectNotEnrolledCode)
+		require.ErrorContains(t, err, moved.UID)
+
+		stayingComments, err := hub.DB.CommentsByIssue(ctx, staying.ID)
+		require.NoError(t, err)
+		var stayingCommentUIDs []string
+		for _, c := range stayingComments {
+			stayingCommentUIDs = append(stayingCommentUIDs, c.UID)
+		}
+		require.Contains(t, stayingCommentUIDs, replyPreviouslyPushed.UID, "reply to previously pushed comment must publish despite unrelated kept-local history")
+	})
+
 	t.Run("legacy hub ignoring partial_not_enrolled still pulls after 403", func(t *testing.T) {
 		ctx := t.Context()
 		hub, projects := newMoveDeliveryHub(t, "joined-legacy", "absent-legacy")

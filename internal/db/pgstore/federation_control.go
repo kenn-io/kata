@@ -317,10 +317,10 @@ WHERE project_id=$1`, projectID)
 	})
 }
 
-// IsFederationEventAcknowledged reports whether one local-origin event has an
-// out-of-order hub acknowledgement marker.
+// IsFederationEventAcknowledged reports whether an event in projectID is
+// already accepted on the hub.
 func (s *Store) IsFederationEventAcknowledged(ctx context.Context, projectID int64, eventUID string) (bool, error) {
-	acknowledged, err := db.IsFederationEventAcknowledged(ctx, s, projectID, eventUID)
+	acknowledged, err := db.IsFederationEventAcknowledged(ctx, s, projectID, eventUID, s.InstanceUID())
 	return acknowledged, mapSQLError(err, nil)
 }
 
