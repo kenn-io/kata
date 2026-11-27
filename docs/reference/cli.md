@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-21
+last_edited: 2026-11-26
 ---
 
 # CLI reference
@@ -2028,6 +2028,11 @@ kata tui [issue-ref]
 Search stays visible above the issue list and the **Jobs**, **Runs**, and
 **Workflows** lists. To edit the current query, press `/` or, with `--mouse`,
 click the search line.
+In the issue list, press `ctrl+t` in the search line to have the daemon rank the
+project's issues instead of filtering the loaded rows. Of the daemon's best 50
+hits, the TUI shows those among the issues it has loaded (up to 2,000 per
+project), and a note counts the rest; see
+[search by meaning in the TUI](../guide/semantic-search.md#search-by-meaning-in-the-tui).
 
 `kata tui` asks for confirmation when you press `q`. To quit immediately, set
 `[tui] confirm_quit = false`; see

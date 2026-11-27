@@ -197,9 +197,11 @@ func (m Model) reloadDatesForm(current Issue) Model {
 
 // withCurrentIssue refreshes conflict-owned fields while keeping list projections.
 func (lm listModel) withCurrentIssue(current Issue) listModel {
-	for i := range lm.issues {
-		if lm.issues[i].UID == current.UID {
-			lm.issues[i] = lm.issues[i].withCurrentDates(current)
+	for _, issues := range [][]Issue{lm.issues, lm.ranked.hits} {
+		for i := range issues {
+			if issues[i].UID == current.UID {
+				issues[i] = issues[i].withCurrentDates(current)
+			}
 		}
 	}
 	return lm

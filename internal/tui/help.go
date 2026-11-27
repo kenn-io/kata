@@ -51,7 +51,7 @@ func helpSections(km keymap) []helpSection {
 			{Key: "ctrl+u", Description: "clear prompt"},
 		}},
 		{"Filters", []helplayout.HelpItem{
-			r(km.Search), r(km.FilterStatus), r(km.FilterForm), r(km.ClearFilters),
+			r(km.Search), r(km.DaemonSearch), r(km.FilterStatus), r(km.FilterForm), r(km.ClearFilters),
 			{Key: "ctrl+r", Description: "reset filter form"},
 		}},
 	}

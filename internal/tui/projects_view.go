@@ -211,7 +211,11 @@ func (m Model) applyProjectsViewSelection(rows []projectsRow) (Model, tea.Cmd) {
 		}
 	}
 	m.view = viewList
-	m.list = listModel{actor: m.list.actor}
+	// Loading, so a search answer that beats the fetch is not judged against an
+	// empty list that looks complete.
+	actor := m.list.actor
+	m.list = newListModel()
+	m.list.actor = actor
 	m.cache.markStale()
 	// The new scope must not inherit the old scope's detail pane: in
 	// split layout the pane stays visible, and its retained issue +

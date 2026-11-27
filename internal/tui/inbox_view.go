@@ -124,6 +124,8 @@ func (m Model) leaveInbox() (Model, tea.Cmd) {
 	m.scopeGen++
 	previous.scope.scopeGen = m.scopeGen
 	m.scope, m.list, m.detail = previous.scope, previous.list, previous.detail
+	// The saved list may hold an ask whose answer is now dropped.
+	m.list.ranked = m.list.ranked.discardInFlight()
 	m.view, m.prevView, m.focus = previous.view, previous.prevView, previous.focus
 	m.cache.drop()
 	m.pendingRefetch = false
