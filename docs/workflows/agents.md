@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-11-23
+last_edited: 2026-11-27
 ---
 
 # Agent workflows
@@ -113,7 +113,7 @@ initialize a project, or configure embeddings.
 
 ## Contract in every session
 
-In unreleased builds, you can load Kata's contract in Claude Code and Codex
+In Kata 0.24.0 and later, you can load Kata's contract in Claude Code and Codex
 sessions that start inside a Kata workspace on this machine. Setup selects
 whichever are installed:
 

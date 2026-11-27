@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-26
+last_edited: 2026-11-27
 ---
 
 # HTTP API schema
@@ -312,6 +312,10 @@ and refuse to render issue detail.
 
 API contract versions advance independently of Kata release versions:
 
+- Kata 0.24.0 includes API `0.71.0` (the changes from `0.44.0` through `0.71.0`
+  below). Direct-spoke hub semantic search requires `0.55.0`, held federation
+  polls require `0.67.0`, atomic label swaps require `0.70.0`, and multiplexed
+  federation event watches require `0.71.0`.
 - Kata 0.23.0 includes API `0.43.0`. Local embeddings setup requires `0.42.0`,
   and MCP Events require `0.43.0`.
 - Kata 0.22.0 includes API `0.41.0`, and Kata 0.21.0 includes API `0.40.0` (the
@@ -381,11 +385,14 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 | `0.71.0` | Federation event watches hold one request for many projects; event polls advertise `X-Kata-Federation-Watch-Max`. |
 | `0.70.0` | Added `PATCH /api/v1/projects/{project_id}/issues/{ref}/labels`, which applies `add` and `remove` label lists in one transaction and answers with the issue's resulting `labels`. |
 | `0.69.0` | Close responses can include a `parent_ready` issue reference. |
+| `0.68.0` | Rejects priority labels (`p0` through `p4` and `priority:` prefixes) on label add, issue create, and recurrence template writes. |
 | `0.67.0` | Federation event polls accept `wait` and advertise `X-Kata-Federation-Poll-Wait-Max`. |
 | `0.66.0` | Federation search accepts `auto` and reports its effective mode, matched fields, and any fallback reason. |
+| `0.65.0` | Exposes the effective close event in selected task snapshots. |
 | `0.64.0` | Routes shared-project attachments to their Docbank origin. Attachment references can include `origin`; the UI attachment capability is enabled when the daemon has a local Docbank or any enabled spoke binding. A disabled spoke rejects uploads and links with `503 federation_offline`, even when it has a local vault. Federation peers advertise `docbank_origin_v1` before receiving origin references. |
 | `0.63.0` | Browser issue reference resolution accepts a project name or UID and qualified references without a project ID. |
 | `0.62.0` | Federation peers advertise `relay_cross_links_v1` in `X-Kata-Event-Features`. A common root can link issues across projects with a shared relay audience. Relays check access to each referenced project they can resolve before releasing events or checkpoints, and pause for older peers with `409 unsupported_event_features` at crossing links or links with unresolved endpoints. An unresolved endpoint may belong to another project. |
+| `0.61.0` | Federation status reports the runner retry schedule for a refused or unavailable spoke binding. |
 | `0.60.0` | Enrollment join instructions use the signing hub's external URL and include signing key placeholders. |
 | `0.59.0` | Schedule and deadline civil dates and times accept an explicit `[Zone]` suffix. |
 | `0.58.0` | `GET /api/v1/projects/{project_id}/events` accepts `actor` so callers who may restore a soft-deleted issue can read its history. |

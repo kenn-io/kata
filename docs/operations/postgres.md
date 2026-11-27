@@ -1,7 +1,7 @@
 ---
 title: PostgreSQL operations
 description: Operate Kata on PostgreSQL with split migration and runtime roles, backups, upgrades, and health checks.
-last_edited: 2026-11-20
+last_edited: 2026-11-27
 ---
 
 # PostgreSQL operations
@@ -203,8 +203,15 @@ The schema 51 to 52 migration converts existing semantic-search vectors in
 place. See the
 [schema 52 migration requirements](../development/postgres-migrations.md#schema-52-shared-vector-catalog).
 
-The schema 52→53 migration adds an index of move events by destination project;
-see the [schema 53 migration requirements](../development/postgres-migrations.md#schema-53-move-events-by-destination-project).
+The schema 52 to 53 migration adds an index of move events by destination
+project; see the
+[schema 53 migration requirements](../development/postgres-migrations.md#schema-53-move-events-by-destination-project).
+
+The schema 53 to 54 and schema 54 to 55 migrations advance only the recorded
+version so older binaries cannot delete held or local-only federation events
+during a reset. Existing runtime grants remain sufficient. See the
+[schema 54 migration requirements](../development/postgres-migrations.md#schema-54-held-federation-cursors)
+and [schema 55 migration requirements](../development/postgres-migrations.md#schema-55-local-federation-event-fence).
 
 Once the schema is prepared, grant the runtime role DML access and set default
 privileges for objects that future migrations create:

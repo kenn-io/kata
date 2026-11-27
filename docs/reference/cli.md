@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-26
+last_edited: 2026-11-27
 ---
 
 # CLI reference
@@ -267,11 +267,11 @@ this text in a harness-native response. To load it in every session, see
 
 ## Agent setup
 
-In unreleased builds, `kata agent setup [<harness>...]` installs user hooks for
-the agents you name. If you pass no names, it selects installed Claude Code and
-Codex. To check readiness without installing anything, add `--check`. When Codex
-hooks need review, open Codex and run `/hooks`. The command exits with code 1
-when a selected agent needs attention.
+In Kata 0.24.0 and later, `kata agent setup [<harness>...]` installs user hooks
+for the agents you name. If you pass no names, it selects installed Claude Code
+and Codex. To check readiness without installing anything, add `--check`. When
+Codex hooks need review, open Codex and run `/hooks`. The command exits with
+code 1 when a selected agent needs attention.
 
 ## Agent hook
 

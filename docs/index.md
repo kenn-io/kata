@@ -34,15 +34,17 @@ powershell -ExecutionPolicy ByPass -c "irm https://katatracker.com/install.ps1 |
 ```
 </section>
 
-## New in 0.23.0
+## New in 0.24.0
 
-You can turn on search by meaning with one command or from **Settings** in the
-web UI. In the terminal UI, you can move issues, change repeating schedules, and
-edit workflows, and you can set up attachments with `kata docbank setup`.
-Assistants that use MCP can set up without a shell and wake when their inbox
-changes. Large stores and federated projects also search, create, and sync
-faster. Read the [0.23.0 release notes](changelog.md#0230) for the schema 50
-upgrade, the PostgreSQL migration, and contributor credits, and see
+The web UI moves navigation and tabbed **Settings** into a resizable,
+collapsible sidebar, keeps the task list beside the open task, and lets you
+edit fields in place. Direct spokes receive hub changes almost immediately
+through held polls and search shared projects by meaning through the hub, while
+hosts can embed with Vertex AI (`gemini-embedding-001`). You can also install
+Claude Code and Codex hooks with `kata agent setup`, move up to 5,000 issues at
+once, and create recurring cron jobs with typed flags. Read the
+[0.24.0 release notes](changelog.md#0240) for the schema 55 upgrade, the
+PostgreSQL migration, and contributor credits, and see
 [Updating Kata](get-started/install.md#updating-kata) for installation and
 federation upgrade guidance.
 
