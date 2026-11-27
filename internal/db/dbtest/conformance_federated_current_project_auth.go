@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/uid"
 )
@@ -788,6 +789,86 @@ func checkFederatedPartialNotEnrolledIngest(t *testing.T, store db.Storage) erro
 	gotA, err = store.IssueByUID(ctx, stayingA.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.Equal(t, "After dup", gotA.Title, "hard error must roll back earlier events in the batch")
+
+	// Immutable cron run identity violation on a run referencing an unenrolled
+	// issue must still fail validation and roll back the whole batch, while a
+	// valid cron run referencing an unenrolled issue is refused without blocking
+	// unrelated edits.
+	cronJob, _ := nativeFederationDefinitions(t, store, source)
+	existingRunUID, err := uid.New()
+	require.NoError(t, err)
+	_, err = store.ObserveCronRun(ctx, db.ObserveCronRun{
+		ProjectID:          source.ID,
+		UID:                existingRunUID,
+		JobUID:             &cronJob.UID,
+		DefinitionEventUID: &cronJob.DefinitionEventUID,
+		IssueUID:           &stayingA.UID,
+		Actor:              "worker",
+		Status:             "running",
+		Summary:            cron.Summary{Version: 1},
+	})
+	require.NoError(t, err)
+	obsTime := time.UnixMilli(at + 120).UTC()
+	badRunPayload, err := json.Marshal(db.CronRunObservation{
+		ProjectUID:         source.UID,
+		UID:                existingRunUID,
+		JobUID:             &cronJob.UID,
+		DefinitionEventUID: &cronJob.DefinitionEventUID,
+		IssueUID:           &moved.UID,
+		Actor:              "worker",
+		Status:             "succeeded",
+		Summary:            cron.Summary{Version: 1},
+		Revision:           2,
+		CreatedAt:          obsTime,
+		UpdatedAt:          obsTime,
+	})
+	require.NoError(t, err)
+	badCronEv := newRemoteEvent(t, source, nil, "cron.run.observed", "worker", origin, at+120, jsontext.Value(badRunPayload))
+	beforeBadCron := newRemoteEvent(t, source, &stayingB.UID, "issue.updated", "worker", origin, at+121, jsontext.Value(`{"title":"Must roll back on bad cron identity"}`))
+	params = baseParams
+	params.Events = []db.FederationIngestEvent{
+		{SourceEventID: 120, Event: beforeBadCron},
+		{SourceEventID: 121, Event: badCronEv},
+	}
+	_, err = store.IngestFederationEvents(ctx, params)
+	require.ErrorIs(t, err, db.ErrFederationIngestValidation, "cron run identity change must reject the entire batch")
+	gotB, err = store.IssueByUID(ctx, stayingB.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "Unrelated after displace", gotB.Title, "batch with cron run identity error must roll back unrelated edits")
+
+	freshRunUID, err := uid.New()
+	require.NoError(t, err)
+	validRunPayload, err := json.Marshal(db.CronRunObservation{
+		ProjectUID:         source.UID,
+		UID:                freshRunUID,
+		JobUID:             &cronJob.UID,
+		DefinitionEventUID: &cronJob.DefinitionEventUID,
+		IssueUID:           &moved.UID,
+		Actor:              "worker",
+		Status:             "running",
+		Summary:            cron.Summary{Version: 1},
+		Revision:           1,
+		CreatedAt:          obsTime,
+		UpdatedAt:          obsTime,
+	})
+	require.NoError(t, err)
+	validMovedCronEv := newRemoteEvent(t, source, nil, "cron.run.observed", "worker", origin, at+122, jsontext.Value(validRunPayload))
+	unrelatedAfterCron := newRemoteEvent(t, source, &stayingB.UID, "issue.updated", "worker", origin, at+123, jsontext.Value(`{"title":"Unrelated after valid cron refusal"}`))
+	params = baseParams
+	params.Events = []db.FederationIngestEvent{
+		{SourceEventID: 122, Event: validMovedCronEv},
+		{SourceEventID: 123, Event: unrelatedAfterCron},
+	}
+	cronPartialRes, err := store.IngestFederationEvents(ctx, params)
+	require.NoError(t, err)
+	require.Equal(t, 1, cronPartialRes.Accepted)
+	require.Zero(t, cronPartialRes.PushCursorEventID)
+	require.Len(t, cronPartialRes.RefusedEvents, 1)
+	require.Equal(t, validMovedCronEv.EventUID, cronPartialRes.RefusedEvents[0].EventUID)
+	require.Equal(t, moved.UID, cronPartialRes.RefusedEvents[0].IssueUID)
+	gotB, err = store.IssueByUID(ctx, stayingB.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "Unrelated after valid cron refusal", gotB.Title)
 
 	// Spoke out-of-order acknowledgement folding.
 	spokeProj, err := store.CreateProject(ctx, "partial-spoke-ack")

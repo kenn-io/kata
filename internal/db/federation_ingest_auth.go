@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json/v2"
 	"errors"
+	"maps"
 	"slices"
 	"strings"
 )
@@ -25,6 +26,16 @@ func NewFederationRefusedDependencies() *FederationRefusedDependencies {
 		issues:   map[string]*FederationProjectNotEnrolledError{},
 		comments: map[string]*FederationProjectNotEnrolledError{},
 		cronRuns: map[string]*FederationProjectNotEnrolledError{},
+	}
+}
+
+// Clone returns a shallow copy of d so callers can evaluate candidate batches
+// without mutating confirmed dependencies before a batch is submitted.
+func (d *FederationRefusedDependencies) Clone() *FederationRefusedDependencies {
+	return &FederationRefusedDependencies{
+		issues:   maps.Clone(d.issues),
+		comments: maps.Clone(d.comments),
+		cronRuns: maps.Clone(d.cronRuns),
 	}
 }
 

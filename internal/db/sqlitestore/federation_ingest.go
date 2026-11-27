@@ -363,6 +363,14 @@ func (d *Store) ingestFederationEventsOnce(
 		return db.FederationIngestResult{}, db.FinishTransactionRollback(ctx, err, tx.Rollback())
 	}
 	if len(refused) > 0 {
+		for _, in := range prepared {
+			if in.Duplicate {
+				continue
+			}
+			if err := cronValidator.Validate(ctx, p.ProjectID, in.Event); err != nil {
+				return db.FederationIngestResult{}, err
+			}
+		}
 		result.RefusedEvents, result.PushCursorEventID = db.SummarizeRefusedFederationIngestEvents(p.Events, refused)
 		filteredPrepared := make([]preparedFederationIngestEvent, 0, len(prepared))
 		filteredFresh := make([]db.RemoteEvent, 0, len(freshEvents))

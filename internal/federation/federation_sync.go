@@ -320,13 +320,18 @@ func pushDirectSpoke(
 			}
 			for len(pending) > 0 {
 				submittable := pending
+				var deferred []db.Event
 				if hasRefused {
-					submittable, err = filterFederationPushPendingDependents(ctx, pending, refusedDeps, refusedComments)
+					submittable, deferred, err = filterFederationPushPendingDependents(ctx, pending, refusedDeps, refusedComments)
 					if err != nil {
 						return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 					}
 					if len(submittable) == 0 {
-						scanCursor = max(scanCursor, pending[len(pending)-1].ID)
+						pageEndID := pending[len(pending)-1].ID
+						if err := commitFederationPushDeferredDependencies(ctx, deferred, pageEndID, refusedComments, refusedDeps); err != nil {
+							return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+						}
+						scanCursor = max(scanCursor, pageEndID)
 						break
 					}
 				}
@@ -426,6 +431,11 @@ func pushDirectSpoke(
 						}
 						refusedComments.recordAccepted(batch, acceptedUIDs)
 						nextScanCursor = ack.PushCursorEventID
+					}
+					if len(deferred) > 0 {
+						if err := commitFederationPushDeferredDependencies(ctx, deferred, nextScanCursor, refusedComments, refusedDeps); err != nil {
+							return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+						}
 					}
 					if len(acceptedUIDs) > 0 {
 						if err := federationFailpoint("before_spoke_push_cursor_advance"); err != nil {
@@ -1406,20 +1416,60 @@ func filterFederationPushPendingDependents(
 	pending []db.Event,
 	deps *db.FederationRefusedDependencies,
 	checker *spokeRefusedCommentChecker,
-) ([]db.Event, error) {
+) ([]db.Event, []db.Event, error) {
+	// Evaluate the pending slice on a working copy so earlier surviving events
+	// keep their comments available to later replies without mutating confirmed
+	// dependencies until a batch is actually submitted and advanced past.
+	localDeps := deps.Clone()
+	stagedComments := map[string]bool{}
 	out := make([]db.Event, 0, len(pending))
+	var deferred []db.Event
 	for _, ev := range pending {
 		remote := federationDependencyEvent(ev)
-		if depErr := deps.Dependency(remote); depErr != nil {
-			checker.refusedEventUIDs[ev.UID] = true
-			if err := deps.Record(remote, depErr, checker.commentAlreadyPresentFunc(ctx, db.EventIssueUID(ev.IssueUID))); err != nil {
-				return nil, err
+		if depErr := localDeps.Dependency(remote); depErr != nil {
+			deferred = append(deferred, ev)
+			baseCheck := checker.commentAlreadyPresentFunc(ctx, db.EventIssueUID(ev.IssueUID))
+			commentAlreadyPresent := func(commentUID string) (bool, error) {
+				if stagedComments[commentUID] {
+					return true, nil
+				}
+				return baseCheck(commentUID)
+			}
+			if err := localDeps.Record(remote, depErr, commentAlreadyPresent); err != nil {
+				return nil, nil, err
 			}
 			continue
 		}
+		for _, commentUID := range db.FederationEventCommentUIDs(remote) {
+			stagedComments[commentUID] = true
+		}
 		out = append(out, ev)
 	}
-	return out, nil
+	return out, deferred, nil
+}
+
+func commitFederationPushDeferredDependencies(
+	ctx context.Context,
+	deferred []db.Event,
+	throughEventID int64,
+	checker *spokeRefusedCommentChecker,
+	deps *db.FederationRefusedDependencies,
+) error {
+	for _, ev := range deferred {
+		if ev.ID > throughEventID {
+			break
+		}
+		remote := federationDependencyEvent(ev)
+		depErr := deps.Dependency(remote)
+		if depErr == nil {
+			continue
+		}
+		checker.refusedEventUIDs[ev.UID] = true
+		if err := deps.Record(remote, depErr, checker.commentAlreadyPresentFunc(ctx, db.EventIssueUID(ev.IssueUID))); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func validateFederationIngestRefusedEvents(batch []db.Event, refused []api.FederationIngestRefusedEvent, pushCursor int64) ([]string, error) {

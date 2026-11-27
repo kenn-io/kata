@@ -727,6 +727,103 @@ func TestSyncFederationMultipleUnenrolledIssuesAndLegacyHub403(t *testing.T) {
 		require.Contains(t, stayingCommentUIDs, replyPreviouslyPushed.UID, "reply to previously pushed comment must publish despite unrelated kept-local history")
 	})
 
+	t.Run("reply to earlier surviving comment in same pass publishes when later move depends on refused comment", func(t *testing.T) {
+		ctx := t.Context()
+		hub, projects := newMoveDeliveryHub(t, "joined-stage-a", "joined-stage-b", "absent-stage-c")
+		spoke := newMoveDeliverySpoke(t, hub, projects[:2])
+
+		bigBody := strings.Repeat("s", (maxFederationPushIngestBodyBytes/2)+64<<10)
+		moved, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "moved peer", Author: "worker"})
+		require.NoError(t, err)
+		staying, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "staying sibling", Author: "worker"})
+		require.NoError(t, err)
+		mover, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "mover issue", Author: "worker"})
+		require.NoError(t, err)
+		require.NoError(t, spoke.sync(t, 0))
+		require.NoError(t, spoke.sync(t, 1))
+
+		localMoved, err := spoke.env.DB.IssueByUID(ctx, moved.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		localStay, err := spoke.env.DB.IssueByUID(ctx, staying.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		localMover, err := spoke.env.DB.IssueByUID(ctx, mover.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+
+		// Move `moved` on the hub into the unjoined third project.
+		_, err = hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+			IssueID: moved.ID, FromProjectID: projects[0].ID, ToProjectID: projects[2].ID,
+			IfMatchRev: moved.Revision, Actor: "worker",
+		})
+		require.NoError(t, err)
+
+		// Batch 1: large refused comment on moved -> sets hasRefused=true and records refusedC0.UID.
+		refusedC0, _, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{
+			IssueID: localMoved.ID, Author: "worker", Body: bigBody + "-refused-c0",
+		})
+		require.NoError(t, err)
+
+		// Batch 2+:
+		// 1. survivingC1 on localMover (large so it splits from Batch 1, does not depend on refusedC0 -> accepted).
+		survivingC1, _, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{
+			IssueID: localMover.ID, Author: "worker", Body: bigBody + "-surviving-c1",
+		})
+		require.NoError(t, err)
+		// 2. Round-trip localMover A -> B -> A carrying a comment replying to refusedC0 plus survivingC1,
+		//    so the move-back snapshot depends on refusedC0 and is deferred by filterFederationPushPendingDependents.
+		movedToB, err := spoke.env.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+			IssueID: localMover.ID, FromProjectID: spoke.projects[0].ID, ToProjectID: spoke.projects[1].ID,
+			IfMatchRev: localMover.Revision, Actor: "worker",
+		})
+		require.NoError(t, err)
+		_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{
+			IssueID: movedToB.Issue.ID, Author: "worker", Body: "reply to refusedC0 inside move",
+			ReplyToUID: refusedC0.UID, ReplyKind: "reply",
+		})
+		require.NoError(t, err)
+		refreshedMover, err := spoke.env.DB.IssueByUID(ctx, mover.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		_, err = spoke.env.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+			IssueID: refreshedMover.ID, FromProjectID: spoke.projects[1].ID, ToProjectID: spoke.projects[0].ID,
+			IfMatchRev: refreshedMover.Revision, Actor: "worker",
+		})
+		require.NoError(t, err)
+		// 3. Cross-issue replies on localStay to survivingC1:
+		//    - small reply (fits alongside survivingC1 in Batch 2)
+		//    - large reply (pushed in Batch 3 of the same sync after survivingC1 is accepted)
+		crossReplySameBatch, _, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{
+			IssueID: localStay.ID, Author: "worker", Body: "reply to survivingC1 same batch",
+			ReplyToUID: survivingC1.UID, ReplyKind: "reply",
+		})
+		require.NoError(t, err)
+		crossReplyNextBatch, _, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{
+			IssueID: localStay.ID, Author: "worker", Body: bigBody + "-reply-to-survivingC1-next-batch",
+			ReplyToUID: survivingC1.UID, ReplyKind: "reply",
+		})
+		require.NoError(t, err)
+
+		// One single sync must publish survivingC1 AND both replies to survivingC1.
+		err = spoke.sync(t, 0)
+		require.ErrorContains(t, err, db.FederationProjectNotEnrolledCode)
+		require.ErrorContains(t, err, moved.UID)
+
+		_, qErr := spoke.env.DB.ActiveFederationQuarantine(ctx, spoke.projects[0].ID, db.FederationQuarantineDirectionPush)
+		require.ErrorIs(t, qErr, db.ErrNotFound)
+
+		moverComments, err := hub.DB.CommentsByIssue(ctx, mover.ID)
+		require.NoError(t, err)
+		require.Len(t, moverComments, 1)
+		require.Equal(t, survivingC1.UID, moverComments[0].UID)
+
+		stayingComments, err := hub.DB.CommentsByIssue(ctx, staying.ID)
+		require.NoError(t, err)
+		var stayingCommentUIDs []string
+		for _, c := range stayingComments {
+			stayingCommentUIDs = append(stayingCommentUIDs, c.UID)
+		}
+		require.Contains(t, stayingCommentUIDs, crossReplySameBatch.UID, "same-batch reply to surviving comment must publish in the same sync")
+		require.Contains(t, stayingCommentUIDs, crossReplyNextBatch.UID, "next-batch reply to surviving comment must publish in the same sync")
+	})
+
 	t.Run("legacy hub ignoring partial_not_enrolled still pulls after 403", func(t *testing.T) {
 		ctx := t.Context()
 		hub, projects := newMoveDeliveryHub(t, "joined-legacy", "absent-legacy")
