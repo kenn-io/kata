@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { dismissFlash } from '@kenn-io/kit-ui'
 
 import type { KataTaskSummary } from '../lib/kata/types'
+import { maxDoneLimit } from '../lib/kata/board'
 import IssueBoard from './IssueBoard.svelte'
 
 function task(overrides: Partial<KataTaskSummary>): KataTaskSummary {
@@ -544,6 +545,21 @@ describe('IssueBoard Done paging', () => {
     expect(column('Done').getAttribute('aria-label')).toBe('Done, 75 cards')
     await fireEvent.click(screen.getByRole('button', { name: 'Show 30 more' }))
     expect(onShowMoreDone).toHaveBeenCalledOnce()
+  })
+
+  it('points to Logbook once Done holds the most closed cards the daemon pages', async () => {
+    const page = Array.from({ length: maxDoneLimit }, (_, n) =>
+      task({ id: 1000 + n, uid: `u-page-${n}`, title: `Paged ${n}`, status: 'closed' }),
+    )
+    const onShowMoreDone = vi.fn()
+    const onOpenLogbook = vi.fn()
+    renderBoard({ issues: page, doneTotal: maxDoneLimit + 250, onShowMoreDone, onOpenLogbook })
+
+    expect(screen.queryByRole('button', { name: /^Show \d+ more$/ })).toBeNull()
+    expect(within(column('Done')).getByText(/Showing the newest 1,000/)).toBeTruthy()
+    await fireEvent.click(within(column('Done')).getByRole('button', { name: 'Open Logbook' }))
+    expect(onOpenLogbook).toHaveBeenCalledOnce()
+    expect(onShowMoreDone).not.toHaveBeenCalled()
   })
 })
 

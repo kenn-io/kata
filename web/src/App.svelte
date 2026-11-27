@@ -6,7 +6,7 @@
   import { commentRetryIdentity } from './lib/kata/commentRetry'
   import type { KataCommentReplyIntent, KataTaskSummary } from './lib/kata/types'
   import { webActor } from './lib/kata/attention'
-  import { defaultDoneLimit, type BoardMovePlan } from './lib/kata/board'
+  import { defaultDoneLimit, maxDoneLimit, type BoardMovePlan } from './lib/kata/board'
   import AppShell from './components/AppShell.svelte'
   import KataDaemonSwitcher from './components/KataDaemonSwitcher.svelte'
   import LaunchHint from './components/LaunchHint.svelte'
@@ -1083,7 +1083,7 @@
   }
 
   function showMoreBoardDone(): void {
-    boardClosedLimit = Math.min(boardClosedLimit + defaultDoneLimit, 1000)
+    boardClosedLimit = Math.min(boardClosedLimit + defaultDoneLimit, maxDoneLimit)
     void refreshSnapshot(false)
   }
 

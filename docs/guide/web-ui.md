@@ -145,7 +145,7 @@ It adds no workflow vocabulary of its own, so there is nothing to configure:
 | Open | Open issues nobody has claimed, or whose claim has expired | Releases the owner |
 | In progress | Open issues with an owner whose claim has not expired | Claims the issue for you if nobody owns it |
 | Needs attention | Open issues waiting on a human: an agent's `stuck` or `needs-human` signal, a `kata notify` request, or the `needs-review` label, as in the [Needs attention](#navigate-projects-and-collections) view | Not a move target; see below |
-| Done | Closed issues, newest first; the daemon sends 30 at a time and **Show more** loads the next 30 | Opens the **Complete task** form, which asks for a reason, note, and evidence before closing |
+| Done | Closed issues, newest first; the daemon sends 30 at a time and **Show more** loads the next 30, up to the newest 1,000, after which **Open Logbook** lists the rest | Opens the **Complete task** form, which asks for a reason, note, and evidence before closing |
 
 A card in Needs attention shows a badge and the reason, such as **Needs you**
 with the agent's message. Moving it out is how you say you've handled it, and

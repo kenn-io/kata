@@ -28,6 +28,7 @@
     cardMarkers,
     columnFor,
     defaultDoneLimit,
+    maxDoneLimit,
     isEpic,
     moveTargets,
     planBoardMove,
@@ -67,6 +68,8 @@
     doneTotal?: number | undefined
     /** Asks the server for the next page of closed issues. */
     onShowMoreDone?: (() => void) | undefined
+    /** Opens Logbook, which lists every closed issue, once Done can page no further. */
+    onOpenLogbook?: (() => void) | undefined
     /** One-line cards with ID, priority, and title only. */
     compact?: boolean | undefined
     /** Column IDs shown as narrow strips. */
@@ -94,6 +97,7 @@
     viewer = undefined,
     doneTotal = undefined,
     onShowMoreDone = undefined,
+    onOpenLogbook = undefined,
     compact = false,
     collapsedColumns = [],
     onToggleColumn = undefined,
@@ -826,7 +830,17 @@
             </button>
           {/if}
         {/if}
-        {#if !collapsed && column.id === 'done' && column.total > column.issues.length}
+        {#if !collapsed && column.id === 'done' && serverPaged && column.issues.length >= maxDoneLimit && column.total > column.issues.length}
+          <!-- The daemon pages at most this many closed issues; Logbook lists the rest. -->
+          <p class="column-more-note">
+            Showing the newest {maxDoneLimit.toLocaleString('en-US')}.
+            {#if onOpenLogbook}
+              <button type="button" class="column-more" onclick={() => onOpenLogbook()}
+                >Open Logbook</button
+              >
+            {/if}
+          </p>
+        {:else if !collapsed && column.id === 'done' && column.total > column.issues.length}
           {@const more = Math.min(defaultDoneLimit, column.total - column.issues.length)}
           <button
             type="button"
@@ -1540,6 +1554,17 @@
     font: inherit;
     font-size: var(--font-size-xs);
     cursor: pointer;
+  }
+
+  .column-more-note {
+    margin: 0 var(--space-3) var(--space-3);
+    color: var(--text-secondary);
+    font-size: var(--font-size-xs);
+    text-align: center;
+  }
+
+  .column-more-note .column-more {
+    margin: 0;
   }
 
   .column-more:hover {

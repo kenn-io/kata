@@ -24,6 +24,8 @@ export interface BoardContext {
 }
 
 export const defaultDoneLimit = 30
+/** The most closed issues one snapshot returns (the API's closed_limit maximum). */
+export const maxDoneLimit = 1000
 
 export type BoardColumnID = 'open' | 'in-progress' | 'attention' | 'done'
 
