@@ -86,7 +86,7 @@ type federationStressNode struct {
 	http      *http.Client
 	db        *sqlitestore.Store
 	stderr    *safeBuffer
-	cmd       *exec.Cmd
+	proc      *federationStressProcess
 	projectID int64
 	running   bool
 	cred      config.FederationCredential
@@ -663,16 +663,74 @@ func (fx *federationStressFixture) assertNodeStderrClean(t federationStressTB, n
 	}
 }
 
+type federationStressProcess struct {
+	cmd  *exec.Cmd
+	done chan struct{}
+	err  error
+}
+
+func startFederationStressProcess(
+	t federationStressTB,
+	cmd *exec.Cmd,
+	role string,
+	stderr *safeBuffer,
+) *federationStressProcess {
+	t.Helper()
+	require.NoError(t, cmd.Start())
+	proc := &federationStressProcess{
+		cmd:  cmd,
+		done: make(chan struct{}),
+	}
+	go func() {
+		proc.err = cmd.Wait()
+		close(proc.done)
+	}()
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("%s daemon stderr:\n%s", role, stderr.String())
+		}
+	})
+	t.Cleanup(proc.stop)
+	return proc
+}
+
+func (p *federationStressProcess) exited() <-chan struct{} {
+	if p == nil {
+		return nil
+	}
+	return p.done
+}
+
+func (p *federationStressProcess) stop() {
+	if p == nil || p.cmd == nil || p.cmd.Process == nil {
+		return
+	}
+	select {
+	case <-p.done:
+		return
+	default:
+	}
+	_ = p.cmd.Process.Signal(syscall.SIGTERM)
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-p.done:
+	case <-timer.C:
+		_ = p.cmd.Process.Kill()
+		<-p.done
+	}
+}
+
 func startFederationStressHub(t federationStressTB, bin string) *federationStressNode {
 	t.Helper()
 	dirs := newFederationStressDirs(t)
 	port := federationStressFreeTCPPort(t)
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	stderr := &safeBuffer{}
-	cmd := startFederationStressTCPDaemon(t, bin, dirs, stderr, addr)
+	proc := startFederationStressTCPDaemon(t, bin, dirs, stderr, addr)
 	url := "http://" + addr
-	stressWaitForPing(t, url, 5*time.Second)
-	store, err := sqlitestore.Open(context.Background(), dirs.dbPath)
+	stressWaitForPing(t, url, 5*time.Second, proc, stderr)
+	store, err := sqlitestore.Open(t.Context(), dirs.dbPath)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 	return &federationStressNode{
@@ -682,7 +740,7 @@ func startFederationStressHub(t federationStressTB, bin string) *federationStres
 		http:    &http.Client{Timeout: 5 * time.Second},
 		db:      store,
 		stderr:  stderr,
-		cmd:     cmd,
+		proc:    proc,
 		running: true,
 	}
 }
@@ -693,7 +751,7 @@ func startFederationStressTCPDaemon(
 	dirs e2eDirs,
 	stderr *safeBuffer,
 	addr string,
-) *exec.Cmd {
+) *federationStressProcess {
 	t.Helper()
 	// t.Cleanup owns this process; t.Context() would kill it before that runs.
 	cmd := exec.CommandContext(context.WithoutCancel(t.Context()), bin, "daemon", "start", "--foreground", "--listen", addr) //nolint:gosec // test-built binary and loopback address
@@ -702,23 +760,16 @@ func startFederationStressTCPDaemon(
 	cmd.Stdout = io.Discard
 	cmd.Stderr = stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	require.NoError(t, cmd.Start())
-	t.Cleanup(func() {
-		if t.Failed() {
-			t.Logf("hub daemon stderr:\n%s", stderr.String())
-		}
-	})
-	t.Cleanup(func() { stopDaemon(cmd) })
-	return cmd
+	return startFederationStressProcess(t, cmd, "hub", stderr)
 }
 
 func startFederationStressSpoke(t federationStressTB, bin string, index int) *federationStressNode {
 	t.Helper()
 	dirs := newFederationStressDirs(t)
 	stderr := &safeBuffer{}
-	cmd := startFederationStressUnixDaemon(t, bin, dirs, stderr)
-	url, client := stressConnectDaemon(t, dirs, stderr)
-	store, err := sqlitestore.Open(context.Background(), dirs.dbPath)
+	proc := startFederationStressUnixDaemon(t, bin, dirs, stderr)
+	url, client := stressConnectDaemon(t, dirs, proc, stderr)
+	store, err := sqlitestore.Open(t.Context(), dirs.dbPath)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 	return &federationStressNode{
@@ -728,12 +779,12 @@ func startFederationStressSpoke(t federationStressTB, bin string, index int) *fe
 		http:    client,
 		db:      store,
 		stderr:  stderr,
-		cmd:     cmd,
+		proc:    proc,
 		running: true,
 	}
 }
 
-func startFederationStressUnixDaemon(t federationStressTB, bin string, dirs e2eDirs, stderr *safeBuffer) *exec.Cmd {
+func startFederationStressUnixDaemon(t federationStressTB, bin string, dirs e2eDirs, stderr *safeBuffer) *federationStressProcess {
 	t.Helper()
 	// t.Cleanup owns this process; t.Context() would kill it before that runs.
 	cmd := exec.CommandContext(context.WithoutCancel(t.Context()), bin, "daemon", "start", "--foreground") //nolint:gosec // test-built binary
@@ -742,14 +793,7 @@ func startFederationStressUnixDaemon(t federationStressTB, bin string, dirs e2eD
 	cmd.Stdout = io.Discard
 	cmd.Stderr = stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	require.NoError(t, cmd.Start())
-	t.Cleanup(func() {
-		if t.Failed() {
-			t.Logf("spoke daemon stderr:\n%s", stderr.String())
-		}
-	})
-	t.Cleanup(func() { stopDaemon(cmd) })
-	return cmd
+	return startFederationStressProcess(t, cmd, "spoke", stderr)
 }
 
 func assertNoDuplicateLiveClaimsOnNode(t federationStressTB, node *federationStressNode) {
@@ -804,13 +848,21 @@ func runFederationStressGit(t federationStressTB, dir string, args ...string) {
 	require.NoErrorf(t, err, "git %v: %s%s", args, stdout, stderr)
 }
 
-func stressConnectDaemon(t federationStressTB, d e2eDirs, daemonStderr *safeBuffer) (string, *http.Client) {
+func stressConnectDaemon(
+	t federationStressTB,
+	d e2eDirs,
+	proc *federationStressProcess,
+	daemonStderr *safeBuffer,
+) (string, *http.Client) {
 	t.Helper()
 	runtimeDir := filepath.Join(d.home, "runtime", config.DBHash(d.dbPath))
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		sockPath, ok := readDaemonSocketPath(runtimeDir)
-		if ok {
+	const timeout = 10 * time.Second
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	tick := time.NewTicker(50 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		if sockPath, ok := readDaemonSocketPath(runtimeDir); ok {
 			client := &http.Client{
 				Transport: newUnixTransport(sockPath),
 				Timeout:   5 * time.Second,
@@ -819,11 +871,22 @@ func stressConnectDaemon(t federationStressTB, d e2eDirs, daemonStderr *safeBuff
 				return "http://kata.invalid", client
 			}
 		}
-		time.Sleep(50 * time.Millisecond)
+		select {
+		case <-proc.exited():
+			t.Fatalf("daemon exited before advertising a unix socket in %s (%v)\ndaemon stderr: %s",
+				runtimeDir, proc.err, daemonStderr.String())
+			return "", nil
+		case <-t.Context().Done():
+			t.Fatalf("context canceled while waiting for daemon unix socket in %s: %v\ndaemon stderr: %s",
+				runtimeDir, t.Context().Err(), daemonStderr.String())
+			return "", nil
+		case <-deadline.C:
+			t.Fatalf("daemon never advertised a unix socket in %s within %s\ndaemon stderr: %s",
+				runtimeDir, timeout, daemonStderr.String())
+			return "", nil
+		case <-tick.C:
+		}
 	}
-	t.Fatalf("daemon never advertised a unix socket in %s\ndaemon stderr: %s",
-		runtimeDir, daemonStderr.String())
-	return "", nil
 }
 
 func stressDecodeGET(t federationStressTB, client *http.Client, url string, out any) {
@@ -912,27 +975,70 @@ func federationStressFreeTCPPort(t federationStressTB) int {
 	return port
 }
 
-func stressWaitForPing(t federationStressTB, base string, timeout time.Duration) {
+func stressWaitForPing(
+	t federationStressTB,
+	base string,
+	timeout time.Duration,
+	proc *federationStressProcess,
+	stderr *safeBuffer,
+) {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	tick := time.NewTicker(50 * time.Millisecond)
+	defer tick.Stop()
 	client := &http.Client{Timeout: time.Second}
-	for time.Now().Before(deadline) {
+	stderrText := func() string {
+		if stderr == nil {
+			return ""
+		}
+		return stderr.String()
+	}
+	probe := func() (bool, string) {
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, base+"/api/v1/ping", nil)
 		require.NoError(t, err)
-		resp, err := client.Do(req)
-		if err == nil {
-			body, _ := io.ReadAll(resp.Body)
-			_ = resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				var info struct {
-					OK bool `json:"ok"`
-				}
-				if json.Unmarshal(body, &info) == nil && info.OK {
-					return
-				}
-			}
+		resp, err := client.Do(req) //nolint:gosec // test loopback
+		if err != nil {
+			return false, err.Error()
 		}
-		time.Sleep(50 * time.Millisecond)
+		body, readErr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if readErr != nil {
+			return false, fmt.Sprintf("HTTP %d read body: %v", resp.StatusCode, readErr)
+		}
+		if resp.StatusCode != http.StatusOK {
+			return false, fmt.Sprintf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		}
+		var info struct {
+			OK bool `json:"ok"`
+		}
+		if err := json.Unmarshal(body, &info); err != nil {
+			return false, fmt.Sprintf("HTTP 200 invalid JSON: %v", err)
+		}
+		if !info.OK {
+			return false, fmt.Sprintf("HTTP 200 ok=false: %s", strings.TrimSpace(string(body)))
+		}
+		return true, ""
 	}
-	t.Fatalf("daemon at %s did not answer /api/v1/ping within %s", base, timeout)
+	for {
+		ok, lastProbe := probe()
+		if ok {
+			return
+		}
+		select {
+		case <-proc.exited():
+			t.Fatalf("daemon at %s exited before answering /api/v1/ping (%v; last probe: %s)\ndaemon stderr:\n%s",
+				base, proc.err, lastProbe, stderrText())
+			return
+		case <-t.Context().Done():
+			t.Fatalf("context canceled while waiting for daemon at %s /api/v1/ping: %v (last probe: %s)\ndaemon stderr:\n%s",
+				base, t.Context().Err(), lastProbe, stderrText())
+			return
+		case <-deadline.C:
+			t.Fatalf("daemon at %s did not answer /api/v1/ping within %s (last probe: %s)\ndaemon stderr:\n%s",
+				base, timeout, lastProbe, stderrText())
+			return
+		case <-tick.C:
+		}
+	}
 }
