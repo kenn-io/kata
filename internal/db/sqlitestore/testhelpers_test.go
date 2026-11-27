@@ -199,7 +199,7 @@ func setupTestIssue(t *testing.T) (*sqlitestore.Store, context.Context, db.Proje
 func setupSoftDeletedIssue(t *testing.T) (*sqlitestore.Store, context.Context, db.Project, db.Issue) {
 	t.Helper()
 	d, ctx, p, issue := setupTestIssue(t)
-	_, _, _, err := d.SoftDeleteIssue(ctx, issue.ID, "agent")
+	_, _, _, err := d.SoftDeleteIssue(ctx, issue.ID, "agent", "")
 	require.NoError(t, err)
 	return d, ctx, p, issue
 }

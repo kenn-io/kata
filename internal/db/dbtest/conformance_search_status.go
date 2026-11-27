@@ -64,7 +64,7 @@ func checkSearchStatus(t *testing.T, store db.Storage) error {
 			require.NoError(t, err)
 		}
 		if deleted {
-			_, _, _, err := store.SoftDeleteIssue(ctx, issue.ID, "tester")
+			_, _, _, err := store.SoftDeleteIssue(ctx, issue.ID, "tester", "")
 			require.NoError(t, err)
 		}
 		return issue

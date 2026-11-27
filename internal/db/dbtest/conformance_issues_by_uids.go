@@ -21,7 +21,7 @@ func checkIssuesByUIDs(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	deleted, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: visible.ID, Title: "Deleted", Author: "worker"})
 	require.NoError(t, err)
-	_, _, _, err = store.SoftDeleteIssue(ctx, deleted.ID, "worker")
+	_, _, _, err = store.SoftDeleteIssue(ctx, deleted.ID, "worker", "")
 	require.NoError(t, err)
 	other, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: hidden.ID, Title: "Other", Author: "worker"})
 	require.NoError(t, err)

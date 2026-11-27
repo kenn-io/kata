@@ -527,7 +527,7 @@ func checkRecurringRecovery(t *testing.T, s db.Storage, b Backend) error {
 	job, _, e = s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, UID: job.UID, Name: job.Name, Definition: job.Definition, Actor: "operator", ExpectedEventUID: job.DefinitionEventUID})
 	require.NoError(t, e)
 	in.ExpectedEventUID = job.DefinitionEventUID
-	_, _, _, e = s.SoftDeleteIssue(ctx, parent.ID, "operator")
+	_, _, _, e = s.SoftDeleteIssue(ctx, parent.ID, "operator", "")
 	require.NoError(t, e)
 	out, e = s.DispatchRecurringCron(ctx, in)
 	require.NoError(t, e)

@@ -362,6 +362,10 @@ access controller, a soft-deleted issue's history always returns
 `issue_not_found`. The daemon uses `actor` only with `issue=` on a soft-deleted
 issue and ignores it otherwise.
 
+`POST /api/v1/projects/{project_id}/issues/{ref}/actions/delete` records its
+optional `reason` on the `issue.soft_deleted` event, so whoever reads that
+history sees why the issue was deleted.
+
 If you need close evidence, pass `include_effective_close_event_uid=true`. When
 a visible native close currently supplies the issue's closed status, the
 response includes `effective_close_event_uid`. The daemon chooses that event
@@ -381,6 +385,7 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
+| `0.73.0` | `POST /api/v1/projects/{project_id}/issues/{ref}/actions/delete` records its `reason` on the `issue.soft_deleted` event. |
 | `0.72.0` | Forwarded hub requests report busy refusals as `429 server_busy` and preserve `Retry-After` hints. |
 | `0.71.0` | Federation event watches hold one request for many projects; event polls advertise `X-Kata-Federation-Watch-Max`. |
 | `0.70.0` | Added `PATCH /api/v1/projects/{project_id}/issues/{ref}/labels`, which applies `add` and `remove` label lists in one transaction and answers with the issue's resulting `labels`. |

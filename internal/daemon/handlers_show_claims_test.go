@@ -443,7 +443,7 @@ func TestShowIssueClaimIncludeDeletedSkipsClaimHydration(t *testing.T) {
 		Now:       time.Now().UTC(),
 	})
 	require.NoError(t, err)
-	_, _, changed, err := env.DB.SoftDeleteIssue(ctx, issue.ID, "tester")
+	_, _, changed, err := env.DB.SoftDeleteIssue(ctx, issue.ID, "tester", "")
 	require.NoError(t, err)
 	require.True(t, changed)
 

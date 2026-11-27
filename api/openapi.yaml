@@ -1481,6 +1481,7 @@ components:
         actor:
           type: string
         reason:
+          description: Why the issue is removed. Delete records it on the issue.soft_deleted event; purge stores it in purge_log.reason.
           type: string
       required:
         - actor
@@ -7818,7 +7819,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.72.0
+  version: 0.73.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:

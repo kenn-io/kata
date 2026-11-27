@@ -117,7 +117,8 @@ func wrapCommentTags(tags string, width int) []string {
 // "[type] timestamp actor — description". issue.closed events expand
 // to additional indented lines surfacing the close message and each
 // evidence item so reviewers can audit the close from the events tab
-// without dropping to `kata audit closes`.
+// without dropping to `kata audit closes`; issue.soft_deleted events with
+// a reason add wrapped "reason:" rows.
 func eventChunks(es []EventLogEntry, width, cursor int, ts tabState) []entryChunk {
 	if placeholder := tabPlaceholder(ts, "events", "(no events yet)", len(es)); placeholder != nil {
 		return []entryChunk{*placeholder}

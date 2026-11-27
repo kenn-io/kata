@@ -210,7 +210,8 @@ type Storage interface {
 	// idempotency lock can compare those events with the persisted receipt.
 	CloseIssueGuarded(ctx context.Context, p CloseIssueParams) (Issue, []Event, bool, error)
 	ReopenIssue(ctx context.Context, issueID int64, actor string) (Issue, *Event, bool, error)
-	SoftDeleteIssue(ctx context.Context, issueID int64, actor string) (Issue, *Event, bool, error)
+	// SoftDeleteIssue records a non-empty reason on its issue.soft_deleted event.
+	SoftDeleteIssue(ctx context.Context, issueID int64, actor, reason string) (Issue, *Event, bool, error)
 	RestoreIssue(ctx context.Context, issueID int64, actor string) (Issue, *Event, bool, error)
 	PurgeIssue(ctx context.Context, issueID int64, actor string, reason *string) (PurgeLog, error)
 	// PurgeProject permanently deletes an archived project and all its

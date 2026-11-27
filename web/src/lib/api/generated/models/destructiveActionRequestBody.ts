@@ -4,5 +4,6 @@
 
 export interface DestructiveActionRequestBody {
   actor: string
+  /** Why the issue is removed. Delete records it on the issue.soft_deleted event; purge stores it in purge_log.reason. */
   reason?: string
 }

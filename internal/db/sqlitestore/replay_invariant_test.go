@@ -96,7 +96,7 @@ func TestReplayInvariant_ProjectProjectionMatchesDirectWrites(t *testing.T) {
 	_, _, changed, err = d.ReopenIssue(ctx, a.ID, "agent")
 	require.NoError(t, err)
 	require.True(t, changed)
-	_, _, changed, err = d.SoftDeleteIssue(ctx, a.ID, "agent")
+	_, _, changed, err = d.SoftDeleteIssue(ctx, a.ID, "agent", "")
 	require.NoError(t, err)
 	require.True(t, changed)
 	_, _, changed, err = d.RestoreIssue(ctx, a.ID, "agent")

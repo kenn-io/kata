@@ -17,7 +17,7 @@ func TestSyncFederationPurgeMoveWhileSourceOffline(t *testing.T) {
 	}
 	_, err = hub.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: issue.Revision, Actor: "worker"})
 	require.NoError(t, err)
-	_, _, _, err = hub.DB.SoftDeleteIssue(t.Context(), issue.ID, "worker")
+	_, _, _, err = hub.DB.SoftDeleteIssue(t.Context(), issue.ID, "worker", "")
 	require.NoError(t, err)
 	_, err = hub.DB.PurgeIssue(t.Context(), issue.ID, "worker", nil)
 	require.NoError(t, err)

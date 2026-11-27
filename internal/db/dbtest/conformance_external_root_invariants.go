@@ -347,7 +347,7 @@ func checkExternalRootSafetyInvariants(t *testing.T, store db.Storage, backend B
 
 	t.Run("soft delete requires an external root to be unbound first", func(t *testing.T) {
 		fixture := newExternalRootSafetyFixture(t, store, "soft-delete")
-		_, event, changed, err := store.SoftDeleteIssue(ctx, fixture.issue.ID, "tester")
+		_, event, changed, err := store.SoftDeleteIssue(ctx, fixture.issue.ID, "tester", "")
 		assert.ErrorIs(t, err, db.ErrExternalRootContentOwned)
 		assert.False(t, changed)
 		assert.Nil(t, event)

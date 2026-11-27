@@ -220,12 +220,12 @@ func (s *projectAccessBeforeIssueMutationStore) PatchIssueMetadata(
 }
 
 func (s *projectAccessBeforeIssueMutationStore) SoftDeleteIssue(
-	ctx context.Context, issueID int64, actor string,
+	ctx context.Context, issueID int64, actor, reason string,
 ) (db.Issue, *db.Event, bool, error) {
 	if err := s.runBefore(ctx, issueID); err != nil {
 		return db.Issue{}, nil, false, err
 	}
-	return s.Storage.SoftDeleteIssue(ctx, issueID, actor)
+	return s.Storage.SoftDeleteIssue(ctx, issueID, actor, reason)
 }
 
 func (s *projectAccessBeforeIssueMutationStore) RestoreIssue(
@@ -750,7 +750,7 @@ func TestProjectAccessPreservesSoftDeletedShowReads(t *testing.T) {
 			ProjectID: f.public.ID, Title: "Readable deleted issue", Author: "member",
 		})
 		require.NoError(t, err)
-		_, _, _, err = store.SoftDeleteIssue(t.Context(), deleted.ID, "member")
+		_, _, _, err = store.SoftDeleteIssue(t.Context(), deleted.ID, "member", "")
 		require.NoError(t, err)
 		status, _, body := f.request(t, http.MethodGet,
 			fmt.Sprintf("/api/v1/projects/%d/issues/%s?include_deleted=true", f.public.ID, deleted.ShortID),
@@ -770,7 +770,7 @@ func TestProjectAccessPreservesSoftDeletedShowReads(t *testing.T) {
 			FromIssueID: live.ID, ToIssueID: deletedPeer.ID, Type: "related", Author: "member",
 		})
 		require.NoError(t, err)
-		_, _, _, err = store.SoftDeleteIssue(t.Context(), deletedPeer.ID, "member")
+		_, _, _, err = store.SoftDeleteIssue(t.Context(), deletedPeer.ID, "member", "")
 		require.NoError(t, err)
 		status, _, body = f.request(t, http.MethodGet,
 			fmt.Sprintf("/api/v1/projects/%d/issues/%s", f.public.ID, live.ShortID),
@@ -1903,7 +1903,7 @@ func TestProjectAccessAnonymousPrivateNetworkLeaseActions(t *testing.T) {
 func TestProjectAccessArchivedSelectionIsIndistinguishable(t *testing.T) {
 	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
 		f := newProjectAccessFixture(t, store)
-		_, _, _, err := store.SoftDeleteIssue(t.Context(), f.issue.ID, "member")
+		_, _, _, err := store.SoftDeleteIssue(t.Context(), f.issue.ID, "member", "")
 		require.NoError(t, err)
 		ctx := db.WithAuthorizedProjects(t.Context(), []string{f.public.UID})
 		data, err := store.(db.UIStore).ReadUISnapshot(ctx, db.UISnapshotQuery{View: "all-open", SelectedIssueUID: f.issue.UID})
