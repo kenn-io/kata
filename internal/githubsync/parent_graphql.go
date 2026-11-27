@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"go.kenn.io/kata/internal/httpurl"
 	"go.kenn.io/kata/internal/issuesync"
 )
 
@@ -347,23 +348,7 @@ func retryWait(header http.Header, now time.Time) time.Duration {
 }
 
 func retryAfterWait(value string, now time.Time) (time.Duration, bool) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return 0, false
-	}
-	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil {
-		const maxDurationSeconds = int64(1<<63-1) / int64(time.Second)
-		if seconds > maxDurationSeconds {
-			return time.Duration(1<<63 - 1), true
-		}
-		return time.Duration(seconds) * time.Second, true
-	}
-	resetAt, err := http.ParseTime(value)
-	if err != nil {
-		return 0, false
-	}
-	wait := max(resetAt.Sub(now), 0)
-	return wait, true
+	return httpurl.RetryAfterWait(value, now)
 }
 
 func rateLimitResetWait(value string, now time.Time) (time.Duration, bool) {

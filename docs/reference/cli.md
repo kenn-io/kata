@@ -84,7 +84,7 @@ Kata writes errors to stderr in your selected output mode.
 | 4 | Not found. |
 | 5 | Conflict. |
 | 6 | Confirmation required. |
-| 7 | Daemon unavailable. |
+| 7 | Daemon unavailable or server busy. |
 | 8 | Wait timeout. |
 
 CLI panics exit with code 1 as internal errors, while daemon and background task
@@ -2223,6 +2223,9 @@ request may already have reached the daemon, the diagnostic also says
 Failures known to occur before transmission omit that warning. Other remote
 services, including federation hubs, keep their command-specific error
 classification.
+
+When a server remains busy after retries, commands report `server_busy` and
+exit with code 7. The message identifies the server that refused the request.
 
 `kata agent-instructions` is an alias for `kata quickstart`. For TCP listener
 auth modes, including trusted private-network bearer auth, read-only

@@ -17,6 +17,7 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 
 	"go.kenn.io/kata/internal/agentguide"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/textsafe"
 	"go.kenn.io/kit/atomicfile"
@@ -91,6 +92,7 @@ const (
 	kindConflict      errKind = "conflict"
 	kindConfirm       errKind = "confirm"
 	kindDaemonUnavail errKind = "daemon_unavailable"
+	kindServerBusy    errKind = "server_busy"
 	kindInternal      errKind = "internal"
 	kindChecksFailed  errKind = "checks_failed"
 )
@@ -817,21 +819,26 @@ func apiErrFromBody(status int, bs []byte) *cliError {
 			ExitCode:   mapStatusToExit(status, ""),
 		}
 	}
+	kind := kindForStatus(status)
+	if env.Error.Code == api.CodeServerBusy {
+		kind = kindServerBusy
+	}
 	return &cliError{
 		HTTPStatus: status,
 		Hint:       env.Error.Hint,
 		Message:    env.Error.Message,
 		Code:       env.Error.Code,
-		Kind:       kindForStatus(status),
+		Kind:       kind,
 		ExitCode:   mapStatusToExit(status, env.Error.Code),
 		Data:       env.Error.Data,
 	}
 }
 
-// mapStatusToExit maps an HTTP status to a CLI exit code. The code parameter
-// is reserved for future per-code overrides (e.g. distinguishing
-// project_not_found from project_not_initialized within 404s).
-func mapStatusToExit(status int, _ string) int {
+// mapStatusToExit maps an HTTP status and error code to a CLI exit code.
+func mapStatusToExit(status int, code string) int {
+	if code == api.CodeServerBusy {
+		return ExitDaemonUnavail
+	}
 	switch status {
 	case http.StatusBadRequest:
 		return ExitValidation

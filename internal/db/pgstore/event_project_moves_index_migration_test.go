@@ -15,11 +15,13 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-// dropSchema53ProjectMovesIndex returns a fresh schema's events indexes to
-// their schema 52 shape. Older fixtures reach it through
-// restoreSchema50EventIndex; it does nothing once the index is gone.
+// dropSchema53ProjectMovesIndex returns a fresh schema's indexes to their
+// schema 52 shape, including the later schema 56 issue metadata index. Older
+// fixtures reach it through restoreSchema50EventIndex; it does nothing once
+// the indexes are gone.
 func dropSchema53ProjectMovesIndex(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
 	t.Helper()
+	dropSchema56IssueMetadataIndex(ctx, t, admin, schema)
 	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP INDEX IF EXISTS %s.idx_events_project_moves`, schema)) // #nosec G201 -- schema is a fixed test identifier.
 	require.NoError(t, err)
 }

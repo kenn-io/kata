@@ -67,6 +67,7 @@ func registerFederationBridgeConnect(humaAPI huma.API, cfg ServerConfig) {
 		if err := policy.ConfigureClient(httpClient, hubURL, token); err != nil {
 			return nil, api.NewError(400, "validation", "hub credential target violates transport policy", "", nil)
 		}
+		observeHubBusy(httpClient)
 		bridge, err := newFederationBridgeAPIClient(httpClient, hubURL)
 		if err != nil {
 			return nil, internalAPIError(err)
@@ -372,6 +373,9 @@ type federationBridgeDoer struct{ client *http.Client }
 func (d federationBridgeDoer) Do(ctx context.Context, request *http.Request) (*http.Response, error) {
 	response, err := d.client.Do(request.WithContext(ctx)) //nolint:gosec // G704: generated routes use the explicitly configured, origin-pinned hub client.
 	if err != nil {
+		if busy := forwardedHubBusy(err); busy != nil {
+			return nil, busy
+		}
 		return nil, api.NewError(503, "hub_unavailable", "selected hub request failed", "retry the same bridge connection", nil)
 	}
 	originalBody := response.Body
@@ -427,6 +431,9 @@ func federationBridgeHubStatus(err error) (int, bool) {
 
 func decodeFederationBridgeResponse(raw []byte, callErr error, output any) error {
 	if callErr != nil {
+		if busy := forwardedHubBusy(callErr); busy != nil {
+			return busy
+		}
 		if apiErr, ok := errors.AsType[*api.APIError](callErr); ok {
 			return apiErr
 		}

@@ -40,37 +40,18 @@ type federationPollWaits struct {
 	total        int
 	maxTotal     int
 	byCredential map[int64]int
-	// signed counts held polls that also hold a federation control admission
-	// slot. They may use at most half of those slots, so held polls never
-	// starve metadata, lease and ordinary poll requests.
-	signed    int
-	maxSigned int
-	remote    *federationPollWakeBus
+	remote       *federationPollWakeBus
 	// instance tags this process's notifications so it ignores its own.
 	instance string
 }
 
-func newFederationPollWaits(controlAdmissionSlots, cpus int) *federationPollWaits {
+func newFederationPollWaits(cpus int) *federationPollWaits {
 	return &federationPollWaits{
 		byCredential: map[int64]int{},
 		maxTotal:     min(federationPollMaxWaiters, federationPollMaxWaitersPerCPU*cpus),
-		maxSigned:    controlAdmissionSlots / 2,
 		remote:       newFederationPollWakeBus(),
 		instance:     rand.Text(),
 	}
-}
-
-type federationControlAdmissionContextKey struct{}
-
-// withFederationControlAdmission marks a request that holds a federation
-// control admission slot for its whole lifetime.
-func withFederationControlAdmission(ctx context.Context) context.Context {
-	return context.WithValue(ctx, federationControlAdmissionContextKey{}, true)
-}
-
-func holdsFederationControlAdmission(ctx context.Context) bool {
-	held, _ := ctx.Value(federationControlAdmissionContextKey{}).(bool)
-	return held
 }
 
 // federationPollWait validates the requested wait and returns how long this
@@ -99,7 +80,6 @@ type federationPollWaiter struct {
 	remote       *federationPollWakeSub
 	unsubRemote  func()
 	enrollmentID int64
-	signed       bool
 }
 
 // admit reserves one held poll for projects, or reports false when a bound is
@@ -107,20 +87,15 @@ type federationPollWaiter struct {
 // connection, goroutine and subscription. The subscriptions start here,
 // before the caller's first read, so an event that commits after that read
 // still wakes the poll.
-func (w *federationPollWaits) admit(ctx context.Context, broadcaster *EventBroadcaster, enrollmentID int64, projects ...db.Project) (*federationPollWaiter, bool) {
-	signed := holdsFederationControlAdmission(ctx)
+func (w *federationPollWaits) admit(broadcaster *EventBroadcaster, enrollmentID int64, projects ...db.Project) (*federationPollWaiter, bool) {
 	w.mu.Lock()
 	if w.total >= w.maxTotal ||
-		w.byCredential[enrollmentID] >= min(federationPollMaxWaitersPerCredential, w.maxTotal/2) ||
-		(signed && w.signed >= w.maxSigned) {
+		w.byCredential[enrollmentID] >= min(federationPollMaxWaitersPerCredential, w.maxTotal/2) {
 		w.mu.Unlock()
 		return nil, false
 	}
 	w.total++
 	w.byCredential[enrollmentID]++
-	if signed {
-		w.signed++
-	}
 	w.mu.Unlock()
 	watched := make(map[int64]string, len(projects))
 	for _, project := range projects {
@@ -130,7 +105,7 @@ func (w *federationPollWaits) admit(ctx context.Context, broadcaster *EventBroad
 	return &federationPollWaiter{
 		waits: w, broadcaster: broadcaster,
 		local: broadcaster.Subscribe(SubFilter{Projects: watched}), remote: remote, unsubRemote: unsubRemote,
-		enrollmentID: enrollmentID, signed: signed,
+		enrollmentID: enrollmentID,
 	}, true
 }
 
@@ -143,9 +118,6 @@ func (p *federationPollWaiter) release() {
 	w.total--
 	if w.byCredential[p.enrollmentID]--; w.byCredential[p.enrollmentID] <= 0 {
 		delete(w.byCredential, p.enrollmentID)
-	}
-	if p.signed {
-		w.signed--
 	}
 }
 

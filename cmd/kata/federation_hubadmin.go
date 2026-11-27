@@ -258,7 +258,7 @@ func ambiguousHubCatalogOriginError() error {
 
 // hubAdminClient builds an HTTP client for the resolved hub admin auth.
 func hubAdminClient(ctx context.Context, a hubAdminAuth) (*http.Client, error) {
-	opts := clientpkg.Opts{Timeout: envHTTPTimeout(defaultHTTPTimeout), AllowInsecure: a.allowInsecure}
+	opts := clientpkg.Opts{Timeout: envHTTPTimeout(BusyRetryBudget), AllowInsecure: a.allowInsecure}
 	auth, err := config.ReadAuthConfigForPolicy()
 	if err != nil {
 		auth.TrustPrivateNetwork = config.EnvTruthy("KATA_TRUST_PRIVATE_NETWORK")
@@ -268,10 +268,15 @@ func hubAdminClient(ctx context.Context, a hubAdminAuth) (*http.Client, error) {
 	// client is unauthenticated — never fall back to NewHTTPClient, which
 	// would attach the local daemon's global KATA_AUTH_TOKEN/[auth].token to
 	// the (stored, potentially hostile) hub URL.
-	return clientpkg.NewHTTPClientForTarget(ctx, a.url,
+	hc, err := clientpkg.NewHTTPClientForTarget(ctx, a.url,
 		clientpkg.TargetAuth{
 			Token:               strings.TrimSpace(a.token),
 			AllowInsecure:       a.allowInsecure,
 			TrustPrivateNetwork: auth.TrustPrivateNetwork,
 		}, opts)
+	if err != nil {
+		return nil, err
+	}
+	configureBusy(hc, envHTTPTimeout(BusyRetryBudget), false)
+	return hc, nil
 }

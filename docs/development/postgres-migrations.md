@@ -542,3 +542,25 @@ The version prevents older binaries from deleting held federation edits during a
 Schema 55 changes only the recorded version. It prevents older binaries from
 deleting local-only federation events during a reset. Run `kata storage postgres migrate`
 with schema-owner credentials before starting the new binary. SQLite upgrades in place.
+
+## Schema 56: issue metadata index
+
+A metadata key filter, such as `kata list --all --meta work.attention`, read
+every issue's metadata, so its cost grew with the whole issue table. The
+55→56 migration adds `idx_issues_metadata`, a GIN index on
+`issues(metadata::jsonb)`, then runs `ANALYZE issues`. Key filters now find
+matching issues through the index. On 100,000 issues in 50 projects, with 200
+carrying the key, the filtered list took about 6 ms instead of 27 ms; on
+1,000,000 issues, about 43 ms instead of 121 ms. The index was about 2.5% of
+the issue table's size. Filters on a key and value (`--meta key=value`) are
+unchanged. Fresh PostgreSQL databases include the same index; SQLite has no
+equivalent index and only records the new version.
+
+Stop serving daemons and imports, back up the database, and run
+`kata storage postgres migrate` with schema-owner credentials. Building the
+index reads `issues` and blocks issue writes; it took about half a second for
+1,000,000 issues, so allow an offline window that fits the table's size.
+Existing table grants remain sufficient, and runtime credentials cannot
+migrate. SQLite upgrades in place. Start the matching schema 56 binary after
+migration. Older binaries cannot open schema 56; rollback requires the
+pre-upgrade backup and matching older binary.

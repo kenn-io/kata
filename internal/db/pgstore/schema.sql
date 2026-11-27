@@ -154,6 +154,7 @@ CREATE INDEX idx_issues_project_created
   ON issues(project_id, created_at, id) WHERE deleted_at IS NULL;
 CREATE INDEX idx_issues_created
   ON issues(created_at, id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_issues_metadata ON issues USING GIN ((metadata::jsonb));
 CREATE INDEX idx_issues_project_ready_priority
   ON issues(project_id, COALESCE(priority, 5), updated_at DESC, id DESC)
   WHERE status = 'open' AND deleted_at IS NULL;

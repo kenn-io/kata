@@ -803,6 +803,9 @@ func claimHubNow(claim *api.IssueClaimOut) time.Time {
 }
 
 func claimForwardError(err error) error {
+	if busy := forwardedHubBusy(err); busy != nil {
+		return busy
+	}
 	if statusErr, ok := errors.AsType[*claimHubStatusError](err); ok {
 		if statusErr.StatusCode == http.StatusUnauthorized {
 			return federationBridgeHubRejection(statusErr.StatusCode)
@@ -816,6 +819,9 @@ func claimForwardError(err error) error {
 }
 
 func isTransportClaimError(err error) bool {
+	if forwardedHubBusy(err) != nil {
+		return false
+	}
 	var statusErr *claimHubStatusError
 	return !errors.As(err, &statusErr)
 }
@@ -897,6 +903,7 @@ func newClaimHubClient(
 			return nil, err
 		}
 	}
+	observeHubBusy(httpClient)
 	return &claimHubClient{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		client:  httpClient,

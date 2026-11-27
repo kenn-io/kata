@@ -1005,7 +1005,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		var waiter *federationPollWaiter
 		if wait > 0 && in.IssueUID == "" && heldFederationPollAllowed(requestCtx) {
 			var admitted bool
-			if waiter, admitted = cfg.federationPollWaits.admit(requestCtx, cfg.Broadcaster, principal.EnrollmentID, project); admitted {
+			if waiter, admitted = cfg.federationPollWaits.admit(cfg.Broadcaster, principal.EnrollmentID, project); admitted {
 				defer waiter.release()
 			}
 		}
@@ -1278,6 +1278,9 @@ func abortFederationReplicaLeave(
 }
 
 func federationReplicaAPIError(err error) error {
+	if busy := forwardedHubBusy(err); busy != nil {
+		return busy
+	}
 	if apiErr := relayCrossProjectLinksAPIError(err); apiErr != nil {
 		return apiErr
 	}
