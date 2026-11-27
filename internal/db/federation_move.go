@@ -103,6 +103,14 @@ func RecordFederationAcknowledgedEvents(ctx context.Context, tx *sql.Tx, project
 	return nil
 }
 
+// IsFederationEventAcknowledged reports whether eventUID has an out-of-order
+// hub acknowledgement marker for projectID.
+func IsFederationEventAcknowledged(ctx context.Context, q moveQuery, projectID int64, eventUID string) (bool, error) {
+	var acknowledged bool
+	err := q.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM meta m JOIN projects p ON p.id=$1 WHERE m.key=$2 || p.uid || '.' || $3 AND m.value='1')`, projectID, FederationAcknowledgedEventPrefix, eventUID).Scan(&acknowledged)
+	return acknowledged, err
+}
+
 // FoldFederationAcknowledgedEvents advances only through consecutive accepted events.
 func FoldFederationAcknowledgedEvents(ctx context.Context, tx *sql.Tx, projectID int64, origin string) error {
 	var cursor int64

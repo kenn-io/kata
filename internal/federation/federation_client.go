@@ -191,6 +191,7 @@ type IngestProjectEventsOptions struct {
 	MoveSourceTokens           map[string]string
 	AdoptionBaseline           string
 	AdoptionBaselineEndEventID int64
+	PartialNotEnrolled         bool
 }
 
 // IngestProjectEventsWithOptions pushes local spoke events with optional
@@ -247,7 +248,15 @@ func (c *Client) IngestProjectEventsWithOptions(
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return api.FederationIngestEventsBody{}, err
 	}
-	response, callErr := apiClient.IngestFederationProjectEventsWithResponse(ctx, &generated.IngestFederationProjectEventsRequestOptions{PathParams: &generated.IngestFederationProjectEventsPath{ProjectID: hubProjectID}, Body: &payload})
+	var query *generated.IngestFederationProjectEventsQuery
+	if opts.PartialNotEnrolled {
+		query = &generated.IngestFederationProjectEventsQuery{PartialNotEnrolled: new(true)}
+	}
+	response, callErr := apiClient.IngestFederationProjectEventsWithResponse(ctx, &generated.IngestFederationProjectEventsRequestOptions{
+		PathParams: &generated.IngestFederationProjectEventsPath{ProjectID: hubProjectID},
+		Query:      query,
+		Body:       &payload,
+	})
 	var body api.FederationIngestEventsBody
 	if response == nil {
 		return body, callErr

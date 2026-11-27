@@ -373,6 +373,7 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
+| `0.72.0` | Direct-spoke ingest (`POST /api/v1/projects/{project_id}/federation/events:ingest`) accepts optional `partial_not_enrolled=true` and returns optional `refused_events` for events touching issues in unenrolled projects (plus intra-batch dependents) while accepting unrelated events in the same batch. |
 | `0.71.0` | Federation event watches hold one request for many projects; event polls advertise `X-Kata-Federation-Watch-Max`. |
 | `0.70.0` | Added `PATCH /api/v1/projects/{project_id}/issues/{ref}/labels`, which applies `add` and `remove` label lists in one transaction and answers with the issue's resulting `labels`. |
 | `0.69.0` | Close responses can include a `parent_ready` issue reference. |

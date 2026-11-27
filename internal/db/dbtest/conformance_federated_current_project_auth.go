@@ -348,3 +348,292 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 
 	return nil
 }
+
+// checkFederatedPartialNotEnrolledIngest verifies per-event refusal for
+// unenrolled current projects, intra-batch causal dependency propagation,
+// hard-error rollback, and spoke out-of-order acknowledgement folding.
+func checkFederatedPartialNotEnrolledIngest(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	source, target, moved, _ := federatedRehomeFixture(t, store, "partial-not-enrolled")
+	_, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: moved.ID, FromProjectID: source.ID, ToProjectID: target.ID,
+		IfMatchRev: moved.Revision, Actor: "worker",
+	})
+	require.NoError(t, err)
+	stayingA, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "Staying A", Author: "worker"})
+	require.NoError(t, err)
+	stayingB, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "Staying B", Author: "worker"})
+	require.NoError(t, err)
+	movedComment, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: moved.ID, Author: "worker", Body: "comment on moved"})
+	require.NoError(t, err)
+
+	origin, err := uid.New()
+	require.NoError(t, err)
+	grant, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+		SpokeInstanceUID: origin, ProjectID: &source.ID, Capabilities: "push,pull", Actor: "worker",
+	})
+	require.NoError(t, err)
+	at := time.Now().Add(time.Hour).UnixMilli()
+
+	// Mixed batch: [before, stuck, after] accepts before and after while refusing stuck.
+	beforeEv := newRemoteEvent(t, source, &stayingA.UID, "issue.updated", "worker", origin, at+1, jsontext.Value(`{"title":"Staying A updated"}`))
+	stuckEv := newRemoteEvent(t, source, &moved.UID, "issue.updated", "worker", origin, at+2, jsontext.Value(`{"title":"Should stay refused"}`))
+	afterEv := newRemoteEvent(t, source, &stayingB.UID, "issue.updated", "worker", origin, at+3, jsontext.Value(`{"title":"Staying B updated"}`))
+	baseParams := db.FederationIngestParams{
+		ProjectID:               source.ID,
+		FederationEnrollmentID:  grant.Enrollment.ID,
+		SpokeInstanceUID:        origin,
+		BoundActor:              "worker",
+		EventFeatures:           db.SupportedEventFeatures,
+		AllowPartialNotEnrolled: true,
+	}
+	params := baseParams
+	params.Events = []db.FederationIngestEvent{
+		{SourceEventID: 10, Event: beforeEv},
+		{SourceEventID: 11, Event: stuckEv},
+		{SourceEventID: 12, Event: afterEv},
+	}
+	res, err := store.IngestFederationEvents(ctx, params)
+	require.NoError(t, err)
+	require.Equal(t, 2, res.Accepted)
+	require.Zero(t, res.Duplicates)
+	require.EqualValues(t, 10, res.PushCursorEventID, "cursor stops before first refused event")
+	require.Len(t, res.RefusedEvents, 1)
+	require.Equal(t, int64(11), res.RefusedEvents[0].SourceEventID)
+	require.Equal(t, stuckEv.EventUID, res.RefusedEvents[0].EventUID)
+	require.Equal(t, db.FederationProjectNotEnrolledCode, res.RefusedEvents[0].Code)
+	require.Equal(t, moved.UID, res.RefusedEvents[0].IssueUID)
+	gotA, err := store.IssueByUID(ctx, stayingA.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "Staying A updated", gotA.Title)
+	gotB, err := store.IssueByUID(ctx, stayingB.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "Staying B updated", gotB.Title)
+	gotMoved, err := store.IssueByUID(ctx, moved.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, moved.Title, gotMoved.Title)
+
+	// All-refused batch returns 0 accepted, 0 cursor, and lists every refused event when opted in,
+	// and returns FederationProjectNotEnrolledError when AllowPartialNotEnrolled is false.
+	stuck2 := newRemoteEvent(t, source, &moved.UID, "issue.updated", "worker", origin, at+4, jsontext.Value(`{"title":"Second stuck"}`))
+	params = baseParams
+	params.Events = []db.FederationIngestEvent{
+		{SourceEventID: 20, Event: stuckEv},
+		{SourceEventID: 21, Event: stuck2},
+	}
+	allRefused, err := store.IngestFederationEvents(ctx, params)
+	require.NoError(t, err)
+	require.Zero(t, allRefused.Accepted)
+	require.Zero(t, allRefused.Duplicates)
+	require.Zero(t, allRefused.PushCursorEventID)
+	require.Len(t, allRefused.RefusedEvents, 2)
+	require.Equal(t, stuckEv.EventUID, allRefused.RefusedEvents[0].EventUID)
+	require.Equal(t, stuck2.EventUID, allRefused.RefusedEvents[1].EventUID)
+
+	strict := params
+	strict.AllowPartialNotEnrolled = false
+	_, err = store.IngestFederationEvents(ctx, strict)
+	var notEnrolled *db.FederationProjectNotEnrolledError
+	require.ErrorAs(t, err, &notEnrolled)
+	require.Equal(t, moved.UID, notEnrolled.IssueUID)
+
+	// In-batch duplicate of a refused event is refused (not counted as duplicate).
+	okAfterDup := newRemoteEvent(t, source, &stayingA.UID, "issue.updated", "worker", origin, at+5, jsontext.Value(`{"title":"After dup"}`))
+	params = baseParams
+	params.Events = []db.FederationIngestEvent{
+		{SourceEventID: 22, Event: stuckEv},
+		{SourceEventID: 23, Event: stuckEv},
+		{SourceEventID: 24, Event: okAfterDup},
+	}
+	dupRes, err := store.IngestFederationEvents(ctx, params)
+	require.NoError(t, err)
+	require.Equal(t, 1, dupRes.Accepted)
+	require.Zero(t, dupRes.Duplicates)
+	require.Zero(t, dupRes.PushCursorEventID)
+	require.Len(t, dupRes.RefusedEvents, 2)
+
+	// Intra-batch causal dependency: creation linking to moved issue + follow-up edit on created issue.
+	createdUID, err := uid.New()
+	require.NoError(t, err)
+	createdPayload, err := json.Marshal(map[string]any{
+		"uid": createdUID, "short_id": "abcd", "title": "Created linking moved", "body": "",
+		"author": "worker", "status": "open", "created_at": time.UnixMilli(at + 6).UTC().Format(time.RFC3339Nano),
+		"metadata": map[string]any{},
+		"links":    []map[string]any{{"type": "blocks", "to_issue_uid": moved.UID}},
+	})
+	require.NoError(t, err)
+	createLinked := newRemoteEvent(t, source, &createdUID, "issue.created", "worker", origin, at+6, jsontext.Value(createdPayload))
+	editCreated := newRemoteEvent(t, source, &createdUID, "issue.updated", "worker", origin, at+7, jsontext.Value(`{"title":"Follow-up edit"}`))
+	unrelated := newRemoteEvent(t, source, &stayingB.UID, "issue.updated", "worker", origin, at+8, jsontext.Value(`{"title":"Unrelated after dep"}`))
+	params = baseParams
+	params.Events = []db.FederationIngestEvent{
+		{SourceEventID: 30, Event: createLinked},
+		{SourceEventID: 31, Event: editCreated},
+		{SourceEventID: 32, Event: unrelated},
+	}
+	depRes, err := store.IngestFederationEvents(ctx, params)
+	require.NoError(t, err)
+	require.Equal(t, 1, depRes.Accepted)
+	require.Zero(t, depRes.PushCursorEventID)
+	require.Len(t, depRes.RefusedEvents, 2)
+	require.Equal(t, createLinked.EventUID, depRes.RefusedEvents[0].EventUID)
+	require.Equal(t, editCreated.EventUID, depRes.RefusedEvents[1].EventUID)
+	require.Equal(t, moved.UID, depRes.RefusedEvents[1].IssueUID)
+	_, err = store.IssueByUID(ctx, createdUID, db.IncludeDeletedYes)
+	require.ErrorIs(t, err, db.ErrNotFound)
+	gotB, err = store.IssueByUID(ctx, stayingB.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "Unrelated after dep", gotB.Title)
+
+	// Comment causal dependency: reply to comment on moved issue + edit of that reply.
+	replyCommentUID, err := uid.New()
+	require.NoError(t, err)
+	replyPayload, err := json.Marshal(map[string]any{
+		"comment_uid": replyCommentUID, "body": "reply to moved", "author": "worker",
+		"reply_to_uid": movedComment.UID, "reply_kind": "reply",
+	})
+	require.NoError(t, err)
+	replyEv := newRemoteEvent(t, source, &stayingA.UID, "issue.commented", "worker", origin, at+9, jsontext.Value(replyPayload))
+	replyEv.RelatedIssueUID = &moved.UID
+	replyEv.ContentHash, err = db.RemoteEventContentHash(replyEv)
+	require.NoError(t, err)
+	editReplyPayload, err := json.Marshal(map[string]any{"comment_uid": replyCommentUID, "body": "edited reply"})
+	require.NoError(t, err)
+	editReplyEv := newRemoteEvent(t, source, &stayingA.UID, "issue.comment_edited", "worker", origin, at+10, jsontext.Value(editReplyPayload))
+	unrelated2 := newRemoteEvent(t, source, &stayingB.UID, "issue.updated", "worker", origin, at+11, jsontext.Value(`{"title":"Unrelated after reply"}`))
+	params = baseParams
+	params.Events = []db.FederationIngestEvent{
+		{SourceEventID: 40, Event: replyEv},
+		{SourceEventID: 41, Event: editReplyEv},
+		{SourceEventID: 42, Event: unrelated2},
+	}
+	replyRes, err := store.IngestFederationEvents(ctx, params)
+	require.NoError(t, err)
+	require.Equal(t, 1, replyRes.Accepted)
+	require.Len(t, replyRes.RefusedEvents, 2)
+	require.Equal(t, replyEv.EventUID, replyRes.RefusedEvents[0].EventUID)
+	require.Equal(t, editReplyEv.EventUID, replyRes.RefusedEvents[1].EventUID)
+
+	// Implicit displaced parent in unenrolled project: refuses only the displacing event
+	// with empty IssueUID (preserving privacy), while accepting an unrelated sibling event.
+	peerGrant, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+		SpokeInstanceUID: origin, ProjectID: &target.ID, Capabilities: "push", Actor: "peer-member",
+	})
+	require.NoError(t, err)
+	childIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "Child with hidden parent", Author: "worker"})
+	require.NoError(t, err)
+	_, _, err = store.CreateLinkAndEvent(ctx,
+		db.CreateLinkParams{FromIssueID: childIssue.ID, ToIssueID: moved.ID, Type: "parent", Author: "worker"},
+		db.LinkEventParams{EventType: "issue.linked", EventIssueID: childIssue.ID, FromUID: childIssue.UID, FromShortID: childIssue.ShortID, ToUID: moved.UID, ToShortID: moved.ShortID, Actor: "worker"},
+	)
+	require.NoError(t, err)
+	newParent, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "New local parent", Author: "worker"})
+	require.NoError(t, err)
+	displacePayload, err := json.Marshal(map[string]string{"parent_set_uid": newParent.UID})
+	require.NoError(t, err)
+	displaceEv := newRemoteEvent(t, source, &childIssue.UID, "issue.links_changed", "worker", origin, at+11, jsontext.Value(displacePayload))
+	unrelatedAfterDisplace := newRemoteEvent(t, source, &stayingB.UID, "issue.updated", "worker", origin, at+11, jsontext.Value(`{"title":"Unrelated after displace"}`))
+	params = baseParams
+	params.MoveSourceEnrollmentIDs = map[string]int64{target.UID: peerGrant.Enrollment.ID}
+	params.AuthorizeReference = func(_ context.Context, _ db.Transaction, _ db.FederationEnrollment, _ db.Project) error {
+		return nil
+	}
+	params.Events = []db.FederationIngestEvent{
+		{SourceEventID: 45, Event: displaceEv},
+		{SourceEventID: 46, Event: unrelatedAfterDisplace},
+	}
+	displaceRes, err := store.IngestFederationEvents(ctx, params)
+	require.NoError(t, err)
+	require.Equal(t, 1, displaceRes.Accepted)
+	require.Zero(t, displaceRes.PushCursorEventID)
+	require.Len(t, displaceRes.RefusedEvents, 1)
+	require.Equal(t, displaceEv.EventUID, displaceRes.RefusedEvents[0].EventUID)
+	require.Empty(t, displaceRes.RefusedEvents[0].IssueUID, "implicit displaced parent UID must not leak")
+	parentLink, err := store.ParentOf(ctx, childIssue.ID)
+	require.NoError(t, err)
+	require.Equal(t, moved.ID, parentLink.ToIssueID)
+	gotB, err = store.IssueByUID(ctx, stayingB.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "Unrelated after displace", gotB.Title)
+
+	// Hard error in the same batch still rolls back the entire batch.
+	hostDenied := errors.New("host denied")
+	otherTarget, err := store.CreateProject(ctx, "partial-host-denied")
+	require.NoError(t, err)
+	_, err = store.EnableProjectFederation(ctx, otherTarget.ID, "worker")
+	require.NoError(t, err)
+	otherIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "Host denied issue", Author: "worker"})
+	require.NoError(t, err)
+	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: otherIssue.ID, FromProjectID: source.ID, ToProjectID: otherTarget.ID,
+		IfMatchRev: otherIssue.Revision, Actor: "worker",
+	})
+	require.NoError(t, err)
+	otherGrant, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+		SpokeInstanceUID: origin, ProjectID: &otherTarget.ID, Capabilities: "push,pull", Actor: "worker",
+	})
+	require.NoError(t, err)
+	beforeHard := newRemoteEvent(t, source, &stayingA.UID, "issue.updated", "worker", origin, at+12, jsontext.Value(`{"title":"Must roll back"}`))
+	hardEv := newRemoteEvent(t, source, &otherIssue.UID, "issue.updated", "worker", origin, at+13, jsontext.Value(`{"title":"Host denied"}`))
+	params = baseParams
+	params.MoveSourceEnrollmentIDs = map[string]int64{otherTarget.UID: otherGrant.Enrollment.ID}
+	params.AuthorizeMove = func(_ context.Context, _ db.Transaction, _ db.FederationEnrollment, project db.Project) error {
+		if project.UID == otherTarget.UID {
+			return hostDenied
+		}
+		return nil
+	}
+	params.Events = []db.FederationIngestEvent{
+		{SourceEventID: 50, Event: beforeHard},
+		{SourceEventID: 51, Event: stuckEv},
+		{SourceEventID: 52, Event: hardEv},
+	}
+	_, err = store.IngestFederationEvents(ctx, params)
+	require.ErrorIs(t, err, hostDenied)
+	gotA, err = store.IssueByUID(ctx, stayingA.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "After dup", gotA.Title, "hard error must roll back earlier events in the batch")
+
+	// Spoke out-of-order acknowledgement folding.
+	spokeProj, err := store.CreateProject(ctx, "partial-spoke-ack")
+	require.NoError(t, err)
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: spokeProj.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example",
+		HubProjectID: 99, HubProjectUID: spokeProj.UID, Enabled: true, PushEnabled: true, Actor: "worker",
+	})
+	require.NoError(t, err)
+	_, e1, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spokeProj.ID, Title: "E1", Author: "worker"})
+	require.NoError(t, err)
+	_, e2, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spokeProj.ID, Title: "E2", Author: "worker"})
+	require.NoError(t, err)
+	_, e3, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spokeProj.ID, Title: "E3", Author: "worker"})
+	require.NoError(t, err)
+
+	require.NoError(t, store.AcknowledgeFederationPushEvents(ctx, spokeProj.ID, []string{e1.UID, e3.UID}))
+	binding, err := store.FederationBindingByProject(ctx, spokeProj.ID)
+	require.NoError(t, err)
+	require.Equal(t, e1.ID, binding.PushCursorEventID, "cursor folds through contiguous prefix only")
+	ackE3, err := store.IsFederationEventAcknowledged(ctx, spokeProj.ID, e3.UID)
+	require.NoError(t, err)
+	require.True(t, ackE3)
+	ackE2, err := store.IsFederationEventAcknowledged(ctx, spokeProj.ID, e2.UID)
+	require.NoError(t, err)
+	require.False(t, ackE2)
+	pending, err := store.PendingFederationPushEvents(ctx, spokeProj.ID, store.InstanceUID(), binding.PushCursorEventID, 100)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	require.Equal(t, e2.UID, pending[0].UID)
+	count, _, err := store.PendingFederationPushStats(ctx, spokeProj.ID, store.InstanceUID(), binding.PushCursorEventID)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, count)
+
+	require.NoError(t, store.AcknowledgeFederationPushEvents(ctx, spokeProj.ID, []string{e2.UID}))
+	binding, err = store.FederationBindingByProject(ctx, spokeProj.ID)
+	require.NoError(t, err)
+	require.Equal(t, e3.ID, binding.PushCursorEventID, "cursor folds through previously acknowledged E3 once E2 resolves")
+	pending, err = store.PendingFederationPushEvents(ctx, spokeProj.ID, store.InstanceUID(), binding.PushCursorEventID, 100)
+	require.NoError(t, err)
+	require.Empty(t, pending)
+
+	return nil
+}

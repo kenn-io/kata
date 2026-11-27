@@ -581,10 +581,11 @@ type FederationWatchEventsBody struct {
 // FederationIngestEventsRequest is the enrollment-authenticated push transport
 // route.
 type FederationIngestEventsRequest struct {
-	EventFeatures string `header:"X-Kata-Event-Features"`
-	ProjectID     int64  `path:"project_id"`
-	Authorization string `header:"Authorization"`
-	Body          FederationIngestEventsRequestBody
+	EventFeatures      string `header:"X-Kata-Event-Features"`
+	ProjectID          int64  `path:"project_id"`
+	Authorization      string `header:"Authorization"`
+	PartialNotEnrolled bool   `query:"partial_not_enrolled,omitempty" doc:"When true on a non-adoption push batch, accept authorized events and return refused_events for events touching issues in unenrolled projects instead of rejecting the entire batch with 403."`
+	Body               FederationIngestEventsRequestBody
 }
 
 // FederationIngestEventsRequestBody carries an all-or-nothing push batch.
@@ -628,6 +629,18 @@ type FederationIngestEventEnvelope struct {
 	CreatedAt         time.Time      `json:"created_at"`
 }
 
+// FederationIngestRefusedEvent describes one event withheld from a
+// partial_not_enrolled push batch because an affected issue currently belongs
+// to a project where the spoke lacks push enrollment with the same actor (or
+// because the event depends on such a withheld event in the same batch).
+type FederationIngestRefusedEvent struct {
+	EventID  int64  `json:"event_id"`
+	EventUID string `json:"event_uid"`
+	Code     string `json:"code"`
+	IssueUID string `json:"issue_uid,omitempty"`
+	Message  string `json:"message"`
+}
+
 // FederationIngestEventsBody summarizes an accepted push batch. Duplicates are
 // same-hash retries and still advance PushCursorEventID.
 type FederationIngestEventsBody struct {
@@ -638,6 +651,11 @@ type FederationIngestEventsBody struct {
 	// store because its project already holds the issue. The spoke deletes
 	// them and takes the hub's state on its next pull.
 	SupersededEventUIDs []string `json:"superseded_event_uids,omitempty"`
+	// RefusedEvents lists events withheld from a partial_not_enrolled push
+	// batch because an affected issue now belongs to an unenrolled project.
+	// PushCursorEventID advances only through the contiguous non-refused prefix
+	// (0 when the first event in the batch was refused).
+	RefusedEvents []FederationIngestRefusedEvent `json:"refused_events,omitempty"`
 }
 
 // FederationIngestEventsResponse wraps FederationIngestEventsBody.

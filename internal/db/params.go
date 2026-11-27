@@ -884,9 +884,22 @@ type FederationIngestParams struct {
 	SpokeInstanceUID                 string
 	BoundActor                       string
 	AllowSnapshotAuthorPreservation  bool
+	AllowPartialNotEnrolled          bool
 	AdoptionBaseline                 string
 	AdoptionBaselineEndSourceEventID int64
 	Events                           []FederationIngestEvent
+}
+
+// FederationIngestRefusedEvent describes one event withheld from a partial push
+// batch because an affected issue currently belongs to a project where the
+// spoke lacks push enrollment with the same actor (or because the event
+// causally depends on such a withheld event in the same batch).
+type FederationIngestRefusedEvent struct {
+	SourceEventID int64
+	EventUID      string
+	Code          string
+	IssueUID      string
+	Message       string
 }
 
 // Federation adoption baseline markers describe whether an ingest batch is a
@@ -914,6 +927,9 @@ type FederationIngestResult struct {
 	// store because its project already holds the issue. The pushing spoke
 	// deletes them and takes the hub's state.
 	SupersededEventUIDs []string
+	// RefusedEvents lists events withheld from a partial push batch because an
+	// affected issue now belongs to an unenrolled project.
+	RefusedEvents []FederationIngestRefusedEvent
 }
 
 // CreateFederationEnrollmentParams carries the plaintext token at creation

@@ -225,6 +225,39 @@ func (d *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCu
 	})
 }
 
+// AcknowledgeFederationPushEvents records accepted local-origin events out of
+// order and folds the monotonic push cursor through any consecutive
+// acknowledged prefix without skipping earlier unresolved events.
+func (d *Store) AcknowledgeFederationPushEvents(ctx context.Context, projectID int64, eventUIDs []string) error {
+	return d.relayTx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `
+			UPDATE federation_bindings
+			   SET last_sync_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+			       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			 WHERE project_id = ?`, projectID)
+		if err != nil {
+			return fmt.Errorf("touch federation push sync time: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("touch federation push sync time rows affected: %w", err)
+		}
+		if n == 0 {
+			return db.ErrNotFound
+		}
+		if err := db.RecordFederationAcknowledgedEvents(ctx, tx, projectID, eventUIDs); err != nil {
+			return err
+		}
+		return db.FoldFederationAcknowledgedEvents(ctx, tx, projectID, d.InstanceUID())
+	})
+}
+
+// IsFederationEventAcknowledged reports whether one local-origin event has an
+// out-of-order hub acknowledgement marker.
+func (d *Store) IsFederationEventAcknowledged(ctx context.Context, projectID int64, eventUID string) (bool, error) {
+	return db.IsFederationEventAcknowledged(ctx, d, projectID, eventUID)
+}
+
 // AdvanceFederationPushCursor records the highest local events.id accepted by
 // the hub for a spoke binding.
 func (d *Store) AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error {
