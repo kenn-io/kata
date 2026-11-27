@@ -995,8 +995,8 @@
   async function moveBoardIssue(issue: KataTaskSummary, plan: BoardMovePlan): Promise<boolean> {
     const target = { projectId: issue.project_id, ref: issue.uid }
     const identityPolicy = authority?.snapshot?.capabilities.actor_policy === 'identity'
-    const patch = (metadata: Record<string, string | null>) =>
-      runMutation({ draft: metadata }, (context) =>
+    const patch = (metadata: Record<string, string | null>, revision?: string) =>
+      runMutation({ draft: metadata, ...(revision ? { revision } : {}) }, (context) =>
         patchIssueMetadata(target, context.body({ patch: metadata }, requestActor), {
           headers: context.headers,
         }),
@@ -1009,7 +1009,12 @@
     }
     if (plan.clearAttention) {
       if (Object.keys(plan.clearAttention.metadata).length > 0) {
-        if (!(await patch(plan.clearAttention.metadata))) return false
+        // Clear only what the board showed: if an agent changed the issue
+        // since, the daemon refuses the write and the move stops. After a
+        // reopen the revision has moved on, and what is cleared dates from
+        // before the close, so that write goes unguarded.
+        const shown = plan.reopen ? undefined : `"rev-${issue.revision}"`
+        if (!(await patch(plan.clearAttention.metadata, shown))) return false
       }
       for (const label of plan.clearAttention.removeLabels) {
         const removed = await runMutation({ draft: label }, () =>

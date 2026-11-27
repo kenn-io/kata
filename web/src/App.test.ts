@@ -3223,7 +3223,64 @@ describe('App', () => {
     expect(await writes[0]!.json()).toEqual({
       patch: { 'work.attention': 'ok', 'work.attention_msg': null },
     })
+    // Clearing applies only to the issue as the board showed it.
+    expect(writes[0]!.headers.get('If-Match')).toBe('"rev-1"')
     expect(new URL(writes[1]!.url).pathname).toBe(`${issuePath}/actions/claim`)
+  })
+
+  it('stops a Needs attention move when the issue changed since the board showed it', async () => {
+    history.replaceState(null, '', '/kata?scope=01J00000000000000000000002&layout=board#direct=1')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const accepted = snapshot()
+    accepted.collection![0]!.metadata = { 'work.attention': 'needs-human' }
+    const issuePath = '/api/v1/projects/7/issues/01J00000000000000000000001'
+    const requests: Request[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        requests.push(request)
+        if (request.method === 'POST' && request.url.endsWith(`${issuePath}/metadata`)) {
+          // An agent wrote a new request after the board loaded.
+          return new Response(
+            JSON.stringify({
+              status: 412,
+              title: 'Precondition Failed',
+              detail: 'issue revision changed',
+              errors: [{ message: 'revision_conflict' }],
+              code: 'revision_conflict',
+            }),
+            { status: 412, headers: { 'Content-Type': 'application/problem+json' } },
+          )
+        }
+        return new Response(JSON.stringify(accepted), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', ETag: `"snapshot-${requests.length}"` },
+        })
+      }),
+    )
+
+    render(App)
+
+    const card = await screen.findByRole('button', { name: 'Example issue' })
+    await fireEvent.keyDown(card, { key: 'ArrowLeft', altKey: true })
+
+    await waitFor(() =>
+      expect(
+        requests.some(
+          (request) => request.method === 'POST' && request.url.endsWith(`${issuePath}/metadata`),
+        ),
+      ).toBe(true),
+    )
+    await waitFor(() =>
+      expect(screen.getByText(/Could not finish moving Example issue/)).toBeTruthy(),
+    )
+    expect(requests.some((request) => request.url.endsWith(`${issuePath}/actions/claim`))).toBe(
+      false,
+    )
   })
 
   it('asks the owner of a board card through a kata notify request', async () => {
