@@ -262,6 +262,34 @@ describe('planBoardMove', () => {
     })
   })
 
+  it('clears signals left from before a close when a Done card reopens elsewhere', () => {
+    // work.* is meaningless on a closed issue, so it must not resurface on reopen.
+    const closed = issue('a', {
+      status: 'closed',
+      labels: ['needs-review'],
+      metadata: {
+        'work.attention': 'stuck',
+        'work.attention_msg': 'Old blocker',
+        'notify.Y29vcmRpbmF0b3I': { from: 'agent-a', message: 'Old request' },
+      },
+    })
+    expect(planBoardMove(closed, 'in-progress', { now })).toEqual({
+      reopen: true,
+      clearAttention: {
+        metadata: {
+          'work.attention': 'ok',
+          'work.attention_msg': null,
+          'notify.Y29vcmRpbmF0b3I': null,
+        },
+        removeLabels: ['needs-review'],
+      },
+      claim: true,
+    })
+    expect(planBoardMove(issue('b', { status: 'closed' }), 'open', { now })).toEqual({
+      reopen: true,
+    })
+  })
+
   it('does nothing when the card is already in the target column', () => {
     expect(planBoardMove(issue('a'), 'open', { now })).toBeUndefined()
     expect(planBoardMove(issue('b', { status: 'closed' }), 'done', { now })).toBeUndefined()

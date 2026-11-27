@@ -134,7 +134,15 @@ export function planBoardMove(
   if (target === 'done') return { close: true }
 
   const plan: BoardMovePlan = {}
-  if (from === 'done') plan.reopen = true
+  if (from === 'done') {
+    plan.reopen = true
+    // Signals left from before the close would put the reopened card straight
+    // back in Needs attention; work.* means nothing on a closed issue anyway.
+    const reopened = { ...issue, status: 'open' as const }
+    if (attentionReasons(reopened, context.viewer).length > 0) {
+      plan.clearAttention = clearSignals(reopened, target, context.viewer)
+    }
+  }
   if (from === 'attention') plan.clearAttention = clearSignals(issue, target, context.viewer)
   const owned = isClaimed(issue, context.now ?? new Date())
   if (target === 'in-progress' && !owned) plan.claim = true

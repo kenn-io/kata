@@ -154,7 +154,8 @@ clears what put it there, as
 describe: `work.attention` becomes `ok` (In progress) or is removed (Open),
 `work.attention_msg` is removed, the requests you were reading are cleared as
 `kata notify --clear` would, and the `needs-review` label comes off. Moving a
-card out of Done reopens it first.
+card out of Done reopens it first, and clears any of those signals left from
+before it closed, so it lands where you dropped it.
 
 No move puts a card into Needs attention. Attention is the working agent's
 signal, and the [orchestration convention](../operations/agent-orchestration.md)
