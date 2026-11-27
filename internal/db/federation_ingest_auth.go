@@ -159,6 +159,53 @@ func AuthorizeFederationCurrentIssuesTx(
 	}
 	refused := map[string]*FederationProjectNotEnrolledError{}
 	hubComments := map[string]bool{}
+	authorizeIssueRef := func(
+		issueUID, primary string,
+		explicitRefs []string,
+		peers map[string]bool,
+		staged map[string]int64,
+		checked map[checkedProject]bool,
+	) (*FederationProjectNotEnrolledError, error) {
+		if issueUID == "" {
+			return nil, nil
+		}
+		current, known := staged[issueUID]
+		if !known {
+			err := tx.QueryRowContext(ctx, `SELECT project_id FROM issues WHERE uid=$1`, issueUID).Scan(&current)
+			if errors.Is(err, sql.ErrNoRows) {
+				// Existing validation permits deferred links and fresh creation.
+				return nil, nil
+			}
+			if err != nil {
+				return nil, err
+			}
+			staged[issueUID] = current
+		}
+		reference := issueUID != primary && peers[issueUID]
+		key := checkedProject{current, reference}
+		if current == p.ProjectID || checked[key] {
+			return nil, nil
+		}
+		var projectUID string
+		err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=$1 AND deleted_at IS NULL`, current).Scan(&projectUID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		if err != nil {
+			return nil, err
+		}
+		if err := authorizeProject(ctx, current, projectUID, reference); err != nil {
+			if errors.Is(err, ErrFederationMoveSourceUnauthorized) {
+				if issueUID != primary && !slices.Contains(explicitRefs, issueUID) {
+					issueUID = ""
+				}
+				return &FederationProjectNotEnrolledError{IssueUID: issueUID, Err: err}, nil
+			}
+			return nil, err
+		}
+		checked[key] = true
+		return nil, nil
+	}
 	for {
 		surviving := events
 		if len(refused) > 0 {
@@ -169,14 +216,20 @@ func AuthorizeFederationCurrentIssuesTx(
 				}
 			}
 		}
-		// Report graph validation only after checking current project authority.
-		parentRemovals, parentErr := DirectParentRemovals(ctx, tx, surviving, p.AuthorizeReference != nil)
+		var parentRemovals map[string][]string
+		var parentErr error
+		if !allowPartial {
+			// Report graph validation only after checking current project authority.
+			parentRemovals, parentErr = DirectParentRemovals(ctx, tx, surviving, p.AuthorizeReference != nil)
+		}
 		// Rebuild forward-only causal dependencies in original batch order on
 		// each pass so a later refused event never blocks earlier independent work.
 		deps := NewFederationRefusedDependencies()
 		staged := map[string]int64{}
 		stagedComments := map[string]bool{}
 		checked := map[checkedProject]bool{}
+		primaryByEvent := map[string]string{}
+		explicitRefsByEvent := map[string][]string{}
 		commentAlreadyPresent := func(commentUID string) (bool, error) {
 			if stagedComments[commentUID] {
 				return true, nil
@@ -251,7 +304,11 @@ func AuthorizeFederationCurrentIssuesTx(
 				return nil, err
 			}
 			explicitRefs := refs
-			if p.AuthorizeReference != nil {
+			if allowPartial && p.AuthorizeReference != nil {
+				primaryByEvent[event.EventUID] = primary
+				explicitRefsByEvent[event.EventUID] = explicitRefs
+			}
+			if !allowPartial && p.AuthorizeReference != nil {
 				for _, previous := range parentRemovals[event.EventUID] {
 					refs = append(refs, previous)
 					delete(peers, previous)
@@ -260,49 +317,17 @@ func AuthorizeFederationCurrentIssuesTx(
 			refs = append([]string{primary}, refs...)
 			var eventRefusal *FederationProjectNotEnrolledError
 			for _, issueUID := range refs {
-				if issueUID == "" {
-					continue
-				}
-				current, known := staged[issueUID]
-				if !known {
-					err := tx.QueryRowContext(ctx, `SELECT project_id FROM issues WHERE uid=$1`, issueUID).Scan(&current)
-					if errors.Is(err, sql.ErrNoRows) {
-						// Existing validation permits deferred links and fresh creation.
-						continue
-					}
-					if err != nil {
-						return nil, err
-					}
-					staged[issueUID] = current
-				}
-				reference := issueUID != primary && peers[issueUID]
-				key := checkedProject{current, reference}
-				if current == p.ProjectID || checked[key] {
-					continue
-				}
-				var projectUID string
-				err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=$1 AND deleted_at IS NULL`, current).Scan(&projectUID)
-				if errors.Is(err, sql.ErrNoRows) {
-					return nil, ErrNotFound
-				}
+				notEnrolled, err := authorizeIssueRef(issueUID, primary, explicitRefs, peers, staged, checked)
 				if err != nil {
 					return nil, err
 				}
-				if err := authorizeProject(ctx, current, projectUID, reference); err != nil {
-					if errors.Is(err, ErrFederationMoveSourceUnauthorized) {
-						if issueUID != primary && !slices.Contains(explicitRefs, issueUID) {
-							issueUID = ""
-						}
-						notEnrolled := &FederationProjectNotEnrolledError{IssueUID: issueUID, Err: err}
-						if !allowPartial {
-							return nil, notEnrolled
-						}
-						eventRefusal = notEnrolled
-						break
+				if notEnrolled != nil {
+					if !allowPartial {
+						return nil, notEnrolled
 					}
-					return nil, err
+					eventRefusal = notEnrolled
+					break
 				}
-				checked[key] = true
 			}
 			if eventRefusal != nil {
 				refused[event.EventUID] = eventRefusal
@@ -335,9 +360,65 @@ func AuthorizeFederationCurrentIssuesTx(
 				}
 			}
 		}
+		if newlyRefused {
+			continue
+		}
+		if !allowPartial {
+			return refused, parentErr
+		}
+		// Evaluate displaced parents only after intrinsic and causal refusals
+		// stabilize so a refused earlier parent assignment never causes a later
+		// authorized assignment to be refused for displacing it.
+		parentRemovals, parentErr = DirectParentRemovals(ctx, tx, surviving, p.AuthorizeReference != nil)
+		if p.AuthorizeReference != nil && len(parentRemovals) > 0 {
+			ordered := slices.Clone(surviving)
+			slices.SortStableFunc(ordered, func(a, b RemoteEvent) int {
+				return compareClock(clockOf(moveSnapshotFoldEvent(a)), clockOf(moveSnapshotFoldEvent(b)))
+			})
+			for _, event := range ordered {
+				removed := parentRemovals[event.EventUID]
+				if len(removed) == 0 {
+					continue
+				}
+				primary := primaryByEvent[event.EventUID]
+				explicitRefs := explicitRefsByEvent[event.EventUID]
+				var eventRefusal *FederationProjectNotEnrolledError
+				for _, previous := range removed {
+					notEnrolled, err := authorizeIssueRef(previous, primary, explicitRefs, nil, staged, checked)
+					if err != nil {
+						return nil, err
+					}
+					if notEnrolled != nil {
+						eventRefusal = notEnrolled
+						break
+					}
+				}
+				if eventRefusal != nil {
+					refused[event.EventUID] = eventRefusal
+					newlyRefused = true
+					break
+				}
+			}
+		}
 		if !newlyRefused {
 			return refused, parentErr
 		}
+	}
+}
+
+// FederationEventCommentUIDs returns the comment UIDs created or embedded by
+// one federation event.
+func FederationEventCommentUIDs(event RemoteEvent) []string {
+	switch event.Type {
+	case "issue.commented":
+		if commentUID := federationCommentEventUID(event); commentUID != "" {
+			return []string{commentUID}
+		}
+		return nil
+	case "issue.created", "issue.snapshot", "issue.moved", RepeatedImportEventType:
+		return federationSnapshotCommentUIDs(event)
+	default:
+		return nil
 	}
 }
 

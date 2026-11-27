@@ -691,6 +691,66 @@ func checkFederatedPartialNotEnrolledIngest(t *testing.T, store db.Storage) erro
 	require.NoError(t, err)
 	require.Equal(t, "Unrelated after displace", gotB.Title)
 
+	// Parentless issue with two parent-only assignments under reference checks:
+	// first into an unjoined project (refused), second into the enrolled receiving
+	// project (must be accepted once the refused first parent is excluded).
+	parentlessChild, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "Parentless child", Author: "worker"})
+	require.NoError(t, err)
+	setMovedParentPayload, err := json.Marshal(map[string]string{"parent_set_uid": moved.UID})
+	require.NoError(t, err)
+	setLocalParentPayload, err := json.Marshal(map[string]string{"parent_set_uid": newParent.UID})
+	require.NoError(t, err)
+	setMovedParentEv := newRemoteEvent(t, source, &parentlessChild.UID, "issue.links_changed", "worker", origin, at+110, jsontext.Value(setMovedParentPayload))
+	setLocalParentEv := newRemoteEvent(t, source, &parentlessChild.UID, "issue.links_changed", "worker", origin, at+111, jsontext.Value(setLocalParentPayload))
+	params = baseParams
+	params.AuthorizeReference = func(_ context.Context, _ db.Transaction, _ db.FederationEnrollment, _ db.Project) error {
+		return nil
+	}
+	params.Events = []db.FederationIngestEvent{
+		{SourceEventID: 110, Event: setMovedParentEv},
+		{SourceEventID: 111, Event: setLocalParentEv},
+	}
+	parentlessRes, err := store.IngestFederationEvents(ctx, params)
+	require.NoError(t, err)
+	require.Equal(t, 1, parentlessRes.Accepted, "second local parent assignment must succeed after first unenrolled parent is refused")
+	require.Zero(t, parentlessRes.PushCursorEventID)
+	require.Len(t, parentlessRes.RefusedEvents, 1)
+	require.Equal(t, setMovedParentEv.EventUID, parentlessRes.RefusedEvents[0].EventUID)
+	require.Equal(t, moved.UID, parentlessRes.RefusedEvents[0].IssueUID)
+	parentlessParent, err := store.ParentOf(ctx, parentlessChild.ID)
+	require.NoError(t, err)
+	require.Equal(t, newParent.ID, parentlessParent.ToIssueID)
+
+	// Two parent-only assignments for an issue whose hub parent is ALREADY in an
+	// unenrolled project must BOTH be refused (re-evaluation cannot bypass the
+	// stored unauthorized parent).
+	setLocalParentA, err := json.Marshal(map[string]string{"parent_set_uid": stayingA.UID})
+	require.NoError(t, err)
+	setLocalParentB, err := json.Marshal(map[string]string{"parent_set_uid": stayingB.UID})
+	require.NoError(t, err)
+	displaceHubEv1 := newRemoteEvent(t, source, &childIssue.UID, "issue.links_changed", "worker", origin, at+112, jsontext.Value(setLocalParentA))
+	displaceHubEv2 := newRemoteEvent(t, source, &childIssue.UID, "issue.links_changed", "worker", origin, at+113, jsontext.Value(setLocalParentB))
+	params = baseParams
+	params.MoveSourceEnrollmentIDs = map[string]int64{target.UID: peerGrant.Enrollment.ID}
+	params.AuthorizeReference = func(_ context.Context, _ db.Transaction, _ db.FederationEnrollment, _ db.Project) error {
+		return nil
+	}
+	params.Events = []db.FederationIngestEvent{
+		{SourceEventID: 112, Event: displaceHubEv1},
+		{SourceEventID: 113, Event: displaceHubEv2},
+	}
+	doubleDisplaceRes, err := store.IngestFederationEvents(ctx, params)
+	require.NoError(t, err)
+	require.Zero(t, doubleDisplaceRes.Accepted)
+	require.Len(t, doubleDisplaceRes.RefusedEvents, 2)
+	require.Equal(t, displaceHubEv1.EventUID, doubleDisplaceRes.RefusedEvents[0].EventUID)
+	require.Equal(t, displaceHubEv2.EventUID, doubleDisplaceRes.RefusedEvents[1].EventUID)
+	require.Empty(t, doubleDisplaceRes.RefusedEvents[0].IssueUID)
+	require.Empty(t, doubleDisplaceRes.RefusedEvents[1].IssueUID)
+	parentLink, err = store.ParentOf(ctx, childIssue.ID)
+	require.NoError(t, err)
+	require.Equal(t, moved.ID, parentLink.ToIssueID)
+
 	// Hard error in the same batch still rolls back the entire batch.
 	hostDenied := errors.New("host denied")
 	otherTarget, err := store.CreateProject(ctx, "partial-host-denied")

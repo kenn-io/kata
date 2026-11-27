@@ -271,6 +271,7 @@ func pushDirectSpoke(
 		hasRefused := false
 		var refusedEvents []api.FederationIngestRefusedEvent
 		refusedDeps := db.NewFederationRefusedDependencies()
+		refusedComments := newSpokeRefusedCommentChecker(store, client.baseURL)
 	pushLoop:
 		for {
 			if q, err := store.ActiveFederationQuarantine(ctx, binding.ProjectID, db.FederationQuarantineDirectionPush); err == nil {
@@ -320,7 +321,10 @@ func pushDirectSpoke(
 			for len(pending) > 0 {
 				submittable := pending
 				if hasRefused {
-					submittable = filterFederationPushPendingDependents(pending, refusedDeps)
+					submittable, err = filterFederationPushPendingDependents(ctx, pending, refusedDeps, refusedComments)
+					if err != nil {
+						return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+					}
 					if len(submittable) == 0 {
 						scanCursor = max(scanCursor, pending[len(pending)-1].ID)
 						break
@@ -399,7 +403,12 @@ func pushDirectSpoke(
 						}
 						hasRefused = true
 						refusedEvents = append(refusedEvents, ack.RefusedEvents...)
-						recordFederationPushRefusedDependencies(batch, ack.RefusedEvents, refusedDeps)
+						refusedComments.recordAccepted(batch, acceptedUIDs)
+						if err := recordFederationPushRefusedDependencies(
+							ctx, batch, ack.RefusedEvents, refusedComments, refusedDeps,
+						); err != nil {
+							return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+						}
 					} else {
 						if ack.PushCursorEventID < batch[0].ID {
 							return recordFederationSyncError(ctx, store, binding.ProjectID,
@@ -415,6 +424,7 @@ func pushDirectSpoke(
 								acceptedUIDs = append(acceptedUIDs, ev.UID)
 							}
 						}
+						refusedComments.recordAccepted(batch, acceptedUIDs)
 						nextScanCursor = ack.PushCursorEventID
 					}
 					if len(acceptedUIDs) > 0 {
@@ -473,6 +483,7 @@ func pushDirectSpoke(
 				}
 				binding.PushCursorEventID = ack.PushCursorEventID
 				scanCursor = max(scanCursor, ack.PushCursorEventID)
+				refusedComments.recordAcceptedThrough(batch, ack.PushCursorEventID)
 				singleRunRetry = false
 				if retryBatchSize > 0 && batch[0].Actor != binding.Actor {
 					retryBatchSize = min(retryBatchSize*2, federationPollLimit)
@@ -1204,42 +1215,240 @@ func federationDependencyEvent(ev db.Event) db.RemoteEvent {
 	}
 }
 
+type spokeRefusedCommentChecker struct {
+	store              db.Storage
+	hubBaseURL         string
+	canonicalHub       string
+	refusedEventUIDs   map[string]bool
+	acceptedComments   map[string]bool
+	hubCommentsByIssue map[string]map[string]bool
+	bindingsByProject  map[int64]*db.FederationBinding
+	hasKeptByProject   map[int64]bool
+}
+
+func newSpokeRefusedCommentChecker(store db.Storage, hubBaseURL string) *spokeRefusedCommentChecker {
+	return &spokeRefusedCommentChecker{
+		store:              store,
+		hubBaseURL:         hubBaseURL,
+		refusedEventUIDs:   map[string]bool{},
+		acceptedComments:   map[string]bool{},
+		hubCommentsByIssue: map[string]map[string]bool{},
+		bindingsByProject:  map[int64]*db.FederationBinding{},
+		hasKeptByProject:   map[int64]bool{},
+	}
+}
+
+func (c *spokeRefusedCommentChecker) recordAccepted(batch []db.Event, acceptedUIDs []string) {
+	if len(acceptedUIDs) == 0 {
+		return
+	}
+	acceptedSet := make(map[string]bool, len(acceptedUIDs))
+	for _, uid := range acceptedUIDs {
+		acceptedSet[uid] = true
+	}
+	for _, ev := range batch {
+		if !acceptedSet[ev.UID] {
+			continue
+		}
+		for _, commentUID := range db.FederationEventCommentUIDs(federationDependencyEvent(ev)) {
+			c.acceptedComments[commentUID] = true
+		}
+	}
+}
+
+func (c *spokeRefusedCommentChecker) recordAcceptedThrough(batch []db.Event, cursor int64) {
+	for _, ev := range batch {
+		if ev.ID > cursor {
+			continue
+		}
+		for _, commentUID := range db.FederationEventCommentUIDs(federationDependencyEvent(ev)) {
+			c.acceptedComments[commentUID] = true
+		}
+	}
+}
+
+func (c *spokeRefusedCommentChecker) commentAlreadyPresentFunc(ctx context.Context, issueUID string) func(string) (bool, error) {
+	return func(commentUID string) (bool, error) {
+		if c.acceptedComments[commentUID] {
+			return true, nil
+		}
+		if issueUID == "" {
+			return false, nil
+		}
+		if c.canonicalHub == "" {
+			canonical, err := httpurl.CanonicalHTTPBaseURL(c.hubBaseURL)
+			if err != nil {
+				return false, err
+			}
+			c.canonicalHub = canonical
+		}
+		present, cached := c.hubCommentsByIssue[issueUID]
+		if !cached {
+			var err error
+			present, err = spokeIssueCommentsOnHub(
+				ctx, c.store, c.canonicalHub, issueUID, c.refusedEventUIDs, c.bindingsByProject, c.hasKeptByProject,
+			)
+			if err != nil {
+				return false, err
+			}
+			c.hubCommentsByIssue[issueUID] = present
+		}
+		return present[commentUID], nil
+	}
+}
+
 func recordFederationPushRefusedDependencies(
+	ctx context.Context,
 	batch []db.Event,
 	refused []api.FederationIngestRefusedEvent,
+	checker *spokeRefusedCommentChecker,
 	deps *db.FederationRefusedDependencies,
-) {
+) error {
 	byUID := make(map[string]db.Event, len(batch))
 	for _, ev := range batch {
 		byUID[ev.UID] = ev
+	}
+	for _, item := range refused {
+		checker.refusedEventUIDs[item.EventUID] = true
 	}
 	for _, item := range refused {
 		ev, ok := byUID[item.EventUID]
 		if !ok {
 			continue
 		}
-		_ = deps.Record(
+		if err := deps.Record(
 			federationDependencyEvent(ev),
 			&db.FederationProjectNotEnrolledError{
 				IssueUID: item.IssueUID,
 				Err:      db.ErrFederationMoveSourceUnauthorized,
 			},
-			nil,
-		)
+			checker.commentAlreadyPresentFunc(ctx, db.EventIssueUID(ev.IssueUID)),
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func spokeIssueCommentsOnHub(
+	ctx context.Context,
+	store db.Storage,
+	canonicalHub string,
+	issueUID string,
+	refusedEventUIDs map[string]bool,
+	bindingsByProject map[int64]*db.FederationBinding,
+	hasKeptByProject map[int64]bool,
+) (map[string]bool, error) {
+	present := map[string]bool{}
+	localOrigin := store.InstanceUID()
+	types := []string{"issue.commented", "issue.created", "issue.snapshot", "issue.moved", db.RepeatedImportEventType}
+	var afterID int64
+	for {
+		history, err := store.EventsAfter(ctx, db.EventsAfterParams{
+			AfterID:  afterID,
+			IssueUID: issueUID,
+			Types:    types,
+			Limit:    federationPollLimit,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if len(history) == 0 {
+			return present, nil
+		}
+		for _, hist := range history {
+			if hist.ID > afterID {
+				afterID = hist.ID
+			}
+			if refusedEventUIDs[hist.UID] {
+				continue
+			}
+			projBinding, known := bindingsByProject[hist.ProjectID]
+			if !known {
+				b, err := store.FederationBindingByProject(ctx, hist.ProjectID)
+				if errors.Is(err, db.ErrNotFound) {
+					bindingsByProject[hist.ProjectID] = nil
+					continue
+				}
+				if err != nil {
+					return nil, err
+				}
+				if b.Role != db.FederationRoleSpoke {
+					bindingsByProject[hist.ProjectID] = nil
+					continue
+				}
+				base, err := httpurl.CanonicalHTTPBaseURL(b.HubURL)
+				if err != nil || base != canonicalHub {
+					bindingsByProject[hist.ProjectID] = nil
+					continue
+				}
+				projBinding = &b
+				bindingsByProject[hist.ProjectID] = projBinding
+			}
+			if projBinding == nil {
+				continue
+			}
+			onHub := false
+			if hist.OriginInstanceUID != localOrigin {
+				onHub = true
+			} else if hist.ID > projBinding.PushCursorEventID {
+				ack, err := store.IsFederationEventAcknowledged(ctx, hist.ProjectID, hist.UID)
+				if err != nil {
+					return nil, err
+				}
+				onHub = ack
+			} else {
+				hasKept, keptKnown := hasKeptByProject[hist.ProjectID]
+				if !keptKnown {
+					var err error
+					hasKept, err = store.HasKeptFederationEvents(ctx, hist.ProjectID)
+					if err != nil {
+						return nil, err
+					}
+					hasKeptByProject[hist.ProjectID] = hasKept
+				}
+				if !hasKept {
+					onHub = true
+				} else {
+					ack, err := store.IsFederationEventAcknowledged(ctx, hist.ProjectID, hist.UID)
+					if err != nil {
+						return nil, err
+					}
+					onHub = ack
+				}
+			}
+			if !onHub {
+				continue
+			}
+			for _, commentUID := range db.FederationEventCommentUIDs(federationDependencyEvent(hist)) {
+				present[commentUID] = true
+			}
+		}
+		if len(history) < federationPollLimit {
+			return present, nil
+		}
 	}
 }
 
-func filterFederationPushPendingDependents(pending []db.Event, deps *db.FederationRefusedDependencies) []db.Event {
+func filterFederationPushPendingDependents(
+	ctx context.Context,
+	pending []db.Event,
+	deps *db.FederationRefusedDependencies,
+	checker *spokeRefusedCommentChecker,
+) ([]db.Event, error) {
 	out := make([]db.Event, 0, len(pending))
 	for _, ev := range pending {
 		remote := federationDependencyEvent(ev)
 		if depErr := deps.Dependency(remote); depErr != nil {
-			_ = deps.Record(remote, depErr, nil)
+			checker.refusedEventUIDs[ev.UID] = true
+			if err := deps.Record(remote, depErr, checker.commentAlreadyPresentFunc(ctx, db.EventIssueUID(ev.IssueUID))); err != nil {
+				return nil, err
+			}
 			continue
 		}
 		out = append(out, ev)
 	}
-	return out
+	return out, nil
 }
 
 func validateFederationIngestRefusedEvents(batch []db.Event, refused []api.FederationIngestRefusedEvent, pushCursor int64) ([]string, error) {
