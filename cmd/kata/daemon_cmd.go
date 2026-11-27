@@ -1600,6 +1600,10 @@ func runDaemonProcess(
 			restart.watch(ctx, restartSignals, idleAdmission, func() error { return restart.accept(ctx, ns.DataDir, rec) }, daemonLog, shutdownTrigger.Call)
 		})
 	}
+	// Defer periodic polling, sync, and sweeper workers until onReady publishes
+	// the listener so their initial database queries do not contend with
+	// building the HTTP server or answering /api/v1/ping.
+	workers.Hold()
 	syncOutcome := daemon.NewSyncOutcomeObserver(telemetryReporter)
 	federationRetries := federation.NewSyncRetries()
 	federationWake := startFederationRunner(
@@ -1912,6 +1916,7 @@ func runDaemonProcess(
 			if listen != "" {
 				_, _ = fmt.Fprintf(diagnostics, "kata daemon: listening on %s\n", rec.Endpoint().ConfigAddress())
 			}
+			workers.Start()
 			return nil
 		})
 	}

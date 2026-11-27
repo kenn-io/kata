@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 )
@@ -274,4 +276,49 @@ func TestReconcileDueNotificationInvalidRecipientDoesNotWaitForWriter(t *testing
 			require.Nil(t, out.Event)
 		})
 	}
+}
+
+func TestOpenCapsAndRetainsSQLitePool(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "pool.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+
+	// Burst concurrent readers as daemon startup workers do. The pool must stay
+	// bounded and retain its idle connections instead of opening a dozen modernc
+	// handles and immediately closing the excess.
+	const readers = 12
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	errs := make(chan error, readers)
+	for range readers {
+		wg.Go(func() {
+			<-start
+			var one int
+			errs <- store.QueryRowContext(ctx, `SELECT 1`).Scan(&one)
+		})
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for queryErr := range errs {
+		require.NoError(t, queryErr)
+	}
+
+	stats := store.Stats()
+	assert.LessOrEqual(t, stats.OpenConnections, sqliteMaxOpenConns)
+	assert.Equal(t, sqliteMaxOpenConns, stats.MaxOpenConnections)
+	assert.Zero(t, stats.MaxIdleClosed, "burst readers should reuse warm connections rather than closing excess handles")
+
+	// Readers must still run concurrently while an export snapshot holds a
+	// read-only transaction on one connection.
+	_, release, err := store.BeginExportSnapshot(ctx)
+	require.NoError(t, err)
+	defer func() { _ = release() }()
+	readCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	var version int
+	require.NoError(t, store.QueryRowContext(readCtx, `SELECT CAST(value AS INTEGER) FROM meta WHERE key='schema_version'`).Scan(&version))
+	assert.Positive(t, version)
 }
