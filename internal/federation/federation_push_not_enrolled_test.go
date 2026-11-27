@@ -1,15 +1,20 @@
 package federation
 
 import (
+	"bytes"
+	"encoding/json/v2"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
@@ -298,10 +303,48 @@ func TestSyncFederationMultipleUnenrolledIssuesAndLegacyHub403(t *testing.T) {
 		require.Equal(t, "unrelated", comments[0].Body)
 	})
 
-	t.Run("all-refused first batch still pushes subsequent batch", func(t *testing.T) {
+	t.Run("all-refused first batch still pushes subsequent refusal-free batch", func(t *testing.T) {
 		ctx := t.Context()
 		hub, projects := newMoveDeliveryHub(t, "joined-split", "absent-split")
+
+		type ingestBatchResult struct {
+			accepted int
+			refused  int
+		}
+		var mu sync.Mutex
+		var batches []ingestBatchResult
+		targetURL, err := url.Parse(hub.URL)
+		require.NoError(t, err)
+		proxy := httputil.NewSingleHostReverseProxy(targetURL)
+		proxy.ModifyResponse = func(resp *http.Response) error {
+			if strings.HasSuffix(resp.Request.URL.Path, "/federation/events:ingest") && resp.StatusCode == http.StatusOK {
+				raw, readErr := io.ReadAll(resp.Body)
+				if readErr != nil {
+					return readErr
+				}
+				resp.Body = io.NopCloser(bytes.NewReader(raw))
+				var body api.FederationIngestEventsBody
+				if err := json.Unmarshal(raw, &body); err == nil {
+					mu.Lock()
+					batches = append(batches, ingestBatchResult{accepted: body.Accepted, refused: len(body.RefusedEvents)})
+					mu.Unlock()
+				}
+			}
+			return nil
+		}
+		observer := httptest.NewServer(proxy)
+		t.Cleanup(observer.Close)
+
 		spoke := newMoveDeliverySpoke(t, hub, projects[:1])
+		binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
+		require.NoError(t, err)
+		binding.HubURL = observer.URL
+		_, err = spoke.env.DB.UpsertFederationBinding(ctx, binding)
+		require.NoError(t, err)
+		cred := spoke.credentials[spoke.projects[0].UID]
+		cred.HubURL = observer.URL
+		spoke.credentials[spoke.projects[0].UID] = cred
+
 		moved, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "moved big", Author: "worker"})
 		require.NoError(t, err)
 		staying, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "staying after split", Author: "worker"})
@@ -313,14 +356,16 @@ func TestSyncFederationMultipleUnenrolledIssuesAndLegacyHub403(t *testing.T) {
 		localStay, err := spoke.env.DB.IssueByUID(ctx, staying.UID, db.IncludeDeletedNo)
 		require.NoError(t, err)
 
-		// Large comment on moved issue forces batch splitting at maxFederationPushIngestBodyBytes (768 KiB)
-		// so batch 1 contains only the refused event and batch 2 contains the unrelated comment.
+		// Give all three comments large bodies (> half of maxFederationPushIngestBodyBytes)
+		// so batch 1 = [stuck1] (all-refused), batch 2 = [stuck2] (all-refused), and
+		// batch 3 = [okAfter] (refusal-free) exercises the post-refusal acceptance path.
 		bigBody := strings.Repeat("x", (maxFederationPushIngestBodyBytes/2)+64<<10)
+		okAfterBody := bigBody + "-after-all-refused"
 		_, stuck1, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: localMoved.ID, Author: "worker", Body: bigBody})
 		require.NoError(t, err)
 		_, stuck2, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: localMoved.ID, Author: "worker", Body: bigBody})
 		require.NoError(t, err)
-		_, okAfter, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: localStay.ID, Author: "worker", Body: "after all-refused batch"})
+		_, okAfter, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: localStay.ID, Author: "worker", Body: okAfterBody})
 		require.NoError(t, err)
 
 		_, err = hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: moved.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: moved.Revision, Actor: "worker"})
@@ -330,13 +375,22 @@ func TestSyncFederationMultipleUnenrolledIssuesAndLegacyHub403(t *testing.T) {
 		require.ErrorContains(t, err, db.FederationProjectNotEnrolledCode)
 		require.ErrorContains(t, err, moved.UID)
 
+		mu.Lock()
+		gotBatches := append([]ingestBatchResult(nil), batches...)
+		mu.Unlock()
+		require.Equal(t, []ingestBatchResult{
+			{accepted: 0, refused: 1},
+			{accepted: 0, refused: 1},
+			{accepted: 1, refused: 0},
+		}, gotBatches, "must exercise a refusal-free batch after all-refused batches")
+
 		comments, err := hub.DB.CommentsByIssue(ctx, staying.ID)
 		require.NoError(t, err)
 		require.Len(t, comments, 1)
-		require.Equal(t, "after all-refused batch", comments[0].Body)
+		require.Equal(t, okAfterBody, comments[0].Body)
 
-		// Cursor must not have jumped past stuck1/stuck2 even though batch 2 had 0 refusals.
-		binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
+		// Cursor must not have jumped past stuck1/stuck2 even though batch 3 had 0 refusals.
+		binding, err = spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
 		require.NoError(t, err)
 		require.Less(t, binding.PushCursorEventID, stuck1.ID)
 		pending, err := spoke.env.DB.PendingFederationPushEvents(ctx, spoke.projects[0].ID, spoke.env.DB.InstanceUID(), binding.PushCursorEventID, 100)
@@ -347,6 +401,134 @@ func TestSyncFederationMultipleUnenrolledIssuesAndLegacyHub403(t *testing.T) {
 		ack, err := spoke.env.DB.IsFederationEventAcknowledged(ctx, spoke.projects[0].ID, okAfter.UID)
 		require.NoError(t, err)
 		require.True(t, ack)
+	})
+
+	t.Run("refused creation dependents deferred across request-size boundary", func(t *testing.T) {
+		ctx := t.Context()
+		hub, projects := newMoveDeliveryHub(t, "joined-cross-batch", "absent-cross-batch")
+		spoke := newMoveDeliverySpoke(t, hub, projects[:1])
+		moved, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "moved peer", Author: "worker"})
+		require.NoError(t, err)
+		staying, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "staying sibling", Author: "worker"})
+		require.NoError(t, err)
+		require.NoError(t, spoke.sync(t, 0))
+
+		localMoved, err := spoke.env.DB.IssueByUID(ctx, moved.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		localStay, err := spoke.env.DB.IssueByUID(ctx, staying.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+
+		// Batch 1 contains only the large issue.created linking to moved; batch 2
+		// receives the follow-up update, a comment on the refused creation, a
+		// cross-issue reply to that comment, and an unrelated comment on staying.
+		bigBody := strings.Repeat("a", (maxFederationPushIngestBodyBytes/2)+64<<10)
+		bigBodyUpdated := strings.Repeat("b", (maxFederationPushIngestBodyBytes/2)+64<<10)
+		createdLocal, createEv, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: spoke.projects[0].ID,
+			Title:     "Created linking moved",
+			Body:      bigBody,
+			Author:    "worker",
+			Links:     []db.InitialLink{{Type: "blocks", ToNumber: localMoved.ID}},
+		})
+		require.NoError(t, err)
+		updatedTitle := "Updated across batch boundary"
+		_, updateEv, _, err := spoke.env.DB.EditIssue(ctx, db.EditIssueParams{
+			IssueID: createdLocal.ID,
+			Title:   &updatedTitle,
+			Body:    &bigBodyUpdated,
+			Actor:   "worker",
+		})
+		require.NoError(t, err)
+		require.NotNil(t, updateEv)
+		depComment, depCommentEv, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{
+			IssueID: createdLocal.ID, Author: "worker", Body: "comment on refused creation",
+		})
+		require.NoError(t, err)
+		_, crossReplyEv, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{
+			IssueID: localStay.ID, Author: "worker", Body: "reply to refused creation comment",
+			ReplyToUID: depComment.UID, ReplyKind: "reply",
+		})
+		require.NoError(t, err)
+		_, okAfterDep, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{
+			IssueID: localStay.ID, Author: "worker", Body: "unrelated after cross-batch dep",
+		})
+		require.NoError(t, err)
+
+		_, err = hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+			IssueID: moved.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID,
+			IfMatchRev: moved.Revision, Actor: "worker",
+		})
+		require.NoError(t, err)
+
+		err = spoke.sync(t, 0)
+		require.ErrorContains(t, err, db.FederationProjectNotEnrolledCode)
+		require.ErrorContains(t, err, moved.UID)
+
+		// Must not quarantine the project when dependent events cross a batch boundary.
+		_, qErr := spoke.env.DB.ActiveFederationQuarantine(ctx, spoke.projects[0].ID, db.FederationQuarantineDirectionPush)
+		require.ErrorIs(t, qErr, db.ErrNotFound)
+
+		// Unrelated edit after the deferred dependents must reach the hub.
+		comments, err := hub.DB.CommentsByIssue(ctx, staying.ID)
+		require.NoError(t, err)
+		require.Len(t, comments, 1)
+		require.Equal(t, "unrelated after cross-batch dep", comments[0].Body)
+		_, err = hub.DB.IssueByUID(ctx, createdLocal.UID, db.IncludeDeletedYes)
+		require.ErrorIs(t, err, db.ErrNotFound)
+
+		// All four dependent events remain pending; okAfterDep is acknowledged.
+		binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
+		require.NoError(t, err)
+		pending, err := spoke.env.DB.PendingFederationPushEvents(ctx, spoke.projects[0].ID, spoke.env.DB.InstanceUID(), binding.PushCursorEventID, 100)
+		require.NoError(t, err)
+		require.Equal(t, []string{createEv.UID, updateEv.UID, depCommentEv.UID, crossReplyEv.UID}, []string{
+			pending[0].UID, pending[1].UID, pending[2].UID, pending[3].UID,
+		})
+		ack, err := spoke.env.DB.IsFederationEventAcknowledged(ctx, spoke.projects[0].ID, okAfterDep.UID)
+		require.NoError(t, err)
+		require.True(t, ack)
+
+		// Enrolling in the destination project delivers the creation and all deferred dependents.
+		destLocal, err := spoke.env.DB.ProjectByUID(ctx, projects[1].UID)
+		if err != nil {
+			destLocal, err = spoke.env.DB.CreateProjectWithUID(ctx, projects[1].Name, projects[1].UID)
+			require.NoError(t, err)
+		} else {
+			_, _, _, err = spoke.env.DB.RestoreProject(ctx, destLocal.ID, "worker")
+			require.NoError(t, err)
+		}
+		_, err = spoke.env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+			ProjectID: destLocal.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL,
+			HubProjectID: projects[1].ID, HubProjectUID: projects[1].UID,
+			Enabled: true, PushEnabled: true, Actor: "worker",
+		})
+		require.NoError(t, err)
+		grant, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+			SpokeInstanceUID: spoke.env.DB.InstanceUID(), ProjectID: &projects[1].ID,
+			Capabilities: "push,pull", Actor: "worker",
+		})
+		require.NoError(t, err)
+		spoke.credentials[projects[1].UID] = config.FederationCredential{
+			HubURL: hub.URL, HubProjectID: projects[1].ID, Token: grant.Token, Actor: "worker",
+		}
+
+		require.NoError(t, spoke.sync(t, 0))
+		delivered, err := hub.DB.IssueByUID(ctx, createdLocal.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		require.Equal(t, updatedTitle, delivered.Title)
+		require.Equal(t, bigBodyUpdated, delivered.Body)
+		deliveredComments, err := hub.DB.CommentsByIssue(ctx, delivered.ID)
+		require.NoError(t, err)
+		require.Len(t, deliveredComments, 1)
+		require.Equal(t, "comment on refused creation", deliveredComments[0].Body)
+		comments, err = hub.DB.CommentsByIssue(ctx, staying.ID)
+		require.NoError(t, err)
+		require.Len(t, comments, 2)
+		binding, err = spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
+		require.NoError(t, err)
+		pending, err = spoke.env.DB.PendingFederationPushEvents(ctx, spoke.projects[0].ID, spoke.env.DB.InstanceUID(), binding.PushCursorEventID, 100)
+		require.NoError(t, err)
+		require.Empty(t, pending)
 	})
 
 	t.Run("legacy hub ignoring partial_not_enrolled still pulls after 403", func(t *testing.T) {

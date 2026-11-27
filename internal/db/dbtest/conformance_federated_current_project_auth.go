@@ -5,6 +5,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -434,8 +435,9 @@ func checkFederatedPartialNotEnrolledIngest(t *testing.T, store db.Storage) erro
 	strict := params
 	strict.AllowPartialNotEnrolled = false
 	_, err = store.IngestFederationEvents(ctx, strict)
-	var notEnrolled *db.FederationProjectNotEnrolledError
-	require.ErrorAs(t, err, &notEnrolled)
+	notEnrolled, ok := errors.AsType[*db.FederationProjectNotEnrolledError](err)
+	require.True(t, ok)
+	require.NotNil(t, notEnrolled)
 	require.Equal(t, moved.UID, notEnrolled.IssueUID)
 
 	// In-batch duplicate of a refused event is refused (not counted as duplicate).
@@ -514,6 +516,138 @@ func checkFederatedPartialNotEnrolledIngest(t *testing.T, store db.Storage) erro
 	require.Len(t, replyRes.RefusedEvents, 2)
 	require.Equal(t, replyEv.EventUID, replyRes.RefusedEvents[0].EventUID)
 	require.Equal(t, editReplyEv.EventUID, replyRes.RefusedEvents[1].EventUID)
+
+	// Offline round-trip move refused later in the batch must not propagate
+	// backward to earlier creations/comments on the same issue, and must not
+	// classify comments already on the hub or created by earlier surviving events
+	// as refused merely because the refused move snapshot carries them.
+	rtPeer, err := store.CreateProject(ctx, "partial-roundtrip-peer")
+	require.NoError(t, err)
+	_, err = store.EnableProjectFederation(ctx, rtPeer.ID, "worker")
+	require.NoError(t, err)
+	rtPeerGrant, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+		SpokeInstanceUID: origin, ProjectID: &rtPeer.ID, Capabilities: "push,pull", Actor: "worker",
+	})
+	require.NoError(t, err)
+	hubExistingIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "Hub existing", Author: "worker"})
+	require.NoError(t, err)
+	hubExistingComment, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: hubExistingIssue.ID, Author: "worker", Body: "already on hub"})
+	require.NoError(t, err)
+
+	rtUID, err := uid.New()
+	require.NoError(t, err)
+	rtCommentUID, err := uid.New()
+	require.NoError(t, err)
+	moveOnlyCommentUID, err := uid.New()
+	require.NoError(t, err)
+	replySurvivingUID, err := uid.New()
+	require.NoError(t, err)
+	replyHubExistingUID, err := uid.New()
+	require.NoError(t, err)
+	replyMoveOnlyUID, err := uid.New()
+	require.NoError(t, err)
+	rtCreatedAt := time.UnixMilli(at + 100).UTC().Format(time.RFC3339Nano)
+	rtShortID := strings.ToLower(rtUID[len(rtUID)-4:])
+	rtCreatePayload, err := json.Marshal(map[string]any{
+		"uid": rtUID, "short_id": rtShortID, "title": "Round-trip created before move", "body": "",
+		"author": "worker", "status": "open", "created_at": rtCreatedAt, "metadata": map[string]any{},
+	})
+	require.NoError(t, err)
+	rtCreateEv := newRemoteEvent(t, source, &rtUID, "issue.created", "worker", origin, at+100, jsontext.Value(rtCreatePayload))
+	rtCommentPayload, err := json.Marshal(map[string]any{
+		"comment_uid": rtCommentUID, "body": "created before refused move", "author": "worker",
+	})
+	require.NoError(t, err)
+	rtCommentEv := newRemoteEvent(t, source, &rtUID, "issue.commented", "worker", origin, at+101, jsontext.Value(rtCommentPayload))
+	rtMovePayload, err := json.Marshal(map[string]any{
+		"issue_uid": rtUID, "from_project_uid": rtPeer.UID, "from_short_id": rtShortID,
+		"to_project_uid": source.UID, "to_short_id": rtShortID, "updated_at": time.UnixMilli(at + 102).UTC().Format(time.RFC3339Nano),
+		"snapshot": map[string]any{
+			"uid": rtUID, "short_id": rtShortID, "title": "Round-trip moved back", "body": "",
+			"author": "worker", "status": "open",
+			"links": []map[string]any{{"type": "blocks", "to_issue_uid": moved.UID}},
+			"comments": []map[string]any{
+				{"comment_uid": rtCommentUID, "body": "created before refused move", "author": "worker", "created_at": rtCommentEv.CreatedAt.UTC().Format(time.RFC3339Nano)},
+				{"comment_uid": moveOnlyCommentUID, "body": "only inside refused move", "author": "worker", "created_at": time.UnixMilli(at + 102).UTC().Format(time.RFC3339Nano)},
+			},
+		},
+	})
+	require.NoError(t, err)
+	rtMoveEv := newRemoteEvent(t, source, &rtUID, "issue.moved", "worker", origin, at+102, jsontext.Value(rtMovePayload))
+	hubBeforeMoveEv := newRemoteEvent(t, source, &hubExistingIssue.UID, "issue.updated", "worker", origin, at+103, jsontext.Value(`{"title":"Hub existing edited before move"}`))
+	hubMovePayload, err := json.Marshal(map[string]any{
+		"issue_uid": hubExistingIssue.UID, "from_project_uid": rtPeer.UID, "from_short_id": hubExistingIssue.ShortID,
+		"to_project_uid": source.UID, "to_short_id": hubExistingIssue.ShortID, "updated_at": time.UnixMilli(at + 104).UTC().Format(time.RFC3339Nano),
+		"snapshot": map[string]any{
+			"uid": hubExistingIssue.UID, "short_id": hubExistingIssue.ShortID, "title": "Hub existing moved back", "body": "",
+			"author": "worker", "status": "open",
+			"links": []map[string]any{{"type": "blocks", "to_issue_uid": moved.UID}},
+			"comments": []map[string]any{
+				{"comment_uid": hubExistingComment.UID, "body": "already on hub", "author": "worker", "created_at": hubExistingComment.CreatedAt.UTC().Format(time.RFC3339Nano)},
+			},
+		},
+	})
+	require.NoError(t, err)
+	hubMoveEv := newRemoteEvent(t, source, &hubExistingIssue.UID, "issue.moved", "worker", origin, at+104, jsontext.Value(hubMovePayload))
+	replySurvivingPayload, err := json.Marshal(map[string]any{
+		"comment_uid": replySurvivingUID, "body": "reply to surviving comment", "author": "worker",
+		"reply_to_uid": rtCommentUID, "reply_kind": "reply",
+	})
+	require.NoError(t, err)
+	replySurvivingEv := newRemoteEvent(t, source, &stayingA.UID, "issue.commented", "worker", origin, at+105, jsontext.Value(replySurvivingPayload))
+	replyHubExistingPayload, err := json.Marshal(map[string]any{
+		"comment_uid": replyHubExistingUID, "body": "reply to hub existing comment", "author": "worker",
+		"reply_to_uid": hubExistingComment.UID, "reply_kind": "reply",
+	})
+	require.NoError(t, err)
+	replyHubExistingEv := newRemoteEvent(t, source, &stayingA.UID, "issue.commented", "worker", origin, at+106, jsontext.Value(replyHubExistingPayload))
+	replyMoveOnlyPayload, err := json.Marshal(map[string]any{
+		"comment_uid": replyMoveOnlyUID, "body": "reply to move-only comment", "author": "worker",
+		"reply_to_uid": moveOnlyCommentUID, "reply_kind": "reply",
+	})
+	require.NoError(t, err)
+	replyMoveOnlyEv := newRemoteEvent(t, source, &stayingA.UID, "issue.commented", "worker", origin, at+107, jsontext.Value(replyMoveOnlyPayload))
+	rtAfterMoveEv := newRemoteEvent(t, source, &rtUID, "issue.updated", "worker", origin, at+108, jsontext.Value(`{"title":"After refused move"}`))
+
+	params = baseParams
+	params.MoveSourceEnrollmentIDs = map[string]int64{rtPeer.UID: rtPeerGrant.Enrollment.ID}
+	params.Events = []db.FederationIngestEvent{
+		{SourceEventID: 100, Event: rtCreateEv},
+		{SourceEventID: 101, Event: rtCommentEv},
+		{SourceEventID: 102, Event: rtMoveEv},
+		{SourceEventID: 103, Event: hubBeforeMoveEv},
+		{SourceEventID: 104, Event: hubMoveEv},
+		{SourceEventID: 105, Event: replySurvivingEv},
+		{SourceEventID: 106, Event: replyHubExistingEv},
+		{SourceEventID: 107, Event: replyMoveOnlyEv},
+		{SourceEventID: 108, Event: rtAfterMoveEv},
+	}
+	rtRes, err := store.IngestFederationEvents(ctx, params)
+	require.NoError(t, err)
+	require.Equal(t, 5, rtRes.Accepted, "earlier create/comment/edit and replies to surviving/hub-existing comments must be accepted")
+	require.EqualValues(t, 101, rtRes.PushCursorEventID, "contiguous prefix stops before rtMoveEv")
+	require.Len(t, rtRes.RefusedEvents, 4)
+	require.Equal(t, []string{rtMoveEv.EventUID, hubMoveEv.EventUID, replyMoveOnlyEv.EventUID, rtAfterMoveEv.EventUID}, []string{
+		rtRes.RefusedEvents[0].EventUID,
+		rtRes.RefusedEvents[1].EventUID,
+		rtRes.RefusedEvents[2].EventUID,
+		rtRes.RefusedEvents[3].EventUID,
+	})
+	gotRT, err := store.IssueByUID(ctx, rtUID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "Round-trip created before move", gotRT.Title)
+	gotHubExisting, err := store.IssueByUID(ctx, hubExistingIssue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "Hub existing edited before move", gotHubExisting.Title)
+	stayingComments, err := store.CommentsByIssue(ctx, stayingA.ID)
+	require.NoError(t, err)
+	var stayingCommentUIDs []string
+	for _, c := range stayingComments {
+		stayingCommentUIDs = append(stayingCommentUIDs, c.UID)
+	}
+	require.Contains(t, stayingCommentUIDs, replySurvivingUID)
+	require.Contains(t, stayingCommentUIDs, replyHubExistingUID)
+	require.NotContains(t, stayingCommentUIDs, replyMoveOnlyUID)
 
 	// Implicit displaced parent in unenrolled project: refuses only the displacing event
 	// with empty IssueUID (preserving privacy), while accepting an unrelated sibling event.

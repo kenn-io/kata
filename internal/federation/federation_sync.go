@@ -270,6 +270,7 @@ func pushDirectSpoke(
 		scanCursor := binding.PushCursorEventID
 		hasRefused := false
 		var refusedEvents []api.FederationIngestRefusedEvent
+		refusedDeps := db.NewFederationRefusedDependencies()
 	pushLoop:
 		for {
 			if q, err := store.ActiveFederationQuarantine(ctx, binding.ProjectID, db.FederationQuarantineDirectionPush); err == nil {
@@ -317,7 +318,15 @@ func pushDirectSpoke(
 				continue pushLoop
 			}
 			for len(pending) > 0 {
-				segment := federationContiguousBaselinePrefix(pending)
+				submittable := pending
+				if hasRefused {
+					submittable = filterFederationPushPendingDependents(pending, refusedDeps)
+					if len(submittable) == 0 {
+						scanCursor = max(scanCursor, pending[len(pending)-1].ID)
+						break
+					}
+				}
+				segment := federationContiguousBaselinePrefix(submittable)
 				batchInput := federationRetryBatchInput(segment, binding.Actor, retryBatchSize, singleRunRetry)
 				batch, adoptionBaseline, adoptionBaselineEndEventID, err := nextFederationPushIngestBatch(batchInput)
 				if err != nil {
@@ -390,6 +399,7 @@ func pushDirectSpoke(
 						}
 						hasRefused = true
 						refusedEvents = append(refusedEvents, ack.RefusedEvents...)
+						recordFederationPushRefusedDependencies(batch, ack.RefusedEvents, refusedDeps)
 					} else {
 						if ack.PushCursorEventID < batch[0].ID {
 							return recordFederationSyncError(ctx, store, binding.ProjectID,
@@ -1183,6 +1193,53 @@ func isPoisonedFederationPushError(err error) bool {
 func isFederationProjectNotEnrolledError(err error) bool {
 	statusErr, ok := errors.AsType[*HubStatusError](err)
 	return ok && statusErr.StatusCode == http.StatusForbidden && federationHubErrorCode(statusErr.Body) == db.FederationProjectNotEnrolledCode
+}
+
+func federationDependencyEvent(ev db.Event) db.RemoteEvent {
+	return db.RemoteEvent{
+		EventUID: ev.UID,
+		IssueUID: ev.IssueUID,
+		Type:     ev.Type,
+		Payload:  jsontext.Value(ev.Payload),
+	}
+}
+
+func recordFederationPushRefusedDependencies(
+	batch []db.Event,
+	refused []api.FederationIngestRefusedEvent,
+	deps *db.FederationRefusedDependencies,
+) {
+	byUID := make(map[string]db.Event, len(batch))
+	for _, ev := range batch {
+		byUID[ev.UID] = ev
+	}
+	for _, item := range refused {
+		ev, ok := byUID[item.EventUID]
+		if !ok {
+			continue
+		}
+		_ = deps.Record(
+			federationDependencyEvent(ev),
+			&db.FederationProjectNotEnrolledError{
+				IssueUID: item.IssueUID,
+				Err:      db.ErrFederationMoveSourceUnauthorized,
+			},
+			nil,
+		)
+	}
+}
+
+func filterFederationPushPendingDependents(pending []db.Event, deps *db.FederationRefusedDependencies) []db.Event {
+	out := make([]db.Event, 0, len(pending))
+	for _, ev := range pending {
+		remote := federationDependencyEvent(ev)
+		if depErr := deps.Dependency(remote); depErr != nil {
+			_ = deps.Record(remote, depErr, nil)
+			continue
+		}
+		out = append(out, ev)
+	}
+	return out
 }
 
 func validateFederationIngestRefusedEvents(batch []db.Event, refused []api.FederationIngestRefusedEvent, pushCursor int64) ([]string, error) {

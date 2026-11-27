@@ -10,6 +10,128 @@ import (
 	"strings"
 )
 
+// FederationRefusedDependencies tracks issues, comments, and cron runs whose
+// producing events were refused earlier in a push batch or pass so later
+// causally dependent events are deferred without sending them out of order.
+type FederationRefusedDependencies struct {
+	issues   map[string]*FederationProjectNotEnrolledError
+	comments map[string]*FederationProjectNotEnrolledError
+	cronRuns map[string]*FederationProjectNotEnrolledError
+}
+
+// NewFederationRefusedDependencies returns an initialized dependency tracker.
+func NewFederationRefusedDependencies() *FederationRefusedDependencies {
+	return &FederationRefusedDependencies{
+		issues:   map[string]*FederationProjectNotEnrolledError{},
+		comments: map[string]*FederationProjectNotEnrolledError{},
+		cronRuns: map[string]*FederationProjectNotEnrolledError{},
+	}
+}
+
+// Record stores artifacts produced by a refused event. When commentAlreadyPresent
+// is non-nil, comments that already exist on the hub or were created by an
+// earlier surviving event are not recorded as missing.
+func (d *FederationRefusedDependencies) Record(
+	event RemoteEvent,
+	refusal *FederationProjectNotEnrolledError,
+	commentAlreadyPresent func(commentUID string) (bool, error),
+) error {
+	switch event.Type {
+	case "issue.created", "issue.snapshot", "issue.moved":
+		if uid := EventIssueUID(event.IssueUID); uid != "" {
+			if _, exists := d.issues[uid]; !exists {
+				d.issues[uid] = refusal
+			}
+		}
+		for _, commentUID := range federationSnapshotCommentUIDs(event) {
+			if _, exists := d.comments[commentUID]; exists {
+				continue
+			}
+			if commentAlreadyPresent != nil {
+				present, err := commentAlreadyPresent(commentUID)
+				if err != nil {
+					return err
+				}
+				if present {
+					continue
+				}
+			}
+			d.comments[commentUID] = refusal
+		}
+	case "issue.commented":
+		if commentUID := federationCommentEventUID(event); commentUID != "" {
+			if _, exists := d.comments[commentUID]; !exists {
+				if commentAlreadyPresent != nil {
+					present, err := commentAlreadyPresent(commentUID)
+					if err != nil {
+						return err
+					}
+					if present {
+						return nil
+					}
+				}
+				d.comments[commentUID] = refusal
+			}
+		}
+	case "cron.run.observed", "cron.run.snapshot":
+		var run CronRunObservation
+		if json.Unmarshal(event.Payload, &run) == nil && run.UID != "" {
+			if _, exists := d.cronRuns[run.UID]; !exists {
+				d.cronRuns[run.UID] = refusal
+			}
+		}
+	}
+	return nil
+}
+
+// Dependency returns the refusal of an earlier event that event causally
+// depends on, or nil if event has no refused dependency.
+func (d *FederationRefusedDependencies) Dependency(event RemoteEvent) *FederationProjectNotEnrolledError {
+	switch {
+	case strings.HasPrefix(event.Type, "issue."):
+		if primary := EventIssueUID(event.IssueUID); primary != "" {
+			if refusal, ok := d.issues[primary]; ok {
+				return refusal
+			}
+		}
+		switch event.Type {
+		case "issue.comment_edited":
+			if commentUID, ok := StringValue(PayloadMap(event.Payload)["comment_uid"]); ok {
+				if refusal, exists := d.comments[commentUID]; exists {
+					return refusal
+				}
+			}
+		case "issue.commented":
+			if replyTo, ok := StringValue(PayloadMap(event.Payload)["reply_to_uid"]); ok {
+				if refusal, exists := d.comments[replyTo]; exists {
+					return refusal
+				}
+			}
+		case "issue.moved":
+			for _, commentUID := range federationSnapshotCommentRefs(event) {
+				if refusal, exists := d.comments[commentUID]; exists {
+					return refusal
+				}
+			}
+		}
+	case event.Type == "cron.run.observed" || event.Type == "cron.run.snapshot":
+		var run CronRunObservation
+		if json.Unmarshal(event.Payload, &run) == nil {
+			if run.UID != "" {
+				if refusal, ok := d.cronRuns[run.UID]; ok {
+					return refusal
+				}
+			}
+			if run.IssueUID != nil {
+				if refusal, ok := d.issues[*run.IssueUID]; ok {
+					return refusal
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // AuthorizeFederationCurrentIssuesTx checks current-project push authority for
 // every fresh event in events. Fresh events retain their authored envelope, but
 // authorization follows every affected issue's current owner. Duplicates
@@ -35,16 +157,8 @@ func AuthorizeFederationCurrentIssuesTx(
 		id        int64
 		reference bool
 	}
-	var refused map[string]*FederationProjectNotEnrolledError
-	var refusedIssues map[string]*FederationProjectNotEnrolledError
-	var refusedComments map[string]*FederationProjectNotEnrolledError
-	var refusedCronRuns map[string]*FederationProjectNotEnrolledError
-	if allowPartial {
-		refused = map[string]*FederationProjectNotEnrolledError{}
-		refusedIssues = map[string]*FederationProjectNotEnrolledError{}
-		refusedComments = map[string]*FederationProjectNotEnrolledError{}
-		refusedCronRuns = map[string]*FederationProjectNotEnrolledError{}
-	}
+	refused := map[string]*FederationProjectNotEnrolledError{}
+	hubComments := map[string]bool{}
 	for {
 		surviving := events
 		if len(refused) > 0 {
@@ -57,14 +171,45 @@ func AuthorizeFederationCurrentIssuesTx(
 		}
 		// Report graph validation only after checking current project authority.
 		parentRemovals, parentErr := DirectParentRemovals(ctx, tx, surviving, p.AuthorizeReference != nil)
+		// Rebuild forward-only causal dependencies in original batch order on
+		// each pass so a later refused event never blocks earlier independent work.
+		deps := NewFederationRefusedDependencies()
 		staged := map[string]int64{}
+		stagedComments := map[string]bool{}
 		checked := map[checkedProject]bool{}
+		commentAlreadyPresent := func(commentUID string) (bool, error) {
+			if stagedComments[commentUID] {
+				return true, nil
+			}
+			if present, known := hubComments[commentUID]; known {
+				return present, nil
+			}
+			var one int
+			err := tx.QueryRowContext(ctx, `SELECT 1 FROM comments WHERE uid=$1`, commentUID).Scan(&one)
+			if errors.Is(err, sql.ErrNoRows) {
+				hubComments[commentUID] = false
+				return false, nil
+			}
+			if err != nil {
+				return false, err
+			}
+			hubComments[commentUID] = true
+			return true, nil
+		}
 		newlyRefused := false
-		for _, event := range surviving {
+		for _, event := range events {
 			if allowPartial {
-				if depErr := federationRefusedDependencyError(event, refusedIssues, refusedComments, refusedCronRuns); depErr != nil {
+				if existingRefusal, isRefused := refused[event.EventUID]; isRefused {
+					if err := deps.Record(event, existingRefusal, commentAlreadyPresent); err != nil {
+						return nil, err
+					}
+					continue
+				}
+				if depErr := deps.Dependency(event); depErr != nil {
 					refused[event.EventUID] = depErr
-					recordFederationRefusedArtifacts(event, depErr, refusedIssues, refusedComments, refusedCronRuns)
+					if err := deps.Record(event, depErr, commentAlreadyPresent); err != nil {
+						return nil, err
+					}
 					newlyRefused = true
 					continue
 				}
@@ -161,7 +306,9 @@ func AuthorizeFederationCurrentIssuesTx(
 			}
 			if eventRefusal != nil {
 				refused[event.EventUID] = eventRefusal
-				recordFederationRefusedArtifacts(event, eventRefusal, refusedIssues, refusedComments, refusedCronRuns)
+				if err := deps.Record(event, eventRefusal, commentAlreadyPresent); err != nil {
+					return nil, err
+				}
 				newlyRefused = true
 				continue
 			}
@@ -170,12 +317,22 @@ func AuthorizeFederationCurrentIssuesTx(
 				if _, exists := staged[primary]; !exists {
 					staged[primary] = p.ProjectID
 				}
+				for _, commentUID := range federationSnapshotCommentUIDs(event) {
+					stagedComments[commentUID] = true
+				}
 			case "issue.moved":
 				_, to, err := FederationMoveProjects(ctx, tx, p.ProjectID, event)
 				if err != nil {
 					return nil, err
 				}
 				staged[primary] = to
+				for _, commentUID := range federationSnapshotCommentUIDs(event) {
+					stagedComments[commentUID] = true
+				}
+			case "issue.commented":
+				if commentUID := federationCommentEventUID(event); commentUID != "" {
+					stagedComments[commentUID] = true
+				}
 			}
 		}
 		if !newlyRefused {
@@ -184,95 +341,13 @@ func AuthorizeFederationCurrentIssuesTx(
 	}
 }
 
-func recordFederationRefusedArtifacts(
-	event RemoteEvent,
-	refusal *FederationProjectNotEnrolledError,
-	refusedIssues map[string]*FederationProjectNotEnrolledError,
-	refusedComments map[string]*FederationProjectNotEnrolledError,
-	refusedCronRuns map[string]*FederationProjectNotEnrolledError,
-) {
-	switch event.Type {
-	case "issue.created", "issue.snapshot", "issue.moved":
-		if uid := EventIssueUID(event.IssueUID); uid != "" {
-			if _, exists := refusedIssues[uid]; !exists {
-				refusedIssues[uid] = refusal
-			}
-		}
-		for _, commentUID := range federationSnapshotCommentUIDs(event) {
-			if _, exists := refusedComments[commentUID]; !exists {
-				refusedComments[commentUID] = refusal
-			}
-		}
-	case "issue.commented":
-		m := PayloadMap(event.Payload)
-		commentUID, _ := StringValue(m["comment_uid"])
-		if commentUID == "" {
-			commentUID, _ = StringValue(m["uid"])
-		}
-		if commentUID != "" {
-			if _, exists := refusedComments[commentUID]; !exists {
-				refusedComments[commentUID] = refusal
-			}
-		}
-	case "cron.run.observed", "cron.run.snapshot":
-		var run CronRunObservation
-		if json.Unmarshal(event.Payload, &run) == nil && run.UID != "" {
-			if _, exists := refusedCronRuns[run.UID]; !exists {
-				refusedCronRuns[run.UID] = refusal
-			}
-		}
+func federationCommentEventUID(event RemoteEvent) string {
+	m := PayloadMap(event.Payload)
+	if commentUID, ok := StringValue(m["comment_uid"]); ok && commentUID != "" {
+		return commentUID
 	}
-}
-
-func federationRefusedDependencyError(
-	event RemoteEvent,
-	refusedIssues map[string]*FederationProjectNotEnrolledError,
-	refusedComments map[string]*FederationProjectNotEnrolledError,
-	refusedCronRuns map[string]*FederationProjectNotEnrolledError,
-) *FederationProjectNotEnrolledError {
-	switch {
-	case strings.HasPrefix(event.Type, "issue."):
-		if primary := EventIssueUID(event.IssueUID); primary != "" {
-			if refusal, ok := refusedIssues[primary]; ok {
-				return refusal
-			}
-		}
-		switch event.Type {
-		case "issue.comment_edited":
-			if commentUID, ok := StringValue(PayloadMap(event.Payload)["comment_uid"]); ok {
-				if refusal, exists := refusedComments[commentUID]; exists {
-					return refusal
-				}
-			}
-		case "issue.commented":
-			if replyTo, ok := StringValue(PayloadMap(event.Payload)["reply_to_uid"]); ok {
-				if refusal, exists := refusedComments[replyTo]; exists {
-					return refusal
-				}
-			}
-		case "issue.moved":
-			for _, commentUID := range federationSnapshotCommentUIDs(event) {
-				if refusal, exists := refusedComments[commentUID]; exists {
-					return refusal
-				}
-			}
-		}
-	case event.Type == "cron.run.observed" || event.Type == "cron.run.snapshot":
-		var run CronRunObservation
-		if json.Unmarshal(event.Payload, &run) == nil {
-			if run.UID != "" {
-				if refusal, ok := refusedCronRuns[run.UID]; ok {
-					return refusal
-				}
-			}
-			if run.IssueUID != nil {
-				if refusal, ok := refusedIssues[*run.IssueUID]; ok {
-					return refusal
-				}
-			}
-		}
-	}
-	return nil
+	commentUID, _ := StringValue(m["uid"])
+	return commentUID
 }
 
 func federationSnapshotCommentUIDs(event RemoteEvent) []string {
@@ -296,6 +371,36 @@ func federationSnapshotCommentUIDs(event RemoteEvent) []string {
 	for _, comment := range doc.Comments {
 		if id := cmp.Or(comment.CommentUID, comment.UID); id != "" {
 			out = append(out, id)
+		}
+	}
+	return out
+}
+
+func federationSnapshotCommentRefs(event RemoteEvent) []string {
+	snapshot := event
+	if event.Type == "issue.moved" {
+		snapshot = FederationMoveSnapshotEvent(event)
+	}
+	if len(snapshot.Payload) == 0 {
+		return nil
+	}
+	var doc struct {
+		Comments []struct {
+			CommentUID string `json:"comment_uid"`
+			UID        string `json:"uid"`
+			ReplyToUID string `json:"reply_to_uid"`
+		} `json:"comments"`
+	}
+	if json.Unmarshal(snapshot.Payload, &doc) != nil {
+		return nil
+	}
+	var out []string
+	for _, comment := range doc.Comments {
+		if id := cmp.Or(comment.CommentUID, comment.UID); id != "" {
+			out = append(out, id)
+		}
+		if comment.ReplyToUID != "" {
+			out = append(out, comment.ReplyToUID)
 		}
 	}
 	return out
