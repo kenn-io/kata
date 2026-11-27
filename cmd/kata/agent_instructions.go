@@ -439,7 +439,10 @@ func renameOverRefused(path string, err error) bool {
 		return false
 	}
 	info, statErr := os.Lstat(path)
-	return statErr == nil && info.Mode().IsRegular()
+	if statErr != nil {
+		return false
+	}
+	return info.Mode().IsRegular()
 }
 
 // writeInstructionInPlace overwrites an existing file without replacing it, so
