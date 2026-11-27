@@ -227,6 +227,50 @@ describe('IssueBoard columns', () => {
   })
 })
 
+describe('IssueBoard column strip', () => {
+  it('lists each column with its count and marks the one in view', () => {
+    renderBoard()
+
+    const strip = screen.getByRole('navigation', { name: 'Board columns' })
+    const buttons = within(strip).getAllByRole('button')
+    expect(buttons.map((button) => button.textContent?.replace(/\s+/g, ' ').trim())).toEqual([
+      'Open 1',
+      'In progress 1',
+      'Needs attention 1',
+      'Done 1',
+    ])
+    expect(buttons.map((button) => button.getAttribute('aria-current'))).toEqual([
+      'true',
+      null,
+      null,
+      null,
+    ])
+  })
+
+  it('brings a column into view when its name is tapped', async () => {
+    const scrolled: [Element, ScrollIntoViewOptions | boolean | undefined][] = []
+    const scrollIntoView = vi
+      .spyOn(Element.prototype, 'scrollIntoView')
+      .mockImplementation(function (this: Element, options) {
+        scrolled.push([this, options])
+      })
+    renderBoard()
+
+    const strip = screen.getByRole('navigation', { name: 'Board columns' })
+    await fireEvent.click(within(strip).getByRole('button', { name: 'Done 1' }))
+
+    // The strip also scrolls its own names; only the Done column moves the board.
+    const columns = scrolled.filter(([element]) => element.matches('section'))
+    expect(columns).toEqual([
+      [column('Done'), expect.objectContaining({ inline: 'start', block: 'nearest' })],
+    ])
+    expect(within(strip).getByRole('button', { name: 'Done 1' }).getAttribute('aria-current')).toBe(
+      'true',
+    )
+    scrollIntoView.mockRestore()
+  })
+})
+
 describe('IssueBoard moves', () => {
   it('claims a card moved from Open to In progress with Alt+ArrowRight', async () => {
     const props = renderBoard()

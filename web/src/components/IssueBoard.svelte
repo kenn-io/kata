@@ -170,6 +170,54 @@
   let menuAnchor = $state<MenuAnchorPoint | undefined>()
   let menuReturn = $state<HTMLElement | undefined>()
   let boardElement = $state<HTMLElement>()
+  let columnsElement = $state<HTMLElement>()
+  // The column most in view, which the phone strip marks as current.
+  let columnInView = $state<BoardColumnID>('open')
+
+  $effect(() => {
+    const root = columnsElement
+    if (!root || typeof IntersectionObserver === 'undefined') return
+    // How much of each column shows; the most visible one is current.
+    const ratios: Record<string, number> = {}
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const id = (entry.target as HTMLElement).dataset.column
+          if (id) ratios[id] = entry.intersectionRatio
+        }
+        let best: string | undefined
+        for (const [id, ratio] of Object.entries(ratios)) {
+          if (best === undefined || ratio > ratios[best]!) best = id
+        }
+        if (best) columnInView = best as BoardColumnID
+      },
+      { root, threshold: [0, 0.25, 0.5, 0.75, 1] },
+    )
+    for (const section of root.querySelectorAll<HTMLElement>('[data-column]')) {
+      observer.observe(section)
+    }
+    return () => observer.disconnect()
+  })
+
+  // Keep the current column's name visible in the strip as the board scrolls.
+  let stripElement = $state<HTMLElement>()
+  $effect(() => {
+    const id = columnInView
+    stripElement
+      ?.querySelector<HTMLElement>(`[data-strip="${id}"]`)
+      ?.scrollIntoView({ inline: 'nearest', block: 'nearest' })
+  })
+
+  function showColumn(id: BoardColumnID): void {
+    columnInView = id
+    const section = columnsElement?.querySelector<HTMLElement>(`[data-column="${id}"]`)
+    const reduced = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+    section?.scrollIntoView({
+      inline: 'start',
+      block: 'nearest',
+      behavior: reduced ? 'auto' : 'smooth',
+    })
+  }
 
   let canMove = $derived(moveBlockedReason === undefined)
   let serverPaged = $derived(doneTotal !== undefined && onShowMoreDone !== undefined)
@@ -550,13 +598,31 @@
       arrow to move it.
     </p>
   {/if}
-  <div class="board-columns">
+  <!-- Phones show one column at a time; this strip says which, and jumps to the others. -->
+  <nav class="column-strip" aria-label="Board columns" bind:this={stripElement}>
+    {#each board.columns as column (column.id)}
+      <button
+        type="button"
+        class="strip-item"
+        data-strip={column.id}
+        aria-current={columnInView === column.id ? 'true' : undefined}
+        style:--column-color={columnColor(column)}
+        onclick={() => showColumn(column.id)}
+      >
+        <span class="column-dot" aria-hidden="true"></span>
+        {column.title}
+        <span class="strip-count">{column.total}</span>
+      </button>
+    {/each}
+  </nav>
+  <div class="board-columns" bind:this={columnsElement}>
     {#each board.columns as column (column.id)}
       {@const headingID = `board-heading-${column.id}`}
       {@const collapsed = collapsedSet.has(column.id)}
       {@const canCollapse = column.id === 'done' || (column.total === 0 && !boardEmpty)}
       <section
         class="board-column"
+        data-column={column.id}
         class:collapsed
         class:drop-target={dropTarget === column.id && draggingUID !== null}
         class:column--done={column.id === 'done'}
@@ -1548,14 +1614,65 @@
     }
   }
 
+  .column-strip {
+    display: none;
+  }
+
   @media (max-width: 640px) {
+    .column-strip {
+      display: flex;
+      gap: var(--space-2);
+      padding: var(--space-3) var(--space-5) 0;
+      overflow-x: auto;
+      scroll-padding-inline: var(--space-5);
+      scrollbar-width: none;
+    }
+
+    .strip-item {
+      display: inline-flex;
+      flex: 0 0 auto;
+      align-items: center;
+      gap: var(--space-3);
+      min-height: 36px;
+      padding: 0 var(--space-5);
+      border: 1px solid transparent;
+      border-radius: var(--radius-md);
+      background: transparent;
+      color: var(--text-secondary);
+      font: inherit;
+      font-size: var(--font-size-sm);
+      white-space: nowrap;
+      cursor: pointer;
+    }
+
+    .strip-item[aria-current='true'] {
+      border-color: var(--border-default);
+      background: var(--bg-surface);
+      color: var(--text-primary);
+      font-weight: var(--font-weight-medium);
+    }
+
+    .strip-item:focus-visible {
+      outline: var(--focus-ring);
+      outline-offset: 1px;
+    }
+
+    .strip-count {
+      color: var(--text-muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Columns snap to the same inset as the page title. */
     .board-columns {
-      padding-inline: var(--space-4);
+      padding-inline: var(--space-5);
+      scroll-padding-inline: var(--space-5);
       scroll-snap-type: x mandatory;
     }
 
+    /* One column fills the screen, leaving the next one peeking in by 32px. */
     .board-column {
-      flex: 0 0 min(300px, calc(100vw - 48px));
+      flex: 0 0 calc(100vw - var(--space-5) - var(--space-4) - var(--space-8));
+      max-width: none;
     }
   }
 </style>

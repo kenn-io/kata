@@ -64,3 +64,23 @@ test('a keyboard-focused board card shows the focus ring', async ({ page, kata }
     .poll(() => card.evaluate((element) => getComputedStyle(element).outlineStyle))
     .not.toBe('none')
 })
+
+test('the phone column strip keeps the column in view named on screen', async ({ page, kata }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const credentials = await kata.launch(page)
+  await kata.seedIssue(page, credentials, { title: 'Phone strip card' })
+  await page.goto(`${kata.origin}/kata?scope=${kata.projectUID}&layout=board`)
+  const strip = page.getByRole('navigation', { name: 'Board columns' })
+  await expect(strip.getByRole('button', { name: /^Open/ })).toHaveAttribute('aria-current', 'true')
+
+  // Scroll the board, not the strip, all the way to Done.
+  await page.locator('.board-columns').evaluate((columns) => {
+    columns.scrollTo({ left: columns.scrollWidth, behavior: 'instant' })
+  })
+
+  const done = strip.getByRole('button', { name: /^Done/ })
+  await expect(done).toHaveAttribute('aria-current', 'true')
+  await expect
+    .poll(() => done.evaluate((element) => element.getBoundingClientRect().right))
+    .toBeLessThanOrEqual(390)
+})
