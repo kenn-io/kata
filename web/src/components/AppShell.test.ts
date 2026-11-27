@@ -276,6 +276,23 @@ describe('AppShell', () => {
       )
     })
 
+    test('locks board writes while another change is saving', () => {
+      render(AppShell, {
+        props: {
+          route: { kind: 'kata', projectUID, graph: false, board: true, filters },
+          snapshot: snapshot(),
+          loading: false,
+          ...mutationProps({ mutationPending: true }),
+          onNavigate: vi.fn(),
+          onCreateProject: vi.fn(async () => ({ changed: true })),
+        },
+      })
+
+      expect(
+        screen.getByRole('button', { name: 'Actions for Example issue' }).hasAttribute('disabled'),
+      ).toBe(true)
+    })
+
     test('remembers a collapsed Done column', async () => {
       const onPreferencesChange = vi.fn()
       render(AppShell, {

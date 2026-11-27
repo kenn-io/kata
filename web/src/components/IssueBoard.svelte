@@ -68,6 +68,8 @@
     doneTotal?: number | undefined
     /** Asks the server for the next page of closed issues. */
     onShowMoreDone?: (() => void) | undefined
+    /** Another change is saving; the board starts no new write until it finishes. */
+    busy?: boolean | undefined
     /** Opens Logbook, which lists every closed issue, once Done can page no further. */
     onOpenLogbook?: (() => void) | undefined
     /** One-line cards with ID, priority, and title only. */
@@ -97,6 +99,7 @@
     viewer = undefined,
     doneTotal = undefined,
     onShowMoreDone = undefined,
+    busy = false,
     onOpenLogbook = undefined,
     compact = false,
     collapsedColumns = [],
@@ -251,7 +254,7 @@
   }
 
   async function moveTo(issue: KataTaskSummary, target: BoardColumnID): Promise<void> {
-    if (!canMove || pending.has(issue.uid)) return
+    if (!canMove || busy || pending.has(issue.uid)) return
     const plan = planBoardMove(issue, target, { viewer })
     if (!plan) return
     if (plan.close) {
@@ -310,7 +313,7 @@
   async function submitAsk(): Promise<void> {
     const request = asking
     const message = askMessage.trim()
-    if (!request || !message || askSaving || !onAskIssue) return
+    if (!request || !message || askSaving || busy || !onAskIssue) return
     askSaving = true
     try {
       if (await onAskIssue(request.issue, request.to, message)) {
@@ -410,7 +413,7 @@
   }
 
   function handleDragStart(event: DragEvent, issue: KataTaskSummary): void {
-    if (!canMove || pending.has(issue.uid)) {
+    if (!canMove || busy || pending.has(issue.uid)) {
       event.preventDefault()
       return
     }
@@ -483,7 +486,7 @@
 
   async function submitAddCard(column: BoardColumn<KataTaskSummary>): Promise<void> {
     const title = addDraft.trim()
-    if (!title || addSaving || !onAddCard) return
+    if (!title || addSaving || busy || !onAddCard) return
     addSaving = true
     // The new card arrives in a refresh before its ID is known, so match its title.
     ownTitles.add(title)
@@ -783,7 +786,7 @@
                     aria-label={`Actions for ${issue.title}`}
                     aria-haspopup="menu"
                     title="Move or ask…"
-                    disabled={pending.has(issue.uid)}
+                    disabled={busy || pending.has(issue.uid)}
                     onclick={(event) => openMenu(event, issue)}
                   >
                     <EllipsisIcon size={14} strokeWidth={2} aria-hidden="true" />
@@ -811,7 +814,7 @@
                   tone="info"
                   surface="solid"
                   label={addSaving ? 'Adding…' : 'Add'}
-                  disabled={addSaving || !addDraft.trim()}
+                  disabled={addSaving || busy || !addDraft.trim()}
                   onclick={() => void submitAddCard(column)}
                 />
                 <Button size="sm" label="Cancel" onclick={() => closeAddCard(column)} />
@@ -920,7 +923,7 @@
       surface="solid"
       label={askSaving ? 'Sending…' : 'Send'}
       ariaLabel="Send request"
-      disabled={askSaving || !askMessage.trim()}
+      disabled={askSaving || busy || !askMessage.trim()}
       onclick={() => void submitAsk()}
     />
   {/snippet}

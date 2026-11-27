@@ -429,6 +429,30 @@ describe('IssueBoard moves', () => {
     expect(props.onMoveIssue).toHaveBeenCalledWith(triage, { claim: true })
   })
 
+  it('starts no move, ask, or add while another change is still saving', async () => {
+    const onAskIssue = vi.fn(async () => true)
+    const onAddCard = vi.fn(async () => true)
+    const props = renderBoard({ busy: true, onAskIssue, onAddCard })
+
+    await fireEvent.keyDown(cardButton('Triage inbox'), { key: 'ArrowRight', altKey: true })
+    await dragTo('Triage inbox', 'In progress', 'u-triage')
+    expect(props.onMoveIssue).not.toHaveBeenCalled()
+    expect(
+      screen.getByRole('button', { name: 'Actions for Triage inbox' }).hasAttribute('disabled'),
+    ).toBe(true)
+    await fireEvent.click(within(column('Open')).getByRole('button', { name: 'Add card to Open' }))
+    await fireEvent.input(
+      within(column('Open')).getByRole('textbox', { name: 'New card in Open' }),
+      {
+        target: { value: 'Waits for the save' },
+      },
+    )
+    expect(
+      within(column('Open')).getByRole('button', { name: 'Add' }).hasAttribute('disabled'),
+    ).toBe(true)
+    expect(onAddCard).not.toHaveBeenCalled()
+  })
+
   it('does not move cards and says why when changes are blocked', async () => {
     const props = renderBoard({ moveBlockedReason: 'This credential is read-only.' })
 

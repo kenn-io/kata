@@ -1243,6 +1243,7 @@
       doneTotal={snapshot.closed_total}
       onShowMoreDone={onShowMoreBoardDone}
       onOpenLogbook={() => openView('logbook')}
+      busy={mutationPending}
       compact={preferences.boardCompact}
       highlightRemoteChanges={preferences.boardHighlightRemote}
       scopeKey={`${selectedProject?.uid ?? 'all'}|${JSON.stringify(route.filters)}`}
