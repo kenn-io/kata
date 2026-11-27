@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"fmt"
+	"runtime"
 	"slices"
 	"testing"
 	"time"
@@ -1217,14 +1218,14 @@ func RunUISnapshotClosedPageContract(t *testing.T, open func(*testing.T) db.Stor
 	addCursorLabel(ctx, t, store, closedLast, "keep")
 	addCursorLabel(ctx, t, store, openA, "keep")
 	// Close out of creation order so closed_at order differs from id order.
-	// Timestamps carry millisecond precision, so space the closes apart.
 	// The two most recent closes (closedLast, closedFirst) are not the two
 	// highest IDs (closedMiddle, closedLast), so ordering by ID would fail.
 	for _, issue := range []db.Issue{closedMiddle, closedLast, closedFirst, otherClosed} {
-		_, _, changed, closeErr := store.CloseIssue(ctx, issue.ID, "done", "user-a", "Completed", nil)
+		closed, _, changed, closeErr := store.CloseIssue(ctx, issue.ID, "done", "user-a", "Completed", nil)
 		require.NoError(t, closeErr)
 		require.True(t, changed)
-		time.Sleep(5 * time.Millisecond)
+		require.NotNil(t, closed.ClosedAt)
+		waitPastMillisecond(*closed.ClosedAt)
 	}
 
 	t.Run("pages closed issues newest first and counts them all", func(t *testing.T) {
@@ -1323,4 +1324,13 @@ func RunUISnapshotCommentCountContract(t *testing.T, open func(*testing.T) db.St
 	require.Equal(t, map[string]int64{busy.UID: 3, quiet.UID: 0, closed.UID: 1}, counts(db.UISnapshotQuery{
 		View: "all-open", ProjectUID: project.UID, Statuses: []string{"all"}, ClosedLimit: 5,
 	}))
+}
+
+// waitPastMillisecond returns once the wall clock is in a later millisecond
+// than at, so the next stored timestamp sorts strictly after it. Stores keep
+// millisecond precision, so this waits at most about a millisecond.
+func waitPastMillisecond(at time.Time) {
+	for !time.Now().UTC().Truncate(time.Millisecond).After(at.UTC().Truncate(time.Millisecond)) {
+		runtime.Gosched()
+	}
 }
