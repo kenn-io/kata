@@ -704,6 +704,12 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 		if err != nil {
 			return nil, nil, err
 		}
+		if query.ClosedLimit > 0 {
+			// Rows filtered in Go above skip the SQL page, so page them here.
+			var total int
+			issues, total = db.PageClosedUIIssues(issues, query.ClosedLimit)
+			closedTotal = &total
+		}
 	}
 	if err := readUILabelsForIssues(ctx, tx, issues); err != nil {
 		return nil, nil, err

@@ -1,8 +1,11 @@
 package db
 
 import (
+	"cmp"
 	"context"
 	"encoding/json/v2"
+	"slices"
+	"time"
 
 	"go.kenn.io/kata/internal/metadata"
 )
@@ -224,4 +227,39 @@ func RecordExposedUILinks(ctx context.Context, links []UILink) {
 		RecordExposedIssue(ctx, link.FromIssueID)
 		RecordExposedIssue(ctx, link.ToIssueID)
 	}
+}
+
+// PageClosedUIIssues keeps every open issue in order and the limit most
+// recently closed issues, newest close first, and returns how many closed
+// issues there were. Stores that filter rows in Go after the query use it so
+// a closed limit pages the same way as the SQL path.
+func PageClosedUIIssues(issues []UIIssue, limit int) ([]UIIssue, int) {
+	paged := make([]UIIssue, 0, len(issues))
+	var closed []UIIssue
+	for _, issue := range issues {
+		if issue.Status == "closed" {
+			closed = append(closed, issue)
+			continue
+		}
+		paged = append(paged, issue)
+	}
+	slices.SortStableFunc(closed, func(a, b UIIssue) int {
+		at, bt := closedTime(a), closedTime(b)
+		if c := bt.Compare(at); c != 0 {
+			return c
+		}
+		return cmp.Compare(b.ID, a.ID)
+	})
+	total := len(closed)
+	if len(closed) > limit {
+		closed = closed[:limit]
+	}
+	return append(paged, closed...), total
+}
+
+func closedTime(issue UIIssue) time.Time {
+	if issue.ClosedAt == nil {
+		return time.Time{}
+	}
+	return *issue.ClosedAt
 }
