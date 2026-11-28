@@ -7,6 +7,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -385,7 +386,7 @@ func (s *Store) insertEventTx(ctx context.Context, tx *sql.Tx, input eventInsert
 	if input.HLC != nil {
 		hlc = *input.HLC
 	} else {
-		hlc, err = nextEventHLCTx(ctx, tx, time.Now().UTC())
+		hlc, err = s.nextEventHLCTx(ctx, tx, time.Now().UTC())
 		if err != nil {
 			return db.Event{}, err
 		}
@@ -416,6 +417,9 @@ func (s *Store) insertEventTx(ctx context.Context, tx *sql.Tx, input eventInsert
 	).Scan(&eventID)
 	if err != nil {
 		return db.Event{}, mapSQLError(err, nil)
+	}
+	if err := recordEventHLCTx(ctx, tx, hlc); err != nil {
+		return db.Event{}, err
 	}
 	event, err := scanEvent(tx.QueryRowContext(ctx, eventSelect+` WHERE e.id = $1`, eventID))
 	if err != nil {
@@ -477,17 +481,72 @@ func lockEventSequenceTx(ctx context.Context, tx db.Transaction) error {
 	return nil
 }
 
-func nextEventHLCTx(ctx context.Context, tx *sql.Tx, now time.Time) (db.EventHLCTimestamp, error) {
-	var last db.EventHLCTimestamp
-	err := tx.QueryRowContext(ctx, `SELECT hlc_physical_ms, hlc_counter FROM events
-      ORDER BY hlc_physical_ms DESC, hlc_counter DESC LIMIT 1`).Scan(&last.PhysicalMS, &last.Counter)
-	if errors.Is(err, sql.ErrNoRows) {
-		return db.NextEventHLCValue(db.EventHLCTimestamp{}, now), nil
+// eventClockSetting names a transaction-local setting that carries the newest
+// clock value this transaction has written. It needs no table: PostgreSQL
+// discards it at commit or rollback, so it never outlives the transaction.
+const eventClockSetting = "kata.event_hlc"
+
+// nextEventHLCTx returns the next local clock value. The caller holds the event
+// sequence lock, so every other writer's events are committed and visible to a
+// new statement. A separate READ COMMITTED connection reads the newest value:
+// reading it inside the caller's serializable snapshot took a predicate lock
+// on the clock index and made a concurrent writer repeat its whole transaction.
+// That connection cannot see this transaction's own events, so the setting
+// supplies them.
+func (s *Store) nextEventHLCTx(ctx context.Context, tx *sql.Tx, now time.Time) (db.EventHLCTimestamp, error) {
+	if s.eventClockDB == nil {
+		return db.EventHLCTimestamp{}, errors.New("postgres event clock reader is unavailable")
 	}
-	if err != nil {
+	var last db.EventHLCTimestamp
+	err := s.eventClockDB.QueryRowContext(ctx, `SELECT hlc_physical_ms, hlc_counter FROM events
+      ORDER BY hlc_physical_ms DESC, hlc_counter DESC LIMIT 1`).Scan(&last.PhysicalMS, &last.Counter)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return db.EventHLCTimestamp{}, mapSQLError(err, nil)
 	}
+	var written sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT current_setting($1, true)`, eventClockSetting).Scan(&written); err != nil {
+		return db.EventHLCTimestamp{}, mapSQLError(err, nil)
+	}
+	// An unset setting reads as NULL; one that an earlier transaction set on
+	// this connection reads as an empty string.
+	if written.String != "" {
+		own, err := parseEventClockSetting(written.String)
+		if err != nil {
+			return db.EventHLCTimestamp{}, err
+		}
+		if own.PhysicalMS > last.PhysicalMS || (own.PhysicalMS == last.PhysicalMS && own.Counter > last.Counter) {
+			last = own
+		}
+	}
 	return db.NextEventHLCValue(last, now), nil
+}
+
+// recordEventHLCTx keeps the larger of the setting and hlc. Fixed-width digits
+// make the byte order of the text equal to the numeric order of the pair.
+func recordEventHLCTx(ctx context.Context, tx *sql.Tx, hlc db.EventHLCTimestamp) error {
+	if hlc.PhysicalMS < 0 || hlc.Counter < 0 {
+		return nil
+	}
+	value := fmt.Sprintf("%019d,%019d", hlc.PhysicalMS, hlc.Counter)
+	if _, err := tx.ExecContext(ctx, `SELECT set_config($1,
+  greatest(coalesce(current_setting($1, true), '') COLLATE "C", $2::text COLLATE "C"), true)`,
+		eventClockSetting, value); err != nil {
+		return mapSQLError(err, nil)
+	}
+	return nil
+}
+
+func parseEventClockSetting(value string) (db.EventHLCTimestamp, error) {
+	physical, counter, found := strings.Cut(value, ",")
+	var clock db.EventHLCTimestamp
+	var err error
+	if clock.PhysicalMS, err = strconv.ParseInt(physical, 10, 64); err != nil || !found {
+		return db.EventHLCTimestamp{}, fmt.Errorf("invalid %s setting %q", eventClockSetting, value)
+	}
+	if clock.Counter, err = strconv.ParseInt(counter, 10, 64); err != nil {
+		return db.EventHLCTimestamp{}, fmt.Errorf("invalid %s setting %q", eventClockSetting, value)
+	}
+	return clock, nil
 }
 
 func scanEvent(row rowScanner) (db.Event, error) {

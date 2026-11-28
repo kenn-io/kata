@@ -48,6 +48,7 @@ type Store struct {
 	pollWakeCtx                  context.Context
 	stopPollWake                 context.CancelFunc
 	idempotencyDB                *sql.DB
+	eventClockDB                 *sql.DB
 	exportQ                      exportQueryer
 	rotationStage                func(context.Context) error
 	uiReadStage                  func(context.Context) error
@@ -76,6 +77,11 @@ func (s *Store) Close() error {
 		idempotencyErr = s.idempotencyDB.Close()
 		s.idempotencyDB = nil
 	}
+	var eventClockErr error
+	if s.eventClockDB != nil {
+		eventClockErr = s.eventClockDB.Close()
+		s.eventClockDB = nil
+	}
 	var federationLockErr error
 	if s.federationLockDB != nil {
 		federationLockErr = s.federationLockDB.Close()
@@ -89,6 +95,7 @@ func (s *Store) Close() error {
 	return errors.Join(
 		leaseErr,
 		idempotencyErr,
+		eventClockErr,
 		federationLockErr,
 		pollWakeErr,
 		s.DB.Close(),
