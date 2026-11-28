@@ -70,6 +70,12 @@
     onShowMoreDone?: (() => void) | undefined
     /** Another change is saving; the board starts no new write until it finishes. */
     busy?: boolean | undefined
+    /**
+     * Rises when the app fences drafts, as after a lost session: open forms
+     * and menus close and drop what was typed, so nothing typed under the old
+     * authority is sent under the new one.
+     */
+    draftFenceGeneration?: number | undefined
     /** Opens Logbook, which lists every closed issue, once Done can page no further. */
     onOpenLogbook?: (() => void) | undefined
     /** One-line cards with ID, priority, and title only. */
@@ -100,6 +106,7 @@
     doneTotal = undefined,
     onShowMoreDone = undefined,
     busy = false,
+    draftFenceGeneration = 0,
     onOpenLogbook = undefined,
     compact = false,
     collapsedColumns = [],
@@ -308,6 +315,23 @@
       askRecipient(issue) !== (viewer?.actor ?? '')
     )
   }
+
+  let lastDraftFence: number | null = null
+  $effect(() => {
+    const generation = draftFenceGeneration
+    if (lastDraftFence === null || generation === lastDraftFence) {
+      lastDraftFence = generation
+      return
+    }
+    lastDraftFence = generation
+    menuOpen = false
+    menuIssue = null
+    completing = null
+    asking = null
+    askMessage = ''
+    addingTo = null
+    addDraft = ''
+  })
 
   function openAsk(issue: KataTaskSummary): void {
     asking = { issue, to: askRecipient(issue) }

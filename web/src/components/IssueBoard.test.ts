@@ -481,6 +481,46 @@ describe('IssueBoard moves', () => {
     expect(onAddCard).not.toHaveBeenCalled()
   })
 
+  it('drops open forms when the app fences drafts after a lost session', async () => {
+    const onAskIssue = vi.fn(async () => true)
+    const onAddCard = vi.fn(async () => true)
+    const view = render(IssueBoard, { props: baseProps({ onAskIssue, onAddCard }) })
+
+    await fireEvent.click(within(column('Open')).getByRole('button', { name: 'Add card to Open' }))
+    await fireEvent.input(
+      within(column('Open')).getByRole('textbox', { name: 'New card in Open' }),
+      { target: { value: 'Typed before the session ended' } },
+    )
+    await fireEvent.click(screen.getByRole('button', { name: 'Actions for Write the parser' }))
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Ask user-b…' }))
+    await fireEvent.input(screen.getByRole('textbox', { name: 'What do you need?' }), {
+      target: { value: 'Typed before the session ended' },
+    })
+
+    await view.rerender({ draftFenceGeneration: 1 })
+
+    expect(screen.queryByRole('dialog', { name: 'Ask user-b' })).toBeNull()
+    expect(within(column('Open')).queryByRole('textbox', { name: 'New card in Open' })).toBeNull()
+    await fireEvent.click(screen.getByRole('button', { name: 'Actions for Write the parser' }))
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Ask user-b…' }))
+    expect(
+      (screen.getByRole('textbox', { name: 'What do you need?' }) as HTMLTextAreaElement).value,
+    ).toBe('')
+    expect(onAskIssue).not.toHaveBeenCalled()
+    expect(onAddCard).not.toHaveBeenCalled()
+  })
+
+  it('closes the completion form when the app fences drafts', async () => {
+    const view = render(IssueBoard, { props: baseProps() })
+
+    await fireEvent.keyDown(cardButton('Write the parser'), { key: 'ArrowRight', altKey: true })
+    expect(screen.getByRole('dialog', { name: 'Complete task' })).toBeTruthy()
+
+    await view.rerender({ draftFenceGeneration: 1 })
+
+    expect(screen.queryByRole('dialog', { name: 'Complete task' })).toBeNull()
+  })
+
   it('does not move cards and says why when changes are blocked', async () => {
     const props = renderBoard({ moveBlockedReason: 'This credential is read-only.' })
 

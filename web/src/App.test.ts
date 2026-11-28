@@ -3959,6 +3959,62 @@ describe('App', () => {
     )
   })
 
+  it('drops a board Ask draft when its send loses the session and the tab renews', async () => {
+    history.replaceState(null, '', '/kata?scope=01J00000000000000000000002&layout=board')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'expired-session', csrf: 'expired-csrf' }),
+    )
+    const accepted = snapshot()
+    Object.assign(accepted.collection![0]!, { owner: 'agent-a' })
+    let askRejected = false
+    let renewedSnapshotAccepted = false
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        const target = new URL(request.url)
+        if (target.pathname.endsWith('/notifications') && request.method === 'POST') {
+          askRejected = true
+          return new Response('', {
+            status: 401,
+            headers: { 'X-Kata-Web-Authentication': 'loopback' },
+          })
+        }
+        if (target.pathname === '/api/v1/ui/session/local') {
+          return Response.json({
+            session: 'renewed-session',
+            csrf: 'renewed-csrf',
+            return_path: '/kata?scope=01J00000000000000000000002&layout=board',
+            writable: true,
+            updates: 'poll',
+            actor_policy: 'identity',
+          })
+        }
+        if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (target.pathname.endsWith('/api/v1/ui/references')) {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (request.headers.get('X-Kata-Web-Session') === 'renewed-session') {
+          renewedSnapshotAccepted = true
+        }
+        return Response.json(accepted, { headers: { ETag: '"snapshot-1"' } })
+      }),
+    )
+
+    render(App)
+    await fireEvent.click(await screen.findByRole('button', { name: 'Actions for Example issue' }))
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Ask agent-a…' }))
+    await fireEvent.input(screen.getByRole('textbox', { name: 'What do you need?' }), {
+      target: { value: 'Typed under the old session' },
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Send request' }))
+
+    await waitFor(() => expect(askRejected).toBe(true))
+    await waitFor(() => expect(renewedSnapshotAccepted).toBe(true))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Ask agent-a' })).toBeNull())
+  })
+
   it('refreshes and fences authority when live updates disconnect', async () => {
     history.replaceState(null, '', '/kata?view=all-open#direct=1')
     sessionStorage.setItem(

@@ -1244,6 +1244,7 @@
       onShowMoreDone={onShowMoreBoardDone}
       onOpenLogbook={() => openView('logbook')}
       busy={mutationPending}
+      {draftFenceGeneration}
       compact={preferences.boardCompact}
       highlightRemoteChanges={preferences.boardHighlightRemote}
       scopeKey={`${selectedProject?.uid ?? 'all'}|${JSON.stringify(route.filters)}`}
