@@ -350,6 +350,27 @@ describe('IssueBoard moves', () => {
     })
   })
 
+  it('says that moving a card out of Needs attention marks it handled', async () => {
+    renderBoard()
+
+    expect(
+      screen.getByRole('button', {
+        name: 'Choose a schema',
+        description: /Moving it out of Needs attention marks it handled\./,
+      }),
+    ).toBeTruthy()
+    await fireEvent.click(screen.getByRole('button', { name: 'Actions for Choose a schema' }))
+    expect(
+      within(screen.getByRole('menu'))
+        .getAllByRole('menuitem')
+        .map((item) => item.textContent?.trim()),
+    ).toContain('Mark handled and move to In progress')
+    await fireEvent.click(
+      screen.getByRole('menuitem', { name: 'Mark handled and move to In progress' }),
+    )
+    await screen.findByText('Moved Choose a schema to In progress and marked it handled.')
+  })
+
   it('never moves a card into Needs attention: Alt+→ skips it and it takes no drops', async () => {
     const props = renderBoard()
 

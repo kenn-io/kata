@@ -289,7 +289,9 @@
     announcement = ''
     highlight(issue.uid)
     // Every move is one kata action, so moving the card back reverses it.
-    showFlash(`Moved ${issue.title} to ${columnTitle(target)}.`)
+    showFlash(
+      `Moved ${issue.title} to ${columnTitle(target)}${plan.clearAttention ? ' and marked it handled' : ''}.`,
+    )
     return true
   }
 
@@ -678,6 +680,7 @@
                     `board-card-identity-${issue.uid}`,
                     issue.parent ? relationID : '',
                     reasons.length > 0 ? `board-card-reason-${issue.uid}` : '',
+                    column.id === 'attention' && canMove ? 'board-handled-hint' : '',
                     compact ? '' : metaID,
                   ]
                     .filter(Boolean)
@@ -872,6 +875,9 @@
     {/each}
   </div>
   <p class="kit-sr-only" role="status" aria-live="polite">{announcement}</p>
+  <span class="kit-sr-only" id="board-handled-hint"
+    >Moving it out of Needs attention marks it handled.</span
+  >
 </section>
 
 <FlashBanner top="72px" />
@@ -882,7 +888,9 @@
       {@const issue = menuIssue}
       {#each moveTargets(issue, { viewer }) as target (target)}
         <MenuItem onselect={() => void moveTo(issue, target)}
-          >Move to {columnTitle(target)}</MenuItem
+          >{planBoardMove(issue, target, { viewer })?.clearAttention
+            ? `Mark handled and move to ${columnTitle(target)}`
+            : `Move to ${columnTitle(target)}`}</MenuItem
         >
       {/each}
       {#if canAsk(issue)}
