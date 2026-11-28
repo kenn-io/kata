@@ -159,9 +159,11 @@ describe: `work.attention` becomes `ok` (In progress) or is removed (Open),
 `work.attention_msg` is removed, the requests you were reading are cleared as
 `kata notify --clear` would, and the `needs-review` label comes off. The
 card's menu says so (**Mark handled and move to In progress**), and so does
-the message after the move. Moving a
-card out of Done reopens it first, and clears any of those signals left from
-before it closed, so it lands where you dropped it.
+the message after the move. Moving a card out of Done reopens it and clears
+any of those signals left from before it closed, so it lands where you
+dropped it. Either way, if someone changed the issue after the board showed
+it, the move stops before writing anything, so a new request or signal is
+never cleared unread.
 
 No move puts a card into Needs attention. Attention is the working agent's
 signal, and the [orchestration convention](../operations/agent-orchestration.md)

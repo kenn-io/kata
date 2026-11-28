@@ -3228,6 +3228,59 @@ describe('App', () => {
     expect(new URL(writes[1]!.url).pathname).toBe(`${issuePath}/actions/claim`)
   })
 
+  it('clears old signals on a Done card, guarded, before reopening it', async () => {
+    history.replaceState(null, '', '/kata?scope=01J00000000000000000000002&layout=board#direct=1')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const accepted = snapshot()
+    Object.assign(accepted.collection![0]!, {
+      status: 'closed',
+      closed_at: '2026-01-02T00:00:00Z',
+      metadata: { 'work.attention': 'needs-human' },
+    })
+    const issuePath = '/api/v1/projects/7/issues/01J00000000000000000000001'
+    const requests: Request[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        requests.push(request)
+        if (request.method === 'POST' && request.url.includes(issuePath)) {
+          return new Response(JSON.stringify({ issue: accepted.collection![0], changed: true }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        return new Response(JSON.stringify(accepted), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', ETag: `"snapshot-${requests.length}"` },
+        })
+      }),
+    )
+
+    render(App)
+
+    const card = await screen.findByRole('button', { name: 'Example issue' })
+    await fireEvent.keyDown(card, { key: 'ArrowLeft', altKey: true })
+
+    const writes = await waitFor(() => {
+      const found = requests.filter(
+        (request) => request.method === 'POST' && request.url.includes(issuePath),
+      )
+      expect(found).toHaveLength(3)
+      return found
+    })
+    expect(writes.map((write) => new URL(write.url).pathname)).toEqual([
+      `${issuePath}/metadata`,
+      `${issuePath}/actions/reopen`,
+      `${issuePath}/actions/claim`,
+    ])
+    // The board's revision still holds before the reopen, so the clear is guarded.
+    expect(writes[0]!.headers.get('If-Match')).toBe('"rev-1"')
+  })
+
   it('stops a Needs attention move when the issue changed since the board showed it', async () => {
     history.replaceState(null, '', '/kata?scope=01J00000000000000000000002&layout=board#direct=1')
     sessionStorage.setItem(

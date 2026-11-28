@@ -174,6 +174,45 @@ test('the card actions menu, and Ask… in it, can be reached from the keyboard'
   await expect(page.getByRole('menuitem', { name: 'Ask user-a…' })).toBeVisible()
 })
 
+test('moving a Done card with an old signal reopens it and clears the signal', async ({
+  page,
+  kata,
+}) => {
+  const credentials = await kata.launch(page)
+  const issue = await kata.seedIssue(page, credentials, {
+    title: 'Reopen the importer',
+    metadata: { 'work.attention': 'needs-human', 'work.attention_msg': 'Left from before' },
+  })
+  const closed = await kata.request(
+    page,
+    credentials,
+    'POST',
+    `/api/v1/projects/${issue.project_id}/issues/${issue.uid}/actions/close`,
+    {
+      actor: 'user-a',
+      reason: 'done',
+      message: 'Closed before the signal was cleared, to set up the reopen.',
+      evidence: [{ type: 'test', command: 'make test' }],
+    },
+  )
+  expect(closed.ok()).toBe(true)
+  await openBoard(page, kata)
+
+  await column(page, 'Done').getByRole('button', { name: issue.title, exact: true }).focus()
+  await page.keyboard.press('Alt+ArrowLeft')
+
+  await expect(
+    column(page, 'In progress').getByRole('button', { name: issue.title, exact: true }),
+  ).toBeVisible()
+  await expect
+    .poll(async () => (await issueState(page, kata, credentials, issue.uid)).owner)
+    .toBeTruthy()
+  const state = await issueState(page, kata, credentials, issue.uid)
+  expect(state.status).toBe('open')
+  expect(state.metadata).toMatchObject({ 'work.attention': 'ok' })
+  expect(state.metadata).not.toHaveProperty('work.attention_msg')
+})
+
 test('a move that takes two kata actions finishes both', async ({ page, kata }) => {
   const credentials = await kata.launch(page)
   const issue = await kata.seedIssue(page, credentials, {

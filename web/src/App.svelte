@@ -993,31 +993,26 @@
   // A move is one mutation: its kata actions run in order and stop at the
   // first refusal, and the board refreshes once afterwards. Running each
   // action as its own mutation let the refresh after one action mark the
-  // board unwritable before the next. A move reopens first, so later writes
-  // act on an open issue, then clears attention, then takes or releases
-  // ownership.
+  // board unwritable before the next. Attention is cleared first, while the
+  // issue is still the revision the board showed; then the reopen, label
+  // removal, and claim or release follow.
   function moveBoardIssue(issue: KataTaskSummary, plan: BoardMovePlan): Promise<boolean> {
     const target = { projectId: issue.project_id, ref: issue.uid }
     const identityPolicy = authority?.snapshot?.capabilities.actor_policy === 'identity'
     const metadata = plan.clearAttention?.metadata ?? {}
     return runMutation({ draft: plan }, async (context) => {
       const steps: (() => Promise<MutationResult>)[] = []
-      if (plan.reopen) {
-        steps.push(() => reopenIssueRequest(target, context.body({}, requestActor)))
-      }
       if (Object.keys(metadata).length > 0) {
-        // Clear only what the board showed: if an agent changed the issue
-        // since, the daemon refuses the write and the move stops. After a
-        // reopen the revision has moved on, and what is cleared dates from
-        // before the close, so that write goes unguarded.
-        const headers: Record<string, string> = plan.reopen
-          ? {}
-          : { 'If-Match': `"rev-${issue.revision}"` }
+        // If anyone changed the issue since the board showed it, the daemon
+        // refuses this write and the move stops before any other step.
         steps.push(() =>
           patchIssueMetadata(target, context.body({ patch: metadata }, requestActor), {
-            headers,
+            headers: { 'If-Match': `"rev-${issue.revision}"` },
           }),
         )
+      }
+      if (plan.reopen) {
+        steps.push(() => reopenIssueRequest(target, context.body({}, requestActor)))
       }
       for (const label of plan.clearAttention?.removeLabels ?? []) {
         steps.push(() =>
