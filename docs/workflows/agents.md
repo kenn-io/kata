@@ -49,8 +49,16 @@ carrying the canonical hook contract. Pass `--dry` to inspect existing files and
 print the proposed contents without writing files or creating directories.
 
 Installation preserves bytes outside the marked blocks along with existing file
-modes, and reinstalling identical instructions leaves files untouched. Keep each
-marker on its own line; LF or CRLF line endings and a missing final newline are
+modes, and reinstalling identical instructions leaves files untouched. Install
+and uninstall replace each file atomically. On Linux and macOS, if renaming over
+an existing file fails with a permission error, as it does for Muse's
+runtime-managed `AGENTS.md`, they try writing that file in place instead,
+keeping its owner and mode. That works only for a writable regular file with no
+other hard links, and it is not atomic, so Muse could briefly read a partial
+file. If a later file fails, either command tries to restore the earlier files.
+If an in-place restore finds a new hard link or a symlink at the path, the
+command reports the failure; check that file before retrying. Keep each marker
+on its own line; LF or CRLF line endings and a missing final newline are
 accepted. Before writing anything, the installer stops with an error if it finds
 an existing unmarked skill or poll file, malformed markers, or a symlink at the
 home directory or inside its managed tree. Parent aliases such as macOS's `/var`
