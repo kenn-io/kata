@@ -10,10 +10,12 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"go.kenn.io/kata/internal/api"
@@ -503,4 +505,45 @@ func TestCronSpokeForwardPreservesUIDPath(t *testing.T) {
 	current, err := f.hub.DB.CronJob(t.Context(), f.hp.ID, uid)
 	require.NoError(t, err)
 	require.Equal(t, initial.Body.Job.DefinitionEventUID, current.DefinitionEventUID)
+}
+
+// The hub now holds the forwarded write, so the spoke pulls it promptly, but
+// only through the binding of the project that forwarded it.
+func TestCronSpokeForwardWakesOnlyItsProjectBinding(t *testing.T) {
+	wakes := &recordedWakes{}
+	f := newCronForwardFixture(t, func(_ *cronForwardFixture, cfg *daemon.ServerConfig) {
+		cfg.FederationWakeProject = wakes.project
+		cfg.FederationWake = wakes.all
+	})
+	response, raw := f.put(t, cronHTTPUID(t), "")
+	require.Equalf(t, 200, response.StatusCode, "%s", raw)
+	projects, all := wakes.snapshot()
+	assert.Equal(t, []int64{f.sp.ID}, projects)
+	assert.Zero(t, all)
+}
+
+// recordedWakes records the federation wakes a handler requests. The handler
+// runs on a server goroutine, so reads take the same lock.
+type recordedWakes struct {
+	mu       sync.Mutex
+	projects []int64
+	allWakes int
+}
+
+func (w *recordedWakes) project(projectID int64) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.projects = append(w.projects, projectID)
+}
+
+func (w *recordedWakes) all() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.allWakes++
+}
+
+func (w *recordedWakes) snapshot() ([]int64, int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]int64(nil), w.projects...), w.allWakes
 }

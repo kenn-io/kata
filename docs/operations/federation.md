@@ -721,6 +721,15 @@ observe wake activity and co-occurring buckets on a move. Notifications omit
 project IDs and issue content. A listener also wakes its held polls after
 reconnecting to cover notifications missed while disconnected.
 
+Each interval syncs every bound project. Between intervals, a local write wakes
+a sync for the project it changed only, so its push stays prompt without
+polling the hub for the other projects. Moving an issue wakes every project,
+because the push to the destination can depend on events another project has
+not pushed yet. Work accepted from a downstream relay and a forwarded
+cron write each wake only their own project. Events the runner pulled from a
+hub do not wake it again. Joining, rebinding, leaving, signing changes and
+configuration changes wake a sync for every project.
+
 Sync runs in turns. In one turn for a project, the runner pushes and pulls at
 most 8 batches per stream and direction (1000 deliveries per event or receipt
 batch, 32 manifest offers per artifact batch) and then yields so it can serve

@@ -1606,9 +1606,10 @@ func runDaemonProcess(
 	workers.Hold()
 	syncOutcome := daemon.NewSyncOutcomeObserver(telemetryReporter)
 	federationRetries := federation.NewSyncRetries()
-	federationWake := startFederationRunner(
+	federationWakes := startFederationRunner(
 		ctx, workers, waitableDrainAdmission, store, publisher, daemonLog, federationRetries, syncOutcome, embeddingWake,
 	)
+	federationWake := federationWakes.WakeAll
 	startDueNotificationSweeper(
 		ctx, workers, waitableDrainAdmission, store, publisher, dcfg.Timezone, daemonLog,
 	)
@@ -1761,6 +1762,7 @@ func runDaemonProcess(
 		MCPEvents:                 mcpEvents,
 		MCPEventsDisabledReason:   mcpEventsReason,
 		FederationWake:            federationWake,
+		FederationWakeProject:     federationWakes.WakeProject,
 		FederationSyncOnce: func(ctx context.Context, binding db.FederationBinding, credential config.FederationCredential) error {
 			return federation.SyncFederationOnceWithPulledEvents(ctx, store, binding, credential, client.Opts{}, publisher.Events)
 		},
@@ -2143,15 +2145,10 @@ func startFederationRunner(
 	retries *federation.SyncRetries,
 	onSpokeResult func(string, int64, error),
 	onSyncComplete ...func(),
-) func() {
-	wake := make(chan struct{}, 1)
-	wakeRunner := func() {
-		select {
-		case wake <- struct{}{}:
-		default:
-		}
-	}
-	workers.Go(func() { daemon.ForwardFederationWakes(ctx, publisher.Broadcaster, store.InstanceUID(), wakeRunner) })
+) *federation.WakeQueue {
+	wake := federation.NewWakeQueue()
+	forwardWakes := daemon.SubscribeFederationWakes(publisher.Broadcaster, store, wake.WakeProject, wake.WakeAll)
+	workers.Go(func() { forwardWakes(ctx) })
 	runner := &federation.Runner{
 		DB:             store,
 		Interval:       federationRunnerInterval(),
@@ -2184,7 +2181,7 @@ func startFederationRunner(
 			daemonLog.Printf("claim sweeper: %v", err)
 		}
 	})
-	return wakeRunner
+	return wake
 }
 
 // vectorsPathForDSN places the semantic-search sidecar next to the SQLite

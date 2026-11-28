@@ -402,13 +402,13 @@ func TestHeldPollThrottleDelaysIntervalSync(t *testing.T) {
 				return ok
 			}, 5*time.Second, 20*time.Millisecond, "the hub's delay was not shared with the runner")
 			before := interval.Load()
-			h.wake <- struct{}{}
+			h.wake.WakeAll()
 			//nolint:kennlint // sleeptest: allow several runner intervals and a wake.
 			time.Sleep(time.Second)
 			assert.Equal(t, before, interval.Load(), "the spoke polled before Retry-After")
 			assert.Equal(t, int64(1), held.Load(), "the spoke retried the held poll before Retry-After")
 			h.rebindTo(t, h.hubURL)
-			h.wake <- struct{}{}
+			h.wake.WakeAll()
 			//nolint:kennlint // sleeptest: the runner reads the changed binding after a wake.
 			require.Eventually(t, func() bool {
 				_, ok := retries.FederationSyncRetry(h.spokeProject.ID)

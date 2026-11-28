@@ -194,7 +194,7 @@ func TestRunnerLeavesFailedTurnsOnTheInterval(t *testing.T) {
 				require.NoError(t, err)
 			}
 			failed := make(chan error, 1)
-			wake := make(chan struct{})
+			wake := federation.NewWakeQueue()
 			runner := &federation.Runner{DB: relay.store, Credentials: relay.credentials, Interval: time.Hour, Wake: wake, OnError: func(err error) {
 				select {
 				case failed <- err:
@@ -272,15 +272,9 @@ func TestRunnerCatchUpIgnoresWakesFromItsOwnPulls(t *testing.T) {
 					published.Add(1)
 				}
 			}()
-			wake := make(chan struct{}, 1)
-			wakeRunner := func() {
-				select {
-				case wake <- struct{}{}:
-				default:
-				}
-			}
+			wake := federation.NewWakeQueue()
 			runCtx, cancel := context.WithCancel(ctx)
-			go daemon.ForwardFederationWakes(runCtx, broadcaster, relay.store.InstanceUID(), wakeRunner)
+			go daemon.SubscribeFederationWakes(broadcaster, relay.store, wake.WakeProject, wake.WakeAll)(runCtx)
 			runner := &federation.Runner{DB: relay.store, Credentials: relay.credentials, Interval: time.Hour, Wake: wake, OnPulledEventsFrom: func(projectID int64, events []db.Event, fork activity.Admission) {
 				publisher.EventsFrom(projectID, events, fork)
 			}}
@@ -342,7 +336,7 @@ func TestRunnerLeavesSpokesWithFailedClaimRetriesOnTheInterval(t *testing.T) {
 			}
 			metadata.Store(0)
 			failed := make(chan error, 1)
-			wake := make(chan struct{})
+			wake := federation.NewWakeQueue()
 			runner := &federation.Runner{DB: relay.store, Credentials: relay.credentials, Interval: time.Hour, Wake: wake, OnError: func(err error) {
 				select {
 				case failed <- err:
@@ -414,7 +408,7 @@ func TestRunnerRelayRefusalBackoff(t *testing.T) {
 	_, err = relay.store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: independent.URL, HubProjectID: 42, HubProjectUID: project.UID, Enabled: true})
 	require.NoError(t, err)
 	require.NoError(t, relay.credentials.StoreFederationCredential(ctx, project.UID, config.FederationCredential{}))
-	wake := make(chan struct{}, 1)
+	wake := federation.NewWakeQueue()
 	outcomes := make(chan error, 128)
 	recovered := make(chan struct{}, 1)
 	runner := &federation.Runner{DB: relay.store, Credentials: relay.credentials, Interval: time.Second, Wake: wake, Debounce: time.Millisecond, OnError: func(err error) {
@@ -459,7 +453,7 @@ func TestRunnerRelayRefusalBackoff(t *testing.T) {
 		before := metadata.Load()
 		progress := other.Load()
 		sinceRefusal.Store(int64(time.Minute - time.Nanosecond))
-		wake <- struct{}{}
+		wake.WakeAll()
 		//nolint:kennlint // sleeptest: Observe an independent request after the wake without depending on result callback counts.
 		require.Eventually(t, func() bool { return other.Load() > progress }, 5*time.Second, 20*time.Millisecond)
 		require.Equal(t, before, metadata.Load(), "wake skips the whole refused turn")
@@ -472,7 +466,7 @@ func TestRunnerRelayRefusalBackoff(t *testing.T) {
 		// Exercise the production one-minute refusal delay once; lifecycle tests
 		// own its full schedule.
 		sinceRefusal.Store(int64(time.Minute))
-		wake <- struct{}{}
+		wake.WakeAll()
 		select {
 		case <-recovered:
 		case <-time.After(10 * time.Second):
@@ -498,16 +492,12 @@ func observeRunnerDebounce(runner *federation.Runner) <-chan struct{} {
 }
 
 // requireRunnerWaitsForInterval proves the runner has no turn left to repeat.
-// It takes an unbuffered wake only between passes, and it debounces that wake
-// only when it was waiting for its interval; a runner that still had a turn to
-// repeat runs it at once instead.
-func requireRunnerWaitsForInterval(t *testing.T, wake chan<- struct{}, debouncing <-chan struct{}) {
+// The runner debounces a wake only when it was waiting for its interval; a
+// runner that still had a turn to repeat folds the wake into that turn
+// instead, and then has no wake left to debounce.
+func requireRunnerWaitsForInterval(t *testing.T, wake *federation.WakeQueue, debouncing <-chan struct{}) {
 	t.Helper()
-	select {
-	case wake <- struct{}{}:
-	case <-time.After(20 * time.Second):
-		t.Fatal("the runner did not finish its pass")
-	}
+	wake.WakeAll()
 	select {
 	case <-debouncing:
 	case <-time.After(20 * time.Second):
@@ -561,7 +551,7 @@ func TestRunnerDeliversHeldPollAnswersDuringARelayBacklog(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, relay.credentials.StoreFederationCredential(ctx, hubProject.UID, config.FederationCredential{HubURL: hubServer.URL, HubProjectID: hubProject.ID, Token: enrollment.Token}))
 
-	wake := make(chan struct{}, 1)
+	wake := federation.NewWakeQueue()
 	runner := &federation.Runner{DB: relay.store, Credentials: relay.credentials, Interval: time.Hour, Wake: wake, Debounce: time.Millisecond}
 	runCtx, cancel := context.WithCancel(ctx)
 	done := make(chan error, 1)
@@ -581,7 +571,7 @@ func TestRunnerDeliversHeldPollAnswersDuringARelayBacklog(t *testing.T) {
 		require.NoError(t, err)
 		return len(issues)
 	}
-	wake <- struct{}{}
+	wake.WakeAll()
 	//nolint:kennlint // sleeptest: The runner drives real HTTP relay hops; bounded polling observes the mirrored projection.
 	// Several budgeted turns have run, so the runner is past its full pass and
 	// serves only the backlog.

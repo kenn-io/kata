@@ -264,7 +264,7 @@ type Service struct {
 	server                 *daemon.Server
 	broadcaster            *daemon.EventBroadcaster
 	publish                daemon.EventPublisher
-	federationWake         chan struct{}
+	federationWake         *federation.WakeQueue
 	federationRetries      *federation.SyncRetries
 	gitHubSyncWake         chan struct{}
 	gitHubSyncFetcher      githubsync.Fetcher
@@ -447,13 +447,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	if index != nil && embedder != nil {
 		reconciler = daemon.NewConfiguredEmbeddingReconciler(store, index, embedder, cfg.Embeddings, publisher, nil, federationCredentials, federation.EmbeddingProducerConnected, federation.EmbeddingProducerAuthorized, cfg.EmbeddingProjectAllowed)
 	}
-	federationWake := make(chan struct{}, 1)
-	wakeFederation := func() {
-		select {
-		case federationWake <- struct{}{}:
-		default:
-		}
-	}
+	federationWake := federation.NewWakeQueue()
 	gitHubSyncWake := make(chan struct{}, 1)
 	wakeGitHubSync := func() {
 		select {
@@ -566,13 +560,14 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	serverConfig := daemon.ServerConfig{
 		DB:       store,
 		Embedder: embedder, VectorIndex: index, EmbeddingUnavailableReason: unavailable,
-		Docbank:         docbankClient,
-		DocbankFolder:   docbankConfig.Folder,
-		WebHandler:      cfg.WebHandler,
-		DefaultTimezone: cfg.DefaultTimezone,
-		StartedAt:       startedAt,
-		Broadcaster:     broadcaster,
-		FederationWake:  wakeFederation,
+		Docbank:               docbankClient,
+		DocbankFolder:         docbankConfig.Folder,
+		WebHandler:            cfg.WebHandler,
+		DefaultTimezone:       cfg.DefaultTimezone,
+		StartedAt:             startedAt,
+		Broadcaster:           broadcaster,
+		FederationWake:        federationWake.WakeAll,
+		FederationWakeProject: federationWake.WakeProject,
 		FederationSyncOnce: func(ctx context.Context, binding db.FederationBinding, credential config.FederationCredential) error {
 			return federation.SyncFederationOnceWithPulledEvents(ctx, store, binding, credential, clientpkg.Opts{}, publisher.Events, federationCredentials)
 		},
@@ -991,23 +986,26 @@ func (s *Service) runWorkers(ctx context.Context, selection workerSelection) err
 		close(done)
 		s.mu.Unlock()
 	}()
-	federationSub := s.broadcaster.Subscribe(daemon.SubFilter{})
+	forwardFederationWakes := daemon.SubscribeFederationWakes(s.broadcaster, s.store, s.federationWake.WakeProject, s.federationWake.WakeAll)
 	federationWakeDone := make(chan struct{})
 	go func() {
 		defer close(federationWakeDone)
+		forwardFederationWakes(runCtx)
+	}()
+	embeddingSub := s.broadcaster.Subscribe(daemon.SubFilter{})
+	embeddingWakeDone := make(chan struct{})
+	go func() {
+		defer close(embeddingWakeDone)
 		for {
 			select {
 			case <-runCtx.Done():
 				return
-			case msg, ok := <-federationSub.Ch:
+			case msg, ok := <-embeddingSub.Ch:
 				if !ok {
 					return
 				}
-				if msg.Kind == daemon.StreamKindEvent {
-					signalWake(s.federationWake)
-					if s.embeddingReconciler != nil {
-						s.embeddingReconciler.Wake()
-					}
+				if msg.Kind == daemon.StreamKindEvent && s.embeddingReconciler != nil {
+					s.embeddingReconciler.Wake()
 				}
 			}
 		}
@@ -1015,7 +1013,8 @@ func (s *Service) runWorkers(ctx context.Context, selection workerSelection) err
 	defer func() {
 		cancel()
 		<-federationWakeDone
-		federationSub.Unsub()
+		<-embeddingWakeDone
+		embeddingSub.Unsub()
 	}()
 
 	var workers []namedWorker

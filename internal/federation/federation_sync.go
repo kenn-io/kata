@@ -1805,11 +1805,14 @@ func remoteEventFromEnvelope(ev api.EventEnvelope) db.RemoteEvent {
 
 // Runner quietly pulls every enabled spoke binding.
 type Runner struct {
-	DB            db.Storage
-	Credentials   config.FederationCredentialStore
-	Opts          clientpkg.Opts
-	Interval      time.Duration
-	Wake          <-chan struct{}
+	DB          db.Storage
+	Credentials config.FederationCredentialStore
+	Opts        clientpkg.Opts
+	Interval    time.Duration
+	// Wake carries wakes that ask for a pass before the next interval: for
+	// every spoke, or for the spokes of the projects that changed. Nil leaves
+	// only the interval.
+	Wake          *WakeQueue
 	Debounce      time.Duration
 	OnError       func(error)
 	OnSpokeResult func(projectID int64, err error)
@@ -1899,6 +1902,13 @@ func (r *Runner) runOnce(
 			return retry, true, nil, nil
 		}
 	}
+	// A pass that serves every spoke covers the wakes queued so far. Take them
+	// before listing bindings, so a wake that arrives during the listing, such
+	// as a join the listing missed, stays queued for another pass.
+	var woken bool
+	if len(only) == 0 {
+		woken, _ = r.Wake.take()
+	}
 	spokes, err := func() ([]activeSpokeBinding, error) {
 		if scan != nil {
 			defer scan.Release()
@@ -1924,6 +1934,11 @@ func (r *Runner) runOnce(
 		return active, nil
 	}()
 	if err != nil {
+		if woken {
+			// The pass reached no spoke, so its wakes are still owed. Queue
+			// them again so they retry after the debounce, not the interval.
+			r.Wake.WakeAll()
+		}
 		return nil, false, nil, err
 	}
 	active := make(map[int64]bool, len(spokes))
@@ -2528,16 +2543,18 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 		polls.stopAll()
 		r.longPolls = nil
 	}()
-	// pending holds the spokes whose last turn stopped at its budget; the next
-	// pass serves only them until a tick or external wake widens it to every spoke.
-	var pending map[int64]bool
+	// only names the spokes the next pass serves; nil serves every spoke. The
+	// first pass and every tick serve every spoke, a project wake serves the
+	// projects it names, and a budgeted turn that left deliveries pending
+	// serves those spokes again at once.
+	var only map[int64]bool
 	for {
 		if validateLease != nil {
 			if err := validateLease(ctx); err != nil {
 				return err
 			}
 		}
-		retry, denied, remaining, err := r.runOnce(ctx, validateLease, pending, retries)
+		retry, denied, remaining, err := r.runOnce(ctx, validateLease, only, retries)
 		polls.passCompleted()
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, errFederationRunnerLeaseInvalid) {
@@ -2559,40 +2576,72 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 			<-ctx.Done()
 			return ctx.Err()
 		}
-		pending = remaining
-		if len(pending) > 0 {
+		if len(remaining) > 0 {
 			// A budgeted turn left deliveries pending. Serve those spokes again
-			// now instead of after an interval. A held-poll answer adds its
-			// spoke; a tick or external wake selects every spoke.
+			// now instead of after an interval, together with any wake or
+			// held-poll answer that has already arrived; a tick widens the
+			// pass to every spoke.
+			only = remaining
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-ticker.C:
-				pending = nil
+				only = nil
 			case <-polls.changed:
-				pending = polls.takeChanged(pending)
-			case <-r.Wake:
-				pending = nil
+				only = polls.takeChanged(only)
+			case <-r.Wake.readyC():
+				only = mergeWake(only, r.Wake)
 			default:
 			}
 			continue
 		}
+		next, err := r.awaitPass(ctx, ticker.C, polls, debounce)
+		if err != nil {
+			return err
+		}
+		only = next
+	}
+}
+
+// awaitPass waits for the next tick, wake, or held-poll answer and returns
+// the spokes the pass it causes serves; nil or empty means every spoke.
+func (r *Runner) awaitPass(ctx context.Context, tick <-chan time.Time, polls *hubLongPolls, debounce time.Duration) (map[int64]bool, error) {
+	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
+			return nil, ctx.Err()
+		case <-tick:
+			return nil, nil
 		case <-polls.changed:
-			pending = polls.takeChanged(nil)
-		case <-r.Wake:
+			return polls.takeChanged(nil), nil
+		case <-r.Wake.readyC():
 			timer := r.newDebounceTimer(debounce)
 			select {
 			case <-ctx.Done():
 				timer.Stop()
-				return ctx.Err()
+				return nil, ctx.Err()
 			case <-timer.C():
+			}
+			if woken, only := r.Wake.take(); woken {
+				return only, nil
 			}
 		}
 	}
+}
+
+// mergeWake adds the pending wakes to only. A wake for every spoke widens the
+// pass to every spoke.
+func mergeWake(only map[int64]bool, wake *WakeQueue) map[int64]bool {
+	woken, projects := wake.take()
+	if !woken {
+		return only
+	}
+	if projects == nil {
+		return nil
+	}
+	merged := maps.Clone(only)
+	maps.Copy(merged, projects)
+	return merged
 }
 
 // Supplemental proofs use joined credentials without crossing their configured
