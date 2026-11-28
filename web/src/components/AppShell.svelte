@@ -1228,36 +1228,40 @@
       onChange={updateFilters}
       onSubmitSearch={submitSearch}
     />
-    <IssueBoard
-      issues={boardIssues}
-      {selectedIssueUID}
-      showProject={!selectedProject}
-      {loading}
-      moveBlockedReason={writeBlockedReason ??
-        (scopedAuthority ? 'This credential can only change one task.' : undefined)}
-      onOpenIssue={(issue) => selectIssue(issue.uid)}
-      onMoveIssue={onMoveBoardIssue}
-      onCompleteIssue={onCompleteBoardIssue}
-      onAskIssue={onAskBoardIssue}
-      {viewer}
-      doneTotal={snapshot.closed_total}
-      onShowMoreDone={onShowMoreBoardDone}
-      onOpenLogbook={() => openView('logbook')}
-      busy={mutationPending}
-      {draftFenceGeneration}
-      compact={preferences.boardCompact}
-      highlightRemoteChanges={preferences.boardHighlightRemote}
-      scopeKey={`${selectedProject?.uid ?? 'all'}|${JSON.stringify(route.filters)}`}
-      onAddCard={selectedProject &&
-      onCreateBoardIssue &&
-      !readOnly &&
-      snapshot.capabilities.writable &&
-      !scopedAuthority
-        ? (title) => onCreateBoardIssue(selectedProject!.id, title)
-        : undefined}
-      collapsedColumns={preferences.collapsedBoardColumns}
-      onToggleColumn={toggleBoardColumn}
-    />
+    <!-- A board belongs to one project: switching projects drops half-typed
+         forms, so a card typed for one project is never created in another. -->
+    {#key selectedProject?.uid ?? 'all'}
+      <IssueBoard
+        issues={boardIssues}
+        {selectedIssueUID}
+        showProject={!selectedProject}
+        {loading}
+        moveBlockedReason={writeBlockedReason ??
+          (scopedAuthority ? 'This credential can only change one task.' : undefined)}
+        onOpenIssue={(issue) => selectIssue(issue.uid)}
+        onMoveIssue={onMoveBoardIssue}
+        onCompleteIssue={onCompleteBoardIssue}
+        onAskIssue={onAskBoardIssue}
+        {viewer}
+        doneTotal={snapshot.closed_total}
+        onShowMoreDone={onShowMoreBoardDone}
+        onOpenLogbook={() => openView('logbook')}
+        busy={mutationPending}
+        {draftFenceGeneration}
+        compact={preferences.boardCompact}
+        highlightRemoteChanges={preferences.boardHighlightRemote}
+        scopeKey={`${selectedProject?.uid ?? 'all'}|${JSON.stringify(route.filters)}`}
+        onAddCard={selectedProject &&
+        onCreateBoardIssue &&
+        !readOnly &&
+        snapshot.capabilities.writable &&
+        !scopedAuthority
+          ? (title) => onCreateBoardIssue(selectedProject!.id, title)
+          : undefined}
+        collapsedColumns={preferences.collapsedBoardColumns}
+        onToggleColumn={toggleBoardColumn}
+      />
+    {/key}
   </div>
 {/snippet}
 

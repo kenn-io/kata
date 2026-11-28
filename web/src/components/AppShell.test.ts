@@ -112,6 +112,53 @@ describe('AppShell', () => {
       expect(screen.queryByRole('button', { name: 'Edit board columns' })).toBeNull()
     })
 
+    test('drops a half-typed board card when the project changes', async () => {
+      const current = snapshot()
+      current.catalog.push({
+        ...current.catalog[0]!,
+        project: {
+          ...current.catalog[0]!.project,
+          id: 8,
+          uid: '01J00000000000000000000003',
+          name: 'other-project',
+        },
+      })
+      const onCreateBoardIssue = vi.fn(async () => true)
+      const props = {
+        snapshot: current,
+        loading: false,
+        ...mutationProps(),
+        onCreateBoardIssue,
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      }
+      const view = render(AppShell, {
+        props: {
+          ...props,
+          route: { kind: 'kata', projectUID, graph: false, board: true, filters },
+        },
+      })
+      const open = () => screen.getByRole('region', { name: /^Open,/ })
+      await fireEvent.click(within(open()).getByRole('button', { name: 'Add card to Open' }))
+      await fireEvent.input(within(open()).getByRole('textbox', { name: 'New card in Open' }), {
+        target: { value: 'Meant for example-project' },
+      })
+
+      await view.rerender({
+        ...props,
+        route: {
+          kind: 'kata',
+          projectUID: '01J00000000000000000000003',
+          graph: false,
+          board: true,
+          filters,
+        },
+      })
+
+      expect(within(open()).queryByRole('textbox', { name: 'New card in Open' })).toBeNull()
+      expect(onCreateBoardIssue).not.toHaveBeenCalled()
+    })
+
     test('opens a clicked card in place on the board', async () => {
       const onNavigate = vi.fn()
       render(AppShell, {
