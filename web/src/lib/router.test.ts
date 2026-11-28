@@ -185,6 +185,20 @@ describe('board layout', () => {
     )
   })
 
+  it('keeps the board for a short issue link', () => {
+    const route = parseRoute(
+      new URL('https://daemon.example/kata?scope=kata&issue=abc4&layout=board&graph=1'),
+    )
+
+    expect(route).toMatchObject({
+      kind: 'kata',
+      link: { scope: 'kata', issue: 'abc4' },
+      board: true,
+      graph: false,
+    })
+    expect(serializeRoute(route)).toBe('/kata?scope=kata&issue=abc4&layout=board')
+  })
+
   it('never combines the board with the reachable graph', () => {
     const route = parseRoute(
       new URL(`https://daemon.example/kata?layout=board&issue=${issueUID}&graph=1`),

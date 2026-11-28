@@ -67,6 +67,7 @@ export function parseRoute(url: URL, routePath = applicationRoutePath()): KataRo
   const normalizedView = view && isSystemView(view) ? view : undefined
   const scope = url.searchParams.get('scope') || undefined
   const issue = url.searchParams.get('issue') || undefined
+  const board = url.searchParams.get('layout') === 'board'
   if (
     issue &&
     ((scope && !validUID(scope)) || !validUID(issue)) &&
@@ -76,7 +77,8 @@ export function parseRoute(url: URL, routePath = applicationRoutePath()): KataRo
       kind: 'kata',
       ...(normalizedView ? { view: normalizedView } : {}),
       link: { ...(scope ? { scope } : {}), issue },
-      graph: url.searchParams.get('graph') === '1',
+      graph: !board && url.searchParams.get('graph') === '1',
+      ...(board ? { board: true as const } : {}),
       filters,
     }
   }
@@ -94,7 +96,6 @@ export function parseRoute(url: URL, routePath = applicationRoutePath()): KataRo
     if (issueUID.length > 0 && issueUID.length < 26) routeError.searchRef = issueUID
     return routeError
   }
-  const board = url.searchParams.get('layout') === 'board'
   return {
     kind: 'kata',
     ...(normalizedView ? { view: normalizedView } : {}),
