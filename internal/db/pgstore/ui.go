@@ -699,15 +699,21 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 			args = append(args, limit)
 			statement += fmt.Sprintf(` LIMIT $%d`, len(args)) // #nosec G202 -- only a generated placeholder number is interpolated.
 		}
+		// Rows filtered in Go skip the SQL page. With a closed limit, read every
+		// match so the open limit cannot stop the scan before closed issues are
+		// paged and counted, then page both here.
+		scanLimit := limit
+		if query.ClosedLimit > 0 {
+			scanLimit = 0
+		}
 		var err error
-		issues, err = scan(statement, args, limit)
+		issues, err = scan(statement, args, scanLimit)
 		if err != nil {
 			return nil, nil, err
 		}
 		if query.ClosedLimit > 0 {
-			// Rows filtered in Go above skip the SQL page, so page them here.
 			var total int
-			issues, total = db.PageClosedUIIssues(issues, query.ClosedLimit)
+			issues, total = db.PageClosedUIIssues(issues, limit, query.ClosedLimit)
 			closedTotal = &total
 		}
 	}

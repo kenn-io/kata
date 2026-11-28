@@ -1261,6 +1261,27 @@ func RunUISnapshotClosedPageContract(t *testing.T, open func(*testing.T) db.Stor
 		require.Equal(t, 3, *data.ClosedTotal)
 	})
 
+	t.Run("pages closed issues after the ready filter under an open limit", func(t *testing.T) {
+		// The open limit must not cut the scan before closed issues are paged.
+		data, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
+			View: "all-open", ProjectUID: project.UID, Statuses: []string{"ready", "closed"},
+			Limit: 1, ClosedLimit: 1,
+		})
+		require.NoError(t, err)
+		var open, closed []string
+		for _, issue := range data.Issues {
+			if issue.Status == "closed" {
+				closed = append(closed, issue.UID)
+			} else {
+				open = append(open, issue.UID)
+			}
+		}
+		require.Len(t, open, 1)
+		require.Equal(t, []string{closedFirst.UID}, closed)
+		require.NotNil(t, data.ClosedTotal)
+		require.Equal(t, 3, *data.ClosedTotal)
+	})
+
 	t.Run("counts across projects when no project is selected", func(t *testing.T) {
 		data, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
 			View: "all-open", Statuses: []string{"all"}, ClosedLimit: 1,

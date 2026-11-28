@@ -229,11 +229,12 @@ func RecordExposedUILinks(ctx context.Context, links []UILink) {
 	}
 }
 
-// PageClosedUIIssues keeps every open issue in order and the limit most
-// recently closed issues, newest close first, and returns how many closed
-// issues there were. Stores that filter rows in Go after the query use it so
-// a closed limit pages the same way as the SQL path.
-func PageClosedUIIssues(issues []UIIssue, limit int) ([]UIIssue, int) {
+// PageClosedUIIssues keeps the first openLimit open issues in order (all of
+// them when openLimit is not positive) and the closedLimit most recently
+// closed issues, newest close first, and returns how many closed issues there
+// were. Stores that filter rows in Go after the query use it so a closed limit
+// pages the same way as the SQL path.
+func PageClosedUIIssues(issues []UIIssue, openLimit, closedLimit int) ([]UIIssue, int) {
 	paged := make([]UIIssue, 0, len(issues))
 	var closed []UIIssue
 	for _, issue := range issues {
@@ -241,7 +242,9 @@ func PageClosedUIIssues(issues []UIIssue, limit int) ([]UIIssue, int) {
 			closed = append(closed, issue)
 			continue
 		}
-		paged = append(paged, issue)
+		if openLimit <= 0 || len(paged) < openLimit {
+			paged = append(paged, issue)
+		}
 	}
 	slices.SortStableFunc(closed, func(a, b UIIssue) int {
 		at, bt := closedTime(a), closedTime(b)
@@ -251,8 +254,8 @@ func PageClosedUIIssues(issues []UIIssue, limit int) ([]UIIssue, int) {
 		return cmp.Compare(b.ID, a.ID)
 	})
 	total := len(closed)
-	if len(closed) > limit {
-		closed = closed[:limit]
+	if len(closed) > closedLimit {
+		closed = closed[:closedLimit]
 	}
 	return append(paged, closed...), total
 }
