@@ -246,9 +246,20 @@ function byPriorityThenUpdated(a: KataTaskSummary, b: KataTaskSummary): number {
   if (pa !== pb) return pa - pb
   const comments = (b.comment_count ?? 0) - (a.comment_count ?? 0)
   if (comments !== 0) return comments
-  return b.updated_at.localeCompare(a.updated_at)
+  return newerFirst(a.updated_at, b.updated_at)
 }
 
 function byClosedDesc(a: KataTaskSummary, b: KataTaskSummary): number {
-  return (b.closed_at ?? b.updated_at).localeCompare(a.closed_at ?? a.updated_at)
+  return newerFirst(a.closed_at ?? a.updated_at, b.closed_at ?? b.updated_at)
+}
+
+// Timestamps compare by value: the daemon drops trailing zeros from
+// fractional seconds, so their text sorts out of order. An unreadable time
+// sorts last.
+function newerFirst(a: string, b: string): number {
+  const at = Date.parse(a)
+  const bt = Date.parse(b)
+  if (Number.isNaN(at) || Number.isNaN(bt))
+    return Number(Number.isNaN(at)) - Number(Number.isNaN(bt))
+  return bt - at
 }

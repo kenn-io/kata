@@ -185,6 +185,27 @@ describe('buildBoard', () => {
     expect(done.total).toBe(5)
   })
 
+  it('orders times by value when their fractional seconds differ in length', () => {
+    // The daemon drops trailing zeros, so 12:00:00.1 and 12:00:00.11 differ in length.
+    const done = buildBoard(
+      [
+        issue('earlier', { status: 'closed', closed_at: '2026-01-01T12:00:00.1Z' }),
+        issue('later', { status: 'closed', closed_at: '2026-01-01T12:00:00.11Z' }),
+      ],
+      { now },
+    ).columns[3]!
+    const open = buildBoard(
+      [
+        issue('older', { updated_at: '2026-01-01T12:00:00.1Z' }),
+        issue('newer', { updated_at: '2026-01-01T12:00:00.11Z' }),
+      ],
+      { now },
+    ).columns[0]!
+
+    expect(done.issues.map((card) => card.uid)).toEqual(['later', 'earlier'])
+    expect(open.issues.map((card) => card.uid)).toEqual(['newer', 'older'])
+  })
+
   it('shows a pending move in its target column', () => {
     const board = buildBoard([issue('a')], { now, pending: new Map([['a', 'in-progress']]) })
     expect(board.columns[1]!.issues.map((i) => i.uid)).toEqual(['a'])
