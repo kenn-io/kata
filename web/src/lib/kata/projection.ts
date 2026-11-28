@@ -477,6 +477,7 @@ function normalizeIssue(
     author: issue.author,
     ...creationFields(issue),
     priority: issue.priority,
+    comment_count: issue.comment_count ?? 0,
     labels: [...(issue.labels ?? [])],
     blocks: [],
     blocked_by: [],

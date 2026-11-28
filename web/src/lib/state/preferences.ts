@@ -6,6 +6,12 @@ export interface Preferences {
   splitDirection: 'horizontal' | 'vertical'
   splitSize: number
   collapsedGroups: string[]
+  /** Board cards show one line each. */
+  boardCompact: boolean
+  /** Board column IDs (such as `done`) shown as narrow strips. */
+  collapsedBoardColumns: string[]
+  /** Flash board cards that someone else moved or added. */
+  boardHighlightRemote: boolean
   sidebarWidth: number
   sidebarCollapsed: boolean
 }
@@ -19,6 +25,9 @@ export const defaultPreferences: Preferences = {
   splitDirection: 'horizontal',
   splitSize: 480,
   collapsedGroups: [],
+  boardCompact: false,
+  collapsedBoardColumns: [],
+  boardHighlightRemote: true,
   sidebarWidth: 240,
   sidebarCollapsed: false,
 }
@@ -37,6 +46,9 @@ export function loadPreferences(storage: Storage = localStorage): Preferences {
           ? value.splitSize
           : defaultPreferences.splitSize,
       collapsedGroups: stringArray(value.collapsedGroups, []),
+      boardCompact: value.boardCompact === true,
+      collapsedBoardColumns: stringArray(value.collapsedBoardColumns, []),
+      boardHighlightRemote: value.boardHighlightRemote !== false,
       sidebarWidth: sidebarWidth(value.sidebarWidth),
       sidebarCollapsed: value.sidebarCollapsed === true,
     }
@@ -67,6 +79,9 @@ export function savePreferences(
         ? current.splitSize
         : defaultPreferences.splitSize,
     collapsedGroups: stringArray(current.collapsedGroups, []),
+    boardCompact: current.boardCompact === true,
+    collapsedBoardColumns: stringArray(current.collapsedBoardColumns, []),
+    boardHighlightRemote: current.boardHighlightRemote !== false,
     sidebarWidth: sidebarWidth(current.sidebarWidth),
     sidebarCollapsed: current.sidebarCollapsed === true,
   }
@@ -83,6 +98,7 @@ function cloneDefaults(): Preferences {
     ...defaultPreferences,
     columns: [...defaultPreferences.columns],
     collapsedGroups: [...defaultPreferences.collapsedGroups],
+    collapsedBoardColumns: [...defaultPreferences.collapsedBoardColumns],
   }
 }
 

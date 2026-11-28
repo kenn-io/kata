@@ -68,6 +68,13 @@ describe('canonical Kata routes', () => {
     expect(serializeRoute(route)).toBe('/kata?view=delegated')
   })
 
+  it('parses and serializes the Needs attention view', () => {
+    const route = parseRoute(new URL('https://daemon.example/kata?view=attention'))
+
+    expect(route).toMatchObject({ kind: 'kata', view: 'attention' })
+    expect(serializeRoute(route)).toBe('/kata?view=attention')
+  })
+
   it('parses and serializes the Scheduled view', () => {
     const route = parseRoute(new URL('https://daemon.example/kata?view=scheduled'))
 
@@ -149,6 +156,58 @@ describe('canonical Kata routes', () => {
   })
 })
 
+describe('board layout', () => {
+  const projectUID = '01HZNQ7VFPK1XGD8R5MABCD4EW'
+
+  it('round-trips the board layout beside scope, issue, and filters', () => {
+    const route = parseRoute(
+      new URL(
+        `https://daemon.example/kata?layout=board&scope=${projectUID}&issue=${issueUID}&owner=alex`,
+      ),
+    )
+
+    expect(route).toMatchObject({ kind: 'kata', board: true, projectUID, issueUID, graph: false })
+    expect(serializeRoute(route)).toBe(
+      `/kata?scope=${projectUID}&issue=${issueUID}&layout=board&owner=alex`,
+    )
+  })
+
+  it('leaves the list layout out of the URL', () => {
+    const route = parseRoute(new URL(`https://daemon.example/kata?scope=${projectUID}`))
+
+    expect(route).not.toHaveProperty('board')
+    expect(serializeRoute(route)).toBe(`/kata?scope=${projectUID}`)
+  })
+
+  it('ignores layout values other than board', () => {
+    expect(parseRoute(new URL('https://daemon.example/kata?layout=grid'))).not.toHaveProperty(
+      'board',
+    )
+  })
+
+  it('keeps the board for a short issue link', () => {
+    const route = parseRoute(
+      new URL('https://daemon.example/kata?scope=kata&issue=abc4&layout=board&graph=1'),
+    )
+
+    expect(route).toMatchObject({
+      kind: 'kata',
+      link: { scope: 'kata', issue: 'abc4' },
+      board: true,
+      graph: false,
+    })
+    expect(serializeRoute(route)).toBe('/kata?scope=kata&issue=abc4&layout=board')
+  })
+
+  it('never combines the board with the reachable graph', () => {
+    const route = parseRoute(
+      new URL(`https://daemon.example/kata?layout=board&issue=${issueUID}&graph=1`),
+    )
+
+    expect(route).toMatchObject({ board: true, graph: false })
+  })
+})
+
 describe('screen names', () => {
   it.each([
     ['', 'inbox'],
@@ -157,9 +216,13 @@ describe('screen names', () => {
     ['?view=delegated', 'delegated'],
     ['?view=scheduled', 'scheduled'],
     ['?view=logbook', 'logbook'],
+    ['?view=attention', 'attention'],
     [`?scope=${issueUID}`, 'issues'],
     [`?issue=${issueUID}`, 'issue'],
     [`?issue=${issueUID}&graph=1`, 'graph'],
+    ['?layout=board', 'board'],
+    [`?scope=${issueUID}&layout=board`, 'board'],
+    [`?layout=board&issue=${issueUID}`, 'issue'],
     [`?view=credentials&issue=${issueUID}`, 'credentials'],
     [`?view=settings&issue=${issueUID}`, 'settings'],
     ['?view=unknown', undefined],

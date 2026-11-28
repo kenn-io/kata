@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"fmt"
+	"runtime"
 	"slices"
 	"testing"
 	"time"
@@ -1192,4 +1193,176 @@ func requireCursorUnchanged(ctx context.Context, t *testing.T, store db.UIStore,
 	got, err := store.UIEventCursor(ctx)
 	require.NoError(t, err)
 	require.Equal(t, want, got, "no-op or rejected write must not advance cursor")
+}
+
+// RunUISnapshotClosedPageContract checks that ClosedLimit returns every
+// matching open issue, only the most recently closed page of matching closed
+// issues, and the total number of matching closed issues.
+func RunUISnapshotClosedPageContract(t *testing.T, open func(*testing.T) db.Storage) {
+	t.Helper()
+	store := open(t)
+	uiStore, ok := store.(db.UIStore)
+	require.True(t, ok, "storage backend must implement db.UIStore")
+	ctx := t.Context()
+	project := createCursorProject(ctx, t, store)
+	other, err := store.CreateProject(ctx, "other-project")
+	require.NoError(t, err)
+	openA := createCursorIssue(ctx, t, store, project.ID, "Open A")
+	openB := createCursorIssue(ctx, t, store, project.ID, "Open B")
+	closedFirst := createCursorIssue(ctx, t, store, project.ID, "Closed first")
+	closedLast := createCursorIssue(ctx, t, store, project.ID, "Closed last")
+	closedMiddle := createCursorIssue(ctx, t, store, project.ID, "Closed middle")
+	// Names give creation order: first, last, middle.
+	otherClosed := createCursorIssue(ctx, t, store, other.ID, "Other project closed")
+	addCursorLabel(ctx, t, store, closedFirst, "keep")
+	addCursorLabel(ctx, t, store, closedLast, "keep")
+	addCursorLabel(ctx, t, store, openA, "keep")
+	// Close out of creation order so closed_at order differs from id order.
+	// The two most recent closes (closedLast, closedFirst) are not the two
+	// highest IDs (closedMiddle, closedLast), so ordering by ID would fail.
+	for _, issue := range []db.Issue{closedMiddle, closedLast, closedFirst, otherClosed} {
+		closed, _, changed, closeErr := store.CloseIssue(ctx, issue.ID, "done", "user-a", "Completed", nil)
+		require.NoError(t, closeErr)
+		require.True(t, changed)
+		require.NotNil(t, closed.ClosedAt)
+		waitPastMillisecond(*closed.ClosedAt)
+	}
+
+	t.Run("pages closed issues newest first and counts them all", func(t *testing.T) {
+		data, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
+			View: "all-open", ProjectUID: project.UID, Statuses: []string{"all"}, ClosedLimit: 2,
+		})
+		require.NoError(t, err)
+		require.ElementsMatch(t, []string{openA.UID, openB.UID, closedFirst.UID, closedLast.UID},
+			uiIssueUIDs(data.Issues))
+		require.NotNil(t, data.ClosedTotal)
+		require.Equal(t, 3, *data.ClosedTotal)
+	})
+
+	t.Run("applies collection filters to the page and the count", func(t *testing.T) {
+		data, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
+			View: "all-open", ProjectUID: project.UID, Statuses: []string{"all"},
+			Labels: []string{"keep"}, Label: "keep", ClosedLimit: 1,
+		})
+		require.NoError(t, err)
+		require.ElementsMatch(t, []string{openA.UID, closedFirst.UID}, uiIssueUIDs(data.Issues))
+		require.NotNil(t, data.ClosedTotal)
+		require.Equal(t, 2, *data.ClosedTotal)
+	})
+
+	t.Run("pages closed issues after the ready filter too", func(t *testing.T) {
+		// Ready is filtered in Go after the query; paging must still apply.
+		data, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
+			View: "all-open", ProjectUID: project.UID, Statuses: []string{"ready", "closed"}, ClosedLimit: 1,
+		})
+		require.NoError(t, err)
+		require.ElementsMatch(t, []string{openA.UID, openB.UID, closedFirst.UID}, uiIssueUIDs(data.Issues))
+		require.NotNil(t, data.ClosedTotal)
+		require.Equal(t, 3, *data.ClosedTotal)
+	})
+
+	t.Run("pages closed issues after the ready filter under an open limit", func(t *testing.T) {
+		// The open limit must not cut the scan before closed issues are paged.
+		data, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
+			View: "all-open", ProjectUID: project.UID, Statuses: []string{"ready", "closed"},
+			Limit: 1, ClosedLimit: 1,
+		})
+		require.NoError(t, err)
+		var open, closed []string
+		for _, issue := range data.Issues {
+			if issue.Status == "closed" {
+				closed = append(closed, issue.UID)
+			} else {
+				open = append(open, issue.UID)
+			}
+		}
+		require.Len(t, open, 1)
+		require.Equal(t, []string{closedFirst.UID}, closed)
+		require.NotNil(t, data.ClosedTotal)
+		require.Equal(t, 3, *data.ClosedTotal)
+	})
+
+	t.Run("counts across projects when no project is selected", func(t *testing.T) {
+		data, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
+			View: "all-open", Statuses: []string{"all"}, ClosedLimit: 1,
+		})
+		require.NoError(t, err)
+		require.ElementsMatch(t, []string{openA.UID, openB.UID, otherClosed.UID}, uiIssueUIDs(data.Issues))
+		require.Equal(t, 4, *data.ClosedTotal)
+	})
+
+	t.Run("without a closed limit returns every closed issue and no total", func(t *testing.T) {
+		data, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
+			View: "all-open", ProjectUID: project.UID, Statuses: []string{"all"},
+		})
+		require.NoError(t, err)
+		require.Len(t, data.Issues, 5)
+		require.Nil(t, data.ClosedTotal)
+	})
+
+	t.Run("reports zero closed when the status filter excludes closed issues", func(t *testing.T) {
+		data, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
+			View: "all-open", ProjectUID: project.UID, ClosedLimit: 5,
+		})
+		require.NoError(t, err)
+		require.ElementsMatch(t, []string{openA.UID, openB.UID}, uiIssueUIDs(data.Issues))
+		require.Equal(t, 0, *data.ClosedTotal)
+	})
+}
+
+// RunUISnapshotCommentCountContract checks that collection issues carry the
+// number of comments on each issue.
+func RunUISnapshotCommentCountContract(t *testing.T, open func(*testing.T) db.Storage) {
+	t.Helper()
+	store := open(t)
+	uiStore, ok := store.(db.UIStore)
+	require.True(t, ok, "storage backend must implement db.UIStore")
+	ctx := t.Context()
+	project := createCursorProject(ctx, t, store)
+	busy := createCursorIssue(ctx, t, store, project.ID, "Busy issue")
+	quiet := createCursorIssue(ctx, t, store, project.ID, "Quiet issue")
+	closed := createCursorIssue(ctx, t, store, project.ID, "Closed issue")
+	for _, comment := range []struct {
+		issue db.Issue
+		body  string
+	}{
+		{busy, "First comment"}, {busy, "Second comment"}, {busy, "Third comment"},
+		{closed, "Closing note"},
+	} {
+		_, _, err := store.CreateComment(ctx, db.CreateCommentParams{
+			IssueID: comment.issue.ID, Author: "user-a", Body: comment.body,
+		})
+		require.NoError(t, err)
+	}
+	_, _, changed, err := store.CloseIssue(ctx, closed.ID, "done", "user-a", "Completed", nil)
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	counts := func(query db.UISnapshotQuery) map[string]int64 {
+		t.Helper()
+		data, err := uiStore.ReadUISnapshot(ctx, query)
+		require.NoError(t, err)
+		result := map[string]int64{}
+		for _, issue := range data.Issues {
+			result[issue.UID] = issue.CommentCount
+		}
+		return result
+	}
+
+	require.Equal(t, map[string]int64{busy.UID: 3, quiet.UID: 0, closed.UID: 1}, counts(db.UISnapshotQuery{
+		View: "all-open", ProjectUID: project.UID, Statuses: []string{"all"},
+	}))
+	// The paged closed read carries counts too.
+	require.Equal(t, map[string]int64{busy.UID: 3, quiet.UID: 0, closed.UID: 1}, counts(db.UISnapshotQuery{
+		View: "all-open", ProjectUID: project.UID, Statuses: []string{"all"}, ClosedLimit: 5,
+	}))
+}
+
+// waitPastMillisecond returns once the wall clock is in a later millisecond
+// than at, so the next stored timestamp sorts strictly after it. Stores keep
+// millisecond precision, so this waits at most about a millisecond.
+func waitPastMillisecond(at time.Time) {
+	for !time.Now().UTC().Truncate(time.Millisecond).After(at.UTC().Truncate(time.Millisecond)) {
+		runtime.Gosched()
+	}
 }

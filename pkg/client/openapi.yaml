@@ -7263,6 +7263,9 @@ components:
           type: string
         closed_reason:
           type: string
+        comment_count:
+          format: int64
+          type: integer
         content_revision:
           format: int64
           type: integer
@@ -7534,6 +7537,10 @@ components:
           items:
             $ref: "#/components/schemas/UIProject"
           type: array
+        closed_total:
+          description: Number of matching closed issues, present only when closed_limit is set.
+          format: int64
+          type: integer
         collection:
           items:
             $ref: "#/components/schemas/UIIssue"
@@ -7614,7 +7621,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.74.0
+  version: 0.75.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:
@@ -13458,6 +13465,14 @@ paths:
           in: query
           name: limit
           schema:
+            format: int64
+            type: integer
+        - description: When set (1-1000), collection holds every matching open issue but only this many of the most recently closed matching issues, and closed_total counts every matching closed issue. Not accepted for the today, upcoming, deadlines, and delegated views.
+          explode: false
+          in: query
+          name: closed_limit
+          schema:
+            description: When set (1-1000), collection holds every matching open issue but only this many of the most recently closed matching issues, and closed_total counts every matching closed issue. Not accepted for the today, upcoming, deadlines, and delegated views.
             format: int64
             type: integer
       responses:

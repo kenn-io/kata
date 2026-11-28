@@ -7645,6 +7645,7 @@ type UIIssue struct {
 	Body                string               `json:"body" validate:"required"`
 	ClosedAt            *time.Time           `json:"closed_at,omitempty"`
 	ClosedReason        *string              `json:"closed_reason,omitempty"`
+	CommentCount        *int64               `json:"comment_count,omitempty"`
 	ContentRevision     int64                `json:"content_revision"`
 	CreatedAt           time.Time            `json:"created_at" validate:"required"`
 	DeadlineOnDate      *string              `json:"deadline_on_date,omitempty"`
@@ -7967,7 +7968,10 @@ func (u UISelectedAuthority) Validate() error {
 type UISnapshotResponseBody struct {
 	Capabilities UICapabilities `json:"capabilities"`
 	Catalog      []UIProject    `json:"catalog" validate:"required"`
-	Collection   []UIIssue      `json:"collection" validate:"required"`
+
+	// ClosedTotal Number of matching closed issues, present only when closed_limit is set.
+	ClosedTotal *int64    `json:"closed_total,omitempty"`
+	Collection  []UIIssue `json:"collection" validate:"required"`
 
 	// CollectionLinks Every link between two issues the principal can read (non-deleted issues in non-archived projects) that has at least one endpoint in collection, regardless of the collection's view, project_uid, status, owner, label, relationship, text, local_date, time_zone, or limit parameters. Count parent links whose to_issue_uid is a collection issue to get its children: from_status gives each child's status, and the open and total counts equal child_counts from GET /api/v1/issues for the same principal at the same cursor (an absent child_counts means zero).
 	CollectionLinks []UILink             `json:"collection_links" validate:"required"`

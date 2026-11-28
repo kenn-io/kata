@@ -1,6 +1,13 @@
 import type { KataCommentLink, KataCreationAttributionWire, KataReplyKind } from '@kenn-io/kata-ui'
 
-export type KataTaskViewName = 'inbox' | 'today' | 'delegated' | 'scheduled' | 'all' | 'logbook'
+export type KataTaskViewName =
+  | 'inbox'
+  | 'today'
+  | 'delegated'
+  | 'scheduled'
+  | 'attention'
+  | 'all'
+  | 'logbook'
 
 export interface KataTaskChecklistItem {
   id: string
@@ -79,6 +86,8 @@ export interface KataTaskSummary extends KataCreationAttributionWire {
   open_blocked_by?: KataOpenBlocker[] | undefined
   related?: KataLinkPeer[] | undefined
   child_counts?: { open: number; total: number } | undefined
+  /** Comments on the issue; snapshot collection issues only. */
+  comment_count?: number | undefined
   recurrence_id?: number | undefined
   occurrence_key?: string | undefined
   created_at: string

@@ -187,6 +187,7 @@ func cloneUISnapshotAuthority(data db.UISnapshotData) db.UISnapshotData {
 		Cursor:          data.Cursor,
 		Projects:        slices.Clone(data.Projects),
 		Issues:          slices.Clone(data.Issues),
+		ClosedTotal:     data.ClosedTotal,
 		CollectionLinks: slices.Clone(data.CollectionLinks),
 	}
 }
@@ -194,6 +195,7 @@ func cloneUISnapshotAuthority(data db.UISnapshotData) db.UISnapshotData {
 func mergeUISnapshotAuthority(data *db.UISnapshotData, authority db.UISnapshotData) {
 	data.Projects = authority.Projects
 	data.Issues = authority.Issues
+	data.ClosedTotal = authority.ClosedTotal
 	data.CollectionLinks = authority.CollectionLinks
 	data.AuthorityReused = false
 }

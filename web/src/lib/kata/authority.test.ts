@@ -40,6 +40,39 @@ function titles(view: ReturnType<typeof projectKataWorkspaceView>): string[] {
 }
 
 describe('projectKataWorkspaceView', () => {
+  test('groups the Needs attention view by urgency and leaves out quiet issues', () => {
+    const view = projectKataWorkspaceView({
+      view: 'attention',
+      filters: defaultKataTaskSearchFilters('attention'),
+      snapshot: { projects, fetched_at: '2026-05-15T16:00:00.000Z' },
+      issues: [
+        issue('quiet'),
+        issue('waiting', { 'work.attention': 'needs-human' }),
+        issue('blocked', { 'work.attention': 'stuck' }),
+      ],
+      today: '2026-05-15',
+    })
+
+    expect(view.groups.map((group) => [group.title, group.issues.map((i) => i.title)])).toEqual([
+      ['Stuck', ['blocked']],
+      ['Needs a human', ['waiting']],
+    ])
+  })
+
+  test('keeps a status-filtered Needs attention list to issues that need attention', () => {
+    // A status filter flattens the view into plain results, so only the
+    // attention filter keeps the quiet issue out.
+    const view = projectKataWorkspaceView({
+      view: 'attention',
+      filters: { ...defaultKataTaskSearchFilters('attention'), status: 'all' },
+      snapshot: { projects, fetched_at: '2026-05-15T16:00:00.000Z' },
+      issues: [issue('quiet'), issue('waiting', { 'work.attention': 'needs-human' })],
+      today: '2026-05-15',
+    })
+
+    expect(titles(view)).toEqual(['waiting'])
+  })
+
   const groupedFilterCases: [
     string,
     {

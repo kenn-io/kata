@@ -51,6 +51,400 @@ describe('AppShell', () => {
     vi.useRealTimers()
   })
 
+  describe('board layout', () => {
+    const projectUID = '01J00000000000000000000002'
+    const filters = { status: [], owner: [], label: [], relationship: [] }
+
+    test('switches a project list to its board from the layout control', async () => {
+      const onNavigate = vi.fn()
+      render(AppShell, {
+        props: {
+          route: { kind: 'kata', projectUID, graph: false, filters },
+          snapshot: snapshot(),
+          loading: false,
+          ...mutationProps(),
+          onNavigate,
+          onCreateProject: vi.fn(async () => ({ changed: true })),
+        },
+      })
+
+      await fireEvent.click(
+        within(screen.getByRole('radiogroup', { name: 'Layout' })).getByRole('radio', {
+          name: 'Board',
+        }),
+      )
+
+      expect(onNavigate).toHaveBeenCalledWith({
+        kind: 'kata',
+        projectUID,
+        graph: false,
+        board: true,
+        filters,
+      })
+    })
+
+    test('shows the four Kata states and leaves labels as labels', () => {
+      const current = snapshot()
+      current.catalog[0]!.project.metadata = { board_columns: ['review'] }
+      current.collection![0]!.labels = ['review']
+      render(AppShell, {
+        props: {
+          route: { kind: 'kata', projectUID, graph: false, board: true, filters },
+          snapshot: current,
+          loading: false,
+          ...mutationProps(),
+          onNavigate: vi.fn(),
+          onCreateProject: vi.fn(async () => ({ changed: true })),
+        },
+      })
+
+      const board = screen.getByRole('region', { name: 'Issue board' })
+      expect(
+        within(board)
+          .getAllByRole('region')
+          .map((region) => region.getAttribute('aria-label')),
+      ).toEqual([
+        'Open, 1 card',
+        'In progress, 0 cards',
+        'Needs attention, 0 cards',
+        'Done, 0 cards',
+      ])
+      expect(screen.queryByRole('button', { name: 'Edit board columns' })).toBeNull()
+    })
+
+    test('drops a half-typed board card when the project changes', async () => {
+      const current = snapshot()
+      current.catalog.push({
+        ...current.catalog[0]!,
+        project: {
+          ...current.catalog[0]!.project,
+          id: 8,
+          uid: '01J00000000000000000000003',
+          name: 'other-project',
+        },
+      })
+      const onCreateBoardIssue = vi.fn(async () => true)
+      const props = {
+        snapshot: current,
+        loading: false,
+        ...mutationProps(),
+        onCreateBoardIssue,
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      }
+      const view = render(AppShell, {
+        props: {
+          ...props,
+          route: { kind: 'kata', projectUID, graph: false, board: true, filters },
+        },
+      })
+      const open = () => screen.getByRole('region', { name: /^Open,/ })
+      await fireEvent.click(within(open()).getByRole('button', { name: 'Add card to Open' }))
+      await fireEvent.input(within(open()).getByRole('textbox', { name: 'New card in Open' }), {
+        target: { value: 'Meant for example-project' },
+      })
+
+      await view.rerender({
+        ...props,
+        route: {
+          kind: 'kata',
+          projectUID: '01J00000000000000000000003',
+          graph: false,
+          board: true,
+          filters,
+        },
+      })
+
+      expect(within(open()).queryByRole('textbox', { name: 'New card in Open' })).toBeNull()
+      expect(onCreateBoardIssue).not.toHaveBeenCalled()
+    })
+
+    test('opens a clicked card in place on the board', async () => {
+      const onNavigate = vi.fn()
+      render(AppShell, {
+        props: {
+          route: { kind: 'kata', projectUID, graph: false, board: true, filters },
+          snapshot: snapshot(),
+          loading: false,
+          ...mutationProps(),
+          onNavigate,
+          onCreateProject: vi.fn(async () => ({ changed: true })),
+        },
+      })
+
+      await fireEvent.click(screen.getByRole('button', { name: 'Example issue' }))
+
+      expect(onNavigate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectUID,
+          issueUID: '01J00000000000000000000001',
+          board: true,
+        }),
+      )
+    })
+
+    test('does not mark Inbox as current on the board across all projects', () => {
+      render(AppShell, {
+        props: {
+          route: { kind: 'kata', graph: false, board: true, filters },
+          snapshot: snapshot(),
+          loading: false,
+          ...mutationProps(),
+          onNavigate: vi.fn(),
+          onCreateProject: vi.fn(async () => ({ changed: true })),
+        },
+      })
+
+      const navigation = screen.getByRole('region', { name: 'Kata navigation' })
+      // The sidebar shows the current view with its active class.
+      expect(within(navigation).getByRole('button', { name: /Inbox/ }).classList).not.toContain(
+        'active',
+      )
+    })
+
+    test('shows the server count of closed issues and asks for the next page', async () => {
+      const current = snapshot()
+      current.closed_total = 45
+      current.collection = Array.from({ length: 30 }, (_, n) => ({
+        ...current.collection![0]!,
+        id: 100 + n,
+        uid: `01J000000000000000000001${String(n).padStart(2, '0')}`,
+        short_id: `c${n}`,
+        title: `Closed ${n}`,
+        status: 'closed' as const,
+        closed_at: '2026-08-01T12:00:00.000Z',
+      }))
+      const onShowMoreBoardDone = vi.fn()
+      render(AppShell, {
+        props: {
+          route: { kind: 'kata', projectUID, graph: false, board: true, filters },
+          snapshot: current,
+          loading: false,
+          ...mutationProps(),
+          onNavigate: vi.fn(),
+          onCreateProject: vi.fn(async () => ({ changed: true })),
+          onShowMoreBoardDone,
+        },
+      })
+
+      expect(screen.getByRole('region', { name: 'Done, 45 cards' })).toBeTruthy()
+      await fireEvent.click(screen.getByRole('button', { name: 'Show 15 more' }))
+      expect(onShowMoreBoardDone).toHaveBeenCalledOnce()
+    })
+
+    test('uses the same four columns on the all-projects board', () => {
+      const current = snapshot()
+      current.catalog.push({
+        project: {
+          ...current.catalog[0]!.project,
+          id: 8,
+          uid: '01J00000000000000000000009',
+          name: 'example-peer',
+        },
+        stats: { Open: 1, Closed: 0, LastEventAt: '2026-08-01T12:00:00.000Z' },
+      })
+      current.collection!.push({
+        ...current.collection![0]!,
+        id: 2,
+        uid: '01J00000000000000000000010',
+        project_id: 8,
+        project_uid: '01J00000000000000000000009',
+        project_name: 'example-peer',
+        title: 'Peer issue',
+        owner: 'agent-a',
+      })
+      render(AppShell, {
+        props: {
+          route: { kind: 'kata', view: 'all-open', graph: false, board: true, filters },
+          snapshot: current,
+          loading: false,
+          ...mutationProps(),
+          onNavigate: vi.fn(),
+          onCreateProject: vi.fn(async () => ({ changed: true })),
+        },
+      })
+
+      expect(
+        within(screen.getByRole('region', { name: 'In progress, 1 card' })).getByText('Peer issue'),
+      ).toBeTruthy()
+      expect(
+        within(screen.getByRole('region', { name: 'Open, 1 card' })).getByText('Example issue'),
+      ).toBeTruthy()
+    })
+
+    test('switches cards to compact from the Display menu and remembers it', async () => {
+      const onPreferencesChange = vi.fn()
+      render(AppShell, {
+        props: {
+          route: { kind: 'kata', projectUID, graph: false, board: true, filters },
+          snapshot: snapshot(),
+          loading: false,
+          ...mutationProps(),
+          onNavigate: vi.fn(),
+          onCreateProject: vi.fn(async () => ({ changed: true })),
+          onPreferencesChange,
+        },
+      })
+
+      // The board keeps its options in the same Display menu as the list.
+      await fireEvent.click(screen.getByRole('button', { name: 'Display' }))
+      await fireEvent.click(
+        within(screen.getByRole('radiogroup', { name: 'Cards' })).getByRole('radio', {
+          name: 'Compact',
+        }),
+      )
+
+      expect(onPreferencesChange).toHaveBeenCalledWith(
+        expect.objectContaining({ boardCompact: true }),
+      )
+    })
+
+    test("turns highlights for other people's changes off from the Display menu", async () => {
+      const onPreferencesChange = vi.fn()
+      render(AppShell, {
+        props: {
+          route: { kind: 'kata', projectUID, graph: false, board: true, filters },
+          snapshot: snapshot(),
+          loading: false,
+          ...mutationProps(),
+          onNavigate: vi.fn(),
+          onCreateProject: vi.fn(async () => ({ changed: true })),
+          onPreferencesChange,
+        },
+      })
+
+      await fireEvent.click(screen.getByRole('button', { name: 'Display' }))
+      const toggle = screen.getByRole('checkbox', { name: 'Highlight changes by others' })
+      expect((toggle as HTMLInputElement).checked).toBe(true)
+      await fireEvent.click(toggle)
+
+      expect(onPreferencesChange).toHaveBeenCalledWith(
+        expect.objectContaining({ boardHighlightRemote: false }),
+      )
+    })
+
+    test('locks board writes while another change is saving', () => {
+      render(AppShell, {
+        props: {
+          route: { kind: 'kata', projectUID, graph: false, board: true, filters },
+          snapshot: snapshot(),
+          loading: false,
+          ...mutationProps({ mutationPending: true }),
+          onNavigate: vi.fn(),
+          onCreateProject: vi.fn(async () => ({ changed: true })),
+        },
+      })
+
+      expect(
+        screen.getByRole('button', { name: 'Actions for Example issue' }).hasAttribute('disabled'),
+      ).toBe(true)
+    })
+
+    test('remembers a collapsed Done column', async () => {
+      const onPreferencesChange = vi.fn()
+      render(AppShell, {
+        props: {
+          route: { kind: 'kata', projectUID, graph: false, board: true, filters },
+          snapshot: snapshot(),
+          loading: false,
+          ...mutationProps(),
+          onNavigate: vi.fn(),
+          onCreateProject: vi.fn(async () => ({ changed: true })),
+          onPreferencesChange,
+        },
+      })
+
+      await fireEvent.click(screen.getByRole('button', { name: 'Collapse Done' }))
+
+      expect(onPreferencesChange).toHaveBeenCalledWith(
+        expect.objectContaining({ collapsedBoardColumns: ['done'] }),
+      )
+    })
+
+    test('adds a card to the project from the Open column', async () => {
+      const onCreateBoardIssue = vi.fn(async () => true)
+      render(AppShell, {
+        props: {
+          route: { kind: 'kata', projectUID, graph: false, board: true, filters },
+          snapshot: snapshot(),
+          loading: false,
+          ...mutationProps(),
+          onNavigate: vi.fn(),
+          onCreateProject: vi.fn(async () => ({ changed: true })),
+          onCreateBoardIssue,
+        },
+      })
+
+      await fireEvent.click(screen.getByRole('button', { name: 'Add card to Open' }))
+      const input = screen.getByRole('textbox', { name: 'New card in Open' })
+      await fireEvent.input(input, { target: { value: 'Draft the announcement' } })
+      await fireEvent.keyDown(input, { key: 'Enter' })
+
+      expect(onCreateBoardIssue).toHaveBeenCalledWith(7, 'Draft the announcement')
+    })
+
+    test('offers no add-card on the all-projects board or without write access', () => {
+      render(AppShell, {
+        props: {
+          route: { kind: 'kata', view: 'all-open', graph: false, board: true, filters },
+          snapshot: snapshot(),
+          loading: false,
+          ...mutationProps(),
+          onNavigate: vi.fn(),
+          onCreateProject: vi.fn(async () => ({ changed: true })),
+          onCreateBoardIssue: vi.fn(async () => true),
+        },
+      })
+      expect(screen.queryByRole('button', { name: /^Add card/ })).toBeNull()
+      cleanup()
+
+      const readOnly = snapshot()
+      readOnly.capabilities.writable = false
+      render(AppShell, {
+        props: {
+          route: { kind: 'kata', projectUID, graph: false, board: true, filters },
+          snapshot: readOnly,
+          loading: false,
+          readOnly: true,
+          ...mutationProps({ canMutate: false }),
+          onNavigate: vi.fn(),
+          onCreateProject: vi.fn(async () => ({ changed: true })),
+          onCreateBoardIssue: vi.fn(async () => true),
+        },
+      })
+      expect(screen.queryByRole('button', { name: /^Add card/ })).toBeNull()
+    })
+
+    test('keeps the board when another project is chosen in the sidebar', async () => {
+      const onNavigate = vi.fn()
+      render(AppShell, {
+        props: {
+          route: { kind: 'kata', view: 'all-open', graph: false, board: true, filters },
+          snapshot: snapshot(),
+          loading: false,
+          ...mutationProps(),
+          onNavigate,
+          onCreateProject: vi.fn(async () => ({ changed: true })),
+        },
+      })
+
+      await fireEvent.click(
+        within(screen.getByRole('region', { name: 'Kata navigation' })).getByRole('button', {
+          name: /example-project/,
+        }),
+      )
+
+      expect(onNavigate).toHaveBeenCalledWith(expect.objectContaining({ projectUID, board: true }))
+      await fireEvent.click(screen.getByRole('button', { name: 'Today' }))
+      expect(onNavigate).toHaveBeenLastCalledWith({
+        kind: 'kata',
+        view: 'today',
+        graph: false,
+        filters,
+      })
+    })
+  })
+
   test('advances Updated labels while the task snapshot stays unchanged', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-01T12:00:16Z'))
@@ -1744,6 +2138,9 @@ describe('AppShell', () => {
           collapsedGroups: [],
           sidebarWidth: 240,
           sidebarCollapsed: false,
+          boardCompact: false,
+          collapsedBoardColumns: [],
+          boardHighlightRemote: true,
         },
         onPreferencesChange,
         ...mutationProps(),
@@ -1762,6 +2159,9 @@ describe('AppShell', () => {
       collapsedGroups: [],
       sidebarWidth: 240,
       sidebarCollapsed: false,
+      boardCompact: false,
+      collapsedBoardColumns: [],
+      boardHighlightRemote: true,
     }
     await view.rerender({ preferences })
     await waitFor(() => expect(handle.getAttribute('aria-valuenow')).toBe('600'))
@@ -1876,6 +2276,9 @@ describe('AppShell', () => {
           splitDirection: 'horizontal',
           splitSize: 420,
           collapsedGroups: [],
+          boardCompact: false,
+          collapsedBoardColumns: [],
+          boardHighlightRemote: true,
           sidebarWidth: 240,
           sidebarCollapsed: false,
         },

@@ -51,6 +51,7 @@ func (s *countingUIStore) ReadUISnapshot(_ context.Context, query db.UISnapshotQ
 		data.Projects = nil
 		data.Issues = nil
 		data.CollectionLinks = nil
+		data.ClosedTotal = nil
 		data.AuthorityReused = true
 	}
 	return data, nil
@@ -785,4 +786,94 @@ func getUIReferences(t *testing.T, ts *httptest.Server, query url.Values, etag s
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	return resp, body
+}
+
+func TestUISnapshotClosedLimitPagesDoneAndReportsTotal(t *testing.T) {
+	total := 42
+	store := &countingUIStore{
+		cursor: 7, snapshotCursor: 7,
+		snapshot: db.UISnapshotData{ClosedTotal: &total},
+	}
+	ts := newUISnapshotServer(t, store, true)
+
+	first, body := getUISnapshot(t, ts, url.Values{
+		"view": {"all-open"}, "status": {"all"}, "closed_limit": {"30"},
+	}, "")
+	require.Equal(t, http.StatusOK, first.StatusCode, string(body))
+	require.Equal(t, 30, store.lastSnapshot.ClosedLimit)
+	var envelope struct {
+		ClosedTotal *int `json:"closed_total"`
+	}
+	require.NoError(t, json.Unmarshal(body, &envelope))
+	require.NotNil(t, envelope.ClosedTotal)
+	require.Equal(t, 42, *envelope.ClosedTotal)
+
+	second, _ := getUISnapshot(t, ts, url.Values{
+		"view": {"all-open"}, "status": {"all"}, "closed_limit": {"60"},
+	}, "")
+	require.Equal(t, 60, store.lastSnapshot.ClosedLimit)
+	require.NotEqual(t, first.Header.Get("ETag"), second.Header.Get("ETag"))
+}
+
+func TestUISnapshotClosedLimitValidation(t *testing.T) {
+	store := &countingUIStore{cursor: 9, snapshotCursor: 9}
+	ts := newUISnapshotServer(t, store, true)
+	for _, query := range []url.Values{
+		{"view": {"all-open"}, "closed_limit": {"-1"}},
+		{"view": {"all-open"}, "closed_limit": {"1001"}},
+		{"view": {"delegated"}, "closed_limit": {"30"}},
+		{"view": {"today"}, "local_date": {"2026-08-01"}, "time_zone": {"UTC"}, "closed_limit": {"30"}},
+	} {
+		resp, body := getUISnapshot(t, ts, query, "")
+		assertAPIError(t, resp.StatusCode, body, http.StatusBadRequest, "validation")
+	}
+	require.Zero(t, store.snapshotReads)
+}
+
+func TestUISnapshotClosedLimitProjectDoesNotReuseGlobalPage(t *testing.T) {
+	projectUID := "01J00000000000000000000001"
+	store := &countingUIStore{cursor: 3, snapshotCursor: 3}
+	ts := newUISnapshotServer(t, store, true)
+	query := url.Values{"view": {"all-open"}, "status": {"all"}, "closed_limit": {"30"}}
+
+	global, _ := getUISnapshot(t, ts, query, "")
+	require.Equal(t, http.StatusOK, global.StatusCode)
+	query.Set("project_uid", projectUID)
+	project, body := getUISnapshot(t, ts, query, "")
+	require.Equal(t, http.StatusOK, project.StatusCode, string(body))
+
+	// A global page holds the newest closes across every project, so a
+	// project page must come from its own read.
+	require.Equal(t, 2, store.snapshotReads)
+	require.Equal(t, projectUID, store.lastSnapshot.ProjectUID)
+}
+
+func TestUISnapshotClosedTotalSurvivesAuthorityReuse(t *testing.T) {
+	selectedUID := "01J00000000000000000000000"
+	total := 12
+	store := &countingUIStore{
+		cursor: 5, snapshotCursor: 5,
+		snapshot: db.UISnapshotData{
+			Issues:        []db.UIIssue{{UID: selectedUID, Title: "Selected issue"}},
+			ClosedTotal:   &total,
+			SelectedState: "available",
+			SelectedIssue: &db.UIIssue{UID: selectedUID, Title: "Selected issue"},
+		},
+	}
+	ts := newUISnapshotServer(t, store, true)
+	query := url.Values{"view": {"all-open"}, "status": {"all"}, "closed_limit": {"30"}}
+
+	first, _ := getUISnapshot(t, ts, query, "")
+	require.Equal(t, http.StatusOK, first.StatusCode)
+	query.Set("selected_issue_uid", selectedUID)
+	second, body := getUISnapshot(t, ts, query, "")
+	require.Equal(t, http.StatusOK, second.StatusCode, string(body))
+	require.NotNil(t, store.lastSnapshot.ReuseAuthorityCursor)
+
+	var envelope struct {
+		ClosedTotal *int `json:"closed_total"`
+	}
+	require.NoError(t, json.Unmarshal(body, &envelope))
+	require.NotNil(t, envelope.ClosedTotal)
+	require.Equal(t, 12, *envelope.ClosedTotal)
 }

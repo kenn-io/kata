@@ -4,7 +4,9 @@
   import { onMount } from 'svelte'
 
   import { commentRetryIdentity } from './lib/kata/commentRetry'
-  import type { KataCommentReplyIntent } from './lib/kata/types'
+  import type { KataCommentReplyIntent, KataTaskSummary } from './lib/kata/types'
+  import { webActor } from './lib/kata/attention'
+  import { defaultDoneLimit, maxDoneLimit, type BoardMovePlan } from './lib/kata/board'
   import AppShell from './components/AppShell.svelte'
   import KataDaemonSwitcher from './components/KataDaemonSwitcher.svelte'
   import LaunchHint from './components/LaunchHint.svelte'
@@ -29,6 +31,7 @@
     initProject,
     listTokens,
     moveIssue as moveIssueRequest,
+    notifyIssue,
     patchIssueMetadata,
     patchProjectMetadata,
     patchRecurrence as patchRecurrenceRequest,
@@ -106,7 +109,7 @@
 
   type ShellMode = 'loading' | 'launch' | 'login' | 'route-error' | 'ready'
   type AppRoute = Exclude<KataRoute, { kind: 'route-error' }>
-  const requestActor = 'kata-web'
+  const requestActor = webActor
   const routePath = applicationRoutePath()
   const mountedApplication = currentApplicationBaseURL().pathname !== '/'
 
@@ -168,6 +171,8 @@
   let automaticSessionAttempted: 'loopback' | 'proxy' | undefined
   let advertisedAuthentication: 'loopback' | 'login' | 'proxy' | 'unavailable' | undefined
   let preferences = $state(loadPreferences())
+  // How many closed issues the board's Done column has loaded from the server.
+  let boardClosedLimit = defaultDoneLimit
   let versionMismatch = $state(false)
   let liveUpdatesReconnecting = $state(false)
   let daemonInfos = $state<WebDaemonInfo[]>([])
@@ -517,6 +522,14 @@
       fenceCredentialAudit()
     }
     history.pushState(null, '', serializeRoute(next))
+    if (
+      route.kind === 'route-error' ||
+      route.projectUID !== next.projectUID ||
+      route.board !== next.board ||
+      serializeFilters(route) !== serializeFilters(next)
+    ) {
+      boardClosedLimit = defaultDoneLimit
+    }
     route = next
     if (activeDaemonID) saveDaemonRoute(activeDaemonID, serializeRoute(next))
     mode = authority?.snapshot ? 'ready' : 'loading'
@@ -566,7 +579,9 @@
   }
 
   function requestIntentForRoute(next: AppRoute): UISnapshotIntent {
-    const intent = snapshotRequestIntent(snapshotIntentForRoute(next))
+    const intent = snapshotRequestIntent(
+      snapshotIntentForRoute(next, undefined, undefined, { closedLimit: boardClosedLimit }),
+    )
     return activeDaemonID ? { ...intent, daemonID: activeDaemonID } : intent
   }
 
@@ -972,6 +987,109 @@
         context.body({}, requestActor),
       ),
     )
+  }
+
+  // Board cards act on any issue in the collection, not only the selected one.
+  // A move is one mutation: its kata actions run in order and stop at the
+  // first refusal, and the board refreshes once afterwards. Running each
+  // action as its own mutation let the refresh after one action mark the
+  // board unwritable before the next. Attention is cleared first, while the
+  // issue is still the revision the board showed; then the reopen, label
+  // removal, and claim or release follow.
+  function moveBoardIssue(issue: KataTaskSummary, plan: BoardMovePlan): Promise<boolean> {
+    const target = { projectId: issue.project_id, ref: issue.uid }
+    const identityPolicy = authority?.snapshot?.capabilities.actor_policy === 'identity'
+    const metadata = plan.clearAttention?.metadata ?? {}
+    return runMutation({ draft: plan }, async (context) => {
+      const steps: (() => Promise<MutationResult>)[] = []
+      if (Object.keys(metadata).length > 0) {
+        // If anyone changed the issue since the board showed it, the daemon
+        // refuses this write and the move stops before any other step.
+        steps.push(() =>
+          patchIssueMetadata(target, context.body({ patch: metadata }, requestActor), {
+            headers: { 'If-Match': `"rev-${issue.revision}"` },
+          }),
+        )
+      }
+      if (plan.reopen) {
+        steps.push(() => reopenIssueRequest(target, context.body({}, requestActor)))
+      }
+      for (const label of plan.clearAttention?.removeLabels ?? []) {
+        steps.push(() =>
+          removeLabelRequest(
+            { ...target, label },
+            identityPolicy ? undefined : { actor: requestActor },
+          ),
+        )
+      }
+      if (plan.claim) {
+        steps.push(() => claimIssueRequest(target, context.body({}, requestActor)))
+      }
+      if (plan.release) {
+        steps.push(() => unassignIssue(target, context.body({}, requestActor)))
+      }
+      let result: MutationResult = { status: 204, headers: new Headers(), data: {} }
+      for (const step of steps) {
+        result = await step()
+        if (result.status < 200 || result.status >= 300) break
+      }
+      return result
+    })
+  }
+
+  // The board's "Ask…": the same request `kata notify <ref> --to <to>` sends.
+  function askBoardIssue(issue: KataTaskSummary, to: string, message: string): Promise<boolean> {
+    return runMutation({ draft: message }, (context) =>
+      notifyIssue(
+        { projectId: String(issue.project_id), ref: issue.uid },
+        context.body({ to, message }, requestActor),
+        { headers: context.headers },
+      ),
+    )
+  }
+
+  function completeBoardIssue(
+    issue: KataTaskSummary,
+    request: KataTaskCloseRequest,
+  ): Promise<boolean> {
+    return runMutation({ draft: request, actionKind: 'issue_closed' }, (context) =>
+      closeIssueRequest(
+        { projectId: issue.project_id, ref: issue.uid },
+        context.body({ ...request }, requestActor),
+        { headers: { 'X-Kata-Surface': 'web' } },
+      ),
+    )
+  }
+
+  // A card added from the board's Open column, created in that project.
+  let pendingBoardCreate: { identity: string; key: string } | undefined
+  async function createBoardIssue(projectID: number, title: string): Promise<boolean> {
+    const identity = JSON.stringify([projectID, title])
+    const create =
+      pendingBoardCreate?.identity === identity
+        ? pendingBoardCreate
+        : { identity, key: globalThis.crypto.randomUUID() }
+    pendingBoardCreate = create
+    const accepted = await runMutation(
+      { draft: title, createKey: create.key, actionKind: 'issue_created' },
+      (context) =>
+        createIssueRequest(
+          { projectId: String(projectID) },
+          context.body({ title }, requestActor),
+          { headers: { 'Idempotency-Key': create.key, 'X-Kata-Surface': 'web' } },
+        ),
+    )
+    if (accepted) pendingBoardCreate = undefined
+    return accepted
+  }
+
+  function showMoreBoardDone(): void {
+    boardClosedLimit = Math.min(boardClosedLimit + defaultDoneLimit, maxDoneLimit)
+    void refreshSnapshot(false)
+  }
+
+  function serializeFilters(value: AppRoute): string {
+    return JSON.stringify(value.filters)
   }
 
   async function runMutation(
@@ -1548,6 +1666,11 @@
         onCreateRecurrence={createRecurrence}
         onPatchRecurrence={patchRecurrence}
         onDeleteRecurrence={deleteRecurrence}
+        onMoveBoardIssue={moveBoardIssue}
+        onCompleteBoardIssue={completeBoardIssue}
+        onAskBoardIssue={askBoardIssue}
+        onShowMoreBoardDone={showMoreBoardDone}
+        onCreateBoardIssue={createBoardIssue}
       />
     {/if}
   {/if}

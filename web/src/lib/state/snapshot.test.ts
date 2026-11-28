@@ -223,6 +223,52 @@ describe('SnapshotController', () => {
 })
 
 describe('snapshotIntentForRoute', () => {
+  it('loads open and closed issues for the board so Done has cards', () => {
+    const route = parseRoute(new URL('https://daemon.example/kata?layout=board'))
+    if (route.kind === 'route-error') throw new Error('expected a Kata route')
+
+    const intent = snapshotIntentForRoute(route, new Date('2026-09-01T00:30:00Z'), 'UTC')
+
+    expect(intent.view).toBe('all-open')
+    expect(intent.statuses).toEqual(['all'])
+  })
+
+  it('shows the whole scope on the board whatever system view the URL names', () => {
+    const route = parseRoute(new URL('https://daemon.example/kata?view=today&layout=board'))
+    if (route.kind === 'route-error') throw new Error('expected a Kata route')
+
+    const intent = snapshotIntentForRoute(route, new Date('2026-09-01T00:30:00Z'), 'UTC')
+
+    expect(intent.view).toBe('all-open')
+    expect(intent.localDate).toBeUndefined()
+  })
+
+  it('asks the board for one page of closed issues', () => {
+    const route = parseRoute(new URL('https://daemon.example/kata?layout=board'))
+    if (route.kind === 'route-error') throw new Error('expected a Kata route')
+
+    expect(snapshotIntentForRoute(route).closedLimit).toBe(30)
+    expect(
+      snapshotIntentForRoute(route, undefined, undefined, { closedLimit: 90 }).closedLimit,
+    ).toBe(90)
+  })
+
+  it('leaves closed issues unpaged in the list layout', () => {
+    const route = parseRoute(new URL('https://daemon.example/kata?view=logbook'))
+    if (route.kind === 'route-error') throw new Error('expected a Kata route')
+
+    expect(
+      snapshotIntentForRoute(route, undefined, undefined, { closedLimit: 90 }),
+    ).not.toHaveProperty('closedLimit')
+  })
+
+  it('keeps an explicit status filter on the board', () => {
+    const route = parseRoute(new URL('https://daemon.example/kata?layout=board&status=open'))
+    if (route.kind === 'route-error') throw new Error('expected a Kata route')
+
+    expect(snapshotIntentForRoute(route).statuses).toEqual(['open'])
+  })
+
   it('includes the browser timezone for non-calendar collections', () => {
     const route = parseRoute(new URL('https://daemon.example/kata?view=all-open'))
     if (route.kind === 'route-error') throw new Error('expected a Kata route')
@@ -242,6 +288,7 @@ describe('snapshotIntentForRoute', () => {
       'https://daemon.example/kata',
       'https://daemon.example/kata?view=inbox',
       'https://daemon.example/kata?view=scheduled',
+      'https://daemon.example/kata?view=attention',
     ]) {
       const route = parseRoute(new URL(url))
       if (route.kind === 'route-error') throw new Error('expected a Kata route')
@@ -319,6 +366,22 @@ describe('snapshotRequestIntent', () => {
       timeZone: 'UTC',
     })
   })
+
+  it("keeps a paged board's project, so Done pages and counts that project's closed issues", () => {
+    const board = {
+      view: 'all-open' as const,
+      projectUID: '01J00000000000000000000002',
+      statuses: ['all'],
+      owners: [],
+      labels: [],
+      relationships: [],
+      includeGraph: false,
+      includeHistory: false,
+      timeZone: 'UTC',
+      closedLimit: 30,
+    }
+    expect(snapshotRequestIntent(board)).toEqual(board)
+  })
 })
 
 describe('projectUISnapshot', () => {
@@ -387,6 +450,7 @@ describe('createUISnapshotRequest', () => {
         includeGraph: true,
         includeHistory: false,
         timeZone: 'America/New_York',
+        closedLimit: 60,
       },
       { signal, etag: '"previous"', full: false },
     )
@@ -401,6 +465,7 @@ describe('createUISnapshotRequest', () => {
         include_graph: true,
         include_history: false,
         time_zone: 'America/New_York',
+        closed_limit: 60,
       },
       { signal, headers: { 'If-None-Match': '"previous"' } },
     )

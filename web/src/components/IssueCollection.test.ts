@@ -903,6 +903,76 @@ describe('IssueCollection', () => {
     expect(screen.getByRole('button', { name: /Due Aug 31/ })).toBeTruthy()
   })
 
+  it('badges a row that needs attention and gives its reason', () => {
+    const stuck = task({
+      uid: 'issue-stuck',
+      title: 'Stuck on credentials',
+      metadata: { 'work.attention': 'stuck', 'work.attention_msg': 'CI token expired' },
+    })
+    const quiet = task({ uid: 'issue-quiet', title: 'Quiet task' })
+    const { container } = render(IssueCollection, {
+      props: {
+        currentView: viewWithIssues([stuck, quiet]),
+        selectedIssueUID: null,
+        loading: false,
+        onSelect: () => {},
+      },
+    })
+
+    const badges = container.querySelectorAll('.attention-badge')
+    expect(badges).toHaveLength(1)
+    expect(badges[0]!.textContent?.trim()).toBe('Stuck')
+    expect(badges[0]!.getAttribute('title')).toBe('Stuck: CI token expired')
+    expect(
+      screen.getByRole('button', { name: /Stuck on credentials.*Stuck: CI token expired/ }),
+    ).toBeTruthy()
+  })
+
+  it('keeps Needs attention grouped by urgency under the default sort', () => {
+    const stuck = task({
+      uid: 'issue-stuck',
+      title: 'Stuck task',
+      updated_at: '2026-05-01T08:00:00Z',
+    })
+    const asked = task({
+      uid: 'issue-asked',
+      title: 'Asked task',
+      updated_at: '2026-05-15T08:00:00Z',
+    })
+    render(IssueCollection, {
+      props: {
+        currentView: {
+          name: 'attention',
+          fetched_at: '2026-05-16T10:00:00Z',
+          groups: [
+            { id: 'attention-stuck', title: 'Stuck', issues: [stuck] },
+            { id: 'attention-request', title: 'Requests', issues: [asked] },
+          ],
+        },
+        selectedIssueUID: null,
+        loading: false,
+        onSelect: () => {},
+      },
+    })
+
+    expect(
+      screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent?.trim()),
+    ).toEqual(['Stuck 1', 'Requests 1'])
+  })
+
+  it('says plainly when nothing needs attention', () => {
+    render(IssueCollection, {
+      props: {
+        currentView: { name: 'attention', fetched_at: '2026-05-16T10:00:00Z', groups: [] },
+        selectedIssueUID: null,
+        loading: false,
+        onSelect: () => {},
+      },
+    })
+
+    expect(screen.getByText('Nothing needs your attention right now.')).toBeTruthy()
+  })
+
   it('renders only authoritative ready rows even though other tasks are open', () => {
     const closed = task({
       ...baseIssues[1]!,

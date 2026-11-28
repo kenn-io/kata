@@ -44,6 +44,7 @@ type UISnapshotRequest struct {
 	LocalDate        string      `query:"local_date"`
 	TimeZone         string      `query:"time_zone"`
 	Limit            OptionalInt `query:"limit"`
+	ClosedLimit      OptionalInt `query:"closed_limit" doc:"When set (1-1000), collection holds every matching open issue but only this many of the most recently closed matching issues, and closed_total counts every matching closed issue. Not accepted for the today, upcoming, deadlines, and delegated views."`
 }
 
 // Resolve preserves every repeated multivalue filter. Huma's scalar-oriented
@@ -95,6 +96,7 @@ type UISnapshotResponseBody struct {
 	OriginStable    bool                 `json:"origin_stable"`
 	Catalog         []UIProject          `json:"catalog"`
 	Collection      []db.UIIssue         `json:"collection"`
+	ClosedTotal     *int                 `json:"closed_total,omitempty" doc:"Number of matching closed issues, present only when closed_limit is set."`
 	CollectionLinks []db.UILink          `json:"collection_links" doc:"Every link between two issues the principal can read (non-deleted issues in non-archived projects) that has at least one endpoint in collection, regardless of the collection's view, project_uid, status, owner, label, relationship, text, local_date, time_zone, or limit parameters. Count parent links whose to_issue_uid is a collection issue to get its children: from_status gives each child's status, and the open and total counts equal child_counts from GET /api/v1/issues for the same principal at the same cursor (an absent child_counts means zero)."`
 	Selected        *UISelectedAuthority `json:"selected,omitempty"`
 	Graph           *UIGraph             `json:"graph,omitempty"`

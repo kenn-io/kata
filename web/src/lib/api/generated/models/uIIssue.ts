@@ -12,6 +12,7 @@ export interface UIIssue {
   body: string
   closed_at?: string
   closed_reason?: string
+  comment_count?: number
   content_revision: number
   created_at: string
   deadline_on_date?: string

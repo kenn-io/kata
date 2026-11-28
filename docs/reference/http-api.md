@@ -385,6 +385,7 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
+| `0.75.0` | `GET /api/v1/ui/snapshot` accepts `closed_limit` and returns `closed_total`, so a board can page closed issues; collection issues carry `comment_count`. |
 | `0.74.0` | Direct-spoke ingest (`POST /api/v1/projects/{project_id}/federation/events:ingest`) accepts optional `partial_not_enrolled=true` and returns optional `refused_events` for events touching issues in unenrolled projects (plus intra-batch dependents) while accepting unrelated events in the same batch. |
 | `0.73.0` | `POST /api/v1/projects/{project_id}/issues/{ref}/actions/delete` records its `reason` on the `issue.soft_deleted` event. |
 | `0.72.0` | Forwarded hub requests report busy refusals as `429 server_busy` and preserve `Retry-After` hints. |
@@ -913,7 +914,12 @@ endpoint there:
 
 - `GET /api/v1/ui/snapshot` returns one coherent catalog, collection, optional
   selected detail/history/graph projection, capability envelope, durable event
-  cursor, and strong ETag.
+  cursor, and strong ETag. `closed_limit` (1-1000) keeps every matching open
+  issue but returns only that many of the most recently closed matching issues,
+  newest close first, and adds `closed_total` with the number of matching
+  closed issues. The today, upcoming, deadlines, and delegated views reject
+  `closed_limit` with a `validation` error. Each collection issue carries
+  `comment_count`, omitted when the issue has no comments.
 - `GET /api/v1/ui/references` returns bounded projects, owners, labels, and
   qualified issue references for pickers and typeahead. Passing `q` returns
   only issue references, with empty projects, owners, and labels. Repeating

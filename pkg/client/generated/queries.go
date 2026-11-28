@@ -619,6 +619,9 @@ type ReadUISnapshotQuery struct {
 	LocalDate        *string                           `json:"local_date,omitempty"`
 	TimeZone         *string                           `json:"time_zone,omitempty"`
 	Limit            *int64                            `json:"limit,omitempty"`
+
+	// ClosedLimit When set (1-1000), collection holds every matching open issue but only this many of the most recently closed matching issues, and closed_total counts every matching closed issue. Not accepted for the today, upcoming, deadlines, and delegated views.
+	ClosedLimit *int64 `json:"closed_limit,omitempty"`
 }
 
 func (r ReadUISnapshotQuery) Validate() error {

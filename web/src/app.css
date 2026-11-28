@@ -103,3 +103,21 @@ a:hover {
   font-size: var(--font-size-md);
   font-weight: 400;
 }
+
+/* Drawer and banner close buttons get a full 44×44 touch target on phones and touch
+   screens; kit-ui sizes them for a mouse pointer. */
+@media (max-width: 640px), (pointer: coarse) {
+  .kit-detail-drawer__close,
+  .kit-flash-banner__dismiss {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* The board's issue drawer fills a phone screen, where its side-panel edge
+   would show as a stray line. */
+@media (max-width: 640px) {
+  .kit-detail-drawer:has(.drawer-detail) {
+    border-left: 0;
+  }
+}

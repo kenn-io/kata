@@ -1,5 +1,6 @@
 import { authorName } from '@kenn-io/kata-ui'
 
+import { buildAttentionGroups, type AttentionViewer } from './attention'
 import { localDateString } from './dates'
 import type {
   KataProjectSummary,
@@ -15,6 +16,7 @@ interface BuildKataTaskViewOptions {
   projects: KataProjectSummary[]
   today?: string
   fetched_at?: string
+  viewer?: AttentionViewer | undefined
 }
 
 type ProjectLookup = Map<string, KataProjectSummary>
@@ -300,6 +302,9 @@ export function buildKataTaskView(options: BuildKataTaskViewOptions): KataTaskVi
       break
     case 'logbook':
       groups = buildLogbook(options.issues, today)
+      break
+    case 'attention':
+      groups = buildAttentionGroups(options.issues, options.viewer)
       break
   }
 

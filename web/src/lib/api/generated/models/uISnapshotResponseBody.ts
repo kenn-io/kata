@@ -11,6 +11,8 @@ import type { UISelectedAuthority } from './uISelectedAuthority.ts'
 export interface UISnapshotResponseBody {
   capabilities: UICapabilities
   catalog: UIProject[]
+  /** Number of matching closed issues, present only when closed_limit is set. */
+  closed_total?: number
   collection: UIIssue[]
   /** Every link between two issues the principal can read (non-deleted issues in non-archived projects) that has at least one endpoint in collection, regardless of the collection's view, project_uid, status, owner, label, relationship, text, local_date, time_zone, or limit parameters. Count parent links whose to_issue_uid is a collection issue to get its children: from_status gives each child's status, and the open and total counts equal child_counts from GET /api/v1/issues for the same principal at the same cursor (an absent child_counts means zero). */
   collection_links: UILink[]

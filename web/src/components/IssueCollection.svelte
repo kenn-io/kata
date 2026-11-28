@@ -1,4 +1,9 @@
 <script lang="ts">
+  import {
+    attentionBadgeLabels,
+    attentionReasons,
+    type AttentionViewer,
+  } from '../lib/kata/attention'
   /* eslint-disable svelte/prefer-svelte-reactivity */
   import { onDestroy, tick, untrack, type Snippet } from 'svelte'
   import ChevronDownIcon from '@lucide/svelte/icons/chevron-down'
@@ -52,6 +57,8 @@
   interface Props {
     toolbar?: Snippet | undefined
     headerAccessory?: Snippet | undefined
+    /** A control that switches this list to another layout, such as the board. */
+    layoutControl?: Snippet | undefined
     currentView: KataCurrentView
     now: number
     resultsKey?: string
@@ -74,6 +81,8 @@
     onOpenGraph?: ((issue: KataTaskSummary) => void) | undefined
     /** Replaces the list, its controls, and the toolbar under the title. */
     empty?: Snippet | undefined
+    /** Whose attention the badges read; see AttentionViewer. */
+    viewer?: AttentionViewer | undefined
   }
 
   const EMPTY_READY_ISSUE_UIDS: ReadonlySet<string> = new Set()
@@ -81,6 +90,7 @@
   let {
     toolbar = undefined,
     headerAccessory = undefined,
+    layoutControl = undefined,
     currentView,
     now,
     resultsKey = '',
@@ -102,6 +112,7 @@
     onStatusAction = undefined,
     onOpenGraph = undefined,
     empty = undefined,
+    viewer = undefined,
   }: Props = $props()
 
   const SORT_STORAGE_KEY = 'kata:issue-sort/v1'
@@ -297,7 +308,8 @@
   }
 
   const keepsSystemViewGroups = $derived(
-    ['today', 'scheduled', 'delegated', 'logbook'].includes(currentView.name),
+    // Needs attention keeps its urgency groups: they are the point of the view.
+    ['today', 'scheduled', 'delegated', 'logbook', 'attention'].includes(currentView.name),
   )
   // Project lists are flat; system views retain their date and handoff groups.
   let isProjectScoped = $derived(Boolean(scopedProjectName) && !keepsSystemViewGroups)
@@ -1134,6 +1146,7 @@
           {@render headerAccessory?.()}
         {/snippet}
         {#snippet actions()}
+          {@render layoutControl?.()}
           {#if hasExpandableVisibleRows || hasAnyExpandedRows}
             <div class="tree-actions" aria-label="Task tree controls">
               <button
@@ -1295,7 +1308,11 @@
         </div>
 
         {#if visibleRootIssues.length === 0}
-          <div class="empty">No tasks</div>
+          <div class="empty">
+            {currentView.name === 'attention'
+              ? 'Nothing needs your attention right now.'
+              : 'No tasks'}
+          </div>
         {/if}
 
         {#if hasTemporaryReveal || isProjectScoped || shouldFlatten || currentView.name === 'inbox'}
@@ -1336,6 +1353,7 @@
   {@const expandable = hasChildren(issue)}
   {@const isExpanded = expanded[issue.uid] === true}
   {@const titleId = `kata-issue-title-${issue.uid}`}
+  {@const attention = attentionReasons(issue, viewer)}
   <div class="row-frame" style:--task-depth={String(depth)}>
     <button
       class="row issue-row"
@@ -1386,6 +1404,13 @@
           aria-hidden="true"
         ></span>
         <span class="title-text" id={titleId}>{issue.title}</span>
+        {#if attention.length > 0}
+          <span
+            class={`attention-badge attention-${attention[0]!.kind}`}
+            title={attention.map((reason) => reason.text).join('\n')}
+            aria-hidden="true">{attentionBadgeLabels[attention[0]!.kind]}</span
+          >
+        {/if}
       </span>
       {#each renderedColumns as column (column.kind === 'task' ? column.id : column.kind)}
         {#if column.kind === 'date'}
@@ -1449,6 +1474,7 @@
         {/if}
       {/each}
       <span class="kit-sr-only">
+        {#each attention as reason (reason.text)}<span>{reason.text}. </span>{/each}
         <span>ID {issue.qualified_id}</span>
         <span>project: {issue.project_name}</span>
         {#if deadline}<span> · Due {shortDate(deadline, new Date(now))}</span>{/if}
@@ -1896,6 +1922,45 @@
     color: var(--text-primary);
     font-size: var(--font-size-sm);
     white-space: nowrap;
+  }
+
+  /* An issue someone is waiting on: a small tinted badge after the title.
+     The reasons are in the tooltip and the row's screen-reader text. */
+  /* Let the badge wrap below the title rather than squeeze it on narrow panes. */
+  .cell-title:has(.attention-badge) {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+
+  .cell-title:has(.attention-badge) .title-text {
+    flex: 1 1 12ch;
+  }
+
+  .attention-badge {
+    flex: 0 0 auto;
+    padding: 0 6px;
+    border-radius: 999px;
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-semibold);
+    line-height: 18px;
+    white-space: nowrap;
+    background: color-mix(in srgb, var(--accent-amber) 16%, transparent);
+    color: color-mix(in srgb, var(--accent-amber) 70%, var(--text-primary));
+  }
+
+  .attention-stuck {
+    background: color-mix(in srgb, var(--accent-red) 14%, transparent);
+    color: color-mix(in srgb, var(--accent-red) 75%, var(--text-primary));
+  }
+
+  .attention-request {
+    background: color-mix(in srgb, var(--accent-blue) 14%, transparent);
+    color: color-mix(in srgb, var(--accent-blue) 75%, var(--text-primary));
+  }
+
+  .attention-needs-review {
+    background: color-mix(in srgb, var(--accent-purple) 14%, transparent);
+    color: color-mix(in srgb, var(--accent-purple) 70%, var(--text-primary));
   }
 
   .title-text {

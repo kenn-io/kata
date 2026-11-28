@@ -17,4 +17,8 @@ export type ReadUISnapshotParams = {
   local_date?: string
   time_zone?: string
   limit?: number
+  /**
+   * When set (1-1000), collection holds every matching open issue but only this many of the most recently closed matching issues, and closed_total counts every matching closed issue. Not accepted for the today, upcoming, deadlines, and delegated views.
+   */
+  closed_limit?: number
 }

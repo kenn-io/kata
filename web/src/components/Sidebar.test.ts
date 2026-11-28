@@ -77,7 +77,15 @@ describe('Sidebar', () => {
     renderSidebar()
 
     const navigation = screen.getByRole('region', { name: 'Kata navigation' })
-    const systemViewLabels = ['Inbox', 'Today 0', 'Scheduled', 'Delegated', 'All open', 'Logbook']
+    const systemViewLabels = [
+      'Inbox',
+      'Needs attention',
+      'Today 0',
+      'Scheduled',
+      'Delegated',
+      'All open',
+      'Logbook',
+    ]
     const systemViewButtons = systemViewLabels.map((name) =>
       within(navigation).getByRole('button', { name }),
     )
@@ -112,6 +120,29 @@ describe('Sidebar', () => {
     })
 
     expect(screen.getByRole('button', { name: 'Inbox 3' })).not.toBeNull()
+  })
+
+  it('counts issues needing attention while that view is open', async () => {
+    const onOpenView = vi.fn()
+    renderSidebar({
+      onOpenView,
+      currentView: {
+        name: 'attention',
+        groups: [
+          { id: 'attention-stuck', title: 'Stuck', issues: [{ uid: 'a' }] as never },
+          {
+            id: 'attention-request',
+            title: 'Requests',
+            issues: [{ uid: 'b' }, { uid: 'c' }] as never,
+          },
+        ],
+      },
+    })
+
+    const button = screen.getByRole('button', { name: 'Needs attention 3' })
+    expect(button.classList).toContain('active')
+    await fireEvent.click(button)
+    expect(onOpenView).toHaveBeenCalledWith('attention')
   })
 
   it('has no Inbox project selector', () => {

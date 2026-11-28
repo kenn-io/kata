@@ -2,6 +2,7 @@ import type { UISnapshotResponseBody } from '../api/generated'
 import { readUISnapshot, type ReadUISnapshotParams } from '../api/generated'
 import { AuthenticationRequiredError, isAuthenticationRequiredError } from '../auth/session'
 import { assertValidIssueScopedCapabilities } from '../auth/scopedAuthority'
+import { defaultDoneLimit } from '../kata/board'
 import type { KataRoute } from '../router'
 
 export interface SnapshotAuthority {
@@ -240,12 +241,15 @@ export interface UISnapshotIntent {
   includeHistory: boolean
   localDate?: string
   timeZone?: string
+  /** Board only: how many of the most recently closed issues to load. */
+  closedLimit?: number
 }
 
 export function snapshotIntentForRoute(
   route: Exclude<KataRoute, { kind: 'route-error' }>,
   now: Date = new Date(),
   timeZone: string = Intl.DateTimeFormat().resolvedOptions().timeZone,
+  options: { closedLimit?: number } = {},
 ): UISnapshotIntent {
   if (route.view === 'credentials' || route.view === 'settings') {
     return {
@@ -260,12 +264,22 @@ export function snapshotIntentForRoute(
     }
   }
   const resolvedView = route.view ?? (route.projectUID || route.issueUID ? 'all-open' : 'inbox')
-  // Inbox and Scheduled are assembled in the browser from every open issue, so
-  // they share the all-open collection instead of server-side view filters.
-  const view = resolvedView === 'inbox' || resolvedView === 'scheduled' ? 'all-open' : resolvedView
+  // Inbox, Scheduled, Needs attention, and the board are assembled in the
+  // browser from every open issue, so they share the all-open collection
+  // instead of server-side view filters.
+  const view =
+    route.board ||
+    resolvedView === 'inbox' ||
+    resolvedView === 'scheduled' ||
+    resolvedView === 'attention'
+      ? 'all-open'
+      : resolvedView
+  // The board's Done column needs closed issues beside the open ones.
+  const statuses =
+    route.board && route.filters.status.length === 0 ? ['all'] : [...route.filters.status]
   const intent: UISnapshotIntent = {
     view,
-    statuses: [...route.filters.status],
+    statuses,
     owners: [...route.filters.owner],
     labels: [...route.filters.label],
     relationships: [...route.filters.relationship],
@@ -275,6 +289,8 @@ export function snapshotIntentForRoute(
   }
   if (route.projectUID) intent.projectUID = route.projectUID
   if (route.issueUID) intent.selectedIssueUID = route.issueUID
+  // The board's Done column pages closed issues on the server.
+  if (route.board) intent.closedLimit = options.closedLimit ?? defaultDoneLimit
   if (route.filters.text) intent.text = route.filters.text
   if (intent.view === 'today') {
     intent.localDate = localDate(now, timeZone)
@@ -284,8 +300,11 @@ export function snapshotIntentForRoute(
 
 // The daemon's list for one project is its list for every project filtered to
 // that project, so the browser requests every project and filters locally.
-// Moving between projects then needs no request.
+// Moving between projects then needs no request. A paged board is the
+// exception: the daemon must page and count that project's closed issues, so
+// its request keeps the project.
 export function snapshotRequestIntent(intent: UISnapshotIntent): UISnapshotIntent {
+  if (intent.closedLimit !== undefined) return { ...intent }
   const request = { ...intent }
   delete request.projectUID
   return request
@@ -355,6 +374,7 @@ export function createUISnapshotRequest(
     if (intent.selectedIssueUID) params.selected_issue_uid = intent.selectedIssueUID
     if (intent.localDate) params.local_date = intent.localDate
     if (intent.timeZone) params.time_zone = intent.timeZone
+    if (intent.closedLimit) params.closed_limit = intent.closedLimit
     const response = await request(params, {
       signal: options.signal,
       ...(options.retry ? { retry: true } : {}),

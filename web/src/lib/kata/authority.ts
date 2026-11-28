@@ -5,6 +5,7 @@ import type {
   KataTaskViewName,
   KataTaskViewResponse,
 } from './types'
+import { hasAttention, type AttentionViewer } from './attention'
 import { localDateString } from './dates'
 import { buildKataTaskView, kataViewIncludesDates } from './view'
 
@@ -28,6 +29,7 @@ export interface ProjectKataWorkspaceViewOptions {
   }
   issues: readonly KataTaskSummary[]
   today?: string | undefined
+  viewer?: AttentionViewer | undefined
 }
 
 function defaultStatusForView(view: KataTaskViewName): KataTaskSearchFilters['status'] {
@@ -110,6 +112,7 @@ export function projectKataWorkspaceView(
         issue.project_uid === options.filters.scope.project_uid,
     )
     .filter((issue) => kataViewIncludesDates(options.view, issue, today))
+    .filter((issue) => options.view !== 'attention' || hasAttention(issue, options.viewer))
     .map((issue) => ({ ...issue }))
   if (statusChangesViewMembership(options.view, options.filters)) {
     return {
@@ -125,5 +128,6 @@ export function projectKataWorkspaceView(
     projects: options.snapshot.projects.map((project) => ({ ...project })),
     today,
     fetched_at: options.snapshot.fetched_at,
+    viewer: options.viewer,
   })
 }

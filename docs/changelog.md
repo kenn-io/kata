@@ -9,6 +9,27 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- See which tasks are waiting on you in the Web UI. The new **Needs attention**
+  view collects open tasks an agent marked `stuck` or `needs-human`, tasks with
+  `kata notify` requests for you, and tasks labelled `needs-review`, grouped by
+  urgency. Rows in every list carry a badge with the reason. See
+  [Navigate projects and collections](guide/web-ui.md#navigate-projects-and-collections).
+- See a project as a board in the Web UI. Switch a list to **Board** to lay
+  cards out in four columns that follow what Kata already records: Open,
+  In progress (claimed), Needs attention (waiting on a human), and Done. Drag a
+  card, use its actions menu, or press **Alt+←**/**Alt+→**, and the board
+  performs the matching action: claim, release, clear the attention you
+  handled, reopen, or close through the usual completion form. **Ask…** sends
+  the card's owner a `kata notify` request. Blocked and parked cards stay in
+  their column and say what they are waiting for. Select a card to read the
+  whole issue in a drawer. Epics show an **Epic** badge with their subtasks
+  listed underneath, and Done loads closed issues 30 at a time from the
+  daemon, so projects with long histories open quickly. Switch to compact
+  one-line cards, collapse Done or empty columns to narrow strips, and add
+  cards to Open. The board updates live: cards that others move or add flash
+  (you can turn this off), cards show their comment count, and the most
+  discussed card leads among cards of the same priority. See
+  [Work on a board](guide/web-ui.md#work-on-a-board).
 - Say why you delete an issue with `kata delete --reason <text>`. The reason
   is recorded on the `issue.soft_deleted` event, so the deleted issue's
   history in the API, `kata tui` and the web UI shows who deleted it, when and

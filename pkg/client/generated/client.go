@@ -10842,6 +10842,7 @@ func (c *Client) ReadUISnapshot(ctx context.Context, options *ReadUISnapshotRequ
 	var err error
 
 	queryEncoding := map[string]runtime.QueryEncoding{
+		"closed_limit":       {Style: "form", Explode: &[]bool{false}[0]},
 		"include_graph":      {Style: "form", Explode: &[]bool{false}[0]},
 		"include_history":    {Style: "form", Explode: &[]bool{false}[0]},
 		"limit":              {Style: "form", Explode: &[]bool{false}[0]},

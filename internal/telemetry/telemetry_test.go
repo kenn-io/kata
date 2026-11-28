@@ -231,3 +231,12 @@ func TestOutcomesProperties(t *testing.T) {
 		require.Equal(t, source, properties["sync_source"])
 	}
 }
+
+func TestScreenViewedKeepsBoardScreen(t *testing.T) {
+	reporter, err := NewReporter(Options{DistinctID: "anonymous-instance-id"})
+	require.NoError(t, err)
+
+	props, err := reporter.SanitizeProperties("screen_viewed", map[string]any{"screen": "board", "surface": "web"})
+	require.NoError(t, err)
+	assert.Equal(t, "board", props["screen"])
+}

@@ -44,6 +44,7 @@ type normalizedUISnapshotIntent struct {
 	ReadyAt            string   `json:"ready_at,omitempty"`
 	DefaultTimezone    string   `json:"default_timezone,omitempty"`
 	Limit              int      `json:"limit"`
+	ClosedLimit        int      `json:"closed_limit,omitempty"`
 	ProjectAccessActor string   `json:"project_access_actor,omitempty"`
 	ProjectAccessEpoch int64    `json:"project_access_epoch,omitempty"`
 	ProjectAccessUIDs  []string `json:"project_access_uids,omitempty"`
@@ -61,7 +62,7 @@ func (in normalizedUISnapshotIntent) storeQuery() db.UISnapshotQuery {
 		Text:          in.Text, SelectedIssueUID: in.SelectedIssueUID,
 		IncludeGraph: in.IncludeGraph, IncludeHistory: in.IncludeHistory,
 		LocalDate: in.LocalDate, TimeZone: in.TimeZone, ReadyAt: in.ReadyAt,
-		DefaultTimezone: in.DefaultTimezone, Limit: in.Limit,
+		DefaultTimezone: in.DefaultTimezone, Limit: in.Limit, ClosedLimit: in.ClosedLimit,
 	}
 	if len(in.Statuses) == 1 {
 		query.Status = in.Statuses[0]
@@ -227,7 +228,10 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if scopedIssueIDs == nil {
 				cachedAuthority, _, authorityDependencies, authorityCached = authorityCache.get(authorityKey)
 			}
-			if scopedIssueIDs == nil && !authorityCached && intent.ProjectUID != "" && intent.Limit == 0 {
+			// A limited global build holds the newest rows across every project,
+			// so only an unlimited one can stand in for a project's collection.
+			if scopedIssueIDs == nil && !authorityCached && intent.ProjectUID != "" &&
+				intent.Limit == 0 && intent.ClosedLimit == 0 {
 				globalIntent := intent
 				globalIntent.ProjectUID = ""
 				globalKey, keyErr := uiSnapshotAuthorityKey(globalIntent)
@@ -650,6 +654,18 @@ func normalizeUISnapshotIntent(in *api.UISnapshotRequest) (normalizedUISnapshotI
 	if err != nil {
 		return normalizedUISnapshotIntent{}, err
 	}
+	closedLimit := 0
+	if in.ClosedLimit.IsSet {
+		closedLimit = in.ClosedLimit.Value
+		if closedLimit < 1 || closedLimit > uiSnapshotLimitMax {
+			return normalizedUISnapshotIntent{}, uiValidationError("closed_limit", "closed_limit must be between 1 and 1000", nil)
+		}
+		// These views drop rows after the query, so a closed page and its
+		// count could disagree with the rows the view shows.
+		if dateSensitiveUIView(view) || view == "delegated" {
+			return normalizedUISnapshotIntent{}, uiValidationError("closed_limit", "closed_limit is not supported for this view", nil)
+		}
+	}
 	localDate := strings.TrimSpace(in.LocalDate)
 	timeZone := strings.TrimSpace(in.TimeZone)
 	if localDate != "" {
@@ -680,7 +696,7 @@ func normalizeUISnapshotIntent(in *api.UISnapshotRequest) (normalizedUISnapshotI
 		Relationships: normalizedUIValues(in.Relationship, true),
 		Text:          strings.TrimSpace(in.Text), SelectedIssueUID: selectedUID,
 		IncludeGraph: in.IncludeGraph, IncludeHistory: in.IncludeHistory,
-		LocalDate: localDate, TimeZone: timeZone, Limit: limit,
+		LocalDate: localDate, TimeZone: timeZone, Limit: limit, ClosedLimit: closedLimit,
 	}, nil
 }
 
@@ -931,6 +947,7 @@ func snapshotResponse(ctx context.Context, data db.UISnapshotData, intent normal
 		out.Body.Catalog = append(out.Body.Catalog, api.UIProject{Project: project, Stats: stats})
 	}
 	out.Body.Collection = nonNil(data.Issues)
+	out.Body.ClosedTotal = data.ClosedTotal
 	out.Body.CollectionLinks = nonNil(data.CollectionLinks)
 	if intent.SelectedIssueUID != "" {
 		state := data.SelectedState

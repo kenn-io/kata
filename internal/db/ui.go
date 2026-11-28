@@ -1,8 +1,11 @@
 package db
 
 import (
+	"cmp"
 	"context"
 	"encoding/json/v2"
+	"slices"
+	"time"
 
 	"go.kenn.io/kata/internal/metadata"
 )
@@ -38,6 +41,12 @@ type UISnapshotQuery struct {
 	ReadyAt         string
 	DefaultTimezone string
 	Limit           int
+	// ClosedLimit, when positive, returns every matching open issue but only
+	// the ClosedLimit most recently closed matching issues, and reports the
+	// number of matching closed issues in UISnapshotData.ClosedTotal. Views
+	// that filter rows after the query (today, upcoming, deadlines, delegated)
+	// do not support it.
+	ClosedLimit int
 	// AllowedIssueIDs is nil for unrestricted callers. A non-nil slice is
 	// applied before ordering and limiting every issue collection.
 	AllowedIssueIDs []int64
@@ -61,6 +70,8 @@ type UIIssue struct {
 	Labels          []string `json:"labels"`
 	ScheduledOnDate string   `json:"scheduled_on_date,omitempty"`
 	DeadlineOnDate  string   `json:"deadline_on_date,omitempty"`
+	// CommentCount is filled for snapshot collection issues only.
+	CommentCount int64 `json:"comment_count,omitempty"`
 }
 
 // MatchUICalendarView evaluates date-sensitive browser collection predicates
@@ -145,10 +156,12 @@ type UIGraphUnresolvedRef struct {
 
 // UISnapshotData is captured wholly inside one backend read transaction.
 type UISnapshotData struct {
-	CommentGraph        CommentGraphData       `json:"-"`
-	Cursor              int64                  `json:"cursor"`
-	Projects            []UIProject            `json:"projects"`
-	Issues              []UIIssue              `json:"issues"`
+	CommentGraph CommentGraphData `json:"-"`
+	Cursor       int64            `json:"cursor"`
+	Projects     []UIProject      `json:"projects"`
+	Issues       []UIIssue        `json:"issues"`
+	// ClosedTotal counts matching closed issues when ClosedLimit is set.
+	ClosedTotal         *int                   `json:"closed_total,omitempty"`
 	CollectionLinks     []UILink               `json:"collection_links"`
 	SelectedIssue       *UIIssue               `json:"selected_issue,omitempty"`
 	SelectedState       string                 `json:"selected_state,omitempty"`
@@ -214,4 +227,42 @@ func RecordExposedUILinks(ctx context.Context, links []UILink) {
 		RecordExposedIssue(ctx, link.FromIssueID)
 		RecordExposedIssue(ctx, link.ToIssueID)
 	}
+}
+
+// PageClosedUIIssues keeps the first openLimit open issues in order (all of
+// them when openLimit is not positive) and the closedLimit most recently
+// closed issues, newest close first, and returns how many closed issues there
+// were. Stores that filter rows in Go after the query use it so a closed limit
+// pages the same way as the SQL path.
+func PageClosedUIIssues(issues []UIIssue, openLimit, closedLimit int) ([]UIIssue, int) {
+	paged := make([]UIIssue, 0, len(issues))
+	var closed []UIIssue
+	for _, issue := range issues {
+		if issue.Status == "closed" {
+			closed = append(closed, issue)
+			continue
+		}
+		if openLimit <= 0 || len(paged) < openLimit {
+			paged = append(paged, issue)
+		}
+	}
+	slices.SortStableFunc(closed, func(a, b UIIssue) int {
+		at, bt := closedTime(a), closedTime(b)
+		if c := bt.Compare(at); c != 0 {
+			return c
+		}
+		return cmp.Compare(b.ID, a.ID)
+	})
+	total := len(closed)
+	if len(closed) > closedLimit {
+		closed = closed[:closedLimit]
+	}
+	return append(paged, closed...), total
+}
+
+func closedTime(issue UIIssue) time.Time {
+	if issue.ClosedAt == nil {
+		return time.Time{}
+	}
+	return *issue.ClosedAt
 }
