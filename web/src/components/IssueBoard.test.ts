@@ -608,6 +608,17 @@ describe('IssueBoard density, collapsing, and comments', () => {
     ).toBeTruthy()
   })
 
+  it.each([false, true])('describes why a card needs attention (compact: %s)', (compact) => {
+    renderBoard({ compact })
+
+    expect(
+      within(column('Needs attention')).getByRole('button', {
+        name: 'Choose a schema',
+        description: /Needs a human: Pick one of two designs/,
+      }),
+    ).toBeTruthy()
+  })
+
   it('keeps ID, priority, and title on one line in compact mode', () => {
     renderBoard({ compact: true })
 

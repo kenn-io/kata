@@ -677,7 +677,7 @@
                   aria-describedby={[
                     `board-card-identity-${issue.uid}`,
                     issue.parent ? relationID : '',
-                    !compact && reasons.length > 0 ? `board-card-reason-${issue.uid}` : '',
+                    reasons.length > 0 ? `board-card-reason-${issue.uid}` : '',
                     compact ? '' : metaID,
                   ]
                     .filter(Boolean)
@@ -730,11 +730,17 @@
                 {/if}
                 {#if !compact}
                   <p class="card-title" id={titleID}>{issue.title}</p>
-                  {#if reasons.length > 0}
-                    <p class="card-reason" id={`board-card-reason-${issue.uid}`}>
-                      {reasons.map((reason) => reason.text).join(' · ')}
-                    </p>
-                  {/if}
+                {/if}
+                {#if reasons.length > 0}
+                  <!-- Compact cards show only the badge; screen readers still hear why. -->
+                  <p
+                    class={compact ? 'kit-sr-only' : 'card-reason'}
+                    id={`board-card-reason-${issue.uid}`}
+                  >
+                    {reasons.map((reason) => reason.text).join(' · ')}
+                  </p>
+                {/if}
+                {#if !compact}
                   <div class="card-meta" id={metaID}>
                     {#if issue.status === 'open' && markers.waitingOn.length > 0}
                       <span class="meta waiting" title="Not ready until these close">
