@@ -990,55 +990,56 @@
   }
 
   // Board cards act on any issue in the collection, not only the selected one.
-  // A move reopens first, so later writes act on an open issue, then clears
-  // attention, then takes or releases ownership.
-  async function moveBoardIssue(issue: KataTaskSummary, plan: BoardMovePlan): Promise<boolean> {
+  // A move is one mutation: its kata actions run in order and stop at the
+  // first refusal, and the board refreshes once afterwards. Running each
+  // action as its own mutation let the refresh after one action mark the
+  // board unwritable before the next. A move reopens first, so later writes
+  // act on an open issue, then clears attention, then takes or releases
+  // ownership.
+  function moveBoardIssue(issue: KataTaskSummary, plan: BoardMovePlan): Promise<boolean> {
     const target = { projectId: issue.project_id, ref: issue.uid }
     const identityPolicy = authority?.snapshot?.capabilities.actor_policy === 'identity'
-    const patch = (metadata: Record<string, string | null>, revision?: string) =>
-      runMutation({ draft: metadata, ...(revision ? { revision } : {}) }, (context) =>
-        patchIssueMetadata(target, context.body({ patch: metadata }, requestActor), {
-          headers: context.headers,
-        }),
-      )
-    if (plan.reopen) {
-      const reopened = await runMutation({}, (context) =>
-        reopenIssueRequest(target, context.body({}, requestActor)),
-      )
-      if (!reopened) return false
-    }
-    if (plan.clearAttention) {
-      if (Object.keys(plan.clearAttention.metadata).length > 0) {
+    const metadata = plan.clearAttention?.metadata ?? {}
+    return runMutation({ draft: plan }, async (context) => {
+      const steps: (() => Promise<MutationResult>)[] = []
+      if (plan.reopen) {
+        steps.push(() => reopenIssueRequest(target, context.body({}, requestActor)))
+      }
+      if (Object.keys(metadata).length > 0) {
         // Clear only what the board showed: if an agent changed the issue
         // since, the daemon refuses the write and the move stops. After a
         // reopen the revision has moved on, and what is cleared dates from
         // before the close, so that write goes unguarded.
-        const shown = plan.reopen ? undefined : `"rev-${issue.revision}"`
-        if (!(await patch(plan.clearAttention.metadata, shown))) return false
+        const headers: Record<string, string> = plan.reopen
+          ? {}
+          : { 'If-Match': `"rev-${issue.revision}"` }
+        steps.push(() =>
+          patchIssueMetadata(target, context.body({ patch: metadata }, requestActor), {
+            headers,
+          }),
+        )
       }
-      for (const label of plan.clearAttention.removeLabels) {
-        const removed = await runMutation({ draft: label }, () =>
+      for (const label of plan.clearAttention?.removeLabels ?? []) {
+        steps.push(() =>
           removeLabelRequest(
             { ...target, label },
             identityPolicy ? undefined : { actor: requestActor },
           ),
         )
-        if (!removed) return false
       }
-    }
-    if (plan.claim) {
-      const claimed = await runMutation({}, (context) =>
-        claimIssueRequest(target, context.body({}, requestActor), { headers: context.headers }),
-      )
-      if (!claimed) return false
-    }
-    if (plan.release) {
-      const released = await runMutation({}, (context) =>
-        unassignIssue(target, context.body({}, requestActor)),
-      )
-      if (!released) return false
-    }
-    return true
+      if (plan.claim) {
+        steps.push(() => claimIssueRequest(target, context.body({}, requestActor)))
+      }
+      if (plan.release) {
+        steps.push(() => unassignIssue(target, context.body({}, requestActor)))
+      }
+      let result: MutationResult = { status: 204, headers: new Headers(), data: {} }
+      for (const step of steps) {
+        result = await step()
+        if (result.status < 200 || result.status >= 300) break
+      }
+      return result
+    })
   }
 
   // The board's "Ask…": the same request `kata notify <ref> --to <to>` sends.

@@ -173,3 +173,26 @@ test('the card actions menu, and Ask… in it, can be reached from the keyboard'
   await page.keyboard.press('Enter')
   await expect(page.getByRole('menuitem', { name: 'Ask user-a…' })).toBeVisible()
 })
+
+test('a move that takes two kata actions finishes both', async ({ page, kata }) => {
+  const credentials = await kata.launch(page)
+  const issue = await kata.seedIssue(page, credentials, {
+    title: 'Nobody has claimed this stuck task',
+    metadata: { 'work.attention': 'needs-human' },
+  })
+  await openBoard(page, kata)
+
+  // Clearing attention and claiming are two writes; the live stream reports
+  // the first while the second is about to start.
+  await column(page, 'Needs attention')
+    .getByRole('button', { name: issue.title, exact: true })
+    .focus()
+  await page.keyboard.press('Alt+ArrowLeft')
+
+  await expect
+    .poll(async () => (await issueState(page, kata, credentials, issue.uid)).owner)
+    .toBeTruthy()
+  expect((await issueState(page, kata, credentials, issue.uid)).metadata).toMatchObject({
+    'work.attention': 'ok',
+  })
+})
