@@ -316,6 +316,10 @@ describe('IssueBoard moves', () => {
     const dialog = screen.getByRole('dialog', { name: 'Ask user-b' })
     const send = within(dialog).getByRole('button', { name: 'Send request' })
     expect(send.hasAttribute('disabled')).toBe(true)
+    // kata keeps one request per person on a task, so asking again replaces it.
+    expect(
+      within(dialog).getByText(/replaces any earlier request to user-b on this task/),
+    ).toBeTruthy()
     await fireEvent.input(within(dialog).getByRole('textbox', { name: 'What do you need?' }), {
       target: { value: '  Which parser API should ship?  ' },
     })

@@ -926,7 +926,9 @@
       />
     </label>
     <p class="ask-hint">
-      Sent as a <code>kata notify</code> request; it shows in their inbox until they clear it.
+      Sent as a <code>kata notify</code> request; it shows in their inbox until they clear it. A
+      task holds one request per person, so this replaces any earlier request to {asking?.to} on this
+      task.
     </p>
   </div>
   {#snippet footer()}

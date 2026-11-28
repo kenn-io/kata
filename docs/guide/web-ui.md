@@ -170,7 +170,9 @@ signal, and the [orchestration convention](../operations/agent-orchestration.md)
 has one writer for it. To ask for something instead, choose **Ask…** from the
 card's actions menu. It sends a `kata notify` request to the owner, or to the
 author when nobody owns the card, the same recipient Kata uses for date
-reminders. The card stays where it is.
+reminders. The card stays where it is. As with `kata notify`, a task holds
+one request per recipient, so asking the same person again replaces the
+earlier request.
 
 Blocked and parked work keeps its column, because `kata ready` only filters it
 and does not change who owns it. A card blocked by open issues shows
