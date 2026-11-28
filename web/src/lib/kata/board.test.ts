@@ -164,6 +164,27 @@ describe('buildBoard', () => {
     expect(paged.total).toBe(90)
   })
 
+  it('pages Done by close time before nesting subtasks under their parent', () => {
+    const closed = (uid: string, hour: number, parent?: string) =>
+      issue(uid, {
+        status: 'closed',
+        closed_at: `2026-01-01T${String(hour).padStart(2, '0')}:00:00Z`,
+        ...(parent ? { parent: { uid: parent, short_id: parent } } : {}),
+      })
+    const issues = [
+      closed('epic', 10),
+      closed('old-1', 1, 'epic'),
+      closed('old-2', 2, 'epic'),
+      closed('new-1', 9),
+      closed('new-2', 8),
+    ]
+
+    const done = buildBoard(issues, { now, doneLimit: 3 }).columns[3]!
+
+    expect(done.issues.map((card) => card.uid)).toEqual(['epic', 'new-1', 'new-2'])
+    expect(done.total).toBe(5)
+  })
+
   it('shows a pending move in its target column', () => {
     const board = buildBoard([issue('a')], { now, pending: new Map([['a', 'in-progress']]) })
     expect(board.columns[1]!.issues.map((i) => i.uid)).toEqual(['a'])

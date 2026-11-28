@@ -111,16 +111,18 @@ export function buildBoard<T extends KataTaskSummary>(
   }
   for (const column of columns) {
     column.issues.sort(column.id === 'done' ? byClosedDesc : byPriorityThenUpdated)
-    nestChildren(column)
     column.total = column.issues.length
   }
   const done = byID.get('done')!
   if (options.doneTotal !== undefined) {
     done.total = Math.max(options.doneTotal, done.issues.length)
   } else {
+    // Page by close time first, so a subtask nested under a newer parent
+    // never pushes a newer card off the page.
     const limit = options.doneLimit ?? defaultDoneLimit
     if (done.issues.length > limit) done.issues = done.issues.slice(0, limit)
   }
+  for (const column of columns) nestChildren(column)
   return { columns }
 }
 
