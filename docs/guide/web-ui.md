@@ -74,8 +74,9 @@ The sidebar lists **Inbox**, **Needs attention**, **Today**, **Scheduled**, **De
     requests the daemon raises for owners. A browser signed in with an account
     shows requests to that account, like `kata inbox --for <account>`; the
     owner-local browser has no account and shows requests to anyone. Requests
-    you sent and comment-reply reports, which tell an agent that someone
-    answered its comment, are left out.
+    the browser sent and comment-reply reports, which tell an agent that
+    someone answered its comment, are left out; a request from a teammate
+    who shares your account still shows.
   - **Needs review**: the task carries the `needs-review` label, which the
     default agent contract asks agents to add when they stop before the work is
     done.

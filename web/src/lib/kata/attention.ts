@@ -141,8 +141,10 @@ function notifyRequest(
   const message = textValue(fields.message)
   if (!message) return undefined
   const from = textValue(fields.from)
-  if (viewer && from === viewer.actor) return undefined
   const teammate = textValue(fields.teammate)
+  // The browser sends as its actor with no teammate; a teammate sharing the
+  // account is someone else asking.
+  if (viewer && from === viewer.actor && !teammate) return undefined
   const sender = from ? (teammate ? `${from}/${teammate}` : from) : undefined
   return `Request to ${recipient}${sender ? ` from ${sender}` : ''}: ${message}`
 }

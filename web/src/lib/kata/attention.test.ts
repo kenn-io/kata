@@ -129,6 +129,22 @@ describe('attentionReasons', () => {
     expect(requestKeys(issue, { actor: 'kata-web' })).toEqual([coordinatorKey, reviewerKey])
   })
 
+  it('keeps requests from a teammate who shares the viewer account', () => {
+    const issue = task('a', {
+      metadata: {
+        [coordinatorKey]: { from: 'coordinator', teammate: 'planner', message: 'Pick a date' },
+      },
+    })
+
+    expect(attentionReasons(issue, { actor: 'coordinator', inbox: 'coordinator' })).toEqual([
+      {
+        kind: 'request',
+        key: coordinatorKey,
+        text: 'Request to coordinator from coordinator/planner: Pick a date',
+      },
+    ])
+  })
+
   it('skips malformed requests', () => {
     expect(
       attentionReasons(
