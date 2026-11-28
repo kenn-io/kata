@@ -746,9 +746,12 @@
                     <span class="card-epic">Epic</span>
                   {/if}
                 </div>
-                <!-- Compact cards hide the project, so the description always names both. -->
+                <!-- The badges and compact cards leave these out of the button's
+                     name, so the description always names the ID, priority, and project. -->
                 <span class="kit-sr-only" id={`board-card-identity-${issue.uid}`}
-                  >{issue.qualified_id}{showProject ? `, project ${issue.project_name}` : ''}</span
+                  >{issue.qualified_id}{issue.priority !== undefined
+                    ? `, priority P${issue.priority}`
+                    : ''}{showProject ? `, project ${issue.project_name}` : ''}</span
                 >
                 {#if issue.parent}
                   <span class="kit-sr-only" id={relationID}

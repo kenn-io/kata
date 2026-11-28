@@ -684,6 +684,14 @@ describe('IssueBoard density, collapsing, and comments', () => {
     ).toBeTruthy()
   })
 
+  it.each([false, true])("describes a card's priority (compact: %s)", (compact) => {
+    renderBoard({ compact })
+
+    expect(
+      screen.getByRole('button', { name: 'Write the parser', description: /priority P1/ }),
+    ).toBeTruthy()
+  })
+
   it('keeps ID, priority, and title on one line in compact mode', () => {
     renderBoard({ compact: true })
 
