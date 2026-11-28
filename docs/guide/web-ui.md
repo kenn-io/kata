@@ -211,7 +211,7 @@ the board but do not move cards.
 
 The board's **Display** menu, in the same place as the list's, chooses
 comfortable cards or compact cards, which show only the ID, priority, and title
-on one line. Done, and any empty column while other columns have cards, has a
+on one line; hover a compact card in Needs attention to read its reasons. Done, and any empty column while other columns have cards, has a
 collapse button in its header that shrinks the column to a narrow strip with its
 count; a collapsed column still accepts dropped cards. The browser remembers
 these choices.

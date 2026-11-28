@@ -710,6 +710,9 @@
                     .filter(Boolean)
                     .join(' ') || undefined}
                   aria-current={issue.uid === selectedIssueUID ? 'true' : undefined}
+                  title={compact && reasons.length > 0
+                    ? reasons.map((reason) => reason.text).join('\n')
+                    : undefined}
                   aria-keyshortcuts={canMove ? 'Alt+ArrowLeft Alt+ArrowRight' : undefined}
                   onclick={() => onOpenIssue(issue)}
                   onkeydown={(event) => handleCardKeydown(event, issue)}

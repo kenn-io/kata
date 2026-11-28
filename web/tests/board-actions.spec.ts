@@ -259,3 +259,26 @@ test('a card shows its whole attention message, however long', async ({ page, ka
   )
   expect(clipped).toBe(false)
 })
+
+test('a compact card shows its attention reasons when hovered', async ({ page, kata }) => {
+  const credentials = await kata.launch(page)
+  const issue = await kata.seedIssue(page, credentials, {
+    title: 'Pick the retry policy',
+    metadata: { 'work.attention': 'needs-human', 'work.attention_msg': 'Linear or exponential?' },
+  })
+  await page.evaluate(() =>
+    localStorage.setItem('kata.preferences.v1', JSON.stringify({ boardCompact: true })),
+  )
+  await openBoard(page, kata)
+
+  const card = column(page, 'Needs attention').getByRole('listitem').filter({
+    hasText: issue.title,
+  })
+  // A tooltip shows only on the element the pointer actually reaches.
+  const box = (await card.getByText('Needs you').boundingBox())!
+  const tooltip = await page.evaluate(
+    ({ x, y }) => document.elementFromPoint(x, y)?.closest('[title]')?.getAttribute('title'),
+    { x: box.x + box.width / 2, y: box.y + box.height / 2 },
+  )
+  expect(tooltip).toBe('Needs a human: Linear or exponential?')
+})

@@ -692,6 +692,22 @@ describe('IssueBoard density, collapsing, and comments', () => {
     ).toBeTruthy()
   })
 
+  it("shows a compact card's attention reasons as a tooltip on the card", () => {
+    renderBoard({ compact: true })
+
+    // Compact cards show only the badge; hovering anywhere on the card shows why.
+    expect(cardButton('Choose a schema').getAttribute('title')).toBe(
+      'Needs a human: Pick one of two designs',
+    )
+    expect(cardButton('Write the parser').hasAttribute('title')).toBe(false)
+  })
+
+  it('leaves the tooltip off comfortable cards, which show the reasons', () => {
+    renderBoard()
+
+    expect(cardButton('Choose a schema').hasAttribute('title')).toBe(false)
+  })
+
   it('keeps ID, priority, and title on one line in compact mode', () => {
     renderBoard({ compact: true })
 
