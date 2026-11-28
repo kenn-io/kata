@@ -235,3 +235,27 @@ test('a move that takes two kata actions finishes both', async ({ page, kata }) 
     'work.attention': 'ok',
   })
 })
+
+test('a card shows its whole attention message, however long', async ({ page, kata }) => {
+  const credentials = await kata.launch(page)
+  const message =
+    'The migration needs a decision: keep the legacy column for one more release so ' +
+    'older clients keep working, or drop it now and ask everyone to upgrade first. ' +
+    'Both are tested; the rollback plan is in the linked comment.'
+  const issue = await kata.seedIssue(page, credentials, {
+    title: 'Decide on the legacy column',
+    metadata: { 'work.attention': 'needs-human', 'work.attention_msg': message },
+  })
+  await openBoard(page, kata)
+
+  // Moving the card out clears this message, so none of it may be cut off.
+  const reason = column(page, 'Needs attention')
+    .getByRole('listitem')
+    .filter({ hasText: issue.title })
+    .getByText(`Needs a human: ${message}`)
+  await expect(reason).toBeVisible()
+  const clipped = await reason.evaluate(
+    (element) => element.scrollHeight > element.clientHeight + 1,
+  )
+  expect(clipped).toBe(false)
+})

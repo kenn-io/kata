@@ -1266,18 +1266,16 @@
     margin-inline-start: 0;
   }
 
+  /* Never clamped: moving a card out of Needs attention clears these
+     messages, so the whole text stays readable first. */
   .card-reason {
     position: relative;
-    display: -webkit-box;
     margin: 0;
-    overflow: hidden;
     color: var(--text-secondary);
     font-size: var(--font-size-xs);
     line-height: 1.35;
+    overflow-wrap: anywhere;
     pointer-events: none;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
   }
 
   .card-epic {
